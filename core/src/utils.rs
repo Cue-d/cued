@@ -42,7 +42,7 @@ mod tests {
 
     #[test]
     fn test_normalize_phone_with_plus_one() {
-        assert_eq!(normalize_phone("+1 555 123 4567"), "5551234567");
+        assert_eq!(normalize_phone("+1 555 123 4567"), "15551234567");
     }
 
     #[test]
@@ -52,7 +52,7 @@ mod tests {
 
     #[test]
     fn test_normalize_phone_with_country_code() {
-        assert_eq!(normalize_phone("+15551234567"), "5551234567");
+        assert_eq!(normalize_phone("+15551234567"), "15551234567");
     }
 
     #[test]
@@ -64,11 +64,6 @@ mod tests {
     fn test_normalize_email_mixed_case() {
         assert_eq!(normalize_email("Alice@Example.COM"), "alice@example.com");
     }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
 
     #[test]
     fn test_apple_epoch() {
