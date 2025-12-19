@@ -1,0 +1,201 @@
+# PRM Project .gitignore
+
+## Soham's
+
+/plans
+
+# ============================================================
+# Python
+# ============================================================
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+pip-wheel-metadata/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# Virtual environments
+venv/
+env/
+ENV/
+env.bak/
+venv.bak/
+.venv/
+
+# PyInstaller
+*.manifest
+*.spec
+
+# FastAPI / uvicorn
+*.log
+
+# ============================================================
+# Rust
+# ============================================================
+# Compiled files
+target/
+**/*.rs.bk
+*.pdb
+
+# Cargo lock (keep for applications, ignore for libraries - adjust as needed)
+# Cargo.lock
+
+# Maturin build artifacts
+prm-core/**/*.so
+prm-core/**/*.dylib
+prm-core/**/*.dll
+prm-core/**/*.pyd
+
+# ============================================================
+# Node.js / Electron
+# ============================================================
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+lerna-debug.log*
+.pnpm-debug.log*
+
+# Electron build outputs
+electron-app/dist/
+electron-app/out/
+electron-app/release/
+electron-app/.webpack/
+
+# ============================================================
+# Application Data & Caches
+# ============================================================
+# Local app database (contains personal data)
+*.db
+*.db-shm
+*.db-wal
+*.sqlite
+*.sqlite3
+
+# PRM cache directories
+.prm/
+backend/.prm/
+
+# Contact and message caches
+**/cache/
+**/*_cache.json
+contacts_full.json
+contact_names.json
+
+# ============================================================
+# macOS
+# ============================================================
+.DS_Store
+.AppleDouble
+.LSOverride
+Icon
+._*
+.DocumentRevisions-V100
+.fseventsd
+.Spotlight-V100
+.TemporaryItems
+.Trashes
+.VolumeIcon.icns
+.com.apple.timemachine.donotpresent
+.AppleDB
+.AppleDesktop
+Network Trash Folder
+Temporary Items
+.apdisk
+
+# ============================================================
+# IDEs & Editors
+# ============================================================
+# VSCode
+.vscode/
+.vscode/*
+!.vscode/settings.json
+!.vscode/tasks.json
+!.vscode/launch.json
+!.vscode/extensions.json
+*.code-workspace
+
+# JetBrains (PyCharm, IntelliJ, etc.)
+.idea/
+*.iml
+*.ipr
+*.iws
+
+# Vim
+*.swp
+*.swo
+*~
+
+# Emacs
+*~
+\#*\#
+.\#*
+
+# Sublime Text
+*.sublime-project
+*.sublime-workspace
+
+# ============================================================
+# Environment & Secrets
+# ============================================================
+.env
+.env.local
+.env.*.local
+*.pem
+*.key
+credentials.json
+
+# ============================================================
+# Testing & Coverage
+# ============================================================
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+.tox/
+.nox/
+coverage.xml
+*.cover
+.hypothesis/
+
+# ============================================================
+# Build & Distribution
+# ============================================================
+# Packaged applications
+*.dmg
+*.pkg
+*.app
+*.exe
+*.msi
+*.zip
+*.tar.gz
+
+# Documentation builds
+docs/_build/
+site/
+
+# ============================================================
+# Temporary & Misc
+# ============================================================
+*.tmp
+*.temp
+tmp/
+temp/
+.cache/
