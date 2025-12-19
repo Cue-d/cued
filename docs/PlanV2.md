@@ -70,8 +70,10 @@ A local-first Electron app mimicking iMessage's UI, backed by a FastAPI + Rust s
 - [x] Write comprehensive tests for phone/email normalization
 - [x] Run `cargo test` - verify all tests pass
 
+NOTE, consolidated both apple_time and normalize into a utils.rs
+
 ### 2.2 Level 1: Read from chat.db
-- [ ] Add `rusqlite` with `bundled` feature to dependencies
+- [x] Add `rusqlite` with `bundled` feature to dependencies
 - [ ] Create `src/chat_reader.rs`:
   - Define `ChatReader` struct with SQLite connection
   - Implement `open(path)` using `SQLITE_OPEN_READ_ONLY` flag
