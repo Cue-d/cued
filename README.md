@@ -179,17 +179,17 @@ WebSocket connection between Electron and FastAPI enables near-instantaneous mes
 ### Development Commands
 
 ```bash
-# Build Rust and install to Python venv
-cd prm-core && maturin develop
+# Build Rust and install with uv
+cd core && maturin develop --uv
 
 # Run FastAPI backend
-cd backend && uvicorn app.main:app --reload
+cd backend && uv run uvicorn app.main:app --reload
 
 # Run Electron in dev mode
-cd electron-app && npm run dev
+cd frontend && npm run dev
 
 # Hydrate contacts from macOS Contacts
-cd backend && python -m cli hydrate-contacts
+cd backend && uv run python -m cli hydrate-contacts
 
 # Test WebSocket connection
 websocat ws://localhost:8000/ws
@@ -245,9 +245,9 @@ The build script:
 - SQLite busy timeout is set to 5000ms
 - Ensure iMessage app is not exclusively locking the database
 
-### "Cannot import prm_core"
-- Rebuild with `cd prm-core && maturin develop`
-- Ensure your Python venv is activated
+### "Cannot import core"
+- Rebuild with `cd core && maturin develop --uv`
+- Ensure you're using `uv run` to execute Python commands
 
 ### WebSocket disconnections
 - Check FastAPI server is running
