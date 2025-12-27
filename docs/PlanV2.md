@@ -74,24 +74,24 @@ NOTE, consolidated both apple_time and normalize into a utils.rs
 
 ### 2.2 Level 1: Read from chat.db
 - [x] Add `rusqlite` with `bundled` feature to dependencies
-- [ ] Create `src/chat_reader.rs`:
+- [x] Create `src/chat_reader.rs`:
   - Define `ChatReader` struct with SQLite connection
   - Implement `open(path)` using `SQLITE_OPEN_READ_ONLY` flag
   - Implement `count_messages()` method
-- [ ] Write test using real chat.db at `/Users/[YOU]/Library/Messages/chat.db`
-- [ ] Test should verify message count > 0
-- [ ] Run `cargo test` - confirm reading from real iMessage database works
+- [x] Write test using real chat.db at `/Users/[YOU]/Library/Messages/chat.db`
+- [x] Test should verify message count > 0
+- [x] Run `cargo test` - confirm reading from real iMessage database works
 
 ### 2.3 Level 2: Extract message structs
-- [ ] Add `serde` with `derive` feature to dependencies
-- [ ] Create `src/models.rs`:
+- [x] Add `serde` with `derive` feature to dependencies
+- [x] Create `src/models.rs`:
   - Define `Message` struct: rowid, text (Option), date, is_from_me
   - Add `#[derive(Debug, Clone, serde::Serialize)]`
-- [ ] In `chat_reader.rs`, add `get_recent_messages(limit)`:
+- [x] In `chat_reader.rs`, add `get_recent_messages(limit)`:
   - Query: SELECT ROWID, text, date, is_from_me FROM message ORDER BY date DESC LIMIT ?
   - Use `query_map` to convert rows to Message structs
-- [ ] Write test that fetches 10 recent messages and prints them
-- [ ] Run test - verify actual iMessages are extracted and displayed
+- [x] Write test that fetches 10 recent messages and prints them
+- [x] Run test - verify actual iMessages are extracted and displayed
 
 ### 2.4 Level 3: Create prm.db and write data
 - [ ] Create `src/app_db.rs`:
