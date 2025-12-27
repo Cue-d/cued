@@ -3,11 +3,13 @@ import { cn } from '@/lib/utils'
 interface AvatarProps {
   initials?: string
   isGroup?: boolean
-  size?: 'sm' | 'md' | 'lg'
+  groupMembers?: string[] // Array of initials for group members
+  size?: 'xs' | 'sm' | 'md' | 'lg'
   className?: string
 }
 
 const sizeClasses = {
+  xs: 'w-6 h-6 text-[10px]',
   sm: 'w-8 h-8 text-xs',
   md: 'w-10 h-10 text-sm',
   lg: 'w-12 h-12 text-base'
@@ -19,20 +21,45 @@ const bgColors = [
   'bg-purple-500',
   'bg-orange-500',
   'bg-pink-500',
-  'bg-teal-500'
+  'bg-teal-500',
+  'bg-red-500',
+  'bg-indigo-500'
 ]
 
-const Avatar = ({ initials, isGroup, size = 'md', className }: AvatarProps) => {
+const getColorForInitials = (initials: string) => {
+  const code = initials.split('').reduce((acc, char) => acc + char.charCodeAt(0), 0)
+  return bgColors[code % bgColors.length]
+}
+
+const Avatar = ({ initials, isGroup, groupMembers, size = 'md', className }: AvatarProps) => {
   const colorIndex = (initials?.charCodeAt(0) || 0) % bgColors.length
 
-  if (isGroup) {
+  if (isGroup && groupMembers && groupMembers.length >= 2) {
+    // Show 2 stacked avatars like iMessage
+    const member1 = groupMembers[0]
+    const member2 = groupMembers[1]
+    const color1 = getColorForInitials(member1)
+    const color2 = getColorForInitials(member2)
+
     return (
-      <div className={cn('relative', sizeClasses[size], className)}>
-        <div className="absolute top-0 left-0 w-6 h-6 rounded-full bg-gray-400 border-2 border-[#f6f6f6] flex items-center justify-center text-white text-[10px] font-medium">
-          {initials?.[0] || '?'}
+      <div className={cn('relative flex-shrink-0', sizeClasses[size], className)}>
+        {/* Back avatar (top-left) */}
+        <div
+          className={cn(
+            'absolute top-0 left-0 w-6 h-6 rounded-full border-2 border-imessage-sidebar flex items-center justify-center text-white text-[10px] font-medium',
+            color1
+          )}
+        >
+          {member1}
         </div>
-        <div className="absolute bottom-0 right-0 w-6 h-6 rounded-full bg-gray-500 border-2 border-[#f6f6f6] flex items-center justify-center text-white text-[10px] font-medium">
-          +
+        {/* Front avatar (bottom-right) */}
+        <div
+          className={cn(
+            'absolute bottom-0 right-0 w-6 h-6 rounded-full border-2 border-imessage-sidebar flex items-center justify-center text-white text-[10px] font-medium',
+            color2
+          )}
+        >
+          {member2}
         </div>
       </div>
     )

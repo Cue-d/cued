@@ -1,10 +1,77 @@
 import { Info, Mic, Plus } from 'lucide-react'
-import { Conversation, formatDateDivider } from '@/data/mockData'
-import MessageBubble from './MessageBubble'
+import { cn } from '@/lib/utils'
+import { Conversation, Message, formatDateDivider, formatMessageTime } from '@/data/types'
 import Avatar from './Avatar'
 
 interface MessageThreadProps {
   conversation: Conversation | null
+}
+
+interface MessageBubbleProps {
+  message: Message
+  showTimestamp?: boolean
+  isGroupChat?: boolean
+  showSenderInfo?: boolean
+}
+
+const MessageBubble = ({
+  message,
+  showTimestamp,
+  isGroupChat,
+  showSenderInfo
+}: MessageBubbleProps) => {
+  const showAvatar = isGroupChat && !message.isSent
+  const senderInitials = message.senderName
+    ? message.senderName
+        .split(' ')
+        .map((n) => n[0])
+        .join('')
+        .slice(0, 2)
+        .toUpperCase()
+    : '?'
+
+  return (
+    <div className={cn('flex flex-col', message.isSent ? 'items-end' : 'items-start')}>
+      {/* Sender name for group chats */}
+      {showSenderInfo && !message.isSent && message.senderName && (
+        <span className="text-xs text-muted-foreground mb-1 ml-10">
+          {message.senderName}
+        </span>
+      )}
+      <div className={cn('flex items-end gap-2', message.isSent && 'flex-row-reverse')}>
+        {/* Avatar for group chats */}
+        {showAvatar && (
+          <Avatar initials={senderInitials} size="xs" />
+        )}
+        <div
+          className={cn(
+            'max-w-[70%] px-3 py-2 rounded-2xl break-words',
+            message.isSent
+              ? 'bg-imessage-bubble-sent text-imessage-bubble-sent-foreground rounded-br-md'
+              : 'bg-imessage-bubble-received text-imessage-bubble-received-foreground rounded-bl-md'
+          )}
+        >
+          {message.isLink ? (
+            <a
+              href={message.text}
+              className="text-imessage-link underline text-[15px] leading-relaxed"
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              {message.text}
+            </a>
+          ) : (
+            <p className="text-[15px] leading-relaxed">{message.text}</p>
+          )}
+        </div>
+      </div>
+      {showTimestamp && (
+        <span className={cn('text-xs text-imessage-timestamp mt-1', showAvatar && 'ml-10')}>
+          {formatMessageTime(message.timestamp)}
+        </span>
+      )}
+    </div>
+  )
 }
 
 const MessageThread = ({ conversation }: MessageThreadProps) => {
@@ -34,6 +101,7 @@ const MessageThread = ({ conversation }: MessageThreadProps) => {
           <Avatar
             initials={conversation.initials || conversation.name.charAt(0)}
             isGroup={conversation.isGroup}
+            groupMembers={conversation.groupAvatars}
             size="sm"
           />
           <span className="font-medium text-foreground">{conversation.name}</span>
@@ -54,13 +122,23 @@ const MessageThread = ({ conversation }: MessageThreadProps) => {
                 </span>
               </div>
               <div className="space-y-1">
-                {messages.map((message, idx) => (
-                  <MessageBubble
-                    key={message.id}
-                    message={message}
-                    showTimestamp={idx === messages.length - 1}
-                  />
-                ))}
+                {messages.map((message, idx) => {
+                  // Show sender info when sender changes in group chat
+                  const prevMsg = idx > 0 ? messages[idx - 1] : null
+                  const senderChanged =
+                    !message.isSent &&
+                    (!prevMsg || prevMsg.isSent || prevMsg.senderName !== message.senderName)
+
+                  return (
+                    <MessageBubble
+                      key={message.id}
+                      message={message}
+                      showTimestamp={idx === messages.length - 1}
+                      isGroupChat={conversation.isGroup}
+                      showSenderInfo={senderChanged}
+                    />
+                  )
+                })}
               </div>
             </div>
           ))}

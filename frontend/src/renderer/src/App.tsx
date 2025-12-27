@@ -3,7 +3,7 @@ import ConversationList from './components/ConversationList'
 import MessageThread from './components/MessageThread'
 import ThemeToggle from './components/ThemeToggle'
 import { fetchConversations, fetchMessages, ConversationResponse, MessageResponse } from './api/client'
-import { Conversation, Message } from '@/data/mockData'
+import { Conversation, Message } from '@/data/types'
 
 function App(): React.JSX.Element {
   const [conversations, setConversations] = useState<Conversation[]>([])
@@ -11,17 +11,22 @@ function App(): React.JSX.Element {
   const [isDark, setIsDark] = useState(true)
   const [loading, setLoading] = useState(true)
 
-  // Convert API response to UI model
-  const toConversation = (c: ConversationResponse, messages: Message[] = []): Conversation => ({
-    id: String(c.id),
-    name: c.name,
-    initials: c.name
+  // Helper to get initials from a name
+  const getInitials = (name: string) =>
+    name
       .split(' ')
       .map((n) => n[0])
       .join('')
       .slice(0, 2)
-      .toUpperCase(),
+      .toUpperCase()
+
+  // Convert API response to UI model
+  const toConversation = (c: ConversationResponse, messages: Message[] = []): Conversation => ({
+    id: String(c.id),
+    name: c.name,
+    initials: getInitials(c.name),
     isGroup: c.is_group || c.handle_ids.length > 1,
+    groupAvatars: c.member_names.map(getInitials),
     lastMessage: c.last_message || '',
     timestamp: new Date(c.last_message_date * 1000),
     messages
@@ -31,7 +36,8 @@ function App(): React.JSX.Element {
     id: String(m.id),
     text: m.text || '',
     isSent: m.is_from_me,
-    timestamp: new Date(m.date * 1000)
+    timestamp: new Date(m.date * 1000),
+    senderName: m.sender_name
   })
 
   // Load conversations on mount

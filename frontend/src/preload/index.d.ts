@@ -5,6 +5,7 @@ export interface ConversationResponse {
   last_message_date: number
   is_group: boolean
   handle_ids: string[]
+  member_names: string[]
 }
 
 export interface MessageResponse {

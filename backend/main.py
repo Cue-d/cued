@@ -19,6 +19,7 @@ class ConversationResponse(BaseModel):
     last_message_date: int
     is_group: bool
     handle_ids: list[str]
+    member_names: list[str]  # Resolved names for group avatars
 
 
 class MessageResponse(BaseModel):
@@ -27,6 +28,13 @@ class MessageResponse(BaseModel):
     date: int
     is_from_me: bool
     sender_name: str | None
+
+
+def strip_country_code(phone: str) -> str:
+    """Strip leading country code (1 for US) from normalized phone number."""
+    if len(phone) == 11 and phone.startswith('1'):
+        return phone[1:]
+    return phone
 
 
 class HandleResolver:
@@ -52,7 +60,11 @@ class HandleResolver:
                     for phone in phones:
                         normalized = core.normalize_phone(phone)
                         if normalized:
+                            # Store both with and without country code
                             self._lookup[normalized] = contact.name
+                            stripped = strip_country_code(normalized)
+                            if stripped != normalized:
+                                self._lookup[stripped] = contact.name
                 except json.JSONDecodeError:
                     pass
 
@@ -74,6 +86,11 @@ class HandleResolver:
         if normalized_phone in self._lookup:
             return self._lookup[normalized_phone]
 
+        # Try without country code
+        stripped = strip_country_code(normalized_phone)
+        if stripped in self._lookup:
+            return self._lookup[stripped]
+
         # Try as email
         normalized_email = core.normalize_email(handle_id)
         if normalized_email in self._lookup:
@@ -82,17 +99,13 @@ class HandleResolver:
         return None
 
 
-# Global instances (lazy init)
-_chat_reader: core.ChatReader | None = None
+# Global resolver (thread-safe since it's just a dict)
 _handle_resolver: HandleResolver | None = None
-_handle_map: dict[int, str] = {}  # rowid -> handle_id
 
 
 def get_chat_reader() -> core.ChatReader:
-    global _chat_reader
-    if _chat_reader is None:
-        _chat_reader = core.ChatReader(CHAT_DB_PATH)
-    return _chat_reader
+    """Create a new ChatReader for each request (SQLite connections are not thread-safe)."""
+    return core.ChatReader(CHAT_DB_PATH)
 
 
 def get_handle_resolver() -> HandleResolver:
@@ -102,13 +115,10 @@ def get_handle_resolver() -> HandleResolver:
     return _handle_resolver
 
 
-def get_handle_map() -> dict[int, str]:
-    global _handle_map
-    if not _handle_map:
-        reader = get_chat_reader()
-        handles = reader.get_all_handles()
-        _handle_map = {h.rowid: h.id for h in handles}
-    return _handle_map
+def get_handle_map(reader: core.ChatReader) -> dict[int, str]:
+    """Build handle map from reader."""
+    handles = reader.get_all_handles()
+    return {h.rowid: h.id for h in handles}
 
 
 @app.get("/")
@@ -130,14 +140,31 @@ def get_conversations(limit: int = 50):
         handles = reader.get_chat_handles(chat.rowid)
         handle_ids = [h.id for h in handles]
 
-        # Resolve name: use display_name, or resolved contact, or raw identifier
-        # For 1:1 chats (single handle), try to resolve to contact name
+        # Resolve each handle to full name (for member_names)
+        member_names = []
+        for hid in handle_ids:
+            resolved = resolver.resolve(hid)
+            if resolved:
+                member_names.append(resolved)
+            else:
+                # Use last 4 digits of phone as fallback
+                digits = core.normalize_phone(hid)
+                member_names.append(digits[-4:] if len(digits) >= 4 else hid)
+
+        # Resolve display name based on chat type
         name = chat.display_name
-        if not name and len(handle_ids) == 1:
-            name = resolver.resolve(handle_ids[0])
         if not name:
-            # Fall back to chat_identifier, but try to resolve it too
-            name = resolver.resolve(chat.chat_identifier) or chat.chat_identifier
+            if len(handle_ids) == 1:
+                # 1:1 chat - use full resolved name
+                name = member_names[0] if member_names else handle_ids[0]
+            elif len(handle_ids) > 1:
+                # Group chat - use first names only
+                first_names = [n.split()[0] for n in member_names[:4]]
+                name = ", ".join(first_names)
+                if len(handle_ids) > 4:
+                    name += f" +{len(handle_ids) - 4}"
+            else:
+                name = chat.chat_identifier
 
         result.append(ConversationResponse(
             id=chat.rowid,
@@ -146,6 +173,7 @@ def get_conversations(limit: int = 50):
             last_message_date=core.apple_to_unix(chat.last_message_date),
             is_group=chat.is_group,
             handle_ids=handle_ids,
+            member_names=member_names,
         ))
 
     return result
@@ -156,7 +184,7 @@ def get_messages(chat_id: int, limit: int = 100):
     """Get messages for a conversation with resolved sender names."""
     reader = get_chat_reader()
     resolver = get_handle_resolver()
-    handle_map = get_handle_map()
+    handle_map = get_handle_map(reader)
 
     messages = reader.get_chat_messages(chat_id, limit)
     result = []
