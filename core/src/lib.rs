@@ -15,6 +15,8 @@ fn core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<models::Message>()?;
     m.add_class::<models::Contact>()?;
     m.add_class::<models::FetchedContact>()?;
+    m.add_class::<models::Chat>()?;
+    m.add_class::<models::Handle>()?;
 
     // Database classes
     m.add_class::<app_db::AppDb>()?;
