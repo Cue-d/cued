@@ -54,7 +54,14 @@ pub fn send_message(recipient: &str, message: &str) -> PyResult<SendResult> {
 #[pyfunction]
 pub fn send_to_group(chat_identifier: &str, message: &str) -> PyResult<SendResult> {
     let escaped = escape_applescript_string(message);
-    let escaped_chat = escape_applescript_string(chat_identifier);
+
+    // Format the chat ID for Messages.app: "iMessage;+;chat..."
+    let full_chat_id = if chat_identifier.starts_with("chat") {
+        format!("iMessage;+;{}", chat_identifier)
+    } else {
+        chat_identifier.to_string()
+    };
+    let escaped_chat = escape_applescript_string(&full_chat_id);
 
     let script = format!(
         r#"
