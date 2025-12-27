@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react'
 import ConversationList from './components/ConversationList'
 import MessageThread from './components/MessageThread'
 import ThemeToggle from './components/ThemeToggle'
-import { fetchConversations, fetchMessages, ConversationResponse, MessageResponse } from './api/client'
+import { fetchConversations, fetchMessages, sendMessage, ConversationResponse, MessageResponse } from './api/client'
 import { Conversation, Message } from '@/data/types'
 
 function App(): React.JSX.Element {
@@ -36,6 +36,7 @@ function App(): React.JSX.Element {
     id: String(m.id),
     text: m.text || '',
     isSent: m.is_from_me,
+    isRead: m.is_read,
     timestamp: new Date(m.date * 1000),
     senderName: m.sender_name
   })
@@ -58,14 +59,24 @@ function App(): React.JSX.Element {
   useEffect(() => {
     if (!selectedId) return
 
-    fetchMessages(Number(selectedId), 100)
-      .then((data) => {
-        const messages = data.map(toMessage).reverse() // API returns desc, we want asc
-        setConversations((prev) =>
-          prev.map((c) => (c.id === selectedId ? { ...c, messages } : c))
-        )
-      })
-      .catch(console.error)
+    const loadMessages = () => {
+      fetchMessages(Number(selectedId), 100)
+        .then((data) => {
+          const messages = data.map(toMessage).reverse() // API returns desc, we want asc
+          setConversations((prev) =>
+            prev.map((c) => (c.id === selectedId ? { ...c, messages } : c))
+          )
+        })
+        .catch(console.error)
+    }
+
+    // Load immediately
+    loadMessages()
+
+    // Auto-refresh every 500ms for near-instant message updates
+    const interval = setInterval(loadMessages, 500)
+
+    return () => clearInterval(interval)
   }, [selectedId])
 
   useEffect(() => {
@@ -73,6 +84,19 @@ function App(): React.JSX.Element {
   }, [isDark])
 
   const selectedConversation = conversations.find((c) => c.id === selectedId) || null
+
+  const handleSendMessage = async (chatId: number, text: string) => {
+    const result = await sendMessage(chatId, text)
+    if (!result.success) {
+      throw new Error(result.error || 'Failed to send message')
+    }
+    // Refresh messages after sending
+    const data = await fetchMessages(chatId, 100)
+    const messages = data.map(toMessage).reverse()
+    setConversations((prev) =>
+      prev.map((c) => (c.id === String(chatId) ? { ...c, messages } : c))
+    )
+  }
 
   if (loading) {
     return (
@@ -92,7 +116,7 @@ function App(): React.JSX.Element {
         selectedId={selectedId}
         onSelect={setSelectedId}
       />
-      <MessageThread conversation={selectedConversation} />
+      <MessageThread conversation={selectedConversation} onSendMessage={handleSendMessage} />
     </div>
   )
 }

@@ -3,7 +3,8 @@ import { contextBridge, ipcRenderer } from 'electron'
 // Custom APIs for renderer
 const api = {
   getConversations: (limit?: number) => ipcRenderer.invoke('api:getConversations', limit),
-  getMessages: (chatId: number, limit?: number) => ipcRenderer.invoke('api:getMessages', chatId, limit)
+  getMessages: (chatId: number, limit?: number) => ipcRenderer.invoke('api:getMessages', chatId, limit),
+  sendMessage: (chatId: number, text: string) => ipcRenderer.invoke('api:sendMessage', chatId, text)
 }
 
 // Expose APIs to renderer

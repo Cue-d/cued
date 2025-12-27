@@ -30,7 +30,7 @@ impl ChatReader {
     /// Get recent messages.
     pub fn get_recent_messages(&self, limit: u32) -> PyResult<Vec<Message>> {
         let mut stmt = self.conn.prepare(
-            "SELECT ROWID, text, date, is_from_me, attributedBody
+            "SELECT ROWID, text, date, is_from_me, attributedBody, is_read, date_read
              FROM message
              ORDER BY date DESC
              LIMIT ?"
@@ -45,11 +45,16 @@ impl ChatReader {
                 None => attributed_body.and_then(|blob| extract_text_from_attributed_body(&blob)),
             };
 
+            let is_read_int: i64 = row.get(5)?;
+            let date_read: Option<i64> = row.get(6)?;
+
             Ok(Message {
                 rowid: row.get(0)?,
                 text: final_text,
                 date: row.get(2)?,
                 is_from_me: row.get(3)?,
+                is_read: is_read_int != 0,
+                date_read,
                 handle_id: 0,  // Not available in this query
                 chat_id: None,
             })
@@ -153,7 +158,7 @@ impl ChatReader {
     /// Get messages for a specific chat.
     pub fn get_chat_messages(&self, chat_id: i64, limit: u32) -> PyResult<Vec<Message>> {
         let mut stmt = self.conn.prepare(
-            "SELECT m.ROWID, m.text, m.date, m.is_from_me, m.handle_id, m.attributedBody
+            "SELECT m.ROWID, m.text, m.date, m.is_from_me, m.handle_id, m.attributedBody, m.is_read, m.date_read
              FROM message m
              INNER JOIN chat_message_join cmj ON cmj.message_id = m.ROWID
              WHERE cmj.chat_id = ?
@@ -170,11 +175,16 @@ impl ChatReader {
                 None => attributed_body.and_then(|blob| extract_text_from_attributed_body(&blob)),
             };
 
+            let is_read_int: i64 = row.get(6)?;
+            let date_read: Option<i64> = row.get(7)?;
+
             Ok(Message {
                 rowid: row.get(0)?,
                 text: final_text,
                 date: row.get(2)?,
                 is_from_me: row.get(3)?,
+                is_read: is_read_int != 0,
+                date_read,
                 handle_id: row.get(4)?,
                 chat_id: Some(chat_id),
             })

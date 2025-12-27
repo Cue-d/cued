@@ -2,6 +2,7 @@ export interface Message {
   id: string
   text: string
   isSent: boolean
+  isRead: boolean
   timestamp: Date
   isLink?: boolean
   senderName?: string | null

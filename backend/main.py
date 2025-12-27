@@ -27,7 +27,18 @@ class MessageResponse(BaseModel):
     text: str | None
     date: int
     is_from_me: bool
+    is_read: bool
+    date_read: int | None
     sender_name: str | None
+
+
+class SendMessageRequest(BaseModel):
+    text: str
+
+
+class SendMessageResponse(BaseModel):
+    success: bool
+    error: str | None = None
 
 
 def strip_country_code(phone: str) -> str:
@@ -196,11 +207,18 @@ def get_messages(chat_id: int, limit: int = 100):
             if handle_id:
                 sender_name = resolver.resolve(handle_id)
 
+        # Convert date_read from Apple timestamp to Unix timestamp if present
+        date_read_unix = None
+        if msg.date_read is not None:
+            date_read_unix = core.apple_to_unix(msg.date_read)
+
         result.append(MessageResponse(
             id=msg.rowid,
             text=msg.text,
             date=core.apple_to_unix(msg.date),
             is_from_me=msg.is_from_me,
+            is_read=msg.is_read,
+            date_read=date_read_unix,
             sender_name=sender_name,
         ))
 
@@ -210,3 +228,30 @@ def get_messages(chat_id: int, limit: int = 100):
 @app.get("/test/normalize-phone/{phone}")
 def normalize_phone(phone: str):
     return {"original": phone, "normalized": core.normalize_phone(phone)}
+
+
+@app.post("/conversations/{chat_id}/messages", response_model=SendMessageResponse)
+def send_message(chat_id: int, request: SendMessageRequest):
+    """Send a message to a conversation."""
+    reader = get_chat_reader()
+
+    # Find the chat
+    chats = reader.get_all_chats()
+    chat = next((c for c in chats if c.rowid == chat_id), None)
+
+    if not chat:
+        return SendMessageResponse(success=False, error="Chat not found")
+
+    # Get handles to determine if it's truly a group chat
+    handles = reader.get_chat_handles(chat_id)
+    if not handles:
+        return SendMessageResponse(success=False, error="No recipient found")
+
+    if len(handles) == 1:
+        # 1:1 chat - send directly to the handle (phone/email)
+        result = core.send_message(handles[0].id, request.text)
+    else:
+        # Group chat - send using chat identifier (format: chat123456789)
+        result = core.send_to_group(chat.chat_identifier, request.text)
+
+    return SendMessageResponse(success=result.success, error=result.error)

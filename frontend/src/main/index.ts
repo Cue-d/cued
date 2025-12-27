@@ -3,18 +3,31 @@ import { join } from 'path'
 
 const API_BASE = 'http://localhost:8000'
 
-// IPC handlers for API calls
-ipcMain.handle('api:getConversations', async (_, limit = 50) => {
-  const res = await fetch(`${API_BASE}/conversations?limit=${limit}`)
-  if (!res.ok) throw new Error(`Failed to fetch conversations: ${res.status}`)
-  return res.json()
-})
+// Register IPC handlers
+function registerIpcHandlers(): void {
+  // IPC handlers for API calls
+  ipcMain.handle('api:getConversations', async (_, limit = 50) => {
+    const res = await fetch(`${API_BASE}/conversations?limit=${limit}`)
+    if (!res.ok) throw new Error(`Failed to fetch conversations: ${res.status}`)
+    return res.json()
+  })
 
-ipcMain.handle('api:getMessages', async (_, chatId: number, limit = 100) => {
-  const res = await fetch(`${API_BASE}/conversations/${chatId}/messages?limit=${limit}`)
-  if (!res.ok) throw new Error(`Failed to fetch messages: ${res.status}`)
-  return res.json()
-})
+  ipcMain.handle('api:getMessages', async (_, chatId: number, limit = 100) => {
+    const res = await fetch(`${API_BASE}/conversations/${chatId}/messages?limit=${limit}`)
+    if (!res.ok) throw new Error(`Failed to fetch messages: ${res.status}`)
+    return res.json()
+  })
+
+  ipcMain.handle('api:sendMessage', async (_, chatId: number, text: string) => {
+    const res = await fetch(`${API_BASE}/conversations/${chatId}/messages`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text })
+    })
+    if (!res.ok) throw new Error(`Failed to send message: ${res.status}`)
+    return res.json()
+  })
+}
 
 function createWindow(): void {
   const mainWindow = new BrowserWindow({
@@ -49,6 +62,7 @@ function createWindow(): void {
 // initialization and is ready to create browser windows.
 // Some APIs can only be used after this event occurs.
 app.whenReady().then(() => {
+  registerIpcHandlers()
   createWindow()
 
   app.on('activate', function () {

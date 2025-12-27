@@ -15,6 +15,10 @@ pub struct Message {
     #[pyo3(get)]
     pub is_from_me: bool,
     #[pyo3(get)]
+    pub is_read: bool,  // 1 = read, 0 = unread
+    #[pyo3(get)]
+    pub date_read: Option<i64>,  // Apple timestamp when message was read
+    #[pyo3(get)]
     pub handle_id: i64,  // FK to handle.ROWID (0 = sent from me)
     #[pyo3(get)]
     pub chat_id: Option<i64>,  // FK to chat.ROWID (set when queried via chat)

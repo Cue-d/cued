@@ -3,6 +3,7 @@
 pub mod app_db;
 pub mod chat_reader;
 pub mod contacts;
+pub mod messaging;
 pub mod models;
 pub mod utils;
 
@@ -30,6 +31,11 @@ fn core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     // Contact fetching functions
     m.add_function(wrap_pyfunction!(contacts::fetch_all_contact_names, m)?)?;
     m.add_function(wrap_pyfunction!(contacts::fetch_contacts_by_names, m)?)?;
+
+    // Messaging functions
+    m.add_class::<messaging::SendResult>()?;
+    m.add_function(wrap_pyfunction!(messaging::send_message, m)?)?;
+    m.add_function(wrap_pyfunction!(messaging::send_to_group, m)?)?;
 
     Ok(())
 }

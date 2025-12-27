@@ -16,14 +16,21 @@ interface ConversationItemProps {
 }
 
 const ConversationItem = ({ conversation, isSelected, onClick }: ConversationItemProps) => {
+  // Check if conversation has any unread received messages
+  const hasUnread = conversation.messages.some(m => !m.isSent && !m.isRead)
+
   return (
     <button
       onClick={onClick}
       className={cn(
-        'w-full flex items-center gap-3 px-3 py-2.5 rounded-xl transition-colors text-left',
+        'w-full flex items-center gap-3 px-3 py-2.5 rounded-xl transition-colors text-left relative',
         isSelected ? 'bg-imessage-selected text-imessage-selected-foreground' : 'hover:bg-sidebar-accent'
       )}
     >
+      {/* Blue dot for unread messages */}
+      {hasUnread && (
+        <div className="absolute left-1 top-1/2 -translate-y-1/2 w-2 h-2 bg-blue-500 rounded-full" />
+      )}
       <Avatar
         initials={conversation.initials || conversation.name.charAt(0)}
         isGroup={conversation.isGroup}

@@ -1,3 +1,4 @@
+import { useState, useRef, useEffect } from 'react'
 import { Info, Mic, Plus } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { Conversation, Message, formatDateDivider, formatMessageTime } from '@/data/types'
@@ -5,6 +6,7 @@ import Avatar from './Avatar'
 
 interface MessageThreadProps {
   conversation: Conversation | null
+  onSendMessage?: (chatId: number, text: string) => Promise<void>
 }
 
 interface MessageBubbleProps {
@@ -45,7 +47,7 @@ const MessageBubble = ({
         )}
         <div
           className={cn(
-            'max-w-[70%] px-3 py-2 rounded-2xl break-words',
+            'max-w-[85%] px-3 py-2 rounded-2xl break-words',
             message.isSent
               ? 'bg-imessage-bubble-sent text-imessage-bubble-sent-foreground rounded-br-md'
               : 'bg-imessage-bubble-received text-imessage-bubble-received-foreground rounded-bl-md'
@@ -74,7 +76,54 @@ const MessageBubble = ({
   )
 }
 
-const MessageThread = ({ conversation }: MessageThreadProps) => {
+const MessageThread = ({ conversation, onSendMessage }: MessageThreadProps) => {
+  const [inputText, setInputText] = useState('')
+  const [sending, setSending] = useState(false)
+  const messagesEndRef = useRef<HTMLDivElement>(null)
+
+  // Scroll to bottom immediately when conversation changes
+  useEffect(() => {
+    if (conversation?.id) {
+      // Immediate scroll when switching conversations
+      messagesEndRef.current?.scrollIntoView({ behavior: 'instant' })
+    }
+  }, [conversation?.id])
+
+  // Smooth scroll when messages update in current conversation
+  useEffect(() => {
+    if (conversation?.messages && conversation.messages.length > 0) {
+      messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
+    }
+  }, [conversation?.messages.length])
+
+  const handleSend = async () => {
+    if (!inputText.trim() || !conversation || !onSendMessage || sending) return
+
+    const text = inputText.trim()
+    setInputText('')
+    setSending(true)
+
+    try {
+      await onSendMessage(Number(conversation.id), text)
+      // Scroll to bottom after sending
+      setTimeout(() => {
+        messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
+      }, 100)
+    } catch (error) {
+      console.error('Failed to send message:', error)
+      setInputText(text) // Restore text on failure
+    } finally {
+      setSending(false)
+    }
+  }
+
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault()
+      handleSend()
+    }
+  }
+
   if (!conversation) {
     return (
       <div className="flex-1 h-full bg-imessage-window-bg flex items-center justify-center">
@@ -143,6 +192,7 @@ const MessageThread = ({ conversation }: MessageThreadProps) => {
             </div>
           ))}
         </div>
+        <div ref={messagesEndRef} />
       </div>
 
       {/* Input Bar */}
@@ -155,10 +205,18 @@ const MessageThread = ({ conversation }: MessageThreadProps) => {
             <input
               type="text"
               placeholder="iMessage"
-              className="flex-1 bg-transparent text-foreground placeholder:text-muted-foreground text-[15px] focus:outline-none"
+              value={inputText}
+              onChange={(e) => setInputText(e.target.value)}
+              onKeyDown={handleKeyDown}
+              disabled={sending}
+              className="flex-1 bg-transparent text-foreground placeholder:text-muted-foreground text-[15px] focus:outline-none disabled:opacity-50"
             />
           </div>
-          <button className="p-2 hover:bg-sidebar-accent rounded-full transition-colors">
+          <button
+            onClick={handleSend}
+            disabled={!inputText.trim() || sending}
+            className="p-2 hover:bg-sidebar-accent rounded-full transition-colors disabled:opacity-50"
+          >
             <Mic className="w-5 h-5 text-muted-foreground" />
           </button>
         </div>

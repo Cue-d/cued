@@ -13,12 +13,20 @@ export interface MessageResponse {
   text: string | null
   date: number
   is_from_me: boolean
+  is_read: boolean
+  date_read: number | null
   sender_name: string | null
+}
+
+export interface SendMessageResponse {
+  success: boolean
+  error: string | null
 }
 
 export interface Api {
   getConversations: (limit?: number) => Promise<ConversationResponse[]>
   getMessages: (chatId: number, limit?: number) => Promise<MessageResponse[]>
+  sendMessage: (chatId: number, text: string) => Promise<SendMessageResponse>
 }
 
 declare global {
