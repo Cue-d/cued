@@ -1,34 +1,30 @@
-import Versions from './components/Versions'
-import electronLogo from './assets/electron.svg'
+import { useState, useEffect } from 'react'
+import ConversationList from './components/ConversationList'
+import MessageThread from './components/MessageThread'
+import ThemeToggle from './components/ThemeToggle'
+import { conversations } from '@/data/mockData'
 
 function App(): React.JSX.Element {
-  const ipcHandle = (): void => window.electron.ipcRenderer.send('ping')
+  const [selectedId, setSelectedId] = useState<string | null>(conversations[0]?.id || null)
+  const selectedConversation = conversations.find((c) => c.id === selectedId) || null
+  const [isDark, setIsDark] = useState(true)
+
+  useEffect(() => {
+    document.documentElement.classList.toggle('dark', isDark)
+  }, [isDark])
 
   return (
-    <>
-      <img alt="logo" className="logo" src={electronLogo} />
-      <div className="creator">Powered by electron-vite</div>
-      <div className="text">
-        Build an Electron app with <span className="react">React</span>
-        &nbsp;and <span className="ts">TypeScript</span>
+    <div className="relative w-full h-screen flex bg-imessage-window-bg">
+      <div className="absolute top-3 right-3 z-10">
+        <ThemeToggle isDark={isDark} onToggle={() => setIsDark(!isDark)} />
       </div>
-      <p className="tip">
-        Please try pressing <code>F12</code> to open the devTool
-      </p>
-      <div className="actions">
-        <div className="action">
-          <a href="https://electron-vite.org/" target="_blank" rel="noreferrer">
-            Documentation
-          </a>
-        </div>
-        <div className="action">
-          <a target="_blank" rel="noreferrer" onClick={ipcHandle}>
-            Send IPC
-          </a>
-        </div>
-      </div>
-      <Versions></Versions>
-    </>
+      <ConversationList
+        conversations={conversations}
+        selectedId={selectedId}
+        onSelect={setSelectedId}
+      />
+      <MessageThread conversation={selectedConversation} />
+    </div>
   )
 }
 
