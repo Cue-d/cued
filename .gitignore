@@ -92,8 +92,6 @@ backend/.prm/
 # Contact and message caches
 **/cache/
 **/*_cache.json
-contacts_full.json
-contact_names.json
 
 # ============================================================
 # macOS
