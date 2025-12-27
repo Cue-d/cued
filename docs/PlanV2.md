@@ -10,20 +10,25 @@ A local-first Electron app mimicking iMessage's UI, backed by a FastAPI + Rust s
 │   Electron App  │◀──────────────────────▶│    FastAPI      │
 │   (TypeScript)  │                        │    (Python)     │
 └─────────────────┘                        └────────┬────────┘
-                                                    │ PyO3
-                                                    ▼
-                                           ┌─────────────────┐
-                                           │   core      │
-                                           │   (Rust/PyO3)   │
-                                           └────────┬────────┘
-                                                    │
-                              ┌─────────────────────┼─────────────────────┐
-                              ▼                     ▼                     ▼
-                    ┌─────────────────┐   ┌─────────────────┐   ┌─────────────────┐
-                    │    prm.db       │   │    chat.db      │   │   Contacts      │
-                    │   (App DB)      │   │   (iMessage)    │   │  (AppleScript)  │
-                    └─────────────────┘   └─────────────────┘   └─────────────────┘
+                                                   │ PyO3
+                                                   ▼
+                                          ┌─────────────────┐
+                                          │      core       │
+                                          │   (Rust/PyO3)   │
+                                          └────────┬────────┘
+                                                   │
+                             ┌─────────────────────┼─────────────────────┐
+                             ▼                     ▼                     ▼
+                   ┌─────────────────┐   ┌─────────────────┐   ┌─────────────────┐
+                   │    prm.db       │   │    chat.db      │   │   Contacts      │
+                   │ (Contacts/Meta) │   │   (iMessage)    │   │  (AppleScript)  │
+                   │   READ-WRITE    │   │   READ-ONLY     │   │                 │
+                   └─────────────────┘   └─────────────────┘   └─────────────────┘
 ```
+
+**Key Design Decision:** We query `chat.db` directly (read-only) for all message data.
+`prm.db` only stores what Apple doesn't provide: contacts metadata, tags, notes, relationship scores.
+This eliminates data redundancy and sync complexity.
 
 ---
 
@@ -93,37 +98,28 @@ NOTE, consolidated both apple_time and normalize into a utils.rs
 - [x] Write test that fetches 10 recent messages and prints them
 - [x] Run test - verify actual iMessages are extracted and displayed
 
-### 2.4 Level 3: Create prm.db and write data
+### 2.4 Level 3: Create prm.db for contacts and metadata
 - [ ] Create `src/app_db.rs`:
   - Define `AppDb` struct with SQLite connection
   - Implement `open(path)` in read-write mode
-  - Implement `init_schema()` creating `messages_cache` table (rowid, text, date, is_from_me)
-- [ ] Add `insert_message(&Message)` method using INSERT OR REPLACE
-- [ ] Write test that:
-  - Reads 5 messages from real chat.db
-  - Creates in-memory AppDb using `:memory:` path
-  - Inserts messages into AppDb
-  - Verifies count matches
-- [ ] Run test - confirm basic sync flow works
+  - Implement `init_schema()` creating contacts-only schema:
+   
+- [ ] Write test that creates schema in `:memory:` database
+- [ ] Run test - confirm schema creation works
 
 ### 2.5 Level 4: Contact resolution with normalization
-- [ ] Extend `app_db.rs` schema with:
-  - `contacts` table: id (autoincrement), name
-  - `identifiers` table: identifier, normalized, contact_id (FK)
-  - Index on normalized column
-- [ ] Add `add_contact(name, phone)` method:
+- [ ] Add `add_contact(name, identifiers: Vec<String>)` method:
   - Insert contact into contacts table
-  - Normalize phone using `normalize::normalize_phone()`
-  - Insert into identifiers table
-- [ ] Add `resolve_phone(phone)` method:
-  - Normalize input phone
-  - JOIN identifiers to contacts on normalized match
-  - Return Option<String> for contact name
+  - For each identifier, normalize and insert into identifiers table
+- [ ] Add `resolve_identifier(phone_or_email)` method:
+  - Normalize input
+  - Query identifiers table for match
+  - Return Option<Contact> with full contact info
 - [ ] Write test that:
-  - Adds contact "Alice" with "(555) 123-4567"
-  - Resolves various formats: "555-123-4567", "+15551234567", "5551234567"
+  - Adds contact "Alice" with phone "(555) 123-4567" and email "alice@example.com"
+  - Resolves various formats: "555-123-4567", "+15551234567", "ALICE@EXAMPLE.COM"
   - Verifies all resolve to "Alice"
-  - Verifies unknown number returns None
+  - Verifies unknown identifier returns None
 - [ ] Run test - confirm identifier resolution works
 
 ### 2.6 Level 5: Error handling
@@ -164,36 +160,28 @@ NOTE, consolidated both apple_time and normalize into a utils.rs
   - Create PyAppDb, add contact, resolve phone
 - [ ] Verify end-to-end Python integration works
 
-### 2.9 Level 8: Expand data model
-- [ ] Expand `Message` struct with: chat_id, sender, attachments
-- [ ] Create `Conversation` struct: chat_identifier, display_name, participants
-- [ ] Implement `get_all_chats()` in chat_reader.rs
-- [ ] Add conversations table to app_db.rs schema
-- [ ] Implement conversation sync logic
-- [ ] Add tests for new functionality
+### 2.9 Level 8: Expand ChatReader queries (read-only from chat.db)
+- [x] Handle `attributedBody` blob parsing for message text extraction
+- [ ] Expand `Message` struct with: guid, chat_id, handle_id, service, associated_message_type
+- [ ] Create `Conversation` struct: chat_identifier, display_name, style, last_message_date
+- [ ] Create `Handle` struct: id (phone/email), service
+- [ ] Implement `get_all_conversations()` - query chat table with last message info
+- [ ] Implement `get_conversation_messages(chat_id, limit, before_rowid)` with pagination
+- [ ] Implement `get_conversation_participants(chat_id)` for group chats
+- [ ] Handle group chat detection via `chat.style` or `chat_identifier` prefix
+- [ ] Add tests for all new query methods
 - [ ] Expose new features in py_bindings.rs
-- [ ] Handle `attributedBody` blob parsing for message text extraction
-- [ ] Handle group chat detection via `chat_identifier` prefix
 
-### 2.10 Level 9: Advanced features
-- [ ] Expand contacts table schema with full fields:
-  - phones (JSON), emails (JSON), company, job_title, birthday, notes_apple
-  - tags (JSON), relationship_score, custom_notes
-  - last_meaningful_contact, source, created_at, updated_at
-- [ ] Implement `sync_conversations()`:
-  - Read all chats from chat.db
-  - Upsert into conversations table
-  - Update last_message_preview, last_message_date
-- [ ] Implement `sync_messages_incremental(since_rowid)`:
-  - Get new messages from chat.db
-  - Insert into messages_cache
-  - Update parent conversation fields
-- [ ] Implement `get_sync_cursor()` and `set_sync_cursor()`
-- [ ] Implement `get_latest_message_rowid()` for sync tracking
-- [ ] Implement `get_messages_since(rowid)` for incremental sync
-- [ ] Implement `get_chat_messages(chat_id, limit, before_rowid)` with pagination
+### 2.10 Level 9: Advanced queries and contact features
+- [ ] Implement `search_messages(query)` - full-text search across messages
+- [ ] Implement `get_messages_since(rowid)` - for real-time update polling
+- [ ] Implement `get_latest_message_rowid()` - for tracking new messages
+- [ ] Expand contacts schema with full fields:
+  - phones (JSON), emails (JSON) for multiple identifiers per contact
+  - last_meaningful_contact timestamp
 - [ ] Build complete identifier index for multiple phones/emails per contact
-- [ ] Expose all functions to Python: `sync_all()`, `get_conversations()`, `get_thread()`, `search_messages()`
+- [ ] Implement cross-database resolution: chat.db handle → prm.db contact
+- [ ] Expose all functions to Python: `get_conversations()`, `get_thread()`, `search_messages()`, `resolve_contact()`
 
 ---
 
@@ -266,9 +254,11 @@ NOTE, consolidated both apple_time and normalize into a utils.rs
 ### 4.4 WebSocket Real-Time Updates
 - [ ] Create `ConnectionManager` class for tracking WebSocket connections
 - [ ] Implement `/ws` WebSocket endpoint
-- [ ] Implement background task that watches for chat.db changes
-- [ ] On change detected:
-  - Run incremental sync via core
+- [ ] Implement background task that polls chat.db for new messages
+  - Track last seen rowid
+  - Query `get_messages_since(last_rowid)` periodically
+- [ ] On new messages detected:
+  - Resolve contacts via prm.db
   - Broadcast `new_messages` event to all connected clients
 - [ ] Define WebSocket message format:
   ```json
@@ -428,8 +418,8 @@ NOTE, consolidated both apple_time and normalize into a utils.rs
 - [ ] On first launch, check if prm.db exists
 - [ ] If not, show onboarding:
   - Request Full Disk Access (instructions)
-  - Run contacts hydration (show progress)
-  - Run initial message sync (show progress)
+  - Verify chat.db is readable
+  - Run contacts hydration from Apple Contacts (show progress)
 - [ ] Store "onboarding complete" flag
 
 ### 7.3 End-to-End Testing
@@ -495,8 +485,9 @@ NOTE, consolidated both apple_time and normalize into a utils.rs
 
 | Component | Location | Purpose |
 |-----------|----------|---------|
-| Rust core | `core/src/` | Database ops, sync, PyO3 |
-| App database | `~/.prm/prm.db` | Contacts, conversations, metadata |
+| Rust core | `core/src/` | Query chat.db, manage prm.db, PyO3 bindings |
+| App database | `~/.prm/prm.db` | Contacts, tags, notes, relationship scores (NO messages) |
+| iMessage DB | `~/Library/Messages/chat.db` | Messages, chats, handles (read-only) |
 | FastAPI | `backend/app/` | REST + WebSocket API |
 | Electron main | `frontend/src/main/` | Window, backend lifecycle |
 | Electron UI | `frontend/src/renderer/` | React/Svelte components |
