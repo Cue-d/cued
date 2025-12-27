@@ -24,7 +24,7 @@ export interface SendMessageResponse {
 }
 
 export interface Api {
-  getConversations: (limit?: number) => Promise<ConversationResponse[]>
+  getConversations: (limit?: number, offset?: number) => Promise<ConversationResponse[]>
   getMessages: (chatId: number, limit?: number) => Promise<MessageResponse[]>
   sendMessage: (chatId: number, text: string) => Promise<SendMessageResponse>
 }

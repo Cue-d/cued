@@ -6,8 +6,8 @@ const API_BASE = 'http://localhost:8000'
 // Register IPC handlers
 function registerIpcHandlers(): void {
   // IPC handlers for API calls
-  ipcMain.handle('api:getConversations', async (_, limit = 50) => {
-    const res = await fetch(`${API_BASE}/conversations?limit=${limit}`)
+  ipcMain.handle('api:getConversations', async (_, limit = 50, offset = 0) => {
+    const res = await fetch(`${API_BASE}/conversations?limit=${limit}&offset=${offset}`)
     if (!res.ok) throw new Error(`Failed to fetch conversations: ${res.status}`)
     return res.json()
   })

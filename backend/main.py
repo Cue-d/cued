@@ -138,12 +138,13 @@ def root():
 
 
 @app.get("/conversations", response_model=list[ConversationResponse])
-def get_conversations(limit: int = 50):
+def get_conversations(limit: int = 50, offset: int = 0):
     """Get recent conversations with resolved contact names."""
     reader = get_chat_reader()
     resolver = get_handle_resolver()
 
-    chats = reader.get_all_chats()[:limit]
+    all_chats = reader.get_all_chats()
+    chats = all_chats[offset:offset + limit]
     result = []
 
     for chat in chats:

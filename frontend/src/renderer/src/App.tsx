@@ -10,6 +10,8 @@ function App(): React.JSX.Element {
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [isDark, setIsDark] = useState(true)
   const [loading, setLoading] = useState(true)
+  const [loadingMore, setLoadingMore] = useState(false)
+  const [hasMore, setHasMore] = useState(true)
 
   // Helper to get initials from a name
   const getInitials = (name: string) =>
@@ -43,10 +45,12 @@ function App(): React.JSX.Element {
 
   // Load conversations on mount
   useEffect(() => {
-    fetchConversations(50)
+    const initialLimit = 50
+    fetchConversations(initialLimit, 0)
       .then((data) => {
         const convos = data.map((c) => toConversation(c))
         setConversations(convos)
+        setHasMore(data.length === initialLimit)
         if (convos.length > 0 && !selectedId) {
           setSelectedId(convos[0].id)
         }
@@ -54,6 +58,37 @@ function App(): React.JSX.Element {
       .catch(console.error)
       .finally(() => setLoading(false))
   }, [])
+
+  // Load more conversations
+  const handleLoadMore = () => {
+    if (loadingMore || !hasMore) return
+
+    setLoadingMore(true)
+    const offset = conversations.length
+    const limit = 50
+
+    fetchConversations(limit, offset)
+      .then((data) => {
+        if (data.length === 0) {
+          setHasMore(false)
+          return
+        }
+
+        const newConvos = data.map((c) => toConversation(c))
+        // Filter out duplicates by ID
+        const existingIds = new Set(conversations.map((c) => c.id))
+        const uniqueNewConvos = newConvos.filter((c) => !existingIds.has(c.id))
+
+        if (uniqueNewConvos.length > 0) {
+          setConversations((prev) => [...prev, ...uniqueNewConvos])
+        }
+
+        // If we got fewer results than requested, we've reached the end
+        setHasMore(data.length === limit && uniqueNewConvos.length > 0)
+      })
+      .catch(console.error)
+      .finally(() => setLoadingMore(false))
+  }
 
   // Load messages when selection changes
   useEffect(() => {
@@ -115,6 +150,9 @@ function App(): React.JSX.Element {
         conversations={conversations}
         selectedId={selectedId}
         onSelect={setSelectedId}
+        onLoadMore={handleLoadMore}
+        hasMore={hasMore}
+        loading={loadingMore}
       />
       <MessageThread conversation={selectedConversation} onSendMessage={handleSendMessage} />
     </div>

@@ -1,7 +1,7 @@
 export type { ConversationResponse, MessageResponse, SendMessageResponse } from '../../../preload/index.d'
 
-export async function fetchConversations(limit = 50) {
-  return window.api.getConversations(limit)
+export async function fetchConversations(limit = 50, offset = 0) {
+  return window.api.getConversations(limit, offset)
 }
 
 export async function fetchMessages(chatId: number, limit = 100) {

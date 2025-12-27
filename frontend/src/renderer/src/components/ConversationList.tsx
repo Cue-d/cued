@@ -2,11 +2,15 @@ import { Search, SquarePen } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { Conversation, formatTimestamp } from '@/data/types'
 import Avatar from './Avatar'
+import { useRef, useEffect } from 'react'
 
 interface ConversationListProps {
   conversations: Conversation[]
   selectedId: string | null
   onSelect: (id: string) => void
+  onLoadMore?: () => void
+  hasMore?: boolean
+  loading?: boolean
 }
 
 interface ConversationItemProps {
@@ -53,7 +57,35 @@ const ConversationItem = ({ conversation, isSelected, onClick }: ConversationIte
   )
 }
 
-const ConversationList = ({ conversations, selectedId, onSelect }: ConversationListProps) => {
+const ConversationList = ({ conversations, selectedId, onSelect, onLoadMore, hasMore, loading }: ConversationListProps) => {
+  const scrollContainerRef = useRef<HTMLDivElement>(null)
+  const loadingRef = useRef(false)
+
+  useEffect(() => {
+    const container = scrollContainerRef.current
+    if (!container || !onLoadMore || !hasMore || loading) return
+
+    const handleScroll = () => {
+      if (loadingRef.current) return
+
+      const { scrollTop, scrollHeight, clientHeight } = container
+      const scrollPercentage = (scrollTop + clientHeight) / scrollHeight
+
+      // Load more when scrolled 80% down
+      if (scrollPercentage > 0.8) {
+        loadingRef.current = true
+        onLoadMore()
+        // Reset after a delay to prevent rapid firing
+        setTimeout(() => {
+          loadingRef.current = false
+        }, 500)
+      }
+    }
+
+    container.addEventListener('scroll', handleScroll)
+    return () => container.removeEventListener('scroll', handleScroll)
+  }, [onLoadMore, hasMore, loading])
+
   return (
     <div className="w-80 h-full bg-imessage-sidebar border-r border-imessage-sidebar-border flex flex-col">
       {/* Search + New Message */}
@@ -72,7 +104,7 @@ const ConversationList = ({ conversations, selectedId, onSelect }: ConversationL
       </div>
 
       {/* Conversation List */}
-      <div className="flex-1 overflow-y-auto scrollbar-thin px-2 pb-2">
+      <div ref={scrollContainerRef} className="flex-1 overflow-y-auto scrollbar-thin px-2 pb-2">
         <div className="space-y-0.5">
           {conversations.map((conversation) => (
             <ConversationItem
@@ -82,6 +114,11 @@ const ConversationList = ({ conversations, selectedId, onSelect }: ConversationL
               onClick={() => onSelect(conversation.id)}
             />
           ))}
+          {loading && (
+            <div className="flex items-center justify-center py-4">
+              <span className="text-sm text-muted-foreground">Loading more...</span>
+            </div>
+          )}
         </div>
       </div>
     </div>
