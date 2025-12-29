@@ -3,7 +3,7 @@
 TODO:
 
 - [x] Implement sending messages
-- [ ] Implement "infinite" scroll of previous conversations
+- [x] Implement "infinite" scroll of previous conversations
 - [ ] Implement attachments, including images, links, etc
 - [ ] Implement Imessage sort by recency, this is an "imessage mode" where the most recent conversations come to the top and when someone new messages you, it comes to the top
 - [ ] Implement other methods of sorting

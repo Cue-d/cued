@@ -35,6 +35,8 @@ function createWindow(): void {
     height: 670,
     show: false,
     autoHideMenuBar: true,
+    titleBarStyle: 'hidden',
+    trafficLightPosition: { x: 10, y: 30 },
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
       sandbox: false

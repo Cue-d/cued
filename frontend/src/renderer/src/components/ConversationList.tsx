@@ -88,19 +88,23 @@ const ConversationList = ({ conversations, selectedId, onSelect, onLoadMore, has
 
   return (
     <div className="w-80 h-full bg-imessage-sidebar border-r border-imessage-sidebar-border flex flex-col">
-      {/* Search + New Message */}
-      <div className="px-3 py-2 flex items-center gap-2">
-        <div className="relative flex-1">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+      {/* Header with traffic light space and new message button */}
+      <div className="h-11 flex items-center justify-end px-4 pt-1.5 -mt-1">
+        <button className="p-1.5 hover:bg-sidebar-accent rounded-lg transition-colors">
+          <SquarePen className="w-[18px] h-[18px] text-primary" />
+        </button>
+      </div>
+
+      {/* Search bar */}
+      <div className="px-4 pb-2.5">
+        <div className="relative">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-[15px] h-[15px] text-muted-foreground pointer-events-none" />
           <input
             type="text"
             placeholder="Search"
-            className="w-full h-9 pl-9 pr-3 rounded-lg bg-muted text-foreground placeholder:text-muted-foreground text-sm focus:outline-none focus:ring-1 focus:ring-primary"
+            className="w-full h-[34px] pl-8 pr-3 rounded-md bg-muted text-foreground placeholder:text-muted-foreground text-[13px] focus:outline-none focus:ring-1 focus:ring-primary"
           />
         </div>
-        <button className="p-2 hover:bg-sidebar-accent rounded-lg transition-colors">
-          <SquarePen className="w-5 h-5 text-primary" />
-        </button>
       </div>
 
       {/* Conversation List */}
