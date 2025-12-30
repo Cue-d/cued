@@ -15,15 +15,16 @@ const sizeClasses = {
   lg: 'w-12 h-12 text-base'
 }
 
+// Muted, sophisticated color palette
 const bgColors = [
-  'bg-blue-500',
-  'bg-green-500',
-  'bg-purple-500',
-  'bg-orange-500',
-  'bg-pink-500',
-  'bg-teal-500',
-  'bg-red-500',
-  'bg-indigo-500'
+  'bg-slate-500',
+  'bg-zinc-500',
+  'bg-stone-500',
+  'bg-gray-500',
+  'bg-neutral-500',
+  'bg-slate-600',
+  'bg-zinc-600',
+  'bg-stone-600'
 ]
 
 const getColorForInitials = (initials: string) => {
