@@ -1,7 +1,56 @@
 import { app, shell, BrowserWindow, ipcMain } from 'electron'
 import { join } from 'path'
+import { spawn, ChildProcess } from 'child_process'
 
 const API_BASE = 'http://localhost:8000'
+
+let backendProcess: ChildProcess | null = null
+
+// Start backend server
+function startBackend(): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const isDev = !app.isPackaged
+
+    // In development, assume backend is running manually
+    if (isDev) {
+      console.log('Development mode: assuming backend is running on localhost:8000')
+      resolve()
+      return
+    }
+
+    // In production, launch the bundled backend executable
+    const backendPath = join(process.resourcesPath, 'backend', 'prm-backend')
+    console.log('Starting backend from:', backendPath)
+
+    backendProcess = spawn(backendPath, [], {
+      stdio: ['ignore', 'pipe', 'pipe']
+    })
+
+    backendProcess.stdout?.on('data', (data) => {
+      console.log('[Backend]', data.toString())
+    })
+
+    backendProcess.stderr?.on('data', (data) => {
+      console.error('[Backend Error]', data.toString())
+    })
+
+    backendProcess.on('error', (error) => {
+      console.error('Failed to start backend:', error)
+      reject(error)
+    })
+
+    backendProcess.on('exit', (code) => {
+      console.log('Backend process exited with code:', code)
+      backendProcess = null
+    })
+
+    // Give backend time to start
+    setTimeout(() => {
+      console.log('Backend should be ready')
+      resolve()
+    }, 2000)
+  })
+}
 
 // Register IPC handlers
 function registerIpcHandlers(): void {
@@ -63,7 +112,8 @@ function createWindow(): void {
 // This method will be called when Electron has finished
 // initialization and is ready to create browser windows.
 // Some APIs can only be used after this event occurs.
-app.whenReady().then(() => {
+app.whenReady().then(async () => {
+  await startBackend()
   registerIpcHandlers()
   createWindow()
 
@@ -80,6 +130,15 @@ app.whenReady().then(() => {
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') {
     app.quit()
+  }
+})
+
+// Clean up backend process when app quits
+app.on('before-quit', () => {
+  if (backendProcess) {
+    console.log('Killing backend process...')
+    backendProcess.kill()
+    backendProcess = null
   }
 })
 
