@@ -21,14 +21,16 @@ interface ConversationItemProps {
 
 const ConversationItem = ({ conversation, isSelected, onClick }: ConversationItemProps) => {
   // Check if conversation has any unread received messages
-  const hasUnread = conversation.messages.some(m => !m.isSent && !m.isRead)
+  const hasUnread = conversation.messages.some((m) => !m.isSent && !m.isRead)
 
   return (
     <button
       onClick={onClick}
       className={cn(
         'w-full flex items-center gap-3 px-3 py-2.5 rounded-xl transition-colors text-left relative',
-        isSelected ? 'bg-imessage-selected text-imessage-selected-foreground' : 'hover:bg-sidebar-accent'
+        isSelected
+          ? 'bg-imessage-selected text-imessage-selected-foreground'
+          : 'hover:bg-sidebar-accent'
       )}
     >
       {/* Blue dot for unread messages */}
@@ -42,14 +44,29 @@ const ConversationItem = ({ conversation, isSelected, onClick }: ConversationIte
       />
       <div className="flex-1 min-w-0">
         <div className="flex items-center justify-between gap-2">
-          <span className={cn('font-medium truncate text-[15px]', isSelected ? 'text-imessage-selected-foreground' : 'text-foreground')}>
+          <span
+            className={cn(
+              'font-medium truncate text-[15px]',
+              isSelected ? 'text-imessage-selected-foreground' : 'text-foreground'
+            )}
+          >
             {conversation.name}
           </span>
-          <span className={cn('text-xs flex-shrink-0', isSelected ? 'text-imessage-selected-foreground/70' : 'text-imessage-timestamp')}>
+          <span
+            className={cn(
+              'text-xs flex-shrink-0',
+              isSelected ? 'text-imessage-selected-foreground/70' : 'text-imessage-timestamp'
+            )}
+          >
             {formatTimestamp(conversation.timestamp)}
           </span>
         </div>
-        <p className={cn('text-[13px] truncate mt-0.5', isSelected ? 'text-imessage-selected-foreground/80' : 'text-muted-foreground')}>
+        <p
+          className={cn(
+            'text-[13px] truncate mt-0.5',
+            isSelected ? 'text-imessage-selected-foreground/80' : 'text-muted-foreground'
+          )}
+        >
           {conversation.lastMessage}
         </p>
       </div>
@@ -57,7 +74,14 @@ const ConversationItem = ({ conversation, isSelected, onClick }: ConversationIte
   )
 }
 
-const ConversationList = ({ conversations, selectedId, onSelect, onLoadMore, hasMore, loading }: ConversationListProps) => {
+const ConversationList = ({
+  conversations,
+  selectedId,
+  onSelect,
+  onLoadMore,
+  hasMore,
+  loading
+}: ConversationListProps) => {
   const scrollContainerRef = useRef<HTMLDivElement>(null)
   const loadingRef = useRef(false)
 

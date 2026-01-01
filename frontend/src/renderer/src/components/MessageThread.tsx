@@ -36,15 +36,11 @@ const MessageBubble = ({
     <div className={cn('flex flex-col', message.isSent ? 'items-end' : 'items-start')}>
       {/* Sender name for group chats */}
       {showSenderInfo && !message.isSent && message.senderName && (
-        <span className="text-xs text-muted-foreground mb-1 ml-10">
-          {message.senderName}
-        </span>
+        <span className="text-xs text-muted-foreground mb-1 ml-10">{message.senderName}</span>
       )}
       <div className={cn('flex items-end gap-2', message.isSent && 'flex-row-reverse')}>
         {/* Avatar for group chats */}
-        {showAvatar && (
-          <Avatar initials={senderInitials} size="xs" />
-        )}
+        {showAvatar && <Avatar initials={senderInitials} size="xs" />}
         <div
           className={cn(
             'max-w-[85%] px-3 py-2 rounded-2xl break-words',
@@ -81,6 +77,9 @@ const MessageThread = ({ conversation, onSendMessage }: MessageThreadProps) => {
   const [sending, setSending] = useState(false)
   const messagesEndRef = useRef<HTMLDivElement>(null)
 
+  // Extract to stable reference for dependency array
+  const messagesLength = conversation?.messages?.length ?? 0
+
   // Scroll to bottom immediately when conversation changes
   useEffect(() => {
     if (conversation?.id) {
@@ -91,10 +90,10 @@ const MessageThread = ({ conversation, onSendMessage }: MessageThreadProps) => {
 
   // Smooth scroll when messages update in current conversation
   useEffect(() => {
-    if (conversation?.messages && conversation.messages.length > 0) {
+    if (messagesLength > 0) {
       messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
     }
-  }, [conversation?.messages.length])
+  }, [messagesLength])
 
   const handleSend = async () => {
     if (!inputText.trim() || !conversation || !onSendMessage || sending) return

@@ -1,8 +1,9 @@
-import os
 import json
+import os
+
+import core
 from fastapi import FastAPI
 from pydantic import BaseModel
-import core
 
 app = FastAPI()
 
@@ -43,7 +44,7 @@ class SendMessageResponse(BaseModel):
 
 def strip_country_code(phone: str) -> str:
     """Strip leading country code (1 for US) from normalized phone number."""
-    if len(phone) == 11 and phone.startswith('1'):
+    if len(phone) == 11 and phone.startswith("1"):
         return phone[1:]
     return phone
 
@@ -144,7 +145,7 @@ def get_conversations(limit: int = 50, offset: int = 0):
     resolver = get_handle_resolver()
 
     all_chats = reader.get_all_chats()
-    chats = all_chats[offset:offset + limit]
+    chats = all_chats[offset : offset + limit]
     result = []
 
     for chat in chats:
@@ -178,15 +179,17 @@ def get_conversations(limit: int = 50, offset: int = 0):
             else:
                 name = chat.chat_identifier
 
-        result.append(ConversationResponse(
-            id=chat.rowid,
-            name=name,
-            last_message=chat.last_message_text,
-            last_message_date=core.apple_to_unix(chat.last_message_date),
-            is_group=chat.is_group,
-            handle_ids=handle_ids,
-            member_names=member_names,
-        ))
+        result.append(
+            ConversationResponse(
+                id=chat.rowid,
+                name=name,
+                last_message=chat.last_message_text,
+                last_message_date=core.apple_to_unix(chat.last_message_date),
+                is_group=chat.is_group,
+                handle_ids=handle_ids,
+                member_names=member_names,
+            )
+        )
 
     return result
 
@@ -213,15 +216,17 @@ def get_messages(chat_id: int, limit: int = 100):
         if msg.date_read is not None:
             date_read_unix = core.apple_to_unix(msg.date_read)
 
-        result.append(MessageResponse(
-            id=msg.rowid,
-            text=msg.text,
-            date=core.apple_to_unix(msg.date),
-            is_from_me=msg.is_from_me,
-            is_read=msg.is_read,
-            date_read=date_read_unix,
-            sender_name=sender_name,
-        ))
+        result.append(
+            MessageResponse(
+                id=msg.rowid,
+                text=msg.text,
+                date=core.apple_to_unix(msg.date),
+                is_from_me=msg.is_from_me,
+                is_read=msg.is_read,
+                date_read=date_read_unix,
+                sender_name=sender_name,
+            )
+        )
 
     return result
 
@@ -260,4 +265,5 @@ def send_message(chat_id: int, request: SendMessageRequest):
 
 if __name__ == "__main__":
     import uvicorn
+
     uvicorn.run(app, host="127.0.0.1", port=8000, log_level="info")

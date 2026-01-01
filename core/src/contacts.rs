@@ -26,12 +26,17 @@ pub fn fetch_all_contact_names() -> PyResult<Vec<String>> {
         .arg("-e")
         .arg(script)
         .output()
-        .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(format!("osascript failed: {}", e)))?;
+        .map_err(|e| {
+            pyo3::exceptions::PyRuntimeError::new_err(format!("osascript failed: {}", e))
+        })?;
 
     let output_str = String::from_utf8(output.stdout)
         .map_err(|e| pyo3::exceptions::PyValueError::new_err(format!("Invalid UTF-8: {}", e)))?;
 
-    let cleaned = output_str.trim().trim_start_matches('{').trim_end_matches('}');
+    let cleaned = output_str
+        .trim()
+        .trim_start_matches('{')
+        .trim_end_matches('}');
     let names: Vec<String> = cleaned
         .split(',')
         .map(|n| n.trim().trim_matches('"').to_string())
@@ -92,7 +97,9 @@ pub fn fetch_contacts_by_names(names: Vec<String>) -> PyResult<Vec<FetchedContac
         .arg("-e")
         .arg(&script)
         .output()
-        .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(format!("osascript failed: {}", e)))?;
+        .map_err(|e| {
+            pyo3::exceptions::PyRuntimeError::new_err(format!("osascript failed: {}", e))
+        })?;
 
     let output_str = String::from_utf8(output.stdout)
         .map_err(|e| pyo3::exceptions::PyValueError::new_err(format!("Invalid UTF-8: {}", e)))?;
@@ -115,7 +122,11 @@ fn parse_contact_block(block: &str) -> Option<FetchedContact> {
     let mut notes = None;
     let mut has_data = false;
 
-    for line in block.split('\r').map(|l| l.trim()).filter(|l| !l.is_empty()) {
+    for line in block
+        .split('\r')
+        .map(|l| l.trim())
+        .filter(|l| !l.is_empty())
+    {
         if let Some(value) = line.strip_prefix("NAME:") {
             name = value.trim().to_string();
             has_data = true;
@@ -143,7 +154,13 @@ fn parse_contact_block(block: &str) -> Option<FetchedContact> {
     }
 
     if has_data && !name.is_empty() {
-        Some(FetchedContact { name, emails, phones, company, notes })
+        Some(FetchedContact {
+            name,
+            emails,
+            phones,
+            company,
+            notes,
+        })
     } else {
         None
     }

@@ -17,15 +17,17 @@ impl AppDb {
     /// Open or create the database at the given path.
     #[new]
     pub fn open(path: &str) -> PyResult<Self> {
-        let conn = Connection::open(path)
-            .map_err(|e| pyo3::exceptions::PyIOError::new_err(format!("Failed to open db: {}", e)))?;
+        let conn = Connection::open(path).map_err(|e| {
+            pyo3::exceptions::PyIOError::new_err(format!("Failed to open db: {}", e))
+        })?;
         Ok(Self { conn })
     }
 
     /// Initialize the database schema.
     pub fn init_schema(&self) -> PyResult<()> {
-        self.conn.execute_batch(
-            "
+        self.conn
+            .execute_batch(
+                "
             CREATE TABLE IF NOT EXISTS contacts (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 name TEXT NOT NULL UNIQUE,
@@ -37,15 +39,19 @@ impl AppDb {
                 updated_at INTEGER NOT NULL
             );
             CREATE INDEX IF NOT EXISTS idx_contacts_name ON contacts(name);
-            "
-        ).map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(format!("Schema error: {}", e)))?;
+            ",
+            )
+            .map_err(|e| {
+                pyo3::exceptions::PyRuntimeError::new_err(format!("Schema error: {}", e))
+            })?;
         Ok(())
     }
 
     /// Upsert multiple contacts.
     pub fn upsert_contacts(&mut self, contacts: Vec<FetchedContact>) -> PyResult<usize> {
-        let tx = self.conn.transaction()
-            .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(format!("Transaction error: {}", e)))?;
+        let tx = self.conn.transaction().map_err(|e| {
+            pyo3::exceptions::PyRuntimeError::new_err(format!("Transaction error: {}", e))
+        })?;
 
         let mut count = 0;
         for contact in &contacts {
@@ -74,41 +80,54 @@ impl AppDb {
             count += 1;
         }
 
-        tx.commit()
-            .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(format!("Commit error: {}", e)))?;
+        tx.commit().map_err(|e| {
+            pyo3::exceptions::PyRuntimeError::new_err(format!("Commit error: {}", e))
+        })?;
         Ok(count)
     }
 
     /// Get all contacts from the database.
     pub fn get_all_contacts(&self) -> PyResult<Vec<Contact>> {
-        let mut stmt = self.conn.prepare(
-            "SELECT id, name, emails, phones, company, notes, created_at, updated_at
-             FROM contacts ORDER BY name"
-        ).map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(format!("Query error: {}", e)))?;
+        let mut stmt = self
+            .conn
+            .prepare(
+                "SELECT id, name, emails, phones, company, notes, created_at, updated_at
+             FROM contacts ORDER BY name",
+            )
+            .map_err(|e| {
+                pyo3::exceptions::PyRuntimeError::new_err(format!("Query error: {}", e))
+            })?;
 
-        let rows = stmt.query_map([], |row| {
-            Ok(Contact {
-                id: row.get(0)?,
-                name: row.get(1)?,
-                emails: row.get(2)?,
-                phones: row.get(3)?,
-                company: row.get(4)?,
-                notes: row.get(5)?,
-                created_at: row.get(6)?,
-                updated_at: row.get(7)?,
+        let rows = stmt
+            .query_map([], |row| {
+                Ok(Contact {
+                    id: row.get(0)?,
+                    name: row.get(1)?,
+                    emails: row.get(2)?,
+                    phones: row.get(3)?,
+                    company: row.get(4)?,
+                    notes: row.get(5)?,
+                    created_at: row.get(6)?,
+                    updated_at: row.get(7)?,
+                })
             })
-        }).map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(format!("Query error: {}", e)))?;
+            .map_err(|e| {
+                pyo3::exceptions::PyRuntimeError::new_err(format!("Query error: {}", e))
+            })?;
 
         let mut result = Vec::new();
         for row in rows {
-            result.push(row.map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(format!("Row error: {}", e)))?);
+            result.push(row.map_err(|e| {
+                pyo3::exceptions::PyRuntimeError::new_err(format!("Row error: {}", e))
+            })?);
         }
         Ok(result)
     }
 
     /// Get contact count.
     pub fn contact_count(&self) -> PyResult<i64> {
-        self.conn.query_row("SELECT COUNT(*) FROM contacts", [], |row| row.get(0))
+        self.conn
+            .query_row("SELECT COUNT(*) FROM contacts", [], |row| row.get(0))
             .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(format!("Count error: {}", e)))
     }
 }

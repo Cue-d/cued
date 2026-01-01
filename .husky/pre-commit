@@ -1,0 +1,16 @@
+#!/bin/sh
+
+# Frontend: lint-staged + typecheck
+cd frontend
+pnpm exec lint-staged
+pnpm run typecheck
+
+# Backend: ruff
+cd ../backend
+uv run ruff check .
+uv run ruff format --check .
+
+# Core: cargo fmt + clippy
+cd ../core
+cargo fmt --check
+cargo clippy -- -D warnings

@@ -7,6 +7,7 @@ Python handles the workflow, batching, progress, and error handling.
 
 import os
 import time
+
 import core
 
 # Config
@@ -43,7 +44,7 @@ def sync_contacts():
     start = time.time()
 
     for i in range(0, len(names), BATCH_SIZE):
-        batch = names[i:i + BATCH_SIZE]
+        batch = names[i : i + BATCH_SIZE]
 
         try:
             contacts = core.fetch_contacts_by_names(batch)
@@ -55,7 +56,7 @@ def sync_contacts():
             print(f"  Progress: {progress}/{len(names)} ({pct:.0f}%) - batch synced {synced}")
 
         except Exception as e:
-            print(f"  Error in batch {i//BATCH_SIZE}: {e}")
+            print(f"  Error in batch {i // BATCH_SIZE}: {e}")
 
     elapsed = time.time() - start
     after_count = db.contact_count()
