@@ -22,7 +22,8 @@
     "build:mac": "electron-vite build && electron-builder --mac",
     "build:linux": "electron-vite build && electron-builder --linux",
     "build:full": "npm run build:rust && npm run build:backend && npm run build && electron-builder --mac",
-    "build:full:unpack": "npm run build:rust && npm run build:backend && npm run build && electron-builder --dir"
+    "build:full:unpack": "npm run build:rust && npm run build:backend && npm run build && electron-builder --dir",
+    "prepare": "husky"
   },
   "dependencies": {
     "@electron-toolkit/preload": "^3.0.2",
@@ -48,6 +49,8 @@
     "eslint-plugin-react": "^7.37.5",
     "eslint-plugin-react-hooks": "^7.0.1",
     "eslint-plugin-react-refresh": "^0.4.24",
+    "husky": "^9.1.7",
+    "lint-staged": "^16.2.7",
     "prettier": "^3.7.4",
     "react": "^19.2.1",
     "react-dom": "^19.2.1",
@@ -59,6 +62,15 @@
     "onlyBuiltDependencies": [
       "electron",
       "esbuild"
+    ]
+  },
+  "lint-staged": {
+    "*.{ts,tsx}": [
+      "eslint --fix",
+      "prettier --write"
+    ],
+    "*.{json,md,css,yaml,yml}": [
+      "prettier --write"
     ]
   }
 }
