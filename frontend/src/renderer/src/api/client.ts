@@ -1,4 +1,8 @@
-export type { ConversationResponse, MessageResponse, SendMessageResponse } from '../../../preload/index.d'
+export type {
+  ConversationResponse,
+  MessageResponse,
+  SendMessageResponse
+} from '../../../preload/index.d'
 
 export async function fetchConversations(limit = 50, offset = 0) {
   return window.api.getConversations(limit, offset)
