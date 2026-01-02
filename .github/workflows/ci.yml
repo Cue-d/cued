@@ -1,0 +1,105 @@
+name: CI
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  frontend:
+    name: Frontend (Lint, Typecheck, Build)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "pnpm"
+          cache-dependency-path: frontend/pnpm-lock.yaml
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Run linter
+        run: pnpm lint
+
+      - name: Run typecheck
+        run: pnpm typecheck
+
+      - name: Build
+        run: pnpm run build
+
+  backend:
+    name: Backend (Python)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+
+      - name: Install dependencies
+        run: uv sync --dev
+
+      - name: Run ruff check
+        run: uv run ruff check .
+
+      - name: Run ruff format check
+        run: uv run ruff format --check .
+
+  core:
+    name: Core (Rust)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: core
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Rust (nightly for edition 2024)
+        uses: dtolnay/rust-toolchain@nightly
+        with:
+          components: rustfmt, clippy
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: core
+
+      - name: Run cargo check
+        run: cargo check
+
+      - name: Run clippy
+        run: cargo clippy --all-targets -- -D warnings
+
+      - name: Run rustfmt check
+        run: cargo fmt --all -- --check
