@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import ConversationList from './components/ConversationList'
 import MessageThread from './components/MessageThread'
 import ThemeToggle from './components/ThemeToggle'
+import { CommandMenu } from './components/CommandMenu'
 import {
   fetchConversations,
   fetchMessages,
@@ -146,6 +147,7 @@ function App() {
 
   return (
     <div className="relative w-full h-screen flex bg-imessage-window-bg">
+      <CommandMenu isDark={isDark} onToggleTheme={() => setIsDark(!isDark)} />
       <div className="absolute top-3 right-3 z-10">
         <ThemeToggle isDark={isDark} onToggle={() => setIsDark(!isDark)} />
       </div>
