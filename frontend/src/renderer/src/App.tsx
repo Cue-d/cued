@@ -3,139 +3,32 @@ import ConversationList from './components/ConversationList'
 import MessageThread from './components/MessageThread'
 import ThemeToggle from './components/ThemeToggle'
 import { CommandMenu } from './components/CommandMenu'
-import {
-  fetchConversations,
-  fetchMessages,
-  sendMessage,
-  ConversationResponse,
-  MessageResponse
-} from './api/client'
-import { Conversation, Message } from '@/data/types'
-
-// Helper to get initials from a name (moved outside component for stability)
-const getInitials = (name: string) =>
-  name
-    .split(' ')
-    .map((n) => n[0])
-    .join('')
-    .slice(0, 2)
-    .toUpperCase()
-
-// Convert API response to UI model (moved outside component for stability)
-const toConversation = (c: ConversationResponse, messages: Message[] = []): Conversation => ({
-  id: String(c.id),
-  name: c.name,
-  initials: getInitials(c.name),
-  isGroup: c.is_group || c.handle_ids.length > 1,
-  groupAvatars: c.member_names.map(getInitials),
-  lastMessage: c.last_message || '',
-  timestamp: new Date(c.last_message_date * 1000),
-  messages
-})
-
-const toMessage = (m: MessageResponse): Message => ({
-  id: String(m.id),
-  text: m.text || '',
-  isSent: m.is_from_me,
-  isRead: m.is_read,
-  timestamp: new Date(m.date * 1000),
-  senderName: m.sender_name
-})
+import { useConversations, useMessages } from '@/hooks'
 
 function App() {
-  const [conversations, setConversations] = useState<Conversation[]>([])
-  const [selectedId, setSelectedId] = useState<string | null>(null)
+  const {
+    conversations,
+    setConversations,
+    selectedId,
+    setSelectedId,
+    loading,
+    loadingMore,
+    hasMore,
+    handleLoadMore
+  } = useConversations()
+
+  const { handleSendMessage } = useMessages({
+    selectedId,
+    setConversations
+  })
+
   const [isDark, setIsDark] = useState(true)
-  const [loading, setLoading] = useState(true)
-  const [loadingMore, setLoadingMore] = useState(false)
-  const [hasMore, setHasMore] = useState(true)
-
-  // Load conversations on mount
-  useEffect(() => {
-    const initialLimit = 50
-    fetchConversations(initialLimit, 0)
-      .then((data) => {
-        const convos = data.map((c) => toConversation(c))
-        setConversations(convos)
-        setHasMore(data.length === initialLimit)
-        // Use functional update to avoid dependency on selectedId
-        setSelectedId((prev) => (convos.length > 0 && !prev ? convos[0].id : prev))
-      })
-      .catch(console.error)
-      .finally(() => setLoading(false))
-  }, [])
-
-  // Load more conversations
-  const handleLoadMore = () => {
-    if (loadingMore || !hasMore) return
-
-    setLoadingMore(true)
-    const offset = conversations.length
-    const limit = 50
-
-    fetchConversations(limit, offset)
-      .then((data) => {
-        if (data.length === 0) {
-          setHasMore(false)
-          return
-        }
-
-        const newConvos = data.map((c) => toConversation(c))
-        // Filter out duplicates by ID
-        const existingIds = new Set(conversations.map((c) => c.id))
-        const uniqueNewConvos = newConvos.filter((c) => !existingIds.has(c.id))
-
-        if (uniqueNewConvos.length > 0) {
-          setConversations((prev) => [...prev, ...uniqueNewConvos])
-        }
-
-        // If we got fewer results than requested, we've reached the end
-        setHasMore(data.length === limit && uniqueNewConvos.length > 0)
-      })
-      .catch(console.error)
-      .finally(() => setLoadingMore(false))
-  }
-
-  // Load messages when selection changes
-  useEffect(() => {
-    if (!selectedId) return
-
-    const loadMessages = () => {
-      fetchMessages(Number(selectedId), 100)
-        .then((data) => {
-          const messages = data.map(toMessage).reverse() // API returns desc, we want asc
-          setConversations((prev) =>
-            prev.map((c) => (c.id === selectedId ? { ...c, messages } : c))
-          )
-        })
-        .catch(console.error)
-    }
-
-    // Load immediately
-    loadMessages()
-
-    // Auto-refresh every 500ms for near-instant message updates
-    const interval = setInterval(loadMessages, 500)
-
-    return () => clearInterval(interval)
-  }, [selectedId])
 
   useEffect(() => {
     document.documentElement.classList.toggle('dark', isDark)
   }, [isDark])
 
   const selectedConversation = conversations.find((c) => c.id === selectedId) || null
-
-  const handleSendMessage = async (chatId: number, text: string) => {
-    const result = await sendMessage(chatId, text)
-    if (!result.success) {
-      throw new Error(result.error || 'Failed to send message')
-    }
-    // Refresh messages after sending
-    const data = await fetchMessages(chatId, 100)
-    const messages = data.map(toMessage).reverse()
-    setConversations((prev) => prev.map((c) => (c.id === String(chatId) ? { ...c, messages } : c)))
-  }
 
   if (loading) {
     return (
