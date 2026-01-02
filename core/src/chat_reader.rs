@@ -30,59 +30,6 @@ impl ChatReader {
             .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(format!("Count error: {}", e)))
     }
 
-    /// Get recent messages.
-    pub fn get_recent_messages(&self, limit: u32) -> PyResult<Vec<Message>> {
-        let mut stmt = self
-            .conn
-            .prepare(
-                "SELECT ROWID, text, date, is_from_me, attributedBody, is_read, date_read
-             FROM message
-             ORDER BY date DESC
-             LIMIT ?",
-            )
-            .map_err(|e| {
-                pyo3::exceptions::PyRuntimeError::new_err(format!("Query error: {}", e))
-            })?;
-
-        let rows = stmt
-            .query_map([limit], |row| {
-                let text: Option<String> = row.get(1)?;
-                let attributed_body: Option<Vec<u8>> = row.get(4)?;
-
-                let final_text = match text {
-                    Some(t) => Some(t),
-                    None => {
-                        attributed_body.and_then(|blob| extract_text_from_attributed_body(&blob))
-                    }
-                };
-
-                let is_read_int: i64 = row.get(5)?;
-                let date_read: Option<i64> = row.get(6)?;
-
-                Ok(Message {
-                    rowid: row.get(0)?,
-                    text: final_text,
-                    date: row.get(2)?,
-                    is_from_me: row.get(3)?,
-                    is_read: is_read_int != 0,
-                    date_read,
-                    handle_id: 0, // Not available in this query
-                    chat_id: None,
-                })
-            })
-            .map_err(|e| {
-                pyo3::exceptions::PyRuntimeError::new_err(format!("Query error: {}", e))
-            })?;
-
-        let mut result = Vec::new();
-        for row in rows {
-            result.push(row.map_err(|e| {
-                pyo3::exceptions::PyRuntimeError::new_err(format!("Row error: {}", e))
-            })?);
-        }
-        Ok(result)
-    }
-
     /// Get all chats (conversations) with their last message.
     pub fn get_all_chats(&self) -> PyResult<Vec<Chat>> {
         let mut stmt = self
