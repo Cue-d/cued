@@ -1,5 +1,7 @@
 # PRM - Personal Relationship Manager
 
+[![CI](https://github.com/snbafana/prm/actions/workflows/ci.yml/badge.svg)](https://github.com/snbafana/prm/actions/workflows/ci.yml)
+
 A local-first personal CRM designed to level up the way you manage and iterate on relationships. PRM provides an iMessage-like interface with powerful augmentations including a Cmd+K command bar, filters, actions, and AI-powered text generation.
 
 ## Overview
