@@ -1,0 +1,5 @@
+{
+  "scripts": {
+    "setup": "cd backend && uv sync && cd .. && VIRTUAL_ENV=backend/.venv maturin develop --manifest-path core/Cargo.toml && cd frontend && pnpm install"
+  }
+}
