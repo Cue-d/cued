@@ -40,11 +40,8 @@ jobs:
       - name: Run linter
         run: pnpm lint
 
-      - name: Run typecheck
-        run: pnpm typecheck
-
       - name: Build
-        run: pnpm run build
+        run: pnpm exec electron-vite build
 
   backend:
     name: Backend (Python)

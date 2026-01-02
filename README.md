@@ -278,3 +278,5 @@ Contributions are welcome! Areas of focus:
 ---
 
 **Note**: This project is for personal use and requires macOS. It directly reads the iMessage database, which is a personal data store. Use responsibly and ensure you have proper backups.
+
+<!-- CI verification -->
