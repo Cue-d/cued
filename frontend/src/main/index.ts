@@ -56,7 +56,7 @@ function startBackend(): Promise<void> {
 function registerIpcHandlers(): void {
   // IPC handlers for API calls
   ipcMain.handle('api:getChats', async (_, limit = 50, offset = 0) => {
-    const res = await fetch(`${API_BASE}/chats?limit=${limit}&offset=${offset}`)
+    const res = await fetch(`${API_BASE}/chats/?limit=${limit}&offset=${offset}`)
     if (!res.ok) throw new Error(`Failed to fetch chats: ${res.status}`)
     return res.json()
   })
@@ -74,6 +74,12 @@ function registerIpcHandlers(): void {
       body: JSON.stringify({ text })
     })
     if (!res.ok) throw new Error(`Failed to send message: ${res.status}`)
+    return res.json()
+  })
+
+  ipcMain.handle('api:getSyncStatus', async () => {
+    const res = await fetch(`${API_BASE}/sync/status`)
+    if (!res.ok) throw new Error(`Failed to fetch sync status: ${res.status}`)
     return res.json()
   })
 }

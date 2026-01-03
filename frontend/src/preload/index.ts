@@ -5,7 +5,9 @@ const api = {
   getChats: (limit?: number, offset?: number) => ipcRenderer.invoke('api:getChats', limit, offset),
   getMessages: (chatId: number, limit?: number) =>
     ipcRenderer.invoke('api:getMessages', chatId, limit),
-  sendMessage: (chatId: number, text: string) => ipcRenderer.invoke('api:sendMessage', chatId, text)
+  sendMessage: (chatId: number, text: string) =>
+    ipcRenderer.invoke('api:sendMessage', chatId, text),
+  getSyncStatus: () => ipcRenderer.invoke('api:getSyncStatus')
 }
 
 // Expose APIs to renderer

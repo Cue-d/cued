@@ -2,17 +2,20 @@
 
 ## What This Is
 
-PRM is a **macOS-only** local-first personal CRM with an iMessage-style interface. It reads directly from the macOS iMessage database (`chat.db`) and uses AppleScript for contacts and message sending.
+PRM is a **macOS-only** local-first personal CRM with an iMessage-style interface. It syncs data from the macOS iMessage database (`chat.db`) to a local app database (`prm.db`) and uses AppleScript for contacts and message sending.
 
 ## Architecture
 
 ```
 Electron (React/TS) ←→ FastAPI (Python) ←→ Rust Core (PyO3) ←→ chat.db / prm.db / Contacts.app
+                                                    ↓
+                                            SyncWatcher (Rust thread)
+                                            sync_db.py (Python)
 ```
 
 - **Frontend**: `frontend/` - Electron + React + TypeScript + Tailwind
-- **Backend**: `backend/` - FastAPI server
-- **Core**: `core/` - Rust with PyO3 bindings for database operations
+- **Backend**: `backend/` - FastAPI server + sync orchestration
+- **Core**: `core/` - Rust with PyO3 bindings for database operations + background sync
 
 ## Quick Start
 
@@ -20,12 +23,14 @@ Electron (React/TS) ←→ FastAPI (Python) ←→ Rust Core (PyO3) ←→ chat.
 # Setup (from root)
 cd backend && uv sync && cd .. && VIRTUAL_ENV=backend/.venv maturin develop --manifest-path core/Cargo.toml && cd frontend && pnpm install
 
-# Run backend
+# Run backend (auto-syncs on first launch)
 cd backend && uv run uvicorn main:app --reload
 
 # Run frontend (separate terminal)
 cd frontend && pnpm dev
 ```
+
+Note: Initial sync runs automatically on first launch (syncs chat.db → prm.db). Subsequent launches skip blocking sync if data exists.
 
 ## Key Files
 
@@ -33,11 +38,15 @@ cd frontend && pnpm dev
 |---------|-------|
 | Conversations UI | `frontend/src/renderer/src/components/ConversationList.tsx` |
 | Message Thread | `frontend/src/renderer/src/components/MessageThread.tsx` |
+| Sync Status | `frontend/src/renderer/src/components/SyncIndicator.tsx`, `hooks/useSyncStatus.ts` |
 | Command Palette (Cmd+K) | `frontend/src/renderer/src/components/CommandMenu.tsx` |
 | shadcn UI primitives | `frontend/src/renderer/src/components/ui/` |
 | API client | `frontend/src/renderer/src/api/client.ts` |
 | Backend API | `backend/main.py` |
+| Full Sync (Python) | `backend/sync_db.py` |
 | iMessage reading | `core/src/chat_reader.rs` |
+| App DB (prm.db) | `core/src/app_db.rs` |
+| Background Sync (Rust) | `core/src/sync_watcher.rs` |
 | Message sending | `core/src/messaging.rs` |
 
 ## Behaviors
@@ -58,9 +67,12 @@ cd frontend && pnpm dev
 
 | Method | Path | Description |
 |--------|------|-------------|
-| GET | `/conversations` | List conversations (limit/offset) |
-| GET | `/conversations/{id}/messages` | Get messages (limit param) |
-| POST | `/conversations/{id}/messages` | Send message (`{"text": "..."}`) |
+| GET | `/chats` | List chats with last message |
+| GET | `/chats/{id}/messages` | Get messages (limit param) |
+| GET | `/chats/{id}/participants` | Get chat participants |
+| POST | `/chats/{id}/messages` | Send message (`{"text": "..."}`) |
+| GET | `/sync/status` | Get sync status |
+| POST | `/sync` | Trigger manual sync |
 
 ## Keyboard Shortcuts
 
@@ -74,7 +86,8 @@ cd frontend && pnpm dev
 |---------|----------|
 | "Error accessing messages database" | Grant Full Disk Access to terminal/IDE |
 | "Cannot import core" | Run `VIRTUAL_ENV=backend/.venv maturin develop --manifest-path core/Cargo.toml` from root |
-| Contact names not resolving | Run `cd backend && uv run python sync_contacts.py` |
+| Contact names not resolving | Restart backend to trigger full sync, or POST `/sync` |
+| Stale contact names | Delete `~/.prm/contacts_cache.json` and restart backend |
 
 ## Testing
 

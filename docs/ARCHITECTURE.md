@@ -4,16 +4,18 @@ This document contains detailed architectural information about the PRM codebase
 
 ## Project Overview
 
-PRM is a **macOS-only** local-first personal CRM that provides an iMessage-style interface for managing conversations. It directly reads from the macOS iMessage database (`chat.db`) and uses AppleScript for contact resolution and message sending.
+PRM is a **macOS-only** local-first personal CRM that provides an iMessage-style interface for managing conversations. It syncs data from the macOS iMessage database (`chat.db`) to a local app database (`prm.db`) and uses AppleScript for contact resolution and message sending.
 
 ### Key Features
 - iMessage-style UI with familiar conversation list and message thread
-- Real-time message sync via polling
-- Contact resolution from macOS Contacts app
+- Real-time message sync via background Rust watcher (500ms polling)
+- Data mirrored from chat.db to prm.db (source of truth)
+- Contact resolution from macOS Contacts app with caching
 - Message sending via AppleScript
 - Dark/light theme support
 - Command palette (Cmd+K) for quick actions and conversation search
 - Local-first architecture (all data stays on your machine)
+- Sync status indicator in UI
 
 ## Architecture Diagram
 
@@ -43,6 +45,16 @@ PRM is a **macOS-only** local-first personal CRM that provides an iMessage-style
 2. **Backend**: FastAPI (Python) - API and orchestration layer
 3. **Core**: Rust with PyO3 bindings - High-performance database operations
 
+### Sync Architecture
+The app mirrors data from chat.db (iMessage) to prm.db (app database) for:
+- Pre-computed display names and contact resolution
+- Faster queries (no runtime contact lookups)
+- Extensibility (can add app-specific metadata)
+
+Two sync mechanisms work together:
+1. **Full Sync** (`sync_db.py`): Python-based sync for people, chats, and bulk data
+2. **Background Watcher** (`SyncWatcher`): Rust background thread for near-real-time message/attachment sync (polls every 500ms)
+
 ## Repository Structure
 
 ```
@@ -50,23 +62,23 @@ prm/
 ├── core/                          # Rust crate with PyO3 bindings
 │   ├── src/
 │   │   ├── lib.rs                 # PyO3 module entry point
-│   │   ├── models.rs              # Data structures (Message, Contact, Chat, Handle)
+│   │   ├── models.rs              # Data structures (Person, PrmChat, PrmMessage, SyncMessage, etc.)
 │   │   ├── chat_reader.rs         # iMessage chat.db reader (read-only SQLite)
-│   │   ├── app_db.rs              # prm.db management (contacts storage)
+│   │   ├── app_db.rs              # prm.db management (people, chats, messages, attachments)
+│   │   ├── sync_watcher.rs        # Background sync watcher (Rust thread, 500ms polling)
 │   │   ├── contacts.rs            # AppleScript Contacts.app integration
 │   │   ├── messaging.rs           # AppleScript message sending
-│   │   └── utils.rs               # Phone/email normalization, timestamp conversion
+│   │   └── utils.rs               # Phone/email normalization, timestamp conversion, text extraction
 │   └── Cargo.toml
 │
 ├── backend/                       # FastAPI application
-│   ├── main.py                    # FastAPI app entry point
+│   ├── main.py                    # FastAPI app entry point, sync status, lifespan
+│   ├── sync_db.py                 # Full sync from chat.db to prm.db (people, chats, messages)
 │   ├── routers/
-│   │   └── conversations.py       # Conversation endpoints
+│   │   └── chats.py               # Chat endpoints (renamed from conversations.py)
 │   ├── schemas.py                 # Pydantic response models
-│   ├── services.py                # HandleResolver for contact resolution
-│   ├── sync_contacts.py           # Contact sync from Contacts.app to prm.db
 │   ├── tests/
-│   │   ├── conftest.py            # Test fixtures (mocked ChatReader, etc.)
+│   │   ├── conftest.py            # Test fixtures (mocked AppDb, etc.)
 │   │   └── test_api.py            # API endpoint tests
 │   └── pyproject.toml
 │
@@ -79,12 +91,17 @@ prm/
 │   │       ├── components/
 │   │       │   ├── ConversationList.tsx  # Sidebar with conversations
 │   │       │   ├── MessageThread.tsx     # Messages and input
+│   │       │   ├── SyncIndicator.tsx     # Sync status indicator
 │   │       │   ├── Avatar.tsx            # Contact/group avatars
 │   │       │   ├── ThemeToggle.tsx       # Dark/light mode
 │   │       │   ├── CommandMenu.tsx       # Cmd+K command palette
 │   │       │   └── ui/                   # shadcn/ui components
 │   │       │       ├── command.tsx       # Command palette primitives
 │   │       │       └── dialog.tsx        # Dialog primitives
+│   │       ├── hooks/
+│   │       │   ├── index.ts              # Hook exports
+│   │       │   ├── useChats.ts           # Chat data hook with background sync trigger
+│   │       │   └── useSyncStatus.ts      # Sync status polling hook
 │   │       ├── __tests__/         # Vitest tests
 │   │       │   ├── setup.ts             # Test setup (jest-dom)
 │   │       │   ├── Avatar.test.tsx      # Avatar component tests
@@ -128,15 +145,14 @@ cd .. && VIRTUAL_ENV=backend/.venv maturin develop --manifest-path core/Cargo.to
 # 3. Install frontend dependencies
 cd frontend && pnpm install
 
-# 4. Sync contacts from Contacts.app (one-time, from backend directory)
-cd ../backend && uv run python sync_contacts.py
+# 4. Start the backend API server (auto-syncs on first launch)
+cd ../backend && uv run uvicorn main:app --reload
 
-# 5. Start the backend API server
-uv run uvicorn main:app --reload
-
-# 6. Start the Electron frontend (in a separate terminal)
+# 5. Start the Electron frontend (in a separate terminal)
 cd frontend && pnpm dev
 ```
+
+Note: Initial sync happens automatically on first launch. The backend syncs data from chat.db → prm.db (people, chats, messages). Subsequent launches skip blocking sync if data exists.
 
 ### Verification Commands
 
@@ -157,22 +173,25 @@ cd ../frontend && pnpm lint
 
 ### Database Access Strategy
 - **chat.db** (iMessage): Opened **read-only** to avoid locking conflicts with Messages.app
-- **prm.db** (App): Stores contacts cache only - no message duplication
-- All message data is queried directly from chat.db
+- **prm.db** (App): Source of truth - stores synced people, chats, messages, attachments
+- All API queries read from prm.db for fast, pre-resolved data
+- Sync copies data from chat.db → prm.db with contact resolution at sync time
 
 ### Contact Resolution
-- Contacts are synced from Contacts.app via AppleScript into prm.db
-- HandleResolver builds a normalized phone/email → contact name lookup
+- Contacts are fetched from Contacts.app via AppleScript and cached in `~/.prm/contacts_cache.json` (1-hour TTL)
+- Names are resolved during sync and stored in prm.db's `people` table
 - Phone normalization: digits only (handles +1, formatting)
 - Email normalization: lowercase
+- Display names are pre-computed for chats (group: "Soham, Aaron, Jay +2")
 
 ### Message Sending
 - Uses AppleScript to interface with Messages.app
 - Separate paths for 1:1 messages (by phone/email) and group chats (by chat identifier)
 
 ### Real-Time Updates
-- Frontend polls backend every 500ms for message updates
-- WebSocket support is planned but not yet implemented
+- **Rust Background Watcher**: Polls chat.db every 500ms for new messages/attachments
+- **Python Full Sync**: Runs on startup and can be triggered manually
+- Frontend polls backend for updates (chat list refresh)
 
 ### Timestamp Handling
 - iMessage uses Apple epoch (nanoseconds since Jan 1, 2001)
@@ -184,36 +203,97 @@ cd ../frontend && pnpm lint
 | Method | Path | Description |
 |--------|------|-------------|
 | GET | `/` | Health check - returns `{"message": "PRM API"}` |
-| GET | `/conversations` | List conversations (paginated, limit/offset) |
-| GET | `/conversations/{id}/messages` | Get messages for a conversation (limit param) |
-| POST | `/conversations/{id}/messages` | Send a message (body: `{"text": "..."}`) |
+| GET | `/chats` | List chats with last message (from prm.db) |
+| GET | `/chats/{id}/messages` | Get messages for a chat (limit param) |
+| GET | `/chats/{id}/participants` | Get participants for a chat |
+| POST | `/chats/{id}/messages` | Send a message (body: `{"text": "..."}`) |
+| GET | `/sync/status` | Get current sync status (is_syncing, initial_sync_complete, etc.) |
+| POST | `/sync` | Manually trigger a full sync |
 | GET | `/test/normalize-phone/{phone}` | Debug endpoint for phone normalization |
 
 ## IPC Channels (Electron)
 
 | Channel | Description |
 |---------|-------------|
-| `api:getConversations` | Fetch conversation list |
+| `api:getChats` | Fetch chat list |
 | `api:getMessages` | Fetch messages for a chat |
 | `api:sendMessage` | Send a message |
+| `api:getSyncStatus` | Get sync status |
 
 ## Database Schemas
 
 ### chat.db (iMessage - Read Only)
 Key tables: `message`, `chat`, `handle`, `chat_message_join`, `chat_handle_join`
 
-### prm.db (App Database)
+### prm.db (App Database - Source of Truth)
 ```sql
-CREATE TABLE contacts (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    name TEXT NOT NULL UNIQUE,
-    emails TEXT,        -- JSON array
-    phones TEXT,        -- JSON array
+-- People: Merged handles + contacts (one row per identifier+service)
+CREATE TABLE people (
+    id INTEGER PRIMARY KEY,          -- Same as handle.ROWID
+    identifier TEXT NOT NULL,        -- phone "+12025551234" or email
+    name TEXT NOT NULL,              -- resolved name (contact name or fallback)
+    short_name TEXT,                 -- first name for group display
+    service TEXT NOT NULL,           -- iMessage, SMS
+    is_contact INTEGER NOT NULL,     -- has Apple Contacts entry
+    contact_phones TEXT,             -- JSON array of all phones
+    contact_emails TEXT,             -- JSON array of all emails
     company TEXT,
     notes TEXT,
-    created_at INTEGER NOT NULL,
-    updated_at INTEGER NOT NULL
+    synced_at INTEGER NOT NULL,
+    UNIQUE(identifier, service)
 );
+
+-- Chats: Conversations
+CREATE TABLE chats (
+    id INTEGER PRIMARY KEY,          -- Same as chat.ROWID
+    identifier TEXT NOT NULL,        -- phone/email for 1:1, "chat123" for groups
+    display_name TEXT,               -- user-set name (groups only)
+    computed_name TEXT,              -- pre-computed display name
+    is_group INTEGER NOT NULL,
+    synced_at INTEGER NOT NULL
+);
+
+-- Chat participants (many-to-many)
+CREATE TABLE chat_participants (
+    chat_id INTEGER NOT NULL REFERENCES chats(id),
+    person_id INTEGER NOT NULL REFERENCES people(id),
+    PRIMARY KEY (chat_id, person_id)
+);
+
+-- Messages: Pre-resolved sender
+CREATE TABLE messages (
+    id INTEGER PRIMARY KEY,          -- Same as message.ROWID
+    chat_id INTEGER NOT NULL REFERENCES chats(id),
+    sender_id INTEGER REFERENCES people(id),  -- NULL if is_from_me
+    text TEXT,
+    timestamp INTEGER NOT NULL,      -- Unix timestamp
+    is_from_me INTEGER NOT NULL,
+    is_read INTEGER NOT NULL,
+    read_at INTEGER,                 -- Unix timestamp
+    has_attachments INTEGER NOT NULL DEFAULT 0,
+    synced_at INTEGER NOT NULL
+);
+
+-- Attachments: Metadata only
+CREATE TABLE attachments (
+    id INTEGER PRIMARY KEY,          -- Same as attachment.ROWID
+    message_id INTEGER NOT NULL REFERENCES messages(id),
+    filename TEXT,
+    path TEXT,                       -- full path in ~/Library/Messages/Attachments
+    mime_type TEXT,
+    uti TEXT,                        -- uniform type identifier
+    size INTEGER,                    -- bytes
+    is_outgoing INTEGER NOT NULL,
+    created_at INTEGER,              -- Unix timestamp
+    synced_at INTEGER NOT NULL
+);
+
+-- Sync state tracking
+CREATE TABLE sync_state (
+    key TEXT PRIMARY KEY,
+    value INTEGER NOT NULL
+);
+-- Keys: 'last_message_rowid', 'last_attachment_rowid'
 ```
 
 ## Paths and Locations
@@ -222,8 +302,8 @@ CREATE TABLE contacts (
 |----------|------|
 | iMessage DB | `~/Library/Messages/chat.db` |
 | App DB | `~/.prm/prm.db` |
+| Contacts Cache | `~/.prm/contacts_cache.json` |
 | Backend API | `http://localhost:8000` |
-| Contacts Cache | `~/.prm/cache/` |
 
 ## Dependencies
 
@@ -272,21 +352,34 @@ CREATE TABLE contacts (
 
 ## PyO3 Exports (Rust → Python)
 
-### Data Classes
+### Data Classes (prm.db models)
+| Class | Source | Properties |
+|-------|--------|------------|
+| `Person` | models.rs | id, identifier, name, short_name, service, is_contact, contact_phones, contact_emails, company, notes |
+| `PrmChat` | models.rs | id, identifier, display_name, computed_name, is_group, last_message_text, last_message_timestamp |
+| `PrmMessage` | models.rs | id, chat_id, sender_id, sender_name, text, timestamp, is_from_me, is_read, read_at, has_attachments |
+| `Attachment` | models.rs | id, message_id, filename, path, mime_type, uti, size, is_outgoing, created_at |
+
+### Sync Models (for chat.db → prm.db transfer)
+| Class | Source | Properties |
+|-------|--------|------------|
+| `SyncHandle` | models.rs | id, identifier, service |
+| `SyncChat` | models.rs | id, identifier, display_name, is_group |
+| `SyncMessage` | models.rs | id, chat_id, handle_id, text, timestamp, is_from_me, is_read, read_at, has_attachments |
+| `SyncAttachment` | models.rs | id, message_id, filename, path, mime_type, uti, size, is_outgoing, created_at |
+
+### Legacy Models (backward compatibility)
 | Class | Source | Properties |
 |-------|--------|------------|
 | `Message` | models.rs | rowid, text, date, is_from_me, is_read, date_read, handle_id, chat_id |
-| `Contact` | models.rs | id, name, emails, phones, company, notes, created_at, updated_at |
-| `FetchedContact` | models.rs | name, emails (Vec), phones (Vec), company, notes |
-| `Chat` | models.rs | rowid, chat_identifier, display_name, is_group, last_message_date, last_message_text |
-| `Handle` | models.rs | rowid, id, service |
 | `SendResult` | messaging.rs | success, error, recipient |
 
 ### Database Classes
 | Class | Source | Methods |
 |-------|--------|---------|
-| `ChatReader` | chat_reader.rs | `open(path)`, `count_messages()`, `get_recent_messages(limit)`, `get_all_chats()`, `get_all_handles()`, `get_chat_handles(chat_id)`, `get_chat_messages(chat_id, limit)` |
-| `AppDb` | app_db.rs | `open(path)`, `init_schema()`, `upsert_contacts(contacts)`, `get_all_contacts()`, `contact_count()` |
+| `ChatReader` | chat_reader.rs | `open(path)`, `get_all_chats_for_sync()`, `get_all_handles_for_sync()`, `get_chat_participants_for_sync()`, `get_messages_since(rowid, limit)`, `get_attachments_since(rowid, limit)` |
+| `AppDb` | app_db.rs | `open(path)`, `init_schema()`, `upsert_person(...)`, `upsert_chat(...)`, `insert_messages(...)`, `insert_attachments(...)`, `get_all_chats()`, `get_chat_messages(chat_id, limit)`, `get_chat_participants(chat_id)`, `get_sync_state(key)`, `set_sync_state(key, value)` |
+| `SyncWatcher` | sync_watcher.rs | `new()`, `start(chat_db_path, app_db_path)`, `stop()`, `is_running()` |
 
 ### Functions
 | Function | Source | Purpose |
@@ -294,6 +387,7 @@ CREATE TABLE contacts (
 | `normalize_phone(phone)` | utils.rs | Strip non-numeric chars |
 | `normalize_email(email)` | utils.rs | Lowercase email |
 | `apple_to_unix(timestamp)` | utils.rs | Convert Apple epoch to Unix |
+| `extract_text_from_attributed_body(blob)` | utils.rs | Extract text from NSAttributedString blob |
 | `fetch_all_contact_names()` | contacts.rs | Get names from Contacts.app |
 | `fetch_contacts_by_names(names)` | contacts.rs | Get full contact details |
 | `send_message(recipient, text)` | messaging.rs | Send 1:1 iMessage |
@@ -303,12 +397,20 @@ CREATE TABLE contacts (
 
 | Component | File | Purpose |
 |-----------|------|---------|
-| `App` | App.tsx | Root component, state management, polling |
+| `App` | App.tsx | Root component, state management, sync status |
 | `ConversationList` | components/ConversationList.tsx | Sidebar with infinite scroll |
 | `MessageThread` | components/MessageThread.tsx | Chat view with message bubbles |
+| `SyncIndicator` | components/SyncIndicator.tsx | Animated sync status indicator |
 | `Avatar` | components/Avatar.tsx | Contact/group avatars with initials |
 | `ThemeToggle` | components/ThemeToggle.tsx | Dark/light mode switch |
 | `CommandMenu` | components/CommandMenu.tsx | Cmd+K command palette |
+
+### Custom Hooks
+
+| Hook | File | Purpose |
+|------|------|---------|
+| `useChats` | hooks/useChats.ts | Fetch chats, trigger background sync |
+| `useSyncStatus` | hooks/useSyncStatus.ts | Poll sync status, track initial sync completion |
 
 ### shadcn/ui Components
 
@@ -458,19 +560,21 @@ Notes:
 ### Frontend
 - **Search not implemented**: UI present but no filtering logic (use Cmd+K for conversation search)
 - **New message button non-functional**: SquarePen button has no handler
-- **Polling aggressive**: 500ms interval (could be reduced for production)
 - **No virtual scrolling**: All messages rendered (may lag with large histories)
 - **Unread status**: Shows indicator but doesn't mark as read on view
 
 ### Core (Rust)
 - **Unused dependencies**: `chrono` and `plist` crates are imported but never used
-- **Unused method**: `get_recent_messages()` exists but is not called by the app
 - **Crate naming**: Named `core` which shadows Rust's std `core` - doctests disabled to avoid conflicts
+
+### Sync
+- **FK constraints disabled in watcher**: Background watcher disables FK constraints to avoid errors when messages arrive for chats not yet synced
+- **Contacts cache TTL**: 1-hour cache may show stale contact names until next full sync
 
 ### General
 - **No WebSocket**: Real-time updates use polling, not WebSocket
 - **No message deletion/editing**: Not supported
-- **No attachments**: Images, links, etc. not yet implemented
+- **Attachments metadata only**: Attachment records are synced but display is not yet implemented
 
 ## Future Features (from docs/DiscoverabilityLayer.md)
 - Semantic search with embeddings (sqlite-vec)

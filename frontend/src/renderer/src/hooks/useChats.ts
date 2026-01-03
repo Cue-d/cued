@@ -41,19 +41,39 @@ export function useChats(): UseChatsReturn {
   const [loadingMore, setLoadingMore] = useState(false)
   const [hasMore, setHasMore] = useState(true)
 
-  // Load chats on mount
+  // Load chats on mount and poll for updates
   useEffect(() => {
     const initialLimit = 50
-    fetchChats(initialLimit, 0)
-      .then((data) => {
-        const loadedChats = data.map((c) => toChat(c))
-        setChats(loadedChats)
-        setHasMore(data.length === initialLimit)
-        // Use functional update to avoid dependency on selectedId
-        setSelectedId((prev) => (loadedChats.length > 0 && !prev ? loadedChats[0].id : prev))
-      })
-      .catch(console.error)
-      .finally(() => setLoading(false))
+
+    const loadChats = (isInitial = false) => {
+      fetchChats(initialLimit, 0)
+        .then((data) => {
+          const loadedChats = data.map((c) => toChat(c))
+          // Preserve messages from existing chats
+          setChats((prev) => {
+            const prevMap = new Map(prev.map((c) => [c.id, c]))
+            return loadedChats.map((c) => ({
+              ...c,
+              messages: prevMap.get(c.id)?.messages || []
+            }))
+          })
+          setHasMore(data.length === initialLimit)
+          if (isInitial) {
+            setSelectedId((prev) => (loadedChats.length > 0 && !prev ? loadedChats[0].id : prev))
+          }
+        })
+        .catch(console.error)
+        .finally(() => {
+          if (isInitial) setLoading(false)
+        })
+    }
+
+    // Initial load
+    loadChats(true)
+
+    // Poll for updates every 1 second (Rust watcher syncs messages every 500ms)
+    const interval = setInterval(() => loadChats(false), 1000)
+    return () => clearInterval(interval)
   }, [])
 
   // Load more chats

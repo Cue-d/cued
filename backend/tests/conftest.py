@@ -5,54 +5,70 @@ import pytest
 from fastapi.testclient import TestClient
 
 
-class MockChat:
-    """Mock for core.Chat returned by ChatReader."""
+class MockPrmChat:
+    """Mock for core.PrmChat returned by AppDb."""
 
     def __init__(
         self,
-        rowid: int,
-        chat_identifier: str,
+        id: int,
+        identifier: str,
         display_name: str | None,
+        computed_name: str | None,
         is_group: bool,
         last_message_text: str | None,
-        last_message_date: int,
+        last_message_timestamp: int | None,
     ):
-        self.rowid = rowid
-        self.chat_identifier = chat_identifier
+        self.id = id
+        self.identifier = identifier
         self.display_name = display_name
+        self.computed_name = computed_name
         self.is_group = is_group
         self.last_message_text = last_message_text
-        self.last_message_date = last_message_date
+        self.last_message_timestamp = last_message_timestamp
 
 
-class MockHandle:
-    """Mock for core.Handle returned by ChatReader."""
+class MockPerson:
+    """Mock for core.Person returned by AppDb."""
 
-    def __init__(self, rowid: int, id: str):
-        self.rowid = rowid
+    def __init__(self, id: int, identifier: str, name: str, short_name: str | None = None):
         self.id = id
+        self.identifier = identifier
+        self.name = name
+        self.short_name = short_name or name.split()[0]
+        self.service = "iMessage"
+        self.is_contact = True
+        self.contact_phones = None
+        self.contact_emails = None
+        self.company = None
+        self.notes = None
 
 
-class MockMessage:
-    """Mock for core.Message returned by ChatReader."""
+class MockPrmMessage:
+    """Mock for core.PrmMessage returned by AppDb."""
 
     def __init__(
         self,
-        rowid: int,
+        id: int,
+        chat_id: int,
+        sender_id: int | None,
+        sender_name: str | None,
         text: str | None,
-        date: int,
+        timestamp: int,
         is_from_me: bool,
         is_read: bool,
-        date_read: int | None,
-        handle_id: int | None,
+        read_at: int | None,
+        has_attachments: bool = False,
     ):
-        self.rowid = rowid
+        self.id = id
+        self.chat_id = chat_id
+        self.sender_id = sender_id
+        self.sender_name = sender_name
         self.text = text
-        self.date = date
+        self.timestamp = timestamp
         self.is_from_me = is_from_me
         self.is_read = is_read
-        self.date_read = date_read
-        self.handle_id = handle_id
+        self.read_at = read_at
+        self.has_attachments = has_attachments
 
 
 class MockSendResult:
@@ -64,100 +80,110 @@ class MockSendResult:
 
 
 @pytest.fixture
-def mock_chat_reader() -> MagicMock:
-    """Create a mock ChatReader with sample data."""
-    reader = MagicMock()
+def mock_app_db() -> MagicMock:
+    """Create a mock AppDb with sample data."""
+    db = MagicMock()
 
     # Sample chats
-    reader.get_all_chats.return_value = [
-        MockChat(
-            rowid=1,
-            chat_identifier="+11234567890",
+    db.get_all_chats.return_value = [
+        MockPrmChat(
+            id=1,
+            identifier="+11234567890",
             display_name=None,
+            computed_name="John Doe",
             is_group=False,
             last_message_text="Hello!",
-            last_message_date=700000000000000000,  # Apple timestamp
+            last_message_timestamp=700000000,  # Unix timestamp
         ),
-        MockChat(
-            rowid=2,
-            chat_identifier="chat123456789",
+        MockPrmChat(
+            id=2,
+            identifier="chat123456789",
             display_name="Family Group",
+            computed_name="Family Group",
             is_group=True,
             last_message_text="See you tomorrow",
-            last_message_date=700000000000000000,
+            last_message_timestamp=700000000,
         ),
     ]
 
-    # Sample handles by chat_id
-    def get_chat_handles(chat_id: int) -> list[MockHandle]:
+    # Sample participants by chat_id
+    def get_chat_participants(chat_id: int) -> list[MockPerson]:
         if chat_id == 1:
-            return [MockHandle(rowid=1, id="+11234567890")]
+            return [MockPerson(id=1, identifier="+11234567890", name="John Doe")]
         if chat_id == 2:
             return [
-                MockHandle(rowid=1, id="+11234567890"),
-                MockHandle(rowid=2, id="+10987654321"),
+                MockPerson(id=1, identifier="+11234567890", name="John Doe"),
+                MockPerson(id=2, identifier="+10987654321", name="Jane Smith"),
             ]
         return []
 
-    reader.get_chat_handles.side_effect = get_chat_handles
+    db.get_chat_participants.side_effect = get_chat_participants
 
-    # All handles
-    reader.get_all_handles.return_value = [
-        MockHandle(rowid=1, id="+11234567890"),
-        MockHandle(rowid=2, id="+10987654321"),
-    ]
+    # Get single chat
+    def get_chat(chat_id: int) -> MockPrmChat | None:
+        chats = {
+            1: MockPrmChat(
+                id=1,
+                identifier="+11234567890",
+                display_name=None,
+                computed_name="John Doe",
+                is_group=False,
+                last_message_text="Hello!",
+                last_message_timestamp=700000000,
+            ),
+            2: MockPrmChat(
+                id=2,
+                identifier="chat123456789",
+                display_name="Family Group",
+                computed_name="Family Group",
+                is_group=True,
+                last_message_text="See you tomorrow",
+                last_message_timestamp=700000000,
+            ),
+        }
+        return chats.get(chat_id)
+
+    db.get_chat.side_effect = get_chat
 
     # Sample messages
-    reader.get_chat_messages.return_value = [
-        MockMessage(
-            rowid=1,
+    db.get_chat_messages.return_value = [
+        MockPrmMessage(
+            id=1,
+            chat_id=1,
+            sender_id=1,
+            sender_name="John Doe",
             text="Hello!",
-            date=700000000000000000,
+            timestamp=700000000,
             is_from_me=False,
             is_read=True,
-            date_read=700000000000000001,
-            handle_id=1,
+            read_at=700000001,
         ),
-        MockMessage(
-            rowid=2,
+        MockPrmMessage(
+            id=2,
+            chat_id=1,
+            sender_id=None,
+            sender_name=None,
             text="Hi there!",
-            date=700000000000000002,
+            timestamp=700000002,
             is_from_me=True,
             is_read=True,
-            date_read=None,
-            handle_id=None,
+            read_at=None,
         ),
     ]
 
-    return reader
+    return db
 
 
 @pytest.fixture
-def mock_handle_resolver() -> MagicMock:
-    """Create a mock HandleResolver."""
-    resolver = MagicMock()
-
-    def resolve(handle: str) -> str | None:
-        contacts = {
-            "+11234567890": "John Doe",
-            "+10987654321": "Jane Smith",
-        }
-        return contacts.get(handle)
-
-    resolver.resolve.side_effect = resolve
-    return resolver
-
-
-@pytest.fixture
-def client(
-    mock_chat_reader: MagicMock, mock_handle_resolver: MagicMock
-) -> Generator[TestClient, None, None]:
+def client(mock_app_db: MagicMock) -> Generator[TestClient, None, None]:
     """Create a test client with mocked dependencies."""
     with (
-        patch("routers.chats.get_chat_reader", return_value=mock_chat_reader),
-        patch("routers.chats.get_handle_resolver", return_value=mock_handle_resolver),
+        patch("routers.chats.get_app_db", return_value=mock_app_db),
+        patch("routers.chats.trigger_background_sync", None),
+        patch("main.run_sync"),  # Skip sync on startup
+        patch("main.has_existing_data", return_value=True),  # Pretend data exists
+        patch("main.trigger_background_sync"),  # Don't trigger background sync
         patch("core.normalize_phone", side_effect=lambda x: x.replace("+", "")),
-        patch("core.apple_to_unix", side_effect=lambda x: x // 1000000000),
         patch(
             "core.send_message",
             return_value=MockSendResult(success=True),

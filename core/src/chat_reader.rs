@@ -3,7 +3,8 @@
 use pyo3::prelude::*;
 use rusqlite::{Connection, OpenFlags};
 
-use crate::models::{Chat, Handle, Message};
+use crate::models::{Chat, Handle, Message, SyncAttachment, SyncChat, SyncHandle, SyncMessage};
+use crate::utils::{apple_to_unix, extract_text_from_attributed_body};
 
 /// iMessage database reader.
 #[pyclass(unsendable)]
@@ -198,82 +199,240 @@ impl ChatReader {
         }
         Ok(result)
     }
-}
 
-/// Extract text from an attributedBody blob (Apple's typedstream format).
-fn extract_text_from_attributed_body(blob: &[u8]) -> Option<String> {
-    let ns_string = b"NSString";
-    let pos = blob.windows(ns_string.len()).position(|w| w == ns_string)?;
+    // ============================================
+    // SYNC METHODS - For syncing to prm.db
+    // ============================================
 
-    let search_start = pos + ns_string.len();
-    let after_marker = &blob[search_start..];
+    /// Get all handles for syncing to prm.db.
+    pub fn get_all_handles_for_sync(&self) -> PyResult<Vec<SyncHandle>> {
+        let mut stmt = self
+            .conn
+            .prepare("SELECT ROWID, id, service FROM handle ORDER BY ROWID")
+            .map_err(|e| {
+                pyo3::exceptions::PyRuntimeError::new_err(format!("Query error: {}", e))
+            })?;
 
-    for i in 0..after_marker.len().saturating_sub(6) {
-        let first_byte = after_marker.get(i);
-        if (first_byte == Some(&0x94) || first_byte == Some(&0x95))
-            && after_marker.get(i + 1) == Some(&0x84)
-            && after_marker.get(i + 2) == Some(&0x01)
-            && after_marker.get(i + 3) == Some(&0x2B)
-        {
-            let (len_bytes_consumed, text_len) = decode_length(&after_marker[i + 4..])?;
-            let text_start = i + 4 + len_bytes_consumed;
+        let rows = stmt
+            .query_map([], |row| {
+                Ok(SyncHandle {
+                    id: row.get(0)?,
+                    identifier: row.get(1)?,
+                    service: row.get(2)?,
+                })
+            })
+            .map_err(|e| {
+                pyo3::exceptions::PyRuntimeError::new_err(format!("Query error: {}", e))
+            })?;
 
-            if text_start + text_len <= after_marker.len() {
-                let text_bytes = &after_marker[text_start..text_start + text_len];
-                if let Ok(text) = std::str::from_utf8(text_bytes) {
-                    let trimmed = text.trim();
-                    if !trimmed.is_empty()
-                        && !trimmed.starts_with("NS")
-                        && !trimmed.starts_with("_NS")
-                        && !trimmed.contains("AttributeName")
-                    {
-                        let filtered: String =
-                            trimmed.chars().filter(|&c| c != '\u{FFFC}').collect();
-                        if !filtered.is_empty() {
-                            return Some(filtered);
-                        } else {
-                            return Some("[attachment]".to_string());
-                        }
-                    }
-                }
-            }
+        let mut result = Vec::new();
+        for row in rows {
+            result.push(row.map_err(|e| {
+                pyo3::exceptions::PyRuntimeError::new_err(format!("Row error: {}", e))
+            })?);
         }
+        Ok(result)
     }
 
-    None
-}
+    /// Get all chats for syncing to prm.db.
+    pub fn get_all_chats_for_sync(&self) -> PyResult<Vec<SyncChat>> {
+        let mut stmt = self
+            .conn
+            .prepare(
+                "SELECT c.ROWID, c.chat_identifier, c.display_name,
+                        (SELECT COUNT(*) FROM chat_handle_join WHERE chat_id = c.ROWID) as participant_count
+                 FROM chat c
+                 ORDER BY c.ROWID",
+            )
+            .map_err(|e| {
+                pyo3::exceptions::PyRuntimeError::new_err(format!("Query error: {}", e))
+            })?;
 
-/// Decode a variable-length integer used in Apple's typedstream format.
-fn decode_length(data: &[u8]) -> Option<(usize, usize)> {
-    let first = *data.first()?;
+        let rows = stmt
+            .query_map([], |row| {
+                let participant_count: i64 = row.get(3)?;
+                Ok(SyncChat {
+                    id: row.get(0)?,
+                    identifier: row.get(1)?,
+                    display_name: row.get(2)?,
+                    is_group: participant_count > 1, // Group = multiple participants
+                })
+            })
+            .map_err(|e| {
+                pyo3::exceptions::PyRuntimeError::new_err(format!("Query error: {}", e))
+            })?;
 
-    if first < 0x80 {
-        Some((1, first as usize))
-    } else if first == 0x81 {
-        let b1 = *data.get(1)? as usize;
-        let b2 = *data.get(2)? as usize;
-        Some((3, b1 | (b2 << 8)))
-    } else if first == 0x82 {
-        let b1 = *data.get(1)? as usize;
-        let b2 = *data.get(2)? as usize;
-        let b3 = *data.get(3)? as usize;
-        Some((4, b1 | (b2 << 8) | (b3 << 16)))
-    } else if first == 0x83 {
-        let b1 = *data.get(1)? as usize;
-        let b2 = *data.get(2)? as usize;
-        let b3 = *data.get(3)? as usize;
-        let b4 = *data.get(4)? as usize;
-        Some((5, b1 | (b2 << 8) | (b3 << 16) | (b4 << 24)))
-    } else {
-        None
+        let mut result = Vec::new();
+        for row in rows {
+            result.push(row.map_err(|e| {
+                pyo3::exceptions::PyRuntimeError::new_err(format!("Row error: {}", e))
+            })?);
+        }
+        Ok(result)
+    }
+
+    /// Get all chat-handle participant pairs for syncing.
+    pub fn get_chat_participants_for_sync(&self) -> PyResult<Vec<(i64, i64)>> {
+        let mut stmt = self
+            .conn
+            .prepare("SELECT chat_id, handle_id FROM chat_handle_join ORDER BY chat_id, handle_id")
+            .map_err(|e| {
+                pyo3::exceptions::PyRuntimeError::new_err(format!("Query error: {}", e))
+            })?;
+
+        let rows = stmt
+            .query_map([], |row| {
+                let chat_id: i64 = row.get(0)?;
+                let handle_id: i64 = row.get(1)?;
+                Ok((chat_id, handle_id))
+            })
+            .map_err(|e| {
+                pyo3::exceptions::PyRuntimeError::new_err(format!("Query error: {}", e))
+            })?;
+
+        let mut result = Vec::new();
+        for row in rows {
+            result.push(row.map_err(|e| {
+                pyo3::exceptions::PyRuntimeError::new_err(format!("Row error: {}", e))
+            })?);
+        }
+        Ok(result)
+    }
+
+    /// Get messages with ROWID > since_rowid for incremental sync.
+    /// Returns messages with timestamps converted to Unix epoch.
+    pub fn get_messages_since(&self, since_rowid: i64, limit: u32) -> PyResult<Vec<SyncMessage>> {
+        // Query messages with their chat_id from the join table
+        let mut stmt = self.conn.prepare(
+            "SELECT m.ROWID, cmj.chat_id, m.handle_id, m.text, m.date, m.is_from_me,
+                    m.is_read, m.date_read, m.attributedBody,
+                    (SELECT COUNT(*) > 0 FROM message_attachment_join maj WHERE maj.message_id = m.ROWID) as has_attachments
+             FROM message m
+             INNER JOIN chat_message_join cmj ON cmj.message_id = m.ROWID
+             WHERE m.ROWID > ?
+             ORDER BY m.ROWID
+             LIMIT ?"
+        ).map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(format!("Query error: {}", e)))?;
+
+        let rows = stmt
+            .query_map([since_rowid, limit as i64], |row| {
+                let text: Option<String> = row.get(3)?;
+                let attributed_body: Option<Vec<u8>> = row.get(8)?;
+                let apple_date: i64 = row.get(4)?;
+                let apple_date_read: Option<i64> = row.get(7)?;
+                let is_read_int: i64 = row.get(6)?;
+                let has_attachments_int: i64 = row.get(9)?;
+
+                // Extract text from attributedBody if text is null
+                let final_text = match text {
+                    Some(t) => Some(t),
+                    None => {
+                        attributed_body.and_then(|blob| extract_text_from_attributed_body(&blob))
+                    }
+                };
+
+                Ok(SyncMessage {
+                    id: row.get(0)?,
+                    chat_id: row.get(1)?,
+                    handle_id: row.get(2)?,
+                    text: final_text,
+                    timestamp: apple_to_unix(apple_date),
+                    is_from_me: row.get(5)?,
+                    is_read: is_read_int != 0,
+                    read_at: apple_date_read.map(apple_to_unix),
+                    has_attachments: has_attachments_int != 0,
+                })
+            })
+            .map_err(|e| {
+                pyo3::exceptions::PyRuntimeError::new_err(format!("Query error: {}", e))
+            })?;
+
+        let mut result = Vec::new();
+        for row in rows {
+            result.push(row.map_err(|e| {
+                pyo3::exceptions::PyRuntimeError::new_err(format!("Row error: {}", e))
+            })?);
+        }
+        Ok(result)
+    }
+
+    /// Get attachments with ROWID > since_rowid for incremental sync.
+    pub fn get_attachments_since(
+        &self,
+        since_rowid: i64,
+        limit: u32,
+    ) -> PyResult<Vec<SyncAttachment>> {
+        let mut stmt = self
+            .conn
+            .prepare(
+                "SELECT a.ROWID, maj.message_id, a.transfer_name, a.filename, a.mime_type,
+                    a.uti, a.total_bytes, a.is_outgoing, a.created_date
+             FROM attachment a
+             INNER JOIN message_attachment_join maj ON maj.attachment_id = a.ROWID
+             WHERE a.ROWID > ?
+             ORDER BY a.ROWID
+             LIMIT ?",
+            )
+            .map_err(|e| {
+                pyo3::exceptions::PyRuntimeError::new_err(format!("Query error: {}", e))
+            })?;
+
+        let rows = stmt
+            .query_map([since_rowid, limit as i64], |row| {
+                let apple_created: Option<i64> = row.get(8)?;
+
+                Ok(SyncAttachment {
+                    id: row.get(0)?,
+                    message_id: row.get(1)?,
+                    filename: row.get(2)?,
+                    path: row.get(3)?,
+                    mime_type: row.get(4)?,
+                    uti: row.get(5)?,
+                    size: row.get(6)?,
+                    is_outgoing: row.get(7)?,
+                    created_at: apple_created.map(apple_to_unix),
+                })
+            })
+            .map_err(|e| {
+                pyo3::exceptions::PyRuntimeError::new_err(format!("Query error: {}", e))
+            })?;
+
+        let mut result = Vec::new();
+        for row in rows {
+            result.push(row.map_err(|e| {
+                pyo3::exceptions::PyRuntimeError::new_err(format!("Row error: {}", e))
+            })?);
+        }
+        Ok(result)
+    }
+
+    /// Get the maximum message ROWID (for determining sync progress).
+    pub fn get_max_message_rowid(&self) -> PyResult<i64> {
+        self.conn
+            .query_row("SELECT COALESCE(MAX(ROWID), 0) FROM message", [], |row| {
+                row.get(0)
+            })
+            .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(format!("Query error: {}", e)))
+    }
+
+    /// Get the maximum attachment ROWID (for determining sync progress).
+    pub fn get_max_attachment_rowid(&self) -> PyResult<i64> {
+        self.conn
+            .query_row(
+                "SELECT COALESCE(MAX(ROWID), 0) FROM attachment",
+                [],
+                |row| row.get(0),
+            )
+            .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(format!("Query error: {}", e)))
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::utils::decode_length;
 
-    // decode_length tests
+    // decode_length tests (testing shared utils)
     #[test]
     fn test_decode_length_single_byte() {
         assert_eq!(decode_length(&[0x05]), Some((1, 5)));

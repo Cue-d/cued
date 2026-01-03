@@ -23,10 +23,19 @@ export interface SendMessageResponse {
   error: string | null
 }
 
+export interface SyncStatusResponse {
+  is_syncing: boolean
+  initial_sync_complete: boolean
+  last_sync_at: number | null
+  last_sync_duration: number | null
+  last_error: string | null
+}
+
 export interface Api {
   getChats: (limit?: number, offset?: number) => Promise<ChatResponse[]>
   getMessages: (chatId: number, limit?: number) => Promise<MessageResponse[]>
   sendMessage: (chatId: number, text: string) => Promise<SendMessageResponse>
+  getSyncStatus: () => Promise<SyncStatusResponse>
 }
 
 declare global {
