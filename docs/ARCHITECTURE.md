@@ -59,8 +59,15 @@ prm/
 │   └── Cargo.toml
 │
 ├── backend/                       # FastAPI application
-│   ├── main.py                    # REST API endpoints, HandleResolver
+│   ├── main.py                    # FastAPI app entry point
+│   ├── routers/
+│   │   └── conversations.py       # Conversation endpoints
+│   ├── schemas.py                 # Pydantic response models
+│   ├── services.py                # HandleResolver for contact resolution
 │   ├── sync_contacts.py           # Contact sync from Contacts.app to prm.db
+│   ├── tests/
+│   │   ├── conftest.py            # Test fixtures (mocked ChatReader, etc.)
+│   │   └── test_api.py            # API endpoint tests
 │   └── pyproject.toml
 │
 ├── frontend/                      # Electron + React
@@ -231,6 +238,9 @@ CREATE TABLE contacts (
 | `uvicorn[standard]` | >=0.40.0 | ASGI server |
 | `pyinstaller` | >=6.17.0 | Binary bundling |
 | `ruff` | >=0.11.0 | Linter/formatter (dev) |
+| `pytest` | >=9.0.0 | Testing framework (dev) |
+| `httpx` | >=0.28.0 | HTTP client for tests (dev) |
+| `pytest-asyncio` | >=1.3.0 | Async test support (dev) |
 
 ### Node (frontend/package.json)
 | Package | Version | Purpose |
@@ -320,6 +330,9 @@ cd core && cargo fmt && cargo clippy
 cd ../backend && uv run ruff check . && uv run ruff format .
 cd ../frontend && pnpm lint && pnpm format
 
+# Testing
+cd backend && uv run pytest -v
+
 # Production Build
 cd frontend && pnpm build:full            # Full build pipeline
 ```
@@ -345,7 +358,7 @@ GitHub Actions runs on PRs and pushes to main (`.github/workflows/ci.yml`):
 | Job | Steps |
 |-----|-------|
 | **Frontend** | pnpm install → lint → electron-vite build |
-| **Backend** | uv sync --dev → ruff check → ruff format --check |
+| **Backend** | uv sync --dev → ruff check → ruff format --check → pytest |
 | **Core** | cargo check → clippy (warnings as errors) → rustfmt --check |
 
 Notes:

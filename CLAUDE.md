@@ -88,3 +88,9 @@ cd backend && uv run ruff check . && uv run ruff format .
 # Core
 cd core && cargo clippy && cargo fmt
 ```
+
+## Testing
+
+```bash
+cd backend && uv run pytest -v
+```
