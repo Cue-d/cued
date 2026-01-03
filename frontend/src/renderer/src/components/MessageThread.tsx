@@ -1,11 +1,11 @@
 import { useState, useRef, useEffect } from 'react'
 import { Info, Mic, Plus } from 'lucide-react'
 import { cn } from '@/lib/utils'
-import { Conversation, Message, formatDateDivider, formatMessageTime } from '@/data/types'
+import { Chat, Message, formatDateDivider, formatMessageTime } from '@/data/types'
 import Avatar from './Avatar'
 
 interface MessageThreadProps {
-  conversation: Conversation | null
+  chat: Chat | null
   onSendMessage?: (chatId: number, text: string) => Promise<void>
 }
 
@@ -72,21 +72,21 @@ const MessageBubble = ({
   )
 }
 
-const MessageThread = ({ conversation, onSendMessage }: MessageThreadProps) => {
+const MessageThread = ({ chat, onSendMessage }: MessageThreadProps) => {
   const [inputText, setInputText] = useState('')
   const [sending, setSending] = useState(false)
   const messagesEndRef = useRef<HTMLDivElement>(null)
 
   // Extract to stable reference for dependency array
-  const messagesLength = conversation?.messages?.length ?? 0
+  const messagesLength = chat?.messages?.length ?? 0
 
-  // Scroll to bottom immediately when conversation changes
+  // Scroll to bottom immediately when chat changes
   useEffect(() => {
-    if (conversation?.id) {
-      // Immediate scroll when switching conversations
+    if (chat?.id) {
+      // Immediate scroll when switching chats
       messagesEndRef.current?.scrollIntoView({ behavior: 'instant' })
     }
-  }, [conversation?.id])
+  }, [chat?.id])
 
   // Smooth scroll when messages update in current conversation
   useEffect(() => {
@@ -96,14 +96,14 @@ const MessageThread = ({ conversation, onSendMessage }: MessageThreadProps) => {
   }, [messagesLength])
 
   const handleSend = async () => {
-    if (!inputText.trim() || !conversation || !onSendMessage || sending) return
+    if (!inputText.trim() || !chat || !onSendMessage || sending) return
 
     const text = inputText.trim()
     setInputText('')
     setSending(true)
 
     try {
-      await onSendMessage(Number(conversation.id), text)
+      await onSendMessage(Number(chat.id), text)
       // Scroll to bottom after sending
       setTimeout(() => {
         messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
@@ -123,17 +123,17 @@ const MessageThread = ({ conversation, onSendMessage }: MessageThreadProps) => {
     }
   }
 
-  if (!conversation) {
+  if (!chat) {
     return (
       <div className="flex-1 min-w-0 h-full bg-imessage-window-bg flex items-center justify-center">
-        <p className="text-muted-foreground">Select a conversation to start messaging</p>
+        <p className="text-muted-foreground">Select a chat to start messaging</p>
       </div>
     )
   }
 
   // Group messages by date
-  const messagesByDate: { [key: string]: typeof conversation.messages } = {}
-  conversation.messages.forEach((msg) => {
+  const messagesByDate: { [key: string]: typeof chat.messages } = {}
+  chat.messages.forEach((msg) => {
     const dateKey = msg.timestamp.toDateString()
     if (!messagesByDate[dateKey]) {
       messagesByDate[dateKey] = []
@@ -147,12 +147,12 @@ const MessageThread = ({ conversation, onSendMessage }: MessageThreadProps) => {
       <div className="h-12 flex items-center justify-between px-4 border-b border-border bg-imessage-header-bg">
         <div className="flex items-center gap-3">
           <Avatar
-            initials={conversation.initials || conversation.name.charAt(0)}
-            isGroup={conversation.isGroup}
-            groupMembers={conversation.groupAvatars}
+            initials={chat.initials || chat.name.charAt(0)}
+            isGroup={chat.isGroup}
+            groupMembers={chat.groupAvatars}
             size="sm"
           />
-          <span className="font-medium text-foreground">{conversation.name}</span>
+          <span className="font-medium text-foreground">{chat.name}</span>
         </div>
         <button className="p-1.5 hover:bg-sidebar-accent rounded transition-colors">
           <Info className="w-5 h-5 text-primary" />
@@ -182,7 +182,7 @@ const MessageThread = ({ conversation, onSendMessage }: MessageThreadProps) => {
                       key={message.id}
                       message={message}
                       showTimestamp={idx === messages.length - 1}
-                      isGroupChat={conversation.isGroup}
+                      isGroupChat={chat.isGroup}
                       showSenderInfo={senderChanged}
                     />
                   )

@@ -154,8 +154,8 @@ def client(
 ) -> Generator[TestClient, None, None]:
     """Create a test client with mocked dependencies."""
     with (
-        patch("routers.conversations.get_chat_reader", return_value=mock_chat_reader),
-        patch("routers.conversations.get_handle_resolver", return_value=mock_handle_resolver),
+        patch("routers.chats.get_chat_reader", return_value=mock_chat_reader),
+        patch("routers.chats.get_handle_resolver", return_value=mock_handle_resolver),
         patch("core.normalize_phone", side_effect=lambda x: x.replace("+", "")),
         patch("core.apple_to_unix", side_effect=lambda x: x // 1000000000),
         patch(

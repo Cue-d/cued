@@ -1,7 +1,7 @@
 import core
 from fastapi import FastAPI
 
-from routers import conversations
+from routers import chats
 
 app = FastAPI()
 
@@ -16,7 +16,7 @@ def normalize_phone(phone: str):
     return {"original": phone, "normalized": core.normalize_phone(phone)}
 
 
-app.include_router(conversations.router, prefix="/conversations")
+app.include_router(chats.router, prefix="/chats")
 
 
 if __name__ == "__main__":

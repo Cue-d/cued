@@ -1,2 +1,2 @@
-export { useConversations, toConversation } from './useConversations'
+export { useChats, toChat } from './useChats'
 export { useMessages, toMessage } from './useMessages'

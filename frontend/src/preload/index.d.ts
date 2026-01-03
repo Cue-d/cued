@@ -1,4 +1,4 @@
-export interface ConversationResponse {
+export interface ChatResponse {
   id: number
   name: string
   last_message: string | null
@@ -24,7 +24,7 @@ export interface SendMessageResponse {
 }
 
 export interface Api {
-  getConversations: (limit?: number, offset?: number) => Promise<ConversationResponse[]>
+  getChats: (limit?: number, offset?: number) => Promise<ChatResponse[]>
   getMessages: (chatId: number, limit?: number) => Promise<MessageResponse[]>
   sendMessage: (chatId: number, text: string) => Promise<SendMessageResponse>
 }

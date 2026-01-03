@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react'
-import { fetchConversations, ConversationResponse } from '@/api/client'
-import { Conversation, Message } from '@/data/types'
+import { fetchChats, ChatResponse } from '@/api/client'
+import { Chat, Message } from '@/data/types'
 
 // Helper to get initials from a name
 const getInitials = (name: string) =>
@@ -12,10 +12,7 @@ const getInitials = (name: string) =>
     .toUpperCase()
 
 // Convert API response to UI model
-export const toConversation = (
-  c: ConversationResponse,
-  messages: Message[] = []
-): Conversation => ({
+export const toChat = (c: ChatResponse, messages: Message[] = []): Chat => ({
   id: String(c.id),
   name: c.name,
   initials: getInitials(c.name),
@@ -26,9 +23,9 @@ export const toConversation = (
   messages
 })
 
-interface UseConversationsReturn {
-  conversations: Conversation[]
-  setConversations: React.Dispatch<React.SetStateAction<Conversation[]>>
+interface UseChatsReturn {
+  chats: Chat[]
+  setChats: React.Dispatch<React.SetStateAction<Chat[]>>
   selectedId: string | null
   setSelectedId: React.Dispatch<React.SetStateAction<string | null>>
   loading: boolean
@@ -37,66 +34,66 @@ interface UseConversationsReturn {
   handleLoadMore: () => void
 }
 
-export function useConversations(): UseConversationsReturn {
-  const [conversations, setConversations] = useState<Conversation[]>([])
+export function useChats(): UseChatsReturn {
+  const [chats, setChats] = useState<Chat[]>([])
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
   const [loadingMore, setLoadingMore] = useState(false)
   const [hasMore, setHasMore] = useState(true)
 
-  // Load conversations on mount
+  // Load chats on mount
   useEffect(() => {
     const initialLimit = 50
-    fetchConversations(initialLimit, 0)
+    fetchChats(initialLimit, 0)
       .then((data) => {
-        const convos = data.map((c) => toConversation(c))
-        setConversations(convos)
+        const loadedChats = data.map((c) => toChat(c))
+        setChats(loadedChats)
         setHasMore(data.length === initialLimit)
         // Use functional update to avoid dependency on selectedId
-        setSelectedId((prev) => (convos.length > 0 && !prev ? convos[0].id : prev))
+        setSelectedId((prev) => (loadedChats.length > 0 && !prev ? loadedChats[0].id : prev))
       })
       .catch(console.error)
       .finally(() => setLoading(false))
   }, [])
 
-  // Load more conversations
+  // Load more chats
   const handleLoadMore = useCallback(async () => {
     if (loadingMore || !hasMore) return
 
     setLoadingMore(true)
-    const offset = conversations.length
+    const offset = chats.length
     const limit = 50
 
     try {
-      const data = await fetchConversations(limit, offset)
+      const data = await fetchChats(limit, offset)
 
       if (data.length === 0) {
         setHasMore(false)
         return
       }
 
-      const newConvos = data.map((c) => toConversation(c))
+      const newChats = data.map((c) => toChat(c))
 
       // Filter duplicates using current state
-      setConversations((prev) => {
+      setChats((prev) => {
         const existingIds = new Set(prev.map((c) => c.id))
-        const uniqueNewConvos = newConvos.filter((c) => !existingIds.has(c.id))
-        return uniqueNewConvos.length > 0 ? [...prev, ...uniqueNewConvos] : prev
+        const uniqueNewChats = newChats.filter((c) => !existingIds.has(c.id))
+        return uniqueNewChats.length > 0 ? [...prev, ...uniqueNewChats] : prev
       })
 
-      // Determine if there are more results - use newConvos length check
-      // since we can't know uniqueNewConvos without accessing state
+      // Determine if there are more results - use newChats length check
+      // since we can't know uniqueNewChats without accessing state
       setHasMore(data.length === limit)
     } catch (error) {
       console.error(error)
     } finally {
       setLoadingMore(false)
     }
-  }, [loadingMore, hasMore, conversations.length])
+  }, [loadingMore, hasMore, chats.length])
 
   return {
-    conversations,
-    setConversations,
+    chats,
+    setChats,
     selectedId,
     setSelectedId,
     loading,

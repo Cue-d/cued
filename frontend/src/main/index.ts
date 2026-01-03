@@ -55,20 +55,20 @@ function startBackend(): Promise<void> {
 // Register IPC handlers
 function registerIpcHandlers(): void {
   // IPC handlers for API calls
-  ipcMain.handle('api:getConversations', async (_, limit = 50, offset = 0) => {
-    const res = await fetch(`${API_BASE}/conversations?limit=${limit}&offset=${offset}`)
-    if (!res.ok) throw new Error(`Failed to fetch conversations: ${res.status}`)
+  ipcMain.handle('api:getChats', async (_, limit = 50, offset = 0) => {
+    const res = await fetch(`${API_BASE}/chats?limit=${limit}&offset=${offset}`)
+    if (!res.ok) throw new Error(`Failed to fetch chats: ${res.status}`)
     return res.json()
   })
 
   ipcMain.handle('api:getMessages', async (_, chatId: number, limit = 100) => {
-    const res = await fetch(`${API_BASE}/conversations/${chatId}/messages?limit=${limit}`)
+    const res = await fetch(`${API_BASE}/chats/${chatId}/messages?limit=${limit}`)
     if (!res.ok) throw new Error(`Failed to fetch messages: ${res.status}`)
     return res.json()
   })
 
   ipcMain.handle('api:sendMessage', async (_, chatId: number, text: string) => {
-    const res = await fetch(`${API_BASE}/conversations/${chatId}/messages`, {
+    const res = await fetch(`${API_BASE}/chats/${chatId}/messages`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ text })

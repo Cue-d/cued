@@ -4,7 +4,7 @@ import core
 from fastapi import APIRouter
 
 from schemas import (
-    ConversationResponse,
+    ChatResponse,
     MessageResponse,
     SendMessageRequest,
     SendMessageResponse,
@@ -39,9 +39,9 @@ def get_handle_map(reader: core.ChatReader) -> dict[int, str]:
     return {h.rowid: h.id for h in handles}
 
 
-@router.get("/", response_model=list[ConversationResponse])
-def get_conversations(limit: int = 50, offset: int = 0):
-    """Get recent conversations with resolved contact names."""
+@router.get("/", response_model=list[ChatResponse])
+def get_chats(limit: int = 50, offset: int = 0):
+    """Get recent chats with resolved contact names."""
     reader = get_chat_reader()
     resolver = get_handle_resolver()
 
@@ -81,7 +81,7 @@ def get_conversations(limit: int = 50, offset: int = 0):
                 name = chat.chat_identifier
 
         result.append(
-            ConversationResponse(
+            ChatResponse(
                 id=chat.rowid,
                 name=name,
                 last_message=chat.last_message_text,
@@ -97,7 +97,7 @@ def get_conversations(limit: int = 50, offset: int = 0):
 
 @router.get("/{chat_id}/messages", response_model=list[MessageResponse])
 def get_messages(chat_id: int, limit: int = 100):
-    """Get messages for a conversation with resolved sender names."""
+    """Get messages for a chat with resolved sender names."""
     reader = get_chat_reader()
     resolver = get_handle_resolver()
     handle_map = get_handle_map(reader)
@@ -134,7 +134,7 @@ def get_messages(chat_id: int, limit: int = 100):
 
 @router.post("/{chat_id}/messages", response_model=SendMessageResponse)
 def send_message(chat_id: int, request: SendMessageRequest):
-    """Send a message to a conversation."""
+    """Send a message to a chat."""
     reader = get_chat_reader()
 
     # Find the chat

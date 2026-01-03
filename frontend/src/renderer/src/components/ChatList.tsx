@@ -1,11 +1,11 @@
 import { Search, SquarePen } from 'lucide-react'
 import { cn } from '@/lib/utils'
-import { Conversation, formatTimestamp } from '@/data/types'
+import { Chat, formatTimestamp } from '@/data/types'
 import Avatar from './Avatar'
 import { useRef, useEffect } from 'react'
 
-interface ConversationListProps {
-  conversations: Conversation[]
+interface ChatListProps {
+  chats: Chat[]
   selectedId: string | null
   onSelect: (id: string) => void
   onLoadMore?: () => void
@@ -13,15 +13,15 @@ interface ConversationListProps {
   loading?: boolean
 }
 
-interface ConversationItemProps {
-  conversation: Conversation
+interface ChatItemProps {
+  chat: Chat
   isSelected: boolean
   onClick: () => void
 }
 
-const ConversationItem = ({ conversation, isSelected, onClick }: ConversationItemProps) => {
-  // Check if conversation has any unread received messages
-  const hasUnread = conversation.messages.some((m) => !m.isSent && !m.isRead)
+const ChatItem = ({ chat, isSelected, onClick }: ChatItemProps) => {
+  // Check if chat has any unread received messages
+  const hasUnread = chat.messages.some((m) => !m.isSent && !m.isRead)
 
   return (
     <button
@@ -38,9 +38,9 @@ const ConversationItem = ({ conversation, isSelected, onClick }: ConversationIte
         <div className="absolute left-1 top-1/2 -translate-y-1/2 w-2 h-2 bg-blue-500 rounded-full" />
       )}
       <Avatar
-        initials={conversation.initials || conversation.name.charAt(0)}
-        isGroup={conversation.isGroup}
-        groupMembers={conversation.groupAvatars}
+        initials={chat.initials || chat.name.charAt(0)}
+        isGroup={chat.isGroup}
+        groupMembers={chat.groupAvatars}
       />
       <div className="flex-1 min-w-0">
         <div className="flex items-center justify-between gap-2">
@@ -50,7 +50,7 @@ const ConversationItem = ({ conversation, isSelected, onClick }: ConversationIte
               isSelected ? 'text-imessage-selected-foreground' : 'text-foreground'
             )}
           >
-            {conversation.name}
+            {chat.name}
           </span>
           <span
             className={cn(
@@ -58,7 +58,7 @@ const ConversationItem = ({ conversation, isSelected, onClick }: ConversationIte
               isSelected ? 'text-imessage-selected-foreground/70' : 'text-imessage-timestamp'
             )}
           >
-            {formatTimestamp(conversation.timestamp)}
+            {formatTimestamp(chat.timestamp)}
           </span>
         </div>
         <p
@@ -67,21 +67,14 @@ const ConversationItem = ({ conversation, isSelected, onClick }: ConversationIte
             isSelected ? 'text-imessage-selected-foreground/80' : 'text-muted-foreground'
           )}
         >
-          {conversation.lastMessage}
+          {chat.lastMessage}
         </p>
       </div>
     </button>
   )
 }
 
-const ConversationList = ({
-  conversations,
-  selectedId,
-  onSelect,
-  onLoadMore,
-  hasMore,
-  loading
-}: ConversationListProps) => {
+const ChatList = ({ chats, selectedId, onSelect, onLoadMore, hasMore, loading }: ChatListProps) => {
   const scrollContainerRef = useRef<HTMLDivElement>(null)
   const loadingRef = useRef(false)
 
@@ -131,15 +124,15 @@ const ConversationList = ({
         </div>
       </div>
 
-      {/* Conversation List */}
+      {/* Chat List */}
       <div ref={scrollContainerRef} className="flex-1 overflow-y-auto scrollbar-thin px-2 pb-2">
         <div className="space-y-0.5">
-          {conversations.map((conversation) => (
-            <ConversationItem
-              key={conversation.id}
-              conversation={conversation}
-              isSelected={selectedId === conversation.id}
-              onClick={() => onSelect(conversation.id)}
+          {chats.map((chat) => (
+            <ChatItem
+              key={chat.id}
+              chat={chat}
+              isSelected={selectedId === chat.id}
+              onClick={() => onSelect(chat.id)}
             />
           ))}
           {loading && (
@@ -153,4 +146,4 @@ const ConversationList = ({
   )
 }
 
-export default ConversationList
+export default ChatList

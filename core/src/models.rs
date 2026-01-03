@@ -94,7 +94,7 @@ impl FetchedContact {
     }
 }
 
-/// iMessage chat/conversation from chat.db.
+/// iMessage chat from chat.db.
 #[pyclass]
 #[derive(Debug, Clone)]
 pub struct Chat {

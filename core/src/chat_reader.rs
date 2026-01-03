@@ -30,7 +30,7 @@ impl ChatReader {
             .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(format!("Count error: {}", e)))
     }
 
-    /// Get all chats (conversations) with their last message.
+    /// Get all chats with their last message.
     pub fn get_all_chats(&self) -> PyResult<Vec<Chat>> {
         let mut stmt = self
             .conn

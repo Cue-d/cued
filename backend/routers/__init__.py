@@ -1,3 +1,3 @@
-from routers import conversations
+from routers import chats
 
-__all__ = ["conversations"]
+__all__ = ["chats"]

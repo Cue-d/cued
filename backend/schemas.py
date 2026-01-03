@@ -1,7 +1,7 @@
 from pydantic import BaseModel
 
 
-class ConversationResponse(BaseModel):
+class ChatResponse(BaseModel):
     id: int
     name: str
     last_message: str | None

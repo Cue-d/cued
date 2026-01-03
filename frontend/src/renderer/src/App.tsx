@@ -1,25 +1,25 @@
 import { useState, useEffect } from 'react'
-import ConversationList from './components/ConversationList'
+import ChatList from './components/ChatList'
 import MessageThread from './components/MessageThread'
 import ThemeToggle from './components/ThemeToggle'
 import { CommandMenu } from './components/CommandMenu'
-import { useConversations, useMessages } from '@/hooks'
+import { useChats, useMessages } from '@/hooks'
 
 function App() {
   const {
-    conversations,
-    setConversations,
+    chats,
+    setChats,
     selectedId,
     setSelectedId,
     loading,
     loadingMore,
     hasMore,
     handleLoadMore
-  } = useConversations()
+  } = useChats()
 
   const { handleSendMessage } = useMessages({
     selectedId,
-    setConversations
+    setChats
   })
 
   const [isDark, setIsDark] = useState(true)
@@ -28,7 +28,7 @@ function App() {
     document.documentElement.classList.toggle('dark', isDark)
   }, [isDark])
 
-  const selectedConversation = conversations.find((c) => c.id === selectedId) || null
+  const selectedChat = chats.find((c) => c.id === selectedId) || null
 
   if (loading) {
     return (
@@ -44,15 +44,15 @@ function App() {
       <div className="absolute top-3 right-3 z-10">
         <ThemeToggle isDark={isDark} onToggle={() => setIsDark(!isDark)} />
       </div>
-      <ConversationList
-        conversations={conversations}
+      <ChatList
+        chats={chats}
         selectedId={selectedId}
         onSelect={setSelectedId}
         onLoadMore={handleLoadMore}
         hasMore={hasMore}
         loading={loadingMore}
       />
-      <MessageThread conversation={selectedConversation} onSendMessage={handleSendMessage} />
+      <MessageThread chat={selectedChat} onSendMessage={handleSendMessage} />
     </div>
   )
 }

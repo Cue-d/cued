@@ -8,7 +8,7 @@ export interface Message {
   senderName?: string | null
 }
 
-export interface Conversation {
+export interface Chat {
   id: string
   name: string
   avatar?: string
