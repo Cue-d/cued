@@ -76,6 +76,13 @@ cd frontend && pnpm dev
 | "Cannot import core" | Run `VIRTUAL_ENV=backend/.venv maturin develop --manifest-path core/Cargo.toml` from root |
 | Contact names not resolving | Run `cd backend && uv run python sync_contacts.py` |
 
+## Testing
+
+```bash
+# Frontend (vitest + testing-library)
+cd frontend && pnpm test
+```
+
 ## Linting
 
 ```bash

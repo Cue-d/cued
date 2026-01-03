@@ -13,9 +13,9 @@ const ThemeToggle = ({ isDark, onToggle }: ThemeToggleProps) => {
       aria-label="Toggle theme"
     >
       {isDark ? (
-        <Sun className="w-4 h-4 text-foreground" />
+        <Sun className="w-4 h-4 text-foreground" data-testid="sun-icon" />
       ) : (
-        <Moon className="w-4 h-4 text-foreground" />
+        <Moon className="w-4 h-4 text-foreground" data-testid="moon-icon" />
       )}
     </button>
   )

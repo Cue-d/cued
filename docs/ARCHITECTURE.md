@@ -85,8 +85,14 @@ prm/
 │   │       │   └── ui/                   # shadcn/ui components
 │   │       │       ├── command.tsx       # Command palette primitives
 │   │       │       └── dialog.tsx        # Dialog primitives
+│   │       ├── __tests__/         # Vitest tests
+│   │       │   ├── setup.ts             # Test setup (jest-dom)
+│   │       │   ├── Avatar.test.tsx      # Avatar component tests
+│   │       │   ├── ThemeToggle.test.tsx # ThemeToggle component tests
+│   │       │   └── utils.test.ts        # Utility function tests
 │   │       ├── api/client.ts      # API client wrapper
 │   │       └── data/types.ts      # TypeScript interfaces
+│   ├── vitest.config.ts           # Vitest configuration
 │   ├── package.json
 │   └── electron-builder.yml
 │
@@ -255,6 +261,10 @@ CREATE TABLE contacts (
 | `tailwind-merge` | ^3.4.0 | Tailwind class merging |
 | `cmdk` | ^1.1.1 | Command palette library |
 | `@radix-ui/react-dialog` | ^1.1.15 | Accessible dialog primitives |
+| `vitest` | ^4.0.16 | Test runner (dev) |
+| `@testing-library/react` | ^16.3.1 | React testing utilities (dev) |
+| `@testing-library/jest-dom` | ^6.9.1 | DOM matchers (dev) |
+| `jsdom` | ^27.4.0 | DOM environment for tests (dev) |
 
 ## PyO3 Exports (Rust → Python)
 
@@ -342,6 +352,7 @@ cd frontend && pnpm build:full            # Full build pipeline
 | Script | Description |
 |--------|-------------|
 | `pnpm dev` | Development mode with hot reload |
+| `pnpm test` | Run vitest tests |
 | `pnpm build` | TypeScript check + electron-vite build |
 | `pnpm lint` | ESLint check |
 | `pnpm format` | Prettier formatting |
@@ -350,6 +361,31 @@ cd frontend && pnpm build:full            # Full build pipeline
 | `pnpm build:mac` | Build for macOS only |
 | `pnpm build:rust` | Build Rust core (maturin release) |
 | `pnpm build:backend` | Build Python backend (pyinstaller) |
+
+## Testing
+
+### Frontend (Vitest)
+
+The frontend uses [Vitest](https://vitest.dev/) with [Testing Library](https://testing-library.com/) for component testing.
+
+**Configuration:** `frontend/vitest.config.ts`
+- Environment: `jsdom` for DOM simulation
+- Setup file: `__tests__/setup.ts` (imports `@testing-library/jest-dom`)
+- Path alias: `@/` resolves to `src/renderer/src/`
+- Test pattern: `src/renderer/src/**/*.test.{ts,tsx}`
+
+**Test Files:**
+| File | Tests | Coverage |
+|------|-------|----------|
+| `Avatar.test.tsx` | 4 | Initials, fallback, sizes, group avatars |
+| `ThemeToggle.test.tsx` | 3 | Icon rendering, click handler |
+| `utils.test.ts` | 3 | `cn()` utility class merging |
+
+**Running Tests:**
+```bash
+cd frontend && pnpm test        # Watch mode
+cd frontend && pnpm test --run  # Single run
+```
 
 ## CI/CD
 
