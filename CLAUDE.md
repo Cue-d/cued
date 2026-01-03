@@ -78,15 +78,15 @@ cd frontend && pnpm dev
 
 ## Testing
 
+| Layer | Framework | Command |
+|-------|-----------|---------|
+| Frontend | Vitest + Testing Library | `cd frontend && pnpm test` |
+| Backend | pytest | `cd backend && uv run pytest -v` |
+| Core | cargo test | `cd core && cargo test` |
+
+**Run all tests from root:**
 ```bash
-# Frontend (vitest + testing-library)
-cd frontend && pnpm test
-
-# Backend (pytest)
-cd backend && uv run pytest -v
-
-# Core (cargo test)
-cd core && cargo test
+cd core && cargo test && cd ../backend && uv run pytest -v && cd ../frontend && pnpm test --run
 ```
 
 ## Linting

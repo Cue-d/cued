@@ -370,20 +370,30 @@ cd frontend && pnpm build:full            # Full build pipeline
 
 ## Testing
 
+### Quick Reference
+
+| Layer | Framework | Command | Test Count |
+|-------|-----------|---------|------------|
+| **Core** | cargo test | `cd core && cargo test` | 26 tests |
+| **Backend** | pytest | `cd backend && uv run pytest -v` | - |
+| **Frontend** | Vitest + Testing Library | `cd frontend && pnpm test --run` | 10 tests |
+
+**Run all tests from root:**
+```bash
+cd core && cargo test && cd ../backend && uv run pytest -v && cd ../frontend && pnpm test --run
+```
+
+---
+
 ### Rust Core Tests
 
-The Rust core has 26 unit tests covering:
+26 unit tests organized by module:
 
-| Module | Tests | Description |
-|--------|-------|-------------|
+| Module | Tests | Coverage |
+|--------|-------|----------|
 | `utils.rs` | 11 | Phone/email normalization, timestamp conversion |
 | `chat_reader.rs` | 11 | Length decoding, text extraction, in-memory SQLite queries |
 | `app_db.rs` | 4 | Contact CRUD operations with in-memory SQLite |
-
-Run tests:
-```bash
-cd core && cargo test
-```
 
 **PyO3 Testing Strategy:**
 - `auto-initialize` feature enables Python interpreter in tests
@@ -391,9 +401,23 @@ cd core && cargo test
 - Tests use in-memory SQLite to avoid filesystem dependencies
 - Private functions (`decode_length`, `extract_text_from_attributed_body`) tested directly via inline test modules
 
-### Frontend (Vitest)
+---
 
-The frontend uses [Vitest](https://vitest.dev/) with [Testing Library](https://testing-library.com/) for component testing.
+### Backend Tests (pytest)
+
+**Configuration:** `backend/tests/conftest.py`
+- Mocked `ChatReader` for deterministic test data
+- `HandleResolver` with empty contacts for isolated testing
+- Uses `TestClient` from FastAPI for endpoint testing
+
+**Test Files:**
+| File | Coverage |
+|------|----------|
+| `test_api.py` | API endpoint tests (`/conversations`, `/conversations/{id}/messages`) |
+
+---
+
+### Frontend Tests (Vitest)
 
 **Configuration:** `frontend/vitest.config.ts`
 - Environment: `jsdom` for DOM simulation
@@ -408,10 +432,10 @@ The frontend uses [Vitest](https://vitest.dev/) with [Testing Library](https://t
 | `ThemeToggle.test.tsx` | 3 | Icon rendering, click handler |
 | `utils.test.ts` | 3 | `cn()` utility class merging |
 
-**Running Tests:**
+**Watch vs Single Run:**
 ```bash
-cd frontend && pnpm test        # Watch mode
-cd frontend && pnpm test --run  # Single run
+cd frontend && pnpm test        # Watch mode (development)
+cd frontend && pnpm test --run  # Single run (CI)
 ```
 
 ## CI/CD
