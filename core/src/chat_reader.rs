@@ -365,7 +365,7 @@ impl ChatReader {
         let mut stmt = self
             .conn
             .prepare(
-                "SELECT a.ROWID, maj.message_id, a.transfer_name, a.filename, a.mime_type,
+                "SELECT a.ROWID, maj.message_id, a.filename, a.mime_type,
                     a.uti, a.total_bytes, a.is_outgoing, a.created_date
              FROM attachment a
              INNER JOIN message_attachment_join maj ON maj.attachment_id = a.ROWID
@@ -379,17 +379,17 @@ impl ChatReader {
 
         let rows = stmt
             .query_map([since_rowid, limit as i64], |row| {
-                let apple_created: Option<i64> = row.get(8)?;
+                let apple_created: Option<i64> = row.get(7)?;
 
                 Ok(SyncAttachment {
                     id: row.get(0)?,
                     message_id: row.get(1)?,
                     filename: row.get(2)?,
-                    path: row.get(3)?,
-                    mime_type: row.get(4)?,
-                    uti: row.get(5)?,
-                    size: row.get(6)?,
-                    is_outgoing: row.get(7)?,
+                    path: row.get(2)?, // Use filename as path (actual path not stored in chat.db)
+                    mime_type: row.get(3)?,
+                    uti: row.get(4)?,
+                    size: row.get(5)?,
+                    is_outgoing: row.get(6)?,
                     created_at: apple_created.map(apple_to_unix),
                 })
             })

@@ -268,21 +268,31 @@ impl AppDb {
         Ok(())
     }
 
-    /// Bulk replace all chat participants.
+    /// Bulk upsert chat participants.
     /// Takes a list of (chat_id, handle_id) tuples - handle_id is used as person_id.
+    /// Uses INSERT OR REPLACE to safely update without deleting unrelated participants.
     pub fn replace_chat_participants(&mut self, participants: Vec<(i64, i64)>) -> PyResult<()> {
         let tx = self.conn.transaction().map_err(|e| {
             pyo3::exceptions::PyRuntimeError::new_err(format!("Transaction error: {}", e))
         })?;
 
-        // Delete all existing participants
-        tx.execute("DELETE FROM chat_participants", [])
+        // Collect all chat_ids we're updating to delete only their old participants
+        let chat_ids: std::collections::HashSet<i64> =
+            participants.iter().map(|(chat_id, _)| *chat_id).collect();
+
+        // Delete participants only for chats we're updating
+        for chat_id in &chat_ids {
+            tx.execute(
+                "DELETE FROM chat_participants WHERE chat_id = ?",
+                params![chat_id],
+            )
             .map_err(|e| {
                 pyo3::exceptions::PyRuntimeError::new_err(format!(
                     "Delete participants error: {}",
                     e
                 ))
             })?;
+        }
 
         // Insert all participants
         for (chat_id, person_id) in participants {
