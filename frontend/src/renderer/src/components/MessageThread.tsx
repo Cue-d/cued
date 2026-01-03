@@ -125,7 +125,7 @@ const MessageThread = ({ conversation, onSendMessage }: MessageThreadProps) => {
 
   if (!conversation) {
     return (
-      <div className="flex-1 h-full bg-imessage-window-bg flex items-center justify-center">
+      <div className="flex-1 min-w-0 h-full bg-imessage-window-bg flex items-center justify-center">
         <p className="text-muted-foreground">Select a conversation to start messaging</p>
       </div>
     )
@@ -142,7 +142,7 @@ const MessageThread = ({ conversation, onSendMessage }: MessageThreadProps) => {
   })
 
   return (
-    <div className="flex-1 h-full bg-imessage-window-bg flex flex-col">
+    <div className="flex-1 min-w-0 h-full bg-imessage-window-bg flex flex-col">
       {/* Header */}
       <div className="h-12 flex items-center justify-between px-4 border-b border-border bg-imessage-header-bg">
         <div className="flex items-center gap-3">

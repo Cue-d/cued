@@ -111,7 +111,7 @@ const ConversationList = ({
   }, [onLoadMore, hasMore, loading])
 
   return (
-    <div className="w-80 h-full bg-imessage-sidebar border-r border-imessage-sidebar-border flex flex-col">
+    <div className="w-80 min-w-80 flex-shrink-0 h-full bg-imessage-sidebar border-r border-imessage-sidebar-border flex flex-col">
       {/* Header with traffic light space and new message button */}
       <div className="h-11 flex items-center justify-end px-4 pt-1.5 -mt-1">
         <button className="p-1.5 hover:bg-sidebar-accent rounded-lg transition-colors">
