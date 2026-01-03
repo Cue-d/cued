@@ -81,6 +81,12 @@ cd frontend && pnpm dev
 ```bash
 # Frontend (vitest + testing-library)
 cd frontend && pnpm test
+
+# Backend (pytest)
+cd backend && uv run pytest -v
+
+# Core (cargo test)
+cd core && cargo test
 ```
 
 ## Linting
@@ -96,8 +102,12 @@ cd backend && uv run ruff check . && uv run ruff format .
 cd core && cargo clippy && cargo fmt
 ```
 
-## Testing
+## Building Core for Python
 
 ```bash
-cd backend && uv run pytest -v
+# For testing (links to Python)
+cargo test
+
+# For maturin/Python module (uses extension-module feature)
+VIRTUAL_ENV=backend/.venv maturin develop --manifest-path core/Cargo.toml --features extension-module
 ```

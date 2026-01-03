@@ -230,12 +230,16 @@ CREATE TABLE contacts (
 ### Rust (core/Cargo.toml)
 | Crate | Version | Purpose |
 |-------|---------|---------|
-| `pyo3` | 0.27.2 | Rust-Python bridge (extension-module) |
+| `pyo3` | 0.27.2 | Rust-Python bridge (auto-initialize for tests, extension-module for builds) |
 | `rusqlite` | 0.37.0 | SQLite bindings (bundled) |
 | `serde` | 1.0.228 | Serialization (derive) |
 | `serde_json` | 1.0.148 | JSON serialization |
 | `chrono` | 0.4.42 | **UNUSED** - can be removed |
 | `plist` | 1.8.0 | **UNUSED** - can be removed |
+
+#### Feature Flags
+- `extension-module`: Enable when building for Python via maturin (don't link libpython)
+- Default (no flags): Links to Python, allows `cargo test` to work
 
 ### Python (backend/pyproject.toml)
 | Package | Version | Purpose |
@@ -331,17 +335,19 @@ Note: After adding, verify imports use `@/` aliases (shadcn may generate full pa
 
 ```bash
 # Development (from root directory)
-VIRTUAL_ENV=backend/.venv maturin develop --manifest-path core/Cargo.toml  # Build Rust
+VIRTUAL_ENV=backend/.venv maturin develop --manifest-path core/Cargo.toml --features extension-module  # Build Rust for Python
 cd backend && uv run uvicorn main:app --reload  # Run API server
 cd frontend && pnpm dev                          # Run Electron dev mode
+
+# Testing
+cd core && cargo test                            # Run Rust unit tests (26 tests)
+cd backend && uv run pytest -v                   # Run backend tests
+cd frontend && pnpm test                         # Run frontend tests
 
 # Linting/Formatting
 cd core && cargo fmt && cargo clippy
 cd ../backend && uv run ruff check . && uv run ruff format .
 cd ../frontend && pnpm lint && pnpm format
-
-# Testing
-cd backend && uv run pytest -v
 
 # Production Build
 cd frontend && pnpm build:full            # Full build pipeline
@@ -363,6 +369,27 @@ cd frontend && pnpm build:full            # Full build pipeline
 | `pnpm build:backend` | Build Python backend (pyinstaller) |
 
 ## Testing
+
+### Rust Core Tests
+
+The Rust core has 26 unit tests covering:
+
+| Module | Tests | Description |
+|--------|-------|-------------|
+| `utils.rs` | 11 | Phone/email normalization, timestamp conversion |
+| `chat_reader.rs` | 11 | Length decoding, text extraction, in-memory SQLite queries |
+| `app_db.rs` | 4 | Contact CRUD operations with in-memory SQLite |
+
+Run tests:
+```bash
+cd core && cargo test
+```
+
+**PyO3 Testing Strategy:**
+- `auto-initialize` feature enables Python interpreter in tests
+- `extension-module` feature is only used for maturin builds (prevents libpython linking)
+- Tests use in-memory SQLite to avoid filesystem dependencies
+- Private functions (`decode_length`, `extract_text_from_attributed_body`) tested directly via inline test modules
 
 ### Frontend (Vitest)
 
@@ -414,6 +441,7 @@ Notes:
 ### Core (Rust)
 - **Unused dependencies**: `chrono` and `plist` crates are imported but never used
 - **Unused method**: `get_recent_messages()` exists but is not called by the app
+- **Crate naming**: Named `core` which shadows Rust's std `core` - doctests disabled to avoid conflicts
 
 ### General
 - **No WebSocket**: Real-time updates use polling, not WebSocket

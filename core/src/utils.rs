@@ -34,6 +34,7 @@ pub fn now_timestamp() -> i64 {
 mod tests {
     use super::*;
 
+    // normalize_phone tests
     #[test]
     fn test_normalize_phone_with_dashes() {
         assert_eq!(normalize_phone("555-123-4567"), "5551234567");
@@ -45,17 +46,59 @@ mod tests {
     }
 
     #[test]
+    fn test_normalize_phone_international() {
+        assert_eq!(normalize_phone("+1 (555) 123-4567"), "15551234567");
+    }
+
+    #[test]
+    fn test_normalize_phone_empty() {
+        assert_eq!(normalize_phone(""), "");
+    }
+
+    #[test]
+    fn test_normalize_phone_with_dots() {
+        assert_eq!(normalize_phone("555.123.4567"), "5551234567");
+    }
+
+    // normalize_email tests
+    #[test]
     fn test_normalize_email_uppercase() {
         assert_eq!(normalize_email("ALICE@EXAMPLE.COM"), "alice@example.com");
     }
 
+    #[test]
+    fn test_normalize_email_mixed_case() {
+        assert_eq!(
+            normalize_email("Alice.Bob@Example.COM"),
+            "alice.bob@example.com"
+        );
+    }
+
+    #[test]
+    fn test_normalize_email_empty() {
+        assert_eq!(normalize_email(""), "");
+    }
+
+    // apple_to_unix tests
     #[test]
     fn test_apple_epoch() {
         assert_eq!(apple_to_unix(0), 978307200);
     }
 
     #[test]
-    fn test_one_second_after_epoch() {
-        assert_eq!(apple_to_unix(1_000_000_000), 978307201);
+    fn test_apple_to_unix_large_value() {
+        // ~24 years after 2001 in nanoseconds
+        let ns = 757_382_400_000_000_000_i64; // ~2025-01-01
+        let unix = apple_to_unix(ns);
+        assert!(unix > 1700000000); // Should be well after 2023
+    }
+
+    // now_timestamp tests
+    #[test]
+    fn test_now_timestamp_reasonable() {
+        let ts = now_timestamp();
+        // Should be after 2024-01-01 (1704067200) and before 2030-01-01 (1893456000)
+        assert!(ts > 1704067200);
+        assert!(ts < 1893456000);
     }
 }

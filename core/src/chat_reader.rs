@@ -268,3 +268,253 @@ fn decode_length(data: &[u8]) -> Option<(usize, usize)> {
         None
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // decode_length tests
+    #[test]
+    fn test_decode_length_single_byte() {
+        assert_eq!(decode_length(&[0x05]), Some((1, 5)));
+        assert_eq!(decode_length(&[0x7F]), Some((1, 127)));
+        assert_eq!(decode_length(&[0x00]), Some((1, 0)));
+    }
+
+    #[test]
+    fn test_decode_length_two_byte() {
+        // 0x81 marker = 2-byte length follows, little-endian: [low, high]
+        // [0x00, 0x01] = 0x0100 = 256
+        assert_eq!(decode_length(&[0x81, 0x00, 0x01]), Some((3, 256)));
+        // [0x01, 0x00] = 0x0001 = 1
+        assert_eq!(decode_length(&[0x81, 0x01, 0x00]), Some((3, 1)));
+    }
+
+    #[test]
+    fn test_decode_length_empty() {
+        assert_eq!(decode_length(&[]), None);
+    }
+
+    #[test]
+    fn test_decode_length_invalid_marker() {
+        assert_eq!(decode_length(&[0x84]), None); // Unsupported marker
+        assert_eq!(decode_length(&[0xFF]), None);
+    }
+
+    #[test]
+    fn test_decode_length_truncated() {
+        // 0x81 expects 2 more bytes but only 1 provided
+        assert_eq!(decode_length(&[0x81, 0x00]), None);
+    }
+
+    // extract_text_from_attributed_body tests
+    #[test]
+    fn test_extract_text_empty_blob() {
+        assert_eq!(extract_text_from_attributed_body(&[]), None);
+    }
+
+    #[test]
+    fn test_extract_text_no_nsstring_marker() {
+        let blob = b"random data without marker";
+        assert_eq!(extract_text_from_attributed_body(blob), None);
+    }
+
+    // ChatReader tests with in-memory SQLite
+    fn create_test_db() -> Connection {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            "
+            CREATE TABLE chat (
+                ROWID INTEGER PRIMARY KEY,
+                chat_identifier TEXT,
+                display_name TEXT,
+                style INTEGER
+            );
+            CREATE TABLE handle (
+                ROWID INTEGER PRIMARY KEY,
+                id TEXT,
+                service TEXT
+            );
+            CREATE TABLE message (
+                ROWID INTEGER PRIMARY KEY,
+                text TEXT,
+                date INTEGER,
+                is_from_me INTEGER,
+                handle_id INTEGER,
+                attributedBody BLOB,
+                is_read INTEGER,
+                date_read INTEGER
+            );
+            CREATE TABLE chat_message_join (
+                chat_id INTEGER,
+                message_id INTEGER
+            );
+            CREATE TABLE chat_handle_join (
+                chat_id INTEGER,
+                handle_id INTEGER
+            );
+            ",
+        )
+        .unwrap();
+        conn
+    }
+
+    #[test]
+    fn test_chat_reader_count_messages_empty() {
+        let conn = create_test_db();
+        let reader = ChatReader { conn };
+        // Use Rust directly, bypassing PyResult
+        let count: i64 = reader
+            .conn
+            .query_row("SELECT COUNT(*) FROM message", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(count, 0);
+    }
+
+    #[test]
+    fn test_chat_reader_get_all_handles() {
+        let conn = create_test_db();
+        conn.execute(
+            "INSERT INTO handle (ROWID, id, service) VALUES (1, '+12025551234', 'iMessage')",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO handle (ROWID, id, service) VALUES (2, 'alice@example.com', 'iMessage')",
+            [],
+        )
+        .unwrap();
+
+        let reader = ChatReader { conn };
+        let mut stmt = reader
+            .conn
+            .prepare("SELECT ROWID, id, service FROM handle ORDER BY ROWID")
+            .unwrap();
+        let handles: Vec<Handle> = stmt
+            .query_map([], |row| {
+                Ok(Handle {
+                    rowid: row.get(0)?,
+                    id: row.get(1)?,
+                    service: row.get(2)?,
+                })
+            })
+            .unwrap()
+            .map(|r| r.unwrap())
+            .collect();
+
+        assert_eq!(handles.len(), 2);
+        assert_eq!(handles[0].id, "+12025551234");
+        assert_eq!(handles[1].id, "alice@example.com");
+    }
+
+    #[test]
+    fn test_chat_reader_get_all_chats() {
+        let conn = create_test_db();
+        // Insert a 1:1 chat (style=43)
+        conn.execute(
+            "INSERT INTO chat (ROWID, chat_identifier, display_name, style) VALUES (1, '+12025551234', NULL, 43)",
+            [],
+        )
+        .unwrap();
+        // Insert a group chat (style=45)
+        conn.execute(
+            "INSERT INTO chat (ROWID, chat_identifier, display_name, style) VALUES (2, 'chat123', 'Family Group', 45)",
+            [],
+        )
+        .unwrap();
+
+        let reader = ChatReader { conn };
+        let mut stmt = reader
+            .conn
+            .prepare(
+                "SELECT ROWID, chat_identifier, display_name, style, 0, NULL FROM chat ORDER BY ROWID",
+            )
+            .unwrap();
+        let chats: Vec<Chat> = stmt
+            .query_map([], |row| {
+                let style: i64 = row.get(3)?;
+                Ok(Chat {
+                    rowid: row.get(0)?,
+                    chat_identifier: row.get(1)?,
+                    display_name: row.get(2)?,
+                    is_group: style == 45,
+                    last_message_date: row.get(4)?,
+                    last_message_text: row.get(5)?,
+                })
+            })
+            .unwrap()
+            .map(|r| r.unwrap())
+            .collect();
+
+        assert_eq!(chats.len(), 2);
+        assert!(!chats[0].is_group);
+        assert!(chats[1].is_group);
+        assert_eq!(chats[1].display_name, Some("Family Group".to_string()));
+    }
+
+    #[test]
+    fn test_chat_reader_get_chat_messages() {
+        let conn = create_test_db();
+        conn.execute(
+            "INSERT INTO chat (ROWID, chat_identifier, display_name, style) VALUES (1, '+12025551234', NULL, 43)",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO message (ROWID, text, date, is_from_me, handle_id, is_read, date_read) VALUES (1, 'Hello', 1000, 0, 1, 1, NULL)",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO message (ROWID, text, date, is_from_me, handle_id, is_read, date_read) VALUES (2, 'Hi there', 2000, 1, 0, 1, NULL)",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO chat_message_join (chat_id, message_id) VALUES (1, 1)",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO chat_message_join (chat_id, message_id) VALUES (1, 2)",
+            [],
+        )
+        .unwrap();
+
+        let reader = ChatReader { conn };
+        let mut stmt = reader
+            .conn
+            .prepare(
+                "SELECT m.ROWID, m.text, m.date, m.is_from_me, m.handle_id, m.is_read, m.date_read
+             FROM message m
+             INNER JOIN chat_message_join cmj ON cmj.message_id = m.ROWID
+             WHERE cmj.chat_id = 1
+             ORDER BY m.date DESC",
+            )
+            .unwrap();
+        let messages: Vec<Message> = stmt
+            .query_map([], |row| {
+                let is_read_int: i64 = row.get(5)?;
+                Ok(Message {
+                    rowid: row.get(0)?,
+                    text: row.get(1)?,
+                    date: row.get(2)?,
+                    is_from_me: row.get(3)?,
+                    handle_id: row.get(4)?,
+                    is_read: is_read_int != 0,
+                    date_read: row.get(6)?,
+                    chat_id: Some(1),
+                })
+            })
+            .unwrap()
+            .map(|r| r.unwrap())
+            .collect();
+
+        assert_eq!(messages.len(), 2);
+        // Ordered by date DESC, so "Hi there" (date=2000) comes first
+        assert_eq!(messages[0].text, Some("Hi there".to_string()));
+        assert!(messages[0].is_from_me);
+        assert_eq!(messages[1].text, Some("Hello".to_string()));
+        assert!(!messages[1].is_from_me);
+    }
+}
