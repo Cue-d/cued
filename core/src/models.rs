@@ -360,3 +360,154 @@ impl Handle {
         format!("Handle(rowid={}, id='{}')", self.rowid, self.id)
     }
 }
+
+// ============================================
+// PRM V1 MODELS (Actions, Search, Embeddings)
+// ============================================
+
+/// Action in the task queue
+#[pyclass]
+#[derive(Debug, Clone)]
+pub struct Action {
+    #[pyo3(get)]
+    pub id: i64,
+    #[pyo3(get)]
+    pub action_type: String,
+    #[pyo3(get)]
+    pub status: String,
+    #[pyo3(get)]
+    pub priority: i32,
+    #[pyo3(get)]
+    pub chat_id: Option<i64>,
+    #[pyo3(get)]
+    pub person_id: Option<i64>,
+    #[pyo3(get)]
+    pub message_id: Option<i64>,
+    #[pyo3(get)]
+    pub payload: Option<String>,
+    #[pyo3(get)]
+    pub created_at: i64,
+    #[pyo3(get)]
+    pub remind_at: Option<i64>,
+    #[pyo3(get)]
+    pub snoozed_until: Option<i64>,
+    #[pyo3(get)]
+    pub completed_at: Option<i64>,
+    #[pyo3(get)]
+    pub discarded_at: Option<i64>,
+    // Joined fields for UI
+    #[pyo3(get)]
+    pub chat_name: Option<String>,
+    #[pyo3(get)]
+    pub person_name: Option<String>,
+    #[pyo3(get)]
+    pub message_text: Option<String>,
+    #[pyo3(get)]
+    pub message_timestamp: Option<i64>,
+}
+
+#[pymethods]
+impl Action {
+    fn __repr__(&self) -> String {
+        format!(
+            "Action(id={}, type='{}', status='{}')",
+            self.id, self.action_type, self.status
+        )
+    }
+}
+
+/// Search result from FTS
+#[pyclass]
+#[derive(Debug, Clone)]
+pub struct SearchResult {
+    #[pyo3(get)]
+    pub message_id: i64,
+    #[pyo3(get)]
+    pub chat_id: i64,
+    #[pyo3(get)]
+    pub text: String,
+    #[pyo3(get)]
+    pub timestamp: i64,
+    #[pyo3(get)]
+    pub sender_name: Option<String>,
+    #[pyo3(get)]
+    pub chat_name: Option<String>,
+    #[pyo3(get)]
+    pub rank: f64,
+}
+
+#[pymethods]
+impl SearchResult {
+    fn __repr__(&self) -> String {
+        let preview = if self.text.len() > 30 {
+            &self.text[..30]
+        } else {
+            &self.text
+        };
+        format!("SearchResult(id={}, text='{}')", self.message_id, preview)
+    }
+}
+
+/// Chat with unanswered message (for action generation)
+#[pyclass]
+#[derive(Debug, Clone)]
+pub struct UnansweredChat {
+    #[pyo3(get)]
+    pub message_id: i64,
+    #[pyo3(get)]
+    pub chat_id: i64,
+    #[pyo3(get)]
+    pub sender_id: Option<i64>,
+    #[pyo3(get)]
+    pub text: Option<String>,
+    #[pyo3(get)]
+    pub timestamp: i64,
+    #[pyo3(get)]
+    pub chat_name: Option<String>,
+    #[pyo3(get)]
+    pub person_name: Option<String>,
+    #[pyo3(get)]
+    pub hours_since: i64,
+}
+
+#[pymethods]
+impl UnansweredChat {
+    fn __repr__(&self) -> String {
+        let name = self.chat_name.as_deref().unwrap_or("unknown");
+        format!(
+            "UnansweredChat(chat='{}', hours_since={})",
+            name, self.hours_since
+        )
+    }
+}
+
+/// Message pending embedding generation
+#[pyclass]
+#[derive(Debug, Clone)]
+pub struct PendingEmbedding {
+    #[pyo3(get)]
+    pub id: i64,
+    #[pyo3(get)]
+    pub chat_id: i64,
+    #[pyo3(get)]
+    pub text: Option<String>,
+}
+
+#[pymethods]
+impl PendingEmbedding {
+    fn __repr__(&self) -> String {
+        format!("PendingEmbedding(id={})", self.id)
+    }
+}
+
+/// Stored embedding for semantic search
+#[pyclass]
+#[derive(Debug, Clone)]
+pub struct StoredEmbedding {
+    #[pyo3(get)]
+    pub message_id: i64,
+    #[pyo3(get)]
+    pub chat_id: i64,
+    #[pyo3(get)]
+    pub embedding: Vec<u8>,
+}

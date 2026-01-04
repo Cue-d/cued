@@ -6,15 +6,20 @@ from dataclasses import dataclass, field
 from threading import Lock, Thread
 
 import core
+from apscheduler.schedulers.background import BackgroundScheduler
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 
-from routers import chats
+from routers import actions, chats, eod, search
 from sync_db import APP_DB_PATH, CHAT_DB_PATH, sync_all
 
 logger = logging.getLogger(__name__)
 
 # Global sync watcher instance (Rust background thread)
 sync_watcher: core.SyncWatcher | None = None
+
+# Background scheduler for periodic jobs
+scheduler: BackgroundScheduler | None = None
 
 
 def has_existing_data() -> bool:
@@ -140,6 +145,124 @@ def stop_sync_watcher():
         sync_watcher = None
 
 
+def run_unanswered_scan():
+    """Background job: Scan for unanswered messages and create actions."""
+    try:
+        db = core.AppDb(APP_DB_PATH)
+        db.init_schema()
+        unanswered = db.get_unanswered_chats(24)  # 24 hour threshold
+
+        import json
+
+        created = 0
+        for chat in unanswered:
+            payload = json.dumps(
+                {
+                    "message_preview": (chat.text or "")[:100],
+                    "hours_since": chat.hours_since,
+                }
+            )
+            db.create_action(
+                action_type="respond_to_message",
+                priority=60,
+                chat_id=chat.chat_id,
+                person_id=chat.sender_id,
+                message_id=chat.message_id,
+                payload=payload,
+                remind_at=None,
+            )
+            created += 1
+
+        if created > 0:
+            logger.info(f"Background job: Created {created} unanswered message actions")
+    except Exception as e:
+        logger.error(f"Unanswered scan failed: {e}")
+
+
+def run_eod_scan():
+    """Background job: Scan for new contacts texted today and create EOD actions."""
+    try:
+        db = core.AppDb(APP_DB_PATH)
+        db.init_schema()
+        new_contacts = db.get_todays_new_contacts()
+
+        import json
+
+        created = 0
+        for person in new_contacts:
+            if db.has_eod_action_today(person.id):
+                continue
+
+            payload = json.dumps(
+                {
+                    "identifier": person.identifier,
+                    "is_contact": person.is_contact,
+                }
+            )
+            db.create_action(
+                action_type="eod_contact",
+                priority=50,
+                chat_id=None,
+                person_id=person.id,
+                message_id=None,
+                payload=payload,
+                remind_at=None,
+            )
+            created += 1
+
+        if created > 0:
+            logger.info(f"Background job: Created {created} EOD contact actions")
+    except Exception as e:
+        logger.error(f"EOD scan failed: {e}")
+
+
+def run_embedding_batch():
+    """Background job: Process a batch of messages for embedding generation."""
+    try:
+        # Import here to avoid loading model on startup
+        from embedding_worker import process_embedding_queue
+
+        processed = process_embedding_queue(batch_size=50)
+        if processed > 0:
+            logger.debug(f"Background job: Processed {processed} embeddings")
+    except ImportError:
+        # embedding_worker not available yet
+        pass
+    except Exception as e:
+        logger.error(f"Embedding batch failed: {e}")
+
+
+def start_scheduler():
+    """Start the background job scheduler."""
+    global scheduler
+    if scheduler is not None and scheduler.running:
+        logger.warning("Scheduler already running")
+        return
+
+    scheduler = BackgroundScheduler()
+
+    # Scan for unanswered messages every 6 hours
+    scheduler.add_job(run_unanswered_scan, "interval", hours=6, id="unanswered_scan")
+
+    # EOD contact scan at 9 PM daily
+    scheduler.add_job(run_eod_scan, "cron", hour=21, id="eod_scan")
+
+    # Process embeddings every 5 minutes (if worker is available)
+    scheduler.add_job(run_embedding_batch, "interval", minutes=5, id="embedding_batch")
+
+    scheduler.start()
+    logger.info("Background scheduler started (unanswered scan: 6h, EOD: 9PM, embeddings: 5min)")
+
+
+def stop_scheduler():
+    """Stop the background job scheduler."""
+    global scheduler
+    if scheduler is not None:
+        scheduler.shutdown()
+        logger.info("Background scheduler stopped")
+        scheduler = None
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Lifespan handler for startup/shutdown."""
@@ -162,13 +285,26 @@ async def lifespan(app: FastAPI):
     # Start the Rust background sync watcher for near-real-time message updates
     start_sync_watcher()
 
+    # Start the background scheduler for periodic jobs
+    start_scheduler()
+
     yield
 
-    # Cleanup: stop the sync watcher
+    # Cleanup: stop the scheduler and sync watcher
+    stop_scheduler()
     stop_sync_watcher()
 
 
 app = FastAPI(lifespan=lifespan)
+
+# CORS middleware for Electron frontend
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # Electron uses file:// or localhost with various ports
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 
 @app.get("/")
@@ -208,6 +344,9 @@ def manual_sync():
 chats.trigger_background_sync = trigger_background_sync
 
 app.include_router(chats.router, prefix="/chats")
+app.include_router(actions.router, prefix="/actions")
+app.include_router(search.router, prefix="/search")
+app.include_router(eod.router, prefix="/eod")
 
 
 if __name__ == "__main__":

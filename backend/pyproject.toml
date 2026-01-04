@@ -8,6 +8,9 @@ dependencies = [
     "fastapi>=0.128.0",
     "pyinstaller>=6.17.0",
     "uvicorn[standard]>=0.40.0",
+    "apscheduler>=3.10.4",
+    "sentence-transformers>=3.0.0",
+    "numpy>=2.0.0",
 ]
 
 [tool.ruff]

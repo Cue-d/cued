@@ -16,28 +16,52 @@ PRM is a **macOS-only** local-first personal CRM that provides an iMessage-style
 - Command palette (Cmd+K) for quick actions and conversation search
 - Local-first architecture (all data stays on your machine)
 - Sync status indicator in UI
+- **Action Queue**: Tinder-style swipeable cards for unanswered messages and new contacts
+- **Full-Text Search**: FTS5-powered message search
+- **Semantic Search**: Embedding-based similarity search using sentence-transformers
+- **Background Scheduler**: APScheduler for automated action generation
 
 ## Architecture Diagram
 
 ```
-┌─────────────────┐     HTTP/REST      ┌─────────────────┐
-│   Electron App  │◀──────────────────▶│    FastAPI      │
-│   (React/TS)    │    localhost:8000  │    (Python)     │
-└─────────────────┘                    └────────┬────────┘
-                                                │ PyO3
-                                                ▼
-                                       ┌─────────────────┐
-                                       │      core       │
-                                       │   (Rust/PyO3)   │
-                                       └────────┬────────┘
-                                                │
-                              ┌─────────────────┼─────────────────┐
-                              ▼                 ▼                 ▼
-                    ┌─────────────────┐ ┌─────────────────┐ ┌─────────────────┐
-                    │    prm.db       │ │    chat.db      │ │   Contacts.app  │
-                    │   (App DB)      │ │   (iMessage)    │ │  (AppleScript)  │
-                    │   READ-WRITE    │ │   READ-ONLY     │ │                 │
-                    └─────────────────┘ └─────────────────┘ └─────────────────┘
+┌─────────────────┐     HTTP/REST      ┌─────────────────────────────────────┐
+│   Electron App  │◀──────────────────▶│           FastAPI (Python)          │
+│   (React/TS)    │    localhost:8000  │                                     │
+└─────────────────┘                    │  ┌─────────────────────────────┐   │
+                                       │  │         Routers             │   │
+                                       │  │  • /chats (conversations)   │   │
+                                       │  │  • /actions (queue)         │   │
+                                       │  │  • /search (FTS5+semantic)  │   │
+                                       │  │  • /eod (end-of-day)        │   │
+                                       │  └─────────────────────────────┘   │
+                                       │                                     │
+                                       │  ┌─────────────────────────────┐   │
+                                       │  │      Background Jobs        │   │
+                                       │  │  • APScheduler              │   │
+                                       │  │  • Embedding Worker         │   │
+                                       │  └─────────────────────────────┘   │
+                                       └────────────────┬──────────────────┘
+                                                        │ PyO3
+                                                        ▼
+                                               ┌─────────────────┐
+                                               │      core       │
+                                               │   (Rust/PyO3)   │
+                                               └────────┬────────┘
+                                                        │
+                              ┌──────────────────────────┼──────────────────────────┐
+                              ▼                          ▼                          ▼
+                    ┌─────────────────┐        ┌─────────────────┐        ┌─────────────────┐
+                    │    prm.db       │        │    chat.db      │        │   Contacts.app  │
+                    │   (App DB)      │        │   (iMessage)    │        │  (AppleScript)  │
+                    │   READ-WRITE    │        │   READ-ONLY     │        │                 │
+                    └─────────────────┘        └─────────────────┘        └─────────────────┘
+                            │
+      ┌─────────────────────┼─────────────────────┐
+      ▼                     ▼                     ▼
+┌───────────┐       ┌───────────────┐       ┌───────────────┐
+│  actions  │       │ messages_fts  │       │  embeddings   │
+│  (queue)  │       │   (FTS5)      │       │  (vectors)    │
+└───────────┘       └───────────────┘       └───────────────┘
 ```
 
 ### Three-Tier Design
@@ -72,14 +96,22 @@ prm/
 │   └── Cargo.toml
 │
 ├── backend/                       # FastAPI application
-│   ├── main.py                    # FastAPI app entry point, sync status, lifespan
+│   ├── main.py                    # FastAPI app entry point, sync status, lifespan, APScheduler
 │   ├── sync_db.py                 # Full sync from chat.db to prm.db (people, chats, messages)
+│   ├── embedding_worker.py        # Semantic search embedding generation (sentence-transformers)
 │   ├── routers/
-│   │   └── chats.py               # Chat endpoints (renamed from conversations.py)
+│   │   ├── chats.py               # Chat endpoints (renamed from conversations.py)
+│   │   ├── actions.py             # Action queue CRUD and swipe gestures
+│   │   ├── search.py              # FTS5 and semantic search endpoints
+│   │   └── eod.py                 # End-of-day contact processing
 │   ├── schemas.py                 # Pydantic response models
 │   ├── tests/
 │   │   ├── conftest.py            # Test fixtures (mocked AppDb, etc.)
-│   │   └── test_api.py            # API endpoint tests
+│   │   ├── test_api.py            # API endpoint tests
+│   │   ├── test_actions.py        # Action queue tests (18 tests)
+│   │   ├── test_search.py         # Search endpoint tests (14 tests)
+│   │   ├── test_eod.py            # EOD endpoint tests (10 tests)
+│   │   └── test_embedding_worker.py # Embedding worker tests (16 tests)
 │   └── pyproject.toml
 │
 ├── frontend/                      # Electron + React
@@ -200,6 +232,7 @@ cd ../frontend && pnpm lint
 
 ## API Endpoints
 
+### Core Endpoints
 | Method | Path | Description |
 |--------|------|-------------|
 | GET | `/` | Health check - returns `{"message": "PRM API"}` |
@@ -210,6 +243,33 @@ cd ../frontend && pnpm lint
 | GET | `/sync/status` | Get current sync status (is_syncing, initial_sync_complete, etc.) |
 | POST | `/sync` | Manually trigger a full sync |
 | GET | `/test/normalize-phone/{phone}` | Debug endpoint for phone normalization |
+
+### Action Queue Endpoints
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/actions/` | List pending actions with recent messages context |
+| GET | `/actions/{id}` | Get single action with full context |
+| POST | `/actions/` | Create new action (type, priority, chat_id, person_id, message_id) |
+| POST | `/actions/{id}/swipe` | Execute swipe gesture (direction: left/up/right, response_text, snooze_minutes) |
+| DELETE | `/actions/{id}` | Delete an action |
+| POST | `/actions/generate/unanswered` | Generate actions for unanswered messages (threshold_hours param) |
+
+### Search Endpoints
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/search/` | Full-text search using FTS5 (query, limit, chat_id params) |
+| GET | `/search/semantic` | Semantic similarity search using embeddings (query, limit params) |
+| POST | `/search/rebuild` | Rebuild FTS5 index from messages table |
+| POST | `/search/embeddings/queue-all` | Queue all messages for embedding generation |
+| POST | `/search/embeddings/process` | Process pending embeddings (batch_size param) |
+| GET | `/search/embeddings/stats` | Get embedding queue statistics |
+
+### End-of-Day Endpoints
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/eod/contacts` | Get today's new contacts |
+| POST | `/eod/generate` | Generate EOD actions for new contacts |
+| POST | `/eod/contacts/{id}/context` | Add context/notes to a person |
 
 ## IPC Channels (Electron)
 
@@ -292,6 +352,43 @@ CREATE TABLE sync_state (
     value INTEGER NOT NULL
 );
 -- Keys: 'last_message_rowid', 'last_attachment_rowid'
+
+-- Action queue (Tinder-style swipeable cards)
+CREATE TABLE actions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    type TEXT NOT NULL,              -- 'respond_to_message', 'eod_contact', 'follow_up'
+    status TEXT NOT NULL DEFAULT 'pending', -- 'pending', 'completed', 'discarded', 'snoozed'
+    priority INTEGER NOT NULL DEFAULT 50,   -- Higher = more urgent (0-100)
+    chat_id INTEGER REFERENCES chats(id),
+    person_id INTEGER REFERENCES people(id),
+    message_id INTEGER REFERENCES messages(id),
+    payload TEXT,                    -- JSON for additional context
+    snooze_until INTEGER,            -- Unix timestamp for snoozed actions
+    created_at INTEGER NOT NULL,     -- Unix timestamp
+    updated_at INTEGER NOT NULL      -- Unix timestamp
+);
+
+-- Full-text search index (FTS5 virtual table)
+CREATE VIRTUAL TABLE messages_fts USING fts5(
+    text,
+    content='messages',
+    content_rowid='id'
+);
+
+-- Embedding queue for semantic search
+CREATE TABLE embedding_queue (
+    message_id INTEGER PRIMARY KEY REFERENCES messages(id),
+    status TEXT NOT NULL DEFAULT 'pending', -- 'pending', 'completed'
+    created_at INTEGER NOT NULL
+);
+
+-- Message embeddings (384-dim vectors from all-MiniLM-L6-v2)
+CREATE TABLE embeddings (
+    message_id INTEGER PRIMARY KEY REFERENCES messages(id),
+    chat_id INTEGER NOT NULL REFERENCES chats(id),
+    embedding BLOB NOT NULL,         -- 384 * 4 bytes = 1536 bytes per embedding
+    created_at INTEGER NOT NULL
+);
 ```
 
 ## Paths and Locations
@@ -324,6 +421,9 @@ CREATE TABLE sync_state (
 |---------|---------|---------|
 | `fastapi` | >=0.128.0 | Web framework |
 | `uvicorn[standard]` | >=0.40.0 | ASGI server |
+| `apscheduler` | >=3.10.0 | Background job scheduling |
+| `sentence-transformers` | >=2.2.0 | Semantic search embeddings (all-MiniLM-L6-v2) |
+| `numpy` | >=1.24.0 | Vector operations for embeddings |
 | `pyinstaller` | >=6.17.0 | Binary bundling |
 | `ruff` | >=0.11.0 | Linter/formatter (dev) |
 | `pytest` | >=9.0.0 | Testing framework (dev) |
@@ -365,6 +465,15 @@ CREATE TABLE sync_state (
 | `SyncChat` | models.rs | id, identifier, display_name, is_group |
 | `SyncMessage` | models.rs | id, chat_id, handle_id, text, timestamp, is_from_me, is_read, read_at, has_attachments |
 | `SyncAttachment` | models.rs | id, message_id, filename, path, mime_type, uti, size, is_outgoing, created_at |
+
+### Action & Search Models
+| Class | Source | Properties |
+|-------|--------|------------|
+| `Action` | models.rs | id, action_type, status, priority, chat_id, person_id, message_id, payload, snooze_until, created_at, updated_at, chat_name, person_name |
+| `UnansweredChat` | models.rs | chat_id, person_id, message_id, message_text, hours_since |
+| `SearchResult` | models.rs | message_id, chat_id, text, timestamp, sender_name, chat_name, rank |
+| `PendingEmbedding` | models.rs | id, chat_id, text |
+| `StoredEmbedding` | models.rs | message_id, chat_id, embedding |
 
 ### Legacy Models (backward compatibility)
 | Class | Source | Properties |
@@ -474,8 +583,8 @@ cd frontend && pnpm build:full            # Full build pipeline
 
 | Layer | Framework | Command | Test Count |
 |-------|-----------|---------|------------|
-| **Core** | cargo test | `cd core && cargo test` | 26 tests |
-| **Backend** | pytest | `cd backend && uv run pytest -v` | - |
+| **Core** | cargo test | `cd core && cargo test` | 27 tests |
+| **Backend** | pytest | `cd backend && uv run pytest -v` | 70 tests |
 | **Frontend** | Vitest + Testing Library | `cd frontend && pnpm test --run` | 10 tests |
 
 **Run all tests from root:**
@@ -507,13 +616,17 @@ cd core && cargo test && cd ../backend && uv run pytest -v && cd ../frontend && 
 
 **Configuration:** `backend/tests/conftest.py`
 - Mocked `ChatReader` for deterministic test data
-- `HandleResolver` with empty contacts for isolated testing
+- Mocked `AppDb` with mock data classes (MockAction, MockPerson, MockPrmChat, etc.)
 - Uses `TestClient` from FastAPI for endpoint testing
 
 **Test Files:**
-| File | Coverage |
-|------|----------|
-| `test_api.py` | API endpoint tests (`/conversations`, `/conversations/{id}/messages`) |
+| File | Tests | Coverage |
+|------|-------|----------|
+| `test_api.py` | 12 | Core API endpoints (`/chats`, `/chats/{id}/messages`) |
+| `test_actions.py` | 18 | Action queue CRUD, swipe gestures, unanswered generation |
+| `test_search.py` | 14 | FTS5 search, semantic search, embedding endpoints |
+| `test_eod.py` | 10 | EOD contacts, action generation, context updates |
+| `test_embedding_worker.py` | 16 | Cosine similarity, queue processing, model loading |
 
 ---
 
@@ -574,8 +687,87 @@ Notes:
 - **No message deletion/editing**: Not supported
 - **Attachments metadata only**: Attachment records are synced but display is not yet implemented
 
+## Manual Processes
+
+### Initial Setup After First Sync
+
+After the first full sync completes, several indexes need to be initialized:
+
+#### 1. FTS5 Full-Text Search Index
+```bash
+curl -X POST http://localhost:8000/search/rebuild
+```
+
+If FTS5 index becomes corrupted ("database disk image is malformed"), manually recreate:
+```python
+import os
+import sqlite3
+conn = sqlite3.connect(os.path.expanduser("~/.prm/prm.db"))
+cursor = conn.cursor()
+cursor.execute('DROP TABLE IF EXISTS messages_fts')
+cursor.execute('''CREATE VIRTUAL TABLE messages_fts USING fts5(
+    text, content='messages', content_rowid='id')''')
+cursor.execute("INSERT INTO messages_fts(messages_fts) VALUES('rebuild')")
+conn.commit()
+conn.close()
+```
+
+#### 2. Semantic Search Embeddings
+```bash
+# Queue all messages for embedding generation
+curl -X POST http://localhost:8000/search/embeddings/queue-all
+# Returns: {"success": true, "messages_queued": 44498}
+
+# Process embeddings in batches (repeat until pending: 0)
+curl -X POST http://localhost:8000/search/embeddings/process?batch_size=500
+# Returns: {"success": true, "processed": 500}
+
+# Check progress
+curl http://localhost:8000/search/embeddings/stats
+# Returns: {"pending": 43998, "completed": 500, "total_embeddings": 500}
+```
+
+**Note:** First call downloads the model (~90MB). Processing is CPU-intensive.
+
+#### 3. Generate Initial Actions
+```bash
+# Generate actions for unanswered messages (24h+ old)
+curl -X POST "http://localhost:8000/actions/generate/unanswered?threshold_hours=24"
+# Returns: {"success": true, "actions_created": 424}
+```
+
+### Background Scheduler
+
+The backend automatically runs these jobs via APScheduler:
+
+| Job | Schedule | Description |
+|-----|----------|-------------|
+| Unanswered scan | Every 6 hours | Generates actions for messages awaiting response |
+| EOD contacts | Daily at 9 PM | Creates review actions for today's new contacts |
+| Embedding processing | Every 5 minutes | Processes 100 pending embeddings per batch |
+
+### Action Queue Swipe Gestures
+
+Execute actions via swipe:
+```bash
+# Swipe left = discard
+curl -X POST http://localhost:8000/actions/1/swipe \
+  -H "Content-Type: application/json" \
+  -d '{"direction": "left"}'
+
+# Swipe up = snooze (1 hour)
+curl -X POST http://localhost:8000/actions/1/swipe \
+  -H "Content-Type: application/json" \
+  -d '{"direction": "up", "snooze_minutes": 60}'
+
+# Swipe right = complete (optionally send message)
+curl -X POST http://localhost:8000/actions/1/swipe \
+  -H "Content-Type: application/json" \
+  -d '{"direction": "right", "response_text": "Hey, sorry for the delay!"}'
+```
+
 ## Future Features (from docs/DiscoverabilityLayer.md)
-- Semantic search with embeddings (sqlite-vec)
+- ~~Semantic search with embeddings~~ ✅ Implemented with sentence-transformers
 - Relationship scoring and decay tracking
-- Smart reminders for unanswered messages
+- ~~Smart reminders for unanswered messages~~ ✅ Implemented via action queue
 - Auto group chat suggestions via community detection
