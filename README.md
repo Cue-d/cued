@@ -124,6 +124,18 @@ curl -X POST http://localhost:8000/actions/1/swipe -H "Content-Type: application
 
 The backend automatically scans for unanswered messages every 6 hours and generates EOD actions for new contacts daily at 9 PM.
 
+## Running Tests
+
+**Backend (pytest):**
+```bash
+cd backend && uv run pytest
+```
+
+**Frontend (vitest):**
+```bash
+cd frontend && pnpm test
+```
+
 ## Troubleshooting
 
 | Problem | Solution |
