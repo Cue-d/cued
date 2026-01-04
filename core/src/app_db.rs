@@ -921,12 +921,25 @@ impl AppDb {
 
     /// Rebuild FTS index from existing messages
     pub fn rebuild_fts_index(&self) -> PyResult<u32> {
-        // Clear and rebuild
+        // Drop and recreate the FTS table to handle corruption
+        // This is more robust than DELETE which can fail on corrupted indexes
         self.conn
-            .execute("DELETE FROM messages_fts", [])
+            .execute_batch(
+                "
+                DROP TABLE IF EXISTS messages_fts;
+                CREATE VIRTUAL TABLE messages_fts USING fts5(
+                    text,
+                    content='messages',
+                    content_rowid='id',
+                    tokenize='porter unicode61'
+                );
+                ",
+            )
             .map_err(|e| {
-                pyo3::exceptions::PyRuntimeError::new_err(format!("Clear FTS error: {}", e))
+                pyo3::exceptions::PyRuntimeError::new_err(format!("Recreate FTS error: {}", e))
             })?;
+
+        // Repopulate from messages
         let count = self.conn.execute(
             "INSERT INTO messages_fts(rowid, text) SELECT id, text FROM messages WHERE text IS NOT NULL",
             []
