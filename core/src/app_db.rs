@@ -248,13 +248,7 @@ impl AppDb {
             .execute(
                 "INSERT OR REPLACE INTO chats (id, identifier, name, is_group, synced_at)
                  VALUES (?, ?, ?, ?, ?)",
-                params![
-                    chat.id,
-                    chat.identifier,
-                    name,
-                    chat.is_group as i32,
-                    now,
-                ],
+                params![chat.id, chat.identifier, name, chat.is_group as i32, now,],
             )
             .map_err(|e| {
                 pyo3::exceptions::PyRuntimeError::new_err(format!("Upsert chat error: {}", e))
