@@ -117,9 +117,20 @@ class TestSemanticSearch:
 
     def test_semantic_search_worker_not_available(self, client: TestClient):
         """Semantic search handles missing worker gracefully."""
-        # Mock the embedding_worker.semantic_search to raise ImportError when called
-        # This simulates the function not being available
-        with patch("embedding_worker.semantic_search", side_effect=ImportError("No module")):
+        import builtins
+        import sys
+
+        # Remove cached module so the import is attempted fresh
+        sys.modules.pop("embedding_worker", None)
+
+        original_import = builtins.__import__
+
+        def mock_import(name, *args, **kwargs):
+            if name == "embedding_worker":
+                raise ImportError("No module named 'embedding_worker'")
+            return original_import(name, *args, **kwargs)
+
+        with patch.object(builtins, "__import__", mock_import):
             response = client.get("/search/semantic?query=test")
             assert response.status_code == 200
             assert response.json() == []
@@ -140,26 +151,26 @@ class TestEmbeddingsQueueAll:
             assert data["messages_queued"] == 1000
 
     def test_queue_all_embeddings_worker_not_available(self, client: TestClient):
-        """Queue all handles missing worker - simulated by returning error."""
-        # Since the router catches ImportError internally, we test the actual endpoint behavior
-        # by mocking the embedding_worker module to raise ImportError
+        """Queue all handles missing worker gracefully."""
+        import builtins
         import sys
 
-        # Temporarily remove embedding_worker from cache to simulate import failure
-        original_module = sys.modules.get("embedding_worker")
-        sys.modules["embedding_worker"] = None  # type: ignore
+        # Remove cached module so the import is attempted fresh
+        sys.modules.pop("embedding_worker", None)
 
-        try:
-            # Force reload of the router to pick up the missing module
-            # This is tricky - let's just test that the endpoint handles errors gracefully
-            with patch.dict(sys.modules, {"embedding_worker": None}):
-                # The actual test - endpoint should return error
-                response = client.post("/search/embeddings/queue-all")
-                # It should either succeed with a mock or return an error response
-                assert response.status_code == 200
-        finally:
-            if original_module:
-                sys.modules["embedding_worker"] = original_module
+        original_import = builtins.__import__
+
+        def mock_import(name, *args, **kwargs):
+            if name == "embedding_worker":
+                raise ImportError("No module named 'embedding_worker'")
+            return original_import(name, *args, **kwargs)
+
+        with patch.object(builtins, "__import__", mock_import):
+            response = client.post("/search/embeddings/queue-all")
+            assert response.status_code == 200
+            data = response.json()
+            assert data["success"] is False
+            assert "not available" in data["error"]
 
 
 class TestEmbeddingsProcess:
