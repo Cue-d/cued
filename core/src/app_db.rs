@@ -40,9 +40,13 @@ impl AppDb {
         })?;
 
         // Set busy timeout to wait up to 5 seconds if database is locked
-        conn.execute("PRAGMA busy_timeout = 5000", []).map_err(|e| {
-            pyo3::exceptions::PyRuntimeError::new_err(format!("Failed to set busy timeout: {}", e))
-        })?;
+        conn.execute("PRAGMA busy_timeout = 5000", [])
+            .map_err(|e| {
+                pyo3::exceptions::PyRuntimeError::new_err(format!(
+                    "Failed to set busy timeout: {}",
+                    e
+                ))
+            })?;
 
         Ok(Self { conn })
     }
