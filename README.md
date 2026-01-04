@@ -77,6 +77,26 @@ cd frontend && pnpm dev
 
 The app will open at http://localhost:5173 (or in Electron).
 
+## Resetting the Database
+
+To completely reset and re-seed the local SQLite database:
+
+```bash
+# Delete the database and contacts cache
+rm -rf ~/.prm/prm.db ~/.prm/contacts_cache.json
+
+# Re-run the full sync (~10 minutes)
+cd backend && uv run python sync_db.py
+
+# Start the backend
+uv run uvicorn main:app --reload
+
+# In another terminal, rebuild search indexes
+curl -X POST http://localhost:8000/search/rebuild
+curl -X POST http://localhost:8000/search/embeddings/queue-all
+curl -X POST http://localhost:8000/search/embeddings/process?batch_size=500
+```
+
 ## Refreshing Contacts
 
 If contact names become stale or you've added new contacts:
