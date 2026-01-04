@@ -108,6 +108,17 @@ fn sync_loop(
     let mut app_conn =
         Connection::open(app_db_path).map_err(|e| format!("Failed to open prm.db: {}", e))?;
 
+    // Enable WAL mode for better concurrent access - this allows the Python
+    // backend to read/write while we're syncing without "database is locked" errors
+    app_conn
+        .execute("PRAGMA journal_mode = WAL", [])
+        .map_err(|e| format!("Failed to enable WAL mode: {}", e))?;
+
+    // Set busy timeout to wait up to 5 seconds if database is locked
+    app_conn
+        .execute("PRAGMA busy_timeout = 5000", [])
+        .map_err(|e| format!("Failed to set busy timeout: {}", e))?;
+
     // Disable foreign keys for the watcher - it only syncs messages/attachments
     // for existing chats. New chats are synced by the full Python sync.
     // This prevents FK errors when a message arrives for a chat that hasn't
