@@ -1011,8 +1011,10 @@ impl AppDb {
         let threshold_secs = (threshold_hours as i64) * 3600;
         let now = now_timestamp();
 
-        let mut stmt = self.conn.prepare(
-            "WITH latest_messages AS (
+        let mut stmt = self
+            .conn
+            .prepare(
+                "WITH latest_messages AS (
                 SELECT
                     chat_id,
                     MAX(CASE WHEN is_from_me = 1 THEN timestamp ELSE 0 END) as my_latest,
@@ -1041,8 +1043,11 @@ impl AppDb {
                 AND type = 'respond_to_message'
                 AND status IN ('pending', 'snoozed')
             )
-            ORDER BY m.timestamp DESC"
-        ).map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(format!("Query error: {}", e)))?;
+            ORDER BY m.timestamp DESC",
+            )
+            .map_err(|e| {
+                pyo3::exceptions::PyRuntimeError::new_err(format!("Query error: {}", e))
+            })?;
 
         let rows = stmt
             .query_map(params![now, now, threshold_secs], |row| {
@@ -1076,15 +1081,20 @@ impl AppDb {
 
     /// Get messages pending embedding generation
     pub fn get_pending_embeddings(&self, limit: u32) -> PyResult<Vec<PendingEmbedding>> {
-        let mut stmt = self.conn.prepare(
-            "SELECT m.id, m.chat_id, m.text
+        let mut stmt = self
+            .conn
+            .prepare(
+                "SELECT m.id, m.chat_id, m.text
              FROM embedding_queue eq
              JOIN messages m ON m.id = eq.message_id
              WHERE eq.status = 'pending'
              AND m.text IS NOT NULL AND length(m.text) > 0
              ORDER BY eq.queued_at ASC
-             LIMIT ?"
-        ).map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(format!("Query error: {}", e)))?;
+             LIMIT ?",
+            )
+            .map_err(|e| {
+                pyo3::exceptions::PyRuntimeError::new_err(format!("Query error: {}", e))
+            })?;
 
         let rows = stmt
             .query_map([limit], |row| {
@@ -1118,7 +1128,12 @@ impl AppDb {
     }
 
     /// Insert a message embedding
-    pub fn insert_embedding(&self, message_id: i64, chat_id: i64, embedding: Vec<u8>) -> PyResult<()> {
+    pub fn insert_embedding(
+        &self,
+        message_id: i64,
+        chat_id: i64,
+        embedding: Vec<u8>,
+    ) -> PyResult<()> {
         let now = now_timestamp();
         self.conn.execute(
             "INSERT OR REPLACE INTO message_embeddings (message_id, chat_id, embedding, created_at)
@@ -1130,18 +1145,25 @@ impl AppDb {
 
     /// Mark embedding as complete in queue
     pub fn mark_embedding_complete(&self, message_id: i64) -> PyResult<()> {
-        self.conn.execute(
-            "UPDATE embedding_queue SET status = 'completed' WHERE message_id = ?",
-            [message_id]
-        ).map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(format!("Update error: {}", e)))?;
+        self.conn
+            .execute(
+                "UPDATE embedding_queue SET status = 'completed' WHERE message_id = ?",
+                [message_id],
+            )
+            .map_err(|e| {
+                pyo3::exceptions::PyRuntimeError::new_err(format!("Update error: {}", e))
+            })?;
         Ok(())
     }
 
     /// Get all embeddings for semantic search
     pub fn get_all_embeddings(&self) -> PyResult<Vec<StoredEmbedding>> {
-        let mut stmt = self.conn.prepare(
-            "SELECT message_id, chat_id, embedding FROM message_embeddings"
-        ).map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(format!("Query error: {}", e)))?;
+        let mut stmt = self
+            .conn
+            .prepare("SELECT message_id, chat_id, embedding FROM message_embeddings")
+            .map_err(|e| {
+                pyo3::exceptions::PyRuntimeError::new_err(format!("Query error: {}", e))
+            })?;
 
         let rows = stmt
             .query_map([], |row| {
@@ -1169,45 +1191,66 @@ impl AppDb {
         let result = self.conn.query_row(
             "SELECT text FROM messages WHERE id = ?",
             [message_id],
-            |row| row.get(0)
+            |row| row.get(0),
         );
         match result {
             Ok(text) => Ok(text),
             Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
-            Err(e) => Err(pyo3::exceptions::PyRuntimeError::new_err(format!("Query error: {}", e)))
+            Err(e) => Err(pyo3::exceptions::PyRuntimeError::new_err(format!(
+                "Query error: {}",
+                e
+            ))),
         }
     }
 
     /// Queue all existing messages for embedding (one-time setup)
     pub fn queue_all_messages_for_embedding(&self) -> PyResult<u32> {
         let now = now_timestamp();
-        let count = self.conn.execute(
-            "INSERT OR IGNORE INTO embedding_queue (message_id, queued_at, status)
+        let count = self
+            .conn
+            .execute(
+                "INSERT OR IGNORE INTO embedding_queue (message_id, queued_at, status)
              SELECT id, ?, 'pending' FROM messages WHERE text IS NOT NULL AND length(text) > 0",
-            [now]
-        ).map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(format!("Queue error: {}", e)))?;
+                [now],
+            )
+            .map_err(|e| {
+                pyo3::exceptions::PyRuntimeError::new_err(format!("Queue error: {}", e))
+            })?;
         Ok(count as u32)
     }
 
     /// Get embedding queue stats
     pub fn get_embedding_queue_stats(&self) -> PyResult<(i64, i64, i64)> {
-        let pending: i64 = self.conn.query_row(
-            "SELECT COUNT(*) FROM embedding_queue WHERE status = 'pending'",
-            [],
-            |row| row.get(0)
-        ).map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(format!("Query error: {}", e)))?;
+        let pending: i64 = self
+            .conn
+            .query_row(
+                "SELECT COUNT(*) FROM embedding_queue WHERE status = 'pending'",
+                [],
+                |row| row.get(0),
+            )
+            .map_err(|e| {
+                pyo3::exceptions::PyRuntimeError::new_err(format!("Query error: {}", e))
+            })?;
 
-        let completed: i64 = self.conn.query_row(
-            "SELECT COUNT(*) FROM embedding_queue WHERE status = 'completed'",
-            [],
-            |row| row.get(0)
-        ).map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(format!("Query error: {}", e)))?;
+        let completed: i64 = self
+            .conn
+            .query_row(
+                "SELECT COUNT(*) FROM embedding_queue WHERE status = 'completed'",
+                [],
+                |row| row.get(0),
+            )
+            .map_err(|e| {
+                pyo3::exceptions::PyRuntimeError::new_err(format!("Query error: {}", e))
+            })?;
 
-        let total_embeddings: i64 = self.conn.query_row(
-            "SELECT COUNT(*) FROM message_embeddings",
-            [],
-            |row| row.get(0)
-        ).map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(format!("Query error: {}", e)))?;
+        let total_embeddings: i64 = self
+            .conn
+            .query_row("SELECT COUNT(*) FROM message_embeddings", [], |row| {
+                row.get(0)
+            })
+            .map_err(|e| {
+                pyo3::exceptions::PyRuntimeError::new_err(format!("Query error: {}", e))
+            })?;
 
         Ok((pending, completed, total_embeddings))
     }
