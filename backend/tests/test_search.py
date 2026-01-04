@@ -117,7 +117,9 @@ class TestSemanticSearch:
 
     def test_semantic_search_worker_not_available(self, client: TestClient):
         """Semantic search handles missing worker gracefully."""
-        with patch("routers.search.semantic_search", side_effect=ImportError):
+        # Mock the embedding_worker.semantic_search to raise ImportError when called
+        # This simulates the function not being available
+        with patch("embedding_worker.semantic_search", side_effect=ImportError("No module")):
             response = client.get("/search/semantic?query=test")
             assert response.status_code == 200
             assert response.json() == []
