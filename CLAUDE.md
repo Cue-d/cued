@@ -48,6 +48,10 @@ Note: Initial sync runs automatically on first launch (syncs chat.db → prm.db)
 | App DB (prm.db) | `core/src/app_db.rs` |
 | Background Sync (Rust) | `core/src/sync_watcher.rs` |
 | Message sending | `core/src/messaging.rs` |
+| Action Queue | `backend/routers/actions.py` |
+| Search (FTS5 + Semantic) | `backend/routers/search.py` |
+| EOD Contacts | `backend/routers/eod.py` |
+| Embedding Worker | `backend/embedding_worker.py` |
 
 ## Behaviors
 
@@ -65,6 +69,7 @@ Note: Initial sync runs automatically on first launch (syncs chat.db → prm.db)
 
 ## API Endpoints
 
+### Core Endpoints
 | Method | Path | Description |
 |--------|------|-------------|
 | GET | `/chats` | List chats with last message |
@@ -73,6 +78,33 @@ Note: Initial sync runs automatically on first launch (syncs chat.db → prm.db)
 | POST | `/chats/{id}/messages` | Send message (`{"text": "..."}`) |
 | GET | `/sync/status` | Get sync status |
 | POST | `/sync` | Trigger manual sync |
+
+### Action Queue (Swipeable Cards)
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/actions/` | List pending actions |
+| GET | `/actions/{id}` | Get single action with context |
+| POST | `/actions/` | Create new action |
+| POST | `/actions/{id}/swipe` | Swipe action (left=discard, up=snooze, right=complete) |
+| DELETE | `/actions/{id}` | Delete action |
+| POST | `/actions/generate/unanswered` | Generate actions for unanswered messages |
+
+### Search
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/search/?query=` | Full-text search (FTS5) |
+| GET | `/search/semantic?query=` | Semantic search (embeddings) |
+| POST | `/search/rebuild` | Rebuild FTS5 index |
+| POST | `/search/embeddings/queue-all` | Queue all messages for embedding |
+| POST | `/search/embeddings/process` | Process embedding queue |
+| GET | `/search/embeddings/stats` | Get embedding queue stats |
+
+### End-of-Day (EOD)
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/eod/contacts` | Get today's new contacts |
+| POST | `/eod/generate` | Generate EOD actions for new contacts |
+| POST | `/eod/contacts/{id}/context` | Add context/notes to a person |
 
 ## Keyboard Shortcuts
 
@@ -124,3 +156,59 @@ cargo test
 # For maturin/Python module (uses extension-module feature)
 VIRTUAL_ENV=backend/.venv maturin develop --manifest-path core/Cargo.toml --features extension-module
 ```
+
+## Manual Processes
+
+### Initial FTS5 Search Index Setup
+
+After first sync, rebuild the FTS5 index for full-text search:
+
+```bash
+curl -X POST http://localhost:8000/search/rebuild
+```
+
+If FTS5 index becomes corrupted ("database disk image is malformed"), manually recreate:
+
+```python
+# Run from backend directory
+import sqlite3
+conn = sqlite3.connect(os.path.expanduser("~/.prm/prm.db"))
+cursor = conn.cursor()
+cursor.execute('DROP TABLE IF EXISTS messages_fts')
+cursor.execute('''CREATE VIRTUAL TABLE messages_fts USING fts5(
+    text, content='messages', content_rowid='id')''')
+cursor.execute("INSERT INTO messages_fts(messages_fts) VALUES('rebuild')")
+conn.commit()
+```
+
+### Initial Embedding Setup (Semantic Search)
+
+Queue all messages for embedding, then process in batches:
+
+```bash
+# Queue all messages (~44K typically)
+curl -X POST http://localhost:8000/search/embeddings/queue-all
+
+# Process in batches (each batch processes ~100 messages)
+curl -X POST http://localhost:8000/search/embeddings/process?batch_size=500
+
+# Check progress
+curl http://localhost:8000/search/embeddings/stats
+```
+
+Note: First call downloads the model (~90MB). Processing is CPU-intensive; run multiple times until `pending: 0`.
+
+### Generate Unanswered Message Actions
+
+Create actions for messages awaiting response (default: 24h threshold):
+
+```bash
+curl -X POST "http://localhost:8000/actions/generate/unanswered?threshold_hours=24"
+```
+
+### Background Scheduler
+
+The backend runs APScheduler jobs automatically:
+- **Unanswered scan**: Every 6 hours
+- **EOD contacts**: Daily at 9 PM
+- **Embedding processing**: Every 5 minutes (100 messages per batch)

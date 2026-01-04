@@ -42,7 +42,28 @@ You'll see progress output as it syncs:
 - Messages (incremental batches)
 - Attachments
 
-### 3. Start the app
+### 3. Initialize Search Indexes
+
+After the first sync completes, set up the search indexes:
+
+```bash
+# Start the backend first
+cd backend && uv run uvicorn main:app --reload
+
+# In another terminal, rebuild FTS5 index for full-text search
+curl -X POST http://localhost:8000/search/rebuild
+
+# Queue messages for semantic search embeddings
+curl -X POST http://localhost:8000/search/embeddings/queue-all
+
+# Process embeddings (run multiple times until pending: 0)
+curl -X POST http://localhost:8000/search/embeddings/process?batch_size=500
+curl http://localhost:8000/search/embeddings/stats  # Check progress
+```
+
+Note: First embedding call downloads the model (~90MB). Processing ~44K messages takes several minutes.
+
+### 4. Start the app
 
 **Terminal 1 - Backend:**
 ```bash
@@ -66,6 +87,23 @@ rm ~/.prm/contacts_cache.json
 cd backend && uv run python sync_db.py
 ```
 
+## Action Queue
+
+PRM includes a Tinder-style action queue for managing unanswered messages and new contacts:
+
+```bash
+# Generate actions for unanswered messages (24h+ old)
+curl -X POST "http://localhost:8000/actions/generate/unanswered?threshold_hours=24"
+
+# View pending actions
+curl http://localhost:8000/actions/
+
+# Swipe actions: left=discard, up=snooze, right=complete
+curl -X POST http://localhost:8000/actions/1/swipe -H "Content-Type: application/json" -d '{"direction": "right", "response_text": "Hey!"}'
+```
+
+The backend automatically scans for unanswered messages every 6 hours and generates EOD actions for new contacts daily at 9 PM.
+
 ## Troubleshooting
 
 | Problem | Solution |
@@ -74,6 +112,8 @@ cd backend && uv run python sync_db.py
 | "Cannot import core" | Run `VIRTUAL_ENV=backend/.venv maturin develop --manifest-path core/Cargo.toml` |
 | Contact names showing as phone numbers | Run the initial sync: `cd backend && uv run python sync_db.py` |
 | Sync seems stuck | Contact resolution is slow (~10 min) - this is normal |
+| "database disk image is malformed" (FTS5) | See CLAUDE.md Manual Processes section to recreate FTS5 table |
+| Semantic search returns empty | Run embedding queue-all and process commands (see step 3) |
 
 ## Architecture
 

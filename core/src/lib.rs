@@ -31,6 +31,13 @@ fn core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<models::SyncMessage>()?;
     m.add_class::<models::SyncAttachment>()?;
 
+    // PRM V1 models (Actions, Search, Embeddings)
+    m.add_class::<models::Action>()?;
+    m.add_class::<models::SearchResult>()?;
+    m.add_class::<models::UnansweredChat>()?;
+    m.add_class::<models::PendingEmbedding>()?;
+    m.add_class::<models::StoredEmbedding>()?;
+
     // Database classes
     m.add_class::<app_db::AppDb>()?;
     m.add_class::<chat_reader::ChatReader>()?;

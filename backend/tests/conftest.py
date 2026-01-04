@@ -76,6 +76,112 @@ class MockSendResult:
         self.error = error
 
 
+class MockAction:
+    """Mock for core.Action returned by AppDb."""
+
+    def __init__(
+        self,
+        id: int,
+        action_type: str,
+        status: str = "pending",
+        priority: int = 50,
+        chat_id: int | None = None,
+        person_id: int | None = None,
+        message_id: int | None = None,
+        payload: str | None = None,
+        created_at: int = 700000000,
+        remind_at: int | None = None,
+        snoozed_until: int | None = None,
+        completed_at: int | None = None,
+        discarded_at: int | None = None,
+        chat_name: str | None = None,
+        person_name: str | None = None,
+        message_text: str | None = None,
+        message_timestamp: int | None = None,
+    ):
+        self.id = id
+        self.action_type = action_type
+        self.status = status
+        self.priority = priority
+        self.chat_id = chat_id
+        self.person_id = person_id
+        self.message_id = message_id
+        self.payload = payload
+        self.created_at = created_at
+        self.remind_at = remind_at
+        self.snoozed_until = snoozed_until
+        self.completed_at = completed_at
+        self.discarded_at = discarded_at
+        self.chat_name = chat_name
+        self.person_name = person_name
+        self.message_text = message_text
+        self.message_timestamp = message_timestamp
+
+
+class MockUnansweredChat:
+    """Mock for core.UnansweredChat returned by get_unanswered_chats."""
+
+    def __init__(
+        self,
+        message_id: int,
+        chat_id: int,
+        sender_id: int | None,
+        text: str | None,
+        timestamp: int,
+        chat_name: str | None,
+        person_name: str | None,
+        hours_since: int,
+    ):
+        self.message_id = message_id
+        self.chat_id = chat_id
+        self.sender_id = sender_id
+        self.text = text
+        self.timestamp = timestamp
+        self.chat_name = chat_name
+        self.person_name = person_name
+        self.hours_since = hours_since
+
+
+class MockSearchResult:
+    """Mock for core.SearchResult returned by search_messages."""
+
+    def __init__(
+        self,
+        message_id: int,
+        chat_id: int,
+        text: str,
+        timestamp: int,
+        sender_name: str | None,
+        chat_name: str | None,
+        rank: float,
+    ):
+        self.message_id = message_id
+        self.chat_id = chat_id
+        self.text = text
+        self.timestamp = timestamp
+        self.sender_name = sender_name
+        self.chat_name = chat_name
+        self.rank = rank
+
+
+class MockPendingEmbedding:
+    """Mock for core.PendingEmbedding returned by get_pending_embeddings."""
+
+    def __init__(self, id: int, chat_id: int, text: str | None):
+        self.id = id
+        self.chat_id = chat_id
+        self.text = text
+
+
+class MockStoredEmbedding:
+    """Mock for core.StoredEmbedding returned by get_all_embeddings."""
+
+    def __init__(self, message_id: int, chat_id: int, embedding: bytes):
+        self.message_id = message_id
+        self.chat_id = chat_id
+        self.embedding = embedding
+
+
 @pytest.fixture
 def mock_app_db() -> MagicMock:
     """Create a mock AppDb with sample data."""
@@ -164,6 +270,94 @@ def mock_app_db() -> MagicMock:
         ),
     ]
 
+    # Sample actions
+    sample_actions = [
+        MockAction(
+            id=1,
+            action_type="respond_to_message",
+            status="pending",
+            priority=60,
+            chat_id=1,
+            person_id=1,
+            message_id=1,
+            payload='{"message_preview": "Hello!", "hours_since": 48}',
+            chat_name="John Doe",
+            person_name="John Doe",
+            message_text="Hello!",
+            message_timestamp=700000000,
+        ),
+        MockAction(
+            id=2,
+            action_type="eod_contact",
+            status="pending",
+            priority=50,
+            person_id=2,
+            person_name="Jane Smith",
+        ),
+    ]
+
+    db.get_pending_actions.return_value = sample_actions
+
+    def get_action(action_id: int) -> MockAction | None:
+        for a in sample_actions:
+            if a.id == action_id:
+                return a
+        return None
+
+    db.get_action.side_effect = get_action
+    db.create_action.return_value = 3  # Return new action ID
+    db.update_action_status.return_value = None
+    db.delete_action.return_value = None
+
+    # Unanswered chats
+    db.get_unanswered_chats.return_value = [
+        MockUnansweredChat(
+            message_id=10,
+            chat_id=1,
+            sender_id=1,
+            text="Are you coming to the party?",
+            timestamp=700000000,
+            chat_name="John Doe",
+            person_name="John Doe",
+            hours_since=72,
+        ),
+    ]
+
+    # Search results
+    db.search_messages.return_value = [
+        MockSearchResult(
+            message_id=1,
+            chat_id=1,
+            text="Hello!",
+            timestamp=700000000,
+            sender_name="John Doe",
+            chat_name="John Doe",
+            rank=1.5,
+        ),
+    ]
+    db.rebuild_fts_index.return_value = 100
+
+    # Get message text
+    db.get_message_text.return_value = "Hello!"
+
+    # EOD contacts
+    db.get_todays_new_contacts.return_value = [
+        MockPerson(id=3, identifier="+15551234567", name="New Contact"),
+    ]
+    db.has_eod_action_today.return_value = False
+
+    # Get person
+    def get_person(person_id: int) -> MockPerson | None:
+        people = {
+            1: MockPerson(id=1, identifier="+11234567890", name="John Doe"),
+            2: MockPerson(id=2, identifier="+10987654321", name="Jane Smith"),
+            3: MockPerson(id=3, identifier="+15551234567", name="New Contact"),
+        }
+        return people.get(person_id)
+
+    db.get_person.side_effect = get_person
+    db.upsert_person.return_value = None
+
     return db
 
 
@@ -173,9 +367,14 @@ def client(mock_app_db: MagicMock) -> Generator[TestClient, None, None]:
     with (
         patch("routers.chats.get_app_db", return_value=mock_app_db),
         patch("routers.chats.trigger_background_sync", None),
+        patch("routers.actions.get_db", return_value=mock_app_db),
+        patch("routers.search.get_db", return_value=mock_app_db),
+        patch("routers.eod.get_db", return_value=mock_app_db),
         patch("main.run_sync"),  # Skip sync on startup
         patch("main.has_existing_data", return_value=True),  # Pretend data exists
         patch("main.trigger_background_sync"),  # Don't trigger background sync
+        patch("main.start_sync_watcher"),  # Skip sync watcher
+        patch("main.start_scheduler"),  # Skip background scheduler
         patch("core.normalize_phone", side_effect=lambda x: x.replace("+", "")),
         patch(
             "core.send_message",

@@ -4,7 +4,8 @@ use pyo3::prelude::*;
 use rusqlite::{Connection, params};
 
 use crate::models::{
-    Attachment, Person, PrmChat, PrmMessage, SyncAttachment, SyncChat, SyncMessage,
+    Attachment, PendingEmbedding, Person, PrmChat, PrmMessage, StoredEmbedding, SyncAttachment,
+    SyncChat, SyncMessage, UnansweredChat,
 };
 use crate::utils::now_timestamp;
 
@@ -128,10 +129,101 @@ impl AppDb {
             );
             INSERT OR IGNORE INTO sync_state (key, value) VALUES ('last_message_rowid', 0);
             INSERT OR IGNORE INTO sync_state (key, value) VALUES ('last_attachment_rowid', 0);
+
+            -- ============================================
+            -- ACTIONS: Task queue
+            -- ============================================
+            CREATE TABLE IF NOT EXISTS actions (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                type TEXT NOT NULL,
+                status TEXT NOT NULL DEFAULT 'pending',
+                priority INTEGER NOT NULL DEFAULT 50,
+                chat_id INTEGER REFERENCES chats(id),
+                person_id INTEGER REFERENCES people(id),
+                message_id INTEGER REFERENCES messages(id),
+                payload TEXT,
+                created_at INTEGER NOT NULL,
+                remind_at INTEGER,
+                snoozed_until INTEGER,
+                completed_at INTEGER,
+                discarded_at INTEGER
+            );
+            CREATE INDEX IF NOT EXISTS idx_actions_status ON actions(status);
+            CREATE INDEX IF NOT EXISTS idx_actions_priority ON actions(status, priority DESC, created_at);
+            CREATE INDEX IF NOT EXISTS idx_actions_chat ON actions(chat_id);
+            CREATE INDEX IF NOT EXISTS idx_actions_person ON actions(person_id);
+            CREATE INDEX IF NOT EXISTS idx_actions_remind ON actions(remind_at) WHERE remind_at IS NOT NULL;
+
+            -- ============================================
+            -- FTS5: Full-text search for messages
+            -- ============================================
+            CREATE VIRTUAL TABLE IF NOT EXISTS messages_fts USING fts5(
+                text,
+                content='messages',
+                content_rowid='id',
+                tokenize='porter unicode61'
+            );
+
+            -- ============================================
+            -- EMBEDDINGS: Semantic search infrastructure
+            -- ============================================
+            CREATE TABLE IF NOT EXISTS embedding_queue (
+                message_id INTEGER PRIMARY KEY REFERENCES messages(id),
+                queued_at INTEGER NOT NULL,
+                status TEXT NOT NULL DEFAULT 'pending'
+            );
+            CREATE INDEX IF NOT EXISTS idx_embedding_queue_status ON embedding_queue(status, queued_at);
+
+            CREATE TABLE IF NOT EXISTS message_embeddings (
+                message_id INTEGER PRIMARY KEY REFERENCES messages(id),
+                chat_id INTEGER NOT NULL REFERENCES chats(id),
+                embedding BLOB NOT NULL,
+                model_version TEXT NOT NULL DEFAULT 'all-MiniLM-L6-v2',
+                created_at INTEGER NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS idx_message_embeddings_chat ON message_embeddings(chat_id);
+
+            CREATE TABLE IF NOT EXISTS contact_embeddings (
+                person_id INTEGER PRIMARY KEY REFERENCES people(id),
+                embedding BLOB NOT NULL,
+                message_count INTEGER NOT NULL,
+                model_version TEXT NOT NULL DEFAULT 'all-MiniLM-L6-v2',
+                updated_at INTEGER NOT NULL
+            );
             ",
             )
             .map_err(|e| {
                 pyo3::exceptions::PyRuntimeError::new_err(format!("Schema error: {}", e))
+            })?;
+        Ok(())
+    }
+
+    /// Ensure FTS5 triggers exist (safe to call multiple times).
+    pub fn ensure_fts_triggers(&self) -> PyResult<()> {
+        self.conn
+            .execute_batch(
+                "
+            -- Trigger to update FTS when message is inserted
+            CREATE TRIGGER IF NOT EXISTS messages_fts_insert AFTER INSERT ON messages
+            BEGIN
+                INSERT INTO messages_fts(rowid, text) VALUES (new.id, new.text);
+            END;
+
+            -- Trigger to update FTS when message is updated
+            CREATE TRIGGER IF NOT EXISTS messages_fts_update AFTER UPDATE ON messages
+            BEGIN
+                UPDATE messages_fts SET text = new.text WHERE rowid = new.id;
+            END;
+
+            -- Trigger to delete from FTS when message is deleted
+            CREATE TRIGGER IF NOT EXISTS messages_fts_delete AFTER DELETE ON messages
+            BEGIN
+                DELETE FROM messages_fts WHERE rowid = old.id;
+            END;
+            ",
+            )
+            .map_err(|e| {
+                pyo3::exceptions::PyRuntimeError::new_err(format!("FTS trigger error: {}", e))
             })?;
         Ok(())
     }
@@ -628,6 +720,496 @@ impl AppDb {
         self.conn
             .query_row("SELECT COUNT(*) FROM chats", [], |row| row.get(0))
             .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(format!("Count error: {}", e)))
+    }
+
+    // ============================================
+    // ACTIONS CRUD
+    // ============================================
+
+    /// Create a new action
+    #[allow(clippy::too_many_arguments)]
+    pub fn create_action(
+        &self,
+        action_type: &str,
+        priority: i32,
+        chat_id: Option<i64>,
+        person_id: Option<i64>,
+        message_id: Option<i64>,
+        payload: Option<&str>,
+        remind_at: Option<i64>,
+    ) -> PyResult<i64> {
+        let now = now_timestamp();
+        self.conn.execute(
+            "INSERT INTO actions (type, status, priority, chat_id, person_id, message_id, payload, created_at, remind_at)
+             VALUES (?, 'pending', ?, ?, ?, ?, ?, ?, ?)",
+            params![action_type, priority, chat_id, person_id, message_id, payload, now, remind_at],
+        ).map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(format!("Create action error: {}", e)))?;
+        Ok(self.conn.last_insert_rowid())
+    }
+
+    /// Get pending actions ordered by priority
+    pub fn get_pending_actions(&self, limit: u32) -> PyResult<Vec<crate::models::Action>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT a.id, a.type, a.status, a.priority, a.chat_id, a.person_id, a.message_id,
+                    a.payload, a.created_at, a.remind_at, a.snoozed_until, a.completed_at, a.discarded_at,
+                    c.name as chat_name, p.name as person_name, m.text as message_text, m.timestamp as message_timestamp
+             FROM actions a
+             LEFT JOIN chats c ON c.id = a.chat_id
+             LEFT JOIN people p ON p.id = a.person_id
+             LEFT JOIN messages m ON m.id = a.message_id
+             WHERE a.status = 'pending'
+             AND (a.snoozed_until IS NULL OR a.snoozed_until <= strftime('%s', 'now'))
+             ORDER BY a.priority DESC, a.created_at ASC
+             LIMIT ?"
+        ).map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(format!("Query error: {}", e)))?;
+
+        let rows = stmt
+            .query_map([limit], |row| {
+                Ok(crate::models::Action {
+                    id: row.get(0)?,
+                    action_type: row.get(1)?,
+                    status: row.get(2)?,
+                    priority: row.get(3)?,
+                    chat_id: row.get(4)?,
+                    person_id: row.get(5)?,
+                    message_id: row.get(6)?,
+                    payload: row.get(7)?,
+                    created_at: row.get(8)?,
+                    remind_at: row.get(9)?,
+                    snoozed_until: row.get(10)?,
+                    completed_at: row.get(11)?,
+                    discarded_at: row.get(12)?,
+                    chat_name: row.get(13)?,
+                    person_name: row.get(14)?,
+                    message_text: row.get(15)?,
+                    message_timestamp: row.get(16)?,
+                })
+            })
+            .map_err(|e| {
+                pyo3::exceptions::PyRuntimeError::new_err(format!("Query error: {}", e))
+            })?;
+
+        let mut result = Vec::new();
+        for row in rows {
+            result.push(row.map_err(|e| {
+                pyo3::exceptions::PyRuntimeError::new_err(format!("Row error: {}", e))
+            })?);
+        }
+        Ok(result)
+    }
+
+    /// Get action by ID
+    pub fn get_action(&self, id: i64) -> PyResult<Option<crate::models::Action>> {
+        let result = self.conn.query_row(
+            "SELECT a.id, a.type, a.status, a.priority, a.chat_id, a.person_id, a.message_id,
+                    a.payload, a.created_at, a.remind_at, a.snoozed_until, a.completed_at, a.discarded_at,
+                    c.name as chat_name, p.name as person_name, m.text as message_text, m.timestamp as message_timestamp
+             FROM actions a
+             LEFT JOIN chats c ON c.id = a.chat_id
+             LEFT JOIN people p ON p.id = a.person_id
+             LEFT JOIN messages m ON m.id = a.message_id
+             WHERE a.id = ?",
+            [id],
+            |row| {
+                Ok(crate::models::Action {
+                    id: row.get(0)?,
+                    action_type: row.get(1)?,
+                    status: row.get(2)?,
+                    priority: row.get(3)?,
+                    chat_id: row.get(4)?,
+                    person_id: row.get(5)?,
+                    message_id: row.get(6)?,
+                    payload: row.get(7)?,
+                    created_at: row.get(8)?,
+                    remind_at: row.get(9)?,
+                    snoozed_until: row.get(10)?,
+                    completed_at: row.get(11)?,
+                    discarded_at: row.get(12)?,
+                    chat_name: row.get(13)?,
+                    person_name: row.get(14)?,
+                    message_text: row.get(15)?,
+                    message_timestamp: row.get(16)?,
+                })
+            },
+        );
+        match result {
+            Ok(action) => Ok(Some(action)),
+            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+            Err(e) => Err(pyo3::exceptions::PyRuntimeError::new_err(format!(
+                "Get action error: {}",
+                e
+            ))),
+        }
+    }
+
+    /// Update action status
+    pub fn update_action_status(
+        &self,
+        id: i64,
+        status: &str,
+        snoozed_until: Option<i64>,
+    ) -> PyResult<()> {
+        let now = now_timestamp();
+        let (completed_at, discarded_at) = match status {
+            "completed" => (Some(now), None),
+            "discarded" => (None, Some(now)),
+            _ => (None, None),
+        };
+        self.conn.execute(
+            "UPDATE actions SET status = ?, snoozed_until = ?, completed_at = ?, discarded_at = ? WHERE id = ?",
+            params![status, snoozed_until, completed_at, discarded_at, id],
+        ).map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(format!("Update action error: {}", e)))?;
+        Ok(())
+    }
+
+    /// Delete action
+    pub fn delete_action(&self, id: i64) -> PyResult<()> {
+        self.conn
+            .execute("DELETE FROM actions WHERE id = ?", [id])
+            .map_err(|e| {
+                pyo3::exceptions::PyRuntimeError::new_err(format!("Delete action error: {}", e))
+            })?;
+        Ok(())
+    }
+
+    // ============================================
+    // FTS SEARCH
+    // ============================================
+
+    /// Search messages using FTS5
+    pub fn search_messages(
+        &self,
+        query: &str,
+        limit: u32,
+    ) -> PyResult<Vec<crate::models::SearchResult>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT m.id, m.chat_id, m.text, m.timestamp, p.name as sender_name, c.name as chat_name,
+                    bm25(messages_fts) as rank
+             FROM messages_fts
+             JOIN messages m ON m.id = messages_fts.rowid
+             LEFT JOIN people p ON p.id = m.sender_id
+             LEFT JOIN chats c ON c.id = m.chat_id
+             WHERE messages_fts MATCH ?
+             ORDER BY rank
+             LIMIT ?"
+        ).map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(format!("Query error: {}", e)))?;
+
+        let rows = stmt
+            .query_map(params![query, limit], |row| {
+                Ok(crate::models::SearchResult {
+                    message_id: row.get(0)?,
+                    chat_id: row.get(1)?,
+                    text: row.get::<_, Option<String>>(2)?.unwrap_or_default(),
+                    timestamp: row.get(3)?,
+                    sender_name: row.get(4)?,
+                    chat_name: row.get(5)?,
+                    rank: row.get(6)?,
+                })
+            })
+            .map_err(|e| {
+                pyo3::exceptions::PyRuntimeError::new_err(format!("Query error: {}", e))
+            })?;
+
+        let mut result = Vec::new();
+        for row in rows {
+            result.push(row.map_err(|e| {
+                pyo3::exceptions::PyRuntimeError::new_err(format!("Row error: {}", e))
+            })?);
+        }
+        Ok(result)
+    }
+
+    /// Rebuild FTS index from existing messages
+    pub fn rebuild_fts_index(&self) -> PyResult<u32> {
+        // Clear and rebuild
+        self.conn
+            .execute("DELETE FROM messages_fts", [])
+            .map_err(|e| {
+                pyo3::exceptions::PyRuntimeError::new_err(format!("Clear FTS error: {}", e))
+            })?;
+        let count = self.conn.execute(
+            "INSERT INTO messages_fts(rowid, text) SELECT id, text FROM messages WHERE text IS NOT NULL",
+            []
+        ).map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(format!("Rebuild FTS error: {}", e)))?;
+        Ok(count as u32)
+    }
+
+    // ============================================
+    // EOD DETECTION
+    // ============================================
+
+    /// Get today's new contacts (people texted today who aren't saved contacts)
+    pub fn get_todays_new_contacts(&self) -> PyResult<Vec<Person>> {
+        let today_start = chrono::Local::now()
+            .date_naive()
+            .and_hms_opt(0, 0, 0)
+            .unwrap()
+            .and_utc()
+            .timestamp();
+        let mut stmt = self.conn.prepare(
+            "SELECT DISTINCT p.id, p.identifier, p.name, p.service, p.is_contact, p.phones, p.emails, p.company, p.notes
+             FROM people p
+             JOIN messages m ON (m.sender_id = p.id OR
+                 (m.is_from_me = 1 AND m.chat_id IN (SELECT chat_id FROM chat_participants WHERE person_id = p.id)))
+             WHERE m.timestamp >= ?
+             AND p.is_contact = 0"
+        ).map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(format!("Query error: {}", e)))?;
+
+        let rows = stmt
+            .query_map([today_start], |row| {
+                Ok(Person {
+                    id: row.get(0)?,
+                    identifier: row.get(1)?,
+                    name: row.get(2)?,
+                    service: row.get(3)?,
+                    is_contact: row.get::<_, i32>(4)? != 0,
+                    phones: row.get(5)?,
+                    emails: row.get(6)?,
+                    company: row.get(7)?,
+                    notes: row.get(8)?,
+                })
+            })
+            .map_err(|e| {
+                pyo3::exceptions::PyRuntimeError::new_err(format!("Query error: {}", e))
+            })?;
+
+        let mut result = Vec::new();
+        for row in rows {
+            result.push(row.map_err(|e| {
+                pyo3::exceptions::PyRuntimeError::new_err(format!("Row error: {}", e))
+            })?);
+        }
+        Ok(result)
+    }
+
+    /// Check if person already has EOD action today
+    pub fn has_eod_action_today(&self, person_id: i64) -> PyResult<bool> {
+        let today_start = chrono::Local::now()
+            .date_naive()
+            .and_hms_opt(0, 0, 0)
+            .unwrap()
+            .and_utc()
+            .timestamp();
+        let count: i64 = self.conn.query_row(
+            "SELECT COUNT(*) FROM actions WHERE person_id = ? AND type = 'eod_contact' AND created_at >= ?",
+            params![person_id, today_start],
+            |row| row.get(0)
+        ).map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(format!("Query error: {}", e)))?;
+        Ok(count > 0)
+    }
+
+    // ============================================
+    // UNANSWERED MESSAGE DETECTION
+    // ============================================
+
+    /// Get chats with unanswered messages older than threshold_hours.
+    /// Only includes chats where:
+    /// - Their last message is newer than my last message (I haven't replied)
+    /// - Their last message is older than threshold (been waiting a while)
+    /// - No pending/snoozed respond_to_message action already exists
+    pub fn get_unanswered_chats(&self, threshold_hours: u32) -> PyResult<Vec<UnansweredChat>> {
+        let threshold_secs = (threshold_hours as i64) * 3600;
+        let now = now_timestamp();
+
+        let mut stmt = self.conn.prepare(
+            "WITH latest_messages AS (
+                SELECT
+                    chat_id,
+                    MAX(CASE WHEN is_from_me = 1 THEN timestamp ELSE 0 END) as my_latest,
+                    MAX(CASE WHEN is_from_me = 0 THEN timestamp ELSE 0 END) as their_latest
+                FROM messages
+                GROUP BY chat_id
+            )
+            SELECT
+                m.id as message_id,
+                m.chat_id,
+                m.sender_id,
+                m.text,
+                m.timestamp,
+                c.name as chat_name,
+                p.name as person_name,
+                (? - m.timestamp) / 3600 as hours_since
+            FROM messages m
+            JOIN latest_messages lm ON lm.chat_id = m.chat_id AND m.timestamp = lm.their_latest
+            LEFT JOIN chats c ON c.id = m.chat_id
+            LEFT JOIN people p ON p.id = m.sender_id
+            WHERE lm.their_latest > lm.my_latest
+            AND lm.their_latest < (? - ?)
+            AND NOT EXISTS (
+                SELECT 1 FROM actions
+                WHERE chat_id = m.chat_id
+                AND type = 'respond_to_message'
+                AND status IN ('pending', 'snoozed')
+            )
+            ORDER BY m.timestamp DESC"
+        ).map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(format!("Query error: {}", e)))?;
+
+        let rows = stmt
+            .query_map(params![now, now, threshold_secs], |row| {
+                Ok(UnansweredChat {
+                    message_id: row.get(0)?,
+                    chat_id: row.get(1)?,
+                    sender_id: row.get(2)?,
+                    text: row.get(3)?,
+                    timestamp: row.get(4)?,
+                    chat_name: row.get(5)?,
+                    person_name: row.get(6)?,
+                    hours_since: row.get(7)?,
+                })
+            })
+            .map_err(|e| {
+                pyo3::exceptions::PyRuntimeError::new_err(format!("Query error: {}", e))
+            })?;
+
+        let mut result = Vec::new();
+        for row in rows {
+            result.push(row.map_err(|e| {
+                pyo3::exceptions::PyRuntimeError::new_err(format!("Row error: {}", e))
+            })?);
+        }
+        Ok(result)
+    }
+
+    // ============================================
+    // EMBEDDING METHODS
+    // ============================================
+
+    /// Get messages pending embedding generation
+    pub fn get_pending_embeddings(&self, limit: u32) -> PyResult<Vec<PendingEmbedding>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT m.id, m.chat_id, m.text
+             FROM embedding_queue eq
+             JOIN messages m ON m.id = eq.message_id
+             WHERE eq.status = 'pending'
+             AND m.text IS NOT NULL AND length(m.text) > 0
+             ORDER BY eq.queued_at ASC
+             LIMIT ?"
+        ).map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(format!("Query error: {}", e)))?;
+
+        let rows = stmt
+            .query_map([limit], |row| {
+                Ok(PendingEmbedding {
+                    id: row.get(0)?,
+                    chat_id: row.get(1)?,
+                    text: row.get(2)?,
+                })
+            })
+            .map_err(|e| {
+                pyo3::exceptions::PyRuntimeError::new_err(format!("Query error: {}", e))
+            })?;
+
+        let mut result = Vec::new();
+        for row in rows {
+            result.push(row.map_err(|e| {
+                pyo3::exceptions::PyRuntimeError::new_err(format!("Row error: {}", e))
+            })?);
+        }
+        Ok(result)
+    }
+
+    /// Queue a message for embedding generation
+    pub fn queue_for_embedding(&self, message_id: i64) -> PyResult<()> {
+        let now = now_timestamp();
+        self.conn.execute(
+            "INSERT OR IGNORE INTO embedding_queue (message_id, queued_at, status) VALUES (?, ?, 'pending')",
+            params![message_id, now]
+        ).map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(format!("Queue error: {}", e)))?;
+        Ok(())
+    }
+
+    /// Insert a message embedding
+    pub fn insert_embedding(&self, message_id: i64, chat_id: i64, embedding: Vec<u8>) -> PyResult<()> {
+        let now = now_timestamp();
+        self.conn.execute(
+            "INSERT OR REPLACE INTO message_embeddings (message_id, chat_id, embedding, created_at)
+             VALUES (?, ?, ?, ?)",
+            params![message_id, chat_id, embedding, now]
+        ).map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(format!("Insert embedding error: {}", e)))?;
+        Ok(())
+    }
+
+    /// Mark embedding as complete in queue
+    pub fn mark_embedding_complete(&self, message_id: i64) -> PyResult<()> {
+        self.conn.execute(
+            "UPDATE embedding_queue SET status = 'completed' WHERE message_id = ?",
+            [message_id]
+        ).map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(format!("Update error: {}", e)))?;
+        Ok(())
+    }
+
+    /// Get all embeddings for semantic search
+    pub fn get_all_embeddings(&self) -> PyResult<Vec<StoredEmbedding>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT message_id, chat_id, embedding FROM message_embeddings"
+        ).map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(format!("Query error: {}", e)))?;
+
+        let rows = stmt
+            .query_map([], |row| {
+                Ok(StoredEmbedding {
+                    message_id: row.get(0)?,
+                    chat_id: row.get(1)?,
+                    embedding: row.get(2)?,
+                })
+            })
+            .map_err(|e| {
+                pyo3::exceptions::PyRuntimeError::new_err(format!("Query error: {}", e))
+            })?;
+
+        let mut result = Vec::new();
+        for row in rows {
+            result.push(row.map_err(|e| {
+                pyo3::exceptions::PyRuntimeError::new_err(format!("Row error: {}", e))
+            })?);
+        }
+        Ok(result)
+    }
+
+    /// Get message text by ID (for search results)
+    pub fn get_message_text(&self, message_id: i64) -> PyResult<Option<String>> {
+        let result = self.conn.query_row(
+            "SELECT text FROM messages WHERE id = ?",
+            [message_id],
+            |row| row.get(0)
+        );
+        match result {
+            Ok(text) => Ok(text),
+            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+            Err(e) => Err(pyo3::exceptions::PyRuntimeError::new_err(format!("Query error: {}", e)))
+        }
+    }
+
+    /// Queue all existing messages for embedding (one-time setup)
+    pub fn queue_all_messages_for_embedding(&self) -> PyResult<u32> {
+        let now = now_timestamp();
+        let count = self.conn.execute(
+            "INSERT OR IGNORE INTO embedding_queue (message_id, queued_at, status)
+             SELECT id, ?, 'pending' FROM messages WHERE text IS NOT NULL AND length(text) > 0",
+            [now]
+        ).map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(format!("Queue error: {}", e)))?;
+        Ok(count as u32)
+    }
+
+    /// Get embedding queue stats
+    pub fn get_embedding_queue_stats(&self) -> PyResult<(i64, i64, i64)> {
+        let pending: i64 = self.conn.query_row(
+            "SELECT COUNT(*) FROM embedding_queue WHERE status = 'pending'",
+            [],
+            |row| row.get(0)
+        ).map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(format!("Query error: {}", e)))?;
+
+        let completed: i64 = self.conn.query_row(
+            "SELECT COUNT(*) FROM embedding_queue WHERE status = 'completed'",
+            [],
+            |row| row.get(0)
+        ).map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(format!("Query error: {}", e)))?;
+
+        let total_embeddings: i64 = self.conn.query_row(
+            "SELECT COUNT(*) FROM message_embeddings",
+            [],
+            |row| row.get(0)
+        ).map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(format!("Query error: {}", e)))?;
+
+        Ok((pending, completed, total_embeddings))
     }
 }
 
