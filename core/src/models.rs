@@ -17,15 +17,13 @@ pub struct Person {
     #[pyo3(get)]
     pub name: String, // resolved name (contact name or fallback)
     #[pyo3(get)]
-    pub short_name: Option<String>, // first name for group display
-    #[pyo3(get)]
     pub service: String, // iMessage, SMS
     #[pyo3(get)]
     pub is_contact: bool, // has Apple Contacts entry
     #[pyo3(get)]
-    pub contact_phones: Option<String>, // JSON array of all phones
+    pub phones: Option<String>, // JSON array of all phones
     #[pyo3(get)]
-    pub contact_emails: Option<String>, // JSON array of all emails
+    pub emails: Option<String>, // JSON array of all emails
     #[pyo3(get)]
     pub company: Option<String>,
     #[pyo3(get)]
@@ -48,9 +46,7 @@ pub struct PrmChat {
     #[pyo3(get)]
     pub identifier: String, // phone/email for 1:1, "chat123" for groups
     #[pyo3(get)]
-    pub display_name: Option<String>, // user-set name (groups only)
-    #[pyo3(get)]
-    pub computed_name: Option<String>, // pre-computed display name
+    pub name: Option<String>, // display name (user-set or computed)
     #[pyo3(get)]
     pub is_group: bool,
     #[pyo3(get)]
@@ -62,11 +58,7 @@ pub struct PrmChat {
 #[pymethods]
 impl PrmChat {
     fn __repr__(&self) -> String {
-        let name = self
-            .computed_name
-            .as_deref()
-            .or(self.display_name.as_deref())
-            .unwrap_or(&self.identifier);
+        let name = self.name.as_deref().unwrap_or(&self.identifier);
         format!("PrmChat(id={}, name='{}')", self.id, name)
     }
 }

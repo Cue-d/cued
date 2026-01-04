@@ -232,11 +232,10 @@ CREATE TABLE people (
     id INTEGER PRIMARY KEY,          -- Same as handle.ROWID
     identifier TEXT NOT NULL,        -- phone "+12025551234" or email
     name TEXT NOT NULL,              -- resolved name (contact name or fallback)
-    short_name TEXT,                 -- first name for group display
     service TEXT NOT NULL,           -- iMessage, SMS
     is_contact INTEGER NOT NULL,     -- has Apple Contacts entry
-    contact_phones TEXT,             -- JSON array of all phones
-    contact_emails TEXT,             -- JSON array of all emails
+    phones TEXT,                     -- JSON array of all phones
+    emails TEXT,                     -- JSON array of all emails
     company TEXT,
     notes TEXT,
     synced_at INTEGER NOT NULL,
@@ -247,8 +246,7 @@ CREATE TABLE people (
 CREATE TABLE chats (
     id INTEGER PRIMARY KEY,          -- Same as chat.ROWID
     identifier TEXT NOT NULL,        -- phone/email for 1:1, "chat123" for groups
-    display_name TEXT,               -- user-set name (groups only)
-    computed_name TEXT,              -- pre-computed display name
+    name TEXT,                       -- display name (user-set or computed)
     is_group INTEGER NOT NULL,
     synced_at INTEGER NOT NULL
 );
@@ -355,8 +353,8 @@ CREATE TABLE sync_state (
 ### Data Classes (prm.db models)
 | Class | Source | Properties |
 |-------|--------|------------|
-| `Person` | models.rs | id, identifier, name, short_name, service, is_contact, contact_phones, contact_emails, company, notes |
-| `PrmChat` | models.rs | id, identifier, display_name, computed_name, is_group, last_message_text, last_message_timestamp |
+| `Person` | models.rs | id, identifier, name, service, is_contact, phones, emails, company, notes |
+| `PrmChat` | models.rs | id, identifier, name, is_group, last_message_text, last_message_timestamp |
 | `PrmMessage` | models.rs | id, chat_id, sender_id, sender_name, text, timestamp, is_from_me, is_read, read_at, has_attachments |
 | `Attachment` | models.rs | id, message_id, filename, path, mime_type, uti, size, is_outgoing, created_at |
 

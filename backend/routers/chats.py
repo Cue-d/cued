@@ -52,8 +52,8 @@ def get_chats(limit: int = 50, offset: int = 0):
         member_names = [p.name for p in participants]
         handle_ids = [p.identifier for p in participants]
 
-        # Use pre-computed name or fallback
-        name = chat.computed_name or chat.display_name or chat.identifier
+        # Use stored name or fallback to identifier
+        name = chat.name or chat.identifier
 
         result.append(
             ChatResponse(
