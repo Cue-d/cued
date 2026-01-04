@@ -12,16 +12,14 @@ class MockPrmChat:
         self,
         id: int,
         identifier: str,
-        display_name: str | None,
-        computed_name: str | None,
+        name: str | None,
         is_group: bool,
         last_message_text: str | None,
         last_message_timestamp: int | None,
     ):
         self.id = id
         self.identifier = identifier
-        self.display_name = display_name
-        self.computed_name = computed_name
+        self.name = name
         self.is_group = is_group
         self.last_message_text = last_message_text
         self.last_message_timestamp = last_message_timestamp
@@ -30,15 +28,14 @@ class MockPrmChat:
 class MockPerson:
     """Mock for core.Person returned by AppDb."""
 
-    def __init__(self, id: int, identifier: str, name: str, short_name: str | None = None):
+    def __init__(self, id: int, identifier: str, name: str):
         self.id = id
         self.identifier = identifier
         self.name = name
-        self.short_name = short_name or name.split()[0]
         self.service = "iMessage"
         self.is_contact = True
-        self.contact_phones = None
-        self.contact_emails = None
+        self.phones = None
+        self.emails = None
         self.company = None
         self.notes = None
 
@@ -89,8 +86,7 @@ def mock_app_db() -> MagicMock:
         MockPrmChat(
             id=1,
             identifier="+11234567890",
-            display_name=None,
-            computed_name="John Doe",
+            name="John Doe",
             is_group=False,
             last_message_text="Hello!",
             last_message_timestamp=700000000,  # Unix timestamp
@@ -98,8 +94,7 @@ def mock_app_db() -> MagicMock:
         MockPrmChat(
             id=2,
             identifier="chat123456789",
-            display_name="Family Group",
-            computed_name="Family Group",
+            name="Family Group",
             is_group=True,
             last_message_text="See you tomorrow",
             last_message_timestamp=700000000,
@@ -125,8 +120,7 @@ def mock_app_db() -> MagicMock:
             1: MockPrmChat(
                 id=1,
                 identifier="+11234567890",
-                display_name=None,
-                computed_name="John Doe",
+                name="John Doe",
                 is_group=False,
                 last_message_text="Hello!",
                 last_message_timestamp=700000000,
@@ -134,8 +128,7 @@ def mock_app_db() -> MagicMock:
             2: MockPrmChat(
                 id=2,
                 identifier="chat123456789",
-                display_name="Family Group",
-                computed_name="Family Group",
+                name="Family Group",
                 is_group=True,
                 last_message_text="See you tomorrow",
                 last_message_timestamp=700000000,

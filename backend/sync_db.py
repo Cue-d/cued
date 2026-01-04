@@ -182,19 +182,17 @@ def sync_people(
         if contact:
             # Found matching contact - use contact name
             name = contact.name
-            short_name = contact.name.split()[0] if contact.name else None
             is_contact = True
-            contact_phones = json.dumps(contact.phones) if contact.phones else None
-            contact_emails = json.dumps(contact.emails) if contact.emails else None
+            phones = json.dumps(contact.phones) if contact.phones else None
+            emails = json.dumps(contact.emails) if contact.emails else None
             company = contact.company
             notes = contact.notes
         else:
             # No contact - use fallback name
             name = fallback_name(handle.identifier)
-            short_name = name
             is_contact = False
-            contact_phones = None
-            contact_emails = None
+            phones = None
+            emails = None
             company = None
             notes = None
 
@@ -202,11 +200,10 @@ def sync_people(
             id=handle.id,
             identifier=handle.identifier,
             name=name,
-            short_name=short_name,
             service=handle.service,
             is_contact=is_contact,
-            contact_phones=contact_phones,
-            contact_emails=contact_emails,
+            phones=phones,
+            emails=emails,
             company=company,
             notes=notes,
         )
@@ -251,12 +248,13 @@ def sync_chats(
     synced = 0
     for chat in chats:
         # Compute display name at sync time
+        # If user set a name (display_name from chat.db), use it; otherwise compute
         if chat.display_name:
-            computed_name = chat.display_name
+            name = chat.display_name
         elif chat.is_group:
             # Group chat - join participant first names (e.g., "Soham, Aaron, Jay")
             handle_ids = chat_to_handles.get(chat.id, [])
-            names = []
+            participant_names = []
             for hid in handle_ids:
                 handle = handle_map.get(hid)
                 if handle:
@@ -264,15 +262,15 @@ def sync_chats(
                     if contact_name:
                         # Use first name for compact group display
                         first_name = contact_name.split()[0]
-                        names.append(first_name)
+                        participant_names.append(first_name)
                     else:
-                        names.append(fallback_name(handle.identifier))
-            if len(names) > 4:
-                computed_name = ", ".join(names[:4]) + f" +{len(names) - 4}"
-            elif names:
-                computed_name = ", ".join(names)
+                        participant_names.append(fallback_name(handle.identifier))
+            if len(participant_names) > 4:
+                name = ", ".join(participant_names[:4]) + f" +{len(participant_names) - 4}"
+            elif participant_names:
+                name = ", ".join(participant_names)
             else:
-                computed_name = chat.identifier
+                name = chat.identifier
         else:
             # 1:1 chat - use the other person's name
             handle_ids = chat_to_handles.get(chat.id, [])
@@ -280,13 +278,13 @@ def sync_chats(
                 handle = handle_map.get(handle_ids[0])
                 if handle:
                     contact_name = contact_lookup.get_name(handle.identifier)
-                    computed_name = contact_name or fallback_name(handle.identifier)
+                    name = contact_name or fallback_name(handle.identifier)
                 else:
-                    computed_name = chat.identifier
+                    name = chat.identifier
             else:
-                computed_name = chat.identifier
+                name = chat.identifier
 
-        app_db.upsert_chat(chat, computed_name)
+        app_db.upsert_chat(chat, name)
         synced += 1
 
         # Progress output every 100 chats

@@ -50,11 +50,10 @@ impl AppDb {
                 id INTEGER PRIMARY KEY,
                 identifier TEXT NOT NULL,
                 name TEXT NOT NULL,
-                short_name TEXT,
                 service TEXT NOT NULL,
                 is_contact INTEGER NOT NULL DEFAULT 0,
-                contact_phones TEXT,
-                contact_emails TEXT,
+                phones TEXT,
+                emails TEXT,
                 company TEXT,
                 notes TEXT,
                 synced_at INTEGER NOT NULL,
@@ -69,8 +68,7 @@ impl AppDb {
             CREATE TABLE IF NOT EXISTS chats (
                 id INTEGER PRIMARY KEY,
                 identifier TEXT NOT NULL,
-                display_name TEXT,
-                computed_name TEXT,
+                name TEXT,
                 is_group INTEGER NOT NULL,
                 synced_at INTEGER NOT NULL
             );
@@ -177,11 +175,10 @@ impl AppDb {
         id: i64,
         identifier: &str,
         name: &str,
-        short_name: Option<&str>,
         service: &str,
         is_contact: bool,
-        contact_phones: Option<&str>,
-        contact_emails: Option<&str>,
+        phones: Option<&str>,
+        emails: Option<&str>,
         company: Option<&str>,
         notes: Option<&str>,
     ) -> PyResult<()> {
@@ -189,17 +186,16 @@ impl AppDb {
         self.conn
             .execute(
                 "INSERT OR REPLACE INTO people
-                 (id, identifier, name, short_name, service, is_contact, contact_phones, contact_emails, company, notes, synced_at)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                 (id, identifier, name, service, is_contact, phones, emails, company, notes, synced_at)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 params![
                     id,
                     identifier,
                     name,
-                    short_name,
                     service,
                     is_contact as i32,
-                    contact_phones,
-                    contact_emails,
+                    phones,
+                    emails,
                     company,
                     notes,
                     now,
@@ -214,7 +210,7 @@ impl AppDb {
     /// Get a person by ID.
     pub fn get_person(&self, id: i64) -> PyResult<Option<Person>> {
         let result = self.conn.query_row(
-            "SELECT id, identifier, name, short_name, service, is_contact, contact_phones, contact_emails, company, notes
+            "SELECT id, identifier, name, service, is_contact, phones, emails, company, notes
              FROM people WHERE id = ?",
             [id],
             |row| {
@@ -222,13 +218,12 @@ impl AppDb {
                     id: row.get(0)?,
                     identifier: row.get(1)?,
                     name: row.get(2)?,
-                    short_name: row.get(3)?,
-                    service: row.get(4)?,
-                    is_contact: row.get::<_, i32>(5)? != 0,
-                    contact_phones: row.get(6)?,
-                    contact_emails: row.get(7)?,
-                    company: row.get(8)?,
-                    notes: row.get(9)?,
+                    service: row.get(3)?,
+                    is_contact: row.get::<_, i32>(4)? != 0,
+                    phones: row.get(5)?,
+                    emails: row.get(6)?,
+                    company: row.get(7)?,
+                    notes: row.get(8)?,
                 })
             },
         );
@@ -247,17 +242,16 @@ impl AppDb {
     // ============================================
 
     /// Upsert a chat.
-    pub fn upsert_chat(&self, chat: &SyncChat, computed_name: &str) -> PyResult<()> {
+    pub fn upsert_chat(&self, chat: &SyncChat, name: &str) -> PyResult<()> {
         let now = now_timestamp();
         self.conn
             .execute(
-                "INSERT OR REPLACE INTO chats (id, identifier, display_name, computed_name, is_group, synced_at)
-                 VALUES (?, ?, ?, ?, ?, ?)",
+                "INSERT OR REPLACE INTO chats (id, identifier, name, is_group, synced_at)
+                 VALUES (?, ?, ?, ?, ?)",
                 params![
                     chat.id,
                     chat.identifier,
-                    chat.display_name,
-                    computed_name,
+                    name,
                     chat.is_group as i32,
                     now,
                 ],
@@ -428,7 +422,7 @@ impl AppDb {
             .conn
             .prepare(
                 "SELECT
-                    c.id, c.identifier, c.display_name, c.computed_name, c.is_group,
+                    c.id, c.identifier, c.name, c.is_group,
                     (SELECT text FROM messages WHERE chat_id = c.id ORDER BY timestamp DESC LIMIT 1) as last_text,
                     (SELECT timestamp FROM messages WHERE chat_id = c.id ORDER BY timestamp DESC LIMIT 1) as last_ts
                  FROM chats c
@@ -443,11 +437,10 @@ impl AppDb {
                 Ok(PrmChat {
                     id: row.get(0)?,
                     identifier: row.get(1)?,
-                    display_name: row.get(2)?,
-                    computed_name: row.get(3)?,
-                    is_group: row.get::<_, i32>(4)? != 0,
-                    last_message_text: row.get(5)?,
-                    last_message_timestamp: row.get(6)?,
+                    name: row.get(2)?,
+                    is_group: row.get::<_, i32>(3)? != 0,
+                    last_message_text: row.get(4)?,
+                    last_message_timestamp: row.get(5)?,
                 })
             })
             .map_err(|e| {
@@ -467,7 +460,7 @@ impl AppDb {
     pub fn get_chat(&self, chat_id: i64) -> PyResult<Option<PrmChat>> {
         let result = self.conn.query_row(
             "SELECT
-                c.id, c.identifier, c.display_name, c.computed_name, c.is_group,
+                c.id, c.identifier, c.name, c.is_group,
                 (SELECT text FROM messages WHERE chat_id = c.id ORDER BY timestamp DESC LIMIT 1) as last_text,
                 (SELECT timestamp FROM messages WHERE chat_id = c.id ORDER BY timestamp DESC LIMIT 1) as last_ts
              FROM chats c
@@ -477,11 +470,10 @@ impl AppDb {
                 Ok(PrmChat {
                     id: row.get(0)?,
                     identifier: row.get(1)?,
-                    display_name: row.get(2)?,
-                    computed_name: row.get(3)?,
-                    is_group: row.get::<_, i32>(4)? != 0,
-                    last_message_text: row.get(5)?,
-                    last_message_timestamp: row.get(6)?,
+                    name: row.get(2)?,
+                    is_group: row.get::<_, i32>(3)? != 0,
+                    last_message_text: row.get(4)?,
+                    last_message_timestamp: row.get(5)?,
                 })
             },
         );
@@ -500,8 +492,8 @@ impl AppDb {
         let mut stmt = self
             .conn
             .prepare(
-                "SELECT p.id, p.identifier, p.name, p.short_name, p.service, p.is_contact,
-                        p.contact_phones, p.contact_emails, p.company, p.notes
+                "SELECT p.id, p.identifier, p.name, p.service, p.is_contact,
+                        p.phones, p.emails, p.company, p.notes
                  FROM people p
                  INNER JOIN chat_participants cp ON cp.person_id = p.id
                  WHERE cp.chat_id = ?
@@ -517,13 +509,12 @@ impl AppDb {
                     id: row.get(0)?,
                     identifier: row.get(1)?,
                     name: row.get(2)?,
-                    short_name: row.get(3)?,
-                    service: row.get(4)?,
-                    is_contact: row.get::<_, i32>(5)? != 0,
-                    contact_phones: row.get(6)?,
-                    contact_emails: row.get(7)?,
-                    company: row.get(8)?,
-                    notes: row.get(9)?,
+                    service: row.get(3)?,
+                    is_contact: row.get::<_, i32>(4)? != 0,
+                    phones: row.get(5)?,
+                    emails: row.get(6)?,
+                    company: row.get(7)?,
+                    notes: row.get(8)?,
                 })
             })
             .map_err(|e| {
@@ -662,11 +653,10 @@ mod tests {
                 id INTEGER PRIMARY KEY,
                 identifier TEXT NOT NULL,
                 name TEXT NOT NULL,
-                short_name TEXT,
                 service TEXT NOT NULL,
                 is_contact INTEGER NOT NULL DEFAULT 0,
-                contact_phones TEXT,
-                contact_emails TEXT,
+                phones TEXT,
+                emails TEXT,
                 company TEXT,
                 notes TEXT,
                 synced_at INTEGER NOT NULL,
@@ -678,8 +668,7 @@ mod tests {
             CREATE TABLE IF NOT EXISTS chats (
                 id INTEGER PRIMARY KEY,
                 identifier TEXT NOT NULL,
-                display_name TEXT,
-                computed_name TEXT,
+                name TEXT,
                 is_group INTEGER NOT NULL,
                 synced_at INTEGER NOT NULL
             );
@@ -725,8 +714,8 @@ mod tests {
 
         db.conn
             .execute(
-                "INSERT INTO people (id, identifier, name, short_name, service, is_contact, contact_phones, contact_emails, company, notes, synced_at)
-                 VALUES (1, '+12025551234', 'Alice Smith', 'Alice', 'iMessage', 1, ?1, ?2, 'Acme Corp', 'Met at conference', ?3)",
+                "INSERT INTO people (id, identifier, name, service, is_contact, phones, emails, company, notes, synced_at)
+                 VALUES (1, '+12025551234', 'Alice Smith', 'iMessage', 1, ?1, ?2, 'Acme Corp', 'Met at conference', ?3)",
                 params![phones_json, emails_json, now],
             )
             .unwrap();
@@ -758,8 +747,8 @@ mod tests {
         // Insert initial person
         db.conn
             .execute(
-                "INSERT INTO people (id, identifier, name, short_name, service, is_contact, company, synced_at)
-                 VALUES (1, '+12025551234', 'Bob Jones', 'Bob', 'iMessage', 1, 'Old Corp', ?1)",
+                "INSERT INTO people (id, identifier, name, service, is_contact, company, synced_at)
+                 VALUES (1, '+12025551234', 'Bob Jones', 'iMessage', 1, 'Old Corp', ?1)",
                 [now],
             )
             .unwrap();
@@ -767,8 +756,8 @@ mod tests {
         // Upsert with same id but different data
         db.conn
             .execute(
-                "INSERT OR REPLACE INTO people (id, identifier, name, short_name, service, is_contact, company, notes, synced_at)
-                 VALUES (1, '+12025551234', 'Bob Jones', 'Bob', 'iMessage', 1, 'New Corp', 'Updated', ?1)",
+                "INSERT OR REPLACE INTO people (id, identifier, name, service, is_contact, company, notes, synced_at)
+                 VALUES (1, '+12025551234', 'Bob Jones', 'iMessage', 1, 'New Corp', 'Updated', ?1)",
                 [now],
             )
             .unwrap();
@@ -824,7 +813,7 @@ mod tests {
         // Query people ordered by name
         let mut stmt = db
             .conn
-            .prepare("SELECT id, identifier, name, short_name, service, is_contact, contact_phones, contact_emails, company, notes FROM people ORDER BY name")
+            .prepare("SELECT id, identifier, name, service, is_contact, phones, emails, company, notes FROM people ORDER BY name")
             .unwrap();
         let people: Vec<Person> = stmt
             .query_map([], |row| {
@@ -832,13 +821,12 @@ mod tests {
                     id: row.get(0)?,
                     identifier: row.get(1)?,
                     name: row.get(2)?,
-                    short_name: row.get(3)?,
-                    service: row.get(4)?,
-                    is_contact: row.get::<_, i32>(5)? != 0,
-                    contact_phones: row.get(6)?,
-                    contact_emails: row.get(7)?,
-                    company: row.get(8)?,
-                    notes: row.get(9)?,
+                    service: row.get(3)?,
+                    is_contact: row.get::<_, i32>(4)? != 0,
+                    phones: row.get(5)?,
+                    emails: row.get(6)?,
+                    company: row.get(7)?,
+                    notes: row.get(8)?,
                 })
             })
             .unwrap()
@@ -863,7 +851,7 @@ mod tests {
 
         db.conn
             .execute(
-                "INSERT INTO people (id, identifier, name, service, is_contact, contact_phones, contact_emails, synced_at)
+                "INSERT INTO people (id, identifier, name, service, is_contact, phones, emails, synced_at)
                  VALUES (1, '+12025551234', 'Alice', 'iMessage', 1, ?1, ?2, ?3)",
                 params![phones_json, emails_json, now],
             )
@@ -872,7 +860,7 @@ mod tests {
         let (stored_phones, stored_emails): (Option<String>, Option<String>) = db
             .conn
             .query_row(
-                "SELECT contact_phones, contact_emails FROM people WHERE name = 'Alice'",
+                "SELECT phones, emails FROM people WHERE name = 'Alice'",
                 [],
                 |row| Ok((row.get(0)?, row.get(1)?)),
             )
