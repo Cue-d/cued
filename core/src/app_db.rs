@@ -32,6 +32,22 @@ impl AppDb {
         let conn = Connection::open(path).map_err(|e| {
             pyo3::exceptions::PyIOError::new_err(format!("Failed to open db: {}", e))
         })?;
+
+        // Enable WAL mode for better concurrent access - this allows the
+        // SyncWatcher to write while the API reads/writes without "database is locked" errors
+        conn.execute("PRAGMA journal_mode = WAL", []).map_err(|e| {
+            pyo3::exceptions::PyRuntimeError::new_err(format!("Failed to enable WAL mode: {}", e))
+        })?;
+
+        // Set busy timeout to wait up to 5 seconds if database is locked
+        conn.execute("PRAGMA busy_timeout = 5000", [])
+            .map_err(|e| {
+                pyo3::exceptions::PyRuntimeError::new_err(format!(
+                    "Failed to set busy timeout: {}",
+                    e
+                ))
+            })?;
+
         Ok(Self { conn })
     }
 
@@ -921,12 +937,25 @@ impl AppDb {
 
     /// Rebuild FTS index from existing messages
     pub fn rebuild_fts_index(&self) -> PyResult<u32> {
-        // Clear and rebuild
+        // Drop and recreate the FTS table to handle corruption
+        // This is more robust than DELETE which can fail on corrupted indexes
         self.conn
-            .execute("DELETE FROM messages_fts", [])
+            .execute_batch(
+                "
+                DROP TABLE IF EXISTS messages_fts;
+                CREATE VIRTUAL TABLE messages_fts USING fts5(
+                    text,
+                    content='messages',
+                    content_rowid='id',
+                    tokenize='porter unicode61'
+                );
+                ",
+            )
             .map_err(|e| {
-                pyo3::exceptions::PyRuntimeError::new_err(format!("Clear FTS error: {}", e))
+                pyo3::exceptions::PyRuntimeError::new_err(format!("Recreate FTS error: {}", e))
             })?;
+
+        // Repopulate from messages
         let count = self.conn.execute(
             "INSERT INTO messages_fts(rowid, text) SELECT id, text FROM messages WHERE text IS NOT NULL",
             []
