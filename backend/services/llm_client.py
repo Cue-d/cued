@@ -67,29 +67,54 @@ def is_llm_available() -> bool:
     return binary_path.exists() and os.access(binary_path, os.X_OK)
 
 
+def sanitize_text(text: str | None) -> str:
+    """Sanitize text by removing problematic characters."""
+    if not text:
+        return ""
+
+    # Remove null bytes and other control characters (keep newlines, tabs)
+    result = "".join(
+        char for char in text if char in "\n\r\t" or (ord(char) >= 0x20 and ord(char) != 0x7F)
+    )
+
+    # Limit length to avoid overwhelming the model
+    if len(result) > 1000:
+        result = result[:1000] + "..."
+
+    return result
+
+
 def format_conversation_as_text(ctx: ConversationContext) -> str:
     """Format a conversation context as plain text for the LLM."""
     lines = []
 
     # Contact info
     if ctx.person_name:
-        contact_line = f"Contact: {ctx.person_name}"
+        name = sanitize_text(ctx.person_name)
+        contact_line = f"Contact: {name}"
         if ctx.person_company:
-            contact_line += f" ({ctx.person_company})"
+            contact_line += f" ({sanitize_text(ctx.person_company)})"
         lines.append(contact_line)
         if ctx.person_notes:
-            lines.append(f"Notes: {ctx.person_notes}")
+            lines.append(f"Notes: {sanitize_text(ctx.person_notes)}")
 
     # Time context
     lines.append(f"Hours since last message: {int(ctx.hours_since_last)}")
     lines.append("")
     lines.append("Messages:")
 
-    # Messages (last 10 for context)
-    for msg in ctx.messages[-10:]:
-        sender = "Me" if msg.get("is_from_me") else "Them"
-        text = msg.get("text") or "[attachment]"
-        lines.append(f"  [{sender}]: {text}")
+    # Sort messages by timestamp (oldest first) and take last 10
+    sorted_messages = sorted(ctx.messages, key=lambda m: m.get("timestamp", 0))[-10:]
+
+    for msg in sorted_messages:
+        if msg.get("is_from_me"):
+            sender = "Me"
+        else:
+            # Use sender_name if available (for group chats), otherwise "Them"
+            sender_name = msg.get("sender_name")
+            sender = sanitize_text(sender_name) if sender_name else "Them"
+        text = sanitize_text(msg.get("text")) or "[attachment]"
+        lines.append(f"  {sender}: {text}")
 
     return "\n".join(lines)
 

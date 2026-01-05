@@ -227,6 +227,7 @@ def _run_llm_action_generation(db, unanswered_chats) -> int:
                     "text": m.text,
                     "is_from_me": m.is_from_me,
                     "timestamp": m.timestamp,
+                    "sender_name": m.sender_name,  # For group chats
                 }
                 for m in messages
             ],
@@ -318,7 +319,7 @@ def start_scheduler():
     scheduler = BackgroundScheduler()
 
     # Scan for unanswered messages every 6 hours
-    scheduler.add_job(run_unanswered_scan, "interval", hours=6, id="unanswered_scan")
+    scheduler.add_job(run_unanswered_scan, "interval", minutes=1, id="unanswered_scan")
 
     # EOD contact scan at 9 PM daily
     scheduler.add_job(run_eod_scan, "cron", hour=21, id="eod_scan")
@@ -360,6 +361,10 @@ async def lifespan(app: FastAPI):
 
     # Start the Rust background sync watcher for near-real-time message updates
     start_sync_watcher()
+
+    # Generate initial actions from unanswered messages on startup
+    logger.info("Running initial unanswered message scan...")
+    run_unanswered_scan()
 
     # Start the background scheduler for periodic jobs
     start_scheduler()

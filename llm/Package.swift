@@ -9,6 +9,15 @@ let package = Package(
     products: [
         .executable(name: "prm-llm", targets: ["prm-llm"])
     ],
+    // AnyLanguageModel uses Swift 6.1 traits to conditionally include heavy dependencies, allowing you to opt-in only to the language model backends you need. This results in smaller binary sizes and faster build times.
+    // By default, no traits are enabled. To enable specific traits, specify them in your package's dependencies:
+    // dependencies: [
+    //     .package(
+    //         url: "https://github.com/mattt/AnyLanguageModel.git",
+    //         from: "0.5.0",
+    //         traits: ["CoreML", "MLX"] // Enable CoreML and MLX support
+    //     )
+    // ]
     dependencies: [
         .package(url: "https://github.com/mattt/AnyLanguageModel.git", from: "0.5.0")
     ],

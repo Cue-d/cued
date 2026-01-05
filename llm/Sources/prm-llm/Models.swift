@@ -4,6 +4,16 @@ import Foundation
 
 struct ActionOutput: Codable {
     let action: ActionSuggestionOutput?
+    
+    // Explicitly encode null for action when it's nil
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(action, forKey: .action)
+    }
+    
+    enum CodingKeys: String, CodingKey {
+        case action
+    }
 }
 
 struct ActionSuggestionOutput: Codable {
@@ -11,7 +21,7 @@ struct ActionSuggestionOutput: Codable {
     let priority: Int
     let payload: ActionPayload
     let remindAt: Int?
-    
+
     enum CodingKeys: String, CodingKey {
         case type
         case priority
