@@ -1,0 +1,15 @@
+repos:
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.8.4
+    hooks:
+      # Run the formatter
+      - id: ruff-format
+        name: ruff format
+        files: ^backend/.*\.py$
+        types: [python]
+      # Run the linter
+      - id: ruff
+        name: ruff lint
+        args: [--fix]
+        files: ^backend/.*\.py$
+        types: [python]
