@@ -511,3 +511,38 @@ pub struct StoredEmbedding {
     #[pyo3(get)]
     pub embedding: Vec<u8>,
 }
+
+/// Chat queued for LLM analysis
+#[pyclass]
+#[derive(Debug, Clone)]
+pub struct QueuedAnalysis {
+    #[pyo3(get)]
+    pub chat_id: i64,
+    #[pyo3(get)]
+    pub status: String,
+    #[pyo3(get)]
+    pub priority: i32,
+    #[pyo3(get)]
+    pub queued_at: i64,
+    #[pyo3(get)]
+    pub started_at: Option<i64>,
+    #[pyo3(get)]
+    pub completed_at: Option<i64>,
+    #[pyo3(get)]
+    pub result: Option<String>,
+    // Joined fields for context
+    #[pyo3(get)]
+    pub chat_name: Option<String>,
+    #[pyo3(get)]
+    pub person_name: Option<String>,
+}
+
+#[pymethods]
+impl QueuedAnalysis {
+    fn __repr__(&self) -> String {
+        format!(
+            "QueuedAnalysis(chat_id={}, status='{}')",
+            self.chat_id, self.status
+        )
+    }
+}

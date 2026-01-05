@@ -37,6 +37,7 @@ fn core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<models::UnansweredChat>()?;
     m.add_class::<models::PendingEmbedding>()?;
     m.add_class::<models::StoredEmbedding>()?;
+    m.add_class::<models::QueuedAnalysis>()?;
 
     // Database classes
     m.add_class::<app_db::AppDb>()?;
