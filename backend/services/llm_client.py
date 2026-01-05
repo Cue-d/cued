@@ -153,6 +153,10 @@ def analyze_conversation(ctx: ConversationContext) -> ActionSuggestion | None:
 
         if result.returncode != 0:
             error_msg = result.stderr.strip() if result.stderr else "Unknown error"
+            # Check for content safety errors (from Apple's MLX LLM)
+            if "unsafe" in error_msg.lower():
+                logger.debug(f"Content flagged as unsafe for chat_id={ctx.chat_id}")
+                raise ContentSafetyError("Content flagged as unsafe")
             logger.error(f"LLM call failed for chat_id={ctx.chat_id}: {error_msg}")
             raise LLMError(f"LLM call failed: {error_msg}")
 
@@ -235,5 +239,11 @@ def generate_actions(contexts: list[ConversationContext]) -> list[ActionSuggesti
 
 class LLMError(Exception):
     """Error from the LLM client."""
+
+    pass
+
+
+class ContentSafetyError(LLMError):
+    """Content was flagged as potentially unsafe by the LLM."""
 
     pass

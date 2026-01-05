@@ -213,6 +213,23 @@ class TestAnalyzeConversation:
             with pytest.raises(LLMError, match="LLM call failed"):
                 analyze_conversation(sample_context)
 
+    def test_raises_content_safety_error_on_unsafe_content(
+        self, sample_context: ConversationContext
+    ):
+        from services.llm_client import ContentSafetyError
+
+        mock_result = MagicMock()
+        mock_result.returncode = 1
+        mock_result.stderr = "Detected content likely to be unsafe"
+        mock_result.stdout = ""
+
+        with (
+            patch("services.llm_client.is_llm_available", return_value=True),
+            patch("subprocess.run", return_value=mock_result),
+        ):
+            with pytest.raises(ContentSafetyError, match="Content flagged as unsafe"):
+                analyze_conversation(sample_context)
+
     def test_raises_error_on_invalid_json(self, sample_context: ConversationContext):
         mock_result = MagicMock()
         mock_result.returncode = 0
