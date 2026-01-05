@@ -3,11 +3,11 @@ import { useEffect, useState } from 'react'
 import { useSyncStatus } from '@/hooks'
 import { ActionQueueView } from './components/ActionQueue'
 import { CommandMenu } from './components/CommandMenu'
-import ThemeToggle from './components/ThemeToggle'
 
 function App() {
   const { isInitialSyncing } = useSyncStatus()
-  const [isDark, setIsDark] = useState(true)
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  const [isDark, _setIsDark] = useState(true)
 
   useEffect(() => {
     document.documentElement.classList.toggle('dark', isDark)
@@ -31,9 +31,6 @@ function App() {
   return (
     <div className="relative w-full h-screen flex overflow-hidden bg-imessage-window-bg">
       <CommandMenu />
-      <div className="absolute top-3 right-3 z-10">
-        <ThemeToggle isDark={isDark} onToggle={() => setIsDark(!isDark)} />
-      </div>
       <ActionQueueView />
     </div>
   )
