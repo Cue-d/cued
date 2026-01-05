@@ -4,14 +4,15 @@ LLM Client - Wrapper for the prm-llm Swift CLI.
 Uses Apple Intelligence (Foundation Models) via AnyLanguageModel to generate
 intelligent action suggestions based on conversation context.
 
-Each conversation is analyzed independently with one LLM call per conversation
-to avoid context degradation.
+Each conversation is analyzed independently with one LLM call per conversation.
+Multiple conversations are analyzed in parallel using a thread pool for better performance.
 """
 
 import json
 import logging
 import os
 import subprocess
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -134,6 +135,8 @@ def analyze_conversation(ctx: ConversationContext) -> ActionSuggestion | None:
     """
     binary_path = get_llm_binary_path()
 
+    print(f"Analyzing conversation for chat_id={ctx.chat_id}")
+
     if not is_llm_available():
         raise LLMError(f"LLM binary not found at {binary_path}")
 
@@ -196,14 +199,22 @@ def analyze_conversation(ctx: ConversationContext) -> ActionSuggestion | None:
         raise LLMError(f"LLM binary not found: {binary_path}") from None
 
 
-def generate_actions(contexts: list[ConversationContext]) -> list[ActionSuggestion]:
+# Maximum number of parallel LLM calls
+MAX_PARALLEL_LLM_CALLS = 5
+
+
+def generate_actions(
+    contexts: list[ConversationContext], max_workers: int | None = None
+) -> list[ActionSuggestion]:
     """
-    Generate action suggestions for multiple conversations.
+    Generate action suggestions for multiple conversations in parallel.
 
     Each conversation is analyzed independently with one LLM call per conversation.
+    Multiple conversations are processed concurrently using a thread pool.
 
     Args:
         contexts: List of conversation contexts to analyze
+        max_workers: Maximum parallel LLM calls (default: MAX_PARALLEL_LLM_CALLS)
 
     Returns:
         List of suggested actions (only for conversations that need action)
@@ -219,19 +230,26 @@ def generate_actions(contexts: list[ConversationContext]) -> list[ActionSuggesti
         logger.warning(f"LLM binary not found at {binary_path}")
         raise LLMError(f"LLM binary not found at {binary_path}")
 
+    workers = max_workers or MAX_PARALLEL_LLM_CALLS
     suggestions = []
-    for ctx in contexts:
-        try:
-            suggestion = analyze_conversation(ctx)
-            if suggestion:
-                suggestions.append(suggestion)
-        except LLMError as e:
-            # Log and continue with other conversations
-            logger.warning(f"Failed to analyze chat_id={ctx.chat_id}: {e}")
-            continue
+
+    with ThreadPoolExecutor(max_workers=workers) as executor:
+        # Submit all conversations for parallel processing
+        future_to_ctx = {executor.submit(analyze_conversation, ctx): ctx for ctx in contexts}
+
+        for future in as_completed(future_to_ctx):
+            ctx = future_to_ctx[future]
+            try:
+                suggestion = future.result()
+                if suggestion:
+                    suggestions.append(suggestion)
+            except LLMError as e:
+                # Log and continue with other conversations
+                logger.warning(f"Failed to analyze chat_id={ctx.chat_id}: {e}")
+                continue
 
     logger.info(
-        f"LLM analyzed {len(contexts)} conversations, "
+        f"LLM analyzed {len(contexts)} conversations in parallel (workers={workers}), "
         f"generated {len(suggestions)} action suggestions"
     )
     return suggestions
