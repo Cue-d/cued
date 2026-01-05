@@ -18,13 +18,37 @@ from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
-# Default path to the prm-llm binary (relative to project root)
+# Default path to the prm-llm binary (relative to project root, for development)
 DEFAULT_LLM_BINARY_PATH = (
     Path(__file__).parent.parent.parent / "llm" / ".build" / "release" / "prm-llm"
 )
 
 # Environment variable to override the binary path
 LLM_BINARY_ENV_VAR = "PRM_LLM_BINARY"
+
+
+def _get_packaged_llm_path() -> Path | None:
+    """Get the LLM binary path when running as a packaged PyInstaller executable.
+
+    When packaged with Electron, the layout is:
+        resources/
+            backend/prm-backend  (PyInstaller executable)
+            llm/prm-llm          (Swift binary)
+
+    We use sys.executable to find the backend location, then navigate to llm/.
+    """
+    import sys
+
+    # Check if running as PyInstaller bundle
+    if not getattr(sys, "frozen", False):
+        return None
+
+    # sys.executable points to resources/backend/prm-backend
+    # We want resources/llm/prm-llm
+    executable_path = Path(sys.executable)
+    llm_path = executable_path.parent.parent / "llm" / "prm-llm"
+    return llm_path
+
 
 # Timeout for LLM calls (seconds)
 LLM_TIMEOUT = 30
@@ -55,10 +79,22 @@ class ActionSuggestion:
 
 
 def get_llm_binary_path() -> Path:
-    """Get the path to the prm-llm binary."""
+    """Get the path to the prm-llm binary.
+
+    Checks in order:
+    1. Environment variable PRM_LLM_BINARY
+    2. Packaged app location (resources/llm/prm-llm) - when running as PyInstaller bundle
+    3. Development location (llm/.build/release/prm-llm)
+    """
     env_path = os.environ.get(LLM_BINARY_ENV_VAR)
     if env_path:
         return Path(env_path)
+
+    # Check packaged app location first (for production builds)
+    packaged_path = _get_packaged_llm_path()
+    if packaged_path and packaged_path.exists():
+        return packaged_path
+
     return DEFAULT_LLM_BINARY_PATH
 
 

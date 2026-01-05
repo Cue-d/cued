@@ -14,6 +14,8 @@ asarUnpack:
 extraResources:
   - from: ../backend/dist/prm-backend
     to: backend/prm-backend
+  - from: ../llm/.build/release/prm-llm
+    to: llm/prm-llm
 win:
   executableName: prm
 nsis:

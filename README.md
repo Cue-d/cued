@@ -9,6 +9,7 @@ A macOS-only local-first personal CRM with an iMessage-style interface.
 - [Rust](https://rustup.rs/)
 - [uv](https://docs.astral.sh/uv/) (Python package manager)
 - [pnpm](https://pnpm.io/)
+- **For Apple Intelligence features:** macOS 26+ (Tahoe) and Xcode 26+ / Swift 6.0+
 
 ## Setup
 
@@ -28,7 +29,19 @@ VIRTUAL_ENV=backend/.venv maturin develop --manifest-path core/Cargo.toml
 cd frontend && pnpm install && cd ..
 ```
 
-### 2. Run initial sync (~10 minutes)
+### 2. Build Swift LLM CLI (Optional)
+
+The `prm-llm` CLI uses Apple Intelligence for intelligent action generation. If not built, the backend falls back to heuristic-based action generation.
+
+**Requirements:** macOS 26+ (Tahoe), Xcode 26+ or Swift 6.0+
+
+```bash
+cd llm && swift build -c release && cd ..
+```
+
+The binary is output to `llm/.build/release/prm-llm`. The backend automatically detects and uses it when available.
+
+### 3. Run initial sync (~10 minutes)
 
 The first sync fetches all your iMessage history and resolves contact names via AppleScript. This takes approximately 10 minutes due to Contacts.app API limitations.
 
@@ -37,12 +50,13 @@ cd backend && uv run python sync_db.py
 ```
 
 You'll see progress output as it syncs:
+
 - People (handles from chat.db)
 - Chats (conversations)
 - Messages (incremental batches)
 - Attachments
 
-### 3. Initialize Search Indexes
+### 4. Initialize Search Indexes
 
 After the first sync completes, set up the search indexes:
 
@@ -63,14 +77,16 @@ curl http://localhost:8000/search/embeddings/stats  # Check progress
 
 Note: First embedding call downloads the model (~90MB). Processing ~44K messages takes several minutes.
 
-### 4. Start the app
+### 5. Start the app
 
 **Terminal 1 - Backend:**
+
 ```bash
 cd backend && uv run uvicorn main:app --reload
 ```
 
 **Terminal 2 - Frontend:**
+
 ```bash
 cd frontend && pnpm dev
 ```
@@ -124,37 +140,63 @@ curl -X POST http://localhost:8000/actions/1/swipe -H "Content-Type: application
 
 The backend automatically scans for unanswered messages every 6 hours and generates EOD actions for new contacts daily at 9 PM.
 
+## Building for Production
+
+Build the complete Electron app with all components bundled:
+
+```bash
+cd frontend && pnpm build:full
+```
+
+This runs the following in order:
+
+1. `build:rust` - Builds the Rust core as a Python extension
+2. `build:llm` - Builds the Swift LLM CLI (requires macOS 26+/Xcode 26+)
+3. `build:backend` - Packages the Python backend with PyInstaller
+4. `build` + `electron-builder` - Builds and packages the Electron app
+
+The final `.dmg` is output to `frontend/dist/`.
+
+**Note:** If Swift build fails (older macOS), the app still works but uses heuristic-based action generation instead of Apple Intelligence.
+
 ## Running Tests
 
 **Backend (pytest):**
+
 ```bash
 cd backend && uv run pytest
 ```
 
 **Frontend (vitest):**
+
 ```bash
 cd frontend && pnpm test
 ```
 
 ## Troubleshooting
 
-| Problem | Solution |
-|---------|----------|
-| "Error accessing messages database" | Grant Full Disk Access to your terminal |
-| "Cannot import core" | Run `VIRTUAL_ENV=backend/.venv maturin develop --manifest-path core/Cargo.toml` |
-| Contact names showing as phone numbers | Run the initial sync: `cd backend && uv run python sync_db.py` |
-| Sync seems stuck | Contact resolution is slow (~10 min) - this is normal |
-| "database disk image is malformed" (FTS5) | See CLAUDE.md Manual Processes section to recreate FTS5 table |
-| Semantic search returns empty | Run embedding queue-all and process commands (see step 3) |
+| Problem                                   | Solution                                                                                |
+| ----------------------------------------- | --------------------------------------------------------------------------------------- |
+| "Error accessing messages database"       | Grant Full Disk Access to your terminal                                                 |
+| "Cannot import core"                      | Run `VIRTUAL_ENV=backend/.venv maturin develop --manifest-path core/Cargo.toml`         |
+| Swift build fails                         | Requires macOS 26+ and Xcode 26+/Swift 6.0+. Backend works without it (uses heuristics) |
+| Contact names showing as phone numbers    | Run the initial sync: `cd backend && uv run python sync_db.py`                          |
+| Sync seems stuck                          | Contact resolution is slow (~10 min) - this is normal                                   |
+| "database disk image is malformed" (FTS5) | See CLAUDE.md Manual Processes section to recreate FTS5 table                           |
+| Semantic search returns empty             | Run embedding queue-all and process commands (see step 4)                               |
 
 ## Architecture
 
 ```
 Frontend (Electron/React) ←→ Backend (FastAPI) ←→ Core (Rust/PyO3) ←→ chat.db / prm.db
+                                    ↓
+                            prm-llm (Swift CLI)
+                            Apple Intelligence
 ```
 
 - `chat.db` - macOS iMessage database (read-only)
 - `prm.db` - App's local database (synced copy with resolved names)
+- `prm-llm` - Swift CLI for intelligent action generation (optional, requires macOS 26+)
 - Contacts resolved via AppleScript → Contacts.app
 
 See [CLAUDE.md](./CLAUDE.md) for detailed development documentation.
