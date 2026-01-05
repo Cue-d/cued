@@ -1,10 +1,12 @@
-import { Inbox, RefreshCw } from 'lucide-react'
+import { AlertCircle, Inbox, RefreshCw } from 'lucide-react'
 import { useCallback, useMemo, useState } from 'react'
 import { searchMessages, semanticSearch } from '@/api/actions'
 import type { ActionType, SearchResultResponse, SwipeDirection } from '@/data/types'
 import { useActions } from '@/hooks'
+import { Empty, EmptyDescription, EmptyMedia, EmptyTitle } from '@/components/ui/empty'
 import { CardStack } from './CardStack'
 import { SearchBar } from './SearchBar'
+import { Spinner } from '../ui/spinner'
 
 type SortBy = 'priority' | 'date' | 'type'
 
@@ -88,30 +90,34 @@ export function ActionQueueView() {
 
   if (loading) {
     return (
-      <div className="w-full h-full flex flex-col items-center justify-center gap-4 bg-imessage-window-bg">
-        <RefreshCw className="w-8 h-8 text-primary animate-spin" />
-        <div className="flex flex-col items-center gap-1">
-          <span className="text-foreground font-medium">Loading Actions</span>
-          <span className="text-sm text-muted-foreground">Getting your pending items...</span>
-        </div>
+      <div className="w-full h-full bg-imessage-window-bg">
+        <Empty className="border-0">
+          <EmptyMedia>
+            <Spinner />
+          </EmptyMedia>
+          <EmptyTitle>Loading Actions</EmptyTitle>
+          <EmptyDescription>Getting your pending items...</EmptyDescription>
+        </Empty>
       </div>
     )
   }
 
   if (error) {
     return (
-      <div className="w-full h-full flex flex-col items-center justify-center gap-4 bg-imessage-window-bg px-8">
-        <div className="text-4xl">😕</div>
-        <div className="flex flex-col items-center gap-2 text-center">
-          <span className="text-foreground font-medium">Something went wrong</span>
-          <span className="text-sm text-muted-foreground max-w-sm">{error}</span>
+      <div className="w-full h-full bg-imessage-window-bg">
+        <Empty className="border-0">
+          <EmptyMedia variant="icon">
+            <AlertCircle className="w-6 h-6" />
+          </EmptyMedia>
+          <EmptyTitle>Something went wrong</EmptyTitle>
+          <EmptyDescription>{error}</EmptyDescription>
           <button
             onClick={refresh}
             className="mt-4 px-4 py-2 bg-primary text-primary-foreground rounded-lg hover:opacity-90 transition-opacity"
           >
             Try Again
           </button>
-        </div>
+        </Empty>
       </div>
     )
   }

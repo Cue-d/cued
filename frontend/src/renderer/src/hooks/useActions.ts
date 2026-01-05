@@ -3,7 +3,10 @@ import type { ActionResponse } from '@/api/actions'
 import { fetchActions, swipeAction } from '@/api/actions'
 import type { SwipeDirection } from '@/data/types'
 
-// Mock data for development when backend is unavailable
+// Check if mock mode is enabled via environment variable
+const USE_MOCK_DATA = import.meta.env.VITE_USE_MOCK_DATA === 'true'
+
+// Mock data for development when backend is unavailable (only used when USE_MOCK_DATA=true)
 const MOCK_ACTIONS: ActionResponse[] = [
   {
     id: 1,
@@ -167,10 +170,15 @@ export function useActions() {
       setLoading(true)
       setError(null)
       const data = await fetchActions('pending', 50)
-      setActions(data.length > 0 ? data : MOCK_ACTIONS)
-    } catch {
-      // Fallback to mock data when backend is unavailable
-      setActions(MOCK_ACTIONS)
+      // Only use mock data when explicitly enabled and no real data exists
+      setActions(USE_MOCK_DATA && data.length === 0 ? MOCK_ACTIONS : data)
+    } catch (err) {
+      if (USE_MOCK_DATA) {
+        // Fallback to mock data when backend is unavailable (dev mode only)
+        setActions(MOCK_ACTIONS)
+      } else {
+        setError(err instanceof Error ? err.message : 'Failed to load actions')
+      }
     } finally {
       setLoading(false)
     }

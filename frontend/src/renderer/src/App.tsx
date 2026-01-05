@@ -1,8 +1,9 @@
-import { RefreshCw } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { useSyncStatus } from '@/hooks'
 import { ActionQueueView } from './components/ActionQueue'
 import { CommandMenu } from './components/CommandMenu'
+import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from './components/ui/empty'
+import { Spinner } from './components/ui/spinner'
 
 function App() {
   const { isInitialSyncing } = useSyncStatus()
@@ -16,15 +17,15 @@ function App() {
   // Show full-screen loading during initial sync
   if (isInitialSyncing) {
     return (
-      <div className="w-full h-screen flex flex-col items-center justify-center bg-imessage-window-bg gap-4">
-        <RefreshCw className="w-8 h-8 text-primary animate-spin" />
-        <div className="flex flex-col items-center gap-1">
-          <span className="text-foreground font-medium">Syncing Messages</span>
-          <span className="text-sm text-muted-foreground">
-            This may take a moment on first launch...
-          </span>
-        </div>
-      </div>
+      <Empty className="w-full h-screen">
+        <EmptyHeader>
+          <EmptyMedia variant="icon">
+            <Spinner />
+          </EmptyMedia>
+          <EmptyTitle>Syncing Messages</EmptyTitle>
+          <EmptyDescription>This may take a moment.</EmptyDescription>
+        </EmptyHeader>
+      </Empty>
     )
   }
 

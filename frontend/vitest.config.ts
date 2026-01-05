@@ -10,7 +10,10 @@ export default defineConfig({
   test: {
     environment: 'jsdom',
     setupFiles: ['./src/renderer/src/__tests__/setup.ts'],
-    include: ['src/renderer/src/**/*.test.{ts,tsx}']
+    include: ['src/renderer/src/**/*.test.{ts,tsx}'],
+    env: {
+      VITE_USE_MOCK_DATA: 'true'
+    }
   },
   resolve: {
     alias: {

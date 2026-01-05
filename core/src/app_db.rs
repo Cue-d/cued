@@ -4,8 +4,8 @@ use pyo3::prelude::*;
 use rusqlite::{Connection, params};
 
 use crate::models::{
-    Attachment, PendingEmbedding, Person, PrmChat, PrmMessage, StoredEmbedding, SyncAttachment,
-    SyncChat, SyncMessage, UnansweredChat,
+    Attachment, PendingEmbedding, Person, PrmChat, PrmMessage, QueuedAnalysis, StoredEmbedding,
+    SyncAttachment, SyncChat, SyncMessage, UnansweredChat,
 };
 use crate::utils::now_timestamp;
 
@@ -43,8 +43,9 @@ impl AppDb {
                 ))
             })?;
 
-        // Set busy timeout to wait up to 5 seconds if database is locked
-        conn.query_row("PRAGMA busy_timeout = 5000", [], |_row| Ok(()))
+        // Set busy timeout to wait up to 30 seconds if database is locked
+        // (increased from 5s to handle parallel LLM processing writes)
+        conn.query_row("PRAGMA busy_timeout = 30000", [], |_row| Ok(()))
             .map_err(|e| {
                 pyo3::exceptions::PyRuntimeError::new_err(format!(
                     "Failed to set busy timeout: {}",
@@ -91,7 +92,8 @@ impl AppDb {
                 identifier TEXT NOT NULL,
                 name TEXT,
                 is_group INTEGER NOT NULL,
-                synced_at INTEGER NOT NULL
+                synced_at INTEGER NOT NULL,
+                last_viewed_at INTEGER  -- Updated when user views chat messages
             );
 
             -- ============================================
@@ -210,6 +212,20 @@ impl AppDb {
                 model_version TEXT NOT NULL DEFAULT 'all-MiniLM-L6-v2',
                 updated_at INTEGER NOT NULL
             );
+
+            -- ============================================
+            -- LLM ANALYSIS QUEUE: Track chat analysis status
+            -- ============================================
+            CREATE TABLE IF NOT EXISTS llm_analysis_queue (
+                chat_id INTEGER PRIMARY KEY REFERENCES chats(id),
+                status TEXT NOT NULL DEFAULT 'pending',  -- pending, processing, completed, skipped
+                priority INTEGER NOT NULL DEFAULT 50,
+                queued_at INTEGER NOT NULL,
+                started_at INTEGER,
+                completed_at INTEGER,
+                result TEXT  -- 'action_created', 'no_action', 'error'
+            );
+            CREATE INDEX IF NOT EXISTS idx_llm_queue_status ON llm_analysis_queue(status, priority DESC, queued_at);
             ",
             )
             .map_err(|e| {
@@ -476,6 +492,7 @@ impl AppDb {
     // ============================================
 
     /// Insert attachments in batch.
+    /// Skips attachments whose message_id doesn't exist in the messages table.
     pub fn insert_attachments(&mut self, attachments: Vec<SyncAttachment>) -> PyResult<usize> {
         if attachments.is_empty() {
             return Ok(0);
@@ -489,6 +506,20 @@ impl AppDb {
         let mut count = 0;
 
         for att in &attachments {
+            // Check if the message exists before inserting attachment
+            let message_exists: bool = tx
+                .query_row(
+                    "SELECT EXISTS(SELECT 1 FROM messages WHERE id = ?)",
+                    params![att.message_id],
+                    |row| row.get(0),
+                )
+                .unwrap_or(false);
+
+            if !message_exists {
+                // Skip attachments for messages that don't exist (e.g., not joined to a chat)
+                continue;
+            }
+
             tx.execute(
                 "INSERT OR REPLACE INTO attachments (id, message_id, filename, path, mime_type, uti, size, is_outgoing, created_at, synced_at)
                  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
@@ -767,7 +798,7 @@ impl AppDb {
         Ok(self.conn.last_insert_rowid())
     }
 
-    /// Get pending actions ordered by priority
+    /// Get pending actions ordered by priority (snoozed actions go to the back once their snooze expires)
     pub fn get_pending_actions(&self, limit: u32) -> PyResult<Vec<crate::models::Action>> {
         let mut stmt = self.conn.prepare(
             "SELECT a.id, a.type, a.status, a.priority, a.chat_id, a.person_id, a.message_id,
@@ -778,8 +809,11 @@ impl AppDb {
              LEFT JOIN people p ON p.id = a.person_id
              LEFT JOIN messages m ON m.id = a.message_id
              WHERE a.status = 'pending'
-             AND (a.snoozed_until IS NULL OR a.snoozed_until <= strftime('%s', 'now'))
-             ORDER BY a.priority DESC, a.created_at ASC
+                OR (a.status = 'snoozed' AND a.snoozed_until <= strftime('%s', 'now'))
+             ORDER BY 
+                CASE WHEN a.status = 'snoozed' THEN 1 ELSE 0 END ASC,
+                a.priority DESC, 
+                a.created_at ASC
              LIMIT ?"
         ).map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(format!("Query error: {}", e)))?;
 
@@ -1040,9 +1074,14 @@ impl AppDb {
     /// - Their last message is newer than my last message (I haven't replied)
     /// - Their last message is older than threshold (been waiting a while)
     /// - No pending/snoozed respond_to_message action already exists
+    /// - Chat was not viewed by user in the last 6 hours
+    /// - Chat was not analyzed with "no_action" result in the last 6 hours
     pub fn get_unanswered_chats(&self, threshold_hours: u32) -> PyResult<Vec<UnansweredChat>> {
         let threshold_secs = (threshold_hours as i64) * 3600;
         let now = now_timestamp();
+        // Skip chats viewed or analyzed in last 6 hours
+        let skip_window_secs: i64 = 6 * 3600;
+        let skip_cutoff = now - skip_window_secs;
 
         let mut stmt = self
             .conn
@@ -1070,11 +1109,26 @@ impl AppDb {
             LEFT JOIN people p ON p.id = m.sender_id
             WHERE lm.their_latest > lm.my_latest
             AND lm.their_latest < (? - ?)
+            -- Exclude chats with pending/snoozed actions,
+            -- or recently discarded actions (within last 24 hours)
             AND NOT EXISTS (
                 SELECT 1 FROM actions
                 WHERE chat_id = m.chat_id
                 AND type = 'respond_to_message'
-                AND status IN ('pending', 'snoozed')
+                AND (
+                    status IN ('pending', 'snoozed')
+                    OR (status = 'discarded' AND discarded_at > (strftime('%s', 'now') - 86400))
+                )
+            )
+            -- Exclude recently viewed chats (user already looked at them)
+            AND (c.last_viewed_at IS NULL OR c.last_viewed_at < ?)
+            -- Exclude chats recently analyzed with no_action result
+            AND NOT EXISTS (
+                SELECT 1 FROM llm_analysis_queue
+                WHERE chat_id = m.chat_id
+                AND status = 'completed'
+                AND result = 'no_action'
+                AND completed_at > ?
             )
             ORDER BY m.timestamp DESC",
             )
@@ -1083,18 +1137,21 @@ impl AppDb {
             })?;
 
         let rows = stmt
-            .query_map(params![now, now, threshold_secs], |row| {
-                Ok(UnansweredChat {
-                    message_id: row.get(0)?,
-                    chat_id: row.get(1)?,
-                    sender_id: row.get(2)?,
-                    text: row.get(3)?,
-                    timestamp: row.get(4)?,
-                    chat_name: row.get(5)?,
-                    person_name: row.get(6)?,
-                    hours_since: row.get(7)?,
-                })
-            })
+            .query_map(
+                params![now, now, threshold_secs, skip_cutoff, skip_cutoff],
+                |row| {
+                    Ok(UnansweredChat {
+                        message_id: row.get(0)?,
+                        chat_id: row.get(1)?,
+                        sender_id: row.get(2)?,
+                        text: row.get(3)?,
+                        timestamp: row.get(4)?,
+                        chat_name: row.get(5)?,
+                        person_name: row.get(6)?,
+                        hours_since: row.get(7)?,
+                    })
+                },
+            )
             .map_err(|e| {
                 pyo3::exceptions::PyRuntimeError::new_err(format!("Query error: {}", e))
             })?;
@@ -1286,6 +1343,170 @@ impl AppDb {
             })?;
 
         Ok((pending, completed, total_embeddings))
+    }
+
+    // ============================================
+    // LLM ANALYSIS QUEUE METHODS
+    // ============================================
+
+    /// Queue a chat for LLM analysis
+    pub fn queue_for_analysis(&self, chat_id: i64, priority: i32) -> PyResult<()> {
+        let now = now_timestamp();
+        self.conn
+            .execute(
+                "INSERT OR REPLACE INTO llm_analysis_queue (chat_id, status, priority, queued_at, started_at, completed_at, result)
+                 VALUES (?, 'pending', ?, ?, NULL, NULL, NULL)",
+                params![chat_id, priority, now],
+            )
+            .map_err(|e| {
+                pyo3::exceptions::PyRuntimeError::new_err(format!("Queue error: {}", e))
+            })?;
+        Ok(())
+    }
+
+    /// Get next pending analysis item (oldest first, highest priority)
+    pub fn get_next_pending_analysis(&self) -> PyResult<Option<QueuedAnalysis>> {
+        let result = self.conn.query_row(
+            "SELECT q.chat_id, q.status, q.priority, q.queued_at, q.started_at, q.completed_at, q.result,
+                    c.name as chat_name, p.name as person_name
+             FROM llm_analysis_queue q
+             LEFT JOIN chats c ON c.id = q.chat_id
+             LEFT JOIN chat_participants cp ON cp.chat_id = q.chat_id
+             LEFT JOIN people p ON p.id = cp.person_id
+             WHERE q.status = 'pending'
+             ORDER BY q.priority DESC, q.queued_at ASC
+             LIMIT 1",
+            [],
+            |row| {
+                Ok(QueuedAnalysis {
+                    chat_id: row.get(0)?,
+                    status: row.get(1)?,
+                    priority: row.get(2)?,
+                    queued_at: row.get(3)?,
+                    started_at: row.get(4)?,
+                    completed_at: row.get(5)?,
+                    result: row.get(6)?,
+                    chat_name: row.get(7)?,
+                    person_name: row.get(8)?,
+                })
+            },
+        );
+        match result {
+            Ok(item) => Ok(Some(item)),
+            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+            Err(e) => Err(pyo3::exceptions::PyRuntimeError::new_err(format!(
+                "Query error: {}",
+                e
+            ))),
+        }
+    }
+
+    /// Mark analysis as started (processing)
+    pub fn mark_analysis_started(&self, chat_id: i64) -> PyResult<()> {
+        let now = now_timestamp();
+        self.conn
+            .execute(
+                "UPDATE llm_analysis_queue SET status = 'processing', started_at = ? WHERE chat_id = ?",
+                params![now, chat_id],
+            )
+            .map_err(|e| {
+                pyo3::exceptions::PyRuntimeError::new_err(format!("Update error: {}", e))
+            })?;
+        Ok(())
+    }
+
+    /// Mark analysis as complete with result
+    pub fn mark_analysis_complete(&self, chat_id: i64, result: &str) -> PyResult<()> {
+        let now = now_timestamp();
+        self.conn
+            .execute(
+                "UPDATE llm_analysis_queue SET status = 'completed', completed_at = ?, result = ? WHERE chat_id = ?",
+                params![now, result, chat_id],
+            )
+            .map_err(|e| {
+                pyo3::exceptions::PyRuntimeError::new_err(format!("Update error: {}", e))
+            })?;
+        Ok(())
+    }
+
+    /// Clear old completed analysis entries (older than given hours)
+    pub fn clear_old_analysis(&self, hours_old: u32) -> PyResult<u32> {
+        let threshold_secs = (hours_old as i64) * 3600;
+        let cutoff = now_timestamp() - threshold_secs;
+        let count = self
+            .conn
+            .execute(
+                "DELETE FROM llm_analysis_queue WHERE status = 'completed' AND completed_at < ?",
+                [cutoff],
+            )
+            .map_err(|e| {
+                pyo3::exceptions::PyRuntimeError::new_err(format!("Delete error: {}", e))
+            })?;
+        Ok(count as u32)
+    }
+
+    /// Get count of pending analysis items
+    pub fn get_pending_analysis_count(&self) -> PyResult<i64> {
+        self.conn
+            .query_row(
+                "SELECT COUNT(*) FROM llm_analysis_queue WHERE status = 'pending'",
+                [],
+                |row| row.get(0),
+            )
+            .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(format!("Query error: {}", e)))
+    }
+
+    /// Check if a chat was recently analyzed (within given hours)
+    pub fn was_recently_analyzed(&self, chat_id: i64, hours: u32) -> PyResult<bool> {
+        let threshold_secs = (hours as i64) * 3600;
+        let cutoff = now_timestamp() - threshold_secs;
+        let count: i64 = self
+            .conn
+            .query_row(
+                "SELECT COUNT(*) FROM llm_analysis_queue
+                 WHERE chat_id = ? AND status = 'completed' AND completed_at > ?",
+                params![chat_id, cutoff],
+                |row| row.get(0),
+            )
+            .map_err(|e| {
+                pyo3::exceptions::PyRuntimeError::new_err(format!("Query error: {}", e))
+            })?;
+        Ok(count > 0)
+    }
+
+    // ============================================
+    // CHAT VIEW TRACKING
+    // ============================================
+
+    /// Update last_viewed_at for a chat
+    pub fn update_chat_last_viewed(&self, chat_id: i64) -> PyResult<()> {
+        let now = now_timestamp();
+        self.conn
+            .execute(
+                "UPDATE chats SET last_viewed_at = ? WHERE id = ?",
+                params![now, chat_id],
+            )
+            .map_err(|e| {
+                pyo3::exceptions::PyRuntimeError::new_err(format!("Update error: {}", e))
+            })?;
+        Ok(())
+    }
+
+    /// Check if a chat was recently viewed (within given hours)
+    pub fn was_recently_viewed(&self, chat_id: i64, hours: u32) -> PyResult<bool> {
+        let threshold_secs = (hours as i64) * 3600;
+        let cutoff = now_timestamp() - threshold_secs;
+        let count: i64 = self
+            .conn
+            .query_row(
+                "SELECT COUNT(*) FROM chats WHERE id = ? AND last_viewed_at > ?",
+                params![chat_id, cutoff],
+                |row| row.get(0),
+            )
+            .map_err(|e| {
+                pyo3::exceptions::PyRuntimeError::new_err(format!("Query error: {}", e))
+            })?;
+        Ok(count > 0)
     }
 }
 

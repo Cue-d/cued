@@ -24,6 +24,12 @@ const MESSAGE_BATCH_SIZE: u32 = 100;
 /// Batch size for attachment sync.
 const ATTACHMENT_BATCH_SIZE: u32 = 100;
 
+/// Maximum retries for database operations on lock errors.
+const MAX_DB_RETRIES: u32 = 5;
+
+/// Base delay for exponential backoff (milliseconds).
+const RETRY_BASE_DELAY_MS: u64 = 100;
+
 /// Background sync watcher that continuously syncs messages from chat.db to prm.db.
 #[pyclass]
 pub struct SyncWatcher {
@@ -114,9 +120,10 @@ fn sync_loop(
         .query_row("PRAGMA journal_mode = WAL", [], |_row| Ok(()))
         .map_err(|e| format!("Failed to enable WAL mode: {}", e))?;
 
-    // Set busy timeout to wait up to 5 seconds if database is locked
+    // Set busy timeout to wait up to 30 seconds if database is locked
+    // (increased from 5s to handle parallel LLM processing writes)
     app_conn
-        .query_row("PRAGMA busy_timeout = 5000", [], |_row| Ok(()))
+        .query_row("PRAGMA busy_timeout = 30000", [], |_row| Ok(()))
         .map_err(|e| format!("Failed to set busy timeout: {}", e))?;
 
     // Disable foreign keys for the watcher - it only syncs messages/attachments
@@ -296,12 +303,33 @@ fn get_attachments_since(
     Ok(result)
 }
 
-/// Insert messages into prm.db using a transaction.
+/// Insert messages into prm.db using a transaction with retry logic.
 fn insert_messages(conn: &mut Connection, messages: &[SyncMessage]) -> Result<usize, String> {
     if messages.is_empty() {
         return Ok(0);
     }
 
+    // Retry with exponential backoff on database lock errors
+    for attempt in 0..MAX_DB_RETRIES {
+        match insert_messages_inner(conn, messages) {
+            Ok(count) => return Ok(count),
+            Err(e) if e.contains("database is locked") || e.contains("SQLITE_BUSY") => {
+                if attempt + 1 < MAX_DB_RETRIES {
+                    let delay = RETRY_BASE_DELAY_MS * (1 << attempt); // Exponential backoff
+                    thread::sleep(Duration::from_millis(delay));
+                    continue;
+                }
+                return Err(e);
+            }
+            Err(e) => return Err(e),
+        }
+    }
+
+    Err("Max retries exceeded for insert_messages".to_string())
+}
+
+/// Inner function for insert_messages (no retry logic).
+fn insert_messages_inner(conn: &mut Connection, messages: &[SyncMessage]) -> Result<usize, String> {
     let tx = conn
         .transaction()
         .map_err(|e| format!("Transaction error: {}", e))?;
@@ -353,7 +381,8 @@ fn insert_messages(conn: &mut Connection, messages: &[SyncMessage]) -> Result<us
     Ok(count)
 }
 
-/// Insert attachments into prm.db using a transaction.
+/// Insert attachments into prm.db using a transaction with retry logic.
+/// Skips attachments whose message_id doesn't exist in the messages table.
 fn insert_attachments(
     conn: &mut Connection,
     attachments: &[SyncAttachment],
@@ -362,6 +391,30 @@ fn insert_attachments(
         return Ok(0);
     }
 
+    // Retry with exponential backoff on database lock errors
+    for attempt in 0..MAX_DB_RETRIES {
+        match insert_attachments_inner(conn, attachments) {
+            Ok(count) => return Ok(count),
+            Err(e) if e.contains("database is locked") || e.contains("SQLITE_BUSY") => {
+                if attempt + 1 < MAX_DB_RETRIES {
+                    let delay = RETRY_BASE_DELAY_MS * (1 << attempt); // Exponential backoff
+                    thread::sleep(Duration::from_millis(delay));
+                    continue;
+                }
+                return Err(e);
+            }
+            Err(e) => return Err(e),
+        }
+    }
+
+    Err("Max retries exceeded for insert_attachments".to_string())
+}
+
+/// Inner function for insert_attachments (no retry logic).
+fn insert_attachments_inner(
+    conn: &mut Connection,
+    attachments: &[SyncAttachment],
+) -> Result<usize, String> {
     let tx = conn
         .transaction()
         .map_err(|e| format!("Transaction error: {}", e))?;
@@ -370,6 +423,20 @@ fn insert_attachments(
     let mut count = 0;
 
     for att in attachments {
+        // Check if the message exists before inserting attachment
+        let message_exists: bool = tx
+            .query_row(
+                "SELECT EXISTS(SELECT 1 FROM messages WHERE id = ?)",
+                params![att.message_id],
+                |row| row.get(0),
+            )
+            .unwrap_or(false);
+
+        if !message_exists {
+            // Skip attachments for messages that don't exist (e.g., not joined to a chat)
+            continue;
+        }
+
         tx.execute(
             "INSERT OR REPLACE INTO attachments (id, message_id, filename, path, mime_type, uti, size, is_outgoing, created_at, synced_at)
              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
