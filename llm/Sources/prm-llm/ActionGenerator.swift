@@ -28,13 +28,12 @@ actor ActionGenerator {
         // Sanitize input text to prevent parsing issues
         let sanitizedText = sanitizeText(conversationText)
 
-        // Try with progressively simpler prompts
+        // Try with retries
         var lastError: Error?
 
         for attempt in 0..<maxRetries {
             do {
-                let promptText = buildPrompt(
-                    conversationText: sanitizedText, simplified: attempt > 0)
+                let promptText = buildPrompt(conversationText: sanitizedText)
 
                 // Use the Prompt builder pattern for structured output requests
                 let response = try await session.respond {
@@ -169,7 +168,7 @@ actor ActionGenerator {
         return result
     }
 
-    private func buildPrompt(conversationText: String, simplified: Bool) -> String {
+    private func buildPrompt(conversationText: String) -> String {
         let jsonSchema = """
             {
                 "shouldAct": boolean,
@@ -178,19 +177,6 @@ actor ActionGenerator {
                 "reason": "string"
             }
             """
-
-        if simplified {
-            return """
-                Analyze this conversation and respond with a JSON object only.
-
-                \(conversationText)
-
-                Response format (JSON only, no other text):
-                \(jsonSchema)
-
-                Set shouldAct to true if user needs to respond, false otherwise.
-                """
-        }
 
         return """
             Analyze this conversation and determine if the user should take action.
@@ -207,8 +193,22 @@ actor ActionGenerator {
 
             Set shouldAct to false if:
             - The conversation is naturally concluded
-            - The last message doesn't need a response (e.g., "thanks", "ok")
+            - The last message doesn't need a response (e.g., "thanks", "ok", "sounds good")
             - The user already responded and is waiting for a reply
+            - 2FA/verification codes, OTPs, or login codes
+            - Scams, phishing attempts, or suspicious messages from unknown senders
+            - Chain messages, forwards, or "share this with X people" messages
+            - Automated messages (delivery notifications, appointment reminders, order confirmations)
+            - Marketing, promotional, or advertising texts
+            - Political campaign or survey messages
+            - Carrier/service provider notifications
+            - Subscription or billing alerts
+            - Emoji-only reactions or read receipts
+            - Group chat mass announcements not requiring individual responses
+            - Messages that are clearly spam or from bots
+            - Contest/sweepstakes/lottery notifications
+            - Coupon codes or discount offers
+            - Messages asking for personal/financial information from unknown contacts
 
             Priority guide: 80+ urgent, 60-79 important, 40-59 routine, below 40 low
             """
