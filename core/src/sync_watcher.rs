@@ -111,12 +111,12 @@ fn sync_loop(
     // Enable WAL mode for better concurrent access - this allows the Python
     // backend to read/write while we're syncing without "database is locked" errors
     app_conn
-        .execute("PRAGMA journal_mode = WAL", [])
+        .query_row("PRAGMA journal_mode = WAL", [], |_row| Ok(()))
         .map_err(|e| format!("Failed to enable WAL mode: {}", e))?;
 
     // Set busy timeout to wait up to 5 seconds if database is locked
     app_conn
-        .execute("PRAGMA busy_timeout = 5000", [])
+        .query_row("PRAGMA busy_timeout = 5000", [], |_row| Ok(()))
         .map_err(|e| format!("Failed to set busy timeout: {}", e))?;
 
     // Disable foreign keys for the watcher - it only syncs messages/attachments
@@ -124,7 +124,7 @@ fn sync_loop(
     // This prevents FK errors when a message arrives for a chat that hasn't
     // been synced yet (the full sync will catch it on next run).
     app_conn
-        .execute("PRAGMA foreign_keys = OFF", [])
+        .execute_batch("PRAGMA foreign_keys = OFF")
         .map_err(|e| format!("Failed to disable foreign keys: {}", e))?;
 
     let poll_duration = Duration::from_millis(POLL_INTERVAL_MS);

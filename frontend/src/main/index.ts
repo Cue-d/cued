@@ -1,6 +1,6 @@
-import { app, shell, BrowserWindow, ipcMain } from 'electron'
-import { join } from 'path'
-import { spawn, ChildProcess } from 'child_process'
+import { type ChildProcess, spawn } from 'node:child_process'
+import { join } from 'node:path'
+import { app, BrowserWindow, ipcMain, shell } from 'electron'
 
 const API_BASE = 'http://localhost:8000'
 
@@ -82,6 +82,59 @@ function registerIpcHandlers(): void {
     if (!res.ok) throw new Error(`Failed to fetch sync status: ${res.status}`)
     return res.json()
   })
+
+  // Action queue handlers
+  ipcMain.handle('api:getActions', async (_, status = 'pending', limit = 50) => {
+    const res = await fetch(`${API_BASE}/actions/?status=${status}&limit=${limit}`)
+    if (!res.ok) throw new Error(`Failed to fetch actions: ${res.status}`)
+    return res.json()
+  })
+
+  ipcMain.handle(
+    'api:swipeAction',
+    async (
+      _,
+      actionId: number,
+      request: {
+        direction: string
+        snooze_minutes?: number
+        response_text?: string
+      }
+    ) => {
+      const res = await fetch(`${API_BASE}/actions/${actionId}/swipe`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(request)
+      })
+      if (!res.ok) throw new Error(`Failed to swipe action: ${res.status}`)
+      return res.json()
+    }
+  )
+
+  ipcMain.handle('api:searchMessages', async (_, query: string, limit = 50) => {
+    const res = await fetch(`${API_BASE}/search/?query=${encodeURIComponent(query)}&limit=${limit}`)
+    if (!res.ok) throw new Error(`Failed to search messages: ${res.status}`)
+    return res.json()
+  })
+
+  ipcMain.handle('api:semanticSearch', async (_, query: string, limit = 20) => {
+    const res = await fetch(
+      `${API_BASE}/search/semantic?query=${encodeURIComponent(query)}&limit=${limit}`
+    )
+    if (!res.ok) throw new Error(`Failed to semantic search: ${res.status}`)
+    return res.json()
+  })
+
+  ipcMain.handle('api:addContactContext', async (_, personId: number, notes: string) => {
+    const res = await fetch(
+      `${API_BASE}/eod/contacts/${personId}/context?notes=${encodeURIComponent(notes)}`,
+      {
+        method: 'POST'
+      }
+    )
+    if (!res.ok) throw new Error(`Failed to add contact context: ${res.status}`)
+    return res.json()
+  })
 }
 
 function createWindow(): void {
@@ -125,7 +178,7 @@ app.whenReady().then(async () => {
   registerIpcHandlers()
   createWindow()
 
-  app.on('activate', function () {
+  app.on('activate', () => {
     // On macOS it's common to re-create a window in the app when the
     // dock icon is clicked and there are no other windows open.
     if (BrowserWindow.getAllWindows().length === 0) createWindow()

@@ -1,7 +1,7 @@
-import { useState, useRef, useEffect } from 'react'
 import { Info, Mic, Plus } from 'lucide-react'
+import { useEffect, useRef, useState } from 'react'
+import { type Chat, formatDateDivider, formatMessageTime, type Message } from '@/data/types'
 import { cn } from '@/lib/utils'
-import { Chat, Message, formatDateDivider, formatMessageTime } from '@/data/types'
 import Avatar from './Avatar'
 
 interface MessageThreadProps {
@@ -43,7 +43,7 @@ const MessageBubble = ({
         {showAvatar && <Avatar initials={senderInitials} size="xs" />}
         <div
           className={cn(
-            'max-w-[85%] px-3 py-2 rounded-2xl break-words',
+            'max-w-[85%] px-3 py-2 rounded-2xl wrap-break-word',
             message.isSent
               ? 'bg-imessage-bubble-sent text-imessage-bubble-sent-foreground rounded-br-md'
               : 'bg-imessage-bubble-received text-imessage-bubble-received-foreground rounded-bl-md'
@@ -154,7 +154,7 @@ const MessageThread = ({ chat, onSendMessage }: MessageThreadProps) => {
           />
           <span className="font-medium text-foreground">{chat.name}</span>
         </div>
-        <button className="p-1.5 hover:bg-sidebar-accent rounded transition-colors">
+        <button type="button" className="p-1.5 hover:bg-sidebar-accent rounded transition-colors">
           <Info className="w-5 h-5 text-primary" />
         </button>
       </div>
@@ -197,7 +197,10 @@ const MessageThread = ({ chat, onSendMessage }: MessageThreadProps) => {
       {/* Input Bar */}
       <div className="p-3 border-t border-border bg-imessage-header-bg">
         <div className="flex items-center gap-2">
-          <button className="p-2 hover:bg-sidebar-accent rounded-full transition-colors">
+          <button
+            type="button"
+            className="p-2 hover:bg-sidebar-accent rounded-full transition-colors"
+          >
             <Plus className="w-5 h-5 text-primary" />
           </button>
           <div className="flex-1 flex items-center bg-imessage-input-bg border border-imessage-input-border rounded-full px-4 py-2">
@@ -212,6 +215,7 @@ const MessageThread = ({ chat, onSendMessage }: MessageThreadProps) => {
             />
           </div>
           <button
+            type="button"
             onClick={handleSend}
             disabled={!inputText.trim() || sending}
             className="p-2 hover:bg-sidebar-accent rounded-full transition-colors disabled:opacity-50"

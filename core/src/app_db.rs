@@ -35,12 +35,16 @@ impl AppDb {
 
         // Enable WAL mode for better concurrent access - this allows the
         // SyncWatcher to write while the API reads/writes without "database is locked" errors
-        conn.execute("PRAGMA journal_mode = WAL", []).map_err(|e| {
-            pyo3::exceptions::PyRuntimeError::new_err(format!("Failed to enable WAL mode: {}", e))
-        })?;
+        conn.query_row("PRAGMA journal_mode = WAL", [], |_row| Ok(()))
+            .map_err(|e| {
+                pyo3::exceptions::PyRuntimeError::new_err(format!(
+                    "Failed to enable WAL mode: {}",
+                    e
+                ))
+            })?;
 
         // Set busy timeout to wait up to 5 seconds if database is locked
-        conn.execute("PRAGMA busy_timeout = 5000", [])
+        conn.query_row("PRAGMA busy_timeout = 5000", [], |_row| Ok(()))
             .map_err(|e| {
                 pyo3::exceptions::PyRuntimeError::new_err(format!(
                     "Failed to set busy timeout: {}",
