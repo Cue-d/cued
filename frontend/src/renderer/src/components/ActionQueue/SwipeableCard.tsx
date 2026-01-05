@@ -85,13 +85,13 @@ export function SwipeableCard({
       // Animate the card in the swipe direction (non-blocking)
       animate(x, targetX, {
         type: 'spring',
-        stiffness: 600,
+        stiffness: 400,
         damping: 35,
         mass: 0.5
       })
       animate(y, targetY, {
         type: 'spring',
-        stiffness: 600,
+        stiffness: 400,
         damping: 35,
         mass: 0.5
       })
@@ -99,7 +99,7 @@ export function SwipeableCard({
       // Reset quickly after animation starts
       setTimeout(() => {
         isAnimatingRef.current = false
-      }, 100)
+      }, 300)
     } else if (!triggerSwipe && isAnimatingRef.current) {
       // Reset when triggerSwipe is cleared
       isAnimatingRef.current = false
@@ -127,7 +127,7 @@ export function SwipeableCard({
           damping: 30
         }
       }}
-      transition={{ type: 'spring', stiffness: 600, damping: 35 }}
+      transition={{ type: 'spring', stiffness: 400, damping: 30 }}
     >
       <div className="relative w-full h-full overflow-hidden rounded-2xl">
         {children}

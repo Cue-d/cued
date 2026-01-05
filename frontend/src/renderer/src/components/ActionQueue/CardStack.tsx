@@ -7,6 +7,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip
 import { type ContactFormData, EODContactCard } from './EODContactCard'
 import { MessageResponseCard } from './MessageResponseCard'
 import { SwipeableCard } from './SwipeableCard'
+import { Button } from '../ui/button'
 
 interface CardStackProps {
   actions: ActionResponse[]
@@ -261,48 +262,44 @@ export function CardStack({ actions, onSwipe }: CardStackProps) {
       </div>
 
       {/* Bottom Action Buttons */}
-      <div className="shrink-0 px-4 pb-6 pt-2">
-        <div className="flex gap-3 max-w-lg mx-auto">
+      <div className="flex items-center justify-center shrink-0 px-4 pb-6 pt-2">
+        <div className="flex items-center gap-4 max-w-md w-full">
           <Tooltip>
             <TooltipTrigger asChild>
-              <button
+              <Button
+                variant="secondary"
                 onClick={() => handleButtonSwipe('left')}
                 disabled={isProcessing}
-                className="flex-1 py-3.5 px-6 rounded-xl font-semibold text-base
-                  bg-muted hover:bg-muted/80 text-foreground
-                  transition-all duration-200 
-                  disabled:opacity-50 disabled:cursor-not-allowed
-                  active:scale-[0.98]"
+                size="lg"
+                className="flex-1"
               >
                 Discard
-              </button>
+              </Button>
             </TooltipTrigger>
             <TooltipContent side="top">
               <p>
                 Press{' '}
-                <kbd className="ml-1 px-1.5 py-0.5 bg-white/20 rounded text-xs font-mono">←</kbd>
+                <kbd className="ml-1 px-1.5 py-0.5 bg-muted/20 rounded text-xs font-mono">←</kbd>
               </p>
             </TooltipContent>
           </Tooltip>
 
           <Tooltip>
             <TooltipTrigger asChild>
-              <button
+              <Button
+                variant="default"
                 onClick={() => handleButtonSwipe('right')}
                 disabled={isProcessing}
-                className="flex-1 py-3.5 px-6 rounded-xl font-semibold text-base
-                  bg-[#00806B] hover:bg-[#006B59] text-secondary-foreground
-                  transition-all duration-200
-                  disabled:opacity-50 disabled:cursor-not-allowed
-                  active:scale-[0.98]"
+                size="lg"
+                className="flex-1"
               >
                 Send
-              </button>
+              </Button>
             </TooltipTrigger>
             <TooltipContent side="top">
               <p>
                 Press{' '}
-                <kbd className="ml-1 px-1.5 py-0.5 bg-white/20 rounded text-xs font-mono">→</kbd>
+                <kbd className="ml-1 px-1.5 py-0.5 bg-muted/20 rounded text-xs font-mono">→</kbd>
               </p>
             </TooltipContent>
           </Tooltip>
