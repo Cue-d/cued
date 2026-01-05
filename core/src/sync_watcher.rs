@@ -124,7 +124,7 @@ fn sync_loop(
     // This prevents FK errors when a message arrives for a chat that hasn't
     // been synced yet (the full sync will catch it on next run).
     app_conn
-        .query_row("PRAGMA foreign_keys = OFF", [], |_row| Ok(()))
+        .execute_batch("PRAGMA foreign_keys = OFF")
         .map_err(|e| format!("Failed to disable foreign keys: {}", e))?;
 
     let poll_duration = Duration::from_millis(POLL_INTERVAL_MS);
