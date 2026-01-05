@@ -241,6 +241,38 @@ curl -X POST "http://localhost:8000/actions/generate/unanswered?threshold_hours=
 
 The backend runs APScheduler jobs automatically:
 
-- **Unanswered scan**: Every 6 hours (uses LLM for intelligent action type/priority if available, falls back to heuristics)
+- **Unanswered scan**: Every 5 minutes (queues chats for LLM analysis with smart priority)
+- **LLM queue processor**: Every 10 seconds (processes one queued chat, rate-limited)
 - **EOD contacts**: Daily at 9 PM
 - **Embedding processing**: Every 5 minutes (100 messages per batch)
+
+### Chat Priority Scoring
+
+When queuing chats for LLM analysis, priority is calculated using a composite score (0-100):
+
+**Time-Decay Curve** (base 20-80):
+| Hours Since | Priority | Rationale |
+|-------------|----------|-----------|
+| 0-2 | 20 | Too fresh, still in active conversation |
+| 2-24 | 40→70 | Ramping up, conversation cooling |
+| 24-72 | 80 | Peak urgency zone |
+| 72-168 | 80→40 | Declining, getting stale |
+| 168+ | 30 | Very old, low priority |
+
+**Contact Importance Boost** (+0 to +25):
+
+- Saved contact (`is_contact=true`): +10
+- Has company field: +10
+- Has notes field: +5
+
+**Group Chat Penalty** (-15):
+
+- Group chats are deprioritized since others may respond
+
+**Example Scores**:
+
+- Saved contact with company, 48h ago: 80 + 10 + 10 = 100 (max)
+- Unknown number, 6h ago: 45 + 0 = 45
+- Group chat, 24h ago: 80 - 15 = 65
+
+Priority functions are in `backend/main.py`: `calculate_chat_priority()`, `_calculate_time_priority()`, `_calculate_contact_priority_boost()`, `_calculate_group_penalty()`.

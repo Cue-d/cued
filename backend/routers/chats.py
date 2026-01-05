@@ -75,6 +75,9 @@ def get_messages(chat_id: int, limit: int = 100):
     """Get messages for a chat with pre-resolved sender names."""
     db = get_app_db()
 
+    # Track that user viewed this chat (for LLM analysis queue)
+    db.update_chat_last_viewed(chat_id)
+
     messages = db.get_chat_messages(chat_id, limit)
     result = []
 
