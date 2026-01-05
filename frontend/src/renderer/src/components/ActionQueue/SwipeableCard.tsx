@@ -1,5 +1,5 @@
 import { motion, type PanInfo, useMotionValue, useTransform, animate } from 'motion/react'
-import { Check, X } from 'lucide-react'
+import { Check, Clock, X } from 'lucide-react'
 import { type ReactNode, useEffect, useRef } from 'react'
 import type { SwipeDirection } from '@/data/types'
 
@@ -37,6 +37,7 @@ export function SwipeableCard({
   // Overlay opacity increases as card is swiped farther (0 at center, 0.95 at threshold)
   const rightOverlayOpacity = useTransform(x, [0, SWIPE_THRESHOLD_X], [0, 0.95])
   const leftOverlayOpacity = useTransform(x, [-SWIPE_THRESHOLD_X, 0], [0.9, 0])
+  const upOverlayOpacity = useTransform(y, [-SWIPE_THRESHOLD_Y, 0], [0.9, 0])
 
   const handleDragStart = () => {
     onSwipeStart?.()
@@ -58,48 +59,72 @@ export function SwipeableCard({
     }
   }
 
-  // Handle programmatic swipe trigger from buttons
+  // Handle programmatic swipe trigger from buttons/keyboard
   useEffect(() => {
     if (triggerSwipe && !isAnimatingRef.current) {
       isAnimatingRef.current = true
       onSwipeStart?.()
 
-      let targetX = 0
-      let targetY = 0
+      // Phase 1: Animate to show overlay (anticipation)
+      let peekX = 0
+      let peekY = 0
+      // Phase 2: Animate off screen
+      let exitX = 0
+      let exitY = 0
 
       switch (triggerSwipe) {
         case 'right':
-          targetX = 300
+          peekX = SWIPE_THRESHOLD_X + 20 // Just past threshold to show overlay
+          exitX = 400
           break
         case 'left':
-          targetX = -300
+          peekX = -(SWIPE_THRESHOLD_X + 20)
+          exitX = -400
           break
         case 'up':
-          targetY = -200
+          peekY = -(SWIPE_THRESHOLD_Y + 20)
+          exitY = -300
           break
       }
 
-      // Call onSwipe immediately for instant feedback
-      onSwipe(triggerSwipe)
-
-      // Animate the card in the swipe direction (non-blocking)
-      animate(x, targetX, {
+      // Phase 1: Quick peek to show the overlay
+      animate(x, peekX, {
         type: 'spring',
-        stiffness: 400,
-        damping: 35,
-        mass: 0.5
+        stiffness: 500,
+        damping: 30,
+        mass: 0.8
       })
-      animate(y, targetY, {
+      animate(y, peekY, {
         type: 'spring',
-        stiffness: 400,
-        damping: 35,
-        mass: 0.5
+        stiffness: 500,
+        damping: 30,
+        mass: 0.8
       })
 
-      // Reset quickly after animation starts
+      // Phase 2: After brief pause, swipe off and trigger action
+      setTimeout(() => {
+        // Trigger the actual swipe action
+        onSwipe(triggerSwipe)
+
+        // Animate card off screen with a graceful exit
+        animate(x, exitX, {
+          type: 'spring',
+          stiffness: 300,
+          damping: 25,
+          mass: 0.6
+        })
+        animate(y, exitY, {
+          type: 'spring',
+          stiffness: 300,
+          damping: 25,
+          mass: 0.6
+        })
+      }, 150)
+
+      // Reset after full animation
       setTimeout(() => {
         isAnimatingRef.current = false
-      }, 300)
+      }, 400)
     } else if (!triggerSwipe && isAnimatingRef.current) {
       // Reset when triggerSwipe is cleared
       isAnimatingRef.current = false
@@ -155,6 +180,19 @@ export function SwipeableCard({
               <X className="w-10 h-10 text-white" strokeWidth={3} />
             </div>
             <span className="text-xl font-semibold text-white">Discard</span>
+          </div>
+        </motion.div>
+
+        {/* Up swipe overlay (Snooze - muted amber) */}
+        <motion.div
+          className="absolute inset-0 bg-amber-700 rounded-2xl flex items-center justify-center pointer-events-none"
+          style={{ opacity: upOverlayOpacity }}
+        >
+          <div className="flex flex-col items-center gap-2">
+            <div className="w-16 h-16 rounded-full bg-white/20 flex items-center justify-center">
+              <Clock className="w-10 h-10 text-white" strokeWidth={2.5} />
+            </div>
+            <span className="text-xl font-semibold text-white">Snooze</span>
           </div>
         </motion.div>
       </div>

@@ -134,6 +134,9 @@ export function CardStack({ actions, onSwipe }: CardStackProps) {
       } else if (e.key === 'ArrowRight') {
         e.preventDefault()
         handleButtonSwipe('right')
+      } else if (e.key === 'ArrowUp') {
+        e.preventDefault()
+        handleButtonSwipe('up')
       }
     }
 
@@ -280,6 +283,26 @@ export function CardStack({ actions, onSwipe }: CardStackProps) {
               <p>
                 Press{' '}
                 <kbd className="ml-1 px-1.5 py-0.5 bg-muted/20 rounded text-xs font-mono">←</kbd>
+              </p>
+            </TooltipContent>
+          </Tooltip>
+
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                variant="outline"
+                onClick={() => handleButtonSwipe('up')}
+                disabled={isProcessing}
+                size="lg"
+                className="flex-1"
+              >
+                Snooze
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent side="top">
+              <p>
+                Press{' '}
+                <kbd className="ml-1 px-1.5 py-0.5 bg-muted/20 rounded text-xs font-mono">↑</kbd>
               </p>
             </TooltipContent>
           </Tooltip>
