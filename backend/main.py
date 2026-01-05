@@ -146,14 +146,33 @@ def stop_sync_watcher():
 
 
 def run_unanswered_scan():
-    """Background job: Scan for unanswered messages and create actions."""
+    """Background job: Scan for unanswered messages and create actions using LLM."""
     try:
         db = core.AppDb(APP_DB_PATH)
         db.init_schema()
         unanswered = db.get_unanswered_chats(24)  # 24 hour threshold
 
+        if not unanswered:
+            return
+
         import json
 
+        from services.llm_client import (
+            LLMError,
+            is_llm_available,
+        )
+
+        # Try LLM-based generation if available
+        if is_llm_available():
+            try:
+                created = _run_llm_action_generation(db, unanswered)
+                if created > 0:
+                    logger.info(f"Background job: LLM created {created} action suggestions")
+                return
+            except LLMError as e:
+                logger.warning(f"LLM generation failed, falling back to heuristics: {e}")
+
+        # Fallback: heuristic-based generation
         created = 0
         for chat in unanswered:
             payload = json.dumps(
@@ -174,9 +193,66 @@ def run_unanswered_scan():
             created += 1
 
         if created > 0:
-            logger.info(f"Background job: Created {created} unanswered message actions")
+            logger.info(f"Background job: Created {created} unanswered message actions (heuristic)")
     except Exception as e:
         logger.error(f"Unanswered scan failed: {e}")
+
+
+def _run_llm_action_generation(db, unanswered_chats) -> int:
+    """Run LLM-based action generation with full conversation context."""
+    import json
+
+    from services.llm_client import ConversationContext, generate_actions
+
+    # Build conversation contexts with full data
+    contexts = []
+    for chat in unanswered_chats:
+        # TOOD: Add RAG context plus recent context.
+        # Get recent messages for context (last 10)
+        messages = db.get_chat_messages(chat.chat_id, 10)
+
+        # Get person info if available
+        person = None
+        if chat.sender_id:
+            person = db.get_person(chat.sender_id)
+
+        ctx = ConversationContext(
+            chat_id=chat.chat_id,
+            person_id=person.id if person else None,
+            person_name=person.name if person else None,
+            person_company=person.company if person else None,
+            person_notes=person.notes if person else None,
+            messages=[
+                {
+                    "text": m.text,
+                    "is_from_me": m.is_from_me,
+                    "timestamp": m.timestamp,
+                }
+                for m in messages
+            ],
+            hours_since_last=chat.hours_since,
+        )
+        contexts.append(ctx)
+
+    # Call LLM
+    suggestions = generate_actions(contexts)
+
+    # Create actions from LLM suggestions
+    created = 0
+    for suggestion in suggestions:
+        payload = json.dumps({"reason": suggestion.reason})
+        db.create_action(
+            action_type=suggestion.action_type,
+            priority=suggestion.priority,
+            chat_id=suggestion.chat_id,
+            person_id=None,  # Could look up from chat if needed
+            message_id=None,
+            payload=payload,
+            remind_at=suggestion.remind_at,
+        )
+        created += 1
+
+    return created
 
 
 def run_eod_scan():
