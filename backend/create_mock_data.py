@@ -194,8 +194,7 @@ CONVERSATION_TEMPLATES = {
         {"text": "Happy to help! Let me know how it goes", "is_from_me": True, "minutes_ago": 1430},
         {
             "text": (
-                "The meeting went great! They want to move forward. "
-                "Coffee next week to celebrate?"
+                "The meeting went great! They want to move forward. Coffee next week to celebrate?"
             ),
             "is_from_me": False,
             "minutes_ago": 20,
