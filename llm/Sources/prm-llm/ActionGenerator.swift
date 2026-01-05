@@ -187,28 +187,40 @@ actor ActionGenerator {
             Response format (JSON only):
             \(jsonSchema)
 
-            Set shouldAct to true only if:
-            - There's an unanswered question from the other person
-            - The user made a promise they haven't fulfilled
+            NEVER set shouldAct to true for automated or suspicious messages.
+            If the message is NOT from a real person you know, set shouldAct to false.
+
+            ALWAYS set shouldAct to FALSE for:
+            - ANY message containing a link from an unknown sender
+            - ANY message claiming your account is locked/suspended/compromised
+            - ANY message with urgency like "act now", "24 hours", "48 hours", "immediately"
+            - Messages from short codes (5-6 digit numbers) or unknown numbers
+            - Phishing attempts pretending to be PayPal, Amazon, Netflix, banks, Apple, Google, etc.
+            - Messages asking you to "verify", "confirm", or "update" account information
+            - 2FA/verification codes, OTPs, or login codes
+            - Delivery notifications, tracking updates, shipping alerts
+            - Appointment reminders from businesses
+            - Order confirmations or receipts
+            - Marketing, promotional, or advertising texts
+            - Political campaign or survey messages
+            - Carrier/service provider notifications (AT&T, Verizon, T-Mobile, etc.)
+            - Subscription or billing alerts
+            - Contest/sweepstakes/lottery notifications
+            - Coupon codes or discount offers
+            - Chain messages or forwards
+            - Any message with poor grammar that claims to be from a major company
+
+            Set shouldAct to true ONLY if:
+            - The message is clearly from a real person you have a relationship with
+            - There's a genuine unanswered question from someone you know
+            - You made a promise to a real person that you haven't fulfilled
+            - It's a personal conversation, not an automated system
 
             Set shouldAct to false if:
             - The conversation is naturally concluded
             - The last message doesn't need a response (e.g., "thanks", "ok", "sounds good")
             - The user already responded and is waiting for a reply
-            - 2FA/verification codes, OTPs, or login codes
-            - Scams, phishing attempts, or suspicious messages from unknown senders
-            - Chain messages, forwards, or "share this with X people" messages
-            - Automated messages (delivery notifications, appointment reminders, order confirmations)
-            - Marketing, promotional, or advertising texts
-            - Political campaign or survey messages
-            - Carrier/service provider notifications
-            - Subscription or billing alerts
-            - Emoji-only reactions or read receipts
-            - Group chat mass announcements not requiring individual responses
-            - Messages that are clearly spam or from bots
-            - Contest/sweepstakes/lottery notifications
-            - Coupon codes or discount offers
-            - Messages asking for personal/financial information from unknown contacts
+            - You have ANY doubt about whether it's a real person
 
             Priority guide: 80+ urgent, 60-79 important, 40-59 routine, below 40 low
             """
