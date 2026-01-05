@@ -1,3 +1,4 @@
+// Frontend-specific chat types (for legacy chat view)
 export interface Message {
   id: string
   text: string
@@ -19,6 +20,15 @@ export interface Chat {
   timestamp: Date
   messages: Message[]
 }
+
+// Action Queue Types - derived from API types in preload/index.d.ts
+// Re-export the canonical types
+export type { ActionResponse, SearchResultResponse, SwipeRequest } from '../../../preload/index.d'
+
+// Convenience type aliases for the action system
+export type ActionType = 'respond_to_message' | 'eod_contact' | 'follow_up'
+export type ActionStatus = 'pending' | 'completed' | 'discarded' | 'snoozed'
+export type SwipeDirection = 'left' | 'right' | 'up'
 
 export const formatTimestamp = (date: Date): string => {
   const now = new Date()

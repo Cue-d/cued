@@ -1,3 +1,4 @@
-export { useChats, toChat } from './useChats'
-export { useMessages, toMessage } from './useMessages'
+export { useActions } from './useActions'
+export { toChat, useChats } from './useChats'
+export { toMessage, useMessages } from './useMessages'
 export { useSyncStatus } from './useSyncStatus'

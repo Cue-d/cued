@@ -43,7 +43,7 @@ const Avatar = ({ initials, isGroup, groupMembers, size = 'md', className }: Ava
     const color2 = getColorForInitials(member2)
 
     return (
-      <div className={cn('relative flex-shrink-0', sizeClasses[size], className)}>
+      <div className={cn('relative shrink-0', sizeClasses[size], className)}>
         {/* Back avatar (top-left) */}
         <div
           className={cn(
@@ -69,7 +69,7 @@ const Avatar = ({ initials, isGroup, groupMembers, size = 'md', className }: Ava
   return (
     <div
       className={cn(
-        'rounded-full flex items-center justify-center text-white font-medium flex-shrink-0',
+        'rounded-full flex items-center justify-center text-white font-medium shrink-0',
         sizeClasses[size],
         bgColors[colorIndex],
         className
