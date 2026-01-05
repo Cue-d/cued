@@ -187,6 +187,14 @@ docs/_build/
 site/
 
 # ============================================================
+# Swift / LLM CLI
+# ============================================================
+# Swift Package Manager build directory
+llm/.build/
+# Swift Package.resolved (lock file - uncomment to track)
+# llm/Package.resolved
+
+# ============================================================
 # Temporary & Misc
 # ============================================================
 *.tmp
