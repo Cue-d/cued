@@ -43,8 +43,9 @@ impl AppDb {
                 ))
             })?;
 
-        // Set busy timeout to wait up to 5 seconds if database is locked
-        conn.query_row("PRAGMA busy_timeout = 5000", [], |_row| Ok(()))
+        // Set busy timeout to wait up to 30 seconds if database is locked
+        // (increased from 5s to handle parallel LLM processing writes)
+        conn.query_row("PRAGMA busy_timeout = 30000", [], |_row| Ok(()))
             .map_err(|e| {
                 pyo3::exceptions::PyRuntimeError::new_err(format!(
                     "Failed to set busy timeout: {}",
@@ -1108,12 +1109,16 @@ impl AppDb {
             LEFT JOIN people p ON p.id = m.sender_id
             WHERE lm.their_latest > lm.my_latest
             AND lm.their_latest < (? - ?)
-            -- Exclude chats with pending/snoozed actions
+            -- Exclude chats with pending/snoozed actions,
+            -- or recently discarded actions (within last 24 hours)
             AND NOT EXISTS (
                 SELECT 1 FROM actions
                 WHERE chat_id = m.chat_id
                 AND type = 'respond_to_message'
-                AND status IN ('pending', 'snoozed')
+                AND (
+                    status IN ('pending', 'snoozed')
+                    OR (status = 'discarded' AND discarded_at > (strftime('%s', 'now') - 86400))
+                )
             )
             -- Exclude recently viewed chats (user already looked at them)
             AND (c.last_viewed_at IS NULL OR c.last_viewed_at < ?)
