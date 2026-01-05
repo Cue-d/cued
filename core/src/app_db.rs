@@ -797,7 +797,7 @@ impl AppDb {
         Ok(self.conn.last_insert_rowid())
     }
 
-    /// Get pending actions ordered by priority
+    /// Get pending actions ordered by priority (snoozed actions go to the back once their snooze expires)
     pub fn get_pending_actions(&self, limit: u32) -> PyResult<Vec<crate::models::Action>> {
         let mut stmt = self.conn.prepare(
             "SELECT a.id, a.type, a.status, a.priority, a.chat_id, a.person_id, a.message_id,
@@ -808,8 +808,11 @@ impl AppDb {
              LEFT JOIN people p ON p.id = a.person_id
              LEFT JOIN messages m ON m.id = a.message_id
              WHERE a.status = 'pending'
-             AND (a.snoozed_until IS NULL OR a.snoozed_until <= strftime('%s', 'now'))
-             ORDER BY a.priority DESC, a.created_at ASC
+                OR (a.status = 'snoozed' AND a.snoozed_until <= strftime('%s', 'now'))
+             ORDER BY 
+                CASE WHEN a.status = 'snoozed' THEN 1 ELSE 0 END ASC,
+                a.priority DESC, 
+                a.created_at ASC
              LIMIT ?"
         ).map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(format!("Query error: {}", e)))?;
 
