@@ -69,89 +69,88 @@ export const EODContactCard = forwardRef<EODContactCardRef, EODContactCardProps>
 
     return (
       <Card
-        className={cn(
-          'w-full h-full flex flex-col overflow-hidden bg-card border-border shadow-2xl',
-          className
-        )}
+        className={cn('w-full h-full flex flex-col overflow-hidden gap-0 border p-0', className)}
       >
         {/* Header */}
-        <CardHeader className="shrink-0 border-b border-border pb-4">
-          <div className="flex items-center gap-4">
-            <Avatar initials={initials} size="lg" />
+        <CardHeader className="shrink-0 p-3">
+          <div className="flex items-center gap-x-3">
+            <Avatar initials={initials} size="sm" />
             <div className="flex-1 min-w-0">
-              <div className="flex items-center gap-2 text-muted-foreground text-sm mb-1">
-                <Clock className="w-4 h-4" />
+              <div className="flex items-center gap-2 text-muted-foreground text-xs mb-1">
+                <Clock className="w-3 h-3" />
                 <span>You met someone new today</span>
               </div>
-              <h3 className="font-semibold text-xl text-foreground">{personName}</h3>
-              <p className="text-sm text-muted-foreground">at {meetingTime}</p>
+              <h3 className="font-semibold text-sm text-foreground truncate">{personName}</h3>
+              <p className="text-xs text-muted-foreground">at {meetingTime}</p>
             </div>
           </div>
         </CardHeader>
 
         {/* Form Content */}
-        <CardContent className="flex-1 overflow-y-auto py-6 space-y-5">
-          <p className="text-muted-foreground text-sm">
-            Tell me a bit more about them so you can remember this connection later.
-          </p>
+        <CardContent className="border-t flex-1 p-0 min-h-0">
+          <div
+            className="h-full overflow-y-auto [&::-webkit-scrollbar]:w-2 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:bg-border/50 [scrollbar-width:thin]"
+            style={{ scrollbarColor: 'rgba(128, 128, 128, 0.5) transparent' }}
+          >
+            <div className="py-6 px-4 space-y-5">
+              <p className="text-muted-foreground text-sm">
+                Tell me a bit more about them so you can remember this connection later.
+              </p>
 
-          {/* Name Field */}
-          <div className="space-y-2">
-            <label className="flex items-center gap-2 text-sm font-medium text-foreground">
-              <User className="w-4 h-4 text-muted-foreground" />
-              Name
-            </label>
-            <Input
-              ref={nameInputRef}
-              value={formData.name}
-              onChange={(e) => onFormChange({ ...formData, name: e.target.value })}
-              placeholder="Their name..."
-              className="bg-background"
-            />
-          </div>
-
-          {/* Tags Field */}
-          <div className="space-y-2">
-            <label className="flex items-center gap-2 text-sm font-medium text-foreground">
-              <Tag className="w-4 h-4 text-muted-foreground" />
-              Tags
-            </label>
-            <Input
-              value={formData.tags}
-              onChange={(e) => onFormChange({ ...formData, tags: e.target.value })}
-              placeholder="work, friend, investor, met at conference..."
-              className="bg-background"
-            />
-            {tagList.length > 0 && (
-              <div className="flex flex-wrap gap-1.5 mt-2">
-                {tagList.map((tag, i) => (
-                  <Badge key={i} variant="secondary" className="text-xs">
-                    {tag}
-                  </Badge>
-                ))}
+              {/* Name Field */}
+              <div className="space-y-2">
+                <label className="flex items-center gap-2 text-sm font-medium text-foreground">
+                  <User className="w-4 h-4 text-muted-foreground" />
+                  Name
+                </label>
+                <Input
+                  ref={nameInputRef}
+                  value={formData.name}
+                  onChange={(e) => onFormChange({ ...formData, name: e.target.value })}
+                  placeholder="Their name..."
+                  className="bg-background"
+                />
               </div>
-            )}
-          </div>
 
-          {/* Notes Field */}
-          <div className="space-y-2">
-            <label className="flex items-center gap-2 text-sm font-medium text-foreground">
-              <FileText className="w-4 h-4 text-muted-foreground" />
-              Notes
-            </label>
-            <Textarea
-              value={formData.notes}
-              onChange={(e) => onFormChange({ ...formData, notes: e.target.value })}
-              placeholder="Where did you meet? What did you talk about? Any follow-ups?"
-              className="min-h-[100px] max-h-[200px] resize-none bg-background"
-            />
+              {/* Tags Field */}
+              <div className="space-y-2">
+                <label className="flex items-center gap-2 text-sm font-medium text-foreground">
+                  <Tag className="w-4 h-4 text-muted-foreground" />
+                  Tags
+                </label>
+                <Input
+                  value={formData.tags}
+                  onChange={(e) => onFormChange({ ...formData, tags: e.target.value })}
+                  placeholder="work, friend, investor, met at conference..."
+                  className="bg-background"
+                />
+                {tagList.length > 0 && (
+                  <div className="flex flex-wrap gap-1.5 mt-2">
+                    {tagList.map((tag, i) => (
+                      <Badge key={i} variant="secondary" className="text-xs">
+                        {tag}
+                      </Badge>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {/* Notes Field */}
+              <div className="space-y-2">
+                <label className="flex items-center gap-2 text-sm font-medium text-foreground">
+                  <FileText className="w-4 h-4 text-muted-foreground" />
+                  Notes
+                </label>
+                <Textarea
+                  value={formData.notes}
+                  onChange={(e) => onFormChange({ ...formData, notes: e.target.value })}
+                  placeholder="Where did you meet? What did you talk about? Any follow-ups?"
+                  className="min-h-[100px] max-h-[200px] resize-none bg-background"
+                />
+              </div>
+            </div>
           </div>
         </CardContent>
-
-        {/* Footer */}
-        <div className="shrink-0 border-t border-border p-4 bg-muted/30">
-          <p className="text-xs text-muted-foreground text-center">← Skip · ↑ Snooze · Save →</p>
-        </div>
       </Card>
     )
   }

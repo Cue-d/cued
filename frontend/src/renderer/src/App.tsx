@@ -30,7 +30,7 @@ function App() {
 
   return (
     <div className="relative w-full h-screen flex overflow-hidden bg-imessage-window-bg">
-      <CommandMenu isDark={isDark} onToggleTheme={() => setIsDark(!isDark)} />
+      <CommandMenu />
       <div className="absolute top-3 right-3 z-10">
         <ThemeToggle isDark={isDark} onToggle={() => setIsDark(!isDark)} />
       </div>

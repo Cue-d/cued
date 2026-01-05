@@ -1,8 +1,7 @@
 import { forwardRef, useEffect, useImperativeHandle, useRef } from 'react'
 import type { ActionResponse } from '@/api/actions'
 import Avatar from '@/components/Avatar'
-import { Card, CardContent, CardHeader } from '@/components/ui/card'
-import { ScrollArea } from '@/components/ui/scroll-area'
+import { Card, CardContent, CardFooter, CardHeader } from '@/components/ui/card'
 import { Textarea } from '@/components/ui/textarea'
 import { cn } from '@/lib/utils'
 
@@ -49,6 +48,7 @@ function formatRelativeTime(timestamp: number): string {
 export const MessageResponseCard = forwardRef<MessageResponseCardRef, MessageResponseCardProps>(
   function MessageResponseCard({ action, responseText, onResponseChange, className }, ref) {
     const textareaRef = useRef<HTMLTextAreaElement>(null)
+    const scrollContainerRef = useRef<HTMLDivElement>(null)
 
     useImperativeHandle(ref, () => ({
       focusInput: () => {
@@ -64,25 +64,32 @@ export const MessageResponseCard = forwardRef<MessageResponseCardRef, MessageRes
       return () => clearTimeout(timer)
     }, [])
 
+    useEffect(() => {
+      // Scroll to bottom when messages change or component mounts
+      const timer = setTimeout(() => {
+        if (scrollContainerRef.current) {
+          scrollContainerRef.current.scrollTop = scrollContainerRef.current.scrollHeight
+        }
+      }, 0)
+      return () => clearTimeout(timer)
+    }, [action.recent_messages])
+
     const personName = action.person_name || action.chat_name || 'Unknown'
     const initials = getInitials(personName)
     const recentMessages = action.recent_messages || []
 
     return (
       <Card
-        className={cn(
-          'w-full h-full flex flex-col overflow-hidden bg-card border-border shadow-2xl',
-          className
-        )}
+        className={cn('w-full h-full flex flex-col overflow-hidden gap-0 border p-0', className)}
       >
         {/* Header */}
-        <CardHeader className="shrink-0 border-b border-border pb-4">
-          <div className="flex items-center gap-3">
-            <Avatar initials={initials} size="lg" />
+        <CardHeader className="shrink-0 p-3">
+          <div className="flex items-center gap-x-3">
+            <Avatar initials={initials} size="sm" />
             <div className="flex-1 min-w-0">
-              <h3 className="font-semibold text-lg text-foreground truncate">{personName}</h3>
+              <h3 className="font-semibold text-sm text-foreground truncate">{personName}</h3>
               {action.message_timestamp && (
-                <p className="text-sm text-muted-foreground">
+                <p className="text-xs text-muted-foreground">
                   {formatRelativeTime(action.message_timestamp)}
                 </p>
               )}
@@ -91,8 +98,12 @@ export const MessageResponseCard = forwardRef<MessageResponseCardRef, MessageRes
         </CardHeader>
 
         {/* Message Context */}
-        <CardContent className="flex-1 p-0">
-          <ScrollArea className="h-full">
+        <CardContent className="border-t flex-1 p-0 min-h-0">
+          <div
+            ref={scrollContainerRef}
+            className="h-full overflow-y-auto [&::-webkit-scrollbar]:w-2 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:bg-border/50 [scrollbar-width:thin]"
+            style={{ scrollbarColor: 'rgba(128, 128, 128, 0.5) transparent' }}
+          >
             <div className="py-4 px-4 space-y-2">
               {recentMessages.length > 0 ? (
                 recentMessages.map((msg) => (
@@ -118,11 +129,11 @@ export const MessageResponseCard = forwardRef<MessageResponseCardRef, MessageRes
                 </div>
               )}
             </div>
-          </ScrollArea>
+          </div>
         </CardContent>
 
         {/* Response Input */}
-        <div className="shrink-0 border-t border-border p-4 bg-muted/30">
+        <CardFooter className="p-3 bg-transparent">
           <Textarea
             ref={textareaRef}
             value={responseText}
@@ -134,10 +145,7 @@ export const MessageResponseCard = forwardRef<MessageResponseCardRef, MessageRes
               e.stopPropagation()
             }}
           />
-          <p className="text-xs text-muted-foreground mt-2 text-center">
-            ← Skip · ↑ Snooze · Send →
-          </p>
-        </div>
+        </CardFooter>
       </Card>
     )
   }

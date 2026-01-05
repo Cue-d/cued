@@ -1,7 +1,7 @@
 import { Inbox, RefreshCw } from 'lucide-react'
 import { useCallback, useMemo, useState } from 'react'
 import { searchMessages, semanticSearch } from '@/api/actions'
-import type { ActionType, SwipeDirection } from '@/data/types'
+import type { ActionType, SearchResultResponse, SwipeDirection } from '@/data/types'
 import { useActions } from '@/hooks'
 import { CardStack } from './CardStack'
 import { SearchBar } from './SearchBar'
@@ -27,7 +27,7 @@ export function ActionQueueView() {
     setIsSearching(true)
     try {
       // Execute search (results could be used to highlight/filter actions)
-      let results
+      let results: SearchResultResponse[] = []
       if (mode === 'semantic') {
         console.log('[ActionQueueView] Calling semanticSearch...')
         results = await semanticSearch(query, 20)
@@ -122,10 +122,11 @@ export function ActionQueueView() {
       <div className="shrink-0 px-6 pt-12 pb-4 border-b border-border bg-imessage-header-bg">
         <div className="flex items-center justify-between mb-4">
           <div className="flex items-center gap-3">
-            <Inbox className="w-6 h-6 text-primary" />
-            <h1 className="text-xl font-semibold text-foreground">Action Queue</h1>
+            <Inbox className="w-6 h-6 text-muted-foreground" />
+            <h1 className="text-xl font-semibold text-secondary-foreground">Action Queue</h1>
           </div>
           <button
+            type="button"
             onClick={refresh}
             className="p-2 rounded-lg hover:bg-muted transition-colors"
             title="Refresh actions"

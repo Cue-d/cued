@@ -1,4 +1,4 @@
-import { MessageSquare, Moon, Search, Sparkles, Sun, User } from 'lucide-react'
+import { MessageSquare, Search, Sparkles, User } from 'lucide-react'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { searchMessages, semanticSearch } from '@/api/actions'
 import { Badge } from '@/components/ui/badge'
@@ -7,27 +7,18 @@ import {
   CommandEmpty,
   CommandGroup,
   CommandItem,
-  CommandList,
-  CommandSeparator,
-  CommandShortcut
+  CommandList
 } from '@/components/ui/command'
 import type { SearchResultResponse } from '@/data/types'
 
 interface CommandMenuProps {
-  isDark: boolean
-  onToggleTheme: () => void
   open?: boolean
   onOpenChange?: (open: boolean) => void
 }
 
 type SearchMode = 'semantic' | 'fts'
 
-export function CommandMenu({
-  isDark,
-  onToggleTheme,
-  open: controlledOpen,
-  onOpenChange
-}: CommandMenuProps) {
+export function CommandMenu({ open: controlledOpen, onOpenChange }: CommandMenuProps) {
   const [internalOpen, setInternalOpen] = useState(false)
 
   // Support both controlled and uncontrolled modes
@@ -95,12 +86,6 @@ export function CommandMenu({
     }
   }, [query, searchMode])
 
-  const runCommand = useCallback((command: () => void) => {
-    setOpen(false)
-    command()
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
-
   const toggleSearchMode = useCallback(() => {
     setSearchMode((prev) => (prev === 'semantic' ? 'fts' : 'semantic'))
   }, [])
@@ -157,22 +142,6 @@ export function CommandMenu({
         {!query && (
           <>
             <CommandEmpty>Start typing to search messages...</CommandEmpty>
-            <CommandGroup heading="Quick Actions">
-              <CommandItem onSelect={() => runCommand(onToggleTheme)}>
-                {isDark ? <Sun className="mr-2 h-4 w-4" /> : <Moon className="mr-2 h-4 w-4" />}
-                <span>Toggle {isDark ? 'Light' : 'Dark'} Mode</span>
-                <CommandShortcut>Theme</CommandShortcut>
-              </CommandItem>
-              <CommandItem onSelect={toggleSearchMode}>
-                {searchMode === 'semantic' ? (
-                  <Search className="mr-2 h-4 w-4" />
-                ) : (
-                  <Sparkles className="mr-2 h-4 w-4" />
-                )}
-                <span>Switch to {searchMode === 'semantic' ? 'Full-Text' : 'AI'} Search</span>
-                <CommandShortcut>{searchMode === 'semantic' ? 'FTS' : 'AI'}</CommandShortcut>
-              </CommandItem>
-            </CommandGroup>
           </>
         )}
 
@@ -244,13 +213,6 @@ export function CommandMenu({
                   )}
                 </CommandItem>
               ))}
-            </CommandGroup>
-            <CommandSeparator />
-            <CommandGroup heading="Actions">
-              <CommandItem onSelect={() => runCommand(onToggleTheme)}>
-                {isDark ? <Sun className="mr-2 h-4 w-4" /> : <Moon className="mr-2 h-4 w-4" />}
-                <span>Toggle {isDark ? 'Light' : 'Dark'} Mode</span>
-              </CommandItem>
             </CommandGroup>
           </>
         )}
