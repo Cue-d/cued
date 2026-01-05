@@ -354,6 +354,7 @@ fn insert_messages(conn: &mut Connection, messages: &[SyncMessage]) -> Result<us
 }
 
 /// Insert attachments into prm.db using a transaction.
+/// Skips attachments whose message_id doesn't exist in the messages table.
 fn insert_attachments(
     conn: &mut Connection,
     attachments: &[SyncAttachment],
@@ -370,6 +371,20 @@ fn insert_attachments(
     let mut count = 0;
 
     for att in attachments {
+        // Check if the message exists before inserting attachment
+        let message_exists: bool = tx
+            .query_row(
+                "SELECT EXISTS(SELECT 1 FROM messages WHERE id = ?)",
+                params![att.message_id],
+                |row| row.get(0),
+            )
+            .unwrap_or(false);
+
+        if !message_exists {
+            // Skip attachments for messages that don't exist (e.g., not joined to a chat)
+            continue;
+        }
+
         tx.execute(
             "INSERT OR REPLACE INTO attachments (id, message_id, filename, path, mime_type, uti, size, is_outgoing, created_at, synced_at)
              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
