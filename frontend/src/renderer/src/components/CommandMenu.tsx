@@ -181,7 +181,6 @@ export function CommandMenu({ open: controlledOpen, onOpenChange }: CommandMenuP
                   key={`${result.chat_id}-${result.message_id}`}
                   onSelect={() => {
                     // TODO: Navigate to message/chat
-                    console.log('Selected message:', result)
                     setOpen(false)
                   }}
                   className="flex flex-col items-start gap-1 py-3"
