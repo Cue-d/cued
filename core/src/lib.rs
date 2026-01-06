@@ -1,11 +1,9 @@
 //! PRM Core - Rust library exposed to Python via PyO3.
 
-pub mod app_db;
-pub mod chat_reader;
-pub mod contacts;
-pub mod messaging;
+pub mod db;
+pub mod macos;
 pub mod models;
-pub mod sync_watcher;
+pub mod sync;
 pub mod utils;
 
 use pyo3::prelude::*;
@@ -39,26 +37,24 @@ fn core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<models::StoredEmbedding>()?;
     m.add_class::<models::QueuedAnalysis>()?;
 
-    // Database classes
-    m.add_class::<app_db::AppDb>()?;
-    m.add_class::<chat_reader::ChatReader>()?;
+    // Database classes (from db module)
+    m.add_class::<db::AppDb>()?;
+    m.add_class::<db::ChatReader>()?;
 
     // Utility functions
     m.add_function(wrap_pyfunction!(utils::normalize_phone, m)?)?;
     m.add_function(wrap_pyfunction!(utils::normalize_email, m)?)?;
     m.add_function(wrap_pyfunction!(utils::apple_to_unix, m)?)?;
 
-    // Contact fetching functions
-    m.add_function(wrap_pyfunction!(contacts::fetch_all_contact_names, m)?)?;
-    m.add_function(wrap_pyfunction!(contacts::fetch_contacts_by_names, m)?)?;
-
-    // Messaging functions
-    m.add_class::<messaging::SendResult>()?;
-    m.add_function(wrap_pyfunction!(messaging::send_message, m)?)?;
-    m.add_function(wrap_pyfunction!(messaging::send_to_group, m)?)?;
+    // macOS integrations (contacts and messaging)
+    m.add_function(wrap_pyfunction!(macos::fetch_all_contact_names, m)?)?;
+    m.add_function(wrap_pyfunction!(macos::fetch_contacts_by_names, m)?)?;
+    m.add_class::<macos::SendResult>()?;
+    m.add_function(wrap_pyfunction!(macos::send_message, m)?)?;
+    m.add_function(wrap_pyfunction!(macos::send_to_group, m)?)?;
 
     // Background sync watcher
-    m.add_class::<sync_watcher::SyncWatcher>()?;
+    m.add_class::<sync::SyncWatcher>()?;
 
     Ok(())
 }
