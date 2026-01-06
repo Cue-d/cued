@@ -35,14 +35,18 @@ export function CommandMenu({ open: controlledOpen, onOpenChange }: CommandMenuP
     const down = (e: KeyboardEvent) => {
       if (e.key === 'k' && (e.metaKey || e.ctrlKey)) {
         e.preventDefault()
-        setOpen(!open)
+        // Toggle using internal state for uncontrolled mode, or callback for controlled
+        if (onOpenChange) {
+          onOpenChange(!controlledOpen)
+        } else {
+          setInternalOpen((prev) => !prev)
+        }
       }
     }
 
     document.addEventListener('keydown', down)
     return () => document.removeEventListener('keydown', down)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
+  }, [controlledOpen, onOpenChange])
 
   // Reset state when dialog closes
   useEffect(() => {
