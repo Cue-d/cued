@@ -27,7 +27,6 @@ export type { ActionResponse, SearchResultResponse, SwipeRequest } from '../../.
 
 // Convenience type aliases for the action system
 export type ActionType = 'respond_to_message' | 'eod_contact' | 'follow_up'
-export type ActionStatus = 'pending' | 'completed' | 'discarded' | 'snoozed'
 export type SwipeDirection = 'left' | 'right' | 'up'
 
 export const formatTimestamp = (date: Date): string => {
