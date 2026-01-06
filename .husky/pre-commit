@@ -5,14 +5,12 @@ cd frontend
 pnpm exec lint-staged
 pnpm run typecheck
 
-# Backend: ruff (auto-format and lint with fixes, then stage changes)
+# Backend: ruff (auto-format and lint with fixes)
 cd ../backend
 uv run ruff format .
 uv run ruff check --fix .
-git add -u .
 
 # Core: cargo fmt + clippy
 cd ../core
 cargo fmt
 cargo clippy -- -D warnings
-git add -u .
