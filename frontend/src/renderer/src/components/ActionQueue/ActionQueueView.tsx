@@ -20,9 +20,7 @@ export function ActionQueueView() {
 
   // Handle search (currently just updates query state, could integrate with action filtering)
   const handleSearch = useCallback(async (query: string, mode: 'fts' | 'semantic') => {
-    console.log(`[ActionQueueView] handleSearch called - query: "${query}", mode: ${mode}`)
     if (!query) {
-      console.log('[ActionQueueView] Empty query, skipping search')
       return
     }
 
@@ -31,19 +29,14 @@ export function ActionQueueView() {
       // Execute search (results could be used to highlight/filter actions)
       let results: SearchResultResponse[] = []
       if (mode === 'semantic') {
-        console.log('[ActionQueueView] Calling semanticSearch...')
         results = await semanticSearch(query, 20)
       } else {
-        console.log('[ActionQueueView] Calling searchMessages...')
         results = await searchMessages(query, 50)
       }
-      console.log(
-        `[ActionQueueView] Search complete - got ${results?.length ?? 0} results:`,
-        results
-      )
-      // For now, just log - in future could filter actions by search results
-    } catch (err) {
-      console.error('[ActionQueueView] Search failed:', err)
+      // For now, results not used - in future could filter actions by search results
+      void results
+    } catch {
+      // Search failed silently - user sees no results
     } finally {
       setIsSearching(false)
     }
