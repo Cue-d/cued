@@ -55,7 +55,7 @@ describe('actions API', () => {
 
       const result = await fetchActions('pending', 50)
 
-      expect(mockFetchActions).toHaveBeenCalledWith('pending', 50)
+      expect(mockFetchActions).toHaveBeenCalledWith('pending', 50, undefined)
       expect(result).toEqual(mockActions)
     })
 
@@ -64,7 +64,15 @@ describe('actions API', () => {
 
       await fetchActions()
 
-      expect(mockFetchActions).toHaveBeenCalledWith('pending', 50)
+      expect(mockFetchActions).toHaveBeenCalledWith('pending', 50, undefined)
+    })
+
+    it('passes action type filter', async () => {
+      mockFetchActions.mockResolvedValue([])
+
+      await fetchActions('pending', 50, 'respond_to_message')
+
+      expect(mockFetchActions).toHaveBeenCalledWith('pending', 50, 'respond_to_message')
     })
   })
 

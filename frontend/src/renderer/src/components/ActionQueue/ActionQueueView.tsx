@@ -11,12 +11,14 @@ import { Spinner } from '../ui/spinner'
 type SortBy = 'priority' | 'date' | 'type'
 
 export function ActionQueueView() {
-  const { actions, loading, error, handleSwipe, refresh } = useActions()
-
   // Local state for filtering/sorting
   const [activeFilters, setActiveFilters] = useState<ActionType[]>([])
   const [sortBy, setSortBy] = useState<SortBy>('priority')
   const [isSearching, setIsSearching] = useState(false)
+
+  // Use server-side filtering when exactly one filter is selected
+  const serverSideFilter = activeFilters.length === 1 ? activeFilters[0] : undefined
+  const { actions, loading, error, handleSwipe, refresh } = useActions(serverSideFilter)
 
   // Handle search (currently just updates query state, could integrate with action filtering)
   const handleSearch = useCallback(async (query: string, mode: 'fts' | 'semantic') => {
@@ -43,11 +45,13 @@ export function ActionQueueView() {
   }, [])
 
   // Filter and sort actions
+  // Client-side filtering only needed when multiple filters are selected
+  // (single filter is handled server-side via useActions)
   const filteredActions = useMemo(() => {
     let result = [...actions]
 
-    // Apply type filters
-    if (activeFilters.length > 0) {
+    // Apply client-side type filters only when multiple filters are selected
+    if (activeFilters.length > 1) {
       result = result.filter((a) => activeFilters.includes(a.type))
     }
 

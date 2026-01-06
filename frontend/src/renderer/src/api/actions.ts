@@ -10,8 +10,8 @@ import {
 // Re-export types from data/types for consumers that import from api/actions
 export type { ActionResponse, SearchResultResponse, SwipeRequest } from '../data/types'
 
-export async function fetchActions(status = 'pending', limit = 50) {
-  return clientFetchActions(status, limit)
+export async function fetchActions(status = 'pending', limit = 50, actionType?: string) {
+  return clientFetchActions(status, limit, actionType)
 }
 
 export async function swipeAction(

@@ -88,7 +88,7 @@ describe('useActions', () => {
     })
 
     expect(mockFetchActions).toHaveBeenCalledTimes(1)
-    expect(mockFetchActions).toHaveBeenCalledWith('pending', 50)
+    expect(mockFetchActions).toHaveBeenCalledWith('pending', 50, undefined)
     expect(result.current.loading).toBe(false)
     expect(result.current.actions).toEqual([mockAction1, mockAction2])
     expect(result.current.currentAction).toEqual(mockAction1)
@@ -284,5 +284,48 @@ describe('useActions', () => {
     })
 
     expect(result.current.loading).toBe(false)
+  })
+
+  it('passes actionType filter to fetchActions', async () => {
+    mockFetchActions.mockResolvedValue([mockAction1])
+
+    const { result } = renderHook(() => useActions('respond_to_message'))
+
+    // Flush the initial fetch
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0)
+    })
+
+    expect(mockFetchActions).toHaveBeenCalledTimes(1)
+    expect(mockFetchActions).toHaveBeenCalledWith('pending', 50, 'respond_to_message')
+    expect(result.current.actions).toEqual([mockAction1])
+  })
+
+  it('refetches when actionType changes', async () => {
+    mockFetchActions.mockResolvedValue([mockAction1])
+
+    const { result, rerender } = renderHook(({ actionType }) => useActions(actionType), {
+      initialProps: { actionType: undefined as string | undefined }
+    })
+
+    // Flush the initial fetch
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0)
+    })
+
+    expect(mockFetchActions).toHaveBeenCalledTimes(1)
+    expect(mockFetchActions).toHaveBeenCalledWith('pending', 50, undefined)
+
+    // Change the actionType
+    mockFetchActions.mockResolvedValue([mockAction2])
+    rerender({ actionType: 'eod_contact' })
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0)
+    })
+
+    expect(mockFetchActions).toHaveBeenCalledTimes(2)
+    expect(mockFetchActions).toHaveBeenLastCalledWith('pending', 50, 'eod_contact')
+    expect(result.current.actions).toEqual([mockAction2])
   })
 })

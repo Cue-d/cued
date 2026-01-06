@@ -261,8 +261,13 @@ def run_unanswered_scan():
     - Time-decay curve (peak at 24-72 hours, declining after)
     - Contact importance (saved contacts, company, notes)
     - Group chat penalty (less actionable)
+
+    Also applies heuristic filters to skip obvious spam/automated messages
+    without making LLM calls.
     """
     try:
+        from services.message_filter import should_skip_llm_analysis
+
         db = core.AppDb(APP_DB_PATH)
         db.init_schema()
         unanswered = db.get_unanswered_chats(24)  # 24 hour threshold
@@ -272,6 +277,7 @@ def run_unanswered_scan():
 
         # Queue chats for analysis with smart priority scoring
         queued = 0
+        skipped = 0
         for chat in unanswered:
             # Get chat and person info for priority calculation
             chat_info = db.get_chat(chat.chat_id)
@@ -280,6 +286,24 @@ def run_unanswered_scan():
             # Get first participant for contact importance scoring
             participants = db.get_chat_participants(chat.chat_id)
             person = participants[0] if participants else None
+
+            # Apply heuristic filters BEFORE queuing for LLM
+            filter_result = should_skip_llm_analysis(
+                identifier=person.identifier if person else None,
+                text=chat.text,
+                person_name=person.name if person else chat.person_name,
+                is_contact=person.is_contact if person else False,
+            )
+
+            if filter_result.should_skip:
+                # Mark as skipped so it won't be re-queued
+                db.mark_analysis_skipped(chat.chat_id, filter_result.reason.value)
+                skipped += 1
+                logger.debug(
+                    f"Skipped chat {chat.chat_id}: {filter_result.reason.value} "
+                    f"(confidence={filter_result.confidence:.2f})"
+                )
+                continue
 
             # Calculate priority using time-decay curve + contact signals
             priority = calculate_chat_priority(
@@ -291,8 +315,8 @@ def run_unanswered_scan():
             db.queue_for_analysis(chat.chat_id, priority)
             queued += 1
 
-        if queued > 0:
-            logger.debug(f"Background job: Queued {queued} chats for LLM analysis")
+        if queued > 0 or skipped > 0:
+            logger.info(f"Unanswered scan: Queued {queued}, skipped {skipped}")
     except Exception as e:
         logger.error(f"Unanswered scan failed: {e}")
 

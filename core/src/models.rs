@@ -546,3 +546,33 @@ impl QueuedAnalysis {
         )
     }
 }
+
+/// Skipped analysis entry (filtered by heuristics before LLM)
+#[pyclass]
+#[derive(Debug, Clone)]
+pub struct SkippedAnalysis {
+    #[pyo3(get)]
+    pub chat_id: i64,
+    #[pyo3(get)]
+    pub skip_reason: String,
+    #[pyo3(get)]
+    pub skipped_at: i64,
+    #[pyo3(get)]
+    pub chat_name: Option<String>,
+    #[pyo3(get)]
+    pub person_name: Option<String>,
+    #[pyo3(get)]
+    pub identifier: Option<String>,
+    #[pyo3(get)]
+    pub last_message: Option<String>,
+}
+
+#[pymethods]
+impl SkippedAnalysis {
+    fn __repr__(&self) -> String {
+        format!(
+            "SkippedAnalysis(chat_id={}, reason='{}')",
+            self.chat_id, self.skip_reason
+        )
+    }
+}

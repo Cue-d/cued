@@ -70,11 +70,19 @@ export async function fetchSyncStatus(): Promise<SyncStatusResponse> {
   return httpGet('/sync/status')
 }
 
-export async function fetchActions(status = 'pending', limit = 50): Promise<ActionResponse[]> {
+export async function fetchActions(
+  status = 'pending',
+  limit = 50,
+  actionType?: string
+): Promise<ActionResponse[]> {
   if (isElectron()) {
-    return window.api.getActions(status, limit)
+    return window.api.getActions(status, limit, actionType)
   }
-  return httpGet(`/actions/?status=${status}&limit=${limit}`)
+  let url = `/actions/?status=${status}&limit=${limit}`
+  if (actionType) {
+    url += `&action_type=${actionType}`
+  }
+  return httpGet(url)
 }
 
 export async function swipeAction(

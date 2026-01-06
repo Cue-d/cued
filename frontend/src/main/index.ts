@@ -84,11 +84,18 @@ function registerIpcHandlers(): void {
   })
 
   // Action queue handlers
-  ipcMain.handle('api:getActions', async (_, status = 'pending', limit = 50) => {
-    const res = await fetch(`${API_BASE}/actions/?status=${status}&limit=${limit}`)
-    if (!res.ok) throw new Error(`Failed to fetch actions: ${res.status}`)
-    return res.json()
-  })
+  ipcMain.handle(
+    'api:getActions',
+    async (_, status = 'pending', limit = 50, actionType?: string) => {
+      let url = `${API_BASE}/actions/?status=${status}&limit=${limit}`
+      if (actionType) {
+        url += `&action_type=${actionType}`
+      }
+      const res = await fetch(url)
+      if (!res.ok) throw new Error(`Failed to fetch actions: ${res.status}`)
+      return res.json()
+    }
+  )
 
   ipcMain.handle(
     'api:swipeAction',

@@ -4,8 +4,8 @@ use pyo3::prelude::*;
 use rusqlite::{Connection, params};
 
 use crate::models::{
-    Attachment, PendingEmbedding, Person, PrmChat, PrmMessage, QueuedAnalysis, StoredEmbedding,
-    SyncAttachment, SyncChat, SyncMessage, UnansweredChat,
+    Attachment, PendingEmbedding, Person, PrmChat, PrmMessage, QueuedAnalysis, SkippedAnalysis,
+    StoredEmbedding, SyncAttachment, SyncChat, SyncMessage, UnansweredChat,
 };
 use crate::utils::now_timestamp;
 
@@ -1443,6 +1443,71 @@ impl AppDb {
                 pyo3::exceptions::PyRuntimeError::new_err(format!("Delete error: {}", e))
             })?;
         Ok(count as u32)
+    }
+
+    /// Mark analysis as skipped with reason (filtered by heuristics, no LLM call needed)
+    pub fn mark_analysis_skipped(&self, chat_id: i64, reason: &str) -> PyResult<()> {
+        let now = now_timestamp();
+        let result = format!("skipped:{}", reason);
+        self.conn
+            .execute(
+                "INSERT OR REPLACE INTO llm_analysis_queue
+                 (chat_id, status, priority, queued_at, started_at, completed_at, result)
+                 VALUES (?, 'completed', 0, ?, NULL, ?, ?)",
+                params![chat_id, now, now, result],
+            )
+            .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(format!("Skip error: {}", e)))?;
+        Ok(())
+    }
+
+    /// Get recently skipped analyses (for review via API)
+    pub fn get_skipped_analyses(&self, limit: u32) -> PyResult<Vec<SkippedAnalysis>> {
+        let mut stmt = self
+            .conn
+            .prepare(
+                "SELECT q.chat_id, q.result, q.completed_at,
+                        c.name as chat_name, p.name as person_name, p.identifier,
+                        (SELECT text FROM messages WHERE chat_id = q.chat_id ORDER BY timestamp DESC LIMIT 1) as last_message
+                 FROM llm_analysis_queue q
+                 LEFT JOIN chats c ON c.id = q.chat_id
+                 LEFT JOIN chat_participants cp ON cp.chat_id = q.chat_id
+                 LEFT JOIN people p ON p.id = cp.person_id
+                 WHERE q.result LIKE 'skipped:%'
+                 ORDER BY q.completed_at DESC
+                 LIMIT ?",
+            )
+            .map_err(|e| {
+                pyo3::exceptions::PyRuntimeError::new_err(format!("Query error: {}", e))
+            })?;
+
+        let rows = stmt
+            .query_map([limit], |row| {
+                let result: String = row.get(1)?;
+                let skip_reason = result
+                    .strip_prefix("skipped:")
+                    .unwrap_or(&result)
+                    .to_string();
+                Ok(SkippedAnalysis {
+                    chat_id: row.get(0)?,
+                    skip_reason,
+                    skipped_at: row.get(2)?,
+                    chat_name: row.get(3)?,
+                    person_name: row.get(4)?,
+                    identifier: row.get(5)?,
+                    last_message: row.get(6)?,
+                })
+            })
+            .map_err(|e| {
+                pyo3::exceptions::PyRuntimeError::new_err(format!("Query error: {}", e))
+            })?;
+
+        let mut result = Vec::new();
+        for row in rows {
+            result.push(row.map_err(|e| {
+                pyo3::exceptions::PyRuntimeError::new_err(format!("Row error: {}", e))
+            })?);
+        }
+        Ok(result)
     }
 
     /// Get count of pending analysis items

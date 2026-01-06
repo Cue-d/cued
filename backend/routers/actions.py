@@ -63,8 +63,18 @@ def action_to_response(action, db) -> ActionResponse:
 
 
 @router.get("/", response_model=list[ActionResponse])
-def get_actions(status: str = "pending", limit: int = 50):
-    """Get actions by status."""
+def get_actions(
+    status: str = "pending",
+    action_type: str | None = None,
+    limit: int = 50,
+):
+    """Get actions by status and optionally by type.
+
+    Args:
+        status: Filter by status (pending, completed, discarded, snoozed)
+        action_type: Filter by action type (respond_to_message, eod_contact, follow_up)
+        limit: Maximum number of actions to return
+    """
     db = get_db()
     if status == "pending":
         actions = db.get_pending_actions(limit)
@@ -72,6 +82,11 @@ def get_actions(status: str = "pending", limit: int = 50):
         # For other statuses, we'd need a different query
         # For now, just return pending
         actions = db.get_pending_actions(limit)
+
+    # Apply type filter if specified
+    if action_type:
+        actions = [a for a in actions if a.action_type == action_type]
+
     return [action_to_response(a, db) for a in actions]
 
 

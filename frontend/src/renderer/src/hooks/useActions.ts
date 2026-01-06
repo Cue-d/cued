@@ -160,7 +160,7 @@ const MOCK_ACTIONS: ActionResponse[] = [
   }
 ]
 
-export function useActions() {
+export function useActions(actionType?: string) {
   const [actions, setActions] = useState<ActionResponse[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -169,7 +169,7 @@ export function useActions() {
     try {
       setLoading(true)
       setError(null)
-      const data = await fetchActions('pending', 50)
+      const data = await fetchActions('pending', 50, actionType)
       // Only use mock data when explicitly enabled and no real data exists
       setActions(USE_MOCK_DATA && data.length === 0 ? MOCK_ACTIONS : data)
     } catch (err) {
@@ -182,7 +182,7 @@ export function useActions() {
     } finally {
       setLoading(false)
     }
-  }, [])
+  }, [actionType])
 
   useEffect(() => {
     loadActions()

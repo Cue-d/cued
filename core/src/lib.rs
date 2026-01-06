@@ -36,6 +36,7 @@ fn core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<models::PendingEmbedding>()?;
     m.add_class::<models::StoredEmbedding>()?;
     m.add_class::<models::QueuedAnalysis>()?;
+    m.add_class::<models::SkippedAnalysis>()?;
 
     // Database classes (from db module)
     m.add_class::<db::AppDb>()?;

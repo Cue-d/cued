@@ -9,8 +9,8 @@ const api = {
   sendMessage: (chatId: number, text: string) =>
     ipcRenderer.invoke('api:sendMessage', chatId, text),
   getSyncStatus: () => ipcRenderer.invoke('api:getSyncStatus'),
-  getActions: (status?: string, limit?: number) =>
-    ipcRenderer.invoke('api:getActions', status, limit),
+  getActions: (status?: string, limit?: number, actionType?: string) =>
+    ipcRenderer.invoke('api:getActions', status, limit, actionType),
   swipeAction: (actionId: number, request: SwipeRequest) =>
     ipcRenderer.invoke('api:swipeAction', actionId, request),
   searchMessages: (query: string, limit?: number) =>
