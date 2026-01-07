@@ -1,8 +1,9 @@
-import { forwardRef, useEffect, useImperativeHandle, useRef } from 'react'
+import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef } from 'react'
 import type { ActionResponse } from '@/api/actions'
 import Avatar from '@/components/Avatar'
 import { Card, CardContent, CardFooter, CardHeader } from '@/components/ui/card'
 import { Textarea } from '@/components/ui/textarea'
+import { type MessageItem, processMessagesWithReactions } from '@/lib/reactions'
 import { cn } from '@/lib/utils'
 
 interface MessageResponseCardProps {
@@ -14,6 +15,23 @@ interface MessageResponseCardProps {
 
 export interface MessageResponseCardRef {
   focusInput: () => void
+}
+
+// UI Components
+const ReactionBadges = ({ reactions, isSent }: { reactions: string[]; isSent: boolean }) => {
+  const displayReactions = reactions.slice(0, 3)
+  return (
+    <div
+      className={cn(
+        'absolute -top-2 flex gap-0.5 px-1.5 py-0.5 rounded-full bg-gray-100 dark:bg-gray-700 shadow-sm text-xs z-10',
+        isSent ? 'left-1' : 'right-1'
+      )}
+    >
+      {displayReactions.map((emoji, idx) => (
+        <span key={idx}>{emoji}</span>
+      ))}
+    </div>
+  )
 }
 
 function getInitials(name: string | null): string {
@@ -57,7 +75,6 @@ export const MessageResponseCard = forwardRef<MessageResponseCardRef, MessageRes
     }))
 
     useEffect(() => {
-      // Auto-focus the textarea when the card mounts
       const timer = setTimeout(() => {
         textareaRef.current?.focus()
       }, 300)
@@ -65,7 +82,6 @@ export const MessageResponseCard = forwardRef<MessageResponseCardRef, MessageRes
     }, [])
 
     useEffect(() => {
-      // Scroll to bottom when messages change or component mounts
       const timer = setTimeout(() => {
         if (scrollContainerRef.current) {
           scrollContainerRef.current.scrollTop = scrollContainerRef.current.scrollHeight
@@ -76,7 +92,18 @@ export const MessageResponseCard = forwardRef<MessageResponseCardRef, MessageRes
 
     const personName = action.person_name || action.chat_name || 'Unknown'
     const initials = getInitials(personName)
-    const recentMessages = action.recent_messages || []
+
+    // Transform and process messages
+    const { displayMessages, reactionsByMessageId } = useMemo(() => {
+      const messages: MessageItem[] = (action.recent_messages || []).map((msg) => ({
+        id: msg.id,
+        text: msg.text,
+        isSent: msg.is_from_me,
+        timestamp: msg.date,
+        senderName: msg.sender_name
+      }))
+      return processMessagesWithReactions(messages)
+    }, [action.recent_messages])
 
     return (
       <Card
@@ -105,24 +132,42 @@ export const MessageResponseCard = forwardRef<MessageResponseCardRef, MessageRes
             style={{ scrollbarColor: 'rgba(128, 128, 128, 0.5) transparent' }}
           >
             <div className="py-4 px-4 space-y-2">
-              {recentMessages.length > 0 ? (
-                recentMessages.map((msg) => (
-                  <div
-                    key={msg.id}
-                    className={cn(
-                      'max-w-[85%] rounded-2xl px-4 py-2 text-sm',
-                      msg.is_from_me
-                        ? 'ml-auto bg-imessage-bubble-sent text-imessage-bubble-sent-foreground'
-                        : 'mr-auto bg-imessage-bubble-received text-imessage-bubble-received-foreground'
-                    )}
-                  >
-                    {!msg.is_from_me && msg.sender_name && (
-                      <p className="text-xs font-medium opacity-70 mb-1">{msg.sender_name}</p>
-                    )}
-                    <p className="whitespace-pre-wrap wrap-break-word">{msg.text || '[No text]'}</p>
-                    <p className="text-[10px] opacity-60 mt-1 text-right">{formatTime(msg.date)}</p>
-                  </div>
-                ))
+              {displayMessages.length > 0 ? (
+                displayMessages.map((msg) => {
+                  const reactions = reactionsByMessageId.get(msg.id)
+                  const hasReactions = reactions && reactions.length > 0
+
+                  return (
+                    <div
+                      key={msg.id}
+                      className={cn('flex flex-col', msg.isSent ? 'items-end' : 'items-start')}
+                    >
+                      {!msg.isSent && msg.senderName && (
+                        <p className="text-xs font-medium opacity-70 mb-1 ml-1">{msg.senderName}</p>
+                      )}
+                      <div className="relative">
+                        {hasReactions && (
+                          <ReactionBadges reactions={reactions} isSent={msg.isSent} />
+                        )}
+                        <div
+                          className={cn(
+                            'max-w-[85%] rounded-2xl px-4 py-2 text-sm',
+                            msg.isSent
+                              ? 'bg-imessage-bubble-sent text-imessage-bubble-sent-foreground'
+                              : 'bg-imessage-bubble-received text-imessage-bubble-received-foreground'
+                          )}
+                        >
+                          <p className="whitespace-pre-wrap wrap-break-word">
+                            {msg.text || '[No text]'}
+                          </p>
+                          <p className="text-[10px] opacity-60 mt-1 text-right">
+                            {formatTime(msg.timestamp)}
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+                  )
+                })
               ) : (
                 <div className="flex items-center justify-center h-full text-muted-foreground">
                   <p>No recent messages</p>
