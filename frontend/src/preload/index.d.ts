@@ -91,7 +91,6 @@ export interface Api {
   getActions: (status?: string, limit?: number, actionType?: string) => Promise<ActionResponse[]>
   swipeAction: (actionId: number, request: SwipeRequest) => Promise<ActionResponse>
   searchMessages: (query: string, limit?: number) => Promise<SearchResultResponse[]>
-  semanticSearch: (query: string, limit?: number) => Promise<SearchResultResponse[]>
   addContactContext: (personId: number, notes: string) => Promise<{ success: boolean }>
 }
 

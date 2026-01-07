@@ -15,8 +15,6 @@ const api = {
     ipcRenderer.invoke('api:swipeAction', actionId, request),
   searchMessages: (query: string, limit?: number) =>
     ipcRenderer.invoke('api:searchMessages', query, limit),
-  semanticSearch: (query: string, limit?: number) =>
-    ipcRenderer.invoke('api:semanticSearch', query, limit),
   addContactContext: (personId: number, notes: string) =>
     ipcRenderer.invoke('api:addContactContext', personId, notes)
 }

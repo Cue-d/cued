@@ -124,14 +124,6 @@ function registerIpcHandlers(): void {
     return res.json()
   })
 
-  ipcMain.handle('api:semanticSearch', async (_, query: string, limit = 20) => {
-    const res = await fetch(
-      `${API_BASE}/search/semantic?query=${encodeURIComponent(query)}&limit=${limit}`
-    )
-    if (!res.ok) throw new Error(`Failed to semantic search: ${res.status}`)
-    return res.json()
-  })
-
   ipcMain.handle('api:addContactContext', async (_, personId: number, notes: string) => {
     const res = await fetch(
       `${API_BASE}/eod/contacts/${personId}/context?notes=${encodeURIComponent(notes)}`,

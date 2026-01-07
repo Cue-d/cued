@@ -3,7 +3,6 @@ import {
   fetchActions as clientFetchActions,
   swipeAction as clientSwipeAction,
   searchMessages as clientSearchMessages,
-  semanticSearch as clientSemanticSearch,
   addContactContext as clientAddContactContext
 } from './client'
 
@@ -30,10 +29,6 @@ export async function swipeAction(
 
 export async function searchMessages(query: string, limit = 50) {
   return clientSearchMessages(query, limit)
-}
-
-export async function semanticSearch(query: string, limit = 20) {
-  return clientSemanticSearch(query, limit)
 }
 
 export async function addContactContext(personId: number, notes: string) {

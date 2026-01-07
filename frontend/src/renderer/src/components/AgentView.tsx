@@ -1,6 +1,6 @@
-import { MessageSquare, Search, Sparkles, User } from 'lucide-react'
-import { useCallback, useEffect, useRef, useState } from 'react'
-import { searchMessages, semanticSearch } from '@/api/actions'
+import { MessageSquare, Search, User } from 'lucide-react'
+import { useEffect, useRef, useState } from 'react'
+import { searchMessages } from '@/api/actions'
 import { Badge } from '@/components/ui/badge'
 import {
   Command,
@@ -11,11 +11,8 @@ import {
 } from '@/components/ui/command'
 import type { SearchResultResponse } from '@/data/types'
 
-type SearchMode = 'semantic' | 'fts'
-
 export function AgentView() {
   const [query, setQuery] = useState('')
-  const [searchMode, setSearchMode] = useState<SearchMode>('semantic')
   const [results, setResults] = useState<SearchResultResponse[]>([])
   const [isSearching, setIsSearching] = useState(false)
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -40,10 +37,7 @@ export function AgentView() {
     debounceRef.current = setTimeout(async () => {
       setIsSearching(true)
       try {
-        const searchResults =
-          searchMode === 'semantic'
-            ? await semanticSearch(query.trim(), 10)
-            : await searchMessages(query.trim(), 10)
+        const searchResults = await searchMessages(query.trim(), 10)
         setResults(searchResults)
       } catch (error) {
         console.error('Search failed:', error)
@@ -58,11 +52,7 @@ export function AgentView() {
         clearTimeout(debounceRef.current)
       }
     }
-  }, [query, searchMode])
-
-  const toggleSearchMode = useCallback(() => {
-    setSearchMode((prev) => (prev === 'semantic' ? 'fts' : 'semantic'))
-  }, [])
+  }, [query])
 
   const formatTimestamp = (timestamp: number) => {
     if (!timestamp) return ''
@@ -96,24 +86,6 @@ export function AgentView() {
               placeholder="Search messages..."
               className="flex h-12 w-full rounded-md bg-transparent py-3 text-sm outline-none placeholder:text-muted-foreground disabled:cursor-not-allowed disabled:opacity-50"
             />
-            <button
-              onClick={toggleSearchMode}
-              type="button"
-              className="ml-2 flex items-center gap-1.5 rounded-md px-2 py-1 text-xs font-medium transition-colors hover:bg-accent"
-              title={`Switch to ${searchMode === 'semantic' ? 'full-text' : 'AI'} search`}
-            >
-              {searchMode === 'semantic' ? (
-                <>
-                  <Sparkles className="h-3.5 w-3.5 text-primary" />
-                  <span className="text-primary">AI</span>
-                </>
-              ) : (
-                <>
-                  <Search className="h-3.5 w-3.5" />
-                  <span>FTS</span>
-                </>
-              )}
-            </button>
           </div>
           <CommandList className="max-h-[500px]">
             {!query && (
@@ -144,12 +116,6 @@ export function AgentView() {
                       <Badge variant="secondary" className="text-xs">
                         {results.length} result{results.length !== 1 ? 's' : ''}
                       </Badge>
-                      {searchMode === 'semantic' && (
-                        <Badge variant="outline" className="text-xs gap-1">
-                          <Sparkles className="h-3 w-3" />
-                          AI
-                        </Badge>
-                      )}
                     </div>
                   }
                 >
@@ -179,7 +145,7 @@ export function AgentView() {
                       <p className="line-clamp-2 w-full pl-8 text-sm text-muted-foreground">
                         {result.text}
                       </p>
-                      {searchMode === 'semantic' && result.rank > 0 && (
+                      {result.rank > 0 && (
                         <div className="pl-8">
                           <Badge variant="outline" className="text-xs">
                             {Math.round(result.rank * 100)}% match

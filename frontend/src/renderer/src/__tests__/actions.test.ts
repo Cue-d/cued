@@ -1,25 +1,17 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import {
-  fetchActions,
-  swipeAction,
-  searchMessages,
-  semanticSearch,
-  addContactContext
-} from '@/api/actions'
+import { fetchActions, swipeAction, searchMessages, addContactContext } from '@/api/actions'
 import * as client from '@/api/client'
 
 vi.mock('@/api/client', () => ({
   fetchActions: vi.fn(),
   swipeAction: vi.fn(),
   searchMessages: vi.fn(),
-  semanticSearch: vi.fn(),
   addContactContext: vi.fn()
 }))
 
 const mockFetchActions = vi.mocked(client.fetchActions)
 const mockSwipeAction = vi.mocked(client.swipeAction)
 const mockSearchMessages = vi.mocked(client.searchMessages)
-const mockSemanticSearch = vi.mocked(client.semanticSearch)
 const mockAddContactContext = vi.mocked(client.addContactContext)
 
 describe('actions API', () => {
@@ -204,36 +196,6 @@ describe('actions API', () => {
       await searchMessages('test query')
 
       expect(mockSearchMessages).toHaveBeenCalledWith('test query', 50)
-    })
-  })
-
-  describe('semanticSearch', () => {
-    it('passes query correctly', async () => {
-      const mockResults = [
-        {
-          message_id: 1,
-          chat_id: 1,
-          text: 'Test message',
-          timestamp: Date.now(),
-          sender_name: 'Test',
-          chat_name: 'Test',
-          rank: 0.9
-        }
-      ]
-      mockSemanticSearch.mockResolvedValue(mockResults)
-
-      const result = await semanticSearch('test query', 20)
-
-      expect(mockSemanticSearch).toHaveBeenCalledWith('test query', 20)
-      expect(result).toEqual(mockResults)
-    })
-
-    it('uses default limit', async () => {
-      mockSemanticSearch.mockResolvedValue([])
-
-      await semanticSearch('test query')
-
-      expect(mockSemanticSearch).toHaveBeenCalledWith('test query', 20)
     })
   })
 

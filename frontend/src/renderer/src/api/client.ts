@@ -104,13 +104,6 @@ export async function searchMessages(query: string, limit = 50): Promise<SearchR
   return httpGet(`/search/?query=${encodeURIComponent(query)}&limit=${limit}`)
 }
 
-export async function semanticSearch(query: string, limit = 20): Promise<SearchResultResponse[]> {
-  if (isElectron()) {
-    return window.api.semanticSearch(query, limit)
-  }
-  return httpGet(`/search/semantic?query=${encodeURIComponent(query)}&limit=${limit}`)
-}
-
 export async function addContactContext(
   personId: number,
   notes: string

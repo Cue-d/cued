@@ -242,6 +242,38 @@ impl AppDb {
             );
 
             -- ============================================
+            -- FTS5 TRIGGERS: Auto-sync search index
+            -- ============================================
+            -- Trigger to insert into FTS when message is inserted
+            CREATE TRIGGER IF NOT EXISTS messages_fts_insert AFTER INSERT ON messages
+            BEGIN
+                INSERT INTO messages_fts(rowid, text) VALUES (new.id, new.text);
+            END;
+
+            -- Trigger to update FTS when message text is updated
+            CREATE TRIGGER IF NOT EXISTS messages_fts_update AFTER UPDATE OF text ON messages
+            BEGIN
+                UPDATE messages_fts SET text = new.text WHERE rowid = new.id;
+            END;
+
+            -- Trigger to delete from FTS when message is deleted
+            CREATE TRIGGER IF NOT EXISTS messages_fts_delete AFTER DELETE ON messages
+            BEGIN
+                DELETE FROM messages_fts WHERE rowid = old.id;
+            END;
+
+            -- ============================================
+            -- EMBEDDING QUEUE TRIGGER: Auto-queue new messages
+            -- ============================================
+            -- Trigger to queue new messages for embedding generation
+            CREATE TRIGGER IF NOT EXISTS messages_embedding_queue AFTER INSERT ON messages
+            WHEN new.text IS NOT NULL AND length(new.text) > 0
+            BEGIN
+                INSERT OR IGNORE INTO embedding_queue (message_id, queued_at, status)
+                VALUES (new.id, strftime('%s', 'now'), 'pending');
+            END;
+
+            -- ============================================
             -- LLM ANALYSIS QUEUE: Track chat analysis status
             -- ============================================
             CREATE TABLE IF NOT EXISTS llm_analysis_queue (

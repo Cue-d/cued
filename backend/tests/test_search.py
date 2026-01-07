@@ -4,7 +4,7 @@ from unittest.mock import MagicMock, patch
 
 from fastapi.testclient import TestClient
 
-from tests.conftest import MockPrmChat, MockSearchResult
+from tests.conftest import MockSearchResult
 
 
 class TestFullTextSearch:
@@ -30,13 +30,15 @@ class TestFullTextSearch:
         assert result["timestamp"] == 700000000
         assert result["sender_name"] == "John Doe"
         assert result["chat_name"] == "John Doe"
-        assert result["rank"] == 1.5
+        # Rank is now normalized 0-1 from RRF fusion
+        assert 0 <= result["rank"] <= 1
 
     def test_search_messages_with_limit(self, client: TestClient, mock_app_db: MagicMock):
-        """Search with limit parameter."""
+        """Search with limit parameter - internally fetches 3x for RRF fusion."""
         response = client.get("/search/?query=hello&limit=10")
         assert response.status_code == 200
-        mock_app_db.search_messages.assert_called_with("hello", 10)
+        # RRF fusion fetches 3x the limit for better result quality
+        mock_app_db.search_messages.assert_called_with("hello", 30)
 
     def test_search_messages_filter_by_chat(self, client: TestClient, mock_app_db: MagicMock):
         """Search with chat_id filter."""
@@ -89,51 +91,6 @@ class TestRebuildSearchIndex:
         assert data["success"] is True
         assert data["messages_indexed"] == 100
         mock_app_db.rebuild_fts_index.assert_called_once()
-
-
-class TestSemanticSearch:
-    """Tests for GET /search/semantic endpoint."""
-
-    def test_semantic_search(self, client: TestClient, mock_app_db: MagicMock):
-        """Semantic search returns results."""
-        mock_app_db.get_chat.return_value = MockPrmChat(
-            id=1,
-            identifier="+11234567890",
-            name="John Doe",
-            is_group=False,
-            last_message_text="Hello!",
-            last_message_timestamp=700000000,
-        )
-
-        with patch("routers.search.semantic_search") as mock_semantic:
-            mock_semantic.return_value = [
-                {"message_id": 1, "chat_id": 1, "similarity": 0.95},
-            ]
-
-            response = client.get("/search/semantic?query=greeting")
-            assert response.status_code == 200
-            data = response.json()
-            assert isinstance(data, list)
-
-    def test_semantic_search_worker_not_available(self, client: TestClient):
-        """Semantic search handles missing worker gracefully."""
-        import builtins
-        import sys
-
-        # Remove cached module so the import is attempted fresh
-        sys.modules.pop("embedding_worker", None)
-
-        original_import = builtins.__import__
-
-        def mock_import(name, *args, **kwargs):
-            if name == "embedding_worker":
-                raise ImportError("No module named 'embedding_worker'")
-            return original_import(name, *args, **kwargs)
-
-        with patch.object(builtins, "__import__", mock_import):
-            response = client.get("/search/semantic?query=test")
-            assert response.status_code == 200
-            assert response.json() == []
 
 
 class TestEmbeddingsQueueAll:

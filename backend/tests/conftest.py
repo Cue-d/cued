@@ -381,6 +381,36 @@ def mock_app_db() -> MagicMock:
     # Get message text
     db.get_message_text.return_value = "Hello!"
 
+    # Get single message (used by unified search for semantic results)
+    def get_message(message_id: int) -> MockPrmMessage | None:
+        messages = {
+            1: MockPrmMessage(
+                id=1,
+                chat_id=1,
+                sender_id=1,
+                sender_name="John Doe",
+                text="Hello!",
+                timestamp=700000000,
+                is_from_me=False,
+                is_read=True,
+                read_at=700000001,
+            ),
+            2: MockPrmMessage(
+                id=2,
+                chat_id=1,
+                sender_id=None,
+                sender_name=None,
+                text="Hi there!",
+                timestamp=700000002,
+                is_from_me=True,
+                is_read=True,
+                read_at=None,
+            ),
+        }
+        return messages.get(message_id)
+
+    db.get_message.side_effect = get_message
+
     # EOD contacts
     db.get_todays_new_contacts.return_value = [
         MockPerson(id=3, identifier="+15551234567", name="New Contact"),

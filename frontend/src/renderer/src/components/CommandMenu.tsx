@@ -1,6 +1,6 @@
 import { MessageSquare, Search, Sparkles, User, Target } from 'lucide-react'
-import { useCallback, useEffect, useRef, useState } from 'react'
-import { searchMessages, semanticSearch } from '@/api/actions'
+import { useEffect, useRef, useState } from 'react'
+import { searchMessages } from '@/api/actions'
 import { Badge } from '@/components/ui/badge'
 import {
   CommandDialog,
@@ -38,8 +38,6 @@ interface CommandMenuProps {
   onOpenChange?: (open: boolean) => void
 }
 
-type SearchMode = 'semantic' | 'fts'
-
 export function CommandMenu({ open: controlledOpen, onOpenChange }: CommandMenuProps) {
   const { currentView, setView } = useViewSafe()
   const [internalOpen, setInternalOpen] = useState(false)
@@ -48,7 +46,6 @@ export function CommandMenu({ open: controlledOpen, onOpenChange }: CommandMenuP
   const open = controlledOpen ?? internalOpen
   const setOpen = onOpenChange ?? setInternalOpen
   const [query, setQuery] = useState('')
-  const [searchMode, setSearchMode] = useState<SearchMode>('semantic')
   const [results, setResults] = useState<SearchResultResponse[]>([])
   const [isSearching, setIsSearching] = useState(false)
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -93,10 +90,7 @@ export function CommandMenu({ open: controlledOpen, onOpenChange }: CommandMenuP
     debounceRef.current = setTimeout(async () => {
       setIsSearching(true)
       try {
-        const searchResults =
-          searchMode === 'semantic'
-            ? await semanticSearch(query.trim(), 10)
-            : await searchMessages(query.trim(), 10)
+        const searchResults = await searchMessages(query.trim(), 10)
         setResults(searchResults)
       } catch (error) {
         console.error('Search failed:', error)
@@ -111,11 +105,7 @@ export function CommandMenu({ open: controlledOpen, onOpenChange }: CommandMenuP
         clearTimeout(debounceRef.current)
       }
     }
-  }, [query, searchMode])
-
-  const toggleSearchMode = useCallback(() => {
-    setSearchMode((prev) => (prev === 'semantic' ? 'fts' : 'semantic'))
-  }, [])
+  }, [query])
 
   const formatTimestamp = (timestamp: number) => {
     if (!timestamp) return ''
@@ -146,24 +136,6 @@ export function CommandMenu({ open: controlledOpen, onOpenChange }: CommandMenuP
           placeholder="Search messages..."
           className="flex h-12 w-full rounded-md bg-transparent py-3 text-sm outline-none placeholder:text-muted-foreground disabled:cursor-not-allowed disabled:opacity-50"
         />
-        <button
-          onClick={toggleSearchMode}
-          type="button"
-          className="ml-2 flex items-center gap-1.5 rounded-md px-2 py-1 text-xs font-medium transition-colors hover:bg-accent"
-          title={`Switch to ${searchMode === 'semantic' ? 'full-text' : 'AI'} search`}
-        >
-          {searchMode === 'semantic' ? (
-            <>
-              <Sparkles className="h-3.5 w-3.5 text-primary" />
-              <span className="text-primary">AI</span>
-            </>
-          ) : (
-            <>
-              <Search className="h-3.5 w-3.5" />
-              <span>FTS</span>
-            </>
-          )}
-        </button>
       </div>
       <CommandList className="max-h-[400px]">
         {!query && (
@@ -220,12 +192,6 @@ export function CommandMenu({ open: controlledOpen, onOpenChange }: CommandMenuP
                   <Badge variant="secondary" className="text-xs">
                     {results.length} result{results.length !== 1 ? 's' : ''}
                   </Badge>
-                  {searchMode === 'semantic' && (
-                    <Badge variant="outline" className="text-xs gap-1">
-                      <Sparkles className="h-3 w-3" />
-                      AI
-                    </Badge>
-                  )}
                 </div>
               }
             >
@@ -256,7 +222,7 @@ export function CommandMenu({ open: controlledOpen, onOpenChange }: CommandMenuP
                   <p className="line-clamp-2 w-full pl-8 text-sm text-muted-foreground">
                     {result.text}
                   </p>
-                  {searchMode === 'semantic' && result.rank > 0 && (
+                  {result.rank > 0 && (
                     <div className="pl-8">
                       <Badge variant="outline" className="text-xs">
                         {Math.round(result.rank * 100)}% match
