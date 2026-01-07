@@ -7,6 +7,7 @@ import { Textarea } from '@/components/ui/textarea'
 import { type MessageItem, processMessagesWithReactions } from '@/lib/reactions'
 import { cn } from '@/lib/utils'
 import type { AttachmentResponse } from '@/api/actions'
+import { renderTextWithLinks } from '@/lib/linkDetection'
 
 interface MessageResponseCardProps {
   action: ActionResponse
@@ -178,22 +179,31 @@ export const MessageResponseCard = forwardRef<MessageResponseCardRef, MessageRes
                   return (
                     <div
                       key={msg.id}
-                      className={cn('flex flex-col', msg.isSent ? 'items-end' : 'items-start')}
+                      className={cn(
+                        'flex flex-col w-full',
+                        msg.isSent ? 'items-end' : 'items-start'
+                      )}
                     >
                       {!msg.isSent && msg.senderName && (
                         <p className="text-xs font-medium opacity-70 mb-1 ml-1">{msg.senderName}</p>
                       )}
-                      <div className="relative">
+                      <div
+                        className={cn(
+                          'relative flex w-full',
+                          msg.isSent ? 'justify-end' : 'justify-start'
+                        )}
+                      >
                         {hasReactions && (
                           <ReactionBadges reactions={reactions} isSent={msg.isSent} />
                         )}
                         <div
                           className={cn(
-                            'max-w-[85%] rounded-2xl px-4 py-2 text-sm',
+                            'rounded-2xl px-4 py-2 text-sm break-words',
                             msg.isSent
                               ? 'bg-imessage-bubble-sent text-imessage-bubble-sent-foreground'
                               : 'bg-imessage-bubble-received text-imessage-bubble-received-foreground'
                           )}
+                          style={{ maxWidth: '85%', width: 'fit-content' }}
                         >
                           {hasAttachments && (
                             <AttachmentDisplay
@@ -202,13 +212,20 @@ export const MessageResponseCard = forwardRef<MessageResponseCardRef, MessageRes
                               compact
                             />
                           )}
-                          {hasText && (
-                            <p className="whitespace-pre-wrap wrap-break-word">{msg.text}</p>
+                          {hasText && msg.text && (
+                            <p className="whitespace-pre-wrap break-words">
+                              {renderTextWithLinks(msg.text, 'whitespace-pre-wrap break-words')}
+                            </p>
                           )}
                           {!hasText && !hasAttachments && (
-                            <p className="whitespace-pre-wrap wrap-break-word">[No text]</p>
+                            <p className="whitespace-pre-wrap break-words">[No text]</p>
                           )}
-                          <p className="text-[10px] opacity-60 mt-1 text-right">
+                          <p
+                            className={cn(
+                              'text-[10px] opacity-60 mt-1',
+                              msg.isSent ? 'text-right' : 'text-left'
+                            )}
+                          >
                             {formatTime(msg.timestamp)}
                           </p>
                         </div>
