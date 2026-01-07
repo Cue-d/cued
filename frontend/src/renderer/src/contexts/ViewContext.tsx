@@ -41,7 +41,7 @@ export function ViewProvider({ children }: { children: React.ReactNode }) {
       // Cmd/Ctrl + number keys
       if ((e.metaKey || e.ctrlKey) && !e.shiftKey && !e.altKey) {
         const num = parseInt(e.key)
-        if (num >= 1 && num <= 4) {
+        if (num >= 1 && num <= 2) {
           e.preventDefault()
           const viewIndex = num - 1
           if (viewIndex < VIEW_ORDER.length) {

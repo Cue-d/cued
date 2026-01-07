@@ -1,6 +1,5 @@
 import { useEffect, useState } from 'react'
 import { useSyncStatus } from '@/hooks'
-import { CommandMenu } from './components/CommandMenu'
 import { ViewProvider } from './contexts/ViewContext'
 import { ViewContainer } from './components/Navigation/ViewContainer'
 import { FloatingNavigationPill } from './components/Navigation/FloatingNavigationPill'
@@ -34,7 +33,6 @@ function App() {
   return (
     <ViewProvider>
       <div className="relative w-full h-screen flex overflow-hidden bg-imessage-window-bg">
-        <CommandMenu />
         <ViewContainer />
         <FloatingNavigationPill />
       </div>

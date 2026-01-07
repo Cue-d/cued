@@ -1,4 +1,4 @@
-import { MessageSquare, Search, Sparkles, User, Target, Users, Settings } from 'lucide-react'
+import { MessageSquare, Search, Sparkles, User, Target } from 'lucide-react'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { searchMessages, semanticSearch } from '@/api/actions'
 import { Badge } from '@/components/ui/badge'
@@ -15,9 +15,7 @@ import { VIEWS, VIEW_ORDER, type ViewType } from '@/types/views'
 
 const NAV_ICON_MAP: Record<string, React.ComponentType<{ className?: string }>> = {
   Target,
-  MessageSquare,
-  Users,
-  Settings
+  MessageSquare
 }
 
 // Hook that safely uses view context (for cases where CommandMenu might be used outside ViewProvider)

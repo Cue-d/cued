@@ -1,47 +1,12 @@
 import { AnimatePresence, motion } from 'motion/react'
 import { useView } from '@/hooks/useView'
 import { ActionQueueView } from '@/components/ActionQueue'
+import { ChatView } from '@/components/ChatView'
 import { useEffect, useRef } from 'react'
-
-// Placeholder views - replace with actual components when ready
-function MessagesView() {
-  return (
-    <div className="w-full h-full flex items-center justify-center bg-imessage-window-bg">
-      <div className="text-center">
-        <h2 className="text-2xl font-semibold mb-2">Messages</h2>
-        <p className="text-muted-foreground">Messages view coming soon...</p>
-      </div>
-    </div>
-  )
-}
-
-function ContactsView() {
-  return (
-    <div className="w-full h-full flex items-center justify-center bg-imessage-window-bg">
-      <div className="text-center">
-        <h2 className="text-2xl font-semibold mb-2">Contacts</h2>
-        <p className="text-muted-foreground">Contacts view coming soon...</p>
-      </div>
-    </div>
-  )
-}
-
-function SettingsView() {
-  return (
-    <div className="w-full h-full flex items-center justify-center bg-imessage-window-bg">
-      <div className="text-center">
-        <h2 className="text-2xl font-semibold mb-2">Settings</h2>
-        <p className="text-muted-foreground">Settings view coming soon...</p>
-      </div>
-    </div>
-  )
-}
 
 const VIEW_COMPONENTS = {
   'action-queue': ActionQueueView,
-  messages: MessagesView,
-  contacts: ContactsView,
-  settings: SettingsView
+  chat: ChatView
 }
 
 export function ViewContainer() {
