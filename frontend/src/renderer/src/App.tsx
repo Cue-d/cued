@@ -1,7 +1,9 @@
 import { useEffect, useState } from 'react'
 import { useSyncStatus } from '@/hooks'
-import { ActionQueueView } from './components/ActionQueue'
 import { CommandMenu } from './components/CommandMenu'
+import { ViewProvider } from './contexts/ViewContext'
+import { ViewContainer } from './components/Navigation/ViewContainer'
+import { FloatingNavigationPill } from './components/Navigation/FloatingNavigationPill'
 import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from './components/ui/empty'
 import { Spinner } from './components/ui/spinner'
 
@@ -30,10 +32,13 @@ function App() {
   }
 
   return (
-    <div className="relative w-full h-screen flex overflow-hidden bg-imessage-window-bg">
-      <CommandMenu />
-      <ActionQueueView />
-    </div>
+    <ViewProvider>
+      <div className="relative w-full h-screen flex overflow-hidden bg-imessage-window-bg">
+        <CommandMenu />
+        <ViewContainer />
+        <FloatingNavigationPill />
+      </div>
+    </ViewProvider>
   )
 }
 

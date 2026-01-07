@@ -1,4 +1,4 @@
-import { MessageSquare, Search, Sparkles, User } from 'lucide-react'
+import { MessageSquare, Search, Sparkles, User, Target, Users, Settings } from 'lucide-react'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { searchMessages, semanticSearch } from '@/api/actions'
 import { Badge } from '@/components/ui/badge'
@@ -10,6 +10,30 @@ import {
   CommandList
 } from '@/components/ui/command'
 import type { SearchResultResponse } from '@/data/types'
+import { useView } from '@/contexts/ViewContext'
+import { VIEWS, VIEW_ORDER, type ViewType } from '@/types/views'
+
+const NAV_ICON_MAP: Record<string, React.ComponentType<{ className?: string }>> = {
+  Target,
+  MessageSquare,
+  Users,
+  Settings
+}
+
+// Hook that safely uses view context (for cases where CommandMenu might be used outside ViewProvider)
+function useViewSafe() {
+  try {
+    return useView()
+  } catch {
+    // Return a no-op if ViewContext is not available
+    return {
+      currentView: 'action-queue' as ViewType,
+      setView: () => {},
+      navigateNext: () => {},
+      navigatePrevious: () => {}
+    }
+  }
+}
 
 interface CommandMenuProps {
   open?: boolean
@@ -19,6 +43,7 @@ interface CommandMenuProps {
 type SearchMode = 'semantic' | 'fts'
 
 export function CommandMenu({ open: controlledOpen, onOpenChange }: CommandMenuProps) {
+  const { currentView, setView } = useViewSafe()
   const [internalOpen, setInternalOpen] = useState(false)
 
   // Support both controlled and uncontrolled modes
@@ -145,7 +170,33 @@ export function CommandMenu({ open: controlledOpen, onOpenChange }: CommandMenuP
       <CommandList className="max-h-[400px]">
         {!query && (
           <>
-            <CommandEmpty>Start typing to search messages...</CommandEmpty>
+            <CommandGroup heading="Navigation">
+              {VIEW_ORDER.map((viewId) => {
+                const view = VIEWS[viewId]
+                const IconComponent = NAV_ICON_MAP[view.icon]
+                const isActive = currentView === viewId
+
+                return (
+                  <CommandItem
+                    key={viewId}
+                    onSelect={() => {
+                      setView(viewId)
+                      setOpen(false)
+                    }}
+                    className={isActive ? 'bg-accent' : ''}
+                  >
+                    {IconComponent && <IconComponent className="mr-2 h-4 w-4" />}
+                    <span>{view.label}</span>
+                    {view.shortcut && (
+                      <span className="ml-auto text-xs text-muted-foreground">{view.shortcut}</span>
+                    )}
+                  </CommandItem>
+                )
+              })}
+            </CommandGroup>
+            <CommandGroup heading="Search">
+              <CommandEmpty>Start typing to search messages...</CommandEmpty>
+            </CommandGroup>
           </>
         )}
 
