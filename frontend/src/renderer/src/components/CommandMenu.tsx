@@ -15,7 +15,7 @@ import { VIEWS, VIEW_ORDER, type ViewType } from '@/types/views'
 
 const NAV_ICON_MAP: Record<string, React.ComponentType<{ className?: string }>> = {
   Target,
-  MessageSquare
+  Sparkles
 }
 
 // Hook that safely uses view context (for cases where CommandMenu might be used outside ViewProvider)

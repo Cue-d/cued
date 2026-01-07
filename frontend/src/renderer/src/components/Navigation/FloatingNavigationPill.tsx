@@ -1,6 +1,6 @@
 import { motion, AnimatePresence } from 'motion/react'
 import { useState, useEffect } from 'react'
-import { Target, MessageSquare } from 'lucide-react'
+import { Target, Sparkles } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useView } from '@/hooks/useView'
 import { VIEWS, VIEW_ORDER, type ViewType } from '@/types/views'
@@ -8,7 +8,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip
 
 const ICON_MAP: Record<string, React.ComponentType<{ className?: string }>> = {
   Target,
-  MessageSquare
+  Sparkles
 }
 
 export function FloatingNavigationPill() {

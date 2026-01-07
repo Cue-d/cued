@@ -17,7 +17,7 @@ export const VIEWS: Record<ViewType, ViewConfig> = {
   agent: {
     id: 'agent',
     label: 'Agent',
-    icon: 'MessageSquare',
+    icon: 'Sparkles',
     shortcut: '⌘2'
   }
 }
