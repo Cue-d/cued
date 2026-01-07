@@ -1,76 +1,13 @@
-import { AlertCircle, Inbox, RefreshCw } from 'lucide-react'
-import { useCallback, useMemo, useState } from 'react'
-import { searchMessages, semanticSearch } from '@/api/actions'
-import type { ActionType, SearchResultResponse, SwipeDirection } from '@/data/types'
+import { AlertCircle } from 'lucide-react'
+import { useCallback } from 'react'
+import type { SwipeDirection } from '@/data/types'
 import { useActions } from '@/hooks'
 import { Empty, EmptyDescription, EmptyMedia, EmptyTitle } from '@/components/ui/empty'
 import { CardStack } from './CardStack'
-import { SearchBar } from './SearchBar'
 import { Spinner } from '../ui/spinner'
 
-type SortBy = 'priority' | 'date' | 'type'
-
 export function ActionQueueView() {
-  // Local state for filtering/sorting
-  const [activeFilters, setActiveFilters] = useState<ActionType[]>([])
-  const [sortBy, setSortBy] = useState<SortBy>('priority')
-  const [isSearching, setIsSearching] = useState(false)
-
-  // Use server-side filtering when exactly one filter is selected
-  const serverSideFilter = activeFilters.length === 1 ? activeFilters[0] : undefined
-  const { actions, loading, error, handleSwipe, refresh } = useActions(serverSideFilter)
-
-  // Handle search (currently just updates query state, could integrate with action filtering)
-  const handleSearch = useCallback(async (query: string, mode: 'fts' | 'semantic') => {
-    if (!query) {
-      return
-    }
-
-    setIsSearching(true)
-    try {
-      // Execute search (results could be used to highlight/filter actions)
-      let results: SearchResultResponse[] = []
-      if (mode === 'semantic') {
-        results = await semanticSearch(query, 20)
-      } else {
-        results = await searchMessages(query, 50)
-      }
-      // For now, results not used - in future could filter actions by search results
-      void results
-    } catch {
-      // Search failed silently - user sees no results
-    } finally {
-      setIsSearching(false)
-    }
-  }, [])
-
-  // Filter and sort actions
-  // Client-side filtering only needed when multiple filters are selected
-  // (single filter is handled server-side via useActions)
-  const filteredActions = useMemo(() => {
-    let result = [...actions]
-
-    // Apply client-side type filters only when multiple filters are selected
-    if (activeFilters.length > 1) {
-      result = result.filter((a) => activeFilters.includes(a.type))
-    }
-
-    // Apply sorting
-    result.sort((a, b) => {
-      switch (sortBy) {
-        case 'priority':
-          return b.priority - a.priority
-        case 'date':
-          return b.created_at - a.created_at
-        case 'type':
-          return a.type.localeCompare(b.type)
-        default:
-          return 0
-      }
-    })
-
-    return result
-  }, [actions, activeFilters, sortBy])
+  const { actions, loading, error, handleSwipe, refresh } = useActions()
 
   // Wrap handleSwipe for CardStack
   const onSwipe = useCallback(
@@ -121,36 +58,9 @@ export function ActionQueueView() {
 
   return (
     <div className="w-full h-full flex flex-col bg-imessage-window-bg">
-      {/* Header */}
-      <div className="shrink-0 px-6 pt-12 pb-4 border-b border-border bg-imessage-header-bg">
-        <div className="flex items-center justify-between mb-4">
-          <div className="flex items-center gap-3">
-            <Inbox className="w-6 h-6 text-muted-foreground" />
-            <h1 className="text-xl font-semibold text-secondary-foreground">Action Queue</h1>
-          </div>
-          <button
-            type="button"
-            onClick={refresh}
-            className="p-2 rounded-lg hover:bg-muted transition-colors"
-            title="Refresh actions"
-          >
-            <RefreshCw
-              className={`w-5 h-5 text-muted-foreground ${isSearching ? 'animate-spin' : ''}`}
-            />
-          </button>
-        </div>
-
-        {/* Search Bar */}
-        <SearchBar
-          onSearch={handleSearch}
-          onFilterChange={setActiveFilters}
-          onSortChange={setSortBy}
-        />
-      </div>
-
       {/* Card Stack */}
       <div className="flex-1 overflow-hidden relative">
-        <CardStack actions={filteredActions} onSwipe={onSwipe} />
+        <CardStack actions={actions} onSwipe={onSwipe} />
       </div>
     </div>
   )
