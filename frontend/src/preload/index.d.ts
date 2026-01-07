@@ -8,6 +8,14 @@ export interface ChatResponse {
   member_names: string[]
 }
 
+export interface AttachmentResponse {
+  id: number
+  filename: string | null
+  mime_type: string | null
+  size: number | null
+  is_image: boolean
+}
+
 export interface MessageResponse {
   id: number
   text: string | null
@@ -16,6 +24,13 @@ export interface MessageResponse {
   is_read: boolean
   date_read: number | null
   sender_name: string | null
+  // Delivery status
+  is_sent: boolean
+  is_delivered: boolean
+  date_delivered: number | null
+  error: number
+  // Attachments
+  attachments: AttachmentResponse[]
 }
 
 export interface SendMessageResponse {

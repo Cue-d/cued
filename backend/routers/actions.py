@@ -7,10 +7,12 @@ from fastapi import APIRouter, HTTPException
 from schemas import (
     ActionResponse,
     ActionSwipeRequest,
+    AttachmentResponse,
     CreateActionRequest,
     MessageResponse,
 )
 from sync_db import APP_DB_PATH
+from utils import is_image_mime_type
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -27,18 +29,37 @@ def action_to_response(action, db) -> ActionResponse:
     recent_messages = []
     if action.chat_id:
         messages = db.get_chat_messages(action.chat_id, 5)
-        recent_messages = [
-            MessageResponse(
-                id=m.id,
-                text=m.text,
-                date=m.timestamp,
-                is_from_me=m.is_from_me,
-                is_read=m.is_read,
-                date_read=m.read_at,
-                sender_name=m.sender_name,
+        message_ids = [m.id for m in messages]
+
+        # Batch fetch attachments for all messages
+        attachments_map = db.get_attachments_for_messages(message_ids) if message_ids else {}
+
+        for m in messages:
+            # Build attachments list
+            msg_attachments = attachments_map.get(m.id, [])
+            attachments = [
+                AttachmentResponse(
+                    id=a.id,
+                    filename=a.filename,
+                    mime_type=a.mime_type,
+                    size=a.size,
+                    is_image=is_image_mime_type(a.mime_type),
+                )
+                for a in msg_attachments
+            ]
+
+            recent_messages.append(
+                MessageResponse(
+                    id=m.id,
+                    text=m.text,
+                    date=m.timestamp,
+                    is_from_me=m.is_from_me,
+                    is_read=m.is_read,
+                    date_read=m.read_at,
+                    sender_name=m.sender_name,
+                    attachments=attachments,
+                )
             )
-            for m in messages
-        ]
 
     return ActionResponse(
         id=action.id,

@@ -301,15 +301,19 @@ impl ChatReader {
 
     /// Get messages with ROWID > since_rowid for incremental sync.
     /// Returns messages with timestamps converted to Unix epoch.
+    /// Only returns regular messages (not reactions - those have associated_message_type >= 2000).
     pub fn get_messages_since(&self, since_rowid: i64, limit: u32) -> PyResult<Vec<SyncMessage>> {
         // Query messages with their chat_id from the join table
+        // Exclude reactions (associated_message_type >= 2000)
         let mut stmt = self.conn.prepare(
             "SELECT m.ROWID, cmj.chat_id, m.handle_id, m.text, m.date, m.is_from_me,
                     m.is_read, m.date_read, m.attributedBody,
-                    (SELECT COUNT(*) > 0 FROM message_attachment_join maj WHERE maj.message_id = m.ROWID) as has_attachments
+                    (SELECT COUNT(*) > 0 FROM message_attachment_join maj WHERE maj.message_id = m.ROWID) as has_attachments,
+                    m.is_sent, m.is_delivered, m.date_delivered, m.error
              FROM message m
              INNER JOIN chat_message_join cmj ON cmj.message_id = m.ROWID
              WHERE m.ROWID > ?
+               AND (m.associated_message_type IS NULL OR m.associated_message_type < 2000)
              ORDER BY m.ROWID
              LIMIT ?"
         ).map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(format!("Query error: {}", e)))?;
@@ -322,6 +326,10 @@ impl ChatReader {
                 let apple_date_read: Option<i64> = row.get(7)?;
                 let is_read_int: i64 = row.get(6)?;
                 let has_attachments_int: i64 = row.get(9)?;
+                let is_sent_int: i64 = row.get(10)?;
+                let is_delivered_int: i64 = row.get(11)?;
+                let apple_date_delivered: Option<i64> = row.get(12)?;
+                let error: i32 = row.get(13)?;
 
                 // Extract text from attributedBody if text is null
                 let final_text = match text {
@@ -341,6 +349,10 @@ impl ChatReader {
                     is_read: is_read_int != 0,
                     read_at: apple_date_read.map(apple_to_unix),
                     has_attachments: has_attachments_int != 0,
+                    is_sent: is_sent_int != 0,
+                    is_delivered: is_delivered_int != 0,
+                    date_delivered: apple_date_delivered.map(apple_to_unix),
+                    error,
                 })
             })
             .map_err(|e| {

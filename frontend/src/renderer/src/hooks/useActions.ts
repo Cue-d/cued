@@ -6,6 +6,30 @@ import type { SwipeDirection } from '@/data/types'
 // Check if mock mode is enabled via environment variable
 const USE_MOCK_DATA = import.meta.env.VITE_USE_MOCK_DATA === 'true'
 
+// Helper to create mock message response with required fields
+function mockMessage(
+  id: number,
+  text: string,
+  date: number,
+  senderName: string | null,
+  isFromMe = false
+) {
+  return {
+    id,
+    text,
+    date,
+    is_from_me: isFromMe,
+    is_read: true,
+    date_read: isFromMe ? date : null,
+    sender_name: senderName,
+    is_sent: true,
+    is_delivered: true,
+    date_delivered: isFromMe ? date : null,
+    error: 0,
+    attachments: []
+  }
+}
+
 // Mock data for development when backend is unavailable (only used when USE_MOCK_DATA=true)
 const MOCK_ACTIONS: ActionResponse[] = [
   {
@@ -28,24 +52,13 @@ const MOCK_ACTIONS: ActionResponse[] = [
       'Hey! Did you get a chance to look at that proposal I sent over yesterday? Would love your thoughts on the pricing section.',
     message_timestamp: Date.now() - 3600000,
     recent_messages: [
-      {
-        id: 99,
-        text: 'Just sent you the proposal doc',
-        date: Date.now() - 7200000,
-        is_from_me: false,
-        is_read: true,
-        date_read: null,
-        sender_name: 'Alex Chen'
-      },
-      {
-        id: 100,
-        text: 'Hey! Did you get a chance to look at that proposal I sent over yesterday? Would love your thoughts on the pricing section.',
-        date: Date.now() - 3600000,
-        is_from_me: false,
-        is_read: true,
-        date_read: null,
-        sender_name: 'Alex Chen'
-      }
+      mockMessage(99, 'Just sent you the proposal doc', Date.now() - 7200000, 'Alex Chen'),
+      mockMessage(
+        100,
+        'Hey! Did you get a chance to look at that proposal I sent over yesterday? Would love your thoughts on the pricing section.',
+        Date.now() - 3600000,
+        'Alex Chen'
+      )
     ]
   },
   {
@@ -67,15 +80,12 @@ const MOCK_ACTIONS: ActionResponse[] = [
     message_text: 'Can we push our meeting to 3pm tomorrow?',
     message_timestamp: Date.now() - 7200000,
     recent_messages: [
-      {
-        id: 200,
-        text: 'Can we push our meeting to 3pm tomorrow?',
-        date: Date.now() - 7200000,
-        is_from_me: false,
-        is_read: true,
-        date_read: null,
-        sender_name: 'Sarah Miller'
-      }
+      mockMessage(
+        200,
+        'Can we push our meeting to 3pm tomorrow?',
+        Date.now() - 7200000,
+        'Sarah Miller'
+      )
     ]
   },
   {
@@ -117,15 +127,7 @@ const MOCK_ACTIONS: ActionResponse[] = [
     message_text: 'Anyone free for a quick sync?',
     message_timestamp: Date.now() - 14400000,
     recent_messages: [
-      {
-        id: 400,
-        text: 'Anyone free for a quick sync?',
-        date: Date.now() - 14400000,
-        is_from_me: false,
-        is_read: true,
-        date_read: null,
-        sender_name: 'Mike Johnson'
-      }
+      mockMessage(400, 'Anyone free for a quick sync?', Date.now() - 14400000, 'Mike Johnson')
     ]
   },
   {
@@ -147,15 +149,12 @@ const MOCK_ACTIONS: ActionResponse[] = [
     message_text: 'Thanks for the intro! Looking forward to connecting.',
     message_timestamp: Date.now() - 18000000,
     recent_messages: [
-      {
-        id: 500,
-        text: 'Thanks for the intro! Looking forward to connecting.',
-        date: Date.now() - 18000000,
-        is_from_me: false,
-        is_read: true,
-        date_read: null,
-        sender_name: 'Emily Davis'
-      }
+      mockMessage(
+        500,
+        'Thanks for the intro! Looking forward to connecting.',
+        Date.now() - 18000000,
+        'Emily Davis'
+      )
     ]
   }
 ]

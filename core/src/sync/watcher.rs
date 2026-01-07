@@ -206,6 +206,7 @@ fn sync_attachments_batch(
 }
 
 /// Get messages with ROWID > since_rowid from chat.db.
+/// Excludes reactions (associated_message_type >= 2000).
 fn get_messages_since(
     conn: &Connection,
     since_rowid: i64,
@@ -215,10 +216,12 @@ fn get_messages_since(
         .prepare(
             "SELECT m.ROWID, cmj.chat_id, m.handle_id, m.text, m.date, m.is_from_me,
                     m.is_read, m.date_read, m.attributedBody,
-                    (SELECT COUNT(*) > 0 FROM message_attachment_join maj WHERE maj.message_id = m.ROWID) as has_attachments
+                    (SELECT COUNT(*) > 0 FROM message_attachment_join maj WHERE maj.message_id = m.ROWID) as has_attachments,
+                    m.is_sent, m.is_delivered, m.date_delivered, m.error
              FROM message m
              INNER JOIN chat_message_join cmj ON cmj.message_id = m.ROWID
              WHERE m.ROWID > ?
+               AND (m.associated_message_type IS NULL OR m.associated_message_type < 2000)
              ORDER BY m.ROWID
              LIMIT ?",
         )
@@ -232,6 +235,10 @@ fn get_messages_since(
             let apple_date_read: Option<i64> = row.get(7)?;
             let is_read_int: i64 = row.get(6)?;
             let has_attachments_int: i64 = row.get(9)?;
+            let is_sent_int: i64 = row.get(10)?;
+            let is_delivered_int: i64 = row.get(11)?;
+            let apple_date_delivered: Option<i64> = row.get(12)?;
+            let error: i32 = row.get(13)?;
 
             // Extract text from attributedBody if text is null
             let final_text = match text {
@@ -249,6 +256,10 @@ fn get_messages_since(
                 is_read: is_read_int != 0,
                 read_at: apple_date_read.map(apple_to_unix),
                 has_attachments: has_attachments_int != 0,
+                is_sent: is_sent_int != 0,
+                is_delivered: is_delivered_int != 0,
+                date_delivered: apple_date_delivered.map(apple_to_unix),
+                error,
             })
         })
         .map_err(|e| format!("Query error: {}", e))?;
@@ -348,8 +359,8 @@ fn insert_messages_inner(conn: &mut Connection, messages: &[SyncMessage]) -> Res
         };
 
         tx.execute(
-            "INSERT OR REPLACE INTO messages (id, chat_id, sender_id, text, timestamp, is_from_me, is_read, read_at, has_attachments, synced_at)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "INSERT OR REPLACE INTO messages (id, chat_id, sender_id, text, timestamp, is_from_me, is_read, read_at, has_attachments, is_sent, is_delivered, date_delivered, error, synced_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             params![
                 msg.id,
                 msg.chat_id,
@@ -360,6 +371,10 @@ fn insert_messages_inner(conn: &mut Connection, messages: &[SyncMessage]) -> Res
                 msg.is_read as i32,
                 msg.read_at,
                 msg.has_attachments as i32,
+                msg.is_sent as i32,
+                msg.is_delivered as i32,
+                msg.date_delivered,
+                msg.error,
                 now,
             ],
         )

@@ -13,6 +13,14 @@ class ChatResponse(BaseModel):
     member_names: list[str]  # Resolved names for group avatars
 
 
+class AttachmentResponse(BaseModel):
+    id: int
+    filename: str | None
+    mime_type: str | None
+    size: int | None
+    is_image: bool  # Computed from mime_type
+
+
 class MessageResponse(BaseModel):
     id: int
     text: str | None
@@ -21,6 +29,13 @@ class MessageResponse(BaseModel):
     is_read: bool
     date_read: int | None
     sender_name: str | None
+    # Delivery status
+    is_sent: bool = True
+    is_delivered: bool = False
+    date_delivered: int | None = None
+    error: int = 0
+    # Attachments
+    attachments: list[AttachmentResponse] = []
 
 
 class SendMessageRequest(BaseModel):

@@ -1,8 +1,44 @@
-import { Info, Mic, Plus } from 'lucide-react'
+import { AlertCircle, Check, CheckCheck, Clock, Info, Mic, Plus } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
-import { type Chat, formatDateDivider, formatMessageTime, type Message } from '@/data/types'
+import { AttachmentDisplay } from '@/components/Attachments'
+import {
+  type Chat,
+  type DeliveryStatus,
+  formatDateDivider,
+  formatMessageTime,
+  type Message,
+  type ReactionType
+} from '@/data/types'
 import { cn } from '@/lib/utils'
 import Avatar from './Avatar'
+
+// Emoji mapping for reaction types (used for reaction message display)
+const REACTION_EMOJI: Record<ReactionType, string> = {
+  love: '❤️',
+  like: '👍',
+  dislike: '👎',
+  laugh: '😂',
+  emphasize: '‼️',
+  question: '❓'
+}
+
+// Delivery status indicator component
+function DeliveryIndicator({ status }: { status: DeliveryStatus }) {
+  switch (status) {
+    case 'sending':
+      return <Clock className="w-3 h-3 text-muted-foreground" />
+    case 'sent':
+      return <Check className="w-3 h-3 text-muted-foreground" />
+    case 'delivered':
+      return <CheckCheck className="w-3 h-3 text-muted-foreground" />
+    case 'read':
+      return <CheckCheck className="w-3 h-3 text-primary" />
+    case 'failed':
+      return <AlertCircle className="w-3 h-3 text-destructive" />
+    default:
+      return null
+  }
+}
 
 interface MessageThreadProps {
   chat: Chat | null
@@ -32,6 +68,34 @@ const MessageBubble = ({
         .toUpperCase()
     : '?'
 
+  const hasAttachments = message.attachments && message.attachments.length > 0
+  const hasText = message.text && message.text.trim().length > 0
+
+  // Check if this is a reaction message (e.g., 'Loved "some text"')
+  const isReactionMessage = message.isReaction && message.reactionType
+
+  // For reaction messages, render a compact inline display
+  if (isReactionMessage) {
+    const emoji = REACTION_EMOJI[message.reactionType!]
+    return (
+      <div className={cn('flex flex-col', message.isSent ? 'items-end' : 'items-start')}>
+        <div
+          className={cn(
+            'flex items-center gap-1 text-xs text-muted-foreground italic py-0.5',
+            message.isSent && 'flex-row-reverse'
+          )}
+        >
+          <span>{emoji}</span>
+          <span>
+            {message.isSent ? 'You' : message.senderName || 'Someone'} reacted to &ldquo;
+            {message.reactionQuotedText?.slice(0, 30)}
+            {(message.reactionQuotedText?.length || 0) > 30 ? '...' : ''}&rdquo;
+          </span>
+        </div>
+      </div>
+    )
+  }
+
   return (
     <div className={cn('flex flex-col', message.isSent ? 'items-end' : 'items-start')}>
       {/* Sender name for group chats */}
@@ -41,32 +105,53 @@ const MessageBubble = ({
       <div className={cn('flex items-end gap-2', message.isSent && 'flex-row-reverse')}>
         {/* Avatar for group chats */}
         {showAvatar && <Avatar initials={senderInitials} size="xs" />}
-        <div
-          className={cn(
-            'max-w-[85%] px-3 py-2 rounded-2xl wrap-break-word',
-            message.isSent
-              ? 'bg-imessage-bubble-sent text-imessage-bubble-sent-foreground rounded-br-md'
-              : 'bg-imessage-bubble-received text-imessage-bubble-received-foreground rounded-bl-md'
-          )}
-        >
-          {message.isLink ? (
-            <a
-              href={message.text}
-              className="text-imessage-link underline text-[15px] leading-relaxed"
-              target="_blank"
-              rel="noopener noreferrer"
-            >
-              {message.text}
-            </a>
-          ) : (
-            <p className="text-[15px] leading-relaxed">{message.text}</p>
-          )}
+        <div className="relative">
+          {/* Message bubble */}
+          <div
+            className={cn(
+              'max-w-[85%] px-3 py-2 rounded-2xl wrap-break-word',
+              message.isSent
+                ? 'bg-imessage-bubble-sent text-imessage-bubble-sent-foreground rounded-br-md'
+                : 'bg-imessage-bubble-received text-imessage-bubble-received-foreground rounded-bl-md'
+            )}
+          >
+            {/* Attachments (before text) */}
+            {hasAttachments && <AttachmentDisplay attachments={message.attachments} />}
+
+            {/* Message text */}
+            {hasText &&
+              (message.isLink ? (
+                <a
+                  href={message.text}
+                  className="text-imessage-link underline text-[15px] leading-relaxed"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                >
+                  {message.text}
+                </a>
+              ) : (
+                <p className="text-[15px] leading-relaxed">{message.text}</p>
+              ))}
+          </div>
         </div>
       </div>
+
+      {/* Timestamp and delivery status */}
       {showTimestamp && (
-        <span className={cn('text-xs text-imessage-timestamp mt-1', showAvatar && 'ml-10')}>
-          {formatMessageTime(message.timestamp)}
-        </span>
+        <div
+          className={cn(
+            'flex items-center gap-1 mt-1',
+            showAvatar && 'ml-10',
+            message.isSent && 'flex-row-reverse'
+          )}
+        >
+          <span className="text-xs text-imessage-timestamp">
+            {formatMessageTime(message.timestamp)}
+          </span>
+          {message.isSent && message.deliveryStatus && (
+            <DeliveryIndicator status={message.deliveryStatus} />
+          )}
+        </div>
       )}
     </div>
   )

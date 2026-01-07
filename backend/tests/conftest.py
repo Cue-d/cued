@@ -62,6 +62,10 @@ class MockPrmMessage:
         is_read: bool,
         read_at: int | None,
         has_attachments: bool = False,
+        is_sent: bool = True,
+        is_delivered: bool = True,
+        date_delivered: int | None = None,
+        error: int = 0,
     ):
         self.id = id
         self.chat_id = chat_id
@@ -73,6 +77,10 @@ class MockPrmMessage:
         self.is_read = is_read
         self.read_at = read_at
         self.has_attachments = has_attachments
+        self.is_sent = is_sent
+        self.is_delivered = is_delivered
+        self.date_delivered = date_delivered
+        self.error = error
 
 
 class MockSendResult:
@@ -416,6 +424,9 @@ def mock_app_db() -> MagicMock:
         ),
     ]
 
+    # Attachments - return None for unknown IDs
+    db.get_attachment.return_value = None
+
     return db
 
 
@@ -429,6 +440,7 @@ def client(mock_app_db: MagicMock) -> Generator[TestClient, None, None]:
         patch("routers.search.get_db", return_value=mock_app_db),
         patch("routers.eod.get_db", return_value=mock_app_db),
         patch("routers.contacts.get_db", return_value=mock_app_db),
+        patch("routers.attachments.get_app_db", return_value=mock_app_db),
         patch("main.run_sync"),  # Skip sync on startup
         patch("main.has_existing_data", return_value=True),  # Pretend data exists
         patch("main.trigger_background_sync"),  # Don't trigger background sync

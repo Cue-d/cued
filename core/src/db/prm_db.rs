@@ -121,6 +121,10 @@ impl AppDb {
                 is_read INTEGER NOT NULL,
                 read_at INTEGER,
                 has_attachments INTEGER NOT NULL DEFAULT 0,
+                is_sent INTEGER NOT NULL DEFAULT 1,
+                is_delivered INTEGER NOT NULL DEFAULT 0,
+                date_delivered INTEGER,
+                error INTEGER NOT NULL DEFAULT 0,
                 synced_at INTEGER NOT NULL
             );
             CREATE INDEX IF NOT EXISTS idx_messages_chat_id ON messages(chat_id);
@@ -813,8 +817,8 @@ impl AppDb {
             };
 
             tx.execute(
-                "INSERT OR REPLACE INTO messages (id, chat_id, sender_id, text, timestamp, is_from_me, is_read, read_at, has_attachments, synced_at)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                "INSERT OR REPLACE INTO messages (id, chat_id, sender_id, text, timestamp, is_from_me, is_read, read_at, has_attachments, is_sent, is_delivered, date_delivered, error, synced_at)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 params![
                     msg.id,
                     msg.chat_id,
@@ -825,6 +829,10 @@ impl AppDb {
                     msg.is_read as i32,
                     msg.read_at,
                     msg.has_attachments as i32,
+                    msg.is_sent as i32,
+                    msg.is_delivered as i32,
+                    msg.date_delivered,
+                    msg.error,
                     now,
                 ],
             )
@@ -1028,7 +1036,8 @@ impl AppDb {
             .conn
             .prepare(
                 "SELECT m.id, m.chat_id, m.sender_id, p.name as sender_name, m.text, m.timestamp,
-                        m.is_from_me, m.is_read, m.read_at, m.has_attachments
+                        m.is_from_me, m.is_read, m.read_at, m.has_attachments,
+                        m.is_sent, m.is_delivered, m.date_delivered, m.error
                  FROM messages m
                  LEFT JOIN people p ON p.id = m.sender_id
                  WHERE m.chat_id = ?
@@ -1052,6 +1061,10 @@ impl AppDb {
                     is_read: row.get::<_, i32>(7)? != 0,
                     read_at: row.get(8)?,
                     has_attachments: row.get::<_, i32>(9)? != 0,
+                    is_sent: row.get::<_, i32>(10)? != 0,
+                    is_delivered: row.get::<_, i32>(11)? != 0,
+                    date_delivered: row.get(12)?,
+                    error: row.get(13)?,
                 })
             })
             .map_err(|e| {
@@ -1103,6 +1116,90 @@ impl AppDb {
             result.push(row.map_err(|e| {
                 pyo3::exceptions::PyRuntimeError::new_err(format!("Row error: {}", e))
             })?);
+        }
+        Ok(result)
+    }
+
+    /// Get a single attachment by ID.
+    pub fn get_attachment(&self, attachment_id: i64) -> PyResult<Option<Attachment>> {
+        let result = self.conn.query_row(
+            "SELECT id, message_id, filename, path, mime_type, uti, size, is_outgoing, created_at
+             FROM attachments WHERE id = ?",
+            [attachment_id],
+            |row| {
+                Ok(Attachment {
+                    id: row.get(0)?,
+                    message_id: row.get(1)?,
+                    filename: row.get(2)?,
+                    path: row.get(3)?,
+                    mime_type: row.get(4)?,
+                    uti: row.get(5)?,
+                    size: row.get(6)?,
+                    is_outgoing: row.get::<_, i32>(7)? != 0,
+                    created_at: row.get(8)?,
+                })
+            },
+        );
+        match result {
+            Ok(attachment) => Ok(Some(attachment)),
+            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+            Err(e) => Err(pyo3::exceptions::PyRuntimeError::new_err(format!(
+                "Get attachment error: {}",
+                e
+            ))),
+        }
+    }
+
+    /// Get attachments for multiple messages (batch query for efficiency).
+    /// Returns a dict mapping message_id to list of attachments.
+    pub fn get_attachments_for_messages(
+        &self,
+        message_ids: Vec<i64>,
+    ) -> PyResult<std::collections::HashMap<i64, Vec<Attachment>>> {
+        if message_ids.is_empty() {
+            return Ok(std::collections::HashMap::new());
+        }
+
+        // Build placeholders for IN clause
+        let placeholders: Vec<String> = message_ids.iter().map(|_| "?".to_string()).collect();
+        let query = format!(
+            "SELECT id, message_id, filename, path, mime_type, uti, size, is_outgoing, created_at
+             FROM attachments WHERE message_id IN ({})",
+            placeholders.join(",")
+        );
+
+        let mut stmt = self.conn.prepare(&query).map_err(|e| {
+            pyo3::exceptions::PyRuntimeError::new_err(format!("Query error: {}", e))
+        })?;
+
+        let rows = stmt
+            .query_map(rusqlite::params_from_iter(message_ids.iter()), |row| {
+                Ok(Attachment {
+                    id: row.get(0)?,
+                    message_id: row.get(1)?,
+                    filename: row.get(2)?,
+                    path: row.get(3)?,
+                    mime_type: row.get(4)?,
+                    uti: row.get(5)?,
+                    size: row.get(6)?,
+                    is_outgoing: row.get::<_, i32>(7)? != 0,
+                    created_at: row.get(8)?,
+                })
+            })
+            .map_err(|e| {
+                pyo3::exceptions::PyRuntimeError::new_err(format!("Query error: {}", e))
+            })?;
+
+        let mut result: std::collections::HashMap<i64, Vec<Attachment>> =
+            std::collections::HashMap::new();
+        for row in rows {
+            let attachment = row.map_err(|e| {
+                pyo3::exceptions::PyRuntimeError::new_err(format!("Row error: {}", e))
+            })?;
+            result
+                .entry(attachment.message_id)
+                .or_default()
+                .push(attachment);
         }
         Ok(result)
     }

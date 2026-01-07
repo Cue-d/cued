@@ -5,7 +5,8 @@ import type {
   SyncStatusResponse,
   ActionResponse,
   SearchResultResponse,
-  SwipeRequest
+  SwipeRequest,
+  AttachmentResponse
 } from '../../../preload/index.d'
 
 export type {
@@ -14,11 +15,12 @@ export type {
   SendMessageResponse,
   SyncStatusResponse,
   ActionResponse,
-  SearchResultResponse
+  SearchResultResponse,
+  AttachmentResponse
 }
 
 // Backend URL for direct HTTP calls (browser dev mode)
-const API_BASE = 'http://localhost:8000'
+export const API_BASE = 'http://localhost:8000'
 
 // Check if running in Electron (window.api is defined by preload script)
 const isElectron = () => typeof window !== 'undefined' && window.api !== undefined

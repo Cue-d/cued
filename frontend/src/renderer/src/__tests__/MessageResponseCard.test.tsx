@@ -51,6 +51,30 @@ vi.mock('@/components/ui/textarea', () => ({
   )
 }))
 
+// Helper to create mock message response with required fields
+function mockMessage(
+  id: number,
+  text: string,
+  date: number,
+  senderName: string | null,
+  isFromMe = false
+) {
+  return {
+    id,
+    text,
+    date,
+    is_from_me: isFromMe,
+    is_read: true,
+    date_read: isFromMe ? date : null,
+    sender_name: senderName,
+    is_sent: true,
+    is_delivered: true,
+    date_delivered: isFromMe ? date : null,
+    error: 0,
+    attachments: []
+  }
+}
+
 const mockAction: ActionResponse = {
   id: 1,
   type: 'respond_to_message',
@@ -70,40 +94,14 @@ const mockAction: ActionResponse = {
   message_text: 'Test message',
   message_timestamp: Date.now() - 3600000,
   recent_messages: [
-    {
-      id: 99,
-      text: 'Previous message',
-      date: Date.now() - 7200000,
-      is_from_me: false,
-      is_read: true,
-      date_read: null,
-      sender_name: 'Alex Chen'
-    },
-    {
-      id: 100,
-      text: 'Test message',
-      date: Date.now() - 3600000,
-      is_from_me: false,
-      is_read: true,
-      date_read: null,
-      sender_name: 'Alex Chen'
-    }
+    mockMessage(99, 'Previous message', Date.now() - 7200000, 'Alex Chen'),
+    mockMessage(100, 'Test message', Date.now() - 3600000, 'Alex Chen')
   ]
 }
 
 const mockActionWithSentMessage: ActionResponse = {
   ...mockAction,
-  recent_messages: [
-    {
-      id: 100,
-      text: 'Sent message',
-      date: Date.now() - 3600000,
-      is_from_me: true,
-      is_read: true,
-      date_read: Date.now() - 3500000,
-      sender_name: null
-    }
-  ]
+  recent_messages: [mockMessage(100, 'Sent message', Date.now() - 3600000, null, true)]
 }
 
 describe('MessageResponseCard', () => {
@@ -275,17 +273,7 @@ describe('MessageResponseCard', () => {
     const groupAction: ActionResponse = {
       ...mockAction,
       chat_name: 'Group Chat',
-      recent_messages: [
-        {
-          id: 100,
-          text: 'Group message',
-          date: Date.now() - 3600000,
-          is_from_me: false,
-          is_read: true,
-          date_read: null,
-          sender_name: 'John Doe'
-        }
-      ]
+      recent_messages: [mockMessage(100, 'Group message', Date.now() - 3600000, 'John Doe')]
     }
 
     render(

@@ -89,6 +89,15 @@ pub struct PrmMessage {
     pub read_at: Option<i64>, // Unix timestamp
     #[pyo3(get)]
     pub has_attachments: bool,
+    // Delivery status fields
+    #[pyo3(get)]
+    pub is_sent: bool,
+    #[pyo3(get)]
+    pub is_delivered: bool,
+    #[pyo3(get)]
+    pub date_delivered: Option<i64>, // Unix timestamp
+    #[pyo3(get)]
+    pub error: i32, // 0 = no error, non-zero = send failed
 }
 
 #[pymethods]
@@ -205,6 +214,15 @@ pub struct SyncMessage {
     pub read_at: Option<i64>, // Unix timestamp
     #[pyo3(get)]
     pub has_attachments: bool,
+    // Delivery status fields
+    #[pyo3(get)]
+    pub is_sent: bool,
+    #[pyo3(get)]
+    pub is_delivered: bool,
+    #[pyo3(get)]
+    pub date_delivered: Option<i64>, // Unix timestamp
+    #[pyo3(get)]
+    pub error: i32, // 0 = no error, non-zero = send failed
 }
 
 #[pymethods]

@@ -7,8 +7,9 @@ import {
   addContactContext as clientAddContactContext
 } from './client'
 
-// Re-export types from data/types for consumers that import from api/actions
+// Re-export types for consumers that import from api/actions
 export type { ActionResponse, SearchResultResponse, SwipeRequest } from '../data/types'
+export type { AttachmentResponse } from './client'
 
 export async function fetchActions(status = 'pending', limit = 50, actionType?: string) {
   return clientFetchActions(status, limit, actionType)

@@ -1,3 +1,18 @@
+// Reaction type for frontend (parsed from message text via regex)
+export type ReactionType = 'love' | 'like' | 'dislike' | 'laugh' | 'emphasize' | 'question'
+
+// Attachment type for frontend
+export interface Attachment {
+  id: number
+  filename: string | null
+  mimeType: string | null
+  size: number | null
+  isImage: boolean
+}
+
+// Delivery status type
+export type DeliveryStatus = 'sending' | 'sent' | 'delivered' | 'read' | 'failed'
+
 // Frontend-specific chat types (for legacy chat view)
 export interface Message {
   id: string
@@ -7,6 +22,13 @@ export interface Message {
   timestamp: Date
   isLink?: boolean
   senderName?: string | null
+  // Delivery and attachments
+  deliveryStatus: DeliveryStatus
+  attachments: Attachment[]
+  // Reaction info (parsed from message text like 'Loved "some text"')
+  isReaction?: boolean
+  reactionType?: ReactionType
+  reactionQuotedText?: string
 }
 
 export interface Chat {

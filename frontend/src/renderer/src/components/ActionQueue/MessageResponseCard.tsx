@@ -1,10 +1,12 @@
 import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef } from 'react'
 import type { ActionResponse } from '@/api/actions'
+import { AttachmentDisplay } from '@/components/Attachments'
 import Avatar from '@/components/Avatar'
 import { Card, CardContent, CardFooter, CardHeader } from '@/components/ui/card'
 import { Textarea } from '@/components/ui/textarea'
 import { type MessageItem, processMessagesWithReactions } from '@/lib/reactions'
 import { cn } from '@/lib/utils'
+import type { AttachmentResponse } from '@/api/actions'
 
 interface MessageResponseCardProps {
   action: ActionResponse
@@ -94,17 +96,33 @@ export const MessageResponseCard = forwardRef<MessageResponseCardRef, MessageRes
     const initials = getInitials(personName)
 
     // Transform and process messages, sorted chronologically (oldest first, newest at bottom)
-    const { displayMessages, reactionsByMessageId } = useMemo(() => {
-      const messages: MessageItem[] = [...(action.recent_messages || [])]
-        .sort((a, b) => a.date - b.date)
-        .map((msg) => ({
-          id: msg.id,
-          text: msg.text,
-          isSent: msg.is_from_me,
-          timestamp: msg.date,
-          senderName: msg.sender_name
-        }))
-      return processMessagesWithReactions(messages)
+    // Keep track of attachments separately since MessageItem doesn't include them
+    const { displayMessages, reactionsByMessageId, attachmentsByMessageId } = useMemo(() => {
+      const sortedMessages = [...(action.recent_messages || [])].sort((a, b) => a.date - b.date)
+
+      // Build a map of attachments by message ID before processing reactions
+      const attachmentsMap = new Map<number, AttachmentResponse[]>()
+      for (const msg of sortedMessages) {
+        if (msg.attachments && msg.attachments.length > 0) {
+          attachmentsMap.set(msg.id, msg.attachments)
+        }
+      }
+
+      const messages: MessageItem[] = sortedMessages.map((msg) => ({
+        id: msg.id,
+        text: msg.text,
+        isSent: msg.is_from_me,
+        timestamp: msg.date,
+        senderName: msg.sender_name
+      }))
+
+      const processed = processMessagesWithReactions(messages)
+
+      return {
+        displayMessages: processed.displayMessages,
+        reactionsByMessageId: processed.reactionsByMessageId,
+        attachmentsByMessageId: attachmentsMap
+      }
     }, [action.recent_messages])
 
     return (
@@ -138,6 +156,24 @@ export const MessageResponseCard = forwardRef<MessageResponseCardRef, MessageRes
                 displayMessages.map((msg) => {
                   const reactions = reactionsByMessageId.get(msg.id)
                   const hasReactions = reactions && reactions.length > 0
+                  const msgAttachments = attachmentsByMessageId.get(msg.id)
+                  const hasAttachments = msgAttachments && msgAttachments.length > 0
+
+                  // Don't show "[attachment]" placeholder text when we have actual attachments
+                  const hasText =
+                    msg.text &&
+                    msg.text.trim().length > 0 &&
+                    !(hasAttachments && msg.text.trim() === '[attachment]')
+
+                  // Convert API attachments to component format
+                  const attachments = hasAttachments
+                    ? msgAttachments.map((a) => ({
+                        id: a.id,
+                        filename: a.filename,
+                        size: a.size,
+                        isImage: a.is_image
+                      }))
+                    : []
 
                   return (
                     <div
@@ -159,9 +195,19 @@ export const MessageResponseCard = forwardRef<MessageResponseCardRef, MessageRes
                               : 'bg-imessage-bubble-received text-imessage-bubble-received-foreground'
                           )}
                         >
-                          <p className="whitespace-pre-wrap wrap-break-word">
-                            {msg.text || '[No text]'}
-                          </p>
+                          {hasAttachments && (
+                            <AttachmentDisplay
+                              attachments={attachments}
+                              maxImageSize={200}
+                              compact
+                            />
+                          )}
+                          {hasText && (
+                            <p className="whitespace-pre-wrap wrap-break-word">{msg.text}</p>
+                          )}
+                          {!hasText && !hasAttachments && (
+                            <p className="whitespace-pre-wrap wrap-break-word">[No text]</p>
+                          )}
                           <p className="text-[10px] opacity-60 mt-1 text-right">
                             {formatTime(msg.timestamp)}
                           </p>
