@@ -1,4 +1,4 @@
-export type ViewType = 'action-queue' | 'messages' | 'contacts' | 'settings'
+export type ViewType = 'action-queue' | 'agent'
 
 export interface ViewConfig {
   id: ViewType
@@ -10,28 +10,16 @@ export interface ViewConfig {
 export const VIEWS: Record<ViewType, ViewConfig> = {
   'action-queue': {
     id: 'action-queue',
-    label: 'Action Queue',
+    label: 'Actions',
     icon: 'Target',
     shortcut: '⌘1'
   },
-  messages: {
-    id: 'messages',
-    label: 'Messages',
-    icon: 'MessageSquare',
+  agent: {
+    id: 'agent',
+    label: 'Agent',
+    icon: 'Sparkles',
     shortcut: '⌘2'
-  },
-  contacts: {
-    id: 'contacts',
-    label: 'Contacts',
-    icon: 'Users',
-    shortcut: '⌘3'
-  },
-  settings: {
-    id: 'settings',
-    label: 'Settings',
-    icon: 'Settings',
-    shortcut: '⌘4'
   }
 }
 
-export const VIEW_ORDER: ViewType[] = ['action-queue', 'messages', 'contacts', 'settings']
+export const VIEW_ORDER: ViewType[] = ['action-queue', 'agent']
