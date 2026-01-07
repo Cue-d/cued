@@ -93,15 +93,17 @@ export const MessageResponseCard = forwardRef<MessageResponseCardRef, MessageRes
     const personName = action.person_name || action.chat_name || 'Unknown'
     const initials = getInitials(personName)
 
-    // Transform and process messages
+    // Transform and process messages, sorted chronologically (oldest first, newest at bottom)
     const { displayMessages, reactionsByMessageId } = useMemo(() => {
-      const messages: MessageItem[] = (action.recent_messages || []).map((msg) => ({
-        id: msg.id,
-        text: msg.text,
-        isSent: msg.is_from_me,
-        timestamp: msg.date,
-        senderName: msg.sender_name
-      }))
+      const messages: MessageItem[] = [...(action.recent_messages || [])]
+        .sort((a, b) => a.date - b.date)
+        .map((msg) => ({
+          id: msg.id,
+          text: msg.text,
+          isSent: msg.is_from_me,
+          timestamp: msg.date,
+          senderName: msg.sender_name
+        }))
       return processMessagesWithReactions(messages)
     }, [action.recent_messages])
 
