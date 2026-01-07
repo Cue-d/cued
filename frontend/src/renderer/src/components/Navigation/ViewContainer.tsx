@@ -1,12 +1,12 @@
 import { AnimatePresence, motion } from 'motion/react'
 import { useView } from '@/hooks/useView'
 import { ActionQueueView } from '@/components/ActionQueue'
-import { ChatView } from '@/components/ChatView'
+import { AgentView } from '@/components/AgentView'
 import { useEffect, useRef } from 'react'
 
 const VIEW_COMPONENTS = {
   'action-queue': ActionQueueView,
-  chat: ChatView
+  agent: AgentView
 }
 
 export function ViewContainer() {

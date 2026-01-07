@@ -13,7 +13,7 @@ import type { SearchResultResponse } from '@/data/types'
 
 type SearchMode = 'semantic' | 'fts'
 
-export function ChatView() {
+export function AgentView() {
   const [query, setQuery] = useState('')
   const [searchMode, setSearchMode] = useState<SearchMode>('semantic')
   const [results, setResults] = useState<SearchResultResponse[]>([])
