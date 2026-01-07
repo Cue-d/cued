@@ -22,6 +22,7 @@ export function FloatingNavigationPill() {
   useEffect(() => {
     if (isHovered) {
       setIsExpanded(true)
+      return undefined
     } else {
       const timer = setTimeout(() => {
         setIsExpanded(false)
