@@ -2,7 +2,7 @@ import { motion, AnimatePresence } from 'motion/react'
 import { useState, useEffect } from 'react'
 import { Target, MessageSquare, Users, Settings } from 'lucide-react'
 import { cn } from '@/lib/utils'
-import { useView } from '@/contexts/ViewContext'
+import { useView } from '@/hooks/useView'
 import { VIEWS, VIEW_ORDER, type ViewType } from '@/types/views'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 
@@ -18,17 +18,25 @@ export function FloatingNavigationPill() {
   const [isExpanded, setIsExpanded] = useState(false)
   const [isHovered, setIsHovered] = useState(false)
 
-  // Auto-expand on hover, collapse after delay when not hovered
+  // Handle hover state changes
+  const handleMouseEnter = () => {
+    setIsHovered(true)
+    setIsExpanded(true)
+  }
+
+  const handleMouseLeave = () => {
+    setIsHovered(false)
+  }
+
+  // Auto-collapse after delay when not hovered
   useEffect(() => {
-    if (isHovered) {
-      setIsExpanded(true)
-      return undefined
-    } else {
+    if (!isHovered) {
       const timer = setTimeout(() => {
         setIsExpanded(false)
       }, 500) // Longer delay for smoother collapse
       return () => clearTimeout(timer)
     }
+    return undefined
   }, [isHovered])
 
   const handleViewClick = (viewId: ViewType) => {
@@ -40,8 +48,8 @@ export function FloatingNavigationPill() {
   return (
     <div
       className="fixed left-6 top-1/2 -translate-y-1/2 z-50"
-      onMouseEnter={() => setIsHovered(true)}
-      onMouseLeave={() => setIsHovered(false)}
+      onMouseEnter={handleMouseEnter}
+      onMouseLeave={handleMouseLeave}
     >
       <motion.div
         className={cn(
@@ -52,8 +60,8 @@ export function FloatingNavigationPill() {
           height: isExpanded ? 'auto' : 'auto',
           scale: isHovered ? 1.02 : 1
         }}
-        transition={{ 
-          duration: 0.3, 
+        transition={{
+          duration: 0.3,
           ease: [0.4, 0, 0.2, 1] // Custom cubic-bezier for smoother animation
         }}
       >
@@ -78,22 +86,22 @@ export function FloatingNavigationPill() {
                     : 'text-muted-foreground hover:text-foreground hover:bg-accent',
                   'w-10 h-10'
                 )}
-                initial={{ 
-                  opacity: 0, 
+                initial={{
+                  opacity: 0,
                   scale: 0.6,
                   y: -10
                 }}
-                animate={{ 
-                  opacity: 1, 
+                animate={{
+                  opacity: 1,
                   scale: 1,
                   y: 0
                 }}
-                exit={{ 
-                  opacity: 0, 
+                exit={{
+                  opacity: 0,
                   scale: 0.6,
                   y: -10
                 }}
-                transition={{ 
+                transition={{
                   duration: 0.25,
                   ease: [0.4, 0, 0.2, 1],
                   delay: isExpanded ? index * 0.03 : 0 // Stagger animation when expanding
@@ -125,4 +133,3 @@ export function FloatingNavigationPill() {
     </div>
   )
 }
-

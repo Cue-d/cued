@@ -1,15 +1,16 @@
-import { createContext, useContext, useState, useCallback, useEffect } from 'react'
+import { createContext, useState, useCallback, useEffect } from 'react'
 import type { ViewType } from '@/types/views'
 import { VIEW_ORDER } from '@/types/views'
 
-interface ViewContextType {
+export interface ViewContextType {
   currentView: ViewType
   setView: (view: ViewType) => void
   navigateNext: () => void
   navigatePrevious: () => void
 }
 
-const ViewContext = createContext<ViewContextType | undefined>(undefined)
+// eslint-disable-next-line react-refresh/only-export-components
+export const ViewContext = createContext<ViewContextType | undefined>(undefined)
 
 export function ViewProvider({ children }: { children: React.ReactNode }) {
   const [currentView, setCurrentView] = useState<ViewType>('action-queue')
@@ -73,12 +74,3 @@ export function ViewProvider({ children }: { children: React.ReactNode }) {
     </ViewContext.Provider>
   )
 }
-
-export function useView() {
-  const context = useContext(ViewContext)
-  if (context === undefined) {
-    throw new Error('useView must be used within a ViewProvider')
-  }
-  return context
-}
-

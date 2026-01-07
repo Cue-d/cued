@@ -10,7 +10,7 @@ import {
   CommandList
 } from '@/components/ui/command'
 import type { SearchResultResponse } from '@/data/types'
-import { useView } from '@/contexts/ViewContext'
+import { useView } from '@/hooks/useView'
 import { VIEWS, VIEW_ORDER, type ViewType } from '@/types/views'
 
 const NAV_ICON_MAP: Record<string, React.ComponentType<{ className?: string }>> = {

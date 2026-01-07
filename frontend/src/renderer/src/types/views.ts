@@ -35,4 +35,3 @@ export const VIEWS: Record<ViewType, ViewConfig> = {
 }
 
 export const VIEW_ORDER: ViewType[] = ['action-queue', 'messages', 'contacts', 'settings']
-
