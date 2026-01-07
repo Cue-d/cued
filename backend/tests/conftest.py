@@ -28,12 +28,19 @@ class MockPrmChat:
 class MockPerson:
     """Mock for core.Person returned by AppDb."""
 
-    def __init__(self, id: int, identifier: str, name: str):
+    def __init__(
+        self,
+        id: int,
+        identifier: str,
+        name: str,
+        contact_id: int | None = None,
+    ):
         self.id = id
         self.identifier = identifier
         self.name = name
         self.service = "iMessage"
         self.is_contact = True
+        self.contact_id = contact_id
         self.phones = None
         self.emails = None
         self.company = None
@@ -180,6 +187,32 @@ class MockStoredEmbedding:
         self.message_id = message_id
         self.chat_id = chat_id
         self.embedding = embedding
+
+
+class MockSyncedContact:
+    """Mock for core.SyncedContact returned by contacts sync."""
+
+    def __init__(
+        self,
+        id: int = 1,
+        apple_id: str = "",
+        name: str = "",
+        phones: list[str] | None = None,
+        emails: list[str] | None = None,
+        company: str | None = None,
+        notes: str | None = None,
+        apple_created_at: int = 700000000,
+        apple_modified_at: int = 700000000,
+    ):
+        self.id = id
+        self.apple_id = apple_id
+        self.name = name
+        self.phones = phones or []
+        self.emails = emails or []
+        self.company = company
+        self.notes = notes
+        self.apple_created_at = apple_created_at
+        self.apple_modified_at = apple_modified_at
 
 
 @pytest.fixture
@@ -358,6 +391,31 @@ def mock_app_db() -> MagicMock:
     db.get_person.side_effect = get_person
     db.upsert_person.return_value = None
 
+    # Contact sync methods
+    db.get_contact_stats.return_value = (100, 5)  # (active, deleted)
+    db.get_sync_state.return_value = 700000000  # Last sync timestamp
+    db.get_latest_contact_modification.return_value = 700000000
+    db.get_all_contact_apple_ids.return_value = ["ABC123", "DEF456", "GHI789"]
+    db.upsert_contact.return_value = 1  # Return contact ID
+    db.mark_contacts_deleted.return_value = 0
+    db.get_all_contacts.return_value = [
+        MockSyncedContact(
+            id=1,
+            apple_id="ABC123",
+            name="John Doe",
+            phones=["+11234567890"],
+            emails=["john@example.com"],
+            company="Acme Inc",
+        ),
+        MockSyncedContact(
+            id=2,
+            apple_id="DEF456",
+            name="Jane Smith",
+            phones=["+10987654321"],
+            emails=["jane@example.com"],
+        ),
+    ]
+
     return db
 
 
@@ -370,12 +428,14 @@ def client(mock_app_db: MagicMock) -> Generator[TestClient, None, None]:
         patch("routers.actions.get_db", return_value=mock_app_db),
         patch("routers.search.get_db", return_value=mock_app_db),
         patch("routers.eod.get_db", return_value=mock_app_db),
+        patch("routers.contacts.get_db", return_value=mock_app_db),
         patch("main.run_sync"),  # Skip sync on startup
         patch("main.has_existing_data", return_value=True),  # Pretend data exists
         patch("main.trigger_background_sync"),  # Don't trigger background sync
         patch("main.start_sync_watcher"),  # Skip sync watcher
         patch("main.start_scheduler"),  # Skip background scheduler
         patch("core.normalize_phone", side_effect=lambda x: x.replace("+", "")),
+        patch("core.normalize_email", side_effect=lambda x: x.lower()),
         patch(
             "core.send_message",
             return_value=MockSendResult(success=True),

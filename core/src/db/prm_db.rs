@@ -74,6 +74,7 @@ impl AppDb {
                 name TEXT NOT NULL,
                 service TEXT NOT NULL,
                 is_contact INTEGER NOT NULL DEFAULT 0,
+                contact_id INTEGER REFERENCES contacts(id),
                 phones TEXT,
                 emails TEXT,
                 company TEXT,
@@ -83,6 +84,7 @@ impl AppDb {
             );
             CREATE INDEX IF NOT EXISTS idx_people_identifier ON people(identifier);
             CREATE INDEX IF NOT EXISTS idx_people_name ON people(name);
+            CREATE INDEX IF NOT EXISTS idx_people_contact_id ON people(contact_id);
 
             -- ============================================
             -- CHATS: Conversations
@@ -143,6 +145,27 @@ impl AppDb {
             CREATE INDEX IF NOT EXISTS idx_attachments_message ON attachments(message_id);
 
             -- ============================================
+            -- CONTACTS: Synced from Apple Contacts
+            -- Tracks Apple Contact IDs and modification timestamps for incremental sync
+            -- ============================================
+            CREATE TABLE IF NOT EXISTS contacts (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                apple_id TEXT NOT NULL UNIQUE,  -- Stable Apple Contacts ID
+                name TEXT NOT NULL,
+                phones TEXT,                     -- JSON array of phone numbers
+                emails TEXT,                     -- JSON array of emails
+                company TEXT,
+                notes TEXT,
+                apple_created_at INTEGER,        -- Apple Contacts creation timestamp
+                apple_modified_at INTEGER,       -- Apple Contacts modification timestamp
+                synced_at INTEGER NOT NULL,      -- When we last synced this contact
+                deleted_at INTEGER               -- NULL if active, timestamp if deleted from Apple Contacts
+            );
+            CREATE INDEX IF NOT EXISTS idx_contacts_apple_id ON contacts(apple_id);
+            CREATE INDEX IF NOT EXISTS idx_contacts_modified ON contacts(apple_modified_at);
+            CREATE INDEX IF NOT EXISTS idx_contacts_deleted ON contacts(deleted_at);
+
+            -- ============================================
             -- SYNC STATE
             -- ============================================
             CREATE TABLE IF NOT EXISTS sync_state (
@@ -151,6 +174,7 @@ impl AppDb {
             );
             INSERT OR IGNORE INTO sync_state (key, value) VALUES ('last_message_rowid', 0);
             INSERT OR IGNORE INTO sync_state (key, value) VALUES ('last_attachment_rowid', 0);
+            INSERT OR IGNORE INTO sync_state (key, value) VALUES ('last_contacts_sync', 0);
 
             -- ============================================
             -- ACTIONS: Task queue
@@ -234,6 +258,48 @@ impl AppDb {
         Ok(())
     }
 
+    /// Migrate schema to add contact_id column to people table.
+    /// Safe to call multiple times - checks if column exists first.
+    pub fn migrate_add_contact_id(&self) -> PyResult<()> {
+        // Check if contact_id column already exists
+        let has_contact_id: bool = self
+            .conn
+            .query_row(
+                "SELECT COUNT(*) FROM pragma_table_info('people') WHERE name = 'contact_id'",
+                [],
+                |row| Ok(row.get::<_, i64>(0)? > 0),
+            )
+            .unwrap_or(false);
+
+        if !has_contact_id {
+            self.conn
+                .execute(
+                    "ALTER TABLE people ADD COLUMN contact_id INTEGER REFERENCES contacts(id)",
+                    [],
+                )
+                .map_err(|e| {
+                    pyo3::exceptions::PyRuntimeError::new_err(format!(
+                        "Migration error (add contact_id): {}",
+                        e
+                    ))
+                })?;
+
+            self.conn
+                .execute(
+                    "CREATE INDEX IF NOT EXISTS idx_people_contact_id ON people(contact_id)",
+                    [],
+                )
+                .map_err(|e| {
+                    pyo3::exceptions::PyRuntimeError::new_err(format!(
+                        "Migration error (create index): {}",
+                        e
+                    ))
+                })?;
+        }
+
+        Ok(())
+    }
+
     /// Ensure FTS5 triggers exist (safe to call multiple times).
     pub fn ensure_fts_triggers(&self) -> PyResult<()> {
         self.conn
@@ -293,6 +359,217 @@ impl AppDb {
     }
 
     // ============================================
+    // CONTACTS SYNC METHODS (Apple Contacts -> contacts table)
+    // ============================================
+
+    /// Upsert a contact from Apple Contacts.
+    #[allow(clippy::too_many_arguments)]
+    pub fn upsert_contact(
+        &self,
+        apple_id: &str,
+        name: &str,
+        phones: Option<&str>,
+        emails: Option<&str>,
+        company: Option<&str>,
+        notes: Option<&str>,
+        apple_created_at: i64,
+        apple_modified_at: i64,
+    ) -> PyResult<i64> {
+        let now = now_timestamp();
+        self.conn
+            .execute(
+                "INSERT INTO contacts
+                 (apple_id, name, phones, emails, company, notes, apple_created_at, apple_modified_at, synced_at, deleted_at)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)
+                 ON CONFLICT(apple_id) DO UPDATE SET
+                    name = excluded.name,
+                    phones = excluded.phones,
+                    emails = excluded.emails,
+                    company = excluded.company,
+                    notes = excluded.notes,
+                    apple_created_at = excluded.apple_created_at,
+                    apple_modified_at = excluded.apple_modified_at,
+                    synced_at = excluded.synced_at,
+                    deleted_at = NULL",
+                params![
+                    apple_id,
+                    name,
+                    phones,
+                    emails,
+                    company,
+                    notes,
+                    apple_created_at,
+                    apple_modified_at,
+                    now,
+                ],
+            )
+            .map_err(|e| {
+                pyo3::exceptions::PyRuntimeError::new_err(format!("Upsert contact error: {}", e))
+            })?;
+
+        // Return the contact ID
+        let id: i64 = self
+            .conn
+            .query_row(
+                "SELECT id FROM contacts WHERE apple_id = ?",
+                [apple_id],
+                |row| row.get(0),
+            )
+            .map_err(|e| {
+                pyo3::exceptions::PyRuntimeError::new_err(format!("Get contact id error: {}", e))
+            })?;
+        Ok(id)
+    }
+
+    /// Get all active (non-deleted) Apple Contact IDs.
+    pub fn get_all_contact_apple_ids(&self) -> PyResult<Vec<String>> {
+        let mut stmt = self
+            .conn
+            .prepare("SELECT apple_id FROM contacts WHERE deleted_at IS NULL")
+            .map_err(|e| {
+                pyo3::exceptions::PyRuntimeError::new_err(format!("Prepare error: {}", e))
+            })?;
+
+        let rows = stmt.query_map([], |row| row.get(0)).map_err(|e| {
+            pyo3::exceptions::PyRuntimeError::new_err(format!("Query error: {}", e))
+        })?;
+
+        let mut ids = Vec::new();
+        for row in rows {
+            ids.push(row.map_err(|e| {
+                pyo3::exceptions::PyRuntimeError::new_err(format!("Row error: {}", e))
+            })?);
+        }
+        Ok(ids)
+    }
+
+    /// Mark contacts as deleted (soft delete).
+    pub fn mark_contacts_deleted(&self, apple_ids: Vec<String>) -> PyResult<i64> {
+        if apple_ids.is_empty() {
+            return Ok(0);
+        }
+
+        let now = now_timestamp();
+        let placeholders: Vec<&str> = apple_ids.iter().map(|_| "?").collect();
+        let sql = format!(
+            "UPDATE contacts SET deleted_at = ? WHERE apple_id IN ({}) AND deleted_at IS NULL",
+            placeholders.join(", ")
+        );
+
+        let mut params_vec: Vec<Box<dyn rusqlite::ToSql>> = vec![Box::new(now)];
+        for id in &apple_ids {
+            params_vec.push(Box::new(id.clone()));
+        }
+
+        let params_refs: Vec<&dyn rusqlite::ToSql> =
+            params_vec.iter().map(|b| b.as_ref()).collect();
+
+        let count = self
+            .conn
+            .execute(&sql, params_refs.as_slice())
+            .map_err(|e| {
+                pyo3::exceptions::PyRuntimeError::new_err(format!("Mark deleted error: {}", e))
+            })?;
+
+        Ok(count as i64)
+    }
+
+    /// Get the timestamp of the most recent contact modification.
+    pub fn get_latest_contact_modification(&self) -> PyResult<i64> {
+        self.conn
+            .query_row(
+                "SELECT COALESCE(MAX(apple_modified_at), 0) FROM contacts WHERE deleted_at IS NULL",
+                [],
+                |row| row.get(0),
+            )
+            .map_err(|e| {
+                pyo3::exceptions::PyRuntimeError::new_err(format!(
+                    "Get latest modification error: {}",
+                    e
+                ))
+            })
+    }
+
+    /// Get contact counts for sync status.
+    pub fn get_contact_stats(&self) -> PyResult<(i64, i64)> {
+        let active: i64 = self
+            .conn
+            .query_row(
+                "SELECT COUNT(*) FROM contacts WHERE deleted_at IS NULL",
+                [],
+                |row| row.get(0),
+            )
+            .map_err(|e| {
+                pyo3::exceptions::PyRuntimeError::new_err(format!("Count error: {}", e))
+            })?;
+
+        let deleted: i64 = self
+            .conn
+            .query_row(
+                "SELECT COUNT(*) FROM contacts WHERE deleted_at IS NOT NULL",
+                [],
+                |row| row.get(0),
+            )
+            .map_err(|e| {
+                pyo3::exceptions::PyRuntimeError::new_err(format!("Count error: {}", e))
+            })?;
+
+        Ok((active, deleted))
+    }
+
+    /// Get all active contacts (for building lookup).
+    pub fn get_all_contacts(&self) -> PyResult<Vec<crate::models::SyncedContact>> {
+        let mut stmt = self
+            .conn
+            .prepare(
+                "SELECT id, apple_id, name, phones, emails, company, notes, apple_created_at, apple_modified_at
+                 FROM contacts WHERE deleted_at IS NULL",
+            )
+            .map_err(|e| {
+                pyo3::exceptions::PyRuntimeError::new_err(format!("Prepare error: {}", e))
+            })?;
+
+        let rows = stmt
+            .query_map([], |row| {
+                let phones_json: Option<String> = row.get(3)?;
+                let emails_json: Option<String> = row.get(4)?;
+
+                // Parse JSON arrays
+                let phones: Vec<String> = phones_json
+                    .as_ref()
+                    .and_then(|s| serde_json::from_str(s).ok())
+                    .unwrap_or_default();
+                let emails: Vec<String> = emails_json
+                    .as_ref()
+                    .and_then(|s| serde_json::from_str(s).ok())
+                    .unwrap_or_default();
+
+                Ok(crate::models::SyncedContact {
+                    id: row.get(0)?,
+                    apple_id: row.get(1)?,
+                    name: row.get(2)?,
+                    phones,
+                    emails,
+                    company: row.get(5)?,
+                    notes: row.get(6)?,
+                    apple_created_at: row.get(7)?,
+                    apple_modified_at: row.get(8)?,
+                })
+            })
+            .map_err(|e| {
+                pyo3::exceptions::PyRuntimeError::new_err(format!("Query error: {}", e))
+            })?;
+
+        let mut contacts = Vec::new();
+        for row in rows {
+            contacts.push(row.map_err(|e| {
+                pyo3::exceptions::PyRuntimeError::new_err(format!("Row error: {}", e))
+            })?);
+        }
+        Ok(contacts)
+    }
+
+    // ============================================
     // PEOPLE SYNC METHODS
     // ============================================
 
@@ -305,6 +582,7 @@ impl AppDb {
         name: &str,
         service: &str,
         is_contact: bool,
+        contact_id: Option<i64>,
         phones: Option<&str>,
         emails: Option<&str>,
         company: Option<&str>,
@@ -314,14 +592,15 @@ impl AppDb {
         self.conn
             .execute(
                 "INSERT OR REPLACE INTO people
-                 (id, identifier, name, service, is_contact, phones, emails, company, notes, synced_at)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                 (id, identifier, name, service, is_contact, contact_id, phones, emails, company, notes, synced_at)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 params![
                     id,
                     identifier,
                     name,
                     service,
                     is_contact as i32,
+                    contact_id,
                     phones,
                     emails,
                     company,
@@ -335,10 +614,84 @@ impl AppDb {
         Ok(())
     }
 
+    /// Batch upsert people in a single transaction.
+    /// Each tuple contains: (id, identifier, name, service, is_contact, contact_id, phones, emails, company, notes)
+    /// This is much faster than individual upsert_person calls for large batches.
+    #[allow(clippy::type_complexity)]
+    pub fn upsert_people_batch(
+        &mut self,
+        people: Vec<(
+            i64,
+            String,
+            String,
+            String,
+            bool,
+            Option<i64>,
+            Option<String>,
+            Option<String>,
+            Option<String>,
+            Option<String>,
+        )>,
+    ) -> PyResult<usize> {
+        if people.is_empty() {
+            return Ok(0);
+        }
+
+        let tx = self.conn.transaction().map_err(|e| {
+            pyo3::exceptions::PyRuntimeError::new_err(format!("Transaction error: {}", e))
+        })?;
+
+        let now = now_timestamp();
+        let mut count = 0;
+
+        for (
+            id,
+            identifier,
+            name,
+            service,
+            is_contact,
+            contact_id,
+            phones,
+            emails,
+            company,
+            notes,
+        ) in &people
+        {
+            tx.execute(
+                "INSERT OR REPLACE INTO people
+                 (id, identifier, name, service, is_contact, contact_id, phones, emails, company, notes, synced_at)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                params![
+                    id,
+                    identifier,
+                    name,
+                    service,
+                    *is_contact as i32,
+                    contact_id,
+                    phones,
+                    emails,
+                    company,
+                    notes,
+                    now,
+                ],
+            )
+            .map_err(|e| {
+                pyo3::exceptions::PyRuntimeError::new_err(format!("Upsert person error: {}", e))
+            })?;
+            count += 1;
+        }
+
+        tx.commit().map_err(|e| {
+            pyo3::exceptions::PyRuntimeError::new_err(format!("Commit error: {}", e))
+        })?;
+
+        Ok(count)
+    }
+
     /// Get a person by ID.
     pub fn get_person(&self, id: i64) -> PyResult<Option<Person>> {
         let result = self.conn.query_row(
-            "SELECT id, identifier, name, service, is_contact, phones, emails, company, notes
+            "SELECT id, identifier, name, service, is_contact, contact_id, phones, emails, company, notes
              FROM people WHERE id = ?",
             [id],
             |row| {
@@ -348,10 +701,11 @@ impl AppDb {
                     name: row.get(2)?,
                     service: row.get(3)?,
                     is_contact: row.get::<_, i32>(4)? != 0,
-                    phones: row.get(5)?,
-                    emails: row.get(6)?,
-                    company: row.get(7)?,
-                    notes: row.get(8)?,
+                    contact_id: row.get(5)?,
+                    phones: row.get(6)?,
+                    emails: row.get(7)?,
+                    company: row.get(8)?,
+                    notes: row.get(9)?,
                 })
             },
         );
@@ -629,7 +983,7 @@ impl AppDb {
         let mut stmt = self
             .conn
             .prepare(
-                "SELECT p.id, p.identifier, p.name, p.service, p.is_contact,
+                "SELECT p.id, p.identifier, p.name, p.service, p.is_contact, p.contact_id,
                         p.phones, p.emails, p.company, p.notes
                  FROM people p
                  INNER JOIN chat_participants cp ON cp.person_id = p.id
@@ -648,10 +1002,11 @@ impl AppDb {
                     name: row.get(2)?,
                     service: row.get(3)?,
                     is_contact: row.get::<_, i32>(4)? != 0,
-                    phones: row.get(5)?,
-                    emails: row.get(6)?,
-                    company: row.get(7)?,
-                    notes: row.get(8)?,
+                    contact_id: row.get(5)?,
+                    phones: row.get(6)?,
+                    emails: row.get(7)?,
+                    company: row.get(8)?,
+                    notes: row.get(9)?,
                 })
             })
             .map_err(|e| {
@@ -1014,7 +1369,7 @@ impl AppDb {
             .and_utc()
             .timestamp();
         let mut stmt = self.conn.prepare(
-            "SELECT DISTINCT p.id, p.identifier, p.name, p.service, p.is_contact, p.phones, p.emails, p.company, p.notes
+            "SELECT DISTINCT p.id, p.identifier, p.name, p.service, p.is_contact, p.contact_id, p.phones, p.emails, p.company, p.notes
              FROM people p
              JOIN messages m ON (m.sender_id = p.id OR
                  (m.is_from_me = 1 AND m.chat_id IN (SELECT chat_id FROM chat_participants WHERE person_id = p.id)))
@@ -1030,10 +1385,11 @@ impl AppDb {
                     name: row.get(2)?,
                     service: row.get(3)?,
                     is_contact: row.get::<_, i32>(4)? != 0,
-                    phones: row.get(5)?,
-                    emails: row.get(6)?,
-                    company: row.get(7)?,
-                    notes: row.get(8)?,
+                    contact_id: row.get(5)?,
+                    phones: row.get(6)?,
+                    emails: row.get(7)?,
+                    company: row.get(8)?,
+                    notes: row.get(9)?,
                 })
             })
             .map_err(|e| {
@@ -1593,6 +1949,7 @@ mod tests {
                 name TEXT NOT NULL,
                 service TEXT NOT NULL,
                 is_contact INTEGER NOT NULL DEFAULT 0,
+                contact_id INTEGER,
                 phones TEXT,
                 emails TEXT,
                 company TEXT,
@@ -1602,6 +1959,7 @@ mod tests {
             );
             CREATE INDEX IF NOT EXISTS idx_people_identifier ON people(identifier);
             CREATE INDEX IF NOT EXISTS idx_people_name ON people(name);
+            CREATE INDEX IF NOT EXISTS idx_people_contact_id ON people(contact_id);
 
             CREATE TABLE IF NOT EXISTS chats (
                 id INTEGER PRIMARY KEY,
@@ -1751,7 +2109,7 @@ mod tests {
         // Query people ordered by name
         let mut stmt = db
             .conn
-            .prepare("SELECT id, identifier, name, service, is_contact, phones, emails, company, notes FROM people ORDER BY name")
+            .prepare("SELECT id, identifier, name, service, is_contact, contact_id, phones, emails, company, notes FROM people ORDER BY name")
             .unwrap();
         let people: Vec<Person> = stmt
             .query_map([], |row| {
@@ -1761,10 +2119,11 @@ mod tests {
                     name: row.get(2)?,
                     service: row.get(3)?,
                     is_contact: row.get::<_, i32>(4)? != 0,
-                    phones: row.get(5)?,
-                    emails: row.get(6)?,
-                    company: row.get(7)?,
-                    notes: row.get(8)?,
+                    contact_id: row.get(5)?,
+                    phones: row.get(6)?,
+                    emails: row.get(7)?,
+                    company: row.get(8)?,
+                    notes: row.get(9)?,
                 })
             })
             .unwrap()

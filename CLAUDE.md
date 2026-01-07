@@ -56,8 +56,9 @@ Note: Initial sync runs automatically on first launch (syncs chat.db → prm.db)
 | Search (FTS5 + Semantic) | `backend/routers/search.py`                                                        |
 | EOD Contacts             | `backend/routers/eod.py`                                                           |
 | Embedding Worker         | `backend/embedding_worker.py`                                                      |
-|                          | LLM Client                                                                         | `backend/services/llm_client.py` |
-|                          | LLM CLI (Swift)                                                                    | `llm/Sources/prm-llm/`           |
+| Contacts Sync            | `backend/contact_sync.py`, `core/src/contacts.rs`                                  |
+| LLM Client               | `backend/services/llm_client.py`                                                   |
+| LLM CLI (Swift)          | `llm/Sources/prm-llm/`                                                             |
 
 ## Behaviors
 
@@ -117,6 +118,15 @@ Note: Initial sync runs automatically on first launch (syncs chat.db → prm.db)
 | GET    | `/eod/contacts`              | Get today's new contacts              |
 | POST   | `/eod/generate`              | Generate EOD actions for new contacts |
 | POST   | `/eod/contacts/{id}/context` | Add context/notes to a person         |
+
+### Contacts Sync
+
+| Method | Path               | Description                                             |
+| ------ | ------------------ | ------------------------------------------------------- |
+| GET    | `/contacts/status` | Get contacts sync status (counts, last sync timestamp)  |
+| POST   | `/contacts/sync`   | Trigger incremental contacts sync (or full if no data)  |
+| POST   | `/contacts/sync/full` | Force full contacts sync from Apple Contacts         |
+| GET    | `/contacts/stats`  | Get contact counts (active, deleted, total)             |
 
 ## Keyboard Shortcuts
 

@@ -21,6 +21,8 @@ pub struct Person {
     #[pyo3(get)]
     pub is_contact: bool, // has Apple Contacts entry
     #[pyo3(get)]
+    pub contact_id: Option<i64>, // FK to contacts.id (None if not a saved contact)
+    #[pyo3(get)]
     pub phones: Option<String>, // JSON array of all phones
     #[pyo3(get)]
     pub emails: Option<String>, // JSON array of all emails
@@ -308,6 +310,43 @@ impl FetchedContact {
             "FetchedContact(name='{}', emails={}, phones={})",
             self.name,
             self.emails.len(),
+            self.phones.len()
+        )
+    }
+}
+
+/// Contact synced from Apple Contacts with tracking metadata.
+/// Used for incremental sync based on modification dates.
+#[pyclass]
+#[derive(Debug, Clone)]
+pub struct SyncedContact {
+    #[pyo3(get)]
+    pub id: i64, // Database ID (contacts.id in prm.db)
+    #[pyo3(get)]
+    pub apple_id: String, // Apple Contacts stable ID (e.g., "ABC123-DEF456-...")
+    #[pyo3(get)]
+    pub name: String,
+    #[pyo3(get)]
+    pub emails: Vec<String>,
+    #[pyo3(get)]
+    pub phones: Vec<String>,
+    #[pyo3(get)]
+    pub company: Option<String>,
+    #[pyo3(get)]
+    pub notes: Option<String>,
+    #[pyo3(get)]
+    pub apple_created_at: i64, // Unix timestamp from Apple Contacts creation_date
+    #[pyo3(get)]
+    pub apple_modified_at: i64, // Unix timestamp from Apple Contacts modification_date
+}
+
+#[pymethods]
+impl SyncedContact {
+    fn __repr__(&self) -> String {
+        format!(
+            "SyncedContact(apple_id='{}', name='{}', phones={})",
+            self.apple_id,
+            self.name,
             self.phones.len()
         )
     }

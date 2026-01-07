@@ -10,7 +10,7 @@ from apscheduler.schedulers.background import BackgroundScheduler
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from routers import actions, chats, eod, search
+from routers import actions, chats, contacts, eod, search
 from sync_db import APP_DB_PATH, CHAT_DB_PATH, sync_all
 
 logger = logging.getLogger(__name__)
@@ -653,6 +653,7 @@ app.include_router(chats.router, prefix="/chats")
 app.include_router(actions.router, prefix="/actions")
 app.include_router(search.router, prefix="/search")
 app.include_router(eod.router, prefix="/eod")
+app.include_router(contacts.router, prefix="/contacts")
 
 
 if __name__ == "__main__":

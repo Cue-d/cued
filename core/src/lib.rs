@@ -14,6 +14,7 @@ fn core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     // Legacy data classes (for backward compatibility during migration)
     m.add_class::<models::Message>()?;
     m.add_class::<models::FetchedContact>()?;
+    m.add_class::<models::SyncedContact>()?;
     m.add_class::<models::Chat>()?;
     m.add_class::<models::Handle>()?;
 
@@ -50,6 +51,9 @@ fn core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     // macOS integrations (contacts and messaging)
     m.add_function(wrap_pyfunction!(macos::fetch_all_contact_names, m)?)?;
     m.add_function(wrap_pyfunction!(macos::fetch_contacts_by_names, m)?)?;
+    m.add_function(wrap_pyfunction!(macos::fetch_all_contacts_for_sync, m)?)?;
+    m.add_function(wrap_pyfunction!(macos::fetch_contacts_modified_since, m)?)?;
+    m.add_function(wrap_pyfunction!(macos::fetch_all_contact_ids, m)?)?;
     m.add_class::<macos::SendResult>()?;
     m.add_function(wrap_pyfunction!(macos::send_message, m)?)?;
     m.add_function(wrap_pyfunction!(macos::send_to_group, m)?)?;

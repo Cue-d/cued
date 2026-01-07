@@ -7,14 +7,23 @@ sync time by merging with Apple Contacts data.
 
 Architecture:
     chat.db (read-only) -> sync_db.py -> prm.db (source of truth)
+
+    For contacts:
+    Apple Contacts -> contact_sync.py -> contacts table
+                                      -> people table (via SyncedContactLookup)
 """
 
 import json
+import logging
 import os
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import core
+
+from contact_sync import SyncedContactLookup, sync_contacts
+
+logger = logging.getLogger(__name__)
 
 # Config
 CHAT_DB_PATH = os.path.expanduser("~/Library/Messages/chat.db")
@@ -160,21 +169,36 @@ class ContactLookup:
 
         return None
 
+    def get_contact_id(self, identifier: str) -> None:
+        """Legacy lookup doesn't track contact IDs - always returns None."""
+        return None
+
+
+PEOPLE_BATCH_SIZE = 100  # Number of people to upsert in a single transaction
+
 
 def sync_people(
     app_db: core.AppDb,
     chat_reader: core.ChatReader,
-    contact_lookup: ContactLookup,
+    contact_lookup: "ContactLookup | SyncedContactLookup",
     verbose: bool = False,
 ) -> int:
     """
     Sync handles from chat.db as people in prm.db, resolving names from contacts.
+
+    Uses batch upserts for better performance (wraps multiple inserts in a single
+    transaction instead of one transaction per insert).
 
     Returns the number of people synced.
     """
     handles = chat_reader.get_all_handles_for_sync()
     total = len(handles)
     synced = 0
+    matched = 0
+    unmatched_samples = []
+
+    # Collect people data for batch upsert
+    batch = []
 
     for handle in handles:
         contact = contact_lookup.get_contact(handle.identifier)
@@ -183,35 +207,63 @@ def sync_people(
             # Found matching contact - use contact name
             name = contact.name
             is_contact = True
+            contact_id = contact_lookup.get_contact_id(handle.identifier)
             phones = json.dumps(contact.phones) if contact.phones else None
             emails = json.dumps(contact.emails) if contact.emails else None
             company = contact.company
             notes = contact.notes
+            matched += 1
         else:
             # No contact - use fallback name
             name = fallback_name(handle.identifier)
             is_contact = False
+            contact_id = None
             phones = None
             emails = None
             company = None
             notes = None
+            # Collect sample of unmatched handles for debugging
+            if len(unmatched_samples) < 10:
+                normalized = core.normalize_phone(handle.identifier)
+                unmatched_samples.append(f"{handle.identifier} -> {normalized}")
 
-        app_db.upsert_person(
-            id=handle.id,
-            identifier=handle.identifier,
-            name=name,
-            service=handle.service,
-            is_contact=is_contact,
-            phones=phones,
-            emails=emails,
-            company=company,
-            notes=notes,
+        # Add to batch as tuple:
+        # (id, identifier, name, service, is_contact, contact_id, phones, emails, company, notes)
+        batch.append(
+            (
+                handle.id,
+                handle.identifier,
+                name,
+                handle.service,
+                is_contact,
+                contact_id,
+                phones,
+                emails,
+                company,
+                notes,
+            )
         )
-        synced += 1
 
-        # Progress output every 100 people
-        if verbose and synced % 100 == 0:
-            print(f"    Progress: {synced}/{total} people synced...")
+        # Flush batch when it reaches the batch size
+        if len(batch) >= PEOPLE_BATCH_SIZE:
+            app_db.upsert_people_batch(batch)
+            synced += len(batch)
+            batch = []
+
+            # Progress output every batch
+            if verbose:
+                print(f"    Progress: {synced}/{total} people synced...")
+
+    # Flush remaining batch
+    if batch:
+        app_db.upsert_people_batch(batch)
+        synced += len(batch)
+
+    # Debug logging for contact matching
+    if verbose:
+        print(f"    [DEBUG] Matched {matched}/{total} handles to contacts")
+        if unmatched_samples:
+            print(f"    [DEBUG] Sample unmatched handles: {unmatched_samples[:5]}")
 
     return synced
 
@@ -219,7 +271,7 @@ def sync_people(
 def sync_chats(
     app_db: core.AppDb,
     chat_reader: core.ChatReader,
-    contact_lookup: ContactLookup,
+    contact_lookup: "ContactLookup | SyncedContactLookup",
     verbose: bool = False,
 ) -> int:
     """
@@ -227,6 +279,10 @@ def sync_chats(
 
     Returns the number of chats synced.
     """
+    # TODO: Pre-compute a handle_id -> resolved_name map before iterating chats.
+    # Currently, for each chat we look up participant names via contact_lookup.get_name(),
+    # which repeats normalization work. Building a dict[handle_id, str] upfront would
+    # eliminate redundant lookups and speed up group chat name computation.
     chats = chat_reader.get_all_chats_for_sync()
     participants = chat_reader.get_chat_participants_for_sync()
     total = len(chats)
@@ -374,16 +430,22 @@ def sync_attachments(
     return total_synced
 
 
-def sync_all(verbose: bool = True):
+def sync_all(verbose: bool = True, use_new_contacts_sync: bool = True):
     """
     Full sync from chat.db to prm.db.
 
     This syncs:
-    1. People (handles merged with contacts)
-    2. Chats (with pre-computed display names)
-    3. Chat participants
-    4. Messages (incremental)
-    5. Attachments (incremental)
+    1. Contacts (Apple Contacts -> contacts table, incremental)
+    2. People (handles merged with contacts)
+    3. Chats (with pre-computed display names)
+    4. Chat participants
+    5. Messages (incremental)
+    6. Attachments (incremental)
+
+    Args:
+        verbose: If True, print progress information
+        use_new_contacts_sync: If True, use the new incremental contacts sync engine.
+                               If False, use the legacy caching approach.
     """
     start_total = time.time()
 
@@ -410,91 +472,150 @@ def sync_all(verbose: bool = True):
     if verbose:
         print("  Databases opened successfully")
 
-    # Fetch contacts for name resolution (with caching)
-    if verbose:
-        print("\n[1/5] Fetching contacts for name resolution...")
-    start = time.time()
-    contacts = []
-
-    # Try cache first
-    cached_contacts = load_contacts_cache(verbose)
-    if cached_contacts is not None:
-        contacts = [CachedContact(c) for c in cached_contacts]
-    else:
-        # Fetch from Apple Contacts
+    # Sync contacts using the new incremental sync engine
+    if use_new_contacts_sync:
+        if verbose:
+            print("\n[1/6] Syncing contacts (Apple Contacts -> contacts table)...")
+        start = time.time()
         try:
-            names = core.fetch_all_contact_names()
-            total_names = len(names)
+            result = sync_contacts(app_db, verbose=verbose)
+            logger.info(
+                f"Contacts sync completed: {result.synced} contacts "
+                f"({result.created} created, {result.updated} updated, {result.deleted} deleted)"
+            )
             if verbose:
-                print(f"    Found {total_names} contact names, fetching details...")
-
-            # Fetch contacts in parallel batches (10 batches of 10 at a time)
-            batch_size = 10
-            parallel_batches = 10
-            batches = [names[i : i + batch_size] for i in range(0, total_names, batch_size)]
-            total_batches = len(batches)
-            completed = 0
-
-            def fetch_batch(batch_names):
-                return core.fetch_contacts_by_names(batch_names)
-
-            if verbose:
-                print(f"    Processing {total_batches} batches ({parallel_batches} parallel)...")
-
-            # Process batches in parallel chunks
-            for chunk_start in range(0, total_batches, parallel_batches):
-                chunk = batches[chunk_start : chunk_start + parallel_batches]
-                with ThreadPoolExecutor(max_workers=parallel_batches) as executor:
-                    futures = {executor.submit(fetch_batch, batch): batch for batch in chunk}
-                    for future in as_completed(futures):
-                        try:
-                            batch_contacts = future.result()
-                            contacts.extend(batch_contacts)
-                            completed += 1
-                            if verbose:
-                                print(f"    Progress: {completed}/{total_batches} batches...")
-                        except Exception as e:
-                            if verbose:
-                                print(f"    Batch error: {e}", flush=True)
-
-            # Cache the results
-            save_contacts_cache(contacts, verbose)
+                sync_type = "full" if result.is_full_sync else "incremental"
+                print(f"    Completed {sync_type} sync: {result.synced} contacts")
+                print(
+                    f"    Created: {result.created}, Updated: {result.updated}, "
+                    f"Deleted: {result.deleted}"
+                )
+                print(f"    Duration: {time.time() - start:.1f}s")
         except Exception as e:
+            logger.warning(f"Contacts sync failed: {e}, falling back to legacy")
             if verbose:
-                print(f"    WARNING: Could not fetch contacts: {e}")
-            contacts = []
+                print(f"    WARNING: Contacts sync failed: {e}")
+                print("    Falling back to legacy contact loading...")
+            use_new_contacts_sync = False
 
-    contact_lookup = ContactLookup(contacts)
-    if verbose:
-        print(f"    Loaded {len(contacts)} contacts in {time.time() - start:.1f}s")
+    # Build contact lookup for name resolution
+    if use_new_contacts_sync:
+        if verbose:
+            print("\n[2/6] Building contact lookup from synced contacts...")
+        start = time.time()
+        try:
+            contact_lookup = SyncedContactLookup(app_db)
+            logger.info(f"Contact lookup built with {contact_lookup.contact_count} contacts")
+            if verbose:
+                count = contact_lookup.contact_count
+                print(f"    Loaded {count} contacts in {time.time() - start:.1f}s")
+        except Exception as e:
+            logger.warning(f"Failed to build contact lookup: {e}, falling back to legacy")
+            if verbose:
+                print(f"    WARNING: Failed to build lookup: {e}")
+                print("    Falling back to legacy contact loading...")
+            use_new_contacts_sync = False
+
+    # Legacy contact loading (fallback)
+    if not use_new_contacts_sync:
+        if verbose:
+            print("\n[1/5] Fetching contacts for name resolution (legacy)...")
+        start = time.time()
+        contacts = []
+
+        # Try cache first
+        cached_contacts = load_contacts_cache(verbose)
+        if cached_contacts is not None:
+            contacts = [CachedContact(c) for c in cached_contacts]
+        else:
+            # Fetch from Apple Contacts
+            try:
+                names = core.fetch_all_contact_names()
+                total_names = len(names)
+                if verbose:
+                    print(f"    Found {total_names} contact names, fetching details...")
+
+                # Fetch contacts in parallel batches (10 batches of 10 at a time)
+                batch_size = 10
+                parallel_batches = 10
+                batches = [names[i : i + batch_size] for i in range(0, total_names, batch_size)]
+                total_batches = len(batches)
+                completed = 0
+
+                def fetch_batch(batch_names):
+                    return core.fetch_contacts_by_names(batch_names)
+
+                if verbose:
+                    print(
+                        f"    Processing {total_batches} batches ({parallel_batches} parallel)..."
+                    )
+
+                # Process batches in parallel chunks
+                for chunk_start in range(0, total_batches, parallel_batches):
+                    chunk = batches[chunk_start : chunk_start + parallel_batches]
+                    with ThreadPoolExecutor(max_workers=parallel_batches) as executor:
+                        futures = {executor.submit(fetch_batch, batch): batch for batch in chunk}
+                        for future in as_completed(futures):
+                            try:
+                                batch_contacts = future.result()
+                                contacts.extend(batch_contacts)
+                                completed += 1
+                                if verbose:
+                                    print(f"    Progress: {completed}/{total_batches} batches...")
+                            except Exception as e:
+                                if verbose:
+                                    print(f"    Batch error: {e}", flush=True)
+
+                # Cache the results
+                save_contacts_cache(contacts, verbose)
+            except Exception as e:
+                if verbose:
+                    print(f"    WARNING: Could not fetch contacts: {e}")
+                contacts = []
+
+        contact_lookup = ContactLookup(contacts)
+        if verbose:
+            print(f"    Loaded {len(contacts)} contacts in {time.time() - start:.1f}s")
 
     # Sync people (handles + contacts)
+    step = 3 if use_new_contacts_sync else 2
+    total_steps = 6 if use_new_contacts_sync else 5
     if verbose:
-        print("\n[2/5] Syncing people (handles + contacts)...")
+        print(f"\n[{step}/{total_steps}] Syncing people (handles + contacts)...")
     start = time.time()
     people_synced = sync_people(app_db, chat_reader, contact_lookup, verbose)
+    logger.info(f"People sync completed: {people_synced} people")
     if verbose:
         print(f"    Completed: {people_synced} people in {time.time() - start:.1f}s")
 
     # Sync chats
+    step += 1
     if verbose:
-        print("\n[3/5] Syncing chats...")
+        print(f"\n[{step}/{total_steps}] Syncing chats...")
     start = time.time()
     chats_synced = sync_chats(app_db, chat_reader, contact_lookup, verbose)
+    logger.info(f"Chats sync completed: {chats_synced} chats")
     if verbose:
         print(f"    Completed: {chats_synced} chats in {time.time() - start:.1f}s")
 
     # Sync messages (incremental)
+    # TODO: Run message and attachment syncs in parallel using ThreadPoolExecutor.
+    # They are independent after the initial message sync completes - messages don't
+    # depend on attachments, and attachments only need message IDs to exist (which
+    # they will after the first message batch). Could use concurrent.futures to
+    # run both sync loops simultaneously, potentially halving this phase's time.
+    step += 1
     if verbose:
-        print("\n[4/5] Syncing messages (incremental)...")
+        print(f"\n[{step}/{total_steps}] Syncing messages (incremental)...")
     start = time.time()
     messages_synced = sync_messages(app_db, chat_reader, verbose)
     if verbose:
         print(f"    Completed: {messages_synced} new messages in {time.time() - start:.1f}s")
 
     # Sync attachments (incremental)
+    step += 1
     if verbose:
-        print("\n[5/5] Syncing attachments (incremental)...")
+        print(f"\n[{step}/{total_steps}] Syncing attachments (incremental)...")
     start = time.time()
     attachments_synced = sync_attachments(app_db, chat_reader, verbose)
     if verbose:
@@ -507,6 +628,9 @@ def sync_all(verbose: bool = True):
         print(f"  Total People: {app_db.people_count()}")
         print(f"  Total Chats: {app_db.chat_count()}")
         print(f"  Total Messages: {app_db.message_count()}")
+        if use_new_contacts_sync:
+            active, deleted = app_db.get_contact_stats()
+            print(f"  Total Contacts: {active} (active), {deleted} (deleted)")
 
 
 if __name__ == "__main__":
