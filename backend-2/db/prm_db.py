@@ -4,7 +4,7 @@ from contextlib import contextmanager
 
 from sqlmodel import Session, SQLModel, create_engine, text
 
-from .models import Attachment, ChatWithLastMessage, Handle, MessageWithSender
+from .models import Attachment, Chat, ChatWithLastMessage, Handle, MessageWithSender
 
 
 class AppDb:
@@ -32,6 +32,27 @@ class AppDb:
     def session(self):
         with Session(self.engine) as session:
             yield session
+
+    def get_chat(self, chat_id: int) -> Chat | None:
+        """Get a single chat by ID."""
+        with self.session() as session:
+            result = session.exec(
+                text("""
+                    SELECT id, identifier, name, is_group, synced_at
+                    FROM chats
+                    WHERE id = :chat_id
+                """).bindparams(chat_id=chat_id)
+            )
+            row = result.fetchone()
+            if row:
+                return Chat(
+                    id=row[0],
+                    identifier=row[1],
+                    name=row[2],
+                    is_group=bool(row[3]),
+                    synced_at=row[4],
+                )
+            return None
 
     def get_all_chats(self) -> list[ChatWithLastMessage]:
         """Get all chats with last message preview."""

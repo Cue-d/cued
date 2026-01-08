@@ -1,8 +1,34 @@
+import os
 from datetime import datetime
 
 from fastapi import APIRouter
+from pydantic import BaseModel
+
+from db import AppDb
+from services.macos import send_message, send_to_group
 
 router = APIRouter()
+
+PRM_DB_PATH = os.path.expanduser("~/.prm/prm.db")
+
+_app_db: AppDb | None = None
+
+
+def get_app_db() -> AppDb:
+    """Get the app database (lazy-loaded singleton)."""
+    global _app_db
+    if _app_db is None:
+        _app_db = AppDb(PRM_DB_PATH)
+    return _app_db
+
+
+class SendMessageRequest(BaseModel):
+    text: str
+
+
+class SendMessageResponse(BaseModel):
+    success: bool
+    error: str | None = None
 
 
 @router.get("/")
@@ -45,12 +71,24 @@ def get_messages(chat_id: int, limit: int = 100):
     ]
 
 
-@router.post("/{chat_id}/messages")
-def send_message(chat_id: int, payload: dict):
-    """Send a message - dummy implementation"""
-    return {
-        "success": True,
-        "message_id": 99999,
-        "text": payload.get("text", ""),
-        "chat_id": chat_id,
-    }
+@router.post("/{chat_id}/messages", response_model=SendMessageResponse)
+def send_message_endpoint(chat_id: int, request: SendMessageRequest):
+    """Send a message to a chat."""
+    db = get_app_db()
+
+    chat = db.get_chat(chat_id)
+    if not chat:
+        return SendMessageResponse(success=False, error="Chat not found")
+
+    participants = db.get_chat_participants(chat_id)
+    if not participants:
+        return SendMessageResponse(success=False, error="No recipient found")
+
+    if len(participants) == 1:
+        # 1:1 chat - send directly to the handle (phone/email)
+        result = send_message(participants[0].identifier, request.text)
+    else:
+        # Group chat - send using chat identifier (format: chat123456789)
+        result = send_to_group(chat.identifier, request.text)
+
+    return SendMessageResponse(success=result.success, error=result.error)
