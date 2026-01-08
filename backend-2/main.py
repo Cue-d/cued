@@ -13,6 +13,53 @@ from workers import start_scheduler, stop_scheduler
 
 logger = logging.getLogger(__name__)
 
+
+def configure_worker_logging() -> None:
+    """Configure logging for background workers based on environment variable.
+
+    Set PRM_DEBUG_WORKERS=1 to enable debug logging for background jobs.
+    """
+    debug_workers = os.environ.get("PRM_DEBUG_WORKERS", "").lower() in ("1", "true", "yes")
+
+    if debug_workers:
+        # Configure root logger to show debug output
+        logging.basicConfig(
+            level=logging.INFO,
+            format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+            datefmt="%H:%M:%S",
+        )
+
+        # Enable debug for worker-related modules
+        worker_loggers = [
+            "workers",
+            "workers.scheduler",
+            "workers.registry",
+            "workers.jobs.llm_processor",
+            "workers.jobs.unanswered_scan",
+            "workers.jobs.llm_cleanup",
+            "workers.jobs.embedding_batch",
+            "workers.jobs.message_sync",
+            "services.actions",
+            "services.actions.llm_client",
+            "services.actions.message_filter",
+            "services.actions.priority",
+        ]
+        for logger_name in worker_loggers:
+            logging.getLogger(logger_name).setLevel(logging.DEBUG)
+
+        logger.info("Worker debug logging ENABLED (PRM_DEBUG_WORKERS=1)")
+    else:
+        # Default: only show warnings and errors from workers
+        logging.basicConfig(
+            level=logging.INFO,
+            format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+            datefmt="%H:%M:%S",
+        )
+
+
+# Configure logging before anything else
+configure_worker_logging()
+
 # Database paths
 CHAT_DB_PATH = os.path.expanduser("~/Library/Messages/chat.db")
 PRM_DB_PATH = os.path.expanduser("~/.prm/prm.db")
