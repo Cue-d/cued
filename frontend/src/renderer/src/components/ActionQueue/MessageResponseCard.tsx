@@ -26,8 +26,8 @@ const ReactionBadges = ({ reactions, isSent }: { reactions: string[]; isSent: bo
   return (
     <div
       className={cn(
-        'absolute -top-2 flex gap-0.5 px-1.5 py-0.5 rounded-full bg-gray-100 dark:bg-gray-700 shadow-sm text-xs z-10',
-        isSent ? 'left-1' : 'right-1'
+        'absolute -top-3 flex gap-0.5 px-2 py-1 rounded-full bg-gray-100 dark:bg-gray-700 shadow-sm text-sm z-10 border border-gray-200 dark:border-gray-600',
+        isSent ? '-left-3' : '-right-3'
       )}
     >
       {displayReactions.map((emoji, idx) => (
@@ -181,30 +181,28 @@ export const MessageResponseCard = forwardRef<MessageResponseCardRef, MessageRes
                       key={msg.id}
                       className={cn(
                         'flex flex-col w-full',
-                        msg.isSent ? 'items-end' : 'items-start'
+                        msg.isSent ? 'items-end' : 'items-start',
+                        hasReactions && 'mb-2'
                       )}
                     >
                       {!msg.isSent && msg.senderName && (
                         <p className="text-xs font-medium opacity-70 mb-1 ml-1">{msg.senderName}</p>
                       )}
                       <div
-                        className={cn(
-                          'relative flex w-full',
-                          msg.isSent ? 'justify-end' : 'justify-start'
-                        )}
+                        className={cn('flex w-full', msg.isSent ? 'justify-end' : 'justify-start')}
                       >
-                        {hasReactions && (
-                          <ReactionBadges reactions={reactions} isSent={msg.isSent} />
-                        )}
                         <div
                           className={cn(
-                            'rounded-2xl px-4 py-2 text-sm break-words',
+                            'relative rounded-2xl px-4 py-2 text-sm break-words',
                             msg.isSent
                               ? 'bg-imessage-bubble-sent text-imessage-bubble-sent-foreground'
                               : 'bg-imessage-bubble-received text-imessage-bubble-received-foreground'
                           )}
                           style={{ maxWidth: '85%', width: 'fit-content' }}
                         >
+                          {hasReactions && (
+                            <ReactionBadges reactions={reactions} isSent={msg.isSent} />
+                          )}
                           {hasAttachments && (
                             <AttachmentDisplay
                               attachments={attachments}
