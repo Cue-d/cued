@@ -106,7 +106,8 @@ class AppDb:
                     queued_at INTEGER,
                     started_at INTEGER,
                     completed_at INTEGER,
-                    result TEXT
+                    result TEXT,
+                    latest_message_ts INTEGER
                 )
             """)
             )
@@ -150,6 +151,15 @@ class AppDb:
                     "ON contact_handles(contact_id)"
                 )
             )
+
+            # Migration: Add latest_message_ts column if table exists but column doesn't
+            # (for existing databases created before this column was added)
+            result = conn.execute(text("PRAGMA table_info(llm_analysis_queue)"))
+            columns = {row[1] for row in result}
+            if "latest_message_ts" not in columns:
+                conn.execute(
+                    text("ALTER TABLE llm_analysis_queue ADD COLUMN latest_message_ts INTEGER")
+                )
 
             conn.commit()
 
@@ -471,30 +481,49 @@ class AppDb:
     # LLM ANALYSIS QUEUE
     # =========================================================================
 
-    def queue_for_analysis(self, chat_id: int, priority: int = 50) -> None:
-        """Queue a chat for LLM analysis."""
+    def queue_for_analysis(
+        self, chat_id: int, priority: int = 50, latest_message_ts: int | None = None
+    ) -> None:
+        """Queue a chat for LLM analysis.
+
+        Args:
+            chat_id: The chat to queue
+            priority: Priority score (0-100, higher = more important)
+            latest_message_ts: Unix timestamp of the latest message (for ordering)
+        """
         now = self._now_timestamp()
         with self.session() as session:
             session.execute(
                 text("""
                     INSERT OR REPLACE INTO llm_analysis_queue
-                    (chat_id, status, priority, queued_at, started_at, completed_at, result)
-                    VALUES (:chat_id, 'pending', :priority, :now, NULL, NULL, NULL)
+                    (chat_id, status, priority, queued_at, started_at, completed_at, result,
+                     latest_message_ts)
+                    VALUES (:chat_id, 'pending', :priority, :now, NULL, NULL, NULL,
+                            :latest_message_ts)
                 """),
-                {"chat_id": chat_id, "priority": priority, "now": now},
+                {
+                    "chat_id": chat_id,
+                    "priority": priority,
+                    "now": now,
+                    "latest_message_ts": latest_message_ts,
+                },
             )
             session.commit()
 
     def get_next_pending_analysis(self) -> QueuedAnalysis | None:
-        """Get next pending analysis item."""
+        """Get next pending analysis item.
+
+        Orders by most recent message first (latest_message_ts DESC),
+        then by priority for messages from the same time period.
+        """
         with self.session() as session:
             result = session.execute(
                 text("""
                     SELECT chat_id, status, priority, queued_at,
-                           started_at, completed_at, result
+                           started_at, completed_at, result, latest_message_ts
                     FROM llm_analysis_queue
                     WHERE status = 'pending'
-                    ORDER BY priority DESC, queued_at ASC
+                    ORDER BY latest_message_ts DESC, priority DESC, queued_at ASC
                     LIMIT 1
                 """)
             )

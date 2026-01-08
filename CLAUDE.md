@@ -209,9 +209,19 @@ The backend runs APScheduler jobs automatically:
 - **EOD contacts**: Daily at 9 PM
 - **Embedding processing**: Every 5 minutes (100 messages per batch)
 
+### LLM Queue Processing Order
+
+The LLM analysis queue processes chats in **recent-first** order:
+
+1. **Primary**: `latest_message_ts DESC` (most recent messages first)
+2. **Secondary**: `priority DESC` (for messages from same time period)
+3. **Tertiary**: `queued_at ASC` (FIFO within same priority)
+
+This ensures recent conversations get analyzed first, while priority still determines order for messages received around the same time.
+
 ### Chat Priority Scoring
 
-When queuing chats for LLM analysis, priority is calculated using a composite score (0-100):
+Priority scores (0-100) are used as a secondary sort and for contact importance:
 
 **Time-Decay Curve** (base 20-80):
 | Hours Since | Priority | Rationale |

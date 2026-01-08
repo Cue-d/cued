@@ -157,10 +157,46 @@ class TestLlmAnalysisQueue:
         assert item.priority == 75
         assert item.status == "pending"
 
-    def test_get_next_pending_analysis_priority_order(self, test_db):
-        """Test that highest priority item is returned first."""
+    def test_get_next_pending_analysis_recent_first(self, test_db):
+        """Test that most recent message is returned first (recent-first ordering)."""
+        db = test_db
+        import time
+
+        now = int(time.time())
+        older_ts = now - 3600  # 1 hour ago
+        recent_ts = now - 600  # 10 minutes ago
+
+        # Queue older message with higher priority
+        db.queue_for_analysis(chat_id=1, priority=80, latest_message_ts=older_ts)
+        # Queue recent message with lower priority
+        db.queue_for_analysis(chat_id=2, priority=50, latest_message_ts=recent_ts)
+
+        # Recent message should come first despite lower priority
+        item = db.get_next_pending_analysis()
+        assert item.chat_id == 2
+        assert item.priority == 50
+
+    def test_get_next_pending_analysis_priority_fallback(self, test_db):
+        """Test that priority is used when timestamps are equal."""
+        db = test_db
+        import time
+
+        now = int(time.time())
+        same_ts = now - 1800  # Same timestamp
+
+        db.queue_for_analysis(chat_id=1, priority=50, latest_message_ts=same_ts)
+        db.queue_for_analysis(chat_id=2, priority=80, latest_message_ts=same_ts)
+
+        # Higher priority should win when timestamps are equal
+        item = db.get_next_pending_analysis()
+        assert item.chat_id == 2
+        assert item.priority == 80
+
+    def test_get_next_pending_analysis_null_timestamp_fallback(self, test_db):
+        """Test that priority is used when timestamps are NULL (legacy behavior)."""
         db = test_db
 
+        # No timestamps provided - should fall back to priority ordering
         db.queue_for_analysis(chat_id=1, priority=50)
         db.queue_for_analysis(chat_id=2, priority=80)
 

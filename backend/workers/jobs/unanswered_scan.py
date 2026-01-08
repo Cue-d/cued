@@ -73,8 +73,8 @@ def run_unanswered_scan(chat_db, app_db, threshold_hours: int = UNANSWERED_THRES
             is_group=is_group,
         )
 
-        # Queue for LLM analysis
-        app_db.queue_for_analysis(chat["chat_id"], priority)
+        # Queue for LLM analysis with message timestamp for recent-first ordering
+        app_db.queue_for_analysis(chat["chat_id"], priority, latest_message_ts=chat["timestamp"])
         queued_count += 1
         logger.debug(
             f"[unanswered_scan] Queued chat_id={chat['chat_id']} "
