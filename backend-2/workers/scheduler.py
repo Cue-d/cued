@@ -60,7 +60,7 @@ def start_scheduler(app_db, embedding_db=None) -> None:
     _scheduler.start()
     logger.info(
         "[STARTUP] Background scheduler started "
-        "(unanswered: 5min, LLM: 10s, cleanup: 1h, embed: 5min)"
+        "(prm_sync: 30s, unanswered: 5min, LLM: 10s, cleanup: 1h, embed: 5min)"
     )
 
 
