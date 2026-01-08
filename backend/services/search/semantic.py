@@ -1,14 +1,26 @@
-"""Semantic search with sentence-transformers embeddings."""
+"""Semantic search with sentence-transformers embeddings and sqlite-vec."""
 
 import logging
 import time
 from contextlib import contextmanager
 
 import numpy as np
+import sqlite_vec
+from sqlalchemy import event
 from sqlmodel import Session, create_engine, text
 
 logger = logging.getLogger(__name__)
 _model = None
+
+# Vector dimensions for all-MiniLM-L6-v2
+EMBEDDING_DIM = 384
+
+
+def _load_vec_extension(dbapi_conn, connection_record):
+    """Load sqlite-vec extension on each new SQLite connection."""
+    dbapi_conn.enable_load_extension(True)
+    sqlite_vec.load(dbapi_conn)
+    dbapi_conn.enable_load_extension(False)
 
 
 def get_model():
@@ -23,10 +35,12 @@ def get_model():
 
 
 class EmbeddingDb:
-    """Embedding database wrapper for embeddings.db."""
+    """Embedding database wrapper using sqlite-vec for vector search."""
 
     def __init__(self, path: str):
         self.engine = create_engine(f"sqlite:///{path}", connect_args={"check_same_thread": False})
+        # Load sqlite-vec extension on each connection
+        event.listen(self.engine, "connect", _load_vec_extension)
         with self.engine.connect() as conn:
             conn.execute(text("PRAGMA journal_mode = WAL"))
             conn.execute(text("PRAGMA busy_timeout = 30000"))
@@ -34,6 +48,7 @@ class EmbeddingDb:
 
     def init_schema(self) -> None:
         with self.engine.connect() as conn:
+            # Embedding queue (unchanged)
             conn.execute(
                 text("""
                 CREATE TABLE IF NOT EXISTS embedding_queue (
@@ -43,16 +58,33 @@ class EmbeddingDb:
             """)
             )
             conn.execute(
+                text("CREATE INDEX IF NOT EXISTS idx_queue_status ON embedding_queue(status)")
+            )
+            # Metadata table for embeddings
+            conn.execute(
                 text("""
-                CREATE TABLE IF NOT EXISTS message_embeddings (
-                    message_id INTEGER PRIMARY KEY, chat_id INTEGER NOT NULL,
-                    embedding BLOB NOT NULL, model_version TEXT DEFAULT 'all-MiniLM-L6-v2',
+                CREATE TABLE IF NOT EXISTS message_embeddings_meta (
+                    message_id INTEGER PRIMARY KEY,
+                    chat_id INTEGER NOT NULL,
+                    model_version TEXT DEFAULT 'all-MiniLM-L6-v2',
                     created_at INTEGER NOT NULL
                 )
             """)
             )
             conn.execute(
-                text("CREATE INDEX IF NOT EXISTS idx_queue_status ON embedding_queue(status)")
+                text(
+                    "CREATE INDEX IF NOT EXISTS idx_embeddings_chat "
+                    "ON message_embeddings_meta(chat_id)"
+                )
+            )
+            # vec0 virtual table for fast KNN search with cosine distance
+            conn.execute(
+                text(f"""
+                CREATE VIRTUAL TABLE IF NOT EXISTS message_embeddings_vec USING vec0(
+                    message_id INTEGER PRIMARY KEY,
+                    embedding float[{EMBEDDING_DIM}] distance_metric=cosine
+                )
+            """)
             )
             conn.commit()
 
@@ -90,14 +122,25 @@ class EmbeddingDb:
             return [(r[0], r[1]) for r in result]
 
     def insert_embedding(self, message_id: int, chat_id: int, embedding: bytes) -> None:
+        """Insert embedding into both metadata and vec0 tables."""
+        now = int(time.time())
         with self.session() as session:
+            # Insert metadata
             session.execute(
                 text(
-                    "INSERT OR REPLACE INTO message_embeddings "
-                    "(message_id, chat_id, embedding, created_at) "
-                    "VALUES (:m, :c, :e, :t)"
+                    "INSERT OR REPLACE INTO message_embeddings_meta "
+                    "(message_id, chat_id, model_version, created_at) "
+                    "VALUES (:m, :c, 'all-MiniLM-L6-v2', :t)"
                 ),
-                {"m": message_id, "c": chat_id, "e": embedding, "t": int(time.time())},
+                {"m": message_id, "c": chat_id, "t": now},
+            )
+            # Insert vector into vec0 (embedding is already float32 bytes)
+            session.execute(
+                text(
+                    "INSERT OR REPLACE INTO message_embeddings_vec "
+                    "(message_id, embedding) VALUES (:m, :e)"
+                ),
+                {"m": message_id, "e": embedding},
             )
             session.commit()
 
@@ -109,13 +152,34 @@ class EmbeddingDb:
             )
             session.commit()
 
-    def get_all_embeddings(self) -> list[tuple[int, int, bytes]]:
+    def knn_search(self, query_embedding: bytes, limit: int = 20) -> list[dict]:
+        """Perform KNN search using sqlite-vec vec0 table.
+
+        Args:
+            query_embedding: Query vector as float32 bytes (384 dimensions)
+            limit: Maximum number of results to return
+
+        Returns:
+            List of dicts with message_id, chat_id, and similarity (1 - cosine distance)
+        """
         with self.session() as session:
+            # sqlite-vec KNN query with cosine distance
+            result = session.execute(
+                text("""
+                SELECT v.message_id, m.chat_id, v.distance
+                FROM message_embeddings_vec v
+                JOIN message_embeddings_meta m ON m.message_id = v.message_id
+                WHERE v.embedding MATCH :query AND k = :k
+            """),
+                {"query": query_embedding, "k": limit},
+            )
             return [
-                (r[0], r[1], r[2])
-                for r in session.execute(
-                    text("SELECT message_id, chat_id, embedding FROM message_embeddings")
-                )
+                {
+                    "message_id": row[0],
+                    "chat_id": row[1],
+                    "similarity": 1.0 - row[2],  # Convert cosine distance to similarity
+                }
+                for row in result
             ]
 
     def get_stats(self) -> dict:
@@ -132,7 +196,9 @@ class EmbeddingDb:
                 ).scalar()
                 or 0
             )
-            total = session.execute(text("SELECT COUNT(*) FROM message_embeddings")).scalar() or 0
+            total = (
+                session.execute(text("SELECT COUNT(*) FROM message_embeddings_meta")).scalar() or 0
+            )
             return {"pending": pending, "completed": completed, "total_embeddings": total}
 
     def delete_embeddings(self, message_ids: list[int]) -> int:
@@ -146,12 +212,21 @@ class EmbeddingDb:
                 # Use parameterized queries to avoid SQL injection
                 placeholders = ",".join(":" + str(i) for i in range(len(batch)))
                 params = {str(i): mid for i, mid in enumerate(batch)}
-                # Delete from embeddings
+                # Delete from metadata table
                 result = session.execute(
-                    text(f"DELETE FROM message_embeddings WHERE message_id IN ({placeholders})"),
+                    text(
+                        f"DELETE FROM message_embeddings_meta WHERE message_id IN ({placeholders})"
+                    ),
                     params,
                 )
                 deleted += result.rowcount
+                # Delete from vec0 table
+                session.execute(
+                    text(
+                        f"DELETE FROM message_embeddings_vec WHERE message_id IN ({placeholders})"
+                    ),
+                    params,
+                )
                 # Also delete from queue
                 session.execute(
                     text(f"DELETE FROM embedding_queue WHERE message_id IN ({placeholders})"),
@@ -162,15 +237,16 @@ class EmbeddingDb:
 
 
 def semantic_search(embedding_db: EmbeddingDb, query: str, limit: int = 20) -> list[dict]:
-    """Search using cosine similarity."""
+    """Search using sqlite-vec KNN with cosine similarity.
+
+    Performance: O(log n) with vec0 index vs O(n) with previous BLOB scan.
+    """
+    # Encode query to embedding
     query_emb = get_model().encode(query, convert_to_numpy=True)
-    results = []
-    for msg_id, chat_id, blob in embedding_db.get_all_embeddings():
-        emb = np.frombuffer(blob, dtype=np.float32)
-        sim = float(np.dot(query_emb, emb) / (np.linalg.norm(query_emb) * np.linalg.norm(emb)))
-        results.append({"message_id": msg_id, "chat_id": chat_id, "similarity": sim})
-    results.sort(key=lambda x: x["similarity"], reverse=True)
-    return results[:limit]
+    query_bytes = query_emb.astype(np.float32).tobytes()
+
+    # Use vec0 KNN search
+    return embedding_db.knn_search(query_bytes, limit)
 
 
 def process_queue(app_db, embedding_db: EmbeddingDb, batch_size: int = 100) -> int:

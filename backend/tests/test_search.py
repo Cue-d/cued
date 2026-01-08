@@ -149,7 +149,7 @@ class TestEmbeddingDb:
     """Tests for EmbeddingDb class."""
 
     def test_init_schema_creates_tables(self, embedding_db: EmbeddingDb):
-        """init_schema() creates required tables."""
+        """init_schema() creates required tables including vec0 virtual table."""
         with embedding_db.session() as session:
             from sqlmodel import text
 
@@ -159,7 +159,8 @@ class TestEmbeddingDb:
             tables = [row[0] for row in result]
 
         assert "embedding_queue" in tables
-        assert "message_embeddings" in tables
+        assert "message_embeddings_meta" in tables
+        assert "message_embeddings_vec" in tables
 
     def test_queue_messages(self, embedding_db: EmbeddingDb):
         """queue_messages() adds messages to queue."""
@@ -202,19 +203,38 @@ class TestEmbeddingDb:
 
         assert len(pending) == 2
 
-    def test_insert_and_get_embedding(self, embedding_db: EmbeddingDb):
-        """insert_embedding() and get_all_embeddings() work together."""
-        # Create a fake embedding (384 dimensions for all-MiniLM-L6-v2)
-        fake_embedding = np.random.rand(384).astype(np.float32).tobytes()
+    def test_insert_embedding_and_knn_search(self, embedding_db: EmbeddingDb):
+        """insert_embedding() stores vectors searchable via knn_search()."""
+        # Create test embeddings (384 dimensions for all-MiniLM-L6-v2)
+        # Use one-hot style vectors for predictable similarity results
+        vec1 = np.zeros(384, dtype=np.float32)
+        vec1[0] = 1.0
+        vec2 = np.zeros(384, dtype=np.float32)
+        vec2[1] = 1.0
+        vec3 = np.zeros(384, dtype=np.float32)
+        vec3[0] = 0.707
+        vec3[1] = 0.707  # 45 degrees between vec1 and vec2
 
-        embedding_db.insert_embedding(1, 10, fake_embedding)
+        embedding_db.insert_embedding(1, 10, vec1.tobytes())
+        embedding_db.insert_embedding(2, 10, vec2.tobytes())
+        embedding_db.insert_embedding(3, 20, vec3.tobytes())
 
-        embeddings = embedding_db.get_all_embeddings()
-        assert len(embeddings) == 1
-        msg_id, chat_id, blob = embeddings[0]
-        assert msg_id == 1
-        assert chat_id == 10
-        assert blob == fake_embedding
+        # Query with vec1, should find msg 1 first (exact match)
+        results = embedding_db.knn_search(vec1.tobytes(), limit=3)
+        assert len(results) == 3
+        assert results[0]["message_id"] == 1
+        assert results[0]["similarity"] > 0.99  # Near-perfect match
+
+    def test_knn_search_respects_limit(self, embedding_db: EmbeddingDb):
+        """knn_search() respects the limit parameter."""
+        # Insert 5 random embeddings
+        for i in range(5):
+            vec = np.random.rand(384).astype(np.float32)
+            embedding_db.insert_embedding(i + 1, 10, vec.tobytes())
+
+        query = np.random.rand(384).astype(np.float32)
+        results = embedding_db.knn_search(query.tobytes(), limit=2)
+        assert len(results) == 2
 
     def test_mark_complete(self, embedding_db: EmbeddingDb):
         """mark_complete() updates status to completed."""
@@ -229,7 +249,9 @@ class TestEmbeddingDb:
         """get_stats() returns correct counts."""
         embedding_db.queue_messages([(1, 10), (2, 20)])
         embedding_db.mark_complete(1)
-        embedding_db.insert_embedding(1, 10, b"fake")
+        # Use proper 384-dim vector for sqlite-vec
+        fake_embedding = np.random.rand(384).astype(np.float32).tobytes()
+        embedding_db.insert_embedding(1, 10, fake_embedding)
 
         stats = embedding_db.get_stats()
 

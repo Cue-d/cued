@@ -13,6 +13,7 @@ dependencies = [
     "pillow-heif>=0.10.0",
     "pyinstaller>=6.17.0",
     "apscheduler>=3.10.4",
+    "sqlite-vec>=0.1.6",
 ]
 
 [dependency-groups]
