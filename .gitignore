@@ -44,23 +44,6 @@ venv.bak/
 *.log
 
 # ============================================================
-# Rust
-# ============================================================
-# Compiled files
-target/
-**/*.rs.bk
-*.pdb
-
-# Cargo lock (keep for applications, ignore for libraries - adjust as needed)
-# Cargo.lock
-
-# Maturin build artifacts
-prm-core/**/*.so
-prm-core/**/*.dylib
-prm-core/**/*.dll
-prm-core/**/*.pyd
-
-# ============================================================
 # Node.js / Electron
 # ============================================================
 node_modules/

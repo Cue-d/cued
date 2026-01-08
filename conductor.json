@@ -5,6 +5,7 @@
     "run:backend": "cd backend && uv run uvicorn main:app --reload",
     "run:frontend": "cd frontend && pnpm dev",
     "build:backend": "cd backend && uv sync",
+    "build:llm": "cd llm && swift build -c release",
     "build:frontend": "cd frontend && pnpm build:full"
   }
 }

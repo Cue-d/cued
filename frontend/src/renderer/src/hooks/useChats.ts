@@ -71,7 +71,7 @@ export function useChats(): UseChatsReturn {
     // Initial load
     loadChats(true)
 
-    // Poll for updates every 1 second (Rust watcher syncs messages every 500ms)
+    // Poll for updates every 1 second
     const interval = setInterval(() => loadChats(false), 1000)
     return () => clearInterval(interval)
   }, [])
