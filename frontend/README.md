@@ -14,7 +14,7 @@ An Electron application with React and TypeScript
 $ pnpm install
 ```
 
-### Development
+### Developmentm
 
 ```bash
 $ pnpm dev
