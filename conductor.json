@@ -1,11 +1,11 @@
 {
   "scripts": {
-    "setup": "cd backend && uv sync && cd frontend && pnpm install",
+    "setup": "cd backend && uv sync && cd ../frontend && pnpm install && cd ../llm && swift build -c release",
     "run": "(cd backend && PRM_DEBUG_WORKERS=1 && PRM_DEBUG_API=1 uv run uvicorn main:app --reload) & (cd frontend && pnpm dev)",
     "run:backend": "cd backend && uv run uvicorn main:app --reload",
     "run:frontend": "cd frontend && pnpm dev",
     "build:backend": "cd backend && uv sync",
-    "build:llm": "cd llm && swift build -c release",
-    "build:frontend": "cd frontend && pnpm build:full"
+    "build:frontend": "cd frontend && pnpm build:full",
+    "build:llm": "cd llm && swift build -c release"
   }
 }
