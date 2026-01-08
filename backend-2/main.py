@@ -1,7 +1,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from routers import actions, chats, eod, search, sync
+from routers import actions, attachments, chats, eod, search, sync
 
 app = FastAPI(title="PRM Backend 2 (Minimal)")
 
@@ -17,6 +17,7 @@ app.add_middleware(
 # Include routers
 app.include_router(chats.router, prefix="/chats", tags=["chats"])
 app.include_router(actions.router, prefix="/actions", tags=["actions"])
+app.include_router(attachments.router, prefix="/attachments", tags=["attachments"])
 app.include_router(search.router, prefix="/search", tags=["search"])
 app.include_router(eod.router, prefix="/eod", tags=["eod"])
 app.include_router(sync.router, prefix="/sync", tags=["sync"])

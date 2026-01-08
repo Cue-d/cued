@@ -162,6 +162,33 @@ class AppDb:
                 for row in result
             ]
 
+    def get_attachment(self, attachment_id: int) -> Attachment | None:
+        """Get a single attachment by ID."""
+        with self.session() as session:
+            result = session.exec(
+                text("""
+                    SELECT id, message_id, filename, path, mime_type,
+                           uti, size, is_outgoing, created_at, synced_at
+                    FROM attachments
+                    WHERE id = :attachment_id
+                """).bindparams(attachment_id=attachment_id)
+            )
+            row = result.fetchone()
+            if not row:
+                return None
+            return Attachment(
+                id=row[0],
+                message_id=row[1],
+                filename=row[2],
+                path=row[3],
+                mime_type=row[4],
+                uti=row[5],
+                size=row[6],
+                is_outgoing=bool(row[7]),
+                created_at=row[8],
+                synced_at=row[9],
+            )
+
     def close(self) -> None:
         self.engine.dispose()
 

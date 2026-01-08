@@ -9,6 +9,8 @@ dependencies = [
     "uvicorn>=0.40.0",
     "sentence-transformers>=3.0.0",
     "numpy>=2.0.0",
+    "Pillow>=10.0.0",
+    "pillow-heif>=0.10.0",
 ]
 
 [dependency-groups]
