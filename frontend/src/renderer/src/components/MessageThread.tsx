@@ -97,7 +97,7 @@ const MessageBubble = ({
   }
 
   return (
-    <div className={cn('flex flex-col', message.isSent ? 'items-end' : 'items-start')}>
+    <div className={cn('flex flex-col mb-1', message.isSent ? 'items-end' : 'items-start')}>
       {/* Sender name for group chats */}
       {showSenderInfo && !message.isSent && message.senderName && (
         <span className="text-xs text-muted-foreground mb-1 ml-10">{message.senderName}</span>
@@ -109,7 +109,7 @@ const MessageBubble = ({
           {/* Message bubble */}
           <div
             className={cn(
-              'max-w-[85%] px-3 py-2 rounded-2xl wrap-break-word',
+              'max-w-[85%] px-3 py-2.5 rounded-2xl wrap-break-word break-words',
               message.isSent
                 ? 'bg-imessage-bubble-sent text-imessage-bubble-sent-foreground rounded-br-md'
                 : 'bg-imessage-bubble-received text-imessage-bubble-received-foreground rounded-bl-md'
@@ -250,11 +250,11 @@ const MessageThread = ({ chat, onSendMessage }: MessageThreadProps) => {
           {Object.entries(messagesByDate).map(([dateKey, messages]) => (
             <div key={dateKey}>
               <div className="flex items-center justify-center my-4">
-                <span className="text-xs text-imessage-timestamp px-3 py-1">
+                <span className="text-xs text-imessage-timestamp px-3 py-1 bg-imessage-header-bg rounded-full">
                   {formatDateDivider(new Date(dateKey))}
                 </span>
               </div>
-              <div className="space-y-1">
+              <div className="space-y-2">
                 {messages.map((message, idx) => {
                   // Show sender info when sender changes in group chat
                   const prevMsg = idx > 0 ? messages[idx - 1] : null
@@ -262,11 +262,23 @@ const MessageThread = ({ chat, onSendMessage }: MessageThreadProps) => {
                     !message.isSent &&
                     (!prevMsg || prevMsg.isSent || prevMsg.senderName !== message.senderName)
 
+                  // Show timestamp if:
+                  // - Last message in the group
+                  // - More than 5 minutes since previous message
+                  // - Sender changed (for group chats)
+                  const timeSincePrev = prevMsg
+                    ? Math.abs(message.timestamp.getTime() - prevMsg.timestamp.getTime()) /
+                      1000 /
+                      60
+                    : Infinity
+                  const showTimestamp =
+                    idx === messages.length - 1 || timeSincePrev > 5 || senderChanged
+
                   return (
                     <MessageBubble
                       key={message.id}
                       message={message}
-                      showTimestamp={idx === messages.length - 1}
+                      showTimestamp={showTimestamp}
                       isGroupChat={chat.isGroup}
                       showSenderInfo={senderChanged}
                     />

@@ -295,12 +295,26 @@ def sync_contacts(
         ContactSyncResult with sync statistics
     """
     # Check if we have any contacts - if not, do a full sync
-    active, _ = app_db.get_contact_stats()
+    active, deleted = app_db.get_contact_stats()
+    logger.debug(f"Contact stats: {active} active, {deleted} deleted")
 
-    if force_full or active == 0:
+    if force_full:
+        logger.info("Force full sync requested")
         return sync_contacts_full(app_db, verbose)
-    else:
-        return sync_contacts_incremental(app_db, verbose)
+
+    if active == 0:
+        logger.info("No active contacts found, performing full sync")
+        return sync_contacts_full(app_db, verbose)
+
+    # Check if we have a last modification timestamp - if not, do a full sync
+    last_modification = app_db.get_latest_contact_modification()
+    if last_modification == 0:
+        logger.info("No last modification timestamp found, performing full sync")
+        return sync_contacts_full(app_db, verbose)
+
+    # We have contacts and a timestamp, do incremental sync
+    logger.info(f"Performing incremental sync (last modification: {last_modification})")
+    return sync_contacts_incremental(app_db, verbose)
 
 
 class SyncedContactLookup:

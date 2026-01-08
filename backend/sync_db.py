@@ -430,12 +430,12 @@ def sync_attachments(
     return total_synced
 
 
-def sync_all(verbose: bool = True, use_new_contacts_sync: bool = True):
+def sync_all(verbose: bool = True, use_new_contacts_sync: bool = True, skip_contacts: bool = False):
     """
     Full sync from chat.db to prm.db.
 
     This syncs:
-    1. Contacts (Apple Contacts -> contacts table, incremental)
+    1. Contacts (Apple Contacts -> contacts table, incremental) - can be skipped
     2. People (handles merged with contacts)
     3. Chats (with pre-computed display names)
     4. Chat participants
@@ -446,6 +446,7 @@ def sync_all(verbose: bool = True, use_new_contacts_sync: bool = True):
         verbose: If True, print progress information
         use_new_contacts_sync: If True, use the new incremental contacts sync engine.
                                If False, use the legacy caching approach.
+        skip_contacts: If True, skip contacts sync entirely (for background syncs)
     """
     start_total = time.time()
 
@@ -472,8 +473,23 @@ def sync_all(verbose: bool = True, use_new_contacts_sync: bool = True):
     if verbose:
         print("  Databases opened successfully")
 
-    # Sync contacts using the new incremental sync engine
-    if use_new_contacts_sync:
+    # Sync contacts using the new incremental sync engine (unless skipped)
+    if skip_contacts:
+        if verbose:
+            print("\n[SKIP] Skipping contacts sync (requested)")
+        # Still try to use synced contacts lookup if contacts exist in DB
+        # This allows name resolution without re-syncing contacts
+        try:
+            active, _ = app_db.get_contact_stats()
+            if active > 0:
+                use_new_contacts_sync = True  # Use existing synced contacts
+                if verbose:
+                    print(f"    Using existing {active} synced contacts for name resolution")
+            else:
+                use_new_contacts_sync = False  # No contacts, fall back to legacy
+        except Exception:
+            use_new_contacts_sync = False  # Error checking, fall back to legacy
+    elif use_new_contacts_sync:
         if verbose:
             print("\n[1/6] Syncing contacts (Apple Contacts -> contacts table)...")
         start = time.time()
@@ -634,4 +650,6 @@ def sync_all(verbose: bool = True, use_new_contacts_sync: bool = True):
 
 
 if __name__ == "__main__":
-    sync_all()
+    # When run directly, skip contacts sync - contacts should be synced separately
+    # via the /contacts/sync endpoint or contact_sync.py
+    sync_all(skip_contacts=True)

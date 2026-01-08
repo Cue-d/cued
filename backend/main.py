@@ -5,15 +5,47 @@ from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from threading import Lock, Thread
 
-import core
-from apscheduler.schedulers.background import BackgroundScheduler
-from fastapi import FastAPI
-from fastapi.middleware.cors import CORSMiddleware
-
-from routers import actions, attachments, chats, contacts, eod, search
-from sync_db import APP_DB_PATH, CHAT_DB_PATH, sync_all
-
+# Configure logging early
+logging.basicConfig(
+    level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+)
 logger = logging.getLogger(__name__)
+
+# Use print as fallback to ensure we see output even if logging is suppressed
+print("[MODULE] Starting module imports...", flush=True)
+logger.info("[MODULE] Starting module imports...")
+import_start = time.time()
+
+print("[MODULE] Importing core module...", flush=True)
+logger.info("[MODULE] Importing core module...")
+core_import_start = time.time()
+import core  # noqa: E402
+
+core_import_elapsed = time.time() - core_import_start
+print(f"[MODULE] Core module imported ({core_import_elapsed:.3f}s)", flush=True)
+logger.info(f"[MODULE] Core module imported ({core_import_elapsed:.3f}s)")
+
+logger.info("[MODULE] Importing FastAPI and dependencies...")
+from apscheduler.schedulers.background import BackgroundScheduler  # noqa: E402
+from fastapi import FastAPI  # noqa: E402
+from fastapi.middleware.cors import CORSMiddleware  # noqa: E402
+
+logger.info("[MODULE] Importing routers...")
+router_import_start = time.time()
+from routers import actions, attachments, chats, contacts, eod, search  # noqa: E402
+
+router_import_elapsed = time.time() - router_import_start
+logger.info(f"[MODULE] Routers imported ({router_import_elapsed:.3f}s)")
+
+logger.info("[MODULE] Importing sync_db...")
+sync_db_import_start = time.time()
+from sync_db import APP_DB_PATH, CHAT_DB_PATH, sync_all  # noqa: E402
+
+sync_db_import_elapsed = time.time() - sync_db_import_start
+logger.info(f"[MODULE] sync_db imported ({sync_db_import_elapsed:.3f}s)")
+
+module_import_elapsed = time.time() - import_start
+logger.info(f"[MODULE] All module imports complete ({module_import_elapsed:.3f}s)")
 
 # ============================================
 # CHAT PRIORITY CALCULATION
@@ -133,14 +165,21 @@ scheduler: BackgroundScheduler | None = None
 
 def has_existing_data() -> bool:
     """Check if prm.db has existing data (skip initial sync screen)."""
+    start = time.time()
     if not os.path.exists(APP_DB_PATH):
+        logger.debug(f"[STARTUP] has_existing_data: DB not found ({time.time() - start:.3f}s)")
         return False
     try:
         db = core.AppDb(APP_DB_PATH)
         db.init_schema()
-        chats = db.get_all_chats()  # Just check if any chats exist
-        return len(chats) > 0
-    except Exception:
+        # Use count query instead of loading all chats - much faster
+        count = db.chat_count()
+        elapsed = time.time() - start
+        logger.info(f"[STARTUP] has_existing_data: {count} chats found ({elapsed:.3f}s)")
+        return count > 0
+    except Exception as e:
+        elapsed = time.time() - start
+        logger.warning(f"[STARTUP] has_existing_data: Error ({elapsed:.3f}s): {e}")
         return False
 
 
@@ -202,15 +241,25 @@ class SyncStatus:
 sync_status = SyncStatus()
 
 
-def run_sync(verbose: bool = False) -> None:
-    """Run sync with status tracking."""
+def run_sync(verbose: bool = False, skip_contacts: bool = False) -> None:
+    """Run sync with status tracking.
+
+    Args:
+        verbose: If True, print progress information
+        skip_contacts: If True, skip contacts sync (for background syncs)
+    """
     sync_status.start_sync()
     start = time.time()
     error = None
     try:
-        sync_all(verbose=verbose)
+        logger.debug(f"[SYNC] Starting sync (verbose={verbose}, skip_contacts={skip_contacts})")
+        sync_all(verbose=verbose, skip_contacts=skip_contacts)
+        elapsed = time.time() - start
+        logger.info(f"[SYNC] Sync completed successfully ({elapsed:.3f}s)")
     except Exception as e:
         error = str(e)
+        elapsed = time.time() - start
+        logger.error(f"[SYNC] Sync failed ({elapsed:.3f}s): {error}")
         raise
     finally:
         sync_status.end_sync(time.time() - start, error)
@@ -219,22 +268,30 @@ def run_sync(verbose: bool = False) -> None:
 def trigger_background_sync():
     """Trigger a sync in the background if enough time has passed."""
     if not sync_status.should_sync():
+        logger.debug("[SYNC] Background sync skipped (sync already in progress)")
         return
 
     def _sync():
+        sync_start = time.time()
         try:
-            logger.debug("Background sync triggered...")
-            run_sync(verbose=False)
-            logger.debug("Background sync completed")
+            logger.info("[SYNC] Background sync starting... (skipping contacts)")
+            # Skip contacts in background sync - they're synced separately via the contacts API
+            # and the Rust SyncWatcher handles messages/attachments in real-time
+            run_sync(verbose=False, skip_contacts=True)
+            elapsed = time.time() - sync_start
+            logger.info(f"[SYNC] Background sync completed ({elapsed:.3f}s)")
         except Exception as e:
-            logger.error(f"Background sync failed: {e}")
+            elapsed = time.time() - sync_start
+            logger.error(f"[SYNC] Background sync failed ({elapsed:.3f}s): {e}")
 
     thread = Thread(target=_sync, daemon=True)
     thread.start()
+    logger.debug("[SYNC] Background sync thread started")
 
 
 def start_sync_watcher():
     """Start the Rust background sync watcher."""
+    start = time.time()
     global sync_watcher
     if sync_watcher is not None and sync_watcher.is_running():
         logger.warning("Sync watcher already running")
@@ -242,7 +299,8 @@ def start_sync_watcher():
 
     sync_watcher = core.SyncWatcher()
     sync_watcher.start(CHAT_DB_PATH, APP_DB_PATH)
-    logger.info("Rust sync watcher started (polling every 500ms)")
+    elapsed = time.time() - start
+    logger.info(f"[STARTUP] Rust sync watcher started (polling every 500ms) ({elapsed:.3f}s)")
 
 
 def stop_sync_watcher():
@@ -265,19 +323,33 @@ def run_unanswered_scan():
     Also applies heuristic filters to skip obvious spam/automated messages
     without making LLM calls.
     """
+    start = time.time()
     try:
         from services.message_filter import should_skip_llm_analysis
 
+        db_start = time.time()
         db = core.AppDb(APP_DB_PATH)
         db.init_schema()
+        db_elapsed = time.time() - db_start
+        logger.debug(f"[STARTUP] run_unanswered_scan: DB init ({db_elapsed:.3f}s)")
+
+        query_start = time.time()
         unanswered = db.get_unanswered_chats(24)  # 24 hour threshold
+        query_elapsed = time.time() - query_start
+        logger.debug(
+            f"[STARTUP] run_unanswered_scan: Found {len(unanswered)} "
+            f"unanswered chats ({query_elapsed:.3f}s)"
+        )
 
         if not unanswered:
+            elapsed = time.time() - start
+            logger.info(f"[STARTUP] run_unanswered_scan: No unanswered chats ({elapsed:.3f}s)")
             return
 
         # Queue chats for analysis with smart priority scoring
         queued = 0
         skipped = 0
+        process_start = time.time()
         for chat in unanswered:
             # Get chat and person info for priority calculation
             chat_info = db.get_chat(chat.chat_id)
@@ -315,10 +387,18 @@ def run_unanswered_scan():
             db.queue_for_analysis(chat.chat_id, priority)
             queued += 1
 
+        process_elapsed = time.time() - process_start
+        elapsed = time.time() - start
         if queued > 0 or skipped > 0:
-            logger.info(f"Unanswered scan: Queued {queued}, skipped {skipped}")
+            logger.info(
+                f"[STARTUP] run_unanswered_scan: Queued {queued}, skipped {skipped} "
+                f"(processing: {process_elapsed:.3f}s, total: {elapsed:.3f}s)"
+            )
+        else:
+            logger.info(f"[STARTUP] run_unanswered_scan: Complete ({elapsed:.3f}s)")
     except Exception as e:
-        logger.error(f"Unanswered scan failed: {e}")
+        elapsed = time.time() - start
+        logger.error(f"[STARTUP] run_unanswered_scan failed ({elapsed:.3f}s): {e}")
 
 
 def _process_single_chat_llm(db, chat_id: int) -> str:
@@ -520,6 +600,7 @@ def run_embedding_batch():
 
 def start_scheduler():
     """Start the background job scheduler."""
+    start = time.time()
     global scheduler
     if scheduler is not None and scheduler.running:
         logger.warning("Scheduler already running")
@@ -553,7 +634,11 @@ def start_scheduler():
     scheduler.add_job(run_embedding_batch, "interval", minutes=5, id="embedding_batch")
 
     scheduler.start()
-    logger.info("Background scheduler started (queue: 5min, LLM: 3s, EOD: 9PM, embed: 5min)")
+    elapsed = time.time() - start
+    logger.info(
+        f"[STARTUP] Background scheduler started "
+        f"(queue: 5min, LLM: 10s, EOD: 9PM, embed: 5min) ({elapsed:.3f}s)"
+    )
 
 
 def stop_scheduler():
@@ -568,42 +653,79 @@ def stop_scheduler():
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Lifespan handler for startup/shutdown."""
+    print("[STARTUP] ===== Application startup beginning =====", flush=True)
+    startup_start = time.time()
+    logger.info("[STARTUP] ===== Application startup beginning =====")
+    print("[STARTUP] Lifespan function called, starting initialization...", flush=True)
+    logger.info("[STARTUP] Lifespan function called, starting initialization...")
+
     # Check if we already have data - if so, skip blocking sync
-    if has_existing_data():
-        logger.info("Existing data found, skipping initial sync screen")
+    data_check_start = time.time()
+    has_data = has_existing_data()
+    data_check_elapsed = time.time() - data_check_start
+
+    if has_data:
+        logger.info(
+            f"[STARTUP] Existing data found, skipping initial sync screen "
+            f"(check took {data_check_elapsed:.3f}s)"
+        )
         sync_status.mark_initial_sync_complete()
         # Still trigger a background sync to catch any new messages
+        bg_sync_start = time.time()
         trigger_background_sync()
+        bg_sync_elapsed = time.time() - bg_sync_start
+        logger.debug(f"[STARTUP] Background sync triggered ({bg_sync_elapsed:.3f}s)")
     else:
         # First launch: Run blocking sync so frontend waits
-        logger.info("No existing data, running initial sync...")
+        logger.info(
+            f"[STARTUP] No existing data, running initial sync... "
+            f"(check took {data_check_elapsed:.3f}s)"
+        )
+        sync_start = time.time()
         try:
             run_sync(verbose=True)
+            sync_elapsed = time.time() - sync_start
+            logger.info(f"[STARTUP] Initial sync completed ({sync_elapsed:.3f}s)")
         except Exception as e:
-            logger.error(f"Initial sync failed: {e}")
+            sync_elapsed = time.time() - sync_start
+            logger.error(f"[STARTUP] Initial sync failed ({sync_elapsed:.3f}s): {e}")
             # Mark as complete even on error so frontend can proceed
             sync_status.mark_initial_sync_complete()
 
     # Start the Rust background sync watcher for near-real-time message updates
     start_sync_watcher()
 
-    # Queue unanswered chats for LLM analysis (non-blocking)
-    logger.info("Queueing unanswered chats for analysis...")
-    run_unanswered_scan()
-
     # Start the background scheduler for periodic jobs
     start_scheduler()
+
+    # Queue unanswered chats for LLM analysis in background (non-blocking)
+    # This can be slow if there are many chats, so run it in a thread
+    def _queue_unanswered_in_background():
+        run_unanswered_scan()
+
+    thread = Thread(target=_queue_unanswered_in_background, daemon=True)
+    thread.start()
+
+    startup_elapsed = time.time() - startup_start
+    logger.info(f"[STARTUP] ===== Application startup complete ({startup_elapsed:.3f}s) =====")
 
     yield
 
     # Cleanup: stop the scheduler and sync watcher
+    logger.info("[SHUTDOWN] Stopping scheduler and sync watcher...")
     stop_scheduler()
     stop_sync_watcher()
+    logger.info("[SHUTDOWN] Cleanup complete")
 
 
+logger.info("[MODULE] Creating FastAPI app...")
+app_create_start = time.time()
 app = FastAPI(lifespan=lifespan)
+app_create_elapsed = time.time() - app_create_start
+logger.info(f"[MODULE] FastAPI app created ({app_create_elapsed:.3f}s)")
 
 # CORS middleware for Electron frontend
+logger.info("[MODULE] Adding CORS middleware...")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],  # Electron uses file:// or localhost with various ports
@@ -611,6 +733,7 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+logger.info("[MODULE] CORS middleware added")
 
 
 @app.get("/")
@@ -631,13 +754,14 @@ def get_sync_status():
 
 @app.post("/sync")
 def manual_sync():
-    """Manually trigger a sync."""
+    """Manually trigger a sync (skips contacts - use /contacts/sync for contacts)."""
     if not sync_status.try_start_sync():
         return {"success": False, "error": "Sync already in progress"}
     start = time.time()
     error = None
     try:
-        sync_all(verbose=False)
+        # Skip contacts in manual sync - contacts are synced separately via /contacts/sync
+        sync_all(verbose=False, skip_contacts=True)
         return {"success": True, "message": "Sync completed"}
     except Exception as e:
         error = str(e)
@@ -647,14 +771,20 @@ def manual_sync():
 
 
 # Import the sync trigger into chats module so it syncs on every request
+logger.info("[MODULE] Setting up router dependencies...")
 chats.trigger_background_sync = trigger_background_sync
 
+logger.info("[MODULE] Including routers...")
+router_include_start = time.time()
 app.include_router(chats.router, prefix="/chats")
 app.include_router(actions.router, prefix="/actions")
 app.include_router(search.router, prefix="/search")
 app.include_router(eod.router, prefix="/eod")
 app.include_router(attachments.router, prefix="/attachments")
 app.include_router(contacts.router, prefix="/contacts")
+router_include_elapsed = time.time() - router_include_start
+logger.info(f"[MODULE] All routers included ({router_include_elapsed:.3f}s)")
+logger.info("[MODULE] Module initialization complete, ready for uvicorn")
 
 
 if __name__ == "__main__":
