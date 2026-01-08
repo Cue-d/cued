@@ -2,7 +2,6 @@
 
 import json
 import logging
-import os
 import time
 from enum import Enum
 
@@ -11,22 +10,10 @@ from pydantic import BaseModel
 
 from db.models import ActionWithContext
 from db.prm_db import AppDb
+from dependencies import get_app_db
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
-
-PRM_DB_PATH = os.path.expanduser("~/.prm/prm.db")
-
-_app_db: AppDb | None = None
-
-
-def get_app_db() -> AppDb:
-    """Get singleton AppDb instance."""
-    global _app_db
-    if _app_db is None:
-        _app_db = AppDb(PRM_DB_PATH)
-        _app_db.init_schema()
-    return _app_db
 
 
 # =============================================================================
@@ -266,12 +253,17 @@ def swipe_action(action_id: int, request: ActionSwipeRequest):
             try:
                 from services.macos.messaging import send_message, send_to_group
 
-                # Get chat to determine if group
+                # Get chat and participants
                 chat = db.get_chat(action.chat_id)
-                if chat and chat.is_group:
-                    send_to_group(chat.identifier, request.response_text)
-                elif chat:
-                    send_message(chat.identifier, request.response_text)
+                participants = db.get_chat_participants(action.chat_id)
+
+                if chat and participants:
+                    if len(participants) == 1:
+                        # 1:1 chat - send to participant's phone/email
+                        send_message(participants[0].identifier, request.response_text)
+                    else:
+                        # Group chat - send using chat identifier
+                        send_to_group(chat.identifier, request.response_text)
             except Exception as e:
                 logger.error(f"Failed to send message: {e}")
         db.update_action_status(action_id, "completed")

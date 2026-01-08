@@ -2,6 +2,8 @@
 
 import os
 
+from config import config
+
 # Register HEIF/HEIC opener for Pillow (needed for iPhone images)
 try:
     import pillow_heif
@@ -9,8 +11,6 @@ try:
     pillow_heif.register_heif_opener()
 except ImportError:
     pass  # pillow-heif not installed, HEIC support unavailable
-
-THUMBNAIL_CACHE_DIR = os.path.expanduser("~/.prm/thumbnails")
 
 
 def is_image_mime_type(mime_type: str | None) -> bool:
@@ -21,8 +21,8 @@ def is_image_mime_type(mime_type: str | None) -> bool:
 class AttachmentService:
     """Service for attachment file operations."""
 
-    def __init__(self, thumbnail_cache_dir: str = THUMBNAIL_CACHE_DIR):
-        self.thumbnail_cache_dir = thumbnail_cache_dir
+    def __init__(self, thumbnail_cache_dir: str | None = None):
+        self.thumbnail_cache_dir = thumbnail_cache_dir or config.THUMBNAIL_CACHE_DIR
 
     def resolve_path(self, path: str | None) -> str | None:
         """Expand ~ and resolve the attachment path.

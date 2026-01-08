@@ -1,5 +1,6 @@
 """Sync from chat.db to prm.db with schema mapping."""
 
+import logging
 import sqlite3
 import time
 
@@ -8,6 +9,8 @@ from sqlmodel import text
 from services.attributed_body import extract_text_from_attributed_body
 
 from .prm_db import AppDb
+
+logger = logging.getLogger(__name__)
 
 # Apple timestamp epoch offset (seconds from 1970-01-01 to 2001-01-01)
 APPLE_EPOCH_OFFSET = 978307200
@@ -20,6 +23,13 @@ def apple_to_unix(apple_ts: int | None) -> int | None:
     return (apple_ts // 1_000_000_000) + APPLE_EPOCH_OFFSET
 
 
+def unix_to_apple(unix_ts: int | None) -> int | None:
+    """Convert Unix timestamp (seconds) to Apple nanosecond timestamp."""
+    if unix_ts is None or unix_ts == 0:
+        return None
+    return (unix_ts - APPLE_EPOCH_OFFSET) * 1_000_000_000
+
+
 def get_message_text(text_col: str | None, attributed_body: bytes | None) -> str | None:
     """Get message text, falling back to attributedBody extraction if text is null."""
     if text_col:
@@ -27,6 +37,19 @@ def get_message_text(text_col: str | None, attributed_body: bytes | None) -> str
     if attributed_body:
         return extract_text_from_attributed_body(attributed_body)
     return None
+
+
+def get_last_sync_timestamp(app_db_path: str) -> int | None:
+    """Get the maximum message timestamp from prm.db for incremental sync."""
+    try:
+        app = AppDb(app_db_path)
+        with app.session() as session:
+            result = session.execute(text("SELECT MAX(timestamp) FROM messages"))
+            row = result.fetchone()
+            app.close()
+            return row[0] if row and row[0] else None
+    except Exception:
+        return None
 
 
 def sync_all(chat_db_path: str, app_db_path: str, verbose: bool = True) -> dict:

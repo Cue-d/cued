@@ -1,33 +1,21 @@
 """Attachment file serving router."""
 
 import os
+from functools import lru_cache
 
 from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import FileResponse
 
-from db.prm_db import AppDb
+from dependencies import get_app_db
 from services.attachments import AttachmentService, is_image_mime_type
 
 router = APIRouter()
 
-PRM_DB_PATH = os.path.expanduser("~/.prm/prm.db")
 
-_app_db: AppDb | None = None
-_attachment_service: AttachmentService | None = None
-
-
-def get_app_db() -> AppDb:
-    global _app_db
-    if _app_db is None:
-        _app_db = AppDb(PRM_DB_PATH)
-    return _app_db
-
-
+@lru_cache(maxsize=1)
 def get_attachment_service() -> AttachmentService:
-    global _attachment_service
-    if _attachment_service is None:
-        _attachment_service = AttachmentService()
-    return _attachment_service
+    """Get singleton AttachmentService instance."""
+    return AttachmentService()
 
 
 @router.get("/{attachment_id}/file")

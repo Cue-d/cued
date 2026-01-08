@@ -9,6 +9,7 @@ dependencies = [
     "uvicorn[standard]>=0.40.0",
     "sentence-transformers>=3.0.0",
     "numpy>=2.0.0",
+    "faiss-cpu>=1.8.0",
     "Pillow>=10.0.0",
     "pillow-heif>=0.10.0",
     "pyinstaller>=6.17.0",
