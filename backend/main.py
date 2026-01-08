@@ -8,6 +8,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from db.sync import sync_text_cache_full
 from deps import get_app_db, get_chat_db, get_embedding_db
 from routers import actions, attachments, chats, contacts, eod, search, sync
+from services.contacts_sync import sync_contacts_to_db
+from services.macos.contacts import is_swift_contacts_available
 from services.search.fts import FtsIndex
 from services.search.semantic import queue_missing_messages
 from workers import start_scheduler, stop_scheduler
@@ -97,6 +99,27 @@ async def lifespan(app: FastAPI):
             logger.error(f"Full sync failed: {e}")
     else:
         logger.info(f"Text cache has {cache_count} messages, skipping full sync")
+
+    # Sync contacts on first startup (if never synced and CLI available)
+    last_contacts_sync = app_db.get_contacts_last_sync()
+    if last_contacts_sync is None:
+        if is_swift_contacts_available():
+            logger.info("First startup: syncing contacts from Apple Contacts...")
+            try:
+                result = sync_contacts_to_db(app_db)
+                if result.success:
+                    logger.info(
+                        f"Contacts sync complete: {result.contacts_added} contacts "
+                        f"in {result.total_time_seconds:.2f}s"
+                    )
+                else:
+                    logger.warning(f"Contacts sync failed: {result.message}")
+            except Exception as e:
+                logger.error(f"Contacts sync failed: {e}")
+        else:
+            logger.info("Contacts CLI not available, skipping initial contacts sync")
+    else:
+        logger.info("Contacts already synced, skipping initial sync")
 
     # Ensure FTS5 index exists and is populated
     try:
