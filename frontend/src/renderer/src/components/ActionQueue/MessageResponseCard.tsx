@@ -66,6 +66,44 @@ function formatRelativeTime(timestamp: number): string {
   return 'Just now'
 }
 
+// Delivery status indicator for sent messages
+const DeliveryStatus = ({
+  isRead,
+  isDelivered,
+  error
+}: {
+  isRead?: boolean
+  isDelivered?: boolean
+  error?: number
+}) => {
+  if (error && error !== 0) {
+    return (
+      <span className="text-red-500" title="Failed to send">
+        !
+      </span>
+    )
+  }
+  if (isRead) {
+    return (
+      <span className="text-blue-400" title="Read">
+        Read
+      </span>
+    )
+  }
+  if (isDelivered) {
+    return (
+      <span className="opacity-60" title="Delivered">
+        Delivered
+      </span>
+    )
+  }
+  return (
+    <span className="opacity-40" title="Sent">
+      Sent
+    </span>
+  )
+}
+
 export const MessageResponseCard = forwardRef<MessageResponseCardRef, MessageResponseCardProps>(
   function MessageResponseCard({ action, responseText, onResponseChange, className }, ref) {
     const textareaRef = useRef<HTMLTextAreaElement>(null)
@@ -114,7 +152,12 @@ export const MessageResponseCard = forwardRef<MessageResponseCardRef, MessageRes
         text: msg.text,
         isSent: msg.is_from_me,
         timestamp: msg.date,
-        senderName: msg.sender_name
+        senderName: msg.sender_name,
+        isRead: msg.is_read,
+        dateRead: msg.date_read,
+        isDelivered: msg.is_delivered,
+        dateDelivered: msg.date_delivered,
+        error: msg.error
       }))
 
       const processed = processMessagesWithReactions(messages)
@@ -220,11 +263,21 @@ export const MessageResponseCard = forwardRef<MessageResponseCardRef, MessageRes
                           )}
                           <p
                             className={cn(
-                              'text-[10px] opacity-60 mt-1',
-                              msg.isSent ? 'text-right' : 'text-left'
+                              'text-[10px] opacity-60 mt-1 flex items-center gap-1',
+                              msg.isSent ? 'justify-end' : 'justify-start'
                             )}
                           >
                             {formatTime(msg.timestamp)}
+                            {msg.isSent && (
+                              <>
+                                <span className="mx-0.5">·</span>
+                                <DeliveryStatus
+                                  isRead={msg.isRead}
+                                  isDelivered={msg.isDelivered}
+                                  error={msg.error}
+                                />
+                              </>
+                            )}
                           </p>
                         </div>
                       </div>

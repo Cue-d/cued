@@ -42,6 +42,12 @@ export interface MessageItem {
   isSent: boolean
   timestamp: number
   senderName?: string | null
+  // Delivery status fields
+  isRead?: boolean
+  dateRead?: number | null
+  isDelivered?: boolean
+  dateDelivered?: number | null
+  error?: number
 }
 
 export interface ParsedReaction {
