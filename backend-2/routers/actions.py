@@ -1,12 +1,12 @@
-from fastapi import APIRouter
 from datetime import datetime
-from typing import Optional
+
+from fastapi import APIRouter
 
 router = APIRouter()
 
 
 @router.get("/")
-def get_actions(status: str = "pending", limit: int = 50, action_type: Optional[str] = None):
+def get_actions(status: str = "pending", limit: int = 50, action_type: str | None = None):
     """List actions - dummy implementation"""
     actions = [
         {

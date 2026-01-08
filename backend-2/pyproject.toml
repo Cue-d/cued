@@ -1,9 +1,39 @@
 [project]
 name = "backend-2"
 version = "0.1.0"
-description = "Add your description here"
+description = "PRM backend with SQLModel"
 requires-python = ">=3.12"
 dependencies = [
     "fastapi>=0.128.0",
+    "sqlmodel>=0.0.31",
     "uvicorn>=0.40.0",
+    "sentence-transformers>=3.0.0",
+    "numpy>=2.0.0",
 ]
+
+[dependency-groups]
+dev = [
+    "httpx>=0.28.1",
+    "pytest>=9.0.2",
+    "pytest-asyncio>=1.3.0",
+    "ruff>=0.11.0",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP"]
+ignore = []
+fixable = ["ALL"]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = "test_*.py"
+python_functions = "test_*"
+python_classes = "Test*"

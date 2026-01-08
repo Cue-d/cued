@@ -1,6 +1,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from routers import chats, actions, search, eod, sync
+
+from routers import actions, chats, eod, search, sync
 
 app = FastAPI(title="PRM Backend 2 (Minimal)")
 
