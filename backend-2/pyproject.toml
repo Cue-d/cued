@@ -12,6 +12,7 @@ dependencies = [
     "Pillow>=10.0.0",
     "pillow-heif>=0.10.0",
     "pyinstaller>=6.17.0",
+    "apscheduler>=3.10.4",
 ]
 
 [dependency-groups]
