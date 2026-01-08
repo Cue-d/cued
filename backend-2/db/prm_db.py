@@ -4,14 +4,18 @@ import time
 from contextlib import contextmanager
 from datetime import datetime
 
-from sqlmodel import Session, SQLModel, create_engine, text
+from sqlmodel import Session, SQLModel, create_engine, func, select, text
 
 from .models import (
+    Action,
     ActionWithContext,
     Attachment,
     Chat,
+    ChatParticipant,
     ChatWithLastMessage,
     Handle,
+    LlmAnalysisQueue,
+    Message,
     MessageWithSender,
     QueuedAnalysis,
     UnansweredChat,
@@ -47,26 +51,14 @@ class AppDb:
     def get_chat(self, chat_id: int) -> Chat | None:
         """Get a single chat by ID."""
         with self.session() as session:
-            result = session.exec(
-                text("""
-                    SELECT id, identifier, name, is_group, synced_at
-                    FROM chats
-                    WHERE id = :chat_id
-                """).bindparams(chat_id=chat_id)
-            )
-            row = result.fetchone()
-            if row:
-                return Chat(
-                    id=row[0],
-                    identifier=row[1],
-                    name=row[2],
-                    is_group=bool(row[3]),
-                    synced_at=row[4],
-                )
-            return None
+            return session.get(Chat, chat_id)
 
     def get_all_chats(self) -> list[ChatWithLastMessage]:
-        """Get all chats with last message preview."""
+        """Get all chats with last message preview.
+
+        NOTE: Uses raw SQL for the correlated subquery (last message per chat).
+        SQLModel doesn't support this pattern natively.
+        """
         with self.session() as session:
             result = session.exec(
                 text("""
@@ -97,108 +89,51 @@ class AppDb:
     def get_chat_messages(self, chat_id: int, limit: int = 100) -> list[MessageWithSender]:
         """Get messages for a chat with sender info."""
         with self.session() as session:
-            result = session.exec(
-                text("""
-                    SELECT
-                        m.id, m.chat_id, m.sender_id, h.identifier,
-                        m.text, m.timestamp, m.is_from_me, m.is_read,
-                        m.read_at, m.has_attachments
-                    FROM messages m
-                    LEFT JOIN handles h ON h.id = m.sender_id
-                    WHERE m.chat_id = :chat_id
-                    ORDER BY m.timestamp DESC
-                    LIMIT :limit
-                """).bindparams(chat_id=chat_id, limit=limit)
+            # Use ORM with explicit join for sender
+            stmt = (
+                select(Message, Handle.identifier)
+                .outerjoin(Handle, Message.sender_id == Handle.id)
+                .where(Message.chat_id == chat_id)
+                .order_by(Message.timestamp.desc())
+                .limit(limit)
             )
+            results = session.exec(stmt).all()
             return [
                 MessageWithSender(
-                    id=row[0],
-                    chat_id=row[1],
-                    sender_id=row[2],
-                    sender_name=row[3],  # Now using identifier as sender_name
-                    text=row[4],
-                    timestamp=row[5],
-                    is_from_me=bool(row[6]),
-                    is_read=bool(row[7]),
-                    read_at=row[8],
-                    has_attachments=bool(row[9]),
+                    id=msg.id,
+                    chat_id=msg.chat_id,
+                    sender_id=msg.sender_id,
+                    sender_name=sender_identifier,
+                    text=msg.text,
+                    timestamp=msg.timestamp,
+                    is_from_me=msg.is_from_me,
+                    is_read=msg.is_read,
+                    read_at=msg.read_at,
+                    has_attachments=msg.has_attachments,
                 )
-                for row in result
+                for msg, sender_identifier in results
             ]
 
     def get_chat_participants(self, chat_id: int) -> list[Handle]:
         """Get participants for a chat."""
         with self.session() as session:
-            result = session.exec(
-                text("""
-                    SELECT h.id, h.identifier, h.service
-                    FROM handles h
-                    INNER JOIN chat_participants cp ON cp.handle_id = h.id
-                    WHERE cp.chat_id = :chat_id
-                """).bindparams(chat_id=chat_id)
+            stmt = (
+                select(Handle)
+                .join(ChatParticipant, ChatParticipant.handle_id == Handle.id)
+                .where(ChatParticipant.chat_id == chat_id)
             )
-            return [
-                Handle(
-                    id=row[0],
-                    identifier=row[1],
-                    service=row[2],
-                )
-                for row in result
-            ]
+            return list(session.exec(stmt).all())
 
     def get_message_attachments(self, message_id: int) -> list[Attachment]:
         """Get attachments for a message."""
         with self.session() as session:
-            result = session.exec(
-                text("""
-                    SELECT id, message_id, filename, path, mime_type,
-                           uti, size, is_outgoing, created_at, synced_at
-                    FROM attachments
-                    WHERE message_id = :message_id
-                """).bindparams(message_id=message_id)
-            )
-            return [
-                Attachment(
-                    id=row[0],
-                    message_id=row[1],
-                    filename=row[2],
-                    path=row[3],
-                    mime_type=row[4],
-                    uti=row[5],
-                    size=row[6],
-                    is_outgoing=bool(row[7]),
-                    created_at=row[8],
-                    synced_at=row[9],
-                )
-                for row in result
-            ]
+            stmt = select(Attachment).where(Attachment.message_id == message_id)
+            return list(session.exec(stmt).all())
 
     def get_attachment(self, attachment_id: int) -> Attachment | None:
         """Get a single attachment by ID."""
         with self.session() as session:
-            result = session.exec(
-                text("""
-                    SELECT id, message_id, filename, path, mime_type,
-                           uti, size, is_outgoing, created_at, synced_at
-                    FROM attachments
-                    WHERE id = :attachment_id
-                """).bindparams(attachment_id=attachment_id)
-            )
-            row = result.fetchone()
-            if not row:
-                return None
-            return Attachment(
-                id=row[0],
-                message_id=row[1],
-                filename=row[2],
-                path=row[3],
-                mime_type=row[4],
-                uti=row[5],
-                size=row[6],
-                is_outgoing=bool(row[7]),
-                created_at=row[8],
-                synced_at=row[9],
-            )
+            return session.get(Attachment, attachment_id)
 
     def close(self) -> None:
         self.engine.dispose()
@@ -210,24 +145,18 @@ class AppDb:
     def get_all_message_ids_with_text(self) -> list[tuple[int, int, str]]:
         """Get all messages with text for embedding. Returns (id, chat_id, text)."""
         with self.session() as session:
-            result = session.exec(
-                text("""
-                    SELECT id, chat_id, text
-                    FROM messages
-                    WHERE text IS NOT NULL AND length(text) > 0
-                """)
+            stmt = (
+                select(Message.id, Message.chat_id, Message.text)
+                .where(Message.text.isnot(None))
+                .where(func.length(Message.text) > 0)
             )
-            return [(row[0], row[1], row[2]) for row in result]
+            return [(row[0], row[1], row[2]) for row in session.exec(stmt).all()]
 
     def get_message_text(self, message_id: int) -> str | None:
         """Get text for a single message."""
         with self.session() as session:
-            result = session.execute(
-                text("SELECT text FROM messages WHERE id = :id"),
-                {"id": message_id},
-            )
-            row = result.fetchone()
-            return row[0] if row else None
+            msg = session.get(Message, message_id)
+            return msg.text if msg else None
 
     # =========================================================================
     # ACTIONS CRUD
@@ -250,29 +179,27 @@ class AppDb:
         """Create a new action. Returns the action ID."""
         now = self._now_timestamp()
         with self.session() as session:
-            result = session.execute(
-                text("""
-                    INSERT INTO actions (type, status, priority, chat_id, person_id,
-                                         message_id, payload, created_at, remind_at)
-                    VALUES (:type, 'pending', :priority, :chat_id, :person_id,
-                            :message_id, :payload, :created_at, :remind_at)
-                """),
-                {
-                    "type": action_type,
-                    "priority": priority,
-                    "chat_id": chat_id,
-                    "person_id": person_id,
-                    "message_id": message_id,
-                    "payload": payload,
-                    "created_at": now,
-                    "remind_at": remind_at,
-                },
+            action = Action(
+                type=action_type,
+                status="pending",
+                priority=priority,
+                chat_id=chat_id,
+                person_id=person_id,
+                message_id=message_id,
+                payload=payload,
+                created_at=now,
+                remind_at=remind_at,
             )
+            session.add(action)
             session.commit()
-            return result.lastrowid
+            session.refresh(action)
+            return action.id
 
     def get_pending_actions(self, limit: int = 50) -> list[ActionWithContext]:
-        """Get pending actions with joined context, ordered by priority."""
+        """Get pending actions with joined context, ordered by priority.
+
+        NOTE: Uses raw SQL for the complex ordering and snoozed logic.
+        """
         with self.session() as session:
             result = session.execute(
                 text("""
@@ -298,7 +225,10 @@ class AppDb:
             return [self._row_to_action_with_context(row) for row in result]
 
     def get_action(self, action_id: int) -> ActionWithContext | None:
-        """Get single action with context."""
+        """Get single action with context.
+
+        NOTE: Uses raw SQL for the multi-table join with aliases.
+        """
         with self.session() as session:
             result = session.execute(
                 text("""
@@ -345,39 +275,34 @@ class AppDb:
     ) -> None:
         """Update action status with appropriate timestamps."""
         now = self._now_timestamp()
-        completed_at = now if status == "completed" else None
-        discarded_at = now if status == "discarded" else None
-
         with self.session() as session:
-            session.execute(
-                text("""
-                    UPDATE actions
-                    SET status = :status, snoozed_until = :snoozed_until,
-                        completed_at = :completed_at, discarded_at = :discarded_at
-                    WHERE id = :id
-                """),
-                {
-                    "id": action_id,
-                    "status": status,
-                    "snoozed_until": snoozed_until,
-                    "completed_at": completed_at,
-                    "discarded_at": discarded_at,
-                },
-            )
-            session.commit()
+            action = session.get(Action, action_id)
+            if action:
+                action.status = status
+                action.snoozed_until = snoozed_until
+                action.completed_at = now if status == "completed" else None
+                action.discarded_at = now if status == "discarded" else None
+                session.add(action)
+                session.commit()
 
     def delete_action(self, action_id: int) -> None:
         """Delete an action."""
         with self.session() as session:
-            session.execute(text("DELETE FROM actions WHERE id = :id"), {"id": action_id})
-            session.commit()
+            action = session.get(Action, action_id)
+            if action:
+                session.delete(action)
+                session.commit()
 
     # =========================================================================
     # UNANSWERED MESSAGE DETECTION
     # =========================================================================
 
     def get_unanswered_chats(self, threshold_hours: int = 24) -> list[UnansweredChat]:
-        """Get chats with unanswered messages older than threshold."""
+        """Get chats with unanswered messages older than threshold.
+
+        NOTE: Uses raw SQL for the complex CTE with aggregation and NOT EXISTS clauses.
+        This query is too complex to express cleanly with SQLModel.
+        """
         now = self._now_timestamp()
         threshold_secs = threshold_hours * 3600
         skip_window_secs = 6 * 3600
@@ -454,18 +379,30 @@ class AppDb:
         """Queue a chat for LLM analysis."""
         now = self._now_timestamp()
         with self.session() as session:
-            session.execute(
-                text("""
-                    INSERT OR REPLACE INTO llm_analysis_queue
-                    (chat_id, status, priority, queued_at, started_at, completed_at, result)
-                    VALUES (:chat_id, 'pending', :priority, :now, NULL, NULL, NULL)
-                """),
-                {"chat_id": chat_id, "priority": priority, "now": now},
-            )
+            # Check if exists
+            existing = session.get(LlmAnalysisQueue, chat_id)
+            if existing:
+                existing.status = "pending"
+                existing.priority = priority
+                existing.queued_at = now
+                existing.started_at = None
+                existing.completed_at = None
+                existing.result = None
+            else:
+                queue_item = LlmAnalysisQueue(
+                    chat_id=chat_id,
+                    status="pending",
+                    priority=priority,
+                    queued_at=now,
+                )
+                session.add(queue_item)
             session.commit()
 
     def get_next_pending_analysis(self) -> QueuedAnalysis | None:
-        """Get next pending analysis item."""
+        """Get next pending analysis item.
+
+        NOTE: Uses raw SQL for the multi-table join with ordering.
+        """
         with self.session() as session:
             result = session.execute(
                 text("""
@@ -500,58 +437,65 @@ class AppDb:
         """Mark analysis as started."""
         now = self._now_timestamp()
         with self.session() as session:
-            session.execute(
-                text("""
-                    UPDATE llm_analysis_queue
-                    SET status = 'processing', started_at = :now
-                    WHERE chat_id = :chat_id
-                """),
-                {"now": now, "chat_id": chat_id},
-            )
-            session.commit()
+            item = session.get(LlmAnalysisQueue, chat_id)
+            if item:
+                item.status = "processing"
+                item.started_at = now
+                session.add(item)
+                session.commit()
 
     def mark_analysis_complete(self, chat_id: int, result: str) -> None:
         """Mark analysis as complete with result."""
         now = self._now_timestamp()
         with self.session() as session:
-            session.execute(
-                text("""
-                    UPDATE llm_analysis_queue
-                    SET status = 'completed', completed_at = :now, result = :result
-                    WHERE chat_id = :chat_id
-                """),
-                {"now": now, "result": result, "chat_id": chat_id},
-            )
-            session.commit()
+            item = session.get(LlmAnalysisQueue, chat_id)
+            if item:
+                item.status = "completed"
+                item.completed_at = now
+                item.result = result
+                session.add(item)
+                session.commit()
 
     def mark_analysis_skipped(self, chat_id: int, reason: str) -> None:
         """Mark analysis as skipped with reason."""
         now = self._now_timestamp()
-        result = f"skipped:{reason}"
+        result_str = f"skipped:{reason}"
         with self.session() as session:
-            session.execute(
-                text("""
-                    INSERT OR REPLACE INTO llm_analysis_queue
-                    (chat_id, status, priority, queued_at, started_at, completed_at, result)
-                    VALUES (:chat_id, 'completed', 0, :now, NULL, :now, :result)
-                """),
-                {"chat_id": chat_id, "now": now, "result": result},
-            )
+            existing = session.get(LlmAnalysisQueue, chat_id)
+            if existing:
+                existing.status = "completed"
+                existing.priority = 0
+                existing.queued_at = now
+                existing.started_at = None
+                existing.completed_at = now
+                existing.result = result_str
+            else:
+                item = LlmAnalysisQueue(
+                    chat_id=chat_id,
+                    status="completed",
+                    priority=0,
+                    queued_at=now,
+                    completed_at=now,
+                    result=result_str,
+                )
+                session.add(item)
             session.commit()
 
     def clear_old_analysis(self, hours_old: int = 24) -> int:
         """Clear completed analysis entries older than given hours."""
         cutoff = self._now_timestamp() - (hours_old * 3600)
         with self.session() as session:
-            result = session.execute(
-                text("""
-                    DELETE FROM llm_analysis_queue
-                    WHERE status = 'completed' AND completed_at < :cutoff
-                """),
-                {"cutoff": cutoff},
+            stmt = (
+                select(LlmAnalysisQueue)
+                .where(LlmAnalysisQueue.status == "completed")
+                .where(LlmAnalysisQueue.completed_at < cutoff)
             )
+            items = session.exec(stmt).all()
+            count = len(items)
+            for item in items:
+                session.delete(item)
             session.commit()
-            return result.rowcount
+            return count
 
     # =========================================================================
     # EOD DETECTION
@@ -563,13 +507,12 @@ class AppDb:
             datetime.now().replace(hour=0, minute=0, second=0, microsecond=0).timestamp()
         )
         with self.session() as session:
-            result = session.execute(
-                text("""
-                    SELECT COUNT(*) FROM actions
-                    WHERE person_id = :person_id
-                    AND type = 'eod_contact'
-                    AND created_at >= :today_start
-                """),
-                {"person_id": person_id, "today_start": today_start},
+            stmt = (
+                select(func.count())
+                .select_from(Action)
+                .where(Action.person_id == person_id)
+                .where(Action.type == "eod_contact")
+                .where(Action.created_at >= today_start)
             )
-            return result.scalar() > 0
+            count = session.exec(stmt).one()
+            return count > 0

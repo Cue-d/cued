@@ -1,24 +1,21 @@
 """Periodic message sync job - syncs new messages from chat.db to prm.db."""
 
 import logging
-import os
 
-from db.sync import sync_all
+from config import config
+from db.sync import sync_incremental
 
 logger = logging.getLogger(__name__)
 
-CHAT_DB_PATH = os.path.expanduser("~/Library/Messages/chat.db")
-PRM_DB_PATH = os.path.expanduser("~/.prm/prm.db")
-
 
 def run_message_sync() -> None:
-    """Sync messages from chat.db to prm.db.
+    """Sync new messages from chat.db to prm.db.
 
-    This performs a full sync - INSERT OR REPLACE ensures idempotency.
-    New messages get added, existing ones get updated if changed.
+    Uses incremental sync to only process messages newer than the last sync.
+    Falls back to full sync if no prior sync exists.
     """
     try:
-        stats = sync_all(CHAT_DB_PATH, PRM_DB_PATH, verbose=False)
+        stats = sync_incremental(config.CHAT_DB_PATH, config.PRM_DB_PATH, verbose=False)
         if stats["messages"] > 0:
             logger.info(
                 f"[MESSAGE_SYNC] Synced {stats['messages']} messages in {stats['elapsed']:.2f}s"

@@ -36,6 +36,7 @@ export function CardStack({ actions, onSwipe }: CardStackProps) {
   const visibleActions = useMemo(() => actions.slice(0, VISIBLE_CARDS), [actions])
 
   const handleResponseChange = useCallback((actionId: number, text: string) => {
+    console.log('[CardStack] handleResponseChange:', { actionId, text })
     setResponseTexts((prev) => ({ ...prev, [actionId]: text }))
   }, [])
 
@@ -51,6 +52,12 @@ export function CardStack({ actions, onSwipe }: CardStackProps) {
       try {
         if (action.type === 'respond_to_message') {
           const responseText = responseTexts[action.id]
+          console.log('[CardStack] handleSwipe called:', {
+            actionId: action.id,
+            direction,
+            responseText,
+            responseTextsState: responseTexts
+          })
           // Only pass response text for right swipe
           if (direction === 'right' && responseText) {
             await onSwipe(action.id, direction, responseText)

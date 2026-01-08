@@ -1,24 +1,10 @@
-import os
-
 from fastapi import APIRouter
 from pydantic import BaseModel
 
-from db import AppDb
+from dependencies import get_app_db
 from services.macos import send_message, send_to_group
 
 router = APIRouter()
-
-PRM_DB_PATH = os.path.expanduser("~/.prm/prm.db")
-
-_app_db: AppDb | None = None
-
-
-def get_app_db() -> AppDb:
-    """Get the app database (lazy-loaded singleton)."""
-    global _app_db
-    if _app_db is None:
-        _app_db = AppDb(PRM_DB_PATH)
-    return _app_db
 
 
 class SendMessageRequest(BaseModel):

@@ -1,13 +1,12 @@
 """Search router - unified FTS5 + semantic search via RRF."""
 
 import logging
-import os
+from functools import lru_cache
 
 from fastapi import APIRouter, Query
 
-from db.prm_db import AppDb
+from dependencies import get_app_db, get_embedding_db
 from services.search import (
-    EmbeddingDb,
     FtsIndex,
     SearchResult,
     merge_results,
@@ -19,35 +18,13 @@ from services.search import (
 logger = logging.getLogger(__name__)
 router = APIRouter()
 
-PRM_DB_PATH = os.path.expanduser("~/.prm/prm.db")
-EMBEDDING_DB_PATH = os.path.expanduser("~/.prm/embeddings.db")
 
-_app_db: AppDb | None = None
-_embedding_db: EmbeddingDb | None = None
-_fts: FtsIndex | None = None
-
-
-def get_app_db() -> AppDb:
-    global _app_db
-    if _app_db is None:
-        _app_db = AppDb(PRM_DB_PATH)
-    return _app_db
-
-
-def get_embedding_db() -> EmbeddingDb:
-    global _embedding_db
-    if _embedding_db is None:
-        _embedding_db = EmbeddingDb(EMBEDDING_DB_PATH)
-        _embedding_db.init_schema()
-    return _embedding_db
-
-
+@lru_cache(maxsize=1)
 def get_fts() -> FtsIndex:
-    global _fts
-    if _fts is None:
-        _fts = FtsIndex(get_app_db().engine)
-        _fts.init()
-    return _fts
+    """Get singleton FTS index instance."""
+    fts = FtsIndex(get_app_db().engine)
+    fts.init()
+    return fts
 
 
 @router.get("/", response_model=list[SearchResult])

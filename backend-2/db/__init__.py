@@ -10,7 +10,7 @@ from .models import (
     MessageWithSender,
 )
 from .prm_db import AppDb
-from .sync import sync_all
+from .sync import sync_all, sync_incremental
 
 __all__ = [
     # Models
@@ -25,4 +25,5 @@ __all__ = [
     # Classes & functions
     "AppDb",
     "sync_all",
+    "sync_incremental",
 ]
