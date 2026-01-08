@@ -1,143 +1,51 @@
-"""Actions router - swipeable action cards with LLM integration."""
-
 import json
 import logging
-import os
-import time
-from enum import Enum
 
+import core
 from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel
 
-from db.models import ActionWithContext
-from db.prm_db import AppDb
+from schemas import (
+    ActionResponse,
+    ActionSwipeRequest,
+    AttachmentResponse,
+    CreateActionRequest,
+    MessageResponse,
+)
+from sync_db import APP_DB_PATH
+from utils import is_image_mime_type
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
 
-PRM_DB_PATH = os.path.expanduser("~/.prm/prm.db")
 
-_app_db: AppDb | None = None
-
-
-def get_app_db() -> AppDb:
-    """Get singleton AppDb instance."""
-    global _app_db
-    if _app_db is None:
-        _app_db = AppDb(PRM_DB_PATH)
-        _app_db.init_schema()
-    return _app_db
+def get_db():
+    db = core.AppDb(APP_DB_PATH)
+    db.init_schema()
+    return db
 
 
-# =============================================================================
-# REQUEST/RESPONSE MODELS
-# =============================================================================
-
-
-class ActionType(str, Enum):
-    RESPOND_TO_MESSAGE = "respond_to_message"
-    EOD_CONTACT = "eod_contact"
-    FOLLOW_UP = "follow_up"
-
-
-class SwipeDirection(str, Enum):
-    RIGHT = "right"
-    LEFT = "left"
-    UP = "up"
-
-
-class CreateActionRequest(BaseModel):
-    type: ActionType
-    priority: int = 50
-    chat_id: int | None = None
-    person_id: int | None = None
-    message_id: int | None = None
-    payload: dict | None = None
-    remind_at: int | None = None
-
-
-class ActionSwipeRequest(BaseModel):
-    direction: SwipeDirection
-    snooze_minutes: int | None = None
-    response_text: str | None = None
-
-
-class AttachmentResponse(BaseModel):
-    id: int
-    filename: str | None = None
-    mime_type: str | None = None
-    size: int | None = None
-    is_image: bool = False
-
-
-class MessageResponse(BaseModel):
-    id: int
-    text: str | None = None
-    date: int
-    is_from_me: bool
-    is_read: bool
-    date_read: int | None = None
-    sender_name: str | None = None
-    # Delivery status fields
-    is_sent: bool = True
-    is_delivered: bool = False
-    date_delivered: int | None = None
-    error: int = 0
-    attachments: list[AttachmentResponse] = []
-
-
-class ActionResponse(BaseModel):
-    id: int
-    type: str
-    status: str
-    priority: int
-    chat_id: int | None = None
-    person_id: int | None = None
-    message_id: int | None = None
-    payload: dict | None = None
-    created_at: int
-    remind_at: int | None = None
-    snoozed_until: int | None = None
-    completed_at: int | None = None
-    discarded_at: int | None = None
-    chat_name: str | None = None
-    person_name: str | None = None
-    message_text: str | None = None
-    message_timestamp: int | None = None
-    recent_messages: list[MessageResponse] = []
-
-
-# =============================================================================
-# HELPER FUNCTIONS
-# =============================================================================
-
-
-def _is_image_mime_type(mime_type: str | None) -> bool:
-    """Check if a MIME type is an image."""
-    if not mime_type:
-        return False
-    return mime_type.startswith("image/")
-
-
-def action_to_response(action: ActionWithContext, db: AppDb) -> ActionResponse:
-    """Convert ActionWithContext to ActionResponse with recent messages."""
-    recent_messages: list[MessageResponse] = []
-
+def action_to_response(action, db) -> ActionResponse:
+    """Convert Action from Rust to ActionResponse with recent messages."""
+    recent_messages = []
     if action.chat_id:
         messages = db.get_chat_messages(action.chat_id, 5)
+        message_ids = [m.id for m in messages]
+
+        # Batch fetch attachments for all messages
+        attachments_map = db.get_attachments_for_messages(message_ids) if message_ids else {}
 
         for m in messages:
-            # Fetch attachments for this message
-            attachments_list = db.get_message_attachments(m.id) if m.has_attachments else []
+            # Build attachments list
+            msg_attachments = attachments_map.get(m.id, [])
             attachments = [
                 AttachmentResponse(
                     id=a.id,
                     filename=a.filename,
                     mime_type=a.mime_type,
                     size=a.size,
-                    is_image=_is_image_mime_type(a.mime_type),
+                    is_image=is_image_mime_type(a.mime_type),
                 )
-                for a in attachments_list
+                for a in msg_attachments
             ]
 
             recent_messages.append(
@@ -149,31 +57,19 @@ def action_to_response(action: ActionWithContext, db: AppDb) -> ActionResponse:
                     is_read=m.is_read,
                     date_read=m.read_at,
                     sender_name=m.sender_name,
-                    is_sent=True,
-                    is_delivered=m.is_from_me,
-                    date_delivered=m.timestamp if m.is_from_me else None,
-                    error=0,
                     attachments=attachments,
                 )
             )
 
-    # Parse payload JSON
-    payload = None
-    if action.payload:
-        try:
-            payload = json.loads(action.payload)
-        except json.JSONDecodeError:
-            payload = None
-
     return ActionResponse(
         id=action.id,
-        type=action.type,
+        type=action.action_type,
         status=action.status,
         priority=action.priority,
         chat_id=action.chat_id,
         person_id=action.person_id,
         message_id=action.message_id,
-        payload=payload,
+        payload=json.loads(action.payload) if action.payload else None,
         created_at=action.created_at,
         remind_at=action.remind_at,
         snoozed_until=action.snoozed_until,
@@ -185,11 +81,6 @@ def action_to_response(action: ActionWithContext, db: AppDb) -> ActionResponse:
         message_timestamp=action.message_timestamp,
         recent_messages=recent_messages,
     )
-
-
-# =============================================================================
-# ENDPOINTS
-# =============================================================================
 
 
 @router.get("/", response_model=list[ActionResponse])
@@ -205,7 +96,7 @@ def get_actions(
         action_type: Filter by action type (respond_to_message, eod_contact, follow_up)
         limit: Maximum number of actions to return
     """
-    db = get_app_db()
+    db = get_db()
     if status == "pending":
         actions = db.get_pending_actions(limit)
     else:
@@ -215,7 +106,7 @@ def get_actions(
 
     # Apply type filter if specified
     if action_type:
-        actions = [a for a in actions if a.type == action_type]
+        actions = [a for a in actions if a.action_type == action_type]
 
     return [action_to_response(a, db) for a in actions]
 
@@ -223,7 +114,7 @@ def get_actions(
 @router.get("/{action_id}", response_model=ActionResponse)
 def get_action(action_id: int):
     """Get single action with context."""
-    db = get_app_db()
+    db = get_db()
     action = db.get_action(action_id)
     if not action:
         raise HTTPException(status_code=404, detail="Action not found")
@@ -233,7 +124,7 @@ def get_action(action_id: int):
 @router.post("/", response_model=ActionResponse)
 def create_action(request: CreateActionRequest):
     """Create a new action."""
-    db = get_app_db()
+    db = get_db()
     payload_json = json.dumps(request.payload) if request.payload else None
     action_id = db.create_action(
         action_type=request.type.value,
@@ -251,32 +142,30 @@ def create_action(request: CreateActionRequest):
 @router.post("/{action_id}/swipe", response_model=ActionResponse)
 def swipe_action(action_id: int, request: ActionSwipeRequest):
     """Handle swipe gesture on action card."""
-    db = get_app_db()
+    db = get_db()
     action = db.get_action(action_id)
     if not action:
         raise HTTPException(status_code=404, detail="Action not found")
 
-    if request.direction == SwipeDirection.LEFT:
-        # Discard
-        db.update_action_status(action_id, "discarded")
+    import time
 
-    elif request.direction == SwipeDirection.RIGHT:
+    if request.direction.value == "left":
+        # Discard
+        db.update_action_status(action_id, "discarded", None)
+    elif request.direction.value == "right":
         # Complete - also send message if provided
         if request.response_text and action.chat_id:
             try:
-                from services.macos.messaging import send_message, send_to_group
-
                 # Get chat to determine if group
                 chat = db.get_chat(action.chat_id)
                 if chat and chat.is_group:
-                    send_to_group(chat.identifier, request.response_text)
+                    core.send_to_group(chat.identifier, request.response_text)
                 elif chat:
-                    send_message(chat.identifier, request.response_text)
+                    core.send_message(chat.identifier, request.response_text)
             except Exception as e:
                 logger.error(f"Failed to send message: {e}")
-        db.update_action_status(action_id, "completed")
-
-    elif request.direction == SwipeDirection.UP:
+        db.update_action_status(action_id, "completed", None)
+    elif request.direction.value == "up":
         # Snooze
         snooze_until = None
         if request.snooze_minutes:
@@ -290,7 +179,7 @@ def swipe_action(action_id: int, request: ActionSwipeRequest):
 @router.delete("/{action_id}")
 def delete_action(action_id: int):
     """Delete an action."""
-    db = get_app_db()
+    db = get_db()
     db.delete_action(action_id)
     return {"success": True}
 
@@ -302,7 +191,7 @@ def generate_unanswered_actions(threshold_hours: int = 24):
     Args:
         threshold_hours: Only create actions for messages unanswered longer than this
     """
-    db = get_app_db()
+    db = get_db()
     unanswered = db.get_unanswered_chats(threshold_hours)
 
     created = 0
@@ -321,6 +210,7 @@ def generate_unanswered_actions(threshold_hours: int = 24):
             person_id=chat.sender_id,
             message_id=chat.message_id,
             payload=payload,
+            remind_at=None,
         )
         created += 1
 

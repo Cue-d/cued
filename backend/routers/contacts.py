@@ -1,95 +1,66 @@
-"""
-Contacts API router.
+"""Contacts sync router - stub implementation.
 
-Provides endpoints for managing Apple Contacts sync.
+These endpoints return stub data until full contact sync is implemented.
+The frontend can still function without real contact data.
 """
 
-import core
 from fastapi import APIRouter
+from pydantic import BaseModel
 
-from contact_sync import (
-    get_sync_status,
-    sync_contacts,
-    sync_contacts_full,
-)
-from sync_db import APP_DB_PATH
-
-router = APIRouter(tags=["contacts"])
+router = APIRouter()
 
 
-def get_db():
-    """Get app database connection.
-
-    Note: Schema is initialized at app startup via sync_all(), so we don't
-    need to call init_schema() here. SQLite tables use IF NOT EXISTS anyway.
-    """
-    return core.AppDb(APP_DB_PATH)
+class ContactsSyncStatus(BaseModel):
+    has_synced: bool
+    last_sync_at: int | None = None
+    total_contacts: int = 0
+    total_handles: int = 0
 
 
-@router.get("/status")
-def get_contacts_sync_status() -> dict:
-    """
-    Get the current status of the contacts sync engine.
+class ContactsStats(BaseModel):
+    active: int = 0
+    deleted: int = 0
+    total: int = 0
 
-    Returns:
-        - total_contacts: Number of active contacts in the database
-        - deleted_contacts: Number of contacts marked as deleted
-        - last_sync_timestamp: Unix timestamp of the last sync
-        - last_modification_timestamp: Latest modification timestamp from Apple Contacts
-    """
-    db = get_db()
-    status = get_sync_status(db)
-    return status.to_dict()
+
+@router.get("/status", response_model=ContactsSyncStatus)
+def get_contacts_status():
+    """Get contacts sync status - stub returns no sync data."""
+    return ContactsSyncStatus(
+        has_synced=False,
+        last_sync_at=None,
+        total_contacts=0,
+        total_handles=0,
+    )
 
 
 @router.post("/sync")
-def trigger_contacts_sync(force_full: bool = False) -> dict:
-    """
-    Trigger a contacts sync.
-
-    Args:
-        force_full: If True, perform a full sync even if incremental is possible
-
-    Returns:
-        - synced: Number of contacts processed
-        - created: Number of new contacts
-        - updated: Number of updated contacts
-        - deleted: Number of contacts marked as deleted
-        - duration_seconds: Time taken for the sync
-        - is_full_sync: Whether this was a full or incremental sync
-    """
-    db = get_db()
-    result = sync_contacts(db, force_full=force_full, verbose=True)
-    return result.to_dict()
+def sync_contacts():
+    """Trigger incremental contacts sync - stub does nothing."""
+    return {
+        "success": True,
+        "message": "Contacts sync not yet implemented",
+        "contacts_added": 0,
+        "contacts_updated": 0,
+    }
 
 
 @router.post("/sync/full")
-def trigger_full_contacts_sync() -> dict:
-    """
-    Force a full contacts sync.
-
-    This fetches all contacts from Apple Contacts and refreshes the database.
-    Use this when you suspect the database is out of sync.
-    """
-    db = get_db()
-    result = sync_contacts_full(db, verbose=True)
-    return result.to_dict()
-
-
-@router.get("/stats")
-def get_contacts_stats() -> dict:
-    """
-    Get statistics about synced contacts.
-
-    Returns:
-        - active: Number of active contacts
-        - deleted: Number of deleted contacts
-        - total: Total contacts (active + deleted)
-    """
-    db = get_db()
-    active, deleted = db.get_contact_stats()
+def sync_contacts_full():
+    """Force full contacts sync - stub does nothing."""
     return {
-        "active": active,
-        "deleted": deleted,
-        "total": active + deleted,
+        "success": True,
+        "message": "Contacts sync not yet implemented",
+        "contacts_added": 0,
+        "contacts_updated": 0,
     }
+
+
+@router.get("/stats", response_model=ContactsStats)
+def get_contacts_stats():
+    """Get contact counts - stub returns zeros."""
+    return ContactsStats(
+        active=0,
+        deleted=0,
+        total=0,
+    )

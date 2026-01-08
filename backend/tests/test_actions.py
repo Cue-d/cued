@@ -1,273 +1,412 @@
-"""Tests for actions router endpoints."""
+"""Tests for actions router and database operations."""
 
-from unittest.mock import MagicMock, patch
+import json
+import time
 
+import pytest
 from fastapi.testclient import TestClient
 
-from tests.conftest import MockAction, MockSendResult
+from db.prm_db import AppDb
+from main import app
 
 
-class TestGetActions:
-    """Tests for GET /actions endpoint."""
-
-    def test_get_actions_returns_list(self, client: TestClient):
-        """Get pending actions returns a list."""
-        response = client.get("/actions/")
-        assert response.status_code == 200
-        data = response.json()
-        assert isinstance(data, list)
-        assert len(data) == 2
-
-    def test_get_actions_structure(self, client: TestClient):
-        """Action response has correct structure."""
-        response = client.get("/actions/")
-        data = response.json()
-        action = data[0]
-
-        assert action["id"] == 1
-        assert action["type"] == "respond_to_message"
-        assert action["status"] == "pending"
-        assert action["priority"] == 60
-        assert action["chat_id"] == 1
-        assert action["person_id"] == 1
-        assert action["message_id"] == 1
-        assert action["chat_name"] == "John Doe"
-        assert action["person_name"] == "John Doe"
-        assert action["payload"]["message_preview"] == "Hello!"
-        assert action["payload"]["hours_since"] == 48
-
-    def test_get_actions_includes_recent_messages(self, client: TestClient):
-        """Actions include recent messages for context."""
-        response = client.get("/actions/")
-        data = response.json()
-        action = data[0]
-
-        assert "recent_messages" in action
-        assert len(action["recent_messages"]) > 0
-        assert action["recent_messages"][0]["text"] == "Hello!"
-
-    def test_get_actions_with_limit(self, client: TestClient):
-        """Limit parameter is passed to database."""
-        response = client.get("/actions/?limit=10")
-        assert response.status_code == 200
+@pytest.fixture
+def client():
+    """Test client for FastAPI app."""
+    return TestClient(app)
 
 
-class TestGetSingleAction:
-    """Tests for GET /actions/{action_id} endpoint."""
-
-    def test_get_action_by_id(self, client: TestClient):
-        """Get single action by ID."""
-        response = client.get("/actions/1")
-        assert response.status_code == 200
-        data = response.json()
-        assert data["id"] == 1
-        assert data["type"] == "respond_to_message"
-
-    def test_get_action_not_found(self, client: TestClient):
-        """Get non-existent action returns 404."""
-        response = client.get("/actions/999")
-        assert response.status_code == 404
-        assert response.json()["detail"] == "Action not found"
+@pytest.fixture
+def test_db(tmp_path):
+    """Create a test database with schema."""
+    db_path = str(tmp_path / "test_prm.db")
+    db = AppDb(db_path)
+    db.init_schema()
+    return db
 
 
-class TestCreateAction:
-    """Tests for POST /actions endpoint."""
+@pytest.fixture
+def test_db_with_data(test_db):
+    """Create test database with sample chat and message data."""
+    from sqlmodel import text
 
-    def test_create_action_respond_to_message(self, client: TestClient, mock_app_db: MagicMock):
-        """Create a respond_to_message action."""
-        # Make get_action return the newly created action
-        mock_app_db.get_action.side_effect = lambda action_id: MockAction(
-            id=3,
+    with test_db.session() as session:
+        # Insert a handle
+        session.execute(
+            text("""
+                INSERT INTO handles (id, identifier, service)
+                VALUES (1, '+15551234567', 'iMessage')
+            """)
+        )
+        # Insert a chat
+        session.execute(
+            text("""
+                INSERT INTO chats (id, identifier, name, is_group, synced_at)
+                VALUES (1, '+15551234567', 'Test Contact', 0, :now)
+            """),
+            {"now": int(time.time())},
+        )
+        # Insert messages
+        now = int(time.time())
+        session.execute(
+            text("""
+                INSERT INTO messages (id, chat_id, sender_id, text, timestamp, is_from_me,
+                                      is_read, has_attachments, synced_at)
+                VALUES
+                    (1, 1, 1, 'Hello there', :ts1, 0, 1, 0, :now),
+                    (2, 1, NULL, 'Hi back', :ts2, 1, 1, 0, :now),
+                    (3, 1, 1, 'How are you?', :ts3, 0, 1, 0, :now)
+            """),
+            {"ts1": now - 7200, "ts2": now - 3600, "ts3": now - 1800, "now": now},
+        )
+        session.commit()
+
+    return test_db
+
+
+class TestActionsCRUD:
+    """Test action CRUD operations."""
+
+    def test_create_action(self, test_db_with_data):
+        """Test creating a new action."""
+        db = test_db_with_data
+        action_id = db.create_action(
             action_type="respond_to_message",
-            status="pending",
-            priority=70,
+            priority=60,
             chat_id=1,
             person_id=1,
-            message_id=1,
-            chat_name="John Doe",
-            person_name="John Doe",
+            message_id=3,
+            payload=json.dumps({"message_preview": "How are you?"}),
         )
 
-        response = client.post(
-            "/actions/",
-            json={
-                "type": "respond_to_message",
-                "priority": 70,
-                "chat_id": 1,
-                "person_id": 1,
-                "message_id": 1,
-            },
-        )
-        assert response.status_code == 200
-        data = response.json()
-        assert data["type"] == "respond_to_message"
-        assert data["priority"] == 70
+        assert action_id is not None
+        assert action_id > 0
 
-    def test_create_action_eod_contact(self, client: TestClient, mock_app_db: MagicMock):
-        """Create an eod_contact action."""
-        mock_app_db.get_action.side_effect = lambda action_id: MockAction(
-            id=3,
-            action_type="eod_contact",
-            status="pending",
-            priority=50,
-            person_id=2,
-            person_name="Jane Smith",
+    def test_get_action(self, test_db_with_data):
+        """Test retrieving a single action."""
+        db = test_db_with_data
+        action_id = db.create_action(
+            action_type="respond_to_message",
+            priority=60,
+            chat_id=1,
         )
 
-        response = client.post(
-            "/actions/",
-            json={
-                "type": "eod_contact",
-                "priority": 50,
-                "person_id": 2,
-            },
-        )
-        assert response.status_code == 200
-        data = response.json()
-        assert data["type"] == "eod_contact"
+        action = db.get_action(action_id)
+        assert action is not None
+        assert action.id == action_id
+        assert action.type == "respond_to_message"
+        assert action.status == "pending"
+        assert action.priority == 60
+        assert action.chat_id == 1
+        assert action.chat_name == "Test Contact"
 
-    def test_create_action_with_payload(self, client: TestClient, mock_app_db: MagicMock):
-        """Create action with custom payload."""
-        mock_app_db.get_action.side_effect = lambda action_id: MockAction(
-            id=3,
-            action_type="follow_up",
-            status="pending",
-            priority=40,
-            payload='{"reason": "test"}',
-        )
+    def test_get_action_not_found(self, test_db_with_data):
+        """Test retrieving nonexistent action."""
+        db = test_db_with_data
+        action = db.get_action(9999)
+        assert action is None
 
-        response = client.post(
-            "/actions/",
-            json={
-                "type": "follow_up",
-                "priority": 40,
-                "payload": {"reason": "test"},
-            },
-        )
-        assert response.status_code == 200
+    def test_get_pending_actions(self, test_db_with_data):
+        """Test getting pending actions ordered by priority."""
+        db = test_db_with_data
+
+        # Create actions with different priorities
+        db.create_action(action_type="respond_to_message", priority=50, chat_id=1)
+        db.create_action(action_type="respond_to_message", priority=80, chat_id=1)
+        db.create_action(action_type="follow_up", priority=60, chat_id=1)
+
+        actions = db.get_pending_actions(limit=10)
+        assert len(actions) == 3
+        # Should be ordered by priority DESC
+        assert actions[0].priority == 80
+        assert actions[1].priority == 60
+        assert actions[2].priority == 50
+
+    def test_get_pending_actions_includes_expired_snoozed(self, test_db_with_data):
+        """Test that expired snoozed actions appear in pending list."""
+        db = test_db_with_data
+
+        action_id = db.create_action(action_type="respond_to_message", priority=50, chat_id=1)
+        # Snooze until the past
+        db.update_action_status(action_id, "snoozed", int(time.time()) - 60)
+
+        actions = db.get_pending_actions()
+        assert len(actions) == 1
+        assert actions[0].status == "snoozed"
+
+    def test_update_action_status_to_completed(self, test_db_with_data):
+        """Test marking action as completed."""
+        db = test_db_with_data
+        action_id = db.create_action(action_type="respond_to_message", chat_id=1)
+
+        db.update_action_status(action_id, "completed")
+
+        action = db.get_action(action_id)
+        assert action.status == "completed"
+        assert action.completed_at is not None
+        assert action.discarded_at is None
+
+    def test_update_action_status_to_discarded(self, test_db_with_data):
+        """Test marking action as discarded."""
+        db = test_db_with_data
+        action_id = db.create_action(action_type="respond_to_message", chat_id=1)
+
+        db.update_action_status(action_id, "discarded")
+
+        action = db.get_action(action_id)
+        assert action.status == "discarded"
+        assert action.discarded_at is not None
+        assert action.completed_at is None
+
+    def test_update_action_status_to_snoozed(self, test_db_with_data):
+        """Test snoozing an action."""
+        db = test_db_with_data
+        action_id = db.create_action(action_type="respond_to_message", chat_id=1)
+        snooze_until = int(time.time()) + 3600
+
+        db.update_action_status(action_id, "snoozed", snooze_until)
+
+        action = db.get_action(action_id)
+        assert action.status == "snoozed"
+        assert action.snoozed_until == snooze_until
+
+    def test_delete_action(self, test_db_with_data):
+        """Test deleting an action."""
+        db = test_db_with_data
+        action_id = db.create_action(action_type="respond_to_message", chat_id=1)
+
+        db.delete_action(action_id)
+
+        action = db.get_action(action_id)
+        assert action is None
 
 
-class TestSwipeAction:
-    """Tests for POST /actions/{action_id}/swipe endpoint."""
+class TestLlmAnalysisQueue:
+    """Test LLM analysis queue operations."""
 
-    def test_swipe_left_discards(self, client: TestClient, mock_app_db: MagicMock):
-        """Swipe left discards the action."""
-        # Return updated action after swipe
-        mock_app_db.get_action.side_effect = [
-            MockAction(id=1, action_type="respond_to_message", status="pending"),
-            MockAction(id=1, action_type="respond_to_message", status="discarded"),
-        ]
+    def test_queue_for_analysis(self, test_db_with_data):
+        """Test queueing a chat for analysis."""
+        db = test_db_with_data
+        db.queue_for_analysis(chat_id=1, priority=75)
 
-        response = client.post(
-            "/actions/1/swipe",
-            json={"direction": "left"},
-        )
-        assert response.status_code == 200
-        mock_app_db.update_action_status.assert_called_with(1, "discarded", None)
+        item = db.get_next_pending_analysis()
+        assert item is not None
+        assert item.chat_id == 1
+        assert item.priority == 75
+        assert item.status == "pending"
 
-    def test_swipe_right_completes(self, client: TestClient, mock_app_db: MagicMock):
-        """Swipe right completes the action."""
-        mock_app_db.get_action.side_effect = [
-            MockAction(id=1, action_type="respond_to_message", status="pending"),
-            MockAction(id=1, action_type="respond_to_message", status="completed"),
-        ]
+    def test_get_next_pending_analysis_priority_order(self, test_db_with_data):
+        """Test that highest priority item is returned first."""
+        db = test_db_with_data
 
-        response = client.post(
-            "/actions/1/swipe",
-            json={"direction": "right"},
-        )
-        assert response.status_code == 200
-        mock_app_db.update_action_status.assert_called_with(1, "completed", None)
+        # Add a second chat
+        from sqlmodel import text
 
-    def test_swipe_right_with_response_sends_message(
-        self, client: TestClient, mock_app_db: MagicMock
-    ):
-        """Swipe right with response_text sends a message."""
-        mock_app_db.get_action.side_effect = [
-            MockAction(id=1, action_type="respond_to_message", status="pending", chat_id=1),
-            MockAction(id=1, action_type="respond_to_message", status="completed", chat_id=1),
-        ]
-
-        with patch("core.send_message", return_value=MockSendResult(success=True)) as mock_send:
-            response = client.post(
-                "/actions/1/swipe",
-                json={"direction": "right", "response_text": "Hey, sorry for the delay!"},
+        with db.session() as session:
+            session.execute(
+                text("""
+                    INSERT INTO chats (id, identifier, name, is_group, synced_at)
+                    VALUES (2, '+15559876543', 'Other Contact', 0, :now)
+                """),
+                {"now": int(time.time())},
             )
-            assert response.status_code == 200
-            mock_send.assert_called_once()
+            session.commit()
 
-    def test_swipe_up_snoozes(self, client: TestClient, mock_app_db: MagicMock):
-        """Swipe up snoozes the action."""
-        mock_app_db.get_action.side_effect = [
-            MockAction(id=1, action_type="respond_to_message", status="pending"),
-            MockAction(id=1, action_type="respond_to_message", status="snoozed"),
-        ]
+        db.queue_for_analysis(chat_id=1, priority=50)
+        db.queue_for_analysis(chat_id=2, priority=80)
 
-        response = client.post(
-            "/actions/1/swipe",
-            json={"direction": "up", "snooze_minutes": 60},
+        item = db.get_next_pending_analysis()
+        assert item.chat_id == 2
+        assert item.priority == 80
+
+    def test_mark_analysis_started(self, test_db_with_data):
+        """Test marking analysis as started."""
+        db = test_db_with_data
+        db.queue_for_analysis(chat_id=1, priority=50)
+
+        db.mark_analysis_started(chat_id=1)
+
+        # Should not appear in pending anymore
+        item = db.get_next_pending_analysis()
+        assert item is None
+
+    def test_mark_analysis_complete(self, test_db_with_data):
+        """Test marking analysis as complete."""
+        db = test_db_with_data
+        db.queue_for_analysis(chat_id=1, priority=50)
+        db.mark_analysis_started(chat_id=1)
+
+        db.mark_analysis_complete(chat_id=1, result="action_created")
+
+        # Verify it's marked complete (not in pending)
+        item = db.get_next_pending_analysis()
+        assert item is None
+
+    def test_mark_analysis_skipped(self, test_db_with_data):
+        """Test marking chat as skipped."""
+        db = test_db_with_data
+        db.mark_analysis_skipped(chat_id=1, reason="short_code_sender")
+
+        # Should not appear in pending
+        item = db.get_next_pending_analysis()
+        assert item is None
+
+    def test_clear_old_analysis(self, test_db_with_data):
+        """Test clearing old completed analysis entries."""
+        db = test_db_with_data
+        db.queue_for_analysis(chat_id=1, priority=50)
+        db.mark_analysis_complete(chat_id=1, result="no_action")
+
+        # hours_old=1 means entries completed more than 1 hour ago
+        # Since we just completed it, it won't be cleared
+        cleared = db.clear_old_analysis(hours_old=1)
+        assert cleared == 0
+
+        # But it should still exist in the queue (just not pending)
+        item = db.get_next_pending_analysis()
+        assert item is None  # Not pending anymore
+
+
+class TestMessageFilter:
+    """Test message filter heuristics."""
+
+    def test_short_code_filter(self):
+        """Test short code sender detection."""
+        from services.actions.message_filter import should_skip_llm_analysis
+
+        result = should_skip_llm_analysis(
+            identifier="12345", text="Hello", person_name=None, is_contact=False
         )
-        assert response.status_code == 200
-        # Check that update_action_status was called with snoozed status
-        call_args = mock_app_db.update_action_status.call_args
-        assert call_args[0][0] == 1
-        assert call_args[0][1] == "snoozed"
-        assert call_args[0][2] is not None  # snooze_until timestamp
+        assert result.should_skip is True
+        assert result.reason.value == "short_code_sender"
 
-    def test_swipe_action_not_found(self, client: TestClient, mock_app_db: MagicMock):
-        """Swipe on non-existent action returns 404."""
-        mock_app_db.get_action.side_effect = lambda action_id: None
+    def test_otp_filter(self):
+        """Test OTP message detection."""
+        from services.actions.message_filter import should_skip_llm_analysis
 
-        response = client.post(
-            "/actions/999/swipe",
-            json={"direction": "left"},
+        result = should_skip_llm_analysis(
+            identifier="+15551234567",
+            text="Your verification code is 123456",
+            person_name=None,
+            is_contact=False,
         )
-        assert response.status_code == 404
+        assert result.should_skip is True
+        assert result.reason.value == "otp_verification_code"
+
+    def test_unsubscribe_filter(self):
+        """Test marketing unsubscribe detection."""
+        from services.actions.message_filter import should_skip_llm_analysis
+
+        result = should_skip_llm_analysis(
+            identifier="+15551234567",
+            text="50% off! Reply STOP to unsubscribe",
+            person_name=None,
+            is_contact=False,
+        )
+        assert result.should_skip is True
+        assert result.reason.value == "marketing_with_unsubscribe"
+
+    def test_normal_message_not_filtered(self):
+        """Test that normal messages are not filtered."""
+        from services.actions.message_filter import should_skip_llm_analysis
+
+        result = should_skip_llm_analysis(
+            identifier="+15551234567",
+            text="Hey, want to grab lunch tomorrow?",
+            person_name="John Smith",
+            is_contact=True,
+        )
+        assert result.should_skip is False
 
 
-class TestDeleteAction:
-    """Tests for DELETE /actions/{action_id} endpoint."""
+class TestPriorityCalculation:
+    """Test priority scoring."""
 
-    def test_delete_action(self, client: TestClient, mock_app_db: MagicMock):
-        """Delete an action."""
-        response = client.delete("/actions/1")
-        assert response.status_code == 200
-        assert response.json()["success"] is True
-        mock_app_db.delete_action.assert_called_with(1)
+    def test_fresh_message_low_priority(self):
+        """Test that very fresh messages have low priority."""
+        from services.actions.priority import calculate_chat_priority
+
+        priority = calculate_chat_priority(hours_since=1)
+        assert priority == 20
+
+    def test_peak_urgency_zone(self):
+        """Test that 24-72h messages have peak priority."""
+        from services.actions.priority import calculate_chat_priority
+
+        priority = calculate_chat_priority(hours_since=48)
+        assert priority == 80
+
+    def test_contact_boost(self):
+        """Test contact importance boost."""
+        from services.actions.priority import calculate_chat_priority
+
+        priority = calculate_chat_priority(
+            hours_since=48, person={"is_contact": True, "company": "Acme Inc"}
+        )
+        # Base 80 + 10 (contact) + 10 (company) = 100
+        assert priority == 100
+
+    def test_group_penalty(self):
+        """Test group chat penalty."""
+        from services.actions.priority import calculate_chat_priority
+
+        priority = calculate_chat_priority(hours_since=48, is_group=True)
+        # Base 80 - 15 (group) = 65
+        assert priority == 65
 
 
-class TestGenerateUnansweredActions:
-    """Tests for POST /actions/generate/unanswered endpoint."""
+class TestLlmClient:
+    """Test LLM client utilities."""
 
-    def test_generate_unanswered_actions(self, client: TestClient, mock_app_db: MagicMock):
-        """Generate actions for unanswered messages."""
-        response = client.post("/actions/generate/unanswered")
-        assert response.status_code == 200
-        data = response.json()
-        assert data["success"] is True
-        assert data["actions_created"] == 1
+    def test_sanitize_text(self):
+        """Test text sanitization."""
+        from services.actions.llm_client import sanitize_text
 
-        # Check that create_action was called with correct parameters
-        mock_app_db.create_action.assert_called_once()
-        call_kwargs = mock_app_db.create_action.call_args[1]
-        assert call_kwargs["action_type"] == "respond_to_message"
-        assert call_kwargs["priority"] == 60
-        assert call_kwargs["chat_id"] == 1
-        assert call_kwargs["message_id"] == 10
+        # Normal text passes through
+        assert sanitize_text("Hello world") == "Hello world"
 
-    def test_generate_unanswered_actions_with_threshold(
-        self, client: TestClient, mock_app_db: MagicMock
-    ):
-        """Generate actions with custom threshold."""
-        response = client.post("/actions/generate/unanswered?threshold_hours=48")
-        assert response.status_code == 200
-        mock_app_db.get_unanswered_chats.assert_called_with(48)
+        # None returns empty string
+        assert sanitize_text(None) == ""
 
-    def test_generate_unanswered_actions_empty(self, client: TestClient, mock_app_db: MagicMock):
-        """Generate actions when no unanswered messages."""
-        mock_app_db.get_unanswered_chats.return_value = []
+        # Control characters are removed
+        assert sanitize_text("Hello\x00world") == "Helloworld"
 
-        response = client.post("/actions/generate/unanswered")
-        assert response.status_code == 200
-        data = response.json()
-        assert data["actions_created"] == 0
+        # Newlines are preserved
+        assert sanitize_text("Hello\nworld") == "Hello\nworld"
+
+    def test_sanitize_text_truncates_long_text(self):
+        """Test that long text is truncated."""
+        from services.actions.llm_client import sanitize_text
+
+        long_text = "x" * 2000
+        result = sanitize_text(long_text)
+        assert len(result) == 1003  # 1000 + "..."
+        assert result.endswith("...")
+
+    def test_format_conversation(self):
+        """Test conversation formatting."""
+        from services.actions.llm_client import (
+            ConversationContext,
+            format_conversation_as_text,
+        )
+
+        ctx = ConversationContext(
+            chat_id=1,
+            person_id=1,
+            person_name="John Doe",
+            person_company="Acme Inc",
+            person_notes="Met at conference",
+            messages=[
+                {"text": "Hello", "is_from_me": False, "timestamp": 1000},
+                {"text": "Hi there", "is_from_me": True, "timestamp": 2000},
+            ],
+            hours_since_last=24,
+        )
+
+        result = format_conversation_as_text(ctx)
+        assert "John Doe" in result
+        assert "Acme Inc" in result
+        assert "Met at conference" in result
+        assert "Hours since last message: 24" in result
+        assert "Them: Hello" in result
+        assert "Me: Hi there" in result

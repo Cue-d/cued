@@ -6,7 +6,6 @@ A macOS-only local-first personal CRM with an iMessage-style interface.
 
 - **macOS** (required - uses native iMessage database and Contacts.app)
 - **Full Disk Access** granted to your terminal/IDE (System Settings → Privacy & Security → Full Disk Access)
-- [Rust](https://rustup.rs/)
 - [uv](https://docs.astral.sh/uv/) (Python package manager)
 - [pnpm](https://pnpm.io/)
 - **For Apple Intelligence features:** macOS 26+ (Tahoe) and Xcode 26+ / Swift 6.0+
@@ -16,14 +15,8 @@ A macOS-only local-first personal CRM with an iMessage-style interface.
 ### 1. Install dependencies
 
 ```bash
-# Install maturin (Rust → Python build tool)
-uv tool install maturin
-
 # Backend (Python)
 cd backend && uv sync && cd ..
-
-# Core (Rust → Python bindings)
-VIRTUAL_ENV=backend/.venv maturin develop --manifest-path core/Cargo.toml
 
 # Frontend (Electron + React)
 cd frontend && pnpm install && cd ..
@@ -41,43 +34,9 @@ cd llm && swift build -c release && cd ..
 
 The binary is output to `llm/.build/release/prm-llm`. The backend automatically detects and uses it when available.
 
-### 3. Run initial sync (~10 minutes)
+### 3. Start the app
 
-The first sync fetches all your iMessage history and resolves contact names via AppleScript. This takes approximately 10 minutes due to Contacts.app API limitations.
-
-```bash
-cd backend && uv run python sync_db.py
-```
-
-You'll see progress output as it syncs:
-
-- People (handles from chat.db)
-- Chats (conversations)
-- Messages (incremental batches)
-- Attachments
-
-### 4. Initialize Search Indexes
-
-After the first sync completes, set up the search indexes:
-
-```bash
-# Start the backend first
-cd backend && uv run uvicorn main:app --reload
-
-# In another terminal, rebuild FTS5 index for full-text search
-curl -X POST http://localhost:8000/search/rebuild
-
-# Queue messages for semantic search embeddings
-curl -X POST http://localhost:8000/search/embeddings/queue-all
-
-# Process embeddings (run multiple times until pending: 0)
-curl -X POST http://localhost:8000/search/embeddings/process?batch_size=500
-curl http://localhost:8000/search/embeddings/stats  # Check progress
-```
-
-Note: First embedding call downloads the model (~90MB). Processing ~44K messages takes several minutes.
-
-### 5. Start the app
+The backend automatically syncs from `chat.db` on first launch.
 
 **Terminal 1 - Backend:**
 
@@ -93,34 +52,39 @@ cd frontend && pnpm dev
 
 The app will open at http://localhost:5173 (or in Electron).
 
+### 4. Initialize Search Indexes (First Run)
+
+After the initial sync completes, set up the search indexes:
+
+```bash
+# Rebuild FTS5 index for full-text search
+curl -X POST http://localhost:8000/search/rebuild
+
+# Queue messages for semantic search embeddings
+curl -X POST http://localhost:8000/search/embeddings/queue-all
+
+# Process embeddings (run multiple times until pending: 0)
+curl -X POST http://localhost:8000/search/embeddings/process?batch_size=500
+curl http://localhost:8000/search/embeddings/stats  # Check progress
+```
+
+Note: First embedding call downloads the model (~90MB). Processing ~44K messages takes several minutes.
+
 ## Resetting the Database
 
 To completely reset and re-seed the local SQLite database:
 
 ```bash
-# Delete the database and contacts cache
+# Delete the database
 rm -rf ~/.prm/prm.db ~/.prm/contacts_cache.json
 
-# Re-run the full sync (~10 minutes)
-cd backend && uv run python sync_db.py
-
-# Start the backend
-uv run uvicorn main:app --reload
+# Restart the backend (will re-sync automatically)
+cd backend && uv run uvicorn main:app --reload
 
 # In another terminal, rebuild search indexes
 curl -X POST http://localhost:8000/search/rebuild
 curl -X POST http://localhost:8000/search/embeddings/queue-all
 curl -X POST http://localhost:8000/search/embeddings/process?batch_size=500
-```
-
-## Refreshing Contacts
-
-If contact names become stale or you've added new contacts:
-
-```bash
-# Delete cache and re-sync
-rm ~/.prm/contacts_cache.json
-cd backend && uv run python sync_db.py
 ```
 
 ## Action Queue
@@ -138,7 +102,7 @@ curl http://localhost:8000/actions/
 curl -X POST http://localhost:8000/actions/1/swipe -H "Content-Type: application/json" -d '{"direction": "right", "response_text": "Hey!"}'
 ```
 
-The backend automatically scans for unanswered messages every 6 hours and generates EOD actions for new contacts daily at 9 PM.
+The backend automatically scans for unanswered messages every 5 minutes and generates EOD actions for new contacts daily at 9 PM.
 
 ## Building for Production
 
@@ -150,10 +114,9 @@ cd frontend && pnpm build:full
 
 This runs the following in order:
 
-1. `build:rust` - Builds the Rust core as a Python extension
-2. `build:llm` - Builds the Swift LLM CLI (requires macOS 26+/Xcode 26+)
-3. `build:backend` - Packages the Python backend with PyInstaller
-4. `build` + `electron-builder` - Builds and packages the Electron app
+1. `build:llm` - Builds the Swift LLM CLI (requires macOS 26+/Xcode 26+)
+2. `build:backend` - Packages the Python backend with PyInstaller
+3. `build` + `electron-builder` - Builds and packages the Electron app
 
 The final `.dmg` is output to `frontend/dist/`.
 
@@ -175,20 +138,18 @@ cd frontend && pnpm test
 
 ## Troubleshooting
 
-| Problem                                   | Solution                                                                                |
-| ----------------------------------------- | --------------------------------------------------------------------------------------- |
-| "Error accessing messages database"       | Grant Full Disk Access to your terminal                                                 |
-| "Cannot import core"                      | Run `VIRTUAL_ENV=backend/.venv maturin develop --manifest-path core/Cargo.toml`         |
-| Swift build fails                         | Requires macOS 26+ and Xcode 26+/Swift 6.0+. Backend works without it (uses heuristics) |
-| Contact names showing as phone numbers    | Run the initial sync: `cd backend && uv run python sync_db.py`                          |
-| Sync seems stuck                          | Contact resolution is slow (~10 min) - this is normal                                   |
-| "database disk image is malformed" (FTS5) | See CLAUDE.md Manual Processes section to recreate FTS5 table                           |
-| Semantic search returns empty             | Run embedding queue-all and process commands (see step 4)                               |
+| Problem                                   | Solution                                                                      |
+| ----------------------------------------- | ----------------------------------------------------------------------------- |
+| "Error accessing messages database"       | Grant Full Disk Access to your terminal                                       |
+| Swift build fails                         | Requires macOS 26+ and Xcode 26+/Swift 6.0+. Backend works without it         |
+| Contact names showing as phone numbers    | Restart the backend to trigger a sync                                         |
+| "database disk image is malformed" (FTS5) | See CLAUDE.md Manual Processes section to recreate FTS5 table                 |
+| Semantic search returns empty             | Run embedding queue-all and process commands (see step 4)                     |
 
 ## Architecture
 
 ```
-Frontend (Electron/React) ←→ Backend (FastAPI) ←→ Core (Rust/PyO3) ←→ chat.db / prm.db
+Frontend (Electron/React) ←→ Backend (FastAPI/Python) ←→ chat.db / prm.db
                                     ↓
                             prm-llm (Swift CLI)
                             Apple Intelligence

@@ -1,71 +1,101 @@
 import os
-from collections.abc import Callable
 
-import core
 from fastapi import APIRouter
+from pydantic import BaseModel
 
-from schemas import (
-    AttachmentResponse,
-    ChatResponse,
-    MessageResponse,
-    SendMessageRequest,
-    SendMessageResponse,
-)
-from utils import is_image_mime_type
+from db import AppDb
+from services.macos import send_message, send_to_group
 
 router = APIRouter()
 
-# Config
-CHAT_DB_PATH = os.path.expanduser("~/Library/Messages/chat.db")
-APP_DB_PATH = os.path.expanduser("~/.prm/prm.db")
+PRM_DB_PATH = os.path.expanduser("~/.prm/prm.db")
 
-# Injected by main.py - triggers background sync
-trigger_background_sync: Callable[[], None] | None = None
+_app_db: AppDb | None = None
 
 
-def get_app_db() -> core.AppDb:
-    """Get the app database (source of truth for chats/messages)."""
-    db = core.AppDb(APP_DB_PATH)
-    db.init_schema()
-    return db
+def get_app_db() -> AppDb:
+    """Get the app database (lazy-loaded singleton)."""
+    global _app_db
+    if _app_db is None:
+        _app_db = AppDb(PRM_DB_PATH)
+    return _app_db
 
 
-def get_chat_reader() -> core.ChatReader:
-    """Get chat reader for sending messages (need to look up chat identifier)."""
-    return core.ChatReader(CHAT_DB_PATH)
+class SendMessageRequest(BaseModel):
+    text: str
+
+
+class SendMessageResponse(BaseModel):
+    success: bool
+    error: str | None = None
+
+
+class AttachmentResponse(BaseModel):
+    id: int
+    filename: str | None = None
+    mime_type: str | None = None
+    size: int | None = None
+    is_image: bool = False
+
+
+class MessageResponse(BaseModel):
+    id: int
+    text: str | None = None
+    date: int  # Unix timestamp in seconds
+    is_from_me: bool
+    is_read: bool
+    date_read: int | None = None
+    sender_name: str | None = None
+    # Delivery status fields - always provide defaults for outgoing messages
+    is_sent: bool = True
+    is_delivered: bool = False
+    date_delivered: int | None = None
+    error: int = 0
+    attachments: list[AttachmentResponse] = []
+
+
+class ChatResponse(BaseModel):
+    id: int
+    name: str
+    last_message: str | None = None
+    last_message_date: int  # Unix timestamp in seconds
+    is_group: bool
+    handle_ids: list[str] = []
+    member_names: list[str] = []
 
 
 @router.get("/", response_model=list[ChatResponse])
 def get_chats(limit: int = 50, offset: int = 0):
-    """Get recent chats from prm.db with pre-resolved names."""
-    # Trigger background sync on every poll (debounced in main.py)
-    if trigger_background_sync:
-        trigger_background_sync()
-
+    """Get recent chats with last message preview."""
     db = get_app_db()
-
     all_chats = db.get_all_chats()
-    chats = all_chats[offset : offset + limit]
-    result = []
 
-    for chat in chats:
+    # Apply pagination
+    paginated = all_chats[offset : offset + limit]
+
+    result = []
+    for chat in paginated:
         # Get participants for this chat
         participants = db.get_chat_participants(chat.id)
-        member_names = [p.name for p in participants]
         handle_ids = [p.identifier for p in participants]
 
-        # Use stored name or fallback to identifier
-        name = chat.name or chat.identifier
+        # Compute display name: use chat.name if set, otherwise use first participant
+        name = chat.name
+        if not name:
+            if handle_ids:
+                name = handle_ids[0]  # Use first participant as name
+            else:
+                name = chat.identifier
 
         result.append(
             ChatResponse(
                 id=chat.id,
                 name=name,
                 last_message=chat.last_message_text,
-                last_message_date=chat.last_message_timestamp,
+                last_message_date=chat.last_message_timestamp or 0,
                 is_group=chat.is_group,
                 handle_ids=handle_ids,
-                member_names=member_names,
+                member_names=handle_ids,  # Use identifiers as member names for now
             )
         )
 
@@ -74,33 +104,26 @@ def get_chats(limit: int = 50, offset: int = 0):
 
 @router.get("/{chat_id}/messages", response_model=list[MessageResponse])
 def get_messages(chat_id: int, limit: int = 100):
-    """Get messages for a chat with pre-resolved sender names and attachments."""
+    """Get messages for a chat with sender info."""
     db = get_app_db()
-
-    # Track that user viewed this chat (for LLM analysis queue)
-    db.update_chat_last_viewed(chat_id)
-
     messages = db.get_chat_messages(chat_id, limit)
-    message_ids = [msg.id for msg in messages]
-
-    # Batch fetch attachments for all messages
-    attachments_map = db.get_attachments_for_messages(message_ids) if message_ids else {}
 
     result = []
-
     for msg in messages:
-        # Build attachments list
-        msg_attachments = attachments_map.get(msg.id, [])
-        attachments = [
-            AttachmentResponse(
-                id=a.id,
-                filename=a.filename,
-                mime_type=a.mime_type,
-                size=a.size,
-                is_image=is_image_mime_type(a.mime_type),
-            )
-            for a in msg_attachments
-        ]
+        # Get attachments for this message if it has any
+        attachments = []
+        if msg.has_attachments:
+            db_attachments = db.get_message_attachments(msg.id)
+            attachments = [
+                AttachmentResponse(
+                    id=att.id,
+                    filename=att.filename,
+                    mime_type=att.mime_type,
+                    size=att.size,
+                    is_image=att.mime_type.startswith("image/") if att.mime_type else False,
+                )
+                for att in db_attachments
+            ]
 
         result.append(
             MessageResponse(
@@ -111,10 +134,11 @@ def get_messages(chat_id: int, limit: int = 100):
                 is_read=msg.is_read,
                 date_read=msg.read_at,
                 sender_name=msg.sender_name,
-                is_sent=msg.is_sent,
-                is_delivered=msg.is_delivered,
-                date_delivered=msg.date_delivered,
-                error=msg.error,
+                # For outgoing messages, assume sent and delivered
+                is_sent=True,
+                is_delivered=msg.is_from_me,  # Assume delivered if from me
+                date_delivered=msg.timestamp if msg.is_from_me else None,
+                error=0,
                 attachments=attachments,
             )
         )
@@ -122,26 +146,39 @@ def get_messages(chat_id: int, limit: int = 100):
     return result
 
 
+@router.get("/{chat_id}/participants")
+def get_chat_participants(chat_id: int):
+    """Get participants for a chat."""
+    db = get_app_db()
+    participants = db.get_chat_participants(chat_id)
+    return [
+        {
+            "id": p.id,
+            "identifier": p.identifier,
+            "service": p.service,
+        }
+        for p in participants
+    ]
+
+
 @router.post("/{chat_id}/messages", response_model=SendMessageResponse)
-def send_message(chat_id: int, request: SendMessageRequest):
+def send_message_endpoint(chat_id: int, request: SendMessageRequest):
     """Send a message to a chat."""
     db = get_app_db()
 
-    # Find the chat
     chat = db.get_chat(chat_id)
     if not chat:
         return SendMessageResponse(success=False, error="Chat not found")
 
-    # Get participants to determine if it's a group
     participants = db.get_chat_participants(chat_id)
     if not participants:
         return SendMessageResponse(success=False, error="No recipient found")
 
     if len(participants) == 1:
         # 1:1 chat - send directly to the handle (phone/email)
-        result = core.send_message(participants[0].identifier, request.text)
+        result = send_message(participants[0].identifier, request.text)
     else:
         # Group chat - send using chat identifier (format: chat123456789)
-        result = core.send_to_group(chat.identifier, request.text)
+        result = send_to_group(chat.identifier, request.text)
 
     return SendMessageResponse(success=result.success, error=result.error)

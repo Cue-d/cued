@@ -1,18 +1,26 @@
 [project]
 name = "backend"
 version = "0.1.0"
-description = "Add your description here"
-readme = "README.md"
+description = "PRM backend with SQLModel"
 requires-python = ">=3.12"
 dependencies = [
     "fastapi>=0.128.0",
-    "pyinstaller>=6.17.0",
+    "sqlmodel>=0.0.31",
     "uvicorn[standard]>=0.40.0",
-    "apscheduler>=3.10.4",
     "sentence-transformers>=3.0.0",
     "numpy>=2.0.0",
-    "pillow>=12.1.0",
-    "pillow-heif>=1.1.1",
+    "Pillow>=10.0.0",
+    "pillow-heif>=0.10.0",
+    "pyinstaller>=6.17.0",
+    "apscheduler>=3.10.4",
+]
+
+[dependency-groups]
+dev = [
+    "httpx>=0.28.1",
+    "pytest>=9.0.2",
+    "pytest-asyncio>=1.3.0",
+    "ruff>=0.11.0",
 ]
 
 [tool.ruff]
@@ -28,10 +36,12 @@ fixable = ["ALL"]
 quote-style = "double"
 indent-style = "space"
 
-[dependency-groups]
-dev = [
-    "httpx>=0.28.1",
-    "pytest>=9.0.2",
-    "pytest-asyncio>=1.3.0",
-    "ruff>=0.11.0",
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = "test_*.py"
+python_functions = "test_*"
+python_classes = "Test*"
+markers = [
+    "slow: marks tests as slow (requires model loading)",
+    "integration: marks tests that require real macOS system access",
 ]

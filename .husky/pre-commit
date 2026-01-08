@@ -9,8 +9,3 @@ pnpm run typecheck
 cd ../backend
 uv run ruff format .
 uv run ruff check --fix .
-
-# Core: cargo fmt + clippy
-cd ../core
-cargo fmt
-cargo clippy -- -D warnings

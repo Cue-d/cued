@@ -7,22 +7,21 @@ PRM is a **macOS-only** local-first personal CRM with an iMessage-style interfac
 ## Architecture
 
 ```
-Electron (React/TS) ←→ FastAPI (Python) ←→ Rust Core (PyO3) ←→ chat.db / prm.db / Contacts.app
-                                ↓                   ↓
-                        prm-llm (Swift)     SyncWatcher (Rust thread)
-                        Apple Intelligence   sync_db.py (Python)
+Electron (React/TS) ←→ FastAPI (Python) ←→ chat.db / prm.db / Contacts.app
+                                ↓
+                        prm-llm (Swift)
+                        Apple Intelligence
 ```
 
 - **Frontend**: `frontend/` - Electron + React + TypeScript + Tailwind
-- **Backend**: `backend/` - FastAPI server + sync orchestration
-- **Core**: `core/` - Rust with PyO3 bindings for database operations + background sync
+- **Backend**: `backend/` - FastAPI server with pure Python database sync
 - **LLM**: `llm/` - Swift CLI using AnyLanguageModel for intelligent action generation
 
 ## Quick Start
 
 ```bash
 # Setup (from root)
-cd backend && uv sync && cd .. && VIRTUAL_ENV=backend/.venv maturin develop --manifest-path core/Cargo.toml && cd frontend && pnpm install
+cd backend && uv sync && cd ../frontend && pnpm install
 
 # Optional: Build LLM CLI for intelligent action generation (requires macOS 26+)
 cd ../llm && swift build -c release && cd ..
@@ -39,7 +38,7 @@ Note: Initial sync runs automatically on first launch (syncs chat.db → prm.db)
 ## Key Files
 
 | Feature                  | Files                                                                              |
-| ------------------------ | ---------------------------------------------------------------------------------- | -------------------------------- |
+| ------------------------ | ---------------------------------------------------------------------------------- |
 | Conversations UI         | `frontend/src/renderer/src/components/ConversationList.tsx`                        |
 | Message Thread           | `frontend/src/renderer/src/components/MessageThread.tsx`                           |
 | Sync Status              | `frontend/src/renderer/src/components/SyncIndicator.tsx`, `hooks/useSyncStatus.ts` |
@@ -47,17 +46,16 @@ Note: Initial sync runs automatically on first launch (syncs chat.db → prm.db)
 | shadcn UI primitives     | `frontend/src/renderer/src/components/ui/`                                         |
 | API client               | `frontend/src/renderer/src/api/client.ts`                                          |
 | Backend API              | `backend/main.py`                                                                  |
-| Full Sync (Python)       | `backend/sync_db.py`                                                               |
-| iMessage reading         | `core/src/chat_reader.rs`                                                          |
-| App DB (prm.db)          | `core/src/app_db.rs`                                                               |
-| Background Sync (Rust)   | `core/src/sync_watcher.rs`                                                         |
-| Message sending          | `core/src/messaging.rs`                                                            |
+| Database Models          | `backend/db/models.py`                                                             |
+| Database Sync            | `backend/db/sync.py`                                                               |
+| App Database             | `backend/db/prm_db.py`                                                             |
 | Action Queue             | `backend/routers/actions.py`                                                       |
 | Search (FTS5 + Semantic) | `backend/routers/search.py`                                                        |
 | EOD Contacts             | `backend/routers/eod.py`                                                           |
-| Embedding Worker         | `backend/embedding_worker.py`                                                      |
-| Contacts Sync            | `backend/contact_sync.py`, `core/src/contacts.rs`                                  |
-| LLM Client               | `backend/services/llm_client.py`                                                   |
+| Contacts Service         | `backend/services/macos/contacts.py`                                               |
+| Messaging Service        | `backend/services/macos/messaging.py`                                              |
+| LLM Client               | `backend/services/actions/llm_client.py`                                           |
+| Background Workers       | `backend/workers/`                                                                 |
 | LLM CLI (Swift)          | `llm/Sources/prm-llm/`                                                             |
 
 ## Behaviors
@@ -74,7 +72,6 @@ Note: Initial sync runs automatically on first launch (syncs chat.db → prm.db)
 
 - Don't modify chat.db directly - it's read-only
 - Don't use `"use client"` directive - this is Electron, not Next.js
-- Don't add unused dependencies to Cargo.toml (`chrono` and `plist` are already unused)
 
 ## API Endpoints
 
@@ -121,12 +118,12 @@ Note: Initial sync runs automatically on first launch (syncs chat.db → prm.db)
 
 ### Contacts Sync
 
-| Method | Path               | Description                                             |
-| ------ | ------------------ | ------------------------------------------------------- |
-| GET    | `/contacts/status` | Get contacts sync status (counts, last sync timestamp)  |
-| POST   | `/contacts/sync`   | Trigger incremental contacts sync (or full if no data)  |
-| POST   | `/contacts/sync/full` | Force full contacts sync from Apple Contacts         |
-| GET    | `/contacts/stats`  | Get contact counts (active, deleted, total)             |
+| Method | Path                  | Description                                            |
+| ------ | --------------------- | ------------------------------------------------------ |
+| GET    | `/contacts/status`    | Get contacts sync status (counts, last sync timestamp) |
+| POST   | `/contacts/sync`      | Trigger incremental contacts sync (or full if no data) |
+| POST   | `/contacts/sync/full` | Force full contacts sync from Apple Contacts           |
+| GET    | `/contacts/stats`     | Get contact counts (active, deleted, total)            |
 
 ## Keyboard Shortcuts
 
@@ -136,12 +133,11 @@ Note: Initial sync runs automatically on first launch (syncs chat.db → prm.db)
 
 ## Common Issues
 
-| Problem                             | Solution                                                                                  |
-| ----------------------------------- | ----------------------------------------------------------------------------------------- |
-| "Error accessing messages database" | Grant Full Disk Access to terminal/IDE                                                    |
-| "Cannot import core"                | Run `VIRTUAL_ENV=backend/.venv maturin develop --manifest-path core/Cargo.toml` from root |
-| Contact names not resolving         | Restart backend to trigger full sync, or POST `/sync`                                     |
-| Stale contact names                 | Delete `~/.prm/contacts_cache.json` and restart backend                                   |
+| Problem                             | Solution                                                          |
+| ----------------------------------- | ----------------------------------------------------------------- |
+| "Error accessing messages database" | Grant Full Disk Access to terminal/IDE                            |
+| Contact names not resolving         | Restart backend to trigger full sync, or POST `/sync`             |
+| Stale contact names                 | Delete `~/.prm/contacts_cache.json` and restart backend           |
 
 ## Testing
 
@@ -149,12 +145,11 @@ Note: Initial sync runs automatically on first launch (syncs chat.db → prm.db)
 | -------- | ------------------------ | -------------------------------- |
 | Frontend | Vitest + Testing Library | `cd frontend && pnpm test`       |
 | Backend  | pytest                   | `cd backend && uv run pytest -v` |
-| Core     | cargo test               | `cd core && cargo test`          |
 
 **Run all tests from root:**
 
 ```bash
-cd core && cargo test && cd ../backend && uv run pytest -v && cd ../frontend && pnpm test --run
+cd backend && uv run pytest -v && cd ../frontend && pnpm test --run
 ```
 
 ## Linting
@@ -165,19 +160,6 @@ cd frontend && pnpm lint && pnpm typecheck
 
 # Backend
 cd backend && uv run ruff check . && uv run ruff format .
-
-# Core
-cd core && cargo clippy && cargo fmt
-```
-
-## Building Core for Python
-
-```bash
-# For testing (links to Python)
-cargo test
-
-# For maturin/Python module (uses extension-module feature)
-VIRTUAL_ENV=backend/.venv maturin develop --manifest-path core/Cargo.toml --features extension-module
 ```
 
 ## Building LLM CLI (Swift)
@@ -213,6 +195,7 @@ If FTS5 index becomes corrupted ("database disk image is malformed"), manually r
 ```python
 # Run from backend directory
 import sqlite3
+import os
 conn = sqlite3.connect(os.path.expanduser("~/.prm/prm.db"))
 cursor = conn.cursor()
 cursor.execute('DROP TABLE IF EXISTS messages_fts')
@@ -285,4 +268,4 @@ When queuing chats for LLM analysis, priority is calculated using a composite sc
 - Unknown number, 6h ago: 45 + 0 = 45
 - Group chat, 24h ago: 80 - 15 = 65
 
-Priority functions are in `backend/main.py`: `calculate_chat_priority()`, `_calculate_time_priority()`, `_calculate_contact_priority_boost()`, `_calculate_group_penalty()`.
+Priority functions are in `backend/services/actions/priority.py`.
