@@ -42,15 +42,15 @@ def register_all_jobs(
     from .jobs.embedding_batch import run_embedding_batch
     from .jobs.llm_cleanup import run_llm_cleanup
     from .jobs.llm_processor import run_llm_processor
-    from .jobs.message_sync import run_message_sync
+    from .jobs.prm_sync import run_prm_sync
     from .jobs.unanswered_scan import run_unanswered_scan
 
-    # Job 0: Message sync - every 30 seconds
+    # Job 0: PRM sync - every 30 seconds (incremental)
     scheduler.add_job(
-        job_wrapper("message_sync")(run_message_sync),
+        job_wrapper("prm_sync")(run_prm_sync),
         "interval",
         seconds=30,
-        id="message_sync",
+        id="prm_sync",
         max_instances=1,
     )
 

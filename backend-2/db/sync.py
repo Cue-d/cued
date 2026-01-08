@@ -254,47 +254,19 @@ def sync_all(chat_db_path: str, app_db_path: str, verbose: bool = True) -> dict:
     return {**stats, "elapsed": elapsed}
 
 
-def sync_incremental(
-    chat_db_path: str,
-    app_db_path: str,
-    since_timestamp: int | None = None,
-    verbose: bool = False,
-) -> dict:
+def sync_incremental(chat_db_path: str, app_db_path: str, verbose: bool = False) -> dict:
     """
-    Incremental sync from chat.db to prm.db - only syncs new/updated messages.
+    Incremental sync from chat.db to prm.db - only brings in new data.
 
-    This is much faster than sync_all() for periodic background syncs.
-    Only processes messages with date > since_timestamp.
-
-    Falls back to full sync if since_timestamp is None and no data exists.
-
-    Args:
-        chat_db_path: Path to Apple's chat.db
-        app_db_path: Path to prm.db
-        since_timestamp: Unix timestamp to sync from (exclusive). If None, auto-detects.
-        verbose: Print progress to stdout
+    Fetches only messages newer than our highest synced message ID,
+    plus any handles/chats/attachments required by those messages.
+    This is much faster than sync_all for periodic background syncs.
 
     Returns:
-        dict with stats: messages, attachments, elapsed time
+        dict with keys: handles, chats, participants, messages, attachments, elapsed
     """
     start = time.time()
     now = int(time.time())
-
-    # Auto-detect last sync timestamp if not provided
-    if since_timestamp is None:
-        since_timestamp = get_last_sync_timestamp(app_db_path)
-
-    # If still None (empty database), fall back to full sync
-    if since_timestamp is None:
-        if verbose:
-            print("No existing data found, performing full sync...")
-        return sync_all(chat_db_path, app_db_path, verbose=verbose)
-
-    # Convert to Apple timestamp for query
-    since_apple_ts = unix_to_apple(since_timestamp)
-
-    if verbose:
-        print(f"Incremental sync: messages since timestamp {since_timestamp}")
 
     # Open chat.db read-only
     src = sqlite3.connect(f"file:{chat_db_path}?mode=ro", uri=True)
@@ -302,50 +274,55 @@ def sync_incremental(
 
     # Open prm.db
     app = AppDb(app_db_path)
-    app.init_schema()
 
-    stats = {"messages": 0, "attachments": 0, "handles": 0, "chats": 0}
-    new_message_ids = set()
+    stats = {"handles": 0, "chats": 0, "participants": 0, "messages": 0, "attachments": 0}
 
     with app.session() as session:
-        # 1. Fetch only new messages (date > since_apple_ts)
-        rows = src.execute(
+        # Get our highest synced message ID
+        result = session.exec(text("SELECT MAX(id) FROM messages"))
+        last_msg_id = result.scalar() or 0
+
+        if verbose:
+            print(f"Incremental sync starting from message ID {last_msg_id}")
+
+        # Fetch new messages from chat.db (messages with ROWID > last_msg_id)
+        new_messages = src.execute(
             """
             SELECT m.ROWID, cmj.chat_id, m.handle_id, m.text, m.attributedBody,
                    m.date, m.is_from_me, m.is_read, m.date_read, m.cache_has_attachments
             FROM message m
             INNER JOIN chat_message_join cmj ON cmj.message_id = m.ROWID
-            WHERE m.date > ?
-            ORDER BY m.date ASC
-            """,
-            (since_apple_ts,),
+            WHERE m.ROWID > ?
+            ORDER BY m.ROWID
+        """,
+            (last_msg_id,),
         ).fetchall()
 
-        if not rows:
+        if not new_messages:
             src.close()
             app.close()
-            return {"messages": 0, "attachments": 0, "elapsed": time.time() - start}
+            return {**stats, "elapsed": time.time() - start}
 
-        if verbose:
-            print(f"Found {len(rows)} new messages")
-
-        # Collect unique handle_ids and chat_ids we need to ensure exist
-        handle_ids = set()
+        # Collect which chats and handles we need
         chat_ids = set()
-        for row in rows:
-            if row["handle_id"] and row["handle_id"] > 0:
-                handle_ids.add(row["handle_id"])
-            chat_ids.add(row["chat_id"])
+        handle_ids = set()
+        message_ids = []
 
-        # 2. Sync any handles we reference (incremental - only missing ones)
+        for row in new_messages:
+            chat_ids.add(row["chat_id"])
+            if row["handle_id"]:
+                handle_ids.add(row["handle_id"])
+            message_ids.append(row["ROWID"])
+
+        # 1. Sync handles that we need (INSERT OR REPLACE)
         if handle_ids:
             placeholders = ",".join("?" * len(handle_ids))
-            handle_rows = src.execute(
+            rows = src.execute(
                 f"SELECT ROWID, id, service FROM handle WHERE ROWID IN ({placeholders})",
                 tuple(handle_ids),
             ).fetchall()
 
-            for row in handle_rows:
+            for row in rows:
                 session.exec(
                     text("""
                         INSERT OR REPLACE INTO handles (id, identifier, service)
@@ -358,23 +335,27 @@ def sync_incremental(
                 )
                 stats["handles"] += 1
 
-        # 3. Sync any chats we reference (incremental)
+        # 2. Sync chats that we need
         if chat_ids:
-            # Get participant counts for is_group determination
+            # Get participant counts for the chats we need
+            placeholders = ",".join("?" * len(chat_ids))
             participant_counts = {}
             for row in src.execute(
-                "SELECT chat_id, COUNT(*) as cnt FROM chat_handle_join GROUP BY chat_id"
+                f"""SELECT chat_id, COUNT(*) as cnt
+                    FROM chat_handle_join
+                    WHERE chat_id IN ({placeholders})
+                    GROUP BY chat_id""",
+                tuple(chat_ids),
             ).fetchall():
                 participant_counts[row["chat_id"]] = row["cnt"]
 
-            placeholders = ",".join("?" * len(chat_ids))
-            chat_query = (
-                f"SELECT ROWID, chat_identifier, display_name "
-                f"FROM chat WHERE ROWID IN ({placeholders})"
-            )
-            chat_rows = src.execute(chat_query, tuple(chat_ids)).fetchall()
+            rows = src.execute(
+                f"""SELECT ROWID, chat_identifier, display_name
+                    FROM chat WHERE ROWID IN ({placeholders})""",
+                tuple(chat_ids),
+            ).fetchall()
 
-            for row in chat_rows:
+            for row in rows:
                 is_group = participant_counts.get(row["ROWID"], 0) > 1
                 name = row["display_name"] or row["chat_identifier"]
                 session.exec(
@@ -391,13 +372,13 @@ def sync_incremental(
                 )
                 stats["chats"] += 1
 
-            # Also sync participants for these chats
-            participant_query = (
-                f"SELECT chat_id, handle_id FROM chat_handle_join WHERE chat_id IN ({placeholders})"
-            )
-            participant_rows = src.execute(participant_query, tuple(chat_ids)).fetchall()
-
-            for row in participant_rows:
+            # 3. Sync participants for those chats
+            for row in src.execute(
+                f"""SELECT chat_id, handle_id
+                    FROM chat_handle_join
+                    WHERE chat_id IN ({placeholders})""",
+                tuple(chat_ids),
+            ).fetchall():
                 session.exec(
                     text("""
                         INSERT OR IGNORE INTO chat_participants (chat_id, handle_id)
@@ -407,9 +388,10 @@ def sync_incremental(
                         handle_id=row["handle_id"],
                     )
                 )
+                stats["participants"] += 1
 
-        # 4. Insert new messages
-        for row in rows:
+        # 4. Insert the new messages
+        for row in new_messages:
             handle_id = row["handle_id"]
             sender_id = handle_id if handle_id and not row["is_from_me"] else None
             message_text = get_message_text(row["text"], row["attributedBody"])
@@ -435,23 +417,22 @@ def sync_incremental(
                 )
             )
             stats["messages"] += 1
-            new_message_ids.add(row["ROWID"])
 
-        # 5. Sync attachments for new messages only
-        if new_message_ids:
-            placeholders = ",".join("?" * len(new_message_ids))
-            attachment_rows = src.execute(
+        # 5. Sync attachments for new messages
+        if message_ids:
+            placeholders = ",".join("?" * len(message_ids))
+            rows = src.execute(
                 f"""
                 SELECT a.ROWID, maj.message_id, a.filename, a.mime_type, a.uti,
                        a.total_bytes, a.is_outgoing, a.created_date
                 FROM attachment a
                 INNER JOIN message_attachment_join maj ON maj.attachment_id = a.ROWID
                 WHERE maj.message_id IN ({placeholders})
-                """,
-                tuple(new_message_ids),
+            """,
+                tuple(message_ids),
             ).fetchall()
 
-            for row in attachment_rows:
+            for row in rows:
                 session.exec(
                     text("""
                         INSERT OR REPLACE INTO attachments
@@ -480,10 +461,7 @@ def sync_incremental(
     app.close()
 
     elapsed = time.time() - start
-
-    if verbose and stats["messages"] > 0:
-        msg_count = stats["messages"]
-        att_count = stats["attachments"]
-        print(f"Incremental sync: {msg_count} messages, {att_count} attachments in {elapsed:.2f}s")
+    if verbose:
+        print(f"Incremental sync done: {stats['messages']} msgs in {elapsed:.2f}s")
 
     return {**stats, "elapsed": elapsed}
