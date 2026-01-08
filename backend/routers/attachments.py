@@ -5,22 +5,12 @@ import os
 from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import FileResponse
 
-from db.prm_db import AppDb
+from deps import get_app_db
 from services.attachments import AttachmentService, is_image_mime_type
 
 router = APIRouter()
 
-PRM_DB_PATH = os.path.expanduser("~/.prm/prm.db")
-
-_app_db: AppDb | None = None
 _attachment_service: AttachmentService | None = None
-
-
-def get_app_db() -> AppDb:
-    global _app_db
-    if _app_db is None:
-        _app_db = AppDb(PRM_DB_PATH)
-    return _app_db
 
 
 def get_attachment_service() -> AttachmentService:

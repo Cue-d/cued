@@ -57,7 +57,7 @@ def fetch_contacts_by_names(names: list[str]) -> list[FetchedContact]:
     # Build AppleScript list of names
     names_list = ", ".join(f'"{n.replace(chr(34), chr(92) + chr(34))}"' for n in names)
 
-    script = f'''
+    script = f"""
         tell application "Contacts"
             launch
             set nameList to {{{names_list}}}
@@ -65,28 +65,31 @@ def fetch_contacts_by_names(names: list[str]) -> list[FetchedContact]:
 
             repeat with targetName in nameList
                 try
-                    set p to first person whose name is targetName
-                    set output to output & "NAME:" & name of p & return
-                    try
-                        set output to output & "COMPANY:" & organization of p & return
-                    end try
-                    try
-                        set output to output & "NOTE:" & note of p & return
-                    end try
-                    repeat with e in emails of p
-                        set output to output & "EMAIL:" & value of e & return
+                    -- Get ALL people matching this name (not just first)
+                    set matchingPeople to every person whose name is targetName
+                    repeat with p in matchingPeople
+                        set output to output & "NAME:" & name of p & return
+                        try
+                            set output to output & "COMPANY:" & organization of p & return
+                        end try
+                        try
+                            set output to output & "NOTE:" & note of p & return
+                        end try
+                        repeat with e in emails of p
+                            set output to output & "EMAIL:" & value of e & return
+                        end repeat
+                        repeat with ph in phones of p
+                            set output to output & "PHONE:" & value of ph & return
+                        end repeat
+                        set output to output & "{CONTACT_DELIMITER}" & return
                     end repeat
-                    repeat with ph in phones of p
-                        set output to output & "PHONE:" & value of ph & return
-                    end repeat
-                    set output to output & "{CONTACT_DELIMITER}" & return
                 on error
                 end try
             end repeat
 
             return output
         end tell
-    '''
+    """
 
     result = subprocess.run(
         ["osascript", "-e", script],

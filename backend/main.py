@@ -5,12 +5,11 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from db.chat_db import ChatDb
-from db.prm_db import AppDb
 from db.sync import sync_text_cache_full
+from deps import get_app_db, get_chat_db, get_embedding_db
 from routers import actions, attachments, chats, contacts, eod, search, sync
 from services.search.fts import FtsIndex
-from services.search.semantic import EmbeddingDb, queue_missing_messages
+from services.search.semantic import queue_missing_messages
 from workers import start_scheduler, stop_scheduler
 
 logger = logging.getLogger(__name__)
@@ -71,42 +70,6 @@ def configure_worker_logging() -> None:
 
 # Configure logging before anything else
 configure_worker_logging()
-
-# Database paths
-CHAT_DB_PATH = os.path.expanduser("~/Library/Messages/chat.db")
-PRM_DB_PATH = os.path.expanduser("~/.prm/prm.db")
-EMBEDDING_DB_PATH = os.path.expanduser("~/.prm/embeddings.db")
-
-# Global database instances
-_chat_db: ChatDb | None = None
-_app_db: AppDb | None = None
-_embedding_db: EmbeddingDb | None = None
-
-
-def get_chat_db() -> ChatDb:
-    """Get or create the ChatDb singleton (read-only chat.db access)."""
-    global _chat_db
-    if _chat_db is None:
-        _chat_db = ChatDb(CHAT_DB_PATH)
-    return _chat_db
-
-
-def get_app_db() -> AppDb:
-    """Get or create the AppDb singleton (prm.db for actions/cache)."""
-    global _app_db
-    if _app_db is None:
-        _app_db = AppDb(PRM_DB_PATH)
-        _app_db.init_schema()
-    return _app_db
-
-
-def get_embedding_db() -> EmbeddingDb:
-    """Get or create the EmbeddingDb singleton."""
-    global _embedding_db
-    if _embedding_db is None:
-        _embedding_db = EmbeddingDb(EMBEDDING_DB_PATH)
-        _embedding_db.init_schema()
-    return _embedding_db
 
 
 @asynccontextmanager

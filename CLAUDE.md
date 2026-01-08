@@ -46,14 +46,17 @@ Note: Initial sync runs automatically on first launch (syncs chat.db → prm.db,
 | shadcn UI primitives     | `frontend/src/renderer/src/components/ui/`                                         |
 | API client               | `frontend/src/renderer/src/api/client.ts`                                          |
 | Backend API              | `backend/main.py`                                                                  |
+| Shared Dependencies      | `backend/deps.py` (database singletons)                                            |
 | Database Models          | `backend/db/models.py`                                                             |
 | Database Sync            | `backend/db/sync.py`                                                               |
 | App Database             | `backend/db/prm_db.py`                                                             |
 | Action Queue             | `backend/routers/actions.py`                                                       |
 | Search (FTS5 + Semantic) | `backend/routers/search.py`                                                        |
 | EOD Contacts             | `backend/routers/eod.py`                                                           |
-| Contacts Service         | `backend/services/macos/contacts.py`                                               |
+| Contact Resolution       | `backend/services/contacts/resolver.py`                                            |
+| Contacts Fetch           | `backend/services/macos/contacts.py`                                               |
 | Messaging Service        | `backend/services/macos/messaging.py`                                              |
+| Phone Normalization      | `backend/utils/phone.py`                                                           |
 | LLM Client               | `backend/services/actions/llm_client.py`                                           |
 | Background Workers       | `backend/workers/`                                                                 |
 | LLM CLI (Swift)          | `llm/Sources/prm-llm/`                                                             |
@@ -118,12 +121,11 @@ Note: Initial sync runs automatically on first launch (syncs chat.db → prm.db,
 
 ### Contacts Sync
 
-| Method | Path                  | Description                                            |
-| ------ | --------------------- | ------------------------------------------------------ |
-| GET    | `/contacts/status`    | Get contacts sync status (counts, last sync timestamp) |
-| POST   | `/contacts/sync`      | Trigger incremental contacts sync (or full if no data) |
-| POST   | `/contacts/sync/full` | Force full contacts sync from Apple Contacts           |
-| GET    | `/contacts/stats`     | Get contact counts (active, deleted, total)            |
+| Method | Path               | Description                                            |
+| ------ | ------------------ | ------------------------------------------------------ |
+| GET    | `/contacts/status` | Get contacts sync status (counts, last sync timestamp) |
+| POST   | `/contacts/sync`   | Full contacts sync from Apple Contacts                 |
+| GET    | `/contacts/stats`  | Get contact counts (active, deleted, total)            |
 
 ## Keyboard Shortcuts
 

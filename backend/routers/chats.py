@@ -1,29 +1,16 @@
 """Chats router - chat and message endpoints.
 
-Reads directly from chat.db via ChatDb.
+Reads directly from chat.db via ChatDb, with contact name resolution from prm.db.
 """
-
-import os
 
 from fastapi import APIRouter
 from pydantic import BaseModel
 
-from db.chat_db import ChatDb
+from deps import get_app_db, get_chat_db
+from services.contacts import ContactResolver, get_chat_display_name
 from services.macos import send_message, send_to_group
 
 router = APIRouter()
-
-CHAT_DB_PATH = os.path.expanduser("~/Library/Messages/chat.db")
-
-_chat_db: ChatDb | None = None
-
-
-def get_chat_db() -> ChatDb:
-    """Get the chat database (lazy-loaded singleton)."""
-    global _chat_db
-    if _chat_db is None:
-        _chat_db = ChatDb(CHAT_DB_PATH)
-    return _chat_db
 
 
 class SendMessageRequest(BaseModel):
@@ -73,24 +60,29 @@ class ChatResponse(BaseModel):
 def get_chats(limit: int = 50, offset: int = 0):
     """Get recent chats with last message preview."""
     db = get_chat_db()
+    resolver = ContactResolver(get_app_db())
     all_chats = db.get_all_chats()
 
     # Apply pagination
     paginated = all_chats[offset : offset + limit]
 
-    result = []
+    # Collect all handles for batch lookup
+    all_handles = set()
+    chat_participants = {}
     for chat in paginated:
-        # Get participants for this chat
         participants = db.get_chat_participants(chat.id)
         handle_ids = [p["identifier"] for p in participants]
+        chat_participants[chat.id] = handle_ids
+        all_handles.update(handle_ids)
 
-        # Compute display name: use chat.name if set, otherwise use first participant
-        name = chat.name
-        if not name:
-            if handle_ids:
-                name = handle_ids[0]  # Use first participant as name
-            else:
-                name = chat.identifier
+    # Batch lookup contact names
+    handle_to_name = resolver.resolve_handles(list(all_handles))
+
+    result = []
+    for chat in paginated:
+        handle_ids = chat_participants[chat.id]
+        member_names = [handle_to_name.get(h, h) for h in handle_ids]
+        name = get_chat_display_name(chat, handle_to_name, handle_ids)
 
         result.append(
             ChatResponse(
@@ -100,7 +92,7 @@ def get_chats(limit: int = 50, offset: int = 0):
                 last_message_date=chat.last_message_timestamp or 0,
                 is_group=chat.is_group,
                 handle_ids=handle_ids,
-                member_names=handle_ids,  # Use identifiers as member names for now
+                member_names=member_names,
             )
         )
 
@@ -111,7 +103,11 @@ def get_chats(limit: int = 50, offset: int = 0):
 def get_messages(chat_id: int, limit: int = 100):
     """Get messages for a chat with sender info."""
     db = get_chat_db()
+    resolver = ContactResolver(get_app_db())
     messages = db.get_chat_messages(chat_id, limit)
+
+    # Batch resolve sender names
+    handle_to_name = resolver.resolve_sender_names(messages)
 
     result = []
     for msg in messages:
@@ -130,6 +126,11 @@ def get_messages(chat_id: int, limit: int = 100):
                 for att in db_attachments
             ]
 
+        # Resolve sender name from contacts
+        sender_name = msg.sender_name
+        if sender_name and not msg.is_from_me:
+            sender_name = handle_to_name.get(msg.sender_name, msg.sender_name)
+
         result.append(
             MessageResponse(
                 id=msg.id,
@@ -138,7 +139,7 @@ def get_messages(chat_id: int, limit: int = 100):
                 is_from_me=msg.is_from_me,
                 is_read=msg.is_read,
                 date_read=msg.read_at,
-                sender_name=msg.sender_name,
+                sender_name=sender_name,
                 # For outgoing messages, assume sent and delivered
                 is_sent=True,
                 is_delivered=msg.is_from_me,  # Assume delivered if from me

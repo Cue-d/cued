@@ -2,9 +2,11 @@
 
 This database stores:
 - message_text_cache: Extracted text from chat.db messages for FTS5/embeddings
-- sync_state: Tracks sync progress
+- sync_state: Tracks sync progress (including contacts sync)
 - actions: Action queue for swipeable cards
 - llm_analysis_queue: Queue for LLM conversation analysis
+- contacts: Synced contacts from Apple Contacts
+- contact_handles: Phone/email handles linked to contacts
 
 All message/chat data is read directly from chat.db via ChatDb.
 """
@@ -14,6 +16,8 @@ from contextlib import contextmanager
 from datetime import datetime
 
 from sqlmodel import Session, create_engine, text
+
+from utils.phone import get_phone_variants, normalize_phone
 
 from .models import (
     ActionWithContext,
@@ -107,12 +111,70 @@ class AppDb:
             """)
             )
 
+            # Contacts table - stores contact info fetched from Apple Contacts
+            conn.execute(
+                text("""
+                CREATE TABLE IF NOT EXISTS contacts (
+                    id INTEGER PRIMARY KEY,
+                    name TEXT NOT NULL,
+                    company TEXT,
+                    notes TEXT,
+                    created_at INTEGER NOT NULL,
+                    updated_at INTEGER NOT NULL,
+                    deleted_at INTEGER
+                )
+            """)
+            )
+
+            # Contact handles - maps phone/email to contact
+            conn.execute(
+                text("""
+                CREATE TABLE IF NOT EXISTS contact_handles (
+                    id INTEGER PRIMARY KEY,
+                    contact_id INTEGER NOT NULL,
+                    handle TEXT NOT NULL,
+                    handle_type TEXT NOT NULL,
+                    FOREIGN KEY (contact_id) REFERENCES contacts(id)
+                )
+            """)
+            )
+            conn.execute(
+                text(
+                    "CREATE INDEX IF NOT EXISTS idx_contact_handles_handle "
+                    "ON contact_handles(handle)"
+                )
+            )
+            conn.execute(
+                text(
+                    "CREATE INDEX IF NOT EXISTS idx_contact_handles_contact "
+                    "ON contact_handles(contact_id)"
+                )
+            )
+
             conn.commit()
 
     @contextmanager
     def session(self):
         with Session(self.engine) as session:
             yield session
+
+    @contextmanager
+    def transaction(self):
+        """Context manager for explicit transactions.
+
+        Usage:
+            with db.transaction() as session:
+                session.execute(...)
+                session.execute(...)
+            # Auto-commits on success, rolls back on exception
+        """
+        with Session(self.engine) as session:
+            try:
+                yield session
+                session.commit()
+            except Exception:
+                session.rollback()
+                raise
 
     def close(self) -> None:
         self.engine.dispose()
@@ -545,3 +607,162 @@ class AppDb:
                 {"person_id": person_id, "today_start": today_start},
             )
             return result.scalar() > 0
+
+    # =========================================================================
+    # CONTACTS CRUD
+    # =========================================================================
+
+    def get_contacts_last_sync(self) -> int | None:
+        """Get the last contacts sync timestamp."""
+        with self.session() as session:
+            result = session.execute(
+                text("SELECT value FROM sync_state WHERE key = 'contacts_last_sync_at'")
+            )
+            row = result.fetchone()
+            return int(row[0]) if row else None
+
+    def set_contacts_last_sync(self, timestamp: int) -> None:
+        """Set the last contacts sync timestamp."""
+        with self.session() as session:
+            session.execute(
+                text("""
+                    INSERT OR REPLACE INTO sync_state (key, value)
+                    VALUES ('contacts_last_sync_at', :value)
+                """),
+                {"value": timestamp},
+            )
+            session.commit()
+
+    def get_contact_count(self) -> dict:
+        """Get contact counts."""
+        with self.session() as session:
+            active = (
+                session.execute(
+                    text("SELECT COUNT(*) FROM contacts WHERE deleted_at IS NULL")
+                ).scalar()
+                or 0
+            )
+            deleted = (
+                session.execute(
+                    text("SELECT COUNT(*) FROM contacts WHERE deleted_at IS NOT NULL")
+                ).scalar()
+                or 0
+            )
+            return {"active": active, "deleted": deleted, "total": active + deleted}
+
+    def get_handle_count(self) -> int:
+        """Get total handle count."""
+        with self.session() as session:
+            return session.execute(text("SELECT COUNT(*) FROM contact_handles")).scalar() or 0
+
+    def clear_all_contacts_in_transaction(self, session) -> None:
+        """Clear all contacts and handles within an existing transaction."""
+        session.execute(text("DELETE FROM contact_handles"))
+        session.execute(text("DELETE FROM contacts"))
+
+    def insert_contact_in_transaction(
+        self,
+        session,
+        name: str,
+        phones: list[str],
+        emails: list[str],
+        company: str | None = None,
+        notes: str | None = None,
+    ) -> int:
+        """Insert a new contact within an existing transaction. Returns contact ID."""
+        now = self._now_timestamp()
+
+        result = session.execute(
+            text("""
+                INSERT INTO contacts (name, company, notes, created_at, updated_at)
+                VALUES (:name, :company, :notes, :created_at, :updated_at)
+            """),
+            {
+                "name": name,
+                "company": company,
+                "notes": notes,
+                "created_at": now,
+                "updated_at": now,
+            },
+        )
+        contact_id = result.lastrowid
+
+        # Deduplicate and insert phone handles
+        seen_phones = set()
+        for phone in phones:
+            normalized = normalize_phone(phone)
+            if normalized and normalized not in seen_phones:
+                seen_phones.add(normalized)
+                session.execute(
+                    text("""
+                        INSERT INTO contact_handles (contact_id, handle, handle_type)
+                        VALUES (:contact_id, :handle, 'phone')
+                    """),
+                    {"contact_id": contact_id, "handle": normalized},
+                )
+
+        # Deduplicate and insert email handles
+        seen_emails = set()
+        for email in emails:
+            normalized = email.lower().strip()
+            if normalized and normalized not in seen_emails:
+                seen_emails.add(normalized)
+                session.execute(
+                    text("""
+                        INSERT INTO contact_handles (contact_id, handle, handle_type)
+                        VALUES (:contact_id, :handle, 'email')
+                    """),
+                    {"contact_id": contact_id, "handle": normalized},
+                )
+
+        return contact_id
+
+    def get_names_for_handles(self, handles: list[str]) -> dict[str, str]:
+        """Look up contact names for multiple handles. Returns {handle: name}.
+
+        Handles phone number variants (e.g., +1xxx and xxx for US numbers).
+        """
+        if not handles:
+            return {}
+
+        # Build map of all variants to original handle
+        variant_to_original: dict[str, str] = {}
+        for h in handles:
+            if "@" in h:
+                variant_to_original[h.lower()] = h
+            else:
+                # For phones, generate all variants
+                for variant in get_phone_variants(h):
+                    variant_to_original[variant] = h
+
+        all_variants = list(variant_to_original.keys())
+        if not all_variants:
+            return {}
+
+        with self.session() as session:
+            # Query in batches to avoid too many parameters
+            name_map: dict[str, str] = {}
+            batch_size = 100
+
+            for i in range(0, len(all_variants), batch_size):
+                batch = all_variants[i : i + batch_size]
+                placeholders = ",".join(f":h{j}" for j in range(len(batch)))
+                params = {f"h{j}": v for j, v in enumerate(batch)}
+
+                result = session.execute(
+                    text(f"""
+                        SELECT ch.handle, c.name
+                        FROM contacts c
+                        JOIN contact_handles ch ON ch.contact_id = c.id
+                        WHERE ch.handle IN ({placeholders}) AND c.deleted_at IS NULL
+                    """),
+                    params,
+                )
+
+                for row in result:
+                    db_handle = row[0]
+                    original_handle = variant_to_original.get(db_handle)
+                    if original_handle and original_handle not in name_map:
+                        name_map[original_handle] = row[1]
+
+            return name_map
