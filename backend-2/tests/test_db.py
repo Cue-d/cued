@@ -1,6 +1,5 @@
 """Tests for database layer."""
 
-
 from db import AppDb, sync_all
 
 

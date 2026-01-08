@@ -80,9 +80,7 @@ def sync_all(chat_db_path: str, app_db_path: str, verbose: bool = True) -> dict:
         ).fetchall():
             participant_counts[row["chat_id"]] = row["cnt"]
 
-        rows = src.execute(
-            "SELECT ROWID, chat_identifier, display_name FROM chat"
-        ).fetchall()
+        rows = src.execute("SELECT ROWID, chat_identifier, display_name FROM chat").fetchall()
         for row in rows:
             is_group = participant_counts.get(row["ROWID"], 0) > 1
             name = row["display_name"] or row["chat_identifier"]

@@ -6,7 +6,15 @@ import os
 from fastapi import APIRouter, Query
 
 from db.prm_db import AppDb
-from services.search import EmbeddingDb, FtsIndex, SearchResult, merge_results, process_queue, queue_all_messages, semantic_search
+from services.search import (
+    EmbeddingDb,
+    FtsIndex,
+    SearchResult,
+    merge_results,
+    process_queue,
+    queue_all_messages,
+    semantic_search,
+)
 
 logger = logging.getLogger(__name__)
 router = APIRouter()

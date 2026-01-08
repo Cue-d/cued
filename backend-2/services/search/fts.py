@@ -63,8 +63,13 @@ class FtsIndex:
             )
             return [
                 SearchResult(
-                    message_id=r[0], chat_id=r[1], text=r[2] or "",
-                    timestamp=r[3], sender_name=r[4], chat_name=r[5], rank=r[6]
+                    message_id=r[0],
+                    chat_id=r[1],
+                    text=r[2] or "",
+                    timestamp=r[3],
+                    sender_name=r[4],
+                    chat_name=r[5],
+                    rank=r[6],
                 )
                 for r in result
             ]

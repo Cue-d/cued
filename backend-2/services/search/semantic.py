@@ -17,6 +17,7 @@ def get_model():
     if _model is None:
         logger.info("Loading sentence-transformers model...")
         from sentence_transformers import SentenceTransformer
+
         _model = SentenceTransformer("all-MiniLM-L6-v2")
     return _model
 
@@ -25,9 +26,7 @@ class EmbeddingDb:
     """Embedding database wrapper for embeddings.db."""
 
     def __init__(self, path: str):
-        self.engine = create_engine(
-            f"sqlite:///{path}", connect_args={"check_same_thread": False}
-        )
+        self.engine = create_engine(f"sqlite:///{path}", connect_args={"check_same_thread": False})
         with self.engine.connect() as conn:
             conn.execute(text("PRAGMA journal_mode = WAL"))
             conn.execute(text("PRAGMA busy_timeout = 30000"))
@@ -35,20 +34,26 @@ class EmbeddingDb:
 
     def init_schema(self) -> None:
         with self.engine.connect() as conn:
-            conn.execute(text("""
+            conn.execute(
+                text("""
                 CREATE TABLE IF NOT EXISTS embedding_queue (
                     message_id INTEGER PRIMARY KEY, chat_id INTEGER NOT NULL,
                     queued_at INTEGER NOT NULL, status TEXT DEFAULT 'pending'
                 )
-            """))
-            conn.execute(text("""
+            """)
+            )
+            conn.execute(
+                text("""
                 CREATE TABLE IF NOT EXISTS message_embeddings (
                     message_id INTEGER PRIMARY KEY, chat_id INTEGER NOT NULL,
                     embedding BLOB NOT NULL, model_version TEXT DEFAULT 'all-MiniLM-L6-v2',
                     created_at INTEGER NOT NULL
                 )
-            """))
-            conn.execute(text("CREATE INDEX IF NOT EXISTS idx_queue_status ON embedding_queue(status)"))
+            """)
+            )
+            conn.execute(
+                text("CREATE INDEX IF NOT EXISTS idx_queue_status ON embedding_queue(status)")
+            )
             conn.commit()
 
     @contextmanager
@@ -63,8 +68,12 @@ class EmbeddingDb:
         with self.session() as session:
             for msg_id, chat_id in messages:
                 session.execute(
-                    text("INSERT OR IGNORE INTO embedding_queue (message_id, chat_id, queued_at, status) VALUES (:m, :c, :t, 'pending')"),
-                    {"m": msg_id, "c": chat_id, "t": now}
+                    text(
+                        "INSERT OR IGNORE INTO embedding_queue "
+                        "(message_id, chat_id, queued_at, status) "
+                        "VALUES (:m, :c, :t, 'pending')"
+                    ),
+                    {"m": msg_id, "c": chat_id, "t": now},
                 )
             session.commit()
         return len(messages)
@@ -72,34 +81,57 @@ class EmbeddingDb:
     def get_pending(self, limit: int = 100) -> list[tuple[int, int]]:
         with self.session() as session:
             result = session.execute(
-                text("SELECT message_id, chat_id FROM embedding_queue WHERE status = 'pending' LIMIT :l"),
-                {"l": limit}
+                text(
+                    "SELECT message_id, chat_id FROM embedding_queue "
+                    "WHERE status = 'pending' LIMIT :l"
+                ),
+                {"l": limit},
             )
             return [(r[0], r[1]) for r in result]
 
     def insert_embedding(self, message_id: int, chat_id: int, embedding: bytes) -> None:
         with self.session() as session:
             session.execute(
-                text("INSERT OR REPLACE INTO message_embeddings (message_id, chat_id, embedding, created_at) VALUES (:m, :c, :e, :t)"),
-                {"m": message_id, "c": chat_id, "e": embedding, "t": int(time.time())}
+                text(
+                    "INSERT OR REPLACE INTO message_embeddings "
+                    "(message_id, chat_id, embedding, created_at) "
+                    "VALUES (:m, :c, :e, :t)"
+                ),
+                {"m": message_id, "c": chat_id, "e": embedding, "t": int(time.time())},
             )
             session.commit()
 
     def mark_complete(self, message_id: int) -> None:
         with self.session() as session:
-            session.execute(text("UPDATE embedding_queue SET status = 'completed' WHERE message_id = :m"), {"m": message_id})
+            session.execute(
+                text("UPDATE embedding_queue SET status = 'completed' WHERE message_id = :m"),
+                {"m": message_id},
+            )
             session.commit()
 
     def get_all_embeddings(self) -> list[tuple[int, int, bytes]]:
         with self.session() as session:
-            return [(r[0], r[1], r[2]) for r in session.execute(
-                text("SELECT message_id, chat_id, embedding FROM message_embeddings")
-            )]
+            return [
+                (r[0], r[1], r[2])
+                for r in session.execute(
+                    text("SELECT message_id, chat_id, embedding FROM message_embeddings")
+                )
+            ]
 
     def get_stats(self) -> dict:
         with self.session() as session:
-            pending = session.execute(text("SELECT COUNT(*) FROM embedding_queue WHERE status = 'pending'")).scalar() or 0
-            completed = session.execute(text("SELECT COUNT(*) FROM embedding_queue WHERE status = 'completed'")).scalar() or 0
+            pending = (
+                session.execute(
+                    text("SELECT COUNT(*) FROM embedding_queue WHERE status = 'pending'")
+                ).scalar()
+                or 0
+            )
+            completed = (
+                session.execute(
+                    text("SELECT COUNT(*) FROM embedding_queue WHERE status = 'completed'")
+                ).scalar()
+                or 0
+            )
             total = session.execute(text("SELECT COUNT(*) FROM message_embeddings")).scalar() or 0
             return {"pending": pending, "completed": completed, "total_embeddings": total}
 

@@ -15,8 +15,12 @@ def reciprocal_rank_fusion(
         scores[r.message_id] = {
             "score": 1.0 / (k + rank),
             "data": {
-                "message_id": r.message_id, "chat_id": r.chat_id, "text": r.text,
-                "timestamp": r.timestamp, "sender_name": r.sender_name, "chat_name": r.chat_name,
+                "message_id": r.message_id,
+                "chat_id": r.chat_id,
+                "text": r.text,
+                "timestamp": r.timestamp,
+                "sender_name": r.sender_name,
+                "chat_name": r.chat_name,
             },
         }
 
@@ -27,8 +31,14 @@ def reciprocal_rank_fusion(
         else:
             scores[msg_id] = {
                 "score": 1.0 / (k + rank),
-                "data": {"message_id": msg_id, "chat_id": r["chat_id"], "text": "",
-                         "timestamp": 0, "sender_name": None, "chat_name": None},
+                "data": {
+                    "message_id": msg_id,
+                    "chat_id": r["chat_id"],
+                    "text": "",
+                    "timestamp": 0,
+                    "sender_name": None,
+                    "chat_name": None,
+                },
                 "needs_fetch": True,
             }
 

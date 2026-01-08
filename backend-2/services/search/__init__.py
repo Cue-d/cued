@@ -1,9 +1,9 @@
 """Search package - FTS5, semantic search, and RRF fusion."""
 
-from .models import SearchResult
 from .fts import FtsIndex
-from .semantic import EmbeddingDb, semantic_search, process_queue, queue_all_messages
-from .fusion import reciprocal_rank_fusion, merge_results
+from .fusion import merge_results, reciprocal_rank_fusion
+from .models import SearchResult
+from .semantic import EmbeddingDb, process_queue, queue_all_messages, semantic_search
 
 __all__ = [
     "SearchResult",

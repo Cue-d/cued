@@ -1,7 +1,6 @@
 """Tests for search services."""
 
 import os
-import tempfile
 
 import numpy as np
 import pytest
@@ -66,6 +65,7 @@ class TestFtsIndex:
 
         with synced_app_db.engine.connect() as conn:
             from sqlmodel import text
+
             result = conn.execute(
                 text("SELECT name FROM sqlite_master WHERE type='table' AND name='messages_fts'")
             )
@@ -152,6 +152,7 @@ class TestEmbeddingDb:
         """init_schema() creates required tables."""
         with embedding_db.session() as session:
             from sqlmodel import text
+
             result = session.execute(
                 text("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name")
             )
@@ -350,7 +351,9 @@ class TestMergeResults:
     def test_respects_limit(self):
         """merge_results() respects limit parameter."""
         fts_results = [
-            SearchResult(message_id=i, chat_id=10, text=f"Msg {i}", timestamp=100+i, rank=-5.0-i)
+            SearchResult(
+                message_id=i, chat_id=10, text=f"Msg {i}", timestamp=100 + i, rank=-5.0 - i
+            )
             for i in range(10)
         ]
 
