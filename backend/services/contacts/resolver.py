@@ -72,6 +72,7 @@ def get_chat_display_name(chat, handle_to_name: dict[str, str], handle_ids: list
     """Compute display name for a chat.
 
     For group chats with an explicit display name, uses that.
+    For unnamed group chats, lists all participant names.
     For 1:1 chats, uses the resolved contact name or falls back to identifier.
 
     Args:
@@ -86,7 +87,12 @@ def get_chat_display_name(chat, handle_to_name: dict[str, str], handle_ids: list
     if chat.is_group and chat.name != chat.identifier:
         return chat.name
 
-    # 1:1 chat or group without display name - use first resolved contact
+    # Group without display name - list all participant names
+    if chat.is_group and handle_ids:
+        names = [handle_to_name.get(h, h) for h in handle_ids]
+        return ", ".join(names)
+
+    # 1:1 chat - use resolved contact name or fall back to identifier
     if handle_ids:
         return handle_to_name.get(handle_ids[0], handle_ids[0])
 
