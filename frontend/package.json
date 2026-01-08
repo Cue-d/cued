@@ -15,15 +15,14 @@
     "start": "electron-vite preview",
     "dev": "electron-vite dev",
     "build": "npm run typecheck && electron-vite build",
-    "build:backend": "cd ../backend && uv run pyinstaller backend.spec",
     "build:llm": "cd ../llm && swift build -c release",
     "postinstall": "electron-builder install-app-deps",
     "build:unpack": "npm run build && electron-builder --dir",
     "build:win": "npm run build && electron-builder --win",
     "build:mac": "electron-vite build && electron-builder --mac",
     "build:linux": "electron-vite build && electron-builder --linux",
-    "build:full": "npm run build:llm && npm run build:backend && npm run build && electron-builder --mac",
-    "build:full:unpack": "npm run build:llm && npm run build:backend && npm run build && electron-builder --dir",
+    "build:full": "npm run build:llm && npm run build && electron-builder --mac",
+    "build:full:unpack": "npm run build:llm && npm run build && electron-builder --dir",
     "prepare": "husky"
   },
   "dependencies": {
