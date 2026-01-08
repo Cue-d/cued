@@ -116,3 +116,97 @@ class MessageWithSender(SQLModel):
     is_read: bool
     read_at: int | None = None
     has_attachments: bool = False
+
+
+# =============================================================================
+# ACTION MODELS
+# =============================================================================
+
+
+class Action(SQLModel, table=True):
+    """Action queue item for swipeable cards."""
+
+    __tablename__ = "actions"
+
+    id: int | None = Field(default=None, primary_key=True)
+    type: str = Field(index=True)  # respond_to_message, eod_contact, follow_up
+    status: str = Field(default="pending", index=True)  # pending, completed, discarded, snoozed
+    priority: int = Field(default=50)
+    chat_id: int | None = Field(default=None, foreign_key="chats.id")
+    person_id: int | None = Field(default=None)  # References people table (if exists)
+    message_id: int | None = Field(default=None, foreign_key="messages.id")
+    payload: str | None = None  # JSON string
+    created_at: int
+    remind_at: int | None = None
+    snoozed_until: int | None = None
+    completed_at: int | None = None
+    discarded_at: int | None = None
+
+
+class LlmAnalysisQueue(SQLModel, table=True):
+    """Queue for LLM conversation analysis."""
+
+    __tablename__ = "llm_analysis_queue"
+
+    chat_id: int = Field(primary_key=True, foreign_key="chats.id")
+    status: str = Field(default="pending")  # pending, processing, completed, skipped
+    priority: int = Field(default=50)
+    queued_at: int
+    started_at: int | None = None
+    completed_at: int | None = None
+    result: str | None = None  # action_created, no_action, error, skipped:<reason>
+
+
+# =============================================================================
+# ACTION RESPONSE MODELS (for API)
+# =============================================================================
+
+
+class ActionWithContext(SQLModel):
+    """Action with joined context for API responses."""
+
+    id: int
+    type: str
+    status: str
+    priority: int
+    chat_id: int | None = None
+    person_id: int | None = None
+    message_id: int | None = None
+    payload: str | None = None  # JSON string - parsed by router
+    created_at: int
+    remind_at: int | None = None
+    snoozed_until: int | None = None
+    completed_at: int | None = None
+    discarded_at: int | None = None
+    # Joined fields
+    chat_name: str | None = None
+    person_name: str | None = None
+    message_text: str | None = None
+    message_timestamp: int | None = None
+
+
+class UnansweredChat(SQLModel):
+    """Chat with unanswered message info."""
+
+    message_id: int
+    chat_id: int
+    sender_id: int | None = None
+    text: str | None = None
+    timestamp: int
+    chat_name: str | None = None
+    person_name: str | None = None
+    hours_since: int
+
+
+class QueuedAnalysis(SQLModel):
+    """LLM analysis queue item with context."""
+
+    chat_id: int
+    status: str
+    priority: int
+    queued_at: int
+    started_at: int | None = None
+    completed_at: int | None = None
+    result: str | None = None
+    chat_name: str | None = None
+    person_name: str | None = None

@@ -1,10 +1,21 @@
 """App database (prm.db) access layer."""
 
+import time
 from contextlib import contextmanager
+from datetime import datetime
 
 from sqlmodel import Session, SQLModel, create_engine, text
 
-from .models import Attachment, Chat, ChatWithLastMessage, Handle, MessageWithSender
+from .models import (
+    ActionWithContext,
+    Attachment,
+    Chat,
+    ChatWithLastMessage,
+    Handle,
+    MessageWithSender,
+    QueuedAnalysis,
+    UnansweredChat,
+)
 
 
 class AppDb:
@@ -217,3 +228,348 @@ class AppDb:
             )
             row = result.fetchone()
             return row[0] if row else None
+
+    # =========================================================================
+    # ACTIONS CRUD
+    # =========================================================================
+
+    def _now_timestamp(self) -> int:
+        """Get current Unix timestamp."""
+        return int(time.time())
+
+    def create_action(
+        self,
+        action_type: str,
+        priority: int = 50,
+        chat_id: int | None = None,
+        person_id: int | None = None,
+        message_id: int | None = None,
+        payload: str | None = None,
+        remind_at: int | None = None,
+    ) -> int:
+        """Create a new action. Returns the action ID."""
+        now = self._now_timestamp()
+        with self.session() as session:
+            result = session.execute(
+                text("""
+                    INSERT INTO actions (type, status, priority, chat_id, person_id,
+                                         message_id, payload, created_at, remind_at)
+                    VALUES (:type, 'pending', :priority, :chat_id, :person_id,
+                            :message_id, :payload, :created_at, :remind_at)
+                """),
+                {
+                    "type": action_type,
+                    "priority": priority,
+                    "chat_id": chat_id,
+                    "person_id": person_id,
+                    "message_id": message_id,
+                    "payload": payload,
+                    "created_at": now,
+                    "remind_at": remind_at,
+                },
+            )
+            session.commit()
+            return result.lastrowid
+
+    def get_pending_actions(self, limit: int = 50) -> list[ActionWithContext]:
+        """Get pending actions with joined context, ordered by priority."""
+        with self.session() as session:
+            result = session.execute(
+                text("""
+                    SELECT a.id, a.type, a.status, a.priority, a.chat_id, a.person_id,
+                           a.message_id, a.payload, a.created_at, a.remind_at,
+                           a.snoozed_until, a.completed_at, a.discarded_at,
+                           c.name as chat_name, h.identifier as person_name,
+                           m.text as message_text, m.timestamp as message_timestamp
+                    FROM actions a
+                    LEFT JOIN chats c ON c.id = a.chat_id
+                    LEFT JOIN handles h ON h.id = a.person_id
+                    LEFT JOIN messages m ON m.id = a.message_id
+                    WHERE a.status = 'pending'
+                       OR (a.status = 'snoozed' AND a.snoozed_until <= :now)
+                    ORDER BY
+                        CASE WHEN a.status = 'snoozed' THEN 1 ELSE 0 END ASC,
+                        a.priority DESC,
+                        a.created_at ASC
+                    LIMIT :limit
+                """),
+                {"now": self._now_timestamp(), "limit": limit},
+            )
+            return [self._row_to_action_with_context(row) for row in result]
+
+    def get_action(self, action_id: int) -> ActionWithContext | None:
+        """Get single action with context."""
+        with self.session() as session:
+            result = session.execute(
+                text("""
+                    SELECT a.id, a.type, a.status, a.priority, a.chat_id, a.person_id,
+                           a.message_id, a.payload, a.created_at, a.remind_at,
+                           a.snoozed_until, a.completed_at, a.discarded_at,
+                           c.name as chat_name, h.identifier as person_name,
+                           m.text as message_text, m.timestamp as message_timestamp
+                    FROM actions a
+                    LEFT JOIN chats c ON c.id = a.chat_id
+                    LEFT JOIN handles h ON h.id = a.person_id
+                    LEFT JOIN messages m ON m.id = a.message_id
+                    WHERE a.id = :id
+                """),
+                {"id": action_id},
+            )
+            row = result.fetchone()
+            return self._row_to_action_with_context(row) if row else None
+
+    def _row_to_action_with_context(self, row) -> ActionWithContext:
+        """Convert a database row to ActionWithContext."""
+        return ActionWithContext(
+            id=row[0],
+            type=row[1],
+            status=row[2],
+            priority=row[3],
+            chat_id=row[4],
+            person_id=row[5],
+            message_id=row[6],
+            payload=row[7],
+            created_at=row[8],
+            remind_at=row[9],
+            snoozed_until=row[10],
+            completed_at=row[11],
+            discarded_at=row[12],
+            chat_name=row[13],
+            person_name=row[14],
+            message_text=row[15],
+            message_timestamp=row[16],
+        )
+
+    def update_action_status(
+        self, action_id: int, status: str, snoozed_until: int | None = None
+    ) -> None:
+        """Update action status with appropriate timestamps."""
+        now = self._now_timestamp()
+        completed_at = now if status == "completed" else None
+        discarded_at = now if status == "discarded" else None
+
+        with self.session() as session:
+            session.execute(
+                text("""
+                    UPDATE actions
+                    SET status = :status, snoozed_until = :snoozed_until,
+                        completed_at = :completed_at, discarded_at = :discarded_at
+                    WHERE id = :id
+                """),
+                {
+                    "id": action_id,
+                    "status": status,
+                    "snoozed_until": snoozed_until,
+                    "completed_at": completed_at,
+                    "discarded_at": discarded_at,
+                },
+            )
+            session.commit()
+
+    def delete_action(self, action_id: int) -> None:
+        """Delete an action."""
+        with self.session() as session:
+            session.execute(text("DELETE FROM actions WHERE id = :id"), {"id": action_id})
+            session.commit()
+
+    # =========================================================================
+    # UNANSWERED MESSAGE DETECTION
+    # =========================================================================
+
+    def get_unanswered_chats(self, threshold_hours: int = 24) -> list[UnansweredChat]:
+        """Get chats with unanswered messages older than threshold."""
+        now = self._now_timestamp()
+        threshold_secs = threshold_hours * 3600
+        skip_window_secs = 6 * 3600
+        skip_cutoff = now - skip_window_secs
+
+        with self.session() as session:
+            result = session.execute(
+                text("""
+                    WITH latest_messages AS (
+                        SELECT
+                            chat_id,
+                            MAX(CASE WHEN is_from_me = 1 THEN timestamp ELSE 0 END) as my_latest,
+                            MAX(CASE WHEN is_from_me = 0 THEN timestamp ELSE 0 END) as their_latest
+                        FROM messages
+                        GROUP BY chat_id
+                    )
+                    SELECT
+                        m.id as message_id,
+                        m.chat_id,
+                        m.sender_id,
+                        m.text,
+                        m.timestamp,
+                        c.name as chat_name,
+                        h.identifier as person_name,
+                        (:now - m.timestamp) / 3600 as hours_since
+                    FROM messages m
+                    JOIN latest_messages lm
+                        ON lm.chat_id = m.chat_id AND m.timestamp = lm.their_latest
+                    LEFT JOIN chats c ON c.id = m.chat_id
+                    LEFT JOIN handles h ON h.id = m.sender_id
+                    WHERE lm.their_latest > lm.my_latest
+                    AND lm.their_latest < (:now - :threshold)
+                    AND NOT EXISTS (
+                        SELECT 1 FROM actions
+                        WHERE chat_id = m.chat_id
+                        AND type = 'respond_to_message'
+                        AND (status IN ('pending', 'snoozed')
+                             OR (status = 'discarded' AND discarded_at > (:now - 86400)))
+                    )
+                    AND NOT EXISTS (
+                        SELECT 1 FROM llm_analysis_queue
+                        WHERE chat_id = m.chat_id
+                        AND status = 'completed'
+                        AND result = 'no_action'
+                        AND completed_at > :skip_cutoff
+                    )
+                    ORDER BY m.timestamp DESC
+                """),
+                {
+                    "now": now,
+                    "threshold": threshold_secs,
+                    "skip_cutoff": skip_cutoff,
+                },
+            )
+            return [
+                UnansweredChat(
+                    message_id=row[0],
+                    chat_id=row[1],
+                    sender_id=row[2],
+                    text=row[3],
+                    timestamp=row[4],
+                    chat_name=row[5],
+                    person_name=row[6],
+                    hours_since=row[7],
+                )
+                for row in result
+            ]
+
+    # =========================================================================
+    # LLM ANALYSIS QUEUE
+    # =========================================================================
+
+    def queue_for_analysis(self, chat_id: int, priority: int = 50) -> None:
+        """Queue a chat for LLM analysis."""
+        now = self._now_timestamp()
+        with self.session() as session:
+            session.execute(
+                text("""
+                    INSERT OR REPLACE INTO llm_analysis_queue
+                    (chat_id, status, priority, queued_at, started_at, completed_at, result)
+                    VALUES (:chat_id, 'pending', :priority, :now, NULL, NULL, NULL)
+                """),
+                {"chat_id": chat_id, "priority": priority, "now": now},
+            )
+            session.commit()
+
+    def get_next_pending_analysis(self) -> QueuedAnalysis | None:
+        """Get next pending analysis item."""
+        with self.session() as session:
+            result = session.execute(
+                text("""
+                    SELECT q.chat_id, q.status, q.priority, q.queued_at,
+                           q.started_at, q.completed_at, q.result,
+                           c.name as chat_name, h.identifier as person_name
+                    FROM llm_analysis_queue q
+                    LEFT JOIN chats c ON c.id = q.chat_id
+                    LEFT JOIN chat_participants cp ON cp.chat_id = q.chat_id
+                    LEFT JOIN handles h ON h.id = cp.handle_id
+                    WHERE q.status = 'pending'
+                    ORDER BY q.priority DESC, q.queued_at ASC
+                    LIMIT 1
+                """)
+            )
+            row = result.fetchone()
+            if not row:
+                return None
+            return QueuedAnalysis(
+                chat_id=row[0],
+                status=row[1],
+                priority=row[2],
+                queued_at=row[3],
+                started_at=row[4],
+                completed_at=row[5],
+                result=row[6],
+                chat_name=row[7],
+                person_name=row[8],
+            )
+
+    def mark_analysis_started(self, chat_id: int) -> None:
+        """Mark analysis as started."""
+        now = self._now_timestamp()
+        with self.session() as session:
+            session.execute(
+                text("""
+                    UPDATE llm_analysis_queue
+                    SET status = 'processing', started_at = :now
+                    WHERE chat_id = :chat_id
+                """),
+                {"now": now, "chat_id": chat_id},
+            )
+            session.commit()
+
+    def mark_analysis_complete(self, chat_id: int, result: str) -> None:
+        """Mark analysis as complete with result."""
+        now = self._now_timestamp()
+        with self.session() as session:
+            session.execute(
+                text("""
+                    UPDATE llm_analysis_queue
+                    SET status = 'completed', completed_at = :now, result = :result
+                    WHERE chat_id = :chat_id
+                """),
+                {"now": now, "result": result, "chat_id": chat_id},
+            )
+            session.commit()
+
+    def mark_analysis_skipped(self, chat_id: int, reason: str) -> None:
+        """Mark analysis as skipped with reason."""
+        now = self._now_timestamp()
+        result = f"skipped:{reason}"
+        with self.session() as session:
+            session.execute(
+                text("""
+                    INSERT OR REPLACE INTO llm_analysis_queue
+                    (chat_id, status, priority, queued_at, started_at, completed_at, result)
+                    VALUES (:chat_id, 'completed', 0, :now, NULL, :now, :result)
+                """),
+                {"chat_id": chat_id, "now": now, "result": result},
+            )
+            session.commit()
+
+    def clear_old_analysis(self, hours_old: int = 24) -> int:
+        """Clear completed analysis entries older than given hours."""
+        cutoff = self._now_timestamp() - (hours_old * 3600)
+        with self.session() as session:
+            result = session.execute(
+                text("""
+                    DELETE FROM llm_analysis_queue
+                    WHERE status = 'completed' AND completed_at < :cutoff
+                """),
+                {"cutoff": cutoff},
+            )
+            session.commit()
+            return result.rowcount
+
+    # =========================================================================
+    # EOD DETECTION
+    # =========================================================================
+
+    def has_eod_action_today(self, person_id: int) -> bool:
+        """Check if person already has EOD action today."""
+        today_start = int(
+            datetime.now().replace(hour=0, minute=0, second=0, microsecond=0).timestamp()
+        )
+        with self.session() as session:
+            result = session.execute(
+                text("""
+                    SELECT COUNT(*) FROM actions
+                    WHERE person_id = :person_id
+                    AND type = 'eod_contact'
+                    AND created_at >= :today_start
+                """),
+                {"person_id": person_id, "today_start": today_start},
+            )
+            return result.scalar() > 0
