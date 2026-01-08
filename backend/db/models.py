@@ -104,19 +104,6 @@ class ActionWithContext(SQLModel):
     message_timestamp: int | None = None
 
 
-class UnansweredChat(SQLModel):
-    """Chat with unanswered message info."""
-
-    message_id: int
-    chat_id: int
-    sender_id: int | None = None
-    text: str | None = None
-    timestamp: int
-    chat_name: str | None = None
-    person_name: str | None = None
-    hours_since: int
-
-
 class QueuedAnalysis(SQLModel):
     """LLM analysis queue item with context."""
 
