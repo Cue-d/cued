@@ -10,6 +10,7 @@ import logging
 
 from services.actions.message_filter import should_skip_llm_analysis
 from services.actions.priority import calculate_chat_priority
+from services.contacts import is_contact
 
 logger = logging.getLogger(__name__)
 
@@ -44,12 +45,15 @@ def run_unanswered_scan(chat_db, app_db, threshold_hours: int = UNANSWERED_THRES
         if app_db.was_recently_skipped(chat["chat_id"]):
             continue
 
+        # Check if sender is a saved contact
+        sender_is_contact = is_contact(chat["person_name"])
+
         # Apply heuristic filters to skip spam/automated messages
         filter_result = should_skip_llm_analysis(
-            identifier=chat["person_name"],  # Using person_name as identifier proxy
+            identifier=chat["person_name"],
             text=chat["text"],
             person_name=chat["person_name"],
-            is_contact=False,  # TODO: Get actual contact status from db
+            is_contact=sender_is_contact,
         )
 
         if filter_result.should_skip:
@@ -66,10 +70,10 @@ def run_unanswered_scan(chat_db, app_db, threshold_hours: int = UNANSWERED_THRES
         chat_details = chat_db.get_chat(chat["chat_id"])
         is_group = chat_details.is_group if chat_details else False
 
-        # Calculate priority score
+        # Calculate priority score (contacts get a boost)
         priority = calculate_chat_priority(
             hours_since=chat["hours_since"],
-            person=None,  # TODO: Get person details for contact boost
+            person={"is_contact": sender_is_contact},
             is_group=is_group,
         )
 

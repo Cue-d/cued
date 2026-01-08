@@ -22,6 +22,8 @@ class SkipReason(str, Enum):
     CARRIER_NOTIFICATION = "carrier_notification"
     URGENCY_SPAM = "urgency_spam_unknown_sender"
     PROMOTIONAL = "promotional_unknown_sender"
+    BANK_ALERT = "bank_transaction_alert"
+    PHISHING = "phishing_attempt"
 
 
 class FilterResult(BaseModel):
@@ -142,6 +144,29 @@ URGENCY_PATTERN = re.compile(
 PROMOTIONAL_PATTERN = re.compile(
     r"(\d+%\s*off|flash sale|deal|discount|coupon|promo\s*code|"
     r"free shipping|clearance|buy one get|bogo|special offer)",
+    re.IGNORECASE,
+)
+
+# Bank/transaction alerts: Automated banking notifications
+# Examples that WILL trigger (non-contacts only):
+#   - "Chase: Purchase of $47.83 at Amazon on card ending 1234"
+#   - "Direct deposit of $2,500.00 received"
+#   - "Transaction alert: $100.00 withdrawal"
+BANK_ALERT_PATTERN = re.compile(
+    r"(card ending|transaction.{0,20}\$\d|purchase of \$|"
+    r"direct deposit|withdrawal.{0,20}\$|balance.{0,20}\$|"
+    r"payment.{0,20}(received|processed|due))",
+    re.IGNORECASE,
+)
+
+# Phishing: Credential harvesting attempts
+# Examples that WILL trigger (non-contacts only):
+#   - "Verify your account at..."
+#   - "Confirm your password by clicking..."
+#   - "Update your payment information"
+PHISHING_PATTERN = re.compile(
+    r"(verify|confirm|update).{0,30}(account|password|payment|card|information|identity)|"
+    r"(click|tap|visit).{0,20}(link|here|below).{0,20}(verify|confirm|update|secure)",
     re.IGNORECASE,
 )
 
@@ -295,6 +320,40 @@ def is_promotional(text: str | None, is_contact: bool) -> FilterResult:
     return FilterResult(should_skip=False)
 
 
+def is_bank_alert(text: str | None, is_contact: bool) -> FilterResult:
+    """Filter automated banking notifications (only for non-contacts).
+
+    Transaction alerts from banks don't require responses.
+
+    Examples that trigger (non-contacts only):
+        - "Chase: Purchase of $47.83 at Amazon on card ending 1234"
+        - "Direct deposit of $2,500.00 received"
+        - "Transaction alert: $100.00 withdrawal"
+    """
+    if is_contact:
+        return FilterResult(should_skip=False)
+    if text and BANK_ALERT_PATTERN.search(text):
+        return FilterResult(should_skip=True, reason=SkipReason.BANK_ALERT, confidence=0.90)
+    return FilterResult(should_skip=False)
+
+
+def is_phishing(text: str | None, is_contact: bool) -> FilterResult:
+    """Filter phishing attempts (only for non-contacts).
+
+    Messages trying to harvest credentials or personal information.
+
+    Examples that trigger (non-contacts only):
+        - "Verify your account at..."
+        - "Confirm your password by clicking..."
+        - "Update your payment information"
+    """
+    if is_contact:
+        return FilterResult(should_skip=False)
+    if text and PHISHING_PATTERN.search(text):
+        return FilterResult(should_skip=True, reason=SkipReason.PHISHING, confidence=0.90)
+    return FilterResult(should_skip=False)
+
+
 def should_skip_llm_analysis(
     identifier: str | None,
     text: str | None,
@@ -307,6 +366,9 @@ def should_skip_llm_analysis(
     Filters are ordered by confidence (highest first) and short-circuit on match.
     This ensures we catch the most obvious spam first while minimizing false positives.
 
+    IMPORTANT: Contacts are trusted and bypass most content filters. Only universal
+    spam signals (short codes, unsubscribe) are applied to contacts.
+
     Args:
         identifier: The sender's phone number or email
         text: The message text to analyze
@@ -317,12 +379,12 @@ def should_skip_llm_analysis(
         FilterResult with should_skip=True if the message should be filtered,
         along with the reason and confidence level.
     """
-    # Tier 1: Sender-based (very high confidence)
+    # Tier 1: Sender-based (very high confidence, applies to all)
     result = is_short_code(identifier)
     if result.should_skip:
         return result
 
-    # Tier 2: Content-based (high confidence)
+    # Tier 2: Universal content filters (applies to all senders)
     result = is_otp_message(text)
     if result.should_skip:
         return result
@@ -335,15 +397,26 @@ def should_skip_llm_analysis(
     if result.should_skip:
         return result
 
-    result = is_account_security_spam(text, is_contact)
-    if result.should_skip:
-        return result
-
     result = is_delivery_notification(text)
     if result.should_skip:
         return result
 
-    # Tier 3: Lower confidence (only for non-contacts)
+    # Tier 3: Non-contact only filters (high confidence)
+    # These patterns are too aggressive for contacts who might legitimately
+    # send similar-looking messages
+    result = is_account_security_spam(text, is_contact)
+    if result.should_skip:
+        return result
+
+    result = is_bank_alert(text, is_contact)
+    if result.should_skip:
+        return result
+
+    result = is_phishing(text, is_contact)
+    if result.should_skip:
+        return result
+
+    # Tier 4: Lower confidence (only for non-contacts)
     result = is_urgency_spam(text, is_contact)
     if result.should_skip:
         return result
