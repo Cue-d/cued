@@ -1,8 +1,8 @@
 {
   "scripts": {
     "setup": "cd backend && uv sync && cd ../frontend && pnpm install && cd ../llm && swift build -c release",
-    "run": "(cd backend && PRM_DEBUG_WORKERS=1 && PRM_DEBUG_API=1 uv run uvicorn main:app --reload) & (cd frontend && pnpm dev)",
-    "run:backend": "cd backend && uv run uvicorn main:app --reload",
+    "run": "(cd backend && PRM_DEBUG_WORKERS=1 PRM_DEBUG_API=1 uv run uvicorn main:app --reload --reload-exclude .venv) & (cd frontend && pnpm dev)",
+    "run:backend": "cd backend && uv run uvicorn main:app --reload --reload-exclude .venv",
     "run:frontend": "cd frontend && pnpm dev",
     "build:backend": "cd backend && uv sync",
     "build:frontend": "cd frontend && pnpm build:full",

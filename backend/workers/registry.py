@@ -55,6 +55,7 @@ def register_all_jobs(
         "interval",
         seconds=30,
         id="text_sync",
+        name="text_sync",
         max_instances=1,
     )
 
@@ -64,6 +65,7 @@ def register_all_jobs(
         "interval",
         minutes=5,
         id="unanswered_scan",
+        name="unanswered_scan",
         max_instances=1,
     )
 
@@ -73,6 +75,7 @@ def register_all_jobs(
         "interval",
         seconds=10,
         id="llm_processor",
+        name="llm_processor",
         max_instances=1,
         coalesce=True,
         misfire_grace_time=None,
@@ -84,6 +87,7 @@ def register_all_jobs(
         "interval",
         hours=1,
         id="llm_cleanup",
+        name="llm_cleanup",
         max_instances=1,
     )
 
@@ -94,6 +98,7 @@ def register_all_jobs(
             "interval",
             minutes=5,
             id="embedding_batch",
+            name="embedding_batch",
             max_instances=1,
         )
     else:
@@ -105,6 +110,7 @@ def register_all_jobs(
         "interval",
         minutes=5,
         id="deletion_scan",
+        name="deletion_scan",
         max_instances=1,
     )
 
@@ -114,6 +120,7 @@ def register_all_jobs(
         "interval",
         minutes=5,
         id="contacts_sync",
+        name="contacts_sync",
         max_instances=1,
     )
 

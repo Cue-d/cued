@@ -298,7 +298,7 @@ def queue_missing_messages(app_db, embedding_db: EmbeddingDb) -> int:
             row[0] for row in session.execute(text("SELECT message_id FROM embedding_queue"))
         }
         embedded_ids = {
-            row[0] for row in session.execute(text("SELECT message_id FROM message_embeddings"))
+            row[0] for row in session.execute(text("SELECT message_id FROM message_embeddings_meta"))
         }
 
     existing_ids = queued_ids | embedded_ids
