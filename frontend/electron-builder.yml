@@ -16,6 +16,8 @@ extraResources:
     to: backend/prm-backend
   - from: ../llm/.build/release/prm-llm
     to: llm/prm-llm
+  - from: ../llm/.build/release/prm-contacts
+    to: llm/prm-contacts
 win:
   executableName: prm
 nsis:

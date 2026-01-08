@@ -1,93 +1,27 @@
 """Tests for macOS services (contacts and messaging)."""
 
+import json
 import sys
 from unittest.mock import MagicMock, patch
 
 import pytest
 
 from services.macos import (
+    ContactsAccessDeniedError,
+    ContactsError,
     FetchedContact,
     SendResult,
-    fetch_all_contact_names,
-    fetch_contacts_by_names,
+    fetch_all_contacts,
+    is_swift_contacts_available,
     send_message,
     send_to_group,
 )
-from services.macos.contacts import _parse_contact_block
+from services.macos.contacts import _parse_error
 from services.macos.messaging import _escape_applescript_string
 
 # =============================================================================
-# Contact Parsing Tests (Unit tests - no AppleScript execution)
+# FetchedContact Model Tests
 # =============================================================================
-
-
-class TestParseContactBlock:
-    """Tests for _parse_contact_block helper."""
-
-    def test_parses_full_contact(self):
-        """Parses a contact block with all fields."""
-        block = """
-NAME:John Doe
-COMPANY:Acme Corp
-NOTE:Met at conference
-EMAIL:john@example.com
-EMAIL:john.doe@work.com
-PHONE:+1234567890
-PHONE:+0987654321
-"""
-        contact = _parse_contact_block(block)
-
-        assert contact is not None
-        assert contact.name == "John Doe"
-        assert contact.company == "Acme Corp"
-        assert contact.notes == "Met at conference"
-        assert contact.emails == ["john@example.com", "john.doe@work.com"]
-        assert contact.phones == ["+1234567890", "+0987654321"]
-
-    def test_parses_minimal_contact(self):
-        """Parses a contact with only name."""
-        block = "NAME:Jane Smith\n"
-        contact = _parse_contact_block(block)
-
-        assert contact is not None
-        assert contact.name == "Jane Smith"
-        assert contact.emails == []
-        assert contact.phones == []
-        assert contact.company is None
-        assert contact.notes is None
-
-    def test_handles_missing_value(self):
-        """Ignores 'missing value' fields from AppleScript."""
-        block = """
-NAME:Test Person
-COMPANY:missing value
-NOTE:missing value
-"""
-        contact = _parse_contact_block(block)
-
-        assert contact is not None
-        assert contact.company is None
-        assert contact.notes is None
-
-    def test_handles_carriage_returns(self):
-        """Handles AppleScript's carriage return line breaks."""
-        block = "NAME:CR Test\rEMAIL:test@example.com\rPHONE:555-1234"
-        contact = _parse_contact_block(block)
-
-        assert contact is not None
-        assert contact.name == "CR Test"
-        assert contact.emails == ["test@example.com"]
-        assert contact.phones == ["555-1234"]
-
-    def test_returns_none_for_empty_block(self):
-        """Returns None for empty block."""
-        assert _parse_contact_block("") is None
-        assert _parse_contact_block("   \n  \n  ") is None
-
-    def test_returns_none_for_block_without_name(self):
-        """Returns None if no NAME field."""
-        block = "EMAIL:test@example.com\nPHONE:555-1234"
-        assert _parse_contact_block(block) is None
 
 
 class TestFetchedContactModel:
@@ -118,6 +52,229 @@ class TestFetchedContactModel:
         assert contact.phones == ["+1"]
         assert contact.company == "Corp"
         assert contact.notes == "Notes here"
+
+
+# =============================================================================
+# Swift CLI Helper Tests
+# =============================================================================
+
+
+class TestParseError:
+    """Tests for _parse_error helper."""
+
+    def test_parses_json_error(self):
+        """Parses JSON error from stderr."""
+        stderr = '{"error": "Contacts access denied"}\n'
+        assert _parse_error(stderr) == "Contacts access denied"
+
+    def test_returns_raw_string_on_invalid_json(self):
+        """Returns raw string if not valid JSON."""
+        stderr = "Some error message"
+        assert _parse_error(stderr) == "Some error message"
+
+    def test_returns_none_for_empty(self):
+        """Returns None for empty stderr."""
+        assert _parse_error("") is None
+        assert _parse_error("   ") is None
+
+
+class TestSwiftContactsAvailability:
+    """Tests for Swift CLI availability checking."""
+
+    @patch("services.macos.contacts.get_contacts_binary_path")
+    def test_is_available_when_binary_exists_and_executable(self, mock_path):
+        """Returns True when binary exists and is executable."""
+        mock_path_obj = MagicMock()
+        mock_path_obj.exists.return_value = True
+        mock_path.return_value = mock_path_obj
+
+        with patch("os.access", return_value=True):
+            assert is_swift_contacts_available() is True
+
+    @patch("services.macos.contacts.get_contacts_binary_path")
+    def test_is_not_available_when_binary_missing(self, mock_path):
+        """Returns False when binary doesn't exist."""
+        mock_path_obj = MagicMock()
+        mock_path_obj.exists.return_value = False
+        mock_path.return_value = mock_path_obj
+
+        assert is_swift_contacts_available() is False
+
+
+# =============================================================================
+# Swift CLI Fetch Tests (Mocked)
+# =============================================================================
+
+
+class TestFetchAllContactsMocked:
+    """Tests for fetch_all_contacts with mocked subprocess."""
+
+    @patch("services.macos.contacts.is_swift_contacts_available")
+    @patch("services.macos.contacts.subprocess.run")
+    @patch("services.macos.contacts.get_contacts_binary_path")
+    def test_returns_parsed_contacts(self, mock_path, mock_run, mock_available):
+        """Parses JSON output from Swift CLI."""
+        mock_available.return_value = True
+        mock_path.return_value = MagicMock(__str__=lambda x: "/path/to/prm-contacts")
+
+        mock_run.return_value = MagicMock(
+            returncode=0,
+            stdout=json.dumps(
+                {
+                    "contacts": [
+                        {
+                            "name": "John Doe",
+                            "emails": ["john@example.com"],
+                            "phones": ["+1234567890"],
+                            "company": "Acme",
+                        },
+                        {
+                            "name": "Jane Smith",
+                            "emails": ["jane@example.com"],
+                            "phones": [],
+                            "company": None,
+                        },
+                    ],
+                    "count": 2,
+                    "elapsed_seconds": 0.05,
+                }
+            ),
+            stderr="",
+        )
+
+        contacts = fetch_all_contacts()
+
+        assert len(contacts) == 2
+        assert contacts[0].name == "John Doe"
+        assert contacts[0].company == "Acme"
+        assert contacts[0].emails == ["john@example.com"]
+        assert contacts[1].name == "Jane Smith"
+        assert contacts[1].company is None
+
+    @patch("services.macos.contacts.is_swift_contacts_available")
+    @patch("services.macos.contacts.subprocess.run")
+    @patch("services.macos.contacts.get_contacts_binary_path")
+    def test_handles_empty_contacts(self, mock_path, mock_run, mock_available):
+        """Handles empty contacts list."""
+        mock_available.return_value = True
+        mock_path.return_value = MagicMock(__str__=lambda x: "/path/to/prm-contacts")
+
+        mock_run.return_value = MagicMock(
+            returncode=0,
+            stdout=json.dumps({"contacts": [], "count": 0, "elapsed_seconds": 0.01}),
+            stderr="",
+        )
+
+        contacts = fetch_all_contacts()
+
+        assert contacts == []
+
+    @patch("services.macos.contacts.is_swift_contacts_available")
+    @patch("services.macos.contacts.get_contacts_binary_path")
+    def test_raises_when_binary_unavailable(self, mock_path, mock_available):
+        """Raises ContactsError when Swift CLI unavailable."""
+        mock_available.return_value = False
+        mock_path.return_value = MagicMock(__str__=lambda x: "/missing/prm-contacts")
+
+        with pytest.raises(ContactsError) as exc:
+            fetch_all_contacts()
+
+        assert "not found" in str(exc.value)
+
+    @patch("services.macos.contacts.is_swift_contacts_available")
+    @patch("services.macos.contacts.subprocess.run")
+    @patch("services.macos.contacts.get_contacts_binary_path")
+    def test_raises_access_denied_on_exit_code_2(self, mock_path, mock_run, mock_available):
+        """Raises ContactsAccessDeniedError on exit code 2."""
+        mock_available.return_value = True
+        mock_path.return_value = MagicMock(__str__=lambda x: "/path/to/prm-contacts")
+
+        mock_run.return_value = MagicMock(
+            returncode=2,
+            stdout="",
+            stderr='{"error": "Contacts access denied"}',
+        )
+
+        with pytest.raises(ContactsAccessDeniedError) as exc:
+            fetch_all_contacts()
+
+        assert "denied" in str(exc.value).lower()
+
+    @patch("services.macos.contacts.is_swift_contacts_available")
+    @patch("services.macos.contacts.subprocess.run")
+    @patch("services.macos.contacts.get_contacts_binary_path")
+    def test_raises_on_invalid_json(self, mock_path, mock_run, mock_available):
+        """Raises ContactsError on invalid JSON output."""
+        mock_available.return_value = True
+        mock_path.return_value = MagicMock(__str__=lambda x: "/path/to/prm-contacts")
+
+        mock_run.return_value = MagicMock(
+            returncode=0,
+            stdout="not valid json",
+            stderr="",
+        )
+
+        with pytest.raises(ContactsError) as exc:
+            fetch_all_contacts()
+
+        assert "Invalid JSON" in str(exc.value)
+
+    @patch("services.macos.contacts.is_swift_contacts_available")
+    @patch("services.macos.contacts.subprocess.run")
+    @patch("services.macos.contacts.get_contacts_binary_path")
+    def test_handles_missing_contact_fields(self, mock_path, mock_run, mock_available):
+        """Handles contacts with missing optional fields gracefully."""
+        mock_available.return_value = True
+        mock_path.return_value = MagicMock(__str__=lambda x: "/path/to/prm-contacts")
+
+        mock_run.return_value = MagicMock(
+            returncode=0,
+            stdout=json.dumps(
+                {
+                    "contacts": [
+                        {"name": "Minimal Contact"},  # Missing emails, phones, company
+                    ],
+                    "count": 1,
+                    "elapsed_seconds": 0.01,
+                }
+            ),
+            stderr="",
+        )
+
+        contacts = fetch_all_contacts()
+
+        assert len(contacts) == 1
+        assert contacts[0].name == "Minimal Contact"
+        assert contacts[0].emails == []
+        assert contacts[0].phones == []
+        assert contacts[0].company is None
+
+    @patch("services.macos.contacts.is_swift_contacts_available")
+    @patch("services.macos.contacts.subprocess.run")
+    @patch("services.macos.contacts.get_contacts_binary_path")
+    def test_raises_on_missing_name_field(self, mock_path, mock_run, mock_available):
+        """Raises error when contact is missing required name field."""
+        mock_available.return_value = True
+        mock_path.return_value = MagicMock(__str__=lambda x: "/path/to/prm-contacts")
+
+        mock_run.return_value = MagicMock(
+            returncode=0,
+            stdout=json.dumps(
+                {
+                    "contacts": [
+                        {"emails": ["test@example.com"]},  # Missing name
+                    ],
+                    "count": 1,
+                    "elapsed_seconds": 0.01,
+                }
+            ),
+            stderr="",
+        )
+
+        with pytest.raises(ContactsError) as exc:
+            fetch_all_contacts()
+
+        assert "name" in str(exc.value).lower()
 
 
 # =============================================================================
@@ -174,115 +331,8 @@ class TestSendResultModel:
 
 
 # =============================================================================
-# Mocked AppleScript Tests
+# Mocked AppleScript Messaging Tests
 # =============================================================================
-
-
-class TestFetchAllContactNamesMocked:
-    """Tests for fetch_all_contact_names with mocked subprocess."""
-
-    @patch("services.macos.contacts.subprocess.run")
-    def test_returns_parsed_names(self, mock_run):
-        """Parses AppleScript list output into Python list."""
-        mock_run.return_value = MagicMock(
-            returncode=0,
-            stdout='{"John Doe", "Jane Smith", "Bob Wilson"}',
-            stderr="",
-        )
-
-        names = fetch_all_contact_names()
-
-        assert names == ["John Doe", "Jane Smith", "Bob Wilson"]
-
-    @patch("services.macos.contacts.subprocess.run")
-    def test_handles_empty_result(self, mock_run):
-        """Handles empty contacts list."""
-        mock_run.return_value = MagicMock(
-            returncode=0,
-            stdout="{}",
-            stderr="",
-        )
-
-        names = fetch_all_contact_names()
-
-        assert names == []
-
-    @patch("services.macos.contacts.subprocess.run")
-    def test_handles_single_contact(self, mock_run):
-        """Handles single contact."""
-        mock_run.return_value = MagicMock(
-            returncode=0,
-            stdout='{"Only Person"}',
-            stderr="",
-        )
-
-        names = fetch_all_contact_names()
-
-        assert names == ["Only Person"]
-
-    @patch("services.macos.contacts.subprocess.run")
-    def test_raises_on_failure(self, mock_run):
-        """Raises RuntimeError on osascript failure."""
-        mock_run.return_value = MagicMock(
-            returncode=1,
-            stdout="",
-            stderr="execution error: Contacts is not running",
-        )
-
-        with pytest.raises(RuntimeError) as exc:
-            fetch_all_contact_names()
-
-        assert "osascript failed" in str(exc.value)
-
-
-class TestFetchContactsByNamesMocked:
-    """Tests for fetch_contacts_by_names with mocked subprocess."""
-
-    @patch("services.macos.contacts.subprocess.run")
-    def test_returns_parsed_contacts(self, mock_run):
-        """Parses contact details from AppleScript output."""
-        mock_run.return_value = MagicMock(
-            returncode=0,
-            stdout="""NAME:John Doe
-COMPANY:Acme
-EMAIL:john@acme.com
-PHONE:+1234567890
-<<<CONTACT>>>
-NAME:Jane Smith
-EMAIL:jane@example.com
-<<<CONTACT>>>
-""",
-            stderr="",
-        )
-
-        contacts = fetch_contacts_by_names(["John Doe", "Jane Smith"])
-
-        assert len(contacts) == 2
-        assert contacts[0].name == "John Doe"
-        assert contacts[0].company == "Acme"
-        assert contacts[1].name == "Jane Smith"
-        assert contacts[1].company is None
-
-    @patch("services.macos.contacts.subprocess.run")
-    def test_returns_empty_for_empty_input(self, mock_run):
-        """Returns empty list for empty input (no subprocess call)."""
-        contacts = fetch_contacts_by_names([])
-
-        assert contacts == []
-        mock_run.assert_not_called()
-
-    @patch("services.macos.contacts.subprocess.run")
-    def test_handles_not_found_contacts(self, mock_run):
-        """Handles contacts that don't exist in Contacts app."""
-        mock_run.return_value = MagicMock(
-            returncode=0,
-            stdout="<<<CONTACT>>>\n",  # Empty blocks for not found
-            stderr="",
-        )
-
-        contacts = fetch_contacts_by_names(["Nonexistent Person"])
-
-        assert contacts == []
 
 
 class TestSendMessageMocked:
@@ -382,22 +432,23 @@ class TestSendToGroupMocked:
 
 
 # =============================================================================
-# Integration Tests (marked slow - require real AppleScript execution)
+# Integration Tests (marked slow - require real execution)
 # =============================================================================
 
 
 @pytest.mark.slow
 @pytest.mark.integration
-@pytest.mark.skipif(sys.platform != "darwin", reason="macOS-only: requires osascript")
+@pytest.mark.skipif(sys.platform != "darwin", reason="macOS-only: requires Contacts.framework")
 class TestContactsIntegration:
     """Integration tests for contacts (requires macOS + Contacts.app)."""
 
-    def test_fetch_all_contact_names_runs(self):
-        """fetch_all_contact_names executes without error."""
-        # This will actually run AppleScript
-        # May return empty list if no contacts
-        names = fetch_all_contact_names()
-        assert isinstance(names, list)
+    def test_fetch_all_contacts_runs(self):
+        """fetch_all_contacts executes without error if Swift CLI available."""
+        if not is_swift_contacts_available():
+            pytest.skip("Swift contacts CLI not available")
+
+        contacts = fetch_all_contacts()
+        assert isinstance(contacts, list)
 
 
 @pytest.mark.slow

@@ -41,6 +41,7 @@ def register_all_jobs(
         app_db: AppDb instance for prm.db access
         embedding_db: Optional EmbeddingDb for semantic search embeddings
     """
+    from .jobs.contacts_sync import run_contacts_sync
     from .jobs.deletion_scan import run_deletion_scan
     from .jobs.embedding_batch import run_embedding_batch
     from .jobs.llm_cleanup import run_llm_cleanup
@@ -107,5 +108,14 @@ def register_all_jobs(
         max_instances=1,
     )
 
-    job_count = 6 if embedding_db else 5
+    # Job 6: Contacts sync - every 5 minutes
+    scheduler.add_job(
+        job_wrapper("contacts_sync")(lambda: run_contacts_sync(app_db)),
+        "interval",
+        minutes=5,
+        id="contacts_sync",
+        max_instances=1,
+    )
+
+    job_count = 7 if embedding_db else 6
     logger.info(f"Registered {job_count} background jobs")
