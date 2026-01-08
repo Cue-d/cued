@@ -7,7 +7,7 @@ from collections.abc import Generator
 
 import pytest
 
-from db import AppDb
+from db import AppDb, ChatDb
 
 
 @pytest.fixture
@@ -147,5 +147,13 @@ def app_db(app_db_path: str) -> Generator[AppDb, None, None]:
     """Create an AppDb instance with initialized schema."""
     db = AppDb(app_db_path)
     db.init_schema()
+    yield db
+    db.close()
+
+
+@pytest.fixture
+def chat_db(chat_db_path: str) -> Generator[ChatDb, None, None]:
+    """Create a ChatDb instance for reading test chat.db."""
+    db = ChatDb(chat_db_path)
     yield db
     db.close()

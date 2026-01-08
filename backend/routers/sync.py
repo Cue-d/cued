@@ -31,13 +31,13 @@ class SyncStatusResponse(BaseModel):
 
 @router.get("/status", response_model=SyncStatusResponse)
 def get_sync_status():
-    """Get sync status based on whether we have data."""
-    # Check if we have any data in the database
+    """Get sync status based on whether we have cached messages."""
     db = get_app_db()
 
     try:
-        chats = db.get_all_chats()
-        has_data = len(chats) > 0
+        # Check text cache count instead of chats (we now read chats from chat.db)
+        cache_count = db.get_cache_count()
+        has_data = cache_count > 0
 
         return SyncStatusResponse(
             is_syncing=False,

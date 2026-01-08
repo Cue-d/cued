@@ -135,6 +135,31 @@ class EmbeddingDb:
             total = session.execute(text("SELECT COUNT(*) FROM message_embeddings")).scalar() or 0
             return {"pending": pending, "completed": completed, "total_embeddings": total}
 
+    def delete_embeddings(self, message_ids: list[int]) -> int:
+        """Delete embeddings for given message IDs. Returns count deleted."""
+        if not message_ids:
+            return 0
+        with self.session() as session:
+            deleted = 0
+            for batch_start in range(0, len(message_ids), 500):
+                batch = message_ids[batch_start : batch_start + 500]
+                # Use parameterized queries to avoid SQL injection
+                placeholders = ",".join(":" + str(i) for i in range(len(batch)))
+                params = {str(i): mid for i, mid in enumerate(batch)}
+                # Delete from embeddings
+                result = session.execute(
+                    text(f"DELETE FROM message_embeddings WHERE message_id IN ({placeholders})"),
+                    params,
+                )
+                deleted += result.rowcount
+                # Also delete from queue
+                session.execute(
+                    text(f"DELETE FROM embedding_queue WHERE message_id IN ({placeholders})"),
+                    params,
+                )
+            session.commit()
+            return deleted
+
 
 def semantic_search(embedding_db: EmbeddingDb, query: str, limit: int = 20) -> list[dict]:
     """Search using cosine similarity."""
@@ -175,3 +200,37 @@ def queue_all_messages(app_db, embedding_db: EmbeddingDb) -> int:
     """Queue all messages for embedding."""
     messages = app_db.get_all_message_ids_with_text()
     return embedding_db.queue_messages([(m[0], m[1]) for m in messages])
+
+
+def queue_missing_messages(app_db, embedding_db: EmbeddingDb) -> int:
+    """Queue only messages that don't have embeddings yet.
+
+    More efficient than queue_all_messages for startup since it
+    skips messages that are already embedded or queued.
+
+    Returns:
+        Number of messages queued
+    """
+    # Get all message IDs from cache
+    all_messages = app_db.get_all_message_ids_with_text()
+    if not all_messages:
+        return 0
+
+    # Get IDs already in embedding queue or with embeddings
+    with embedding_db.session() as session:
+        queued_ids = {
+            row[0] for row in session.execute(text("SELECT message_id FROM embedding_queue"))
+        }
+        embedded_ids = {
+            row[0] for row in session.execute(text("SELECT message_id FROM message_embeddings"))
+        }
+
+    existing_ids = queued_ids | embedded_ids
+
+    # Filter to only missing messages
+    missing = [(m[0], m[1]) for m in all_messages if m[0] not in existing_ids]
+
+    if not missing:
+        return 0
+
+    return embedding_db.queue_messages(missing)

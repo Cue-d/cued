@@ -25,51 +25,12 @@ def test_db(tmp_path):
     return db
 
 
-@pytest.fixture
-def test_db_with_data(test_db):
-    """Create test database with sample chat and message data."""
-    from sqlmodel import text
-
-    with test_db.session() as session:
-        # Insert a handle
-        session.execute(
-            text("""
-                INSERT INTO handles (id, identifier, service)
-                VALUES (1, '+15551234567', 'iMessage')
-            """)
-        )
-        # Insert a chat
-        session.execute(
-            text("""
-                INSERT INTO chats (id, identifier, name, is_group, synced_at)
-                VALUES (1, '+15551234567', 'Test Contact', 0, :now)
-            """),
-            {"now": int(time.time())},
-        )
-        # Insert messages
-        now = int(time.time())
-        session.execute(
-            text("""
-                INSERT INTO messages (id, chat_id, sender_id, text, timestamp, is_from_me,
-                                      is_read, has_attachments, synced_at)
-                VALUES
-                    (1, 1, 1, 'Hello there', :ts1, 0, 1, 0, :now),
-                    (2, 1, NULL, 'Hi back', :ts2, 1, 1, 0, :now),
-                    (3, 1, 1, 'How are you?', :ts3, 0, 1, 0, :now)
-            """),
-            {"ts1": now - 7200, "ts2": now - 3600, "ts3": now - 1800, "now": now},
-        )
-        session.commit()
-
-    return test_db
-
-
 class TestActionsCRUD:
     """Test action CRUD operations."""
 
-    def test_create_action(self, test_db_with_data):
+    def test_create_action(self, test_db):
         """Test creating a new action."""
-        db = test_db_with_data
+        db = test_db
         action_id = db.create_action(
             action_type="respond_to_message",
             priority=60,
@@ -82,9 +43,9 @@ class TestActionsCRUD:
         assert action_id is not None
         assert action_id > 0
 
-    def test_get_action(self, test_db_with_data):
+    def test_get_action(self, test_db):
         """Test retrieving a single action."""
-        db = test_db_with_data
+        db = test_db
         action_id = db.create_action(
             action_type="respond_to_message",
             priority=60,
@@ -98,33 +59,34 @@ class TestActionsCRUD:
         assert action.status == "pending"
         assert action.priority == 60
         assert action.chat_id == 1
-        assert action.chat_name == "Test Contact"
+        # Note: chat_name is now populated by ChatDb, not stored in actions table
+        assert action.chat_name is None
 
-    def test_get_action_not_found(self, test_db_with_data):
+    def test_get_action_not_found(self, test_db):
         """Test retrieving nonexistent action."""
-        db = test_db_with_data
+        db = test_db
         action = db.get_action(9999)
         assert action is None
 
-    def test_get_pending_actions(self, test_db_with_data):
+    def test_get_pending_actions(self, test_db):
         """Test getting pending actions ordered by priority."""
-        db = test_db_with_data
+        db = test_db
 
         # Create actions with different priorities
         db.create_action(action_type="respond_to_message", priority=50, chat_id=1)
         db.create_action(action_type="respond_to_message", priority=80, chat_id=1)
         db.create_action(action_type="follow_up", priority=60, chat_id=1)
 
-        actions = db.get_pending_actions(limit=10)
+        actions = db.get_pending_actions()
         assert len(actions) == 3
         # Should be ordered by priority DESC
         assert actions[0].priority == 80
         assert actions[1].priority == 60
         assert actions[2].priority == 50
 
-    def test_get_pending_actions_includes_expired_snoozed(self, test_db_with_data):
+    def test_get_pending_actions_includes_expired_snoozed(self, test_db):
         """Test that expired snoozed actions appear in pending list."""
-        db = test_db_with_data
+        db = test_db
 
         action_id = db.create_action(action_type="respond_to_message", priority=50, chat_id=1)
         # Snooze until the past
@@ -134,9 +96,9 @@ class TestActionsCRUD:
         assert len(actions) == 1
         assert actions[0].status == "snoozed"
 
-    def test_update_action_status_to_completed(self, test_db_with_data):
+    def test_update_action_status_to_completed(self, test_db):
         """Test marking action as completed."""
-        db = test_db_with_data
+        db = test_db
         action_id = db.create_action(action_type="respond_to_message", chat_id=1)
 
         db.update_action_status(action_id, "completed")
@@ -146,9 +108,9 @@ class TestActionsCRUD:
         assert action.completed_at is not None
         assert action.discarded_at is None
 
-    def test_update_action_status_to_discarded(self, test_db_with_data):
+    def test_update_action_status_to_discarded(self, test_db):
         """Test marking action as discarded."""
-        db = test_db_with_data
+        db = test_db
         action_id = db.create_action(action_type="respond_to_message", chat_id=1)
 
         db.update_action_status(action_id, "discarded")
@@ -158,9 +120,9 @@ class TestActionsCRUD:
         assert action.discarded_at is not None
         assert action.completed_at is None
 
-    def test_update_action_status_to_snoozed(self, test_db_with_data):
+    def test_update_action_status_to_snoozed(self, test_db):
         """Test snoozing an action."""
-        db = test_db_with_data
+        db = test_db
         action_id = db.create_action(action_type="respond_to_message", chat_id=1)
         snooze_until = int(time.time()) + 3600
 
@@ -170,9 +132,9 @@ class TestActionsCRUD:
         assert action.status == "snoozed"
         assert action.snoozed_until == snooze_until
 
-    def test_delete_action(self, test_db_with_data):
+    def test_delete_action(self, test_db):
         """Test deleting an action."""
-        db = test_db_with_data
+        db = test_db
         action_id = db.create_action(action_type="respond_to_message", chat_id=1)
 
         db.delete_action(action_id)
@@ -184,9 +146,9 @@ class TestActionsCRUD:
 class TestLlmAnalysisQueue:
     """Test LLM analysis queue operations."""
 
-    def test_queue_for_analysis(self, test_db_with_data):
+    def test_queue_for_analysis(self, test_db):
         """Test queueing a chat for analysis."""
-        db = test_db_with_data
+        db = test_db
         db.queue_for_analysis(chat_id=1, priority=75)
 
         item = db.get_next_pending_analysis()
@@ -195,22 +157,9 @@ class TestLlmAnalysisQueue:
         assert item.priority == 75
         assert item.status == "pending"
 
-    def test_get_next_pending_analysis_priority_order(self, test_db_with_data):
+    def test_get_next_pending_analysis_priority_order(self, test_db):
         """Test that highest priority item is returned first."""
-        db = test_db_with_data
-
-        # Add a second chat
-        from sqlmodel import text
-
-        with db.session() as session:
-            session.execute(
-                text("""
-                    INSERT INTO chats (id, identifier, name, is_group, synced_at)
-                    VALUES (2, '+15559876543', 'Other Contact', 0, :now)
-                """),
-                {"now": int(time.time())},
-            )
-            session.commit()
+        db = test_db
 
         db.queue_for_analysis(chat_id=1, priority=50)
         db.queue_for_analysis(chat_id=2, priority=80)
@@ -219,9 +168,9 @@ class TestLlmAnalysisQueue:
         assert item.chat_id == 2
         assert item.priority == 80
 
-    def test_mark_analysis_started(self, test_db_with_data):
+    def test_mark_analysis_started(self, test_db):
         """Test marking analysis as started."""
-        db = test_db_with_data
+        db = test_db
         db.queue_for_analysis(chat_id=1, priority=50)
 
         db.mark_analysis_started(chat_id=1)
@@ -230,9 +179,9 @@ class TestLlmAnalysisQueue:
         item = db.get_next_pending_analysis()
         assert item is None
 
-    def test_mark_analysis_complete(self, test_db_with_data):
+    def test_mark_analysis_complete(self, test_db):
         """Test marking analysis as complete."""
-        db = test_db_with_data
+        db = test_db
         db.queue_for_analysis(chat_id=1, priority=50)
         db.mark_analysis_started(chat_id=1)
 
@@ -242,18 +191,18 @@ class TestLlmAnalysisQueue:
         item = db.get_next_pending_analysis()
         assert item is None
 
-    def test_mark_analysis_skipped(self, test_db_with_data):
+    def test_mark_analysis_skipped(self, test_db):
         """Test marking chat as skipped."""
-        db = test_db_with_data
+        db = test_db
         db.mark_analysis_skipped(chat_id=1, reason="short_code_sender")
 
         # Should not appear in pending
         item = db.get_next_pending_analysis()
         assert item is None
 
-    def test_clear_old_analysis(self, test_db_with_data):
+    def test_clear_old_analysis(self, test_db):
         """Test clearing old completed analysis entries."""
-        db = test_db_with_data
+        db = test_db
         db.queue_for_analysis(chat_id=1, priority=50)
         db.mark_analysis_complete(chat_id=1, result="no_action")
 

@@ -1,28 +1,22 @@
 """Database access layer for PRM."""
 
+from .chat_db import ChatDb
 from .models import (
-    Attachment,
-    Chat,
-    ChatParticipant,
     ChatWithLastMessage,
-    Handle,
-    Message,
     MessageWithSender,
 )
 from .prm_db import AppDb
-from .sync import sync_all
+from .sync import detect_deletions, sync_text_cache, sync_text_cache_full
 
 __all__ = [
-    # Models
-    "Handle",
-    "Chat",
-    "ChatParticipant",
-    "Message",
-    "Attachment",
     # Response models
     "ChatWithLastMessage",
     "MessageWithSender",
-    # Classes & functions
+    # Database classes
+    "ChatDb",
     "AppDb",
-    "sync_all",
+    # Sync functions
+    "sync_text_cache",
+    "sync_text_cache_full",
+    "detect_deletions",
 ]

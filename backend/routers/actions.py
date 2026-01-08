@@ -1,4 +1,7 @@
-"""Actions router - swipeable action cards with LLM integration."""
+"""Actions router - swipeable action cards with LLM integration.
+
+Uses ChatDb for message context, AppDb for action storage.
+"""
 
 import json
 import logging
@@ -9,23 +12,46 @@ from enum import Enum
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
+from db.chat_db import ChatDb
 from db.models import ActionWithContext
 from db.prm_db import AppDb
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
 
+CHAT_DB_PATH = os.path.expanduser("~/Library/Messages/chat.db")
 PRM_DB_PATH = os.path.expanduser("~/.prm/prm.db")
 
+_chat_db: ChatDb | None = None
 _app_db: AppDb | None = None
+
+
+def get_chat_db() -> ChatDb:
+    """Get singleton ChatDb instance."""
+    global _chat_db
+    if _chat_db is None:
+        logger.info("Initializing ChatDb singleton...")
+        try:
+            _chat_db = ChatDb(CHAT_DB_PATH)
+            logger.info("ChatDb singleton initialized successfully")
+        except Exception as e:
+            logger.error(f"Failed to initialize ChatDb: {e}")
+            raise
+    return _chat_db
 
 
 def get_app_db() -> AppDb:
     """Get singleton AppDb instance."""
     global _app_db
     if _app_db is None:
-        _app_db = AppDb(PRM_DB_PATH)
-        _app_db.init_schema()
+        logger.info("Initializing AppDb singleton...")
+        try:
+            _app_db = AppDb(PRM_DB_PATH)
+            _app_db.init_schema()
+            logger.info("AppDb singleton initialized successfully")
+        except Exception as e:
+            logger.error(f"Failed to initialize AppDb: {e}")
+            raise
     return _app_db
 
 
@@ -119,23 +145,44 @@ def _is_image_mime_type(mime_type: str | None) -> bool:
     return mime_type.startswith("image/")
 
 
-def action_to_response(action: ActionWithContext, db: AppDb) -> ActionResponse:
+def enrich_action_context(action: ActionWithContext, chat_db: ChatDb) -> ActionWithContext:
+    """Enrich action with context from ChatDb."""
+    if action.chat_id:
+        chat = chat_db.get_chat(action.chat_id)
+        if chat:
+            action.chat_name = chat.name
+
+        # Get participants to find person name
+        participants = chat_db.get_chat_participants(action.chat_id)
+        if participants and len(participants) == 1:
+            action.person_name = participants[0]["identifier"]
+
+    if action.message_id:
+        message = chat_db.get_message(action.message_id)
+        if message:
+            action.message_text = message.text
+            action.message_timestamp = message.timestamp
+
+    return action
+
+
+def action_to_response(action: ActionWithContext, chat_db: ChatDb) -> ActionResponse:
     """Convert ActionWithContext to ActionResponse with recent messages."""
     recent_messages: list[MessageResponse] = []
 
     if action.chat_id:
-        messages = db.get_chat_messages(action.chat_id, 5)
+        messages = chat_db.get_chat_messages(action.chat_id, 5)
 
         for m in messages:
             # Fetch attachments for this message
-            attachments_list = db.get_message_attachments(m.id) if m.has_attachments else []
+            attachments_list = chat_db.get_message_attachments(m.id) if m.has_attachments else []
             attachments = [
                 AttachmentResponse(
-                    id=a.id,
-                    filename=a.filename,
-                    mime_type=a.mime_type,
-                    size=a.size,
-                    is_image=_is_image_mime_type(a.mime_type),
+                    id=a["id"],
+                    filename=a["filename"],
+                    mime_type=a["mime_type"],
+                    size=a["size"],
+                    is_image=_is_image_mime_type(a["mime_type"]),
                 )
                 for a in attachments_list
             ]
@@ -205,37 +252,85 @@ def get_actions(
         action_type: Filter by action type (respond_to_message, eod_contact, follow_up)
         limit: Maximum number of actions to return
     """
-    db = get_app_db()
-    if status == "pending":
-        actions = db.get_pending_actions(limit)
-    else:
-        # For other statuses, we'd need a different query
-        # For now, just return pending
-        actions = db.get_pending_actions(limit)
+    logger.debug(f"GET /actions/ called: status={status}, action_type={action_type}, limit={limit}")
+
+    try:
+        logger.debug("Acquiring AppDb connection...")
+        app_db = get_app_db()
+        logger.debug("AppDb connection acquired")
+    except Exception as e:
+        logger.error(f"Failed to get AppDb: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Database error (AppDb): {e}") from None
+
+    try:
+        logger.debug("Acquiring ChatDb connection...")
+        chat_db = get_chat_db()
+        logger.debug("ChatDb connection acquired")
+    except Exception as e:
+        logger.error(f"Failed to get ChatDb: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Database error (ChatDb): {e}") from None
+
+    try:
+        logger.debug("Fetching pending actions from AppDb...")
+        if status == "pending":
+            actions = app_db.get_pending_actions()
+        else:
+            # For other statuses, we'd need a different query
+            # For now, just return pending
+            actions = app_db.get_pending_actions()
+        logger.debug(f"Fetched {len(actions)} actions from AppDb")
+    except Exception as e:
+        logger.error(f"Failed to fetch actions from AppDb: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Database query error: {e}") from None
+
+    try:
+        logger.debug("Enriching actions with ChatDb context...")
+        # Enrich with context from ChatDb
+        actions = [enrich_action_context(a, chat_db) for a in actions]
+        logger.debug("Actions enriched successfully")
+    except Exception as e:
+        logger.error(f"Failed to enrich actions with ChatDb context: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Context enrichment error: {e}") from None
 
     # Apply type filter if specified
     if action_type:
         actions = [a for a in actions if a.type == action_type]
 
-    return [action_to_response(a, db) for a in actions]
+    # Apply limit
+    actions = actions[:limit]
+
+    try:
+        logger.debug(f"Building response for {len(actions)} actions...")
+        result = [action_to_response(a, chat_db) for a in actions]
+        logger.debug(f"GET /actions/ completed successfully, returning {len(result)} actions")
+        return result
+    except Exception as e:
+        logger.error(f"Failed to build action responses: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Response building error: {e}") from None
 
 
 @router.get("/{action_id}", response_model=ActionResponse)
 def get_action(action_id: int):
     """Get single action with context."""
-    db = get_app_db()
-    action = db.get_action(action_id)
+    app_db = get_app_db()
+    chat_db = get_chat_db()
+
+    action = app_db.get_action(action_id)
     if not action:
         raise HTTPException(status_code=404, detail="Action not found")
-    return action_to_response(action, db)
+
+    action = enrich_action_context(action, chat_db)
+    return action_to_response(action, chat_db)
 
 
 @router.post("/", response_model=ActionResponse)
 def create_action(request: CreateActionRequest):
     """Create a new action."""
-    db = get_app_db()
+    app_db = get_app_db()
+    chat_db = get_chat_db()
+
     payload_json = json.dumps(request.payload) if request.payload else None
-    action_id = db.create_action(
+    action_id = app_db.create_action(
         action_type=request.type.value,
         priority=request.priority,
         chat_id=request.chat_id,
@@ -244,21 +339,24 @@ def create_action(request: CreateActionRequest):
         payload=payload_json,
         remind_at=request.remind_at,
     )
-    action = db.get_action(action_id)
-    return action_to_response(action, db)
+    action = app_db.get_action(action_id)
+    action = enrich_action_context(action, chat_db)
+    return action_to_response(action, chat_db)
 
 
 @router.post("/{action_id}/swipe", response_model=ActionResponse)
 def swipe_action(action_id: int, request: ActionSwipeRequest):
     """Handle swipe gesture on action card."""
-    db = get_app_db()
-    action = db.get_action(action_id)
+    app_db = get_app_db()
+    chat_db = get_chat_db()
+
+    action = app_db.get_action(action_id)
     if not action:
         raise HTTPException(status_code=404, detail="Action not found")
 
     if request.direction == SwipeDirection.LEFT:
         # Discard
-        db.update_action_status(action_id, "discarded")
+        app_db.update_action_status(action_id, "discarded")
 
     elif request.direction == SwipeDirection.RIGHT:
         # Complete - also send message if provided
@@ -267,31 +365,32 @@ def swipe_action(action_id: int, request: ActionSwipeRequest):
                 from services.macos.messaging import send_message, send_to_group
 
                 # Get chat to determine if group
-                chat = db.get_chat(action.chat_id)
+                chat = chat_db.get_chat(action.chat_id)
                 if chat and chat.is_group:
                     send_to_group(chat.identifier, request.response_text)
                 elif chat:
                     send_message(chat.identifier, request.response_text)
             except Exception as e:
                 logger.error(f"Failed to send message: {e}")
-        db.update_action_status(action_id, "completed")
+        app_db.update_action_status(action_id, "completed")
 
     elif request.direction == SwipeDirection.UP:
         # Snooze
         snooze_until = None
         if request.snooze_minutes:
             snooze_until = int(time.time()) + (request.snooze_minutes * 60)
-        db.update_action_status(action_id, "snoozed", snooze_until)
+        app_db.update_action_status(action_id, "snoozed", snooze_until)
 
-    action = db.get_action(action_id)
-    return action_to_response(action, db)
+    action = app_db.get_action(action_id)
+    action = enrich_action_context(action, chat_db)
+    return action_to_response(action, chat_db)
 
 
 @router.delete("/{action_id}")
 def delete_action(action_id: int):
     """Delete an action."""
-    db = get_app_db()
-    db.delete_action(action_id)
+    app_db = get_app_db()
+    app_db.delete_action(action_id)
     return {"success": True}
 
 
@@ -302,24 +401,35 @@ def generate_unanswered_actions(threshold_hours: int = 24):
     Args:
         threshold_hours: Only create actions for messages unanswered longer than this
     """
-    db = get_app_db()
-    unanswered = db.get_unanswered_chats(threshold_hours)
+    app_db = get_app_db()
+    chat_db = get_chat_db()
+
+    # Get unanswered chats from ChatDb
+    unanswered = chat_db.get_unanswered_chats(threshold_hours)
 
     created = 0
     for chat in unanswered:
+        # Skip if already has pending action
+        if app_db.has_pending_action_for_chat(chat["chat_id"], "respond_to_message"):
+            continue
+
+        # Skip if recently skipped by LLM
+        if app_db.was_recently_skipped(chat["chat_id"]):
+            continue
+
         payload = json.dumps(
             {
-                "message_preview": (chat.text or "")[:100],
-                "hours_since": chat.hours_since,
+                "message_preview": (chat["text"] or "")[:100],
+                "hours_since": chat["hours_since"],
             }
         )
 
-        db.create_action(
+        app_db.create_action(
             action_type="respond_to_message",
             priority=60,  # Higher than EOD contacts (50)
-            chat_id=chat.chat_id,
-            person_id=chat.sender_id,
-            message_id=chat.message_id,
+            chat_id=chat["chat_id"],
+            person_id=chat["sender_id"],
+            message_id=chat["message_id"],
             payload=payload,
         )
         created += 1

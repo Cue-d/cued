@@ -29,6 +29,7 @@ def job_wrapper(job_name: str):
 
 def register_all_jobs(
     scheduler: BackgroundScheduler,
+    chat_db,
     app_db,
     embedding_db=None,
 ) -> None:
@@ -36,27 +37,29 @@ def register_all_jobs(
 
     Args:
         scheduler: APScheduler BackgroundScheduler instance
-        app_db: AppDb instance for database access
+        chat_db: ChatDb instance for reading chat.db
+        app_db: AppDb instance for prm.db access
         embedding_db: Optional EmbeddingDb for semantic search embeddings
     """
+    from .jobs.deletion_scan import run_deletion_scan
     from .jobs.embedding_batch import run_embedding_batch
     from .jobs.llm_cleanup import run_llm_cleanup
     from .jobs.llm_processor import run_llm_processor
-    from .jobs.prm_sync import run_prm_sync
+    from .jobs.text_sync import run_text_sync
     from .jobs.unanswered_scan import run_unanswered_scan
 
-    # Job 0: PRM sync - every 30 seconds (incremental)
+    # Job 0: Text cache sync - every 30 seconds (incremental)
     scheduler.add_job(
-        job_wrapper("prm_sync")(run_prm_sync),
+        job_wrapper("text_sync")(lambda: run_text_sync(chat_db, app_db)),
         "interval",
         seconds=30,
-        id="prm_sync",
+        id="text_sync",
         max_instances=1,
     )
 
     # Job 1: Unanswered message scanner - every 5 minutes
     scheduler.add_job(
-        job_wrapper("unanswered_scan")(lambda: run_unanswered_scan(app_db)),
+        job_wrapper("unanswered_scan")(lambda: run_unanswered_scan(chat_db, app_db)),
         "interval",
         minutes=5,
         id="unanswered_scan",
@@ -65,7 +68,7 @@ def register_all_jobs(
 
     # Job 2: LLM queue processor - every 10 seconds (rate-limited internally)
     scheduler.add_job(
-        job_wrapper("llm_processor")(lambda: run_llm_processor(app_db)),
+        job_wrapper("llm_processor")(lambda: run_llm_processor(chat_db, app_db)),
         "interval",
         seconds=10,
         id="llm_processor",
@@ -95,5 +98,14 @@ def register_all_jobs(
     else:
         logger.info("Embedding batch job skipped (no embedding_db provided)")
 
-    job_count = 5 if embedding_db else 4
+    # Job 5: Deletion scan - every 5 minutes
+    scheduler.add_job(
+        job_wrapper("deletion_scan")(lambda: run_deletion_scan(chat_db, app_db, embedding_db)),
+        "interval",
+        minutes=5,
+        id="deletion_scan",
+        max_instances=1,
+    )
+
+    job_count = 6 if embedding_db else 5
     logger.info(f"Registered {job_count} background jobs")

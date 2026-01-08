@@ -20,11 +20,12 @@ from workers.scheduler import can_call_llm, mark_llm_called
 logger = logging.getLogger(__name__)
 
 
-def run_llm_processor(app_db) -> None:
+def run_llm_processor(chat_db, app_db) -> None:
     """Process the next queued chat through the LLM.
 
     Args:
-        app_db: AppDb instance
+        chat_db: ChatDb instance for reading chat.db
+        app_db: AppDb instance for prm.db access
     """
     # Check if LLM is available
     if not is_llm_available():
@@ -47,12 +48,18 @@ def run_llm_processor(app_db) -> None:
     # Mark as started
     app_db.mark_analysis_started(chat_id)
 
-    # Get messages for context
-    messages = app_db.get_chat_messages(chat_id, limit=10)
+    # Get messages for context from chat.db
+    messages = chat_db.get_chat_messages(chat_id, limit=10)
     if not messages:
         app_db.mark_analysis_complete(chat_id, "no_messages")
         logger.debug(f"[llm_processor] No messages for chat_id={chat_id}")
         return
+
+    # Get participants for person name
+    participants = chat_db.get_chat_participants(chat_id)
+    person_name = None
+    if participants and len(participants) == 1:
+        person_name = participants[0]["identifier"]
 
     # Get the most recent message (for timestamp calculation)
     latest_msg = messages[0] if messages else None
@@ -66,7 +73,7 @@ def run_llm_processor(app_db) -> None:
     ctx = ConversationContext(
         chat_id=chat_id,
         person_id=None,  # Not available from the analysis queue
-        person_name=queued.person_name,
+        person_name=person_name,
         person_company=None,
         person_notes=None,
         messages=[

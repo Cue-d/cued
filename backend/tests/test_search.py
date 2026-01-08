@@ -5,7 +5,7 @@ import os
 import numpy as np
 import pytest
 
-from db import AppDb, sync_all
+from db import AppDb, ChatDb, sync_text_cache_full
 from services.search import (
     EmbeddingDb,
     FtsIndex,
@@ -33,12 +33,10 @@ def embedding_db(embedding_db_path: str):
 
 
 @pytest.fixture
-def synced_app_db(chat_db_path: str, app_db_path: str):
+def synced_app_db(chat_db: ChatDb, app_db: AppDb):
     """Create an AppDb with synced data from chat.db."""
-    sync_all(chat_db_path, app_db_path, verbose=False)
-    db = AppDb(app_db_path)
-    yield db
-    db.close()
+    sync_text_cache_full(chat_db, app_db, verbose=False)
+    yield app_db
 
 
 @pytest.fixture
@@ -59,7 +57,7 @@ class TestFtsIndex:
     """Tests for FTS5 full-text search."""
 
     def test_init_creates_fts_table(self, synced_app_db: AppDb):
-        """init() creates the messages_fts virtual table."""
+        """init() creates the message_text_fts virtual table."""
         fts = FtsIndex(synced_app_db.engine)
         fts.init()
 
@@ -67,7 +65,9 @@ class TestFtsIndex:
             from sqlmodel import text
 
             result = conn.execute(
-                text("SELECT name FROM sqlite_master WHERE type='table' AND name='messages_fts'")
+                text(
+                    "SELECT name FROM sqlite_master WHERE type='table' AND name='message_text_fts'"
+                )
             )
             assert result.fetchone() is not None
 

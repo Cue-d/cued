@@ -33,7 +33,7 @@ cd backend && uv run uvicorn main:app --reload
 cd frontend && pnpm dev
 ```
 
-Note: Initial sync runs automatically on first launch (syncs chat.db → prm.db). Subsequent launches skip blocking sync if data exists.
+Note: Initial sync runs automatically on first launch (syncs chat.db → prm.db, builds FTS5 index, queues embeddings). Subsequent launches verify indexes are up to date.
 
 ## Key Files
 
@@ -180,47 +180,15 @@ cd llm && swift build -c release
 
 If the LLM binary is unavailable, the backend falls back to heuristic-based action generation.
 
-## Manual Processes
+## Background Jobs
 
-### Initial FTS5 Search Index Setup
+### Automatic Initialization
 
-After first sync, rebuild the FTS5 index for full-text search:
+On startup, the backend automatically:
 
-```bash
-curl -X POST http://localhost:8000/search/rebuild
-```
-
-If FTS5 index becomes corrupted ("database disk image is malformed"), manually recreate:
-
-```python
-# Run from backend directory
-import sqlite3
-import os
-conn = sqlite3.connect(os.path.expanduser("~/.prm/prm.db"))
-cursor = conn.cursor()
-cursor.execute('DROP TABLE IF EXISTS messages_fts')
-cursor.execute('''CREATE VIRTUAL TABLE messages_fts USING fts5(
-    text, content='messages', content_rowid='id')''')
-cursor.execute("INSERT INTO messages_fts(messages_fts) VALUES('rebuild')")
-conn.commit()
-```
-
-### Initial Embedding Setup (Semantic Search)
-
-Queue all messages for embedding, then process in batches:
-
-```bash
-# Queue all messages (~44K typically)
-curl -X POST http://localhost:8000/search/embeddings/queue-all
-
-# Process in batches (each batch processes ~100 messages)
-curl -X POST http://localhost:8000/search/embeddings/process?batch_size=500
-
-# Check progress
-curl http://localhost:8000/search/embeddings/stats
-```
-
-Note: First call downloads the model (~90MB). Processing is CPU-intensive; run multiple times until `pending: 0`.
+1. **Syncs chat.db → prm.db** (full sync if empty, otherwise incremental)
+2. **Ensures FTS5 index** is populated (rebuilds if empty or >10% out of sync)
+3. **Queues missing messages** for embedding (only messages without embeddings)
 
 ### Generate Unanswered Message Actions
 
@@ -230,7 +198,7 @@ Create actions for messages awaiting response (default: 24h threshold):
 curl -X POST "http://localhost:8000/actions/generate/unanswered?threshold_hours=24"
 ```
 
-### Background Scheduler
+### Scheduled Jobs
 
 The backend runs APScheduler jobs automatically:
 

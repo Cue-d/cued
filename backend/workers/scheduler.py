@@ -37,11 +37,12 @@ def mark_llm_called() -> None:
         _llm_last_call_time = time.time()
 
 
-def start_scheduler(app_db, embedding_db=None) -> None:
+def start_scheduler(chat_db, app_db, embedding_db=None) -> None:
     """Initialize and start the background scheduler.
 
     Args:
-        app_db: AppDb instance for database access
+        chat_db: ChatDb instance for reading chat.db
+        app_db: AppDb instance for prm.db access
         embedding_db: Optional EmbeddingDb instance for semantic search
     """
     global _scheduler
@@ -55,12 +56,12 @@ def start_scheduler(app_db, embedding_db=None) -> None:
     # Import and register all jobs
     from .registry import register_all_jobs
 
-    register_all_jobs(_scheduler, app_db, embedding_db)
+    register_all_jobs(_scheduler, chat_db, app_db, embedding_db)
 
     _scheduler.start()
     logger.info(
         "[STARTUP] Background scheduler started "
-        "(prm_sync: 30s, unanswered: 5min, LLM: 10s, cleanup: 1h, embed: 5min)"
+        "(text_sync: 30s, unanswered: 5min, LLM: 10s, cleanup: 1h, embed: 5min, deletion: 5min)"
     )
 
 

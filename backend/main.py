@@ -5,10 +5,12 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from db.chat_db import ChatDb
 from db.prm_db import AppDb
-from db.sync import sync_all
+from db.sync import sync_text_cache_full
 from routers import actions, attachments, chats, contacts, eod, search, sync
-from services.search.semantic import EmbeddingDb
+from services.search.fts import FtsIndex
+from services.search.semantic import EmbeddingDb, queue_missing_messages
 from workers import start_scheduler, stop_scheduler
 
 logger = logging.getLogger(__name__)
@@ -18,10 +20,12 @@ def configure_worker_logging() -> None:
     """Configure logging for background workers based on environment variable.
 
     Set PRM_DEBUG_WORKERS=1 to enable debug logging for background jobs.
+    Set PRM_DEBUG_API=1 to enable debug logging for API routes.
     """
     debug_workers = os.environ.get("PRM_DEBUG_WORKERS", "").lower() in ("1", "true", "yes")
+    debug_api = os.environ.get("PRM_DEBUG_API", "").lower() in ("1", "true", "yes")
 
-    if debug_workers:
+    if debug_workers or debug_api:
         # Configure root logger to show debug output
         logging.basicConfig(
             level=logging.INFO,
@@ -38,16 +42,24 @@ def configure_worker_logging() -> None:
             "workers.jobs.unanswered_scan",
             "workers.jobs.llm_cleanup",
             "workers.jobs.embedding_batch",
-            "workers.jobs.message_sync",
+            "workers.jobs.text_sync",
+            "workers.jobs.deletion_scan",
             "services.actions",
             "services.actions.llm_client",
             "services.actions.message_filter",
             "services.actions.priority",
+            "routers.actions",
         ]
-        for logger_name in worker_loggers:
-            logging.getLogger(logger_name).setLevel(logging.DEBUG)
+        if debug_workers:
+            for logger_name in worker_loggers:
+                logging.getLogger(logger_name).setLevel(logging.DEBUG)
+            logger.info("Worker debug logging ENABLED (PRM_DEBUG_WORKERS=1)")
 
-        logger.info("Worker debug logging ENABLED (PRM_DEBUG_WORKERS=1)")
+        if debug_api:
+            api_loggers = ["routers.actions", "routers.chats", "routers.search", "routers.sync"]
+            for logger_name in api_loggers:
+                logging.getLogger(logger_name).setLevel(logging.DEBUG)
+            logger.info("API debug logging ENABLED (PRM_DEBUG_API=1)")
     else:
         # Default: only show warnings and errors from workers
         logging.basicConfig(
@@ -65,13 +77,22 @@ CHAT_DB_PATH = os.path.expanduser("~/Library/Messages/chat.db")
 PRM_DB_PATH = os.path.expanduser("~/.prm/prm.db")
 EMBEDDING_DB_PATH = os.path.expanduser("~/.prm/embeddings.db")
 
-# Global database instances for workers
+# Global database instances
+_chat_db: ChatDb | None = None
 _app_db: AppDb | None = None
 _embedding_db: EmbeddingDb | None = None
 
 
+def get_chat_db() -> ChatDb:
+    """Get or create the ChatDb singleton (read-only chat.db access)."""
+    global _chat_db
+    if _chat_db is None:
+        _chat_db = ChatDb(CHAT_DB_PATH)
+    return _chat_db
+
+
 def get_app_db() -> AppDb:
-    """Get or create the AppDb singleton."""
+    """Get or create the AppDb singleton (prm.db for actions/cache)."""
     global _app_db
     if _app_db is None:
         _app_db = AppDb(PRM_DB_PATH)
@@ -94,17 +115,49 @@ async def lifespan(app: FastAPI):
     # Startup
     logger.info("Starting PRM Backend...")
 
-    # Sync from chat.db to prm.db on startup
-    logger.info("Syncing from chat.db...")
-    try:
-        stats = sync_all(CHAT_DB_PATH, PRM_DB_PATH, verbose=True)
-        logger.info(f"Sync complete: {stats['messages']} messages in {stats['elapsed']:.2f}s")
-    except Exception as e:
-        logger.error(f"Sync failed: {e}")
-
+    # Initialize databases
+    chat_db = get_chat_db()
     app_db = get_app_db()
     embedding_db = get_embedding_db()
-    start_scheduler(app_db, embedding_db)
+
+    # Check if text cache needs initial population
+    cache_count = app_db.get_cache_count()
+    if cache_count == 0:
+        logger.info("Text cache empty, performing full sync from chat.db...")
+        try:
+            stats = sync_text_cache_full(chat_db, app_db, verbose=True)
+            cached = stats["cached_messages"]
+            elapsed = stats["elapsed"]
+            cache_count = cached  # Update for FTS/embedding init
+            logger.info(f"Full sync complete: {cached} messages in {elapsed:.2f}s")
+        except Exception as e:
+            logger.error(f"Full sync failed: {e}")
+    else:
+        logger.info(f"Text cache has {cache_count} messages, skipping full sync")
+
+    # Ensure FTS5 index exists and is populated
+    try:
+        fts = FtsIndex(app_db.engine)
+        fts_indexed = fts.ensure_index(cache_count)
+        if fts_indexed > 0:
+            logger.info(f"FTS5 index rebuilt with {fts_indexed} messages")
+        else:
+            logger.info("FTS5 index already up to date")
+    except Exception as e:
+        logger.error(f"FTS5 index initialization failed: {e}")
+
+    # Queue any messages missing embeddings
+    try:
+        queued = queue_missing_messages(app_db, embedding_db)
+        if queued > 0:
+            logger.info(f"Queued {queued} messages for embedding")
+        else:
+            logger.info("All messages already queued for embedding")
+    except Exception as e:
+        logger.error(f"Embedding queue initialization failed: {e}")
+
+    # Start background scheduler with all database instances
+    start_scheduler(chat_db, app_db, embedding_db)
 
     yield
 

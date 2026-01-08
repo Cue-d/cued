@@ -1,10 +1,9 @@
 {
   "scripts": {
-    "setup": "cd backend && uv sync && cd .. && VIRTUAL_ENV=backend/.venv maturin develop --manifest-path core/Cargo.toml && cd frontend && pnpm install",
-    "run": "(cd backend && uv run uvicorn main:app --reload) & (cd frontend && pnpm dev)",
+    "setup": "cd backend && uv sync && cd frontend && pnpm install",
+    "run": "(cd backend && PRM_DEBUG_WORKERS=1 && PRM_DEBUG_API=1 uv run uvicorn main:app --reload) & (cd frontend && pnpm dev)",
     "run:backend": "cd backend && uv run uvicorn main:app --reload",
     "run:frontend": "cd frontend && pnpm dev",
-    "build:core": "VIRTUAL_ENV=backend/.venv maturin develop --manifest-path core/Cargo.toml",
     "build:backend": "cd backend && uv sync",
     "build:frontend": "cd frontend && pnpm build:full"
   }

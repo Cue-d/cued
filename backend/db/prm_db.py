@@ -1,20 +1,23 @@
-"""App database (prm.db) access layer."""
+"""App database (prm.db) access layer.
+
+This database stores:
+- message_text_cache: Extracted text from chat.db messages for FTS5/embeddings
+- sync_state: Tracks sync progress
+- actions: Action queue for swipeable cards
+- llm_analysis_queue: Queue for LLM conversation analysis
+
+All message/chat data is read directly from chat.db via ChatDb.
+"""
 
 import time
 from contextlib import contextmanager
 from datetime import datetime
 
-from sqlmodel import Session, SQLModel, create_engine, text
+from sqlmodel import Session, create_engine, text
 
 from .models import (
     ActionWithContext,
-    Attachment,
-    Chat,
-    ChatWithLastMessage,
-    Handle,
-    MessageWithSender,
     QueuedAnalysis,
-    UnansweredChat,
 )
 
 
@@ -33,201 +36,205 @@ class AppDb:
         with self.engine.connect() as conn:
             conn.execute(text("PRAGMA journal_mode = WAL"))
             conn.execute(text("PRAGMA busy_timeout = 30000"))
-            conn.execute(text("PRAGMA foreign_keys = ON"))
+            conn.execute(text("PRAGMA foreign_keys = OFF"))  # No FKs to chat.db
             conn.commit()
 
     def init_schema(self) -> None:
-        SQLModel.metadata.create_all(self.engine)
+        """Initialize the database schema."""
+        with self.engine.connect() as conn:
+            # Message text cache for FTS5 and embeddings
+            conn.execute(
+                text("""
+                CREATE TABLE IF NOT EXISTS message_text_cache (
+                    message_id INTEGER PRIMARY KEY,
+                    chat_id INTEGER NOT NULL,
+                    text TEXT NOT NULL,
+                    synced_at INTEGER NOT NULL
+                )
+            """)
+            )
+            conn.execute(
+                text(
+                    "CREATE INDEX IF NOT EXISTS idx_text_cache_chat ON message_text_cache(chat_id)"
+                )
+            )
+
+            # Sync state tracking
+            conn.execute(
+                text("""
+                CREATE TABLE IF NOT EXISTS sync_state (
+                    key TEXT PRIMARY KEY,
+                    value INTEGER NOT NULL
+                )
+            """)
+            )
+
+            # Actions table
+            conn.execute(
+                text("""
+                CREATE TABLE IF NOT EXISTS actions (
+                    id INTEGER PRIMARY KEY,
+                    type TEXT NOT NULL,
+                    status TEXT DEFAULT 'pending',
+                    priority INTEGER DEFAULT 50,
+                    chat_id INTEGER,
+                    person_id INTEGER,
+                    message_id INTEGER,
+                    payload TEXT,
+                    created_at INTEGER,
+                    remind_at INTEGER,
+                    snoozed_until INTEGER,
+                    completed_at INTEGER,
+                    discarded_at INTEGER
+                )
+            """)
+            )
+            conn.execute(text("CREATE INDEX IF NOT EXISTS idx_actions_type ON actions(type)"))
+            conn.execute(text("CREATE INDEX IF NOT EXISTS idx_actions_status ON actions(status)"))
+
+            # LLM analysis queue
+            conn.execute(
+                text("""
+                CREATE TABLE IF NOT EXISTS llm_analysis_queue (
+                    chat_id INTEGER PRIMARY KEY,
+                    status TEXT DEFAULT 'pending',
+                    priority INTEGER DEFAULT 50,
+                    queued_at INTEGER,
+                    started_at INTEGER,
+                    completed_at INTEGER,
+                    result TEXT
+                )
+            """)
+            )
+
+            conn.commit()
 
     @contextmanager
     def session(self):
         with Session(self.engine) as session:
             yield session
 
-    def get_chat(self, chat_id: int) -> Chat | None:
-        """Get a single chat by ID."""
-        with self.session() as session:
-            result = session.exec(
-                text("""
-                    SELECT id, identifier, name, is_group, synced_at
-                    FROM chats
-                    WHERE id = :chat_id
-                """).bindparams(chat_id=chat_id)
-            )
-            row = result.fetchone()
-            if row:
-                return Chat(
-                    id=row[0],
-                    identifier=row[1],
-                    name=row[2],
-                    is_group=bool(row[3]),
-                    synced_at=row[4],
-                )
-            return None
-
-    def get_all_chats(self) -> list[ChatWithLastMessage]:
-        """Get all chats with last message preview."""
-        with self.session() as session:
-            result = session.exec(
-                text("""
-                    SELECT
-                        c.id, c.identifier, c.name, c.is_group,
-                        m.text, m.timestamp
-                    FROM chats c
-                    LEFT JOIN messages m ON m.id = (
-                        SELECT id FROM messages
-                        WHERE chat_id = c.id
-                        ORDER BY timestamp DESC LIMIT 1
-                    )
-                    ORDER BY m.timestamp DESC NULLS LAST
-                """)
-            )
-            return [
-                ChatWithLastMessage(
-                    id=row[0],
-                    identifier=row[1],
-                    name=row[2],
-                    is_group=bool(row[3]),
-                    last_message_text=row[4],
-                    last_message_timestamp=row[5],
-                )
-                for row in result
-            ]
-
-    def get_chat_messages(self, chat_id: int, limit: int = 100) -> list[MessageWithSender]:
-        """Get messages for a chat with sender info."""
-        with self.session() as session:
-            result = session.exec(
-                text("""
-                    SELECT
-                        m.id, m.chat_id, m.sender_id, h.identifier,
-                        m.text, m.timestamp, m.is_from_me, m.is_read,
-                        m.read_at, m.has_attachments
-                    FROM messages m
-                    LEFT JOIN handles h ON h.id = m.sender_id
-                    WHERE m.chat_id = :chat_id
-                    ORDER BY m.timestamp DESC
-                    LIMIT :limit
-                """).bindparams(chat_id=chat_id, limit=limit)
-            )
-            return [
-                MessageWithSender(
-                    id=row[0],
-                    chat_id=row[1],
-                    sender_id=row[2],
-                    sender_name=row[3],  # Now using identifier as sender_name
-                    text=row[4],
-                    timestamp=row[5],
-                    is_from_me=bool(row[6]),
-                    is_read=bool(row[7]),
-                    read_at=row[8],
-                    has_attachments=bool(row[9]),
-                )
-                for row in result
-            ]
-
-    def get_chat_participants(self, chat_id: int) -> list[Handle]:
-        """Get participants for a chat."""
-        with self.session() as session:
-            result = session.exec(
-                text("""
-                    SELECT h.id, h.identifier, h.service
-                    FROM handles h
-                    INNER JOIN chat_participants cp ON cp.handle_id = h.id
-                    WHERE cp.chat_id = :chat_id
-                """).bindparams(chat_id=chat_id)
-            )
-            return [
-                Handle(
-                    id=row[0],
-                    identifier=row[1],
-                    service=row[2],
-                )
-                for row in result
-            ]
-
-    def get_message_attachments(self, message_id: int) -> list[Attachment]:
-        """Get attachments for a message."""
-        with self.session() as session:
-            result = session.exec(
-                text("""
-                    SELECT id, message_id, filename, path, mime_type,
-                           uti, size, is_outgoing, created_at, synced_at
-                    FROM attachments
-                    WHERE message_id = :message_id
-                """).bindparams(message_id=message_id)
-            )
-            return [
-                Attachment(
-                    id=row[0],
-                    message_id=row[1],
-                    filename=row[2],
-                    path=row[3],
-                    mime_type=row[4],
-                    uti=row[5],
-                    size=row[6],
-                    is_outgoing=bool(row[7]),
-                    created_at=row[8],
-                    synced_at=row[9],
-                )
-                for row in result
-            ]
-
-    def get_attachment(self, attachment_id: int) -> Attachment | None:
-        """Get a single attachment by ID."""
-        with self.session() as session:
-            result = session.exec(
-                text("""
-                    SELECT id, message_id, filename, path, mime_type,
-                           uti, size, is_outgoing, created_at, synced_at
-                    FROM attachments
-                    WHERE id = :attachment_id
-                """).bindparams(attachment_id=attachment_id)
-            )
-            row = result.fetchone()
-            if not row:
-                return None
-            return Attachment(
-                id=row[0],
-                message_id=row[1],
-                filename=row[2],
-                path=row[3],
-                mime_type=row[4],
-                uti=row[5],
-                size=row[6],
-                is_outgoing=bool(row[7]),
-                created_at=row[8],
-                synced_at=row[9],
-            )
-
     def close(self) -> None:
         self.engine.dispose()
 
     # =========================================================================
-    # MESSAGE TEXT HELPERS (used by search package)
+    # TEXT CACHE METHODS
     # =========================================================================
 
-    def get_all_message_ids_with_text(self) -> list[tuple[int, int, str]]:
-        """Get all messages with text for embedding. Returns (id, chat_id, text)."""
+    def cache_message_text(self, message_id: int, chat_id: int, msg_text: str) -> None:
+        """Cache extracted text for a message."""
+        now = int(time.time())
         with self.session() as session:
-            result = session.exec(
+            session.execute(
                 text("""
-                    SELECT id, chat_id, text
-                    FROM messages
-                    WHERE text IS NOT NULL AND length(text) > 0
-                """)
+                    INSERT OR REPLACE INTO message_text_cache (message_id, chat_id, text, synced_at)
+                    VALUES (:message_id, :chat_id, :text, :synced_at)
+                """),
+                {"message_id": message_id, "chat_id": chat_id, "text": msg_text, "synced_at": now},
             )
-            return [(row[0], row[1], row[2]) for row in result]
+            session.commit()
 
-    def get_message_text(self, message_id: int) -> str | None:
-        """Get text for a single message."""
+    def cache_message_texts_batch(
+        self, messages: list[tuple[int, int, str]], synced_at: int | None = None
+    ) -> None:
+        """Cache extracted text for multiple messages efficiently."""
+        if not messages:
+            return
+        now = synced_at or int(time.time())
+        with self.session() as session:
+            for message_id, chat_id, msg_text in messages:
+                session.execute(
+                    text("""
+                        INSERT OR REPLACE INTO message_text_cache
+                        (message_id, chat_id, text, synced_at)
+                        VALUES (:message_id, :chat_id, :text, :synced_at)
+                    """),
+                    {
+                        "message_id": message_id,
+                        "chat_id": chat_id,
+                        "text": msg_text,
+                        "synced_at": now,
+                    },
+                )
+            session.commit()
+
+    def get_cached_text(self, message_id: int) -> str | None:
+        """Get cached text for a single message."""
         with self.session() as session:
             result = session.execute(
-                text("SELECT text FROM messages WHERE id = :id"),
+                text("SELECT text FROM message_text_cache WHERE message_id = :id"),
                 {"id": message_id},
             )
             row = result.fetchone()
             return row[0] if row else None
+
+    def get_all_cached_message_ids(self) -> set[int]:
+        """Get all cached message IDs."""
+        with self.session() as session:
+            result = session.execute(text("SELECT message_id FROM message_text_cache"))
+            return {row[0] for row in result}
+
+    def delete_cached_messages(self, message_ids: list[int]) -> int:
+        """Delete cached messages by IDs. Returns count deleted."""
+        if not message_ids:
+            return 0
+        with self.session() as session:
+            # Batch delete with proper parameterized queries
+            deleted = 0
+            for batch_start in range(0, len(message_ids), 500):
+                batch = message_ids[batch_start : batch_start + 500]
+                placeholders = ",".join(":" + str(i) for i in range(len(batch)))
+                params = {str(i): mid for i, mid in enumerate(batch)}
+                result = session.execute(
+                    text(f"DELETE FROM message_text_cache WHERE message_id IN ({placeholders})"),
+                    params,
+                )
+                deleted += result.rowcount
+            session.commit()
+            return deleted
+
+    def get_all_message_ids_with_text(self) -> list[tuple[int, int, str]]:
+        """Get all cached messages for embedding. Returns (message_id, chat_id, text)."""
+        with self.session() as session:
+            result = session.execute(
+                text("SELECT message_id, chat_id, text FROM message_text_cache")
+            )
+            return [(row[0], row[1], row[2]) for row in result]
+
+    def get_message_text(self, message_id: int) -> str | None:
+        """Get cached text for a single message (alias for get_cached_text)."""
+        return self.get_cached_text(message_id)
+
+    # =========================================================================
+    # SYNC STATE METHODS
+    # =========================================================================
+
+    def get_last_synced_rowid(self) -> int:
+        """Get the last synced message ROWID."""
+        with self.session() as session:
+            result = session.execute(
+                text("SELECT value FROM sync_state WHERE key = 'last_message_rowid'")
+            )
+            row = result.fetchone()
+            return row[0] if row else 0
+
+    def set_last_synced_rowid(self, rowid: int) -> None:
+        """Set the last synced message ROWID."""
+        with self.session() as session:
+            session.execute(
+                text("""
+                    INSERT OR REPLACE INTO sync_state (key, value)
+                    VALUES ('last_message_rowid', :rowid)
+                """),
+                {"rowid": rowid},
+            )
+            session.commit()
+
+    def get_cache_count(self) -> int:
+        """Get count of cached messages."""
+        with self.session() as session:
+            result = session.execute(text("SELECT COUNT(*) FROM message_text_cache"))
+            return result.scalar() or 0
 
     # =========================================================================
     # ACTIONS CRUD
@@ -271,74 +278,83 @@ class AppDb:
             session.commit()
             return result.lastrowid
 
-    def get_pending_actions(self, limit: int = 50) -> list[ActionWithContext]:
-        """Get pending actions with joined context, ordered by priority."""
+    def get_pending_actions(self) -> list[ActionWithContext]:
+        """Get pending actions (context must be joined from ChatDb by caller)."""
         with self.session() as session:
             result = session.execute(
                 text("""
-                    SELECT a.id, a.type, a.status, a.priority, a.chat_id, a.person_id,
-                           a.message_id, a.payload, a.created_at, a.remind_at,
-                           a.snoozed_until, a.completed_at, a.discarded_at,
-                           c.name as chat_name, h.identifier as person_name,
-                           m.text as message_text, m.timestamp as message_timestamp
-                    FROM actions a
-                    LEFT JOIN chats c ON c.id = a.chat_id
-                    LEFT JOIN handles h ON h.id = a.person_id
-                    LEFT JOIN messages m ON m.id = a.message_id
-                    WHERE a.status = 'pending'
-                       OR (a.status = 'snoozed' AND a.snoozed_until <= :now)
+                    SELECT id, type, status, priority, chat_id, person_id,
+                           message_id, payload, created_at, remind_at,
+                           snoozed_until, completed_at, discarded_at
+                    FROM actions
+                    WHERE status = 'pending'
+                       OR (status = 'snoozed' AND snoozed_until <= :now)
                     ORDER BY
-                        CASE WHEN a.status = 'snoozed' THEN 1 ELSE 0 END ASC,
-                        a.priority DESC,
-                        a.created_at ASC
-                    LIMIT :limit
+                        CASE WHEN status = 'snoozed' THEN 1 ELSE 0 END ASC,
+                        priority DESC,
+                        created_at ASC
                 """),
-                {"now": self._now_timestamp(), "limit": limit},
+                {"now": self._now_timestamp()},
             )
-            return [self._row_to_action_with_context(row) for row in result]
+            return [
+                ActionWithContext(
+                    id=row[0],
+                    type=row[1],
+                    status=row[2],
+                    priority=row[3],
+                    chat_id=row[4],
+                    person_id=row[5],
+                    message_id=row[6],
+                    payload=row[7],
+                    created_at=row[8],
+                    remind_at=row[9],
+                    snoozed_until=row[10],
+                    completed_at=row[11],
+                    discarded_at=row[12],
+                    # Context fields will be populated by caller from ChatDb
+                    chat_name=None,
+                    person_name=None,
+                    message_text=None,
+                    message_timestamp=None,
+                )
+                for row in result
+            ]
 
     def get_action(self, action_id: int) -> ActionWithContext | None:
-        """Get single action with context."""
+        """Get single action (context must be joined from ChatDb by caller)."""
         with self.session() as session:
             result = session.execute(
                 text("""
-                    SELECT a.id, a.type, a.status, a.priority, a.chat_id, a.person_id,
-                           a.message_id, a.payload, a.created_at, a.remind_at,
-                           a.snoozed_until, a.completed_at, a.discarded_at,
-                           c.name as chat_name, h.identifier as person_name,
-                           m.text as message_text, m.timestamp as message_timestamp
-                    FROM actions a
-                    LEFT JOIN chats c ON c.id = a.chat_id
-                    LEFT JOIN handles h ON h.id = a.person_id
-                    LEFT JOIN messages m ON m.id = a.message_id
-                    WHERE a.id = :id
+                    SELECT id, type, status, priority, chat_id, person_id,
+                           message_id, payload, created_at, remind_at,
+                           snoozed_until, completed_at, discarded_at
+                    FROM actions
+                    WHERE id = :id
                 """),
                 {"id": action_id},
             )
             row = result.fetchone()
-            return self._row_to_action_with_context(row) if row else None
-
-    def _row_to_action_with_context(self, row) -> ActionWithContext:
-        """Convert a database row to ActionWithContext."""
-        return ActionWithContext(
-            id=row[0],
-            type=row[1],
-            status=row[2],
-            priority=row[3],
-            chat_id=row[4],
-            person_id=row[5],
-            message_id=row[6],
-            payload=row[7],
-            created_at=row[8],
-            remind_at=row[9],
-            snoozed_until=row[10],
-            completed_at=row[11],
-            discarded_at=row[12],
-            chat_name=row[13],
-            person_name=row[14],
-            message_text=row[15],
-            message_timestamp=row[16],
-        )
+            if not row:
+                return None
+            return ActionWithContext(
+                id=row[0],
+                type=row[1],
+                status=row[2],
+                priority=row[3],
+                chat_id=row[4],
+                person_id=row[5],
+                message_id=row[6],
+                payload=row[7],
+                created_at=row[8],
+                remind_at=row[9],
+                snoozed_until=row[10],
+                completed_at=row[11],
+                discarded_at=row[12],
+                chat_name=None,
+                person_name=None,
+                message_text=None,
+                message_timestamp=None,
+            )
 
     def update_action_status(
         self, action_id: int, status: str, snoozed_until: int | None = None
@@ -372,79 +388,22 @@ class AppDb:
             session.execute(text("DELETE FROM actions WHERE id = :id"), {"id": action_id})
             session.commit()
 
-    # =========================================================================
-    # UNANSWERED MESSAGE DETECTION
-    # =========================================================================
-
-    def get_unanswered_chats(self, threshold_hours: int = 24) -> list[UnansweredChat]:
-        """Get chats with unanswered messages older than threshold."""
+    def has_pending_action_for_chat(self, chat_id: int, action_type: str) -> bool:
+        """Check if chat already has a pending action of given type."""
         now = self._now_timestamp()
-        threshold_secs = threshold_hours * 3600
-        skip_window_secs = 6 * 3600
-        skip_cutoff = now - skip_window_secs
-
         with self.session() as session:
             result = session.execute(
                 text("""
-                    WITH latest_messages AS (
-                        SELECT
-                            chat_id,
-                            MAX(CASE WHEN is_from_me = 1 THEN timestamp ELSE 0 END) as my_latest,
-                            MAX(CASE WHEN is_from_me = 0 THEN timestamp ELSE 0 END) as their_latest
-                        FROM messages
-                        GROUP BY chat_id
-                    )
-                    SELECT
-                        m.id as message_id,
-                        m.chat_id,
-                        m.sender_id,
-                        m.text,
-                        m.timestamp,
-                        c.name as chat_name,
-                        h.identifier as person_name,
-                        (:now - m.timestamp) / 3600 as hours_since
-                    FROM messages m
-                    JOIN latest_messages lm
-                        ON lm.chat_id = m.chat_id AND m.timestamp = lm.their_latest
-                    LEFT JOIN chats c ON c.id = m.chat_id
-                    LEFT JOIN handles h ON h.id = m.sender_id
-                    WHERE lm.their_latest > lm.my_latest
-                    AND lm.their_latest < (:now - :threshold)
-                    AND NOT EXISTS (
-                        SELECT 1 FROM actions
-                        WHERE chat_id = m.chat_id
-                        AND type = 'respond_to_message'
-                        AND (status IN ('pending', 'snoozed')
-                             OR (status = 'discarded' AND discarded_at > (:now - 86400)))
-                    )
-                    AND NOT EXISTS (
-                        SELECT 1 FROM llm_analysis_queue
-                        WHERE chat_id = m.chat_id
-                        AND status = 'completed'
-                        AND result = 'no_action'
-                        AND completed_at > :skip_cutoff
-                    )
-                    ORDER BY m.timestamp DESC
+                    SELECT 1 FROM actions
+                    WHERE chat_id = :chat_id
+                      AND type = :type
+                      AND (status IN ('pending', 'snoozed')
+                           OR (status = 'discarded' AND discarded_at > :cutoff))
+                    LIMIT 1
                 """),
-                {
-                    "now": now,
-                    "threshold": threshold_secs,
-                    "skip_cutoff": skip_cutoff,
-                },
+                {"chat_id": chat_id, "type": action_type, "cutoff": now - 86400},
             )
-            return [
-                UnansweredChat(
-                    message_id=row[0],
-                    chat_id=row[1],
-                    sender_id=row[2],
-                    text=row[3],
-                    timestamp=row[4],
-                    chat_name=row[5],
-                    person_name=row[6],
-                    hours_since=row[7],
-                )
-                for row in result
-            ]
+            return result.fetchone() is not None
 
     # =========================================================================
     # LLM ANALYSIS QUEUE
@@ -469,15 +428,11 @@ class AppDb:
         with self.session() as session:
             result = session.execute(
                 text("""
-                    SELECT q.chat_id, q.status, q.priority, q.queued_at,
-                           q.started_at, q.completed_at, q.result,
-                           c.name as chat_name, h.identifier as person_name
-                    FROM llm_analysis_queue q
-                    LEFT JOIN chats c ON c.id = q.chat_id
-                    LEFT JOIN chat_participants cp ON cp.chat_id = q.chat_id
-                    LEFT JOIN handles h ON h.id = cp.handle_id
-                    WHERE q.status = 'pending'
-                    ORDER BY q.priority DESC, q.queued_at ASC
+                    SELECT chat_id, status, priority, queued_at,
+                           started_at, completed_at, result
+                    FROM llm_analysis_queue
+                    WHERE status = 'pending'
+                    ORDER BY priority DESC, queued_at ASC
                     LIMIT 1
                 """)
             )
@@ -492,8 +447,8 @@ class AppDb:
                 started_at=row[4],
                 completed_at=row[5],
                 result=row[6],
-                chat_name=row[7],
-                person_name=row[8],
+                chat_name=None,  # Must be populated from ChatDb
+                person_name=None,
             )
 
     def mark_analysis_started(self, chat_id: int) -> None:
@@ -538,6 +493,23 @@ class AppDb:
                 {"chat_id": chat_id, "now": now, "result": result},
             )
             session.commit()
+
+    def was_recently_skipped(self, chat_id: int, hours: int = 6) -> bool:
+        """Check if chat was recently skipped (within given hours)."""
+        cutoff = self._now_timestamp() - (hours * 3600)
+        with self.session() as session:
+            result = session.execute(
+                text("""
+                    SELECT 1 FROM llm_analysis_queue
+                    WHERE chat_id = :chat_id
+                      AND status = 'completed'
+                      AND result = 'no_action'
+                      AND completed_at > :cutoff
+                    LIMIT 1
+                """),
+                {"chat_id": chat_id, "cutoff": cutoff},
+            )
+            return result.fetchone() is not None
 
     def clear_old_analysis(self, hours_old: int = 24) -> int:
         """Clear completed analysis entries older than given hours."""
