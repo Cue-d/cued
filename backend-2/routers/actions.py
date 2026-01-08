@@ -78,6 +78,11 @@ class MessageResponse(BaseModel):
     is_read: bool
     date_read: int | None = None
     sender_name: str | None = None
+    # Delivery status fields
+    is_sent: bool = True
+    is_delivered: bool = False
+    date_delivered: int | None = None
+    error: int = 0
     attachments: list[AttachmentResponse] = []
 
 
@@ -144,6 +149,10 @@ def action_to_response(action: ActionWithContext, db: AppDb) -> ActionResponse:
                     is_read=m.is_read,
                     date_read=m.read_at,
                     sender_name=m.sender_name,
+                    is_sent=True,
+                    is_delivered=m.is_from_me,
+                    date_delivered=m.timestamp if m.is_from_me else None,
+                    error=0,
                     attachments=attachments,
                 )
             )

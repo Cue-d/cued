@@ -42,7 +42,17 @@ def register_all_jobs(
     from .jobs.embedding_batch import run_embedding_batch
     from .jobs.llm_cleanup import run_llm_cleanup
     from .jobs.llm_processor import run_llm_processor
+    from .jobs.message_sync import run_message_sync
     from .jobs.unanswered_scan import run_unanswered_scan
+
+    # Job 0: Message sync - every 30 seconds
+    scheduler.add_job(
+        job_wrapper("message_sync")(run_message_sync),
+        "interval",
+        seconds=30,
+        id="message_sync",
+        max_instances=1,
+    )
 
     # Job 1: Unanswered message scanner - every 5 minutes
     scheduler.add_job(
@@ -85,4 +95,5 @@ def register_all_jobs(
     else:
         logger.info("Embedding batch job skipped (no embedding_db provided)")
 
-    logger.info(f"Registered {4 if embedding_db else 3} background jobs")
+    job_count = 5 if embedding_db else 4
+    logger.info(f"Registered {job_count} background jobs")

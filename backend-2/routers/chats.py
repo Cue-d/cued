@@ -1,5 +1,4 @@
 import os
-from datetime import datetime
 
 from fastapi import APIRouter
 from pydantic import BaseModel
@@ -31,43 +30,134 @@ class SendMessageResponse(BaseModel):
     error: str | None = None
 
 
-@router.get("/")
+class AttachmentResponse(BaseModel):
+    id: int
+    filename: str | None = None
+    mime_type: str | None = None
+    size: int | None = None
+    is_image: bool = False
+
+
+class MessageResponse(BaseModel):
+    id: int
+    text: str | None = None
+    date: int  # Unix timestamp in seconds
+    is_from_me: bool
+    is_read: bool
+    date_read: int | None = None
+    sender_name: str | None = None
+    # Delivery status fields - always provide defaults for outgoing messages
+    is_sent: bool = True
+    is_delivered: bool = False
+    date_delivered: int | None = None
+    error: int = 0
+    attachments: list[AttachmentResponse] = []
+
+
+class ChatResponse(BaseModel):
+    id: int
+    name: str
+    last_message: str | None = None
+    last_message_date: int  # Unix timestamp in seconds
+    is_group: bool
+    handle_ids: list[str] = []
+    member_names: list[str] = []
+
+
+@router.get("/", response_model=list[ChatResponse])
 def get_chats(limit: int = 50, offset: int = 0):
-    """Get recent chats - dummy implementation"""
-    return [
-        {
-            "id": offset + i,
-            "chat_identifier": f"+1234567{offset + i:04d}",
-            "display_name": f"Contact {offset + i}",
-            "last_message_date": datetime.now().isoformat(),
-            "last_message_text": f"Last message in chat {offset + i}",
-            "unread_count": i % 5,
-            "is_group": i % 3 == 0,
-            "is_from_me": False,
-        }
-        for i in range(min(limit, 20))
-    ]
+    """Get recent chats with last message preview."""
+    db = get_app_db()
+    all_chats = db.get_all_chats()
+
+    # Apply pagination
+    paginated = all_chats[offset : offset + limit]
+
+    result = []
+    for chat in paginated:
+        # Get participants for this chat
+        participants = db.get_chat_participants(chat.id)
+        handle_ids = [p.identifier for p in participants]
+
+        # Compute display name: use chat.name if set, otherwise use first participant
+        name = chat.name
+        if not name:
+            if handle_ids:
+                name = handle_ids[0]  # Use first participant as name
+            else:
+                name = chat.identifier
+
+        result.append(
+            ChatResponse(
+                id=chat.id,
+                name=name,
+                last_message=chat.last_message_text,
+                last_message_date=chat.last_message_timestamp or 0,
+                is_group=chat.is_group,
+                handle_ids=handle_ids,
+                member_names=handle_ids,  # Use identifiers as member names for now
+            )
+        )
+
+    return result
 
 
-@router.get("/{chat_id}/messages")
+@router.get("/{chat_id}/messages", response_model=list[MessageResponse])
 def get_messages(chat_id: int, limit: int = 100):
-    """Get messages for a chat - dummy implementation"""
+    """Get messages for a chat with sender info."""
+    db = get_app_db()
+    messages = db.get_chat_messages(chat_id, limit)
+
+    result = []
+    for msg in messages:
+        # Get attachments for this message if it has any
+        attachments = []
+        if msg.has_attachments:
+            db_attachments = db.get_message_attachments(msg.id)
+            attachments = [
+                AttachmentResponse(
+                    id=att.id,
+                    filename=att.filename,
+                    mime_type=att.mime_type,
+                    size=att.size,
+                    is_image=att.mime_type.startswith("image/") if att.mime_type else False,
+                )
+                for att in db_attachments
+            ]
+
+        result.append(
+            MessageResponse(
+                id=msg.id,
+                text=msg.text,
+                date=msg.timestamp,
+                is_from_me=msg.is_from_me,
+                is_read=msg.is_read,
+                date_read=msg.read_at,
+                sender_name=msg.sender_name,
+                # For outgoing messages, assume sent and delivered
+                is_sent=True,
+                is_delivered=msg.is_from_me,  # Assume delivered if from me
+                date_delivered=msg.timestamp if msg.is_from_me else None,
+                error=0,
+                attachments=attachments,
+            )
+        )
+
+    return result
+
+
+@router.get("/{chat_id}/participants")
+def get_chat_participants(chat_id: int):
+    """Get participants for a chat."""
+    db = get_app_db()
+    participants = db.get_chat_participants(chat_id)
     return [
         {
-            "id": chat_id * 1000 + i,
-            "chat_id": chat_id,
-            "text": f"Message {i} in chat {chat_id}",
-            "date": datetime.now().isoformat(),
-            "is_from_me": i % 2 == 0,
-            "guid": f"msg-{chat_id}-{i}",
-            "handle_id": f"+1234567{chat_id:04d}",
-            "service": "iMessage",
-            "associated_message_guid": None,
-            "associated_message_type": 0,
-            "attachments": [],
-            "reactions": [],
+            "id": p.id,
+            "identifier": p.identifier,
+            "service": p.service,
         }
-        for i in range(min(limit, 10))
+        for p in participants
     ]
 
 

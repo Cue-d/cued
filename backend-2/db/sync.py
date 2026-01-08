@@ -6,6 +6,7 @@ import time
 from sqlmodel import text
 
 from .prm_db import AppDb
+from services.attributed_body import extract_text_from_attributed_body
 
 # Apple timestamp epoch offset (seconds from 1970-01-01 to 2001-01-01)
 APPLE_EPOCH_OFFSET = 978307200
@@ -16,6 +17,15 @@ def apple_to_unix(apple_ts: int | None) -> int | None:
     if apple_ts is None or apple_ts == 0:
         return None
     return (apple_ts // 1_000_000_000) + APPLE_EPOCH_OFFSET
+
+
+def get_message_text(text_col: str | None, attributed_body: bytes | None) -> str | None:
+    """Get message text, falling back to attributedBody extraction if text is null."""
+    if text_col:
+        return text_col
+    if attributed_body:
+        return extract_text_from_attributed_body(attributed_body)
+    return None
 
 
 def sync_all(chat_db_path: str, app_db_path: str, verbose: bool = True) -> dict:
@@ -127,8 +137,8 @@ def sync_all(chat_db_path: str, app_db_path: str, verbose: bool = True) -> dict:
             print("\n4. Syncing messages...")
 
         rows = src.execute("""
-            SELECT m.ROWID, cmj.chat_id, m.handle_id, m.text, m.date,
-                   m.is_from_me, m.is_read, m.date_read, m.cache_has_attachments
+            SELECT m.ROWID, cmj.chat_id, m.handle_id, m.text, m.attributedBody,
+                   m.date, m.is_from_me, m.is_read, m.date_read, m.cache_has_attachments
             FROM message m
             INNER JOIN chat_message_join cmj ON cmj.message_id = m.ROWID
         """).fetchall()
@@ -137,6 +147,10 @@ def sync_all(chat_db_path: str, app_db_path: str, verbose: bool = True) -> dict:
             # handle_id=0 means no handle (system message), convert to None
             handle_id = row["handle_id"]
             sender_id = handle_id if handle_id and not row["is_from_me"] else None
+
+            # Extract text from attributedBody if text column is null
+            message_text = get_message_text(row["text"], row["attributedBody"])
+
             session.exec(
                 text("""
                     INSERT OR REPLACE INTO messages
@@ -148,7 +162,7 @@ def sync_all(chat_db_path: str, app_db_path: str, verbose: bool = True) -> dict:
                     id=row["ROWID"],
                     chat_id=row["chat_id"],
                     sender_id=sender_id,
-                    text=row["text"],
+                    text=message_text,
                     timestamp=apple_to_unix(row["date"]) or 0,
                     is_from_me=bool(row["is_from_me"]),
                     is_read=bool(row["is_read"]),

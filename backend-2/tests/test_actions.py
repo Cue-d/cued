@@ -126,9 +126,7 @@ class TestActionsCRUD:
         """Test that expired snoozed actions appear in pending list."""
         db = test_db_with_data
 
-        action_id = db.create_action(
-            action_type="respond_to_message", priority=50, chat_id=1
-        )
+        action_id = db.create_action(action_type="respond_to_message", priority=50, chat_id=1)
         # Snooze until the past
         db.update_action_status(action_id, "snoozed", int(time.time()) - 60)
 

@@ -6,13 +6,15 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from db.prm_db import AppDb
-from routers import actions, attachments, chats, eod, search, sync
+from db.sync import sync_all
+from routers import actions, attachments, chats, contacts, eod, search, sync
 from services.search.semantic import EmbeddingDb
 from workers import start_scheduler, stop_scheduler
 
 logger = logging.getLogger(__name__)
 
 # Database paths
+CHAT_DB_PATH = os.path.expanduser("~/Library/Messages/chat.db")
 PRM_DB_PATH = os.path.expanduser("~/.prm/prm.db")
 EMBEDDING_DB_PATH = os.path.expanduser("~/.prm/embeddings.db")
 
@@ -44,6 +46,15 @@ async def lifespan(app: FastAPI):
     """FastAPI lifespan handler for startup and shutdown."""
     # Startup
     logger.info("Starting PRM Backend 2...")
+
+    # Sync from chat.db to prm.db on startup
+    logger.info("Syncing from chat.db...")
+    try:
+        stats = sync_all(CHAT_DB_PATH, PRM_DB_PATH, verbose=True)
+        logger.info(f"Sync complete: {stats['messages']} messages in {stats['elapsed']:.2f}s")
+    except Exception as e:
+        logger.error(f"Sync failed: {e}")
+
     app_db = get_app_db()
     embedding_db = get_embedding_db()
     start_scheduler(app_db, embedding_db)
@@ -73,6 +84,7 @@ app.include_router(attachments.router, prefix="/attachments", tags=["attachments
 app.include_router(search.router, prefix="/search", tags=["search"])
 app.include_router(eod.router, prefix="/eod", tags=["eod"])
 app.include_router(sync.router, prefix="/sync", tags=["sync"])
+app.include_router(contacts.router, prefix="/contacts", tags=["contacts"])
 
 
 @app.get("/health")

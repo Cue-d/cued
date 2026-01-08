@@ -15,7 +15,6 @@ from services.macos import (
 from services.macos.contacts import _parse_contact_block
 from services.macos.messaging import _escape_applescript_string
 
-
 # =============================================================================
 # Contact Parsing Tests (Unit tests - no AppleScript execution)
 # =============================================================================
