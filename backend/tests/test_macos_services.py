@@ -1,5 +1,6 @@
 """Tests for macOS services (contacts and messaging)."""
 
+import sys
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -387,6 +388,7 @@ class TestSendToGroupMocked:
 
 @pytest.mark.slow
 @pytest.mark.integration
+@pytest.mark.skipif(sys.platform != "darwin", reason="macOS-only: requires osascript")
 class TestContactsIntegration:
     """Integration tests for contacts (requires macOS + Contacts.app)."""
 
@@ -400,6 +402,7 @@ class TestContactsIntegration:
 
 @pytest.mark.slow
 @pytest.mark.integration
+@pytest.mark.skipif(sys.platform != "darwin", reason="macOS-only: requires osascript")
 class TestMessagingIntegration:
     """Integration tests for messaging (requires macOS + Messages.app).
 

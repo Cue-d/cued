@@ -184,11 +184,13 @@ def sync_all(chat_db_path: str, app_db_path: str, verbose: bool = True) -> dict:
         if verbose:
             print("\n5. Syncing attachments...")
 
+        # Only sync attachments for messages that have a chat association
         rows = src.execute("""
             SELECT a.ROWID, maj.message_id, a.filename, a.mime_type, a.uti,
                    a.total_bytes, a.is_outgoing, a.created_date
             FROM attachment a
             INNER JOIN message_attachment_join maj ON maj.attachment_id = a.ROWID
+            INNER JOIN chat_message_join cmj ON cmj.message_id = maj.message_id
         """).fetchall()
 
         for row in rows:
@@ -350,12 +352,37 @@ def sync_incremental(chat_db_path: str, app_db_path: str, verbose: bool = False)
                 stats["chats"] += 1
 
             # 3. Sync participants for those chats
-            for row in src.execute(
+            # First, collect all handle_ids needed for participants
+            participant_rows = src.execute(
                 f"""SELECT chat_id, handle_id
                     FROM chat_handle_join
                     WHERE chat_id IN ({placeholders})""",
                 tuple(chat_ids),
-            ).fetchall():
+            ).fetchall()
+
+            # Sync any handles we don't have yet (participants who weren't message senders)
+            participant_handle_ids = {row["handle_id"] for row in participant_rows}
+            missing_handle_ids = participant_handle_ids - handle_ids
+            if missing_handle_ids:
+                ph = ",".join("?" * len(missing_handle_ids))
+                for row in src.execute(
+                    f"SELECT ROWID, id, service FROM handle WHERE ROWID IN ({ph})",
+                    tuple(missing_handle_ids),
+                ).fetchall():
+                    session.exec(
+                        text("""
+                            INSERT OR REPLACE INTO handles (id, identifier, service)
+                            VALUES (:id, :identifier, :service)
+                        """).bindparams(
+                            id=row["ROWID"],
+                            identifier=row["id"],
+                            service=row["service"],
+                        )
+                    )
+                    stats["handles"] += 1
+
+            # Now insert the participants
+            for row in participant_rows:
                 session.exec(
                     text("""
                         INSERT OR IGNORE INTO chat_participants (chat_id, handle_id)

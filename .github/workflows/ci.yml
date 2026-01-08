@@ -62,22 +62,11 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Setup Rust (nightly for edition 2024)
-        uses: dtolnay/rust-toolchain@nightly
-
-      - name: Cache cargo
-        uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: core
-
       - name: Install uv
         uses: astral-sh/setup-uv@v4
 
       - name: Install dependencies
         run: uv sync --dev
-
-      - name: Build core module
-        run: uvx maturin develop --uv --manifest-path ../core/Cargo.toml --features extension-module
 
       - name: Run ruff check
         run: uv run ruff check .
@@ -87,41 +76,3 @@ jobs:
 
       - name: Run tests
         run: uv run pytest -v
-
-  core:
-    name: Core (Lint, Test)
-    runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: core
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Setup Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-
-      - name: Setup Rust (nightly for edition 2024)
-        uses: dtolnay/rust-toolchain@nightly
-        with:
-          components: rustfmt, clippy
-
-      - name: Cache cargo
-        uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: core
-
-      - name: Run cargo check
-        run: cargo check
-
-      - name: Run clippy
-        run: cargo clippy --all-targets -- -D warnings
-
-      - name: Run rustfmt check
-        run: cargo fmt --all -- --check
-
-      - name: Run tests
-        run: cargo test

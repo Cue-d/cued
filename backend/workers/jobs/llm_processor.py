@@ -65,7 +65,7 @@ def run_llm_processor(app_db) -> None:
     # Build conversation context
     ctx = ConversationContext(
         chat_id=chat_id,
-        person_id=queued.person_name,  # Using person_name as proxy for now
+        person_id=None,  # Not available from the analysis queue
         person_name=queued.person_name,
         person_company=None,
         person_notes=None,
