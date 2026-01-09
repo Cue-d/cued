@@ -1,13 +1,12 @@
 import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef } from 'react'
-import type { ActionResponse } from '@/api/actions'
+import type { ActionResponse, AttachmentResponse } from '@/api/actions'
 import { AttachmentDisplay } from '@/components/Attachments'
 import Avatar from '@/components/Avatar'
 import { Card, CardContent, CardFooter, CardHeader } from '@/components/ui/card'
 import { Textarea } from '@/components/ui/textarea'
-import { type MessageItem, processMessagesWithReactions } from '@/lib/reactions'
-import { cn } from '@/lib/utils'
-import type { AttachmentResponse } from '@/api/actions'
 import { renderTextWithLinks } from '@/lib/linkDetection'
+import { type MessageItem, processMessagesWithReactions } from '@/lib/reactions'
+import { cn, getInitials } from '@/lib/utils'
 
 interface MessageResponseCardProps {
   action: ActionResponse
@@ -35,15 +34,6 @@ const ReactionBadges = ({ reactions, isSent }: { reactions: string[]; isSent: bo
       ))}
     </div>
   )
-}
-
-function getInitials(name: string | null): string {
-  if (!name) return '?'
-  const parts = name.split(' ').filter(Boolean)
-  if (parts.length >= 2) {
-    return (parts[0][0] + parts[1][0]).toUpperCase()
-  }
-  return name.substring(0, 2).toUpperCase()
 }
 
 function formatTime(timestamp: number): string {

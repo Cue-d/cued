@@ -36,8 +36,6 @@ CONTACTS_TIMEOUT = 30
 class ContactsError(Exception):
     """Error from the contacts CLI."""
 
-    pass
-
 
 class ContactsAccessDeniedError(ContactsError):
     """Contacts access was denied - user needs to grant permission."""

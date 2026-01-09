@@ -1,15 +1,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { fetchChats, ChatResponse } from '@/api/client'
 import { Chat, Message } from '@/data/types'
-
-// Helper to get initials from a name
-const getInitials = (name: string) =>
-  name
-    .split(' ')
-    .map((n) => n[0])
-    .join('')
-    .slice(0, 2)
-    .toUpperCase()
+import { getInitials } from '@/lib/utils'
 
 // Convert API response to UI model
 export const toChat = (c: ChatResponse, messages: Message[] = []): Chat => ({

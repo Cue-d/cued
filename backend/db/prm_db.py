@@ -273,10 +273,6 @@ class AppDb:
             )
             return [(row[0], row[1], row[2]) for row in result]
 
-    def get_message_text(self, message_id: int) -> str | None:
-        """Get cached text for a single message (alias for get_cached_text)."""
-        return self.get_cached_text(message_id)
-
     # =========================================================================
     # SYNC STATE METHODS
     # =========================================================================

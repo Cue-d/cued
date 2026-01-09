@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect } from 'react'
 import { useSyncStatus } from '@/hooks'
 import { ViewProvider } from './contexts/ViewContext'
 import { ViewContainer } from './components/Navigation/ViewContainer'
@@ -8,12 +8,11 @@ import { Spinner } from './components/ui/spinner'
 
 function App() {
   const { isInitialSyncing } = useSyncStatus()
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  const [isDark, _setIsDark] = useState(true)
 
+  // Enable dark mode on mount
   useEffect(() => {
-    document.documentElement.classList.toggle('dark', isDark)
-  }, [isDark])
+    document.documentElement.classList.add('dark')
+  }, [])
 
   // Show full-screen loading during initial sync
   if (isInitialSyncing) {

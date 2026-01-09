@@ -107,7 +107,7 @@ def search(
         logger.warning(f"Semantic search failed: {e}")
         sem_results = []
 
-    results = merge_results(fts_results, sem_results, get_app_db().get_message_text, limit)
+    results = merge_results(fts_results, sem_results, get_app_db().get_cached_text, limit)
     return enrich_results_with_chat_names(results)
 
 

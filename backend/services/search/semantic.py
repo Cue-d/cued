@@ -257,7 +257,7 @@ def process_queue(app_db, embedding_db: EmbeddingDb, batch_size: int = 100) -> i
 
     texts, valid = [], []
     for msg_id, chat_id in pending:
-        txt = app_db.get_message_text(msg_id)
+        txt = app_db.get_cached_text(msg_id)
         if txt and txt.strip():
             texts.append(txt)
             valid.append((msg_id, chat_id))

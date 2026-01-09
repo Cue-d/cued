@@ -37,8 +37,6 @@ MAX_PARALLEL_LLM_CALLS = 5
 class LLMError(Exception):
     """Error from the LLM client."""
 
-    pass
-
 
 class ContentSafetyError(LLMError):
     """Content was flagged as potentially unsafe by the LLM."""

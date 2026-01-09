@@ -8,19 +8,8 @@ This module handles:
 
 import time
 
-from services.attributed_body import extract_text_from_attributed_body
-
-from .chat_db import ChatDb
+from .chat_db import ChatDb, get_message_text
 from .prm_db import AppDb
-
-
-def get_message_text(text_col: str | None, attributed_body: bytes | None) -> str | None:
-    """Get message text, falling back to attributedBody extraction if text is null."""
-    if text_col:
-        return text_col
-    if attributed_body:
-        return extract_text_from_attributed_body(attributed_body)
-    return None
 
 
 def sync_text_cache(chat_db: ChatDb, app_db: AppDb, verbose: bool = False) -> dict:

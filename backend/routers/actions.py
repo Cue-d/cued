@@ -13,6 +13,7 @@ from pydantic import BaseModel
 
 from db.models import ActionWithContext
 from deps import get_app_db, get_chat_db
+from services.attachments import is_image_mime_type
 from services.contacts import ContactResolver, get_chat_display_name
 
 logger = logging.getLogger(__name__)
@@ -97,18 +98,6 @@ class ActionResponse(BaseModel):
     recent_messages: list[MessageResponse] = []
 
 
-# =============================================================================
-# HELPER FUNCTIONS
-# =============================================================================
-
-
-def _is_image_mime_type(mime_type: str | None) -> bool:
-    """Check if a MIME type is an image."""
-    if not mime_type:
-        return False
-    return mime_type.startswith("image/")
-
-
 def enrich_action_context(
     action: ActionWithContext, chat_db, resolver: ContactResolver
 ) -> ActionWithContext:
@@ -162,7 +151,7 @@ def action_to_response(
                     filename=a["filename"],
                     mime_type=a["mime_type"],
                     size=a["size"],
-                    is_image=_is_image_mime_type(a["mime_type"]),
+                    is_image=is_image_mime_type(a["mime_type"]),
                 )
                 for a in attachments_list
             ]

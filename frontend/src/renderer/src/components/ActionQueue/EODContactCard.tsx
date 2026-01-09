@@ -6,7 +6,7 @@ import { Badge } from '@/components/ui/badge'
 import { Card, CardContent, CardHeader } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
-import { cn } from '@/lib/utils'
+import { cn, getInitials } from '@/lib/utils'
 
 interface ContactFormData {
   name: string
@@ -23,15 +23,6 @@ interface EODContactCardProps {
 
 export interface EODContactCardRef {
   focusInput: () => void
-}
-
-function getInitials(name: string | null): string {
-  if (!name) return '?'
-  const parts = name.split(' ').filter(Boolean)
-  if (parts.length >= 2) {
-    return (parts[0][0] + parts[1][0]).toUpperCase()
-  }
-  return name.substring(0, 2).toUpperCase()
 }
 
 function formatMeetingTime(timestamp: number): string {
