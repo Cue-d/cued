@@ -1,12 +1,11 @@
 import { motion, type PanInfo, useMotionValue, useTransform, animate } from 'motion/react'
 import { Check, Clock, X } from 'lucide-react'
-import { type ReactNode, useEffect, useRef } from 'react'
+import { type ReactNode, useCallback, useEffect, useRef, useState } from 'react'
 import type { SwipeDirection } from '@/data/types'
 
 interface SwipeableCardProps {
   children: ReactNode
   onSwipe: (direction: SwipeDirection) => void
-  onSwipeStart?: () => void
   disabled?: boolean
   triggerSwipe?: SwipeDirection | null
 }
@@ -14,16 +13,47 @@ interface SwipeableCardProps {
 const SWIPE_THRESHOLD_X = 120
 const SWIPE_THRESHOLD_Y = 80
 
+/**
+ * Check if an element or any of its ancestors has the data-selectable attribute.
+ * This is used to determine if a pointer event started from within a text-selectable area.
+ */
+function isSelectableElement(element: EventTarget | null): boolean {
+  if (!(element instanceof HTMLElement)) return false
+
+  let current: HTMLElement | null = element
+  while (current) {
+    if (current.dataset.selectable === 'true') return true
+    current = current.parentElement
+  }
+  return false
+}
+
 export function SwipeableCard({
   children,
   onSwipe,
-  onSwipeStart,
   disabled = false,
   triggerSwipe = null
 }: SwipeableCardProps) {
   const x = useMotionValue(0)
   const y = useMotionValue(0)
   const isAnimatingRef = useRef(false)
+
+  // Track whether the current interaction started from a selectable text area
+  const [isSelectingText, setIsSelectingText] = useState(false)
+
+  // Handle pointer down to detect if user is trying to select text
+  const handlePointerDown = useCallback((e: React.PointerEvent) => {
+    if (isSelectableElement(e.target)) {
+      setIsSelectingText(true)
+    } else {
+      setIsSelectingText(false)
+    }
+  }, [])
+
+  // Reset selection state on pointer up
+  const handlePointerUp = useCallback(() => {
+    setIsSelectingText(false)
+  }, [])
 
   // Rotate based on horizontal drag
   const rotate = useTransform(x, [-200, 200], [-15, 15])
@@ -38,10 +68,6 @@ export function SwipeableCard({
   const rightOverlayOpacity = useTransform(x, [0, SWIPE_THRESHOLD_X], [0, 0.95])
   const leftOverlayOpacity = useTransform(x, [-SWIPE_THRESHOLD_X, 0], [0.9, 0])
   const upOverlayOpacity = useTransform(y, [-SWIPE_THRESHOLD_Y, 0], [0.9, 0])
-
-  const handleDragStart = () => {
-    onSwipeStart?.()
-  }
 
   const handleDragEnd = (_: MouseEvent | TouchEvent | PointerEvent, info: PanInfo) => {
     const offsetX = info.offset.x
@@ -63,7 +89,6 @@ export function SwipeableCard({
   useEffect(() => {
     if (triggerSwipe && !isAnimatingRef.current) {
       isAnimatingRef.current = true
-      onSwipeStart?.()
 
       // Phase 1: Animate to show overlay (anticipation)
       let peekX = 0
@@ -129,18 +154,25 @@ export function SwipeableCard({
       // Reset when triggerSwipe is cleared
       isAnimatingRef.current = false
     }
-  }, [triggerSwipe, x, y, onSwipe, onSwipeStart])
+  }, [triggerSwipe, x, y, onSwipe])
+
+  // Drag is enabled only when not disabled and not selecting text
+  const isDragEnabled = !disabled && !isSelectingText
 
   return (
     <motion.div
-      className="absolute inset-0 cursor-grab active:cursor-grabbing"
+      className={
+        isDragEnabled ? 'absolute inset-0 cursor-grab active:cursor-grabbing' : 'absolute inset-0'
+      }
       style={{ x, y, rotate, scale, opacity }}
-      drag={!disabled}
+      drag={isDragEnabled}
       dragConstraints={{ left: 0, right: 0, top: 0, bottom: 0 }}
       dragElastic={0.7}
-      onDragStart={handleDragStart}
       onDragEnd={handleDragEnd}
-      whileTap={{ cursor: 'grabbing' }}
+      onPointerDown={handlePointerDown}
+      onPointerUp={handlePointerUp}
+      onPointerCancel={handlePointerUp}
+      whileTap={isDragEnabled ? { cursor: 'grabbing' } : undefined}
       initial={{ scale: 0.95, opacity: 0 }}
       animate={{ scale: 1, opacity: 1 }}
       exit={{

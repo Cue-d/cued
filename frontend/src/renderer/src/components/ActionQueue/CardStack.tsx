@@ -1,11 +1,13 @@
 import { AnimatePresence, motion } from 'motion/react'
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { ActionResponse } from '@/api/actions'
 import { addContactContext } from '@/api/actions'
 import type { SwipeDirection } from '@/data/types'
+import { PartyPopperIcon, type PartyPopperIconHandle } from '@/components/ui/party-popper'
+import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from '@/components/ui/empty'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
-import { type ContactFormData, EODContactCard } from './EODContactCard'
-import { MessageResponseCard } from './MessageResponseCard'
+import { type ContactFormData, EODContactCard, type EODContactCardRef } from './EODContactCard'
+import { MessageResponseCard, type MessageResponseCardRef } from './MessageResponseCard'
 import { SwipeableCard } from './SwipeableCard'
 import { Button } from '../ui/button'
 
@@ -32,6 +34,34 @@ export function CardStack({ actions, onSwipe }: CardStackProps) {
     direction: SwipeDirection
   } | null>(null)
 
+  // Refs for focus management
+  const containerRef = useRef<HTMLDivElement>(null)
+  const messageCardRef = useRef<MessageResponseCardRef>(null)
+  const eodCardRef = useRef<EODContactCardRef>(null)
+
+  // Focus the text input in the current card
+  const focusCardInput = useCallback(() => {
+    if (actions.length === 0) return
+    const topAction = actions[0]
+    if (topAction.type === 'eod_contact') {
+      eodCardRef.current?.focusInput()
+    } else {
+      messageCardRef.current?.focusInput()
+    }
+  }, [actions])
+
+  // Extract the top action ID for dependency tracking
+  const topActionId = actions.length > 0 ? actions[0]?.id : null
+
+  // Auto-focus container on mount and when top action changes
+  useEffect(() => {
+    // Small delay to ensure the card has rendered
+    const timer = setTimeout(() => {
+      containerRef.current?.focus()
+    }, 50)
+    return () => clearTimeout(timer)
+  }, [topActionId])
+
   // Get visible cards (top 3)
   const visibleActions = useMemo(() => actions.slice(0, VISIBLE_CARDS), [actions])
 
@@ -50,42 +80,25 @@ export function CardStack({ actions, onSwipe }: CardStackProps) {
       setIsProcessing(true)
 
       try {
-        if (action.type === 'respond_to_message') {
-          const responseText = responseTexts[action.id]
-          console.log('[CardStack] handleSwipe called:', {
-            actionId: action.id,
-            direction,
-            responseText,
-            responseTextsState: responseTexts
-          })
-          // Only pass response text for right swipe
-          if (direction === 'right' && responseText) {
-            await onSwipe(action.id, direction, responseText)
-          } else if (direction === 'up') {
-            // Snooze for 1 hour by default
-            await onSwipe(action.id, direction, undefined, 60)
-          } else {
-            await onSwipe(action.id, direction)
-          }
-        } else if (action.type === 'eod_contact') {
-          const formData = contactForms[action.id]
-          // Save contact context on right swipe
-          if (direction === 'right' && action.person_id && formData?.notes) {
-            await addContactContext(action.person_id, formData.notes)
-          }
-          if (direction === 'up') {
-            await onSwipe(action.id, direction, undefined, 60)
-          } else {
-            await onSwipe(action.id, direction)
-          }
-        } else {
-          // follow_up or other types
-          if (direction === 'up') {
-            await onSwipe(action.id, direction, undefined, 60)
-          } else {
-            await onSwipe(action.id, direction)
+        // Handle pre-swipe actions
+        if (direction === 'right') {
+          if (action.type === 'respond_to_message') {
+            const responseText = responseTexts[action.id]
+            if (responseText) {
+              await onSwipe(action.id, direction, responseText)
+              return
+            }
+          } else if (action.type === 'eod_contact') {
+            const formData = contactForms[action.id]
+            if (action.person_id && formData?.notes) {
+              await addContactContext(action.person_id, formData.notes)
+            }
           }
         }
+
+        // Default swipe handling (snooze uses 60 min default)
+        const snoozeMinutes = direction === 'up' ? 60 : undefined
+        await onSwipe(action.id, direction, undefined, snoozeMinutes)
       } finally {
         setIsProcessing(false)
         // Clean up state for this action
@@ -127,14 +140,22 @@ export function CardStack({ actions, onSwipe }: CardStackProps) {
     return undefined
   }, [triggerSwipe])
 
-  // Keyboard shortcuts
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      // Don't trigger if user is typing in an input
+  // Handle keyboard navigation on the container
+  const handleContainerKeyDown = useCallback(
+    (e: React.KeyboardEvent) => {
+      // Ignore keyboard shortcuts when typing in inputs
       if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) {
         return
       }
 
+      // Tab focuses the text input
+      if (e.key === 'Tab' && !e.shiftKey) {
+        e.preventDefault()
+        focusCardInput()
+        return
+      }
+
+      // Arrow keys for swipe actions
       if (e.key === 'ArrowLeft') {
         e.preventDefault()
         handleButtonSwipe('left')
@@ -145,32 +166,87 @@ export function CardStack({ actions, onSwipe }: CardStackProps) {
         e.preventDefault()
         handleButtonSwipe('up')
       }
+    },
+    [focusCardInput, handleButtonSwipe]
+  )
+
+  // Handle Escape key from inputs to return focus to container
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        // If we're in an input, refocus the container for arrow key navigation
+        if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) {
+          e.preventDefault()
+          containerRef.current?.focus()
+        }
+      }
     }
 
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [handleButtonSwipe])
+  }, [])
+
+  // Ref for animated party popper icon
+  const partyPopperRef = useRef<PartyPopperIconHandle>(null)
+
+  // Trigger party popper animation when empty state mounts
+  useEffect(() => {
+    if (actions.length === 0) {
+      const timer = setTimeout(() => {
+        partyPopperRef.current?.startAnimation()
+      }, 200)
+      return () => clearTimeout(timer)
+    }
+    return undefined
+  }, [actions.length])
 
   if (actions.length === 0) {
     return (
-      <div className="flex flex-col items-center justify-center h-full text-center px-8">
-        <motion.div
-          initial={{ scale: 0.9, opacity: 0 }}
-          animate={{ scale: 1, opacity: 1 }}
-          className="text-6xl mb-4"
-        >
-          🎉
-        </motion.div>
-        <h2 className="text-2xl font-semibold text-foreground mb-2">All caught up!</h2>
-        <p className="text-muted-foreground max-w-sm">
-          You can exhale now. New actions will appear here.
-        </p>
-      </div>
+      <motion.div
+        key="empty-state"
+        initial={{ opacity: 0, scale: 0.95, y: 10 }}
+        animate={{ opacity: 1, scale: 1, y: 0 }}
+        exit={{ opacity: 0, scale: 0.95, y: -10 }}
+        transition={{
+          type: 'spring',
+          stiffness: 300,
+          damping: 30,
+          opacity: { duration: 0.2 }
+        }}
+        className="flex flex-col items-center justify-center h-full"
+      >
+        <Empty>
+          <EmptyHeader>
+            <EmptyMedia variant="icon">
+              <PartyPopperIcon ref={partyPopperRef} size={24} />
+            </EmptyMedia>
+            <motion.div
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: 0.15, duration: 0.3 }}
+            >
+              <EmptyTitle>All caught up!</EmptyTitle>
+            </motion.div>
+            <motion.div
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: 0.25, duration: 0.3 }}
+            >
+              <EmptyDescription>You can exhale now. New actions will appear here.</EmptyDescription>
+            </motion.div>
+          </EmptyHeader>
+        </Empty>
+      </motion.div>
     )
   }
 
   return (
-    <div className="relative w-full h-full flex flex-col">
+    <div
+      ref={containerRef}
+      tabIndex={0}
+      onKeyDown={handleContainerKeyDown}
+      className="relative w-full h-full flex flex-col outline-none"
+    >
       {/* Header with count */}
       <div className="shrink-0 flex items-center justify-center py-3">
         <span className="text-lg font-semibold text-foreground">{actions.length} Left</span>
@@ -225,6 +301,7 @@ export function CardStack({ actions, onSwipe }: CardStackProps) {
                   >
                     {action.type === 'eod_contact' ? (
                       <EODContactCard
+                        ref={eodCardRef}
                         action={action}
                         formData={
                           contactForms[action.id] || {
@@ -234,12 +311,15 @@ export function CardStack({ actions, onSwipe }: CardStackProps) {
                           }
                         }
                         onFormChange={(data) => handleContactFormChange(action.id, data)}
+                        autoFocus={false}
                       />
                     ) : (
                       <MessageResponseCard
+                        ref={messageCardRef}
                         action={action}
                         responseText={responseTexts[action.id] || ''}
                         onResponseChange={(text) => handleResponseChange(action.id, text)}
+                        autoFocus={false}
                       />
                     )}
                   </SwipeableCard>
@@ -255,12 +335,14 @@ export function CardStack({ actions, onSwipe }: CardStackProps) {
                           notes: ''
                         }}
                         onFormChange={() => {}}
+                        autoFocus={false}
                       />
                     ) : (
                       <MessageResponseCard
                         action={action}
                         responseText=""
                         onResponseChange={() => {}}
+                        autoFocus={false}
                       />
                     )}
                   </div>
@@ -282,6 +364,7 @@ export function CardStack({ actions, onSwipe }: CardStackProps) {
                 disabled={isProcessing}
                 size="lg"
                 className="flex-1"
+                tabIndex={-1}
               >
                 Discard
               </Button>
@@ -302,6 +385,7 @@ export function CardStack({ actions, onSwipe }: CardStackProps) {
                 disabled={isProcessing}
                 size="lg"
                 className="flex-1"
+                tabIndex={-1}
               >
                 Snooze
               </Button>
@@ -322,6 +406,7 @@ export function CardStack({ actions, onSwipe }: CardStackProps) {
                 disabled={isProcessing}
                 size="lg"
                 className="flex-1"
+                tabIndex={-1}
               >
                 Send
               </Button>

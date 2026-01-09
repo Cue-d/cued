@@ -1,6 +1,7 @@
 """Semantic search with sentence-transformers embeddings and sqlite-vec."""
 
 import logging
+import os
 import time
 from contextlib import contextmanager
 
@@ -38,6 +39,8 @@ class EmbeddingDb:
     """Embedding database wrapper using sqlite-vec for vector search."""
 
     def __init__(self, path: str):
+        # Ensure parent directory exists before creating database
+        os.makedirs(os.path.dirname(path), exist_ok=True)
         self.engine = create_engine(f"sqlite:///{path}", connect_args={"check_same_thread": False})
         # Load sqlite-vec extension on each connection
         event.listen(self.engine, "connect", _load_vec_extension)

@@ -150,8 +150,16 @@ class ChatDb:
     # MESSAGE QUERIES
     # =========================================================================
 
-    def get_chat_messages(self, chat_id: int, limit: int = 100) -> list[MessageWithSender]:
-        """Get messages for a chat with sender info."""
+    def get_chat_messages(
+        self, chat_id: int, limit: int = 100, offset: int = 0
+    ) -> list[MessageWithSender]:
+        """Get messages for a chat with sender info.
+
+        Args:
+            chat_id: The chat ID to fetch messages for.
+            limit: Maximum number of messages to return.
+            offset: Number of messages to skip (for pagination).
+        """
         with self._lock:
             cursor = self.conn.execute(
                 """
@@ -172,9 +180,9 @@ class ChatDb:
             LEFT JOIN handle h ON h.ROWID = m.handle_id
             WHERE cmj.chat_id = ?
             ORDER BY m.date DESC
-            LIMIT ?
+            LIMIT ? OFFSET ?
             """,
-                (chat_id, limit),
+                (chat_id, limit, offset),
             )
 
             results = []

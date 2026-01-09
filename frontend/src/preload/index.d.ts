@@ -90,6 +90,11 @@ export interface Api {
   getSyncStatus: () => Promise<SyncStatusResponse>
   getActions: (status?: string, limit?: number, actionType?: string) => Promise<ActionResponse[]>
   swipeAction: (actionId: number, request: SwipeRequest) => Promise<ActionResponse>
+  getActionMessages: (
+    actionId: number,
+    limit?: number,
+    offset?: number
+  ) => Promise<MessageResponse[]>
   searchMessages: (query: string, limit?: number) => Promise<SearchResultResponse[]>
   addContactContext: (personId: number, notes: string) => Promise<{ success: boolean }>
 }

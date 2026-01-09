@@ -13,6 +13,8 @@ const api = {
     ipcRenderer.invoke('api:getActions', status, limit, actionType),
   swipeAction: (actionId: number, request: SwipeRequest) =>
     ipcRenderer.invoke('api:swipeAction', actionId, request),
+  getActionMessages: (actionId: number, limit?: number, offset?: number) =>
+    ipcRenderer.invoke('api:getActionMessages', actionId, limit, offset),
   searchMessages: (query: string, limit?: number) =>
     ipcRenderer.invoke('api:searchMessages', query, limit),
   addContactContext: (personId: number, notes: string) =>

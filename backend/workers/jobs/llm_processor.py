@@ -15,6 +15,7 @@ from services.actions.llm_client import (
     analyze_conversation,
     is_llm_available,
 )
+from services.macos.notifications import schedule_action_notification
 from workers.scheduler import can_call_llm, mark_llm_called
 
 logger = logging.getLogger(__name__)
@@ -116,6 +117,17 @@ def run_llm_processor(chat_db, app_db) -> None:
             f"[llm_processor] Created action_id={action_id} "
             f"type={suggestion.action_type} for chat_id={chat_id}"
         )
+
+        # Schedule desktop notification if remind_at is set
+        if suggestion.remind_at:
+            message_preview = latest_msg.text if latest_msg else None
+            schedule_action_notification(
+                action_id=action_id,
+                remind_at=suggestion.remind_at,
+                action_type=suggestion.action_type,
+                person_name=person_name,
+                message_preview=message_preview,
+            )
 
     except ContentSafetyError:
         # Content was flagged - expected, don't retry

@@ -19,6 +19,7 @@ interface EODContactCardProps {
   formData: ContactFormData
   onFormChange: (data: ContactFormData) => void
   className?: string
+  autoFocus?: boolean
 }
 
 export interface EODContactCardRef {
@@ -31,7 +32,7 @@ function formatMeetingTime(timestamp: number): string {
 }
 
 export const EODContactCard = forwardRef<EODContactCardRef, EODContactCardProps>(
-  function EODContactCard({ action, formData, onFormChange, className }, ref) {
+  function EODContactCard({ action, formData, onFormChange, className, autoFocus = true }, ref) {
     const nameInputRef = useRef<HTMLInputElement>(null)
 
     useImperativeHandle(ref, () => ({
@@ -41,12 +42,13 @@ export const EODContactCard = forwardRef<EODContactCardRef, EODContactCardProps>
     }))
 
     useEffect(() => {
+      if (!autoFocus) return
       // Auto-focus the name input when the card mounts
       const timer = setTimeout(() => {
         nameInputRef.current?.focus()
       }, 300)
       return () => clearTimeout(timer)
-    }, [])
+    }, [autoFocus])
 
     const personName = action.person_name || 'Unknown'
     const initials = getInitials(personName)
@@ -60,10 +62,10 @@ export const EODContactCard = forwardRef<EODContactCardRef, EODContactCardProps>
 
     return (
       <Card
-        className={cn('w-full h-full flex flex-col overflow-hidden gap-0 border p-0', className)}
+        className={cn('w-full h-full flex flex-col overflow-hidden gap-0 border-0 p-0', className)}
       >
         {/* Header */}
-        <CardHeader className="shrink-0 p-3">
+        <CardHeader className="shrink-0 p-4">
           <div className="flex items-center gap-x-3">
             <Avatar initials={initials} size="sm" />
             <div className="flex-1 min-w-0">
@@ -78,7 +80,7 @@ export const EODContactCard = forwardRef<EODContactCardRef, EODContactCardProps>
         </CardHeader>
 
         {/* Form Content */}
-        <CardContent className="border-t flex-1 p-0 min-h-0">
+        <CardContent className="flex-1 p-0 min-h-0">
           <div
             className="h-full overflow-y-auto [&::-webkit-scrollbar]:w-2 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:bg-border/50 [scrollbar-width:thin]"
             style={{ scrollbarColor: 'rgba(128, 128, 128, 0.5) transparent' }}
@@ -89,7 +91,7 @@ export const EODContactCard = forwardRef<EODContactCardRef, EODContactCardProps>
               </p>
 
               {/* Name Field */}
-              <div className="space-y-2">
+              <div className="space-y-2" data-selectable="true">
                 <label className="flex items-center gap-2 text-sm font-medium text-foreground">
                   <User className="w-4 h-4 text-muted-foreground" />
                   Name
@@ -104,7 +106,7 @@ export const EODContactCard = forwardRef<EODContactCardRef, EODContactCardProps>
               </div>
 
               {/* Tags Field */}
-              <div className="space-y-2">
+              <div className="space-y-2" data-selectable="true">
                 <label className="flex items-center gap-2 text-sm font-medium text-foreground">
                   <Tag className="w-4 h-4 text-muted-foreground" />
                   Tags
@@ -127,7 +129,7 @@ export const EODContactCard = forwardRef<EODContactCardRef, EODContactCardProps>
               </div>
 
               {/* Notes Field */}
-              <div className="space-y-2">
+              <div className="space-y-2" data-selectable="true">
                 <label className="flex items-center gap-2 text-sm font-medium text-foreground">
                   <FileText className="w-4 h-4 text-muted-foreground" />
                   Notes

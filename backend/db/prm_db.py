@@ -11,6 +11,7 @@ This database stores:
 All message/chat data is read directly from chat.db via ChatDb.
 """
 
+import os
 import time
 from contextlib import contextmanager
 from datetime import datetime
@@ -30,6 +31,8 @@ class AppDb:
 
     def __init__(self, path: str):
         self.path = path
+        # Ensure parent directory exists before creating database
+        os.makedirs(os.path.dirname(path), exist_ok=True)
         self.engine = create_engine(
             f"sqlite:///{path}",
             connect_args={"check_same_thread": False},

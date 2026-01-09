@@ -10,8 +10,22 @@ vi.mock('motion/react', () => ({
   motion: {
     div: ({ children, ...props }: { children: React.ReactNode }) => <div {...props}>{children}</div>
   },
-  AnimatePresence: ({ children }: { children: React.ReactNode }) => <>{children}</>
+  AnimatePresence: ({ children }: { children: React.ReactNode }) => <>{children}</>,
+  useAnimation: () => ({
+    start: vi.fn(),
+    stop: vi.fn(),
+    set: vi.fn()
+  })
 }))
+
+// Mock party-popper icon to avoid useAnimation issues
+vi.mock('@/components/ui/party-popper', () => {
+  const MockPartyPopperIcon = React.forwardRef<HTMLSpanElement>(() => (
+    <span data-testid="party-popper-icon">🎉</span>
+  ))
+  MockPartyPopperIcon.displayName = 'MockPartyPopperIcon'
+  return { PartyPopperIcon: MockPartyPopperIcon }
+})
 
 // Mock child components
 vi.mock('@/components/ActionQueue/SwipeableCard', () => ({
@@ -206,7 +220,7 @@ describe('CardStack', () => {
     fireEvent.click(swipeLeftButton)
 
     await waitFor(() => {
-      expect(mockOnSwipe).toHaveBeenCalledWith(1, 'left')
+      expect(mockOnSwipe).toHaveBeenCalledWith(1, 'left', undefined, undefined)
     })
   })
 
@@ -235,22 +249,24 @@ describe('CardStack', () => {
 
     await waitFor(() => {
       expect(mockAddContactContext).toHaveBeenCalledWith(3, 'Met at conference')
-      expect(mockOnSwipe).toHaveBeenCalledWith(2, 'right')
+      expect(mockOnSwipe).toHaveBeenCalledWith(2, 'right', undefined, undefined)
     })
   })
 
   it('keyboard shortcuts (ArrowLeft/ArrowRight) trigger swipe', async () => {
-    render(<CardStack actions={[mockMessageAction]} onSwipe={mockOnSwipe} />)
+    const { container } = render(<CardStack actions={[mockMessageAction]} onSwipe={mockOnSwipe} />)
 
-    fireEvent.keyDown(window, { key: 'ArrowLeft' })
+    // The container div with tabIndex={0} handles keyboard events
+    const focusableContainer = container.querySelector('[tabindex="0"]')!
+    fireEvent.keyDown(focusableContainer, { key: 'ArrowLeft' })
 
     await waitFor(() => {
-      expect(mockOnSwipe).toHaveBeenCalledWith(1, 'left')
+      expect(mockOnSwipe).toHaveBeenCalledWith(1, 'left', undefined, undefined)
     })
 
     mockOnSwipe.mockClear()
 
-    fireEvent.keyDown(window, { key: 'ArrowRight' })
+    fireEvent.keyDown(focusableContainer, { key: 'ArrowRight' })
 
     await waitFor(() => {
       expect(mockOnSwipe).toHaveBeenCalled()
@@ -261,9 +277,12 @@ describe('CardStack', () => {
     render(<CardStack actions={[mockMessageAction]} onSwipe={mockOnSwipe} />)
 
     const textarea = screen.getByTestId('response-textarea')
+    // Focus the textarea and fire a keyDown event on it
+    textarea.focus()
     fireEvent.keyDown(textarea, { key: 'ArrowLeft' })
 
-    // Should not trigger swipe when typing in textarea
+    // Should not trigger swipe when key event originates from textarea
+    // (the container's onKeyDown handler only triggers when the container itself receives the event)
     expect(mockOnSwipe).not.toHaveBeenCalled()
   })
 

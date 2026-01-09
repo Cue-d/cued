@@ -2,6 +2,7 @@ import type { SwipeDirection } from '../data/types'
 import {
   fetchActions as clientFetchActions,
   swipeAction as clientSwipeAction,
+  fetchActionMessages as clientFetchActionMessages,
   searchMessages as clientSearchMessages,
   addContactContext as clientAddContactContext
 } from './client'
@@ -25,6 +26,10 @@ export async function swipeAction(
     response_text: responseText,
     snooze_minutes: snoozeMinutes
   })
+}
+
+export async function fetchActionMessages(actionId: number, limit = 15, offset = 0) {
+  return clientFetchActionMessages(actionId, limit, offset)
 }
 
 export async function searchMessages(query: string, limit = 50) {

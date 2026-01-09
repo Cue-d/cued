@@ -15,6 +15,10 @@ from db.models import ActionWithContext
 from deps import get_app_db, get_chat_db
 from services.attachments import is_image_mime_type
 from services.contacts import ContactResolver, get_chat_display_name
+from services.macos.notifications import (
+    cancel_scheduled_notification,
+    schedule_action_notification,
+)
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -137,7 +141,7 @@ def action_to_response(
     recent_messages: list[MessageResponse] = []
 
     if action.chat_id:
-        messages = chat_db.get_chat_messages(action.chat_id, 5)
+        messages = chat_db.get_chat_messages(action.chat_id, 15)
 
         # Batch resolve sender names
         handle_to_name = resolver.resolve_sender_names(messages)
@@ -304,6 +308,18 @@ def create_action(request: CreateActionRequest):
     )
     action = app_db.get_action(action_id)
     action = enrich_action_context(action, chat_db, resolver)
+
+    # Schedule desktop notification for remind_at time
+    if request.remind_at:
+        message_preview = action.message_text if action.message_text else None
+        schedule_action_notification(
+            action_id=action_id,
+            remind_at=request.remind_at,
+            action_type=request.type.value,
+            person_name=action.person_name,
+            message_preview=message_preview,
+        )
+
     return action_to_response(action, chat_db, resolver)
 
 
@@ -318,12 +334,19 @@ def swipe_action(action_id: int, request: ActionSwipeRequest):
     if not action:
         raise HTTPException(status_code=404, detail="Action not found")
 
+    # Enrich for notification content (need person_name, message_text)
+    action = enrich_action_context(action, chat_db, resolver)
+
     if request.direction == SwipeDirection.LEFT:
-        # Discard
+        # Discard - cancel any scheduled notification
+        cancel_scheduled_notification(action_id)
         app_db.update_action_status(action_id, "discarded")
 
     elif request.direction == SwipeDirection.RIGHT:
-        # Complete - also send message if provided
+        # Complete - cancel any scheduled notification
+        cancel_scheduled_notification(action_id)
+
+        # Send message if provided
         if request.response_text and action.chat_id:
             try:
                 from services.macos.messaging import send_message, send_to_group
@@ -339,10 +362,23 @@ def swipe_action(action_id: int, request: ActionSwipeRequest):
         app_db.update_action_status(action_id, "completed")
 
     elif request.direction == SwipeDirection.UP:
-        # Snooze
+        # Snooze - reschedule notification
         snooze_until = None
         if request.snooze_minutes:
             snooze_until = int(time.time()) + (request.snooze_minutes * 60)
+
+            # Schedule notification at snooze time
+            schedule_action_notification(
+                action_id=action_id,
+                remind_at=snooze_until,
+                action_type=action.type,
+                person_name=action.person_name,
+                message_preview=action.message_text,
+            )
+        else:
+            # No snooze time, just cancel the notification
+            cancel_scheduled_notification(action_id)
+
         app_db.update_action_status(action_id, "snoozed", snooze_until)
 
     action = app_db.get_action(action_id)
@@ -354,8 +390,79 @@ def swipe_action(action_id: int, request: ActionSwipeRequest):
 def delete_action(action_id: int):
     """Delete an action."""
     app_db = get_app_db()
+
+    # Cancel any scheduled notification
+    cancel_scheduled_notification(action_id)
+
     app_db.delete_action(action_id)
     return {"success": True}
+
+
+@router.get("/{action_id}/messages", response_model=list[MessageResponse])
+def get_action_messages(action_id: int, limit: int = 15, offset: int = 0):
+    """Get paginated messages for an action's chat.
+
+    Args:
+        action_id: The action ID.
+        limit: Maximum number of messages to return (default 15).
+        offset: Number of messages to skip for pagination.
+
+    Returns messages ordered by date DESC (newest first).
+    """
+    app_db = get_app_db()
+    chat_db = get_chat_db()
+    resolver = ContactResolver(app_db)
+
+    action = app_db.get_action(action_id)
+    if not action:
+        raise HTTPException(status_code=404, detail="Action not found")
+
+    if not action.chat_id:
+        return []
+
+    messages = chat_db.get_chat_messages(action.chat_id, limit, offset)
+
+    # Batch resolve sender names
+    handle_to_name = resolver.resolve_sender_names(messages)
+
+    result: list[MessageResponse] = []
+    for m in messages:
+        # Fetch attachments for this message
+        attachments_list = chat_db.get_message_attachments(m.id) if m.has_attachments else []
+        attachments = [
+            AttachmentResponse(
+                id=a["id"],
+                filename=a["filename"],
+                mime_type=a["mime_type"],
+                size=a["size"],
+                is_image=is_image_mime_type(a["mime_type"]),
+            )
+            for a in attachments_list
+        ]
+
+        # Resolve sender name from contacts
+        sender_name = m.sender_name
+        if sender_name and not m.is_from_me:
+            sender_name = handle_to_name.get(m.sender_name, m.sender_name)
+
+        result.append(
+            MessageResponse(
+                id=m.id,
+                text=m.text,
+                date=m.timestamp,
+                is_from_me=m.is_from_me,
+                is_read=m.is_read,
+                date_read=m.read_at,
+                sender_name=sender_name,
+                is_sent=True,
+                is_delivered=m.is_from_me,
+                date_delivered=m.timestamp if m.is_from_me else None,
+                error=0,
+                attachments=attachments,
+            )
+        )
+
+    return result
 
 
 @router.post("/generate/unanswered")

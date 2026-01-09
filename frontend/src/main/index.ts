@@ -118,6 +118,14 @@ function registerIpcHandlers(): void {
     }
   )
 
+  ipcMain.handle('api:getActionMessages', async (_, actionId: number, limit = 15, offset = 0) => {
+    const res = await fetch(
+      `${API_BASE}/actions/${actionId}/messages?limit=${limit}&offset=${offset}`
+    )
+    if (!res.ok) throw new Error(`Failed to fetch action messages: ${res.status}`)
+    return res.json()
+  })
+
   ipcMain.handle('api:searchMessages', async (_, query: string, limit = 50) => {
     const res = await fetch(`${API_BASE}/search/?query=${encodeURIComponent(query)}&limit=${limit}`)
     if (!res.ok) throw new Error(`Failed to search messages: ${res.status}`)

@@ -1,5 +1,15 @@
-import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef } from 'react'
+import {
+  forwardRef,
+  useCallback,
+  useEffect,
+  useImperativeHandle,
+  useMemo,
+  useRef,
+  useState
+} from 'react'
 import type { ActionResponse, AttachmentResponse } from '@/api/actions'
+import { fetchActionMessages } from '@/api/actions'
+import type { MessageResponse } from '@/api/client'
 import { AttachmentDisplay } from '@/components/Attachments'
 import Avatar from '@/components/Avatar'
 import { Card, CardContent, CardFooter, CardHeader } from '@/components/ui/card'
@@ -8,11 +18,14 @@ import { renderTextWithLinks } from '@/lib/linkDetection'
 import { type MessageItem, processMessagesWithReactions } from '@/lib/reactions'
 import { cn, getInitials } from '@/lib/utils'
 
+const PAGE_SIZE = 15
+
 interface MessageResponseCardProps {
   action: ActionResponse
   responseText: string
   onResponseChange: (text: string) => void
   className?: string
+  autoFocus?: boolean
 }
 
 export interface MessageResponseCardRef {
@@ -95,9 +108,24 @@ const DeliveryStatus = ({
 }
 
 export const MessageResponseCard = forwardRef<MessageResponseCardRef, MessageResponseCardProps>(
-  function MessageResponseCard({ action, responseText, onResponseChange, className }, ref) {
+  function MessageResponseCard(
+    { action, responseText, onResponseChange, className, autoFocus = true },
+    ref
+  ) {
     const textareaRef = useRef<HTMLTextAreaElement>(null)
     const scrollContainerRef = useRef<HTMLDivElement>(null)
+
+    // Pagination state
+    const [messages, setMessages] = useState<MessageResponse[]>(action.recent_messages || [])
+    const [isLoadingMore, setIsLoadingMore] = useState(false)
+    const [hasMore, setHasMore] = useState(true)
+    const loadingRef = useRef(false) // Prevent concurrent loads
+
+    // Reset messages when action changes
+    useEffect(() => {
+      setMessages(action.recent_messages || [])
+      setHasMore(true)
+    }, [action.id, action.recent_messages])
 
     useImperativeHandle(ref, () => ({
       focusInput: () => {
@@ -106,12 +134,14 @@ export const MessageResponseCard = forwardRef<MessageResponseCardRef, MessageRes
     }))
 
     useEffect(() => {
+      if (!autoFocus) return
       const timer = setTimeout(() => {
         textareaRef.current?.focus()
       }, 300)
       return () => clearTimeout(timer)
-    }, [])
+    }, [autoFocus])
 
+    // Scroll to bottom on initial load
     useEffect(() => {
       const timer = setTimeout(() => {
         if (scrollContainerRef.current) {
@@ -119,7 +149,63 @@ export const MessageResponseCard = forwardRef<MessageResponseCardRef, MessageRes
         }
       }, 0)
       return () => clearTimeout(timer)
-    }, [action.recent_messages])
+    }, [action.id])
+
+    // Load more messages when scrolling to top
+    const loadMoreMessages = useCallback(async () => {
+      if (loadingRef.current || !hasMore || !action.id) return
+      loadingRef.current = true
+      setIsLoadingMore(true)
+
+      try {
+        const offset = messages.length
+        const olderMessages = await fetchActionMessages(action.id, PAGE_SIZE, offset)
+
+        if (olderMessages.length === 0) {
+          setHasMore(false)
+        } else {
+          // Preserve scroll position by measuring before and after
+          const container = scrollContainerRef.current
+          const previousScrollHeight = container?.scrollHeight || 0
+
+          // Merge messages, avoiding duplicates by ID
+          setMessages((prev) => {
+            const existingIds = new Set(prev.map((m) => m.id))
+            const newMessages = olderMessages.filter((m) => !existingIds.has(m.id))
+            return [...newMessages, ...prev]
+          })
+
+          // Restore scroll position after DOM updates
+          requestAnimationFrame(() => {
+            if (container) {
+              const newScrollHeight = container.scrollHeight
+              container.scrollTop = newScrollHeight - previousScrollHeight
+            }
+          })
+
+          // If we got fewer messages than requested, there are no more
+          if (olderMessages.length < PAGE_SIZE) {
+            setHasMore(false)
+          }
+        }
+      } catch (error) {
+        console.error('Failed to load more messages:', error)
+      } finally {
+        setIsLoadingMore(false)
+        loadingRef.current = false
+      }
+    }, [action.id, messages.length, hasMore])
+
+    // Handle scroll to detect when user reaches the top
+    const handleScroll = useCallback(() => {
+      const container = scrollContainerRef.current
+      if (!container || isLoadingMore || !hasMore) return
+
+      // Trigger load when scrolled near the top (within 50px)
+      if (container.scrollTop < 50) {
+        loadMoreMessages()
+      }
+    }, [isLoadingMore, hasMore, loadMoreMessages])
 
     const personName = action.person_name || action.chat_name || 'Unknown'
     const initials = getInitials(personName)
@@ -127,7 +213,7 @@ export const MessageResponseCard = forwardRef<MessageResponseCardRef, MessageRes
     // Transform and process messages, sorted chronologically (oldest first, newest at bottom)
     // Keep track of attachments separately since MessageItem doesn't include them
     const { displayMessages, reactionsByMessageId, attachmentsByMessageId } = useMemo(() => {
-      const sortedMessages = [...(action.recent_messages || [])].sort((a, b) => a.date - b.date)
+      const sortedMessages = [...messages].sort((a, b) => a.date - b.date)
 
       // Build a map of attachments by message ID before processing reactions
       const attachmentsMap = new Map<number, AttachmentResponse[]>()
@@ -137,7 +223,7 @@ export const MessageResponseCard = forwardRef<MessageResponseCardRef, MessageRes
         }
       }
 
-      const messages: MessageItem[] = sortedMessages.map((msg) => ({
+      const messageItems: MessageItem[] = sortedMessages.map((msg) => ({
         id: msg.id,
         text: msg.text,
         isSent: msg.is_from_me,
@@ -150,21 +236,21 @@ export const MessageResponseCard = forwardRef<MessageResponseCardRef, MessageRes
         error: msg.error
       }))
 
-      const processed = processMessagesWithReactions(messages)
+      const processed = processMessagesWithReactions(messageItems)
 
       return {
         displayMessages: processed.displayMessages,
         reactionsByMessageId: processed.reactionsByMessageId,
         attachmentsByMessageId: attachmentsMap
       }
-    }, [action.recent_messages])
+    }, [messages])
 
     return (
       <Card
-        className={cn('w-full h-full flex flex-col overflow-hidden gap-0 border p-0', className)}
+        className={cn('w-full h-full flex flex-col overflow-hidden gap-0 border-0 p-0', className)}
       >
         {/* Header */}
-        <CardHeader className="shrink-0 p-3">
+        <CardHeader className="shrink-0 p-4">
           <div className="flex items-center gap-x-3">
             <Avatar initials={initials} size="sm" />
             <div className="flex-1 min-w-0">
@@ -179,13 +265,26 @@ export const MessageResponseCard = forwardRef<MessageResponseCardRef, MessageRes
         </CardHeader>
 
         {/* Message Context */}
-        <CardContent className="border-t flex-1 p-0 min-h-0">
+        <CardContent className="flex-1 p-0 min-h-0">
           <div
             ref={scrollContainerRef}
+            onScroll={handleScroll}
             className="h-full overflow-y-auto [&::-webkit-scrollbar]:w-2 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:bg-border/50 [scrollbar-width:thin]"
             style={{ scrollbarColor: 'rgba(128, 128, 128, 0.5) transparent' }}
           >
             <div className="py-4 px-4 space-y-2">
+              {/* Loading indicator at the top */}
+              {isLoadingMore && (
+                <div className="flex justify-center py-2">
+                  <div className="text-xs text-muted-foreground">Loading older messages...</div>
+                </div>
+              )}
+              {/* "Beginning of conversation" indicator */}
+              {!hasMore && messages.length > 0 && (
+                <div className="flex justify-center py-2">
+                  <div className="text-xs text-muted-foreground">Beginning of conversation</div>
+                </div>
+              )}
               {displayMessages.length > 0 ? (
                 displayMessages.map((msg) => {
                   const reactions = reactionsByMessageId.get(msg.id)
@@ -244,7 +343,10 @@ export const MessageResponseCard = forwardRef<MessageResponseCardRef, MessageRes
                             />
                           )}
                           {hasText && msg.text && (
-                            <p className="whitespace-pre-wrap break-words">
+                            <p
+                              className="whitespace-pre-wrap break-words select-text"
+                              data-selectable="true"
+                            >
                               {renderTextWithLinks(msg.text, 'whitespace-pre-wrap break-words')}
                             </p>
                           )}
@@ -284,7 +386,7 @@ export const MessageResponseCard = forwardRef<MessageResponseCardRef, MessageRes
         </CardContent>
 
         {/* Response Input */}
-        <CardFooter className="p-3 bg-transparent">
+        <CardFooter className="p-4 bg-transparent" data-selectable="true">
           <Textarea
             ref={textareaRef}
             value={responseText}

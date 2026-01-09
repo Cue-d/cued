@@ -97,6 +97,17 @@ export async function swipeAction(
   return httpPost(`/actions/${actionId}/swipe`, request)
 }
 
+export async function fetchActionMessages(
+  actionId: number,
+  limit = 15,
+  offset = 0
+): Promise<MessageResponse[]> {
+  if (isElectron()) {
+    return window.api.getActionMessages(actionId, limit, offset)
+  }
+  return httpGet(`/actions/${actionId}/messages?limit=${limit}&offset=${offset}`)
+}
+
 export async function searchMessages(query: string, limit = 50): Promise<SearchResultResponse[]> {
   if (isElectron()) {
     return window.api.searchMessages(query, limit)

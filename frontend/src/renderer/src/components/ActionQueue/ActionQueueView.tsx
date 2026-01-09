@@ -1,67 +1,150 @@
-import { AlertCircle } from 'lucide-react'
-import { useCallback } from 'react'
-import type { SwipeDirection } from '@/data/types'
+import { AnimatePresence, motion } from 'motion/react'
+import { useEffect, useRef } from 'react'
 import { useActions } from '@/hooks'
-import { Empty, EmptyDescription, EmptyMedia, EmptyTitle } from '@/components/ui/empty'
+import { BadgeAlertIcon, type BadgeAlertIconHandle } from '@/components/ui/badge-alert'
+import { Button } from '@/components/ui/button'
+import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from '@/components/ui/empty'
+import { LoaderPinwheelIcon, type LoaderPinwheelIconHandle } from '@/components/ui/loader-pinwheel'
 import { CardStack } from './CardStack'
-import { Spinner } from '../ui/spinner'
+
+type ViewState = 'loading' | 'error' | 'content'
 
 export function ActionQueueView() {
   const { actions, loading, error, handleSwipe, refresh } = useActions()
 
-  // Wrap handleSwipe for CardStack
-  const onSwipe = useCallback(
-    async (
-      actionId: number,
-      direction: SwipeDirection,
-      responseText?: string,
-      snoozeMinutes?: number
-    ) => {
-      await handleSwipe(actionId, direction, responseText, snoozeMinutes)
-    },
-    [handleSwipe]
-  )
+  // Refs for animated icons
+  const loaderRef = useRef<LoaderPinwheelIconHandle>(null)
+  const alertRef = useRef<BadgeAlertIconHandle>(null)
 
-  if (loading) {
-    return (
-      <div className="w-full h-full bg-imessage-window-bg">
-        <Empty className="border-0">
-          <EmptyMedia>
-            <Spinner />
-          </EmptyMedia>
-          <EmptyTitle>Loading Actions</EmptyTitle>
-          <EmptyDescription>Getting your pending items...</EmptyDescription>
-        </Empty>
-      </div>
-    )
-  }
+  // Start loader animation when loading state is active
+  useEffect(() => {
+    if (loading) {
+      const timer = setTimeout(() => {
+        loaderRef.current?.startAnimation()
+      }, 100)
+      return () => clearTimeout(timer)
+    }
+    return undefined
+  }, [loading])
 
-  if (error) {
-    return (
-      <div className="w-full h-full bg-imessage-window-bg">
-        <Empty className="border-0">
-          <EmptyMedia variant="icon">
-            <AlertCircle className="w-6 h-6" />
-          </EmptyMedia>
-          <EmptyTitle>Something went wrong</EmptyTitle>
-          <EmptyDescription>{error}</EmptyDescription>
-          <button
-            onClick={refresh}
-            className="mt-4 px-4 py-2 bg-primary text-primary-foreground rounded-lg hover:opacity-90 transition-opacity"
-          >
-            Try Again
-          </button>
-        </Empty>
-      </div>
-    )
-  }
+  // Trigger alert animation when error state appears
+  useEffect(() => {
+    if (error) {
+      const timer = setTimeout(() => {
+        alertRef.current?.startAnimation()
+      }, 200)
+      return () => clearTimeout(timer)
+    }
+    return undefined
+  }, [error])
+
+  // Determine current view state
+  const viewState: ViewState = loading ? 'loading' : error ? 'error' : 'content'
 
   return (
-    <div className="w-full h-full flex flex-col bg-imessage-window-bg">
-      {/* Card Stack */}
-      <div className="flex-1 overflow-hidden relative">
-        <CardStack actions={actions} onSwipe={onSwipe} />
-      </div>
+    <div className="w-full h-full flex flex-col bg-imessage-window-bg overflow-hidden">
+      <AnimatePresence mode="wait">
+        {viewState === 'loading' && (
+          <motion.div
+            key="loading"
+            initial={{ opacity: 0, scale: 0.95 }}
+            animate={{ opacity: 1, scale: 1 }}
+            exit={{ opacity: 0, scale: 0.95, y: -10 }}
+            transition={{
+              type: 'spring',
+              stiffness: 300,
+              damping: 30,
+              opacity: { duration: 0.2 }
+            }}
+            className="flex-1 flex items-center justify-center"
+          >
+            <Empty className="border-0">
+              <EmptyHeader>
+                <EmptyMedia>
+                  <LoaderPinwheelIcon ref={loaderRef} size={24} />
+                </EmptyMedia>
+                <motion.div
+                  initial={{ opacity: 0, y: 10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ delay: 0.15, duration: 0.3 }}
+                >
+                  <EmptyTitle>Loading Actions</EmptyTitle>
+                </motion.div>
+                <motion.div
+                  initial={{ opacity: 0, y: 10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ delay: 0.25, duration: 0.3 }}
+                >
+                  <EmptyDescription>Getting your pending items...</EmptyDescription>
+                </motion.div>
+              </EmptyHeader>
+            </Empty>
+          </motion.div>
+        )}
+
+        {viewState === 'error' && (
+          <motion.div
+            key="error"
+            initial={{ opacity: 0, scale: 0.95 }}
+            animate={{ opacity: 1, scale: 1 }}
+            exit={{ opacity: 0, scale: 0.95, y: -10 }}
+            transition={{
+              type: 'spring',
+              stiffness: 300,
+              damping: 30,
+              opacity: { duration: 0.2 }
+            }}
+            className="flex-1 flex items-center justify-center"
+          >
+            <Empty className="border-0">
+              <EmptyMedia variant="icon">
+                <BadgeAlertIcon ref={alertRef} size={24} className="text-destructive" />
+              </EmptyMedia>
+              <motion.div
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: 0.15, duration: 0.3 }}
+              >
+                <EmptyTitle>Something went wrong</EmptyTitle>
+              </motion.div>
+              <motion.div
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: 0.25, duration: 0.3 }}
+              >
+                <EmptyDescription>{error}</EmptyDescription>
+              </motion.div>
+              <motion.div
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: 0.35, duration: 0.3 }}
+              >
+                <Button onClick={refresh} className="mt-2">
+                  Try Again
+                </Button>
+              </motion.div>
+            </Empty>
+          </motion.div>
+        )}
+
+        {viewState === 'content' && (
+          <motion.div
+            key="content"
+            initial={{ opacity: 0, scale: 0.98, y: 10 }}
+            animate={{ opacity: 1, scale: 1, y: 0 }}
+            exit={{ opacity: 0, scale: 0.98 }}
+            transition={{
+              type: 'spring',
+              stiffness: 300,
+              damping: 30,
+              opacity: { duration: 0.2 }
+            }}
+            className="flex-1 overflow-hidden relative"
+          >
+            <CardStack actions={actions} onSwipe={handleSwipe} />
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   )
 }
