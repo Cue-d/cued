@@ -274,6 +274,18 @@ def get_actions(
         raise HTTPException(status_code=500, detail=f"Response building error: {e}") from None
 
 
+@router.get("/count")
+def get_actions_count(action_type: str | None = None):
+    """Get count of pending actions (fast endpoint for UI).
+
+    Args:
+        action_type: Optional filter by action type
+    """
+    app_db = get_app_db()
+    count = app_db.get_pending_actions_count(action_type)
+    return {"count": count}
+
+
 @router.get("/{action_id}", response_model=ActionResponse)
 def get_action(action_id: int):
     """Get single action with context."""
@@ -291,33 +303,51 @@ def get_action(action_id: int):
 
 @router.post("/", response_model=ActionResponse)
 def create_action(request: CreateActionRequest):
-    """Create a new action."""
+    """Create a new action (idempotent - returns existing if duplicate)."""
     app_db = get_app_db()
     chat_db = get_chat_db()
     resolver = ContactResolver(app_db)
 
     payload_json = json.dumps(request.payload) if request.payload else None
-    action_id = app_db.create_action(
-        action_type=request.type.value,
-        priority=request.priority,
-        chat_id=request.chat_id,
-        person_id=request.person_id,
-        message_id=request.message_id,
-        payload=payload_json,
-        remind_at=request.remind_at,
-    )
+
+    # Deduplication is keyed by (chat_id, action_type). Actions without a chat_id
+    # (e.g., manual reminders, person-only actions) aren't deduplicated since they
+    # aren't tied to a specific conversation.
+    if request.chat_id is not None:
+        action_id, created = app_db.create_action_if_not_exists(
+            action_type=request.type.value,
+            chat_id=request.chat_id,
+            priority=request.priority,
+            person_id=request.person_id,
+            message_id=request.message_id,
+            payload=payload_json,
+            remind_at=request.remind_at,
+        )
+        if not created:
+            logger.info(f"Duplicate action request, returning existing action_id={action_id}")
+    else:
+        action_id = app_db.create_action(
+            action_type=request.type.value,
+            priority=request.priority,
+            chat_id=None,
+            person_id=request.person_id,
+            message_id=request.message_id,
+            payload=payload_json,
+            remind_at=request.remind_at,
+        )
+        created = True
+
     action = app_db.get_action(action_id)
     action = enrich_action_context(action, chat_db, resolver)
 
-    # Schedule desktop notification for remind_at time
-    if request.remind_at:
-        message_preview = action.message_text if action.message_text else None
+    # Schedule desktop notification for remind_at time (only for new actions)
+    if request.remind_at and created:
         schedule_action_notification(
             action_id=action_id,
             remind_at=request.remind_at,
             action_type=request.type.value,
             person_name=action.person_name,
-            message_preview=message_preview,
+            message_preview=action.message_text,
         )
 
     return action_to_response(action, chat_db, resolver)
@@ -480,8 +510,8 @@ def generate_unanswered_actions(threshold_hours: int = 24):
 
     created = 0
     for chat in unanswered:
-        # Skip if already has pending action
-        if app_db.has_pending_action_for_chat(chat["chat_id"], "respond_to_message"):
+        # Skip if already has ANY pending action
+        if app_db.has_any_pending_action_for_chat(chat["chat_id"]):
             continue
 
         # Skip if recently skipped by LLM
@@ -495,15 +525,16 @@ def generate_unanswered_actions(threshold_hours: int = 24):
             }
         )
 
-        app_db.create_action(
+        _, was_created = app_db.create_action_if_not_exists(
             action_type="respond_to_message",
-            priority=60,  # Higher than EOD contacts (50)
             chat_id=chat["chat_id"],
+            priority=60,  # Higher than EOD contacts (50)
             person_id=chat["sender_id"],
             message_id=chat["message_id"],
             payload=payload,
         )
-        created += 1
+        if was_created:
+            created += 1
 
     logger.info(f"Generated {created} unanswered message actions (threshold: {threshold_hours}h)")
     return {"success": True, "actions_created": created}

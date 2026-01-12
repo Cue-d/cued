@@ -87,6 +87,18 @@ export async function fetchActions(
   return httpGet(url)
 }
 
+export async function fetchActionsCount(actionType?: string): Promise<number> {
+  if (isElectron()) {
+    return window.api.getActionsCount(actionType)
+  }
+  let url = '/actions/count'
+  if (actionType) {
+    url += `?action_type=${actionType}`
+  }
+  const response = await httpGet<{ count: number }>(url)
+  return response.count
+}
+
 export async function swipeAction(
   actionId: number,
   request: SwipeRequest

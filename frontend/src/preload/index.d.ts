@@ -89,6 +89,7 @@ export interface Api {
   sendMessage: (chatId: number, text: string) => Promise<SendMessageResponse>
   getSyncStatus: () => Promise<SyncStatusResponse>
   getActions: (status?: string, limit?: number, actionType?: string) => Promise<ActionResponse[]>
+  getActionsCount: (actionType?: string) => Promise<number>
   swipeAction: (actionId: number, request: SwipeRequest) => Promise<ActionResponse>
   getActionMessages: (
     actionId: number,

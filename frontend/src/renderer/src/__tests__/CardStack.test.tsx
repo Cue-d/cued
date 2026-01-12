@@ -167,7 +167,7 @@ describe('CardStack', () => {
   })
 
   it('renders "All caught up" when no actions', () => {
-    render(<CardStack actions={[]} onSwipe={mockOnSwipe} />)
+    render(<CardStack actions={[]} totalCount={[].length} onSwipe={mockOnSwipe} />)
 
     expect(screen.getByText('All caught up!')).toBeInTheDocument()
     expect(screen.getByText(/You can exhale now/)).toBeInTheDocument()
@@ -175,7 +175,7 @@ describe('CardStack', () => {
 
   it('renders visible cards (up to 3)', () => {
     const actions = [mockMessageAction, mockEODAction]
-    render(<CardStack actions={actions} onSwipe={mockOnSwipe} />)
+    render(<CardStack actions={actions} totalCount={actions.length} onSwipe={mockOnSwipe} />)
 
     expect(screen.getAllByTestId('swipeable-card')).toHaveLength(1) // Only top card is swipeable
     expect(screen.getByTestId('message-response-card')).toBeInTheDocument()
@@ -183,13 +183,19 @@ describe('CardStack', () => {
 
   it('displays correct remaining count', () => {
     const actions = [mockMessageAction, mockEODAction]
-    render(<CardStack actions={actions} onSwipe={mockOnSwipe} />)
+    render(<CardStack actions={actions} totalCount={actions.length} onSwipe={mockOnSwipe} />)
 
     expect(screen.getByText('2 Left')).toBeInTheDocument()
   })
 
   it('calls onSwipe with response text for right swipe on message action', async () => {
-    render(<CardStack actions={[mockMessageAction]} onSwipe={mockOnSwipe} />)
+    render(
+      <CardStack
+        actions={[mockMessageAction]}
+        totalCount={[mockMessageAction].length}
+        onSwipe={mockOnSwipe}
+      />
+    )
 
     const textarea = screen.getByTestId('response-textarea')
     fireEvent.change(textarea, { target: { value: 'My response' } })
@@ -203,7 +209,13 @@ describe('CardStack', () => {
   })
 
   it('calls onSwipe with snooze minutes for up swipe', async () => {
-    render(<CardStack actions={[mockMessageAction]} onSwipe={mockOnSwipe} />)
+    render(
+      <CardStack
+        actions={[mockMessageAction]}
+        totalCount={[mockMessageAction].length}
+        onSwipe={mockOnSwipe}
+      />
+    )
 
     const swipeUpButton = screen.getByText('Swipe Up')
     fireEvent.click(swipeUpButton)
@@ -214,7 +226,13 @@ describe('CardStack', () => {
   })
 
   it('calls onSwipe without response text for left swipe', async () => {
-    render(<CardStack actions={[mockMessageAction]} onSwipe={mockOnSwipe} />)
+    render(
+      <CardStack
+        actions={[mockMessageAction]}
+        totalCount={[mockMessageAction].length}
+        onSwipe={mockOnSwipe}
+      />
+    )
 
     const swipeLeftButton = screen.getByText('Swipe Left')
     fireEvent.click(swipeLeftButton)
@@ -225,21 +243,39 @@ describe('CardStack', () => {
   })
 
   it('renders EODContactCard for eod_contact action type', () => {
-    render(<CardStack actions={[mockEODAction]} onSwipe={mockOnSwipe} />)
+    render(
+      <CardStack
+        actions={[mockEODAction]}
+        totalCount={[mockEODAction].length}
+        onSwipe={mockOnSwipe}
+      />
+    )
 
     expect(screen.getByTestId('eod-contact-card')).toBeInTheDocument()
     expect(screen.getByText('Person: Jordan Lee')).toBeInTheDocument()
   })
 
   it('renders MessageResponseCard for respond_to_message action type', () => {
-    render(<CardStack actions={[mockMessageAction]} onSwipe={mockOnSwipe} />)
+    render(
+      <CardStack
+        actions={[mockMessageAction]}
+        totalCount={[mockMessageAction].length}
+        onSwipe={mockOnSwipe}
+      />
+    )
 
     expect(screen.getByTestId('message-response-card')).toBeInTheDocument()
     expect(screen.getByText('Message: Test message')).toBeInTheDocument()
   })
 
   it('calls addContactContext on right swipe for EOD contact with notes', async () => {
-    render(<CardStack actions={[mockEODAction]} onSwipe={mockOnSwipe} />)
+    render(
+      <CardStack
+        actions={[mockEODAction]}
+        totalCount={[mockEODAction].length}
+        onSwipe={mockOnSwipe}
+      />
+    )
 
     const notesTextarea = screen.getByTestId('contact-notes')
     fireEvent.change(notesTextarea, { target: { value: 'Met at conference' } })
@@ -254,7 +290,13 @@ describe('CardStack', () => {
   })
 
   it('keyboard shortcuts (ArrowLeft/ArrowRight) trigger swipe', async () => {
-    const { container } = render(<CardStack actions={[mockMessageAction]} onSwipe={mockOnSwipe} />)
+    const { container } = render(
+      <CardStack
+        actions={[mockMessageAction]}
+        totalCount={[mockMessageAction].length}
+        onSwipe={mockOnSwipe}
+      />
+    )
 
     // The container div with tabIndex={0} handles keyboard events
     const focusableContainer = container.querySelector('[tabindex="0"]')!
@@ -274,7 +316,13 @@ describe('CardStack', () => {
   })
 
   it('does not trigger keyboard shortcuts when typing in input', () => {
-    render(<CardStack actions={[mockMessageAction]} onSwipe={mockOnSwipe} />)
+    render(
+      <CardStack
+        actions={[mockMessageAction]}
+        totalCount={[mockMessageAction].length}
+        onSwipe={mockOnSwipe}
+      />
+    )
 
     const textarea = screen.getByTestId('response-textarea')
     // Focus the textarea and fire a keyDown event on it
@@ -289,7 +337,13 @@ describe('CardStack', () => {
   it('disables buttons when processing', async () => {
     const slowOnSwipe = vi.fn().mockImplementation(() => new Promise(() => {})) // Never resolves
 
-    render(<CardStack actions={[mockMessageAction]} onSwipe={slowOnSwipe} />)
+    render(
+      <CardStack
+        actions={[mockMessageAction]}
+        totalCount={[mockMessageAction].length}
+        onSwipe={slowOnSwipe}
+      />
+    )
 
     const swipeRightButton = screen.getByText('Swipe Right')
     fireEvent.click(swipeRightButton)
@@ -308,7 +362,13 @@ describe('CardStack', () => {
   })
 
   it('handles button clicks to trigger swipe', async () => {
-    render(<CardStack actions={[mockMessageAction]} onSwipe={mockOnSwipe} />)
+    render(
+      <CardStack
+        actions={[mockMessageAction]}
+        totalCount={[mockMessageAction].length}
+        onSwipe={mockOnSwipe}
+      />
+    )
 
     const sendButton = screen.getByRole('button', { name: 'Send' })
     fireEvent.click(sendButton)
@@ -319,7 +379,7 @@ describe('CardStack', () => {
   })
 
   it('does not trigger swipe when no actions', () => {
-    render(<CardStack actions={[]} onSwipe={mockOnSwipe} />)
+    render(<CardStack actions={[]} totalCount={[].length} onSwipe={mockOnSwipe} />)
 
     fireEvent.keyDown(window, { key: 'ArrowLeft' })
 

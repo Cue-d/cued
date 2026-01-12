@@ -10,7 +10,7 @@ import { CardStack } from './CardStack'
 type ViewState = 'loading' | 'error' | 'content'
 
 export function ActionQueueView() {
-  const { actions, loading, error, handleSwipe, refresh } = useActions()
+  const { actions, totalCount, loading, error, handleSwipe, refresh } = useActions()
 
   // Refs for animated icons
   const loaderRef = useRef<LoaderPinwheelIconHandle>(null)
@@ -18,24 +18,20 @@ export function ActionQueueView() {
 
   // Start loader animation when loading state is active
   useEffect(() => {
-    if (loading) {
-      const timer = setTimeout(() => {
-        loaderRef.current?.startAnimation()
-      }, 100)
-      return () => clearTimeout(timer)
-    }
-    return undefined
+    if (!loading) return
+    const timer = setTimeout(() => {
+      loaderRef.current?.startAnimation()
+    }, 100)
+    return () => clearTimeout(timer)
   }, [loading])
 
   // Trigger alert animation when error state appears
   useEffect(() => {
-    if (error) {
-      const timer = setTimeout(() => {
-        alertRef.current?.startAnimation()
-      }, 200)
-      return () => clearTimeout(timer)
-    }
-    return undefined
+    if (!error) return
+    const timer = setTimeout(() => {
+      alertRef.current?.startAnimation()
+    }, 200)
+    return () => clearTimeout(timer)
   }, [error])
 
   // Determine current view state
@@ -141,7 +137,7 @@ export function ActionQueueView() {
             }}
             className="flex-1 overflow-hidden relative"
           >
-            <CardStack actions={actions} onSwipe={handleSwipe} />
+            <CardStack actions={actions} totalCount={totalCount} onSwipe={handleSwipe} />
           </motion.div>
         )}
       </AnimatePresence>

@@ -270,6 +270,22 @@ class ChatDb:
     # ATTACHMENT QUERIES
     # =========================================================================
 
+    def _attachment_row_to_dict(self, row, message_id: int | None = None) -> dict:
+        """Convert an attachment row to a dict."""
+        result = {
+            "id": row["id"],
+            "filename": row["filename"],
+            "path": row["filename"],  # filename contains full path
+            "mime_type": row["mime_type"],
+            "uti": row["uti"],
+            "size": row["size"],
+            "is_outgoing": bool(row["is_outgoing"]),
+            "created_at": apple_to_unix(row["created_date"]),
+        }
+        if message_id is not None:
+            result["message_id"] = message_id
+        return result
+
     def get_message_attachments(self, message_id: int) -> list[dict]:
         """Get attachments for a message."""
         with self._lock:
@@ -290,20 +306,30 @@ class ChatDb:
                 """,
                 (message_id,),
             )
-            return [
-                {
-                    "id": row["id"],
-                    "message_id": row["message_id"],
-                    "filename": row["filename"],
-                    "path": row["filename"],  # Use filename as path
-                    "mime_type": row["mime_type"],
-                    "uti": row["uti"],
-                    "size": row["size"],
-                    "is_outgoing": bool(row["is_outgoing"]),
-                    "created_at": apple_to_unix(row["created_date"]),
-                }
-                for row in cursor
-            ]
+            return [self._attachment_row_to_dict(row, row["message_id"]) for row in cursor]
+
+    def get_attachment(self, attachment_id: int) -> dict | None:
+        """Get a single attachment by ID."""
+        with self._lock:
+            cursor = self.conn.execute(
+                """
+                SELECT
+                    a.ROWID as id,
+                    a.filename,
+                    a.mime_type,
+                    a.uti,
+                    a.total_bytes as size,
+                    a.is_outgoing,
+                    a.created_date
+                FROM attachment a
+                WHERE a.ROWID = ?
+                """,
+                (attachment_id,),
+            )
+            row = cursor.fetchone()
+            if not row:
+                return None
+            return self._attachment_row_to_dict(row)
 
     # =========================================================================
     # SYNC SUPPORT QUERIES

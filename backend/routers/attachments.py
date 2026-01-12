@@ -5,7 +5,7 @@ import os
 from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import FileResponse
 
-from deps import get_app_db
+from deps import get_chat_db
 from services.attachments import AttachmentService, is_image_mime_type
 
 router = APIRouter()
@@ -23,27 +23,27 @@ def get_attachment_service() -> AttachmentService:
 @router.get("/{attachment_id}/file")
 def get_attachment_file(attachment_id: int):
     """Serve an attachment file from ~/Library/Messages/Attachments/."""
-    db = get_app_db()
-    attachment = db.get_attachment(attachment_id)
+    chat_db = get_chat_db()
+    attachment = chat_db.get_attachment(attachment_id)
 
     if not attachment:
         raise HTTPException(status_code=404, detail="Attachment not found")
 
     service = get_attachment_service()
-    file_path = service.resolve_path(attachment.path)
+    file_path = service.resolve_path(attachment["path"])
 
     if not file_path:
-        if not attachment.path:
+        if not attachment["path"]:
             raise HTTPException(status_code=404, detail="Attachment path not available")
         raise HTTPException(status_code=404, detail="Attachment file not found on disk")
 
     # Determine media type
-    media_type = attachment.mime_type or "application/octet-stream"
+    media_type = attachment["mime_type"] or "application/octet-stream"
 
     return FileResponse(
         file_path,
         media_type=media_type,
-        filename=attachment.filename or os.path.basename(file_path),
+        filename=attachment["filename"] or os.path.basename(file_path),
     )
 
 
@@ -53,21 +53,21 @@ def get_attachment_thumbnail(attachment_id: int, size: int = Query(300, ge=50, l
 
     Thumbnails are cached in ~/.prm/thumbnails/ to avoid regenerating on each request.
     """
-    db = get_app_db()
-    attachment = db.get_attachment(attachment_id)
+    chat_db = get_chat_db()
+    attachment = chat_db.get_attachment(attachment_id)
 
     if not attachment:
         raise HTTPException(status_code=404, detail="Attachment not found")
 
     # Check if it's an image
-    if not is_image_mime_type(attachment.mime_type):
+    if not is_image_mime_type(attachment["mime_type"]):
         raise HTTPException(status_code=400, detail="Attachment is not an image")
 
     service = get_attachment_service()
-    file_path = service.resolve_path(attachment.path)
+    file_path = service.resolve_path(attachment["path"])
 
     if not file_path:
-        if not attachment.path:
+        if not attachment["path"]:
             raise HTTPException(status_code=404, detail="Attachment path not available")
         raise HTTPException(status_code=404, detail="Attachment file not found on disk")
 
@@ -84,6 +84,6 @@ def get_attachment_thumbnail(attachment_id: int, size: int = Query(300, ge=50, l
         return FileResponse(thumbnail_path, media_type="image/jpeg")
     except ImportError:
         # PIL not available, serve original file
-        return FileResponse(file_path, media_type=attachment.mime_type or "image/jpeg")
+        return FileResponse(file_path, media_type=attachment["mime_type"] or "image/jpeg")
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to generate thumbnail: {e}") from e

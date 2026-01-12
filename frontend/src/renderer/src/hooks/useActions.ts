@@ -1,7 +1,11 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useState, useRef } from 'react'
 import type { ActionResponse } from '@/api/actions'
-import { fetchActions, swipeAction } from '@/api/actions'
+import { fetchActions, fetchActionsCount, swipeAction } from '@/api/actions'
 import type { SwipeDirection } from '@/data/types'
+
+// Constants for pagination
+const PAGE_SIZE = 50
+const LOAD_MORE_THRESHOLD = 10 // Load more when less than this many actions left
 
 // Check if mock mode is enabled via environment variable
 const USE_MOCK_DATA = import.meta.env.VITE_USE_MOCK_DATA === 'true'
@@ -161,31 +165,89 @@ const MOCK_ACTIONS: ActionResponse[] = [
 
 export function useActions(actionType?: string) {
   const [actions, setActions] = useState<ActionResponse[]>([])
+  const [totalCount, setTotalCount] = useState(0)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const loadedIdsRef = useRef<Set<number>>(new Set())
+  const isLoadingMoreRef = useRef(false)
 
-  const loadActions = useCallback(async () => {
+  // Load total count (fast endpoint)
+  const loadCount = useCallback(async () => {
     try {
-      setLoading(true)
-      setError(null)
-      const data = await fetchActions('pending', 50, actionType)
-      // Only use mock data when explicitly enabled and no real data exists
-      setActions(USE_MOCK_DATA && data.length === 0 ? MOCK_ACTIONS : data)
+      const count = await fetchActionsCount(actionType)
+      setTotalCount(count)
     } catch (err) {
-      if (USE_MOCK_DATA) {
-        // Fallback to mock data when backend is unavailable (dev mode only)
-        setActions(MOCK_ACTIONS)
-      } else {
-        setError(err instanceof Error ? err.message : 'Failed to load actions')
-      }
-    } finally {
-      setLoading(false)
+      console.error('[useActions] Failed to load count:', err)
     }
   }, [actionType])
 
+  // Load a batch of actions
+  const loadActions = useCallback(
+    async (append = false) => {
+      if (isLoadingMoreRef.current && append) return
+
+      if (!append) {
+        setLoading(true)
+        loadedIdsRef.current.clear()
+      } else {
+        isLoadingMoreRef.current = true
+      }
+      setError(null)
+
+      try {
+        const data = await fetchActions('pending', PAGE_SIZE, actionType)
+
+        if (USE_MOCK_DATA && data.length === 0) {
+          setActions(MOCK_ACTIONS)
+        } else if (append) {
+          // Filter out already loaded actions to avoid duplicates
+          const newActions = data.filter((a) => !loadedIdsRef.current.has(a.id))
+          newActions.forEach((a) => loadedIdsRef.current.add(a.id))
+          setActions((prev) => [...prev, ...newActions])
+        } else {
+          setActions(data)
+          data.forEach((a) => loadedIdsRef.current.add(a.id))
+        }
+      } catch (err) {
+        if (USE_MOCK_DATA) {
+          setActions(MOCK_ACTIONS)
+        } else {
+          setError(err instanceof Error ? err.message : 'Failed to load actions')
+        }
+      } finally {
+        setLoading(false)
+        isLoadingMoreRef.current = false
+      }
+    },
+    [actionType]
+  )
+
+  // Initial load
   useEffect(() => {
     loadActions()
-  }, [loadActions])
+    loadCount()
+  }, [loadActions, loadCount])
+
+  // Load more when running low (only if we haven't already tried)
+  const hasTriedLoadMore = useRef(false)
+  useEffect(() => {
+    if (
+      actions.length > 0 &&
+      actions.length < LOAD_MORE_THRESHOLD &&
+      totalCount > actions.length &&
+      !hasTriedLoadMore.current
+    ) {
+      hasTriedLoadMore.current = true
+      loadActions(true)
+    }
+  }, [actions.length, totalCount, loadActions])
+
+  // Reset load more flag when actions are refreshed
+  useEffect(() => {
+    if (actions.length >= LOAD_MORE_THRESHOLD || actions.length === 0) {
+      hasTriedLoadMore.current = false
+    }
+  }, [actions.length])
 
   const handleSwipe = useCallback(
     async (
@@ -196,28 +258,36 @@ export function useActions(actionType?: string) {
     ) => {
       try {
         await swipeAction(actionId, direction, responseText, snoozeMinutes)
-        // Remove the swiped action from the list
+        // Remove the swiped action from the list and update count
         setActions((prev) => prev.filter((a) => a.id !== actionId))
+        setTotalCount((prev) => Math.max(0, prev - 1))
+        loadedIdsRef.current.delete(actionId)
       } catch (err) {
         // If backend fails, still remove the action locally (mock mode)
         setActions((prev) => prev.filter((a) => a.id !== actionId))
-        // setError(err instanceof Error ? err.message : 'Failed to process swipe')
+        setTotalCount((prev) => Math.max(0, prev - 1))
+        loadedIdsRef.current.delete(actionId)
         console.error('[useActions] Failed to process swipe:', err)
       }
     },
     []
   )
 
+  const refresh = useCallback(async () => {
+    loadedIdsRef.current.clear()
+    await Promise.all([loadActions(), loadCount()])
+  }, [loadActions, loadCount])
+
   const currentAction = actions[0] || null
-  const remainingCount = actions.length
 
   return {
     actions,
     currentAction,
-    remainingCount,
+    totalCount,
+    remainingCount: totalCount, // Alias for backwards compatibility
     loading,
     error,
     handleSwipe,
-    refresh: loadActions
+    refresh
   }
 }

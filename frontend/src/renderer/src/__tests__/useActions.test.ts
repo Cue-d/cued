@@ -6,10 +6,12 @@ import type { ActionResponse } from '@/api/actions'
 
 vi.mock('@/api/actions', () => ({
   fetchActions: vi.fn(),
+  fetchActionsCount: vi.fn(),
   swipeAction: vi.fn()
 }))
 
 const mockFetchActions = vi.mocked(actionsApi.fetchActions)
+const mockFetchActionsCount = vi.mocked(actionsApi.fetchActionsCount)
 const mockSwipeAction = vi.mocked(actionsApi.swipeAction)
 
 const mockAction1: ActionResponse = {
@@ -58,7 +60,10 @@ describe('useActions', () => {
   beforeEach(() => {
     vi.useFakeTimers()
     mockFetchActions.mockReset()
+    mockFetchActionsCount.mockReset()
     mockSwipeAction.mockReset()
+    // Default count mock - returns 0 unless overridden
+    mockFetchActionsCount.mockResolvedValue(0)
   })
 
   afterEach(() => {
@@ -79,6 +84,7 @@ describe('useActions', () => {
 
   it('fetches actions on mount', async () => {
     mockFetchActions.mockResolvedValue([mockAction1, mockAction2])
+    mockFetchActionsCount.mockResolvedValue(2)
 
     const { result } = renderHook(() => useActions())
 
@@ -92,11 +98,12 @@ describe('useActions', () => {
     expect(result.current.loading).toBe(false)
     expect(result.current.actions).toEqual([mockAction1, mockAction2])
     expect(result.current.currentAction).toEqual(mockAction1)
-    expect(result.current.remainingCount).toBe(2)
+    expect(result.current.totalCount).toBe(2)
   })
 
   it('falls back to mock data when API fails', async () => {
     mockFetchActions.mockRejectedValue(new Error('Network error'))
+    mockFetchActionsCount.mockRejectedValue(new Error('Network error'))
 
     const { result } = renderHook(() => useActions())
 
@@ -108,11 +115,13 @@ describe('useActions', () => {
     expect(result.current.loading).toBe(false)
     expect(result.current.actions.length).toBeGreaterThan(0)
     expect(result.current.currentAction).not.toBeNull()
-    expect(result.current.remainingCount).toBeGreaterThan(0)
+    // Mock data fallback doesn't set totalCount, so check actions.length
+    expect(result.current.actions.length).toBeGreaterThan(0)
   })
 
   it('falls back to mock data when API returns empty array', async () => {
     mockFetchActions.mockResolvedValue([])
+    mockFetchActionsCount.mockResolvedValue(0)
 
     const { result } = renderHook(() => useActions())
 
@@ -124,11 +133,13 @@ describe('useActions', () => {
     expect(result.current.loading).toBe(false)
     expect(result.current.actions.length).toBeGreaterThan(0)
     expect(result.current.currentAction).not.toBeNull()
-    expect(result.current.remainingCount).toBeGreaterThan(0)
+    // Mock data fallback doesn't set totalCount, so check actions.length
+    expect(result.current.actions.length).toBeGreaterThan(0)
   })
 
   it('handleSwipe removes action from list on success', async () => {
     mockFetchActions.mockResolvedValue([mockAction1, mockAction2])
+    mockFetchActionsCount.mockResolvedValue(2)
     mockSwipeAction.mockResolvedValue(mockAction1)
 
     const { result } = renderHook(() => useActions())
@@ -138,7 +149,7 @@ describe('useActions', () => {
       await vi.advanceTimersByTimeAsync(0)
     })
 
-    expect(result.current.remainingCount).toBe(2)
+    expect(result.current.totalCount).toBe(2)
 
     // Swipe the first action
     await act(async () => {
@@ -146,13 +157,14 @@ describe('useActions', () => {
     })
 
     expect(mockSwipeAction).toHaveBeenCalledWith(1, 'right', 'Response text', undefined)
-    expect(result.current.remainingCount).toBe(1)
+    expect(result.current.totalCount).toBe(1)
     expect(result.current.actions).toEqual([mockAction2])
     expect(result.current.currentAction).toEqual(mockAction2)
   })
 
   it('handleSwipe removes action from list even on API failure (mock mode)', async () => {
     mockFetchActions.mockResolvedValue([mockAction1, mockAction2])
+    mockFetchActionsCount.mockResolvedValue(2)
     mockSwipeAction.mockRejectedValue(new Error('API error'))
 
     const { result } = renderHook(() => useActions())
@@ -162,7 +174,7 @@ describe('useActions', () => {
       await vi.advanceTimersByTimeAsync(0)
     })
 
-    expect(result.current.remainingCount).toBe(2)
+    expect(result.current.totalCount).toBe(2)
 
     // Swipe the first action (should still remove it locally)
     await act(async () => {
@@ -170,7 +182,7 @@ describe('useActions', () => {
     })
 
     expect(mockSwipeAction).toHaveBeenCalledWith(1, 'left', undefined, undefined)
-    expect(result.current.remainingCount).toBe(1)
+    expect(result.current.totalCount).toBe(1)
     expect(result.current.actions).toEqual([mockAction2])
     expect(result.current.currentAction).toEqual(mockAction2)
   })
@@ -229,8 +241,9 @@ describe('useActions', () => {
     expect(result.current.remainingCount).toBe(0)
   })
 
-  it('remainingCount reflects action array length', async () => {
+  it('remainingCount reflects totalCount from count endpoint', async () => {
     mockFetchActions.mockResolvedValue([mockAction1, mockAction2])
+    mockFetchActionsCount.mockResolvedValue(100) // Total count is more than loaded
 
     const { result } = renderHook(() => useActions())
 
@@ -239,8 +252,10 @@ describe('useActions', () => {
       await vi.advanceTimersByTimeAsync(0)
     })
 
-    expect(result.current.remainingCount).toBe(2)
-    expect(result.current.remainingCount).toBe(result.current.actions.length)
+    // remainingCount should be totalCount (100), not actions.length (2)
+    expect(result.current.totalCount).toBe(100)
+    expect(result.current.remainingCount).toBe(100)
+    expect(result.current.actions.length).toBe(2)
   })
 
   it('refresh triggers reload of actions', async () => {

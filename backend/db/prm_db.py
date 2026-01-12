@@ -25,6 +25,10 @@ from .models import (
     QueuedAnalysis,
 )
 
+# Recently discarded actions within this window are treated as "existing" for deduplication.
+# This prevents re-creating an action the user just dismissed.
+DISCARDED_DEDUP_WINDOW_SECONDS = 86400  # 24 hours
+
 
 class AppDb:
     """App database wrapper for prm.db."""
@@ -391,6 +395,30 @@ class AppDb:
                 for row in result
             ]
 
+    def get_pending_actions_count(self, action_type: str | None = None) -> int:
+        """Get count of pending actions (fast, no enrichment)."""
+        with self.session() as session:
+            if action_type:
+                result = session.execute(
+                    text("""
+                        SELECT COUNT(*) FROM actions
+                        WHERE (status = 'pending'
+                               OR (status = 'snoozed' AND snoozed_until <= :now))
+                          AND type = :type
+                    """),
+                    {"now": self._now_timestamp(), "type": action_type},
+                )
+            else:
+                result = session.execute(
+                    text("""
+                        SELECT COUNT(*) FROM actions
+                        WHERE status = 'pending'
+                           OR (status = 'snoozed' AND snoozed_until <= :now)
+                    """),
+                    {"now": self._now_timestamp()},
+                )
+            return result.fetchone()[0]
+
     def get_action(self, action_id: int) -> ActionWithContext | None:
         """Get single action (context must be joined from ChatDb by caller)."""
         with self.session() as session:
@@ -462,6 +490,7 @@ class AppDb:
     def has_pending_action_for_chat(self, chat_id: int, action_type: str) -> bool:
         """Check if chat already has a pending action of given type."""
         now = self._now_timestamp()
+        cutoff = now - DISCARDED_DEDUP_WINDOW_SECONDS
         with self.session() as session:
             result = session.execute(
                 text("""
@@ -472,9 +501,101 @@ class AppDb:
                            OR (status = 'discarded' AND discarded_at > :cutoff))
                     LIMIT 1
                 """),
-                {"chat_id": chat_id, "type": action_type, "cutoff": now - 86400},
+                {"chat_id": chat_id, "type": action_type, "cutoff": cutoff},
             )
             return result.fetchone() is not None
+
+    def _get_pending_action_for_chat(
+        self, chat_id: int, action_type: str
+    ) -> ActionWithContext | None:
+        """Get existing pending/snoozed action for chat+type."""
+        now = self._now_timestamp()
+        cutoff = now - DISCARDED_DEDUP_WINDOW_SECONDS
+        with self.session() as session:
+            result = session.execute(
+                text("""
+                    SELECT id, type, status, priority, chat_id, person_id,
+                           message_id, payload, created_at, remind_at,
+                           snoozed_until, completed_at, discarded_at
+                    FROM actions
+                    WHERE chat_id = :chat_id
+                      AND type = :type
+                      AND (status IN ('pending', 'snoozed')
+                           OR (status = 'discarded' AND discarded_at > :cutoff))
+                    LIMIT 1
+                """),
+                {"chat_id": chat_id, "type": action_type, "cutoff": cutoff},
+            )
+            row = result.fetchone()
+            if not row:
+                return None
+            return ActionWithContext(
+                id=row[0],
+                type=row[1],
+                status=row[2],
+                priority=row[3],
+                chat_id=row[4],
+                person_id=row[5],
+                message_id=row[6],
+                payload=row[7],
+                created_at=row[8],
+                remind_at=row[9],
+                snoozed_until=row[10],
+                completed_at=row[11],
+                discarded_at=row[12],
+                chat_name=None,
+                person_name=None,
+                message_text=None,
+                message_timestamp=None,
+            )
+
+    def has_any_pending_action_for_chat(self, chat_id: int) -> bool:
+        """Check if chat has ANY pending/snoozed action (regardless of type)."""
+        now = self._now_timestamp()
+        with self.session() as session:
+            result = session.execute(
+                text("""
+                    SELECT 1 FROM actions
+                    WHERE chat_id = :chat_id
+                      AND (status IN ('pending', 'snoozed')
+                           OR (status = 'discarded' AND discarded_at > :cutoff))
+                    LIMIT 1
+                """),
+                {"chat_id": chat_id, "cutoff": now - DISCARDED_DEDUP_WINDOW_SECONDS},
+            )
+            return result.fetchone() is not None
+
+    def create_action_if_not_exists(
+        self,
+        action_type: str,
+        chat_id: int,
+        priority: int = 50,
+        person_id: int | None = None,
+        message_id: int | None = None,
+        payload: str | None = None,
+        remind_at: int | None = None,
+    ) -> tuple[int | None, bool]:
+        """Create action if no pending/snoozed action of same type exists for chat.
+
+        Returns:
+            (action_id, created) - action_id is new or existing, created is True if new.
+        """
+        # Single query to check for existing action
+        existing = self._get_pending_action_for_chat(chat_id, action_type)
+        if existing:
+            return (existing.id, False)
+
+        # Create new action
+        action_id = self.create_action(
+            action_type=action_type,
+            chat_id=chat_id,
+            priority=priority,
+            person_id=person_id,
+            message_id=message_id,
+            payload=payload,
+            remind_at=remind_at,
+        )
+        return (action_id, True)
 
     # =========================================================================
     # LLM ANALYSIS QUEUE

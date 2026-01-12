@@ -37,8 +37,8 @@ def run_unanswered_scan(chat_db, app_db, threshold_hours: int = UNANSWERED_THRES
     skipped_count = 0
 
     for chat in unanswered_chats:
-        # Skip if already has pending action
-        if app_db.has_pending_action_for_chat(chat["chat_id"], "respond_to_message"):
+        # Skip if already has ANY pending action (regardless of type)
+        if app_db.has_any_pending_action_for_chat(chat["chat_id"]):
             continue
 
         # Skip if recently skipped by LLM

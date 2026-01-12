@@ -11,6 +11,7 @@ const api = {
   getSyncStatus: () => ipcRenderer.invoke('api:getSyncStatus'),
   getActions: (status?: string, limit?: number, actionType?: string) =>
     ipcRenderer.invoke('api:getActions', status, limit, actionType),
+  getActionsCount: (actionType?: string) => ipcRenderer.invoke('api:getActionsCount', actionType),
   swipeAction: (actionId: number, request: SwipeRequest) =>
     ipcRenderer.invoke('api:swipeAction', actionId, request),
   getActionMessages: (actionId: number, limit?: number, offset?: number) =>

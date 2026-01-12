@@ -7,6 +7,7 @@ Schedule: Every 10 seconds
 """
 
 import logging
+import time
 
 from services.actions.llm_client import (
     ContentSafetyError,
@@ -66,8 +67,6 @@ def run_llm_processor(chat_db, app_db) -> None:
     latest_msg = messages[0] if messages else None
     hours_since = 0.0
     if latest_msg and latest_msg.timestamp:
-        import time
-
         hours_since = (time.time() - latest_msg.timestamp) / 3600
 
     # Build conversation context
@@ -101,16 +100,25 @@ def run_llm_processor(chat_db, app_db) -> None:
             logger.info(f"[llm_processor] No action needed for chat_id={chat_id}")
             return
 
-        # Create action from suggestion
-        action_id = app_db.create_action(
+        # Create action from suggestion (with deduplication check)
+        action_id, created = app_db.create_action_if_not_exists(
             action_type=suggestion.action_type,
-            priority=suggestion.priority,
             chat_id=chat_id,
+            priority=suggestion.priority,
             person_id=None,  # TODO: Get person_id if available
             message_id=latest_msg.id if latest_msg else None,
             payload=suggestion.reason,
             remind_at=suggestion.remind_at,
         )
+
+        if not created:
+            app_db.mark_analysis_complete(chat_id, "duplicate_action")
+            logger.info(
+                f"[llm_processor] Duplicate action skipped: "
+                f"type={suggestion.action_type} chat_id={chat_id} "
+                f"existing_action_id={action_id}"
+            )
+            return
 
         app_db.mark_analysis_complete(chat_id, "action_created")
         logger.info(
@@ -119,7 +127,7 @@ def run_llm_processor(chat_db, app_db) -> None:
         )
 
         # Schedule desktop notification if remind_at is set
-        if suggestion.remind_at:
+        if suggestion.remind_at and action_id:
             message_preview = latest_msg.text if latest_msg else None
             schedule_action_notification(
                 action_id=action_id,

@@ -97,6 +97,17 @@ function registerIpcHandlers(): void {
     }
   )
 
+  ipcMain.handle('api:getActionsCount', async (_, actionType?: string) => {
+    let url = `${API_BASE}/actions/count`
+    if (actionType) {
+      url += `?action_type=${actionType}`
+    }
+    const res = await fetch(url)
+    if (!res.ok) throw new Error(`Failed to fetch actions count: ${res.status}`)
+    const data = await res.json()
+    return data.count
+  })
+
   ipcMain.handle(
     'api:swipeAction',
     async (

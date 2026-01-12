@@ -1,6 +1,7 @@
 import type { SwipeDirection } from '../data/types'
 import {
   fetchActions as clientFetchActions,
+  fetchActionsCount as clientFetchActionsCount,
   swipeAction as clientSwipeAction,
   fetchActionMessages as clientFetchActionMessages,
   searchMessages as clientSearchMessages,
@@ -13,6 +14,10 @@ export type { AttachmentResponse } from './client'
 
 export async function fetchActions(status = 'pending', limit = 50, actionType?: string) {
   return clientFetchActions(status, limit, actionType)
+}
+
+export async function fetchActionsCount(actionType?: string) {
+  return clientFetchActionsCount(actionType)
 }
 
 export async function swipeAction(

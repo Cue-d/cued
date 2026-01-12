@@ -13,6 +13,7 @@ import { Button } from '../ui/button'
 
 interface CardStackProps {
   actions: ActionResponse[]
+  totalCount: number
   onSwipe: (
     actionId: number,
     direction: SwipeDirection,
@@ -23,7 +24,7 @@ interface CardStackProps {
 
 const VISIBLE_CARDS = 3
 
-export function CardStack({ actions, onSwipe }: CardStackProps) {
+export function CardStack({ actions, totalCount, onSwipe }: CardStackProps) {
   // State for the current card's input
   const [responseTexts, setResponseTexts] = useState<Record<number, string>>({})
   const [contactForms, setContactForms] = useState<Record<number, ContactFormData>>({})
@@ -130,14 +131,11 @@ export function CardStack({ actions, onSwipe }: CardStackProps) {
 
   // Reset triggerSwipe after it's been processed
   useEffect(() => {
-    if (triggerSwipe) {
-      // Reset quickly to allow next swipe
-      const timer = setTimeout(() => {
-        setTriggerSwipe(null)
-      }, 300)
-      return () => clearTimeout(timer)
-    }
-    return undefined
+    if (!triggerSwipe) return
+    const timer = setTimeout(() => {
+      setTriggerSwipe(null)
+    }, 300)
+    return () => clearTimeout(timer)
   }, [triggerSwipe])
 
   // Handle keyboard navigation on the container
@@ -191,13 +189,11 @@ export function CardStack({ actions, onSwipe }: CardStackProps) {
 
   // Trigger party popper animation when empty state mounts
   useEffect(() => {
-    if (actions.length === 0) {
-      const timer = setTimeout(() => {
-        partyPopperRef.current?.startAnimation()
-      }, 200)
-      return () => clearTimeout(timer)
-    }
-    return undefined
+    if (actions.length > 0) return
+    const timer = setTimeout(() => {
+      partyPopperRef.current?.startAnimation()
+    }, 200)
+    return () => clearTimeout(timer)
   }, [actions.length])
 
   if (actions.length === 0) {
@@ -249,7 +245,7 @@ export function CardStack({ actions, onSwipe }: CardStackProps) {
     >
       {/* Header with count */}
       <div className="shrink-0 flex items-center justify-center py-3">
-        <span className="text-lg font-semibold text-foreground">{actions.length} Left</span>
+        <span className="text-lg font-semibold text-foreground">{totalCount} Left</span>
       </div>
 
       {/* Card Stack Area */}
