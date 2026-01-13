@@ -12,6 +12,7 @@
   "dependencies": {
     "@convex-dev/workos": "^0.0.1",
     "@prm/convex": "workspace:*",
+    "@prm/ui": "workspace:*",
     "@workos-inc/authkit-nextjs": "^2.13.0",
     "convex": "^1.18.0",
     "next": "16.1.1",

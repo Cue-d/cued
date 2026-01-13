@@ -1,0 +1,65 @@
+@import "tailwindcss";
+
+@theme {
+  --color-background: 0 0% 100%;
+  --color-foreground: 0 0% 0%;
+
+  --color-card: 0 0% 100%;
+  --color-card-foreground: 0 0% 0%;
+
+  --color-popover: 0 0% 100%;
+  --color-popover-foreground: 0 0% 0%;
+
+  --color-primary: 0 0% 0%;
+  --color-primary-foreground: 0 0% 100%;
+
+  --color-secondary: 0 0% 96%;
+  --color-secondary-foreground: 0 0% 0%;
+
+  --color-muted: 0 0% 96%;
+  --color-muted-foreground: 0 0% 40%;
+
+  --color-accent: 0 0% 96%;
+  --color-accent-foreground: 0 0% 0%;
+
+  --color-destructive: 0 84% 60%;
+  --color-destructive-foreground: 0 0% 100%;
+
+  --color-border: 0 0% 90%;
+  --color-input: 0 0% 90%;
+  --color-ring: 0 0% 0%;
+
+  --radius: 0.5rem;
+}
+
+@media (prefers-color-scheme: dark) {
+  @theme {
+    --color-background: 0 0% 0%;
+    --color-foreground: 0 0% 100%;
+
+    --color-card: 0 0% 0%;
+    --color-card-foreground: 0 0% 100%;
+
+    --color-popover: 0 0% 0%;
+    --color-popover-foreground: 0 0% 100%;
+
+    --color-primary: 0 0% 100%;
+    --color-primary-foreground: 0 0% 0%;
+
+    --color-secondary: 0 0% 10%;
+    --color-secondary-foreground: 0 0% 100%;
+
+    --color-muted: 0 0% 10%;
+    --color-muted-foreground: 0 0% 60%;
+
+    --color-accent: 0 0% 10%;
+    --color-accent-foreground: 0 0% 100%;
+
+    --color-destructive: 0 63% 31%;
+    --color-destructive-foreground: 0 0% 100%;
+
+    --color-border: 0 0% 15%;
+    --color-input: 0 0% 15%;
+    --color-ring: 0 0% 100%;
+  }
+}
