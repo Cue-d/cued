@@ -182,7 +182,7 @@
         "Add index by_user_status for action queue queries",
         "Deploy and verify"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "1.13",

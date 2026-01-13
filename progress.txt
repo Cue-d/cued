@@ -178,3 +178,26 @@ Notes:
   - Ready for task 1.12: Define actions table for action queue
 ---
 
+[2026-01-13 14:05] Task 1.12 - Define Convex schema: actions table
+Files: packages/convex/convex/schema.ts, prd.json, progress.txt
+Decisions:
+  - Added actions table with userId, type, status, priority, optional references (conversationId, contactId, messageId)
+  - Added draftMessage and reason fields for AI-generated action context
+  - Added snoozedUntil, createdAt, completedAt timestamps for lifecycle tracking
+  - Created actionTypeValidator union: "respond", "follow_up", "send_message", "eod_contact"
+  - Created actionStatusValidator union: "pending", "completed", "discarded", "snoozed"
+  - Created by_user and by_user_status indexes for efficient action queue queries
+Why:
+  - Type/status validators follow established pattern (platformValidator, handleTypeValidator, etc.)
+  - Optional references enable flexible action types (conversation actions, contact-only actions)
+  - by_user_status compound index enables efficient "get pending actions for user" queries
+  - draftMessage field stores AI-suggested response text for quick edits
+  - snoozedUntil supports swipe-up snooze behavior from existing backend
+Notes:
+  - Schema deployed successfully via `npx convex dev --once` (593ms)
+  - TypeScript typecheck passes for entire monorepo
+  - Code simplified by code-simplifier agent: extracted validators to match existing pattern
+  - This completes Phase 1 architectural schema work (tasks 1.7-1.12)
+  - Ready for task 1.13: Install WorkOS AuthKit and Convex auth packages
+---
+
