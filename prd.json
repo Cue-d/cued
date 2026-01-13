@@ -66,7 +66,7 @@
         "Add button component as test: `pnpm dlx shadcn@latest add button`",
         "Export components from package index"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "1.5",

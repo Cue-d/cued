@@ -293,3 +293,26 @@ Notes:
   - Ready for remaining Phase 1 tasks: 1.3 (Electron), 1.4 (packages/ui), 1.5 (packages/shared), 1.17 (marketing page), 1.18 (app shell)
 ---
 
+[2026-01-13 15:10] Task 1.4 - Create packages/ui with shadcn/ui setup
+Files: packages/ui/*, apps/web/next.config.ts, apps/web/package.json, apps/web/app/(marketing)/page.tsx, pnpm-lock.yaml
+Decisions:
+  - Created packages/ui with React 19, TypeScript, Tailwind v4, and shadcn components
+  - Used manual shadcn setup instead of CLI due to Tailwind v4 compatibility requirements
+  - Changed button.tsx to use relative imports (../../lib/utils) instead of @ aliases to avoid TypeScript resolution issues in consuming apps
+  - Added Tailwind v4 globals.css with @theme configuration for neutral color scheme (base preset)
+  - Configured Next.js transpilePackages for @prm/ui to enable runtime module resolution
+  - Added Button component to marketing page as verification test
+  - Created package exports: "." (main index), "./styles/*", "./components/*", "./lib/*"
+Why:
+  - Relative imports avoid complex TypeScript path mapping across workspace packages
+  - Tailwind v4 requires @import "tailwindcss" and @theme syntax (not v3 @tailwind directives)
+  - transpilePackages required for Next.js to process workspace TypeScript packages
+  - Neutral color scheme provides clean foundation for PRM's professional aesthetic
+  - Manual setup gives full control over Tailwind v4 + shadcn integration
+Notes:
+  - Lint and typecheck pass successfully for both packages/ui and apps/web
+  - Button component renders correctly in marketing page with proper styling
+  - Package structure supports adding more shadcn components via manual copying and adapting imports
+  - Ready for task 1.5: Create packages/shared with phone normalization utils
+---
+
