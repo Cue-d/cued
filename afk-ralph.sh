@@ -11,6 +11,11 @@
 #
 # Options:
 #   --sandbox    Run in Docker sandbox (recommended for overnight runs)
+#
+# Prerequisites for chrome debugging:
+#   - Chrome browser running
+#   - Claude in Chrome extension (v1.0.36+)
+#   - Dev server running: pnpm dev (in apps/web)
 
 set -e
 
@@ -63,8 +68,8 @@ if [ -z "$ITERATIONS" ]; then
   echo "Usage: $0 <iterations> [--sandbox]"
   echo ""
   echo "Examples:"
-  echo "  ./afk-ralph.sh 10           # Run 10 iterations"
-  echo "  ./afk-ralph.sh 20 --sandbox # Run 20 iterations in Docker sandbox"
+  echo "  ./afk-ralph.sh 10              # Run 10 iterations"
+  echo "  ./afk-ralph.sh 20 --sandbox    # Run 20 iterations in Docker sandbox"
   echo ""
   echo "Recommended iteration counts:"
   echo "  5-10   Small tasks, single phase"
@@ -116,6 +121,7 @@ The prd.json file contains structured tasks with:
 - description: What to implement
 - steps: Verification steps (all must pass)
 - passes: false (you set to true when complete)
+- reference: (optional) URL to documentation for this task
 
 ## YOUR TASK
 1. Read prd.json and progress.txt to understand current state.
@@ -127,31 +133,34 @@ The prd.json file contains structured tasks with:
    - Standard features and implementation (MEDIUM)
    - Polish, cleanup, and quick wins (LOW)
 
-3. Keep changes SMALL and FOCUSED:
+3. If the task has a 'reference' URL, fetch it to understand the implementation.
+
+4. Keep changes SMALL and FOCUSED:
    - One logical change per commit
    - If the task feels too large, break it into subtasks
    - Run feedback loops after each change, not at the end
 
-4. Implement the task, then verify ALL steps in the task's 'steps' array.
+5. Implement the task, then verify ALL steps in the task's 'steps' array.
 
-5. Run ALL feedback loops:
+6. Run ALL feedback loops:
    - TypeScript: pnpm lint && pnpm typecheck (MUST pass)
    - Tests: pnpm test (MUST pass if tests exist)
    Do NOT commit if any feedback loop fails.
 
-6. Run /simplify to review and simplify your code.
+7. Run the code-simplifier:code-simplifier skill to reivew and simplify your code.
 
-7. Commit with a descriptive message.
+8. Commit with a descriptive message.
 
-8. Update prd.json: set passes=true for the completed task.
+9. Update prd.json: set passes=true for the completed task.
 
-9. Update progress.txt with:
-   - Date/time and task ID + description
-   - Files changed
-   - Decisions made and WHY
-   - Blockers or notes for next iteration
+10. Update progress.txt with:
+    - Date/time and task ID + description
+    - Files changed
+    - Decisions made and WHY
+    - Browser verification results (for UI tasks)
+    - Blockers or notes for next iteration
 
-10. Check if ALL tasks in prd.json have passes=true.
+11. Check if ALL tasks in prd.json have passes=true.
     If so, output exactly: <promise>COMPLETE</promise>
 
 ONLY WORK ON A SINGLE TASK.")

@@ -5,6 +5,12 @@
 # Best for: Phases 1-2 (Foundation, iMessage Sync)
 # These are high-stakes, low-reversibility tasks where architectural
 # decisions cascade through the entire codebase.
+#
+# Prerequisites for browser verification:
+#   - Chrome browser running
+#   - Claude in Chrome extension (v1.0.36+)
+#   - Claude Code CLI (v2.0.73+)
+#   - Dev server running: pnpm dev (in apps/web)
 
 set -e
 
@@ -60,6 +66,7 @@ The prd.json file contains structured tasks with:
 - description: What to implement
 - steps: Verification steps (all must pass)
 - passes: false (you set to true when complete)
+- reference: (optional) URL to documentation for this task
 
 ## YOUR TASK
 1. Read prd.json and progress.txt to understand current state.
@@ -72,32 +79,42 @@ The prd.json file contains structured tasks with:
    - Polish, cleanup, and quick wins (LOW)
    Do NOT just pick the first one - pick the HIGHEST PRIORITY uncompleted task.
 
-3. Keep changes SMALL and FOCUSED:
+3. If the task has a 'reference' URL, fetch it to understand the implementation.
+
+4. Keep changes SMALL and FOCUSED:
    - One logical change per commit
    - If the task feels too large, break it into subtasks first
    - Prefer multiple small commits over one large commit
 
-4. Implement the task, then verify ALL steps in the task's 'steps' array pass.
+5. Implement the task, then verify ALL steps in the task's 'steps' array pass.
 
-5. Run ALL feedback loops:
+6. Run ALL feedback loops:
    - TypeScript: pnpm lint && pnpm typecheck (MUST pass)
    - Tests: pnpm test (MUST pass if tests exist)
    - For Python: uv run ruff check . && uv run ruff format .
    Do NOT commit if any feedback loop fails. Fix issues first.
 
-6. Run /simplify to review and simplify the code you wrote.
+7. For UI tasks (category: 'ui'), use browser tools to verify:
+   - Open http://localhost:3000 (or relevant route) in Chrome
+   - Verify the UI renders correctly without console errors
+   - Check that interactive elements (buttons, links, forms) work
+   - Verify dark mode works if applicable
+   - Take note of any visual issues
 
-7. Commit with a descriptive message.
+8. Run the code-simplifier:code-simplifier skill to review and simplify the code you wrote.
 
-8. Update prd.json: set passes=true for the completed task.
+9. Commit with a descriptive message.
 
-9. Update progress.txt with:
-   - Date/time
-   - Task ID and description (e.g., '1.7 - Define Convex schema: users table')
-   - Files changed
-   - Key decisions made and WHY
-   - Any blockers or notes for next iteration
-   Keep entries concise.
+10. Update prd.json: set passes=true for the completed task.
+
+11. Update progress.txt with:
+    - Date/time
+    - Task ID and description (e.g., '1.7 - Define Convex schema: users table')
+    - Files changed
+    - Key decisions made and WHY
+    - Browser verification results (for UI tasks)
+    - Any blockers or notes for next iteration
+    Keep entries concise.
 
 ONLY DO ONE TASK. Small steps compound into big progress."
 
