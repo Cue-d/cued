@@ -234,7 +234,7 @@
         "Wrap app layout with ConvexClientProvider",
         "Verify unauthenticated users redirect to /sign-in"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "1.16",

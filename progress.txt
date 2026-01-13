@@ -242,3 +242,25 @@ Notes:
   - Ready for task 1.15: Create middleware and ConvexClientProvider
 ---
 
+[2026-01-13 14:35] Task 1.15 - Create middleware and ConvexClientProvider
+Files: apps/web/middleware.ts, apps/web/components/ConvexClientProvider.tsx, apps/web/app/layout.tsx, apps/web/app/(app)/layout.tsx, apps/web/app/(app)/app/page.tsx, prd.json, progress.txt
+Decisions:
+  - Created middleware.ts with authkitMiddleware to protect /app routes
+  - Configured unauthenticatedPaths: ["/", "/sign-in", "/sign-up", "/callback"]
+  - Created ConvexClientProvider wrapping AuthKitProvider + ConvexProviderWithAuth
+  - Implemented useAuthFromAuthKit hook bridging WorkOS auth to Convex client
+  - Wrapped root layout with ConvexClientProvider for authenticated queries throughout app
+  - Created (app) route group with basic layout and placeholder page at /app
+Why:
+  - Middleware ensures /app routes require authentication, redirects to /sign-in if unauthenticated
+  - AuthKitProvider wraps ConvexProviderWithAuth to provide WorkOS session context
+  - useAuthFromAuthKit translates WorkOS useAuth() + useAccessToken() to Convex's auth interface
+  - Root layout wrapping enables authenticated Convex queries in all client components
+  - Route groups enable separate layouts for marketing (/) vs app (/app) without affecting URLs
+Notes:
+  - Fixed routing conflict: (marketing)/page.tsx at /, (app)/app/page.tsx at /app
+  - Code simplified by code-simplifier: removed unnecessary useRef/useEffect token caching
+  - Lint and typecheck pass successfully
+  - Ready for task 1.16: Test auth flow end-to-end with Convex
+---
+
