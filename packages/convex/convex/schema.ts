@@ -20,6 +20,20 @@ export const conversationTypeValidator = v.union(
   v.literal("channel")
 );
 
+export const actionTypeValidator = v.union(
+  v.literal("respond"),
+  v.literal("follow_up"),
+  v.literal("send_message"),
+  v.literal("eod_contact")
+);
+
+export const actionStatusValidator = v.union(
+  v.literal("pending"),
+  v.literal("completed"),
+  v.literal("discarded"),
+  v.literal("snoozed")
+);
+
 const schema = defineSchema({
   // Task 1.7: Users table
   users: defineTable({
@@ -103,8 +117,23 @@ const schema = defineSchema({
       filterFields: ["userId", "conversationId"],
     }),
 
-  // Tables to be added:
-  // - actions (task 1.12)
+  // Task 1.12: Actions table
+  actions: defineTable({
+    userId: v.id("users"),
+    type: actionTypeValidator,
+    status: actionStatusValidator,
+    priority: v.number(), // 0-100 priority score
+    conversationId: v.optional(v.id("conversations")),
+    contactId: v.optional(v.id("contacts")),
+    messageId: v.optional(v.id("messages")),
+    draftMessage: v.optional(v.string()),
+    reason: v.optional(v.string()),
+    snoozedUntil: v.optional(v.number()),
+    createdAt: v.number(),
+    completedAt: v.optional(v.number()),
+  })
+    .index("by_user", ["userId"])
+    .index("by_user_status", ["userId", "status"]),
 });
 
 export default schema;
