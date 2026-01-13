@@ -414,6 +414,20 @@
       "passes": true
     },
     {
+      "id": "2.7b",
+      "phase": 2,
+      "mode": "hitl",
+      "category": "functional",
+      "description": "Implement incremental contacts sync from macOS Contacts.app",
+      "steps": [
+        "Watch for CNContactStoreDidChange notifications in Electron main process",
+        "Re-sync modified contacts on change detection",
+        "Add periodic full sync fallback (hourly) using setInterval",
+        "Verify contact updates propagate to Convex within 5 seconds of change"
+      ],
+      "passes": false
+    },
+    {
       "id": "2.8",
       "phase": 2,
       "mode": "hitl",
@@ -427,6 +441,22 @@
         "Verify only new messages synced on subsequent runs"
       ],
       "passes": true
+    },
+    {
+      "id": "2.8b",
+      "phase": 2,
+      "mode": "hitl",
+      "category": "functional",
+      "description": "Optimize message sync performance (target: 1000+ msgs/sec)",
+      "steps": [
+        "Profile current bottleneck: Electron read, network, or Convex mutation",
+        "Parallelize batch uploads (send multiple batches concurrently)",
+        "Increase batch size if network latency is bottleneck (test 5000-10000)",
+        "Add bulk insert optimization in Convex mutation if DB writes are slow",
+        "Add progress indicator in Electron UI for large syncs",
+        "Benchmark full sync of 148k messages completes in under 3 minutes"
+      ],
+      "passes": false
     },
     {
       "id": "2.9",
@@ -456,7 +486,7 @@
         "Join participant contact names",
         "Test query with your synced messages and verify expected shape"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "2.11",

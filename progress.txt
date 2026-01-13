@@ -684,3 +684,32 @@ Notes:
   - Completes Phase 1 UI tasks (1.17, 1.18 already done)
 ---
 
+[2026-01-13 18:15] Task 2.10 - Create Convex query getInbox with pagination
+Files: packages/convex/convex/messages.ts (new)
+Decisions:
+  - Created getInbox query with cursor-based pagination using lastMessageAt timestamp
+  - Created getMessages query for conversation detail view (bonus, needed by 2.11)
+  - Used by_user_last_message index for efficient inbox sorting by recency DESC
+  - Resolved participant contactIds to displayNames for UI display
+  - Added platform filter support for future multi-platform inbox filtering
+  - Created test versions (getInboxTest) for dev testing without auth
+Why:
+  - Cursor pagination via timestamp enables efficient "load more" without offset scanning
+  - Fetching limit+1 enables "hasMore" detection without separate count query
+  - Platform filter done in-memory after fetch (small datasets) vs separate index
+  - Test queries use same logic via shared fetchInbox helper (DRY)
+Code Simplification:
+  - Extracted fetchInbox helper to share logic between getInbox and getInboxTest
+  - Added InboxArgs/InboxResult interfaces for explicit typing
+  - Created EMPTY_INBOX/EMPTY_MESSAGES constants to reduce repetition
+  - Simplified query building with inline cursor conditional
+  - Reduced file from ~299 to ~244 lines (~14% reduction)
+Notes:
+  - Tested with real synced iMessage data: 10 conversations returned with correct shape
+  - Pagination cursor works: nextCursor="1678722085000" for loading older conversations
+  - Participant displayNames show phone numbers (contact sync will enrich with real names)
+  - TypeScript typecheck passes for entire monorepo
+  - Convex functions deployed successfully
+  - Also created getMessages query (will be used by task 2.11)
+---
+
