@@ -20,9 +20,10 @@
     "electron-updater": "^6.7.3"
   },
   "devDependencies": {
+    "@electron/rebuild": "^4.0.2",
     "@types/better-sqlite3": "^7.6.13",
     "@types/node": "^20.14.9",
-    "electron": "^32.3.2",
+    "electron": "^39.2.7",
     "electron-vite": "^5.0.0",
     "typescript": "^5.7.3",
     "vite": "^6.0.11",

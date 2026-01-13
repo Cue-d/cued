@@ -112,6 +112,7 @@ const schema = defineSchema({
     platformMessageId: v.string(), // unique ID from source platform (ROWID, Gmail msgId, Slack ts)
   })
     .index("by_conversation", ["conversationId", "sentAt"])
+    .index("by_platform_message", ["userId", "platform", "platformMessageId"])
     .searchIndex("search_content", {
       searchField: "content",
       filterFields: ["userId", "conversationId"],

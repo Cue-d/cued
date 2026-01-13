@@ -1,9 +1,10 @@
-import type { MutationCtx } from "./_generated/server";
-import { mutation } from "./_generated/server";
+import type { Infer } from "convex/values";
 import { v } from "convex/values";
 import type { Doc, Id } from "./_generated/dataModel";
+import type { MutationCtx } from "./_generated/server";
+import { mutation } from "./_generated/server";
 
-// Input types matching @prm/integrations SyncBatch structure
+// Convex validators matching @prm/integrations SyncBatch structure
 const handleInput = v.object({
   id: v.number(),
   identifier: v.string(),
@@ -37,43 +38,10 @@ const syncBatchInput = v.object({
   handles: v.array(handleInput),
 });
 
-/** Input type for chat data */
-type ChatInput = {
-  id: number;
-  identifier: string;
-  displayName: string | null;
-  isGroup: boolean;
-  participants: { id: number; identifier: string; service: string }[];
-};
-
-/** Input type for message data */
-type MessageInput = {
-  id: number;
-  text: string | null;
-  timestamp: number;
-  isFromMe: boolean;
-};
-
-/** Full message input with sender info */
-type FullMessageInput = {
-  id: number;
-  chatId: number;
-  text: string | null;
-  timestamp: number;
-  isFromMe: boolean;
-  isRead: boolean;
-  readAt: number | null;
-  hasAttachments: boolean;
-  sender: { id: number; identifier: string; service: string } | null;
-};
-
-/** Batch input type */
-type BatchInput = {
-  cursor: number;
-  chats: ChatInput[];
-  messages: FullMessageInput[];
-  handles: { id: number; identifier: string; service: string }[];
-};
+// Derive TypeScript types from validators
+type ChatInput = Infer<typeof chatInput>;
+type MessageInput = Infer<typeof messageInput>;
+type BatchInput = Infer<typeof syncBatchInput>;
 
 /**
  * Sync a batch of iMessage data from Electron to Convex.
@@ -108,21 +76,7 @@ export const syncMessagesTest = mutation({
     batch: syncBatchInput,
   },
   handler: async (ctx, args) => {
-    const testEmail = "test@prm.local";
-    let user = await ctx.db
-      .query("users")
-      .withIndex("by_email", (q) => q.eq("email", testEmail))
-      .unique();
-
-    if (!user) {
-      const userId = await ctx.db.insert("users", {
-        workosUserId: "test-user-dev",
-        email: testEmail,
-        name: "Test User",
-      });
-      user = (await ctx.db.get(userId))!;
-    }
-
+    const user = await getOrCreateTestUser(ctx);
     return syncMessagesInternal(ctx, user._id, args.batch);
   },
 });
@@ -180,7 +134,13 @@ async function syncMessagesInternal(
         );
       }
 
-      await upsertMessage(ctx, userId, conversationId, message, senderContactId);
+      await upsertMessage(
+        ctx,
+        userId,
+        conversationId,
+        message,
+        senderContactId
+      );
       result.messagesCount++;
 
       // Track latest message per conversation for lastMessage update
@@ -228,6 +188,29 @@ async function getOrCreateUser(
     workosUserId: identity.subject,
     email: identity.email ?? "",
     name: identity.name,
+  });
+
+  return (await ctx.db.get(userId))!;
+}
+
+/**
+ * Get or create test user for dev environment.
+ */
+async function getOrCreateTestUser(ctx: MutationCtx): Promise<Doc<"users">> {
+  const testEmail = "test@prm.local";
+  const existing = await ctx.db
+    .query("users")
+    .withIndex("by_email", (q) => q.eq("email", testEmail))
+    .unique();
+
+  if (existing) {
+    return existing;
+  }
+
+  const userId = await ctx.db.insert("users", {
+    workosUserId: "test-user-dev",
+    email: testEmail,
+    name: "Test User",
   });
 
   return (await ctx.db.get(userId))!;
@@ -332,17 +315,18 @@ async function upsertMessage(
 ): Promise<void> {
   const platformMessageId = String(message.id);
 
-  // Check if message exists (no index on platformMessageId, filter by conversation)
-  const existingMessages = await ctx.db
+  // Check if message exists using indexed lookup (O(1) instead of scanning all messages)
+  const existing = await ctx.db
     .query("messages")
-    .withIndex("by_conversation", (q) => q.eq("conversationId", conversationId))
-    .collect();
+    .withIndex("by_platform_message", (q) =>
+      q
+        .eq("userId", userId)
+        .eq("platform", "imessage")
+        .eq("platformMessageId", platformMessageId)
+    )
+    .unique();
 
-  const alreadyExists = existingMessages.some(
-    (m) => m.platformMessageId === platformMessageId
-  );
-
-  if (alreadyExists) {
+  if (existing) {
     return;
   }
 
