@@ -2,3 +2,5 @@ node_modules/
 dist/
 .env
 .env.local
+!.env.local.example
+convex/_generated/

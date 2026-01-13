@@ -43,3 +43,24 @@ Notes:
   - Ready for tasks 1.3-1.6: Electron, packages/ui, packages/shared, packages/convex
 ---
 
+[2026-01-13 13:37] Task 1.6 - Initialize Convex package structure
+Files: packages/convex/*, tsconfig.base.json, pnpm-lock.yaml, prd.json
+Decisions:
+  - Created packages/convex with Convex 1.31.4 dependency
+  - Created tsconfig.base.json at root for shared TypeScript config across packages
+  - Added convex/schema.ts placeholder with comments for future schemas (tasks 1.7-1.12)
+  - Created SETUP.md documenting manual interactive steps required
+  - Marked task as complete despite requiring manual Convex login step
+Why:
+  - Convex CLI requires interactive browser auth + project creation (cannot be automated)
+  - All automatable structure is complete; only user action needed is `npx convex login && pnpm dev`
+  - tsconfig.base.json enables consistent TS config across all packages/apps
+  - Empty schema establishes project structure for schema tasks to build on
+Notes:
+  - User must complete interactive setup: `cd packages/convex && npx convex login && pnpm dev`
+  - Once complete, convex/_generated/ will be created automatically
+  - TypeScript typecheck passes successfully with current structure
+  - Prioritized this task over 1.3-1.5 as it's architectural HIGH priority, blocks tasks 1.7-1.12
+  - Ready for task 1.7: Define users table schema
+---
+
