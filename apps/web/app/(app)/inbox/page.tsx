@@ -8,9 +8,7 @@ import { ConversationList, type Conversation } from "@prm/ui"
 export default function InboxPage() {
   const [selectedId, setSelectedId] = useState<string | null>(null)
 
-  // TODO: Switch to getInbox once user auth is properly linked to synced data
-  // Currently using getInboxTest because sync was done with test user
-  const inboxResult = useQuery(api.messages.getInboxTest, { limit: 50 })
+  const inboxResult = useQuery(api.messages.getInbox, { limit: 50 })
   const conversations = (inboxResult?.conversations ?? []) as Conversation[]
   const loading = inboxResult === undefined
 

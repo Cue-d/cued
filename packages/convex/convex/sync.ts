@@ -73,21 +73,7 @@ export const syncMessages = mutation({
 });
 
 /**
- * Test-only mutation for syncing without auth (dev environment only).
- * Uses a hardcoded test user for local testing.
- */
-export const syncMessagesTest = mutation({
-  args: {
-    batch: syncBatchInput,
-  },
-  handler: async (ctx, args) => {
-    const user = await getOrCreateTestUser(ctx);
-    return syncMessagesInternal(ctx, user._id, args.batch);
-  },
-});
-
-/**
- * Internal sync logic shared by authenticated and test mutations.
+ * Internal sync logic shared by mutations.
  */
 async function syncMessagesInternal(
   ctx: MutationCtx,
@@ -193,29 +179,6 @@ async function getOrCreateUser(
     workosUserId: identity.subject,
     email: identity.email ?? "",
     name: identity.name,
-  });
-
-  return (await ctx.db.get(userId))!;
-}
-
-/**
- * Get or create test user for dev environment.
- */
-async function getOrCreateTestUser(ctx: MutationCtx): Promise<Doc<"users">> {
-  const testEmail = "test@prm.local";
-  const existing = await ctx.db
-    .query("users")
-    .withIndex("by_email", (q) => q.eq("email", testEmail))
-    .unique();
-
-  if (existing) {
-    return existing;
-  }
-
-  const userId = await ctx.db.insert("users", {
-    workosUserId: "test-user-dev",
-    email: testEmail,
-    name: "Test User",
   });
 
   return (await ctx.db.get(userId))!;
@@ -389,19 +352,6 @@ export const syncContacts = mutation({
     }
 
     const user = await getOrCreateUser(ctx, identity);
-    return syncContactsInternal(ctx, user._id, args.contacts);
-  },
-});
-
-/**
- * Test-only mutation for syncing contacts without auth (dev environment only).
- */
-export const syncContactsTest = mutation({
-  args: {
-    contacts: v.array(contactInput),
-  },
-  handler: async (ctx, args) => {
-    const user = await getOrCreateTestUser(ctx);
     return syncContactsInternal(ctx, user._id, args.contacts);
   },
 });

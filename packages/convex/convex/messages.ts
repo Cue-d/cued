@@ -227,31 +227,3 @@ function findUserByWorkosId(
     .unique();
 }
 
-/**
- * Find test user by email.
- */
-function findTestUser(ctx: QueryCtx): Promise<Doc<"users"> | null> {
-  return ctx.db
-    .query("users")
-    .withIndex("by_email", (q) => q.eq("email", "test@prm.local"))
-    .unique();
-}
-
-/**
- * Test-only version of getInbox (uses test user, no auth required).
- */
-export const getInboxTest = query({
-  args: {
-    limit: v.optional(v.number()),
-    cursor: v.optional(v.string()),
-    platform: v.optional(platformValidator),
-  },
-  handler: async (ctx, args) => {
-    const user = await findTestUser(ctx);
-    if (!user) {
-      return EMPTY_INBOX;
-    }
-
-    return fetchInbox(ctx, user._id, args);
-  },
-});
