@@ -316,3 +316,26 @@ Notes:
   - Ready for task 1.5: Create packages/shared with phone normalization utils
 ---
 
+[2026-01-13 14:46] Task 1.5 - Create packages/shared with phone normalization utils
+Files: packages/shared/*, pnpm-lock.yaml, prd.json, progress.txt
+Decisions:
+  - Created packages/shared as workspace package with TypeScript and Vitest
+  - Ported normalizePhone and getPhoneVariants functions from backend/utils/phone.py
+  - Used regex /\D/g for digit extraction (TypeScript equivalent of Python's isdigit filter)
+  - Created comprehensive unit tests (15 test cases covering edge cases)
+  - Added vitest.config.ts for test runner configuration
+  - Exported phone utilities from package index for workspace consumption
+Why:
+  - Phone normalization is foundational utility needed across multiple packages (Electron sync, Convex mutations, contact resolution)
+  - Shared package enables code reuse and single source of truth for phone logic
+  - Unit tests ensure parity with Python implementation and prevent regressions
+  - TypeScript port maintains exact behavior: strips non-digits, preserves + prefix, generates US/Canada variants
+  - Package exports allow selective imports: import { normalizePhone } from '@prm/shared' or '@prm/shared/phone'
+Notes:
+  - All 15 unit tests pass successfully
+  - TypeScript typecheck passes for both packages/shared and apps/web
+  - Web app lint passes (no regressions)
+  - Ready for task 1.3 (Electron), 1.17 (marketing page), or 1.18 (app shell)
+  - Phone utilities can now be imported by any workspace package
+---
+

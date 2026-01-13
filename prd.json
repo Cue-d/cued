@@ -80,7 +80,7 @@
         "Add unit tests for phone normalization",
         "Export from package index"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "1.6",
@@ -271,9 +271,9 @@
       "phase": 1,
       "mode": "hitl",
       "category": "ui",
-      "description": "Create authenticated app shell with sidebar",
+      "description": "Create authenticated app shell with sidebar with shadcn/ui sidebar component",
       "steps": [
-        "Create app/(app)/layout.tsx with sidebar",
+        "Create app/(app)/layout.tsx with sidebar using shadcn/ui sidebar component",
         "Add navigation items: Inbox, Actions, Assistant, Contacts, Settings",
         "Show user avatar and name from session",
         "Add sign out button",
