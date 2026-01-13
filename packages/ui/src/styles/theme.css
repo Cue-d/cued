@@ -1,0 +1,100 @@
+/* shadcn/ui theme variables - import this in consuming apps */
+
+@theme {
+  /* Base neutral color palette - OKLCH format */
+  --color-background: oklch(100% 0 0);
+  --color-foreground: oklch(9% 0 0);
+
+  --color-card: oklch(100% 0 0);
+  --color-card-foreground: oklch(9% 0 0);
+
+  --color-popover: oklch(100% 0 0);
+  --color-popover-foreground: oklch(9% 0 0);
+
+  --color-primary: oklch(15% 0 0);
+  --color-primary-foreground: oklch(98% 0 0);
+
+  --color-secondary: oklch(96% 0 0);
+  --color-secondary-foreground: oklch(15% 0 0);
+
+  --color-muted: oklch(96% 0 0);
+  --color-muted-foreground: oklch(50% 0 0);
+
+  --color-accent: oklch(96% 0 0);
+  --color-accent-foreground: oklch(15% 0 0);
+
+  --color-destructive: oklch(62% 0.24 27);
+  --color-destructive-foreground: oklch(98% 0 0);
+
+  --color-border: oklch(90% 0 0);
+  --color-input: oklch(90% 0 0);
+  --color-ring: oklch(9% 0 0);
+
+  /* Sidebar variables */
+  --color-sidebar-background: oklch(100% 0 0);
+  --color-sidebar-foreground: oklch(9% 0 0);
+  --color-sidebar-primary: oklch(15% 0 0);
+  --color-sidebar-primary-foreground: oklch(98% 0 0);
+  --color-sidebar-accent: oklch(96% 0 0);
+  --color-sidebar-accent-foreground: oklch(15% 0 0);
+  --color-sidebar-border: oklch(90% 0 0);
+  --color-sidebar-ring: oklch(9% 0 0);
+
+  /* Chart variables */
+  --color-chart-1: oklch(60% 0.15 250);
+  --color-chart-2: oklch(65% 0.15 180);
+  --color-chart-3: oklch(70% 0.15 120);
+  --color-chart-4: oklch(60% 0.15 60);
+  --color-chart-5: oklch(65% 0.15 30);
+
+  --radius: 0.5rem;
+}
+
+@media (prefers-color-scheme: dark) {
+  @theme {
+    --color-background: oklch(9% 0 0);
+    --color-foreground: oklch(98% 0 0);
+
+    --color-card: oklch(9% 0 0);
+    --color-card-foreground: oklch(98% 0 0);
+
+    --color-popover: oklch(9% 0 0);
+    --color-popover-foreground: oklch(98% 0 0);
+
+    --color-primary: oklch(98% 0 0);
+    --color-primary-foreground: oklch(15% 0 0);
+
+    --color-secondary: oklch(20% 0 0);
+    --color-secondary-foreground: oklch(98% 0 0);
+
+    --color-muted: oklch(20% 0 0);
+    --color-muted-foreground: oklch(65% 0 0);
+
+    --color-accent: oklch(20% 0 0);
+    --color-accent-foreground: oklch(98% 0 0);
+
+    --color-destructive: oklch(35% 0.20 27);
+    --color-destructive-foreground: oklch(98% 0 0);
+
+    --color-border: oklch(20% 0 0);
+    --color-input: oklch(20% 0 0);
+    --color-ring: oklch(85% 0 0);
+
+    /* Sidebar variables */
+    --color-sidebar-background: oklch(9% 0 0);
+    --color-sidebar-foreground: oklch(98% 0 0);
+    --color-sidebar-primary: oklch(98% 0 0);
+    --color-sidebar-primary-foreground: oklch(15% 0 0);
+    --color-sidebar-accent: oklch(20% 0 0);
+    --color-sidebar-accent-foreground: oklch(98% 0 0);
+    --color-sidebar-border: oklch(20% 0 0);
+    --color-sidebar-ring: oklch(85% 0 0);
+
+    /* Chart variables */
+    --color-chart-1: oklch(55% 0.20 250);
+    --color-chart-2: oklch(60% 0.20 180);
+    --color-chart-3: oklch(65% 0.20 120);
+    --color-chart-4: oklch(55% 0.20 60);
+    --color-chart-5: oklch(60% 0.20 30);
+  }
+}
