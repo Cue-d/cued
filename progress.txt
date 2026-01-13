@@ -388,3 +388,30 @@ Notes:
   - Ready for task 1.17 (marketing page) or 1.18 (app shell with sidebar)
 ---
 
+[2026-01-13 16:30] Task 1.18 - Create authenticated app shell with sidebar
+Files: packages/ui/src/components/ui/{sidebar,sheet,tooltip,separator,skeleton,input}.tsx, packages/ui/src/components/{app-sidebar.tsx,hooks/use-mobile.tsx}, apps/web/app/(app)/{layout.tsx,_components/app-layout-client.tsx}, packages/ui/package.json, pnpm-lock.yaml
+Decisions:
+  - Added shadcn/ui sidebar component with dependencies (sheet, tooltip, separator, skeleton, input)
+  - Fixed all component imports to use relative paths (../../lib/utils, ./button) instead of @ aliases for monorepo compatibility
+  - Created useIsMobile hook (768px breakpoint) for responsive sidebar behavior
+  - Created AppSidebar component with 5 navigation items: Inbox, Actions, Assistant, Contacts, Settings
+  - Added user profile display (name + email) in SidebarFooter from WorkOS/Convex auth
+  - Added sign out button in sidebar footer using WorkOS signOut() server action
+  - Created AppLayoutClient wrapper to bridge Convex auth data to sidebar (useQuery + currentUser)
+  - Installed lucide-react for navigation icons (InboxIcon, ListTodoIcon, etc.)
+  - Used SidebarMenuButton with render prop instead of asChild (render={<a href={...} />})
+Why:
+  - Relative imports avoid TypeScript path resolution issues across workspace packages
+  - SidebarProvider wraps entire app layout, SidebarInset contains page content
+  - Client component wrapper needed to access Convex queries (useQuery requires "use client")
+  - Sidebar uses --sidebar-* CSS variables from task 1.4b for theming (background, foreground, primary, border)
+  - render prop is shadcn sidebar API for custom elements (not asChild like other components)
+Notes:
+  - All lint and typecheck pass successfully for both packages/ui and apps/web
+  - Sidebar includes keyboard shortcut (Cmd+B) for toggle built into SidebarProvider
+  - Responsive: desktop shows fixed sidebar, mobile shows sheet overlay
+  - Navigation hrefs point to /inbox, /actions, /assistant, /contacts, /settings (routes to be implemented in Phase 2+)
+  - User profile gracefully handles null/undefined (shows nothing until auth loads)
+  - Completed Phase 1 UI foundation - ready for task 1.17 (marketing page) or Phase 2 (iMessage sync)
+---
+

@@ -306,7 +306,7 @@
         "Verify sidebar uses --sidebar-* CSS variables for theming",
         "Verify layout renders for authenticated users with collapsible sidebar"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "2.1",
