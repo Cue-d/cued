@@ -105,3 +105,28 @@ Notes:
   - Ready for task 1.9: Define contacts and contactHandles tables
 ---
 
+[2026-01-13 13:57] Task 1.9 - Define Convex schema: contacts and contactHandles tables
+Files: packages/convex/convex/schema.ts, prd.json, progress.txt
+Decisions:
+  - Added contacts table with userId, displayName (required), company, notes, importance (all optional metadata)
+  - Added contactHandles table with userId, contactId (FK), handleType, handle, platform fields
+  - Used handleType union: "phone", "email", "slack_id" for type-safe handle classification
+  - Used platform union: "imessage", "gmail", "slack" matching integrations table
+  - Created searchIndex on contacts.displayName with userId filter for fast contact search
+  - Created by_user_handle compound index on [userId, handle] for O(1) contact resolution during sync
+  - Created by_contact index for reverse lookups (all handles for a contact)
+Why:
+  - Separation of contacts and handles enables cross-platform identity resolution (same person, multiple handles)
+  - handle field stores normalized values (E.164 phone, lowercase email) for consistent lookups
+  - handleType distinguishes phone vs email vs Slack ID without parsing handle string
+  - Search index on displayName enables fast fuzzy contact search in UI
+  - by_user_handle index is CRITICAL for sync performance: O(1) "does this phone/email exist?" queries
+  - by_contact index enables showing all communication channels for a person in UI
+Notes:
+  - Schema deployed successfully via `npx convex dev --once` (691ms)
+  - TypeScript typecheck passes
+  - Generated types in convex/_generated/ updated with new contacts and contactHandles tables
+  - This data model supports cross-platform contact merging (e.g., same person with phone+email+Slack)
+  - Ready for task 1.10: Define conversations table
+---
+

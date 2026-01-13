@@ -137,7 +137,7 @@
         "Add index by_user_handle on contactHandles",
         "Deploy and verify"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "1.10",
@@ -190,6 +190,7 @@
       "mode": "hitl",
       "category": "integration",
       "description": "Install WorkOS AuthKit and Convex auth packages",
+      "reference": "https://docs.convex.dev/auth/authkit",
       "steps": [
         "Run `pnpm add @workos-inc/authkit-nextjs @convex-dev/workos convex` in apps/web",
         "Add WORKOS_CLIENT_ID to .env.local (from WorkOS dashboard)",
@@ -206,6 +207,7 @@
       "mode": "hitl",
       "category": "integration",
       "description": "Create Convex auth config and WorkOS auth routes",
+      "reference": "https://docs.convex.dev/auth/authkit",
       "steps": [
         "Create convex/auth.config.ts with WorkOS JWT provider using @convex-dev/workos",
         "Create app/callback/route.ts with GET handler from handleAuth()",
@@ -222,6 +224,7 @@
       "mode": "hitl",
       "category": "integration",
       "description": "Create middleware and ConvexClientProvider",
+      "reference": "https://docs.convex.dev/auth/authkit",
       "steps": [
         "Create middleware.ts using authkitMiddleware from @workos-inc/authkit-nextjs",
         "Configure matcher for protected routes: /(app)/*",
@@ -238,6 +241,7 @@
       "mode": "hitl",
       "category": "functional",
       "description": "Test auth flow end-to-end with Convex",
+      "reference": "https://docs.convex.dev/auth/authkit",
       "steps": [
         "Click sign-in button and complete WorkOS OAuth flow",
         "Verify JWT token passed to Convex via useAuthFromAuthKit",
