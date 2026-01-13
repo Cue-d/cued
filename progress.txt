@@ -221,3 +221,24 @@ Notes:
   - Ready for task 1.14: Create Convex auth config and WorkOS auth routes
 ---
 
+[2026-01-13 14:20] Task 1.14 - Create Convex auth config and WorkOS auth routes
+Files: packages/convex/convex/auth.config.ts, apps/web/app/callback/route.ts, apps/web/app/sign-in/route.ts, apps/web/app/sign-up/route.ts, prd.json, progress.txt
+Decisions:
+  - Created auth.config.ts with two JWT providers: SSO flow and user management flow
+  - Created callback route using handleAuth() helper from @workos-inc/authkit-nextjs
+  - Created sign-in route using getSignInUrl() with redirect to WorkOS authorize endpoint
+  - Created sign-up route using getSignUpUrl() with redirect to WorkOS registration
+  - Set WORKOS_CLIENT_ID in Convex cloud environment using npx convex env set
+Why:
+  - Two JWT providers needed to support both WorkOS SSO and user management authentication flows
+  - handleAuth() in callback route processes OAuth callback and sets session cookie
+  - getSignInUrl/getSignUpUrl generate WorkOS authorization URLs with correct client_id and redirect_uri
+  - Cloud environment variable required for auth.config.ts to access WORKOS_CLIENT_ID at runtime
+  - Each route handler is minimal (3-4 lines) leveraging WorkOS SDK abstractions
+Notes:
+  - Auth config deployed successfully to Convex (647.98ms)
+  - Verified /sign-in returns 307 redirect to https://api.workos.com/user_management/authorize
+  - Lint and typecheck pass successfully
+  - Ready for task 1.15: Create middleware and ConvexClientProvider
+---
+
