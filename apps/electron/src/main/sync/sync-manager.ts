@@ -112,7 +112,10 @@ export class SyncManager {
       }
     } catch (e: unknown) {
       const message = e instanceof Error ? e.message : String(e);
-      console.warn("[SyncManager] Server cursor fetch failed, using local:", message);
+      console.warn(
+        "[SyncManager] Server cursor fetch failed, using local:",
+        message
+      );
     }
   }
 
@@ -152,14 +155,9 @@ export class SyncManager {
       while (cursor < maxRowid) {
         batchNumber++;
         const batchStart = performance.now();
-        const batch = chatDb.buildSyncBatch(cursor);
+        const batch = chatDb.buildSyncBatch(cursor, BATCH_SIZE);
 
         if (batch.messages.length === 0) break;
-
-        if (batch.messages.length > BATCH_SIZE) {
-          batch.messages = batch.messages.slice(0, BATCH_SIZE);
-          batch.cursor = batch.messages[batch.messages.length - 1].id;
-        }
 
         this.updateProgress({
           currentBatch: {

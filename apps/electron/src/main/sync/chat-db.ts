@@ -15,7 +15,12 @@ import { extractTextFromAttributedBody } from "./attributed-body";
 const APPLE_EPOCH_OFFSET = 978307200;
 
 /** Default path to macOS iMessage database */
-export const DEFAULT_CHAT_DB_PATH = join(homedir(), "Library", "Messages", "chat.db");
+export const DEFAULT_CHAT_DB_PATH = join(
+  homedir(),
+  "Library",
+  "Messages",
+  "chat.db"
+);
 
 /**
  * Convert Apple nanosecond timestamp to Unix seconds.
@@ -30,7 +35,10 @@ function appleToUnix(appleTs: number | null): number | null {
 /**
  * Get message text, falling back to attributedBody extraction if text is null.
  */
-function getMessageText(text: string | null, attributedBody: Buffer | null): string | null {
+function getMessageText(
+  text: string | null,
+  attributedBody: Buffer | null
+): string | null {
   if (text) {
     return text;
   }
@@ -77,7 +85,7 @@ interface HandleRow {
  */
 export class ChatDb {
   private db: Database.Database;
-  private stmtGetMessagesSince: Database.Statement<[number]>;
+  private stmtGetMessagesSince: Database.Statement<[number, number]>;
   private stmtGetMaxRowid: Database.Statement<[]>;
   private stmtGetChatParticipants: Database.Statement<[number]>;
   private stmtGetChatById: Database.Statement<[number, number]>;
@@ -91,6 +99,7 @@ export class ChatDb {
     this.db = new Database(path, { readonly: true, fileMustExist: true });
 
     // Prepare commonly-used statements for performance
+    // Note: LIMIT is required to avoid loading too many messages at once
     this.stmtGetMessagesSince = this.db.prepare(`
       SELECT
         m.ROWID as rowid,
@@ -110,6 +119,7 @@ export class ChatDb {
       LEFT JOIN handle h ON h.ROWID = m.handle_id
       WHERE m.ROWID > ?
       ORDER BY m.ROWID
+      LIMIT ?
     `);
 
     this.stmtGetMaxRowid = this.db.prepare(`
@@ -157,16 +167,23 @@ export class ChatDb {
    * Used to initialize sync cursor on first run.
    */
   getMaxMessageRowid(): number {
-    const row = this.stmtGetMaxRowid.get() as { max_rowid: number | null } | undefined;
+    const row = this.stmtGetMaxRowid.get() as
+      | { max_rowid: number | null }
+      | undefined;
     return row?.max_rowid ?? 0;
   }
 
   /**
-   * Get all messages with ROWID > lastRowid for incremental sync.
+   * Get messages with ROWID > lastRowid for incremental sync.
    * Returns messages with full sender info and text extraction.
+   * @param lastRowid - Fetch messages after this ROWID
+   * @param limit - Maximum number of messages to fetch (default 2500)
    */
-  getMessagesSince(lastRowid: number): Message[] {
-    const rows = this.stmtGetMessagesSince.all(lastRowid) as MessageRow[];
+  getMessagesSince(lastRowid: number, limit: number = 2500): Message[] {
+    const rows = this.stmtGetMessagesSince.all(
+      lastRowid,
+      limit
+    ) as MessageRow[];
 
     return rows.map((row) => {
       const text = getMessageText(row.text, row.attributedBody);
@@ -232,9 +249,11 @@ export class ChatDb {
   /**
    * Build a sync batch from new messages since lastRowid.
    * Groups messages by chat and includes all referenced handles.
+   * @param lastRowid - Fetch messages after this ROWID
+   * @param limit - Maximum number of messages to fetch (default 2500)
    */
-  buildSyncBatch(lastRowid: number): SyncBatch {
-    const messages = this.getMessagesSince(lastRowid);
+  buildSyncBatch(lastRowid: number, limit: number = 2500): SyncBatch {
+    const messages = this.getMessagesSince(lastRowid, limit);
 
     if (messages.length === 0) {
       return { cursor: lastRowid, chats: [], messages: [], handles: [] };
@@ -242,7 +261,9 @@ export class ChatDb {
 
     // Fetch chats for all unique chat IDs in messages
     const chatIds = [...new Set(messages.map((m) => m.chatId))];
-    const chats = chatIds.map((id) => this.getChat(id)).filter((c): c is Chat => c !== null);
+    const chats = chatIds
+      .map((id) => this.getChat(id))
+      .filter((c): c is Chat => c !== null);
 
     // Collect handles from chat participants and message senders
     const handlesMap = new Map<number, Handle>();
@@ -257,8 +278,12 @@ export class ChatDb {
       }
     }
 
+    // Messages are ordered by ROWID, so the last one has the highest id
+    // Using array access instead of Math.max(...) to avoid stack overflow with large arrays
+    const cursor = messages[messages.length - 1].id;
+
     return {
-      cursor: Math.max(...messages.map((m) => m.id)),
+      cursor,
       chats,
       messages,
       handles: [...handlesMap.values()],
