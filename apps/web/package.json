@@ -10,6 +10,9 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@convex-dev/workos": "^0.0.1",
+    "@workos-inc/authkit-nextjs": "^2.13.0",
+    "convex": "^1.18.0",
     "next": "16.1.1",
     "react": "19.2.3",
     "react-dom": "19.2.3"
