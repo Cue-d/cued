@@ -250,7 +250,7 @@
         "Sign out and verify redirect to marketing page",
         "Sign in again and verify redirect to (app) routes"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "1.17",

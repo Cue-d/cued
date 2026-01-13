@@ -264,3 +264,32 @@ Notes:
   - Ready for task 1.16: Test auth flow end-to-end with Convex
 ---
 
+[2026-01-13 14:40] Task 1.16 - Test auth flow end-to-end with Convex
+Files: packages/convex/convex/users.ts, packages/convex/index.ts, packages/convex/package.json, apps/web/app/(app)/app/page.tsx, apps/web/app/(marketing)/page.tsx, apps/web/package.json, .gitignore, pnpm-lock.yaml
+Decisions:
+  - Created getCurrentUser Convex query using ctx.auth.getUserIdentity() to verify auth integration
+  - Built testing UI with three visual states: loading (undefined), no auth (null), authenticated (green success box)
+  - Added sign-out button using WorkOS signOut() server action for testing logout flow
+  - Added sign-in/sign-up buttons to marketing page for complete flow testing
+  - Created packages/convex/index.ts to export api for workspace consumers
+  - Added @prm/convex as workspace dependency in web app for type-safe API imports
+  - Added .turbo/ to .gitignore for Turborepo cache artifacts
+Why:
+  - Testing infrastructure enables manual verification of all auth steps without writing E2E tests
+  - Visual state indicators (green/red/gray boxes) make JWT token flow immediately visible
+  - getCurrentUser query validates that WorkOS JWT is properly passed through useAuthFromAuthKit to Convex
+  - Explicit state handling (undefined/null/object) helps debug auth issues during manual testing
+  - Package export structure follows monorepo best practices for shared Convex functions
+Notes:
+  - Code review by code-simplifier confirmed all files are clean and functional, no simplifications needed
+  - Lint and typecheck pass successfully across monorepo
+  - Auth infrastructure complete - USER MUST COMPLETE MANUAL TESTS:
+    1. Navigate to localhost:3000, click "Sign In"
+    2. Complete WorkOS OAuth flow in browser
+    3. Verify green success box appears at /app with user identity (subject, email, name)
+    4. Click "Sign Out" button and verify redirect to marketing page
+    5. Sign in again and verify redirect back to /app
+  - All verification steps from prd.json task 1.16 can now be manually executed
+  - Ready for remaining Phase 1 tasks: 1.3 (Electron), 1.4 (packages/ui), 1.5 (packages/shared), 1.17 (marketing page), 1.18 (app shell)
+---
+
