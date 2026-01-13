@@ -713,3 +713,36 @@ Notes:
   - Also created getMessages query (will be used by task 2.11)
 ---
 
+[2026-01-13 18:35] Task 2.9 - Port inbox UI to packages/ui/unified-inbox
+Files: packages/ui/src/components/unified-inbox/*, packages/ui/src/index.ts, apps/web/app/(app)/inbox/page.tsx
+Decisions:
+  - Created unified-inbox component directory with: types.ts, platform-badge.tsx, conversation-avatar.tsx, conversation-item.tsx, conversation-list.tsx
+  - Ported ChatList pattern from frontend/ but adapted for Convex InboxResult data shape
+  - Used ConversationAvatar component with smart initials: "#" for phone numbers, first letter for emails, standard initials for names
+  - Created PlatformBadge with platformConfig lookup object (iMessage green, Gmail red, Slack purple)
+  - ConversationList includes infinite scroll via onScroll handler + useCallback
+  - Inbox page uses getInboxTest temporarily (TODO: switch to getInbox when auth is linked to synced data)
+Why:
+  - Types defined locally in unified-inbox rather than importing from Convex to avoid circular deps
+  - Smart initials prevent ugly "+" avatars for phone numbers
+  - platformConfig pattern cleaner than nested ternaries
+  - useCallback + onScroll cleaner than useEffect + addEventListener
+Code Simplification (by code-simplifier agent):
+  - Removed "use client" from components without hooks (platform-badge, conversation-avatar, conversation-item)
+  - Extracted SingleAvatar helper in conversation-avatar
+  - Used platformConfig lookup instead of conditional logic
+  - Simplified formatTimestamp with Date.now()
+Browser Verification:
+  - Conversations load correctly (700+ in database)
+  - Phone number avatars show "#" instead of "+"
+  - Email avatars show first letter
+  - Platform badges visible (green "i" for iMessage)
+  - Timestamps formatted correctly (time, Yesterday, weekday, date)
+  - Selection highlighting works
+  - Infinite scroll ready (hasMore prop wired up)
+Notes:
+  - Lint and typecheck pass successfully
+  - Currently using getInboxTest because synced data owned by test user, not authenticated user
+  - Task 2.11 (conversation detail view) can now proceed
+---
+

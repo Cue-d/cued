@@ -449,6 +449,7 @@
       "category": "functional",
       "description": "Optimize message sync performance (target: 1000+ msgs/sec)",
       "steps": [
+        "Prioritize syncing recent messages first",
         "Profile current bottleneck: Electron read, network, or Convex mutation",
         "Parallelize batch uploads (send multiple batches concurrently)",
         "Increase batch size if network latency is bottleneck (test 5000-10000)",
@@ -471,7 +472,7 @@
         "Add platform badges (iMessage icon)",
         "Export from packages/ui"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "2.10",
