@@ -1,6 +1,9 @@
 @import "tailwindcss";
 @import "@prm/ui/styles/theme.css";
 
+/* Scan UI package for Tailwind classes */
+@source "../../../packages/ui/src/**/*.{ts,tsx}";
+
 @theme inline {
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
