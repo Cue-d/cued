@@ -22,34 +22,137 @@
     .container {
       text-align: center;
       padding: 2rem;
+      max-width: 400px;
     }
     h1 {
-      font-size: 3rem;
-      margin-bottom: 1rem;
+      font-size: 2.5rem;
+      margin-bottom: 0.5rem;
       font-weight: 700;
     }
-    p {
-      font-size: 1.25rem;
+    .subtitle {
+      font-size: 1rem;
+      opacity: 0.8;
+      margin-bottom: 2rem;
+    }
+    .card {
+      background: rgba(255, 255, 255, 0.1);
+      border-radius: 12px;
+      padding: 1.5rem;
+      margin-bottom: 1.5rem;
+      backdrop-filter: blur(10px);
+    }
+    .auth-status {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 0.5rem;
+      margin-bottom: 1rem;
+    }
+    .status-dot {
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      background: #ef4444;
+    }
+    .status-dot.authenticated {
+      background: #22c55e;
+    }
+    .user-info {
+      font-size: 0.9rem;
       opacity: 0.9;
-      margin-bottom: 0.5rem;
+    }
+    .user-name {
+      font-weight: 600;
+      font-size: 1.1rem;
+    }
+    button {
+      background: white;
+      color: #667eea;
+      border: none;
+      padding: 0.75rem 1.5rem;
+      border-radius: 8px;
+      font-size: 1rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: transform 0.1s, opacity 0.2s;
+      margin-top: 0.5rem;
+    }
+    button:hover {
+      transform: scale(1.02);
+    }
+    button:active {
+      transform: scale(0.98);
+    }
+    button:disabled {
+      opacity: 0.6;
+      cursor: not-allowed;
+    }
+    button.secondary {
+      background: rgba(255, 255, 255, 0.2);
+      color: white;
+    }
+    .user-code {
+      font-family: monospace;
+      font-size: 2rem;
+      font-weight: 700;
+      letter-spacing: 0.2em;
+      margin: 1rem 0;
+    }
+    .instructions {
+      font-size: 0.9rem;
+      opacity: 0.9;
     }
     .version-info {
-      margin-top: 2rem;
-      padding: 1rem;
-      background: rgba(255, 255, 255, 0.1);
-      border-radius: 8px;
-      font-size: 0.875rem;
+      font-size: 0.75rem;
+      opacity: 0.5;
+      margin-top: 1rem;
+    }
+    .hidden {
+      display: none;
     }
   </style>
 </head>
 <body>
   <div class="container">
     <h1>PRM Sync</h1>
-    <p>macOS iMessage Sync Agent</p>
-    <p>Phase 2 will implement sync logic</p>
-    <div class="version-info" id="versions">
-      <p>Loading version info...</p>
+    <p class="subtitle">macOS iMessage Sync Agent</p>
+
+    <!-- Loading State -->
+    <div id="loading" class="card">
+      <p>Loading...</p>
     </div>
+
+    <!-- Not Authenticated State -->
+    <div id="login" class="card hidden">
+      <div class="auth-status">
+        <span class="status-dot"></span>
+        <span>Not signed in</span>
+      </div>
+      <p class="instructions">Sign in to sync your iMessages with PRM</p>
+      <button id="loginBtn">Sign In</button>
+    </div>
+
+    <!-- Device Code Display (during auth) -->
+    <div id="device-code" class="card hidden">
+      <p class="instructions">Enter this code in your browser:</p>
+      <div class="user-code" id="codeDisplay">----</div>
+      <p class="instructions">A browser window should have opened automatically.</p>
+    </div>
+
+    <!-- Authenticated State -->
+    <div id="authenticated" class="card hidden">
+      <div class="auth-status">
+        <span class="status-dot authenticated"></span>
+        <span>Signed in</span>
+      </div>
+      <div class="user-info">
+        <p class="user-name" id="userName"></p>
+        <p id="userEmail"></p>
+      </div>
+      <button id="signOutBtn" class="secondary">Sign Out</button>
+    </div>
+
+    <div class="version-info" id="versions"></div>
   </div>
   <script type="module" src="./index.ts"></script>
 </body>
