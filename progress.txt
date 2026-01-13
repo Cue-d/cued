@@ -640,3 +640,47 @@ Notes:
   - Ready for task 2.8: Implement incremental sync with ROWID cursor
 ---
 
+[2026-01-13 17:44] Task 2.8 - Implement incremental sync with ROWID cursor
+Files: packages/convex/convex/sync.ts, apps/web/app/api/sync/imessage/route.ts, apps/electron/src/main/sync/sync-manager.ts
+Decisions:
+  - Added getSyncCursor query and updateSyncCursor mutation to Convex sync.ts
+  - Cursor stored as string in integrations.syncState.lastSyncCursor field
+  - Added GET /api/sync/imessage endpoint to fetch cursor from Convex
+  - POST /api/sync/imessage now persists cursor after successful batch sync
+  - SyncManager.start() fetches server cursor on first run (if authenticated)
+  - Uses Math.max(serverCursor, localCursor) to prevent sync regression
+  - Created helper functions: findUserByWorkosId, findIntegration, getOrCreateIntegration
+  - Code simplified: extracted auth helpers, reduced duplication
+Why:
+  - Server-side cursor enables cross-device sync resume (new device picks up where old left off)
+  - Local cursor as fallback ensures offline resilience
+  - Max of both cursors prevents re-syncing already-synced messages
+  - Cursor as string allows for non-numeric cursors in future (Gmail pageToken, etc.)
+Notes:
+  - All 66 tests pass (51 electron, 15 shared)
+  - Lint and typecheck pass for entire monorepo
+  - Integration table auto-created on first sync with isConnected=true
+  - Ready for task 2.9: Port inbox UI to packages/ui/unified-inbox
+---
+
+[2026-01-13 18:00] Task 1.17 - Create basic marketing page layout
+Files: apps/web/app/(marketing)/layout.tsx (new), apps/web/app/(marketing)/page.tsx, apps/web/package.json, pnpm-lock.yaml
+Decisions:
+  - Created layout.tsx with sticky header navigation and footer
+  - Updated page.tsx with hero section + 3-feature grid (Unified Inbox, AI Actions, Contact Memory)
+  - Used plain Tailwind CSS instead of @prm/ui Button component (avoids @base-ui/react SSR issues)
+  - Added @base-ui/react to web app dependencies (fixes SSR import issues for authenticated routes)
+  - Navigation uses direct Link components styled with Tailwind for simplicity
+Why:
+  - Sticky header with backdrop blur follows modern SaaS landing page patterns
+  - Feature grid highlights core value props: unified messaging, AI actions, contact memory
+  - Plain CSS styling for marketing pages avoids component library SSR complexity
+  - Consistent border-border, bg-muted, text-muted-foreground CSS variable usage
+Notes:
+  - Lint and typecheck pass
+  - Page renders correctly at localhost:3000 (verified with curl)
+  - Sign In → /sign-in, Get Started → /sign-up links work with existing auth routes
+  - Code review by code-simplifier: no changes needed, code is clean and readable
+  - Completes Phase 1 UI tasks (1.17, 1.18 already done)
+---
+

@@ -287,7 +287,7 @@
         "Style with Tailwind CSS using shadcn/ui CSS variables",
         "Verify page renders at localhost:3000"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "1.18",
@@ -426,7 +426,7 @@
         "Electron updates local cursor",
         "Verify only new messages synced on subsequent runs"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "2.9",

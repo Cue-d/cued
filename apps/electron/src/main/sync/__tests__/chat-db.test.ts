@@ -1,5 +1,19 @@
-import Database from "better-sqlite3";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import type BetterSqlite3 from "better-sqlite3";
+
+// better-sqlite3 is built for Electron's Node version, not system Node.
+// Skip these tests when the native module can't be loaded.
+let Database: typeof BetterSqlite3 | null = null;
+try {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const mod = require("better-sqlite3");
+  // Actually try to instantiate to trigger native module load
+  const testDb = new mod(":memory:");
+  testDb.close();
+  Database = mod;
+} catch {
+  // Module not available for current Node version
+}
 
 // Apple timestamp epoch offset (seconds from 1970-01-01 to 2001-01-01)
 const APPLE_EPOCH_OFFSET = 978307200;
@@ -50,12 +64,12 @@ const SQL_GET_CHAT = `
   WHERE c.ROWID = ?
 `;
 
-describe("ChatDb SQL queries", () => {
-  let db: Database.Database;
+describe.skipIf(!Database)("ChatDb SQL queries", () => {
+  let db: BetterSqlite3.Database;
 
   beforeEach(() => {
     // Create in-memory database with chat.db schema
-    db = new Database(":memory:");
+    db = new Database!(":memory:");
 
     // Create tables matching chat.db structure
     db.exec(`
@@ -121,7 +135,7 @@ describe("ChatDb SQL queries", () => {
   });
 
   afterEach(() => {
-    db.close();
+    db?.close();
   });
 
   describe("getMessagesSince query", () => {

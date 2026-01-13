@@ -1,0 +1,51 @@
+appId: com.prm.desktop
+productName: PRM
+copyright: Copyright © 2024-2025
+
+directories:
+  buildResources: resources
+  output: dist
+
+files:
+  - out/**/*
+  - node_modules/**/*
+  - "!node_modules/**/*.{md,ts,map}"
+  - "!node_modules/**/test/**"
+  - "!node_modules/**/docs/**"
+  - "!node_modules/**/.github/**"
+
+# Include native modules properly
+asarUnpack:
+  - node_modules/better-sqlite3/**/*
+
+# macOS configuration
+mac:
+  target:
+    - target: dmg
+      arch:
+        - arm64
+        - x64
+  category: public.app-category.productivity
+  hardenedRuntime: true
+  gatekeeperAssess: false
+  entitlements: resources/entitlements.mac.plist
+  entitlementsInherit: resources/entitlements.mac.plist
+  # Sign all files including native modules
+  signIgnore:
+    - "!node_modules/better-sqlite3/**/*.node"
+
+# DMG configuration
+dmg:
+  sign: true
+
+# Notarization (requires APPLE_ID, APPLE_APP_SPECIFIC_PASSWORD, APPLE_TEAM_ID env vars)
+afterSign: scripts/notarize.js
+
+# Rebuild native modules for Electron
+electronLanguages:
+  - en
+
+npmRebuild: true
+
+# Build hooks
+beforeBuild: scripts/rebuild-native.js

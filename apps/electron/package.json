@@ -10,7 +10,12 @@
     "preview": "electron-vite preview",
     "start": "electron-vite preview",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run"
+    "test": "vitest run",
+    "package": "electron-vite build && electron-builder --mac",
+    "package:unsigned": "electron-vite build && CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder --mac",
+    "rebuild": "npx @electron/rebuild -f -w better-sqlite3",
+    "sign:dev": "bash scripts/sign-dev.sh",
+    "postrebuild": "bash scripts/sign-dev.sh"
   },
   "dependencies": {
     "@prm/integrations": "workspace:*",
@@ -20,10 +25,12 @@
     "electron-updater": "^6.7.3"
   },
   "devDependencies": {
+    "@electron/notarize": "^2.5.0",
     "@electron/rebuild": "^4.0.2",
     "@types/better-sqlite3": "^7.6.13",
     "@types/node": "^20.14.9",
     "electron": "^39.2.7",
+    "electron-builder": "^26.0.0",
     "electron-vite": "^5.0.0",
     "typescript": "^5.7.3",
     "vite": "^6.0.11",
