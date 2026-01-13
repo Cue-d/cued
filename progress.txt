@@ -415,3 +415,26 @@ Notes:
   - Completed Phase 1 UI foundation - ready for task 1.17 (marketing page) or Phase 2 (iMessage sync)
 ---
 
+[2026-01-13 16:45] Task 2.1 - Create packages/integrations with iMessage types
+Files: packages/integrations/*, apps/electron/src/main/sync/types.ts, apps/electron/package.json, pnpm-lock.yaml
+Decisions:
+  - Created @prm/integrations package as workspace package with TypeScript
+  - Defined 7 types: Handle, Chat, Message, ChatWithMessages, SyncBatch, SyncResult, ResolvedContact
+  - Message type includes id (ROWID), chatId, text, timestamp, isFromMe, isRead, hasAttachments, sender
+  - SyncBatch bundles cursor position + chats + messages + handles for atomic sync operations
+  - Used export type * for barrel files (cleaner, auto-includes new types)
+  - Added @prm/integrations as workspace dependency in apps/electron
+  - Created sync/types.ts in Electron as local re-export point for sync modules
+Why:
+  - Types modeled after chat.db structure (backend/db/chat_db.py) for easy porting
+  - SyncBatch designed for Phase 2 incremental sync: cursor tracks ROWID progress
+  - ResolvedContact type prepares for Contacts.app integration in task 2.3
+  - Wildcard exports reduce maintenance when adding new types
+  - Separate package enables sharing types between Electron and web app
+Notes:
+  - TypeScript typecheck passes for both @prm/integrations and @prm/electron
+  - Code simplified by code-simplifier agent (wildcard exports, removed redundant comments)
+  - Ready for task 2.2: Port chat_db.py logic to TypeScript in Electron
+  - Types will be used by sync-manager, api-client, and Convex mutations
+---
+

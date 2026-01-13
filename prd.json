@@ -320,7 +320,7 @@
         "Export types from package index",
         "Verify types importable from apps/electron"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "2.2",
