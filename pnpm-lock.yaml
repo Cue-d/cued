@@ -17,6 +17,9 @@ importers:
       '@convex-dev/workos':
         specifier: ^0.0.1
         version: 0.0.1(@types/node@20.19.29)(convex@1.31.4(react@19.2.3))(jiti@2.6.1)(lightningcss@1.30.2)(react@19.2.3)(typescript@5.9.3)
+      '@prm/convex':
+        specifier: workspace:*
+        version: link:../../packages/convex
       '@workos-inc/authkit-nextjs':
         specifier: ^2.13.0
         version: 2.13.0(next@16.1.1(@babel/core@7.28.6)(react-dom@19.2.3(react@19.2.3))(react@19.2.3))(react-dom@19.2.3(react@19.2.3))(react@19.2.3)
