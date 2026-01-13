@@ -1,6 +1,25 @@
 import { defineSchema, defineTable } from "convex/server";
 import { v } from "convex/values";
 
+// Shared enum validators for type safety and reusability
+export const platformValidator = v.union(
+  v.literal("imessage"),
+  v.literal("gmail"),
+  v.literal("slack")
+);
+
+export const handleTypeValidator = v.union(
+  v.literal("phone"),
+  v.literal("email"),
+  v.literal("slack_id")
+);
+
+export const conversationTypeValidator = v.union(
+  v.literal("dm"),
+  v.literal("group"),
+  v.literal("channel")
+);
+
 const schema = defineSchema({
   // Task 1.7: Users table
   users: defineTable({
@@ -15,7 +34,7 @@ const schema = defineSchema({
   // Task 1.8: Integrations table
   integrations: defineTable({
     userId: v.id("users"),
-    platform: v.union(v.literal("imessage"), v.literal("gmail"), v.literal("slack")),
+    platform: platformValidator,
     pipedreamAccountId: v.optional(v.string()),
     syncState: v.object({
       isConnected: v.boolean(),
@@ -44,9 +63,9 @@ const schema = defineSchema({
   contactHandles: defineTable({
     userId: v.id("users"),
     contactId: v.id("contacts"),
-    handleType: v.union(v.literal("phone"), v.literal("email"), v.literal("slack_id")),
+    handleType: handleTypeValidator,
     handle: v.string(), // normalized value (e.g., E.164 phone, lowercase email)
-    platform: v.union(v.literal("imessage"), v.literal("gmail"), v.literal("slack")),
+    platform: platformValidator,
   })
     .index("by_user", ["userId"])
     .index("by_user_handle", ["userId", "handle"])
@@ -55,9 +74,9 @@ const schema = defineSchema({
   // Task 1.10: Conversations table
   conversations: defineTable({
     userId: v.id("users"),
-    platform: v.union(v.literal("imessage"), v.literal("gmail"), v.literal("slack")),
+    platform: platformValidator,
     platformConversationId: v.string(), // chat.db chat_id, Gmail threadId, Slack channel+thread
-    conversationType: v.union(v.literal("dm"), v.literal("group"), v.literal("channel")),
+    conversationType: conversationTypeValidator,
     participantContactIds: v.array(v.id("contacts")), // references to contacts table
     lastMessageText: v.optional(v.string()),
     lastMessageAt: v.optional(v.number()), // timestamp in milliseconds
