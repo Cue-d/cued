@@ -9,17 +9,21 @@
     "build": "electron-vite build",
     "preview": "electron-vite preview",
     "start": "electron-vite preview",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
   },
   "dependencies": {
     "@prm/integrations": "workspace:*",
+    "better-sqlite3": "^12.6.0",
     "electron-updater": "^6.7.3"
   },
   "devDependencies": {
+    "@types/better-sqlite3": "^7.6.13",
     "@types/node": "^20.14.9",
     "electron": "^32.3.2",
     "electron-vite": "^5.0.0",
     "typescript": "^5.7.3",
-    "vite": "^6.0.11"
+    "vite": "^6.0.11",
+    "vitest": "^2.1.8"
   }
 }
