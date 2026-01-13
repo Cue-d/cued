@@ -335,7 +335,7 @@
         "Port text extraction from attributedBody",
         "Add unit tests for SQL queries"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "2.3",
@@ -345,12 +345,12 @@
       "description": "Port contact resolver to TypeScript in Electron",
       "steps": [
         "Create apps/electron/src/main/sync/contacts.ts",
-        "Use AppleScript or native bindings to read Contacts.app",
+        "Use Swift CLI (prm-contacts) for fast contact fetching from Contacts.app",
         "Map phone numbers to contact names",
         "Cache contact lookup results",
         "Test with real contacts"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "2.4",

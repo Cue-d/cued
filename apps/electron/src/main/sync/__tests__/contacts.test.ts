@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, vi, afterEach } from "vitest";
-import { ContactsManager, ContactsError, ContactsAccessDeniedError } from "../contacts";
+import { ContactsManager, ContactsError, ContactsAccessDeniedError, isSwiftContactsAvailable } from "../contacts";
 
 // Mock fs module
 vi.mock("fs", async () => {
@@ -11,6 +11,8 @@ vi.mock("fs", async () => {
     writeFileSync: vi.fn(),
     mkdirSync: vi.fn(),
     unlinkSync: vi.fn(),
+    accessSync: vi.fn(),
+    constants: actual.constants,
   };
 });
 
@@ -24,8 +26,22 @@ vi.mock("os", () => ({
   homedir: () => "/Users/test",
 }));
 
-import { existsSync, readFileSync, writeFileSync } from "fs";
+import { existsSync, readFileSync, writeFileSync, accessSync } from "fs";
 import { execSync } from "child_process";
+
+/** Helper to create Swift CLI JSON output format */
+function createCliOutput(contacts: Array<{ name: string; phones: string[]; emails: string[]; company?: string }>) {
+  return JSON.stringify({
+    contacts: contacts.map(c => ({
+      name: c.name,
+      phones: c.phones,
+      emails: c.emails,
+      company: c.company ?? null,
+    })),
+    count: contacts.length,
+    elapsed_seconds: 0.05,
+  });
+}
 
 describe("ContactsManager", () => {
   let manager: ContactsManager;
@@ -33,6 +49,13 @@ describe("ContactsManager", () => {
   beforeEach(() => {
     manager = new ContactsManager();
     vi.clearAllMocks();
+    // Default: binary exists
+    vi.mocked(existsSync).mockImplementation((path) => {
+      if (typeof path === "string" && path.includes("prm-contacts")) {
+        return true;
+      }
+      return false;
+    });
   });
 
   afterEach(() => {
@@ -58,7 +81,15 @@ describe("ContactsManager", () => {
         },
       };
 
-      vi.mocked(existsSync).mockReturnValue(true);
+      vi.mocked(existsSync).mockImplementation((path) => {
+        if (typeof path === "string" && path.includes("contacts_cache.json")) {
+          return true;
+        }
+        if (typeof path === "string" && path.includes("prm-contacts")) {
+          return true;
+        }
+        return false;
+      });
       vi.mocked(readFileSync).mockReturnValue(JSON.stringify(cachedData));
 
       const contacts = await manager.fetchContacts();
@@ -75,12 +106,18 @@ describe("ContactsManager", () => {
         handleIndex: {},
       };
 
-      vi.mocked(existsSync).mockReturnValue(true);
+      vi.mocked(existsSync).mockImplementation((path) => {
+        if (typeof path === "string" && path.includes("contacts_cache.json")) {
+          return true;
+        }
+        if (typeof path === "string" && path.includes("prm-contacts")) {
+          return true;
+        }
+        return false;
+      });
       vi.mocked(readFileSync).mockReturnValue(JSON.stringify(expiredCache));
       vi.mocked(execSync).mockReturnValue(
-        JSON.stringify([
-          { name: "New Contact", phones: ["+15559999999"], emails: [] },
-        ])
+        createCliOutput([{ name: "New Contact", phones: ["+15559999999"], emails: [] }])
       );
 
       const contacts = await manager.fetchContacts();
@@ -90,12 +127,15 @@ describe("ContactsManager", () => {
       expect(execSync).toHaveBeenCalled();
     });
 
-    it("fetches from AppleScript when no cache exists", async () => {
-      vi.mocked(existsSync).mockReturnValue(false);
+    it("fetches from Swift CLI when no cache exists", async () => {
+      vi.mocked(existsSync).mockImplementation((path) => {
+        if (typeof path === "string" && path.includes("prm-contacts")) {
+          return true;
+        }
+        return false;
+      });
       vi.mocked(execSync).mockReturnValue(
-        JSON.stringify([
-          { name: "Jane Smith", company: "Tech Co", phones: ["+15551111111"], emails: ["jane@tech.co"] },
-        ])
+        createCliOutput([{ name: "Jane Smith", company: "Tech Co", phones: ["+15551111111"], emails: ["jane@tech.co"] }])
       );
 
       const contacts = await manager.fetchContacts();
@@ -114,10 +154,18 @@ describe("ContactsManager", () => {
         handleIndex: {},
       };
 
-      vi.mocked(existsSync).mockReturnValue(true);
+      vi.mocked(existsSync).mockImplementation((path) => {
+        if (typeof path === "string" && path.includes("contacts_cache.json")) {
+          return true;
+        }
+        if (typeof path === "string" && path.includes("prm-contacts")) {
+          return true;
+        }
+        return false;
+      });
       vi.mocked(readFileSync).mockReturnValue(JSON.stringify(cachedData));
       vi.mocked(execSync).mockReturnValue(
-        JSON.stringify([{ name: "Fresh", phones: [], emails: [] }])
+        createCliOutput([{ name: "Fresh", phones: [], emails: [] }])
       );
 
       const contacts = await manager.fetchContacts(true);
@@ -129,9 +177,14 @@ describe("ContactsManager", () => {
 
   describe("resolveHandle", () => {
     beforeEach(async () => {
-      vi.mocked(existsSync).mockReturnValue(false);
+      vi.mocked(existsSync).mockImplementation((path) => {
+        if (typeof path === "string" && path.includes("prm-contacts")) {
+          return true;
+        }
+        return false;
+      });
       vi.mocked(execSync).mockReturnValue(
-        JSON.stringify([
+        createCliOutput([
           { name: "Alice", phones: ["+15551234567", "+15559876543"], emails: ["alice@example.com"] },
           { name: "Bob", phones: ["555-111-2222"], emails: ["bob@work.com", "bob@personal.com"] },
         ])
@@ -185,9 +238,14 @@ describe("ContactsManager", () => {
 
   describe("resolveHandles", () => {
     beforeEach(async () => {
-      vi.mocked(existsSync).mockReturnValue(false);
+      vi.mocked(existsSync).mockImplementation((path) => {
+        if (typeof path === "string" && path.includes("prm-contacts")) {
+          return true;
+        }
+        return false;
+      });
       vi.mocked(execSync).mockReturnValue(
-        JSON.stringify([
+        createCliOutput([
           { name: "Alice", phones: ["+15551234567"], emails: [] },
           { name: "Bob", phones: ["+15559999999"], emails: [] },
         ])
@@ -207,11 +265,14 @@ describe("ContactsManager", () => {
 
   describe("getContact", () => {
     beforeEach(async () => {
-      vi.mocked(existsSync).mockReturnValue(false);
+      vi.mocked(existsSync).mockImplementation((path) => {
+        if (typeof path === "string" && path.includes("prm-contacts")) {
+          return true;
+        }
+        return false;
+      });
       vi.mocked(execSync).mockReturnValue(
-        JSON.stringify([
-          { name: "Alice", company: "Acme", phones: ["+15551234567"], emails: ["alice@acme.com"] },
-        ])
+        createCliOutput([{ name: "Alice", company: "Acme", phones: ["+15551234567"], emails: ["alice@acme.com"] }])
       );
       await manager.fetchContacts();
     });
@@ -232,23 +293,46 @@ describe("ContactsManager", () => {
   });
 
   describe("error handling", () => {
-    it("throws ContactsAccessDeniedError when access denied", async () => {
+    it("throws ContactsError when binary not found", async () => {
       vi.mocked(existsSync).mockReturnValue(false);
+
+      await expect(manager.fetchContacts()).rejects.toThrow(ContactsError);
+      await expect(manager.fetchContacts()).rejects.toThrow(/binary not found/);
+    });
+
+    it("throws ContactsAccessDeniedError when exit code 2", async () => {
+      vi.mocked(existsSync).mockImplementation((path) => {
+        if (typeof path === "string" && path.includes("prm-contacts")) {
+          return true;
+        }
+        return false;
+      });
       vi.mocked(execSync).mockImplementation(() => {
-        const error = new Error("Script Error: Contacts is not allowed assistive access");
+        const error = new Error("Command failed") as Error & { status: number; stderr: string };
+        error.status = 2;
+        error.stderr = JSON.stringify({ error: "Contacts access denied" });
         throw error;
       });
 
       await expect(manager.fetchContacts()).rejects.toThrow(ContactsAccessDeniedError);
     });
 
-    it("throws ContactsError for other errors", async () => {
-      vi.mocked(existsSync).mockReturnValue(false);
+    it("throws ContactsError for other exit codes", async () => {
+      vi.mocked(existsSync).mockImplementation((path) => {
+        if (typeof path === "string" && path.includes("prm-contacts")) {
+          return true;
+        }
+        return false;
+      });
       vi.mocked(execSync).mockImplementation(() => {
-        throw new Error("Some other error");
+        const error = new Error("Command failed") as Error & { status: number; stderr: string };
+        error.status = 1;
+        error.stderr = JSON.stringify({ error: "Some other error" });
+        throw error;
       });
 
       await expect(manager.fetchContacts()).rejects.toThrow(ContactsError);
+      await expect(manager.fetchContacts()).rejects.toThrow("Some other error");
     });
   });
 
@@ -258,8 +342,13 @@ describe("ContactsManager", () => {
     });
 
     it("isCacheLoaded returns true after fetch", async () => {
-      vi.mocked(existsSync).mockReturnValue(false);
-      vi.mocked(execSync).mockReturnValue(JSON.stringify([]));
+      vi.mocked(existsSync).mockImplementation((path) => {
+        if (typeof path === "string" && path.includes("prm-contacts")) {
+          return true;
+        }
+        return false;
+      });
+      vi.mocked(execSync).mockReturnValue(createCliOutput([]));
 
       await manager.fetchContacts();
 
@@ -267,9 +356,14 @@ describe("ContactsManager", () => {
     });
 
     it("getCacheSize returns contact count", async () => {
-      vi.mocked(existsSync).mockReturnValue(false);
+      vi.mocked(existsSync).mockImplementation((path) => {
+        if (typeof path === "string" && path.includes("prm-contacts")) {
+          return true;
+        }
+        return false;
+      });
       vi.mocked(execSync).mockReturnValue(
-        JSON.stringify([
+        createCliOutput([
           { name: "A", phones: ["1"], emails: [] },
           { name: "B", phones: ["2"], emails: [] },
         ])
@@ -281,8 +375,13 @@ describe("ContactsManager", () => {
     });
 
     it("clearMemoryCache resets state", async () => {
-      vi.mocked(existsSync).mockReturnValue(false);
-      vi.mocked(execSync).mockReturnValue(JSON.stringify([{ name: "Test", phones: ["1"], emails: [] }]));
+      vi.mocked(existsSync).mockImplementation((path) => {
+        if (typeof path === "string" && path.includes("prm-contacts")) {
+          return true;
+        }
+        return false;
+      });
+      vi.mocked(execSync).mockReturnValue(createCliOutput([{ name: "Test", phones: ["1"], emails: [] }]));
 
       await manager.fetchContacts();
       expect(manager.isCacheLoaded()).toBe(true);
@@ -290,6 +389,27 @@ describe("ContactsManager", () => {
       manager.clearMemoryCache();
       expect(manager.isCacheLoaded()).toBe(false);
     });
+  });
+
+  describe("getBinaryPath", () => {
+    it("returns the binary path", () => {
+      const path = manager.getBinaryPath();
+      expect(path).toContain("prm-contacts");
+    });
+  });
+});
+
+describe("isSwiftContactsAvailable", () => {
+  it("returns true when binary is executable", () => {
+    vi.mocked(accessSync).mockImplementation(() => {});
+    expect(isSwiftContactsAvailable()).toBe(true);
+  });
+
+  it("returns false when binary is not executable", () => {
+    vi.mocked(accessSync).mockImplementation(() => {
+      throw new Error("ENOENT");
+    });
+    expect(isSwiftContactsAvailable()).toBe(false);
   });
 });
 
