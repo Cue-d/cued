@@ -51,22 +51,43 @@
         "Create placeholder sync/ directory",
         "Verify electron app launches"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "1.4",
       "phase": 1,
       "mode": "hitl",
       "category": "architectural",
-      "description": "Create packages/ui with shadcn/ui setup",
+      "description": "Create packages/ui with shadcn/ui setup and full CSS variable configuration",
+      "reference": "https://ui.shadcn.com/docs/installation/manual",
       "steps": [
         "Create packages/ui directory",
         "Initialize with React and TypeScript",
-        "Run `pnpm dlx shadcn@latest init`",
+        "Run `pnpm dlx shadcn@latest init` with New York style and zinc base color",
+        "Configure globals.css with all CSS variables: --background, --foreground, --card, --popover, --primary, --secondary, --muted, --accent, --destructive, --border, --input, --ring",
+        "Add sidebar CSS variables: --sidebar-background, --sidebar-foreground, --sidebar-primary, --sidebar-primary-foreground, --sidebar-accent, --sidebar-accent-foreground, --sidebar-border, --sidebar-ring",
+        "Add chart CSS variables: --chart-1 through --chart-5 for both light and dark themes",
         "Add button component as test: `pnpm dlx shadcn@latest add button`",
-        "Export components from package index"
+        "Export components from package index with consistent @/components/ui import paths"
       ],
       "passes": true
+    },
+    {
+      "id": "1.4b",
+      "phase": 1,
+      "mode": "hitl",
+      "category": "architectural",
+      "description": "Verify shadcn/ui configuration across monorepo",
+      "reference": "https://ui.shadcn.com/docs/theming",
+      "steps": [
+        "Verify packages/ui/components.json exists with correct aliases: { '@/components': './src/components', '@/lib': './src/lib' }",
+        "Verify apps/web can import from @repo/ui package",
+        "Verify tailwind.config.ts extends packages/ui theme variables",
+        "Verify CSS variables include sidebar-* and chart-* in both :root and .dark",
+        "Test dark mode toggle applies all variable changes correctly",
+        "Run `pnpm lint && pnpm typecheck` to verify no import errors"
+      ],
+      "passes": false
     },
     {
       "id": "1.5",
@@ -259,9 +280,11 @@
       "category": "ui",
       "description": "Create basic marketing page layout",
       "steps": [
+        "Create app/(marketing)/layout.tsx with shared navigation",
         "Create app/(marketing)/page.tsx with hero section",
-        "Add navigation with Sign In button",
-        "Style with Tailwind CSS",
+        "Import UI components from @repo/ui with consistent @/ aliases",
+        "Add navigation with Sign In button linking to /sign-in",
+        "Style with Tailwind CSS using shadcn/ui CSS variables",
         "Verify page renders at localhost:3000"
       ],
       "passes": false
@@ -271,13 +294,17 @@
       "phase": 1,
       "mode": "hitl",
       "category": "ui",
-      "description": "Create authenticated app shell with sidebar with shadcn/ui sidebar component",
+      "description": "Create authenticated app shell with sidebar using shadcn/ui sidebar component",
+      "reference": "https://ui.shadcn.com/docs/components/sidebar",
       "steps": [
-        "Create app/(app)/layout.tsx with sidebar using shadcn/ui sidebar component",
-        "Add navigation items: Inbox, Actions, Assistant, Contacts, Settings",
-        "Show user avatar and name from session",
-        "Add sign out button",
-        "Verify layout renders for authenticated users"
+        "Run `pnpm dlx shadcn@latest add sidebar` in packages/ui",
+        "Create app/(app)/layout.tsx with SidebarProvider and AppSidebar",
+        "Import sidebar components from @repo/ui using consistent @/ aliases",
+        "Add navigation items: Inbox, Actions, Assistant, Contacts, Settings using SidebarMenu",
+        "Show user avatar and name from WorkOS session using SidebarFooter",
+        "Add sign out button in SidebarFooter",
+        "Verify sidebar uses --sidebar-* CSS variables for theming",
+        "Verify layout renders for authenticated users with collapsible sidebar"
       ],
       "passes": false
     },

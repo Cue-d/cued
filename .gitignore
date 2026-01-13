@@ -58,6 +58,8 @@ electron-app/dist/
 electron-app/out/
 electron-app/release/
 electron-app/.webpack/
+apps/electron/out/
+apps/electron/dist/
 
 # ============================================================
 # Application Data & Caches
@@ -181,6 +183,10 @@ llm/.build/
 # Turborepo
 # ============================================================
 .turbo/
+
+# TypeScript build info
+tsconfig.tsbuildinfo
+**/tsconfig.tsbuildinfo
 
 # ============================================================
 # Temporary & Misc

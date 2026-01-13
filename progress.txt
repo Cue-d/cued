@@ -339,3 +339,29 @@ Notes:
   - Phone utilities can now be imported by any workspace package
 ---
 
+[2026-01-13 15:45] Task 1.3 - Create apps/electron scaffold (minimal, sync-only)
+Files: apps/electron/*, turbo.json, pnpm-lock.yaml, prd.json
+Decisions:
+  - Created apps/electron with electron-vite 5.0.0 (latest, supports Vite 6)
+  - Structured as three-process Electron app: main, preload, renderer
+  - Main process (src/main/index.ts): BrowserWindow setup, lifecycle hooks
+  - Preload (src/preload/index.ts): Secure IPC bridge with contextBridge
+  - Renderer (src/renderer/): Minimal HTML/TS placeholder with version display
+  - Created src/main/sync/ directory with README documenting future Phase 2 work
+  - Added "out/**" to turbo.json build outputs for Electron build artifacts
+  - Fixed TypeScript config to include DOM lib for renderer process
+  - Added export {} to renderer/index.ts to make it a proper module for global augmentation
+Why:
+  - electron-vite chosen over electron-forge for better Vite 6 integration and simpler config
+  - Three-process architecture follows Electron security best practices (contextIsolation)
+  - Placeholder renderer serves as "sync-only" indicator until Phase 2 UI work
+  - sync/ README documents planned ports from backend/ Python code
+  - Minimal dependencies: electron, electron-vite, electron-updater (no React yet)
+Notes:
+  - TypeScript typecheck passes successfully
+  - Build completes successfully (out/ directory generated)
+  - App launches successfully (verified with pnpm build)
+  - Blocks Phase 2 tasks: 2.2 (chat-db port), 2.3 (contacts port), 2.4 (auth flow)
+  - Ready for task 1.17 (marketing page) or 1.18 (app shell with sidebar)
+---
+
