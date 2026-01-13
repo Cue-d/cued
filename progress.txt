@@ -201,3 +201,23 @@ Notes:
   - Ready for task 1.13: Install WorkOS AuthKit and Convex auth packages
 ---
 
+[2026-01-13 14:15] Task 1.13 - Install WorkOS AuthKit and Convex auth packages
+Files: apps/web/package.json, apps/web/.env.local, pnpm-lock.yaml, prd.json, progress.txt
+Decisions:
+  - Installed @workos-inc/authkit-nextjs v2.13.0 for WorkOS authentication integration
+  - Installed @convex-dev/workos v0.0.1 for Convex+WorkOS auth bridge
+  - Installed convex v1.18.0 client for Next.js app to connect to Convex backend
+  - Added WorkOS credential placeholders to .env.local with clear instructions
+  - Set redirect URI to http://localhost:3000/callback (matches task 1.14 route config)
+Why:
+  - @workos-inc/authkit-nextjs provides handleAuth() helpers and middleware for Next.js integration
+  - @convex-dev/workos provides JWT verification and useAuthFromAuthKit hook for seamless Convex auth
+  - convex client package required for ConvexProviderWithAuth in task 1.15
+  - .env.local placeholders guide user to set up WorkOS dashboard credentials before testing
+  - Redirect URI must match WorkOS app config and Next.js route handler (task 1.14)
+Notes:
+  - pnpm lint and pnpm typecheck both pass successfully
+  - .env.local not committed (gitignored) - user must populate with real credentials from WorkOS dashboard
+  - Ready for task 1.14: Create Convex auth config and WorkOS auth routes
+---
+

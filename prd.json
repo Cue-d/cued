@@ -199,7 +199,7 @@
         "Add NEXT_PUBLIC_WORKOS_REDIRECT_URI=http://localhost:3000/callback to .env.local",
         "Verify packages installed in package.json"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "1.14",
