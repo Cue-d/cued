@@ -86,8 +86,24 @@ const schema = defineSchema({
     .index("by_user_last_message", ["userId", "lastMessageAt"])
     .index("by_platform_conversation", ["userId", "platform", "platformConversationId"]),
 
+  // Task 1.11: Messages table
+  messages: defineTable({
+    userId: v.id("users"),
+    conversationId: v.id("conversations"),
+    platform: platformValidator,
+    content: v.string(),
+    sentAt: v.number(), // timestamp in milliseconds
+    senderContactId: v.optional(v.id("contacts")), // null if isFromMe=true
+    isFromMe: v.boolean(),
+    platformMessageId: v.string(), // unique ID from source platform (ROWID, Gmail msgId, Slack ts)
+  })
+    .index("by_conversation", ["conversationId", "sentAt"])
+    .searchIndex("search_content", {
+      searchField: "content",
+      filterFields: ["userId", "conversationId"],
+    }),
+
   // Tables to be added:
-  // - messages (task 1.11)
   // - actions (task 1.12)
 });
 

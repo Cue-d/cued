@@ -167,7 +167,7 @@
         "Add index by_conversation for message retrieval",
         "Deploy and verify search index in dashboard"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "1.12",

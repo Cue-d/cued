@@ -155,3 +155,26 @@ Notes:
   - Ready for task 1.11: Define messages table with search index
 ---
 
+[2026-01-13 14:02] Task 1.11 - Define Convex schema: messages table with search index
+Files: packages/convex/convex/schema.ts, prd.json, progress.txt
+Decisions:
+  - Added messages table with userId, conversationId (FK), platform, content, sentAt fields
+  - Added senderContactId (optional, null if isFromMe), isFromMe boolean, platformMessageId fields
+  - Created by_conversation compound index on [conversationId, sentAt] for chronological message retrieval
+  - Created search_content full-text search index on content field with userId and conversationId filters
+Why:
+  - conversationId FK links messages to their conversations for thread views
+  - sentAt timestamp enables chronological sorting within conversations
+  - senderContactId optional because outgoing messages (isFromMe=true) don't have a sender contact
+  - platformMessageId enables deduplication during sync (unique ID from iMessage ROWID, Gmail msgId, Slack ts)
+  - by_conversation index is CRITICAL for message thread query performance: load messages for conversation sorted by time
+  - search_content full-text index enables fast message search filtered by user and optionally by conversation
+  - Filter fields on search index allow scoping searches to user's data and specific conversations
+Notes:
+  - Schema deployed successfully via `npx convex dev --once` (615.91ms)
+  - TypeScript typecheck passes for entire monorepo
+  - Generated types in convex/_generated/ updated with messages table and search index
+  - This completes the core unified data model for cross-platform messaging (users, integrations, contacts, conversations, messages)
+  - Ready for task 1.12: Define actions table for action queue
+---
+
