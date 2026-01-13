@@ -94,7 +94,7 @@
         "Verify convex/ directory created with _generated/",
         "Verify Convex dashboard shows project"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "1.7",

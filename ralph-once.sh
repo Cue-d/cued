@@ -1,0 +1,114 @@
+#!/bin/bash
+# ralph-once.sh - Human-in-the-loop Ralph Wiggum iteration
+# Run this manually, watch what Claude does, check the commit, run again.
+#
+# Best for: Phases 1-2 (Foundation, iMessage Sync)
+# These are high-stakes, low-reversibility tasks where architectural
+# decisions cascade through the entire codebase.
+
+set -e
+
+# Ensure PATH includes common locations for claude CLI
+export PATH="$HOME/.local/bin:$HOME/.npm-global/bin:/usr/local/bin:/opt/homebrew/bin:$PATH"
+
+# Find claude command - check common locations
+CLAUDE_CMD=""
+for loc in "$HOME/.local/bin/claude" "/usr/local/bin/claude" "/opt/homebrew/bin/claude" "$(which claude 2>/dev/null)"; do
+  if [ -x "$loc" ] 2>/dev/null; then
+    CLAUDE_CMD="$loc"
+    break
+  fi
+done
+
+if [ -z "$CLAUDE_CMD" ]; then
+  echo "========================================"
+  echo "Error: Claude CLI not found"
+  echo "========================================"
+  echo ""
+  echo "Install it with:"
+  echo "  npm install -g @anthropic-ai/claude-code"
+  echo ""
+  echo "Then run: claude --version"
+  echo ""
+  echo "If you're using Claude Code via VS Code/Cursor extension,"
+  echo "you still need to install the CLI separately for Ralph."
+  echo "========================================"
+  exit 1
+fi
+
+echo "Using Claude CLI: $CLAUDE_CMD"
+
+echo "========================================"
+echo "Ralph Wiggum - HITL Mode"
+echo "========================================"
+echo "Start time: $(date)"
+echo ""
+
+$CLAUDE_CMD --dangerously-skip-permissions "@prd.json @progress.txt \
+
+## CONTEXT
+This is PRODUCTION CODE that will be maintained long-term.
+Quality over speed. Every shortcut becomes technical debt.
+Leave the codebase better than you found it.
+
+## PRD FORMAT
+The prd.json file contains structured tasks with:
+- id: Task identifier (e.g., '1.7')
+- phase: 1-6
+- mode: 'hitl' or 'afk'
+- category: architectural, integration, functional, ui, testing
+- description: What to implement
+- steps: Verification steps (all must pass)
+- passes: false (you set to true when complete)
+
+## YOUR TASK
+1. Read prd.json and progress.txt to understand current state.
+
+2. Find tasks where passes=false. Choose the next task using this priority:
+   - Architectural decisions and core abstractions (HIGH)
+   - Integration points between modules (HIGH)
+   - Unknown unknowns and spike work (HIGH)
+   - Standard features and implementation (MEDIUM)
+   - Polish, cleanup, and quick wins (LOW)
+   Do NOT just pick the first one - pick the HIGHEST PRIORITY uncompleted task.
+
+3. Keep changes SMALL and FOCUSED:
+   - One logical change per commit
+   - If the task feels too large, break it into subtasks first
+   - Prefer multiple small commits over one large commit
+
+4. Implement the task, then verify ALL steps in the task's 'steps' array pass.
+
+5. Run ALL feedback loops:
+   - TypeScript: pnpm lint && pnpm typecheck (MUST pass)
+   - Tests: pnpm test (MUST pass if tests exist)
+   - For Python: uv run ruff check . && uv run ruff format .
+   Do NOT commit if any feedback loop fails. Fix issues first.
+
+6. Run /simplify to review and simplify the code you wrote.
+
+7. Commit with a descriptive message.
+
+8. Update prd.json: set passes=true for the completed task.
+
+9. Update progress.txt with:
+   - Date/time
+   - Task ID and description (e.g., '1.7 - Define Convex schema: users table')
+   - Files changed
+   - Key decisions made and WHY
+   - Any blockers or notes for next iteration
+   Keep entries concise.
+
+ONLY DO ONE TASK. Small steps compound into big progress."
+
+echo ""
+echo "========================================"
+echo "Ralph iteration complete."
+echo "End time: $(date)"
+echo ""
+echo "Next steps:"
+echo "  1. Review the commit: git log -1 --stat"
+echo "  2. Check progress.txt for notes"
+echo "  3. Check prd.json for updated passes status"
+echo "  4. Run again: ./ralph-once.sh"
+echo "========================================"
