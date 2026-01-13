@@ -1,0 +1,45 @@
+# PRM Cloud Refactor - Progress Log
+# ==================================
+# This file tracks completed tasks from PRM.md
+# Delete this file when the sprint is complete.
+#
+# Format per entry:
+# [YYYY-MM-DD HH:MM] Task X.Y - Short description
+# Files: list of files changed
+# Decisions: key decisions and WHY
+# Notes: blockers, observations for next iteration
+# ---
+
+[2026-01-13 13:24] Task 1.1 - Initialize Turborepo monorepo structure
+Files: turbo.json, pnpm-workspace.yaml, package.json, pnpm-lock.yaml
+Decisions:
+  - Created Turborepo config manually rather than using create-turbo since we have existing code
+  - Set up workspace pattern for apps/* and packages/* (standard Turborepo structure)
+  - Pinned packageManager to pnpm@9.15.4 for reproducibility
+  - Configured turbo.json with standard pipeline: build, dev, lint, typecheck, test
+  - Included .next/** output in anticipation of task 1.2 (Next.js app)
+Notes:
+  - Frontend/, backend/, llm/ still at root - will migrate to apps/* in subsequent tasks
+  - Turbo successfully installed and pnpm workspace recognized
+  - Ready for task 1.2: Create Next.js app in apps/web
+---
+
+[2026-01-13 13:30] Task 1.2 - Create Next.js 16 app with App Router
+Files: apps/web/*, pnpm-lock.yaml
+Decisions:
+  - Initialized Next.js 16.1.1 with App Router, TypeScript, Tailwind CSS 4, ESLint
+  - Added typecheck script (tsc --noEmit) to package.json for type safety validation
+  - Used route groups: (marketing) for public pages at /, /app for authenticated routes
+  - Updated root layout metadata for PRM branding
+  - Created minimal marketing page and placeholder app page
+  - Converted from npm to pnpm for monorepo consistency
+Why:
+  - Route groups enable shared layouts without affecting URLs (marketing vs app contexts)
+  - Tailwind 4 is latest stable version with improved performance
+  - Turbopack enabled for faster dev rebuilds
+Notes:
+  - Both pnpm lint and pnpm typecheck pass successfully
+  - Dev server runs on localhost:3000, both / and /app routes accessible
+  - Ready for tasks 1.3-1.6: Electron, packages/ui, packages/shared, packages/convex
+---
+

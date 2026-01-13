@@ -1,0 +1,1011 @@
+{
+  "project": "PRM Cloud Refactor",
+  "description": "Refactor PRM from local-first macOS Electron+FastAPI to cloud-based multi-platform personal relationship manager",
+  "target_stack": [
+    "Turborepo",
+    "Next.js",
+    "Convex",
+    "WorkOS",
+    "Pipedream",
+    "Mem0"
+  ],
+  "v1_platforms": ["iMessage", "Gmail", "Slack"],
+  "tasks": [
+    {
+      "id": "1.1",
+      "phase": 1,
+      "mode": "hitl",
+      "category": "architectural",
+      "description": "Initialize Turborepo monorepo structure",
+      "steps": [
+        "Run `npx create-turbo@latest` in project root",
+        "Verify turbo.json exists with pipeline config",
+        "Verify pnpm-workspace.yaml includes apps/* and packages/*",
+        "Run `pnpm install` successfully"
+      ],
+      "passes": true
+    },
+    {
+      "id": "1.2",
+      "phase": 1,
+      "mode": "hitl",
+      "category": "architectural",
+      "description": "Create apps/web as Next.js 16 (latest) app with App Router",
+      "steps": [
+        "Create apps/web directory with Next.js 16",
+        "Configure App Router in app/ directory",
+        "Set up (marketing) and (app) route groups",
+        "Run `pnpm dev` and verify localhost:3000 loads"
+      ],
+      "passes": true
+    },
+    {
+      "id": "1.3",
+      "phase": 1,
+      "mode": "hitl",
+      "category": "architectural",
+      "description": "Create apps/electron scaffold (minimal, sync-only)",
+      "steps": [
+        "Create apps/electron with electron-vite or electron-forge",
+        "Set up main process in src/main/",
+        "Create placeholder sync/ directory",
+        "Verify electron app launches"
+      ],
+      "passes": false
+    },
+    {
+      "id": "1.4",
+      "phase": 1,
+      "mode": "hitl",
+      "category": "architectural",
+      "description": "Create packages/ui with shadcn/ui setup",
+      "steps": [
+        "Create packages/ui directory",
+        "Initialize with React and TypeScript",
+        "Run `pnpm dlx shadcn@latest init`",
+        "Add button component as test: `pnpm dlx shadcn@latest add button`",
+        "Export components from package index"
+      ],
+      "passes": false
+    },
+    {
+      "id": "1.5",
+      "phase": 1,
+      "mode": "hitl",
+      "category": "architectural",
+      "description": "Create packages/shared with phone normalization utils",
+      "steps": [
+        "Create packages/shared directory",
+        "Port normalizePhone function from backend/utils/phone.py",
+        "Add unit tests for phone normalization",
+        "Export from package index"
+      ],
+      "passes": false
+    },
+    {
+      "id": "1.6",
+      "phase": 1,
+      "mode": "hitl",
+      "category": "architectural",
+      "description": "Create packages/convex and initialize Convex project",
+      "steps": [
+        "Create packages/convex directory",
+        "Run `npx convex dev` to initialize",
+        "Verify convex/ directory created with _generated/",
+        "Verify Convex dashboard shows project"
+      ],
+      "passes": false
+    },
+    {
+      "id": "1.7",
+      "phase": 1,
+      "mode": "hitl",
+      "category": "architectural",
+      "description": "Define Convex schema: users table",
+      "steps": [
+        "Add users table to schema.ts with workosUserId, email, name, plan fields",
+        "Add index by_workos_id on workosUserId",
+        "Add index by_email on email",
+        "Run `npx convex dev` and verify schema deploys"
+      ],
+      "passes": false
+    },
+    {
+      "id": "1.8",
+      "phase": 1,
+      "mode": "hitl",
+      "category": "architectural",
+      "description": "Define Convex schema: integrations table",
+      "steps": [
+        "Add integrations table with userId, platform, pipedreamAccountId, syncState fields",
+        "Add index by_user on userId",
+        "Add index by_user_platform on [userId, platform]",
+        "Deploy and verify in Convex dashboard"
+      ],
+      "passes": false
+    },
+    {
+      "id": "1.9",
+      "phase": 1,
+      "mode": "hitl",
+      "category": "architectural",
+      "description": "Define Convex schema: contacts and contactHandles tables",
+      "steps": [
+        "Add contacts table with userId, displayName, company, notes, importance fields",
+        "Add contactHandles table with userId, contactId, handleType, handle, platform fields",
+        "Add search index on contacts.displayName",
+        "Add index by_user_handle on contactHandles",
+        "Deploy and verify"
+      ],
+      "passes": false
+    },
+    {
+      "id": "1.10",
+      "phase": 1,
+      "mode": "hitl",
+      "category": "architectural",
+      "description": "Define Convex schema: conversations table",
+      "steps": [
+        "Add conversations table with userId, platform, platformConversationId, conversationType fields",
+        "Add participantContactIds array field",
+        "Add lastMessageText, lastMessageAt, unreadCount fields",
+        "Add index by_user_last_message for inbox sorting",
+        "Deploy and verify"
+      ],
+      "passes": false
+    },
+    {
+      "id": "1.11",
+      "phase": 1,
+      "mode": "hitl",
+      "category": "architectural",
+      "description": "Define Convex schema: messages table with search index",
+      "steps": [
+        "Add messages table with userId, conversationId, platform, content, sentAt fields",
+        "Add senderContactId, isFromMe, platformMessageId fields",
+        "Add full-text search index on content field",
+        "Add index by_conversation for message retrieval",
+        "Deploy and verify search index in dashboard"
+      ],
+      "passes": false
+    },
+    {
+      "id": "1.12",
+      "phase": 1,
+      "mode": "hitl",
+      "category": "architectural",
+      "description": "Define Convex schema: actions table",
+      "steps": [
+        "Add actions table with userId, type, status, priority fields",
+        "Add conversationId, contactId, messageId optional reference fields",
+        "Add draftMessage, reason, snoozedUntil fields",
+        "Add index by_user_status for action queue queries",
+        "Deploy and verify"
+      ],
+      "passes": false
+    },
+    {
+      "id": "1.13",
+      "phase": 1,
+      "mode": "hitl",
+      "category": "integration",
+      "description": "Install WorkOS AuthKit in apps/web",
+      "steps": [
+        "Run `pnpm add @workos-inc/authkit-nextjs` in apps/web",
+        "Add WORKOS_CLIENT_ID and WORKOS_API_KEY to .env.local",
+        "Add WORKOS_REDIRECT_URI pointing to localhost callback",
+        "Verify package installed in package.json"
+      ],
+      "passes": false
+    },
+    {
+      "id": "1.14",
+      "phase": 1,
+      "mode": "hitl",
+      "category": "integration",
+      "description": "Create WorkOS auth routes",
+      "steps": [
+        "Create app/api/auth/[...workos]/route.ts",
+        "Export GET and POST handlers from handleAuth()",
+        "Configure callbacks for user creation in Convex",
+        "Verify /api/auth/login redirects to WorkOS"
+      ],
+      "passes": false
+    },
+    {
+      "id": "1.15",
+      "phase": 1,
+      "mode": "hitl",
+      "category": "integration",
+      "description": "Create auth middleware for protected routes",
+      "steps": [
+        "Create middleware.ts in apps/web root",
+        "Use withAuth from @workos-inc/authkit-nextjs",
+        "Configure matcher for /(app)/* routes",
+        "Verify unauthenticated users redirect to login"
+      ],
+      "passes": false
+    },
+    {
+      "id": "1.16",
+      "phase": 1,
+      "mode": "hitl",
+      "category": "functional",
+      "description": "Test auth flow end-to-end",
+      "steps": [
+        "Sign up with a new email via WorkOS",
+        "Verify user created in Convex users table",
+        "Sign out and verify redirect to marketing page",
+        "Sign in again and verify redirect to app"
+      ],
+      "passes": false
+    },
+    {
+      "id": "1.17",
+      "phase": 1,
+      "mode": "hitl",
+      "category": "ui",
+      "description": "Create basic marketing page layout",
+      "steps": [
+        "Create app/(marketing)/page.tsx with hero section",
+        "Add navigation with Sign In button",
+        "Style with Tailwind CSS",
+        "Verify page renders at localhost:3000"
+      ],
+      "passes": false
+    },
+    {
+      "id": "1.18",
+      "phase": 1,
+      "mode": "hitl",
+      "category": "ui",
+      "description": "Create authenticated app shell with sidebar",
+      "steps": [
+        "Create app/(app)/layout.tsx with sidebar",
+        "Add navigation items: Inbox, Actions, Assistant, Contacts, Settings",
+        "Show user avatar and name from session",
+        "Add sign out button",
+        "Verify layout renders for authenticated users"
+      ],
+      "passes": false
+    },
+    {
+      "id": "2.1",
+      "phase": 2,
+      "mode": "hitl",
+      "category": "architectural",
+      "description": "Create packages/integrations with iMessage types",
+      "steps": [
+        "Create packages/integrations directory",
+        "Define iMessage types: Message, Chat, Handle, SyncBatch",
+        "Export types from package index",
+        "Verify types importable from apps/electron"
+      ],
+      "passes": false
+    },
+    {
+      "id": "2.2",
+      "phase": 2,
+      "mode": "hitl",
+      "category": "integration",
+      "description": "Port chat_db.py logic to TypeScript in Electron",
+      "steps": [
+        "Create apps/electron/src/main/sync/chat-db.ts",
+        "Implement SQLite connection to ~/Library/Messages/chat.db (read-only)",
+        "Port getMessagesSince query with ROWID cursor",
+        "Port text extraction from attributedBody",
+        "Add unit tests for SQL queries"
+      ],
+      "passes": false
+    },
+    {
+      "id": "2.3",
+      "phase": 2,
+      "mode": "hitl",
+      "category": "integration",
+      "description": "Port contact resolver to TypeScript in Electron",
+      "steps": [
+        "Create apps/electron/src/main/sync/contacts.ts",
+        "Use AppleScript or native bindings to read Contacts.app",
+        "Map phone numbers to contact names",
+        "Cache contact lookup results",
+        "Test with real contacts"
+      ],
+      "passes": false
+    },
+    {
+      "id": "2.4",
+      "phase": 2,
+      "mode": "hitl",
+      "category": "integration",
+      "description": "Create Electron auth flow (WorkOS device auth)",
+      "steps": [
+        "Implement WorkOS device authorization flow",
+        "Store auth token securely in macOS Keychain",
+        "Add token refresh logic",
+        "Show login prompt on first launch",
+        "Verify token persists across app restarts"
+      ],
+      "passes": false
+    },
+    {
+      "id": "2.5",
+      "phase": 2,
+      "mode": "hitl",
+      "category": "integration",
+      "description": "Create /api/sync/imessage POST endpoint",
+      "steps": [
+        "Create app/api/sync/imessage/route.ts",
+        "Validate auth token from Authorization header",
+        "Parse SyncBatch from request body",
+        "Call Convex mutation to upsert messages",
+        "Return new cursor position"
+      ],
+      "passes": false
+    },
+    {
+      "id": "2.6",
+      "phase": 2,
+      "mode": "hitl",
+      "category": "functional",
+      "description": "Create Convex mutation syncMessages for batch upsert",
+      "steps": [
+        "Create convex/sync.ts with syncMessages mutation",
+        "Upsert conversations by platformConversationId",
+        "Upsert messages by platformMessageId (dedup)",
+        "Resolve sender handles to contact IDs",
+        "Update conversation lastMessage fields",
+        "Test with sample batch data"
+      ],
+      "passes": false
+    },
+    {
+      "id": "2.7",
+      "phase": 2,
+      "mode": "hitl",
+      "category": "functional",
+      "description": "Create Convex mutation syncContacts for contact upsert",
+      "steps": [
+        "Create syncContacts mutation in convex/sync.ts",
+        "Upsert contacts by normalized handle",
+        "Link handles to contact records",
+        "Handle phone number variants",
+        "Test with sample contact data"
+      ],
+      "passes": false
+    },
+    {
+      "id": "2.8",
+      "phase": 2,
+      "mode": "hitl",
+      "category": "functional",
+      "description": "Implement incremental sync with ROWID cursor",
+      "steps": [
+        "Store lastSyncCursor in Convex integrations table",
+        "Electron fetches messages since cursor",
+        "API returns new cursor after successful sync",
+        "Electron updates local cursor",
+        "Verify only new messages synced on subsequent runs"
+      ],
+      "passes": false
+    },
+    {
+      "id": "2.9",
+      "phase": 2,
+      "mode": "hitl",
+      "category": "ui",
+      "description": "Port inbox UI to packages/ui/unified-inbox",
+      "steps": [
+        "Create packages/ui/components/unified-inbox/",
+        "Port ConversationList component from existing frontend",
+        "Adapt for Convex data shape",
+        "Add platform badges (iMessage icon)",
+        "Export from packages/ui"
+      ],
+      "passes": false
+    },
+    {
+      "id": "2.10",
+      "phase": 2,
+      "mode": "hitl",
+      "category": "functional",
+      "description": "Create Convex query getInbox with pagination",
+      "steps": [
+        "Create convex/messages.ts with getInbox query",
+        "Sort by lastMessageAt descending",
+        "Support limit and cursor pagination",
+        "Join participant contact names",
+        "Test query returns expected shape"
+      ],
+      "passes": false
+    },
+    {
+      "id": "2.11",
+      "phase": 2,
+      "mode": "hitl",
+      "category": "ui",
+      "description": "Create conversation detail view",
+      "steps": [
+        "Create app/(app)/inbox/[id]/page.tsx",
+        "Fetch messages for conversation",
+        "Render message thread with sender names",
+        "Show message timestamps",
+        "Style sent vs received messages differently"
+      ],
+      "passes": false
+    },
+    {
+      "id": "2.12",
+      "phase": 2,
+      "mode": "hitl",
+      "category": "functional",
+      "description": "Test full sync cycle: Electron → API → Convex → UI",
+      "steps": [
+        "Launch Electron app and authenticate",
+        "Trigger sync of recent messages",
+        "Verify messages appear in Convex dashboard",
+        "Open web app and verify inbox shows messages",
+        "Click conversation and verify messages load"
+      ],
+      "passes": false
+    },
+    {
+      "id": "3.1",
+      "phase": 3,
+      "mode": "afk",
+      "category": "architectural",
+      "description": "Create packages/ai with tool type definitions",
+      "steps": [
+        "Create packages/ai directory",
+        "Define Tool interface with name, description, parameters, execute",
+        "Define ToolResult type",
+        "Export types from package index"
+      ],
+      "passes": false
+    },
+    {
+      "id": "3.2",
+      "phase": 3,
+      "mode": "afk",
+      "category": "functional",
+      "description": "Port search_messages tool to TypeScript",
+      "steps": [
+        "Create packages/ai/tools/search-messages.ts",
+        "Port logic from backend/services/assistant/tools.py",
+        "Use Convex full-text search on messages",
+        "Return results with chat_id, text, timestamp, sender_name",
+        "Add unit tests"
+      ],
+      "passes": false
+    },
+    {
+      "id": "3.3",
+      "phase": 3,
+      "mode": "afk",
+      "category": "functional",
+      "description": "Port search_contacts tool to TypeScript",
+      "steps": [
+        "Create packages/ai/tools/search-contacts.ts",
+        "Query Convex contacts with name search",
+        "Return contact details with all handles",
+        "Add unit tests"
+      ],
+      "passes": false
+    },
+    {
+      "id": "3.4",
+      "phase": 3,
+      "mode": "afk",
+      "category": "functional",
+      "description": "Port create_action tool to TypeScript",
+      "steps": [
+        "Create packages/ai/tools/create-action.ts",
+        "Support types: respond, follow_up, send_message",
+        "Insert into Convex actions table",
+        "Return action ID and confirmation",
+        "Add unit tests"
+      ],
+      "passes": false
+    },
+    {
+      "id": "3.5",
+      "phase": 3,
+      "mode": "afk",
+      "category": "functional",
+      "description": "Port get_conversations tool to TypeScript",
+      "steps": [
+        "Create packages/ai/tools/get-conversations.ts",
+        "Query recent conversations with limit",
+        "Include last message preview",
+        "Return conversation list with IDs",
+        "Add unit tests"
+      ],
+      "passes": false
+    },
+    {
+      "id": "3.6",
+      "phase": 3,
+      "mode": "afk",
+      "category": "integration",
+      "description": "Port search_memories tool (Mem0 API client)",
+      "steps": [
+        "Create packages/ai/tools/search-memories.ts",
+        "Initialize Mem0 client with API key",
+        "Port custom prompts from mem0_service.py",
+        "Search memories with person_id filter",
+        "Return memory results",
+        "Add unit tests with mocked Mem0"
+      ],
+      "passes": false
+    },
+    {
+      "id": "3.7",
+      "phase": 3,
+      "mode": "afk",
+      "category": "integration",
+      "description": "Create /api/assistant/chat streaming route",
+      "steps": [
+        "Create app/api/assistant/chat/route.ts",
+        "Set runtime to 'edge' for streaming",
+        "Use Vercel AI SDK streamText function",
+        "Register all tools with tool executor",
+        "Return streaming response"
+      ],
+      "passes": false
+    },
+    {
+      "id": "3.8",
+      "phase": 3,
+      "mode": "afk",
+      "category": "integration",
+      "description": "Set up Vercel AI SDK with OpenAI",
+      "steps": [
+        "Install @ai-sdk/openai and ai packages",
+        "Configure OpenAI client with API key",
+        "Add ZDR endpoint config for production",
+        "Verify streaming works with test prompt"
+      ],
+      "passes": false
+    },
+    {
+      "id": "3.9",
+      "phase": 3,
+      "mode": "afk",
+      "category": "functional",
+      "description": "Port system prompt from backend/services/assistant/llm.py",
+      "steps": [
+        "Create packages/ai/prompts/system.ts",
+        "Port BASE_SYSTEM_PROMPT content",
+        "Update for Convex schema differences",
+        "Include tool usage instructions",
+        "Export for use in chat route"
+      ],
+      "passes": false
+    },
+    {
+      "id": "3.10",
+      "phase": 3,
+      "mode": "afk",
+      "category": "ui",
+      "description": "Port AssistantView component to packages/ui",
+      "steps": [
+        "Create packages/ui/components/assistant/AssistantView.tsx",
+        "Port from frontend/src/renderer/src/components/Assistant/",
+        "Adapt for Convex and new API shape",
+        "Use useChat hook from Vercel AI SDK",
+        "Export from packages/ui"
+      ],
+      "passes": false
+    },
+    {
+      "id": "3.11",
+      "phase": 3,
+      "mode": "afk",
+      "category": "ui",
+      "description": "Port ChatMessage component with artifacts",
+      "steps": [
+        "Port ChatMessage.tsx component",
+        "Port artifact rendering (search results, contacts, actions)",
+        "Style user vs assistant messages",
+        "Handle streaming state",
+        "Export from packages/ui"
+      ],
+      "passes": false
+    },
+    {
+      "id": "3.12",
+      "phase": 3,
+      "mode": "afk",
+      "category": "ui",
+      "description": "Port SuggestedPrompts component",
+      "steps": [
+        "Port SuggestedPrompts.tsx component",
+        "Update prompts for multi-platform context",
+        "Handle prompt selection",
+        "Export from packages/ui"
+      ],
+      "passes": false
+    },
+    {
+      "id": "3.13",
+      "phase": 3,
+      "mode": "afk",
+      "category": "integration",
+      "description": "Connect Mem0 service with custom prompts",
+      "steps": [
+        "Port CUSTOM_FACT_EXTRACTION_PROMPT from mem0_service.py",
+        "Configure Mem0 with OpenAI embeddings",
+        "Set up memory extraction on message sync",
+        "Test memory search returns results"
+      ],
+      "passes": false
+    },
+    {
+      "id": "3.14",
+      "phase": 3,
+      "mode": "afk",
+      "category": "functional",
+      "description": "Test assistant end-to-end",
+      "steps": [
+        "Open assistant in web app",
+        "Ask 'Who have I talked to this week?'",
+        "Verify search_messages tool called",
+        "Ask 'Create a follow-up with [contact]'",
+        "Verify action created in Convex"
+      ],
+      "passes": false
+    },
+    {
+      "id": "4.1",
+      "phase": 4,
+      "mode": "afk",
+      "category": "integration",
+      "description": "Set up Pipedream project and get API keys",
+      "steps": [
+        "Create Pipedream account if needed",
+        "Create new project for PRM",
+        "Get client ID and client secret",
+        "Add to .env.local as PIPEDREAM_CLIENT_ID and PIPEDREAM_CLIENT_SECRET"
+      ],
+      "passes": false
+    },
+    {
+      "id": "4.2",
+      "phase": 4,
+      "mode": "afk",
+      "category": "integration",
+      "description": "Create Pipedream Gmail OAuth app",
+      "steps": [
+        "Create Gmail OAuth app in Pipedream",
+        "Configure required scopes for read/send",
+        "Get OAuth app ID",
+        "Add to .env.local as PIPEDREAM_GMAIL_APP_ID"
+      ],
+      "passes": false
+    },
+    {
+      "id": "4.3",
+      "phase": 4,
+      "mode": "afk",
+      "category": "ui",
+      "description": "Create /settings/integrations page",
+      "steps": [
+        "Create app/(app)/settings/integrations/page.tsx",
+        "Show connected integrations status",
+        "Add connect/disconnect buttons for each platform",
+        "Query Convex integrations table for current state"
+      ],
+      "passes": false
+    },
+    {
+      "id": "4.4",
+      "phase": 4,
+      "mode": "afk",
+      "category": "integration",
+      "description": "Implement Gmail connect button with Pipedream SDK",
+      "steps": [
+        "Install @pipedream/connect-react",
+        "Use usePipedreamConnect hook",
+        "Implement connect flow for Gmail",
+        "Handle success/error callbacks"
+      ],
+      "passes": false
+    },
+    {
+      "id": "4.5",
+      "phase": 4,
+      "mode": "afk",
+      "category": "functional",
+      "description": "Create Convex mutation to store integration",
+      "steps": [
+        "Create convex/integrations.ts with connect mutation",
+        "Store pipedreamAccountId for user",
+        "Set isConnected to true",
+        "Update connectedAt timestamp"
+      ],
+      "passes": false
+    },
+    {
+      "id": "4.6",
+      "phase": 4,
+      "mode": "afk",
+      "category": "integration",
+      "description": "Create /api/pipedream/gmail/webhook receiver",
+      "steps": [
+        "Create app/api/pipedream/gmail/webhook/route.ts",
+        "Verify Pipedream signature",
+        "Parse Gmail message from payload",
+        "Call Convex mutation to sync message"
+      ],
+      "passes": false
+    },
+    {
+      "id": "4.7",
+      "phase": 4,
+      "mode": "afk",
+      "category": "functional",
+      "description": "Create Convex mutation syncGmailMessage",
+      "steps": [
+        "Create syncGmailMessage mutation",
+        "Map Gmail message to unified message schema",
+        "Upsert conversation by threadId",
+        "Upsert message by Gmail message ID",
+        "Resolve sender to contact"
+      ],
+      "passes": false
+    },
+    {
+      "id": "4.8",
+      "phase": 4,
+      "mode": "afk",
+      "category": "functional",
+      "description": "Create historical sync worker (Convex scheduled function)",
+      "steps": [
+        "Create convex/crons.ts with Gmail sync job",
+        "Use Pipedream proxy to fetch Gmail messages",
+        "Implement pagination with nextPageToken",
+        "Schedule to run after initial connect"
+      ],
+      "passes": false
+    },
+    {
+      "id": "4.9",
+      "phase": 4,
+      "mode": "afk",
+      "category": "functional",
+      "description": "Create sendGmailMessage in packages/integrations",
+      "steps": [
+        "Create packages/integrations/gmail.ts",
+        "Implement sendGmailMessage using Pipedream proxy",
+        "Support reply-to-thread via threadId",
+        "Return sent message ID"
+      ],
+      "passes": false
+    },
+    {
+      "id": "4.10",
+      "phase": 4,
+      "mode": "afk",
+      "category": "functional",
+      "description": "Wire Gmail send to action queue completion",
+      "steps": [
+        "Update action completion handler",
+        "Check if action has Gmail conversation",
+        "Call sendGmailMessage on swipe right",
+        "Update action status to completed"
+      ],
+      "passes": false
+    },
+    {
+      "id": "5.1",
+      "phase": 5,
+      "mode": "afk",
+      "category": "integration",
+      "description": "Create Pipedream Slack OAuth app",
+      "steps": [
+        "Create Slack OAuth app in Pipedream",
+        "Configure scopes: channels:read, chat:write, im:read, im:write",
+        "Get OAuth app ID",
+        "Add to .env.local"
+      ],
+      "passes": false
+    },
+    {
+      "id": "5.2",
+      "phase": 5,
+      "mode": "afk",
+      "category": "ui",
+      "description": "Implement Slack connect button",
+      "steps": [
+        "Add Slack to integrations page",
+        "Use Pipedream Connect for OAuth flow",
+        "Store pipedreamAccountId on success",
+        "Show connected status"
+      ],
+      "passes": false
+    },
+    {
+      "id": "5.3",
+      "phase": 5,
+      "mode": "afk",
+      "category": "integration",
+      "description": "Create /api/pipedream/slack/webhook receiver",
+      "steps": [
+        "Create app/api/pipedream/slack/webhook/route.ts",
+        "Verify Pipedream signature",
+        "Parse Slack message event",
+        "Call Convex mutation to sync message"
+      ],
+      "passes": false
+    },
+    {
+      "id": "5.4",
+      "phase": 5,
+      "mode": "afk",
+      "category": "functional",
+      "description": "Create Convex mutation syncSlackMessage",
+      "steps": [
+        "Create syncSlackMessage mutation",
+        "Map Slack message to unified schema",
+        "Handle both DM and channel messages",
+        "Upsert by Slack message ts"
+      ],
+      "passes": false
+    },
+    {
+      "id": "5.5",
+      "phase": 5,
+      "mode": "afk",
+      "category": "functional",
+      "description": "Handle Slack DMs vs channels",
+      "steps": [
+        "Detect message type from channel ID prefix",
+        "Set conversationType to 'dm' or 'channel'",
+        "Store channel name for channels",
+        "Handle thread replies with thread_ts"
+      ],
+      "passes": false
+    },
+    {
+      "id": "5.6",
+      "phase": 5,
+      "mode": "afk",
+      "category": "functional",
+      "description": "Create sendSlackMessage in packages/integrations",
+      "steps": [
+        "Create packages/integrations/slack.ts",
+        "Implement sendSlackMessage using Pipedream proxy",
+        "Support thread replies via thread_ts",
+        "Return sent message ts"
+      ],
+      "passes": false
+    },
+    {
+      "id": "5.7",
+      "phase": 5,
+      "mode": "afk",
+      "category": "functional",
+      "description": "Wire Slack send to action queue completion",
+      "steps": [
+        "Update action completion handler",
+        "Check if action has Slack conversation",
+        "Call sendSlackMessage on swipe right",
+        "Update action status to completed"
+      ],
+      "passes": false
+    },
+    {
+      "id": "6.1",
+      "phase": 6,
+      "mode": "afk",
+      "category": "ui",
+      "description": "Create contact merge UI for cross-platform resolution",
+      "steps": [
+        "Create contacts merge interface",
+        "Show potential duplicate contacts",
+        "Allow user to link handles to same contact",
+        "Update contactHandles on merge"
+      ],
+      "passes": false
+    },
+    {
+      "id": "6.2",
+      "phase": 6,
+      "mode": "afk",
+      "category": "ui",
+      "description": "Add platform filter to unified inbox",
+      "steps": [
+        "Add filter buttons: All, iMessage, Gmail, Slack",
+        "Filter inbox query by platform",
+        "Persist filter in URL params",
+        "Update conversation count per platform"
+      ],
+      "passes": false
+    },
+    {
+      "id": "6.3",
+      "phase": 6,
+      "mode": "afk",
+      "category": "ui",
+      "description": "Add platform badges to conversation list",
+      "steps": [
+        "Add platform icon next to each conversation",
+        "Use appropriate icons: Messages, Mail, Slack logos",
+        "Show in conversation list and detail view"
+      ],
+      "passes": false
+    },
+    {
+      "id": "6.4",
+      "phase": 6,
+      "mode": "afk",
+      "category": "ui",
+      "description": "Create action routing (pick platform to send from)",
+      "steps": [
+        "Show platform selector when creating action",
+        "Default to contact's most recent platform",
+        "Allow override to different platform",
+        "Validate contact has handle for selected platform"
+      ],
+      "passes": false
+    },
+    {
+      "id": "6.5",
+      "phase": 6,
+      "mode": "afk",
+      "category": "ui",
+      "description": "Add keyboard shortcuts (Cmd+K, etc.)",
+      "steps": [
+        "Implement Cmd+K for command palette",
+        "Add Cmd+1/2/3 for view switching",
+        "Add arrow keys for navigation",
+        "Show shortcuts in help menu"
+      ],
+      "passes": false
+    },
+    {
+      "id": "6.6",
+      "phase": 6,
+      "mode": "afk",
+      "category": "testing",
+      "description": "Write integration tests for sync flows",
+      "steps": [
+        "Create test for iMessage sync flow",
+        "Create test for Gmail webhook handling",
+        "Create test for Slack webhook handling",
+        "Mock external services appropriately"
+      ],
+      "passes": false
+    },
+    {
+      "id": "6.7",
+      "phase": 6,
+      "mode": "afk",
+      "category": "testing",
+      "description": "Write E2E tests for critical paths",
+      "steps": [
+        "Set up Playwright for E2E testing",
+        "Test auth flow: sign up, sign in, sign out",
+        "Test inbox navigation and message viewing",
+        "Test action creation and completion"
+      ],
+      "passes": false
+    },
+    {
+      "id": "6.8",
+      "phase": 6,
+      "mode": "afk",
+      "category": "functional",
+      "description": "Production deployment checklist",
+      "steps": [
+        "Configure Vercel production environment",
+        "Set all environment variables",
+        "Deploy Convex to production",
+        "Test auth flow in production",
+        "Verify webhook endpoints accessible",
+        "Monitor for errors in first 24 hours"
+      ],
+      "passes": false
+    }
+  ]
+}
