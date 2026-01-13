@@ -52,8 +52,22 @@ const schema = defineSchema({
     .index("by_user_handle", ["userId", "handle"])
     .index("by_contact", ["contactId"]),
 
+  // Task 1.10: Conversations table
+  conversations: defineTable({
+    userId: v.id("users"),
+    platform: v.union(v.literal("imessage"), v.literal("gmail"), v.literal("slack")),
+    platformConversationId: v.string(), // chat.db chat_id, Gmail threadId, Slack channel+thread
+    conversationType: v.union(v.literal("dm"), v.literal("group"), v.literal("channel")),
+    participantContactIds: v.array(v.id("contacts")), // references to contacts table
+    lastMessageText: v.optional(v.string()),
+    lastMessageAt: v.optional(v.number()), // timestamp in milliseconds
+    unreadCount: v.number(),
+  })
+    .index("by_user", ["userId"])
+    .index("by_user_last_message", ["userId", "lastMessageAt"])
+    .index("by_platform_conversation", ["userId", "platform", "platformConversationId"]),
+
   // Tables to be added:
-  // - conversations (task 1.10)
   // - messages (task 1.11)
   // - actions (task 1.12)
 });
