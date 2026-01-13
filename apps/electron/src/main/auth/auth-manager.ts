@@ -163,12 +163,15 @@ function tokenResponseToStoredTokens(response: TokenResponse): StoredTokens {
   const { first_name, last_name } = response.user
   const name = first_name ? [first_name, last_name].filter(Boolean).join(' ') : null
 
+  // Default to 1 hour if expires_in not provided (WorkOS doesn't always include it)
+  const expiresIn = response.expires_in || 3600
+
   return {
     accessToken: response.access_token,
     refreshToken: response.refresh_token,
     userId: response.user.id,
     email: response.user.email,
     name,
-    expiresAt: Date.now() + response.expires_in * 1000,
+    expiresAt: Date.now() + expiresIn * 1000,
   }
 }
