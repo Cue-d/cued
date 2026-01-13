@@ -16,6 +16,7 @@
     "@prm/integrations": "workspace:*",
     "@prm/shared": "workspace:*",
     "better-sqlite3": "^12.6.0",
+    "convex": "^1.18.0",
     "electron-updater": "^6.7.3"
   },
   "devDependencies": {
