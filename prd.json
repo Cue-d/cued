@@ -108,7 +108,7 @@
         "Add index by_email on email",
         "Run `npx convex dev` and verify schema deploys"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "1.8",
@@ -189,12 +189,14 @@
       "phase": 1,
       "mode": "hitl",
       "category": "integration",
-      "description": "Install WorkOS AuthKit in apps/web",
+      "description": "Install WorkOS AuthKit and Convex auth packages",
       "steps": [
-        "Run `pnpm add @workos-inc/authkit-nextjs` in apps/web",
-        "Add WORKOS_CLIENT_ID and WORKOS_API_KEY to .env.local",
-        "Add WORKOS_REDIRECT_URI pointing to localhost callback",
-        "Verify package installed in package.json"
+        "Run `pnpm add @workos-inc/authkit-nextjs @convex-dev/workos convex` in apps/web",
+        "Add WORKOS_CLIENT_ID to .env.local (from WorkOS dashboard)",
+        "Add WORKOS_API_KEY to .env.local (from WorkOS dashboard)",
+        "Add WORKOS_COOKIE_PASSWORD to .env.local (32+ char secret)",
+        "Add NEXT_PUBLIC_WORKOS_REDIRECT_URI=http://localhost:3000/callback to .env.local",
+        "Verify packages installed in package.json"
       ],
       "passes": false
     },
@@ -203,12 +205,14 @@
       "phase": 1,
       "mode": "hitl",
       "category": "integration",
-      "description": "Create WorkOS auth routes",
+      "description": "Create Convex auth config and WorkOS auth routes",
       "steps": [
-        "Create app/api/auth/[...workos]/route.ts",
-        "Export GET and POST handlers from handleAuth()",
-        "Configure callbacks for user creation in Convex",
-        "Verify /api/auth/login redirects to WorkOS"
+        "Create convex/auth.config.ts with WorkOS JWT provider using @convex-dev/workos",
+        "Create app/callback/route.ts with GET handler from handleAuth()",
+        "Create app/sign-in/route.ts with GET handler from handleAuth()",
+        "Create app/sign-up/route.ts with GET handler from handleAuth()",
+        "Run `npx convex dev` to deploy auth config",
+        "Verify /sign-in redirects to WorkOS login"
       ],
       "passes": false
     },
@@ -217,12 +221,14 @@
       "phase": 1,
       "mode": "hitl",
       "category": "integration",
-      "description": "Create auth middleware for protected routes",
+      "description": "Create middleware and ConvexClientProvider",
       "steps": [
-        "Create middleware.ts in apps/web root",
-        "Use withAuth from @workos-inc/authkit-nextjs",
-        "Configure matcher for /(app)/* routes",
-        "Verify unauthenticated users redirect to login"
+        "Create middleware.ts using authkitMiddleware from @workos-inc/authkit-nextjs",
+        "Configure matcher for protected routes: /(app)/*",
+        "Create components/ConvexClientProvider.tsx with ConvexProviderWithAuth",
+        "Use useAuthFromAuthKit hook from @convex-dev/workos/react",
+        "Wrap app layout with ConvexClientProvider",
+        "Verify unauthenticated users redirect to /sign-in"
       ],
       "passes": false
     },
@@ -231,12 +237,13 @@
       "phase": 1,
       "mode": "hitl",
       "category": "functional",
-      "description": "Test auth flow end-to-end",
+      "description": "Test auth flow end-to-end with Convex",
       "steps": [
-        "Sign up with a new email via WorkOS",
-        "Verify user created in Convex users table",
+        "Click sign-in button and complete WorkOS OAuth flow",
+        "Verify JWT token passed to Convex via useAuthFromAuthKit",
+        "Query Convex with authenticated user context (ctx.auth.getUserIdentity)",
         "Sign out and verify redirect to marketing page",
-        "Sign in again and verify redirect to app"
+        "Sign in again and verify redirect to (app) routes"
       ],
       "passes": false
     },

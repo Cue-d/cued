@@ -64,3 +64,22 @@ Notes:
   - Ready for task 1.7: Define users table schema
 ---
 
+[2026-01-13 13:49] Task 1.7 - Define Convex schema: users table
+Files: packages/convex/convex/schema.ts, prd.json
+Decisions:
+  - Added users table with workosUserId, email, name (optional), plan (optional) fields
+  - Created by_workos_id index on workosUserId for efficient user lookup by WorkOS ID
+  - Created by_email index on email for efficient user lookup by email
+  - Made name and plan optional using v.optional() to support gradual profile completion
+Why:
+  - workosUserId is the primary foreign key linking PRM users to WorkOS auth system
+  - Email index enables quick lookups during auth flows and user search
+  - Optional fields allow flexibility: users can be created with minimal data, enhanced later
+  - Indexes on both workosUserId and email ensure fast queries for both auth patterns
+Notes:
+  - Schema deployed successfully via `npx convex dev --once` (573ms)
+  - TypeScript compilation passes at both package and monorepo level
+  - Generated types in convex/_generated/ updated automatically
+  - Ready for task 1.8: Define integrations table schema
+---
+
