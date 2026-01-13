@@ -618,3 +618,25 @@ Notes:
   - Blocked on Electron code signing for end-to-end test
 ---
 
+[2026-01-13 17:38] Task 2.7 - Create Convex mutation syncContacts for contact upsert
+Files: packages/convex/convex/sync.ts, packages/convex/package.json, apps/electron/src/main/sync/test-sync-contacts.ts
+Decisions:
+  - Created syncContacts mutation accepting array of { displayName, company, phoneNumbers, emails }
+  - Upserts contacts by finding existing via any normalized handle (phone or email)
+  - Uses getPhoneVariants from @prm/shared for US/Canada phone matching (+1, 10-digit, 11-digit)
+  - Creates contactHandles for each phone/email linked to contact record
+  - Returns { contactsCount, updatedCount, handlesCount, errors } for progress tracking
+  - Added @prm/shared as workspace dependency to packages/convex for phone utilities
+  - Code simplified by code-simplifier: extracted findContactByHandle helper, spread+map for handles
+Why:
+  - Upsert-by-handle ensures same person with phone+email gets single contact record
+  - Phone variants handle common formats: 5551234567, +15551234567, 15551234567
+  - Batched sync (50/batch) avoids Convex 12s timeout for large contact lists
+  - Reusing @prm/shared avoids duplicate normalizePhone/getPhoneVariants code
+Notes:
+  - Tested with 108 real macOS contacts: 87 new, 21 updated (matched handles), 120 handles added
+  - Test script: apps/electron/src/main/sync/test-sync-contacts.ts
+  - Contacts synced in 3 batches (~2.5s total)
+  - Ready for task 2.8: Implement incremental sync with ROWID cursor
+---
+

@@ -3,6 +3,10 @@ import { v } from "convex/values";
 import type { Doc, Id } from "./_generated/dataModel";
 import type { MutationCtx } from "./_generated/server";
 import { mutation } from "./_generated/server";
+import {
+  normalizePhone,
+  getPhoneVariants as getPhoneVariantsShared,
+} from "@prm/shared";
 
 // Convex validators matching @prm/integrations SyncBatch structure
 const handleInput = v.object({
@@ -344,16 +348,186 @@ async function upsertMessage(
 
 /**
  * Normalize a handle for consistent lookups.
- * - Phone numbers: strip non-digits, keep + prefix
+ * - Phone numbers: use normalizePhone from @prm/shared
  * - Emails: lowercase
  */
 function normalizeHandle(handle: string): string {
   if (handle.includes("@")) {
     return handle.toLowerCase();
   }
+  return normalizePhone(handle);
+}
 
-  // Phone number: keep + prefix, strip other non-digits
-  const hasPlus = handle.startsWith("+");
-  const digits = handle.replace(/\D/g, "");
-  return hasPlus ? `+${digits}` : digits;
+// Validator for contact input from Electron
+const contactInput = v.object({
+  displayName: v.string(),
+  company: v.union(v.string(), v.null()),
+  phoneNumbers: v.array(v.string()),
+  emails: v.array(v.string()),
+});
+
+type ContactInput = Infer<typeof contactInput>;
+
+/**
+ * Sync contacts from macOS Contacts.app to Convex.
+ *
+ * This mutation:
+ * 1. Upserts contacts by normalized handle (finds existing by any phone/email)
+ * 2. Updates displayName and company from Contacts.app data
+ * 3. Links all handles to the contact record
+ * 4. Handles phone number variants for US/Canada numbers
+ */
+export const syncContacts = mutation({
+  args: {
+    contacts: v.array(contactInput),
+  },
+  handler: async (ctx, args) => {
+    const identity = await ctx.auth.getUserIdentity();
+    if (!identity) {
+      throw new Error("Unauthorized: Must be authenticated to sync contacts");
+    }
+
+    const user = await getOrCreateUser(ctx, identity);
+    return syncContactsInternal(ctx, user._id, args.contacts);
+  },
+});
+
+/**
+ * Test-only mutation for syncing contacts without auth (dev environment only).
+ */
+export const syncContactsTest = mutation({
+  args: {
+    contacts: v.array(contactInput),
+  },
+  handler: async (ctx, args) => {
+    const user = await getOrCreateTestUser(ctx);
+    return syncContactsInternal(ctx, user._id, args.contacts);
+  },
+});
+
+/**
+ * Internal sync logic for contacts.
+ */
+async function syncContactsInternal(
+  ctx: MutationCtx,
+  userId: Id<"users">,
+  contacts: ContactInput[]
+) {
+  const result = {
+    contactsCount: 0,
+    handlesCount: 0,
+    updatedCount: 0,
+    errors: [] as string[],
+  };
+
+  for (const contact of contacts) {
+    try {
+      const syncResult = await upsertContactWithHandles(ctx, userId, contact);
+      if (syncResult.isNew) {
+        result.contactsCount++;
+      } else {
+        result.updatedCount++;
+      }
+      result.handlesCount += syncResult.handlesAdded;
+    } catch (e) {
+      result.errors.push(`Failed to sync contact ${contact.displayName}: ${e}`);
+    }
+  }
+
+  return result;
+}
+
+/**
+ * Find an existing contact by checking all handle variants.
+ */
+async function findContactByHandle(
+  ctx: MutationCtx,
+  userId: Id<"users">,
+  handle: { value: string; type: "phone" | "email" }
+): Promise<Id<"contacts"> | null> {
+  const variants =
+    handle.type === "phone"
+      ? getPhoneVariantsShared(handle.value)
+      : [handle.value];
+
+  for (const variant of variants) {
+    const existing = await ctx.db
+      .query("contactHandles")
+      .withIndex("by_user_handle", (q) =>
+        q.eq("userId", userId).eq("handle", variant)
+      )
+      .unique();
+
+    if (existing) {
+      return existing.contactId;
+    }
+  }
+  return null;
+}
+
+/**
+ * Upsert a contact by finding existing contact via any of its handles,
+ * or creating a new one if no match found.
+ */
+async function upsertContactWithHandles(
+  ctx: MutationCtx,
+  userId: Id<"users">,
+  contact: ContactInput
+): Promise<{ isNew: boolean; handlesAdded: number }> {
+  // Collect all normalized handles
+  const handles = [
+    ...contact.phoneNumbers.map((p) => ({
+      value: normalizeHandle(p),
+      type: "phone" as const,
+    })),
+    ...contact.emails.map((e) => ({
+      value: normalizeHandle(e),
+      type: "email" as const,
+    })),
+  ];
+
+  // Find existing contact by any handle
+  let contactId: Id<"contacts"> | null = null;
+  for (const handle of handles) {
+    contactId = await findContactByHandle(ctx, userId, handle);
+    if (contactId) break;
+  }
+
+  const isNew = contactId === null;
+  const contactData = {
+    displayName: contact.displayName,
+    company: contact.company ?? undefined,
+  };
+
+  if (contactId) {
+    await ctx.db.patch(contactId, contactData);
+  } else {
+    contactId = await ctx.db.insert("contacts", { userId, ...contactData });
+  }
+
+  // Add missing handles or update mislinked ones
+  let handlesAdded = 0;
+  for (const handle of handles) {
+    const existing = await ctx.db
+      .query("contactHandles")
+      .withIndex("by_user_handle", (q) =>
+        q.eq("userId", userId).eq("handle", handle.value)
+      )
+      .unique();
+
+    if (!existing) {
+      await ctx.db.insert("contactHandles", {
+        userId,
+        contactId,
+        handleType: handle.type,
+        handle: handle.value,
+        platform: "imessage",
+      });
+      handlesAdded++;
+    } else if (existing.contactId !== contactId) {
+      await ctx.db.patch(existing._id, { contactId });
+    }
+  }
+
+  return { isNew, handlesAdded };
 }

@@ -411,7 +411,7 @@
         "Handle phone number variants",
         "Test by syncing real contacts from macOS Contacts.app"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "2.8",

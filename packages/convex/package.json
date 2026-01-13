@@ -13,7 +13,8 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "convex": "^1.18.0"
+    "convex": "^1.18.0",
+    "@prm/shared": "workspace:*"
   },
   "devDependencies": {
     "@types/node": "^22.10.5",
