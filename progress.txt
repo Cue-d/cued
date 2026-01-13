@@ -365,3 +365,26 @@ Notes:
   - Ready for task 1.17 (marketing page) or 1.18 (app shell with sidebar)
 ---
 
+[2026-01-13 16:00] Task 1.4b - Verify shadcn/ui configuration across monorepo
+Files: packages/ui/src/styles/theme.css (new), packages/ui/src/styles/globals.css, apps/web/app/globals.css, prd.json
+Decisions:
+  - Added missing sidebar CSS variables (--sidebar-background, --sidebar-foreground, etc.) for task 1.18 sidebar component
+  - Added missing chart CSS variables (--chart-1 through --chart-5) for future data visualization features
+  - Created separate theme.css file containing only CSS variables (no Tailwind import)
+  - Updated globals.css in UI package to import theme.css
+  - Updated web app globals.css to import theme.css from @prm/ui instead of full globals.css
+  - This avoids duplicate Tailwind imports (web app imports once, theme is imported separately)
+Why:
+  - Sidebar variables required for task 1.18 (authenticated app shell with sidebar component)
+  - Chart variables complete the shadcn/ui variable set for future features
+  - Separate theme.css enables consuming apps to import only variables without Tailwind duplication
+  - Single source of truth for theme variables across monorepo
+  - Dark mode handled via @media (prefers-color-scheme: dark) with full variable coverage
+Notes:
+  - All verification steps pass: components.json configured, imports work, CSS variables complete, lint/typecheck pass
+  - Code review by simplifier agent confirmed clean structure with minor optimization applied
+  - Sidebar and chart variables use same OKLCH color format as base theme for consistency
+  - Dark mode chart colors use slightly higher chroma (0.20 vs 0.15) for better visibility
+  - Ready for task 1.17 (marketing page) or 1.18 (app shell with sidebar)
+---
+

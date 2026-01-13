@@ -87,7 +87,7 @@
         "Test dark mode toggle applies all variable changes correctly",
         "Run `pnpm lint && pnpm typecheck` to verify no import errors"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "1.5",
