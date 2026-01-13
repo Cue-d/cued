@@ -122,7 +122,7 @@
         "Add index by_user_platform on [userId, platform]",
         "Deploy and verify in Convex dashboard"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "1.9",

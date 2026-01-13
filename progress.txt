@@ -83,3 +83,25 @@ Notes:
   - Ready for task 1.8: Define integrations table schema
 ---
 
+[2026-01-13 13:54] Task 1.8 - Define Convex schema: integrations table
+Files: packages/convex/convex/schema.ts, prd.json, progress.txt
+Decisions:
+  - Added integrations table with userId (FK to users), platform (union literal), pipedreamAccountId, syncState fields
+  - Used v.union with literals for platform: "imessage", "gmail", "slack" (type-safe enum)
+  - Made pipedreamAccountId optional since iMessage doesn't use Pipedream
+  - Created syncState as nested object with isConnected, lastSyncAt, lastSyncCursor, lastError
+  - Created by_user index on userId for "get all integrations for user" queries
+  - Created by_user_platform compound index on [userId, platform] for unique lookups
+Why:
+  - Union literals provide compile-time type safety for platform values vs strings
+  - Nested syncState object keeps related sync metadata grouped and easier to update atomically
+  - Optional pipedreamAccountId allows iMessage (Electron local sync) to coexist with cloud integrations
+  - Compound index enables efficient uniqueness check and "is this user+platform connected?" queries
+  - lastSyncCursor field supports incremental sync for iMessage ROWID cursor and Gmail/Slack pagination tokens
+Notes:
+  - Schema deployed successfully via `npx convex dev --once` (615ms)
+  - TypeScript typecheck passes for entire monorepo
+  - Generated types in convex/_generated/ updated with new integrations table
+  - Ready for task 1.9: Define contacts and contactHandles tables
+---
+
