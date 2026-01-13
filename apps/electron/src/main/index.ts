@@ -1,6 +1,12 @@
 import { join } from "node:path";
 import { app, BrowserWindow, ipcMain } from "electron";
-import { initAuth, getAuthState, startDeviceAuth, signOut } from "./auth";
+import {
+  initAuth,
+  getAuthState,
+  getValidAccessToken,
+  startDeviceAuth,
+  signOut,
+} from "./auth";
 import { getSyncManager, type SyncProgress } from "./sync/sync-manager";
 
 // WorkOS Client ID - should match web app config
@@ -53,6 +59,11 @@ function setupAuthIpcHandlers(): void {
           isAuthenticated: true,
           user,
         });
+
+        // Start sync with token provider
+        const syncManager = getSyncManager();
+        syncManager.setTokenProvider(getValidAccessToken);
+        syncManager.start();
       },
       onAuthError: (error) => {
         // Notify renderer of auth failure
@@ -92,10 +103,17 @@ function setupSyncIpcHandlers(): void {
   });
 }
 
-function startBackgroundSync(): void {
+async function startBackgroundSync(): Promise<void> {
   try {
+    // Check if user is authenticated before starting sync
+    const authState = getAuthState();
+    if (!authState.isAuthenticated) {
+      console.log("[Main] Not authenticated, skipping background sync");
+      return;
+    }
+
     const syncManager = getSyncManager({
-      useTestMutation: true, // Use test mutation for now (no auth required)
+      getAuthToken: getValidAccessToken,
       onProgress: (progress: SyncProgress) => {
         // Notify renderer of sync progress
         mainWindow?.webContents.send("sync:progress", progress);
@@ -104,8 +122,9 @@ function startBackgroundSync(): void {
 
     syncManager.start();
     console.log("[Main] Background sync started");
-  } catch (err: any) {
-    console.error("[Main] Failed to start background sync:", err.message);
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : String(err);
+    console.error("[Main] Failed to start background sync:", message);
     // Don't crash the app if sync fails to start
   }
 }

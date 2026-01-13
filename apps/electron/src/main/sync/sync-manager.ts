@@ -35,8 +35,7 @@ export interface SyncProgress {
 
 export interface SyncManagerOptions {
   onProgress?: (progress: SyncProgress) => void;
-  useTestMutation?: boolean; // Use syncMessagesTest (no auth) for dev
-  authToken?: string; // WorkOS access token for authenticated sync
+  getAuthToken?: () => Promise<string | null>; // Token provider that refreshes as needed
 }
 
 export class SyncManager {
@@ -56,19 +55,40 @@ export class SyncManager {
     this.options = options;
     this.client = new ConvexHttpClient(CONVEX_URL);
     this.cursorPath = path.join(app.getPath("userData"), "sync_cursor.json");
-
-    // Set auth token if provided
-    if (options.authToken) {
-      this.client.setAuth(options.authToken);
-    }
   }
 
   /**
-   * Update the auth token (e.g., after token refresh).
+   * Set the token provider function.
    */
-  setAuthToken(token: string): void {
-    this.options.authToken = token;
+  setTokenProvider(getAuthToken: () => Promise<string | null>): void {
+    this.options.getAuthToken = getAuthToken;
+  }
+
+  /**
+   * Set the progress callback.
+   */
+  setProgressCallback(onProgress: (progress: SyncProgress) => void): void {
+    this.options.onProgress = onProgress;
+  }
+
+  /**
+   * Refresh and set the auth token on the client.
+   * Returns true if a valid token was set, false otherwise.
+   */
+  private async refreshAuth(): Promise<boolean> {
+    if (!this.options.getAuthToken) {
+      console.warn("[SyncManager] No token provider configured");
+      return false;
+    }
+
+    const token = await this.options.getAuthToken();
+    if (!token) {
+      console.warn("[SyncManager] Token provider returned no token");
+      return false;
+    }
+
     this.client.setAuth(token);
+    return true;
   }
 
   /**
@@ -79,7 +99,9 @@ export class SyncManager {
 
     console.log("[SyncManager] Starting background sync...");
 
-    if (!this.isInitialized && !this.options.useTestMutation) {
+    if (!this.isInitialized) {
+      // Refresh auth before fetching cursor from server
+      await this.refreshAuth();
       await this.initializeCursorFromServer();
     }
 
@@ -141,6 +163,17 @@ export class SyncManager {
     this.updateProgress({ status: "syncing" });
 
     try {
+      // Refresh auth token before each sync cycle
+      const hasAuth = await this.refreshAuth();
+      if (!hasAuth) {
+        this.updateProgress({
+          status: "error",
+          error: "Not authenticated",
+          currentBatch: undefined,
+        });
+        return;
+      }
+
       const chatDb = this.getChatDb();
       const maxRowid = chatDb.getMaxMessageRowid();
       let cursor = this.loadCursor();
@@ -170,11 +203,9 @@ export class SyncManager {
           },
         });
 
-        const mutation = this.options.useTestMutation
-          ? api.sync.syncMessagesTest
-          : api.sync.syncMessages;
-
-        const result = await this.client.mutation(mutation, { batch });
+        const result = await this.client.mutation(api.sync.syncMessages, {
+          batch,
+        });
         const batchTime = performance.now() - batchStart;
         const rate = Math.round(result.messagesCount / (batchTime / 1000));
 
