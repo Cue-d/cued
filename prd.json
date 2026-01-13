@@ -152,7 +152,7 @@
         "Add index by_user_last_message for inbox sorting",
         "Deploy and verify"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "1.11",

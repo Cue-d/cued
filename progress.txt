@@ -130,3 +130,28 @@ Notes:
   - Ready for task 1.10: Define conversations table
 ---
 
+[2026-01-13 13:58] Task 1.10 - Define Convex schema: conversations table
+Files: packages/convex/convex/schema.ts, prd.json, progress.txt
+Decisions:
+  - Added conversations table with userId, platform, platformConversationId, conversationType fields
+  - Used conversationType union: "dm", "group", "channel" for type-safe conversation classification
+  - Added participantContactIds array of contact IDs for linking conversations to contacts
+  - Added lastMessageText, lastMessageAt, unreadCount for inbox UI sorting and preview
+  - Created by_user index for basic user filtering
+  - Created by_user_last_message compound index on [userId, lastMessageAt] for inbox sorting by recency
+  - Created by_platform_conversation compound index on [userId, platform, platformConversationId] for sync deduplication
+Why:
+  - platformConversationId enables unique identification across platforms (iMessage chat_id, Gmail threadId, Slack channel+thread)
+  - conversationType distinguishes DMs vs group chats vs Slack channels without parsing
+  - by_user_last_message index is CRITICAL for inbox query performance: sort conversations by recency DESC
+  - by_platform_conversation index enables O(1) "does this conversation exist?" during sync (prevents duplicates)
+  - participantContactIds array enables showing all participants in UI without joins
+  - lastMessageText/At enables inbox preview without separate messages query
+Notes:
+  - Schema deployed successfully via `npx convex dev --once` (639ms)
+  - TypeScript typecheck passes
+  - Generated types in convex/_generated/ updated with conversations table
+  - Code review via code-simplifier agent confirmed schema is well-structured, no simplification needed
+  - Ready for task 1.11: Define messages table with search index
+---
+
