@@ -438,3 +438,183 @@ Notes:
   - Types will be used by sync-manager, api-client, and Convex mutations
 ---
 
+[2026-01-13 15:53] Task 2.2 - Port chat_db.py logic to TypeScript in Electron
+Files: apps/electron/src/main/sync/chat-db.ts, apps/electron/src/main/sync/attributed-body.ts, apps/electron/src/main/sync/__tests__/*.ts, apps/electron/package.json, apps/electron/vitest.config.ts
+Decisions:
+  - Used better-sqlite3 for SQLite access (sync API, high performance, native bindings)
+  - Ported extractTextFromAttributedBody for Apple typedstream blob parsing (NSString marker + length prefix decoding)
+  - Created ChatDb class with prepared statements for performance (stmtGetMessagesSince, stmtGetMaxRowid, etc.)
+  - Ported all sync-relevant queries: getMessagesSince, getChat, getChatParticipants, getMaxMessageRowid, buildSyncBatch
+  - Returns typed Message/Chat/Handle/SyncBatch objects matching @prm/integrations types
+  - Apple timestamp conversion: nanoseconds since 2001-01-01 → Unix seconds
+  - Opens chat.db read-only with fileMustExist to avoid conflicts with Messages.app
+Why:
+  - better-sqlite3 chosen over node-sqlite3 for sync API (simpler code) and better performance
+  - Prepared statements cached in constructor for repeated query performance
+  - buildSyncBatch groups messages by chat and deduplicates handles for efficient sync payloads
+  - attributedBody extraction handles Apple's typedstream format when text column is NULL
+Notes:
+  - 21 unit tests pass (12 for attributed-body, 9 for chat-db SQL queries)
+  - Tests use in-memory SQLite with mock chat.db schema (no real Messages.db dependency)
+  - TypeScript typecheck passes
+  - Code simplified by code-simplifier: extracted test helpers, removed duplicate interfaces, improved loop logic
+  - Ready for task 2.3: Port contact resolver to TypeScript (Contacts.app integration)
+---
+
+[2026-01-13 16:00] Task 2.3 - Port contact resolver to TypeScript in Electron
+Files: apps/electron/src/main/sync/contacts.ts, apps/electron/src/main/sync/__tests__/contacts.test.ts, apps/electron/package.json, pnpm-lock.yaml
+Decisions:
+  - Used AppleScript via osascript subprocess (simpler than native bindings, no extra dependencies)
+  - Created ContactsManager class with async fetchContacts() and sync resolveHandle() methods
+  - Cache stored in ~/.prm/contacts_cache.json with 24h expiry (same location as Python backend)
+  - Phone lookups try variants via @prm/shared getPhoneVariants() for US/CA +1 handling
+  - Emails normalized to lowercase for case-insensitive matching
+  - Index built during cache load for O(1) handle lookups
+Why:
+  - AppleScript approach matches Python implementation (backend/services/macos/contacts.py pattern)
+  - File-based cache enables persistence across app restarts without database overhead
+  - Singleton pattern (getContactsManager()) enables shared state across sync modules
+  - Separate ContactsError and ContactsAccessDeniedError for granular error handling
+  - Code simplified by code-simplifier: extracted findContactByHandle helper, removed dynamic require
+Notes:
+  - 26 unit tests pass (cache behavior, handle resolution, error handling)
+  - Tests mock fs and child_process to avoid real Contacts.app dependency
+  - Real contact testing requires manual verification (AppleScript needs Contacts.app access)
+  - TypeScript typecheck passes for entire monorepo
+  - Ready for task 2.4: Create Electron auth flow (WorkOS device auth)
+---
+
+[2026-01-13 16:05] Task 2.3 Update - Switch from AppleScript to Swift CLI
+Files: apps/electron/src/main/sync/contacts.ts, apps/electron/src/main/sync/__tests__/contacts.test.ts, prd.json
+Decisions:
+  - Replaced AppleScript with prm-contacts Swift CLI for ~100x faster contact fetching
+  - Added getContactsBinaryPath() checking: env var > packaged app > dev path
+  - Added isSwiftContactsAvailable() helper for binary detection
+  - Swift CLI output matches Python backend format: { contacts: [...], count, elapsed_seconds }
+Why:
+  - Swift CLI uses native Contacts.framework (167ms for 108 contacts vs seconds with AppleScript)
+  - Binary path resolution matches Python backend pattern (backend/services/macos/contacts.py)
+  - Environment variable override enables custom binary paths for testing/deployment
+Notes:
+  - Tested with real contacts: 108 contacts fetched in 167ms
+  - Phone resolution verified: +16465930341 -> Justin Garvey
+  - Email resolution verified: amy@tarr.com -> Amy Tarr (case-insensitive)
+  - Unknown handles correctly return null
+  - 51 tests pass (30 for contacts, 12 for attributed-body, 9 for chat-db)
+  - Swift CLI must be built first: cd llm && swift build -c release --product prm-contacts
+---
+
+[2026-01-13 16:15] Task 2.4 - Create Electron auth flow (WorkOS device auth)
+Files: apps/electron/src/main/auth/*.ts, apps/electron/src/main/index.ts, apps/electron/src/preload/index.ts, apps/electron/src/renderer/index.{ts,html}
+Decisions:
+  - Implemented RFC 8628 device authorization grant (OAuth 2.0 device flow)
+  - Used Electron safeStorage API for secure token storage (uses macOS Keychain under the hood)
+  - Tokens stored encrypted in app userData directory (~/Library/Application Support/prm-electron/auth_tokens.enc)
+  - Implemented token refresh logic with 5-minute expiry buffer
+  - Created IPC bridge (auth:getState, auth:startLogin, auth:signOut) for renderer communication
+  - Added event-based auth state changes (auth:stateChanged, auth:userCode)
+Why:
+  - Device auth flow is ideal for desktop apps: opens browser for OAuth, polls for completion
+  - safeStorage provides cross-platform secure storage without additional dependencies
+  - IPC bridge follows Electron security best practices (contextIsolation: true)
+  - Event-based updates enable real-time UI state without polling
+Notes:
+  - WorkOS client ID hardcoded with env override (WORKOS_CLIENT_ID)
+  - Token persistence verification requires manual testing (build + restart app)
+  - UI shows 4 states: loading, login prompt, device code display, authenticated
+  - Code simplified by code-simplifier agent (removed unused functions, improved type safety)
+  - 51 tests pass (existing sync tests unaffected)
+  - Ready for task 2.5: Create /api/sync/imessage POST endpoint
+---
+
+[2026-01-13 16:38] Task 2.6 - Create Convex mutation syncMessages for batch upsert
+Files: packages/convex/convex/sync.ts, packages/convex/package.json
+Decisions:
+  - Created syncMessages mutation accepting SyncBatch input matching @prm/integrations types
+  - Upserts conversations by platformConversationId (compound index lookup)
+  - Upserts messages by platformMessageId (ROWID from chat.db) for deduplication
+  - Resolves sender handles to contact IDs, creates placeholder contact if not exists
+  - Updates conversation lastMessageText/lastMessageAt after batch processing
+  - Fixed build script to use `convex codegen` instead of `convex deploy` (avoids interactive prompt in CI)
+  - Used MutationCtx type for helper functions (proper typing vs any)
+Why:
+  - syncMessages is called by /api/sync/imessage endpoint (task 2.5) from Electron client
+  - Batch processing more efficient than individual message inserts
+  - Placeholder contacts enable future enrichment from Contacts.app data (task 2.7)
+  - lastMessage tracking enables inbox sorting without joins
+  - Normalized handles (E.164 phone, lowercase email) ensure consistent lookups
+Notes:
+  - Code simplified by code-simplifier agent: removed unused handleIdToIdentifier map, proper types
+  - TypeScript typecheck passes for entire monorepo
+  - Convex functions deployed successfully (831ms)
+  - Task 2.5 (API endpoint) and 2.7 (syncContacts) can now proceed
+  - TESTED with real iMessage data: 4 chats, 100 messages synced successfully with 0 errors
+  - Test script at apps/electron/src/main/sync/test-sync.ts uses syncMessagesTest mutation (no auth)
+---
+
+[2026-01-13 17:15] Task 2.6b - Implement batched incremental sync in Electron
+Files: apps/electron/src/main/sync/sync-manager.ts, apps/electron/src/main/index.ts, packages/convex/convex/schema.ts
+Decisions:
+  - Created SyncManager class with batched incremental sync (2500 msgs/batch, 30s interval)
+  - Cursor persistence using JSON file in app userData directory (sync_cursor.json)
+  - Added by_platform_message index on messages table for O(1) deduplication lookups
+  - IPC handlers: sync:getProgress, sync:runNow, sync:reset for renderer control
+  - Progress reporting via onProgress callback (status, batch info, errors)
+  - useTestMutation flag for dev mode (syncMessagesTest, no auth required)
+Why:
+  - 2500 msgs/batch stays under Convex 12s timeout limit (measured ~250 msgs/sec)
+  - by_platform_message index critical: original query scanned all messages (hit "Too many documents" error)
+  - Cursor persistence enables resume after app restart without full resync
+  - Singleton pattern (getSyncManager) ensures single sync instance
+Performance:
+  - 500 msgs: 2.5s (~200 msg/s)
+  - 1000 msgs: 4.7s (~211 msg/s)
+  - 2000 msgs: 9.3s (~213 msg/s)
+  - 3000 msgs: 11.7s (~250 msg/s)
+  - Practical limit: ~3000 msgs/batch before Convex timeout warnings
+Notes:
+  - Background sync wired up in index.ts: starts on app.whenReady()
+  - Electron native module issue: better-sqlite3 causes code signature crash on macOS
+  - Test script works standalone: npx tsx apps/electron/src/main/sync/test-sync.ts 1000
+  - Production Electron app will need proper code signing to use native modules
+  - Sync infrastructure complete; blocked on macOS code signing for Electron execution
+---
+
+[2026-01-13 17:30] Electron Crash Debugging - Code Signing Issue
+Root Cause:
+  - better-sqlite3 native module has invalid/missing code signature
+  - macOS 26 (SIP enabled) kills process with SIGKILL (EXC_BAD_ACCESS, Code Signature Invalid)
+  - Crash happens in dyld during dlopen when validating Mach-O binary
+Why test script works:
+  - `npx tsx` runs in Node.js directly, not inside signed Electron bundle
+  - macOS doesn't enforce strict code signing for unbundled Node.js
+Solutions (ranked):
+  1. Proper code signing with Apple Developer cert for entire Electron.app bundle
+  2. Replace better-sqlite3 with sql.js (pure WASM, no native bindings)
+  3. Subprocess architecture: spawn Node.js for sync, keep Electron for UI only
+Status:
+  - Sync infrastructure complete and tested via standalone scripts
+  - Electron app blocked until code signing resolved
+---
+
+[2026-01-13 17:35] Task 2.5 - Create /api/sync/imessage POST endpoint
+Files: apps/web/app/api/sync/imessage/route.ts, apps/web/package.json, pnpm-lock.yaml
+Decisions:
+  - Used ConvexHttpClient from convex/browser for server-side mutation calls
+  - Auth token passed from Electron via Authorization: Bearer header
+  - convex.setAuth(token) forwards JWT to Convex for identity verification
+  - Validates request body structure before calling mutation
+  - Returns SyncResult with cursor, counts, and errors
+Why:
+  - ConvexHttpClient is the standard pattern for server-side Convex calls
+  - setAuth() allows passing client-provided JWT for user identity
+  - Token validation happens in Convex mutation (ctx.auth.getUserIdentity)
+  - API route acts as thin proxy, minimal business logic
+Notes:
+  - Lint and typecheck pass for entire monorepo
+  - Added @prm/integrations as workspace dependency to web app
+  - Endpoint ready for Electron client to call
+  - Flow complete: Electron → /api/sync/imessage → Convex syncMessages mutation
+  - Blocked on Electron code signing for end-to-end test
+---
+

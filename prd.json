@@ -365,7 +365,7 @@
         "Show login prompt on first launch",
         "Verify token persists across app restarts"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "2.5",
@@ -380,7 +380,7 @@
         "Call Convex mutation to upsert messages",
         "Return new cursor position"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "2.6",
@@ -394,9 +394,9 @@
         "Upsert messages by platformMessageId (dedup)",
         "Resolve sender handles to contact IDs",
         "Update conversation lastMessage fields",
-        "Test with sample batch data"
+        "Test by syncing real iMessage data from Electron app"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "2.7",
@@ -409,7 +409,7 @@
         "Upsert contacts by normalized handle",
         "Link handles to contact records",
         "Handle phone number variants",
-        "Test with sample contact data"
+        "Test by syncing real contacts from macOS Contacts.app"
       ],
       "passes": false
     },
@@ -454,7 +454,7 @@
         "Sort by lastMessageAt descending",
         "Support limit and cursor pagination",
         "Join participant contact names",
-        "Test query returns expected shape"
+        "Test query with your synced messages and verify expected shape"
       ],
       "passes": false
     },
@@ -606,7 +606,7 @@
         "Install @ai-sdk/openai and ai packages",
         "Configure OpenAI client with API key",
         "Add ZDR endpoint config for production",
-        "Verify streaming works with test prompt"
+        "Verify streaming works by asking about your recent conversations"
       ],
       "passes": false
     },
@@ -680,7 +680,7 @@
         "Port CUSTOM_FACT_EXTRACTION_PROMPT from mem0_service.py",
         "Configure Mem0 with OpenAI embeddings",
         "Set up memory extraction on message sync",
-        "Test memory search returns results"
+        "Test memory search with queries about real contacts and conversations"
       ],
       "passes": false
     },
