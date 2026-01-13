@@ -9,7 +9,7 @@
   },
   "scripts": {
     "dev": "convex dev",
-    "build": "convex deploy --cmd 'echo Convex deploy complete'",
+    "build": "convex codegen",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
