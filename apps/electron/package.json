@@ -3,7 +3,7 @@
   "version": "0.0.1",
   "private": true,
   "description": "PRM macOS Electron app for iMessage sync",
-  "main": "dist/main/index.js",
+  "main": "out/main/index.js",
   "scripts": {
     "dev": "electron-vite dev",
     "build": "electron-vite build",

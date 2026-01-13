@@ -60,6 +60,7 @@ electron-app/release/
 electron-app/.webpack/
 apps/electron/out/
 apps/electron/dist/
+apps/electron/.electron-vite/
 
 # ============================================================
 # Application Data & Caches
