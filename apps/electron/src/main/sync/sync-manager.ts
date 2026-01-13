@@ -36,6 +36,7 @@ export interface SyncProgress {
 export interface SyncManagerOptions {
   onProgress?: (progress: SyncProgress) => void;
   useTestMutation?: boolean; // Use syncMessagesTest (no auth) for dev
+  authToken?: string; // WorkOS access token for authenticated sync
 }
 
 export class SyncManager {
@@ -43,6 +44,7 @@ export class SyncManager {
   private client: ConvexHttpClient;
   private intervalId: NodeJS.Timeout | null = null;
   private isRunning = false;
+  private isInitialized = false;
   private progress: SyncProgress = {
     status: "idle",
     totalMessagesSynced: 0,
@@ -54,17 +56,64 @@ export class SyncManager {
     this.options = options;
     this.client = new ConvexHttpClient(CONVEX_URL);
     this.cursorPath = path.join(app.getPath("userData"), "sync_cursor.json");
+
+    // Set auth token if provided
+    if (options.authToken) {
+      this.client.setAuth(options.authToken);
+    }
+  }
+
+  /**
+   * Update the auth token (e.g., after token refresh).
+   */
+  setAuthToken(token: string): void {
+    this.options.authToken = token;
+    this.client.setAuth(token);
   }
 
   /**
    * Start background sync on interval.
    */
-  start(): void {
+  async start(): Promise<void> {
     if (this.intervalId) return;
 
     console.log("[SyncManager] Starting background sync...");
-    this.runSync(); // Run immediately
+
+    if (!this.isInitialized && !this.options.useTestMutation) {
+      await this.initializeCursorFromServer();
+    }
+
+    this.runSync();
     this.intervalId = setInterval(() => this.runSync(), SYNC_INTERVAL_MS);
+  }
+
+  /**
+   * Initialize cursor from server, falling back to local if unavailable.
+   */
+  private async initializeCursorFromServer(): Promise<void> {
+    this.isInitialized = true;
+
+    try {
+      const result = await this.client.query(api.sync.getSyncCursor, {
+        platform: "imessage",
+      });
+
+      if (!result?.cursor) return;
+
+      const serverCursor = parseInt(result.cursor, 10);
+      const localCursor = this.loadCursor();
+      const cursor = Math.max(serverCursor, localCursor);
+
+      if (cursor > 0) {
+        this.saveCursor(cursor);
+        console.log(
+          `[SyncManager] Cursor initialized: ${cursor} (server: ${serverCursor}, local: ${localCursor})`
+        );
+      }
+    } catch (e: unknown) {
+      const message = e instanceof Error ? e.message : String(e);
+      console.warn("[SyncManager] Server cursor fetch failed, using local:", message);
+    }
   }
 
   /**
@@ -83,27 +132,18 @@ export class SyncManager {
    * Run a single sync cycle.
    */
   async runSync(): Promise<void> {
-    if (this.isRunning) {
-      console.log("[SyncManager] Sync already running, skipping");
-      return;
-    }
+    if (this.isRunning) return;
 
     this.isRunning = true;
     this.updateProgress({ status: "syncing" });
-    console.log("[SyncManager] runSync() starting...");
 
     try {
-      console.log("[SyncManager] Getting ChatDb...");
       const chatDb = this.getChatDb();
-      console.log("[SyncManager] ChatDb acquired successfully");
       const maxRowid = chatDb.getMaxMessageRowid();
       let cursor = this.loadCursor();
 
-      // If no cursor, start from beginning (full sync)
       if (cursor === 0) {
-        console.log(
-          `[SyncManager] Starting full sync from beginning (${maxRowid} messages)`
-        );
+        console.log(`[SyncManager] Starting full sync (${maxRowid} messages)`);
       }
 
       let batchNumber = 0;
@@ -112,16 +152,10 @@ export class SyncManager {
       while (cursor < maxRowid) {
         batchNumber++;
         const batchStart = performance.now();
-
-        // Build batch
         const batch = chatDb.buildSyncBatch(cursor);
 
-        if (batch.messages.length === 0) {
-          console.log("[SyncManager] No new messages to sync");
-          break;
-        }
+        if (batch.messages.length === 0) break;
 
-        // Limit batch size
         if (batch.messages.length > BATCH_SIZE) {
           batch.messages = batch.messages.slice(0, BATCH_SIZE);
           batch.cursor = batch.messages[batch.messages.length - 1].id;
@@ -138,29 +172,22 @@ export class SyncManager {
           },
         });
 
-        console.log(
-          `[SyncManager] Batch ${batchNumber}: ${batch.messages.length} messages (cursor ${cursor} → ${batch.cursor})`
-        );
-
-        // Sync to Convex
         const mutation = this.options.useTestMutation
           ? api.sync.syncMessagesTest
           : api.sync.syncMessages;
 
         const result = await this.client.mutation(mutation, { batch });
-
         const batchTime = performance.now() - batchStart;
         const rate = Math.round(result.messagesCount / (batchTime / 1000));
 
         console.log(
-          `[SyncManager] Batch ${batchNumber} complete: ${result.messagesCount} msgs, ${result.chatsCount} chats, ${result.errors.length} errors (${Math.round(batchTime)}ms, ${rate} msg/s)`
+          `[SyncManager] Batch ${batchNumber}: ${result.messagesCount} msgs, ${result.chatsCount} chats (${Math.round(batchTime)}ms, ${rate}/s)`
         );
 
         if (result.errors.length > 0) {
           console.warn("[SyncManager] Errors:", result.errors.slice(0, 3));
         }
 
-        // Update cursor and progress
         cursor = batch.cursor;
         this.saveCursor(cursor);
         this.updateProgress({
@@ -175,13 +202,12 @@ export class SyncManager {
         lastSyncAt: Date.now(),
         currentBatch: undefined,
       });
-
-      console.log("[SyncManager] Sync cycle complete");
-    } catch (error: any) {
-      console.error("[SyncManager] Sync error:", error.message);
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.error("[SyncManager] Sync error:", message);
       this.updateProgress({
         status: "error",
-        error: error.message,
+        error: message,
         currentBatch: undefined,
       });
     } finally {
@@ -206,13 +232,9 @@ export class SyncManager {
   }
 
   private getChatDb(): ChatDb {
-    if (this.chatDb) {
-      return this.chatDb;
+    if (!this.chatDb) {
+      this.chatDb = new ChatDb();
     }
-
-    console.log("[SyncManager] Creating new ChatDb instance...");
-    this.chatDb = new ChatDb();
-    console.log("[SyncManager] ChatDb created successfully");
     return this.chatDb;
   }
 

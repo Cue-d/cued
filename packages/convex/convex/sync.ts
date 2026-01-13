@@ -1,8 +1,9 @@
 import type { Infer } from "convex/values";
 import { v } from "convex/values";
 import type { Doc, Id } from "./_generated/dataModel";
-import type { MutationCtx } from "./_generated/server";
-import { mutation } from "./_generated/server";
+import type { MutationCtx, QueryCtx } from "./_generated/server";
+import { mutation, query } from "./_generated/server";
+import { platformValidator } from "./schema";
 import {
   normalizePhone,
   getPhoneVariants as getPhoneVariantsShared,
@@ -530,4 +531,116 @@ async function upsertContactWithHandles(
   }
 
   return { isNew, handlesAdded };
+}
+
+// ============================================================================
+// Sync Cursor Management
+// ============================================================================
+
+/**
+ * Get the sync cursor for a platform from the integrations table.
+ */
+export const getSyncCursor = query({
+  args: {
+    platform: platformValidator,
+  },
+  handler: async (ctx, args) => {
+    const identity = await ctx.auth.getUserIdentity();
+    if (!identity) return null;
+
+    const user = await findUserByWorkosId(ctx, identity.subject);
+    if (!user) return null;
+
+    const integration = await findIntegration(ctx, user._id, args.platform);
+    return {
+      cursor: integration?.syncState.lastSyncCursor ?? "0",
+      lastSyncAt: integration?.syncState.lastSyncAt ?? null,
+    };
+  },
+});
+
+/**
+ * Update the sync cursor for a platform after successful sync.
+ */
+export const updateSyncCursor = mutation({
+  args: {
+    platform: platformValidator,
+    cursor: v.string(),
+  },
+  handler: async (ctx, args) => {
+    const identity = await ctx.auth.getUserIdentity();
+    if (!identity) {
+      throw new Error("Unauthorized: Must be authenticated");
+    }
+
+    const user = await getOrCreateUser(ctx, identity);
+    const integration = await getOrCreateIntegration(
+      ctx,
+      user._id,
+      args.platform
+    );
+
+    await ctx.db.patch(integration._id, {
+      syncState: {
+        ...integration.syncState,
+        lastSyncCursor: args.cursor,
+        lastSyncAt: Date.now(),
+        lastError: undefined,
+      },
+    });
+
+    return { success: true };
+  },
+});
+
+/**
+ * Find user by WorkOS ID (for queries).
+ */
+function findUserByWorkosId(
+  ctx: QueryCtx,
+  workosUserId: string
+): Promise<Doc<"users"> | null> {
+  return ctx.db
+    .query("users")
+    .withIndex("by_workos_id", (q) => q.eq("workosUserId", workosUserId))
+    .unique();
+}
+
+/**
+ * Find integration by user and platform.
+ */
+function findIntegration(
+  ctx: QueryCtx,
+  userId: Id<"users">,
+  platform: "imessage" | "gmail" | "slack"
+): Promise<Doc<"integrations"> | null> {
+  return ctx.db
+    .query("integrations")
+    .withIndex("by_user_platform", (q) =>
+      q.eq("userId", userId).eq("platform", platform)
+    )
+    .unique();
+}
+
+/**
+ * Get or create an integration record for a user+platform.
+ */
+async function getOrCreateIntegration(
+  ctx: MutationCtx,
+  userId: Id<"users">,
+  platform: "imessage" | "gmail" | "slack"
+): Promise<Doc<"integrations">> {
+  const existing = await findIntegration(ctx, userId, platform);
+  if (existing) return existing;
+
+  const integrationId = await ctx.db.insert("integrations", {
+    userId,
+    platform,
+    syncState: {
+      isConnected: true,
+      lastSyncCursor: "0",
+    },
+  });
+
+  return (await ctx.db.get(integrationId))!;
 }
