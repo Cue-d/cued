@@ -1495,3 +1495,34 @@ Notes:
   - Remaining Phase 3 task (3.13a memory extraction on sync) is optional enhancement
   - Ready for Phase 4: Pipedream/Gmail integration
 ---
+
+[2026-01-14 13:45] Task 3.13c - Automatically extract Mem0 memories from new messages on sync
+Files:
+  - packages/convex/convex/schema.ts (add memoryExtractedAt field to messages)
+  - packages/convex/convex/memories.ts (new functions for incremental processing)
+  - apps/web/app/api/memories/sync/route.ts (new endpoint)
+Decisions:
+  - Added memoryExtractedAt timestamp to messages schema for per-message deduplication
+  - Created processNewMessagesForMemory action using per-message tracking (not cursor)
+  - Created /api/memories/sync endpoint to trigger extraction after sync
+  - Smaller batch size (25 msgs) for incremental processing vs backfill (50)
+  - Recent-first processing order for better UX with new conversations
+  - Exponential backoff on rate limits: 1s, 2s, 4s retries (MAX_RETRIES=3)
+  - hasMore flag allows caller to continue processing if needed
+Why:
+  - Per-message tracking is more robust than cursor: survives out-of-order syncs
+  - Separate endpoint (not inline in syncMessages) avoids blocking sync
+  - Recent-first ensures newest conversations get memories extracted first
+  - Exponential backoff handles Mem0 rate limits gracefully
+  - Returns hasMore so caller can loop until all messages processed
+Code Simplification (by code-simplifier agent):
+  - Extracted shared types: EnrichedMessage, MessageGroup
+  - Extracted helpers: enrichMessagesWithContext(), groupMessagesByContact()
+  - Reduced duplication between getMessagesForMemoryProcessing and getUnprocessedMessages
+  - Removed unused platform arg from getUnprocessedMessageCount
+Notes:
+  - All lint and typecheck pass for entire monorepo
+  - Convex functions deployed successfully (1.14s)
+  - Task completes Phase 3 AI integration
+  - Memory extraction can be triggered via POST /api/memories/sync with auth token
+---

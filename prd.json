@@ -868,7 +868,7 @@
         "Handle rate limits gracefully with exponential backoff",
         "Verify new conversations automatically generate searchable memories"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "3.14",
