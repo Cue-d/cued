@@ -2,11 +2,10 @@ import { streamText, tool, stepCountIs } from "ai";
 import { ConvexHttpClient } from "convex/browser";
 import { z } from "zod/v4";
 
-import { openai, DEFAULT_MODEL, SYSTEM_PROMPT } from "@prm/ai";
+import { openai, DEFAULT_MODEL, SYSTEM_PROMPT, getMemories } from "@prm/ai";
 import { api } from "@prm/convex";
 import type { Id } from "@prm/convex";
 
-// Initialize Convex client for tool execution
 const convex = new ConvexHttpClient(process.env.NEXT_PUBLIC_CONVEX_URL!);
 
 // Convert UI message format (parts) to Core message format (content)
@@ -41,25 +40,20 @@ function convertMessages(uiMessages: UIMessage[]): CoreMessage[] {
 
 export async function POST(req: Request) {
   const { messages: rawMessages } = await req.json();
-
-  // Convert from UI format (parts) to Core format (content)
   const messages = convertMessages(rawMessages);
-
-  // Get auth token from header
   const token = req.headers.get("authorization")?.replace("Bearer ", "");
 
   if (token) {
     convex.setAuth(token);
   }
 
-  // Get user identity for tool context
   let userId: string | null = null;
   if (token) {
     try {
       const user = await convex.query(api.users.getCurrentUser);
       userId = user?.subject ?? null;
     } catch {
-      // Continue without user context for unauthenticated requests
+      // Continue without user context
     }
   }
 
@@ -203,12 +197,32 @@ export async function POST(req: Request) {
             .optional()
             .describe("Filter memories about a specific contact"),
         }),
-        // eslint-disable-next-line @typescript-eslint/no-unused-vars
         execute: async ({ query, contactId }) => {
           if (!userId) return { memories: [], error: "Not authenticated" };
-          // Mem0 search requires the user_id for scoping
-          // Full implementation in task 3.13
-          return { memories: [], message: "Mem0 integration pending" };
+
+          try {
+            const memories = await getMemories(query, {
+              user_id: userId,
+              filters: contactId ? { contact_id: contactId } : undefined,
+            });
+
+            type MemoryResult = { id: string; memory?: string; score?: number };
+            const results = ((memories as MemoryResult[]) || [])
+              .filter((m) => m.memory)
+              .map((m) => ({ id: m.id, memory: m.memory, score: m.score }));
+
+            return { memories: results };
+          } catch (error) {
+            const message =
+              error instanceof Error ? error.message : "Unknown error";
+            if (
+              message.includes("API key") ||
+              message.includes("MEM0_API_KEY")
+            ) {
+              return { memories: [], error: "Mem0 not configured" };
+            }
+            return { memories: [], error: message };
+          }
         },
       }),
 
