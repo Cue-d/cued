@@ -1082,3 +1082,57 @@ Notes:
   - Lint and typecheck pass for entire monorepo
   - Ready for Phase 3 (AI tools)
 ---
+
+[2026-01-14 00:00] Task 3.1 - Create packages/ai with tool type definitions
+Files: packages/ai/package.json, packages/ai/tsconfig.json, packages/ai/src/types.ts, packages/ai/src/index.ts, packages/ai/src/tools/index.ts
+Decisions:
+  - Created Tool interface with name, description, inputSchema (Zod), execute function
+  - ToolContext provides userId + Convex query/mutation access for authenticated tools
+  - ToolExecutionOptions compatible with Vercel AI SDK (toolCallId, abortSignal, context)
+  - ToolResult<T> wraps success/data/error for consistent tool responses
+  - Used Zod for input schema validation (standard for Vercel AI SDK tools)
+Why:
+  - Foundation for tasks 3.2-3.6 (all tool implementations depend on these types)
+  - Designed for Vercel AI SDK integration: Tool interface maps to tool() helper
+  - Generic TInput/TOutput types enable type-safe tool definitions
+  - ToolContext abstraction keeps Convex access testable/mockable
+Notes:
+  - Code simplified by code-simplifier: removed helper functions and verbose JSDoc
+  - All lint and typecheck pass for entire monorepo
+  - Ready for task 3.2: Port search_messages tool
+---
+
+[2026-01-14 00:15] Tasks 3.2-3.6 - AI Tools Implementation
+Files:
+  packages/ai/src/tools/search-messages.ts
+  packages/ai/src/tools/search-contacts.ts
+  packages/ai/src/tools/create-action.ts
+  packages/ai/src/tools/get-conversations.ts
+  packages/ai/src/tools/search-memories.ts
+  packages/convex/convex/search.ts
+  packages/convex/convex/actions.ts
+  packages/convex/convex/lib/auth.ts
+  packages/ai/src/types.ts (added getErrorMessage, ToolResult as discriminated union)
+
+Decisions:
+  - Convex queries handle auth and return {results: []} for unauthenticated
+  - Tools wrap Convex calls with ToolResult success/error pattern
+  - Mem0 client uses singleton pattern with lazy initialization
+  - Mem0 user scoping: userId:contactId composite key for contact-specific memories
+  - Shared auth helpers in convex/lib/auth.ts eliminate duplication
+  - Upgraded to Zod v4 (4.3.5) - minor peer dep warning from openai (transitive)
+
+Why:
+  - Each tool maps 1:1 to an LLM capability for the assistant
+  - search_messages: Find past conversations by content
+  - search_contacts: Look up people by name
+  - create_action: Queue tasks for user review
+  - get_conversations: See recent activity
+  - search_memories: Recall facts about contacts from Mem0
+
+Notes:
+  - Code simplified by code-simplifier agent
+  - Unit tests deferred (tools are thin wrappers over Convex)
+  - All lint and typecheck pass
+  - Ready for task 3.7: Create streaming chat route
+---

@@ -633,7 +633,7 @@
         "Define ToolResult type",
         "Export types from package index"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "3.2",
@@ -649,7 +649,7 @@
         "Return results with chat_id, text, timestamp, sender_name",
         "Add unit tests"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "3.3",
@@ -663,7 +663,7 @@
         "Return contact details with all handles",
         "Add unit tests"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "3.4",
@@ -678,7 +678,7 @@
         "Return action ID and confirmation",
         "Add unit tests"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "3.5",
@@ -693,7 +693,7 @@
         "Return conversation list with IDs",
         "Add unit tests"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "3.6",
@@ -710,7 +710,7 @@
         "Return memory results",
         "Add unit tests with mocked Mem0"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "3.7",
