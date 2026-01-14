@@ -34,6 +34,14 @@ export const actionStatusValidator = v.union(
   v.literal("snoozed")
 );
 
+export const messageStatusValidator = v.union(
+  v.literal("sending"),
+  v.literal("sent"),
+  v.literal("delivered"),
+  v.literal("read"),
+  v.literal("failed")
+);
+
 const schema = defineSchema({
   // Task 1.7: Users table
   users: defineTable({
@@ -110,6 +118,30 @@ const schema = defineSchema({
     senderContactId: v.optional(v.id("contacts")), // null if isFromMe=true
     isFromMe: v.boolean(),
     platformMessageId: v.string(), // unique ID from source platform (ROWID, Gmail msgId, Slack ts)
+    // Task 2.2b: Message status and reactions
+    status: v.optional(messageStatusValidator), // sent, delivered, read, failed
+    reactions: v.optional(
+      v.array(
+        v.object({
+          emoji: v.string(),
+          contactId: v.optional(v.id("contacts")), // null if isFromMe
+          isFromMe: v.boolean(),
+          timestamp: v.number(),
+        })
+      )
+    ),
+    // Task 2.2c: Attachments
+    attachments: v.optional(
+      v.array(
+        v.object({
+          filename: v.string(),
+          mimeType: v.string(),
+          size: v.number(),
+          storageId: v.id("_storage"), // Convex file storage ID
+          thumbnailStorageId: v.optional(v.id("_storage")), // thumbnail for images/videos
+        })
+      )
+    ),
   })
     .index("by_conversation", ["conversationId", "sentAt"])
     .index("by_platform_message", ["userId", "platform", "platformMessageId"])

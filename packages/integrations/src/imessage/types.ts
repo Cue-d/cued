@@ -55,6 +55,46 @@ export interface Reaction {
 }
 
 /**
+ * Attachment represents a file attached to a message.
+ * Corresponds to the `attachment` table in chat.db.
+ */
+export interface Attachment {
+  /** ROWID from chat.db attachment table */
+  id: number;
+  /** Original filename (e.g., "IMG_1234.HEIC") */
+  filename: string;
+  /** Full path to file in ~/Library/Messages/Attachments/ */
+  path: string;
+  /** MIME type (e.g., "image/heic", "video/quicktime") */
+  mimeType: string | null;
+  /** Uniform Type Identifier (e.g., "public.heic", "public.mpeg-4") */
+  uti: string | null;
+  /** File size in bytes */
+  size: number;
+  /** Whether this is an outgoing attachment (sent by user) */
+  isOutgoing: boolean;
+  /** Unix timestamp when attachment was created */
+  createdAt: number | null;
+}
+
+/**
+ * Attachment with Convex storage IDs after upload.
+ * Used when syncing attachments to the cloud.
+ */
+export interface UploadedAttachment {
+  /** Original filename */
+  filename: string;
+  /** MIME type */
+  mimeType: string;
+  /** File size in bytes */
+  size: number;
+  /** Convex storage ID for the original file */
+  storageId: string;
+  /** Convex storage ID for thumbnail (images/videos only) */
+  thumbnailStorageId?: string;
+}
+
+/**
  * Message represents a single iMessage/SMS.
  * Corresponds to the `message` table in chat.db.
  */
@@ -81,6 +121,8 @@ export interface Message {
   errorCode: number;
   /** Whether message has attachments */
   hasAttachments: boolean;
+  /** Attachments for this message (populated if hasAttachments is true) */
+  attachments: Attachment[];
   /** Sender handle (null if isFromMe) */
   sender: Handle | null;
   /** Reactions (tapbacks) on this message */

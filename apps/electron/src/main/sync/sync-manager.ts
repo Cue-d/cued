@@ -35,7 +35,8 @@ export interface SyncProgress {
 
 export interface SyncManagerOptions {
   onProgress?: (progress: SyncProgress) => void;
-  getAuthToken?: () => Promise<string | null>; // Token provider that refreshes as needed
+  getAuthToken?: (forceRefresh?: boolean) => Promise<string | null>; // Token provider that refreshes as needed
+  onAuthInvalid?: () => void; // Called when auth fails and cannot be refreshed
 }
 
 export class SyncManager {
@@ -72,16 +73,24 @@ export class SyncManager {
   }
 
   /**
+   * Set the auth invalid callback.
+   */
+  setAuthInvalidCallback(onAuthInvalid: () => void): void {
+    this.options.onAuthInvalid = onAuthInvalid;
+  }
+
+  /**
    * Refresh and set the auth token on the client.
    * Returns true if a valid token was set, false otherwise.
+   * @param forceRefresh - If true, force a token refresh regardless of expiry
    */
-  private async refreshAuth(): Promise<boolean> {
+  private async refreshAuth(forceRefresh = false): Promise<boolean> {
     if (!this.options.getAuthToken) {
       console.warn("[SyncManager] No token provider configured");
       return false;
     }
 
-    const token = await this.options.getAuthToken();
+    const token = await this.options.getAuthToken(forceRefresh);
     if (!token) {
       console.warn("[SyncManager] Token provider returned no token");
       return false;
@@ -105,10 +114,13 @@ export class SyncManager {
         throw error;
       }
 
-      console.log("[SyncManager] Got 401 error, refreshing token and retrying...");
+      console.log("[SyncManager] Got auth error, force refreshing token and retrying...");
 
-      const hasAuth = await this.refreshAuth();
+      // Force refresh since the server rejected our token
+      const hasAuth = await this.refreshAuth(true);
       if (!hasAuth) {
+        // Notify that auth is invalid so UI can update
+        this.options.onAuthInvalid?.();
         throw new Error("Token refresh failed, cannot retry request");
       }
 
@@ -124,10 +136,13 @@ export class SyncManager {
     if (error instanceof Error) {
       const message = error.message.toLowerCase();
       // Convex returns "Unauthenticated" for auth errors
+      // WorkOS returns "InvalidAuthHeader" with "Token expired" message
       return (
         message.includes("unauthenticated") ||
         message.includes("401") ||
-        message.includes("unauthorized")
+        message.includes("unauthorized") ||
+        message.includes("invalidauthheader") ||
+        message.includes("token expired")
       );
     }
     return false;
@@ -213,6 +228,8 @@ export class SyncManager {
           error: "Not authenticated",
           currentBatch: undefined,
         });
+        // Notify that auth is invalid so UI can update
+        this.options.onAuthInvalid?.();
         return;
       }
 
@@ -245,9 +262,18 @@ export class SyncManager {
           },
         });
 
+        // Transform batch for Convex sync:
+        // Strip local attachments (attachment upload is a separate phase)
+        const syncBatch = {
+          ...batch,
+          messages: batch.messages.map(
+            ({ guid, status, errorCode, attachments, reactions, ...rest }) => rest
+          ),
+        };
+
         // Execute mutation with 401 retry logic
         const result = await this.executeMutationWithRetry(
-          () => this.client.mutation(api.sync.syncMessages, { batch })
+          () => this.client.mutation(api.sync.syncMessages, { batch: syncBatch })
         );
 
         const batchTime = performance.now() - batchStart;

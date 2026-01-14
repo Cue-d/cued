@@ -82,8 +82,28 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
 
   try {
     convex.setAuth(token)
+
+    // Transform batch for Convex:
+    // - Strip local attachments (attachment upload happens in Electron before sync)
+    // - Convex expects UploadedAttachment[] with storage IDs, not local Attachment[]
+    const syncBatch = {
+      ...batch,
+      messages: batch.messages.map((msg) => ({
+        id: msg.id,
+        chatId: msg.chatId,
+        text: msg.text,
+        timestamp: msg.timestamp,
+        isFromMe: msg.isFromMe,
+        isRead: msg.isRead,
+        readAt: msg.readAt,
+        hasAttachments: msg.hasAttachments,
+        sender: msg.sender,
+        // attachments field omitted - not yet supported
+      })),
+    }
+
     const result = (await convex.mutation(api.sync.syncMessages, {
-      batch,
+      batch: syncBatch,
     })) as SyncResult
 
     await convex.mutation(api.sync.updateSyncCursor, {

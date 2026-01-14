@@ -5,6 +5,7 @@
   "description": "PRM macOS Electron app for iMessage sync",
   "main": "out/main/index.js",
   "scripts": {
+    "predev": "bash scripts/build-swift.sh",
     "dev": "electron-vite dev",
     "build": "electron-vite build",
     "preview": "electron-vite preview",
@@ -22,7 +23,8 @@
     "@prm/shared": "workspace:*",
     "better-sqlite3": "^12.6.0",
     "convex": "^1.18.0",
-    "electron-updater": "^6.7.3"
+    "electron-updater": "^6.7.3",
+    "sharp": "^0.34.5"
   },
   "devDependencies": {
     "@electron/notarize": "^2.5.0",

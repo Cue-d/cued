@@ -24,6 +24,15 @@ const chatInput = v.object({
   participants: v.array(handleInput),
 });
 
+// Validator for uploaded attachments (after Convex storage upload)
+const uploadedAttachmentInput = v.object({
+  filename: v.string(),
+  mimeType: v.string(),
+  size: v.number(),
+  storageId: v.id("_storage"),
+  thumbnailStorageId: v.optional(v.id("_storage")),
+});
+
 const messageInput = v.object({
   id: v.number(),
   chatId: v.number(),
@@ -33,6 +42,8 @@ const messageInput = v.object({
   isRead: v.boolean(),
   readAt: v.union(v.number(), v.null()),
   hasAttachments: v.boolean(),
+  // Uploaded attachments with Convex storage IDs
+  attachments: v.optional(v.array(uploadedAttachmentInput)),
   sender: v.union(handleInput, v.null()),
 });
 
@@ -298,6 +309,12 @@ async function upsertMessage(
     return;
   }
 
+  // Pass attachments if present (already in correct format from validator)
+  const attachments =
+    message.attachments && message.attachments.length > 0
+      ? message.attachments
+      : undefined;
+
   await ctx.db.insert("messages", {
     userId,
     conversationId,
@@ -307,6 +324,7 @@ async function upsertMessage(
     senderContactId,
     isFromMe: message.isFromMe,
     platformMessageId,
+    attachments,
   });
 }
 
