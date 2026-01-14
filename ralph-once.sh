@@ -44,6 +44,37 @@ fi
 
 echo "Using Claude CLI: $CLAUDE_CMD"
 
+# Check if dev server is running
+check_dev_server() {
+  curl -s -o /dev/null -w "%{http_code}" http://localhost:3000 2>/dev/null | grep -q "200\|304"
+}
+
+DEV_SERVER_PID=""
+if check_dev_server; then
+  echo "Dev server already running at http://localhost:3000"
+else
+  echo "Dev server not running. Starting in background..."
+  cd apps/web && pnpm dev > /tmp/ralph-dev-server.log 2>&1 &
+  DEV_SERVER_PID=$!
+  cd - > /dev/null
+
+  # Wait for server to be ready (max 30 seconds)
+  echo -n "Waiting for dev server"
+  for i in {1..30}; do
+    if check_dev_server; then
+      echo " ready!"
+      break
+    fi
+    echo -n "."
+    sleep 1
+  done
+
+  if ! check_dev_server; then
+    echo " failed to start. Check /tmp/ralph-dev-server.log"
+    echo "Continuing anyway (UI verification may fail)..."
+  fi
+fi
+
 echo "========================================"
 echo "Ralph Wiggum - HITL Mode"
 echo "========================================"
@@ -122,6 +153,12 @@ echo ""
 echo "========================================"
 echo "Ralph iteration complete."
 echo "End time: $(date)"
+echo ""
+if [ -n "$DEV_SERVER_PID" ]; then
+  echo "Dev server running in background (PID: $DEV_SERVER_PID)"
+  echo "  - Logs: /tmp/ralph-dev-server.log"
+  echo "  - Stop: kill $DEV_SERVER_PID"
+fi
 echo ""
 echo "Next steps:"
 echo "  1. Review the commit: git log -1 --stat"

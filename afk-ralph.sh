@@ -46,6 +46,37 @@ fi
 
 echo "Using Claude CLI: $CLAUDE_BIN"
 
+# Check if dev server is running
+check_dev_server() {
+  curl -s -o /dev/null -w "%{http_code}" http://localhost:3000 2>/dev/null | grep -q "200\|304"
+}
+
+DEV_SERVER_PID=""
+if check_dev_server; then
+  echo "Dev server already running at http://localhost:3000"
+else
+  echo "Dev server not running. Starting in background..."
+  cd apps/web && pnpm dev > /tmp/ralph-dev-server.log 2>&1 &
+  DEV_SERVER_PID=$!
+  cd - > /dev/null
+
+  # Wait for server to be ready (max 30 seconds)
+  echo -n "Waiting for dev server"
+  for i in {1..30}; do
+    if check_dev_server; then
+      echo " ready!"
+      break
+    fi
+    echo -n "."
+    sleep 1
+  done
+
+  if ! check_dev_server; then
+    echo " failed to start. Check /tmp/ralph-dev-server.log"
+    echo "Continuing anyway (UI verification may fail)..."
+  fi
+fi
+
 # Parse arguments
 ITERATIONS=""
 USE_SANDBOX=false
@@ -181,6 +212,11 @@ ONLY WORK ON A SINGLE TASK.")
     echo "Total time: ${MINUTES} minutes"
     echo "End time: $(date)"
     echo ""
+    if [ -n "$DEV_SERVER_PID" ]; then
+      echo "Stopping dev server (PID: $DEV_SERVER_PID)..."
+      kill $DEV_SERVER_PID 2>/dev/null || true
+    fi
+    echo ""
     echo "Review the commits: git log --oneline -${i}"
     echo "========================================"
     exit 0
@@ -199,6 +235,11 @@ echo "Completed $ITERATIONS iterations"
 echo "========================================"
 echo "Total time: ${MINUTES} minutes"
 echo "End time: $(date)"
+echo ""
+if [ -n "$DEV_SERVER_PID" ]; then
+  echo "Stopping dev server (PID: $DEV_SERVER_PID)..."
+  kill $DEV_SERVER_PID 2>/dev/null || true
+fi
 echo ""
 echo "Check status:"
 echo "  - progress.txt for what was done"
