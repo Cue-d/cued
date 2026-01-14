@@ -59,10 +59,11 @@ export function getAuthState(): AuthState {
  * Implements proactive token refresh with 5 minute buffer.
  * @param forceRefresh - If true, always refresh the token regardless of expiry
  */
-export async function getValidAccessToken(forceRefresh = false): Promise<string | null> {
+export async function getValidAccessToken(
+  forceRefresh = false
+): Promise<string | null> {
   const tokens = getStoredTokens();
   if (!tokens) {
-    console.log("[Auth] No stored tokens found");
     return null;
   }
 
@@ -75,27 +76,17 @@ export async function getValidAccessToken(forceRefresh = false): Promise<string 
     return tokens.accessToken;
   }
 
-  // Token expires within 5 minutes or force refresh requested, try to refresh
-  if (forceRefresh) {
-    console.log("[Auth] Force refresh requested, refreshing token...");
-  } else {
-    console.log(`[Auth] Token expires in ${Math.round(timeUntilExpiry / 1000)}s, refreshing...`);
-  }
-
   if (tokens.refreshToken) {
     try {
       const newTokens = await refreshAccessToken(tokens.refreshToken);
-      console.log(`[Auth] Token refreshed successfully, new expiry in ${Math.round((newTokens.expiresAt - Date.now()) / 1000)}s`);
       return newTokens.accessToken;
     } catch (error) {
       // Refresh failed, user needs to re-authenticate
       const message = error instanceof Error ? error.message : String(error);
-      console.error(`[Auth] Token refresh failed: ${message}`);
       return null;
     }
   }
 
-  console.warn("[Auth] No refresh token available");
   return null;
 }
 
