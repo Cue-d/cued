@@ -1,24 +1,24 @@
-import * as React from "react"
-import { Sparkles } from "lucide-react"
+import * as React from "react";
+import { Sparkles } from "lucide-react";
 
-import { cn } from "../../lib/utils"
-import { type Attachment, MultimodalInput } from "./multimodal-input"
-import { ChatMessage } from "./chat-message"
-import { SuggestedPrompts } from "./suggested-prompts"
-import type { MessageWithToolInvocations, SuggestedPrompt } from "./types"
+import { cn } from "../../lib/utils";
+import { type Attachment, MultimodalInput } from "./multimodal-input";
+import { ChatMessage } from "./chat-message";
+import { SuggestedPrompts } from "./suggested-prompts";
+import type { MessageWithToolInvocations, SuggestedPrompt } from "./types";
 
 interface AssistantViewProps {
-  messages: MessageWithToolInvocations[]
-  input: string
-  onInputChange: (value: string) => void
-  onSubmit: () => void
-  onStop?: () => void
-  isLoading?: boolean
-  error?: Error | null
-  suggestedPrompts?: SuggestedPrompt[]
-  attachments?: Attachment[]
-  onAttachmentsChange?: React.Dispatch<React.SetStateAction<Attachment[]>>
-  className?: string
+  messages: MessageWithToolInvocations[];
+  input: string;
+  onInputChange: (value: string) => void;
+  onSubmit: () => void;
+  onStop?: () => void;
+  isLoading?: boolean;
+  error?: Error | null;
+  suggestedPrompts?: SuggestedPrompt[];
+  attachments?: Attachment[];
+  onAttachmentsChange?: React.Dispatch<React.SetStateAction<Attachment[]>>;
+  className?: string;
 }
 
 export function AssistantView({
@@ -35,18 +35,22 @@ export function AssistantView({
   className,
 }: AssistantViewProps) {
   // Internal attachments state for when not controlled externally
-  const [internalAttachments, setInternalAttachments] = React.useState<Attachment[]>([])
-  const actualAttachments = onAttachmentsChange ? attachments : internalAttachments
-  const setActualAttachments = onAttachmentsChange ?? setInternalAttachments
-  const scrollContainerRef = React.useRef<HTMLDivElement>(null)
+  const [internalAttachments, setInternalAttachments] = React.useState<
+    Attachment[]
+  >([]);
+  const actualAttachments = onAttachmentsChange
+    ? attachments
+    : internalAttachments;
+  const setActualAttachments = onAttachmentsChange ?? setInternalAttachments;
+  const scrollContainerRef = React.useRef<HTMLDivElement>(null);
 
   React.useEffect(() => {
-    const container = scrollContainerRef.current
-    if (!container) return
-    container.scrollTo({ top: container.scrollHeight, behavior: "smooth" })
-  }, [messages, isLoading])
+    const container = scrollContainerRef.current;
+    if (!container) return;
+    container.scrollTo({ top: container.scrollHeight, behavior: "smooth" });
+  }, [messages, isLoading]);
 
-  const isEmpty = messages.length === 0
+  const isEmpty = messages.length === 0;
 
   return (
     <div className={cn("flex h-full flex-col", className)}>
@@ -105,9 +109,9 @@ export function AssistantView({
             input={input}
             setInput={(value) => {
               if (typeof value === "function") {
-                onInputChange(value(input))
+                onInputChange(value(input));
               } else {
-                onInputChange(value)
+                onInputChange(value);
               }
             }}
             onSubmit={onSubmit}
@@ -119,5 +123,5 @@ export function AssistantView({
         </div>
       </div>
     </div>
-  )
+  );
 }

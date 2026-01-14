@@ -694,7 +694,7 @@
         "Enable queries like 'What follow-ups do I have pending?' or 'Show actions for John'",
         "Add unit tests"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "3.5",
@@ -733,10 +733,10 @@
       "phase": 3,
       "mode": "afk",
       "category": "integration",
-      "description": "Create /api/assistant/chat streaming route",
+      "description": "Create /api/chat streaming route",
       "reference": "https://ai-sdk.dev/docs/reference/ai-sdk-core/stream-text",
       "steps": [
-        "Create app/api/assistant/chat/route.ts",
+        "Create app/api/chat/route.ts",
         "Set runtime to 'edge' for streaming",
         "Use Vercel AI SDK streamText function",
         "Register all tools with tool executor",

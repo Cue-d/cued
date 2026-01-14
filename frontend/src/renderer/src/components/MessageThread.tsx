@@ -1,6 +1,7 @@
-import { AlertCircle, Check, CheckCheck, Clock, Info, Mic, Plus } from 'lucide-react'
-import { useEffect, useRef, useState } from 'react'
+import { AlertCircle, Check, CheckCheck, Clock, Info } from 'lucide-react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { AttachmentDisplay } from '@/components/Attachments'
+import { type Attachment, MultimodalInput } from '@/components/MultimodalInput'
 import {
   type Chat,
   type DeliveryStatus,
@@ -159,6 +160,7 @@ const MessageBubble = ({
 
 const MessageThread = ({ chat, onSendMessage }: MessageThreadProps) => {
   const [inputText, setInputText] = useState('')
+  const [attachments, setAttachments] = useState<Attachment[]>([])
   const [sending, setSending] = useState(false)
   const messagesEndRef = useRef<HTMLDivElement>(null)
 
@@ -180,14 +182,16 @@ const MessageThread = ({ chat, onSendMessage }: MessageThreadProps) => {
     }
   }, [messagesLength])
 
-  const handleSend = async () => {
-    if (!inputText.trim() || !chat || !onSendMessage || sending) return
+  const handleSend = useCallback(async () => {
+    if ((!inputText.trim() && attachments.length === 0) || !chat || !onSendMessage || sending) return
 
     const text = inputText.trim()
     setInputText('')
+    setAttachments([])
     setSending(true)
 
     try {
+      // TODO: Handle attachments when backend supports it
       await onSendMessage(Number(chat.id), text)
       // Scroll to bottom after sending
       setTimeout(() => {
@@ -199,14 +203,7 @@ const MessageThread = ({ chat, onSendMessage }: MessageThreadProps) => {
     } finally {
       setSending(false)
     }
-  }
-
-  const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === 'Enter' && !e.shiftKey) {
-      e.preventDefault()
-      handleSend()
-    }
-  }
+  }, [inputText, attachments, chat, onSendMessage, sending])
 
   if (!chat) {
     return (
@@ -293,33 +290,15 @@ const MessageThread = ({ chat, onSendMessage }: MessageThreadProps) => {
 
       {/* Input Bar */}
       <div className="p-3 border-t border-border bg-imessage-header-bg">
-        <div className="flex items-center gap-2">
-          <button
-            type="button"
-            className="p-2 hover:bg-sidebar-accent rounded-full transition-colors"
-          >
-            <Plus className="w-5 h-5 text-primary" />
-          </button>
-          <div className="flex-1 flex items-center bg-imessage-input-bg border border-imessage-input-border rounded-full px-4 py-2">
-            <input
-              type="text"
-              placeholder="iMessage"
-              value={inputText}
-              onChange={(e) => setInputText(e.target.value)}
-              onKeyDown={handleKeyDown}
-              disabled={sending}
-              className="flex-1 bg-transparent text-foreground placeholder:text-muted-foreground text-[15px] focus:outline-none disabled:opacity-50"
-            />
-          </div>
-          <button
-            type="button"
-            onClick={handleSend}
-            disabled={!inputText.trim() || sending}
-            className="p-2 hover:bg-sidebar-accent rounded-full transition-colors disabled:opacity-50"
-          >
-            <Mic className="w-5 h-5 text-muted-foreground" />
-          </button>
-        </div>
+        <MultimodalInput
+          input={inputText}
+          setInput={setInputText}
+          onSubmit={handleSend}
+          attachments={attachments}
+          setAttachments={setAttachments}
+          isSubmitting={sending}
+          placeholder="iMessage"
+        />
       </div>
     </div>
   )

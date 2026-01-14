@@ -15,7 +15,8 @@ const geistMono = Geist_Mono({
 
 export const metadata: Metadata = {
   title: "PRM - Personal Relationship Manager",
-  description: "Cloud-based personal relationship manager for iMessage, Gmail, and Slack",
+  description:
+    "Cloud-based personal relationship manager for iMessage, Gmail, and Slack",
 };
 
 export default function RootLayout({

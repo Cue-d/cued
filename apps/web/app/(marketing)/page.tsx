@@ -1,4 +1,4 @@
-import Link from "next/link"
+import Link from "next/link";
 
 export default function Home() {
   return (
@@ -15,8 +15,8 @@ export default function Home() {
             relationship manager
           </h1>
           <p className="mx-auto mt-6 max-w-2xl text-lg leading-8 text-muted-foreground">
-            Connect your communications across iMessage, Gmail, and Slack.
-            Never miss a follow-up again with AI-powered action suggestions.
+            Connect your communications across iMessage, Gmail, and Slack. Never
+            miss a follow-up again with AI-powered action suggestions.
           </p>
           <div className="mt-10 flex items-center justify-center gap-4">
             <Link
@@ -109,5 +109,5 @@ export default function Home() {
         </div>
       </section>
     </div>
-  )
+  );
 }

@@ -1,8 +1,8 @@
-"use client"
+"use client";
 
-import { useQuery } from "convex/react"
-import { api } from "@prm/convex"
-import { signOut } from "@workos-inc/authkit-nextjs"
+import { useQuery } from "convex/react";
+import { api } from "@prm/convex";
+import { signOut } from "@workos-inc/authkit-nextjs";
 import {
   Button,
   Card,
@@ -10,10 +10,10 @@ import {
   CardDescription,
   CardHeader,
   CardTitle,
-} from "@prm/ui"
+} from "@prm/ui";
 
 export default function AppPage() {
-  const currentUser = useQuery(api.users.getCurrentUser)
+  const currentUser = useQuery(api.users.getCurrentUser);
 
   return (
     <div className="p-8">
@@ -27,7 +27,7 @@ export default function AppPage() {
         </div>
         <form
           action={async () => {
-            await signOut()
+            await signOut();
           }}
         >
           <Button type="submit" variant="outline">
@@ -97,5 +97,5 @@ export default function AppPage() {
         </Card>
       )}
     </div>
-  )
+  );
 }

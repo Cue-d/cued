@@ -1,9 +1,9 @@
-import Link from "next/link"
+import Link from "next/link";
 
 export default function MarketingLayout({
   children,
 }: {
-  children: React.ReactNode
+  children: React.ReactNode;
 }) {
   return (
     <div className="flex min-h-screen flex-col bg-background">
@@ -37,5 +37,5 @@ export default function MarketingLayout({
         </div>
       </footer>
     </div>
-  )
+  );
 }
