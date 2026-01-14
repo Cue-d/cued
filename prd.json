@@ -502,7 +502,7 @@
         "Show message timestamps",
         "Style sent vs received messages differently"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "2.12",

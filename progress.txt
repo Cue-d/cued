@@ -746,3 +746,36 @@ Notes:
   - Task 2.11 (conversation detail view) can now proceed
 ---
 
+[2026-01-13 19:00] Task 2.11 - Create conversation detail view
+Files: packages/ui/src/components/unified-inbox/{message-types.ts,message-bubble.tsx,message-thread.tsx,index.ts}, apps/web/app/(app)/inbox/page.tsx, packages/convex/index.ts
+Decisions:
+  - Created MessageThread component in packages/ui with header, date dividers, and message bubbles
+  - Created MessageBubble component with sent/received styling (primary bg vs muted bg)
+  - Used inline conversation detail instead of separate [id]/page.tsx route (simpler, no routing needed)
+  - Messages grouped by date with smart date divider formatting (Today, Yesterday, weekday, or date)
+  - Smart timestamp display: shown on last message, sender change, or >5 minute gap
+  - Sender names shown in group chats when sender changes
+  - Added Id and Doc type exports to @prm/convex for type-safe Convex ID handling
+  - Messages fetched with useQuery conditional skip pattern (selectedId ? args : "skip")
+Why:
+  - Inline detail view avoids URL changes and extra routing complexity for list+detail layout
+  - Date dividers improve message readability and context
+  - Smart timestamp logic reduces visual clutter while preserving important time context
+  - Sender name display matches iMessage pattern: show on first message and when sender changes
+  - Conditional query skip prevents unnecessary API calls when no conversation selected
+Browser Verification:
+  - Conversations load and display correctly in sidebar
+  - Clicking conversation shows message thread with proper layout
+  - Sent messages: dark/primary background, right-aligned
+  - Received messages: muted gray background, left-aligned
+  - Timestamps display correctly (6:40 PM, 6:44 PM, etc.)
+  - Date divider shows "Today" for current date
+  - Group chat shows sender names above received messages
+  - Switching conversations updates message thread correctly
+  - No console errors related to the app
+Notes:
+  - Code simplified by code-simplifier: removed unused RefObject import
+  - Lint and typecheck pass for entire monorepo
+  - Ready for task 2.12: Test full sync cycle end-to-end
+---
+

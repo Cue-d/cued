@@ -1,5 +1,8 @@
 export * from "./types"
+export * from "./message-types"
 export { ConversationList } from "./conversation-list"
 export { ConversationItem } from "./conversation-item"
 export { ConversationAvatar } from "./conversation-avatar"
 export { PlatformBadge } from "./platform-badge"
+export { MessageBubble } from "./message-bubble"
+export { MessageThread } from "./message-thread"
