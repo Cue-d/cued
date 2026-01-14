@@ -58,10 +58,11 @@ describe("searchMemoriesTool", () => {
 
     expect(mockGetMemories).toHaveBeenCalledWith("communication preferences", {
       user_id: "user-123",
+      filters: undefined,
     });
   });
 
-  it("scopes memories by contactId when provided", async () => {
+  it("filters memories by contactId when provided", async () => {
     const { getMemories } = await import("@mem0/vercel-ai-provider");
     const mockGetMemories = vi.mocked(getMemories);
     mockGetMemories.mockResolvedValue([]);
@@ -72,7 +73,8 @@ describe("searchMemoriesTool", () => {
     );
 
     expect(mockGetMemories).toHaveBeenCalledWith("test", {
-      user_id: "user-123:contact-456",
+      user_id: "user-123",
+      filters: { contact_id: "contact-456" },
     });
   });
 

@@ -12,8 +12,8 @@ const inputSchema = z.object({
     .describe("Filter memories to a specific contact/person ID"),
 });
 
-// @mem0/vercel-ai-provider doesn't export Memory types (getMemories returns Promise<any>)
-interface Mem0Memory {
+// getMemories returns Promise<any> - define shape for type safety
+interface Mem0MemoryResponse {
   id: string;
   memory?: string;
   score?: number;
@@ -38,18 +38,14 @@ export const searchMemoriesTool: Tool<typeof inputSchema, MemoryResult[]> = {
   inputSchema,
   execute: async (input, options): Promise<ToolResult<MemoryResult[]>> => {
     try {
-      // Scope memories by userId:contactId for contact-specific recall
-      const mem0UserId = input.contactId
-        ? `${options.context.userId}:${input.contactId}`
-        : options.context.userId;
-
+      // user_id = PRM user, contactId = filter by who the memory is about
       const memories = await getMemories(input.query, {
-        user_id: mem0UserId,
-        // mem0ApiKey read from MEM0_API_KEY env var automatically
+        user_id: options.context.userId,
+        filters: input.contactId ? { contact_id: input.contactId } : undefined,
       });
 
-      const results = (memories as Mem0Memory[])
-        .filter((m): m is Mem0Memory & { memory: string } => !!m.memory)
+      const results = (memories as Mem0MemoryResponse[])
+        .filter((m): m is Mem0MemoryResponse & { memory: string } => !!m.memory)
         .map((m) => ({
           id: m.id,
           memory: m.memory,

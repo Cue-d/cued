@@ -20,4 +20,7 @@ export {
   addMemories,
   getMemories,
   retrieveMemories,
+  searchMemories,
+  type Mem0Provider,
+  type Mem0ConfigSettings,
 } from "./mem0.js";
