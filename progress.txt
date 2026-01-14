@@ -1001,3 +1001,56 @@ Notes:
   - Ready for task 2.12: Test full sync cycle end-to-end
 ---
 
+## TODO / Future Improvements
+
+- **Recent-first sync**: Currently syncs oldest messages first (ORDER BY m.ROWID ASC).
+  Should change to sync most recent messages first for better UX during initial sync.
+  Options: (1) Start cursor at maxRowid and work backwards, (2) Query DESC order with reversed cursor logic.
+
+- **Attachments sync**: Currently disabled by default (syncAttachments: false).
+  Considerations:
+  - Pros: Full message context, searchable files, complete history
+  - Cons: Slow initial sync (file I/O + upload), storage costs, privacy concerns
+  - Most attachments are ephemeral (memes, screenshots) - low value for CRM
+  - HEIC conversion adds complexity, Safari handles natively but other browsers don't
+  Recommendation: Skip for MVP. Consider later as opt-in "sync media" toggle, or
+  thumbnails-only with on-demand full file fetch. For CRM use case, text content matters more.
+
+- **Reactions sync**: Infrastructure exists (task 2.2b) but not wired to Convex.
+  Considerations:
+  - Pros: Social context, conversation fidelity, sentiment signal
+  - Cons: Extra queries per batch, reactions change frequently, UI complexity
+  - Low value for CRM - knowing someone ❤️'d a message doesn't help follow-ups
+  - Tapback types already mapped (❤️👍👎😂‼️❓) but not persisted
+  Recommendation: Skip for MVP. Reactions are nice-to-have polish, not core CRM value.
+  Could revisit for "social listening" features later.
+
+
+[2026-01-13 21:05] Task 2.12 - Test full sync cycle: Electron → API → Convex → UI
+Files: None modified (verification task)
+Verification Results:
+  - Electron app launches successfully with native modules (better-sqlite3)
+  - Native modules ad-hoc signed via scripts/sign-dev.sh
+  - Auth token refresh working (5 auth errors recovered, tokens refreshed)
+  - Sync completed: 1523 messages synced across 18 batches
+  - Contacts watcher started, contacts synced: 108 contacts
+  - Web app inbox shows messages with:
+    - Contact names properly resolved (Logan Hennes, Soham Bafana, etc.)
+    - Phone numbers showing "#" avatar (+16467762158)
+    - Group chats showing multiple participants
+    - iMessage platform badges (green "i" icons)
+    - Timestamps displaying correctly
+  - Conversation detail view works:
+    - Messages load when clicking conversation
+    - Sent messages right-aligned (primary background)
+    - Received messages left-aligned (muted background)
+    - Timestamps displayed correctly
+Key Observations:
+  - Native module code signing issue resolved with postrebuild script
+  - Token refresh handles long-running sync gracefully
+  - Sync rate: ~64 msgs/sec overall (with auth retry overhead)
+  - Full Phase 2 sync infrastructure verified end-to-end
+Notes:
+  - Phase 2 iMessage sync feature complete
+  - Ready for Phase 3 (AI tools) or Phase 2b tasks (reset script, attachments)
+---

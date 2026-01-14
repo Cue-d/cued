@@ -602,7 +602,7 @@
         "Open web app and verify inbox shows messages",
         "Click conversation and verify messages load"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "2.12b",
