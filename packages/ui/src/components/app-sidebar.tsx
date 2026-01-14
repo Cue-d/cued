@@ -1,6 +1,6 @@
-"use client"
+"use client";
 
-import * as React from "react"
+import * as React from "react";
 import {
   InboxIcon,
   ListTodoIcon,
@@ -8,7 +8,7 @@ import {
   UsersIcon,
   SettingsIcon,
   LogOutIcon,
-} from "lucide-react"
+} from "lucide-react";
 import {
   Sidebar,
   SidebarContent,
@@ -20,8 +20,8 @@ import {
   SidebarMenuButton,
   SidebarMenuItem,
   SidebarSeparator,
-} from "./ui/sidebar"
-import { Button } from "./ui/button"
+} from "./ui/sidebar";
+import { Button } from "./ui/button";
 
 const navigation = [
   { title: "Inbox", href: "/inbox", icon: InboxIcon },
@@ -29,19 +29,19 @@ const navigation = [
   { title: "Assistant", href: "/assistant", icon: MessageSquareIcon },
   { title: "Contacts", href: "/contacts", icon: UsersIcon },
   { title: "Settings", href: "/settings", icon: SettingsIcon },
-]
+];
 
 interface AppSidebarProps extends React.ComponentProps<typeof Sidebar> {
   user?: {
-    name?: string
-    email?: string
-  } | null
-  onSignOut?: () => void
+    name?: string;
+    email?: string;
+  } | null;
+  onSignOut?: () => void;
 }
 
 export function AppSidebar({ user, onSignOut, ...props }: AppSidebarProps) {
   return (
-    <Sidebar {...props}>
+    <Sidebar {...props} variant="inset">
       <SidebarHeader className="border-b border-sidebar-border p-4">
         <div className="flex items-center gap-2">
           <div className="flex size-8 items-center justify-center rounded-lg bg-sidebar-primary text-sidebar-primary-foreground">
@@ -99,5 +99,5 @@ export function AppSidebar({ user, onSignOut, ...props }: AppSidebarProps) {
         </div>
       </SidebarFooter>
     </Sidebar>
-  )
+  );
 }
