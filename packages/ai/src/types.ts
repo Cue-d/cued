@@ -18,10 +18,13 @@ export interface ToolExecutionOptions {
 }
 
 /** Result of a tool execution. */
-export interface ToolResult<T = unknown> {
-  success: boolean;
-  data?: T;
-  error?: string;
+export type ToolResult<T = unknown> =
+  | { success: true; data: T }
+  | { success: false; error: string };
+
+/** Extract error message from unknown error. */
+export function getErrorMessage(error: unknown, fallback: string): string {
+  return error instanceof Error ? error.message : fallback;
 }
 
 /** PRM tool definition, designed for use with Vercel AI SDK's tool() helper. */

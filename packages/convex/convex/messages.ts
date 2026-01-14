@@ -2,6 +2,7 @@ import { v } from "convex/values";
 import type { Doc, Id } from "./_generated/dataModel";
 import type { QueryCtx } from "./_generated/server";
 import { query } from "./_generated/server";
+import { getAuthenticatedUser } from "./lib/auth";
 import { platformValidator } from "./schema";
 
 interface InboxArgs {
@@ -102,15 +103,8 @@ export const getInbox = query({
     platform: v.optional(platformValidator),
   },
   handler: async (ctx, args) => {
-    const identity = await ctx.auth.getUserIdentity();
-    if (!identity) {
-      return EMPTY_INBOX;
-    }
-
-    const user = await findUserByWorkosId(ctx, identity.subject);
-    if (!user) {
-      return EMPTY_INBOX;
-    }
+    const user = await getAuthenticatedUser(ctx);
+    if (!user) return EMPTY_INBOX;
 
     return fetchInbox(ctx, user._id, args);
   },
@@ -131,15 +125,8 @@ export const getMessages = query({
     cursor: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
-    const identity = await ctx.auth.getUserIdentity();
-    if (!identity) {
-      return EMPTY_MESSAGES;
-    }
-
-    const user = await findUserByWorkosId(ctx, identity.subject);
-    if (!user) {
-      return EMPTY_MESSAGES;
-    }
+    const user = await getAuthenticatedUser(ctx);
+    if (!user) return EMPTY_MESSAGES;
 
     // Verify conversation belongs to user
     const conversation = await ctx.db.get(args.conversationId);
@@ -230,16 +217,4 @@ async function resolveParticipants(
     }));
 }
 
-/**
- * Find user by WorkOS ID.
- */
-function findUserByWorkosId(
-  ctx: QueryCtx,
-  workosUserId: string
-): Promise<Doc<"users"> | null> {
-  return ctx.db
-    .query("users")
-    .withIndex("by_workos_id", (q) => q.eq("workosUserId", workosUserId))
-    .unique();
-}
 
