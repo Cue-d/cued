@@ -909,7 +909,7 @@
         "Add Client ID and Client Secret to Nango integration",
         "Verify integration shows as configured"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "4.3",

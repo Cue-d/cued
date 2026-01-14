@@ -1548,3 +1548,25 @@ Notes:
   - All lint and typecheck pass for entire monorepo
   - Ready for task 4.2: Configure Google Mail integration in Nango dashboard
 ---
+
+[2026-01-14 18:00] Task 4.2 - Configure Google Mail integration in Nango
+Files:
+  - apps/web/NANGO_SETUP.md (new)
+  - apps/web/.env.local.example (updated)
+Decisions:
+  - Created comprehensive NANGO_SETUP.md with step-by-step configuration guide
+  - Replaced Pipedream env vars with Nango in .env.local.example
+  - Documented required Gmail scopes: gmail.readonly, gmail.send, gmail.modify
+  - Added troubleshooting section for common OAuth issues
+  - Included verification checklist for manual confirmation
+Why:
+  - Task 4.2 is a manual configuration task in external dashboards (Nango + Google Cloud Console)
+  - Documentation follows same pattern as packages/convex/SETUP.md for manual steps
+  - Scopes chosen for read+send+modify operations needed by tasks 4.3-4.14
+  - Manual setup required because OAuth credentials are user-specific and cannot be shared
+Notes:
+  - USER ACTION REQUIRED: Follow NANGO_SETUP.md to complete Google Cloud Console setup
+  - NANGO_SECRET_KEY already configured in .env.local (from task 4.1)
+  - All lint and typecheck pass for entire monorepo
+  - Ready for task 4.3: Create Nango Gmail sync function for emails
+---

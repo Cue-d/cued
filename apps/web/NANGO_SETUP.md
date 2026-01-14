@@ -90,9 +90,3 @@ Task 4.2 requires manual configuration in the Nango dashboard and Google Cloud C
 After completing this setup:
 - Task 4.3: Create Nango Gmail sync function for emails
 - Task 4.4: Create /settings/integrations page with Nango Connect UI
-
-## Important Notes
-
-- Gmail API scopes are **restricted** - for production you'll need Google verification
-- For development/testing, add your Google account as a test user in OAuth consent screen
-- The integration-id `google-mail` is what you'll use in code when calling Nango APIs
