@@ -63,6 +63,12 @@ const schema = defineSchema({
       lastSyncAt: v.optional(v.number()),
       lastSyncCursor: v.optional(v.string()),
       lastError: v.optional(v.string()),
+      // Task 2.8a: Extended sync metadata for recovery
+      totalMessagesSynced: v.optional(v.number()),
+      totalContactsSynced: v.optional(v.number()),
+      syncVersion: v.optional(v.number()), // Increment when schema changes require re-sync
+      // Task 2.7c: Contacts sync state for recovery
+      lastContactsSyncAt: v.optional(v.number()),
     }),
   })
     .index("by_user", ["userId"])

@@ -128,6 +128,16 @@ export async function syncContactsToConvex(
     console.log(
       `[ContactsSync] Synced ${result.contactsCount} contacts (${result.updatedCount} updated, ${result.handlesCount} handles)`
     );
+
+    // Task 2.7c: Update server contacts sync state for recovery
+    try {
+      await client.mutation(api.sync.updateContactsSyncState, {
+        platform: "imessage",
+        contactsCount: contacts.length,
+      });
+    } catch (e) {
+      console.warn("[ContactsSync] Failed to update contacts sync state:", e);
+    }
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     console.error("[ContactsSync] Error:", message);

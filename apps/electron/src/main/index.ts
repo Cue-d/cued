@@ -110,6 +110,13 @@ function setupSyncIpcHandlers(): void {
     manager.resetCursor();
     return manager.getProgress();
   });
+
+  // Force full sync: resets both server and local state, then re-syncs messages + contacts
+  ipcMain.handle("sync:forceFullSync", async () => {
+    const manager = getSyncManager();
+    await manager.forceFullSync();
+    return manager.getProgress();
+  });
 }
 
 async function startBackgroundSync(): Promise<void> {
@@ -134,6 +141,11 @@ async function startBackgroundSync(): Promise<void> {
           isAuthenticated: false,
           user: null,
         });
+      },
+      // Wire contacts sync for recovery flows
+      syncContacts: async () => {
+        const result = await syncContactsToConvex(getValidAccessToken, true);
+        return { contactsCount: result.contactsCount };
       },
     });
 

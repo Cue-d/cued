@@ -28,4 +28,20 @@ contextBridge.exposeInMainWorld('electron', {
       return () => ipcRenderer.removeListener('auth:userCode', handler)
     },
   },
+  sync: {
+    // Get current sync progress
+    getProgress: (): Promise<unknown> => ipcRenderer.invoke('sync:getProgress'),
+    // Run sync now
+    runNow: (): Promise<unknown> => ipcRenderer.invoke('sync:runNow'),
+    // Reset cursor (local only)
+    reset: (): Promise<unknown> => ipcRenderer.invoke('sync:reset'),
+    // Force full sync (resets server + local state, re-syncs messages + contacts)
+    forceFullSync: (): Promise<unknown> => ipcRenderer.invoke('sync:forceFullSync'),
+    // Listen for sync progress updates
+    onProgress: (callback: (progress: unknown) => void) => {
+      const handler = (_event: IpcRendererEvent, progress: unknown) => callback(progress)
+      ipcRenderer.on('sync:progress', handler)
+      return () => ipcRenderer.removeListener('sync:progress', handler)
+    },
+  },
 })
