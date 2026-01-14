@@ -371,7 +371,7 @@
         "Handle missing/deleted attachment files gracefully",
         "Verify attachments display correctly in web UI with real photos and videos"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "2.3",
@@ -601,6 +601,23 @@
         "Verify messages appear in Convex dashboard",
         "Open web app and verify inbox shows messages",
         "Click conversation and verify messages load"
+      ],
+      "passes": false
+    },
+    {
+      "id": "2.12b",
+      "phase": 2,
+      "mode": "hitl",
+      "category": "testing",
+      "description": "Create database reset and full reseed script for testing",
+      "steps": [
+        "Create script to drop all Convex data (messages, conversations, contacts, contactHandles)",
+        "Clear sync cursors and metadata in integrations table",
+        "Clear local Electron cache (contacts cache, sync state)",
+        "Trigger automatic full re-sync of messages and contacts",
+        "Verify sync completes without manual intervention",
+        "Add npm script: pnpm reset-and-reseed for easy invocation",
+        "Document usage in README for development testing"
       ],
       "passes": false
     },

@@ -885,3 +885,31 @@ Notes:
   - Follow-up needed: wire uploadAttachments() into sync loop, add UI attachment display
 ---
 
+[2026-01-13 21:00] Task 2.2c - Complete iMessage attachment sync (UI + wiring)
+Files: packages/convex/convex/messages.ts, packages/ui/src/components/unified-inbox/message-types.ts, packages/ui/src/components/unified-inbox/message-bubble.tsx, apps/electron/src/main/sync/sync-manager.ts, apps/electron/src/main/sync/attachment-service.ts
+Decisions:
+  - Updated getMessages query to resolve attachment storage URLs (ctx.storage.getUrl)
+  - Added MessageAttachment type to UI: filename, mimeType, size, url, thumbnailUrl
+  - Created AttachmentPreview component with image, video, and generic file rendering
+  - Wired attachment upload into sync loop: upload attachments BEFORE creating syncBatch
+  - Cast UploadedAttachment string IDs to Id<"_storage"> for Convex type safety
+  - Removed HEIC/HEIF from thumbnail supported types (libheif not available in sharp)
+  - Skip HEIC conversion entirely - upload as-is (Safari/iOS can display natively)
+  - Added syncAttachments option to SyncManager (default: true)
+Why:
+  - Images display with thumbnailUrl for faster loading, link to full-size url
+  - Videos show with poster thumbnail and native controls
+  - Generic files show icon, filename, and human-readable file size
+  - HEIC conversion removed because libvips doesn't have libheif compiled by default
+  - Safari/iOS browsers handle HEIC natively, other browsers show download link
+Bugfixes:
+  - Fixed HEIC conversion crash: "heif: Support for this compression format has not been built in"
+  - Removed unused extname import and convertToWebFormat/getWebSafeMimeType functions
+Notes:
+  - All lint and typecheck pass for entire monorepo
+  - Code simplified by code-simplifier: inlined displayUrl, simplified attachment loop
+  - Attachment display ready for when Electron sync produces real attachment data
+  - Electron code signing still blocks end-to-end verification with real photos
+  - Auth token refresh issue observed - may need further investigation
+---
+
