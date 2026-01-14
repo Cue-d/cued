@@ -1409,3 +1409,39 @@ Notes:
   - Memory extraction testing requires MEM0_API_KEY environment variable
   - Batch processing of all messages is task 3.13b (separate)
 ---
+
+[2026-01-14 11:25] Task 3.13b - Batch process all messages to extract Mem0 memories
+Files:
+  packages/convex/convex/schema.ts (add memory tracking fields + by_user_sent_at index)
+  packages/convex/convex/memories.ts (new)
+  packages/convex/convex/crons.ts (new placeholder)
+  apps/web/app/api/memories/process/route.ts (new)
+  apps/web/app/api/cron/memories/route.ts (new)
+  apps/web/vercel.json (new)
+Decisions:
+  - Added memory tracking to integrations.syncState: lastMemoryProcessedAt, totalMessagesProcessedForMemory, totalMemoriesExtracted
+  - Added by_user_sent_at index to messages for efficient cursor-based pagination
+  - Created processMemoryBatch Convex action that processes 50 messages per call
+  - Groups messages by contact for contextual memory extraction
+  - Skips short messages (<10 chars) as unlikely to contain useful info
+  - Created POST /api/memories/process for manual batch processing with auth
+  - Created GET /api/memories/process to check processing status
+  - Created vercel.json with 5-minute cron (Vercel Cron calls endpoint)
+  - Cron endpoint returns status only - user-initiated processing via /api/memories/process
+Why:
+  - Cursor-based pagination (sentAt timestamp) enables efficient incremental processing
+  - Rate limiting ~50 msgs/batch respects Mem0 API limits (~100 msgs/min)
+  - Grouping by contact provides context for better memory extraction
+  - Manual trigger enables initial backfill control
+  - Vercel cron handles scheduled processing in production
+Performance:
+  - 50 messages per batch × 12 batches/hour = 600 msgs/hour
+  - Full backfill of 148k messages takes ~24 hours
+  - Can adjust BATCH_SIZE to trade speed vs rate limits
+Notes:
+  - All 21 AI package tests pass
+  - Lint and typecheck pass for entire monorepo
+  - Code simplified by code-simplifier: extracted findIntegration, buildDocMap helpers
+  - Convex functions deployed successfully
+  - Requires MEM0_API_KEY environment variable
+---

@@ -850,7 +850,7 @@
         "Create manual trigger endpoint for initial backfill",
         "Verify memories are searchable after processing real conversations"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "3.14",
