@@ -13,7 +13,7 @@ export const openai = createOpenAI({
 });
 
 // Default model for assistant chat
-export const DEFAULT_MODEL = "gpt-4o";
+export const DEFAULT_MODEL = "gpt-5-mini";
 
 // Faster model for structured extraction tasks
-export const FAST_MODEL = "gpt-4o-mini";
+export const FAST_MODEL = "gpt-5-nano";
