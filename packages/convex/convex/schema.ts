@@ -69,6 +69,10 @@ const schema = defineSchema({
       syncVersion: v.optional(v.number()), // Increment when schema changes require re-sync
       // Task 2.7c: Contacts sync state for recovery
       lastContactsSyncAt: v.optional(v.number()),
+      // Task 3.13b: Memory extraction tracking
+      lastMemoryProcessedAt: v.optional(v.number()), // sentAt timestamp of last processed message
+      totalMessagesProcessedForMemory: v.optional(v.number()),
+      totalMemoriesExtracted: v.optional(v.number()),
     }),
   })
     .index("by_user", ["userId"])
@@ -152,6 +156,7 @@ const schema = defineSchema({
     .index("by_user", ["userId"])
     .index("by_conversation", ["conversationId", "sentAt"])
     .index("by_platform_message", ["userId", "platform", "platformMessageId"])
+    .index("by_user_sent_at", ["userId", "sentAt"]) // Task 3.13b: For memory extraction pagination
     .searchIndex("search_content", {
       searchField: "content",
       filterFields: ["userId", "conversationId"],
