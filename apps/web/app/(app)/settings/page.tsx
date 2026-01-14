@@ -3,7 +3,7 @@
 import { useQuery } from "convex/react";
 import { useTheme } from "next-themes";
 import type { ReactNode } from "react";
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useSyncExternalStore } from "react";
 import { api } from "@prm/convex";
 import { Avatar, AvatarFallback, Skeleton, Separator, Switch } from "@prm/ui";
 import {
@@ -17,6 +17,16 @@ import {
   BrainIcon,
   ClockIcon,
 } from "lucide-react";
+
+// SSR-safe mounted detection via useSyncExternalStore
+const noop = (): void => {};
+function useIsMounted(): boolean {
+  return useSyncExternalStore(
+    () => noop,
+    () => true,
+    () => false
+  );
+}
 
 function getInitials(name: string): string {
   return name
@@ -44,15 +54,11 @@ function formatRelativeTime(timestamp: number): string {
 
 export default function SettingsPage() {
   const { theme, setTheme } = useTheme();
-  const [mounted, setMounted] = useState(false);
+  const mounted = useIsMounted();
   const memoryStats = useQuery(api.memories.getMemoryStatsByContact);
   const processingStatus = useQuery(api.memories.getMemoryProcessingStatus, {
     platform: "imessage",
   });
-
-  useEffect(() => {
-    setMounted(true);
-  }, []);
 
   const selectedTheme = mounted ? theme : null;
   const isMemoryLoading =
