@@ -38,15 +38,15 @@ prm/
 
 ## 2. Convex Schema (Key Tables)
 
-| Table | Purpose |
-|-------|---------|
-| `users` | WorkOS auth, plan info |
-| `integrations` | Connected platforms per user (pipedreamAccountId, syncState) |
-| `contacts` | Cross-platform identity (displayName, importance, handles) |
-| `contactHandles` | Phone/email/slack_id → contactId mapping |
-| `conversations` | Unified threads (platform, type, participants, lastMessage) |
-| `messages` | Message content, platform metadata, sender (full-text searchable) |
-| `actions` | Action queue (respond, follow_up, send_message, status) |
+| Table            | Purpose                                                           |
+| ---------------- | ----------------------------------------------------------------- |
+| `users`          | WorkOS auth, plan info                                            |
+| `integrations`   | Connected platforms per user (pipedreamAccountId, syncState)      |
+| `contacts`       | Cross-platform identity (displayName, importance, handles)        |
+| `contactHandles` | Phone/email/slack_id → contactId mapping                          |
+| `conversations`  | Unified threads (platform, type, participants, lastMessage)       |
+| `messages`       | Message content, platform metadata, sender (full-text searchable) |
+| `actions`        | Action queue (respond, follow_up, send_message, status)           |
 
 **Note:** No `mem0References` table needed - use Convex `userId` and `contactId` directly as Mem0 identifiers.
 
@@ -55,12 +55,14 @@ prm/
 ## 3. Sync Architecture
 
 ### iMessage (Electron → Convex)
+
 1. Electron reads chat.db (read-only, incremental via ROWID cursor)
 2. Resolves contact names from Contacts.app
 3. POSTs batches to `/api/sync/imessage`
 4. Convex mutation upserts conversations/messages
 
 ### Gmail/Slack (Pipedream → Convex)
+
 1. User connects via Pipedream Connect OAuth
 2. **Real-time:** Pipedream webhooks POST new messages to `/api/pipedream/[platform]/webhook`
 3. **Historical:** Background job fetches via Pipedream proxy API
@@ -71,18 +73,21 @@ prm/
 ## 4. AI Assistant (Port from ai-message-assistant branch)
 
 **Tools to implement:**
+
 - `search_messages` - Convex full-text + vector search across platforms
 - `search_contacts` - Convex query with name/company/notes
 - `create_action` - Convex mutation to queue for user review
 - `search_memories` - Mem0 API with person_id filtering
 - `get_conversations` / `get_messages` - Convex queries
 
-**API Route:** `/api/assistant/chat`
+**API Route:** `/api/chat`
+
 - Uses Vercel AI SDK with OpenAI (ZDR-ready)
 - SSE streaming to frontend
 - Tools executed with user context
 
 **What to port:**
+
 - Tool definitions from `backend/services/assistant/tools.py`
 - Mem0 prompts from `backend/services/memory/mem0_service.py`
 - Assistant UI from `frontend/src/renderer/src/components/Assistant/`
@@ -94,11 +99,15 @@ prm/
 ```typescript
 // OAuth connection
 const { connect } = usePipedreamConnect();
-await connect('gmail', { oauthAppId: GMAIL_APP_ID });
+await connect("gmail", { oauthAppId: GMAIL_APP_ID });
 
 // Send message via proxy
-await pd.proxy.post(accountId, 'gmail', '/users/me/messages/send', { body: { raw } });
-await pd.proxy.post(accountId, 'slack', '/chat.postMessage', { body: { channel, text } });
+await pd.proxy.post(accountId, "gmail", "/users/me/messages/send", {
+  body: { raw },
+});
+await pd.proxy.post(accountId, "slack", "/chat.postMessage", {
+  body: { channel, text },
+});
 ```
 
 ---
@@ -106,12 +115,14 @@ await pd.proxy.post(accountId, 'slack', '/chat.postMessage', { body: { channel, 
 ## 6. Security
 
 **Data Protection (v1):**
+
 - Convex provides encryption at rest (AES-256)
 - TLS 1.3 for all data in transit
 - No custom E2E encryption for v1 (simplifies search and reduces complexity)
 - Can add E2E encryption in future for enterprise customers who require it
 
 **Auth:**
+
 - WorkOS AuthKit with enterprise SSO support (SAML, OIDC)
 - Device auth flow for Electron app
 - Pipedream stores OAuth tokens (never in our database)
@@ -121,6 +132,7 @@ await pd.proxy.post(accountId, 'slack', '/chat.postMessage', { body: { channel, 
 ## 7. Migration Phases
 
 ### Phase 1: Foundation (HUMAN-IN-THE-LOOP)
+
 > Run `./ralph-once.sh` and review each commit carefully
 
 - [ ] 1.1 Initialize Turborepo: `npx create-turbo@latest`
@@ -143,6 +155,7 @@ await pd.proxy.post(accountId, 'slack', '/chat.postMessage', { body: { channel, 
 - [ ] 1.18 Create authenticated app shell with sidebar
 
 ### Phase 2: iMessage Sync (HUMAN-IN-THE-LOOP)
+
 > Still supervise closely - sync is tricky
 
 - [ ] 2.1 Create `packages/integrations` with iMessage types
@@ -159,6 +172,7 @@ await pd.proxy.post(accountId, 'slack', '/chat.postMessage', { body: { channel, 
 - [ ] 2.12 Test full sync cycle: Electron → API → Convex → UI
 
 ### Phase 3: AI Assistant (AFK-READY)
+
 > Can run `./afk-ralph.sh 10` for this phase
 
 - [ ] 3.1 Create `packages/ai` with tool type definitions
@@ -167,7 +181,7 @@ await pd.proxy.post(accountId, 'slack', '/chat.postMessage', { body: { channel, 
 - [ ] 3.4 Port `create_action` tool to TypeScript
 - [ ] 3.5 Port `get_conversations` tool to TypeScript
 - [ ] 3.6 Port `search_memories` tool (Mem0 API client)
-- [ ] 3.7 Create `/api/assistant/chat` streaming route
+- [ ] 3.7 Create `/api/chat` streaming route
 - [ ] 3.8 Set up Vercel AI SDK with OpenAI
 - [ ] 3.9 Port system prompt from `backend/services/assistant/llm.py`
 - [ ] 3.10 Port `AssistantView` component to packages/ui
@@ -177,6 +191,7 @@ await pd.proxy.post(accountId, 'slack', '/chat.postMessage', { body: { channel, 
 - [ ] 3.14 Test assistant end-to-end
 
 ### Phase 4: Gmail (AFK-READY)
+
 - [ ] 4.1 Set up Pipedream project and get API keys
 - [ ] 4.2 Create Pipedream Gmail OAuth app
 - [ ] 4.3 Create `/settings/integrations` page
@@ -189,6 +204,7 @@ await pd.proxy.post(accountId, 'slack', '/chat.postMessage', { body: { channel, 
 - [ ] 4.10 Wire Gmail send to action queue completion
 
 ### Phase 5: Slack (AFK-READY)
+
 - [ ] 5.1 Create Pipedream Slack OAuth app
 - [ ] 5.2 Implement Slack connect button
 - [ ] 5.3 Create `/api/pipedream/slack/webhook` receiver
@@ -198,6 +214,7 @@ await pd.proxy.post(accountId, 'slack', '/chat.postMessage', { body: { channel, 
 - [ ] 5.7 Wire Slack send to action queue completion
 
 ### Phase 6: Polish (AFK-READY)
+
 - [ ] 6.1 Create contact merge UI for cross-platform resolution
 - [ ] 6.2 Add platform filter to unified inbox
 - [ ] 6.3 Add platform badges to conversation list
@@ -212,12 +229,14 @@ await pd.proxy.post(accountId, 'slack', '/chat.postMessage', { body: { channel, 
 ## 8. What to Keep vs Rewrite
 
 ### Keep (adapt to TypeScript/Convex):
+
 - `backend/services/assistant/tools.py` - Tool logic
 - `backend/services/memory/mem0_service.py` - Mem0 config and prompts
 - `frontend/src/renderer/src/components/Assistant/` - UI components
 - `frontend/src/renderer/src/components/ActionQueue/CardStack.tsx` - Swipe UI
 
 ### Rewrite:
+
 - Database layer → Convex schema + functions
 - API routes → Next.js API routes
 - Auth → WorkOS AuthKit
@@ -225,6 +244,7 @@ await pd.proxy.post(accountId, 'slack', '/chat.postMessage', { body: { channel, 
 - Background jobs → Convex scheduled functions
 
 ### Discard:
+
 - `chat_db.py` (stays in Electron only)
 - `prm_db.py` (replaced by Convex)
 - Swift LLM CLI (using OpenAI ZDR)
@@ -234,13 +254,13 @@ await pd.proxy.post(accountId, 'slack', '/chat.postMessage', { body: { channel, 
 
 ## 9. Critical Files to Reference
 
-| File | Purpose |
-|------|---------|
-| `backend/services/assistant/tools.py` | AI tool implementations to port |
-| `backend/services/memory/mem0_service.py` | Mem0 prompts and graph config |
-| `backend/db/prm_db.py` | Current schema patterns |
-| `frontend/.../ActionQueue/CardStack.tsx` | Swipe UI to port |
-| `backend/routers/actions.py` | Action queue API patterns |
+| File                                      | Purpose                         |
+| ----------------------------------------- | ------------------------------- |
+| `backend/services/assistant/tools.py`     | AI tool implementations to port |
+| `backend/services/memory/mem0_service.py` | Mem0 prompts and graph config   |
+| `backend/db/prm_db.py`                    | Current schema patterns         |
+| `frontend/.../ActionQueue/CardStack.tsx`  | Swipe UI to port                |
+| `backend/routers/actions.py`              | Action queue API patterns       |
 
 ---
 

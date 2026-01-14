@@ -1,14 +1,7 @@
 {
   "project": "PRM Cloud Refactor",
   "description": "Refactor PRM from local-first macOS Electron+FastAPI to cloud-based multi-platform personal relationship manager",
-  "target_stack": [
-    "Turborepo",
-    "Next.js",
-    "Convex",
-    "WorkOS",
-    "Pipedream",
-    "Mem0"
-  ],
+  "target_stack": ["Turborepo", "Next.js", "Convex", "WorkOS", "Nango", "Mem0"],
   "v1_platforms": ["iMessage", "Gmail", "Slack"],
   "tasks": [
     {
@@ -890,13 +883,14 @@
       "phase": 4,
       "mode": "afk",
       "category": "integration",
-      "description": "Set up Pipedream project and get API keys",
-      "reference": "https://pipedream.com/docs/connect",
+      "description": "Set up Nango account and configure environment",
+      "reference": "https://nango.dev/docs/getting-started/quickstart/access-an-api",
       "steps": [
-        "Create Pipedream account if needed",
-        "Create new project for PRM",
-        "Get client ID and client secret",
-        "Add to .env.local as PIPEDREAM_CLIENT_ID and PIPEDREAM_CLIENT_SECRET"
+        "Create Nango account at app.nango.dev/signup",
+        "Get NANGO_SECRET_KEY from Environment Settings",
+        "Add NANGO_SECRET_KEY to .env.local",
+        "Install @nangohq/node and @nangohq/frontend packages",
+        "Verify Nango dashboard accessible"
       ],
       "passes": false
     },
@@ -905,13 +899,15 @@
       "phase": 4,
       "mode": "afk",
       "category": "integration",
-      "description": "Create Pipedream Gmail OAuth app",
-      "reference": "https://pipedream.com/docs/connect",
+      "description": "Configure Google Mail integration in Nango",
+      "reference": "https://nango.dev/docs/getting-started/quickstart/access-an-api",
       "steps": [
-        "Create Gmail OAuth app in Pipedream",
-        "Configure required scopes for read/send",
-        "Get OAuth app ID",
-        "Add to .env.local as PIPEDREAM_GMAIL_APP_ID"
+        "In Nango dashboard, go to Integrations tab and add 'google-mail'",
+        "Create OAuth credentials in Google Cloud Console",
+        "Set callback URL from Nango integration settings in Google Console",
+        "Configure scopes: gmail.readonly, gmail.send, gmail.modify",
+        "Add Client ID and Client Secret to Nango integration",
+        "Verify integration shows as configured"
       ],
       "passes": false
     },
@@ -919,13 +915,18 @@
       "id": "4.3",
       "phase": 4,
       "mode": "afk",
-      "category": "ui",
-      "description": "Create /settings/integrations page",
+      "category": "integration",
+      "description": "Create Nango Gmail sync function for emails",
+      "reference": "https://github.com/NangoHQ/integration-templates/tree/main/integrations/google-mail",
       "steps": [
-        "Create app/(app)/settings/integrations/page.tsx",
-        "Show connected integrations status",
-        "Add connect/disconnect buttons for each platform",
-        "Query Convex integrations table for current state"
+        "Initialize Nango CLI: npx nango init in packages/integrations",
+        "Create nango.yaml with google-mail integration config",
+        "Create syncs/emails.ts based on integration-templates example",
+        "Define GmailEmail model with sender, recipients, subject, body, threadId, attachments",
+        "Implement pagination through Gmail messages/list API",
+        "Use nango.batchSave() to store emails",
+        "Configure sync to run every 5 minutes",
+        "Deploy sync with: npx nango deploy"
       ],
       "passes": false
     },
@@ -933,14 +934,17 @@
       "id": "4.4",
       "phase": 4,
       "mode": "afk",
-      "category": "integration",
-      "description": "Implement Gmail connect button with Pipedream SDK",
-      "reference": "https://github.com/PipedreamHQ/pipedream/blob/master/packages/connect-react/README.md",
+      "category": "ui",
+      "description": "Create /settings/integrations page with Nango Connect UI",
+      "reference": "https://nango.dev/docs/getting-started/quickstart/embed-in-your-app",
       "steps": [
-        "Install @pipedream/connect-react",
-        "Use usePipedreamConnect hook",
-        "Implement connect flow for Gmail",
-        "Handle success/error callbacks"
+        "Create app/(app)/settings/integrations/page.tsx",
+        "Create /api/nango/session POST endpoint to generate connect session tokens",
+        "Use nango.createConnectSession() with end_user.id from WorkOS session",
+        "Implement Nango Connect UI with nango.openConnectUI()",
+        "Handle onEvent callbacks for 'connect' and 'close' events",
+        "Show connected integrations status from Convex",
+        "Add disconnect button that calls Nango API to delete connection"
       ],
       "passes": false
     },
@@ -949,12 +953,13 @@
       "phase": 4,
       "mode": "afk",
       "category": "functional",
-      "description": "Create Convex mutation to store integration",
+      "description": "Create Convex mutation to store Nango connection",
       "steps": [
-        "Create convex/integrations.ts with connect mutation",
-        "Store pipedreamAccountId for user",
-        "Set isConnected to true",
-        "Update connectedAt timestamp"
+        "Create convex/integrations.ts with connectNango mutation",
+        "Store nangoConnectionId for user (received from webhook)",
+        "Set platform to 'gmail', isConnected to true",
+        "Update connectedAt timestamp",
+        "Create query to check connection status by userId and platform"
       ],
       "passes": false
     },
@@ -963,12 +968,16 @@
       "phase": 4,
       "mode": "afk",
       "category": "integration",
-      "description": "Create /api/pipedream/gmail/webhook receiver",
+      "description": "Create /api/nango/webhook receiver for connection events",
+      "reference": "https://nango.dev/docs/guides/use-cases/webhooks",
       "steps": [
-        "Create app/api/pipedream/gmail/webhook/route.ts",
-        "Verify Pipedream signature",
-        "Parse Gmail message from payload",
-        "Call Convex mutation to sync message"
+        "Create app/api/nango/webhook/route.ts",
+        "Configure webhook URL in Nango Environment Settings",
+        "Enable 'Send New Connection Creation Webhooks' in Nango",
+        "Handle type='auth', operation='creation' events",
+        "Extract connectionId and endUser.endUserId from payload",
+        "Call Convex mutation to store connection",
+        "Handle connection deletion events to update Convex"
       ],
       "passes": false
     },
@@ -977,13 +986,17 @@
       "phase": 4,
       "mode": "afk",
       "category": "functional",
-      "description": "Create Convex mutation syncGmailMessage",
+      "description": "Create Convex scheduled function to pull Gmail from Nango",
       "steps": [
-        "Create syncGmailMessage mutation",
-        "Map Gmail message to unified message schema",
-        "Upsert conversation by threadId",
-        "Upsert message by Gmail message ID",
-        "Resolve sender to contact"
+        "Create convex/crons.ts with pullGmailEmails job",
+        "Use @nangohq/node SDK to call nango.listRecords()",
+        "Fetch records from 'emails' sync for each Gmail connection",
+        "Map GmailEmail records to unified message schema",
+        "Upsert conversations by threadId",
+        "Upsert messages by Gmail message ID",
+        "Resolve sender email to contactId",
+        "Schedule to run every 5 minutes",
+        "Track lastPulledAt cursor per connection"
       ],
       "passes": false
     },
@@ -991,13 +1004,16 @@
       "id": "4.8",
       "phase": 4,
       "mode": "afk",
-      "category": "functional",
-      "description": "Create historical sync worker (Convex scheduled function)",
+      "category": "integration",
+      "description": "Create Nango action for sending Gmail messages",
+      "reference": "https://github.com/NangoHQ/integration-templates/tree/main/integrations/google-mail",
       "steps": [
-        "Create convex/crons.ts with Gmail sync job",
-        "Use Pipedream proxy to fetch Gmail messages",
-        "Implement pagination with nextPageToken",
-        "Schedule to run after initial connect"
+        "Create actions/send-email.ts in Nango integration",
+        "Define GmailEmailInput model with to, subject, body, threadId",
+        "Implement action using Gmail messages/send API",
+        "Handle reply-to-thread via threadId and References header",
+        "Return sent message ID and threadId",
+        "Deploy action with: npx nango deploy"
       ],
       "passes": false
     },
@@ -1006,12 +1022,15 @@
       "phase": 4,
       "mode": "afk",
       "category": "functional",
-      "description": "Create sendGmailMessage in packages/integrations",
+      "description": "Create sendGmailMessage in packages/integrations using Nango",
       "steps": [
-        "Create packages/integrations/gmail.ts",
-        "Implement sendGmailMessage using Pipedream proxy",
-        "Support reply-to-thread via threadId",
-        "Return sent message ID"
+        "Create packages/integrations/nango-gmail.ts",
+        "Initialize Nango client with NANGO_SECRET_KEY",
+        "Implement sendGmailMessage() that triggers Nango action",
+        "Use nango.triggerAction('google-mail', 'send-email', connectionId, input)",
+        "Support reply-to-thread via threadId parameter",
+        "Return sent message ID",
+        "Add error handling for connection not found"
       ],
       "passes": false
     },
@@ -1022,10 +1041,82 @@
       "category": "functional",
       "description": "Wire Gmail send to action queue completion",
       "steps": [
-        "Update action completion handler",
-        "Check if action has Gmail conversation",
+        "Update action completion handler in convex/actions.ts",
+        "Check if action has Gmail conversation (platform='gmail')",
+        "Get nangoConnectionId from integrations table",
         "Call sendGmailMessage on swipe right",
-        "Update action status to completed"
+        "Update action status to completed on success",
+        "Handle errors and show failure state"
+      ],
+      "passes": false
+    },
+    {
+      "id": "4.11",
+      "phase": 4,
+      "mode": "afk",
+      "category": "integration",
+      "description": "Auto-create Mem0 memories from Gmail emails",
+      "steps": [
+        "Hook into pullGmailEmails cron after processing new emails",
+        "Queue new Gmail messages for Mem0 processing",
+        "Extract key facts: meeting times, commitments, topics discussed",
+        "Associate memories with resolved contactId",
+        "Skip automated/newsletter emails (detect via sender patterns)",
+        "Verify Gmail conversations generate searchable memories"
+      ],
+      "passes": false
+    },
+    {
+      "id": "4.12",
+      "phase": 4,
+      "mode": "afk",
+      "category": "integration",
+      "description": "Create Nango sync for Google Contacts (People API)",
+      "reference": "https://developers.google.com/people/api/rest/v1/people.connections/list",
+      "steps": [
+        "Add 'google-contacts' integration to nango.yaml (custom, not prebuilt)",
+        "Configure OAuth with contacts.readonly scope",
+        "Create syncs/contacts.ts for People API",
+        "Call people.connections.list with personFields: names,emailAddresses,phoneNumbers",
+        "Handle pagination with pageToken",
+        "Use syncToken for incremental sync (expires after 7 days)",
+        "Define GoogleContact model: name, emails[], phones[], resourceName",
+        "Deploy sync with 5-minute interval"
+      ],
+      "passes": false
+    },
+    {
+      "id": "4.13",
+      "phase": 4,
+      "mode": "afk",
+      "category": "functional",
+      "description": "Pull Google Contacts from Nango into Convex",
+      "steps": [
+        "Add pullGoogleContacts to convex/crons.ts",
+        "Fetch records from 'contacts' sync using nango.listRecords()",
+        "Map GoogleContact to unified contact schema",
+        "Upsert contacts by email/phone handle",
+        "Link contactHandles for all email and phone variants",
+        "Merge with existing iMessage contacts by phone number",
+        "Track lastPulledAt cursor per connection"
+      ],
+      "passes": false
+    },
+    {
+      "id": "4.14",
+      "phase": 4,
+      "mode": "afk",
+      "category": "functional",
+      "description": "Test Gmail integration end-to-end",
+      "steps": [
+        "Connect Gmail account via settings page",
+        "Verify connection shows in Convex integrations table",
+        "Wait for initial sync to complete (check Nango logs)",
+        "Verify emails appear in Convex messages table",
+        "Verify email threads appear in inbox UI",
+        "Send test reply via action queue",
+        "Verify sent email appears in Gmail sent folder",
+        "Verify memories created from email conversations"
       ],
       "passes": false
     },
@@ -1034,13 +1125,15 @@
       "phase": 5,
       "mode": "afk",
       "category": "integration",
-      "description": "Create Pipedream Slack OAuth app",
-      "reference": "https://pipedream.com/docs/connect",
+      "description": "Configure Slack integration in Nango",
+      "reference": "https://nango.dev/docs/integrations/slack",
       "steps": [
-        "Create Slack OAuth app in Pipedream",
-        "Configure scopes: channels:read, chat:write, im:read, im:write",
-        "Get OAuth app ID",
-        "Add to .env.local"
+        "In Nango dashboard, go to Integrations tab and add 'slack'",
+        "Create Slack app at api.slack.com/apps with OAuth",
+        "Configure OAuth scopes: channels:read, channels:history, chat:write, im:read, im:history, im:write, users:read",
+        "Set OAuth redirect URL from Nango integration settings",
+        "Add Client ID and Client Secret to Nango integration",
+        "Verify integration shows as configured"
       ],
       "passes": false
     },
@@ -1048,14 +1141,18 @@
       "id": "5.2",
       "phase": 5,
       "mode": "afk",
-      "category": "ui",
-      "description": "Implement Slack connect button",
-      "reference": "https://github.com/PipedreamHQ/pipedream/blob/master/packages/connect-react/README.md",
+      "category": "integration",
+      "description": "Create Nango Slack sync function for messages",
+      "reference": "https://github.com/NangoHQ/integration-templates/tree/main/integrations/slack",
       "steps": [
-        "Add Slack to integrations page",
-        "Use Pipedream Connect for OAuth flow",
-        "Store pipedreamAccountId on success",
-        "Show connected status"
+        "Add slack integration to nango.yaml in packages/integrations",
+        "Create syncs/messages.ts for Slack conversations API",
+        "Define SlackMessage model: text, user, channel, ts, thread_ts, reactions",
+        "Fetch DMs via conversations.list (types=im) and conversations.history",
+        "Handle pagination with cursor",
+        "Use nango.batchSave() to store messages",
+        "Configure sync to run every 5 minutes",
+        "Deploy sync with: npx nango deploy"
       ],
       "passes": false
     },
@@ -1063,13 +1160,15 @@
       "id": "5.3",
       "phase": 5,
       "mode": "afk",
-      "category": "integration",
-      "description": "Create /api/pipedream/slack/webhook receiver",
+      "category": "ui",
+      "description": "Add Slack to integrations page with Nango Connect UI",
       "steps": [
-        "Create app/api/pipedream/slack/webhook/route.ts",
-        "Verify Pipedream signature",
-        "Parse Slack message event",
-        "Call Convex mutation to sync message"
+        "Add Slack card to /settings/integrations page",
+        "Use same Nango Connect UI pattern from Gmail (task 4.4)",
+        "Pass integration_id='slack' to nango.openConnectUI()",
+        "Handle onEvent callbacks for connect/close events",
+        "Show connected status from Convex integrations table",
+        "Add disconnect button"
       ],
       "passes": false
     },
@@ -1078,12 +1177,18 @@
       "phase": 5,
       "mode": "afk",
       "category": "functional",
-      "description": "Create Convex mutation syncSlackMessage",
+      "description": "Create Convex scheduled function to pull Slack from Nango",
       "steps": [
-        "Create syncSlackMessage mutation",
-        "Map Slack message to unified schema",
-        "Handle both DM and channel messages",
-        "Upsert by Slack message ts"
+        "Add pullSlackMessages to convex/crons.ts",
+        "Use @nangohq/node SDK to call nango.listRecords()",
+        "Fetch records from 'messages' sync for each Slack connection",
+        "Map SlackMessage records to unified message schema",
+        "Detect DM vs channel from channel ID (D prefix = DM, C prefix = channel)",
+        "Upsert conversations by channel ID",
+        "Upsert messages by Slack ts (timestamp)",
+        "Resolve Slack user_id to contactId using users:read API",
+        "Schedule to run every 5 minutes",
+        "Track lastPulledAt cursor per connection"
       ],
       "passes": false
     },
@@ -1092,12 +1197,13 @@
       "phase": 5,
       "mode": "afk",
       "category": "functional",
-      "description": "Handle Slack DMs vs channels",
+      "description": "Handle Slack threads and channel metadata",
       "steps": [
-        "Detect message type from channel ID prefix",
-        "Set conversationType to 'dm' or 'channel'",
-        "Store channel name for channels",
-        "Handle thread replies with thread_ts"
+        "Store thread_ts for threaded conversations",
+        "Group thread replies under parent message",
+        "Fetch channel names via conversations.info for display",
+        "Store conversationType as 'dm' or 'channel'",
+        "Handle thread replies in message detail view"
       ],
       "passes": false
     },
@@ -1105,13 +1211,16 @@
       "id": "5.6",
       "phase": 5,
       "mode": "afk",
-      "category": "functional",
-      "description": "Create sendSlackMessage in packages/integrations",
+      "category": "integration",
+      "description": "Create Nango action for sending Slack messages",
+      "reference": "https://github.com/NangoHQ/integration-templates/tree/main/integrations/slack",
       "steps": [
-        "Create packages/integrations/slack.ts",
-        "Implement sendSlackMessage using Pipedream proxy",
-        "Support thread replies via thread_ts",
-        "Return sent message ts"
+        "Create actions/send-message.ts in Nango slack integration",
+        "Define SlackMessageInput model with channel, text, thread_ts (optional)",
+        "Implement action using chat.postMessage API",
+        "Handle thread replies via thread_ts parameter",
+        "Return sent message ts and channel",
+        "Deploy action with: npx nango deploy"
       ],
       "passes": false
     },
@@ -1120,12 +1229,156 @@
       "phase": 5,
       "mode": "afk",
       "category": "functional",
+      "description": "Create sendSlackMessage in packages/integrations using Nango",
+      "steps": [
+        "Create packages/integrations/nango-slack.ts",
+        "Initialize Nango client with NANGO_SECRET_KEY",
+        "Implement sendSlackMessage() that triggers Nango action",
+        "Use nango.triggerAction('slack', 'send-message', connectionId, input)",
+        "Support thread replies via thread_ts parameter",
+        "Return sent message ts",
+        "Add error handling for connection not found"
+      ],
+      "passes": false
+    },
+    {
+      "id": "5.8",
+      "phase": 5,
+      "mode": "afk",
+      "category": "functional",
       "description": "Wire Slack send to action queue completion",
       "steps": [
-        "Update action completion handler",
-        "Check if action has Slack conversation",
+        "Update action completion handler in convex/actions.ts",
+        "Check if action has Slack conversation (platform='slack')",
+        "Get nangoConnectionId from integrations table",
         "Call sendSlackMessage on swipe right",
-        "Update action status to completed"
+        "Update action status to completed on success",
+        "Handle errors and show failure state"
+      ],
+      "passes": false
+    },
+    {
+      "id": "5.9",
+      "phase": 5,
+      "mode": "afk",
+      "category": "integration",
+      "description": "Auto-create Mem0 memories from Slack messages",
+      "steps": [
+        "Hook into pullSlackMessages cron after processing new messages",
+        "Queue new Slack messages for Mem0 processing",
+        "Extract key facts: decisions, action items, discussed topics",
+        "Associate memories with resolved contactId (Slack user)",
+        "Skip bot messages and automated notifications",
+        "Verify Slack conversations generate searchable memories"
+      ],
+      "passes": false
+    },
+    {
+      "id": "5.10",
+      "phase": 5,
+      "mode": "afk",
+      "category": "functional",
+      "description": "Test Slack integration end-to-end",
+      "steps": [
+        "Connect Slack workspace via settings page",
+        "Verify connection shows in Convex integrations table",
+        "Wait for initial sync to complete (check Nango logs)",
+        "Verify DMs appear in Convex messages table",
+        "Verify Slack conversations appear in inbox UI with Slack badge",
+        "Send test reply via action queue",
+        "Verify sent message appears in Slack conversation",
+        "Verify memories created from Slack conversations"
+      ],
+      "passes": false
+    },
+    {
+      "id": "6.0a",
+      "phase": 6,
+      "mode": "afk",
+      "category": "functional",
+      "description": "Implement deterministic contact matching (email and phone)",
+      "steps": [
+        "Create packages/ai/contact-resolution/deterministic.ts",
+        "Normalize emails: lowercase, trim whitespace, handle gmail dot variants",
+        "Normalize phones: use libphonenumber-js for E.164 format",
+        "Match contacts with identical normalized email across platforms",
+        "Match contacts with identical normalized phone across platforms",
+        "Create Convex query findMatchingContacts(handle, handleType)",
+        "Auto-merge on exact match during sync (high confidence)",
+        "Track merge source: 'email_match', 'phone_match'"
+      ],
+      "passes": false
+    },
+    {
+      "id": "6.0b",
+      "phase": 6,
+      "mode": "afk",
+      "category": "functional",
+      "description": "Implement fuzzy name matching for contact resolution",
+      "steps": [
+        "Create packages/ai/contact-resolution/fuzzy-name.ts",
+        "Normalize names: lowercase, remove prefixes (Dr., Mr.), handle nicknames",
+        "Use Jaro-Winkler or Levenshtein distance for similarity scoring",
+        "Handle name variants: 'Bob' = 'Robert', 'Mike' = 'Michael'",
+        "Create common nicknames mapping table",
+        "Match 'First Last' with 'F. Last' and 'Last, First' formats",
+        "Score threshold: >0.85 = suggest merge, >0.95 = auto-merge",
+        "Track merge source: 'name_match' with confidence score"
+      ],
+      "passes": false
+    },
+    {
+      "id": "6.0c",
+      "phase": 6,
+      "mode": "afk",
+      "category": "integration",
+      "description": "Implement LLM-assisted contact resolution for ambiguous matches",
+      "reference": "https://ai-sdk.dev/docs/ai-sdk-core/generating-structured-data",
+      "steps": [
+        "Create packages/ai/contact-resolution/llm-resolver.ts",
+        "Define ContactMatchResult schema: { isSamePerson: boolean, confidence: number, reasoning: string }",
+        "Build context prompt with: names, emails, phones, companies, conversation snippets",
+        "Use generateObject() with gpt-4o-mini for cost efficiency",
+        "Handle cases: different name spellings, company email vs personal email",
+        "Handle cases: shared phone (couples), similar names (family members)",
+        "Only invoke LLM for contacts with 0.6-0.85 fuzzy score (ambiguous zone)",
+        "Cache LLM decisions to avoid re-processing same pair",
+        "Track merge source: 'llm_match' with confidence and reasoning"
+      ],
+      "passes": false
+    },
+    {
+      "id": "6.0d",
+      "phase": 6,
+      "mode": "afk",
+      "category": "functional",
+      "description": "Create background job to find and suggest contact merges",
+      "steps": [
+        "Create Convex scheduled function findMergeCandidates",
+        "Run after each sync completes (iMessage, Gmail, Slack, Google Contacts)",
+        "For each new contact, run deterministic matching first",
+        "If no deterministic match, run fuzzy name matching",
+        "If fuzzy score in ambiguous zone (0.6-0.85), queue for LLM resolution",
+        "Store merge suggestions in mergeSuggestions table: contact1Id, contact2Id, confidence, source, status",
+        "Auto-apply high-confidence merges (>0.95) without user review",
+        "Rate limit LLM calls: max 50 resolutions per sync batch"
+      ],
+      "passes": false
+    },
+    {
+      "id": "6.0e",
+      "phase": 6,
+      "mode": "afk",
+      "category": "functional",
+      "description": "Create Convex schema and mutations for contact merging",
+      "steps": [
+        "Add mergeSuggestions table: contact1Id, contact2Id, confidence, source, reasoning, status (pending/approved/rejected)",
+        "Create mutation mergeContacts(primaryId, secondaryId): move all handles to primary, delete secondary",
+        "Update all conversations referencing secondary contact to primary",
+        "Update all messages referencing secondary contact to primary",
+        "Preserve merge history for audit: mergedFrom, mergedAt, mergeSource",
+        "Create mutation rejectMerge(suggestionId) to mark as rejected and prevent re-suggestion",
+        "Add index by_status on mergeSuggestions for pending queue"
       ],
       "passes": false
     },
@@ -1134,12 +1387,37 @@
       "phase": 6,
       "mode": "afk",
       "category": "ui",
-      "description": "Create contact merge UI for cross-platform resolution",
+      "description": "Create contact merge review UI for suggested matches",
       "steps": [
-        "Create contacts merge interface",
-        "Show potential duplicate contacts",
-        "Allow user to link handles to same contact",
-        "Update contactHandles on merge"
+        "Create app/(app)/contacts/merge/page.tsx",
+        "Query pending mergeSuggestions from Convex",
+        "Show side-by-side comparison: names, handles, platforms, conversation counts",
+        "Display confidence score and match source (email, phone, name, LLM)",
+        "Show LLM reasoning for LLM-assisted matches",
+        "Add 'Merge' button that calls mergeContacts mutation",
+        "Add 'Not Same Person' button that calls rejectMerge mutation",
+        "Show badge in sidebar when pending suggestions exist",
+        "Filter by confidence level and match source"
+      ],
+      "passes": false
+    },
+    {
+      "id": "6.1b",
+      "phase": 6,
+      "mode": "afk",
+      "category": "ui",
+      "description": "Build contacts list page with handle details",
+      "steps": [
+        "Create app/(app)/contacts/page.tsx with searchable contact list",
+        "Create Convex query getContacts with pagination and search",
+        "Show contact card: name, company, avatar",
+        "Display all handles grouped by platform (iMessage, Gmail, Slack)",
+        "Show handle type icons: phone, email, slack ID",
+        "Add 'Last contacted' timestamp from most recent conversation",
+        "Create app/(app)/contacts/[id]/page.tsx for contact detail view",
+        "Show all conversations with this contact across platforms",
+        "Add edit form for name, company, notes, importance",
+        "Add button to manually link/unlink handles"
       ],
       "passes": false
     },
