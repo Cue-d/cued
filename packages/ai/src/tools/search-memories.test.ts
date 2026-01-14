@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { searchMemoriesTool } from "./search-memories.js";
-import type { ToolExecutionOptions } from "../types.js";
+import type { ToolExecutionOptions } from "../types";
 
 // Mock the @mem0/vercel-ai-provider module
 vi.mock("@mem0/vercel-ai-provider", () => ({

@@ -11,6 +11,7 @@
   },
   "dependencies": {
     "@ai-sdk/openai": "^3.0.9",
+    "@ai-sdk/react": "^3.0.35",
     "@base-ui/react": "^1.0.0",
     "@convex-dev/workos": "^0.0.1",
     "@prm/ai": "workspace:*",

@@ -1,6 +1,6 @@
 import { getMemories } from "@mem0/vercel-ai-provider";
 import { z } from "zod";
-import { getErrorMessage, type Tool, type ToolResult } from "../types.js";
+import { getErrorMessage, type Tool, type ToolResult } from "../types";
 
 const inputSchema = z.object({
   query: z

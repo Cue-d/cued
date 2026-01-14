@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { getErrorMessage, type Tool, type ToolResult } from "../types.js";
+import { getErrorMessage, type Tool, type ToolResult } from "../types";
 
 const ACTION_TYPES = ["respond", "follow_up", "send_message", "eod_contact"] as const;
 

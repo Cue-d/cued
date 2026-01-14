@@ -3,11 +3,10 @@ export type {
   ToolContext,
   ToolExecutionOptions,
   ToolResult,
-} from "./types.js";
-export { getErrorMessage } from "./types.js";
+} from "./types";
+export { getErrorMessage } from "./types";
 
-// OpenAI provider for Vercel AI SDK
-export { openai, DEFAULT_MODEL, FAST_MODEL } from "./openai.js";
+export { openai, DEFAULT_MODEL, FAST_MODEL } from "./openai";
 
 export {
   searchMessagesTool,
@@ -15,9 +14,8 @@ export {
   createActionTool,
   getConversationsTool,
   searchMemoriesTool,
-} from "./tools/index.js";
+} from "./tools";
 
-// Mem0 provider for Vercel AI SDK
 export {
   createMem0Provider,
   addMemories,
@@ -26,7 +24,6 @@ export {
   searchMemories,
   type Mem0Provider,
   type Mem0ConfigSettings,
-} from "./mem0.js";
+} from "./mem0";
 
-// System prompts
-export { SYSTEM_PROMPT, buildSystemPrompt } from "./prompts/system.js";
+export { SYSTEM_PROMPT, buildSystemPrompt } from "./prompts/system";

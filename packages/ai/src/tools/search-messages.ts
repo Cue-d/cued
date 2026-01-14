@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { getErrorMessage, type Tool, type ToolResult } from "../types.js";
+import { getErrorMessage, type Tool, type ToolResult } from "../types";
 
 const inputSchema = z.object({
   query: z.string().describe("Search query to match against message content"),

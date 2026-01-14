@@ -1,5 +1,5 @@
-export { searchMessagesTool } from "./search-messages.js";
-export { searchContactsTool } from "./search-contacts.js";
-export { createActionTool } from "./create-action.js";
-export { getConversationsTool } from "./get-conversations.js";
-export { searchMemoriesTool } from "./search-memories.js";
+export { searchMessagesTool } from "./search-messages"
+export { searchContactsTool } from "./search-contacts"
+export { createActionTool } from "./create-action"
+export { getConversationsTool } from "./get-conversations"
+export { searchMemoriesTool } from "./search-memories"
