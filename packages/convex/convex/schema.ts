@@ -149,6 +149,7 @@ const schema = defineSchema({
       )
     ),
   })
+    .index("by_user", ["userId"])
     .index("by_conversation", ["conversationId", "sentAt"])
     .index("by_platform_message", ["userId", "platform", "platformMessageId"])
     .searchIndex("search_content", {

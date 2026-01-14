@@ -8,7 +8,8 @@
     "dev": "turbo dev",
     "lint": "turbo lint",
     "typecheck": "turbo typecheck",
-    "test": "turbo test"
+    "test": "turbo test",
+    "reset-and-reseed": "cd apps/web && npx tsx ../../scripts/reset-and-reseed.ts"
   },
   "devDependencies": {
     "turbo": "^2.3.3"

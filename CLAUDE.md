@@ -154,6 +154,27 @@ Note: Initial sync runs automatically on first launch (syncs chat.db → prm.db,
 cd backend && uv run pytest -v && cd ../frontend && pnpm test --run
 ```
 
+### Reset and Reseed (Development Testing)
+
+To reset all Convex data and trigger a full re-sync for testing:
+
+```bash
+# Get access token from Electron app DevTools:
+# 1. Open Electron app and sign in
+# 2. Open DevTools (Cmd+Option+I)
+# 3. Run: await window.electronAPI.auth.getState()
+# 4. Copy the accessToken value
+
+# Run reset script
+PRM_ACCESS_TOKEN=<token> pnpm reset-and-reseed
+```
+
+This script:
+- Deletes all messages, conversations, contacts, and actions from Convex
+- Resets sync cursors and metadata in integrations table
+- Clears local Electron cache (contacts cache, sync cursor)
+- After running, launch Electron to trigger automatic full re-sync
+
 ## Linting
 
 ```bash
