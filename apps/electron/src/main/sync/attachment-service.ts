@@ -4,15 +4,17 @@
  * Handles:
  * - Resolving attachment file paths from ~/Library/Messages/Attachments/
  * - Generating thumbnails for images (max 400px, preserve aspect ratio)
- * - HEIC to JPEG conversion for web compatibility
  * - Missing/deleted file detection
+ *
+ * Note: HEIC/HEIF files are uploaded as-is (no conversion) since libheif
+ * isn't typically available. Safari/iOS can display them natively.
  */
 
 import { existsSync, readFileSync } from "fs";
 import { homedir } from "os";
-import { extname, join } from "path";
+import { join } from "path";
 import sharp from "sharp";
-import type { Attachment, UploadedAttachment } from "./types";
+import type { Attachment } from "./types";
 
 /** Maximum dimension (width or height) for thumbnails */
 const THUMBNAIL_MAX_SIZE = 400;
@@ -23,9 +25,8 @@ const THUMBNAIL_SUPPORTED_TYPES = new Set([
   "image/png",
   "image/gif",
   "image/webp",
-  "image/heic",
-  "image/heif",
   "image/tiff",
+  // Note: HEIC/HEIF require libvips compiled with libheif, which is often not available
   // Video thumbnails would require ffmpeg - not supported yet
 ]);
 
@@ -105,56 +106,9 @@ export async function generateThumbnail(
 }
 
 /**
- * Get the web-safe MIME type for an attachment.
- * Converts HEIC/HEIF to JPEG since most browsers don't support HEIC.
- */
-export function getWebSafeMimeType(mimeType: string | null): string {
-  if (!mimeType) return "application/octet-stream";
-
-  const lowerMime = mimeType.toLowerCase();
-
-  // Convert HEIC/HEIF to JPEG (sharp handles conversion)
-  if (lowerMime === "image/heic" || lowerMime === "image/heif") {
-    return "image/jpeg";
-  }
-
-  return mimeType;
-}
-
-/**
- * Convert HEIC/HEIF images to JPEG for web compatibility.
- * Returns the original buffer for non-HEIC images.
- */
-export async function convertToWebFormat(
-  fileBuffer: Buffer,
-  mimeType: string | null
-): Promise<{ buffer: Buffer; mimeType: string }> {
-  if (!mimeType) {
-    return { buffer: fileBuffer, mimeType: "application/octet-stream" };
-  }
-
-  const lowerMime = mimeType.toLowerCase();
-
-  // Convert HEIC/HEIF to JPEG
-  if (lowerMime === "image/heic" || lowerMime === "image/heif") {
-    try {
-      const jpegBuffer = await sharp(fileBuffer).jpeg({ quality: 90 }).toBuffer();
-      return { buffer: jpegBuffer, mimeType: "image/jpeg" };
-    } catch (error) {
-      console.error("HEIC conversion failed:", error);
-      // Return original if conversion fails
-      return { buffer: fileBuffer, mimeType };
-    }
-  }
-
-  return { buffer: fileBuffer, mimeType };
-}
-
-/**
  * Process an attachment for upload.
  * - Reads the file from disk
- * - Converts HEIC to JPEG if needed
- * - Generates thumbnail for images
+ * - Generates thumbnail for supported image types
  *
  * Returns null if the file can't be read.
  */
@@ -168,28 +122,16 @@ export async function processAttachment(attachment: Attachment): Promise<{
     return null;
   }
 
-  // Convert HEIC to web format if needed
-  const { buffer: webBuffer, mimeType: webMimeType } = await convertToWebFormat(
-    fileBuffer,
-    attachment.mimeType
-  );
+  const mimeType = attachment.mimeType ?? "application/octet-stream";
 
-  // Update filename extension if MIME type changed
-  let filename = attachment.filename;
-  if (webMimeType !== attachment.mimeType) {
-    // Replace extension with new MIME type extension
-    const ext = extname(filename);
-    filename = filename.slice(0, -ext.length) + ".jpg";
-  }
-
-  // Generate thumbnail for images
-  const thumbnail = await generateThumbnail(webBuffer, webMimeType);
+  // Generate thumbnail for supported image types (excludes HEIC since libheif isn't available)
+  const thumbnail = await generateThumbnail(fileBuffer, mimeType);
 
   return {
     original: {
-      buffer: webBuffer,
-      mimeType: webMimeType,
-      filename,
+      buffer: fileBuffer,
+      mimeType,
+      filename: attachment.filename,
     },
     thumbnail,
   };
