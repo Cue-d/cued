@@ -493,7 +493,7 @@
         "Include contacts in 'Force Full Sync' recovery flow (task 2.8a)",
         "Verify contacts re-sync works after clearing local cache"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "2.8",

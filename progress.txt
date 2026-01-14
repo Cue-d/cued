@@ -972,3 +972,32 @@ Notes:
   - Attachments can be enabled later via syncAttachments: true option
 ---
 
+[2026-01-13 21:00] Task 2.7c - Store contacts sync state in Convex for recovery
+Files:
+  - packages/convex/convex/schema.ts (add lastContactsSyncAt to syncState)
+  - packages/convex/convex/sync.ts (update getSyncState, add updateContactsSyncState mutation)
+  - apps/electron/src/main/sync/contacts-sync.ts (call updateContactsSyncState after sync)
+  - apps/electron/src/main/sync/sync-manager.ts (contacts count mismatch detection, preloadLocalContactsCount)
+  - apps/electron/src/main/index.ts (wire sync IPC handlers)
+  - apps/electron/src/preload/index.ts (sync IPC bridge)
+Decisions:
+  - Added lastContactsSyncAt timestamp to integrations.syncState schema
+  - Created updateContactsSyncState mutation to persist contacts count after sync
+  - Updated getSyncState to return lastContactsSyncAt for Electron
+  - Added contacts count mismatch >10% detection in detectRecoveryScenario
+  - Pre-load local contacts via preloadLocalContactsCount before recovery detection
+  - Reset lastContactsSyncAt in resetSyncState for clean recovery
+Why:
+  - Contacts sync state enables detection of bulk additions/deletions in Contacts.app
+  - 10% threshold prevents false positives from minor contact edits
+  - Pre-loading contacts ensures accurate comparison with server count
+  - Recovery detection triggers full contacts re-sync when significant drift detected
+  - Force Full Sync already wired (task 2.8a) for manual recovery option
+Notes:
+  - All lint and typecheck pass for entire monorepo
+  - Convex schema and functions deployed successfully (862ms)
+  - Code review confirmed clean implementation, no simplification needed
+  - Manual verification of contacts re-sync requires Electron code signing
+  - Ready for task 2.12: Test full sync cycle end-to-end
+---
+
