@@ -1,10 +1,10 @@
+import { getMemories } from "@mem0/vercel-ai-provider";
 import { z } from "zod";
 import { getErrorMessage, type Tool, type ToolResult } from "../types.js";
 
 const inputSchema = z.object({
   query: z.string().describe("Search query to find relevant memories about a person or topic"),
   contactId: z.string().optional().describe("Filter memories to a specific contact/person ID"),
-  limit: z.number().optional().describe("Maximum number of memories to return (default: 10)"),
 });
 
 interface MemoryResult {
@@ -15,35 +15,13 @@ interface MemoryResult {
   createdAt?: string;
 }
 
-interface Mem0Memory {
+// Type for raw Mem0 response (getMemories returns Promise<any>)
+interface Mem0RawMemory {
   id: string;
   memory?: string;
   score?: number;
   metadata?: Record<string, unknown>;
-  created_at?: Date;
-}
-
-interface Mem0Client {
-  search: (query: string, options: { user_id?: string; limit?: number }) => Promise<Mem0Memory[]>;
-}
-
-let mem0Client: Mem0Client | null = null;
-let mem0Initialized = false;
-
-async function getMem0Client(): Promise<Mem0Client | null> {
-  if (mem0Initialized) return mem0Client;
-  mem0Initialized = true;
-
-  const apiKey = process.env.MEM0_API_KEY;
-  if (!apiKey) return null;
-
-  try {
-    const { default: MemoryClient } = await import("mem0ai");
-    mem0Client = new MemoryClient({ apiKey }) as Mem0Client;
-    return mem0Client;
-  } catch {
-    return null;
-  }
+  created_at?: string;
 }
 
 export const searchMemoriesTool: Tool<typeof inputSchema, MemoryResult[]> = {
@@ -55,36 +33,36 @@ export const searchMemoriesTool: Tool<typeof inputSchema, MemoryResult[]> = {
   inputSchema,
   execute: async (input, options): Promise<ToolResult<MemoryResult[]>> => {
     try {
-      const client = await getMem0Client();
-      if (!client) {
-        return {
-          success: false,
-          error: "Mem0 is not configured. Set MEM0_API_KEY environment variable.",
-        };
-      }
-
+      // Scope memories by userId:contactId for contact-specific recall
       const mem0UserId = input.contactId
         ? `${options.context.userId}:${input.contactId}`
         : options.context.userId;
 
-      const memories = await client.search(input.query, {
+      const memories = await getMemories(input.query, {
         user_id: mem0UserId,
-        limit: input.limit ?? 10,
+        // mem0ApiKey read from MEM0_API_KEY env var automatically
       });
 
-      const results = memories
-        .filter((m): m is Mem0Memory & { memory: string } => !!m.memory)
+      const results = (memories as Mem0RawMemory[])
+        .filter((m): m is Mem0RawMemory & { memory: string } => !!m.memory)
         .map((m) => ({
           id: m.id,
           memory: m.memory,
           score: m.score,
           metadata: m.metadata,
-          createdAt: m.created_at?.toISOString(),
+          createdAt: m.created_at,
         }));
 
       return { success: true, data: results };
     } catch (error) {
-      return { success: false, error: getErrorMessage(error, "Failed to search memories") };
+      const message = getErrorMessage(error, "Failed to search memories");
+      if (message.includes("API key") || message.includes("MEM0_API_KEY")) {
+        return {
+          success: false,
+          error: "Mem0 is not configured. Set MEM0_API_KEY environment variable.",
+        };
+      }
+      return { success: false, error: message };
     }
   },
 };

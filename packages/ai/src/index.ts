@@ -13,3 +13,11 @@ export {
   getConversationsTool,
   searchMemoriesTool,
 } from "./tools/index.js";
+
+// Mem0 provider for Vercel AI SDK
+export {
+  createMem0Provider,
+  addMemories,
+  getMemories,
+  retrieveMemories,
+} from "./mem0.js";
