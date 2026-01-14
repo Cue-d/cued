@@ -1318,3 +1318,62 @@ Notes:
   - Browser verification needed once API endpoint wired
   - Ready for task 3.13: Connect Mem0 service with custom prompts
 ---
+
+[2026-01-14 09:05] Task 3.4b - Create search_actions tool for AI assistant
+Files:
+  packages/ai/src/tools/search-actions.ts (new)
+  packages/ai/src/tools/search-actions.test.ts (new)
+  packages/ai/src/tools/index.ts (added export)
+  packages/ai/src/index.ts (added export)
+  packages/ai/src/openai.test.ts (fixed model name tests)
+  packages/convex/convex/actions.ts (added searchActions query, extracted enrichAction helper)
+  apps/web/app/api/assistant/chat/route.ts (added search_actions tool)
+Decisions:
+  - Created searchActions Convex query with filters: status, type, contactId, conversationId, createdAfter, snoozedUntilBefore
+  - Query uses by_user_status compound index when filtering by status, in-memory filtering for other fields
+  - Extracted enrichAction helper to eliminate duplication between searchActions and getPendingActions
+  - Tool returns enriched action details including contactName and platform from related records
+  - Added 8 unit tests covering filter combinations and error handling
+  - Fixed pre-existing openai.test.ts failures (gpt-4o → gpt-5-mini model name updates)
+Why:
+  - Completes the AI tool suite: search_messages, search_contacts, get_conversations, create_action, search_memories, search_actions
+  - Enables assistant queries like "What follow-ups do I have pending?" or "Show actions for John"
+  - In-memory filtering acceptable for action tables (typically <1000 records per user)
+  - enrichAction helper ensures consistent response shape across action queries
+Code Simplification:
+  - Simplified execute function by passing input directly instead of destructuring
+  - Used spread operator with targeted ID casts in chat route
+Notes:
+  - All 21 AI package tests pass
+  - Lint and typecheck pass for entire monorepo
+  - Convex functions deployed successfully
+  - Ready for task 3.13: Connect Mem0 service with custom prompts
+---
+
+[2026-01-14 10:15] Fix AI SDK v6 streaming and auth in assistant
+Files:
+  apps/web/app/api/chat/route.ts (changed toTextStreamResponse → toUIMessageStreamResponse)
+  apps/web/app/(app)/assistant/page.tsx (fixed stale closure with ref pattern)
+  apps/web/app/api/assistant/chat/route.ts (deleted - duplicate)
+Decisions:
+  - Changed streaming response from toTextStreamResponse() to toUIMessageStreamResponse()
+  - Fixed race condition where auth token wasn't available when transport was created
+  - Used React ref to hold latest accessToken, ensuring fetch always gets current token
+  - Deleted duplicate /api/assistant/chat route (frontend uses /api/chat)
+Why:
+  - toUIMessageStreamResponse() returns AI SDK v6 format with parts array including tool invocations
+  - toTextStreamResponse() strips tool invocation metadata, breaking tool display in UI
+  - useMemo dependency on accessToken caused stale closure: transport captured undefined token
+  - Ref pattern: transport created once (stable), but fetch callback reads ref.current (always latest)
+  - Race condition: accessToken loads async, first render creates transport with undefined token
+Bug Details:
+  - Symptom: "Not authenticated" error from all tools despite being logged in
+  - Root cause 1: /api/chat used toTextStreamResponse() (wrong format)
+  - Root cause 2: Authorization header not sent (accessToken was undefined when transport created)
+  - Fix 1: Use toUIMessageStreamResponse() for proper AI SDK v6 streaming
+  - Fix 2: Use ref to always get latest accessToken in fetch callback
+Notes:
+  - All 21 AI package tests pass
+  - Lint and typecheck pass for entire monorepo
+  - Browser verified: tools now authenticate and return real data
+---

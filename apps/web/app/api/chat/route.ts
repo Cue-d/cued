@@ -11,46 +11,48 @@ const convex = new ConvexHttpClient(process.env.NEXT_PUBLIC_CONVEX_URL!);
 
 // Convert UI message format (parts) to Core message format (content)
 interface UIMessagePart {
-  type: string
-  text?: string
+  type: string;
+  text?: string;
 }
 
 interface UIMessage {
-  id: string
-  role: "user" | "assistant"
-  parts: UIMessagePart[]
+  id: string;
+  role: "user" | "assistant";
+  parts: UIMessagePart[];
 }
 
 interface CoreMessage {
-  role: "user" | "assistant"
-  content: string
+  role: "user" | "assistant";
+  content: string;
 }
 
 function convertMessages(uiMessages: UIMessage[]): CoreMessage[] {
   return uiMessages.map((msg) => ({
     role: msg.role,
     content: msg.parts
-      .filter((p): p is UIMessagePart & { text: string } => p.type === "text" && !!p.text)
+      .filter(
+        (p): p is UIMessagePart & { text: string } =>
+          p.type === "text" && !!p.text,
+      )
       .map((p) => p.text)
       .join(""),
-  }))
+  }));
 }
 
 export async function POST(req: Request) {
-  const { messages: rawMessages } = await req.json()
+  const { messages: rawMessages } = await req.json();
 
   // Convert from UI format (parts) to Core format (content)
-  const messages = convertMessages(rawMessages)
+  const messages = convertMessages(rawMessages);
 
   // Get auth token from header
-  const authHeader = req.headers.get("authorization")
-  const token = authHeader?.replace("Bearer ", "")
+  const token = req.headers.get("authorization")?.replace("Bearer ", "");
 
   if (token) {
     convex.setAuth(token);
   }
 
-  // Get user identity for tool context (subject is the WorkOS user ID)
+  // Get user identity for tool context
   let userId: string | null = null;
   if (token) {
     try {
@@ -79,7 +81,7 @@ export async function POST(req: Request) {
             .number()
             .optional()
             .describe(
-              "Maximum number of results to return (default: 20, max: 50)"
+              "Maximum number of results to return (default: 20, max: 50)",
             ),
           conversationId: z
             .string()
@@ -209,6 +211,52 @@ export async function POST(req: Request) {
           return { memories: [], message: "Mem0 integration pending" };
         },
       }),
+
+      search_actions: tool({
+        description:
+          "Search the action queue with filters. " +
+          "Actions are tasks like 'respond to message', 'follow up with contact'. " +
+          "Use this to find pending follow-ups, check what actions exist for a contact, or see completed tasks.",
+        inputSchema: z.object({
+          status: z
+            .enum(["pending", "completed", "discarded", "snoozed"])
+            .optional()
+            .describe("Filter by action status"),
+          type: z
+            .enum(["respond", "follow_up", "send_message", "eod_contact"])
+            .optional()
+            .describe("Filter by action type"),
+          contactId: z.string().optional().describe("Filter by contact ID"),
+          conversationId: z
+            .string()
+            .optional()
+            .describe("Filter by conversation ID"),
+          createdAfter: z
+            .number()
+            .optional()
+            .describe(
+              "Filter actions created after this timestamp (ms since epoch)",
+            ),
+          snoozedUntilBefore: z
+            .number()
+            .optional()
+            .describe("Filter snoozed actions due before this timestamp"),
+          limit: z
+            .number()
+            .optional()
+            .describe("Maximum number of results (default: 20, max: 100)"),
+        }),
+        execute: async (input) => {
+          if (!userId) return { actions: [], error: "Not authenticated" };
+          return convex.query(api.actions.searchActions, {
+            ...input,
+            contactId: input.contactId as Id<"contacts"> | undefined,
+            conversationId: input.conversationId as
+              | Id<"conversations">
+              | undefined,
+          });
+        },
+      }),
     },
     stopWhen: stepCountIs(5), // Allow up to 5 tool call steps
     onError: (error) => {
@@ -216,5 +264,5 @@ export async function POST(req: Request) {
     },
   });
 
-  return result.toTextStreamResponse();
+  return result.toUIMessageStreamResponse();
 }
