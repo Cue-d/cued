@@ -8,6 +8,8 @@ import {
   signOut,
 } from "./auth";
 import { getSyncManager, type SyncProgress } from "./sync/sync-manager";
+import { getContactsWatcher } from "./sync/contacts-watcher";
+import { syncContactsToConvex } from "./sync/contacts-sync";
 
 // WorkOS Client ID - should match web app config
 // In production, this would be loaded from a config file or env
@@ -122,11 +124,42 @@ async function startBackgroundSync(): Promise<void> {
 
     syncManager.start();
     console.log("[Main] Background sync started");
+
+    // Start contacts watcher for incremental contact sync
+    startContactsWatcher();
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : String(err);
     console.error("[Main] Failed to start background sync:", message);
     // Don't crash the app if sync fails to start
   }
+}
+
+/**
+ * Start watching for contacts changes and sync when detected.
+ */
+function startContactsWatcher(): void {
+  const watcher = getContactsWatcher();
+
+  watcher.on("change", async () => {
+    console.log("[Main] Contacts changed, syncing to Convex...");
+    try {
+      const result = await syncContactsToConvex(getValidAccessToken, true);
+      console.log(
+        `[Main] Contacts sync complete: ${result.contactsCount} contacts in ${Math.round(result.elapsed)}ms`
+      );
+      mainWindow?.webContents.send("contacts:synced", result);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      console.error("[Main] Contacts sync error:", message);
+    }
+  });
+
+  watcher.on("error", (err) => {
+    console.error("[Main] Contacts watcher error:", err.message);
+  });
+
+  watcher.start();
+  console.log("[Main] Contacts watcher started");
 }
 
 app.whenReady().then(() => {
@@ -163,4 +196,5 @@ app.on("window-all-closed", () => {
 
 app.on("will-quit", () => {
   getSyncManager().stop();
+  getContactsWatcher().stop();
 });

@@ -29,3 +29,17 @@ struct ContactsOutput: Codable {
 struct ErrorOutput: Codable {
     let error: String
 }
+
+/// Watch mode event types
+enum WatchEventType: String, Codable {
+    case started
+    case changed
+    case error
+}
+
+/// Watch mode event output
+struct WatchEvent: Codable {
+    let type: WatchEventType
+    let timestamp: String
+    let message: String?
+}

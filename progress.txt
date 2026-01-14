@@ -779,3 +779,29 @@ Notes:
   - Ready for task 2.12: Test full sync cycle end-to-end
 ---
 
+[2026-01-13 19:15] Task 2.7b - Implement incremental contacts sync from macOS Contacts.app
+Files: llm/Sources/prm-contacts/{main.swift,Models.swift}, apps/electron/src/main/sync/{contacts-watcher.ts,contacts-sync.ts}, apps/electron/src/main/index.ts
+Decisions:
+  - Added --watch mode to prm-contacts Swift CLI using CNContactStoreDidChange notifications
+  - Swift CLI outputs JSON lines (type: started|changed|error) when contacts change
+  - Used dispatchMain() for indefinite run loop in watch mode (idiomatic Swift pattern)
+  - Created ContactsWatcher class in Electron that spawns Swift CLI and parses JSON events
+  - Hourly fallback polling if Swift CLI unavailable (setInterval with HOURLY_INTERVAL_MS)
+  - ContactsWatcher emits EventEmitter events: change, error, started, stopped
+  - syncContactsToConvex function batches contact sync (50/batch) to Convex
+  - Wired watcher to main index.ts: starts after auth success, stops on app quit
+Why:
+  - Native CNContactStoreDidChange provides near-instant contact change detection (<1s)
+  - JSON line streaming enables real-time event processing without polling
+  - EventEmitter pattern decouples watcher from sync logic (testable, reusable)
+  - Hourly fallback ensures contacts sync even if watch mode fails
+  - forceRefresh=true on change bypasses 24h cache to get fresh contact data
+Notes:
+  - Swift CLI builds successfully (prm-contacts --watch)
+  - All 57 tests pass (42 electron, 15 shared)
+  - Lint and typecheck pass for entire monorepo
+  - Code simplified by code-simplifier: removed duplicated getContactsBinaryPath, used dispatchMain()
+  - Electron app still blocked on native module code signing (better-sqlite3)
+  - Verification requires manual test: modify contact in Contacts.app → see sync in Convex
+---
+

@@ -187,6 +187,9 @@
         "Add senderContactId, isFromMe, platformMessageId fields",
         "Add full-text search index on content field",
         "Add index by_conversation for message retrieval",
+        "Add attachments array field (type, filename, mimeType, size, storageId)",
+        "Add reactions array field (emoji, contactId, timestamp)",
+        "Add status field (sent, delivered, read, failed)",
         "Deploy and verify search index in dashboard"
       ],
       "passes": true
@@ -338,6 +341,23 @@
       "passes": true
     },
     {
+      "id": "2.2b",
+      "phase": 2,
+      "mode": "hitl",
+      "category": "integration",
+      "description": "Extract attachments, reactions, and status from chat.db",
+      "steps": [
+        "Query attachment table joined with message_attachment_join for file metadata",
+        "Extract attachment paths from ~/Library/Messages/Attachments/",
+        "Query message.associated_message_guid for tapback reactions (loved, liked, etc.)",
+        "Parse message.is_delivered, is_read, is_sent, is_from_me for status",
+        "Handle failed messages via message.error code",
+        "Upload attachments to Convex storage and store storageId",
+        "Verify attachments and reactions sync correctly with real messages"
+      ],
+      "passes": false
+    },
+    {
       "id": "2.3",
       "phase": 2,
       "mode": "hitl",
@@ -366,6 +386,22 @@
         "Verify token persists across app restarts"
       ],
       "passes": true
+    },
+    {
+      "id": "2.4b",
+      "phase": 2,
+      "mode": "hitl",
+      "category": "integration",
+      "description": "Implement proactive WorkOS token refresh in Electron",
+      "steps": [
+        "Check token expiry before each API call (refresh if <5 min remaining)",
+        "Handle 401 errors by refreshing token and retrying request once",
+        "Use WorkOS refresh token flow to get new access token",
+        "Update stored token in Keychain after refresh",
+        "Add logging for token refresh events",
+        "Verify long-running sync (148k messages) completes without auth errors"
+      ],
+      "passes": false
     },
     {
       "id": "2.5",
@@ -425,7 +461,7 @@
         "Add periodic full sync fallback (hourly) using setInterval",
         "Verify contact updates propagate to Convex within 5 seconds of change"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "2.8",
