@@ -2,13 +2,23 @@
   "name": "@prm/shared",
   "version": "0.0.0",
   "type": "module",
-  "main": "./src/index.ts",
+  "main": "./dist/index.js",
   "types": "./src/index.ts",
   "exports": {
-    ".": "./src/index.ts",
-    "./phone": "./src/phone.ts"
+    ".": {
+      "types": "./src/index.ts",
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
+    },
+    "./phone": {
+      "types": "./src/phone.ts",
+      "import": "./dist/phone.js",
+      "default": "./dist/phone.js"
+    }
   },
   "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch",
     "typecheck": "tsc --noEmit",
     "test": "vitest"
   },
