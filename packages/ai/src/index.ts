@@ -27,3 +27,6 @@ export {
   type Mem0Provider,
   type Mem0ConfigSettings,
 } from "./mem0.js";
+
+// System prompts
+export { SYSTEM_PROMPT, buildSystemPrompt } from "./prompts/system.js";
