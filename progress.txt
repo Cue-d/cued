@@ -1377,3 +1377,35 @@ Notes:
   - Lint and typecheck pass for entire monorepo
   - Browser verified: tools now authenticate and return real data
 ---
+
+[2026-01-14 10:40] Task 3.13 - Connect Mem0 service with custom prompts
+Files:
+  packages/ai/src/prompts/memory.ts (new)
+  packages/ai/src/mem0.ts (added addContactMemories function)
+  packages/ai/src/index.ts (added exports)
+  apps/web/app/api/memories/route.ts (new)
+  apps/web/app/api/chat/route.ts (wired search_memories to real Mem0 API)
+Decisions:
+  - Created CUSTOM_FACT_EXTRACTION_PROMPT for CRM-focused memory extraction
+  - Prompt focuses on: personal details, professional info, preferences, life events, follow-up opportunities
+  - Created addContactMemories() function that passes custom_instructions to Mem0 API
+  - Messages formatted as "Me: ...\nContact: ..." text string for Mem0 processing
+  - contact_id stored in metadata for filtering memories by person
+  - Created POST /api/memories endpoint for manual memory extraction testing
+  - Wired search_memories tool to getMemories API (was placeholder before)
+Why:
+  - custom_instructions parameter tells Mem0 what kinds of facts to extract
+  - CRM-focused prompts filter out generic conversation filler
+  - Metadata-based contact filtering enables "what do I know about John?" queries
+  - Manual endpoint enables testing memory extraction before batch processing
+API Flow:
+  - addContactMemories(messages, userId, contactId, contactName) → Mem0 addMemories
+  - getMemories(query, {user_id, filters: {contact_id}}) → search user's memories
+  - POST /api/memories {conversationId} → extract memories from conversation
+Notes:
+  - All 21 AI package tests pass
+  - Lint and typecheck pass for entire monorepo
+  - Code simplified by code-simplifier agent
+  - Memory extraction testing requires MEM0_API_KEY environment variable
+  - Batch processing of all messages is task 3.13b (separate)
+---

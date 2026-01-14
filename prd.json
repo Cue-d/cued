@@ -831,7 +831,7 @@
         "Set up memory extraction on message sync",
         "Test memory search with queries about real contacts and conversations"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "3.13b",
