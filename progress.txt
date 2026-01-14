@@ -1136,3 +1136,107 @@ Notes:
   - All lint and typecheck pass
   - Ready for task 3.7: Create streaming chat route
 ---
+
+[2026-01-14 00:30] Mem0 Integration Update - @mem0/vercel-ai-provider
+Files:
+  packages/ai/package.json (replaced mem0ai with @mem0/vercel-ai-provider)
+  packages/ai/src/mem0.ts (new provider helper)
+  packages/ai/src/tools/search-memories.ts (refactored to use new package)
+  packages/ai/src/mem0.test.ts (new tests)
+  packages/ai/src/tools/search-memories.test.ts (new tests)
+
+Decisions:
+  - Use @mem0/vercel-ai-provider instead of raw mem0ai SDK
+  - Static imports (not dynamic) since it's a regular dependency
+  - createMem0Provider wraps models with memory for chat routes
+  - Export addMemories/getMemories/retrieveMemories for direct use
+  - user_id scoping: userId or userId:contactId for contact-specific
+
+API:
+  - createMem0Provider(userId, contactId?) -> Vercel AI SDK provider
+  - addMemories(messages, {user_id}) -> store conversation context
+  - getMemories(query, {user_id}) -> raw memory array
+  - retrieveMemories(query, {user_id}) -> formatted system prompt
+
+Tests: 9 passing (6 search-memories, 3 mem0 provider)
+---
+
+[2026-01-14 00:45] Mem0 user_id/contactId Semantics Fix
+Files:
+  packages/ai/src/mem0.ts (simplified: only takes userId)
+  packages/ai/src/tools/search-memories.ts (contactId as filter only)
+  packages/ai/src/mem0.test.ts (updated tests)
+  packages/ai/src/tools/search-memories.test.ts (updated tests)
+
+Decisions:
+  - user_id = PRM user (the user whose memories these are)
+  - contactId = metadata filter (the person the memory is about)
+  - createMem0Provider(userId) only takes userId, NOT contactId
+  - contactId only used when adding/searching memories as filters.contact_id
+  - @mem0/vercel-ai-provider getMemories returns Promise<any>, so custom Mem0Memory interface required
+
+API Corrected:
+  - createMem0Provider(userId) -> wraps model with user's memory context
+  - getMemories(query, {user_id, filters: {contact_id}}) -> search with optional contact filter
+  - searchMemoriesTool.execute({query, contactId}, {context: {userId}}) -> proper scoping
+
+Tests: 8 passing (2 mem0.test.ts, 6 search-memories.test.ts)
+---
+
+[2026-01-14 08:10] Mem0 Provider API Fix - Per-Request user_id
+Files:
+  packages/ai/src/mem0.ts (refactored)
+  packages/ai/src/tools/search-memories.ts (renamed interface)
+  packages/ai/src/mem0.test.ts (updated tests)
+  packages/ai/src/index.ts (added type exports)
+
+Decisions:
+  - createMem0Provider() no longer takes userId parameter
+  - user_id passed per-request when calling model: mem0("gpt-4o", { user_id })
+  - getMemories still takes { user_id, filters: { contact_id } } for search scoping
+  - Exported Mem0Provider and Mem0ConfigSettings types from @mem0/vercel-ai-provider
+  - Added searchMemories function re-export for direct memory search
+  - Renamed Mem0Memory -> Mem0MemoryResponse for clarity (local type, not from package)
+
+Why:
+  - Per-request user_id matches official @mem0/vercel-ai-provider API design
+  - Provider creation decoupled from user context (singleton-friendly)
+  - getMemories scoping unchanged: user_id = whose memories, contactId = filter
+  - TypeScript types now available from package (v0.0.14+ exports types)
+
+API:
+  - createMem0Provider() -> returns Mem0Provider (no user_id binding)
+  - mem0("gpt-4o", { user_id }) -> pass user_id per-request
+  - getMemories(query, { user_id, filters }) -> search with scoping
+  - searchMemoriesTool.execute({ query, contactId }, { context: { userId } }) -> unchanged
+
+Tests: 9 passing (3 mem0.test.ts, 6 search-memories.test.ts)
+---
+
+[2026-01-14 08:30] Tasks 3.7 & 3.8 - AI SDK streaming route and OpenAI setup
+Files:
+  packages/ai/src/openai.ts (new)
+  packages/ai/src/openai.test.ts (new)
+  packages/ai/src/index.ts (added openai exports)
+  apps/web/app/api/assistant/chat/route.ts (new)
+  apps/web/package.json (added @prm/ai, zod deps)
+  apps/web/.env.local.example (added OPENAI_BASE_URL)
+
+Decisions:
+  - OpenAI provider configured with optional ZDR endpoint via OPENAI_BASE_URL env var
+  - Exported DEFAULT_MODEL (gpt-4o) and FAST_MODEL (gpt-4o-mini) constants
+  - Chat route uses tool() helper with inputSchema (not parameters) per AI SDK 6.0
+  - Uses stopWhen: stepCountIs(5) for multi-step tool calling
+  - All 5 tools registered: search_messages, search_contacts, get_conversations, create_action, search_memories
+  - Returns toTextStreamResponse() for streaming (not edge runtime needed)
+  - Auth via Bearer token in Authorization header, passed to Convex
+
+Why:
+  - AI SDK 6.0 renamed parameters -> inputSchema in tool definitions
+  - stepCountIs(n) replaces maxSteps for controlling tool call iterations
+  - Convex IDs cast via "as Id<table>" since zod schema uses string
+  - search_memories returns placeholder (Mem0 integration in task 3.13)
+
+Tests: 13 passing (4 openai, 3 mem0, 6 search-memories)
+Lint/Typecheck: All pass
+---

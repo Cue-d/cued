@@ -726,7 +726,7 @@
         "Register all tools with tool executor",
         "Return streaming response"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "3.8",
@@ -741,7 +741,7 @@
         "Add ZDR endpoint config for production",
         "Verify streaming works by asking about your recent conversations"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "3.9",
@@ -814,6 +814,25 @@
         "Configure Mem0 with OpenAI embeddings",
         "Set up memory extraction on message sync",
         "Test memory search with queries about real contacts and conversations"
+      ],
+      "passes": false
+    },
+    {
+      "id": "3.13b",
+      "phase": 3,
+      "mode": "afk",
+      "category": "integration",
+      "description": "Batch process all messages to extract Mem0 memories",
+      "reference": "https://docs.mem0.ai/api-reference",
+      "steps": [
+        "Create Convex scheduled function to process messages in batches",
+        "Track lastMemoryProcessedAt cursor in integrations table",
+        "Extract memories from message content using Mem0 add() API",
+        "Associate memories with contactId for person-specific recall",
+        "Rate limit API calls to avoid Mem0 limits (batch ~100 msgs/min)",
+        "Add progress tracking: totalMessagesProcessed, totalMemoriesExtracted",
+        "Create manual trigger endpoint for initial backfill",
+        "Verify memories are searchable after processing real conversations"
       ],
       "passes": false
     },

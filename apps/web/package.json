@@ -10,16 +10,20 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@ai-sdk/openai": "^3.0.9",
     "@base-ui/react": "^1.0.0",
     "@convex-dev/workos": "^0.0.1",
+    "@prm/ai": "workspace:*",
     "@prm/convex": "workspace:*",
     "@prm/integrations": "workspace:*",
     "@prm/ui": "workspace:*",
     "@workos-inc/authkit-nextjs": "^2.13.0",
+    "ai": "^6.0.33",
     "convex": "^1.18.0",
     "next": "16.1.1",
     "react": "19.2.3",
-    "react-dom": "19.2.3"
+    "react-dom": "19.2.3",
+    "zod": "^4.3.5"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",

@@ -6,6 +6,9 @@ export type {
 } from "./types.js";
 export { getErrorMessage } from "./types.js";
 
+// OpenAI provider for Vercel AI SDK
+export { openai, DEFAULT_MODEL, FAST_MODEL } from "./openai.js";
+
 export {
   searchMessagesTool,
   searchContactsTool,
