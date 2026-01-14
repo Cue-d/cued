@@ -31,17 +31,21 @@ export const searchMessagesTool: Tool<
   name: "search_messages",
   description:
     "Search through message history to find messages matching a query. " +
+    "Automatically searches ALL connected platforms (iMessage, etc.) " +
     "Returns messages with sender info and conversation context. " +
     "Use this to find past conversations, specific topics, or messages from a person.",
   inputSchema,
-  execute: async (input, options): Promise<ToolResult<MessageSearchResult[]>> => {
+  execute: async (
+    input,
+    options
+  ): Promise<ToolResult<MessageSearchResult[]>> => {
     try {
       const result = await options.context.query<{
         results: MessageSearchResult[];
       }>("search:searchMessages", {
         query: input.query,
         limit: input.limit,
-        conversationId: input.conversationId,
+        conversationId: input.conversationId || undefined,
       });
 
       return { success: true, data: result.results };
