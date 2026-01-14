@@ -8,7 +8,11 @@ import {
   UsersIcon,
   SettingsIcon,
   LogOutIcon,
+  SunIcon,
+  MoonIcon,
+  ChevronsUpDownIcon,
 } from "lucide-react";
+import { useTheme } from "next-themes";
 import {
   Sidebar,
   SidebarContent,
@@ -19,16 +23,21 @@ import {
   SidebarMenu,
   SidebarMenuButton,
   SidebarMenuItem,
-  SidebarSeparator,
 } from "./ui/sidebar";
-import { Button } from "./ui/button";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "./ui/dropdown-menu";
+import { Avatar, AvatarFallback } from "./ui/avatar";
 
 const navigation = [
   { title: "Inbox", href: "/inbox", icon: InboxIcon },
   { title: "Actions", href: "/actions", icon: ListTodoIcon },
   { title: "Assistant", href: "/assistant", icon: MessageSquareIcon },
   { title: "Contacts", href: "/contacts", icon: UsersIcon },
-  { title: "Settings", href: "/settings", icon: SettingsIcon },
 ];
 
 interface AppSidebarProps extends React.ComponentProps<typeof Sidebar> {
@@ -40,6 +49,30 @@ interface AppSidebarProps extends React.ComponentProps<typeof Sidebar> {
 }
 
 export function AppSidebar({ user, onSignOut, ...props }: AppSidebarProps) {
+  const { setTheme, resolvedTheme } = useTheme();
+  const [mounted, setMounted] = React.useState(false);
+
+  React.useEffect(() => {
+    setMounted(true);
+  }, []);
+
+  const isDarkMode = mounted && resolvedTheme === "dark";
+
+  const getInitials = (name?: string, email?: string) => {
+    if (name) {
+      return name
+        .split(" ")
+        .map((n) => n[0])
+        .join("")
+        .toUpperCase()
+        .slice(0, 2);
+    }
+    if (email) {
+      return email[0].toUpperCase();
+    }
+    return "U";
+  };
+
   return (
     <Sidebar {...props} variant="inset">
       <SidebarHeader className="border-b border-sidebar-border p-4">
@@ -66,37 +99,64 @@ export function AppSidebar({ user, onSignOut, ...props }: AppSidebarProps) {
           </SidebarGroupContent>
         </SidebarGroup>
       </SidebarContent>
-      <SidebarFooter className="border-t border-sidebar-border p-4">
-        <div className="flex flex-col gap-2">
-          {user && (
-            <div className="flex flex-col gap-1 text-sm">
-              {user.name && (
-                <span className="font-medium text-sidebar-foreground">
-                  {user.name}
-                </span>
-              )}
-              {user.email && (
-                <span className="text-xs text-sidebar-foreground/70">
-                  {user.email}
-                </span>
-              )}
-            </div>
-          )}
-          {onSignOut && (
-            <>
-              <SidebarSeparator className="my-1" />
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={onSignOut}
-                className="justify-start gap-2 px-2"
+      <SidebarFooter className="p-2">
+        <SidebarMenu>
+          <SidebarMenuItem>
+            <DropdownMenu>
+              <DropdownMenuTrigger
+                className="w-full rounded-md ring-sidebar-ring focus-visible:ring-2 outline-hidden"
+                render={
+                  <SidebarMenuButton
+                    size="lg"
+                    className="data-[state=open]:bg-sidebar-accent data-[state=open]:text-sidebar-accent-foreground"
+                  />
+                }
               >
-                <LogOutIcon className="size-4" />
-                <span>Sign Out</span>
-              </Button>
-            </>
-          )}
-        </div>
+                <Avatar className="size-8 rounded-lg">
+                  <AvatarFallback className="rounded-lg bg-sidebar-primary text-sidebar-primary-foreground text-xs">
+                    {getInitials(user?.name, user?.email)}
+                  </AvatarFallback>
+                </Avatar>
+                <div className="grid flex-1 text-left text-sm leading-tight">
+                  <span className="truncate font-medium">
+                    {user?.name || "User"}
+                  </span>
+                  <span className="truncate text-xs text-sidebar-foreground/70">
+                    {user?.email}
+                  </span>
+                </div>
+                <ChevronsUpDownIcon className="ml-auto size-4" />
+              </DropdownMenuTrigger>
+              <DropdownMenuContent
+                className="w-[--anchor-width] min-w-56 rounded-lg"
+                side="top"
+                align="start"
+                sideOffset={4}
+              >
+                <DropdownMenuItem render={<a href="/settings" />}>
+                  <SettingsIcon />
+                  Settings
+                </DropdownMenuItem>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem
+                  onClick={() => setTheme(isDarkMode ? "light" : "dark")}
+                >
+                  {isDarkMode ? <SunIcon /> : <MoonIcon />}
+                  {isDarkMode ? "Light mode" : "Dark mode"}
+                </DropdownMenuItem>
+                {onSignOut && (
+                  <>
+                    <DropdownMenuSeparator />
+                    <DropdownMenuItem onClick={onSignOut}>
+                      <LogOutIcon />
+                      Sign out
+                    </DropdownMenuItem>
+                  </>
+                )}
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </SidebarMenuItem>
+        </SidebarMenu>
       </SidebarFooter>
     </Sidebar>
   );
