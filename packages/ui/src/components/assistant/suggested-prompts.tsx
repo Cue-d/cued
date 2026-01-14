@@ -46,17 +46,19 @@ export function SuggestedPrompts({
           type="button"
           onClick={() => onSelect(prompt.prompt)}
           className={cn(
-            "group relative flex items-center gap-3 rounded-xl border border-border/40 bg-card/50 px-4 py-3.5 text-left transition-all",
-            "hover:border-primary/30 hover:bg-card hover:shadow-sm",
-            "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30",
-            "animate-in fade-in slide-in-from-bottom-2"
+            "group relative flex items-center gap-3.5 rounded-2xl border border-border/30 bg-card/40 px-4 py-4 text-left",
+            "transition-all duration-300 ease-out",
+            "hover:border-primary/40 hover:bg-card/80 hover:shadow-lg hover:shadow-primary/5 hover:-translate-y-0.5",
+            "active:scale-[0.98] active:translate-y-0",
+            "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 focus-visible:ring-offset-2 focus-visible:ring-offset-background",
+            "animate-in fade-in slide-in-from-bottom-3"
           )}
-          style={{ animationDelay: `${index * 75}ms`, animationFillMode: "backwards" }}
+          style={{ animationDelay: `${index * 100}ms`, animationFillMode: "backwards" }}
         >
-          <div className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary transition-colors group-hover:bg-primary/15">
+          <div className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-primary/15 to-primary/5 text-primary transition-all duration-300 group-hover:from-primary/25 group-hover:to-primary/10 group-hover:scale-110">
             {prompt.icon}
           </div>
-          <span className="text-sm font-medium text-foreground/80 group-hover:text-foreground">
+          <span className="text-sm font-medium text-foreground/70 transition-colors duration-200 group-hover:text-foreground">
             {prompt.label}
           </span>
         </button>

@@ -1,50 +1,50 @@
-import * as React from "react"
-import { Bot, ChevronDown, Loader2, User } from "lucide-react"
+import * as React from "react";
+import { Bot, ChevronDown, Loader2, User } from "lucide-react";
 
-import { cn } from "../../lib/utils"
-import { Avatar, AvatarFallback } from "../ui/avatar"
+import { cn } from "../../lib/utils";
+import { Avatar, AvatarFallback } from "../ui/avatar";
 import {
   Collapsible,
   CollapsibleContent,
   CollapsibleTrigger,
-} from "../ui/collapsible"
-import { ToolArtifact } from "./tool-artifact"
+} from "../ui/collapsible";
+import { ToolArtifact } from "./tool-artifact";
 import type {
   MessageWithToolInvocations,
   ToolArtifact as ToolArtifactType,
-} from "./types"
+} from "./types";
 
 interface ChatMessageProps {
-  message: MessageWithToolInvocations
-  isStreaming?: boolean
-  className?: string
+  message: MessageWithToolInvocations;
+  isStreaming?: boolean;
+  className?: string;
 }
 
 function parseToolResult(
   toolName: string,
   result: unknown
 ): ToolArtifactType | null {
-  if (!result || typeof result !== "object") return null
+  if (!result || typeof result !== "object") return null;
 
-  const data = result as Record<string, unknown>
-  if (!data.success) return null
+  const data = result as Record<string, unknown>;
+  if (!data.success) return null;
 
   switch (toolName) {
     case "search_messages":
       if (Array.isArray(data.results)) {
-        return { type: "search_results", data: data.results }
+        return { type: "search_results", data: data.results };
       }
-      break
+      break;
     case "search_contacts":
       if (Array.isArray(data.contacts)) {
-        return { type: "contacts", data: data.contacts }
+        return { type: "contacts", data: data.contacts };
       }
-      break
+      break;
     case "get_conversations":
       if (Array.isArray(data.conversations)) {
-        return { type: "conversations", data: data.conversations }
+        return { type: "conversations", data: data.conversations };
       }
-      break
+      break;
     case "create_action":
       if (data.actionId) {
         return {
@@ -56,17 +56,17 @@ function parseToolResult(
             reason: data.reason as string | undefined,
             draftMessage: data.draftMessage as string | undefined,
           },
-        }
+        };
       }
-      break
+      break;
     case "search_memories":
       if (Array.isArray(data.memories)) {
-        return { type: "memories", data: data.memories }
+        return { type: "memories", data: data.memories };
       }
-      break
+      break;
   }
 
-  return null
+  return null;
 }
 
 function StreamingDots() {
@@ -76,7 +76,7 @@ function StreamingDots() {
       <span className="size-1.5 animate-bounce rounded-full bg-current [animation-delay:-0.15s]" />
       <span className="size-1.5 animate-bounce rounded-full bg-current" />
     </span>
-  )
+  );
 }
 
 function ToolCallIndicator({ toolName }: { toolName: string }) {
@@ -85,7 +85,7 @@ function ToolCallIndicator({ toolName }: { toolName: string }) {
       <Loader2 className="size-3 animate-spin" />
       <span>Using {toolName.replace(/_/g, " ")}...</span>
     </div>
-  )
+  );
 }
 
 export function ChatMessage({
@@ -93,39 +93,46 @@ export function ChatMessage({
   isStreaming = false,
   className,
 }: ChatMessageProps) {
-  const isUser = message.role === "user"
-  const [showToolCalls, setShowToolCalls] = React.useState(false)
+  const isUser = message.role === "user";
+  const [showToolCalls, setShowToolCalls] = React.useState(false);
 
   const artifacts = React.useMemo(() => {
-    if (!message.toolInvocations) return []
+    if (!message.toolInvocations) return [];
     return message.toolInvocations
       .filter((inv) => inv.state === "result" && inv.result)
       .map((inv) => parseToolResult(inv.toolName, inv.result))
-      .filter((a): a is ToolArtifactType => a !== null)
-  }, [message.toolInvocations])
+      .filter((a): a is ToolArtifactType => a !== null);
+  }, [message.toolInvocations]);
 
   const pendingToolCalls = message.toolInvocations?.filter(
     (inv) => inv.state === "call" || inv.state === "partial-call"
-  )
+  );
 
   return (
     <div
       className={cn(
-        "group flex gap-3",
+        "group flex gap-3.5",
         isUser ? "flex-row-reverse" : "flex-row",
         className
       )}
     >
-      <Avatar size="sm" className="mt-0.5 shrink-0">
+      <Avatar
+        size="sm"
+        className="mt-1 shrink-0 transition-transform duration-200 group-hover:scale-105"
+      >
         <AvatarFallback
           className={cn(
-            "text-xs",
+            "text-xs ring-2 ring-background",
             isUser
-              ? "bg-primary text-primary-foreground"
+              ? "bg-linear-to-br from-primary to-primary/80 text-primary-foreground shadow-md shadow-primary/20"
               : "bg-muted text-muted-foreground"
           )}
         >
-          {isUser ? <User className="size-3.5" /> : <Bot className="size-3.5" />}
+          {isUser ? (
+            <User className="size-3.5" />
+          ) : (
+            <Bot className="size-3.5" />
+          )}
         </AvatarFallback>
       </Avatar>
 
@@ -137,10 +144,10 @@ export function ChatMessage({
       >
         <div
           className={cn(
-            "rounded-2xl px-4 py-2.5 shadow-sm",
+            "rounded-2xl px-4 py-3",
             isUser
-              ? "rounded-br-md bg-primary text-primary-foreground"
-              : "rounded-bl-md bg-muted/70 text-foreground"
+              ? "rounded-br-lg bg-linear-to-br from-primary to-primary/90 text-primary-foreground shadow-lg shadow-primary/15"
+              : "rounded-bl-lg bg-muted/60 text-foreground backdrop-blur-sm border border-border/30"
           )}
         >
           {message.content ? (
@@ -154,7 +161,7 @@ export function ChatMessage({
         </div>
 
         {pendingToolCalls && pendingToolCalls.length > 0 && (
-          <div className="mt-1">
+          <div className="mt-2">
             {pendingToolCalls.map((inv) => (
               <ToolCallIndicator key={inv.toolCallId} toolName={inv.toolName} />
             ))}
@@ -162,21 +169,21 @@ export function ChatMessage({
         )}
 
         {artifacts.length > 0 && (
-          <div className="mt-2 w-full max-w-md">
+          <div className="mt-3 w-full max-w-md">
             {artifacts.length === 1 ? (
               <ToolArtifact artifact={artifacts[0]} />
             ) : (
               <Collapsible open={showToolCalls} onOpenChange={setShowToolCalls}>
-                <CollapsibleTrigger className="flex items-center gap-1.5 text-xs text-muted-foreground transition-colors hover:text-foreground">
+                <CollapsibleTrigger className="flex items-center gap-2 text-xs font-medium text-muted-foreground transition-colors hover:text-foreground">
                   <ChevronDown
                     className={cn(
-                      "size-3 transition-transform",
+                      "size-3.5 transition-transform duration-200",
                       showToolCalls && "rotate-180"
                     )}
                   />
                   <span>{artifacts.length} tool results</span>
                 </CollapsibleTrigger>
-                <CollapsibleContent className="mt-2 space-y-2">
+                <CollapsibleContent className="mt-3 space-y-3">
                   {artifacts.map((artifact, i) => (
                     <ToolArtifact key={i} artifact={artifact} />
                   ))}
@@ -187,5 +194,5 @@ export function ChatMessage({
         )}
       </div>
     </div>
-  )
+  );
 }

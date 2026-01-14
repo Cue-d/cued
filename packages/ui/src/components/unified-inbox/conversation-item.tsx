@@ -52,28 +52,34 @@ export function ConversationItem({
       type="button"
       onClick={onClick}
       className={cn(
-        "w-full flex items-center gap-3 px-3 py-2.5 rounded-xl transition-colors text-left relative",
+        "group w-full flex items-center gap-3 px-3 py-3 rounded-xl text-left relative",
+        "transition-all duration-200 ease-out",
         isSelected
-          ? "bg-primary text-primary-foreground"
-          : "hover:bg-muted"
+          ? "bg-primary text-primary-foreground shadow-md shadow-primary/20"
+          : "hover:bg-muted/80 active:scale-[0.98]"
       )}
     >
       {/* Unread indicator */}
       {hasUnread && !isSelected && (
-        <div className="absolute left-1 top-1/2 -translate-y-1/2 w-2 h-2 bg-blue-500 rounded-full" />
+        <div className="absolute left-1.5 top-1/2 -translate-y-1/2 w-2 h-2 bg-primary rounded-full shadow-sm shadow-primary/50 animate-pulse" />
       )}
 
-      <ConversationAvatar
-        participants={conversation.participants}
-        conversationType={conversation.conversationType}
-      />
+      <div className={cn(
+        "transition-transform duration-200",
+        !isSelected && "group-hover:scale-105"
+      )}>
+        <ConversationAvatar
+          participants={conversation.participants}
+          conversationType={conversation.conversationType}
+        />
+      </div>
 
       <div className="flex-1 min-w-0">
         <div className="flex items-center justify-between gap-2">
-          <div className="flex items-center gap-1.5 min-w-0">
+          <div className="flex items-center gap-2 min-w-0">
             <span
               className={cn(
-                "font-medium truncate text-[15px]",
+                "font-semibold truncate text-[15px] tracking-tight",
                 isSelected ? "text-primary-foreground" : "text-foreground"
               )}
             >
@@ -83,7 +89,7 @@ export function ConversationItem({
           </div>
           <span
             className={cn(
-              "text-xs shrink-0",
+              "text-[11px] font-medium shrink-0 tabular-nums",
               isSelected ? "text-primary-foreground/70" : "text-muted-foreground"
             )}
           >
@@ -92,7 +98,7 @@ export function ConversationItem({
         </div>
         <p
           className={cn(
-            "text-[13px] truncate mt-0.5",
+            "text-[13px] truncate mt-0.5 leading-relaxed",
             isSelected ? "text-primary-foreground/80" : "text-muted-foreground"
           )}
         >

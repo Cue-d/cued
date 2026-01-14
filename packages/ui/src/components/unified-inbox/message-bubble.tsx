@@ -103,20 +103,20 @@ export function MessageBubble({
   return (
     <div
       className={cn(
-        "flex flex-col mb-1",
+        "flex flex-col mb-1.5 group",
         message.isFromMe ? "items-end" : "items-start"
       )}
     >
       {/* Sender name for received messages */}
       {showSenderName && !message.isFromMe && senderName && (
-        <span className="text-xs text-muted-foreground mb-1 ml-1">
+        <span className="text-xs font-medium text-muted-foreground mb-1.5 ml-1">
           {senderName}
         </span>
       )}
 
       {/* Attachments */}
       {hasAttachments && (
-        <div className="max-w-[75%] mb-1 space-y-1">
+        <div className="max-w-[75%] mb-1.5 space-y-1.5">
           {message.attachments!.map((attachment, index) => (
             <AttachmentPreview key={`${message._id}-att-${index}`} attachment={attachment} />
           ))}
@@ -127,10 +127,10 @@ export function MessageBubble({
       {hasContent && (
         <div
           className={cn(
-            "max-w-[75%] px-3 py-2 rounded-2xl break-words",
+            "max-w-[75%] px-4 py-2.5 rounded-2xl break-words transition-all duration-200",
             message.isFromMe
-              ? "bg-primary text-primary-foreground rounded-br-md"
-              : "bg-muted text-foreground rounded-bl-md"
+              ? "bg-gradient-to-br from-primary to-primary/90 text-primary-foreground rounded-br-lg shadow-md shadow-primary/15"
+              : "bg-muted/70 text-foreground rounded-bl-lg border border-border/20"
           )}
         >
           <p className="text-[15px] leading-relaxed whitespace-pre-wrap">
@@ -141,7 +141,7 @@ export function MessageBubble({
 
       {/* Timestamp */}
       {showTimestamp && (
-        <span className="text-xs text-muted-foreground mt-1">
+        <span className="text-[11px] font-medium text-muted-foreground mt-1.5 tabular-nums opacity-0 group-hover:opacity-100 transition-opacity duration-200">
           {formatMessageTime(message.sentAt)}
         </span>
       )}
