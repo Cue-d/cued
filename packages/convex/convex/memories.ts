@@ -6,7 +6,12 @@
  */
 import { v } from "convex/values";
 import type { Doc, Id } from "./_generated/dataModel";
-import { action, internalMutation, internalQuery, query } from "./_generated/server";
+import {
+  action,
+  internalMutation,
+  internalQuery,
+  query,
+} from "./_generated/server";
 import type { QueryCtx, MutationCtx } from "./_generated/server";
 import { internal } from "./_generated/api";
 import { getAuthenticatedUser } from "./lib/auth";
@@ -61,9 +66,7 @@ function findIntegration(
 function buildDocMap<T extends Doc<"conversations"> | Doc<"contacts">>(
   docs: (T | null)[]
 ): Map<T["_id"], T> {
-  return new Map(
-    docs.filter((d): d is T => d !== null).map((d) => [d._id, d])
-  );
+  return new Map(docs.filter((d): d is T => d !== null).map((d) => [d._id, d]));
 }
 
 /**
@@ -113,7 +116,8 @@ async function enrichMessagesWithContext(
       isFromMe: m.isFromMe,
       conversationId: m.conversationId,
       conversationType: conversation?.conversationType,
-      primaryContactId: primaryContact?._id ?? conversation?.participantContactIds[0],
+      primaryContactId:
+        primaryContact?._id ?? conversation?.participantContactIds[0],
       primaryContactName: primaryContact?.displayName,
     };
   });
@@ -123,7 +127,9 @@ async function enrichMessagesWithContext(
  * Group messages by contact for batch memory extraction.
  * Filters out messages that are too short.
  */
-function groupMessagesByContact(messages: EnrichedMessage[]): Map<string, MessageGroup> {
+function groupMessagesByContact(
+  messages: EnrichedMessage[]
+): Map<string, MessageGroup> {
   const groups = new Map<string, MessageGroup>();
 
   for (const msg of messages) {
@@ -185,7 +191,9 @@ export const updateMemoryProcessingState = internalMutation({
   handler: async (ctx, args) => {
     const integration = await findIntegration(ctx, args.userId, args.platform);
     if (!integration) {
-      throw new Error(`No integration found for user ${args.userId} platform ${args.platform}`);
+      throw new Error(
+        `No integration found for user ${args.userId} platform ${args.platform}`
+      );
     }
 
     const { syncState } = integration;
@@ -193,8 +201,11 @@ export const updateMemoryProcessingState = internalMutation({
       syncState: {
         ...syncState,
         lastMemoryProcessedAt: args.lastProcessedAt,
-        totalMessagesProcessedForMemory: (syncState.totalMessagesProcessedForMemory ?? 0) + args.messagesProcessed,
-        totalMemoriesExtracted: (syncState.totalMemoriesExtracted ?? 0) + args.memoriesExtracted,
+        totalMessagesProcessedForMemory:
+          (syncState.totalMessagesProcessedForMemory ?? 0) +
+          args.messagesProcessed,
+        totalMemoriesExtracted:
+          (syncState.totalMemoriesExtracted ?? 0) + args.memoriesExtracted,
       },
     });
   },
@@ -202,6 +213,7 @@ export const updateMemoryProcessingState = internalMutation({
 
 /**
  * Get memory processing status for a user.
+ * Returns stats from integration syncState (no expensive message collection).
  */
 export const getMemoryProcessingStatus = query({
   args: {
@@ -214,17 +226,13 @@ export const getMemoryProcessingStatus = query({
     const integration = await findIntegration(ctx, user._id, args.platform);
     if (!integration) return null;
 
-    const messages = await ctx.db
-      .query("messages")
-      .withIndex("by_user", (q) => q.eq("userId", user._id))
-      .collect();
-
     const { syncState } = integration;
     return {
       lastProcessedAt: syncState.lastMemoryProcessedAt ?? null,
       totalMessagesProcessed: syncState.totalMessagesProcessedForMemory ?? 0,
       totalMemoriesExtracted: syncState.totalMemoriesExtracted ?? 0,
-      totalMessages: messages.length,
+      // Use totalMessagesSynced from syncState instead of expensive count
+      totalMessages: syncState.totalMessagesSynced ?? 0,
     };
   },
 });
@@ -301,9 +309,12 @@ export const processMemoryBatch = action({
           group.contactName,
           group.messages
         );
-        result.memoriesExtracted += memResult.memoriesAdded + memResult.memoriesUpdated;
+        result.memoriesExtracted +=
+          memResult.memoriesAdded + memResult.memoriesUpdated;
       } catch (e) {
-        result.errors.push(`Failed to extract memories for ${group.contactName}: ${e}`);
+        result.errors.push(
+          `Failed to extract memories for ${group.contactName}: ${e}`
+        );
       }
     }
 
@@ -359,14 +370,23 @@ async function extractMemoriesForContact(
   contactId: Id<"contacts">,
   contactName: string,
   messages: Array<{ content: string; isFromMe: boolean }>
-): Promise<{ memoriesAdded: number; memoriesUpdated: number; memoriesDeleted: number }> {
+): Promise<{
+  memoriesAdded: number;
+  memoriesUpdated: number;
+  memoriesDeleted: number;
+}> {
   const conversationMessages = messages.map((m) => ({
     role: m.isFromMe ? ("user" as const) : ("assistant" as const),
     content: m.content,
   }));
 
   const { addContactMemories } = await import("@prm/ai");
-  return addContactMemories(conversationMessages, userId, contactId, contactName);
+  return addContactMemories(
+    conversationMessages,
+    userId,
+    contactId,
+    contactName
+  );
 }
 
 /**
@@ -510,7 +530,8 @@ export const processNewMessagesForMemory = action({
             group.contactName,
             group.messages
           );
-          result.memoriesExtracted += memResult.memoriesAdded + memResult.memoriesUpdated;
+          result.memoriesExtracted +=
+            memResult.memoriesAdded + memResult.memoriesUpdated;
           lastError = null;
           break;
         } catch (e) {
@@ -529,7 +550,9 @@ export const processNewMessagesForMemory = action({
       }
 
       if (lastError) {
-        result.errors.push(`Failed to extract memories for ${group.contactName}: ${lastError.message}`);
+        result.errors.push(
+          `Failed to extract memories for ${group.contactName}: ${lastError.message}`
+        );
       }
     }
 
@@ -584,5 +607,72 @@ export const getUnprocessedMessageCount = query({
       totalChecked: messages.length,
       hasMore: messages.length >= 1000,
     };
+  },
+});
+
+/**
+ * Get memory extraction stats grouped by contact.
+ * Returns contacts with count of messages that have had memories extracted.
+ * Scans recent messages (up to 20k) to stay within Convex limits.
+ */
+export const getMemoryStatsByContact = query({
+  args: {},
+  handler: async (ctx) => {
+    const user = await getAuthenticatedUser(ctx);
+    if (!user) return null;
+
+    // Limit scan to 20k messages (recent first) to stay under 32k limit
+    const messages = await ctx.db
+      .query("messages")
+      .withIndex("by_user_sent_at", (q) => q.eq("userId", user._id))
+      .order("desc")
+      .take(20000);
+
+    // Group by senderContactId (only messages with memoryExtractedAt)
+    const contactStats = new Map<
+      string,
+      { count: number; lastExtractedAt: number }
+    >();
+
+    for (const msg of messages) {
+      if (!msg.memoryExtractedAt || !msg.senderContactId) continue;
+
+      const contactIdStr = msg.senderContactId as string;
+      const existing = contactStats.get(contactIdStr);
+      if (existing) {
+        existing.count++;
+        existing.lastExtractedAt = Math.max(
+          existing.lastExtractedAt,
+          msg.memoryExtractedAt
+        );
+      } else {
+        contactStats.set(contactIdStr, {
+          count: 1,
+          lastExtractedAt: msg.memoryExtractedAt,
+        });
+      }
+    }
+
+    // Fetch contact details (limit to top 50 contacts)
+    const sortedContactIds = [...contactStats.entries()]
+      .sort((a, b) => b[1].count - a[1].count)
+      .slice(0, 50)
+      .map(([id]) => id);
+
+    const contacts = await Promise.all(
+      sortedContactIds.map((id) => ctx.db.get(id as Id<"contacts">))
+    );
+
+    return contacts
+      .filter((c): c is Doc<"contacts"> => c !== null)
+      .map((contact) => ({
+        contactId: contact._id,
+        displayName: contact.displayName,
+        company: contact.company,
+        messagesProcessed: contactStats.get(contact._id as string)!.count,
+        lastExtractedAt: contactStats.get(contact._id as string)!
+          .lastExtractedAt,
+      }))
+      .sort((a, b) => b.messagesProcessed - a.messagesProcessed);
   },
 });

@@ -148,7 +148,9 @@ export class SyncManager {
         throw error;
       }
 
-      console.log("[SyncManager] Got auth error, force refreshing token and retrying...");
+      console.log(
+        "[SyncManager] Got auth error, force refreshing token and retrying..."
+      );
 
       // Force refresh since the server rejected our token
       const hasAuth = await this.refreshAuth(true);
@@ -207,9 +209,9 @@ export class SyncManager {
     this.isInitialized = true;
 
     try {
-      const syncState = await this.client.query(api.sync.getSyncState, {
+      const syncState = (await this.client.query(api.sync.getSyncState, {
         platform: "imessage",
-      }) as SyncState | null;
+      })) as SyncState | null;
 
       const localCursor = this.loadCursor();
 
@@ -232,7 +234,9 @@ export class SyncManager {
         // Sync contacts first if available
         if (this.options.syncContacts) {
           try {
-            console.log("[SyncManager] Running contacts sync as part of recovery...");
+            console.log(
+              "[SyncManager] Running contacts sync as part of recovery..."
+            );
             const contactResult = await this.options.syncContacts();
             console.log(
               `[SyncManager] Recovery contacts sync complete: ${contactResult.contactsCount} contacts`
@@ -288,7 +292,11 @@ export class SyncManager {
     }
 
     // Scenario 2: Local cache cleared (no local cursor file but server has state)
-    if (!hasLocalCursorFile && syncState && parseInt(syncState.cursor, 10) > 0) {
+    if (
+      !hasLocalCursorFile &&
+      syncState &&
+      parseInt(syncState.cursor, 10) > 0
+    ) {
       return "Local cache cleared (server has sync state but no local cursor)";
     }
 
@@ -336,7 +344,9 @@ export class SyncManager {
       const contactsManager = getContactsManager();
       // fetchContacts uses cache by default, only fetches if expired
       await contactsManager.fetchContacts(false);
-      console.log(`[SyncManager] Local contacts loaded: ${contactsManager.getCacheSize()}`);
+      console.log(
+        `[SyncManager] Local contacts loaded: ${contactsManager.getCacheSize()}`
+      );
     } catch (e) {
       console.warn("[SyncManager] Failed to preload contacts:", e);
     }
@@ -421,9 +431,15 @@ export class SyncManager {
 
         this.updateProgress({
           currentBatch: {
-            messagesInBatch: batchesToProcess.reduce((sum, b) => sum + b.batch.messages.length, 0),
+            messagesInBatch: batchesToProcess.reduce(
+              (sum, b) => sum + b.batch.messages.length,
+              0
+            ),
             batchNumber: batchesToProcess[0].batchNum,
-            estimatedBatchesRemaining: Math.max(0, estimatedTotalBatches - batchNumber),
+            estimatedBatchesRemaining: Math.max(
+              0,
+              estimatedTotalBatches - batchNumber
+            ),
           },
         });
 
@@ -436,7 +452,10 @@ export class SyncManager {
         );
 
         const batchTime = performance.now() - batchStart;
-        const batchMsgCount = results.reduce((sum, r) => sum + r.messagesCount, 0);
+        const batchMsgCount = results.reduce(
+          (sum, r) => sum + r.messagesCount,
+          0
+        );
         const rate = Math.round(batchMsgCount / (batchTime / 1000));
 
         console.log(
@@ -451,7 +470,8 @@ export class SyncManager {
         totalMessagesSynced += batchMsgCount;
         this.updateProgress({
           lastCursor: cursor,
-          totalMessagesSynced: this.progress.totalMessagesSynced + batchMsgCount,
+          totalMessagesSynced:
+            this.progress.totalMessagesSynced + batchMsgCount,
         });
       }
 
@@ -482,6 +502,16 @@ export class SyncManager {
         currentBatch: undefined,
         recoveryReason: undefined,
       });
+
+      // Trigger async memory extraction (non-blocking, fire-and-forget)
+      if (totalMessagesSynced > 0) {
+        this.triggerMemoryProcessing().catch((e) => {
+          console.warn(
+            "[SyncManager] Memory processing failed (non-blocking):",
+            e
+          );
+        });
+      }
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : String(error);
       console.error("[SyncManager] Sync error:", message);
@@ -511,21 +541,29 @@ export class SyncManager {
         .filter((msg) => msg.attachments?.length)
         .map(async (message) => {
           try {
-            const uploaded = await uploadAttachments(this.client, message.attachments!);
+            const uploaded = await uploadAttachments(
+              this.client,
+              message.attachments!
+            );
             if (uploaded.length > 0) {
-              const convexAttachments: ConvexAttachment[] = uploaded.map((att) => ({
-                filename: att.filename,
-                mimeType: att.mimeType,
-                size: att.size,
-                storageId: att.storageId as Id<"_storage">,
-                thumbnailStorageId: att.thumbnailStorageId
-                  ? (att.thumbnailStorageId as Id<"_storage">)
-                  : undefined,
-              }));
+              const convexAttachments: ConvexAttachment[] = uploaded.map(
+                (att) => ({
+                  filename: att.filename,
+                  mimeType: att.mimeType,
+                  size: att.size,
+                  storageId: att.storageId as Id<"_storage">,
+                  thumbnailStorageId: att.thumbnailStorageId
+                    ? (att.thumbnailStorageId as Id<"_storage">)
+                    : undefined,
+                })
+              );
               return { messageId: message.id, attachments: convexAttachments };
             }
           } catch (e) {
-            console.warn(`[SyncManager] Batch ${batchNum}: Failed to upload attachments for message ${message.id}:`, e);
+            console.warn(
+              `[SyncManager] Batch ${batchNum}: Failed to upload attachments for message ${message.id}:`,
+              e
+            );
           }
           return null;
         });
@@ -542,7 +580,14 @@ export class SyncManager {
     const syncBatch = {
       ...batch,
       messages: batch.messages.map(
-        ({ guid, status, errorCode, attachments: localAttachments, reactions, ...rest }) => {
+        ({
+          guid,
+          status,
+          errorCode,
+          attachments: localAttachments,
+          reactions,
+          ...rest
+        }) => {
           const uploadedAtts = uploadedAttachmentMap.get(rest.id);
           return {
             ...rest,
@@ -553,12 +598,15 @@ export class SyncManager {
     };
 
     // Execute mutation with 401 retry logic
-    const result = await this.executeMutationWithRetry(
-      () => this.client.mutation(api.sync.syncMessages, { batch: syncBatch })
+    const result = await this.executeMutationWithRetry(() =>
+      this.client.mutation(api.sync.syncMessages, { batch: syncBatch })
     );
 
     if (result.errors.length > 0) {
-      console.warn(`[SyncManager] Batch ${batchNum} errors:`, result.errors.slice(0, 3));
+      console.warn(
+        `[SyncManager] Batch ${batchNum} errors:`,
+        result.errors.slice(0, 3)
+      );
     }
 
     return result;
@@ -576,7 +624,11 @@ export class SyncManager {
    */
   resetCursor(): void {
     this.saveCursor(0);
-    this.updateProgress({ lastCursor: 0, totalMessagesSynced: 0, totalContactsSynced: 0 });
+    this.updateProgress({
+      lastCursor: 0,
+      totalMessagesSynced: 0,
+      totalContactsSynced: 0,
+    });
     console.log("[SyncManager] Cursor reset, next sync will be full sync");
   }
 
@@ -623,7 +675,9 @@ export class SyncManager {
     // Sync contacts first
     if (this.options.syncContacts) {
       try {
-        console.log("[SyncManager] Running contacts sync as part of force full sync...");
+        console.log(
+          "[SyncManager] Running contacts sync as part of force full sync..."
+        );
         const contactResult = await this.options.syncContacts();
         console.log(
           `[SyncManager] Force full sync contacts complete: ${contactResult.contactsCount} contacts`
@@ -638,6 +692,55 @@ export class SyncManager {
 
     // Now run message sync
     await this.runSync();
+  }
+
+  /**
+   * Trigger async memory extraction for newly synced messages.
+   * Non-blocking - errors are logged but don't affect sync.
+   */
+  private async triggerMemoryProcessing(): Promise<void> {
+    const token = await this.options.getAuthToken?.();
+    if (!token) {
+      console.log("[SyncManager] No auth token, skipping memory processing");
+      return;
+    }
+
+    const baseUrl = process.env.API_BASE_URL || "http://localhost:3000";
+    try {
+      const response = await fetch(`${baseUrl}/api/memories/sync`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ platform: "imessage" }),
+      });
+
+      if (!response.ok) {
+        const text = await response.text();
+        console.warn(
+          `[SyncManager] Memory sync returned ${response.status}: ${text.slice(0, 200)}`
+        );
+        return;
+      }
+
+      // Check content-type before parsing JSON to avoid errors when server returns HTML
+      const contentType = response.headers.get("content-type") || "";
+      if (!contentType.includes("application/json")) {
+        console.warn(
+          `[SyncManager] Memory sync returned non-JSON content-type: ${contentType}`
+        );
+        return;
+      }
+
+      const result = await response.json();
+      console.log(
+        `[SyncManager] Memory processing: ${result.memoriesExtracted ?? 0} memories from ${result.messagesProcessed ?? 0} messages`
+      );
+    } catch (e) {
+      // Network errors are non-fatal
+      console.warn("[SyncManager] Memory sync request failed:", e);
+    }
   }
 
   private getChatDb(): ChatDb {
