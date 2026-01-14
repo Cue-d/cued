@@ -152,6 +152,8 @@ const schema = defineSchema({
         })
       )
     ),
+    // Task 3.13c: Track when memory was extracted from this message
+    memoryExtractedAt: v.optional(v.number()),
   })
     .index("by_user", ["userId"])
     .index("by_conversation", ["conversationId", "sentAt"])
