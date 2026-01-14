@@ -85,6 +85,7 @@ export const syncMessages = mutation({
 
 /**
  * Internal sync logic shared by mutations.
+ * OPTIMIZED: Uses batch lookups to eliminate N+1 queries.
  */
 async function syncMessagesInternal(
   ctx: MutationCtx,
@@ -98,65 +99,163 @@ async function syncMessagesInternal(
     errors: [] as string[],
   };
 
+  // OPTIMIZATION 1: Batch lookup existing conversations by platformConversationId
+  const conversationIds = batch.chats.map((c) => String(c.id));
+  const existingConversations = await batchFetchConversations(
+    ctx,
+    userId,
+    conversationIds
+  );
+  const conversationMap = new Map(
+    existingConversations.map((c) => [c.platformConversationId, c._id])
+  );
+
+  // OPTIMIZATION 2: Batch lookup existing messages by platformMessageId
+  const messageIds = batch.messages.map((m) => String(m.id));
+  const existingMessages = await batchFetchMessages(ctx, userId, messageIds);
+  const existingMessageSet = new Set(existingMessages.map((m) => m.platformMessageId));
+
+  // OPTIMIZATION 3: Batch lookup handles → contacts for all senders
+  const uniqueHandles = new Set<string>();
+  for (const msg of batch.messages) {
+    if (!msg.isFromMe && msg.sender) {
+      uniqueHandles.add(normalizeHandle(msg.sender.identifier));
+    }
+  }
+  for (const chat of batch.chats) {
+    for (const p of chat.participants) {
+      uniqueHandles.add(normalizeHandle(p.identifier));
+    }
+  }
+  const handleToContact = await batchResolveHandles(
+    ctx,
+    userId,
+    [...uniqueHandles]
+  );
+
   // Build chat ID lookup (iMessage chat.id -> Convex conversation._id)
   const chatIdMap = new Map<number, Id<"conversations">>();
 
-  // Process chats first (conversations must exist before messages)
+  // Process chats - use existing or create new
   for (const chat of batch.chats) {
     try {
-      const conversationId = await upsertConversation(ctx, userId, chat);
-      chatIdMap.set(chat.id, conversationId);
+      const platformConversationId = String(chat.id);
+      const existingId = conversationMap.get(platformConversationId);
+
+      if (existingId) {
+        chatIdMap.set(chat.id, existingId);
+      } else {
+        // Resolve participant handles to contacts from pre-fetched map
+        const participantContactIds: Id<"contacts">[] = [];
+        for (const participant of chat.participants) {
+          const normalizedHandle = normalizeHandle(participant.identifier);
+          let contactId = handleToContact.get(normalizedHandle);
+          if (!contactId) {
+            // Create placeholder contact
+            contactId = await createPlaceholderContact(
+              ctx,
+              userId,
+              participant.identifier
+            );
+            handleToContact.set(normalizedHandle, contactId);
+          }
+          participantContactIds.push(contactId);
+        }
+
+        const conversationId = await ctx.db.insert("conversations", {
+          userId,
+          platform: "imessage",
+          platformConversationId,
+          conversationType: chat.isGroup ? "group" : "dm",
+          participantContactIds,
+          unreadCount: 0,
+        });
+        chatIdMap.set(chat.id, conversationId);
+      }
       result.chatsCount++;
     } catch (e) {
       result.errors.push(`Failed to sync chat ${chat.id}: ${e}`);
     }
   }
 
-  // Process messages
+  // Process messages - bulk insert only new messages
   const conversationUpdates = new Map<
     Id<"conversations">,
     { text: string; timestamp: number }
   >();
 
-  for (const message of batch.messages) {
-    try {
-      const conversationId = chatIdMap.get(message.chatId);
-      if (!conversationId) {
-        result.errors.push(`No conversation found for chat ${message.chatId}`);
-        continue;
-      }
+  const messagesToInsert: Array<{
+    userId: Id<"users">;
+    conversationId: Id<"conversations">;
+    platform: "imessage";
+    content: string;
+    sentAt: number;
+    senderContactId: Id<"contacts"> | undefined;
+    isFromMe: boolean;
+    platformMessageId: string;
+    attachments?: typeof batch.messages[number]["attachments"];
+  }> = [];
 
-      // Resolve sender to contact ID
-      let senderContactId: Id<"contacts"> | undefined;
-      if (!message.isFromMe && message.sender) {
-        senderContactId = await resolveHandleToContact(
+  for (const message of batch.messages) {
+    const platformMessageId = String(message.id);
+
+    // Skip if already exists
+    if (existingMessageSet.has(platformMessageId)) {
+      continue;
+    }
+
+    const conversationId = chatIdMap.get(message.chatId);
+    if (!conversationId) {
+      result.errors.push(`No conversation found for chat ${message.chatId}`);
+      continue;
+    }
+
+    // Resolve sender from pre-fetched map
+    let senderContactId: Id<"contacts"> | undefined;
+    if (!message.isFromMe && message.sender) {
+      const normalizedHandle = normalizeHandle(message.sender.identifier);
+      senderContactId = handleToContact.get(normalizedHandle);
+      if (!senderContactId) {
+        // Create placeholder contact
+        senderContactId = await createPlaceholderContact(
           ctx,
           userId,
           message.sender.identifier
         );
+        handleToContact.set(normalizedHandle, senderContactId);
       }
-
-      await upsertMessage(
-        ctx,
-        userId,
-        conversationId,
-        message,
-        senderContactId
-      );
-      result.messagesCount++;
-
-      // Track latest message per conversation for lastMessage update
-      const messageTimestampMs = message.timestamp * 1000;
-      const existing = conversationUpdates.get(conversationId);
-      if (!existing || messageTimestampMs > existing.timestamp) {
-        conversationUpdates.set(conversationId, {
-          text: message.text ?? "",
-          timestamp: messageTimestampMs,
-        });
-      }
-    } catch (e) {
-      result.errors.push(`Failed to sync message ${message.id}: ${e}`);
     }
+
+    messagesToInsert.push({
+      userId,
+      conversationId,
+      platform: "imessage",
+      content: message.text ?? "",
+      sentAt: message.timestamp * 1000,
+      senderContactId,
+      isFromMe: message.isFromMe,
+      platformMessageId,
+      attachments:
+        message.attachments && message.attachments.length > 0
+          ? message.attachments
+          : undefined,
+    });
+
+    // Track latest message per conversation for lastMessage update
+    const messageTimestampMs = message.timestamp * 1000;
+    const existing = conversationUpdates.get(conversationId);
+    if (!existing || messageTimestampMs > existing.timestamp) {
+      conversationUpdates.set(conversationId, {
+        text: message.text ?? "",
+        timestamp: messageTimestampMs,
+      });
+    }
+  }
+
+  // Bulk insert messages
+  for (const msg of messagesToInsert) {
+    await ctx.db.insert("messages", msg);
+    result.messagesCount++;
   }
 
   // Update lastMessage fields on conversations
@@ -168,6 +267,131 @@ async function syncMessagesInternal(
   }
 
   return result;
+}
+
+/**
+ * Batch fetch existing conversations by platformConversationId.
+ */
+async function batchFetchConversations(
+  ctx: MutationCtx,
+  userId: Id<"users">,
+  platformConversationIds: string[]
+): Promise<Doc<"conversations">[]> {
+  const results: Doc<"conversations">[] = [];
+
+  // Fetch in parallel batches of 100
+  const batchSize = 100;
+  for (let i = 0; i < platformConversationIds.length; i += batchSize) {
+    const batch = platformConversationIds.slice(i, i + batchSize);
+    const promises = batch.map((id) =>
+      ctx.db
+        .query("conversations")
+        .withIndex("by_platform_conversation", (q) =>
+          q
+            .eq("userId", userId)
+            .eq("platform", "imessage")
+            .eq("platformConversationId", id)
+        )
+        .unique()
+    );
+    const batchResults = await Promise.all(promises);
+    results.push(...batchResults.filter((c): c is Doc<"conversations"> => c !== null));
+  }
+
+  return results;
+}
+
+/**
+ * Batch fetch existing messages by platformMessageId.
+ */
+async function batchFetchMessages(
+  ctx: MutationCtx,
+  userId: Id<"users">,
+  platformMessageIds: string[]
+): Promise<Doc<"messages">[]> {
+  const results: Doc<"messages">[] = [];
+
+  // Fetch in parallel batches of 100
+  const batchSize = 100;
+  for (let i = 0; i < platformMessageIds.length; i += batchSize) {
+    const batch = platformMessageIds.slice(i, i + batchSize);
+    const promises = batch.map((id) =>
+      ctx.db
+        .query("messages")
+        .withIndex("by_platform_message", (q) =>
+          q
+            .eq("userId", userId)
+            .eq("platform", "imessage")
+            .eq("platformMessageId", id)
+        )
+        .unique()
+    );
+    const batchResults = await Promise.all(promises);
+    results.push(...batchResults.filter((m): m is Doc<"messages"> => m !== null));
+  }
+
+  return results;
+}
+
+/**
+ * Batch resolve handles to contact IDs.
+ */
+async function batchResolveHandles(
+  ctx: MutationCtx,
+  userId: Id<"users">,
+  handles: string[]
+): Promise<Map<string, Id<"contacts">>> {
+  const handleToContact = new Map<string, Id<"contacts">>();
+
+  // Fetch in parallel batches of 100
+  const batchSize = 100;
+  for (let i = 0; i < handles.length; i += batchSize) {
+    const batch = handles.slice(i, i + batchSize);
+    const promises = batch.map((handle) =>
+      ctx.db
+        .query("contactHandles")
+        .withIndex("by_user_handle", (q) =>
+          q.eq("userId", userId).eq("handle", handle)
+        )
+        .unique()
+    );
+    const batchResults = await Promise.all(promises);
+
+    for (let j = 0; j < batch.length; j++) {
+      const result = batchResults[j];
+      if (result) {
+        handleToContact.set(batch[j], result.contactId);
+      }
+    }
+  }
+
+  return handleToContact;
+}
+
+/**
+ * Create a placeholder contact with handle.
+ */
+async function createPlaceholderContact(
+  ctx: MutationCtx,
+  userId: Id<"users">,
+  handle: string
+): Promise<Id<"contacts">> {
+  const contactId = await ctx.db.insert("contacts", {
+    userId,
+    displayName: handle,
+  });
+
+  const normalizedHandle = normalizeHandle(handle);
+  const handleType = handle.includes("@") ? "email" : "phone";
+  await ctx.db.insert("contactHandles", {
+    userId,
+    contactId,
+    handleType,
+    handle: normalizedHandle,
+    platform: "imessage",
+  });
+
+  return contactId;
 }
 
 /**
@@ -193,139 +417,6 @@ async function getOrCreateUser(
   });
 
   return (await ctx.db.get(userId))!;
-}
-
-/**
- * Upsert a conversation from iMessage chat data.
- */
-async function upsertConversation(
-  ctx: MutationCtx,
-  userId: Id<"users">,
-  chat: ChatInput
-): Promise<Id<"conversations">> {
-  const platformConversationId = String(chat.id);
-
-  const existing = await ctx.db
-    .query("conversations")
-    .withIndex("by_platform_conversation", (q) =>
-      q
-        .eq("userId", userId)
-        .eq("platform", "imessage")
-        .eq("platformConversationId", platformConversationId)
-    )
-    .unique();
-
-  if (existing) {
-    return existing._id;
-  }
-
-  // Resolve participant handles to contacts
-  const participantContactIds: Id<"contacts">[] = [];
-  for (const participant of chat.participants) {
-    const contactId = await resolveHandleToContact(
-      ctx,
-      userId,
-      participant.identifier
-    );
-    if (contactId) {
-      participantContactIds.push(contactId);
-    }
-  }
-
-  return ctx.db.insert("conversations", {
-    userId,
-    platform: "imessage",
-    platformConversationId,
-    conversationType: chat.isGroup ? "group" : "dm",
-    participantContactIds,
-    unreadCount: 0,
-  });
-}
-
-/**
- * Resolve an iMessage handle (phone/email) to a contact ID.
- * Creates a placeholder contact if one doesn't exist.
- */
-async function resolveHandleToContact(
-  ctx: MutationCtx,
-  userId: Id<"users">,
-  handle: string
-): Promise<Id<"contacts"> | undefined> {
-  const normalizedHandle = normalizeHandle(handle);
-
-  const existingHandle = await ctx.db
-    .query("contactHandles")
-    .withIndex("by_user_handle", (q) =>
-      q.eq("userId", userId).eq("handle", normalizedHandle)
-    )
-    .unique();
-
-  if (existingHandle) {
-    return existingHandle.contactId;
-  }
-
-  // Create placeholder contact (can be enriched later from Contacts.app)
-  const contactId = await ctx.db.insert("contacts", {
-    userId,
-    displayName: handle,
-  });
-
-  const handleType = handle.includes("@") ? "email" : "phone";
-  await ctx.db.insert("contactHandles", {
-    userId,
-    contactId,
-    handleType,
-    handle: normalizedHandle,
-    platform: "imessage",
-  });
-
-  return contactId;
-}
-
-/**
- * Upsert a message by platformMessageId (ROWID).
- */
-async function upsertMessage(
-  ctx: MutationCtx,
-  userId: Id<"users">,
-  conversationId: Id<"conversations">,
-  message: MessageInput,
-  senderContactId?: Id<"contacts">
-): Promise<void> {
-  const platformMessageId = String(message.id);
-
-  // Check if message exists using indexed lookup (O(1) instead of scanning all messages)
-  const existing = await ctx.db
-    .query("messages")
-    .withIndex("by_platform_message", (q) =>
-      q
-        .eq("userId", userId)
-        .eq("platform", "imessage")
-        .eq("platformMessageId", platformMessageId)
-    )
-    .unique();
-
-  if (existing) {
-    return;
-  }
-
-  // Pass attachments if present (already in correct format from validator)
-  const attachments =
-    message.attachments && message.attachments.length > 0
-      ? message.attachments
-      : undefined;
-
-  await ctx.db.insert("messages", {
-    userId,
-    conversationId,
-    platform: "imessage",
-    content: message.text ?? "",
-    sentAt: message.timestamp * 1000,
-    senderContactId,
-    isFromMe: message.isFromMe,
-    platformMessageId,
-    attachments,
-  });
 }
 
 /**
@@ -505,6 +596,9 @@ async function upsertContactWithHandles(
 // Sync Cursor Management
 // ============================================================================
 
+// Current sync version - increment when schema changes require full re-sync
+export const CURRENT_SYNC_VERSION = 1;
+
 /**
  * Get the sync cursor for a platform from the integrations table.
  */
@@ -523,6 +617,36 @@ export const getSyncCursor = query({
     return {
       cursor: integration?.syncState.lastSyncCursor ?? "0",
       lastSyncAt: integration?.syncState.lastSyncAt ?? null,
+    };
+  },
+});
+
+/**
+ * Get full sync state for a platform, including metadata for recovery decisions.
+ */
+export const getSyncState = query({
+  args: {
+    platform: platformValidator,
+  },
+  handler: async (ctx, args) => {
+    const identity = await ctx.auth.getUserIdentity();
+    if (!identity) return null;
+
+    const user = await findUserByWorkosId(ctx, identity.subject);
+    if (!user) return null;
+
+    const integration = await findIntegration(ctx, user._id, args.platform);
+    if (!integration) return null;
+
+    return {
+      cursor: integration.syncState.lastSyncCursor ?? "0",
+      lastSyncAt: integration.syncState.lastSyncAt ?? null,
+      totalMessagesSynced: integration.syncState.totalMessagesSynced ?? 0,
+      totalContactsSynced: integration.syncState.totalContactsSynced ?? 0,
+      syncVersion: integration.syncState.syncVersion ?? 0,
+      isConnected: integration.syncState.isConnected,
+      // Task 2.7c: Contacts sync state
+      lastContactsSyncAt: integration.syncState.lastContactsSyncAt ?? null,
     };
   },
 });
@@ -553,6 +677,121 @@ export const updateSyncCursor = mutation({
         ...integration.syncState,
         lastSyncCursor: args.cursor,
         lastSyncAt: Date.now(),
+        lastError: undefined,
+      },
+    });
+
+    return { success: true };
+  },
+});
+
+/**
+ * Update full sync metadata after successful sync.
+ * Used for tracking sync progress and detecting recovery scenarios.
+ */
+export const updateSyncMetadata = mutation({
+  args: {
+    platform: platformValidator,
+    cursor: v.string(),
+    totalMessagesSynced: v.optional(v.number()),
+    totalContactsSynced: v.optional(v.number()),
+    syncVersion: v.optional(v.number()),
+  },
+  handler: async (ctx, args) => {
+    const identity = await ctx.auth.getUserIdentity();
+    if (!identity) {
+      throw new Error("Unauthorized: Must be authenticated");
+    }
+
+    const user = await getOrCreateUser(ctx, identity);
+    const integration = await getOrCreateIntegration(
+      ctx,
+      user._id,
+      args.platform
+    );
+
+    await ctx.db.patch(integration._id, {
+      syncState: {
+        ...integration.syncState,
+        lastSyncCursor: args.cursor,
+        lastSyncAt: Date.now(),
+        lastError: undefined,
+        totalMessagesSynced:
+          args.totalMessagesSynced ?? integration.syncState.totalMessagesSynced,
+        totalContactsSynced:
+          args.totalContactsSynced ?? integration.syncState.totalContactsSynced,
+        syncVersion: args.syncVersion ?? integration.syncState.syncVersion,
+      },
+    });
+
+    return { success: true };
+  },
+});
+
+/**
+ * Reset sync state to trigger full re-sync.
+ * Clears cursor and message count so recovery flow triggers full sync.
+ */
+export const resetSyncState = mutation({
+  args: {
+    platform: platformValidator,
+  },
+  handler: async (ctx, args) => {
+    const identity = await ctx.auth.getUserIdentity();
+    if (!identity) {
+      throw new Error("Unauthorized: Must be authenticated");
+    }
+
+    const user = await getOrCreateUser(ctx, identity);
+    const integration = await findIntegration(ctx, user._id, args.platform);
+
+    if (integration) {
+      await ctx.db.patch(integration._id, {
+        syncState: {
+          isConnected: true,
+          lastSyncCursor: "0",
+          lastSyncAt: undefined,
+          lastError: undefined,
+          totalMessagesSynced: 0,
+          totalContactsSynced: 0,
+          syncVersion: CURRENT_SYNC_VERSION,
+          // Task 2.7c: Reset contacts sync state
+          lastContactsSyncAt: undefined,
+        },
+      });
+    }
+
+    return { success: true };
+  },
+});
+
+/**
+ * Update contacts sync state after successful contacts sync.
+ * Task 2.7c: Stores lastContactsSyncAt and totalContactsSynced for recovery.
+ */
+export const updateContactsSyncState = mutation({
+  args: {
+    platform: platformValidator,
+    contactsCount: v.number(),
+  },
+  handler: async (ctx, args) => {
+    const identity = await ctx.auth.getUserIdentity();
+    if (!identity) {
+      throw new Error("Unauthorized: Must be authenticated");
+    }
+
+    const user = await getOrCreateUser(ctx, identity);
+    const integration = await getOrCreateIntegration(
+      ctx,
+      user._id,
+      args.platform
+    );
+
+    await ctx.db.patch(integration._id, {
+      syncState: {
+        ...integration.syncState,
+        totalContactsSynced: args.contactsCount,
+        lastContactsSyncAt: Date.now(),
         lastError: undefined,
       },
     });

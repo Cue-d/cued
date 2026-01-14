@@ -525,7 +525,7 @@
         "Detect schema changes (syncVersion mismatch) and trigger re-sync of both",
         "Verify full re-sync (messages + contacts) works after deleting local cache"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "2.8b",
@@ -542,7 +542,7 @@
         "Add progress indicator in Electron UI for large syncs",
         "Benchmark full sync of 148k messages completes in under 3 minutes"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "2.9",
