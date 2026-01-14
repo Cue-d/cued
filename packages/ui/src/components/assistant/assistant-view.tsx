@@ -2,7 +2,7 @@ import * as React from "react"
 import { Sparkles } from "lucide-react"
 
 import { cn } from "../../lib/utils"
-import { ChatInput } from "./chat-input"
+import { type Attachment, MultimodalInput } from "./multimodal-input"
 import { ChatMessage } from "./chat-message"
 import { SuggestedPrompts } from "./suggested-prompts"
 import type { MessageWithToolInvocations, SuggestedPrompt } from "./types"
@@ -16,6 +16,8 @@ interface AssistantViewProps {
   isLoading?: boolean
   error?: Error | null
   suggestedPrompts?: SuggestedPrompt[]
+  attachments?: Attachment[]
+  onAttachmentsChange?: React.Dispatch<React.SetStateAction<Attachment[]>>
   className?: string
 }
 
@@ -28,8 +30,14 @@ export function AssistantView({
   isLoading = false,
   error,
   suggestedPrompts,
+  attachments = [],
+  onAttachmentsChange,
   className,
 }: AssistantViewProps) {
+  // Internal attachments state for when not controlled externally
+  const [internalAttachments, setInternalAttachments] = React.useState<Attachment[]>([])
+  const actualAttachments = onAttachmentsChange ? attachments : internalAttachments
+  const setActualAttachments = onAttachmentsChange ?? setInternalAttachments
   const scrollContainerRef = React.useRef<HTMLDivElement>(null)
 
   React.useEffect(() => {
@@ -93,12 +101,20 @@ export function AssistantView({
 
       <div className="border-t bg-background/80 px-4 py-4 backdrop-blur-sm">
         <div className="mx-auto max-w-2xl">
-          <ChatInput
-            value={input}
-            onChange={onInputChange}
+          <MultimodalInput
+            input={input}
+            setInput={(value) => {
+              if (typeof value === "function") {
+                onInputChange(value(input))
+              } else {
+                onInputChange(value)
+              }
+            }}
             onSubmit={onSubmit}
             onStop={onStop}
-            isLoading={isLoading}
+            isSubmitting={isLoading}
+            attachments={actualAttachments}
+            setAttachments={setActualAttachments}
           />
         </div>
       </div>
