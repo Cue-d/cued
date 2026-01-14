@@ -3,9 +3,23 @@ import { z } from "zod";
 import { getErrorMessage, type Tool, type ToolResult } from "../types.js";
 
 const inputSchema = z.object({
-  query: z.string().describe("Search query to find relevant memories about a person or topic"),
-  contactId: z.string().optional().describe("Filter memories to a specific contact/person ID"),
+  query: z
+    .string()
+    .describe("Search query to find relevant memories about a person or topic"),
+  contactId: z
+    .string()
+    .optional()
+    .describe("Filter memories to a specific contact/person ID"),
 });
+
+// @mem0/vercel-ai-provider doesn't export Memory types (getMemories returns Promise<any>)
+interface Mem0Memory {
+  id: string;
+  memory?: string;
+  score?: number;
+  metadata?: Record<string, unknown>;
+  created_at?: string;
+}
 
 interface MemoryResult {
   id: string;
@@ -13,15 +27,6 @@ interface MemoryResult {
   score?: number;
   metadata?: Record<string, unknown>;
   createdAt?: string;
-}
-
-// Type for raw Mem0 response (getMemories returns Promise<any>)
-interface Mem0RawMemory {
-  id: string;
-  memory?: string;
-  score?: number;
-  metadata?: Record<string, unknown>;
-  created_at?: string;
 }
 
 export const searchMemoriesTool: Tool<typeof inputSchema, MemoryResult[]> = {
@@ -43,8 +48,8 @@ export const searchMemoriesTool: Tool<typeof inputSchema, MemoryResult[]> = {
         // mem0ApiKey read from MEM0_API_KEY env var automatically
       });
 
-      const results = (memories as Mem0RawMemory[])
-        .filter((m): m is Mem0RawMemory & { memory: string } => !!m.memory)
+      const results = (memories as Mem0Memory[])
+        .filter((m): m is Mem0Memory & { memory: string } => !!m.memory)
         .map((m) => ({
           id: m.id,
           memory: m.memory,
@@ -59,7 +64,8 @@ export const searchMemoriesTool: Tool<typeof inputSchema, MemoryResult[]> = {
       if (message.includes("API key") || message.includes("MEM0_API_KEY")) {
         return {
           success: false,
-          error: "Mem0 is not configured. Set MEM0_API_KEY environment variable.",
+          error:
+            "Mem0 is not configured. Set MEM0_API_KEY environment variable.",
         };
       }
       return { success: false, error: message };
