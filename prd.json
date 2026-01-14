@@ -892,7 +892,7 @@
         "Install @nangohq/node and @nangohq/frontend packages",
         "Verify Nango dashboard accessible"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "4.2",

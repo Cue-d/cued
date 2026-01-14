@@ -1526,3 +1526,25 @@ Notes:
   - Task completes Phase 3 AI integration
   - Memory extraction can be triggered via POST /api/memories/sync with auth token
 ---
+
+[2026-01-14 14:30] Task 4.1 - Set up Nango account and configure environment
+Files:
+  - apps/web/package.json (add @nangohq/node, @nangohq/frontend)
+  - apps/web/.env.local (add NANGO_SECRET_KEY placeholder)
+  - apps/web/app/(app)/settings/page.tsx (fix lint: useEffect+setState → useSyncExternalStore)
+Decisions:
+  - Installed @nangohq/node v0.69.22 for backend SDK (API calls, sync management)
+  - Installed @nangohq/frontend v0.69.22 for frontend SDK (Connect UI, OAuth flows)
+  - Added NANGO_SECRET_KEY placeholder with instructions to get from dashboard
+  - Fixed pre-existing lint error: React 19 ESLint rule against setState in useEffect
+  - Refactored useIsMounted to use useSyncExternalStore (SSR-safe pattern)
+Why:
+  - Nango SDK enables OAuth integration with Gmail/Slack (tasks 4.2-4.14, 5.1-5.10)
+  - @nangohq/node for server-side: nango.post(), nango.listRecords(), nango.triggerAction()
+  - @nangohq/frontend for client-side: nango.openConnectUI() OAuth modal
+  - useSyncExternalStore is React 18+ canonical solution for hydration-safe mounted checks
+Notes:
+  - USER ACTION REQUIRED: Create Nango account at app.nango.dev and add real NANGO_SECRET_KEY
+  - All lint and typecheck pass for entire monorepo
+  - Ready for task 4.2: Configure Google Mail integration in Nango dashboard
+---
