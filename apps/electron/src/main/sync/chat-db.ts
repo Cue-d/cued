@@ -8,8 +8,59 @@
 import Database from "better-sqlite3";
 import { homedir } from "os";
 import { join } from "path";
-import type { Chat, Handle, Message, SyncBatch } from "./types";
+import type {
+  Chat,
+  Handle,
+  Message,
+  MessageStatus,
+  Reaction,
+  SyncBatch,
+} from "./types";
 import { extractTextFromAttributedBody } from "./attributed-body";
+
+/**
+ * Map iMessage tapback type codes to emoji.
+ * See: https://iphonedevwiki.net/index.php/Message
+ */
+const TAPBACK_TYPE_TO_EMOJI: Record<number, string> = {
+  2000: "❤️", // loved
+  2001: "👍", // liked
+  2002: "👎", // disliked
+  2003: "😂", // laughed
+  2004: "‼️", // emphasized
+  2005: "❓", // questioned
+  // Removal codes (3000-3005) subtract the tapback - handled separately
+};
+
+/**
+ * Determine message status from chat.db flags.
+ */
+function getMessageStatus(
+  isFromMe: boolean,
+  isSent: boolean,
+  isDelivered: boolean,
+  isRead: boolean,
+  error: number
+): MessageStatus {
+  if (error !== 0) {
+    return "failed";
+  }
+  if (!isFromMe) {
+    // Received messages: read by us or not
+    return isRead ? "read" : "delivered";
+  }
+  // Sent messages: progression is sending → sent → delivered → read
+  if (isRead) {
+    return "read";
+  }
+  if (isDelivered) {
+    return "delivered";
+  }
+  if (isSent) {
+    return "sent";
+  }
+  return "sending";
+}
 
 // Apple timestamp epoch offset (seconds from 1970-01-01 to 2001-01-01)
 const APPLE_EPOCH_OFFSET = 978307200;
@@ -51,6 +102,7 @@ function getMessageText(
 // Row types from SQLite queries
 interface MessageRow {
   rowid: number;
+  guid: string;
   chat_id: number;
   sender_id: number | null;
   sender_identifier: string | null;
@@ -59,9 +111,26 @@ interface MessageRow {
   attributedBody: Buffer | null;
   date: number | null;
   is_from_me: number;
+  is_sent: number;
+  is_delivered: number;
   is_read: number;
   date_read: number | null;
+  error: number;
   cache_has_attachments: number;
+  // Reaction-related fields (only populated for tapback messages)
+  associated_message_guid: string | null;
+  associated_message_type: number;
+  associated_message_emoji: string | null;
+}
+
+interface ReactionRow {
+  rowid: number;
+  target_guid: string;
+  associated_message_type: number;
+  associated_message_emoji: string | null;
+  reactor_identifier: string | null;
+  is_from_me: number;
+  date: number | null;
 }
 
 interface ChatRow {
@@ -89,6 +158,7 @@ export class ChatDb {
   private stmtGetMaxRowid: Database.Statement<[]>;
   private stmtGetChatParticipants: Database.Statement<[number]>;
   private stmtGetChatById: Database.Statement<[number, number]>;
+  private stmtGetReactionsForGuids: Database.Statement<[string]>;
 
   /**
    * Create a new ChatDb instance.
@@ -103,6 +173,7 @@ export class ChatDb {
     this.stmtGetMessagesSince = this.db.prepare(`
       SELECT
         m.ROWID as rowid,
+        m.guid,
         cmj.chat_id,
         CASE WHEN m.is_from_me = 0 THEN m.handle_id ELSE NULL END as sender_id,
         h.id as sender_identifier,
@@ -111,15 +182,49 @@ export class ChatDb {
         m.attributedBody,
         m.date,
         m.is_from_me,
+        m.is_sent,
+        m.is_delivered,
         m.is_read,
         m.date_read,
-        m.cache_has_attachments
+        m.error,
+        m.cache_has_attachments,
+        m.associated_message_guid,
+        m.associated_message_type,
+        m.associated_message_emoji
       FROM message m
       INNER JOIN chat_message_join cmj ON cmj.message_id = m.ROWID
       LEFT JOIN handle h ON h.ROWID = m.handle_id
       WHERE m.ROWID > ?
       ORDER BY m.ROWID
       LIMIT ?
+    `);
+
+    // Query to get reactions targeting specific message GUIDs
+    // associated_message_guid format: "p:0/TARGET_GUID" or "bp:TARGET_GUID"
+    // We extract the GUID part after the last '/' or ':'
+    this.stmtGetReactionsForGuids = this.db.prepare(`
+      SELECT
+        m.ROWID as rowid,
+        CASE
+          WHEN m.associated_message_guid LIKE 'p:%/%' THEN substr(m.associated_message_guid, instr(m.associated_message_guid, '/') + 1)
+          WHEN m.associated_message_guid LIKE 'bp:%' THEN substr(m.associated_message_guid, 4)
+          ELSE m.associated_message_guid
+        END as target_guid,
+        m.associated_message_type,
+        m.associated_message_emoji,
+        h.id as reactor_identifier,
+        m.is_from_me,
+        m.date
+      FROM message m
+      LEFT JOIN handle h ON h.ROWID = m.handle_id
+      WHERE m.associated_message_type BETWEEN 2000 AND 2005
+        AND (
+          CASE
+            WHEN m.associated_message_guid LIKE 'p:%/%' THEN substr(m.associated_message_guid, instr(m.associated_message_guid, '/') + 1)
+            WHEN m.associated_message_guid LIKE 'bp:%' THEN substr(m.associated_message_guid, 4)
+            ELSE m.associated_message_guid
+          END
+        ) IN (SELECT value FROM json_each(?))
     `);
 
     this.stmtGetMaxRowid = this.db.prepare(`
@@ -176,6 +281,7 @@ export class ChatDb {
   /**
    * Get messages with ROWID > lastRowid for incremental sync.
    * Returns messages with full sender info and text extraction.
+   * Filters out reaction messages (those are processed separately).
    * @param lastRowid - Fetch messages after this ROWID
    * @param limit - Maximum number of messages to fetch (default 2500)
    */
@@ -185,10 +291,26 @@ export class ChatDb {
       limit
     ) as MessageRow[];
 
-    return rows.map((row) => {
+    // Filter out tapback reactions (types 2000-3005) - they're attached to target messages instead
+    const contentMessages = rows.filter(
+      (row) =>
+        row.associated_message_type < 2000 || row.associated_message_type > 3005
+    );
+
+    return contentMessages.map((row) => {
       const text = getMessageText(row.text, row.attributedBody);
       const timestamp = appleToUnix(row.date) ?? 0;
       const readAt = appleToUnix(row.date_read);
+      const isFromMe = row.is_from_me === 1;
+      const isRead = row.is_read === 1;
+
+      const status = getMessageStatus(
+        isFromMe,
+        row.is_sent === 1,
+        row.is_delivered === 1,
+        isRead,
+        row.error
+      );
 
       const sender: Handle | null =
         row.sender_id !== null
@@ -201,16 +323,58 @@ export class ChatDb {
 
       return {
         id: row.rowid,
+        guid: row.guid,
         chatId: row.chat_id,
         text,
         timestamp,
-        isFromMe: row.is_from_me === 1,
-        isRead: row.is_read === 1,
+        isFromMe,
+        isRead,
         readAt,
+        status,
+        errorCode: row.error,
         hasAttachments: row.cache_has_attachments === 1,
         sender,
+        reactions: [], // Populated in buildSyncBatch
       };
     });
+  }
+
+  /**
+   * Get reactions (tapbacks) for a list of message GUIDs.
+   * @param guids - Array of message GUIDs to get reactions for
+   * @returns Map of target GUID to array of reactions
+   */
+  getReactionsForGuids(guids: string[]): Map<string, Reaction[]> {
+    if (guids.length === 0) {
+      return new Map();
+    }
+
+    const rows = this.stmtGetReactionsForGuids.all(
+      JSON.stringify(guids)
+    ) as ReactionRow[];
+
+    const reactionMap = new Map<string, Reaction[]>();
+
+    for (const row of rows) {
+      const emoji =
+        row.associated_message_emoji ||
+        TAPBACK_TYPE_TO_EMOJI[row.associated_message_type];
+      if (!emoji) continue;
+
+      const reaction: Reaction = {
+        emoji,
+        reactorIdentifier: row.reactor_identifier ?? "",
+        isFromMe: row.is_from_me === 1,
+        timestamp: appleToUnix(row.date) ?? 0,
+      };
+
+      if (!reactionMap.has(row.target_guid)) {
+        reactionMap.set(row.target_guid, []);
+      }
+      reactionMap.get(row.target_guid)!.push(reaction);
+    }
+
+    return reactionMap;
   }
 
   /**
@@ -248,7 +412,7 @@ export class ChatDb {
 
   /**
    * Build a sync batch from new messages since lastRowid.
-   * Groups messages by chat and includes all referenced handles.
+   * Groups messages by chat, includes all referenced handles, and attaches reactions.
    * @param lastRowid - Fetch messages after this ROWID
    * @param limit - Maximum number of messages to fetch (default 2500)
    */
@@ -257,6 +421,18 @@ export class ChatDb {
 
     if (messages.length === 0) {
       return { cursor: lastRowid, chats: [], messages: [], handles: [] };
+    }
+
+    // Fetch reactions for all messages in the batch
+    const guids = messages.map((m) => m.guid);
+    const reactionMap = this.getReactionsForGuids(guids);
+
+    // Attach reactions to their target messages
+    for (const msg of messages) {
+      const reactions = reactionMap.get(msg.guid);
+      if (reactions) {
+        msg.reactions = reactions;
+      }
     }
 
     // Fetch chats for all unique chat IDs in messages

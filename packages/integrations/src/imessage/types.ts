@@ -36,12 +36,33 @@ export interface Chat {
 }
 
 /**
+ * Message delivery status.
+ */
+export type MessageStatus = "sending" | "sent" | "delivered" | "read" | "failed";
+
+/**
+ * Reaction (tapback) on a message.
+ */
+export interface Reaction {
+  /** Emoji representing the reaction */
+  emoji: string;
+  /** Handle identifier of who reacted */
+  reactorIdentifier: string;
+  /** Whether the reaction is from the current user */
+  isFromMe: boolean;
+  /** Unix timestamp when reaction was added */
+  timestamp: number;
+}
+
+/**
  * Message represents a single iMessage/SMS.
  * Corresponds to the `message` table in chat.db.
  */
 export interface Message {
   /** ROWID from chat.db (used as sync cursor) */
   id: number;
+  /** Unique message identifier (GUID from chat.db) */
+  guid: string;
   /** Chat ROWID this message belongs to */
   chatId: number;
   /** Message text content (extracted from text or attributedBody) */
@@ -54,10 +75,16 @@ export interface Message {
   isRead: boolean;
   /** Unix timestamp when read (null if unread) */
   readAt: number | null;
+  /** Message delivery status */
+  status: MessageStatus;
+  /** Error code if status is "failed" (0 = no error) */
+  errorCode: number;
   /** Whether message has attachments */
   hasAttachments: boolean;
   /** Sender handle (null if isFromMe) */
   sender: Handle | null;
+  /** Reactions (tapbacks) on this message */
+  reactions: Reaction[];
 }
 
 /**

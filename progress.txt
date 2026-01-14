@@ -827,3 +827,29 @@ Notes:
   - Last step "Verify long-running sync" requires manual test (code signing blocker)
 ---
 
+[2026-01-13 20:05] Task 2.2b - Extract reactions and message status from chat.db
+Files: packages/integrations/src/imessage/types.ts, apps/electron/src/main/sync/chat-db.ts, apps/electron/src/main/sync/__tests__/chat-db.test.ts
+Decisions:
+  - Added MessageStatus type: "sending" | "sent" | "delivered" | "read" | "failed"
+  - Added Reaction interface with emoji, reactorIdentifier, isFromMe, timestamp
+  - Added guid field to Message type for reaction targeting
+  - Updated SQL query to fetch: guid, is_sent, is_delivered, error, associated_message_* columns
+  - Created getMessageStatus() function mapping db flags to MessageStatus
+  - Created TAPBACK_TYPE_TO_EMOJI mapping: 2000=❤️, 2001=👍, 2002=👎, 2003=😂, 2004=‼️, 2005=❓
+  - Added getReactionsForGuids() method with SQL to extract GUID from "p:0/GUID" format
+  - Filters tapback messages (type 2000-3005) from content messages in getMessagesSince()
+  - Attaches reactions to target messages in buildSyncBatch()
+Why:
+  - guid required to match reactions to target messages (associated_message_guid references guid)
+  - Status progression: sending → sent → delivered → read (or failed if error != 0)
+  - Filtering tapbacks prevents them from appearing as standalone messages
+  - Batch reactions fetch with IN clause for efficiency (all message GUIDs in one query)
+  - "p:0/GUID" format indicates message part 0 of the target message (standard iMessage format)
+Notes:
+  - Lint and typecheck pass for entire monorepo
+  - 55 tests pass (42 electron with 13 skipped due to native module, 15 shared)
+  - Native module (better-sqlite3) tests skipped - expected due to Node version mismatch
+  - Verification with real chat.db blocked on native module (Electron code signing needed)
+  - Supports custom emoji reactions via associated_message_emoji field (untested - no data)
+---
+

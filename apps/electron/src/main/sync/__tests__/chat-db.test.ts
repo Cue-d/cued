@@ -26,13 +26,21 @@ function unixToApple(unixTs: number): number {
 const SQL_GET_MESSAGES_SINCE = `
   SELECT
     m.ROWID as rowid,
+    m.guid,
     cmj.chat_id,
     CASE WHEN m.is_from_me = 0 THEN m.handle_id ELSE NULL END as sender_id,
     h.id as sender_identifier,
     h.service as sender_service,
     m.text,
     m.date,
-    m.is_from_me
+    m.is_from_me,
+    m.is_sent,
+    m.is_delivered,
+    m.is_read,
+    m.error,
+    m.associated_message_guid,
+    m.associated_message_type,
+    m.associated_message_emoji
   FROM message m
   INNER JOIN chat_message_join cmj ON cmj.message_id = m.ROWID
   LEFT JOIN handle h ON h.ROWID = m.handle_id
@@ -87,14 +95,21 @@ describe.skipIf(!Database)("ChatDb SQL queries", () => {
 
       CREATE TABLE message (
         ROWID INTEGER PRIMARY KEY,
+        guid TEXT UNIQUE NOT NULL,
         text TEXT,
         attributedBody BLOB,
         date INTEGER,
         is_from_me INTEGER DEFAULT 0,
+        is_sent INTEGER DEFAULT 0,
+        is_delivered INTEGER DEFAULT 0,
         is_read INTEGER DEFAULT 0,
         date_read INTEGER,
+        error INTEGER DEFAULT 0,
         handle_id INTEGER,
         cache_has_attachments INTEGER DEFAULT 0,
+        associated_message_guid TEXT,
+        associated_message_type INTEGER DEFAULT 0,
+        associated_message_emoji TEXT,
         FOREIGN KEY (handle_id) REFERENCES handle(ROWID)
       );
 
@@ -148,14 +163,14 @@ describe.skipIf(!Database)("ChatDb SQL queries", () => {
       const appleNow = unixToApple(Math.floor(Date.now() / 1000));
 
       db.exec(`
-        INSERT INTO message (ROWID, text, date, is_from_me, handle_id)
-        VALUES (1, 'Message 1', ${appleNow - 3000000000000}, 0, 1);
+        INSERT INTO message (ROWID, guid, text, date, is_from_me, is_sent, is_delivered, handle_id)
+        VALUES (1, 'guid-1', 'Message 1', ${appleNow - 3000000000000}, 0, 0, 0, 1);
 
-        INSERT INTO message (ROWID, text, date, is_from_me, handle_id)
-        VALUES (2, 'Reply from me', ${appleNow - 2000000000000}, 1, NULL);
+        INSERT INTO message (ROWID, guid, text, date, is_from_me, is_sent, is_delivered, handle_id)
+        VALUES (2, 'guid-2', 'Reply from me', ${appleNow - 2000000000000}, 1, 1, 1, NULL);
 
-        INSERT INTO message (ROWID, text, date, is_from_me, handle_id)
-        VALUES (3, 'Message 3', ${appleNow - 1000000000000}, 0, 1);
+        INSERT INTO message (ROWID, guid, text, date, is_from_me, is_sent, is_delivered, handle_id)
+        VALUES (3, 'guid-3', 'Message 3', ${appleNow - 1000000000000}, 0, 0, 0, 1);
 
         INSERT INTO chat_message_join (chat_id, message_id) VALUES (1, 1);
         INSERT INTO chat_message_join (chat_id, message_id) VALUES (1, 2);
@@ -164,17 +179,21 @@ describe.skipIf(!Database)("ChatDb SQL queries", () => {
 
       interface MessageRow {
         rowid: number;
+        guid: string;
         sender_id: number | null;
         sender_identifier: string | null;
         text: string | null;
         is_from_me: number;
+        is_sent: number;
+        is_delivered: number;
       }
       const rows = db.prepare(SQL_GET_MESSAGES_SINCE).all(1) as MessageRow[];
 
       expect(rows).toHaveLength(2);
-      expect(rows[0]).toMatchObject({ rowid: 2, text: "Reply from me", is_from_me: 1, sender_id: null });
+      expect(rows[0]).toMatchObject({ rowid: 2, guid: "guid-2", text: "Reply from me", is_from_me: 1, sender_id: null, is_sent: 1 });
       expect(rows[1]).toMatchObject({
         rowid: 3,
+        guid: "guid-3",
         text: "Message 3",
         is_from_me: 0,
         sender_id: 1,
@@ -192,9 +211,9 @@ describe.skipIf(!Database)("ChatDb SQL queries", () => {
 
     it("returns highest ROWID", () => {
       db.exec(`
-        INSERT INTO message (ROWID, text) VALUES (1, 'msg 1');
-        INSERT INTO message (ROWID, text) VALUES (5, 'msg 5');
-        INSERT INTO message (ROWID, text) VALUES (3, 'msg 3');
+        INSERT INTO message (ROWID, guid, text) VALUES (1, 'guid-a', 'msg 1');
+        INSERT INTO message (ROWID, guid, text) VALUES (5, 'guid-b', 'msg 5');
+        INSERT INTO message (ROWID, guid, text) VALUES (3, 'guid-c', 'msg 3');
       `);
 
       const stmt = db.prepare("SELECT MAX(ROWID) as max_rowid FROM message");
@@ -240,6 +259,148 @@ describe.skipIf(!Database)("ChatDb SQL queries", () => {
       const convertedBack =
         Math.floor(appleTimestamp / 1_000_000_000) + APPLE_EPOCH_OFFSET;
       expect(convertedBack).toBe(unixTimestamp);
+    });
+  });
+
+  describe("message status fields", () => {
+    it("returns status fields for messages", () => {
+      const appleNow = unixToApple(Math.floor(Date.now() / 1000));
+
+      db.exec(`
+        INSERT INTO message (ROWID, guid, text, date, is_from_me, is_sent, is_delivered, is_read, error, handle_id)
+        VALUES (1, 'guid-sent', 'Sent message', ${appleNow - 3000000000000}, 1, 1, 0, 0, 0, NULL);
+
+        INSERT INTO message (ROWID, guid, text, date, is_from_me, is_sent, is_delivered, is_read, error, handle_id)
+        VALUES (2, 'guid-delivered', 'Delivered message', ${appleNow - 2000000000000}, 1, 1, 1, 0, 0, NULL);
+
+        INSERT INTO message (ROWID, guid, text, date, is_from_me, is_sent, is_delivered, is_read, error, handle_id)
+        VALUES (3, 'guid-read', 'Read message', ${appleNow - 1000000000000}, 1, 1, 1, 1, 0, NULL);
+
+        INSERT INTO message (ROWID, guid, text, date, is_from_me, is_sent, is_delivered, is_read, error, handle_id)
+        VALUES (4, 'guid-failed', 'Failed message', ${appleNow}, 1, 0, 0, 0, 22, NULL);
+
+        INSERT INTO chat_message_join (chat_id, message_id) VALUES (1, 1);
+        INSERT INTO chat_message_join (chat_id, message_id) VALUES (1, 2);
+        INSERT INTO chat_message_join (chat_id, message_id) VALUES (1, 3);
+        INSERT INTO chat_message_join (chat_id, message_id) VALUES (1, 4);
+      `);
+
+      interface StatusRow {
+        guid: string;
+        is_sent: number;
+        is_delivered: number;
+        is_read: number;
+        error: number;
+      }
+      const rows = db.prepare(SQL_GET_MESSAGES_SINCE).all(0) as StatusRow[];
+
+      expect(rows).toHaveLength(4);
+      expect(rows[0]).toMatchObject({ guid: "guid-sent", is_sent: 1, is_delivered: 0, is_read: 0, error: 0 });
+      expect(rows[1]).toMatchObject({ guid: "guid-delivered", is_sent: 1, is_delivered: 1, is_read: 0, error: 0 });
+      expect(rows[2]).toMatchObject({ guid: "guid-read", is_sent: 1, is_delivered: 1, is_read: 1, error: 0 });
+      expect(rows[3]).toMatchObject({ guid: "guid-failed", is_sent: 0, is_delivered: 0, is_read: 0, error: 22 });
+    });
+  });
+
+  describe("reactions (tapbacks)", () => {
+    const SQL_GET_REACTIONS = `
+      SELECT
+        m.ROWID as rowid,
+        CASE
+          WHEN m.associated_message_guid LIKE 'p:%/%' THEN substr(m.associated_message_guid, instr(m.associated_message_guid, '/') + 1)
+          WHEN m.associated_message_guid LIKE 'bp:%' THEN substr(m.associated_message_guid, 4)
+          ELSE m.associated_message_guid
+        END as target_guid,
+        m.associated_message_type,
+        m.associated_message_emoji,
+        h.id as reactor_identifier,
+        m.is_from_me,
+        m.date
+      FROM message m
+      LEFT JOIN handle h ON h.ROWID = m.handle_id
+      WHERE m.associated_message_type BETWEEN 2000 AND 2005
+    `;
+
+    it("extracts target GUID from associated_message_guid", () => {
+      const appleNow = unixToApple(Math.floor(Date.now() / 1000));
+
+      db.exec(`
+        INSERT INTO message (ROWID, guid, text, date, is_from_me, handle_id, associated_message_guid, associated_message_type)
+        VALUES (1, 'target-guid', 'Original message', ${appleNow - 2000000000000}, 0, 1, NULL, 0);
+
+        INSERT INTO message (ROWID, guid, text, date, is_from_me, handle_id, associated_message_guid, associated_message_type)
+        VALUES (2, 'reaction-guid', NULL, ${appleNow - 1000000000000}, 0, 2, 'p:0/target-guid', 2000);
+
+        INSERT INTO chat_message_join (chat_id, message_id) VALUES (1, 1);
+        INSERT INTO chat_message_join (chat_id, message_id) VALUES (1, 2);
+      `);
+
+      interface ReactionRow {
+        rowid: number;
+        target_guid: string;
+        associated_message_type: number;
+        reactor_identifier: string;
+        is_from_me: number;
+      }
+      const rows = db.prepare(SQL_GET_REACTIONS).all() as ReactionRow[];
+
+      expect(rows).toHaveLength(1);
+      expect(rows[0]).toMatchObject({
+        rowid: 2,
+        target_guid: "target-guid",
+        associated_message_type: 2000, // loved
+        reactor_identifier: "+15559876543",
+        is_from_me: 0,
+      });
+    });
+
+    it("filters out tapback messages from regular message query", () => {
+      const appleNow = unixToApple(Math.floor(Date.now() / 1000));
+
+      db.exec(`
+        INSERT INTO message (ROWID, guid, text, date, is_from_me, handle_id, associated_message_type)
+        VALUES (1, 'msg-guid', 'Hello', ${appleNow - 2000000000000}, 0, 1, 0);
+
+        INSERT INTO message (ROWID, guid, text, date, is_from_me, handle_id, associated_message_guid, associated_message_type)
+        VALUES (2, 'tapback-guid', NULL, ${appleNow - 1000000000000}, 1, NULL, 'p:0/msg-guid', 2001);
+
+        INSERT INTO chat_message_join (chat_id, message_id) VALUES (1, 1);
+        INSERT INTO chat_message_join (chat_id, message_id) VALUES (1, 2);
+      `);
+
+      // SQL query returns all messages
+      interface AllRow { rowid: number; associated_message_type: number }
+      const allRows = db.prepare(SQL_GET_MESSAGES_SINCE).all(0) as AllRow[];
+      expect(allRows).toHaveLength(2);
+
+      // Filter out tapbacks (type 2000-3005 are tapbacks)
+      const contentRows = allRows.filter(
+        (row) =>
+          row.associated_message_type === 0 ||
+          row.associated_message_type < 2000 ||
+          row.associated_message_type > 3005
+      );
+      expect(contentRows).toHaveLength(1);
+      expect(contentRows[0].rowid).toBe(1);
+    });
+
+    it("maps tapback types to correct emoji", () => {
+      // Test the mapping logic in isolation
+      const TAPBACK_TYPE_TO_EMOJI: Record<number, string> = {
+        2000: "❤️", // loved
+        2001: "👍", // liked
+        2002: "👎", // disliked
+        2003: "😂", // laughed
+        2004: "‼️", // emphasized
+        2005: "❓", // questioned
+      };
+
+      expect(TAPBACK_TYPE_TO_EMOJI[2000]).toBe("❤️");
+      expect(TAPBACK_TYPE_TO_EMOJI[2001]).toBe("👍");
+      expect(TAPBACK_TYPE_TO_EMOJI[2002]).toBe("👎");
+      expect(TAPBACK_TYPE_TO_EMOJI[2003]).toBe("😂");
+      expect(TAPBACK_TYPE_TO_EMOJI[2004]).toBe("‼️");
+      expect(TAPBACK_TYPE_TO_EMOJI[2005]).toBe("❓");
     });
   });
 });

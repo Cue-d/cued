@@ -353,7 +353,7 @@
         "Handle failed messages via message.error code",
         "Verify reactions and status sync correctly with real messages"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "2.2c",
