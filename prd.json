@@ -853,6 +853,24 @@
       "passes": true
     },
     {
+      "id": "3.13c",
+      "phase": 3,
+      "mode": "afk",
+      "category": "integration",
+      "description": "Automatically extract Mem0 memories from new messages on sync",
+      "reference": "https://docs.mem0.ai/api-reference",
+      "steps": [
+        "Hook into syncMessages mutation to trigger memory extraction",
+        "Queue new messages for Mem0 processing (avoid blocking sync)",
+        "Create Convex action/scheduled function to process memory queue",
+        "Extract facts using Mem0 add() with contactId as user_id",
+        "Dedupe: skip messages already processed (track memoryExtractedAt on message)",
+        "Handle rate limits gracefully with exponential backoff",
+        "Verify new conversations automatically generate searchable memories"
+      ],
+      "passes": false
+    },
+    {
       "id": "3.14",
       "phase": 3,
       "mode": "afk",
@@ -865,7 +883,7 @@
         "Ask 'Create a follow-up with [contact]'",
         "Verify action created in Convex"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "4.1",

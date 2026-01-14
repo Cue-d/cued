@@ -7,7 +7,7 @@ import {
   type Mem0Provider,
   type Mem0ConfigSettings,
 } from "@mem0/vercel-ai-provider";
-import { buildMemoryInstructions } from "./prompts/memory.js";
+import { buildMemoryInstructions } from "./prompts/memory";
 
 export function createMem0Provider(): Mem0Provider {
   return createMem0({ provider: "openai" });
