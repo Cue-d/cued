@@ -24,12 +24,12 @@ describe("openai provider", () => {
     expect(typeof openai).toBe("function");
   });
 
-  it("exports DEFAULT_MODEL as gpt-4o", () => {
-    expect(DEFAULT_MODEL).toBe("gpt-4o");
+  it("exports DEFAULT_MODEL as gpt-5-mini", () => {
+    expect(DEFAULT_MODEL).toBe("gpt-5-mini");
   });
 
-  it("exports FAST_MODEL as gpt-4o-mini", () => {
-    expect(FAST_MODEL).toBe("gpt-4o-mini");
+  it("exports FAST_MODEL as gpt-5-nano", () => {
+    expect(FAST_MODEL).toBe("gpt-5-nano");
   });
 
   it("creates model with correct ID", () => {

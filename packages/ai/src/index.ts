@@ -14,6 +14,7 @@ export {
   createActionTool,
   getConversationsTool,
   searchMemoriesTool,
+  searchActionsTool,
 } from "./tools";
 
 export {

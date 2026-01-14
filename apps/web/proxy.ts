@@ -4,7 +4,15 @@ export default authkitMiddleware({
   // Require authentication for all routes under /app
   middlewareAuth: {
     enabled: true,
-    unauthenticatedPaths: ["/", "/sign-in", "/sign-up", "/callback"],
+    // TODO: Remove /assistant and /api/chat after debugging
+    unauthenticatedPaths: [
+      "/",
+      "/sign-in",
+      "/sign-up",
+      "/callback",
+      "/assistant",
+      "/api/chat",
+    ],
   },
 });
 
