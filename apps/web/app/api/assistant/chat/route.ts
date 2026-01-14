@@ -9,12 +9,42 @@ import type { Id } from "@prm/convex";
 // Initialize Convex client for tool execution
 const convex = new ConvexHttpClient(process.env.NEXT_PUBLIC_CONVEX_URL!);
 
+// Convert UI message format (parts) to Core message format (content)
+interface UIMessagePart {
+  type: string
+  text?: string
+}
+
+interface UIMessage {
+  id: string
+  role: "user" | "assistant"
+  parts: UIMessagePart[]
+}
+
+interface CoreMessage {
+  role: "user" | "assistant"
+  content: string
+}
+
+function convertMessages(uiMessages: UIMessage[]): CoreMessage[] {
+  return uiMessages.map((msg) => ({
+    role: msg.role,
+    content: msg.parts
+      .filter((p): p is UIMessagePart & { text: string } => p.type === "text" && !!p.text)
+      .map((p) => p.text)
+      .join(""),
+  }))
+}
+
 export async function POST(req: Request) {
-  const { messages } = await req.json();
+  const { messages: rawMessages } = await req.json()
+
+  // Convert from UI format (parts) to Core format (content)
+  const messages = convertMessages(rawMessages)
 
   // Get auth token from header
-  const authHeader = req.headers.get("authorization");
-  const token = authHeader?.replace("Bearer ", "");
+  const authHeader = req.headers.get("authorization")
+  const token = authHeader?.replace("Bearer ", "")
 
   if (token) {
     convex.setAuth(token);

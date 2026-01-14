@@ -681,6 +681,22 @@
       "passes": true
     },
     {
+      "id": "3.4b",
+      "phase": 3,
+      "mode": "afk",
+      "category": "functional",
+      "description": "Create search_actions tool for AI assistant",
+      "steps": [
+        "Create packages/ai/tools/search-actions.ts",
+        "Query Convex actions table with filters: status, type, contactId, conversationId",
+        "Support date range filtering (created after, snoozed until)",
+        "Return action details: type, status, reason, draftMessage, related contact/conversation",
+        "Enable queries like 'What follow-ups do I have pending?' or 'Show actions for John'",
+        "Add unit tests"
+      ],
+      "passes": false
+    },
+    {
       "id": "3.5",
       "phase": 3,
       "mode": "afk",
@@ -756,7 +772,7 @@
         "Include tool usage instructions",
         "Export for use in chat route"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "3.10",
@@ -771,7 +787,7 @@
         "Use useChat hook from Vercel AI SDK",
         "Export from packages/ui"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "3.11",
@@ -786,7 +802,7 @@
         "Handle streaming state",
         "Export from packages/ui"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "3.12",
@@ -800,7 +816,7 @@
         "Handle prompt selection",
         "Export from packages/ui"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "3.13",

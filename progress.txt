@@ -1240,3 +1240,81 @@ Why:
 Tests: 13 passing (4 openai, 3 mem0, 6 search-memories)
 Lint/Typecheck: All pass
 ---
+
+[2026-01-14 10:00] Task 3.9 - Create system prompt for PRM assistant
+Files:
+  packages/ai/src/prompts/system.ts (new)
+  packages/ai/src/index.ts (added export)
+  apps/web/app/api/assistant/chat/route.ts (added system prop)
+
+Decisions:
+  - Created SYSTEM_PROMPT constant with 5 capability sections
+  - Added buildSystemPrompt() helper for context-aware prompts (kept for future use)
+  - Wired SYSTEM_PROMPT to streamText() in chat route
+  - Note: Original backend/services/assistant/llm.py doesn't exist - created new prompt
+
+Prompt Sections:
+  1. Capabilities: search messages, contacts, conversations; create actions; recall memories
+  2. Guidelines: be helpful/concise, use tools proactively, create appropriate actions
+  3. Action types: respond, follow_up, send_message, eod_contact with reasons + drafts
+  4. Privacy/tone: match user style, don't cross-share info between contacts
+  5. Limitations: can't send directly, only connected platforms, memory works best with specific queries
+
+Why:
+  - System prompt essential for assistant behavior and tool usage guidance
+  - Multi-platform context (iMessage, Gmail, Slack) reflected in capabilities
+  - Action creation guidance ensures user reviews all outgoing messages
+  - Keeps buildSystemPrompt for future context injection (conversation/contact aware)
+
+Notes:
+  - Lint and typecheck pass for entire monorepo
+  - Code reviewed by code-simplifier: kept buildSystemPrompt for future use
+  - Ready for task 3.10: Port AssistantView component
+---
+
+[2026-01-14 08:45] Tasks 3.10, 3.11, 3.12 - Port AssistantView, ChatMessage, SuggestedPrompts
+Files:
+  packages/ui/src/components/assistant/types.ts
+  packages/ui/src/components/assistant/assistant-view.tsx
+  packages/ui/src/components/assistant/chat-message.tsx
+  packages/ui/src/components/assistant/chat-input.tsx
+  packages/ui/src/components/assistant/suggested-prompts.tsx
+  packages/ui/src/components/assistant/tool-artifact.tsx
+  packages/ui/src/components/assistant/index.ts
+  packages/ui/src/index.ts
+  apps/web/app/(app)/assistant/page.tsx
+  apps/web/package.json
+  packages/ai/src/index.ts (fixed .js imports)
+  packages/ai/src/tools/index.ts (fixed .js imports)
+
+Decisions:
+  - Created assistant components in packages/ui/components/assistant/
+  - AssistantView: main container with scroll, input, and message list
+  - ChatMessage: renders user/assistant bubbles with tool invocation display
+  - ChatInput: auto-resizing textarea with send/stop buttons
+  - SuggestedPrompts: grid of starter prompts with stagger animation
+  - ToolArtifact: renders tool results (search, contacts, conversations, actions, memories)
+  - Used AI SDK v6 useChat hook with DefaultChatTransport
+  - Fixed .js import extensions in packages/ai for Turbopack compatibility
+  - Added @ai-sdk/react dependency to web app
+
+Component Design:
+  - Types defined separately from Convex (MessageWithToolInvocations, ToolArtifact union)
+  - Tool results parsed from toolInvocations array, rendered as collapsible artifacts
+  - Streaming indicator: bouncing dots in assistant bubble
+  - Tool call indicator: spinner with "Using {tool}..." text
+  - Empty state shows decorative icon + 4 suggested prompts
+  - Dark mode compatible via Tailwind CSS variables
+
+Why:
+  - Separate types avoid circular deps between UI and Convex
+  - AI SDK v6 API significantly changed from v5 (parts instead of content, sendMessage instead of handleSubmit)
+  - DefaultChatTransport handles HTTP transport with correct stream parsing
+  - Tool artifacts provide visual feedback for LLM reasoning
+
+Notes:
+  - All lint and typecheck pass for entire monorepo
+  - Code simplified by code-simplifier agent
+  - Browser verification needed once API endpoint wired
+  - Ready for task 3.13: Connect Mem0 service with custom prompts
+---
