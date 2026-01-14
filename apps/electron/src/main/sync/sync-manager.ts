@@ -6,6 +6,7 @@
  * - Incremental sync using ROWID cursor
  * - Background sync on interval
  * - Progress reporting
+ * - Attachment upload to Convex storage
  */
 
 import { app } from "electron";
@@ -13,7 +14,19 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { ConvexHttpClient } from "convex/browser";
 import { api } from "@prm/convex";
+import type { Id } from "@prm/convex";
+import type { Message } from "@prm/integrations";
 import { ChatDb } from "./chat-db";
+import { uploadAttachments } from "./attachment-uploader";
+
+/** Attachment with Convex storage IDs (properly typed) */
+interface ConvexAttachment {
+  filename: string;
+  mimeType: string;
+  size: number;
+  storageId: Id<"_storage">;
+  thumbnailStorageId?: Id<"_storage">;
+}
 
 const BATCH_SIZE = 2500;
 const SYNC_INTERVAL_MS = 30_000; // 30 seconds
@@ -37,6 +50,7 @@ export interface SyncManagerOptions {
   onProgress?: (progress: SyncProgress) => void;
   getAuthToken?: (forceRefresh?: boolean) => Promise<string | null>; // Token provider that refreshes as needed
   onAuthInvalid?: () => void; // Called when auth fails and cannot be refreshed
+  syncAttachments?: boolean; // Enable attachment upload (default: true)
 }
 
 export class SyncManager {
@@ -262,12 +276,46 @@ export class SyncManager {
           },
         });
 
-        // Transform batch for Convex sync:
-        // Strip local attachments (attachment upload is a separate phase)
+        // Upload attachments if enabled
+        const uploadedAttachmentMap = new Map<number, ConvexAttachment[]>();
+        if (this.options.syncAttachments !== false) {
+          for (const message of batch.messages) {
+            if (!message.attachments?.length) continue;
+
+            try {
+              const uploaded = await uploadAttachments(this.client, message.attachments);
+              if (uploaded.length === 0) continue;
+
+              const convexAttachments: ConvexAttachment[] = uploaded.map((att) => ({
+                filename: att.filename,
+                mimeType: att.mimeType,
+                size: att.size,
+                storageId: att.storageId as Id<"_storage">,
+                thumbnailStorageId: att.thumbnailStorageId
+                  ? (att.thumbnailStorageId as Id<"_storage">)
+                  : undefined,
+              }));
+              uploadedAttachmentMap.set(message.id, convexAttachments);
+              console.log(
+                `[SyncManager] Uploaded ${uploaded.length} attachments for message ${message.id}`
+              );
+            } catch (e) {
+              console.warn(`[SyncManager] Failed to upload attachments for message ${message.id}:`, e);
+            }
+          }
+        }
+
+        // Transform batch for Convex sync, including uploaded attachments
         const syncBatch = {
           ...batch,
           messages: batch.messages.map(
-            ({ guid, status, errorCode, attachments, reactions, ...rest }) => rest
+            ({ guid, status, errorCode, attachments: localAttachments, reactions, ...rest }) => {
+              const uploadedAtts = uploadedAttachmentMap.get(rest.id);
+              return {
+                ...rest,
+                attachments: uploadedAtts,
+              };
+            }
           ),
         };
 

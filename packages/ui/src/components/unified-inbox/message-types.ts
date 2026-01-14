@@ -10,6 +10,14 @@ export interface MessageSender {
   displayName: string
 }
 
+export interface MessageAttachment {
+  filename: string
+  mimeType: string
+  size: number
+  url: string
+  thumbnailUrl: string | null
+}
+
 export interface Message {
   _id: string
   content: string
@@ -17,6 +25,7 @@ export interface Message {
   isFromMe: boolean
   platform: Platform
   sender: MessageSender | null
+  attachments?: MessageAttachment[]
 }
 
 export interface MessagesResult {
