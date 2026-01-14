@@ -853,3 +853,35 @@ Notes:
   - Supports custom emoji reactions via associated_message_emoji field (untested - no data)
 ---
 
+[2026-01-13 20:20] Task 2.2c - Add iMessage attachment sync infrastructure (PARTIAL)
+Files: packages/integrations/src/imessage/types.ts, packages/convex/convex/schema.ts, packages/convex/convex/files.ts, packages/convex/convex/sync.ts, apps/electron/src/main/sync/chat-db.ts, apps/electron/src/main/sync/attachment-service.ts, apps/electron/src/main/sync/attachment-uploader.ts, apps/electron/src/main/sync/sync-manager.ts, apps/web/app/api/sync/imessage/route.ts
+Decisions:
+  - Added Attachment and UploadedAttachment types to @prm/integrations
+  - Added messageStatusValidator to Convex schema (sending|sent|delivered|read|failed)
+  - Added attachments array to messages table schema: filename, mimeType, size, storageId, thumbnailStorageId
+  - Created files.ts with generateUploadUrl(s) and getFileUrl(s) mutations for Convex storage
+  - Added getAttachmentsForMessages() method to chat-db.ts using message_attachment_join
+  - Created attachment-service.ts: resolveAttachmentPath, generateThumbnail (sharp, 400px max), HEIC→JPEG conversion
+  - Created attachment-uploader.ts: uploadAttachments() using Convex storage API
+  - Updated sync-manager.ts to strip local attachments from sync batch (upload is separate phase)
+  - Updated API route to strip attachments similarly
+  - Installed sharp for Node.js image processing
+Why:
+  - Infrastructure-first approach: all pieces in place before wiring upload to sync loop
+  - Local Attachment type (with path) vs UploadedAttachment (with storageId) separates concerns
+  - Sharp chosen over Pillow for Node.js compatibility and performance
+  - Thumbnail max 400px preserves aspect ratio without enlargement
+  - HEIC→JPEG conversion required for web browser compatibility
+  - Stripping attachments in sync allows incremental implementation
+What's NOT Complete:
+  - Attachment upload during sync (infrastructure ready but not wired)
+  - Attachments not populated on messages in Convex (schema ready)
+  - UI display of attachments (no UI changes yet)
+Notes:
+  - All lint and typecheck pass for entire monorepo
+  - Code simplified by code-simplifier: Promise.all for parallel URL generation, destructuring for batch transform
+  - Convex functions deployed successfully
+  - This is INFRASTRUCTURE ONLY - passes=false until full verification steps complete
+  - Follow-up needed: wire uploadAttachments() into sync loop, add UI attachment display
+---
+
