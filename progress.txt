@@ -1054,3 +1054,31 @@ Notes:
   - Phase 2 iMessage sync feature complete
   - Ready for Phase 3 (AI tools) or Phase 2b tasks (reset script, attachments)
 ---
+
+[2026-01-13 21:15] Task 2.12b - Create database reset and full reseed script for testing
+Files:
+  - packages/convex/convex/reset.ts (new)
+  - packages/convex/convex/schema.ts (add by_user index to messages)
+  - scripts/reset-and-reseed.ts (new)
+  - package.json (add pnpm reset-and-reseed script)
+  - CLAUDE.md (document usage)
+Decisions:
+  - Created resetAllUserData Convex mutation with explicit confirmation required
+  - Uses generic deleteAllByUser helper with batched deletion (500 records/batch)
+  - Added by_user index to messages table for efficient user-scoped deletion
+  - Reset script clears local Electron cache files: sync_cursor.json, contacts_cache.json
+  - Resets integrations.syncState to isConnected=false, cursor=0, totalMessagesSynced=0
+  - Requires PRM_ACCESS_TOKEN env var from Electron app DevTools
+  - Runs from apps/web directory to access CONVEX_URL env var
+  - After reset, Electron app auto-triggers full re-sync on next launch
+Why:
+  - Enables reliable development testing workflow for sync infrastructure
+  - Batched deletion prevents Convex timeout on large datasets
+  - by_user index enables O(1) lookup for user-scoped queries
+  - Explicit confirmation prevents accidental data loss
+  - Access token from env var keeps auth flow simple (no OAuth dance in script)
+Notes:
+  - Code simplified by code-simplifier: reduced reset.ts from 191 to 91 lines
+  - Lint and typecheck pass for entire monorepo
+  - Ready for Phase 3 (AI tools)
+---

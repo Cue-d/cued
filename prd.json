@@ -619,7 +619,7 @@
         "Add npm script: pnpm reset-and-reseed for easy invocation",
         "Document usage in README for development testing"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "3.1",
