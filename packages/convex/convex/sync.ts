@@ -279,8 +279,8 @@ async function batchFetchConversations(
 ): Promise<Doc<"conversations">[]> {
   const results: Doc<"conversations">[] = [];
 
-  // Fetch in parallel batches of 100
-  const batchSize = 100;
+  // Fetch in parallel batches of 50 to stay under Convex 4096 read limit
+  const batchSize = 50;
   for (let i = 0; i < platformConversationIds.length; i += batchSize) {
     const batch = platformConversationIds.slice(i, i + batchSize);
     const promises = batch.map((id) =>
@@ -311,8 +311,8 @@ async function batchFetchMessages(
 ): Promise<Doc<"messages">[]> {
   const results: Doc<"messages">[] = [];
 
-  // Fetch in parallel batches of 100
-  const batchSize = 100;
+  // Fetch in parallel batches of 50 to stay under Convex 4096 read limit
+  const batchSize = 50;
   for (let i = 0; i < platformMessageIds.length; i += batchSize) {
     const batch = platformMessageIds.slice(i, i + batchSize);
     const promises = batch.map((id) =>
@@ -343,8 +343,8 @@ async function batchResolveHandles(
 ): Promise<Map<string, Id<"contacts">>> {
   const handleToContact = new Map<string, Id<"contacts">>();
 
-  // Fetch in parallel batches of 100
-  const batchSize = 100;
+  // Fetch in parallel batches of 50 to stay under Convex 4096 read limit
+  const batchSize = 50;
   for (let i = 0; i < handles.length; i += batchSize) {
     const batch = handles.slice(i, i + batchSize);
     const promises = batch.map((handle) =>

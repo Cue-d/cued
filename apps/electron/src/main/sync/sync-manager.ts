@@ -30,8 +30,8 @@ interface ConvexAttachment {
 }
 
 // Performance tuning constants
-const BATCH_SIZE = 5000; // Increased from 2500 - optimized Convex mutation can handle larger batches
-const CONCURRENT_BATCHES = 3; // Number of batches to upload in parallel
+const BATCH_SIZE = 1000; // Reduced to stay under Convex 4096 read limit per mutation
+const CONCURRENT_BATCHES = 5; // Increased parallelism to compensate for smaller batches
 const SYNC_INTERVAL_MS = 30_000; // 30 seconds
 const CONVEX_URL =
   process.env.CONVEX_URL || "https://perceptive-lobster-290.convex.cloud";
