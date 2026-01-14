@@ -1025,6 +1025,21 @@ Notes:
   Recommendation: Skip for MVP. Reactions are nice-to-have polish, not core CRM value.
   Could revisit for "social listening" features later.
 
+- **Speed up Mem0 memory extraction**: Currently ~600 msgs/hour (24h for 148k messages).
+  Options to speed up:
+  1. **Increase batch size**: Current BATCH_SIZE=50. Try 100-200 if Mem0 rate limits allow.
+  2. **Parallel processing**: Process multiple contacts concurrently within a batch.
+  3. **Smarter filtering**: Skip messages that are unlikely to have useful info:
+     - System messages, reactions, empty content
+     - Messages shorter than N words (not just 10 chars)
+     - Duplicate/very similar messages
+  4. **Batch Mem0 API**: Use Mem0's batch endpoint (PUT /v1/batch/) if available for adds.
+  5. **Reduce cron interval**: 5 min → 1-2 min if rate limits allow (need to test).
+  6. **Priority processing**: Process recent messages first, backfill old ones slowly.
+  7. **Conversation-level batching**: Send entire conversation to Mem0 at once instead of
+     individual messages (fewer API calls, better context).
+  Recommendation: Start with (1) increase batch size and (6) recent-first processing.
+  Test Mem0 rate limits empirically before going aggressive.
 
 [2026-01-13 21:05] Task 2.12 - Test full sync cycle: Electron → API → Convex → UI
 Files: None modified (verification task)
