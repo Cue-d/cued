@@ -1041,6 +1041,17 @@ Notes:
   Recommendation: Start with (1) increase batch size and (6) recent-first processing.
   Test Mem0 rate limits empirically before going aggressive.
 
+- **Add Convex message ID to Mem0 metadata**: Store original message _id when extracting memories.
+  Benefits:
+  1. **Traceability**: Know exactly which message a memory came from
+  2. **Context retrieval**: Fetch surrounding messages for richer context when recalling
+  3. **Deduplication**: Avoid reprocessing same messages if cursor resets
+  4. **Source linking**: Show user "where did you learn this?" with link to conversation
+  Implementation:
+  - Pass message._id in Mem0 metadata: { contact_id, message_id, conversation_id, sent_at }
+  - On memory search, optionally fetch source messages for additional context
+  - Could enable "expand context" feature in assistant to show full conversation around a fact
+
 [2026-01-13 21:05] Task 2.12 - Test full sync cycle: Electron → API → Convex → UI
 Files: None modified (verification task)
 Verification Results:
