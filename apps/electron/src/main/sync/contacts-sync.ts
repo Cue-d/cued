@@ -22,13 +22,30 @@ export interface ContactsSyncResult {
 }
 
 /**
+ * Check if an error is an authentication error.
+ */
+function isAuthError(error: unknown): boolean {
+  if (error instanceof Error) {
+    const message = error.message.toLowerCase();
+    return (
+      message.includes("unauthenticated") ||
+      message.includes("401") ||
+      message.includes("unauthorized") ||
+      message.includes("invalidauthheader") ||
+      message.includes("token expired")
+    );
+  }
+  return false;
+}
+
+/**
  * Sync all contacts from macOS Contacts.app to Convex.
  *
  * @param getAuthToken - Function to get a valid auth token
  * @param forceRefresh - If true, bypass contact cache and fetch fresh data
  */
 export async function syncContactsToConvex(
-  getAuthToken: () => Promise<string | null>,
+  getAuthToken: (forceRefresh?: boolean) => Promise<string | null>,
   forceRefresh = false
 ): Promise<ContactsSyncResult> {
   const startTime = performance.now();
@@ -71,17 +88,41 @@ export async function syncContactsToConvex(
       emails: c.emails,
     }));
 
-    // Sync in batches
+    // Sync in batches with auth retry
     for (let i = 0; i < convexContacts.length; i += BATCH_SIZE) {
       const batch = convexContacts.slice(i, i + BATCH_SIZE);
-      const batchResult = await client.mutation(api.sync.syncContacts, {
-        contacts: batch,
-      });
 
-      result.contactsCount += batchResult.contactsCount;
-      result.updatedCount += batchResult.updatedCount;
-      result.handlesCount += batchResult.handlesCount;
-      result.errors.push(...batchResult.errors);
+      try {
+        const batchResult = await client.mutation(api.sync.syncContacts, {
+          contacts: batch,
+        });
+
+        result.contactsCount += batchResult.contactsCount;
+        result.updatedCount += batchResult.updatedCount;
+        result.handlesCount += batchResult.handlesCount;
+        result.errors.push(...batchResult.errors);
+      } catch (error) {
+        // If auth error, try refreshing token and retry once
+        if (isAuthError(error)) {
+          console.log("[ContactsSync] Got auth error, force refreshing token and retrying...");
+          const newToken = await getAuthToken(true);
+          if (!newToken) {
+            throw new Error("Token refresh failed, cannot retry request");
+          }
+          client.setAuth(newToken);
+
+          const batchResult = await client.mutation(api.sync.syncContacts, {
+            contacts: batch,
+          });
+
+          result.contactsCount += batchResult.contactsCount;
+          result.updatedCount += batchResult.updatedCount;
+          result.handlesCount += batchResult.handlesCount;
+          result.errors.push(...batchResult.errors);
+        } else {
+          throw error;
+        }
+      }
     }
 
     console.log(

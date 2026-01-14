@@ -62,9 +62,16 @@ function setupAuthIpcHandlers(): void {
           user,
         });
 
-        // Start sync with token provider
+        // Start sync with token provider and auth invalid callback
         const syncManager = getSyncManager();
         syncManager.setTokenProvider(getValidAccessToken);
+        syncManager.setAuthInvalidCallback(() => {
+          console.log("[Main] Auth invalid during sync, notifying renderer");
+          mainWindow?.webContents.send("auth:stateChanged", {
+            isAuthenticated: false,
+            user: null,
+          });
+        });
         syncManager.start();
       },
       onAuthError: (error) => {
@@ -119,6 +126,14 @@ async function startBackgroundSync(): Promise<void> {
       onProgress: (progress: SyncProgress) => {
         // Notify renderer of sync progress
         mainWindow?.webContents.send("sync:progress", progress);
+      },
+      onAuthInvalid: () => {
+        // Notify renderer that auth is no longer valid
+        console.log("[Main] Auth invalid, notifying renderer");
+        mainWindow?.webContents.send("auth:stateChanged", {
+          isAuthenticated: false,
+          user: null,
+        });
       },
     });
 
