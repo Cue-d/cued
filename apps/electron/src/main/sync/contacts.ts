@@ -79,10 +79,10 @@ function getContactsBinaryPath(): string {
     }
   }
 
-  // 3. Development location - relative to this file
-  // File is at: apps/electron/src/main/sync/contacts.ts
+  // 3. Development location - relative to built output
+  // Built file is at: apps/electron/out/main/index.js
   // Binary is at: llm/.build/release/prm-contacts
-  const devPath = join(__dirname, "..", "..", "..", "..", "..", "llm", ".build", "release", "prm-contacts");
+  const devPath = join(__dirname, "..", "..", "..", "..", "llm", ".build", "release", "prm-contacts");
   return devPath;
 }
 

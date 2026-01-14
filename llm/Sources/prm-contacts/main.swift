@@ -20,37 +20,70 @@ import Foundation
 
 @main
 struct PRMContacts {
-    static func main() async {
+    static func main() {
         let args = CommandLine.arguments
         let prettyPrint = args.contains("--pretty")
         let outputJSON = prettyPrint || args.contains("--json") || isatty(fileno(stdout)) == 0
         let includeAll = args.contains("--include-all")
         let watchMode = args.contains("--watch")
 
-        do {
-            let fetcher = ContactsFetcher()
+        // Watch mode runs synchronously (blocks forever)
+        if watchMode {
+            runWatchMode(outputJSON: outputJSON)
+            return
+        }
 
-            // Request access if needed
-            try await fetcher.requestAccessIfNeeded()
-
-            if watchMode {
-                // Watch mode: output events when contacts change
-                await runWatchMode()
-            } else {
-                // Normal mode: fetch and output contacts
-                try await fetchAndOutput(fetcher: fetcher, outputJSON: outputJSON, prettyPrint: prettyPrint, includeAll: includeAll)
-            }
-
-        } catch let error as ContactsError {
+        // Request contacts access synchronously
+        if let error = requestAccessSync() {
             writeError(error.localizedDescription, json: outputJSON)
             exit(error == .accessDenied ? 2 : 1)
+        }
+
+        // Fetch and output contacts synchronously
+        do {
+            let fetcher = ContactsFetcher()
+            try fetchAndOutputSync(
+                fetcher: fetcher, outputJSON: outputJSON, prettyPrint: prettyPrint,
+                includeAll: includeAll)
+        } catch let error as ContactsError {
+            writeError(error.localizedDescription, json: outputJSON)
+            exit(1)
         } catch {
             writeError(error.localizedDescription, json: outputJSON)
             exit(1)
         }
     }
 
-    static func fetchAndOutput(fetcher: ContactsFetcher, outputJSON: Bool, prettyPrint: Bool, includeAll: Bool) async throws {
+    /// Request contacts access synchronously, returns error if denied
+    static func requestAccessSync() -> ContactsError? {
+        let store = CNContactStore()
+        let status = CNContactStore.authorizationStatus(for: .contacts)
+
+        switch status {
+        case .authorized, .limited:
+            return nil
+        case .notDetermined:
+            let semaphore = DispatchSemaphore(value: 0)
+            var granted = false
+            store.requestAccess(for: .contacts) { success, _ in
+                granted = success
+                semaphore.signal()
+            }
+            semaphore.wait()
+            return granted ? nil : .accessDenied
+        case .denied:
+            return .accessDenied
+        case .restricted:
+            return .accessRestricted
+        @unknown default:
+            return .unknownAuthStatus("rawValue=\(status.rawValue)")
+        }
+    }
+
+    /// Fetch and output contacts synchronously
+    static func fetchAndOutputSync(
+        fetcher: ContactsFetcher, outputJSON: Bool, prettyPrint: Bool, includeAll: Bool
+    ) throws {
         let startTime = CFAbsoluteTimeGetCurrent()
         let contacts = try fetcher.fetchAllContacts(includeAll: includeAll)
         let elapsed = CFAbsoluteTimeGetCurrent() - startTime
@@ -62,7 +95,8 @@ struct PRMContacts {
                 elapsedSeconds: elapsed
             )
             let encoder = JSONEncoder()
-            encoder.outputFormatting = prettyPrint
+            encoder.outputFormatting =
+                prettyPrint
                 ? [.prettyPrinted, .sortedKeys]
                 : [.sortedKeys]
             let data = try encoder.encode(output)
@@ -82,7 +116,29 @@ struct PRMContacts {
         }
     }
 
-    static func runWatchMode() async {
+    static func runWatchMode(outputJSON: Bool) {
+        // Request contacts access first using CNContactStore directly (synchronous)
+        let store = CNContactStore()
+        let status = CNContactStore.authorizationStatus(for: .contacts)
+
+        if status == .notDetermined {
+            let semaphore = DispatchSemaphore(value: 0)
+            var granted = false
+            store.requestAccess(for: .contacts) { success, _ in
+                granted = success
+                semaphore.signal()
+            }
+            semaphore.wait()
+
+            if !granted {
+                writeError("Contacts access denied", json: outputJSON)
+                exit(2)
+            }
+        } else if status != .authorized {
+            writeError("Contacts access denied", json: outputJSON)
+            exit(2)
+        }
+
         // Output started event
         outputWatchEvent(.started, message: "Watching for contact changes")
 
@@ -95,8 +151,8 @@ struct PRMContacts {
             outputWatchEvent(.changed, message: "Contacts changed")
         }
 
-        // Run the main dispatch queue to receive notifications
-        dispatchMain()
+        // Run the main run loop forever to receive notifications
+        RunLoop.main.run()
     }
 
     static func outputWatchEvent(_ type: WatchEventType, message: String?) {
@@ -112,10 +168,10 @@ struct PRMContacts {
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.sortedKeys]
         if let data = try? encoder.encode(event),
-           let json = String(data: data, encoding: .utf8)
+            let json = String(data: data, encoding: .utf8)
         {
             print(json)
-            fflush(stdout) // Ensure immediate output for streaming
+            fflush(stdout)  // Ensure immediate output for streaming
         }
     }
 
