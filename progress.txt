@@ -805,3 +805,25 @@ Notes:
   - Verification requires manual test: modify contact in Contacts.app → see sync in Convex
 ---
 
+[2026-01-13 19:50] Task 2.4b - Implement proactive WorkOS token refresh in Electron
+Files: apps/electron/src/main/auth/auth-manager.ts, apps/electron/src/main/sync/sync-manager.ts
+Decisions:
+  - Enhanced getValidAccessToken() with detailed logging for token lifecycle events
+  - Added logging: token expiry time remaining, refresh success/failure, no refresh token scenarios
+  - Created executeMutationWithRetry() helper in sync-manager for 401 retry logic
+  - Created isAuthError() helper to detect Convex auth errors (unauthenticated/401/unauthorized)
+  - Uses early return pattern for non-auth errors, reducing nesting in retry logic
+  - Single retry attempt on 401 (no infinite retry loops)
+Why:
+  - Proactive refresh (5 min buffer) prevents token expiry during long-running batched sync
+  - 401 retry handles edge case where token expires mid-request despite buffer
+  - Detailed logging enables debugging token lifecycle issues in production
+  - isAuthError checks multiple patterns because Convex error messages vary
+Notes:
+  - Token expiry check already existed in getValidAccessToken() (5 min buffer)
+  - Token storage in Keychain already implemented via storeTokens() after refresh
+  - All 57 tests pass (42 electron, 15 shared)
+  - Lint and typecheck pass for entire monorepo
+  - Last step "Verify long-running sync" requires manual test (code signing blocker)
+---
+

@@ -92,6 +92,48 @@ export class SyncManager {
   }
 
   /**
+   * Execute a mutation with 401 retry logic.
+   * If the mutation fails with 401 (Unauthenticated), refresh the token and retry once.
+   */
+  private async executeMutationWithRetry<T>(
+    mutationFn: () => Promise<T>
+  ): Promise<T> {
+    try {
+      return await mutationFn();
+    } catch (error: unknown) {
+      if (!this.isAuthError(error)) {
+        throw error;
+      }
+
+      console.log("[SyncManager] Got 401 error, refreshing token and retrying...");
+
+      const hasAuth = await this.refreshAuth();
+      if (!hasAuth) {
+        throw new Error("Token refresh failed, cannot retry request");
+      }
+
+      console.log("[SyncManager] Token refreshed, retrying mutation...");
+      return await mutationFn();
+    }
+  }
+
+  /**
+   * Check if an error is an authentication error (401).
+   */
+  private isAuthError(error: unknown): boolean {
+    if (error instanceof Error) {
+      const message = error.message.toLowerCase();
+      // Convex returns "Unauthenticated" for auth errors
+      return (
+        message.includes("unauthenticated") ||
+        message.includes("401") ||
+        message.includes("unauthorized")
+      );
+    }
+    return false;
+  }
+
+  /**
    * Start background sync on interval.
    */
   async start(): Promise<void> {
@@ -203,9 +245,11 @@ export class SyncManager {
           },
         });
 
-        const result = await this.client.mutation(api.sync.syncMessages, {
-          batch,
-        });
+        // Execute mutation with 401 retry logic
+        const result = await this.executeMutationWithRetry(
+          () => this.client.mutation(api.sync.syncMessages, { batch })
+        );
+
         const batchTime = performance.now() - batchStart;
         const rate = Math.round(result.messagesCount / (batchTime / 1000));
 

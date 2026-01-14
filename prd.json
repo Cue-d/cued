@@ -345,15 +345,31 @@
       "phase": 2,
       "mode": "hitl",
       "category": "integration",
-      "description": "Extract attachments, reactions, and status from chat.db",
+      "description": "Extract reactions and message status from chat.db",
       "steps": [
-        "Query attachment table joined with message_attachment_join for file metadata",
-        "Extract attachment paths from ~/Library/Messages/Attachments/",
-        "Query message.associated_message_guid for tapback reactions (loved, liked, etc.)",
+        "Query message.associated_message_guid for tapback reactions (loved, liked, laughed, etc.)",
+        "Map tapback types to emoji: 2000=loved, 2001=liked, 2002=disliked, 2003=laughed, 2004=emphasized, 2005=questioned",
         "Parse message.is_delivered, is_read, is_sent, is_from_me for status",
         "Handle failed messages via message.error code",
-        "Upload attachments to Convex storage and store storageId",
-        "Verify attachments and reactions sync correctly with real messages"
+        "Verify reactions and status sync correctly with real messages"
+      ],
+      "passes": false
+    },
+    {
+      "id": "2.2c",
+      "phase": 2,
+      "mode": "hitl",
+      "category": "integration",
+      "description": "Sync iMessage attachments with thumbnail generation",
+      "steps": [
+        "Query attachment table joined with message_attachment_join for file metadata",
+        "Read attachment files from ~/Library/Messages/Attachments/",
+        "Generate thumbnails for images/videos (max 400px, preserve aspect ratio)",
+        "Handle HEIC to JPEG conversion for web compatibility",
+        "Upload original and thumbnail to Convex storage",
+        "Store attachment metadata: filename, mimeType, size, storageId, thumbnailStorageId",
+        "Handle missing/deleted attachment files gracefully",
+        "Verify attachments display correctly in web UI with real photos and videos"
       ],
       "passes": false
     },
@@ -401,7 +417,7 @@
         "Add logging for token refresh events",
         "Verify long-running sync (148k messages) completes without auth errors"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "2.5",
@@ -464,6 +480,22 @@
       "passes": true
     },
     {
+      "id": "2.7c",
+      "phase": 2,
+      "mode": "hitl",
+      "category": "functional",
+      "description": "Store contacts sync state in Convex for recovery",
+      "steps": [
+        "Store lastContactsSyncAt timestamp in Convex integrations table",
+        "Store contactsCount to detect bulk additions/deletions",
+        "On Electron launch, fetch remote contacts sync state",
+        "If no remote state or count mismatch >10%, trigger full contacts sync",
+        "Include contacts in 'Force Full Sync' recovery flow (task 2.8a)",
+        "Verify contacts re-sync works after clearing local cache"
+      ],
+      "passes": false
+    },
+    {
       "id": "2.8",
       "phase": 2,
       "mode": "hitl",
@@ -477,6 +509,23 @@
         "Verify only new messages synced on subsequent runs"
       ],
       "passes": true
+    },
+    {
+      "id": "2.8a",
+      "phase": 2,
+      "mode": "hitl",
+      "category": "functional",
+      "description": "Handle sync state recovery and full re-sync scenarios",
+      "steps": [
+        "On Electron launch, fetch remote sync state from Convex integrations table",
+        "Compare remote message cursor with local chat.db max ROWID to detect gaps",
+        "If local cache cleared or fresh install, trigger full sync (messages + contacts)",
+        "Add 'Force Full Sync' button in Electron settings for manual recovery",
+        "Store sync metadata: lastSyncAt, totalMessagesSynced, totalContactsSynced, syncVersion",
+        "Detect schema changes (syncVersion mismatch) and trigger re-sync of both",
+        "Verify full re-sync (messages + contacts) works after deleting local cache"
+      ],
+      "passes": false
     },
     {
       "id": "2.8b",
