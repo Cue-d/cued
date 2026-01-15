@@ -2380,3 +2380,99 @@ Notes:
   - All lint and typecheck pass
   - Badge shows on Actions menu item only
 ---
+
+---
+
+[2026-01-15 12:35] Tasks 6.0a, 6.0b - Contact resolution utilities and schema
+Files:
+  - packages/convex/convex/schema.ts (updated - added mergeSuggestions table, resolve_contact action type)
+  - packages/ai/src/contact-resolution/deterministic.ts (new)
+  - packages/ai/src/contact-resolution/deterministic.test.ts (new)
+  - packages/ai/src/contact-resolution/fuzzy-name.ts (new)
+  - packages/ai/src/contact-resolution/fuzzy-name.test.ts (new)
+  - packages/ai/src/contact-resolution/index.ts (new)
+  - packages/ai/src/index.ts (updated - exports contact-resolution)
+Implementation:
+  - mergeSuggestions table: contact1Id, contact2Id, confidence, source, reasoning, status
+  - Deterministic matching:
+    - Gmail dot-variant normalization (j.doe@gmail.com = jdoe@gmail.com)
+    - Plus-addressing removal (user+tag@gmail.com = user@gmail.com)
+    - Phone variant matching via getPhoneVariants (US +1 handling)
+  - Fuzzy name matching:
+    - Jaro-Winkler similarity algorithm
+    - 80+ common nickname mappings (Bob/Robert, Mike/Michael, etc.)
+    - Title removal (Dr., Mr., Mrs., Jr., III, etc.)
+    - Initial format detection (J. Smith → matches John Smith)
+    - Thresholds: AUTO_MERGE=0.95, SUGGEST_MERGE=0.80, MINIMUM=0.60
+Decisions:
+  - Skipped LLM resolution (6.0c) for now - can add later
+  - Used Jaro-Winkler over Levenshtein (better for name matching)
+  - Nickname map covers both directions (bob→robert canonical)
+Notes:
+  - 35 tests passing for contact-resolution
+  - All typecheck passes
+---
+
+---
+
+[2026-01-15 12:45] Tasks 6.0d, 6.0e - Contact merge mutations and background job
+Files:
+  - packages/convex/convex/contacts.ts (new)
+  - packages/convex/convex/contactResolution.ts (new)
+Implementation:
+  - contacts.ts:
+    - getContacts: Paginated query returning contacts with all handles
+    - getContact: Single contact with handles
+    - getPendingMergeSuggestions: Query for merge review UI
+    - getPendingMergeSuggestionCount: For sidebar badge
+    - mergeContacts: Full merge (handles, conversations, messages, actions)
+    - rejectMerge: Mark as intentionally separate
+    - updateContact: Edit contact details
+  - contactResolution.ts:
+    - findMergeCandidatesForContact: Check single contact after sync
+    - scanAllContactsForMerges: Full O(n²) scan with limit
+    - triggerMergeScan: User-facing mutation
+    - Auto-merge at >95% confidence via autoMergeContacts
+    - Create suggestions at >80% confidence
+    - Uses deterministic (email/phone) then fuzzy (name) matching
+    - Helper functions: getHandleValues, findMatchingPair, findBestMatch
+Decisions:
+  - Deferred LLM resolution (6.0c) - deterministic+fuzzy covers most cases
+  - Auto-merge threshold at 95% (name similarity requires high confidence)
+  - Audit trail via approved mergeSuggestions entries for auto-merges
+Notes:
+  - All typecheck passes
+  - Ready for UI integration
+---
+
+---
+
+[2026-01-15 12:55] Tasks 6.1, 6.1b - MergeCard component and contacts page
+Files:
+  - packages/ui/src/components/contacts/merge-card.tsx (new)
+  - packages/ui/src/components/contacts/index.ts (new)
+  - packages/ui/src/index.ts (modified - export contacts)
+  - apps/web/app/(app)/contacts/page.tsx (new)
+Implementation:
+  - MergeCard component:
+    - Side-by-side contact comparison for merge review
+    - Shows confidence score and match source badge
+    - Displays all handles grouped by type (phone, email, slack)
+    - Platform badges with color coding (green=iMessage, red=Gmail, purple=Slack)
+    - Action buttons: "Different people" (reject) / "Merge contacts" (approve)
+    - Loading state support
+  - Contacts page:
+    - Pending merge suggestions section with AlertCircle icon
+    - MergeCard integration with mergeContacts/rejectMerge mutations
+    - All contacts list with handles
+    - ContactRow component showing avatar, name, company, handles
+    - Empty state for no contacts
+Decisions:
+  - Combined merge suggestions + contacts list on same page (simpler UX)
+  - Deferred contact detail view and edit form for later
+  - Deferred sidebar badge for pending suggestions count
+Notes:
+  - All typecheck passes
+  - All 116 tests pass in @prm/ai
+  - Ready for testing with real data
+---
