@@ -1706,7 +1706,7 @@
         "Return selected timestamp to parent component",
         "Style to match card overlay aesthetic"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "7.12",

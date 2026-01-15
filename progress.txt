@@ -2201,3 +2201,22 @@ Notes:
   - All lint and typecheck pass
   - Convex deployed successfully
 ---
+
+[2026-01-15 11:47] Task 7.11 - Create snooze picker with presets + custom date option
+Files:
+  - packages/ui/src/components/action-queue/SnoozePicker.tsx (new)
+  - packages/ui/src/components/action-queue/index.ts (new)
+  - packages/ui/src/index.ts (updated - export action-queue)
+Implementation:
+  - SnoozePicker component with preset buttons (1h, 3h, Tomorrow 9am, Next Monday 9am)
+  - Custom date/time picker using shadcn Calendar and time input
+  - Returns timestamp via onSelect callback
+  - Card-style overlay aesthetic with border and shadow
+  - Prevents snoozing to past dates
+Decisions:
+  - Used native time input instead of TimePicker (simpler, works well)
+  - PopoverTrigger styled directly (base-ui doesn't support asChild)
+Notes:
+  - All lint and typecheck pass
+  - Exported from @prm/ui package
+---
