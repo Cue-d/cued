@@ -111,6 +111,8 @@ const schema = defineSchema({
     company: v.optional(v.string()),
     notes: v.optional(v.string()),
     importance: v.optional(v.number()),
+    tags: v.optional(v.array(v.string())),
+    isDismissed: v.optional(v.boolean()),
   })
     .index("by_user", ["userId"])
     .searchIndex("search_display_name", {

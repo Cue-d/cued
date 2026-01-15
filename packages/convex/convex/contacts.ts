@@ -33,16 +33,20 @@ export const getContacts = query({
       company?: string;
       notes?: string;
       importance?: number;
+      tags?: string[];
+      isDismissed?: boolean;
     }>;
 
     if (args.searchQuery && args.searchQuery.trim().length > 0) {
       // Use search index for text search
-      contacts = await ctx.db
+      const searchResults = await ctx.db
         .query("contacts")
         .withSearchIndex("search_display_name", (q) =>
           q.search("displayName", args.searchQuery!).eq("userId", user._id)
         )
         .take(limit + 1);
+      // Filter out dismissed contacts
+      contacts = searchResults.filter((c) => !c.isDismissed);
     } else {
       // Regular query with optional cursor
       let query = ctx.db
@@ -53,7 +57,9 @@ export const getContacts = query({
         query = query.filter((q) => q.gt(q.field("_id"), args.cursor!));
       }
 
-      contacts = await query.take(limit + 1);
+      const results = await query.take(limit + 1);
+      // Filter out dismissed contacts
+      contacts = results.filter((c) => !c.isDismissed);
     }
 
     const hasMore = contacts.length > limit;
@@ -78,12 +84,12 @@ export const getContacts = query({
       })
     );
 
-    // Get total count for display
+    // Get total count for display (excluding dismissed)
     const totalCount = await ctx.db
       .query("contacts")
       .withIndex("by_user", (q) => q.eq("userId", user._id))
       .collect()
-      .then((all) => all.length);
+      .then((all) => all.filter((c) => !c.isDismissed).length);
 
     return {
       contacts: contactsWithHandles,
@@ -394,7 +400,7 @@ export const createMergeSuggestion = mutation({
 });
 
 /**
- * Update contact details (name, company, notes, importance).
+ * Update contact details (name, company, notes, importance, tags).
  */
 export const updateContact = mutation({
   args: {
@@ -403,6 +409,7 @@ export const updateContact = mutation({
     company: v.optional(v.string()),
     notes: v.optional(v.string()),
     importance: v.optional(v.number()),
+    tags: v.optional(v.array(v.string())),
   },
   handler: async (ctx, args) => {
     const user = await getAuthenticatedUser(ctx);
@@ -422,6 +429,192 @@ export const updateContact = mutation({
 
     if (Object.keys(updates).length > 0) {
       await ctx.db.patch(contactId, updates);
+    }
+
+    return { success: true };
+  },
+});
+
+/**
+ * Save contact from action card (eod_contact or new_contact).
+ * Updates contact details and marks the action as completed.
+ */
+export const saveContactFromCard = mutation({
+  args: {
+    actionId: v.id("actions"),
+    contactId: v.id("contacts"),
+    displayName: v.string(),
+    company: v.optional(v.string()),
+    notes: v.optional(v.string()),
+    tags: v.optional(v.array(v.string())),
+    // If linking to existing contact, merge handles instead of updating
+    linkToContactId: v.optional(v.id("contacts")),
+  },
+  handler: async (ctx, args) => {
+    const user = await getAuthenticatedUser(ctx);
+    if (!user) throw new Error("Unauthorized");
+
+    const action = await ctx.db.get(args.actionId);
+    if (!action || action.userId !== user._id) {
+      throw new Error("Action not found");
+    }
+
+    const contact = await ctx.db.get(args.contactId);
+    if (!contact || contact.userId !== user._id) {
+      throw new Error("Contact not found");
+    }
+
+    const now = Date.now();
+
+    // If linking to existing contact, merge handles and delete the new contact
+    if (args.linkToContactId) {
+      const existingContact = await ctx.db.get(args.linkToContactId);
+      if (!existingContact || existingContact.userId !== user._id) {
+        throw new Error("Target contact not found");
+      }
+
+      // Move all handles from new contact to existing contact
+      const handles = await ctx.db
+        .query("contactHandles")
+        .withIndex("by_contact", (q) => q.eq("contactId", args.contactId))
+        .collect();
+
+      for (const handle of handles) {
+        await ctx.db.patch(handle._id, { contactId: args.linkToContactId });
+      }
+
+      // Update existing contact with any new info (if provided and existing is empty)
+      const updates: {
+        company?: string;
+        notes?: string;
+        tags?: string[];
+      } = {};
+
+      if (args.company && !existingContact.company) {
+        updates.company = args.company;
+      }
+      if (args.notes) {
+        // Append notes if existing has notes
+        updates.notes = existingContact.notes
+          ? `${existingContact.notes}\n\n${args.notes}`
+          : args.notes;
+      }
+      if (args.tags && args.tags.length > 0) {
+        // Merge tags (deduplicate)
+        const existingTags = existingContact.tags ?? [];
+        updates.tags = [...new Set([...existingTags, ...args.tags])];
+      }
+
+      if (Object.keys(updates).length > 0) {
+        await ctx.db.patch(args.linkToContactId, updates);
+      }
+
+      // Update conversations to reference existing contact
+      const conversations = await ctx.db
+        .query("conversations")
+        .withIndex("by_user", (q) => q.eq("userId", user._id))
+        .collect();
+
+      for (const conv of conversations) {
+        if (conv.participantContactIds.includes(args.contactId)) {
+          const withoutNew = conv.participantContactIds.filter(
+            (id) => id !== args.contactId
+          );
+          const hasExisting = conv.participantContactIds.includes(args.linkToContactId);
+          const updated = hasExisting
+            ? withoutNew
+            : [...withoutNew, args.linkToContactId];
+          await ctx.db.patch(conv._id, { participantContactIds: updated });
+        }
+      }
+
+      // Update messages to reference existing contact
+      const messages = await ctx.db
+        .query("messages")
+        .withIndex("by_user", (q) => q.eq("userId", user._id))
+        .filter((q) => q.eq(q.field("senderContactId"), args.contactId))
+        .collect();
+
+      for (const msg of messages) {
+        await ctx.db.patch(msg._id, { senderContactId: args.linkToContactId });
+      }
+
+      // Delete the new contact (now merged)
+      await ctx.db.delete(args.contactId);
+    } else {
+      // Update the contact with form data
+      await ctx.db.patch(args.contactId, {
+        displayName: args.displayName,
+        company: args.company,
+        notes: args.notes,
+        tags: args.tags,
+      });
+    }
+
+    // Mark action as completed
+    await ctx.db.patch(args.actionId, {
+      status: "completed",
+      completedAt: now,
+    });
+
+    // Decrement pending action count
+    const currentCount = user.pendingActionCount ?? 0;
+    if (currentCount > 0) {
+      await ctx.db.patch(user._id, {
+        pendingActionCount: currentCount - 1,
+      });
+    }
+
+    return {
+      success: true,
+      merged: !!args.linkToContactId,
+      contactId: args.linkToContactId ?? args.contactId,
+    };
+  },
+});
+
+/**
+ * Dismiss a contact as spam/not-a-contact.
+ * Marks the contact as dismissed and discards the action.
+ */
+export const dismissContact = mutation({
+  args: {
+    actionId: v.id("actions"),
+    contactId: v.id("contacts"),
+  },
+  handler: async (ctx, args) => {
+    const user = await getAuthenticatedUser(ctx);
+    if (!user) throw new Error("Unauthorized");
+
+    const action = await ctx.db.get(args.actionId);
+    if (!action || action.userId !== user._id) {
+      throw new Error("Action not found");
+    }
+
+    const contact = await ctx.db.get(args.contactId);
+    if (!contact || contact.userId !== user._id) {
+      throw new Error("Contact not found");
+    }
+
+    const now = Date.now();
+
+    // Mark contact as dismissed (won't show in contact list, won't create future actions)
+    await ctx.db.patch(args.contactId, {
+      isDismissed: true,
+    });
+
+    // Mark action as discarded
+    await ctx.db.patch(args.actionId, {
+      status: "discarded",
+      discardedAt: now,
+    });
+
+    // Decrement pending action count
+    const currentCount = user.pendingActionCount ?? 0;
+    if (currentCount > 0) {
+      await ctx.db.patch(user._id, {
+        pendingActionCount: currentCount - 1,
+      });
     }
 
     return { success: true };
