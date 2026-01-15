@@ -77,13 +77,14 @@ export const getIntegrationStatus = query({
 
 /**
  * Connect a Nango integration. Called from webhook when user completes OAuth.
- * Uses WorkOS ID to find user (webhook receives endUser.endUserId = WorkOS subject).
+ * Uses WorkOS ID to find or create user.
  */
 export const connectNango = mutation({
   args: {
     workosUserId: v.string(),
     nangoIntegrationId: v.string(), // e.g., "google-mail", "slack"
     nangoConnectionId: v.string(),
+    email: v.optional(v.string()), // From endUser.endUserEmail
   },
   handler: async (ctx, args) => {
     const platform = nangoToPlatform(args.nangoIntegrationId);
@@ -91,9 +92,18 @@ export const connectNango = mutation({
       throw new Error(`Unknown Nango integration: ${args.nangoIntegrationId}`);
     }
 
-    const user = await findUserByWorkosId(ctx, args.workosUserId);
+    // Find or create user
+    let user = await findUserByWorkosId(ctx, args.workosUserId);
     if (!user) {
-      throw new Error(`User not found for WorkOS ID: ${args.workosUserId}`);
+      // Create user if they don't exist (first connection via Nango, no Electron sync yet)
+      const userId = await ctx.db.insert("users", {
+        workosUserId: args.workosUserId,
+        email: args.email ?? "",
+      });
+      user = await ctx.db.get(userId);
+      if (!user) {
+        throw new Error("Failed to create user");
+      }
     }
 
     // Check if integration already exists

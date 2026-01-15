@@ -44,6 +44,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
         workosUserId: endUser.endUserId,
         nangoIntegrationId: providerConfigKey,
         nangoConnectionId: connectionId,
+        email: endUser.endUserEmail,
       });
       console.log("Nango connection created:", result);
       return NextResponse.json({ received: true, processed: true, result });
