@@ -48,7 +48,7 @@ export async function sendGmailMessage(
   const nango = createNangoGmailClient();
 
   return nango.triggerAction<SendGmailMessageInput, SendGmailMessageResult>(
-    "google-mail", // Must match Nango Dashboard integration name
+    "google",
     connectionId,
     "send-email",
     input

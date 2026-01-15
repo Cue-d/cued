@@ -585,6 +585,73 @@ export const debugGetUnansweredCandidates = query({
 });
 
 /**
+ * Debug: Get raw stats without auth (for dashboard testing).
+ * Shows conversation counts and recent data.
+ */
+export const debugRawStats = query({
+  args: {},
+  handler: async (ctx) => {
+    // Get all users
+    const users = await ctx.db.query("users").take(10);
+
+    const stats = [];
+    for (const user of users) {
+      const conversations = await ctx.db
+        .query("conversations")
+        .withIndex("by_user", (q) => q.eq("userId", user._id))
+        .take(100);
+
+      const queueEntries = await ctx.db
+        .query("actionAnalysisQueue")
+        .withIndex("by_user_status", (q) => q.eq("userId", user._id))
+        .take(50);
+
+      const actions = await ctx.db
+        .query("actions")
+        .withIndex("by_user", (q) => q.eq("userId", user._id))
+        .take(50);
+
+      // Get a sample conversation with messages
+      let sampleConversation = null;
+      if (conversations.length > 0) {
+        const conv = conversations[0];
+        const messages = await ctx.db
+          .query("messages")
+          .withIndex("by_conversation", (q) => q.eq("conversationId", conv._id))
+          .order("desc")
+          .take(3);
+
+        sampleConversation = {
+          platform: conv.platform,
+          lastMessageAt: conv.lastMessageAt ? new Date(conv.lastMessageAt).toISOString() : null,
+          messageCount: messages.length,
+          lastMessagePreview: messages[0]?.content?.slice(0, 50),
+          lastMessageIsFromMe: messages[0]?.isFromMe,
+        };
+      }
+
+      stats.push({
+        userId: user._id,
+        email: user.email,
+        conversationCount: conversations.length,
+        queueEntryCount: queueEntries.length,
+        queueByStatus: {
+          pending: queueEntries.filter(e => e.status === "pending").length,
+          processing: queueEntries.filter(e => e.status === "processing").length,
+          completed: queueEntries.filter(e => e.status === "completed").length,
+          skipped: queueEntries.filter(e => e.status === "skipped").length,
+        },
+        actionCount: actions.length,
+        pendingActions: actions.filter(a => a.status === "pending").length,
+        sampleConversation,
+      });
+    }
+
+    return { users: stats };
+  },
+});
+
+/**
  * Debug: Get current queue status with details.
  */
 export const debugGetQueueDetails = query({

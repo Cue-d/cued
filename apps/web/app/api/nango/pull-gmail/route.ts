@@ -46,7 +46,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
 
     // Fetch records from Nango (model name must match sync definition)
     const { records } = await nango.listRecords<GmailEmail>({
-      providerConfigKey: "google-mail", // Must match Nango Dashboard integration name
+      providerConfigKey: "google",
       connectionId,
       model: "GmailEmail",
     });

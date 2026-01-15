@@ -13,7 +13,7 @@ type Platform = "imessage" | "gmail" | "slack";
 // Map Nango integration IDs to our platform enum
 function nangoToPlatform(nangoIntegrationId: string): Platform | null {
   const mapping: Record<string, Platform> = {
-    "google-mail": "gmail", // Must match Nango Dashboard integration name
+    google: "gmail",
     slack: "slack",
   };
   return mapping[nangoIntegrationId] ?? null;
