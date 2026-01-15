@@ -1672,3 +1672,30 @@ Notes:
   - All lint and typecheck pass for entire monorepo
   - Ready for task 5.2: Create Nango Slack sync function for messages
 ---
+
+[2026-01-15 16:45] Task 5.2 - Create Nango Slack sync function for messages
+Files:
+  - nango-integrations/slack/types.ts (new)
+  - nango-integrations/slack/syncs/messages.ts (new)
+  - prd.json (mark task complete)
+Decisions:
+  - Created comprehensive Slack API types: SlackConversation, SlackMessage, SlackReaction, SlackUser, etc.
+  - Created messages.ts sync with createSync() pattern matching Gmail implementation
+  - SlackSyncMessage model: id, channelId, channelType, userId, text, ts, threadTs, reactions, isBot, sentAt
+  - Fetches DMs using conversations.list (types=im) then conversations.history per channel
+  - Default 30-day backfill period (vs 1 year for Gmail - Slack messages are more ephemeral)
+  - Filters out bot messages and subtypes (channel_join, etc.)
+  - Maps reactions preserving name, count, and users array
+  - Sync runs every 5 minutes with incremental mode
+Why:
+  - 30-day backfill is more appropriate for Slack DMs (vs 1 year for email)
+  - Channel type detection (im/channel/group/mpim) enables proper UI routing later
+  - threadTs support enables thread display in task 5.5
+  - isBot flag enables filtering bot messages in UI/actions
+  - Reactions preserved for display (task 5.4 will map to Convex format)
+Notes:
+  - Nango compile successful
+  - All monorepo lint and typecheck pass
+  - Deploy requires: cd nango-integrations && npx nango deploy dev
+  - Ready for task 5.3: Add Slack to integrations page
+---
