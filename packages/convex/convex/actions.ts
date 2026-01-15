@@ -526,7 +526,7 @@ const swipeDirectionValidator = v.union(
 /**
  * Handle swipe action with platform routing.
  * - left: discard action
- * - right: complete/send message (routing to platform handlers in 7.20-7.22)
+ * - right: complete/send message
  * - up: snooze action until specified time
  */
 export const swipeAction = mutation({
@@ -643,13 +643,56 @@ export const swipeAction = mutation({
           : null;
         const platform = action.platform ?? conversation?.platform;
 
-        // For now, mark as completed
-        // Platform routing (actual message sending) will be implemented in tasks 7.20-7.22
-        // Those tasks will create pendingSends table and platform-specific handlers
+        let messageSent = false;
+        let pendingSendId: string | null = null;
+
+        // Handle iMessage sending via pending sends queue (Electron polls this)
+        if (platform === "imessage" && responseText && conversation) {
+          // Get recipient info from conversation
+          const isGroup = conversation.conversationType === "group";
+
+          // For groups, we need the chat identifier (from platformConversationId)
+          // For 1:1, we need the recipient's handle
+          let recipientHandle = "";
+
+          if (!isGroup && conversation.participantContactIds.length > 0) {
+            // Get the first participant's handle for 1:1 chats
+            const participantId = conversation.participantContactIds[0];
+            const handles = await ctx.db
+              .query("contactHandles")
+              .withIndex("by_contact", (q) => q.eq("contactId", participantId))
+              .filter((q) => q.eq(q.field("platform"), "imessage"))
+              .first();
+
+            if (handles) {
+              recipientHandle = handles.handle;
+            }
+          }
+
+          // Create pending send for Electron to pick up
+          if (recipientHandle || isGroup) {
+            const sendId = await ctx.db.insert("pendingSends", {
+              userId: user._id,
+              conversationId: conversation._id,
+              actionId: args.actionId,
+              text: responseText,
+              recipientHandle: recipientHandle,
+              isGroup,
+              chatIdentifier: isGroup ? conversation.platformConversationId : undefined,
+              status: "pending",
+              createdAt: now,
+              attempts: 0,
+            });
+            pendingSendId = sendId;
+            messageSent = true;
+          }
+        }
+
+        // Mark action as completed
         await ctx.db.patch(args.actionId, {
           status: "completed",
           completedAt: now,
-          draftResponse: responseText, // Save the final response
+          draftResponse: responseText,
         });
 
         // Decrement counter if was pending
@@ -661,7 +704,8 @@ export const swipeAction = mutation({
           success: true,
           status: "completed",
           platform,
-          messageSent: false, // Will be true once 7.20-7.22 are implemented
+          messageSent,
+          pendingSendId,
           responseText,
         };
       }

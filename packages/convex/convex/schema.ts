@@ -65,7 +65,6 @@ export const messageStatusValidator = v.union(
 );
 
 const schema = defineSchema({
-  // Task 1.7: Users table
   users: defineTable({
     workosUserId: v.string(),
     email: v.string(),
@@ -77,26 +76,22 @@ const schema = defineSchema({
     .index("by_workos_id", ["workosUserId"])
     .index("by_email", ["email"]),
 
-  // Task 1.8: Integrations table
   integrations: defineTable({
     userId: v.id("users"),
     platform: platformValidator,
     pipedreamAccountId: v.optional(v.string()),
-    nangoConnectionId: v.optional(v.string()), // Task 4.5: Nango connection ID for Gmail/Slack
-    connectedAt: v.optional(v.number()), // Task 4.5: When the integration was connected
+    nangoConnectionId: v.optional(v.string()),
+    connectedAt: v.optional(v.number()),
     syncState: v.object({
       isConnected: v.boolean(),
       lastSyncAt: v.optional(v.number()),
       lastSyncCursor: v.optional(v.string()),
       lastError: v.optional(v.string()),
-      // Task 2.8a: Extended sync metadata for recovery
       totalMessagesSynced: v.optional(v.number()),
       totalContactsSynced: v.optional(v.number()),
-      syncVersion: v.optional(v.number()), // Increment when schema changes require re-sync
-      // Task 2.7c: Contacts sync state for recovery
+      syncVersion: v.optional(v.number()),
       lastContactsSyncAt: v.optional(v.number()),
-      // Task 3.13b: Memory extraction tracking
-      lastMemoryProcessedAt: v.optional(v.number()), // sentAt timestamp of last processed message
+      lastMemoryProcessedAt: v.optional(v.number()),
       totalMessagesProcessedForMemory: v.optional(v.number()),
       totalMemoriesExtracted: v.optional(v.number()),
     }),
@@ -104,7 +99,6 @@ const schema = defineSchema({
     .index("by_user", ["userId"])
     .index("by_user_platform", ["userId", "platform"]),
 
-  // Task 1.9: Contacts and ContactHandles tables
   contacts: defineTable({
     userId: v.id("users"),
     displayName: v.string(),
@@ -131,7 +125,6 @@ const schema = defineSchema({
     .index("by_user_handle", ["userId", "handle"])
     .index("by_contact", ["contactId"]),
 
-  // Task 1.10: Conversations table
   conversations: defineTable({
     userId: v.id("users"),
     platform: platformValidator,
@@ -141,14 +134,12 @@ const schema = defineSchema({
     lastMessageText: v.optional(v.string()),
     lastMessageAt: v.optional(v.number()), // timestamp in milliseconds
     unreadCount: v.number(),
-    // Task 5.5: Channel/thread metadata
-    displayName: v.optional(v.string()), // Slack channel name, Gmail subject, etc.
+    displayName: v.optional(v.string()),
   })
     .index("by_user", ["userId"])
     .index("by_user_last_message", ["userId", "lastMessageAt"])
     .index("by_platform_conversation", ["userId", "platform", "platformConversationId"]),
 
-  // Task 1.11: Messages table
   messages: defineTable({
     userId: v.id("users"),
     conversationId: v.id("conversations"),
@@ -157,12 +148,10 @@ const schema = defineSchema({
     sentAt: v.number(), // timestamp in milliseconds
     senderContactId: v.optional(v.id("contacts")), // null if isFromMe=true
     isFromMe: v.boolean(),
-    platformMessageId: v.string(), // unique ID from source platform (ROWID, Gmail msgId, Slack ts)
-    // Task 5.5: Thread support for Slack/Gmail
-    threadTs: v.optional(v.string()), // Slack thread_ts or Gmail threadId for thread replies
-    isThreadParent: v.optional(v.boolean()), // true if this message started a thread
-    // Task 2.2b: Message status and reactions
-    status: v.optional(messageStatusValidator), // sent, delivered, read, failed
+    platformMessageId: v.string(),
+    threadTs: v.optional(v.string()),
+    isThreadParent: v.optional(v.boolean()),
+    status: v.optional(messageStatusValidator),
     reactions: v.optional(
       v.array(
         v.object({
@@ -173,7 +162,6 @@ const schema = defineSchema({
         })
       )
     ),
-    // Task 2.2c: Attachments
     attachments: v.optional(
       v.array(
         v.object({
@@ -181,17 +169,16 @@ const schema = defineSchema({
           mimeType: v.string(),
           size: v.number(),
           storageId: v.id("_storage"), // Convex file storage ID
-          thumbnailStorageId: v.optional(v.id("_storage")), // thumbnail for images/videos
+          thumbnailStorageId: v.optional(v.id("_storage")),
         })
       )
     ),
-    // Task 3.13c: Track when memory was extracted from this message
     memoryExtractedAt: v.optional(v.number()),
   })
     .index("by_user", ["userId"])
     .index("by_conversation", ["conversationId", "sentAt"])
     .index("by_platform_message", ["userId", "platform", "platformMessageId"])
-    .index("by_user_sent_at", ["userId", "sentAt"]) // Task 3.13b: For memory extraction pagination
+    .index("by_user_sent_at", ["userId", "sentAt"])
     .searchIndex("search_content", {
       searchField: "content",
       filterFields: ["userId", "conversationId"],
@@ -244,9 +231,8 @@ const schema = defineSchema({
   })
     .index("by_user_status", ["userId", "status"])
     .index("by_priority", ["status", "priority"]) // For processing order: pending first, then by priority
-    .index("by_conversation", ["conversationId"]), // To check if conversation already queued
+    .index("by_conversation", ["conversationId"]),
 
-  // Task 6.0e: Merge suggestions for contact resolution
   mergeSuggestions: defineTable({
     userId: v.id("users"),
     contact1Id: v.id("contacts"), // Primary contact (will be kept)
@@ -260,9 +246,8 @@ const schema = defineSchema({
     resolvedAt: v.optional(v.number()),
   })
     .index("by_user_status", ["userId", "status"])
-    .index("by_contacts", ["contact1Id", "contact2Id"]), // Prevent duplicate suggestions
+    .index("by_contacts", ["contact1Id", "contact2Id"]),
 
-  // Denormalized per-contact memory extraction stats (avoids 20k message scans)
   contactMemoryStats: defineTable({
     userId: v.id("users"),
     contactId: v.id("contacts"),
@@ -274,6 +259,33 @@ const schema = defineSchema({
   })
     .index("by_user_recent", ["userId", "lastExtractedAt"])
     .index("by_contact", ["contactId"]),
+
+  pendingSends: defineTable({
+    userId: v.id("users"),
+    conversationId: v.id("conversations"),
+    actionId: v.optional(v.id("actions")), // Link to action that created this
+    text: v.string(),
+    // Recipient info (for iMessage AppleScript)
+    recipientHandle: v.string(), // Phone number or email
+    isGroup: v.boolean(),
+    chatIdentifier: v.optional(v.string()), // For group chats
+    // Status tracking
+    status: v.union(
+      v.literal("pending"),
+      v.literal("sending"),
+      v.literal("sent"),
+      v.literal("failed")
+    ),
+    error: v.optional(v.string()),
+    // Timestamps
+    createdAt: v.number(),
+    sentAt: v.optional(v.number()),
+    // Retry tracking
+    attempts: v.number(),
+    lastAttemptAt: v.optional(v.number()),
+  })
+    .index("by_user_status", ["userId", "status"])
+    .index("by_conversation", ["conversationId"]),
 });
 
 export default schema;

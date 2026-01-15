@@ -10,6 +10,7 @@ import {
 import { getSyncManager, type SyncProgress } from "./sync/sync-manager";
 import { getContactsWatcher } from "./sync/contacts-watcher";
 import { syncContactsToConvex } from "./sync/contacts-sync";
+import { getIMessageSender } from "./sync/imessage-sender";
 
 // WorkOS Client ID - should match web app config
 // In production, this would be loaded from a config file or env
@@ -154,6 +155,11 @@ async function startBackgroundSync(): Promise<void> {
 
     // Start contacts watcher for incremental contact sync
     startContactsWatcher();
+
+    // Start iMessage sender to poll for pending sends
+    const imessageSender = getIMessageSender(getValidAccessToken);
+    imessageSender.start(5000); // Poll every 5 seconds
+    console.log("[Main] iMessage sender started");
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : String(err);
     console.error("[Main] Failed to start background sync:", message);
@@ -224,4 +230,9 @@ app.on("window-all-closed", () => {
 app.on("will-quit", () => {
   getSyncManager().stop();
   getContactsWatcher().stop();
+  try {
+    getIMessageSender().stop();
+  } catch {
+    // Sender may not be initialized
+  }
 });
