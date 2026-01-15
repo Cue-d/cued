@@ -851,3 +851,309 @@ async function getOrCreateIntegration(
 
   return (await ctx.db.get(integrationId))!;
 }
+
+// ============================================================================
+// Slack Message Sync
+// ============================================================================
+
+// Validator for Slack message input (from Nango sync)
+const slackMessageInput = v.object({
+  id: v.string(), // Slack ts (timestamp)
+  channelId: v.string(),
+  channelType: v.union(
+    v.literal("im"),
+    v.literal("channel"),
+    v.literal("group"),
+    v.literal("mpim")
+  ),
+  userId: v.optional(v.string()), // Slack user ID
+  text: v.string(),
+  ts: v.string(),
+  threadTs: v.optional(v.string()),
+  isThreadParent: v.boolean(),
+  reactions: v.optional(
+    v.array(
+      v.object({
+        name: v.string(),
+        count: v.number(),
+        users: v.array(v.string()),
+      })
+    )
+  ),
+  isBot: v.boolean(),
+  sentAt: v.string(), // ISO date string
+});
+
+type SlackMessageInput = Infer<typeof slackMessageInput>;
+
+/**
+ * Sync Slack messages from Nango to Convex.
+ * Called via API endpoint when Nango sync completes.
+ */
+export const syncSlackMessages = mutation({
+  args: {
+    workosUserId: v.string(), // From webhook payload
+    messages: v.array(slackMessageInput),
+  },
+  handler: async (ctx, args) => {
+    // Find user by WorkOS ID (webhook doesn't have auth context)
+    const user = await findUserByWorkosIdMutation(ctx, args.workosUserId);
+    if (!user) {
+      throw new Error(`User not found for WorkOS ID: ${args.workosUserId}`);
+    }
+
+    return syncSlackMessagesInternal(ctx, user._id, args.messages);
+  },
+});
+
+/**
+ * Internal sync logic for Slack messages.
+ */
+async function syncSlackMessagesInternal(
+  ctx: MutationCtx,
+  userId: Id<"users">,
+  messages: SlackMessageInput[]
+) {
+  const result = {
+    messagesCount: 0,
+    conversationsCount: 0,
+    errors: [] as string[],
+  };
+
+  // Group messages by channel for efficient processing
+  const messagesByChannel = new Map<string, SlackMessageInput[]>();
+  for (const msg of messages) {
+    const existing = messagesByChannel.get(msg.channelId) ?? [];
+    existing.push(msg);
+    messagesByChannel.set(msg.channelId, existing);
+  }
+
+  // Batch fetch existing conversations
+  const channelIds = [...messagesByChannel.keys()];
+  const existingConversations = await batchFetchSlackConversations(
+    ctx,
+    userId,
+    channelIds
+  );
+  const conversationMap = new Map(
+    existingConversations.map((c) => [c.platformConversationId, c._id])
+  );
+
+  // Batch fetch existing messages
+  const messageIds = messages.map((m) => m.ts);
+  const existingMessages = await batchFetchSlackMessages(ctx, userId, messageIds);
+  const existingMessageSet = new Set(existingMessages.map((m) => m.platformMessageId));
+
+  // Process each channel's messages
+  for (const [channelId, channelMessages] of messagesByChannel) {
+    try {
+      // Get or create conversation
+      let conversationId = conversationMap.get(channelId);
+
+      if (!conversationId) {
+        const firstMsg = channelMessages[0];
+        const conversationType = getConversationType(firstMsg.channelType);
+
+        conversationId = await ctx.db.insert("conversations", {
+          userId,
+          platform: "slack",
+          platformConversationId: channelId,
+          conversationType,
+          participantContactIds: [], // Will be populated when we resolve users
+          unreadCount: 0,
+        });
+        conversationMap.set(channelId, conversationId);
+        result.conversationsCount++;
+      }
+
+      // Insert new messages
+      let latestMessage: { text: string; timestamp: number } | null = null;
+
+      for (const msg of channelMessages) {
+        // Skip if already exists
+        if (existingMessageSet.has(msg.ts)) {
+          continue;
+        }
+
+        // Skip bot messages
+        if (msg.isBot) {
+          continue;
+        }
+
+        // Resolve Slack user to contact
+        let senderContactId: Id<"contacts"> | undefined;
+        if (msg.userId) {
+          senderContactId = await getOrCreateSlackContact(ctx, userId, msg.userId);
+        }
+
+        const sentAtMs = new Date(msg.sentAt).getTime();
+
+        // Map reactions to our format
+        const reactions = msg.reactions?.map((r) => ({
+          emoji: `:${r.name}:`,
+          contactId: undefined as Id<"contacts"> | undefined, // TODO: resolve first user
+          isFromMe: false,
+          timestamp: sentAtMs,
+        }));
+
+        await ctx.db.insert("messages", {
+          userId,
+          conversationId,
+          platform: "slack",
+          content: msg.text,
+          sentAt: sentAtMs,
+          senderContactId,
+          isFromMe: false, // Nango sync only gets messages from others
+          platformMessageId: msg.ts,
+          reactions: reactions && reactions.length > 0 ? reactions : undefined,
+        });
+
+        result.messagesCount++;
+
+        // Track latest message for conversation update
+        if (!latestMessage || sentAtMs > latestMessage.timestamp) {
+          latestMessage = { text: msg.text, timestamp: sentAtMs };
+        }
+      }
+
+      // Update conversation lastMessage
+      if (latestMessage) {
+        await ctx.db.patch(conversationId, {
+          lastMessageText: latestMessage.text,
+          lastMessageAt: latestMessage.timestamp,
+        });
+      }
+    } catch (e) {
+      result.errors.push(`Failed to sync channel ${channelId}: ${e}`);
+    }
+  }
+
+  return result;
+}
+
+/**
+ * Map Slack channel type to our conversation type.
+ */
+function getConversationType(
+  channelType: "im" | "channel" | "group" | "mpim"
+): "dm" | "group" | "channel" {
+  switch (channelType) {
+    case "im":
+      return "dm";
+    case "mpim":
+    case "group":
+      return "group";
+    case "channel":
+      return "channel";
+  }
+}
+
+/**
+ * Get or create a contact for a Slack user ID.
+ */
+async function getOrCreateSlackContact(
+  ctx: MutationCtx,
+  userId: Id<"users">,
+  slackUserId: string
+): Promise<Id<"contacts">> {
+  // Check if we already have a handle for this Slack user
+  const existingHandle = await ctx.db
+    .query("contactHandles")
+    .withIndex("by_user_handle", (q) =>
+      q.eq("userId", userId).eq("handle", slackUserId)
+    )
+    .unique();
+
+  if (existingHandle) {
+    return existingHandle.contactId;
+  }
+
+  // Create placeholder contact with Slack user ID as name
+  const contactId = await ctx.db.insert("contacts", {
+    userId,
+    displayName: slackUserId, // Will be updated when we fetch user info
+  });
+
+  // Create handle for Slack user ID
+  await ctx.db.insert("contactHandles", {
+    userId,
+    contactId,
+    handleType: "slack_id",
+    handle: slackUserId,
+    platform: "slack",
+  });
+
+  return contactId;
+}
+
+/**
+ * Batch fetch existing Slack conversations by channel ID.
+ */
+async function batchFetchSlackConversations(
+  ctx: MutationCtx,
+  userId: Id<"users">,
+  channelIds: string[]
+): Promise<Doc<"conversations">[]> {
+  const results: Doc<"conversations">[] = [];
+
+  const batchSize = 50;
+  for (let i = 0; i < channelIds.length; i += batchSize) {
+    const batch = channelIds.slice(i, i + batchSize);
+    const promises = batch.map((id) =>
+      ctx.db
+        .query("conversations")
+        .withIndex("by_platform_conversation", (q) =>
+          q
+            .eq("userId", userId)
+            .eq("platform", "slack")
+            .eq("platformConversationId", id)
+        )
+        .unique()
+    );
+    const batchResults = await Promise.all(promises);
+    results.push(...batchResults.filter((c): c is Doc<"conversations"> => c !== null));
+  }
+
+  return results;
+}
+
+/**
+ * Batch fetch existing Slack messages by timestamp.
+ */
+async function batchFetchSlackMessages(
+  ctx: MutationCtx,
+  userId: Id<"users">,
+  messageTs: string[]
+): Promise<Doc<"messages">[]> {
+  const results: Doc<"messages">[] = [];
+
+  const batchSize = 50;
+  for (let i = 0; i < messageTs.length; i += batchSize) {
+    const batch = messageTs.slice(i, i + batchSize);
+    const promises = batch.map((ts) =>
+      ctx.db
+        .query("messages")
+        .withIndex("by_platform_message", (q) =>
+          q.eq("userId", userId).eq("platform", "slack").eq("platformMessageId", ts)
+        )
+        .unique()
+    );
+    const batchResults = await Promise.all(promises);
+    results.push(...batchResults.filter((m): m is Doc<"messages"> => m !== null));
+  }
+
+  return results;
+}
+
+/**
+ * Find user by WorkOS ID (for mutations without auth context).
+ */
+function findUserByWorkosIdMutation(
+  ctx: MutationCtx,
+  workosUserId: string
+): Promise<Doc<"users"> | null> {
+  return ctx.db
+    .query("users")
+    .withIndex("by_workos_id", (q) => q.eq("workosUserId", workosUserId))
+    .unique();
+}

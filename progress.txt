@@ -1699,3 +1699,46 @@ Notes:
   - Deploy requires: cd nango-integrations && npx nango deploy dev
   - Ready for task 5.3: Add Slack to integrations page
 ---
+
+[2026-01-15 17:00] Task 5.3 - Add Slack to integrations page (ALREADY COMPLETE)
+Files: None (already implemented)
+Decisions:
+  - Verified integrations page already includes Slack card at line 49-56
+  - nangoIntegrationId: "slack" correctly configured
+  - Same Nango Connect UI pattern as Gmail already in place
+  - onEvent handlers for connect/close already working
+  - Convex integrations.ts has nangoToPlatform mapping for "slack"
+  - connectNango/disconnectNango mutations handle Slack
+Why:
+  - Task was implemented as part of task 4.4 when integrations page was created
+  - Slack was included from the start alongside Gmail placeholder
+Notes:
+  - No code changes needed - just marking task as complete
+  - Ready for task 5.4: Create Convex scheduled function to pull Slack from Nango
+---
+
+[2026-01-15 17:30] Task 5.4 - Create Convex function to pull Slack from Nango
+Files:
+  - packages/convex/convex/sync.ts (add syncSlackMessages mutation)
+  - apps/web/app/api/nango/pull-slack/route.ts (new)
+  - apps/web/app/api/nango/webhook/route.ts (add sync webhook handling)
+Decisions:
+  - Created syncSlackMessages mutation mirroring iMessage sync pattern
+  - Maps SlackSyncMessage from Nango to unified message schema
+  - Creates placeholder contacts for Slack user IDs with slack_id handle type
+  - Uses batch fetch for conversations and messages to avoid N+1 queries
+  - Webhook-driven pull: Nango sends sync webhook -> webhook calls pull-slack -> pull-slack fetches from Nango and calls Convex mutation
+  - Channel type mapping: im->dm, mpim/group->group, channel->channel
+  - Reactions mapped to `:name:` format for emoji display
+  - Bot messages filtered out during sync
+Why:
+  - Webhook-driven approach more efficient than polling (only pulls when new data available)
+  - Separating pull-slack route enables manual testing and future scheduled calls
+  - Placeholder contacts allow immediate message display; user resolution can be added later
+  - Using Next.js API route for Nango SDK since Convex actions have limited npm support
+Notes:
+  - All lint and typecheck pass
+  - Convex deployed successfully with syncSlackMessages mutation
+  - Requires webhook URL in Nango Dashboard with sync webhooks enabled
+  - User name resolution (task 5.4 step "users:read API") deferred to task 5.5
+---

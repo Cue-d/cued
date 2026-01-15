@@ -1171,7 +1171,7 @@
         "Show connected status from Convex integrations table",
         "Add disconnect button"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "5.4",
@@ -1191,7 +1191,7 @@
         "Schedule to run every 5 minutes",
         "Track lastPulledAt cursor per connection"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "5.5",
