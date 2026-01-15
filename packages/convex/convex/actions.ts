@@ -9,6 +9,38 @@ import {
   platformValidator,
 } from "./schema";
 
+/**
+ * Fetch all actionable items: pending actions + snoozed actions that are due.
+ * This is the core logic for determining what needs user attention.
+ */
+async function fetchActionableActions(
+  ctx: QueryCtx,
+  userId: Id<"users">
+): Promise<Doc<"actions">[]> {
+  const now = Date.now();
+
+  const [pendingActions, snoozedActions] = await Promise.all([
+    ctx.db
+      .query("actions")
+      .withIndex("by_user_status", (q) =>
+        q.eq("userId", userId).eq("status", "pending")
+      )
+      .collect(),
+    ctx.db
+      .query("actions")
+      .withIndex("by_user_status", (q) =>
+        q.eq("userId", userId).eq("status", "snoozed")
+      )
+      .collect(),
+  ]);
+
+  const dueSnoozedActions = snoozedActions.filter(
+    (a) => a.snoozedUntil && a.snoozedUntil <= now
+  );
+
+  return [...pendingActions, ...dueSnoozedActions];
+}
+
 /** Enrich an action with related contact and conversation data. */
 async function enrichAction(
   ctx: QueryCtx,
@@ -180,28 +212,52 @@ export const createAction = mutation({
 
 /**
  * Get pending actions for the current user.
+ * Includes:
+ *  - Actions with status="pending"
+ *  - Snoozed actions where snoozedUntil <= now (due to wake up)
+ * Supports cursor-based pagination using createdAt timestamp.
  */
 export const getPendingActions = query({
   args: {
     limit: v.optional(v.number()),
+    cursor: v.optional(v.number()), // createdAt timestamp of last action
   },
   handler: async (ctx, args) => {
     const user = await getAuthenticatedUser(ctx);
-    if (!user) return { actions: [] };
+    if (!user) return { actions: [], nextCursor: null };
 
     const limit = Math.min(args.limit ?? 20, 100);
 
-    const actions = await ctx.db
-      .query("actions")
-      .withIndex("by_user_status", (q) =>
-        q.eq("userId", user._id).eq("status", "pending")
-      )
-      .take(limit);
+    const actionable = await fetchActionableActions(ctx, user._id);
+
+    // Sort by priority DESC, then createdAt DESC
+    actionable.sort((a, b) => {
+      if (b.priority !== a.priority) return b.priority - a.priority;
+      return b.createdAt - a.createdAt;
+    });
+
+    // Apply cursor-based pagination
+    let filtered = actionable;
+    if (args.cursor) {
+      const cursorIdx = filtered.findIndex((a) => a.createdAt < args.cursor!);
+      filtered = cursorIdx >= 0 ? filtered.slice(cursorIdx) : [];
+    }
+
+    // Take limit + 1 to determine if there's more
+    const page = filtered.slice(0, limit + 1);
+    const hasMore = page.length > limit;
+    const actions = hasMore ? page.slice(0, limit) : page;
 
     const enriched = await Promise.all(
       actions.map((a) => enrichAction(ctx, a))
     );
-    return { actions: enriched };
+
+    const nextCursor =
+      hasMore && actions.length > 0
+        ? actions[actions.length - 1].createdAt
+        : null;
+
+    return { actions: enriched, nextCursor };
   },
 });
 
@@ -243,5 +299,153 @@ export const updateActionStatus = mutation({
     await ctx.db.patch(args.actionId, updates);
 
     return { success: true };
+  },
+});
+
+/**
+ * Get a single action with full context: messages and contact info.
+ * Used for the action detail view / card.
+ */
+export const getActionWithContext = query({
+  args: {
+    actionId: v.id("actions"),
+    messageLimit: v.optional(v.number()), // How many messages to include (default 10)
+  },
+  handler: async (ctx, args) => {
+    const user = await getAuthenticatedUser(ctx);
+    if (!user) return null;
+
+    const action = await ctx.db.get(args.actionId);
+    if (!action || action.userId !== user._id) {
+      return null;
+    }
+
+    const messageLimit = Math.min(args.messageLimit ?? 10, 50);
+
+    // Get related conversation if exists
+    const conversation = action.conversationId
+      ? await ctx.db.get(action.conversationId)
+      : null;
+
+    // Get related contact if exists
+    const contact = action.contactId
+      ? await ctx.db.get(action.contactId)
+      : null;
+
+    // Get contact handles if we have a contact
+    const handles = contact
+      ? await ctx.db
+          .query("contactHandles")
+          .withIndex("by_contact", (q) => q.eq("contactId", contact._id))
+          .collect()
+      : [];
+
+    // Get recent messages from the conversation
+    const messages = action.conversationId
+      ? await ctx.db
+          .query("messages")
+          .withIndex("by_conversation", (q) =>
+            q.eq("conversationId", action.conversationId!)
+          )
+          .order("desc")
+          .take(messageLimit)
+      : [];
+
+    // Resolve sender names for messages
+    const messagesWithSender = await Promise.all(
+      messages.map(async (msg) => {
+        let senderName: string | null = null;
+        if (msg.isFromMe) {
+          senderName = "You";
+        } else if (msg.senderContactId) {
+          const sender = await ctx.db.get(msg.senderContactId);
+          senderName = sender?.displayName ?? null;
+        }
+
+        // Resolve attachment URLs
+        const attachmentsWithUrls = msg.attachments
+          ? await Promise.all(
+              msg.attachments.map(async (att) => ({
+                ...att,
+                url: await ctx.storage.getUrl(att.storageId),
+                thumbnailUrl: att.thumbnailStorageId
+                  ? await ctx.storage.getUrl(att.thumbnailStorageId)
+                  : null,
+              }))
+            )
+          : null;
+
+        return {
+          _id: msg._id,
+          content: msg.content,
+          sentAt: msg.sentAt,
+          isFromMe: msg.isFromMe,
+          senderName,
+          status: msg.status,
+          reactions: msg.reactions,
+          attachments: attachmentsWithUrls,
+        };
+      })
+    );
+
+    // Reverse to show oldest first (chronological order for display)
+    messagesWithSender.reverse();
+
+    return {
+      action: {
+        _id: action._id,
+        type: action.type,
+        status: action.status,
+        priority: action.priority,
+        draftMessage: action.draftMessage ?? null,
+        draftResponse: action.draftResponse ?? null,
+        reason: action.reason ?? null,
+        llmReason: action.llmReason ?? null,
+        createdAt: action.createdAt,
+        snoozedUntil: action.snoozedUntil ?? null,
+        completedAt: action.completedAt ?? null,
+        discardedAt: action.discardedAt ?? null,
+        platform: action.platform ?? conversation?.platform ?? null,
+      },
+      conversation: conversation
+        ? {
+            _id: conversation._id,
+            platform: conversation.platform,
+            conversationType: conversation.conversationType,
+            displayName: conversation.displayName ?? null,
+            lastMessageAt: conversation.lastMessageAt ?? null,
+          }
+        : null,
+      contact: contact
+        ? {
+            _id: contact._id,
+            displayName: contact.displayName,
+            company: contact.company ?? null,
+            notes: contact.notes ?? null,
+            importance: contact.importance ?? null,
+            handles: handles.map((h) => ({
+              handleType: h.handleType,
+              handle: h.handle,
+              platform: h.platform,
+            })),
+          }
+        : null,
+      messages: messagesWithSender,
+    };
+  },
+});
+
+/**
+ * Get count of pending actions for sidebar badge.
+ * Includes pending + due snoozed actions.
+ */
+export const getPendingActionCount = query({
+  args: {},
+  handler: async (ctx) => {
+    const user = await getAuthenticatedUser(ctx);
+    if (!user) return { count: 0 };
+
+    const actionable = await fetchActionableActions(ctx, user._id);
+    return { count: actionable.length };
   },
 });

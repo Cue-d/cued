@@ -2121,3 +2121,66 @@ Implementation:
   - 30-second cron interval (rate-limited to 1 per run)
   - getQueueStats: query for monitoring pending/processing/completed counts
 ---
+
+[2026-01-15 11:35] Task 4.13 - Pull Google Contacts from Nango into Convex
+Files:
+  - apps/web/app/api/nango/pull-google-contacts/route.ts (new)
+  - packages/convex/convex/sync.ts (syncGoogleContacts mutation added)
+  - apps/web/app/api/nango/webhook/route.ts (updated to call both Gmail+Contacts)
+Implementation:
+  - Created pull-google-contacts API route following Gmail/Slack pattern
+  - Added syncGoogleContacts mutation that upserts contacts by email/phone handle
+  - Implemented cross-platform contact merging (Google -> iMessage/Slack by handle match)
+  - Handle deleted contacts: remove gmail handles, preserve iMessage/Slack data
+  - Updated webhook to call both pull-gmail and pull-google-contacts on Google sync
+Decisions:
+  - Used API route (webhook-triggered) instead of cron job (matches existing pattern)
+  - GoogleContact handles stored with platform="gmail" (Google OAuth uses gmail provider)
+  - Smart display name updates: only override if current name is just a handle/placeholder
+  - Deleted contacts: only remove email handles from gmail platform, preserve phone handles
+Notes:
+  - All lint and typecheck pass
+  - Convex deployed successfully
+  - Deploy Nango sync with: cd nango-integrations && npx nango deploy dev
+  - Ready for task 4.14: Test Gmail integration end-to-end
+---
+
+[2026-01-15 11:40] Task 4.14 - Test Gmail integration end-to-end
+Files:
+  - apps/web/TEST_GMAIL_E2E.md (new - test documentation)
+  - packages/convex/convex/integrations.ts (debugGmailStats query)
+  - packages/convex/convex/actionAnalysis.ts (TypeScript fix for null handling)
+Verification:
+  - ✓ Gmail OAuth connection flow works (tested, shows isConnected: true)
+  - ✓ Integration shows in Convex with hasNangoConnection: true
+  - ✓ All API routes in place: pull-gmail, pull-google-contacts, webhook, gmail/send
+  - ✓ Sync mutations ready: syncGmailMessages, syncGoogleContacts
+  - ✓ Inbox UI queries support gmail platform
+  - ⚠ No messages synced yet (lastSyncAt: null) - requires webhook URL config in Nango
+Decisions:
+  - Created comprehensive test doc (TEST_GMAIL_E2E.md) with manual verification steps
+  - Added debugGmailStats query for programmatic verification
+  - TypeScript fix: null-to-undefined conversion using !== null ternary
+Notes:
+  - Code is complete; sync requires Nango Dashboard webhook URL configuration
+  - Manual verification: npx convex run 'integrations:debugGmailStats' '{}'
+  - All lint and typecheck pass
+---
+
+[2026-01-15 11:42] Task 7.9 - Create actions Convex queries (getPending, getWithContext, getCount)
+Files:
+  - packages/convex/convex/actions.ts (updated)
+Implementation:
+  - getPendingActions: cursor-based pagination with limit, includes snoozed actions due (snoozedUntil <= now)
+  - getActionWithContext: full context with action, conversation, contact (with handles), messages (with sender names, attachments)
+  - getPendingActionCount: count for sidebar badge
+  - fetchActionableActions: helper to DRY pending + snoozed fetching with parallel queries
+Decisions:
+  - Sort by priority DESC then createdAt DESC
+  - Messages in getActionWithContext are returned chronological (oldest first) for display
+  - Attachment URLs resolved via ctx.storage.getUrl()
+Notes:
+  - All lint and typecheck pass
+  - Convex deployed successfully
+  - Code simplified via code-simplifier agent
+---
