@@ -34,6 +34,13 @@ export const actionStatusValidator = v.union(
   v.literal("snoozed")
 );
 
+export const analysisQueueStatusValidator = v.union(
+  v.literal("pending"),
+  v.literal("processing"),
+  v.literal("completed"),
+  v.literal("skipped")
+);
+
 export const messageStatusValidator = v.union(
   v.literal("sending"),
   v.literal("sent"),
@@ -188,6 +195,27 @@ const schema = defineSchema({
   })
     .index("by_user", ["userId"])
     .index("by_user_status", ["userId", "status"]),
+
+  actionAnalysisQueue: defineTable({
+    conversationId: v.id("conversations"),
+    userId: v.id("users"),
+    status: analysisQueueStatusValidator,
+    priority: v.number(),
+    queuedAt: v.number(),
+    startedAt: v.optional(v.number()),
+    completedAt: v.optional(v.number()),
+    result: v.optional(
+      v.union(
+        v.literal("action_created"),
+        v.literal("no_action"),
+        v.literal("error")
+      )
+    ),
+    skipReason: v.optional(v.string()),
+  })
+    .index("by_user_status", ["userId", "status"])
+    .index("by_priority", ["status", "priority"]) // For processing order: pending first, then by priority
+    .index("by_conversation", ["conversationId"]), // To check if conversation already queued
 });
 
 export default schema;
