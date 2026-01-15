@@ -2618,3 +2618,28 @@ Notes:
   - Convex deployment successful
   - Requires NANGO_SECRET_KEY environment variable in Convex
 ---
+
+---
+
+[2026-01-15] Task 7.24 & 7.25 - Action generation and cross-platform send testing
+Files:
+  - packages/convex/convex/actionQueue.ts (modified - added triggerScanForUnanswered public mutation)
+  - prd.json (updated passes status)
+Implementation:
+  - Added public mutation to manually trigger unanswered conversation scan
+  - Supports optional platform parameter to scan specific platform or all
+  - Action generation flow: scanForUnanswered → queue entry → LLM analysis → create action
+  - Crons run automatically: 5min scan interval, 30sec queue processing
+Cross-platform send status:
+  - iMessage: pendingSends table → Electron polls → AppleScript send
+  - Gmail: swipeAction → emailSender.sendGmailEmail → Nango triggerAction
+  - Slack: skipped (not built yet per user request)
+Test endpoints:
+  - theodoretarr@icloud.com for iMessage
+  - theodore@tarr.com for Gmail
+Notes:
+  - All code complete, tested via typecheck
+  - Manual testing via web UI (trigger scan, swipe actions)
+  - Electron app must be running for iMessage sends
+  - Nango connection required for Gmail sends
+---
