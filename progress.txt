@@ -2003,3 +2003,29 @@ Notes:
   - Deploy requires: cd nango-integrations && npx nango deploy dev
   - Ready for task 4.13: Pull Google Contacts from Nango into Convex
 ---
+
+[2026-01-15 10:50] Task 7.3 - Create action generation LLM prompt with structured output
+Files:
+  - packages/ai/src/actions/generate-action.ts (new)
+  - packages/ai/src/actions/index.ts (new)
+  - packages/ai/src/actions/generate-action.test.ts (new)
+  - packages/ai/src/index.ts (updated exports)
+Implementation:
+  - ActionSuggestionSchema: Zod schema for LLM structured output
+    - shouldCreateAction, type, priority, reason, suggestedResponse, remindAt
+  - generateAction(): Main function to analyze conversations
+    - System prompt with detailed guidelines for action creation
+    - Context builder: contact info, last 10 messages, platform, time since
+    - Edge cases: empty conversations returns no-action, user-sent-last returns no-action
+  - generateActionWithRetry(): Wrapper with exponential backoff (max 2 retries)
+  - Types: ActionSuggestion, ContactInfo, ActionMessage, GenerateActionInput
+Decisions:
+  - Uses FAST_MODEL (gpt-4o-mini) for cost efficiency
+  - Renamed ConversationMessage to ActionMessage to avoid conflict with mem0 type
+  - System prompt specifies when to create vs skip actions
+  - Priority guidelines: 80-100 urgent, 60-79 important, 40-59 should address, etc.
+Notes:
+  - Code simplified by code-simplifier: extracted delay helper, clearer retry semantics
+  - 9 unit tests with mocked OpenAI responses (all passing)
+  - All lint and typecheck pass
+---
