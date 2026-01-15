@@ -1587,7 +1587,7 @@
         "Add index by_priority for processing order",
         "Deploy schema and verify in Convex dashboard"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "7.5",

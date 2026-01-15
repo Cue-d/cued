@@ -1919,3 +1919,30 @@ Notes:
   - Newsletter filtering prevents extracting memories from automated emails
   - Ready for task 4.12: Create Nango sync for Google Contacts
 ---
+
+[2026-01-15 10:37] Task 7.4 - Create Convex actionAnalysisQueue table and indexes
+Files:
+  - packages/convex/convex/schema.ts
+Implementation:
+  - Added analysisQueueStatusValidator: pending, processing, completed, skipped
+  - Created actionAnalysisQueue table with fields:
+    - conversationId (ref to conversations)
+    - userId (ref to users)
+    - status (uses analysisQueueStatusValidator)
+    - priority (0-100 for processing order)
+    - queuedAt, startedAt, completedAt (timestamps)
+    - result (action_created, no_action, error)
+    - skipReason (why conversation was skipped)
+  - Indexes:
+    - by_user_status: for queue queries by user
+    - by_priority: compound [status, priority] for processing order
+    - by_conversation: to check if conversation already queued
+Decisions:
+  - Status uses separate validator from actionStatus (different states)
+  - Result is optional union type to capture LLM decision outcome
+  - by_priority index uses compound [status, priority] so pending items sort by priority
+Notes:
+  - Code simplified by code-simplifier: removed redundant comments
+  - Schema deployed successfully to Convex
+  - All lint and typecheck pass
+---
