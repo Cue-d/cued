@@ -1652,3 +1652,23 @@ Notes:
   - Web app lint and typecheck pass
   - Convex deployed successfully with new schema and mutations
 ---
+
+[2026-01-15 16:30] Task 5.1 - Configure Slack integration in Nango
+Files:
+  - apps/web/SLACK_SETUP.md (new)
+  - prd.json (mark task complete)
+Decisions:
+  - Created comprehensive SLACK_SETUP.md with step-by-step setup instructions
+  - Documented all required OAuth scopes: channels:read, channels:history, chat:write, im:read, im:history, im:write, users:read
+  - Verified Convex schema already includes "slack" as valid platform (added in phase 1)
+  - Documented troubleshooting for common OAuth errors
+Why:
+  - Task 5.1 is primarily a manual configuration task requiring Nango Dashboard + Slack API setup
+  - Documentation enables consistent setup and troubleshooting
+  - Following same pattern as Gmail setup (NANGO_SETUP.md) for consistency
+Notes:
+  - Manual steps required: create Slack app, configure OAuth, add credentials to Nango
+  - Convex schema already supports slack platform - no schema changes needed
+  - All lint and typecheck pass for entire monorepo
+  - Ready for task 5.2: Create Nango Slack sync function for messages
+---
