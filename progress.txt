@@ -2092,3 +2092,32 @@ Notes:
   - Deduplication check prevents duplicate actions per conversation
   - Deployed to Convex dev environment
 ---
+
+## Task 7.5 - Create scanForUnansweredConversations cron
+Status: COMPLETE (2026-01-15)
+Commit: 3e74314
+Files:
+  - packages/convex/convex/actionQueue.ts (new)
+  - packages/convex/convex/crons.ts (updated)
+Implementation:
+  - scanForUnansweredConversations: internalMutation that processes one user/platform
+  - scanAllUsersForUnanswered: iterates all connected integrations
+  - 5-minute cron interval registered in crons.ts
+  - Applies shouldSkipLlmAnalysis filter from @prm/ai
+  - Calculates priority using calculatePriority from @prm/ai
+  - Queues entries in actionAnalysisQueue table
+  - 2-hour threshold, 6-hour grace period
+---
+
+## Task 7.7 - Create processAnalysisQueue cron
+Status: COMPLETE (2026-01-15)
+Commit: 3e74314 (same as 7.5)
+Files:
+  - packages/convex/convex/actionQueue.ts
+  - packages/convex/convex/crons.ts
+Implementation:
+  - triggerQueueProcessing: internalMutation that schedules action
+  - Uses ctx.scheduler.runAfter(0, ...) to call analyzeConversation
+  - 30-second cron interval (rate-limited to 1 per run)
+  - getQueueStats: query for monitoring pending/processing/completed counts
+---

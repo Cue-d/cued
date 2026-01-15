@@ -1605,7 +1605,7 @@
         "Calculate priority using 7.2, queue for LLM analysis",
         "Log stats: processed, queued, skipped counts"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "7.6",
@@ -1638,7 +1638,7 @@
         "Handle action errors, update queue status",
         "Log processing stats"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "7.8",
