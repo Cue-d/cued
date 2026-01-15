@@ -102,31 +102,39 @@ async function handleSyncWebhook(payload: NangoWebhookPayload): Promise<NextResp
     return NextResponse.json({ error: "Missing required fields" }, { status: 400 });
   }
 
-  // Route to appropriate pull handler based on integration
-  if (providerConfigKey === "slack") {
-    // Call our pull-slack endpoint to fetch and sync records
-    const baseUrl = process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000";
-    const pullResponse = await fetch(`${baseUrl}/api/nango/pull-slack`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        connectionId,
-        workosUserId: endUser.endUserId,
-      }),
+  // Map provider to pull endpoint
+  const pullEndpoints: Record<string, string> = {
+    slack: "pull-slack",
+    "google-mail": "pull-gmail",
+  };
+
+  const endpoint = pullEndpoints[providerConfigKey];
+  if (!endpoint) {
+    return NextResponse.json({
+      received: true,
+      processed: false,
+      reason: "Unknown integration",
     });
-
-    if (!pullResponse.ok) {
-      const error = await pullResponse.json();
-      console.error("Slack pull failed:", error);
-      return NextResponse.json({ received: true, processed: false, error });
-    }
-
-    const result = await pullResponse.json();
-    console.log("Slack sync pulled:", result);
-    return NextResponse.json({ received: true, processed: true, result });
   }
 
-  // TODO: Add google-mail handler here
+  // Call the appropriate pull endpoint
+  const baseUrl = process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000";
+  const pullResponse = await fetch(`${baseUrl}/api/nango/${endpoint}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      connectionId,
+      workosUserId: endUser.endUserId,
+    }),
+  });
 
-  return NextResponse.json({ received: true, processed: false, reason: "Unknown integration" });
+  if (!pullResponse.ok) {
+    const error = await pullResponse.json();
+    console.error(`${providerConfigKey} pull failed:`, error);
+    return NextResponse.json({ received: true, processed: false, error });
+  }
+
+  const result = await pullResponse.json();
+  console.log(`${providerConfigKey} sync pulled:`, result);
+  return NextResponse.json({ received: true, processed: true, result });
 }

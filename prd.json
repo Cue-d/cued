@@ -1065,7 +1065,7 @@
         "Skip automated/newsletter emails (detect via sender patterns)",
         "Verify Gmail conversations generate searchable memories"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "4.12",
@@ -1518,6 +1518,423 @@
         "Test auth flow in production",
         "Verify webhook endpoints accessible",
         "Monitor for errors in first 24 hours"
+      ],
+      "passes": false
+    },
+    {
+      "id": "7.1",
+      "phase": 7,
+      "mode": "afk",
+      "category": "functional",
+      "description": "Port message filter heuristics (OTP, spam, scams, phishing)",
+      "reference": "backend/services/actions/message_filter.py",
+      "steps": [
+        "Create packages/ai/filters/message-filter.ts",
+        "Port Tier 1: Short code detection (5-6 digit senders)",
+        "Port Tier 2: OTP codes, unsubscribe keywords, carrier notifications, delivery tracking",
+        "Port Tier 3 (non-contacts only): Account security phishing, bank alerts, credential harvesting",
+        "Port Tier 4 (low confidence): Urgency spam, promotional language",
+        "Export FilterResult type with should_skip, reason, confidence",
+        "Add unit tests for each filter tier"
+      ],
+      "passes": false
+    },
+    {
+      "id": "7.2",
+      "phase": 7,
+      "mode": "afk",
+      "category": "functional",
+      "description": "Port priority scoring system (time-decay, contact boost, group penalty)",
+      "reference": "backend/services/actions/priority.py",
+      "steps": [
+        "Create packages/ai/filters/priority.ts",
+        "Implement time-decay curve: 0-2h=20, 2-24h=40-70, 24-72h=80, 72-168h=80-40, 168h+=30",
+        "Implement contact boost: +10 saved contact, +10 has company, +5 has notes",
+        "Implement group penalty: -15 for group chats",
+        "Export calculatePriority(hoursSince, contactInfo, isGroup) returning 0-100",
+        "Add unit tests for priority edge cases"
+      ],
+      "passes": false
+    },
+    {
+      "id": "7.3",
+      "phase": 7,
+      "mode": "afk",
+      "category": "integration",
+      "description": "Create action generation LLM prompt with structured output (Zod schema)",
+      "reference": "https://ai-sdk.dev/docs/ai-sdk-core/generating-structured-data",
+      "steps": [
+        "Create packages/ai/actions/generate-action.ts",
+        "Define ActionSuggestion Zod schema: shouldCreateAction, type, priority, reason, suggestedResponse, remindAt",
+        "Create system prompt with context: contact info, last 10 messages, hours since, platform",
+        "Use Vercel AI SDK generateObject() with gpt-4o-mini",
+        "Handle edge cases: empty conversations, very long messages",
+        "Add unit tests with mocked OpenAI responses"
+      ],
+      "passes": false
+    },
+    {
+      "id": "7.4",
+      "phase": 7,
+      "mode": "afk",
+      "category": "architectural",
+      "description": "Create Convex actionAnalysisQueue table and indexes",
+      "steps": [
+        "Add actionAnalysisQueue table to convex/schema.ts",
+        "Fields: conversationId, userId, status (pending/processing/completed/skipped), priority",
+        "Fields: queuedAt, startedAt, completedAt, result, skipReason",
+        "Add index by_user_status for queue queries",
+        "Add index by_priority for processing order",
+        "Deploy schema and verify in Convex dashboard"
+      ],
+      "passes": false
+    },
+    {
+      "id": "7.5",
+      "phase": 7,
+      "mode": "afk",
+      "category": "functional",
+      "description": "Create scanForUnansweredConversations scheduled function (5 min)",
+      "reference": "backend/workers/jobs/unanswered_scan.py",
+      "steps": [
+        "Create Convex cron in convex/crons.ts running every 5 minutes",
+        "Query conversations where lastMessage is not from user, older than 2 hours",
+        "Skip if pending action already exists for conversation",
+        "Skip if analyzed within last 6 hours (grace period)",
+        "Apply message filters from 7.1, mark skipped with reason",
+        "Calculate priority using 7.2, queue for LLM analysis",
+        "Log stats: processed, queued, skipped counts"
+      ],
+      "passes": false
+    },
+    {
+      "id": "7.6",
+      "phase": 7,
+      "mode": "afk",
+      "category": "integration",
+      "description": "Create analyzeConversationWithLLM Convex action (OpenAI gpt-4o-mini)",
+      "reference": "backend/workers/jobs/llm_processor.py",
+      "steps": [
+        "Create convex/actions/analyzeConversation.ts",
+        "Fetch conversation context: last 10 messages, contact info, platform",
+        "Call generateAction() from packages/ai with context",
+        "If shouldCreateAction=true: create action in actions table",
+        "Update queue entry with result: action_created, no_action, or error",
+        "Handle errors gracefully, mark for retry"
+      ],
+      "passes": false
+    },
+    {
+      "id": "7.7",
+      "phase": 7,
+      "mode": "afk",
+      "category": "functional",
+      "description": "Create processAnalysisQueue scheduled function (30 sec, rate-limited)",
+      "steps": [
+        "Create Convex cron in convex/crons.ts running every 30 seconds",
+        "Get next pending queue entry ordered by priority DESC",
+        "Call analyzeConversationWithLLM action",
+        "Process max 1 conversation per run (rate limiting)",
+        "Handle action errors, update queue status",
+        "Log processing stats"
+      ],
+      "passes": false
+    },
+    {
+      "id": "7.8",
+      "phase": 7,
+      "mode": "afk",
+      "category": "architectural",
+      "description": "Extend actions table with draftResponse, snoozedUntil, platform, expired status",
+      "steps": [
+        "Update actions table in convex/schema.ts",
+        "Add draftResponse: optional string for user's typed response",
+        "Add snoozedUntil: optional number (timestamp)",
+        "Add completedAt, discardedAt: optional timestamps",
+        "Add platform: string (imessage, gmail, slack)",
+        "Add llmReason: string explaining why action was created",
+        "Update status enum: pending, completed, discarded, snoozed, expired",
+        "Deploy schema changes"
+      ],
+      "passes": false
+    },
+    {
+      "id": "7.9",
+      "phase": 7,
+      "mode": "afk",
+      "category": "functional",
+      "description": "Create actions Convex queries (getPending, getWithContext, getCount)",
+      "steps": [
+        "Create convex/actions.ts with getPendingActions query",
+        "Support pagination with limit and cursor",
+        "Include snoozed actions where snoozedUntil < now",
+        "Create getActionWithContext: action + messages + contact info",
+        "Create getPendingActionCount for sidebar badge",
+        "Add unit tests for query edge cases"
+      ],
+      "passes": false
+    },
+    {
+      "id": "7.10",
+      "phase": 7,
+      "mode": "afk",
+      "category": "functional",
+      "description": "Create swipeAction mutation with platform routing",
+      "steps": [
+        "Create swipeAction mutation in convex/actions.ts",
+        "Handle direction='left': set status=discarded, discardedAt=now",
+        "Handle direction='right': send message, set status=completed, completedAt=now",
+        "Handle direction='up': set status=snoozed, snoozedUntil from input",
+        "Route send to correct platform handler (7.20-7.22)",
+        "Create updateDraftResponse mutation to save typing progress"
+      ],
+      "passes": false
+    },
+    {
+      "id": "7.11",
+      "phase": 7,
+      "mode": "afk",
+      "category": "ui",
+      "description": "Create snooze picker with presets + custom date option",
+      "steps": [
+        "Create packages/ui/components/action-queue/SnoozePicker.tsx",
+        "Add preset buttons: 1 hour, 3 hours, Tomorrow 9am, Next Monday 9am",
+        "Add 'Custom...' button that opens date/time picker",
+        "Use shadcn/ui Calendar and TimePicker components",
+        "Return selected timestamp to parent component",
+        "Style to match card overlay aesthetic"
+      ],
+      "passes": false
+    },
+    {
+      "id": "7.12",
+      "phase": 7,
+      "mode": "afk",
+      "category": "ui",
+      "description": "Port CardStack component to packages/ui (3 visible cards, keyboard nav)",
+      "reference": "frontend/src/renderer/src/components/ActionQueue/CardStack.tsx",
+      "steps": [
+        "Create packages/ui/components/action-queue/CardStack.tsx",
+        "Render stack of 3 visible cards with scale/offset effect",
+        "Top card interactive, bottom 2 are previews",
+        "Implement keyboard navigation: left/right/up arrows for swipe, Tab for focus input",
+        "Track responseTexts and contactForms state per action",
+        "Handle swipe callbacks to parent",
+        "Export from packages/ui"
+      ],
+      "passes": false
+    },
+    {
+      "id": "7.13",
+      "phase": 7,
+      "mode": "afk",
+      "category": "ui",
+      "description": "Port SwipeableCard gesture component with Framer Motion",
+      "reference": "frontend/src/renderer/src/components/ActionQueue/SwipeableCard.tsx",
+      "steps": [
+        "Create packages/ui/components/action-queue/SwipeableCard.tsx",
+        "Install framer-motion in packages/ui",
+        "Implement drag gesture with thresholds: X=120px, Y=80px",
+        "Add visual feedback: rotation, scale, opacity transforms",
+        "Add color overlays: teal (send), gray (discard), amber (snooze)",
+        "Implement programmatic swipe animation for keyboard/button triggers",
+        "Handle text selection protection in input areas"
+      ],
+      "passes": false
+    },
+    {
+      "id": "7.14",
+      "phase": 7,
+      "mode": "afk",
+      "category": "ui",
+      "description": "Port MessageResponseCard with message history and response textarea",
+      "reference": "frontend/src/renderer/src/components/ActionQueue/MessageResponseCard.tsx",
+      "steps": [
+        "Create packages/ui/components/action-queue/MessageResponseCard.tsx",
+        "Display message history with sender, timestamp, delivery status",
+        "Show attachments with image preview",
+        "Show reaction badges on messages",
+        "Add response textarea with auto-focus",
+        "Format timestamps: 'Just now', '1h ago', '3d ago'",
+        "Track response text in parent state"
+      ],
+      "passes": false
+    },
+    {
+      "id": "7.15",
+      "phase": 7,
+      "mode": "afk",
+      "category": "ui",
+      "description": "Create Actions page with Convex integration and empty state",
+      "steps": [
+        "Create app/(app)/actions/page.tsx",
+        "Use useQuery to fetch pending actions from Convex",
+        "Render CardStack with action data",
+        "Show loading skeleton during initial fetch",
+        "Show empty state when no pending actions",
+        "Add keyboard shortcut hints in corner",
+        "Handle swipe mutations with optimistic updates"
+      ],
+      "passes": false
+    },
+    {
+      "id": "7.16",
+      "phase": 7,
+      "mode": "afk",
+      "category": "ui",
+      "description": "Create ContactCard component with editable name, company, tags, notes",
+      "reference": "frontend/src/renderer/src/components/ActionQueue/EODContactCard.tsx",
+      "steps": [
+        "Create packages/ui/components/action-queue/ContactCard.tsx",
+        "Display contact avatar and editable name field",
+        "Add company input field",
+        "Add tags input (comma-separated, rendered as badges)",
+        "Add notes textarea for relationship context",
+        "Add 'Link to existing contact' dropdown for manual merge",
+        "Show platform badge indicating contact origin",
+        "Track form state in parent"
+      ],
+      "passes": false
+    },
+    {
+      "id": "7.17",
+      "phase": 7,
+      "mode": "afk",
+      "category": "functional",
+      "description": "Create daily scan for new contacts (EOD generation)",
+      "steps": [
+        "Create Convex cron running daily at 9 PM user's timezone",
+        "Query conversations from today with new/unknown senders",
+        "Skip if contact already has notes or company (already enriched)",
+        "Create action with type='new_contact' for each",
+        "Include context: when contacted, conversation preview",
+        "Limit to 10 new contacts per day to avoid overwhelm"
+      ],
+      "passes": false
+    },
+    {
+      "id": "7.18",
+      "phase": 7,
+      "mode": "afk",
+      "category": "functional",
+      "description": "Wire contact cards to manual contact resolution flow (from 6.0c)",
+      "steps": [
+        "When LLM contact resolution has confidence 0.6-0.85, create action type='resolve_contact'",
+        "Include both contact candidates in action payload",
+        "ContactCard shows merge decision UI with both contacts side-by-side",
+        "Swipe right: merge contacts using mergeContacts mutation from 6.0e",
+        "Swipe left: reject merge, mark as separate people",
+        "Update mergeSuggestions table with decision"
+      ],
+      "passes": false
+    },
+    {
+      "id": "7.19",
+      "phase": 7,
+      "mode": "afk",
+      "category": "functional",
+      "description": "Create contact save/dismiss mutations with handle linking",
+      "steps": [
+        "Create saveContactFromCard mutation in convex/contacts.ts",
+        "Update contact name, company, notes from form data",
+        "Parse and save tags as array",
+        "Handle 'link to existing' by merging handles",
+        "Create dismissContact mutation for spam/not-a-contact",
+        "Mark action as completed/discarded accordingly"
+      ],
+      "passes": false
+    },
+    {
+      "id": "7.20",
+      "phase": 7,
+      "mode": "afk",
+      "category": "integration",
+      "description": "Create iMessage send flow (web to Convex to Electron polling to AppleScript)",
+      "steps": [
+        "Create pendingSends table in Convex: userId, conversationId, text, status, createdAt",
+        "swipeAction creates pending send for iMessage platform",
+        "Electron polls pendingSends every 5 seconds for current user",
+        "Electron sends via AppleScript using existing messaging.py logic (ported)",
+        "Electron updates Convex: status=sent, sentAt timestamp",
+        "Handle send failures: status=failed, retry logic"
+      ],
+      "passes": false
+    },
+    {
+      "id": "7.21",
+      "phase": 7,
+      "mode": "afk",
+      "category": "integration",
+      "description": "Wire Gmail send to swipeAction (uses Nango action from 4.8)",
+      "steps": [
+        "In swipeAction, detect platform='gmail'",
+        "Get Nango connectionId from integrations table",
+        "Call sendGmailMessage from packages/integrations/nango-gmail.ts",
+        "Pass threadId for reply-to-thread",
+        "Update action status based on send result",
+        "Handle errors: show failure in UI, allow retry"
+      ],
+      "passes": false
+    },
+    {
+      "id": "7.22",
+      "phase": 7,
+      "mode": "afk",
+      "category": "integration",
+      "description": "Wire Slack send to swipeAction (uses Nango action from 5.6)",
+      "steps": [
+        "In swipeAction, detect platform='slack'",
+        "Get Nango connectionId from integrations table",
+        "Call sendSlackMessage from packages/integrations/nango-slack.ts",
+        "Pass thread_ts for threaded replies",
+        "Update action status based on send result",
+        "Handle errors: show failure in UI, allow retry"
+      ],
+      "passes": false
+    },
+    {
+      "id": "7.23",
+      "phase": 7,
+      "mode": "afk",
+      "category": "ui",
+      "description": "Add action count badge to sidebar",
+      "steps": [
+        "Query getPendingActionCount in app layout",
+        "Show badge on Actions nav item when count > 0",
+        "Use real-time subscription for live updates",
+        "Animate badge on count change",
+        "Hide badge when count is 0"
+      ],
+      "passes": false
+    },
+    {
+      "id": "7.24",
+      "phase": 7,
+      "mode": "afk",
+      "category": "testing",
+      "description": "Test action generation end-to-end with real conversations",
+      "steps": [
+        "Trigger unanswered scan manually",
+        "Verify OTP/spam messages are filtered before LLM",
+        "Verify LLM creates action for legitimate unanswered message",
+        "Verify action appears in Actions page UI",
+        "Verify priority scoring: 48h saved contact > 6h unknown",
+        "Test snooze: action reappears after snooze period"
+      ],
+      "passes": false
+    },
+    {
+      "id": "7.25",
+      "phase": 7,
+      "mode": "afk",
+      "category": "testing",
+      "description": "Test cross-platform send: iMessage, Gmail, Slack",
+      "steps": [
+        "Create action for iMessage conversation, swipe right, verify sent via Electron",
+        "Create action for Gmail thread, swipe right, verify email sent",
+        "Create action for Slack DM, swipe right, verify Slack message sent",
+        "Verify action status updates to completed on all platforms",
+        "Test error handling: network failure, auth expired"
       ],
       "passes": false
     }

@@ -853,6 +853,356 @@ async function getOrCreateIntegration(
 }
 
 // ============================================================================
+// Gmail Message Sync
+// ============================================================================
+
+// Validator for Gmail email input (from Nango sync)
+const gmailEmailInput = v.object({
+  id: v.string(), // Gmail message ID
+  sender: v.string(), // From header (e.g., "John Doe <john@example.com>")
+  recipients: v.optional(v.string()), // To header
+  date: v.string(), // ISO date string
+  subject: v.string(),
+  body: v.optional(v.string()),
+  attachments: v.array(
+    v.object({
+      filename: v.string(),
+      mimeType: v.string(),
+      size: v.number(),
+      attachmentId: v.string(),
+    })
+  ),
+  threadId: v.string(), // Gmail thread ID
+});
+
+type GmailEmailInput = Infer<typeof gmailEmailInput>;
+
+/**
+ * Check if an email is likely a newsletter or automated message.
+ * Used to filter out emails that shouldn't create memories.
+ */
+function isNewsletterOrAutomated(email: GmailEmailInput): boolean {
+  const senderLower = email.sender.toLowerCase();
+  const subjectLower = email.subject.toLowerCase();
+
+  // Common automated sender patterns
+  const automatedSenderPatterns = [
+    "noreply@",
+    "no-reply@",
+    "donotreply@",
+    "do-not-reply@",
+    "newsletter@",
+    "notifications@",
+    "updates@",
+    "marketing@",
+    "promo@",
+    "deals@",
+    "info@",
+    "support@",
+    "mailer-daemon@",
+    "postmaster@",
+  ];
+
+  // Check sender patterns
+  if (automatedSenderPatterns.some((p) => senderLower.includes(p))) {
+    return true;
+  }
+
+  // Common newsletter subject patterns
+  const newsletterSubjectPatterns = [
+    "[newsletter]",
+    "[digest]",
+    "[weekly]",
+    "[monthly]",
+    "[daily]",
+    "unsubscribe",
+    "weekly roundup",
+    "daily digest",
+    "newsletter:",
+  ];
+
+  if (newsletterSubjectPatterns.some((p) => subjectLower.includes(p))) {
+    return true;
+  }
+
+  return false;
+}
+
+/**
+ * Parse email address from "Name <email@example.com>" format.
+ */
+function parseEmailAddress(fromHeader: string): { name: string; email: string } {
+  // Match "Name <email>" or just "email"
+  const match = fromHeader.match(/^(?:(.+?)\s*)?<?([^\s<>]+@[^\s<>]+)>?$/);
+  if (match) {
+    return {
+      name: match[1]?.trim() || match[2],
+      email: match[2].toLowerCase(),
+    };
+  }
+  return { name: fromHeader, email: fromHeader.toLowerCase() };
+}
+
+/**
+ * Sync Gmail emails from Nango to Convex.
+ * Called via API endpoint when Nango sync completes.
+ */
+export const syncGmailMessages = mutation({
+  args: {
+    workosUserId: v.string(),
+    emails: v.array(gmailEmailInput),
+  },
+  handler: async (ctx, args) => {
+    const user = await findUserByWorkosId(ctx, args.workosUserId);
+    if (!user) {
+      throw new Error(`User not found for WorkOS ID: ${args.workosUserId}`);
+    }
+
+    return syncGmailMessagesInternal(ctx, user._id, args.emails);
+  },
+});
+
+/**
+ * Internal sync logic for Gmail messages.
+ */
+async function syncGmailMessagesInternal(
+  ctx: MutationCtx,
+  userId: Id<"users">,
+  emails: GmailEmailInput[]
+) {
+  const result = {
+    messagesCount: 0,
+    conversationsCount: 0,
+    skippedNewsletters: 0,
+    errors: [] as string[],
+  };
+
+  // Filter out newsletters/automated emails
+  const personalEmails = emails.filter((email) => {
+    if (isNewsletterOrAutomated(email)) {
+      result.skippedNewsletters++;
+      return false;
+    }
+    return true;
+  });
+
+  // Group emails by threadId for efficient processing
+  const emailsByThread = new Map<string, GmailEmailInput[]>();
+  for (const email of personalEmails) {
+    const existing = emailsByThread.get(email.threadId) ?? [];
+    existing.push(email);
+    emailsByThread.set(email.threadId, existing);
+  }
+
+  // Batch fetch existing conversations
+  const threadIds = [...emailsByThread.keys()];
+  const existingConversations = await batchFetchGmailConversations(
+    ctx,
+    userId,
+    threadIds
+  );
+  const conversationMap = new Map(
+    existingConversations.map((c) => [c.platformConversationId, c._id])
+  );
+
+  // Batch fetch existing messages
+  const messageIds = personalEmails.map((e) => e.id);
+  const existingMessages = await batchFetchGmailMessages(ctx, userId, messageIds);
+  const existingMessageSet = new Set(
+    existingMessages.map((m) => m.platformMessageId)
+  );
+
+  // Process each thread's emails
+  for (const [threadId, threadEmails] of emailsByThread) {
+    try {
+      // Get or create conversation
+      let conversationId = conversationMap.get(threadId);
+      const firstEmail = threadEmails[0];
+      const parsed = parseEmailAddress(firstEmail.sender);
+
+      if (!conversationId) {
+        conversationId = await ctx.db.insert("conversations", {
+          userId,
+          platform: "gmail",
+          platformConversationId: threadId,
+          conversationType: "dm",
+          participantContactIds: [],
+          unreadCount: 0,
+          displayName: firstEmail.subject || parsed.name,
+        });
+        conversationMap.set(threadId, conversationId);
+        result.conversationsCount++;
+      }
+
+      // Insert new messages
+      let latestMessage: { text: string; timestamp: number } | null = null;
+
+      for (const email of threadEmails) {
+        // Skip if already exists
+        if (existingMessageSet.has(email.id)) {
+          continue;
+        }
+
+        // Resolve sender email to contact
+        const senderParsed = parseEmailAddress(email.sender);
+        const senderContactId = await getOrCreateEmailContact(
+          ctx,
+          userId,
+          senderParsed.email,
+          senderParsed.name
+        );
+
+        const sentAtMs = new Date(email.date).getTime();
+
+        // Combine subject and body for message content
+        const content = email.body
+          ? `${email.subject}\n\n${email.body}`
+          : email.subject;
+
+        await ctx.db.insert("messages", {
+          userId,
+          conversationId,
+          platform: "gmail",
+          content,
+          sentAt: sentAtMs,
+          senderContactId,
+          isFromMe: false, // Nango sync gets received emails
+          platformMessageId: email.id,
+        });
+
+        result.messagesCount++;
+
+        // Track latest message for conversation update
+        if (!latestMessage || sentAtMs > latestMessage.timestamp) {
+          latestMessage = { text: email.subject, timestamp: sentAtMs };
+        }
+      }
+
+      // Update conversation lastMessage
+      if (latestMessage) {
+        await ctx.db.patch(conversationId, {
+          lastMessageText: latestMessage.text,
+          lastMessageAt: latestMessage.timestamp,
+        });
+      }
+    } catch (e) {
+      result.errors.push(`Failed to sync thread ${threadId}: ${e}`);
+    }
+  }
+
+  return result;
+}
+
+/**
+ * Get or create a contact for an email address.
+ */
+async function getOrCreateEmailContact(
+  ctx: MutationCtx,
+  userId: Id<"users">,
+  email: string,
+  displayName: string
+): Promise<Id<"contacts">> {
+  const normalizedEmail = email.toLowerCase();
+
+  // Check if we already have a handle for this email
+  const existingHandle = await ctx.db
+    .query("contactHandles")
+    .withIndex("by_user_handle", (q) =>
+      q.eq("userId", userId).eq("handle", normalizedEmail)
+    )
+    .unique();
+
+  if (existingHandle) {
+    // Update display name if we have a better one
+    if (displayName && displayName !== email) {
+      const existingContact = await ctx.db.get(existingHandle.contactId);
+      if (existingContact && existingContact.displayName === email) {
+        await ctx.db.patch(existingHandle.contactId, { displayName });
+      }
+    }
+    return existingHandle.contactId;
+  }
+
+  // Create placeholder contact
+  const contactId = await ctx.db.insert("contacts", {
+    userId,
+    displayName: displayName || email,
+  });
+
+  // Create handle for email
+  await ctx.db.insert("contactHandles", {
+    userId,
+    contactId,
+    handleType: "email",
+    handle: normalizedEmail,
+    platform: "gmail",
+  });
+
+  return contactId;
+}
+
+/**
+ * Batch fetch existing Gmail conversations by thread ID.
+ */
+async function batchFetchGmailConversations(
+  ctx: MutationCtx,
+  userId: Id<"users">,
+  threadIds: string[]
+): Promise<Doc<"conversations">[]> {
+  const results: Doc<"conversations">[] = [];
+
+  const batchSize = 50;
+  for (let i = 0; i < threadIds.length; i += batchSize) {
+    const batch = threadIds.slice(i, i + batchSize);
+    const promises = batch.map((id) =>
+      ctx.db
+        .query("conversations")
+        .withIndex("by_platform_conversation", (q) =>
+          q
+            .eq("userId", userId)
+            .eq("platform", "gmail")
+            .eq("platformConversationId", id)
+        )
+        .unique()
+    );
+    const batchResults = await Promise.all(promises);
+    results.push(
+      ...batchResults.filter((c): c is Doc<"conversations"> => c !== null)
+    );
+  }
+
+  return results;
+}
+
+/**
+ * Batch fetch existing Gmail messages by message ID.
+ */
+async function batchFetchGmailMessages(
+  ctx: MutationCtx,
+  userId: Id<"users">,
+  messageIds: string[]
+): Promise<Doc<"messages">[]> {
+  const results: Doc<"messages">[] = [];
+
+  const batchSize = 50;
+  for (let i = 0; i < messageIds.length; i += batchSize) {
+    const batch = messageIds.slice(i, i + batchSize);
+    const promises = batch.map((id) =>
+      ctx.db
+        .query("messages")
+        .withIndex("by_platform_message", (q) =>
+          q.eq("userId", userId).eq("platform", "gmail").eq("platformMessageId", id)
+        )
+        .unique()
+    );
+    const batchResults = await Promise.all(promises);
+    results.push(...batchResults.filter((m): m is Doc<"messages"> => m !== null));
+  }
+
+  return results;
+}
+
+// ============================================================================
 // Slack Message Sync
 // ============================================================================
 

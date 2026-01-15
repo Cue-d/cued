@@ -1889,3 +1889,33 @@ Notes:
   - All implementations verified to match task requirements
   - Ready for task 5.9: Auto-create Mem0 memories from Slack messages
 ---
+
+[2026-01-15 20:45] Task 4.11 - Auto-create Mem0 memories from Gmail emails
+Files:
+  - packages/convex/convex/sync.ts (add syncGmailMessages mutation)
+  - apps/web/app/api/nango/pull-gmail/route.ts (new)
+  - apps/web/app/api/nango/webhook/route.ts (add google-mail handler)
+Implementation:
+  - Created syncGmailMessages mutation following Slack sync pattern
+  - Groups emails by threadId, creates conversations and messages
+  - Resolves sender email to contact via getOrCreateEmailContact
+  - Newsletter/automated email filtering via isNewsletterOrAutomated:
+    - Sender patterns: noreply@, newsletter@, notifications@, etc.
+    - Subject patterns: [Newsletter], [Digest], unsubscribe, etc.
+  - Created /api/nango/pull-gmail endpoint to fetch records from Nango
+  - Webhook routes google-mail syncs to pull-gmail endpoint
+  - Memory extraction happens automatically via existing cron job
+    (processNewMessagesForMemory processes all unprocessed messages)
+Code Simplifications:
+  - Removed no-op triggerMemoryExtraction function
+  - Consolidated webhook handlers into data-driven lookup table
+  - Improved console logging with structured output
+Decisions:
+  - Email content stored as "Subject\n\nBody" for searchability
+  - Conversations named by email subject (first email in thread)
+  - Gmail messages included in memory extraction via existing cron
+Notes:
+  - All lint and typecheck pass
+  - Newsletter filtering prevents extracting memories from automated emails
+  - Ready for task 4.12: Create Nango sync for Google Contacts
+---
