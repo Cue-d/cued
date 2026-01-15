@@ -1796,7 +1796,7 @@
         "Show platform badge indicating contact origin",
         "Track form state in parent"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "7.17",

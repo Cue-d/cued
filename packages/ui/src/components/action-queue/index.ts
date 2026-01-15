@@ -18,3 +18,11 @@ export type {
   DisplayMessage,
   MessageAttachment,
 } from "./message-response-card"
+
+export { ContactCard } from "./contact-card"
+export type {
+  ContactCardProps,
+  ContactCardRef,
+  ContactFormData,
+  ExistingContact,
+} from "./contact-card"

@@ -2314,3 +2314,27 @@ Notes:
   - All lint and typecheck pass
   - Ready for testing with live Convex data
 ---
+
+[2026-01-15 12:55] Task 7.16 - Create ContactCard component with editable name, company, tags, notes
+Files:
+  - packages/ui/src/components/action-queue/contact-card.tsx (new)
+  - packages/ui/src/components/action-queue/index.ts (updated)
+Implementation:
+  - ContactCard component with editable fields
+  - Name input with auto-focus
+  - Company input field (new, not in original reference)
+  - Tags input (comma-separated, rendered as badges)
+  - Notes textarea for relationship context
+  - "Link to existing contact" Select dropdown for manual merge
+  - Platform badge with color coding (iMessage/Gmail/Slack)
+  - Form state tracked via props (formData/onFormChange)
+  - Avatar with initials
+  - Meeting time display
+Decisions:
+  - Used SelectValue with children instead of placeholder (base-ui API)
+  - Added company field as requested (not in original reference)
+  - Platform badge colors: green (iMessage), red (Gmail), purple (Slack)
+Notes:
+  - All lint and typecheck pass
+  - Exported from @prm/ui package
+---
