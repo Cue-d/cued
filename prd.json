@@ -1853,7 +1853,7 @@
         "Create dismissContact mutation for spam/not-a-contact",
         "Mark action as completed/discarded accordingly"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "7.20",

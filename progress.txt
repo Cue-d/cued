@@ -2553,3 +2553,23 @@ Notes:
   - Typecheck passes
   - Tests skipped (hanging on external API calls)
 ---
+
+---
+
+[2026-01-15] Task 7.19 - Contact save/dismiss mutations with handle linking
+Files:
+  - packages/convex/convex/schema.ts (modified - added tags, isDismissed to contacts)
+  - packages/convex/convex/contacts.ts (modified - added saveContactFromCard, dismissContact)
+Implementation:
+  - saveContactFromCard: saves contact from action card (eod_contact, new_contact)
+    - Updates displayName, company, notes, tags
+    - Supports linkToContactId to merge into existing contact
+    - Moves handles, updates conversations/messages references
+    - Marks action completed, decrements pendingActionCount
+  - dismissContact: marks contact as spam/not-a-contact
+    - Sets isDismissed flag on contact
+    - Marks action discarded, decrements pendingActionCount
+  - getContacts filters out dismissed contacts from results
+Notes:
+  - Typecheck passes
+---
