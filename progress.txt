@@ -1946,3 +1946,30 @@ Notes:
   - Schema deployed successfully to Convex
   - All lint and typecheck pass
 ---
+
+[2026-01-15 10:44] Task 7.8 - Extend actions table with draftResponse, platform, llmReason, discardedAt
+Files:
+  - packages/convex/convex/schema.ts
+  - packages/convex/convex/actions.ts
+Implementation:
+  - Added 'expired' to actionStatusValidator (5 states now)
+  - Extended actions table with new fields:
+    - platform: for actions without conversationId (e.g., send_message to new contact)
+    - draftResponse: user-edited response (distinct from draftMessage = AI-suggested)
+    - llmReason: AI-generated explanation (distinct from reason = heuristic/manual)
+    - discardedAt: timestamp when action was discarded
+  - Updated actions.ts:
+    - enrichAction exposes all new fields, prefers action.platform if set
+    - updateActionStatus sets discardedAt when status=discarded
+    - createAction accepts platform, draftResponse, llmReason arguments
+    - Uses platformValidator from schema for type safety
+Decisions:
+  - Kept draftMessage and draftResponse separate for AI vs user drafts
+  - Kept reason and llmReason separate for heuristic vs AI explanations
+  - snoozedUntil already existed, completedAt already existed
+  - Added inline comments grouping fields by purpose
+Notes:
+  - Code simplified by code-simplifier: better organization and field grouping
+  - Schema deployed successfully to Convex
+  - All lint and typecheck pass
+---

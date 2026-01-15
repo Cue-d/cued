@@ -1656,7 +1656,7 @@
         "Update status enum: pending, completed, discarded, snoozed, expired",
         "Deploy schema changes"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "7.9",
