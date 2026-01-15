@@ -1973,3 +1973,33 @@ Notes:
   - Schema deployed successfully to Convex
   - All lint and typecheck pass
 ---
+
+[2026-01-15 21:15] Task 4.12 - Create Nango sync for Google Contacts (People API)
+Files:
+  - nango-integrations/google-contacts/types.ts (new)
+  - nango-integrations/google-contacts/syncs/contacts.ts (new)
+  - nango-integrations/index.ts (add import)
+  - apps/web/NANGO_SETUP.md (add Google Contacts docs)
+Implementation:
+  - Created types.ts with People API interfaces: Person, PersonName, PersonEmailAddress, etc.
+  - Created contacts.ts sync with createSync() pattern following Gmail implementation
+  - Uses syncToken for incremental sync (Google expires after 7 days)
+  - On 410 error, clears syncToken and falls back to full sync
+  - GoogleContact model: id (resourceName), name, emails[], phones[], company, title, isDeleted
+  - Maps primary fields using findPrimary helper
+  - Phones prefer canonicalForm (E.164) when available
+Decisions:
+  - Separate google-contacts integration (not combined with google-mail) for distinct OAuth scopes
+  - 5-minute sync frequency matches Gmail pattern
+  - isDeleted flag supports soft-delete propagation from Google
+  - company and title from organizations for professional context
+Code Simplification:
+  - Extracted BASE_PARAMS constant to reduce duplication
+  - Created findPrimary<T> generic helper for metadata.primary lookup
+  - Simplified sync token logic by removing confusing useSyncToken variable
+Notes:
+  - nango compile passes with 5 files built
+  - All monorepo lint and typecheck pass
+  - Deploy requires: cd nango-integrations && npx nango deploy dev
+  - Ready for task 4.13: Pull Google Contacts from Nango into Convex
+---

@@ -1084,7 +1084,7 @@
         "Define GoogleContact model: name, emails[], phones[], resourceName",
         "Deploy sync with 5-minute interval"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "4.13",
