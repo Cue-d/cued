@@ -2476,3 +2476,33 @@ Notes:
   - All 116 tests pass in @prm/ai
   - Ready for testing with real data
 ---
+
+---
+
+[2026-01-15 13:15] Tasks 6.2, 6.3, 6.4 - Platform filter, badges, and action routing
+Files:
+  - apps/web/app/(app)/inbox/page.tsx (modified)
+  - packages/ui/src/components/unified-inbox/conversation-list.tsx (modified)
+  - packages/ui/src/components/action-queue/message-response-card.tsx (modified)
+  - packages/ui/src/components/action-queue/index.ts (modified)
+Implementation:
+  - 6.2 Platform Filter:
+    - Filter buttons in InboxConversationList (All, iMessage, Gmail, Slack)
+    - URL param persistence (?platform=imessage)
+    - Clears selection when filter changes
+    - getInbox query already supported platform param
+  - 6.3 Platform Badges:
+    - Already implemented in InboxConversationItem via InboxPlatformBadge
+    - Shows colored letter badge (i=green, G=red, S=purple)
+  - 6.4 Action Routing:
+    - Platform selector dropdown in MessageResponseCard header
+    - Shows current platform with icon and label
+    - Dropdown only appears when multiple platforms available
+    - ActionPlatform type exported from @prm/ui
+Decisions:
+  - Count per platform in filter (6.2) deferred - needs separate queries
+  - Handle validation on send (6.4) deferred - backend already validates
+Notes:
+  - All typecheck passes
+  - Platform badges were already implemented (no changes needed)
+---
