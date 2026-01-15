@@ -2245,3 +2245,25 @@ Notes:
   - All lint and typecheck pass
   - Exported from @prm/ui package
 ---
+
+[2026-01-15 12:10] Task 7.13 - Port SwipeableCard gesture component with Framer Motion
+Files:
+  - packages/ui/src/components/action-queue/swipeable-card.tsx (new)
+  - packages/ui/src/components/action-queue/index.ts (updated)
+Implementation:
+  - SwipeableCard with motion/react (Framer Motion) gesture support
+  - Drag thresholds: X=120px, Y=80px for swipe detection
+  - Visual transforms: rotation (-15° to 15°), scale, opacity based on drag
+  - Color overlays: teal (send/right), gray (discard/left), amber (snooze/up)
+  - Text selection protection via data-selectable attribute check
+  - Programmatic swipe trigger via triggerSwipe prop with 2-phase animation
+  - Spring animations for natural feel (stiffness: 400, damping: 30)
+Decisions:
+  - Used lowercase-with-dashes filename convention
+  - Overlay opacity tied to swipe threshold for clear visual feedback
+  - Two-phase animation: peek (150ms) then exit for button-triggered swipes
+  - Velocity detection (>500px/s) for fast flick gestures
+Notes:
+  - All lint and typecheck pass
+  - Exported from @prm/ui package
+---

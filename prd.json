@@ -1742,7 +1742,7 @@
         "Implement programmatic swipe animation for keyboard/button triggers",
         "Handle text selection protection in input areas"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "7.14",
