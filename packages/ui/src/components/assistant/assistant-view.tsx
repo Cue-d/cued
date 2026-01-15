@@ -1,5 +1,4 @@
-import * as React from "react";
-import { Sparkles } from "lucide-react";
+import { ArrowUpIcon, PaperclipIcon, SquareIcon } from "lucide-react";
 
 import { cn } from "../../lib/utils";
 import {
@@ -8,10 +7,29 @@ import {
   ConversationEmptyState,
   ConversationScrollButton,
 } from "../ai-elements/conversation";
-import { type Attachment, MultimodalInput } from "./multimodal-input";
+import {
+  PromptInput,
+  PromptInputTextarea,
+  PromptInputFooter,
+  PromptInputSubmit,
+  PromptInputTools,
+  PromptInputButton,
+  PromptInputAttachments,
+  PromptInputAttachment,
+  usePromptInputAttachments,
+} from "../ai-elements/prompt-input";
 import { ChatMessage } from "./chat-message";
 import { Suggestions, Suggestion } from "../ai-elements/suggestion";
 import type { MessageWithToolInvocations, SuggestedPrompt } from "./types";
+
+function AttachmentButton() {
+  const attachments = usePromptInputAttachments();
+  return (
+    <PromptInputButton onClick={() => attachments.openFileDialog()}>
+      <PaperclipIcon className="size-4" />
+    </PromptInputButton>
+  );
+}
 
 interface AssistantViewProps {
   messages: MessageWithToolInvocations[];
@@ -22,8 +40,6 @@ interface AssistantViewProps {
   isLoading?: boolean;
   error?: Error | null;
   suggestedPrompts?: SuggestedPrompt[];
-  attachments?: Attachment[];
-  onAttachmentsChange?: React.Dispatch<React.SetStateAction<Attachment[]>>;
   className?: string;
 }
 
@@ -51,18 +67,8 @@ export function AssistantView({
   isLoading = false,
   error,
   suggestedPrompts = DEFAULT_PROMPTS,
-  attachments = [],
-  onAttachmentsChange,
   className,
 }: AssistantViewProps) {
-  const [internalAttachments, setInternalAttachments] = React.useState<
-    Attachment[]
-  >([]);
-  const actualAttachments = onAttachmentsChange
-    ? attachments
-    : internalAttachments;
-  const setActualAttachments = onAttachmentsChange ?? setInternalAttachments;
-
   const isEmpty = messages.length === 0;
 
   return (
@@ -93,19 +99,17 @@ export function AssistantView({
               </Suggestions>
             </ConversationEmptyState>
           ) : (
-            <>
-              {messages.map((message, index) => (
-                <ChatMessage
-                  key={message.id}
-                  message={message}
-                  isStreaming={
-                    isLoading &&
-                    message.role === "assistant" &&
-                    index === messages.length - 1
-                  }
-                />
-              ))}
-            </>
+            messages.map((message, index) => (
+              <ChatMessage
+                key={message.id}
+                message={message}
+                isStreaming={
+                  isLoading &&
+                  message.role === "assistant" &&
+                  index === messages.length - 1
+                }
+              />
+            ))
           )}
 
           {error && (
@@ -117,23 +121,40 @@ export function AssistantView({
         <ConversationScrollButton />
       </Conversation>
 
-      <div className="border-t border-border/50 bg-background/95 px-4 py-5 backdrop-blur-xl">
+      <div className="bg-background/95 px-4 py-5 backdrop-blur-xl">
         <div className="mx-auto max-w-2xl">
-          <MultimodalInput
-            input={input}
-            setInput={(value) => {
-              if (typeof value === "function") {
-                onInputChange(value(input));
-              } else {
-                onInputChange(value);
-              }
+          <PromptInput
+            accept="image/*"
+            multiple
+            onSubmit={(message) => {
+              if (!message.text.trim() && message.files.length === 0) return;
+              onSubmit();
             }}
-            onSubmit={onSubmit}
-            onStop={onStop}
-            isSubmitting={isLoading}
-            attachments={actualAttachments}
-            setAttachments={setActualAttachments}
-          />
+          >
+            <PromptInputAttachments>
+              {(attachment) => <PromptInputAttachment data={attachment} />}
+            </PromptInputAttachments>
+            <PromptInputTextarea
+              value={input}
+              onChange={(e) => onInputChange(e.target.value)}
+              placeholder="Ask about your conversations..."
+              className="min-h-12"
+            />
+            <PromptInputFooter>
+              <PromptInputTools>
+                <AttachmentButton />
+              </PromptInputTools>
+              {isLoading ? (
+                <PromptInputButton onClick={onStop} variant="default">
+                  <SquareIcon className="size-4" />
+                </PromptInputButton>
+              ) : (
+                <PromptInputSubmit disabled={!input.trim()}>
+                  <ArrowUpIcon className="size-4" />
+                </PromptInputSubmit>
+              )}
+            </PromptInputFooter>
+          </PromptInput>
         </div>
       </div>
     </div>
