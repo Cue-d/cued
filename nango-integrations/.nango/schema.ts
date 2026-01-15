@@ -36,6 +36,20 @@ export interface ActionOutput_google_mail_sendemail {
   labelIds?: string[] | undefined;
 };
 
+export interface SyncMetadata_google_contacts_contacts {
+  syncToken?: string | undefined;
+};
+
+export interface GoogleContact {
+  id: string;
+  name: string;
+  emails: string[];
+  phones: string[];
+  company?: string | undefined;
+  title?: string | undefined;
+  isDeleted: boolean;
+};
+
 export interface SyncMetadata_slack_messages {
   backfillPeriodMs?: number | undefined;
 };

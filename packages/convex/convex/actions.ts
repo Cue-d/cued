@@ -3,7 +3,11 @@ import type { Doc, Id } from "./_generated/dataModel";
 import type { QueryCtx } from "./_generated/server";
 import { mutation, query } from "./_generated/server";
 import { getAuthenticatedUser, requireAuthenticatedUser } from "./lib/auth";
-import { actionStatusValidator, actionTypeValidator } from "./schema";
+import {
+  actionStatusValidator,
+  actionTypeValidator,
+  platformValidator,
+} from "./schema";
 
 /** Enrich an action with related contact and conversation data. */
 async function enrichAction(
@@ -15,10 +19,13 @@ async function enrichAction(
   status: Doc<"actions">["status"];
   priority: number;
   draftMessage: string | null;
+  draftResponse: string | null;
   reason: string | null;
+  llmReason: string | null;
   createdAt: number;
-  completedAt: number | null;
   snoozedUntil: number | null;
+  completedAt: number | null;
+  discardedAt: number | null;
   conversationId: Id<"conversations"> | null;
   contactId: Id<"contacts"> | null;
   contactName: string | null;
@@ -29,20 +36,26 @@ async function enrichAction(
     action.contactId ? ctx.db.get(action.contactId) : null,
   ]);
 
+  // Prefer action.platform if set, otherwise derive from conversation
+  const platform = action.platform ?? conversation?.platform ?? null;
+
   return {
     _id: action._id,
     type: action.type,
     status: action.status,
     priority: action.priority,
     draftMessage: action.draftMessage ?? null,
+    draftResponse: action.draftResponse ?? null,
     reason: action.reason ?? null,
+    llmReason: action.llmReason ?? null,
     createdAt: action.createdAt,
-    completedAt: action.completedAt ?? null,
     snoozedUntil: action.snoozedUntil ?? null,
+    completedAt: action.completedAt ?? null,
+    discardedAt: action.discardedAt ?? null,
     conversationId: action.conversationId ?? null,
     contactId: action.contactId ?? null,
     contactName: contact?.displayName ?? null,
-    platform: conversation?.platform ?? null,
+    platform,
   };
 }
 
@@ -136,8 +149,11 @@ export const createAction = mutation({
     conversationId: v.optional(v.id("conversations")),
     contactId: v.optional(v.id("contacts")),
     messageId: v.optional(v.id("messages")),
+    platform: v.optional(platformValidator),
     draftMessage: v.optional(v.string()),
+    draftResponse: v.optional(v.string()),
     reason: v.optional(v.string()),
+    llmReason: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
     const user = await requireAuthenticatedUser(ctx);
@@ -150,8 +166,11 @@ export const createAction = mutation({
       conversationId: args.conversationId,
       contactId: args.contactId,
       messageId: args.messageId,
+      platform: args.platform,
       draftMessage: args.draftMessage,
+      draftResponse: args.draftResponse,
       reason: args.reason,
+      llmReason: args.llmReason,
       createdAt: Date.now(),
     });
 
@@ -207,8 +226,14 @@ export const updateActionStatus = mutation({
       status: args.status,
     };
 
+    const now = Date.now();
+
     if (args.status === "completed") {
-      updates.completedAt = Date.now();
+      updates.completedAt = now;
+    }
+
+    if (args.status === "discarded") {
+      updates.discardedAt = now;
     }
 
     if (args.status === "snoozed" && args.snoozedUntil) {

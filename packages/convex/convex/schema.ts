@@ -31,7 +31,8 @@ export const actionStatusValidator = v.union(
   v.literal("pending"),
   v.literal("completed"),
   v.literal("discarded"),
-  v.literal("snoozed")
+  v.literal("snoozed"),
+  v.literal("expired")
 );
 
 export const analysisQueueStatusValidator = v.union(
@@ -179,19 +180,29 @@ const schema = defineSchema({
     }),
 
   // Task 1.12: Actions table
+  // Extended in 7.8: platform, draftResponse, llmReason, discardedAt, expired status
   actions: defineTable({
     userId: v.id("users"),
     type: actionTypeValidator,
     status: actionStatusValidator,
-    priority: v.number(), // 0-100 priority score
+    priority: v.number(),
+    // References
     conversationId: v.optional(v.id("conversations")),
     contactId: v.optional(v.id("contacts")),
     messageId: v.optional(v.id("messages")),
+    // Platform (for actions without conversationId, e.g., send_message to new contact)
+    platform: v.optional(platformValidator),
+    // Drafts: draftMessage = AI-suggested, draftResponse = user-edited
     draftMessage: v.optional(v.string()),
+    draftResponse: v.optional(v.string()),
+    // Reasons: reason = heuristic/manual, llmReason = AI-generated explanation
     reason: v.optional(v.string()),
-    snoozedUntil: v.optional(v.number()),
+    llmReason: v.optional(v.string()),
+    // Timestamps
     createdAt: v.number(),
+    snoozedUntil: v.optional(v.number()),
     completedAt: v.optional(v.number()),
+    discardedAt: v.optional(v.number()),
   })
     .index("by_user", ["userId"])
     .index("by_user_status", ["userId", "status"]),

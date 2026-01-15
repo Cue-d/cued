@@ -186,6 +186,73 @@ The Gmail integration includes a `send-email` action for sending emails via the 
 
 3. Verify in Nango Dashboard → Integrations → google-mail → Actions
 
+## Google Contacts Integration (Task 4.12)
+
+The Google Contacts integration uses the People API to sync contacts for cross-platform identity resolution.
+
+### Step 1: Add Google Contacts Integration in Nango
+
+1. Log in to [Nango Dashboard](https://app.nango.dev)
+2. Navigate to **Integrations** tab
+3. Click **Configure New Integration**
+4. Search for and select **google-contacts** (or add custom integration if not listed)
+5. Note the **Callback URL** - use the same as Gmail if possible
+
+### Step 2: Configure OAuth Scopes
+
+If using the same Google Cloud Console project as Gmail:
+
+1. Go to **APIs & Services** → **OAuth consent screen** → **Edit App**
+2. Add additional scope:
+   - `https://www.googleapis.com/auth/contacts.readonly` - Read contacts
+3. Save changes
+
+If creating a separate OAuth client:
+1. Follow Steps 2-3 from Gmail setup above
+2. Use only the contacts.readonly scope
+
+### Step 3: Enable People API
+
+1. Go to **APIs & Services** → **Library**
+2. Search for **People API**
+3. Click **Enable**
+
+### Step 4: Configure Nango Integration
+
+1. In Nango Dashboard → **Integrations** → **google-contacts**
+2. Enter OAuth credentials (can be same as Gmail)
+3. Configure scope: `https://www.googleapis.com/auth/contacts.readonly`
+4. Save the integration
+
+### Step 5: Deploy the Sync
+
+```bash
+cd nango-integrations
+npx nango compile
+npx nango deploy dev
+```
+
+### Sync Behavior
+
+- **Frequency**: Every 5 minutes
+- **Incremental**: Uses Google sync tokens (expires after 7 days)
+- **Fields synced**: names, emailAddresses, phoneNumbers, organizations
+- **Handles deleted contacts**: isDeleted flag set to true
+
+### GoogleContact Model
+
+```typescript
+{
+  id: string;        // Google resource name (e.g., "people/c12345")
+  name: string;      // Display name
+  emails: string[];  // All email addresses
+  phones: string[];  // All phone numbers (canonical E.164 format preferred)
+  company?: string;  // Primary organization name
+  title?: string;    // Job title
+  isDeleted: boolean // True if contact was deleted
+}
+```
+
 ## Next Steps
 
 After completing this setup:
@@ -193,5 +260,7 @@ After completing this setup:
 - Task 4.4: Create /settings/integrations page with Nango Connect UI (done)
 - Task 4.5/4.6: Webhook handler receives connection events and updates Convex (done)
 - Task 4.8: Create Nango action for sending Gmail messages (done)
-- Task 4.9: Create sendGmailMessage in packages/integrations using Nango
-- Task 4.10: Wire Gmail send to action queue completion
+- Task 4.9: Create sendGmailMessage in packages/integrations using Nango (done)
+- Task 4.10: Wire Gmail send to action queue completion (done)
+- Task 4.12: Create Nango sync for Google Contacts (done)
+- Task 4.13: Pull Google Contacts from Nango into Convex
