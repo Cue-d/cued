@@ -26,4 +26,12 @@ crons.interval(
   internal.actionQueue.triggerQueueProcessing
 );
 
+// Task 7.17: Daily scan for new contacts at 9 PM UTC
+// Creates eod_contact actions for unenriched contacts from today
+crons.daily(
+  "daily-eod-contact-scan",
+  { hourUTC: 21, minuteUTC: 0 }, // 9 PM UTC (adjust for user timezone in future)
+  internal.actionQueue.scanAllUsersForNewContacts
+);
+
 export default crons;

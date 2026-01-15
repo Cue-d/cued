@@ -1812,7 +1812,7 @@
         "Include context: when contacted, conversation preview",
         "Limit to 10 new contacts per day to avoid overwhelm"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "7.18",

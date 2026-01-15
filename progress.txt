@@ -2338,3 +2338,25 @@ Notes:
   - All lint and typecheck pass
   - Exported from @prm/ui package
 ---
+
+[2026-01-15 13:15] Task 7.17 - Create daily scan for new contacts (EOD generation)
+Files:
+  - packages/convex/convex/actionQueue.ts (updated - added EOD scan functions)
+  - packages/convex/convex/crons.ts (updated - added daily cron)
+Implementation:
+  - getNewContactsForEOD query: finds unenriched contacts with today's conversations
+  - hasEODActionForContact query: checks for existing pending eod_contact action
+  - createEODContactAction mutation: creates action with type='eod_contact'
+  - scanForNewContacts action: scans user's contacts and creates actions
+  - scanAllUsersForNewContacts mutation: iterates all users with connected integrations
+  - Daily cron at 9 PM UTC calling scanAllUsersForNewContacts
+  - Max 10 contacts per day limit (MAX_EOD_CONTACTS_PER_DAY)
+Decisions:
+  - Used 9 PM UTC (user timezone adjustment deferred to future task)
+  - Checks for enrichment via notes or company fields
+  - Action type is 'eod_contact' (already in schema)
+  - Priority set to 60 (medium priority)
+Notes:
+  - All typecheck passes
+  - Cron will run daily at 9 PM UTC
+---

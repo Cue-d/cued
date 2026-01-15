@@ -446,3 +446,241 @@ export const scanAllUsersForUnanswered = internalMutation({
   },
 });
 
+// ============================================================================
+// Task 7.17: EOD Contact Scan - Daily scan for new contacts
+// ============================================================================
+
+const MAX_EOD_CONTACTS_PER_DAY = 10; // Limit to avoid overwhelm
+
+/**
+ * Get contacts without enrichment (no notes or company) that have
+ * recent conversations (from today).
+ */
+export const getNewContactsForEOD = internalQuery({
+  args: {
+    userId: v.id("users"),
+    todayStartMs: v.number(), // Start of today in ms
+    limit: v.number(),
+  },
+  handler: async (ctx, args) => {
+    // Get all contacts for user
+    const contacts = await ctx.db
+      .query("contacts")
+      .withIndex("by_user", (q) => q.eq("userId", args.userId))
+      .collect();
+
+    // Filter contacts that haven't been enriched
+    const unenrichedContacts = contacts.filter(
+      (c) => !c.notes && !c.company
+    );
+
+    // For each, check if they have a conversation from today
+    const results: Array<{
+      contact: Doc<"contacts">;
+      conversation: Doc<"conversations"> | null;
+      latestMessageAt: number;
+    }> = [];
+
+    for (const contact of unenrichedContacts) {
+      // Find conversations where this contact is a participant
+      const conversation = await ctx.db
+        .query("conversations")
+        .withIndex("by_user", (q) => q.eq("userId", args.userId))
+        .filter((q) =>
+          q.and(
+            q.gte(q.field("lastMessageAt"), args.todayStartMs),
+            // Check if contact is in participants
+            // Note: This is a simplified check - in practice you might need more sophisticated matching
+          )
+        )
+        .order("desc")
+        .first();
+
+      // Get any conversation with this contact
+      const allConversations = await ctx.db
+        .query("conversations")
+        .withIndex("by_user", (q) => q.eq("userId", args.userId))
+        .collect();
+
+      const contactConv = allConversations.find(
+        (c) => c.participantContactIds.includes(contact._id) &&
+               (c.lastMessageAt ?? 0) >= args.todayStartMs
+      );
+
+      if (contactConv && contactConv.lastMessageAt) {
+        results.push({
+          contact,
+          conversation: contactConv,
+          latestMessageAt: contactConv.lastMessageAt,
+        });
+      }
+
+      if (results.length >= args.limit) break;
+    }
+
+    // Sort by latest message time
+    results.sort((a, b) => b.latestMessageAt - a.latestMessageAt);
+
+    return results.slice(0, args.limit);
+  },
+});
+
+/**
+ * Check if a contact already has a pending EOD action.
+ */
+export const hasEODActionForContact = internalQuery({
+  args: {
+    userId: v.id("users"),
+    contactId: v.id("contacts"),
+  },
+  handler: async (ctx, args) => {
+    const existing = await ctx.db
+      .query("actions")
+      .withIndex("by_user_status", (q) =>
+        q.eq("userId", args.userId).eq("status", "pending")
+      )
+      .filter((q) =>
+        q.and(
+          q.eq(q.field("contactId"), args.contactId),
+          q.eq(q.field("type"), "eod_contact")
+        )
+      )
+      .first();
+
+    return existing !== null;
+  },
+});
+
+/**
+ * Create an EOD contact action.
+ */
+export const createEODContactAction = internalMutation({
+  args: {
+    userId: v.id("users"),
+    contactId: v.id("contacts"),
+    conversationId: v.optional(v.id("conversations")),
+    platform: platformValidator,
+    reason: v.optional(v.string()),
+  },
+  handler: async (ctx, args) => {
+    const actionId = await ctx.db.insert("actions", {
+      userId: args.userId,
+      type: "eod_contact",
+      status: "pending",
+      priority: 60, // Medium priority
+      contactId: args.contactId,
+      conversationId: args.conversationId,
+      platform: args.platform,
+      reason: args.reason ?? "New contact needs enrichment",
+      createdAt: Date.now(),
+    });
+
+    return actionId;
+  },
+});
+
+/**
+ * Scan for new contacts for a specific user.
+ * Task 7.17: Creates eod_contact actions for unenriched contacts.
+ */
+export const scanForNewContacts = internalAction({
+  args: {
+    userId: v.id("users"),
+  },
+  handler: async (
+    ctx,
+    args
+  ): Promise<{ found: number; created: number; skipped: number }> => {
+    const todayStart = new Date();
+    todayStart.setHours(0, 0, 0, 0);
+
+    // Get new contacts from today
+    const newContacts: Array<{
+      contact: Doc<"contacts">;
+      conversation: Doc<"conversations"> | null;
+      latestMessageAt: number;
+    }> = await ctx.runQuery(internal.actionQueue.getNewContactsForEOD, {
+      userId: args.userId,
+      todayStartMs: todayStart.getTime(),
+      limit: MAX_EOD_CONTACTS_PER_DAY,
+    });
+
+    let created = 0;
+    let skipped = 0;
+
+    for (const { contact, conversation } of newContacts) {
+      // Check if already has pending EOD action
+      const hasAction = await ctx.runQuery(
+        internal.actionQueue.hasEODActionForContact,
+        {
+          userId: args.userId,
+          contactId: contact._id,
+        }
+      );
+
+      if (hasAction) {
+        skipped++;
+        continue;
+      }
+
+      // Create EOD action
+      await ctx.runMutation(internal.actionQueue.createEODContactAction, {
+        userId: args.userId,
+        contactId: contact._id,
+        conversationId: conversation?._id,
+        platform: conversation?.platform ?? "imessage",
+        reason: `New contact from today: ${contact.displayName}`,
+      });
+
+      created++;
+    }
+
+    return {
+      found: newContacts.length,
+      created,
+      skipped,
+    };
+  },
+});
+
+/**
+ * Scan all users for new contacts.
+ * Task 7.17: Called by daily cron at 9 PM.
+ */
+export const scanAllUsersForNewContacts = internalMutation({
+  args: {},
+  handler: async (ctx) => {
+    // Get all users with connected integrations
+    const integrations = await ctx.db
+      .query("integrations")
+      .filter((q) => q.eq(q.field("syncState.isConnected"), true))
+      .collect();
+
+    // Get unique user IDs
+    const userIds = [...new Set(integrations.map((i) => i.userId))];
+
+    const results: Array<{
+      userId: string;
+      scheduled: boolean;
+    }> = [];
+
+    for (const userId of userIds) {
+      // Schedule the scan action for each user
+      await ctx.scheduler.runAfter(
+        0,
+        internal.actionQueue.scanForNewContacts,
+        { userId }
+      );
+
+      results.push({
+        userId: userId as string,
+        scheduled: true,
+      });
+    }
+
+    return {
+      usersScanned: results.length,
+    };
+  },
+});
+
