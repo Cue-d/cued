@@ -1,35 +1,12 @@
 "use client";
 
 import { useQuery } from "convex/react";
-import { useTheme } from "next-themes";
 import type { ReactNode } from "react";
-import { useMemo, useSyncExternalStore } from "react";
+import { useMemo } from "react";
 import { api } from "@prm/convex";
-import { Avatar, AvatarFallback, Skeleton, Separator, Switch } from "@prm/ui";
-import {
-  SunIcon,
-  MoonIcon,
-  MonitorIcon,
-  BellIcon,
-  ShieldIcon,
-  DatabaseIcon,
-  PaletteIcon,
-  BrainIcon,
-  ClockIcon,
-  LinkIcon,
-  ChevronRightIcon,
-} from "lucide-react";
+import { Avatar, AvatarFallback, Skeleton, Separator } from "@prm/ui";
+import { BrainIcon, ClockIcon, LinkIcon, ChevronRightIcon } from "lucide-react";
 import Link from "next/link";
-
-// SSR-safe mounted detection via useSyncExternalStore
-const noop = (): void => {};
-function useIsMounted(): boolean {
-  return useSyncExternalStore(
-    () => noop,
-    () => true,
-    () => false
-  );
-}
 
 function getInitials(name: string): string {
   return name
@@ -56,14 +33,11 @@ function formatRelativeTime(timestamp: number): string {
 }
 
 export default function SettingsPage() {
-  const { theme, setTheme } = useTheme();
-  const mounted = useIsMounted();
   const memoryStats = useQuery(api.memories.getMemoryStatsByContact);
   const processingStatus = useQuery(api.memories.getMemoryProcessingStatus, {
     platform: "imessage",
   });
 
-  const selectedTheme = mounted ? theme : null;
   const isMemoryLoading =
     memoryStats === undefined || processingStatus === undefined;
   const totalMemories = processingStatus?.totalMemoriesExtracted ?? 0;
@@ -233,134 +207,6 @@ export default function SettingsPage() {
               </div>
               <ChevronRightIcon className="size-4 text-muted-foreground" />
             </Link>
-          </section>
-
-          {/* Appearance Section */}
-          <section>
-            <div className="mb-4">
-              <h2 className="text-sm font-medium text-foreground">
-                Appearance
-              </h2>
-              <p className="text-sm text-muted-foreground">
-                Customize how PRM looks on your device
-              </p>
-            </div>
-
-            <div className="rounded-lg border bg-card">
-              <div className="p-4">
-                <div className="flex items-center gap-3 mb-4">
-                  <div className="flex size-9 items-center justify-center rounded-md bg-muted">
-                    <PaletteIcon className="size-4 text-muted-foreground" />
-                  </div>
-                  <div>
-                    <p className="text-sm font-medium">Theme</p>
-                    <p className="text-xs text-muted-foreground">
-                      Select your preferred color scheme
-                    </p>
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-3 gap-2">
-                  <button
-                    onClick={() => setTheme("light")}
-                    className={`flex flex-col items-center gap-2 rounded-lg border p-3 transition-colors ${
-                      selectedTheme === "light"
-                        ? "border-primary bg-primary/5"
-                        : "border-border hover:border-muted-foreground/30 hover:bg-muted/50"
-                    }`}
-                  >
-                    <div className="flex size-10 items-center justify-center rounded-md bg-white border shadow-sm">
-                      <SunIcon className="size-5 text-amber-500" />
-                    </div>
-                    <span className="text-xs font-medium">Light</span>
-                  </button>
-
-                  <button
-                    onClick={() => setTheme("dark")}
-                    className={`flex flex-col items-center gap-2 rounded-lg border p-3 transition-colors ${
-                      selectedTheme === "dark"
-                        ? "border-primary bg-primary/5"
-                        : "border-border hover:border-muted-foreground/30 hover:bg-muted/50"
-                    }`}
-                  >
-                    <div className="flex size-10 items-center justify-center rounded-md bg-zinc-900 border border-zinc-700 shadow-sm">
-                      <MoonIcon className="size-5 text-blue-400" />
-                    </div>
-                    <span className="text-xs font-medium">Dark</span>
-                  </button>
-
-                  <button
-                    onClick={() => setTheme("system")}
-                    className={`flex flex-col items-center gap-2 rounded-lg border p-3 transition-colors ${
-                      selectedTheme === "system"
-                        ? "border-primary bg-primary/5"
-                        : "border-border hover:border-muted-foreground/30 hover:bg-muted/50"
-                    }`}
-                  >
-                    <div className="flex size-10 items-center justify-center rounded-md bg-linear-to-br from-white to-zinc-900 border shadow-sm">
-                      <MonitorIcon className="size-5 text-zinc-500" />
-                    </div>
-                    <span className="text-xs font-medium">System</span>
-                  </button>
-                </div>
-              </div>
-            </div>
-          </section>
-
-          {/* Notifications Section */}
-          <section>
-            <div className="mb-4">
-              <h2 className="text-sm font-medium text-foreground">
-                Notifications
-              </h2>
-              <p className="text-sm text-muted-foreground">
-                Configure how you receive alerts
-              </p>
-            </div>
-
-            <div className="rounded-lg border bg-card divide-y">
-              <SettingsRow
-                icon={<BellIcon className="size-4" />}
-                title="Push notifications"
-                description="Receive notifications for new messages"
-              >
-                <Switch defaultChecked />
-              </SettingsRow>
-              <SettingsRow
-                icon={<BellIcon className="size-4" />}
-                title="Email digest"
-                description="Weekly summary of your conversations"
-              >
-                <Switch />
-              </SettingsRow>
-            </div>
-          </section>
-
-          {/* Privacy Section */}
-          <section>
-            <div className="mb-4">
-              <h2 className="text-sm font-medium text-foreground">Privacy</h2>
-              <p className="text-sm text-muted-foreground">
-                Manage your data and privacy settings
-              </p>
-            </div>
-
-            <div className="rounded-lg border bg-card divide-y">
-              <SettingsRow
-                icon={<ShieldIcon className="size-4" />}
-                title="Memory extraction"
-                description="Allow AI to extract facts from messages"
-              >
-                <Switch defaultChecked />
-              </SettingsRow>
-              <SettingsRow
-                icon={<DatabaseIcon className="size-4" />}
-                title="Data retention"
-                description="Keep message history indefinitely"
-              >
-                <Switch defaultChecked />
-              </SettingsRow>
-            </div>
           </section>
 
           {/* Account Section */}
