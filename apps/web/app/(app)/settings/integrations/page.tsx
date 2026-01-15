@@ -43,7 +43,7 @@ const INTEGRATIONS: IntegrationConfig[] = [
     name: "Gmail",
     description: "Connect your Gmail account to sync emails",
     icon: <MailIcon className="size-5" />,
-    nangoIntegrationId: "google",
+    nangoIntegrationId: "google-mail", // Must match Nango Dashboard integration name
     color: "text-red-500",
   },
   {

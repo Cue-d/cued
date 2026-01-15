@@ -105,7 +105,7 @@ async function handleSyncWebhook(payload: NangoWebhookPayload): Promise<NextResp
   // Map provider to pull endpoint
   const pullEndpoints: Record<string, string> = {
     slack: "pull-slack",
-    google: "pull-gmail",
+    "google-mail": "pull-gmail", // Must match Nango Dashboard integration name
   };
 
   const endpoint = pullEndpoints[providerConfigKey];

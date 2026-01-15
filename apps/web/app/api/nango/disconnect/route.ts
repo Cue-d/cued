@@ -35,8 +35,20 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    console.log("Attempting to delete Nango connection:", {
+      providerConfigKey,
+      nangoConnectionId,
+    });
+
     // Delete the connection from Nango
-    await nango.deleteConnection(providerConfigKey, nangoConnectionId);
+    // If this fails (connection doesn't exist, wrong name, etc.), continue anyway
+    try {
+      await nango.deleteConnection(providerConfigKey, nangoConnectionId);
+      console.log("Nango connection deleted successfully");
+    } catch (nangoError) {
+      // Log but don't fail - connection might already be deleted or name mismatch
+      console.warn("Nango deleteConnection failed (continuing anyway):", nangoError);
+    }
 
     // Update Convex to mark as disconnected
     await convex.mutation(api.integrations.disconnectNango, {
