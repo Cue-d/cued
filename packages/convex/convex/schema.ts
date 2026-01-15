@@ -5,13 +5,17 @@ import { v } from "convex/values";
 export const platformValidator = v.union(
   v.literal("imessage"),
   v.literal("gmail"),
-  v.literal("slack")
+  v.literal("slack"),
+  v.literal("linkedin"),
+  v.literal("twitter")
 );
 
 export const handleTypeValidator = v.union(
   v.literal("phone"),
   v.literal("email"),
-  v.literal("slack_id")
+  v.literal("slack_id"),
+  v.literal("linkedin_url"),
+  v.literal("twitter_handle")
 );
 
 export const conversationTypeValidator = v.union(
@@ -262,7 +266,7 @@ const schema = defineSchema({
 
   pendingSends: defineTable({
     userId: v.id("users"),
-    conversationId: v.id("conversations"),
+    conversationId: v.optional(v.id("conversations")), // Optional for test sends
     actionId: v.optional(v.id("actions")), // Link to action that created this
     text: v.string(),
     // Recipient info (for iMessage AppleScript)

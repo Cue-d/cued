@@ -10,7 +10,7 @@ import {
   type SwipeDirection,
   type DisplayMessage,
 } from "@prm/ui"
-import { Button, Skeleton } from "@prm/ui"
+import { Button, Input, Skeleton } from "@prm/ui"
 
 /** Action type matching enriched actions from getPendingActions */
 interface EnrichedAction {
@@ -64,8 +64,17 @@ export default function ActionsPage() {
   const updateDraftResponse = useMutation(api.actions.updateDraftResponse)
   const triggerScan = useMutation(api.actionQueue.triggerScanForUnanswered)
 
+  const testSendMessage = useMutation(api.pendingSends.testSendMessage)
+
   // Scan state
   const [scanning, setScanning] = React.useState(false)
+
+  // Test send state
+  const [showTestPanel, setShowTestPanel] = React.useState(false)
+  const [testPhone, setTestPhone] = React.useState("+13474468966")
+  const [testMessage, setTestMessage] = React.useState("Test message from PRM!")
+  const [sending, setSending] = React.useState(false)
+  const [sendResult, setSendResult] = React.useState<string | null>(null)
 
   const handleScan = React.useCallback(async () => {
     setScanning(true)
@@ -77,6 +86,22 @@ export default function ActionsPage() {
       setScanning(false)
     }
   }, [triggerScan])
+
+  const handleTestSend = React.useCallback(async () => {
+    setSending(true)
+    setSendResult(null)
+    try {
+      const result = await testSendMessage({
+        recipientHandle: testPhone,
+        text: testMessage,
+      })
+      setSendResult(`Queued! Electron will send shortly...`)
+    } catch (error) {
+      setSendResult(`Error: ${error instanceof Error ? error.message : "Failed"}`)
+    } finally {
+      setSending(false)
+    }
+  }, [testSendMessage, testPhone, testMessage])
 
   // Track response texts locally (optimistic)
   const [responseTexts, setResponseTexts] = React.useState<
@@ -173,6 +198,13 @@ export default function ActionsPage() {
         <Button
           variant="outline"
           size="sm"
+          onClick={() => setShowTestPanel(!showTestPanel)}
+        >
+          Test Send
+        </Button>
+        <Button
+          variant="outline"
+          size="sm"
           onClick={handleScan}
           disabled={scanning}
         >
@@ -195,6 +227,48 @@ export default function ActionsPage() {
           Send
         </span>
       </div>
+
+      {/* Test Send Panel */}
+      {showTestPanel && (
+        <div className="absolute top-16 right-4 z-20 bg-card border rounded-lg p-4 shadow-lg w-80">
+          <h3 className="font-medium mb-3">Test iMessage Send</h3>
+          <div className="space-y-3">
+            <div>
+              <label className="text-xs text-muted-foreground">Phone Number</label>
+              <Input
+                value={testPhone}
+                onChange={(e) => setTestPhone(e.target.value)}
+                placeholder="+1234567890"
+                className="mt-1"
+              />
+            </div>
+            <div>
+              <label className="text-xs text-muted-foreground">Message</label>
+              <Input
+                value={testMessage}
+                onChange={(e) => setTestMessage(e.target.value)}
+                placeholder="Test message..."
+                className="mt-1"
+              />
+            </div>
+            <Button
+              onClick={handleTestSend}
+              disabled={sending || !testPhone || !testMessage}
+              className="w-full"
+            >
+              {sending ? "Sending..." : "Send iMessage"}
+            </Button>
+            {sendResult && (
+              <p className={`text-xs ${sendResult.startsWith("Error") ? "text-destructive" : "text-green-600"}`}>
+                {sendResult}
+              </p>
+            )}
+            <p className="text-xs text-muted-foreground">
+              Electron app must be running to send.
+            </p>
+          </div>
+        </div>
+      )}
 
       {/* Card Stack */}
       <CardStack<ActionWithId>

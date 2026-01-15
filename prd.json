@@ -2032,7 +2032,7 @@
         "Test auth: POST without token, verify 401 response",
         "Test validation: POST invalid body, verify 400 response with error details"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "8.5",
@@ -2054,7 +2054,7 @@
         "Test: call mutation again with same contacts, verify updatedContacts=3, newContacts=0",
         "Test: verify contactHandles table has linkedin_url handles for each contact"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "8.6",

@@ -819,7 +819,7 @@ function findUserByWorkosId(
 function findIntegration(
   ctx: QueryCtx,
   userId: Id<"users">,
-  platform: "imessage" | "gmail" | "slack"
+  platform: "imessage" | "gmail" | "slack" | "linkedin" | "twitter"
 ): Promise<Doc<"integrations"> | null> {
   return ctx.db
     .query("integrations")
@@ -835,7 +835,7 @@ function findIntegration(
 async function getOrCreateIntegration(
   ctx: MutationCtx,
   userId: Id<"users">,
-  platform: "imessage" | "gmail" | "slack"
+  platform: "imessage" | "gmail" | "slack" | "linkedin" | "twitter"
 ): Promise<Doc<"integrations">> {
   const existing = await findIntegration(ctx, userId, platform);
   if (existing) return existing;
@@ -1796,5 +1796,139 @@ async function upsertGoogleContact(
   }
 
   return { isNew, handlesAdded };
+}
+
+// ============================================================================
+// Social Contacts Sync (LinkedIn, Twitter)
+// ============================================================================
+
+const socialContactInput = v.object({
+  name: v.string(),
+  handle: v.string(),
+  profileUrl: v.string(),
+  headline: v.union(v.string(), v.null()),
+});
+
+const socialPlatformValidator = v.union(
+  v.literal("linkedin"),
+  v.literal("twitter")
+);
+
+type SocialContactInput = Infer<typeof socialContactInput>;
+type SocialPlatform = Infer<typeof socialPlatformValidator>;
+
+/**
+ * Sync social contacts from Electron scrapers to Convex.
+ */
+export const syncSocialContacts = mutation({
+  args: {
+    platform: socialPlatformValidator,
+    contacts: v.array(socialContactInput),
+    syncedAt: v.number(),
+  },
+  handler: async (ctx, args) => {
+    const identity = await ctx.auth.getUserIdentity();
+    if (!identity) {
+      throw new Error("Unauthorized: Must be authenticated to sync social contacts");
+    }
+
+    const user = await getOrCreateUser(ctx, identity);
+    return syncSocialContactsInternal(ctx, user._id, args.platform, args.contacts, args.syncedAt);
+  },
+});
+
+async function syncSocialContactsInternal(
+  ctx: MutationCtx,
+  userId: Id<"users">,
+  platform: SocialPlatform,
+  contacts: SocialContactInput[],
+  syncedAt: number
+) {
+  const result = {
+    totalContacts: contacts.length,
+    newContacts: 0,
+    updatedContacts: 0,
+    errors: [] as string[],
+  };
+
+  const handleType = platform === "linkedin" ? "linkedin_url" : "twitter_handle";
+
+  for (const contact of contacts) {
+    try {
+      const isNew = await upsertSocialContact(ctx, userId, platform, handleType, contact);
+      if (isNew) {
+        result.newContacts++;
+      } else {
+        result.updatedContacts++;
+      }
+    } catch (e) {
+      result.errors.push(`Failed to sync ${contact.name}: ${e}`);
+    }
+  }
+
+  // Update integration sync state
+  const integration = await getOrCreateIntegration(ctx, userId, platform);
+  await ctx.db.patch(integration._id, {
+    syncState: {
+      ...integration.syncState,
+      lastSyncAt: syncedAt,
+      lastError: undefined,
+      totalContactsSynced: (integration.syncState.totalContactsSynced ?? 0) + result.newContacts,
+    },
+  });
+
+  return result;
+}
+
+function extractCompanyFromHeadline(headline: string | null): string | undefined {
+  if (!headline) return undefined;
+  const match = headline.match(/\s+(?:at|@)\s+(.+?)(?:\s*[|•·-]|$)/i);
+  return match ? match[1].trim() : undefined;
+}
+
+async function upsertSocialContact(
+  ctx: MutationCtx,
+  userId: Id<"users">,
+  platform: SocialPlatform,
+  handleType: "linkedin_url" | "twitter_handle",
+  contact: SocialContactInput
+): Promise<boolean> {
+  const normalizedHandle =
+    platform === "linkedin"
+      ? contact.profileUrl.split("?")[0].toLowerCase()
+      : contact.handle.toLowerCase().replace(/^@/, "");
+
+  const existingHandle = await ctx.db
+    .query("contactHandles")
+    .withIndex("by_user_handle", (q) => q.eq("userId", userId).eq("handle", normalizedHandle))
+    .unique();
+
+  if (existingHandle) {
+    const existingContact = await ctx.db.get(existingHandle.contactId);
+    if (existingContact) {
+      const company = extractCompanyFromHeadline(contact.headline);
+      if (company && !existingContact.company) {
+        await ctx.db.patch(existingHandle.contactId, { company });
+      }
+    }
+    return false;
+  }
+
+  const company = extractCompanyFromHeadline(contact.headline);
+  const contactId = await ctx.db.insert("contacts", {
+    userId,
+    displayName: contact.name,
+    company,
+  });
+
+  await ctx.db.insert("contactHandles", {
+    userId,
+    contactId,
+    handleType,
+    handle: normalizedHandle,
+    platform,
+  });
+
+  return true;
 }
 

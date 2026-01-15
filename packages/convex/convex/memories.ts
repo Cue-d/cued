@@ -22,7 +22,7 @@ import { platformValidator } from "./schema";
 const BATCH_SIZE = 50;
 const MIN_MESSAGE_LENGTH = 10; // Skip very short messages
 
-type Platform = "imessage" | "gmail" | "slack";
+type Platform = "imessage" | "gmail" | "slack" | "linkedin" | "twitter";
 
 /** Message data enriched with contact/conversation context. */
 interface EnrichedMessage {

@@ -5,10 +5,12 @@ import { getAuthenticatedUser, findUserByWorkosId } from "./lib/auth";
 const platformValidator = v.union(
   v.literal("imessage"),
   v.literal("gmail"),
-  v.literal("slack")
+  v.literal("slack"),
+  v.literal("linkedin"),
+  v.literal("twitter")
 );
 
-type Platform = "imessage" | "gmail" | "slack";
+type Platform = "imessage" | "gmail" | "slack" | "linkedin" | "twitter";
 
 // Map Nango integration IDs to our platform enum
 function nangoToPlatform(nangoIntegrationId: string): Platform | null {

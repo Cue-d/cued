@@ -1,2 +1,2 @@
-export * from "./gmail.js";
-export * from "./slack.js";
+export * from "./gmail";
+export * from "./slack";

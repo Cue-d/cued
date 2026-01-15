@@ -30,9 +30,9 @@ const MERGE_THRESHOLDS = {
 
 type ContactWithHandles = Doc<"contacts"> & {
   handles: Array<{
-    type: "phone" | "email" | "slack_id";
+    type: "phone" | "email" | "slack_id" | "linkedin_url" | "twitter_handle";
     value: string;
-    platform: "imessage" | "gmail" | "slack";
+    platform: "imessage" | "gmail" | "slack" | "linkedin" | "twitter";
   }>;
 };
 

@@ -15,6 +15,8 @@ export default authkitMiddleware({
       "/api/nango/pull-gmail",
       "/api/nango/pull-google-contacts",
       "/api/nango/pull-slack",
+      "/api/gmail/send",
+      "/api/slack/send",
     ],
   },
 });

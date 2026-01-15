@@ -18,7 +18,7 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 
-type Platform = "imessage" | "gmail" | "slack";
+type Platform = "imessage" | "gmail" | "slack" | "linkedin" | "twitter";
 
 interface IntegrationConfig {
   id: Platform;

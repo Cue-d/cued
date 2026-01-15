@@ -149,6 +149,33 @@ export const markFailed = mutation({
 });
 
 /**
+ * Test sending an iMessage directly (for testing).
+ * Creates a pending send without requiring a conversation.
+ */
+export const testSendMessage = mutation({
+  args: {
+    recipientHandle: v.string(), // Phone number or email
+    text: v.string(),
+  },
+  handler: async (ctx, args) => {
+    const user = await getAuthenticatedUser(ctx);
+    if (!user) throw new Error("Unauthorized");
+
+    const sendId = await ctx.db.insert("pendingSends", {
+      userId: user._id,
+      text: args.text,
+      recipientHandle: args.recipientHandle,
+      isGroup: false,
+      status: "pending",
+      createdAt: Date.now(),
+      attempts: 0,
+    });
+
+    return { sendId, message: `Queued message to ${args.recipientHandle}` };
+  },
+});
+
+/**
  * Retry a failed send.
  * Resets status to pending for another attempt.
  */
