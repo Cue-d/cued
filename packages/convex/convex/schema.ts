@@ -58,6 +58,8 @@ const schema = defineSchema({
     userId: v.id("users"),
     platform: platformValidator,
     pipedreamAccountId: v.optional(v.string()),
+    nangoConnectionId: v.optional(v.string()), // Task 4.5: Nango connection ID for Gmail/Slack
+    connectedAt: v.optional(v.number()), // Task 4.5: When the integration was connected
     syncState: v.object({
       isConnected: v.boolean(),
       lastSyncAt: v.optional(v.number()),

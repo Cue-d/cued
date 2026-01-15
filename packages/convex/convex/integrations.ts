@@ -1,6 +1,23 @@
 import { v } from "convex/values";
-import { query } from "./_generated/server";
-import { getAuthenticatedUser } from "./lib/auth";
+import { mutation, query } from "./_generated/server";
+import { getAuthenticatedUser, findUserByWorkosId } from "./lib/auth";
+
+const platformValidator = v.union(
+  v.literal("imessage"),
+  v.literal("gmail"),
+  v.literal("slack")
+);
+
+type Platform = "imessage" | "gmail" | "slack";
+
+// Map Nango integration IDs to our platform enum
+function nangoToPlatform(nangoIntegrationId: string): Platform | null {
+  const mapping: Record<string, Platform> = {
+    "google-mail": "gmail",
+    slack: "slack",
+  };
+  return mapping[nangoIntegrationId] ?? null;
+}
 
 export const getUserIntegrations = query({
   args: {},
@@ -55,5 +72,104 @@ export const getIntegrationStatus = query({
       lastError: integration.syncState.lastError ?? null,
       totalMessagesSynced: integration.syncState.totalMessagesSynced ?? 0,
     };
+  },
+});
+
+/**
+ * Connect a Nango integration. Called from webhook when user completes OAuth.
+ * Uses WorkOS ID to find user (webhook receives endUser.endUserId = WorkOS subject).
+ */
+export const connectNango = mutation({
+  args: {
+    workosUserId: v.string(),
+    nangoIntegrationId: v.string(), // e.g., "google-mail", "slack"
+    nangoConnectionId: v.string(),
+  },
+  handler: async (ctx, args) => {
+    const platform = nangoToPlatform(args.nangoIntegrationId);
+    if (!platform) {
+      throw new Error(`Unknown Nango integration: ${args.nangoIntegrationId}`);
+    }
+
+    const user = await findUserByWorkosId(ctx, args.workosUserId);
+    if (!user) {
+      throw new Error(`User not found for WorkOS ID: ${args.workosUserId}`);
+    }
+
+    // Check if integration already exists
+    const existing = await ctx.db
+      .query("integrations")
+      .withIndex("by_user_platform", (q) =>
+        q.eq("userId", user._id).eq("platform", platform)
+      )
+      .unique();
+
+    if (existing) {
+      // Update existing integration
+      await ctx.db.patch(existing._id, {
+        nangoConnectionId: args.nangoConnectionId,
+        connectedAt: Date.now(),
+        syncState: {
+          ...existing.syncState,
+          isConnected: true,
+          lastError: undefined,
+        },
+      });
+      return { integrationId: existing._id, updated: true };
+    }
+
+    // Create new integration
+    const integrationId = await ctx.db.insert("integrations", {
+      userId: user._id,
+      platform,
+      nangoConnectionId: args.nangoConnectionId,
+      connectedAt: Date.now(),
+      syncState: {
+        isConnected: true,
+      },
+    });
+
+    return { integrationId, updated: false };
+  },
+});
+
+/**
+ * Disconnect a Nango integration. Called from webhook when connection is deleted.
+ */
+export const disconnectNango = mutation({
+  args: {
+    workosUserId: v.string(),
+    nangoConnectionId: v.string(),
+  },
+  handler: async (ctx, args) => {
+    const user = await findUserByWorkosId(ctx, args.workosUserId);
+    if (!user) {
+      return { success: false, error: "User not found" };
+    }
+
+    // Find integration by nangoConnectionId
+    const integrations = await ctx.db
+      .query("integrations")
+      .withIndex("by_user", (q) => q.eq("userId", user._id))
+      .collect();
+
+    const integration = integrations.find(
+      (i) => i.nangoConnectionId === args.nangoConnectionId
+    );
+
+    if (!integration) {
+      return { success: false, error: "Integration not found" };
+    }
+
+    // Update to disconnected state
+    await ctx.db.patch(integration._id, {
+      nangoConnectionId: undefined,
+      syncState: {
+        ...integration.syncState,
+        isConnected: false,
+      },
+    });
+
+    return { success: true };
   },
 });

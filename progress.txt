@@ -1627,3 +1627,28 @@ Notes:
   - Disconnect not yet functional (waiting for webhook to store nangoConnectionId)
   - Ready for task 4.5: Create Convex mutation to store Nango connection
 ---
+
+[2026-01-15 16:00] Tasks 4.5/4.6 - Nango webhook handler for connection events
+Files:
+  - packages/convex/convex/schema.ts (add nangoConnectionId, connectedAt)
+  - packages/convex/convex/integrations.ts (add connectNango, disconnectNango mutations)
+  - apps/web/app/api/nango/webhook/route.ts (new)
+  - apps/web/NANGO_SETUP.md (add webhook config instructions)
+Decisions:
+  - Added nangoConnectionId and connectedAt fields to integrations table
+  - Created connectNango mutation: finds user by WorkOS ID, upserts integration
+  - Created disconnectNango mutation: sets isConnected=false, clears nangoConnectionId
+  - Created nangoToPlatform helper to map "google-mail" -> "gmail"
+  - Webhook handles type="auth" with operation="creation" and "deletion"
+  - Uses WorkOS subject (endUser.endUserId) to find user in Convex
+Why:
+  - Webhook is required to update Convex when Nango OAuth completes
+  - WorkOS subject is the stable identifier passed through Nango connect session
+  - Upsert pattern handles both new and existing integrations
+  - Both create and delete events handled for full lifecycle support
+Notes:
+  - Requires webhook URL configured in Nango Dashboard > Environment Settings
+  - Local testing requires ngrok tunnel for HTTPS
+  - Web app lint and typecheck pass
+  - Convex deployed successfully with new schema and mutations
+---

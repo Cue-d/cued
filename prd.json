@@ -961,7 +961,7 @@
         "Update connectedAt timestamp",
         "Create query to check connection status by userId and platform"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "4.6",
@@ -979,7 +979,7 @@
         "Call Convex mutation to store connection",
         "Handle connection deletion events to update Convex"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "4.7",
