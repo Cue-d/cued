@@ -11,27 +11,51 @@ import { mergeSuggestionStatusValidator, mergeSourceValidator } from "./schema";
 
 /**
  * Get all contacts for the current user with their handles.
+ * Supports search by name and cursor-based pagination.
  */
 export const getContacts = query({
   args: {
     limit: v.optional(v.number()),
     cursor: v.optional(v.id("contacts")),
+    searchQuery: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
     const user = await getAuthenticatedUser(ctx);
-    if (!user) return { contacts: [], nextCursor: null };
+    if (!user) return { contacts: [], nextCursor: null, totalCount: 0 };
 
     const limit = Math.min(args.limit ?? 50, 100);
 
-    let query = ctx.db
-      .query("contacts")
-      .withIndex("by_user", (q) => q.eq("userId", user._id));
+    // Fetch contacts - with search or regular query
+    let contacts: Array<{
+      _id: Id<"contacts">;
+      userId: Id<"users">;
+      displayName: string;
+      company?: string;
+      notes?: string;
+      importance?: number;
+    }>;
 
-    if (args.cursor) {
-      query = query.filter((q) => q.gt(q.field("_id"), args.cursor!));
+    if (args.searchQuery && args.searchQuery.trim().length > 0) {
+      // Use search index for text search
+      contacts = await ctx.db
+        .query("contacts")
+        .withSearchIndex("search_display_name", (q) =>
+          q.search("displayName", args.searchQuery!).eq("userId", user._id)
+        )
+        .take(limit + 1);
+    } else {
+      // Regular query with optional cursor
+      let query = ctx.db
+        .query("contacts")
+        .withIndex("by_user", (q) => q.eq("userId", user._id));
+
+      if (args.cursor) {
+        query = query.filter((q) => q.gt(q.field("_id"), args.cursor!));
+      }
+
+      contacts = await query.take(limit + 1);
     }
 
-    const contacts = await query.take(limit + 1);
     const hasMore = contacts.length > limit;
     const results = hasMore ? contacts.slice(0, -1) : contacts;
 
@@ -54,9 +78,17 @@ export const getContacts = query({
       })
     );
 
+    // Get total count for display
+    const totalCount = await ctx.db
+      .query("contacts")
+      .withIndex("by_user", (q) => q.eq("userId", user._id))
+      .collect()
+      .then((all) => all.length);
+
     return {
       contacts: contactsWithHandles,
       nextCursor: hasMore ? results[results.length - 1]._id : null,
+      totalCount,
     };
   },
 });

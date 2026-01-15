@@ -446,12 +446,49 @@ type MatchResult = {
   reasoning: string;
 };
 
-/** Extract handles of a specific type from a contact */
+/** Check if a string looks like an email address */
+function looksLikeEmail(value: string): boolean {
+  return value.includes("@") && value.includes(".");
+}
+
+/** Check if a string looks like a phone number (digits with optional formatting) */
+function looksLikePhone(value: string): boolean {
+  // Remove common phone formatting characters
+  const digitsOnly = value.replace(/[\s\-\(\)\+\.]/g, "");
+  // Should be mostly digits (at least 7) and no @ symbol
+  return digitsOnly.length >= 7 && /^\d+$/.test(digitsOnly) && !value.includes("@");
+}
+
+/** Extract handles of a specific type from a contact.
+ * Also includes displayName if it looks like an email/phone (fallback for
+ * placeholder contacts that might not have handles stored correctly).
+ */
 function getHandleValues(
   contact: ContactWithHandles,
   type: "email" | "phone"
 ): string[] {
-  return contact.handles.filter((h) => h.type === type).map((h) => h.value);
+  const handleValues = contact.handles
+    .filter((h) => h.type === type)
+    .map((h) => h.value);
+
+  // For email matching, also include displayName if it looks like an email
+  // This catches placeholder contacts where displayName IS the email
+  if (type === "email" && looksLikeEmail(contact.displayName)) {
+    const normalizedDisplayName = contact.displayName.toLowerCase().trim();
+    if (!handleValues.some((v) => v.toLowerCase() === normalizedDisplayName)) {
+      handleValues.push(normalizedDisplayName);
+    }
+  }
+
+  // For phone matching, also include displayName if it looks like a phone
+  if (type === "phone" && looksLikePhone(contact.displayName)) {
+    const normalizedDisplayName = contact.displayName.replace(/[\s\-\(\)\.]/g, "");
+    if (!handleValues.includes(normalizedDisplayName)) {
+      handleValues.push(normalizedDisplayName);
+    }
+  }
+
+  return handleValues;
 }
 
 /** Check if any pair of values match using the provided matcher */
