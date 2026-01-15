@@ -1777,7 +1777,7 @@
         "Add keyboard shortcut hints in corner",
         "Handle swipe mutations with optimistic updates"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "7.16",

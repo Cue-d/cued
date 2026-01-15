@@ -2291,3 +2291,26 @@ Notes:
   - Warning about <img> tag is acceptable for shared UI
   - Exported from @prm/ui package
 ---
+
+[2026-01-15 12:40] Task 7.15 - Create Actions page with Convex integration and empty state
+Files:
+  - apps/web/app/(app)/actions/page.tsx (new)
+Implementation:
+  - Actions page with useQuery for pending actions and count
+  - CardStack rendering with MessageResponseCard content
+  - Lazy context fetch (getActionWithContext) for top action only
+  - Loading skeleton while fetching initial data
+  - Empty state handled by CardStack component
+  - Keyboard shortcut hints in top-right corner
+  - swipeAction mutation on swipe with direction handling
+  - updateDraftResponse mutation with debounced sync (500ms)
+  - Local response text state with server sync
+  - Reaction emoji extraction from reaction objects
+Decisions:
+  - Used stable EMPTY_ACTIONS constant to fix useMemo lint warning
+  - Only fetch full context for top card (performance)
+  - Map enriched actions to ActionWithId with index signature
+Notes:
+  - All lint and typecheck pass
+  - Ready for testing with live Convex data
+---
