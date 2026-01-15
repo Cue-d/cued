@@ -1529,3 +1529,250 @@ async function batchFetchSlackMessages(
   return results;
 }
 
+// ============================================================================
+// Google Contacts Sync
+// ============================================================================
+
+// Validator for Google Contact input (from Nango sync)
+const googleContactInput = v.object({
+  id: v.string(), // resourceName from Google People API
+  name: v.string(),
+  emails: v.array(v.string()),
+  phones: v.array(v.string()),
+  company: v.optional(v.string()),
+  title: v.optional(v.string()),
+  isDeleted: v.boolean(),
+});
+
+type GoogleContactInput = Infer<typeof googleContactInput>;
+
+/**
+ * Sync Google Contacts from Nango to Convex.
+ * Called via API endpoint when Nango sync completes.
+ *
+ * This mutation:
+ * 1. Upserts contacts by email/phone handle
+ * 2. Links handles to contact records
+ * 3. Merges with existing iMessage contacts by phone number
+ * 4. Handles deleted contacts from Google
+ */
+export const syncGoogleContacts = mutation({
+  args: {
+    workosUserId: v.string(),
+    contacts: v.array(googleContactInput),
+  },
+  handler: async (ctx, args) => {
+    const user = await findUserByWorkosId(ctx, args.workosUserId);
+    if (!user) {
+      throw new Error(`User not found for WorkOS ID: ${args.workosUserId}`);
+    }
+
+    return syncGoogleContactsInternal(ctx, user._id, args.contacts);
+  },
+});
+
+/**
+ * Internal sync logic for Google Contacts.
+ */
+async function syncGoogleContactsInternal(
+  ctx: MutationCtx,
+  userId: Id<"users">,
+  contacts: GoogleContactInput[]
+) {
+  const result = {
+    contactsCount: 0,
+    updatedCount: 0,
+    deletedCount: 0,
+    handlesCount: 0,
+    errors: [] as string[],
+  };
+
+  for (const contact of contacts) {
+    try {
+      // Handle deleted contacts
+      if (contact.isDeleted) {
+        // Find and soft-delete the contact if it exists
+        const deleted = await handleDeletedGoogleContact(ctx, userId, contact);
+        if (deleted) {
+          result.deletedCount++;
+        }
+        continue;
+      }
+
+      // Skip contacts with no identifiable handles
+      if (contact.emails.length === 0 && contact.phones.length === 0) {
+        continue;
+      }
+
+      const syncResult = await upsertGoogleContact(ctx, userId, contact);
+      if (syncResult.isNew) {
+        result.contactsCount++;
+      } else {
+        result.updatedCount++;
+      }
+      result.handlesCount += syncResult.handlesAdded;
+    } catch (e) {
+      result.errors.push(`Failed to sync contact ${contact.name}: ${e}`);
+    }
+  }
+
+  return result;
+}
+
+/**
+ * Handle a deleted Google Contact.
+ * Finds the contact by any handle and removes Google-specific handles.
+ */
+async function handleDeletedGoogleContact(
+  ctx: MutationCtx,
+  userId: Id<"users">,
+  contact: GoogleContactInput
+): Promise<boolean> {
+  // Collect all handles to find the contact
+  const allHandles = [
+    ...contact.emails.map((e) => e.toLowerCase()),
+    ...contact.phones.map((p) => normalizePhone(p)),
+  ];
+
+  for (const handle of allHandles) {
+    const existingHandle = await ctx.db
+      .query("contactHandles")
+      .withIndex("by_user_handle", (q) =>
+        q.eq("userId", userId).eq("handle", handle)
+      )
+      .unique();
+
+    if (existingHandle) {
+      // Remove handles that came from Gmail (not iMessage or Slack)
+      // We identify Gmail handles by checking if they're email type
+      const handlesByContact = await ctx.db
+        .query("contactHandles")
+        .withIndex("by_contact", (q) => q.eq("contactId", existingHandle.contactId))
+        .collect();
+
+      for (const h of handlesByContact) {
+        // Only delete email handles from gmail platform
+        if (h.platform === "gmail" && h.handleType === "email") {
+          await ctx.db.delete(h._id);
+        }
+      }
+
+      // Check if contact has any remaining handles
+      const remainingHandles = await ctx.db
+        .query("contactHandles")
+        .withIndex("by_contact", (q) => q.eq("contactId", existingHandle.contactId))
+        .first();
+
+      // If no handles remain, delete the contact too
+      if (!remainingHandles) {
+        await ctx.db.delete(existingHandle.contactId);
+      }
+
+      return true;
+    }
+  }
+
+  return false;
+}
+
+/**
+ * Upsert a Google Contact by finding existing contact via any of its handles,
+ * or creating a new one if no match found.
+ * Merges with existing iMessage/Slack contacts by phone/email.
+ */
+async function upsertGoogleContact(
+  ctx: MutationCtx,
+  userId: Id<"users">,
+  contact: GoogleContactInput
+): Promise<{ isNew: boolean; handlesAdded: number }> {
+  // Collect all normalized handles
+  const handles: Array<{ value: string; type: "phone" | "email" }> = [
+    ...contact.phones.map((p) => ({
+      value: normalizePhone(p),
+      type: "phone" as const,
+    })),
+    ...contact.emails.map((e) => ({
+      value: e.toLowerCase(),
+      type: "email" as const,
+    })),
+  ];
+
+  // Find existing contact by any handle (including iMessage phones)
+  let contactId: Id<"contacts"> | null = null;
+  for (const handle of handles) {
+    contactId = await findContactByHandle(ctx, userId, handle);
+    if (contactId) break;
+  }
+
+  const isNew = contactId === null;
+  const contactData: {
+    displayName: string;
+    company?: string;
+  } = {
+    displayName: contact.name || contact.emails[0] || contact.phones[0] || "Unknown",
+  };
+
+  // Only set company if we have one
+  if (contact.company) {
+    contactData.company = contact.company;
+  }
+
+  if (contactId) {
+    // Update existing contact with Google data (only if we have better info)
+    const existingContact = await ctx.db.get(contactId);
+    if (existingContact) {
+      const updates: { displayName?: string; company?: string } = {};
+
+      // Update display name if current is just a handle/placeholder
+      if (
+        contact.name &&
+        (existingContact.displayName.includes("@") ||
+          existingContact.displayName.startsWith("+") ||
+          existingContact.displayName.match(/^\d+$/))
+      ) {
+        updates.displayName = contact.name;
+      }
+
+      // Update company if not set
+      if (contact.company && !existingContact.company) {
+        updates.company = contact.company;
+      }
+
+      if (Object.keys(updates).length > 0) {
+        await ctx.db.patch(contactId, updates);
+      }
+    }
+  } else {
+    // Create new contact
+    contactId = await ctx.db.insert("contacts", { userId, ...contactData });
+  }
+
+  // Add missing handles (link to existing contact)
+  let handlesAdded = 0;
+  for (const handle of handles) {
+    const existing = await ctx.db
+      .query("contactHandles")
+      .withIndex("by_user_handle", (q) =>
+        q.eq("userId", userId).eq("handle", handle.value)
+      )
+      .unique();
+
+    if (!existing) {
+      // Add new handle linked to this contact
+      await ctx.db.insert("contactHandles", {
+        userId,
+        contactId,
+        handleType: handle.type,
+        handle: handle.value,
+        platform: "gmail", // Google Contacts sync uses gmail platform
+      });
+      handlesAdded++;
+    } else if (existing.contactId !== contactId) {
+      // Handle exists but linked to different contact - update to primary contact
+      await ctx.db.patch(existing._id, { contactId });
+    }
+  }
+
+  return { isNew, handlesAdded };
+}
+

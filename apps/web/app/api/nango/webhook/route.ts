@@ -102,14 +102,14 @@ async function handleSyncWebhook(payload: NangoWebhookPayload): Promise<NextResp
     return NextResponse.json({ error: "Missing required fields" }, { status: 400 });
   }
 
-  // Map provider to pull endpoint
-  const pullEndpoints: Record<string, string> = {
-    slack: "pull-slack",
-    google: "pull-gmail",
+  // Map provider to pull endpoints (some providers have multiple syncs)
+  const pullEndpoints: Record<string, string[]> = {
+    slack: ["pull-slack"],
+    google: ["pull-gmail", "pull-google-contacts"],
   };
 
-  const endpoint = pullEndpoints[providerConfigKey];
-  if (!endpoint) {
+  const endpoints = pullEndpoints[providerConfigKey];
+  if (!endpoints) {
     return NextResponse.json({
       received: true,
       processed: false,
@@ -117,24 +117,45 @@ async function handleSyncWebhook(payload: NangoWebhookPayload): Promise<NextResp
     });
   }
 
-  // Call the appropriate pull endpoint
+  // Call all appropriate pull endpoints for this provider
   const baseUrl = process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000";
-  const pullResponse = await fetch(`${baseUrl}/api/nango/${endpoint}`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      connectionId,
-      workosUserId: endUser.endUserId,
-    }),
-  });
+  const results: Record<string, unknown> = {};
+  const errors: Record<string, unknown> = {};
 
-  if (!pullResponse.ok) {
-    const error = await pullResponse.json();
-    console.error(`${providerConfigKey} pull failed:`, error);
-    return NextResponse.json({ received: true, processed: false, error });
+  for (const endpoint of endpoints) {
+    try {
+      const pullResponse = await fetch(`${baseUrl}/api/nango/${endpoint}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          connectionId,
+          workosUserId: endUser.endUserId,
+        }),
+      });
+
+      if (!pullResponse.ok) {
+        const error = await pullResponse.json();
+        console.error(`${endpoint} pull failed:`, error);
+        errors[endpoint] = error;
+      } else {
+        const result = await pullResponse.json();
+        console.log(`${endpoint} sync pulled:`, result);
+        results[endpoint] = result;
+      }
+    } catch (e) {
+      const errorMsg = e instanceof Error ? e.message : "Unknown error";
+      console.error(`${endpoint} pull error:`, errorMsg);
+      errors[endpoint] = errorMsg;
+    }
   }
 
-  const result = await pullResponse.json();
-  console.log(`${providerConfigKey} sync pulled:`, result);
-  return NextResponse.json({ received: true, processed: true, result });
+  const hasResults = Object.keys(results).length > 0;
+  const hasErrors = Object.keys(errors).length > 0;
+
+  return NextResponse.json({
+    received: true,
+    processed: hasResults,
+    results: hasResults ? results : undefined,
+    errors: hasErrors ? errors : undefined,
+  });
 }
