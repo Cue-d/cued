@@ -1785,3 +1785,73 @@ Notes:
   - Gmail connection flow now works end-to-end
   - UI shows "Connected" status after OAuth completes
 ---
+
+[2026-01-15 19:00] Task 4.8 - Create Nango action for sending Gmail messages
+Files:
+  - nango-integrations/google-mail/actions/send-email.ts (new)
+  - nango-integrations/index.ts (add Gmail action + Slack imports)
+  - nango-integrations/.nango/schema.ts (auto-generated types)
+  - apps/web/NANGO_SETUP.md (document send-email action)
+Decisions:
+  - Created send-email action with RFC 2822 email formatting
+  - Input: to, subject, body, threadId (optional), inReplyTo (optional), references (optional)
+  - Output: id, threadId, labelIds
+  - Uses base64url encoding (RFC 4648) without padding for Gmail API
+  - Threading via threadId in request body, In-Reply-To and References headers
+  - Following same pattern as Slack send-message action
+Why:
+  - RFC 2822 format required by Gmail API messages/send endpoint
+  - In-Reply-To/References headers enable proper email client threading
+  - threadId groups messages in same Gmail thread
+  - base64url encoding required by Gmail API (not standard base64)
+Notes:
+  - nango compile passes successfully
+  - Code simplified by code-simplifier agent (87 lines down from 134)
+  - Deploy requires: cd nango-integrations && npx nango deploy dev
+  - All lint and typecheck pass for monorepo
+  - Ready for task 4.9: Create sendGmailMessage in packages/integrations
+---
+
+[2026-01-15 19:15] Task 4.9 - Create sendGmailMessage in packages/integrations using Nango
+Files:
+  - packages/integrations/src/nango/gmail.ts (new)
+  - packages/integrations/src/nango/index.ts (add export)
+Decisions:
+  - Created gmail.ts following exact same pattern as slack.ts
+  - sendGmailMessage() uses nango.triggerAction('google-mail', 'send-email', connectionId, input)
+  - sendGmailReply() convenience function for replying to threads
+  - Input interface: to, subject, body, threadId, inReplyTo, references
+  - Output interface: id, threadId, labelIds
+  - createNangoGmailClient() factory follows same pattern as Slack
+Why:
+  - Consistent API surface across integrations (Slack, Gmail use same pattern)
+  - Threading support via threadId + email headers (inReplyTo, references)
+  - Error handling delegated to Nango SDK (throws on connection not found)
+  - Clean separation: Nango action handles RFC 2822 encoding, this is just SDK wrapper
+Notes:
+  - Code simplified by code-simplifier: removed intermediate result variable
+  - All lint and typecheck pass for entire monorepo
+  - Ready for task 4.10: Wire Gmail send to action queue completion
+---
+
+[2026-01-15 20:00] Task 4.10 - Wire Gmail send to action queue completion
+Files:
+  - apps/web/app/api/gmail/send/route.ts (new)
+Decisions:
+  - Created /api/gmail/send POST endpoint mirroring /api/slack/send pattern
+  - Validates: workosUserId, conversationId, to, subject, body (required fields)
+  - Gets Gmail nangoConnectionId from Convex integrations table
+  - Verifies conversation exists before sending
+  - Calls sendGmailMessage from @prm/integrations/nango with threading support
+  - Returns: success, messageId, threadId on success
+  - Supports optional threadId, inReplyTo, references for email threading
+Why:
+  - Consistent API pattern with Slack send endpoint
+  - Front-end action completion can call this endpoint when platform='gmail'
+  - Threading headers enable proper Gmail thread display when replying
+  - Verification step prevents sending to deleted/invalid conversations
+Notes:
+  - Code simplified by code-simplifier: removed unused actionId field, consolidated error responses
+  - All lint and typecheck pass for entire monorepo
+  - Ready for task 4.11: Auto-create Mem0 memories from Gmail emails
+---

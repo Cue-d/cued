@@ -1016,7 +1016,7 @@
         "Return sent message ID and threadId",
         "Deploy action with: npx nango deploy"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "4.9",
@@ -1033,7 +1033,7 @@
         "Return sent message ID",
         "Add error handling for connection not found"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "4.10",
@@ -1049,7 +1049,7 @@
         "Update action status to completed on success",
         "Handle errors and show failure state"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "4.11",

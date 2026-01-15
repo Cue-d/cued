@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { ConvexHttpClient } from "convex/browser";
-import { api, Id } from "@prm/convex";
+import type { Id } from "@prm/convex";
+import { api } from "@prm/convex";
 import { sendSlackMessage } from "@prm/integrations/nango";
 
 const convex = new ConvexHttpClient(process.env.NEXT_PUBLIC_CONVEX_URL!);
@@ -22,9 +23,9 @@ interface SendSlackMessageRequest {
 export async function POST(request: NextRequest): Promise<NextResponse> {
   try {
     const body = (await request.json()) as SendSlackMessageRequest;
-    const { actionId, workosUserId, conversationId, text, threadTs } = body;
+    const { workosUserId, conversationId, text, threadTs } = body;
 
-    if (!actionId || !workosUserId || !conversationId || !text) {
+    if (!workosUserId || !conversationId || !text) {
       return NextResponse.json(
         { error: "Missing required fields" },
         { status: 400 }
