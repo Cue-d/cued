@@ -219,3 +219,61 @@ export const disconnectNango = mutation({
     return { success: true };
   },
 });
+
+// ============================================================================
+// Debug/Test Queries
+// ============================================================================
+
+/**
+ * Debug query to get Gmail integration status and stats.
+ * Used for E2E testing verification (Task 4.14).
+ */
+export const debugGmailStats = query({
+  args: {},
+  handler: async (ctx) => {
+    // Get all integrations (small table)
+    const allIntegrations = await ctx.db.query("integrations").collect();
+    const gmailIntegrations = allIntegrations.filter((i) => i.platform === "gmail");
+
+    // Sample Gmail conversations (limit query to avoid scanning entire table)
+    const gmailConversations = await ctx.db
+      .query("conversations")
+      .order("desc")
+      .take(100);
+    const filteredConversations = gmailConversations.filter((c) => c.platform === "gmail");
+
+    // Sample Gmail messages (limit query)
+    const recentMessages = await ctx.db
+      .query("messages")
+      .order("desc")
+      .take(100);
+    const gmailMessages = recentMessages.filter((m) => m.platform === "gmail");
+
+    return {
+      integrations: gmailIntegrations.map((i) => ({
+        _id: i._id,
+        userId: i.userId,
+        isConnected: i.syncState.isConnected,
+        lastSyncAt: i.syncState.lastSyncAt
+          ? new Date(i.syncState.lastSyncAt).toISOString()
+          : null,
+        totalMessagesSynced: i.syncState.totalMessagesSynced ?? 0,
+        totalContactsSynced: i.syncState.totalContactsSynced ?? 0,
+        hasNangoConnection: !!i.nangoConnectionId,
+      })),
+      stats: {
+        conversationSample: filteredConversations.length,
+        messageSample: gmailMessages.length,
+        note: "Counts are sampled from last 100 records",
+      },
+      sampleConversations: filteredConversations.slice(0, 5).map((c) => ({
+        _id: c._id,
+        displayName: c.displayName,
+        lastMessageAt: c.lastMessageAt
+          ? new Date(c.lastMessageAt).toISOString()
+          : null,
+        lastMessagePreview: c.lastMessageText?.slice(0, 50),
+      })),
+    };
+  },
+});

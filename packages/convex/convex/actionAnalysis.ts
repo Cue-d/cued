@@ -366,8 +366,8 @@ export const analyzeConversation = internalAction({
           type: suggestion.type ?? "respond",
           priority: suggestion.priority ?? 50,
           platform: conversation.platform,
-          draftMessage: suggestion.suggestedResponse,
-          llmReason: suggestion.reason,
+          draftMessage: suggestion.suggestedResponse !== null ? suggestion.suggestedResponse : undefined,
+          llmReason: suggestion.reason !== null ? suggestion.reason : undefined,
           snoozedUntil,
         }
       );
