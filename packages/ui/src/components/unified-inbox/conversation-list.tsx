@@ -1,10 +1,12 @@
 "use client";
 
 import { useCallback, useRef } from "react";
-import { Search } from "lucide-react";
+import { Search, MessageSquare, Mail, Hash } from "lucide-react";
 import { cn } from "../../lib/utils";
 import { InboxConversationItem } from "./conversation-item";
-import type { InboxConversation } from "./types";
+import type { InboxConversation, InboxPlatform } from "./types";
+
+type PlatformFilter = InboxPlatform | "all";
 
 interface InboxConversationListProps {
   conversations: InboxConversation[];
@@ -14,7 +16,18 @@ interface InboxConversationListProps {
   hasMore?: boolean;
   loading?: boolean;
   className?: string;
+  /** Current platform filter */
+  platformFilter?: PlatformFilter;
+  /** Called when filter changes */
+  onFilterChange?: (platform: PlatformFilter) => void;
 }
+
+const filterButtons: Array<{ value: PlatformFilter; label: string; icon?: React.ReactNode }> = [
+  { value: "all", label: "All" },
+  { value: "imessage", label: "iMessage", icon: <MessageSquare className="w-3.5 h-3.5" /> },
+  { value: "gmail", label: "Gmail", icon: <Mail className="w-3.5 h-3.5" /> },
+  { value: "slack", label: "Slack", icon: <Hash className="w-3.5 h-3.5" /> },
+];
 
 export function InboxConversationList({
   conversations,
@@ -24,6 +37,8 @@ export function InboxConversationList({
   hasMore,
   loading,
   className,
+  platformFilter = "all",
+  onFilterChange,
 }: InboxConversationListProps): React.ReactElement {
   const loadingRef = useRef(false);
 
@@ -63,6 +78,28 @@ export function InboxConversationList({
           />
         </div>
       </div>
+
+      {/* Platform Filter */}
+      {onFilterChange && (
+        <div className="px-4 pb-3 flex gap-1.5">
+          {filterButtons.map((btn) => (
+            <button
+              key={btn.value}
+              type="button"
+              onClick={() => onFilterChange(btn.value)}
+              className={cn(
+                "flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium transition-all",
+                platformFilter === btn.value
+                  ? "bg-primary text-primary-foreground shadow-sm"
+                  : "bg-muted/60 text-muted-foreground hover:bg-muted hover:text-foreground"
+              )}
+            >
+              {btn.icon}
+              {btn.label}
+            </button>
+          ))}
+        </div>
+      )}
 
       {/* Conversation list */}
       <div

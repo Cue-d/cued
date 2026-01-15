@@ -17,6 +17,7 @@ export type {
   MessageResponseCardRef,
   DisplayMessage,
   MessageAttachment,
+  ActionPlatform,
 } from "./message-response-card"
 
 export { ContactCard } from "./contact-card"

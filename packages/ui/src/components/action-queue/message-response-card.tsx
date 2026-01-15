@@ -1,10 +1,27 @@
 "use client"
 
 import * as React from "react"
+import { MessageSquare, Mail, Hash, ChevronDown } from "lucide-react"
 import { cn } from "../../lib/utils"
 import { Card, CardContent, CardFooter, CardHeader } from "../ui/card"
 import { Avatar, AvatarFallback } from "../ui/avatar"
 import { Textarea } from "../ui/textarea"
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "../ui/dropdown-menu"
+
+/** Platform types */
+export type ActionPlatform = "imessage" | "gmail" | "slack"
+
+/** Platform config for display */
+const platformConfig: Record<ActionPlatform, { label: string; icon: React.ReactNode; colorClass: string }> = {
+  imessage: { label: "iMessage", icon: <MessageSquare className="w-3.5 h-3.5" />, colorClass: "text-green-600" },
+  gmail: { label: "Gmail", icon: <Mail className="w-3.5 h-3.5" />, colorClass: "text-red-600" },
+  slack: { label: "Slack", icon: <Hash className="w-3.5 h-3.5" />, colorClass: "text-purple-600" },
+}
 
 /** Message attachment with URL */
 export interface MessageAttachment {
@@ -41,6 +58,12 @@ export interface MessageResponseCardProps {
   className?: string
   /** Auto-focus textarea on mount */
   autoFocus?: boolean
+  /** Current platform for sending */
+  platform?: ActionPlatform
+  /** Available platforms (from contact handles) */
+  availablePlatforms?: ActionPlatform[]
+  /** Called when platform changes */
+  onPlatformChange?: (platform: ActionPlatform) => void
 }
 
 export interface MessageResponseCardRef {
@@ -184,6 +207,9 @@ export const MessageResponseCard = React.forwardRef<
     onResponseChange,
     className,
     autoFocus = true,
+    platform,
+    availablePlatforms,
+    onPlatformChange,
   },
   ref
 ) {
@@ -246,6 +272,43 @@ export const MessageResponseCard = React.forwardRef<
               </p>
             )}
           </div>
+
+          {/* Platform Selector */}
+          {platform && availablePlatforms && availablePlatforms.length > 1 && onPlatformChange ? (
+            <DropdownMenu>
+              <DropdownMenuTrigger className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-muted/60 hover:bg-muted text-sm transition-colors">
+                <span className={platformConfig[platform].colorClass}>
+                  {platformConfig[platform].icon}
+                </span>
+                <span className="text-xs font-medium">{platformConfig[platform].label}</span>
+                <ChevronDown className="w-3 h-3 text-muted-foreground" />
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end">
+                {availablePlatforms.map((p) => (
+                  <DropdownMenuItem
+                    key={p}
+                    onClick={() => onPlatformChange(p)}
+                    className={cn(
+                      "flex items-center gap-2",
+                      p === platform && "bg-muted"
+                    )}
+                  >
+                    <span className={platformConfig[p].colorClass}>
+                      {platformConfig[p].icon}
+                    </span>
+                    <span>{platformConfig[p].label}</span>
+                  </DropdownMenuItem>
+                ))}
+              </DropdownMenuContent>
+            </DropdownMenu>
+          ) : platform ? (
+            <div className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-muted/60 text-sm">
+              <span className={platformConfig[platform].colorClass}>
+                {platformConfig[platform].icon}
+              </span>
+              <span className="text-xs font-medium">{platformConfig[platform].label}</span>
+            </div>
+          ) : null}
         </div>
       </CardHeader>
 
