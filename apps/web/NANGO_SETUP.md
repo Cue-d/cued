@@ -26,9 +26,7 @@ Task 4.2 requires manual configuration in the Nango dashboard and Google Cloud C
    - **User support email**: Your email
    - **Developer contact**: Your email
 5. Add **Scopes** (click "Add or Remove Scopes"):
-   - `https://www.googleapis.com/auth/gmail.readonly` - Read emails
-   - `https://www.googleapis.com/auth/gmail.send` - Send emails
-   - `https://www.googleapis.com/auth/gmail.modify` - Modify email labels
+   - `https://mail.google.com/` - Full Gmail access (read, send, modify)
 6. Save and continue through the remaining consent screen steps
 
 ## Step 3: Create OAuth Client ID
@@ -49,9 +47,7 @@ Task 4.2 requires manual configuration in the Nango dashboard and Google Cloud C
    - **Client ID**: Your Google OAuth Client ID
    - **Client Secret**: Your Google OAuth Client Secret
 3. Verify **Scopes** are configured:
-   - `gmail.readonly`
-   - `gmail.send`
-   - `gmail.modify`
+   - https://mail.google.com/
 4. Save the integration
 
 ## Step 5: Test the Integration
@@ -68,25 +64,29 @@ Task 4.2 requires manual configuration in the Nango dashboard and Google Cloud C
 - [ ] OAuth consent screen configured in Google Cloud Console
 - [ ] OAuth credentials created with correct redirect URI
 - [ ] Client ID and Secret added to Nango integration
-- [ ] Scopes configured: gmail.readonly, gmail.send, gmail.modify
+- [ ] Scopes configured: https://mail.google.com/
 - [ ] Test connection successful
 
 ## Troubleshooting
 
 ### "redirect_uri_mismatch" Error
+
 - Ensure the Callback URL in Google Console exactly matches what Nango shows
 - Check for trailing slashes
 
 ### "access_denied" or "invalid_scope" Error
+
 - Verify all scopes are added in Google OAuth consent screen
 - If app is "unverified", add test users in Google Console
 
 ### Connection Works But No Data
+
 - Gmail API must be enabled in Google Cloud Console
 - Go to **APIs & Services** → **Library** → Search "Gmail API" → Enable
 
 ## Next Steps
 
 After completing this setup:
+
 - Task 4.3: Create Nango Gmail sync function for emails
 - Task 4.4: Create /settings/integrations page with Nango Connect UI
