@@ -3,6 +3,7 @@ import { v } from "convex/values";
 import type { Doc, Id } from "./_generated/dataModel";
 import type { MutationCtx, QueryCtx } from "./_generated/server";
 import { mutation, query } from "./_generated/server";
+import { internal } from "./_generated/api";
 import { platformValidator } from "./schema";
 import {
   normalizePhone,
@@ -1852,18 +1853,29 @@ async function syncSocialContactsInternal(
   };
 
   const handleType = platform === "linkedin" ? "linkedin_url" : "twitter_handle";
+  const newContactIds: Id<"contacts">[] = [];
 
   for (const contact of contacts) {
     try {
-      const isNew = await upsertSocialContact(ctx, userId, platform, handleType, contact);
-      if (isNew) {
+      const upsertResult = await upsertSocialContact(ctx, userId, platform, handleType, contact);
+      if (upsertResult.isNew) {
         result.newContacts++;
+        newContactIds.push(upsertResult.contactId);
       } else {
         result.updatedContacts++;
       }
     } catch (e) {
       result.errors.push(`Failed to sync ${contact.name}: ${e}`);
     }
+  }
+
+  // Task 8.6: Schedule merge candidate search for each new contact
+  // This will auto-merge high confidence matches and create suggestions for medium confidence
+  for (const contactId of newContactIds) {
+    await ctx.scheduler.runAfter(0, internal.contactResolution.findMergeCandidatesForContact, {
+      userId,
+      contactId,
+    });
   }
 
   // Update integration sync state
@@ -1892,7 +1904,7 @@ async function upsertSocialContact(
   platform: SocialPlatform,
   handleType: "linkedin_url" | "twitter_handle",
   contact: SocialContactInput
-): Promise<boolean> {
+): Promise<{ isNew: boolean; contactId: Id<"contacts"> }> {
   const normalizedHandle =
     platform === "linkedin"
       ? contact.profileUrl.split("?")[0].toLowerCase()
@@ -1911,7 +1923,7 @@ async function upsertSocialContact(
         await ctx.db.patch(existingHandle.contactId, { company });
       }
     }
-    return false;
+    return { isNew: false, contactId: existingHandle.contactId };
   }
 
   const company = extractCompanyFromHeadline(contact.headline);
@@ -1929,6 +1941,6 @@ async function upsertSocialContact(
     platform,
   });
 
-  return true;
+  return { isNew: true, contactId };
 }
 

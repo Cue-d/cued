@@ -2074,7 +2074,7 @@
         "Verify auto-merge: both handles linked to same contact (confidence >0.95)",
         "Test: sync 'Jon Smith', verify mergeSuggestion created for manual review (0.6-0.95)"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "8.7",

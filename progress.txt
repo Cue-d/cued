@@ -2734,3 +2734,22 @@ Notes:
   - Typecheck passes across all packages
   - Ready for Task 8.8 (Social Settings UI) or Task 8.9 (IPC handlers)
 ---
+
+[2026-01-15] Task 8.6 - Integrate social contacts with contact resolution
+Files:
+  - packages/convex/convex/sync.ts (modified syncSocialContactsInternal)
+Implementation:
+  - Hook syncSocialContacts to trigger findMergeCandidatesForContact after sync
+  - For each new social contact, schedule internal action via ctx.scheduler.runAfter
+  - findMergeCandidatesForContact runs fuzzy name match against existing contacts
+  - Auto-merge >0.95 confidence, create mergeSuggestion 0.6-0.95, keep new <0.6
+  - Company from LinkedIn boosts confidence (+0.1 if matches)
+  - Changed upsertSocialContact to return {isNew, contactId} instead of just boolean
+Decisions:
+  - Reuse existing contactResolution.findMergeCandidatesForContact (no new code needed)
+  - Schedule merge search asynchronously to avoid blocking sync mutation
+  - Existing name_match source is sufficient (no need for separate social_name_match)
+Notes:
+  - Typecheck passes
+  - Ready for Task 8.7 (new_connection actions) or Task 8.8 (Social Settings UI)
+---
