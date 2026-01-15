@@ -69,3 +69,21 @@ export {
   type ContactPriorityInfo,
   type CalculatePriorityInput,
 } from "./filters";
+
+// Task 6.0a/6.0b: Contact resolution utilities
+export {
+  normalizeEmail,
+  getEmailVariants,
+  emailsMatch,
+  phonesMatch,
+  findHandleMatch,
+  normalizePhone,
+  getPhoneVariants,
+  normalizeName,
+  jaroWinklerSimilarity,
+  nameSimilarity,
+  namesMatch,
+  getNameMatchResult,
+  NAME_MATCH_THRESHOLDS,
+  type NameMatchResult,
+} from "./contact-resolution";

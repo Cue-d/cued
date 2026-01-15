@@ -24,7 +24,21 @@ export const actionTypeValidator = v.union(
   v.literal("respond"),
   v.literal("follow_up"),
   v.literal("send_message"),
-  v.literal("eod_contact")
+  v.literal("eod_contact"),
+  v.literal("resolve_contact") // Task 6.1: Contact merge resolution
+);
+
+export const mergeSuggestionStatusValidator = v.union(
+  v.literal("pending"),
+  v.literal("approved"),
+  v.literal("rejected")
+);
+
+export const mergeSourceValidator = v.union(
+  v.literal("email_match"),
+  v.literal("phone_match"),
+  v.literal("name_match"),
+  v.literal("llm_match")
 );
 
 export const actionStatusValidator = v.union(
@@ -227,6 +241,22 @@ const schema = defineSchema({
     .index("by_user_status", ["userId", "status"])
     .index("by_priority", ["status", "priority"]) // For processing order: pending first, then by priority
     .index("by_conversation", ["conversationId"]), // To check if conversation already queued
+
+  // Task 6.0e: Merge suggestions for contact resolution
+  mergeSuggestions: defineTable({
+    userId: v.id("users"),
+    contact1Id: v.id("contacts"), // Primary contact (will be kept)
+    contact2Id: v.id("contacts"), // Secondary contact (will be merged into primary)
+    confidence: v.number(), // 0-1 confidence score
+    source: mergeSourceValidator, // How the match was detected
+    reasoning: v.optional(v.string()), // Human-readable explanation
+    status: mergeSuggestionStatusValidator,
+    // Timestamps
+    createdAt: v.number(),
+    resolvedAt: v.optional(v.number()),
+  })
+    .index("by_user_status", ["userId", "status"])
+    .index("by_contacts", ["contact1Id", "contact2Id"]), // Prevent duplicate suggestions
 });
 
 export default schema;
