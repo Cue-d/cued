@@ -1,0 +1,217 @@
+import { generateObject } from "ai";
+import { z } from "zod";
+import { openai, FAST_MODEL } from "../openai";
+
+/** Action types that can be suggested by the LLM */
+const ACTION_TYPES = ["respond", "follow_up", "send_message"] as const;
+
+/** Zod schema for LLM action suggestion output */
+export const ActionSuggestionSchema = z.object({
+  shouldCreateAction: z
+    .boolean()
+    .describe("Whether an action should be created for this conversation"),
+  type: z
+    .enum(ACTION_TYPES)
+    .optional()
+    .describe("Action type: respond (reply needed), follow_up (reminder), send_message (outreach)"),
+  priority: z
+    .number()
+    .min(0)
+    .max(100)
+    .optional()
+    .describe("Priority score 0-100 (higher = more urgent)"),
+  reason: z
+    .string()
+    .optional()
+    .describe("Brief explanation of why this action is needed"),
+  suggestedResponse: z
+    .string()
+    .optional()
+    .describe("Draft response text for the user to review and edit"),
+  remindAt: z
+    .string()
+    .optional()
+    .describe("ISO timestamp for when to remind (for follow_up type)"),
+});
+
+export type ActionSuggestion = z.infer<typeof ActionSuggestionSchema>;
+
+/** Contact information for context */
+export interface ContactInfo {
+  displayName: string;
+  company?: string;
+  notes?: string;
+  isKnownContact: boolean;
+}
+
+/** Message in conversation history */
+export interface ActionMessage {
+  content: string;
+  isFromMe: boolean;
+  sentAt: number;
+  senderName?: string;
+}
+
+/** Input for action generation */
+export interface GenerateActionInput {
+  contact: ContactInfo;
+  messages: ActionMessage[];
+  platform: "imessage" | "gmail" | "slack";
+  hoursSinceLastMessage: number;
+}
+
+/** Truncate text to max length, adding ellipsis if needed */
+function truncate(text: string, maxLength: number): string {
+  return text.length <= maxLength ? text : text.slice(0, maxLength - 3) + "...";
+}
+
+/** Format timestamp as relative time */
+function formatRelativeTime(hours: number): string {
+  if (hours < 1) return "just now";
+  if (hours < 24) return `${Math.round(hours)}h ago`;
+  const days = Math.round(hours / 24);
+  return days === 1 ? "1 day ago" : `${days} days ago`;
+}
+
+/** Build context prompt from conversation data */
+function buildContextPrompt(input: GenerateActionInput): string {
+  const { contact, messages, platform, hoursSinceLastMessage } = input;
+
+  // Contact info section
+  const contactLines = [`Contact: ${contact.displayName}`];
+  if (contact.company) contactLines.push(`Company: ${contact.company}`);
+  if (contact.notes) contactLines.push(`Notes: ${truncate(contact.notes, 200)}`);
+  contactLines.push(`Known contact: ${contact.isKnownContact ? "Yes" : "No"}`);
+
+  // Message history (last 10, truncate long messages)
+  const recentMessages = messages.slice(-10);
+  const messageLines = recentMessages.map((msg) => {
+    const sender = msg.isFromMe ? "Me" : msg.senderName || contact.displayName;
+    const content = truncate(msg.content, 500);
+    return `[${sender}]: ${content}`;
+  });
+
+  // Handle empty conversations
+  if (messageLines.length === 0) {
+    messageLines.push("[No messages in conversation]");
+  }
+
+  return `## Context
+Platform: ${platform}
+Time since last message: ${formatRelativeTime(hoursSinceLastMessage)}
+
+## Contact Information
+${contactLines.join("\n")}
+
+## Recent Messages (oldest to newest)
+${messageLines.join("\n")}`;
+}
+
+/** System prompt for action generation */
+const SYSTEM_PROMPT = `You are an AI assistant helping a user manage their personal relationships.
+Your task is to analyze a conversation and decide if the user needs to take action.
+
+## Guidelines for Creating Actions
+
+Create an action when:
+- The other person asked a direct question that hasn't been answered
+- The other person made a request or asked for help
+- A commitment was made that needs follow-up
+- The conversation ended mid-discussion and needs continuation
+- Professional context (recruiter, business contact) requires timely response
+
+Do NOT create an action when:
+- The user sent the last message and is waiting for a reply
+- The conversation reached a natural conclusion (goodbyes, thanks)
+- It's a group chat where others might respond
+- The message is purely informational with no expected response
+- It's an automated message (OTP, verification, delivery notification)
+
+## Action Types
+- respond: Direct reply is needed to the conversation
+- follow_up: Set a reminder to check back later
+- send_message: Proactive outreach is appropriate
+
+## Priority Guidelines (0-100)
+- 80-100: Urgent business/professional, time-sensitive commitments
+- 60-79: Important personal messages, questions awaiting answers
+- 40-59: Non-urgent but should be addressed soon
+- 20-39: Low priority, nice-to-respond
+- 0-19: Very low priority, optional response
+
+## Response Guidelines
+When suggesting a response:
+- Match the tone and formality of the conversation
+- Keep it concise and natural
+- Don't over-explain or be overly formal
+- For professional contexts, be appropriately polite`;
+
+/**
+ * Generate an action suggestion for a conversation using LLM.
+ * Uses gpt-4o-mini for cost efficiency with structured output.
+ */
+export async function generateAction(
+  input: GenerateActionInput
+): Promise<ActionSuggestion> {
+  // Handle edge case: empty conversation
+  if (input.messages.length === 0) {
+    return {
+      shouldCreateAction: false,
+      reason: "Empty conversation - no context to analyze",
+    };
+  }
+
+  // Handle edge case: user sent last message (waiting for reply)
+  const lastMessage = input.messages[input.messages.length - 1];
+  if (lastMessage?.isFromMe) {
+    return {
+      shouldCreateAction: false,
+      reason: "User sent the last message - waiting for reply",
+    };
+  }
+
+  const contextPrompt = buildContextPrompt(input);
+
+  const { object } = await generateObject({
+    model: openai(FAST_MODEL),
+    schema: ActionSuggestionSchema,
+    system: SYSTEM_PROMPT,
+    prompt: `Analyze this conversation and decide if an action is needed:\n\n${contextPrompt}`,
+  });
+
+  return object;
+}
+
+/** Delay execution for exponential backoff */
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/**
+ * Generate action with retry on failure.
+ * Returns a safe default if LLM fails after retries.
+ */
+export async function generateActionWithRetry(
+  input: GenerateActionInput,
+  maxRetries = 2
+): Promise<ActionSuggestion> {
+  const totalAttempts = maxRetries + 1;
+  let lastError: Error | undefined;
+
+  for (let attempt = 1; attempt <= totalAttempts; attempt++) {
+    try {
+      return await generateAction(input);
+    } catch (error) {
+      lastError = error instanceof Error ? error : new Error(String(error));
+      if (attempt < totalAttempts) {
+        await delay(1000 * attempt);
+      }
+    }
+  }
+
+  console.error("generateAction failed after retries:", lastError?.message);
+  return {
+    shouldCreateAction: false,
+    reason: `LLM analysis failed: ${lastError?.message ?? "unknown error"}`,
+  };
+}

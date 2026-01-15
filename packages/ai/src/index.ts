@@ -36,3 +36,13 @@ export {
   CUSTOM_UPDATE_MEMORY_PROMPT,
   buildMemoryInstructions,
 } from "./prompts/memory";
+
+export {
+  ActionSuggestionSchema,
+  generateAction,
+  generateActionWithRetry,
+  type ActionSuggestion,
+  type ContactInfo,
+  type ActionMessage,
+  type GenerateActionInput,
+} from "./actions";
