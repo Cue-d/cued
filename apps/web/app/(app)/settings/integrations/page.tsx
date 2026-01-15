@@ -5,7 +5,7 @@ import { useQuery } from "convex/react";
 import { useAccessToken } from "@workos-inc/authkit-nextjs/components";
 import Nango from "@nangohq/frontend";
 import { api } from "@prm/convex";
-import { Button, Skeleton } from "@prm/ui";
+import { Button, Skeleton, Input } from "@prm/ui";
 import {
   MessageCircleIcon,
   MailIcon,
@@ -15,6 +15,10 @@ import {
   ArrowLeftIcon,
   RefreshCwIcon,
   LinkIcon,
+  LinkedinIcon,
+  TwitterIcon,
+  ExternalLinkIcon,
+  UsersIcon,
 } from "lucide-react";
 import Link from "next/link";
 
@@ -53,6 +57,31 @@ const INTEGRATIONS: IntegrationConfig[] = [
     icon: <HashIcon className="size-5" />,
     nangoIntegrationId: "slack",
     color: "text-purple-500",
+  },
+];
+
+interface SocialIntegrationConfig {
+  id: "linkedin" | "twitter";
+  name: string;
+  description: string;
+  icon: React.ReactNode;
+  color: string;
+}
+
+const SOCIAL_INTEGRATIONS: SocialIntegrationConfig[] = [
+  {
+    id: "linkedin",
+    name: "LinkedIn",
+    description: "Scrape your LinkedIn connections",
+    icon: <LinkedinIcon className="size-5" />,
+    color: "text-blue-600",
+  },
+  {
+    id: "twitter",
+    name: "X (Twitter)",
+    description: "Scrape mutual followers from X",
+    icon: <TwitterIcon className="size-5" />,
+    color: "text-sky-500",
   },
 ];
 
@@ -205,6 +234,29 @@ export default function IntegrationsPage() {
             })}
           </div>
 
+          {/* Social Network Scrapers Section */}
+          <div className="pt-4">
+            <h2 className="text-sm font-medium text-muted-foreground mb-4">Social Networks</h2>
+            <div className="space-y-4">
+              {SOCIAL_INTEGRATIONS.map((config) => {
+                const status = statusByPlatform.get(config.id);
+                return (
+                  <SocialIntegrationCard
+                    key={config.id}
+                    config={config}
+                    isConnected={status?.isConnected ?? false}
+                    isLoading={isLoading}
+                    lastSyncAt={status?.lastSyncAt ?? null}
+                    totalContactsSynced={
+                      integrations?.integrations.find((i) => i.platform === config.id)
+                        ?.totalMessagesSynced ?? 0
+                    }
+                  />
+                );
+              })}
+            </div>
+          </div>
+
           <div className="rounded-lg border bg-muted/30 p-4">
             <h3 className="text-sm font-medium mb-2">How it works</h3>
             <ul className="text-sm text-muted-foreground space-y-1">
@@ -216,7 +268,11 @@ export default function IntegrationsPage() {
                 <strong>Gmail/Slack:</strong> Click Connect to authorize PRM to read your
                 messages
               </li>
-              <li>Your messages are securely synced and never shared</li>
+              <li>
+                <strong>LinkedIn/X:</strong> Use the desktop app to login and scrape your
+                connections
+              </li>
+              <li>Your data is securely synced and never shared</li>
             </ul>
           </div>
         </div>
@@ -332,4 +388,115 @@ function formatRelativeTime(timestamp: number): string {
 
   const days = Math.floor(hours / 24);
   return `${days}d ago`;
+}
+
+// Task 8.8: Social Integration Card for LinkedIn/Twitter
+interface SocialIntegrationCardProps {
+  config: SocialIntegrationConfig;
+  isConnected: boolean;
+  isLoading: boolean;
+  lastSyncAt: number | null;
+  totalContactsSynced: number;
+}
+
+function SocialIntegrationCard({
+  config,
+  isConnected,
+  isLoading,
+  lastSyncAt,
+  totalContactsSynced,
+}: SocialIntegrationCardProps) {
+  const [twitterUsername, setTwitterUsername] = useState("");
+
+  function renderStatusAndAction() {
+    if (isLoading) {
+      return <Skeleton className="h-9 w-24" />;
+    }
+
+    if (isConnected) {
+      return (
+        <div className="flex items-center gap-2">
+          <div className="flex items-center gap-1.5 text-green-600">
+            <CheckCircle2Icon className="size-4" />
+            <span className="text-xs font-medium">Logged In</span>
+          </div>
+          <Button variant="outline" size="sm" disabled>
+            <RefreshCwIcon className="size-4 mr-2" />
+            Scrape Now
+          </Button>
+        </div>
+      );
+    }
+
+    return (
+      <div className="flex items-center gap-2">
+        <div className="flex items-center gap-1.5 text-muted-foreground">
+          <XCircleIcon className="size-4" />
+          <span className="text-xs">Not logged in</span>
+        </div>
+        <Button variant="outline" size="sm" disabled>
+          <ExternalLinkIcon className="size-4 mr-2" />
+          Open Login
+        </Button>
+      </div>
+    );
+  }
+
+  return (
+    <div className="rounded-lg border bg-card">
+      <div className="flex items-center justify-between p-4">
+        <div className="flex items-center gap-4">
+          <div
+            className={`flex size-12 items-center justify-center rounded-lg bg-muted ${config.color}`}
+          >
+            {config.icon}
+          </div>
+          <div>
+            <h3 className="text-sm font-medium">{config.name}</h3>
+            <p className="text-xs text-muted-foreground">{config.description}</p>
+          </div>
+        </div>
+        <div className="flex items-center gap-3">{renderStatusAndAction()}</div>
+      </div>
+
+      {/* Twitter username input */}
+      {config.id === "twitter" && (
+        <div className="border-t px-4 py-3">
+          <label className="text-xs text-muted-foreground block mb-1.5">
+            Username to scrape mutuals for
+          </label>
+          <Input
+            placeholder="@username"
+            value={twitterUsername}
+            onChange={(e) => setTwitterUsername(e.target.value)}
+            className="h-8 text-sm"
+          />
+        </div>
+      )}
+
+      {/* Stats section */}
+      {(isConnected || totalContactsSynced > 0) && (
+        <div className="border-t px-4 py-2 flex items-center gap-4">
+          {totalContactsSynced > 0 && (
+            <div className="flex items-center gap-1.5 text-muted-foreground">
+              <UsersIcon className="size-3.5" />
+              <span className="text-xs">{totalContactsSynced} connections</span>
+            </div>
+          )}
+          {lastSyncAt && (
+            <span className="text-xs text-muted-foreground">
+              Last scraped {formatRelativeTime(lastSyncAt)}
+            </span>
+          )}
+        </div>
+      )}
+
+      {/* Desktop app required notice */}
+      <div className="border-t px-4 py-2 bg-muted/30">
+        <p className="text-xs text-muted-foreground">
+          💡 Requires the PRM desktop app to scrape social connections
+        </p>
+      </div>
+    </div>
+  );
 }

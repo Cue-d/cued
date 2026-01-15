@@ -2116,7 +2116,7 @@
         "Test: click 'Open Login' for LinkedIn, verify Electron opens browser",
         "Test: click 'Scrape Now', verify scrape runs and stats update in UI"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "8.9",

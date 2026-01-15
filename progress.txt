@@ -2776,3 +2776,26 @@ Notes:
   - UI component for ContactCard needs to handle new_connection type (Task 8.8 or existing)
   - Ready for Task 8.8 (Social Settings UI) or Task 8.9 (IPC handlers)
 ---
+
+[2026-01-15] Task 8.8 - Create Social Settings UI
+Files:
+  - apps/web/app/(app)/settings/integrations/page.tsx (added Social Network section)
+Implementation:
+  - Added SOCIAL_INTEGRATIONS config array for LinkedIn and Twitter
+  - Added SocialIntegrationCard component with:
+    - Login status indicator (green=logged in, gray=not logged in)
+    - Open Login button (disabled, will be enabled with IPC in 8.9)
+    - Scrape Now button (disabled, will be enabled with IPC in 8.9)
+    - Connection count from totalContactsSynced
+    - Last scraped timestamp
+  - Twitter section has username input for mutuals scraping
+  - Desktop app required notice shown on all social cards
+  - Updated "How it works" section with LinkedIn/X info
+Decisions:
+  - Buttons disabled for now since web cannot IPC to Electron directly
+  - Stats shown from integrations table (lastSyncAt, totalMessagesSynced as connection count)
+  - Task 8.9 will add actual Electron IPC handlers
+Notes:
+  - Typecheck passes
+  - UI is ready for IPC integration in Task 8.9
+---
