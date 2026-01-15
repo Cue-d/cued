@@ -4,7 +4,7 @@ import { ReactNode } from "react";
 import { useQuery } from "convex/react";
 import { api } from "@prm/convex";
 import { signOut } from "@workos-inc/authkit-nextjs";
-import { SidebarProvider, SidebarInset, AppSidebar } from "@prm/ui";
+import { SidebarProvider, SidebarInset, AppSidebar, CommandMenu } from "@prm/ui";
 
 interface AppLayoutClientProps {
   children: ReactNode;
@@ -27,6 +27,7 @@ export function AppLayoutClient({ children }: AppLayoutClientProps) {
     <SidebarProvider>
       <AppSidebar user={user} onSignOut={signOut} actionCount={actionCount} />
       <SidebarInset>{children}</SidebarInset>
+      <CommandMenu />
     </SidebarProvider>
   );
 }

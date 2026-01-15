@@ -162,4 +162,5 @@ export {
 } from "./components/ai-elements/suggestion"
 
 export { AppSidebar } from "./components/app-sidebar"
+export { CommandMenu } from "./components/command-menu"
 export { cn } from "./lib/utils"
