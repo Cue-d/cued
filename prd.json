@@ -1990,7 +1990,7 @@
         "Test scrape: call scrapeConnections(), verify returns array with name, profile_url populated",
         "Verify scraped data matches visible connections on LinkedIn (spot check 5 names)"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "8.3",

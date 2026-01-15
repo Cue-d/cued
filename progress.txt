@@ -2666,3 +2666,24 @@ Notes:
   - Base class ready for LinkedIn (8.2) and Twitter (8.3) scrapers
   - Reference file backend/services/social/scraper.py did not exist - built from requirements
 ---
+
+[2026-01-15] Task 8.2 - Create LinkedIn scraper module
+Files:
+  - apps/electron/src/main/sync/linkedin.ts (new - LinkedIn connection scraper)
+Implementation:
+  - LinkedInScraper class extends SocialScraper base class
+  - checkLoginStatus() navigates to linkedin.com, checks for feed container
+  - loginLinkedIn() opens visible browser for user to authenticate manually
+  - scrapeConnections() uses scroll-and-load pattern with pagination
+  - Parses connection cards: name, profileUrl, headline, connectedDate
+  - O(1) deduplication using Set for profileUrl tracking
+  - Default max 500 connections, stops after 3 scrolls with no new data
+Decisions:
+  - Headless mode by default for scraping (visible for login only)
+  - 5 minute timeout for manual login
+  - Clean profileUrl by removing query params
+Notes:
+  - Typecheck passes
+  - Selectors may need updates if LinkedIn changes DOM structure
+  - Ready for Twitter scraper (8.3) or IPC integration (8.9)
+---
