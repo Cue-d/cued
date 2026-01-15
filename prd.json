@@ -1869,7 +1869,7 @@
         "Electron updates Convex: status=sent, sentAt timestamp",
         "Handle send failures: status=failed, retry logic"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "7.21",
@@ -1885,7 +1885,7 @@
         "Update action status based on send result",
         "Handle errors: show failure in UI, allow retry"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "7.22",

@@ -10,6 +10,7 @@ import {
   internalAction,
   internalMutation,
   internalQuery,
+  mutation,
   query,
 } from "./_generated/server";
 import { internal } from "./_generated/api";
@@ -367,6 +368,42 @@ export const getQueueStats = query({
       processing: processing.length,
       completedToday: completed.length,
     };
+  },
+});
+
+/**
+ * Manually trigger scan for unanswered conversations (for testing).
+ * Public mutation to allow manual testing.
+ */
+export const triggerScanForUnanswered = mutation({
+  args: {
+    platform: v.optional(platformValidator),
+  },
+  handler: async (ctx, args) => {
+    const identity = await ctx.auth.getUserIdentity();
+    if (!identity) throw new Error("Unauthorized");
+
+    const user = await ctx.db
+      .query("users")
+      .withIndex("by_workos_id", (q) => q.eq("workosUserId", identity.subject))
+      .unique();
+
+    if (!user) throw new Error("User not found");
+
+    // Scan specific platform or all platforms
+    const platforms = args.platform
+      ? [args.platform]
+      : (["imessage", "gmail", "slack"] as const);
+
+    for (const platform of platforms) {
+      await ctx.scheduler.runAfter(
+        0,
+        internal.actionQueue.scanForUnansweredConversations,
+        { userId: user._id, platform }
+      );
+    }
+
+    return { success: true, message: `Scan scheduled for ${platforms.join(", ")}` };
   },
 });
 

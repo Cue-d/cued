@@ -2573,3 +2573,48 @@ Implementation:
 Notes:
   - Typecheck passes
 ---
+
+---
+
+[2026-01-15] Task 7.20 - iMessage send flow via Electron polling
+Files:
+  - packages/convex/convex/schema.ts (modified - added pendingSends table)
+  - packages/convex/convex/pendingSends.ts (new - queue management mutations)
+  - packages/convex/convex/actions.ts (modified - swipeAction creates pending sends for iMessage)
+  - apps/electron/src/main/sync/imessage-sender.ts (new - AppleScript sender + Convex polling)
+  - apps/electron/src/main/index.ts (modified - integrate iMessage sender)
+Implementation:
+  - pendingSends table: userId, conversationId, actionId, text, recipientHandle, isGroup, chatIdentifier, status, attempts
+  - swipeAction detects platform='imessage' and creates pending send entry
+  - IMessageSender class in Electron polls Convex every 5 seconds
+  - AppleScript execution for individual and group messages
+  - Status flow: pending → sending → sent/failed
+  - Retry logic: up to 3 attempts before marking permanently failed
+  - Convex mutations: getPendingSends, createPendingSend, markSending, markSent, markFailed, retrySend
+Decisions:
+  - Polling (not WebSocket) for simplicity - 5 sec interval acceptable for send latency
+  - AppleScript escaping handles quotes, newlines, tabs, backslashes
+  - TokenProvider accepts null to handle auth edge cases
+Notes:
+  - Typecheck passes
+  - Requires Electron app running to process pending sends
+  - Test with theodoretarr@icloud.com for iMessage
+---
+
+---
+
+[2026-01-15] Task 7.21 - Wire Gmail send to swipeAction via Nango
+Files:
+  - packages/convex/convex/emailSender.ts (new - Convex action for Gmail sending)
+  - packages/convex/convex/actions.ts (modified - swipeAction routes Gmail to emailSender)
+Implementation:
+  - Created sendGmailEmail internal action that calls Nango trigger API
+  - swipeAction detects platform='gmail' and schedules sendGmailEmail
+  - Gets recipient email from conversation participant's email handle
+  - Passes threadId for reply-to-thread threading
+  - Uses Nango provider_config_key "google" and action_name "send-email"
+Notes:
+  - Typecheck passes
+  - Convex deployment successful
+  - Requires NANGO_SECRET_KEY environment variable in Convex
+---

@@ -688,6 +688,52 @@ export const swipeAction = mutation({
           }
         }
 
+        // Handle Gmail sending via Nango action
+        if (platform === "gmail" && responseText && conversation) {
+          // Get user's Gmail integration
+          const integration = await ctx.db
+            .query("integrations")
+            .withIndex("by_user_platform", (q) =>
+              q.eq("userId", user._id).eq("platform", "gmail")
+            )
+            .first();
+
+          if (integration?.nangoConnectionId) {
+            // Get recipient email from conversation participants
+            let recipientEmail = "";
+            if (conversation.participantContactIds.length > 0) {
+              const participantId = conversation.participantContactIds[0];
+              const emailHandle = await ctx.db
+                .query("contactHandles")
+                .withIndex("by_contact", (q) => q.eq("contactId", participantId))
+                .filter((q) => q.eq(q.field("handleType"), "email"))
+                .first();
+
+              if (emailHandle) {
+                recipientEmail = emailHandle.handle;
+              }
+            }
+
+            if (recipientEmail) {
+              // Schedule Gmail send action
+              await ctx.scheduler.runAfter(
+                0,
+                internal.emailSender.sendGmailEmail,
+                {
+                  connectionId: integration.nangoConnectionId,
+                  to: recipientEmail,
+                  subject: `Re: ${conversation.displayName ?? "Message"}`,
+                  body: responseText,
+                  threadId: conversation.platformConversationId,
+                  actionId: args.actionId,
+                  conversationId: conversation._id,
+                }
+              );
+              messageSent = true;
+            }
+          }
+        }
+
         // Mark action as completed
         await ctx.db.patch(args.actionId, {
           status: "completed",
