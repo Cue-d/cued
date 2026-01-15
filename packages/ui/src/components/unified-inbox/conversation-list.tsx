@@ -3,11 +3,11 @@
 import { useCallback, useRef } from "react";
 import { Search, SquarePen } from "lucide-react";
 import { cn } from "../../lib/utils";
-import { ConversationItem } from "./conversation-item";
-import type { Conversation } from "./types";
+import { InboxConversationItem } from "./conversation-item";
+import type { InboxConversation } from "./types";
 
-interface ConversationListProps {
-  conversations: Conversation[];
+interface InboxConversationListProps {
+  conversations: InboxConversation[];
   selectedId: string | null;
   onSelect: (id: string) => void;
   onLoadMore?: () => void;
@@ -16,7 +16,7 @@ interface ConversationListProps {
   className?: string;
 }
 
-export function ConversationList({
+export function InboxConversationList({
   conversations,
   selectedId,
   onSelect,
@@ -24,7 +24,7 @@ export function ConversationList({
   hasMore,
   loading,
   className,
-}: ConversationListProps): React.ReactElement {
+}: InboxConversationListProps): React.ReactElement {
   const loadingRef = useRef(false);
 
   const handleScroll = useCallback(
@@ -92,7 +92,7 @@ export function ConversationList({
         ) : (
           <div className="space-y-1">
             {conversations.map((conversation) => (
-              <ConversationItem
+              <InboxConversationItem
                 key={conversation._id}
                 conversation={conversation}
                 isSelected={selectedId === conversation._id}

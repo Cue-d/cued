@@ -1,19 +1,19 @@
 import type React from "react"
 import { cn } from "../../lib/utils"
-import type { Platform } from "./types"
+import type { InboxPlatform } from "./types"
 
-interface PlatformBadgeProps {
-  platform: Platform
+interface InboxPlatformBadgeProps {
+  platform: InboxPlatform
   className?: string
 }
 
-const platformConfig: Record<Platform, { label: string; letter: string; colorClass: string }> = {
+const platformConfig: Record<InboxPlatform, { label: string; letter: string; colorClass: string }> = {
   imessage: { label: "iMessage", letter: "i", colorClass: "bg-green-500 text-white" },
   gmail: { label: "Gmail", letter: "G", colorClass: "bg-red-500 text-white" },
   slack: { label: "Slack", letter: "S", colorClass: "bg-purple-500 text-white" },
 }
 
-export function PlatformBadge({ platform, className }: PlatformBadgeProps): React.ReactElement {
+export function InboxPlatformBadge({ platform, className }: InboxPlatformBadgeProps): React.ReactElement {
   const config = platformConfig[platform]
 
   return (

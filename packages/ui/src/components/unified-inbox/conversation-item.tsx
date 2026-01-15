@@ -1,11 +1,11 @@
 import type React from "react"
 import { cn } from "../../lib/utils"
-import { ConversationAvatar } from "./conversation-avatar"
-import { PlatformBadge } from "./platform-badge"
-import type { Conversation } from "./types"
+import { InboxConversationAvatar } from "./conversation-avatar"
+import { InboxPlatformBadge } from "./platform-badge"
+import type { InboxConversation } from "./types"
 
-interface ConversationItemProps {
-  conversation: Conversation
+interface InboxConversationItemProps {
+  conversation: InboxConversation
   isSelected: boolean
   onClick: () => void
 }
@@ -28,7 +28,7 @@ function formatTimestamp(timestamp: number | null): string {
   return date.toLocaleDateString("en-US", { month: "short", day: "numeric" })
 }
 
-function getConversationName(conversation: Conversation): string {
+function getConversationName(conversation: InboxConversation): string {
   const { participants } = conversation
   if (participants.length === 0) return "Unknown"
   if (participants.length === 1) return participants[0].displayName
@@ -39,11 +39,11 @@ function getConversationName(conversation: Conversation): string {
     .join(", ")
 }
 
-export function ConversationItem({
+export function InboxConversationItem({
   conversation,
   isSelected,
   onClick,
-}: ConversationItemProps): React.ReactElement {
+}: InboxConversationItemProps): React.ReactElement {
   const name = getConversationName(conversation)
   const hasUnread = conversation.unreadCount > 0
 
@@ -68,7 +68,7 @@ export function ConversationItem({
         "transition-transform duration-200",
         !isSelected && "group-hover:scale-105"
       )}>
-        <ConversationAvatar
+        <InboxConversationAvatar
           participants={conversation.participants}
           conversationType={conversation.conversationType}
         />
@@ -85,7 +85,7 @@ export function ConversationItem({
             >
               {name}
             </span>
-            <PlatformBadge platform={conversation.platform} />
+            <InboxPlatformBadge platform={conversation.platform} />
           </div>
           <span
             className={cn(

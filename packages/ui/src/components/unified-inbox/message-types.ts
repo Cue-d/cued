@@ -3,14 +3,14 @@
  * These mirror the Convex query return types from packages/convex/convex/messages.ts
  */
 
-import type { Platform } from "./types"
+import type { InboxPlatform } from "./types"
 
-export interface MessageSender {
+export interface InboxMessageSender {
   _id: string
   displayName: string
 }
 
-export interface MessageAttachment {
+export interface InboxMessageAttachment {
   filename: string
   mimeType: string
   size: number
@@ -18,17 +18,17 @@ export interface MessageAttachment {
   thumbnailUrl: string | null
 }
 
-export interface Message {
+export interface InboxMessage {
   _id: string
   content: string
   sentAt: number
   isFromMe: boolean
-  platform: Platform
-  sender: MessageSender | null
-  attachments?: MessageAttachment[]
+  platform: InboxPlatform
+  sender: InboxMessageSender | null
+  attachments?: InboxMessageAttachment[]
 }
 
-export interface MessagesResult {
-  messages: Message[]
+export interface InboxMessagesResult {
+  messages: InboxMessage[]
   nextCursor: string | null
 }

@@ -1,10 +1,10 @@
 import type React from "react"
 import { cn } from "../../lib/utils"
-import type { Participant, ConversationType } from "./types"
+import type { InboxParticipant, InboxConversationType } from "./types"
 
-interface ConversationAvatarProps {
-  participants: Participant[]
-  conversationType: ConversationType
+interface InboxConversationAvatarProps {
+  participants: InboxParticipant[]
+  conversationType: InboxConversationType
   size?: "sm" | "md" | "lg"
   className?: string
 }
@@ -62,12 +62,12 @@ function SingleAvatar({ name, className }: { name: string; className?: string })
   )
 }
 
-export function ConversationAvatar({
+export function InboxConversationAvatar({
   participants,
   conversationType,
   size = "md",
   className,
-}: ConversationAvatarProps): React.ReactElement {
+}: InboxConversationAvatarProps): React.ReactElement {
   const isGroup = conversationType === "group" || conversationType === "channel"
   const [first, second] = participants
   const displayName = first?.displayName || "?"

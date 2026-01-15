@@ -4,10 +4,10 @@ import { useState } from "react";
 import { useQuery } from "convex/react";
 import { api } from "@prm/convex";
 import {
-  ConversationList,
-  MessageThread,
-  type Conversation,
-  type Message,
+  InboxConversationList,
+  InboxMessageThread,
+  type InboxConversation,
+  type InboxMessage,
 } from "@prm/ui";
 import type { Id } from "@prm/convex";
 
@@ -16,7 +16,7 @@ export default function InboxPage() {
 
   // Fetch inbox (list of conversations)
   const inboxResult = useQuery(api.messages.getInbox, { limit: 50 });
-  const conversations = (inboxResult?.conversations ?? []) as Conversation[];
+  const conversations = (inboxResult?.conversations ?? []) as InboxConversation[];
   const inboxLoading = inboxResult === undefined;
 
   // Find the selected conversation
@@ -29,12 +29,12 @@ export default function InboxPage() {
       ? { conversationId: selectedId as Id<"conversations">, limit: 100 }
       : "skip",
   );
-  const messages = (messagesResult?.messages ?? []) as Message[];
+  const messages = (messagesResult?.messages ?? []) as InboxMessage[];
   const messagesLoading = selectedId !== null && messagesResult === undefined;
 
   return (
     <div className="flex h-full">
-      <ConversationList
+      <InboxConversationList
         conversations={conversations}
         selectedId={selectedId}
         onSelect={setSelectedId}
@@ -44,7 +44,7 @@ export default function InboxPage() {
 
       <div className="flex-1 min-w-0">
         {selectedConversation ? (
-          <MessageThread
+          <InboxMessageThread
             conversation={selectedConversation}
             messages={messages}
             loading={messagesLoading}

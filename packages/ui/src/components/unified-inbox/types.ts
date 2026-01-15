@@ -3,26 +3,26 @@
  * These mirror the Convex query return types from packages/convex/convex/messages.ts
  */
 
-export type Platform = "imessage" | "gmail" | "slack"
-export type ConversationType = "dm" | "group" | "channel"
+export type InboxPlatform = "imessage" | "gmail" | "slack"
+export type InboxConversationType = "dm" | "group" | "channel"
 
-export interface Participant {
+export interface InboxParticipant {
   _id: string
   displayName: string
 }
 
-export interface Conversation {
+export interface InboxConversation {
   _id: string
-  platform: Platform
+  platform: InboxPlatform
   platformConversationId: string
-  conversationType: ConversationType
-  participants: Participant[]
+  conversationType: InboxConversationType
+  participants: InboxParticipant[]
   lastMessageText: string | null
   lastMessageAt: number | null
   unreadCount: number
 }
 
 export interface InboxResult {
-  conversations: Conversation[]
+  conversations: InboxConversation[]
   nextCursor: string | null
 }

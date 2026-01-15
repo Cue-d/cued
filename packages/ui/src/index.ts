@@ -2,9 +2,9 @@ export * from "./components/ui"
 export * from "./components/unified-inbox"
 export * from "./components/assistant"
 
-// ai-elements exports with prefixed names to avoid conflicts with unified-inbox
+// ai-elements - shadcn registry components for AI chat interfaces
 export {
-  Conversation as AIConversation,
+  Conversation,
   ConversationContent,
   ConversationEmptyState,
   ConversationScrollButton,
@@ -15,8 +15,8 @@ export {
 } from "./components/ai-elements/conversation"
 
 export {
-  Message as AIMessage,
-  MessageContent as AIMessageContent,
+  Message,
+  MessageContent,
   MessageActions,
   MessageAction,
   MessageBranch,
@@ -26,11 +26,11 @@ export {
   MessageBranchNext,
   MessageBranchPage,
   MessageResponse,
-  MessageAttachment as AIMessageAttachment,
+  MessageAttachment,
   MessageAttachments,
   MessageToolbar,
-  type MessageProps as AIMessageProps,
-  type MessageContentProps as AIMessageContentProps,
+  type MessageProps,
+  type MessageContentProps,
   type MessageActionsProps,
   type MessageActionProps,
   type MessageBranchProps,
@@ -40,7 +40,7 @@ export {
   type MessageBranchNextProps,
   type MessageBranchPageProps,
   type MessageResponseProps,
-  type MessageAttachmentProps as AIMessageAttachmentProps,
+  type MessageAttachmentProps,
   type MessageAttachmentsProps,
   type MessageToolbarProps,
 } from "./components/ai-elements/message"

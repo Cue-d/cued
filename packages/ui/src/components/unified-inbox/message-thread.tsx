@@ -2,15 +2,15 @@
 
 import { useEffect, useRef } from "react"
 import { cn } from "../../lib/utils"
-import { MessageBubble } from "./message-bubble"
-import type { Message } from "./message-types"
-import type { Conversation } from "./types"
-import { ConversationAvatar } from "./conversation-avatar"
-import { PlatformBadge } from "./platform-badge"
+import { InboxMessageBubble } from "./message-bubble"
+import type { InboxMessage } from "./message-types"
+import type { InboxConversation } from "./types"
+import { InboxConversationAvatar } from "./conversation-avatar"
+import { InboxPlatformBadge } from "./platform-badge"
 
-interface MessageThreadProps {
-  conversation: Conversation
-  messages: Message[]
+interface InboxMessageThreadProps {
+  conversation: InboxConversation
+  messages: InboxMessage[]
   loading?: boolean
   hasMore?: boolean
   onLoadMore?: () => void
@@ -36,9 +36,9 @@ function formatDateDivider(date: Date): string {
 }
 
 function groupMessagesByDate(
-  messages: Message[]
-): Map<string, Message[]> {
-  const groups = new Map<string, Message[]>()
+  messages: InboxMessage[]
+): Map<string, InboxMessage[]> {
+  const groups = new Map<string, InboxMessage[]>()
 
   // Messages come in DESC order from API, reverse to show oldest first
   const chronological = [...messages].reverse()
@@ -57,8 +57,8 @@ function groupMessagesByDate(
 }
 
 function shouldShowTimestamp(
-  message: Message,
-  prevMessage: Message | undefined,
+  message: InboxMessage,
+  prevMessage: InboxMessage | undefined,
   isLast: boolean
 ): boolean {
   if (isLast) return true
@@ -73,8 +73,8 @@ function shouldShowTimestamp(
 }
 
 function shouldShowSenderName(
-  message: Message,
-  prevMessage: Message | undefined,
+  message: InboxMessage,
+  prevMessage: InboxMessage | undefined,
   isGroup: boolean
 ): boolean {
   if (!isGroup) return false
@@ -86,14 +86,14 @@ function shouldShowSenderName(
   return message.sender?._id !== prevMessage.sender?._id
 }
 
-export function MessageThread({
+export function InboxMessageThread({
   conversation,
   messages,
   loading = false,
   hasMore = false,
   onLoadMore,
   className,
-}: MessageThreadProps): React.ReactElement {
+}: InboxMessageThreadProps): React.ReactElement {
   const scrollRef = useRef<HTMLDivElement>(null)
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const prevConversationIdRef = useRef<string | null>(null)
@@ -125,7 +125,7 @@ export function MessageThread({
       <div className="h-16 flex items-center justify-between px-5 border-b border-border/50 shrink-0 bg-background/80 backdrop-blur-sm">
         <div className="flex items-center gap-3.5">
           <div className="transition-transform duration-200 hover:scale-105">
-            <ConversationAvatar
+            <InboxConversationAvatar
               participants={conversation.participants}
               conversationType={conversation.conversationType}
               size="sm"
@@ -140,7 +140,7 @@ export function MessageThread({
             )}
           </div>
         </div>
-        <PlatformBadge platform={conversation.platform} />
+        <InboxPlatformBadge platform={conversation.platform} />
       </div>
 
       {/* Messages */}
@@ -201,7 +201,7 @@ export function MessageThread({
                 const isLast = idx === dateMessages.length - 1
 
                 return (
-                  <MessageBubble
+                  <InboxMessageBubble
                     key={message._id}
                     message={message}
                     showTimestamp={shouldShowTimestamp(message, prevMessage, isLast)}

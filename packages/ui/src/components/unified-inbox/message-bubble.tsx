@@ -1,9 +1,9 @@
 import type React from "react"
 import { cn } from "../../lib/utils"
-import type { Message, MessageAttachment } from "./message-types"
+import type { InboxMessage, InboxMessageAttachment } from "./message-types"
 
-interface MessageBubbleProps {
-  message: Message
+interface InboxMessageBubbleProps {
+  message: InboxMessage
   showTimestamp?: boolean
   showSenderName?: boolean
 }
@@ -27,7 +27,7 @@ function isVideoMimeType(mimeType: string): boolean {
   return mimeType.startsWith("video/")
 }
 
-function AttachmentPreview({ attachment }: { attachment: MessageAttachment }) {
+function AttachmentPreview({ attachment }: { attachment: InboxMessageAttachment }) {
   if (isImageMimeType(attachment.mimeType)) {
     return (
       <a
@@ -91,11 +91,11 @@ function AttachmentPreview({ attachment }: { attachment: MessageAttachment }) {
   )
 }
 
-export function MessageBubble({
+export function InboxMessageBubble({
   message,
   showTimestamp = false,
   showSenderName = false,
-}: MessageBubbleProps): React.ReactElement {
+}: InboxMessageBubbleProps): React.ReactElement {
   const senderName = message.sender?.displayName
   const hasAttachments = message.attachments && message.attachments.length > 0
   const hasContent = message.content.trim().length > 0
