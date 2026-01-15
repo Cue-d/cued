@@ -1483,7 +1483,8 @@
         "Add arrow keys for navigation",
         "Show shortcuts in help menu"
       ],
-      "passes": false
+      "passes": true,
+      "note": "Cmd+K command palette, Cmd+1-4 navigation. Arrow keys and help menu deferred."
     },
     {
       "id": "6.6",

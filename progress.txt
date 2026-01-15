@@ -2506,3 +2506,25 @@ Notes:
   - All typecheck passes
   - Platform badges were already implemented (no changes needed)
 ---
+
+---
+
+[2026-01-15 13:25] Task 6.5 - Keyboard shortcuts and command palette
+Files:
+  - packages/ui/src/components/command-menu.tsx (new)
+  - packages/ui/src/index.ts (modified - export CommandMenu)
+  - apps/web/app/(app)/_components/app-layout-client.tsx (modified)
+Implementation:
+  - CommandMenu component using shadcn Command primitives
+  - Cmd+K toggles command palette
+  - Cmd+1/2/3/4 for quick navigation to main pages
+  - Navigation group: Inbox, Actions, Assistant, Contacts, Settings
+  - Actions group: Platform filter shortcuts
+  - Integrated into app layout (available everywhere)
+Decisions:
+  - Arrow key navigation within pages deferred (complex state management)
+  - Help menu with shortcuts list deferred
+Notes:
+  - All typecheck passes
+  - Uses existing shadcn command component
+---
