@@ -1,0 +1,450 @@
+/**
+ * Task 7.5 & 7.7: Action queue management - scanning and processing.
+ *
+ * - scanForUnansweredConversations: Finds conversations needing action
+ * - triggerQueueProcessing: Schedules LLM analysis for queued conversations
+ */
+import { v } from "convex/values";
+import type { Doc, Id } from "./_generated/dataModel";
+import {
+  internalMutation,
+  internalQuery,
+  mutation,
+  query,
+} from "./_generated/server";
+import { internal } from "./_generated/api";
+import { platformValidator } from "./schema";
+
+// Constants
+const UNANSWERED_THRESHOLD_HOURS = 2; // Hours before considering message unanswered
+const GRACE_PERIOD_HOURS = 6; // Don't re-analyze within this window
+const MAX_QUEUE_PER_RUN = 50; // Max conversations to queue per scan
+
+// ============================================================================
+// Task 7.5: Scan for unanswered conversations
+// ============================================================================
+
+interface ScanResult {
+  processed: number;
+  queued: number;
+  skipped: number;
+  filtered: number;
+}
+
+/**
+ * Get conversations with unanswered messages for a user.
+ * Returns conversations where:
+ * - Last message is not from the user
+ * - Last message is older than threshold hours
+ */
+export const getUnansweredConversations = internalQuery({
+  args: {
+    userId: v.id("users"),
+    thresholdMs: v.number(), // Threshold in milliseconds
+    limit: v.number(),
+  },
+  handler: async (ctx, args) => {
+    const cutoffTime = Date.now() - args.thresholdMs;
+
+    // Get recent conversations with messages
+    const conversations = await ctx.db
+      .query("conversations")
+      .withIndex("by_user_last_message", (q) => q.eq("userId", args.userId))
+      .order("desc")
+      .take(args.limit * 2); // Fetch extra to filter
+
+    // Filter: last message before cutoff (potentially unanswered)
+    const candidates = conversations.filter(
+      (c) => c.lastMessageAt && c.lastMessageAt < cutoffTime
+    );
+
+    // For each candidate, check if last message is from user
+    const results: Array<{
+      conversation: Doc<"conversations">;
+      lastMessage: Doc<"messages"> | null;
+      primaryContact: Doc<"contacts"> | null;
+    }> = [];
+
+    for (const conv of candidates.slice(0, args.limit)) {
+      // Get the last message
+      const lastMessage = await ctx.db
+        .query("messages")
+        .withIndex("by_conversation", (q) => q.eq("conversationId", conv._id))
+        .order("desc")
+        .first();
+
+      // Skip if last message is from user (waiting for reply)
+      if (!lastMessage || lastMessage.isFromMe) {
+        continue;
+      }
+
+      // Get primary contact
+      const primaryContact = conv.participantContactIds.length > 0
+        ? await ctx.db.get(conv.participantContactIds[0])
+        : null;
+
+      results.push({
+        conversation: conv,
+        lastMessage,
+        primaryContact,
+      });
+    }
+
+    return results;
+  },
+});
+
+/**
+ * Check if conversation is already queued or was recently analyzed.
+ */
+export const isAlreadyQueued = internalQuery({
+  args: {
+    conversationId: v.id("conversations"),
+    gracePeriodMs: v.number(),
+  },
+  handler: async (ctx, args) => {
+    // Check for pending or processing entry
+    const pending = await ctx.db
+      .query("actionAnalysisQueue")
+      .withIndex("by_conversation", (q) =>
+        q.eq("conversationId", args.conversationId)
+      )
+      .filter((q) =>
+        q.or(
+          q.eq(q.field("status"), "pending"),
+          q.eq(q.field("status"), "processing")
+        )
+      )
+      .first();
+
+    if (pending) return true;
+
+    // Check for recently completed entry
+    const graceCutoff = Date.now() - args.gracePeriodMs;
+    const recentlyCompleted = await ctx.db
+      .query("actionAnalysisQueue")
+      .withIndex("by_conversation", (q) =>
+        q.eq("conversationId", args.conversationId)
+      )
+      .filter((q) =>
+        q.and(
+          q.eq(q.field("status"), "completed"),
+          q.gte(q.field("completedAt"), graceCutoff)
+        )
+      )
+      .first();
+
+    return recentlyCompleted !== null;
+  },
+});
+
+/**
+ * Check if a pending action exists for this conversation.
+ */
+export const hasPendingActionForConversation = internalQuery({
+  args: {
+    userId: v.id("users"),
+    conversationId: v.id("conversations"),
+  },
+  handler: async (ctx, args) => {
+    const existing = await ctx.db
+      .query("actions")
+      .withIndex("by_user_status", (q) =>
+        q.eq("userId", args.userId).eq("status", "pending")
+      )
+      .filter((q) => q.eq(q.field("conversationId"), args.conversationId))
+      .first();
+    return existing !== null;
+  },
+});
+
+/**
+ * Queue a conversation for LLM analysis.
+ */
+export const queueForAnalysis = internalMutation({
+  args: {
+    userId: v.id("users"),
+    conversationId: v.id("conversations"),
+    priority: v.number(),
+  },
+  handler: async (ctx, args) => {
+    const queueId = await ctx.db.insert("actionAnalysisQueue", {
+      userId: args.userId,
+      conversationId: args.conversationId,
+      status: "pending",
+      priority: args.priority,
+      queuedAt: Date.now(),
+    });
+    return queueId;
+  },
+});
+
+/**
+ * Mark a conversation as skipped in the queue.
+ */
+export const markAsSkipped = internalMutation({
+  args: {
+    userId: v.id("users"),
+    conversationId: v.id("conversations"),
+    skipReason: v.string(),
+  },
+  handler: async (ctx, args) => {
+    await ctx.db.insert("actionAnalysisQueue", {
+      userId: args.userId,
+      conversationId: args.conversationId,
+      status: "skipped",
+      priority: 0,
+      queuedAt: Date.now(),
+      completedAt: Date.now(),
+      skipReason: args.skipReason,
+    });
+  },
+});
+
+/**
+ * Scan for unanswered conversations and queue for LLM analysis.
+ * Task 7.5: Called by cron every 5 minutes.
+ */
+export const scanForUnansweredConversations = internalMutation({
+  args: {
+    userId: v.id("users"),
+    platform: platformValidator,
+  },
+  handler: async (ctx, args): Promise<ScanResult> => {
+    const result: ScanResult = {
+      processed: 0,
+      queued: 0,
+      skipped: 0,
+      filtered: 0,
+    };
+
+    const thresholdMs = UNANSWERED_THRESHOLD_HOURS * 60 * 60 * 1000;
+    const gracePeriodMs = GRACE_PERIOD_HOURS * 60 * 60 * 1000;
+
+    // Get unanswered conversations
+    const conversations = await ctx.runQuery(
+      internal.actionQueue.getUnansweredConversations,
+      {
+        userId: args.userId,
+        thresholdMs,
+        limit: MAX_QUEUE_PER_RUN,
+      }
+    );
+
+    // Import filters dynamically
+    const { shouldSkipLlmAnalysis, calculatePriority } = await import("@prm/ai");
+
+    for (const { conversation, lastMessage, primaryContact } of conversations) {
+      result.processed++;
+
+      // Skip if already queued or recently analyzed
+      const alreadyQueued = await ctx.runQuery(
+        internal.actionQueue.isAlreadyQueued,
+        {
+          conversationId: conversation._id,
+          gracePeriodMs,
+        }
+      );
+
+      if (alreadyQueued) {
+        result.skipped++;
+        continue;
+      }
+
+      // Skip if pending action already exists
+      const hasPending = await ctx.runQuery(
+        internal.actionQueue.hasPendingActionForConversation,
+        {
+          userId: args.userId,
+          conversationId: conversation._id,
+        }
+      );
+
+      if (hasPending) {
+        result.skipped++;
+        continue;
+      }
+
+      // Apply message filters
+      if (lastMessage) {
+        const filterResult = shouldSkipLlmAnalysis({
+          identifier: primaryContact?.displayName ?? "unknown",
+          text: lastMessage.content,
+          personName: primaryContact?.displayName,
+          isContact: primaryContact !== null,
+        });
+
+        if (filterResult.shouldSkip) {
+          await ctx.runMutation(internal.actionQueue.markAsSkipped, {
+            userId: args.userId,
+            conversationId: conversation._id,
+            skipReason: filterResult.reason ?? "filtered",
+          });
+          result.filtered++;
+          continue;
+        }
+      }
+
+      // Calculate priority
+      const hoursSince = lastMessage
+        ? (Date.now() - lastMessage.sentAt) / (1000 * 60 * 60)
+        : 0;
+
+      const priority = calculatePriority({
+        hoursSince,
+        contact: primaryContact
+          ? {
+              isContact: true,
+              company: primaryContact.company,
+              notes: primaryContact.notes,
+            }
+          : undefined,
+        isGroup: conversation.conversationType === "group",
+      });
+
+      // Queue for analysis
+      await ctx.runMutation(internal.actionQueue.queueForAnalysis, {
+        userId: args.userId,
+        conversationId: conversation._id,
+        priority,
+      });
+      result.queued++;
+    }
+
+    return result;
+  },
+});
+
+// ============================================================================
+// Task 7.7: Process analysis queue
+// ============================================================================
+
+/**
+ * Get queue stats for monitoring.
+ */
+export const getQueueStats = query({
+  args: {},
+  handler: async (ctx) => {
+    const identity = await ctx.auth.getUserIdentity();
+    if (!identity) return null;
+
+    const user = await ctx.db
+      .query("users")
+      .withIndex("by_workos_id", (q) => q.eq("workosUserId", identity.subject))
+      .unique();
+
+    if (!user) return null;
+
+    const pending = await ctx.db
+      .query("actionAnalysisQueue")
+      .withIndex("by_user_status", (q) =>
+        q.eq("userId", user._id).eq("status", "pending")
+      )
+      .collect();
+
+    const processing = await ctx.db
+      .query("actionAnalysisQueue")
+      .withIndex("by_user_status", (q) =>
+        q.eq("userId", user._id).eq("status", "processing")
+      )
+      .collect();
+
+    // Get today's completed count
+    const todayStart = new Date();
+    todayStart.setHours(0, 0, 0, 0);
+
+    const completed = await ctx.db
+      .query("actionAnalysisQueue")
+      .withIndex("by_user_status", (q) =>
+        q.eq("userId", user._id).eq("status", "completed")
+      )
+      .filter((q) => q.gte(q.field("completedAt"), todayStart.getTime()))
+      .collect();
+
+    return {
+      pending: pending.length,
+      processing: processing.length,
+      completedToday: completed.length,
+    };
+  },
+});
+
+/**
+ * Trigger processing of the analysis queue.
+ * Task 7.7: Schedules the analyzeConversation action.
+ * Called by cron every 30 seconds.
+ */
+export const triggerQueueProcessing = internalMutation({
+  args: {},
+  handler: async (ctx) => {
+    // Get next pending entry
+    const nextEntry = await ctx.db
+      .query("actionAnalysisQueue")
+      .withIndex("by_priority", (q) => q.eq("status", "pending"))
+      .order("desc")
+      .first();
+
+    if (!nextEntry) {
+      return { scheduled: false, reason: "Queue empty" };
+    }
+
+    // Schedule the action to run immediately
+    await ctx.scheduler.runAfter(0, internal.actionAnalysis.analyzeConversation, {
+      queueEntryId: nextEntry._id,
+    });
+
+    return { scheduled: true, queueEntryId: nextEntry._id };
+  },
+});
+
+/**
+ * Scan all users for unanswered conversations.
+ * Called by cron - iterates through all connected integrations.
+ */
+export const scanAllUsersForUnanswered = internalMutation({
+  args: {},
+  handler: async (ctx) => {
+    // Get all connected integrations
+    const integrations = await ctx.db
+      .query("integrations")
+      .filter((q) => q.eq(q.field("syncState.isConnected"), true))
+      .collect();
+
+    const results: Array<{
+      userId: string;
+      platform: string;
+      queued: number;
+      filtered: number;
+    }> = [];
+
+    for (const integration of integrations) {
+      try {
+        const scanResult = await ctx.runMutation(
+          internal.actionQueue.scanForUnansweredConversations,
+          {
+            userId: integration.userId,
+            platform: integration.platform,
+          }
+        );
+
+        results.push({
+          userId: integration.userId as string,
+          platform: integration.platform,
+          queued: scanResult.queued,
+          filtered: scanResult.filtered,
+        });
+      } catch (error) {
+        console.error(
+          `Error scanning user ${integration.userId} platform ${integration.platform}:`,
+          error
+        );
+      }
+    }
+
+    return {
+      usersScanned: results.length,
+      totalQueued: results.reduce((sum, r) => sum + r.queued, 0),
+      totalFiltered: results.reduce((sum, r) => sum + r.filtered, 0),
+    };
+  },
+});
