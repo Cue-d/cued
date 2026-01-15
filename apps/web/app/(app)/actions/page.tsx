@@ -10,7 +10,7 @@ import {
   type SwipeDirection,
   type DisplayMessage,
 } from "@prm/ui"
-import { Skeleton } from "@prm/ui"
+import { Button, Skeleton } from "@prm/ui"
 
 /** Action type matching enriched actions from getPendingActions */
 interface EnrichedAction {
@@ -62,6 +62,21 @@ export default function ActionsPage() {
   // Mutations
   const swipeAction = useMutation(api.actions.swipeAction)
   const updateDraftResponse = useMutation(api.actions.updateDraftResponse)
+  const triggerScan = useMutation(api.actionQueue.triggerScanForUnanswered)
+
+  // Scan state
+  const [scanning, setScanning] = React.useState(false)
+
+  const handleScan = React.useCallback(async () => {
+    setScanning(true)
+    try {
+      await triggerScan({})
+    } catch (error) {
+      console.error("Failed to trigger scan:", error)
+    } finally {
+      setScanning(false)
+    }
+  }, [triggerScan])
 
   // Track response texts locally (optimistic)
   const [responseTexts, setResponseTexts] = React.useState<
@@ -153,9 +168,17 @@ export default function ActionsPage() {
 
   return (
     <div className="h-full flex flex-col">
-      {/* Keyboard hints */}
-      <div className="absolute top-4 right-4 text-xs text-muted-foreground z-10">
-        <span className="opacity-60">
+      {/* Header with scan button and keyboard hints */}
+      <div className="absolute top-4 right-4 flex items-center gap-4 z-10">
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={handleScan}
+          disabled={scanning}
+        >
+          {scanning ? "Scanning..." : "Scan Now"}
+        </Button>
+        <span className="text-xs text-muted-foreground opacity-60">
           <kbd className="px-1.5 py-0.5 bg-muted rounded text-[10px] mr-1">
             ←
           </kbd>
