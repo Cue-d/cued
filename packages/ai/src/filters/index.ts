@@ -14,3 +14,12 @@ export {
   type FilterInput,
   type SkipReason,
 } from "./message-filter";
+
+export {
+  calculatePriority,
+  calculateTimePriority,
+  calculateContactBoost,
+  calculateGroupPenalty,
+  type ContactPriorityInfo,
+  type CalculatePriorityInput,
+} from "./priority";

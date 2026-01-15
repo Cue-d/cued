@@ -59,7 +59,13 @@ export {
   isPromotional,
   isBankAlert,
   isPhishing,
+  calculatePriority,
+  calculateTimePriority,
+  calculateContactBoost,
+  calculateGroupPenalty,
   type FilterResult,
   type FilterInput,
   type SkipReason,
+  type ContactPriorityInfo,
+  type CalculatePriorityInput,
 } from "./filters";
