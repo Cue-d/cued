@@ -2708,3 +2708,29 @@ Notes:
   - Selectors may need updates if X changes DOM structure
   - Ready for API endpoint (8.4) or IPC integration (8.9)
 ---
+
+[2026-01-15] Task 8.4 & 8.5 - Social sync API endpoint and Convex mutation
+Files:
+  - apps/web/app/api/sync/social/route.ts (new - POST endpoint for social contacts)
+  - packages/convex/convex/sync.ts (added syncSocialContacts mutation)
+  - packages/convex/convex/schema.ts (added linkedin_url, twitter_handle to handleTypeValidator)
+  - packages/convex/convex/schema.ts (added linkedin, twitter to platformValidator)
+  - packages/convex/convex/integrations.ts (updated Platform type)
+  - packages/convex/convex/memories.ts (updated Platform type)
+  - packages/convex/convex/contactResolution.ts (updated ContactWithHandles type)
+  - packages/ai/src/actions/generate-action.ts (updated platform type in GenerateActionInput)
+  - apps/web/app/(app)/settings/integrations/page.tsx (updated Platform type)
+Implementation:
+  - POST /api/sync/social accepts SocialSyncBatch with platform, contacts[], syncedAt
+  - Validates auth token, platform, and contact structure
+  - Routes to syncSocialContacts Convex mutation
+  - Mutation upserts contacts by normalized handle (linkedin_url or twitter_handle)
+  - Extracts company from LinkedIn headline pattern ("at" or "@")
+  - Updates integration syncState with lastSyncAt and totalContactsSynced
+Decisions:
+  - Added linkedin/twitter as first-class platforms (not just handle types)
+  - Simplified company extraction to single regex pattern
+Notes:
+  - Typecheck passes across all packages
+  - Ready for Task 8.8 (Social Settings UI) or Task 8.9 (IPC handlers)
+---
