@@ -13,7 +13,7 @@ type Platform = "imessage" | "gmail" | "slack";
 // Map Nango integration IDs to our platform enum
 function nangoToPlatform(nangoIntegrationId: string): Platform | null {
   const mapping: Record<string, Platform> = {
-    "google-mail": "gmail",
+    google: "gmail",
     slack: "slack",
   };
   return mapping[nangoIntegrationId] ?? null;
@@ -40,6 +40,7 @@ export const getUserIntegrations = query({
         lastSyncAt: int.syncState.lastSyncAt ?? null,
         lastError: int.syncState.lastError ?? null,
         totalMessagesSynced: int.syncState.totalMessagesSynced ?? 0,
+        nangoConnectionId: int.nangoConnectionId ?? null,
       })),
     };
   },
@@ -117,7 +118,7 @@ export const getIntegration = query({
 export const connectNango = mutation({
   args: {
     workosUserId: v.string(),
-    nangoIntegrationId: v.string(), // e.g., "google-mail", "slack"
+    nangoIntegrationId: v.string(), // e.g., "google", "slack"
     nangoConnectionId: v.string(),
     email: v.optional(v.string()), // From endUser.endUserEmail
   },

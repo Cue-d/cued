@@ -43,7 +43,7 @@ const INTEGRATIONS: IntegrationConfig[] = [
     name: "Gmail",
     description: "Connect your Gmail account to sync emails",
     icon: <MailIcon className="size-5" />,
-    nangoIntegrationId: "google-mail",
+    nangoIntegrationId: "google",
     color: "text-red-500",
   },
   {
@@ -60,12 +60,20 @@ export default function IntegrationsPage() {
   const { accessToken } = useAccessToken();
   const integrations = useQuery(api.integrations.getUserIntegrations);
   const [connecting, setConnecting] = useState<Platform | null>(null);
+  const [disconnecting, setDisconnecting] = useState<Platform | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const statusByPlatform = useMemo(() => {
-    const map = new Map<Platform, { isConnected: boolean; lastSyncAt: number | null }>();
+    const map = new Map<
+      Platform,
+      { isConnected: boolean; lastSyncAt: number | null; nangoConnectionId: string | null }
+    >();
     for (const int of integrations?.integrations ?? []) {
-      map.set(int.platform, { isConnected: int.isConnected, lastSyncAt: int.lastSyncAt });
+      map.set(int.platform, {
+        isConnected: int.isConnected,
+        lastSyncAt: int.lastSyncAt,
+        nangoConnectionId: int.nangoConnectionId,
+      });
     }
     return map;
   }, [integrations]);
@@ -116,8 +124,38 @@ export default function IntegrationsPage() {
 
   async function handleDisconnect(config: IntegrationConfig) {
     if (!config.nangoIntegrationId || !accessToken) return;
-    // TODO: Implement disconnect via Nango API
-    setError("Disconnect not yet implemented");
+
+    const status = statusByPlatform.get(config.id);
+    if (!status?.nangoConnectionId) {
+      setError("No connection ID found");
+      return;
+    }
+
+    setDisconnecting(config.id);
+    setError(null);
+
+    try {
+      const res = await fetch("/api/nango/disconnect", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          nangoConnectionId: status.nangoConnectionId,
+          providerConfigKey: config.nangoIntegrationId,
+        }),
+      });
+
+      if (!res.ok) {
+        const data = await res.json();
+        throw new Error(data.error || "Failed to disconnect");
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Disconnect failed");
+    } finally {
+      setDisconnecting(null);
+    }
   }
 
   const isLoading = integrations === undefined;
@@ -157,6 +195,7 @@ export default function IntegrationsPage() {
                   config={config}
                   isConnected={status?.isConnected ?? false}
                   isConnecting={connecting === config.id}
+                  isDisconnecting={disconnecting === config.id}
                   isLoading={isLoading}
                   lastSyncAt={status?.lastSyncAt ?? null}
                   onConnect={() => handleConnect(config)}
@@ -190,6 +229,7 @@ interface IntegrationCardProps {
   config: IntegrationConfig;
   isConnected: boolean;
   isConnecting: boolean;
+  isDisconnecting: boolean;
   isLoading: boolean;
   lastSyncAt: number | null;
   onConnect: () => void;
@@ -200,6 +240,7 @@ function IntegrationCard({
   config,
   isConnected,
   isConnecting,
+  isDisconnecting,
   isLoading,
   lastSyncAt,
   onConnect,
@@ -218,8 +259,8 @@ function IntegrationCard({
             <span className="text-xs font-medium">Connected</span>
           </div>
           {config.nangoIntegrationId && (
-            <Button variant="outline" size="sm" onClick={onDisconnect} disabled={isConnecting}>
-              {isConnecting ? <RefreshCwIcon className="size-4 animate-spin" /> : "Disconnect"}
+            <Button variant="outline" size="sm" onClick={onDisconnect} disabled={isDisconnecting}>
+              {isDisconnecting ? <RefreshCwIcon className="size-4 animate-spin" /> : "Disconnect"}
             </Button>
           )}
         </>

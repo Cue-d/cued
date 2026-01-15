@@ -1,4 +1,4 @@
-# Nango Integration Setup - Gmail
+# Nango Integration Setup - Google
 
 Task 4.2 requires manual configuration in the Nango dashboard and Google Cloud Console.
 
@@ -7,12 +7,12 @@ Task 4.2 requires manual configuration in the Nango dashboard and Google Cloud C
 - Nango account created at https://app.nango.dev (task 4.1)
 - NANGO_SECRET_KEY already added to `.env.local`
 
-## Step 1: Add Google Mail Integration in Nango
+## Step 1: Add Google Integration in Nango
 
 1. Log in to [Nango Dashboard](https://app.nango.dev)
 2. Navigate to **Integrations** tab
 3. Click **Configure New Integration**
-4. Search for and select **google-mail** (or "Google Mail" / "Gmail")
+4. Search for and select **google** (or "Google Mail" / "Gmail")
 5. Note the **Callback URL** displayed - you'll need this for Step 2
 
 ## Step 2: Create OAuth Credentials in Google Cloud Console
@@ -44,7 +44,7 @@ Task 4.2 requires manual configuration in the Nango dashboard and Google Cloud C
 
 ## Step 4: Configure Nango Integration
 
-1. Return to Nango Dashboard → **Integrations** → **google-mail**
+1. Return to Nango Dashboard → **Integrations** → **google**
 2. Enter the credentials from Step 3:
    - **Client ID**: Your Google OAuth Client ID
    - **Client Secret**: Your Google OAuth Client Secret
@@ -58,7 +58,7 @@ Task 4.2 requires manual configuration in the Nango dashboard and Google Cloud C
 
 1. In Nango Dashboard, go to **Connections** tab
 2. Click **Add Test Connection**
-3. Select **google-mail** integration
+3. Select **google** integration
 4. Click **Authorize** and complete Google OAuth flow
 5. Verify the connection appears with status "Connected"
 
@@ -114,7 +114,7 @@ After completing the OAuth setup above, deploy the Gmail sync function:
    ```
 
 5. Verify deployment in Nango Dashboard:
-   - Go to **Integrations** → **google-mail**
+   - Go to **Integrations** → **google**
    - Check that **emails** sync is listed with 5-minute frequency
    - Verify the `/emails` endpoint is exposed
 
@@ -157,7 +157,7 @@ ngrok http 3000
 
 The Gmail integration includes a `send-email` action for sending emails via the action queue:
 
-**Endpoint**: `POST /google-mail/emails`
+**Endpoint**: `POST /google/emails`
 
 **Input**:
 - `to` (required): Recipient email address
@@ -184,11 +184,11 @@ The Gmail integration includes a `send-email` action for sending emails via the 
    npx nango deploy dev
    ```
 
-3. Verify in Nango Dashboard → Integrations → google-mail → Actions
+3. Verify in Nango Dashboard → Integrations → google → Actions
 
 ## Google Contacts Sync (Task 4.12)
 
-Google Contacts sync uses the same `google-mail` integration - just add the contacts scope.
+Google Contacts sync uses the same `google` integration - just add the contacts scope.
 
 ### Step 1: Enable People API
 
@@ -204,7 +204,7 @@ Google Contacts sync uses the same `google-mail` integration - just add the cont
 
 ### Step 3: Update Nango Integration
 
-1. In Nango Dashboard → **Integrations** → **google-mail**
+1. In Nango Dashboard → **Integrations** → **google**
 2. Add scope: `https://www.googleapis.com/auth/contacts.readonly`
 3. Save (existing connections may need to re-authorize)
 

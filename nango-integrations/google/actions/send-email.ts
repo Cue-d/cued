@@ -51,7 +51,7 @@ const action = createAction({
 
     endpoint: {
         method: 'POST',
-        path: '/google-mail/emails',
+        path: '/google/emails',
         group: 'Emails'
     },
 

@@ -3,7 +3,7 @@
 // You can version this file
 // ---------------------------
 
-export interface SyncMetadata_google_mail_emails {
+export interface SyncMetadata_google_emails {
   backfillPeriodMs?: number | undefined;
 };
 
@@ -21,7 +21,7 @@ export interface GmailEmail {
   threadId: string;
 };
 
-export interface SyncMetadata_google_mail_contacts {
+export interface SyncMetadata_google_contacts {
   syncToken?: string | undefined;
 };
 
@@ -35,7 +35,7 @@ export interface GoogleContact {
   isDeleted: boolean;
 };
 
-export interface ActionInput_google_mail_sendemail {
+export interface ActionInput_google_sendemail {
   to: string;
   subject: string;
   body: string;
@@ -44,7 +44,7 @@ export interface ActionInput_google_mail_sendemail {
   references?: string | undefined;
 };
 
-export interface ActionOutput_google_mail_sendemail {
+export interface ActionOutput_google_sendemail {
   id: string;
   threadId: string;
   labelIds?: string[] | undefined;
