@@ -1690,7 +1690,7 @@
         "Route send to correct platform handler (7.20-7.22)",
         "Create updateDraftResponse mutation to save typing progress"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "7.11",

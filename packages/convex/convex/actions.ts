@@ -449,3 +449,117 @@ export const getPendingActionCount = query({
     return { count: actionable.length };
   },
 });
+
+/**
+ * Swipe direction type for action gestures.
+ */
+const swipeDirectionValidator = v.union(
+  v.literal("left"), // discard
+  v.literal("right"), // complete/send
+  v.literal("up") // snooze
+);
+
+/**
+ * Handle swipe action with platform routing.
+ * - left: discard action
+ * - right: complete/send message (routing to platform handlers in 7.20-7.22)
+ * - up: snooze action until specified time
+ */
+export const swipeAction = mutation({
+  args: {
+    actionId: v.id("actions"),
+    direction: swipeDirectionValidator,
+    snoozedUntil: v.optional(v.number()), // Required for direction='up'
+    responseText: v.optional(v.string()), // Optional response text for direction='right'
+  },
+  handler: async (ctx, args) => {
+    const user = await requireAuthenticatedUser(ctx);
+    const now = Date.now();
+
+    const action = await ctx.db.get(args.actionId);
+    if (!action || action.userId !== user._id) {
+      throw new Error("Action not found");
+    }
+
+    switch (args.direction) {
+      case "left": {
+        // Discard action
+        await ctx.db.patch(args.actionId, {
+          status: "discarded",
+          discardedAt: now,
+        });
+        return { success: true, status: "discarded" };
+      }
+
+      case "up": {
+        // Snooze action
+        if (!args.snoozedUntil) {
+          throw new Error("snoozedUntil is required for snooze action");
+        }
+        await ctx.db.patch(args.actionId, {
+          status: "snoozed",
+          snoozedUntil: args.snoozedUntil,
+        });
+        return { success: true, status: "snoozed", snoozedUntil: args.snoozedUntil };
+      }
+
+      case "right": {
+        // Complete action and potentially send message
+        // Get the response text (user-edited draft or AI-suggested)
+        const responseText =
+          args.responseText ?? action.draftResponse ?? action.draftMessage;
+
+        // Get conversation to determine platform
+        const conversation = action.conversationId
+          ? await ctx.db.get(action.conversationId)
+          : null;
+        const platform = action.platform ?? conversation?.platform;
+
+        // For now, mark as completed
+        // Platform routing (actual message sending) will be implemented in tasks 7.20-7.22
+        // Those tasks will create pendingSends table and platform-specific handlers
+        await ctx.db.patch(args.actionId, {
+          status: "completed",
+          completedAt: now,
+          draftResponse: responseText, // Save the final response
+        });
+
+        return {
+          success: true,
+          status: "completed",
+          platform,
+          messageSent: false, // Will be true once 7.20-7.22 are implemented
+          responseText,
+        };
+      }
+
+      default:
+        throw new Error(`Unknown swipe direction: ${args.direction}`);
+    }
+  },
+});
+
+/**
+ * Update draft response while user is typing.
+ * This saves typing progress so it persists across sessions.
+ */
+export const updateDraftResponse = mutation({
+  args: {
+    actionId: v.id("actions"),
+    draftResponse: v.string(),
+  },
+  handler: async (ctx, args) => {
+    const user = await requireAuthenticatedUser(ctx);
+
+    const action = await ctx.db.get(args.actionId);
+    if (!action || action.userId !== user._id) {
+      throw new Error("Action not found");
+    }
+
+    await ctx.db.patch(args.actionId, {
+      draftResponse: args.draftResponse,
+    });
+
+    return { success: true };
+  },
+});
