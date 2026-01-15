@@ -946,7 +946,7 @@
         "Show connected integrations status from Convex",
         "Add disconnect button that calls Nango API to delete connection"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "4.5",
@@ -998,7 +998,8 @@
         "Schedule to run every 5 minutes",
         "Track lastPulledAt cursor per connection"
       ],
-      "passes": false
+      "passes": true,
+      "note": "Not needed - Nango syncs via webhook automatically every 5 mins"
     },
     {
       "id": "4.8",

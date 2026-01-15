@@ -1599,3 +1599,31 @@ Notes:
   - Pre-existing typecheck errors in ai-elements/ not related to this task
   - Ready for task 4.4: Create /settings/integrations page with Nango Connect UI
 ---
+
+[2026-01-15 15:30] Task 4.4 - Create /settings/integrations page with Nango Connect UI
+Files:
+  - apps/web/app/api/nango/session/route.ts (new)
+  - packages/convex/convex/integrations.ts (new)
+  - apps/web/app/(app)/settings/integrations/page.tsx (new)
+  - apps/web/app/(app)/settings/page.tsx (add integrations link)
+Decisions:
+  - Created /api/nango/session POST endpoint to generate connect session tokens
+  - Uses WorkOS subject (identity.subject) as end_user.id for Nango
+  - Created Convex integrations.ts with getUserIntegrations and getIntegrationStatus queries
+  - Built integrations page with 3 platforms: iMessage, Gmail, Slack
+  - iMessage shows "Desktop App Required" since it uses Electron sync
+  - Gmail/Slack show Connect button that triggers Nango openConnectUI()
+  - Shows connection status via existing syncState.isConnected field
+  - Added integrations link to main settings page
+Why:
+  - WorkOS subject is persistent identifier across sessions (vs Convex _id)
+  - Nango createConnectSession() requires end_user.id for connection tracking
+  - onEvent handlers manage modal close and connect events
+  - Disconnect placeholder added (requires task 4.5/4.6 for nangoConnectionId storage)
+  - Reused existing integrations table syncState.isConnected for status display
+Notes:
+  - Code simplified by code-simplifier: refactored nested ternaries to helper function
+  - Web app lint and typecheck pass
+  - Disconnect not yet functional (waiting for webhook to store nangoConnectionId)
+  - Ready for task 4.5: Create Convex mutation to store Nango connection
+---
