@@ -866,7 +866,9 @@ const slackMessageInput = v.object({
     v.literal("group"),
     v.literal("mpim")
   ),
+  channelName: v.optional(v.string()), // Task 5.5: Channel name or DM partner name
   userId: v.optional(v.string()), // Slack user ID
+  userName: v.optional(v.string()), // Task 5.5: Sender display name
   text: v.string(),
   ts: v.string(),
   threadTs: v.optional(v.string()),
@@ -949,9 +951,9 @@ async function syncSlackMessagesInternal(
     try {
       // Get or create conversation
       let conversationId = conversationMap.get(channelId);
+      const firstMsg = channelMessages[0];
 
       if (!conversationId) {
-        const firstMsg = channelMessages[0];
         const conversationType = getConversationType(firstMsg.channelType);
 
         conversationId = await ctx.db.insert("conversations", {
@@ -961,9 +963,20 @@ async function syncSlackMessagesInternal(
           conversationType,
           participantContactIds: [], // Will be populated when we resolve users
           unreadCount: 0,
+          displayName: firstMsg.channelName, // Task 5.5: Store channel name
         });
         conversationMap.set(channelId, conversationId);
         result.conversationsCount++;
+      } else if (firstMsg.channelName) {
+        // Update display name if we have one and it's not set
+        const existingConv = existingConversations.find(
+          (c) => c.platformConversationId === channelId
+        );
+        if (existingConv && !existingConv.displayName) {
+          await ctx.db.patch(conversationId, {
+            displayName: firstMsg.channelName,
+          });
+        }
       }
 
       // Insert new messages
@@ -980,10 +993,15 @@ async function syncSlackMessagesInternal(
           continue;
         }
 
-        // Resolve Slack user to contact
+        // Resolve Slack user to contact (with display name if available)
         let senderContactId: Id<"contacts"> | undefined;
         if (msg.userId) {
-          senderContactId = await getOrCreateSlackContact(ctx, userId, msg.userId);
+          senderContactId = await getOrCreateSlackContact(
+            ctx,
+            userId,
+            msg.userId,
+            msg.userName // Task 5.5: Pass user display name
+          );
         }
 
         const sentAtMs = new Date(msg.sentAt).getTime();
@@ -1005,6 +1023,9 @@ async function syncSlackMessagesInternal(
           senderContactId,
           isFromMe: false, // Nango sync only gets messages from others
           platformMessageId: msg.ts,
+          // Task 5.5: Store thread info
+          threadTs: msg.threadTs,
+          isThreadParent: msg.isThreadParent,
           reactions: reactions && reactions.length > 0 ? reactions : undefined,
         });
 
@@ -1050,11 +1071,13 @@ function getConversationType(
 
 /**
  * Get or create a contact for a Slack user ID.
+ * Task 5.5: Also updates display name if we have a better one.
  */
 async function getOrCreateSlackContact(
   ctx: MutationCtx,
   userId: Id<"users">,
-  slackUserId: string
+  slackUserId: string,
+  displayName?: string
 ): Promise<Id<"contacts">> {
   // Check if we already have a handle for this Slack user
   const existingHandle = await ctx.db
@@ -1065,13 +1088,24 @@ async function getOrCreateSlackContact(
     .unique();
 
   if (existingHandle) {
+    // Update display name if we have a better one (not just a Slack user ID)
+    if (displayName) {
+      const existingContact = await ctx.db.get(existingHandle.contactId);
+      if (
+        existingContact &&
+        existingContact.displayName.startsWith("U") &&
+        existingContact.displayName === slackUserId
+      ) {
+        await ctx.db.patch(existingHandle.contactId, { displayName });
+      }
+    }
     return existingHandle.contactId;
   }
 
-  // Create placeholder contact with Slack user ID as name
+  // Create placeholder contact with display name or Slack user ID
   const contactId = await ctx.db.insert("contacts", {
     userId,
-    displayName: slackUserId, // Will be updated when we fetch user info
+    displayName: displayName || slackUserId,
   });
 
   // Create handle for Slack user ID

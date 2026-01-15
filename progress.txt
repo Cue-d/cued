@@ -1742,3 +1742,29 @@ Notes:
   - Requires webhook URL in Nango Dashboard with sync webhooks enabled
   - User name resolution (task 5.4 step "users:read API") deferred to task 5.5
 ---
+
+[2026-01-15 18:00] Task 5.5 - Handle Slack threads and channel metadata
+Files:
+  - packages/convex/convex/schema.ts (add threadTs, isThreadParent to messages; displayName to conversations)
+  - nango-integrations/slack/syncs/messages.ts (fetch user info, include channelName, userName)
+  - packages/convex/convex/sync.ts (store thread info, update contacts with display names)
+  - apps/web/app/api/nango/pull-slack/route.ts (update interface with new fields)
+Decisions:
+  - Added threadTs and isThreadParent fields to messages schema for thread grouping
+  - Added displayName to conversations schema for channel names and DM partner names
+  - Nango sync now fetches user info via users.info API with user cache
+  - Channel names come from conversation.name; DM names from user profile
+  - User display names: profile.display_name || profile.real_name || real_name || name
+  - getOrCreateSlackContact updated to accept and store display names
+  - Contact display names auto-upgrade from raw Slack user IDs when real names available
+Why:
+  - Thread support enables proper thread display in UI (group replies under parent)
+  - Channel/user names improve UX (show "John Smith" instead of "U12345ABC")
+  - User info caching reduces API calls (prefetch DM partners, cache senders)
+  - Auto-upgrade pattern ensures contacts get better names over time as messages sync
+Notes:
+  - Nango compile successful
+  - All lint and typecheck pass
+  - Thread replies share same channelId but have different threadTs
+  - isThreadParent=true when message has reply_count > 0
+---

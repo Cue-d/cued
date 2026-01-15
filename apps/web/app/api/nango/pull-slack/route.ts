@@ -10,7 +10,9 @@ interface SlackSyncMessage {
   id: string;
   channelId: string;
   channelType: "im" | "channel" | "group" | "mpim";
+  channelName?: string; // Task 5.5: Channel name or DM partner name
   userId?: string;
+  userName?: string; // Task 5.5: Sender display name
   text: string;
   ts: string;
   threadTs?: string;

@@ -9,8 +9,9 @@ export default authkitMiddleware({
       "/sign-in",
       "/sign-up",
       "/callback",
-      // API routes that handle their own Bearer token auth
+      // API routes that handle their own auth or are called by external services
       "/api/memories/:path*",
+      "/api/nango/webhook",
     ],
   },
 });

@@ -3,8 +3,10 @@ import * as z from 'zod';
 import type {
     SlackMessage,
     SlackConversation,
+    SlackUser,
     ConversationsListResponse,
-    ConversationsHistoryResponse
+    ConversationsHistoryResponse,
+    UsersInfoResponse
 } from '../types.js';
 
 // 30 days ago (default backfill period for Slack)
@@ -25,7 +27,9 @@ const SlackSyncMessage = z.object({
     id: z.string(), // ts (timestamp is unique ID)
     channelId: z.string(),
     channelType: z.enum(['im', 'channel', 'group', 'mpim']),
+    channelName: z.string().optional(), // Channel name or DM partner name
     userId: z.string().optional(), // Sender user ID
+    userName: z.string().optional(), // Sender display name
     text: z.string(),
     ts: z.string(), // Original timestamp
     threadTs: z.string().optional(), // Parent thread if reply
@@ -74,11 +78,24 @@ const sync = createSync({
         // Convert to Slack timestamp format (seconds with microseconds)
         const oldestTs = Math.floor(syncDate.getTime() / 1000).toString();
 
+        // User cache to store fetched user info
+        const userCache = new Map<string, SlackUser>();
+
         // Step 1: Get all DM conversations
         const dmConversations = await fetchConversations(nango, 'im');
         await nango.log(`Found ${dmConversations.length} DM conversations`);
 
-        // Step 2: Fetch messages from each DM
+        // Step 2: Prefetch user info for DM partners
+        for (const conversation of dmConversations) {
+            if (conversation.user && !userCache.has(conversation.user)) {
+                const user = await fetchUserInfo(nango, conversation.user);
+                if (user) {
+                    userCache.set(conversation.user, user);
+                }
+            }
+        }
+
+        // Step 3: Fetch messages from each DM
         for (const conversation of dmConversations) {
             const messages = await fetchConversationHistory(nango, conversation.id, oldestTs);
 
@@ -86,8 +103,18 @@ const sync = createSync({
                 continue;
             }
 
+            // Fetch user info for message senders not in cache
+            for (const msg of messages) {
+                if (msg.user && !userCache.has(msg.user)) {
+                    const user = await fetchUserInfo(nango, msg.user);
+                    if (user) {
+                        userCache.set(msg.user, user);
+                    }
+                }
+            }
+
             const syncMessages: SlackSyncMessage[] = messages.map((msg) =>
-                mapMessage(msg, conversation)
+                mapMessage(msg, conversation, userCache)
             );
 
             await nango.batchSave(syncMessages, 'SlackSyncMessage');
@@ -175,17 +202,83 @@ async function fetchConversationHistory(
 }
 
 /**
+ * Fetch user info from Slack API
+ */
+async function fetchUserInfo(
+    nango: NangoSyncLocal,
+    userId: string
+): Promise<SlackUser | null> {
+    try {
+        const response = await nango.proxy<UsersInfoResponse>({
+            method: 'get',
+            endpoint: '/users.info',
+            params: { user: userId },
+            retries: 3
+        });
+
+        if (!response.data.ok) {
+            return null;
+        }
+
+        return response.data.user;
+    } catch {
+        return null;
+    }
+}
+
+/**
+ * Get display name for a Slack user
+ */
+function getUserDisplayName(user: SlackUser | undefined): string | undefined {
+    if (!user) return undefined;
+    return (
+        user.profile.display_name ||
+        user.profile.real_name ||
+        user.real_name ||
+        user.name
+    );
+}
+
+/**
+ * Get channel/conversation display name
+ */
+function getChannelDisplayName(
+    conversation: SlackConversation,
+    userCache: Map<string, SlackUser>
+): string | undefined {
+    // For channels, use the channel name
+    if (conversation.name) {
+        return conversation.name;
+    }
+
+    // For DMs, use the other user's display name
+    if (conversation.is_im && conversation.user) {
+        const user = userCache.get(conversation.user);
+        return getUserDisplayName(user);
+    }
+
+    return undefined;
+}
+
+/**
  * Map a Slack message to our sync format
  */
-function mapMessage(msg: SlackMessage, conversation: SlackConversation): SlackSyncMessage {
+function mapMessage(
+    msg: SlackMessage,
+    conversation: SlackConversation,
+    userCache: Map<string, SlackUser>
+): SlackSyncMessage {
     const channelType = getChannelType(conversation);
     const isBot = Boolean(msg.bot_id || msg.app_id);
+    const senderUser = msg.user ? userCache.get(msg.user) : undefined;
 
     return {
         id: msg.ts,
         channelId: conversation.id,
         channelType,
+        channelName: getChannelDisplayName(conversation, userCache),
         userId: msg.user,
+        userName: getUserDisplayName(senderUser),
         text: msg.text,
         ts: msg.ts,
         threadTs: msg.thread_ts,

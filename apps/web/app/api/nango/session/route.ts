@@ -37,11 +37,17 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       // Empty body is fine
     }
 
+    console.log("Creating Nango session for:", {
+      id: identity.subject,
+      email: identity.email,
+      allowedIntegrations,
+    });
+
     const response = await nango.createConnectSession({
       end_user: {
         id: identity.subject,
-        email: identity.email,
-        display_name: identity.name,
+        ...(identity.email && { email: identity.email }),
+        ...(identity.name && { display_name: identity.name }),
       },
       ...(allowedIntegrations && { allowed_integrations: allowedIntegrations }),
     });
@@ -51,7 +57,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Session creation failed";
-    console.error("Nango session error:", message);
+    console.error("Nango session error:", error);
     return errorResponse("Failed to create connect session", 500, message);
   }
 }

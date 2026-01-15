@@ -115,6 +115,8 @@ const schema = defineSchema({
     lastMessageText: v.optional(v.string()),
     lastMessageAt: v.optional(v.number()), // timestamp in milliseconds
     unreadCount: v.number(),
+    // Task 5.5: Channel/thread metadata
+    displayName: v.optional(v.string()), // Slack channel name, Gmail subject, etc.
   })
     .index("by_user", ["userId"])
     .index("by_user_last_message", ["userId", "lastMessageAt"])
@@ -130,6 +132,9 @@ const schema = defineSchema({
     senderContactId: v.optional(v.id("contacts")), // null if isFromMe=true
     isFromMe: v.boolean(),
     platformMessageId: v.string(), // unique ID from source platform (ROWID, Gmail msgId, Slack ts)
+    // Task 5.5: Thread support for Slack/Gmail
+    threadTs: v.optional(v.string()), // Slack thread_ts or Gmail threadId for thread replies
+    isThreadParent: v.optional(v.boolean()), // true if this message started a thread
     // Task 2.2b: Message status and reactions
     status: v.optional(messageStatusValidator), // sent, delivered, read, failed
     reactions: v.optional(
