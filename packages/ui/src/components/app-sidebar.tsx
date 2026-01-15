@@ -13,6 +13,7 @@ import {
   ChevronsUpDownIcon,
 } from "lucide-react";
 import { useTheme } from "next-themes";
+import { cn } from "../lib/utils";
 import {
   Sidebar,
   SidebarContent,
@@ -21,6 +22,7 @@ import {
   SidebarGroupContent,
   SidebarHeader,
   SidebarMenu,
+  SidebarMenuBadge,
   SidebarMenuButton,
   SidebarMenuItem,
 } from "./ui/sidebar";
@@ -46,11 +48,31 @@ interface AppSidebarProps extends React.ComponentProps<typeof Sidebar> {
     email?: string;
   } | null;
   onSignOut?: () => void;
+  /** Number of pending actions for badge */
+  actionCount?: number;
 }
 
-export function AppSidebar({ user, onSignOut, ...props }: AppSidebarProps) {
+export function AppSidebar({
+  user,
+  onSignOut,
+  actionCount = 0,
+  ...props
+}: AppSidebarProps) {
   const { setTheme, resolvedTheme } = useTheme();
   const [mounted, setMounted] = React.useState(false);
+  const [prevCount, setPrevCount] = React.useState(actionCount);
+  const [isAnimating, setIsAnimating] = React.useState(false);
+
+  // Animate badge when count changes
+  React.useEffect(() => {
+    if (actionCount !== prevCount && actionCount > 0) {
+      setIsAnimating(true);
+      const timer = setTimeout(() => setIsAnimating(false), 300);
+      setPrevCount(actionCount);
+      return () => clearTimeout(timer);
+    }
+    setPrevCount(actionCount);
+  }, [actionCount, prevCount]);
 
   React.useEffect(() => {
     setMounted(true);
@@ -93,6 +115,16 @@ export function AppSidebar({ user, onSignOut, ...props }: AppSidebarProps) {
                     <Icon className="size-4" />
                     <span>{title}</span>
                   </SidebarMenuButton>
+                  {title === "Actions" && actionCount > 0 && (
+                    <SidebarMenuBadge
+                      className={cn(
+                        "transition-transform duration-200",
+                        isAnimating && "scale-125"
+                      )}
+                    >
+                      {actionCount > 99 ? "99+" : actionCount}
+                    </SidebarMenuBadge>
+                  )}
                 </SidebarMenuItem>
               ))}
             </SidebarMenu>

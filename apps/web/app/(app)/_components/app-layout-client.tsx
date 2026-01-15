@@ -12,6 +12,7 @@ interface AppLayoutClientProps {
 
 export function AppLayoutClient({ children }: AppLayoutClientProps) {
   const currentUser = useQuery(api.users.getCurrentUser);
+  const actionCountResult = useQuery(api.actions.getPendingActionCount, {});
 
   const user = currentUser
     ? {
@@ -20,9 +21,11 @@ export function AppLayoutClient({ children }: AppLayoutClientProps) {
       }
     : null;
 
+  const actionCount = actionCountResult?.count ?? 0;
+
   return (
     <SidebarProvider>
-      <AppSidebar user={user} onSignOut={signOut} />
+      <AppSidebar user={user} onSignOut={signOut} actionCount={actionCount} />
       <SidebarInset>{children}</SidebarInset>
     </SidebarProvider>
   );

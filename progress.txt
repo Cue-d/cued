@@ -2360,3 +2360,23 @@ Notes:
   - All typecheck passes
   - Cron will run daily at 9 PM UTC
 ---
+
+[2026-01-15 13:30] Task 7.23 - Add action count badge to sidebar
+Files:
+  - packages/ui/src/components/app-sidebar.tsx (updated)
+  - apps/web/app/(app)/_components/app-layout-client.tsx (updated)
+Implementation:
+  - Added actionCount prop to AppSidebar
+  - Query getPendingActionCount in app layout with real-time subscription
+  - Show SidebarMenuBadge on Actions nav item when count > 0
+  - Badge hidden when count is 0
+  - Scale animation (scale-125) when count changes
+  - Cap display at "99+" for large counts
+Decisions:
+  - Used SidebarMenuBadge from sidebar components
+  - Animation via CSS transition-transform + state tracking
+  - Real-time updates via Convex useQuery subscription
+Notes:
+  - All lint and typecheck pass
+  - Badge shows on Actions menu item only
+---
