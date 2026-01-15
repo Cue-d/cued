@@ -1,7 +1,6 @@
 "use client";
 
 import { useQuery } from "convex/react";
-import type { ReactNode } from "react";
 import { useMemo } from "react";
 import { api } from "@prm/convex";
 import { Avatar, AvatarFallback, Skeleton, Separator } from "@prm/ui";
@@ -249,33 +248,6 @@ export default function SettingsPage() {
           </div>
         </div>
       </div>
-    </div>
-  );
-}
-
-function SettingsRow({
-  icon,
-  title,
-  description,
-  children,
-}: {
-  icon: ReactNode;
-  title: string;
-  description: string;
-  children: ReactNode;
-}) {
-  return (
-    <div className="flex items-center justify-between gap-4 p-4">
-      <div className="flex items-center gap-3">
-        <div className="flex size-9 items-center justify-center rounded-md bg-muted text-muted-foreground">
-          {icon}
-        </div>
-        <div>
-          <p className="text-sm font-medium">{title}</p>
-          <p className="text-xs text-muted-foreground">{description}</p>
-        </div>
-      </div>
-      {children}
     </div>
   );
 }
