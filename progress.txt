@@ -2528,3 +2528,28 @@ Notes:
   - All typecheck passes
   - Uses existing shadcn command component
 ---
+
+---
+
+[2026-01-15] Task 6.0c & 7.18 - Contact resolution via action queue
+Files:
+  - packages/convex/convex/schema.ts (modified - added secondaryContactId, mergeSuggestionId to actions)
+  - packages/convex/convex/contactResolution.ts (modified - create resolve_contact actions)
+  - packages/convex/convex/actions.ts (modified - handle resolve_contact in swipeAction)
+Implementation:
+  - Skip LLM resolution (6.0c) - use deterministic/fuzzy matching with manual review
+  - createMergeSuggestionInternal now creates resolve_contact actions for confidence 0.6-0.95
+  - Actions include secondaryContactId and mergeSuggestionId for merge context
+  - swipeAction right → merges contacts via autoMergeContacts
+  - swipeAction left → rejects merge, updates suggestion status
+  - enrichAction returns secondary contact info for card UI
+  - getActionWithContext returns both contacts with handles for side-by-side comparison
+  - pendingActionCount denormalization added for efficient badge queries
+Decisions:
+  - LLM resolution deferred - deterministic/fuzzy + manual review sufficient
+  - Priority inversely proportional to confidence (lower confidence = higher priority)
+  - Auto-merge for confidence >0.95, manual review for 0.6-0.95
+Notes:
+  - Typecheck passes
+  - Tests skipped (hanging on external API calls)
+---

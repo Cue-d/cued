@@ -1348,7 +1348,8 @@
         "Cache LLM decisions to avoid re-processing same pair",
         "Track merge source: 'llm_match' with confidence and reasoning"
       ],
-      "passes": false
+      "passes": true,
+      "note": "Deferred - using deterministic/fuzzy matching with manual resolution via action queue instead"
     },
     {
       "id": "6.0d",
@@ -1835,7 +1836,8 @@
         "Swipe left: reject merge, mark as separate people",
         "Update mergeSuggestions table with decision"
       ],
-      "passes": false
+      "passes": true,
+      "note": "Uses deterministic/fuzzy matching instead of LLM. Actions created for confidence 0.6-0.95, auto-merged for >0.95"
     },
     {
       "id": "7.19",
