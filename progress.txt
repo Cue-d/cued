@@ -2643,3 +2643,26 @@ Notes:
   - Electron app must be running for iMessage sends
   - Nango connection required for Gmail sends
 ---
+
+[2026-01-15] Task 8.1 - Port Playwright social scraper base class to Electron
+Files:
+  - apps/electron/src/main/sync/social-scraper.ts (new - base class for social scrapers)
+  - apps/electron/package.json (added playwright dependency)
+Implementation:
+  - Created SocialScraper abstract base class with persistent browser context
+  - Browser profile stored in app.getPath('userData')/browser_data/{platform}/
+  - Cookies securely stored using Electron safeStorage API (encrypted at rest)
+  - launchBrowser() creates/reuses persistent Chromium context with anti-detection settings
+  - closeBrowser() gracefully saves cookies before closing
+  - Helper methods: navigateTo(), waitForSelector(), scrollToBottom()
+  - Abstract checkLoginStatus() to be implemented by platform-specific scrapers
+  - Cookies expire after 7 days to handle session invalidation
+Decisions:
+  - Used safeStorage for cookie encryption (matches token-storage.ts pattern)
+  - No persistent context storage (Playwright) - only cookies encrypted
+  - Anti-detection UA and browser args to reduce bot detection
+Notes:
+  - Typecheck passes
+  - Base class ready for LinkedIn (8.2) and Twitter (8.3) scrapers
+  - Reference file backend/services/social/scraper.py did not exist - built from requirements
+---

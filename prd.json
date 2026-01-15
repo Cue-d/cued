@@ -1950,6 +1950,217 @@
       ],
       "passes": true,
       "note": "Code complete. iMessage: Electron polling pendingSends → AppleScript. Gmail: Convex action → Nango triggerAction. Slack: skipped (not built yet). Test recipients: theodoretarr@icloud.com (iMessage), theodore@tarr.com (Gmail)."
+    },
+    {
+      "id": "8.1",
+      "phase": 8,
+      "mode": "hitl",
+      "category": "integration",
+      "description": "Port Playwright social scraper base class to TypeScript in Electron",
+      "reference": "backend/services/social/scraper.py",
+      "steps": [
+        "Create apps/electron/src/main/sync/social-scraper.ts",
+        "Install playwright package: pnpm add playwright in apps/electron",
+        "Port SocialScraper base class with persistent browser context management",
+        "Store browser profile in Electron app.getPath('userData')/browser_data/",
+        "Store cookies securely using Electron safeStorage API",
+        "Implement launchBrowser() that creates/reuses persistent context",
+        "Implement closeBrowser() that gracefully closes context",
+        "Verify browser launches with: const scraper = new SocialScraper('linkedin'); await scraper.launchBrowser()",
+        "Verify browser profile persists between launches (check userData folder)"
+      ],
+      "passes": true
+    },
+    {
+      "id": "8.2",
+      "phase": 8,
+      "mode": "hitl",
+      "category": "integration",
+      "description": "Create LinkedIn scraper module (login, scrape connections)",
+      "reference": "backend/services/social/scraper.py",
+      "steps": [
+        "Create apps/electron/src/main/sync/linkedin.ts extending SocialScraper",
+        "Implement checkLoginStatus() that navigates to linkedin.com and checks for login state",
+        "Implement loginLinkedIn() that opens visible browser at linkedin.com/login for user auth",
+        "Implement scrapeConnections(headless: boolean) with scroll-and-load pattern",
+        "Parse connection cards: name, profile_url, headline, connected_date",
+        "Handle pagination by scrolling to bottom and waiting for new cards to load",
+        "Return LinkedInConnection[] array with scraped data",
+        "Test login: call loginLinkedIn(), manually login, verify checkLoginStatus() returns true",
+        "Test scrape: call scrapeConnections(), verify returns array with name, profile_url populated",
+        "Verify scraped data matches visible connections on LinkedIn (spot check 5 names)"
+      ],
+      "passes": false
+    },
+    {
+      "id": "8.3",
+      "phase": 8,
+      "mode": "hitl",
+      "category": "integration",
+      "description": "Create X (Twitter) scraper module (login, scrape followers/following)",
+      "reference": "backend/services/social/scraper.py",
+      "steps": [
+        "Create apps/electron/src/main/sync/twitter.ts extending SocialScraper",
+        "Implement checkLoginStatus() that checks for authenticated state on x.com",
+        "Implement loginTwitter() that opens visible browser at x.com/login for user auth",
+        "Implement scrapeFollowers(username: string) with scroll-and-load pattern",
+        "Implement scrapeFollowing(username: string) with scroll-and-load pattern",
+        "Implement getMutuals(username: string) that returns intersection of followers/following",
+        "Parse user cards: displayName, handle (@username), bio snippet",
+        "Return TwitterUser[] for followers/following, compute mutuals from intersection",
+        "Test login: call loginTwitter(), manually login, verify checkLoginStatus() returns true",
+        "Test scrape: call scrapeFollowers(), verify returns array with handle populated",
+        "Test mutuals: call getMutuals(), verify returns accounts that appear in both lists"
+      ],
+      "passes": false
+    },
+    {
+      "id": "8.4",
+      "phase": 8,
+      "mode": "hitl",
+      "category": "integration",
+      "description": "Create /api/sync/social POST endpoint for contact batch upload",
+      "steps": [
+        "Create apps/web/app/api/sync/social/route.ts",
+        "Define SocialSyncBatch type: platform, contacts[], syncedAt timestamp",
+        "Define SocialContact type: name, handle, profileUrl, headline, platform",
+        "Validate auth token from Authorization header (WorkOS JWT)",
+        "Parse and validate request body against SocialSyncBatch schema",
+        "Route to Convex mutation (created in 8.5)",
+        "Return sync stats: totalContacts, newContacts, updatedContacts",
+        "Test with curl: POST valid batch, verify 200 response with stats",
+        "Test auth: POST without token, verify 401 response",
+        "Test validation: POST invalid body, verify 400 response with error details"
+      ],
+      "passes": false
+    },
+    {
+      "id": "8.5",
+      "phase": 8,
+      "mode": "hitl",
+      "category": "functional",
+      "description": "Create syncSocialContacts Convex mutation with handle upsert",
+      "steps": [
+        "Add syncSocialContacts mutation to convex/sync.ts",
+        "Add 'linkedin_url' and 'twitter_handle' to handleType in convex/schema.ts",
+        "For each contact: check if contactHandle exists for platform+handle",
+        "If exists: update contact displayName if changed, return 'updated'",
+        "If not exists: create new contact with displayName, source platform",
+        "Create contactHandle: handleType='linkedin_url' for LinkedIn, 'twitter_handle' for X",
+        "Extract company from LinkedIn headline (text before ' at ' or ' @ ')",
+        "Store lastScrapedAt, connectionCount in integrations table for platform",
+        "Return stats: newContacts count, updatedContacts count",
+        "Test: call mutation with 3 LinkedIn contacts, verify contacts table has 3 new rows",
+        "Test: call mutation again with same contacts, verify updatedContacts=3, newContacts=0",
+        "Test: verify contactHandles table has linkedin_url handles for each contact"
+      ],
+      "passes": false
+    },
+    {
+      "id": "8.6",
+      "phase": 8,
+      "mode": "afk",
+      "category": "functional",
+      "description": "Integrate social contacts with contact resolution (auto-merge high confidence)",
+      "steps": [
+        "Hook syncSocialContacts to trigger findMergeCandidates after sync",
+        "For each new social contact, run fuzzy name match against existing contacts",
+        "If name match >0.95 confidence: auto-merge (link handles to existing contact)",
+        "If name match 0.6-0.95: create mergeSuggestion for manual review",
+        "If no match: keep as new contact",
+        "Use company from LinkedIn as supporting signal (boost confidence if company matches)",
+        "Track merge source: 'social_name_match' with confidence score",
+        "Test: sync LinkedIn contact 'John Smith', have existing iMessage contact 'John Smith'",
+        "Verify auto-merge: both handles linked to same contact (confidence >0.95)",
+        "Test: sync 'Jon Smith', verify mergeSuggestion created for manual review (0.6-0.95)"
+      ],
+      "passes": false
+    },
+    {
+      "id": "8.7",
+      "phase": 8,
+      "mode": "afk",
+      "category": "functional",
+      "description": "Create 'new_connection' action type for enrichment prompts",
+      "steps": [
+        "Add 'new_connection' to action type enum in convex/schema.ts",
+        "After social sync, create actions for new unmatched contacts",
+        "Action payload: contactId, platform, profileUrl, headline",
+        "Display as ContactCard in action queue (reuse from 7.16)",
+        "Prompt user to add notes about how they know this connection",
+        "Swipe right: save contact with notes",
+        "Swipe left: mark contact as 'not important' (don't generate future actions)",
+        "Swipe up: snooze for later review",
+        "Limit to 20 new_connection actions per sync (avoid overwhelm)",
+        "Test: sync 5 new LinkedIn contacts, verify 5 new_connection actions created",
+        "Verify actions appear in Actions page with ContactCard UI"
+      ],
+      "passes": false
+    },
+    {
+      "id": "8.8",
+      "phase": 8,
+      "mode": "afk",
+      "category": "ui",
+      "description": "Create Social Settings UI with login status and scrape buttons",
+      "steps": [
+        "Add LinkedIn section to apps/web/app/(app)/settings/integrations/page.tsx",
+        "Show login status indicator (green=logged in, gray=not logged in)",
+        "Add 'Open Login' button that sends IPC to Electron to open LinkedIn login",
+        "Show lastScrapedAt timestamp from integrations table",
+        "Add 'Scrape Now' button that triggers scrape via Electron IPC",
+        "Show connectionCount from last scrape",
+        "Add X (Twitter) section with same pattern",
+        "Add username input field for X (whose mutuals to scrape)",
+        "Handle Electron not running: show message 'Desktop app required for social sync'",
+        "Test: click 'Open Login' for LinkedIn, verify Electron opens browser",
+        "Test: click 'Scrape Now', verify scrape runs and stats update in UI"
+      ],
+      "passes": false
+    },
+    {
+      "id": "8.9",
+      "phase": 8,
+      "mode": "afk",
+      "category": "integration",
+      "description": "Add social scraper IPC handlers to Electron main process",
+      "steps": [
+        "Create apps/electron/src/main/ipc/social.ts with IPC handlers",
+        "Register handler: 'social:linkedin:login' - opens LinkedIn login browser",
+        "Register handler: 'social:linkedin:scrape' - runs scrape, returns contacts",
+        "Register handler: 'social:linkedin:status' - returns login status boolean",
+        "Register handler: 'social:twitter:login' - opens X login browser",
+        "Register handler: 'social:twitter:scrape' - accepts username, returns mutuals",
+        "Register handler: 'social:twitter:status' - returns login status boolean",
+        "After successful scrape, automatically POST to /api/sync/social",
+        "Return sync stats to renderer process",
+        "Add handlers to apps/electron/src/main/index.ts",
+        "Test: from renderer, invoke 'social:linkedin:status', verify boolean response",
+        "Test: invoke 'social:linkedin:scrape', verify contacts synced to Convex"
+      ],
+      "passes": false
+    },
+    {
+      "id": "8.10",
+      "phase": 8,
+      "mode": "hitl",
+      "category": "testing",
+      "description": "Test social integration end-to-end with real accounts",
+      "steps": [
+        "Start Electron app and web app",
+        "In web settings, click 'Open Login' for LinkedIn",
+        "Complete LinkedIn login in opened browser",
+        "Verify login status shows green in web UI",
+        "Click 'Scrape Now', wait for scrape to complete",
+        "Verify connectionCount updates in UI",
+        "Check Convex dashboard: verify contacts created with linkedin_url handles",
+        "Verify new_connection actions created in Actions page",
+        "Swipe right on a connection, verify contact updated with notes",
+        "Repeat flow for X (Twitter): login, scrape mutuals, verify contacts synced",
+        "Test contact resolution: if LinkedIn contact matches existing contact by name, verify merged",
+        "Test full cycle: scrape → sync → resolution → actions → enrichment"
+      ],
+      "passes": false
     }
   ]
 }
