@@ -3,38 +3,6 @@
 // You can version this file
 // ---------------------------
 
-export type SyncMetadata_github_fetchIssues = void
-
-export interface GithubIssue {
-  id: string;
-  owner: string;
-  repo: string;
-  issue_number: number;
-  title: string;
-  state: string;
-  author: string;
-  author_id: number;
-  body: string;
-  date_created: string;
-  date_last_modified: string;
-};
-
-export interface ActionInput_github_createIssue {
-  id: string;
-  owner: string;
-  repo: string;
-  issue_number: number;
-  title: string;
-  state: string;
-  author: string;
-  author_id: number;
-  body: string;
-  date_created: string;
-  date_last_modified: string;
-};
-
-export type ActionOutput_github_createIssue = void
-
 export interface SyncMetadata_google_mail_emails {
   backfillPeriodMs?: number | undefined;
 };
