@@ -88,9 +88,46 @@ Task 4.2 requires manual configuration in the Nango dashboard and Google Cloud C
 - Gmail API must be enabled in Google Cloud Console
 - Go to **APIs & Services** → **Library** → Search "Gmail API" → Enable
 
+## Deploying Gmail Sync to Nango (Task 4.3)
+
+After completing the OAuth setup above, deploy the Gmail sync function:
+
+1. Navigate to the nango-integrations directory:
+   ```bash
+   cd nango-integrations
+   ```
+
+2. Add your Nango secret key to `.env`:
+   ```bash
+   # Get the key from Nango Dashboard → Environment Settings
+   NANGO_SECRET_KEY_DEV=your-dev-key-here
+   ```
+
+3. Compile and verify the integration:
+   ```bash
+   nango compile
+   ```
+
+4. Deploy to Nango (requires confirmation):
+   ```bash
+   nango deploy dev
+   ```
+
+5. Verify deployment in Nango Dashboard:
+   - Go to **Integrations** → **google-mail**
+   - Check that **emails** sync is listed with 5-minute frequency
+   - Verify the `/emails` endpoint is exposed
+
+### Testing the Sync
+
+1. Create a test connection (if not already done in Step 5 above)
+2. Go to **Connections** → Your Gmail connection
+3. Click **Trigger Sync** next to the emails sync
+4. Check **Logs** tab for sync progress
+5. Verify records appear in **Records** tab
+
 ## Next Steps
 
 After completing this setup:
 
-- Task 4.3: Create Nango Gmail sync function for emails
 - Task 4.4: Create /settings/integrations page with Nango Connect UI

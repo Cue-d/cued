@@ -186,6 +186,13 @@ llm/.build/
 # ============================================================
 .turbo/
 
+# ============================================================
+# Nango Integrations
+# ============================================================
+nango-integrations/build/
+nango-integrations/.nango/nango.json
+nango-integrations/.nango/schema.json
+
 # TypeScript build info
 tsconfig.tsbuildinfo
 **/tsconfig.tsbuildinfo
