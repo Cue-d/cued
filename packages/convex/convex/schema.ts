@@ -25,7 +25,7 @@ export const actionTypeValidator = v.union(
   v.literal("follow_up"),
   v.literal("send_message"),
   v.literal("eod_contact"),
-  v.literal("resolve_contact") // Task 6.1: Contact merge resolution
+  v.literal("resolve_contact")
 );
 
 export const mergeSuggestionStatusValidator = v.union(
@@ -71,6 +71,8 @@ const schema = defineSchema({
     email: v.string(),
     name: v.optional(v.string()),
     plan: v.optional(v.string()),
+    // Denormalized counter for efficient action badge queries
+    pendingActionCount: v.optional(v.number()),
   })
     .index("by_workos_id", ["workosUserId"])
     .index("by_email", ["email"]),
@@ -193,8 +195,7 @@ const schema = defineSchema({
       filterFields: ["userId", "conversationId"],
     }),
 
-  // Task 1.12: Actions table
-  // Extended in 7.8: platform, draftResponse, llmReason, discardedAt, expired status
+  // Actions table
   actions: defineTable({
     userId: v.id("users"),
     type: actionTypeValidator,
@@ -204,7 +205,8 @@ const schema = defineSchema({
     conversationId: v.optional(v.id("conversations")),
     contactId: v.optional(v.id("contacts")),
     messageId: v.optional(v.id("messages")),
-    // Platform (for actions without conversationId, e.g., send_message to new contact)
+    secondaryContactId: v.optional(v.id("contacts")), // For resolve_contact actions
+    mergeSuggestionId: v.optional(v.id("mergeSuggestions")), // For resolve_contact actions
     platform: v.optional(platformValidator),
     // Drafts: draftMessage = AI-suggested, draftResponse = user-edited
     draftMessage: v.optional(v.string()),
@@ -257,6 +259,19 @@ const schema = defineSchema({
   })
     .index("by_user_status", ["userId", "status"])
     .index("by_contacts", ["contact1Id", "contact2Id"]), // Prevent duplicate suggestions
+
+  // Denormalized per-contact memory extraction stats (avoids 20k message scans)
+  contactMemoryStats: defineTable({
+    userId: v.id("users"),
+    contactId: v.id("contacts"),
+    displayName: v.string(), // Denormalized for display
+    company: v.optional(v.string()), // Denormalized for display
+    messagesProcessed: v.number(),
+    memoriesExtracted: v.number(),
+    lastExtractedAt: v.number(),
+  })
+    .index("by_user_recent", ["userId", "lastExtractedAt"])
+    .index("by_contact", ["contactId"]),
 });
 
 export default schema;

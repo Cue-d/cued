@@ -8,9 +8,6 @@ import {
 import { internal } from "./_generated/api";
 import type { Doc, Id } from "./_generated/dataModel";
 import { getAuthenticatedUser } from "./lib/auth";
-
-// Import contact resolution utilities
-// Note: These are pure functions, no external API calls
 import {
   normalizeEmail,
   emailsMatch,
@@ -320,7 +317,10 @@ export const createMergeSuggestionInternal = internalMutation({
       return { created: false, reason: "Already exists" };
     }
 
-    await ctx.db.insert("mergeSuggestions", {
+    const now = Date.now();
+
+    // Create the merge suggestion
+    const suggestionId = await ctx.db.insert("mergeSuggestions", {
       userId: args.userId,
       contact1Id: args.contact1Id,
       contact2Id: args.contact2Id,
@@ -328,10 +328,34 @@ export const createMergeSuggestionInternal = internalMutation({
       source: args.source,
       reasoning: args.reasoning,
       status: "pending",
-      createdAt: Date.now(),
+      createdAt: now,
     });
 
-    return { created: true };
+    // Priority scales with confidence (higher confidence = lower urgency since easier decision)
+    const priority = Math.round((1 - args.confidence) * 100);
+
+    await ctx.db.insert("actions", {
+      userId: args.userId,
+      type: "resolve_contact",
+      status: "pending",
+      priority,
+      contactId: args.contact1Id,
+      secondaryContactId: args.contact2Id,
+      mergeSuggestionId: suggestionId,
+      reason: `${args.source}: ${(args.confidence * 100).toFixed(0)}% match`,
+      llmReason: args.reasoning,
+      createdAt: now,
+    });
+
+    // Increment pending action count
+    const user = await ctx.db.get(args.userId);
+    if (user) {
+      await ctx.db.patch(args.userId, {
+        pendingActionCount: (user.pendingActionCount ?? 0) + 1,
+      });
+    }
+
+    return { created: true, suggestionId };
   },
 });
 

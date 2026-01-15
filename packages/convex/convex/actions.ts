@@ -1,13 +1,31 @@
 import { v } from "convex/values";
 import type { Doc, Id } from "./_generated/dataModel";
-import type { QueryCtx } from "./_generated/server";
-import { mutation, query } from "./_generated/server";
+import type { MutationCtx, QueryCtx } from "./_generated/server";
+import { internalMutation, mutation, query } from "./_generated/server";
+import { internal } from "./_generated/api";
 import { getAuthenticatedUser, requireAuthenticatedUser } from "./lib/auth";
 import {
   actionStatusValidator,
   actionTypeValidator,
   platformValidator,
 } from "./schema";
+
+/**
+ * Helper to adjust the pending action count on a user.
+ * Call with delta=1 when adding a pending action, delta=-1 when removing.
+ */
+async function adjustPendingActionCount(
+  ctx: MutationCtx,
+  userId: Id<"users">,
+  delta: number
+): Promise<void> {
+  const user = await ctx.db.get(userId);
+  if (!user) return;
+
+  const currentCount = user.pendingActionCount ?? 0;
+  const newCount = Math.max(0, currentCount + delta);
+  await ctx.db.patch(userId, { pendingActionCount: newCount });
+}
 
 /**
  * Fetch all actionable items: pending actions + snoozed actions that are due.
@@ -61,11 +79,15 @@ async function enrichAction(
   conversationId: Id<"conversations"> | null;
   contactId: Id<"contacts"> | null;
   contactName: string | null;
+  secondaryContactId: Id<"contacts"> | null;
+  secondaryContactName: string | null;
+  mergeSuggestionId: Id<"mergeSuggestions"> | null;
   platform: string | null;
 }> {
-  const [conversation, contact] = await Promise.all([
+  const [conversation, contact, secondaryContact] = await Promise.all([
     action.conversationId ? ctx.db.get(action.conversationId) : null,
     action.contactId ? ctx.db.get(action.contactId) : null,
+    action.secondaryContactId ? ctx.db.get(action.secondaryContactId) : null,
   ]);
 
   // Prefer action.platform if set, otherwise derive from conversation
@@ -87,6 +109,9 @@ async function enrichAction(
     conversationId: action.conversationId ?? null,
     contactId: action.contactId ?? null,
     contactName: contact?.displayName ?? null,
+    secondaryContactId: action.secondaryContactId ?? null,
+    secondaryContactName: secondaryContact?.displayName ?? null,
+    mergeSuggestionId: action.mergeSuggestionId ?? null,
     platform,
   };
 }
@@ -206,6 +231,9 @@ export const createAction = mutation({
       createdAt: Date.now(),
     });
 
+    // Increment pending action count (new actions are always pending)
+    await adjustPendingActionCount(ctx, user._id, 1);
+
     return { actionId };
   },
 });
@@ -278,6 +306,9 @@ export const updateActionStatus = mutation({
       throw new Error("Action not found");
     }
 
+    const oldStatus = action.status;
+    const newStatus = args.status;
+
     const updates: Partial<Doc<"actions">> = {
       status: args.status,
     };
@@ -297,6 +328,13 @@ export const updateActionStatus = mutation({
     }
 
     await ctx.db.patch(args.actionId, updates);
+
+    // Adjust pending action count based on status change
+    if (oldStatus === "pending" && newStatus !== "pending") {
+      await adjustPendingActionCount(ctx, user._id, -1);
+    } else if (oldStatus !== "pending" && newStatus === "pending") {
+      await adjustPendingActionCount(ctx, user._id, 1);
+    }
 
     return { success: true };
   },
@@ -337,6 +375,17 @@ export const getActionWithContext = query({
       ? await ctx.db
           .query("contactHandles")
           .withIndex("by_contact", (q) => q.eq("contactId", contact._id))
+          .collect()
+      : [];
+
+    const secondaryContact = action.secondaryContactId
+      ? await ctx.db.get(action.secondaryContactId)
+      : null;
+
+    const secondaryHandles = secondaryContact
+      ? await ctx.db
+          .query("contactHandles")
+          .withIndex("by_contact", (q) => q.eq("contactId", secondaryContact._id))
           .collect()
       : [];
 
@@ -406,6 +455,8 @@ export const getActionWithContext = query({
         completedAt: action.completedAt ?? null,
         discardedAt: action.discardedAt ?? null,
         platform: action.platform ?? conversation?.platform ?? null,
+        secondaryContactId: action.secondaryContactId ?? null,
+        mergeSuggestionId: action.mergeSuggestionId ?? null,
       },
       conversation: conversation
         ? {
@@ -430,6 +481,20 @@ export const getActionWithContext = query({
             })),
           }
         : null,
+      secondaryContact: secondaryContact
+        ? {
+            _id: secondaryContact._id,
+            displayName: secondaryContact.displayName,
+            company: secondaryContact.company ?? null,
+            notes: secondaryContact.notes ?? null,
+            importance: secondaryContact.importance ?? null,
+            handles: secondaryHandles.map((h) => ({
+              handleType: h.handleType,
+              handle: h.handle,
+              platform: h.platform,
+            })),
+          }
+        : null,
       messages: messagesWithSender,
     };
   },
@@ -437,7 +502,7 @@ export const getActionWithContext = query({
 
 /**
  * Get count of pending actions for sidebar badge.
- * Includes pending + due snoozed actions.
+ * Uses denormalized counter on users table (no expensive queries).
  */
 export const getPendingActionCount = query({
   args: {},
@@ -445,8 +510,45 @@ export const getPendingActionCount = query({
     const user = await getAuthenticatedUser(ctx);
     if (!user) return { count: 0 };
 
-    const actionable = await fetchActionableActions(ctx, user._id);
-    return { count: actionable.length };
+    return { count: user.pendingActionCount ?? 0 };
+  },
+});
+
+/**
+ * Recalculate pending action count from scratch.
+ * TEMPORARY: Run once then delete.
+ */
+export const recalculatePendingActionCount = mutation({
+  args: {
+    email: v.optional(v.string()),
+  },
+  handler: async (ctx, args) => {
+    let user;
+    if (args.email) {
+      // CLI mode: lookup by email
+      user = await ctx.db
+        .query("users")
+        .withIndex("by_email", (q) => q.eq("email", args.email!))
+        .unique();
+    } else {
+      // Authenticated mode
+      user = await getAuthenticatedUser(ctx);
+    }
+
+    if (!user) throw new Error("User not found");
+
+    const pendingActions = await ctx.db
+      .query("actions")
+      .withIndex("by_user_status", (q) =>
+        q.eq("userId", user._id).eq("status", "pending")
+      )
+      .collect();
+
+    await ctx.db.patch(user._id, {
+      pendingActionCount: pendingActions.length,
+    });
+
+    return { count: pendingActions.length };
   },
 });
 
@@ -481,13 +583,28 @@ export const swipeAction = mutation({
       throw new Error("Action not found");
     }
 
+    const wasPending = action.status === "pending";
+
     switch (args.direction) {
       case "left": {
+        if (action.type === "resolve_contact" && action.mergeSuggestionId) {
+          await ctx.db.patch(action.mergeSuggestionId, {
+            status: "rejected",
+            resolvedAt: now,
+          });
+        }
+
         // Discard action
         await ctx.db.patch(args.actionId, {
           status: "discarded",
           discardedAt: now,
         });
+
+        // Decrement counter if was pending
+        if (wasPending) {
+          await adjustPendingActionCount(ctx, user._id, -1);
+        }
+
         return { success: true, status: "discarded" };
       }
 
@@ -500,10 +617,59 @@ export const swipeAction = mutation({
           status: "snoozed",
           snoozedUntil: args.snoozedUntil,
         });
+
+        // Decrement counter if was pending
+        if (wasPending) {
+          await adjustPendingActionCount(ctx, user._id, -1);
+        }
+
         return { success: true, status: "snoozed", snoozedUntil: args.snoozedUntil };
       }
 
       case "right": {
+        if (action.type === "resolve_contact") {
+          if (!action.contactId || !action.secondaryContactId) {
+            throw new Error("resolve_contact action missing contact IDs");
+          }
+
+          // Merge contacts: secondary → primary (contactId is primary)
+          await ctx.scheduler.runAfter(
+            0,
+            internal.contactResolution.autoMergeContacts,
+            {
+              primaryContactId: action.contactId,
+              secondaryContactId: action.secondaryContactId,
+              source: "name_match", // Best guess, actual source is in mergeSuggestion
+              reasoning: "User approved merge via action swipe",
+            }
+          );
+
+          // Update merge suggestion if linked
+          if (action.mergeSuggestionId) {
+            await ctx.db.patch(action.mergeSuggestionId, {
+              status: "approved",
+              resolvedAt: now,
+            });
+          }
+
+          await ctx.db.patch(args.actionId, {
+            status: "completed",
+            completedAt: now,
+          });
+
+          // Decrement counter if was pending
+          if (wasPending) {
+            await adjustPendingActionCount(ctx, user._id, -1);
+          }
+
+          return {
+            success: true,
+            status: "completed",
+            merged: true,
+            primaryContactId: action.contactId,
+          };
+        }
+
         // Complete action and potentially send message
         // Get the response text (user-edited draft or AI-suggested)
         const responseText =
@@ -523,6 +689,11 @@ export const swipeAction = mutation({
           completedAt: now,
           draftResponse: responseText, // Save the final response
         });
+
+        // Decrement counter if was pending
+        if (wasPending) {
+          await adjustPendingActionCount(ctx, user._id, -1);
+        }
 
         return {
           success: true,
