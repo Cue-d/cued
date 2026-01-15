@@ -2799,3 +2799,28 @@ Notes:
   - Typecheck passes
   - UI is ready for IPC integration in Task 8.9
 ---
+
+[2026-01-15] Task 8.9 - Add social scraper IPC handlers to Electron
+Files:
+  - apps/electron/src/main/ipc/social.ts (new - IPC handlers for social scrapers)
+  - apps/electron/src/main/index.ts (register handlers, add cleanup)
+Implementation:
+  - Created setupSocialIpcHandlers() with all social platform handlers:
+    - social:linkedin:status - check LinkedIn login status
+    - social:linkedin:login - open visible browser for manual login
+    - social:linkedin:scrape - scrape connections, return data array
+    - social:twitter:status - check Twitter login status
+    - social:twitter:login - open visible browser for manual login
+    - social:twitter:scrapeFollowers - scrape followers for a username
+    - social:twitter:scrapeMutuals - scrape mutual followers (followers ∩ following)
+  - Singleton scraper instances to maintain state across IPC calls
+  - Progress events sent to renderer via webContents.send()
+  - cleanupSocialScrapers() called on app quit to close browser instances
+Decisions:
+  - IPC handlers return data directly (no auto-POST to sync API)
+  - Renderer can POST to sync API after receiving scrape results
+  - Twitter mutuals is most useful for PRM (bidirectional relationships)
+Notes:
+  - Typecheck passes
+  - Ready for Task 8.10 (E2E testing with real accounts) - REQUIRES MANUAL VERIFICATION
+---

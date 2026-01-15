@@ -11,6 +11,7 @@ import { getSyncManager, type SyncProgress } from "./sync/sync-manager";
 import { getContactsWatcher } from "./sync/contacts-watcher";
 import { syncContactsToConvex } from "./sync/contacts-sync";
 import { getIMessageSender } from "./sync/imessage-sender";
+import { setupSocialIpcHandlers, cleanupSocialScrapers } from "./ipc/social";
 
 // WorkOS Client ID - should match web app config
 // In production, this would be loaded from a config file or env
@@ -205,6 +206,9 @@ app.whenReady().then(() => {
 
   createWindow();
 
+  // Set up social IPC handlers after window is created (needs mainWindow reference)
+  setupSocialIpcHandlers(mainWindow);
+
   // Start background sync
   startBackgroundSync();
 
@@ -227,7 +231,7 @@ app.on("window-all-closed", () => {
   }
 });
 
-app.on("will-quit", () => {
+app.on("will-quit", async () => {
   getSyncManager().stop();
   getContactsWatcher().stop();
   try {
@@ -235,4 +239,6 @@ app.on("will-quit", () => {
   } catch {
     // Sender may not be initialized
   }
+  // Clean up social scraper browser instances
+  await cleanupSocialScrapers();
 });

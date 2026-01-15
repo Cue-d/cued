@@ -2138,7 +2138,7 @@
         "Test: from renderer, invoke 'social:linkedin:status', verify boolean response",
         "Test: invoke 'social:linkedin:scrape', verify contacts synced to Convex"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "8.10",
