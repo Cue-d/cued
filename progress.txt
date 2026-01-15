@@ -2220,3 +2220,28 @@ Notes:
   - All lint and typecheck pass
   - Exported from @prm/ui package
 ---
+
+[2026-01-15 11:52] Task 7.12 - Port CardStack component to packages/ui
+Files:
+  - packages/ui/src/components/action-queue/CardStack.tsx (new)
+  - packages/ui/src/components/action-queue/index.ts (updated)
+  - packages/ui/package.json (added motion for animations)
+Implementation:
+  - Generic CardStack<T extends ActionItem> component
+  - Stack of 3 visible cards with scale/offset visual effect
+  - AnimatePresence for smooth card transitions
+  - Keyboard navigation: Arrow keys for swipe (left/right/up)
+  - Escape returns focus to container for arrow key navigation
+  - renderCard prop for custom card content
+  - Response text state tracking per action
+  - Bottom action buttons with tooltips (Discard, Snooze, Send)
+  - Empty state with PartyPopper icon
+Decisions:
+  - Used generic type to work with any action data shape
+  - TooltipTrigger styled directly (base-ui doesn't support asChild)
+  - Simple swipe animation (visual feedback) instead of full gesture support
+  - SwipeableCard with full gestures deferred to task 7.13
+Notes:
+  - All lint and typecheck pass
+  - Exported from @prm/ui package
+---

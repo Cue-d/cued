@@ -1724,7 +1724,7 @@
         "Handle swipe callbacks to parent",
         "Export from packages/ui"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "7.13",

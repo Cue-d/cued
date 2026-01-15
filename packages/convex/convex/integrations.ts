@@ -228,6 +228,32 @@ export const disconnectNango = mutation({
  * Debug query to get Gmail integration status and stats.
  * Used for E2E testing verification (Task 4.14).
  */
+/**
+ * Debug: Get full integration details including connection IDs.
+ * Returns data needed to manually trigger pulls.
+ */
+export const debugIntegrationDetails = query({
+  args: {},
+  handler: async (ctx) => {
+    const integrations = await ctx.db.query("integrations").collect();
+    const users = await ctx.db.query("users").collect();
+
+    const userMap = new Map(users.map((u) => [u._id, u]));
+
+    return integrations.map((i) => ({
+      _id: i._id,
+      platform: i.platform,
+      userId: i.userId,
+      workosUserId: userMap.get(i.userId)?.workosUserId ?? "unknown",
+      nangoConnectionId: i.nangoConnectionId ?? null,
+      isConnected: i.syncState.isConnected,
+      lastSyncAt: i.syncState.lastSyncAt
+        ? new Date(i.syncState.lastSyncAt).toISOString()
+        : null,
+    }));
+  },
+});
+
 export const debugGmailStats = query({
   args: {},
   handler: async (ctx) => {
