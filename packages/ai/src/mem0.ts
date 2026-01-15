@@ -51,16 +51,22 @@ export async function addContactMemories(
   const customInstructions = buildMemoryInstructions(contactName);
 
   // Cast needed because type def says LanguageModelV2Prompt but implementation accepts string
+  // async_mode: false required to get synchronous results with event types (ADD/UPDATE/DELETE)
+  // See: https://docs.mem0.ai/platform/features/async-mode-default-change
   const result = await addMemories(
     conversationText as unknown as Parameters<typeof addMemories>[0],
     {
       user_id: userId,
       metadata: { contact_id: contactId },
       custom_instructions: customInstructions,
+      async_mode: false,
     } as Mem0ConfigSettings
   );
 
-  const results = result?.results || [];
+  // Response format: array directly when async_mode: false
+  // Each item: {id, data: {memory, old_memory?}, event: "ADD"|"UPDATE"|"DELETE"|"NOOP"}
+  const results = Array.isArray(result) ? result : (result?.results || []);
+
   return {
     memoriesAdded: results.filter(
       (r: { event?: string }) => r.event === "ADD"
