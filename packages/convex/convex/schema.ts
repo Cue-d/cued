@@ -29,7 +29,8 @@ export const actionTypeValidator = v.union(
   v.literal("follow_up"),
   v.literal("send_message"),
   v.literal("eod_contact"),
-  v.literal("resolve_contact")
+  v.literal("resolve_contact"),
+  v.literal("new_connection")
 );
 
 export const mergeSuggestionStatusValidator = v.union(

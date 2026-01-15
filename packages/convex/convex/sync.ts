@@ -1849,18 +1849,27 @@ async function syncSocialContactsInternal(
     totalContacts: contacts.length,
     newContacts: 0,
     updatedContacts: 0,
+    actionsCreated: 0,
     errors: [] as string[],
   };
 
   const handleType = platform === "linkedin" ? "linkedin_url" : "twitter_handle";
-  const newContactIds: Id<"contacts">[] = [];
+  const newContactsInfo: Array<{
+    contactId: Id<"contacts">;
+    headline: string | null;
+    profileUrl: string;
+  }> = [];
 
   for (const contact of contacts) {
     try {
       const upsertResult = await upsertSocialContact(ctx, userId, platform, handleType, contact);
       if (upsertResult.isNew) {
         result.newContacts++;
-        newContactIds.push(upsertResult.contactId);
+        newContactsInfo.push({
+          contactId: upsertResult.contactId,
+          headline: contact.headline,
+          profileUrl: contact.profileUrl,
+        });
       } else {
         result.updatedContacts++;
       }
@@ -1871,11 +1880,41 @@ async function syncSocialContactsInternal(
 
   // Task 8.6: Schedule merge candidate search for each new contact
   // This will auto-merge high confidence matches and create suggestions for medium confidence
-  for (const contactId of newContactIds) {
+  for (const info of newContactsInfo) {
     await ctx.scheduler.runAfter(0, internal.contactResolution.findMergeCandidatesForContact, {
       userId,
-      contactId,
+      contactId: info.contactId,
     });
+  }
+
+  // Task 8.7: Create new_connection actions for enrichment (limit 20 per sync)
+  const MAX_NEW_CONNECTION_ACTIONS = 20;
+  const actionsToCreate = newContactsInfo.slice(0, MAX_NEW_CONNECTION_ACTIONS);
+  const now = Date.now();
+
+  for (const info of actionsToCreate) {
+    await ctx.db.insert("actions", {
+      userId,
+      type: "new_connection",
+      status: "pending",
+      priority: 40, // Medium-low priority for enrichment prompts
+      contactId: info.contactId,
+      platform,
+      llmReason: info.headline ?? undefined, // Store headline in llmReason field
+      reason: info.profileUrl, // Store profileUrl in reason field
+      createdAt: now,
+    });
+    result.actionsCreated++;
+  }
+
+  // Increment pending action count for user
+  if (result.actionsCreated > 0) {
+    const user = await ctx.db.get(userId);
+    if (user) {
+      await ctx.db.patch(userId, {
+        pendingActionCount: (user.pendingActionCount ?? 0) + result.actionsCreated,
+      });
+    }
   }
 
   // Update integration sync state

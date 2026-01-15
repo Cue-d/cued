@@ -2753,3 +2753,26 @@ Notes:
   - Typecheck passes
   - Ready for Task 8.7 (new_connection actions) or Task 8.8 (Social Settings UI)
 ---
+
+[2026-01-15] Task 8.7 - Create 'new_connection' action type
+Files:
+  - packages/convex/convex/schema.ts (added new_connection to actionTypeValidator)
+  - packages/convex/convex/sync.ts (create new_connection actions in syncSocialContactsInternal)
+  - packages/convex/convex/actions.ts (swipeAction handler for new_connection)
+Implementation:
+  - Added 'new_connection' to actionTypeValidator enum
+  - After social sync, create actions for new contacts (limit 20 per sync)
+  - Action stores contactId, platform, headline (in llmReason), profileUrl (in reason)
+  - Swipe right: save responseText as notes on contact, mark completed
+  - Swipe left: set contact importance = -1 (not important), mark discarded
+  - Swipe up: snooze (generic handler already works)
+  - Increments user's pendingActionCount when creating actions
+Decisions:
+  - Priority 40 for new_connection (medium-low, enrichment is optional)
+  - Reuse llmReason/reason fields instead of adding new schema fields
+  - Max 20 actions per sync to avoid overwhelming user
+Notes:
+  - Typecheck passes
+  - UI component for ContactCard needs to handle new_connection type (Task 8.8 or existing)
+  - Ready for Task 8.8 (Social Settings UI) or Task 8.9 (IPC handlers)
+---

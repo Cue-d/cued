@@ -2095,7 +2095,7 @@
         "Test: sync 5 new LinkedIn contacts, verify 5 new_connection actions created",
         "Verify actions appear in Actions page with ContactCard UI"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "8.8",

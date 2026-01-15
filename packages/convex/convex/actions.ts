@@ -556,6 +556,13 @@ export const swipeAction = mutation({
           });
         }
 
+        // Task 8.7: Mark new_connection contact as "not important" (-1)
+        if (action.type === "new_connection" && action.contactId) {
+          await ctx.db.patch(action.contactId, {
+            importance: -1,
+          });
+        }
+
         // Discard action
         await ctx.db.patch(args.actionId, {
           status: "discarded",
@@ -629,6 +636,34 @@ export const swipeAction = mutation({
             status: "completed",
             merged: true,
             primaryContactId: action.contactId,
+          };
+        }
+
+        // Task 8.7: Handle new_connection - save notes to contact
+        if (action.type === "new_connection" && action.contactId) {
+          // Save responseText as notes on the contact
+          if (args.responseText) {
+            await ctx.db.patch(action.contactId, {
+              notes: args.responseText,
+            });
+          }
+
+          await ctx.db.patch(args.actionId, {
+            status: "completed",
+            completedAt: now,
+            draftResponse: args.responseText,
+          });
+
+          // Decrement counter if was pending
+          if (wasPending) {
+            await adjustPendingActionCount(ctx, user._id, -1);
+          }
+
+          return {
+            success: true,
+            status: "completed",
+            contactId: action.contactId,
+            notesSaved: !!args.responseText,
           };
         }
 
