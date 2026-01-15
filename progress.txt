@@ -2687,3 +2687,24 @@ Notes:
   - Selectors may need updates if LinkedIn changes DOM structure
   - Ready for Twitter scraper (8.3) or IPC integration (8.9)
 ---
+
+[2026-01-15] Task 8.3 - Create X (Twitter) scraper module
+Files:
+  - apps/electron/src/main/sync/twitter.ts (new - Twitter/X follower scraper)
+Implementation:
+  - TwitterScraper class extends SocialScraper base class
+  - checkLoginStatus() navigates to x.com/home, checks for timeline
+  - loginTwitter() opens visible browser for manual auth (5 min timeout)
+  - scrapeFollowers(username) / scrapeFollowing(username) with scroll-and-load
+  - getMutuals(username) computes intersection of followers and following
+  - Parses user cards: displayName, handle, bio, profileUrl
+  - O(1) deduplication using Set for handle tracking
+Decisions:
+  - X/Twitter API requires auth, so scraping is practical alternative
+  - getMutuals runs both scrapes sequentially (followers first, then following)
+  - Uses data-testid selectors which are more stable than class names
+Notes:
+  - Typecheck passes
+  - Selectors may need updates if X changes DOM structure
+  - Ready for API endpoint (8.4) or IPC integration (8.9)
+---
