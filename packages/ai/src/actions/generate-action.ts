@@ -12,26 +12,26 @@ export const ActionSuggestionSchema = z.object({
     .describe("Whether an action should be created for this conversation"),
   type: z
     .enum(ACTION_TYPES)
-    .optional()
-    .describe("Action type: respond (reply needed), follow_up (reminder), send_message (outreach)"),
+    .nullable()
+    .describe("Action type: respond (reply needed), follow_up (reminder), send_message (outreach). Null if no action needed."),
   priority: z
     .number()
     .min(0)
     .max(100)
-    .optional()
-    .describe("Priority score 0-100 (higher = more urgent)"),
+    .nullable()
+    .describe("Priority score 0-100 (higher = more urgent). Null if no action needed."),
   reason: z
     .string()
-    .optional()
-    .describe("Brief explanation of why this action is needed"),
+    .nullable()
+    .describe("Brief explanation of why this action is needed or why not"),
   suggestedResponse: z
     .string()
-    .optional()
-    .describe("Draft response text for the user to review and edit"),
+    .nullable()
+    .describe("Draft response text for the user to review and edit. Null if no action needed."),
   remindAt: z
     .string()
-    .optional()
-    .describe("ISO timestamp for when to remind (for follow_up type)"),
+    .nullable()
+    .describe("ISO timestamp for when to remind (for follow_up type). Null if not applicable."),
 });
 
 export type ActionSuggestion = z.infer<typeof ActionSuggestionSchema>;
@@ -157,7 +157,11 @@ export async function generateAction(
   if (input.messages.length === 0) {
     return {
       shouldCreateAction: false,
+      type: null,
+      priority: null,
       reason: "Empty conversation - no context to analyze",
+      suggestedResponse: null,
+      remindAt: null,
     };
   }
 
@@ -166,7 +170,11 @@ export async function generateAction(
   if (lastMessage?.isFromMe) {
     return {
       shouldCreateAction: false,
+      type: null,
+      priority: null,
       reason: "User sent the last message - waiting for reply",
+      suggestedResponse: null,
+      remindAt: null,
     };
   }
 
@@ -212,6 +220,10 @@ export async function generateActionWithRetry(
   console.error("generateAction failed after retries:", lastError?.message);
   return {
     shouldCreateAction: false,
+    type: null,
+    priority: null,
     reason: `LLM analysis failed: ${lastError?.message ?? "unknown error"}`,
+    suggestedResponse: null,
+    remindAt: null,
   };
 }
