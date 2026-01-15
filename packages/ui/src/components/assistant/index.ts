@@ -7,11 +7,11 @@ export { ToolArtifact } from "./tool-artifact"
 export { MultimodalInput, type Attachment } from "./multimodal-input"
 export { PreviewAttachment } from "./preview-attachment"
 export {
-  PromptInput,
-  PromptInputTextarea,
-  PromptInputToolbar,
-  PromptInputTools,
-  PromptInputSubmit,
+  PromptInput as SimplePromptInput,
+  PromptInputTextarea as SimplePromptInputTextarea,
+  PromptInputToolbar as SimplePromptInputToolbar,
+  PromptInputTools as SimplePromptInputTools,
+  PromptInputSubmit as SimplePromptInputSubmit,
 } from "./prompt-input"
 export {
   ArrowUpIcon,

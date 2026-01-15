@@ -1,64 +1,64 @@
 export interface AssistantMessage {
-  id: string
-  role: "user" | "assistant"
-  content: string
-  createdAt?: Date
+  id: string;
+  role: "user" | "assistant";
+  content: string;
+  createdAt?: Date;
 }
 
 export interface ToolInvocation {
-  toolCallId: string
-  toolName: string
-  args: Record<string, unknown>
-  state: "partial-call" | "call" | "result"
-  result?: unknown
+  toolCallId: string;
+  toolName: string;
+  args: Record<string, unknown>;
+  state: "partial-call" | "call" | "result";
+  result?: unknown;
 }
 
 export interface MessageWithToolInvocations extends AssistantMessage {
-  toolInvocations?: ToolInvocation[]
+  toolInvocations?: ToolInvocation[];
 }
 
 export interface SearchResult {
-  _id: string
-  content: string
-  sentAt: number
-  conversationId: string
-  platform: string
-  isFromMe: boolean
-  senderName?: string
+  _id: string;
+  content: string;
+  sentAt: number;
+  conversationId: string;
+  platform: string;
+  isFromMe: boolean;
+  senderName?: string;
 }
 
 export interface ContactResult {
-  _id: string
-  displayName: string
-  company?: string
+  _id: string;
+  displayName: string;
+  company?: string;
   handles: Array<{
-    handleType: string
-    handle: string
-    platform: string
-  }>
+    handleType: string;
+    handle: string;
+    platform: string;
+  }>;
 }
 
 export interface ConversationResult {
-  _id: string
-  platform: string
-  conversationType: string
-  participantNames: string[]
-  lastMessageText?: string
-  lastMessageAt?: number
+  _id: string;
+  platform: string;
+  conversationType: string;
+  participantNames: string[];
+  lastMessageText?: string;
+  lastMessageAt?: number;
 }
 
 export interface ActionResult {
-  actionId: string
-  type: string
-  priority: number
-  reason?: string
-  draftMessage?: string
+  actionId: string;
+  type: string;
+  priority: number;
+  reason?: string;
+  draftMessage?: string;
 }
 
 export interface MemoryResult {
-  id: string
-  memory: string
-  created_at?: string
+  id: string;
+  memory: string;
+  created_at?: string;
 }
 
 export type ToolArtifact =
@@ -67,10 +67,9 @@ export type ToolArtifact =
   | { type: "contacts"; data: ContactResult[] }
   | { type: "conversations"; data: ConversationResult[] }
   | { type: "action_created"; data: ActionResult }
-  | { type: "memories"; data: MemoryResult[] }
+  | { type: "memories"; data: MemoryResult[] };
 
 export interface SuggestedPrompt {
-  icon: React.ReactNode
-  label: string
-  prompt: string
+  title: string;
+  prompt: string;
 }
