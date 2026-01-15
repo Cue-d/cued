@@ -60,9 +60,7 @@ const sync = createSync({
         'users:read'
     ],
 
-    models: {
-        SlackSyncMessage: SlackSyncMessage
-    },
+    models: { SlackSyncMessage },
 
     metadata: OptionalBackfillSetting,
 
@@ -109,17 +107,17 @@ async function fetchConversations(
     types: 'im' | 'public_channel' | 'private_channel' | 'mpim'
 ): Promise<SlackConversation[]> {
     const conversations: SlackConversation[] = [];
-    let cursor: string | undefined = '';
+    let cursor: string | undefined;
 
     do {
-        const response: { data: ConversationsListResponse } = await nango.proxy({
+        const response = await nango.proxy<ConversationsListResponse>({
             method: 'get',
             endpoint: '/conversations.list',
             params: {
                 types,
                 limit: '200',
                 exclude_archived: 'true',
-                ...(cursor ? { cursor } : {})
+                ...(cursor && { cursor })
             },
             retries: 5
         });
@@ -144,28 +142,27 @@ async function fetchConversationHistory(
     oldest: string
 ): Promise<SlackMessage[]> {
     const messages: SlackMessage[] = [];
-    let cursor: string | undefined = '';
+    let cursor: string | undefined;
 
     do {
-        const response: { data: ConversationsHistoryResponse } = await nango.proxy({
+        const response = await nango.proxy<ConversationsHistoryResponse>({
             method: 'get',
             endpoint: '/conversations.history',
             params: {
                 channel: channelId,
                 oldest,
                 limit: '200',
-                ...(cursor ? { cursor } : {})
+                ...(cursor && { cursor })
             },
             retries: 5
         });
 
         if (!response.data.ok) {
-            // Channel might be inaccessible, skip instead of failing
             await nango.log(`Warning: Could not fetch history for ${channelId}`);
             break;
         }
 
-        // Filter out bot messages and subtypes we don't want
+        // Filter out bot messages and subtypes
         const userMessages = response.data.messages.filter(
             (msg) => msg.type === 'message' && !msg.subtype
         );
@@ -192,7 +189,7 @@ function mapMessage(msg: SlackMessage, conversation: SlackConversation): SlackSy
         text: msg.text,
         ts: msg.ts,
         threadTs: msg.thread_ts,
-        isThreadParent: Boolean(msg.reply_count && msg.reply_count > 0),
+        isThreadParent: (msg.reply_count ?? 0) > 0,
         reactions: msg.reactions?.map((r) => ({
             name: r.name,
             count: r.count,

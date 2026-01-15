@@ -5,7 +5,7 @@ import { api } from "@prm/convex";
 const convex = new ConvexHttpClient(process.env.NEXT_PUBLIC_CONVEX_URL!);
 
 interface NangoWebhookPayload {
-  type: string; // "auth" | "sync"
+  type: "auth" | "sync";
   operation: string;
   success?: boolean;
   connectionId?: string;
@@ -14,11 +14,6 @@ interface NangoWebhookPayload {
     endUserId: string;
     endUserEmail?: string;
   };
-  // Sync-specific fields
-  model?: string;
-  queryTimeStamp?: string;
-  modifiedAfter?: string;
-  syncName?: string;
 }
 
 /**
@@ -70,7 +65,7 @@ async function handleAuthWebhook(payload: NangoWebhookPayload): Promise<NextResp
       workosUserId: endUser.endUserId,
       nangoIntegrationId: providerConfigKey,
       nangoConnectionId: connectionId,
-      email: endUser.endUserEmail,
+      email: endUser.endUserEmail ?? undefined, // Convert null to undefined
     });
     console.log("Nango connection created:", result);
     return NextResponse.json({ received: true, processed: true, result });

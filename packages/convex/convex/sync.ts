@@ -801,10 +801,10 @@ export const updateContactsSyncState = mutation({
 });
 
 /**
- * Find user by WorkOS ID (for queries).
+ * Find user by WorkOS ID.
  */
 function findUserByWorkosId(
-  ctx: QueryCtx,
+  ctx: QueryCtx | MutationCtx,
   workosUserId: string
 ): Promise<Doc<"users"> | null> {
   return ctx.db
@@ -897,7 +897,7 @@ export const syncSlackMessages = mutation({
   },
   handler: async (ctx, args) => {
     // Find user by WorkOS ID (webhook doesn't have auth context)
-    const user = await findUserByWorkosIdMutation(ctx, args.workosUserId);
+    const user = await findUserByWorkosId(ctx, args.workosUserId);
     if (!user) {
       throw new Error(`User not found for WorkOS ID: ${args.workosUserId}`);
     }
@@ -1145,15 +1145,3 @@ async function batchFetchSlackMessages(
   return results;
 }
 
-/**
- * Find user by WorkOS ID (for mutations without auth context).
- */
-function findUserByWorkosIdMutation(
-  ctx: MutationCtx,
-  workosUserId: string
-): Promise<Doc<"users"> | null> {
-  return ctx.db
-    .query("users")
-    .withIndex("by_workos_id", (q) => q.eq("workosUserId", workosUserId))
-    .unique();
-}

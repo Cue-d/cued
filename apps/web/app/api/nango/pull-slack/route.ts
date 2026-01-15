@@ -46,15 +46,14 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       );
     }
 
-    // Fetch records from Nango using listRecords
-    // Model name must match what's defined in the sync (SlackSyncMessage)
-    const records = await nango.listRecords<SlackSyncMessage>({
+    // Fetch records from Nango (model name must match sync definition)
+    const { records } = await nango.listRecords<SlackSyncMessage>({
       providerConfigKey: "slack",
       connectionId,
       model: "SlackSyncMessage",
     });
 
-    if (!records.records || records.records.length === 0) {
+    if (!records || records.length === 0) {
       return NextResponse.json({
         success: true,
         message: "No new records to sync",
@@ -62,25 +61,10 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       });
     }
 
-    // Map Nango records to our format (they should already match)
-    const messages = records.records.map((record: SlackSyncMessage) => ({
-      id: record.id,
-      channelId: record.channelId,
-      channelType: record.channelType,
-      userId: record.userId,
-      text: record.text,
-      ts: record.ts,
-      threadTs: record.threadTs,
-      isThreadParent: record.isThreadParent,
-      reactions: record.reactions,
-      isBot: record.isBot,
-      sentAt: record.sentAt,
-    }));
-
-    // Call Convex mutation to sync messages
+    // Sync to Convex
     const result = await convex.mutation(api.sync.syncSlackMessages, {
       workosUserId,
-      messages,
+      messages: records,
     });
 
     console.log("Slack sync result:", result);
@@ -88,7 +72,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     return NextResponse.json({
       success: true,
       result,
-      recordsProcessed: messages.length,
+      recordsProcessed: records.length,
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Pull failed";
