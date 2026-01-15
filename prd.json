@@ -1537,7 +1537,7 @@
         "Export FilterResult type with should_skip, reason, confidence",
         "Add unit tests for each filter tier"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "7.2",

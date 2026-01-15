@@ -2029,3 +2029,31 @@ Notes:
   - 9 unit tests with mocked OpenAI responses (all passing)
   - All lint and typecheck pass
 ---
+
+[2026-01-15 10:55] Task 7.1 - Port message filter heuristics to TypeScript
+Files:
+  - packages/ai/src/filters/message-filter.ts (new)
+  - packages/ai/src/filters/index.ts (new)
+  - packages/ai/src/filters/message-filter.test.ts (new)
+Implementation:
+  - Ported from backend/services/actions/message_filter.py
+  - Tier 1: Short code detection (5-6 digit senders, 0.99 confidence)
+  - Tier 2: Universal filters for all senders
+    - OTP/verification codes (0.95 confidence)
+    - Unsubscribe/opt-out messages (0.98 confidence)
+    - Carrier notifications (0.95 confidence)
+    - Delivery notifications with links/tracking (0.90 confidence)
+  - Tier 3: Non-contact only filters
+    - Account security phishing (0.95 confidence)
+    - Bank transaction alerts (0.90 confidence)
+    - Phishing attempts (0.90 confidence)
+  - Tier 4: Low confidence filters
+    - Urgency spam (0.80 confidence)
+    - Promotional messages (0.75 confidence)
+  - shouldSkipLlmAnalysis(): Main entry point with tiered evaluation
+  - FilterResult type: { shouldSkip, reason, confidence }
+Notes:
+  - 33 unit tests covering all filter tiers
+  - Contacts bypass Tier 3-4 filters (trusted)
+  - All lint and typecheck pass
+---
