@@ -1855,3 +1855,37 @@ Notes:
   - All lint and typecheck pass for entire monorepo
   - Ready for task 4.11: Auto-create Mem0 memories from Gmail emails
 ---
+
+[2026-01-15 20:15] Tasks 5.6, 5.7, 5.8 - Slack send implementation (retroactive documentation)
+Note: These tasks were implemented earlier but not documented. Marking as complete after verification.
+
+Task 5.6 - Create Nango action for sending Slack messages:
+Files: nango-integrations/slack/actions/send-message.ts
+Implementation:
+  - SlackMessageInput model with channel, text, thread_ts (optional)
+  - Uses chat.postMessage API via nango.proxy()
+  - Handles thread replies via thread_ts parameter
+  - Returns ok, channel, ts, message
+  - Exported in nango-integrations/index.ts
+
+Task 5.7 - Create sendSlackMessage in packages/integrations:
+Files: packages/integrations/src/nango/slack.ts
+Implementation:
+  - createNangoSlackClient() with NANGO_SECRET_KEY
+  - sendSlackMessage() calls nango.triggerAction('slack', 'send-message', connectionId, input)
+  - sendSlackThreadReply() convenience wrapper
+  - Returns SendSlackMessageResult with ok, channel, ts
+
+Task 5.8 - Wire Slack send to action queue completion:
+Files: apps/web/app/api/slack/send/route.ts
+Implementation:
+  - POST endpoint validates workosUserId, conversationId, text
+  - Gets Slack nangoConnectionId from Convex integrations table
+  - Fetches conversation to get platformConversationId (channel)
+  - Calls sendSlackMessage with channel, text, thread_ts
+  - Returns success, messageTs, channel
+
+Notes:
+  - All implementations verified to match task requirements
+  - Ready for task 5.9: Auto-create Mem0 memories from Slack messages
+---

@@ -1223,7 +1223,7 @@
         "Return sent message ts and channel",
         "Deploy action with: npx nango deploy"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "5.7",
@@ -1240,7 +1240,7 @@
         "Return sent message ts",
         "Add error handling for connection not found"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "5.8",
@@ -1256,7 +1256,7 @@
         "Update action status to completed on success",
         "Handle errors and show failure state"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "5.9",
