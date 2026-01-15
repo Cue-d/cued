@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useRef } from "react";
-import { Search, SquarePen } from "lucide-react";
+import { Search } from "lucide-react";
 import { cn } from "../../lib/utils";
 import { InboxConversationItem } from "./conversation-item";
 import type { InboxConversation } from "./types";
@@ -48,23 +48,10 @@ export function InboxConversationList({
   return (
     <div
       className={cn(
-        "w-80 min-w-80 shrink-0 h-full bg-sidebar flex flex-col border-r border-sidebar-border",
+        "w-80 min-w-80 shrink-0 h-full min-h-0 bg-sidebar flex flex-col border-r border-sidebar-border",
         className
       )}
     >
-      {/* Header */}
-      <div className="h-14 flex items-center justify-between px-5 border-b border-sidebar-border">
-        <h2 className="text-lg font-semibold tracking-tight text-foreground">
-          Inbox
-        </h2>
-        <button
-          type="button"
-          className="p-2 hover:bg-sidebar-accent rounded-xl transition-all duration-200 hover:scale-105 active:scale-95"
-        >
-          <SquarePen className="w-[18px] h-[18px] text-primary" />
-        </button>
-      </div>
-
       {/* Search */}
       <div className="px-4 py-3">
         <div className="relative group">
@@ -80,7 +67,7 @@ export function InboxConversationList({
       {/* Conversation list */}
       <div
         onScroll={handleScroll}
-        className="flex-1 overflow-y-auto px-2.5 pb-3"
+        className="flex-1 min-h-0 overflow-y-auto px-2.5 pb-3"
       >
         {conversations.length === 0 && !loading ? (
           <div className="flex flex-col items-center justify-center h-40 text-muted-foreground text-sm gap-2">

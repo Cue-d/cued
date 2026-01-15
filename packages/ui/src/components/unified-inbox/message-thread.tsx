@@ -120,7 +120,7 @@ export function InboxMessageThread({
     conversation.platformConversationId
 
   return (
-    <div className={cn("flex flex-col h-full bg-background", className)}>
+    <div className={cn("flex flex-col h-full min-h-0 bg-background", className)}>
       {/* Header */}
       <div className="h-16 flex items-center justify-between px-5 border-b border-border/50 shrink-0 bg-background/80 backdrop-blur-sm">
         <div className="flex items-center gap-3.5">
@@ -146,7 +146,7 @@ export function InboxMessageThread({
       {/* Messages */}
       <div
         ref={scrollRef}
-        className="flex-1 overflow-y-auto p-5"
+        className="flex-1 min-h-0 overflow-y-auto p-5"
       >
         {/* Load more button */}
         {hasMore && (

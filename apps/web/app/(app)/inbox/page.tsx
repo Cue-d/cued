@@ -33,7 +33,7 @@ export default function InboxPage() {
   const messagesLoading = selectedId !== null && messagesResult === undefined;
 
   return (
-    <div className="flex h-full">
+    <div className="flex h-full min-h-0 overflow-hidden">
       <InboxConversationList
         conversations={conversations}
         selectedId={selectedId}
@@ -42,7 +42,7 @@ export default function InboxPage() {
         hasMore={!!inboxResult?.nextCursor}
       />
 
-      <div className="flex-1 min-w-0">
+      <div className="flex-1 min-w-0 min-h-0 flex flex-col">
         {selectedConversation ? (
           <InboxMessageThread
             conversation={selectedConversation}
