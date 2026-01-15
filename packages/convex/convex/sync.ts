@@ -1034,16 +1034,12 @@ async function syncGmailMessagesInternal(
         result.conversationsCount++;
       }
 
-      // Insert new messages
+      // Insert new messages and collect participant contacts
       let latestMessage: { text: string; timestamp: number } | null = null;
+      const threadParticipantIds = new Set<Id<"contacts">>();
 
       for (const email of threadEmails) {
-        // Skip if already exists
-        if (existingMessageSet.has(email.id)) {
-          continue;
-        }
-
-        // Resolve sender email to contact
+        // Resolve sender email to contact (always, for participant tracking)
         const senderParsed = parseEmailAddress(email.sender);
         const senderContactId = await getOrCreateEmailContact(
           ctx,
@@ -1051,6 +1047,14 @@ async function syncGmailMessagesInternal(
           senderParsed.email,
           senderParsed.name
         );
+
+        // Track participant for conversation
+        threadParticipantIds.add(senderContactId);
+
+        // Skip message insert if already exists
+        if (existingMessageSet.has(email.id)) {
+          continue;
+        }
 
         const sentAtMs = new Date(email.date).getTime();
 
@@ -1078,12 +1082,30 @@ async function syncGmailMessagesInternal(
         }
       }
 
-      // Update conversation lastMessage
+      // Update conversation with participants and lastMessage
+      const updates: {
+        lastMessageText?: string;
+        lastMessageAt?: number;
+        participantContactIds?: Id<"contacts">[];
+      } = {};
+
       if (latestMessage) {
-        await ctx.db.patch(conversationId, {
-          lastMessageText: latestMessage.text,
-          lastMessageAt: latestMessage.timestamp,
-        });
+        updates.lastMessageText = latestMessage.text;
+        updates.lastMessageAt = latestMessage.timestamp;
+      }
+
+      if (threadParticipantIds.size > 0) {
+        // Merge with existing participants
+        const existingConv = await ctx.db.get(conversationId);
+        const existingIds = new Set(existingConv?.participantContactIds ?? []);
+        for (const id of threadParticipantIds) {
+          existingIds.add(id);
+        }
+        updates.participantContactIds = Array.from(existingIds);
+      }
+
+      if (Object.keys(updates).length > 0) {
+        await ctx.db.patch(conversationId, updates);
       }
     } catch (e) {
       result.errors.push(`Failed to sync thread ${threadId}: ${e}`);
