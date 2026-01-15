@@ -63,10 +63,17 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       });
     }
 
+    // Strip Nango metadata before sending to Convex
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const cleanedRecords = records.map((record: any) => {
+      const { _nango_metadata, ...message } = record;
+      return message as SlackSyncMessage;
+    });
+
     // Sync to Convex
     const result = await convex.mutation(api.sync.syncSlackMessages, {
       workosUserId,
-      messages: records,
+      messages: cleanedRecords,
     });
 
     console.log("Slack sync result:", result);

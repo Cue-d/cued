@@ -53,10 +53,17 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       });
     }
 
+    // Strip Nango metadata before sending to Convex
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const cleanedRecords = records.map((record: any) => {
+      const { _nango_metadata, ...contact } = record;
+      return contact as GoogleContact;
+    });
+
     // Sync to Convex
     const result = await convex.mutation(api.sync.syncGoogleContacts, {
       workosUserId,
-      contacts: records,
+      contacts: cleanedRecords,
     });
 
     console.log("Google Contacts sync complete:", {

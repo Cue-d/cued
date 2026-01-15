@@ -59,10 +59,17 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       });
     }
 
+    // Strip Nango metadata before sending to Convex
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const cleanedRecords = records.map((record: any) => {
+      const { _nango_metadata, ...email } = record;
+      return email as GmailEmail;
+    });
+
     // Sync to Convex
     const result = await convex.mutation(api.sync.syncGmailMessages, {
       workosUserId,
-      emails: records,
+      emails: cleanedRecords,
     });
 
     console.log("Gmail sync complete:", {
