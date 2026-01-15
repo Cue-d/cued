@@ -2057,3 +2057,19 @@ Notes:
   - Contacts bypass Tier 3-4 filters (trusted)
   - All lint and typecheck pass
 ---
+
+## Task 7.2 - Port priority scoring system
+Status: COMPLETE (2026-01-15)
+Commit: c7b8c7e
+Files:
+  - packages/ai/src/filters/priority.ts (116 lines)
+  - packages/ai/src/filters/priority.test.ts (152 lines)
+Implementation:
+  - calculateTimePriority(): Time-decay curve (0-2h=20, 2-24h=40-70, 24-72h=80, 72-168h=80-40, 168h+=30)
+  - calculateContactBoost(): +10 saved contact, +10 has company, +5 has notes (max +25)
+  - calculateGroupPenalty(): -15 for group chats
+  - calculatePriority(): Combines all factors, clamps to 10-100
+Notes:
+  - 18 unit tests covering all curve segments
+  - Exported from @prm/ai package
+---

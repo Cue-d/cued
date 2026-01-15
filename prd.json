@@ -1554,7 +1554,7 @@
         "Export calculatePriority(hoursSince, contactInfo, isGroup) returning 0-100",
         "Add unit tests for priority edge cases"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "7.3",
