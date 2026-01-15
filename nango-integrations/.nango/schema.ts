@@ -20,3 +20,55 @@ export interface GmailEmail {
   attachmentId: string;})[];
   threadId: string;
 };
+
+export interface ActionInput_google_mail_sendemail {
+  to: string;
+  subject: string;
+  body: string;
+  threadId?: string | undefined;
+  inReplyTo?: string | undefined;
+  references?: string | undefined;
+};
+
+export interface ActionOutput_google_mail_sendemail {
+  id: string;
+  threadId: string;
+  labelIds?: string[] | undefined;
+};
+
+export interface SyncMetadata_slack_messages {
+  backfillPeriodMs?: number | undefined;
+};
+
+export interface SlackSyncMessage {
+  id: string;
+  channelId: string;
+  channelType: 'im' | 'channel' | 'group' | 'mpim';
+  channelName?: string | undefined;
+  userId?: string | undefined;
+  userName?: string | undefined;
+  text: string;
+  ts: string;
+  threadTs?: string | undefined;
+  isThreadParent: boolean;
+  reactions?: ({  name: string;
+  count: number;
+  users: string[];})[] | undefined;
+  isBot: boolean;
+  sentAt: string;
+};
+
+export interface ActionInput_slack_sendmessage {
+  channel: string;
+  text: string;
+  thread_ts?: string | undefined;
+};
+
+export interface ActionOutput_slack_sendmessage {
+  ok: boolean;
+  channel: string;
+  ts: string;
+  message?: {  text: string;
+  user?: string | undefined;
+  ts: string;};
+};

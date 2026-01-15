@@ -153,9 +153,45 @@ ngrok http 3000
 # Set as webhook URL in Nango Dashboard
 ```
 
+## Send Email Action (Task 4.8)
+
+The Gmail integration includes a `send-email` action for sending emails via the action queue:
+
+**Endpoint**: `POST /google-mail/emails`
+
+**Input**:
+- `to` (required): Recipient email address
+- `subject` (required): Email subject
+- `body` (required): Email body (plain text)
+- `threadId` (optional): Thread ID for reply-to-thread
+- `inReplyTo` (optional): Message-ID header for proper threading
+- `references` (optional): References header for thread chain
+
+**Output**:
+- `id`: Gmail message ID
+- `threadId`: Thread ID (same as input for replies, new for fresh emails)
+- `labelIds`: Labels applied (e.g., SENT)
+
+### Deploying the Action
+
+1. Compile the integration:
+   ```bash
+   cd nango-integrations && npx nango compile
+   ```
+
+2. Deploy to Nango:
+   ```bash
+   npx nango deploy dev
+   ```
+
+3. Verify in Nango Dashboard → Integrations → google-mail → Actions
+
 ## Next Steps
 
 After completing this setup:
 
 - Task 4.4: Create /settings/integrations page with Nango Connect UI (done)
 - Task 4.5/4.6: Webhook handler receives connection events and updates Convex (done)
+- Task 4.8: Create Nango action for sending Gmail messages (done)
+- Task 4.9: Create sendGmailMessage in packages/integrations using Nango
+- Task 4.10: Wire Gmail send to action queue completion
