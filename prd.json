@@ -928,7 +928,7 @@
         "Configure sync to run every 5 minutes",
         "Deploy sync with: npx nango deploy"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "4.4",

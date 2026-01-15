@@ -1570,3 +1570,32 @@ Notes:
   - All lint and typecheck pass for entire monorepo
   - Ready for task 4.3: Create Nango Gmail sync function for emails
 ---
+
+[2026-01-15 13:55] Task 4.3 - Create Nango Gmail sync function for emails
+Files:
+  - nango-integrations/ (new directory)
+  - nango-integrations/google-mail/syncs/emails.ts
+  - nango-integrations/google-mail/types.ts
+  - nango-integrations/index.ts
+  - .gitignore (updated)
+  - apps/web/NANGO_SETUP.md (updated with deploy steps)
+Decisions:
+  - Initialized nango-integrations directory at project root (not inside packages/)
+  - Created google-mail sync based on NangoHQ/integration-templates pattern
+  - GmailEmail model: id, sender, recipients, date, subject, body, attachments, threadId
+  - Attachment model: filename, mimeType, size, attachmentId
+  - Sync config: incremental, 5-minute frequency, 1-year default backfill
+  - Uses nango.proxy() for Gmail API calls, nango.batchSave() for persistence
+  - Processes MIME parts recursively to extract plain text/HTML body and attachments
+Why:
+  - Nango CLI expects integrations in separate directory with own package.json
+  - Incremental sync with timestamp-based backfill matches Gmail API best practices
+  - 5-minute frequency balances freshness with rate limits
+  - Recursive MIME processing handles multipart emails correctly
+Notes:
+  - nango compile passes successfully (4 files built)
+  - USER ACTION: Run `nango deploy dev` after adding NANGO_SECRET_KEY_DEV to .env
+  - Fixed pre-existing lint error in prompt-input.tsx (refs during render)
+  - Pre-existing typecheck errors in ai-elements/ not related to this task
+  - Ready for task 4.4: Create /settings/integrations page with Nango Connect UI
+---
