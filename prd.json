@@ -1760,7 +1760,7 @@
         "Format timestamps: 'Just now', '1h ago', '3d ago'",
         "Track response text in parent state"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "7.15",

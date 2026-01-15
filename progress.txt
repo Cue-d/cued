@@ -2267,3 +2267,27 @@ Notes:
   - All lint and typecheck pass
   - Exported from @prm/ui package
 ---
+
+[2026-01-15 12:25] Task 7.14 - Port MessageResponseCard with message history and response textarea
+Files:
+  - packages/ui/src/components/action-queue/message-response-card.tsx (new)
+  - packages/ui/src/components/action-queue/index.ts (updated)
+Implementation:
+  - Generic MessageResponseCard component with props-based data
+  - Message display with sender name, timestamp, delivery status
+  - Attachment preview with image support (thumbnail fallback)
+  - Reaction badges positioned relative to message bubble
+  - Textarea for response with auto-focus and data-selectable
+  - Time formatting: "Just now", "Xh ago", "Xd ago"
+  - Scroll to bottom on mount, auto-scroll container
+Decisions:
+  - Used props types instead of Convex types for portability
+  - No pagination in component - data fetching at page level
+  - Simplified from original (no fetchActionMessages, API types)
+  - Used lowercase-with-dashes filename convention
+  - Used primary/muted colors instead of iMessage-specific colors
+Notes:
+  - All lint and typecheck pass
+  - Warning about <img> tag is acceptable for shared UI
+  - Exported from @prm/ui package
+---

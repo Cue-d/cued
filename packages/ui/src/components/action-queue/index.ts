@@ -10,3 +10,11 @@ export type {
 
 export { SwipeableCard } from "./swipeable-card"
 export type { SwipeableCardProps } from "./swipeable-card"
+
+export { MessageResponseCard } from "./message-response-card"
+export type {
+  MessageResponseCardProps,
+  MessageResponseCardRef,
+  DisplayMessage,
+  MessageAttachment,
+} from "./message-response-card"
