@@ -26,7 +26,9 @@ Task 4.2 requires manual configuration in the Nango dashboard and Google Cloud C
    - **User support email**: Your email
    - **Developer contact**: Your email
 5. Add **Scopes** (click "Add or Remove Scopes"):
-   - `https://mail.google.com/` - Full Gmail access (read, send, modify)
+   - `https://www.googleapis.com/auth/gmail.readonly` - Read emails
+   - `https://www.googleapis.com/auth/gmail.send` - Send emails
+   - `https://www.googleapis.com/auth/gmail.modify` - Modify email labels
 6. Save and continue through the remaining consent screen steps
 
 ## Step 3: Create OAuth Client ID
@@ -46,8 +48,10 @@ Task 4.2 requires manual configuration in the Nango dashboard and Google Cloud C
 2. Enter the credentials from Step 3:
    - **Client ID**: Your Google OAuth Client ID
    - **Client Secret**: Your Google OAuth Client Secret
-3. Verify **Scopes** are configured:
-   - https://mail.google.com/
+3. Verify **Scopes** are configured (use full URLs):
+   - `https://www.googleapis.com/auth/gmail.readonly`
+   - `https://www.googleapis.com/auth/gmail.send`
+   - `https://www.googleapis.com/auth/gmail.modify`
 4. Save the integration
 
 ## Step 5: Test the Integration
@@ -64,7 +68,7 @@ Task 4.2 requires manual configuration in the Nango dashboard and Google Cloud C
 - [ ] OAuth consent screen configured in Google Cloud Console
 - [ ] OAuth credentials created with correct redirect URI
 - [ ] Client ID and Secret added to Nango integration
-- [ ] Scopes configured: https://mail.google.com/
+- [ ] Scopes configured: gmail.readonly, gmail.send, gmail.modify (full URLs)
 - [ ] Test connection successful
 
 ## Troubleshooting
