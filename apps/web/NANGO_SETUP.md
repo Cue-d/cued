@@ -186,45 +186,29 @@ The Gmail integration includes a `send-email` action for sending emails via the 
 
 3. Verify in Nango Dashboard → Integrations → google-mail → Actions
 
-## Google Contacts Integration (Task 4.12)
+## Google Contacts Sync (Task 4.12)
 
-The Google Contacts integration uses the People API to sync contacts for cross-platform identity resolution.
+Google Contacts sync uses the same `google-mail` integration - just add the contacts scope.
 
-### Step 1: Add Google Contacts Integration in Nango
+### Step 1: Enable People API
 
-1. Log in to [Nango Dashboard](https://app.nango.dev)
-2. Navigate to **Integrations** tab
-3. Click **Configure New Integration**
-4. Search for and select **google-contacts** (or add custom integration if not listed)
-5. Note the **Callback URL** - use the same as Gmail if possible
+1. Go to [Google Cloud Console](https://console.cloud.google.com)
+2. Navigate to **APIs & Services** → **Library**
+3. Search for **People API** → Click **Enable**
 
-### Step 2: Configure OAuth Scopes
-
-If using the same Google Cloud Console project as Gmail:
+### Step 2: Add Contacts Scope
 
 1. Go to **APIs & Services** → **OAuth consent screen** → **Edit App**
-2. Add additional scope:
-   - `https://www.googleapis.com/auth/contacts.readonly` - Read contacts
+2. Add scope: `https://www.googleapis.com/auth/contacts.readonly`
 3. Save changes
 
-If creating a separate OAuth client:
-1. Follow Steps 2-3 from Gmail setup above
-2. Use only the contacts.readonly scope
+### Step 3: Update Nango Integration
 
-### Step 3: Enable People API
+1. In Nango Dashboard → **Integrations** → **google-mail**
+2. Add scope: `https://www.googleapis.com/auth/contacts.readonly`
+3. Save (existing connections may need to re-authorize)
 
-1. Go to **APIs & Services** → **Library**
-2. Search for **People API**
-3. Click **Enable**
-
-### Step 4: Configure Nango Integration
-
-1. In Nango Dashboard → **Integrations** → **google-contacts**
-2. Enter OAuth credentials (can be same as Gmail)
-3. Configure scope: `https://www.googleapis.com/auth/contacts.readonly`
-4. Save the integration
-
-### Step 5: Deploy the Sync
+### Step 4: Deploy the Sync
 
 ```bash
 cd nango-integrations

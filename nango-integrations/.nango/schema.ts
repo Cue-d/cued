@@ -21,6 +21,20 @@ export interface GmailEmail {
   threadId: string;
 };
 
+export interface SyncMetadata_google_mail_contacts {
+  syncToken?: string | undefined;
+};
+
+export interface GoogleContact {
+  id: string;
+  name: string;
+  emails: string[];
+  phones: string[];
+  company?: string | undefined;
+  title?: string | undefined;
+  isDeleted: boolean;
+};
+
 export interface ActionInput_google_mail_sendemail {
   to: string;
   subject: string;
@@ -34,20 +48,6 @@ export interface ActionOutput_google_mail_sendemail {
   id: string;
   threadId: string;
   labelIds?: string[] | undefined;
-};
-
-export interface SyncMetadata_google_contacts_contacts {
-  syncToken?: string | undefined;
-};
-
-export interface GoogleContact {
-  id: string;
-  name: string;
-  emails: string[];
-  phones: string[];
-  company?: string | undefined;
-  title?: string | undefined;
-  isDeleted: boolean;
 };
 
 export interface SyncMetadata_slack_messages {
