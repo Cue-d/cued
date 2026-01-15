@@ -575,6 +575,14 @@ export const createEODContactAction = internalMutation({
       createdAt: Date.now(),
     });
 
+    // Increment pending action count
+    const user = await ctx.db.get(args.userId);
+    if (user) {
+      await ctx.db.patch(args.userId, {
+        pendingActionCount: (user.pendingActionCount ?? 0) + 1,
+      });
+    }
+
     return actionId;
   },
 });

@@ -200,10 +200,12 @@ export const createActionFromSuggestion = internalMutation({
     snoozedUntil: v.optional(v.number()),
   },
   handler: async (ctx, args) => {
+    const isPending = !args.snoozedUntil;
+
     const actionId = await ctx.db.insert("actions", {
       userId: args.userId,
       type: args.type,
-      status: args.snoozedUntil ? "snoozed" : "pending",
+      status: isPending ? "pending" : "snoozed",
       priority: args.priority,
       conversationId: args.conversationId,
       contactId: args.contactId,
@@ -213,6 +215,17 @@ export const createActionFromSuggestion = internalMutation({
       snoozedUntil: args.snoozedUntil,
       createdAt: Date.now(),
     });
+
+    // Increment pending action count if created as pending
+    if (isPending) {
+      const user = await ctx.db.get(args.userId);
+      if (user) {
+        await ctx.db.patch(args.userId, {
+          pendingActionCount: (user.pendingActionCount ?? 0) + 1,
+        });
+      }
+    }
+
     return actionId;
   },
 });

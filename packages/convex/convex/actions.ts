@@ -515,44 +515,6 @@ export const getPendingActionCount = query({
 });
 
 /**
- * Recalculate pending action count from scratch.
- * TEMPORARY: Run once then delete.
- */
-export const recalculatePendingActionCount = mutation({
-  args: {
-    email: v.optional(v.string()),
-  },
-  handler: async (ctx, args) => {
-    let user;
-    if (args.email) {
-      // CLI mode: lookup by email
-      user = await ctx.db
-        .query("users")
-        .withIndex("by_email", (q) => q.eq("email", args.email!))
-        .unique();
-    } else {
-      // Authenticated mode
-      user = await getAuthenticatedUser(ctx);
-    }
-
-    if (!user) throw new Error("User not found");
-
-    const pendingActions = await ctx.db
-      .query("actions")
-      .withIndex("by_user_status", (q) =>
-        q.eq("userId", user._id).eq("status", "pending")
-      )
-      .collect();
-
-    await ctx.db.patch(user._id, {
-      pendingActionCount: pendingActions.length,
-    });
-
-    return { count: pendingActions.length };
-  },
-});
-
-/**
  * Swipe direction type for action gestures.
  */
 const swipeDirectionValidator = v.union(

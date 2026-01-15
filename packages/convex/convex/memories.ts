@@ -212,6 +212,51 @@ export const updateMemoryProcessingState = internalMutation({
 });
 
 /**
+ * Upsert per-contact memory stats (denormalized for efficient queries).
+ */
+export const upsertContactMemoryStats = internalMutation({
+  args: {
+    userId: v.id("users"),
+    contactId: v.id("contacts"),
+    messagesProcessed: v.number(),
+    memoriesExtracted: v.number(),
+  },
+  handler: async (ctx, args) => {
+    // Get contact for denormalized fields
+    const contact = await ctx.db.get(args.contactId);
+    if (!contact) return;
+
+    // Find existing stats
+    const existing = await ctx.db
+      .query("contactMemoryStats")
+      .withIndex("by_contact", (q) => q.eq("contactId", args.contactId))
+      .unique();
+
+    const now = Date.now();
+
+    if (existing) {
+      await ctx.db.patch(existing._id, {
+        displayName: contact.displayName,
+        company: contact.company,
+        messagesProcessed: existing.messagesProcessed + args.messagesProcessed,
+        memoriesExtracted: existing.memoriesExtracted + args.memoriesExtracted,
+        lastExtractedAt: now,
+      });
+    } else {
+      await ctx.db.insert("contactMemoryStats", {
+        userId: args.userId,
+        contactId: args.contactId,
+        displayName: contact.displayName,
+        company: contact.company,
+        messagesProcessed: args.messagesProcessed,
+        memoriesExtracted: args.memoriesExtracted,
+        lastExtractedAt: now,
+      });
+    }
+  },
+});
+
+/**
  * Get memory processing status for a user.
  * Returns stats from integration syncState (no expensive message collection).
  */
@@ -309,8 +354,17 @@ export const processMemoryBatch = action({
           group.contactName,
           group.messages
         );
-        result.memoriesExtracted +=
+        const memoriesForContact =
           memResult.memoriesAdded + memResult.memoriesUpdated;
+        result.memoriesExtracted += memoriesForContact;
+
+        // Update per-contact stats
+        await ctx.runMutation(internal.memories.upsertContactMemoryStats, {
+          userId: user._id,
+          contactId: group.contactId,
+          messagesProcessed: group.messages.length,
+          memoriesExtracted: memoriesForContact,
+        });
       } catch (e) {
         result.errors.push(
           `Failed to extract memories for ${group.contactName}: ${e}`
@@ -521,6 +575,7 @@ export const processNewMessagesForMemory = action({
 
     for (const group of messagesByContact.values()) {
       let lastError: Error | null = null;
+      let memoriesForContact = 0;
 
       for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
         try {
@@ -530,8 +585,9 @@ export const processNewMessagesForMemory = action({
             group.contactName,
             group.messages
           );
-          result.memoriesExtracted +=
+          memoriesForContact =
             memResult.memoriesAdded + memResult.memoriesUpdated;
+          result.memoriesExtracted += memoriesForContact;
           lastError = null;
           break;
         } catch (e) {
@@ -553,6 +609,14 @@ export const processNewMessagesForMemory = action({
         result.errors.push(
           `Failed to extract memories for ${group.contactName}: ${lastError.message}`
         );
+      } else {
+        // Update per-contact stats on success
+        await ctx.runMutation(internal.memories.upsertContactMemoryStats, {
+          userId: user._id,
+          contactId: group.contactId,
+          messagesProcessed: group.messages.length,
+          memoriesExtracted: memoriesForContact,
+        });
       }
     }
 
@@ -612,8 +676,7 @@ export const getUnprocessedMessageCount = query({
 
 /**
  * Get memory extraction stats grouped by contact.
- * Returns contacts with count of messages that have had memories extracted.
- * Scans recent messages (up to 20k) to stay within Convex limits.
+ * Queries denormalized contactMemoryStats table (no expensive message scans).
  */
 export const getMemoryStatsByContact = query({
   args: {},
@@ -621,58 +684,19 @@ export const getMemoryStatsByContact = query({
     const user = await getAuthenticatedUser(ctx);
     if (!user) return null;
 
-    // Limit scan to 20k messages (recent first) to stay under 32k limit
-    const messages = await ctx.db
-      .query("messages")
-      .withIndex("by_user_sent_at", (q) => q.eq("userId", user._id))
+    // Query denormalized stats table, sorted by most recent extraction
+    const stats = await ctx.db
+      .query("contactMemoryStats")
+      .withIndex("by_user_recent", (q) => q.eq("userId", user._id))
       .order("desc")
-      .take(20000);
+      .take(50);
 
-    // Group by senderContactId (only messages with memoryExtractedAt)
-    const contactStats = new Map<
-      string,
-      { count: number; lastExtractedAt: number }
-    >();
-
-    for (const msg of messages) {
-      if (!msg.memoryExtractedAt || !msg.senderContactId) continue;
-
-      const contactIdStr = msg.senderContactId as string;
-      const existing = contactStats.get(contactIdStr);
-      if (existing) {
-        existing.count++;
-        existing.lastExtractedAt = Math.max(
-          existing.lastExtractedAt,
-          msg.memoryExtractedAt
-        );
-      } else {
-        contactStats.set(contactIdStr, {
-          count: 1,
-          lastExtractedAt: msg.memoryExtractedAt,
-        });
-      }
-    }
-
-    // Fetch contact details (limit to top 50 contacts)
-    const sortedContactIds = [...contactStats.entries()]
-      .sort((a, b) => b[1].count - a[1].count)
-      .slice(0, 50)
-      .map(([id]) => id);
-
-    const contacts = await Promise.all(
-      sortedContactIds.map((id) => ctx.db.get(id as Id<"contacts">))
-    );
-
-    return contacts
-      .filter((c): c is Doc<"contacts"> => c !== null)
-      .map((contact) => ({
-        contactId: contact._id,
-        displayName: contact.displayName,
-        company: contact.company,
-        messagesProcessed: contactStats.get(contact._id as string)!.count,
-        lastExtractedAt: contactStats.get(contact._id as string)!
-          .lastExtractedAt,
-      }))
-      .sort((a, b) => b.messagesProcessed - a.messagesProcessed);
+    return stats.map((stat) => ({
+      contactId: stat.contactId,
+      displayName: stat.displayName,
+      company: stat.company,
+      messagesProcessed: stat.messagesProcessed,
+      lastExtractedAt: stat.lastExtractedAt,
+    }));
   },
 });

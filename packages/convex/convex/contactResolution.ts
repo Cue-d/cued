@@ -118,7 +118,10 @@ export const scanAllContactsForMerges = internalAction({
     userId: v.id("users"),
     maxComparisons: v.optional(v.number()),
   },
-  handler: async (ctx, args): Promise<{
+  handler: async (
+    ctx,
+    args
+  ): Promise<{
     contactsScanned: number;
     comparisonsPerformed: number;
     suggestionsCreated: number;
@@ -141,7 +144,11 @@ export const scanAllContactsForMerges = internalAction({
     let comparisons = 0;
 
     // Compare each pair of contacts (O(n²) but limited by maxComparisons)
-    for (let i = 0; i < allContacts.length && comparisons < maxComparisons; i++) {
+    for (
+      let i = 0;
+      i < allContacts.length && comparisons < maxComparisons;
+      i++
+    ) {
       for (
         let j = i + 1;
         j < allContacts.length && comparisons < maxComparisons;
@@ -210,9 +217,13 @@ export const triggerMergeScan = mutation({
     if (!user) throw new Error("Unauthorized");
 
     // Schedule the scan as a background action
-    await ctx.scheduler.runAfter(0, internal.contactResolution.scanAllContactsForMerges, {
-      userId: user._id,
-    });
+    await ctx.scheduler.runAfter(
+      0,
+      internal.contactResolution.scanAllContactsForMerges,
+      {
+        userId: user._id,
+      }
+    );
 
     return { success: true, message: "Merge scan scheduled" };
   },
@@ -384,7 +395,9 @@ export const autoMergeContacts = internalMutation({
     // 1. Move all handles from secondary to primary
     const secondaryHandles = await ctx.db
       .query("contactHandles")
-      .withIndex("by_contact", (q) => q.eq("contactId", args.secondaryContactId))
+      .withIndex("by_contact", (q) =>
+        q.eq("contactId", args.secondaryContactId)
+      )
       .collect();
 
     for (const handle of secondaryHandles) {
@@ -403,12 +416,16 @@ export const autoMergeContacts = internalMutation({
         const withoutSecondary = conv.participantContactIds.filter(
           (id) => id !== args.secondaryContactId
         );
-        const hasPrimary = conv.participantContactIds.includes(args.primaryContactId);
+        const hasPrimary = conv.participantContactIds.includes(
+          args.primaryContactId
+        );
         const updatedParticipants = hasPrimary
           ? withoutSecondary
           : [...withoutSecondary, args.primaryContactId];
 
-        await ctx.db.patch(conv._id, { participantContactIds: updatedParticipants });
+        await ctx.db.patch(conv._id, {
+          participantContactIds: updatedParticipants,
+        });
       }
     }
 
@@ -416,9 +433,7 @@ export const autoMergeContacts = internalMutation({
     const messages = await ctx.db
       .query("messages")
       .withIndex("by_user", (q) => q.eq("userId", primary.userId))
-      .filter((q) =>
-        q.eq(q.field("senderContactId"), args.secondaryContactId)
-      )
+      .filter((q) => q.eq(q.field("senderContactId"), args.secondaryContactId))
       .collect();
 
     for (const msg of messages) {
@@ -426,14 +441,18 @@ export const autoMergeContacts = internalMutation({
     }
 
     // 4. Merge contact metadata
-    const updates: { company?: string; notes?: string; importance?: number } = {};
+    const updates: { company?: string; notes?: string; importance?: number } =
+      {};
     if (!primary.company && secondary.company) {
       updates.company = secondary.company;
     }
     if (!primary.notes && secondary.notes) {
       updates.notes = secondary.notes;
     }
-    if (primary.importance === undefined && secondary.importance !== undefined) {
+    if (
+      primary.importance === undefined &&
+      secondary.importance !== undefined
+    ) {
       updates.importance = secondary.importance;
     }
     if (Object.keys(updates).length > 0) {
@@ -480,7 +499,9 @@ function looksLikePhone(value: string): boolean {
   // Remove common phone formatting characters
   const digitsOnly = value.replace(/[\s\-\(\)\+\.]/g, "");
   // Should be mostly digits (at least 7) and no @ symbol
-  return digitsOnly.length >= 7 && /^\d+$/.test(digitsOnly) && !value.includes("@");
+  return (
+    digitsOnly.length >= 7 && /^\d+$/.test(digitsOnly) && !value.includes("@")
+  );
 }
 
 /** Extract handles of a specific type from a contact.
@@ -506,7 +527,10 @@ function getHandleValues(
 
   // For phone matching, also include displayName if it looks like a phone
   if (type === "phone" && looksLikePhone(contact.displayName)) {
-    const normalizedDisplayName = contact.displayName.replace(/[\s\-\(\)\.]/g, "");
+    const normalizedDisplayName = contact.displayName.replace(
+      /[\s\-\(\)\.]/g,
+      ""
+    );
     if (!handleValues.includes(normalizedDisplayName)) {
       handleValues.push(normalizedDisplayName);
     }
