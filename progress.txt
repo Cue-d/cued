@@ -1768,3 +1768,20 @@ Notes:
   - Thread replies share same channelId but have different threadTs
   - isThreadParent=true when message has reply_count > 0
 ---
+
+[2026-01-15 16:30] Bugfixes - Nango integration connection flow
+Files:
+  - apps/web/proxy.ts (add /api/nango/webhook to unauthenticated paths)
+  - apps/web/app/api/nango/session/route.ts (handle optional fields, better errors)
+  - apps/web/app/api/nango/webhook/route.ts (convert null email to undefined)
+  - packages/convex/convex/integrations.ts (create user if not found)
+Fixes:
+  - 303 redirect on webhook: Added /api/nango/webhook to middleware unauthenticated paths
+  - User not found: connectNango now creates user if not found (for users without Electron sync)
+  - null email validation error: Convert null to undefined in webhook payload
+  - 400 error on session: Only include email/name if they have values
+  - Better error messages: Extract Nango API error message from Axios response
+Notes:
+  - Gmail connection flow now works end-to-end
+  - UI shows "Connected" status after OAuth completes
+---
