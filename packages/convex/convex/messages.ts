@@ -217,4 +217,28 @@ async function resolveParticipants(
     }));
 }
 
+/**
+ * Get a conversation by ID.
+ * Task 5.8: Used by API routes to get conversation details for message sending.
+ */
+export const getConversationById = query({
+  args: {
+    conversationId: v.id("conversations"),
+  },
+  handler: async (ctx, args) => {
+    const conversation = await ctx.db.get(args.conversationId);
+    if (!conversation) {
+      return null;
+    }
+
+    return {
+      _id: conversation._id,
+      platform: conversation.platform,
+      platformConversationId: conversation.platformConversationId,
+      conversationType: conversation.conversationType,
+      displayName: conversation.displayName ?? null,
+    };
+  },
+});
+
 

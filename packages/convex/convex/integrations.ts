@@ -76,6 +76,41 @@ export const getIntegrationStatus = query({
 });
 
 /**
+ * Get integration by WorkOS user ID and platform.
+ * Task 5.8: Used by API routes to get Nango connection ID for message sending.
+ */
+export const getIntegration = query({
+  args: {
+    workosUserId: v.string(),
+    platform: platformValidator,
+  },
+  handler: async (ctx, args) => {
+    const user = await findUserByWorkosId(ctx, args.workosUserId);
+    if (!user) {
+      return null;
+    }
+
+    const integration = await ctx.db
+      .query("integrations")
+      .withIndex("by_user_platform", (q) =>
+        q.eq("userId", user._id).eq("platform", args.platform)
+      )
+      .unique();
+
+    if (!integration) {
+      return null;
+    }
+
+    return {
+      _id: integration._id,
+      platform: integration.platform,
+      nangoConnectionId: integration.nangoConnectionId ?? null,
+      isConnected: integration.syncState.isConnected,
+    };
+  },
+});
+
+/**
  * Connect a Nango integration. Called from webhook when user completes OAuth.
  * Uses WorkOS ID to find or create user.
  */
