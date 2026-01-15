@@ -2073,3 +2073,22 @@ Notes:
   - 18 unit tests covering all curve segments
   - Exported from @prm/ai package
 ---
+
+## Task 7.6 - Create analyzeConversation Convex action
+Status: COMPLETE (2026-01-15)
+Commit: b91ddc7
+Files:
+  - packages/convex/convex/actionAnalysis.ts (422 lines)
+Implementation:
+  - analyzeConversation: internalAction that processes queue entries
+  - Fetches conversation context (last 10 messages, contact info)
+  - Calls generateActionWithRetry from @prm/ai
+  - Creates action if LLM suggests shouldCreateAction=true
+  - Updates queue entry with result (action_created, no_action, error)
+  - processNextInQueue: public action for cron job usage
+  - Internal helpers: getNextPendingAnalysis, markAnalysisStarted/Completed/Skipped
+Notes:
+  - Uses internalAction to allow calling from other actions
+  - Deduplication check prevents duplicate actions per conversation
+  - Deployed to Convex dev environment
+---
