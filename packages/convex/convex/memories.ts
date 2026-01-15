@@ -557,7 +557,7 @@ export const processNewMessagesForMemory = action({
     }
 
     // Mark all processed messages (including skipped short ones)
-    const allMessageIds = messages.map((m) => m._id);
+    const allMessageIds = messages.map((m: EnrichedMessage) => m._id);
     await ctx.runMutation(internal.memories.markMessagesAsProcessed, {
       messageIds: allMessageIds,
     });

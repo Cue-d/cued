@@ -7,6 +7,8 @@
 import { v } from "convex/values";
 import type { Doc, Id } from "./_generated/dataModel";
 import {
+  action,
+  internalAction,
   internalMutation,
   internalQuery,
   mutation,
@@ -204,8 +206,9 @@ export const markAsSkipped = internalMutation({
 /**
  * Scan for unanswered conversations and queue for LLM analysis.
  * Task 7.5: Called by cron every 5 minutes.
+ * Uses internalAction because it needs to import @prm/ai for filtering.
  */
-export const scanForUnansweredConversations = internalMutation({
+export const scanForUnansweredConversations = internalAction({
   args: {
     userId: v.id("users"),
     platform: platformValidator,
@@ -418,33 +421,223 @@ export const scanAllUsersForUnanswered = internalMutation({
     }> = [];
 
     for (const integration of integrations) {
-      try {
-        const scanResult = await ctx.runMutation(
-          internal.actionQueue.scanForUnansweredConversations,
-          {
-            userId: integration.userId,
-            platform: integration.platform,
-          }
-        );
-
-        results.push({
-          userId: integration.userId as string,
+      // Schedule the scan action to run immediately
+      // (Can't call actions directly from mutations, so we schedule them)
+      await ctx.scheduler.runAfter(
+        0,
+        internal.actionQueue.scanForUnansweredConversations,
+        {
+          userId: integration.userId,
           platform: integration.platform,
-          queued: scanResult.queued,
-          filtered: scanResult.filtered,
-        });
-      } catch (error) {
-        console.error(
-          `Error scanning user ${integration.userId} platform ${integration.platform}:`,
-          error
-        );
-      }
+        }
+      );
+
+      results.push({
+        userId: integration.userId as string,
+        platform: integration.platform,
+        queued: 0, // Will be populated by the scheduled action
+        filtered: 0,
+      });
     }
 
     return {
       usersScanned: results.length,
       totalQueued: results.reduce((sum, r) => sum + r.queued, 0),
       totalFiltered: results.reduce((sum, r) => sum + r.filtered, 0),
+    };
+  },
+});
+
+// ============================================================================
+// Manual testing functions (public for dashboard/API access)
+// ============================================================================
+
+/**
+ * Internal query to get user by WorkOS ID.
+ */
+export const getUserByWorkosId = internalQuery({
+  args: { workosUserId: v.string() },
+  handler: async (ctx, args) => {
+    return ctx.db
+      .query("users")
+      .withIndex("by_workos_id", (q) => q.eq("workosUserId", args.workosUserId))
+      .unique();
+  },
+});
+
+/**
+ * Manual trigger: Scan current user's conversations for unanswered messages.
+ * Use this from Convex dashboard to test the scan flow.
+ */
+export const testScanForUnanswered = action({
+  args: {
+    platform: platformValidator,
+  },
+  handler: async (ctx, args): Promise<ScanResult & { error?: string }> => {
+    const identity = await ctx.auth.getUserIdentity();
+    if (!identity) {
+      return { processed: 0, queued: 0, skipped: 0, filtered: 0, error: "Not authenticated" };
+    }
+
+    const user = await ctx.runQuery(internal.actionQueue.getUserByWorkosId, {
+      workosUserId: identity.subject,
+    });
+
+    if (!user) {
+      return { processed: 0, queued: 0, skipped: 0, filtered: 0, error: "User not found" };
+    }
+
+    return ctx.runAction(internal.actionQueue.scanForUnansweredConversations, {
+      userId: user._id,
+      platform: args.platform,
+    });
+  },
+});
+
+/**
+ * Manual trigger: Process the next item in the queue.
+ * Use this from Convex dashboard to test the processing flow.
+ */
+export const testProcessQueue = mutation({
+  args: {},
+  handler: async (ctx): Promise<{ scheduled: boolean; queueEntryId?: string; reason?: string; error?: string }> => {
+    const identity = await ctx.auth.getUserIdentity();
+    if (!identity) {
+      return { scheduled: false, error: "Not authenticated" };
+    }
+
+    const result = await ctx.runMutation(internal.actionQueue.triggerQueueProcessing, {});
+    return {
+      scheduled: result.scheduled,
+      queueEntryId: result.queueEntryId as string | undefined,
+      reason: result.reason,
+    };
+  },
+});
+
+/**
+ * Debug: Get conversations that would be picked up by the scanner.
+ * Shows what conversations meet the criteria without actually queuing them.
+ */
+export const debugGetUnansweredCandidates = query({
+  args: {
+    thresholdHours: v.optional(v.number()),
+  },
+  handler: async (ctx, args) => {
+    const identity = await ctx.auth.getUserIdentity();
+    if (!identity) return null;
+
+    const user = await ctx.db
+      .query("users")
+      .withIndex("by_workos_id", (q) => q.eq("workosUserId", identity.subject))
+      .unique();
+
+    if (!user) return null;
+
+    const thresholdMs = (args.thresholdHours ?? UNANSWERED_THRESHOLD_HOURS) * 60 * 60 * 1000;
+    const cutoffTime = Date.now() - thresholdMs;
+
+    // Get recent conversations
+    const conversations = await ctx.db
+      .query("conversations")
+      .withIndex("by_user_last_message", (q) => q.eq("userId", user._id))
+      .order("desc")
+      .take(20);
+
+    const results = [];
+
+    for (const conv of conversations) {
+      // Get last message
+      const lastMessage = await ctx.db
+        .query("messages")
+        .withIndex("by_conversation", (q) => q.eq("conversationId", conv._id))
+        .order("desc")
+        .first();
+
+      // Get primary contact
+      const primaryContact = conv.participantContactIds.length > 0
+        ? await ctx.db.get(conv.participantContactIds[0])
+        : null;
+
+      const hoursSince = lastMessage
+        ? (Date.now() - lastMessage.sentAt) / (1000 * 60 * 60)
+        : null;
+
+      results.push({
+        conversationId: conv._id,
+        platform: conv.platform,
+        contactName: primaryContact?.displayName ?? "Unknown",
+        lastMessageAt: conv.lastMessageAt,
+        lastMessagePreview: lastMessage?.content?.slice(0, 100),
+        lastMessageIsFromMe: lastMessage?.isFromMe,
+        hoursSinceLastMessage: hoursSince ? Math.round(hoursSince * 10) / 10 : null,
+        meetsThreshold: conv.lastMessageAt ? conv.lastMessageAt < cutoffTime : false,
+        wouldBeQueued: lastMessage && !lastMessage.isFromMe && conv.lastMessageAt && conv.lastMessageAt < cutoffTime,
+      });
+    }
+
+    return {
+      thresholdHours: args.thresholdHours ?? UNANSWERED_THRESHOLD_HOURS,
+      cutoffTime: new Date(cutoffTime).toISOString(),
+      conversations: results,
+    };
+  },
+});
+
+/**
+ * Debug: Get current queue status with details.
+ */
+export const debugGetQueueDetails = query({
+  args: {},
+  handler: async (ctx) => {
+    const identity = await ctx.auth.getUserIdentity();
+    if (!identity) return null;
+
+    const user = await ctx.db
+      .query("users")
+      .withIndex("by_workos_id", (q) => q.eq("workosUserId", identity.subject))
+      .unique();
+
+    if (!user) return null;
+
+    // Get all queue entries for this user
+    const entries = await ctx.db
+      .query("actionAnalysisQueue")
+      .withIndex("by_user_status", (q) => q.eq("userId", user._id))
+      .take(50);
+
+    // Enrich with conversation info
+    const enriched = await Promise.all(
+      entries.map(async (entry) => {
+        const conversation = await ctx.db.get(entry.conversationId);
+        const primaryContact = conversation?.participantContactIds[0]
+          ? await ctx.db.get(conversation.participantContactIds[0])
+          : null;
+
+        return {
+          _id: entry._id,
+          status: entry.status,
+          priority: entry.priority,
+          queuedAt: new Date(entry.queuedAt).toISOString(),
+          completedAt: entry.completedAt ? new Date(entry.completedAt).toISOString() : null,
+          result: entry.result,
+          skipReason: entry.skipReason,
+          conversationId: entry.conversationId,
+          platform: conversation?.platform,
+          contactName: primaryContact?.displayName ?? "Unknown",
+        };
+      })
+    );
+
+    return {
+      total: enriched.length,
+      byStatus: {
+        pending: enriched.filter((e) => e.status === "pending").length,
+        processing: enriched.filter((e) => e.status === "processing").length,
+        completed: enriched.filter((e) => e.status === "completed").length,
+        skipped: enriched.filter((e) => e.status === "skipped").length,
+      },
+      entries: enriched,
     };
   },
 });

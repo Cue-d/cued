@@ -328,7 +328,7 @@ export const analyzeConversation = internalAction({
           notes: primaryContact?.notes ?? undefined,
           isKnownContact: primaryContact !== null,
         },
-        messages: messages.map((m) => ({
+        messages: messages.map((m: { content: string; isFromMe: boolean; sentAt: number; senderName?: string }) => ({
           content: m.content,
           isFromMe: m.isFromMe,
           sentAt: m.sentAt,
