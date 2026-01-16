@@ -223,12 +223,17 @@ export abstract class SocialScraper {
 
   /**
    * Navigate to a URL and wait for load.
+   * Uses 'domcontentloaded' instead of 'networkidle' for social sites
+   * that have continuous background network activity.
    */
-  protected async navigateTo(url: string): Promise<void> {
+  protected async navigateTo(url: string, options: { timeout?: number } = {}): Promise<void> {
     if (!this.page) {
       throw new Error('Browser not launched. Call launchBrowser() first.')
     }
-    await this.page.goto(url, { waitUntil: 'networkidle' })
+    await this.page.goto(url, {
+      waitUntil: 'domcontentloaded',
+      timeout: options.timeout ?? 60000
+    })
   }
 
   /**
