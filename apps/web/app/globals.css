@@ -9,6 +9,10 @@
   --font-mono: var(--font-geist-mono);
 }
 
+* {
+  border-color: var(--color-border);
+}
+
 body {
   background: var(--color-background);
   color: var(--color-foreground);
