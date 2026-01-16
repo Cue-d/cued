@@ -1,90 +1,90 @@
-"use client"
+"use client";
 
-import * as React from "react"
-import { Building2, Clock, FileText, Link, Tag, User } from "lucide-react"
-import { cn } from "../../lib/utils"
-import { Card, CardContent, CardHeader } from "../ui/card"
-import { Avatar, AvatarFallback } from "../ui/avatar"
-import { Input } from "../ui/input"
-import { Textarea } from "../ui/textarea"
-import { Badge } from "../ui/badge"
+import * as React from "react";
+import { Building2, Clock, FileText, Link, Tag, User } from "lucide-react";
+import { cn } from "../../lib/utils";
+import { Card, CardContent, CardHeader } from "../ui/card";
+import { Avatar, AvatarFallback } from "../ui/avatar";
+import { Input } from "../ui/input";
+import { Textarea } from "../ui/textarea";
+import { Badge } from "../ui/badge";
 import {
   Select,
   SelectContent,
   SelectItem,
   SelectTrigger,
   SelectValue,
-} from "../ui/select"
+} from "../ui/select";
 
 /** Form data for contact card */
 export interface ContactFormData {
-  name: string
-  company: string
-  tags: string
-  notes: string
-  linkedContactId: string | null
+  name: string;
+  company: string;
+  tags: string;
+  notes: string;
+  linkedContactId: string | null;
 }
 
 /** Existing contact for linking dropdown */
 export interface ExistingContact {
-  id: string
-  name: string
-  company?: string | null
+  id: string;
+  name: string;
+  company?: string | null;
 }
 
 export interface ContactCardProps {
   /** Person name for display */
-  personName: string
+  personName: string;
   /** When the contact was first seen */
-  createdAt?: number
+  createdAt?: number;
   /** Platform where contact originated */
-  platform?: string | null
+  platform?: string | null;
   /** Form data state */
-  formData: ContactFormData
+  formData: ContactFormData;
   /** Called when form data changes */
-  onFormChange: (data: ContactFormData) => void
+  onFormChange: (data: ContactFormData) => void;
   /** Existing contacts for merge dropdown */
-  existingContacts?: ExistingContact[]
+  existingContacts?: ExistingContact[];
   /** Optional class name */
-  className?: string
+  className?: string;
   /** Auto-focus name input on mount */
-  autoFocus?: boolean
+  autoFocus?: boolean;
 }
 
 export interface ContactCardRef {
-  focusInput: () => void
+  focusInput: () => void;
 }
 
 /** Get initials from a name */
 function getInitials(name: string): string {
-  if (/^\+?\d/.test(name)) return "#"
-  if (name.includes("@")) return name[0].toUpperCase()
+  if (/^\+?\d/.test(name)) return "#";
+  if (name.includes("@")) return name[0].toUpperCase();
   return name
     .split(" ")
     .map((n) => n[0])
     .join("")
     .slice(0, 2)
-    .toUpperCase()
+    .toUpperCase();
 }
 
 /** Format timestamp to time string */
 function formatMeetingTime(timestamp: number): string {
-  const date = new Date(timestamp)
-  return date.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })
+  const date = new Date(timestamp);
+  return date.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
 }
 
 /** Platform badge color mapping */
 function getPlatformColor(platform: string | null | undefined): string {
   switch (platform?.toLowerCase()) {
     case "imessage":
-      return "bg-green-500/10 text-green-600 border-green-200"
+      return "bg-green-500/10 text-green-600 border-green-200";
     case "gmail":
     case "email":
-      return "bg-red-500/10 text-red-600 border-red-200"
+      return "bg-red-500/10 text-red-600 border-red-200";
     case "slack":
-      return "bg-purple-500/10 text-purple-600 border-purple-200"
+      return "bg-purple-500/10 text-purple-600 border-purple-200";
     default:
-      return "bg-muted text-muted-foreground"
+      return "bg-muted text-muted-foreground";
   }
 }
 
@@ -106,30 +106,30 @@ export const ContactCard = React.forwardRef<ContactCardRef, ContactCardProps>(
     },
     ref
   ) {
-    const nameInputRef = React.useRef<HTMLInputElement>(null)
+    const nameInputRef = React.useRef<HTMLInputElement>(null);
 
     React.useImperativeHandle(ref, () => ({
       focusInput: () => {
-        nameInputRef.current?.focus()
+        nameInputRef.current?.focus();
       },
-    }))
+    }));
 
     React.useEffect(() => {
-      if (!autoFocus) return
+      if (!autoFocus) return;
       const timer = setTimeout(() => {
-        nameInputRef.current?.focus()
-      }, 300)
-      return () => clearTimeout(timer)
-    }, [autoFocus])
+        nameInputRef.current?.focus();
+      }, 300);
+      return () => clearTimeout(timer);
+    }, [autoFocus]);
 
-    const initials = getInitials(personName)
-    const meetingTime = createdAt ? formatMeetingTime(createdAt) : "earlier"
+    const initials = getInitials(personName);
+    const meetingTime = createdAt ? formatMeetingTime(createdAt) : "earlier";
 
     // Parse tags from comma-separated string
     const tagList = formData.tags
       .split(",")
       .map((t) => t.trim())
-      .filter(Boolean)
+      .filter(Boolean);
 
     return (
       <Card
@@ -156,7 +156,10 @@ export const ContactCard = React.forwardRef<ContactCardRef, ContactCardProps>(
                 {platform && (
                   <Badge
                     variant="outline"
-                    className={cn("text-[10px] px-1.5 py-0", getPlatformColor(platform))}
+                    className={cn(
+                      "text-[10px] px-1.5 py-0",
+                      getPlatformColor(platform)
+                    )}
                   >
                     {platform}
                   </Badge>
@@ -291,8 +294,8 @@ export const ContactCard = React.forwardRef<ContactCardRef, ContactCardProps>(
           </div>
         </CardContent>
       </Card>
-    )
+    );
   }
-)
+);
 
-export default ContactCard
+export default ContactCard;
