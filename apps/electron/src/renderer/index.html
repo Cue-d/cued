@@ -204,6 +204,50 @@
           <button id="forceSyncBtn" class="secondary" style="flex: 1;">Force Full Sync</button>
           <button id="signOutBtn" class="secondary" style="flex: 1;">Sign Out</button>
         </div>
+
+        <!-- Social Scrapers Section -->
+        <div style="margin-top: 1.5rem; padding-top: 1rem; border-top: 1px solid rgba(255,255,255,0.2);">
+          <p class="sync-label">Social Networks</p>
+
+          <!-- LinkedIn -->
+          <div style="background: rgba(255,255,255,0.05); border-radius: 8px; padding: 0.75rem; margin-top: 0.5rem;">
+            <div style="display: flex; align-items: center; justify-content: space-between;">
+              <div style="display: flex; align-items: center; gap: 0.5rem;">
+                <span style="font-size: 1.25rem;">🔗</span>
+                <div>
+                  <p style="font-weight: 600; font-size: 0.9rem;">LinkedIn</p>
+                  <p id="linkedinStatus" style="font-size: 0.75rem; opacity: 0.7;">Checking...</p>
+                </div>
+              </div>
+              <div style="display: flex; gap: 0.25rem;">
+                <button id="linkedinLoginBtn" class="secondary" style="padding: 0.4rem 0.6rem; font-size: 0.75rem;">Login</button>
+                <button id="linkedinScrapeBtn" class="secondary" style="padding: 0.4rem 0.6rem; font-size: 0.75rem;" disabled>Scrape</button>
+              </div>
+            </div>
+            <p id="linkedinProgress" class="sync-details" style="margin-top: 0.5rem; display: none;"></p>
+          </div>
+
+          <!-- Twitter/X -->
+          <div style="background: rgba(255,255,255,0.05); border-radius: 8px; padding: 0.75rem; margin-top: 0.5rem;">
+            <div style="display: flex; align-items: center; justify-content: space-between;">
+              <div style="display: flex; align-items: center; gap: 0.5rem;">
+                <span style="font-size: 1.25rem;">𝕏</span>
+                <div>
+                  <p style="font-weight: 600; font-size: 0.9rem;">X (Twitter)</p>
+                  <p id="twitterStatus" style="font-size: 0.75rem; opacity: 0.7;">Checking...</p>
+                </div>
+              </div>
+              <div style="display: flex; gap: 0.25rem;">
+                <button id="twitterLoginBtn" class="secondary" style="padding: 0.4rem 0.6rem; font-size: 0.75rem;">Login</button>
+                <button id="twitterScrapeBtn" class="secondary" style="padding: 0.4rem 0.6rem; font-size: 0.75rem;" disabled>Scrape</button>
+              </div>
+            </div>
+            <div style="margin-top: 0.5rem;">
+              <input id="twitterUsername" type="text" placeholder="@username for mutuals" style="width: 100%; padding: 0.4rem; border-radius: 4px; border: none; font-size: 0.8rem; background: rgba(255,255,255,0.1); color: white;">
+            </div>
+            <p id="twitterProgress" class="sync-details" style="margin-top: 0.5rem; display: none;"></p>
+          </div>
+        </div>
       </div>
 
       <div class="version-info" id="versions"></div>

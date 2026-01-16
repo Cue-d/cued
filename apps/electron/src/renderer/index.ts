@@ -27,6 +27,25 @@ interface SyncProgress {
   recoveryReason?: string
 }
 
+interface SocialStatusResult {
+  isLoggedIn: boolean
+  error?: string
+}
+
+interface SocialScrapeResult {
+  success: boolean
+  data?: unknown[]
+  error?: string
+  count?: number
+}
+
+interface SocialProgress {
+  status: 'starting' | 'complete' | 'error'
+  count?: number
+  type?: string
+  error?: string
+}
+
 declare global {
   interface Window {
     electron: {
@@ -49,6 +68,16 @@ declare global {
         forceFullSync: () => Promise<SyncProgress>
         onProgress: (callback: (progress: SyncProgress) => void) => () => void
       }
+      social: {
+        linkedinStatus: () => Promise<SocialStatusResult>
+        linkedinLogin: () => Promise<SocialStatusResult>
+        linkedinScrape: (options?: { maxConnections?: number }) => Promise<SocialScrapeResult>
+        twitterStatus: () => Promise<SocialStatusResult>
+        twitterLogin: () => Promise<SocialStatusResult>
+        twitterScrapeMutuals: (username: string, options?: { maxUsers?: number }) => Promise<SocialScrapeResult>
+        onLinkedinProgress: (callback: (progress: SocialProgress) => void) => () => void
+        onTwitterProgress: (callback: (progress: SocialProgress) => void) => () => void
+      }
     }
   }
 }
@@ -70,6 +99,17 @@ const progressBarContainerEl = document.getElementById('progressBarContainer')
 const progressBarEl = document.getElementById('progressBar')
 const syncDetailsEl = document.getElementById('syncDetails')
 const versionsEl = document.getElementById('versions')
+
+// Social UI Elements
+const linkedinStatusEl = document.getElementById('linkedinStatus')
+const linkedinLoginBtn = document.getElementById('linkedinLoginBtn')
+const linkedinScrapeBtn = document.getElementById('linkedinScrapeBtn')
+const linkedinProgressEl = document.getElementById('linkedinProgress')
+const twitterStatusEl = document.getElementById('twitterStatus')
+const twitterLoginBtn = document.getElementById('twitterLoginBtn')
+const twitterScrapeBtn = document.getElementById('twitterScrapeBtn')
+const twitterUsernameEl = document.getElementById('twitterUsername') as HTMLInputElement | null
+const twitterProgressEl = document.getElementById('twitterProgress')
 
 // Track sync rate calculation
 let syncStartTime: number | null = null
@@ -248,11 +288,215 @@ async function init(): Promise<void> {
     if (state.isAuthenticated) {
       const syncProgress = await window.electron.sync.getProgress()
       updateSyncUI(syncProgress)
+
+      // Check social login status
+      checkSocialStatus()
     }
   } catch (error) {
     console.error('Failed to get auth state:', error)
     showState('login')
   }
+
+  // Set up social handlers
+  setupSocialHandlers()
+}
+
+// ============================================================================
+// Social Scraper Functions
+// ============================================================================
+
+async function checkSocialStatus(): Promise<void> {
+  // Check LinkedIn status
+  try {
+    const linkedinResult = await window.electron.social.linkedinStatus()
+    updateLinkedinStatus(linkedinResult.isLoggedIn)
+  } catch (error) {
+    console.error('Failed to check LinkedIn status:', error)
+    if (linkedinStatusEl) linkedinStatusEl.textContent = 'Error checking status'
+  }
+
+  // Check Twitter status
+  try {
+    const twitterResult = await window.electron.social.twitterStatus()
+    updateTwitterStatus(twitterResult.isLoggedIn)
+  } catch (error) {
+    console.error('Failed to check Twitter status:', error)
+    if (twitterStatusEl) twitterStatusEl.textContent = 'Error checking status'
+  }
+}
+
+function updateLinkedinStatus(isLoggedIn: boolean): void {
+  if (linkedinStatusEl) {
+    linkedinStatusEl.textContent = isLoggedIn ? '✓ Logged in' : 'Not logged in'
+    linkedinStatusEl.style.color = isLoggedIn ? '#22c55e' : ''
+  }
+  if (linkedinScrapeBtn) {
+    (linkedinScrapeBtn as HTMLButtonElement).disabled = !isLoggedIn
+  }
+}
+
+function updateTwitterStatus(isLoggedIn: boolean): void {
+  if (twitterStatusEl) {
+    twitterStatusEl.textContent = isLoggedIn ? '✓ Logged in' : 'Not logged in'
+    twitterStatusEl.style.color = isLoggedIn ? '#22c55e' : ''
+  }
+  if (twitterScrapeBtn) {
+    (twitterScrapeBtn as HTMLButtonElement).disabled = !isLoggedIn
+  }
+}
+
+function setupSocialHandlers(): void {
+  // LinkedIn login
+  linkedinLoginBtn?.addEventListener('click', async () => {
+    linkedinLoginBtn.setAttribute('disabled', 'true')
+    linkedinLoginBtn.textContent = 'Opening...'
+    if (linkedinStatusEl) linkedinStatusEl.textContent = 'Opening browser...'
+
+    try {
+      const result = await window.electron.social.linkedinLogin()
+      updateLinkedinStatus(result.isLoggedIn)
+      if (!result.isLoggedIn && result.error) {
+        if (linkedinStatusEl) linkedinStatusEl.textContent = `Error: ${result.error}`
+      }
+    } catch (error) {
+      console.error('LinkedIn login failed:', error)
+      if (linkedinStatusEl) linkedinStatusEl.textContent = 'Login failed'
+    } finally {
+      linkedinLoginBtn.removeAttribute('disabled')
+      linkedinLoginBtn.textContent = 'Login'
+    }
+  })
+
+  // LinkedIn scrape
+  linkedinScrapeBtn?.addEventListener('click', async () => {
+    linkedinScrapeBtn.setAttribute('disabled', 'true')
+    linkedinScrapeBtn.textContent = 'Scraping...'
+    if (linkedinProgressEl) {
+      linkedinProgressEl.style.display = 'block'
+      linkedinProgressEl.textContent = 'Starting scrape...'
+    }
+
+    try {
+      const result = await window.electron.social.linkedinScrape()
+      if (result.success) {
+        if (linkedinProgressEl) {
+          linkedinProgressEl.textContent = `✓ Scraped ${result.count} connections`
+          linkedinProgressEl.style.color = '#22c55e'
+        }
+      } else {
+        if (linkedinProgressEl) {
+          linkedinProgressEl.textContent = `Error: ${result.error}`
+          linkedinProgressEl.style.color = '#ef4444'
+        }
+      }
+    } catch (error) {
+      console.error('LinkedIn scrape failed:', error)
+      if (linkedinProgressEl) {
+        linkedinProgressEl.textContent = 'Scrape failed'
+        linkedinProgressEl.style.color = '#ef4444'
+      }
+    } finally {
+      linkedinScrapeBtn.removeAttribute('disabled')
+      linkedinScrapeBtn.textContent = 'Scrape'
+    }
+  })
+
+  // Twitter login
+  twitterLoginBtn?.addEventListener('click', async () => {
+    twitterLoginBtn.setAttribute('disabled', 'true')
+    twitterLoginBtn.textContent = 'Opening...'
+    if (twitterStatusEl) twitterStatusEl.textContent = 'Opening browser...'
+
+    try {
+      const result = await window.electron.social.twitterLogin()
+      updateTwitterStatus(result.isLoggedIn)
+      if (!result.isLoggedIn && result.error) {
+        if (twitterStatusEl) twitterStatusEl.textContent = `Error: ${result.error}`
+      }
+    } catch (error) {
+      console.error('Twitter login failed:', error)
+      if (twitterStatusEl) twitterStatusEl.textContent = 'Login failed'
+    } finally {
+      twitterLoginBtn.removeAttribute('disabled')
+      twitterLoginBtn.textContent = 'Login'
+    }
+  })
+
+  // Twitter scrape mutuals
+  twitterScrapeBtn?.addEventListener('click', async () => {
+    const username = twitterUsernameEl?.value?.replace(/^@/, '').trim()
+    if (!username) {
+      if (twitterProgressEl) {
+        twitterProgressEl.style.display = 'block'
+        twitterProgressEl.textContent = 'Please enter a username'
+        twitterProgressEl.style.color = '#ef4444'
+      }
+      return
+    }
+
+    twitterScrapeBtn.setAttribute('disabled', 'true')
+    twitterScrapeBtn.textContent = 'Scraping...'
+    if (twitterProgressEl) {
+      twitterProgressEl.style.display = 'block'
+      twitterProgressEl.textContent = `Scraping mutuals for @${username}...`
+      twitterProgressEl.style.color = ''
+    }
+
+    try {
+      const result = await window.electron.social.twitterScrapeMutuals(username)
+      if (result.success) {
+        if (twitterProgressEl) {
+          twitterProgressEl.textContent = `✓ Found ${result.count} mutuals`
+          twitterProgressEl.style.color = '#22c55e'
+        }
+      } else {
+        if (twitterProgressEl) {
+          twitterProgressEl.textContent = `Error: ${result.error}`
+          twitterProgressEl.style.color = '#ef4444'
+        }
+      }
+    } catch (error) {
+      console.error('Twitter scrape failed:', error)
+      if (twitterProgressEl) {
+        twitterProgressEl.textContent = 'Scrape failed'
+        twitterProgressEl.style.color = '#ef4444'
+      }
+    } finally {
+      twitterScrapeBtn.removeAttribute('disabled')
+      twitterScrapeBtn.textContent = 'Scrape'
+    }
+  })
+
+  // Progress listeners
+  window.electron.social.onLinkedinProgress((progress) => {
+    if (linkedinProgressEl) {
+      linkedinProgressEl.style.display = 'block'
+      if (progress.status === 'starting') {
+        linkedinProgressEl.textContent = 'Scraping...'
+      } else if (progress.status === 'complete') {
+        linkedinProgressEl.textContent = `✓ Scraped ${progress.count} connections`
+        linkedinProgressEl.style.color = '#22c55e'
+      } else if (progress.status === 'error') {
+        linkedinProgressEl.textContent = `Error: ${progress.error}`
+        linkedinProgressEl.style.color = '#ef4444'
+      }
+    }
+  })
+
+  window.electron.social.onTwitterProgress((progress) => {
+    if (twitterProgressEl) {
+      twitterProgressEl.style.display = 'block'
+      if (progress.status === 'starting') {
+        twitterProgressEl.textContent = `Scraping ${progress.type}...`
+      } else if (progress.status === 'complete') {
+        twitterProgressEl.textContent = `✓ Found ${progress.count} ${progress.type}`
+        twitterProgressEl.style.color = '#22c55e'
+      } else if (progress.status === 'error') {
+        twitterProgressEl.textContent = `Error: ${progress.error}`
+        twitterProgressEl.style.color = '#ef4444'
+      }
+    }
+  })
 }
 
 init()

@@ -44,4 +44,27 @@ contextBridge.exposeInMainWorld('electron', {
       return () => ipcRenderer.removeListener('sync:progress', handler)
     },
   },
+  social: {
+    // LinkedIn
+    linkedinStatus: (): Promise<unknown> => ipcRenderer.invoke('social:linkedin:status'),
+    linkedinLogin: (): Promise<unknown> => ipcRenderer.invoke('social:linkedin:login'),
+    linkedinScrape: (options?: { maxConnections?: number }): Promise<unknown> =>
+      ipcRenderer.invoke('social:linkedin:scrape', options),
+    // Twitter
+    twitterStatus: (): Promise<unknown> => ipcRenderer.invoke('social:twitter:status'),
+    twitterLogin: (): Promise<unknown> => ipcRenderer.invoke('social:twitter:login'),
+    twitterScrapeMutuals: (username: string, options?: { maxUsers?: number }): Promise<unknown> =>
+      ipcRenderer.invoke('social:twitter:scrapeMutuals', username, options),
+    // Progress listeners
+    onLinkedinProgress: (callback: (progress: unknown) => void) => {
+      const handler = (_event: IpcRendererEvent, progress: unknown) => callback(progress)
+      ipcRenderer.on('social:linkedin:scrapeProgress', handler)
+      return () => ipcRenderer.removeListener('social:linkedin:scrapeProgress', handler)
+    },
+    onTwitterProgress: (callback: (progress: unknown) => void) => {
+      const handler = (_event: IpcRendererEvent, progress: unknown) => callback(progress)
+      ipcRenderer.on('social:twitter:scrapeProgress', handler)
+      return () => ipcRenderer.removeListener('social:twitter:scrapeProgress', handler)
+    },
+  },
 })
