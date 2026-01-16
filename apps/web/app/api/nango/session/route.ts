@@ -29,6 +29,12 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       return errorResponse("User not found", 401);
     }
 
+    // Get user profile for display name
+    const profile = await convex.query(api.users.getProfile, {});
+    const displayName = profile?.firstName && profile?.lastName
+      ? `${profile.firstName} ${profile.lastName}`
+      : profile?.firstName ?? profile?.lastName;
+
     let allowedIntegrations: string[] | undefined;
     try {
       const body = await request.json();
@@ -41,7 +47,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       end_user: {
         id: identity.subject,
         ...(identity.email && { email: identity.email }),
-        ...(identity.name && { display_name: identity.name }),
+        ...(displayName && { display_name: displayName }),
       },
       ...(allowedIntegrations && { allowed_integrations: allowedIntegrations }),
     });

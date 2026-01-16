@@ -9,6 +9,7 @@ import {
   normalizePhone,
   getPhoneVariants as getPhoneVariantsShared,
 } from "@prm/shared";
+import { findUserByWorkosId } from "./lib/auth";
 
 // Convex validators matching @prm/integrations SyncBatch structure
 const handleInput = v.object({
@@ -397,10 +398,11 @@ async function createPlaceholderContact(
 
 /**
  * Get existing user or create a new one from auth identity.
+ * Profile data (firstName, lastName, etc.) is synced separately via users.syncProfile.
  */
 async function getOrCreateUser(
   ctx: MutationCtx,
-  identity: { subject: string; email?: string; name?: string }
+  identity: { subject: string; email?: string }
 ): Promise<Doc<"users">> {
   const existing = await ctx.db
     .query("users")
@@ -414,7 +416,6 @@ async function getOrCreateUser(
   const userId = await ctx.db.insert("users", {
     workosUserId: identity.subject,
     email: identity.email ?? "",
-    name: identity.name,
   });
 
   return (await ctx.db.get(userId))!;
@@ -800,19 +801,6 @@ export const updateContactsSyncState = mutation({
     return { success: true };
   },
 });
-
-/**
- * Find user by WorkOS ID.
- */
-function findUserByWorkosId(
-  ctx: QueryCtx | MutationCtx,
-  workosUserId: string
-): Promise<Doc<"users"> | null> {
-  return ctx.db
-    .query("users")
-    .withIndex("by_workos_id", (q) => q.eq("workosUserId", workosUserId))
-    .unique();
-}
 
 /**
  * Find integration by user and platform.

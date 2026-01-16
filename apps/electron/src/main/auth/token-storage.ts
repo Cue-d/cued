@@ -12,7 +12,8 @@ export interface StoredTokens {
   refreshToken: string
   userId: string
   email: string
-  name: string | null
+  firstName: string | null
+  lastName: string | null
   expiresAt: number // Unix timestamp in ms
 }
 

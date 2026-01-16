@@ -1,23 +1,49 @@
 "use client";
 
-import { ReactNode } from "react";
-import { useQuery } from "convex/react";
+import { ReactNode, useEffect, useRef } from "react";
+import { useQuery, useMutation } from "convex/react";
 import { api } from "@prm/convex";
 import { signOut } from "@workos-inc/authkit-nextjs";
 import { SidebarProvider, SidebarInset, AppSidebar, CommandMenu } from "@prm/ui";
 
-interface AppLayoutClientProps {
-  children: ReactNode;
+interface WorkosProfile {
+  email: string;
+  firstName?: string;
+  lastName?: string;
+  profilePictureUrl?: string;
 }
 
-export function AppLayoutClient({ children }: AppLayoutClientProps) {
-  const currentUser = useQuery(api.users.getCurrentUser);
-  const actionCountResult = useQuery(api.actions.getPendingActionCount, {});
+interface AppLayoutClientProps {
+  children: ReactNode;
+  workosProfile?: WorkosProfile;
+}
 
-  const user = currentUser
+export function AppLayoutClient({
+  children,
+  workosProfile,
+}: AppLayoutClientProps) {
+  const userProfile = useQuery(api.users.getProfile);
+  const actionCountResult = useQuery(api.actions.getPendingActionCount, {});
+  const syncProfile = useMutation(api.users.syncProfile);
+  const hasSynced = useRef(false);
+
+  // Sync user profile from WorkOS on first load
+  useEffect(() => {
+    if (workosProfile && !hasSynced.current) {
+      hasSynced.current = true;
+      syncProfile({
+        email: workosProfile.email,
+        firstName: workosProfile.firstName,
+        lastName: workosProfile.lastName,
+        profilePictureUrl: workosProfile.profilePictureUrl,
+      }).catch(console.error);
+    }
+  }, [workosProfile, syncProfile]);
+
+  const user = userProfile
     ? {
-        name: currentUser.name ?? undefined,
-        email: currentUser.email ?? undefined,
+        name: [userProfile.firstName, userProfile.lastName].filter(Boolean).join(" ") || undefined,
+        email: userProfile.email ?? undefined,
       }
     : null;
 

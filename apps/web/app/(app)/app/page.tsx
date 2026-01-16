@@ -14,6 +14,7 @@ import {
 
 export default function AppPage() {
   const currentUser = useQuery(api.users.getCurrentUser);
+  const userProfile = useQuery(api.users.getProfile);
 
   return (
     <div className="p-8">
@@ -77,19 +78,19 @@ export default function AppPage() {
               <div>
                 <dt className="inline font-medium">Email:</dt>
                 <dd className="ml-2 inline text-muted-foreground">
-                  {currentUser.email}
+                  {currentUser.email ?? userProfile?.email ?? "(not provided)"}
                 </dd>
               </div>
               <div>
-                <dt className="inline font-medium">Name:</dt>
+                <dt className="inline font-medium">First Name:</dt>
                 <dd className="ml-2 inline text-muted-foreground">
-                  {currentUser.name || "(not provided)"}
+                  {userProfile?.firstName ?? "(not provided)"}
                 </dd>
               </div>
               <div>
-                <dt className="inline font-medium">Email Verified:</dt>
+                <dt className="inline font-medium">Last Name:</dt>
                 <dd className="ml-2 inline text-muted-foreground">
-                  {currentUser.emailVerified ? "Yes" : "No"}
+                  {userProfile?.lastName ?? "(not provided)"}
                 </dd>
               </div>
             </dl>

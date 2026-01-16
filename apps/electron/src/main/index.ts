@@ -1,5 +1,7 @@
 import { join } from "node:path";
 import { app, BrowserWindow, ipcMain } from "electron";
+import { ConvexHttpClient } from "convex/browser";
+import { api } from "@prm/convex";
 import {
   initAuth,
   getAuthState,
@@ -12,6 +14,9 @@ import { getContactsWatcher } from "./sync/contacts-watcher";
 import { syncContactsToConvex } from "./sync/contacts-sync";
 import { getIMessageSender } from "./sync/imessage-sender";
 import { setupSocialIpcHandlers, cleanupSocialScrapers } from "./ipc/social";
+
+const CONVEX_URL =
+  process.env.CONVEX_URL || "https://perceptive-lobster-290.convex.cloud";
 
 // WorkOS Client ID - should match web app config
 // In production, this would be loaded from a config file or env
@@ -57,12 +62,31 @@ function setupAuthIpcHandlers(): void {
         // Notify renderer to display user code
         mainWindow?.webContents.send("auth:userCode", code, uri);
       },
-      onAuthSuccess: (user) => {
+      onAuthSuccess: async (user) => {
         // Notify renderer of auth state change
         mainWindow?.webContents.send("auth:stateChanged", {
           isAuthenticated: true,
           user,
         });
+
+        // Sync user profile to Convex
+        if (user) {
+          try {
+            const token = await getValidAccessToken();
+            if (token) {
+              const convex = new ConvexHttpClient(CONVEX_URL);
+              convex.setAuth(token);
+              await convex.mutation(api.users.syncProfile, {
+                email: user.email,
+                firstName: user.firstName ?? undefined,
+                lastName: user.lastName ?? undefined,
+              });
+              console.log("[Main] User profile synced to Convex");
+            }
+          } catch (e) {
+            console.warn("[Main] Failed to sync user profile:", e);
+          }
+        }
 
         // Start sync with token provider and auth invalid callback
         const syncManager = getSyncManager();

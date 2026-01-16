@@ -16,7 +16,8 @@ export interface AuthState {
   user: {
     id: string;
     email: string;
-    name: string | null;
+    firstName: string | null;
+    lastName: string | null;
   } | null;
 }
 
@@ -35,13 +36,15 @@ export function initAuth(clientId: string): void {
   currentClientId = clientId;
 }
 
+const UNAUTHENTICATED_STATE: AuthState = { isAuthenticated: false, user: null };
+
 /**
  * Get the current auth state.
  */
 export function getAuthState(): AuthState {
   const tokens = getStoredTokens();
   if (!tokens || !hasValidTokens()) {
-    return { isAuthenticated: false, user: null };
+    return UNAUTHENTICATED_STATE;
   }
 
   return {
@@ -49,7 +52,8 @@ export function getAuthState(): AuthState {
     user: {
       id: tokens.userId,
       email: tokens.email,
-      name: tokens.name,
+      firstName: tokens.firstName,
+      lastName: tokens.lastName,
     },
   };
 }
@@ -80,9 +84,8 @@ export async function getValidAccessToken(
     try {
       const newTokens = await refreshAccessToken(tokens.refreshToken);
       return newTokens.accessToken;
-    } catch (error) {
+    } catch {
       // Refresh failed, user needs to re-authenticate
-      const message = error instanceof Error ? error.message : String(error);
       return null;
     }
   }
@@ -147,7 +150,8 @@ export async function startDeviceAuth(
       callbacks.onAuthSuccess({
         id: storedTokens.userId,
         email: storedTokens.email,
-        name: storedTokens.name,
+        firstName: storedTokens.firstName,
+        lastName: storedTokens.lastName,
       });
     }
   } catch (error) {
@@ -171,11 +175,6 @@ export function signOut(): void {
  * Convert WorkOS token response to storage format.
  */
 function tokenResponseToStoredTokens(response: TokenResponse): StoredTokens {
-  const { first_name, last_name } = response.user;
-  const name = first_name
-    ? [first_name, last_name].filter(Boolean).join(" ")
-    : null;
-
   // Default to 1 hour if expires_in not provided (WorkOS doesn't always include it)
   const expiresIn = response.expires_in || 3600;
 
@@ -184,7 +183,8 @@ function tokenResponseToStoredTokens(response: TokenResponse): StoredTokens {
     refreshToken: response.refresh_token,
     userId: response.user.id,
     email: response.user.email,
-    name,
+    firstName: response.user.first_name,
+    lastName: response.user.last_name,
     expiresAt: Date.now() + expiresIn * 1000,
   };
 }
