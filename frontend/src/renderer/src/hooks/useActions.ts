@@ -232,7 +232,7 @@ export function useActions(actionType?: string) {
   const hasTriedLoadMore = useRef(false)
   useEffect(() => {
     if (
-      actions.length > 0 &&
+      !loading && // Don't trigger during initial load
       actions.length < LOAD_MORE_THRESHOLD &&
       totalCount > actions.length &&
       !hasTriedLoadMore.current
@@ -240,7 +240,7 @@ export function useActions(actionType?: string) {
       hasTriedLoadMore.current = true
       loadActions(true)
     }
-  }, [actions.length, totalCount, loadActions])
+  }, [actions.length, totalCount, loading, loadActions])
 
   // Reset load more flag when actions are refreshed
   useEffect(() => {
