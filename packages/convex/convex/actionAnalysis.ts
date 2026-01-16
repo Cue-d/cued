@@ -127,6 +127,44 @@ export const hasPendingAction = internalQuery({
   },
 });
 
+/**
+ * Get recent actions for a conversation (to avoid duplicates).
+ * Returns actions from the last 7 days, including discarded ones.
+ */
+export const getRecentActionsForConversation = internalQuery({
+  args: {
+    userId: v.id("users"),
+    conversationId: v.id("conversations"),
+    limit: v.optional(v.number()),
+    daysBack: v.optional(v.number()),
+  },
+  handler: async (ctx, args) => {
+    const limit = args.limit ?? 5;
+    const daysBack = args.daysBack ?? 7;
+    const cutoffTime = Date.now() - daysBack * 24 * 60 * 60 * 1000;
+
+    // Get all actions for this user, then filter by conversation and time
+    const actions = await ctx.db
+      .query("actions")
+      .withIndex("by_user", (q) => q.eq("userId", args.userId))
+      .filter((q) =>
+        q.and(
+          q.eq(q.field("conversationId"), args.conversationId),
+          q.gte(q.field("createdAt"), cutoffTime)
+        )
+      )
+      .order("desc")
+      .take(limit);
+
+    // Return simplified action data for LLM context
+    return actions.map((action) => ({
+      type: action.type,
+      status: action.status,
+      createdAt: action.createdAt,
+    }));
+  },
+});
+
 // ============================================================================
 // Internal mutations for updating state
 // ============================================================================
@@ -331,6 +369,17 @@ export const analyzeConversation = internalAction({
         ? (Date.now() - lastMessage.sentAt) / (1000 * 60 * 60)
         : 0;
 
+      // Get recent actions to avoid duplicates
+      const recentActions = await ctx.runQuery(
+        internal.actionAnalysis.getRecentActionsForConversation,
+        {
+          userId: queueEntry.userId,
+          conversationId: queueEntry.conversationId,
+          limit: 5,
+          daysBack: 7,
+        }
+      );
+
       // Build input for LLM
       const { generateActionWithRetry } = await import("@prm/ai");
 
@@ -349,6 +398,7 @@ export const analyzeConversation = internalAction({
         })),
         platform: conversation.platform,
         hoursSinceLastMessage,
+        recentActions,
       });
 
       if (!suggestion.shouldCreateAction) {

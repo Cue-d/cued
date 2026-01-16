@@ -44,6 +44,13 @@ export interface ContactInfo {
   isKnownContact: boolean;
 }
 
+/** Recent action for context (to avoid duplicates) */
+export interface RecentAction {
+  type: string; // "respond", "follow_up", etc.
+  status: "pending" | "completed" | "discarded" | "snoozed" | "expired";
+  createdAt: number; // timestamp in ms
+}
+
 /** Message in conversation history */
 export interface ActionMessage {
   content: string;
@@ -58,6 +65,8 @@ export interface GenerateActionInput {
   messages: ActionMessage[];
   platform: "imessage" | "gmail" | "slack" | "linkedin" | "twitter";
   hoursSinceLastMessage: number;
+  /** Recent actions for this conversation (to avoid duplicates) */
+  recentActions?: RecentAction[];
 }
 
 /** Truncate text to max length, adding ellipsis if needed */
@@ -73,9 +82,15 @@ function formatRelativeTime(hours: number): string {
   return days === 1 ? "1 day ago" : `${days} days ago`;
 }
 
+/** Format timestamp (ms) as relative time from now */
+function formatTimestampRelative(timestamp: number): string {
+  const hours = (Date.now() - timestamp) / (1000 * 60 * 60);
+  return formatRelativeTime(hours);
+}
+
 /** Build context prompt from conversation data */
 function buildContextPrompt(input: GenerateActionInput): string {
-  const { contact, messages, platform, hoursSinceLastMessage } = input;
+  const { contact, messages, platform, hoursSinceLastMessage, recentActions } = input;
 
   // Contact info section
   const contactLines = [`Contact: ${contact.displayName}`];
@@ -96,13 +111,22 @@ function buildContextPrompt(input: GenerateActionInput): string {
     messageLines.push("[No messages in conversation]");
   }
 
+  // Recent actions section (to avoid duplicates)
+  let recentActionsSection = "";
+  if (recentActions && recentActions.length > 0) {
+    const actionLines = recentActions.map((action) => {
+      return `- ${action.type} (${action.status}, ${formatTimestampRelative(action.createdAt)})`;
+    });
+    recentActionsSection = `\n## Recent Actions\n${actionLines.join("\n")}\n`;
+  }
+
   return `## Context
 Platform: ${platform}
 Time since last message: ${formatRelativeTime(hoursSinceLastMessage)}
 
 ## Contact Information
 ${contactLines.join("\n")}
-
+${recentActionsSection}
 ## Recent Messages (oldest to newest)
 ${messageLines.join("\n")}`;
 }
@@ -126,6 +150,8 @@ Do NOT create an action when:
 - It's a group chat where others might respond
 - The message is purely informational with no expected response
 - It's an automated message (OTP, verification, delivery notification)
+- A similar action was recently discarded (user dismissed it)
+- A pending action of the same type already exists
 
 ## Action Types
 - respond: Direct reply is needed to the conversation
@@ -176,6 +202,38 @@ export async function generateAction(
       suggestedResponse: null,
       remindAt: null,
     };
+  }
+
+  // Deterministic check: if pending action exists, skip LLM
+  const hasPendingAction = input.recentActions?.some(
+    (action) => action.status === "pending"
+  );
+  if (hasPendingAction) {
+    return {
+      shouldCreateAction: false,
+      type: null,
+      priority: null,
+      reason: "Pending action already exists for this conversation",
+      suggestedResponse: null,
+      remindAt: null,
+    };
+  }
+
+  // Deterministic check: no new messages since most recent action
+  if (input.recentActions && input.recentActions.length > 0) {
+    const mostRecentAction = input.recentActions[0]; // Already sorted by createdAt desc
+    const mostRecentMessageTime = lastMessage?.sentAt ?? 0;
+
+    if (mostRecentMessageTime <= mostRecentAction.createdAt) {
+      return {
+        shouldCreateAction: false,
+        type: null,
+        priority: null,
+        reason: "No new messages since last action was created",
+        suggestedResponse: null,
+        remindAt: null,
+      };
+    }
   }
 
   const contextPrompt = buildContextPrompt(input);

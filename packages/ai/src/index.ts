@@ -45,6 +45,7 @@ export {
   type ContactInfo,
   type ActionMessage,
   type GenerateActionInput,
+  type RecentAction,
 } from "./actions";
 
 export {

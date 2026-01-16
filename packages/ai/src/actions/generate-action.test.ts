@@ -98,6 +98,103 @@ describe("generateAction", () => {
     expect(prompt.prompt).toContain("can you send me that report");
   });
 
+  it("includes recent actions in context when provided", async () => {
+    mockGenerateObject.mockResolvedValueOnce({
+      object: { shouldCreateAction: false },
+    } as never);
+
+    await generateAction({
+      ...baseInput,
+      recentActions: [
+        { type: "respond", status: "discarded", createdAt: Date.now() - 86400000 },
+        { type: "follow_up", status: "completed", createdAt: Date.now() - 172800000 },
+      ],
+    });
+
+    const call = mockGenerateObject.mock.calls[0];
+    const prompt = (call as unknown[])[0] as { prompt: string };
+
+    expect(prompt.prompt).toContain("Recent Actions");
+    expect(prompt.prompt).toContain("respond (discarded");
+    expect(prompt.prompt).toContain("follow_up (completed");
+  });
+
+  it("omits recent actions section when none provided", async () => {
+    mockGenerateObject.mockResolvedValueOnce({
+      object: { shouldCreateAction: false },
+    } as never);
+
+    await generateAction(baseInput);
+
+    const call = mockGenerateObject.mock.calls[0];
+    const prompt = (call as unknown[])[0] as { prompt: string };
+
+    expect(prompt.prompt).not.toContain("Recent Actions");
+  });
+
+  it("skips LLM when pending action exists", async () => {
+    const result = await generateAction({
+      ...baseInput,
+      recentActions: [
+        { type: "respond", status: "pending", createdAt: Date.now() - 3600000 },
+      ],
+    });
+
+    expect(result.shouldCreateAction).toBe(false);
+    expect(result.reason).toContain("Pending action already exists");
+    expect(mockGenerateObject).not.toHaveBeenCalled();
+  });
+
+  it("skips LLM when no new messages since last action", async () => {
+    const messageTime = Date.now() - 7200000; // 2 hours ago
+    const actionTime = Date.now() - 3600000; // 1 hour ago (after message)
+
+    const result = await generateAction({
+      ...baseInput,
+      messages: [
+        {
+          content: "Hey, can you send me that report?",
+          isFromMe: false,
+          sentAt: messageTime,
+          senderName: "John Doe",
+        },
+      ],
+      recentActions: [
+        { type: "respond", status: "discarded", createdAt: actionTime },
+      ],
+    });
+
+    expect(result.shouldCreateAction).toBe(false);
+    expect(result.reason).toContain("No new messages since last action");
+    expect(mockGenerateObject).not.toHaveBeenCalled();
+  });
+
+  it("calls LLM when there are new messages since last action", async () => {
+    mockGenerateObject.mockResolvedValueOnce({
+      object: { shouldCreateAction: true, type: "respond", priority: 50 },
+    } as never);
+
+    const actionTime = Date.now() - 7200000; // 2 hours ago
+    const messageTime = Date.now() - 3600000; // 1 hour ago (after action)
+
+    await generateAction({
+      ...baseInput,
+      messages: [
+        {
+          content: "Hey, can you send me that report?",
+          isFromMe: false,
+          sentAt: messageTime,
+          senderName: "John Doe",
+        },
+      ],
+      recentActions: [
+        { type: "respond", status: "discarded", createdAt: actionTime },
+      ],
+    });
+
+    expect(mockGenerateObject).toHaveBeenCalledOnce();
+  });
+
   it("handles LLM returning no action needed", async () => {
     mockGenerateObject.mockResolvedValueOnce({
       object: {
