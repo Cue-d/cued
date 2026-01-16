@@ -4,8 +4,13 @@
  */
 import { exec } from "node:child_process";
 import { promisify } from "node:util";
+import { ConvexHttpClient } from "convex/browser";
+import { api } from "@prm/convex";
+import type { Id } from "@prm/convex";
 
 const execAsync = promisify(exec);
+const CONVEX_URL =
+  process.env.CONVEX_URL || "https://perceptive-lobster-290.convex.cloud";
 
 interface SendResult {
   success: boolean;
@@ -83,7 +88,7 @@ export async function sendToGroup(
 
 // Types for Convex pending send
 interface PendingSend {
-  _id: string;
+  _id: Id<"pendingSends">;
   text: string;
   recipientHandle: string;
   isGroup: boolean;
@@ -92,66 +97,19 @@ interface PendingSend {
 
 type TokenProvider = () => Promise<string | null>;
 
-interface ConvexClient {
-  mutation: <T>(name: string, args: Record<string, unknown>) => Promise<T>;
-  query: <T>(name: string, args: Record<string, unknown>) => Promise<T>;
-}
-
-/**
- * Create a Convex client for pending sends operations.
- */
-function createConvexClient(getToken: TokenProvider): ConvexClient {
-  const CONVEX_URL = process.env.VITE_CONVEX_URL || "https://peaceful-tern-595.convex.cloud";
-
-  async function callConvex<T>(
-    type: "mutation" | "query",
-    name: string,
-    args: Record<string, unknown>
-  ): Promise<T> {
-    const token = await getToken();
-    if (!token) {
-      throw new Error("No auth token available");
-    }
-
-    const response = await fetch(`${CONVEX_URL}/api/${type}`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${token}`,
-      },
-      body: JSON.stringify({
-        path: name,
-        args,
-      }),
-    });
-
-    if (!response.ok) {
-      throw new Error(`Convex ${type} failed: ${response.statusText}`);
-    }
-
-    const result = await response.json();
-    return result.value as T;
-  }
-
-  return {
-    mutation: <T>(name: string, args: Record<string, unknown>) =>
-      callConvex<T>("mutation", name, args),
-    query: <T>(name: string, args: Record<string, unknown>) =>
-      callConvex<T>("query", name, args),
-  };
-}
-
 /**
  * iMessage sender manager.
  * Polls Convex for pending sends and processes them.
  */
 export class IMessageSender {
   private getToken: TokenProvider;
+  private client: ConvexHttpClient;
   private pollInterval: NodeJS.Timeout | null = null;
   private isProcessing = false;
 
   constructor(getToken: TokenProvider) {
     this.getToken = getToken;
+    this.client = new ConvexHttpClient(CONVEX_URL);
   }
 
   /**
@@ -159,8 +117,6 @@ export class IMessageSender {
    */
   start(intervalMs = 5000): void {
     if (this.pollInterval) return;
-
-    console.log("[iMessage] Sender started, polling every", intervalMs, "ms");
 
     // Initial poll
     this.processPendingSends();
@@ -178,7 +134,6 @@ export class IMessageSender {
     if (this.pollInterval) {
       clearInterval(this.pollInterval);
       this.pollInterval = null;
-      console.log("[iMessage] Sender stopped");
     }
   }
 
@@ -190,23 +145,26 @@ export class IMessageSender {
     this.isProcessing = true;
 
     try {
-      const client = createConvexClient(this.getToken);
+      // Refresh auth token
+      const token = await this.getToken();
+      if (!token) {
+        this.isProcessing = false;
+        return;
+      }
+      this.client.setAuth(token);
 
-      // Get pending sends
-      const { sends } = await client.query<{ sends: PendingSend[] }>(
-        "pendingSends:getPendingSends",
-        { limit: 10 }
-      );
+      // Get pending sends using typed API
+      const { sends } = await this.client.query(api.pendingSends.getPendingSends, {
+        limit: 10,
+      });
 
       if (sends.length === 0) {
         this.isProcessing = false;
         return;
       }
 
-      console.log(`[iMessage] Processing ${sends.length} pending send(s)`);
-
       for (const send of sends) {
-        await this.processSend(client, send);
+        await this.processSend(send as PendingSend);
       }
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
@@ -219,13 +177,12 @@ export class IMessageSender {
   /**
    * Process a single pending send.
    */
-  private async processSend(
-    client: ConvexClient,
-    send: PendingSend
-  ): Promise<void> {
+  private async processSend(send: PendingSend): Promise<void> {
     try {
       // Mark as sending
-      await client.mutation("pendingSends:markSending", { sendId: send._id });
+      await this.client.mutation(api.pendingSends.markSending, {
+        sendId: send._id,
+      });
 
       // Send the message
       let result: SendResult;
@@ -239,21 +196,22 @@ export class IMessageSender {
 
       // Update status
       if (result.success) {
-        await client.mutation("pendingSends:markSent", { sendId: send._id });
-        console.log(`[iMessage] Sent message to ${send.isGroup ? "group" : send.recipientHandle}`);
+        await this.client.mutation(api.pendingSends.markSent, {
+          sendId: send._id,
+        });
       } else {
-        await client.mutation("pendingSends:markFailed", {
+        await this.client.mutation(api.pendingSends.markFailed, {
           sendId: send._id,
           error: result.error || "Unknown error",
         });
-        console.log(`[iMessage] Failed to send: ${result.error}`);
+        console.error(`[iMessage] Failed to send: ${result.error}`);
       }
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       console.error(`[iMessage] Error processing send ${send._id}:`, message);
 
       try {
-        await client.mutation("pendingSends:markFailed", {
+        await this.client.mutation(api.pendingSends.markFailed, {
           sendId: send._id,
           error: message,
         });
