@@ -871,7 +871,7 @@
         "Add Badge component to (actions) NativeTabs.Trigger",
         "Display count when > 0, hide when 0"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "7.7",
@@ -885,7 +885,7 @@
         "Create SkeletonCard component with animated opacity",
         "Show 3 stacked skeleton cards matching CardStack layout"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "7.8",

@@ -932,3 +932,52 @@
 - Contact handles listed if available
 - ActionButtons at bottom for discard/snooze/send actions
 - Next task 7.6 will add badge count to Actions tab
+
+## 2026-01-17: Task 7.6 - Add badge count to Actions tab
+
+### Completed Tasks
+- 7.6: Add badge count to Actions tab
+
+### Files Changed
+- apps/mobile/app/_layout.tsx: Added TabsWithBadge component with usePendingActionCount
+
+### Decisions
+- Extracted TabsWithBadge component: Needed separate component to use hook inside NativeTabs structure
+- Badge with hidden prop: Uses hidden={count === 0} to hide when no actions, shows count when > 0
+- Simple string conversion: Badge children requires string, using String(count) when > 0
+
+### Verification Results
+- `pnpm lint` passes (0 errors, warnings only)
+- `pnpm typecheck` passes all 10 packages
+
+### Notes
+- Badge automatically updates via Convex real-time subscription
+- Task 7.6 was already implemented in previous session, just marked as complete
+- Next task 7.7 adds loading skeleton
+
+## 2026-01-17: Task 7.7 - Add loading skeleton to Actions tab
+
+### Completed Tasks
+- 7.7: Add loading skeleton to Actions tab
+
+### Files Changed
+- apps/mobile/src/components/skeleton-card.tsx: New SkeletonCard and SkeletonStack components
+- apps/mobile/app/(actions)/index.tsx: Use SkeletonStack for loading state
+
+### Decisions
+- Reanimated pulse animation: Using withRepeat + withTiming for 1s opacity pulse cycle (0.4 → 0.8)
+- Skeleton structure matches real card: Avatar, name, timestamp, platform badge, message bubbles, response input placeholders
+- SkeletonStack matches CardStack layout: Same VISIBLE_CARDS=3, SCALE_OFFSET=0.04, Y_OFFSET=8 constants
+- Header skeleton placeholder: Shows loading indicator for "X Left" count
+- bg-sf-fill for skeleton elements: Uses iOS semantic fill color for subtle placeholders
+
+### Verification Results
+- `pnpm lint` passes (0 errors, warnings only in web/ui)
+- `pnpm typecheck` passes all 10 packages
+- Linter auto-converted relative imports to @/ path aliases
+
+### Notes
+- SkeletonCard can be reused for other loading states if needed
+- Animation is smooth infinite pulse, not jarring shimmer
+- Task 7.8 (testing) requires manual iOS Simulator verification
+- Next phases: Phase 8 (Contacts), Phase 9 (Agent chat), Phase 10 (Auth)
