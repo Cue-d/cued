@@ -136,7 +136,9 @@ for ((i=1; i<=$ITERATIONS; i++)); do
   echo "Time: $(date)"
   echo "-----------------------------------"
 
-  result=$($CLAUDE_CMD "@prd.json @progress.txt \
+  OUTPUT_FILE="/tmp/ralph-iteration-$i.txt"
+
+  $CLAUDE_CMD "@mobile-prd.json @progress.txt \
 
 ## CONTEXT
 This is PRODUCTION CODE. Quality over speed.
@@ -144,7 +146,7 @@ Every shortcut becomes someone else's burden.
 Fight entropy. Leave the codebase better than you found it.
 
 ## PRD FORMAT
-The prd.json file contains structured tasks with:
+The mobile-prd.json file contains structured tasks with:
 - id: Task identifier (e.g., '3.2')
 - phase: 1-6
 - mode: 'hitl' or 'afk'
@@ -155,7 +157,7 @@ The prd.json file contains structured tasks with:
 - reference: (optional) URL to documentation for this task
 
 ## YOUR TASK
-1. Read prd.json and progress.txt to understand current state.
+1. Read mobile-prd.json and progress.txt to understand current state.
 
 2. Find tasks where passes=false. Choose using this priority:
    - Architectural decisions and core abstractions (HIGH)
@@ -182,7 +184,7 @@ The prd.json file contains structured tasks with:
 
 8. Commit with a descriptive message.
 
-9. Update prd.json: set passes=true for the completed task.
+9. Update mobile-prd.json: set passes=true for the completed task.
 
 10. Update progress.txt with:
     - Date/time and task ID + description
@@ -191,16 +193,15 @@ The prd.json file contains structured tasks with:
     - Browser verification results (for UI tasks)
     - Blockers or notes for next iteration
 
-11. Check if ALL tasks in prd.json have passes=true.
+11. Check if ALL tasks in mobile-prd.json have passes=true.
     If so, output exactly: <promise>COMPLETE</promise>
 
-ONLY WORK ON A SINGLE TASK.")
+ONLY WORK ON A SINGLE TASK." | tee "$OUTPUT_FILE"
 
-  echo "$result"
   echo ""
 
   # Check for completion sigil
-  if [[ "$result" == *"<promise>COMPLETE</promise>"* ]]; then
+  if grep -q "<promise>COMPLETE</promise>" "$OUTPUT_FILE" 2>/dev/null; then
     END_TIME=$(date +%s)
     DURATION=$((END_TIME - START_TIME))
     MINUTES=$((DURATION / 60))
@@ -243,7 +244,7 @@ fi
 echo ""
 echo "Check status:"
 echo "  - progress.txt for what was done"
-echo "  - prd.json for tasks with passes=false"
+echo "  - mobile-prd.json for tasks with passes=false"
 echo "  - git log --oneline -${ITERATIONS}"
 echo ""
 echo "Run again if more work remains."

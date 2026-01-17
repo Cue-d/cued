@@ -239,3 +239,50 @@
 ### Notes
 - Path aliases work for TypeScript but Metro bundler also needs babel-plugin-module-resolver for runtime (Expo handles this automatically via tsconfig paths)
 - Next task 1.12 will update app.json with iOS configuration
+
+## 2026-01-17: Task 1.12 - Update app.json with iOS configuration
+
+### Completed Tasks
+- 1.12: Update app.json with iOS configuration
+
+### Files Changed
+- apps/mobile/app.json: Added bundleIdentifier for iOS, package and softwareKeyboardLayoutMode for Android
+
+### Decisions
+- newArchEnabled already present: Was added during initial Expo app creation (task 1.1), no change needed
+- Used com.prm.mobile for both platforms: Consistent identifier for iOS and Android
+- softwareKeyboardLayoutMode: resize: Ensures keyboard pushes content up rather than overlaying
+
+### Verification Results
+- `pnpm run lint` passes (warnings only, no errors)
+- `pnpm run typecheck` passes all 9 packages
+- JSON validated with python3 json.tool
+
+### Notes
+- Next task 1.13 is a testing task to verify Phase 1 setup compiles and runs in iOS Simulator
+
+## 2026-01-17: Task 1.14 - Configure Turborepo dev scripts for mobile app
+
+### Completed Tasks
+- 1.14: Configure Turborepo dev scripts for mobile app
+
+### Files Changed
+- apps/mobile/package.json: Added dev, typecheck, lint scripts
+- apps/mobile/eslint.config.js: Created with eslint-config-expo/flat
+- apps/mobile/app/index.tsx: Removed unused test imports (isLiquidGlassAvailable, Animated, ConvexReactClient, cn)
+- pnpm-lock.yaml: Updated with ESLint dependencies
+
+### Decisions
+- Used eslint-config-expo@9 with flat config: Expo SDK 54 supports ESLint 9 flat config format
+- Removed test imports: index.tsx had test imports from earlier tasks (1.3-1.6, 1.11) that caused lint warnings - cleaned up since packages were already verified
+- No turbo.json changes needed: Turborepo auto-discovers packages by workspace config, mobile app already included
+
+### Verification Results
+- `pnpm lint` passes (8 packages including mobile, warnings only)
+- `pnpm typecheck` passes (10 tasks including mobile)
+- Mobile app ESLint runs cleanly with no errors
+
+### Notes
+- Task 1.13 (testing) requires manual iOS Simulator verification - skipped for now
+- Phase 1 architectural setup complete (tasks 1.1-1.12, 1.14)
+- Next: Phase 2 begins with CSS component wrappers (task 2.1)

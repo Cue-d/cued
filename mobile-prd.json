@@ -180,7 +180,7 @@
         "Add expo.newArchEnabled: true for New Architecture",
         "Verify app.json is valid JSON"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "1.13",
@@ -195,7 +195,7 @@
         "Verify app loads without crash",
         "Check Metro logs for any NativeWind/Tailwind warnings"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "1.14",
@@ -211,7 +211,7 @@
         "Run `pnpm dev` from root and verify mobile app starts alongside other apps",
         "Verify `pnpm typecheck` and `pnpm lint` include mobile app"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "2.1",
