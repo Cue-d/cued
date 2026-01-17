@@ -142,3 +142,100 @@
 - NativeWind auto-generated nativewind-env.d.ts on first run for TypeScript support
 - Expo warning about @types/react version mismatch is informational (works correctly)
 - Next task 1.8 will create postcss.config.mjs for Tailwind v4
+
+## 2026-01-17: Task 1.8 - PostCSS config for Tailwind v4
+
+### Completed Tasks
+- 1.8: Create PostCSS config for Tailwind v4
+
+### Files Changed
+- apps/mobile/postcss.config.mjs: Created with @tailwindcss/postcss plugin
+
+### Decisions
+- ESM format (.mjs): Consistent with Tailwind v4's modern config approach
+- Minimal config: Just the @tailwindcss/postcss plugin, no additional options needed
+
+### Verification Results
+- `pnpm lint` passes (warnings only, no errors)
+- `pnpm typecheck` passes all 9 packages
+- File exports correct structure: `{ plugins: { '@tailwindcss/postcss': {} } }`
+
+### Notes
+- This completes the NativeWind v5 + Tailwind v4 configuration chain: metro.config.js -> postcss.config.mjs -> (global.css in task 1.9)
+- Next task 1.9 will create global CSS with Tailwind imports and platform fonts
+
+## 2026-01-17: Task 1.9 - Global CSS with Tailwind imports and platform fonts
+
+### Completed Tasks
+- 1.9: Create global CSS with Tailwind imports and platform fonts
+
+### Files Changed
+- apps/mobile/src/global.css: Created with Tailwind v4 @import statements and platform-specific font CSS variables
+- apps/mobile/app/_layout.tsx: Added import for global.css as first import
+
+### Decisions
+- NativeWind v5 uses @media ios/android CSS blocks: Not platformSelect() config - actual CSS media queries are supported
+- Imported nativewind/theme: Provides CSS variable definitions for NativeWind v5's theming system
+- Used relative import path "../src/global.css": Task 1.11 will configure @/ path aliases, using relative path until then
+- Font variables use system defaults: iOS gets system-ui/ui-monospace, Android gets normal/monospace (native platform fonts)
+
+### Verification Results
+- `pnpm lint` passes (warnings only, no errors)
+- `pnpm typecheck` passes all 9 packages
+- Metro bundler starts successfully with NativeWind CSS processing
+- CSS file contains all required Tailwind imports and platform font definitions
+
+### Notes
+- Global CSS must be imported as FIRST import in _layout.tsx per NativeWind docs
+- Next task 1.10 will create Apple semantic colors CSS file (sf.css)
+
+## 2026-01-17: Task 1.10 - Apple semantic colors CSS file
+
+### Completed Tasks
+- 1.10: Create Apple semantic colors CSS file
+
+### Files Changed
+- apps/mobile/src/css/sf.css: Created with iOS platform colors and web/Android fallbacks
+- apps/mobile/src/global.css: Added @import for ./css/sf.css
+
+### Decisions
+- Used platformColor() for iOS: Native iOS semantic colors (systemBlue, label, systemBackground, etc.)
+- Used light-dark() for web/Android: CSS function for automatic light/dark mode switching
+- Comprehensive color set: Includes system colors (blue, green, red, etc.), text colors (label variants), backgrounds, fills, and separator
+- @theme directive for Tailwind: Registers all colors as --color-sf-* tokens for use with bg-sf-*, text-sf-*, etc.
+
+### Verification Results
+- `pnpm lint` passes (warnings only, no errors)
+- `pnpm typecheck` passes all packages
+- Mobile app TypeScript compiles cleanly
+
+### Notes
+- Colors now available as Tailwind utilities: text-sf-label, bg-sf-bg, bg-sf-blue, etc.
+- iOS will use true platform colors that respond to system appearance/accessibility settings
+- Web/Android will use appropriate hex fallbacks with light-dark() for dark mode support
+- Next task 1.11 will configure TypeScript path aliases
+
+## 2026-01-17: Task 1.11 - TypeScript path aliases
+
+### Completed Tasks
+- 1.11: Configure TypeScript path aliases
+
+### Files Changed
+- apps/mobile/tsconfig.json: Added baseUrl and paths for @/ and @prm/convex/*
+- apps/mobile/src/lib/utils.ts: Created cn() helper function with clsx + twMerge
+- apps/mobile/app/index.tsx: Added test import for @/lib/utils
+
+### Decisions
+- Created src/lib/utils.ts: Task 2.5 requires this file anyway, created now to verify @/ alias works
+- cn() uses standard pattern: twMerge(clsx(inputs)) for Tailwind class merging
+- Two path aliases configured: @/* for local src, @prm/convex/* for shared Convex package
+
+### Verification Results
+- `pnpm lint` passes (warnings only, no errors)
+- `pnpm typecheck` passes all 9 packages
+- `npx tsc --noEmit` in mobile app passes with @/lib/utils import
+- Import `import { cn } from "@/lib/utils"` resolves correctly
+
+### Notes
+- Path aliases work for TypeScript but Metro bundler also needs babel-plugin-module-resolver for runtime (Expo handles this automatically via tsconfig paths)
+- Next task 1.12 will update app.json with iOS configuration

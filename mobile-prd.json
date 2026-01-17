@@ -121,7 +121,7 @@
         "Create apps/mobile/postcss.config.mjs with @tailwindcss/postcss plugin",
         "Verify file exports { plugins: { '@tailwindcss/postcss': {} } }"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "1.9",
@@ -137,7 +137,7 @@
         "Add @media ios block with --font-mono: ui-monospace, --font-sans: system-ui",
         "Add @media android block with --font-mono: monospace, --font-sans: normal"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "1.10",
@@ -152,7 +152,7 @@
         "Add @layer theme with @theme mapping --color-sf-* to CSS variables",
         "Import sf.css in global.css"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "1.11",
@@ -165,7 +165,7 @@
         "Add paths: { '@/*': ['./src/*'], '@prm/convex/*': ['../../packages/convex/*'] }",
         "Verify `import { cn } from '@/lib/utils'` resolves correctly"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "1.12",

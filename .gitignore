@@ -17,6 +17,7 @@ eggs/
 lib/
 !frontend/src/renderer/src/lib/
 !packages/convex/convex/lib/
+!apps/mobile/src/lib/
 lib64/
 parts/
 sdist/
