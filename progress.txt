@@ -473,3 +473,27 @@
 ### Notes
 - MMKV storage instance isolated with id "convex-cache" to not conflict with other app storage
 - Next task 4.2 will create ConvexProvider with auth integration
+
+## 2026-01-17: Task 4.2 - ConvexProvider with auth integration
+
+### Completed Tasks
+- 4.2: Create ConvexProvider with auth integration
+
+### Files Changed
+- apps/mobile/src/providers/ConvexProvider.tsx: Created with ConvexProviderWithAuth wrapper and placeholder auth hook
+
+### Decisions
+- Placeholder auth pattern: useAuthPlaceholder returns unauthenticated state (isAuthenticated=false) allowing development without auth
+- React.JSX.Element return type: Newer TypeScript requires explicit React namespace for JSX types
+- useMemo for return value: Prevents unnecessary re-renders of Convex context consumers
+- TODO comments for Phase 10: Documents exactly what needs to change when real auth is implemented
+
+### Verification Results
+- `pnpm lint` passes (warnings only, no errors)
+- `pnpm typecheck` passes all packages
+- ConvexProvider exports correctly and TypeScript types are valid
+
+### Notes
+- Auth is placeholder until Phase 10 (tasks 10.1-10.8) when WorkOS OAuth is implemented
+- Convex queries without auth requirements will work in development
+- Next task 4.3 will integrate ConvexProvider into root layout

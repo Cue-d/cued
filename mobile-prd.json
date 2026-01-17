@@ -457,7 +457,7 @@
         "Wrap children with ConvexProviderWithAuth",
         "Pass auth token from useAuth to Convex"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "4.3",
