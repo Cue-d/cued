@@ -381,7 +381,33 @@ export const analyzeConversation = internalAction({
       );
 
       // Build input for LLM
-      const { generateActionWithRetry } = await import("@prm/ai");
+      const { generateActionWithRetry, getMemories } = await import("@prm/ai");
+
+      // Fetch memories about this contact for better context
+      let contactMemories: Array<{ memory: string; createdAt?: string }> = [];
+      if (primaryContact) {
+        try {
+          const memoryResults = await getMemories(
+            primaryContact.displayName,
+            {
+              user_id: queueEntry.userId.toString(),
+              filters: { contact_id: primaryContact._id.toString() },
+            }
+          );
+          if (Array.isArray(memoryResults)) {
+            contactMemories = memoryResults
+              .filter((m): m is { memory: string; created_at?: string } => Boolean(m.memory))
+              .slice(0, 10)
+              .map((m) => ({
+                memory: m.memory,
+                createdAt: m.created_at,
+              }));
+          }
+        } catch (e) {
+          // Memory fetch is optional - continue without it
+          console.log("Failed to fetch memories (non-blocking):", e);
+        }
+      }
 
       const suggestion = await generateActionWithRetry({
         contact: {
@@ -389,16 +415,14 @@ export const analyzeConversation = internalAction({
           company: primaryContact?.company ?? undefined,
           notes: primaryContact?.notes ?? undefined,
           isKnownContact: primaryContact !== null,
+          tags: primaryContact?.tags ?? undefined,
+          importance: primaryContact?.importance ?? undefined,
         },
-        messages: messages.map((m: { content: string; isFromMe: boolean; sentAt: number; senderName?: string }) => ({
-          content: m.content,
-          isFromMe: m.isFromMe,
-          sentAt: m.sentAt,
-          senderName: m.senderName,
-        })),
+        messages,
         platform: conversation.platform,
         hoursSinceLastMessage,
         recentActions,
+        contactMemories,
       });
 
       if (!suggestion.shouldCreateAction) {
@@ -429,8 +453,8 @@ export const analyzeConversation = internalAction({
           type: suggestion.type ?? "respond",
           priority: suggestion.priority ?? 50,
           platform: conversation.platform,
-          draftMessage: suggestion.suggestedResponse !== null ? suggestion.suggestedResponse : undefined,
-          llmReason: suggestion.reason !== null ? suggestion.reason : undefined,
+          draftMessage: suggestion.suggestedResponse ?? undefined,
+          llmReason: suggestion.reason ?? undefined,
           snoozedUntil,
         }
       );

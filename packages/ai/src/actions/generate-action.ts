@@ -42,6 +42,18 @@ export interface ContactInfo {
   company?: string;
   notes?: string;
   isKnownContact: boolean;
+  /** Tags or categories for the contact */
+  tags?: string[];
+  /** Contact importance score (0-100) */
+  importance?: number;
+}
+
+/** Memory about a contact from past interactions */
+export interface ContactMemory {
+  /** The memory content (fact, preference, context) */
+  memory: string;
+  /** When this memory was created */
+  createdAt?: string;
 }
 
 /** Recent action for context (to avoid duplicates) */
@@ -67,6 +79,8 @@ export interface GenerateActionInput {
   hoursSinceLastMessage: number;
   /** Recent actions for this conversation (to avoid duplicates) */
   recentActions?: RecentAction[];
+  /** Memories about this contact from past interactions */
+  contactMemories?: ContactMemory[];
 }
 
 /** Truncate text to max length, adding ellipsis if needed */
@@ -90,12 +104,26 @@ function formatTimestampRelative(timestamp: number): string {
 
 /** Build context prompt from conversation data */
 function buildContextPrompt(input: GenerateActionInput): string {
-  const { contact, messages, platform, hoursSinceLastMessage, recentActions } = input;
+  const { contact, messages, platform, hoursSinceLastMessage, recentActions, contactMemories } = input;
 
   // Contact info section
   const contactLines = [`Contact: ${contact.displayName}`];
   if (contact.company) contactLines.push(`Company: ${contact.company}`);
   if (contact.notes) contactLines.push(`Notes: ${truncate(contact.notes, 200)}`);
+  if (contact.tags && contact.tags.length > 0) {
+    contactLines.push(`Tags: ${contact.tags.join(", ")}`);
+  }
+  if (contact.importance !== undefined) {
+    let importanceLabel: string;
+    if (contact.importance >= 80) {
+      importanceLabel = "High";
+    } else if (contact.importance >= 50) {
+      importanceLabel = "Medium";
+    } else {
+      importanceLabel = "Low";
+    }
+    contactLines.push(`Importance: ${importanceLabel}`);
+  }
   contactLines.push(`Known contact: ${contact.isKnownContact ? "Yes" : "No"}`);
 
   // Message history (last 10, truncate long messages)
@@ -120,13 +148,22 @@ function buildContextPrompt(input: GenerateActionInput): string {
     recentActionsSection = `\n## Recent Actions\n${actionLines.join("\n")}\n`;
   }
 
+  // Memories section (context from past interactions)
+  let memoriesSection = "";
+  if (contactMemories && contactMemories.length > 0) {
+    const memoryLines = contactMemories.slice(0, 10).map((mem) => {
+      return `- ${truncate(mem.memory, 200)}`;
+    });
+    memoriesSection = `\n## What You Know About This Person\n${memoryLines.join("\n")}\n`;
+  }
+
   return `## Context
 Platform: ${platform}
 Time since last message: ${formatRelativeTime(hoursSinceLastMessage)}
 
 ## Contact Information
 ${contactLines.join("\n")}
-${recentActionsSection}
+${memoriesSection}${recentActionsSection}
 ## Recent Messages (oldest to newest)
 ${messageLines.join("\n")}`;
 }
@@ -143,6 +180,7 @@ Create an action when:
 - A commitment was made that needs follow-up
 - The conversation ended mid-discussion and needs continuation
 - Professional context (recruiter, business contact) requires timely response
+- An important contact (high importance) has been waiting for a response
 
 Do NOT create an action when:
 - The user sent the last message and is waiting for a reply
@@ -153,13 +191,21 @@ Do NOT create an action when:
 - A similar action was recently discarded (user dismissed it)
 - A pending action of the same type already exists
 
+## Using Contact Context
+When context about the contact is available:
+- Use memories to personalize suggested responses
+- Reference shared history or past topics when relevant
+- Adjust priority based on contact importance and relationship
+- Consider company/professional context for business relationships
+- Use tags to understand the relationship type (friend, colleague, etc.)
+
 ## Action Types
 - respond: Direct reply is needed to the conversation
 - follow_up: Set a reminder to check back later
 - send_message: Proactive outreach is appropriate
 
 ## Priority Guidelines (0-100)
-- 80-100: Urgent business/professional, time-sensitive commitments
+- 80-100: Urgent business/professional, time-sensitive commitments, high-importance contacts
 - 60-79: Important personal messages, questions awaiting answers
 - 40-59: Non-urgent but should be addressed soon
 - 20-39: Low priority, nice-to-respond
@@ -168,6 +214,8 @@ Do NOT create an action when:
 ## Response Guidelines
 When suggesting a response:
 - Match the tone and formality of the conversation
+- Use context from memories to make responses more personal
+- Reference relevant shared context when appropriate
 - Keep it concise and natural
 - Don't over-explain or be overly formal
 - For professional contexts, be appropriately polite`;
