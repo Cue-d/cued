@@ -99,7 +99,7 @@ export function setupSocialIpcHandlers(mainWindow: BrowserWindow | null): void {
         });
 
         const connections = await scraper.scrapeConnections({
-          headless: true,
+          headless: false, // Show browser so user can see progress
           maxConnections: options?.maxConnections ?? 500,
         });
 
@@ -182,7 +182,7 @@ export function setupSocialIpcHandlers(mainWindow: BrowserWindow | null): void {
         });
 
         const followers = await scraper.scrapeFollowers(username, {
-          headless: true,
+          headless: false, // Show browser so user can see progress
           maxUsers: options?.maxUsers ?? 500,
         });
 
@@ -231,7 +231,7 @@ export function setupSocialIpcHandlers(mainWindow: BrowserWindow | null): void {
         });
 
         const mutuals = await scraper.getMutuals(username, {
-          headless: true,
+          headless: false, // Show browser so user can see progress
           maxUsers: options?.maxUsers ?? 500,
         });
 
