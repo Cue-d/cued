@@ -520,3 +520,27 @@
 - Convex queries requiring auth will fail until Phase 10 (WorkOS OAuth)
 - Convex queries without auth requirements will work immediately
 - Next task 4.4 will create useActions hook for pending actions query
+
+## 2026-01-17: Task 4.4 - Create useActions hook for pending actions query
+
+### Completed Tasks
+- 4.4: Create useActions hook for pending actions query
+
+### Files Changed
+- apps/mobile/src/hooks/useActions.ts: Created hook using Convex useQuery
+
+### Decisions
+- Used api.actions.getPendingActions: PRD said api.actions.listPending but actual Convex API exports getPendingActions query
+- Supports cursor-based pagination: Hook accepts optional limit and cursor parameters
+- Returns enriched actions: The Convex query returns actions with contactName, platform, conversationId etc already resolved
+- error always null: Convex useQuery throws on error rather than returning error state, kept for interface consistency
+
+### Verification Results
+- `pnpm lint` passes (warnings only in web/ui packages, mobile clean)
+- `pnpm typecheck` passes all 10 packages
+- Hook imports resolve correctly via @prm/convex path alias
+
+### Notes
+- Hook returns { actions, nextCursor, isLoading, error }
+- isLoading is true while Convex query is pending (result === undefined)
+- Next task 4.5 will create useContacts hook

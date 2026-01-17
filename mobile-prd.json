@@ -487,7 +487,7 @@
         "Return { actions, isLoading, error }",
         "Export hook"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "4.5",
