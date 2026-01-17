@@ -1,6 +1,6 @@
 import React from "react";
 import { Alert, ActivityIndicator } from "react-native";
-import { Stack, router } from "expo-router";
+import { router } from "expo-router";
 import { View, Text, Pressable, ScrollView } from "@/tw";
 import { SymbolView } from "expo-symbols";
 import * as Haptics from "expo-haptics";
@@ -141,16 +141,7 @@ export default function SettingsScreen() {
   }
 
   return (
-    <>
-      <Stack.Screen
-        options={{
-          title: "Settings",
-          headerLargeTitle: true,
-          headerTransparent: true,
-          headerBlurEffect: "systemMaterial",
-        }}
-      />
-      <ScrollView
+    <ScrollView
         className="flex-1 bg-sf-bg"
         contentContainerClassName="pt-4 pb-8"
         contentInsetAdjustmentBehavior="automatic"
@@ -229,7 +220,6 @@ export default function SettingsScreen() {
         <Text className="text-center text-sf-tertiaryLabel text-xs mt-4">
           PRM v1.0.0
         </Text>
-      </ScrollView>
-    </>
+    </ScrollView>
   );
 }
