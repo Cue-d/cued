@@ -10,7 +10,7 @@
 import { useState, useCallback, useEffect } from "react";
 import { useMutation } from "convex/react";
 import { useRouter, useLocalSearchParams } from "expo-router";
-import * as Haptics from "expo-haptics";
+  import * as Haptics from "expo-haptics";
 import { View, Text, ScrollView } from "@/tw";
 import { useActions } from "@/hooks/useActions";
 import { CardStack } from "@/components/card-stack";
@@ -22,6 +22,7 @@ import {
   type ContactFormData,
 } from "@/components/cards";
 import type { SwipeDirection } from "@/components/swipeable-card";
+import { SkeletonStack } from "@/components/skeleton-card";
 import { api } from "@prm/convex/convex/_generated/api";
 import type { Id } from "@prm/convex/convex/_generated/dataModel";
 
@@ -259,13 +260,9 @@ export default function ActionsScreen(): React.JSX.Element {
     ],
   );
 
-  // Loading state
+  // Loading state - show skeleton cards matching CardStack layout
   if (isLoading) {
-    return (
-      <View className="flex-1 items-center justify-center">
-        <Text className="text-sf-secondaryLabel">Loading actions...</Text>
-      </View>
-    );
+    return <SkeletonStack />;
   }
 
   return (
