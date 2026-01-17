@@ -544,3 +544,28 @@
 - Hook returns { actions, nextCursor, isLoading, error }
 - isLoading is true while Convex query is pending (result === undefined)
 - Next task 4.5 will create useContacts hook
+
+## 2026-01-17: Task 4.5 - Create useContacts hook for contacts query
+
+### Completed Tasks
+- 4.5: Create useContacts hook for contacts query
+
+### Files Changed
+- apps/mobile/src/hooks/useContacts.ts: Created hook using Convex useQuery
+
+### Decisions
+- Used api.contacts.getContacts: PRD said api.contacts.list but actual Convex API exports getContacts query
+- Supports searchQuery parameter: For filtering contacts by displayName
+- Supports cursor-based pagination: Hook accepts optional limit and cursor (Id<"contacts">) parameters
+- Used proper Id<"contacts"> type: Imported from @prm/convex for type safety on cursor
+- error always null: Convex useQuery throws on error rather than returning error state, kept for interface consistency
+
+### Verification Results
+- `pnpm lint` passes (warnings only in web/ui packages, mobile clean)
+- `pnpm typecheck` passes all 10 packages
+- Hook imports resolve correctly via @prm/convex path alias
+
+### Notes
+- Hook returns { contacts, nextCursor, isLoading, error }
+- isLoading is true while Convex query is pending (result === undefined)
+- Next task 4.6 will create usePendingActionCount hook for badge

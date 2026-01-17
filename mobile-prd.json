@@ -503,7 +503,7 @@
         "Support search parameter for filtering",
         "Return { contacts, isLoading, error }"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "4.6",
