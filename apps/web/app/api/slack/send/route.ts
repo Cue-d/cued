@@ -21,59 +21,71 @@ interface SendSlackMessageRequest {
  * Called when completing a Slack-platform action (respond/follow_up).
  */
 export async function POST(request: NextRequest): Promise<NextResponse> {
-  try {
-    const body = (await request.json()) as SendSlackMessageRequest;
-    const { workosUserId, conversationId, text, threadTs } = body;
+  // TODO: DISABLED - Comment out to prevent accidentally contacting people
+  const body = (await request.json()) as SendSlackMessageRequest;
+  console.log("[Slack API] DISABLED - would have sent message:", {
+    conversationId: body.conversationId,
+    text: body.text?.substring(0, 50) + "...",
+  });
+  return NextResponse.json({
+    success: true,
+    messageTs: "DISABLED",
+    channel: "DISABLED",
+  });
 
-    if (!workosUserId || !conversationId || !text) {
-      return NextResponse.json(
-        { error: "Missing required fields" },
-        { status: 400 }
-      );
-    }
+  // try {
+  //   const body = (await request.json()) as SendSlackMessageRequest;
+  //   const { workosUserId, conversationId, text, threadTs } = body;
 
-    // Get user's Slack connection from Convex
-    const integration = await convex.query(api.integrations.getIntegration, {
-      workosUserId,
-      platform: "slack",
-    });
+  //   if (!workosUserId || !conversationId || !text) {
+  //     return NextResponse.json(
+  //       { error: "Missing required fields" },
+  //       { status: 400 }
+  //     );
+  //   }
 
-    if (!integration?.nangoConnectionId) {
-      return NextResponse.json(
-        { error: "Slack not connected" },
-        { status: 400 }
-      );
-    }
+  //   // Get user's Slack connection from Convex
+  //   const integration = await convex.query(api.integrations.getIntegration, {
+  //     workosUserId,
+  //     platform: "slack",
+  //   });
 
-    // Get conversation to find the channel ID
-    const conversation = await convex.query(api.messages.getConversationById, {
-      conversationId: conversationId as Id<"conversations">, // Type cast for ID
-    });
+  //   if (!integration?.nangoConnectionId) {
+  //     return NextResponse.json(
+  //       { error: "Slack not connected" },
+  //       { status: 400 }
+  //     );
+  //   }
 
-    if (!conversation) {
-      return NextResponse.json(
-        { error: "Conversation not found" },
-        { status: 404 }
-      );
-    }
+  //   // Get conversation to find the channel ID
+  //   const conversation = await convex.query(api.messages.getConversationById, {
+  //     conversationId: conversationId as Id<"conversations">, // Type cast for ID
+  //   });
 
-    // Send message via Nango
-    const result = await sendSlackMessage(integration.nangoConnectionId, {
-      channel: conversation.platformConversationId,
-      text,
-      thread_ts: threadTs,
-    });
+  //   if (!conversation) {
+  //     return NextResponse.json(
+  //       { error: "Conversation not found" },
+  //       { status: 404 }
+  //     );
+  //   }
 
-    console.log("Slack message sent:", result);
+  //   // Send message via Nango
+  //   const result = await sendSlackMessage(integration.nangoConnectionId, {
+  //     channel: conversation.platformConversationId,
+  //     text,
+  //     thread_ts: threadTs,
+  //   });
 
-    return NextResponse.json({
-      success: true,
-      messageTs: result.ts,
-      channel: result.channel,
-    });
-  } catch (error) {
-    const message = error instanceof Error ? error.message : "Send failed";
-    console.error("Slack send error:", message);
-    return NextResponse.json({ error: message }, { status: 500 });
-  }
+  //   console.log("Slack message sent:", result);
+
+  //   return NextResponse.json({
+  //     success: true,
+  //     messageTs: result.ts,
+  //     channel: result.channel,
+  //   });
+  // } catch (error) {
+  //   const message = error instanceof Error ? error.message : "Send failed";
+  //   console.error("Slack send error:", message);
+  //   return NextResponse.json({ error: message }, { status: 500 });
+  // }
 }

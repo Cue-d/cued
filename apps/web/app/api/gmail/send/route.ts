@@ -24,53 +24,66 @@ interface SendGmailMessageRequest {
  * Called when completing a Gmail-platform action (respond/follow_up).
  */
 export async function POST(request: NextRequest): Promise<NextResponse> {
-  try {
-    const body = (await request.json()) as SendGmailMessageRequest;
-    const { workosUserId, conversationId, to, subject, body: emailBody, threadId, inReplyTo, references } = body;
+  // TODO: DISABLED - Comment out to prevent accidentally contacting people
+  const body = (await request.json()) as SendGmailMessageRequest;
+  console.log("[Gmail API] DISABLED - would have sent email:", {
+    to: body.to,
+    subject: body.subject,
+    body: body.body?.substring(0, 50) + "...",
+  });
+  return NextResponse.json({
+    success: true,
+    messageId: "DISABLED",
+    threadId: "DISABLED",
+  });
 
-    if (!workosUserId || !conversationId || !to || !subject || !emailBody) {
-      return NextResponse.json({ error: "Missing required fields" }, { status: 400 });
-    }
+  // try {
+  //   const body = (await request.json()) as SendGmailMessageRequest;
+  //   const { workosUserId, conversationId, to, subject, body: emailBody, threadId, inReplyTo, references } = body;
 
-    // Get user's Gmail connection from Convex
-    const integration = await convex.query(api.integrations.getIntegration, {
-      workosUserId,
-      platform: "gmail",
-    });
+  //   if (!workosUserId || !conversationId || !to || !subject || !emailBody) {
+  //     return NextResponse.json({ error: "Missing required fields" }, { status: 400 });
+  //   }
 
-    if (!integration?.nangoConnectionId) {
-      return NextResponse.json({ error: "Gmail not connected" }, { status: 400 });
-    }
+  //   // Get user's Gmail connection from Convex
+  //   const integration = await convex.query(api.integrations.getIntegration, {
+  //     workosUserId,
+  //     platform: "gmail",
+  //   });
 
-    // Verify conversation exists
-    const conversationExists = await convex.query(api.messages.getConversationById, {
-      conversationId: conversationId as Id<"conversations">,
-    });
+  //   if (!integration?.nangoConnectionId) {
+  //     return NextResponse.json({ error: "Gmail not connected" }, { status: 400 });
+  //   }
 
-    if (!conversationExists) {
-      return NextResponse.json({ error: "Conversation not found" }, { status: 404 });
-    }
+  //   // Verify conversation exists
+  //   const conversationExists = await convex.query(api.messages.getConversationById, {
+  //     conversationId: conversationId as Id<"conversations">,
+  //   });
 
-    // Send email via Nango
-    const result = await sendGmailMessage(integration.nangoConnectionId, {
-      to,
-      subject,
-      body: emailBody,
-      threadId,
-      inReplyTo,
-      references,
-    });
+  //   if (!conversationExists) {
+  //     return NextResponse.json({ error: "Conversation not found" }, { status: 404 });
+  //   }
 
-    console.log("Gmail message sent:", result);
+  //   // Send email via Nango
+  //   const result = await sendGmailMessage(integration.nangoConnectionId, {
+  //     to,
+  //     subject,
+  //     body: emailBody,
+  //     threadId,
+  //     inReplyTo,
+  //     references,
+  //   });
 
-    return NextResponse.json({
-      success: true,
-      messageId: result.id,
-      threadId: result.threadId,
-    });
-  } catch (error) {
-    const message = error instanceof Error ? error.message : "Send failed";
-    console.error("Gmail send error:", message);
-    return NextResponse.json({ error: message }, { status: 500 });
-  }
+  //   console.log("Gmail message sent:", result);
+
+  //   return NextResponse.json({
+  //     success: true,
+  //     messageId: result.id,
+  //     threadId: result.threadId,
+  //   });
+  // } catch (error) {
+  //   const message = error instanceof Error ? error.message : "Send failed";
+  //   console.error("Gmail send error:", message);
+  //   return NextResponse.json({ error: message }, { status: 500 });
+  // }
 }
