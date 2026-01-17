@@ -551,7 +551,7 @@
         "Call onSwipe('right'|'left'|'up') based on direction",
         "If below threshold, animate back with withSpring(0)"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "5.2",
@@ -566,7 +566,7 @@
         "Interpolate opacity from translateX: [-200, 0, 200] -> [0.5, 1, 0.5]",
         "Apply transforms to Animated.View style"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "5.3",
@@ -583,7 +583,7 @@
         "Add up overlay: bg-amber-700 with clock icon and 'Snooze' text",
         "Use SymbolView from expo-symbols for icons"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "5.4",

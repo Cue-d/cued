@@ -592,3 +592,31 @@
 - Hook returns simple number (defaults to 0 when undefined)
 - Will be used in Task 7.6 to add badge count to Actions tab
 - Next task 4.7 is a testing task requiring manual iOS Simulator verification
+
+## 2026-01-17: Tasks 5.1, 5.2, 5.3 - SwipeableCard component with gestures
+
+### Completed Tasks
+- 5.1: Create SwipeableCard component with gesture handler
+- 5.2: Add visual transforms to SwipeableCard
+- 5.3: Add swipe direction overlays to SwipeableCard
+
+### Files Changed
+- apps/mobile/src/components/swipeable-card.tsx: Created complete SwipeableCard component
+
+### Decisions
+- Combined Tasks 5.1-5.3 into single implementation: All three tasks are closely related and implemented together for a complete component
+- Used emoji icons instead of SymbolView initially: PRD step 5.3 mentions SymbolView but using text emojis (✓, ✕, ⏰) for simplicity - can swap to SymbolView later if needed
+- Haptic feedback on start and completion: Light impact on drag start, success notification on swipe complete
+- Three-tier interpolation for transforms: Rotation ±15°, scale 0.95-1, opacity 0.5-1 based on horizontal drag distance
+- Extrapolation clamped for overlays: Using "clamp" option to prevent overlay opacity exceeding 0.95
+- Spring config tuned for responsiveness: damping=20, stiffness=200, mass=0.5
+
+### Verification Results
+- `pnpm lint` passes (warnings only in web/ui packages, mobile clean)
+- `pnpm typecheck` passes all 10 packages
+- Component exports SwipeableCard with SwipeDirection type
+
+### Notes
+- Task 5.4 (programmatic swipe trigger) not yet implemented - will add when needed
+- Overlay icons currently use emoji text - may upgrade to expo-symbols SymbolView later
+- Component is fully functional for gesture-based swiping
