@@ -1,4 +1,5 @@
 export * from "./types"
+export * from "./artifacts"
 export { AssistantView } from "./assistant-view"
 export { ChatMessage } from "./chat-message"
 export { ChatInput } from "./chat-input"

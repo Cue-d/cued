@@ -1,78 +1,44 @@
-import * as React from "react";
-import { Bot, ChevronDown, User } from "lucide-react";
+import * as React from "react"
+import { Bot, ChevronDown, User } from "lucide-react"
 
-import { cn } from "../../lib/utils";
-import { Avatar, AvatarFallback } from "../ui/avatar";
+import { cn } from "../../lib/utils"
+import { Avatar, AvatarFallback } from "../ui/avatar"
 import {
   Collapsible,
   CollapsibleContent,
   CollapsibleTrigger,
-} from "../ui/collapsible";
+} from "../ui/collapsible"
 import {
   Message,
   MessageContent,
   MessageResponse,
-} from "../ai-elements/message";
-import { Loader } from "../ai-elements/loader";
-import { ToolArtifact } from "./tool-artifact";
-import type {
-  MessageWithToolInvocations,
-  ToolArtifact as ToolArtifactType,
-} from "./types";
+} from "../ai-elements/message"
+import { Loader } from "../ai-elements/loader"
+import { ToolArtifact } from "./tool-artifact"
 
-interface ChatMessageProps {
-  message: MessageWithToolInvocations;
-  isStreaming?: boolean;
-  className?: string;
+export interface ToolInvocation {
+  toolCallId: string
+  toolName: string
+  args: Record<string, unknown>
+  state: "partial-call" | "call" | "result"
+  result?: unknown
 }
 
-function parseToolResult(
-  toolName: string,
-  result: unknown
-): ToolArtifactType | null {
-  if (!result || typeof result !== "object") return null;
+export interface AssistantMessage {
+  id: string
+  role: "user" | "assistant"
+  content: string
+  createdAt?: Date
+}
 
-  const data = result as Record<string, unknown>;
-  if (!data.success) return null;
+export interface MessageWithToolInvocations extends AssistantMessage {
+  toolInvocations?: ToolInvocation[]
+}
 
-  switch (toolName) {
-    case "search_messages":
-      if (Array.isArray(data.results)) {
-        return { type: "search_results", data: data.results };
-      }
-      break;
-    case "search_contacts":
-      if (Array.isArray(data.contacts)) {
-        return { type: "contacts", data: data.contacts };
-      }
-      break;
-    case "get_conversations":
-      if (Array.isArray(data.conversations)) {
-        return { type: "conversations", data: data.conversations };
-      }
-      break;
-    case "create_action":
-      if (data.actionId) {
-        return {
-          type: "action_created",
-          data: {
-            actionId: data.actionId as string,
-            type: (data.type as string) || "unknown",
-            priority: (data.priority as number) || 50,
-            reason: data.reason as string | undefined,
-            draftMessage: data.draftMessage as string | undefined,
-          },
-        };
-      }
-      break;
-    case "search_memories":
-      if (Array.isArray(data.memories)) {
-        return { type: "memories", data: data.memories };
-      }
-      break;
-  }
-
-  return null;
+interface ChatMessageProps {
+  message: MessageWithToolInvocations
+  isStreaming?: boolean
+  className?: string
 }
 
 function StreamingIndicator() {
@@ -80,7 +46,7 @@ function StreamingIndicator() {
     <span className="inline-flex items-center gap-1 text-muted-foreground">
       <Loader size={14} />
     </span>
-  );
+  )
 }
 
 function ToolCallIndicator({ toolName }: { toolName: string }) {
@@ -89,7 +55,7 @@ function ToolCallIndicator({ toolName }: { toolName: string }) {
       <Loader size={12} />
       <span>Using {toolName.replace(/_/g, " ")}...</span>
     </div>
-  );
+  )
 }
 
 export function ChatMessage({
@@ -97,20 +63,21 @@ export function ChatMessage({
   isStreaming = false,
   className,
 }: ChatMessageProps) {
-  const isUser = message.role === "user";
-  const [showToolCalls, setShowToolCalls] = React.useState(false);
+  const isUser = message.role === "user"
+  const [showToolCalls, setShowToolCalls] = React.useState(false)
 
-  const artifacts = React.useMemo(() => {
-    if (!message.toolInvocations) return [];
-    return message.toolInvocations
-      .filter((inv) => inv.state === "result" && inv.result)
-      .map((inv) => parseToolResult(inv.toolName, inv.result))
-      .filter((a): a is ToolArtifactType => a !== null);
-  }, [message.toolInvocations]);
+  // Get completed tool invocations with results
+  const completedToolCalls = React.useMemo(() => {
+    if (!message.toolInvocations) return []
+    return message.toolInvocations.filter(
+      (inv) => inv.state === "result" && inv.result !== undefined
+    )
+  }, [message.toolInvocations])
 
+  // Get pending tool calls
   const pendingToolCalls = message.toolInvocations?.filter(
     (inv) => inv.state === "call" || inv.state === "partial-call"
-  );
+  )
 
   return (
     <Message from={message.role} className={className}>
@@ -166,6 +133,7 @@ export function ChatMessage({
             ) : null}
           </MessageContent>
 
+          {/* Pending tool calls */}
           {pendingToolCalls && pendingToolCalls.length > 0 && (
             <div className="space-y-1">
               {pendingToolCalls.map((inv) => (
@@ -177,10 +145,14 @@ export function ChatMessage({
             </div>
           )}
 
-          {artifacts.length > 0 && (
+          {/* Completed tool results */}
+          {completedToolCalls.length > 0 && (
             <div className="w-full max-w-md">
-              {artifacts.length === 1 ? (
-                <ToolArtifact artifact={artifacts[0]} />
+              {completedToolCalls.length === 1 ? (
+                <ToolArtifact
+                  toolName={completedToolCalls[0].toolName}
+                  result={completedToolCalls[0].result}
+                />
               ) : (
                 <Collapsible
                   open={showToolCalls}
@@ -193,11 +165,15 @@ export function ChatMessage({
                         showToolCalls && "rotate-180"
                       )}
                     />
-                    <span>{artifacts.length} tool results</span>
+                    <span>{completedToolCalls.length} tool results</span>
                   </CollapsibleTrigger>
                   <CollapsibleContent className="mt-3 space-y-3">
-                    {artifacts.map((artifact, i) => (
-                      <ToolArtifact key={i} artifact={artifact} />
+                    {completedToolCalls.map((inv) => (
+                      <ToolArtifact
+                        key={inv.toolCallId}
+                        toolName={inv.toolName}
+                        result={inv.result}
+                      />
                     ))}
                   </CollapsibleContent>
                 </Collapsible>
@@ -207,5 +183,5 @@ export function ChatMessage({
         </div>
       </div>
     </Message>
-  );
+  )
 }

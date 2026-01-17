@@ -22,26 +22,44 @@ function getTextContent(msg: UIMessage): string {
 
 function getToolInvocations(msg: UIMessage): ToolInvocation[] {
   return msg.parts
-    .filter((part) => part.type.startsWith("tool-"))
+    .filter(
+      (part) => part.type.startsWith("tool-") || part.type === "dynamic-tool"
+    )
     .map((part) => {
       const toolPart = part as {
         type: string;
         toolCallId: string;
-        toolName: string;
-        state?: string;
-        args?: Record<string, unknown>;
+        toolName?: string; // For dynamic-tool type
+        state: string;
         input?: unknown;
-        result?: unknown;
+        output?: unknown;
       };
+
+      // Extract tool name: from type for static tools, or from toolName for dynamic tools
+      const toolName =
+        toolPart.type === "dynamic-tool"
+          ? toolPart.toolName || "unknown"
+          : toolPart.type.replace(/^tool-/, "");
+
+      // Map AI SDK states to our simplified states
+      let state: "partial-call" | "call" | "result";
+      if (toolPart.state === "input-streaming") {
+        state = "partial-call";
+      } else if (
+        toolPart.state === "output-available" ||
+        toolPart.state === "output-error"
+      ) {
+        state = "result";
+      } else {
+        state = "call";
+      }
+
       return {
         toolCallId: toolPart.toolCallId,
-        toolName: toolPart.toolName,
-        args: (toolPart.args || toolPart.input || {}) as Record<
-          string,
-          unknown
-        >,
-        state: (toolPart.state || "call") as "partial-call" | "call" | "result",
-        result: toolPart.result,
+        toolName,
+        args: (toolPart.input || {}) as Record<string, unknown>,
+        state,
+        result: toolPart.output,
       };
     });
 }
