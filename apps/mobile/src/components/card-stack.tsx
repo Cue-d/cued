@@ -11,8 +11,9 @@ import Animated, {
   FadeOut,
   Layout,
 } from "react-native-reanimated";
+import { SymbolView } from "expo-symbols";
 import { SwipeableCard, type SwipeDirection } from "./swipeable-card";
-import { View } from "@/tw";
+import { View, Text } from "@/tw";
 
 // Number of visible cards in the stack
 const VISIBLE_CARDS = 3;
@@ -53,6 +54,30 @@ export function CardStack<T extends CardStackItem>({
   const handleSwipe = (item: T, direction: SwipeDirection): void => {
     onSwipe(item, direction);
   };
+
+  // Empty state when no actions
+  if (actions.length === 0) {
+    return (
+      <View className="flex-1 items-center justify-center px-4">
+        <Animated.View
+          entering={FadeIn.duration(300)}
+          className="items-center"
+        >
+          <SymbolView
+            name="party.popper"
+            size={64}
+            tintColor="#8E8E93"
+          />
+          <Text className="text-2xl font-bold text-sf-label mt-4">
+            All caught up!
+          </Text>
+          <Text className="text-base text-sf-secondaryLabel mt-2 text-center">
+            New actions will appear here
+          </Text>
+        </Animated.View>
+      </View>
+    );
+  }
 
   return (
     <View className="flex-1 items-center justify-center px-4">
