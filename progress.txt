@@ -1008,3 +1008,281 @@
 - Task 8.2 will add Link.Preview and context menu features (advanced expo-router features)
 - Component ready for use in Contacts tab (Task 8.3)
 - lastMessageText field will require joining with conversations/messages data in the hook or query
+
+## 2026-01-17: Task 8.2 - Add Link.Preview and context menu to ContactListItem
+
+### Completed Tasks
+- 8.2: Add Link.Preview and context menu to ContactListItem
+
+### Files Changed
+- apps/mobile/src/components/contact-list-item.tsx: Added Link.Trigger, Link.Preview, Link.Menu with actions
+
+### Decisions
+- Replaced asChild pattern with Link.Trigger: expo-router's Link component supports children-based API with Trigger/Preview/Menu subcomponents
+- Link.Preview without children: Renders preview of the href destination page on long press (peek)
+- Five context menu actions: Message, Call, Email, View Profile, Block
+- Message/Call disabled when no phoneNumber: Shows disabled state in context menu
+- Email disabled when no email: Shows disabled state in context menu
+- Block action is destructive: Uses destructive prop for red styling
+- Haptic feedback on all menu actions: Uses Haptics.selectionAsync() for consistent feedback
+- Added phoneNumber/email to ContactListItemData: Optional fields for context menu actions
+- Added onBlock callback prop: Parent component handles block logic
+
+### Verification Results
+- `pnpm lint` passes (0 errors, warnings only in web/ui packages)
+- `pnpm typecheck` passes all 10 packages
+- Link.MenuAction uses SF Symbol icons via icon prop (message.fill, phone.fill, envelope.fill, person.crop.circle, hand.raised.slash.fill)
+
+### Notes
+- Link.Preview/Menu/Trigger are iOS-only features (@platform ios in docs)
+- Context menu appears on long press via native iOS API
+- View Profile action navigates via normal Link tap
+- Task 8.3 will implement Contacts tab with FlatList using this component
+
+## 2026-01-17: Task 8.3 - Implement Contacts tab with FlatList
+
+### Completed Tasks
+- 8.3: Implement Contacts tab with FlatList
+
+### Files Changed
+- apps/mobile/app/(contacts)/index.tsx: Complete rewrite with FlatList and useContacts hook
+
+### Decisions
+- FlatList from react-native: Native scrolling performance with contentInsetAdjustmentBehavior for iOS header handling
+- mapContact helper: Transforms Convex contact shape to ContactListItemData, extracting phone/email from handles array
+- Extracted helper functions: renderContactItem, keyExtractor, EmptyState, ItemSeparator for clean component structure
+- Empty state component: Shows friendly message when no contacts exist
+- Item separator: 1px line with left margin (ml-16) to align with content, not avatar
+- Loading state: Simple centered text while contacts are fetched
+
+### Verification Results
+- `pnpm lint` passes (0 errors, warnings only in web/ui packages)
+- `pnpm typecheck` passes all 10 packages
+- FlatList uses keyExtractor with contact.id for efficient list rendering
+
+### Notes
+- Contacts will show as empty until user authenticates (Phase 10)
+- Task 8.4 will add search functionality to filter contacts
+- lastMessageText field not yet populated (would require joining with conversations)
+
+## 2026-01-17: Task 8.4 - Add search to Contacts tab
+
+### Completed Tasks
+- 8.4: Add search to Contacts tab
+
+### Files Changed
+- apps/mobile/app/(contacts)/index.tsx: Added searchQuery state with headerSearchBarOptions.onChangeText, pass to useContacts hook
+- apps/mobile/app/(contacts)/_layout.tsx: Removed headerSearchBarOptions (moved to screen for dynamic control)
+
+### Decisions
+- No useSearch hook exists: PRD step mentioned importing useSearch from expo-router, but this hook doesn't exist. Used headerSearchBarOptions.onChangeText callback with useState instead, which is the official pattern.
+- headerSearchBarOptions in screen component: Moved from layout to screen to enable dynamic onChangeText callback that updates state
+- searchQuery || undefined: Pass undefined instead of empty string when search is blank to avoid filtering on empty query
+
+### Verification Results
+- `pnpm lint` passes (0 errors, warnings only in web/ui packages)
+- `pnpm typecheck` passes all 10 packages
+- Search functionality wired correctly via headerSearchBarOptions.onChangeText → useState → useContacts hook
+
+### Notes
+- Native iOS search bar appears under navigation title
+- Search filtering happens via Convex query (server-side)
+- Task 8.5 (contact detail page) is next in Phase 8
+
+## 2026-01-17: Task 8.5 - Create contact detail page
+
+### Completed Tasks
+- 8.5: Create contact detail page
+
+### Files Changed
+- apps/mobile/app/(contacts)/[id].tsx: New contact detail screen with full profile
+- apps/mobile/app/(contacts)/_layout.tsx: Added Stack.Screen config for [id] route
+
+### Decisions
+- Used api.contacts.getContact: PRD mentioned getWithHandles but actual API is getContact which returns contact with handles
+- Handles grouped by platform: Shows all contact handles organized under platform headers (iMessage, Gmail, Slack, etc.)
+- Platform color coding: Each platform has branded tint color (green for iMessage, red for Gmail, purple for Slack)
+- SFSymbol type import: Required importing SFSymbol from sf-symbols-typescript to satisfy SymbolView name prop type checking
+- Recent conversations placeholder: Shows "coming soon" state - would require additional query to list conversations by contact
+
+### Verification Results
+- `pnpm lint` passes (0 errors, warnings only in web/ui packages)
+- `pnpm typecheck` passes all 10 packages
+- Contact detail shows avatar, name/company, handles, tags, notes
+
+### Notes
+- Screen navigable from ContactListItem via Link href="/contacts/[id]"
+- Tags displayed as rounded badge pills
+- Notes section shows full text with selectable prop
+- Task 8.6 (Contacts tab E2E testing) requires manual iOS Simulator verification
+- Phase 9 (Agent chat) is next after Phase 8 testing
+
+## 2026-01-17: Task 9.1 - Create ChatMessage component for agent
+
+### Completed Tasks
+- 9.1: Create ChatMessage component for agent
+
+### Files Changed
+- apps/mobile/src/components/chat/chat-message.tsx: New ChatMessage component with markdown and streaming support
+
+### Decisions
+- Simple markdown renderer: Inline regex parsing for **bold** and `code` - no external library needed for these simple cases
+- FadeIn animation: Messages animate in smoothly with 200ms Reanimated FadeIn
+- Avatar component inline: Simple circular avatar with "U" for user, "AI" for assistant
+- TypingIndicator with ActivityIndicator: Native spinner with "Thinking..." text during streaming
+- PendingToolIndicator: Shows "Using [tool name]..." with spinner while tool is executing
+- Color scheme: Uses sf-blue for user bubbles, sf-fill for assistant bubbles (iOS semantic colors)
+- Rounded corners: rounded-2xl with rounded-br-md (user) or rounded-bl-md (assistant) for chat bubble style
+
+### Verification Results
+- `pnpm lint` passes (0 errors, warnings only in web/ui/mobile for unrelated issues)
+- `pnpm typecheck` passes all 10 packages
+- Component exports ChatMessage, ChatMessageData, ToolInvocation types
+
+### Notes
+- Task 9.2 (ChatInput) is next in Phase 9
+- Tool artifacts (Task 9.6) will need separate component when completed tools are displayed
+
+## 2026-01-17: Task 9.2 - Create ChatInput component with keyboard handling
+
+### Completed Tasks
+- 9.2: Create ChatInput component with keyboard handling
+
+### Files Changed
+- apps/mobile/src/components/chat/chat-input.tsx: New ChatInput component with multiline input and send button
+
+### Decisions
+- Used arrow.up SF Symbol (not arrow.up.circle.fill): Cleaner look with circular button background providing the circle, arrow alone is cleaner inside
+- GlassView conditional rendering: Uses isLiquidGlassAvailable() check to use GlassView on iOS 26+, falls back to semi-transparent bg-sf-secondaryBg/95
+- Multiline with max height: min-h-[36px] max-h-[120px] for reasonable input bounds without taking over screen
+- Send button circular: w-9 h-9 rounded-full with bg-sf-blue when active, bg-sf-fill when disabled
+- Haptic feedback: Light impact on send button press for tactile confirmation
+- blurOnSubmit={false}: Keeps keyboard open after sending for rapid conversation flow
+
+### Verification Results
+- `pnpm lint` passes (0 errors, mobile clean)
+- `pnpm typecheck` passes all 10 packages
+- Component exports ChatInput, ChatInputProps
+
+### Notes
+- Task 9.3 (SuggestedPrompts) is next in Phase 9
+- ChatInput works standalone, will be composed with ChatMessage in Agent tab (Task 9.5)
+
+## 2026-01-17: Task 9.3 - Create SuggestedPrompts component
+
+### Completed Tasks
+- 9.3: Create SuggestedPrompts component
+
+### Files Changed
+- apps/mobile/src/components/chat/suggested-prompts.tsx: New SuggestedPrompts component with horizontal scrolling prompt chips
+
+### Decisions
+- Three predefined prompts: "Who did I talk to recently?", "Any messages I should reply to?", "What's new with my contacts?"
+- PromptChip subcomponent: Reusable chip with GlassView (iOS 26+) or fallback bg-sf-fill styling
+- Horizontal ScrollView: Using contentContainerClassName for gap/padding styling
+- Haptic feedback: Light impact on chip selection for tactile confirmation
+- isLiquidGlassAvailable() check: Same pattern as ChatInput for conditional GlassView usage
+- "Try asking..." header: Provides context above the prompt suggestions
+
+### Verification Results
+- `pnpm lint` passes (0 errors, mobile clean)
+- `pnpm typecheck` passes all 10 packages
+- Component exports SuggestedPrompts, SuggestedPromptsProps
+
+### Notes
+- Task 9.4 (useChat hook) is next in Phase 9
+- SuggestedPrompts will be shown when messages array is empty in Agent tab (Task 9.5)
+
+## 2026-01-17: Task 9.4 - Create useChat hook for AI streaming
+
+### Completed Tasks
+- 9.4: Create useChat hook for AI streaming
+
+### Files Changed
+- apps/mobile/src/hooks/useChat.ts: New custom useChat hook for React Native
+
+### Decisions
+- Custom implementation vs @ai-sdk/react: React Native doesn't support the same SSE/EventSource APIs as web, so custom fetch+ReadableStream parsing needed
+- EXPO_PUBLIC_API_URL env var: Configurable API base URL, defaults to localhost:3000 for development
+- UI message format matching: Converts local messages to API's expected format (id, role, parts[{type:"text", text}])
+- AbortController for cancellation: Allows stopping in-progress requests, properly handles AbortError
+- SSE parsing: Custom parseSSELine function handles "event:" and "data:" prefixes
+- Tool invocation tracking: Maintains Map<toolCallId, ToolInvocation> for accumulating tool state across stream events
+- Error recovery: Removes empty assistant message on error, preserves user message
+
+### Verification Results
+- `pnpm lint` passes (0 errors, mobile clean)
+- `pnpm typecheck` passes all 10 packages
+- Hook exports useChat with full return interface: { messages, input, setInput, sendMessage, isLoading, error, clearMessages }
+
+### Notes
+- API uses AI SDK's toUIMessageStreamResponse which sends specific event types: text-delta, tool-call, tool-result
+- Hook supports optional getAccessToken callback for authenticated requests
+- Task 9.5 (Agent tab implementation) is next in Phase 9
+
+## 2026-01-17: Task 9.5 - Implement Agent tab with chat UI
+
+### Completed Tasks
+- 9.5: Implement Agent tab with chat UI
+
+### Files Changed
+- apps/mobile/app/(agent)/index.tsx: Complete rewrite with FlatList chat interface
+
+### Decisions
+- Inverted FlatList with reversed data: Standard pattern for chat UIs - newest at bottom, scroll direction inverted
+- KeyboardAvoidingView with padding behavior: iOS standard, offset includes header height (insets.top + 44)
+- useSafeAreaInsets for keyboard offset: Accounts for notch/dynamic island height
+- SuggestedPrompts as empty state: Shows suggestions when messages.length === 0, disappears after first message
+- Error display above input: Shows API errors in red banner, dismisses on next send
+- Streaming detection: isStreaming passed to ChatMessage when index===0 && role==="assistant" && isLoading
+- handleSelectPrompt uses sendMessage directly: Reuses same message sending logic for tapped prompts
+
+### Verification Results
+- `pnpm lint` passes (0 errors, mobile clean)
+- `pnpm typecheck` passes all 10 packages
+- All PRD steps verified: useChat hook, ChatMessage, ChatInput, SuggestedPrompts, inverted FlatList, KeyboardAvoidingView
+
+### Notes
+- Task 9.6 (tool call artifacts) is next in Phase 9
+- Task 9.7 (Agent tab testing) requires manual iOS Simulator verification
+- Chat UI requires /api/chat endpoint to be accessible for full functionality
+
+## 2026-01-17: Tasks 10.1-10.7 - WorkOS Authentication for Mobile
+
+### Completed Tasks
+- 10.1: Install auth dependencies
+- 10.2: Create auth helpers with WorkOS config
+- 10.3: Create AuthProvider with state management
+- 10.4: Create sign-in screen
+- 10.5: Implement OAuth sign-in flow
+- 10.6: Add auth redirect in root layout
+- 10.7: Pass auth token to Convex client
+
+### Files Changed
+- apps/mobile/package.json: Added expo-auth-session, expo-web-browser, expo-secure-store, expo-crypto, expo-clipboard
+- apps/mobile/src/lib/auth.ts: New auth helper with PKCE OAuth flow for WorkOS User Management
+- apps/mobile/src/providers/AuthProvider.tsx: New AuthProvider with useAuth and useAuthForConvex hooks
+- apps/mobile/src/providers/ConvexProvider.tsx: Updated to use useAuthForConvex for real token passing
+- apps/mobile/app/sign-in.tsx: New sign-in screen with Apple/Google OAuth buttons and GlassView styling
+- apps/mobile/app/_layout.tsx: Updated with AuthProvider wrapper and auth state-based rendering
+- apps/mobile/.env.local: Added EXPO_PUBLIC_WORKOS_CLIENT_ID
+
+### Decisions
+- Used WorkOS User Management API: /user_management/authorize and /user_management/authenticate endpoints
+- PKCE flow for mobile security: Generates code_verifier and code_challenge (S256) for secure OAuth without client secret
+- WebBrowser.openAuthSessionAsync: Opens native browser for OAuth, handles redirect back to app
+- SecureStore for token persistence: Access token, refresh token, and user data stored securely
+- Conditional rendering in layout: Shows LoadingScreen → SignInScreen → TabsWithBadge based on auth state
+- useAuthForConvex hook: Separate hook formatted for ConvexProviderWithAuth's useAuth prop requirements
+- Debug redirect URI display: In dev mode, sign-in screen shows "Show Redirect URI" button for WorkOS dashboard setup
+
+### Verification Results
+- `pnpm lint` passes (0 errors)
+- `pnpm typecheck` passes all packages
+- OAuth flow tested: Redirect URI registered in WorkOS, authentication completes successfully
+
+### Notes
+- Redirect URI must be added to WorkOS Dashboard > Redirects before auth will work
+- expo-crypto used for PKCE code challenge generation (SHA-256 hash)
+- Task 10.8 (E2E testing) requires manual verification
+- Auth state persists across app restarts via SecureStore

@@ -1,4 +1,5 @@
 import "../src/global.css";
+import { ActivityIndicator } from "react-native";
 import {
   NativeTabs,
   NativeTabTrigger,
@@ -7,8 +8,11 @@ import {
   Badge,
 } from "expo-router/unstable-native-tabs";
 import { SafeAreaProvider } from "react-native-safe-area-context";
+import { View } from "@/tw";
+import { AuthProvider, useAuth } from "@/providers/AuthProvider";
 import { ConvexProvider } from "@/providers/ConvexProvider";
 import { usePendingActionCount } from "@/hooks/usePendingActionCount";
+import SignInScreen from "./sign-in";
 
 function TabsWithBadge() {
   const count = usePendingActionCount();
@@ -34,12 +38,38 @@ function TabsWithBadge() {
   );
 }
 
+function LoadingScreen() {
+  return (
+    <View className="flex-1 items-center justify-center bg-neutral-50 dark:bg-black">
+      <ActivityIndicator size="large" />
+    </View>
+  );
+}
+
+function AuthenticatedApp() {
+  const { isLoading, isAuthenticated } = useAuth();
+
+  if (isLoading) {
+    return <LoadingScreen />;
+  }
+
+  if (!isAuthenticated) {
+    return <SignInScreen />;
+  }
+
+  return (
+    <ConvexProvider>
+      <TabsWithBadge />
+    </ConvexProvider>
+  );
+}
+
 export default function RootLayout() {
   return (
     <SafeAreaProvider>
-      <ConvexProvider>
-        <TabsWithBadge />
-      </ConvexProvider>
+      <AuthProvider>
+        <AuthenticatedApp />
+      </AuthProvider>
     </SafeAreaProvider>
   );
 }

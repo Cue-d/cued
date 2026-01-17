@@ -935,7 +935,7 @@
         "Use Link.MenuAction with SF Symbol icons",
         "Add destructive 'Block' action"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "8.3",
@@ -951,7 +951,7 @@
         "Render ContactListItem for each contact",
         "Add keyExtractor using contact.id"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "8.4",
@@ -966,7 +966,7 @@
         "Configure headerSearchBarOptions in _layout.tsx",
         "Verify search filters contact list"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "8.5",
@@ -984,7 +984,7 @@
         "Show tags as badges",
         "Add 'Recent conversations' section linking to inbox"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "8.6",
@@ -1018,7 +1018,7 @@
         "Add basic markdown support for assistant (bold, code)",
         "Handle streaming state with typing indicator"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "9.2",
@@ -1034,7 +1034,7 @@
         "Wrap in GlassView for liquid glass background",
         "Disable send button when input empty"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "9.3",
@@ -1049,7 +1049,7 @@
         "Wrap each in GlassView isInteractive",
         "On tap, call onSelect with prompt text"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "9.4",
@@ -1067,7 +1067,7 @@
         "Handle errors and set error state",
         "Return { messages, input, setInput, sendMessage, isLoading, error }"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "9.5",
@@ -1084,7 +1084,7 @@
         "Add KeyboardAvoidingView for iOS keyboard",
         "Position ChatInput at bottom"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "9.6",
@@ -1132,7 +1132,7 @@
         "Verify packages in package.json",
         "Verify no duplicate expo-crypto or expo-random warnings"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "10.2",
@@ -1148,7 +1148,7 @@
         "Create setAccessToken() saving to SecureStore",
         "Create clearAccessToken() removing from SecureStore"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "10.3",
@@ -1163,7 +1163,7 @@
         "Validate token with WorkOS userinfo endpoint",
         "Export useAuth hook for accessing context"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "10.4",
@@ -1180,7 +1180,7 @@
         "Style buttons per Apple HIG (min 44pt height)",
         "Call signIn from useAuth on button press"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "10.5",
@@ -1198,7 +1198,7 @@
         "Store access_token and refresh_token in SecureStore",
         "Set user state from ID token claims"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "10.6",
@@ -1214,7 +1214,7 @@
         "Use router.replace('/sign-in') from expo-router",
         "Show loading indicator while checking auth state"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "10.7",
@@ -1229,7 +1229,7 @@
         "fetchAccessToken returns token from SecureStore",
         "Pass to ConvexProviderWithAuth useAuth prop"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "10.8",

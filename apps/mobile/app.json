@@ -10,7 +10,9 @@
     "newArchEnabled": true,
     "plugins": [
       "expo-router",
-      "@react-native-community/datetimepicker"
+      "@react-native-community/datetimepicker",
+      "expo-web-browser",
+      "expo-secure-store"
     ],
     "splash": {
       "image": "./assets/splash-icon.png",
