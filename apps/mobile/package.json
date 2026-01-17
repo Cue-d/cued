@@ -12,6 +12,7 @@
     "lint": "eslint ."
   },
   "dependencies": {
+    "@bacons/apple-targets": "^3.0.7",
     "@react-native-community/datetimepicker": "8.4.4",
     "@tailwindcss/postcss": "^4",
     "clsx": "^2.1.1",
