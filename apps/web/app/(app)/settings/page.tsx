@@ -4,8 +4,7 @@ import { useQuery } from "convex/react";
 import { useMemo } from "react";
 import { api } from "@prm/convex";
 import { Avatar, AvatarFallback, Skeleton, Separator } from "@prm/ui";
-import { BrainIcon, ClockIcon, LinkIcon, ChevronRightIcon } from "lucide-react";
-import Link from "next/link";
+import { BrainIcon, ClockIcon } from "lucide-react";
 
 function getInitials(name: string): string {
   return name
@@ -176,36 +175,6 @@ export default function SettingsPage() {
                 </div>
               </div>
             </div>
-          </section>
-
-          {/* Integrations Section */}
-          <section>
-            <div className="mb-4">
-              <h2 className="text-sm font-medium text-foreground">
-                Integrations
-              </h2>
-              <p className="text-sm text-muted-foreground">
-                Connect your messaging platforms
-              </p>
-            </div>
-
-            <Link
-              href="/settings/integrations"
-              className="flex items-center justify-between rounded-lg border bg-card p-4 hover:bg-muted/50 transition-colors"
-            >
-              <div className="flex items-center gap-3">
-                <div className="flex size-9 items-center justify-center rounded-md bg-muted">
-                  <LinkIcon className="size-4 text-muted-foreground" />
-                </div>
-                <div>
-                  <p className="text-sm font-medium">Connected accounts</p>
-                  <p className="text-xs text-muted-foreground">
-                    Gmail, Slack, iMessage
-                  </p>
-                </div>
-              </div>
-              <ChevronRightIcon className="size-4 text-muted-foreground" />
-            </Link>
           </section>
 
           {/* Account Section */}

@@ -6,6 +6,7 @@ import {
   ListTodoIcon,
   MessageSquareIcon,
   UsersIcon,
+  LinkIcon,
   SettingsIcon,
   LogOutIcon,
   SunIcon,
@@ -168,6 +169,10 @@ export function AppSidebar({
                 <DropdownMenuItem render={<a href="/settings" />}>
                   <SettingsIcon />
                   Settings
+                </DropdownMenuItem>
+                <DropdownMenuItem render={<a href="/settings/integrations" />}>
+                  <LinkIcon />
+                  Integrations
                 </DropdownMenuItem>
                 <DropdownMenuSeparator />
                 <DropdownMenuItem
