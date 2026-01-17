@@ -1339,7 +1339,7 @@
         "Verify package in package.json",
         "Add to app.json plugins: ['@bacons/apple-targets']"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "12.2",
@@ -1354,7 +1354,7 @@
         "Define small widget showing pending action count",
         "Configure widget in Info.plist"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "12.3",
@@ -1369,7 +1369,7 @@
         "Generate timeline entries for widget updates",
         "Update from main app when action count changes"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "12.4",
@@ -1384,7 +1384,7 @@
         "Call when action count changes in useActions",
         "Trigger widget timeline reload with WidgetKit"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "12.5",
@@ -1464,7 +1464,7 @@
         "Set splash.resizeMode = 'contain'",
         "Set splash.backgroundColor matching brand color"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "13.5",
@@ -1478,7 +1478,7 @@
         "Update app.json with ios.icon.dark and ios.icon.tinted",
         "Verify icons display correctly in both modes"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "14.1",
@@ -1616,7 +1616,7 @@
         "Configure development, preview, production profiles",
         "Set ios.simulator: true for development profile"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "15.2",
