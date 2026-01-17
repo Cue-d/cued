@@ -791,7 +791,7 @@
         "In renderCard: check action.type, render MessageResponseCard for 'respond'/'follow_up'",
         "Render ContactCard for 'eod_contact'/'new_connection'"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "7.2",

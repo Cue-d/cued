@@ -796,3 +796,30 @@
 ### Notes
 - Task 6.6 (testing) requires iOS Simulator manual verification
 - Phase 6 UI tasks complete, Phase 7 (functional integration) is next
+
+## 2026-01-17: Task 7.1 - Implement Actions tab with CardStack and real data
+
+### Completed Tasks
+- 7.1: Implement Actions tab with CardStack and real data
+
+### Files Changed
+- apps/mobile/app/(actions)/index.tsx: Complete rewrite with CardStack integration
+
+### Decisions
+- Used local EnrichedAction type: Matches shape returned by Convex getPendingActions query
+- ActionItem wrapper for CardStack: CardStack requires { id: string } interface, wrapping action with id field
+- Two action type categories: MESSAGE_ACTION_TYPES (respond, follow_up) → MessageResponseCard, CONTACT_ACTION_TYPES (eod_contact, new_connection) → ContactCard
+- Local state for response text/form data: useState with Record<actionId, data> pattern for tracking edits per action
+- Fallback UI for unknown action types: Shows action type, contact name, and reason in centered layout
+- Swipe handler is placeholder: console.log for now, Task 7.2 will implement Convex mutation
+- Empty messages array for MessageResponseCard: Task 7.5 (getActionWithContext) will add full message data
+
+### Verification Results
+- `pnpm lint` passes (mobile clean, warnings only in web/ui packages)
+- `pnpm typecheck` passes all packages
+- Mobile app TypeScript compiles cleanly
+
+### Notes
+- Actions will render in empty state until user authenticates (Phase 10)
+- Message cards will show "No recent messages" until Task 7.5 adds getActionWithContext
+- Next task 7.2 will wire up swipe handler with Convex swipeAction mutation
