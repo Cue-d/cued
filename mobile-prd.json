@@ -289,7 +289,7 @@
         "Export cn function: return twMerge(clsx(inputs))",
         "Test: cn('p-4', 'p-2') returns 'p-2'"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "2.6",
@@ -322,7 +322,7 @@
         "Add (agent) trigger with Icon sf={{ default: 'sparkles', selected: 'sparkles' }}",
         "Wrap with SafeAreaProvider and ConvexProvider (placeholder)"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "3.2",
@@ -338,7 +338,7 @@
         "Set headerLargeStyle: { backgroundColor: 'transparent' }",
         "Add Stack.Screen for index with title 'Actions'"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "3.3",
@@ -353,7 +353,7 @@
         "Add placeholder Text: 'Actions will appear here'",
         "Verify screen renders in tab"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "3.4",
@@ -368,7 +368,7 @@
         "Add headerSearchBarOptions for search integration",
         "Add Stack.Screen for index with title 'Contacts'"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "3.5",
@@ -382,7 +382,7 @@
         "Render ScrollView with contentInsetAdjustmentBehavior='automatic'",
         "Add placeholder Text: 'Contacts will appear here'"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "3.6",
@@ -396,7 +396,7 @@
         "Configure transparent header options",
         "Add Stack.Screen for index with title 'Assistant'"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "3.7",
@@ -409,7 +409,7 @@
         "Import View, Text from '@/tw'",
         "Render placeholder chat UI"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "3.8",

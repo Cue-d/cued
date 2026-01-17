@@ -386,3 +386,65 @@
 - blurIntensity default is 50 (matches BlurView default)
 - fallbackColor default is semi-transparent gray for visible distinction
 - Next task 2.5 will create lib/utils.ts with cn helper (already exists from task 1.11)
+
+## 2026-01-17: Task 2.5 - lib/utils.ts with cn helper
+
+### Completed Tasks
+- 2.5: Create lib/utils.ts with cn helper
+
+### Files Changed
+- None (file already existed from task 1.11)
+
+### Decisions
+- Task already complete: src/lib/utils.ts was created during task 1.11 (TypeScript path aliases) to verify @/ alias worked
+- Verified cn() behavior: cn('p-4', 'p-2') correctly returns 'p-2' (twMerge deduplicates conflicting classes)
+
+### Verification Results
+- `pnpm lint` passes (warnings only, no errors)
+- `pnpm typecheck` passes all packages
+- Node.js test confirmed cn() merges classes correctly
+
+### Notes
+- File contains standard pattern: twMerge(clsx(inputs))
+- Next task 2.6 is a testing task requiring iOS Simulator verification
+
+## 2026-01-17: Tasks 3.1-3.7 - NativeTabs navigation with liquid glass
+
+### Completed Tasks
+- 3.1: Create root layout with NativeTabs (liquid glass)
+- 3.2: Create (actions) tab stack layout
+- 3.3: Create (actions)/index.tsx placeholder
+- 3.4: Create (contacts) tab stack layout
+- 3.5: Create (contacts)/index.tsx placeholder
+- 3.6: Create (agent) tab stack layout
+- 3.7: Create (agent)/index.tsx placeholder
+
+### Files Changed
+- apps/mobile/app/_layout.tsx: Updated with NativeTabs, SafeAreaProvider, 3 tab triggers
+- apps/mobile/app/(actions)/_layout.tsx: New Stack layout with transparent header, large title
+- apps/mobile/app/(actions)/index.tsx: New placeholder with ScrollView, TW Text
+- apps/mobile/app/(contacts)/_layout.tsx: New Stack layout with search bar options
+- apps/mobile/app/(contacts)/index.tsx: New placeholder with ScrollView, TW Text
+- apps/mobile/app/(agent)/_layout.tsx: New Stack layout with transparent header
+- apps/mobile/app/(agent)/index.tsx: New placeholder with View, TW Text
+- apps/mobile/app/index.tsx: Removed (NativeTabs handles default route)
+
+### Decisions
+- Import from expo-router/unstable-native-tabs: This is the correct export path for NativeTabs in expo-router 6.x
+- Used NativeTabTrigger with Icon/Label/Badge children: Component-based API per expo-router types
+- headerBlurEffect: 'none': Allows liquid glass effect to show through on iOS 26+
+- headerTransparent + headerLargeTitle: iOS-native large title pattern with transparency
+- Contacts layout has headerSearchBarOptions: Native iOS search bar integration for Phase 8
+- ConvexProvider placeholder: Will be added in Task 4.3 when Convex integration is ready
+- Removed root index.tsx: NativeTabs renders the first trigger by default ((actions) tab)
+
+### Verification Results
+- `pnpm lint` passes (5 warnings in web app, mobile clean)
+- `pnpm typecheck` passes all 10 tasks
+- All tab group directories created with _layout.tsx and index.tsx
+
+### Notes
+- Task 3.8 is a testing task requiring iOS Simulator verification
+- SF Symbol icons: tray/tray.fill, person.2/person.2.fill, sparkles/sparkles
+- minimizeBehavior='onScrollDown' enables iOS 26+ liquid glass tab bar minimization
+- Badge component in Actions trigger is placeholder for Task 7.6 (pending action count)
