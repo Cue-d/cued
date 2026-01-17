@@ -759,7 +759,7 @@
         "Export ContactCard from './contact-card'",
         "Export all related types"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "6.6",

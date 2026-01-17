@@ -774,3 +774,25 @@
 ### Notes
 - Component follows same patterns as MessageResponseCard (Avatar, platform badge, sf-* colors)
 - Next task 6.5 will create barrel export for card components
+
+## 2026-01-17: Task 6.5 - Barrel export for card components
+
+### Completed Tasks
+- 6.5: Create barrel export for card components
+
+### Files Changed
+- apps/mobile/src/components/cards/index.ts: New barrel export file
+
+### Decisions
+- Exported all types alongside components: ActionPlatform, MessageAttachment, DisplayMessage, MessageResponseCardProps, ContactFormData, ContactPlatform, ContactCardProps
+- Simple re-export pattern: Named exports from each card file, no default exports
+- Types exported with `type` keyword: Ensures proper tree-shaking and type-only imports
+
+### Verification Results
+- `pnpm lint` passes (warnings only in web/ui packages, mobile clean)
+- `pnpm typecheck` passes all 10 packages
+- TypeScript traceResolution confirms barrel export resolves both card modules correctly
+
+### Notes
+- Task 6.6 (testing) requires iOS Simulator manual verification
+- Phase 6 UI tasks complete, Phase 7 (functional integration) is next
