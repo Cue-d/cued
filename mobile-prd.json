@@ -442,7 +442,7 @@
         "Initialize ConvexReactClient with CONVEX_URL from env",
         "Export convex client instance"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "4.2",
