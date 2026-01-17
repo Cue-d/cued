@@ -12,7 +12,8 @@
       "expo-router",
       "@react-native-community/datetimepicker",
       "expo-web-browser",
-      "expo-secure-store"
+      "expo-secure-store",
+      "expo-notifications"
     ],
     "splash": {
       "image": "./assets/splash-icon.png",
