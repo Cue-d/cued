@@ -840,7 +840,7 @@
         "Navigate back to actions index",
         "Verify action disappears from queue"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "7.5",

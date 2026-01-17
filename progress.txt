@@ -878,3 +878,27 @@
 - contentStyle backgroundColor: transparent allows glass effect to show through
 - Task 7.4 will wire this up to the action index - currently navigation params aren't consumed
 - Next task 7.4 will wire snooze picker to action swipe
+
+## 2026-01-17: Task 7.4 - Wire snooze picker to action swipe
+
+### Completed Tasks
+- 7.4: Wire snooze picker to action swipe
+
+### Files Changed
+- apps/mobile/app/(actions)/index.tsx: Added router, useLocalSearchParams, useEffect for snooze return handling, navigation to snooze-picker on swipe up
+- apps/mobile/app/(actions)/snooze-picker.tsx: Changed from router.back() + setParams to router.replace() with params for proper data flow
+
+### Decisions
+- router.replace() instead of back() + setParams: Expo Router's setParams after back() doesn't work as expected. Using replace() with pathname and params properly passes data back to index screen.
+- useEffect with params dependency: Handles async snooze mutation when returning from picker with snoozedUntil and snoozeActionId params
+- Clear params after processing: Prevents re-triggering the snooze mutation on subsequent renders
+- snoozeActionId param name: Used different name from actionId to avoid confusion with other potential route params
+
+### Verification Results
+- `pnpm lint` passes (mobile clean, 0 errors)
+- `pnpm typecheck` passes all 10 packages
+
+### Notes
+- Flow: swipe up → navigate to snooze-picker with actionId → select time → replace back to index with snoozedUntil + snoozeActionId → useEffect triggers swipeAction mutation → params cleared
+- Action will disappear from queue when Convex mutation succeeds (real-time subscription updates)
+- Next task 7.5 will add action detail route for full context
