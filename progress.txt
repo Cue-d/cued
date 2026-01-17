@@ -716,3 +716,34 @@
 - ActionButtons provides accessible alternatives to swipe gestures
 - Uses SymbolView for native SF Symbol rendering (xmark, clock, checkmark)
 - Task 5.9 (testing) requires iOS Simulator verification
+
+## 2026-01-17: Tasks 6.1, 6.2, 6.3 - MessageResponseCard component
+
+### Completed Tasks
+- 6.1: Create MessageResponseCard component header
+- 6.2: Create MessageResponseCard message bubbles
+- 6.3: Create MessageResponseCard response input
+
+### Files Changed
+- apps/mobile/src/components/cards/message-response-card.tsx: New complete MessageResponseCard component
+
+### Decisions
+- Combined all 3 tasks into single implementation: Tasks 6.1-6.3 are tightly coupled, implemented together for cohesive component
+- No autoFocus/ref support: TW wrapper (useCssElement) doesn't forward refs, removed autoFocus feature
+- Used SymbolView for platform icons: SF Symbols (message.fill, envelope.fill, number) with platform-specific tint colors
+- Three-tier message styling: sent (bg-sf-blue, white text), received (bg-sf-fill, sf-label text), empty state
+- Avatar component inline: Simple View with initials, not separate file since only used here
+- Relative timestamp format: "Xd ago", "Xh ago", "Just now" pattern matching web UI
+- AttachmentDisplay for images and files: Uses expo-image with fallback for non-image files
+- ReactionBadges component: Positioned absolutely above message bubble, shows up to 3 reactions
+- DeliveryStatus for sent messages: Shows read/delivered/sent status with accessibility labels
+
+### Verification Results
+- `pnpm lint` passes (warnings only in web/ui packages, mobile clean)
+- `pnpm typecheck` passes all 10 packages
+
+### Notes
+- Component follows web MessageResponseCard patterns but adapted for React Native
+- Tailwind classes use sf-* semantic colors for iOS platform consistency
+- TextInput placeholder color hardcoded to #8E8E93 (iOS secondary label gray)
+- Task 6.4 (ContactCard) is next in Phase 6

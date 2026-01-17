@@ -694,7 +694,7 @@
         "Display person name and relative timestamp",
         "Add platform badge (iMessage/Gmail/Slack) with icon"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "6.2",
@@ -711,7 +711,7 @@
         "Show timestamp below each message",
         "Handle attachments with Image preview"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "6.3",
@@ -727,7 +727,7 @@
         "Style with min-h-[80px] max-h-[150px] resize-none",
         "Add data-selectable='true' to prevent swipe while typing"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "6.4",
