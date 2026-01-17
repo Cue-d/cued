@@ -1,14 +1,8 @@
-import React, {
-  createContext,
-  useContext,
-  useState,
-  useEffect,
-  useCallback,
-  useMemo,
-  ReactNode,
-} from "react";
+import React, { createContext, useContext, useState, useEffect, useCallback, useMemo } from "react";
+import type { ReactNode } from "react";
 import {
-  WorkOSUser,
+  type OAuthProvider,
+  type WorkOSUser,
   signIn as authSignIn,
   signOut as authSignOut,
   getAccessToken,
@@ -20,58 +14,44 @@ interface AuthContextType {
   user: WorkOSUser | null;
   isAuthenticated: boolean;
   isLoading: boolean;
-  signIn: (provider: "GoogleOAuth" | "AppleOAuth") => Promise<void>;
+  signIn: (provider: OAuthProvider) => Promise<void>;
   signOut: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
-interface AuthProviderProps {
-  children: ReactNode;
-}
-
-export function AuthProvider({ children }: AuthProviderProps) {
+export function AuthProvider({ children }: { children: ReactNode }): React.ReactElement {
   const [user, setUser] = useState<WorkOSUser | null>(null);
   const [isLoading, setIsLoading] = useState(true);
 
-  // Check for existing authentication on mount
   useEffect(() => {
-    async function checkAuth() {
-      try {
-        const authenticated = await checkIsAuthenticated();
+    checkIsAuthenticated()
+      .then(async (authenticated) => {
         if (authenticated) {
           const storedUser = await getUser();
           setUser(storedUser);
         }
-      } catch (error) {
-        console.error("Error checking auth state:", error);
-      } finally {
-        setIsLoading(false);
-      }
-    }
-
-    checkAuth();
+      })
+      .catch((error) => console.error("Error checking auth state:", error))
+      .finally(() => setIsLoading(false));
   }, []);
 
-  const signIn = useCallback(
-    async (provider: "GoogleOAuth" | "AppleOAuth") => {
-      try {
-        setIsLoading(true);
-        const result = await authSignIn(provider);
-        setUser(result.user);
-      } catch (error) {
-        console.error("Sign in error:", error);
-        throw error;
-      } finally {
-        setIsLoading(false);
-      }
-    },
-    []
-  );
+  const signIn = useCallback(async (provider: OAuthProvider) => {
+    setIsLoading(true);
+    try {
+      const result = await authSignIn(provider);
+      setUser(result.user);
+    } catch (error) {
+      console.error("Sign in error:", error);
+      throw error;
+    } finally {
+      setIsLoading(false);
+    }
+  }, []);
 
   const signOut = useCallback(async () => {
+    setIsLoading(true);
     try {
-      setIsLoading(true);
       await authSignOut();
       setUser(null);
     } catch (error) {
@@ -82,38 +62,33 @@ export function AuthProvider({ children }: AuthProviderProps) {
     }
   }, []);
 
-  const isAuthenticated = user !== null;
-
   const value = useMemo(
     () => ({
       user,
-      isAuthenticated,
+      isAuthenticated: user !== null,
       isLoading,
       signIn,
       signOut,
     }),
-    [user, isAuthenticated, isLoading, signIn, signOut]
+    [user, isLoading, signIn, signOut]
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }
 
-/**
- * Hook to access auth context
- */
 export function useAuth(): AuthContextType {
   const context = useContext(AuthContext);
-  if (context === undefined) {
+  if (!context) {
     throw new Error("useAuth must be used within an AuthProvider");
   }
   return context;
 }
 
-/**
- * Hook for Convex authentication integration
- * Returns the format expected by ConvexProviderWithAuth
- */
-export function useAuthForConvex() {
+export function useAuthForConvex(): {
+  isLoading: boolean;
+  isAuthenticated: boolean;
+  fetchAccessToken: () => Promise<string | null>;
+} {
   const { isAuthenticated, isLoading } = useAuth();
 
   const fetchAccessToken = useCallback(async (): Promise<string | null> => {
@@ -122,11 +97,7 @@ export function useAuthForConvex() {
   }, [isAuthenticated]);
 
   return useMemo(
-    () => ({
-      isLoading,
-      isAuthenticated,
-      fetchAccessToken,
-    }),
+    () => ({ isLoading, isAuthenticated, fetchAccessToken }),
     [isLoading, isAuthenticated, fetchAccessToken]
   );
 }

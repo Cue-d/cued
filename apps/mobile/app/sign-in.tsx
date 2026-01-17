@@ -1,61 +1,93 @@
-import React, { useState } from "react";
+import { useState } from "react";
 import { ActivityIndicator, Platform, Alert } from "react-native";
 import * as Clipboard from "expo-clipboard";
-import { View, Text, Pressable } from "@/tw";
-import { SymbolView } from "expo-symbols";
 import * as Haptics from "expo-haptics";
 import { GlassView, isLiquidGlassAvailable } from "expo-glass-effect";
 import { BlurView } from "expo-blur";
+import { SymbolView } from "expo-symbols";
+import { View, Text, Pressable } from "@/tw";
 import { useAuth } from "@/providers/AuthProvider";
-import { getRedirectUri } from "@/lib/auth";
+import { getRedirectUri, type OAuthProvider } from "@/lib/auth";
 
-type SignInProvider = "google" | "apple";
+type ButtonProvider = "google" | "apple";
 
-function AdaptiveGlassCard({ children }: { children: React.ReactNode }) {
+function AdaptiveGlassCard({ children }: { children: React.ReactNode }): React.ReactElement {
+  const content = <View className="p-8">{children}</View>;
+  const containerClass = "mx-6 rounded-3xl overflow-hidden";
+
   if (isLiquidGlassAvailable()) {
-    return (
-      <GlassView className="mx-6 rounded-3xl overflow-hidden">
-        <View className="p-8">{children}</View>
-      </GlassView>
-    );
+    return <GlassView className={containerClass}>{content}</GlassView>;
   }
 
   if (Platform.OS === "ios") {
     return (
-      <BlurView
-        intensity={80}
-        tint="systemMaterial"
-        className="mx-6 rounded-3xl overflow-hidden"
-      >
-        <View className="p-8">{children}</View>
+      <BlurView intensity={80} tint="systemMaterial" className={containerClass}>
+        {content}
       </BlurView>
     );
   }
 
   return (
-    <View className="mx-6 rounded-3xl overflow-hidden bg-neutral-100 dark:bg-neutral-800">
-      <View className="p-8">{children}</View>
-    </View>
+    <View className={`${containerClass} bg-neutral-100 dark:bg-neutral-800`}>{content}</View>
   );
 }
 
-export default function SignInScreen() {
-  const { signIn, isLoading } = useAuth();
-  const [signingInWith, setSigningInWith] = useState<SignInProvider | null>(null);
+interface SignInButtonProps {
+  provider: ButtonProvider;
+  isLoading: boolean;
+  onPress: () => void;
+  disabled: boolean;
+}
 
-  async function handleSignIn(provider: SignInProvider) {
-    const oauthProvider = provider === "google" ? "GoogleOAuth" : "AppleOAuth";
+function SignInButton({ provider, isLoading, onPress, disabled }: SignInButtonProps): React.ReactElement {
+  const isApple = provider === "apple";
+  const buttonClass = isApple
+    ? "flex-row items-center justify-center bg-black dark:bg-white rounded-xl py-4 px-6 mb-3"
+    : "flex-row items-center justify-center bg-white dark:bg-neutral-700 border border-neutral-200 dark:border-neutral-600 rounded-xl py-4 px-6";
+
+  return (
+    <Pressable onPress={onPress} disabled={disabled} className={buttonClass} style={{ minHeight: 50 }}>
+      {isLoading ? (
+        <ActivityIndicator color={isApple ? "white" : "gray"} />
+      ) : (
+        <>
+          {isApple ? (
+            <SymbolView name="apple.logo" size={20} tintColor="white" />
+          ) : (
+            <View className="w-5 h-5 items-center justify-center">
+              <Text className="text-lg">G</Text>
+            </View>
+          )}
+          <Text
+            className={
+              isApple
+                ? "text-white dark:text-black font-semibold text-base ml-2"
+                : "text-neutral-900 dark:text-white font-semibold text-base ml-2"
+            }
+          >
+            Sign in with {isApple ? "Apple" : "Google"}
+          </Text>
+        </>
+      )}
+    </Pressable>
+  );
+}
+
+export default function SignInScreen(): React.ReactElement {
+  const { signIn, isLoading } = useAuth();
+  const [signingInWith, setSigningInWith] = useState<ButtonProvider | null>(null);
+
+  async function handleSignIn(provider: ButtonProvider): Promise<void> {
+    const oauthProvider: OAuthProvider = provider === "google" ? "GoogleOAuth" : "AppleOAuth";
+    setSigningInWith(provider);
     try {
-      setSigningInWith(provider);
       await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
       await signIn(oauthProvider);
       await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     } catch (error) {
       await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
-      Alert.alert(
-        "Sign In Failed",
-        error instanceof Error ? error.message : "An error occurred"
-      );
+      const message = error instanceof Error ? error.message : "An error occurred";
+      Alert.alert("Sign In Failed", message);
     } finally {
       setSigningInWith(null);
     }
@@ -87,44 +119,20 @@ export default function SignInScreen() {
         </Text>
 
         {Platform.OS === "ios" && (
-          <Pressable
+          <SignInButton
+            provider="apple"
+            isLoading={signingInWith === "apple"}
             onPress={() => handleSignIn("apple")}
             disabled={isSigningIn}
-            className="flex-row items-center justify-center bg-black dark:bg-white rounded-xl py-4 px-6 mb-3"
-            style={{ minHeight: 50 }}
-          >
-            {signingInWith === "apple" ? (
-              <ActivityIndicator color="white" />
-            ) : (
-              <>
-                <SymbolView name="apple.logo" size={20} tintColor="white" />
-                <Text className="text-white dark:text-black font-semibold text-base ml-2">
-                  Sign in with Apple
-                </Text>
-              </>
-            )}
-          </Pressable>
+          />
         )}
 
-        <Pressable
+        <SignInButton
+          provider="google"
+          isLoading={signingInWith === "google"}
           onPress={() => handleSignIn("google")}
           disabled={isSigningIn}
-          className="flex-row items-center justify-center bg-white dark:bg-neutral-700 border border-neutral-200 dark:border-neutral-600 rounded-xl py-4 px-6"
-          style={{ minHeight: 50 }}
-        >
-          {signingInWith === "google" ? (
-            <ActivityIndicator color="gray" />
-          ) : (
-            <>
-              <View className="w-5 h-5 items-center justify-center">
-                <Text className="text-lg">G</Text>
-              </View>
-              <Text className="text-neutral-900 dark:text-white font-semibold text-base ml-2">
-                Sign in with Google
-              </Text>
-            </>
-          )}
-        </Pressable>
+        />
       </AdaptiveGlassCard>
 
       <View className="mt-8 px-12">
@@ -137,14 +145,10 @@ export default function SignInScreen() {
         <Pressable
           onPress={() => {
             const uri = getRedirectUri();
-            Alert.alert(
-              "Redirect URI",
-              `Add this to WorkOS Dashboard > Redirects:\n\n${uri}`,
-              [
-                { text: "Copy", onPress: () => Clipboard.setStringAsync(uri) },
-                { text: "OK" },
-              ]
-            );
+            Alert.alert("Redirect URI", `Add to WorkOS Dashboard:\n\n${uri}`, [
+              { text: "Copy", onPress: () => Clipboard.setStringAsync(uri) },
+              { text: "OK" },
+            ]);
           }}
           className="mt-6 px-12"
         >

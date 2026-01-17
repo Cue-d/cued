@@ -1,32 +1,22 @@
-import React from "react";
 import { router } from "expo-router";
-import { Pressable, View, Text } from "@/tw";
 import * as Haptics from "expo-haptics";
+import { Pressable, View, Text } from "@/tw";
 import { useAuth } from "@/providers/AuthProvider";
+import { getDisplayName, getInitials } from "@/lib/utils";
 
 interface HeaderAvatarProps {
   size?: number;
 }
 
-export function HeaderAvatar({ size = 32 }: HeaderAvatarProps) {
+export function HeaderAvatar({ size = 32 }: HeaderAvatarProps): React.ReactElement {
   const { user } = useAuth();
+  const displayName = getDisplayName(user);
+  const initials = getInitials(displayName);
 
-  const displayName =
-    user?.firstName && user?.lastName
-      ? `${user.firstName} ${user.lastName}`
-      : user?.email?.split("@")[0] || "U";
-
-  const initials = displayName
-    .split(" ")
-    .map((n) => n[0])
-    .join("")
-    .toUpperCase()
-    .slice(0, 2);
-
-  const handlePress = () => {
+  function handlePress(): void {
     Haptics.selectionAsync();
     router.push("/settings");
-  };
+  }
 
   return (
     <Pressable
@@ -39,10 +29,7 @@ export function HeaderAvatar({ size = 32 }: HeaderAvatarProps) {
         className="items-center justify-center rounded-full bg-sf-blue"
         style={{ width: size, height: size }}
       >
-        <Text
-          className="font-semibold text-white"
-          style={{ fontSize: size * 0.4 }}
-        >
+        <Text className="font-semibold text-white" style={{ fontSize: size * 0.4 }}>
           {initials}
         </Text>
       </View>
