@@ -808,7 +808,7 @@
         "On swipe up: show snooze picker (next task)",
         "Add Haptics.notificationAsync on success"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "7.3",

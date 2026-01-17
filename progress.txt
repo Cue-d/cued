@@ -823,3 +823,29 @@
 - Actions will render in empty state until user authenticates (Phase 10)
 - Message cards will show "No recent messages" until Task 7.5 adds getActionWithContext
 - Next task 7.2 will wire up swipe handler with Convex swipeAction mutation
+
+## 2026-01-17: Task 7.2 - Implement swipe handler with Convex mutation
+
+### Completed Tasks
+- 7.2: Implement swipe handler with Convex mutation
+
+### Files Changed
+- apps/mobile/app/(actions)/index.tsx: Added useMutation hook and handleSwipe implementation
+
+### Decisions
+- Used api.actions.swipeAction (not api.actions.swipe as PRD stated): Verified actual API export name in Convex codebase
+- Async handleSwipe: Mutation is async, callback updated to handle promises
+- Snooze placeholder: Returns early for direction='up' - Task 7.3/7.4 will implement snooze picker
+- Notes vs responseText: For new_connection actions, uses form notes field; others use responseText
+- Haptic feedback for both success and error: Success notification on mutation complete, error notification on failure
+- ESLint auto-fixed imports to use @/ aliases: Consistent with project conventions
+
+### Verification Results
+- `pnpm lint` passes (mobile clean, warnings only in web/ui packages)
+- `pnpm typecheck` passes all 10 packages
+
+### Notes
+- Swipe right: Calls swipeAction with direction='right' and responseText
+- Swipe left: Calls swipeAction with direction='left' (discard)
+- Swipe up: Currently logs and returns - Task 7.3/7.4 will add snooze picker navigation
+- Next task 7.3 will create snooze picker sheet route
