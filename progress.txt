@@ -357,3 +357,32 @@
 - AnimatedView/AnimatedScrollView can be used with useAnimatedStyle from reanimated
 - These components have full className support via the underlying TW wrappers
 - Next task 2.4 will create AdaptiveGlass component with fallback
+
+## 2026-01-17: Task 2.4 - AdaptiveGlass component with fallback
+
+### Completed Tasks
+- 2.4: Create AdaptiveGlass component with fallback
+
+### Files Changed
+- apps/mobile/src/tw/glass.tsx: Created with AdaptiveGlass component
+
+### Decisions
+- isLiquidGlassAvailable is a function: Called as isLiquidGlassAvailable(), not a boolean constant
+- expo-blur import: Using public API `import { BlurView } from "expo-blur"` instead of internal path `expo-blur/build/BlurView`
+- Accessibility listener: Uses reduceTransparencyChanged event to dynamically switch between glass/blur and solid fallback
+- Three-tier fallback:
+  1. iOS 26+ with transparency: GlassView (true Liquid Glass)
+  2. iOS older with transparency: BlurView with systemMaterial tint
+  3. Android or reduced transparency: solid View with configurable fallbackColor
+- Configurable props: fallbackColor, isInteractive, blurIntensity for flexibility
+
+### Verification Results
+- `pnpm lint` passes (warnings only, no errors)
+- `pnpm typecheck` passes all 10 tasks
+- Mobile app TypeScript compiles cleanly
+
+### Notes
+- AdaptiveGlass automatically responds to accessibility settings changes at runtime
+- blurIntensity default is 50 (matches BlurView default)
+- fallbackColor default is semi-transparent gray for visible distinction
+- Next task 2.5 will create lib/utils.ts with cn helper (already exists from task 1.11)

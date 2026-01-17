@@ -275,7 +275,7 @@
         "Fall back to BlurView tint='systemMaterial' on older iOS",
         "Fall back to solid View on Android/unsupported"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "2.5",
