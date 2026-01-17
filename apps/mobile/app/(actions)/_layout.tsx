@@ -11,6 +11,16 @@ export default function ActionsLayout() {
       }}
     >
       <Stack.Screen name="index" options={{ title: "Actions" }} />
+      <Stack.Screen
+        name="snooze-picker"
+        options={{
+          title: "Snooze",
+          presentation: "formSheet",
+          sheetGrabberVisible: true,
+          sheetAllowedDetents: [0.4],
+          contentStyle: { backgroundColor: "transparent" },
+        }}
+      />
     </Stack>
   );
 }

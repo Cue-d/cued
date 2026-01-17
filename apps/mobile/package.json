@@ -4,14 +4,15 @@
   "main": "index.ts",
   "scripts": {
     "start": "expo start",
-    "dev": "expo start",
-    "android": "expo start --android",
-    "ios": "expo start --ios",
+    "dev": "expo run:ios",
+    "android": "expo run:android",
+    "ios": "expo run:ios",
     "web": "expo start --web",
     "typecheck": "tsc --noEmit",
     "lint": "eslint ."
   },
   "dependencies": {
+    "@react-native-community/datetimepicker": "8.4.4",
     "@tailwindcss/postcss": "^4",
     "clsx": "^2.1.1",
     "convex": "^1.18.0",
@@ -25,6 +26,8 @@
     "expo-router": "~6.0.21",
     "expo-status-bar": "~3.0.9",
     "expo-symbols": "~1.0.8",
+    "expo-system-ui": "~6.0.9",
+    "metro-cache": "^0.83.3",
     "nativewind": "5.0.0-preview.2",
     "react": "19.1.0",
     "react-native": "0.81.5",
@@ -39,6 +42,7 @@
   },
   "devDependencies": {
     "@types/react": "~19.1.0",
+    "babel-plugin-module-resolver": "^5.0.2",
     "eslint": "^9",
     "eslint-config-expo": "^9",
     "typescript": "~5.9.2"
