@@ -7,12 +7,13 @@
  * - Up: Snooze action (amber overlay)
  */
 
-import { type ReactNode, useRef } from "react";
+import { type ReactNode, useRef, useEffect, useCallback } from "react";
 import { Gesture, GestureDetector } from "react-native-gesture-handler";
 import Animated, {
   useSharedValue,
   useAnimatedStyle,
   withSpring,
+  withTiming,
   interpolate,
   runOnJS,
 } from "react-native-reanimated";
@@ -26,6 +27,8 @@ export interface SwipeableCardProps {
   onSwipe: (direction: SwipeDirection) => void;
   disabled?: boolean;
   className?: string;
+  /** Set to trigger a programmatic swipe animation */
+  triggerSwipe?: SwipeDirection | null;
 }
 
 // Thresholds for triggering swipe actions
@@ -44,6 +47,7 @@ export function SwipeableCard({
   onSwipe,
   disabled = false,
   className,
+  triggerSwipe,
 }: SwipeableCardProps): React.JSX.Element {
   const translateX = useSharedValue(0);
   const translateY = useSharedValue(0);
@@ -57,10 +61,53 @@ export function SwipeableCard({
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
   };
 
-  const handleSwipe = (direction: SwipeDirection): void => {
-    triggerSuccessHaptic();
-    onSwipe(direction);
-  };
+  const handleSwipe = useCallback(
+    (direction: SwipeDirection): void => {
+      triggerSuccessHaptic();
+      onSwipe(direction);
+    },
+    [onSwipe],
+  );
+
+  // Handle programmatic swipe trigger
+  useEffect(() => {
+    if (!triggerSwipe || isAnimatingRef.current) return;
+
+    isAnimatingRef.current = true;
+    const peekDistance = SWIPE_THRESHOLD_X + 20;
+    const peekDistanceY = SWIPE_THRESHOLD_Y + 20;
+
+    // First animate to peek position
+    if (triggerSwipe === "right") {
+      translateX.value = withTiming(peekDistance, { duration: 150 });
+    } else if (triggerSwipe === "left") {
+      translateX.value = withTiming(-peekDistance, { duration: 150 });
+    } else if (triggerSwipe === "up") {
+      translateY.value = withTiming(-peekDistanceY, { duration: 150 });
+    }
+
+    // After peek, animate off screen and call onSwipe
+    const peekTimeout = setTimeout(() => {
+      if (triggerSwipe === "right") {
+        translateX.value = withSpring(400, SPRING_CONFIG);
+      } else if (triggerSwipe === "left") {
+        translateX.value = withSpring(-400, SPRING_CONFIG);
+      } else if (triggerSwipe === "up") {
+        translateY.value = withSpring(-400, SPRING_CONFIG);
+      }
+      handleSwipe(triggerSwipe);
+    }, 150);
+
+    // Reset animating state after animation completes
+    const resetTimeout = setTimeout(() => {
+      isAnimatingRef.current = false;
+    }, 400);
+
+    return () => {
+      clearTimeout(peekTimeout);
+      clearTimeout(resetTimeout);
+    };
+  }, [triggerSwipe, handleSwipe, translateX, translateY]);
 
   const panGesture = Gesture.Pan()
     .enabled(!disabled && !isAnimatingRef.current)
