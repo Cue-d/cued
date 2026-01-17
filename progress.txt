@@ -286,3 +286,74 @@
 - Task 1.13 (testing) requires manual iOS Simulator verification - skipped for now
 - Phase 1 architectural setup complete (tasks 1.1-1.12, 1.14)
 - Next: Phase 2 begins with CSS component wrappers (task 2.1)
+
+## 2026-01-17: Task 2.1 - CSS component wrappers for View, Text, ScrollView
+
+### Completed Tasks
+- 2.1: Create CSS component wrappers for View, Text, ScrollView
+
+### Files Changed
+- apps/mobile/src/tw/index.tsx: Created with View, Text, ScrollView, Pressable, TextInput wrappers and useCSSVariable export
+
+### Decisions
+- Used react-native-css's useCssElement hook: This is the official pattern from the library (found in node_modules/react-native-css/src/components/*.tsx)
+- Shared classNameMapping for simple components: View, Text, Pressable, TextInput all use `{ className: "style" }` mapping
+- ScrollView has separate mapping: Includes both className and contentContainerClassName props
+- Re-exported useNativeVariable as useCSSVariable: Matches PRD naming convention for CSS variable access
+- Added explicit return types: Per code-simplifier recommendations
+
+### Verification Results
+- `pnpm lint` passes (warnings only, no errors)
+- `pnpm typecheck` passes all 10 tasks
+- TypeScript correctly types all wrapper props with StyledProps
+
+### Notes
+- The useCssElement hook takes 3 args: component, props, mapping (different from PRD's 2-arg example)
+- react-native-css already provides View, Text, TextInput in react-native-css/components but we created our own for customization
+- Next task 2.2 will create CSS-wrapped Image component with expo-image
+
+## 2026-01-17: Task 2.2 - CSS-wrapped Image component with expo-image
+
+### Completed Tasks
+- 2.2: Create CSS-wrapped Image component with expo-image
+
+### Files Changed
+- apps/mobile/src/tw/image.tsx: Created with Image wrapper and AnimatedExpoImage export
+
+### Decisions
+- Simple useCssElement pattern: react-native-css automatically maps CSS object-fit → contentFit and object-position → contentPosition via its parseObjectFit/parseObjectPosition functions (found in react-native-css/src/compiler/declarations.ts)
+- No manual style mapping needed: The library handles the CSS property transformation internally
+- AnimatedExpoImage using Animated.createAnimatedComponent: For use with reanimated animations
+
+### Verification Results
+- `pnpm lint` passes (warnings only, no errors)
+- `pnpm typecheck` passes all 10 tasks
+- TypeScript correctly types Image props with StyledProps
+
+### Notes
+- CSS classes like object-cover, object-contain map automatically to expo-image's contentFit prop
+- CSS classes like object-center, object-top map automatically to expo-image's contentPosition prop
+- Next task 2.3 will create CSS-wrapped Animated components
+
+## 2026-01-17: Task 2.3 - CSS-wrapped Animated components
+
+### Completed Tasks
+- 2.3: Create CSS-wrapped Animated components
+
+### Files Changed
+- apps/mobile/src/tw/animated.tsx: Created with AnimatedView and AnimatedScrollView exports
+
+### Decisions
+- Minimal implementation: Just 9 lines of code - imports TW wrappers from ./index and wraps with createAnimatedComponent
+- No AnimatedText: Not needed per PRD steps, and text animations are rarely useful in practice
+- AnimatedExpoImage stays in image.tsx: Keep image-related animated component with image file rather than moving all animated components here
+
+### Verification Results
+- `pnpm lint` passes (warnings only, no errors)
+- `pnpm typecheck` passes all 10 tasks
+- Mobile app TypeScript compiles cleanly
+
+### Notes
+- AnimatedView/AnimatedScrollView can be used with useAnimatedStyle from reanimated
+- These components have full className support via the underlying TW wrappers
+- Next task 2.4 will create AdaptiveGlass component with fallback

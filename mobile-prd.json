@@ -244,7 +244,7 @@
         "Map objectPosition style to contentPosition prop",
         "Export Image with useCssElement wrapper"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "2.3",
@@ -258,7 +258,7 @@
         "Export Animated.View as createAnimatedComponent(TW.View)",
         "Export Animated.ScrollView as createAnimatedComponent(TW.ScrollView)"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "2.4",
