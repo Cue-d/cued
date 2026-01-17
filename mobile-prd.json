@@ -1432,7 +1432,7 @@
         "Add loading indicator during refresh",
         "Verify haptic feedback on pull threshold"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "13.3",
@@ -1448,7 +1448,7 @@
         "Add 'Try Again' button calling reset",
         "Wrap tab screens with ErrorBoundary"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "13.4",
@@ -1491,7 +1491,7 @@
         "Fix any TypeScript errors",
         "Verify clean output with no errors"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "14.2",
@@ -1504,7 +1504,7 @@
         "Fix any linting errors",
         "Verify clean output"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "14.3",

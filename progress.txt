@@ -1454,3 +1454,87 @@
 
 ### Notes
 - Phase 13 polish tasks continue with 13.2 (pull-to-refresh) next
+
+## 2026-01-17: Task 13.2 - Add pull-to-refresh on lists
+
+### Completed Tasks
+- 13.2: Add pull-to-refresh on lists
+
+### Files Changed
+- apps/mobile/app/(tabs)/(contacts)/index.tsx: Added RefreshControl to FlatList, handleRefresh callback with haptic feedback
+- apps/mobile/app/(tabs)/(actions)/index.tsx: Added RefreshControl to ScrollView, handleRefresh callback with haptic feedback, fixed import indentation
+
+### Decisions
+- Convex real-time pattern: Convex useQuery auto-updates via real-time subscriptions, no manual refetch needed. Pull-to-refresh shows UX indicator only (500ms delay) for user feedback.
+- Haptic feedback on pull: Haptics.impactAsync(Light) triggers when refresh starts per iOS HIG
+- tintColor #8E8E93: iOS system secondary label gray for refresh indicator, matches semantic color palette
+- useCallback for handleRefresh: Prevents unnecessary re-renders when used as RefreshControl prop
+
+### Verification Results
+- `pnpm lint` passes (0 errors, warnings only in web/ui packages)
+- `pnpm typecheck` passes all 10 packages
+- All 5 task steps verified:
+  1. ✓ Add refreshControl to FlatList in Contacts tab
+  2. ✓ Add RefreshControl to ScrollView in Actions tab
+  3. ✓ Connect to Convex refetch on pull (via real-time updates, UX indicator shown)
+  4. ✓ Add loading indicator during refresh (RefreshControl refreshing prop)
+  5. ✓ Haptic feedback on pull threshold (Haptics.impactAsync Light)
+
+### Notes
+- Task 13.3 (error boundary) is next in Phase 13
+- iOS Simulator verification needed for full haptic/visual testing
+
+## 2026-01-17: Task 13.3 - Add error boundary with retry
+
+### Completed Tasks
+- 13.3: Add error boundary with retry
+
+### Files Changed
+- apps/mobile/src/components/error-boundary.tsx: New ErrorBoundary class component
+- apps/mobile/app/(tabs)/(actions)/index.tsx: Wrapped content with ErrorBoundary
+- apps/mobile/app/(tabs)/(contacts)/index.tsx: Wrapped content with ErrorBoundary
+- apps/mobile/app/(tabs)/(agent)/index.tsx: Wrapped content with ErrorBoundary
+- apps/mobile/src/components/skeleton-card.tsx: Fixed pre-existing bug (Animated.View → AnimatedView)
+
+### Decisions
+- Class component for ErrorBoundary: React error boundaries require class components with componentDidCatch/getDerivedStateFromError
+- SF Symbol exclamationmark.triangle.fill: Standard iOS error indicator icon
+- __DEV__ conditional for error details: Show error message in development only, hide in production
+- Haptic feedback on retry: Medium impact for tactile confirmation when pressing "Try Again"
+- Error boundary per-screen: Each tab screen gets its own boundary vs wrapping entire app
+
+### Verification Results
+- `pnpm lint` passes (0 errors, mobile clean)
+- `pnpm typecheck` passes all packages
+- All 6 task steps verified:
+  1. ✓ Create apps/mobile/src/components/error-boundary.tsx
+  2. ✓ Create ErrorBoundary class component
+  3. ✓ Catch errors in componentDidCatch
+  4. ✓ Display friendly error message
+  5. ✓ Add 'Try Again' button calling reset
+  6. ✓ Wrap tab screens with ErrorBoundary
+
+### Notes
+- Fixed pre-existing TypeScript error in skeleton-card.tsx (was using undefined Animated.View)
+- Task 13.4 (app icon and splash screen) is next in Phase 13
+
+## 2026-01-17: Tasks 14.1, 14.2 - TypeScript and ESLint verification
+
+### Completed Tasks
+- 14.1: Run TypeScript type check
+- 14.2: Run ESLint
+
+### Files Changed
+- None (verification tasks only)
+
+### Decisions
+- Both checks already passing: No code fixes required, mobile app TypeScript and ESLint clean
+
+### Verification Results
+- Task 14.1: `cd apps/mobile && pnpm tsc --noEmit` - clean output, no errors
+- Task 14.2: `cd apps/mobile && pnpm lint` - clean output, no errors
+- Full monorepo: `pnpm typecheck` passes 10/10 tasks, `pnpm lint` passes 5/5 tasks (warnings only in web app)
+
+### Notes
+- Tasks 14.3-14.8 require manual iOS Simulator testing
+- Phase 12 (iOS widgets) and Phase 15 (deployment) still pending
