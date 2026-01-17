@@ -37,6 +37,7 @@ interface ScanResult {
  * Returns conversations where:
  * - Last message is not from the user
  * - Last message is older than threshold hours
+ * Optimized: batches message and contact fetches to avoid N+1.
  */
 export const getUnansweredConversations = internalQuery({
   args: {
@@ -55,84 +56,93 @@ export const getUnansweredConversations = internalQuery({
       .take(args.limit * 2); // Fetch extra to filter
 
     // Filter: last message before cutoff (potentially unanswered)
-    const candidates = conversations.filter(
-      (c) => c.lastMessageAt && c.lastMessageAt < cutoffTime
+    const candidates = conversations
+      .filter((c) => c.lastMessageAt && c.lastMessageAt < cutoffTime)
+      .slice(0, args.limit);
+
+    if (candidates.length === 0) return [];
+
+    // Batch fetch last messages for all candidates in parallel
+    const lastMessages = await Promise.all(
+      candidates.map((conv) =>
+        ctx.db
+          .query("messages")
+          .withIndex("by_conversation", (q) => q.eq("conversationId", conv._id))
+          .order("desc")
+          .first()
+      )
     );
 
-    // For each candidate, check if last message is from user
-    const results: Array<{
-      conversation: Doc<"conversations">;
-      lastMessage: Doc<"messages"> | null;
-      primaryContact: Doc<"contacts"> | null;
-    }> = [];
+    // Filter to only conversations where last message is NOT from user
+    const validPairs = candidates
+      .map((conv, i) => ({ conv, msg: lastMessages[i] }))
+      .filter(
+        (pair): pair is { conv: Doc<"conversations">; msg: Doc<"messages"> } =>
+          pair.msg !== null && !pair.msg.isFromMe
+      );
 
-    for (const conv of candidates.slice(0, args.limit)) {
-      // Get the last message
-      const lastMessage = await ctx.db
-        .query("messages")
-        .withIndex("by_conversation", (q) => q.eq("conversationId", conv._id))
-        .order("desc")
-        .first();
+    if (validPairs.length === 0) return [];
 
-      // Skip if last message is from user (waiting for reply)
-      if (!lastMessage || lastMessage.isFromMe) {
-        continue;
-      }
+    // Collect unique contact IDs and batch fetch
+    const contactIds = [
+      ...new Set(
+        validPairs
+          .map((p) => p.conv.participantContactIds[0])
+          .filter((id): id is Id<"contacts"> => id !== undefined)
+      ),
+    ];
+    const contacts = await Promise.all(contactIds.map((id) => ctx.db.get(id)));
+    const contactMap = new Map(
+      contactIds.map((id, i) => [id, contacts[i]])
+    );
 
-      // Get primary contact
-      const primaryContact = conv.participantContactIds.length > 0
-        ? await ctx.db.get(conv.participantContactIds[0])
-        : null;
-
-      results.push({
-        conversation: conv,
-        lastMessage,
-        primaryContact,
-      });
-    }
-
-    return results;
+    // Build results
+    return validPairs.map(({ conv, msg }) => ({
+      conversation: conv,
+      lastMessage: msg,
+      primaryContact: conv.participantContactIds[0]
+        ? contactMap.get(conv.participantContactIds[0]) ?? null
+        : null,
+    }));
   },
 });
 
 /**
  * Check if conversation is already queued or was recently analyzed.
+ * Uses by_conversation_status index for efficient lookups.
  */
 export const isAlreadyQueued = internalQuery({
   args: {
     conversationId: v.id("conversations"),
     gracePeriodMs: v.number(),
   },
-  handler: async (ctx, args) => {
-    // Check for pending or processing entry
-    const pending = await ctx.db
-      .query("actionAnalysisQueue")
-      .withIndex("by_conversation", (q) =>
-        q.eq("conversationId", args.conversationId)
-      )
-      .filter((q) =>
-        q.or(
-          q.eq(q.field("status"), "pending"),
-          q.eq(q.field("status"), "processing")
+  handler: async (ctx, args): Promise<boolean> => {
+    // Check for pending or processing entries in parallel
+    const [pending, processing] = await Promise.all([
+      ctx.db
+        .query("actionAnalysisQueue")
+        .withIndex("by_conversation_status", (q) =>
+          q.eq("conversationId", args.conversationId).eq("status", "pending")
         )
-      )
-      .first();
+        .first(),
+      ctx.db
+        .query("actionAnalysisQueue")
+        .withIndex("by_conversation_status", (q) =>
+          q.eq("conversationId", args.conversationId).eq("status", "processing")
+        )
+        .first(),
+    ]);
 
-    if (pending) return true;
+    if (pending || processing) return true;
 
     // Check for recently completed entry
     const graceCutoff = Date.now() - args.gracePeriodMs;
     const recentlyCompleted = await ctx.db
       .query("actionAnalysisQueue")
-      .withIndex("by_conversation", (q) =>
-        q.eq("conversationId", args.conversationId)
+      .withIndex("by_conversation_status", (q) =>
+        q.eq("conversationId", args.conversationId).eq("status", "completed")
       )
-      .filter((q) =>
-        q.and(
-          q.eq(q.field("status"), "completed"),
-          q.gte(q.field("completedAt"), graceCutoff)
-        )
-      )
+      .filter((q) => q.gte(q.field("completedAt"), graceCutoff))
       .first();
 
     return recentlyCompleted !== null;
@@ -141,19 +151,18 @@ export const isAlreadyQueued = internalQuery({
 
 /**
  * Check if a pending action exists for this conversation.
+ * Uses by_conversation_status index for efficient lookups.
  */
 export const hasPendingActionForConversation = internalQuery({
   args: {
-    userId: v.id("users"),
     conversationId: v.id("conversations"),
   },
-  handler: async (ctx, args) => {
+  handler: async (ctx, args): Promise<boolean> => {
     const existing = await ctx.db
       .query("actions")
-      .withIndex("by_user_status", (q) =>
-        q.eq("userId", args.userId).eq("status", "pending")
+      .withIndex("by_conversation_status", (q) =>
+        q.eq("conversationId", args.conversationId).eq("status", "pending")
       )
-      .filter((q) => q.eq(q.field("conversationId"), args.conversationId))
       .first();
     return existing !== null;
   },
@@ -256,10 +265,7 @@ export const scanForUnansweredConversations = internalAction({
       // Skip if pending action already exists
       const hasPending = await ctx.runQuery(
         internal.actionQueue.hasPendingActionForConversation,
-        {
-          userId: args.userId,
-          conversationId: conversation._id,
-        }
+        { conversationId: conversation._id }
       );
 
       if (hasPending) {
@@ -492,6 +498,7 @@ const MAX_EOD_CONTACTS_PER_DAY = 10; // Limit to avoid overwhelm
 /**
  * Get contacts without enrichment (no notes or company) that have
  * recent conversations (from today).
+ * Optimized: fetches conversations first, then batch fetches contacts.
  */
 export const getNewContactsForEOD = internalQuery({
   args: {
@@ -500,55 +507,60 @@ export const getNewContactsForEOD = internalQuery({
     limit: v.number(),
   },
   handler: async (ctx, args) => {
-    // Get all contacts for user
-    const contacts = await ctx.db
-      .query("contacts")
-      .withIndex("by_user", (q) => q.eq("userId", args.userId))
-      .collect();
+    // Get today's conversations sorted by recent activity
+    const todayConversations = await ctx.db
+      .query("conversations")
+      .withIndex("by_user_last_message", (q) => q.eq("userId", args.userId))
+      .order("desc")
+      .filter((q) => q.gte(q.field("lastMessageAt"), args.todayStartMs))
+      .take(100); // Reasonable limit for today's conversations
 
-    // Filter contacts that haven't been enriched
-    const unenrichedContacts = contacts.filter(
-      (c) => !c.notes && !c.company
-    );
+    if (todayConversations.length === 0) return [];
 
-    // For each, check if they have a conversation from today
+    // Extract unique contact IDs from today's conversations
+    const contactIdsFromToday = new Set<Id<"contacts">>();
+    const contactToConversation = new Map<
+      string,
+      { conv: Doc<"conversations">; lastMessageAt: number }
+    >();
+
+    for (const conv of todayConversations) {
+      for (const contactId of conv.participantContactIds) {
+        const key = contactId as string;
+        if (!contactToConversation.has(key)) {
+          contactToConversation.set(key, {
+            conv,
+            lastMessageAt: conv.lastMessageAt ?? 0,
+          });
+        }
+        contactIdsFromToday.add(contactId);
+      }
+    }
+
+    // Batch fetch all contacts involved in today's conversations
+    const contactIds = [...contactIdsFromToday];
+    const contacts = await Promise.all(contactIds.map((id) => ctx.db.get(id)));
+
+    // Filter to unenriched contacts and build results
     const results: Array<{
       contact: Doc<"contacts">;
       conversation: Doc<"conversations"> | null;
       latestMessageAt: number;
     }> = [];
 
-    for (const contact of unenrichedContacts) {
-      // Find conversations where this contact is a participant
-      const conversation = await ctx.db
-        .query("conversations")
-        .withIndex("by_user", (q) => q.eq("userId", args.userId))
-        .filter((q) =>
-          q.and(
-            q.gte(q.field("lastMessageAt"), args.todayStartMs),
-            // Check if contact is in participants
-            // Note: This is a simplified check - in practice you might need more sophisticated matching
-          )
-        )
-        .order("desc")
-        .first();
+    for (let i = 0; i < contactIds.length; i++) {
+      const contact = contacts[i];
+      if (!contact) continue;
 
-      // Get any conversation with this contact
-      const allConversations = await ctx.db
-        .query("conversations")
-        .withIndex("by_user", (q) => q.eq("userId", args.userId))
-        .collect();
+      // Skip if contact is enriched (has notes or company)
+      if (contact.notes || contact.company) continue;
 
-      const contactConv = allConversations.find(
-        (c) => c.participantContactIds.includes(contact._id) &&
-               (c.lastMessageAt ?? 0) >= args.todayStartMs
-      );
-
-      if (contactConv && contactConv.lastMessageAt) {
+      const convData = contactToConversation.get(contactIds[i] as string);
+      if (convData) {
         results.push({
           contact,
-          conversation: contactConv,
-          latestMessageAt: contactConv.lastMessageAt,
+          conversation: convData.conv,
+          latestMessageAt: convData.lastMessageAt,
         });
       }
 

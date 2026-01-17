@@ -217,7 +217,8 @@ const schema = defineSchema({
     discardedAt: v.optional(v.number()),
   })
     .index("by_user", ["userId"])
-    .index("by_user_status", ["userId", "status"]),
+    .index("by_user_status", ["userId", "status"])
+    .index("by_conversation_status", ["conversationId", "status"]),
 
   actionAnalysisQueue: defineTable({
     conversationId: v.id("conversations"),
@@ -238,7 +239,8 @@ const schema = defineSchema({
   })
     .index("by_user_status", ["userId", "status"])
     .index("by_priority", ["status", "priority"]) // For processing order: pending first, then by priority
-    .index("by_conversation", ["conversationId"]),
+    .index("by_conversation", ["conversationId"])
+    .index("by_conversation_status", ["conversationId", "status"]),
 
   mergeSuggestions: defineTable({
     userId: v.id("users"),
