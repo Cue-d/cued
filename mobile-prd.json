@@ -96,7 +96,7 @@
         "Create test: `import { ConvexReactClient } from 'convex/react'`",
         "Verify import compiles without error"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "1.7",
@@ -109,7 +109,7 @@
         "Set inlineVariables: false and globalClassNamePolyfill: false",
         "Run `npx expo start --clear` and verify Metro starts with NativeWind"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "1.8",
@@ -194,6 +194,22 @@
         "Press 'i' to open iOS Simulator",
         "Verify app loads without crash",
         "Check Metro logs for any NativeWind/Tailwind warnings"
+      ],
+      "passes": false
+    },
+    {
+      "id": "1.14",
+      "phase": 1,
+      "mode": "hitl",
+      "category": "architectural",
+      "description": "Configure Turborepo dev scripts for mobile app",
+      "steps": [
+        "Add dev script to apps/mobile/package.json: `\"dev\": \"expo start\"`",
+        "Add typecheck script: `\"typecheck\": \"tsc --noEmit\"`",
+        "Add lint script: `\"lint\": \"eslint .\"`",
+        "Update turbo.json to include apps/mobile in pipeline if needed",
+        "Run `pnpm dev` from root and verify mobile app starts alongside other apps",
+        "Verify `pnpm typecheck` and `pnpm lint` include mobile app"
       ],
       "passes": false
     },
