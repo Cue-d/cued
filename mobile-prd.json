@@ -598,7 +598,7 @@
         "After 150ms, call onSwipe and animate off screen",
         "Reset isAnimatingRef after 400ms"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "5.5",

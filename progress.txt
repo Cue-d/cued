@@ -620,3 +620,27 @@
 - Task 5.4 (programmatic swipe trigger) not yet implemented - will add when needed
 - Overlay icons currently use emoji text - may upgrade to expo-symbols SymbolView later
 - Component is fully functional for gesture-based swiping
+
+## 2026-01-17: Task 5.4 - Programmatic swipe trigger for SwipeableCard
+
+### Completed Tasks
+- 5.4: Add programmatic swipe trigger to SwipeableCard
+
+### Files Changed
+- apps/mobile/src/components/swipeable-card.tsx: Added triggerSwipe prop and useEffect
+
+### Decisions
+- Used withTiming for peek animation: 150ms duration to peek position (threshold + 20)
+- Used withSpring for off-screen animation: Consistent with manual swipe behavior
+- useCallback for handleSwipe: Required to satisfy ESLint exhaustive-deps rule properly
+- Timeout-based sequencing: setTimeout for peek→exit animation, cleanup on unmount
+
+### Verification Results
+- `pnpm lint` passes (warnings only in web/ui packages, mobile clean)
+- `pnpm typecheck` passes all 10 packages
+- triggerSwipe prop correctly typed as SwipeDirection | null
+
+### Notes
+- This enables ActionButtons component (Task 5.8) to trigger swipes programmatically
+- Animation sequence: peek position → 150ms delay → off-screen spring → onSwipe callback
+- isAnimatingRef prevents multiple simultaneous triggers
