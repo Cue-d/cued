@@ -745,7 +745,7 @@
         "Add TextInput for notes with FileText icon",
         "Track form state and call onFormChange on changes"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "6.5",

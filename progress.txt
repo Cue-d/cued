@@ -747,3 +747,30 @@
 - Tailwind classes use sf-* semantic colors for iOS platform consistency
 - TextInput placeholder color hardcoded to #8E8E93 (iOS secondary label gray)
 - Task 6.4 (ContactCard) is next in Phase 6
+
+## 2026-01-17: Task 6.4 - ContactCard component for new contacts
+
+### Completed Tasks
+- 6.4: Create ContactCard component for new contacts
+
+### Files Changed
+- apps/mobile/src/components/cards/contact-card.tsx: New ContactCard component
+
+### Decisions
+- SF Symbol mapping for icons: person (User), building.2 (Building2), tag (Tag), doc.text (FileText), clock (Clock)
+- ContactFormData interface mirrors web: name, company, tags, notes fields (omitted linkedContactId for mobile simplicity)
+- ContactPlatform type same as ActionPlatform: imessage, gmail, slack
+- PlatformBadge uses transparent background tint: `${tintColor}15` for subtle platform indicator
+- TagBadge component: Renders parsed tags as visual badges below the tags input
+- FormField helper component: Reusable field with icon, label, and TextInput for DRY implementation
+- ScrollView with keyboardShouldPersistTaps="handled": Prevents keyboard dismissal when tapping form fields
+- No autoFocus/ref: Same as MessageResponseCard, TW wrappers don't forward refs
+
+### Verification Results
+- `pnpm lint` passes (5 tasks, 0 errors, warnings only in web/ui packages)
+- `pnpm typecheck` passes all 10 packages
+- Mobile app TypeScript compiles cleanly
+
+### Notes
+- Component follows same patterns as MessageResponseCard (Avatar, platform badge, sf-* colors)
+- Next task 6.5 will create barrel export for card components
