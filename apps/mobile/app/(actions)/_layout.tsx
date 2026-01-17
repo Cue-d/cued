@@ -21,6 +21,12 @@ export default function ActionsLayout() {
           contentStyle: { backgroundColor: "transparent" },
         }}
       />
+      <Stack.Screen
+        name="[id]"
+        options={{
+          headerLargeTitle: false,
+        }}
+      />
     </Stack>
   );
 }
