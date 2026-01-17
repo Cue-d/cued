@@ -61,6 +61,43 @@ type ChatInput = Infer<typeof chatInput>;
 type MessageInput = Infer<typeof messageInput>;
 type BatchInput = Infer<typeof syncBatchInput>;
 
+// Shared constant for action event triggers - only process messages from last 7 days
+const SEVEN_DAYS_MS = 7 * 24 * 60 * 60 * 1000;
+
+/**
+ * Schedule action events for incoming messages on a set of conversations.
+ */
+async function scheduleIncomingMessageEvents(
+  ctx: MutationCtx,
+  userId: Id<"users">,
+  conversationIds: Set<Id<"conversations">>,
+  platform: "imessage" | "gmail" | "slack"
+): Promise<void> {
+  for (const convId of conversationIds) {
+    await ctx.scheduler.runAfter(0, internal.actionEvents.onIncomingMessage, {
+      userId,
+      conversationId: convId,
+      platform,
+    });
+  }
+}
+
+/**
+ * Schedule action events for outgoing messages (auto-complete pending actions).
+ */
+async function scheduleOutgoingMessageEvents(
+  ctx: MutationCtx,
+  userId: Id<"users">,
+  conversationIds: Set<Id<"conversations">>
+): Promise<void> {
+  for (const convId of conversationIds) {
+    await ctx.scheduler.runAfter(0, internal.actionEvents.onUserSentMessage, {
+      userId,
+      conversationId: convId,
+    });
+  }
+}
+
 /**
  * Sync a batch of iMessage data from Electron to Convex.
  *
@@ -267,6 +304,23 @@ async function syncMessagesInternal(
       lastMessageAt: update.timestamp,
     });
   }
+
+  // Schedule action analysis for new messages (event-driven)
+  const cutoff = Date.now() - SEVEN_DAYS_MS;
+  const incomingConvos = new Set<Id<"conversations">>();
+  const outgoingConvos = new Set<Id<"conversations">>();
+
+  for (const msg of messagesToInsert) {
+    if (msg.sentAt < cutoff) continue;
+    if (msg.isFromMe) {
+      outgoingConvos.add(msg.conversationId);
+    } else {
+      incomingConvos.add(msg.conversationId);
+    }
+  }
+
+  await scheduleIncomingMessageEvents(ctx, userId, incomingConvos, "imessage");
+  await scheduleOutgoingMessageEvents(ctx, userId, outgoingConvos);
 
   return result;
 }
@@ -1101,6 +1155,24 @@ async function syncGmailMessagesInternal(
     }
   }
 
+  // Schedule action analysis for new incoming emails (event-driven)
+  const cutoff = Date.now() - SEVEN_DAYS_MS;
+  const incomingConvos = new Set<Id<"conversations">>();
+
+  for (const [threadId, threadEmails] of emailsByThread) {
+    const conversationId = conversationMap.get(threadId);
+    if (!conversationId) continue;
+
+    const hasRecentEmail = threadEmails.some(
+      (email) => new Date(email.date).getTime() >= cutoff
+    );
+    if (hasRecentEmail) {
+      incomingConvos.add(conversationId);
+    }
+  }
+
+  await scheduleIncomingMessageEvents(ctx, userId, incomingConvos, "gmail");
+
   return result;
 }
 
@@ -1409,6 +1481,24 @@ async function syncSlackMessagesInternal(
       result.errors.push(`Failed to sync channel ${channelId}: ${e}`);
     }
   }
+
+  // Schedule action analysis for new incoming Slack messages (event-driven)
+  const cutoff = Date.now() - SEVEN_DAYS_MS;
+  const incomingConvos = new Set<Id<"conversations">>();
+
+  for (const [channelId, channelMessages] of messagesByChannel) {
+    const conversationId = conversationMap.get(channelId);
+    if (!conversationId) continue;
+
+    const hasRecentMessage = channelMessages.some(
+      (msg) => new Date(msg.sentAt).getTime() >= cutoff
+    );
+    if (hasRecentMessage) {
+      incomingConvos.add(conversationId);
+    }
+  }
+
+  await scheduleIncomingMessageEvents(ctx, userId, incomingConvos, "slack");
 
   return result;
 }

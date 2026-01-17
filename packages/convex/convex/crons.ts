@@ -4,29 +4,25 @@
  * Note: Cron jobs can only call queries and mutations, not actions.
  * For tasks that need to call external APIs (OpenAI, Mem0), we use
  * mutations that schedule actions via ctx.scheduler.runAfter().
+ *
+ * Action analysis is now event-driven (triggered from sync.ts on new messages).
+ * The old scan-unanswered-conversations and process-analysis-queue crons
+ * have been removed in favor of the event-driven approach.
  */
 import { cronJobs } from "convex/server";
 import { internal } from "./_generated/api";
 
 const crons = cronJobs();
 
-// Task 7.5: Scan for unanswered conversations every 5 minutes
-// Finds conversations needing action and queues them for LLM analysis
+// Wake up snoozed actions that are due (every 15 minutes)
+// Converts snoozed actions to pending when snoozedUntil <= now
 crons.interval(
-  "scan-unanswered-conversations",
-  { minutes: 5 },
-  internal.actionQueue.scanAllUsersForUnanswered
+  "wake-snoozed-actions",
+  { minutes: 15 },
+  internal.actionEvents.wakeSnoozedActions
 );
 
-// Task 7.7: Process analysis queue every 30 seconds
-// Picks next pending entry and schedules LLM analysis
-crons.interval(
-  "process-analysis-queue",
-  { seconds: 30 },
-  internal.actionQueue.triggerQueueProcessing
-);
-
-// Task 7.17: Daily scan for new contacts at 9 PM UTC
+// Daily scan for new contacts at 9 PM UTC
 // Creates eod_contact actions for unenriched contacts from today
 crons.daily(
   "daily-eod-contact-scan",
