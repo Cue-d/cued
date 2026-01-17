@@ -669,3 +669,25 @@
 - Task 5.6 (empty state) not yet implemented - separate concern that should be its own commit
 - Used bg-sf-secondaryBg for card background with shadow-lg for depth
 - triggerSwipe prop passed through to top card only
+
+## 2026-01-17: Task 5.6 - Empty state for CardStack
+
+### Completed Tasks
+- 5.6: Add empty state to CardStack
+
+### Files Changed
+- apps/mobile/src/components/card-stack.tsx: Added empty state rendering with SymbolView
+
+### Decisions
+- Early return pattern: Check actions.length === 0 and return empty state JSX before main rendering
+- Used expo-symbols SymbolView: SF Symbol "party.popper" with size 64 and gray tint (#8E8E93)
+- FadeIn animation: 300ms duration for smooth appearance
+- Text styling: Uses sf-label and sf-secondaryLabel for semantic iOS colors
+
+### Verification Results
+- `pnpm lint` passes (warnings only in web app, mobile clean)
+- `pnpm typecheck` passes all 10 packages
+
+### Notes
+- SymbolView provides native SF Symbol rendering on iOS with fallback support for Android/web
+- Empty state matches iOS design patterns with centered content and muted icon

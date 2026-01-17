@@ -630,7 +630,7 @@
         "Add 'All caught up!' heading",
         "Add 'New actions will appear here' subtext"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "5.7",
