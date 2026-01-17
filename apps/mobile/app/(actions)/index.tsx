@@ -3,11 +3,13 @@
  *
  * Task 7.1: Implement Actions tab with CardStack and real data.
  * Task 7.2: Implement swipe handler with Convex mutation.
+ * Task 7.4: Wire snooze picker to action swipe.
  * Displays pending actions as swipeable cards using Convex data.
  */
 
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect } from "react";
 import { useMutation } from "convex/react";
+import { useRouter, useLocalSearchParams } from "expo-router";
 import * as Haptics from "expo-haptics";
 import { View, Text, ScrollView } from "@/tw";
 import { useActions } from "@/hooks/useActions";
@@ -59,6 +61,11 @@ const MESSAGE_ACTION_TYPES = ["respond", "follow_up"];
 const CONTACT_ACTION_TYPES = ["eod_contact", "new_connection"];
 
 export default function ActionsScreen(): React.JSX.Element {
+  const router = useRouter();
+  const params = useLocalSearchParams<{
+    snoozedUntil?: string;
+    snoozeActionId?: string;
+  }>();
   const { actions, isLoading } = useActions({ limit: 20 });
   const swipeAction = useMutation(api.actions.swipeAction);
 
@@ -71,6 +78,34 @@ export default function ActionsScreen(): React.JSX.Element {
   const [contactForms, setContactForms] = useState<
     Record<string, ContactFormData>
   >({});
+
+  // Handle snooze return from snooze-picker sheet
+  useEffect(() => {
+    const handleSnoozeReturn = async () => {
+      const { snoozedUntil, snoozeActionId } = params;
+      if (!snoozedUntil || !snoozeActionId) return;
+
+      const timestamp = parseInt(snoozedUntil, 10);
+      if (isNaN(timestamp)) return;
+
+      try {
+        await swipeAction({
+          actionId: snoozeActionId as Id<"actions">,
+          direction: "up",
+          snoozedUntil: timestamp,
+        });
+        await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      } catch (error) {
+        console.error("Failed to snooze action:", error);
+        await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+      }
+
+      // Clear params after processing
+      router.setParams({ snoozedUntil: undefined, snoozeActionId: undefined });
+    };
+
+    handleSnoozeReturn();
+  }, [params, swipeAction, router]);
 
   // Transform actions to CardStack items
   const cardItems: ActionItem[] = actions.map((action) => ({
@@ -127,10 +162,12 @@ export default function ActionsScreen(): React.JSX.Element {
     async (item: ActionItem, direction: SwipeDirection) => {
       const { action } = item;
 
-      // For snooze (up), Task 7.3/7.4 will show snooze picker sheet
+      // For snooze (up), navigate to snooze picker sheet
       if (direction === "up") {
-        // TODO: Task 7.3/7.4 - navigate to snooze picker with actionId
-        console.log(`Snooze requested for action ${action._id}`);
+        router.push({
+          pathname: "/(actions)/snooze-picker",
+          params: { actionId: action._id },
+        });
         return;
       }
 
@@ -158,7 +195,7 @@ export default function ActionsScreen(): React.JSX.Element {
         await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
       }
     },
-    [swipeAction, getResponseText, getContactFormData],
+    [router, swipeAction, getResponseText, getContactFormData],
   );
 
   // Render card based on action type

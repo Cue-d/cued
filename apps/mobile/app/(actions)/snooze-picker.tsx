@@ -75,11 +75,13 @@ export default function SnoozePicker(): React.JSX.Element {
     (preset: SnoozePreset) => {
       const timestamp = preset.getTimestamp();
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-      // Navigate back with selected timestamp
-      router.back();
-      router.setParams({
-        snoozedUntil: timestamp.toString(),
-        actionId: actionId ?? "",
+      // Navigate back to index with selected timestamp
+      router.replace({
+        pathname: "/(actions)",
+        params: {
+          snoozedUntil: timestamp.toString(),
+          snoozeActionId: actionId ?? "",
+        },
       });
     },
     [router, actionId],
@@ -98,10 +100,13 @@ export default function SnoozePicker(): React.JSX.Element {
   /** Confirm custom date */
   const handleConfirmCustom = useCallback(() => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-    router.back();
-    router.setParams({
-      snoozedUntil: customDate.getTime().toString(),
-      actionId: actionId ?? "",
+    // Navigate back to index with selected timestamp
+    router.replace({
+      pathname: "/(actions)",
+      params: {
+        snoozedUntil: customDate.getTime().toString(),
+        snoozeActionId: actionId ?? "",
+      },
     });
   }, [router, actionId, customDate]);
 
