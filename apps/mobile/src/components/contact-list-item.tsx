@@ -88,6 +88,11 @@ export function ContactListItem({
 }: ContactListItemProps): React.JSX.Element {
   const initials = getInitials(contact.displayName);
 
+  /** Handle tap with haptic feedback */
+  const handleTap = (): void => {
+    Haptics.selectionAsync();
+  };
+
   const handleMessage = (): void => {
     if (contact.phoneNumber) {
       Linking.openURL(`sms:${contact.phoneNumber}`);
@@ -115,6 +120,7 @@ export function ContactListItem({
       {/* Trigger: the tappable content */}
       <Link.Trigger>
         <Pressable
+          onPressIn={handleTap}
           className={cn(
             "flex-row items-center px-4 py-3 gap-3 active:bg-sf-fill",
             className,
