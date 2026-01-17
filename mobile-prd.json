@@ -825,7 +825,7 @@
         "Add 'Custom...' button opening DateTimePicker",
         "On selection, navigate back with selected timestamp"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "7.4",

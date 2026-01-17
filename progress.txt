@@ -849,3 +849,32 @@
 - Swipe left: Calls swipeAction with direction='left' (discard)
 - Swipe up: Currently logs and returns - Task 7.3/7.4 will add snooze picker navigation
 - Next task 7.3 will create snooze picker sheet route
+
+## 2026-01-17: Task 7.3 - Create snooze picker sheet route
+
+### Completed Tasks
+- 7.3: Create snooze picker sheet route
+
+### Files Changed
+- apps/mobile/app/(actions)/snooze-picker.tsx: New snooze picker sheet with presets and custom date picker
+- apps/mobile/app/(actions)/_layout.tsx: Added Stack.Screen config for snooze-picker
+- apps/mobile/package.json: Added @react-native-community/datetimepicker ^8.4.4
+
+### Decisions
+- Four preset snooze options: 1 hour, 3 hours, Tomorrow 9am, Next Monday 9am - covers common use cases
+- getTomorrow9am/getNextMonday9am helpers: Calculate timestamps correctly handling day-of-week logic
+- GlassView for preset buttons: Uses isInteractive prop for liquid glass tap effect on iOS 26+
+- DateTimePicker with spinner display: Native iOS feel for custom date/time selection
+- themeVariant="dark" on picker: Matches app appearance since sheet has transparent background
+- Haptic feedback: Medium impact on preset/confirm selection, selection async on toggle
+- router.setParams for return value: Task 7.4 will read snoozedUntil param in index.tsx
+
+### Verification Results
+- `pnpm lint` passes (mobile clean, warnings only in web/ui packages)
+- `pnpm typecheck` passes all 10 packages
+
+### Notes
+- snooze-picker presents as formSheet with 40% detent and grabber visible
+- contentStyle backgroundColor: transparent allows glass effect to show through
+- Task 7.4 will wire this up to the action index - currently navigation params aren't consumed
+- Next task 7.4 will wire snooze picker to action swipe
