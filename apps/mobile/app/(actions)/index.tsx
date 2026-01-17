@@ -2,10 +2,13 @@
  * Actions tab main screen.
  *
  * Task 7.1: Implement Actions tab with CardStack and real data.
+ * Task 7.2: Implement swipe handler with Convex mutation.
  * Displays pending actions as swipeable cards using Convex data.
  */
 
 import { useState, useCallback } from "react";
+import { useMutation } from "convex/react";
+import * as Haptics from "expo-haptics";
 import { View, Text, ScrollView } from "@/tw";
 import { useActions } from "@/hooks/useActions";
 import { CardStack } from "@/components/card-stack";
@@ -17,6 +20,8 @@ import {
   type ContactFormData,
 } from "@/components/cards";
 import type { SwipeDirection } from "@/components/swipeable-card";
+import { api } from "@prm/convex/convex/_generated/api";
+import type { Id } from "@prm/convex/convex/_generated/dataModel";
 
 /** Action type from Convex getPendingActions */
 type EnrichedAction = {
@@ -55,6 +60,7 @@ const CONTACT_ACTION_TYPES = ["eod_contact", "new_connection"];
 
 export default function ActionsScreen(): React.JSX.Element {
   const { actions, isLoading } = useActions({ limit: 20 });
+  const swipeAction = useMutation(api.actions.swipeAction);
 
   // Track response text per action (key = action._id)
   const [responseTexts, setResponseTexts] = useState<Record<string, string>>(
@@ -116,13 +122,43 @@ export default function ActionsScreen(): React.JSX.Element {
     [],
   );
 
-  // Handle swipe (placeholder - Task 7.2 will implement mutation)
+  // Handle swipe with Convex mutation
   const handleSwipe = useCallback(
-    (item: ActionItem, direction: SwipeDirection) => {
-      console.log(`Swipe ${direction} on action ${item.id}`);
-      // TODO: Task 7.2 will implement Convex mutation
+    async (item: ActionItem, direction: SwipeDirection) => {
+      const { action } = item;
+
+      // For snooze (up), Task 7.3/7.4 will show snooze picker sheet
+      if (direction === "up") {
+        // TODO: Task 7.3/7.4 - navigate to snooze picker with actionId
+        console.log(`Snooze requested for action ${action._id}`);
+        return;
+      }
+
+      // Get response text for right swipe (send)
+      const responseText =
+        direction === "right" ? getResponseText(action) : undefined;
+
+      // Get notes from contact form for new_connection right swipe
+      const notes =
+        direction === "right" && action.type === "new_connection"
+          ? getContactFormData(action).notes
+          : undefined;
+
+      try {
+        await swipeAction({
+          actionId: action._id as Id<"actions">,
+          direction,
+          responseText: notes ?? responseText,
+        });
+        // Success haptic feedback
+        await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      } catch (error) {
+        console.error("Failed to swipe action:", error);
+        // Error haptic feedback
+        await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+      }
     },
-    [],
+    [swipeAction, getResponseText, getContactFormData],
   );
 
   // Render card based on action type
