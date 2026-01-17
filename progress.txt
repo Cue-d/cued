@@ -569,3 +569,26 @@
 - Hook returns { contacts, nextCursor, isLoading, error }
 - isLoading is true while Convex query is pending (result === undefined)
 - Next task 4.6 will create usePendingActionCount hook for badge
+
+## 2026-01-17: Task 4.6 - Create usePendingActionCount hook for badge
+
+### Completed Tasks
+- 4.6: Create usePendingActionCount hook for badge
+
+### Files Changed
+- apps/mobile/src/hooks/usePendingActionCount.ts: Created hook using Convex useQuery
+
+### Decisions
+- Used api.actions.getPendingActionCount: PRD said api.actions.getPendingCount but actual Convex API exports getPendingActionCount
+- Returns number directly: Unlike useActions/useContacts which return objects, this hook returns just the count number for simplicity
+- Uses denormalized counter: The Convex query reads pendingActionCount from users table (no expensive query)
+
+### Verification Results
+- `pnpm lint` passes (warnings only in web/ui packages, mobile clean)
+- `pnpm typecheck` passes all 10 packages
+- Hook compiles correctly with @prm/convex/convex/_generated/api path
+
+### Notes
+- Hook returns simple number (defaults to 0 when undefined)
+- Will be used in Task 7.6 to add badge count to Actions tab
+- Next task 4.7 is a testing task requiring manual iOS Simulator verification

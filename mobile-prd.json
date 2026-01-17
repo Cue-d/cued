@@ -517,7 +517,7 @@
         "Call api.actions.getPendingCount",
         "Return count number"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "4.7",
