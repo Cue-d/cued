@@ -661,7 +661,7 @@
         "Add Haptics.impactAsync(ImpactFeedbackStyle.Medium) on press",
         "Call onSwipe('left'|'up'|'right') respectively"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "5.9",

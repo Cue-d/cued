@@ -691,3 +691,28 @@
 ### Notes
 - SymbolView provides native SF Symbol rendering on iOS with fallback support for Android/web
 - Empty state matches iOS design patterns with centered content and muted icon
+
+## 2026-01-17: Task 5.8 - ActionButtons component with GlassView
+
+### Completed Tasks
+- 5.8: Create ActionButtons component with GlassView
+
+### Files Changed
+- apps/mobile/src/components/action-buttons.tsx: New component with glass-styled swipe action buttons
+
+### Decisions
+- GlassView with isInteractive prop: Uses expo-glass-effect for iOS 26+ liquid glass effect
+- Fallback to solid bg-sf-secondaryBg: For older iOS and Android where GlassView isn't available
+- SFSymbol type import from sf-symbols-typescript: Required for proper typing of SF Symbol names
+- Three buttons with color coding: Discard (gray #8E8E93), Snooze (amber #FF9500), Send (teal #00806B)
+- Medium haptic feedback: Haptics.impactAsync(ImpactFeedbackStyle.Medium) on button press
+- Configurable disabled state: 0.5 opacity when disabled
+
+### Verification Results
+- `pnpm lint` passes (warnings only in web/ui packages, mobile clean)
+- `pnpm typecheck` passes all 10 packages
+
+### Notes
+- ActionButtons provides accessible alternatives to swipe gestures
+- Uses SymbolView for native SF Symbol rendering (xmark, clock, checkmark)
+- Task 5.9 (testing) requires iOS Simulator verification
