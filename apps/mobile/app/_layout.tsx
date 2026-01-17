@@ -1,10 +1,14 @@
 import "../src/global.css";
+import { useEffect } from "react";
 import { ActivityIndicator } from "react-native";
 import { Stack } from "expo-router/stack";
+import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 import { View } from "@/tw";
 import { AuthProvider, useAuth } from "@/providers/AuthProvider";
 import { ConvexProvider } from "@/providers/ConvexProvider";
+import { PushTokenRegistrar } from "@/components/push-token-registrar";
+import { configureNotifications } from "@/lib/notifications";
 import SignInScreen from "./sign-in";
 
 function LoadingScreen() {
@@ -18,6 +22,11 @@ function LoadingScreen() {
 function AuthenticatedApp() {
   const { isLoading, isAuthenticated } = useAuth();
 
+  // Configure notification handlers on mount
+  useEffect(() => {
+    configureNotifications();
+  }, []);
+
   if (isLoading) {
     return <LoadingScreen />;
   }
@@ -28,6 +37,7 @@ function AuthenticatedApp() {
 
   return (
     <ConvexProvider>
+      <PushTokenRegistrar />
       <Stack screenOptions={{ headerShown: false }}>
         <Stack.Screen name="(tabs)" />
         <Stack.Screen
@@ -48,10 +58,12 @@ function AuthenticatedApp() {
 
 export default function RootLayout() {
   return (
-    <SafeAreaProvider>
-      <AuthProvider>
-        <AuthenticatedApp />
-      </AuthProvider>
-    </SafeAreaProvider>
+    <GestureHandlerRootView style={{ flex: 1 }}>
+      <SafeAreaProvider>
+        <AuthProvider>
+          <AuthenticatedApp />
+        </AuthProvider>
+      </SafeAreaProvider>
+    </GestureHandlerRootView>
   );
 }

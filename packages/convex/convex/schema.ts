@@ -79,6 +79,8 @@ const schema = defineSchema({
     plan: v.optional(v.string()),
     // Denormalized counter for efficient action badge queries
     pendingActionCount: v.optional(v.number()),
+    // Expo push token for mobile notifications
+    expoPushToken: v.optional(v.string()),
   })
     .index("by_workos_id", ["workosUserId"])
     .index("by_email", ["email"]),

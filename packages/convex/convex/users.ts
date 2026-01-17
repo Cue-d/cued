@@ -45,6 +45,36 @@ export const getProfile = query({
 });
 
 /**
+ * Register an Expo push token for the authenticated user.
+ * Call this after authentication and when the token refreshes.
+ */
+export const registerPushToken = mutation({
+  args: {
+    pushToken: v.string(),
+  },
+  handler: async (ctx, args) => {
+    const identity = await ctx.auth.getUserIdentity();
+    if (!identity) {
+      throw new Error("Unauthorized");
+    }
+
+    const user = await findUserByWorkosId(ctx, identity.subject);
+    if (!user) {
+      throw new Error("User not found");
+    }
+
+    // Only update if token changed
+    if (user.expoPushToken !== args.pushToken) {
+      await ctx.db.patch(user._id, {
+        expoPushToken: args.pushToken,
+      });
+    }
+
+    return { success: true };
+  },
+});
+
+/**
  * Sync user profile from WorkOS user data.
  * Creates user if not exists, updates profile if changed.
  * Call this on app startup with user data from AuthKit/token response.

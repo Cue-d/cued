@@ -5,11 +5,13 @@ import * as Crypto from "expo-crypto";
 
 WebBrowser.maybeCompleteAuthSession();
 
-const ACCESS_TOKEN_KEY = "prm_access_token";
-const REFRESH_TOKEN_KEY = "prm_refresh_token";
-const USER_KEY = "prm_user";
+const STORAGE_KEYS = {
+  accessToken: "prm_access_token",
+  refreshToken: "prm_refresh_token",
+  user: "prm_user",
+} as const;
 
-const WORKOS_CLIENT_ID = process.env.EXPO_PUBLIC_WORKOS_CLIENT_ID!;
+const WORKOS_CLIENT_ID = process.env.EXPO_PUBLIC_WORKOS_CLIENT_ID ?? "";
 const WORKOS_AUTH_ENDPOINT = "https://api.workos.com/user_management/authorize";
 const WORKOS_TOKEN_ENDPOINT = "https://api.workos.com/user_management/authenticate";
 
@@ -19,8 +21,10 @@ const WORKOS_REDIRECT_URI = AuthSession.makeRedirectUri({
 });
 
 if (__DEV__) {
-  console.log("[PRM Auth] Redirect URI for WorkOS Dashboard:", WORKOS_REDIRECT_URI);
+  console.log("[PRM Auth] Redirect URI:", WORKOS_REDIRECT_URI);
 }
+
+export type OAuthProvider = "GoogleOAuth" | "AppleOAuth";
 
 export interface WorkOSUser {
   id: string;
@@ -33,11 +37,6 @@ export interface WorkOSUser {
   updatedAt: string;
 }
 
-export interface AuthTokens {
-  accessToken: string;
-  refreshToken: string;
-}
-
 export interface AuthResult {
   user: WorkOSUser;
   accessToken: string;
@@ -45,9 +44,8 @@ export interface AuthResult {
 }
 
 async function generateRandomString(length: number): Promise<string> {
-  const randomBytes = await Crypto.getRandomBytesAsync(length);
-  return Array.from(randomBytes)
-    .map((byte) => byte.toString(16).padStart(2, "0"))
+  const bytes = await Crypto.getRandomBytesAsync(length);
+  return Array.from(bytes, (b) => b.toString(16).padStart(2, "0"))
     .join("")
     .slice(0, length);
 }
@@ -59,12 +57,15 @@ async function generatePKCE(): Promise<{ codeVerifier: string; codeChallenge: st
     codeVerifier,
     { encoding: Crypto.CryptoEncoding.BASE64 }
   );
-  const codeChallenge = digest.replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+  const codeChallenge = digest
+    .replace(/\+/g, "-")
+    .replace(/\//g, "_")
+    .replace(/=+$/, "");
   return { codeVerifier, codeChallenge };
 }
 
-export function buildAuthorizationUrl(
-  provider: "GoogleOAuth" | "AppleOAuth" | "authkit",
+function buildAuthorizationUrl(
+  provider: OAuthProvider,
   codeChallenge: string,
   state: string
 ): string {
@@ -77,19 +78,13 @@ export function buildAuthorizationUrl(
     code_challenge_method: "S256",
     state,
   });
-
   return `${WORKOS_AUTH_ENDPOINT}?${params.toString()}`;
 }
 
-async function exchangeCodeForTokens(
-  code: string,
-  codeVerifier: string
-): Promise<AuthResult> {
+async function exchangeCodeForTokens(code: string, codeVerifier: string): Promise<AuthResult> {
   const response = await fetch(WORKOS_TOKEN_ENDPOINT, {
     method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-    },
+    headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
       client_id: WORKOS_CLIENT_ID,
       code,
@@ -99,8 +94,8 @@ async function exchangeCodeForTokens(
   });
 
   if (!response.ok) {
-    const error = await response.text();
-    throw new Error(`Token exchange failed: ${error}`);
+    const errorText = await response.text();
+    throw new Error(`Token exchange failed: ${errorText}`);
   }
 
   const data = await response.json();
@@ -111,7 +106,7 @@ async function exchangeCodeForTokens(
   };
 }
 
-export async function signIn(provider: "GoogleOAuth" | "AppleOAuth"): Promise<AuthResult> {
+export async function signIn(provider: OAuthProvider): Promise<AuthResult> {
   const { codeVerifier, codeChallenge } = await generatePKCE();
   const state = await generateRandomString(32);
   const authUrl = buildAuthorizationUrl(provider, codeChallenge, state);
@@ -133,37 +128,41 @@ export async function signIn(provider: "GoogleOAuth" | "AppleOAuth"): Promise<Au
   }
 
   const authResult = await exchangeCodeForTokens(code, codeVerifier);
-  await setAccessToken(authResult.accessToken);
-  await setRefreshToken(authResult.refreshToken);
-  await setUser(authResult.user);
+  await Promise.all([
+    setAccessToken(authResult.accessToken),
+    setRefreshToken(authResult.refreshToken),
+    setUser(authResult.user),
+  ]);
 
   return authResult;
 }
 
 export async function signOut(): Promise<void> {
-  await SecureStore.deleteItemAsync(ACCESS_TOKEN_KEY);
-  await SecureStore.deleteItemAsync(REFRESH_TOKEN_KEY);
-  await SecureStore.deleteItemAsync(USER_KEY);
+  await Promise.all([
+    SecureStore.deleteItemAsync(STORAGE_KEYS.accessToken),
+    SecureStore.deleteItemAsync(STORAGE_KEYS.refreshToken),
+    SecureStore.deleteItemAsync(STORAGE_KEYS.user),
+  ]);
 }
 
 export async function getAccessToken(): Promise<string | null> {
-  return SecureStore.getItemAsync(ACCESS_TOKEN_KEY);
+  return SecureStore.getItemAsync(STORAGE_KEYS.accessToken);
 }
 
 export async function setAccessToken(token: string): Promise<void> {
-  await SecureStore.setItemAsync(ACCESS_TOKEN_KEY, token);
+  await SecureStore.setItemAsync(STORAGE_KEYS.accessToken, token);
 }
 
 export async function getRefreshToken(): Promise<string | null> {
-  return SecureStore.getItemAsync(REFRESH_TOKEN_KEY);
+  return SecureStore.getItemAsync(STORAGE_KEYS.refreshToken);
 }
 
 export async function setRefreshToken(token: string): Promise<void> {
-  await SecureStore.setItemAsync(REFRESH_TOKEN_KEY, token);
+  await SecureStore.setItemAsync(STORAGE_KEYS.refreshToken, token);
 }
 
 export async function getUser(): Promise<WorkOSUser | null> {
-  const userData = await SecureStore.getItemAsync(USER_KEY);
+  const userData = await SecureStore.getItemAsync(STORAGE_KEYS.user);
   if (!userData) return null;
   try {
     return JSON.parse(userData);
@@ -173,7 +172,7 @@ export async function getUser(): Promise<WorkOSUser | null> {
 }
 
 export async function setUser(user: WorkOSUser): Promise<void> {
-  await SecureStore.setItemAsync(USER_KEY, JSON.stringify(user));
+  await SecureStore.setItemAsync(STORAGE_KEYS.user, JSON.stringify(user));
 }
 
 export async function isAuthenticated(): Promise<boolean> {
