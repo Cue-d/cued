@@ -856,7 +856,7 @@
         "Add ActionButtons at bottom for manual swipe",
         "Configure headerLargeTitle: false for detail view"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "7.6",

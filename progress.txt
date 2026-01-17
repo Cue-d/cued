@@ -902,3 +902,33 @@
 - Flow: swipe up → navigate to snooze-picker with actionId → select time → replace back to index with snoozedUntil + snoozeActionId → useEffect triggers swipeAction mutation → params cleared
 - Action will disappear from queue when Convex mutation succeeds (real-time subscription updates)
 - Next task 7.5 will add action detail route for full context
+
+## 2026-01-17: Task 7.5 - Add action detail route for full context
+
+### Completed Tasks
+- 7.5: Add action detail route for full context
+
+### Files Changed
+- apps/mobile/app/(actions)/[id].tsx: New action detail screen with getActionWithContext query
+- apps/mobile/app/(actions)/_layout.tsx: Added Stack.Screen config for [id] route
+
+### Decisions
+- Used api.actions.getActionWithContext: PRD said getWithContext but actual API is getActionWithContext
+- Transform reactions to string[]: Convex returns reaction objects with emoji property, DisplayMessage expects string array, extracted emoji only
+- Dynamic Stack.Screen title: Uses contact displayName via Stack.Screen options in component
+- Response text initialization: Sets from draftResponse or draftMessage if available
+- Snooze navigates to snooze-picker: Reuses existing snooze picker flow instead of inline sheet
+- MessageBubble simplified: Doesn't include reactions/attachments for detail view (full card handles that)
+
+### Verification Results
+- `pnpm lint` passes (mobile clean, 0 errors)
+- `pnpm typecheck` passes all 10 packages
+
+### Notes
+- Screen shows contact header with avatar and company
+- Action details section shows type, reason, llmReason, platform
+- Full message thread displays with MessageBubble components
+- Response input only shown for respond/follow_up action types
+- Contact handles listed if available
+- ActionButtons at bottom for discard/snooze/send actions
+- Next task 7.6 will add badge count to Actions tab
