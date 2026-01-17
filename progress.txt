@@ -981,3 +981,30 @@
 - Animation is smooth infinite pulse, not jarring shimmer
 - Task 7.8 (testing) requires manual iOS Simulator verification
 - Next phases: Phase 8 (Contacts), Phase 9 (Agent chat), Phase 10 (Auth)
+
+## 2026-01-17: Task 8.1 - Create ContactListItem component with preview
+
+### Completed Tasks
+- 8.1: Create ContactListItem component with preview
+
+### Files Changed
+- apps/mobile/src/components/contact-list-item.tsx: New ContactListItem component
+
+### Decisions
+- Used same Avatar pattern as ContactCard/MessageResponseCard: Consistent initials-based avatar across app
+- expo-router Link with asChild: Wraps Pressable to get proper navigation with native touch feedback
+- ContactListItemData interface: Minimal interface with id, displayName, company, lastMessageText - all optional except id/displayName
+- Chevron indicator: Simple "›" text character for navigation affordance instead of SF Symbol (lighter weight)
+- active:bg-sf-fill: Native iOS-style press state using semantic fill color
+- numberOfLines={1}: All text fields truncated to single line for list item density
+- Accessibility: accessibilityRole="button" and accessibilityLabel for VoiceOver support
+
+### Verification Results
+- `pnpm lint` passes (0 errors, warnings only in web/ui packages)
+- `pnpm typecheck` passes all 10 packages
+- Component exports ContactListItem, ContactListItemData, ContactListItemProps
+
+### Notes
+- Task 8.2 will add Link.Preview and context menu features (advanced expo-router features)
+- Component ready for use in Contacts tab (Task 8.3)
+- lastMessageText field will require joining with conversations/messages data in the hook or query

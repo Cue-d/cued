@@ -920,7 +920,7 @@
         "Show last message preview truncated",
         "Wrap in Link from expo-router with href to /contacts/[id]"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "8.2",
