@@ -174,12 +174,12 @@ docs/_build/
 site/
 
 # ============================================================
-# Swift / LLM CLI
+# Swift (Electron contacts CLI)
 # ============================================================
 # Swift Package Manager build directory
-llm/.build/
+apps/electron/swift/.build/
 # Swift Package.resolved (lock file - uncomment to track)
-# llm/Package.resolved
+# apps/electron/swift/Package.resolved
 
 # ============================================================
 # Turborepo

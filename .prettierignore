@@ -1,0 +1,14 @@
+# Swift build output
+apps/electron/swift/.build/
+
+# Convex generated files
+packages/convex/convex/_generated/
+
+# Build outputs
+**/dist/
+**/out/
+**/.next/
+**/.turbo/
+
+# Dependencies
+**/node_modules/

@@ -4,10 +4,10 @@
 
 set -e
 
-# Path to llm directory (inside prm monorepo)
+# Path to swift directory (inside apps/electron)
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-LLM_DIR="$SCRIPT_DIR/../../../llm"
-BINARY_PATH="$LLM_DIR/.build/release/prm-contacts"
+SWIFT_DIR="$SCRIPT_DIR/../swift"
+BINARY_PATH="$SWIFT_DIR/.build/release/prm-contacts"
 
 # Check if binary already exists
 if [ -f "$BINARY_PATH" ]; then
@@ -15,15 +15,15 @@ if [ -f "$BINARY_PATH" ]; then
   exit 0
 fi
 
-# Check if llm directory exists
-if [ ! -d "$LLM_DIR" ]; then
-  echo "[build-swift] Warning: llm directory not found at $LLM_DIR"
+# Check if swift directory exists
+if [ ! -d "$SWIFT_DIR" ]; then
+  echo "[build-swift] Warning: swift directory not found at $SWIFT_DIR"
   echo "[build-swift] Contacts sync will use fallback mode"
   exit 0
 fi
 
 echo "[build-swift] Building prm-contacts..."
-cd "$LLM_DIR"
+cd "$SWIFT_DIR"
 swift build -c release --product prm-contacts
 
 if [ -f "$BINARY_PATH" ]; then

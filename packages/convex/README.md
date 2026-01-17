@@ -33,16 +33,12 @@ pnpm typecheck   # Run TypeScript type checking
 
 ```
 convex/
-  schema.ts      # Database schema definitions
-  _generated/    # Auto-generated TypeScript types (gitignored)
+  schema.ts          # Database schema (users, contacts, messages, actions, etc.)
+  sync.ts            # Data synchronization logic
+  actions.ts         # Action management
+  messages.ts        # Message operations
+  contacts.ts        # Contact management
+  search.ts          # Search functionality
+  crons.ts           # Scheduled jobs
+  _generated/        # Auto-generated TypeScript types (gitignored)
 ```
-
-## Next Steps
-
-After initialization (task 1.6), complete:
-- Task 1.7: Define users table schema
-- Task 1.8: Define integrations table schema
-- Task 1.9: Define contacts and contactHandles tables
-- Task 1.10: Define conversations table
-- Task 1.11: Define messages table with search index
-- Task 1.12: Define actions table

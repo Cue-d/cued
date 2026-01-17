@@ -59,8 +59,8 @@ interface ContactsCliError {
  *
  * Checks in order:
  * 1. Environment variable PRM_CONTACTS_BINARY
- * 2. Packaged app location (resources/llm/prm-contacts) - for production
- * 3. Development location (llm/.build/release/prm-contacts) - for development
+ * 2. Packaged app location (resources/swift/prm-contacts) - for production
+ * 3. Development location (swift/.build/release/prm-contacts) - for development
  */
 function getContactsBinaryPath(): string {
   // 1. Check environment variable
@@ -70,10 +70,10 @@ function getContactsBinaryPath(): string {
   }
 
   // 2. Check packaged app location (Electron resources)
-  // When packaged, the structure is: resources/llm/prm-contacts
+  // When packaged, the structure is: resources/swift/prm-contacts
   const resourcesPath = process.resourcesPath;
   if (resourcesPath) {
-    const packagedPath = join(resourcesPath, "llm", "prm-contacts");
+    const packagedPath = join(resourcesPath, "swift", "prm-contacts");
     if (existsSync(packagedPath)) {
       return packagedPath;
     }
@@ -81,8 +81,8 @@ function getContactsBinaryPath(): string {
 
   // 3. Development location - relative to built output
   // Built file is at: apps/electron/out/main/index.js
-  // Binary is at: llm/.build/release/prm-contacts
-  const devPath = join(__dirname, "..", "..", "..", "..", "llm", ".build", "release", "prm-contacts");
+  // Binary is at: apps/electron/swift/.build/release/prm-contacts
+  const devPath = join(__dirname, "..", "..", "swift", ".build", "release", "prm-contacts");
   return devPath;
 }
 
@@ -225,7 +225,7 @@ export class ContactsManager {
     if (!existsSync(this.binaryPath)) {
       throw new ContactsError(
         `Swift contacts binary not found at ${this.binaryPath}. ` +
-        `Build it with: cd llm && swift build -c release --product prm-contacts`
+        `Build it with: cd apps/electron/swift && swift build -c release --product prm-contacts`
       );
     }
 
