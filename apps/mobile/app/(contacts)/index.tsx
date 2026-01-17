@@ -2,13 +2,18 @@
  * Contacts tab screen.
  *
  * Task 8.3: Implement Contacts tab with FlatList
+ * Task 8.4: Add search to Contacts tab
  * - Import useContacts hook
  * - Use FlatList from react-native with contentInsetAdjustmentBehavior
  * - Render ContactListItem for each contact
  * - Add keyExtractor using contact.id
+ * - Use Stack.Screen onChangeText to get search text
+ * - Pass searchQuery to useContacts for filtering
  */
 
+import { useState } from "react";
 import { FlatList, type ListRenderItemInfo } from "react-native";
+import { Stack } from "expo-router";
 import { View, Text } from "@/tw";
 import { useContacts } from "@/hooks/useContacts";
 import {
@@ -68,7 +73,10 @@ function ItemSeparator(): React.JSX.Element {
 }
 
 export default function ContactsScreen(): React.JSX.Element {
-  const { contacts, isLoading } = useContacts();
+  const [searchQuery, setSearchQuery] = useState("");
+  const { contacts, isLoading } = useContacts({
+    searchQuery: searchQuery || undefined,
+  });
 
   // Map Convex contacts to ContactListItemData
   const mappedContacts = contacts.map(mapContact);
@@ -82,13 +90,23 @@ export default function ContactsScreen(): React.JSX.Element {
   }
 
   return (
-    <FlatList
-      data={mappedContacts}
-      renderItem={renderContactItem}
-      keyExtractor={keyExtractor}
-      contentInsetAdjustmentBehavior="automatic"
-      ListEmptyComponent={EmptyState}
-      ItemSeparatorComponent={ItemSeparator}
-    />
+    <>
+      <Stack.Screen
+        options={{
+          headerSearchBarOptions: {
+            placeholder: "Search contacts",
+            onChangeText: (event) => setSearchQuery(event.nativeEvent.text),
+          },
+        }}
+      />
+      <FlatList
+        data={mappedContacts}
+        renderItem={renderContactItem}
+        keyExtractor={keyExtractor}
+        contentInsetAdjustmentBehavior="automatic"
+        ListEmptyComponent={EmptyState}
+        ItemSeparatorComponent={ItemSeparator}
+      />
+    </>
   );
 }

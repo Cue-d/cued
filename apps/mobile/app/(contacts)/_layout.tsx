@@ -8,9 +8,6 @@ export default function ContactsLayout() {
         headerLargeTitle: true,
         headerBlurEffect: "none",
         headerLargeStyle: { backgroundColor: "transparent" },
-        headerSearchBarOptions: {
-          placeholder: "Search contacts",
-        },
       }}
     >
       <Stack.Screen name="index" options={{ title: "Contacts" }} />
