@@ -6,7 +6,7 @@
  */
 
 import { useEffect } from "react";
-import Animated, {
+import {
   useSharedValue,
   useAnimatedStyle,
   withRepeat,
@@ -14,6 +14,7 @@ import Animated, {
   Easing,
 } from "react-native-reanimated";
 import { View } from "@/tw";
+import { AnimatedView } from "@/tw/animated";
 
 // Animation constants
 const ANIMATION_DURATION = 1000; // 1 second pulse cycle
@@ -46,7 +47,7 @@ export function SkeletonCard({ className }: SkeletonCardProps): React.JSX.Elemen
   }));
 
   return (
-    <Animated.View
+    <AnimatedView
       className={`w-full h-full bg-sf-secondaryBg rounded-2xl overflow-hidden ${className ?? ""}`}
       style={animatedStyle}
     >
@@ -77,7 +78,7 @@ export function SkeletonCard({ className }: SkeletonCardProps): React.JSX.Elemen
       <View className="p-4">
         <View className="w-full h-20 rounded-xl bg-sf-fill" />
       </View>
-    </Animated.View>
+    </AnimatedView>
   );
 }
 

@@ -21,6 +21,7 @@ import {
   ContactListItem,
   type ContactListItemData,
 } from "@/components/contact-list-item";
+import { ErrorBoundary } from "@/components/error-boundary";
 
 /** Map Convex contact to ContactListItemData */
 function mapContact(contact: {
@@ -102,7 +103,7 @@ export default function ContactsScreen(): React.JSX.Element {
   }
 
   return (
-    <>
+    <ErrorBoundary>
       <Stack.Screen
         options={{
           headerSearchBarOptions: {
@@ -126,6 +127,6 @@ export default function ContactsScreen(): React.JSX.Element {
           />
         }
       />
-    </>
+    </ErrorBoundary>
   );
 }

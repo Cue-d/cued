@@ -20,6 +20,7 @@ import {
 } from "@/components/chat/chat-message";
 import { ChatInput } from "@/components/chat/chat-input";
 import { SuggestedPrompts } from "@/components/chat/suggested-prompts";
+import { ErrorBoundary } from "@/components/error-boundary";
 
 export default function AgentScreen() {
   const insets = useSafeAreaInsets();
@@ -54,59 +55,61 @@ export default function AgentScreen() {
   const showSuggestions = messages.length === 0;
 
   return (
-    <KeyboardAvoidingView
-      behavior={Platform.OS === "ios" ? "padding" : "height"}
-      className="flex-1 bg-sf-bg"
-      keyboardVerticalOffset={insets.top + 44} // Header height
-    >
-      <View className="flex-1">
-        {showSuggestions ? (
-          // Empty state with suggestions
-          <View className="flex-1 justify-center">
-            <View className="items-center mb-6 px-4">
-              <Text className="text-sf-label text-xl font-semibold mb-2">
-                PRM Assistant
-              </Text>
-              <Text className="text-sf-secondaryLabel text-center">
-                Ask me about your contacts, messages, or relationships
+    <ErrorBoundary>
+      <KeyboardAvoidingView
+        behavior={Platform.OS === "ios" ? "padding" : "height"}
+        className="flex-1 bg-sf-bg"
+        keyboardVerticalOffset={insets.top + 44} // Header height
+      >
+        <View className="flex-1">
+          {showSuggestions ? (
+            // Empty state with suggestions
+            <View className="flex-1 justify-center">
+              <View className="items-center mb-6 px-4">
+                <Text className="text-sf-label text-xl font-semibold mb-2">
+                  PRM Assistant
+                </Text>
+                <Text className="text-sf-secondaryLabel text-center">
+                  Ask me about your contacts, messages, or relationships
+                </Text>
+              </View>
+              <SuggestedPrompts onSelect={handleSelectPrompt} />
+            </View>
+          ) : (
+            // Message list (inverted)
+            <FlatList
+              ref={flatListRef}
+              data={[...messages].reverse()} // Reverse for inverted list
+              renderItem={renderMessage}
+              keyExtractor={keyExtractor}
+              inverted
+              contentContainerStyle={{
+                paddingTop: 16,
+                paddingBottom: 8,
+              }}
+              keyboardShouldPersistTaps="handled"
+              keyboardDismissMode="interactive"
+            />
+          )}
+
+          {/* Error message */}
+          {error && (
+            <View className="px-4 py-2 bg-sf-red/10">
+              <Text className="text-sf-red text-sm text-center">
+                {error.message}
               </Text>
             </View>
-            <SuggestedPrompts onSelect={handleSelectPrompt} />
-          </View>
-        ) : (
-          // Message list (inverted)
-          <FlatList
-            ref={flatListRef}
-            data={[...messages].reverse()} // Reverse for inverted list
-            renderItem={renderMessage}
-            keyExtractor={keyExtractor}
-            inverted
-            contentContainerStyle={{
-              paddingTop: 16,
-              paddingBottom: 8,
-            }}
-            keyboardShouldPersistTaps="handled"
-            keyboardDismissMode="interactive"
+          )}
+
+          {/* Chat input */}
+          <ChatInput
+            value={input}
+            onChangeText={setInput}
+            onSubmit={handleSendMessage}
+            disabled={isLoading}
           />
-        )}
-
-        {/* Error message */}
-        {error && (
-          <View className="px-4 py-2 bg-sf-red/10">
-            <Text className="text-sf-red text-sm text-center">
-              {error.message}
-            </Text>
-          </View>
-        )}
-
-        {/* Chat input */}
-        <ChatInput
-          value={input}
-          onChangeText={setInput}
-          onSubmit={handleSendMessage}
-          disabled={isLoading}
-        />
-      </View>
-    </KeyboardAvoidingView>
+        </View>
+      </KeyboardAvoidingView>
+    </ErrorBoundary>
   );
 }

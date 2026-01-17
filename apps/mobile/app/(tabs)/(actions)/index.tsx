@@ -24,6 +24,7 @@ import {
 } from "@/components/cards";
 import type { SwipeDirection } from "@/components/swipeable-card";
 import { SkeletonStack } from "@/components/skeleton-card";
+import { ErrorBoundary } from "@/components/error-boundary";
 import { api } from "@prm/convex/convex/_generated/api";
 import type { Id } from "@prm/convex/convex/_generated/dataModel";
 
@@ -278,24 +279,26 @@ export default function ActionsScreen(): React.JSX.Element {
   }
 
   return (
-    <ScrollView
-      className="flex-1"
-      contentInsetAdjustmentBehavior="automatic"
-      contentContainerClassName="flex-1"
-      refreshControl={
-        <RefreshControl
-          refreshing={isRefreshing}
-          onRefresh={handleRefresh}
-          tintColor="#8E8E93"
+    <ErrorBoundary>
+      <ScrollView
+        className="flex-1"
+        contentInsetAdjustmentBehavior="automatic"
+        contentContainerClassName="flex-1"
+        refreshControl={
+          <RefreshControl
+            refreshing={isRefreshing}
+            onRefresh={handleRefresh}
+            tintColor="#8E8E93"
+          />
+        }
+      >
+        <CardStack
+          actions={cardItems}
+          totalCount={actions.length}
+          onSwipe={handleSwipe}
+          renderCard={renderCard}
         />
-      }
-    >
-      <CardStack
-        actions={cardItems}
-        totalCount={actions.length}
-        onSwipe={handleSwipe}
-        renderCard={renderCard}
-      />
-    </ScrollView>
+      </ScrollView>
+    </ErrorBoundary>
   );
 }
