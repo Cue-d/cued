@@ -31,6 +31,7 @@ function formatRelativeTime(timestamp: number): string {
 }
 
 export default function SettingsPage() {
+  const user = useQuery(api.users.getProfile);
   const memoryStats = useQuery(api.memories.getMemoryStatsByContact);
   const processingStatus = useQuery(api.memories.getMemoryProcessingStatus, {
     platform: "imessage",
@@ -190,13 +191,19 @@ export default function SettingsPage() {
               <div className="flex items-center gap-4 p-4">
                 <Avatar className="size-12">
                   <AvatarFallback className="bg-primary text-primary-foreground text-sm">
-                    U
+                    {user?.firstName && user?.lastName
+                      ? getInitials(`${user.firstName} ${user.lastName}`)
+                      : user?.email?.[0]?.toUpperCase() ?? "U"}
                   </AvatarFallback>
                 </Avatar>
                 <div className="flex-1 min-w-0">
-                  <p className="text-sm font-medium truncate">User</p>
+                  <p className="text-sm font-medium truncate">
+                    {user?.firstName && user?.lastName
+                      ? `${user.firstName} ${user.lastName}`
+                      : user?.email ?? "User"}
+                  </p>
                   <p className="text-xs text-muted-foreground truncate">
-                    Signed in via WorkOS
+                    {user?.email ?? ""}
                   </p>
                 </div>
               </div>
