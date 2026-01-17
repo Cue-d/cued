@@ -644,3 +644,28 @@
 - This enables ActionButtons component (Task 5.8) to trigger swipes programmatically
 - Animation sequence: peek position → 150ms delay → off-screen spring → onSwipe callback
 - isAnimatingRef prevents multiple simultaneous triggers
+
+## 2026-01-17: Tasks 5.5, 5.7 - CardStack component with header
+
+### Completed Tasks
+- 5.5: Create CardStack component for stacked cards
+- 5.7: Add header and count display to CardStack
+
+### Files Changed
+- apps/mobile/src/components/card-stack.tsx: New CardStack component
+
+### Decisions
+- Used Reanimated Layout animations instead of AnimatePresence: PRD mentions AnimatePresence (Framer Motion) but React Native uses Reanimated's FadeIn/FadeOut/Layout.springify() for equivalent functionality
+- Generic type parameter: CardStack<T extends CardStackItem> allows type-safe renderCard function
+- Combined 5.7 into 5.5: Header with "{count} Left" was a natural part of the component structure
+- Positioned header with absolute + z-50: Keeps count visible above card stack
+
+### Verification Results
+- `pnpm lint` passes (warnings only in web/ui packages, mobile clean)
+- `pnpm typecheck` passes all 10 packages
+- Component exports CardStack, CardStackItem, CardStackProps
+
+### Notes
+- Task 5.6 (empty state) not yet implemented - separate concern that should be its own commit
+- Used bg-sf-secondaryBg for card background with shadow-lg for depth
+- triggerSwipe prop passed through to top card only
