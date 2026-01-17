@@ -175,7 +175,7 @@ export default function ContactsPage() {
     searchQuery: debouncedSearch || undefined,
   })
   const contactsLoading = contactsResult === undefined
-  const totalCount = contactsResult?.totalCount ?? 0
+  const totalCount = allContacts.length
   const hasMore = contactsResult?.nextCursor !== null && contactsResult?.nextCursor !== undefined
 
   // Accumulate contacts for pagination
