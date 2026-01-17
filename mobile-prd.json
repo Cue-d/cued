@@ -1100,7 +1100,7 @@
         "For create_action: show action created confirmation",
         "Style artifacts with GlassView background"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "9.7",
@@ -1262,7 +1262,7 @@
         "Verify packages in package.json",
         "Add expo-notifications to app.json plugins"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "11.2",
@@ -1279,7 +1279,7 @@
         "Get Expo push token with getExpoPushTokenAsync",
         "Return token string"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "11.3",
@@ -1294,7 +1294,7 @@
         "Call mutation after successful auth in AuthProvider",
         "Handle token refresh on app launch"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "11.4",
@@ -1309,7 +1309,7 @@
         "If type='message', navigate to /inbox/[conversationId]",
         "Clean up listener on unmount"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "11.5",
@@ -1417,7 +1417,7 @@
         "Add haptics to ContactListItem tap",
         "Add haptics to ChatInput send"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "13.2",

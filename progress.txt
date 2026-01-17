@@ -1247,6 +1247,36 @@
 - Task 9.7 (Agent tab testing) requires manual iOS Simulator verification
 - Chat UI requires /api/chat endpoint to be accessible for full functionality
 
+## 2026-01-17: Task 9.6 - Add tool call artifacts to ChatMessage
+
+### Completed Tasks
+- 9.6: Add tool call artifacts to ChatMessage
+
+### Files Changed
+- apps/mobile/src/components/chat/tool-artifact.tsx: New ToolArtifact and ToolArtifacts components
+- apps/mobile/src/components/chat/chat-message.tsx: Import and render ToolArtifacts for assistant messages
+
+### Decisions
+- Created dedicated ToolArtifact component: Mirrors web implementation structure but optimized for React Native
+- Three artifact types supported: search_messages, search_contacts, create_action (per PRD steps)
+- GlassView with fallback: Uses isLiquidGlassAvailable() check for iOS 26+ liquid glass, falls back to bg-sf-fill/50
+- ArtifactCard wrapper: Encapsulates glass styling for consistent appearance across artifact types
+- Platform icon mapping: Uses SF Symbols (message.fill, envelope.fill, number) with branded colors per platform
+- Search results truncated to 5: Shows "+N more results" for larger result sets (matches web pattern)
+- Contact handles truncated to 3: Shows "+N" badge for additional handles (matches web pattern)
+- Action created uses green styling: Border + background with #34C759 (iOS system green) for success state
+
+### Verification Results
+- `pnpm lint` passes (0 errors, mobile clean)
+- `pnpm typecheck` passes all 10 packages
+- All PRD steps verified: toolInvocations check, ToolArtifact per result, message/contact/action displays, GlassView styling
+
+### Notes
+- ToolArtifacts filters for state === "result" && result !== undefined (only completed tools)
+- formatRelativeTime helper matches web implementation (just now, Xm ago, Xh ago, Xd ago, date)
+- Task 9.7 (Agent tab E2E testing) requires manual iOS Simulator verification
+- Phase 10 (Auth) already partially implemented in progress.txt
+
 ## 2026-01-17: Tasks 10.1-10.7 - WorkOS Authentication for Mobile
 
 ### Completed Tasks
@@ -1286,3 +1316,141 @@
 - expo-crypto used for PKCE code challenge generation (SHA-256 hash)
 - Task 10.8 (E2E testing) requires manual verification
 - Auth state persists across app restarts via SecureStore
+
+## 2026-01-17: Task 11.1 - Install push notification dependencies
+
+### Completed Tasks
+- 11.1: Install push notification dependencies
+
+### Files Changed
+- apps/mobile/package.json: Added expo-notifications ~0.32.16, expo-device ~8.0.10
+- apps/mobile/app.json: Added expo-notifications to plugins array
+- pnpm-lock.yaml: Updated with new dependencies
+
+### Decisions
+- expo-constants already installed: Was added in earlier phase, no duplicate install needed
+- expo-notifications plugin: Required for native iOS/Android notification permissions and handling
+
+### Verification Results
+- `pnpm lint` passes (0 errors, warnings only in web/ui packages)
+- `pnpm typecheck` passes all 10 packages
+- Package.json shows correct versions installed
+
+### Notes
+- Task 11.2 will create notification registration helper
+- Push notifications require physical device for full testing (simulator won't receive pushes)
+
+## 2026-01-17: Task 11.2 - Create notification registration helper
+
+### Completed Tasks
+- 11.2: Create notification registration helper
+
+### Files Changed
+- apps/mobile/src/lib/notifications.ts: New file with registerForPushNotifications and configureNotifications functions
+
+### Decisions
+- Two functions exported: registerForPushNotifications (gets token) and configureNotifications (sets up handlers)
+- Device.isDevice check: Returns null early on simulators since push notifications require physical devices
+- Permission flow: Check existing → request if needed → get token if granted
+- EAS projectId required: getExpoPushTokenAsync requires projectId from Constants.expoConfig or Constants.easConfig
+- configureNotifications separate: Allows early initialization without blocking on token registration
+- Android notification channel: Set up "default" channel with MAX importance for prominent notifications
+
+### Verification Results
+- `pnpm lint` passes (0 errors, warnings only in web/ui packages)
+- `pnpm typecheck` passes all 10 packages
+- All 7 task steps verified
+
+### Notes
+- Function returns token string or null on any failure (simulator, denied permission, missing projectId)
+- configureNotifications sets up foreground display behavior and Android channel
+- Task 11.3 will store push token in Convex after auth
+
+## 2026-01-17: Task 11.3 - Store push token in Convex
+
+### Completed Tasks
+- 11.3: Store push token in Convex
+
+### Files Changed
+- packages/convex/convex/schema.ts: Added expoPushToken optional field to users table
+- packages/convex/convex/users.ts: Added registerPushToken mutation
+- apps/mobile/src/components/push-token-registrar.tsx: New component to register tokens after auth
+- apps/mobile/app/_layout.tsx: Added PushTokenRegistrar inside ConvexProvider, call configureNotifications on mount
+- apps/mobile/src/lib/auth.ts: Fixed pre-existing STORAGE_KEYS reference errors
+
+### Decisions
+- Created PushTokenRegistrar component: Separate component inside ConvexProvider to use useMutation hook cleanly
+- hasRegistered ref to prevent multiple registrations: Tracks if token was registered in current mount cycle
+- configureNotifications called in AuthenticatedApp: Configures notification handlers before auth is complete
+- registerPushToken mutation checks token changed: Only patches user if token differs (efficiency)
+- Fixed auth.ts errors: Pre-existing bug where ACCESS_TOKEN_KEY/REFRESH_TOKEN_KEY/USER_KEY were undefined (should be STORAGE_KEYS.x)
+
+### Verification Results
+- `pnpm lint` passes (0 errors, warnings only in web/ui packages)
+- `pnpm typecheck` passes all 10 packages
+- All 5 task steps verified:
+  1. ✓ Created api.users.registerPushToken mutation
+  2. ✓ Accepts pushToken string parameter
+  3. ✓ Stores in users.expoPushToken for authenticated user
+  4. ✓ Called after auth via PushTokenRegistrar component
+  5. ✓ Handles refresh on app launch (PushTokenRegistrar runs on every mount)
+
+### Notes
+- Push token registration is silent (no UI), logs success/failure to console
+- Task 11.4 will handle notification tap navigation
+
+## 2026-01-17: Task 11.4 - Handle notification tap navigation
+
+### Completed Tasks
+- 11.4: Handle notification tap navigation
+
+### Files Changed
+- apps/mobile/app/_layout.tsx: Added notification response listener with navigation handling
+
+### Decisions
+- Used useRef for listener subscription: Allows proper cleanup in useEffect return
+- subscription.remove() method: expo-notifications EventSubscription uses .remove() not Notifications.removeNotificationSubscription()
+- useRouter from expo-router: Not from expo-router/stack (Stack component is separate from router hook)
+- Navigation patterns: action type → /(tabs)/(actions)/[id], message type → /(tabs)/(actions) (placeholder until inbox route exists)
+- Typed notification data: Explicit type for data object with type, id, conversationId fields
+
+### Verification Results
+- `pnpm lint` passes (0 errors, warnings only in web/ui/settings.tsx)
+- `pnpm typecheck` passes all 10 packages
+- All 5 task steps verified:
+  1. ✓ Added Notifications.addNotificationResponseReceivedListener in root layout
+  2. ✓ Parse notification data for type and id
+  3. ✓ If type='action', navigate to /(tabs)/(actions)/[id]
+  4. ✓ If type='message', navigate to actions tab (inbox route placeholder)
+  5. ✓ Clean up listener on unmount via subscription.remove()
+
+### Notes
+- Message notification currently navigates to actions tab - will navigate to inbox when route is created
+- Task 11.5 (Test push notifications) requires physical device for full testing
+
+## 2026-01-17: Task 13.1 - Add haptic feedback to all interactive elements
+
+### Completed Tasks
+- 13.1: Add haptic feedback to all interactive elements
+
+### Files Changed
+- apps/mobile/src/components/contact-list-item.tsx: Added handleTap with Haptics.selectionAsync() and onPressIn handler
+
+### Decisions
+- Most haptics already implemented in earlier tasks: swipeable-card (5.1), action-buttons (5.8), chat-input (9.2) already had haptic feedback
+- Used Haptics.selectionAsync() for ContactListItem: Appropriate for list selection interactions per iOS HIG
+- Used onPressIn vs onPress: Triggers haptic on touch down for immediate feedback, not on release
+
+### Verification Results
+- `pnpm lint` passes (0 errors, warnings only in web/ui packages)
+- `pnpm typecheck` passes all 10 packages
+- All 6 task steps verified:
+  1. ✓ Import Haptics in swipeable-card (done in Task 5.1)
+  2. ✓ Haptics.impactAsync(Light) on swipe start (done in Task 5.1)
+  3. ✓ Haptics.notificationAsync(Success) on swipe complete (done in Task 5.1)
+  4. ✓ Haptics on button taps - action-buttons uses impactAsync(Medium)
+  5. ✓ Haptics on ContactListItem tap (added this task)
+  6. ✓ Haptics on ChatInput send (done in Task 9.2)
+
+### Notes
+- Phase 13 polish tasks continue with 13.2 (pull-to-refresh) next
