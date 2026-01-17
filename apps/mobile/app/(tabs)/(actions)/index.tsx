@@ -8,9 +8,10 @@
  */
 
 import { useState, useCallback, useEffect } from "react";
+import { RefreshControl } from "react-native";
 import { useMutation } from "convex/react";
 import { useRouter, useLocalSearchParams } from "expo-router";
-  import * as Haptics from "expo-haptics";
+import * as Haptics from "expo-haptics";
 import { View, Text, ScrollView } from "@/tw";
 import { useActions } from "@/hooks/useActions";
 import { CardStack } from "@/components/card-stack";
@@ -69,6 +70,7 @@ export default function ActionsScreen(): React.JSX.Element {
   }>();
   const { actions, isLoading } = useActions({ limit: 20 });
   const swipeAction = useMutation(api.actions.swipeAction);
+  const [isRefreshing, setIsRefreshing] = useState(false);
 
   // Track response text per action (key = action._id)
   const [responseTexts, setResponseTexts] = useState<Record<string, string>>(
@@ -157,6 +159,16 @@ export default function ActionsScreen(): React.JSX.Element {
     },
     [],
   );
+
+  // Handle pull-to-refresh
+  // Convex has real-time updates, so we just show refresh indicator for UX
+  const handleRefresh = useCallback(async () => {
+    setIsRefreshing(true);
+    await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    // Convex updates automatically, simulate brief refresh for UX
+    await new Promise((resolve) => setTimeout(resolve, 500));
+    setIsRefreshing(false);
+  }, []);
 
   // Handle swipe with Convex mutation
   const handleSwipe = useCallback(
@@ -270,6 +282,13 @@ export default function ActionsScreen(): React.JSX.Element {
       className="flex-1"
       contentInsetAdjustmentBehavior="automatic"
       contentContainerClassName="flex-1"
+      refreshControl={
+        <RefreshControl
+          refreshing={isRefreshing}
+          onRefresh={handleRefresh}
+          tintColor="#8E8E93"
+        />
+      }
     >
       <CardStack
         actions={cardItems}

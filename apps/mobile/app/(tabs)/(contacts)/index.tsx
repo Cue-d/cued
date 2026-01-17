@@ -11,9 +11,10 @@
  * - Pass searchQuery to useContacts for filtering
  */
 
-import { useState } from "react";
-import { FlatList, type ListRenderItemInfo } from "react-native";
+import { useState, useCallback } from "react";
+import { FlatList, RefreshControl, type ListRenderItemInfo } from "react-native";
 import { Stack } from "expo-router";
+import * as Haptics from "expo-haptics";
 import { View, Text } from "@/tw";
 import { useContacts } from "@/hooks/useContacts";
 import {
@@ -74,12 +75,23 @@ function ItemSeparator(): React.JSX.Element {
 
 export default function ContactsScreen(): React.JSX.Element {
   const [searchQuery, setSearchQuery] = useState("");
+  const [isRefreshing, setIsRefreshing] = useState(false);
   const { contacts, isLoading } = useContacts({
     searchQuery: searchQuery || undefined,
   });
 
   // Map Convex contacts to ContactListItemData
   const mappedContacts = contacts.map(mapContact);
+
+  // Handle pull-to-refresh
+  // Convex has real-time updates, so we just show refresh indicator for UX
+  const handleRefresh = useCallback(async () => {
+    setIsRefreshing(true);
+    await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    // Convex updates automatically, simulate brief refresh for UX
+    await new Promise((resolve) => setTimeout(resolve, 500));
+    setIsRefreshing(false);
+  }, []);
 
   if (isLoading) {
     return (
@@ -106,6 +118,13 @@ export default function ContactsScreen(): React.JSX.Element {
         contentInsetAdjustmentBehavior="automatic"
         ListEmptyComponent={EmptyState}
         ItemSeparatorComponent={ItemSeparator}
+        refreshControl={
+          <RefreshControl
+            refreshing={isRefreshing}
+            onRefresh={handleRefresh}
+            tintColor="#8E8E93"
+          />
+        }
       />
     </>
   );
