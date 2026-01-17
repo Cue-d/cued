@@ -4,8 +4,22 @@
     "strict": true,
     "baseUrl": ".",
     "paths": {
-      "@/*": ["./src/*"],
-      "@prm/convex/*": ["../../packages/convex/*"]
+      "@/*": [
+        "./src/*"
+      ],
+      "@prm/convex/*": [
+        "../../packages/convex/*"
+      ]
     }
-  }
+  },
+  "include": [
+    "src",
+    "app",
+    "*.ts",
+    "*.js",
+    "nativewind-env.d.ts"
+  ],
+  "exclude": [
+    "node_modules"
+  ]
 }
