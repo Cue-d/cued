@@ -228,7 +228,7 @@
         "Export Pressable and TextInput wrappers",
         "Export useCSSVariable hook for CSS variable access"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "2.2",
