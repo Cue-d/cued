@@ -1,0 +1,26 @@
+import { useQuery } from "convex/react";
+import { api } from "@prm/convex/convex/_generated/api";
+import type { Id } from "@prm/convex/convex/_generated/dataModel";
+
+/**
+ * Hook for fetching contacts from Convex.
+ * Supports search filtering and cursor-based pagination.
+ */
+export function useContacts(options?: {
+  limit?: number;
+  cursor?: Id<"contacts">;
+  searchQuery?: string;
+}) {
+  const result = useQuery(api.contacts.getContacts, {
+    limit: options?.limit,
+    cursor: options?.cursor,
+    searchQuery: options?.searchQuery,
+  });
+
+  return {
+    contacts: result?.contacts ?? [],
+    nextCursor: result?.nextCursor ?? null,
+    isLoading: result === undefined,
+    error: null, // Convex useQuery throws on error, doesn't return it
+  };
+}
