@@ -471,7 +471,7 @@
         "Wrap NativeTabs with ConvexProvider",
         "Verify app still loads without errors"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "4.4",
