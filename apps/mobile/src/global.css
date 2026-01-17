@@ -2,6 +2,7 @@
 @import "tailwindcss/preflight.css" layer(base);
 @import "tailwindcss/utilities.css";
 @import "nativewind/theme";
+@import "./css/sf.css";
 
 /* Platform-specific font families */
 @media ios {
