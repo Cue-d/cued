@@ -4,6 +4,7 @@ import Animated, { FadeIn } from "react-native-reanimated";
 
 import { View, Text } from "@/tw";
 import { cn } from "@/lib/utils";
+import { ToolArtifacts } from "./tool-artifact";
 
 // Types matching web implementation
 export interface ToolInvocation {
@@ -181,6 +182,11 @@ export function ChatMessage({ message, isStreaming = false }: ChatMessageProps) 
         {pendingToolCalls.map((inv) => (
           <PendingToolIndicator key={inv.toolCallId} toolName={inv.toolName} />
         ))}
+
+        {/* Completed tool call artifacts */}
+        {!isUser && message.toolInvocations && (
+          <ToolArtifacts toolInvocations={message.toolInvocations} />
+        )}
       </View>
     </Animated.View>
   );
