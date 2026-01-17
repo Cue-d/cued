@@ -1,0 +1,99 @@
+# PRM Mobile App Progress Log
+
+## 2026-01-17: Tasks 1.1 + 1.2 - Expo app + Router setup
+
+### Completed Tasks
+- 1.1: Create Expo app in apps/mobile with TypeScript template
+- 1.2: Install Expo Router and navigation dependencies
+
+### Files Changed
+- apps/mobile/ (new directory)
+  - package.json: Expo SDK 54, React 19.1, expo-router, safe-area-context, screens
+  - app.json: scheme "prm", plugins ["expo-router"], userInterfaceStyle "automatic"
+  - app/_layout.tsx: Root layout with Slot
+  - app/index.tsx: Home screen placeholder
+  - index.ts: Updated to use expo-router/entry
+  - tsconfig.json, .gitignore, assets/
+
+### Decisions
+- Used userInterfaceStyle: "automatic" (supports dark mode)
+- Named app "PRM" with slug "prm" for deep linking
+- Created minimal index.tsx as home placeholder (will be replaced by tabs)
+
+### Verification Results
+- Metro bundler starts on port 8081
+- No router errors
+- TypeScript compiles cleanly
+
+### Notes
+- App.tsx from blank template still exists but unused (expo-router uses app/ dir)
+- Will remove App.tsx when implementing tabs (task 3.x)
+- Pre-existing @prm/ai typecheck failures (vitest types) unrelated to mobile
+
+## 2026-01-17: Task 1.3 - Animation and gesture dependencies
+
+### Completed Tasks
+- 1.3: Install animation and gesture dependencies
+
+### Files Changed
+- apps/mobile/package.json: Added react-native-reanimated ~4.1.1, react-native-gesture-handler ~2.28.0
+- apps/mobile/babel.config.js: Created with reanimated/plugin
+- apps/mobile/app/index.tsx: Added test import for Animated
+
+### Decisions
+- Plugin in babel.config.js NOT app.json: Adding to app.json plugins caused WorkletsBabelPluginError during config serialization ("Cannot set properties of undefined (setting 'workletNumber')"). babel.config.js works correctly.
+- Installed reanimated 4.x (not 3.x as stated in PRD): Expo SDK 54 defaults to ~4.1.1. This is the latest stable version compatible with Expo 54 and New Architecture.
+
+### Verification Results
+- TypeScript compiles cleanly (mobile app)
+- Metro bundler starts without reanimated errors
+- `import Animated from "react-native-reanimated"` resolves correctly
+
+### Notes
+- react-native-worklets is auto-installed as peer dependency of reanimated 4.x
+- Pre-existing @prm/ai typecheck failures still present (vitest types) - unrelated to mobile
+
+## 2026-01-17: Task 1.4 - iOS visual effect dependencies
+
+### Completed Tasks
+- 1.4: Install iOS visual effect dependencies
+
+### Files Changed
+- apps/mobile/package.json: Added expo-symbols ~1.0.8, expo-blur ~15.0.8, expo-glass-effect ~0.1.8, expo-haptics ~15.0.8, expo-image ~3.0.11
+- apps/mobile/app/index.tsx: Added test import for isLiquidGlassAvailable
+
+### Decisions
+- No additional config needed: These packages don't require babel/metro config changes like reanimated
+- expo-glass-effect ~0.1.8 available in SDK 54: Liquid Glass APIs for iOS 26+
+
+### Verification Results
+- TypeScript compiles cleanly (mobile app)
+- Metro bundler starts without errors
+- `import { isLiquidGlassAvailable } from "expo-glass-effect"` resolves correctly
+
+### Notes
+- Pre-existing @prm/electron typecheck failures (vitest types) - unrelated to mobile
+- expo-glass-effect provides isLiquidGlassAvailable check for runtime feature detection
+
+## 2026-01-17: Task 1.5 - NativeWind v5 and Tailwind v4
+
+### Completed Tasks
+- 1.5: Install NativeWind v5 and Tailwind v4 with react-native-css
+
+### Files Changed
+- apps/mobile/package.json: Added nativewind 5.0.0-preview.2, tailwindcss ^4, react-native-css 0.0.0-nightly.5ce6396, @tailwindcss/postcss ^4, tailwind-merge ^3.4.0, clsx ^2.1.1
+- package.json (root): Added lightningcss 1.30.1 to pnpm.overrides
+
+### Decisions
+- lightningcss override at root level: pnpm overrides must be in root package.json for monorepo, not individual workspace packages
+- Using nightly react-native-css: Required for NativeWind v5 preview with Tailwind v4 compatibility
+- Peer dependency warnings acceptable: react-native-css shows unmet peers for expo/react-native versions but works correctly with Expo SDK 54
+
+### Verification Results
+- `pnpm lint` passes (warnings only, no errors)
+- `pnpm typecheck` passes all packages
+- Package.json shows correct versions installed
+
+### Notes
+- Next task 1.6 will add Convex and MMKV for offline storage
+- Metro/PostCSS config will be added in tasks 1.7-1.8

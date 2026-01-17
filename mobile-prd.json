@@ -1,0 +1,1668 @@
+{
+  "project": "PRM Mobile App",
+  "description": "iOS mobile app with liquid glass native tabs, swipe card UI for actions/contacts, and AI agent chat",
+  "target_stack": ["Expo SDK 54+", "NativeWind v5", "Tailwind v4", "Convex", "WorkOS", "expo-glass-effect"],
+  "decisions": {
+    "distribution": "EAS Build for TestFlight",
+    "offline": "MMKV caching for offline support",
+    "chat": "Same /api/chat endpoint as web",
+    "notifications": "expo-notifications for push",
+    "widgets": "@bacons/apple-targets for iOS widgets"
+  },
+  "tasks": [
+    {
+      "id": "1.1",
+      "phase": 1,
+      "mode": "hitl",
+      "category": "architectural",
+      "description": "Create Expo app in apps/mobile with TypeScript template",
+      "steps": [
+        "Run `cd apps && npx create-expo-app@latest mobile --template blank-typescript`",
+        "Verify apps/mobile/package.json exists with expo dependency",
+        "Run `cd apps/mobile && npx expo start` and verify Metro bundler starts",
+        "Verify apps/mobile/app.json has expo.name set"
+      ],
+      "passes": true
+    },
+    {
+      "id": "1.2",
+      "phase": 1,
+      "mode": "hitl",
+      "category": "architectural",
+      "description": "Install Expo Router and navigation dependencies",
+      "steps": [
+        "Run `cd apps/mobile && npx expo install expo-router expo-constants expo-linking expo-status-bar`",
+        "Run `npx expo install react-native-safe-area-context react-native-screens`",
+        "Verify package.json has expo-router dependency",
+        "Update app.json: add `\"scheme\": \"prm\"` and `\"plugins\": [\"expo-router\"]`",
+        "Create apps/mobile/app/_layout.tsx with basic Slot export",
+        "Run `npx expo start` and verify no router errors"
+      ],
+      "passes": true
+    },
+    {
+      "id": "1.3",
+      "phase": 1,
+      "mode": "hitl",
+      "category": "architectural",
+      "description": "Install animation and gesture dependencies",
+      "steps": [
+        "Run `cd apps/mobile && npx expo install react-native-reanimated react-native-gesture-handler`",
+        "Verify package.json has react-native-reanimated ^3.x",
+        "Add reanimated plugin to app.json plugins array",
+        "Create test file with `import Animated from 'react-native-reanimated'`",
+        "Run `npx expo start --clear` and verify no reanimated errors"
+      ],
+      "passes": true
+    },
+    {
+      "id": "1.4",
+      "phase": 1,
+      "mode": "hitl",
+      "category": "architectural",
+      "description": "Install iOS visual effect dependencies",
+      "steps": [
+        "Run `cd apps/mobile && npx expo install expo-symbols expo-blur expo-glass-effect expo-haptics expo-image`",
+        "Verify package.json has expo-glass-effect",
+        "Create test: `import { isLiquidGlassAvailable } from 'expo-glass-effect'`",
+        "Verify import compiles without error"
+      ],
+      "passes": true
+    },
+    {
+      "id": "1.5",
+      "phase": 1,
+      "mode": "hitl",
+      "category": "architectural",
+      "description": "Install NativeWind v5 and Tailwind v4 with react-native-css",
+      "steps": [
+        "Run `cd apps/mobile && npx expo install tailwindcss@^4 nativewind@5.0.0-preview.2 react-native-css@0.0.0-nightly.5ce6396 @tailwindcss/postcss tailwind-merge clsx`",
+        "Verify package.json has nativewind@5.0.0-preview.2",
+        "Verify package.json has tailwindcss@^4",
+        "Add to package.json: `\"resolutions\": { \"lightningcss\": \"1.30.1\" }`",
+        "Run `pnpm install` to apply resolutions"
+      ],
+      "passes": true
+    },
+    {
+      "id": "1.6",
+      "phase": 1,
+      "mode": "hitl",
+      "category": "architectural",
+      "description": "Install Convex and offline storage dependencies",
+      "steps": [
+        "Run `cd apps/mobile && pnpm add convex react-native-mmkv`",
+        "Verify package.json has convex and react-native-mmkv",
+        "Create test: `import { ConvexReactClient } from 'convex/react'`",
+        "Verify import compiles without error"
+      ],
+      "passes": false
+    },
+    {
+      "id": "1.7",
+      "phase": 1,
+      "mode": "hitl",
+      "category": "architectural",
+      "description": "Create metro.config.js with NativeWind transformer",
+      "steps": [
+        "Create apps/mobile/metro.config.js with getDefaultConfig and withNativewind",
+        "Set inlineVariables: false and globalClassNamePolyfill: false",
+        "Run `npx expo start --clear` and verify Metro starts with NativeWind"
+      ],
+      "passes": false
+    },
+    {
+      "id": "1.8",
+      "phase": 1,
+      "mode": "hitl",
+      "category": "architectural",
+      "description": "Create PostCSS config for Tailwind v4",
+      "steps": [
+        "Create apps/mobile/postcss.config.mjs with @tailwindcss/postcss plugin",
+        "Verify file exports { plugins: { '@tailwindcss/postcss': {} } }"
+      ],
+      "passes": false
+    },
+    {
+      "id": "1.9",
+      "phase": 1,
+      "mode": "hitl",
+      "category": "architectural",
+      "description": "Create global CSS with Tailwind imports and platform fonts",
+      "steps": [
+        "Create apps/mobile/src/global.css",
+        "Add @import 'tailwindcss/theme.css' layer(theme)",
+        "Add @import 'tailwindcss/preflight.css' layer(base)",
+        "Add @import 'tailwindcss/utilities.css'",
+        "Add @media ios block with --font-mono: ui-monospace, --font-sans: system-ui",
+        "Add @media android block with --font-mono: monospace, --font-sans: normal"
+      ],
+      "passes": false
+    },
+    {
+      "id": "1.10",
+      "phase": 1,
+      "mode": "hitl",
+      "category": "architectural",
+      "description": "Create Apple semantic colors CSS file",
+      "steps": [
+        "Create apps/mobile/src/css/sf.css",
+        "Add :root with --sf-blue, --sf-green, --sf-red using light-dark() for web/Android",
+        "Add @media ios block with platformColor(systemBlue), platformColor(label), etc.",
+        "Add @layer theme with @theme mapping --color-sf-* to CSS variables",
+        "Import sf.css in global.css"
+      ],
+      "passes": false
+    },
+    {
+      "id": "1.11",
+      "phase": 1,
+      "mode": "hitl",
+      "category": "architectural",
+      "description": "Configure TypeScript path aliases",
+      "steps": [
+        "Update apps/mobile/tsconfig.json with baseUrl: '.'",
+        "Add paths: { '@/*': ['./src/*'], '@prm/convex/*': ['../../packages/convex/*'] }",
+        "Verify `import { cn } from '@/lib/utils'` resolves correctly"
+      ],
+      "passes": false
+    },
+    {
+      "id": "1.12",
+      "phase": 1,
+      "mode": "hitl",
+      "category": "architectural",
+      "description": "Update app.json with iOS configuration",
+      "steps": [
+        "Set expo.ios.bundleIdentifier to 'com.prm.mobile'",
+        "Set expo.android.package to 'com.prm.mobile'",
+        "Set expo.android.softwareKeyboardLayoutMode to 'resize'",
+        "Add expo.newArchEnabled: true for New Architecture",
+        "Verify app.json is valid JSON"
+      ],
+      "passes": false
+    },
+    {
+      "id": "1.13",
+      "phase": 1,
+      "mode": "hitl",
+      "category": "testing",
+      "description": "Test Phase 1 setup compiles and runs",
+      "steps": [
+        "Run `cd apps/mobile && npx expo start --clear`",
+        "Verify Metro bundler starts without errors",
+        "Press 'i' to open iOS Simulator",
+        "Verify app loads without crash",
+        "Check Metro logs for any NativeWind/Tailwind warnings"
+      ],
+      "passes": false
+    },
+    {
+      "id": "2.1",
+      "phase": 2,
+      "mode": "hitl",
+      "category": "architectural",
+      "description": "Create CSS component wrappers for View, Text, ScrollView",
+      "steps": [
+        "Create apps/mobile/src/tw/index.tsx",
+        "Import useCssElement from react-native-css",
+        "Export View wrapper: useCssElement(RNView, props, { className: 'style' })",
+        "Export Text wrapper: useCssElement(RNText, props, { className: 'style' })",
+        "Export ScrollView wrapper with className and contentContainerClassName mapping",
+        "Export Pressable and TextInput wrappers",
+        "Export useCSSVariable hook for CSS variable access"
+      ],
+      "passes": false
+    },
+    {
+      "id": "2.2",
+      "phase": 2,
+      "mode": "hitl",
+      "category": "architectural",
+      "description": "Create CSS-wrapped Image component with expo-image",
+      "steps": [
+        "Create apps/mobile/src/tw/image.tsx",
+        "Import Image from expo-image and createAnimatedComponent from reanimated",
+        "Create AnimatedExpoImage with createAnimatedComponent",
+        "Map objectFit style to contentFit prop",
+        "Map objectPosition style to contentPosition prop",
+        "Export Image with useCssElement wrapper"
+      ],
+      "passes": false
+    },
+    {
+      "id": "2.3",
+      "phase": 2,
+      "mode": "hitl",
+      "category": "architectural",
+      "description": "Create CSS-wrapped Animated components",
+      "steps": [
+        "Create apps/mobile/src/tw/animated.tsx",
+        "Import Reanimated and TW components",
+        "Export Animated.View as createAnimatedComponent(TW.View)",
+        "Export Animated.ScrollView as createAnimatedComponent(TW.ScrollView)"
+      ],
+      "passes": false
+    },
+    {
+      "id": "2.4",
+      "phase": 2,
+      "mode": "hitl",
+      "category": "architectural",
+      "description": "Create AdaptiveGlass component with fallback",
+      "steps": [
+        "Create apps/mobile/src/tw/glass.tsx",
+        "Import GlassView, isLiquidGlassAvailable from expo-glass-effect",
+        "Import BlurView from expo-blur",
+        "Import AccessibilityInfo for isReduceTransparencyEnabled check",
+        "Create AdaptiveGlass that uses GlassView on iOS 26+ when transparency not reduced",
+        "Fall back to BlurView tint='systemMaterial' on older iOS",
+        "Fall back to solid View on Android/unsupported"
+      ],
+      "passes": false
+    },
+    {
+      "id": "2.5",
+      "phase": 2,
+      "mode": "hitl",
+      "category": "architectural",
+      "description": "Create lib/utils.ts with cn helper",
+      "steps": [
+        "Create apps/mobile/src/lib/utils.ts",
+        "Import clsx and twMerge",
+        "Export cn function: return twMerge(clsx(inputs))",
+        "Test: cn('p-4', 'p-2') returns 'p-2'"
+      ],
+      "passes": false
+    },
+    {
+      "id": "2.6",
+      "phase": 2,
+      "mode": "hitl",
+      "category": "testing",
+      "description": "Test CSS wrappers with Tailwind classes",
+      "steps": [
+        "Create apps/mobile/app/index.tsx test screen",
+        "Import View, Text from '@/tw'",
+        "Render <View className='flex-1 bg-sf-bg p-4'><Text className='text-sf-text text-xl'>Test</Text></View>",
+        "Run app in iOS Simulator",
+        "Verify text renders with correct color",
+        "Toggle dark mode in Simulator, verify colors adapt"
+      ],
+      "passes": false
+    },
+    {
+      "id": "3.1",
+      "phase": 3,
+      "mode": "hitl",
+      "category": "ui",
+      "description": "Create root layout with NativeTabs (liquid glass)",
+      "steps": [
+        "Create apps/mobile/app/_layout.tsx",
+        "Import NativeTabs, Icon, Label, Badge from expo-router/unstable-native-tabs",
+        "Configure NativeTabs with minimizeBehavior='onScrollDown'",
+        "Add (actions) trigger with Icon sf={{ default: 'tray', selected: 'tray.full' }}",
+        "Add (contacts) trigger with Icon sf={{ default: 'person.2', selected: 'person.2.fill' }}",
+        "Add (agent) trigger with Icon sf={{ default: 'sparkles', selected: 'sparkles' }}",
+        "Wrap with SafeAreaProvider and ConvexProvider (placeholder)"
+      ],
+      "passes": false
+    },
+    {
+      "id": "3.2",
+      "phase": 3,
+      "mode": "hitl",
+      "category": "ui",
+      "description": "Create (actions) tab stack layout",
+      "steps": [
+        "Create apps/mobile/app/(actions)/_layout.tsx",
+        "Import Stack from expo-router/stack",
+        "Configure screenOptions: headerTransparent: true, headerLargeTitle: true",
+        "Set headerBlurEffect: 'none' for liquid glass compatibility",
+        "Set headerLargeStyle: { backgroundColor: 'transparent' }",
+        "Add Stack.Screen for index with title 'Actions'"
+      ],
+      "passes": false
+    },
+    {
+      "id": "3.3",
+      "phase": 3,
+      "mode": "hitl",
+      "category": "ui",
+      "description": "Create (actions)/index.tsx placeholder",
+      "steps": [
+        "Create apps/mobile/app/(actions)/index.tsx",
+        "Import ScrollView from '@/tw'",
+        "Render ScrollView with contentInsetAdjustmentBehavior='automatic'",
+        "Add placeholder Text: 'Actions will appear here'",
+        "Verify screen renders in tab"
+      ],
+      "passes": false
+    },
+    {
+      "id": "3.4",
+      "phase": 3,
+      "mode": "hitl",
+      "category": "ui",
+      "description": "Create (contacts) tab stack layout",
+      "steps": [
+        "Create apps/mobile/app/(contacts)/_layout.tsx",
+        "Import Stack from expo-router/stack",
+        "Configure same transparent header options as actions",
+        "Add headerSearchBarOptions for search integration",
+        "Add Stack.Screen for index with title 'Contacts'"
+      ],
+      "passes": false
+    },
+    {
+      "id": "3.5",
+      "phase": 3,
+      "mode": "hitl",
+      "category": "ui",
+      "description": "Create (contacts)/index.tsx placeholder",
+      "steps": [
+        "Create apps/mobile/app/(contacts)/index.tsx",
+        "Import ScrollView from '@/tw'",
+        "Render ScrollView with contentInsetAdjustmentBehavior='automatic'",
+        "Add placeholder Text: 'Contacts will appear here'"
+      ],
+      "passes": false
+    },
+    {
+      "id": "3.6",
+      "phase": 3,
+      "mode": "hitl",
+      "category": "ui",
+      "description": "Create (agent) tab stack layout",
+      "steps": [
+        "Create apps/mobile/app/(agent)/_layout.tsx",
+        "Import Stack from expo-router/stack",
+        "Configure transparent header options",
+        "Add Stack.Screen for index with title 'Assistant'"
+      ],
+      "passes": false
+    },
+    {
+      "id": "3.7",
+      "phase": 3,
+      "mode": "hitl",
+      "category": "ui",
+      "description": "Create (agent)/index.tsx placeholder",
+      "steps": [
+        "Create apps/mobile/app/(agent)/index.tsx",
+        "Import View, Text from '@/tw'",
+        "Render placeholder chat UI"
+      ],
+      "passes": false
+    },
+    {
+      "id": "3.8",
+      "phase": 3,
+      "mode": "hitl",
+      "category": "testing",
+      "description": "Test NativeTabs navigation and liquid glass",
+      "steps": [
+        "Run app in iOS 18+ Simulator",
+        "Verify 3 tabs render at bottom",
+        "Tap each tab, verify correct screen loads",
+        "Verify tab bar has liquid glass blur effect",
+        "Scroll content, verify tab bar minimizes (minimizeBehavior)",
+        "Verify SF Symbol icons show correct default/selected states",
+        "Test on iOS 17 Simulator, verify fallback appearance"
+      ],
+      "passes": false
+    },
+    {
+      "id": "4.1",
+      "phase": 4,
+      "mode": "hitl",
+      "category": "integration",
+      "description": "Create Convex client with MMKV storage",
+      "steps": [
+        "Create apps/mobile/src/lib/convex.ts",
+        "Import ConvexReactClient from convex/react",
+        "Import MMKV from react-native-mmkv",
+        "Create MMKV instance for Convex cache",
+        "Initialize ConvexReactClient with CONVEX_URL from env",
+        "Export convex client instance"
+      ],
+      "passes": false
+    },
+    {
+      "id": "4.2",
+      "phase": 4,
+      "mode": "hitl",
+      "category": "integration",
+      "description": "Create ConvexProvider with auth integration",
+      "steps": [
+        "Create apps/mobile/src/providers/ConvexProvider.tsx",
+        "Import ConvexProviderWithAuth from convex/react",
+        "Create useAuth hook placeholder for token management",
+        "Wrap children with ConvexProviderWithAuth",
+        "Pass auth token from useAuth to Convex"
+      ],
+      "passes": false
+    },
+    {
+      "id": "4.3",
+      "phase": 4,
+      "mode": "hitl",
+      "category": "integration",
+      "description": "Update root layout with ConvexProvider",
+      "steps": [
+        "Update apps/mobile/app/_layout.tsx",
+        "Import ConvexProvider from '@/providers/ConvexProvider'",
+        "Wrap NativeTabs with ConvexProvider",
+        "Verify app still loads without errors"
+      ],
+      "passes": false
+    },
+    {
+      "id": "4.4",
+      "phase": 4,
+      "mode": "hitl",
+      "category": "integration",
+      "description": "Create useActions hook for pending actions query",
+      "steps": [
+        "Create apps/mobile/src/hooks/useActions.ts",
+        "Import useQuery from convex/react",
+        "Import api from @prm/convex/_generated/api",
+        "Create useActions hook calling api.actions.listPending",
+        "Return { actions, isLoading, error }",
+        "Export hook"
+      ],
+      "passes": false
+    },
+    {
+      "id": "4.5",
+      "phase": 4,
+      "mode": "hitl",
+      "category": "integration",
+      "description": "Create useContacts hook for contacts query",
+      "steps": [
+        "Create apps/mobile/src/hooks/useContacts.ts",
+        "Import useQuery from convex/react",
+        "Import api from @prm/convex/_generated/api",
+        "Create useContacts hook calling api.contacts.list",
+        "Support search parameter for filtering",
+        "Return { contacts, isLoading, error }"
+      ],
+      "passes": false
+    },
+    {
+      "id": "4.6",
+      "phase": 4,
+      "mode": "hitl",
+      "category": "integration",
+      "description": "Create usePendingActionCount hook for badge",
+      "steps": [
+        "Create apps/mobile/src/hooks/usePendingActionCount.ts",
+        "Import useQuery from convex/react",
+        "Call api.actions.getPendingCount",
+        "Return count number"
+      ],
+      "passes": false
+    },
+    {
+      "id": "4.7",
+      "phase": 4,
+      "mode": "hitl",
+      "category": "testing",
+      "description": "Test Convex connection with real data",
+      "steps": [
+        "Add EXPO_PUBLIC_CONVEX_URL to apps/mobile/.env.local",
+        "Update ConvexProvider to read from process.env.EXPO_PUBLIC_CONVEX_URL",
+        "Run app and check console for Convex connection logs",
+        "Verify useActions returns data or expected auth error",
+        "Verify no runtime errors in Metro console"
+      ],
+      "passes": false
+    },
+    {
+      "id": "5.1",
+      "phase": 5,
+      "mode": "hitl",
+      "category": "ui",
+      "description": "Create SwipeableCard component with gesture handler",
+      "steps": [
+        "Create apps/mobile/src/components/swipeable-card.tsx",
+        "Import Gesture, GestureDetector from react-native-gesture-handler",
+        "Import useSharedValue, useAnimatedStyle, withSpring, interpolate from reanimated",
+        "Create translateX, translateY shared values",
+        "Create Pan gesture with onUpdate setting translation values",
+        "Define SWIPE_THRESHOLD_X = 120, SWIPE_THRESHOLD_Y = 80",
+        "In onEnd: check if |offsetX| > threshold or |offsetY| > threshold",
+        "Call onSwipe('right'|'left'|'up') based on direction",
+        "If below threshold, animate back with withSpring(0)"
+      ],
+      "passes": false
+    },
+    {
+      "id": "5.2",
+      "phase": 5,
+      "mode": "hitl",
+      "category": "ui",
+      "description": "Add visual transforms to SwipeableCard",
+      "steps": [
+        "Add useAnimatedStyle for card transforms",
+        "Interpolate rotation from translateX: [-200, 200] -> [-15deg, 15deg]",
+        "Interpolate scale from translateX: [-200, 0, 200] -> [0.95, 1, 0.95]",
+        "Interpolate opacity from translateX: [-200, 0, 200] -> [0.5, 1, 0.5]",
+        "Apply transforms to Animated.View style"
+      ],
+      "passes": false
+    },
+    {
+      "id": "5.3",
+      "phase": 5,
+      "mode": "hitl",
+      "category": "ui",
+      "description": "Add swipe direction overlays to SwipeableCard",
+      "steps": [
+        "Create rightOverlayOpacity interpolating from translateX [0, THRESHOLD] -> [0, 0.95]",
+        "Create leftOverlayOpacity interpolating from translateX [-THRESHOLD, 0] -> [0.9, 0]",
+        "Create upOverlayOpacity interpolating from translateY [-THRESHOLD, 0] -> [0.9, 0]",
+        "Add right overlay: bg-[#00806B] (teal) with checkmark icon and 'Send' text",
+        "Add left overlay: bg-neutral-600 (gray) with X icon and 'Discard' text",
+        "Add up overlay: bg-amber-700 with clock icon and 'Snooze' text",
+        "Use SymbolView from expo-symbols for icons"
+      ],
+      "passes": false
+    },
+    {
+      "id": "5.4",
+      "phase": 5,
+      "mode": "hitl",
+      "category": "ui",
+      "description": "Add programmatic swipe trigger to SwipeableCard",
+      "steps": [
+        "Add triggerSwipe prop: SwipeDirection | null",
+        "Add useEffect watching triggerSwipe",
+        "When trigger set, animate to peek position (threshold + 20)",
+        "After 150ms, call onSwipe and animate off screen",
+        "Reset isAnimatingRef after 400ms"
+      ],
+      "passes": false
+    },
+    {
+      "id": "5.5",
+      "phase": 5,
+      "mode": "hitl",
+      "category": "ui",
+      "description": "Create CardStack component for stacked cards",
+      "steps": [
+        "Create apps/mobile/src/components/card-stack.tsx",
+        "Accept actions array, totalCount, onSwipe callback, renderCard function",
+        "Slice to show top 3 cards (VISIBLE_CARDS = 3)",
+        "Map visible cards with stacked positioning: scale = 1 - index * 0.04, y = index * 8",
+        "Set zIndex = VISIBLE_CARDS - index for proper stacking",
+        "Only top card (index 0) is interactive",
+        "Wrap with AnimatePresence for enter/exit animations"
+      ],
+      "passes": false
+    },
+    {
+      "id": "5.6",
+      "phase": 5,
+      "mode": "hitl",
+      "category": "ui",
+      "description": "Add empty state to CardStack",
+      "steps": [
+        "Check if actions.length === 0",
+        "Render centered empty state with FadeIn animation",
+        "Add party popper icon using SymbolView name='party.popper'",
+        "Add 'All caught up!' heading",
+        "Add 'New actions will appear here' subtext"
+      ],
+      "passes": false
+    },
+    {
+      "id": "5.7",
+      "phase": 5,
+      "mode": "hitl",
+      "category": "ui",
+      "description": "Add header and count display to CardStack",
+      "steps": [
+        "Add header View with totalCount display",
+        "Format as '{count} Left' text",
+        "Style with text-lg font-semibold"
+      ],
+      "passes": false
+    },
+    {
+      "id": "5.8",
+      "phase": 5,
+      "mode": "hitl",
+      "category": "ui",
+      "description": "Create ActionButtons component with GlassView",
+      "steps": [
+        "Create apps/mobile/src/components/action-buttons.tsx",
+        "Import GlassView from expo-glass-effect",
+        "Import Haptics from expo-haptics",
+        "Create 3 buttons: Discard, Snooze, Send",
+        "Wrap each in GlassView isInteractive for liquid glass effect",
+        "Add SF Symbols: xmark, clock, checkmark",
+        "Add Haptics.impactAsync(ImpactFeedbackStyle.Medium) on press",
+        "Call onSwipe('left'|'up'|'right') respectively"
+      ],
+      "passes": false
+    },
+    {
+      "id": "5.9",
+      "phase": 5,
+      "mode": "hitl",
+      "category": "testing",
+      "description": "Test SwipeableCard gestures and animations",
+      "steps": [
+        "Create test screen with SwipeableCard containing placeholder content",
+        "Run in iOS Simulator",
+        "Drag card right, verify teal overlay appears progressively",
+        "Release past threshold, verify onSwipe('right') called",
+        "Drag card left, verify gray overlay and onSwipe('left')",
+        "Drag card up, verify amber overlay and onSwipe('up')",
+        "Drag and release below threshold, verify card snaps back",
+        "Verify haptic feedback on swipe completion"
+      ],
+      "passes": false
+    },
+    {
+      "id": "6.1",
+      "phase": 6,
+      "mode": "hitl",
+      "category": "ui",
+      "description": "Create MessageResponseCard component header",
+      "steps": [
+        "Create apps/mobile/src/components/cards/message-response-card.tsx",
+        "Accept personName, messageTimestamp, messages, responseText, onResponseChange props",
+        "Create header with Avatar (initials from name)",
+        "Display person name and relative timestamp",
+        "Add platform badge (iMessage/Gmail/Slack) with icon"
+      ],
+      "passes": false
+    },
+    {
+      "id": "6.2",
+      "phase": 6,
+      "mode": "hitl",
+      "category": "ui",
+      "description": "Create MessageResponseCard message bubbles",
+      "steps": [
+        "Sort messages by sentAt ascending",
+        "Map messages to bubble Views",
+        "Sent messages (isFromMe): right-aligned, bg-primary, rounded-2xl",
+        "Received messages: left-aligned, bg-muted, rounded-2xl",
+        "Show sender name for group chats",
+        "Show timestamp below each message",
+        "Handle attachments with Image preview"
+      ],
+      "passes": false
+    },
+    {
+      "id": "6.3",
+      "phase": 6,
+      "mode": "hitl",
+      "category": "ui",
+      "description": "Create MessageResponseCard response input",
+      "steps": [
+        "Add TextInput at bottom for response draft",
+        "Bind value to responseText prop",
+        "Call onResponseChange on text change",
+        "Set placeholder 'Type your response...'",
+        "Style with min-h-[80px] max-h-[150px] resize-none",
+        "Add data-selectable='true' to prevent swipe while typing"
+      ],
+      "passes": false
+    },
+    {
+      "id": "6.4",
+      "phase": 6,
+      "mode": "hitl",
+      "category": "ui",
+      "description": "Create ContactCard component for new contacts",
+      "steps": [
+        "Create apps/mobile/src/components/cards/contact-card.tsx",
+        "Accept personName, createdAt, platform, formData, onFormChange props",
+        "Create header with Avatar and 'You met someone new' text",
+        "Add editable TextInput for name with User icon",
+        "Add editable TextInput for company with Building2 icon",
+        "Add editable TextInput for tags (comma-separated) with Tag icon",
+        "Add TextInput for notes with FileText icon",
+        "Track form state and call onFormChange on changes"
+      ],
+      "passes": false
+    },
+    {
+      "id": "6.5",
+      "phase": 6,
+      "mode": "hitl",
+      "category": "ui",
+      "description": "Create barrel export for card components",
+      "steps": [
+        "Create apps/mobile/src/components/cards/index.ts",
+        "Export MessageResponseCard from './message-response-card'",
+        "Export ContactCard from './contact-card'",
+        "Export all related types"
+      ],
+      "passes": false
+    },
+    {
+      "id": "6.6",
+      "phase": 6,
+      "mode": "hitl",
+      "category": "testing",
+      "description": "Test card components with mock data",
+      "steps": [
+        "Create test screen rendering MessageResponseCard with mock messages",
+        "Verify messages display in correct order",
+        "Verify sent/received styling differs",
+        "Type in response input, verify onResponseChange fires",
+        "Render ContactCard with mock form data",
+        "Edit name field, verify onFormChange fires with updated data"
+      ],
+      "passes": false
+    },
+    {
+      "id": "7.1",
+      "phase": 7,
+      "mode": "hitl",
+      "category": "functional",
+      "description": "Implement Actions tab with CardStack and real data",
+      "steps": [
+        "Update apps/mobile/app/(actions)/index.tsx",
+        "Import useActions hook",
+        "Import CardStack, MessageResponseCard, ContactCard",
+        "Render CardStack with actions from useActions",
+        "In renderCard: check action.type, render MessageResponseCard for 'respond'/'follow_up'",
+        "Render ContactCard for 'eod_contact'/'new_connection'"
+      ],
+      "passes": false
+    },
+    {
+      "id": "7.2",
+      "phase": 7,
+      "mode": "hitl",
+      "category": "functional",
+      "description": "Implement swipe handler with Convex mutation",
+      "steps": [
+        "Import useMutation from convex/react",
+        "Get swipeAction mutation from api.actions.swipe",
+        "Create handleSwipe async function",
+        "On swipe right: call mutation with direction='right', responseText",
+        "On swipe left: call mutation with direction='left'",
+        "On swipe up: show snooze picker (next task)",
+        "Add Haptics.notificationAsync on success"
+      ],
+      "passes": false
+    },
+    {
+      "id": "7.3",
+      "phase": 7,
+      "mode": "hitl",
+      "category": "ui",
+      "description": "Create snooze picker sheet route",
+      "steps": [
+        "Create apps/mobile/app/(actions)/snooze-picker.tsx",
+        "Configure Stack.Screen with presentation: 'formSheet'",
+        "Set sheetGrabberVisible: true, sheetAllowedDetents: [0.4]",
+        "Set contentStyle: { backgroundColor: 'transparent' } for glass effect",
+        "Add preset buttons: 1 hour, 3 hours, Tomorrow 9am, Next Monday 9am",
+        "Add 'Custom...' button opening DateTimePicker",
+        "On selection, navigate back with selected timestamp"
+      ],
+      "passes": false
+    },
+    {
+      "id": "7.4",
+      "phase": 7,
+      "mode": "hitl",
+      "category": "functional",
+      "description": "Wire snooze picker to action swipe",
+      "steps": [
+        "On swipe up, navigate to snooze-picker with actionId param",
+        "In snooze-picker, receive actionId from route params",
+        "On time selection, call swipeAction mutation with direction='up', snoozedUntil",
+        "Navigate back to actions index",
+        "Verify action disappears from queue"
+      ],
+      "passes": false
+    },
+    {
+      "id": "7.5",
+      "phase": 7,
+      "mode": "hitl",
+      "category": "ui",
+      "description": "Add action detail route for full context",
+      "steps": [
+        "Create apps/mobile/app/(actions)/[id].tsx",
+        "Query api.actions.getWithContext with id param",
+        "Display full message thread in ScrollView",
+        "Show action details: type, reason, created time",
+        "Add ActionButtons at bottom for manual swipe",
+        "Configure headerLargeTitle: false for detail view"
+      ],
+      "passes": false
+    },
+    {
+      "id": "7.6",
+      "phase": 7,
+      "mode": "hitl",
+      "category": "ui",
+      "description": "Add badge count to Actions tab",
+      "steps": [
+        "Update apps/mobile/app/_layout.tsx",
+        "Import usePendingActionCount hook",
+        "Get count from hook",
+        "Add Badge component to (actions) NativeTabs.Trigger",
+        "Display count when > 0, hide when 0"
+      ],
+      "passes": false
+    },
+    {
+      "id": "7.7",
+      "phase": 7,
+      "mode": "hitl",
+      "category": "ui",
+      "description": "Add loading skeleton to Actions tab",
+      "steps": [
+        "Check isLoading from useActions",
+        "When loading, render skeleton cards",
+        "Create SkeletonCard component with animated opacity",
+        "Show 3 stacked skeleton cards matching CardStack layout"
+      ],
+      "passes": false
+    },
+    {
+      "id": "7.8",
+      "phase": 7,
+      "mode": "hitl",
+      "category": "testing",
+      "description": "Test Actions tab end-to-end",
+      "steps": [
+        "Ensure test actions exist in Convex database",
+        "Run app and navigate to Actions tab",
+        "Verify pending actions load and display",
+        "Verify badge shows correct count",
+        "Swipe right on message action, verify mutation called",
+        "Verify action removed from queue after swipe",
+        "Swipe up, verify snooze picker opens",
+        "Select snooze time, verify action snoozed",
+        "Tap card to open detail, verify full context displays"
+      ],
+      "passes": false
+    },
+    {
+      "id": "8.1",
+      "phase": 8,
+      "mode": "hitl",
+      "category": "ui",
+      "description": "Create ContactListItem component with preview",
+      "steps": [
+        "Create apps/mobile/src/components/contact-list-item.tsx",
+        "Accept contact data: id, displayName, company, lastMessageText",
+        "Create Avatar with initials",
+        "Display name and company on right",
+        "Show last message preview truncated",
+        "Wrap in Link from expo-router with href to /contacts/[id]"
+      ],
+      "passes": false
+    },
+    {
+      "id": "8.2",
+      "phase": 8,
+      "mode": "hitl",
+      "category": "ui",
+      "description": "Add Link.Preview and context menu to ContactListItem",
+      "steps": [
+        "Add Link.Trigger wrapper around content",
+        "Add Link.Preview for peek on long press",
+        "Add Link.Menu with actions: Message, Call, Email, View Profile",
+        "Use Link.MenuAction with SF Symbol icons",
+        "Add destructive 'Block' action"
+      ],
+      "passes": false
+    },
+    {
+      "id": "8.3",
+      "phase": 8,
+      "mode": "hitl",
+      "category": "functional",
+      "description": "Implement Contacts tab with FlatList",
+      "steps": [
+        "Update apps/mobile/app/(contacts)/index.tsx",
+        "Import useContacts hook",
+        "Import FlatList from react-native",
+        "Configure contentInsetAdjustmentBehavior='automatic'",
+        "Render ContactListItem for each contact",
+        "Add keyExtractor using contact.id"
+      ],
+      "passes": false
+    },
+    {
+      "id": "8.4",
+      "phase": 8,
+      "mode": "hitl",
+      "category": "functional",
+      "description": "Add search to Contacts tab",
+      "steps": [
+        "Import useSearch hook from expo-router",
+        "Get search text from hook",
+        "Pass search to useContacts for filtering",
+        "Configure headerSearchBarOptions in _layout.tsx",
+        "Verify search filters contact list"
+      ],
+      "passes": false
+    },
+    {
+      "id": "8.5",
+      "phase": 8,
+      "mode": "hitl",
+      "category": "ui",
+      "description": "Create contact detail page",
+      "steps": [
+        "Create apps/mobile/app/(contacts)/[id].tsx",
+        "Query api.contacts.getWithHandles using id param",
+        "Display large Avatar at top",
+        "Show name and company",
+        "List all handles grouped by platform with icons",
+        "Show notes section",
+        "Show tags as badges",
+        "Add 'Recent conversations' section linking to inbox"
+      ],
+      "passes": false
+    },
+    {
+      "id": "8.6",
+      "phase": 8,
+      "mode": "hitl",
+      "category": "testing",
+      "description": "Test Contacts tab end-to-end",
+      "steps": [
+        "Ensure contacts exist in Convex database",
+        "Run app and navigate to Contacts tab",
+        "Verify contacts list loads",
+        "Type in search bar, verify list filters",
+        "Long press contact, verify context menu appears",
+        "Tap contact, verify detail page opens",
+        "Verify handles display correctly",
+        "Test back navigation"
+      ],
+      "passes": false
+    },
+    {
+      "id": "9.1",
+      "phase": 9,
+      "mode": "hitl",
+      "category": "ui",
+      "description": "Create ChatMessage component for agent",
+      "steps": [
+        "Create apps/mobile/src/components/chat/chat-message.tsx",
+        "Accept message: { role, content, toolInvocations }",
+        "User messages: right-aligned, bg-primary, rounded-2xl",
+        "Assistant messages: left-aligned, bg-muted, rounded-2xl",
+        "Add basic markdown support for assistant (bold, code)",
+        "Handle streaming state with typing indicator"
+      ],
+      "passes": false
+    },
+    {
+      "id": "9.2",
+      "phase": 9,
+      "mode": "hitl",
+      "category": "ui",
+      "description": "Create ChatInput component with keyboard handling",
+      "steps": [
+        "Create apps/mobile/src/components/chat/chat-input.tsx",
+        "Accept value, onChangeText, onSubmit props",
+        "Create TextInput with multiline support",
+        "Add send button with SymbolView name='arrow.up.circle.fill'",
+        "Wrap in GlassView for liquid glass background",
+        "Disable send button when input empty"
+      ],
+      "passes": false
+    },
+    {
+      "id": "9.3",
+      "phase": 9,
+      "mode": "hitl",
+      "category": "ui",
+      "description": "Create SuggestedPrompts component",
+      "steps": [
+        "Create apps/mobile/src/components/chat/suggested-prompts.tsx",
+        "Define prompts: 'Who did I talk to recently?', 'Any messages I should reply to?', 'What's new with my contacts?'",
+        "Render horizontal ScrollView of prompt chips",
+        "Wrap each in GlassView isInteractive",
+        "On tap, call onSelect with prompt text"
+      ],
+      "passes": false
+    },
+    {
+      "id": "9.4",
+      "phase": 9,
+      "mode": "hitl",
+      "category": "functional",
+      "description": "Create useChat hook for AI streaming",
+      "steps": [
+        "Create apps/mobile/src/hooks/useChat.ts",
+        "Manage messages state array",
+        "Create sendMessage function",
+        "POST to /api/chat with messages",
+        "Handle streaming response with ReadableStream",
+        "Parse SSE chunks and update assistant message",
+        "Handle errors and set error state",
+        "Return { messages, input, setInput, sendMessage, isLoading, error }"
+      ],
+      "passes": false
+    },
+    {
+      "id": "9.5",
+      "phase": 9,
+      "mode": "hitl",
+      "category": "functional",
+      "description": "Implement Agent tab with chat UI",
+      "steps": [
+        "Update apps/mobile/app/(agent)/index.tsx",
+        "Import useChat hook",
+        "Import ChatMessage, ChatInput, SuggestedPrompts",
+        "Use FlatList inverted for message list",
+        "Show SuggestedPrompts when messages empty",
+        "Add KeyboardAvoidingView for iOS keyboard",
+        "Position ChatInput at bottom"
+      ],
+      "passes": false
+    },
+    {
+      "id": "9.6",
+      "phase": 9,
+      "mode": "hitl",
+      "category": "ui",
+      "description": "Add tool call artifacts to ChatMessage",
+      "steps": [
+        "Check for toolInvocations in message",
+        "Create ToolArtifact component for each tool result",
+        "For search_messages: show message previews",
+        "For search_contacts: show contact cards",
+        "For create_action: show action created confirmation",
+        "Style artifacts with GlassView background"
+      ],
+      "passes": false
+    },
+    {
+      "id": "9.7",
+      "phase": 9,
+      "mode": "hitl",
+      "category": "testing",
+      "description": "Test Agent tab end-to-end",
+      "steps": [
+        "Ensure /api/chat endpoint is accessible",
+        "Run app and navigate to Agent tab",
+        "Verify empty state shows suggested prompts",
+        "Tap suggested prompt, verify sent to chat",
+        "Verify streaming response appears",
+        "Type custom message, tap send",
+        "Verify message sent and response received",
+        "Test tool call: ask 'Who did I talk to recently?'",
+        "Verify search_messages artifact displays"
+      ],
+      "passes": false
+    },
+    {
+      "id": "10.1",
+      "phase": 10,
+      "mode": "hitl",
+      "category": "integration",
+      "description": "Install auth dependencies",
+      "steps": [
+        "Run `cd apps/mobile && npx expo install expo-auth-session expo-web-browser expo-secure-store`",
+        "Verify packages in package.json",
+        "Verify no duplicate expo-crypto or expo-random warnings"
+      ],
+      "passes": false
+    },
+    {
+      "id": "10.2",
+      "phase": 10,
+      "mode": "hitl",
+      "category": "integration",
+      "description": "Create auth helpers with WorkOS config",
+      "steps": [
+        "Create apps/mobile/src/lib/auth.ts",
+        "Import AuthSession, SecureStore",
+        "Configure discovery with WorkOS authorization endpoint",
+        "Create getAccessToken() reading from SecureStore",
+        "Create setAccessToken() saving to SecureStore",
+        "Create clearAccessToken() removing from SecureStore"
+      ],
+      "passes": false
+    },
+    {
+      "id": "10.3",
+      "phase": 10,
+      "mode": "hitl",
+      "category": "integration",
+      "description": "Create AuthProvider with state management",
+      "steps": [
+        "Create apps/mobile/src/providers/AuthProvider.tsx",
+        "Create AuthContext with user, isAuthenticated, signIn, signOut",
+        "On mount, check SecureStore for existing token",
+        "Validate token with WorkOS userinfo endpoint",
+        "Export useAuth hook for accessing context"
+      ],
+      "passes": false
+    },
+    {
+      "id": "10.4",
+      "phase": 10,
+      "mode": "hitl",
+      "category": "ui",
+      "description": "Create sign-in screen",
+      "steps": [
+        "Create apps/mobile/app/sign-in.tsx",
+        "Import GlassView for card background",
+        "Add app logo/name at top",
+        "Add 'Sign in with Apple' button",
+        "Add 'Sign in with Google' button",
+        "Style buttons per Apple HIG (min 44pt height)",
+        "Call signIn from useAuth on button press"
+      ],
+      "passes": false
+    },
+    {
+      "id": "10.5",
+      "phase": 10,
+      "mode": "hitl",
+      "category": "functional",
+      "description": "Implement OAuth sign-in flow",
+      "steps": [
+        "In AuthProvider signIn function:",
+        "Generate code_verifier and code_challenge for PKCE",
+        "Build WorkOS authorization URL with redirect_uri",
+        "Use AuthSession.startAsync to open browser",
+        "Handle callback with authorization code",
+        "Exchange code for tokens via WorkOS API",
+        "Store access_token and refresh_token in SecureStore",
+        "Set user state from ID token claims"
+      ],
+      "passes": false
+    },
+    {
+      "id": "10.6",
+      "phase": 10,
+      "mode": "hitl",
+      "category": "functional",
+      "description": "Add auth redirect in root layout",
+      "steps": [
+        "Update apps/mobile/app/_layout.tsx",
+        "Wrap with AuthProvider",
+        "Import useAuth hook",
+        "If not isAuthenticated and not on sign-in, redirect to /sign-in",
+        "Use router.replace('/sign-in') from expo-router",
+        "Show loading indicator while checking auth state"
+      ],
+      "passes": false
+    },
+    {
+      "id": "10.7",
+      "phase": 10,
+      "mode": "hitl",
+      "category": "functional",
+      "description": "Pass auth token to Convex client",
+      "steps": [
+        "Update apps/mobile/src/providers/ConvexProvider.tsx",
+        "Import useAuth hook",
+        "Create useAuthFromWorkOS function returning { isLoading, isAuthenticated, fetchAccessToken }",
+        "fetchAccessToken returns token from SecureStore",
+        "Pass to ConvexProviderWithAuth useAuth prop"
+      ],
+      "passes": false
+    },
+    {
+      "id": "10.8",
+      "phase": 10,
+      "mode": "hitl",
+      "category": "testing",
+      "description": "Test auth flow end-to-end",
+      "steps": [
+        "Run app fresh (clear SecureStore)",
+        "Verify redirect to sign-in screen",
+        "Tap 'Sign in with Google'",
+        "Complete OAuth flow in browser",
+        "Verify redirect back to app",
+        "Verify tabs appear (authenticated)",
+        "Verify Convex queries return user data",
+        "Kill and restart app",
+        "Verify still authenticated (token persisted)",
+        "Sign out and verify redirect to sign-in"
+      ],
+      "passes": false
+    },
+    {
+      "id": "11.1",
+      "phase": 11,
+      "mode": "hitl",
+      "category": "integration",
+      "description": "Install push notification dependencies",
+      "steps": [
+        "Run `cd apps/mobile && npx expo install expo-notifications expo-device expo-constants`",
+        "Verify packages in package.json",
+        "Add expo-notifications to app.json plugins"
+      ],
+      "passes": false
+    },
+    {
+      "id": "11.2",
+      "phase": 11,
+      "mode": "hitl",
+      "category": "integration",
+      "description": "Create notification registration helper",
+      "steps": [
+        "Create apps/mobile/src/lib/notifications.ts",
+        "Import Notifications, Device, Constants",
+        "Create registerForPushNotifications function",
+        "Check Device.isDevice (skip on simulator)",
+        "Request permissions with getPermissionsAsync/requestPermissionsAsync",
+        "Get Expo push token with getExpoPushTokenAsync",
+        "Return token string"
+      ],
+      "passes": false
+    },
+    {
+      "id": "11.3",
+      "phase": 11,
+      "mode": "hitl",
+      "category": "functional",
+      "description": "Store push token in Convex",
+      "steps": [
+        "Create Convex mutation api.users.registerPushToken",
+        "Accept pushToken string",
+        "Store in users table for authenticated user",
+        "Call mutation after successful auth in AuthProvider",
+        "Handle token refresh on app launch"
+      ],
+      "passes": false
+    },
+    {
+      "id": "11.4",
+      "phase": 11,
+      "mode": "hitl",
+      "category": "functional",
+      "description": "Handle notification tap navigation",
+      "steps": [
+        "In root layout, add Notifications.addNotificationResponseReceivedListener",
+        "Parse notification data for type and id",
+        "If type='action', navigate to /actions/[id]",
+        "If type='message', navigate to /inbox/[conversationId]",
+        "Clean up listener on unmount"
+      ],
+      "passes": false
+    },
+    {
+      "id": "11.5",
+      "phase": 11,
+      "mode": "hitl",
+      "category": "testing",
+      "description": "Test push notifications",
+      "steps": [
+        "Run app on physical device (notifications require device)",
+        "Verify permission prompt appears",
+        "Grant permission, verify token logged",
+        "Verify token saved in Convex users table",
+        "Use Expo push tool to send test notification",
+        "Verify notification appears on device",
+        "Tap notification, verify navigates to correct screen"
+      ],
+      "passes": false
+    },
+    {
+      "id": "12.1",
+      "phase": 12,
+      "mode": "hitl",
+      "category": "integration",
+      "description": "Install @bacons/apple-targets for widgets",
+      "steps": [
+        "Run `cd apps/mobile && pnpm add @bacons/apple-targets`",
+        "Verify package in package.json",
+        "Add to app.json plugins: ['@bacons/apple-targets']"
+      ],
+      "passes": false
+    },
+    {
+      "id": "12.2",
+      "phase": 12,
+      "mode": "hitl",
+      "category": "architectural",
+      "description": "Create iOS widget target structure",
+      "steps": [
+        "Create apps/mobile/targets/widget directory",
+        "Create widget/index.swift with WidgetBundle",
+        "Create widget/ActionCountWidget.swift",
+        "Define small widget showing pending action count",
+        "Configure widget in Info.plist"
+      ],
+      "passes": false
+    },
+    {
+      "id": "12.3",
+      "phase": 12,
+      "mode": "hitl",
+      "category": "functional",
+      "description": "Implement widget data provider",
+      "steps": [
+        "Create widget/Provider.swift implementing TimelineProvider",
+        "Use App Groups for shared data access",
+        "Read pending action count from shared UserDefaults",
+        "Generate timeline entries for widget updates",
+        "Update from main app when action count changes"
+      ],
+      "passes": false
+    },
+    {
+      "id": "12.4",
+      "phase": 12,
+      "mode": "hitl",
+      "category": "functional",
+      "description": "Share data with widget from React Native",
+      "steps": [
+        "Create apps/mobile/src/lib/widget-data.ts",
+        "Use expo-secure-store or custom native module for App Groups",
+        "Create updateWidgetData(actionCount) function",
+        "Call when action count changes in useActions",
+        "Trigger widget timeline reload with WidgetKit"
+      ],
+      "passes": false
+    },
+    {
+      "id": "12.5",
+      "phase": 12,
+      "mode": "hitl",
+      "category": "testing",
+      "description": "Test widget end-to-end",
+      "steps": [
+        "Run EAS build for iOS with widget target",
+        "Install on device or simulator",
+        "Add widget to home screen",
+        "Verify action count displays correctly",
+        "Complete an action in app",
+        "Verify widget updates with new count",
+        "Tap widget, verify opens app to Actions tab"
+      ],
+      "passes": false
+    },
+    {
+      "id": "13.1",
+      "phase": 13,
+      "mode": "hitl",
+      "category": "polish",
+      "description": "Add haptic feedback to all interactive elements",
+      "steps": [
+        "Import Haptics from expo-haptics in swipeable-card",
+        "Add Haptics.impactAsync(Light) on swipe start",
+        "Add Haptics.notificationAsync(Success) on swipe complete",
+        "Add Haptics.selectionAsync on button taps",
+        "Add haptics to ContactListItem tap",
+        "Add haptics to ChatInput send"
+      ],
+      "passes": false
+    },
+    {
+      "id": "13.2",
+      "phase": 13,
+      "mode": "hitl",
+      "category": "polish",
+      "description": "Add pull-to-refresh on lists",
+      "steps": [
+        "Add refreshControl to FlatList in Contacts tab",
+        "Add RefreshControl to ScrollView in Actions tab",
+        "Connect to Convex refetch on pull",
+        "Add loading indicator during refresh",
+        "Verify haptic feedback on pull threshold"
+      ],
+      "passes": false
+    },
+    {
+      "id": "13.3",
+      "phase": 13,
+      "mode": "hitl",
+      "category": "polish",
+      "description": "Add error boundary with retry",
+      "steps": [
+        "Create apps/mobile/src/components/error-boundary.tsx",
+        "Create ErrorBoundary class component",
+        "Catch errors in componentDidCatch",
+        "Display friendly error message",
+        "Add 'Try Again' button calling reset",
+        "Wrap tab screens with ErrorBoundary"
+      ],
+      "passes": false
+    },
+    {
+      "id": "13.4",
+      "phase": 13,
+      "mode": "hitl",
+      "category": "polish",
+      "description": "Configure app icon and splash screen",
+      "steps": [
+        "Create apps/mobile/assets/icon.png (1024x1024)",
+        "Create apps/mobile/assets/splash.png (1284x2778)",
+        "Update app.json: expo.icon = './assets/icon.png'",
+        "Update app.json: expo.splash.image = './assets/splash.png'",
+        "Set splash.resizeMode = 'contain'",
+        "Set splash.backgroundColor matching brand color"
+      ],
+      "passes": false
+    },
+    {
+      "id": "13.5",
+      "phase": 13,
+      "mode": "hitl",
+      "category": "polish",
+      "description": "Configure dark mode icon variants",
+      "steps": [
+        "Create apps/mobile/assets/icon-dark.png for dark mode",
+        "Create apps/mobile/assets/icon-tinted.png for tinted mode",
+        "Update app.json with ios.icon.dark and ios.icon.tinted",
+        "Verify icons display correctly in both modes"
+      ],
+      "passes": false
+    },
+    {
+      "id": "14.1",
+      "phase": 14,
+      "mode": "hitl",
+      "category": "testing",
+      "description": "Run TypeScript type check",
+      "steps": [
+        "Run `cd apps/mobile && pnpm tsc --noEmit`",
+        "Fix any TypeScript errors",
+        "Verify clean output with no errors"
+      ],
+      "passes": false
+    },
+    {
+      "id": "14.2",
+      "phase": 14,
+      "mode": "hitl",
+      "category": "testing",
+      "description": "Run ESLint",
+      "steps": [
+        "Run `cd apps/mobile && pnpm lint`",
+        "Fix any linting errors",
+        "Verify clean output"
+      ],
+      "passes": false
+    },
+    {
+      "id": "14.3",
+      "phase": 14,
+      "mode": "hitl",
+      "category": "testing",
+      "description": "Test on iOS 18+ Simulator with liquid glass",
+      "steps": [
+        "Run `npx expo run:ios --device 'iPhone 16 Pro'`",
+        "Verify app builds and launches",
+        "Verify NativeTabs have liquid glass blur",
+        "Verify GlassView components have glass effect",
+        "Verify sheets have glass background",
+        "Take screenshots for documentation"
+      ],
+      "passes": false
+    },
+    {
+      "id": "14.4",
+      "phase": 14,
+      "mode": "hitl",
+      "category": "testing",
+      "description": "Test on iOS 17 Simulator (fallback)",
+      "steps": [
+        "Run `npx expo run:ios --device 'iPhone 15'`",
+        "Verify app builds and launches",
+        "Verify BlurView fallback for tab bar",
+        "Verify AdaptiveGlass falls back to BlurView",
+        "Verify no crashes or visual glitches"
+      ],
+      "passes": false
+    },
+    {
+      "id": "14.5",
+      "phase": 14,
+      "mode": "hitl",
+      "category": "testing",
+      "description": "Test accessibility with VoiceOver",
+      "steps": [
+        "Enable VoiceOver on Simulator",
+        "Navigate through all tabs",
+        "Verify all interactive elements have labels",
+        "Verify swipe card announces direction hints",
+        "Verify form inputs announce labels",
+        "Verify navigation is logical with focus order"
+      ],
+      "passes": false
+    },
+    {
+      "id": "14.6",
+      "phase": 14,
+      "mode": "hitl",
+      "category": "testing",
+      "description": "Test Reduce Motion and Reduce Transparency",
+      "steps": [
+        "Enable Reduce Motion in Simulator settings",
+        "Verify animations are reduced or removed",
+        "Enable Reduce Transparency",
+        "Verify glass effects fall back to solid backgrounds",
+        "Verify app remains usable in both modes"
+      ],
+      "passes": false
+    },
+    {
+      "id": "14.7",
+      "phase": 14,
+      "mode": "hitl",
+      "category": "testing",
+      "description": "Manual E2E: Complete action flow",
+      "steps": [
+        "Sign in to app",
+        "Verify Actions tab shows pending actions (or create via web)",
+        "Swipe right to send message",
+        "Verify Convex mutation called",
+        "Verify action removed from queue",
+        "Verify badge count decremented",
+        "Swipe up on action, select snooze time",
+        "Verify action disappears and returns after time"
+      ],
+      "passes": false
+    },
+    {
+      "id": "14.8",
+      "phase": 14,
+      "mode": "hitl",
+      "category": "testing",
+      "description": "Manual E2E: Agent chat flow",
+      "steps": [
+        "Navigate to Agent tab",
+        "Tap suggested prompt 'Who did I talk to recently?'",
+        "Verify message sent and streaming response appears",
+        "Verify search_messages tool artifacts display",
+        "Ask follow-up: 'Create a follow-up with [name]'",
+        "Verify create_action tool called",
+        "Navigate to Actions tab, verify action created"
+      ],
+      "passes": false
+    },
+    {
+      "id": "15.1",
+      "phase": 15,
+      "mode": "hitl",
+      "category": "deployment",
+      "description": "Configure EAS Build",
+      "steps": [
+        "Run `cd apps/mobile && npx eas init`",
+        "Run `npx eas build:configure`",
+        "Verify eas.json created with build profiles",
+        "Configure development, preview, production profiles",
+        "Set ios.simulator: true for development profile"
+      ],
+      "passes": false
+    },
+    {
+      "id": "15.2",
+      "phase": 15,
+      "mode": "hitl",
+      "category": "deployment",
+      "description": "Configure environment variables in EAS",
+      "steps": [
+        "Run `npx eas secret:create CONVEX_URL`",
+        "Run `npx eas secret:create WORKOS_CLIENT_ID`",
+        "Run `npx eas secret:create WORKOS_REDIRECT_URI`",
+        "Verify secrets in EAS dashboard",
+        "Update app.config.js to read from process.env"
+      ],
+      "passes": false
+    },
+    {
+      "id": "15.3",
+      "phase": 15,
+      "mode": "hitl",
+      "category": "deployment",
+      "description": "Build for iOS Simulator",
+      "steps": [
+        "Run `npx eas build --profile development --platform ios`",
+        "Wait for build to complete",
+        "Download and install .app on Simulator",
+        "Verify app launches and functions correctly"
+      ],
+      "passes": false
+    },
+    {
+      "id": "15.4",
+      "phase": 15,
+      "mode": "hitl",
+      "category": "deployment",
+      "description": "Build for TestFlight",
+      "steps": [
+        "Configure Apple Developer account in EAS",
+        "Run `npx eas build --profile production --platform ios`",
+        "Wait for build to complete",
+        "Run `npx eas submit --platform ios`",
+        "Verify build appears in App Store Connect",
+        "Add to TestFlight for internal testing"
+      ],
+      "passes": false
+    },
+    {
+      "id": "15.5",
+      "phase": 15,
+      "mode": "hitl",
+      "category": "deployment",
+      "description": "Test TestFlight build on device",
+      "steps": [
+        "Install TestFlight app on physical iPhone",
+        "Accept TestFlight invite",
+        "Download and install PRM build",
+        "Complete sign-in flow",
+        "Verify all features work on device",
+        "Test push notifications on device",
+        "Verify widget appears and functions"
+      ],
+      "passes": false
+    }
+  ]
+}
