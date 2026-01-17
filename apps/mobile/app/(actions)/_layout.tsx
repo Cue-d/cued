@@ -1,4 +1,5 @@
 import { Stack } from "expo-router/stack";
+import { HeaderAvatar } from "@/components/header-avatar";
 
 export default function ActionsLayout() {
   return (
@@ -10,7 +11,13 @@ export default function ActionsLayout() {
         headerLargeStyle: { backgroundColor: "transparent" },
       }}
     >
-      <Stack.Screen name="index" options={{ title: "Actions" }} />
+      <Stack.Screen
+        name="index"
+        options={{
+          title: "Actions",
+          headerRight: () => <HeaderAvatar />,
+        }}
+      />
       <Stack.Screen
         name="snooze-picker"
         options={{
