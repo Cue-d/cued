@@ -1,4 +1,5 @@
 import { StatusBar } from "expo-status-bar";
+import { isLiquidGlassAvailable } from "expo-glass-effect";
 import { StyleSheet, Text, View } from "react-native";
 import Animated from "react-native-reanimated";
 
