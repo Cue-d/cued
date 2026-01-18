@@ -48,20 +48,28 @@ export const createPendingSend = mutation({
     const user = await getAuthenticatedUser(ctx);
     if (!user) throw new Error("Unauthorized");
 
-    const sendId = await ctx.db.insert("pendingSends", {
-      userId: user._id,
-      conversationId: args.conversationId,
-      actionId: args.actionId,
-      text: args.text,
+    // TODO: DISABLED - Comment out to prevent accidentally contacting people
+    console.log("[pendingSends] DISABLED - would have created pending send:", {
       recipientHandle: args.recipientHandle,
+      text: args.text.substring(0, 50) + "...",
       isGroup: args.isGroup,
-      chatIdentifier: args.chatIdentifier,
-      status: "pending",
-      createdAt: Date.now(),
-      attempts: 0,
     });
+    return { sendId: null as unknown as typeof args.conversationId };
 
-    return { sendId };
+    // const sendId = await ctx.db.insert("pendingSends", {
+    //   userId: user._id,
+    //   conversationId: args.conversationId,
+    //   actionId: args.actionId,
+    //   text: args.text,
+    //   recipientHandle: args.recipientHandle,
+    //   isGroup: args.isGroup,
+    //   chatIdentifier: args.chatIdentifier,
+    //   status: "pending",
+    //   createdAt: Date.now(),
+    //   attempts: 0,
+    // });
+
+    // return { sendId };
   },
 });
 
