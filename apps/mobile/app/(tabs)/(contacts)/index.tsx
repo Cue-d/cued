@@ -15,7 +15,7 @@ import { useState, useCallback } from "react";
 import { FlatList, RefreshControl, type ListRenderItemInfo } from "react-native";
 import { Stack } from "expo-router";
 import * as Haptics from "expo-haptics";
-import { View, Text } from "@/tw";
+import { View, Text } from "react-native";
 import { useContacts } from "@/hooks/useContacts";
 import {
   ContactListItem,
@@ -126,6 +126,7 @@ export default function ContactsScreen(): React.JSX.Element {
             tintColor="#8E8E93"
           />
         }
+        contentContainerClassName="flex-1 px-6"
       />
     </ErrorBoundary>
   );

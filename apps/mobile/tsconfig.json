@@ -16,8 +16,7 @@
     "src",
     "app",
     "*.ts",
-    "*.js",
-    "nativewind-env.d.ts"
+    "*.js"
   ],
   "exclude": [
     "node_modules"

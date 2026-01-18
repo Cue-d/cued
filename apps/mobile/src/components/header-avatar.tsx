@@ -1,6 +1,6 @@
 import { router } from "expo-router";
 import * as Haptics from "expo-haptics";
-import { Pressable, View, Text } from "@/tw";
+import { Pressable, View, Text } from "react-native";
 import { useAuth } from "@/providers/AuthProvider";
 import { getDisplayName, getInitials } from "@/lib/utils";
 
@@ -21,15 +21,22 @@ export function HeaderAvatar({ size = 32 }: HeaderAvatarProps): React.ReactEleme
   return (
     <Pressable
       onPress={handlePress}
-      className="active:opacity-70"
       accessibilityLabel="Open settings"
       accessibilityRole="button"
     >
       <View
-        className="items-center justify-center rounded-full bg-sf-blue"
+        className="relative items-center justify-center text-center rounded-full"
         style={{ width: size, height: size }}
       >
-        <Text className="font-semibold text-white" style={{ fontSize: size * 0.4 }}>
+        <Text
+          className="font-medium text-muted-foreground"
+          style={{
+            fontSize: size * 0.45,
+            lineHeight: size * 0.5,
+            includeFontPadding: false,
+            textAlignVertical: "center",
+          }}
+        >
           {initials}
         </Text>
       </View>

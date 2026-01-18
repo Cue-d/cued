@@ -9,7 +9,7 @@ import { useState, useCallback } from "react";
 import { useLocalSearchParams, useRouter, Stack } from "expo-router";
 import { useQuery, useMutation } from "convex/react";
 import * as Haptics from "expo-haptics";
-import { View, Text, ScrollView, TextInput } from "@/tw";
+import { View, Text, ScrollView, TextInput } from "react-native";
 import { ActionButtons } from "@/components/action-buttons";
 import type { SwipeDirection } from "@/components/swipeable-card";
 import type { DisplayMessage } from "@/components/cards";

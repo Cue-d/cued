@@ -1,10 +1,11 @@
 import { useMemo } from "react";
 import { SymbolView } from "expo-symbols";
 import type { SFSymbol } from "sf-symbols-typescript";
-import Animated, { FadeIn } from "react-native-reanimated";
+import { FadeIn } from "react-native-reanimated";
 import { isLiquidGlassAvailable, GlassView } from "expo-glass-effect";
 
-import { View, Text } from "@/tw";
+import { View, Text } from "react-native";
+import { AnimatedView } from "@/components/animated";
 import type { ToolInvocation } from "./chat-message";
 
 // Types matching web implementation
@@ -97,7 +98,7 @@ function ArtifactHeader({
   return (
     <View className="flex-row items-center gap-2">
       <SymbolView name={icon} size={14} tintColor="#8E8E93" />
-      <Text className="text-xs font-medium text-sf-secondaryLabel">
+      <Text className="text-xs font-medium text-muted-foreground">
         {isEmpty ? emptyMessage : label}
       </Text>
     </View>
@@ -117,7 +118,7 @@ function ArtifactCard({ children }: { children: React.ReactNode }) {
   }
 
   return (
-    <View className="rounded-xl bg-sf-fill/50 p-3">{children}</View>
+    <View className="rounded-xl bg-muted/50 p-3">{children}</View>
   );
 }
 
@@ -151,20 +152,20 @@ function SearchMessagesArtifact({ data }: { data: SearchMessageResult[] }) {
                 size={12}
                 tintColor={getPlatformColor(result.platform)}
               />
-              <Text className="text-xs font-medium text-sf-label">
+              <Text className="text-xs font-medium text-foreground">
                 {result.isFromMe ? "You" : result.senderName || "Unknown"}
               </Text>
-              <Text className="text-xs text-sf-tertiaryLabel">
+              <Text className="text-xs text-muted-foreground">
                 {formatRelativeTime(result.sentAt)}
               </Text>
             </View>
-            <Text className="text-sm text-sf-label" numberOfLines={2}>
+            <Text className="text-sm text-foreground" numberOfLines={2}>
               {result.content}
             </Text>
           </ArtifactCard>
         ))}
         {data.length > 5 && (
-          <Text className="text-xs text-sf-secondaryLabel mt-1">
+          <Text className="text-xs text-muted-foreground mt-1">
             +{data.length - 5} more results
           </Text>
         )}
@@ -199,8 +200,8 @@ function SearchContactsArtifact({ data }: { data: ContactResult[] }) {
           <ArtifactCard key={contact._id}>
             <View className="flex-row items-center gap-3">
               {/* Avatar */}
-              <View className="w-8 h-8 rounded-full bg-sf-blue/20 items-center justify-center">
-                <Text className="text-xs font-semibold text-sf-blue">
+              <View className="w-8 h-8 rounded-full bg-primary/20 items-center justify-center">
+                <Text className="text-xs font-semibold text-primary">
                   {contact.displayName
                     .split(" ")
                     .map((n) => n[0])
@@ -210,11 +211,11 @@ function SearchContactsArtifact({ data }: { data: ContactResult[] }) {
                 </Text>
               </View>
               <View className="flex-1">
-                <Text className="text-sm font-medium text-sf-label">
+                <Text className="text-sm font-medium text-foreground">
                   {contact.displayName}
                 </Text>
                 {contact.company && (
-                  <Text className="text-xs text-sf-secondaryLabel">
+                  <Text className="text-xs text-muted-foreground">
                     {contact.company}
                   </Text>
                 )}
@@ -223,7 +224,7 @@ function SearchContactsArtifact({ data }: { data: ContactResult[] }) {
                     {contact.handles.slice(0, 3).map((handle, i) => (
                       <View
                         key={i}
-                        className="flex-row items-center gap-1 bg-sf-fill rounded-full px-2 py-0.5"
+                        className="flex-row items-center gap-1 bg-muted rounded-full px-2 py-0.5"
                       >
                         <SymbolView
                           name={getPlatformIcon(handle.platform)}
@@ -231,7 +232,7 @@ function SearchContactsArtifact({ data }: { data: ContactResult[] }) {
                           tintColor={getPlatformColor(handle.platform)}
                         />
                         <Text
-                          className="text-[10px] text-sf-secondaryLabel max-w-[80px]"
+                          className="text-[10px] text-muted-foreground max-w-[80px]"
                           numberOfLines={1}
                         >
                           {handle.value}
@@ -239,8 +240,8 @@ function SearchContactsArtifact({ data }: { data: ContactResult[] }) {
                       </View>
                     ))}
                     {contact.handles.length > 3 && (
-                      <View className="bg-sf-fill rounded-full px-2 py-0.5">
-                        <Text className="text-[10px] text-sf-secondaryLabel">
+                      <View className="bg-muted rounded-full px-2 py-0.5">
+                        <Text className="text-[10px] text-muted-foreground">
                           +{contact.handles.length - 3}
                         </Text>
                       </View>
@@ -275,17 +276,17 @@ function ActionCreatedArtifact({ data }: { data: ActionCreatedResult }) {
             <Text className="text-sm font-medium text-[#34C759]">
               Action created
             </Text>
-            <Text className="text-xs text-sf-secondaryLabel">
+            <Text className="text-xs text-muted-foreground">
               {data.type.replace(/_/g, " ")} - Priority {data.priority}
             </Text>
           </View>
         </View>
         {data.reason && (
-          <Text className="text-sm text-sf-label mt-2">{data.reason}</Text>
+          <Text className="text-sm text-foreground mt-2">{data.reason}</Text>
         )}
         {data.draftMessage && (
-          <View className="mt-2 bg-sf-fill/50 rounded-lg p-2">
-            <Text className="text-sm text-sf-label">{data.draftMessage}</Text>
+          <View className="mt-2 bg-muted/50 rounded-lg p-2">
+            <Text className="text-sm text-foreground">{data.draftMessage}</Text>
           </View>
         )}
       </View>
@@ -349,7 +350,7 @@ export function ToolArtifact({ toolName, result }: ToolArtifactProps) {
   if (!parsed) return null;
 
   return (
-    <Animated.View entering={FadeIn.duration(200)} className="mt-2">
+    <AnimatedView entering={FadeIn.duration(200)} className="mt-2">
       {parsed.type === "messages" && (
         <SearchMessagesArtifact data={parsed.data as SearchMessageResult[]} />
       )}
@@ -359,7 +360,7 @@ export function ToolArtifact({ toolName, result }: ToolArtifactProps) {
       {parsed.type === "action" && (
         <ActionCreatedArtifact data={parsed.data as ActionCreatedResult} />
       )}
-    </Animated.View>
+    </AnimatedView>
   );
 }
 

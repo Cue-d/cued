@@ -3,5 +3,5 @@ const expoConfig = require("eslint-config-expo/flat");
 
 module.exports = defineConfig([
   expoConfig,
-  globalIgnores([".expo/**", "node_modules/**", "nativewind-env.d.ts"]),
+  globalIgnores([".expo/**", "node_modules/**", "src/uniwind-types.d.ts"]),
 ]);

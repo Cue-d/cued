@@ -2,18 +2,23 @@
  * ChatInput - Text input component for agent chat with keyboard handling
  *
  * Features:
- * - Multiline text input
+ * - Multiline text input with rounded styling
  * - Send button with SF Symbol
  * - GlassView background for liquid glass effect
- * - Disabled state when input is empty
+ * - Keyboard-responsive animated positioning
+ * - Haptic feedback on send
  */
 
-import { Pressable } from "react-native";
 import { SymbolView } from "expo-symbols";
 import { GlassView, isLiquidGlassAvailable } from "expo-glass-effect";
 import * as Haptics from "expo-haptics";
+import Animated, {
+  useAnimatedKeyboard,
+  useAnimatedStyle,
+} from "react-native-reanimated";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 
-import { View, TextInput } from "@/tw";
+import { View, TextInput, Pressable, Platform } from "react-native";
 import { cn } from "@/lib/utils";
 
 export interface ChatInputProps {
@@ -32,32 +37,46 @@ export function ChatInput({
   disabled = false,
 }: ChatInputProps) {
   const canSubmit = value.trim().length > 0 && !disabled;
+  const { bottom } = useSafeAreaInsets();
+  const keyboard = useAnimatedKeyboard({});
 
   const handleSubmit = () => {
     if (!canSubmit) return;
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    if (Platform.OS === "ios") {
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    }
     onSubmit();
   };
 
+  // Animate based on keyboard height
+  const animatedStyle = useAnimatedStyle(() => {
+    return {
+      paddingBottom: Math.max(keyboard.height.value, bottom),
+    };
+  }, [bottom]);
+
   const inputContent = (
-    <View className="flex-row items-end gap-2 px-4 py-3">
-      <TextInput
-        className="flex-1 text-sf-label text-[15px] min-h-[36px] max-h-[120px] py-2"
-        value={value}
-        onChangeText={onChangeText}
-        placeholder={placeholder}
-        placeholderTextColor="#8E8E93"
-        multiline
-        returnKeyType="default"
-        blurOnSubmit={false}
-        editable={!disabled}
-      />
+    <View className="flex-row items-end gap-3 px-4 py-3">
+      <View className="flex-1 flex-row items-end bg-secondary rounded-[20px] px-4 py-2">
+        <TextInput
+          className="flex-1 text-foreground text-[16px] min-h-[24px] max-h-[120px]"
+          value={value}
+          onChangeText={onChangeText}
+          placeholder={placeholder}
+          placeholderTextColor="#8E8E93"
+          multiline
+          returnKeyType="send"
+          blurOnSubmit={false}
+          editable={!disabled}
+          onSubmitEditing={handleSubmit}
+        />
+      </View>
       <Pressable
         onPress={handleSubmit}
         disabled={!canSubmit}
         className={cn(
-          "w-9 h-9 rounded-full items-center justify-center",
-          canSubmit ? "bg-sf-blue" : "bg-sf-fill"
+          "w-9 h-9 rounded-full items-center justify-center mb-0.5",
+          canSubmit ? "bg-primary" : "bg-muted"
         )}
         accessibilityLabel="Send message"
         accessibilityRole="button"
@@ -66,6 +85,7 @@ export function ChatInput({
         <SymbolView
           name="arrow.up"
           size={18}
+          weight="semibold"
           tintColor={canSubmit ? "#FFFFFF" : "#8E8E93"}
         />
       </Pressable>
@@ -75,19 +95,25 @@ export function ChatInput({
   // Use GlassView on iOS 26+ for liquid glass effect
   if (isLiquidGlassAvailable()) {
     return (
-      <GlassView
-        className="border-t border-sf-separator"
-        isInteractive={false}
-      >
-        {inputContent}
-      </GlassView>
+      <Animated.View style={animatedStyle}>
+        <GlassView isInteractive={false}>{inputContent}</GlassView>
+      </Animated.View>
     );
   }
 
-  // Fallback to semi-transparent background
+  // Fallback to semi-transparent background with blur
   return (
-    <View className="border-t border-sf-separator bg-sf-secondaryBg/95">
+    <Animated.View
+      style={[
+        {
+          backgroundColor: "rgba(249, 249, 249, 0.95)",
+          borderTopWidth: 0.5,
+          borderTopColor: "rgba(0, 0, 0, 0.1)",
+        },
+        animatedStyle,
+      ]}
+    >
       {inputContent}
-    </View>
+    </Animated.View>
   );
 }

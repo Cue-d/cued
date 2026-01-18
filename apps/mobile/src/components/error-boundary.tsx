@@ -6,10 +6,9 @@
  */
 
 import React, { Component, type ErrorInfo, type ReactNode } from "react";
-import { Pressable } from "react-native";
 import { SymbolView } from "expo-symbols";
 import * as Haptics from "expo-haptics";
-import { View, Text } from "@/tw";
+import { View, Text, Pressable } from "react-native";
 
 interface ErrorBoundaryProps {
   children: ReactNode;
@@ -68,25 +67,25 @@ export class ErrorBoundary extends Component<
 
       // Default error UI
       return (
-        <View className="flex-1 items-center justify-center p-6 bg-sf-bg">
+        <View className="flex-1 items-center justify-center p-6 bg-background">
           <SymbolView
             name="exclamationmark.triangle.fill"
             size={64}
             tintColor="#FF3B30"
           />
 
-          <Text className="text-sf-label text-xl font-semibold mt-6 text-center">
+          <Text className="text-foreground text-xl font-semibold mt-6 text-center">
             Something went wrong
           </Text>
 
-          <Text className="text-sf-secondaryLabel text-base mt-2 text-center">
+          <Text className="text-muted-foreground text-base mt-2 text-center">
             An unexpected error occurred. Please try again.
           </Text>
 
           {__DEV__ && error && (
-            <View className="mt-4 p-3 bg-sf-fill rounded-lg max-w-full">
+            <View className="mt-4 p-3 bg-muted rounded-lg max-w-full">
               <Text
-                className="text-sf-red text-xs font-mono"
+                className="text-destructive text-xs font-mono"
                 numberOfLines={4}
               >
                 {error.message}
@@ -96,7 +95,7 @@ export class ErrorBoundary extends Component<
 
           <Pressable
             onPress={this.handleRetry}
-            className="mt-6 px-6 py-3 bg-sf-blue rounded-xl active:opacity-80"
+            className="mt-6 px-6 py-3 bg-primary rounded-xl active:opacity-80"
             accessibilityRole="button"
             accessibilityLabel="Try again"
           >

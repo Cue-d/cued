@@ -12,7 +12,7 @@ import { RefreshControl } from "react-native";
 import { useMutation } from "convex/react";
 import { useRouter, useLocalSearchParams } from "expo-router";
 import * as Haptics from "expo-haptics";
-import { View, Text, ScrollView } from "@/tw";
+import { View, Text, ScrollView } from "react-native";
 import { useActions } from "@/hooks/useActions";
 import { CardStack } from "@/components/card-stack";
 import {
@@ -251,14 +251,14 @@ export default function ActionsScreen(): React.JSX.Element {
       // Fallback for unknown action types
       return (
         <View className="flex-1 p-4 items-center justify-center">
-          <Text className="text-sf-label text-lg font-semibold">
+          <Text className="text-sf-label text-center text-lg font-semibold">
             {action.type}
           </Text>
-          <Text className="text-sf-secondaryLabel text-sm mt-2">
+          <Text className="text-sf-secondaryLabel text-center text-sm mt-2">
             {action.contactName ?? "Unknown contact"}
           </Text>
           {action.reason && (
-            <Text className="text-sf-tertiaryLabel text-xs mt-1 text-center">
+            <Text className="text-sf-tertiaryLabel text-center text-xs mt-1">
               {action.reason}
             </Text>
           )}
@@ -283,7 +283,7 @@ export default function ActionsScreen(): React.JSX.Element {
       <ScrollView
         className="flex-1"
         contentInsetAdjustmentBehavior="automatic"
-        contentContainerClassName="flex-1"
+        contentContainerStyle={{ flexGrow: 1 }}
         refreshControl={
           <RefreshControl
             refreshing={isRefreshing}

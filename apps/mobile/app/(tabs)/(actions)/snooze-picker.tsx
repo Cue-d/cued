@@ -6,13 +6,12 @@
  */
 
 import { useState, useCallback } from "react";
-import { Pressable } from "react-native";
 import DateTimePicker from "@react-native-community/datetimepicker";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { SymbolView } from "expo-symbols";
 import * as Haptics from "expo-haptics";
 import { GlassView } from "expo-glass-effect";
-import { View, Text } from "@/tw";
+import { View, Text, Pressable } from "react-native";
 
 /** Snooze preset with label and timestamp calculator */
 interface SnoozePreset {

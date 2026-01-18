@@ -1,18 +1,21 @@
 /**
- * SuggestedPrompts - Horizontal scrolling prompt suggestions for agent chat
+ * SuggestedPrompts - Vertical animated prompt suggestions for agent chat
  *
  * Features:
  * - Pre-defined prompts for common queries
- * - Horizontal ScrollView for browsing
+ * - Staggered fade-in animations
  * - GlassView chips with interactive tap effect
  * - Haptic feedback on selection
+ *
+ * Based on expo-ai FirstSuggestions design
  */
 
-import { Pressable } from "react-native";
+import { Platform } from "react-native";
 import { GlassView, isLiquidGlassAvailable } from "expo-glass-effect";
 import * as Haptics from "expo-haptics";
+import Animated, { FadeInDown } from "react-native-reanimated";
 
-import { View, Text, ScrollView } from "@/tw";
+import { View, Text, Pressable } from "react-native";
 
 const SUGGESTED_PROMPTS = [
   "Who did I talk to recently?",
@@ -27,60 +30,69 @@ export interface SuggestedPromptsProps {
 function PromptChip({
   prompt,
   onPress,
+  index,
 }: {
   prompt: string;
   onPress: () => void;
+  index: number;
 }) {
   const handlePress = () => {
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    if (Platform.OS === "ios") {
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    }
     onPress();
   };
+
+  const chipContent = (
+    <View className="rounded-full bg-card border border-border p-2 px-3">
+      <Text className="text-foreground text-[16px]">{prompt}</Text>
+    </View>
+  );
 
   // Use GlassView on iOS 26+ for liquid glass effect
   if (isLiquidGlassAvailable()) {
     return (
-      <GlassView
-        isInteractive
-        className="rounded-full px-4 py-2.5"
+      <Animated.View
+        entering={FadeInDown.delay((SUGGESTED_PROMPTS.length - 1 - index) * 100)}
       >
-        <Pressable onPress={handlePress} accessibilityRole="button">
-          <Text className="text-sf-label text-[15px]">{prompt}</Text>
-        </Pressable>
-      </GlassView>
+        <GlassView isInteractive className="rounded-2xl rounded-bl-[4px]">
+          <Pressable onPress={handlePress} accessibilityRole="button">
+            <View className="p-2 px-3">
+              <Text className="text-foreground text-[16px]">{prompt}</Text>
+            </View>
+          </Pressable>
+        </GlassView>
+      </Animated.View>
     );
   }
 
-  // Fallback to semi-transparent background
+  // Fallback with animation
   return (
-    <Pressable
-      onPress={handlePress}
-      className="rounded-full px-4 py-2.5 bg-sf-fill active:opacity-70"
-      accessibilityRole="button"
+    <Animated.View
+      entering={FadeInDown.delay((SUGGESTED_PROMPTS.length - 1 - index) * 100)}
     >
-      <Text className="text-sf-label text-[15px]">{prompt}</Text>
-    </Pressable>
+      <Pressable
+        onPress={handlePress}
+        className="active:opacity-70"
+        accessibilityRole="button"
+      >
+        {chipContent}
+      </Pressable>
+    </Animated.View>
   );
 }
 
 export function SuggestedPrompts({ onSelect }: SuggestedPromptsProps) {
   return (
-    <View className="py-4">
-      <Text className="text-sf-secondaryLabel text-sm mb-3 px-4">
-        Try asking...
-      </Text>
-      <ScrollView
-        horizontal
-        showsHorizontalScrollIndicator={false}
-        contentContainerClassName="gap-3 px-4"
-      >
-        {SUGGESTED_PROMPTS.map((prompt) => (
-          <PromptChip
-            key={prompt}
-            prompt={prompt}
-            onPress={() => onSelect(prompt)}
-          />
-        ))}
-      </ScrollView>
+    <View className="flex-col items-start gap-2 px-4">
+      {SUGGESTED_PROMPTS.map((prompt, index) => (
+        <PromptChip
+          key={prompt}
+          prompt={prompt}
+          index={index}
+          onPress={() => onSelect(prompt)}
+        />
+      ))}
     </View>
   );
 }

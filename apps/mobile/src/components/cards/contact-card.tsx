@@ -11,7 +11,7 @@
 
 import { useMemo } from "react";
 import { SymbolView } from "expo-symbols";
-import { View, Text, ScrollView, TextInput } from "@/tw";
+import { View, Text, ScrollView, TextInput } from "react-native";
 import { cn } from "@/lib/utils";
 
 /** Form data for contact card */
@@ -88,11 +88,11 @@ function Avatar({
   return (
     <View
       className={cn(
-        "w-10 h-10 rounded-full bg-sf-fill items-center justify-center",
+        "w-10 h-10 rounded-full bg-muted items-center justify-center",
         className,
       )}
     >
-      <Text className="text-sf-label font-semibold text-sm">{initials}</Text>
+      <Text className="text-foreground font-semibold text-sm">{initials}</Text>
     </View>
   );
 }
@@ -139,7 +139,7 @@ function FormField({
     <View className="gap-2">
       <View className="flex-row items-center gap-2">
         {icon}
-        <Text className="text-sm font-medium text-sf-label">{label}</Text>
+        <Text className="text-sm font-medium text-foreground">{label}</Text>
       </View>
       <TextInput
         value={value}
@@ -148,7 +148,7 @@ function FormField({
         placeholderTextColor="#8E8E93"
         multiline={multiline}
         className={cn(
-          "bg-sf-bg rounded-xl px-3 py-3 text-sf-label text-sm",
+          "bg-background rounded-xl px-3 py-3 text-foreground text-sm",
           multiline && "min-h-[100px] max-h-[200px]",
         )}
         accessibilityLabel={label}
@@ -160,8 +160,8 @@ function FormField({
 /** Tag badge component */
 function TagBadge({ tag }: { tag: string }): React.JSX.Element {
   return (
-    <View className="bg-sf-fill px-2.5 py-1 rounded-md">
-      <Text className="text-xs text-sf-label">{tag}</Text>
+    <View className="bg-muted px-2.5 py-1 rounded-md">
+      <Text className="text-xs text-foreground">{tag}</Text>
     </View>
   );
 }
@@ -194,7 +194,7 @@ export function ContactCard({
   return (
     <View
       className={cn(
-        "flex-1 bg-sf-secondaryBg rounded-2xl overflow-hidden",
+        "flex-1 bg-card rounded-2xl overflow-hidden",
         className,
       )}
     >
@@ -204,20 +204,20 @@ export function ContactCard({
         <View className="flex-1 min-w-0">
           <View className="flex-row items-center gap-1.5 mb-0.5">
             <SymbolView name="clock" size={12} tintColor="#8E8E93" />
-            <Text className="text-xs text-sf-secondaryLabel">
+            <Text className="text-xs text-muted-foreground">
               You met someone new today
             </Text>
           </View>
           <View className="flex-row items-center gap-2">
             <Text
-              className="font-semibold text-sm text-sf-label"
+              className="font-semibold text-sm text-foreground"
               numberOfLines={1}
             >
               {personName}
             </Text>
             {platform && <PlatformBadge platform={platform} />}
           </View>
-          <Text className="text-xs text-sf-secondaryLabel">
+          <Text className="text-xs text-muted-foreground">
             at {meetingTime}
           </Text>
         </View>
@@ -229,7 +229,7 @@ export function ContactCard({
         contentContainerClassName="py-4 px-4 gap-5"
         keyboardShouldPersistTaps="handled"
       >
-        <Text className="text-sf-secondaryLabel text-sm">
+        <Text className="text-muted-foreground text-sm">
           Tell me a bit more about them so you can remember this connection
           later.
         </Text>

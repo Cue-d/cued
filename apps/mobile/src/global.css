@@ -1,8 +1,9 @@
-@import "tailwindcss/theme.css" layer(theme);
-@import "tailwindcss/preflight.css" layer(base);
-@import "tailwindcss/utilities.css";
-@import "nativewind/theme";
-@import "./css/sf.css";
+@import "tailwindcss";
+@import "uniwind";
+@import "./css/theme.css";
+
+/* Scan app/ directory for class names (global.css is in src/) */
+@source "../app";
 
 /* Platform-specific font families */
 @media ios {

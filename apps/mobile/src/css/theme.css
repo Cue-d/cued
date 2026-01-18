@@ -1,0 +1,117 @@
+/* shadcn/ui theme for React Native via Uniwind */
+
+@layer theme {
+  :root {
+    @variant light {
+      /* Core semantic colors */
+      --color-background: oklch(1 0 0);
+      --color-foreground: oklch(0.147 0.004 49.25);
+
+      /* Card */
+      --color-card: oklch(1 0 0);
+      --color-card-foreground: oklch(0.147 0.004 49.25);
+
+      /* Popover */
+      --color-popover: oklch(1 0 0);
+      --color-popover-foreground: oklch(0.147 0.004 49.25);
+
+      /* Primary */
+      --color-primary: oklch(0.646 0.222 41.116);
+      --color-primary-foreground: oklch(0.98 0.016 73.684);
+
+      /* Secondary */
+      --color-secondary: oklch(0.967 0.001 286.375);
+      --color-secondary-foreground: oklch(0.21 0.006 285.885);
+
+      /* Muted */
+      --color-muted: oklch(0.97 0.001 106.424);
+      --color-muted-foreground: oklch(0.553 0.013 58.071);
+
+      /* Accent */
+      --color-accent: oklch(0.97 0.001 106.424);
+      --color-accent-foreground: oklch(0.216 0.006 56.043);
+
+      /* Destructive */
+      --color-destructive: oklch(0.577 0.245 27.325);
+      --color-destructive-foreground: oklch(0.98 0.016 73.684);
+
+      /* Border, Input, Ring */
+      --color-border: oklch(0.923 0.003 48.717);
+      --color-input: oklch(0.923 0.003 48.717);
+      --color-ring: oklch(0.709 0.01 56.259);
+
+      /* Chart colors */
+      --color-chart-1: oklch(0.837 0.128 66.29);
+      --color-chart-2: oklch(0.705 0.213 47.604);
+      --color-chart-3: oklch(0.646 0.222 41.116);
+      --color-chart-4: oklch(0.553 0.195 38.402);
+      --color-chart-5: oklch(0.47 0.157 37.304);
+
+      /* Sidebar (for tablet layouts) */
+      --color-sidebar: oklch(0.985 0.001 106.423);
+      --color-sidebar-foreground: oklch(0.147 0.004 49.25);
+      --color-sidebar-primary: oklch(0.646 0.222 41.116);
+      --color-sidebar-primary-foreground: oklch(0.98 0.016 73.684);
+      --color-sidebar-accent: oklch(0.97 0.001 106.424);
+      --color-sidebar-accent-foreground: oklch(0.216 0.006 56.043);
+      --color-sidebar-border: oklch(0.923 0.003 48.717);
+      --color-sidebar-ring: oklch(0.709 0.01 56.259);
+    }
+
+    @variant dark {
+      /* Core semantic colors */
+      --color-background: oklch(0.147 0.004 49.25);
+      --color-foreground: oklch(0.985 0.001 106.423);
+
+      /* Card */
+      --color-card: oklch(0.216 0.006 56.043);
+      --color-card-foreground: oklch(0.985 0.001 106.423);
+
+      /* Popover */
+      --color-popover: oklch(0.216 0.006 56.043);
+      --color-popover-foreground: oklch(0.985 0.001 106.423);
+
+      /* Primary */
+      --color-primary: oklch(0.705 0.213 47.604);
+      --color-primary-foreground: oklch(0.98 0.016 73.684);
+
+      /* Secondary */
+      --color-secondary: oklch(0.274 0.006 286.033);
+      --color-secondary-foreground: oklch(0.985 0 0);
+
+      /* Muted */
+      --color-muted: oklch(0.268 0.007 34.298);
+      --color-muted-foreground: oklch(0.709 0.01 56.259);
+
+      /* Accent */
+      --color-accent: oklch(0.268 0.007 34.298);
+      --color-accent-foreground: oklch(0.985 0.001 106.423);
+
+      /* Destructive */
+      --color-destructive: oklch(0.704 0.191 22.216);
+      --color-destructive-foreground: oklch(0.98 0.016 73.684);
+
+      /* Border, Input, Ring */
+      --color-border: oklch(1 0 0 / 10%);
+      --color-input: oklch(1 0 0 / 15%);
+      --color-ring: oklch(0.553 0.013 58.071);
+
+      /* Chart colors */
+      --color-chart-1: oklch(0.837 0.128 66.29);
+      --color-chart-2: oklch(0.705 0.213 47.604);
+      --color-chart-3: oklch(0.646 0.222 41.116);
+      --color-chart-4: oklch(0.553 0.195 38.402);
+      --color-chart-5: oklch(0.47 0.157 37.304);
+
+      /* Sidebar (for tablet layouts) */
+      --color-sidebar: oklch(0.216 0.006 56.043);
+      --color-sidebar-foreground: oklch(0.985 0.001 106.423);
+      --color-sidebar-primary: oklch(0.705 0.213 47.604);
+      --color-sidebar-primary-foreground: oklch(0.98 0.016 73.684);
+      --color-sidebar-accent: oklch(0.268 0.007 34.298);
+      --color-sidebar-accent-foreground: oklch(0.985 0.001 106.423);
+      --color-sidebar-border: oklch(1 0 0 / 10%);
+      --color-sidebar-ring: oklch(0.553 0.013 58.071);
+    }
+  }
+}

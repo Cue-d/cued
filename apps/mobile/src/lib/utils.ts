@@ -8,8 +8,8 @@ export function cn(...inputs: ClassValue[]): string {
 
 export function getDisplayName(user: WorkOSUser | null): string {
   if (!user) return "User";
-  if (user.firstName && user.lastName) {
-    return `${user.firstName} ${user.lastName}`;
+  if (user.first_name && user.last_name) {
+    return `${user.first_name} ${user.last_name}`;
   }
   return user.email?.split("@")[0] || "User";
 }

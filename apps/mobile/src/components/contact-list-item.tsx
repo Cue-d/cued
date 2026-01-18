@@ -16,8 +16,7 @@
 
 import { Link } from "expo-router";
 import * as Haptics from "expo-haptics";
-import { Linking } from "react-native";
-import { View, Text, Pressable } from "@/tw";
+import { Linking, View, Text, Pressable } from "react-native";
 import { cn } from "@/lib/utils";
 
 export interface ContactListItemData {
@@ -61,11 +60,11 @@ function Avatar({
   return (
     <View
       className={cn(
-        "w-12 h-12 rounded-full bg-sf-fill items-center justify-center",
+        "w-12 h-12 rounded-full bg-muted items-center justify-center",
         className,
       )}
     >
-      <Text className="text-sf-label font-semibold text-base">{initials}</Text>
+      <Text className="text-foreground font-semibold text-base">{initials}</Text>
     </View>
   );
 }
@@ -122,7 +121,7 @@ export function ContactListItem({
         <Pressable
           onPressIn={handleTap}
           className={cn(
-            "flex-row items-center px-4 py-3 gap-3 active:bg-sf-fill",
+            "flex-row items-center px-4 py-3 gap-3 active:bg-muted",
             className,
           )}
           accessibilityRole="button"
@@ -133,7 +132,7 @@ export function ContactListItem({
           <View className="flex-1 min-w-0">
             {/* Name */}
             <Text
-              className="font-semibold text-base text-sf-label"
+              className="font-semibold text-base text-foreground"
               numberOfLines={1}
             >
               {contact.displayName}
@@ -142,7 +141,7 @@ export function ContactListItem({
             {/* Company */}
             {contact.company && (
               <Text
-                className="text-sm text-sf-secondaryLabel mt-0.5"
+                className="text-sm text-muted-foreground mt-0.5"
                 numberOfLines={1}
               >
                 {contact.company}
@@ -152,7 +151,7 @@ export function ContactListItem({
             {/* Last message preview */}
             {contact.lastMessageText && (
               <Text
-                className="text-sm text-sf-tertiaryLabel mt-1"
+                className="text-sm text-muted-foreground mt-1"
                 numberOfLines={1}
               >
                 {contact.lastMessageText}
@@ -161,7 +160,7 @@ export function ContactListItem({
           </View>
 
           {/* Chevron indicator */}
-          <Text className="text-sf-tertiaryLabel text-lg">›</Text>
+          <Text className="text-muted-foreground text-lg">›</Text>
         </Pressable>
       </Link.Trigger>
 

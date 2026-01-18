@@ -10,7 +10,7 @@ import { useLocalSearchParams, Stack } from "expo-router";
 import { useQuery } from "convex/react";
 import { SymbolView } from "expo-symbols";
 import type { SFSymbol } from "sf-symbols-typescript";
-import { View, Text, ScrollView, Pressable } from "@/tw";
+import { View, Text, ScrollView, Pressable } from "react-native";
 import { api } from "@prm/convex/convex/_generated/api";
 import type { Id } from "@prm/convex/convex/_generated/dataModel";
 

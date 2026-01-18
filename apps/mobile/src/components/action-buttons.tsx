@@ -5,12 +5,11 @@
  * Uses GlassView for iOS 26+ liquid glass effect.
  */
 
-import { Pressable } from "react-native";
 import { GlassView, isLiquidGlassAvailable } from "expo-glass-effect";
 import { SymbolView } from "expo-symbols";
 import type { SFSymbol } from "sf-symbols-typescript";
 import * as Haptics from "expo-haptics";
-import { View, Text } from "@/tw";
+import { View, Text, Pressable } from "react-native";
 import type { SwipeDirection } from "./swipeable-card";
 
 export interface ActionButtonsProps {
@@ -85,7 +84,7 @@ function ActionButton({
     <Pressable
       onPress={handlePress}
       disabled={disabled}
-      className="bg-sf-secondaryBg rounded-2xl min-w-[80px]"
+      className="bg-card rounded-2xl min-w-[80px]"
       style={{ opacity: disabled ? 0.5 : 1 }}
     >
       {content}

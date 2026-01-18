@@ -26,15 +26,16 @@ if (__DEV__) {
 
 export type OAuthProvider = "GoogleOAuth" | "AppleOAuth";
 
+
 export interface WorkOSUser {
   id: string;
   email: string;
-  firstName?: string;
-  lastName?: string;
-  emailVerified: boolean;
-  profilePictureUrl?: string;
-  createdAt: string;
-  updatedAt: string;
+  first_name?: string;
+  last_name?: string;
+  email_verified: boolean;
+  profile_picture_url?: string;
+  created_at: string;
+  updated_at: string;
 }
 
 export interface AuthResult {
@@ -104,6 +105,67 @@ async function exchangeCodeForTokens(code: string, codeVerifier: string): Promis
     accessToken: data.access_token,
     refreshToken: data.refresh_token,
   };
+}
+
+/**
+ * Refresh the access token using the stored refresh token.
+ * Returns the new auth result, or null if refresh failed.
+ */
+export async function refreshAccessToken(): Promise<AuthResult | null> {
+  const refreshToken = await getRefreshToken();
+  if (!refreshToken) {
+    if (__DEV__) {
+      console.log("[PRM Auth] No refresh token available");
+    }
+    return null;
+  }
+
+  try {
+    const response = await fetch(WORKOS_TOKEN_ENDPOINT, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        client_id: WORKOS_CLIENT_ID,
+        refresh_token: refreshToken,
+        grant_type: "refresh_token",
+      }),
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      if (__DEV__) {
+        console.log("[PRM Auth] Token refresh failed:", errorText);
+      }
+      // Clear invalid tokens
+      await signOut();
+      return null;
+    }
+
+    const data = await response.json();
+    const authResult: AuthResult = {
+      user: data.user,
+      accessToken: data.access_token,
+      refreshToken: data.refresh_token,
+    };
+
+    // Store the new tokens
+    await Promise.all([
+      setAccessToken(authResult.accessToken),
+      setRefreshToken(authResult.refreshToken),
+      setUser(authResult.user),
+    ]);
+
+    if (__DEV__) {
+      console.log("[PRM Auth] Token refreshed successfully");
+    }
+
+    return authResult;
+  } catch (error) {
+    if (__DEV__) {
+      console.error("[PRM Auth] Token refresh error:", error);
+    }
+    return null;
+  }
 }
 
 export async function signIn(provider: OAuthProvider): Promise<AuthResult> {

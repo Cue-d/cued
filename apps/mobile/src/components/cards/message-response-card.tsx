@@ -8,9 +8,9 @@
 
 import { useMemo } from "react";
 import { SymbolView, type SFSymbol } from "expo-symbols";
-import { View, Text, ScrollView, TextInput } from "@/tw";
+import { View, Text, ScrollView, TextInput } from "react-native";
+import { Image } from "expo-image";
 import { cn } from "@/lib/utils";
-import { Image } from "@/tw/image";
 
 /** Platform types */
 export type ActionPlatform = "imessage" | "gmail" | "slack";
@@ -115,11 +115,11 @@ function Avatar({
   return (
     <View
       className={cn(
-        "w-10 h-10 rounded-full bg-sf-fill items-center justify-center",
+        "w-10 h-10 rounded-full bg-muted items-center justify-center",
         className,
       )}
     >
-      <Text className="text-sf-label font-semibold text-sm">{initials}</Text>
+      <Text className="text-foreground font-semibold text-sm">{initials}</Text>
     </View>
   );
 }
@@ -132,7 +132,7 @@ function PlatformBadge({
 }): React.JSX.Element {
   const config = platformConfig[platform];
   return (
-    <View className="flex-row items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-sf-secondaryBg">
+    <View className="flex-row items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-card">
       <SymbolView
         name={config.symbol}
         size={14}
@@ -144,7 +144,7 @@ function PlatformBadge({
               : "#9333ea"
         }
       />
-      <Text className="text-xs font-medium text-sf-label">{config.label}</Text>
+      <Text className="text-xs font-medium text-foreground">{config.label}</Text>
     </View>
   );
 }
@@ -171,13 +171,13 @@ function DeliveryStatus({
   }
   if (status === "delivered") {
     return (
-      <Text className="text-sf-secondaryLabel text-[10px]" accessibilityLabel="Delivered">
+      <Text className="text-muted-foreground text-[10px]" accessibilityLabel="Delivered">
         Delivered
       </Text>
     );
   }
   return (
-    <Text className="text-sf-tertiaryLabel text-[10px]" accessibilityLabel="Sent">
+    <Text className="text-muted-foreground text-[10px]" accessibilityLabel="Sent">
       Sent
     </Text>
   );
@@ -212,7 +212,7 @@ function AttachmentDisplay({
             className="flex-row items-center gap-2"
           >
             <SymbolView name="doc.fill" size={12} tintColor="#8E8E93" />
-            <Text className="text-xs text-sf-secondaryLabel" numberOfLines={1}>
+            <Text className="text-xs text-muted-foreground" numberOfLines={1}>
               {att.filename || "Attachment"}
             </Text>
           </View>
@@ -234,7 +234,7 @@ function ReactionBadges({
   return (
     <View
       className={cn(
-        "absolute -top-3 flex-row gap-0.5 px-2 py-1 rounded-full bg-sf-secondaryBg border border-sf-separator z-10",
+        "absolute -top-3 flex-row gap-0.5 px-2 py-1 rounded-full bg-card border border-border z-10",
         isSent ? "-left-3" : "-right-3",
       )}
     >
@@ -269,19 +269,19 @@ export function MessageResponseCard({
   );
 
   return (
-    <View className={cn("flex-1 bg-sf-secondaryBg rounded-2xl overflow-hidden", className)}>
+    <View className={cn("flex-1 bg-card rounded-2xl overflow-hidden", className)}>
       {/* Header */}
       <View className="p-4 flex-row items-center gap-3">
         <Avatar initials={initials} />
         <View className="flex-1 min-w-0">
           <Text
-            className="font-semibold text-sm text-sf-label"
+            className="font-semibold text-sm text-foreground"
             numberOfLines={1}
           >
             {personName}
           </Text>
           {messageTimestamp && (
-            <Text className="text-xs text-sf-secondaryLabel">
+            <Text className="text-xs text-muted-foreground">
               {formatRelativeTime(messageTimestamp)}
             </Text>
           )}
@@ -315,14 +315,14 @@ export function MessageResponseCard({
                 )}
               >
                 {!msg.isFromMe && msg.senderName && (
-                  <Text className="text-xs font-medium text-sf-secondaryLabel mb-1 ml-1">
+                  <Text className="text-xs font-medium text-muted-foreground mb-1 ml-1">
                     {msg.senderName}
                   </Text>
                 )}
                 <View
                   className={cn(
                     "relative rounded-2xl px-4 py-2 max-w-[85%]",
-                    msg.isFromMe ? "bg-sf-blue" : "bg-sf-fill",
+                    msg.isFromMe ? "bg-primary" : "bg-muted",
                   )}
                 >
                   {hasReactions && (
@@ -338,7 +338,7 @@ export function MessageResponseCard({
                     <Text
                       className={cn(
                         "text-sm",
-                        msg.isFromMe ? "text-white" : "text-sf-label",
+                        msg.isFromMe ? "text-white" : "text-foreground",
                       )}
                       selectable
                     >
@@ -346,7 +346,7 @@ export function MessageResponseCard({
                     </Text>
                   )}
                   {!hasText && !hasAttachments && (
-                    <Text className="text-sm text-sf-secondaryLabel">
+                    <Text className="text-sm text-muted-foreground">
                       [No text]
                     </Text>
                   )}
@@ -359,7 +359,7 @@ export function MessageResponseCard({
                     <Text
                       className={cn(
                         "text-[10px]",
-                        msg.isFromMe ? "text-white/60" : "text-sf-tertiaryLabel",
+                        msg.isFromMe ? "text-white/60" : "text-muted-foreground",
                       )}
                     >
                       {formatTime(msg.sentAt)}
@@ -369,7 +369,7 @@ export function MessageResponseCard({
                         <Text
                           className={cn(
                             "text-[10px] mx-0.5",
-                            msg.isFromMe ? "text-white/60" : "text-sf-tertiaryLabel",
+                            msg.isFromMe ? "text-white/60" : "text-muted-foreground",
                           )}
                         >
                           ·
@@ -384,7 +384,7 @@ export function MessageResponseCard({
           })
         ) : (
           <View className="flex-1 items-center justify-center">
-            <Text className="text-sf-secondaryLabel">No recent messages</Text>
+            <Text className="text-muted-foreground">No recent messages</Text>
           </View>
         )}
       </ScrollView>
@@ -397,7 +397,7 @@ export function MessageResponseCard({
           placeholder="Type your response... (swipe right to send)"
           placeholderTextColor="#8E8E93"
           multiline
-          className="min-h-[80px] max-h-[150px] bg-sf-bg rounded-xl p-3 text-sf-label text-sm"
+          className="min-h-[80px] max-h-[150px] bg-background rounded-xl p-3 text-foreground text-sm"
           accessibilityLabel="Response input"
           accessibilityHint="Type your response to send"
         />

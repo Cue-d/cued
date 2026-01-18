@@ -6,14 +6,11 @@
  */
 
 import { type ReactNode } from "react";
-import Animated, {
-  FadeIn,
-  FadeOut,
-  Layout,
-} from "react-native-reanimated";
+import { FadeIn, FadeOut, Layout } from "react-native-reanimated";
 import { SymbolView } from "expo-symbols";
 import { SwipeableCard, type SwipeDirection } from "./swipeable-card";
-import { View, Text } from "@/tw";
+import { View, Text, useWindowDimensions } from "react-native";
+import { AnimatedView, AnimatedText } from "@/components/animated";
 
 // Number of visible cards in the stack
 const VISIBLE_CARDS = 3;
@@ -48,8 +45,13 @@ export function CardStack<T extends CardStackItem>({
   renderCard,
   triggerSwipe,
 }: CardStackProps<T>): React.JSX.Element {
+  const { width: screenWidth } = useWindowDimensions();
   // Show only top VISIBLE_CARDS
   const visibleCards = actions.slice(0, VISIBLE_CARDS);
+  
+  // Calculate card dimensions (3:4 aspect ratio, with padding)
+  const cardWidth = Math.min(screenWidth - 32, 400); // max-w-md ~= 400px
+  const cardHeight = (cardWidth * 4) / 3;
 
   const handleSwipe = (item: T, direction: SwipeDirection): void => {
     onSwipe(item, direction);
@@ -59,7 +61,7 @@ export function CardStack<T extends CardStackItem>({
   if (actions.length === 0) {
     return (
       <View className="flex-1 items-center justify-center px-4">
-        <Animated.View
+        <AnimatedView
           entering={FadeIn.duration(300)}
           className="items-center"
         >
@@ -68,13 +70,13 @@ export function CardStack<T extends CardStackItem>({
             size={64}
             tintColor="#8E8E93"
           />
-          <Text className="text-2xl font-bold text-sf-label mt-4">
+          <Text className="text-2xl font-bold text-foreground mt-4">
             All caught up!
           </Text>
-          <Text className="text-base text-sf-secondaryLabel mt-2 text-center">
+          <Text className="text-base text-muted-foreground mt-2 text-center">
             New actions will appear here
           </Text>
-        </Animated.View>
+        </AnimatedView>
       </View>
     );
   }
@@ -84,18 +86,21 @@ export function CardStack<T extends CardStackItem>({
       {/* Header with count */}
       {totalCount > 0 && (
         <View className="absolute top-4 left-4 z-50">
-          <Animated.Text
-            className="text-lg font-semibold text-sf-label"
+          <AnimatedText
+            className="text-lg font-semibold text-foreground"
             entering={FadeIn}
             exiting={FadeOut}
           >
             {totalCount} Left
-          </Animated.Text>
+          </AnimatedText>
         </View>
       )}
 
       {/* Card stack */}
-      <View className="relative w-full max-w-md aspect-[3/4]">
+      <View 
+        className="relative"
+        style={{ width: cardWidth, height: cardHeight }}
+      >
         {visibleCards.map((item, index) => {
           const isTopCard = index === 0;
           const scale = 1 - index * SCALE_OFFSET;
@@ -103,7 +108,7 @@ export function CardStack<T extends CardStackItem>({
           const zIndex = VISIBLE_CARDS - index;
 
           return (
-            <Animated.View
+            <AnimatedView
               key={item.id}
               className="absolute inset-0"
               style={{
@@ -118,11 +123,11 @@ export function CardStack<T extends CardStackItem>({
                 onSwipe={(direction) => handleSwipe(item, direction)}
                 disabled={!isTopCard}
                 triggerSwipe={isTopCard ? triggerSwipe : null}
-                className="w-full h-full bg-sf-secondaryBg rounded-2xl shadow-lg overflow-hidden"
+                className="w-full h-full bg-card rounded-2xl shadow-lg overflow-hidden"
               >
                 {renderCard(item, index)}
               </SwipeableCard>
-            </Animated.View>
+            </AnimatedView>
           );
         })}
       </View>

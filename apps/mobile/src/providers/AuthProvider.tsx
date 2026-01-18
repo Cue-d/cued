@@ -7,7 +7,8 @@ import {
   signOut as authSignOut,
   getAccessToken,
   getUser,
-  isAuthenticated as checkIsAuthenticated,
+  getRefreshToken,
+  refreshAccessToken,
 } from "@/lib/auth";
 
 interface AuthContextType {
@@ -25,15 +26,47 @@ export function AuthProvider({ children }: { children: ReactNode }): React.React
   const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
-    checkIsAuthenticated()
-      .then(async (authenticated) => {
-        if (authenticated) {
-          const storedUser = await getUser();
-          setUser(storedUser);
+    async function restoreAuthState() {
+      try {
+        // First check if we have tokens stored
+        const [accessToken, refreshToken, storedUser] = await Promise.all([
+          getAccessToken(),
+          getRefreshToken(),
+          getUser(),
+        ]);
+
+        if (!accessToken && !refreshToken) {
+          // No tokens at all, user needs to sign in
+          return;
         }
-      })
-      .catch((error) => console.error("Error checking auth state:", error))
-      .finally(() => setIsLoading(false));
+
+        if (accessToken && storedUser) {
+          // We have both token and user, try to use them
+          // Proactively refresh the token to ensure it's valid
+          const refreshResult = await refreshAccessToken();
+          if (refreshResult) {
+            setUser(refreshResult.user);
+          } else if (storedUser) {
+            // Refresh failed but we have stored user, might still work
+            // The token might still be valid
+            setUser(storedUser);
+          }
+        } else if (refreshToken) {
+          // We have a refresh token but no access token or user
+          // Try to refresh
+          const refreshResult = await refreshAccessToken();
+          if (refreshResult) {
+            setUser(refreshResult.user);
+          }
+        }
+      } catch (error) {
+        console.error("Error restoring auth state:", error);
+      } finally {
+        setIsLoading(false);
+      }
+    }
+
+    restoreAuthState();
   }, []);
 
   const signIn = useCallback(async (provider: OAuthProvider) => {

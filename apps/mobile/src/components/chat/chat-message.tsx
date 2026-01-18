@@ -1,9 +1,9 @@
 import { useMemo } from "react";
 import { ActivityIndicator } from "react-native";
-import Animated, { FadeIn } from "react-native-reanimated";
+import { FadeInUp } from "react-native-reanimated";
 
-import { View, Text } from "@/tw";
-import { cn } from "@/lib/utils";
+import { View, Text } from "react-native";
+import { AnimatedView } from "@/components/animated";
 import { ToolArtifacts } from "./tool-artifact";
 
 // Types matching web implementation
@@ -41,7 +41,7 @@ function renderMarkdown(text: string): React.ReactNode[] {
     const boldMatch = remaining.match(/^\*\*(.+?)\*\*/);
     if (boldMatch) {
       parts.push(
-        <Text key={key++} className="font-bold">
+        <Text key={key++} className="font-semibold">
           {boldMatch[1]}
         </Text>
       );
@@ -55,7 +55,7 @@ function renderMarkdown(text: string): React.ReactNode[] {
       parts.push(
         <Text
           key={key++}
-          className="font-mono bg-sf-fill px-1 py-0.5 rounded text-sm"
+          className="font-mono bg-muted px-1 rounded text-sm"
         >
           {codeMatch[1]}
         </Text>
@@ -86,9 +86,9 @@ function renderMarkdown(text: string): React.ReactNode[] {
 
 function TypingIndicator() {
   return (
-    <View className="flex-row items-center gap-1">
+    <View className="flex-row items-center gap-1.5 py-1">
       <ActivityIndicator size="small" color="#8E8E93" />
-      <Text className="text-sf-secondaryLabel text-sm">Thinking...</Text>
+      <Text className="text-muted-foreground text-sm">Thinking...</Text>
     </View>
   );
 }
@@ -98,34 +98,74 @@ function PendingToolIndicator({ toolName }: { toolName: string }) {
   return (
     <View className="flex-row items-center gap-2 mt-2">
       <ActivityIndicator size="small" color="#8E8E93" />
-      <Text className="text-sf-secondaryLabel text-xs">
+      <Text className="text-muted-foreground text-xs">
         Using {displayName}...
       </Text>
     </View>
   );
 }
 
-function Avatar({ isUser }: { isUser: boolean }) {
+/**
+ * User message - right-aligned bubble with distinctive corner
+ * Based on expo-ai design
+ */
+function UserMessage({ content }: { content: string }) {
   return (
-    <View
-      className={cn(
-        "w-8 h-8 rounded-full items-center justify-center",
-        isUser ? "bg-sf-blue" : "bg-sf-fill"
-      )}
-    >
-      <Text
-        className={cn(
-          "text-xs font-medium",
-          isUser ? "text-white" : "text-sf-secondaryLabel"
-        )}
-      >
-        {isUser ? "U" : "AI"}
-      </Text>
+    <View className="flex-row justify-end px-4 py-1">
+      <View className="max-w-[85%]">
+        <View className="bg-white border border-border rounded-[20px] rounded-br-[8px] p-3">
+          <Text selectable className="text-black text-[16px]">
+            {content}
+          </Text>
+        </View>
+      </View>
     </View>
   );
 }
 
-export function ChatMessage({ message, isStreaming = false }: ChatMessageProps) {
+/**
+ * Assistant message - left-aligned with subtle gray prefix
+ * Based on expo-ai design
+ */
+function AssistantMessage({
+  content,
+  isStreaming,
+  pendingToolCalls,
+  toolInvocations,
+}: {
+  content: string;
+  isStreaming: boolean;
+  pendingToolCalls: ToolInvocation[];
+  toolInvocations?: ToolInvocation[];
+}) {
+  const showTypingIndicator = isStreaming && !content;
+
+  return (
+    <View className="px-4 py-1">
+      {showTypingIndicator ? (
+        <TypingIndicator />
+      ) : content ? (
+        <Text className="text-foreground text-[16px] leading-relaxed">
+          <Text className="text-muted-foreground">{"> "}</Text>
+          {renderMarkdown(content)}
+        </Text>
+      ) : null}
+
+      {/* Pending tool calls */}
+      {pendingToolCalls.map((inv) => (
+        <PendingToolIndicator key={inv.toolCallId} toolName={inv.toolName} />
+      ))}
+
+      {/* Completed tool call artifacts */}
+      {toolInvocations && <ToolArtifacts toolInvocations={toolInvocations} />}
+    </View>
+  );
+}
+
+export function ChatMessage({
+  message,
+  isStreaming = false,
+}: ChatMessageProps) {
   const isUser = message.role === "user";
 
   // Get pending tool calls
@@ -136,58 +176,18 @@ export function ChatMessage({ message, isStreaming = false }: ChatMessageProps) 
     );
   }, [message.toolInvocations]);
 
-  const content = message.content;
-  const showTypingIndicator = isStreaming && !content && isUser === false;
-
   return (
-    <Animated.View
-      entering={FadeIn.duration(200)}
-      className={cn(
-        "flex-row gap-3 py-2 px-4",
-        isUser ? "flex-row-reverse" : "flex-row"
+    <AnimatedView entering={FadeInUp.duration(300).springify()}>
+      {isUser ? (
+        <UserMessage content={message.content} />
+      ) : (
+        <AssistantMessage
+          content={message.content}
+          isStreaming={isStreaming}
+          pendingToolCalls={pendingToolCalls}
+          toolInvocations={message.toolInvocations}
+        />
       )}
-    >
-      <Avatar isUser={isUser} />
-
-      <View
-        className={cn(
-          "max-w-[80%] flex-shrink",
-          isUser ? "items-end" : "items-start"
-        )}
-      >
-        {/* Message bubble */}
-        <View
-          className={cn(
-            "rounded-2xl px-4 py-3",
-            isUser
-              ? "bg-sf-blue rounded-br-md"
-              : "bg-sf-fill rounded-bl-md"
-          )}
-        >
-          {showTypingIndicator ? (
-            <TypingIndicator />
-          ) : content ? (
-            <Text
-              className={cn(
-                "text-[15px] leading-relaxed",
-                isUser ? "text-white" : "text-sf-label"
-              )}
-            >
-              {isUser ? content : renderMarkdown(content)}
-            </Text>
-          ) : null}
-        </View>
-
-        {/* Pending tool calls */}
-        {pendingToolCalls.map((inv) => (
-          <PendingToolIndicator key={inv.toolCallId} toolName={inv.toolName} />
-        ))}
-
-        {/* Completed tool call artifacts */}
-        {!isUser && message.toolInvocations && (
-          <ToolArtifacts toolInvocations={message.toolInvocations} />
-        )}
-      </View>
-    </Animated.View>
+    </AnimatedView>
   );
 }

@@ -5,7 +5,7 @@ import * as Haptics from "expo-haptics";
 import { GlassView, isLiquidGlassAvailable } from "expo-glass-effect";
 import { BlurView } from "expo-blur";
 import { SymbolView } from "expo-symbols";
-import { View, Text, Pressable } from "@/tw";
+import { View, Text, Pressable } from "react-native";
 import { useAuth } from "@/providers/AuthProvider";
 import { getRedirectUri, type OAuthProvider } from "@/lib/auth";
 

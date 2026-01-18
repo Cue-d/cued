@@ -24,6 +24,11 @@
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.prm.mobile",
+      "icon": {
+        "light": "./assets/icon.png",
+        "dark": "./assets/icon-dark.png",
+        "tinted": "./assets/icon-tinted.png"
+      },
       "entitlements": {
         "com.apple.security.application-groups": ["group.com.prm.mobile"]
       }

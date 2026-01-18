@@ -1,12 +1,11 @@
 import "../src/global.css";
 import { useEffect, useRef } from "react";
-import { ActivityIndicator } from "react-native";
+import { ActivityIndicator, View } from "react-native";
 import { Stack } from "expo-router/stack";
 import { useRouter } from "expo-router";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 import * as Notifications from "expo-notifications";
-import { View } from "@/tw";
 import { AuthProvider, useAuth } from "@/providers/AuthProvider";
 import { ConvexProvider } from "@/providers/ConvexProvider";
 import { PushTokenRegistrar } from "@/components/push-token-registrar";
@@ -83,11 +82,7 @@ function AuthenticatedApp() {
         <Stack.Screen
           name="settings"
           options={{
-            headerShown: true,
-            headerLargeTitle: true,
-            headerTransparent: true,
-            headerBlurEffect: "systemMaterial",
-            title: "Settings",
+            headerShown: false,
             presentation: "modal",
           }}
         />
