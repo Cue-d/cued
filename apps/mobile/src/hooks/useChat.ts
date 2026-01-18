@@ -88,10 +88,10 @@ export function useChat(options: UseChatOptions = {}): UseChatReturn {
         .map((part) => {
           const toolPart = part as Record<string, unknown>;
           return {
-            toolCallId: toolPart.toolCallId,
+            toolCallId: toolPart.toolCallId as string,
             toolName: part.type.replace(/^tool-/, ""),
-            args: toolPart.input ?? {},
-            state: mapToolState(toolPart.state),
+            args: (toolPart.input as Record<string, unknown>) ?? {},
+            state: mapToolState(toolPart.state as string),
             result: toolPart.output,
           };
         }) || [];
