@@ -1,6 +1,6 @@
 import "../src/global.css";
 import { useEffect, useRef } from "react";
-import { ActivityIndicator, View } from "react-native";
+import { ActivityIndicator, View, useColorScheme } from "react-native";
 import { Stack } from "expo-router/stack";
 import { useRouter } from "expo-router";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
@@ -10,6 +10,7 @@ import { AuthProvider, useAuth } from "@/providers/AuthProvider";
 import { ConvexProvider } from "@/providers/ConvexProvider";
 import { PushTokenRegistrar } from "@/components/push-token-registrar";
 import { configureNotifications } from "@/lib/notifications";
+import { getThemeColors } from "@/lib/utils";
 import SignInScreen from "./sign-in";
 
 function LoadingScreen() {
@@ -23,6 +24,8 @@ function LoadingScreen() {
 function AuthenticatedApp() {
   const { isLoading, isAuthenticated } = useAuth();
   const router = useRouter();
+  const colorScheme = useColorScheme();
+  const colors = getThemeColors(colorScheme === "dark");
   const notificationResponseListener =
     useRef<Notifications.EventSubscription | null>(null);
 
@@ -84,6 +87,7 @@ function AuthenticatedApp() {
           options={{
             headerShown: false,
             presentation: "modal",
+            contentStyle: { backgroundColor: colors.secondaryBackground },
           }}
         />
       </Stack>

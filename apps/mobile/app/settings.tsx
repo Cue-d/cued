@@ -1,12 +1,19 @@
 import { router } from "expo-router";
 import * as Haptics from "expo-haptics";
 import { SymbolView } from "expo-symbols";
-import { Alert, ActivityIndicator, View, Text, Pressable, useColorScheme } from "react-native";
+import {
+  Alert,
+  ActivityIndicator,
+  View,
+  Text,
+  Pressable,
+  useColorScheme,
+} from "react-native";
 import { Uniwind, useUniwind } from "uniwind";
+import { SafeAreaView } from "react-native-safe-area-context";
 import { useAuth } from "@/providers/AuthProvider";
 import { getRedirectUri } from "@/lib/auth";
 import { cn, getDisplayName, getInitials, getThemeColors } from "@/lib/utils";
-import { SafeAreaView } from "react-native-safe-area-context";
 
 function Avatar({ name, size = 80 }: { name: string; size?: number }): React.ReactElement {
   return (
@@ -27,7 +34,6 @@ interface SettingsRowProps {
   value?: string;
   onPress?: () => void;
   destructive?: boolean;
-  colors: ReturnType<typeof getThemeColors>;
 }
 
 function SettingsRow({
@@ -36,8 +42,10 @@ function SettingsRow({
   value,
   onPress,
   destructive = false,
-  colors,
 }: SettingsRowProps): React.ReactElement {
+  const colorScheme = useColorScheme();
+  const colors = getThemeColors(colorScheme === "dark");
+
   function handlePress(): void {
     if (onPress) {
       Haptics.selectionAsync();
@@ -106,6 +114,7 @@ export default function SettingsScreen(): React.ReactElement {
   const colors = getThemeColors(colorScheme === "dark");
   const displayName = getDisplayName(user);
   const activeTheme: ThemeValue = hasAdaptiveThemes ? "system" : theme;
+  const activeThemeLabel = THEME_OPTIONS.find((o) => o.value === activeTheme)?.label;
 
   function handleSignOut(): void {
     Alert.alert("Sign Out", "Are you sure you want to sign out?", [
@@ -149,7 +158,7 @@ export default function SettingsScreen(): React.ReactElement {
   }
 
   return (
-    <SafeAreaView className="flex-1 bg-background">
+    <SafeAreaView className="flex-1" style={{ backgroundColor: colors.secondaryBackground }}>
       <View className="items-center mt-12">
         <Avatar name={displayName} size={80} />
         <Text className="text-xl font-semibold text-foreground mt-3">{displayName}</Text>
@@ -157,25 +166,27 @@ export default function SettingsScreen(): React.ReactElement {
       </View>
 
       <SettingsSection title="Account">
-        <SettingsRow icon="person.circle" label="Email" value={user?.email} colors={colors} />
+        <SettingsRow icon="person.circle" label="Email" value={user?.email} />
         <Divider />
         <SettingsRow
           icon="checkmark.seal"
           label="Email Verified"
           value={user?.email_verified ? "Yes" : "No"}
-          colors={colors}
         />
       </SettingsSection>
 
       <SettingsSection title="App">
-        <SettingsRow icon="bell" label="Notifications" onPress={() => showComingSoon("Notification")} colors={colors} />
+        <SettingsRow
+          icon="bell"
+          label="Notifications"
+          onPress={() => showComingSoon("Notification")}
+        />
         <Divider />
         <SettingsRow
           icon="paintbrush"
           label="Appearance"
-          value={THEME_OPTIONS.find((o) => o.value === activeTheme)?.label}
+          value={activeThemeLabel}
           onPress={handleThemeChange}
-          colors={colors}
         />
       </SettingsSection>
 
@@ -185,10 +196,13 @@ export default function SettingsScreen(): React.ReactElement {
             icon="link"
             label="Show Redirect URI"
             onPress={() => Alert.alert("Redirect URI", getRedirectUri())}
-            colors={colors}
           />
           <Divider />
-          <SettingsRow icon="info.circle" label="User ID" value={`${user?.id?.slice(0, 8)}...`} colors={colors} />
+          <SettingsRow
+            icon="info.circle"
+            label="User ID"
+            value={`${user?.id?.slice(0, 8)}...`}
+          />
         </SettingsSection>
       )}
 
@@ -198,7 +212,6 @@ export default function SettingsScreen(): React.ReactElement {
           label="Sign Out"
           onPress={handleSignOut}
           destructive
-          colors={colors}
         />
       </SettingsSection>
 

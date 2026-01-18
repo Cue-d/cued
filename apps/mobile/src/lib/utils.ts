@@ -12,6 +12,8 @@ export function cn(...inputs: ClassValue[]): string {
  */
 export const themeColors = {
   light: {
+    background: "#FFFFFF", // white
+    secondaryBackground: "#F5F5F4", // stone-100 (for grouped settings)
     mutedForeground: "#71717A", // zinc-500
     foreground: "#18181B", // zinc-900
     primary: "#EA580C", // orange-600
@@ -23,6 +25,8 @@ export const themeColors = {
     black: "#000000",
   },
   dark: {
+    background: "#1C1917", // stone-900 (matches oklch 0.147 0.004 49.25)
+    secondaryBackground: "#0C0A09", // stone-950 (darker than cards for contrast)
     mutedForeground: "#A1A1AA", // zinc-400
     foreground: "#FAFAFA", // zinc-50
     primary: "#F97316", // orange-500
