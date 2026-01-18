@@ -180,20 +180,18 @@ The mobile-prd.json file contains structured tasks with:
    - Tests: pnpm test (MUST pass if tests exist)
    Do NOT commit if any feedback loop fails.
 
-7. Run the code-simplifier:code-simplifier skill to reivew and simplify your code.
+7. Commit with a descriptive message.
 
-8. Commit with a descriptive message.
+8. Update mobile-prd.json: set passes=true for the completed task.
 
-9. Update mobile-prd.json: set passes=true for the completed task.
-
-10. Update progress.txt with:
+9. Update progress.txt with:
     - Date/time and task ID + description
     - Files changed
     - Decisions made and WHY
     - Browser verification results (for UI tasks)
     - Blockers or notes for next iteration
 
-11. Check if ALL tasks in mobile-prd.json have passes=true.
+10. Check if ALL tasks in mobile-prd.json have passes=true.
     If so, output exactly: <promise>COMPLETE</promise>
 
 ONLY WORK ON A SINGLE TASK." | tee "$OUTPUT_FILE"
