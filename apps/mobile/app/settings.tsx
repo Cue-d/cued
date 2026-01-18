@@ -1,11 +1,11 @@
 import { router } from "expo-router";
 import * as Haptics from "expo-haptics";
 import { SymbolView } from "expo-symbols";
-import { Alert, ActivityIndicator, View, Text, Pressable } from "react-native";
+import { Alert, ActivityIndicator, View, Text, Pressable, useColorScheme } from "react-native";
 import { Uniwind, useUniwind } from "uniwind";
 import { useAuth } from "@/providers/AuthProvider";
 import { getRedirectUri } from "@/lib/auth";
-import { cn, getDisplayName, getInitials } from "@/lib/utils";
+import { cn, getDisplayName, getInitials, getThemeColors } from "@/lib/utils";
 import { SafeAreaView } from "react-native-safe-area-context";
 
 function Avatar({ name, size = 80 }: { name: string; size?: number }): React.ReactElement {
@@ -27,6 +27,7 @@ interface SettingsRowProps {
   value?: string;
   onPress?: () => void;
   destructive?: boolean;
+  colors: ReturnType<typeof getThemeColors>;
 }
 
 function SettingsRow({
@@ -35,6 +36,7 @@ function SettingsRow({
   value,
   onPress,
   destructive = false,
+  colors,
 }: SettingsRowProps): React.ReactElement {
   function handlePress(): void {
     if (onPress) {
@@ -43,7 +45,7 @@ function SettingsRow({
     }
   }
 
-  const iconColor = destructive ? "#FF3B30" : "#8E8E93";
+  const iconColor = destructive ? colors.destructive : colors.mutedForeground;
 
   return (
     <Pressable
@@ -57,7 +59,7 @@ function SettingsRow({
       <Text className={cn("flex-1 text-base text-foreground", destructive && "text-destructive")}>{label}</Text>
       {value && <Text className={cn("text-base text-muted-foreground", destructive && "text-destructive-foreground")}>{value}</Text>}
       {onPress && !destructive && (
-        <SymbolView name="chevron.right" size={13} tintColor="#C7C7CC" />
+        <SymbolView name="chevron.right" size={13} tintColor={colors.mutedForeground} />
       )}
     </Pressable>
   );
@@ -100,6 +102,8 @@ type ThemeValue = (typeof THEME_OPTIONS)[number]["value"];
 export default function SettingsScreen(): React.ReactElement {
   const { user, signOut, isLoading } = useAuth();
   const { theme, hasAdaptiveThemes } = useUniwind();
+  const colorScheme = useColorScheme();
+  const colors = getThemeColors(colorScheme === "dark");
   const displayName = getDisplayName(user);
   const activeTheme: ThemeValue = hasAdaptiveThemes ? "system" : theme;
 
@@ -153,23 +157,25 @@ export default function SettingsScreen(): React.ReactElement {
       </View>
 
       <SettingsSection title="Account">
-        <SettingsRow icon="person.circle" label="Email" value={user?.email} />
+        <SettingsRow icon="person.circle" label="Email" value={user?.email} colors={colors} />
         <Divider />
         <SettingsRow
           icon="checkmark.seal"
           label="Email Verified"
           value={user?.email_verified ? "Yes" : "No"}
+          colors={colors}
         />
       </SettingsSection>
 
       <SettingsSection title="App">
-        <SettingsRow icon="bell" label="Notifications" onPress={() => showComingSoon("Notification")} />
+        <SettingsRow icon="bell" label="Notifications" onPress={() => showComingSoon("Notification")} colors={colors} />
         <Divider />
         <SettingsRow
           icon="paintbrush"
           label="Appearance"
           value={THEME_OPTIONS.find((o) => o.value === activeTheme)?.label}
           onPress={handleThemeChange}
+          colors={colors}
         />
       </SettingsSection>
 
@@ -179,9 +185,10 @@ export default function SettingsScreen(): React.ReactElement {
             icon="link"
             label="Show Redirect URI"
             onPress={() => Alert.alert("Redirect URI", getRedirectUri())}
+            colors={colors}
           />
           <Divider />
-          <SettingsRow icon="info.circle" label="User ID" value={`${user?.id?.slice(0, 8)}...`} />
+          <SettingsRow icon="info.circle" label="User ID" value={`${user?.id?.slice(0, 8)}...`} colors={colors} />
         </SettingsSection>
       )}
 
@@ -191,6 +198,7 @@ export default function SettingsScreen(): React.ReactElement {
           label="Sign Out"
           onPress={handleSignOut}
           destructive
+          colors={colors}
         />
       </SettingsSection>
 

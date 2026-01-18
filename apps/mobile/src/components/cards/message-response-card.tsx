@@ -6,11 +6,13 @@
  * Task 6.3: Response input (will implement later)
  */
 
-import { useMemo } from "react";
+import { useMemo, useRef, useCallback } from "react";
 import { SymbolView, type SFSymbol } from "expo-symbols";
-import { View, Text, ScrollView, TextInput } from "react-native";
+import { GlassView, isLiquidGlassAvailable } from "expo-glass-effect";
+import { View, Text, ScrollView, TextInput, useColorScheme } from "react-native";
+import type { ScrollView as ScrollViewType } from "react-native";
 import { Image } from "expo-image";
-import { cn } from "@/lib/utils";
+import { cn, getThemeColors } from "@/lib/utils";
 
 /** Platform types */
 export type ActionPlatform = "imessage" | "gmail" | "slack";
@@ -124,6 +126,13 @@ function Avatar({
   );
 }
 
+/** Platform colors */
+const platformColors: Record<ActionPlatform, string> = {
+  imessage: "#16a34a", // green-600
+  gmail: "#dc2626", // red-600
+  slack: "#9333ea", // purple-600
+};
+
 /** Platform badge component */
 function PlatformBadge({
   platform,
@@ -136,13 +145,7 @@ function PlatformBadge({
       <SymbolView
         name={config.symbol}
         size={14}
-        tintColor={
-          platform === "imessage"
-            ? "#16a34a"
-            : platform === "gmail"
-              ? "#dc2626"
-              : "#9333ea"
-        }
+        tintColor={platformColors[platform]}
       />
       <Text className="text-xs font-medium text-foreground">{config.label}</Text>
     </View>
@@ -186,8 +189,10 @@ function DeliveryStatus({
 /** Attachment display component */
 function AttachmentDisplay({
   attachments,
+  mutedColor,
 }: {
   attachments: MessageAttachment[];
+  mutedColor: string;
 }): React.JSX.Element {
   return (
     <View className="mb-1 gap-1">
@@ -211,7 +216,7 @@ function AttachmentDisplay({
             key={idx}
             className="flex-row items-center gap-2"
           >
-            <SymbolView name="doc.fill" size={12} tintColor="#8E8E93" />
+            <SymbolView name="doc.fill" size={12} tintColor={mutedColor} />
             <Text className="text-xs text-muted-foreground" numberOfLines={1}>
               {att.filename || "Attachment"}
             </Text>
@@ -260,7 +265,10 @@ export function MessageResponseCard({
   className,
   platform,
 }: MessageResponseCardProps): React.JSX.Element {
+  const colorScheme = useColorScheme();
+  const colors = getThemeColors(colorScheme === "dark");
   const initials = getInitials(personName);
+  const scrollViewRef = useRef<ScrollViewType>(null);
 
   // Sort messages chronologically (oldest first)
   const sortedMessages = useMemo(
@@ -268,8 +276,15 @@ export function MessageResponseCard({
     [messages],
   );
 
+  // Scroll to bottom when content changes
+  const scrollToBottom = useCallback(() => {
+    setTimeout(() => {
+      scrollViewRef.current?.scrollToEnd({ animated: false });
+    }, 50);
+  }, []);
+
   return (
-    <View className={cn("flex-1 bg-card rounded-2xl overflow-hidden", className)}>
+    <View className={cn("flex-1 overflow-hidden", className)}>
       {/* Header */}
       <View className="p-4 flex-row items-center gap-3">
         <Avatar initials={initials} />
@@ -293,8 +308,11 @@ export function MessageResponseCard({
 
       {/* Message Context */}
       <ScrollView
+        ref={scrollViewRef}
         className="flex-1"
         contentContainerClassName="py-4 px-4 gap-2"
+        onLayout={scrollToBottom}
+        onContentSizeChange={scrollToBottom}
       >
         {sortedMessages.length > 0 ? (
           sortedMessages.map((msg) => {
@@ -332,7 +350,7 @@ export function MessageResponseCard({
                     />
                   )}
                   {hasAttachments && (
-                    <AttachmentDisplay attachments={msg.attachments!} />
+                    <AttachmentDisplay attachments={msg.attachments!} mutedColor={colors.mutedForeground} />
                   )}
                   {hasText && msg.content && (
                     <Text
@@ -389,18 +407,46 @@ export function MessageResponseCard({
         )}
       </ScrollView>
 
-      {/* Response Input */}
+      {/* Response Input - Liquid Glass Style */}
       <View className="p-4 bg-transparent">
-        <TextInput
-          value={responseText}
-          onChangeText={onResponseChange}
-          placeholder="Type your response... (swipe right to send)"
-          placeholderTextColor="#8E8E93"
-          multiline
-          className="min-h-[80px] max-h-[150px] bg-background rounded-xl p-3 text-foreground text-sm"
-          accessibilityLabel="Response input"
-          accessibilityHint="Type your response to send"
-        />
+        {isLiquidGlassAvailable() ? (
+          <GlassView
+            style={{
+              borderRadius: 16,
+              minHeight: 80,
+            }}
+          >
+            <View className="flex-row items-start p-3 gap-2">
+              <SymbolView name="plus" size={18} tintColor={colors.mutedForeground} />
+              <TextInput
+                value={responseText}
+                onChangeText={onResponseChange}
+                placeholder="Message..."
+                placeholderTextColorClassName="accent-muted-foreground"
+                multiline
+                className="flex-1 text-foreground text-sm min-h-[60px] max-h-[120px]"
+                accessibilityLabel="Response input"
+                accessibilityHint="Type your response, swipe left to send"
+              />
+              <SymbolView name="mic" size={18} tintColor={colors.mutedForeground} />
+            </View>
+          </GlassView>
+        ) : (
+          <View className="flex-row items-start bg-muted/50 rounded-2xl p-3 gap-2 border border-border">
+            <SymbolView name="plus" size={18} tintColor={colors.mutedForeground} />
+            <TextInput
+              value={responseText}
+              onChangeText={onResponseChange}
+              placeholder="Message..."
+              placeholderTextColorClassName="accent-muted-foreground"
+              multiline
+              className="flex-1 text-foreground text-sm min-h-[60px] max-h-[120px]"
+              accessibilityLabel="Response input"
+              accessibilityHint="Type your response, swipe left to send"
+            />
+            <SymbolView name="mic" size={18} tintColor={colors.mutedForeground} />
+          </View>
+        )}
       </View>
     </View>
   );

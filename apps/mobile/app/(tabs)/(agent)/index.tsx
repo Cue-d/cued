@@ -11,7 +11,7 @@
  */
 
 import { useCallback, useRef } from "react";
-import { Platform } from "react-native";
+import { Platform , View, Text } from "react-native";
 import Animated, {
   KeyboardState,
   scrollTo,
@@ -23,7 +23,6 @@ import Animated, {
 } from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
-import { View, Text } from "react-native";
 import { useChat } from "@/hooks/useChat";
 import { ChatMessage } from "@/components/chat/chat-message";
 import { ChatInput } from "@/components/chat/chat-input";
@@ -161,7 +160,7 @@ function KeyboardFriendlyScrollView({
       scrollEventThrottle={16}
       keyboardShouldPersistTaps="handled"
       keyboardDismissMode="interactive"
-      contentContainerStyle={{ paddingTop: 16, paddingBottom: 8 }}
+      contentContainerClassName="pt-4 pb-2"
     >
       {children}
       {Platform.OS !== "web" && (
@@ -174,6 +173,7 @@ function KeyboardFriendlyScrollView({
 export default function AgentScreen() {
   const { messages, input, setInput, sendMessage, isLoading, error } =
     useChat();
+  const { bottom } = useSafeAreaInsets();
 
   const handleSendMessage = useCallback(async () => {
     await sendMessage();
@@ -190,18 +190,10 @@ export default function AgentScreen() {
 
   return (
     <ErrorBoundary>
-      <View className="flex-1">
+      <View className="flex-1 bg-background">
         {showSuggestions ? (
-          // Empty state with suggestions
-          <View className="flex-1 justify-center">
-            <View className="items-center mb-8 px-4">
-              <Text className="text-sf-label text-2xl font-semibold mb-2">
-                PRM Assistant
-              </Text>
-              <Text className="text-sf-secondaryLabel text-center text-[16px]">
-                Ask me about your contacts, messages, or relationships
-              </Text>
-            </View>
+          // Empty state with suggestions - vertically centered
+          <View className="flex-1 justify-center" style={{ paddingBottom: bottom + 80 }}>
             <SuggestedPrompts onSelect={handleSelectPrompt} />
           </View>
         ) : (
@@ -225,8 +217,8 @@ export default function AgentScreen() {
 
         {/* Error message */}
         {error && (
-          <View className="px-4 py-2 bg-sf-red/10">
-            <Text className="text-sf-red text-sm text-center">
+          <View className="mx-4 mb-2 px-4 py-3 bg-destructive/10 rounded-xl">
+            <Text className="text-destructive text-sm text-center">
               {error.message}
             </Text>
           </View>

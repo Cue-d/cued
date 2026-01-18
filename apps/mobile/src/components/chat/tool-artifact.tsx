@@ -4,8 +4,9 @@ import type { SFSymbol } from "sf-symbols-typescript";
 import { FadeIn } from "react-native-reanimated";
 import { isLiquidGlassAvailable, GlassView } from "expo-glass-effect";
 
-import { View, Text } from "react-native";
+import { View, Text, useColorScheme } from "react-native";
 import { AnimatedView } from "@/components/animated";
+import { getThemeColors } from "@/lib/utils";
 import type { ToolInvocation } from "./chat-message";
 
 // Types matching web implementation
@@ -89,15 +90,17 @@ function ArtifactHeader({
   label,
   isEmpty,
   emptyMessage,
+  mutedColor,
 }: {
   icon: SFSymbol;
   label: string;
   isEmpty: boolean;
   emptyMessage: string;
+  mutedColor: string;
 }) {
   return (
     <View className="flex-row items-center gap-2">
-      <SymbolView name={icon} size={14} tintColor="#8E8E93" />
+      <SymbolView name={icon} size={14} tintColor={mutedColor} />
       <Text className="text-xs font-medium text-muted-foreground">
         {isEmpty ? emptyMessage : label}
       </Text>
@@ -123,7 +126,7 @@ function ArtifactCard({ children }: { children: React.ReactNode }) {
 }
 
 // Search Messages Artifact
-function SearchMessagesArtifact({ data }: { data: SearchMessageResult[] }) {
+function SearchMessagesArtifact({ data, mutedColor }: { data: SearchMessageResult[]; mutedColor: string }) {
   if (data.length === 0) {
     return (
       <ArtifactHeader
@@ -131,6 +134,7 @@ function SearchMessagesArtifact({ data }: { data: SearchMessageResult[] }) {
         label=""
         isEmpty={true}
         emptyMessage="No messages found"
+        mutedColor={mutedColor}
       />
     );
   }
@@ -142,6 +146,7 @@ function SearchMessagesArtifact({ data }: { data: SearchMessageResult[] }) {
         label={`${data.length} message${data.length > 1 ? "s" : ""} found`}
         isEmpty={false}
         emptyMessage=""
+        mutedColor={mutedColor}
       />
       <View className="gap-1.5">
         {data.slice(0, 5).map((result) => (
@@ -175,7 +180,7 @@ function SearchMessagesArtifact({ data }: { data: SearchMessageResult[] }) {
 }
 
 // Search Contacts Artifact
-function SearchContactsArtifact({ data }: { data: ContactResult[] }) {
+function SearchContactsArtifact({ data, mutedColor }: { data: ContactResult[]; mutedColor: string }) {
   if (data.length === 0) {
     return (
       <ArtifactHeader
@@ -183,6 +188,7 @@ function SearchContactsArtifact({ data }: { data: ContactResult[] }) {
         label=""
         isEmpty={true}
         emptyMessage="No contacts found"
+        mutedColor={mutedColor}
       />
     );
   }
@@ -194,6 +200,7 @@ function SearchContactsArtifact({ data }: { data: ContactResult[] }) {
         label={`${data.length} contact${data.length > 1 ? "s" : ""} found`}
         isEmpty={false}
         emptyMessage=""
+        mutedColor={mutedColor}
       />
       <View className="gap-1.5">
         {data.map((contact) => (
@@ -258,7 +265,7 @@ function SearchContactsArtifact({ data }: { data: ContactResult[] }) {
 }
 
 // Action Created Artifact
-function ActionCreatedArtifact({ data }: { data: ActionCreatedResult }) {
+function ActionCreatedArtifact({ data, mutedColor, successColor }: { data: ActionCreatedResult; mutedColor: string; successColor: string }) {
   return (
     <View className="gap-2">
       <ArtifactHeader
@@ -266,14 +273,15 @@ function ActionCreatedArtifact({ data }: { data: ActionCreatedResult }) {
         label="Action created"
         isEmpty={false}
         emptyMessage=""
+        mutedColor={mutedColor}
       />
-      <View className="rounded-xl bg-[#34C759]/10 p-3 border border-[#34C759]/20">
+      <View className="rounded-xl bg-green-500/10 p-3 border border-green-500/20">
         <View className="flex-row items-center gap-3">
-          <View className="w-8 h-8 rounded-full bg-[#34C759]/20 items-center justify-center">
-            <SymbolView name="checkmark" size={16} tintColor="#34C759" />
+          <View className="w-8 h-8 rounded-full bg-green-500/20 items-center justify-center">
+            <SymbolView name="checkmark" size={16} tintColor={successColor} />
           </View>
           <View className="flex-1">
-            <Text className="text-sm font-medium text-[#34C759]">
+            <Text className="text-sm font-medium text-green-600 dark:text-green-500">
               Action created
             </Text>
             <Text className="text-xs text-muted-foreground">
@@ -342,6 +350,8 @@ interface ToolArtifactProps {
 }
 
 export function ToolArtifact({ toolName, result }: ToolArtifactProps) {
+  const colorScheme = useColorScheme();
+  const colors = getThemeColors(colorScheme === "dark");
   const parsed = useMemo(
     () => parseToolResult(toolName, result),
     [toolName, result]
@@ -352,13 +362,13 @@ export function ToolArtifact({ toolName, result }: ToolArtifactProps) {
   return (
     <AnimatedView entering={FadeIn.duration(200)} className="mt-2">
       {parsed.type === "messages" && (
-        <SearchMessagesArtifact data={parsed.data as SearchMessageResult[]} />
+        <SearchMessagesArtifact data={parsed.data as SearchMessageResult[]} mutedColor={colors.mutedForeground} />
       )}
       {parsed.type === "contacts" && (
-        <SearchContactsArtifact data={parsed.data as ContactResult[]} />
+        <SearchContactsArtifact data={parsed.data as ContactResult[]} mutedColor={colors.mutedForeground} />
       )}
       {parsed.type === "action" && (
-        <ActionCreatedArtifact data={parsed.data as ActionCreatedResult} />
+        <ActionCreatedArtifact data={parsed.data as ActionCreatedResult} mutedColor={colors.mutedForeground} successColor={colors.success} />
       )}
     </AnimatedView>
   );

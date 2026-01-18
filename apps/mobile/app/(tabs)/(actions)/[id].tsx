@@ -323,7 +323,7 @@ export default function ActionDetailScreen(): React.JSX.Element {
                 value={responseText}
                 onChangeText={setResponseText}
                 placeholder="Type your response..."
-                placeholderTextColor="#8E8E93"
+                placeholderTextColorClassName="accent-muted-foreground"
                 multiline
                 className="min-h-[100px] bg-sf-secondaryBg rounded-xl p-3 text-sf-label text-sm"
                 accessibilityLabel="Response input"

@@ -11,7 +11,8 @@ import { useLocalSearchParams, useRouter } from "expo-router";
 import { SymbolView } from "expo-symbols";
 import * as Haptics from "expo-haptics";
 import { GlassView } from "expo-glass-effect";
-import { View, Text, Pressable } from "react-native";
+import { View, Text, Pressable, useColorScheme } from "react-native";
+import { getThemeColors } from "@/lib/utils";
 
 /** Snooze preset with label and timestamp calculator */
 interface SnoozePreset {
@@ -68,6 +69,8 @@ export default function SnoozePicker(): React.JSX.Element {
   const { actionId } = useLocalSearchParams<{ actionId: string }>();
   const [showDatePicker, setShowDatePicker] = useState(false);
   const [customDate, setCustomDate] = useState(new Date());
+  const colorScheme = useColorScheme();
+  const colors = getThemeColors(colorScheme === "dark");
 
   /** Handle preset selection */
   const handlePresetSelect = useCallback(
@@ -141,7 +144,7 @@ export default function SnoozePicker(): React.JSX.Element {
               <SymbolView
                 name={preset.icon as never}
                 size={24}
-                tintColor="#007AFF"
+                tintColor={colors.info}
               />
               <Text className="text-sf-label text-base flex-1">
                 {preset.label}
@@ -149,7 +152,7 @@ export default function SnoozePicker(): React.JSX.Element {
               <SymbolView
                 name="chevron.right"
                 size={16}
-                tintColor="#8E8E93"
+                tintColor={colors.mutedForeground}
               />
             </GlassView>
           </Pressable>
@@ -170,13 +173,13 @@ export default function SnoozePicker(): React.JSX.Element {
             <SymbolView
               name="calendar.badge.clock"
               size={24}
-              tintColor="#007AFF"
+              tintColor={colors.info}
             />
             <Text className="text-sf-label text-base flex-1">Custom...</Text>
             <SymbolView
               name={showDatePicker ? "chevron.up" : "chevron.down"}
               size={16}
-              tintColor="#8E8E93"
+              tintColor={colors.mutedForeground}
             />
           </GlassView>
         </Pressable>

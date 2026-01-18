@@ -9,6 +9,7 @@ import React, { Component, type ErrorInfo, type ReactNode } from "react";
 import { SymbolView } from "expo-symbols";
 import * as Haptics from "expo-haptics";
 import { View, Text, Pressable } from "react-native";
+import { themeColors } from "@/lib/utils";
 
 interface ErrorBoundaryProps {
   children: ReactNode;
@@ -71,7 +72,7 @@ export class ErrorBoundary extends Component<
           <SymbolView
             name="exclamationmark.triangle.fill"
             size={64}
-            tintColor="#FF3B30"
+            tintColor={themeColors.light.destructive}
           />
 
           <Text className="text-foreground text-xl font-semibold mt-6 text-center">

@@ -11,8 +11,8 @@
 
 import { useMemo } from "react";
 import { SymbolView } from "expo-symbols";
-import { View, Text, ScrollView, TextInput } from "react-native";
-import { cn } from "@/lib/utils";
+import { View, Text, ScrollView, TextInput, useColorScheme } from "react-native";
+import { cn, getThemeColors } from "@/lib/utils";
 
 /** Form data for contact card */
 export interface ContactFormData {
@@ -145,7 +145,7 @@ function FormField({
         value={value}
         onChangeText={onChangeText}
         placeholder={placeholder}
-        placeholderTextColor="#8E8E93"
+        placeholderTextColorClassName="accent-muted-foreground"
         multiline={multiline}
         className={cn(
           "bg-background rounded-xl px-3 py-3 text-foreground text-sm",
@@ -178,6 +178,8 @@ export function ContactCard({
   onFormChange,
   className,
 }: ContactCardProps): React.JSX.Element {
+  const colorScheme = useColorScheme();
+  const colors = getThemeColors(colorScheme === "dark");
   const initials = getInitials(personName);
   const meetingTime = createdAt ? formatMeetingTime(createdAt) : "earlier";
 
@@ -203,7 +205,7 @@ export function ContactCard({
         <Avatar initials={initials} />
         <View className="flex-1 min-w-0">
           <View className="flex-row items-center gap-1.5 mb-0.5">
-            <SymbolView name="clock" size={12} tintColor="#8E8E93" />
+            <SymbolView name="clock" size={12} tintColor={colors.mutedForeground} />
             <Text className="text-xs text-muted-foreground">
               You met someone new today
             </Text>
@@ -236,7 +238,7 @@ export function ContactCard({
 
         {/* Name Field */}
         <FormField
-          icon={<SymbolView name="person" size={16} tintColor="#8E8E93" />}
+          icon={<SymbolView name="person" size={16} tintColor={colors.mutedForeground} />}
           label="Name"
           value={formData.name}
           onChangeText={(text) => onFormChange({ ...formData, name: text })}
@@ -245,7 +247,7 @@ export function ContactCard({
 
         {/* Company Field */}
         <FormField
-          icon={<SymbolView name="building.2" size={16} tintColor="#8E8E93" />}
+          icon={<SymbolView name="building.2" size={16} tintColor={colors.mutedForeground} />}
           label="Company"
           value={formData.company}
           onChangeText={(text) => onFormChange({ ...formData, company: text })}
@@ -255,7 +257,7 @@ export function ContactCard({
         {/* Tags Field */}
         <View className="gap-2">
           <FormField
-            icon={<SymbolView name="tag" size={16} tintColor="#8E8E93" />}
+            icon={<SymbolView name="tag" size={16} tintColor={colors.mutedForeground} />}
             label="Tags"
             value={formData.tags}
             onChangeText={(text) => onFormChange({ ...formData, tags: text })}
@@ -272,7 +274,7 @@ export function ContactCard({
 
         {/* Notes Field */}
         <FormField
-          icon={<SymbolView name="doc.text" size={16} tintColor="#8E8E93" />}
+          icon={<SymbolView name="doc.text" size={16} tintColor={colors.mutedForeground} />}
           label="Notes"
           value={formData.notes}
           onChangeText={(text) => onFormChange({ ...formData, notes: text })}
