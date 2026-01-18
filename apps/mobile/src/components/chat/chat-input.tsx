@@ -2,56 +2,113 @@
  * ChatInput - Text input component for agent chat with keyboard handling
  *
  * Features:
- * - Liquid glass text field container
- * - Multiline text input with rounded styling
- * - Send button with SF Symbol
+ * - Liquid glass container with unified pill shape
+ * - Animated color transition (muted to primary) when text is entered
  * - Keyboard-responsive animated positioning
  * - Haptic feedback on send
  */
 
-import { SymbolView } from "expo-symbols";
-import { isLiquidGlassAvailable } from "expo-glass-effect";
+import { useEffect } from "react";
+import { View, TextInput, Pressable, Platform, useColorScheme } from "react-native";
+import { GlassView, isLiquidGlassAvailable } from "expo-glass-effect";
 import * as Haptics from "expo-haptics";
+import { SymbolView } from "expo-symbols";
 import Animated, {
+  Easing,
+  interpolateColor,
   useAnimatedKeyboard,
+  useAnimatedProps,
   useAnimatedStyle,
+  useSharedValue,
+  withTiming,
 } from "react-native-reanimated";
 
-import { View, TextInput, Pressable, Platform, useColorScheme } from "react-native";
-import { cn, getThemeColors } from "@/lib/utils";
+import { getThemeColors } from "@/lib/utils";
+
+const AnimatedSymbolView = Animated.createAnimatedComponent(SymbolView);
+
+const CONTAINER_HEIGHT = 44;
+const CONTAINER_RADIUS = 22;
 
 export interface ChatInputProps {
   value: string;
   onChangeText: (text: string) => void;
-  onSubmit: () => void;
+  onSubmit?: () => void;
+  onPlusPress?: () => void;
   placeholder?: string;
   disabled?: boolean;
+  /** Disable keyboard-responsive positioning (for use in cards) */
+  disableKeyboardHandling?: boolean;
+  /** Hide the outer padding wrapper */
+  noPadding?: boolean;
+  /** Use subtle inner style when already inside a GlassView */
+  insideGlassContainer?: boolean;
+}
+
+function getContainerStyle(isDark: boolean, variant: "glass" | "fallback" | "inner") {
+  const baseStyle = {
+    height: CONTAINER_HEIGHT,
+    borderRadius: CONTAINER_RADIUS,
+    overflow: "hidden" as const,
+  };
+
+  if (variant === "glass") {
+    return baseStyle;
+  }
+
+  if (variant === "inner") {
+    return {
+      ...baseStyle,
+      backgroundColor: isDark ? "rgba(255, 255, 255, 0.06)" : "rgba(0, 0, 0, 0.04)",
+      borderWidth: 1,
+      borderColor: isDark ? "rgba(255, 255, 255, 0.08)" : "rgba(0, 0, 0, 0.06)",
+    };
+  }
+
+  // fallback
+  return {
+    ...baseStyle,
+    backgroundColor: isDark ? "rgba(255, 255, 255, 0.08)" : "rgba(0, 0, 0, 0.06)",
+    borderWidth: 1,
+    borderColor: isDark ? "rgba(255, 255, 255, 0.1)" : "rgba(0, 0, 0, 0.08)",
+  };
 }
 
 export function ChatInput({
   value,
   onChangeText,
   onSubmit,
+  onPlusPress,
   placeholder = "Ask anything...",
   disabled = false,
-}: ChatInputProps) {
-  const canSubmit = value.trim().length > 0 && !disabled;
-  const keyboard = useAnimatedKeyboard({});
+  disableKeyboardHandling = false,
+  noPadding = false,
+  insideGlassContainer = false,
+}: ChatInputProps): React.JSX.Element {
   const colorScheme = useColorScheme();
   const isDark = colorScheme === "dark";
   const colors = getThemeColors(isDark);
-
-  const handleSubmit = () => {
-    if (!canSubmit) return;
-    if (Platform.OS === "ios") {
-      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    }
-    onSubmit();
-  };
-
-  // Animate based on keyboard height
-  // When Liquid Glass tabs are available, add extra bottom margin above the floating tab bar
+  const keyboard = useAnimatedKeyboard({});
   const hasLiquidGlass = isLiquidGlassAvailable();
+
+  const canSubmit = value.trim().length > 0 && !disabled;
+  const colorProgress = useSharedValue(canSubmit ? 1 : 0);
+
+  useEffect(() => {
+    colorProgress.value = withTiming(canSubmit ? 1 : 0, {
+      duration: 200,
+      easing: Easing.out(Easing.ease),
+    });
+  }, [canSubmit, colorProgress]);
+
+  const animatedIconProps = useAnimatedProps(() => ({
+    tintColor: interpolateColor(
+      colorProgress.value,
+      [0, 1],
+      [colors.mutedForeground, colors.primary]
+    ),
+  }));
+
   const animatedStyle = useAnimatedStyle(() => {
     const keyboardOpen = keyboard.height.value > 0;
     const baseMargin = hasLiquidGlass ? 80 : 0;
@@ -61,64 +118,81 @@ export function ChatInput({
     };
   }, [hasLiquidGlass]);
 
-  const inputField = (
-    <View
-      className="flex-1 flex-row items-end px-4 py-2"
-      style={{
-        minHeight: 40,
-        borderRadius: 20,
-        backgroundColor: isDark ? "rgba(255, 255, 255, 0.1)" : "rgba(0, 0, 0, 0.06)",
-      }}
-    >
+  function handleSubmit(): void {
+    if (!canSubmit || !onSubmit) return;
+    if (Platform.OS === "ios") {
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    }
+    onSubmit();
+  }
+
+  const inputContent = (
+    <View className="flex-row items-center flex-1 gap-3 px-4 h-11">
+      <Pressable
+        onPress={onPlusPress}
+        hitSlop={8}
+        accessibilityLabel="Add attachment"
+        accessibilityRole="button"
+      >
+        <SymbolView
+          name="plus"
+          size={20}
+          weight="medium"
+          tintColor={colors.mutedForeground}
+        />
+      </Pressable>
+
       <TextInput
-        className="flex-1 text-foreground text-[16px] min-h-[24px] max-h-[120px]"
+        className="flex-1 h-11 text-foreground text-base pt-2"
         value={value}
         onChangeText={onChangeText}
         placeholder={placeholder}
-        placeholderTextColorClassName="accent-muted-foreground"
-        multiline
         returnKeyType="send"
-        blurOnSubmit={false}
         editable={!disabled}
         onSubmitEditing={handleSubmit}
         accessibilityLabel="Message input"
         accessibilityHint="Type your message here"
+        placeholderTextColorClassName="text-muted-foreground"
+        multiline
       />
+
+      <Pressable
+        onPress={canSubmit ? handleSubmit : undefined}
+        hitSlop={8}
+        accessibilityLabel="Send message"
+        accessibilityRole="button"
+        accessibilityState={{ disabled: !canSubmit }}
+      >
+        <AnimatedSymbolView
+          name="arrow.up.circle.fill"
+          size={28}
+          weight="medium"
+          animatedProps={animatedIconProps}
+        />
+      </Pressable>
     </View>
   );
 
-  const disabledButtonBackground = isDark
-    ? "rgba(255, 255, 255, 0.08)"
-    : "rgba(0, 0, 0, 0.04)";
+  function renderGlassContainer(): React.JSX.Element {
+    if (insideGlassContainer) {
+      return <View style={getContainerStyle(isDark, "inner")}>{inputContent}</View>;
+    }
+    if (hasLiquidGlass) {
+      return <GlassView style={getContainerStyle(isDark, "glass")}>{inputContent}</GlassView>;
+    }
+    return <View style={getContainerStyle(isDark, "fallback")}>{inputContent}</View>;
+  }
 
-  const sendButton = (
-    <Pressable
-      onPress={handleSubmit}
-      disabled={!canSubmit}
-      className={cn(
-        "w-10 h-10 rounded-full items-center justify-center",
-        canSubmit && "bg-primary"
-      )}
-      style={!canSubmit ? { backgroundColor: disabledButtonBackground } : undefined}
-      accessibilityLabel="Send message"
-      accessibilityRole="button"
-      accessibilityState={{ disabled: !canSubmit }}
-    >
-      <SymbolView
-        name="arrow.up"
-        size={18}
-        weight="semibold"
-        tintColor={canSubmit ? colors.white : colors.mutedForeground}
-      />
-    </Pressable>
-  );
+  if (disableKeyboardHandling) {
+    if (noPadding) {
+      return renderGlassContainer();
+    }
+    return <View className="px-4 py-3">{renderGlassContainer()}</View>;
+  }
 
   return (
     <Animated.View style={animatedStyle}>
-      <View className="flex-row items-end gap-2 px-4 py-3">
-        {inputField}
-        {sendButton}
-      </View>
+      <View className="px-4 py-3">{renderGlassContainer()}</View>
     </Animated.View>
   );
 }
