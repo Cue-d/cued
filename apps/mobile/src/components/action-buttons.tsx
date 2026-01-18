@@ -1,7 +1,8 @@
 /**
- * ActionButtons - Glass-styled buttons for triggering card swipes
+ * ActionButtons - Slack-style action buttons for card swipes
  *
- * Provides accessible button alternatives to swipe gestures.
+ * Two main buttons (Skip / Send) plus a snooze option.
+ * Matches Slack's "Keep Unread" / "Mark as Read" UI pattern.
  * Uses GlassView for iOS 26+ liquid glass effect.
  */
 
@@ -11,31 +12,35 @@ import type { SFSymbol } from "sf-symbols-typescript";
 import * as Haptics from "expo-haptics";
 import { View, Text, Pressable } from "react-native";
 import type { SwipeDirection } from "./swipeable-card";
+import { cn } from "@/lib/utils";
+
+// Colors matching the swipeable card backgrounds
+const COLORS = {
+  send: "#1B5E3D", // Dark green for send (right swipe)
+  skip: "#6B7280", // Gray for skip (left swipe)
+  snooze: "#B45309", // Amber for snooze (up swipe)
+};
 
 export interface ActionButtonsProps {
   onSwipe: (direction: SwipeDirection) => void;
   disabled?: boolean;
+  /** Custom label for skip button (default: "Skip") */
+  skipLabel?: string;
+  /** Custom label for send button (default: "Send") */
+  sendLabel?: string;
 }
 
-interface ButtonConfig {
-  direction: SwipeDirection;
-  icon: SFSymbol;
-  label: string;
-  color: string;
-}
-
-const BUTTONS: ButtonConfig[] = [
-  { direction: "left", icon: "xmark", label: "Discard", color: "#8E8E93" },
-  { direction: "up", icon: "clock", label: "Snooze", color: "#FF9500" },
-  { direction: "right", icon: "checkmark", label: "Send", color: "#00806B" },
-];
-
-function ActionButton({
-  config,
+/** Primary action button (Skip or Send) */
+function PrimaryButton({
+  label,
+  icon,
+  variant,
   onPress,
   disabled,
 }: {
-  config: ButtonConfig;
+  label: string;
+  icon: SFSymbol;
+  variant: "skip" | "send";
   onPress: () => void;
   disabled?: boolean;
 }): React.JSX.Element {
@@ -44,19 +49,23 @@ function ActionButton({
     onPress();
   };
 
+  const isSend = variant === "send";
+  const color = isSend ? COLORS.send : COLORS.skip;
+
   const content = (
-    <View className="items-center justify-center p-4">
+    <View
+      className={cn("flex-row items-center justify-center gap-2 rounded-2xl flex-1", isSend ? "" : "border border-border")}
+    >
       <SymbolView
-        name={config.icon}
-        size={28}
-        tintColor={config.color}
+        name={icon}
+        size={16}
+        tintColor={isSend ? "white" : color}
         weight="semibold"
       />
       <Text
-        className="text-xs mt-1 font-medium"
-        style={{ color: config.color }}
+        className="font-semibold text-foreground text-base"
       >
-        {config.label}
+        {label}
       </Text>
     </View>
   );
@@ -64,27 +73,95 @@ function ActionButton({
   // Use GlassView on iOS 26+ for liquid glass effect
   if (isLiquidGlassAvailable()) {
     return (
-      <Pressable onPress={handlePress} disabled={disabled}>
+      <Pressable
+        onPress={handlePress}
+        disabled={disabled}
+        className="flex-1"
+        style={{ opacity: disabled ? 0.5 : 1 }}
+      >
         <GlassView
           isInteractive
+          tintColor={isSend ? color : undefined}
           style={{
             borderRadius: 16,
-            minWidth: 80,
-            opacity: disabled ? 0.5 : 1,
+            flex: 1,
           }}
         >
+          <View
+            className="flex-row flex-1 items-center justify-center gap-2"
+          >
+            <SymbolView
+              name={icon}
+              size={16}
+              tintColor={isSend ? "white" : color}
+              weight="semibold"
+            />
+            <Text
+              className="font-semibold text-foreground text-base"
+            >
+              {label}
+            </Text>
+          </View>
+        </GlassView>
+      </Pressable>
+    );
+  }
+
+  return (
+    <Pressable
+      onPress={handlePress}
+      disabled={disabled}
+      className="flex-1"
+      style={{ opacity: disabled ? 0.5 : 1 }}
+    >
+      {content}
+    </Pressable>
+  );
+}
+
+/** Small snooze button */
+function SnoozeButton({
+  onPress,
+  disabled,
+}: {
+  onPress: () => void;
+  disabled?: boolean;
+}): React.JSX.Element {
+  const handlePress = (): void => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    onPress();
+  };
+
+  const content = (
+    <View className="items-center justify-center p-3">
+      <SymbolView
+        name="clock"
+        size={22}
+        tintColor={COLORS.snooze}
+        weight="semibold"
+      />
+    </View>
+  );
+
+  if (isLiquidGlassAvailable()) {
+    return (
+      <Pressable
+        onPress={handlePress}
+        disabled={disabled}
+        style={{ opacity: disabled ? 0.5 : 1 }}
+      >
+        <GlassView isInteractive style={{ borderRadius: 12 }}>
           {content}
         </GlassView>
       </Pressable>
     );
   }
 
-  // Fallback for older iOS and Android
   return (
     <Pressable
       onPress={handlePress}
       disabled={disabled}
-      className="bg-card rounded-2xl min-w-[80px]"
+      className="bg-card rounded-xl border border-border"
       style={{ opacity: disabled ? 0.5 : 1 }}
     >
       {content}
@@ -95,17 +172,31 @@ function ActionButton({
 export function ActionButtons({
   onSwipe,
   disabled = false,
+  skipLabel = "Skip",
+  sendLabel = "Send",
 }: ActionButtonsProps): React.JSX.Element {
   return (
-    <View className="flex-row justify-center items-center gap-4 py-4">
-      {BUTTONS.map((config) => (
-        <ActionButton
-          key={config.direction}
-          config={config}
-          onPress={() => onSwipe(config.direction)}
-          disabled={disabled}
-        />
-      ))}
+    <View className="flex-row items-center gap-3 px-4 py-3">
+      {/* Skip button - maps to left swipe */}
+      <PrimaryButton
+        label={skipLabel}
+        icon="xmark"
+        variant="skip"
+        onPress={() => onSwipe("left")}
+        disabled={disabled}
+      />
+
+      {/* Snooze button - maps to up swipe */}
+      <SnoozeButton onPress={() => onSwipe("up")} disabled={disabled} />
+
+      {/* Send button - maps to right swipe */}
+      <PrimaryButton
+        label={sendLabel}
+        icon="checkmark"
+        variant="send"
+        onPress={() => onSwipe("right")}
+        disabled={disabled}
+      />
     </View>
   );
 }

@@ -6,7 +6,7 @@
  */
 
 import { useEffect } from "react";
-import { useWindowDimensions } from "react-native";
+import { useWindowDimensions, View } from "react-native";
 import {
   useSharedValue,
   useAnimatedStyle,
@@ -14,7 +14,6 @@ import {
   withTiming,
   Easing,
 } from "react-native-reanimated";
-import { View } from "react-native";
 import { AnimatedView } from "@/components/animated";
 
 // Animation constants
@@ -93,7 +92,7 @@ const Y_OFFSET = 8;
  */
 export function SkeletonStack(): React.JSX.Element {
   const { width: screenWidth } = useWindowDimensions();
-  
+
   // Calculate card dimensions (3:4 aspect ratio, with padding)
   const cardWidth = Math.min(screenWidth - 32, 400);
   const cardHeight = (cardWidth * 4) / 3;
@@ -106,7 +105,7 @@ export function SkeletonStack(): React.JSX.Element {
       </View>
 
       {/* Skeleton card stack */}
-      <View 
+      <View
         className="relative"
         style={{ width: cardWidth, height: cardHeight }}
       >
