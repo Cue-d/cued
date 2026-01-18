@@ -8,11 +8,11 @@
 
 import { useMemo, useRef, useCallback } from "react";
 import { SymbolView, type SFSymbol } from "expo-symbols";
-import { GlassView, isLiquidGlassAvailable } from "expo-glass-effect";
-import { View, Text, ScrollView, TextInput, useColorScheme } from "react-native";
+import { View, Text, ScrollView, useColorScheme } from "react-native";
 import type { ScrollView as ScrollViewType } from "react-native";
 import { Image } from "expo-image";
 import { cn, getThemeColors } from "@/lib/utils";
+import { ChatInput } from "@/components/chat/chat-input";
 
 /** Platform types */
 export type ActionPlatform = "imessage" | "gmail" | "slack";
@@ -408,46 +408,13 @@ export function MessageResponseCard({
       </ScrollView>
 
       {/* Response Input - Liquid Glass Style */}
-      <View className="p-4 bg-transparent">
-        {isLiquidGlassAvailable() ? (
-          <GlassView
-            style={{
-              borderRadius: 16,
-              minHeight: 80,
-            }}
-          >
-            <View className="flex-row items-start p-3 gap-2">
-              <SymbolView name="plus" size={18} tintColor={colors.mutedForeground} />
-              <TextInput
-                value={responseText}
-                onChangeText={onResponseChange}
-                placeholder="Message..."
-                placeholderTextColorClassName="accent-muted-foreground"
-                multiline
-                className="flex-1 text-foreground text-sm min-h-[60px] max-h-[120px]"
-                accessibilityLabel="Response input"
-                accessibilityHint="Type your response, swipe left to send"
-              />
-              <SymbolView name="mic" size={18} tintColor={colors.mutedForeground} />
-            </View>
-          </GlassView>
-        ) : (
-          <View className="flex-row items-start bg-muted/50 rounded-2xl p-3 gap-2 border border-border">
-            <SymbolView name="plus" size={18} tintColor={colors.mutedForeground} />
-            <TextInput
-              value={responseText}
-              onChangeText={onResponseChange}
-              placeholder="Message..."
-              placeholderTextColorClassName="accent-muted-foreground"
-              multiline
-              className="flex-1 text-foreground text-sm min-h-[60px] max-h-[120px]"
-              accessibilityLabel="Response input"
-              accessibilityHint="Type your response, swipe left to send"
-            />
-            <SymbolView name="mic" size={18} tintColor={colors.mutedForeground} />
-          </View>
-        )}
-      </View>
+      <ChatInput
+        value={responseText}
+        onChangeText={onResponseChange}
+        placeholder="Message..."
+        disableKeyboardHandling
+        insideGlassContainer
+      />
     </View>
   );
 }
