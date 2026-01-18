@@ -14,7 +14,7 @@ export default function AgentLayout() {
       <Stack.Screen
         name="index"
         options={{
-          title: "Assistant",
+          title: "",
           headerRight: () => <HeaderAvatar />,
         }}
       />
