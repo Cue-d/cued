@@ -27,6 +27,10 @@ export default function TabsLayout() {
         <Icon sf={{ default: "sparkles", selected: "sparkles" }} />
         <Label>Agent</Label>
       </NativeTabTrigger>
+
+      <NativeTabTrigger name="(search)" role="search">
+        <Label>Search</Label>
+      </NativeTabTrigger>
     </NativeTabs>
   );
 }
