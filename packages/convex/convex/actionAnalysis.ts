@@ -224,6 +224,7 @@ export const markAnalysisSkipped = internalMutation({
 
 /**
  * Create an action from LLM suggestion.
+ * Atomically checks for existing pending action to prevent race conditions.
  */
 export const createActionFromSuggestion = internalMutation({
   args: {
@@ -238,6 +239,19 @@ export const createActionFromSuggestion = internalMutation({
     snoozedUntil: v.optional(v.number()),
   },
   handler: async (ctx, args) => {
+    // Atomic check: prevent race condition where multiple events create duplicate actions
+    const existingPending = await ctx.db
+      .query("actions")
+      .withIndex("by_conversation_status", (q) =>
+        q.eq("conversationId", args.conversationId).eq("status", "pending")
+      )
+      .first();
+
+    if (existingPending) {
+      // Action already exists for this conversation, skip creation
+      return null;
+    }
+
     const isPending = !args.snoozedUntil;
 
     const actionId = await ctx.db.insert("actions", {
