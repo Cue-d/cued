@@ -28,6 +28,7 @@ import { ChatMessage } from "@/components/chat/chat-message";
 import { ChatInput } from "@/components/chat/chat-input";
 import { SuggestedPrompts } from "@/components/chat/suggested-prompts";
 import { ErrorBoundary } from "@/components/error-boundary";
+import { getAccessToken } from "@/lib/auth";
 
 /**
  * Keyboard-friendly ScrollView that auto-scrolls to bottom
@@ -43,7 +44,7 @@ function KeyboardFriendlyScrollView({
   const ref = useAnimatedRef<Animated.ScrollView>();
   const timeout = useRef<ReturnType<typeof setTimeout> | null>(null);
   const keyboard = useAnimatedKeyboard({});
-  const { bottom } = useSafeAreaInsets();
+  const { top, bottom } = useSafeAreaInsets();
   const scrollOffset = useSharedValue(0);
   const lastKeyboardState = useSharedValue(KeyboardState.UNKNOWN);
   const keyboardHeight = useSharedValue(0);
@@ -77,56 +78,46 @@ function KeyboardFriendlyScrollView({
   }, [keyboard, isScrollViewControlled, scrollToBottom, onContentSizeChange]);
 
   useDerivedValue(() => {
-    if (
-      !isScrollViewControlled.value &&
-      keyboard.state.value === KeyboardState.CLOSING &&
-      lastKeyboardState.value === KeyboardState.OPEN &&
-      isTouching.value
-    ) {
+    const currentState = keyboard.state.value;
+    const stateChanged = lastKeyboardState.value !== currentState;
+    const isClosing = currentState === KeyboardState.CLOSING;
+    const isOpen = currentState === KeyboardState.OPEN;
+    const isClosed = currentState === KeyboardState.CLOSED;
+    const wasOpen = lastKeyboardState.value === KeyboardState.OPEN;
+
+    // Take control when user is touching while keyboard closes
+    if (!isScrollViewControlled.value && isClosing && wasOpen && isTouching.value) {
       isScrollViewControlled.value = true;
     }
 
-    if (
-      keyboard.state.value === KeyboardState.OPEN ||
-      keyboard.state.value === KeyboardState.CLOSED
-    ) {
-      if (
-        !isScrollViewControlled.value &&
-        lastKeyboardState.value !== keyboard.state.value &&
-        keyboard.state.value === KeyboardState.OPEN
-      ) {
+    // Handle keyboard fully open or closed states
+    if (isOpen || isClosed) {
+      if (!isScrollViewControlled.value && stateChanged && isOpen) {
         scrollTo(ref, 0, Number.MAX_SAFE_INTEGER, true);
       }
-
       isScrollViewControlled.value = false;
     }
 
-    if (lastKeyboardState.value !== keyboard.state.value) {
-      lastKeyboardState.value = keyboard.state.value;
+    // Track state changes
+    if (stateChanged) {
+      lastKeyboardState.value = currentState;
       scrollOffsetAtStart.value = scrollOffset.value;
     }
   });
 
+  // Sync scroll position with keyboard movement
   useDerivedValue(() => {
-    if (isScrollViewControlled.value) {
-      return;
-    }
+    if (isScrollViewControlled.value) return;
 
-    if (keyboard.state.value === KeyboardState.OPENING) {
-      scrollTo(
-        ref,
-        0,
-        scrollOffsetAtStart.value + Math.max(0, keyboard.height.value - bottom),
-        false
-      );
-    } else if (keyboard.state.value === KeyboardState.CLOSING) {
-      scrollTo(
-        ref,
-        0,
-        scrollOffsetAtStart.value -
-          Math.max(0, keyboardHeight.value - keyboard.height.value - bottom),
-        false
-      );
+    const isOpening = keyboard.state.value === KeyboardState.OPENING;
+    const isClosing = keyboard.state.value === KeyboardState.CLOSING;
+
+    if (isOpening) {
+      const offset = scrollOffsetAtStart.value + Math.max(0, keyboard.height.value - bottom);
+      scrollTo(ref, 0, offset, false);
+    } else if (isClosing) {
+      const offset = scrollOffsetAtStart.value - Math.max(0, keyboardHeight.value - keyboard.height.value - bottom);
+      scrollTo(ref, 0, offset, false);
     }
   });
 
@@ -160,7 +151,7 @@ function KeyboardFriendlyScrollView({
       scrollEventThrottle={16}
       keyboardShouldPersistTaps="handled"
       keyboardDismissMode="interactive"
-      contentContainerClassName="pt-4 pb-2"
+      contentContainerStyle={{ paddingTop: top + 16, paddingBottom: 8 }}
     >
       {children}
       {Platform.OS !== "web" && (
@@ -172,7 +163,7 @@ function KeyboardFriendlyScrollView({
 
 export default function AgentScreen() {
   const { messages, input, setInput, sendMessage, isLoading, error } =
-    useChat();
+    useChat({ getAccessToken });
   const { bottom } = useSafeAreaInsets();
 
   const handleSendMessage = useCallback(async () => {

@@ -10,6 +10,7 @@ export default authkitMiddleware({
       "/sign-up",
       "/callback",
       // API routes that handle their own auth or are called by external services
+      "/api/chat",
       "/api/memories/:path*",
       "/api/nango/webhook",
       "/api/nango/pull-gmail",
