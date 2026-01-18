@@ -17,7 +17,7 @@ import {
 import { Stack } from "expo-router";
 import { SymbolView } from "expo-symbols";
 import * as Haptics from "expo-haptics";
-import { useColorScheme } from "nativewind";
+import { useColorScheme } from "react-native";
 import { getThemeColors } from "@/lib/utils";
 import { useContacts } from "@/hooks/useContacts";
 import {
@@ -98,7 +98,7 @@ function SectionHeader({ title }: { title: string }) {
 
 /** Empty state component */
 function EmptyState() {
-  const { colorScheme } = useColorScheme();
+  const colorScheme = useColorScheme();
   const colors = getThemeColors(colorScheme === "dark");
 
   return (
