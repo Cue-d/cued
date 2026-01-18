@@ -11,13 +11,13 @@ import {
   RefreshControl,
   View,
   Text,
+  useColorScheme,
   type SectionListRenderItemInfo,
   type SectionListData,
 } from "react-native";
 import { Stack } from "expo-router";
 import { SymbolView } from "expo-symbols";
 import * as Haptics from "expo-haptics";
-import { useColorScheme } from "react-native";
 import { getThemeColors } from "@/lib/utils";
 import { useContacts } from "@/hooks/useContacts";
 import {

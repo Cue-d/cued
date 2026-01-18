@@ -5,16 +5,14 @@
 
 import { useRouter } from "expo-router";
 import * as Haptics from "expo-haptics";
-import { View, Text, Pressable } from "react-native";
+import { View, Text, Pressable, useColorScheme } from "react-native";
 import { SymbolView } from "expo-symbols";
-import { useColorScheme } from "nativewind";
-import { getThemeColors } from "@/lib/utils";
+import { getInitials, getThemeColors } from "@/lib/utils";
 
 export interface ContactListItemData {
   id: string;
   displayName: string;
   company?: string | null;
-  lastMessageText?: string | null;
   phoneNumber?: string | null;
   email?: string | null;
 }
@@ -23,26 +21,12 @@ export interface ContactListItemProps {
   contact: ContactListItemData;
 }
 
-/** Get initials from a name */
-function getInitials(name: string): string {
-  if (/^\+?\d/.test(name)) return "#";
-  if (name.includes("@")) return name[0]?.toUpperCase() ?? "?";
-  return name
-    .split(" ")
-    .map((n) => n[0])
-    .join("")
-    .slice(0, 2)
-    .toUpperCase();
-}
-
-/**
- * ContactListItem - Modern iOS-style contact row.
- */
+/** ContactListItem - Modern iOS-style contact row. */
 export function ContactListItem({
   contact,
 }: ContactListItemProps): React.JSX.Element {
   const router = useRouter();
-  const { colorScheme } = useColorScheme();
+  const colorScheme = useColorScheme();
   const colors = getThemeColors(colorScheme === "dark");
   const initials = getInitials(contact.displayName);
 

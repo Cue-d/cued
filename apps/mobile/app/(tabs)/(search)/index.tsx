@@ -1,6 +1,6 @@
 import { useState, useMemo } from "react";
 import { View, Text, ScrollView, Pressable, PlatformColor } from "react-native";
-import { Stack, Link } from "expo-router";
+import { Stack, useRouter } from "expo-router";
 import { GlassView, isLiquidGlassAvailable } from "expo-glass-effect";
 import { BlurView } from "expo-blur";
 import { SymbolView } from "expo-symbols";
@@ -38,16 +38,24 @@ function AdaptiveGlass({ children, style }: AdaptiveGlassProps): React.ReactElem
 }
 
 function ContactResultCard({ contact }: { contact: SearchContactResult }): React.ReactElement {
+  const router = useRouter();
   const phoneHandle = contact.handles.find((h) => h.type === "phone");
   const emailHandle = contact.handles.find((h) => h.type === "email");
   const subtitle = contact.company || phoneHandle?.value || emailHandle?.value;
 
+  const handlePress = () => {
+    Haptics.selectionAsync();
+    router.push({
+      pathname: "/(tabs)/(search)/[contactId]",
+      params: { contactId: contact._id },
+    });
+  };
+
   return (
-    <Link href={`/(tabs)/(contacts)/${contact._id}`} asChild>
-      <Pressable
-        onPressIn={() => Haptics.selectionAsync()}
-        style={{ flexDirection: "row", alignItems: "center", padding: 12, gap: 12 }}
-      >
+    <Pressable
+      onPress={handlePress}
+      style={{ flexDirection: "row", alignItems: "center", padding: 12, gap: 12 }}
+    >
         <View style={avatarStyle}>
           <SymbolView name="person.fill" tintColor={PlatformColor("secondaryLabel")} size={20} />
         </View>
@@ -68,8 +76,7 @@ function ContactResultCard({ contact }: { contact: SearchContactResult }): React
           )}
         </View>
         <SymbolView name="chevron.right" tintColor={PlatformColor("tertiaryLabel")} size={14} />
-      </Pressable>
-    </Link>
+    </Pressable>
   );
 }
 

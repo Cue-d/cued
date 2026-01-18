@@ -52,11 +52,14 @@ export function getDisplayName(user: WorkOSUser | null): string {
   return user.email?.split("@")[0] || "User";
 }
 
+/** Get initials from a name, handling phone numbers and emails */
 export function getInitials(name: string): string {
+  if (/^\+?\d/.test(name)) return "#";
+  if (name.includes("@")) return name[0]?.toUpperCase() ?? "?";
   return name
     .split(" ")
     .map((n) => n[0])
     .join("")
-    .toUpperCase()
-    .slice(0, 2);
+    .slice(0, 2)
+    .toUpperCase();
 }
