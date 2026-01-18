@@ -1,19 +1,20 @@
-import { Alert, ActivityIndicator } from "react-native";
 import { router } from "expo-router";
 import * as Haptics from "expo-haptics";
 import { SymbolView } from "expo-symbols";
-import { View, Text, Pressable, ScrollView } from "@/tw";
+import { Alert, ActivityIndicator, View, Text, Pressable } from "react-native";
+import { Uniwind, useUniwind } from "uniwind";
 import { useAuth } from "@/providers/AuthProvider";
 import { getRedirectUri } from "@/lib/auth";
-import { getDisplayName, getInitials } from "@/lib/utils";
+import { cn, getDisplayName, getInitials } from "@/lib/utils";
+import { SafeAreaView } from "react-native-safe-area-context";
 
 function Avatar({ name, size = 80 }: { name: string; size?: number }): React.ReactElement {
   return (
     <View
-      className="items-center justify-center rounded-full bg-sf-blue"
+      className="items-center justify-center rounded-full bg-primary"
       style={{ width: size, height: size }}
     >
-      <Text className="font-semibold text-white" style={{ fontSize: size * 0.4 }}>
+      <Text className="font-medium text-primary-foreground text-2xl">
         {getInitials(name)}
       </Text>
     </View>
@@ -43,20 +44,21 @@ function SettingsRow({
   }
 
   const iconColor = destructive ? "#FF3B30" : "#8E8E93";
-  const labelClass = destructive ? "text-red-500" : "text-sf-label";
 
   return (
     <Pressable
       onPress={handlePress}
       disabled={!onPress}
-      className="flex-row items-center px-4 py-3 active:bg-sf-fill"
+      className="flex-row items-center gap-3 px-4 py-3 active:bg-muted"
     >
-      <View className="w-8 items-center">
-        <SymbolView name={icon as any} size={22} tintColor={iconColor} />
+      <View className="w-7 items-center">
+        <SymbolView name={icon as any} size={20} tintColor={iconColor} />
       </View>
-      <Text className={`flex-1 ml-3 text-base ${labelClass}`}>{label}</Text>
-      {value && <Text className="text-sf-secondaryLabel text-base mr-2">{value}</Text>}
-      {onPress && !destructive && <SymbolView name="chevron.right" size={14} tintColor="#C7C7CC" />}
+      <Text className={cn("flex-1 text-base text-foreground", destructive && "text-destructive")}>{label}</Text>
+      {value && <Text className={cn("text-base text-muted-foreground", destructive && "text-destructive-foreground")}>{value}</Text>}
+      {onPress && !destructive && (
+        <SymbolView name="chevron.right" size={13} tintColor="#C7C7CC" />
+      )}
     </Pressable>
   );
 }
@@ -69,20 +71,37 @@ function SettingsSection({
   children: React.ReactNode;
 }): React.ReactElement {
   return (
-    <View className="mb-6">
-      {title && <Text className="text-sf-secondaryLabel text-xs uppercase px-4 mb-2">{title}</Text>}
-      <View className="bg-sf-secondaryBg rounded-xl overflow-hidden mx-4">{children}</View>
+    <View className="mb-8 px-4 py-2">
+      {title && (
+        <View className="px-1 mb-2">
+          <Text className="text-muted-foreground text-xs">
+            {title}
+          </Text>
+        </View>
+      )}
+      <View className="bg-card rounded-xl overflow-hidden">{children}</View>
     </View>
   );
 }
 
 function Divider(): React.ReactElement {
-  return <View className="h-px bg-sf-separator ml-12" />;
+  // Offset: px-4 row padding (16px) + w-7 icon (28px) + gap-3 (12px) = 56px = ml-14
+  return <View className="h-px bg-border ml-14" />;
 }
+
+const THEME_OPTIONS = [
+  { value: "system", label: "System" },
+  { value: "light", label: "Light" },
+  { value: "dark", label: "Dark" },
+] as const;
+
+type ThemeValue = (typeof THEME_OPTIONS)[number]["value"];
 
 export default function SettingsScreen(): React.ReactElement {
   const { user, signOut, isLoading } = useAuth();
+  const { theme, hasAdaptiveThemes } = useUniwind();
   const displayName = getDisplayName(user);
+  const activeTheme: ThemeValue = hasAdaptiveThemes ? "system" : theme;
 
   function handleSignOut(): void {
     Alert.alert("Sign Out", "Are you sure you want to sign out?", [
@@ -101,7 +120,7 @@ export default function SettingsScreen(): React.ReactElement {
 
   if (isLoading) {
     return (
-      <View className="flex-1 items-center justify-center bg-sf-bg">
+      <View className="flex-1 items-center justify-center bg-background">
         <ActivityIndicator size="large" />
       </View>
     );
@@ -111,16 +130,26 @@ export default function SettingsScreen(): React.ReactElement {
     Alert.alert("Coming Soon", `${feature} settings will be available in a future update.`);
   }
 
+  function handleThemeChange(): void {
+    Alert.alert(
+      "Appearance",
+      "Choose your preferred theme",
+      THEME_OPTIONS.map((option) => ({
+        text: option.label + (activeTheme === option.value ? " ✓" : ""),
+        onPress: () => {
+          Haptics.selectionAsync();
+          Uniwind.setTheme(option.value);
+        },
+      }))
+    );
+  }
+
   return (
-    <ScrollView
-      className="flex-1 bg-sf-bg"
-      contentContainerClassName="pt-4 pb-8"
-      contentInsetAdjustmentBehavior="automatic"
-    >
-      <View className="items-center py-6">
+    <SafeAreaView className="flex-1 bg-background">
+      <View className="items-center mt-12">
         <Avatar name={displayName} size={80} />
-        <Text className="text-xl font-semibold text-sf-label mt-4">{displayName}</Text>
-        <Text className="text-sf-secondaryLabel mt-1">{user?.email}</Text>
+        <Text className="text-xl font-semibold text-foreground mt-3">{displayName}</Text>
+        <Text className="text-muted-foreground text-[15px] mt-0.5">{user?.email}</Text>
       </View>
 
       <SettingsSection title="Account">
@@ -129,7 +158,7 @@ export default function SettingsScreen(): React.ReactElement {
         <SettingsRow
           icon="checkmark.seal"
           label="Email Verified"
-          value={user?.emailVerified ? "Yes" : "No"}
+          value={user?.email_verified ? "Yes" : "No"}
         />
       </SettingsSection>
 
@@ -139,8 +168,8 @@ export default function SettingsScreen(): React.ReactElement {
         <SettingsRow
           icon="paintbrush"
           label="Appearance"
-          value="System"
-          onPress={() => showComingSoon("Appearance")}
+          value={THEME_OPTIONS.find((o) => o.value === activeTheme)?.label}
+          onPress={handleThemeChange}
         />
       </SettingsSection>
 
@@ -165,7 +194,7 @@ export default function SettingsScreen(): React.ReactElement {
         />
       </SettingsSection>
 
-      <Text className="text-center text-sf-tertiaryLabel text-xs mt-4">PRM v1.0.0</Text>
-    </ScrollView>
+      <Text className="text-center text-muted-foreground text-xs mt-6">PRM v1.0.0</Text>
+    </SafeAreaView>
   );
 }
