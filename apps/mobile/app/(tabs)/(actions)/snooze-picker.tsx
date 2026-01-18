@@ -1,23 +1,59 @@
 /**
- * Snooze picker sheet for snoozeing actions.
- *
- * Task 7.3: Create snooze picker sheet route.
+ * Snooze picker sheet for snoozing actions.
  * Presents as a form sheet with preset snooze times and custom date picker.
+ * Calls mutation directly and uses router.back() to dismiss.
  */
 
 import { useState, useCallback } from "react";
+import type { StyleProp, ViewStyle } from "react-native";
 import DateTimePicker from "@react-native-community/datetimepicker";
 import { useLocalSearchParams, useRouter } from "expo-router";
+import { useMutation } from "convex/react";
 import { SymbolView } from "expo-symbols";
+import type { SFSymbol } from "sf-symbols-typescript";
 import * as Haptics from "expo-haptics";
 import { GlassView } from "expo-glass-effect";
 import { View, Text, Pressable, useColorScheme } from "react-native";
 import { getThemeColors } from "@/lib/utils";
+import { api } from "@prm/convex/convex/_generated/api";
+import type { Id } from "@prm/convex/convex/_generated/dataModel";
+
+/** Shared style for GlassView rows */
+const GLASS_ROW_STYLE: StyleProp<ViewStyle> = {
+  flexDirection: "row",
+  alignItems: "center",
+  padding: 16,
+  borderRadius: 12,
+  gap: 12,
+};
+
+/** Reusable row component for snooze options */
+function SnoozeRow({
+  label,
+  icon,
+  iconColor,
+  onPress,
+}: {
+  label: string;
+  icon: SFSymbol;
+  iconColor: string;
+  onPress: () => void;
+}): React.JSX.Element {
+  return (
+    <Pressable onPress={onPress}>
+      <GlassView isInteractive style={GLASS_ROW_STYLE}>
+        <Text className="flex-1 text-foreground text-base" numberOfLines={1}>
+          {label}
+        </Text>
+        <SymbolView name={icon} size={16} tintColor={iconColor} />
+      </GlassView>
+    </Pressable>
+  );
+}
 
 /** Snooze preset with label and timestamp calculator */
 interface SnoozePreset {
   label: string;
-  icon: string;
   getTimestamp: () => number;
 }
 
@@ -29,12 +65,19 @@ function getTomorrow9am(): number {
   return date.getTime();
 }
 
+/** Calculate days until next Monday */
+function getDaysUntilMonday(dayOfWeek: number): number {
+  switch (dayOfWeek) {
+    case 0: return 1;  // Sunday -> tomorrow
+    case 1: return 7;  // Monday -> next Monday
+    default: return 8 - dayOfWeek; // Tue-Sat
+  }
+}
+
 /** Calculate next Monday at 9am */
 function getNextMonday9am(): number {
   const date = new Date();
-  const day = date.getDay();
-  // Days until Monday (if today is Monday, go to next Monday)
-  const daysUntilMonday = day === 0 ? 1 : day === 1 ? 7 : 8 - day;
+  const daysUntilMonday = getDaysUntilMonday(date.getDay());
   date.setDate(date.getDate() + daysUntilMonday);
   date.setHours(9, 0, 0, 0);
   return date.getTime();
@@ -44,22 +87,18 @@ function getNextMonday9am(): number {
 const SNOOZE_PRESETS: SnoozePreset[] = [
   {
     label: "1 hour",
-    icon: "clock",
     getTimestamp: () => Date.now() + 60 * 60 * 1000,
   },
   {
     label: "3 hours",
-    icon: "clock.badge.3",
     getTimestamp: () => Date.now() + 3 * 60 * 60 * 1000,
   },
   {
     label: "Tomorrow 9am",
-    icon: "sunrise",
     getTimestamp: getTomorrow9am,
   },
   {
     label: "Next Monday 9am",
-    icon: "calendar",
     getTimestamp: getNextMonday9am,
   },
 ];
@@ -67,26 +106,41 @@ const SNOOZE_PRESETS: SnoozePreset[] = [
 export default function SnoozePicker(): React.JSX.Element {
   const router = useRouter();
   const { actionId } = useLocalSearchParams<{ actionId: string }>();
+  const swipeAction = useMutation(api.actions.swipeAction);
   const [showDatePicker, setShowDatePicker] = useState(false);
   const [customDate, setCustomDate] = useState(new Date());
   const colorScheme = useColorScheme();
   const colors = getThemeColors(colorScheme === "dark");
 
+  /** Snooze the action and dismiss the sheet */
+  const snoozeAndDismiss = useCallback(
+    async (timestamp: number) => {
+      if (!actionId) return;
+
+      try {
+        await swipeAction({
+          actionId: actionId as Id<"actions">,
+          direction: "up",
+          snoozedUntil: timestamp,
+        });
+        await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      } catch (error) {
+        console.error("Failed to snooze action:", error);
+        await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+      }
+
+      router.back();
+    },
+    [actionId, swipeAction, router],
+  );
+
   /** Handle preset selection */
   const handlePresetSelect = useCallback(
     (preset: SnoozePreset) => {
-      const timestamp = preset.getTimestamp();
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-      // Navigate back to index with selected timestamp
-      router.replace({
-        pathname: "/(actions)",
-        params: {
-          snoozedUntil: timestamp.toString(),
-          snoozeActionId: actionId ?? "",
-        },
-      });
+      snoozeAndDismiss(preset.getTimestamp());
     },
-    [router, actionId],
+    [snoozeAndDismiss],
   );
 
   /** Handle custom date selection */
@@ -102,15 +156,8 @@ export default function SnoozePicker(): React.JSX.Element {
   /** Confirm custom date */
   const handleConfirmCustom = useCallback(() => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-    // Navigate back to index with selected timestamp
-    router.replace({
-      pathname: "/(actions)",
-      params: {
-        snoozedUntil: customDate.getTime().toString(),
-        snoozeActionId: actionId ?? "",
-      },
-    });
-  }, [router, actionId, customDate]);
+    snoozeAndDismiss(customDate.getTime());
+  }, [snoozeAndDismiss, customDate]);
 
   /** Toggle custom picker visibility */
   const toggleCustomPicker = useCallback(() => {
@@ -120,69 +167,27 @@ export default function SnoozePicker(): React.JSX.Element {
 
   return (
     <View className="flex-1 p-4">
-      <Text className="text-sf-label text-xl font-bold text-center mb-6">
-        Snooze Until
+      <Text className="text-foreground text-xl font-bold text-center mb-6">
+        Remind me later
       </Text>
 
-      {/* Preset buttons */}
+      {/* Preset and custom buttons */}
       <View className="gap-3">
         {SNOOZE_PRESETS.map((preset) => (
-          <Pressable
+          <SnoozeRow
             key={preset.label}
+            label={preset.label}
+            icon="chevron.right"
+            iconColor={colors.mutedForeground}
             onPress={() => handlePresetSelect(preset)}
-          >
-            <GlassView
-              isInteractive
-              style={{
-                flexDirection: "row",
-                alignItems: "center",
-                padding: 16,
-                borderRadius: 12,
-                gap: 12,
-              }}
-            >
-              <SymbolView
-                name={preset.icon as never}
-                size={24}
-                tintColor={colors.info}
-              />
-              <Text className="text-sf-label text-base flex-1">
-                {preset.label}
-              </Text>
-              <SymbolView
-                name="chevron.right"
-                size={16}
-                tintColor={colors.mutedForeground}
-              />
-            </GlassView>
-          </Pressable>
+          />
         ))}
-
-        {/* Custom date option */}
-        <Pressable onPress={toggleCustomPicker}>
-          <GlassView
-            isInteractive
-            style={{
-              flexDirection: "row",
-              alignItems: "center",
-              padding: 16,
-              borderRadius: 12,
-              gap: 12,
-            }}
-          >
-            <SymbolView
-              name="calendar.badge.clock"
-              size={24}
-              tintColor={colors.info}
-            />
-            <Text className="text-sf-label text-base flex-1">Custom...</Text>
-            <SymbolView
-              name={showDatePicker ? "chevron.up" : "chevron.down"}
-              size={16}
-              tintColor={colors.mutedForeground}
-            />
-          </GlassView>
-        </Pressable>
+        <SnoozeRow
+          label="Custom..."
+          icon={showDatePicker ? "chevron.up" : "chevron.down"}
+          iconColor={colors.mutedForeground}
+          onPress={toggleCustomPicker}
+        />
 
         {/* Date/time picker */}
         {showDatePicker && (
@@ -193,11 +198,11 @@ export default function SnoozePicker(): React.JSX.Element {
               display="spinner"
               minimumDate={new Date()}
               onChange={handleCustomDateChange}
-              themeVariant="dark"
+              themeVariant={colorScheme === "dark" ? "dark" : "light"}
             />
             <Pressable
               onPress={handleConfirmCustom}
-              className="mt-4 bg-sf-blue px-8 py-3 rounded-full"
+              className="mt-4 bg-primary px-8 py-3 rounded-full"
             >
               <Text className="text-white font-semibold text-base">
                 Confirm

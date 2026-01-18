@@ -1,18 +1,14 @@
 /**
  * Actions tab main screen.
- *
- * Task 7.1: Implement Actions tab with CardStack and real data.
- * Task 7.2: Implement swipe handler with Convex mutation.
- * Task 7.4: Wire snooze picker to action swipe.
  * Displays pending actions as swipeable cards using Convex data.
  */
 
-import { useState, useCallback, useEffect } from "react";
-import { RefreshControl } from "react-native";
-import { useMutation } from "convex/react";
-import { useRouter, useLocalSearchParams } from "expo-router";
+import { useState, useCallback, useMemo } from "react";
+import { useMutation, useQuery } from "convex/react";
+import { useRouter } from "expo-router";
 import * as Haptics from "expo-haptics";
-import { View, Text, ScrollView } from "react-native";
+import { View, Text } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useActions } from "@/hooks/useActions";
 import { CardStack } from "@/components/card-stack";
 import {
@@ -23,6 +19,7 @@ import {
   type ContactFormData,
 } from "@/components/cards";
 import type { SwipeDirection } from "@/components/swipeable-card";
+import { ActionButtons } from "@/components/action-buttons";
 import { SkeletonStack } from "@/components/skeleton-card";
 import { ErrorBoundary } from "@/components/error-boundary";
 import { api } from "@prm/convex/convex/_generated/api";
@@ -65,13 +62,41 @@ const CONTACT_ACTION_TYPES = ["eod_contact", "new_connection"];
 
 export default function ActionsScreen(): React.JSX.Element {
   const router = useRouter();
-  const params = useLocalSearchParams<{
-    snoozedUntil?: string;
-    snoozeActionId?: string;
-  }>();
+  const insets = useSafeAreaInsets();
   const { actions, isLoading } = useActions({ limit: 20 });
   const swipeAction = useMutation(api.actions.swipeAction);
-  const [isRefreshing, setIsRefreshing] = useState(false);
+  const [triggerSwipe, setTriggerSwipe] = useState<SwipeDirection | null>(null);
+
+  // Get the top action ID for fetching context with messages
+  const topActionId = actions[0]?._id as Id<"actions"> | undefined;
+
+  // Fetch context for the top action (includes messages)
+  const actionContext = useQuery(
+    api.actions.getActionWithContext,
+    topActionId ? { actionId: topActionId, messageLimit: 15 } : "skip"
+  );
+
+  // Map messages from context to DisplayMessage format
+  const topActionMessages: DisplayMessage[] = useMemo(() => {
+    const messages = actionContext?.messages;
+    if (!messages) return [];
+
+    return messages.map((msg) => ({
+      _id: msg._id,
+      content: msg.content,
+      sentAt: msg.sentAt,
+      isFromMe: msg.isFromMe,
+      senderName: msg.senderName,
+      status: msg.status,
+      reactions: msg.reactions?.map((r) => r.emoji) ?? null,
+      attachments: msg.attachments?.map((att) => ({
+        filename: att.filename ?? null,
+        mimeType: att.mimeType ?? null,
+        url: att.url ?? null,
+        thumbnailUrl: att.thumbnailUrl ?? null,
+      })),
+    }));
+  }, [actionContext?.messages]);
 
   // Track response text per action (key = action._id)
   const [responseTexts, setResponseTexts] = useState<Record<string, string>>(
@@ -82,34 +107,6 @@ export default function ActionsScreen(): React.JSX.Element {
   const [contactForms, setContactForms] = useState<
     Record<string, ContactFormData>
   >({});
-
-  // Handle snooze return from snooze-picker sheet
-  useEffect(() => {
-    const handleSnoozeReturn = async () => {
-      const { snoozedUntil, snoozeActionId } = params;
-      if (!snoozedUntil || !snoozeActionId) return;
-
-      const timestamp = parseInt(snoozedUntil, 10);
-      if (isNaN(timestamp)) return;
-
-      try {
-        await swipeAction({
-          actionId: snoozeActionId as Id<"actions">,
-          direction: "up",
-          snoozedUntil: timestamp,
-        });
-        await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-      } catch (error) {
-        console.error("Failed to snooze action:", error);
-        await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
-      }
-
-      // Clear params after processing
-      router.setParams({ snoozedUntil: undefined, snoozeActionId: undefined });
-    };
-
-    handleSnoozeReturn();
-  }, [params, swipeAction, router]);
 
   // Transform actions to CardStack items
   const cardItems: ActionItem[] = actions.map((action) => ({
@@ -161,37 +158,26 @@ export default function ActionsScreen(): React.JSX.Element {
     [],
   );
 
-  // Handle pull-to-refresh
-  // Convex has real-time updates, so we just show refresh indicator for UX
-  const handleRefresh = useCallback(async () => {
-    setIsRefreshing(true);
-    await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    // Convex updates automatically, simulate brief refresh for UX
-    await new Promise((resolve) => setTimeout(resolve, 500));
-    setIsRefreshing(false);
-  }, []);
-
   // Handle swipe with Convex mutation
   const handleSwipe = useCallback(
     async (item: ActionItem, direction: SwipeDirection) => {
       const { action } = item;
+      setTriggerSwipe(null);
 
-      // For snooze (up), navigate to snooze picker sheet
+      // Snooze: navigate to picker sheet
       if (direction === "up") {
         router.push({
-          pathname: "/(actions)/snooze-picker",
+          pathname: "/(tabs)/(actions)/snooze-picker",
           params: { actionId: action._id },
         });
         return;
       }
 
-      // Get response text for right swipe (send)
-      const responseText =
-        direction === "right" ? getResponseText(action) : undefined;
-
-      // Get notes from contact form for new_connection right swipe
+      // Right = send, Left = skip
+      const isSending = direction === "right";
+      const responseText = isSending ? getResponseText(action) : undefined;
       const notes =
-        direction === "right" && action.type === "new_connection"
+        isSending && action.type === "new_connection"
           ? getContactFormData(action).notes
           : undefined;
 
@@ -201,27 +187,34 @@ export default function ActionsScreen(): React.JSX.Element {
           direction,
           responseText: notes ?? responseText,
         });
-        // Success haptic feedback
         await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       } catch (error) {
         console.error("Failed to swipe action:", error);
-        // Error haptic feedback
         await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
       }
     },
     [router, swipeAction, getResponseText, getContactFormData],
   );
 
+  // Handle button press from ActionButtons
+  const handleButtonSwipe = useCallback(
+    (direction: SwipeDirection) => {
+      if (actions.length === 0) return;
+      setTriggerSwipe(direction);
+    },
+    [actions.length],
+  );
+
   // Render card based on action type
   const renderCard = useCallback(
-    (item: ActionItem): React.JSX.Element => {
+    (item: ActionItem, index: number): React.JSX.Element => {
       const { action } = item;
+      const isTopCard = index === 0;
 
       // Message-based actions (respond, follow_up)
       if (MESSAGE_ACTION_TYPES.includes(action.type)) {
-        // For now, render with minimal data
-        // Task 7.5 will add getActionWithContext for full messages
-        const messages: DisplayMessage[] = [];
+        // Use messages from context for the top card, empty for others
+        const messages = isTopCard ? topActionMessages : [];
 
         return (
           <MessageResponseCard
@@ -270,8 +263,12 @@ export default function ActionsScreen(): React.JSX.Element {
       getContactFormData,
       handleResponseChange,
       handleContactFormChange,
+      topActionMessages,
     ],
   );
+
+  // Get top action for button state
+  const topAction = actions[0];
 
   // Loading state - show skeleton cards matching CardStack layout
   if (isLoading) {
@@ -280,25 +277,27 @@ export default function ActionsScreen(): React.JSX.Element {
 
   return (
     <ErrorBoundary>
-      <ScrollView
-        className="flex-1"
-        contentInsetAdjustmentBehavior="automatic"
-        contentContainerStyle={{ flexGrow: 1 }}
-        refreshControl={
-          <RefreshControl
-            refreshing={isRefreshing}
-            onRefresh={handleRefresh}
-            tintColor="#8E8E93"
-          />
-        }
-      >
+      <View className="flex-1 bg-background pt-24">
         <CardStack
           actions={cardItems}
           totalCount={actions.length}
           onSwipe={handleSwipe}
           renderCard={renderCard}
+          triggerSwipe={triggerSwipe}
         />
-      </ScrollView>
+
+        {/* Bottom action buttons - positioned above tab bar */}
+        {actions.length > 0 && (
+          <View style={{ marginBottom: 56 + insets.bottom }}>
+            <ActionButtons
+              onSwipe={handleButtonSwipe}
+              disabled={!topAction}
+              skipLabel="Skip"
+              sendLabel="Send"
+            />
+          </View>
+        )}
+      </View>
     </ErrorBoundary>
   );
 }
