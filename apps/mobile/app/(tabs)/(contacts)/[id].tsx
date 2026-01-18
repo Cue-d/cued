@@ -6,8 +6,7 @@ import { useLocalSearchParams, Stack } from "expo-router";
 import { useQuery } from "convex/react";
 import { SymbolView } from "expo-symbols";
 import type { SFSymbol } from "sf-symbols-typescript";
-import { View, Text, ScrollView, Pressable } from "react-native";
-import { useColorScheme } from "nativewind";
+import { View, Text, ScrollView, Pressable, useColorScheme } from "react-native";
 import { getThemeColors } from "@/lib/utils";
 import { api } from "@prm/convex/convex/_generated/api";
 import type { Id } from "@prm/convex/convex/_generated/dataModel";
@@ -172,7 +171,7 @@ function HandleRow({
   handle: Handle;
   isFirst: boolean;
 }): React.JSX.Element {
-  const { colorScheme } = useColorScheme();
+  const colorScheme = useColorScheme();
   const colors = getThemeColors(colorScheme === "dark");
 
   // Format phone numbers for display
@@ -348,7 +347,7 @@ export default function ContactDetailScreen(): React.JSX.Element {
 
 /** Recent conversations placeholder component */
 function RecentConversationsPlaceholder(): React.JSX.Element {
-  const { colorScheme } = useColorScheme();
+  const colorScheme = useColorScheme();
   const colors = getThemeColors(colorScheme === "dark");
 
   return (
