@@ -1,27 +1,36 @@
 /**
  * Contacts tab screen.
  *
- * Task 8.3: Implement Contacts tab with FlatList
- * Task 8.4: Add search to Contacts tab
- * - Import useContacts hook
- * - Use FlatList from react-native with contentInsetAdjustmentBehavior
- * - Render ContactListItem for each contact
- * - Add keyExtractor using contact.id
- * - Use Stack.Screen onChangeText to get search text
- * - Pass searchQuery to useContacts for filtering
+ * Modern iOS-style contacts list with alphabetical sections,
+ * colored avatars, and glass effect backgrounds.
  */
 
-import { useState, useCallback } from "react";
-import { FlatList, RefreshControl, type ListRenderItemInfo } from "react-native";
+import { useState, useCallback, useMemo } from "react";
+import {
+  SectionList,
+  RefreshControl,
+  View,
+  Text,
+  type SectionListRenderItemInfo,
+  type SectionListData,
+} from "react-native";
 import { Stack } from "expo-router";
+import { SymbolView } from "expo-symbols";
 import * as Haptics from "expo-haptics";
-import { View, Text } from "react-native";
+import { useColorScheme } from "nativewind";
+import { getThemeColors } from "@/lib/utils";
 import { useContacts } from "@/hooks/useContacts";
 import {
   ContactListItem,
   type ContactListItemData,
 } from "@/components/contact-list-item";
 import { ErrorBoundary } from "@/components/error-boundary";
+
+/** Section type for alphabetical grouping */
+interface ContactSection {
+  title: string;
+  data: ContactListItemData[];
+}
 
 /** Map Convex contact to ContactListItemData */
 function mapContact(contact: {
@@ -30,7 +39,6 @@ function mapContact(contact: {
   company?: string | null;
   handles?: { type: string; value: string; platform: string }[];
 }): ContactListItemData {
-  // Extract phone number and email from handles
   const phoneHandle = contact.handles?.find((h) => h.type === "phone");
   const emailHandle = contact.handles?.find((h) => h.type === "email");
 
@@ -43,35 +51,83 @@ function mapContact(contact: {
   };
 }
 
-/** Render each contact list item */
-function renderContactItem({
-  item,
-}: ListRenderItemInfo<ContactListItemData>): React.JSX.Element {
-  return <ContactListItem contact={item} />;
+/** Group contacts by first letter */
+function groupContactsByLetter(
+  contacts: ContactListItemData[]
+): ContactSection[] {
+  const groups: Record<string, ContactListItemData[]> = {};
+
+  for (const contact of contacts) {
+    const name = contact.displayName.trim();
+    let letter = name[0]?.toUpperCase() ?? "#";
+    // Group non-alphabetic characters under #
+    if (!/[A-Z]/i.test(letter)) {
+      letter = "#";
+    }
+    if (!groups[letter]) {
+      groups[letter] = [];
+    }
+    groups[letter].push(contact);
+  }
+
+  // Sort sections alphabetically, with # at the end
+  const sortedLetters = Object.keys(groups).sort((a, b) => {
+    if (a === "#") return 1;
+    if (b === "#") return -1;
+    return a.localeCompare(b);
+  });
+
+  return sortedLetters.map((letter) => ({
+    title: letter,
+    data: groups[letter].sort((a, b) =>
+      a.displayName.localeCompare(b.displayName)
+    ),
+  }));
 }
 
-/** Key extractor for FlatList */
-function keyExtractor(item: ContactListItemData): string {
-  return item.id;
-}
-
-/** Empty state component */
-function EmptyState(): React.JSX.Element {
+/** Section header component */
+function SectionHeader({ title }: { title: string }) {
   return (
-    <View className="flex-1 items-center justify-center p-8">
-      <Text className="text-sf-secondaryLabel text-lg text-center">
-        No contacts yet
-      </Text>
-      <Text className="text-sf-tertiaryLabel text-sm text-center mt-2">
-        Contacts will appear here as you sync your messages
+    <View className="px-4 py-1.5 bg-background">
+      <Text className="text-sm font-semibold text-muted-foreground">
+        {title}
       </Text>
     </View>
   );
 }
 
-/** Separator between contact items */
-function ItemSeparator(): React.JSX.Element {
-  return <View className="h-px bg-sf-separator ml-16" />;
+/** Empty state component */
+function EmptyState() {
+  const { colorScheme } = useColorScheme();
+  const colors = getThemeColors(colorScheme === "dark");
+
+  return (
+    <View className="flex-1 items-center justify-center p-8">
+      <SymbolView name="person.2" tintColor={colors.mutedForeground} size={56} />
+      <Text className="text-xl font-semibold text-foreground mt-4 text-center">
+        No Contacts Yet
+      </Text>
+      <Text className="text-base text-muted-foreground mt-2 text-center max-w-[280px]">
+        Contacts will appear here as you sync your messages and emails
+      </Text>
+    </View>
+  );
+}
+
+/** Item separator */
+function ItemSeparator() {
+  return <View className="h-px bg-border ml-[72px]" />;
+}
+
+/** Loading state */
+function LoadingState() {
+  return (
+    <View className="flex-1 items-center justify-center p-8">
+      <Text className="text-base text-muted-foreground">
+        Loading contacts...
+      </Text>
+    </View>
+  );
 }
 
 export default function ContactsScreen(): React.JSX.Element {
@@ -81,26 +137,44 @@ export default function ContactsScreen(): React.JSX.Element {
     searchQuery: searchQuery || undefined,
   });
 
-  // Map Convex contacts to ContactListItemData
-  const mappedContacts = contacts.map(mapContact);
+  // Map and group contacts
+  const sections = useMemo(() => {
+    const mapped = contacts.map(mapContact);
+    return groupContactsByLetter(mapped);
+  }, [contacts]);
 
   // Handle pull-to-refresh
-  // Convex has real-time updates, so we just show refresh indicator for UX
   const handleRefresh = useCallback(async () => {
     setIsRefreshing(true);
     await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    // Convex updates automatically, simulate brief refresh for UX
     await new Promise((resolve) => setTimeout(resolve, 500));
     setIsRefreshing(false);
   }, []);
 
+  const renderItem = useCallback(
+    ({ item }: SectionListRenderItemInfo<ContactListItemData, ContactSection>) => (
+      <ContactListItem contact={item} />
+    ),
+    []
+  );
+
+  const renderSectionHeader = useCallback(
+    ({ section }: { section: SectionListData<ContactListItemData, ContactSection> }) => (
+      <SectionHeader title={section.title} />
+    ),
+    []
+  );
+
+  const keyExtractor = useCallback(
+    (item: ContactListItemData) => item.id,
+    []
+  );
+
   if (isLoading) {
-    return (
-      <View className="flex-1 items-center justify-center">
-        <Text className="text-sf-secondaryLabel">Loading contacts...</Text>
-      </View>
-    );
+    return <LoadingState />;
   }
+
+  const totalContacts = contacts.length;
 
   return (
     <ErrorBoundary>
@@ -112,21 +186,29 @@ export default function ContactsScreen(): React.JSX.Element {
           },
         }}
       />
-      <FlatList
-        data={mappedContacts}
-        renderItem={renderContactItem}
+      <SectionList
+        sections={sections}
+        renderItem={renderItem}
+        renderSectionHeader={renderSectionHeader}
         keyExtractor={keyExtractor}
         contentInsetAdjustmentBehavior="automatic"
-        ListEmptyComponent={EmptyState}
+        keyboardShouldPersistTaps="handled"
+        stickySectionHeadersEnabled
         ItemSeparatorComponent={ItemSeparator}
-        refreshControl={
-          <RefreshControl
-            refreshing={isRefreshing}
-            onRefresh={handleRefresh}
-            tintColor="#8E8E93"
-          />
+        ListEmptyComponent={EmptyState}
+        ListFooterComponent={
+          totalContacts > 0 ? (
+            <View className="py-6 items-center">
+              <Text className="text-sm text-muted-foreground">
+                {totalContacts} {totalContacts === 1 ? "Contact" : "Contacts"}
+              </Text>
+            </View>
+          ) : null
         }
-        contentContainerClassName="flex-1 px-6"
+        refreshControl={
+          <RefreshControl refreshing={isRefreshing} onRefresh={handleRefresh} />
+        }
+        className="bg-background"
       />
     </ErrorBoundary>
   );

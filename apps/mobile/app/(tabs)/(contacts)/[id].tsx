@@ -1,9 +1,5 @@
 /**
  * Contact detail screen - displays full contact profile.
- *
- * Task 8.5: Create contact detail page.
- * Shows avatar, name, company, handles grouped by platform, notes, tags,
- * and recent conversations.
  */
 
 import { useLocalSearchParams, Stack } from "expo-router";
@@ -11,6 +7,8 @@ import { useQuery } from "convex/react";
 import { SymbolView } from "expo-symbols";
 import type { SFSymbol } from "sf-symbols-typescript";
 import { View, Text, ScrollView, Pressable } from "react-native";
+import { useColorScheme } from "nativewind";
+import { getThemeColors } from "@/lib/utils";
 import { api } from "@prm/convex/convex/_generated/api";
 import type { Id } from "@prm/convex/convex/_generated/dataModel";
 
@@ -26,21 +24,37 @@ function getInitials(name: string): string {
     .toUpperCase();
 }
 
+/** Format phone number: +12078005660 -> +1 (207) 800-5660 */
+function formatPhoneNumber(phone: string): string {
+  const digits = phone.replace(/\D/g, "");
+
+  // Handle US numbers (10 or 11 digits)
+  if (digits.length === 11 && digits.startsWith("1")) {
+    const country = digits.slice(0, 1);
+    const area = digits.slice(1, 4);
+    const first = digits.slice(4, 7);
+    const last = digits.slice(7, 11);
+    return `+${country} (${area}) ${first}-${last}`;
+  }
+
+  if (digits.length === 10) {
+    const area = digits.slice(0, 3);
+    const first = digits.slice(3, 6);
+    const last = digits.slice(6, 10);
+    return `(${area}) ${first}-${last}`;
+  }
+
+  // Return original if not standard format
+  return phone;
+}
+
 /** Avatar component */
-function Avatar({
-  initials,
-  size = "large",
-}: {
-  initials: string;
-  size?: "small" | "large";
-}): React.JSX.Element {
-  const sizeClasses =
-    size === "large" ? "w-24 h-24 text-3xl" : "w-12 h-12 text-base";
+function Avatar({ initials }: { initials: string }): React.JSX.Element {
   return (
-    <View
-      className={`rounded-full bg-sf-fill items-center justify-center ${sizeClasses}`}
-    >
-      <Text className="text-sf-label font-semibold">{initials}</Text>
+    <View className="w-20 h-20 rounded-full bg-muted items-center justify-center">
+      <Text className="text-2xl font-semibold text-muted-foreground">
+        {initials}
+      </Text>
     </View>
   );
 }
@@ -135,8 +149,8 @@ function groupHandlesByPlatform(handles: Handle[]): GroupedHandles {
 /** Tag badge component */
 function TagBadge({ tag }: { tag: string }): React.JSX.Element {
   return (
-    <View className="px-3 py-1 rounded-full bg-sf-fill mr-2 mb-2">
-      <Text className="text-xs font-medium text-sf-label">{tag}</Text>
+    <View className="px-3 py-1.5 rounded-2xl bg-muted mr-2 mb-2">
+      <Text className="text-sm font-medium text-foreground">{tag}</Text>
     </View>
   );
 }
@@ -144,7 +158,7 @@ function TagBadge({ tag }: { tag: string }): React.JSX.Element {
 /** Section header component */
 function SectionHeader({ title }: { title: string }): React.JSX.Element {
   return (
-    <Text className="text-sm font-semibold text-sf-secondaryLabel uppercase tracking-wide mb-2 mx-4">
+    <Text className="text-sm font-semibold text-muted-foreground mb-2 mx-4">
       {title}
     </Text>
   );
@@ -158,25 +172,28 @@ function HandleRow({
   handle: Handle;
   isFirst: boolean;
 }): React.JSX.Element {
+  const { colorScheme } = useColorScheme();
+  const colors = getThemeColors(colorScheme === "dark");
+
+  // Format phone numbers for display
+  const displayValue =
+    handle.type === "phone" ? formatPhoneNumber(handle.value) : handle.value;
+
   return (
     <Pressable
-      className={`flex-row items-center px-4 py-3 active:bg-sf-fill ${!isFirst ? "border-t border-sf-separator" : ""}`}
+      className={`flex-row items-center px-4 py-3 active:bg-muted ${!isFirst ? "border-t border-border" : ""}`}
       accessibilityRole="button"
-      accessibilityLabel={`${getHandleTypeLabel(handle.type)}: ${handle.value}`}
+      accessibilityLabel={`${getHandleTypeLabel(handle.type)}: ${displayValue}`}
     >
-      <View className="w-8 h-8 rounded-full bg-sf-fill items-center justify-center mr-3">
-        <SymbolView
-          name={getHandleIcon(handle.type)}
-          size={14}
-          tintColor="#8E8E93"
-        />
+      <View className="w-8 h-8 rounded-full bg-muted items-center justify-center mr-3">
+        <SymbolView name={getHandleIcon(handle.type)} size={14} tintColor={colors.mutedForeground} />
       </View>
       <View className="flex-1">
-        <Text className="text-xs text-sf-secondaryLabel">
+        <Text className="text-xs text-muted-foreground">
           {getHandleTypeLabel(handle.type)}
         </Text>
-        <Text className="text-base text-sf-label" selectable>
-          {handle.value}
+        <Text className="text-base text-foreground mt-0.5" selectable>
+          {displayValue}
         </Text>
       </View>
     </Pressable>
@@ -201,7 +218,7 @@ export default function ContactDetailScreen(): React.JSX.Element {
           }}
         />
         <View className="flex-1 items-center justify-center">
-          <Text className="text-sf-secondaryLabel">Loading...</Text>
+          <Text className="text-muted-foreground">Loading...</Text>
         </View>
       </>
     );
@@ -218,10 +235,10 @@ export default function ContactDetailScreen(): React.JSX.Element {
           }}
         />
         <View className="flex-1 items-center justify-center">
-          <Text className="text-sf-label text-lg font-semibold">
+          <Text className="text-lg font-semibold text-foreground">
             Contact not found
           </Text>
-          <Text className="text-sf-secondaryLabel mt-2">
+          <Text className="text-muted-foreground mt-2">
             This contact may have been deleted.
           </Text>
         </View>
@@ -246,16 +263,16 @@ export default function ContactDetailScreen(): React.JSX.Element {
       <ScrollView
         className="flex-1"
         contentInsetAdjustmentBehavior="automatic"
-        contentContainerClassName="pb-8"
+        contentContainerStyle={{ paddingBottom: 32 }}
       >
         {/* Profile Header */}
         <View className="items-center pt-6 pb-8">
-          <Avatar initials={initials} size="large" />
-          <Text className="text-2xl font-bold text-sf-label mt-4">
+          <Avatar initials={initials} />
+          <Text className="text-2xl font-bold text-foreground mt-4">
             {contact.displayName}
           </Text>
           {contact.company && (
-            <Text className="text-base text-sf-secondaryLabel mt-1">
+            <Text className="text-base text-muted-foreground mt-1">
               {contact.company}
             </Text>
           )}
@@ -278,13 +295,13 @@ export default function ContactDetailScreen(): React.JSX.Element {
                       tintColor={getPlatformColor(platform)}
                     />
                   </View>
-                  <Text className="text-sm font-medium text-sf-label">
+                  <Text className="text-sm font-medium text-foreground">
                     {getPlatformLabel(platform)}
                   </Text>
                 </View>
 
                 {/* Handle rows */}
-                <View className="mx-4 rounded-xl bg-sf-secondaryBg overflow-hidden">
+                <View className="mx-4 rounded-xl bg-card overflow-hidden">
                   {groupedHandles[platform].map((handle, idx) => (
                     <HandleRow
                       key={`${handle.type}-${handle.value}`}
@@ -314,8 +331,8 @@ export default function ContactDetailScreen(): React.JSX.Element {
         {hasNotes && (
           <View className="mb-6">
             <SectionHeader title="Notes" />
-            <View className="mx-4 p-4 rounded-xl bg-sf-secondaryBg">
-              <Text className="text-base text-sf-label" selectable>
+            <View className="mx-4 p-4 rounded-xl bg-card">
+              <Text className="text-base text-foreground" selectable>
                 {contact.notes}
               </Text>
             </View>
@@ -323,20 +340,26 @@ export default function ContactDetailScreen(): React.JSX.Element {
         )}
 
         {/* Recent Conversations placeholder */}
-        <View className="mb-6">
-          <SectionHeader title="Recent Conversations" />
-          <View className="mx-4 p-4 rounded-xl bg-sf-secondaryBg items-center">
-            <SymbolView
-              name="text.bubble"
-              size={32}
-              tintColor="#8E8E93"
-            />
-            <Text className="text-sm text-sf-secondaryLabel mt-2">
-              Conversation history coming soon
-            </Text>
-          </View>
-        </View>
+        <RecentConversationsPlaceholder />
       </ScrollView>
     </>
+  );
+}
+
+/** Recent conversations placeholder component */
+function RecentConversationsPlaceholder(): React.JSX.Element {
+  const { colorScheme } = useColorScheme();
+  const colors = getThemeColors(colorScheme === "dark");
+
+  return (
+    <View className="mb-6">
+      <SectionHeader title="Recent Conversations" />
+      <View className="mx-4 p-4 rounded-xl bg-card items-center">
+        <SymbolView name="text.bubble" size={32} tintColor={colors.mutedForeground} />
+        <Text className="text-sm text-muted-foreground mt-2">
+          Conversation history coming soon
+        </Text>
+      </View>
+    </View>
   );
 }
