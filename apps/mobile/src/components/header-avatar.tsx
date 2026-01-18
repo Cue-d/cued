@@ -25,15 +25,16 @@ export function HeaderAvatar({ size = 32 }: HeaderAvatarProps): React.ReactEleme
       accessibilityRole="button"
     >
       <View
-        className="relative items-center justify-center text-center rounded-full"
+        className="rounded-full"
         style={{ width: size, height: size }}
       >
         <Text
-          className="font-medium text-muted-foreground"
+          className="font-bold ml-[1] text-muted-foreground"
           style={{
-            fontSize: size * 0.45,
-            lineHeight: size * 0.5,
-            includeFontPadding: false,
+            width: size,
+            fontSize: size * 0.5,
+            lineHeight: size,
+            textAlign: "center",
             textAlignVertical: "center",
           }}
         >
