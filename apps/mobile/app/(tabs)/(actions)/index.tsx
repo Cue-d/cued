@@ -174,18 +174,31 @@ export default function ActionsScreen(): React.JSX.Element {
       }
 
       // Right = send, Left = skip
-      const isSending = direction === "right";
-      const responseText = isSending ? getResponseText(action) : undefined;
-      const notes =
-        isSending && action.type === "new_connection"
+      if (direction === "left") {
+        try {
+          await swipeAction({
+            actionId: action._id as Id<"actions">,
+            direction,
+          });
+          await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+        } catch (error) {
+          console.error("Failed to skip action:", error);
+          await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+        }
+        return;
+      }
+
+      // direction === "right" - send with response text
+      const responseText =
+        action.type === "new_connection"
           ? getContactFormData(action).notes
-          : undefined;
+          : getResponseText(action);
 
       try {
         await swipeAction({
           actionId: action._id as Id<"actions">,
           direction,
-          responseText: notes ?? responseText,
+          responseText,
         });
         await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       } catch (error) {

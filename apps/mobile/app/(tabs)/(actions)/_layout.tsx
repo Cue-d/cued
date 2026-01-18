@@ -1,7 +1,7 @@
 import { Stack } from "expo-router/stack";
 import { HeaderAvatar } from "@/components/header-avatar";
 
-export default function ActionsLayout() {
+export default function ActionsLayout(): React.JSX.Element {
   return (
     <Stack
       screenOptions={{
