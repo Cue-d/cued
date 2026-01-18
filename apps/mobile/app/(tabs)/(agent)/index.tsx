@@ -190,6 +190,8 @@ export default function AgentScreen() {
         ) : (
           // Message list with keyboard handling
           <KeyboardFriendlyScrollView>
+            {/* Extra padding for first message to clear header */}
+            <View className="h-10" />
             {messages.map((message, index) => {
               const isLastAssistantMessage =
                 index === messages.length - 1 &&
