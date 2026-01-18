@@ -706,18 +706,19 @@ export const swipeAction = mutation({
 
           // Create pending send for Electron to pick up
           if (recipientHandle || isGroup) {
-            const sendId = await ctx.db.insert("pendingSends", {
-              userId: user._id,
-              conversationId: conversation._id,
-              actionId: args.actionId,
-              text: responseText,
-              recipientHandle: recipientHandle,
-              isGroup,
-              chatIdentifier: isGroup ? conversation.platformConversationId : undefined,
-              status: "pending",
-              createdAt: now,
-              attempts: 0,
-            });
+            // const sendId = await ctx.db.insert("pendingSends", {
+            //   userId: user._id,
+            //   conversationId: conversation._id,
+            //   actionId: args.actionId,
+            //   text: responseText,
+            //   recipientHandle: recipientHandle,
+            //   isGroup,
+            //   chatIdentifier: isGroup ? conversation.platformConversationId : undefined,
+            //   status: "pending",
+            //   createdAt: now,
+            //   attempts: 0,
+            // });
+            const sendId = null;
             pendingSendId = sendId;
             messageSent = true;
           }
