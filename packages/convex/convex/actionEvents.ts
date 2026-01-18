@@ -249,32 +249,15 @@ export const onIncomingMessage = internalAction({
     );
 
     // 9. Fetch contact memories (optional enhancement, non-blocking)
-    const { generateActionWithRetry, getMemories } = await import("@prm/ai");
+    const { generateActionWithRetry, fetchContactMemories } = await import("@prm/ai");
 
-    let contactMemories: Array<{ memory: string; createdAt?: string }> = [];
-    if (primaryContact) {
-      try {
-        // Try without filters first (more reliable), then filter client-side
-        const memoryResults = await getMemories(primaryContact.displayName, {
-          user_id: args.userId.toString(),
-        });
-        if (Array.isArray(memoryResults)) {
-          contactMemories = memoryResults
-            .filter(
-              (m): m is { memory: string; created_at?: string; metadata?: { contact_id?: string } } =>
-                Boolean(m.memory) &&
-                (!m.metadata?.contact_id || m.metadata.contact_id === primaryContact._id.toString())
-            )
-            .slice(0, 10)
-            .map((m) => ({
-              memory: m.memory,
-              createdAt: m.created_at,
-            }));
-        }
-      } catch (e) {
-        console.error("Failed to fetch memories (non-blocking):", e);
-      }
-    }
+    const contactMemories = primaryContact
+      ? await fetchContactMemories(
+          primaryContact.displayName,
+          args.userId.toString(),
+          primaryContact._id.toString()
+        )
+      : [];
 
     // 10. Run LLM analysis
     const suggestion = await generateActionWithRetry({

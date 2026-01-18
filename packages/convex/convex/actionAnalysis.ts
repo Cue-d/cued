@@ -395,37 +395,16 @@ export const analyzeConversation = internalAction({
       );
 
       // Build input for LLM
-      const { generateActionWithRetry, getMemories } = await import("@prm/ai");
+      const { generateActionWithRetry, fetchContactMemories } = await import("@prm/ai");
 
       // Fetch memories about this contact for better context (optional, non-blocking)
-      let contactMemories: Array<{ memory: string; createdAt?: string }> = [];
-      if (primaryContact) {
-        try {
-          // Fetch memories without server-side filters (more reliable), filter client-side
-          const memoryResults = await getMemories(
+      const contactMemories = primaryContact
+        ? await fetchContactMemories(
             primaryContact.displayName,
-            {
-              user_id: queueEntry.userId.toString(),
-            }
-          );
-          if (Array.isArray(memoryResults)) {
-            contactMemories = memoryResults
-              .filter(
-                (m): m is { memory: string; created_at?: string; metadata?: { contact_id?: string } } =>
-                  Boolean(m.memory) &&
-                  (!m.metadata?.contact_id || m.metadata.contact_id === primaryContact._id.toString())
-              )
-              .slice(0, 10)
-              .map((m) => ({
-                memory: m.memory,
-                createdAt: m.created_at,
-              }));
-          }
-        } catch (e) {
-          // Memories fetch is optional - continue without them
-          console.error("Failed to fetch memories:", e);
-        }
-      }
+            queueEntry.userId.toString(),
+            primaryContact._id.toString()
+          )
+        : [];
 
       const suggestion = await generateActionWithRetry({
         contact: {
@@ -467,7 +446,10 @@ export const analyzeConversation = internalAction({
         {
           userId: queueEntry.userId,
           conversationId: queueEntry.conversationId,
-          contactId: primaryContact?._id,
+          contactId:
+            conversation.conversationType === "dm"
+              ? primaryContact?._id
+              : undefined,
           type: suggestion.type ?? "respond",
           priority: suggestion.priority ?? 50,
           platform: conversation.platform,

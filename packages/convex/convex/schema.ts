@@ -297,6 +297,14 @@ const schema = defineSchema({
   })
     .index("by_user_status", ["userId", "status"])
     .index("by_conversation", ["conversationId"]),
+
+  // Device presence tracking for remote send capability
+  devicePresence: defineTable({
+    userId: v.id("users"),
+    deviceType: v.literal("electron"), // Future: could add "mobile", "web"
+    lastHeartbeatAt: v.number(),
+    appVersion: v.optional(v.string()),
+  }).index("by_user_device", ["userId", "deviceType"]),
 });
 
 export default schema;

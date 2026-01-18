@@ -56,16 +56,13 @@ export const searchActionsTool: Tool<
   inputSchema,
   execute: async (input, options): Promise<ToolResult<ActionSearchResult[]>> => {
     try {
-      // Sanitize input: convert empty strings to undefined for ID fields
-      const sanitizedInput = {
+      const result = await options.context.query<{
+        actions: ActionSearchResult[];
+      }>("actions:searchActions", {
         ...input,
         contactId: input.contactId?.trim() || undefined,
         conversationId: input.conversationId?.trim() || undefined,
-      };
-
-      const result = await options.context.query<{
-        actions: ActionSearchResult[];
-      }>("actions:searchActions", sanitizedInput);
+      });
 
       return { success: true, data: result.actions };
     } catch (error) {

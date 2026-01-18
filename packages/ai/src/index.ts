@@ -24,8 +24,10 @@ export {
   getMemories,
   retrieveMemories,
   searchMemories,
+  fetchContactMemories,
   type AddMemoriesResult,
   type ConversationMessage,
+  type ContactMemoryItem,
   type Mem0Provider,
   type Mem0ConfigSettings,
 } from "./mem0";

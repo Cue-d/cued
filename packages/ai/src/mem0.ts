@@ -80,6 +80,45 @@ export async function addContactMemories(
   };
 }
 
+/**
+ * Memory item returned from getMemories, with optional metadata.
+ */
+export interface ContactMemoryItem {
+  memory: string;
+  createdAt?: string;
+}
+
+/**
+ * Fetch memories for a contact, filtering by user and optionally contact ID.
+ * Returns simplified memory items for use in action generation.
+ */
+export async function fetchContactMemories(
+  contactName: string,
+  userId: string,
+  contactId?: string,
+  limit = 10
+): Promise<ContactMemoryItem[]> {
+  try {
+    const results = await getMemories(contactName, { user_id: userId });
+    if (!Array.isArray(results)) return [];
+
+    return results
+      .filter(
+        (m): m is { memory: string; created_at?: string; metadata?: { contact_id?: string } } =>
+          Boolean(m.memory) &&
+          (!m.metadata?.contact_id || !contactId || m.metadata.contact_id === contactId)
+      )
+      .slice(0, limit)
+      .map((m) => ({
+        memory: m.memory,
+        createdAt: m.created_at,
+      }));
+  } catch (error) {
+    console.error("Failed to fetch memories (non-blocking):", error);
+    return [];
+  }
+}
+
 // Re-export memory functions and types for direct use
 export {
   addMemories,

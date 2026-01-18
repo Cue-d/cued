@@ -10,6 +10,7 @@ import * as Haptics from "expo-haptics";
 import { View, Text } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useActions } from "@/hooks/useActions";
+import { useElectronPresence } from "@/hooks/useElectronPresence";
 import { CardStack } from "@/components/card-stack";
 import {
   MessageResponseCard,
@@ -64,6 +65,7 @@ export default function ActionsScreen(): React.JSX.Element {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const { actions, isLoading } = useActions({ limit: 20 });
+  const { isOnline: isDesktopOnline } = useElectronPresence();
   const swipeAction = useMutation(api.actions.swipeAction);
   const [triggerSwipe, setTriggerSwipe] = useState<SwipeDirection | null>(null);
 
@@ -237,6 +239,7 @@ export default function ActionsScreen(): React.JSX.Element {
             responseText={getResponseText(action)}
             onResponseChange={(text) => handleResponseChange(action._id, text)}
             platform={(action.platform as ActionPlatform) ?? undefined}
+            isDesktopOnline={isDesktopOnline}
           />
         );
       }
@@ -277,6 +280,7 @@ export default function ActionsScreen(): React.JSX.Element {
       handleResponseChange,
       handleContactFormChange,
       topActionMessages,
+      isDesktopOnline,
     ],
   );
 

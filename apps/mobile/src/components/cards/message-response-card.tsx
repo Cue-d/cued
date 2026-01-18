@@ -74,6 +74,8 @@ export interface MessageResponseCardProps {
   className?: string;
   /** Current platform for sending */
   platform?: ActionPlatform;
+  /** Whether the desktop app is online (for iMessage remote send) */
+  isDesktopOnline?: boolean;
 }
 
 /** Get initials from a name */
@@ -152,36 +154,21 @@ function PlatformBadge({
   );
 }
 
+/** Status display config */
+const STATUS_CONFIG: Record<string, { text: string; className: string }> = {
+  failed: { text: "!", className: "text-red-500" },
+  read: { text: "Read", className: "text-blue-400" },
+  delivered: { text: "Delivered", className: "text-muted-foreground" },
+};
+
 /** Delivery status indicator */
-function DeliveryStatus({
-  status,
-}: {
-  status?: string | null;
-}): React.JSX.Element | null {
-  if (status === "failed") {
-    return (
-      <Text className="text-red-500 text-[10px]" accessibilityLabel="Failed to send">
-        !
-      </Text>
-    );
-  }
-  if (status === "read") {
-    return (
-      <Text className="text-blue-400 text-[10px]" accessibilityLabel="Read">
-        Read
-      </Text>
-    );
-  }
-  if (status === "delivered") {
-    return (
-      <Text className="text-muted-foreground text-[10px]" accessibilityLabel="Delivered">
-        Delivered
-      </Text>
-    );
-  }
+function DeliveryStatus({ status }: { status?: string | null }): React.JSX.Element {
+  const config = status ? STATUS_CONFIG[status] : undefined;
+  const { text, className } = config ?? { text: "Sent", className: "text-muted-foreground" };
+
   return (
-    <Text className="text-muted-foreground text-[10px]" accessibilityLabel="Sent">
-      Sent
+    <Text className={`${className} text-[10px]`} accessibilityLabel={text}>
+      {text}
     </Text>
   );
 }
@@ -264,6 +251,7 @@ export function MessageResponseCard({
   onResponseChange,
   className,
   platform,
+  isDesktopOnline,
 }: MessageResponseCardProps): React.JSX.Element {
   const colorScheme = useColorScheme();
   const colors = getThemeColors(colorScheme === "dark");
@@ -302,8 +290,20 @@ export function MessageResponseCard({
           )}
         </View>
 
-        {/* Platform Badge */}
-        {platform && <PlatformBadge platform={platform} />}
+        {/* Platform Badge + Desktop Status */}
+        <View className="flex-row items-center gap-2">
+          {platform === "imessage" && isDesktopOnline !== undefined && (
+            <View className="flex-row items-center gap-1.5">
+              <View
+                className={`w-2 h-2 rounded-full ${isDesktopOnline ? "bg-green-500" : "bg-muted-foreground"}`}
+              />
+              <Text className="text-xs text-muted-foreground">
+                {isDesktopOnline ? "Online" : "Offline"}
+              </Text>
+            </View>
+          )}
+          {platform && <PlatformBadge platform={platform} />}
+        </View>
       </View>
 
       {/* Message Context */}

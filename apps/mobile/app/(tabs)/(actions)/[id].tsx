@@ -15,6 +15,7 @@ import type { SwipeDirection } from "@/components/swipeable-card";
 import type { DisplayMessage } from "@/components/cards";
 import { api } from "@prm/convex/convex/_generated/api";
 import type { Id } from "@prm/convex/convex/_generated/dataModel";
+import { useElectronPresence } from "@/hooks/useElectronPresence";
 
 /** Format timestamp to relative time */
 function formatRelativeTime(timestamp: number): string {
@@ -136,6 +137,7 @@ export default function ActionDetailScreen(): React.JSX.Element {
   const { id } = useLocalSearchParams<{ id: string }>();
   const router = useRouter();
   const [responseText, setResponseText] = useState("");
+  const { isOnline: isDesktopOnline } = useElectronPresence();
 
   const data = useQuery(api.actions.getActionWithContext, {
     actionId: id as Id<"actions">,
@@ -291,10 +293,20 @@ export default function ActionDetailScreen(): React.JSX.Element {
               </Text>
             )}
             {conversation && (
-              <View className="flex-row items-center mt-2 pt-2 border-t border-sf-separator">
+              <View className="flex-row items-center justify-between mt-2 pt-2 border-t border-sf-separator">
                 <Text className="text-xs text-sf-tertiaryLabel">
                   {getPlatformLabel(action.platform)}
                 </Text>
+                {action.platform === "imessage" && (
+                  <View className="flex-row items-center gap-1.5">
+                    <View
+                      className={`w-2 h-2 rounded-full ${isDesktopOnline ? "bg-green-500" : "bg-sf-tertiaryLabel"}`}
+                    />
+                    <Text className="text-xs text-sf-tertiaryLabel">
+                      {isDesktopOnline ? "Desktop Online" : "Desktop Offline"}
+                    </Text>
+                  </View>
+                )}
               </View>
             )}
           </View>

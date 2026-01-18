@@ -22,6 +22,14 @@ crons.interval(
   internal.actionEvents.wakeSnoozedActions
 );
 
+// Mark stale devices as offline (every 30 seconds)
+// This triggers reactive queries on mobile to update UI
+crons.interval(
+  "mark-stale-devices-offline",
+  { seconds: 30 },
+  internal.presence.markStaleDevicesOffline
+);
+
 // Daily scan for new contacts at 9 PM UTC
 // Creates eod_contact actions for unenriched contacts from today
 crons.daily(

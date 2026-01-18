@@ -13,6 +13,7 @@ import { getSyncManager, type SyncProgress } from "./sync/sync-manager";
 import { getContactsWatcher } from "./sync/contacts-watcher";
 import { syncContactsToConvex } from "./sync/contacts-sync";
 import { getIMessageSender } from "./sync/imessage-sender";
+import { getHeartbeatManager } from "./sync/presence";
 import { setupSocialIpcHandlers, cleanupSocialScrapers } from "./ipc/social";
 
 const CONVEX_URL =
@@ -185,6 +186,11 @@ async function startBackgroundSync(): Promise<void> {
     const imessageSender = getIMessageSender(getValidAccessToken);
     imessageSender.start(5000); // Poll every 5 seconds
     console.log("[Main] iMessage sender started");
+
+    // Start presence heartbeat for mobile to detect desktop online status
+    const heartbeatManager = getHeartbeatManager(getValidAccessToken);
+    heartbeatManager.start();
+    console.log("[Main] Presence heartbeat started");
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : String(err);
     console.error("[Main] Failed to start background sync:", message);
@@ -262,6 +268,11 @@ app.on("will-quit", async () => {
     getIMessageSender().stop();
   } catch {
     // Sender may not be initialized
+  }
+  try {
+    await getHeartbeatManager().stop();
+  } catch {
+    // Heartbeat may not be initialized
   }
   // Clean up social scraper browser instances
   await cleanupSocialScrapers();
