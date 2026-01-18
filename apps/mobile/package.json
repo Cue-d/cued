@@ -12,8 +12,10 @@
     "lint": "eslint ."
   },
   "dependencies": {
+    "@ai-sdk/react": "^3.0.35",
     "@bacons/apple-targets": "^3.0.7",
     "@react-native-community/datetimepicker": "8.4.4",
+    "ai": "^6.0.33",
     "clsx": "^2.1.1",
     "convex": "^1.18.0",
     "expo": "~54.0.31",
@@ -37,13 +39,14 @@
     "metro-cache": "^0.83.3",
     "react": "19.1.0",
     "react-native": "0.81.5",
-    "uniwind": "^1.2.0",
     "react-native-gesture-handler": "~2.28.0",
     "react-native-mmkv": "^4.1.1",
     "react-native-reanimated": "~4.1.6",
     "react-native-safe-area-context": "~5.6.2",
     "react-native-screens": "~4.16.0",
-    "tailwind-merge": "^3.4.0"
+    "react-native-svg": "^15.15.1",
+    "tailwind-merge": "^3.4.0",
+    "uniwind": "^1.2.0"
   },
   "devDependencies": {
     "@types/react": "~19.1.0",
