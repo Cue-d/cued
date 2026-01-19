@@ -12,6 +12,7 @@
 import { useMemo } from "react";
 import { SymbolView } from "expo-symbols";
 import { View, Text, ScrollView, TextInput, useColorScheme } from "react-native";
+import { getInitials, PLATFORM_CONFIG, type ActionPlatform } from "@prm/shared";
 import { cn, getThemeColors } from "@/lib/utils";
 
 /** Form data for contact card */
@@ -22,27 +23,8 @@ export interface ContactFormData {
   notes: string;
 }
 
-/** Platform types */
-export type ContactPlatform = "imessage" | "gmail" | "slack";
-
-/** Platform config for display */
-const platformConfig: Record<
-  ContactPlatform,
-  { label: string; tintColor: string }
-> = {
-  imessage: {
-    label: "iMessage",
-    tintColor: "#16a34a", // green-600
-  },
-  gmail: {
-    label: "Gmail",
-    tintColor: "#dc2626", // red-600
-  },
-  slack: {
-    label: "Slack",
-    tintColor: "#9333ea", // purple-600
-  },
-};
+/** Re-export ActionPlatform as ContactPlatform for this component */
+export type ContactPlatform = ActionPlatform;
 
 export interface ContactCardProps {
   /** Person name for header display */
@@ -57,18 +39,6 @@ export interface ContactCardProps {
   onFormChange: (data: ContactFormData) => void;
   /** Optional class name */
   className?: string;
-}
-
-/** Get initials from a name */
-function getInitials(name: string): string {
-  if (/^\+?\d/.test(name)) return "#";
-  if (name.includes("@")) return name[0]?.toUpperCase() ?? "?";
-  return name
-    .split(" ")
-    .map((n) => n[0])
-    .join("")
-    .slice(0, 2)
-    .toUpperCase();
 }
 
 /** Format timestamp to time string */
@@ -103,15 +73,15 @@ function PlatformBadge({
 }: {
   platform: ContactPlatform;
 }): React.JSX.Element {
-  const config = platformConfig[platform];
+  const config = PLATFORM_CONFIG[platform];
   return (
     <View
       className="px-2 py-0.5 rounded-md"
-      style={{ backgroundColor: `${config.tintColor}15` }}
+      style={{ backgroundColor: `${config.color}15` }}
     >
       <Text
         className="text-[10px] font-medium"
-        style={{ color: config.tintColor }}
+        style={{ color: config.color }}
       >
         {config.label}
       </Text>

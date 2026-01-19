@@ -13,33 +13,18 @@ import type { ScrollView as ScrollViewType } from "react-native";
 import { Image } from "expo-image";
 import { GlassView, isLiquidGlassAvailable } from "expo-glass-effect";
 import * as Haptics from "expo-haptics";
-import { getInitials, formatTime, formatRelativeTime } from "@prm/shared";
+import { getInitials, formatTime, formatRelativeTime, PLATFORM_CONFIG, type ActionPlatform } from "@prm/shared";
 import { cn, getThemeColors } from "@/lib/utils";
 import { ChatInput } from "@/components/chat/chat-input";
 
-/** Platform types */
-export type ActionPlatform = "imessage" | "gmail" | "slack";
+/** Re-export ActionPlatform for backwards compatibility */
+export type { ActionPlatform } from "@prm/shared";
 
-/** Platform config for display */
-const platformConfig: Record<
-  ActionPlatform,
-  { label: string; symbol: SFSymbol; colorClass: string }
-> = {
-  imessage: {
-    label: "iMessage",
-    symbol: "message.fill",
-    colorClass: "text-green-600",
-  },
-  gmail: {
-    label: "Gmail",
-    symbol: "envelope.fill",
-    colorClass: "text-red-600",
-  },
-  slack: {
-    label: "Slack",
-    symbol: "number",
-    colorClass: "text-purple-600",
-  },
+/** Platform icons (platform-specific SF Symbols) */
+const PLATFORM_SYMBOLS: Record<ActionPlatform, SFSymbol> = {
+  imessage: "message.fill",
+  gmail: "envelope.fill",
+  slack: "number",
 };
 
 /** Message attachment with URL */
@@ -121,26 +106,19 @@ function Avatar({
   );
 }
 
-/** Platform colors */
-const platformColors: Record<ActionPlatform, string> = {
-  imessage: "#16a34a", // green-600
-  gmail: "#dc2626", // red-600
-  slack: "#9333ea", // purple-600
-};
-
 /** Platform badge component */
 function PlatformBadge({
   platform,
 }: {
   platform: ActionPlatform;
 }): React.JSX.Element {
-  const config = platformConfig[platform];
+  const config = PLATFORM_CONFIG[platform];
   return (
     <View className="flex-row items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-card">
       <SymbolView
-        name={config.symbol}
+        name={PLATFORM_SYMBOLS[platform]}
         size={14}
-        tintColor={platformColors[platform]}
+        tintColor={config.color}
       />
       <Text className="text-xs font-medium text-foreground">{config.label}</Text>
     </View>
