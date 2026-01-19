@@ -26,7 +26,7 @@
     "@prm/ui": "workspace:*",
     "@workos-inc/authkit-nextjs": "^2.13.0",
     "ai": "^6.0.33",
-    "convex": "^1.18.0",
+    "convex": "^1.31.5",
     "next": "16.1.1",
     "next-themes": "^0.4.6",
     "react": "19.2.3",
