@@ -3,6 +3,10 @@
  * Provides global mocks for Expo modules and React Native dependencies
  */
 import { vi } from "vitest";
+import React from "react";
+
+// Ensure React is globally available for JSX transform in components
+globalThis.React = React;
 
 // Mock @bacons/apple-targets (iOS widget extension storage)
 vi.mock("@bacons/apple-targets", () => {
@@ -18,24 +22,29 @@ vi.mock("@bacons/apple-targets", () => {
   return { ExtensionStorage: MockExtensionStorage };
 });
 
-// Mock expo-router
+// Mock expo-router - store mock functions so tests can access them
+const mockRouterPush = vi.fn();
+const mockRouterReplace = vi.fn();
+const mockRouterBack = vi.fn();
+const mockRouterSetParams = vi.fn();
+
 vi.mock("expo-router", () => ({
-  useRouter: () => ({
-    push: vi.fn(),
-    replace: vi.fn(),
-    back: vi.fn(),
+  useRouter: vi.fn(() => ({
+    push: mockRouterPush,
+    replace: mockRouterReplace,
+    back: mockRouterBack,
     canGoBack: () => true,
-    setParams: vi.fn(),
-  }),
-  useLocalSearchParams: () => ({}),
-  useGlobalSearchParams: () => ({}),
-  useSegments: () => [],
-  usePathname: () => "/",
-  useNavigation: () => ({
+    setParams: mockRouterSetParams,
+  })),
+  useLocalSearchParams: vi.fn(() => ({})),
+  useGlobalSearchParams: vi.fn(() => ({})),
+  useSegments: vi.fn(() => []),
+  usePathname: vi.fn(() => "/"),
+  useNavigation: vi.fn(() => ({
     navigate: vi.fn(),
     goBack: vi.fn(),
     setOptions: vi.fn(),
-  }),
+  })),
   Link: ({ children }: { children: React.ReactNode }) => children,
   Stack: {
     Screen: ({ children }: { children?: React.ReactNode }) => children,
@@ -44,13 +53,16 @@ vi.mock("expo-router", () => ({
     Screen: ({ children }: { children?: React.ReactNode }) => children,
   },
   router: {
-    push: vi.fn(),
-    replace: vi.fn(),
-    back: vi.fn(),
+    push: mockRouterPush,
+    replace: mockRouterReplace,
+    back: mockRouterBack,
     canGoBack: () => true,
-    setParams: vi.fn(),
+    setParams: mockRouterSetParams,
   },
 }));
+
+// Export mocks for test files to access
+export { mockRouterPush, mockRouterReplace, mockRouterBack, mockRouterSetParams };
 
 // Mock expo-status-bar
 vi.mock("expo-status-bar", () => ({
@@ -156,6 +168,12 @@ vi.mock("expo-symbols", () => ({
   SFSymbol: {},
 }));
 
+// Mock expo-glass-effect
+vi.mock("expo-glass-effect", () => ({
+  GlassView: ({ children }: { children?: React.ReactNode }) => children,
+  isLiquidGlassAvailable: () => false,
+}));
+
 // Mock react-native-reanimated
 vi.mock("react-native-reanimated", () => ({
   default: {
@@ -184,7 +202,12 @@ vi.mock("react-native-reanimated", () => ({
   FadeOutDown: { duration: () => ({ delay: () => ({}) }) },
   SlideInRight: { duration: () => ({ delay: () => ({}) }) },
   SlideOutRight: { duration: () => ({ delay: () => ({}) }) },
-  Layout: { duration: () => ({}) },
+  Layout: {
+    duration: () => ({}),
+    springify: () => ({}),
+    damping: () => ({}),
+    stiffness: () => ({}),
+  },
   Easing: {
     linear: (x: number) => x,
     ease: (x: number) => x,
@@ -193,42 +216,46 @@ vi.mock("react-native-reanimated", () => ({
 }));
 
 // Mock react-native-gesture-handler
-vi.mock("react-native-gesture-handler", () => ({
-  GestureDetector: ({ children }: { children?: React.ReactNode }) => children,
-  GestureHandlerRootView: ({ children }: { children?: React.ReactNode }) => children,
-  Gesture: {
-    Pan: () => ({
-      onStart: () => ({}),
-      onUpdate: () => ({}),
-      onEnd: () => ({}),
-      minDistance: () => ({}),
-      activeOffsetX: () => ({}),
-      activeOffsetY: () => ({}),
-      failOffsetX: () => ({}),
-      failOffsetY: () => ({}),
-    }),
-    Tap: () => ({
-      onStart: () => ({}),
-      onEnd: () => ({}),
-      maxDuration: () => ({}),
-      numberOfTaps: () => ({}),
-    }),
-    LongPress: () => ({
-      onStart: () => ({}),
-      onEnd: () => ({}),
-      minDuration: () => ({}),
-    }),
-    Simultaneous: () => ({}),
-    Exclusive: () => ({}),
-    Race: () => ({}),
-  },
-  Swipeable: ({ children }: { children?: React.ReactNode }) => children,
-  DrawerLayout: ({ children }: { children?: React.ReactNode }) => children,
-  State: {},
-  PanGestureHandler: ({ children }: { children?: React.ReactNode }) => children,
-  TapGestureHandler: ({ children }: { children?: React.ReactNode }) => children,
-  LongPressGestureHandler: ({ children }: { children?: React.ReactNode }) => children,
-}));
+vi.mock("react-native-gesture-handler", () => {
+  // Create a chainable gesture mock that returns itself for all methods
+  const createChainableGesture = () => {
+    const gesture: Record<string, unknown> = {};
+    const chainMethods = [
+      "onStart", "onUpdate", "onEnd", "onFinalize", "onTouchesDown", "onTouchesMove", "onTouchesUp",
+      "minDistance", "activeOffsetX", "activeOffsetY", "failOffsetX", "failOffsetY",
+      "enabled", "shouldCancelWhenOutside", "hitSlop", "simultaneousWithExternalGesture",
+      "withTestId", "runOnJS", "maxDuration", "numberOfTaps", "minDuration", "maxPointers", "minPointers"
+    ];
+    chainMethods.forEach(method => {
+      gesture[method] = () => gesture;
+    });
+    return gesture;
+  };
+
+  return {
+    GestureDetector: ({ children }: { children?: React.ReactNode }) => children,
+    GestureHandlerRootView: ({ children }: { children?: React.ReactNode }) => children,
+    Gesture: {
+      Pan: createChainableGesture,
+      Tap: createChainableGesture,
+      LongPress: createChainableGesture,
+      Pinch: createChainableGesture,
+      Rotation: createChainableGesture,
+      Fling: createChainableGesture,
+      Native: createChainableGesture,
+      Manual: createChainableGesture,
+      Simultaneous: () => ({}),
+      Exclusive: () => ({}),
+      Race: () => ({}),
+    },
+    Swipeable: ({ children }: { children?: React.ReactNode }) => children,
+    DrawerLayout: ({ children }: { children?: React.ReactNode }) => children,
+    State: {},
+    PanGestureHandler: ({ children }: { children?: React.ReactNode }) => children,
+    TapGestureHandler: ({ children }: { children?: React.ReactNode }) => children,
+    LongPressGestureHandler: ({ children }: { children?: React.ReactNode }) => children,
+  };
+});
 
 // Mock react-native-safe-area-context
 vi.mock("react-native-safe-area-context", () => ({

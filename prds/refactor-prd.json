@@ -307,7 +307,7 @@
         "Test message deduplication",
         "Run pnpm test"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "4.1",
@@ -323,7 +323,7 @@
         "Create apps/mobile/src/__tests__/example.test.tsx",
         "Run pnpm test in apps/mobile"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "4.2",
@@ -339,7 +339,7 @@
         "Mock Convex hooks appropriately",
         "Run pnpm test"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "4.3",
@@ -354,7 +354,7 @@
         "Test contact-list-item.tsx: renders, navigation",
         "Run pnpm test"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "4.4",

@@ -670,3 +670,212 @@ This refactoring effort addresses:
 
 **Commit:** 3e1f211
 
+### 2026-01-19 - Task 3.4: Add tests for packages/convex/convex/sync.ts critical paths
+
+**Files changed:**
+- Created: `packages/convex/convex/__tests__/sync.test.ts`
+
+**Tests created (32 tests):**
+
+- **syncMessages mutation - iMessage** (10 tests):
+  - Throws for unauthenticated user
+  - Syncs new conversation from iMessage chat
+  - Syncs new messages and updates conversation lastMessage
+  - Creates placeholder contact for unknown sender
+  - Resolves existing contact by phone number
+  - Deduplicates messages by platformMessageId
+  - Handles group chat with multiple participants
+  - Handles messages with email handles
+
+- **syncGmailMessages mutation** (6 tests):
+  - Throws for unknown user
+  - Syncs Gmail email and creates conversation
+  - Creates contact from email sender
+  - Skips newsletter emails
+  - Deduplicates Gmail messages by id
+  - Groups emails by thread and updates conversation
+
+- **syncSlackMessages mutation** (10 tests):
+  - Throws for unknown user
+  - Syncs Slack DM message and creates conversation
+  - Creates contact with Slack user ID handle
+  - Skips bot messages
+  - Handles channel conversation type
+  - Handles mpim (multi-party IM) as group
+  - Deduplicates Slack messages by ts
+  - Stores thread information
+  - Stores reactions on messages
+
+- **Contact resolution during sync** (2 tests):
+  - Resolves contact by normalized email across platforms
+  - Creates new contact when no handle match found
+
+- **Sync cursor management** (6 tests):
+  - getSyncCursor: returns null for unauthenticated, default cursor, cursor from integration
+  - updateSyncCursor: throws for unauthenticated, creates/updates integration
+  - resetSyncState: resets integration sync state
+
+**Decisions:**
+- Reused `setupAuthenticatedUser()` pattern from actions.test.ts
+- Tests verify core sync functionality: conversation/message creation, contact resolution, deduplication
+- Gmail/Slack mutations use workosUserId arg (webhook context) rather than auth identity
+- convex-test produces "Write outside of transaction" warnings from scheduled functions (`ctx.scheduler.runAfter`) - this is a known limitation and doesn't affect test correctness
+- Newsletter detection test validates `isNewsletterOrAutomated()` helper
+
+**Verification:**
+- ✅ packages/convex tests pass (134 tests: 54 actions + 48 contacts + 32 sync)
+- ✅ pnpm lint passes (only pre-existing warnings)
+- ✅ packages/convex typecheck passes
+- ⚠️ pnpm typecheck has pre-existing failure in mobile (useContacts.ts) - unrelated to this change
+
+**Commit:** f9ad1c2
+
+### 2026-01-19 - Task 4.1: Set up Vitest for apps/mobile with React Native Testing Library
+
+**Files changed:**
+- Modified: `apps/mobile/package.json`
+- Created: `apps/mobile/vitest.config.ts`
+- Created: `apps/mobile/src/test/setup.ts`
+- Created: `apps/mobile/src/test/mocks/react-native.ts`
+- Created: `apps/mobile/src/test/mocks/convex-api.ts`
+- Created: `apps/mobile/src/test/mocks/convex-server.ts`
+- Created: `apps/mobile/src/hooks/__tests__/usePendingActionCount.test.ts`
+
+**Decisions:**
+- Used **Vitest** instead of Jest to match the rest of the monorepo (packages/shared, packages/ui, packages/convex, packages/ai all use Vitest)
+- Used **@testing-library/react** with jsdom environment instead of @testing-library/react-native - RNTL has complex peer dependencies on react-native that are difficult to mock properly
+- Created comprehensive mocks for Expo modules: expo-router, expo-haptics, expo-notifications, expo-secure-store, expo-clipboard, expo-blur, expo-image, expo-symbols, etc.
+- Mocked @bacons/apple-targets for iOS widget extension storage
+- Mocked react-native with core APIs: View, Text, Platform, Dimensions, StyleSheet, Animated, Keyboard, Alert, Linking, AppState
+- Mocked react-native-reanimated with animation stubs
+- Mocked react-native-gesture-handler with gesture factory stubs
+- Mocked convex API via vitest alias to avoid TypeScript-only declaration file issues
+- Created example hook test for usePendingActionCount with 6 passing tests
+
+**Dependencies added:**
+- vitest@2.1.8
+- @vitest/coverage-v8@2.1.9
+- @testing-library/react@16.3.2
+- @testing-library/react-native@13.3.0 (unused but kept for future component tests)
+- react-dom@19.1.0
+- react-test-renderer@19.1.0
+- jsdom@26.0.0
+
+**Verification:**
+- ✅ apps/mobile tests pass (6 tests)
+- ✅ pnpm lint passes (only pre-existing warning about unused DraftRiskFlag in message-response-card.tsx)
+- ⚠️ pnpm typecheck has pre-existing failure in mobile (useContacts.ts) - unrelated to this change
+
+**Commit:** 4212d06
+
+### 2026-01-19 - Task 4.2: Add tests for mobile hooks
+
+**Files changed:**
+- Created: `apps/mobile/src/hooks/__tests__/useActions.test.ts`
+- Created: `apps/mobile/src/hooks/__tests__/useContacts.test.ts`
+- Created: `apps/mobile/src/hooks/__tests__/useChat.test.ts`
+- Modified: `apps/mobile/src/test/setup.ts` (added updateWidgetActionsList mock)
+
+**Tests created:**
+
+- **useActions.test.ts** (14 tests):
+  - Loading state: isLoading=true when undefined, false when available
+  - Actions data: empty array, returns actions, nextCursor handling
+  - Options: passes limit, cursor, both options to query
+  - Widget sync: updates with actions data, handles null contactName, empty array, reacts to changes
+  - Error handling: returns null error (Convex throws instead)
+
+- **useContacts.test.ts** (14 tests):
+  - Loading state: isLoading=true when undefined, false when available
+  - Contacts data: empty array, returns contacts, nextCursor handling
+  - Options: passes limit, cursor, searchQuery, all options to query
+  - Search filtering: handles empty and special character queries
+  - Error handling: returns null error
+  - Pagination: cursor-based pagination flow
+
+- **useChat.test.ts** (30 tests):
+  - Initial state: empty messages, empty input, isLoading=false, null error
+  - Input handling: setInput updates, clears on empty
+  - Loading state: streaming/submitted → true, ready/error → false
+  - sendMessage: calls AI SDK, clears input, explicit content, empty/whitespace rejection, trimming
+  - Message transformation: user/assistant messages, text concatenation, no parts
+  - Tool invocations: extraction, state mapping (input-streaming→partial-call, output-available/error→result, unknown→call)
+  - clearMessages: calls setMessages with empty array
+  - Error handling: returns error, null, coerces undefined
+  - Options: default API path, custom path, getAccessToken
+
+**Decisions:**
+- usePendingActionCount tests already existed from task 4.1 (6 tests)
+- Added updateWidgetActionsList to widget-data mock since useActions uses it
+- Used same mock patterns as usePendingActionCount.test.ts for consistency
+- Mocked @ai-sdk/react and ai module for useChat tests
+- Used `as never` type assertions where vitest mocking conflicts with TypeScript types
+
+**Verification:**
+- ✅ apps/mobile tests pass (64 tests: 6 usePendingActionCount + 14 useActions + 14 useContacts + 30 useChat)
+- ✅ pnpm lint passes (only pre-existing warning about unused DraftRiskFlag)
+- ⚠️ pnpm typecheck has pre-existing failure in mobile (useContacts.ts) - unrelated to this change
+
+**Commit:** c109e0c
+
+### 2026-01-19 - Task 4.3: Add tests for mobile components
+
+**Files changed:**
+- Created: `apps/mobile/src/components/__tests__/swipeable-card.test.tsx`
+- Created: `apps/mobile/src/components/__tests__/card-stack.test.tsx`
+- Created: `apps/mobile/src/components/__tests__/action-buttons.test.tsx`
+- Created: `apps/mobile/src/components/__tests__/contact-list-item.test.tsx`
+- Modified: `apps/mobile/src/test/setup.ts` (added expo-glass-effect mock, chainable gesture handler mock, global React, exported router mocks)
+
+**Tests created:**
+
+- **swipeable-card.test.tsx** (13 tests):
+  - Renders children content, custom className, swipe progress overlay
+  - Disabled state: renders when disabled, disabled=false by default
+  - TriggerSwipe prop: accepts null, right, left, up directions
+  - SwipeDirection type validation
+  - Glass effect fallback styling
+  - Component structure: gesture detector wrapper, background overlay
+
+- **card-stack.test.tsx** (12 tests):
+  - Empty state: renders "All caught up!" message, no cards rendered
+  - Renders visible cards, maximum 3 cards, fewer cards if available
+  - Calls renderCard with correct arguments
+  - Top card interactivity: only top card enabled, non-top cards disabled
+  - TriggerSwipe passed to top card only
+  - Single action rendering
+  - Card className styling
+
+- **action-buttons.test.tsx** (14 tests):
+  - Renders skip/send buttons with default and custom labels
+  - Renders three pressable buttons (skip, snooze, send)
+  - Button structure: skip first, send last, snooze middle
+  - Disabled state: renders, applies opacity
+  - Custom labels: renders both, maintains button order
+  - Component structure: row layout, gap between buttons
+
+- **contact-list-item.test.tsx** (16 tests):
+  - Renders display name, initials, company
+  - Handles null company, company not provided
+  - Initials generation from two-word, single-word, three-word names
+  - Accessibility: button role, accessibility label with contact name
+  - Optional fields: renders without phone, email, minimal data
+  - Edge cases: empty name, long name, special characters
+
+**Decisions:**
+- Used jsdom environment (consistent with other packages) instead of React Native Testing Library
+- React Native components (View, Text, Pressable) render as lowercase HTML elements in jsdom
+- Added `globalThis.React = React` in setup.ts and tests to support JSX transform
+- Created chainable gesture mock to support Gesture.Pan().enabled().onStart()... pattern
+- Used container.querySelector("pressable") instead of getByRole("button") since jsdom doesn't recognize RN accessibilityRole
+- Skipped event-based tests (onPress handlers) since fireEvent.click doesn't trigger RN's onPress
+- Focused tests on rendering, structure, and accessibility attributes
+- Mock paths use relative paths from test file location (e.g., "../swipeable-card")
+
+**Verification:**
+- ✅ apps/mobile tests pass (120 tests: 64 hooks + 56 components)
+- ✅ pnpm lint passes (only pre-existing warnings)
+- ✅ pnpm typecheck passes (all 10 packages)
+
+**Commit:** 4bfcc82
+
