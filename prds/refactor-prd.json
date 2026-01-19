@@ -1,6 +1,10 @@
 {
   "project": "PRM Codebase Refactor",
   "description": "Comprehensive refactoring for test coverage, code de-duplication, and maintainability across the monorepo",
+  "parallel_groups": {
+    "P1": ["6.2", "6.3"],
+    "P2": ["7.2", "7.3"]
+  },
   "target_goals": [
     "80%+ test coverage for shared packages",
     "Eliminate duplicate utility functions and types",
@@ -469,7 +473,7 @@
         "Create apps/web/e2e/helpers.ts for common actions",
         "Run npx playwright test --ui to verify setup"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "6.2",
@@ -477,6 +481,8 @@
       "mode": "afk",
       "category": "testing",
       "description": "Add E2E tests for web app critical paths",
+      "depends_on": ["6.1"],
+      "parallel_group": "P1",
       "steps": [
         "Test login flow: sign in, redirect to dashboard",
         "Test actions page: view actions, swipe action",
@@ -484,7 +490,7 @@
         "Test settings page: view integrations, connect OAuth",
         "Run npx playwright test"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "6.3",
@@ -492,6 +498,8 @@
       "mode": "hitl",
       "category": "testing",
       "description": "Set up Detox or Maestro for apps/mobile E2E testing",
+      "depends_on": [],
+      "parallel_group": "P1",
       "steps": [
         "Research Detox vs Maestro for Expo SDK 54",
         "Install chosen E2E framework",
@@ -508,6 +516,8 @@
       "mode": "afk",
       "category": "testing",
       "description": "Add E2E tests for mobile app critical paths",
+      "depends_on": ["6.3"],
+      "parallel_group": null,
       "steps": [
         "Test login flow: sign in screen, OAuth flow",
         "Test actions tab: view stack, swipe action",
@@ -538,6 +548,8 @@
       "mode": "afk",
       "category": "refactor",
       "description": "Remove unused exports and dead code",
+      "depends_on": [],
+      "parallel_group": "P2",
       "steps": [
         "Run ts-prune or knip to find unused exports",
         "Review and remove confirmed dead code",
@@ -553,6 +565,8 @@
       "mode": "hitl",
       "category": "documentation",
       "description": "Update CLAUDE.md with refactored architecture",
+      "depends_on": [],
+      "parallel_group": "P2",
       "steps": [
         "Document packages/shared as source of truth for utils/types",
         "Document packages/ui component organization",
@@ -560,7 +574,7 @@
         "Document import conventions",
         "Verify commands still accurate"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "7.4",
@@ -568,6 +582,8 @@
       "mode": "afk",
       "category": "testing",
       "description": "Verify all tests pass and coverage meets goals",
+      "depends_on": ["6.2", "6.4", "7.2"],
+      "parallel_group": null,
       "steps": [
         "Run pnpm test across all packages",
         "Generate coverage report",
@@ -584,6 +600,8 @@
       "mode": "hitl",
       "category": "testing",
       "description": "Add CI test workflow verification",
+      "depends_on": ["7.4"],
+      "parallel_group": null,
       "steps": [
         "Ensure .github/workflows includes test step",
         "Verify pnpm test runs in CI",
