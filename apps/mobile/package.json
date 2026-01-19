@@ -9,7 +9,9 @@
     "ios": "expo run:ios",
     "web": "expo start --web",
     "typecheck": "tsc --noEmit",
-    "lint": "eslint ."
+    "lint": "eslint .",
+    "test": "vitest",
+    "test:coverage": "vitest run --coverage"
   },
   "dependencies": {
     "@ai-sdk/react": "^3.0.35",
@@ -49,12 +51,19 @@
     "uniwind": "^1.2.0"
   },
   "devDependencies": {
+    "@testing-library/react": "^16.3.2",
+    "@testing-library/react-native": "^13.3.0",
     "@types/react": "~19.1.0",
+    "@vitest/coverage-v8": "^2.1.9",
     "babel-plugin-module-resolver": "^5.0.2",
     "eslint": "^9",
     "eslint-config-expo": "^9",
+    "jsdom": "^26.0.0",
+    "react-dom": "19.1.0",
+    "react-test-renderer": "19.1.0",
     "tailwindcss": "^4.1.18",
-    "typescript": "~5.9.2"
+    "typescript": "~5.9.2",
+    "vitest": "^2.1.8"
   },
   "private": true
 }
