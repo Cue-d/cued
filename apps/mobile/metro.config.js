@@ -8,6 +8,9 @@ const monorepoRoot = path.resolve(__dirname, "../..");
 /** @type {import('expo/metro-config').MetroConfig} */
 const config = getDefaultConfig(__dirname);
 
+// Enable package.json "exports" field resolution (needed for workspace packages)
+config.resolver.unstable_enablePackageExports = true;
+
 // Watch the monorepo root for changes (required for pnpm)
 config.watchFolders = [monorepoRoot];
 
