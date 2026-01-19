@@ -1,0 +1,59 @@
+# LinkedIn Messaging Integration - Progress Log
+
+## Overview
+Port Beeper's mautrix-linkedin Go client to TypeScript for the Electron app.
+Reference: https://github.com/mautrix/linkedin/tree/main/pkg/linkedingo
+
+## Parallel Groups
+- P1: Tasks 1.2, 1.3, 1.4 (urn, request, client)
+- P2: Tasks 2.1, 2.2, 2.3 (conversations, messages, contacts)
+- P3: Tasks 4.1, 4.2 (IPC handlers, Convex mutations)
+- P4: Tasks 5.1, 5.2 (unit tests, integration tests)
+
+---
+
+## Progress
+
+### [In Progress] Phase 1: Foundation
+- [x] 1.1 - Create linkedin-api package structure
+- [ ] 1.2 - Port urn.ts (parallel with 1.3, 1.4)
+- [ ] 1.3 - Port request.ts (parallel with 1.2, 1.4)
+- [ ] 1.4 - Port client.ts (parallel with 1.2, 1.3)
+
+### [Not Started] Phase 2: API Methods
+- [ ] 2.1 - Port conversations.ts (parallel with 2.2, 2.3)
+- [ ] 2.2 - Port messages.ts (parallel with 2.1, 2.3)
+- [ ] 2.3 - Create contacts.ts (parallel with 2.1, 2.2)
+
+### [Not Started] Phase 3: Integration
+- [ ] 3.1 - Integrate with SocialScraper auth
+- [ ] 3.2 - Create LinkedInSyncManager
+
+### [Not Started] Phase 4: IPC + Convex
+- [ ] 4.1 - Add IPC handlers (parallel with 4.2)
+- [ ] 4.2 - Create Convex mutations (parallel with 4.1)
+
+### [Not Started] Phase 5: Testing
+- [ ] 5.1 - Unit tests (parallel with 5.2)
+- [ ] 5.2 - Integration tests (parallel with 5.1)
+
+### [Not Started] Phase 6: E2E
+- [ ] 6.1 - Manual end-to-end test
+
+---
+
+## Log Entries
+
+### 2026-01-19 - Task 1.1: Create linkedin-api package structure with types
+**Files changed:**
+- `apps/electron/src/main/linkedin-api/types.ts` (new)
+- `apps/electron/src/main/linkedin-api/constants.ts` (new)
+- `apps/electron/src/main/linkedin-api/index.ts` (new)
+
+**Summary:**
+Created linkedin-api package with TypeScript types ported from mautrix-linkedin Go client:
+- types.ts: URN, Cookie, Message, Conversation, Connection, MessagingParticipant, RenderContent (attachments), GraphQL response types, EventHandlers
+- constants.ts: Browser ID (Chrome 141), BASE_URL, API_URLS, COOKIE_NAMES, CONTENT_TYPES, DEFAULT_HEADERS, GRAPHQL_QUERY_IDS, REALTIME_TOPICS, RETRY_CONFIG, PAGINATION_DEFAULTS
+- index.ts: Barrel export
+
+Verification: `pnpm typecheck` passes in apps/electron
