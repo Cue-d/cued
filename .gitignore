@@ -175,6 +175,13 @@ docs/_build/
 site/
 
 # ============================================================
+# iOS Widgets (Expo)
+# ============================================================
+# Generated widget assets and entitlements
+apps/mobile/targets/widget/Assets.xcassets/
+apps/mobile/targets/widget/generated.entitlements
+
+# ============================================================
 # Swift (Electron contacts CLI)
 # ============================================================
 # Swift Package Manager build directory
