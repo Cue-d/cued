@@ -706,19 +706,26 @@ export const swipeAction = mutation({
             throw new Error("resolve_contact action missing contact IDs");
           }
 
-          // Merge contacts: secondary → primary (contactId is primary)
+          // Get the merge source from the suggestion if available
+          let mergeSource: "email_match" | "phone_match" = "email_match";
+          if (action.mergeSuggestionId) {
+            const suggestion = await ctx.db.get(action.mergeSuggestionId);
+            if (suggestion) {
+              mergeSource = suggestion.source;
+            }
+          }
+
           await ctx.scheduler.runAfter(
             0,
             internal.contactResolution.autoMergeContacts,
             {
               primaryContactId: action.contactId,
               secondaryContactId: action.secondaryContactId,
-              source: "name_match", // Best guess, actual source is in mergeSuggestion
+              source: mergeSource,
               reasoning: "User approved merge via action swipe",
             }
           );
 
-          // Update merge suggestion if linked
           if (action.mergeSuggestionId) {
             await ctx.db.patch(action.mergeSuggestionId, {
               status: "approved",
