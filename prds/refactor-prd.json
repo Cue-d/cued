@@ -438,7 +438,7 @@
         "Keep main sync.ts as orchestrator",
         "Run pnpm typecheck"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "5.5",
@@ -530,7 +530,7 @@
         "Fix any import order violations",
         "Run pnpm lint"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "7.2",

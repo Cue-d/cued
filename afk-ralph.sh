@@ -138,7 +138,7 @@ for ((i=1; i<=$ITERATIONS; i++)); do
 
   OUTPUT_FILE="/tmp/ralph-iteration-$i.txt"
 
-  $CLAUDE_CMD "@prds/mobile-prd.json @prds/progress.txt \
+  $CLAUDE_CMD "@prds/refactor-prd.json @prds/refactor-progress.txt \
 
 ## CONTEXT
 This is PRODUCTION CODE. Quality over speed.
@@ -146,7 +146,7 @@ Every shortcut becomes someone else's burden.
 Fight entropy. Leave the codebase better than you found it.
 
 ## PRD FORMAT
-The prds/mobile-prd.json file contains structured tasks with:
+The prds/refactor-prd.json file contains structured tasks with:
 - id: Task identifier (e.g., '3.2')
 - phase: 1-6
 - mode: 'hitl' or 'afk'
@@ -157,7 +157,7 @@ The prds/mobile-prd.json file contains structured tasks with:
 - reference: (optional) URL to documentation for this task
 
 ## YOUR TASK
-1. Read prds/mobile-prd.json and prds/progress.txt to understand current state.
+1. Read prds/refactor-prd.json and prds/refactor-progress.txt to understand current state.
 
 2. Find tasks where passes=false. Choose using this priority:
    - Architectural decisions and core abstractions (HIGH)
@@ -182,16 +182,16 @@ The prds/mobile-prd.json file contains structured tasks with:
 
 7. Commit with a descriptive message.
 
-8. Update prds/mobile-prd.json: set passes=true for the completed task.
+8. Update prds/refactor-prd.json: set passes=true for the completed task.
 
-9. Update prds/progress.txt with:
+9. Update prds/refactor-progress.txt with:
     - Date/time and task ID + description
     - Files changed
     - Decisions made and WHY
     - Browser verification results (for UI tasks)
     - Blockers or notes for next iteration
 
-10. Check if ALL tasks in prds/mobile-prd.json have passes=true.
+10. Check if ALL tasks in prds/refactor-prd.json have passes=true.
     If so, output exactly: <promise>COMPLETE</promise>
 
 ONLY WORK ON A SINGLE TASK." | tee "$OUTPUT_FILE"
@@ -241,8 +241,8 @@ if [ -n "$DEV_SERVER_PID" ]; then
 fi
 echo ""
 echo "Check status:"
-echo "  - prds/progress.txt for what was done"
-echo "  - prds/mobile-prd.json for tasks with passes=false"
+echo "  - prds/refactor-progress.txt for what was done"
+echo "  - prds/refactor-prd.json for tasks with passes=false"
 echo "  - git log --oneline -${ITERATIONS}"
 echo ""
 echo "Run again if more work remains."

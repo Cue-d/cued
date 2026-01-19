@@ -974,6 +974,80 @@ This refactoring effort addresses:
 
 **Also Assessed (for future reference):**
 - Task 5.3 (message-response-card.tsx): 522 LOC but already decomposed into sub-components (ReactionBadges, DeliveryStatus, AttachmentDisplay, DraftOptionButton). Main component is ~295 lines. LOW PRIORITY.
-- Task 5.4 (sync.ts): 2,089 LOC - genuine candidate but complex refactor with working test suite
 - Task 5.5 (integrations page.tsx): 502 LOC - barely over threshold, minimal benefit
+
+### 2026-01-19 - Task 5.4: Simplify packages/convex sync.ts - extract platform handlers
+
+**Files changed:**
+- Modified: `packages/convex/convex/sync.ts` (reduced from 2,071 LOC to 558 LOC)
+- Created: `packages/convex/convex/sync/shared.ts` (233 LOC)
+- Created: `packages/convex/convex/sync/imessage.ts` (510 LOC)
+- Created: `packages/convex/convex/sync/gmail.ts` (636 LOC)
+- Created: `packages/convex/convex/sync/slack.ts` (353 LOC)
+
+**Architecture:**
+- `sync.ts` remains the orchestrator - exports all public mutations/queries
+- `sync/shared.ts` contains common utilities:
+  - `SEVEN_DAYS_MS`, `CURRENT_SYNC_VERSION` constants
+  - `handleInput` validator
+  - `scheduleIncomingMessageEvents`, `scheduleOutgoingMessageEvents`
+  - `normalizeHandle`, `getOrCreateUser`, `createPlaceholderContact`
+  - `batchResolveHandles`
+  - `findIntegration`, `getOrCreateIntegration`
+- `sync/imessage.ts` handles iMessage and macOS Contacts sync
+- `sync/gmail.ts` handles Gmail emails and Google Contacts sync
+- `sync/slack.ts` handles Slack messages sync
+
+**Decisions:**
+- Kept social contacts sync (LinkedIn/Twitter) in main sync.ts - relatively small (~150 LOC) and different pattern from platform handlers
+- Used dynamic imports in gmail.ts for `findContactByHandle` to avoid circular dependencies
+- Public API unchanged - all existing imports from sync.ts continue to work
+- Each platform module handles its own batch fetching, contact creation, and message processing
+
+**Verification:**
+- ✅ pnpm --filter @prm/convex typecheck passes
+- ✅ pnpm --filter @prm/convex lint passes
+- ✅ pnpm --filter @prm/convex test passes (134 tests)
+- ⚠️ "Write outside of transaction" warnings from convex-test are expected (scheduled functions)
+
+**Line count summary:**
+- Before: sync.ts = 2,071 LOC (monolithic)
+- After: sync.ts = 558 LOC + sync/*.ts = 1,732 LOC (modular)
+- Main orchestrator now well under 500 LOC threshold
+
+**Commit:** 9fd35da
+
+### 2026-01-19 - Task 7.1: Standardize import patterns across codebase
+
+**Files changed:**
+- Modified: `apps/web/eslint.config.mjs`
+- Modified: `apps/mobile/eslint.config.js`
+- Modified: `packages/ui/eslint.config.js`
+- Modified: `apps/web/package.json`, `apps/mobile/package.json`, `packages/ui/package.json` (added eslint-plugin-import-x)
+- Modified: 18 files in apps/web with import order fixes (auto-fixed)
+
+**Decisions:**
+- Used `eslint-plugin-import-x` (modern fork of eslint-plugin-import, supports ESLint 9 flat config)
+- Import order convention documented via ESLint rules:
+  1. React/React Native first
+  2. Framework imports (next/**, expo-**)
+  3. External packages (alphabetized)
+  4. Monorepo packages (@prm/*)
+  5. Local aliases (@/*)
+  6. Type imports at end
+- Set rule to "warn" (not error) to allow gradual adoption
+- Test files with `vi.hoisted()` patterns have legitimate import order due to Vitest mock hoisting requirements
+
+**Import Convention:**
+- `@prm/*` for shared monorepo packages (e.g., `@prm/shared`, `@prm/ui`, `@prm/convex`)
+- `@/` for app-local imports (e.g., `@/components`, `@/lib`)
+- No empty lines between import groups
+- Alphabetized within each group
+
+**Verification:**
+- ✅ pnpm lint passes (only warnings for test file patterns and pre-existing unused imports)
+- ✅ pnpm typecheck passes (all packages)
+- ✅ pnpm test passes (shared: 101, ui: 139, convex: 134, mobile: 228)
+
+**Commit:** c8dcfaf
 
