@@ -2,7 +2,7 @@
  * @prm/shared - Shared utilities for PRM
  */
 
-export { normalizePhone, getPhoneVariants } from "./phone.js";
+export { normalizePhone, getPhoneVariants, phonesMatch } from "./phone.js";
 
 // Utility functions
 export { getInitials } from "./utils/index.js";
@@ -20,3 +20,13 @@ export {
   type ActionPlatform,
   type PlatformConfigItem,
 } from "./constants/platform.js";
+
+// Action queue types
+export type {
+  DraftRiskFlag,
+  DraftLabel,
+  DraftOption,
+  MessageAttachment,
+  DisplayMessage,
+  ContactFormData,
+} from "./types/actions.js";
