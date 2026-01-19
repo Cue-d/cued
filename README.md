@@ -37,6 +37,43 @@ pnpm dev
 
 Web app opens at http://localhost:3000
 
+
+### Run the App
+
+```bash
+# After build completes, start the dev server
+pnpm dev
+
+# The dev client will connect automatically
+# Or scan the QR code with your device
+```
+
+### Local Mobile Build
+
+If you prefer building locally instead of EAS cloud:
+
+```bash
+cd apps/mobile
+
+# Generate native projects
+npx expo prebuild
+
+# Run on iOS Simulator
+npx expo run:ios
+
+# Run on physical device (requires code signing)
+npx expo run:ios --device
+```
+
+### Code Signing for Physical Devices
+
+For physical device testing, you need an Apple Developer account:
+
+1. Open `apps/mobile/ios/PRM.xcworkspace` in Xcode
+2. Select the PRM target → Signing & Capabilities
+3. Select your Team and let Xcode manage signing
+4. Or use EAS with `eas build --profile preview` (handles signing automatically)
+
 ## Environment Variables
 
 Each package has its own `.env.local` file (gitignored).
@@ -107,6 +144,36 @@ packages/
 | "Error accessing messages database" | Grant Full Disk Access to your terminal |
 | "Contacts access denied" | Grant Contacts access in System Settings |
 | Convex types missing | Run `cd packages/convex && pnpm dev` |
+
+### better-sqlite3 Issues (Electron)
+
+Native modules like `better-sqlite3` need to be rebuilt for Electron's Node version.
+
+**"Module not found" or ABI mismatch errors:**
+
+```bash
+cd apps/electron
+npx @electron/rebuild -w better-sqlite3 --force
+```
+
+**Code signing errors on macOS 15+ (Sequoia):**
+
+macOS 15+ requires all native modules to be signed. For local development:
+
+```bash
+cd apps/electron
+./scripts/sign-dev.sh
+```
+
+This uses ad-hoc signing (no certificate required). For production builds, `electron-builder` handles signing automatically.
+
+
+### Mobile Build Issues
+
+| Problem | Solution |
+|---------|----------|
+| Code signing errors | Open `.xcworkspace` in Xcode, set Team in Signing & Capabilities |
+| Metro bundler issues | `cd apps/mobile && npx expo start --clear` |
 
 ## Documentation
 
