@@ -33,9 +33,9 @@ Reference: https://github.com/mautrix/linkedin/tree/main/pkg/linkedingo
 - [x] 4.1 - Add IPC handlers (parallel with 4.2)
 - [x] 4.2 - Create Convex mutations (parallel with 4.1)
 
-### [Not Started] Phase 5: Testing
+### [In Progress] Phase 5: Testing
 - [ ] 5.1 - Unit tests (parallel with 5.2)
-- [ ] 5.2 - Integration tests (parallel with 5.1)
+- [x] 5.2 - Integration tests (parallel with 5.1)
 
 ### [Not Started] Phase 6: E2E
 - [ ] 6.1 - Manual end-to-end test
@@ -284,3 +284,38 @@ Created Convex mutations for LinkedIn messaging sync:
 - Exported mutations: `syncLinkedInConversations`, `syncLinkedInMessages`
 
 Verification: `pnpm typecheck` passes in packages/convex
+
+### 2026-01-19 - Task 5.2: Add integration test for full sync flow
+**Files changed:**
+- `apps/electron/src/main/sync/__tests__/linkedin-sync.test.ts` (new)
+
+**Summary:**
+Created comprehensive integration tests for LinkedInSyncManager (31 test cases):
+- Test helpers: createMockParticipant(), createMockConversation(), createMockMessage(), createMockLinkedInClient()
+- Mocked Convex client and messages module to isolate sync manager behavior
+- **initialization tests**: verifies idle status and client storage
+- **syncConversations tests**:
+  - Fetches conversations and stores sync token
+  - Uses sync token for incremental fetches
+  - Syncs messages for each conversation
+- **syncMessages tests**:
+  - Fetches messages for a conversation
+  - Stores cursor for pagination (start + count)
+  - Updates progress with current conversation info
+  - Handles empty messages gracefully
+- **pagination tests**:
+  - Handles multiple conversation batches correctly
+  - Respects MAX_CONVERSATIONS_PER_SYNC limit (50)
+- **error handling tests**:
+  - Calls onAuthInvalid when LinkedInAuthError occurs
+  - Detects auth error from error message (401, 403, unauthenticated)
+  - Does not call onAuthInvalid for non-auth errors
+  - Calls onAuthInvalid when Convex auth token is null
+  - Sets error status and message on sync failure
+- **runSync tests**: prevents concurrent syncs, sets syncing status, updates lastSyncAt
+- **sendMessage tests**: sends message and syncs to Convex, throws if no client
+- **lifecycle tests**: start() begins interval, stop() clears interval, start() no-op if running
+- **reset test**: clears all sync state (cursors, token, progress)
+- **callback setter tests**: setTokenProvider, setProgressCallback, setAuthInvalidCallback
+
+Verification: `pnpm test` passes (31/31 tests in linkedin-sync.test.ts)

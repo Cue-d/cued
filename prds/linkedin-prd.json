@@ -291,7 +291,7 @@
         "Run pnpm test"
       ],
       "verification": "pnpm test passes",
-      "passes": false
+      "passes": true
     },
     {
       "id": "6.1",
