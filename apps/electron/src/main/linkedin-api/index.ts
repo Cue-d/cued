@@ -10,6 +10,9 @@ export * from './types'
 // Constants
 export * from './constants'
 
+// URN utilities
+export * from './urn'
+
 // Request utilities
 export * from './request'
 
