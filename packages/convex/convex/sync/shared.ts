@@ -48,7 +48,7 @@ export async function scheduleIncomingMessageEvents(
   ctx: MutationCtx,
   userId: Id<"users">,
   conversationIds: Set<Id<"conversations">>,
-  platform: "imessage" | "gmail" | "slack"
+  platform: "imessage" | "gmail" | "slack" | "linkedin"
 ): Promise<void> {
   for (const convId of conversationIds) {
     await ctx.scheduler.runAfter(0, internal.actionEvents.onIncomingMessage, {

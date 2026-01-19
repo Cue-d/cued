@@ -44,6 +44,12 @@ import {
   slackMessageInput,
   syncSlackMessagesInternal,
 } from "./sync/slack";
+import {
+  linkedInConversationsBatchInput,
+  linkedInMessagesBatchInput,
+  syncLinkedInConversationsInternal,
+  syncLinkedInMessagesInternal,
+} from "./sync/linkedin";
 
 // Re-export for backwards compatibility
 export { CURRENT_SYNC_VERSION };
@@ -556,3 +562,52 @@ async function upsertSocialContact(
 
   return { isNew: true, contactId };
 }
+
+// ============================================================================
+// LinkedIn Messaging Sync
+// ============================================================================
+
+/**
+ * Sync LinkedIn conversations from Electron to Convex.
+ * Called by LinkedInSyncManager when fetching conversations.
+ *
+ * This mutation:
+ * 1. Upserts conversations by entityURN (platformConversationId)
+ * 2. Resolves participants to contacts via LinkedIn profile URL
+ * 3. Updates conversation lastActivityAt and unreadCount
+ */
+export const syncLinkedInConversations = mutation({
+  args: linkedInConversationsBatchInput,
+  handler: async (ctx, args) => {
+    const identity = await ctx.auth.getUserIdentity();
+    if (!identity) {
+      throw new Error("Unauthorized: Must be authenticated to sync LinkedIn conversations");
+    }
+
+    const user = await getOrCreateUser(ctx, identity);
+    return syncLinkedInConversationsInternal(ctx, user._id, args.conversations);
+  },
+});
+
+/**
+ * Sync LinkedIn messages from Electron to Convex.
+ * Called by LinkedInSyncManager when fetching messages.
+ *
+ * This mutation:
+ * 1. Upserts messages by entityURN (platformMessageId) for deduplication
+ * 2. Resolves senders to contacts via LinkedIn URN
+ * 3. Updates conversation lastMessage fields
+ * 4. Links contacts by LinkedIn profile URL in contactHandles table
+ */
+export const syncLinkedInMessages = mutation({
+  args: linkedInMessagesBatchInput,
+  handler: async (ctx, args) => {
+    const identity = await ctx.auth.getUserIdentity();
+    if (!identity) {
+      throw new Error("Unauthorized: Must be authenticated to sync LinkedIn messages");
+    }
+
+    const user = await getOrCreateUser(ctx, identity);
+    return syncLinkedInMessagesInternal(ctx, user._id, args.messages);
+  },
+});

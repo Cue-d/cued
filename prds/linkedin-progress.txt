@@ -247,3 +247,40 @@ Updated preload/index.ts with new contextBridge methods:
 - `onLinkedinAuthInvalid(callback)` - listen for auth invalidation
 
 Verification: `pnpm typecheck` passes for task 4.1 files (error in packages/convex/convex/sync/linkedin.ts:368 is owned by task 4.2)
+
+### 2026-01-19 - Task 4.2: Create Convex LinkedIn sync mutations
+**Files changed:**
+- `packages/convex/convex/sync/linkedin.ts` (new)
+- `packages/convex/convex/sync.ts` (updated - added LinkedIn imports and mutations)
+- `packages/convex/convex/sync/shared.ts` (updated - added "linkedin" to scheduleIncomingMessageEvents platform type)
+
+**Summary:**
+Created Convex mutations for LinkedIn messaging sync:
+- `linkedInParticipantInput` - validator for conversation participant
+- `linkedInConversationInput` - validator with entityURN, title, lastActivityAt, participants, etc.
+- `linkedInAttachmentInput` - validator for file/image/video/audio attachments
+- `linkedInReactionInput` - validator for message reactions
+- `linkedInMessageInput` - validator with entityURN, conversationURN, text, sender info, attachments
+- `linkedInConversationsBatchInput` / `linkedInMessagesBatchInput` - batch validators
+- `syncLinkedInConversationsInternal()`:
+  - Batch fetch existing conversations by entityURN
+  - Upsert conversations with platform="linkedin"
+  - Resolve participants to contacts via LinkedIn profile URL
+  - Create contactHandles with handleType="linkedin_url"
+  - Update integration sync state
+- `syncLinkedInMessagesInternal()`:
+  - Batch fetch existing messages for deduplication via platformMessageId
+  - Group messages by conversation for efficient processing
+  - Resolve senders to contacts via URN
+  - Detect isFromMe by comparing sender URN to user's LinkedIn URN
+  - Update conversation lastMessageText/lastMessageAt
+  - Schedule action analysis for recent incoming messages
+  - Update integration totalMessagesSynced
+- Helper functions:
+  - `getOrCreateLinkedInContact()` - creates/updates contact from participant
+  - `getOrCreateLinkedInContactByURN()` - creates contact from sender URN
+  - `normalizeLinkedInProfileUrl()` - strips query params, trailing slash
+  - `batchFetchLinkedInConversations()` / `batchFetchLinkedInMessages()` - batch queries
+- Exported mutations: `syncLinkedInConversations`, `syncLinkedInMessages`
+
+Verification: `pnpm typecheck` passes in packages/convex
