@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { normalizePhone, getPhoneVariants, formatPhoneNumber } from "./phone";
+import {
+  normalizePhone,
+  getPhoneVariants,
+  formatPhoneNumber,
+  phonesMatch,
+} from "./phone";
 
 describe("normalizePhone", () => {
   it("normalizes phone with + prefix and formatting", () => {
@@ -127,5 +132,42 @@ describe("formatPhoneNumber", () => {
   it("handles real-world examples", () => {
     // From PRD: +12078005660 -> +1 (207) 800-5660
     expect(formatPhoneNumber("+12078005660")).toBe("+1 (207) 800-5660");
+  });
+});
+
+describe("phonesMatch", () => {
+  it("matches identical normalized numbers", () => {
+    expect(phonesMatch("+15551234567", "+15551234567")).toBe(true);
+    expect(phonesMatch("5551234567", "5551234567")).toBe(true);
+  });
+
+  it("matches US number with +1 against 10-digit", () => {
+    expect(phonesMatch("+15551234567", "5551234567")).toBe(true);
+    expect(phonesMatch("5551234567", "+15551234567")).toBe(true);
+  });
+
+  it("matches US number variants with formatting", () => {
+    expect(phonesMatch("+1 (555) 123-4567", "555-123-4567")).toBe(true);
+    expect(phonesMatch("(555) 123-4567", "+1-555-123-4567")).toBe(true);
+  });
+
+  it("matches 11-digit US number without + to other variants", () => {
+    expect(phonesMatch("15551234567", "+15551234567")).toBe(true);
+    expect(phonesMatch("15551234567", "5551234567")).toBe(true);
+  });
+
+  it("does not match different numbers", () => {
+    expect(phonesMatch("+15551234567", "+15559876543")).toBe(false);
+    expect(phonesMatch("5551234567", "5559876543")).toBe(false);
+  });
+
+  it("does not match international to US number", () => {
+    // +44 number should not match US number
+    expect(phonesMatch("+442079460958", "+15551234567")).toBe(false);
+  });
+
+  it("matches international numbers only when exact", () => {
+    expect(phonesMatch("+442079460958", "+44 20 7946 0958")).toBe(true);
+    expect(phonesMatch("+442079460958", "+442079460000")).toBe(false);
   });
 });
