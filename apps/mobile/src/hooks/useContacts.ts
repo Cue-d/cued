@@ -8,7 +8,7 @@ import type { Id } from "@prm/convex/convex/_generated/dataModel";
  */
 export function useContacts(options?: {
   limit?: number;
-  cursor?: Id<"contacts">;
+  cursor?: { displayName: string; _id: Id<"contacts"> };
   searchQuery?: string;
 }) {
   const result = useQuery(api.contacts.getContacts, {
