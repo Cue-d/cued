@@ -263,6 +263,7 @@ vi.mock("convex/react", () => ({
 // Mock widget data (iOS specific)
 vi.mock("@/lib/widget-data", () => ({
   updateWidgetData: vi.fn(),
+  updateWidgetActionsList: vi.fn(),
 }));
 
 // Silence console warnings during tests (optional)
