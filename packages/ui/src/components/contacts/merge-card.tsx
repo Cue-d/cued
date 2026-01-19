@@ -4,10 +4,10 @@ import * as React from "react"
 import { ArrowRight, Check, Mail, MessageSquare, Phone, X } from "lucide-react"
 import { getInitials } from "@prm/shared"
 import { cn } from "../../lib/utils"
-import { Card, CardContent, CardHeader } from "../ui/card"
 import { Avatar, AvatarFallback } from "../ui/avatar"
 import { Badge } from "../ui/badge"
 import { Button } from "../ui/button"
+import { Card, CardContent, CardHeader } from "../ui/card"
 
 /** Handle type for contacts */
 export interface ContactHandle {

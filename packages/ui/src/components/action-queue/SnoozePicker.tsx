@@ -5,12 +5,12 @@ import { Clock, CalendarIcon } from "lucide-react"
 import { cn } from "../../lib/utils"
 import { Button } from "../ui/button"
 import { Calendar } from "../ui/calendar"
+import { Input } from "../ui/input"
 import {
   Popover,
   PopoverContent,
   PopoverTrigger,
 } from "../ui/popover"
-import { Input } from "../ui/input"
 
 export interface SnoozePickerProps {
   /** Called when user selects a snooze time */

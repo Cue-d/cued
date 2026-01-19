@@ -1,14 +1,3 @@
-import type { ChatStatus, FileUIPart } from "ai";
-import {
-  CornerDownLeftIcon,
-  ImageIcon,
-  Loader2Icon,
-  PaperclipIcon,
-  PlusIcon,
-  SquareIcon,
-  XIcon,
-} from "lucide-react";
-import { nanoid } from "nanoid";
 import {
   type ChangeEvent,
   type ChangeEventHandler,
@@ -31,7 +20,16 @@ import {
   useRef,
   useState,
 } from "react";
-
+import {
+  CornerDownLeftIcon,
+  ImageIcon,
+  Loader2Icon,
+  PaperclipIcon,
+  PlusIcon,
+  SquareIcon,
+  XIcon,
+} from "lucide-react";
+import { nanoid } from "nanoid";
 import { cn } from "../../lib/utils";
 import { Button } from "../ui/button";
 import {
@@ -67,6 +65,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "../ui/select";
+import type { ChatStatus, FileUIPart } from "ai";
 
 // ============================================================================
 // Provider Context & Types

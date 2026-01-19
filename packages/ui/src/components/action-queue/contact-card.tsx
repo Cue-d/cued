@@ -4,11 +4,10 @@ import * as React from "react";
 import { Building2, Clock, FileText, Link, Tag, User } from "lucide-react";
 import { getInitials, type ContactFormData } from "@prm/shared";
 import { cn } from "../../lib/utils";
-import { Card, CardContent, CardHeader } from "../ui/card";
 import { Avatar, AvatarFallback } from "../ui/avatar";
-import { Input } from "../ui/input";
-import { Textarea } from "../ui/textarea";
 import { Badge } from "../ui/badge";
+import { Card, CardContent, CardHeader } from "../ui/card";
+import { Input } from "../ui/input";
 import {
   Select,
   SelectContent,
@@ -16,6 +15,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "../ui/select";
+import { Textarea } from "../ui/textarea";
 
 /** Re-export ContactFormData for backwards compatibility */
 export type { ContactFormData } from "@prm/shared";

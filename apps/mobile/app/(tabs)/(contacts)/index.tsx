@@ -15,16 +15,16 @@ import {
   type SectionListRenderItemInfo,
   type SectionListData,
 } from "react-native";
+import * as Haptics from "expo-haptics";
 import { Stack } from "expo-router";
 import { SymbolView } from "expo-symbols";
-import * as Haptics from "expo-haptics";
-import { getThemeColors } from "@/lib/utils";
-import { useContacts } from "@/hooks/useContacts";
 import {
   ContactListItem,
   type ContactListItemData,
 } from "@/components/contact-list-item";
 import { ErrorBoundary } from "@/components/error-boundary";
+import { useContacts } from "@/hooks/useContacts";
+import { getThemeColors } from "@/lib/utils";
 
 /** Section type for alphabetical grouping */
 interface ContactSection {

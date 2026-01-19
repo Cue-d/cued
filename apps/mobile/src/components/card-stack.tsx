@@ -6,13 +6,13 @@
  */
 
 import { type ReactNode } from "react";
-import { FadeIn, FadeOut, Layout } from "react-native-reanimated";
-import { SymbolView } from "expo-symbols";
-import { SwipeableCard, type SwipeDirection } from "./swipeable-card";
 import { View, Text, useWindowDimensions, useColorScheme } from "react-native";
+import { SymbolView } from "expo-symbols";
+import { FadeIn, FadeOut, Layout } from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { AnimatedView } from "@/components/animated";
 import { getThemeColors } from "@/lib/utils";
+import { SwipeableCard, type SwipeDirection } from "./swipeable-card";
 
 // Number of visible cards in the stack
 const VISIBLE_CARDS = 3;

@@ -22,12 +22,11 @@ import Animated, {
   useSharedValue,
 } from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-
-import { useChat } from "@/hooks/useChat";
-import { ChatMessage } from "@/components/chat/chat-message";
 import { ChatInput } from "@/components/chat/chat-input";
+import { ChatMessage } from "@/components/chat/chat-message";
 import { SuggestedPrompts } from "@/components/chat/suggested-prompts";
 import { ErrorBoundary } from "@/components/error-boundary";
+import { useChat } from "@/hooks/useChat";
 import { getAccessToken } from "@/lib/auth";
 
 /**

@@ -2,11 +2,10 @@
 
 import { Copy, ListTodo } from "lucide-react"
 import { toast } from "sonner"
-
-import { cn } from "../../../lib/utils"
-import { Badge } from "../../ui/badge"
 import { Artifact } from "./create-artifact"
 import { formatActionType, formatRelativeTime, PlatformIcon } from "./utils"
+import { cn } from "../../../lib/utils"
+import { Badge } from "../../ui/badge"
 
 export interface ActionSearchResult {
   _id: string

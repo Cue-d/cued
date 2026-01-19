@@ -1,6 +1,6 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen } from "@testing-library/react";
 import React from "react";
+import { render, screen } from "@testing-library/react";
+import { describe, it, expect, vi, beforeEach } from "vitest";
 import { ChatMessage, type ChatMessageData, type ToolInvocation } from "../chat-message";
 
 // Ensure React is globally available for JSX transform

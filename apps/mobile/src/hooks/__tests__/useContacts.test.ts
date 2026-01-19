@@ -1,6 +1,6 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
 import { renderHook } from "@testing-library/react";
 import { useQuery } from "convex/react";
+import { describe, it, expect, vi, beforeEach } from "vitest";
 import { useContacts } from "../useContacts";
 
 // Mock convex/react is already done in setup.ts

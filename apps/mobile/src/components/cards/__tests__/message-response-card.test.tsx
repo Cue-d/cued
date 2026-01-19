@@ -1,6 +1,6 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, fireEvent } from "@testing-library/react";
 import React from "react";
+import { render, screen, fireEvent } from "@testing-library/react";
+import { describe, it, expect, vi, beforeEach } from "vitest";
 import { MessageResponseCard, type MessageResponseCardProps, type DisplayMessage, type DraftOption } from "../message-response-card";
 
 // Ensure React is globally available for JSX transform

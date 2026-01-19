@@ -1,7 +1,6 @@
 import { useMemo } from "react";
 import { ActivityIndicator, View, Text } from "react-native";
 import { FadeInUp } from "react-native-reanimated";
-
 import { AnimatedView } from "@/components/animated";
 import { ToolArtifacts } from "./tool-artifact";
 

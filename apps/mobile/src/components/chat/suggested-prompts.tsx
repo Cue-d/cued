@@ -10,9 +10,9 @@
  */
 
 import { Platform, useColorScheme, View, Text, Pressable } from "react-native";
-import { SymbolView } from "expo-symbols";
 import { GlassView, isLiquidGlassAvailable } from "expo-glass-effect";
 import * as Haptics from "expo-haptics";
+import { SymbolView } from "expo-symbols";
 import Animated, { FadeInDown, FadeIn } from "react-native-reanimated";
 import { getThemeColors } from "@/lib/utils";
 

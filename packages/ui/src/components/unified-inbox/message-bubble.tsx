@@ -1,6 +1,6 @@
-import type React from "react"
 import { cn } from "../../lib/utils"
 import type { InboxMessage, InboxMessageAttachment } from "./message-types"
+import type React from "react"
 
 interface InboxMessageBubbleProps {
   message: InboxMessage

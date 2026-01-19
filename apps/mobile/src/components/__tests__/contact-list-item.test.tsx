@@ -1,6 +1,7 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen } from "@testing-library/react";
 import React from "react";
+import { render, screen } from "@testing-library/react";
+import { describe, it, expect, vi, beforeEach } from "vitest";
+import { ContactListItem, type ContactListItemData } from "../contact-list-item";
 
 // Ensure React is globally available for JSX transform
 globalThis.React = React;
@@ -13,8 +14,6 @@ vi.mock("@/lib/utils", () => ({
     primary: "#EA580C",
   }),
 }));
-
-import { ContactListItem, type ContactListItemData } from "../contact-list-item";
 
 describe("ContactListItem", () => {
   beforeEach(() => {

@@ -2,8 +2,8 @@
 
 import { useCallback, useRef } from "react";
 import { Search, MessageSquare, Mail, Hash } from "lucide-react";
-import { cn } from "../../lib/utils";
 import { InboxConversationItem } from "./conversation-item";
+import { cn } from "../../lib/utils";
 import type { InboxConversation, InboxPlatform } from "./types";
 
 type PlatformFilter = InboxPlatform | "all";

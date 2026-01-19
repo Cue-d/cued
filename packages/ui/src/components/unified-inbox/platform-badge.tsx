@@ -1,7 +1,7 @@
-import type React from "react"
 import { PLATFORM_CONFIG } from "@prm/shared"
 import { cn } from "../../lib/utils"
 import type { InboxPlatform } from "./types"
+import type React from "react"
 
 interface InboxPlatformBadgeProps {
   platform: InboxPlatform

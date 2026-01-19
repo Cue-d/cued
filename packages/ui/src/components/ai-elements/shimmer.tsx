@@ -1,4 +1,3 @@
-import { motion } from "motion/react";
 import {
   type CSSProperties,
   type ElementType,
@@ -6,7 +5,7 @@ import {
   memo,
   useMemo,
 } from "react";
-
+import { motion } from "motion/react";
 import { cn } from "../../lib/utils";
 
 export type TextShimmerProps = {

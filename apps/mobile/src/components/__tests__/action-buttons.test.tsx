@@ -1,6 +1,7 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen } from "@testing-library/react";
 import React from "react";
+import { render, screen } from "@testing-library/react";
+import { describe, it, expect, vi, beforeEach } from "vitest";
+import { ActionButtons } from "../action-buttons";
 
 // Ensure React is globally available for JSX transform
 globalThis.React = React;
@@ -8,8 +9,6 @@ globalThis.React = React;
 vi.mock("@/lib/utils", () => ({
   cn: (...inputs: string[]) => inputs.filter(Boolean).join(" "),
 }));
-
-import { ActionButtons } from "../action-buttons";
 
 describe("ActionButtons", () => {
   const mockOnSwipe = vi.fn();

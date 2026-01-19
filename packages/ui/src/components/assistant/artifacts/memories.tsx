@@ -2,7 +2,6 @@
 
 import { Clock, Copy } from "lucide-react"
 import { toast } from "sonner"
-
 import { Artifact } from "./create-artifact"
 
 export interface MemoryResult {

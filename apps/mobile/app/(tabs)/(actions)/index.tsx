@@ -4,13 +4,13 @@
  */
 
 import { useState, useCallback, useMemo } from "react";
-import { useMutation, useQuery } from "convex/react";
-import { useRouter } from "expo-router";
-import * as Haptics from "expo-haptics";
 import { View, Text } from "react-native";
+import * as Haptics from "expo-haptics";
+import { useRouter } from "expo-router";
+import { useMutation, useQuery } from "convex/react";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { useActions } from "@/hooks/useActions";
-import { useElectronPresence } from "@/hooks/useElectronPresence";
+import { api } from "@prm/convex/convex/_generated/api";
+import { ActionButtons } from "@/components/action-buttons";
 import { CardStack } from "@/components/card-stack";
 import {
   MessageResponseCard,
@@ -20,11 +20,11 @@ import {
   type ContactFormData,
   type DraftOption,
 } from "@/components/cards";
-import type { SwipeDirection } from "@/components/swipeable-card";
-import { ActionButtons } from "@/components/action-buttons";
-import { SkeletonStack } from "@/components/skeleton-card";
 import { ErrorBoundary } from "@/components/error-boundary";
-import { api } from "@prm/convex/convex/_generated/api";
+import { SkeletonStack } from "@/components/skeleton-card";
+import { useActions } from "@/hooks/useActions";
+import { useElectronPresence } from "@/hooks/useElectronPresence";
+import type { SwipeDirection } from "@/components/swipeable-card";
 import type { Id } from "@prm/convex/convex/_generated/dataModel";
 
 /** Draft option from Convex (with string label) */

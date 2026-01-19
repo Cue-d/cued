@@ -7,12 +7,11 @@
  */
 
 import { useMemo, useRef, useCallback, useState } from "react";
-import { SymbolView, type SFSymbol } from "expo-symbols";
 import { View, Text, ScrollView, useColorScheme, Pressable } from "react-native";
-import type { ScrollView as ScrollViewType } from "react-native";
-import { Image } from "expo-image";
 import { GlassView, isLiquidGlassAvailable } from "expo-glass-effect";
 import * as Haptics from "expo-haptics";
+import { Image } from "expo-image";
+import { SymbolView, type SFSymbol } from "expo-symbols";
 import {
   getInitials,
   formatTime,
@@ -24,8 +23,9 @@ import {
   type DraftRiskFlag,
   type DraftOption,
 } from "@prm/shared";
-import { cn, getThemeColors } from "@/lib/utils";
 import { ChatInput } from "@/components/chat/chat-input";
+import { cn, getThemeColors } from "@/lib/utils";
+import type { ScrollView as ScrollViewType } from "react-native";
 
 /** Re-export types for backwards compatibility */
 export type { ActionPlatform, MessageAttachment, DisplayMessage, DraftRiskFlag, DraftOption } from "@prm/shared";

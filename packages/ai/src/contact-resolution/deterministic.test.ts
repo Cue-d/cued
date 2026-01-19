@@ -59,6 +59,14 @@ describe("phonesMatch", () => {
     expect(phonesMatch("5551234567", "+15551234567")).toBe(true);
   });
 
+  it("matches 11-digit US number without + to other formats", () => {
+    // 15551234567 (common format from contact apps) should match all variants
+    expect(phonesMatch("15551234567", "+15551234567")).toBe(true);
+    expect(phonesMatch("15551234567", "5551234567")).toBe(true);
+    expect(phonesMatch("+15551234567", "15551234567")).toBe(true);
+    expect(phonesMatch("5551234567", "15551234567")).toBe(true);
+  });
+
   it("does not match different numbers", () => {
     expect(phonesMatch("+15551234567", "+15559876543")).toBe(false);
   });

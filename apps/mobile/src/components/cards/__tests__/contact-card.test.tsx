@@ -1,6 +1,6 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen } from "@testing-library/react";
 import React from "react";
+import { render, screen } from "@testing-library/react";
+import { describe, it, expect, vi, beforeEach } from "vitest";
 import { ContactCard, type ContactCardProps, type ContactFormData } from "../contact-card";
 
 // Ensure React is globally available for JSX transform

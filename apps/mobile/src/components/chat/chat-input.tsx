@@ -22,7 +22,6 @@ import Animated, {
   useSharedValue,
   withTiming,
 } from "react-native-reanimated";
-
 import { getThemeColors } from "@/lib/utils";
 
 const AnimatedSymbolView = Animated.createAnimatedComponent(SymbolView);

@@ -10,8 +10,8 @@
  */
 
 import { useMemo } from "react";
-import { SymbolView } from "expo-symbols";
 import { View, Text, ScrollView, TextInput, useColorScheme } from "react-native";
+import { SymbolView } from "expo-symbols";
 import { getInitials, PLATFORM_CONFIG, type ActionPlatform, type ContactFormData } from "@prm/shared";
 import { cn, getThemeColors } from "@/lib/utils";
 

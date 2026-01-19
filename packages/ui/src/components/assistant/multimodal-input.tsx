@@ -1,6 +1,5 @@
 "use client";
 
-import { AnimatePresence, motion, type Transition } from "motion/react";
 import {
   type ChangeEvent,
   type Dispatch,
@@ -12,6 +11,7 @@ import {
   useRef,
   useState,
 } from "react";
+import { AnimatePresence, motion, type Transition } from "motion/react";
 import { ArrowUpIcon, PaperclipIcon, StopIcon } from "./icons";
 import { type Attachment, PreviewAttachment } from "./preview-attachment";
 import {
@@ -21,8 +21,8 @@ import {
   PromptInputToolbar,
   PromptInputTools,
 } from "./prompt-input";
-import { Button } from "../ui/button";
 import { cn } from "../../lib/utils";
+import { Button } from "../ui/button";
 
 // Re-export Attachment type for consumers
 export type { Attachment };

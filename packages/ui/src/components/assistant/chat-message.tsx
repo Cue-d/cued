@@ -1,20 +1,19 @@
 import * as React from "react"
 import { Bot, ChevronDown, User } from "lucide-react"
-
+import { ToolArtifact } from "./tool-artifact"
 import { cn } from "../../lib/utils"
+import { Loader } from "../ai-elements/loader"
+import {
+  Message,
+  MessageContent,
+  MessageResponse,
+} from "../ai-elements/message"
 import { Avatar, AvatarFallback } from "../ui/avatar"
 import {
   Collapsible,
   CollapsibleContent,
   CollapsibleTrigger,
 } from "../ui/collapsible"
-import {
-  Message,
-  MessageContent,
-  MessageResponse,
-} from "../ai-elements/message"
-import { Loader } from "../ai-elements/loader"
-import { ToolArtifact } from "./tool-artifact"
 
 export interface ToolInvocation {
   toolCallId: string

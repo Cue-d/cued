@@ -1,14 +1,11 @@
+import { createContext, memo, useContext, useEffect, useState } from "react";
 import {
   ChevronLeftIcon,
   ChevronRightIcon,
   PaperclipIcon,
   XIcon,
 } from "lucide-react";
-import type { ComponentProps, HTMLAttributes, ReactElement } from "react";
-import { createContext, memo, useContext, useEffect, useState } from "react";
 import { Streamdown } from "streamdown";
-import type { FileUIPart, UIMessage } from "ai";
-
 import { cn } from "../../lib/utils";
 import { Button } from "../ui/button";
 import { ButtonGroup, ButtonGroupText } from "../ui/button-group";
@@ -18,6 +15,8 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "../ui/tooltip";
+import type { FileUIPart, UIMessage } from "ai";
+import type { ComponentProps, HTMLAttributes, ReactElement } from "react";
 
 export type MessageProps = HTMLAttributes<HTMLDivElement> & {
   from: UIMessage["role"];

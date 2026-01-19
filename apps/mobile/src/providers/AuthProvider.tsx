@@ -1,5 +1,4 @@
 import React, { createContext, useContext, useState, useEffect, useCallback, useMemo } from "react";
-import type { ReactNode } from "react";
 import {
   type OAuthProvider,
   type WorkOSUser,
@@ -10,6 +9,7 @@ import {
   getRefreshToken,
   refreshAccessToken,
 } from "@/lib/auth";
+import type { ReactNode } from "react";
 
 interface AuthContextType {
   user: WorkOSUser | null;

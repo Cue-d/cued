@@ -24,12 +24,12 @@ export type { MemoryResult } from "./memories"
 export { actionsArtifact } from "./actions"
 export type { ActionSearchResult } from "./actions"
 
-import { searchMessagesArtifact } from "./search-messages"
+import { actionCreatedArtifact } from "./action-created"
+import { actionsArtifact } from "./actions"
 import { contactsArtifact } from "./contacts"
 import { conversationsArtifact } from "./conversations"
-import { actionCreatedArtifact } from "./action-created"
 import { memoriesArtifact } from "./memories"
-import { actionsArtifact } from "./actions"
+import { searchMessagesArtifact } from "./search-messages"
 
 /** Registry of all artifact definitions */
 export const artifactDefinitions = [

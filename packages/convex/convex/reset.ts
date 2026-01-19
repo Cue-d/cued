@@ -163,3 +163,28 @@ export const migrateGroupDisplayNames = mutation({
     return { updated, skippedDm, skippedHasValidName, skippedNoParticipants, total: conversations.length };
   },
 });
+
+/**
+ * Migration: Remove deprecated draftMessage field from actions.
+ * After running this, you can remove draftMessage from the schema.
+ */
+export const migrateRemoveDraftMessage = mutation({
+  args: {},
+  handler: async (ctx) => {
+    const actions = await ctx.db.query("actions").collect();
+
+    let updated = 0;
+    for (const action of actions) {
+      // Check if the action has the deprecated field
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      if ((action as any).draftMessage !== undefined) {
+        // Use unset by setting to undefined and replacing the document
+        const { draftMessage: _, ...rest } = action as typeof action & { draftMessage?: string };
+        await ctx.db.replace(action._id, rest);
+        updated++;
+      }
+    }
+
+    return { updated, total: actions.length };
+  },
+});

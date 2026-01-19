@@ -1,9 +1,9 @@
-import type React from "react"
 import { formatTimestamp as formatTimestampShared } from "@prm/shared"
-import { cn } from "../../lib/utils"
 import { InboxConversationAvatar } from "./conversation-avatar"
 import { InboxPlatformBadge } from "./platform-badge"
+import { cn } from "../../lib/utils"
 import type { InboxConversation } from "./types"
+import type React from "react"
 
 interface InboxConversationItemProps {
   conversation: InboxConversation

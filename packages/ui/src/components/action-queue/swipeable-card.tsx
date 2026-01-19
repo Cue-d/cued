@@ -1,6 +1,7 @@
 "use client"
 
 import * as React from "react"
+import { Check, Clock, X } from "lucide-react"
 import {
   motion,
   type PanInfo,
@@ -8,7 +9,6 @@ import {
   useTransform,
   animate,
 } from "motion/react"
-import { Check, Clock, X } from "lucide-react"
 import { cn } from "../../lib/utils"
 import type { SwipeDirection } from "./CardStack"
 

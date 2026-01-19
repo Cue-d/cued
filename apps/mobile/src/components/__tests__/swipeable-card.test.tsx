@@ -1,6 +1,7 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen } from "@testing-library/react";
 import React from "react";
+import { render, screen } from "@testing-library/react";
+import { describe, it, expect, vi, beforeEach } from "vitest";
+import { SwipeableCard, type SwipeDirection } from "../swipeable-card";
 
 // Ensure React is globally available for JSX transform
 globalThis.React = React;
@@ -10,8 +11,6 @@ vi.mock("@/components/animated", () => ({
   AnimatedView: ({ children, ...props }: { children?: React.ReactNode }) =>
     React.createElement("div", { "data-testid": "animated-view", ...props }, children),
 }));
-
-import { SwipeableCard, type SwipeDirection } from "../swipeable-card";
 
 describe("SwipeableCard", () => {
   const mockOnSwipe = vi.fn();

@@ -2,8 +2,8 @@
  * Vitest setup for React Native / Expo mobile app testing
  * Provides global mocks for Expo modules and React Native dependencies
  */
-import { vi } from "vitest";
 import React from "react";
+import { vi } from "vitest";
 
 // Ensure React is globally available for JSX transform in components
 globalThis.React = React;

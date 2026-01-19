@@ -1,6 +1,3 @@
-import { router } from "expo-router";
-import * as Haptics from "expo-haptics";
-import { SymbolView } from "expo-symbols";
 import {
   Alert,
   ActivityIndicator,
@@ -9,12 +6,15 @@ import {
   Pressable,
   useColorScheme,
 } from "react-native";
-import { Uniwind, useUniwind } from "uniwind";
+import * as Haptics from "expo-haptics";
+import { router } from "expo-router";
+import { SymbolView } from "expo-symbols";
 import { SafeAreaView } from "react-native-safe-area-context";
+import { Uniwind, useUniwind } from "uniwind";
 import { getInitials } from "@prm/shared";
-import { useAuth } from "@/providers/AuthProvider";
 import { getRedirectUri } from "@/lib/auth";
 import { cn, getDisplayName, getThemeColors } from "@/lib/utils";
+import { useAuth } from "@/providers/AuthProvider";
 
 function Avatar({ name, size = 80 }: { name: string; size?: number }): React.ReactElement {
   return (

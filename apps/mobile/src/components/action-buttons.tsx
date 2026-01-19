@@ -6,13 +6,13 @@
  * Uses GlassView for iOS 26+ liquid glass effect.
  */
 
-import { GlassView, isLiquidGlassAvailable } from "expo-glass-effect";
-import { SymbolView } from "expo-symbols";
-import type { SFSymbol } from "sf-symbols-typescript";
-import * as Haptics from "expo-haptics";
 import { View, Text, Pressable } from "react-native";
-import type { SwipeDirection } from "./swipeable-card";
+import { GlassView, isLiquidGlassAvailable } from "expo-glass-effect";
+import * as Haptics from "expo-haptics";
+import { SymbolView } from "expo-symbols";
 import { cn } from "@/lib/utils";
+import type { SwipeDirection } from "./swipeable-card";
+import type { SFSymbol } from "sf-symbols-typescript";
 
 // Colors matching the swipeable card backgrounds
 const COLORS = {

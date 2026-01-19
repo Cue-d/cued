@@ -1,7 +1,7 @@
-import type React from "react"
 import { getInitials } from "@prm/shared"
 import { cn } from "../../lib/utils"
 import type { InboxParticipant, InboxConversationType } from "./types"
+import type React from "react"
 
 interface InboxConversationAvatarProps {
   participants: InboxParticipant[]

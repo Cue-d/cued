@@ -1,13 +1,13 @@
 import { useState, useMemo } from "react";
 import { View, Text, ScrollView, Pressable, PlatformColor } from "react-native";
-import { Stack, useRouter } from "expo-router";
-import { GlassView, isLiquidGlassAvailable } from "expo-glass-effect";
 import { BlurView } from "expo-blur";
-import { SymbolView } from "expo-symbols";
-import type { SFSymbols7_0 } from "sf-symbols-typescript";
+import { GlassView, isLiquidGlassAvailable } from "expo-glass-effect";
 import * as Haptics from "expo-haptics";
-import { useSearch, type SearchContactResult, type SearchMessageResult } from "@/hooks/useSearch";
+import { Stack, useRouter } from "expo-router";
+import { SymbolView } from "expo-symbols";
 import { useContacts } from "@/hooks/useContacts";
+import { useSearch, type SearchContactResult, type SearchMessageResult } from "@/hooks/useSearch";
+import type { SFSymbols7_0 } from "sf-symbols-typescript";
 
 const AVATAR_SIZE = 40;
 

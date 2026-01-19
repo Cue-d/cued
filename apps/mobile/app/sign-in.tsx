@@ -7,14 +7,14 @@ import {
   Text,
   Pressable,
 } from "react-native";
-import Animated, { FadeIn, FadeInUp } from "react-native-reanimated";
 import * as Clipboard from "expo-clipboard";
-import * as Haptics from "expo-haptics";
 import { GlassView, isLiquidGlassAvailable } from "expo-glass-effect";
+import * as Haptics from "expo-haptics";
 import { SymbolView } from "expo-symbols";
-import { useAuth } from "@/providers/AuthProvider";
+import Animated, { FadeIn, FadeInUp } from "react-native-reanimated";
 import { getRedirectUri, type OAuthProvider } from "@/lib/auth";
 import { cn } from "@/lib/utils";
+import { useAuth } from "@/providers/AuthProvider";
 
 type ButtonProvider = "google" | "apple";
 

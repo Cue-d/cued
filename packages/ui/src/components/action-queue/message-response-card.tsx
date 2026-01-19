@@ -15,16 +15,16 @@ import {
   type DisplayMessage,
 } from "@prm/shared"
 import { cn } from "../../lib/utils"
-import { Card, CardContent, CardFooter, CardHeader } from "../ui/card"
 import { Avatar, AvatarFallback } from "../ui/avatar"
-import { Textarea } from "../ui/textarea"
+import { Badge } from "../ui/badge"
+import { Card, CardContent, CardFooter, CardHeader } from "../ui/card"
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "../ui/dropdown-menu"
-import { Badge } from "../ui/badge"
+import { Textarea } from "../ui/textarea"
 
 /** Re-export types for backwards compatibility */
 export type { ActionPlatform, DraftRiskFlag, DraftOption, DraftLabel, MessageAttachment, DisplayMessage } from "@prm/shared"

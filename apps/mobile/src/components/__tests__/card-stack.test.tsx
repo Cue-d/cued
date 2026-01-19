@@ -1,6 +1,7 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen } from "@testing-library/react";
 import React from "react";
+import { render, screen } from "@testing-library/react";
+import { describe, it, expect, vi, beforeEach } from "vitest";
+import { CardStack, type CardStackItem } from "../card-stack";
 
 // Ensure React is globally available for JSX transform
 globalThis.React = React;
@@ -39,8 +40,6 @@ vi.mock("../swipeable-card", () => ({
       children
     ),
 }));
-
-import { CardStack, type CardStackItem } from "../card-stack";
 
 interface TestAction extends CardStackItem {
   id: string;

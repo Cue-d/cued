@@ -1,14 +1,13 @@
 import { useMemo } from "react";
-import { SymbolView } from "expo-symbols";
-import type { SFSymbol } from "sf-symbols-typescript";
-import { FadeIn } from "react-native-reanimated";
-import { isLiquidGlassAvailable, GlassView } from "expo-glass-effect";
-import { formatRelativeTime } from "@prm/shared";
-
 import { View, Text, useColorScheme } from "react-native";
+import { isLiquidGlassAvailable, GlassView } from "expo-glass-effect";
+import { SymbolView } from "expo-symbols";
+import { FadeIn } from "react-native-reanimated";
+import { formatRelativeTime } from "@prm/shared";
 import { AnimatedView } from "@/components/animated";
 import { getThemeColors } from "@/lib/utils";
 import type { ToolInvocation } from "./chat-message";
+import type { SFSymbol } from "sf-symbols-typescript";
 
 // Types matching web implementation
 interface SearchMessageResult {

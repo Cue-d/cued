@@ -1,5 +1,5 @@
-import { ExtensionStorage } from "@bacons/apple-targets";
 import { Platform } from "react-native";
+import { ExtensionStorage } from "@bacons/apple-targets";
 
 const APP_GROUP_ID = "group.com.prm.mobile";
 const PENDING_ACTION_COUNT_KEY = "pendingActionCount";

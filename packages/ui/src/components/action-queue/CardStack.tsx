@@ -1,8 +1,8 @@
 "use client"
 
 import * as React from "react"
-import { AnimatePresence, motion } from "motion/react"
 import { PartyPopper } from "lucide-react"
+import { AnimatePresence, motion } from "motion/react"
 import { cn } from "../../lib/utils"
 import {
   Tooltip,

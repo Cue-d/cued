@@ -3,9 +3,9 @@
  * Modern iOS-style contact row.
  */
 
-import { useRouter } from "expo-router";
-import * as Haptics from "expo-haptics";
 import { View, Text, Pressable, useColorScheme } from "react-native";
+import * as Haptics from "expo-haptics";
+import { useRouter } from "expo-router";
 import { SymbolView } from "expo-symbols";
 import { getInitials } from "@prm/shared";
 import { getThemeColors } from "@/lib/utils";

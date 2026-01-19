@@ -1,12 +1,12 @@
 "use client"
 
 import { useEffect, useRef } from "react"
-import { cn } from "../../lib/utils"
+import { InboxConversationAvatar } from "./conversation-avatar"
 import { InboxMessageBubble } from "./message-bubble"
+import { InboxPlatformBadge } from "./platform-badge"
+import { cn } from "../../lib/utils"
 import type { InboxMessage } from "./message-types"
 import type { InboxConversation } from "./types"
-import { InboxConversationAvatar } from "./conversation-avatar"
-import { InboxPlatformBadge } from "./platform-badge"
 
 interface InboxMessageThreadProps {
   conversation: InboxConversation

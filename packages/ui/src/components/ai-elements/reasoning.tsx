@@ -1,16 +1,15 @@
-import { BrainIcon, ChevronDownIcon } from "lucide-react";
-import type { ComponentProps, ReactNode } from "react";
 import { createContext, memo, useContext, useEffect, useState } from "react";
 import { useControllableState } from "@radix-ui/react-use-controllable-state";
+import { BrainIcon, ChevronDownIcon } from "lucide-react";
 import { Streamdown } from "streamdown";
-
+import { Shimmer } from "./shimmer";
 import { cn } from "../../lib/utils";
 import {
   Collapsible,
   CollapsibleContent,
   CollapsibleTrigger,
 } from "../ui/collapsible";
-import { Shimmer } from "./shimmer";
+import type { ComponentProps, ReactNode } from "react";
 
 type ReasoningContextValue = {
   isStreaming: boolean;

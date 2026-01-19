@@ -6,9 +6,9 @@
  */
 
 import React, { Component, type ErrorInfo, type ReactNode } from "react";
-import { SymbolView } from "expo-symbols";
-import * as Haptics from "expo-haptics";
 import { View, Text, Pressable } from "react-native";
+import * as Haptics from "expo-haptics";
+import { SymbolView } from "expo-symbols";
 import { themeColors } from "@/lib/utils";
 
 interface ErrorBoundaryProps {

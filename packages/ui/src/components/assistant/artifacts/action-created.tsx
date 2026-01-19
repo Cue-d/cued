@@ -1,7 +1,6 @@
 "use client"
 
 import { CheckCircle2 } from "lucide-react"
-
 import { Artifact } from "./create-artifact"
 
 export interface ActionResult {

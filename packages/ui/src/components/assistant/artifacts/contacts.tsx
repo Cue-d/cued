@@ -2,10 +2,9 @@
 
 import { Copy, User, Users } from "lucide-react"
 import { toast } from "sonner"
-
-import { Badge } from "../../ui/badge"
 import { Artifact } from "./create-artifact"
 import { PlatformIcon } from "./utils"
+import { Badge } from "../../ui/badge"
 
 export interface ContactResult {
   _id: string

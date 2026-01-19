@@ -1,5 +1,5 @@
 import { ArrowUpIcon, PaperclipIcon, SquareIcon } from "lucide-react";
-
+import { ChatMessage } from "./chat-message";
 import { cn } from "../../lib/utils";
 import {
   Conversation,
@@ -18,7 +18,6 @@ import {
   PromptInputAttachment,
   usePromptInputAttachments,
 } from "../ai-elements/prompt-input";
-import { ChatMessage } from "./chat-message";
 import { Suggestions, Suggestion } from "../ai-elements/suggestion";
 import type { MessageWithToolInvocations, SuggestedPrompt } from "./types";
 

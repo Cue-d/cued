@@ -9,6 +9,10 @@
  */
 
 import { type ReactNode, useRef, useEffect, useCallback } from "react";
+import { View } from "react-native";
+import { GlassView, isLiquidGlassAvailable } from "expo-glass-effect";
+import * as Haptics from "expo-haptics";
+import { SymbolView } from "expo-symbols";
 import { Gesture, GestureDetector } from "react-native-gesture-handler";
 import {
   useSharedValue,
@@ -18,10 +22,6 @@ import {
   runOnJS,
   type SharedValue,
 } from "react-native-reanimated";
-import { GlassView, isLiquidGlassAvailable } from "expo-glass-effect";
-import { SymbolView } from "expo-symbols";
-import * as Haptics from "expo-haptics";
-import { View } from "react-native";
 import { AnimatedView } from "@/components/animated";
 
 export type SwipeDirection = "left" | "right" | "up";

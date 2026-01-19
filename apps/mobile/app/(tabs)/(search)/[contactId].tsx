@@ -2,14 +2,14 @@
  * Contact detail screen - displays full contact profile.
  */
 
-import { useLocalSearchParams, Stack } from "expo-router";
-import { useQuery } from "convex/react";
-import { SymbolView } from "expo-symbols";
-import type { SFSymbol } from "sf-symbols-typescript";
 import { View, Text, ScrollView, Pressable, useColorScheme, PlatformColor } from "react-native";
-import { getInitials, formatPhoneNumber } from "@prm/shared";
+import { useLocalSearchParams, Stack } from "expo-router";
+import { SymbolView } from "expo-symbols";
+import { useQuery } from "convex/react";
 import { api } from "@prm/convex/convex/_generated/api";
+import { getInitials, formatPhoneNumber } from "@prm/shared";
 import type { Id } from "@prm/convex/convex/_generated/dataModel";
+import type { SFSymbol } from "sf-symbols-typescript";
 
 /** Avatar component */
 function Avatar({ initials }: { initials: string }): React.JSX.Element {

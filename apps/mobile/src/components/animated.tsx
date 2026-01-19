@@ -5,8 +5,8 @@
  * to enable Reanimated animations.
  */
 
-import Animated from "react-native-reanimated";
 import { View, Text, ScrollView, Pressable } from "react-native";
+import Animated from "react-native-reanimated";
 
 // Create animated versions of React Native components
 export const AnimatedView = Animated.createAnimatedComponent(View);

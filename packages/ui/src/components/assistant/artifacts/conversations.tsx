@@ -2,7 +2,6 @@
 
 import { Copy, MessageCircle } from "lucide-react"
 import { toast } from "sonner"
-
 import { Artifact } from "./create-artifact"
 import { formatRelativeTime, PlatformIcon } from "./utils"
 

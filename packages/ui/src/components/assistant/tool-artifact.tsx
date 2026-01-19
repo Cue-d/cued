@@ -1,18 +1,17 @@
 "use client"
 
 import * as React from "react"
-
+import {
+  artifactDefinitions,
+  type ArtifactKind,
+  parseToolResult,
+} from "./artifacts"
 import { cn } from "../../lib/utils"
 import {
   Tooltip,
   TooltipContent,
   TooltipTrigger,
 } from "../ui/tooltip"
-import {
-  artifactDefinitions,
-  type ArtifactKind,
-  parseToolResult,
-} from "./artifacts"
 
 export type { ArtifactKind }
 

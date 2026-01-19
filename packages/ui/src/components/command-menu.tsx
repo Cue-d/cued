@@ -1,7 +1,6 @@
 "use client"
 
 import * as React from "react"
-import { useRouter } from "next/navigation"
 import {
   InboxIcon,
   ListTodoIcon,
@@ -10,6 +9,7 @@ import {
   SettingsIcon,
   Search,
 } from "lucide-react"
+import { useRouter } from "next/navigation"
 import {
   CommandDialog,
   CommandEmpty,

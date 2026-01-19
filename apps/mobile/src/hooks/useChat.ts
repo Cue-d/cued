@@ -1,8 +1,7 @@
+import { useCallback, useMemo, useState } from "react";
 import { useChat as useAIChat } from "@ai-sdk/react";
 import { DefaultChatTransport, UIMessage } from "ai";
 import { fetch as expoFetch } from "expo/fetch";
-import { useCallback, useMemo, useState } from "react";
-
 import type { ChatMessageData, ToolInvocation } from "@/components/chat/chat-message";
 
 const API_URL = process.env.EXPO_PUBLIC_API_URL || "http://localhost:3000";
