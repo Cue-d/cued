@@ -151,7 +151,7 @@ export class AuthedRequest {
    */
   withGraphQLQuery(
     queryId: keyof typeof GRAPHQL_QUERY_IDS,
-    variables: Record<string, unknown>
+    variables: Record<string, string>
   ): this {
     const fullQueryId = GRAPHQL_QUERY_IDS[queryId]
 
@@ -159,9 +159,15 @@ export class AuthedRequest {
     this.headers['Accept'] = CONTENT_TYPES.linkedInNormalized
     this.headers['x-li-track'] = DEFAULT_X_LI_TRACK
 
-    // Add query parameters for GraphQL
-    this.withQueryParam('queryId', fullQueryId)
-    this.withQueryParam('variables', JSON.stringify(variables))
+    // Format variables as LinkedIn's special format: (key:value,key:value)
+    // NOT JSON - this is critical for the API to work
+    const variablesStr = queriesToString(variables)
+
+    // URL-encode the variables string for the query parameter
+    // LinkedIn will decode it before parsing
+    this.rawQuery = `queryId=${fullQueryId}&variables=${encodeURIComponent(variablesStr)}`
+
+    console.log('[LinkedIn API] GraphQL query:', { queryId: fullQueryId, variables: variablesStr })
 
     return this
   }
@@ -218,11 +224,28 @@ export class AuthedRequest {
     const url = this.buildUrl()
     const options = this.buildRequestOptions()
 
+    // Debug logging
+    console.log('[LinkedIn API] Request:', {
+      method: this.method,
+      url: url.substring(0, 150) + (url.length > 150 ? '...' : ''),
+      hasCSRF: !!this.headers['csrf-token'],
+      hasCookies: this.headers['Cookie']?.length > 0,
+      cookiePreview: this.headers['Cookie']?.substring(0, 100) + '...',
+    })
+
     let lastError: Error | null = null
 
     for (let attempt = 0; attempt <= RETRY_CONFIG.maxRetries; attempt++) {
       try {
         const response = await fetch(url, options)
+
+        // Log response details
+        console.log('[LinkedIn API] Response:', {
+          status: response.status,
+          statusText: response.statusText,
+          attempt: attempt + 1,
+          contentType: response.headers.get('content-type'),
+        })
 
         // Check for auth errors - don't retry these
         if (
@@ -298,6 +321,7 @@ export class AuthedRequest {
 
     if (!response.ok) {
       const text = await response.text().catch(() => '')
+      console.error('[LinkedIn API] Error response body:', text.substring(0, 500))
       throw new LinkedInRequestError(
         `Request failed: ${response.status} ${response.statusText}`,
         response.status,
@@ -305,7 +329,35 @@ export class AuthedRequest {
       )
     }
 
-    return response.json() as Promise<T>
+    const text = await response.text()
+    console.log('[LinkedIn API] Response body length:', text.length)
+
+    // Try to parse JSON and log a preview
+    try {
+      const json = JSON.parse(text)
+      console.log('[LinkedIn API] Response keys:', Object.keys(json))
+      if (json.included) {
+        console.log('[LinkedIn API] Included count:', json.included?.length)
+      }
+      if (json.data) {
+        console.log('[LinkedIn API] Data keys:', Object.keys(json.data))
+        // Log nested data structure (GraphQL responses have data.data)
+        if (json.data.data) {
+          console.log('[LinkedIn API] Data.data keys:', Object.keys(json.data.data))
+        }
+        // Log GraphQL errors if present
+        if (json.data.errors) {
+          console.log('[LinkedIn API] GraphQL errors:', JSON.stringify(json.data.errors, null, 2))
+        }
+      }
+      if (json.paging) {
+        console.log('[LinkedIn API] Paging:', json.paging)
+      }
+      return json as T
+    } catch (e) {
+      console.error('[LinkedIn API] Failed to parse JSON:', e)
+      throw new LinkedInRequestError('Failed to parse JSON response', response.status, text)
+    }
   }
 }
 
@@ -340,7 +392,7 @@ export function newPostRequest(url: string, cookies: Cookie[]): AuthedRequest {
 export function newMessagingGraphQLRequest(
   cookies: Cookie[],
   queryId: keyof typeof GRAPHQL_QUERY_IDS,
-  variables: Record<string, unknown>
+  variables: Record<string, string>
 ): AuthedRequest {
   return new AuthedRequest(API_URLS.messagingGraphQL, cookies)
     .withMethod('GET')
@@ -353,7 +405,7 @@ export function newMessagingGraphQLRequest(
 export function newVoyagerGraphQLRequest(
   cookies: Cookie[],
   queryId: keyof typeof GRAPHQL_QUERY_IDS,
-  variables: Record<string, unknown>
+  variables: Record<string, string>
 ): AuthedRequest {
   return new AuthedRequest(API_URLS.voyagerGraphQL, cookies)
     .withMethod('GET')
@@ -366,4 +418,17 @@ export function newVoyagerGraphQLRequest(
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
+/**
+ * Format variables as LinkedIn's special query format: (key:value,key:value)
+ * This is NOT JSON - LinkedIn uses a custom format for GraphQL variables
+ */
+function queriesToString(queries: Record<string, string>): string {
+  const parts: string[] = []
+  for (const [key, value] of Object.entries(queries)) {
+    if (value === '') continue
+    parts.push(`${key}:${value}`)
+  }
+  return `(${parts.join(',')})`
 }

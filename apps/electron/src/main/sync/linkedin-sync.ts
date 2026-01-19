@@ -6,6 +6,7 @@
 
 import { ConvexHttpClient } from 'convex/browser'
 import { api } from '@prm/convex'
+import { electronEnv } from '@prm/env/electron'
 import type { LinkedInClient } from '../linkedin-api/client'
 import type { Conversation, Message } from '../linkedin-api/types'
 import { getMessages, getMessagesBefore, sendMessage } from '../linkedin-api/messages'
@@ -17,9 +18,8 @@ import { getMessages, getMessagesBefore, sendMessage } from '../linkedin-api/mes
 /** Default sync interval: 5 minutes */
 const SYNC_INTERVAL_MS = 5 * 60 * 1000
 
-/** Convex URL from environment or default */
-const CONVEX_URL =
-  process.env.CONVEX_URL || 'https://perceptive-lobster-290.convex.cloud'
+/** Convex URL from environment */
+const CONVEX_URL = electronEnv.CONVEX_URL
 
 /** Maximum conversations to sync per cycle */
 const MAX_CONVERSATIONS_PER_SYNC = 50

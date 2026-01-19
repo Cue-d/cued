@@ -157,6 +157,100 @@ export class LinkedInClient {
     return cookie.value.replace(/^"|"$/g, '')
   }
 
+  /**
+   * Fetch the current user's profile to get the user entity URN.
+   * This is required for mailbox-based API calls.
+   */
+  async fetchSelf(): Promise<string> {
+    if (this._userEntityURN) {
+      return this._userEntityURN
+    }
+
+    const { newGetRequest } = await import('./request')
+    const { API_URLS, CONTENT_TYPES } = await import('./constants')
+
+    console.log('[LinkedInClient] Fetching user profile from /me endpoint')
+
+    // LinkedIn uses normalized format: data contains refs, actual objects in included
+    interface MeResponse {
+      data?: {
+        plainId?: number
+        '*miniProfile'?: string
+      }
+      included?: Array<{
+        entityUrn?: string
+        publicIdentifier?: string
+        $type?: string
+      }>
+      // Sometimes the response is flat (no data wrapper)
+      plainId?: number
+      '*miniProfile'?: string
+    }
+
+    const response = await newGetRequest(API_URLS.commonMe, this._cookies)
+      .withHeader('Accept', CONTENT_TYPES.linkedInNormalized)
+      .withXLIHeaders()
+      .doJSON<MeResponse>()
+
+    // Get plainId - could be in data or at root level
+    const plainId = response.data?.plainId ?? response.plainId
+
+    // Look for miniProfile in included array
+    const miniProfile = response.included?.find(
+      (item) => item.$type?.includes('MiniProfile') || item.entityUrn?.includes('fsd_profile')
+    )
+
+    console.log('[LinkedInClient] /me response:', {
+      plainId,
+      miniProfileUrn: miniProfile?.entityUrn,
+      publicIdentifier: miniProfile?.publicIdentifier,
+      includedCount: response.included?.length ?? 0,
+    })
+
+    // For messaging API, we need fsd_profile format with plainId
+    // The miniProfile URN (fs_miniProfile) doesn't work for messaging
+    if (plainId) {
+      this._userEntityURN = `urn:li:fsd_profile:${plainId}`
+      console.log('[LinkedInClient] Constructed user URN from plainId:', this._userEntityURN)
+      return this._userEntityURN
+    }
+
+    // Fallback: try to convert miniProfile URN to fsd_profile format
+    if (miniProfile?.entityUrn) {
+      // Extract the ID part and convert to fsd_profile format
+      const match = miniProfile.entityUrn.match(/:([^:]+)$/)
+      if (match) {
+        this._userEntityURN = `urn:li:fsd_profile:${match[1]}`
+        console.log('[LinkedInClient] Converted miniProfile URN to fsd_profile:', this._userEntityURN)
+        return this._userEntityURN
+      }
+    }
+
+    // Last resort: try to find any entityUrn in included and convert it
+    const anyUrn = response.included?.find((item) => item.entityUrn)?.entityUrn
+    if (anyUrn) {
+      const match = anyUrn.match(/:([^:]+)$/)
+      if (match) {
+        this._userEntityURN = `urn:li:fsd_profile:${match[1]}`
+        console.log('[LinkedInClient] Converted included URN to fsd_profile:', this._userEntityURN)
+        return this._userEntityURN
+      }
+    }
+
+    console.error('[LinkedInClient] Full /me response:', JSON.stringify(response, null, 2).substring(0, 1000))
+    throw new Error('Could not determine user entity URN from /me response')
+  }
+
+  /**
+   * Get the mailbox URN for conversation API calls.
+   * Format: URL-encoded urn:li:fsd_profile:XXXXX
+   * The URN value must be URL-encoded within LinkedIn's custom variable format
+   */
+  async getMailboxUrn(): Promise<string> {
+    const userUrn = await this.fetchSelf()
+    return encodeURIComponent(userUrn)
+  }
+
   // ============================================================================
   // Event Handlers
   // ============================================================================

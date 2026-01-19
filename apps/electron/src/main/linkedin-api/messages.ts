@@ -154,9 +154,9 @@ export async function getMessages(
   // Ensure conversationId is a full URN
   const conversationURN = ensureConversationURN(conversationId)
 
-  const variables: Record<string, unknown> = {
+  const variables: Record<string, string> = {
     conversationUrn: conversationURN,
-    count: PAGINATION_DEFAULTS.messagesCount,
+    count: String(PAGINATION_DEFAULTS.messagesCount),
   }
 
   // Add cursor if provided (for pagination)
@@ -199,11 +199,11 @@ export async function getMessagesBefore(
   // Ensure conversationId is a full URN
   const conversationURN = ensureConversationURN(conversationId)
 
-  const variables: Record<string, unknown> = {
+  const variables: Record<string, string> = {
     conversationUrn: conversationURN,
-    anchorTimestamp: timestamp,
-    countBefore: PAGINATION_DEFAULTS.messagesCount,
-    countAfter: 0,
+    anchorTimestamp: String(timestamp),
+    countBefore: String(PAGINATION_DEFAULTS.messagesCount),
+    countAfter: '0',
   }
 
   const response = await newMessagingGraphQLRequest(

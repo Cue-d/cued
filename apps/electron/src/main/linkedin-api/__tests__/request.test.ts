@@ -233,7 +233,7 @@ describe('AuthedRequest', () => {
 
       const request = new AuthedRequest('https://example.com', testCookies)
       await request
-        .withGraphQLQuery('messengerConversations', { count: 20 })
+        .withGraphQLQuery('messengerConversations', { count: '20' })
         .doRaw()
 
       const [url, options] = mockFetch.mock.calls[0]
@@ -497,7 +497,7 @@ describe('request factory functions', () => {
       const request = newMessagingGraphQLRequest(
         testCookies,
         'messengerConversations',
-        { count: 20 }
+        { count: '20' }
       )
       await request.doRaw()
 
@@ -513,7 +513,7 @@ describe('request factory functions', () => {
       const request = newVoyagerGraphQLRequest(
         testCookies,
         'messengerConversations',
-        { count: 20 }
+        { count: '20' }
       )
       await request.doRaw()
 

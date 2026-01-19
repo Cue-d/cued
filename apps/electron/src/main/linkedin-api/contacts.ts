@@ -110,6 +110,8 @@ export async function getConnections(
   const start = cursor ? parseInt(cursor, 10) : 0
   const count = PAGINATION_DEFAULTS.connectionsCount
 
+  console.log('[LinkedIn Contacts] Fetching connections:', { start, count, hasCookies: client.cookies.length })
+
   // Build the query parameters
   // LinkedIn uses a decoratedList format for connections
   const queryParams = new URLSearchParams({
@@ -121,6 +123,8 @@ export async function getConnections(
     sortType: 'RECENTLY_ADDED',
   })
 
+  console.log('[LinkedIn Contacts] Request URL:', `${API_URLS.connections}?${queryParams.toString()}`)
+
   const response = await newGetRequest(
     `${API_URLS.connections}?${queryParams.toString()}`,
     client.cookies
@@ -129,7 +133,14 @@ export async function getConnections(
     .withXLIHeaders()
     .doJSON<ConnectionsApiResponse>()
 
+  console.log('[LinkedIn Contacts] Raw response:', {
+    hasData: !!response.data,
+    includedCount: response.included?.length ?? 0,
+    paging: response.paging,
+  })
+
   const connections = parseConnectionsResponse(response)
+  console.log('[LinkedIn Contacts] Parsed connections:', connections.length)
 
   // Calculate next cursor
   const total = response.paging?.total ?? 0
@@ -154,8 +165,17 @@ function parseConnectionsResponse(response: ConnectionsApiResponse): Connection[
   const connections: Connection[] = []
 
   if (!response.included) {
+    console.log('[LinkedIn Contacts] No included array in response')
     return connections
   }
+
+  // Log all types in included for debugging
+  const types = new Map<string, number>()
+  for (const element of response.included) {
+    const type = element.$type ?? 'unknown'
+    types.set(type, (types.get(type) ?? 0) + 1)
+  }
+  console.log('[LinkedIn Contacts] Element types in included:', Object.fromEntries(types))
 
   // Filter for connection elements that have member data
   for (const element of response.included) {
@@ -165,6 +185,7 @@ function parseConnectionsResponse(response: ConnectionsApiResponse): Connection[
 
     const member = element.connectedMemberResolutionResult
     if (!member) {
+      console.log('[LinkedIn Contacts] Connection element missing member data:', element.entityUrn)
       continue
     }
 

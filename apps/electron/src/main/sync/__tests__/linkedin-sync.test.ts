@@ -343,7 +343,7 @@ describe('LinkedInSyncManager', () => {
       )
 
       expect(lastProgressWithConv).toBeDefined()
-      expect(lastProgressWithConv[0].currentConversation.conversationId).toBe(
+      expect(lastProgressWithConv![0].currentConversation.conversationId).toBe(
         'urn:li:fsd_conversation:conv1'
       )
     })

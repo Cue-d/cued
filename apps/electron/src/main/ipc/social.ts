@@ -103,7 +103,7 @@ export function setupSocialIpcHandlers(mainWindow: BrowserWindow | null): void {
   });
 
   /**
-   * Scrape LinkedIn connections.
+   * Scrape LinkedIn connections using the API (faster and more reliable than Playwright).
    * Requires user to be logged in (call login first if needed).
    */
   ipcMain.handle(
@@ -114,7 +114,7 @@ export function setupSocialIpcHandlers(mainWindow: BrowserWindow | null): void {
     ): Promise<SocialScrapeResult<LinkedInConnection>> => {
       try {
         const scraper = getLinkedInScraper();
-        console.log("[Social IPC] Starting LinkedIn scrape...");
+        console.log("[Social IPC] Starting LinkedIn API scrape...");
 
         // Notify renderer that scrape is starting
         mainWindow?.webContents.send("social:linkedin:scrapeProgress", {
@@ -122,10 +122,18 @@ export function setupSocialIpcHandlers(mainWindow: BrowserWindow | null): void {
           count: 0,
         });
 
-        const connections = await scraper.scrapeConnections({
-          headless: false, // Show browser so user can see progress
+        // Use API-based scraping instead of Playwright DOM scraping
+        const apiConnections = await scraper.scrapeConnectionsViaApi({
           maxConnections: options?.maxConnections ?? 500,
         });
+
+        // Convert API Connection[] to LinkedInConnection[] format for UI compatibility
+        const connections: LinkedInConnection[] = apiConnections.map((conn) => ({
+          name: `${conn.firstName} ${conn.lastName}`.trim(),
+          profileUrl: conn.profileUrl,
+          headline: conn.headline ?? null,
+          connectedDate: conn.connectionDate ?? null,
+        }));
 
         // Notify renderer of completion
         mainWindow?.webContents.send("social:linkedin:scrapeProgress", {
@@ -133,11 +141,11 @@ export function setupSocialIpcHandlers(mainWindow: BrowserWindow | null): void {
           count: connections.length,
         });
 
-        console.log(`[Social IPC] LinkedIn scrape complete: ${connections.length} connections`);
+        console.log(`[Social IPC] LinkedIn API scrape complete: ${connections.length} connections`);
         return { success: true, data: connections, count: connections.length };
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
-        console.error("[Social IPC] LinkedIn scrape failed:", message);
+        console.error("[Social IPC] LinkedIn API scrape failed:", message);
 
         mainWindow?.webContents.send("social:linkedin:scrapeProgress", {
           status: "error",

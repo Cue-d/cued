@@ -46,6 +46,25 @@ interface SocialProgress {
   error?: string
 }
 
+interface LinkedInMessagingStatus {
+  connected: boolean
+  syncProgress?: LinkedInSyncProgress
+  error?: string
+}
+
+interface LinkedInSyncProgress {
+  status: 'idle' | 'syncing' | 'error'
+  conversationsSynced: number
+  messagesSynced: number
+  lastSyncAt?: number
+  error?: string
+}
+
+interface LinkedInSyncResult {
+  success: boolean
+  error?: string
+}
+
 declare global {
   interface Window {
     electron: {
@@ -69,13 +88,24 @@ declare global {
         onProgress: (callback: (progress: SyncProgress) => void) => () => void
       }
       social: {
+        // LinkedIn - Contact Scraping
         linkedinStatus: () => Promise<SocialStatusResult>
         linkedinLogin: () => Promise<SocialStatusResult>
         linkedinScrape: (options?: { maxConnections?: number }) => Promise<SocialScrapeResult>
+        // LinkedIn - Messaging Sync
+        linkedinMessagingStatus: () => Promise<LinkedInMessagingStatus>
+        linkedinStartMessagingSync: () => Promise<LinkedInSyncResult>
+        linkedinStopMessagingSync: () => Promise<LinkedInSyncResult>
+        linkedinSendMessage: (conversationId: string, text: string) => Promise<unknown>
+        linkedinGetSyncProgress: () => Promise<LinkedInSyncProgress>
+        // Twitter
         twitterStatus: () => Promise<SocialStatusResult>
         twitterLogin: () => Promise<SocialStatusResult>
         twitterScrapeMutuals: (username: string, options?: { maxUsers?: number }) => Promise<SocialScrapeResult>
+        // Progress listeners
         onLinkedinProgress: (callback: (progress: SocialProgress) => void) => () => void
+        onLinkedinMessagingSyncProgress: (callback: (progress: LinkedInSyncProgress) => void) => () => void
+        onLinkedinAuthInvalid: (callback: () => void) => () => void
         onTwitterProgress: (callback: (progress: SocialProgress) => void) => () => void
       }
     }
@@ -105,6 +135,12 @@ const linkedinStatusEl = document.getElementById('linkedinStatus')
 const linkedinLoginBtn = document.getElementById('linkedinLoginBtn')
 const linkedinScrapeBtn = document.getElementById('linkedinScrapeBtn')
 const linkedinProgressEl = document.getElementById('linkedinProgress')
+// LinkedIn Messaging Sync UI
+const linkedinMessagingStatusEl = document.getElementById('linkedinMessagingStatus')
+const linkedinStartSyncBtn = document.getElementById('linkedinStartSyncBtn')
+const linkedinStopSyncBtn = document.getElementById('linkedinStopSyncBtn')
+const linkedinMessagingProgressEl = document.getElementById('linkedinMessagingProgress')
+// Twitter UI
 const twitterStatusEl = document.getElementById('twitterStatus')
 const twitterLoginBtn = document.getElementById('twitterLoginBtn')
 const twitterScrapeBtn = document.getElementById('twitterScrapeBtn')
@@ -310,6 +346,14 @@ async function checkSocialStatus(): Promise<void> {
   try {
     const linkedinResult = await window.electron.social.linkedinStatus()
     updateLinkedinStatus(linkedinResult.isLoggedIn)
+
+    // Also check messaging sync status
+    if (linkedinResult.isLoggedIn) {
+      const messagingStatus = await window.electron.social.linkedinMessagingStatus()
+      if (messagingStatus.syncProgress) {
+        updateLinkedinMessagingStatus(messagingStatus.syncProgress)
+      }
+    }
   } catch (error) {
     console.error('Failed to check LinkedIn status:', error)
     if (linkedinStatusEl) linkedinStatusEl.textContent = 'Error checking status'
@@ -332,6 +376,55 @@ function updateLinkedinStatus(isLoggedIn: boolean): void {
   }
   if (linkedinScrapeBtn) {
     (linkedinScrapeBtn as HTMLButtonElement).disabled = !isLoggedIn
+  }
+  // Enable messaging sync button when logged in
+  if (linkedinStartSyncBtn) {
+    (linkedinStartSyncBtn as HTMLButtonElement).disabled = !isLoggedIn
+  }
+}
+
+function updateLinkedinMessagingStatus(progress: LinkedInSyncProgress): void {
+  if (linkedinMessagingStatusEl) {
+    if (progress.status === 'syncing') {
+      linkedinMessagingStatusEl.textContent = '↻ Syncing...'
+      linkedinMessagingStatusEl.style.color = '#22c55e'
+    } else if (progress.status === 'error') {
+      linkedinMessagingStatusEl.textContent = `✗ Error: ${progress.error}`
+      linkedinMessagingStatusEl.style.color = '#ef4444'
+    } else {
+      linkedinMessagingStatusEl.textContent = progress.lastSyncAt
+        ? `Last sync: ${new Date(progress.lastSyncAt).toLocaleTimeString()}`
+        : 'Not syncing'
+      linkedinMessagingStatusEl.style.color = ''
+    }
+  }
+
+  // Update progress display
+  if (linkedinMessagingProgressEl) {
+    if (progress.status === 'syncing') {
+      linkedinMessagingProgressEl.style.display = 'block'
+      linkedinMessagingProgressEl.textContent =
+        `${progress.conversationsSynced} conversations, ${progress.messagesSynced} messages`
+      linkedinMessagingProgressEl.style.color = ''
+    } else if (progress.status === 'error') {
+      linkedinMessagingProgressEl.style.display = 'block'
+      linkedinMessagingProgressEl.textContent = progress.error ?? 'Unknown error'
+      linkedinMessagingProgressEl.style.color = '#ef4444'
+    } else if (progress.messagesSynced > 0) {
+      linkedinMessagingProgressEl.style.display = 'block'
+      linkedinMessagingProgressEl.textContent =
+        `✓ ${progress.conversationsSynced} conversations, ${progress.messagesSynced} messages`
+      linkedinMessagingProgressEl.style.color = '#22c55e'
+    }
+  }
+
+  // Update button states
+  const isSyncing = progress.status === 'syncing'
+  if (linkedinStartSyncBtn) {
+    (linkedinStartSyncBtn as HTMLButtonElement).disabled = isSyncing
+  }
+  if (linkedinStopSyncBtn) {
+    (linkedinStopSyncBtn as HTMLButtonElement).disabled = !isSyncing
   }
 }
 
@@ -398,6 +491,74 @@ function setupSocialHandlers(): void {
     } finally {
       linkedinScrapeBtn.removeAttribute('disabled')
       linkedinScrapeBtn.textContent = 'Scrape'
+    }
+  })
+
+  // LinkedIn messaging sync - start
+  linkedinStartSyncBtn?.addEventListener('click', async () => {
+    linkedinStartSyncBtn.setAttribute('disabled', 'true')
+    linkedinStartSyncBtn.textContent = 'Starting...'
+    if (linkedinMessagingStatusEl) linkedinMessagingStatusEl.textContent = 'Starting sync...'
+
+    try {
+      const result = await window.electron.social.linkedinStartMessagingSync()
+      if (result.success) {
+        if (linkedinStopSyncBtn) {
+          (linkedinStopSyncBtn as HTMLButtonElement).disabled = false
+        }
+        if (linkedinMessagingStatusEl) {
+          linkedinMessagingStatusEl.textContent = '↻ Syncing...'
+          linkedinMessagingStatusEl.style.color = '#22c55e'
+        }
+      } else {
+        if (linkedinMessagingStatusEl) {
+          linkedinMessagingStatusEl.textContent = `Error: ${result.error}`
+          linkedinMessagingStatusEl.style.color = '#ef4444'
+        }
+        linkedinStartSyncBtn.removeAttribute('disabled')
+      }
+    } catch (error) {
+      console.error('LinkedIn messaging sync start failed:', error)
+      if (linkedinMessagingStatusEl) {
+        linkedinMessagingStatusEl.textContent = 'Start failed'
+        linkedinMessagingStatusEl.style.color = '#ef4444'
+      }
+      linkedinStartSyncBtn.removeAttribute('disabled')
+    } finally {
+      linkedinStartSyncBtn.textContent = 'Start'
+    }
+  })
+
+  // LinkedIn messaging sync - stop
+  linkedinStopSyncBtn?.addEventListener('click', async () => {
+    linkedinStopSyncBtn.setAttribute('disabled', 'true')
+    linkedinStopSyncBtn.textContent = 'Stopping...'
+
+    try {
+      const result = await window.electron.social.linkedinStopMessagingSync()
+      if (result.success) {
+        if (linkedinStartSyncBtn) {
+          (linkedinStartSyncBtn as HTMLButtonElement).disabled = false
+        }
+        if (linkedinMessagingStatusEl) {
+          linkedinMessagingStatusEl.textContent = 'Stopped'
+          linkedinMessagingStatusEl.style.color = ''
+        }
+      } else {
+        if (linkedinMessagingStatusEl) {
+          linkedinMessagingStatusEl.textContent = `Error: ${result.error}`
+          linkedinMessagingStatusEl.style.color = '#ef4444'
+        }
+      }
+    } catch (error) {
+      console.error('LinkedIn messaging sync stop failed:', error)
+      if (linkedinMessagingStatusEl) {
+        linkedinMessagingStatusEl.textContent = 'Stop failed'
+        linkedinMessagingStatusEl.style.color = '#ef4444'
+      }
+    } finally {
+      linkedinStopSyncBtn.removeAttribute('disabled')
+      linkedinStopSyncBtn.textContent = 'Stop'
     }
   })
 
@@ -480,6 +641,24 @@ function setupSocialHandlers(): void {
         linkedinProgressEl.textContent = `Error: ${progress.error}`
         linkedinProgressEl.style.color = '#ef4444'
       }
+    }
+  })
+
+  // LinkedIn messaging sync progress listener
+  window.electron.social.onLinkedinMessagingSyncProgress((progress) => {
+    updateLinkedinMessagingStatus(progress)
+  })
+
+  // LinkedIn auth invalid listener - prompt re-login
+  window.electron.social.onLinkedinAuthInvalid(() => {
+    console.log('LinkedIn auth invalid, prompting re-login')
+    updateLinkedinStatus(false)
+    if (linkedinMessagingStatusEl) {
+      linkedinMessagingStatusEl.textContent = 'Auth expired - please login again'
+      linkedinMessagingStatusEl.style.color = '#ef4444'
+    }
+    if (linkedinStopSyncBtn) {
+      (linkedinStopSyncBtn as HTMLButtonElement).disabled = true
     }
   })
 
