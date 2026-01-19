@@ -12,7 +12,7 @@ import {
   type ContactHandle,
 } from "@prm/ui"
 import { Card, CardContent, Skeleton, Badge, Avatar, AvatarFallback, Input, Button } from "@prm/ui"
-import { Mail, MessageSquare, Phone, AlertCircle, Users, Search, Loader2, ChevronDown, ScanSearch } from "lucide-react"
+import { Mail, MessageSquare, Phone, AlertCircle, Users, Search, Loader2, ScanSearch } from "lucide-react"
 
 /** Handle icon by type */
 function HandleIcon({ type }: { type: string }) {
@@ -131,13 +131,16 @@ function useDebounce<T>(value: T, delay: number): T {
   return debouncedValue
 }
 
+/** Cursor type for alphabetical pagination */
+type ContactCursor = { displayName: string; _id: Id<"contacts"> }
+
 export default function ContactsPage() {
   // Search state
   const [searchInput, setSearchInput] = React.useState("")
   const debouncedSearch = useDebounce(searchInput, 300)
 
   // Pagination state
-  const [cursor, setCursor] = React.useState<Id<"contacts"> | undefined>(undefined)
+  const [cursor, setCursor] = React.useState<ContactCursor | undefined>(undefined)
   const [allContacts, setAllContacts] = React.useState<Array<{
     _id: Id<"contacts">
     displayName: string
@@ -145,6 +148,9 @@ export default function ContactsPage() {
     handles: Array<{ type: string; value: string; platform: string }>
   }>>([])
   const [isLoadingMore, setIsLoadingMore] = React.useState(false)
+
+  // Ref for infinite scroll sentinel
+  const loadMoreRef = React.useRef<HTMLDivElement>(null)
 
   // Reset pagination when search changes
   React.useEffect(() => {
@@ -185,12 +191,25 @@ export default function ContactsPage() {
     }
   }, [contactsResult, cursor])
 
-  const handleLoadMore = React.useCallback(() => {
-    if (contactsResult?.nextCursor && !isLoadingMore) {
-      setIsLoadingMore(true)
-      setCursor(contactsResult.nextCursor)
-    }
-  }, [contactsResult?.nextCursor, isLoadingMore])
+  // Intersection observer for infinite scroll
+  React.useEffect(() => {
+    const sentinel = loadMoreRef.current
+    if (!sentinel) return
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        const entry = entries[0]
+        if (entry.isIntersecting && contactsResult?.nextCursor && !isLoadingMore && !debouncedSearch) {
+          setIsLoadingMore(true)
+          setCursor(contactsResult.nextCursor)
+        }
+      },
+      { rootMargin: "100px" }
+    )
+
+    observer.observe(sentinel)
+    return () => observer.disconnect()
+  }, [contactsResult?.nextCursor, isLoadingMore, debouncedSearch])
 
   // Mutations
   const mergeContacts = useMutation(api.contacts.mergeContacts)
@@ -246,12 +265,21 @@ export default function ContactsPage() {
   // Loading skeleton
   if (suggestionsLoading && contactsLoading && allContacts.length === 0) {
     return (
-      <div className="h-full p-6 space-y-6">
-        <Skeleton className="h-10 w-full max-w-md" />
-        <Skeleton className="h-8 w-48" />
-        <div className="grid gap-4">
-          <Skeleton className="h-48 w-full rounded-xl" />
-          <Skeleton className="h-48 w-full rounded-xl" />
+      <div className="flex h-full flex-col">
+        <div className="border-b">
+          <div className="mx-auto max-w-2xl px-6 py-4">
+            <Skeleton className="h-10 w-full" />
+          </div>
+        </div>
+        <div className="flex-1 overflow-y-auto">
+          <div className="mx-auto max-w-2xl space-y-6 p-6">
+            <Skeleton className="h-8 w-48" />
+            <div className="grid gap-4">
+              <Skeleton className="h-16 w-full rounded-xl" />
+              <Skeleton className="h-16 w-full rounded-xl" />
+              <Skeleton className="h-16 w-full rounded-xl" />
+            </div>
+          </div>
         </div>
       </div>
     )
@@ -260,149 +288,139 @@ export default function ContactsPage() {
   const displayContacts = allContacts.length > 0 ? allContacts : (contactsResult?.contacts ?? [])
 
   return (
-    <div className="h-full overflow-y-auto p-6 space-y-8">
-      {/* Search Bar and Actions */}
-      <div className="sticky -top-6 z-10 bg-background pb-4 -mx-6 px-6 pt-6">
-        <div className="flex items-center gap-3 max-w-2xl">
-          <div className="relative flex-1">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-            <Input
-              type="text"
-              placeholder="Search contacts..."
-              value={searchInput}
-              onChange={(e) => setSearchInput(e.target.value)}
-              className="pl-9 pr-4"
-            />
-            {contactsLoading && debouncedSearch && (
-              <Loader2 className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground animate-spin" />
-            )}
+    <div className="flex h-full flex-col">
+      {/* Sticky Search Bar */}
+      <div className="sticky top-0 z-10 bg-background border-b">
+        <div className="mx-auto max-w-2xl px-6 py-4">
+          <div className="flex items-center gap-3">
+            <div className="relative flex-1">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+              <Input
+                type="text"
+                placeholder="Search contacts..."
+                value={searchInput}
+                onChange={(e) => setSearchInput(e.target.value)}
+                className="pl-9 pr-4"
+              />
+              {contactsLoading && debouncedSearch && (
+                <Loader2 className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground animate-spin" />
+              )}
+            </div>
+            <Button
+              variant="outline"
+              onClick={handleTriggerScan}
+              disabled={isScanning}
+              className="gap-2 shrink-0"
+            >
+              {isScanning ? (
+                <>
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                  Scanning...
+                </>
+              ) : (
+                <>
+                  <ScanSearch className="w-4 h-4" />
+                  Find Duplicates
+                </>
+              )}
+            </Button>
           </div>
-          <Button
-            variant="outline"
-            onClick={handleTriggerScan}
-            disabled={isScanning}
-            className="gap-2 shrink-0"
-          >
-            {isScanning ? (
-              <>
-                <Loader2 className="w-4 h-4 animate-spin" />
-                Scanning...
-              </>
-            ) : (
-              <>
-                <ScanSearch className="w-4 h-4" />
-                Find Duplicates
-              </>
-            )}
-          </Button>
         </div>
       </div>
 
-      {/* Merge Suggestions Section */}
-      {suggestions.length > 0 && (
-        <section>
-          <div className="flex items-center gap-2 mb-4">
-            <AlertCircle className="w-5 h-5 text-amber-500" />
-            <h2 className="text-lg font-semibold">Possible Duplicates</h2>
-            <Badge variant="secondary" className="ml-2">{suggestions.length}</Badge>
-          </div>
-          <div className="grid gap-4 max-w-2xl">
-            {suggestions.map((suggestion) => {
-              if (!suggestion.contact1 || !suggestion.contact2) return null
-
-              const contact1: MergeContact = {
-                _id: suggestion.contact1._id,
-                displayName: suggestion.contact1.displayName,
-                company: suggestion.contact1.company,
-                notes: suggestion.contact1.notes,
-                handles: suggestion.contact1.handles as ContactHandle[],
-              }
-
-              const contact2: MergeContact = {
-                _id: suggestion.contact2._id,
-                displayName: suggestion.contact2.displayName,
-                company: suggestion.contact2.company,
-                notes: suggestion.contact2.notes,
-                handles: suggestion.contact2.handles as ContactHandle[],
-              }
-
-              const mergeSuggestion: MergeSuggestion = {
-                _id: suggestion._id,
-                confidence: suggestion.confidence,
-                source: suggestion.source as MergeSuggestion["source"],
-                reasoning: suggestion.reasoning,
-              }
-
-              return (
-                <MergeCard
-                  key={suggestion._id}
-                  contact1={contact1}
-                  contact2={contact2}
-                  suggestion={mergeSuggestion}
-                  onMerge={() => handleMerge(suggestion._id, suggestion.contact1Id, suggestion.contact2Id)}
-                  onReject={() => handleReject(suggestion._id)}
-                  isLoading={loadingStates[suggestion._id] ?? false}
-                />
-              )
-            })}
-          </div>
-        </section>
-      )}
-
-      {/* All Contacts Section */}
-      <section>
-        <div className="flex items-center gap-2 mb-4">
-          <Users className="w-5 h-5 text-muted-foreground" />
-          <h2 className="text-lg font-semibold">All Contacts</h2>
-          <Badge variant="secondary" className="ml-2">
-            {debouncedSearch ? `${displayContacts.length} of ${totalCount}` : totalCount}
-          </Badge>
-        </div>
-
-        {displayContacts.length === 0 && !contactsLoading ? (
-          <Card>
-            <CardContent className="py-8 text-center text-muted-foreground">
-              <Users className="w-12 h-12 mx-auto mb-4 opacity-50" />
-              {debouncedSearch ? (
-                <p>No contacts matching &quot;{debouncedSearch}&quot;</p>
-              ) : (
-                <p>No contacts yet. Connect Gmail or iMessage to import contacts.</p>
-              )}
-            </CardContent>
-          </Card>
-        ) : (
-          <Card>
-            <CardContent className="p-2 divide-y divide-border">
-              {displayContacts.map((contact) => (
-                <ContactRow key={contact._id} contact={contact} />
-              ))}
-            </CardContent>
-            {/* Load More Button */}
-            {hasMore && !debouncedSearch && (
-              <div className="p-4 flex justify-center">
-                <Button
-                  variant="outline"
-                  onClick={handleLoadMore}
-                  disabled={isLoadingMore}
-                  className="gap-2"
-                >
-                  {isLoadingMore ? (
-                    <>
-                      <Loader2 className="w-4 h-4 animate-spin" />
-                      Loading...
-                    </>
-                  ) : (
-                    <>
-                      <ChevronDown className="w-4 h-4" />
-                      Load More
-                    </>
-                  )}
-                </Button>
+      {/* Content */}
+      <div className="flex-1 overflow-y-auto">
+        <div className="mx-auto max-w-2xl space-y-8 p-6">
+          {/* Merge Suggestions Section - hidden during search */}
+          {suggestions.length > 0 && !debouncedSearch && (
+            <section>
+              <div className="flex items-center gap-2 mb-4">
+                <AlertCircle className="w-5 h-5 text-amber-500" />
+                <h2 className="text-lg font-semibold">Possible Duplicates</h2>
+                <Badge variant="secondary" className="ml-2">{suggestions.length}</Badge>
               </div>
+              <div className="grid gap-4">
+                {suggestions.map((suggestion) => {
+                  if (!suggestion.contact1 || !suggestion.contact2) return null
+
+                  const contact1: MergeContact = {
+                    _id: suggestion.contact1._id,
+                    displayName: suggestion.contact1.displayName,
+                    company: suggestion.contact1.company,
+                    notes: suggestion.contact1.notes,
+                    handles: suggestion.contact1.handles as ContactHandle[],
+                  }
+
+                  const contact2: MergeContact = {
+                    _id: suggestion.contact2._id,
+                    displayName: suggestion.contact2.displayName,
+                    company: suggestion.contact2.company,
+                    notes: suggestion.contact2.notes,
+                    handles: suggestion.contact2.handles as ContactHandle[],
+                  }
+
+                  const mergeSuggestion: MergeSuggestion = {
+                    _id: suggestion._id,
+                    confidence: suggestion.confidence,
+                    source: suggestion.source as MergeSuggestion["source"],
+                    reasoning: suggestion.reasoning,
+                  }
+
+                  return (
+                    <MergeCard
+                      key={suggestion._id}
+                      contact1={contact1}
+                      contact2={contact2}
+                      suggestion={mergeSuggestion}
+                      onMerge={() => handleMerge(suggestion._id, suggestion.contact1Id, suggestion.contact2Id)}
+                      onReject={() => handleReject(suggestion._id)}
+                      isLoading={loadingStates[suggestion._id] ?? false}
+                    />
+                  )
+                })}
+              </div>
+            </section>
+          )}
+
+          {/* All Contacts Section */}
+          <section>
+            <div className="flex items-center gap-2 mb-4">
+              <Users className="w-5 h-5 text-muted-foreground" />
+              <h2 className="text-lg font-semibold">All Contacts</h2>
+              <Badge variant="secondary" className="ml-2">{totalCount}</Badge>
+            </div>
+
+            {displayContacts.length === 0 && !contactsLoading ? (
+              <Card>
+                <CardContent className="py-8 text-center text-muted-foreground">
+                  <Users className="w-12 h-12 mx-auto mb-4 opacity-50" />
+                  {debouncedSearch ? (
+                    <p>No contacts matching &quot;{debouncedSearch}&quot;</p>
+                  ) : (
+                    <p>No contacts yet. Connect Gmail or iMessage to import contacts.</p>
+                  )}
+                </CardContent>
+              </Card>
+            ) : (
+              <Card>
+                <CardContent className="p-2 divide-y divide-border">
+                  {displayContacts.map((contact) => (
+                    <ContactRow key={contact._id} contact={contact} />
+                  ))}
+                </CardContent>
+                {/* Infinite scroll sentinel */}
+                {hasMore && !debouncedSearch && (
+                  <div ref={loadMoreRef} className="p-4 flex justify-center">
+                    {isLoadingMore && (
+                      <Loader2 className="w-5 h-5 text-muted-foreground animate-spin" />
+                    )}
+                  </div>
+                )}
+              </Card>
             )}
-          </Card>
-        )}
-      </section>
+          </section>
+        </div>
+      </div>
     </div>
   )
 }

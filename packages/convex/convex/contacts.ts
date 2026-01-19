@@ -1,7 +1,7 @@
 import { v } from "convex/values";
 import { mutation, query } from "./_generated/server";
-import type { QueryCtx } from "./_generated/server";
-import type { Id } from "./_generated/dataModel";
+import type { MutationCtx, QueryCtx } from "./_generated/server";
+import type { Doc, Id } from "./_generated/dataModel";
 import { getAuthenticatedUser } from "./lib/auth";
 import { mergeSuggestionStatusValidator, mergeSourceValidator } from "./schema";
 
@@ -11,13 +11,19 @@ import { mergeSuggestionStatusValidator, mergeSourceValidator } from "./schema";
 
 /**
  * Get all contacts for the current user with their handles.
+ * Sorted alphabetically by displayName.
  * Supports search by name and cursor-based pagination.
  * Optimized: batch fetches handles instead of N+1 queries.
  */
 export const getContacts = query({
   args: {
     limit: v.optional(v.number()),
-    cursor: v.optional(v.id("contacts")),
+    cursor: v.optional(
+      v.object({
+        displayName: v.string(),
+        _id: v.id("contacts"),
+      })
+    ),
     searchQuery: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
@@ -38,13 +44,24 @@ export const getContacts = query({
         )
         .take(limit + 1);
     } else {
+      // Use alphabetical index for sorted results
       let contactsQuery = ctx.db
         .query("contacts")
-        .withIndex("by_user", (q) => q.eq("userId", user._id));
+        .withIndex("by_user_display_name", (q) => q.eq("userId", user._id));
 
+      // For cursor-based pagination with alphabetical ordering:
+      // Skip contacts until we pass the cursor position
       if (args.cursor) {
         contactsQuery = contactsQuery.filter((q) =>
-          q.gt(q.field("_id"), args.cursor!)
+          q.or(
+            // displayName > cursor.displayName
+            q.gt(q.field("displayName"), args.cursor!.displayName),
+            // displayName == cursor.displayName AND _id > cursor._id (tiebreaker)
+            q.and(
+              q.eq(q.field("displayName"), args.cursor!.displayName),
+              q.gt(q.field("_id"), args.cursor!._id)
+            )
+          )
         );
       }
 
@@ -80,9 +97,14 @@ export const getContacts = query({
       })),
     }));
 
+    // Build cursor from last result for pagination
+    const lastContact = results[results.length - 1];
+
     return {
       contacts: contactsWithHandles,
-      nextCursor: hasMore ? results[results.length - 1]._id : null,
+      nextCursor: hasMore
+        ? { displayName: lastContact.displayName, _id: lastContact._id }
+        : null,
     };
   },
 });
@@ -278,16 +300,17 @@ export const mergeContacts = mutation({
       await ctx.db.patch(args.primaryContactId, updates);
     }
 
-    // 6. Delete secondary contact
-    await ctx.db.delete(args.secondaryContactId);
-
-    // 7. Update merge suggestion if provided
+    // 6. Update merge suggestion and clean up action BEFORE deleting contact
     if (args.suggestionId) {
       await ctx.db.patch(args.suggestionId, {
         status: "approved",
         resolvedAt: Date.now(),
       });
+      await cleanupResolveContactAction(ctx, user, args.suggestionId, "completed");
     }
+
+    // 7. Delete secondary contact (last step)
+    await ctx.db.delete(args.secondaryContactId);
 
     return {
       success: true,
@@ -320,6 +343,8 @@ export const rejectMerge = mutation({
       status: "rejected",
       resolvedAt: Date.now(),
     });
+
+    await cleanupResolveContactAction(ctx, user, args.suggestionId, "discarded");
 
     return { success: true };
   },
@@ -630,4 +655,39 @@ async function getContactWithHandles(ctx: QueryCtx, contactId: Id<"contacts">) {
       platform: h.platform,
     })),
   };
+}
+
+/**
+ * Clean up a resolve_contact action when its merge suggestion is resolved.
+ * Marks the action as completed/discarded and decrements the pending count.
+ */
+async function cleanupResolveContactAction(
+  ctx: MutationCtx,
+  user: Doc<"users">,
+  suggestionId: Id<"mergeSuggestions">,
+  status: "completed" | "discarded"
+): Promise<void> {
+  const resolveAction = await ctx.db
+    .query("actions")
+    .withIndex("by_user", (q) => q.eq("userId", user._id))
+    .filter((q) =>
+      q.and(
+        q.eq(q.field("mergeSuggestionId"), suggestionId),
+        q.eq(q.field("type"), "resolve_contact")
+      )
+    )
+    .first();
+
+  if (!resolveAction) return;
+
+  const now = Date.now();
+  if (status === "completed") {
+    await ctx.db.patch(resolveAction._id, { status: "completed", completedAt: now });
+  } else {
+    await ctx.db.patch(resolveAction._id, { status: "discarded", discardedAt: now });
+  }
+
+  if (user.pendingActionCount && user.pendingActionCount > 0) {
+    await ctx.db.patch(user._id, { pendingActionCount: user.pendingActionCount - 1 });
+  }
 }

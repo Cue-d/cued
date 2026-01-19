@@ -41,9 +41,7 @@ export const mergeSuggestionStatusValidator = v.union(
 
 export const mergeSourceValidator = v.union(
   v.literal("email_match"),
-  v.literal("phone_match"),
-  v.literal("name_match"),
-  v.literal("llm_match")
+  v.literal("phone_match")
 );
 
 export const actionStatusValidator = v.union(
@@ -127,6 +125,7 @@ const schema = defineSchema({
     ),
   })
     .index("by_user", ["userId"])
+    .index("by_user_display_name", ["userId", "displayName"])
     .searchIndex("search_display_name", {
       searchField: "displayName",
       filterFields: ["userId"],
