@@ -175,45 +175,57 @@ vi.mock("expo-glass-effect", () => ({
 }));
 
 // Mock react-native-reanimated
-vi.mock("react-native-reanimated", () => ({
-  default: {
-    createAnimatedComponent: (component: unknown) => component,
-    View: ({ children }: { children?: React.ReactNode }) => children,
-    Text: ({ children }: { children?: React.ReactNode }) => children,
-    Image: () => null,
-    ScrollView: ({ children }: { children?: React.ReactNode }) => children,
-  },
-  useSharedValue: (initial: unknown) => ({ value: initial }),
-  useAnimatedStyle: () => ({}),
-  withTiming: (value: unknown) => value,
-  withSpring: (value: unknown) => value,
-  withDelay: (_: number, value: unknown) => value,
-  withSequence: (...values: unknown[]) => values[values.length - 1],
-  runOnJS: (fn: (...args: unknown[]) => unknown) => fn,
-  runOnUI: (fn: (...args: unknown[]) => unknown) => fn,
-  useDerivedValue: (fn: () => unknown) => ({ value: fn() }),
-  useAnimatedScrollHandler: () => ({}),
-  useAnimatedGestureHandler: () => ({}),
-  FadeIn: { duration: () => ({ delay: () => ({}) }) },
-  FadeOut: { duration: () => ({ delay: () => ({}) }) },
-  FadeInUp: { duration: () => ({ delay: () => ({}) }) },
-  FadeInDown: { duration: () => ({ delay: () => ({}) }) },
-  FadeOutUp: { duration: () => ({ delay: () => ({}) }) },
-  FadeOutDown: { duration: () => ({ delay: () => ({}) }) },
-  SlideInRight: { duration: () => ({ delay: () => ({}) }) },
-  SlideOutRight: { duration: () => ({ delay: () => ({}) }) },
-  Layout: {
-    duration: () => ({}),
-    springify: () => ({}),
-    damping: () => ({}),
-    stiffness: () => ({}),
-  },
-  Easing: {
-    linear: (x: number) => x,
-    ease: (x: number) => x,
-    bezier: () => (x: number) => x,
-  },
-}));
+vi.mock("react-native-reanimated", () => {
+  // Create a chainable animation mock that supports all common methods
+  const createChainableAnimation = () => {
+    const animation: Record<string, unknown> = {};
+    const chainMethods = ["duration", "delay", "springify", "damping", "stiffness", "easing"];
+    chainMethods.forEach(method => {
+      animation[method] = () => animation;
+    });
+    return animation;
+  };
+
+  return {
+    default: {
+      createAnimatedComponent: (component: unknown) => component,
+      View: ({ children }: { children?: React.ReactNode }) => children,
+      Text: ({ children }: { children?: React.ReactNode }) => children,
+      Image: () => null,
+      ScrollView: ({ children }: { children?: React.ReactNode }) => children,
+    },
+    useSharedValue: (initial: unknown) => ({ value: initial }),
+    useAnimatedStyle: () => ({}),
+    useAnimatedProps: () => ({}),
+    useAnimatedKeyboard: () => ({ height: { value: 0 } }),
+    withTiming: (value: unknown) => value,
+    withSpring: (value: unknown) => value,
+    withDelay: (_: number, value: unknown) => value,
+    withSequence: (...values: unknown[]) => values[values.length - 1],
+    runOnJS: (fn: (...args: unknown[]) => unknown) => fn,
+    runOnUI: (fn: (...args: unknown[]) => unknown) => fn,
+    useDerivedValue: (fn: () => unknown) => ({ value: fn() }),
+    useAnimatedScrollHandler: () => ({}),
+    useAnimatedGestureHandler: () => ({}),
+    interpolateColor: (progress: number, inputRange: number[], outputRange: string[]) =>
+      progress < 0.5 ? outputRange[0] : outputRange[1],
+    FadeIn: createChainableAnimation(),
+    FadeOut: createChainableAnimation(),
+    FadeInUp: createChainableAnimation(),
+    FadeInDown: createChainableAnimation(),
+    FadeOutUp: createChainableAnimation(),
+    FadeOutDown: createChainableAnimation(),
+    SlideInRight: createChainableAnimation(),
+    SlideOutRight: createChainableAnimation(),
+    Layout: createChainableAnimation(),
+    Easing: {
+      linear: (x: number) => x,
+      ease: (x: number) => x,
+      out: (fn: (x: number) => number) => fn,
+      bezier: () => (x: number) => x,
+    },
+  };
+});
 
 // Mock react-native-gesture-handler
 vi.mock("react-native-gesture-handler", () => {
