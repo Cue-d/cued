@@ -58,6 +58,7 @@
     "babel-plugin-module-resolver": "^5.0.2",
     "eslint": "^9",
     "eslint-config-expo": "^9",
+    "eslint-plugin-import-x": "^4.16.1",
     "jsdom": "^26.0.0",
     "react-dom": "19.1.0",
     "react-test-renderer": "19.1.0",

@@ -2,8 +2,8 @@
 
 import * as React from "react"
 import { useQuery, useMutation } from "convex/react"
+import { Mail, MessageSquare, Phone, AlertCircle, Users, Search, Loader2, ScanSearch } from "lucide-react"
 import { api } from "@prm/convex"
-import type { Id } from "@prm/convex"
 import { getInitials } from "@prm/shared"
 import {
   MergeCard,
@@ -12,7 +12,7 @@ import {
   type ContactHandle,
 } from "@prm/ui"
 import { Card, CardContent, Skeleton, Badge, Avatar, AvatarFallback, Input, Button } from "@prm/ui"
-import { Mail, MessageSquare, Phone, AlertCircle, Users, Search, Loader2, ScanSearch } from "lucide-react"
+import type { Id } from "@prm/convex"
 
 /** Handle icon by type */
 function HandleIcon({ type }: { type: string }) {

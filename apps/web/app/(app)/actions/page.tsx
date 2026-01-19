@@ -3,7 +3,6 @@
 import * as React from "react"
 import { useQuery, useMutation, useAction } from "convex/react"
 import { api } from "@prm/convex"
-import type { Id } from "@prm/convex"
 import {
   CardStack,
   MessageResponseCard,
@@ -12,6 +11,7 @@ import {
   type DraftOption,
 } from "@prm/ui"
 import { Button, Skeleton } from "@prm/ui"
+import type { Id } from "@prm/convex"
 
 /** Supported platforms for style extraction */
 type StylePlatform = "imessage" | "gmail" | "slack"

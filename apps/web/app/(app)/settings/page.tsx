@@ -1,11 +1,11 @@
 "use client";
 
-import { useQuery } from "convex/react";
 import { useMemo } from "react";
+import { useQuery } from "convex/react";
+import { BrainIcon, ClockIcon } from "lucide-react";
 import { api } from "@prm/convex";
 import { getInitials } from "@prm/shared";
 import { Avatar, AvatarFallback, Skeleton, Separator } from "@prm/ui";
-import { BrainIcon, ClockIcon } from "lucide-react";
 
 function formatRelativeTime(timestamp: number): string {
   const now = Date.now();

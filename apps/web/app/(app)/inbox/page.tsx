@@ -1,8 +1,8 @@
 "use client";
 
 import { useState } from "react";
-import { useQuery } from "convex/react";
 import { useSearchParams, useRouter } from "next/navigation";
+import { useQuery } from "convex/react";
 import { api } from "@prm/convex";
 import {
   InboxConversationList,

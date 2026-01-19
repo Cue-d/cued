@@ -1,9 +1,9 @@
 "use client";
 
 import { ReactNode, useEffect, useRef } from "react";
+import { signOut } from "@workos-inc/authkit-nextjs";
 import { useQuery, useMutation } from "convex/react";
 import { api } from "@prm/convex";
-import { signOut } from "@workos-inc/authkit-nextjs";
 import { SidebarProvider, SidebarInset, AppSidebar, CommandMenu } from "@prm/ui";
 
 interface WorkosProfile {

@@ -2,9 +2,8 @@
 
 import * as React from "react";
 import { useChat } from "@ai-sdk/react";
-import { DefaultChatTransport, type UIMessage } from "ai";
 import { useAccessToken } from "@workos-inc/authkit-nextjs/components";
-
+import { DefaultChatTransport, type UIMessage } from "ai";
 import {
   AssistantView,
   type MessageWithToolInvocations,

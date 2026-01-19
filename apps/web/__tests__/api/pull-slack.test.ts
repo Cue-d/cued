@@ -1,7 +1,6 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
 import { NextRequest } from "next/server";
-
-// Hoist mock functions
+import { describe, it, expect, vi, beforeEach } from "vitest";
+// Hoist mock functions - must be declared before vi.mock() calls
 const mockListRecords = vi.hoisted(() => vi.fn());
 const mockConvexMutation = vi.hoisted(() => vi.fn());
 

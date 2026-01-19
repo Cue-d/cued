@@ -1,11 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { ConvexHttpClient } from "convex/browser";
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
-import type { Id } from "@prm/convex";
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
 import { api } from "@prm/convex";
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
 import { sendGmailMessage } from "@prm/integrations/nango";
+import type { Id } from "@prm/convex";
 
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
 const convex = new ConvexHttpClient(process.env.NEXT_PUBLIC_CONVEX_URL!);

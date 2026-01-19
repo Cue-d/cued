@@ -1,11 +1,10 @@
 "use client";
 
 import { useState, useMemo } from "react";
-import { useQuery } from "convex/react";
-import { useAccessToken } from "@workos-inc/authkit-nextjs/components";
+import Link from "next/link";
 import Nango from "@nangohq/frontend";
-import { api } from "@prm/convex";
-import { Button, Skeleton, Input } from "@prm/ui";
+import { useAccessToken } from "@workos-inc/authkit-nextjs/components";
+import { useQuery } from "convex/react";
 import {
   MessageCircleIcon,
   MailIcon,
@@ -20,7 +19,8 @@ import {
   ExternalLinkIcon,
   UsersIcon,
 } from "lucide-react";
-import Link from "next/link";
+import { api } from "@prm/convex";
+import { Button, Skeleton, Input } from "@prm/ui";
 
 type Platform = "imessage" | "gmail" | "slack" | "linkedin" | "twitter";
 

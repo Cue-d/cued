@@ -1,8 +1,8 @@
 "use client";
 
+import { signOut } from "@workos-inc/authkit-nextjs";
 import { useQuery } from "convex/react";
 import { api } from "@prm/convex";
-import { signOut } from "@workos-inc/authkit-nextjs";
 import {
   Button,
   Card,
