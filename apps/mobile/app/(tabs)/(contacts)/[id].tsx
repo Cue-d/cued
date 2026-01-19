@@ -7,21 +7,10 @@ import { useQuery } from "convex/react";
 import { SymbolView } from "expo-symbols";
 import type { SFSymbol } from "sf-symbols-typescript";
 import { View, Text, ScrollView, Pressable, useColorScheme } from "react-native";
+import { getInitials } from "@prm/shared";
 import { getThemeColors } from "@/lib/utils";
 import { api } from "@prm/convex/convex/_generated/api";
 import type { Id } from "@prm/convex/convex/_generated/dataModel";
-
-/** Get initials from a name */
-function getInitials(name: string): string {
-  if (/^\+?\d/.test(name)) return "#";
-  if (name.includes("@")) return name[0]?.toUpperCase() ?? "?";
-  return name
-    .split(" ")
-    .map((n) => n[0])
-    .join("")
-    .slice(0, 2)
-    .toUpperCase();
-}
 
 /** Format phone number: +12078005660 -> +1 (207) 800-5660 */
 function formatPhoneNumber(phone: string): string {

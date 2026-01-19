@@ -7,7 +7,8 @@ import { useRouter } from "expo-router";
 import * as Haptics from "expo-haptics";
 import { View, Text, Pressable, useColorScheme } from "react-native";
 import { SymbolView } from "expo-symbols";
-import { getInitials, getThemeColors } from "@/lib/utils";
+import { getInitials } from "@prm/shared";
+import { getThemeColors } from "@/lib/utils";
 
 export interface ContactListItemData {
   id: string;

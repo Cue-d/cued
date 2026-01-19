@@ -3,17 +3,9 @@
 import { useQuery } from "convex/react";
 import { useMemo } from "react";
 import { api } from "@prm/convex";
+import { getInitials } from "@prm/shared";
 import { Avatar, AvatarFallback, Skeleton, Separator } from "@prm/ui";
 import { BrainIcon, ClockIcon } from "lucide-react";
-
-function getInitials(name: string): string {
-  return name
-    .split(" ")
-    .map((n) => n[0])
-    .join("")
-    .toUpperCase()
-    .slice(0, 2);
-}
 
 function formatRelativeTime(timestamp: number): string {
   const now = Date.now();

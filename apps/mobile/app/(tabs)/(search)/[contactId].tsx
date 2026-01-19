@@ -7,9 +7,9 @@ import { useQuery } from "convex/react";
 import { SymbolView } from "expo-symbols";
 import type { SFSymbol } from "sf-symbols-typescript";
 import { View, Text, ScrollView, Pressable, useColorScheme, PlatformColor } from "react-native";
+import { getInitials } from "@prm/shared";
 import { api } from "@prm/convex/convex/_generated/api";
 import type { Id } from "@prm/convex/convex/_generated/dataModel";
-import { getInitials } from "@/lib/utils";
 
 /** Format phone number: +12078005660 -> +1 (207) 800-5660 */
 function formatPhoneNumber(phone: string): string {

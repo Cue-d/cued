@@ -2,6 +2,7 @@
 
 import * as React from "react"
 import { MessageSquare, Mail, Hash, ChevronDown, AlertTriangle, Sparkles } from "lucide-react"
+import { getInitials } from "@prm/shared"
 import { cn } from "../../lib/utils"
 import { Card, CardContent, CardFooter, CardHeader } from "../ui/card"
 import { Avatar, AvatarFallback } from "../ui/avatar"
@@ -100,18 +101,6 @@ export interface MessageResponseCardProps {
 
 export interface MessageResponseCardRef {
   focusInput: () => void
-}
-
-/** Get initials from a name */
-function getInitials(name: string): string {
-  if (/^\+?\d/.test(name)) return "#"
-  if (name.includes("@")) return name[0].toUpperCase()
-  return name
-    .split(" ")
-    .map((n) => n[0])
-    .join("")
-    .slice(0, 2)
-    .toUpperCase()
 }
 
 /** Format timestamp to time string */

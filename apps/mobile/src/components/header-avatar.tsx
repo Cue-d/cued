@@ -1,8 +1,9 @@
 import { router } from "expo-router";
 import * as Haptics from "expo-haptics";
 import { Pressable, View, Text } from "react-native";
+import { getInitials } from "@prm/shared";
 import { useAuth } from "@/providers/AuthProvider";
-import { getDisplayName, getInitials } from "@/lib/utils";
+import { getDisplayName } from "@/lib/utils";
 
 interface HeaderAvatarProps {
   size?: number;

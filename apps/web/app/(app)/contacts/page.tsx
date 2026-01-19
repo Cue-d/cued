@@ -4,6 +4,7 @@ import * as React from "react"
 import { useQuery, useMutation } from "convex/react"
 import { api } from "@prm/convex"
 import type { Id } from "@prm/convex"
+import { getInitials } from "@prm/shared"
 import {
   MergeCard,
   type MergeContact,
@@ -12,18 +13,6 @@ import {
 } from "@prm/ui"
 import { Card, CardContent, Skeleton, Badge, Avatar, AvatarFallback, Input, Button } from "@prm/ui"
 import { Mail, MessageSquare, Phone, AlertCircle, Users, Search, Loader2, ChevronDown, ScanSearch } from "lucide-react"
-
-/** Get initials from a name */
-function getInitials(name: string): string {
-  if (/^\+?\d/.test(name)) return "#"
-  if (name.includes("@")) return name[0].toUpperCase()
-  return name
-    .split(" ")
-    .map((n) => n[0])
-    .join("")
-    .slice(0, 2)
-    .toUpperCase()
-}
 
 /** Handle icon by type */
 function HandleIcon({ type }: { type: string }) {

@@ -10,6 +10,7 @@ import { useLocalSearchParams, useRouter, Stack } from "expo-router";
 import { useQuery, useMutation } from "convex/react";
 import * as Haptics from "expo-haptics";
 import { View, Text, ScrollView, TextInput } from "react-native";
+import { getInitials } from "@prm/shared";
 import { ActionButtons } from "@/components/action-buttons";
 import type { SwipeDirection } from "@/components/swipeable-card";
 import type { DisplayMessage } from "@/components/cards";
@@ -33,18 +34,6 @@ function formatRelativeTime(timestamp: number): string {
 function formatTime(timestamp: number): string {
   const date = new Date(timestamp);
   return date.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
-}
-
-/** Get initials from a name */
-function getInitials(name: string): string {
-  if (/^\+?\d/.test(name)) return "#";
-  if (name.includes("@")) return name[0]?.toUpperCase() ?? "?";
-  return name
-    .split(" ")
-    .map((n) => n[0])
-    .join("")
-    .slice(0, 2)
-    .toUpperCase();
 }
 
 /** Avatar component */

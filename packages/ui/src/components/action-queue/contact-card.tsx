@@ -2,6 +2,7 @@
 
 import * as React from "react";
 import { Building2, Clock, FileText, Link, Tag, User } from "lucide-react";
+import { getInitials } from "@prm/shared";
 import { cn } from "../../lib/utils";
 import { Card, CardContent, CardHeader } from "../ui/card";
 import { Avatar, AvatarFallback } from "../ui/avatar";
@@ -53,18 +54,6 @@ export interface ContactCardProps {
 
 export interface ContactCardRef {
   focusInput: () => void;
-}
-
-/** Get initials from a name */
-function getInitials(name: string): string {
-  if (/^\+?\d/.test(name)) return "#";
-  if (name.includes("@")) return name[0].toUpperCase();
-  return name
-    .split(" ")
-    .map((n) => n[0])
-    .join("")
-    .slice(0, 2)
-    .toUpperCase();
 }
 
 /** Format timestamp to time string */

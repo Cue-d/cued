@@ -2,6 +2,7 @@
 
 import * as React from "react"
 import { ArrowRight, Check, Mail, MessageSquare, Phone, X } from "lucide-react"
+import { getInitials } from "@prm/shared"
 import { cn } from "../../lib/utils"
 import { Card, CardContent, CardHeader } from "../ui/card"
 import { Avatar, AvatarFallback } from "../ui/avatar"
@@ -47,18 +48,6 @@ export interface MergeCardProps {
   isLoading?: boolean
   /** Optional class name */
   className?: string
-}
-
-/** Get initials from a name */
-function getInitials(name: string): string {
-  if (/^\+?\d/.test(name)) return "#"
-  if (name.includes("@")) return name[0].toUpperCase()
-  return name
-    .split(" ")
-    .map((n) => n[0])
-    .join("")
-    .slice(0, 2)
-    .toUpperCase()
 }
 
 /** Get platform badge color */

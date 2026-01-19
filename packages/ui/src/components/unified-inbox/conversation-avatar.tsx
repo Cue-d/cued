@@ -1,4 +1,5 @@
 import type React from "react"
+import { getInitials } from "@prm/shared"
 import { cn } from "../../lib/utils"
 import type { InboxParticipant, InboxConversationType } from "./types"
 
@@ -29,23 +30,6 @@ const bgColors = [
 function getColorForName(name: string): string {
   const code = name.split("").reduce((acc, char) => acc + char.charCodeAt(0), 0)
   return bgColors[code % bgColors.length]
-}
-
-function getInitials(name: string): string {
-  // Handle phone numbers - show "#" icon
-  if (/^\+?\d/.test(name)) {
-    return "#"
-  }
-  // Handle email addresses - use first letter before @
-  if (name.includes("@")) {
-    return name[0].toUpperCase()
-  }
-  return name
-    .split(" ")
-    .map((n) => n[0])
-    .join("")
-    .slice(0, 2)
-    .toUpperCase()
 }
 
 function SingleAvatar({ name, className }: { name: string; className?: string }): React.ReactElement {

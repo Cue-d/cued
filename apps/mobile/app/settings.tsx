@@ -11,9 +11,10 @@ import {
 } from "react-native";
 import { Uniwind, useUniwind } from "uniwind";
 import { SafeAreaView } from "react-native-safe-area-context";
+import { getInitials } from "@prm/shared";
 import { useAuth } from "@/providers/AuthProvider";
 import { getRedirectUri } from "@/lib/auth";
-import { cn, getDisplayName, getInitials, getThemeColors } from "@/lib/utils";
+import { cn, getDisplayName, getThemeColors } from "@/lib/utils";
 
 function Avatar({ name, size = 80 }: { name: string; size?: number }): React.ReactElement {
   return (
