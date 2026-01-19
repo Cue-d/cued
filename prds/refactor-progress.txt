@@ -1,0 +1,672 @@
+# PRM Codebase Refactor Progress Log
+
+## Overview
+
+This refactoring effort addresses:
+- **Test Coverage**: From 17 test files to comprehensive coverage across all packages
+- **Code De-duplication**: 11 getInitials, 4 formatTime, duplicated types and configs
+- **Simplification**: Breaking down 5 files over 500 LOC
+- **Standardization**: Import patterns, constants, shared utilities
+
+## Baseline Metrics (Pre-Refactor)
+
+| Metric | Value |
+|--------|-------|
+| Test files | 17 |
+| UI component tests | 0 |
+| Convex function tests | 0 |
+| Mobile tests | 0 |
+| Duplicate getInitials | 11 |
+| Duplicate formatTime | 4 |
+| Files > 500 LOC | 5 |
+| Largest file (sync.ts) | 2,071 LOC |
+
+## Target Metrics (Post-Refactor)
+
+| Metric | Goal |
+|--------|------|
+| packages/shared coverage | > 90% |
+| packages/ui coverage | > 80% |
+| packages/convex coverage | > 50% |
+| apps/mobile coverage | > 50% |
+| Duplicate utilities | 0 |
+| Files > 500 LOC | 0 |
+
+## Phase Summary
+
+- **Phase 1**: De-duplication (utils, types, constants) - 9 tasks
+- **Phase 2**: Test infrastructure + packages/ui & shared tests - 6 tasks
+- **Phase 3**: Convex test coverage - 4 tasks
+- **Phase 4**: Mobile test coverage - 4 tasks
+- **Phase 5**: Code simplification (large files) - 5 tasks
+- **Phase 6**: E2E tests (web + mobile) - 4 tasks
+- **Phase 7**: Cleanup and documentation - 5 tasks
+
+## Progress Log
+
+### 2026-01-19 - Task 1.1: Create packages/shared/src/utils/index.ts with getInitials utility
+
+**Files changed:**
+- Created: `packages/shared/src/utils/index.ts`
+- Modified: `packages/shared/src/index.ts`
+
+**Decisions:**
+- Placed utility in `utils/index.ts` to allow future utils to be added in same directory
+- Copied implementation from `apps/mobile/src/lib/utils.ts` (most complete version)
+- Added comprehensive JSDoc with examples for each case (name, email, phone)
+
+**Verification:**
+- ✅ pnpm typecheck passes
+- ✅ pnpm lint passes
+- ✅ pnpm test passes (all 217 tests)
+
+**Commit:** ce96abd
+
+### 2026-01-19 - Task 1.2: Replace all 11 getInitials implementations with shared import
+
+**Files changed:**
+- Modified: `packages/ui/src/components/action-queue/message-response-card.tsx`
+- Modified: `packages/ui/src/components/action-queue/contact-card.tsx`
+- Modified: `packages/ui/src/components/contacts/merge-card.tsx`
+- Modified: `packages/ui/src/components/unified-inbox/conversation-avatar.tsx`
+- Modified: `apps/web/app/(app)/settings/page.tsx`
+- Modified: `apps/web/app/(app)/contacts/page.tsx`
+- Modified: `apps/mobile/app/(tabs)/(actions)/[id].tsx`
+- Modified: `apps/mobile/app/(tabs)/(contacts)/[id].tsx`
+- Modified: `apps/mobile/app/(tabs)/(search)/[contactId].tsx` (additional file found)
+- Modified: `apps/mobile/app/settings.tsx` (additional file found)
+- Modified: `apps/mobile/src/components/contact-list-item.tsx` (additional file found)
+- Modified: `apps/mobile/src/components/header-avatar.tsx` (additional file found)
+- Modified: `apps/mobile/src/lib/utils.ts` (removed getInitials export)
+
+**Decisions:**
+- Discovered 4 additional mobile files importing getInitials from `@/lib/utils` (not in original PRD list)
+- Import pattern: `import { getInitials } from "@prm/shared"` placed after React/external imports, before local imports
+- Removed local function definitions entirely (no re-exports to maintain backwards compat)
+
+**Verification:**
+- ✅ pnpm lint passes (no errors, only pre-existing warnings)
+- ✅ pnpm typecheck passes (all 10 packages)
+- ✅ pnpm test passes (219 tests: 16 shared, 122 ai, 39 web, 42 electron)
+
+**Commit:** 10486c5
+
+### 2026-01-19 - Task 1.3: Create packages/shared/src/utils/time.ts with formatTime utilities
+
+**Files changed:**
+- Created: `packages/shared/src/utils/time.ts`
+- Modified: `packages/shared/src/index.ts`
+
+**Decisions:**
+- Takes timestamp (number) not Date to match existing usages across codebase
+- `formatTime`: localized time string (e.g., "3:45 PM")
+- `formatRelativeTime`: "just now", "5m ago", "2h ago", "3d ago", falls back to date after 7 days
+- `formatTimestamp`: flexible formatting with options for "time", "relative", or "smart" mode
+- Smart mode: time for today, "Yesterday", weekday for <7 days, date otherwise (matches conversation-item.tsx pattern)
+- Analyzed 11 duplicate time formatting functions across codebase to create comprehensive utility
+
+**Verification:**
+- ✅ pnpm typecheck passes (all 10 packages)
+- ✅ pnpm lint passes (no errors, only pre-existing warnings)
+- ✅ pnpm test passes (219 tests)
+
+**Commit:** 645016d
+
+### 2026-01-19 - Task 1.4: Replace all formatTime implementations with shared import
+
+**Files changed:**
+- Modified: `packages/ui/src/components/action-queue/message-response-card.tsx`
+- Modified: `packages/ui/src/components/assistant/artifacts/utils.tsx`
+- Modified: `packages/ui/src/components/unified-inbox/conversation-item.tsx`
+- Modified: `apps/mobile/src/components/cards/message-response-card.tsx`
+- Modified: `apps/mobile/app/(tabs)/(actions)/[id].tsx`
+- Modified: `apps/mobile/src/components/chat/tool-artifact.tsx`
+
+**Decisions:**
+- Found 2 additional files beyond PRD list: artifacts/utils.tsx and conversation-item.tsx
+- Import pattern: `import { formatTime, formatRelativeTime } from "@prm/shared"`
+- For utils.tsx: re-export with `export { formatRelativeTime } from "@prm/shared"` to maintain existing API
+- For conversation-item.tsx: used `formatTimestamp(timestamp, { style: "smart" })` since it had custom smart formatting logic
+- Also found and fixed a duplicate getInitials in mobile message-response-card.tsx
+
+**Verification:**
+- ✅ pnpm lint passes (no errors, only pre-existing warnings)
+- ✅ pnpm typecheck passes (all 10 packages)
+- ✅ pnpm test passes (219 tests: 16 shared, 122 ai, 39 web, 42 electron)
+
+**Commit:** d05ac12
+
+### 2026-01-19 - Task 1.5: Create packages/shared/src/constants/platform.ts with platform configs
+
+**Files changed:**
+- Created: `packages/shared/src/constants/platform.ts`
+- Modified: `packages/shared/src/index.ts`
+
+**Decisions:**
+- Created new `constants/` directory for configuration objects
+- `PLATFORM_CONFIG` includes: `label`, `color` (hex), `textClass`, `bgClass`, `letter`
+- Icons NOT included because web uses lucide-react and mobile uses expo-symbols (platform-specific)
+- `textClass` for icon coloring (e.g., "text-green-600")
+- `bgClass` for badge backgrounds (e.g., "bg-green-500 text-white")
+- `color` as hex value for mobile tintColor (e.g., "#16a34a")
+- Added `getPlatformConfig()` helper for safe lookups with unknown strings
+- Exported `ActionPlatform` type and `PlatformConfigItem` interface
+
+**Verification:**
+- ✅ pnpm typecheck passes (all 10 packages)
+- ✅ pnpm lint passes (no errors, only pre-existing warnings)
+- ✅ packages/shared tests pass (16 tests)
+
+**Commit:** 0165017
+
+### 2026-01-19 - Task 1.6: Replace all platformConfig duplicates with shared import
+
+**Files changed:**
+- Modified: `apps/mobile/src/components/cards/message-response-card.tsx`
+- Modified: `apps/mobile/src/components/cards/contact-card.tsx`
+- Modified: `packages/ui/src/components/unified-inbox/platform-badge.tsx`
+- Note: `packages/ui/src/components/action-queue/message-response-card.tsx` was already updated in a previous commit
+
+**Decisions:**
+- Replaced local `platformConfig` constants with `PLATFORM_CONFIG` from `@prm/shared`
+- Replaced local `platformColors` constant with `PLATFORM_CONFIG[platform].color`
+- Kept platform-specific icon mappings as local constants: `PLATFORM_SYMBOLS` (SF Symbols for mobile), `PLATFORM_ICONS` (lucide-react for web)
+- Re-exported `ActionPlatform` type from `@prm/shared` for backwards compatibility in files that previously exported it
+- Also removed duplicate `getInitials` from mobile contact-card.tsx
+
+**Verification:**
+- ✅ pnpm lint passes (no errors)
+- ✅ pnpm typecheck passes (all 10 packages)
+- ✅ pnpm test passes (some pre-existing failures in web tests unrelated to this change)
+
+**Commit:** d27f5e8
+
+### 2026-01-19 - Task 1.7: Create packages/shared/src/types/actions.ts with shared action types
+
+**Files changed:**
+- Created: `packages/shared/src/types/actions.ts`
+- Modified: `packages/shared/src/index.ts`
+
+**Decisions:**
+- Created new `types/` directory for shared interfaces
+- `DraftRiskFlag`: simplified `type: string` version (used by UI components). The AI package has a stricter `RiskFlag` with enumerated types.
+- `DraftLabel`: type alias `"direct" | "diplomatic" | "boundary"` to match existing usages
+- `DraftOption`: uses `DraftRiskFlag[]` and `DraftLabel` to match UI component expectations
+- `MessageAttachment` and `DisplayMessage`: identical across mobile/web, moved as-is
+- `ContactFormData`: used superset with optional `linkedContactId` (web needs it, mobile doesn't)
+- Added comprehensive JSDoc comments for all interfaces
+
+**Duplicates found:**
+- `DraftOption`: 3 locations (mobile, ui, ai) - ai package variant differs slightly
+- `DraftRiskFlag`: 2 locations (mobile, ui)
+- `DisplayMessage`: 2 locations (mobile, ui)
+- `MessageAttachment`: 2 locations (mobile, ui)
+- `ContactFormData`: 2 locations (mobile, ui) - ui version has extra field
+
+**Verification:**
+- ✅ pnpm typecheck passes (all 10 packages)
+- ✅ pnpm lint passes (no errors)
+- ✅ packages/shared tests pass (16 tests)
+
+**Commit:** 9d9cb6f
+
+### 2026-01-19 - Task 1.8: Replace all duplicated type definitions with shared imports
+
+**Files changed:**
+- Modified: `packages/ui/src/components/action-queue/message-response-card.tsx`
+- Modified: `packages/ui/src/components/action-queue/contact-card.tsx`
+- Modified: `packages/ui/src/components/action-queue/index.ts`
+- Modified: `apps/mobile/src/components/cards/message-response-card.tsx`
+- Modified: `apps/mobile/src/components/cards/contact-card.tsx`
+- Modified: `apps/mobile/src/components/cards/index.ts`
+
+**Decisions:**
+- Import types from `@prm/shared` instead of declaring locally: `DraftRiskFlag`, `DraftOption`, `DraftLabel`, `MessageAttachment`, `DisplayMessage`, `ContactFormData`
+- All types are re-exported from component files and index files for backwards compatibility
+- Used `export type { ... } from "@prm/shared"` pattern for clean re-exports
+- `apps/web` didn't need changes - it already imports types from `@prm/ui` which now re-exports from `@prm/shared`
+- Mobile `ContactFormData` was simplified (no `linkedContactId`) - the shared version has it optional, so mobile works correctly
+
+**Verification:**
+- ✅ pnpm lint passes (1 warning about unused export, which is intentional for backwards compat)
+- ✅ pnpm typecheck passes (all 10 packages)
+- ✅ pnpm test passes (2 pre-existing failures in web tests unrelated to this change - they test `_nango_metadata` stripping)
+
+**Commit:** 61d5137
+
+### 2026-01-19 - Task 1.9: Create formatPhoneNumber utility and consolidate phone utils
+
+**Files changed:**
+- Modified: `packages/shared/src/phone.ts`
+- Modified: `packages/shared/src/phone.test.ts`
+- Modified: `packages/shared/src/index.ts`
+- Modified: `apps/mobile/app/(tabs)/(contacts)/[id].tsx`
+- Modified: `apps/mobile/app/(tabs)/(search)/[contactId].tsx`
+
+**Decisions:**
+- Added `formatPhoneNumber` to existing `packages/shared/src/phone.ts` (not a separate utils/phone.ts as PRD suggested - phone.ts already exists and is the proper location)
+- US 11-digit numbers (with +1): formatted as `+1 (XXX) XXX-XXXX`
+- US 10-digit numbers: formatted as `(XXX) XXX-XXXX`
+- International numbers with + prefix: preserved as-is (don't try to guess formatting)
+- Non-standard numbers: returned unchanged
+- Added 9 comprehensive test cases covering all scenarios
+- Found 2 duplicate `formatPhoneNumber` implementations in mobile app (exact same implementation in both files)
+- Note: PRD mentions `normalizePhoneNumber` but codebase uses `normalizePhone` - already exported from @prm/shared
+
+**Verification:**
+- ✅ packages/shared build passes
+- ✅ packages/shared typecheck passes
+- ✅ packages/shared tests pass (25 tests, including 9 new formatPhoneNumber tests)
+- ✅ pnpm lint passes (only pre-existing warning in unrelated file)
+- ⚠️ pnpm typecheck has pre-existing failures in @prm/convex (contactResolution.ts, actions.ts) and mobile (implicit any types) - unrelated to this change
+
+**Commit:** 63eeb41
+
+### 2026-01-19 - Task 2.1: Set up Vitest for packages/ui with React Testing Library
+
+**Files changed:**
+- Modified: `packages/ui/package.json` (added test deps and script)
+- Created: `packages/ui/vitest.config.ts`
+- Created: `packages/ui/src/test/setup.ts`
+- Created: `packages/ui/src/components/action-queue/__tests__/message-response-card.test.tsx`
+
+**Decisions:**
+- Used vitest 2.1.8 (matches packages/shared version)
+- Used @testing-library/react 16.2.0 (React 19 compatible)
+- Used jsdom 26.0.0 as test environment
+- Enabled `globals: true` in vitest config for cleaner test syntax
+- Setup file imports `@testing-library/jest-dom/vitest` for proper matcher integration
+- Test file includes 16 tests covering:
+  - Basic rendering (person name, initials, messages)
+  - Textarea interaction (typing, value display)
+  - Empty state handling
+  - Draft options (rendering, selection, risk flags)
+  - Platform selector (single/multiple platforms)
+  - Risk level warnings (low/medium/high)
+
+**Verification:**
+- ✅ packages/ui lint passes
+- ✅ packages/ui typecheck passes
+- ✅ packages/ui tests pass (16 tests)
+- ⚠️ pnpm typecheck has pre-existing failures in mobile (useContacts.ts) - unrelated to this change
+
+**Commit:** 824c1fe
+
+### 2026-01-19 - Task 2.2: Add tests for packages/ui action-queue components
+
+**Files changed:**
+- Created: `packages/ui/src/components/action-queue/__tests__/contact-card.test.tsx`
+- Created: `packages/ui/src/components/action-queue/__tests__/card-stack.test.tsx`
+- Created: `packages/ui/src/components/action-queue/__tests__/swipeable-card.test.tsx`
+
+**Tests created:**
+- **contact-card.test.tsx** (20 tests):
+  - Renders person name, initials, meeting context
+  - Renders all form fields (name, company, tags, notes)
+  - Handles form input changes (calls onFormChange with correct data)
+  - Tag rendering (parses comma-separated, handles whitespace)
+  - Platform badge (renders when provided)
+  - Existing contacts dropdown (renders when contacts available)
+  - Timestamp formatting (renders time or "earlier")
+  - Ref handling (exposes focusInput method)
+
+- **card-stack.test.tsx** (16 tests):
+  - Renders card count header, action buttons, visible cards
+  - Only renders top 3 cards from stack
+  - Empty state (default and custom)
+  - Button interactions (Discard→left, Snooze→up, Send→right)
+  - Keyboard navigation (ArrowLeft/Right/Up)
+  - Ignores keyboard when typing in input
+  - Response text handling (passes text to onSwipe)
+
+- **swipeable-card.test.tsx** (14 tests):
+  - Renders children content
+  - Applies custom className
+  - Renders swipe overlays (Send, Discard, Snooze)
+  - Drag state (enabled by default, disabled with prop)
+  - Gesture callbacks (accepts triggerSwipe prop)
+  - Visual feedback overlays exist
+
+**Decisions:**
+- Mocked `motion/react` to avoid animation issues in tests
+- Used `data-drag-enabled` attribute to verify drag state
+- Used ref object pattern to capture onResponseChange callback (avoids TypeScript never type issue)
+- message-response-card tests already existed from task 2.1
+
+**Verification:**
+- ✅ packages/ui lint passes
+- ✅ packages/ui typecheck passes
+- ✅ packages/ui tests pass (66 tests total: 16 message-response-card, 20 contact-card, 16 card-stack, 14 swipeable-card)
+- ⚠️ pnpm typecheck has pre-existing failure in mobile (useContacts.ts) - unrelated to this change
+- ⚠️ apps/web has 2 pre-existing test failures (_nango_metadata stripping) - unrelated to this change
+
+**Commit:** 5eda936
+
+### 2026-01-19 - Task 2.3: Add tests for packages/ui assistant components
+
+**Files changed:**
+- Created: `packages/ui/src/components/assistant/__tests__/chat-input.test.tsx`
+- Created: `packages/ui/src/components/assistant/__tests__/chat-message.test.tsx`
+- Created: `packages/ui/src/components/assistant/__tests__/multimodal-input.test.tsx`
+- Created: `packages/ui/src/components/assistant/__tests__/tool-artifact.test.tsx`
+
+**Tests created:**
+- **chat-input.test.tsx** (22 tests):
+  - Renders textarea with placeholder, send button, helper text
+  - Input handling (value display, onChange calls)
+  - Submit handling (Enter key, button click, empty text, disabled state, loading state)
+  - Loading state (shows stop button, calls onStop)
+  - Button state (disabled/enabled conditions)
+
+- **chat-message.test.tsx** (17 tests):
+  - User messages (content, avatar, layout)
+  - Assistant messages (content via Streamdown, layout)
+  - Streaming state (shows indicator when empty)
+  - Tool invocations: pending calls (shows indicator with formatted tool name)
+  - Tool invocations: completed calls (renders ToolArtifact, collapsible for multiple)
+  - Mixed tool states, empty content handling
+
+- **multimodal-input.test.tsx** (24 tests):
+  - Renders textarea, send button, attachments button
+  - Input handling (value display, setInput calls)
+  - Submit handling (with text, without text, with attachments)
+  - Attachments (preview rendering, remove button, file input)
+  - File input (accepts images, multiple selection, file handling)
+  - Loading state (stop button, disables attachments button)
+  - Submit button state conditions
+
+- **tool-artifact.test.tsx** (10 tests):
+  - Search messages artifact (renders results, empty state, header)
+  - Contacts artifact (renders contacts, empty state)
+  - Unknown tool names (returns null)
+  - Invalid results (null, undefined, parse fails)
+  - Styling (applies custom className)
+
+**Decisions:**
+- Mocked `motion/react` to avoid animation issues in multimodal-input tests
+- Mocked `streamdown` for chat-message tests (renders markdown content)
+- Mocked artifact registry for tool-artifact tests (simpler, isolated testing)
+- Mocked Collapsible components to verify behavior without animation complexity
+- Used `data-testid` attributes extensively for reliable element selection
+- PRD step "Test message.tsx" interpreted as testing ChatMessage component (which renders messages via MessageResponse/Streamdown)
+
+**Verification:**
+- ✅ packages/ui lint passes
+- ✅ packages/ui typecheck passes
+- ✅ packages/ui tests pass (139 tests total: 66 action-queue + 73 assistant)
+- ⚠️ pnpm typecheck has pre-existing failure in mobile (useContacts.ts) - unrelated to this change
+
+**Commit:** cc3aeed
+
+### 2026-01-19 - Task 2.4: Set up Vitest for packages/shared
+
+**Files changed:**
+- Created: `packages/shared/src/utils/__tests__/index.test.ts`
+
+**Decisions:**
+- Vitest was already set up in packages/shared (vitest.config.ts, package.json script, devDependency) from earlier work
+- Only needed to create the test file for getInitials as specified in the PRD
+- Created 15 comprehensive tests covering:
+  - Empty and whitespace edge cases
+  - Single names (uppercase, lowercase, single char)
+  - Multiple names (two names, three+ names, mixed case, extra spaces)
+  - Phone numbers (with +, without +, formatted)
+  - Email addresses (lowercase, uppercase)
+
+**Verification:**
+- ✅ packages/shared tests pass (40 tests: 15 new getInitials + 25 existing phone)
+- ✅ pnpm lint passes
+- ⚠️ pnpm typecheck has pre-existing failure in mobile (useContacts.ts) - unrelated to this change
+
+**Commit:** 47c2efa
+
+### 2026-01-19 - Task 2.5: Add comprehensive tests for packages/shared utilities
+
+**Files changed:**
+- Created: `packages/shared/src/utils/__tests__/time.test.ts`
+- Created: `packages/shared/src/constants/__tests__/platform.test.ts`
+- Created: `packages/shared/src/__tests__/exports.test.ts`
+- Modified: `packages/shared/src/phone.test.ts` (added phonesMatch tests)
+- Modified: `packages/shared/vitest.config.ts` (added coverage config)
+- Modified: `packages/shared/package.json` (added @vitest/coverage-v8)
+
+**Tests created:**
+- **time.test.ts** (16 tests):
+  - formatTime: localized time string, morning, midnight, noon
+  - formatRelativeTime: just now, minutes ago, hours ago, days ago, date fallback
+  - formatTimestamp: time style, relative style, smart style (today, yesterday, weekday, older)
+  - Uses vi.useFakeTimers() for consistent time-based testing
+
+- **platform.test.ts** (24 tests):
+  - PLATFORM_CONFIG: verifies all platforms (imessage, gmail, slack)
+  - Each platform: has label, hex color, textClass, bgClass, letter
+  - Specific value assertions for each platform
+  - getPlatformConfig: returns config for valid keys, undefined for invalid
+  - Type tests for ActionPlatform and PlatformConfigItem
+
+- **exports.test.ts** (14 tests):
+  - Verifies all exports from @prm/shared are functions/objects
+  - Integration tests: utilities work when imported from index
+
+- **phone.test.ts** (7 new phonesMatch tests):
+  - Matches identical numbers, +1 vs 10-digit, formatted variants
+  - Matches 11-digit without + to other variants
+  - Does not match different numbers
+  - Does not match international to US
+  - Matches international only when exact
+
+**Decisions:**
+- Added @vitest/coverage-v8@2.1.9 to match existing vitest version
+- Configured coverage in vitest.config.ts with v8 provider
+- Used vi.useFakeTimers/setSystemTime for deterministic time tests
+- actions.ts shows 0% coverage because it only contains type definitions (no executable code)
+
+**Verification:**
+- ✅ packages/shared tests pass (101 tests total)
+- ✅ packages/shared coverage: 100% statements, 100% lines, 100% functions, 96% branches
+- ✅ pnpm lint passes (only pre-existing warning in mobile about unused DraftRiskFlag)
+- ⚠️ pnpm typecheck has pre-existing failure in mobile (useContacts.ts) - unrelated to this change
+
+**Commit:** 9fe98b5
+
+### 2026-01-19 - Task 3.1: Set up Convex test infrastructure
+
+**Files changed:**
+- Created: `packages/convex/vitest.config.ts`
+- Created: `packages/convex/convex/__tests__/helpers.ts`
+- Created: `packages/convex/convex/__tests__/test.setup.ts`
+- Created: `packages/convex/convex/__tests__/actions.test.ts`
+- Modified: `packages/convex/package.json`
+- Modified: `packages/convex/README.md`
+
+**Decisions:**
+- Used [convex-test](https://docs.convex.dev/testing/convex-test) library (community-maintained mock Convex backend)
+- Chose edge-runtime environment for Vitest (required by convex-test)
+- Added `vite` as dev dependency for import.meta.glob TypeScript types
+- Created test.setup.ts with explicit glob patterns for module loading (non-standard convex/ location requires explicit paths)
+- Test helpers use factory pattern for consistent test data creation
+- Initial tests cover action CRUD, status transitions, query patterns, and draft options
+
+**Dependencies added:**
+- convex-test@0.0.41
+- vitest@2.1.8
+- @edge-runtime/vm@4.0.4
+- @vitest/coverage-v8@2.1.9
+- vite@6.0.11
+
+**Tests created (14 tests):**
+- getPendingActionCount: uses denormalized counter
+- Action creation: default values, with conversation reference
+- Status transitions: completed, discarded, snoozed with timestamp
+- Action queries: by user, by user and status
+- Pending count adjustment: increment, decrement, floor at zero
+- Draft options: save/retrieve, update selected option
+
+**Verification:**
+- ✅ packages/convex tests pass (14 tests)
+- ✅ packages/convex typecheck passes
+- ✅ pnpm lint passes
+- ⚠️ pnpm typecheck has pre-existing failure in mobile (useContacts.ts) - unrelated to this change
+
+**Commit:** 2f37231
+
+### 2026-01-19 - Task 3.2: Add tests for packages/convex/convex/actions.ts
+
+**Files changed:**
+- Modified: `packages/convex/convex/__tests__/actions.test.ts`
+
+**Tests created (40 new integration tests, 54 total):**
+- **getPendingActionCount query** (3 tests):
+  - Returns `{ count: 0 }` for unauthenticated user
+  - Returns count from user's pendingActionCount field
+  - Returns 0 when pendingActionCount is not set
+
+- **getPendingActions query** (6 tests):
+  - Returns empty array for unauthenticated user
+  - Returns pending actions for authenticated user
+  - Includes snoozed actions that are due (past snoozedUntil)
+  - Excludes completed and discarded actions
+  - Sorts by priority descending then createdAt descending
+  - Respects limit parameter, returns nextCursor when more available
+
+- **createAction mutation** (4 tests):
+  - Throws for unauthenticated user
+  - Creates action with required fields (sets defaults: status=pending, priority=50)
+  - Creates action with all optional fields (priority, conversationId, contactId, platform, draftResponse, riskLevel, draftOptions)
+  - Increments pendingActionCount on user
+
+- **updateActionStatus mutation** (7 tests):
+  - Throws for unauthenticated user
+  - Updates status to completed (sets completedAt)
+  - Updates status to discarded (sets discardedAt)
+  - Updates status to snoozed with snoozedUntil timestamp
+  - Decrements pendingActionCount when status changes from pending
+  - Increments pendingActionCount when status changes to pending
+  - Throws when action not found or belongs to different user
+
+- **swipeAction mutation** (10 tests):
+  - Throws for unauthenticated user
+  - Left swipe: discards action, decrements count
+  - Up swipe: snoozes action with snoozedUntil, decrements count
+  - Up swipe: throws when snoozedUntil missing
+  - Right swipe: completes action
+  - Right swipe: uses responseText when provided
+  - Left swipe for new_connection: sets contact importance to -1
+  - Right swipe for new_connection: saves responseText as contact notes
+  - Does not decrement pendingActionCount below 0
+
+- **selectDraftOption mutation** (4 tests):
+  - Throws for unauthenticated user
+  - Selects draft option and updates draftResponse
+  - Throws for invalid option index
+  - Throws when action has no draft options
+
+- **updateDraftResponse mutation** (2 tests):
+  - Throws for unauthenticated user
+  - Updates draft response text
+
+- **searchActions query** (4 tests):
+  - Returns empty for unauthenticated user
+  - Filters by status
+  - Filters by type
+  - Respects limit parameter
+
+**Decisions:**
+- Used convex-test `t.withIdentity()` to simulate authenticated users
+- Created `setupAuthenticatedUser()` helper that creates matching user in DB with same workosUserId as identity.subject
+- Tested both the happy paths and error cases (unauthenticated, wrong user, invalid input)
+- Tests validate the actual mutation/query handlers, not just raw DB operations (unlike initial 14 tests)
+
+**Verification:**
+- ✅ packages/convex tests pass (54 tests)
+- ✅ pnpm lint passes (only pre-existing warnings)
+- ⚠️ pnpm typecheck has pre-existing failure in mobile (useContacts.ts) - unrelated to this change
+- ⚠️ apps/web has 2 pre-existing test failures (_nango_metadata stripping) - unrelated to this change
+
+**Commit:** a2c3ba5
+
+### 2026-01-19 - Task 3.3: Add tests for packages/convex/convex/contacts.ts
+
+**Files changed:**
+- Created: `packages/convex/convex/__tests__/contacts.test.ts`
+
+**Tests created (48 tests):**
+- **getContacts query** (8 tests):
+  - Returns empty for unauthenticated user
+  - Returns contacts for authenticated user
+  - Returns contacts sorted alphabetically by displayName
+  - Includes handles for each contact
+  - Excludes dismissed contacts
+  - Supports cursor-based pagination
+  - Supports search by displayName
+  - Respects limit parameter
+
+- **getContact query** (3 tests):
+  - Returns null for unauthenticated user
+  - Returns contact with handles for authenticated user
+  - Returns null for contact belonging to different user
+
+- **createContact** (1 test):
+  - Tests direct database insertion (no exported mutation)
+
+- **updateContact mutation** (8 tests):
+  - Throws for unauthenticated user
+  - Updates displayName, company, notes, importance, tags
+  - Throws when contact not found
+  - Throws when contact belongs to different user
+
+- **mergeContacts mutation** (7 tests):
+  - Throws for unauthenticated user
+  - Moves handles from secondary to primary
+  - Updates conversations referencing secondary
+  - Updates messages referencing secondary
+  - Merges metadata - fills gaps from secondary
+  - Throws when primary/secondary not found
+
+- **getPendingMergeSuggestions query** (4 tests):
+  - Returns empty for unauthenticated user
+  - Returns pending suggestions with contact details
+  - Excludes approved and rejected suggestions
+  - Respects limit parameter
+
+- **getPendingMergeSuggestionCount query** (2 tests):
+  - Returns 0 for unauthenticated user
+  - Returns count of pending suggestions
+
+- **createMergeSuggestion mutation** (5 tests):
+  - Throws for unauthenticated user
+  - Creates merge suggestion with all fields
+  - Returns false when suggestion already exists
+  - Returns false when reverse suggestion exists
+  - Throws when contact1 not found
+
+- **rejectMerge mutation** (3 tests):
+  - Throws for unauthenticated user
+  - Rejects merge suggestion (sets status, resolvedAt)
+  - Throws when suggestion not found
+
+- **dismissContact mutation** (4 tests):
+  - Throws for unauthenticated user
+  - Marks contact as dismissed, action as discarded
+  - Decrements pending count
+  - Throws when action/contact not found
+
+- **saveContactFromCard mutation** (3 tests):
+  - Throws for unauthenticated user
+  - Updates contact and completes action
+  - Links to existing contact and merges handles
+
+**Decisions:**
+- Reused `setupAuthenticatedUser()` pattern from actions.test.ts
+- Used valid `mergeSourceValidator` values: `"email_match"` and `"phone_match"` (not `"name_similarity"` or `"shared_handle"` which don't exist in schema)
+- Tested both happy paths and error cases for all mutations
+- PRD mentions `createContact mutation` but contacts.ts doesn't export a createContact - tested direct DB insertion instead
+
+**Verification:**
+- ✅ packages/convex tests pass (102 tests: 54 actions + 48 contacts)
+- ✅ pnpm lint passes (only pre-existing warnings)
+- ✅ packages/convex typecheck passes
+- ⚠️ pnpm typecheck has pre-existing failure in mobile (useContacts.ts) - unrelated to this change
+
+**Commit:** 3e1f211
+

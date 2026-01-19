@@ -1,0 +1,595 @@
+{
+  "project": "PRM Codebase Refactor",
+  "description": "Comprehensive refactoring for test coverage, code de-duplication, and maintainability across the monorepo",
+  "target_goals": [
+    "80%+ test coverage for shared packages",
+    "Eliminate duplicate utility functions and types",
+    "Consolidate shared components into packages/ui",
+    "Simplify complex files (>500 LOC)",
+    "Standardize import patterns and constants"
+  ],
+  "metrics_before": {
+    "test_files": 17,
+    "ui_component_tests": 0,
+    "convex_function_tests": 0,
+    "mobile_tests": 0,
+    "duplicate_getInitials": 11,
+    "duplicate_formatTime": 4,
+    "files_over_500_loc": 5,
+    "largest_file_loc": 2071
+  },
+  "tasks": [
+    {
+      "id": "1.1",
+      "phase": 1,
+      "mode": "hitl",
+      "category": "architectural",
+      "description": "Create packages/shared/src/utils/index.ts with getInitials utility",
+      "steps": [
+        "Create packages/shared/src/utils/index.ts",
+        "Move getInitials function from apps/mobile/src/lib/utils.ts",
+        "Add JSDoc comments and type annotations",
+        "Export from packages/shared/src/index.ts",
+        "Run pnpm typecheck to verify exports"
+      ],
+      "passes": true
+    },
+    {
+      "id": "1.2",
+      "phase": 1,
+      "mode": "afk",
+      "category": "refactor",
+      "description": "Replace all 11 getInitials implementations with shared import",
+      "steps": [
+        "Update packages/ui/src/components/action-queue/message-response-card.tsx",
+        "Update packages/ui/src/components/action-queue/contact-card.tsx",
+        "Update packages/ui/src/components/contacts/merge-card.tsx",
+        "Update packages/ui/src/components/unified-inbox/conversation-avatar.tsx",
+        "Update apps/web/app/(app)/settings/page.tsx",
+        "Update apps/web/app/(app)/contacts/page.tsx",
+        "Update apps/mobile/app/(tabs)/(actions)/[id].tsx",
+        "Update apps/mobile/app/(tabs)/(contacts)/[id].tsx",
+        "Remove local getInitials definitions",
+        "Run pnpm lint && pnpm typecheck"
+      ],
+      "passes": true
+    },
+    {
+      "id": "1.3",
+      "phase": 1,
+      "mode": "hitl",
+      "category": "architectural",
+      "description": "Create packages/shared/src/utils/time.ts with formatTime utilities",
+      "steps": [
+        "Create packages/shared/src/utils/time.ts",
+        "Add formatTime(date: Date): string function",
+        "Add formatRelativeTime(date: Date): string function",
+        "Add formatTimestamp(date: Date, options?: FormatOptions): string function",
+        "Export all from packages/shared/src/index.ts",
+        "Run pnpm typecheck"
+      ],
+      "passes": true
+    },
+    {
+      "id": "1.4",
+      "phase": 1,
+      "mode": "afk",
+      "category": "refactor",
+      "description": "Replace all formatTime implementations with shared import",
+      "steps": [
+        "Update packages/ui/src/components/action-queue/message-response-card.tsx",
+        "Update apps/mobile/src/components/cards/message-response-card.tsx",
+        "Update apps/mobile/app/(tabs)/(actions)/[id].tsx",
+        "Update apps/mobile/src/components/chat/tool-artifact.tsx",
+        "Remove local formatTime/formatRelativeTime definitions",
+        "Run pnpm lint && pnpm typecheck"
+      ],
+      "passes": true
+    },
+    {
+      "id": "1.5",
+      "phase": 1,
+      "mode": "hitl",
+      "category": "architectural",
+      "description": "Create packages/shared/src/constants/platform.ts with platform configs",
+      "steps": [
+        "Create packages/shared/src/constants/platform.ts",
+        "Define PLATFORM_CONFIG object with colors, icons, labels for iMessage/Gmail/Slack",
+        "Define ActionPlatform type: 'imessage' | 'gmail' | 'slack'",
+        "Export from packages/shared/src/index.ts",
+        "Run pnpm typecheck"
+      ],
+      "passes": true
+    },
+    {
+      "id": "1.6",
+      "phase": 1,
+      "mode": "afk",
+      "category": "refactor",
+      "description": "Replace all platformConfig duplicates with shared import",
+      "steps": [
+        "Update packages/ui/src/components/action-queue/message-response-card.tsx",
+        "Update apps/mobile/src/components/cards/message-response-card.tsx",
+        "Update apps/mobile/src/components/cards/contact-card.tsx",
+        "Remove local platformConfig objects",
+        "Run pnpm lint && pnpm typecheck"
+      ],
+      "passes": true
+    },
+    {
+      "id": "1.7",
+      "phase": 1,
+      "mode": "hitl",
+      "category": "architectural",
+      "description": "Create packages/shared/src/types/actions.ts with shared action types",
+      "steps": [
+        "Create packages/shared/src/types/actions.ts",
+        "Move DraftOption interface",
+        "Move DraftRiskFlag interface",
+        "Move DisplayMessage interface",
+        "Move MessageAttachment interface",
+        "Move ContactFormData interface",
+        "Export all from packages/shared/src/index.ts",
+        "Run pnpm typecheck"
+      ],
+      "passes": true
+    },
+    {
+      "id": "1.8",
+      "phase": 1,
+      "mode": "afk",
+      "category": "refactor",
+      "description": "Replace all duplicated type definitions with shared imports",
+      "steps": [
+        "Update packages/ui to import types from @prm/shared",
+        "Update apps/mobile to import types from @prm/shared",
+        "Update apps/web to import types from @prm/shared",
+        "Remove local type definitions",
+        "Run pnpm lint && pnpm typecheck"
+      ],
+      "passes": true
+    },
+    {
+      "id": "1.9",
+      "phase": 1,
+      "mode": "hitl",
+      "category": "architectural",
+      "description": "Create formatPhoneNumber utility and consolidate phone utils in packages/shared",
+      "steps": [
+        "Add formatPhoneNumber function to packages/shared/src/utils/phone.ts",
+        "Format as (XXX) XXX-XXXX for US numbers (area code in parentheses)",
+        "Handle international numbers with + prefix",
+        "Handle numbers without area code gracefully",
+        "Add JSDoc with examples",
+        "Find all normalizePhoneNumber implementations across codebase",
+        "Replace duplicates with import from @prm/shared",
+        "Export formatPhoneNumber and normalizePhoneNumber from packages/shared/src/index.ts",
+        "Run pnpm typecheck && pnpm test"
+      ],
+      "passes": true
+    },
+    {
+      "id": "2.1",
+      "phase": 2,
+      "mode": "hitl",
+      "category": "testing",
+      "description": "Set up Vitest for packages/ui with React Testing Library",
+      "steps": [
+        "Add vitest, @testing-library/react, @testing-library/jest-dom to packages/ui devDependencies",
+        "Create packages/ui/vitest.config.ts with jsdom environment",
+        "Create packages/ui/src/test/setup.ts with jest-dom matchers",
+        "Add test script to packages/ui/package.json",
+        "Create packages/ui/src/components/action-queue/__tests__/message-response-card.test.tsx as example",
+        "Run pnpm test in packages/ui"
+      ],
+      "passes": true
+    },
+    {
+      "id": "2.2",
+      "phase": 2,
+      "mode": "afk",
+      "category": "testing",
+      "description": "Add tests for packages/ui action-queue components",
+      "steps": [
+        "Test message-response-card.tsx: renders messages, handles draft selection",
+        "Test contact-card.tsx: renders form, handles input changes",
+        "Test CardStack.tsx: renders stack, handles swipe direction",
+        "Test SwipeableCard.tsx: renders, handles gesture callbacks",
+        "Run pnpm test with coverage > 80%"
+      ],
+      "passes": true
+    },
+    {
+      "id": "2.3",
+      "phase": 2,
+      "mode": "afk",
+      "category": "testing",
+      "description": "Add tests for packages/ui assistant components",
+      "steps": [
+        "Test chat-input.tsx: renders, handles submit",
+        "Test tool-artifact.tsx: renders search results, contacts, actions",
+        "Test multimodal-input.tsx: renders, handles file upload",
+        "Test message.tsx: renders markdown, code blocks",
+        "Run pnpm test with coverage > 80%"
+      ],
+      "passes": true
+    },
+    {
+      "id": "2.4",
+      "phase": 2,
+      "mode": "hitl",
+      "category": "testing",
+      "description": "Set up Vitest for packages/shared",
+      "steps": [
+        "Add vitest to packages/shared devDependencies",
+        "Create packages/shared/vitest.config.ts",
+        "Add test script to packages/shared/package.json",
+        "Create packages/shared/src/utils/__tests__/index.test.ts",
+        "Test getInitials with edge cases (empty, single name, multiple names)",
+        "Run pnpm test in packages/shared"
+      ],
+      "passes": true
+    },
+    {
+      "id": "2.5",
+      "phase": 2,
+      "mode": "afk",
+      "category": "testing",
+      "description": "Add comprehensive tests for packages/shared utilities",
+      "steps": [
+        "Test time.ts: formatTime, formatRelativeTime with various dates",
+        "Test platform.ts: PLATFORM_CONFIG has all expected keys",
+        "Test phone.ts: already has tests, verify still passing",
+        "Test types export correctly",
+        "Run pnpm test with coverage > 90%"
+      ],
+      "passes": true
+    },
+    {
+      "id": "3.1",
+      "phase": 3,
+      "mode": "hitl",
+      "category": "testing",
+      "description": "Set up Convex test infrastructure",
+      "steps": [
+        "Research Convex testing patterns (convex-test library or mock approach)",
+        "Create packages/convex/vitest.config.ts",
+        "Create packages/convex/convex/__tests__/helpers.ts for test utilities",
+        "Create mock Convex context for unit testing",
+        "Add test script to packages/convex/package.json",
+        "Document testing approach in packages/convex/README.md"
+      ],
+      "passes": true
+    },
+    {
+      "id": "3.2",
+      "phase": 3,
+      "mode": "afk",
+      "category": "testing",
+      "description": "Add tests for packages/convex/convex/actions.ts",
+      "steps": [
+        "Test getPendingActions query returns expected shape",
+        "Test swipeAction mutation handles all directions",
+        "Test createAction mutation validates input",
+        "Test updateAction mutation updates correctly",
+        "Test getPendingActionCount returns number",
+        "Run pnpm test"
+      ],
+      "passes": true
+    },
+    {
+      "id": "3.3",
+      "phase": 3,
+      "mode": "afk",
+      "category": "testing",
+      "description": "Add tests for packages/convex/convex/contacts.ts",
+      "steps": [
+        "Test getContacts query with pagination",
+        "Test getContact query returns with handles",
+        "Test createContact mutation",
+        "Test updateContact mutation",
+        "Test mergeContacts mutation",
+        "Run pnpm test"
+      ],
+      "passes": true
+    },
+    {
+      "id": "3.4",
+      "phase": 3,
+      "mode": "afk",
+      "category": "testing",
+      "description": "Add tests for packages/convex/convex/sync.ts critical paths",
+      "steps": [
+        "Test syncMessages handles iMessage format",
+        "Test syncMessages handles Gmail format",
+        "Test syncMessages handles Slack format",
+        "Test contact resolution during sync",
+        "Test message deduplication",
+        "Run pnpm test"
+      ],
+      "passes": false
+    },
+    {
+      "id": "4.1",
+      "phase": 4,
+      "mode": "hitl",
+      "category": "testing",
+      "description": "Set up Jest/Vitest for apps/mobile with React Native Testing Library",
+      "steps": [
+        "Add jest, @testing-library/react-native to apps/mobile devDependencies",
+        "Create apps/mobile/jest.config.js with react-native preset",
+        "Create apps/mobile/jest.setup.js with mocks for expo modules",
+        "Add test script to apps/mobile/package.json",
+        "Create apps/mobile/src/__tests__/example.test.tsx",
+        "Run pnpm test in apps/mobile"
+      ],
+      "passes": false
+    },
+    {
+      "id": "4.2",
+      "phase": 4,
+      "mode": "afk",
+      "category": "testing",
+      "description": "Add tests for mobile hooks",
+      "steps": [
+        "Test useActions.ts: returns pending actions, loading state",
+        "Test useContacts.ts: returns contacts, handles search",
+        "Test usePendingActionCount.ts: returns count",
+        "Test useChat.ts: sends messages, handles streaming",
+        "Mock Convex hooks appropriately",
+        "Run pnpm test"
+      ],
+      "passes": false
+    },
+    {
+      "id": "4.3",
+      "phase": 4,
+      "mode": "afk",
+      "category": "testing",
+      "description": "Add tests for mobile components",
+      "steps": [
+        "Test swipeable-card.tsx: renders, handles gestures",
+        "Test card-stack.tsx: renders stack, empty state",
+        "Test action-buttons.tsx: renders buttons, handles press",
+        "Test contact-list-item.tsx: renders, navigation",
+        "Run pnpm test"
+      ],
+      "passes": false
+    },
+    {
+      "id": "4.4",
+      "phase": 4,
+      "mode": "afk",
+      "category": "testing",
+      "description": "Add tests for mobile card components",
+      "steps": [
+        "Test message-response-card.tsx: renders messages, input",
+        "Test contact-card.tsx: renders form fields",
+        "Test chat-message.tsx: renders user/assistant styles",
+        "Test chat-input.tsx: handles submit",
+        "Run pnpm test"
+      ],
+      "passes": false
+    },
+    {
+      "id": "5.1",
+      "phase": 5,
+      "mode": "hitl",
+      "category": "refactor",
+      "description": "Split packages/ui prompt-input.tsx (1,266 LOC) into smaller modules",
+      "steps": [
+        "Identify logical boundaries in prompt-input.tsx",
+        "Extract PromptInputContext to separate file",
+        "Extract usePromptInputState hook",
+        "Extract SuggestionsList component",
+        "Extract FilePreview component",
+        "Keep main PromptInput as composition of parts",
+        "Verify all exports still work",
+        "Run pnpm typecheck && pnpm test"
+      ],
+      "passes": false
+    },
+    {
+      "id": "5.2",
+      "phase": 5,
+      "mode": "hitl",
+      "category": "refactor",
+      "description": "Split packages/ui sidebar.tsx (719 LOC) into smaller modules",
+      "steps": [
+        "Extract SidebarContext to packages/ui/src/components/ui/sidebar/context.tsx",
+        "Extract SidebarTrigger component",
+        "Extract SidebarContent component",
+        "Extract SidebarMenu components",
+        "Create barrel export in sidebar/index.ts",
+        "Update all imports",
+        "Run pnpm typecheck && pnpm test"
+      ],
+      "passes": false
+    },
+    {
+      "id": "5.3",
+      "phase": 5,
+      "mode": "hitl",
+      "category": "refactor",
+      "description": "Split packages/ui message-response-card.tsx (575 LOC)",
+      "steps": [
+        "Extract MessageBubble component",
+        "Extract DraftSelector component",
+        "Extract PlatformBadge component (reusable)",
+        "Extract ResponseInput component",
+        "Keep MessageResponseCard as composition",
+        "Run pnpm typecheck && pnpm test"
+      ],
+      "passes": false
+    },
+    {
+      "id": "5.4",
+      "phase": 5,
+      "mode": "hitl",
+      "category": "refactor",
+      "description": "Simplify packages/convex sync.ts (2,071 LOC) - extract platform handlers",
+      "steps": [
+        "Create packages/convex/convex/sync/imessage.ts",
+        "Create packages/convex/convex/sync/gmail.ts",
+        "Create packages/convex/convex/sync/slack.ts",
+        "Create packages/convex/convex/sync/shared.ts for common logic",
+        "Keep main sync.ts as orchestrator",
+        "Run pnpm typecheck"
+      ],
+      "passes": false
+    },
+    {
+      "id": "5.5",
+      "phase": 5,
+      "mode": "hitl",
+      "category": "refactor",
+      "description": "Simplify apps/web settings/integrations/page.tsx (502 LOC)",
+      "steps": [
+        "Extract IntegrationCard component",
+        "Extract ConnectionStatus component",
+        "Extract OAuthButton component",
+        "Create apps/web/app/(app)/settings/integrations/components/",
+        "Keep page as composition of components",
+        "Run pnpm typecheck"
+      ],
+      "passes": false
+    },
+    {
+      "id": "6.1",
+      "phase": 6,
+      "mode": "hitl",
+      "category": "testing",
+      "description": "Add E2E test setup for apps/web with Playwright",
+      "steps": [
+        "Verify playwright.config.ts exists and is configured",
+        "Create apps/web/e2e/auth.setup.ts for authenticated tests",
+        "Create apps/web/e2e/fixtures.ts for test data",
+        "Create apps/web/e2e/helpers.ts for common actions",
+        "Run npx playwright test --ui to verify setup"
+      ],
+      "passes": false
+    },
+    {
+      "id": "6.2",
+      "phase": 6,
+      "mode": "afk",
+      "category": "testing",
+      "description": "Add E2E tests for web app critical paths",
+      "steps": [
+        "Test login flow: sign in, redirect to dashboard",
+        "Test actions page: view actions, swipe action",
+        "Test contacts page: view list, search, view detail",
+        "Test settings page: view integrations, connect OAuth",
+        "Run npx playwright test"
+      ],
+      "passes": false
+    },
+    {
+      "id": "6.3",
+      "phase": 6,
+      "mode": "hitl",
+      "category": "testing",
+      "description": "Set up Detox or Maestro for apps/mobile E2E testing",
+      "steps": [
+        "Research Detox vs Maestro for Expo SDK 54",
+        "Install chosen E2E framework",
+        "Configure for iOS Simulator",
+        "Create apps/mobile/e2e/ directory structure",
+        "Create first smoke test: app launches",
+        "Document setup in apps/mobile/README.md"
+      ],
+      "passes": false
+    },
+    {
+      "id": "6.4",
+      "phase": 6,
+      "mode": "afk",
+      "category": "testing",
+      "description": "Add E2E tests for mobile app critical paths",
+      "steps": [
+        "Test login flow: sign in screen, OAuth flow",
+        "Test actions tab: view stack, swipe action",
+        "Test contacts tab: view list, search, view detail",
+        "Test agent tab: send message, view response",
+        "Run E2E tests on iOS Simulator"
+      ],
+      "passes": false
+    },
+    {
+      "id": "7.1",
+      "phase": 7,
+      "mode": "hitl",
+      "category": "architectural",
+      "description": "Standardize import patterns across codebase",
+      "steps": [
+        "Document import convention: @prm/* for packages, @/ for app-local",
+        "Update eslint config to enforce import order",
+        "Add eslint-plugin-import-x for import sorting",
+        "Fix any import order violations",
+        "Run pnpm lint"
+      ],
+      "passes": false
+    },
+    {
+      "id": "7.2",
+      "phase": 7,
+      "mode": "afk",
+      "category": "refactor",
+      "description": "Remove unused exports and dead code",
+      "steps": [
+        "Run ts-prune or knip to find unused exports",
+        "Review and remove confirmed dead code",
+        "Remove any TODO/FIXME comments for completed items",
+        "Remove backwards-compat shims if any",
+        "Run pnpm lint && pnpm typecheck"
+      ],
+      "passes": false
+    },
+    {
+      "id": "7.3",
+      "phase": 7,
+      "mode": "hitl",
+      "category": "documentation",
+      "description": "Update CLAUDE.md with refactored architecture",
+      "steps": [
+        "Document packages/shared as source of truth for utils/types",
+        "Document packages/ui component organization",
+        "Document testing strategy and coverage goals",
+        "Document import conventions",
+        "Verify commands still accurate"
+      ],
+      "passes": false
+    },
+    {
+      "id": "7.4",
+      "phase": 7,
+      "mode": "afk",
+      "category": "testing",
+      "description": "Verify all tests pass and coverage meets goals",
+      "steps": [
+        "Run pnpm test across all packages",
+        "Generate coverage report",
+        "Verify packages/shared > 90% coverage",
+        "Verify packages/ui > 80% coverage",
+        "Verify packages/convex has test coverage",
+        "Verify apps/mobile has test coverage"
+      ],
+      "passes": false
+    },
+    {
+      "id": "7.5",
+      "phase": 7,
+      "mode": "hitl",
+      "category": "testing",
+      "description": "Add CI test workflow verification",
+      "steps": [
+        "Ensure .github/workflows includes test step",
+        "Verify pnpm test runs in CI",
+        "Add coverage threshold check",
+        "Verify lint and typecheck run in CI",
+        "Run full CI workflow locally with act or similar"
+      ],
+      "passes": false
+    }
+  ]
+}
