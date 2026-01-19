@@ -1,9 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
 import { ConvexHttpClient } from "convex/browser";
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 import type { Id } from "@prm/convex";
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 import { api } from "@prm/convex";
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 import { sendSlackMessage } from "@prm/integrations/nango";
 
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 const convex = new ConvexHttpClient(process.env.NEXT_PUBLIC_CONVEX_URL!);
 
 interface SendSlackMessageRequest {

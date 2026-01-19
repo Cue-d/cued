@@ -66,7 +66,8 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     // Strip Nango metadata before sending to Convex
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const cleanedRecords = records.map((record: any) => {
-      const { _nango_metadata, ...message } = record;
+      // eslint-disable-next-line @typescript-eslint/no-unused-vars
+      const { nango_metadata: _nango_metadata, ...message } = record;
       return message as SlackSyncMessage;
     });
 

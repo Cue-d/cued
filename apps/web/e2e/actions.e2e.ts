@@ -74,6 +74,7 @@ test.describe("Actions Page", () => {
     await page.goto("/inbox");
 
     // Look for badge with count in sidebar
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
     const actionsBadge = page.locator('[data-testid="actions-badge"]');
 
     // Badge may or may not be visible depending on pending actions

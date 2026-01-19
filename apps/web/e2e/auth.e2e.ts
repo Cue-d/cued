@@ -66,9 +66,8 @@ test.describe("Authentication Flow", () => {
 });
 
 test.describe("Sign Out", () => {
-  test.skip("sign-out clears session and redirects to home", async ({
-    page,
-  }) => {
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  test.skip("sign-out clears session and redirects to home", async ({ page }) => {
     // This test requires an authenticated session
     // Skip in CI without proper auth setup
     // Would need to:
