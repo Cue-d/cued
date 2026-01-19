@@ -8,18 +8,15 @@
 // Browser Identification
 // ============================================================================
 
-export const BROWSER_NAME = 'Chrome'
-export const CHROME_VERSION = '141'
-export const OS_NAME = 'macOS'
-export const SERVICE_VERSION = '1.13.40953'
+const CHROME_VERSION = '141'
+const OS_NAME = 'macOS'
+const SERVICE_VERSION = '1.13.40953'
 
 export const USER_AGENT = `Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${CHROME_VERSION}.0.0.0 Safari/537.36`
 
 // ============================================================================
 // Base URLs
 // ============================================================================
-
-export const BASE_URL = 'https://www.linkedin.com'
 
 export const API_URLS = {
   voyagerGraphQL: 'https://www.linkedin.com/voyager/api/graphql',
@@ -77,11 +74,12 @@ export const DEFAULT_HEADERS = {
 // ============================================================================
 
 export const GRAPHQL_QUERY_IDS = {
-  // Messaging queries
-  messengerConversations: 'messengerConversations.0a1e58aeb7c5f6b3c5fe3ec336b3f09a',
-  messengerConversationsBySyncToken: 'messengerConversationsBySyncToken.f2f54caf04e0a5a8723d0db0d8b71833',
-  messengerMessagesByConversation: 'messengerMessagesByConversation.4fffca8ffb3c0c385f9e8dc30f6f89dd',
-  messengerMessagesByAnchorTimestamp: 'messengerMessagesByAnchorTimestamp.0e5b81dc5a0c8d6e84f9dd2bc8bc5736',
+  // Messaging queries - updated from mautrix-linkedin Jan 2026
+  messengerConversations: 'messengerConversations.f0873b936b43ed663997b215b2c28359',
+  messengerConversationsBySyncToken: 'messengerConversations.74c17e85611b60b7ba2700481151a316',
+  messengerConversationsByCursor: 'messengerConversations.8656fb361a8ad0c178e8d3ff1a84ce26',
+  messengerMessagesByConversation: 'messengerMessages.34c9888be71c8010fecfb575cb38308f',
+  messengerMessagesByAnchorTimestamp: 'messengerMessages.4088d03bc70c91c3fa68965cb42336de',
 
   // Realtime decoration queries
   realtimeConversations: 'voyagerMessagingDashMessengerRealtimeDecoration.f855048b390b286e513d7b23c59efee3',
@@ -93,7 +91,7 @@ export const GRAPHQL_QUERY_IDS = {
   realtimeTypingIndicators: 'voyagerMessagingDashMessengerRealtimeDecoration.234ce03cd062b2438dae060ca854a6d2',
 
   // Search queries
-  searchClusters: 'voyagerSearchDashRealtimeDecoration.7a2ea8ee07de9b18830e4548c43eaf1e',
+  searchClusters: 'voyagerSearchDashClusters.ef3d0937fb65bd7812e32e5a85028e79',
 } as const
 
 // ============================================================================
