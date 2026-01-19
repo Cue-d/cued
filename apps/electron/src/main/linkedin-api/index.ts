@@ -18,3 +18,12 @@ export * from './request'
 
 // Client
 export * from './client'
+
+// API modules - Conversations
+export * from './conversations'
+
+// API modules - Messages
+export * from './messages'
+
+// Contacts (connections and search)
+export * from './contacts'

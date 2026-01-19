@@ -13,6 +13,10 @@ import type {
   PagingMetadata,
 } from './types'
 import { COOKIE_NAMES, DEFAULT_X_LI_TRACK, USER_AGENT } from './constants'
+import {
+  getConversations as fetchConversations,
+  getConversationsBefore as fetchConversationsBefore,
+} from './conversations'
 
 export interface ConversationsResult {
   conversations: Conversation[]
@@ -174,9 +178,7 @@ export class LinkedInClient {
    * @returns Promise resolving to conversations with pagination metadata
    */
   async getConversations(syncToken?: string): Promise<ConversationsResult> {
-    // Implementation in conversations.ts
-    void syncToken
-    throw new Error('Not implemented - see conversations.ts')
+    return fetchConversations(this, syncToken)
   }
 
   /**
@@ -185,9 +187,7 @@ export class LinkedInClient {
    * @returns Promise resolving to conversations with pagination metadata
    */
   async getConversationsBefore(timestamp: number): Promise<ConversationsResult> {
-    // Implementation in conversations.ts
-    void timestamp
-    throw new Error('Not implemented - see conversations.ts')
+    return fetchConversationsBefore(this, timestamp)
   }
 
   /**
