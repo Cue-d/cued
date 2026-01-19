@@ -8,8 +8,7 @@
     "dev": "turbo dev",
     "lint": "turbo lint",
     "typecheck": "turbo typecheck",
-    "test": "turbo test",
-    "reset-and-reseed": "cd apps/web && npx tsx ../../scripts/reset-and-reseed.ts"
+    "test": "turbo test"
   },
   "devDependencies": {
     "eslint-plugin-import-x": "^4.16.1",
