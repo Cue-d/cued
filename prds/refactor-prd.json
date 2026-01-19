@@ -557,7 +557,7 @@
         "Remove backwards-compat shims if any",
         "Run pnpm lint && pnpm typecheck"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "7.3",

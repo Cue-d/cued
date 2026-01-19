@@ -1247,3 +1247,42 @@ This refactoring effort addresses:
 - ⚠️ pnpm typecheck has pre-existing failure in electron (linkedin-sync.test.ts) - unrelated to this change
 - ✅ Commands verified: pnpm dev, pnpm build, pnpm lint, pnpm typecheck, pnpm test all work
 
+### 2026-01-19 - Task 7.2: Remove unused exports and dead code
+
+**Files changed:**
+- Modified: `apps/mobile/src/components/animated.tsx`
+- Modified: `apps/web/app/(app)/settings/integrations/components/index.ts`
+- Modified: `apps/electron/src/main/linkedin-api/constants.ts`
+
+**Analysis:**
+- Used `knip` to identify unused exports across the codebase
+- Reviewed 36 flagged unused exports and 26 unused type exports
+- Most flagged items were false positives:
+  - Convex files flagged as "unused" (knip doesn't understand Convex entry points)
+  - Schema validators used internally within schema.ts definition
+  - LinkedIn API types used as part of comprehensive type definitions
+  - Re-exports for backwards compatibility (intentional design)
+  - Public API exports for external consumers
+
+**Dead code removed:**
+1. `AnimatedText`, `AnimatedScrollView`, `AnimatedPressable` from mobile animated.tsx - never used anywhere
+2. `ConnectionStatus`, `OAuthButton` exports from web integrations index.ts - internal helpers only used within integration-card.tsx
+3. `BROWSER_NAME`, `BASE_URL` exports from LinkedIn API constants - never imported
+4. Made `CHROME_VERSION`, `OS_NAME`, `SERVICE_VERSION` internal (non-exported) - only used within file
+
+**Items reviewed but kept:**
+- TODO/FIXME comments: All are intentional markers (safety guards like "DISABLED" or future work references)
+- Backwards-compat re-exports: Intentional design pattern for @prm/ui and @prm/shared consumers
+- Schema validators: Used in schema definition, exported for potential arg validation
+- LinkedIn API types: Comprehensive API type definitions, some unused but form cohesive set
+- Risk classifier exports: Public API for potential external use
+
+**Verification:**
+- ✅ pnpm lint passes (warnings only, no errors)
+- ✅ pnpm typecheck passes for changed files (pre-existing electron errors unrelated to this task)
+- ✅ apps/mobile tests pass (228 tests)
+- ✅ packages/shared tests pass (101 tests)
+- ✅ packages/ui tests pass (139 tests)
+
+**Commit:** 5cc6660
+
