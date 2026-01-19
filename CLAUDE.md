@@ -112,15 +112,6 @@ Web app: http://localhost:3000
 - Don't modify Convex `_generated/` files
 - Don't duplicate utilities that exist in `@prm/shared`
 
-### Import Order (enforced by ESLint)
-
-1. React/React Native
-2. Framework imports (next/**, expo-**)
-3. External packages (alphabetized)
-4. Monorepo packages (@prm/*)
-5. Local aliases (@/*)
-6. Type imports
-
 ## Commands
 
 | Command | Description |
@@ -190,3 +181,9 @@ Build Swift: `cd apps/electron/swift && swift build -c release`
 | "Contacts access denied" | Grant Contacts access in System Settings |
 | Convex types missing | Run `cd packages/convex && pnpm dev` once |
 | Swift build fails | Requires macOS 15+ and Swift 6.0+ |
+
+
+## Plan Mode
+
+- Make the plan extremely concise. Sacrifice grammar for the sake of concision.
+- At the end of each plan, give me a list of unresolved questions to answer, if any.
