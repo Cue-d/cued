@@ -25,8 +25,8 @@ Reference: https://github.com/mautrix/linkedin/tree/main/pkg/linkedingo
 - [x] 2.2 - Port messages.ts (parallel with 2.1, 2.3)
 - [x] 2.3 - Create contacts.ts (parallel with 2.1, 2.2)
 
-### [Not Started] Phase 3: Integration
-- [ ] 3.1 - Integrate with SocialScraper auth
+### [In Progress] Phase 3: Integration
+- [x] 3.1 - Integrate with SocialScraper auth
 - [ ] 3.2 - Create LinkedInSyncManager
 
 ### [Not Started] Phase 4: IPC + Convex
@@ -177,3 +177,20 @@ Created contacts.ts for fetching LinkedIn connections and searching people:
 - Exported via index.ts for use by LinkedInClient in task 3.1
 
 Verification: `pnpm typecheck` passes for contacts.ts (no errors in task 2.3 files)
+
+### 2026-01-19 - Task 3.1: Integrate LinkedInClient with SocialScraper auth
+**Files changed:**
+- `apps/electron/src/main/sync/linkedin.ts` (modified)
+
+**Summary:**
+Integrated LinkedInClient with LinkedInScraper auth system:
+- Added `_apiClient: LinkedInClient | null` cached instance property
+- Added `getAuthCookies()` - extracts cookies from Playwright browser context, converts to linkedin-api Cookie format
+- Added `getApiClient(forceRefresh?)` - creates/returns LinkedInClient with browser cookies, verifies authentication via isAuthenticated()
+- Added `scrapeConnectionsViaApi(options?)` - fetches connections using getConnections() API instead of Playwright scraping
+  - Supports maxConnections option (default 500)
+  - Handles pagination via cursor
+  - Returns Connection[] type from linkedin-api
+- Marked existing `scrapeConnections()` as deprecated in favor of API-based method
+
+Verification: `pnpm typecheck` passes in apps/electron

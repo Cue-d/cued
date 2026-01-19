@@ -182,7 +182,7 @@
         "Run pnpm typecheck"
       ],
       "verification": "pnpm typecheck passes, manual login->API test works",
-      "passes": false
+      "passes": true
     },
     {
       "id": "3.2",

@@ -2,6 +2,8 @@
 // Extends SocialScraper base class for persistent browser context
 
 import { SocialScraper } from './social-scraper'
+import { LinkedInClient, getConnections } from '../linkedin-api'
+import type { Cookie, Connection } from '../linkedin-api'
 
 export interface LinkedInConnection {
   name: string
@@ -37,6 +39,63 @@ const SELECTORS = {
 export class LinkedInScraper extends SocialScraper {
   constructor() {
     super('linkedin')
+  }
+
+  /** Cached LinkedInClient instance */
+  private _apiClient: LinkedInClient | null = null
+
+  /**
+   * Get authentication cookies from the browser context.
+   * Must have an active browser session (call launchBrowser first).
+   * @returns Promise resolving to Cookie[] for use with LinkedInClient
+   */
+  async getAuthCookies(): Promise<Cookie[]> {
+    if (!this.context) {
+      throw new Error('Browser not launched. Call launchBrowser() first.')
+    }
+
+    const playwrightCookies = await this.context.cookies()
+
+    // Convert Playwright cookies to LinkedInClient Cookie format
+    return playwrightCookies.map((c) => ({
+      name: c.name,
+      value: c.value,
+      domain: c.domain,
+      path: c.path,
+      expires: c.expires,
+      httpOnly: c.httpOnly,
+      secure: c.secure,
+      sameSite: c.sameSite,
+    }))
+  }
+
+  /**
+   * Get a LinkedInClient instance configured with current browser cookies.
+   * Creates a new client if needed, or returns cached instance.
+   * @param forceRefresh - Force creation of new client with fresh cookies
+   * @returns Promise resolving to configured LinkedInClient
+   */
+  async getApiClient(forceRefresh = false): Promise<LinkedInClient> {
+    if (this._apiClient && !forceRefresh) {
+      return this._apiClient
+    }
+
+    // Ensure browser is launched
+    if (!this.context) {
+      await this.launchBrowser({ headless: true })
+      await this.navigateTo(LINKEDIN_URLS.home)
+      await this.page?.waitForTimeout(2000)
+    }
+
+    const cookies = await this.getAuthCookies()
+    this._apiClient = new LinkedInClient({ cookies })
+
+    // Verify authentication
+    if (!this._apiClient.isAuthenticated()) {
+      throw new Error('LinkedIn API client not authenticated - missing required cookies')
+    }
+
+    return this._apiClient
   }
 
   /**
@@ -191,6 +250,62 @@ export class LinkedInScraper extends SocialScraper {
     } catch (error) {
       console.error('Error scraping LinkedIn connections:', error)
       return connections
+    } finally {
+      await this.closeBrowser()
+    }
+  }
+
+  /**
+   * Scrape LinkedIn connections using the API instead of Playwright scraping.
+   * This is more reliable and faster than the Playwright-based approach.
+   * @param options.maxConnections - Maximum connections to fetch (default: 500)
+   * @returns Promise resolving to Connection[] from the API
+   * @deprecated Use this method instead of scrapeConnections() for better reliability
+   */
+  async scrapeConnectionsViaApi(options: { maxConnections?: number } = {}): Promise<Connection[]> {
+    const { maxConnections = 500 } = options
+    const allConnections: Connection[] = []
+
+    try {
+      // Get or create API client with current browser cookies
+      const client = await this.getApiClient()
+
+      let cursor: string | undefined
+      let hasMore = true
+
+      while (hasMore && allConnections.length < maxConnections) {
+        const result = await getConnections(client, cursor)
+
+        if (result.connections.length === 0) {
+          break
+        }
+
+        // Add connections up to max limit
+        for (const conn of result.connections) {
+          if (allConnections.length >= maxConnections) {
+            break
+          }
+          allConnections.push(conn)
+        }
+
+        console.log(`Fetched ${allConnections.length} connections via API...`)
+
+        // Check for more pages
+        const total = result.metadata?.total ?? 0
+        const fetched = (result.metadata?.start ?? 0) + result.connections.length
+        hasMore = fetched < total
+
+        // Update cursor for next page
+        if (hasMore && result.metadata) {
+          cursor = ((result.metadata.start ?? 0) + result.connections.length).toString()
+        }
+      }
+
+      console.log(`Finished fetching ${allConnections.length} LinkedIn connections via API`)
+      return allConnections
+    } catch (error) {
+      console.error('Error fetching LinkedIn connections via API:', error)
+      return allConnections
     } finally {
       await this.closeBrowser()
     }
