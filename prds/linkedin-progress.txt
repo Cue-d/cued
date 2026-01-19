@@ -33,8 +33,8 @@ Reference: https://github.com/mautrix/linkedin/tree/main/pkg/linkedingo
 - [x] 4.1 - Add IPC handlers (parallel with 4.2)
 - [x] 4.2 - Create Convex mutations (parallel with 4.1)
 
-### [In Progress] Phase 5: Testing
-- [ ] 5.1 - Unit tests (parallel with 5.2)
+### [Completed] Phase 5: Testing
+- [x] 5.1 - Unit tests (parallel with 5.2)
 - [x] 5.2 - Integration tests (parallel with 5.1)
 
 ### [Not Started] Phase 6: E2E
@@ -319,3 +319,46 @@ Created comprehensive integration tests for LinkedInSyncManager (31 test cases):
 - **callback setter tests**: setTokenProvider, setProgressCallback, setAuthInvalidCallback
 
 Verification: `pnpm test` passes (31/31 tests in linkedin-sync.test.ts)
+
+### 2026-01-19 - Task 5.1: Add unit tests for linkedin-api package
+**Files changed:**
+- `apps/electron/src/main/linkedin-api/__tests__/request.test.ts` (new)
+- `apps/electron/src/main/linkedin-api/__tests__/client.test.ts` (new)
+
+**Summary:**
+Created comprehensive unit tests for request.ts and client.ts (77 test cases total):
+
+**request.test.ts (41 tests):**
+- `getCSRFToken()`: extracts token from JSESSIONID, removes quotes (leading/trailing/both)
+- `formatCookieHeader()`: formats single/multiple cookies, handles empty array
+- `AuthedRequest` constructor: sets default headers, CSRF token, Cookie header
+- `withMethod()`: sets HTTP method (GET, POST, etc.)
+- `withHeader()`: adds custom headers
+- `withQueryParam()`: adds query parameters, encodes values
+- `withRawQuery()`: sets raw query string (takes precedence over params)
+- `withJSONPayload()`: sets JSON body and Content-Type header
+- `withGraphQLQuery()`: sets GraphQL query ID, variables, headers
+- `withXLIHeaders()`: adds x-li-track header
+- `doRaw() auth errors`: throws LinkedInAuthError on 401/403, doesn't retry auth errors
+- `doRaw() retry logic`: retries 502/503/504, succeeds after transient failures, throws after max retries
+- `doJSON()`: parses JSON response, throws LinkedInRequestError on non-ok status
+- Factory functions: `newRequest()`, `newGetRequest()`, `newPostRequest()`, `newMessagingGraphQLRequest()`, `newVoyagerGraphQLRequest()`
+- Error classes: LinkedInAuthError, LinkedInRequestError properties
+
+**client.test.ts (36 tests):**
+- Constructor: default options, provided cookies, custom userAgent/xLiTrack, event handlers
+- Cookie management: `setCookies()`, `getCookie()`, `getCookieValue()`
+- Authentication: `isAuthenticated()` with/without cookies, empty values
+- `getSessionId()`: strips quotes, handles missing/empty cookie
+- `userEntityURN`: getter/setter, can set to null
+- Event handlers: `setEventHandlers()` replaces existing
+- API method signatures: verify getMessages/getMessagesBefore/sendMessage/getConnections/searchPeople throw "Not implemented"
+- Integration: realistic LinkedIn cookie scenario, cookies with all optional fields
+
+**Coverage (v8):**
+- `request.ts`: 95.73% lines
+- `client.ts`: 95.29% lines
+- `constants.ts`: 100%
+- `urn.ts`: 100%
+
+Verification: `pnpm test` passes (110/110 tests in linkedin-api), coverage >80% for request.ts and client.ts
