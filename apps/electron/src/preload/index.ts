@@ -45,22 +45,48 @@ contextBridge.exposeInMainWorld('electron', {
     },
   },
   social: {
-    // LinkedIn
+    // LinkedIn - Contact Scraping
     linkedinStatus: (): Promise<unknown> => ipcRenderer.invoke('social:linkedin:status'),
     linkedinLogin: (): Promise<unknown> => ipcRenderer.invoke('social:linkedin:login'),
     linkedinScrape: (options?: { maxConnections?: number }): Promise<unknown> =>
       ipcRenderer.invoke('social:linkedin:scrape', options),
+
+    // LinkedIn - Messaging Sync
+    linkedinMessagingStatus: (): Promise<unknown> =>
+      ipcRenderer.invoke('social:linkedin:messagingStatus'),
+    linkedinStartMessagingSync: (): Promise<unknown> =>
+      ipcRenderer.invoke('social:linkedin:startMessagingSync'),
+    linkedinStopMessagingSync: (): Promise<unknown> =>
+      ipcRenderer.invoke('social:linkedin:stopMessagingSync'),
+    linkedinSendMessage: (conversationId: string, text: string): Promise<unknown> =>
+      ipcRenderer.invoke('social:linkedin:sendMessage', conversationId, text),
+    linkedinGetSyncProgress: (): Promise<unknown> =>
+      ipcRenderer.invoke('social:linkedin:getSyncProgress'),
+
     // Twitter
     twitterStatus: (): Promise<unknown> => ipcRenderer.invoke('social:twitter:status'),
     twitterLogin: (): Promise<unknown> => ipcRenderer.invoke('social:twitter:login'),
     twitterScrapeMutuals: (username: string, options?: { maxUsers?: number }): Promise<unknown> =>
       ipcRenderer.invoke('social:twitter:scrapeMutuals', username, options),
-    // Progress listeners
+
+    // Progress listeners - LinkedIn
     onLinkedinProgress: (callback: (progress: unknown) => void) => {
       const handler = (_event: IpcRendererEvent, progress: unknown) => callback(progress)
       ipcRenderer.on('social:linkedin:scrapeProgress', handler)
       return () => ipcRenderer.removeListener('social:linkedin:scrapeProgress', handler)
     },
+    onLinkedinMessagingSyncProgress: (callback: (progress: unknown) => void) => {
+      const handler = (_event: IpcRendererEvent, progress: unknown) => callback(progress)
+      ipcRenderer.on('social:linkedin:messagingSyncProgress', handler)
+      return () => ipcRenderer.removeListener('social:linkedin:messagingSyncProgress', handler)
+    },
+    onLinkedinAuthInvalid: (callback: () => void) => {
+      const handler = () => callback()
+      ipcRenderer.on('social:linkedin:authInvalid', handler)
+      return () => ipcRenderer.removeListener('social:linkedin:authInvalid', handler)
+    },
+
+    // Progress listeners - Twitter
     onTwitterProgress: (callback: (progress: unknown) => void) => {
       const handler = (_event: IpcRendererEvent, progress: unknown) => callback(progress)
       ipcRenderer.on('social:twitter:scrapeProgress', handler)

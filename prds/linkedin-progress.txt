@@ -29,9 +29,9 @@ Reference: https://github.com/mautrix/linkedin/tree/main/pkg/linkedingo
 - [x] 3.1 - Integrate with SocialScraper auth
 - [x] 3.2 - Create LinkedInSyncManager
 
-### [Not Started] Phase 4: IPC + Convex
-- [ ] 4.1 - Add IPC handlers (parallel with 4.2)
-- [ ] 4.2 - Create Convex mutations (parallel with 4.1)
+### [Completed] Phase 4: IPC + Convex
+- [x] 4.1 - Add IPC handlers (parallel with 4.2)
+- [x] 4.2 - Create Convex mutations (parallel with 4.1)
 
 ### [Not Started] Phase 5: Testing
 - [ ] 5.1 - Unit tests (parallel with 5.2)
@@ -219,3 +219,31 @@ Created LinkedInSyncManager class following sync-manager.ts pattern:
 - Singleton pattern with `getLinkedInSyncManager()`
 
 Verification: `pnpm typecheck` passes in apps/electron
+
+### 2026-01-19 - Task 4.1: Add LinkedIn messaging IPC handlers
+**Files changed:**
+- `apps/electron/src/main/ipc/social.ts` (modified)
+- `apps/electron/src/preload/index.ts` (modified)
+
+**Summary:**
+Added IPC handlers for LinkedIn messaging sync to social.ts:
+- `social:linkedin:messagingStatus` - returns {connected, syncProgress}
+- `social:linkedin:startMessagingSync` - starts LinkedInSyncManager with API client from scraper
+- `social:linkedin:stopMessagingSync` - stops background sync
+- `social:linkedin:sendMessage` - sends message via LinkedInSyncManager
+- `social:linkedin:getSyncProgress` - returns current sync progress
+- Added `LinkedInMessagingStatusResult`, `LinkedInSyncResult`, `LinkedInSendMessageResult` types
+- Updated `cleanupSocialScrapers()` to stop sync manager on app quit
+- Set up progress callback to emit `social:linkedin:messagingSyncProgress` events
+- Set up auth invalid callback to emit `social:linkedin:authInvalid` events
+
+Updated preload/index.ts with new contextBridge methods:
+- `linkedinMessagingStatus()` - get messaging sync status
+- `linkedinStartMessagingSync()` - start messaging sync
+- `linkedinStopMessagingSync()` - stop messaging sync
+- `linkedinSendMessage(conversationId, text)` - send a message
+- `linkedinGetSyncProgress()` - get current progress
+- `onLinkedinMessagingSyncProgress(callback)` - listen for sync progress
+- `onLinkedinAuthInvalid(callback)` - listen for auth invalidation
+
+Verification: `pnpm typecheck` passes for task 4.1 files (error in packages/convex/convex/sync/linkedin.ts:368 is owned by task 4.2)

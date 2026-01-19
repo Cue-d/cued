@@ -227,7 +227,7 @@
         "Run pnpm typecheck"
       ],
       "verification": "pnpm typecheck passes",
-      "passes": false
+      "passes": true
     },
     {
       "id": "4.2",
@@ -249,7 +249,7 @@
         "Run pnpm typecheck in packages/convex"
       ],
       "verification": "pnpm typecheck passes in packages/convex",
-      "passes": false
+      "passes": true
     },
     {
       "id": "5.1",
