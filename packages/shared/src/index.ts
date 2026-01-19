@@ -12,3 +12,11 @@ export {
   formatTimestamp,
   type FormatTimestampOptions,
 } from "./utils/time.js";
+
+// Platform constants
+export {
+  PLATFORM_CONFIG,
+  getPlatformConfig,
+  type ActionPlatform,
+  type PlatformConfigItem,
+} from "./constants/platform.js";
