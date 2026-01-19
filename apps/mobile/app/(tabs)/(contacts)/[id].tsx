@@ -7,34 +7,10 @@ import { useQuery } from "convex/react";
 import { SymbolView } from "expo-symbols";
 import type { SFSymbol } from "sf-symbols-typescript";
 import { View, Text, ScrollView, Pressable, useColorScheme } from "react-native";
-import { getInitials } from "@prm/shared";
+import { getInitials, formatPhoneNumber } from "@prm/shared";
 import { getThemeColors } from "@/lib/utils";
 import { api } from "@prm/convex/convex/_generated/api";
 import type { Id } from "@prm/convex/convex/_generated/dataModel";
-
-/** Format phone number: +12078005660 -> +1 (207) 800-5660 */
-function formatPhoneNumber(phone: string): string {
-  const digits = phone.replace(/\D/g, "");
-
-  // Handle US numbers (10 or 11 digits)
-  if (digits.length === 11 && digits.startsWith("1")) {
-    const country = digits.slice(0, 1);
-    const area = digits.slice(1, 4);
-    const first = digits.slice(4, 7);
-    const last = digits.slice(7, 11);
-    return `+${country} (${area}) ${first}-${last}`;
-  }
-
-  if (digits.length === 10) {
-    const area = digits.slice(0, 3);
-    const first = digits.slice(3, 6);
-    const last = digits.slice(6, 10);
-    return `(${area}) ${first}-${last}`;
-  }
-
-  // Return original if not standard format
-  return phone;
-}
 
 /** Avatar component */
 function Avatar({ initials }: { initials: string }): React.JSX.Element {

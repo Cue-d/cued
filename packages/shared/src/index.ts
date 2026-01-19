@@ -2,7 +2,12 @@
  * @prm/shared - Shared utilities for PRM
  */
 
-export { normalizePhone, getPhoneVariants, phonesMatch } from "./phone.js";
+export {
+  normalizePhone,
+  getPhoneVariants,
+  phonesMatch,
+  formatPhoneNumber,
+} from "./phone.js";
 
 // Utility functions
 export { getInitials } from "./utils/index.js";
