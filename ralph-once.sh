@@ -81,7 +81,7 @@ echo "========================================"
 echo "Start time: $(date)"
 echo ""
 
-$CLAUDE_CMD --dangerously-skip-permissions "@prd.json @progress.txt \
+$CLAUDE_CMD --dangerously-skip-permissions "@prds/prd.json @prds/progress.txt \
 
 ## CONTEXT
 This is PRODUCTION CODE that will be maintained long-term.
@@ -89,7 +89,7 @@ Quality over speed. Every shortcut becomes technical debt.
 Leave the codebase better than you found it.
 
 ## PRD FORMAT
-The prd.json file contains structured tasks with:
+The prds/prd.json file contains structured tasks with:
 - id: Task identifier (e.g., '1.7')
 - phase: 1-6
 - mode: 'hitl' or 'afk'
@@ -100,7 +100,7 @@ The prd.json file contains structured tasks with:
 - reference: (optional) URL to documentation for this task
 
 ## YOUR TASK
-1. Read prd.json and progress.txt to understand current state.
+1. Read prds/prd.json and prds/progress.txt to understand current state.
 
 2. Find tasks where passes=false. Choose the next task using this priority:
    - Architectural decisions and core abstractions (HIGH)
@@ -136,9 +136,9 @@ The prd.json file contains structured tasks with:
 
 9. Commit with a descriptive message.
 
-10. Update prd.json: set passes=true for the completed task.
+10. Update prds/prd.json: set passes=true for the completed task.
 
-11. Update progress.txt with:
+11. Update prds/progress.txt with:
     - Date/time
     - Task ID and description (e.g., '1.7 - Define Convex schema: users table')
     - Files changed
@@ -162,7 +162,7 @@ fi
 echo ""
 echo "Next steps:"
 echo "  1. Review the commit: git log -1 --stat"
-echo "  2. Check progress.txt for notes"
-echo "  3. Check prd.json for updated passes status"
+echo "  2. Check prds/progress.txt for notes"
+echo "  3. Check prds/prd.json for updated passes status"
 echo "  4. Run again: ./ralph-once.sh"
 echo "========================================"
