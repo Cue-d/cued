@@ -212,11 +212,11 @@ export default function ActionsPage() {
           // For top card, use full context if available
           if (isTop && contextResult) {
             const { contact, conversation, messages } = contextResult
-            const personName =
-              contact?.displayName ??
-              conversation?.displayName ??
-              item.action.contactName ??
-              "Unknown"
+            // For groups/channels, use conversation displayName; for DMs use contact
+            const isGroup = conversation?.conversationType !== "dm"
+            const personName = isGroup
+              ? (conversation?.displayName ?? item.action.contactName ?? "Group Chat")
+              : (contact?.displayName ?? item.action.contactName ?? "Unknown")
 
             // Map messages to DisplayMessage format
             const displayMessages: DisplayMessage[] = messages.map((msg) => ({

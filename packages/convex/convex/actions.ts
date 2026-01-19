@@ -93,6 +93,32 @@ async function enrichAction(
   // Prefer action.platform if set, otherwise derive from conversation
   const platform = action.platform ?? conversation?.platform ?? null;
 
+  // Determine contact name - for groups, use displayName or list participants
+  let contactName: string | null = null;
+  const isGroup =
+    conversation?.conversationType === "group" ||
+    conversation?.conversationType === "channel";
+
+  if (isGroup) {
+    if (conversation.displayName) {
+      contactName = conversation.displayName;
+    } else if (conversation.participantContactIds.length) {
+      // Fetch participant names for group chats without displayName
+      const participants = await Promise.all(
+        conversation.participantContactIds.map((id) => ctx.db.get(id))
+      );
+      const names = participants
+        .filter((p): p is NonNullable<typeof p> => p !== null)
+        .map((p) => p.displayName)
+        .filter(Boolean);
+      contactName = names.length > 0 ? names.join(", ") : null;
+    }
+  }
+  // Fall back to contact name for DMs or if group name resolution failed
+  if (!contactName) {
+    contactName = contact?.displayName ?? null;
+  }
+
   return {
     _id: action._id,
     type: action.type,
@@ -108,7 +134,7 @@ async function enrichAction(
     discardedAt: action.discardedAt ?? null,
     conversationId: action.conversationId ?? null,
     contactId: action.contactId ?? null,
-    contactName: contact?.displayName ?? null,
+    contactName,
     secondaryContactId: action.secondaryContactId ?? null,
     secondaryContactName: secondaryContact?.displayName ?? null,
     mergeSuggestionId: action.mergeSuggestionId ?? null,

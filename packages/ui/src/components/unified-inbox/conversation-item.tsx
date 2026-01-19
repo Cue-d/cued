@@ -29,6 +29,12 @@ function formatTimestamp(timestamp: number | null): string {
 }
 
 function getConversationName(conversation: InboxConversation): string {
+  // For groups/channels, prefer displayName (which includes participant fallback from server)
+  if (conversation.conversationType !== "dm" && conversation.displayName) {
+    return conversation.displayName
+  }
+
+  // For DMs or fallback
   const { participants } = conversation
   if (participants.length === 0) return "Unknown"
   if (participants.length === 1) return participants[0].displayName

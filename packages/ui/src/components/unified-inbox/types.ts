@@ -16,6 +16,7 @@ export interface InboxConversation {
   platform: InboxPlatform
   platformConversationId: string
   conversationType: InboxConversationType
+  displayName: string | null
   participants: InboxParticipant[]
   lastMessageText: string | null
   lastMessageAt: number | null

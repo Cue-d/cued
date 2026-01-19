@@ -183,6 +183,13 @@ async function syncMessagesInternal(
 
       if (existingId) {
         chatIdMap.set(chat.id, existingId);
+        // Update displayName for existing group chats if not set
+        if (chat.isGroup && chat.displayName) {
+          const existingConv = await ctx.db.get(existingId);
+          if (existingConv && !existingConv.displayName) {
+            await ctx.db.patch(existingId, { displayName: chat.displayName });
+          }
+        }
       } else {
         // Resolve participant handles to contacts from pre-fetched map
         const participantContactIds: Id<"contacts">[] = [];
@@ -208,6 +215,7 @@ async function syncMessagesInternal(
           conversationType: chat.isGroup ? "group" : "dm",
           participantContactIds,
           unreadCount: 0,
+          displayName: chat.isGroup ? (chat.displayName ?? undefined) : undefined,
         });
         chatIdMap.set(chat.id, conversationId);
       }

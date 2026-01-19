@@ -17,6 +17,7 @@ interface InboxResult {
     platform: Doc<"conversations">["platform"];
     platformConversationId: string;
     conversationType: Doc<"conversations">["conversationType"];
+    displayName: string | null;
     participants: Array<{ _id: Id<"contacts">; displayName: string }>;
     lastMessageText: string | null;
     lastMessageAt: number | null;
@@ -68,11 +69,22 @@ async function fetchInbox(
         conversation.participantContactIds
       );
 
+      // For groups without displayName, build name from participants
+      let displayName: string | null = conversation.displayName ?? null;
+      if (
+        conversation.conversationType !== "dm" &&
+        !displayName &&
+        participants.length > 0
+      ) {
+        displayName = participants.map((p) => p.displayName).join(", ");
+      }
+
       return {
         _id: conversation._id,
         platform: conversation.platform,
         platformConversationId: conversation.platformConversationId,
         conversationType: conversation.conversationType,
+        displayName,
         participants,
         lastMessageText: conversation.lastMessageText ?? null,
         lastMessageAt: conversation.lastMessageAt ?? null,

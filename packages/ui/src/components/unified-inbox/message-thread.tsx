@@ -115,9 +115,10 @@ export function InboxMessageThread({
 
   const messagesByDate = groupMessagesByDate(messages)
   const isGroup = conversation.conversationType === "group" || conversation.conversationType === "channel"
-  const displayName =
-    conversation.participants[0]?.displayName ||
-    conversation.platformConversationId
+  // For groups, prefer displayName (which includes participant fallback from server)
+  const displayName = isGroup
+    ? (conversation.displayName || "Group Chat")
+    : (conversation.participants[0]?.displayName || "Unknown")
 
   return (
     <div className={cn("flex flex-col h-full min-h-0 bg-background", className)}>
