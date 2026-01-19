@@ -196,6 +196,7 @@ const schema = defineSchema({
     .index("by_conversation", ["conversationId", "sentAt"])
     .index("by_platform_message", ["userId", "platform", "platformMessageId"])
     .index("by_user_sent_at", ["userId", "sentAt"])
+    .index("by_sender_contact", ["senderContactId"])
     .searchIndex("search_content", {
       searchField: "content",
       filterFields: ["userId", "conversationId"],
@@ -270,7 +271,8 @@ const schema = defineSchema({
   })
     .index("by_user", ["userId"])
     .index("by_user_status", ["userId", "status"])
-    .index("by_conversation_status", ["conversationId", "status"]),
+    .index("by_conversation_status", ["conversationId", "status"])
+    .index("by_contact", ["contactId"]),
 
   actionAnalysisQueue: defineTable({
     conversationId: v.id("conversations"),

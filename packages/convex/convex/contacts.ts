@@ -264,9 +264,8 @@ export const mergeContacts = mutation({
     // 3. Update all messages referencing secondary contact
     const messages = await ctx.db
       .query("messages")
-      .withIndex("by_user", (q) => q.eq("userId", user._id))
-      .filter((q) =>
-        q.eq(q.field("senderContactId"), args.secondaryContactId)
+      .withIndex("by_sender_contact", (q) =>
+        q.eq("senderContactId", args.secondaryContactId)
       )
       .collect();
 
@@ -277,8 +276,7 @@ export const mergeContacts = mutation({
     // 4. Update all actions referencing secondary contact
     const actions = await ctx.db
       .query("actions")
-      .withIndex("by_user", (q) => q.eq("userId", user._id))
-      .filter((q) => q.eq(q.field("contactId"), args.secondaryContactId))
+      .withIndex("by_contact", (q) => q.eq("contactId", args.secondaryContactId))
       .collect();
 
     for (const action of actions) {
@@ -544,8 +542,9 @@ export const saveContactFromCard = mutation({
       // Update messages to reference existing contact
       const messages = await ctx.db
         .query("messages")
-        .withIndex("by_user", (q) => q.eq("userId", user._id))
-        .filter((q) => q.eq(q.field("senderContactId"), args.contactId))
+        .withIndex("by_sender_contact", (q) =>
+          q.eq("senderContactId", args.contactId)
+        )
         .collect();
 
       for (const msg of messages) {
