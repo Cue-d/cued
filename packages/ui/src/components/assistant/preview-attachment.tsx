@@ -26,6 +26,7 @@ export const PreviewAttachment = ({
       data-testid="input-attachment-preview"
     >
       {contentType?.startsWith("image") ? (
+        // eslint-disable-next-line @next/next/no-img-element
         <img
           alt={name ?? "An image attachment"}
           className="size-full object-cover"

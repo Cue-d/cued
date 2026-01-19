@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useMemo } from "react";
 import { useQuery } from "convex/react";
 import { api } from "@prm/convex/convex/_generated/api";
 import { updateWidgetActionsList } from "@/lib/widget-data";
@@ -15,7 +15,7 @@ export function useActions(options?: { limit?: number; cursor?: number }) {
     cursor: options?.cursor,
   });
 
-  const actions = result?.actions ?? [];
+  const actions = useMemo(() => result?.actions ?? [], [result?.actions]);
 
   // Sync actions to iOS widget when they change
   useEffect(() => {

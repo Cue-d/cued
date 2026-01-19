@@ -2,7 +2,7 @@
 
 import * as React from "react"
 import { MessageSquare, Mail, Hash, ChevronDown, AlertTriangle, Sparkles } from "lucide-react"
-import { getInitials, formatTime, formatRelativeTime } from "@prm/shared"
+import { getInitials, formatTime, formatRelativeTime, PLATFORM_CONFIG, type ActionPlatform } from "@prm/shared"
 import { cn } from "../../lib/utils"
 import { Card, CardContent, CardFooter, CardHeader } from "../ui/card"
 import { Avatar, AvatarFallback } from "../ui/avatar"
@@ -15,8 +15,8 @@ import {
 } from "../ui/dropdown-menu"
 import { Badge } from "../ui/badge"
 
-/** Platform types */
-export type ActionPlatform = "imessage" | "gmail" | "slack"
+/** Re-export ActionPlatform for backwards compatibility */
+export type { ActionPlatform } from "@prm/shared"
 
 /** Risk flag for a draft option */
 export interface DraftRiskFlag {
@@ -34,11 +34,11 @@ export interface DraftOption {
   riskFlags: DraftRiskFlag[]
 }
 
-/** Platform config for display */
-const platformConfig: Record<ActionPlatform, { label: string; icon: React.ReactNode; colorClass: string }> = {
-  imessage: { label: "iMessage", icon: <MessageSquare className="w-3.5 h-3.5" />, colorClass: "text-green-600" },
-  gmail: { label: "Gmail", icon: <Mail className="w-3.5 h-3.5" />, colorClass: "text-red-600" },
-  slack: { label: "Slack", icon: <Hash className="w-3.5 h-3.5" />, colorClass: "text-purple-600" },
+/** Platform icons (platform-specific, not in shared config) */
+const PLATFORM_ICONS: Record<ActionPlatform, React.ReactNode> = {
+  imessage: <MessageSquare className="w-3.5 h-3.5" />,
+  gmail: <Mail className="w-3.5 h-3.5" />,
+  slack: <Hash className="w-3.5 h-3.5" />,
 }
 
 /** Label config for draft options */
@@ -170,6 +170,7 @@ function AttachmentDisplay({
 
         if (isImage && url) {
           return (
+            // eslint-disable-next-line @next/next/no-img-element
             <img
               key={idx}
               src={url}
@@ -354,10 +355,10 @@ export const MessageResponseCard = React.forwardRef<
           {platform && availablePlatforms && availablePlatforms.length > 1 && onPlatformChange ? (
             <DropdownMenu>
               <DropdownMenuTrigger className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-muted/60 hover:bg-muted text-sm transition-colors">
-                <span className={platformConfig[platform].colorClass}>
-                  {platformConfig[platform].icon}
+                <span className={PLATFORM_CONFIG[platform].textClass}>
+                  {PLATFORM_ICONS[platform]}
                 </span>
-                <span className="text-xs font-medium">{platformConfig[platform].label}</span>
+                <span className="text-xs font-medium">{PLATFORM_CONFIG[platform].label}</span>
                 <ChevronDown className="w-3 h-3 text-muted-foreground" />
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end">
@@ -370,20 +371,20 @@ export const MessageResponseCard = React.forwardRef<
                       p === platform && "bg-muted"
                     )}
                   >
-                    <span className={platformConfig[p].colorClass}>
-                      {platformConfig[p].icon}
+                    <span className={PLATFORM_CONFIG[p].textClass}>
+                      {PLATFORM_ICONS[p]}
                     </span>
-                    <span>{platformConfig[p].label}</span>
+                    <span>{PLATFORM_CONFIG[p].label}</span>
                   </DropdownMenuItem>
                 ))}
               </DropdownMenuContent>
             </DropdownMenu>
           ) : platform ? (
             <div className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-muted/60 text-sm">
-              <span className={platformConfig[platform].colorClass}>
-                {platformConfig[platform].icon}
+              <span className={PLATFORM_CONFIG[platform].textClass}>
+                {PLATFORM_ICONS[platform]}
               </span>
-              <span className="text-xs font-medium">{platformConfig[platform].label}</span>
+              <span className="text-xs font-medium">{PLATFORM_CONFIG[platform].label}</span>
             </div>
           ) : null}
         </div>
