@@ -15,17 +15,22 @@ export { MessageResponseCard } from "./message-response-card"
 export type {
   MessageResponseCardProps,
   MessageResponseCardRef,
+} from "./message-response-card"
+
+// Re-export shared types from @prm/shared for backwards compatibility
+export type {
   DisplayMessage,
   MessageAttachment,
   ActionPlatform,
   DraftOption,
   DraftRiskFlag,
-} from "./message-response-card"
+  DraftLabel,
+  ContactFormData,
+} from "@prm/shared"
 
 export { ContactCard } from "./contact-card"
 export type {
   ContactCardProps,
   ContactCardRef,
-  ContactFormData,
   ExistingContact,
 } from "./contact-card"

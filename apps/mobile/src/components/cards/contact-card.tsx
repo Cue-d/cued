@@ -12,16 +12,11 @@
 import { useMemo } from "react";
 import { SymbolView } from "expo-symbols";
 import { View, Text, ScrollView, TextInput, useColorScheme } from "react-native";
-import { getInitials, PLATFORM_CONFIG, type ActionPlatform } from "@prm/shared";
+import { getInitials, PLATFORM_CONFIG, type ActionPlatform, type ContactFormData } from "@prm/shared";
 import { cn, getThemeColors } from "@/lib/utils";
 
-/** Form data for contact card */
-export interface ContactFormData {
-  name: string;
-  company: string;
-  tags: string;
-  notes: string;
-}
+/** Re-export types for backwards compatibility */
+export type { ContactFormData } from "@prm/shared";
 
 /** Re-export ActionPlatform as ContactPlatform for this component */
 export type ContactPlatform = ActionPlatform;

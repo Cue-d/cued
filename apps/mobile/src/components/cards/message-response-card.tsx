@@ -13,12 +13,22 @@ import type { ScrollView as ScrollViewType } from "react-native";
 import { Image } from "expo-image";
 import { GlassView, isLiquidGlassAvailable } from "expo-glass-effect";
 import * as Haptics from "expo-haptics";
-import { getInitials, formatTime, formatRelativeTime, PLATFORM_CONFIG, type ActionPlatform } from "@prm/shared";
+import {
+  getInitials,
+  formatTime,
+  formatRelativeTime,
+  PLATFORM_CONFIG,
+  type ActionPlatform,
+  type MessageAttachment,
+  type DisplayMessage,
+  type DraftRiskFlag,
+  type DraftOption,
+} from "@prm/shared";
 import { cn, getThemeColors } from "@/lib/utils";
 import { ChatInput } from "@/components/chat/chat-input";
 
-/** Re-export ActionPlatform for backwards compatibility */
-export type { ActionPlatform } from "@prm/shared";
+/** Re-export types for backwards compatibility */
+export type { ActionPlatform, MessageAttachment, DisplayMessage, DraftRiskFlag, DraftOption } from "@prm/shared";
 
 /** Platform icons (platform-specific SF Symbols) */
 const PLATFORM_SYMBOLS: Record<ActionPlatform, SFSymbol> = {
@@ -26,42 +36,6 @@ const PLATFORM_SYMBOLS: Record<ActionPlatform, SFSymbol> = {
   gmail: "envelope.fill",
   slack: "number",
 };
-
-/** Message attachment with URL */
-export interface MessageAttachment {
-  filename: string | null;
-  mimeType: string | null;
-  url: string | null;
-  thumbnailUrl?: string | null;
-}
-
-/** Message data shape for display */
-export interface DisplayMessage {
-  _id: string;
-  content: string | null;
-  sentAt: number;
-  isFromMe: boolean;
-  senderName: string | null;
-  status?: string | null;
-  reactions?: string[] | null;
-  attachments?: MessageAttachment[] | null;
-}
-
-/** Risk flag for a draft option */
-export interface DraftRiskFlag {
-  type: string;
-  trigger: string;
-}
-
-/** Draft option from AI generation */
-export interface DraftOption {
-  text: string;
-  label: "direct" | "diplomatic" | "boundary";
-  confidence: number;
-  assumptions: string[];
-  styleSources: string[];
-  riskFlags: DraftRiskFlag[];
-}
 
 export interface MessageResponseCardProps {
   /** Person name for header */

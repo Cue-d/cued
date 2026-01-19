@@ -2,7 +2,18 @@
 
 import * as React from "react"
 import { MessageSquare, Mail, Hash, ChevronDown, AlertTriangle, Sparkles } from "lucide-react"
-import { getInitials, formatTime, formatRelativeTime, PLATFORM_CONFIG, type ActionPlatform } from "@prm/shared"
+import {
+  getInitials,
+  formatTime,
+  formatRelativeTime,
+  PLATFORM_CONFIG,
+  type ActionPlatform,
+  type DraftRiskFlag,
+  type DraftOption,
+  type DraftLabel,
+  type MessageAttachment,
+  type DisplayMessage,
+} from "@prm/shared"
 import { cn } from "../../lib/utils"
 import { Card, CardContent, CardFooter, CardHeader } from "../ui/card"
 import { Avatar, AvatarFallback } from "../ui/avatar"
@@ -15,24 +26,8 @@ import {
 } from "../ui/dropdown-menu"
 import { Badge } from "../ui/badge"
 
-/** Re-export ActionPlatform for backwards compatibility */
-export type { ActionPlatform } from "@prm/shared"
-
-/** Risk flag for a draft option */
-export interface DraftRiskFlag {
-  type: string
-  trigger: string
-}
-
-/** A draft option with metadata */
-export interface DraftOption {
-  text: string
-  label: "direct" | "diplomatic" | "boundary"
-  confidence: number
-  assumptions: string[]
-  styleSources: string[]
-  riskFlags: DraftRiskFlag[]
-}
+/** Re-export types for backwards compatibility */
+export type { ActionPlatform, DraftRiskFlag, DraftOption, DraftLabel, MessageAttachment, DisplayMessage } from "@prm/shared"
 
 /** Platform icons (platform-specific, not in shared config) */
 const PLATFORM_ICONS: Record<ActionPlatform, React.ReactNode> = {
@@ -42,30 +37,10 @@ const PLATFORM_ICONS: Record<ActionPlatform, React.ReactNode> = {
 }
 
 /** Label config for draft options */
-const labelConfig: Record<DraftOption["label"], { label: string; colorClass: string }> = {
+const labelConfig: Record<DraftLabel, { label: string; colorClass: string }> = {
   direct: { label: "Direct", colorClass: "bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200" },
   diplomatic: { label: "Diplomatic", colorClass: "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200" },
   boundary: { label: "Decline", colorClass: "bg-orange-100 text-orange-800 dark:bg-orange-900 dark:text-orange-200" },
-}
-
-/** Message attachment with URL */
-export interface MessageAttachment {
-  filename: string | null
-  mimeType: string | null
-  url: string | null
-  thumbnailUrl?: string | null
-}
-
-/** Message data shape for display */
-export interface DisplayMessage {
-  _id: string
-  content: string | null
-  sentAt: number
-  isFromMe: boolean
-  senderName: string | null
-  status?: string | null
-  reactions?: string[] | null
-  attachments?: MessageAttachment[] | null
 }
 
 export interface MessageResponseCardProps {

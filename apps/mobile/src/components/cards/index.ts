@@ -7,18 +7,22 @@
 // MessageResponseCard
 export {
   MessageResponseCard,
-  type ActionPlatform,
-  type MessageAttachment,
-  type DisplayMessage,
   type MessageResponseCardProps,
-  type DraftOption,
-  type DraftRiskFlag,
 } from "./message-response-card";
 
 // ContactCard
 export {
   ContactCard,
-  type ContactFormData,
   type ContactPlatform,
   type ContactCardProps,
 } from "./contact-card";
+
+// Re-export shared types from @prm/shared for backwards compatibility
+export type {
+  ActionPlatform,
+  MessageAttachment,
+  DisplayMessage,
+  DraftOption,
+  DraftRiskFlag,
+  ContactFormData,
+} from "@prm/shared";

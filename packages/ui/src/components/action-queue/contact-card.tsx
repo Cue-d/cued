@@ -2,7 +2,7 @@
 
 import * as React from "react";
 import { Building2, Clock, FileText, Link, Tag, User } from "lucide-react";
-import { getInitials } from "@prm/shared";
+import { getInitials, type ContactFormData } from "@prm/shared";
 import { cn } from "../../lib/utils";
 import { Card, CardContent, CardHeader } from "../ui/card";
 import { Avatar, AvatarFallback } from "../ui/avatar";
@@ -17,14 +17,8 @@ import {
   SelectValue,
 } from "../ui/select";
 
-/** Form data for contact card */
-export interface ContactFormData {
-  name: string;
-  company: string;
-  tags: string;
-  notes: string;
-  linkedContactId: string | null;
-}
+/** Re-export ContactFormData for backwards compatibility */
+export type { ContactFormData } from "@prm/shared";
 
 /** Existing contact for linking dropdown */
 export interface ExistingContact {
