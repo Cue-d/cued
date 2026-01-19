@@ -9,3 +9,9 @@ export * from './types'
 
 // Constants
 export * from './constants'
+
+// Request utilities
+export * from './request'
+
+// Client
+export * from './client'
