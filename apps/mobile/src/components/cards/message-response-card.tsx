@@ -13,6 +13,7 @@ import type { ScrollView as ScrollViewType } from "react-native";
 import { Image } from "expo-image";
 import { GlassView, isLiquidGlassAvailable } from "expo-glass-effect";
 import * as Haptics from "expo-haptics";
+import { getInitials, formatTime, formatRelativeTime } from "@prm/shared";
 import { cn, getThemeColors } from "@/lib/utils";
 import { ChatInput } from "@/components/chat/chat-input";
 
@@ -98,36 +99,6 @@ export interface MessageResponseCardProps {
   draftOptions?: DraftOption[];
   /** Called when a draft option is selected */
   onOptionSelect?: (option: DraftOption, index: number) => void;
-}
-
-/** Get initials from a name */
-function getInitials(name: string): string {
-  if (/^\+?\d/.test(name)) return "#";
-  if (name.includes("@")) return name[0]?.toUpperCase() ?? "?";
-  return name
-    .split(" ")
-    .map((n) => n[0])
-    .join("")
-    .slice(0, 2)
-    .toUpperCase();
-}
-
-/** Format timestamp to time string */
-function formatTime(timestamp: number): string {
-  const date = new Date(timestamp);
-  return date.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
-}
-
-/** Format timestamp to relative time */
-function formatRelativeTime(timestamp: number): string {
-  const now = Date.now();
-  const diff = now - timestamp;
-  const hours = Math.floor(diff / (1000 * 60 * 60));
-  const days = Math.floor(hours / 24);
-
-  if (days > 0) return `${days}d ago`;
-  if (hours > 0) return `${hours}h ago`;
-  return "Just now";
 }
 
 /** Avatar component with initials */

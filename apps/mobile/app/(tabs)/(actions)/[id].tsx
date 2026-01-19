@@ -10,31 +10,13 @@ import { useLocalSearchParams, useRouter, Stack } from "expo-router";
 import { useQuery, useMutation } from "convex/react";
 import * as Haptics from "expo-haptics";
 import { View, Text, ScrollView, TextInput } from "react-native";
-import { getInitials } from "@prm/shared";
+import { getInitials, formatTime, formatRelativeTime } from "@prm/shared";
 import { ActionButtons } from "@/components/action-buttons";
 import type { SwipeDirection } from "@/components/swipeable-card";
 import type { DisplayMessage } from "@/components/cards";
 import { api } from "@prm/convex/convex/_generated/api";
 import type { Id } from "@prm/convex/convex/_generated/dataModel";
 import { useElectronPresence } from "@/hooks/useElectronPresence";
-
-/** Format timestamp to relative time */
-function formatRelativeTime(timestamp: number): string {
-  const now = Date.now();
-  const diff = now - timestamp;
-  const hours = Math.floor(diff / (1000 * 60 * 60));
-  const days = Math.floor(hours / 24);
-
-  if (days > 0) return `${days}d ago`;
-  if (hours > 0) return `${hours}h ago`;
-  return "Just now";
-}
-
-/** Format timestamp to time string */
-function formatTime(timestamp: number): string {
-  const date = new Date(timestamp);
-  return date.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
-}
 
 /** Avatar component */
 function Avatar({

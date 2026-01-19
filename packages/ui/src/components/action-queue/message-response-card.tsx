@@ -2,7 +2,7 @@
 
 import * as React from "react"
 import { MessageSquare, Mail, Hash, ChevronDown, AlertTriangle, Sparkles } from "lucide-react"
-import { getInitials } from "@prm/shared"
+import { getInitials, formatTime, formatRelativeTime } from "@prm/shared"
 import { cn } from "../../lib/utils"
 import { Card, CardContent, CardFooter, CardHeader } from "../ui/card"
 import { Avatar, AvatarFallback } from "../ui/avatar"
@@ -101,24 +101,6 @@ export interface MessageResponseCardProps {
 
 export interface MessageResponseCardRef {
   focusInput: () => void
-}
-
-/** Format timestamp to time string */
-function formatTime(timestamp: number): string {
-  const date = new Date(timestamp)
-  return date.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })
-}
-
-/** Format timestamp to relative time */
-function formatRelativeTime(timestamp: number): string {
-  const now = Date.now()
-  const diff = now - timestamp
-  const hours = Math.floor(diff / (1000 * 60 * 60))
-  const days = Math.floor(hours / 24)
-
-  if (days > 0) return `${days}d ago`
-  if (hours > 0) return `${hours}h ago`
-  return "Just now"
 }
 
 /** Reaction badges component */

@@ -1,4 +1,5 @@
 import type React from "react"
+import { formatTimestamp as formatTimestampShared } from "@prm/shared"
 import { cn } from "../../lib/utils"
 import { InboxConversationAvatar } from "./conversation-avatar"
 import { InboxPlatformBadge } from "./platform-badge"
@@ -12,20 +13,7 @@ interface InboxConversationItemProps {
 
 function formatTimestamp(timestamp: number | null): string {
   if (!timestamp) return ""
-
-  const date = new Date(timestamp)
-  const diffDays = Math.floor((Date.now() - timestamp) / (1000 * 60 * 60 * 24))
-
-  if (diffDays === 0) {
-    return date.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })
-  }
-  if (diffDays === 1) {
-    return "Yesterday"
-  }
-  if (diffDays < 7) {
-    return date.toLocaleDateString("en-US", { weekday: "short" })
-  }
-  return date.toLocaleDateString("en-US", { month: "short", day: "numeric" })
+  return formatTimestampShared(timestamp, { style: "smart" })
 }
 
 function getConversationName(conversation: InboxConversation): string {
