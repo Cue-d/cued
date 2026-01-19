@@ -25,9 +25,9 @@ Reference: https://github.com/mautrix/linkedin/tree/main/pkg/linkedingo
 - [x] 2.2 - Port messages.ts (parallel with 2.1, 2.3)
 - [x] 2.3 - Create contacts.ts (parallel with 2.1, 2.2)
 
-### [In Progress] Phase 3: Integration
+### [Completed] Phase 3: Integration
 - [x] 3.1 - Integrate with SocialScraper auth
-- [ ] 3.2 - Create LinkedInSyncManager
+- [x] 3.2 - Create LinkedInSyncManager
 
 ### [Not Started] Phase 4: IPC + Convex
 - [ ] 4.1 - Add IPC handlers (parallel with 4.2)
@@ -192,5 +192,30 @@ Integrated LinkedInClient with LinkedInScraper auth system:
   - Handles pagination via cursor
   - Returns Connection[] type from linkedin-api
 - Marked existing `scrapeConnections()` as deprecated in favor of API-based method
+
+Verification: `pnpm typecheck` passes in apps/electron
+
+### 2026-01-19 - Task 3.2: Create LinkedInSyncManager
+**Files changed:**
+- `apps/electron/src/main/sync/linkedin-sync.ts` (new)
+
+**Summary:**
+Created LinkedInSyncManager class following sync-manager.ts pattern:
+- `_client: LinkedInClient` - LinkedIn API client property with getter/setter
+- `convexClient: ConvexHttpClient` - Convex client for data sync
+- `conversationCursors: Map<string, string>` - per-conversation pagination cursors
+- `conversationSyncToken: string | null` - incremental conversation sync token
+- `start()` - begins 5-minute polling interval, runs initial sync immediately
+- `stop()` - clears interval
+- `runSync()` - main sync cycle: refreshes auth, syncs conversations then messages
+- `syncConversations()` - fetches conversations using sync token, processes each one
+- `syncMessages(conversationId)` - fetches messages with cursor management
+- `sendMessage(conversationId, text)` - sends message via API and syncs to Convex
+- `syncConversationToConvex()` / `syncMessagesToConvex()` - transform and sync to Convex (mutations pending task 4.2)
+- `getProgress()` - returns current sync progress
+- `reset()` - clears all cursors and sync state
+- Progress callbacks: `setTokenProvider()`, `setProgressCallback()`, `setAuthInvalidCallback()`
+- Auth error detection with `isAuthError()`
+- Singleton pattern with `getLinkedInSyncManager()`
 
 Verification: `pnpm typecheck` passes in apps/electron
