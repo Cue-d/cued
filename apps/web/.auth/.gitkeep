@@ -1,0 +1,7 @@
+# This directory stores Playwright authentication state for E2E tests.
+# The user.json file is gitignored and should not be committed.
+#
+# To generate auth state:
+#   1. Run: pnpm --filter web dev
+#   2. Open http://localhost:3000 and sign in
+#   3. Run: npx playwright codegen --save-storage=apps/web/.auth/user.json http://localhost:3000
