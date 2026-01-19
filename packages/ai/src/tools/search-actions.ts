@@ -33,7 +33,6 @@ interface ActionSearchResult {
   type: string;
   status: string;
   priority: number;
-  draftMessage: string | null;
   reason: string | null;
   createdAt: number;
   completedAt: number | null;

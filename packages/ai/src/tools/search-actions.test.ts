@@ -30,7 +30,6 @@ describe("searchActionsTool", () => {
         type: "follow_up",
         status: "pending",
         priority: 75,
-        draftMessage: "Hey, checking in!",
         reason: "No reply in 3 days",
         createdAt: Date.now() - 86400000,
         completedAt: null,

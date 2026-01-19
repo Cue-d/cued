@@ -15,7 +15,6 @@ export interface ActionSearchResult {
   priority: number
   contactName: string | null
   reason: string | null
-  draftMessage: string | null
   createdAt: number
   snoozedUntil: number | null
   platform: string | null

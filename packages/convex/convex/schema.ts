@@ -116,6 +116,15 @@ const schema = defineSchema({
     importance: v.optional(v.number()),
     tags: v.optional(v.array(v.string())),
     isDismissed: v.optional(v.boolean()),
+    // Per-contact style overrides for draft generation
+    styleOverrides: v.optional(
+      v.object({
+        formality: v.optional(v.number()), // 1-5, overrides user default
+        brevity: v.optional(v.number()), // 1-5
+        warmth: v.optional(v.number()), // 1-5
+        relationship: v.optional(v.string()), // "investor", "friend", "vendor", etc.
+      })
+    ),
   })
     .index("by_user", ["userId"])
     .searchIndex("search_display_name", {
@@ -193,6 +202,24 @@ const schema = defineSchema({
       filterFields: ["userId", "conversationId"],
     }),
 
+  // User style profiles for draft generation
+  userStyleProfiles: defineTable({
+    userId: v.id("users"),
+    platform: v.union(v.literal("imessage"), v.literal("gmail"), v.literal("slack")),
+    profile: v.object({
+      greetingStyle: v.string(),
+      signOffStyle: v.string(),
+      avgLength: v.number(),
+      emojiFrequency: v.number(), // 0-1
+      formalityScore: v.number(), // 1-5
+      brevityScore: v.number(), // 1-5
+      hedgingPatterns: v.array(v.string()),
+      punctuationNotes: v.string(),
+    }),
+    extractedAt: v.number(),
+    sampleCount: v.number(),
+  }).index("by_user_platform", ["userId", "platform"]),
+
   // Actions table
   actions: defineTable({
     userId: v.id("users"),
@@ -206,9 +233,33 @@ const schema = defineSchema({
     secondaryContactId: v.optional(v.id("contacts")), // For resolve_contact actions
     mergeSuggestionId: v.optional(v.id("mergeSuggestions")), // For resolve_contact actions
     platform: v.optional(platformValidator),
-    // Drafts: draftMessage = AI-suggested, draftResponse = user-edited
-    draftMessage: v.optional(v.string()),
+    // User-edited draft response
     draftResponse: v.optional(v.string()),
+    // Multi-option drafts (new system)
+    draftOptions: v.optional(
+      v.array(
+        v.object({
+          text: v.string(),
+          label: v.string(), // "direct", "diplomatic", "boundary"
+          confidence: v.number(), // 0-1
+          assumptions: v.array(v.string()),
+          styleSources: v.array(v.string()), // "similar reply to X on date"
+          riskFlags: v.array(
+            v.object({
+              type: v.string(), // "commitment", "legal", "financial", "sensitive"
+              trigger: v.string(), // the phrase that triggered
+            })
+          ),
+        })
+      )
+    ),
+    selectedOptionIndex: v.optional(v.number()),
+    // Risk classification
+    riskLevel: v.optional(
+      v.union(v.literal("low"), v.literal("medium"), v.literal("high"))
+    ),
+    riskFlags: v.optional(v.array(v.string())),
+    requiresApproval: v.optional(v.boolean()),
     // Reasons: reason = heuristic/manual, llmReason = AI-generated explanation
     reason: v.optional(v.string()),
     llmReason: v.optional(v.string()),

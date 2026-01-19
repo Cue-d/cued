@@ -20,7 +20,6 @@ const inputSchema = z.object({
   conversationId: z.string().optional().describe("Conversation ID this action relates to"),
   contactId: z.string().optional().describe("Contact ID this action relates to"),
   messageId: z.string().optional().describe("Specific message ID this action responds to"),
-  draftMessage: z.string().optional().describe("Suggested message draft for the action"),
   reason: z.string().optional().describe("Reason or context for creating this action"),
   priority: z
     .number()
@@ -51,7 +50,6 @@ export const createActionTool: Tool<typeof inputSchema, CreateActionResult> = {
           conversationId: input.conversationId,
           contactId: input.contactId,
           messageId: input.messageId,
-          draftMessage: input.draftMessage,
           reason: input.reason,
           priority: input.priority,
         }

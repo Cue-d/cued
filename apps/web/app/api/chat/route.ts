@@ -156,10 +156,6 @@ export async function POST(req: Request) {
             .string()
             .optional()
             .describe("Contact this action relates to"),
-          draftMessage: z
-            .string()
-            .optional()
-            .describe("Suggested message text for the action"),
           reason: z.string().optional().describe("Why this action was created"),
           priority: z
             .number()
@@ -170,7 +166,6 @@ export async function POST(req: Request) {
           type,
           conversationId,
           contactId,
-          draftMessage,
           reason,
           priority,
         }) => {
@@ -179,7 +174,6 @@ export async function POST(req: Request) {
             type,
             conversationId: conversationId as Id<"conversations"> | undefined,
             contactId: contactId as Id<"contacts"> | undefined,
-            draftMessage,
             reason,
             priority,
           });

@@ -18,6 +18,7 @@ import {
   type ActionPlatform,
   type DisplayMessage,
   type ContactFormData,
+  type DraftOption,
 } from "@/components/cards";
 import type { SwipeDirection } from "@/components/swipeable-card";
 import { ActionButtons } from "@/components/action-buttons";
@@ -26,14 +27,28 @@ import { ErrorBoundary } from "@/components/error-boundary";
 import { api } from "@prm/convex/convex/_generated/api";
 import type { Id } from "@prm/convex/convex/_generated/dataModel";
 
+/** Draft option from Convex (with string label) */
+type ConvexDraftOption = {
+  text: string;
+  label: string;
+  confidence: number;
+  assumptions: string[];
+  styleSources: string[];
+  riskFlags: { type: string; trigger: string }[];
+};
+
 /** Action type from Convex getPendingActions */
 type EnrichedAction = {
   _id: string;
   type: string;
   status: string;
   priority: number;
-  draftMessage: string | null;
   draftResponse: string | null;
+  draftOptions: ConvexDraftOption[] | null;
+  selectedOptionIndex: number | null;
+  riskLevel: "low" | "medium" | "high" | null;
+  riskFlags: string[] | null;
+  requiresApproval: boolean | null;
   reason: string | null;
   llmReason: string | null;
   createdAt: number;
@@ -56,7 +71,7 @@ interface ActionItem {
 }
 
 /** Action types that use MessageResponseCard */
-const MESSAGE_ACTION_TYPES = ["respond", "follow_up"];
+const MESSAGE_ACTION_TYPES = ["respond", "follow_up", "send_message"];
 
 /** Action types that use ContactCard */
 const CONTACT_ACTION_TYPES = ["eod_contact", "new_connection"];
@@ -116,13 +131,13 @@ export default function ActionsScreen(): React.JSX.Element {
     action,
   }));
 
-  // Get response text for an action (prefer user edits, then draft)
+  // Get response text for an action (prefer user edits, then draft options)
   const getResponseText = useCallback(
     (action: EnrichedAction): string => {
       return (
         responseTexts[action._id] ??
         action.draftResponse ??
-        action.draftMessage ??
+        action.draftOptions?.[0]?.text ??
         ""
       );
     },
@@ -226,10 +241,19 @@ export default function ActionsScreen(): React.JSX.Element {
       const { action } = item;
       const isTopCard = index === 0;
 
-      // Message-based actions (respond, follow_up)
+      // Message-based actions (respond, follow_up, send_message)
       if (MESSAGE_ACTION_TYPES.includes(action.type)) {
         // Use messages from context for the top card, empty for others
         const messages = isTopCard ? topActionMessages : [];
+        // Use draftOptions from context for top card, or from action directly
+        const rawOptions = isTopCard
+          ? (actionContext?.action?.draftOptions ?? action.draftOptions)
+          : action.draftOptions;
+        // Cast label to the expected union type
+        const options = rawOptions?.map((opt) => ({
+          ...opt,
+          label: opt.label as DraftOption["label"],
+        }));
 
         return (
           <MessageResponseCard
@@ -240,6 +264,7 @@ export default function ActionsScreen(): React.JSX.Element {
             onResponseChange={(text) => handleResponseChange(action._id, text)}
             platform={(action.platform as ActionPlatform) ?? undefined}
             isDesktopOnline={isDesktopOnline}
+            draftOptions={options}
           />
         );
       }
@@ -281,6 +306,7 @@ export default function ActionsScreen(): React.JSX.Element {
       handleContactFormChange,
       topActionMessages,
       isDesktopOnline,
+      actionContext?.action?.draftOptions,
     ],
   );
 

@@ -1,7 +1,7 @@
 "use client"
 
 import * as React from "react"
-import { MessageSquare, Mail, Hash, ChevronDown } from "lucide-react"
+import { MessageSquare, Mail, Hash, ChevronDown, AlertTriangle, Sparkles } from "lucide-react"
 import { cn } from "../../lib/utils"
 import { Card, CardContent, CardFooter, CardHeader } from "../ui/card"
 import { Avatar, AvatarFallback } from "../ui/avatar"
@@ -12,15 +12,39 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "../ui/dropdown-menu"
+import { Badge } from "../ui/badge"
 
 /** Platform types */
 export type ActionPlatform = "imessage" | "gmail" | "slack"
+
+/** Risk flag for a draft option */
+export interface DraftRiskFlag {
+  type: string
+  trigger: string
+}
+
+/** A draft option with metadata */
+export interface DraftOption {
+  text: string
+  label: "direct" | "diplomatic" | "boundary"
+  confidence: number
+  assumptions: string[]
+  styleSources: string[]
+  riskFlags: DraftRiskFlag[]
+}
 
 /** Platform config for display */
 const platformConfig: Record<ActionPlatform, { label: string; icon: React.ReactNode; colorClass: string }> = {
   imessage: { label: "iMessage", icon: <MessageSquare className="w-3.5 h-3.5" />, colorClass: "text-green-600" },
   gmail: { label: "Gmail", icon: <Mail className="w-3.5 h-3.5" />, colorClass: "text-red-600" },
   slack: { label: "Slack", icon: <Hash className="w-3.5 h-3.5" />, colorClass: "text-purple-600" },
+}
+
+/** Label config for draft options */
+const labelConfig: Record<DraftOption["label"], { label: string; colorClass: string }> = {
+  direct: { label: "Direct", colorClass: "bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200" },
+  diplomatic: { label: "Diplomatic", colorClass: "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200" },
+  boundary: { label: "Decline", colorClass: "bg-orange-100 text-orange-800 dark:bg-orange-900 dark:text-orange-200" },
 }
 
 /** Message attachment with URL */
@@ -64,6 +88,14 @@ export interface MessageResponseCardProps {
   availablePlatforms?: ActionPlatform[]
   /** Called when platform changes */
   onPlatformChange?: (platform: ActionPlatform) => void
+  /** Draft options (new multi-option system) */
+  draftOptions?: DraftOption[]
+  /** Called when a draft option is selected */
+  onOptionSelect?: (option: DraftOption, index: number) => void
+  /** Overall risk level for the action */
+  riskLevel?: "low" | "medium" | "high"
+  /** Whether approval is required before sending */
+  requiresApproval?: boolean
 }
 
 export interface MessageResponseCardRef {
@@ -195,6 +227,54 @@ function AttachmentDisplay({
  * MessageResponseCard component for action queue.
  * Displays message history and response textarea.
  */
+/** Draft option button component */
+function DraftOptionButton({
+  option,
+  index,
+  onSelect,
+}: {
+  option: DraftOption
+  index: number
+  onSelect: (option: DraftOption, index: number) => void
+}) {
+  const config = labelConfig[option.label]
+  const hasRiskFlags = option.riskFlags.length > 0
+
+  return (
+    <button
+      type="button"
+      onClick={() => onSelect(option, index)}
+      className={cn(
+        "w-full text-left p-3 rounded-lg border bg-card hover:bg-accent transition-colors",
+        "focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2"
+      )}
+    >
+      <div className="flex items-start justify-between gap-2">
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2 mb-1.5">
+            <Badge variant="secondary" className={cn("text-xs font-medium", config.colorClass)}>
+              {config.label}
+            </Badge>
+            {hasRiskFlags && (
+              <AlertTriangle className="w-3.5 h-3.5 text-amber-500" />
+            )}
+          </div>
+          <p className="text-sm text-foreground line-clamp-2">{option.text}</p>
+        </div>
+      </div>
+      {hasRiskFlags && (
+        <div className="mt-2 pt-2 border-t">
+          {option.riskFlags.slice(0, 2).map((flag, i) => (
+            <p key={i} className="text-xs text-amber-600 dark:text-amber-400">
+              {flag.type}: &quot;{flag.trigger}&quot;
+            </p>
+          ))}
+        </div>
+      )}
+    </button>
+  )
+}
+
 export const MessageResponseCard = React.forwardRef<
   MessageResponseCardRef,
   MessageResponseCardProps
@@ -210,11 +290,37 @@ export const MessageResponseCard = React.forwardRef<
     platform,
     availablePlatforms,
     onPlatformChange,
+    draftOptions,
+    onOptionSelect,
+    riskLevel,
+    requiresApproval,
   },
   ref
 ) {
   const textareaRef = React.useRef<HTMLTextAreaElement>(null)
   const scrollContainerRef = React.useRef<HTMLDivElement>(null)
+  const [showOptions, setShowOptions] = React.useState(true)
+
+  // Handle option selection: populate textarea and hide options
+  const handleOptionSelect = React.useCallback(
+    (option: DraftOption, index: number) => {
+      onResponseChange(option.text)
+      setShowOptions(false)
+      onOptionSelect?.(option, index)
+      // Auto-focus the textarea after selecting
+      setTimeout(() => {
+        textareaRef.current?.focus()
+      }, 100)
+    },
+    [onResponseChange, onOptionSelect]
+  )
+
+  // Show options again if text is cleared
+  React.useEffect(() => {
+    if (responseText === "" && draftOptions && draftOptions.length > 0) {
+      setShowOptions(true)
+    }
+  }, [responseText, draftOptions])
 
   React.useImperativeHandle(ref, () => ({
     focusInput: () => {
@@ -409,13 +515,52 @@ export const MessageResponseCard = React.forwardRef<
         </div>
       </CardContent>
 
+      {/* Draft Options */}
+      {draftOptions && draftOptions.length > 0 && showOptions && (
+        <div className="px-4 pb-2">
+          <div className="flex items-center gap-2 mb-2">
+            <Sparkles className="w-3.5 h-3.5 text-muted-foreground" />
+            <span className="text-xs text-muted-foreground">Suggested replies</span>
+          </div>
+          <div className="space-y-2">
+            {draftOptions.map((option, index) => (
+              <DraftOptionButton
+                key={index}
+                option={option}
+                index={index}
+                onSelect={handleOptionSelect}
+              />
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Risk Warning */}
+      {riskLevel && riskLevel !== "low" && (
+        <div className={cn(
+          "mx-4 mb-2 px-3 py-2 rounded-lg text-xs flex items-center gap-2",
+          riskLevel === "high"
+            ? "bg-red-50 text-red-700 dark:bg-red-950 dark:text-red-300"
+            : "bg-amber-50 text-amber-700 dark:bg-amber-950 dark:text-amber-300"
+        )}>
+          <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
+          <span>
+            {riskLevel === "high"
+              ? "Review carefully before sending"
+              : "Contains commitment or sensitive content"}
+          </span>
+        </div>
+      )}
+
       {/* Response Input */}
       <CardFooter className="p-4 bg-transparent" data-selectable="true">
         <Textarea
           ref={textareaRef}
           value={responseText}
           onChange={(e) => onResponseChange(e.target.value)}
-          placeholder="Type your response... (swipe right to send)"
+          placeholder={draftOptions && draftOptions.length > 0
+            ? "Select an option above or type your own..."
+            : "Type your response... (swipe right to send)"}
           className="min-h-[80px] max-h-[150px] resize-none bg-background w-full"
           onKeyDown={(e) => {
             // Prevent card swipe while typing

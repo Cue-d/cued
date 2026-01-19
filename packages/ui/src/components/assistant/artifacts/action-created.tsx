@@ -1,7 +1,6 @@
 "use client"
 
-import { CheckCircle2, Copy } from "lucide-react"
-import { toast } from "sonner"
+import { CheckCircle2 } from "lucide-react"
 
 import { Artifact } from "./create-artifact"
 
@@ -10,7 +9,6 @@ export interface ActionResult {
   type: string
   priority: number
   reason?: string
-  draftMessage?: string
 }
 
 function ActionCreatedContent({ data }: { data: ActionResult }) {
@@ -28,11 +26,6 @@ function ActionCreatedContent({ data }: { data: ActionResult }) {
         </p>
         {data.reason && (
           <p className="mt-1 text-sm text-foreground/80">{data.reason}</p>
-        )}
-        {data.draftMessage && (
-          <div className="mt-2 rounded-md bg-background/50 p-2 text-sm">
-            {data.draftMessage}
-          </div>
         )}
       </div>
     </div>
@@ -54,24 +47,10 @@ export const actionCreatedArtifact = new Artifact<"create_action", ActionResult>
           type: (data.type as string) || "unknown",
           priority: (data.priority as number) || 50,
           reason: data.reason as string | undefined,
-          draftMessage: data.draftMessage as string | undefined,
         }
       }
       return null
     },
     content: ActionCreatedContent,
-    actions: [
-      {
-        icon: <Copy className="size-3.5" />,
-        description: "Copy draft message",
-        onClick: ({ data }) => {
-          if (data.draftMessage) {
-            navigator.clipboard.writeText(data.draftMessage)
-            toast.success("Draft copied to clipboard")
-          }
-        },
-        isDisabled: ({ data }) => !data.draftMessage,
-      },
-    ],
   }
 )

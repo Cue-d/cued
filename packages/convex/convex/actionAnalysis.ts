@@ -234,7 +234,6 @@ export const createActionFromSuggestion = internalMutation({
     type: actionTypeValidator,
     priority: v.number(),
     platform: platformValidator,
-    draftMessage: v.optional(v.string()),
     llmReason: v.optional(v.string()),
     snoozedUntil: v.optional(v.number()),
   },
@@ -262,7 +261,6 @@ export const createActionFromSuggestion = internalMutation({
       conversationId: args.conversationId,
       contactId: args.contactId,
       platform: args.platform,
-      draftMessage: args.draftMessage,
       llmReason: args.llmReason,
       snoozedUntil: args.snoozedUntil,
       createdAt: Date.now(),
@@ -453,7 +451,6 @@ export const analyzeConversation = internalAction({
           type: suggestion.type ?? "respond",
           priority: suggestion.priority ?? 50,
           platform: conversation.platform,
-          draftMessage: suggestion.suggestedResponse ?? undefined,
           llmReason: suggestion.reason ?? undefined,
           snoozedUntil,
         }

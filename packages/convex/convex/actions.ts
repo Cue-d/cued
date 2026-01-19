@@ -1,8 +1,8 @@
 import { v } from "convex/values";
 import type { Doc, Id } from "./_generated/dataModel";
 import type { MutationCtx, QueryCtx } from "./_generated/server";
-import { internalMutation, mutation, query } from "./_generated/server";
-import { internal } from "./_generated/api";
+import { action, internalMutation, mutation, query } from "./_generated/server";
+import { api, internal } from "./_generated/api";
 import { getAuthenticatedUser, requireAuthenticatedUser } from "./lib/auth";
 import {
   actionStatusValidator,
@@ -59,6 +59,16 @@ async function fetchActionableActions(
   return [...pendingActions, ...dueSnoozedActions];
 }
 
+/** Draft option type for enriched action */
+interface EnrichedDraftOption {
+  text: string;
+  label: string;
+  confidence: number;
+  assumptions: string[];
+  styleSources: string[];
+  riskFlags: Array<{ type: string; trigger: string }>;
+}
+
 /** Enrich an action with related contact and conversation data. */
 async function enrichAction(
   ctx: QueryCtx,
@@ -68,8 +78,12 @@ async function enrichAction(
   type: Doc<"actions">["type"];
   status: Doc<"actions">["status"];
   priority: number;
-  draftMessage: string | null;
   draftResponse: string | null;
+  draftOptions: EnrichedDraftOption[] | null;
+  selectedOptionIndex: number | null;
+  riskLevel: "low" | "medium" | "high" | null;
+  riskFlags: string[] | null;
+  requiresApproval: boolean | null;
   reason: string | null;
   llmReason: string | null;
   createdAt: number;
@@ -124,8 +138,12 @@ async function enrichAction(
     type: action.type,
     status: action.status,
     priority: action.priority,
-    draftMessage: action.draftMessage ?? null,
     draftResponse: action.draftResponse ?? null,
+    draftOptions: action.draftOptions ?? null,
+    selectedOptionIndex: action.selectedOptionIndex ?? null,
+    riskLevel: action.riskLevel ?? null,
+    riskFlags: action.riskFlags ?? null,
+    requiresApproval: action.requiresApproval ?? null,
     reason: action.reason ?? null,
     llmReason: action.llmReason ?? null,
     createdAt: action.createdAt,
@@ -222,6 +240,22 @@ export const searchActions = query({
   },
 });
 
+/** Validator for draft option risk flags */
+const draftOptionRiskFlagValidator = v.object({
+  type: v.string(),
+  trigger: v.string(),
+});
+
+/** Validator for draft options */
+const draftOptionValidator = v.object({
+  text: v.string(),
+  label: v.string(),
+  confidence: v.number(),
+  assumptions: v.array(v.string()),
+  styleSources: v.array(v.string()),
+  riskFlags: v.array(draftOptionRiskFlagValidator),
+});
+
 /**
  * Create a new action item.
  */
@@ -233,8 +267,14 @@ export const createAction = mutation({
     contactId: v.optional(v.id("contacts")),
     messageId: v.optional(v.id("messages")),
     platform: v.optional(platformValidator),
-    draftMessage: v.optional(v.string()),
     draftResponse: v.optional(v.string()),
+    // New multi-option fields
+    draftOptions: v.optional(v.array(draftOptionValidator)),
+    riskLevel: v.optional(
+      v.union(v.literal("low"), v.literal("medium"), v.literal("high"))
+    ),
+    riskFlags: v.optional(v.array(v.string())),
+    requiresApproval: v.optional(v.boolean()),
     reason: v.optional(v.string()),
     llmReason: v.optional(v.string()),
   },
@@ -250,8 +290,11 @@ export const createAction = mutation({
       contactId: args.contactId,
       messageId: args.messageId,
       platform: args.platform,
-      draftMessage: args.draftMessage,
       draftResponse: args.draftResponse,
+      draftOptions: args.draftOptions,
+      riskLevel: args.riskLevel,
+      riskFlags: args.riskFlags,
+      requiresApproval: args.requiresApproval,
       reason: args.reason,
       llmReason: args.llmReason,
       createdAt: Date.now(),
@@ -261,6 +304,38 @@ export const createAction = mutation({
     await adjustPendingActionCount(ctx, user._id, 1);
 
     return { actionId };
+  },
+});
+
+/**
+ * Select a draft option for an action.
+ * Populates draftResponse with the selected option's text.
+ */
+export const selectDraftOption = mutation({
+  args: {
+    actionId: v.id("actions"),
+    optionIndex: v.number(),
+  },
+  handler: async (ctx, args) => {
+    const user = await requireAuthenticatedUser(ctx);
+
+    const action = await ctx.db.get(args.actionId);
+    if (!action || action.userId !== user._id) {
+      throw new Error("Action not found");
+    }
+
+    if (!action.draftOptions || args.optionIndex >= action.draftOptions.length) {
+      throw new Error("Invalid option index");
+    }
+
+    const selectedOption = action.draftOptions[args.optionIndex];
+
+    await ctx.db.patch(args.actionId, {
+      selectedOptionIndex: args.optionIndex,
+      draftResponse: selectedOption.text,
+    });
+
+    return { success: true, selectedText: selectedOption.text };
   },
 });
 
@@ -472,8 +547,12 @@ export const getActionWithContext = query({
         type: action.type,
         status: action.status,
         priority: action.priority,
-        draftMessage: action.draftMessage ?? null,
         draftResponse: action.draftResponse ?? null,
+        draftOptions: action.draftOptions ?? null,
+        selectedOptionIndex: action.selectedOptionIndex ?? null,
+        riskLevel: action.riskLevel ?? null,
+        riskFlags: action.riskFlags ?? null,
+        requiresApproval: action.requiresApproval ?? null,
         reason: action.reason ?? null,
         llmReason: action.llmReason ?? null,
         createdAt: action.createdAt,
@@ -694,9 +773,9 @@ export const swipeAction = mutation({
         }
 
         // Complete action and potentially send message
-        // Get the response text (user-edited draft or AI-suggested)
+        // Get the response text (user-edited draft or first draft option)
         const responseText =
-          args.responseText ?? action.draftResponse ?? action.draftMessage;
+          args.responseText ?? action.draftResponse ?? action.draftOptions?.[0]?.text;
 
         // Get conversation to determine platform
         const conversation = action.conversationId
@@ -846,5 +925,491 @@ export const updateDraftResponse = mutation({
     });
 
     return { success: true };
+  },
+});
+
+// ============================================================================
+// Style profile extraction
+// ============================================================================
+
+/** Supported platforms for style profiles */
+type StylePlatform = "imessage" | "gmail" | "slack";
+const STYLE_PLATFORMS: readonly StylePlatform[] = ["imessage", "gmail", "slack"];
+
+/** Platform type validator for style profiles */
+const stylePlatformValidator = v.union(
+  v.literal("imessage"),
+  v.literal("gmail"),
+  v.literal("slack")
+);
+
+/** Check if a platform supports style profiles */
+function isStylePlatform(platform: string): platform is StylePlatform {
+  return STYLE_PLATFORMS.includes(platform as StylePlatform);
+}
+
+/** Get user's sent messages for style extraction */
+export const getMessagesForStyleExtraction = query({
+  args: {
+    platform: stylePlatformValidator,
+    limit: v.optional(v.number()),
+  },
+  handler: async (ctx, args) => {
+    const user = await getAuthenticatedUser(ctx);
+    if (!user) return { messages: [], count: 0 };
+
+    const limit = Math.min(args.limit ?? 200, 500);
+
+    // Get user's sent messages for the platform
+    const allMessages = await ctx.db
+      .query("messages")
+      .withIndex("by_user_sent_at", (q) => q.eq("userId", user._id))
+      .order("desc")
+      .take(limit * 3); // Take more to filter
+
+    const platformMessages = allMessages
+      .filter((m) => m.isFromMe && m.platform === args.platform)
+      .slice(0, limit);
+
+    // Get conversation info for recipient names
+    const convoIds = [...new Set(platformMessages.map((m) => m.conversationId))];
+    const convos = await Promise.all(convoIds.map((id) => ctx.db.get(id)));
+    const convoMap = new Map(convos.filter(Boolean).map((c) => [c!._id, c!]));
+
+    const messages = await Promise.all(
+      platformMessages.map(async (msg) => {
+        const convo = convoMap.get(msg.conversationId);
+        let recipientName: string | undefined;
+        if (convo && convo.participantContactIds.length > 0) {
+          const recipient = await ctx.db.get(convo.participantContactIds[0]);
+          recipientName = recipient?.displayName;
+        }
+        return {
+          content: msg.content,
+          platform: msg.platform as StylePlatform,
+          sentAt: msg.sentAt,
+          recipientName,
+        };
+      })
+    );
+
+    return { messages, count: messages.length };
+  },
+});
+
+/** Save extracted style profile */
+export const saveStyleProfile = internalMutation({
+  args: {
+    userId: v.id("users"),
+    platform: stylePlatformValidator,
+    profile: v.object({
+      greetingStyle: v.string(),
+      signOffStyle: v.string(),
+      avgLength: v.number(),
+      emojiFrequency: v.number(),
+      formalityScore: v.number(),
+      brevityScore: v.number(),
+      hedgingPatterns: v.array(v.string()),
+      punctuationNotes: v.string(),
+    }),
+    sampleCount: v.number(),
+  },
+  handler: async (ctx, args) => {
+    // Check for existing profile
+    const existing = await ctx.db
+      .query("userStyleProfiles")
+      .withIndex("by_user_platform", (q) =>
+        q.eq("userId", args.userId).eq("platform", args.platform)
+      )
+      .first();
+
+    if (existing) {
+      // Update existing
+      await ctx.db.patch(existing._id, {
+        profile: args.profile,
+        extractedAt: Date.now(),
+        sampleCount: args.sampleCount,
+      });
+      return { profileId: existing._id, updated: true };
+    }
+
+    // Create new
+    const profileId = await ctx.db.insert("userStyleProfiles", {
+      userId: args.userId,
+      platform: args.platform,
+      profile: args.profile,
+      extractedAt: Date.now(),
+      sampleCount: args.sampleCount,
+    });
+
+    return { profileId, updated: false };
+  },
+});
+
+/**
+ * Extract style profile from user's sent messages.
+ * This is a Convex action because it calls external APIs (OpenAI).
+ */
+export const extractStyleProfile = action({
+  args: {
+    platform: stylePlatformValidator,
+  },
+  handler: async (ctx, args): Promise<{
+    success: boolean;
+    profile?: {
+      greetingStyle: string;
+      signOffStyle: string;
+      avgLength: number;
+      emojiFrequency: number;
+      formalityScore: number;
+      brevityScore: number;
+      hedgingPatterns: string[];
+      punctuationNotes: string;
+    };
+    sampleCount?: number;
+    error?: string;
+  }> => {
+    // Get current user ID
+    const userId = await ctx.runQuery(api.actions.getCurrentUserId, {});
+    if (!userId) {
+      return { success: false, error: "Not authenticated" };
+    }
+
+    // Get messages for extraction
+    const { messages, count } = await ctx.runQuery(
+      api.actions.getMessagesForStyleExtraction,
+      { platform: args.platform, limit: 200 }
+    );
+
+    if (count < 10) {
+      return {
+        success: false,
+        error: `Not enough messages for ${args.platform}. Found ${count}, need at least 10.`,
+      };
+    }
+
+    try {
+      // Import style extraction function
+      const { extractStyleProfile: extractStyle } = await import("@prm/ai");
+
+      // Extract style profile
+      const profile = await extractStyle(messages, args.platform);
+
+      // Save to database
+      await ctx.runMutation(internal.actions.saveStyleProfile, {
+        userId,
+        platform: args.platform,
+        profile,
+        sampleCount: count,
+      });
+
+      return {
+        success: true,
+        profile,
+        sampleCount: count,
+      };
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      console.error("Style extraction failed:", errorMessage);
+      return { success: false, error: errorMessage };
+    }
+  },
+});
+
+/** Get current user's style profile */
+export const getStyleProfile = query({
+  args: {
+    platform: stylePlatformValidator,
+  },
+  handler: async (ctx, args) => {
+    const user = await getAuthenticatedUser(ctx);
+    if (!user) return null;
+
+    const profile = await ctx.db
+      .query("userStyleProfiles")
+      .withIndex("by_user_platform", (q) =>
+        q.eq("userId", user._id).eq("platform", args.platform)
+      )
+      .first();
+
+    return profile;
+  },
+});
+
+/** Get all style profiles for the current user */
+export const getAllStyleProfiles = query({
+  args: {},
+  handler: async (ctx) => {
+    const user = await getAuthenticatedUser(ctx);
+    if (!user) return [];
+
+    const profiles = await ctx.db
+      .query("userStyleProfiles")
+      .withIndex("by_user_platform", (q) => q.eq("userId", user._id))
+      .collect();
+
+    return profiles;
+  },
+});
+
+/** Get current user ID (for actions that need to save data) */
+export const getCurrentUserId = query({
+  args: {},
+  handler: async (ctx) => {
+    const user = await getAuthenticatedUser(ctx);
+    return user?._id ?? null;
+  },
+});
+
+// ============================================================================
+// On-demand draft generation
+// ============================================================================
+
+/** Internal query to get context needed for draft generation */
+export const getDraftGenerationContext = query({
+  args: {
+    actionId: v.id("actions"),
+  },
+  handler: async (ctx, args) => {
+    const user = await getAuthenticatedUser(ctx);
+    if (!user) return null;
+
+    const action = await ctx.db.get(args.actionId);
+    if (!action || action.userId !== user._id) return null;
+
+    const conversation = action.conversationId
+      ? await ctx.db.get(action.conversationId)
+      : null;
+    if (!conversation) return null;
+
+    const contact = action.contactId
+      ? await ctx.db.get(action.contactId)
+      : null;
+
+    // Get recent messages (last 15 for context), then reverse to chronological
+    const rawMessages = await ctx.db
+      .query("messages")
+      .withIndex("by_conversation", (q) =>
+        q.eq("conversationId", conversation._id)
+      )
+      .order("desc")
+      .take(15);
+    rawMessages.reverse();
+
+    // Enrich messages with sender names
+    const messages = await Promise.all(
+      rawMessages.map(async (msg) => {
+        const senderName = msg.senderContactId
+          ? (await ctx.db.get(msg.senderContactId))?.displayName
+          : undefined;
+        return {
+          content: msg.content,
+          isFromMe: msg.isFromMe,
+          sentAt: msg.sentAt,
+          senderName,
+        };
+      })
+    );
+
+    // Get style profile if platform supports it
+    const styleProfile = isStylePlatform(conversation.platform)
+      ? await ctx.db
+          .query("userStyleProfiles")
+          .withIndex("by_user_platform", (q) =>
+            q.eq("userId", user._id).eq("platform", conversation.platform as StylePlatform)
+          )
+          .first()
+      : null;
+
+    // Get user's sent messages for similar reply retrieval
+    const allRecentMessages = await ctx.db
+      .query("messages")
+      .withIndex("by_user_sent_at", (q) => q.eq("userId", user._id))
+      .order("desc")
+      .take(300);
+
+    const userSentMessages = allRecentMessages
+      .filter((m) => m.isFromMe)
+      .slice(0, 100);
+
+    // Build conversation lookup for recipient names
+    const convoIds = [...new Set(userSentMessages.map((m) => m.conversationId))];
+    const convos = await Promise.all(convoIds.map((id) => ctx.db.get(id)));
+    const convoMap = new Map(convos.filter(Boolean).map((c) => [c!._id, c!]));
+
+    // Map to searchable message format
+    const sentMessagesForSearch = await Promise.all(
+      userSentMessages.map(async (msg) => {
+        const convo = convoMap.get(msg.conversationId);
+        const recipientName = convo?.participantContactIds[0]
+          ? (await ctx.db.get(convo.participantContactIds[0]))?.displayName
+          : undefined;
+
+        return {
+          _id: msg._id.toString(),
+          content: msg.content,
+          sentAt: msg.sentAt,
+          platform: isStylePlatform(msg.platform) ? msg.platform : "imessage" as const,
+          isFromMe: msg.isFromMe,
+          conversationId: msg.conversationId.toString(),
+          recipientName,
+        };
+      })
+    );
+
+    // Calculate hours since last message
+    const lastMessage = messages[messages.length - 1];
+    const hoursSinceLastMessage = lastMessage
+      ? (Date.now() - lastMessage.sentAt) / (1000 * 60 * 60)
+      : 0;
+
+    const contactInfo = contact
+      ? {
+          displayName: contact.displayName,
+          company: contact.company ?? undefined,
+          notes: contact.notes ?? undefined,
+          isKnownContact: true as const,
+          tags: contact.tags ?? undefined,
+          importance: contact.importance ?? undefined,
+          styleOverrides: contact.styleOverrides ?? undefined,
+        }
+      : {
+          displayName: "Unknown",
+          isKnownContact: false as const,
+        };
+
+    return {
+      action: {
+        _id: action._id,
+        type: action.type,
+        priority: action.priority,
+      },
+      contact: contactInfo,
+      messages,
+      platform: conversation.platform,
+      hoursSinceLastMessage,
+      styleProfile: styleProfile?.profile ?? null,
+      sentMessagesForSearch,
+    };
+  },
+});
+
+/** Internal mutation to save generated draft options */
+export const saveDraftOptions = internalMutation({
+  args: {
+    actionId: v.id("actions"),
+    draftOptions: v.array(draftOptionValidator),
+    riskLevel: v.union(v.literal("low"), v.literal("medium"), v.literal("high")),
+    riskFlags: v.array(v.string()),
+    requiresApproval: v.boolean(),
+  },
+  handler: async (ctx, args) => {
+    await ctx.db.patch(args.actionId, {
+      draftOptions: args.draftOptions,
+      riskLevel: args.riskLevel,
+      riskFlags: args.riskFlags,
+      requiresApproval: args.requiresApproval,
+      // Set first option as default draft response
+      draftResponse: args.draftOptions[0]?.text ?? null,
+      selectedOptionIndex: 0,
+    });
+    return { success: true };
+  },
+});
+
+/** Map any platform to a style platform (defaulting to gmail for unsupported) */
+function toStylePlatform(platform: string): StylePlatform {
+  return isStylePlatform(platform) ? platform : "gmail";
+}
+
+/**
+ * Generate draft response options for an action on-demand.
+ * This is a Convex action because it calls external APIs (OpenAI).
+ */
+export const generateDraftOptions = action({
+  args: {
+    actionId: v.id("actions"),
+  },
+  handler: async (ctx, args): Promise<{
+    success: boolean;
+    draftOptions?: Array<{
+      text: string;
+      label: string;
+      confidence: number;
+      assumptions: string[];
+      styleSources: string[];
+      riskFlags: Array<{ type: string; trigger: string }>;
+    }>;
+    riskLevel?: "low" | "medium" | "high";
+    error?: string;
+  }> => {
+    const context = await ctx.runQuery(api.actions.getDraftGenerationContext, {
+      actionId: args.actionId,
+    });
+
+    if (!context) {
+      return { success: false, error: "Action not found or no conversation context" };
+    }
+
+    try {
+      const { generateActionWithOptionsRetry, retrieveSimilarReplies } =
+        await import("@prm/ai");
+
+      // Find the last incoming message for similar reply matching
+      const incomingMessage = context.messages
+        .slice()
+        .reverse()
+        .find((m) => !m.isFromMe);
+
+      const stylePlatform = toStylePlatform(context.platform);
+
+      // Retrieve similar past replies for style matching
+      const similarReplies = incomingMessage
+        ? await retrieveSimilarReplies(
+            incomingMessage.content,
+            context.sentMessagesForSearch,
+            {
+              conversationId: context.action._id.toString(),
+              contactName: context.contact.displayName,
+              platform: stylePlatform,
+            },
+            3
+          )
+        : [];
+
+      const result = await generateActionWithOptionsRetry({
+        contact: context.contact,
+        messages: context.messages,
+        platform: context.platform as "imessage" | "gmail" | "slack" | "linkedin" | "twitter",
+        hoursSinceLastMessage: context.hoursSinceLastMessage,
+        styleProfile: context.styleProfile ?? undefined,
+        styleOverrides: context.contact.styleOverrides,
+        similarReplies,
+      });
+
+      if (!result.draftOptions || result.draftOptions.length === 0) {
+        return { success: false, error: "No draft options generated" };
+      }
+
+      await ctx.runMutation(internal.actions.saveDraftOptions, {
+        actionId: args.actionId,
+        draftOptions: result.draftOptions,
+        riskLevel: result.riskLevel,
+        riskFlags: result.draftOptions.flatMap((opt) =>
+          opt.riskFlags.map((f) => `${f.type}: ${f.trigger}`)
+        ),
+        requiresApproval: result.requiresApproval,
+      });
+
+      return {
+        success: true,
+        draftOptions: result.draftOptions,
+        riskLevel: result.riskLevel,
+      };
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      console.error("Draft generation failed:", errorMessage);
+      return { success: false, error: errorMessage };
+    }
   },
 });

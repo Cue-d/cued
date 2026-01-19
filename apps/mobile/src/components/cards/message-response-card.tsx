@@ -6,11 +6,13 @@
  * Task 6.3: Response input (will implement later)
  */
 
-import { useMemo, useRef, useCallback } from "react";
+import { useMemo, useRef, useCallback, useState } from "react";
 import { SymbolView, type SFSymbol } from "expo-symbols";
-import { View, Text, ScrollView, useColorScheme } from "react-native";
+import { View, Text, ScrollView, useColorScheme, Pressable } from "react-native";
 import type { ScrollView as ScrollViewType } from "react-native";
 import { Image } from "expo-image";
+import { GlassView, isLiquidGlassAvailable } from "expo-glass-effect";
+import * as Haptics from "expo-haptics";
 import { cn, getThemeColors } from "@/lib/utils";
 import { ChatInput } from "@/components/chat/chat-input";
 
@@ -59,6 +61,22 @@ export interface DisplayMessage {
   attachments?: MessageAttachment[] | null;
 }
 
+/** Risk flag for a draft option */
+export interface DraftRiskFlag {
+  type: string;
+  trigger: string;
+}
+
+/** Draft option from AI generation */
+export interface DraftOption {
+  text: string;
+  label: "direct" | "diplomatic" | "boundary";
+  confidence: number;
+  assumptions: string[];
+  styleSources: string[];
+  riskFlags: DraftRiskFlag[];
+}
+
 export interface MessageResponseCardProps {
   /** Person name for header */
   personName: string;
@@ -76,6 +94,10 @@ export interface MessageResponseCardProps {
   platform?: ActionPlatform;
   /** Whether the desktop app is online (for iMessage remote send) */
   isDesktopOnline?: boolean;
+  /** Draft options (suggested responses) */
+  draftOptions?: DraftOption[];
+  /** Called when a draft option is selected */
+  onOptionSelect?: (option: DraftOption, index: number) => void;
 }
 
 /** Get initials from a name */
@@ -239,6 +261,74 @@ function ReactionBadges({
   );
 }
 
+/** Label config for suggestion chips */
+const labelConfig: Record<DraftOption["label"], { label: string; symbol: SFSymbol }> = {
+  direct: { label: "Direct", symbol: "bolt.fill" },
+  diplomatic: { label: "Warm", symbol: "heart.fill" },
+  boundary: { label: "Decline", symbol: "hand.raised.fill" },
+};
+
+/** Suggestion chip component with liquid glass */
+function SuggestionChip({
+  option,
+  onPress,
+  isDark,
+}: {
+  option: DraftOption;
+  onPress: () => void;
+  isDark: boolean;
+}): React.JSX.Element {
+  const colors = getThemeColors(isDark);
+  const config = labelConfig[option.label];
+  const hasLiquidGlass = isLiquidGlassAvailable();
+
+  const chipContent = (
+    <Pressable
+      onPress={onPress}
+      className="flex-row items-center gap-2 px-3 py-2"
+    >
+      <SymbolView
+        name={config.symbol}
+        size={12}
+        tintColor={colors.primary}
+      />
+      <Text
+        className="text-sm text-foreground"
+        numberOfLines={1}
+        style={{ maxWidth: 200 }}
+      >
+        {option.text}
+      </Text>
+    </Pressable>
+  );
+
+  const chipStyle = {
+    borderRadius: 16,
+    overflow: "hidden" as const,
+  };
+
+  if (hasLiquidGlass) {
+    return (
+      <GlassView style={chipStyle}>
+        {chipContent}
+      </GlassView>
+    );
+  }
+
+  return (
+    <View
+      style={{
+        ...chipStyle,
+        backgroundColor: isDark ? "rgba(255, 255, 255, 0.08)" : "rgba(0, 0, 0, 0.06)",
+        borderWidth: 1,
+        borderColor: isDark ? "rgba(255, 255, 255, 0.1)" : "rgba(0, 0, 0, 0.08)",
+      }}
+    >
+      {chipContent}
+    </View>
+  );
+}
+
 /**
  * MessageResponseCard component for action queue.
  * Displays message history and response textarea.
@@ -252,11 +342,15 @@ export function MessageResponseCard({
   className,
   platform,
   isDesktopOnline,
+  draftOptions,
+  onOptionSelect,
 }: MessageResponseCardProps): React.JSX.Element {
   const colorScheme = useColorScheme();
-  const colors = getThemeColors(colorScheme === "dark");
+  const isDark = colorScheme === "dark";
+  const colors = getThemeColors(isDark);
   const initials = getInitials(personName);
   const scrollViewRef = useRef<ScrollViewType>(null);
+  const [showSuggestions, setShowSuggestions] = useState(true);
 
   // Sort messages chronologically (oldest first)
   const sortedMessages = useMemo(
@@ -270,6 +364,17 @@ export function MessageResponseCard({
       scrollViewRef.current?.scrollToEnd({ animated: false });
     }, 50);
   }, []);
+
+  // Handle suggestion chip press
+  const handleSuggestionPress = useCallback(
+    (option: DraftOption, index: number) => {
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+      onResponseChange(option.text);
+      setShowSuggestions(false);
+      onOptionSelect?.(option, index);
+    },
+    [onResponseChange, onOptionSelect],
+  );
 
   return (
     <View className={cn("flex-1 overflow-hidden", className)}>
@@ -406,6 +511,25 @@ export function MessageResponseCard({
           </View>
         )}
       </ScrollView>
+
+      {/* Suggestion Chips */}
+      {draftOptions && draftOptions.length > 0 && showSuggestions && (
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          contentContainerClassName="px-4 pb-2 gap-2"
+          className="max-h-12"
+        >
+          {draftOptions.map((option, index) => (
+            <SuggestionChip
+              key={index}
+              option={option}
+              onPress={() => handleSuggestionPress(option, index)}
+              isDark={isDark}
+            />
+          ))}
+        </ScrollView>
+      )}
 
       {/* Response Input - Liquid Glass Style */}
       <ChatInput

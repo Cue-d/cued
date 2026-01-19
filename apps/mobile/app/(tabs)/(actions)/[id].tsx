@@ -197,7 +197,7 @@ export default function ActionDetailScreen(): React.JSX.Element {
 
   // Initialize response text from draft
   const draftText =
-    data?.action?.draftResponse ?? data?.action?.draftMessage ?? "";
+    data?.action?.draftResponse ?? data?.action?.draftOptions?.[0]?.text ?? "";
   if (responseText === "" && draftText) {
     setResponseText(draftText);
   }

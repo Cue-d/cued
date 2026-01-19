@@ -23,3 +23,12 @@ export {
   type ContactPriorityInfo,
   type CalculatePriorityInput,
 } from "./priority";
+
+export {
+  classifyRisk,
+  getOverallRiskLevel,
+  formatRiskWarning,
+  type RiskLevel,
+  type RiskFlag,
+  type RiskClassification,
+} from "./risk-classifier";

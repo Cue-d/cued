@@ -43,13 +43,40 @@ export {
   ActionSuggestionSchema,
   generateAction,
   generateActionWithRetry,
+  generateActionWithOptions,
+  generateActionWithOptionsRetry,
   type ActionSuggestion,
+  type ActionSuggestionWithOptions,
+  type DraftOption,
+  type RiskFlag,
   type ContactInfo,
   type ContactMemory,
   type ActionMessage,
   type GenerateActionInput,
+  type GenerateActionWithStyleInput,
   type RecentAction,
 } from "./actions";
+
+// Style profile and draft generation
+export {
+  extractStyleProfile,
+  getDefaultStyleProfile,
+  applyStyleOverrides,
+  formatStyleForPrompt,
+  retrieveSimilarReplies,
+  formatSimilarRepliesForPrompt,
+  extractUserPolicies,
+  formatPoliciesForPrompt,
+  checkPolicyViolations,
+  type StyleProfile,
+  type StyleMessage,
+  type StylePlatform,
+  type SimilarReply,
+  type SearchableMessage,
+  type ConversationContext,
+  type UserPolicy,
+  type PolicyExtractionMessage,
+} from "./style";
 
 export {
   shouldSkipLlmAnalysis,

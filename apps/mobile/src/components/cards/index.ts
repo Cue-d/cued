@@ -11,6 +11,8 @@ export {
   type MessageAttachment,
   type DisplayMessage,
   type MessageResponseCardProps,
+  type DraftOption,
+  type DraftRiskFlag,
 } from "./message-response-card";
 
 // ContactCard

@@ -18,6 +18,8 @@ export type {
   DisplayMessage,
   MessageAttachment,
   ActionPlatform,
+  DraftOption,
+  DraftRiskFlag,
 } from "./message-response-card"
 
 export { ContactCard } from "./contact-card"

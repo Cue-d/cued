@@ -36,7 +36,6 @@ interface ActionCreatedResult {
   type: string;
   priority: number;
   reason?: string;
-  draftMessage?: string;
 }
 
 // Helper to format relative time
@@ -292,11 +291,6 @@ function ActionCreatedArtifact({ data, mutedColor, successColor }: { data: Actio
         {data.reason && (
           <Text className="text-sm text-foreground mt-2">{data.reason}</Text>
         )}
-        {data.draftMessage && (
-          <View className="mt-2 bg-muted/50 rounded-lg p-2">
-            <Text className="text-sm text-foreground">{data.draftMessage}</Text>
-          </View>
-        )}
       </View>
     </View>
   );
@@ -332,7 +326,6 @@ function parseToolResult(
             type: (data.type as string) || "unknown",
             priority: (data.priority as number) || 50,
             reason: data.reason as string | undefined,
-            draftMessage: data.draftMessage as string | undefined,
           } as ActionCreatedResult,
         };
       }
