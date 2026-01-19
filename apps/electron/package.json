@@ -5,6 +5,7 @@
   "description": "PRM macOS Electron app for iMessage sync",
   "main": "out/main/index.js",
   "scripts": {
+    "postinstall": "npx @electron/rebuild -f -w better-sqlite3 && bash scripts/sign-dev.sh",
     "predev": "bash scripts/build-swift.sh",
     "dev": "electron-vite dev",
     "build": "electron-vite build",
