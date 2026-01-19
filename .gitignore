@@ -34,6 +34,7 @@ MANIFEST
 venv/
 env/
 ENV/
+!packages/env/
 env.bak/
 venv.bak/
 .venv/
@@ -157,6 +158,15 @@ htmlcov/
 coverage.xml
 *.cover
 .hypothesis/
+**/coverage/
+
+# Playwright
+**/test-results/
+**/playwright-report/
+**/playwright/.cache/
+**/.auth/
+!**/.auth/.gitkeep
+blob-report/
 
 # ============================================================
 # Build & Distribution

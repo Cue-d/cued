@@ -1,7 +1,11 @@
+// Load env vars FIRST before any other imports
+import "./env.js";
+
 import { join } from "node:path";
 import { app, BrowserWindow, ipcMain } from "electron";
 import { ConvexHttpClient } from "convex/browser";
 import { api } from "@prm/convex";
+import { electronEnv } from "@prm/env/electron";
 import {
   initAuth,
   getAuthState,
@@ -16,13 +20,8 @@ import { getIMessageSender } from "./sync/imessage-sender";
 import { getHeartbeatManager } from "./sync/presence";
 import { setupSocialIpcHandlers, cleanupSocialScrapers } from "./ipc/social";
 
-const CONVEX_URL =
-  process.env.CONVEX_URL || "https://perceptive-lobster-290.convex.cloud";
-
-// WorkOS Client ID - should match web app config
-// In production, this would be loaded from a config file or env
-const WORKOS_CLIENT_ID =
-  process.env.WORKOS_CLIENT_ID || "client_01JZDHMFDC22NTPTWYKPR32P73";
+const CONVEX_URL = electronEnv.CONVEX_URL;
+const WORKOS_CLIENT_ID = electronEnv.WORKOS_CLIENT_ID;
 
 let mainWindow: BrowserWindow | null = null;
 
@@ -39,7 +38,7 @@ function createWindow(): void {
 
   // In development, load from dev server
   // In production, load from built files
-  if (process.env.NODE_ENV === "development") {
+  if (electronEnv.NODE_ENV === "development") {
     mainWindow.loadURL("http://localhost:5173");
   } else {
     mainWindow.loadFile(join(__dirname, "../renderer/index.html"));

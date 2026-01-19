@@ -2,6 +2,7 @@ import * as AuthSession from "expo-auth-session";
 import * as Crypto from "expo-crypto";
 import * as SecureStore from "expo-secure-store";
 import * as WebBrowser from "expo-web-browser";
+import { clientEnv } from "@prm/env/client";
 
 WebBrowser.maybeCompleteAuthSession();
 
@@ -11,7 +12,7 @@ const STORAGE_KEYS = {
   user: "prm_user",
 } as const;
 
-const WORKOS_CLIENT_ID = process.env.EXPO_PUBLIC_WORKOS_CLIENT_ID ?? "";
+const WORKOS_CLIENT_ID = clientEnv.EXPO_PUBLIC_WORKOS_CLIENT_ID ?? "";
 const WORKOS_AUTH_ENDPOINT = "https://api.workos.com/user_management/authorize";
 const WORKOS_TOKEN_ENDPOINT = "https://api.workos.com/user_management/authenticate";
 

@@ -1,7 +1,9 @@
 // Task 1.14: Convex auth configuration for WorkOS AuthKit
 // Validates WorkOS JWT tokens for both SSO and user management flows
 
-const clientId = process.env.WORKOS_CLIENT_ID;
+import { convexEnv } from "@prm/env/convex";
+
+const clientId = convexEnv.WORKOS_CLIENT_ID;
 
 export default {
   providers: [

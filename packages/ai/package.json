@@ -16,6 +16,7 @@
   "dependencies": {
     "@ai-sdk/openai": "^3.0.9",
     "@mem0/vercel-ai-provider": "^2.0.4",
+    "@prm/shared": "workspace:*",
     "ai": "^6.0.33",
     "zod": "^4.3.5"
   },

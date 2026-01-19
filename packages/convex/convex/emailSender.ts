@@ -4,8 +4,9 @@
  */
 import { v } from "convex/values";
 import { internalAction } from "./_generated/server";
+import { convexEnv } from "@prm/env/convex";
 
-const NANGO_SECRET_KEY = process.env.NANGO_SECRET_KEY;
+const NANGO_SECRET_KEY = convexEnv.NANGO_SECRET_KEY;
 const NANGO_BASE_URL = "https://api.nango.dev";
 
 interface SendEmailInput {

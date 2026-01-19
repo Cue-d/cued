@@ -1,5 +1,6 @@
 import { ConvexReactClient } from "convex/react";
 import { createMMKV, type MMKV } from "react-native-mmkv";
+import { clientEnv } from "@prm/env/client";
 
 // MMKV storage instance for Convex cache
 // Uses a dedicated instance ID to isolate from other app storage
@@ -14,8 +15,7 @@ export function getConvexStorage(): MMKV {
 }
 
 // Convex client instance
-// EXPO_PUBLIC_ prefix makes the env var available at runtime in Expo
-const convexUrl = process.env.EXPO_PUBLIC_CONVEX_URL;
+const convexUrl = clientEnv.EXPO_PUBLIC_CONVEX_URL;
 
 if (!convexUrl) {
   throw new Error(

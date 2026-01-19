@@ -6,10 +6,10 @@
 
 import { ConvexHttpClient } from "convex/browser";
 import { api } from "@prm/convex";
+import { electronEnv } from "@prm/env/electron";
 import { getContactsManager } from "./contacts";
 
-const CONVEX_URL =
-  process.env.CONVEX_URL || "https://perceptive-lobster-290.convex.cloud";
+const CONVEX_URL = electronEnv.CONVEX_URL;
 
 const BATCH_SIZE = 50;
 

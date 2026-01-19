@@ -2,9 +2,10 @@ import { NextRequest, NextResponse } from "next/server";
 import { Nango } from "@nangohq/node";
 import { ConvexHttpClient } from "convex/browser";
 import { api } from "@prm/convex";
+import { env } from "@prm/env/server";
 
-const convex = new ConvexHttpClient(process.env.NEXT_PUBLIC_CONVEX_URL!);
-const nango = new Nango({ secretKey: process.env.NANGO_SECRET_KEY! });
+const convex = new ConvexHttpClient(env.NEXT_PUBLIC_CONVEX_URL!);
+const nango = new Nango({ secretKey: env.NANGO_SECRET_KEY });
 
 function extractBearerToken(request: NextRequest): string | null {
   const authHeader = request.headers.get("Authorization");

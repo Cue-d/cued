@@ -1,6 +1,23 @@
 {
   "$schema": "https://turbo.build/schema.json",
   "ui": "tui",
+  "globalPassThroughEnv": [
+    "CONVEX_URL",
+    "NEXT_PUBLIC_CONVEX_URL",
+    "EXPO_PUBLIC_CONVEX_URL",
+    "WORKOS_CLIENT_ID",
+    "WORKOS_API_KEY",
+    "WORKOS_COOKIE_PASSWORD",
+    "NEXT_PUBLIC_WORKOS_REDIRECT_URI",
+    "EXPO_PUBLIC_WORKOS_CLIENT_ID",
+    "OPENAI_API_KEY",
+    "OPENAI_BASE_URL",
+    "MEM0_API_KEY",
+    "NANGO_SECRET_KEY",
+    "API_BASE_URL",
+    "CRON_SECRET",
+    "NODE_ENV"
+  ],
   "tasks": {
     "build": {
       "dependsOn": ["^build"],

@@ -16,6 +16,7 @@ import { ConvexHttpClient } from "convex/browser";
 import { api } from "@prm/convex";
 import type { Id } from "@prm/convex";
 import type { Message } from "@prm/integrations";
+import { electronEnv } from "@prm/env/electron";
 import { ChatDb } from "./chat-db";
 import { uploadAttachments } from "./attachment-uploader";
 import { getContactsManager } from "./contacts";
@@ -33,8 +34,7 @@ interface ConvexAttachment {
 const BATCH_SIZE = 1000; // Reduced to stay under Convex 4096 read limit per mutation
 const CONCURRENT_BATCHES = 5; // Increased parallelism to compensate for smaller batches
 const SYNC_INTERVAL_MS = 30_000; // 30 seconds
-const CONVEX_URL =
-  process.env.CONVEX_URL || "https://perceptive-lobster-290.convex.cloud";
+const CONVEX_URL = electronEnv.CONVEX_URL;
 
 // Current sync version - must match CURRENT_SYNC_VERSION in packages/convex/convex/sync.ts
 const CURRENT_SYNC_VERSION = 1;
@@ -705,7 +705,7 @@ export class SyncManager {
       return;
     }
 
-    const baseUrl = process.env.API_BASE_URL || "http://localhost:3000";
+    const baseUrl = electronEnv.API_BASE_URL || "http://localhost:3000";
     try {
       const response = await fetch(`${baseUrl}/api/memories/sync`, {
         method: "POST",

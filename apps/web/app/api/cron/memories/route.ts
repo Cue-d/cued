@@ -7,14 +7,16 @@
  * Security: Protected by CRON_SECRET environment variable.
  */
 import { NextResponse } from "next/server";
+import { env } from "@prm/env/server";
 
 export async function GET(req: Request) {
   // Verify cron secret for security
   const authHeader = req.headers.get("authorization");
-  const cronSecret = process.env.CRON_SECRET;
+  const cronSecret = env.CRON_SECRET;
+  const nodeEnv = process.env.NODE_ENV; // Keep NODE_ENV as direct access (Next.js runtime)
 
   // In development, allow without secret
-  if (process.env.NODE_ENV === "production" && cronSecret) {
+  if (nodeEnv === "production" && cronSecret) {
     if (authHeader !== `Bearer ${cronSecret}`) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }

@@ -1,8 +1,12 @@
 import { defineConfig } from "electron-vite";
 import { resolve } from "path";
 
+// Point to monorepo root for shared .env.local
+const rootDir = resolve(__dirname, "../..");
+
 export default defineConfig({
   main: {
+    envDir: rootDir,
     build: {
       rollupOptions: {
         input: {

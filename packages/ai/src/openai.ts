@@ -4,6 +4,9 @@ import { createOpenAI } from "@ai-sdk/openai";
  * OpenAI provider instance configured for PRM.
  * Uses OPENAI_API_KEY from environment.
  * Supports optional ZDR (Zero Data Retention) endpoint for production.
+ *
+ * Note: Uses process.env directly because this module is bundled by Convex
+ * which runs in a different runtime environment.
  */
 export const openai = createOpenAI({
   // Use ZDR endpoint in production if configured

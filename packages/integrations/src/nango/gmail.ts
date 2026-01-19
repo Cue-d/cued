@@ -1,4 +1,5 @@
 import { Nango } from "@nangohq/node";
+import { env } from "@prm/env/server";
 
 /**
  * Input for sending a Gmail email
@@ -23,14 +24,9 @@ export interface SendGmailMessageResult {
 
 /**
  * Create a Nango client for Gmail operations.
- * Requires NANGO_SECRET_KEY environment variable.
  */
 export function createNangoGmailClient() {
-  const secretKey = process.env.NANGO_SECRET_KEY;
-  if (!secretKey) {
-    throw new Error("NANGO_SECRET_KEY environment variable is required");
-  }
-  return new Nango({ secretKey });
+  return new Nango({ secretKey: env.NANGO_SECRET_KEY });
 }
 
 /**

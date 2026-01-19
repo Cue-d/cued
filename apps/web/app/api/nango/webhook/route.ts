@@ -1,8 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { ConvexHttpClient } from "convex/browser";
 import { api } from "@prm/convex";
+import { env } from "@prm/env/server";
 
-const convex = new ConvexHttpClient(process.env.NEXT_PUBLIC_CONVEX_URL!);
+const convex = new ConvexHttpClient(env.NEXT_PUBLIC_CONVEX_URL!);
 
 interface NangoWebhookPayload {
   type: "auth" | "sync";
@@ -118,7 +119,7 @@ async function handleSyncWebhook(payload: NangoWebhookPayload): Promise<NextResp
   }
 
   // Call all appropriate pull endpoints for this provider
-  const baseUrl = process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000";
+  const baseUrl = env.NEXT_PUBLIC_APP_URL || "http://localhost:3000";
   const results: Record<string, unknown> = {};
   const errors: Record<string, unknown> = {};
 

@@ -7,10 +7,10 @@ import { promisify } from "node:util";
 import { ConvexHttpClient } from "convex/browser";
 import { api } from "@prm/convex";
 import type { Id } from "@prm/convex";
+import { electronEnv } from "@prm/env/electron";
 
 const execAsync = promisify(exec);
-const CONVEX_URL =
-  process.env.CONVEX_URL || "https://perceptive-lobster-290.convex.cloud";
+const CONVEX_URL = electronEnv.CONVEX_URL;
 
 interface SendResult {
   success: boolean;

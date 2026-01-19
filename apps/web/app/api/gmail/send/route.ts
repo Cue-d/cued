@@ -5,9 +5,10 @@ import { api } from "@prm/convex";
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
 import { sendGmailMessage } from "@prm/integrations/nango";
 import type { Id } from "@prm/convex";
+import { env } from "@prm/env/server";
 
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
-const convex = new ConvexHttpClient(process.env.NEXT_PUBLIC_CONVEX_URL!);
+const convex = new ConvexHttpClient(env.NEXT_PUBLIC_CONVEX_URL!);
 
 interface SendGmailMessageRequest {
   workosUserId: string;
