@@ -1,47 +1,30 @@
 "use client"
 
 import * as React from "react"
-import { MessageSquare, Mail, Hash, ChevronDown, AlertTriangle, Sparkles } from "lucide-react"
+import { AlertTriangle } from "lucide-react"
 import {
   getInitials,
-  formatTime,
   formatRelativeTime,
-  PLATFORM_CONFIG,
   type ActionPlatform,
-  type DraftRiskFlag,
   type DraftOption,
-  type DraftLabel,
-  type MessageAttachment,
   type DisplayMessage,
 } from "@prm/shared"
 import { cn } from "../../lib/utils"
 import { Avatar, AvatarFallback } from "../ui/avatar"
-import { Badge } from "../ui/badge"
 import { Card, CardContent, CardFooter, CardHeader } from "../ui/card"
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from "../ui/dropdown-menu"
-import { Textarea } from "../ui/textarea"
+import { DraftSelector } from "./message-response-card/draft-selector"
+import { MessageBubble } from "./message-response-card/message-bubble"
+import { PlatformBadge } from "./message-response-card/platform-badge"
+import { ResponseInput } from "./message-response-card/response-input"
 
 /** Re-export types for backwards compatibility */
 export type { ActionPlatform, DraftRiskFlag, DraftOption, DraftLabel, MessageAttachment, DisplayMessage } from "@prm/shared"
 
-/** Platform icons (platform-specific, not in shared config) */
-const PLATFORM_ICONS: Record<ActionPlatform, React.ReactNode> = {
-  imessage: <MessageSquare className="w-3.5 h-3.5" />,
-  gmail: <Mail className="w-3.5 h-3.5" />,
-  slack: <Hash className="w-3.5 h-3.5" />,
-}
-
-/** Label config for draft options */
-const labelConfig: Record<DraftLabel, { label: string; colorClass: string }> = {
-  direct: { label: "Direct", colorClass: "bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200" },
-  diplomatic: { label: "Diplomatic", colorClass: "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200" },
-  boundary: { label: "Decline", colorClass: "bg-orange-100 text-orange-800 dark:bg-orange-900 dark:text-orange-200" },
-}
+/** Re-export sub-components for advanced usage */
+export { PlatformBadge, PLATFORM_ICONS, type PlatformBadgeProps } from "./message-response-card/platform-badge"
+export { MessageBubble, ReactionBadges, DeliveryStatus, AttachmentDisplay, type MessageBubbleProps } from "./message-response-card/message-bubble"
+export { DraftSelector, DraftOptionButton, type DraftSelectorProps } from "./message-response-card/draft-selector"
+export { ResponseInput, type ResponseInputProps } from "./message-response-card/response-input"
 
 export interface MessageResponseCardProps {
   /** Person name for header */
@@ -78,150 +61,11 @@ export interface MessageResponseCardRef {
   focusInput: () => void
 }
 
-/** Reaction badges component */
-function ReactionBadges({
-  reactions,
-  isSent,
-}: {
-  reactions: string[]
-  isSent: boolean
-}) {
-  const displayReactions = reactions.slice(0, 3)
-  return (
-    <div
-      className={cn(
-        "absolute -top-3 flex gap-0.5 px-2 py-1 rounded-full bg-muted shadow-sm text-sm z-10 border",
-        isSent ? "-left-3" : "-right-3"
-      )}
-    >
-      {displayReactions.map((emoji, idx) => (
-        <span key={idx}>{emoji}</span>
-      ))}
-    </div>
-  )
-}
-
-/** Delivery status indicator */
-function DeliveryStatus({ status }: { status?: string | null }) {
-  if (status === "failed") {
-    return (
-      <span className="text-destructive" title="Failed to send">
-        !
-      </span>
-    )
-  }
-  if (status === "read") {
-    return (
-      <span className="text-blue-400" title="Read">
-        Read
-      </span>
-    )
-  }
-  if (status === "delivered") {
-    return (
-      <span className="opacity-60" title="Delivered">
-        Delivered
-      </span>
-    )
-  }
-  return (
-    <span className="opacity-40" title="Sent">
-      Sent
-    </span>
-  )
-}
-
-/** Attachment display component */
-function AttachmentDisplay({
-  attachments,
-}: {
-  attachments: MessageAttachment[]
-}) {
-  return (
-    <div className="space-y-1 mb-1">
-      {attachments.map((att, idx) => {
-        const isImage = att.mimeType?.startsWith("image/")
-        const url = att.thumbnailUrl || att.url
-
-        if (isImage && url) {
-          return (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img
-              key={idx}
-              src={url}
-              alt={att.filename || "Image"}
-              className="max-w-[200px] max-h-[200px] rounded-lg object-cover"
-            />
-          )
-        }
-
-        return (
-          <div
-            key={idx}
-            className="flex items-center gap-2 text-xs text-muted-foreground"
-          >
-            <span className="truncate max-w-[150px]">
-              {att.filename || "Attachment"}
-            </span>
-          </div>
-        )
-      })}
-    </div>
-  )
-}
-
 /**
  * MessageResponseCard component for action queue.
  * Displays message history and response textarea.
+ * Composed of PlatformBadge, MessageBubble, DraftSelector, and ResponseInput.
  */
-/** Draft option button component */
-function DraftOptionButton({
-  option,
-  index,
-  onSelect,
-}: {
-  option: DraftOption
-  index: number
-  onSelect: (option: DraftOption, index: number) => void
-}) {
-  const config = labelConfig[option.label]
-  const hasRiskFlags = option.riskFlags.length > 0
-
-  return (
-    <button
-      type="button"
-      onClick={() => onSelect(option, index)}
-      className={cn(
-        "w-full text-left p-3 rounded-lg border bg-card hover:bg-accent transition-colors",
-        "focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2"
-      )}
-    >
-      <div className="flex items-start justify-between gap-2">
-        <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-2 mb-1.5">
-            <Badge variant="secondary" className={cn("text-xs font-medium", config.colorClass)}>
-              {config.label}
-            </Badge>
-            {hasRiskFlags && (
-              <AlertTriangle className="w-3.5 h-3.5 text-amber-500" />
-            )}
-          </div>
-          <p className="text-sm text-foreground line-clamp-2">{option.text}</p>
-        </div>
-      </div>
-      {hasRiskFlags && (
-        <div className="mt-2 pt-2 border-t">
-          {option.riskFlags.slice(0, 2).map((flag, i) => (
-            <p key={i} className="text-xs text-amber-600 dark:text-amber-400">
-              {flag.type}: &quot;{flag.trigger}&quot;
-            </p>
-          ))}
-        </div>
-      )}
-    </button>
-  )
-}
-
 export const MessageResponseCard = React.forwardRef<
   MessageResponseCardRef,
   MessageResponseCardProps
@@ -240,7 +84,6 @@ export const MessageResponseCard = React.forwardRef<
     draftOptions,
     onOptionSelect,
     riskLevel,
-    requiresApproval,
   },
   ref
 ) {
@@ -327,41 +170,13 @@ export const MessageResponseCard = React.forwardRef<
           </div>
 
           {/* Platform Selector */}
-          {platform && availablePlatforms && availablePlatforms.length > 1 && onPlatformChange ? (
-            <DropdownMenu>
-              <DropdownMenuTrigger className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-muted/60 hover:bg-muted text-sm transition-colors">
-                <span className={PLATFORM_CONFIG[platform].textClass}>
-                  {PLATFORM_ICONS[platform]}
-                </span>
-                <span className="text-xs font-medium">{PLATFORM_CONFIG[platform].label}</span>
-                <ChevronDown className="w-3 h-3 text-muted-foreground" />
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end">
-                {availablePlatforms.map((p) => (
-                  <DropdownMenuItem
-                    key={p}
-                    onClick={() => onPlatformChange(p)}
-                    className={cn(
-                      "flex items-center gap-2",
-                      p === platform && "bg-muted"
-                    )}
-                  >
-                    <span className={PLATFORM_CONFIG[p].textClass}>
-                      {PLATFORM_ICONS[p]}
-                    </span>
-                    <span>{PLATFORM_CONFIG[p].label}</span>
-                  </DropdownMenuItem>
-                ))}
-              </DropdownMenuContent>
-            </DropdownMenu>
-          ) : platform ? (
-            <div className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-muted/60 text-sm">
-              <span className={PLATFORM_CONFIG[platform].textClass}>
-                {PLATFORM_ICONS[platform]}
-              </span>
-              <span className="text-xs font-medium">{PLATFORM_CONFIG[platform].label}</span>
-            </div>
-          ) : null}
+          {platform && (
+            <PlatformBadge
+              platform={platform}
+              availablePlatforms={availablePlatforms}
+              onPlatformChange={onPlatformChange}
+            />
+          )}
         </div>
       </CardHeader>
 
@@ -374,85 +189,19 @@ export const MessageResponseCard = React.forwardRef<
         >
           <div className="py-4 px-4 space-y-2">
             {sortedMessages.length > 0 ? (
-              sortedMessages.map((msg) => {
-                const hasReactions = msg.reactions && msg.reactions.length > 0
-                const hasAttachments =
-                  msg.attachments && msg.attachments.length > 0
-                const hasText =
-                  msg.content &&
-                  msg.content.trim().length > 0 &&
-                  !(hasAttachments && msg.content.trim() === "[attachment]")
-
-                return (
-                  <div
-                    key={msg._id}
-                    className={cn(
-                      "flex flex-col w-full",
-                      msg.isFromMe ? "items-end" : "items-start",
-                      hasReactions && "mb-2"
-                    )}
-                  >
-                    {!msg.isFromMe && msg.senderName && (
-                      <p className="text-xs font-medium opacity-70 mb-1 ml-1">
-                        {msg.senderName}
-                      </p>
-                    )}
-                    <div
-                      className={cn(
-                        "flex w-full",
-                        msg.isFromMe ? "justify-end" : "justify-start"
-                      )}
-                    >
-                      <div
-                        className={cn(
-                          "relative rounded-2xl px-4 py-2 text-sm break-words",
-                          msg.isFromMe
-                            ? "bg-primary text-primary-foreground"
-                            : "bg-muted text-foreground"
-                        )}
-                        style={{ maxWidth: "85%", width: "fit-content" }}
-                      >
-                        {hasReactions && (
-                          <ReactionBadges
-                            reactions={msg.reactions!}
-                            isSent={msg.isFromMe}
-                          />
-                        )}
-                        {hasAttachments && (
-                          <AttachmentDisplay attachments={msg.attachments!} />
-                        )}
-                        {hasText && msg.content && (
-                          <p
-                            className="whitespace-pre-wrap break-words select-text"
-                            data-selectable="true"
-                          >
-                            {msg.content}
-                          </p>
-                        )}
-                        {!hasText && !hasAttachments && (
-                          <p className="whitespace-pre-wrap break-words">
-                            [No text]
-                          </p>
-                        )}
-                        <p
-                          className={cn(
-                            "text-[10px] opacity-60 mt-1 flex items-center gap-1",
-                            msg.isFromMe ? "justify-end" : "justify-start"
-                          )}
-                        >
-                          {formatTime(msg.sentAt)}
-                          {msg.isFromMe && (
-                            <>
-                              <span className="mx-0.5">·</span>
-                              <DeliveryStatus status={msg.status} />
-                            </>
-                          )}
-                        </p>
-                      </div>
-                    </div>
-                  </div>
-                )
-              })
+              sortedMessages.map((msg) => (
+                <MessageBubble
+                  key={msg._id}
+                  id={msg._id}
+                  content={msg.content}
+                  isFromMe={msg.isFromMe}
+                  sentAt={msg.sentAt}
+                  senderName={msg.senderName}
+                  status={msg.status}
+                  reactions={msg.reactions}
+                  attachments={msg.attachments}
+                />
+              ))
             ) : (
               <div className="flex items-center justify-center h-full text-muted-foreground">
                 <p>No recent messages</p>
@@ -464,22 +213,10 @@ export const MessageResponseCard = React.forwardRef<
 
       {/* Draft Options */}
       {draftOptions && draftOptions.length > 0 && showOptions && (
-        <div className="px-4 pb-2">
-          <div className="flex items-center gap-2 mb-2">
-            <Sparkles className="w-3.5 h-3.5 text-muted-foreground" />
-            <span className="text-xs text-muted-foreground">Suggested replies</span>
-          </div>
-          <div className="space-y-2">
-            {draftOptions.map((option, index) => (
-              <DraftOptionButton
-                key={index}
-                option={option}
-                index={index}
-                onSelect={handleOptionSelect}
-              />
-            ))}
-          </div>
-        </div>
+        <DraftSelector
+          draftOptions={draftOptions}
+          onOptionSelect={handleOptionSelect}
+        />
       )}
 
       {/* Risk Warning */}
@@ -501,18 +238,13 @@ export const MessageResponseCard = React.forwardRef<
 
       {/* Response Input */}
       <CardFooter className="p-4 bg-transparent" data-selectable="true">
-        <Textarea
-          ref={textareaRef}
+        <ResponseInput
           value={responseText}
-          onChange={(e) => onResponseChange(e.target.value)}
+          onChange={onResponseChange}
           placeholder={draftOptions && draftOptions.length > 0
             ? "Select an option above or type your own..."
             : "Type your response... (swipe right to send)"}
-          className="min-h-[80px] max-h-[150px] resize-none bg-background w-full"
-          onKeyDown={(e) => {
-            // Prevent card swipe while typing
-            e.stopPropagation()
-          }}
+          textareaRef={textareaRef}
         />
       </CardFooter>
     </Card>

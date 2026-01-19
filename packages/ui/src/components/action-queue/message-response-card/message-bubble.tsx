@@ -1,0 +1,205 @@
+"use client"
+
+import * as React from "react"
+import { formatTime, type MessageAttachment } from "@prm/shared"
+import { cn } from "../../../lib/utils"
+
+/** Reaction badges component */
+export function ReactionBadges({
+  reactions,
+  isSent,
+}: {
+  reactions: string[]
+  isSent: boolean
+}) {
+  const displayReactions = reactions.slice(0, 3)
+  return (
+    <div
+      className={cn(
+        "absolute -top-3 flex gap-0.5 px-2 py-1 rounded-full bg-muted shadow-sm text-sm z-10 border",
+        isSent ? "-left-3" : "-right-3"
+      )}
+    >
+      {displayReactions.map((emoji, idx) => (
+        <span key={idx}>{emoji}</span>
+      ))}
+    </div>
+  )
+}
+
+/** Delivery status indicator */
+export function DeliveryStatus({ status }: { status?: string | null }) {
+  if (status === "failed") {
+    return (
+      <span className="text-destructive" title="Failed to send">
+        !
+      </span>
+    )
+  }
+  if (status === "read") {
+    return (
+      <span className="text-blue-400" title="Read">
+        Read
+      </span>
+    )
+  }
+  if (status === "delivered") {
+    return (
+      <span className="opacity-60" title="Delivered">
+        Delivered
+      </span>
+    )
+  }
+  return (
+    <span className="opacity-40" title="Sent">
+      Sent
+    </span>
+  )
+}
+
+/** Attachment display component */
+export function AttachmentDisplay({
+  attachments,
+}: {
+  attachments: MessageAttachment[]
+}) {
+  return (
+    <div className="space-y-1 mb-1">
+      {attachments.map((att, idx) => {
+        const isImage = att.mimeType?.startsWith("image/")
+        const url = att.thumbnailUrl || att.url
+
+        if (isImage && url) {
+          return (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img
+              key={idx}
+              src={url}
+              alt={att.filename || "Image"}
+              className="max-w-[200px] max-h-[200px] rounded-lg object-cover"
+            />
+          )
+        }
+
+        return (
+          <div
+            key={idx}
+            className="flex items-center gap-2 text-xs text-muted-foreground"
+          >
+            <span className="truncate max-w-[150px]">
+              {att.filename || "Attachment"}
+            </span>
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
+export interface MessageBubbleProps {
+  /** Unique message ID */
+  id: string
+  /** Message content */
+  content?: string | null
+  /** Whether message is from the user */
+  isFromMe: boolean
+  /** Message timestamp */
+  sentAt: number
+  /** Sender name (for received messages) */
+  senderName?: string | null
+  /** Delivery status */
+  status?: string | null
+  /** Reactions on the message */
+  reactions?: string[] | null
+  /** Attachments */
+  attachments?: MessageAttachment[] | null
+}
+
+/**
+ * MessageBubble component - renders a single chat message with optional
+ * attachments, reactions, and delivery status.
+ */
+export function MessageBubble({
+  content,
+  isFromMe,
+  sentAt,
+  senderName,
+  status,
+  reactions,
+  attachments,
+}: MessageBubbleProps) {
+  const hasReactions = reactions && reactions.length > 0
+  const hasAttachments = attachments && attachments.length > 0
+  const hasText =
+    content &&
+    content.trim().length > 0 &&
+    !(hasAttachments && content.trim() === "[attachment]")
+
+  return (
+    <div
+      className={cn(
+        "flex flex-col w-full",
+        isFromMe ? "items-end" : "items-start",
+        hasReactions && "mb-2"
+      )}
+    >
+      {!isFromMe && senderName && (
+        <p className="text-xs font-medium opacity-70 mb-1 ml-1">
+          {senderName}
+        </p>
+      )}
+      <div
+        className={cn(
+          "flex w-full",
+          isFromMe ? "justify-end" : "justify-start"
+        )}
+      >
+        <div
+          className={cn(
+            "relative rounded-2xl px-4 py-2 text-sm break-words",
+            isFromMe
+              ? "bg-primary text-primary-foreground"
+              : "bg-muted text-foreground"
+          )}
+          style={{ maxWidth: "85%", width: "fit-content" }}
+        >
+          {hasReactions && (
+            <ReactionBadges reactions={reactions!} isSent={isFromMe} />
+          )}
+          {hasAttachments && (
+            <AttachmentDisplay attachments={attachments!} />
+          )}
+          {hasText && content && (
+            <p
+              className="whitespace-pre-wrap break-words select-text"
+              data-selectable="true"
+            >
+              {content}
+            </p>
+          )}
+          {!hasText && !hasAttachments && (
+            <p className="whitespace-pre-wrap break-words">
+              [No text]
+            </p>
+          )}
+          <p
+            className={cn(
+              "text-[10px] opacity-60 mt-1 flex items-center gap-1",
+              isFromMe ? "justify-end" : "justify-start"
+            )}
+          >
+            {formatTime(sentAt)}
+            {isFromMe && (
+              <>
+                <span className="mx-0.5">·</span>
+                <DeliveryStatus status={status} />
+              </>
+            )}
+          </p>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+export default MessageBubble
