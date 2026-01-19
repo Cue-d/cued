@@ -9,29 +9,18 @@ import {
   MessageCircleIcon,
   MailIcon,
   HashIcon,
-  CheckCircle2Icon,
-  XCircleIcon,
   ArrowLeftIcon,
-  RefreshCwIcon,
-  LinkIcon,
   LinkedinIcon,
   TwitterIcon,
-  ExternalLinkIcon,
-  UsersIcon,
 } from "lucide-react";
 import { api } from "@prm/convex";
-import { Button, Skeleton, Input } from "@prm/ui";
-
-type Platform = "imessage" | "gmail" | "slack" | "linkedin" | "twitter";
-
-interface IntegrationConfig {
-  id: Platform;
-  name: string;
-  description: string;
-  icon: React.ReactNode;
-  nangoIntegrationId: string | null; // null = not using Nango (iMessage uses Electron)
-  color: string;
-}
+import {
+  IntegrationCard,
+  SocialIntegrationCard,
+  type IntegrationConfig,
+  type SocialIntegrationConfig,
+  type Platform,
+} from "./components";
 
 const INTEGRATIONS: IntegrationConfig[] = [
   {
@@ -59,14 +48,6 @@ const INTEGRATIONS: IntegrationConfig[] = [
     color: "text-purple-500",
   },
 ];
-
-interface SocialIntegrationConfig {
-  id: "linkedin" | "twitter";
-  name: string;
-  description: string;
-  icon: React.ReactNode;
-  color: string;
-}
 
 const SOCIAL_INTEGRATIONS: SocialIntegrationConfig[] = [
   {
@@ -276,226 +257,6 @@ export default function IntegrationsPage() {
             </ul>
           </div>
         </div>
-      </div>
-    </div>
-  );
-}
-
-interface IntegrationCardProps {
-  config: IntegrationConfig;
-  isConnected: boolean;
-  isConnecting: boolean;
-  isDisconnecting: boolean;
-  isLoading: boolean;
-  lastSyncAt: number | null;
-  onConnect: () => void;
-  onDisconnect: () => void;
-}
-
-function IntegrationCard({
-  config,
-  isConnected,
-  isConnecting,
-  isDisconnecting,
-  isLoading,
-  lastSyncAt,
-  onConnect,
-  onDisconnect,
-}: IntegrationCardProps) {
-  function renderStatusAndAction() {
-    if (isLoading) {
-      return <Skeleton className="h-9 w-24" />;
-    }
-
-    if (isConnected) {
-      return (
-        <>
-          <div className="flex items-center gap-1.5 text-green-600">
-            <CheckCircle2Icon className="size-4" />
-            <span className="text-xs font-medium">Connected</span>
-          </div>
-          {config.nangoIntegrationId && (
-            <Button variant="outline" size="sm" onClick={onDisconnect} disabled={isDisconnecting}>
-              {isDisconnecting ? <RefreshCwIcon className="size-4 animate-spin" /> : "Disconnect"}
-            </Button>
-          )}
-        </>
-      );
-    }
-
-    return (
-      <>
-        <div className="flex items-center gap-1.5 text-muted-foreground">
-          <XCircleIcon className="size-4" />
-          <span className="text-xs">Not connected</span>
-        </div>
-        {config.nangoIntegrationId ? (
-          <Button variant="default" size="sm" onClick={onConnect} disabled={isConnecting}>
-            {isConnecting ? (
-              <RefreshCwIcon className="size-4 animate-spin mr-2" />
-            ) : (
-              <LinkIcon className="size-4 mr-2" />
-            )}
-            Connect
-          </Button>
-        ) : (
-          <Button variant="outline" size="sm" disabled>
-            Desktop App Required
-          </Button>
-        )}
-      </>
-    );
-  }
-
-  return (
-    <div className="rounded-lg border bg-card">
-      <div className="flex items-center justify-between p-4">
-        <div className="flex items-center gap-4">
-          <div
-            className={`flex size-12 items-center justify-center rounded-lg bg-muted ${config.color}`}
-          >
-            {config.icon}
-          </div>
-          <div>
-            <h3 className="text-sm font-medium">{config.name}</h3>
-            <p className="text-xs text-muted-foreground">{config.description}</p>
-          </div>
-        </div>
-        <div className="flex items-center gap-3">{renderStatusAndAction()}</div>
-      </div>
-
-      {isConnected && lastSyncAt && (
-        <div className="border-t px-4 py-2">
-          <p className="text-xs text-muted-foreground">
-            Last synced {formatRelativeTime(lastSyncAt)}
-          </p>
-        </div>
-      )}
-    </div>
-  );
-}
-
-function formatRelativeTime(timestamp: number): string {
-  const now = Date.now();
-  const diff = now - timestamp;
-  const minutes = Math.floor(diff / 60000);
-
-  if (minutes < 1) return "just now";
-  if (minutes < 60) return `${minutes}m ago`;
-
-  const hours = Math.floor(minutes / 60);
-  if (hours < 24) return `${hours}h ago`;
-
-  const days = Math.floor(hours / 24);
-  return `${days}d ago`;
-}
-
-// Task 8.8: Social Integration Card for LinkedIn/Twitter
-interface SocialIntegrationCardProps {
-  config: SocialIntegrationConfig;
-  isConnected: boolean;
-  isLoading: boolean;
-  lastSyncAt: number | null;
-  totalContactsSynced: number;
-}
-
-function SocialIntegrationCard({
-  config,
-  isConnected,
-  isLoading,
-  lastSyncAt,
-  totalContactsSynced,
-}: SocialIntegrationCardProps) {
-  const [twitterUsername, setTwitterUsername] = useState("");
-
-  function renderStatusAndAction() {
-    if (isLoading) {
-      return <Skeleton className="h-9 w-24" />;
-    }
-
-    if (isConnected) {
-      return (
-        <div className="flex items-center gap-2">
-          <div className="flex items-center gap-1.5 text-green-600">
-            <CheckCircle2Icon className="size-4" />
-            <span className="text-xs font-medium">Logged In</span>
-          </div>
-          <Button variant="outline" size="sm" disabled>
-            <RefreshCwIcon className="size-4 mr-2" />
-            Scrape Now
-          </Button>
-        </div>
-      );
-    }
-
-    return (
-      <div className="flex items-center gap-2">
-        <div className="flex items-center gap-1.5 text-muted-foreground">
-          <XCircleIcon className="size-4" />
-          <span className="text-xs">Not logged in</span>
-        </div>
-        <Button variant="outline" size="sm" disabled>
-          <ExternalLinkIcon className="size-4 mr-2" />
-          Open Login
-        </Button>
-      </div>
-    );
-  }
-
-  return (
-    <div className="rounded-lg border bg-card">
-      <div className="flex items-center justify-between p-4">
-        <div className="flex items-center gap-4">
-          <div
-            className={`flex size-12 items-center justify-center rounded-lg bg-muted ${config.color}`}
-          >
-            {config.icon}
-          </div>
-          <div>
-            <h3 className="text-sm font-medium">{config.name}</h3>
-            <p className="text-xs text-muted-foreground">{config.description}</p>
-          </div>
-        </div>
-        <div className="flex items-center gap-3">{renderStatusAndAction()}</div>
-      </div>
-
-      {/* Twitter username input */}
-      {config.id === "twitter" && (
-        <div className="border-t px-4 py-3">
-          <label className="text-xs text-muted-foreground block mb-1.5">
-            Username to scrape mutuals for
-          </label>
-          <Input
-            placeholder="@username"
-            value={twitterUsername}
-            onChange={(e) => setTwitterUsername(e.target.value)}
-            className="h-8 text-sm"
-          />
-        </div>
-      )}
-
-      {/* Stats section */}
-      {(isConnected || totalContactsSynced > 0) && (
-        <div className="border-t px-4 py-2 flex items-center gap-4">
-          {totalContactsSynced > 0 && (
-            <div className="flex items-center gap-1.5 text-muted-foreground">
-              <UsersIcon className="size-3.5" />
-              <span className="text-xs">{totalContactsSynced} connections</span>
-            </div>
-          )}
-          {lastSyncAt && (
-            <span className="text-xs text-muted-foreground">
-              Last scraped {formatRelativeTime(lastSyncAt)}
-            </span>
-          )}
-        </div>
-      )}
-
-      {/* Desktop app required notice */}
-      <div className="border-t px-4 py-2 bg-muted/30">
-        <p className="text-xs text-muted-foreground">
-          💡 Requires the PRM desktop app to scrape social connections
-        </p>
       </div>
     </div>
   );

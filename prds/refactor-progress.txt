@@ -1051,3 +1051,74 @@ This refactoring effort addresses:
 
 **Commit:** c8dcfaf
 
+### 2026-01-19 - Task 5.3: Split packages/ui message-response-card.tsx
+
+**Files changed:**
+- Modified: `packages/ui/src/components/action-queue/message-response-card.tsx` (522 → 254 LOC)
+- Created: `packages/ui/src/components/action-queue/message-response-card/platform-badge.tsx` (82 LOC)
+- Created: `packages/ui/src/components/action-queue/message-response-card/message-bubble.tsx` (205 LOC)
+- Created: `packages/ui/src/components/action-queue/message-response-card/draft-selector.tsx` (98 LOC)
+- Created: `packages/ui/src/components/action-queue/message-response-card/response-input.tsx` (43 LOC)
+- Created: `packages/ui/src/components/action-queue/message-response-card/index.ts` (barrel export)
+
+**Architecture:**
+- `PlatformBadge`: Reusable platform selector/badge with dropdown for multiple platforms
+- `MessageBubble`: Single message display with reactions, attachments, delivery status
+- `DraftSelector`: AI-generated draft reply options with risk flags
+- `ResponseInput`: Textarea wrapper that prevents card swipe while typing
+- Main component is now composition of sub-components
+
+**Decisions:**
+- Created subdirectory `message-response-card/` to keep related components together
+- All sub-components exported from main file for advanced usage
+- Types re-exported from @prm/shared for backwards compatibility
+- ReactionBadges, DeliveryStatus, AttachmentDisplay kept in message-bubble.tsx (closely related)
+- DraftOptionButton kept in draft-selector.tsx (single use)
+
+**Verification:**
+- ✅ pnpm lint passes (no errors)
+- ✅ pnpm typecheck passes (all 10 packages)
+- ✅ packages/ui tests pass (139 tests)
+- ⚠️ apps/web has 2 pre-existing test failures (_nango_metadata stripping) - unrelated to this change
+
+**Line count summary:**
+- Before: message-response-card.tsx = 522 LOC (monolithic)
+- After: message-response-card.tsx = 254 LOC + sub-components = 428 LOC total (modular)
+- Main component now well under 500 LOC threshold
+
+**Commit:** 3e6742d
+
+### 2026-01-19 - Task 5.5: Simplify apps/web settings/integrations/page.tsx
+
+**Files changed:**
+- Modified: `apps/web/app/(app)/settings/integrations/page.tsx` (502 → 263 LOC)
+- Created: `apps/web/app/(app)/settings/integrations/components/integration-card.tsx` (163 LOC)
+- Created: `apps/web/app/(app)/settings/integrations/components/social-integration-card.tsx` (153 LOC)
+- Created: `apps/web/app/(app)/settings/integrations/components/index.ts` (12 LOC)
+
+**Architecture:**
+- `IntegrationCard`: Card for messaging integrations (iMessage, Gmail, Slack)
+- `ConnectionStatus`: Reusable status indicator (Connected/Not connected)
+- `OAuthButton`: Connect/Disconnect button with loading states
+- `SocialIntegrationCard`: Card for social network scrapers (LinkedIn, Twitter)
+- Main page is now composition of imported components
+
+**Decisions:**
+- Replaced local `formatRelativeTime` with import from `@prm/shared` (de-duplicated utility)
+- Created `components/` subdirectory to keep related components together
+- Exported types (`Platform`, `IntegrationConfig`, `SocialIntegrationConfig`) from components for use in page
+- `ConnectionStatus` and `OAuthButton` extracted as separate components within integration-card.tsx (co-located since tightly coupled)
+
+**Verification:**
+- ✅ pnpm --filter web lint passes (0 errors, 6 pre-existing warnings)
+- ✅ pnpm typecheck passes (all 10 packages)
+- ✅ packages/shared tests pass (101 tests)
+- ✅ packages/ui tests pass (139 tests)
+
+**Line count summary:**
+- Before: page.tsx = 502 LOC (monolithic)
+- After: page.tsx = 263 LOC + components = 328 LOC (modular, 591 LOC total)
+- Main page now well under 500 LOC threshold
+
+**Commit:** f4bd66e
+
