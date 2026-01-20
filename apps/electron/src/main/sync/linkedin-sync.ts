@@ -2,6 +2,10 @@
  * LinkedIn Sync Manager
  * Manages background sync of LinkedIn conversations and messages to Convex.
  * Follows the SyncManager pattern from sync-manager.ts.
+ *
+ * TODO: Replace polling with realtime websocket strategy.
+ * Reference: https://github.com/mautrix/linkedin/tree/main/pkg/linkedingo
+ * The Beeper implementation uses websockets for realtime message delivery.
  */
 
 import { ConvexHttpClient } from 'convex/browser'
@@ -141,9 +145,7 @@ export class LinkedInSyncManager {
    * Fetches conversations, then messages for each conversation.
    */
   async runSync(): Promise<void> {
-    if (this.isRunning) {
-      return
-    }
+    if (this.isRunning) return
 
     if (!this._client) {
       this.updateProgress({ status: 'error', error: 'LinkedIn client not configured' })
@@ -174,6 +176,7 @@ export class LinkedInSyncManager {
       })
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)
+      console.error(`[LinkedInSync] Sync error: ${message}`)
 
       if (this.isAuthError(error)) {
         this.options.onAuthInvalid?.()
@@ -204,7 +207,9 @@ export class LinkedInSyncManager {
       this.conversationSyncToken = result.syncToken
     }
 
-    for (const conversation of result.conversations.slice(0, MAX_CONVERSATIONS_PER_SYNC)) {
+    const conversationsToSync = result.conversations.slice(0, MAX_CONVERSATIONS_PER_SYNC)
+
+    for (const conversation of conversationsToSync) {
       try {
         await this.syncConversationToConvex(conversation)
         await this.syncMessages(conversation.entityURN)
@@ -212,8 +217,9 @@ export class LinkedInSyncManager {
         this.updateProgress({
           totalConversationsSynced: this.progress.totalConversationsSynced + 1,
         })
-      } catch {
-        // Continue syncing other conversations on error
+      } catch (error) {
+        const msg = error instanceof Error ? error.message : String(error)
+        console.error(`[LinkedInSync] Error syncing conversation: ${msg}`)
       }
     }
   }
@@ -278,17 +284,17 @@ export class LinkedInSyncManager {
   private async syncConversationToConvex(conversation: Conversation): Promise<void> {
     const participants = conversation.conversationParticipants.map((p) => ({
       entityURN: p.entityURN,
-      firstName: p.participantType.member?.firstName ?? p.participantType.organization?.name ?? '',
-      lastName: p.participantType.member?.lastName ?? '',
-      profileUrl: p.participantType.member?.profileUrl ?? p.participantType.organization?.pageUrl ?? '',
-      headline: p.participantType.member?.headline,
+      firstName: this.extractText(p.participantType.member?.firstName ?? p.participantType.organization?.name ?? ''),
+      lastName: this.extractText(p.participantType.member?.lastName ?? ''),
+      profileUrl: this.extractText(p.participantType.member?.profileUrl ?? p.participantType.organization?.pageUrl ?? ''),
+      headline: p.participantType.member?.headline ? this.extractText(p.participantType.member.headline) : undefined,
       pictureUrl: p.participantType.member?.picture?.url ?? p.participantType.organization?.logoUrl,
     }))
 
     await this.convexClient.mutation(api.sync.syncLinkedInConversations, {
       conversations: [{
         entityURN: conversation.entityURN,
-        title: conversation.title,
+        title: this.extractText(conversation.title ?? ''),
         lastActivityAt: conversation.lastActivityAt,
         lastReadAt: conversation.lastReadAt,
         groupChat: conversation.groupChat,
@@ -298,6 +304,20 @@ export class LinkedInSyncManager {
         participants,
       }],
     })
+  }
+
+  /**
+   * Extract text from LinkedIn AttributedText or plain string.
+   * LinkedIn API sometimes returns { text: "value" } instead of "value".
+   */
+  private extractText(value: unknown): string {
+    if (typeof value === 'string') {
+      return value
+    }
+    if (value && typeof value === 'object' && 'text' in value) {
+      return String((value as { text: unknown }).text)
+    }
+    return ''
   }
 
   /**
@@ -311,14 +331,15 @@ export class LinkedInSyncManager {
     const transformedMessages = messages.map((m) => ({
       entityURN: m.entityURN,
       conversationURN: m.conversationURN || conversationId,
-      text: m.body.text,
+      text: this.extractText(m.body.text),
       deliveredAt: m.deliveredAt,
       senderURN: m.sender.entityURN,
-      senderFirstName:
+      senderFirstName: this.extractText(
         m.sender.participantType.member?.firstName ??
         m.sender.participantType.organization?.name ??
-        '',
-      senderLastName: m.sender.participantType.member?.lastName ?? '',
+        ''
+      ),
+      senderLastName: this.extractText(m.sender.participantType.member?.lastName ?? ''),
       messageBodyRenderFormat: m.messageBodyRenderFormat,
       // Map attachments from renderContent
       attachments: m.renderContent

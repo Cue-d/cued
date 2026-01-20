@@ -64,24 +64,11 @@ export abstract class SocialScraper {
    * Store cookies securely using Electron safeStorage.
    */
   protected async storeCookies(): Promise<void> {
-    if (!this.context) {
-      console.log(`[${this.platform}] storeCookies: no context`)
-      return
-    }
-    if (!this.isStorageAvailable()) {
-      console.warn(`[${this.platform}] Secure storage not available, cookies will not be persisted`)
+    if (!this.context || !this.isStorageAvailable()) {
       return
     }
 
     const cookies = await this.context.cookies()
-    console.log(`[${this.platform}] storeCookies: ${cookies.length} total cookies`)
-
-    // Log auth-related cookies
-    const authCookies = cookies.filter(c =>
-      c.name === 'li_at' || c.name === 'JSESSIONID' || c.name === 'auth_token'
-    )
-    console.log(`[${this.platform}] storeCookies: auth cookies found:`, authCookies.map(c => c.name))
-
     const storedCookies: StoredCookies = {
       platform: this.platform,
       cookies: cookies.map((c) => ({
@@ -103,27 +90,18 @@ export abstract class SocialScraper {
     const data = JSON.stringify(storedCookies)
     const encrypted = safeStorage.encryptString(data)
     writeFileSync(cookiesPath, encrypted)
-    console.log(`[${this.platform}] storeCookies: saved to ${cookiesPath}`)
   }
 
   /**
    * Load stored cookies into the browser context.
    */
   protected async loadCookies(): Promise<boolean> {
-    console.log(`[${this.platform}] loadCookies: starting`)
-
-    if (!this.context) {
-      console.log(`[${this.platform}] loadCookies: no context`)
-      return false
-    }
-    if (!this.isStorageAvailable()) {
-      console.log(`[${this.platform}] loadCookies: secure storage not available`)
+    if (!this.context || !this.isStorageAvailable()) {
       return false
     }
 
     const cookiesPath = this.getCookiesPath()
     if (!existsSync(cookiesPath)) {
-      console.log(`[${this.platform}] loadCookies: no saved cookies at ${cookiesPath}`)
       return false
     }
 
@@ -132,27 +110,16 @@ export abstract class SocialScraper {
       const decrypted = safeStorage.decryptString(encrypted)
       const storedCookies: StoredCookies = JSON.parse(decrypted)
 
-      console.log(`[${this.platform}] loadCookies: found ${storedCookies.cookies.length} stored cookies, saved ${Math.round((Date.now() - storedCookies.savedAt) / 1000 / 60)} minutes ago`)
-
       // Check if cookies are too old (7 days)
       const maxAgeMs = 7 * 24 * 60 * 60 * 1000
       if (Date.now() - storedCookies.savedAt > maxAgeMs) {
-        console.log(`[${this.platform}] loadCookies: cookies too old, clearing`)
         this.clearCookies()
         return false
       }
 
-      // Log auth-related cookies
-      const authCookies = storedCookies.cookies.filter(c =>
-        c.name === 'li_at' || c.name === 'JSESSIONID' || c.name === 'auth_token'
-      )
-      console.log(`[${this.platform}] loadCookies: auth cookies found:`, authCookies.map(c => c.name))
-
       await this.context.addCookies(storedCookies.cookies)
-      console.log(`[${this.platform}] loadCookies: cookies added to context`)
       return true
-    } catch (error) {
-      console.error(`[${this.platform}] loadCookies: error`, error)
+    } catch {
       return false
     }
   }
