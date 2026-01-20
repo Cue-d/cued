@@ -1,53 +1,6 @@
 # PRM Project .gitignore
 
 # ============================================================
-# Python
-# ============================================================
-__pycache__/
-*.py[cod]
-*$py.class
-*.so
-.Python
-build/
-develop-eggs/
-dist/
-downloads/
-eggs/
-.eggs/
-lib/
-!frontend/src/renderer/src/lib/
-!packages/convex/convex/lib/
-!apps/mobile/src/lib/
-!packages/ui/src/lib/
-lib64/
-parts/
-sdist/
-var/
-wheels/
-pip-wheel-metadata/
-share/python-wheels/
-*.egg-info/
-.installed.cfg
-*.egg
-MANIFEST
-
-# Virtual environments
-venv/
-env/
-ENV/
-!packages/env/
-env.bak/
-venv.bak/
-.venv/
-
-# PyInstaller
-*.manifest
-*.spec
-
-# FastAPI / uvicorn
-*.log
-
-# ============================================================
 # Node.js / Electron
 # ============================================================
 node_modules/
@@ -150,15 +103,6 @@ credentials.json
 # ============================================================
 # Testing & Coverage
 # ============================================================
-.pytest_cache/
-.coverage
-.coverage.*
-htmlcov/
-.tox/
-.nox/
-coverage.xml
-*.cover
-.hypothesis/
 **/coverage/
 
 # Playwright
@@ -182,7 +126,6 @@ blob-report/
 *.tar.gz
 
 # Documentation builds
-docs/_build/
 site/
 
 # ============================================================
@@ -204,6 +147,9 @@ apps/electron/swift/.build/
 # Turborepo
 # ============================================================
 .turbo/
+
+# Package build outputs
+packages/*/dist/
 
 # ============================================================
 # Nango Integrations

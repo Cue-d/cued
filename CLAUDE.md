@@ -183,6 +183,78 @@ Build Swift: `cd apps/electron/swift && swift build -c release`
 | Swift build fails | Requires macOS 15+ and Swift 6.0+ |
 
 
+## Linear Integration & PRD Automation
+
+We use Linear MCP to track features and automatically generate PRDs.
+
+### AI Agent Instructions (IMPORTANT)
+
+When a user asks to work on a Linear issue or create a PRD:
+
+1. **Fetch issue details** using Linear MCP:
+   ```
+   mcp__linear__get_issue with id: "PRM-123"
+   ```
+
+2. **Generate PRD automatically** by running:
+   ```bash
+   cd scripts && pnpm prd pull PRM-123
+   ```
+   This creates `prds/prm-123-prd.json` with tasks extracted from the issue.
+
+3. **Execute PRD tasks** with:
+   ```bash
+   cd scripts && pnpm prd run prds/prm-123-prd.json
+   ```
+   Use `--interactive` flag for step-by-step confirmation.
+
+4. **Sync progress to Linear** after completing tasks:
+   ```bash
+   cd scripts && pnpm prd sync prds/prm-123-prd.json
+   ```
+
+### When to Auto-Generate PRDs
+
+Automatically run `pnpm prd pull <issue-id>` when the user:
+- Says "work on PRM-123" or "start PRM-123"
+- Says "create PRD for PRM-123"
+- Asks to implement a feature tied to a Linear issue
+- References a Linear issue and asks for a plan
+
+### Direct Linear Commands
+
+You can also use Linear MCP directly:
+- `mcp__linear__list_issues` - List issues assigned to user
+- `mcp__linear__get_issue` - Get issue details
+- `mcp__linear__update_issue` - Update status, assignee, etc.
+- `mcp__linear__create_comment` - Add progress comments
+
+### Branch Naming
+
+Use Linear issue IDs: `theotarr/prm-123-dark-mode`
+
+### Link PRs to Linear Issues
+
+After creating a PR, automatically link it to the Linear issue:
+```bash
+cd scripts && pnpm prd link-pr PRM-123 https://github.com/org/repo/pull/456
+```
+
+**AI agents MUST run this after `gh pr create` succeeds.** Extract the PR URL from the gh output and link it.
+
+### Example Workflow
+
+User: "Work on PRM-123"
+
+1. Fetch issue: `mcp__linear__get_issue` with id "PRM-123"
+2. Generate PRD: `cd scripts && pnpm prd pull PRM-123`
+3. Update status: `mcp__linear__update_issue` → "In Progress"
+4. Create branch: `git checkout -b theotarr/prm-123-feature-name`
+5. Execute tasks from PRD
+6. Sync progress: `cd scripts && pnpm prd sync prds/prm-123-prd.json`
+7. Create PR: `gh pr create ...` → capture PR URL
+8. Link PR: `cd scripts && pnpm prd link-pr PRM-123 <pr-url>`
+
 ## Plan Mode
 
 - Make the plan extremely concise. Sacrifice grammar for the sake of concision.
