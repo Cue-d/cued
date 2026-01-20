@@ -1,10 +1,18 @@
 import Link from "next/link";
+import { redirect } from "next/navigation";
+import { withAuth } from "@workos-inc/authkit-nextjs";
 
-export default function MarketingLayout({
+export default async function MarketingLayout({
   children,
 }: {
   children: React.ReactNode;
 }) {
+  const { user } = await withAuth();
+
+  if (user) {
+    redirect("/inbox");
+  }
+
   return (
     <div className="flex min-h-screen flex-col bg-background">
       <header className="sticky top-0 z-50 border-b border-border bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
@@ -12,16 +20,16 @@ export default function MarketingLayout({
           <Link href="/" className="flex items-center gap-2">
             <span className="text-xl font-bold tracking-tight">PRM</span>
           </Link>
-          <div className="flex items-center gap-4">
+          <div className="flex items-center gap-3">
             <Link
               href="/sign-in"
-              className="text-sm font-medium text-muted-foreground hover:text-foreground"
+              className="inline-flex h-8 items-center justify-center rounded-md px-2.5 text-sm font-medium hover:bg-muted hover:text-foreground"
             >
               Sign In
             </Link>
             <Link
               href="/sign-up"
-              className="inline-flex h-8 items-center justify-center rounded-md bg-primary px-3 text-sm font-medium text-primary-foreground hover:bg-primary/90"
+              className="inline-flex h-8 items-center justify-center rounded-md bg-primary px-2.5 text-sm font-medium text-primary-foreground hover:bg-primary/80"
             >
               Get Started
             </Link>
@@ -32,7 +40,7 @@ export default function MarketingLayout({
       <footer className="border-t border-border py-6">
         <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
           <p className="text-center text-sm text-muted-foreground">
-            PRM - Your personal relationship manager
+            PRM &ndash; Your personal relationship manager
           </p>
         </div>
       </footer>

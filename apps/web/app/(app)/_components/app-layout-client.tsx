@@ -1,6 +1,6 @@
 "use client";
 
-import { ReactNode, useEffect, useRef } from "react";
+import { ReactNode, useCallback, useEffect, useRef } from "react";
 import { signOut } from "@workos-inc/authkit-nextjs";
 import { useQuery, useMutation } from "convex/react";
 import { api } from "@prm/convex";
@@ -49,9 +49,13 @@ export function AppLayoutClient({
 
   const actionCount = actionCountResult?.count ?? 0;
 
+  const handleSignOut = useCallback(() => {
+    signOut();
+  }, []);
+
   return (
     <SidebarProvider>
-      <AppSidebar user={user} onSignOut={signOut} actionCount={actionCount} />
+      <AppSidebar user={user} onSignOut={handleSignOut} actionCount={actionCount} />
       <SidebarInset>{children}</SidebarInset>
       <CommandMenu />
     </SidebarProvider>
