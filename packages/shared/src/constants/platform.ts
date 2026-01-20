@@ -16,7 +16,14 @@
 /**
  * Supported messaging platforms for actions.
  */
-export type ActionPlatform = "imessage" | "gmail" | "slack" | "linkedin";
+export type ActionPlatform =
+  | "imessage"
+  | "gmail"
+  | "slack"
+  | "linkedin"
+  | "twitter"
+  | "signal"
+  | "whatsapp";
 
 /**
  * Platform configuration object.
@@ -77,6 +84,27 @@ export const PLATFORM_CONFIG: Record<ActionPlatform, PlatformConfigItem> = {
     textClass: "text-blue-600",
     bgClass: "bg-blue-600 text-white",
     letter: "L",
+  },
+  twitter: {
+    label: "Twitter",
+    color: "#1d9bf0",
+    textClass: "text-sky-500",
+    bgClass: "bg-sky-500 text-white",
+    letter: "X",
+  },
+  signal: {
+    label: "Signal",
+    color: "#3a76f0",
+    textClass: "text-blue-500",
+    bgClass: "bg-blue-500 text-white",
+    letter: "S",
+  },
+  whatsapp: {
+    label: "WhatsApp",
+    color: "#25d366",
+    textClass: "text-emerald-500",
+    bgClass: "bg-emerald-500 text-white",
+    letter: "W",
   },
 };
 

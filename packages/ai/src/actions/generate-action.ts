@@ -152,7 +152,7 @@ export interface ActionMessage {
 export interface GenerateActionInput {
   contact: ContactInfo;
   messages: ActionMessage[];
-  platform: "imessage" | "gmail" | "slack" | "linkedin" | "twitter";
+  platform: "imessage" | "gmail" | "slack" | "linkedin" | "twitter" | "signal" | "whatsapp";
   hoursSinceLastMessage: number;
   /** Recent actions for this conversation (to avoid duplicates) */
   recentActions?: RecentAction[];

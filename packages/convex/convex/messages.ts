@@ -61,12 +61,15 @@ async function fetchInbox(
   const hasMore = filtered.length > limit;
   const page = hasMore ? filtered.slice(0, limit) : filtered;
 
-  // Resolve participant contact names
+  // Resolve participant contact names and handles
   const conversationsWithParticipants = await Promise.all(
     page.map(async (conversation) => {
+      // Include handles for DM conversations (needed for sending messages)
+      const isDm = conversation.conversationType === "dm";
       const participants = await resolveParticipants(
         ctx,
-        conversation.participantContactIds
+        conversation.participantContactIds,
+        isDm ? { includeHandles: true, platform: conversation.platform } : undefined
       );
 
       // For groups without displayName, build name from participants
@@ -211,22 +214,44 @@ export const getMessages = query({
 });
 
 /**
- * Resolve an array of contact IDs to participant info.
+ * Resolve an array of contact IDs to participant info, optionally including handles.
  */
 async function resolveParticipants(
   ctx: QueryCtx,
-  contactIds: Id<"contacts">[]
-): Promise<Array<{ _id: Id<"contacts">; displayName: string }>> {
+  contactIds: Id<"contacts">[],
+  options?: { includeHandles?: boolean; platform?: string }
+): Promise<Array<{ _id: Id<"contacts">; displayName: string; handle?: string }>> {
   const contacts = await Promise.all(
     contactIds.map((id) => ctx.db.get(id))
   );
 
-  return contacts
-    .filter((c): c is Doc<"contacts"> => c !== null)
-    .map((c) => ({
-      _id: c._id,
-      displayName: c.displayName,
-    }));
+  const validContacts = contacts.filter((c): c is Doc<"contacts"> => c !== null);
+
+  // Optionally fetch handles for the contacts
+  let handleMap = new Map<string, string>();
+  if (options?.includeHandles && options?.platform) {
+    const handles = await Promise.all(
+      validContacts.map(async (c) => {
+        const handle = await ctx.db
+          .query("contactHandles")
+          .withIndex("by_contact", (q) => q.eq("contactId", c._id))
+          .filter((q) => q.eq(q.field("platform"), options.platform))
+          .first();
+        return { contactId: c._id, handle: handle?.handle ?? null };
+      })
+    );
+    for (const h of handles) {
+      if (h.handle) {
+        handleMap.set(h.contactId, h.handle);
+      }
+    }
+  }
+
+  return validContacts.map((c) => ({
+    _id: c._id,
+    displayName: c.displayName,
+    handle: handleMap.get(c._id),
+  }));
 }
 
 /**

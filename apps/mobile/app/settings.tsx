@@ -11,10 +11,20 @@ import { router } from "expo-router";
 import { SymbolView } from "expo-symbols";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Uniwind, useUniwind } from "uniwind";
+import { useQuery, useMutation } from "convex/react";
+import { api } from "@prm/convex";
 import { getInitials } from "@prm/shared";
 import { getRedirectUri } from "@/lib/auth";
 import { cn, getDisplayName, getThemeColors } from "@/lib/utils";
 import { useAuth } from "@/providers/AuthProvider";
+
+const UNDO_DELAY_OPTIONS = [
+  { value: 3, label: "3 seconds" },
+  { value: 5, label: "5 seconds" },
+  { value: 10, label: "10 seconds" },
+  { value: 15, label: "15 seconds" },
+  { value: 30, label: "30 seconds" },
+] as const;
 
 function Avatar({ name, size = 80 }: { name: string; size?: number }): React.ReactElement {
   return (
@@ -117,6 +127,12 @@ export default function SettingsScreen(): React.ReactElement {
   const activeTheme: ThemeValue = hasAdaptiveThemes ? "system" : theme;
   const activeThemeLabel = THEME_OPTIONS.find((o) => o.value === activeTheme)?.label;
 
+  // Undo send delay settings
+  const userSettings = useQuery(api.users.getSettings);
+  const updateUndoDelay = useMutation(api.users.updateUndoSendDelay);
+  const currentDelay = userSettings?.undoSendDelaySeconds ?? 30;
+  const currentDelayLabel = UNDO_DELAY_OPTIONS.find((o) => o.value === currentDelay)?.label ?? "30 seconds";
+
   function handleSignOut(): void {
     Alert.alert("Sign Out", "Are you sure you want to sign out?", [
       { text: "Cancel", style: "cancel" },
@@ -158,6 +174,20 @@ export default function SettingsScreen(): React.ReactElement {
     );
   }
 
+  function handleUndoDelayChange(): void {
+    Alert.alert(
+      "Undo Send Delay",
+      "Time to cancel a message before it sends",
+      UNDO_DELAY_OPTIONS.map((option) => ({
+        text: option.label + (currentDelay === option.value ? " ✓" : ""),
+        onPress: () => {
+          Haptics.selectionAsync();
+          updateUndoDelay({ delaySeconds: option.value });
+        },
+      }))
+    );
+  }
+
   return (
     <SafeAreaView className="flex-1" style={{ backgroundColor: colors.secondaryBackground }}>
       <View className="items-center mt-12">
@@ -188,6 +218,13 @@ export default function SettingsScreen(): React.ReactElement {
           label="Appearance"
           value={activeThemeLabel}
           onPress={handleThemeChange}
+        />
+        <Divider />
+        <SettingsRow
+          icon="clock.arrow.circlepath"
+          label="Undo Send Delay"
+          value={currentDelayLabel}
+          onPress={handleUndoDelayChange}
         />
       </SettingsSection>
 

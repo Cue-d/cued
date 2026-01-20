@@ -10,18 +10,20 @@ import { useRouter } from "expo-router";
 import { useMutation, useQuery } from "convex/react";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { api } from "@prm/convex/convex/_generated/api";
+import type { ActionPlatform } from "@prm/shared";
 import { ActionButtons } from "@/components/action-buttons";
 import { CardStack } from "@/components/card-stack";
 import {
   MessageResponseCard,
   ContactCard,
-  type ActionPlatform,
+  type ActionPlatform as CardActionPlatform,
   type DisplayMessage,
   type ContactFormData,
   type DraftOption,
 } from "@/components/cards";
 import { ErrorBoundary } from "@/components/error-boundary";
 import { SkeletonStack } from "@/components/skeleton-card";
+import { UndoSendToast } from "@/components/undo-send-toast";
 import { useActions } from "@/hooks/useActions";
 import { useElectronPresence } from "@/hooks/useElectronPresence";
 import type { SwipeDirection } from "@/components/swipeable-card";
@@ -76,13 +78,25 @@ const MESSAGE_ACTION_TYPES = ["respond", "follow_up", "send_message"];
 /** Action types that use ContactCard */
 const CONTACT_ACTION_TYPES = ["eod_contact", "new_connection"];
 
+/** Data for a queued message toast */
+interface QueuedMessageToast {
+  messageId: string;
+  platform: ActionPlatform;
+  recipientName: string;
+  messagePreview?: string;
+}
+
 export default function ActionsScreen(): React.JSX.Element {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const { actions, isLoading } = useActions({ limit: 20 });
   const { isOnline: isDesktopOnline } = useElectronPresence();
   const swipeAction = useMutation(api.actions.swipeAction);
+  const cancelMessage = useMutation(api.messageQueue.cancelMessage);
   const [triggerSwipe, setTriggerSwipe] = useState<SwipeDirection | null>(null);
+
+  // Track queued messages for undo toast display
+  const [queuedMessages, setQueuedMessages] = useState<QueuedMessageToast[]>([]);
 
   // Get the top action ID for fetching context with messages
   const topActionId = actions[0]?._id as Id<"actions"> | undefined;
@@ -212,12 +226,25 @@ export default function ActionsScreen(): React.JSX.Element {
           : getResponseText(action);
 
       try {
-        await swipeAction({
+        const result = await swipeAction({
           actionId: action._id as Id<"actions">,
           direction,
           responseText,
         });
         await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+
+        // Show undo toast for queued messages (iMessage, LinkedIn)
+        if (result?.queuedMessageId && action.platform) {
+          setQueuedMessages((prev) => [
+            ...prev,
+            {
+              messageId: result.queuedMessageId as string,
+              platform: action.platform as ActionPlatform,
+              recipientName: action.contactName ?? "Unknown",
+              messagePreview: responseText,
+            },
+          ]);
+        }
       } catch (error) {
         console.error("Failed to swipe action:", error);
         await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
@@ -233,6 +260,22 @@ export default function ActionsScreen(): React.JSX.Element {
       setTriggerSwipe(direction);
     },
     [actions.length],
+  );
+
+  // Handle undo for a queued message
+  const handleUndoMessage = useCallback(
+    async (messageId: string) => {
+      await cancelMessage({ messageId: messageId as Id<"messageQueue"> });
+    },
+    [cancelMessage],
+  );
+
+  // Handle toast dismissal (remove from local state)
+  const handleToastDismiss = useCallback(
+    (messageId: string, _reason: "sent" | "cancelled" | "closed") => {
+      setQueuedMessages((prev) => prev.filter((m) => m.messageId !== messageId));
+    },
+    [],
   );
 
   // Render card based on action type
@@ -338,6 +381,31 @@ export default function ActionsScreen(): React.JSX.Element {
               skipLabel="Skip"
               sendLabel="Send"
             />
+          </View>
+        )}
+
+        {/* Undo send toasts for queued messages */}
+        {queuedMessages.length > 0 && (
+          <View
+            style={{
+              position: "absolute",
+              bottom: 56 + insets.bottom + 80,
+              left: 0,
+              right: 0,
+              gap: 8,
+            }}
+          >
+            {queuedMessages.slice(0, 3).map((msg) => (
+              <UndoSendToast
+                key={msg.messageId}
+                messageId={msg.messageId}
+                platform={msg.platform}
+                recipientName={msg.recipientName}
+                messagePreview={msg.messagePreview}
+                onUndo={handleUndoMessage}
+                onDismiss={handleToastDismiss}
+              />
+            ))}
           </View>
         )}
       </View>

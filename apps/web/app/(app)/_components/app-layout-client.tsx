@@ -3,8 +3,15 @@
 import { ReactNode, useCallback, useEffect, useRef } from "react";
 import { signOut } from "@workos-inc/authkit-nextjs";
 import { useQuery, useMutation } from "convex/react";
-import { api } from "@prm/convex";
-import { SidebarProvider, SidebarInset, AppSidebar, CommandMenu } from "@prm/ui";
+import { api, Id } from "@prm/convex";
+import {
+  SidebarProvider,
+  SidebarInset,
+  AppSidebar,
+  CommandMenu,
+  UndoSendProvider,
+  type PendingMessage,
+} from "@prm/ui";
 
 interface WorkosProfile {
   email: string;
@@ -26,6 +33,36 @@ export function AppLayoutClient({
   const actionCountResult = useQuery(api.actions.getPendingActionCount, {});
   const syncProfile = useMutation(api.users.syncProfile);
   const hasSynced = useRef(false);
+
+  // Message queue for undo send functionality
+  const pendingMessagesResult = useQuery(api.messageQueue.getPendingMessages, {});
+  const cancelMessageMutation = useMutation(api.messageQueue.cancelMessage);
+  const sendImmediatelyMutation = useMutation(api.messageQueue.sendImmediately);
+
+  const handleCancelMessage = useCallback(
+    async (messageId: string) => {
+      await cancelMessageMutation({ messageId: messageId as Id<"messageQueue"> });
+    },
+    [cancelMessageMutation]
+  );
+
+  const handleSendNow = useCallback(
+    async (messageId: string) => {
+      await sendImmediatelyMutation({ messageId: messageId as Id<"messageQueue"> });
+    },
+    [sendImmediatelyMutation]
+  );
+
+  // Transform Convex messages to PendingMessage type for UndoSendProvider
+  const pendingMessages: PendingMessage[] = (pendingMessagesResult?.messages ?? []).map((m) => ({
+    _id: m._id,
+    platform: m.platform,
+    recipientHandle: m.recipientHandle,
+    recipientContactId: m.recipientContactId,
+    text: m.text,
+    scheduledFor: m.scheduledFor,
+    timeRemainingMs: m.timeRemainingMs,
+  }));
 
   // Sync user profile from WorkOS on first load
   useEffect(() => {
@@ -54,10 +91,16 @@ export function AppLayoutClient({
   }, []);
 
   return (
-    <SidebarProvider>
-      <AppSidebar user={user} onSignOut={handleSignOut} actionCount={actionCount} />
-      <SidebarInset>{children}</SidebarInset>
-      <CommandMenu />
-    </SidebarProvider>
+    <UndoSendProvider
+      pendingMessages={pendingMessages}
+      onCancelMessage={handleCancelMessage}
+      onSendNow={handleSendNow}
+    >
+      <SidebarProvider>
+        <AppSidebar user={user} onSignOut={handleSignOut} actionCount={actionCount} />
+        <SidebarInset>{children}</SidebarInset>
+        <CommandMenu />
+      </SidebarProvider>
+    </UndoSendProvider>
   );
 }

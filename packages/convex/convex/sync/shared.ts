@@ -199,7 +199,7 @@ export async function batchResolveHandles(
 export function findIntegration(
   ctx: QueryCtx,
   userId: Id<"users">,
-  platform: "imessage" | "gmail" | "slack" | "linkedin" | "twitter"
+  platform: "imessage" | "gmail" | "slack" | "linkedin" | "twitter" | "signal" | "whatsapp"
 ): Promise<Doc<"integrations"> | null> {
   return ctx.db
     .query("integrations")
@@ -215,7 +215,7 @@ export function findIntegration(
 export async function getOrCreateIntegration(
   ctx: MutationCtx,
   userId: Id<"users">,
-  platform: "imessage" | "gmail" | "slack" | "linkedin" | "twitter"
+  platform: "imessage" | "gmail" | "slack" | "linkedin" | "twitter" | "signal" | "whatsapp"
 ): Promise<Doc<"integrations">> {
   const existing = await findIntegration(ctx, userId, platform);
   if (existing) return existing;

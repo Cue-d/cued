@@ -1,11 +1,29 @@
 "use client";
 
 import { useMemo } from "react";
-import { useQuery } from "convex/react";
-import { BrainIcon, ClockIcon } from "lucide-react";
+import { useQuery, useMutation } from "convex/react";
+import { BrainIcon, ClockIcon, SendIcon } from "lucide-react";
 import { api } from "@prm/convex";
 import { getInitials } from "@prm/shared";
-import { Avatar, AvatarFallback, Skeleton, Separator } from "@prm/ui";
+import {
+  Avatar,
+  AvatarFallback,
+  Skeleton,
+  Separator,
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@prm/ui";
+
+const UNDO_DELAY_OPTIONS = [
+  { value: 3, label: "3 seconds" },
+  { value: 5, label: "5 seconds" },
+  { value: 10, label: "10 seconds" },
+  { value: 15, label: "15 seconds" },
+  { value: 30, label: "30 seconds" },
+] as const;
 
 function formatRelativeTime(timestamp: number): string {
   const now = Date.now();
@@ -24,6 +42,8 @@ function formatRelativeTime(timestamp: number): string {
 
 export default function SettingsPage() {
   const user = useQuery(api.users.getProfile);
+  const userSettings = useQuery(api.users.getSettings);
+  const updateUndoDelay = useMutation(api.users.updateUndoSendDelay);
   const memoryStats = useQuery(api.memories.getMemoryStatsByContact);
   const processingStatus = useQuery(api.memories.getMemoryProcessingStatus, {
     platform: "imessage",
@@ -165,6 +185,49 @@ export default function SettingsPage() {
                       ))}
                     </div>
                   )}
+                </div>
+              </div>
+            </div>
+          </section>
+
+          {/* Messages Section */}
+          <section>
+            <div className="mb-4">
+              <h2 className="text-sm font-medium text-foreground">Messages</h2>
+              <p className="text-sm text-muted-foreground">
+                Configure message sending behavior
+              </p>
+            </div>
+
+            <div className="rounded-lg border bg-card">
+              <div className="p-4">
+                <div className="flex items-center gap-3 mb-4">
+                  <div className="flex size-9 items-center justify-center rounded-md bg-muted">
+                    <SendIcon className="size-4 text-muted-foreground" />
+                  </div>
+                  <div className="flex-1">
+                    <p className="text-sm font-medium">Undo send delay</p>
+                    <p className="text-xs text-muted-foreground">
+                      Time to cancel a message before it sends
+                    </p>
+                  </div>
+                  <Select
+                    value={String(userSettings?.undoSendDelaySeconds ?? 30)}
+                    onValueChange={(value) => {
+                      updateUndoDelay({ delaySeconds: Number(value) });
+                    }}
+                  >
+                    <SelectTrigger className="w-[140px]">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {UNDO_DELAY_OPTIONS.map((option) => (
+                        <SelectItem key={option.value} value={String(option.value)}>
+                          {option.label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
                 </div>
               </div>
             </div>

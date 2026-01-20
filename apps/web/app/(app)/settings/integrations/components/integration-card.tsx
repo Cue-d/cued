@@ -9,7 +9,7 @@ import {
 import { formatRelativeTime } from "@prm/shared";
 import { Button, Skeleton } from "@prm/ui";
 
-export type Platform = "imessage" | "gmail" | "slack" | "linkedin" | "twitter";
+export type Platform = "imessage" | "gmail" | "slack" | "linkedin" | "twitter" | "signal" | "whatsapp";
 
 export interface IntegrationConfig {
   id: Platform;

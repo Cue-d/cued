@@ -9,7 +9,7 @@ import { api } from '@prm/convex'
 import { electronEnv } from '@prm/env/electron'
 import type { LinkedInClient } from '../linkedin-api/client'
 import type { Conversation, Message, EventHandlers } from '../linkedin-api/types'
-import { getMessages, getMessagesBefore, sendMessage } from '../linkedin-api/messages'
+import { getMessages, getMessagesBefore } from '../linkedin-api/messages'
 
 // ============================================================================
 // Constants
@@ -417,25 +417,6 @@ export class LinkedInSyncManager {
       totalMessagesSynced: this.progress.totalMessagesSynced + result.messages.length,
       currentConversation: { conversationId, messagesInConversation: result.messages.length },
     })
-  }
-
-  /**
-   * Send a message to a conversation.
-   * Uses the LinkedIn API to send and syncs the result to Convex.
-   */
-  async sendMessage(conversationId: string, text: string): Promise<Message> {
-    if (!this._client) throw new Error('Client not set')
-
-    const message = await sendMessage(this._client, conversationId, text)
-
-    // Sync the sent message to Convex
-    await this.syncMessagesToConvex(conversationId, [message])
-
-    this.updateProgress({
-      totalMessagesSynced: this.progress.totalMessagesSynced + 1,
-    })
-
-    return message
   }
 
   // ============================================================================

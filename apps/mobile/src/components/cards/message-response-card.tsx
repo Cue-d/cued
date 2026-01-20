@@ -35,6 +35,9 @@ const PLATFORM_SYMBOLS: Record<ActionPlatform, SFSymbol> = {
   gmail: "envelope.fill",
   slack: "number",
   linkedin: "person.2.fill",
+  twitter: "bird.fill",
+  signal: "phone.fill",
+  whatsapp: "phone.fill",
 };
 
 export interface MessageResponseCardProps {

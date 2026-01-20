@@ -788,99 +788,93 @@ export const swipeAction = mutation({
         const conversation = action.conversationId
           ? await ctx.db.get(action.conversationId)
           : null;
-        const platform = action.platform ?? conversation?.platform;
+        const platform = (action.platform ?? conversation?.platform) as
+          | "imessage"
+          | "gmail"
+          | "slack"
+          | "linkedin"
+          | "twitter"
+          | "signal"
+          | "whatsapp"
+          | undefined;
 
         let messageSent = false;
-        let pendingSendId: string | null = null;
+        let queuedMessageId: Id<"messageQueue"> | null = null;
 
-        // Handle iMessage sending via pending sends queue (Electron polls this)
-        if (platform === "imessage" && responseText && conversation) {
+        // Handle iMessage and LinkedIn sending via unified message queue
+        // These platforms have Electron adapters and support undo via the queue
+        if (
+          (platform === "imessage" || platform === "linkedin") &&
+          responseText &&
+          conversation
+        ) {
           // Get recipient info from conversation
           const isGroup = conversation.conversationType === "group";
 
           // For groups, we need the chat identifier (from platformConversationId)
           // For 1:1, we need the recipient's handle
           let recipientHandle = "";
+          let recipientContactId: Id<"contacts"> | undefined;
 
           if (!isGroup && conversation.participantContactIds.length > 0) {
             // Get the first participant's handle for 1:1 chats
             const participantId = conversation.participantContactIds[0];
-            const handles = await ctx.db
-              .query("contactHandles")
-              .withIndex("by_contact", (q) => q.eq("contactId", participantId))
-              .filter((q) => q.eq(q.field("platform"), "imessage"))
-              .first();
+            recipientContactId = participantId;
 
-            if (handles) {
-              recipientHandle = handles.handle;
+            // For iMessage, get the phone/email handle
+            // For LinkedIn, the platformConversationId is the thread URN
+            if (platform === "imessage") {
+              const handleDoc = await ctx.db
+                .query("contactHandles")
+                .withIndex("by_contact", (q) => q.eq("contactId", participantId))
+                .filter((q) => q.eq(q.field("platform"), "imessage"))
+                .first();
+
+              if (handleDoc) {
+                recipientHandle = handleDoc.handle;
+              }
+            } else if (platform === "linkedin") {
+              // LinkedIn uses platformConversationId (thread URN) as the identifier
+              // The adapter will use this to send the message
+              recipientHandle = conversation.platformConversationId ?? "";
             }
           }
 
-          // Create pending send for Electron to pick up
+          // Queue message for Electron to send (with undo window based on user settings)
           if (recipientHandle || isGroup) {
-            // const sendId = await ctx.db.insert("pendingSends", {
-            //   userId: user._id,
-            //   conversationId: conversation._id,
-            //   actionId: args.actionId,
-            //   text: responseText,
-            //   recipientHandle: recipientHandle,
-            //   isGroup,
-            //   chatIdentifier: isGroup ? conversation.platformConversationId : undefined,
-            //   status: "pending",
-            //   createdAt: now,
-            //   attempts: 0,
-            // });
-            const sendId = null;
-            pendingSendId = sendId;
+            const delaySeconds = user.undoSendDelaySeconds ?? 30;
+            const scheduledFor = now + delaySeconds * 1000;
+
+            const messageId = await ctx.db.insert("messageQueue", {
+              userId: user._id,
+              platform,
+              recipientHandle,
+              recipientContactId,
+              text: responseText,
+              isGroup,
+              chatIdentifier: isGroup ? conversation.platformConversationId : undefined,
+              conversationId: conversation._id,
+              actionId: args.actionId,
+              status: "pending",
+              scheduledFor,
+              attempts: 0,
+              createdAt: now,
+            });
+
+            // Schedule markReady to trigger subscription update when undo window expires
+            await ctx.scheduler.runAt(
+              scheduledFor,
+              internal.messageQueue.markReady,
+              { messageId }
+            );
+
+            queuedMessageId = messageId;
             messageSent = true;
           }
         }
 
-        // Handle Gmail sending via Nango action
-        if (platform === "gmail" && responseText && conversation) {
-          // Get user's Gmail integration
-          const integration = await ctx.db
-            .query("integrations")
-            .withIndex("by_user_platform", (q) =>
-              q.eq("userId", user._id).eq("platform", "gmail")
-            )
-            .first();
-
-          if (integration?.nangoConnectionId) {
-            // Get recipient email from conversation participants
-            let recipientEmail = "";
-            if (conversation.participantContactIds.length > 0) {
-              const participantId = conversation.participantContactIds[0];
-              const emailHandle = await ctx.db
-                .query("contactHandles")
-                .withIndex("by_contact", (q) => q.eq("contactId", participantId))
-                .filter((q) => q.eq(q.field("handleType"), "email"))
-                .first();
-
-              if (emailHandle) {
-                recipientEmail = emailHandle.handle;
-              }
-            }
-
-            if (recipientEmail) {
-              // Schedule Gmail send action
-              await ctx.scheduler.runAfter(
-                0,
-                internal.emailSender.sendGmailEmail,
-                {
-                  connectionId: integration.nangoConnectionId,
-                  to: recipientEmail,
-                  subject: `Re: ${conversation.displayName ?? "Message"}`,
-                  body: responseText,
-                  threadId: conversation.platformConversationId,
-                  actionId: args.actionId,
-                  conversationId: conversation._id,
-                }
-              );
-              messageSent = true;
-            }
-          }
-        }
+        // Note: Gmail uses Nango server-side actions (not the message queue)
+        // Gmail sending is not yet integrated with the new queue system
 
         // Mark action as completed
         await ctx.db.patch(args.actionId, {
@@ -899,7 +893,7 @@ export const swipeAction = mutation({
           status: "completed",
           platform,
           messageSent,
-          pendingSendId,
+          queuedMessageId,
           responseText,
         };
       }
@@ -1387,7 +1381,7 @@ export const generateDraftOptions = action({
       const result = await generateActionWithOptionsRetry({
         contact: context.contact,
         messages: context.messages,
-        platform: context.platform as "imessage" | "gmail" | "slack" | "linkedin" | "twitter",
+        platform: context.platform as "imessage" | "gmail" | "slack" | "linkedin" | "twitter" | "signal" | "whatsapp",
         hoursSinceLastMessage: context.hoursSinceLastMessage,
         styleProfile: context.styleProfile ?? undefined,
         styleOverrides: context.contact.styleOverrides,

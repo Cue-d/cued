@@ -35,3 +35,10 @@ export type {
   DisplayMessage,
   ContactFormData,
 } from "./types/actions.js";
+
+// Platform adapter types (for message queue)
+export type {
+  SendResult,
+  QueuedMessage,
+  PlatformAdapter,
+} from "./types/platform-adapter.js";

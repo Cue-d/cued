@@ -17,11 +17,12 @@ import {
 import { getSyncManager, type SyncProgress } from "./sync/sync-manager";
 import { getContactsWatcher } from "./sync/contacts-watcher";
 import { syncContactsToConvex } from "./sync/contacts-sync";
-import { getIMessageSender } from "./sync/imessage-sender";
 import { getHeartbeatManager } from "./sync/presence";
 import { setupSocialIpcHandlers, cleanupSocialScrapers } from "./ipc/social";
 import { getLinkedInSyncManager } from "./sync/linkedin-sync";
 import { LinkedInScraper } from "./sync/linkedin";
+import { getMessageQueueProcessor } from "./queue/message-queue-processor";
+import { getReactiveConvexClient } from "./convex-client";
 
 const CONVEX_URL = electronEnv.CONVEX_URL;
 const WORKOS_CLIENT_ID = electronEnv.WORKOS_CLIENT_ID;
@@ -203,10 +204,21 @@ async function startBackgroundSync(): Promise<void> {
     // Start contacts watcher for incremental contact sync
     startContactsWatcher();
 
-    // Start iMessage sender to poll for pending sends
-    const imessageSender = getIMessageSender(getValidAccessToken);
-    imessageSender.start(5000); // Poll every 5 seconds
-    console.log("[Main] iMessage sender started");
+    // Configure and start the unified message queue processor
+    // This replaces the old iMessage sender with a multi-platform queue
+    const reactiveClient = getReactiveConvexClient();
+    reactiveClient.setTokenProvider(getValidAccessToken);
+    reactiveClient.setAuthInvalidCallback(() => {
+      console.log("[Main] ReactiveConvexClient auth invalid, notifying renderer");
+      mainWindow?.webContents.send("auth:stateChanged", {
+        isAuthenticated: false,
+        user: null,
+      });
+    });
+
+    const queueProcessor = getMessageQueueProcessor();
+    queueProcessor.start();
+    console.log("[Main] Message queue processor started");
 
     // Start presence heartbeat for mobile to detect desktop online status
     const heartbeatManager = getHeartbeatManager(getValidAccessToken);
@@ -346,9 +358,14 @@ app.on("will-quit", async () => {
   getSyncManager().stop();
   getContactsWatcher().stop();
   try {
-    getIMessageSender().stop();
+    getMessageQueueProcessor().stop();
   } catch {
-    // Sender may not be initialized
+    // Processor may not be initialized
+  }
+  try {
+    await getReactiveConvexClient().close();
+  } catch {
+    // Client may not be initialized
   }
   try {
     await getHeartbeatManager().stop();

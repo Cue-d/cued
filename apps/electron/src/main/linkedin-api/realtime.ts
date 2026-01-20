@@ -187,7 +187,6 @@ export class RealtimeConnection {
    */
   async start(): Promise<void> {
     if (this.isConnected) {
-      console.log('[LinkedInRealtime] Already connected')
       return
     }
 
@@ -200,7 +199,6 @@ export class RealtimeConnection {
    * Closes SSE connection and stops heartbeat.
    */
   stop(): void {
-    console.log('[LinkedInRealtime] Stopping connection')
     this.shouldReconnect = false
     this.disconnect()
   }
@@ -226,17 +224,15 @@ export class RealtimeConnection {
   private async connect(): Promise<void> {
     while (this.shouldReconnect && this.connectAttempts < MAX_RECONNECT_ATTEMPTS) {
       try {
-        console.log(`[LinkedInRealtime] Connecting (attempt ${this.connectAttempts + 1})...`)
         await this.doConnect()
 
         // If we get here, connection closed normally
         if (this.shouldReconnect) {
-          console.log('[LinkedInRealtime] Connection closed, reconnecting...')
           this.scheduleReconnect()
         }
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error)
-        console.log(`[LinkedInRealtime] Connection error: ${message}`)
+        console.error(`[LinkedInRealtime] Connection error: ${message}`)
 
         if (!this.shouldReconnect) {
           break
@@ -244,7 +240,7 @@ export class RealtimeConnection {
 
         // Handle specific HTTP errors
         if (message.includes('400')) {
-          console.log('[LinkedInRealtime] Got 400, generating new session ID')
+          console.error('[LinkedInRealtime] Got 400, generating new session ID')
           this.sessionId = this.generateSessionId()
         }
 
@@ -253,7 +249,7 @@ export class RealtimeConnection {
     }
 
     if (this.connectAttempts >= MAX_RECONNECT_ATTEMPTS) {
-      console.log('[LinkedInRealtime] Max reconnect attempts reached')
+      console.error('[LinkedInRealtime] Max reconnect attempts reached')
       this.handlers.onDisconnected?.(new Error('Max reconnect attempts reached'))
     }
   }
@@ -337,7 +333,6 @@ export class RealtimeConnection {
     this.connectAttempts++
 
     const backoffSeconds = Math.min(this.connectAttempts * 2, MAX_BACKOFF_SECONDS)
-    console.log(`[LinkedInRealtime] Reconnecting in ${backoffSeconds}s...`)
 
     setTimeout(() => {
       if (this.shouldReconnect) {
@@ -360,7 +355,6 @@ export class RealtimeConnection {
         const { done, value } = await reader.read()
 
         if (done) {
-          console.log('[LinkedInRealtime] Stream ended')
           break
         }
 
@@ -376,7 +370,7 @@ export class RealtimeConnection {
       }
     } catch (error) {
       if (error instanceof Error && error.name === 'AbortError') {
-        console.log('[LinkedInRealtime] Stream aborted')
+        console.error('[LinkedInRealtime] Stream aborted')
       } else {
         throw error
       }
@@ -387,23 +381,16 @@ export class RealtimeConnection {
 
   private processLine(line: string): void {
     // SSE format: "data: {...json...}"
-    if (!line.startsWith('data:')) {
-      return
-    }
+    if (!line.startsWith('data:')) return
 
-    const jsonStr = line.slice(5).trim() // Remove "data:" prefix
-    if (!jsonStr) {
-      return
-    }
+    const jsonStr = line.slice(5).trim()
+    if (!jsonStr) return
 
     try {
       const event = JSON.parse(jsonStr) as RealtimeEvent
-      // Debug: log event types we receive
-      const eventTypes = Object.keys(event).filter(k => event[k as keyof RealtimeEvent])
-      console.log(`[LinkedInRealtime] Event received: ${eventTypes.join(', ')}`)
       this.handleEvent(event)
-    } catch (error) {
-      console.log(`[LinkedInRealtime] Failed to parse event: ${jsonStr.slice(0, 200)}...`)
+    } catch {
+      console.error(`[LinkedInRealtime] Failed to parse event: ${jsonStr.slice(0, 200)}...`)
     }
   }
 
@@ -425,42 +412,24 @@ export class RealtimeConnection {
     this.handlers.onHeartbeat?.()
   }
 
-  private handleClientConnection(event: ClientConnectionEvent): void {
-    if (event.id) {
-      console.log(`[LinkedInRealtime] Client connection ID: ${event.id}`)
-    }
+  private handleClientConnection(_event: ClientConnectionEvent): void {
+    // Connection ID received - no action needed
   }
 
   private handleDecoratedEvent(event: DecoratedEvent): void {
     const topic = event.topic
     const payload = event.payload?.data
-
-    console.log(`[LinkedInRealtime] Decorated event - topic: ${topic}`)
-
-    if (!topic || !payload) {
-      console.log(`[LinkedInRealtime] Missing topic or payload`)
-      return
-    }
-
-    // Debug: log payload structure
-    console.log(`[LinkedInRealtime] Payload keys: ${Object.keys(payload as object).join(', ')}`)
+    if (!topic || !payload) return
 
     // Route to appropriate handler based on topic
     if (topic.includes('messages') || topic.includes('Messages')) {
-      console.log(`[LinkedInRealtime] Routing to message handler`)
       this.handleMessageEvent(payload)
     } else if (topic.includes('typing') || topic.includes('Typing')) {
       this.handleTypingEvent(payload)
     } else if (topic.includes('conversation') || topic.includes('Conversation')) {
-      console.log(`[LinkedInRealtime] Routing to conversation handler`)
       this.handleConversationEvent(payload)
-    } else if (topic.includes('reaction') || topic.includes('Reaction')) {
-      this.handleReactionEvent(payload)
-    } else if (topic.includes('seen') || topic.includes('Seen')) {
-      this.handleSeenReceiptEvent(payload)
-    } else {
-      console.log(`[LinkedInRealtime] Unhandled topic: ${topic}`)
     }
+    // Reactions and seen receipts are received but not currently handled
   }
 
   private handleMessageEvent(payload: unknown): void {
@@ -491,17 +460,6 @@ export class RealtimeConnection {
     if (conversation) {
       this.handlers.onConversationUpdate?.(conversation)
     }
-  }
-
-  private handleReactionEvent(payload: unknown): void {
-    // Reactions update - could trigger a message refresh
-    // For now, treat as a conversation update signal
-    console.log('[LinkedInRealtime] Reaction event received')
-  }
-
-  private handleSeenReceiptEvent(payload: unknown): void {
-    // Seen receipts - could update read status
-    console.log('[LinkedInRealtime] Seen receipt event received')
   }
 
   // ============================================================================
@@ -627,7 +585,7 @@ export class RealtimeConnection {
 
       this.isFirstHeartbeat = false
     } catch (error) {
-      console.log(`[LinkedInRealtime] Heartbeat failed: ${error instanceof Error ? error.message : String(error)}`)
+      console.error(`[LinkedInRealtime] Heartbeat failed: ${error instanceof Error ? error.message : String(error)}`)
     }
   }
 

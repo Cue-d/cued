@@ -7,10 +7,12 @@ const platformValidator = v.union(
   v.literal("gmail"),
   v.literal("slack"),
   v.literal("linkedin"),
-  v.literal("twitter")
+  v.literal("twitter"),
+  v.literal("signal"),
+  v.literal("whatsapp")
 );
 
-type Platform = "imessage" | "gmail" | "slack" | "linkedin" | "twitter";
+type Platform = "imessage" | "gmail" | "slack" | "linkedin" | "twitter" | "signal" | "whatsapp";
 
 // Map Nango integration IDs to our platform enum
 function nangoToPlatform(nangoIntegrationId: string): Platform | null {

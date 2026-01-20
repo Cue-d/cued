@@ -2,14 +2,16 @@
 
 import * as React from "react"
 import { useQuery, useMutation } from "convex/react"
-import { Mail, MessageSquare, Phone, AlertCircle, Users, Search, Loader2, ScanSearch } from "lucide-react"
+import { Mail, MessageSquare, Phone, AlertCircle, Users, Search, Loader2, ScanSearch, Send } from "lucide-react"
 import { api } from "@prm/convex"
-import { getInitials } from "@prm/shared"
+import { getInitials, type ActionPlatform } from "@prm/shared"
 import {
   MergeCard,
   type MergeContact,
   type MergeSuggestion,
   type ContactHandle,
+  SendMessageModal,
+  type SendMessageContact,
 } from "@prm/ui"
 import { Card, CardContent, Skeleton, Badge, Avatar, AvatarFallback, Input, Button } from "@prm/ui"
 import type { Id } from "@prm/convex"
@@ -69,8 +71,62 @@ function deduplicateHandles(handles: Array<{ type: string; value: string; platfo
   return Array.from(seen.values())
 }
 
+/** Map platform string to ActionPlatform type */
+function mapPlatformToActionPlatform(platform: string): ActionPlatform | null {
+  const platformMap: Record<string, ActionPlatform> = {
+    imessage: "imessage",
+    gmail: "gmail",
+    slack: "slack",
+    linkedin: "linkedin",
+    twitter: "twitter",
+    signal: "signal",
+    whatsapp: "whatsapp",
+  }
+  return platformMap[platform.toLowerCase()] ?? null
+}
+
+/** Get sendable platforms from contact handles */
+function getSendablePlatforms(handles: Array<{ type: string; value: string; platform: string }>): Array<{ platform: ActionPlatform; handle: string }> {
+  const platforms: Array<{ platform: ActionPlatform; handle: string }> = []
+  const seen = new Set<string>()
+
+  for (const handle of handles) {
+    const actionPlatform = mapPlatformToActionPlatform(handle.platform)
+    if (actionPlatform && !seen.has(actionPlatform)) {
+      // For iMessage, use phone handles
+      if (actionPlatform === "imessage" && handle.type === "phone") {
+        platforms.push({ platform: actionPlatform, handle: handle.value })
+        seen.add(actionPlatform)
+      }
+      // For Gmail, use email handles
+      else if (actionPlatform === "gmail" && handle.type === "email") {
+        platforms.push({ platform: actionPlatform, handle: handle.value })
+        seen.add(actionPlatform)
+      }
+      // For LinkedIn, use linkedin handles
+      else if (actionPlatform === "linkedin" && handle.type === "linkedin_id") {
+        platforms.push({ platform: actionPlatform, handle: handle.value })
+        seen.add(actionPlatform)
+      }
+      // For Slack, use slack handles
+      else if (actionPlatform === "slack" && handle.type === "slack_id") {
+        platforms.push({ platform: actionPlatform, handle: handle.value })
+        seen.add(actionPlatform)
+      }
+    }
+  }
+
+  return platforms
+}
+
 /** Contact row component */
-function ContactRow({ contact }: { contact: { _id: Id<"contacts">; displayName: string; company?: string | null; handles: Array<{ type: string; value: string; platform: string }> } }) {
+function ContactRow({
+  contact,
+  onSendMessage,
+}: {
+  contact: { _id: Id<"contacts">; displayName: string; company?: string | null; handles: Array<{ type: string; value: string; platform: string }> }
+  onSendMessage: (contact: SendMessageContact) => void
+}) {
   const initials = getInitials(contact.displayName)
   const uniqueHandles = deduplicateHandles(contact.handles)
 
@@ -89,8 +145,23 @@ function ContactRow({ contact }: { contact: { _id: Id<"contacts">; displayName: 
   const shown = displayHandles.slice(0, 4)
   const remaining = uniqueHandles.length - shown.length
 
+  // Get sendable platforms for this contact
+  const sendablePlatforms = getSendablePlatforms(contact.handles)
+  const canSend = sendablePlatforms.length > 0
+
+  const handleSendClick = (e: React.MouseEvent) => {
+    e.stopPropagation()
+    if (canSend) {
+      onSendMessage({
+        id: contact._id,
+        name: contact.displayName,
+        platforms: sendablePlatforms,
+      })
+    }
+  }
+
   return (
-    <div className="flex items-start gap-3 p-3 hover:bg-muted/50">
+    <div className="flex items-start gap-3 p-3 hover:bg-muted/50 group">
       <Avatar size="sm">
         <AvatarFallback>{initials}</AvatarFallback>
       </Avatar>
@@ -115,6 +186,17 @@ function ContactRow({ contact }: { contact: { _id: Id<"contacts">; displayName: 
           </div>
         )}
       </div>
+      {canSend && (
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={handleSendClick}
+          className="opacity-0 group-hover:opacity-100 transition-opacity shrink-0"
+        >
+          <Send className="w-4 h-4 mr-1.5" />
+          Send
+        </Button>
+      )}
     </div>
   )
 }
@@ -138,6 +220,10 @@ export default function ContactsPage() {
   // Search state
   const [searchInput, setSearchInput] = React.useState("")
   const debouncedSearch = useDebounce(searchInput, 300)
+
+  // Send message modal state
+  const [sendModalOpen, setSendModalOpen] = React.useState(false)
+  const [selectedContact, setSelectedContact] = React.useState<SendMessageContact | null>(null)
 
   // Pagination state
   const [cursor, setCursor] = React.useState<ContactCursor | undefined>(undefined)
@@ -215,6 +301,7 @@ export default function ContactsPage() {
   const mergeContacts = useMutation(api.contacts.mergeContacts)
   const rejectMerge = useMutation(api.contacts.rejectMerge)
   const triggerMergeScan = useMutation(api.contactResolution.triggerMergeScan)
+  const queueMessage = useMutation(api.messageQueue.queueMessage)
 
   // Track loading states for individual cards
   const [loadingStates, setLoadingStates] = React.useState<Record<string, boolean>>({})
@@ -261,6 +348,30 @@ export default function ContactsPage() {
       setLoadingStates(prev => ({ ...prev, [suggestionId]: false }))
     }
   }, [rejectMerge])
+
+  // Send message handlers
+  const handleOpenSendModal = React.useCallback((contact: SendMessageContact) => {
+    setSelectedContact(contact)
+    setSendModalOpen(true)
+  }, [])
+
+  const handleSendMessage = React.useCallback(async (params: {
+    platform: ActionPlatform
+    recipientHandle: string
+    recipientContactId?: string
+    text: string
+    conversationId?: string
+  }) => {
+    const result = await queueMessage({
+      platform: params.platform,
+      recipientHandle: params.recipientHandle,
+      recipientContactId: params.recipientContactId as Id<"contacts"> | undefined,
+      text: params.text,
+      isGroup: false,
+      conversationId: params.conversationId as Id<"conversations"> | undefined,
+    })
+    return result
+  }, [queueMessage])
 
   // Loading skeleton
   if (suggestionsLoading && contactsLoading && allContacts.length === 0) {
@@ -405,7 +516,7 @@ export default function ContactsPage() {
               <Card>
                 <CardContent className="p-2 divide-y divide-border">
                   {displayContacts.map((contact) => (
-                    <ContactRow key={contact._id} contact={contact} />
+                    <ContactRow key={contact._id} contact={contact} onSendMessage={handleOpenSendModal} />
                   ))}
                 </CardContent>
                 {/* Infinite scroll sentinel */}
@@ -421,6 +532,14 @@ export default function ContactsPage() {
           </section>
         </div>
       </div>
+
+      {/* Send Message Modal */}
+      <SendMessageModal
+        open={sendModalOpen}
+        onOpenChange={setSendModalOpen}
+        contact={selectedContact ?? undefined}
+        onSend={handleSendMessage}
+      />
     </div>
   )
 }

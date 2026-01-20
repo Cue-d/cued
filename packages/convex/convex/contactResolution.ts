@@ -14,7 +14,7 @@ type ContactWithHandles = Doc<"contacts"> & {
   handles: Array<{
     type: "phone" | "email" | "slack_id" | "linkedin_url" | "twitter_handle";
     value: string;
-    platform: "imessage" | "gmail" | "slack" | "linkedin" | "twitter";
+    platform: "imessage" | "gmail" | "slack" | "linkedin" | "twitter" | "signal" | "whatsapp";
   }>;
 };
 

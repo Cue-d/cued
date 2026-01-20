@@ -82,7 +82,7 @@ export function InboxConversationList({
 
       {/* Platform Filter */}
       {onFilterChange && (
-        <div className="px-4 pb-3 flex gap-1.5">
+        <div className="px-4 pb-3 flex flex-wrap gap-1.5">
           {filterButtons.map((btn) => (
             <button
               key={btn.value}

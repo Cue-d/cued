@@ -7,7 +7,9 @@ export const platformValidator = v.union(
   v.literal("gmail"),
   v.literal("slack"),
   v.literal("linkedin"),
-  v.literal("twitter")
+  v.literal("twitter"),
+  v.literal("signal"),
+  v.literal("whatsapp")
 );
 
 export const handleTypeValidator = v.union(
@@ -79,6 +81,8 @@ const schema = defineSchema({
     pendingActionCount: v.optional(v.number()),
     // Expo push token for mobile notifications
     expoPushToken: v.optional(v.string()),
+    // Undo send delay in seconds (default 30, options: 3, 5, 10, 15, 30)
+    undoSendDelaySeconds: v.optional(v.number()),
   })
     .index("by_workos_id", ["workosUserId"])
     .index("by_email", ["email"]),
@@ -323,33 +327,6 @@ const schema = defineSchema({
     .index("by_user_recent", ["userId", "lastExtractedAt"])
     .index("by_contact", ["contactId"]),
 
-  pendingSends: defineTable({
-    userId: v.id("users"),
-    conversationId: v.optional(v.id("conversations")), // Optional for test sends
-    actionId: v.optional(v.id("actions")), // Link to action that created this
-    text: v.string(),
-    // Recipient info (for iMessage AppleScript)
-    recipientHandle: v.string(), // Phone number or email
-    isGroup: v.boolean(),
-    chatIdentifier: v.optional(v.string()), // For group chats
-    // Status tracking
-    status: v.union(
-      v.literal("pending"),
-      v.literal("sending"),
-      v.literal("sent"),
-      v.literal("failed")
-    ),
-    error: v.optional(v.string()),
-    // Timestamps
-    createdAt: v.number(),
-    sentAt: v.optional(v.number()),
-    // Retry tracking
-    attempts: v.number(),
-    lastAttemptAt: v.optional(v.number()),
-  })
-    .index("by_user_status", ["userId", "status"])
-    .index("by_conversation", ["conversationId"]),
-
   // Device presence tracking for remote send capability
   devicePresence: defineTable({
     userId: v.id("users"),
@@ -357,6 +334,44 @@ const schema = defineSchema({
     lastHeartbeatAt: v.number(),
     appVersion: v.optional(v.string()),
   }).index("by_user_device", ["userId", "deviceType"]),
+
+  // Unified message queue for all platforms (replaces pendingSends)
+  messageQueue: defineTable({
+    userId: v.id("users"),
+    platform: platformValidator,
+    // Recipient info
+    recipientHandle: v.string(), // Phone, email, Slack ID, LinkedIn URL, etc.
+    recipientContactId: v.optional(v.id("contacts")),
+    // Message content
+    text: v.string(),
+    // For group chats
+    isGroup: v.boolean(),
+    chatIdentifier: v.optional(v.string()), // Group chat ID if applicable
+    // References
+    conversationId: v.optional(v.id("conversations")),
+    actionId: v.optional(v.id("actions")), // Link to action that created this
+    // Queue status
+    status: v.union(
+      v.literal("pending"), // Waiting to be sent (in undo window)
+      v.literal("sending"), // Currently being sent
+      v.literal("sent"), // Successfully sent
+      v.literal("failed"), // Failed to send
+      v.literal("cancelled") // User cancelled during undo window
+    ),
+    // Scheduling
+    scheduledFor: v.number(), // Timestamp when message should be sent (now + 30s for undo)
+    // Error handling
+    error: v.optional(v.string()),
+    attempts: v.number(),
+    lastAttemptAt: v.optional(v.number()),
+    // Timestamps
+    createdAt: v.number(),
+    sentAt: v.optional(v.number()),
+    cancelledAt: v.optional(v.number()),
+  })
+    .index("by_user_status", ["userId", "status"])
+    .index("by_user_pending", ["userId", "scheduledFor"]) // For getting messages ready to send
+    .index("by_user_platform", ["userId", "platform"]),
 });
 
 export default schema;

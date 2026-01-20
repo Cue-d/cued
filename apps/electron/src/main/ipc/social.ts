@@ -11,7 +11,7 @@ import {
   getLinkedInSyncManager,
   type LinkedInSyncProgress,
 } from "../sync/linkedin-sync";
-import type { Message } from "../linkedin-api/types";
+import { getAdapter } from "../adapters";
 import { getValidAccessToken } from "../auth";
 import { electronEnv } from "@prm/env/electron";
 
@@ -59,7 +59,7 @@ export interface LinkedInSyncResult {
 
 export interface LinkedInSendMessageResult {
   success: boolean;
-  message?: Message;
+  messageId?: string;
   error?: string;
 }
 
@@ -354,8 +354,8 @@ export function setupSocialIpcHandlers(mainWindow: BrowserWindow | null): void {
   );
 
   /**
-   * Send a message via LinkedIn.
-   * Requires messaging sync to be running.
+   * Send a message via LinkedIn using the platform adapter.
+   * For queued sends with undo support, use the messageQueue API instead.
    */
   ipcMain.handle(
     "social:linkedin:sendMessage",
@@ -365,24 +365,35 @@ export function setupSocialIpcHandlers(mainWindow: BrowserWindow | null): void {
       text: string
     ): Promise<LinkedInSendMessageResult> => {
       try {
-        const syncManager = getLinkedInSyncManager();
+        const adapter = getAdapter("linkedin");
 
-        if (!syncManager.client) {
+        if (!adapter) {
           return {
             success: false,
-            error: "LinkedIn messaging sync not started. Call startMessagingSync first.",
+            error: "LinkedIn adapter not available",
           };
         }
 
         console.log(`[Social IPC] Sending LinkedIn message to ${conversationId}...`);
-        const message = await syncManager.sendMessage(conversationId, text);
+        const result = await adapter.send({
+          id: `ipc-${Date.now()}`, // Temporary ID for IPC-based sends
+          platform: "linkedin",
+          recipientHandle: conversationId, // Not used by LinkedIn adapter
+          text,
+          threadId: conversationId, // LinkedIn adapter uses threadId for conversation URN
+        });
 
-        console.log("[Social IPC] LinkedIn message sent successfully");
-        return { success: true, message };
+        if (result.success) {
+          console.log("[Social IPC] LinkedIn message sent successfully");
+          return { success: true, messageId: result.messageId };
+        } else {
+          console.error("[Social IPC] LinkedIn send message failed:", result.error);
+          return { success: false, error: result.error };
+        }
       } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-        console.error("[Social IPC] LinkedIn send message failed:", message);
-        return { success: false, error: message };
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        console.error("[Social IPC] LinkedIn send message failed:", errorMessage);
+        return { success: false, error: errorMessage };
       }
     }
   );

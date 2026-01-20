@@ -7,7 +7,15 @@ import {
 } from "../platform";
 
 describe("PLATFORM_CONFIG", () => {
-  const platforms: ActionPlatform[] = ["imessage", "gmail", "slack", "linkedin"];
+  const platforms: ActionPlatform[] = [
+    "imessage",
+    "gmail",
+    "slack",
+    "linkedin",
+    "twitter",
+    "signal",
+    "whatsapp",
+  ];
 
   it("contains all expected platform keys", () => {
     expect(Object.keys(PLATFORM_CONFIG)).toEqual(
@@ -113,8 +121,11 @@ describe("types", () => {
     const gmail: ActionPlatform = "gmail";
     const slack: ActionPlatform = "slack";
     const linkedin: ActionPlatform = "linkedin";
+    const twitter: ActionPlatform = "twitter";
+    const signal: ActionPlatform = "signal";
+    const whatsapp: ActionPlatform = "whatsapp";
 
-    expect([imessage, gmail, slack, linkedin]).toHaveLength(4);
+    expect([imessage, gmail, slack, linkedin, twitter, signal, whatsapp]).toHaveLength(7);
   });
 
   it("PlatformConfigItem has all required fields", () => {

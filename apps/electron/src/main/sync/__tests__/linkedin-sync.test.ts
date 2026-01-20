@@ -40,10 +40,9 @@ vi.mock('@prm/convex', () => ({
 vi.mock('../../linkedin-api/messages', () => ({
   getMessages: vi.fn(),
   getMessagesBefore: vi.fn(),
-  sendMessage: vi.fn(),
 }))
 
-import { getMessages, sendMessage } from '../../linkedin-api/messages'
+import { getMessages } from '../../linkedin-api/messages'
 
 // ============================================================================
 // Test Helpers
@@ -613,29 +612,6 @@ describe('LinkedInSyncManager', () => {
 
       expect(syncManager.getProgress().status).toBe('error')
       expect(syncManager.getProgress().error).toBe('LinkedIn client not configured')
-    })
-  })
-
-  describe('sendMessage', () => {
-    it('sends message and syncs to Convex', async () => {
-      const participant = createMockParticipant('user123', 'Test', 'User')
-      const sentMessage = createMockMessage('sent1', 'conv1', participant, 'Hello!')
-
-      vi.mocked(sendMessage).mockResolvedValue(sentMessage)
-      syncManager.setClient(mockClient)
-
-      const result = await syncManager.sendMessage('urn:li:fsd_conversation:conv1', 'Hello!')
-
-      expect(sendMessage).toHaveBeenCalledWith(mockClient, 'urn:li:fsd_conversation:conv1', 'Hello!')
-      expect(result).toEqual(sentMessage)
-      expect(syncManager.getProgress().totalMessagesSynced).toBe(1)
-    })
-
-    it('throws error if no client is set', async () => {
-      // Don't set a client
-      await expect(
-        syncManager.sendMessage('urn:li:fsd_conversation:conv1', 'Hello!')
-      ).rejects.toThrow('Client not set')
     })
   })
 

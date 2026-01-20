@@ -1,7 +1,7 @@
 "use client"
 
 import * as React from "react"
-import { MessageSquare, Mail, Hash, Linkedin, ChevronDown } from "lucide-react"
+import { MessageSquare, Mail, Hash, Linkedin, ChevronDown, Twitter, Phone } from "lucide-react"
 import { PLATFORM_CONFIG, type ActionPlatform } from "@prm/shared"
 import { cn } from "../../../lib/utils"
 import {
@@ -17,6 +17,9 @@ export const PLATFORM_ICONS: Record<ActionPlatform, React.ReactNode> = {
   gmail: <Mail className="w-3.5 h-3.5" />,
   slack: <Hash className="w-3.5 h-3.5" />,
   linkedin: <Linkedin className="w-3.5 h-3.5" />,
+  twitter: <Twitter className="w-3.5 h-3.5" />,
+  signal: <Phone className="w-3.5 h-3.5" />,
+  whatsapp: <Phone className="w-3.5 h-3.5" />,
 }
 
 export interface PlatformBadgeProps {

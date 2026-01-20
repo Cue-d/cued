@@ -2,12 +2,16 @@
  * Contact detail screen - displays full contact profile.
  */
 
+import { useState, useCallback, useMemo } from "react";
 import { View, Text, ScrollView, Pressable, useColorScheme, PlatformColor } from "react-native";
+import * as Haptics from "expo-haptics";
 import { useLocalSearchParams, Stack } from "expo-router";
 import { SymbolView } from "expo-symbols";
-import { useQuery } from "convex/react";
+import { useQuery, useMutation } from "convex/react";
 import { api } from "@prm/convex/convex/_generated/api";
-import { getInitials, formatPhoneNumber } from "@prm/shared";
+import { getInitials, formatPhoneNumber, type ActionPlatform } from "@prm/shared";
+import { SendMessageSheet, type SendMessageContact } from "@/components/send-message-sheet";
+import { UndoSendToast } from "@/components/undo-send-toast";
 import type { Id } from "@prm/convex/convex/_generated/dataModel";
 import type { SFSymbol } from "sf-symbols-typescript";
 
@@ -163,12 +167,135 @@ function HandleRow({
   );
 }
 
+/** Platforms that support sending via the message queue */
+const SENDABLE_PLATFORMS = ["imessage", "linkedin"] as const;
+
+/** Map handle type to platform for sending */
+function handleTypeToPlatform(type: string): ActionPlatform | null {
+  switch (type) {
+    case "phone":
+      return "imessage";
+    case "linkedin_url":
+      return "linkedin";
+    default:
+      return null;
+  }
+}
+
+/** Data for a queued message toast */
+interface QueuedMessageToast {
+  messageId: string;
+  platform: ActionPlatform;
+  recipientName: string;
+  messagePreview?: string;
+}
+
 export default function ContactDetailScreen(): React.JSX.Element {
   const { contactId } = useLocalSearchParams<{ contactId: string }>();
+  const colorScheme = useColorScheme();
+  const iconColor = colorScheme === "dark" ? "#a1a1aa" : "#71717a";
+
+  // State for send message sheet
+  const [showSendSheet, setShowSendSheet] = useState(false);
+  const [queuedMessages, setQueuedMessages] = useState<QueuedMessageToast[]>([]);
 
   const contact = useQuery(api.contacts.getContact, {
     contactId: contactId as Id<"contacts">,
   });
+
+  // Mutations for message queue
+  const queueMessage = useMutation(api.messageQueue.queueMessage);
+  const cancelMessage = useMutation(api.messageQueue.cancelMessage);
+
+  // Build sendable platforms from contact handles
+  const sendableContact: SendMessageContact | null = useMemo(() => {
+    if (!contact) return null;
+
+    const platforms: SendMessageContact["platforms"] = [];
+
+    for (const handle of contact.handles ?? []) {
+      const platform = handleTypeToPlatform(handle.type);
+      if (platform && SENDABLE_PLATFORMS.includes(platform as typeof SENDABLE_PLATFORMS[number])) {
+        // Avoid duplicates for the same platform
+        if (!platforms.some((p) => p.platform === platform)) {
+          platforms.push({
+            platform,
+            handle: handle.value,
+          });
+        }
+      }
+    }
+
+    if (platforms.length === 0) return null;
+
+    return {
+      id: contact._id,
+      name: contact.displayName,
+      platforms,
+    };
+  }, [contact]);
+
+  // Handle sending a message
+  const handleSendMessage = useCallback(
+    async (params: {
+      platform: ActionPlatform;
+      recipientHandle: string;
+      recipientContactId?: string;
+      text: string;
+      conversationId?: string;
+    }) => {
+      const result = await queueMessage({
+        platform: params.platform,
+        recipientHandle: params.recipientHandle,
+        recipientContactId: params.recipientContactId
+          ? (params.recipientContactId as Id<"contacts">)
+          : undefined,
+        text: params.text,
+        isGroup: false,
+        conversationId: params.conversationId
+          ? (params.conversationId as Id<"conversations">)
+          : undefined,
+      });
+
+      // Show undo toast
+      if (result?.messageId && contact) {
+        setQueuedMessages((prev) => [
+          ...prev,
+          {
+            messageId: result.messageId as string,
+            platform: params.platform,
+            recipientName: contact.displayName,
+            messagePreview: params.text,
+          },
+        ]);
+      }
+
+      return result;
+    },
+    [queueMessage, contact]
+  );
+
+  // Handle undo for a queued message
+  const handleUndoMessage = useCallback(
+    async (messageId: string) => {
+      await cancelMessage({ messageId: messageId as Id<"messageQueue"> });
+    },
+    [cancelMessage]
+  );
+
+  // Handle toast dismissal
+  const handleToastDismiss = useCallback(
+    (messageId: string, _reason: "sent" | "cancelled" | "closed") => {
+      setQueuedMessages((prev) => prev.filter((m) => m.messageId !== messageId));
+    },
+    []
+  );
+
+  // Open send sheet
+  const handleOpenSendSheet = useCallback(() => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    setShowSendSheet(true);
+  }, []);
 
   // Loading state
   if (contact === undefined) {
@@ -226,10 +353,10 @@ export default function ContactDetailScreen(): React.JSX.Element {
       <ScrollView
         className="flex-1"
         contentInsetAdjustmentBehavior="automatic"
-        contentContainerStyle={{ paddingBottom: 32 }}
+        contentContainerStyle={{ paddingBottom: 100 }}
       >
         {/* Profile Header */}
-        <View className="items-center pt-6 pb-8">
+        <View className="items-center pt-6 pb-4">
           <Avatar initials={initials} />
           <Text className="text-2xl font-bold text-foreground mt-4">
             {contact.displayName}
@@ -238,6 +365,25 @@ export default function ContactDetailScreen(): React.JSX.Element {
             <Text className="text-base text-muted-foreground mt-1">
               {contact.company}
             </Text>
+          )}
+
+          {/* Send Message Button */}
+          {sendableContact && (
+            <Pressable
+              onPress={handleOpenSendSheet}
+              className="flex-row items-center gap-2 mt-4 px-4 py-2 rounded-xl bg-primary"
+              accessibilityRole="button"
+              accessibilityLabel="Send message"
+            >
+              <SymbolView
+                name="paperplane.fill"
+                size={16}
+                tintColor="#FFFFFF"
+              />
+              <Text className="text-base font-medium text-white">
+                Send Message
+              </Text>
+            </Pressable>
           )}
         </View>
 
@@ -305,6 +451,41 @@ export default function ContactDetailScreen(): React.JSX.Element {
         {/* Recent Conversations placeholder */}
         <RecentConversationsPlaceholder />
       </ScrollView>
+
+      {/* Undo send toasts for queued messages */}
+      {queuedMessages.length > 0 && (
+        <View
+          style={{
+            position: "absolute",
+            bottom: 16,
+            left: 0,
+            right: 0,
+            gap: 8,
+          }}
+        >
+          {queuedMessages.slice(0, 3).map((msg) => (
+            <UndoSendToast
+              key={msg.messageId}
+              messageId={msg.messageId}
+              platform={msg.platform}
+              recipientName={msg.recipientName}
+              messagePreview={msg.messagePreview}
+              onUndo={handleUndoMessage}
+              onDismiss={handleToastDismiss}
+            />
+          ))}
+        </View>
+      )}
+
+      {/* Send message sheet */}
+      {sendableContact && (
+        <SendMessageSheet
+          visible={showSendSheet}
+          onClose={() => setShowSendSheet(false)}
+          contact={sendableContact}
+          onSend={handleSendMessage}
+        />
+      )}
     </View>
   );
 }
