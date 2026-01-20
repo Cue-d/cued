@@ -1,6 +1,8 @@
 #!/bin/bash
 # afk-ralph.sh - Autonomous Ralph Wiggum loop
-# Usage: ./afk-ralph.sh <iterations> [--sandbox]
+# Usage: ./afk-ralph.sh <prd-file> <iterations> [--sandbox]
+#
+# Example: ./afk-ralph.sh prds/slack-native-integration-prd.json 10
 #
 # Best for: Phases 3-6 (AI Assistant, Gmail, Slack, Polish)
 # Only use this AFTER the foundation is solid:
@@ -78,6 +80,7 @@ else
 fi
 
 # Parse arguments
+PRD_FILE=""
 ITERATIONS=""
 USE_SANDBOX=false
 
@@ -85,22 +88,23 @@ for arg in "$@"; do
   case $arg in
     --sandbox)
       USE_SANDBOX=true
-      shift
       ;;
     *)
-      if [ -z "$ITERATIONS" ]; then
+      if [ -z "$PRD_FILE" ]; then
+        PRD_FILE=$arg
+      elif [ -z "$ITERATIONS" ]; then
         ITERATIONS=$arg
       fi
       ;;
   esac
 done
 
-if [ -z "$ITERATIONS" ]; then
-  echo "Usage: $0 <iterations> [--sandbox]"
+if [ -z "$PRD_FILE" ] || [ -z "$ITERATIONS" ]; then
+  echo "Usage: $0 <prd-file> <iterations> [--sandbox]"
   echo ""
   echo "Examples:"
-  echo "  ./afk-ralph.sh 10              # Run 10 iterations"
-  echo "  ./afk-ralph.sh 20 --sandbox    # Run 20 iterations in Docker sandbox"
+  echo "  ./afk-ralph.sh prds/slack-native-integration-prd.json 10"
+  echo "  ./afk-ralph.sh prds/prm-38-prd.json 20 --sandbox"
   echo ""
   echo "Recommended iteration counts:"
   echo "  5-10   Small tasks, single phase"
@@ -109,11 +113,22 @@ if [ -z "$ITERATIONS" ]; then
   exit 1
 fi
 
+# Derive progress file from PRD file
+PROGRESS_FILE="${PRD_FILE%.json}-progress.txt"
+
+# Verify PRD file exists
+if [ ! -f "$PRD_FILE" ]; then
+  echo "Error: PRD file not found: $PRD_FILE"
+  exit 1
+fi
+
 START_TIME=$(date +%s)
 
 echo "========================================"
 echo "Ralph Wiggum - AFK Mode"
 echo "========================================"
+echo "PRD: $PRD_FILE"
+echo "Progress: $PROGRESS_FILE"
 echo "Iterations: $ITERATIONS"
 echo "Sandbox: $USE_SANDBOX"
 echo "Start time: $(date)"
@@ -138,7 +153,7 @@ for ((i=1; i<=$ITERATIONS; i++)); do
 
   OUTPUT_FILE="/tmp/ralph-iteration-$i.txt"
 
-  $CLAUDE_CMD "@prds/refactor-prd.json @prds/refactor-progress.txt \
+  $CLAUDE_CMD "@$PRD_FILE @$PROGRESS_FILE \
 
 ## CONTEXT
 This is PRODUCTION CODE. Quality over speed.
@@ -146,7 +161,7 @@ Every shortcut becomes someone else's burden.
 Fight entropy. Leave the codebase better than you found it.
 
 ## PRD FORMAT
-The prds/refactor-prd.json file contains structured tasks with:
+The $PRD_FILE file contains structured tasks with:
 - id: Task identifier (e.g., '3.2')
 - phase: 1-7
 - mode: 'hitl' or 'afk'
@@ -161,7 +176,7 @@ The prds/refactor-prd.json file contains structured tasks with:
 The PRD also has a 'parallel_groups' object defining which tasks can run concurrently.
 
 ## YOUR TASK
-1. Read prds/refactor-prd.json and prds/refactor-progress.txt to understand current state.
+1. Read $PRD_FILE and $PROGRESS_FILE to understand current state.
 
 2. Find tasks where passes=false. Check dependencies:
    - A task can only start if all tasks in its 'depends_on' array have passes=true
@@ -195,16 +210,16 @@ The PRD also has a 'parallel_groups' object defining which tasks can run concurr
 
 9. Commit with a descriptive message.
 
-10. Update prds/refactor-prd.json: set passes=true for the completed task.
+10. Update $PRD_FILE: set passes=true for the completed task.
 
-11. Update prds/refactor-progress.txt with:
+11. Update $PROGRESS_FILE with:
     - Date/time and task ID + description
     - Files changed
     - Decisions made and WHY
     - Browser verification results (for UI tasks)
     - Blockers or notes for next iteration
 
-12. Check if ALL tasks in prds/refactor-prd.json have passes=true.
+12. Check if ALL tasks in $PRD_FILE have passes=true.
     If so, output exactly: <promise>COMPLETE</promise>
 
 For single tasks: complete ONE task per iteration.
@@ -255,8 +270,8 @@ if [ -n "$DEV_SERVER_PID" ]; then
 fi
 echo ""
 echo "Check status:"
-echo "  - prds/refactor-progress.txt for what was done"
-echo "  - prds/refactor-prd.json for tasks with passes=false"
+echo "  - $PROGRESS_FILE for what was done"
+echo "  - $PRD_FILE for tasks with passes=false"
 echo "  - git log --oneline -${ITERATIONS}"
 echo ""
 echo "Run again if more work remains."

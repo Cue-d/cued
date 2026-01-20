@@ -2,6 +2,9 @@
 # ralph-once.sh - Human-in-the-loop Ralph Wiggum iteration
 # Run this manually, watch what Claude does, check the commit, run again.
 #
+# Usage: ./ralph-once.sh <prd-file>
+# Example: ./ralph-once.sh prds/slack-native-integration-prd.json
+#
 # Best for: Phases 1-2 (Foundation, iMessage Sync)
 # These are high-stakes, low-reversibility tasks where architectural
 # decisions cascade through the entire codebase.
@@ -44,6 +47,27 @@ fi
 
 echo "Using Claude CLI: $CLAUDE_CMD"
 
+# Parse arguments
+PRD_FILE="$1"
+
+if [ -z "$PRD_FILE" ]; then
+  echo "Usage: $0 <prd-file>"
+  echo ""
+  echo "Examples:"
+  echo "  ./ralph-once.sh prds/slack-native-integration-prd.json"
+  echo "  ./ralph-once.sh prds/prm-38-prd.json"
+  exit 1
+fi
+
+# Derive progress file from PRD file
+PROGRESS_FILE="${PRD_FILE%.json}-progress.txt"
+
+# Verify PRD file exists
+if [ ! -f "$PRD_FILE" ]; then
+  echo "Error: PRD file not found: $PRD_FILE"
+  exit 1
+fi
+
 # Check if dev server is running
 check_dev_server() {
   curl -s -o /dev/null -w "%{http_code}" http://localhost:3000 2>/dev/null | grep -q "200\|304"
@@ -78,10 +102,12 @@ fi
 echo "========================================"
 echo "Ralph Wiggum - HITL Mode"
 echo "========================================"
+echo "PRD: $PRD_FILE"
+echo "Progress: $PROGRESS_FILE"
 echo "Start time: $(date)"
 echo ""
 
-$CLAUDE_CMD --dangerously-skip-permissions "@prds/refactor-prd.json @prds/refactor-progress.txt \
+$CLAUDE_CMD --dangerously-skip-permissions "@$PRD_FILE @$PROGRESS_FILE \
 
 ## CONTEXT
 This is PRODUCTION CODE that will be maintained long-term.
@@ -100,7 +126,7 @@ The prds/prd.json file contains structured tasks with:
 - reference: (optional) URL to documentation for this task
 
 ## YOUR TASK
-1. Read prds/refactor-prd.json and prds/refactor-progress.txt to understand current state.
+1. Read $PRD_FILE and $PROGRESS_FILE to understand current state.
 
 2. Find tasks where passes=false. Choose the next task using this priority:
    - Architectural decisions and core abstractions (HIGH)
@@ -136,9 +162,9 @@ The prds/prd.json file contains structured tasks with:
 
 9. Commit with a descriptive message.
 
-10. Update prds/refactor-prd.json: set passes=true for the completed task.
+10. Update $PRD_FILE: set passes=true for the completed task.
 
-11. Update prds/refactor-progress.txt with:
+11. Update $PROGRESS_FILE with:
     - Date/time
     - Task ID and description (e.g., '1.7 - Define Convex schema: users table')
     - Files changed
@@ -162,7 +188,7 @@ fi
 echo ""
 echo "Next steps:"
 echo "  1. Review the commit: git log -1 --stat"
-echo "  2. Check prds/refactor-progress.txt for notes"
-echo "  3. Check prds/refactor-prd.json for updated passes status"
-echo "  4. Run again: ./ralph-once.sh"
+echo "  2. Check $PROGRESS_FILE for notes"
+echo "  3. Check $PRD_FILE for updated passes status"
+echo "  4. Run again: ./ralph-once.sh $PRD_FILE"
 echo "========================================"

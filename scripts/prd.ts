@@ -4,7 +4,7 @@ import { Command } from "commander";
 import { readFileSync, writeFileSync, existsSync } from "fs";
 import { resolve, basename } from "path";
 
-import { fetchAndParseIssue, linkPRToIssue, getIssue } from "./lib/linear.js";
+import { fetchAndParseIssue, linkPRToIssue, getIssue, updateIssueStatus } from "./lib/linear.js";
 import {
   generatePRD,
   validatePRD,
@@ -62,6 +62,123 @@ program
       } else {
         writeFileSync(outputPath, JSON.stringify(prd, null, 2));
         console.log(`\nPRD written to: ${outputPath}`);
+      }
+    } catch (error) {
+      console.error("Error:", error instanceof Error ? error.message : error);
+      process.exit(1);
+    }
+  });
+
+/**
+ * Start working on a Linear issue - one-shot command
+ * Combines: pull + set status + create branch
+ */
+program
+  .command("start <linear-id>")
+  .description("One-shot: fetch issue, generate PRD, set In Progress, create branch")
+  .option("-o, --output <path>", "Output path for PRD JSON")
+  .option("--no-branch", "Skip creating git branch")
+  .option("--no-status", "Skip updating Linear status")
+  .option("--run", "Immediately start running tasks after setup")
+  .action(async (linearId: string, options) => {
+    console.log(`\n🚀 Starting work on ${linearId}...\n`);
+
+    try {
+      // Step 1: Fetch and parse issue
+      console.log("1. Fetching Linear issue...");
+      const issue = fetchAndParseIssue(linearId);
+      if (!issue) {
+        console.error(`Issue ${linearId} not found`);
+        process.exit(1);
+      }
+      console.log(`   ✓ Found: ${issue.title}`);
+
+      // Step 2: Generate PRD
+      console.log("\n2. Generating PRD...");
+      const prd = generatePRD(issue);
+      const outputPath = options.output || `prds/${linearId.toLowerCase()}-prd.json`;
+      writeFileSync(outputPath, JSON.stringify(prd, null, 2));
+      console.log(`   ✓ PRD written to: ${outputPath}`);
+      console.log(`   ✓ ${prd.tasks.length} tasks across ${new Set(prd.tasks.map((t) => t.phase)).size} phases`);
+
+      if (prd.documentation && prd.documentation.length > 0) {
+        console.log(`   ✓ ${prd.documentation.length} documentation references`);
+      }
+      if (prd.reference_repos && prd.reference_repos.length > 0) {
+        console.log(`   ✓ ${prd.reference_repos.length} reference repos`);
+      }
+
+      // Step 3: Update Linear status
+      if (options.status !== false) {
+        console.log("\n3. Updating Linear status to 'In Progress'...");
+        const statusUpdated = updateIssueStatus(linearId, "In Progress");
+        if (statusUpdated) {
+          console.log("   ✓ Status updated");
+        } else {
+          console.log("   ⚠ Failed to update status (continuing anyway)");
+        }
+      }
+
+      // Step 4: Create git branch
+      if (options.branch !== false) {
+        console.log("\n4. Creating git branch...");
+        const branchName = `theotarr/${linearId.toLowerCase()}-${issue.title
+          .toLowerCase()
+          .replace(/[^a-z0-9]+/g, "-")
+          .replace(/-+/g, "-")
+          .replace(/^-|-$/g, "")
+          .slice(0, 40)}`;
+
+        const { spawnSync } = await import("child_process");
+
+        // Check if branch exists
+        const checkBranch = spawnSync("git", ["rev-parse", "--verify", branchName], {
+          encoding: "utf-8",
+          stdio: "pipe",
+        });
+
+        if (checkBranch.status === 0) {
+          // Branch exists, switch to it
+          const switchResult = spawnSync("git", ["checkout", branchName], {
+            encoding: "utf-8",
+            stdio: "pipe",
+          });
+          if (switchResult.status === 0) {
+            console.log(`   ✓ Switched to existing branch: ${branchName}`);
+          } else {
+            console.log(`   ⚠ Failed to switch to branch (continuing anyway)`);
+          }
+        } else {
+          // Create new branch
+          const createResult = spawnSync("git", ["checkout", "-b", branchName], {
+            encoding: "utf-8",
+            stdio: "pipe",
+          });
+          if (createResult.status === 0) {
+            console.log(`   ✓ Created branch: ${branchName}`);
+          } else {
+            console.log(`   ⚠ Failed to create branch (continuing anyway)`);
+          }
+        }
+      }
+
+      // Summary
+      console.log("\n" + "=".repeat(60));
+      console.log("✅ Ready to work!");
+      console.log("=".repeat(60));
+      console.log(`\nPRD: ${outputPath}`);
+      console.log(`\nNext steps:`);
+      console.log(`  1. Review the PRD and documentation`);
+      console.log(`  2. Run tasks: pnpm prd run ${outputPath}`);
+      console.log(`  3. Sync progress: pnpm prd sync ${outputPath}`);
+
+      // Optionally start running
+      if (options.run) {
+        console.log("\n" + "=".repeat(60));
+        console.log("Starting task execution...");
+        console.log("=".repeat(60) + "\n");
+
+        await executePRD(prd, outputPath, { stopOnError: true });
       }
     } catch (error) {
       console.error("Error:", error instanceof Error ? error.message : error);

@@ -2,6 +2,110 @@ import { z } from "zod";
 import { executeClaudePrompt } from "./claude.js";
 import type { ParsedIssue } from "./linear.js";
 
+// =============================================================================
+// PRD GENERATION PROMPT
+// =============================================================================
+// This prompt is the heart of PRD generation. Edit carefully.
+// Uses ${} interpolation - all variables come from ParsedIssue.
+// =============================================================================
+
+const PRD_GENERATION_PROMPT = `
+## CONTEXT
+
+You are generating a PRD (Product Requirements Document) for a Linear issue.
+This PRD will be executed by AI agents autonomously.
+Quality over speed. Every task must be verifiable.
+
+## FEATURE
+
+Title: \${title}
+Linear ID: \${identifier}
+
+Overview:
+\${overview}
+
+Target Stack:
+\${targetStack}
+
+Acceptance Criteria:
+\${acceptanceCriteria}
+
+Key Decisions:
+\${decisions}
+
+## PRD FORMAT
+
+Generate a JSON PRD with this structure:
+
+{
+  "project": "Feature name",
+  "description": "Brief description",
+  "linearIssueId": "\${identifier}",
+  "target_stack": ["packages/foo/", "apps/bar/"],
+  "decisions": {"key": "value"},
+  "documentation": [
+    {"url": "https://docs.example.com", "title": "API Docs", "reason": "Needed for X"}
+  ],
+  "reference_repos": [
+    {"url": "https://github.com/org/repo", "description": "Similar pattern for Y"}
+  ],
+  "tasks": [...]
+}
+
+## DOCUMENTATION DISCOVERY
+
+CRITICAL: Identify documentation an AI agent should fetch before implementing:
+
+1. **Official Docs** - API refs, SDK guides, framework docs
+2. **Reference Repos** - Open-source projects with similar patterns
+3. **Internal Patterns** - Link to existing code if mentioned
+
+Examples:
+- Slack integration → Slack Web API docs, mautrix/slack repo
+- Convex mutations → Convex docs for mutations
+- Electron IPC → Electron IPC docs
+
+Include REAL URLs. AI agents will fetch these before executing tasks.
+
+## TASK STRUCTURE
+
+Each task:
+{
+  "id": "1.1",              // phase.task format
+  "phase": 1,               // 1=Foundation, 2=Core, 3=Integration, 4=Polish, 5=Testing
+  "mode": "afk",            // "afk" (autonomous) or "hitl" (human review needed)
+  "category": "setup",      // setup, integration, functional, ui, testing, refactor
+  "description": "What this accomplishes",
+  "steps": [
+    "Step 1 - specific file/function",
+    "Step 2 - specific action",
+    "Verify: pnpm typecheck && pnpm lint - must pass"
+  ],
+  "passes": false,
+  "dependencies": ["1.0"]   // optional - task IDs that must complete first
+}
+
+## TASK REQUIREMENTS
+
+1. **Verifiable** - Every task ends with: "Verify: pnpm typecheck && pnpm lint - must pass"
+2. **Specific** - Include file paths, function names, not vague descriptions
+3. **Small** - 3-7 steps max. If larger, split into subtasks.
+4. **Dependencies** - If task B needs task A's output, add dependencies array
+
+## MODES
+
+- "afk": Straightforward implementation, can run autonomously
+- "hitl": Architectural decisions, security-sensitive, needs human review
+
+## OUTPUT
+
+Return ONLY valid JSON. No markdown. No explanation. Just the PRD object.
+`;
+
+// =============================================================================
+// SCHEMAS
+// =============================================================================
+
 // Zod schemas for validation - intentionally flexible to support PRD-specific needs
 const TaskSchema = z.object({
   id: z.string(), // Flexible ID format (e.g., "1.1", "setup", "test-auth")
@@ -15,12 +119,24 @@ const TaskSchema = z.object({
   dependencies: z.array(z.string()).optional(),
 });
 
+const DocumentationSchema = z.object({
+  url: z.string().url(),
+  title: z.string(),
+  reason: z.string().optional(), // Why this doc is relevant
+});
+
 const PRDSchema = z.object({
   project: z.string(),
   description: z.string(),
   linearIssueId: z.string().optional(),
   target_stack: z.array(z.string()).optional(),
   decisions: z.record(z.string()).optional(),
+  // Documentation fields for AI context
+  documentation: z.array(DocumentationSchema).optional(), // Relevant web docs to search
+  reference_repos: z.array(z.object({
+    url: z.string(),
+    description: z.string(),
+  })).optional(), // External repos to explore for patterns
   tasks: z.array(TaskSchema),
   // Allow arbitrary additional fields for PRD-specific needs
 }).passthrough();
@@ -29,87 +145,36 @@ export type Task = z.infer<typeof TaskSchema>;
 export type PRD = z.infer<typeof PRDSchema>;
 
 /**
+ * Interpolate the PRD prompt with issue data
+ */
+function buildPrompt(issue: ParsedIssue): string {
+  const vars = {
+    title: issue.title,
+    identifier: issue.identifier,
+    overview: issue.overview || issue.description || "(no overview provided)",
+    targetStack: issue.targetStack.length > 0
+      ? issue.targetStack.map((t) => `- ${t}`).join("\n")
+      : "(not specified - infer from overview)",
+    acceptanceCriteria: issue.acceptanceCriteria.length > 0
+      ? issue.acceptanceCriteria.map((c) => `- [ ] ${c}`).join("\n")
+      : "(derive from overview)",
+    decisions: Object.keys(issue.decisions).length > 0
+      ? Object.entries(issue.decisions).map(([k, v]) => `- **${k}**: ${v}`).join("\n")
+      : "(none specified)",
+  };
+
+  // Simple template interpolation: replace ${key} with vars[key]
+  return PRD_GENERATION_PROMPT.replace(
+    /\$\{(\w+)\}/g,
+    (_, key) => vars[key as keyof typeof vars] ?? `\${${key}}`
+  );
+}
+
+/**
  * Generate PRD tasks from a parsed Linear issue using Claude Code CLI
  */
 export function generatePRD(issue: ParsedIssue): PRD {
-  const prompt = `You are a software architect creating a PRD with executable tasks.
-
-Generate a PRD for this feature:
-
-## Title
-${issue.title}
-
-## Overview
-${issue.overview || issue.description}
-
-## Target Stack
-${issue.targetStack.length > 0 ? issue.targetStack.map((t) => `- ${t}`).join("\n") : "(not specified)"}
-
-## Acceptance Criteria
-${issue.acceptanceCriteria.length > 0 ? issue.acceptanceCriteria.map((c) => `- [ ] ${c}`).join("\n") : "(derive from overview)"}
-
-## Key Decisions
-${Object.keys(issue.decisions).length > 0 ? Object.entries(issue.decisions).map(([k, v]) => `- **${k}**: ${v}`).join("\n") : "(none specified)"}
-
-## Task Requirements
-
-**CRITICAL: Every task must be verifiable.** Each task's final step(s) MUST include verification:
-
-1. **Run typecheck**: \`pnpm typecheck\` must pass with no errors
-2. **Run linting**: \`pnpm lint\` must pass
-3. **Run formatting**: Code must be properly formatted
-4. **Run tests**: If tests exist for the modified code, they must pass
-
-Example verification step: "Verify: run \`pnpm typecheck && pnpm lint && pnpm test\` - all must pass"
-
-## Task Structure Guidelines
-
-1. **IDs**: Use "phase.task" format (e.g., "1.1", "2.3") or descriptive names ("setup", "auth-flow")
-
-2. **Phases** (optional but recommended):
-   - Phase 1: Foundation/Setup
-   - Phase 2: Core Implementation
-   - Phase 3: Integration
-   - Phase 4: Polish
-   - Phase 5: Testing & Verification
-
-3. **Modes**:
-   - "hitl": Requires human review (architectural decisions, security, complex logic)
-   - "afk": Can run autonomously (straightforward implementation)
-
-4. **Steps**: 3-7 specific steps per task:
-   - Actionable (start with verb)
-   - Specific (file paths, function names)
-   - Verifiable (concrete outcome)
-   - MUST end with verification step
-
-## Output Format
-
-Return ONLY valid JSON (no markdown):
-{
-  "project": "${issue.title}",
-  "description": "Brief description",
-  "linearIssueId": "${issue.identifier}",
-  "target_stack": ${JSON.stringify(issue.targetStack.length > 0 ? issue.targetStack : [])},
-  "decisions": ${JSON.stringify(issue.decisions)},
-  "tasks": [
-    {
-      "id": "1.1",
-      "phase": 1,
-      "mode": "afk",
-      "category": "setup",
-      "description": "What this task accomplishes",
-      "steps": [
-        "Step 1 - specific action",
-        "Step 2 - specific action",
-        "Verify: run typecheck, lint, and tests - all must pass"
-      ],
-      "passes": false
-    }
-  ]
-}
-
-Generate tasks that satisfy ALL acceptance criteria. Every task must end with a verification step.`;
+  const prompt = buildPrompt(issue);
 
   const response = executeClaudePrompt(prompt, { timeout: 180000 }); // 3 min timeout for generation
 

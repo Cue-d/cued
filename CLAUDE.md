@@ -187,73 +187,91 @@ Build Swift: `cd apps/electron/swift && swift build -c release`
 
 We use Linear MCP to track features and automatically generate PRDs.
 
-### AI Agent Instructions (IMPORTANT)
+### One-Shot Command (PREFERRED)
 
-When a user asks to work on a Linear issue or create a PRD:
+When user says "work on PRM-123" or "start PRM-123":
 
-1. **Fetch issue details** using Linear MCP:
-   ```
-   mcp__linear__get_issue with id: "PRM-123"
-   ```
-
-2. **Generate PRD automatically** by running:
-   ```bash
-   cd scripts && pnpm prd pull PRM-123
-   ```
-   This creates `prds/prm-123-prd.json` with tasks extracted from the issue.
-
-3. **Execute PRD tasks** with:
-   ```bash
-   cd scripts && pnpm prd run prds/prm-123-prd.json
-   ```
-   Use `--interactive` flag for step-by-step confirmation.
-
-4. **Sync progress to Linear** after completing tasks:
-   ```bash
-   cd scripts && pnpm prd sync prds/prm-123-prd.json
-   ```
-
-### When to Auto-Generate PRDs
-
-Automatically run `pnpm prd pull <issue-id>` when the user:
-- Says "work on PRM-123" or "start PRM-123"
-- Says "create PRD for PRM-123"
-- Asks to implement a feature tied to a Linear issue
-- References a Linear issue and asks for a plan
-
-### Direct Linear Commands
-
-You can also use Linear MCP directly:
-- `mcp__linear__list_issues` - List issues assigned to user
-- `mcp__linear__get_issue` - Get issue details
-- `mcp__linear__update_issue` - Update status, assignee, etc.
-- `mcp__linear__create_comment` - Add progress comments
-
-### Branch Naming
-
-Use Linear issue IDs: `theotarr/prm-123-dark-mode`
-
-### Link PRs to Linear Issues
-
-After creating a PR, automatically link it to the Linear issue:
 ```bash
-cd scripts && pnpm prd link-pr PRM-123 https://github.com/org/repo/pull/456
+cd scripts && pnpm prd start PRM-123
 ```
 
-**AI agents MUST run this after `gh pr create` succeeds.** Extract the PR URL from the gh output and link it.
+This single command:
+1. Fetches Linear issue
+2. Generates PRD with tasks + documentation refs
+3. Updates Linear status → "In Progress"
+4. Creates git branch `theotarr/prm-123-feature-name`
 
-### Example Workflow
+Add `--run` to immediately start executing tasks.
 
-User: "Work on PRM-123"
+### PRD JSON Schema
 
-1. Fetch issue: `mcp__linear__get_issue` with id "PRM-123"
-2. Generate PRD: `cd scripts && pnpm prd pull PRM-123`
-3. Update status: `mcp__linear__update_issue` → "In Progress"
-4. Create branch: `git checkout -b theotarr/prm-123-feature-name`
-5. Execute tasks from PRD
-6. Sync progress: `cd scripts && pnpm prd sync prds/prm-123-prd.json`
-7. Create PR: `gh pr create ...` → capture PR URL
-8. Link PR: `cd scripts && pnpm prd link-pr PRM-123 <pr-url>`
+Generated PRDs include documentation fields for AI context:
+
+```json
+{
+  "project": "Feature Name",
+  "linearIssueId": "PRM-123",
+  "documentation": [
+    {"url": "https://docs.example.com", "title": "API Docs", "reason": "Needed for X"}
+  ],
+  "reference_repos": [
+    {"url": "https://github.com/foo/bar", "description": "Similar pattern"}
+  ],
+  "tasks": [...]
+}
+```
+
+AI agents should **fetch these docs** before executing tasks.
+
+### CLI Commands
+
+| Command | Description |
+|---------|-------------|
+| `pnpm prd start PRM-123` | One-shot: pull + status + branch |
+| `pnpm prd start PRM-123 --run` | Same + immediately run tasks |
+| `pnpm prd pull PRM-123` | Just generate PRD |
+| `pnpm prd run prds/prm-123-prd.json` | Execute tasks (Ralph loop) |
+| `pnpm prd run prds/prm-123-prd.json --dry-run` | Show what would execute |
+| `pnpm prd sync prds/prm-123-prd.json` | Sync progress to Linear |
+| `pnpm prd status prds/prm-123-prd.json` | Show completion status |
+| `pnpm prd link-pr PRM-123 <url>` | Link PR to issue |
+
+### Ralph Shell Scripts
+
+The Ralph scripts are thin wrappers for manual iteration:
+
+```bash
+./ralph-once.sh prds/slack-native-integration-prd.json  # Single iteration
+./afk-ralph.sh prds/slack-native-integration-prd.json 10  # 10 iterations
+```
+
+Both use the same prompt pattern - ONE Claude session handles multiple tasks.
+
+### When to Use What
+
+| User says | Action |
+|-----------|--------|
+| "work on PRM-123" | `pnpm prd start PRM-123` |
+| "start PRM-123" | `pnpm prd start PRM-123` |
+| "create PRD for PRM-123" | `pnpm prd start PRM-123` |
+| "implement PRM-123" | `pnpm prd start PRM-123 --run` |
+| "continue PRM-123" | `pnpm prd run prds/prm-123-prd.json` |
+| "sync progress" | `pnpm prd sync prds/prm-123-prd.json` |
+
+### After PR Creation
+
+**MUST** link PR to Linear:
+```bash
+cd scripts && pnpm prd link-pr PRM-123 <pr-url>
+```
+
+### Direct Linear MCP Commands
+
+For manual operations:
+- `mcp__linear__list_issues` - List issues
+- `mcp__linear__get_issue` - Get details
+- `mcp__linear__update_issue` - Update status
+- `mcp__linear__create_comment` - Add comments
 
 ## Plan Mode
 
