@@ -1,5 +1,7 @@
 import { defineConfig } from "electron-vite";
 import { resolve } from "path";
+import react from "@vitejs/plugin-react";
+import tailwindcss from "@tailwindcss/vite";
 
 // Point to monorepo root for shared .env.local
 const rootDir = resolve(__dirname, "../..");
@@ -13,7 +15,7 @@ export default defineConfig({
           index: resolve(__dirname, "src/main/index.ts"),
         },
         // Native modules must be external - they can't be bundled
-        external: ["better-sqlite3"],
+        external: ["better-sqlite3", "electron-liquid-glass"],
       },
     },
   },
@@ -27,6 +29,15 @@ export default defineConfig({
     },
   },
   renderer: {
+    plugins: [react(), tailwindcss()],
+    resolve: {
+      alias: {
+        "@": resolve(__dirname, "src/renderer"),
+        "@prm/ui": resolve(__dirname, "../../packages/ui/src"),
+        "@prm/shared": resolve(__dirname, "../../packages/shared/src"),
+      },
+      dedupe: ["react", "react-dom"],
+    },
     build: {
       rollupOptions: {
         input: {

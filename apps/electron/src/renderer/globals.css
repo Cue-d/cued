@@ -1,0 +1,30 @@
+@import "tailwindcss";
+
+/* Theme variables - imported from shared UI package */
+@import "../../../../packages/ui/src/styles/theme.css";
+
+/* Source for Tailwind to scan components */
+@source "../../../../packages/ui/src/**/*.{ts,tsx}";
+
+:root {
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro", system-ui, sans-serif;
+}
+
+html,
+body {
+  background: transparent;
+  min-height: 100vh;
+}
+
+body {
+  color: var(--foreground);
+}
+
+/* Drag region for window title bar */
+.drag-region {
+  -webkit-app-region: drag;
+}
+
+.no-drag {
+  -webkit-app-region: no-drag;
+}

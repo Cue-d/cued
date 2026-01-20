@@ -3,6 +3,7 @@ import "./env.js";
 
 import { join } from "node:path";
 import { app, BrowserWindow, ipcMain } from "electron";
+import liquidGlass from "electron-liquid-glass";
 import { ConvexHttpClient } from "convex/browser";
 import { api } from "@prm/convex";
 import { electronEnv } from "@prm/env/electron";
@@ -27,16 +28,35 @@ const WORKOS_CLIENT_ID = electronEnv.WORKOS_CLIENT_ID;
 
 let mainWindow: BrowserWindow | null = null;
 
+/**
+ * Check if running on macOS Tahoe (26+) which supports Liquid Glass
+ */
+function isTahoe(): boolean {
+  if (process.platform !== "darwin") return false;
+  const [major] = process.getSystemVersion().split(".").map(Number);
+  return major >= 26;
+}
+
 function createWindow(): void {
+  const useLiquidGlass = isTahoe();
+
   mainWindow = new BrowserWindow({
     width: 1200,
     height: 800,
+    transparent: useLiquidGlass,
+    titleBarStyle: useLiquidGlass ? "hiddenInset" : "default",
+    backgroundColor: useLiquidGlass ? undefined : "#1a1a1a",
     webPreferences: {
       preload: join(__dirname, "../preload/index.js"),
       nodeIntegration: false,
       contextIsolation: true,
     },
   });
+
+  // Apply Liquid Glass effect on macOS Tahoe+
+  if (useLiquidGlass) {
+    mainWindow.setWindowButtonVisibility(true);
+  }
 
   // In development, load from dev server
   // In production, load from built files
@@ -293,6 +313,18 @@ app.whenReady().then(() => {
 
   // Check initial auth state and notify renderer once window is ready
   mainWindow?.webContents.once("did-finish-load", () => {
+    // Apply Liquid Glass effect on macOS Tahoe+
+    if (mainWindow && isTahoe()) {
+      try {
+        liquidGlass.addView(mainWindow.getNativeWindowHandle(), {
+          cornerRadius: 12,
+          tintColor: "#00000010",
+        });
+      } catch (err) {
+        console.error("[Main] Failed to apply Liquid Glass effect:", err);
+      }
+    }
+
     const authState = getAuthState();
     mainWindow?.webContents.send("auth:stateChanged", authState);
   });
