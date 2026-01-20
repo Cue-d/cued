@@ -20,7 +20,6 @@ import {
   type ActionPlatform,
   type MessageAttachment,
   type DisplayMessage,
-  type DraftRiskFlag,
   type DraftOption,
 } from "@prm/shared";
 import { ChatInput } from "@/components/chat/chat-input";

@@ -3,8 +3,8 @@ import { ConvexHttpClient } from "convex/browser";
 import { z } from "zod/v4";
 import { openai, DEFAULT_MODEL, SYSTEM_PROMPT, getMemories } from "@prm/ai";
 import { api } from "@prm/convex";
-import type { Id } from "@prm/convex";
 import { env } from "@prm/env/server";
+import type { Id } from "@prm/convex";
 
 const convex = new ConvexHttpClient(env.NEXT_PUBLIC_CONVEX_URL!);
 

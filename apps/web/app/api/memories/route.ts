@@ -2,8 +2,8 @@ import { NextResponse } from "next/server";
 import { ConvexHttpClient } from "convex/browser";
 import { addContactMemories, type ConversationMessage } from "@prm/ai";
 import { api } from "@prm/convex";
-import type { Id } from "@prm/convex";
 import { env } from "@prm/env/server";
+import type { Id } from "@prm/convex";
 
 const convex = new ConvexHttpClient(env.NEXT_PUBLIC_CONVEX_URL!);
 

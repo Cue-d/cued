@@ -1,8 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { ConvexHttpClient } from "convex/browser";
 import { api } from "@prm/convex";
-import type { SyncBatch, SyncResult } from "@prm/integrations/imessage";
 import { env } from "@prm/env/server";
+import type { SyncBatch, SyncResult } from "@prm/integrations/imessage";
 
 const convex = new ConvexHttpClient(env.NEXT_PUBLIC_CONVEX_URL!);
 

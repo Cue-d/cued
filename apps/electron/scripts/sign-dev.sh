@@ -4,6 +4,12 @@
 
 set -e
 
+# Skip on non-macOS (codesign is macOS-only)
+if [[ "$(uname)" != "Darwin" ]]; then
+    echo "Skipping code signing (not macOS)"
+    exit 0
+fi
+
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
 MONOREPO_ROOT="$(dirname "$(dirname "$PROJECT_ROOT")")"

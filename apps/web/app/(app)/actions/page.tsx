@@ -231,7 +231,7 @@ export default function ActionsPage() {
       actions.map((action) => ({
         id: action._id,
         type: action.type,
-        action,
+        action: action as EnrichedAction,
       })),
     [actions]
   )

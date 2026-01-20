@@ -1,9 +1,19 @@
+/* eslint-disable import-x/order */
 import { NextRequest } from "next/server";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 // Hoist mock functions so they're available when vi.mock is executed
 const mockConvexQuery = vi.hoisted(() => vi.fn());
 const mockConvexMutation = vi.hoisted(() => vi.fn());
 const mockSetAuth = vi.hoisted(() => vi.fn());
+
+// Mock environment variables before importing route
+vi.mock("@prm/env/server", () => ({
+  env: {
+    NEXT_PUBLIC_CONVEX_URL: "https://test.convex.cloud",
+    NANGO_SECRET_KEY: "test-nango-key",
+    OPENAI_API_KEY: "test-openai-key",
+  },
+}));
 
 vi.mock("convex/browser", () => ({
   ConvexHttpClient: vi.fn().mockImplementation(() => ({

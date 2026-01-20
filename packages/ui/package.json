@@ -15,6 +15,7 @@
     "test": "vitest"
   },
   "dependencies": {
+    "ai": "^6.0.33",
     "@base-ui/react": "^1.0.0",
     "@prm/shared": "workspace:*",
     "@radix-ui/react-use-controllable-state": "^1.2.2",

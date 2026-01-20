@@ -54,6 +54,7 @@
     "uniwind": "^1.2.0"
   },
   "devDependencies": {
+    "sf-symbols-typescript": "^2.0.0",
     "@testing-library/react": "^16.3.2",
     "@testing-library/react-native": "^13.3.0",
     "@types/react": "~19.1.0",

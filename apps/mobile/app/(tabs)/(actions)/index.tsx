@@ -128,7 +128,7 @@ export default function ActionsScreen(): React.JSX.Element {
   // Transform actions to CardStack items
   const cardItems: ActionItem[] = actions.map((action) => ({
     id: action._id,
-    action,
+    action: action as EnrichedAction,
   }));
 
   // Get response text for an action (prefer user edits, then draft options)

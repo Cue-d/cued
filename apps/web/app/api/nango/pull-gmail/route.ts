@@ -64,7 +64,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const cleanedRecords = records.map((record: any) => {
       // eslint-disable-next-line @typescript-eslint/no-unused-vars
-      const { nango_metadata: _nango_metadata, ...email } = record;
+      const { _nango_metadata, ...email } = record;
       return email as GmailEmail;
     });
 

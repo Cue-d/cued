@@ -1,12 +1,9 @@
 {
   "scripts": {
-    "setup": "cd backend && uv sync && cd ../frontend && pnpm install && cd ../llm && swift build -c release",
-    "run": "(cd backend && PRM_DEBUG_WORKERS=1 PRM_DEBUG_API=1 uv run uvicorn main:app --reload --reload-exclude .venv) & (cd frontend && pnpm dev)",
-    "run:backend": "cd backend && uv run uvicorn main:app --reload --reload-exclude .venv",
-    "run:frontend": "cd frontend && pnpm dev",
-    "reset": "rm -rf ~/.prm/ && cd backend && uv sync && cd ../frontend && pnpm install && cd ../llm && swift build -c release",
-    "test": "cd backend && uv run pytest && cd ../frontend && pnpm test --run",
-    "lint": "cd backend && uv run ruff check . && uv run ruff format --check . && cd ../frontend && pnpm lint && pnpm typecheck",
-    "build": "cd llm && swift build -c release && cd ../frontend && pnpm build:mac"
+    "setup": "pnpm install",
+    "run": "pnpm dev",
+    "test": "pnpm test",
+    "lint": "pnpm lint && pnpm typecheck",
+    "build": "pnpm build"
   }
 }

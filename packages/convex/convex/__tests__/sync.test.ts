@@ -3,6 +3,10 @@
  *
  * Uses convex-test to mock the Convex backend and test
  * iMessage, Gmail, and Slack sync operations.
+ *
+ * Note: Sync mutations schedule background functions (contact resolution, action events)
+ * that may generate warnings after test completion. This is expected behavior as the
+ * tests focus on the synchronous mutation results rather than background processing.
  */
 
 import { convexTest } from "convex-test";

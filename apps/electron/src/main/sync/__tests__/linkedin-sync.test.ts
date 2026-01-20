@@ -27,6 +27,15 @@ vi.mock('convex/browser', () => ({
   })),
 }))
 
+// Mock @prm/convex api
+vi.mock('@prm/convex', () => ({
+  api: {
+    sync: {
+      syncLinkedInMessages: 'sync:syncLinkedInMessages',
+    },
+  },
+}))
+
 // Mock the messages module to avoid importing actual API calls
 vi.mock('../../linkedin-api/messages', () => ({
   getMessages: vi.fn(),
@@ -122,6 +131,7 @@ function createMockLinkedInClient(overrides: Partial<LinkedInClient> = {}): Link
     sendMessage: vi.fn(),
     getConnections: vi.fn(),
     searchPeople: vi.fn(),
+    stopRealtime: vi.fn(),
     ...overrides,
   } as unknown as LinkedInClient
 }

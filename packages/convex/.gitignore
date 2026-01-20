@@ -3,4 +3,9 @@ dist/
 .env
 .env.local
 !.env.local.example
-convex/_generated/
+convex/_generated/*
+!convex/_generated/api.js
+!convex/_generated/api.d.ts
+!convex/_generated/dataModel.d.ts
+!convex/_generated/server.js
+!convex/_generated/server.d.ts

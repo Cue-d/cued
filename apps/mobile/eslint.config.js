@@ -4,6 +4,18 @@ const importPlugin = require("eslint-plugin-import-x");
 
 module.exports = defineConfig([
   expoConfig,
+  // Ignore convex generated files (not available in CI)
+  {
+    settings: {
+      "import-x/ignore": ["@prm/convex/convex/_generated"],
+    },
+    rules: {
+      "import/no-unresolved": [
+        "error",
+        { ignore: ["@prm/convex/convex/_generated"] },
+      ],
+    },
+  },
   // Import ordering configuration
   {
     plugins: {

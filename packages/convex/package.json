@@ -9,7 +9,7 @@
   },
   "scripts": {
     "dev": "convex dev",
-    "build": "convex codegen",
+    "build": "[ -z \"$CONVEX_DEPLOYMENT\" ] && echo 'Skipping codegen - using committed types' || convex codegen",
     "typecheck": "tsc --noEmit",
     "test": "vitest",
     "test:once": "vitest run",

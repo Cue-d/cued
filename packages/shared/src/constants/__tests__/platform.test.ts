@@ -7,7 +7,7 @@ import {
 } from "../platform";
 
 describe("PLATFORM_CONFIG", () => {
-  const platforms: ActionPlatform[] = ["imessage", "gmail", "slack"];
+  const platforms: ActionPlatform[] = ["imessage", "gmail", "slack", "linkedin"];
 
   it("contains all expected platform keys", () => {
     expect(Object.keys(PLATFORM_CONFIG)).toEqual(
@@ -73,6 +73,16 @@ describe("PLATFORM_CONFIG", () => {
       letter: "S",
     });
   });
+
+  it("has correct values for LinkedIn", () => {
+    expect(PLATFORM_CONFIG.linkedin).toEqual({
+      label: "LinkedIn",
+      color: "#0a66c2",
+      textClass: "text-blue-600",
+      bgClass: "bg-blue-600 text-white",
+      letter: "L",
+    });
+  });
 });
 
 describe("getPlatformConfig", () => {
@@ -80,6 +90,7 @@ describe("getPlatformConfig", () => {
     expect(getPlatformConfig("imessage")).toBe(PLATFORM_CONFIG.imessage);
     expect(getPlatformConfig("gmail")).toBe(PLATFORM_CONFIG.gmail);
     expect(getPlatformConfig("slack")).toBe(PLATFORM_CONFIG.slack);
+    expect(getPlatformConfig("linkedin")).toBe(PLATFORM_CONFIG.linkedin);
   });
 
   it("returns undefined for invalid platform key", () => {
@@ -101,8 +112,9 @@ describe("types", () => {
     const imessage: ActionPlatform = "imessage";
     const gmail: ActionPlatform = "gmail";
     const slack: ActionPlatform = "slack";
+    const linkedin: ActionPlatform = "linkedin";
 
-    expect([imessage, gmail, slack]).toHaveLength(3);
+    expect([imessage, gmail, slack, linkedin]).toHaveLength(4);
   });
 
   it("PlatformConfigItem has all required fields", () => {
