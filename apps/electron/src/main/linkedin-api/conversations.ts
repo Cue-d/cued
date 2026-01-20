@@ -279,58 +279,17 @@ export async function getConversations(
   client: LinkedInClient,
   syncToken?: string
 ): Promise<ConversationsResult> {
-  // Get the user's mailbox URN - required for the API
   const mailboxUrn = await client.getMailboxUrn()
 
-  console.log('[LinkedIn Conversations] Fetching conversations:', {
-    mailboxUrn: mailboxUrn.substring(0, 40) + '...',
-    hasSyncToken: !!syncToken,
-    hasCookies: client.cookies.length,
-  })
+  const queryId = syncToken ? 'messengerConversationsBySyncToken' : 'messengerConversations'
+  const variables: Record<string, string> = syncToken
+    ? { mailboxUrn, syncToken }
+    : { mailboxUrn }
 
-  // Use sync token query if available, otherwise use regular query
-  let queryId: 'messengerConversationsBySyncToken' | 'messengerConversations'
-  let variables: Record<string, string>
+  const response = await newMessagingGraphQLRequest(client.cookies, queryId, variables)
+    .doJSON<GraphQLConversationsResponse>()
 
-  if (syncToken) {
-    queryId = 'messengerConversationsBySyncToken'
-    variables = {
-      mailboxUrn,
-      syncToken,
-    }
-  } else {
-    // Initial fetch - only mailboxUrn, no count parameter
-    queryId = 'messengerConversations'
-    variables = {
-      mailboxUrn,
-    }
-  }
-
-  console.log('[LinkedIn Conversations] Using query:', queryId, 'variables:', Object.keys(variables))
-
-  const request = newMessagingGraphQLRequest(client.cookies, queryId, variables)
-
-  try {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const response = await request.doJSON<GraphQLConversationsResponse & { errors?: any[] }>()
-
-    console.log('[LinkedIn Conversations] Raw response:', {
-      hasData: !!response.data,
-      hasSyncTokenResponse: !!response.data?.messengerConversationsBySyncToken,
-      hasRegularResponse: !!response.data?.messengerConversations,
-      includedCount: response.included?.length ?? 0,
-      errors: response.errors,
-      syncTokenData: response.data?.messengerConversationsBySyncToken,
-      regularData: response.data?.messengerConversations,
-    })
-
-    const result = parseConversationsResponse(response)
-    console.log('[LinkedIn Conversations] Parsed conversations:', result.conversations.length)
-    return result
-  } catch (error) {
-    console.error('[LinkedIn Conversations] Error fetching conversations:', error)
-    throw error
-  }
+  return parseConversationsResponse(response)
 }
 
 /**
@@ -345,10 +304,8 @@ export async function getConversationsBefore(
   client: LinkedInClient,
   timestamp: number
 ): Promise<ConversationsResult> {
-  // Get the user's mailbox URN - required for the API
   const mailboxUrn = await client.getMailboxUrn()
 
-  // All values must be strings for LinkedIn's API format
   const variables: Record<string, string> = {
     mailboxUrn,
     count: String(PAGINATION_DEFAULTS.conversationsCount),
@@ -356,12 +313,11 @@ export async function getConversationsBefore(
     query: '(predicateUnions:List((conversationCategoryPredicate:(category:PRIMARY_INBOX))))',
   }
 
-  const request = newMessagingGraphQLRequest(
+  const response = await newMessagingGraphQLRequest(
     client.cookies,
     'messengerConversationsByCursor',
     variables
-  )
+  ).doJSON<GraphQLConversationsResponse>()
 
-  const response = await request.doJSON<GraphQLConversationsResponse>()
   return parseConversationsResponse(response)
 }

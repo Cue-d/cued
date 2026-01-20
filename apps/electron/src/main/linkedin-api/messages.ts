@@ -6,14 +6,8 @@
 
 import { API_URLS, PAGINATION_DEFAULTS, CONTENT_TYPES } from './constants'
 import { newMessagingGraphQLRequest, newPostRequest, linkedInEncode } from './request'
-import { URN } from './urn'
 import type { LinkedInClient, MessagesResult } from './client'
-import type {
-  Message,
-  GraphQLResponse,
-  AttributedText,
-  PagingMetadata,
-} from './types'
+import type { Message, AttributedText, PagingMetadata } from './types'
 
 // ============================================================================
 // Response Types (internal)

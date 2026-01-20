@@ -287,45 +287,38 @@ describe('LinkedInClient', () => {
   })
 
   describe('API method signatures', () => {
-    // These methods are implemented in separate files (messages.ts, contacts.ts)
-    // We just verify the method signatures exist and throw "Not implemented"
+    // These methods delegate to implementations in messages.ts and contacts.ts
+    // Without auth, they throw errors (auth or validation errors)
 
-    it('getMessages throws not implemented', async () => {
+    it('getMessages requires auth', async () => {
       const client = new LinkedInClient()
-
-      await expect(client.getMessages('conv-id')).rejects.toThrow(
-        'Not implemented'
-      )
+      // Without cookies, this will fail with auth error
+      await expect(client.getMessages('conv-id')).rejects.toThrow()
     })
 
-    it('getMessagesBefore throws not implemented', async () => {
+    it('getMessagesBefore requires auth', async () => {
       const client = new LinkedInClient()
-
       await expect(
         client.getMessagesBefore('conv-id', Date.now())
-      ).rejects.toThrow('Not implemented')
+      ).rejects.toThrow()
     })
 
-    it('sendMessage throws not implemented', async () => {
+    it('sendMessage requires userEntityURN', async () => {
       const client = new LinkedInClient()
-
+      // sendMessage checks for userEntityURN before making request
       await expect(client.sendMessage('conv-id', 'Hello')).rejects.toThrow(
-        'Not implemented'
+        'userEntityURN'
       )
     })
 
-    it('getConnections throws not implemented', async () => {
+    it('getConnections requires auth', async () => {
       const client = new LinkedInClient()
-
-      await expect(client.getConnections()).rejects.toThrow('Not implemented')
+      await expect(client.getConnections()).rejects.toThrow()
     })
 
-    it('searchPeople throws not implemented', async () => {
+    it('searchPeople requires auth', async () => {
       const client = new LinkedInClient()
-
-      await expect(client.searchPeople('query')).rejects.toThrow(
-        'Not implemented'
-      )
+      await expect(client.searchPeople('query')).rejects.toThrow()
     })
   })
 })

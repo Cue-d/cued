@@ -170,20 +170,9 @@ export class LinkedInClient {
     const { newGetRequest } = await import('./request')
     const { API_URLS, CONTENT_TYPES } = await import('./constants')
 
-    console.log('[LinkedInClient] Fetching user profile from /me endpoint')
-
-    // LinkedIn uses normalized format: data contains refs, actual objects in included
     interface MeResponse {
-      data?: {
-        plainId?: number
-        '*miniProfile'?: string
-      }
-      included?: Array<{
-        entityUrn?: string
-        publicIdentifier?: string
-        $type?: string
-      }>
-      // Sometimes the response is flat (no data wrapper)
+      data?: { plainId?: number; '*miniProfile'?: string }
+      included?: Array<{ entityUrn?: string; publicIdentifier?: string; $type?: string }>
       plainId?: number
       '*miniProfile'?: string
     }
@@ -193,7 +182,6 @@ export class LinkedInClient {
       .withXLIHeaders()
       .doJSON<MeResponse>()
 
-    // Get plainId - could be in data or at root level
     const plainId = response.data?.plainId ?? response.plainId
 
     // Look for miniProfile in included array
@@ -201,23 +189,11 @@ export class LinkedInClient {
       (item) => item.$type?.includes('MiniProfile') || item.entityUrn?.includes('fsd_profile')
     )
 
-    console.log('[LinkedInClient] /me response:', {
-      plainId,
-      miniProfileUrn: miniProfile?.entityUrn,
-      publicIdentifier: miniProfile?.publicIdentifier,
-      includedCount: response.included?.length ?? 0,
-    })
-
-    // For messaging API, we need the alphanumeric ID from miniProfile URN
-    // mautrix-linkedin uses this format, NOT the numeric plainId
-    // miniProfile URN: urn:li:fs_miniProfile:ACoAADcIKVEBjLKPYltoVZ4Erv...
-    // Mailbox URN: urn:li:fsd_profile:ACoAADcIKVEBjLKPYltoVZ4Erv...
+    // Extract the alphanumeric ID from miniProfile URN for messaging API
     if (miniProfile?.entityUrn) {
-      // Extract the alphanumeric ID from fs_miniProfile URN
       const match = miniProfile.entityUrn.match(/:([^:]+)$/)
       if (match) {
         this._userEntityURN = `urn:li:fsd_profile:${match[1]}`
-        console.log('[LinkedInClient] Constructed user URN from miniProfile ID:', this._userEntityURN)
         return this._userEntityURN
       }
     }
@@ -228,7 +204,6 @@ export class LinkedInClient {
       const match = anyUrn.match(/:([^:]+)$/)
       if (match) {
         this._userEntityURN = `urn:li:fsd_profile:${match[1]}`
-        console.log('[LinkedInClient] Constructed user URN from included URN:', this._userEntityURN)
         return this._userEntityURN
       }
     }
@@ -236,11 +211,9 @@ export class LinkedInClient {
     // Last resort: use plainId (may not work for all API calls)
     if (plainId) {
       this._userEntityURN = `urn:li:fsd_profile:${plainId}`
-      console.log('[LinkedInClient] Fallback: using plainId for URN:', this._userEntityURN)
       return this._userEntityURN
     }
 
-    console.error('[LinkedInClient] Full /me response:', JSON.stringify(response, null, 2).substring(0, 1000))
     throw new Error('Could not determine user entity URN from /me response')
   }
 
@@ -297,10 +270,8 @@ export class LinkedInClient {
     conversationId: string,
     cursor?: string
   ): Promise<MessagesResult> {
-    // Implementation in messages.ts
-    void conversationId
-    void cursor
-    throw new Error('Not implemented - see messages.ts')
+    const { getMessages } = await import('./messages')
+    return getMessages(this, conversationId, cursor)
   }
 
   /**
@@ -313,10 +284,8 @@ export class LinkedInClient {
     conversationId: string,
     timestamp: number
   ): Promise<MessagesResult> {
-    // Implementation in messages.ts
-    void conversationId
-    void timestamp
-    throw new Error('Not implemented - see messages.ts')
+    const { getMessagesBefore } = await import('./messages')
+    return getMessagesBefore(this, conversationId, timestamp)
   }
 
   /**
@@ -326,10 +295,8 @@ export class LinkedInClient {
    * @returns Promise resolving to the sent message
    */
   async sendMessage(conversationId: string, text: string): Promise<Message> {
-    // Implementation in messages.ts
-    void conversationId
-    void text
-    throw new Error('Not implemented - see messages.ts')
+    const { sendMessage } = await import('./messages')
+    return sendMessage(this, conversationId, text)
   }
 
   /**
@@ -338,9 +305,8 @@ export class LinkedInClient {
    * @returns Promise resolving to connections with pagination metadata
    */
   async getConnections(cursor?: string): Promise<ConnectionsResult> {
-    // Implementation in contacts.ts
-    void cursor
-    throw new Error('Not implemented - see contacts.ts')
+    const { getConnections } = await import('./contacts')
+    return getConnections(this, cursor)
   }
 
   /**
@@ -349,8 +315,7 @@ export class LinkedInClient {
    * @returns Promise resolving to matching connections
    */
   async searchPeople(query: string): Promise<ConnectionsResult> {
-    // Implementation in contacts.ts
-    void query
-    throw new Error('Not implemented - see contacts.ts')
+    const { searchPeople } = await import('./contacts')
+    return searchPeople(this, query)
   }
 }

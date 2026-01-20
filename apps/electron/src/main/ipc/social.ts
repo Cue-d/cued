@@ -12,6 +12,8 @@ import {
   type LinkedInSyncProgress,
 } from "../sync/linkedin-sync";
 import type { Message } from "../linkedin-api/types";
+import { getValidAccessToken } from "../auth";
+import { electronEnv } from "@prm/env/electron";
 
 // Singleton scraper instances to maintain state across calls
 let linkedInScraper: LinkedInScraper | null = null;
@@ -59,6 +61,89 @@ export interface LinkedInSendMessageResult {
   success: boolean;
   message?: Message;
   error?: string;
+}
+
+export interface SocialSyncResult {
+  success: boolean;
+  totalContacts?: number;
+  newContacts?: number;
+  updatedContacts?: number;
+  error?: string;
+}
+
+/**
+ * Sync scraped social contacts to the backend.
+ * Maps connections to SocialContact format and POSTs to /api/sync/social.
+ */
+async function syncLinkedInContactsToBackend(
+  connections: LinkedInConnection[]
+): Promise<SocialSyncResult> {
+  try {
+    const token = await getValidAccessToken();
+    if (!token) {
+      return { success: false, error: "No auth token available" };
+    }
+
+    const baseUrl = electronEnv.API_BASE_URL || "http://localhost:3000";
+
+    // Map LinkedInConnection to SocialContact format expected by API
+    const contacts = connections.map((conn) => ({
+      name: conn.name,
+      handle: conn.profileUrl, // Use profile URL as handle for LinkedIn
+      profileUrl: conn.profileUrl,
+      headline: conn.headline,
+      platform: "linkedin" as const,
+    }));
+
+    const response = await fetch(`${baseUrl}/api/sync/social`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        platform: "linkedin",
+        contacts,
+        syncedAt: Date.now(),
+      }),
+    });
+
+    if (!response.ok) {
+      const text = await response.text();
+      console.error(
+        `[Social IPC] Social sync API returned ${response.status}: ${text.slice(0, 200)}`
+      );
+      return {
+        success: false,
+        error: `API error: ${response.status} - ${text.slice(0, 100)}`,
+      };
+    }
+
+    // Check content-type before parsing JSON
+    const contentType = response.headers.get("content-type") || "";
+    if (!contentType.includes("application/json")) {
+      console.warn(
+        `[Social IPC] Social sync API returned non-JSON content-type: ${contentType}`
+      );
+      return { success: false, error: "Invalid response format" };
+    }
+
+    const result = await response.json();
+    console.log(
+      `[Social IPC] LinkedIn contacts synced: ${result.totalContacts} total, ${result.newContacts} new, ${result.updatedContacts} updated`
+    );
+
+    return {
+      success: true,
+      totalContacts: result.totalContacts,
+      newContacts: result.newContacts,
+      updatedContacts: result.updatedContacts,
+    };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    console.error("[Social IPC] LinkedIn sync to backend failed:", message);
+    return { success: false, error: message };
+  }
 }
 
 /**
@@ -135,10 +220,30 @@ export function setupSocialIpcHandlers(mainWindow: BrowserWindow | null): void {
           connectedDate: conn.connectionDate ?? null,
         }));
 
+        // Sync connections to backend
+        mainWindow?.webContents.send("social:linkedin:scrapeProgress", {
+          status: "syncing",
+          count: connections.length,
+        });
+
+        const syncResult = await syncLinkedInContactsToBackend(connections);
+        if (!syncResult.success) {
+          console.warn(
+            `[Social IPC] LinkedIn backend sync failed: ${syncResult.error}`
+          );
+          // Continue even if sync fails - scrape was successful
+        }
+
         // Notify renderer of completion
         mainWindow?.webContents.send("social:linkedin:scrapeProgress", {
           status: "complete",
           count: connections.length,
+          syncResult: syncResult.success
+            ? {
+                newContacts: syncResult.newContacts,
+                updatedContacts: syncResult.updatedContacts,
+              }
+            : undefined,
         });
 
         console.log(`[Social IPC] LinkedIn API scrape complete: ${connections.length} connections`);

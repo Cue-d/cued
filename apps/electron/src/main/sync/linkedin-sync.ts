@@ -115,16 +115,10 @@ export class LinkedInSyncManager {
    */
   start(): void {
     if (this.intervalId) {
-      console.log('[LinkedInSyncManager] Already running')
       return
     }
 
-    console.log('[LinkedInSyncManager] Starting background sync...')
-
-    // Run initial sync immediately
     this.runSync()
-
-    // Schedule recurring syncs
     this.intervalId = setInterval(() => this.runSync(), SYNC_INTERVAL_MS)
   }
 
@@ -136,7 +130,6 @@ export class LinkedInSyncManager {
       clearInterval(this.intervalId)
       this.intervalId = null
     }
-    console.log('[LinkedInSyncManager] Stopped background sync')
   }
 
   // ============================================================================
@@ -149,16 +142,11 @@ export class LinkedInSyncManager {
    */
   async runSync(): Promise<void> {
     if (this.isRunning) {
-      console.log('[LinkedInSyncManager] Sync already in progress, skipping')
       return
     }
 
     if (!this._client) {
-      console.warn('[LinkedInSyncManager] No LinkedIn client set')
-      this.updateProgress({
-        status: 'error',
-        error: 'LinkedIn client not configured',
-      })
+      this.updateProgress({ status: 'error', error: 'LinkedIn client not configured' })
       return
     }
 
@@ -166,23 +154,17 @@ export class LinkedInSyncManager {
     this.updateProgress({ status: 'syncing' })
 
     try {
-      // Refresh Convex auth if available
       if (this.options.getAuthToken) {
         const token = await this.options.getAuthToken()
         if (token) {
           this.convexClient.setAuth(token)
         } else {
-          console.warn('[LinkedInSyncManager] No Convex auth token available')
           this.options.onAuthInvalid?.()
-          this.updateProgress({
-            status: 'error',
-            error: 'Not authenticated',
-          })
+          this.updateProgress({ status: 'error', error: 'Not authenticated' })
           return
         }
       }
 
-      // Sync conversations
       await this.syncConversations()
 
       this.updateProgress({
@@ -190,15 +172,9 @@ export class LinkedInSyncManager {
         lastSyncAt: Date.now(),
         currentConversation: undefined,
       })
-
-      console.log(
-        `[LinkedInSyncManager] Sync complete: ${this.progress.totalConversationsSynced} conversations, ${this.progress.totalMessagesSynced} messages`
-      )
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)
-      console.error('[LinkedInSyncManager] Sync error:', message)
 
-      // Check for auth errors
       if (this.isAuthError(error)) {
         this.options.onAuthInvalid?.()
       }
@@ -224,35 +200,20 @@ export class LinkedInSyncManager {
       this.conversationSyncToken ?? undefined
     )
 
-    // Store new sync token for next incremental fetch
     if (result.syncToken) {
       this.conversationSyncToken = result.syncToken
     }
 
-    console.log(
-      `[LinkedInSyncManager] Fetched ${result.conversations.length} conversations`
-    )
-
-    // Process each conversation
-    for (const conversation of result.conversations.slice(
-      0,
-      MAX_CONVERSATIONS_PER_SYNC
-    )) {
+    for (const conversation of result.conversations.slice(0, MAX_CONVERSATIONS_PER_SYNC)) {
       try {
-        // Sync conversation to Convex
         await this.syncConversationToConvex(conversation)
-
-        // Sync messages for this conversation
         await this.syncMessages(conversation.entityURN)
 
         this.updateProgress({
           totalConversationsSynced: this.progress.totalConversationsSynced + 1,
         })
-      } catch (error) {
-        console.error(
-          `[LinkedInSyncManager] Error syncing conversation ${conversation.entityURN}:`,
-          error
-        )
+      } catch {
+        // Continue syncing other conversations on error
       }
     }
   }
@@ -265,42 +226,26 @@ export class LinkedInSyncManager {
     if (!this._client) throw new Error('Client not set')
 
     this.updateProgress({
-      currentConversation: {
-        conversationId,
-        messagesInConversation: 0,
-      },
+      currentConversation: { conversationId, messagesInConversation: 0 },
     })
 
-    // Get existing cursor for this conversation
     const cursor = this.conversationCursors.get(conversationId)
-
-    // Fetch messages
     const result = await getMessages(this._client, conversationId, cursor)
-
-    console.log(
-      `[LinkedInSyncManager] Fetched ${result.messages.length} messages for ${conversationId}`
-    )
 
     if (result.messages.length === 0) {
       return
     }
 
-    // Sync messages to Convex
     await this.syncMessagesToConvex(conversationId, result.messages)
 
-    // Update cursor for next fetch
     if (result.metadata?.start !== undefined && result.metadata?.count !== undefined) {
       const nextCursor = String(result.metadata.start + result.metadata.count)
       this.conversationCursors.set(conversationId, nextCursor)
     }
 
     this.updateProgress({
-      totalMessagesSynced:
-        this.progress.totalMessagesSynced + result.messages.length,
-      currentConversation: {
-        conversationId,
-        messagesInConversation: result.messages.length,
-      },
+      totalMessagesSynced: this.progress.totalMessagesSynced + result.messages.length,
+      currentConversation: { conversationId, messagesInConversation: result.messages.length },
     })
   }
 
@@ -331,7 +276,6 @@ export class LinkedInSyncManager {
    * Sync a conversation to Convex.
    */
   private async syncConversationToConvex(conversation: Conversation): Promise<void> {
-    // Transform conversation for Convex
     const participants = conversation.conversationParticipants.map((p) => ({
       entityURN: p.entityURN,
       firstName: p.participantType.member?.firstName ?? p.participantType.organization?.name ?? '',
@@ -341,27 +285,19 @@ export class LinkedInSyncManager {
       pictureUrl: p.participantType.member?.picture?.url ?? p.participantType.organization?.logoUrl,
     }))
 
-    // Call Convex mutation
-    // Note: The actual Convex mutation will be created in task 4.2
-    // For now we log and prepare the data structure
-    console.log(
-      `[LinkedInSyncManager] Syncing conversation ${conversation.entityURN} with ${participants.length} participants`
-    )
-
-    // TODO: Uncomment when Convex mutations are available (task 4.2)
-    // await this.convexClient.mutation(api.sync.linkedin.syncLinkedInConversations, {
-    //   conversations: [{
-    //     entityURN: conversation.entityURN,
-    //     title: conversation.title,
-    //     lastActivityAt: conversation.lastActivityAt,
-    //     lastReadAt: conversation.lastReadAt,
-    //     groupChat: conversation.groupChat,
-    //     read: conversation.read,
-    //     categories: conversation.categories,
-    //     unreadCount: conversation.unreadCount ?? 0,
-    //     participants,
-    //   }],
-    // })
+    await this.convexClient.mutation(api.sync.syncLinkedInConversations, {
+      conversations: [{
+        entityURN: conversation.entityURN,
+        title: conversation.title,
+        lastActivityAt: conversation.lastActivityAt,
+        lastReadAt: conversation.lastReadAt,
+        groupChat: conversation.groupChat,
+        read: conversation.read,
+        categories: conversation.categories,
+        unreadCount: conversation.unreadCount ?? 0,
+        participants,
+      }],
+    })
   }
 
   /**
@@ -421,7 +357,7 @@ export class LinkedInSyncManager {
           }
           return null
         })
-        .filter(Boolean),
+        .filter((attachment): attachment is NonNullable<typeof attachment> => attachment !== null),
       reactions: m.reactionSummaries?.map((r) => ({
         emoji: r.emoji,
         count: r.count,
@@ -429,14 +365,9 @@ export class LinkedInSyncManager {
       })),
     }))
 
-    console.log(
-      `[LinkedInSyncManager] Syncing ${transformedMessages.length} messages for ${conversationId}`
-    )
-
-    // TODO: Uncomment when Convex mutations are available (task 4.2)
-    // await this.convexClient.mutation(api.sync.linkedin.syncLinkedInMessages, {
-    //   messages: transformedMessages,
-    // })
+    await this.convexClient.mutation(api.sync.syncLinkedInMessages, {
+      messages: transformedMessages,
+    })
   }
 
   // ============================================================================
@@ -482,7 +413,6 @@ export class LinkedInSyncManager {
       totalConversationsSynced: 0,
       totalMessagesSynced: 0,
     }
-    console.log('[LinkedInSyncManager] Reset sync state')
   }
 
   /**

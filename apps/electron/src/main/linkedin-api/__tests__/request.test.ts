@@ -243,9 +243,7 @@ describe('AuthedRequest', () => {
       expect(url).toContain('variables=')
 
       // Check headers
-      expect(options.headers['Accept']).toBe(
-        'application/vnd.linkedin.normalized+json+2.1'
-      )
+      expect(options.headers['Accept']).toBe('application/graphql')
       expect(options.headers['x-li-track']).toBeDefined()
     })
   })

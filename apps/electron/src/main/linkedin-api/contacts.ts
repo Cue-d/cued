@@ -6,7 +6,7 @@
 import type { LinkedInClient, ConnectionsResult } from './client'
 import type { Connection, VectorImage } from './types'
 import { API_URLS, PAGINATION_DEFAULTS, CONTENT_TYPES } from './constants'
-import { newGetRequest, LinkedInRequestError } from './request'
+import { newGetRequest } from './request'
 
 // ============================================================================
 // Response Types (internal)
@@ -110,20 +110,13 @@ export async function getConnections(
   const start = cursor ? parseInt(cursor, 10) : 0
   const count = PAGINATION_DEFAULTS.connectionsCount
 
-  console.log('[LinkedIn Contacts] Fetching connections:', { start, count, hasCookies: client.cookies.length })
-
-  // Build the query parameters
-  // LinkedIn uses a decoratedList format for connections
   const queryParams = new URLSearchParams({
-    decorationId:
-      'com.linkedin.voyager.dash.deco.relationships.ConnectionListWithProfile-1',
+    decorationId: 'com.linkedin.voyager.dash.deco.relationships.ConnectionListWithProfile-1',
     count: count.toString(),
     start: start.toString(),
     q: 'search',
     sortType: 'RECENTLY_ADDED',
   })
-
-  console.log('[LinkedIn Contacts] Request URL:', `${API_URLS.connections}?${queryParams.toString()}`)
 
   const response = await newGetRequest(
     `${API_URLS.connections}?${queryParams.toString()}`,
@@ -133,27 +126,15 @@ export async function getConnections(
     .withXLIHeaders()
     .doJSON<ConnectionsApiResponse>()
 
-  console.log('[LinkedIn Contacts] Raw response:', {
-    hasData: !!response.data,
-    includedCount: response.included?.length ?? 0,
-    paging: response.paging,
-  })
-
   const connections = parseConnectionsResponse(response)
-  console.log('[LinkedIn Contacts] Parsed connections:', connections.length)
 
-  // Calculate next cursor
   const total = response.paging?.total ?? 0
   const nextStart = start + count
   const hasMore = nextStart < total
 
   return {
     connections,
-    metadata: {
-      start,
-      count: connections.length,
-      total,
-    },
+    metadata: { start, count: connections.length, total },
     ...(hasMore ? { cursor: nextStart.toString() } : {}),
   }
 }
@@ -162,22 +143,12 @@ export async function getConnections(
  * Parse the connections API response into Connection[] type
  */
 function parseConnectionsResponse(response: ConnectionsApiResponse): Connection[] {
+  if (!response.included) {
+    return []
+  }
+
   const connections: Connection[] = []
 
-  if (!response.included) {
-    console.log('[LinkedIn Contacts] No included array in response')
-    return connections
-  }
-
-  // Log all types in included for debugging
-  const types = new Map<string, number>()
-  for (const element of response.included) {
-    const type = element.$type ?? 'unknown'
-    types.set(type, (types.get(type) ?? 0) + 1)
-  }
-  console.log('[LinkedIn Contacts] Element types in included:', Object.fromEntries(types))
-
-  // Filter for connection elements that have member data
   for (const element of response.included) {
     if (element.$type !== 'com.linkedin.voyager.dash.relationships.Connection') {
       continue
@@ -185,15 +156,13 @@ function parseConnectionsResponse(response: ConnectionsApiResponse): Connection[
 
     const member = element.connectedMemberResolutionResult
     if (!member) {
-      console.log('[LinkedIn Contacts] Connection element missing member data:', element.entityUrn)
       continue
     }
 
-    // Extract profile picture
+    // Extract profile picture (use largest artifact)
     let picture: VectorImage | undefined
     const pictureData = member.profilePicture?.displayImageReference?.vectorImage
     if (pictureData?.rootUrl && pictureData.artifacts?.length) {
-      // Get the largest artifact
       const largestArtifact = pictureData.artifacts.reduce((prev, curr) =>
         (curr.width ?? 0) > (prev.width ?? 0) ? curr : prev
       )
@@ -204,7 +173,6 @@ function parseConnectionsResponse(response: ConnectionsApiResponse): Connection[
       }
     }
 
-    // Extract profile ID from entityUrn (format: urn:li:fsd_profile:ABC123)
     const profileId = extractProfileId(member.entityUrn)
 
     connections.push({

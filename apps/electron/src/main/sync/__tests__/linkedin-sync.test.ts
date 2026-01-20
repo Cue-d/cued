@@ -4,6 +4,16 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
+
+// Mock environment variables before importing linkedin-sync
+vi.mock('@prm/env/electron', () => ({
+  electronEnv: {
+    CONVEX_URL: 'https://test.convex.cloud',
+    WORKOS_CLIENT_ID: 'client_test',
+    NEXT_PUBLIC_APP_URL: 'http://localhost:3000',
+  },
+}))
+
 import { LinkedInSyncManager } from '../linkedin-sync'
 import type { LinkedInClient, ConversationsResult, MessagesResult } from '../../linkedin-api/client'
 import type { Conversation, Message, MessagingParticipant, PagingMetadata } from '../../linkedin-api/types'

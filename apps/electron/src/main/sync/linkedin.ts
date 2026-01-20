@@ -56,33 +56,13 @@ export class LinkedInScraper extends SocialScraper {
 
     const playwrightCookies = await this.context.cookies()
 
-    // Log cookie info for debugging
-    console.log('[LinkedIn Scraper] Retrieved cookies:', {
-      total: playwrightCookies.length,
-      linkedInCookies: playwrightCookies.filter((c) => c.domain.includes('linkedin')).length,
-    })
-
-    // Check for critical auth cookies
     const hasLiAt = playwrightCookies.some((c) => c.name === 'li_at')
     const hasJSESSIONID = playwrightCookies.some((c) => c.name === 'JSESSIONID')
-    console.log('[LinkedIn Scraper] Auth cookies present:', { li_at: hasLiAt, JSESSIONID: hasJSESSIONID })
 
     if (!hasLiAt || !hasJSESSIONID) {
-      console.warn('[LinkedIn Scraper] Missing critical auth cookies!')
+      console.warn('[LinkedIn Scraper] Missing critical auth cookies (li_at or JSESSIONID)')
     }
 
-    // Log JSESSIONID value (masked) for CSRF debugging
-    const jsessionid = playwrightCookies.find((c) => c.name === 'JSESSIONID')
-    if (jsessionid) {
-      console.log('[LinkedIn Scraper] JSESSIONID format:', {
-        length: jsessionid.value.length,
-        startsWithQuote: jsessionid.value.startsWith('"'),
-        endsWithQuote: jsessionid.value.endsWith('"'),
-        preview: jsessionid.value.substring(0, 20) + '...',
-      })
-    }
-
-    // Convert Playwright cookies to LinkedInClient Cookie format
     return playwrightCookies.map((c) => ({
       name: c.name,
       value: c.value,
@@ -102,33 +82,24 @@ export class LinkedInScraper extends SocialScraper {
    * @returns Promise resolving to configured LinkedInClient
    */
   async getApiClient(forceRefresh = false): Promise<LinkedInClient> {
-    console.log('[LinkedIn Scraper] getApiClient called:', { forceRefresh, hasCachedClient: !!this._apiClient })
-
     if (this._apiClient && !forceRefresh) {
-      console.log('[LinkedIn Scraper] Returning cached API client')
       return this._apiClient
     }
 
     // Ensure browser is launched
     if (!this.context) {
-      console.log('[LinkedIn Scraper] Launching browser for cookie retrieval...')
       await this.launchBrowser({ headless: true })
       await this.navigateTo(LINKEDIN_URLS.home)
-      console.log('[LinkedIn Scraper] Navigated to LinkedIn home, waiting for page to settle...')
       await this.page?.waitForTimeout(2000)
     }
 
     const cookies = await this.getAuthCookies()
-    console.log('[LinkedIn Scraper] Creating new LinkedInClient with', cookies.length, 'cookies')
     this._apiClient = new LinkedInClient({ cookies })
 
-    // Verify authentication
     if (!this._apiClient.isAuthenticated()) {
-      console.error('[LinkedIn Scraper] API client not authenticated!')
       throw new Error('LinkedIn API client not authenticated - missing required cookies')
     }
 
-    console.log('[LinkedIn Scraper] API client authenticated successfully')
     return this._apiClient
   }
 
@@ -294,41 +265,23 @@ export class LinkedInScraper extends SocialScraper {
    * This is more reliable and faster than the Playwright-based approach.
    * @param options.maxConnections - Maximum connections to fetch (default: 500)
    * @returns Promise resolving to Connection[] from the API
-   * @deprecated Use this method instead of scrapeConnections() for better reliability
    */
   async scrapeConnectionsViaApi(options: { maxConnections?: number } = {}): Promise<Connection[]> {
     const { maxConnections = 500 } = options
     const allConnections: Connection[] = []
 
-    console.log('[LinkedIn Scraper] scrapeConnectionsViaApi starting with maxConnections:', maxConnections)
-
     try {
-      // Get or create API client with current browser cookies
-      console.log('[LinkedIn Scraper] Getting API client...')
       const client = await this.getApiClient()
-      console.log('[LinkedIn Scraper] Got API client, isAuthenticated:', client.isAuthenticated())
-
       let cursor: string | undefined
       let hasMore = true
-      let pageNum = 0
 
       while (hasMore && allConnections.length < maxConnections) {
-        pageNum++
-        console.log(`[LinkedIn Scraper] Fetching page ${pageNum}, cursor: ${cursor ?? 'initial'}`)
-
         const result = await getConnections(client, cursor)
 
-        console.log(`[LinkedIn Scraper] Page ${pageNum} result:`, {
-          connections: result.connections.length,
-          metadata: result.metadata,
-        })
-
         if (result.connections.length === 0) {
-          console.log('[LinkedIn Scraper] No connections returned, stopping pagination')
           break
         }
 
-        // Add connections up to max limit
         for (const conn of result.connections) {
           if (allConnections.length >= maxConnections) {
             break
@@ -336,33 +289,18 @@ export class LinkedInScraper extends SocialScraper {
           allConnections.push(conn)
         }
 
-        console.log(`[LinkedIn Scraper] Total connections so far: ${allConnections.length}`)
-
-        // Check for more pages
         const total = result.metadata?.total ?? 0
         const fetched = (result.metadata?.start ?? 0) + result.connections.length
         hasMore = fetched < total
 
-        console.log('[LinkedIn Scraper] Pagination status:', { total, fetched, hasMore })
-
-        // Update cursor for next page
         if (hasMore && result.metadata) {
           cursor = ((result.metadata.start ?? 0) + result.connections.length).toString()
         }
       }
 
-      console.log(`[LinkedIn Scraper] Finished fetching ${allConnections.length} connections via API`)
       return allConnections
     } catch (error) {
       console.error('[LinkedIn Scraper] Error fetching connections via API:', error)
-      // Log the full error for debugging
-      if (error instanceof Error) {
-        console.error('[LinkedIn Scraper] Error details:', {
-          name: error.name,
-          message: error.message,
-          stack: error.stack?.split('\n').slice(0, 5).join('\n'),
-        })
-      }
       return allConnections
     } finally {
       await this.closeBrowser()

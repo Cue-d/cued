@@ -168,8 +168,6 @@ export class AuthedRequest {
     // Build raw query string - do NOT URL-encode the variables structure
     this.rawQuery = `queryId=${fullQueryId}&variables=${variablesStr}`
 
-    console.log('[LinkedIn API] GraphQL query:', { queryId: fullQueryId, variables: variablesStr })
-
     return this
   }
 
@@ -225,28 +223,11 @@ export class AuthedRequest {
     const url = this.buildUrl()
     const options = this.buildRequestOptions()
 
-    // Debug logging
-    console.log('[LinkedIn API] Request:', {
-      method: this.method,
-      url: url.substring(0, 150) + (url.length > 150 ? '...' : ''),
-      hasCSRF: !!this.headers['csrf-token'],
-      hasCookies: this.headers['Cookie']?.length > 0,
-      cookiePreview: this.headers['Cookie']?.substring(0, 100) + '...',
-    })
-
     let lastError: Error | null = null
 
     for (let attempt = 0; attempt <= RETRY_CONFIG.maxRetries; attempt++) {
       try {
         const response = await fetch(url, options)
-
-        // Log response details
-        console.log('[LinkedIn API] Response:', {
-          status: response.status,
-          statusText: response.statusText,
-          attempt: attempt + 1,
-          contentType: response.headers.get('content-type'),
-        })
 
         // Check for auth errors - don't retry these
         if (
@@ -322,7 +303,6 @@ export class AuthedRequest {
 
     if (!response.ok) {
       const text = await response.text().catch(() => '')
-      console.error('[LinkedIn API] Error response body:', text.substring(0, 500))
       throw new LinkedInRequestError(
         `Request failed: ${response.status} ${response.statusText}`,
         response.status,
@@ -331,32 +311,10 @@ export class AuthedRequest {
     }
 
     const text = await response.text()
-    console.log('[LinkedIn API] Response body length:', text.length)
 
-    // Try to parse JSON and log a preview
     try {
-      const json = JSON.parse(text)
-      console.log('[LinkedIn API] Response keys:', Object.keys(json))
-      if (json.included) {
-        console.log('[LinkedIn API] Included count:', json.included?.length)
-      }
-      if (json.data) {
-        console.log('[LinkedIn API] Data keys:', Object.keys(json.data))
-        // Log nested data structure (GraphQL responses have data.data)
-        if (json.data.data) {
-          console.log('[LinkedIn API] Data.data keys:', Object.keys(json.data.data))
-        }
-        // Log GraphQL errors if present
-        if (json.data.errors) {
-          console.log('[LinkedIn API] GraphQL errors:', JSON.stringify(json.data.errors, null, 2))
-        }
-      }
-      if (json.paging) {
-        console.log('[LinkedIn API] Paging:', json.paging)
-      }
-      return json as T
-    } catch (e) {
-      console.error('[LinkedIn API] Failed to parse JSON:', e)
+      return JSON.parse(text) as T
+    } catch {
       throw new LinkedInRequestError('Failed to parse JSON response', response.status, text)
     }
   }
