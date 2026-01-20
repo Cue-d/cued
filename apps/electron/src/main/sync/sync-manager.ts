@@ -39,6 +39,18 @@ const CONVEX_URL = electronEnv.CONVEX_URL;
 // Current sync version - must match CURRENT_SYNC_VERSION in packages/convex/convex/sync.ts
 const CURRENT_SYNC_VERSION = 1;
 
+/**
+ * Cursor state for dual-mode sync:
+ * - Full sync (DESC): Fetches recent messages first, from maxRowid down to 0
+ * - Incremental sync (ASC): Fetches new messages from cursor upward
+ */
+interface CursorState {
+  cursor: number; // ASC incremental cursor (highest synced ROWID)
+  fullSyncStartRowid?: number; // maxRowid when full sync started
+  fullSyncCursor?: number; // current position in DESC sync (upper bound for next batch)
+  updatedAt: number;
+}
+
 export interface SyncProgress {
   status: "idle" | "syncing" | "error" | "recovery";
   lastSyncAt?: number;
@@ -213,7 +225,7 @@ export class SyncManager {
         platform: "imessage",
       })) as SyncState | null;
 
-      const localCursor = this.loadCursor();
+      const localCursor = this.loadCursorState().cursor;
 
       // Task 2.7c: Pre-load local contacts count before recovery detection
       await this.preloadLocalContactsCount();
@@ -228,8 +240,18 @@ export class SyncManager {
           recoveryReason,
         });
 
-        // Reset local cursor to trigger full sync
-        this.saveCursor(0);
+        // Initialize full sync state (DESC from maxRowid to 0)
+        const chatDb = this.getChatDb();
+        const maxRowid = chatDb.getMaxMessageRowid();
+        this.saveCursorState({
+          cursor: 0,
+          fullSyncStartRowid: maxRowid,
+          fullSyncCursor: maxRowid,
+          updatedAt: Date.now(),
+        });
+        console.log(
+          `[SyncManager] Full sync initialized: will fetch ${maxRowid} messages DESC`
+        );
 
         // Sync contacts first if available
         if (this.options.syncContacts) {
@@ -259,7 +281,7 @@ export class SyncManager {
       const cursor = Math.max(serverCursor, localCursor);
 
       if (cursor > 0) {
-        this.saveCursor(cursor);
+        this.saveCursorState({ cursor, updatedAt: Date.now() });
         console.log(
           `[SyncManager] Cursor initialized: ${cursor} (server: ${serverCursor}, local: ${localCursor})`
         );
@@ -376,6 +398,10 @@ export class SyncManager {
   /**
    * Run a single sync cycle with parallel batch uploads for improved performance.
    * Uses CONCURRENT_BATCHES parallel uploads to maximize throughput.
+   *
+   * Dual-mode sync:
+   * - Full sync (DESC): When fullSyncStartRowid is set, fetches recent messages first
+   * - Incremental sync (ASC): Normal mode, fetches new messages from cursor upward
    */
   async runSync(): Promise<void> {
     if (this.isRunning) return;
@@ -399,118 +425,34 @@ export class SyncManager {
 
       const chatDb = this.getChatDb();
       const maxRowid = chatDb.getMaxMessageRowid();
-      let cursor = this.loadCursor();
+      const state = this.loadCursorState();
 
-      if (cursor === 0) {
-        console.log(`[SyncManager] Starting full sync (${maxRowid} messages)`);
-      }
+      // Check for full sync mode (fullSyncStartRowid is set)
+      if (state.fullSyncStartRowid !== undefined) {
+        const fullSyncStartRowid = state.fullSyncStartRowid;
+        const fullSyncCursor = state.fullSyncCursor ?? fullSyncStartRowid;
+        await this.runFullSyncDesc(
+          chatDb,
+          fullSyncCursor,
+          fullSyncStartRowid,
+          maxRowid
+        );
+      } else {
+        const messagesSynced = await this.runIncrementalSyncAsc(
+          chatDb,
+          state.cursor,
+          maxRowid
+        );
 
-      const totalStart = performance.now();
-      let totalMessagesSynced = 0;
-      let batchNumber = 0;
-      const estimatedTotalBatches = Math.ceil((maxRowid - cursor) / BATCH_SIZE);
-
-      while (cursor < maxRowid) {
-        // Read multiple batches ahead for parallel processing
-        const batchesToProcess: Array<{
-          batch: ReturnType<ChatDb["buildSyncBatch"]>;
-          batchNum: number;
-        }> = [];
-
-        let tempCursor = cursor;
-        for (let i = 0; i < CONCURRENT_BATCHES && tempCursor < maxRowid; i++) {
-          const batch = chatDb.buildSyncBatch(tempCursor, BATCH_SIZE);
-          if (batch.messages.length === 0) break;
-
-          batchNumber++;
-          batchesToProcess.push({ batch, batchNum: batchNumber });
-          tempCursor = batch.cursor;
+        // Trigger memory processing for incremental sync
+        if (messagesSynced > 0) {
+          this.triggerMemoryProcessing().catch((e) => {
+            console.warn(
+              "[SyncManager] Memory processing failed (non-blocking):",
+              e
+            );
+          });
         }
-
-        if (batchesToProcess.length === 0) break;
-
-        this.updateProgress({
-          currentBatch: {
-            messagesInBatch: batchesToProcess.reduce(
-              (sum, b) => sum + b.batch.messages.length,
-              0
-            ),
-            batchNumber: batchesToProcess[0].batchNum,
-            estimatedBatchesRemaining: Math.max(
-              0,
-              estimatedTotalBatches - batchNumber
-            ),
-          },
-        });
-
-        // Process batches in parallel
-        const batchStart = performance.now();
-        const results = await Promise.all(
-          batchesToProcess.map(async ({ batch, batchNum }) => {
-            return this.processSingleBatch(batch, batchNum);
-          })
-        );
-
-        const batchTime = performance.now() - batchStart;
-        const batchMsgCount = results.reduce(
-          (sum, r) => sum + r.messagesCount,
-          0
-        );
-        const rate = Math.round(batchMsgCount / (batchTime / 1000));
-
-        console.log(
-          `[SyncManager] Parallel batches ${batchesToProcess[0].batchNum}-${batchesToProcess[batchesToProcess.length - 1].batchNum}: ${batchMsgCount} msgs (${Math.round(batchTime)}ms, ${rate}/s)`
-        );
-
-        // Update cursor to the last successful batch
-        const lastBatch = batchesToProcess[batchesToProcess.length - 1];
-        cursor = lastBatch.batch.cursor;
-        this.saveCursor(cursor);
-
-        totalMessagesSynced += batchMsgCount;
-        this.updateProgress({
-          lastCursor: cursor,
-          totalMessagesSynced:
-            this.progress.totalMessagesSynced + batchMsgCount,
-        });
-      }
-
-      const totalTime = performance.now() - totalStart;
-      const overallRate = Math.round(totalMessagesSynced / (totalTime / 1000));
-      console.log(
-        `[SyncManager] Sync complete: ${totalMessagesSynced} msgs in ${Math.round(totalTime / 1000)}s (${overallRate}/s overall)`
-      );
-
-      // Update server sync metadata
-      try {
-        await this.executeMutationWithRetry(() =>
-          this.client.mutation(api.sync.updateSyncMetadata, {
-            platform: "imessage",
-            cursor: String(cursor),
-            totalMessagesSynced: this.progress.totalMessagesSynced,
-            totalContactsSynced: this.progress.totalContactsSynced || 0,
-            syncVersion: CURRENT_SYNC_VERSION,
-          })
-        );
-      } catch (e) {
-        console.warn("[SyncManager] Failed to update sync metadata:", e);
-      }
-
-      this.updateProgress({
-        status: "idle",
-        lastSyncAt: Date.now(),
-        currentBatch: undefined,
-        recoveryReason: undefined,
-      });
-
-      // Trigger async memory extraction (non-blocking, fire-and-forget)
-      if (totalMessagesSynced > 0) {
-        this.triggerMemoryProcessing().catch((e) => {
-          console.warn(
-            "[SyncManager] Memory processing failed (non-blocking):",
-            e
-          );
-        });
       }
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : String(error);
@@ -522,6 +464,261 @@ export class SyncManager {
       });
     } finally {
       this.isRunning = false;
+    }
+  }
+
+  /**
+   * Core batch sync loop used by both full sync (DESC) and incremental sync (ASC).
+   * @param direction - "desc" for newest-first full sync, "asc" for incremental sync
+   * @param initialCursor - Starting cursor position
+   * @param bound - Upper bound for ASC (maxRowid), lower bound for DESC (0)
+   * @param estimatedTotal - Estimated total messages to sync (for progress)
+   * @param fetchBatch - Function to fetch the next batch
+   * @param saveCursor - Function to save cursor state after each batch
+   * @returns Total messages synced and final cursor
+   */
+  private async runBatchSyncLoop(
+    chatDb: ChatDb,
+    direction: "asc" | "desc",
+    initialCursor: number,
+    bound: number,
+    estimatedTotal: number,
+    saveCursor: (cursor: number) => void
+  ): Promise<{ totalMessagesSynced: number; finalCursor: number }> {
+    const label = direction === "desc" ? "DESC" : "ASC";
+    const hasMore =
+      direction === "desc"
+        ? (cursor: number) => cursor > bound
+        : (cursor: number) => cursor < bound;
+    const fetchBatch =
+      direction === "desc"
+        ? (cursor: number) => chatDb.buildSyncBatchDescending(cursor, 0, BATCH_SIZE)
+        : (cursor: number) => chatDb.buildSyncBatch(cursor, BATCH_SIZE);
+    const mergeCursors =
+      direction === "desc"
+        ? (cursors: number[]) => Math.min(...cursors)
+        : (cursors: number[]) => Math.max(...cursors);
+
+    let cursor = initialCursor;
+    const totalStart = performance.now();
+    let totalMessagesSynced = 0;
+    let batchNumber = 0;
+    const estimatedTotalBatches = Math.ceil(estimatedTotal / BATCH_SIZE);
+
+    while (hasMore(cursor)) {
+      // Read multiple batches for parallel processing
+      const batchesToProcess: Array<{
+        batch: ReturnType<typeof fetchBatch>;
+        batchNum: number;
+      }> = [];
+
+      let tempCursor = cursor;
+      for (let i = 0; i < CONCURRENT_BATCHES && hasMore(tempCursor); i++) {
+        const batch = fetchBatch(tempCursor);
+        if (batch.messages.length === 0) break;
+
+        batchNumber++;
+        batchesToProcess.push({ batch, batchNum: batchNumber });
+        tempCursor = batch.cursor;
+      }
+
+      if (batchesToProcess.length === 0) break;
+
+      this.updateProgress({
+        currentBatch: {
+          messagesInBatch: batchesToProcess.reduce(
+            (sum, b) => sum + b.batch.messages.length,
+            0
+          ),
+          batchNumber: batchesToProcess[0].batchNum,
+          estimatedBatchesRemaining: Math.max(
+            0,
+            estimatedTotalBatches - batchNumber
+          ),
+        },
+      });
+
+      // Process batches in parallel
+      const batchStart = performance.now();
+      const results = await Promise.all(
+        batchesToProcess.map(({ batch, batchNum }) =>
+          this.processSingleBatch(batch, batchNum)
+        )
+      );
+
+      const batchTime = performance.now() - batchStart;
+      const batchMsgCount = results.reduce(
+        (sum, r) => sum + r.messagesCount,
+        0
+      );
+      const rate = Math.round(batchMsgCount / (batchTime / 1000));
+
+      console.log(
+        `[SyncManager] ${label} batches ${batchesToProcess[0].batchNum}-${batchesToProcess[batchesToProcess.length - 1].batchNum}: ${batchMsgCount} msgs (${Math.round(batchTime)}ms, ${rate}/s)`
+      );
+
+      cursor = mergeCursors(batchesToProcess.map((b) => b.batch.cursor));
+      saveCursor(cursor);
+
+      totalMessagesSynced += batchMsgCount;
+      this.updateProgress({
+        lastCursor: cursor,
+        totalMessagesSynced:
+          this.progress.totalMessagesSynced + batchMsgCount,
+      });
+    }
+
+    const totalTime = performance.now() - totalStart;
+    const overallRate =
+      totalTime > 0
+        ? Math.round(totalMessagesSynced / (totalTime / 1000))
+        : 0;
+    console.log(
+      `[SyncManager] ${label} sync complete: ${totalMessagesSynced} msgs in ${Math.round(totalTime / 1000)}s (${overallRate}/s overall)`
+    );
+
+    return { totalMessagesSynced, finalCursor: cursor };
+  }
+
+  /**
+   * Full sync in DESC order (newest messages first).
+   * Used for fresh installs and recovery scenarios.
+   * @param fullSyncCursor - Current position in DESC sync (upper bound for next batch)
+   * @param fullSyncStartRowid - The maxRowid when full sync started (for transition to incremental)
+   * @param maxRowid - Current maxRowid (to detect messages that arrived during sync)
+   */
+  private async runFullSyncDesc(
+    chatDb: ChatDb,
+    fullSyncCursor: number,
+    fullSyncStartRowid: number,
+    maxRowid: number
+  ): Promise<void> {
+    console.log(
+      `[SyncManager] Full sync DESC: from ${fullSyncCursor} down to 0 (started at ${fullSyncStartRowid})`
+    );
+
+    const { totalMessagesSynced } = await this.runBatchSyncLoop(
+      chatDb,
+      "desc",
+      fullSyncCursor,
+      0,
+      fullSyncCursor,
+      (cursor) =>
+        this.saveCursorState({
+          cursor: 0,
+          fullSyncStartRowid,
+          fullSyncCursor: cursor,
+          updatedAt: Date.now(),
+        })
+    );
+
+    // Transition to incremental mode: cursor = fullSyncStartRowid
+    // This catches any messages that arrived during full sync
+    this.saveCursorState({
+      cursor: fullSyncStartRowid,
+      updatedAt: Date.now(),
+    });
+
+    console.log(
+      `[SyncManager] Transitioned to incremental mode, cursor=${fullSyncStartRowid}`
+    );
+
+    // Update server sync metadata
+    await this.updateServerSyncMetadata(fullSyncStartRowid);
+
+    // Check for new messages that arrived during full sync
+    let catchUpMessagesSynced = 0;
+    if (fullSyncStartRowid < maxRowid) {
+      console.log(
+        `[SyncManager] Catching up ${maxRowid - fullSyncStartRowid} new messages from during full sync`
+      );
+      catchUpMessagesSynced = await this.runIncrementalSyncAsc(
+        chatDb,
+        fullSyncStartRowid,
+        maxRowid
+      );
+    } else {
+      this.updateProgress({
+        status: "idle",
+        lastSyncAt: Date.now(),
+        currentBatch: undefined,
+        recoveryReason: undefined,
+      });
+    }
+
+    // Trigger memory processing once for all messages synced (full sync + catch-up)
+    const totalSyncedThisCycle = totalMessagesSynced + catchUpMessagesSynced;
+    if (totalSyncedThisCycle > 0) {
+      this.triggerMemoryProcessing().catch((e) => {
+        console.warn(
+          "[SyncManager] Memory processing failed (non-blocking):",
+          e
+        );
+      });
+    }
+  }
+
+  /**
+   * Incremental sync in ASC order (oldest first for new messages).
+   * Standard sync mode after full sync is complete.
+   * @returns Total messages synced (caller handles memory processing)
+   */
+  private async runIncrementalSyncAsc(
+    chatDb: ChatDb,
+    cursor: number,
+    maxRowid: number
+  ): Promise<number> {
+    if (cursor >= maxRowid) {
+      this.updateProgress({
+        status: "idle",
+        lastSyncAt: Date.now(),
+        currentBatch: undefined,
+      });
+      return 0;
+    }
+
+    console.log(
+      `[SyncManager] Incremental sync ASC: from ${cursor} to ${maxRowid}`
+    );
+
+    const { totalMessagesSynced, finalCursor } = await this.runBatchSyncLoop(
+      chatDb,
+      "asc",
+      cursor,
+      maxRowid,
+      maxRowid - cursor,
+      (newCursor) => this.saveCursorState({ cursor: newCursor, updatedAt: Date.now() })
+    );
+
+    // Update server sync metadata
+    await this.updateServerSyncMetadata(finalCursor);
+
+    this.updateProgress({
+      status: "idle",
+      lastSyncAt: Date.now(),
+      currentBatch: undefined,
+      recoveryReason: undefined,
+    });
+
+    return totalMessagesSynced;
+  }
+
+  /**
+   * Update server sync metadata after sync cycle.
+   */
+  private async updateServerSyncMetadata(cursor: number): Promise<void> {
+    try {
+      await this.executeMutationWithRetry(() =>
+        this.client.mutation(api.sync.updateSyncMetadata, {
+          platform: "imessage",
+          cursor: String(cursor),
+          totalMessagesSynced: this.progress.totalMessagesSynced,
+          totalContactsSynced: this.progress.totalContactsSynced || 0,
+          syncVersion: CURRENT_SYNC_VERSION,
+        })
+      );
+    } catch (e) {
+      console.warn("[SyncManager] Failed to update sync metadata:", e);
     }
   }
 
@@ -621,15 +818,25 @@ export class SyncManager {
 
   /**
    * Force a full resync by resetting cursor (local only, for testing).
+   * Sets up DESC sync from current maxRowid.
    */
   resetCursor(): void {
-    this.saveCursor(0);
+    const chatDb = this.getChatDb();
+    const maxRowid = chatDb.getMaxMessageRowid();
+    this.saveCursorState({
+      cursor: 0,
+      fullSyncStartRowid: maxRowid,
+      fullSyncCursor: maxRowid,
+      updatedAt: Date.now(),
+    });
     this.updateProgress({
       lastCursor: 0,
       totalMessagesSynced: 0,
       totalContactsSynced: 0,
     });
-    console.log("[SyncManager] Cursor reset, next sync will be full sync");
+    console.log(
+      `[SyncManager] Cursor reset, next sync will be full sync DESC (${maxRowid} messages)`
+    );
   }
 
   /**
@@ -662,8 +869,19 @@ export class SyncManager {
       console.warn("[SyncManager] Failed to reset server sync state:", e);
     }
 
-    // Reset local cursor
-    this.saveCursor(0);
+    // Initialize full sync state (DESC from maxRowid to 0)
+    const chatDb = this.getChatDb();
+    const maxRowid = chatDb.getMaxMessageRowid();
+    this.saveCursorState({
+      cursor: 0,
+      fullSyncStartRowid: maxRowid,
+      fullSyncCursor: maxRowid,
+      updatedAt: Date.now(),
+    });
+    console.log(
+      `[SyncManager] Force full sync: will fetch ${maxRowid} messages DESC`
+    );
+
     this.updateProgress({
       lastCursor: 0,
       totalMessagesSynced: 0,
@@ -757,30 +975,32 @@ export class SyncManager {
     }
   }
 
-  private loadCursor(): number {
+  private loadCursorState(): CursorState {
     try {
       if (fs.existsSync(this.cursorPath)) {
         const data = JSON.parse(fs.readFileSync(this.cursorPath, "utf-8"));
-        return data.cursor || 0;
+        return {
+          cursor: data.cursor || 0,
+          fullSyncStartRowid: data.fullSyncStartRowid,
+          fullSyncCursor: data.fullSyncCursor,
+          updatedAt: data.updatedAt || Date.now(),
+        };
       }
     } catch (e) {
-      console.warn("[SyncManager] Failed to load cursor:", e);
+      console.warn("[SyncManager] Failed to load cursor state:", e);
     }
-    return 0;
+    return { cursor: 0, updatedAt: Date.now() };
   }
 
-  private saveCursor(cursor: number): void {
+  private saveCursorState(state: CursorState): void {
     try {
       const dir = path.dirname(this.cursorPath);
       if (!fs.existsSync(dir)) {
         fs.mkdirSync(dir, { recursive: true });
       }
-      fs.writeFileSync(
-        this.cursorPath,
-        JSON.stringify({ cursor, updatedAt: Date.now() })
-      );
+      fs.writeFileSync(this.cursorPath, JSON.stringify(state));
     } catch (e) {
-      console.warn("[SyncManager] Failed to save cursor:", e);
+      console.warn("[SyncManager] Failed to save cursor state:", e);
     }
   }
 

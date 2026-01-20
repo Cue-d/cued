@@ -167,6 +167,7 @@ interface HandleRow {
 export class ChatDb {
   private db: Database.Database;
   private stmtGetMessagesSince: Database.Statement<[number, number]>;
+  private stmtGetMessagesDesc: Database.Statement<[number, number, number]>;
   private stmtGetMaxRowid: Database.Statement<[]>;
   private stmtGetChatParticipants: Database.Statement<[number]>;
   private stmtGetChatById: Database.Statement<[number, number]>;
@@ -209,6 +210,36 @@ export class ChatDb {
       LEFT JOIN handle h ON h.ROWID = m.handle_id
       WHERE m.ROWID > ?
       ORDER BY m.ROWID
+      LIMIT ?
+    `);
+
+    // DESC query for full sync (newest messages first)
+    this.stmtGetMessagesDesc = this.db.prepare(`
+      SELECT
+        m.ROWID as rowid,
+        m.guid,
+        cmj.chat_id,
+        CASE WHEN m.is_from_me = 0 THEN m.handle_id ELSE NULL END as sender_id,
+        h.id as sender_identifier,
+        h.service as sender_service,
+        m.text,
+        m.attributedBody,
+        m.date,
+        m.is_from_me,
+        m.is_sent,
+        m.is_delivered,
+        m.is_read,
+        m.date_read,
+        m.error,
+        m.cache_has_attachments,
+        m.associated_message_guid,
+        m.associated_message_type,
+        m.associated_message_emoji
+      FROM message m
+      INNER JOIN chat_message_join cmj ON cmj.message_id = m.ROWID
+      LEFT JOIN handle h ON h.ROWID = m.handle_id
+      WHERE m.ROWID <= ? AND m.ROWID > ?
+      ORDER BY m.ROWID DESC
       LIMIT ?
     `);
 
@@ -308,19 +339,10 @@ export class ChatDb {
   }
 
   /**
-   * Get messages with ROWID > lastRowid for incremental sync.
-   * Returns messages with full sender info and text extraction.
-   * Filters out reaction messages (those are processed separately).
-   * @param lastRowid - Fetch messages after this ROWID
-   * @param limit - Maximum number of messages to fetch (default 2500)
+   * Transform raw message rows into Message objects.
+   * Filters out tapback reactions (types 2000-3005) - they're attached to target messages instead.
    */
-  getMessagesSince(lastRowid: number, limit: number = 2500): Message[] {
-    const rows = this.stmtGetMessagesSince.all(
-      lastRowid,
-      limit
-    ) as MessageRow[];
-
-    // Filter out tapback reactions (types 2000-3005) - they're attached to target messages instead
+  private transformMessageRows(rows: MessageRow[]): Message[] {
     const contentMessages = rows.filter(
       (row) =>
         row.associated_message_type < 2000 || row.associated_message_type > 3005
@@ -362,11 +384,26 @@ export class ChatDb {
         status,
         errorCode: row.error,
         hasAttachments: row.cache_has_attachments === 1,
-        attachments: [], // Populated in buildSyncBatch
+        attachments: [],
         sender,
-        reactions: [], // Populated in buildSyncBatch
+        reactions: [],
       };
     });
+  }
+
+  /**
+   * Get messages with ROWID > lastRowid for incremental sync.
+   * Returns messages with full sender info and text extraction.
+   * Filters out reaction messages (those are processed separately).
+   * @param lastRowid - Fetch messages after this ROWID
+   * @param limit - Maximum number of messages to fetch (default 2500)
+   */
+  getMessagesSince(lastRowid: number, limit: number = 2500): Message[] {
+    const rows = this.stmtGetMessagesSince.all(
+      lastRowid,
+      limit
+    ) as MessageRow[];
+    return this.transformMessageRows(rows);
   }
 
   /**
@@ -485,18 +522,13 @@ export class ChatDb {
   }
 
   /**
-   * Build a sync batch from new messages since lastRowid.
-   * Groups messages by chat, includes all referenced handles, attaches reactions and attachments.
-   * @param lastRowid - Fetch messages after this ROWID
-   * @param limit - Maximum number of messages to fetch (default 2500)
+   * Hydrate messages with reactions, attachments, chats, and handles.
+   * Shared by both ASC and DESC sync batch builders.
    */
-  buildSyncBatch(lastRowid: number, limit: number = 2500): SyncBatch {
-    const messages = this.getMessagesSince(lastRowid, limit);
-
-    if (messages.length === 0) {
-      return { cursor: lastRowid, chats: [], messages: [], handles: [] };
-    }
-
+  private hydrateMessages(messages: Message[]): {
+    chats: Chat[];
+    handles: Handle[];
+  } {
     // Fetch reactions for all messages in the batch
     const guids = messages.map((m) => m.guid);
     const reactionMap = this.getReactionsForGuids(guids);
@@ -543,15 +575,74 @@ export class ChatDb {
       }
     }
 
-    // Messages are ordered by ROWID, so the last one has the highest id
-    // Using array access instead of Math.max(...) to avoid stack overflow with large arrays
+    return { chats, handles: [...handlesMap.values()] };
+  }
+
+  /**
+   * Build a sync batch from new messages since lastRowid.
+   * Groups messages by chat, includes all referenced handles, attaches reactions and attachments.
+   * @param lastRowid - Fetch messages after this ROWID
+   * @param limit - Maximum number of messages to fetch (default 2500)
+   */
+  buildSyncBatch(lastRowid: number, limit: number = 2500): SyncBatch {
+    const messages = this.getMessagesSince(lastRowid, limit);
+
+    if (messages.length === 0) {
+      return { cursor: lastRowid, chats: [], messages: [], handles: [] };
+    }
+
+    const { chats, handles } = this.hydrateMessages(messages);
+
+    // Messages are ordered by ROWID ASC, so the last one has the highest id
     const cursor = messages[messages.length - 1].id;
 
-    return {
-      cursor,
-      chats,
-      messages,
-      handles: [...handlesMap.values()],
-    };
+    return { cursor, chats, messages, handles };
+  }
+
+  /**
+   * Get messages with ROWID <= maxRowid and ROWID > minRowid in DESC order for full sync.
+   * Returns messages from newest to oldest.
+   * @param maxRowid - Maximum ROWID to include (upper bound, inclusive)
+   * @param minRowid - Minimum ROWID to exclude (lower bound, exclusive)
+   * @param limit - Maximum number of messages to fetch (default 2500)
+   */
+  getMessagesDescending(
+    maxRowid: number,
+    minRowid: number,
+    limit: number = 2500
+  ): Message[] {
+    const rows = this.stmtGetMessagesDesc.all(
+      maxRowid,
+      minRowid,
+      limit
+    ) as MessageRow[];
+    return this.transformMessageRows(rows);
+  }
+
+  /**
+   * Build a sync batch from messages in DESC order (newest first) for full sync.
+   * @param maxRowid - Maximum ROWID to include (upper bound, inclusive)
+   * @param minRowid - Minimum ROWID to exclude (lower bound, exclusive), defaults to 0
+   * @param limit - Maximum number of messages to fetch (default 2500)
+   * @returns SyncBatch with cursor set to (lowest ROWID in batch - 1) for DESC iteration
+   */
+  buildSyncBatchDescending(
+    maxRowid: number,
+    minRowid: number = 0,
+    limit: number = 2500
+  ): SyncBatch {
+    const messages = this.getMessagesDescending(maxRowid, minRowid, limit);
+
+    if (messages.length === 0) {
+      return { cursor: minRowid, chats: [], messages: [], handles: [] };
+    }
+
+    const { chats, handles } = this.hydrateMessages(messages);
+
+    // For DESC order: cursor is (lowest ROWID in batch - 1) to mark progress going backwards
+    // Messages are sorted DESC, so last element has lowest ROWID
+    const cursor = messages[messages.length - 1].id - 1;
+
+    return { cursor, chats, messages, handles };
   }
 }

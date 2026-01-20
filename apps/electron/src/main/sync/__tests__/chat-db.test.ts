@@ -72,6 +72,37 @@ const SQL_GET_CHAT = `
   WHERE c.ROWID = ?
 `;
 
+// SQL query for DESC order (newest messages first)
+// Matches production query in chat-db.ts stmtGetMessagesDesc
+const SQL_GET_MESSAGES_DESC = `
+  SELECT
+    m.ROWID as rowid,
+    m.guid,
+    cmj.chat_id,
+    CASE WHEN m.is_from_me = 0 THEN m.handle_id ELSE NULL END as sender_id,
+    h.id as sender_identifier,
+    h.service as sender_service,
+    m.text,
+    m.attributedBody,
+    m.date,
+    m.is_from_me,
+    m.is_sent,
+    m.is_delivered,
+    m.is_read,
+    m.date_read,
+    m.error,
+    m.cache_has_attachments,
+    m.associated_message_guid,
+    m.associated_message_type,
+    m.associated_message_emoji
+  FROM message m
+  INNER JOIN chat_message_join cmj ON cmj.message_id = m.ROWID
+  LEFT JOIN handle h ON h.ROWID = m.handle_id
+  WHERE m.ROWID <= ? AND m.ROWID > ?
+  ORDER BY m.ROWID DESC
+  LIMIT ?
+`;
+
 describe.skipIf(!Database)("ChatDb SQL queries", () => {
   let db: BetterSqlite3.Database;
 
@@ -401,6 +432,266 @@ describe.skipIf(!Database)("ChatDb SQL queries", () => {
       expect(TAPBACK_TYPE_TO_EMOJI[2003]).toBe("😂");
       expect(TAPBACK_TYPE_TO_EMOJI[2004]).toBe("‼️");
       expect(TAPBACK_TYPE_TO_EMOJI[2005]).toBe("❓");
+    });
+  });
+
+  describe("getMessagesDescending query (DESC order for full sync)", () => {
+    it("returns empty array when no messages exist", () => {
+      const rows = db.prepare(SQL_GET_MESSAGES_DESC).all(1000, 0, 100);
+      expect(rows).toEqual([]);
+    });
+
+    it("returns messages in DESC order (newest first)", () => {
+      const appleNow = unixToApple(Math.floor(Date.now() / 1000));
+
+      db.exec(`
+        INSERT INTO message (ROWID, guid, text, date, is_from_me, is_sent, is_delivered, handle_id)
+        VALUES (1, 'guid-1', 'Oldest message', ${appleNow - 3000000000000}, 0, 0, 0, 1);
+
+        INSERT INTO message (ROWID, guid, text, date, is_from_me, is_sent, is_delivered, handle_id)
+        VALUES (2, 'guid-2', 'Middle message', ${appleNow - 2000000000000}, 0, 0, 0, 1);
+
+        INSERT INTO message (ROWID, guid, text, date, is_from_me, is_sent, is_delivered, handle_id)
+        VALUES (3, 'guid-3', 'Newest message', ${appleNow - 1000000000000}, 0, 0, 0, 1);
+
+        INSERT INTO chat_message_join (chat_id, message_id) VALUES (1, 1);
+        INSERT INTO chat_message_join (chat_id, message_id) VALUES (1, 2);
+        INSERT INTO chat_message_join (chat_id, message_id) VALUES (1, 3);
+      `);
+
+      interface MessageRow {
+        rowid: number;
+        guid: string;
+        text: string | null;
+      }
+      // maxRowid=3, minRowid=0, limit=100 → should return all 3 in DESC order
+      const rows = db.prepare(SQL_GET_MESSAGES_DESC).all(3, 0, 100) as MessageRow[];
+
+      expect(rows).toHaveLength(3);
+      // DESC order: newest (ROWID 3) first, oldest (ROWID 1) last
+      expect(rows[0]).toMatchObject({ rowid: 3, guid: "guid-3", text: "Newest message" });
+      expect(rows[1]).toMatchObject({ rowid: 2, guid: "guid-2", text: "Middle message" });
+      expect(rows[2]).toMatchObject({ rowid: 1, guid: "guid-1", text: "Oldest message" });
+    });
+
+    it("respects maxRowid upper bound (inclusive)", () => {
+      const appleNow = unixToApple(Math.floor(Date.now() / 1000));
+
+      db.exec(`
+        INSERT INTO message (ROWID, guid, text, date, handle_id) VALUES (1, 'guid-1', 'Msg 1', ${appleNow - 4000000000000}, 1);
+        INSERT INTO message (ROWID, guid, text, date, handle_id) VALUES (2, 'guid-2', 'Msg 2', ${appleNow - 3000000000000}, 1);
+        INSERT INTO message (ROWID, guid, text, date, handle_id) VALUES (3, 'guid-3', 'Msg 3', ${appleNow - 2000000000000}, 1);
+        INSERT INTO message (ROWID, guid, text, date, handle_id) VALUES (4, 'guid-4', 'Msg 4', ${appleNow - 1000000000000}, 1);
+
+        INSERT INTO chat_message_join (chat_id, message_id) VALUES (1, 1);
+        INSERT INTO chat_message_join (chat_id, message_id) VALUES (1, 2);
+        INSERT INTO chat_message_join (chat_id, message_id) VALUES (1, 3);
+        INSERT INTO chat_message_join (chat_id, message_id) VALUES (1, 4);
+      `);
+
+      interface MessageRow { rowid: number }
+      // maxRowid=2 → should only return ROWID 1 and 2 (not 3 or 4)
+      const rows = db.prepare(SQL_GET_MESSAGES_DESC).all(2, 0, 100) as MessageRow[];
+
+      expect(rows).toHaveLength(2);
+      expect(rows[0].rowid).toBe(2);
+      expect(rows[1].rowid).toBe(1);
+    });
+
+    it("respects minRowid lower bound (exclusive)", () => {
+      const appleNow = unixToApple(Math.floor(Date.now() / 1000));
+
+      db.exec(`
+        INSERT INTO message (ROWID, guid, text, date, handle_id) VALUES (1, 'guid-1', 'Msg 1', ${appleNow - 4000000000000}, 1);
+        INSERT INTO message (ROWID, guid, text, date, handle_id) VALUES (2, 'guid-2', 'Msg 2', ${appleNow - 3000000000000}, 1);
+        INSERT INTO message (ROWID, guid, text, date, handle_id) VALUES (3, 'guid-3', 'Msg 3', ${appleNow - 2000000000000}, 1);
+        INSERT INTO message (ROWID, guid, text, date, handle_id) VALUES (4, 'guid-4', 'Msg 4', ${appleNow - 1000000000000}, 1);
+
+        INSERT INTO chat_message_join (chat_id, message_id) VALUES (1, 1);
+        INSERT INTO chat_message_join (chat_id, message_id) VALUES (1, 2);
+        INSERT INTO chat_message_join (chat_id, message_id) VALUES (1, 3);
+        INSERT INTO chat_message_join (chat_id, message_id) VALUES (1, 4);
+      `);
+
+      interface MessageRow { rowid: number }
+      // minRowid=2 → should exclude ROWID 1 and 2, only return 3 and 4
+      const rows = db.prepare(SQL_GET_MESSAGES_DESC).all(4, 2, 100) as MessageRow[];
+
+      expect(rows).toHaveLength(2);
+      expect(rows[0].rowid).toBe(4);
+      expect(rows[1].rowid).toBe(3);
+    });
+
+    it("respects limit parameter", () => {
+      const appleNow = unixToApple(Math.floor(Date.now() / 1000));
+
+      db.exec(`
+        INSERT INTO message (ROWID, guid, text, date, handle_id) VALUES (1, 'guid-1', 'Msg 1', ${appleNow - 5000000000000}, 1);
+        INSERT INTO message (ROWID, guid, text, date, handle_id) VALUES (2, 'guid-2', 'Msg 2', ${appleNow - 4000000000000}, 1);
+        INSERT INTO message (ROWID, guid, text, date, handle_id) VALUES (3, 'guid-3', 'Msg 3', ${appleNow - 3000000000000}, 1);
+        INSERT INTO message (ROWID, guid, text, date, handle_id) VALUES (4, 'guid-4', 'Msg 4', ${appleNow - 2000000000000}, 1);
+        INSERT INTO message (ROWID, guid, text, date, handle_id) VALUES (5, 'guid-5', 'Msg 5', ${appleNow - 1000000000000}, 1);
+
+        INSERT INTO chat_message_join (chat_id, message_id) VALUES (1, 1);
+        INSERT INTO chat_message_join (chat_id, message_id) VALUES (1, 2);
+        INSERT INTO chat_message_join (chat_id, message_id) VALUES (1, 3);
+        INSERT INTO chat_message_join (chat_id, message_id) VALUES (1, 4);
+        INSERT INTO chat_message_join (chat_id, message_id) VALUES (1, 5);
+      `);
+
+      interface MessageRow { rowid: number }
+      // limit=2 → should only return 2 newest messages
+      const rows = db.prepare(SQL_GET_MESSAGES_DESC).all(5, 0, 2) as MessageRow[];
+
+      expect(rows).toHaveLength(2);
+      expect(rows[0].rowid).toBe(5); // Newest
+      expect(rows[1].rowid).toBe(4); // Second newest
+    });
+
+    it("filters out tapback reactions in DESC order", () => {
+      const appleNow = unixToApple(Math.floor(Date.now() / 1000));
+
+      db.exec(`
+        INSERT INTO message (ROWID, guid, text, date, handle_id, associated_message_type)
+        VALUES (1, 'msg-guid', 'Hello', ${appleNow - 2000000000000}, 1, 0);
+
+        INSERT INTO message (ROWID, guid, text, date, handle_id, associated_message_guid, associated_message_type)
+        VALUES (2, 'tapback-guid', NULL, ${appleNow - 1000000000000}, 1, 'p:0/msg-guid', 2001);
+
+        INSERT INTO message (ROWID, guid, text, date, handle_id, associated_message_type)
+        VALUES (3, 'msg-guid-2', 'Hi there', ${appleNow}, 1, 0);
+
+        INSERT INTO chat_message_join (chat_id, message_id) VALUES (1, 1);
+        INSERT INTO chat_message_join (chat_id, message_id) VALUES (1, 2);
+        INSERT INTO chat_message_join (chat_id, message_id) VALUES (1, 3);
+      `);
+
+      interface MessageRow { rowid: number; associated_message_type: number }
+      const allRows = db.prepare(SQL_GET_MESSAGES_DESC).all(3, 0, 100) as MessageRow[];
+      expect(allRows).toHaveLength(3);
+
+      // Filter out tapbacks (type 2000-3005)
+      const contentRows = allRows.filter(
+        (row) =>
+          row.associated_message_type < 2000 ||
+          row.associated_message_type > 3005
+      );
+      expect(contentRows).toHaveLength(2);
+      // DESC order: ROWID 3 first, ROWID 1 second
+      expect(contentRows[0].rowid).toBe(3);
+      expect(contentRows[1].rowid).toBe(1);
+    });
+  });
+
+  describe("buildSyncBatchDescending cursor calculation", () => {
+    it("cursor should be lowest ROWID - 1 for DESC iteration", () => {
+      // This tests the cursor semantics for DESC sync
+      // After processing a batch with messages ROWID 5,4,3, cursor should be 2 (lowest - 1)
+      // Next batch would then fetch WHERE ROWID <= 2 AND ROWID > 0
+
+      const appleNow = unixToApple(Math.floor(Date.now() / 1000));
+
+      db.exec(`
+        INSERT INTO message (ROWID, guid, text, date, handle_id) VALUES (1, 'guid-1', 'Msg 1', ${appleNow - 5000000000000}, 1);
+        INSERT INTO message (ROWID, guid, text, date, handle_id) VALUES (2, 'guid-2', 'Msg 2', ${appleNow - 4000000000000}, 1);
+        INSERT INTO message (ROWID, guid, text, date, handle_id) VALUES (3, 'guid-3', 'Msg 3', ${appleNow - 3000000000000}, 1);
+        INSERT INTO message (ROWID, guid, text, date, handle_id) VALUES (4, 'guid-4', 'Msg 4', ${appleNow - 2000000000000}, 1);
+        INSERT INTO message (ROWID, guid, text, date, handle_id) VALUES (5, 'guid-5', 'Msg 5', ${appleNow - 1000000000000}, 1);
+
+        INSERT INTO chat_message_join (chat_id, message_id) VALUES (1, 1);
+        INSERT INTO chat_message_join (chat_id, message_id) VALUES (1, 2);
+        INSERT INTO chat_message_join (chat_id, message_id) VALUES (1, 3);
+        INSERT INTO chat_message_join (chat_id, message_id) VALUES (1, 4);
+        INSERT INTO chat_message_join (chat_id, message_id) VALUES (1, 5);
+      `);
+
+      interface MessageRow { rowid: number }
+
+      // First batch: maxRowid=5, minRowid=0, limit=3
+      const batch1 = db.prepare(SQL_GET_MESSAGES_DESC).all(5, 0, 3) as MessageRow[];
+      expect(batch1).toHaveLength(3);
+      expect(batch1.map(r => r.rowid)).toEqual([5, 4, 3]);
+
+      // Cursor calculation: lowest ROWID in batch - 1 = 3 - 1 = 2
+      const lowestRowid = batch1[batch1.length - 1].rowid;
+      const cursor = lowestRowid - 1;
+      expect(cursor).toBe(2);
+
+      // Second batch: maxRowid=cursor(2), minRowid=0, limit=3
+      const batch2 = db.prepare(SQL_GET_MESSAGES_DESC).all(cursor, 0, 3) as MessageRow[];
+      expect(batch2).toHaveLength(2);
+      expect(batch2.map(r => r.rowid)).toEqual([2, 1]);
+
+      // Cursor after batch2: lowest ROWID - 1 = 1 - 1 = 0
+      const cursor2 = batch2[batch2.length - 1].rowid - 1;
+      expect(cursor2).toBe(0);
+
+      // Third batch: maxRowid=0 should return nothing
+      const batch3 = db.prepare(SQL_GET_MESSAGES_DESC).all(cursor2, 0, 3) as MessageRow[];
+      expect(batch3).toHaveLength(0);
+    });
+
+    it("parallel DESC batches calculate cursors correctly", () => {
+      // Simulate parallel batch processing for DESC sync
+      // 5 messages, 3 batches processed in parallel
+
+      const appleNow = unixToApple(Math.floor(Date.now() / 1000));
+
+      db.exec(`
+        INSERT INTO message (ROWID, guid, text, date, handle_id) VALUES (1, 'guid-1', 'Msg 1', ${appleNow - 10000000000000}, 1);
+        INSERT INTO message (ROWID, guid, text, date, handle_id) VALUES (2, 'guid-2', 'Msg 2', ${appleNow - 9000000000000}, 1);
+        INSERT INTO message (ROWID, guid, text, date, handle_id) VALUES (3, 'guid-3', 'Msg 3', ${appleNow - 8000000000000}, 1);
+        INSERT INTO message (ROWID, guid, text, date, handle_id) VALUES (4, 'guid-4', 'Msg 4', ${appleNow - 7000000000000}, 1);
+        INSERT INTO message (ROWID, guid, text, date, handle_id) VALUES (5, 'guid-5', 'Msg 5', ${appleNow - 6000000000000}, 1);
+        INSERT INTO message (ROWID, guid, text, date, handle_id) VALUES (6, 'guid-6', 'Msg 6', ${appleNow - 5000000000000}, 1);
+        INSERT INTO message (ROWID, guid, text, date, handle_id) VALUES (7, 'guid-7', 'Msg 7', ${appleNow - 4000000000000}, 1);
+        INSERT INTO message (ROWID, guid, text, date, handle_id) VALUES (8, 'guid-8', 'Msg 8', ${appleNow - 3000000000000}, 1);
+        INSERT INTO message (ROWID, guid, text, date, handle_id) VALUES (9, 'guid-9', 'Msg 9', ${appleNow - 2000000000000}, 1);
+        INSERT INTO message (ROWID, guid, text, date, handle_id) VALUES (10, 'guid-10', 'Msg 10', ${appleNow - 1000000000000}, 1);
+
+        INSERT INTO chat_message_join (chat_id, message_id) VALUES (1, 1);
+        INSERT INTO chat_message_join (chat_id, message_id) VALUES (1, 2);
+        INSERT INTO chat_message_join (chat_id, message_id) VALUES (1, 3);
+        INSERT INTO chat_message_join (chat_id, message_id) VALUES (1, 4);
+        INSERT INTO chat_message_join (chat_id, message_id) VALUES (1, 5);
+        INSERT INTO chat_message_join (chat_id, message_id) VALUES (1, 6);
+        INSERT INTO chat_message_join (chat_id, message_id) VALUES (1, 7);
+        INSERT INTO chat_message_join (chat_id, message_id) VALUES (1, 8);
+        INSERT INTO chat_message_join (chat_id, message_id) VALUES (1, 9);
+        INSERT INTO chat_message_join (chat_id, message_id) VALUES (1, 10);
+      `);
+
+      interface MessageRow { rowid: number }
+
+      // Simulate reading 3 batches ahead for parallel processing
+      let tempCursor = 10; // Start from maxRowid
+      const batches: { rows: MessageRow[]; cursor: number }[] = [];
+
+      for (let i = 0; i < 3 && tempCursor > 0; i++) {
+        const rows = db.prepare(SQL_GET_MESSAGES_DESC).all(tempCursor, 0, 3) as MessageRow[];
+        if (rows.length === 0) break;
+        const cursor = rows[rows.length - 1].rowid - 1;
+        batches.push({ rows, cursor });
+        tempCursor = cursor;
+      }
+
+      expect(batches).toHaveLength(3);
+
+      // Batch 1: ROWIDs 10, 9, 8 → cursor = 7
+      expect(batches[0].rows.map(r => r.rowid)).toEqual([10, 9, 8]);
+      expect(batches[0].cursor).toBe(7);
+
+      // Batch 2: ROWIDs 7, 6, 5 → cursor = 4
+      expect(batches[1].rows.map(r => r.rowid)).toEqual([7, 6, 5]);
+      expect(batches[1].cursor).toBe(4);
+
+      // Batch 3: ROWIDs 4, 3, 2 → cursor = 1
+      expect(batches[2].rows.map(r => r.rowid)).toEqual([4, 3, 2]);
+      expect(batches[2].cursor).toBe(1);
+
+      // After parallel processing, overall cursor = min of all batch cursors = 1
+      const overallCursor = Math.min(...batches.map(b => b.cursor));
+      expect(overallCursor).toBe(1);
     });
   });
 });
