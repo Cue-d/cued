@@ -3,7 +3,10 @@
  * These mirror the Convex query return types from packages/convex/convex/messages.ts
  */
 
-export type InboxPlatform = "imessage" | "gmail" | "slack"
+import type { ActionPlatform } from "@prm/shared"
+
+/** Platform type for inbox - re-exported from shared for convenience */
+export type InboxPlatform = ActionPlatform
 export type InboxConversationType = "dm" | "group" | "channel"
 
 export interface InboxParticipant {

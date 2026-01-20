@@ -16,7 +16,7 @@
 /**
  * Supported messaging platforms for actions.
  */
-export type ActionPlatform = "imessage" | "gmail" | "slack";
+export type ActionPlatform = "imessage" | "gmail" | "slack" | "linkedin";
 
 /**
  * Platform configuration object.
@@ -35,7 +35,7 @@ export interface PlatformConfigItem {
 }
 
 /**
- * Platform configuration for iMessage, Gmail, and Slack.
+ * Platform configuration for all supported platforms.
  *
  * @example
  * ```tsx
@@ -70,6 +70,13 @@ export const PLATFORM_CONFIG: Record<ActionPlatform, PlatformConfigItem> = {
     textClass: "text-purple-600",
     bgClass: "bg-purple-500 text-white",
     letter: "S",
+  },
+  linkedin: {
+    label: "LinkedIn",
+    color: "#0a66c2",
+    textClass: "text-blue-600",
+    bgClass: "bg-blue-600 text-white",
+    letter: "L",
   },
 };
 

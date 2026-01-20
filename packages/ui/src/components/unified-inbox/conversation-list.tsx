@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useRef } from "react";
-import { Search, MessageSquare, Mail, Hash } from "lucide-react";
+import { Search, MessageSquare, Mail, Hash, Linkedin } from "lucide-react";
 import { InboxConversationItem } from "./conversation-item";
 import { cn } from "../../lib/utils";
 import type { InboxConversation, InboxPlatform } from "./types";
@@ -27,6 +27,7 @@ const filterButtons: Array<{ value: PlatformFilter; label: string; icon?: React.
   { value: "imessage", label: "iMessage", icon: <MessageSquare className="w-3.5 h-3.5" /> },
   { value: "gmail", label: "Gmail", icon: <Mail className="w-3.5 h-3.5" /> },
   { value: "slack", label: "Slack", icon: <Hash className="w-3.5 h-3.5" /> },
+  { value: "linkedin", label: "LinkedIn", icon: <Linkedin className="w-3.5 h-3.5" /> },
 ];
 
 export function InboxConversationList({
