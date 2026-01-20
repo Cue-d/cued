@@ -308,6 +308,7 @@ export function setupSocialIpcHandlers(mainWindow: BrowserWindow | null): void {
         // Configure sync manager
         const syncManager = getLinkedInSyncManager();
         syncManager.setClient(apiClient);
+        syncManager.setTokenProvider(getValidAccessToken);
 
         // Set up progress callback to notify renderer
         syncManager.setProgressCallback((progress) => {
