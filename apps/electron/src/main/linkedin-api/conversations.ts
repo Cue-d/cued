@@ -311,13 +311,17 @@ export async function getConversations(
   const request = newMessagingGraphQLRequest(client.cookies, queryId, variables)
 
   try {
-    const response = await request.doJSON<GraphQLConversationsResponse>()
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const response = await request.doJSON<GraphQLConversationsResponse & { errors?: any[] }>()
 
     console.log('[LinkedIn Conversations] Raw response:', {
       hasData: !!response.data,
       hasSyncTokenResponse: !!response.data?.messengerConversationsBySyncToken,
       hasRegularResponse: !!response.data?.messengerConversations,
       includedCount: response.included?.length ?? 0,
+      errors: response.errors,
+      syncTokenData: response.data?.messengerConversationsBySyncToken,
+      regularData: response.data?.messengerConversations,
     })
 
     const result = parseConversationsResponse(response)

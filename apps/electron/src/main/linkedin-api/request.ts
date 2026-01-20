@@ -155,17 +155,18 @@ export class AuthedRequest {
   ): this {
     const fullQueryId = GRAPHQL_QUERY_IDS[queryId]
 
-    // Set GraphQL-specific headers
-    this.headers['Accept'] = CONTENT_TYPES.linkedInNormalized
+    // Set GraphQL-specific headers (must match mautrix-linkedin exactly)
+    this.headers['Accept'] = CONTENT_TYPES.graphql
+    this.headers['Referer'] = `${API_URLS.messagingBase}/`
     this.headers['x-li-track'] = DEFAULT_X_LI_TRACK
+    this.headers['x-restli-protocol-version'] = '2.0.0'
 
     // Format variables as LinkedIn's special format: (key:value,key:value)
-    // NOT JSON - this is critical for the API to work
+    // Values inside should already be URL-encoded, but the structure is NOT encoded
     const variablesStr = queriesToString(variables)
 
-    // URL-encode the variables string for the query parameter
-    // LinkedIn will decode it before parsing
-    this.rawQuery = `queryId=${fullQueryId}&variables=${encodeURIComponent(variablesStr)}`
+    // Build raw query string - do NOT URL-encode the variables structure
+    this.rawQuery = `queryId=${fullQueryId}&variables=${variablesStr}`
 
     console.log('[LinkedIn API] GraphQL query:', { queryId: fullQueryId, variables: variablesStr })
 
@@ -418,6 +419,20 @@ export function newVoyagerGraphQLRequest(
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
+/**
+ * URL-encode a string like Go's url.QueryEscape.
+ * encodeURIComponent doesn't encode: ! ' ( ) *
+ * But LinkedIn needs these encoded for URN values.
+ */
+export function linkedInEncode(str: string): string {
+  return encodeURIComponent(str)
+    .replace(/!/g, '%21')
+    .replace(/'/g, '%27')
+    .replace(/\(/g, '%28')
+    .replace(/\)/g, '%29')
+    .replace(/\*/g, '%2A')
 }
 
 /**

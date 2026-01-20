@@ -5,7 +5,7 @@
  */
 
 import { API_URLS, PAGINATION_DEFAULTS, CONTENT_TYPES } from './constants'
-import { newMessagingGraphQLRequest, newPostRequest } from './request'
+import { newMessagingGraphQLRequest, newPostRequest, linkedInEncode } from './request'
 import { URN } from './urn'
 import type { LinkedInClient, MessagesResult } from './client'
 import type {
@@ -154,8 +154,9 @@ export async function getMessages(
   // Ensure conversationId is a full URN
   const conversationURN = ensureConversationURN(conversationId)
 
+  // URL-encode the conversation URN (contains special chars like parentheses)
   const variables: Record<string, string> = {
-    conversationUrn: conversationURN,
+    conversationUrn: linkedInEncode(conversationURN),
     count: String(PAGINATION_DEFAULTS.messagesCount),
   }
 
@@ -199,8 +200,9 @@ export async function getMessagesBefore(
   // Ensure conversationId is a full URN
   const conversationURN = ensureConversationURN(conversationId)
 
+  // URL-encode the conversation URN (contains special chars like parentheses)
   const variables: Record<string, string> = {
-    conversationUrn: conversationURN,
+    conversationUrn: linkedInEncode(conversationURN),
     anchorTimestamp: String(timestamp),
     countBefore: String(PAGINATION_DEFAULTS.messagesCount),
     countAfter: '0',

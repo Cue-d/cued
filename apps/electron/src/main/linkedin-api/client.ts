@@ -17,6 +17,7 @@ import {
   getConversations as fetchConversations,
   getConversationsBefore as fetchConversationsBefore,
 } from './conversations'
+import { linkedInEncode } from './request'
 
 export interface ConversationsResult {
   conversations: Conversation[]
@@ -207,34 +208,36 @@ export class LinkedInClient {
       includedCount: response.included?.length ?? 0,
     })
 
-    // For messaging API, we need fsd_profile format with plainId
-    // The miniProfile URN (fs_miniProfile) doesn't work for messaging
-    if (plainId) {
-      this._userEntityURN = `urn:li:fsd_profile:${plainId}`
-      console.log('[LinkedInClient] Constructed user URN from plainId:', this._userEntityURN)
-      return this._userEntityURN
-    }
-
-    // Fallback: try to convert miniProfile URN to fsd_profile format
+    // For messaging API, we need the alphanumeric ID from miniProfile URN
+    // mautrix-linkedin uses this format, NOT the numeric plainId
+    // miniProfile URN: urn:li:fs_miniProfile:ACoAADcIKVEBjLKPYltoVZ4Erv...
+    // Mailbox URN: urn:li:fsd_profile:ACoAADcIKVEBjLKPYltoVZ4Erv...
     if (miniProfile?.entityUrn) {
-      // Extract the ID part and convert to fsd_profile format
+      // Extract the alphanumeric ID from fs_miniProfile URN
       const match = miniProfile.entityUrn.match(/:([^:]+)$/)
       if (match) {
         this._userEntityURN = `urn:li:fsd_profile:${match[1]}`
-        console.log('[LinkedInClient] Converted miniProfile URN to fsd_profile:', this._userEntityURN)
+        console.log('[LinkedInClient] Constructed user URN from miniProfile ID:', this._userEntityURN)
         return this._userEntityURN
       }
     }
 
-    // Last resort: try to find any entityUrn in included and convert it
+    // Fallback: try any entityUrn in included array
     const anyUrn = response.included?.find((item) => item.entityUrn)?.entityUrn
     if (anyUrn) {
       const match = anyUrn.match(/:([^:]+)$/)
       if (match) {
         this._userEntityURN = `urn:li:fsd_profile:${match[1]}`
-        console.log('[LinkedInClient] Converted included URN to fsd_profile:', this._userEntityURN)
+        console.log('[LinkedInClient] Constructed user URN from included URN:', this._userEntityURN)
         return this._userEntityURN
       }
+    }
+
+    // Last resort: use plainId (may not work for all API calls)
+    if (plainId) {
+      this._userEntityURN = `urn:li:fsd_profile:${plainId}`
+      console.log('[LinkedInClient] Fallback: using plainId for URN:', this._userEntityURN)
+      return this._userEntityURN
     }
 
     console.error('[LinkedInClient] Full /me response:', JSON.stringify(response, null, 2).substring(0, 1000))
@@ -248,7 +251,7 @@ export class LinkedInClient {
    */
   async getMailboxUrn(): Promise<string> {
     const userUrn = await this.fetchSelf()
-    return encodeURIComponent(userUrn)
+    return linkedInEncode(userUrn)
   }
 
   // ============================================================================
