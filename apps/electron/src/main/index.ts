@@ -19,6 +19,8 @@ import { syncContactsToConvex } from "./sync/contacts-sync";
 import { getIMessageSender } from "./sync/imessage-sender";
 import { getHeartbeatManager } from "./sync/presence";
 import { setupSocialIpcHandlers, cleanupSocialScrapers } from "./ipc/social";
+import { getLinkedInSyncManager } from "./sync/linkedin-sync";
+import { LinkedInScraper } from "./sync/linkedin";
 
 const CONVEX_URL = electronEnv.CONVEX_URL;
 const WORKOS_CLIENT_ID = electronEnv.WORKOS_CLIENT_ID;
@@ -190,10 +192,58 @@ async function startBackgroundSync(): Promise<void> {
     const heartbeatManager = getHeartbeatManager(getValidAccessToken);
     heartbeatManager.start();
     console.log("[Main] Presence heartbeat started");
+
+    // Auto-start LinkedIn messaging sync if already logged in
+    startLinkedInMessagingSync();
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : String(err);
     console.error("[Main] Failed to start background sync:", message);
     // Don't crash the app if sync fails to start
+  }
+}
+
+/**
+ * Auto-start LinkedIn messaging sync if user is already logged in.
+ */
+async function startLinkedInMessagingSync(): Promise<void> {
+  try {
+    const scraper = new LinkedInScraper();
+    const isLoggedIn = await scraper.checkLoginStatus();
+
+    if (!isLoggedIn) {
+      console.log("[Main] LinkedIn not logged in, skipping auto-start");
+      return;
+    }
+
+    console.log("[Main] LinkedIn logged in, starting messaging sync...");
+
+    // Get API client from scraper
+    const apiClient = await scraper.getApiClient();
+
+    // Configure sync manager
+    const syncManager = getLinkedInSyncManager();
+    syncManager.setClient(apiClient);
+    syncManager.setTokenProvider(getValidAccessToken);
+
+    // Set up progress callback to notify renderer
+    syncManager.setProgressCallback((progress) => {
+      mainWindow?.webContents.send("social:linkedin:messagingSyncProgress", progress);
+    });
+
+    // Set up auth invalid callback
+    syncManager.setAuthInvalidCallback(() => {
+      console.log("[Main] LinkedIn auth invalid, stopping sync");
+      mainWindow?.webContents.send("social:linkedin:authInvalid", {});
+    });
+
+    // Start sync (will use realtime by default)
+    await syncManager.start();
+
+    console.log("[Main] LinkedIn messaging sync auto-started");
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : String(err);
+    console.log("[Main] LinkedIn auto-start failed (non-fatal):", message);
+    // Non-fatal - user can manually start later
   }
 }
 

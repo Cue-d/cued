@@ -18,6 +18,7 @@ import {
   getConversationsBefore as fetchConversationsBefore,
 } from './conversations'
 import { linkedInEncode } from './request'
+import { RealtimeConnection } from './realtime'
 
 export interface ConversationsResult {
   conversations: Conversation[]
@@ -61,6 +62,9 @@ export class LinkedInClient {
 
   /** Event handlers for real-time updates */
   private _eventHandlers: EventHandlers
+
+  /** Realtime SSE connection */
+  private _realtimeConnection: RealtimeConnection | null = null
 
   constructor(options: LinkedInClientOptions = {}) {
     this._cookies = options.cookies ?? []
@@ -236,6 +240,56 @@ export class LinkedInClient {
    */
   setEventHandlers(handlers: EventHandlers): void {
     this._eventHandlers = handlers
+    // Update realtime connection handlers if active
+    if (this._realtimeConnection) {
+      this._realtimeConnection.setHandlers(handlers)
+    }
+  }
+
+  // ============================================================================
+  // Realtime Connection
+  // ============================================================================
+
+  /**
+   * Start realtime SSE connection for live updates.
+   * Must have valid authentication and userEntityURN set.
+   */
+  async startRealtime(): Promise<void> {
+    if (!this.isAuthenticated()) {
+      throw new Error('Cannot start realtime: not authenticated')
+    }
+
+    // Ensure we have the user URN
+    const userUrn = await this.fetchSelf()
+
+    // Stop existing connection if any
+    this.stopRealtime()
+
+    // Create and start new connection
+    this._realtimeConnection = new RealtimeConnection(
+      this._cookies,
+      userUrn,
+      this._eventHandlers
+    )
+
+    await this._realtimeConnection.start()
+  }
+
+  /**
+   * Stop realtime SSE connection.
+   */
+  stopRealtime(): void {
+    if (this._realtimeConnection) {
+      this._realtimeConnection.stop()
+      this._realtimeConnection = null
+    }
+  }
+
+  /**
+   * Check if realtime connection is active.
+   */
+  get isRealtimeConnected(): boolean {
+    return this._realtimeConnection?.connected ?? false
   }
 
   // ============================================================================

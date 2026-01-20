@@ -1,26 +1,25 @@
 /**
  * LinkedIn Sync Manager
  * Manages background sync of LinkedIn conversations and messages to Convex.
- * Follows the SyncManager pattern from sync-manager.ts.
- *
- * TODO: Replace polling with realtime websocket strategy.
- * Reference: https://github.com/mautrix/linkedin/tree/main/pkg/linkedingo
- * The Beeper implementation uses websockets for realtime message delivery.
+ * Uses realtime SSE for live updates with periodic sync as fallback.
  */
 
 import { ConvexHttpClient } from 'convex/browser'
 import { api } from '@prm/convex'
 import { electronEnv } from '@prm/env/electron'
 import type { LinkedInClient } from '../linkedin-api/client'
-import type { Conversation, Message } from '../linkedin-api/types'
+import type { Conversation, Message, EventHandlers } from '../linkedin-api/types'
 import { getMessages, getMessagesBefore, sendMessage } from '../linkedin-api/messages'
 
 // ============================================================================
 // Constants
 // ============================================================================
 
-/** Default sync interval: 5 minutes */
-const SYNC_INTERVAL_MS = 5 * 60 * 1000
+/** Fallback sync interval when realtime disconnects: 5 minutes */
+const FALLBACK_SYNC_INTERVAL_MS = 5 * 60 * 1000
+
+/** Periodic full sync interval (even with realtime): 30 minutes */
+const FULL_SYNC_INTERVAL_MS = 30 * 60 * 1000
 
 /** Convex URL from environment */
 const CONVEX_URL = electronEnv.CONVEX_URL
@@ -36,10 +35,11 @@ const MAX_MESSAGES_PER_CONVERSATION = 100
 // ============================================================================
 
 export interface LinkedInSyncProgress {
-  status: 'idle' | 'syncing' | 'error'
+  status: 'idle' | 'syncing' | 'realtime' | 'error'
   lastSyncAt?: number
   totalConversationsSynced: number
   totalMessagesSynced: number
+  realtimeConnected: boolean
   currentConversation?: {
     conversationId: string
     messagesInConversation: number
@@ -51,6 +51,8 @@ export interface LinkedInSyncManagerOptions {
   onProgress?: (progress: LinkedInSyncProgress) => void
   getAuthToken?: () => Promise<string | null>
   onAuthInvalid?: () => void
+  /** Use realtime SSE instead of polling (default: true) */
+  useRealtime?: boolean
 }
 
 // ============================================================================
@@ -59,7 +61,7 @@ export interface LinkedInSyncManagerOptions {
 
 /**
  * Manages background sync of LinkedIn conversations and messages.
- * Uses polling to fetch new conversations and messages.
+ * Uses realtime SSE for live updates, with polling as fallback.
  */
 export class LinkedInSyncManager {
   /** LinkedIn API client for making requests */
@@ -74,8 +76,11 @@ export class LinkedInSyncManager {
   /** Sync token for incremental conversation fetches */
   private conversationSyncToken: string | null = null
 
-  /** Interval timer ID */
-  private intervalId: NodeJS.Timeout | null = null
+  /** Fallback polling interval timer ID */
+  private fallbackIntervalId: NodeJS.Timeout | null = null
+
+  /** Full sync interval timer ID */
+  private fullSyncIntervalId: NodeJS.Timeout | null = null
 
   /** Flag to prevent concurrent syncs */
   private isRunning = false
@@ -85,14 +90,19 @@ export class LinkedInSyncManager {
     status: 'idle',
     totalConversationsSynced: 0,
     totalMessagesSynced: 0,
+    realtimeConnected: false,
   }
 
   /** Options passed at construction */
   private options: LinkedInSyncManagerOptions
 
+  /** Whether realtime mode is enabled */
+  private useRealtime: boolean
+
   constructor(options: LinkedInSyncManagerOptions = {}) {
     this.options = options
     this.convexClient = new ConvexHttpClient(CONVEX_URL)
+    this.useRealtime = options.useRealtime !== false // default true
   }
 
   // ============================================================================
@@ -114,25 +124,177 @@ export class LinkedInSyncManager {
   // ============================================================================
 
   /**
-   * Start background sync on interval.
-   * Runs immediately, then every SYNC_INTERVAL_MS (5 minutes).
+   * Start sync - uses realtime if enabled, otherwise falls back to polling.
+   * Always runs an initial full sync, then switches to realtime.
    */
-  start(): void {
-    if (this.intervalId) {
+  async start(): Promise<void> {
+    if (!this._client) {
+      console.log('[LinkedInSync] ERROR: No LinkedIn client configured')
+      this.updateProgress({ status: 'error', error: 'LinkedIn client not configured' })
       return
     }
 
-    this.runSync()
-    this.intervalId = setInterval(() => this.runSync(), SYNC_INTERVAL_MS)
+    // Set up auth
+    if (this.options.getAuthToken) {
+      const token = await this.options.getAuthToken()
+      if (token) {
+        this.convexClient.setAuth(token)
+      } else {
+        this.options.onAuthInvalid?.()
+        this.updateProgress({ status: 'error', error: 'Not authenticated' })
+        return
+      }
+    }
+
+    // Run initial full sync
+    console.log('[LinkedInSync] Running initial sync...')
+    await this.runSync()
+
+    if (this.useRealtime) {
+      // Start realtime connection
+      await this.startRealtime()
+    } else {
+      // Fall back to polling
+      this.startPolling()
+    }
+
+    // Schedule periodic full syncs (even with realtime, for consistency)
+    this.fullSyncIntervalId = setInterval(() => {
+      console.log('[LinkedInSync] Running periodic full sync...')
+      this.runSync()
+    }, FULL_SYNC_INTERVAL_MS)
   }
 
   /**
-   * Stop background sync.
+   * Stop all sync operations.
    */
   stop(): void {
-    if (this.intervalId) {
-      clearInterval(this.intervalId)
-      this.intervalId = null
+    console.log('[LinkedInSync] Stopping sync...')
+
+    // Stop realtime
+    if (this._client) {
+      this._client.stopRealtime()
+    }
+    this.updateProgress({ realtimeConnected: false })
+
+    // Stop polling intervals
+    if (this.fallbackIntervalId) {
+      clearInterval(this.fallbackIntervalId)
+      this.fallbackIntervalId = null
+    }
+
+    if (this.fullSyncIntervalId) {
+      clearInterval(this.fullSyncIntervalId)
+      this.fullSyncIntervalId = null
+    }
+
+    this.updateProgress({ status: 'idle' })
+  }
+
+  // ============================================================================
+  // Realtime Methods
+  // ============================================================================
+
+  /**
+   * Start realtime SSE connection.
+   */
+  private async startRealtime(): Promise<void> {
+    if (!this._client) return
+
+    console.log('[LinkedInSync] Starting realtime connection...')
+
+    // Set up event handlers
+    const handlers: EventHandlers = {
+      onConnected: () => {
+        console.log('[LinkedInSync] Realtime connected')
+        this.updateProgress({ status: 'realtime', realtimeConnected: true })
+        // Stop fallback polling since realtime is working
+        this.stopPolling()
+      },
+      onDisconnected: (error) => {
+        console.log(`[LinkedInSync] Realtime disconnected: ${error?.message ?? 'unknown'}`)
+        this.updateProgress({ realtimeConnected: false })
+        // Start fallback polling
+        this.startPolling()
+      },
+      onMessage: (message) => {
+        console.log(`[LinkedInSync] Realtime message: ${message.entityURN}`)
+        this.handleRealtimeMessage(message)
+      },
+      onConversationUpdate: (conversation) => {
+        console.log(`[LinkedInSync] Realtime conversation update: ${conversation.entityURN}`)
+        this.handleRealtimeConversation(conversation)
+      },
+      onTypingIndicator: (conversationURN, participant) => {
+        // Could emit typing events to UI if needed
+        console.log(`[LinkedInSync] Typing: ${participant.entityURN} in ${conversationURN}`)
+      },
+      onHeartbeat: () => {
+        // Connection is alive
+      },
+    }
+
+    this._client.setEventHandlers(handlers)
+
+    try {
+      await this._client.startRealtime()
+    } catch (error) {
+      console.log(`[LinkedInSync] Failed to start realtime: ${error instanceof Error ? error.message : String(error)}`)
+      // Fall back to polling
+      this.startPolling()
+    }
+  }
+
+  /**
+   * Handle a message received via realtime.
+   */
+  private async handleRealtimeMessage(message: Message): Promise<void> {
+    try {
+      await this.syncMessagesToConvex(message.conversationURN, [message])
+      this.updateProgress({
+        totalMessagesSynced: this.progress.totalMessagesSynced + 1,
+      })
+    } catch (error) {
+      console.log(`[LinkedInSync] Error syncing realtime message: ${error instanceof Error ? error.message : String(error)}`)
+    }
+  }
+
+  /**
+   * Handle a conversation update received via realtime.
+   */
+  private async handleRealtimeConversation(conversation: Conversation): Promise<void> {
+    try {
+      await this.syncConversationToConvex(conversation)
+      this.updateProgress({
+        totalConversationsSynced: this.progress.totalConversationsSynced + 1,
+      })
+    } catch (error) {
+      console.log(`[LinkedInSync] Error syncing realtime conversation: ${error instanceof Error ? error.message : String(error)}`)
+    }
+  }
+
+  // ============================================================================
+  // Polling Methods (Fallback)
+  // ============================================================================
+
+  /**
+   * Start fallback polling.
+   */
+  private startPolling(): void {
+    if (this.fallbackIntervalId) return
+
+    console.log('[LinkedInSync] Starting fallback polling...')
+    this.fallbackIntervalId = setInterval(() => this.runSync(), FALLBACK_SYNC_INTERVAL_MS)
+  }
+
+  /**
+   * Stop fallback polling.
+   */
+  private stopPolling(): void {
+    if (this.fallbackIntervalId) {
+      console.log('[LinkedInSync] Stopping fallback polling (realtime active)')
+      clearInterval(this.fallbackIntervalId)
+      this.fallbackIntervalId = null
     }
   }
 
@@ -153,9 +315,11 @@ export class LinkedInSyncManager {
     }
 
     this.isRunning = true
+    const previousStatus = this.progress.status
     this.updateProgress({ status: 'syncing' })
 
     try {
+      // Re-auth if needed
       if (this.options.getAuthToken) {
         const token = await this.options.getAuthToken()
         if (token) {
@@ -170,7 +334,7 @@ export class LinkedInSyncManager {
       await this.syncConversations()
 
       this.updateProgress({
-        status: 'idle',
+        status: this.progress.realtimeConnected ? 'realtime' : 'idle',
         lastSyncAt: Date.now(),
         currentConversation: undefined,
       })
@@ -433,6 +597,7 @@ export class LinkedInSyncManager {
       status: 'idle',
       totalConversationsSynced: 0,
       totalMessagesSynced: 0,
+      realtimeConnected: false,
     }
   }
 

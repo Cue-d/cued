@@ -27,3 +27,6 @@ export * from './messages'
 
 // Contacts (connections and search)
 export * from './contacts'
+
+// Realtime SSE connection
+export * from './realtime'

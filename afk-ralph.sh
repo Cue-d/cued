@@ -148,53 +148,67 @@ Fight entropy. Leave the codebase better than you found it.
 ## PRD FORMAT
 The prds/refactor-prd.json file contains structured tasks with:
 - id: Task identifier (e.g., '3.2')
-- phase: 1-6
+- phase: 1-7
 - mode: 'hitl' or 'afk'
-- category: architectural, integration, functional, ui, testing
+- category: architectural, integration, functional, ui, testing, refactor, documentation
 - description: What to implement
 - steps: Verification steps (all must pass)
 - passes: false (you set to true when complete)
+- depends_on: (optional) Array of task IDs that must complete first
+- parallel_group: (optional) Group ID for tasks that can run in parallel (e.g., 'P1', 'P2')
 - reference: (optional) URL to documentation for this task
+
+The PRD also has a 'parallel_groups' object defining which tasks can run concurrently.
 
 ## YOUR TASK
 1. Read prds/refactor-prd.json and prds/refactor-progress.txt to understand current state.
 
-2. Find tasks where passes=false. Choose using this priority:
+2. Find tasks where passes=false. Check dependencies:
+   - A task can only start if all tasks in its 'depends_on' array have passes=true
+   - Tasks in the same 'parallel_group' can be spawned as parallel sub-agents using the Task tool
+
+3. For PARALLEL EXECUTION: If you find multiple tasks in the same parallel_group that are ready:
+   - Use the Task tool to spawn multiple sub-agents, one per task
+   - Run them IN PARALLEL (single message with multiple Task tool calls)
+   - Each sub-agent should complete its task, commit, and update the PRD
+
+4. For SEQUENTIAL EXECUTION: Choose tasks using this priority:
    - Architectural decisions and core abstractions (HIGH)
    - Integration points between modules (HIGH)
    - Unknown unknowns and spike work (HIGH)
    - Standard features and implementation (MEDIUM)
    - Polish, cleanup, and quick wins (LOW)
 
-3. If the task has a 'reference' URL, fetch it to understand the implementation.
+5. If the task has a 'reference' URL, fetch it to understand the implementation.
 
-4. Keep changes SMALL and FOCUSED:
+6. Keep changes SMALL and FOCUSED:
    - One logical change per commit
    - If the task feels too large, break it into subtasks
    - Run feedback loops after each change, not at the end
 
-5. Implement the task, then verify ALL steps in the task's 'steps' array.
+7. Implement the task, then verify ALL steps in the task's 'steps' array.
 
-6. Run ALL feedback loops:
+8. Run ALL feedback loops:
    - TypeScript: pnpm lint && pnpm typecheck (MUST pass)
    - Tests: pnpm test (MUST pass if tests exist)
    Do NOT commit if any feedback loop fails.
 
-7. Commit with a descriptive message.
+9. Commit with a descriptive message.
 
-8. Update prds/refactor-prd.json: set passes=true for the completed task.
+10. Update prds/refactor-prd.json: set passes=true for the completed task.
 
-9. Update prds/refactor-progress.txt with:
+11. Update prds/refactor-progress.txt with:
     - Date/time and task ID + description
     - Files changed
     - Decisions made and WHY
     - Browser verification results (for UI tasks)
     - Blockers or notes for next iteration
 
-10. Check if ALL tasks in prds/refactor-prd.json have passes=true.
+12. Check if ALL tasks in prds/refactor-prd.json have passes=true.
     If so, output exactly: <promise>COMPLETE</promise>
 
-ONLY WORK ON A SINGLE TASK." | tee "$OUTPUT_FILE"
+For single tasks: complete ONE task per iteration.
+For parallel groups: spawn sub-agents and complete ALL tasks in the group." | tee "$OUTPUT_FILE"
 
   echo ""
 

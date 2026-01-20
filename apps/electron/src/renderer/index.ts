@@ -53,9 +53,10 @@ interface LinkedInMessagingStatus {
 }
 
 interface LinkedInSyncProgress {
-  status: 'idle' | 'syncing' | 'error'
-  conversationsSynced: number
-  messagesSynced: number
+  status: 'idle' | 'syncing' | 'realtime' | 'error'
+  totalConversationsSynced: number
+  totalMessagesSynced: number
+  realtimeConnected: boolean
   lastSyncAt?: number
   error?: string
 }
@@ -385,9 +386,12 @@ function updateLinkedinStatus(isLoggedIn: boolean): void {
 
 function updateLinkedinMessagingStatus(progress: LinkedInSyncProgress): void {
   if (linkedinMessagingStatusEl) {
-    if (progress.status === 'syncing') {
-      linkedinMessagingStatusEl.textContent = '↻ Syncing...'
+    if (progress.status === 'realtime') {
+      linkedinMessagingStatusEl.textContent = '⚡ Realtime connected'
       linkedinMessagingStatusEl.style.color = '#22c55e'
+    } else if (progress.status === 'syncing') {
+      linkedinMessagingStatusEl.textContent = '↻ Syncing...'
+      linkedinMessagingStatusEl.style.color = '#3b82f6'
     } else if (progress.status === 'error') {
       linkedinMessagingStatusEl.textContent = `✗ Error: ${progress.error}`
       linkedinMessagingStatusEl.style.color = '#ef4444'
@@ -401,30 +405,32 @@ function updateLinkedinMessagingStatus(progress: LinkedInSyncProgress): void {
 
   // Update progress display
   if (linkedinMessagingProgressEl) {
-    if (progress.status === 'syncing') {
+    const isActive = progress.status === 'syncing' || progress.status === 'realtime'
+    if (isActive) {
       linkedinMessagingProgressEl.style.display = 'block'
+      const realtimeIndicator = progress.realtimeConnected ? ' ⚡' : ''
       linkedinMessagingProgressEl.textContent =
-        `${progress.conversationsSynced} conversations, ${progress.messagesSynced} messages`
+        `${progress.totalConversationsSynced} conversations, ${progress.totalMessagesSynced} messages${realtimeIndicator}`
       linkedinMessagingProgressEl.style.color = ''
     } else if (progress.status === 'error') {
       linkedinMessagingProgressEl.style.display = 'block'
       linkedinMessagingProgressEl.textContent = progress.error ?? 'Unknown error'
       linkedinMessagingProgressEl.style.color = '#ef4444'
-    } else if (progress.messagesSynced > 0) {
+    } else if (progress.totalMessagesSynced > 0) {
       linkedinMessagingProgressEl.style.display = 'block'
       linkedinMessagingProgressEl.textContent =
-        `✓ ${progress.conversationsSynced} conversations, ${progress.messagesSynced} messages`
+        `✓ ${progress.totalConversationsSynced} conversations, ${progress.totalMessagesSynced} messages`
       linkedinMessagingProgressEl.style.color = '#22c55e'
     }
   }
 
-  // Update button states
-  const isSyncing = progress.status === 'syncing'
+  // Update button states - sync is active if syncing OR realtime
+  const isActive = progress.status === 'syncing' || progress.status === 'realtime'
   if (linkedinStartSyncBtn) {
-    (linkedinStartSyncBtn as HTMLButtonElement).disabled = isSyncing
+    (linkedinStartSyncBtn as HTMLButtonElement).disabled = isActive
   }
   if (linkedinStopSyncBtn) {
-    (linkedinStopSyncBtn as HTMLButtonElement).disabled = !isSyncing
+    (linkedinStopSyncBtn as HTMLButtonElement).disabled = !isActive
   }
 }
 
