@@ -95,12 +95,78 @@ export function executeClaudeForJSON<T>(
 
   try {
     // Try to extract JSON from the response
-    let jsonStr = response.output;
+    let jsonStr = response.output.trim();
 
-    // Handle markdown code blocks
-    const jsonMatch = jsonStr.match(/```(?:json)?\s*([\s\S]*?)```/);
-    if (jsonMatch) {
-      jsonStr = jsonMatch[1];
+    // If output already starts with JSON, try to parse it directly first
+    if (jsonStr.startsWith('{') || jsonStr.startsWith('[')) {
+      // Find matching closing brace/bracket for the first character
+      const openChar = jsonStr[0];
+      const closeChar = openChar === '{' ? '}' : ']';
+      let depth = 0;
+      let inString = false;
+      let escapeNext = false;
+      let endIdx = -1;
+
+      for (let i = 0; i < jsonStr.length; i++) {
+        const c = jsonStr[i];
+
+        if (escapeNext) {
+          escapeNext = false;
+          continue;
+        }
+
+        if (c === '\\' && inString) {
+          escapeNext = true;
+          continue;
+        }
+
+        if (c === '"' && !escapeNext) {
+          inString = !inString;
+          continue;
+        }
+
+        if (!inString) {
+          if (c === openChar) depth++;
+          else if (c === closeChar) {
+            depth--;
+            if (depth === 0) {
+              endIdx = i;
+              break;
+            }
+          }
+        }
+      }
+
+      if (endIdx > 0) {
+        jsonStr = jsonStr.substring(0, endIdx + 1);
+      }
+    } else {
+      // Output doesn't start with JSON - try to extract from code blocks or find JSON
+      const jsonMatch = jsonStr.match(/```json\s*([\s\S]*?)```/);
+      if (jsonMatch) {
+        jsonStr = jsonMatch[1].trim();
+      } else {
+        // Find first { or [ and extract to matching close
+        const firstBrace = jsonStr.indexOf('{');
+        const firstBracket = jsonStr.indexOf('[');
+
+        let startIdx = -1;
+        if (firstBrace !== -1 && (firstBracket === -1 || firstBrace < firstBracket)) {
+          startIdx = firstBrace;
+        } else if (firstBracket !== -1) {
+          startIdx = firstBracket;
+        }
+
+        if (startIdx !== -1) {
+          const endBrace = jsonStr.lastIndexOf('}');
+          const endBracket = jsonStr.lastIndexOf(']');
+          const endIdx = Math.max(endBrace, endBracket);
+
+          if (endIdx > startIdx) {
+            jsonStr = jsonStr.substring(startIdx, endIdx + 1);
+          }
+        }
+      }
     }
 
     const data = JSON.parse(jsonStr) as T;
