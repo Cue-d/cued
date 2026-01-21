@@ -26,6 +26,7 @@ import {
   findIntegration,
   getOrCreateIntegration,
   CURRENT_SYNC_VERSION,
+  normalizeLinkedInUrl,
 } from "./sync/shared";
 import {
   syncBatchInput,
@@ -432,6 +433,7 @@ async function syncSocialContactsInternal(
     updatedContacts: 0,
     actionsCreated: 0,
     errors: [] as string[],
+    duplicatesSkipped: 0,
   };
 
   const handleType = platform === "linkedin" ? "linkedin_url" : "twitter_handle";
@@ -441,7 +443,20 @@ async function syncSocialContactsInternal(
     profileUrl: string;
   }> = [];
 
+  // Deduplicate contacts within batch by normalized handle
+  const seenHandles = new Set<string>();
+  const deduplicatedContacts: SocialContactInput[] = [];
   for (const contact of contacts) {
+    const normalizedHandle = normalizeLinkedInUrl(contact.profileUrl);
+    if (seenHandles.has(normalizedHandle)) {
+      result.duplicatesSkipped++;
+      continue;
+    }
+    seenHandles.add(normalizedHandle);
+    deduplicatedContacts.push(contact);
+  }
+
+  for (const contact of deduplicatedContacts) {
     try {
       const upsertResult = await upsertSocialContact(ctx, userId, platform, handleType, contact);
       if (upsertResult.isNew) {
@@ -526,13 +541,14 @@ async function upsertSocialContact(
 ): Promise<{ isNew: boolean; contactId: Id<"contacts"> }> {
   const normalizedHandle =
     platform === "linkedin"
-      ? contact.profileUrl.split("?")[0].toLowerCase()
+      ? normalizeLinkedInUrl(contact.profileUrl)
       : contact.handle.toLowerCase().replace(/^@/, "");
 
+  // NOTE: Using .first() instead of .unique() to handle duplicates gracefully
   const existingHandle = await ctx.db
     .query("contactHandles")
     .withIndex("by_user_handle", (q) => q.eq("userId", userId).eq("handle", normalizedHandle))
-    .unique();
+    .first();
 
   if (existingHandle) {
     const existingContact = await ctx.db.get(existingHandle.contactId);

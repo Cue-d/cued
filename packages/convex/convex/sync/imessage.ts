@@ -428,12 +428,13 @@ export async function findContactByHandle(
       : [handle.value];
 
   for (const variant of variants) {
+    // NOTE: Using .first() instead of .unique() to handle duplicates gracefully
     const existing = await ctx.db
       .query("contactHandles")
       .withIndex("by_user_handle", (q) =>
         q.eq("userId", userId).eq("handle", variant)
       )
-      .unique();
+      .first();
 
     if (existing) {
       return existing.contactId;
@@ -483,6 +484,7 @@ async function upsertContactWithHandles(
   }
 
   // Add missing handles or update mislinked ones
+  // NOTE: Using .first() instead of .unique() to handle duplicates gracefully
   let handlesAdded = 0;
   for (const handle of handles) {
     const existing = await ctx.db
@@ -490,7 +492,7 @@ async function upsertContactWithHandles(
       .withIndex("by_user_handle", (q) =>
         q.eq("userId", userId).eq("handle", handle.value)
       )
-      .unique();
+      .first();
 
     if (!existing) {
       await ctx.db.insert("contactHandles", {

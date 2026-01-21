@@ -74,12 +74,17 @@ export interface SocialSyncResult {
 /**
  * Sync scraped social contacts to the backend.
  * Maps connections to SocialContact format and POSTs to /api/sync/social.
+ * Retries with fresh token on auth errors.
  */
 async function syncLinkedInContactsToBackend(
-  connections: LinkedInConnection[]
+  connections: LinkedInConnection[],
+  retryCount = 0
 ): Promise<SocialSyncResult> {
+  const MAX_RETRIES = 2;
+
   try {
-    const token = await getValidAccessToken();
+    // Force refresh token if this is a retry
+    const token = await getValidAccessToken(retryCount > 0);
     if (!token) {
       return { success: false, error: "No auth token available" };
     }
@@ -89,7 +94,7 @@ async function syncLinkedInContactsToBackend(
     // Map LinkedInConnection to SocialContact format expected by API
     const contacts = connections.map((conn) => ({
       name: conn.name,
-      handle: conn.profileUrl, // Use profile URL as handle for LinkedIn
+      handle: conn.profileUrl,
       profileUrl: conn.profileUrl,
       headline: conn.headline,
       platform: "linkedin" as const,
@@ -108,11 +113,17 @@ async function syncLinkedInContactsToBackend(
       }),
     });
 
+    // Check for auth errors and retry with fresh token
+    if (response.status === 401 && retryCount < MAX_RETRIES) {
+      return syncLinkedInContactsToBackend(connections, retryCount + 1);
+    }
+
     if (!response.ok) {
       const text = await response.text();
-      console.error(
-        `[Social IPC] Social sync API returned ${response.status}: ${text.slice(0, 200)}`
-      );
+      // Retry on auth-related HTML responses (redirects to login page)
+      if (text.includes("<!DOCTYPE") && retryCount < MAX_RETRIES) {
+        return syncLinkedInContactsToBackend(connections, retryCount + 1);
+      }
       return {
         success: false,
         error: `API error: ${response.status} - ${text.slice(0, 100)}`,
@@ -122,16 +133,19 @@ async function syncLinkedInContactsToBackend(
     // Check content-type before parsing JSON
     const contentType = response.headers.get("content-type") || "";
     if (!contentType.includes("application/json")) {
-      console.warn(
-        `[Social IPC] Social sync API returned non-JSON content-type: ${contentType}`
-      );
+      const htmlBody = await response.text();
+      if (htmlBody.includes("404") || htmlBody.includes("Not Found")) {
+        return { success: false, error: "API route not found (404)" };
+      }
+      // Retry with fresh token - HTML response usually means auth redirect
+      if (retryCount < MAX_RETRIES) {
+        return syncLinkedInContactsToBackend(connections, retryCount + 1);
+      }
       return { success: false, error: "Invalid response format" };
     }
 
     const result = await response.json();
-    console.log(
-      `[Social IPC] LinkedIn contacts synced: ${result.totalContacts} total, ${result.newContacts} new, ${result.updatedContacts} updated`
-    );
+    console.log(`[Social IPC] Synced ${result.newContacts} new, ${result.updatedContacts} updated contacts`);
 
     return {
       success: true,
@@ -208,8 +222,9 @@ export function setupSocialIpcHandlers(mainWindow: BrowserWindow | null): void {
         });
 
         // Use API-based scraping instead of Playwright DOM scraping
+        // Pass maxConnections only if explicitly provided (undefined = fetch all)
         const apiConnections = await scraper.scrapeConnectionsViaApi({
-          maxConnections: options?.maxConnections ?? 500,
+          maxConnections: options?.maxConnections,
         });
 
         // Convert API Connection[] to LinkedInConnection[] format for UI compatibility
@@ -228,9 +243,7 @@ export function setupSocialIpcHandlers(mainWindow: BrowserWindow | null): void {
 
         const syncResult = await syncLinkedInContactsToBackend(connections);
         if (!syncResult.success) {
-          console.warn(
-            `[Social IPC] LinkedIn backend sync failed: ${syncResult.error}`
-          );
+          console.warn(`[Social IPC] LinkedIn backend sync failed: ${syncResult.error}`);
           // Continue even if sync fails - scrape was successful
         }
 

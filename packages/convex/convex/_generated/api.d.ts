@@ -16,6 +16,8 @@ import type * as actions from "../actions.js";
 import type * as contactResolution from "../contactResolution.js";
 import type * as contacts from "../contacts.js";
 import type * as crons from "../crons.js";
+import type * as debug_cleanupDuplicateHandles from "../debug/cleanupDuplicateHandles.js";
+import type * as debug_findDuplicateHandles from "../debug/findDuplicateHandles.js";
 import type * as files from "../files.js";
 import type * as integrations from "../integrations.js";
 import type * as lib_auth from "../lib/auth.js";
@@ -48,6 +50,8 @@ declare const fullApi: ApiFromModules<{
   contactResolution: typeof contactResolution;
   contacts: typeof contacts;
   crons: typeof crons;
+  "debug/cleanupDuplicateHandles": typeof debug_cleanupDuplicateHandles;
+  "debug/findDuplicateHandles": typeof debug_findDuplicateHandles;
   files: typeof files;
   integrations: typeof integrations;
   "lib/auth": typeof lib_auth;

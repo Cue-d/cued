@@ -18,6 +18,9 @@ export default authkitMiddleware({
       "/api/nango/pull-slack",
       "/api/gmail/send",
       "/api/slack/send",
+      // Electron app sync routes (use Bearer token auth)
+      "/api/sync/social",
+      "/api/sync/imessage",
     ],
   },
 });

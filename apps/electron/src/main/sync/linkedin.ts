@@ -15,22 +15,11 @@ export interface LinkedInConnection {
 const LINKEDIN_URLS = {
   home: 'https://www.linkedin.com',
   login: 'https://www.linkedin.com/login',
-  connections: 'https://www.linkedin.com/mynetwork/invite-connect/connections/',
 }
 
-// Selectors for LinkedIn pages
 const SELECTORS = {
-  // Login detection - presence of feed indicates logged in
   feedContainer: '[data-test-id="feed-container"], .feed-shared-update-v2',
-  // Login page elements
   loginForm: 'form.login__form, #organic-div form',
-  // Connections page
-  connectionsList: '.mn-connections',
-  connectionCard: '.mn-connection-card',
-  connectionName: '.mn-connection-card__name',
-  connectionOccupation: '.mn-connection-card__occupation',
-  connectionLink: '.mn-connection-card__link',
-  connectionTime: 'time.time-badge',
 }
 
 /**
@@ -115,6 +104,8 @@ export class LinkedInScraper extends SocialScraper {
       // Wait a bit for page to load
       await this.page?.waitForTimeout(2000)
 
+      const currentUrl = this.page?.url() ?? ''
+
       // Check for feed container (indicates logged in)
       const feedElement = await this.page?.$(SELECTORS.feedContainer)
       if (feedElement) {
@@ -128,10 +119,9 @@ export class LinkedInScraper extends SocialScraper {
       }
 
       // Check URL - if redirected to login, not logged in
-      const currentUrl = this.page?.url() ?? ''
       return !currentUrl.includes('/login') && !currentUrl.includes('/authwall')
     } catch (error) {
-      console.error('Error checking LinkedIn login status:', error)
+      console.error('[LinkedIn Scraper] checkLoginStatus error:', error)
       return false
     } finally {
       await this.closeBrowser()
@@ -191,91 +181,22 @@ export class LinkedInScraper extends SocialScraper {
   }
 
   /**
-   * Scrape LinkedIn connections.
-   * @param headless - Run in headless mode (default: true)
-   * @param maxConnections - Maximum connections to scrape (default: 500)
-   */
-  async scrapeConnections(options: { headless?: boolean; maxConnections?: number } = {}): Promise<
-    LinkedInConnection[]
-  > {
-    const { headless = true, maxConnections = 500 } = options
-    const connections: LinkedInConnection[] = []
-    const seenUrls = new Set<string>()
-
-    try {
-      await this.launchBrowser({ headless })
-
-      // Navigate to connections page
-      await this.navigateTo(LINKEDIN_URLS.connections)
-
-      // Wait for connections list to load
-      await this.page?.waitForTimeout(2000)
-
-      // Check if we're logged in
-      const connectionsList = await this.page?.$(SELECTORS.connectionsList)
-      if (!connectionsList) {
-        console.error('Not logged in or connections page not accessible')
-        return connections
-      }
-
-      // Scroll and load connections
-      let previousCount = 0
-      let noNewConnectionsCount = 0
-      const maxNoNewConnections = 3
-
-      while (connections.length < maxConnections && noNewConnectionsCount < maxNoNewConnections) {
-        // Parse current visible connection cards
-        const newConnections = await this.parseConnectionCards()
-
-        // Add new unique connections (O(1) lookup with Set)
-        for (const conn of newConnections) {
-          if (!seenUrls.has(conn.profileUrl) && connections.length < maxConnections) {
-            seenUrls.add(conn.profileUrl)
-            connections.push(conn)
-          }
-        }
-
-        // Check if we found new connections
-        if (connections.length === previousCount) {
-          noNewConnectionsCount++
-        } else {
-          noNewConnectionsCount = 0
-        }
-        previousCount = connections.length
-
-        // Scroll to load more
-        await this.page?.evaluate(() => window.scrollTo(0, document.body.scrollHeight))
-        await this.page?.waitForTimeout(1500)
-
-        console.log(`Scraped ${connections.length} connections...`)
-      }
-
-      console.log(`Finished scraping ${connections.length} LinkedIn connections`)
-      return connections
-    } catch (error) {
-      console.error('Error scraping LinkedIn connections:', error)
-      return connections
-    } finally {
-      await this.closeBrowser()
-    }
-  }
-
-  /**
-   * Scrape LinkedIn connections using the API instead of Playwright scraping.
+   * Scrape LinkedIn connections using the API.
    * This is more reliable and faster than the Playwright-based approach.
    * @param options.maxConnections - Maximum connections to fetch (default: 500)
    * @returns Promise resolving to Connection[] from the API
    */
   async scrapeConnectionsViaApi(options: { maxConnections?: number } = {}): Promise<Connection[]> {
-    const { maxConnections = 500 } = options
+    const { maxConnections } = options
     const allConnections: Connection[] = []
 
     try {
       const client = await this.getApiClient()
+
       let cursor: string | undefined
       let hasMore = true
 
-      while (hasMore && allConnections.length < maxConnections) {
+      while (hasMore && (maxConnections === undefined || allConnections.length < maxConnections)) {
         const result = await getConnections(client, cursor)
 
         if (result.connections.length === 0) {
@@ -283,21 +204,18 @@ export class LinkedInScraper extends SocialScraper {
         }
 
         for (const conn of result.connections) {
-          if (allConnections.length >= maxConnections) {
+          if (maxConnections !== undefined && allConnections.length >= maxConnections) {
             break
           }
           allConnections.push(conn)
         }
 
-        const total = result.metadata?.total ?? 0
-        const fetched = (result.metadata?.start ?? 0) + result.connections.length
-        hasMore = fetched < total
-
-        if (hasMore && result.metadata) {
-          cursor = ((result.metadata.start ?? 0) + result.connections.length).toString()
-        }
+        // Use cursor from result to determine if there are more pages
+        cursor = 'cursor' in result ? result.cursor as string | undefined : undefined
+        hasMore = cursor !== undefined
       }
 
+      console.log(`[LinkedIn Scraper] Fetched ${allConnections.length} connections`)
       return allConnections
     } catch (error) {
       console.error('[LinkedIn Scraper] Error fetching connections via API:', error)
@@ -305,51 +223,6 @@ export class LinkedInScraper extends SocialScraper {
     } finally {
       await this.closeBrowser()
     }
-  }
-
-  /**
-   * Parse connection cards from the current page.
-   */
-  private async parseConnectionCards(): Promise<LinkedInConnection[]> {
-    if (!this.page) return []
-
-    return await this.page.evaluate((selectors) => {
-      const connections: LinkedInConnection[] = []
-      const cards = document.querySelectorAll(selectors.connectionCard)
-
-      cards.forEach((card) => {
-        try {
-          // Get name
-          const nameEl = card.querySelector(selectors.connectionName)
-          const name = nameEl?.textContent?.trim() ?? ''
-
-          // Get profile URL
-          const linkEl = card.querySelector(selectors.connectionLink) as HTMLAnchorElement | null
-          const profileUrl = linkEl?.href ?? ''
-
-          // Get headline/occupation
-          const occupationEl = card.querySelector(selectors.connectionOccupation)
-          const headline = occupationEl?.textContent?.trim() ?? null
-
-          // Get connected date
-          const timeEl = card.querySelector(selectors.connectionTime)
-          const connectedDate = timeEl?.textContent?.trim() ?? null
-
-          if (name && profileUrl) {
-            connections.push({
-              name,
-              profileUrl: profileUrl.split('?')[0], // Remove query params
-              headline,
-              connectedDate,
-            })
-          }
-        } catch {
-          // Skip malformed cards
-        }
-      })
-
-      return connections
-    }, SELECTORS)
   }
 }
 

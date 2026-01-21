@@ -23,6 +23,7 @@ import { getLinkedInSyncManager } from "./sync/linkedin-sync";
 import { LinkedInScraper } from "./sync/linkedin";
 import { getMessageQueueProcessor } from "./queue/message-queue-processor";
 import { getReactiveConvexClient } from "./convex-client";
+import { getSyncCoordinator } from "./sync/sync-coordinator";
 
 const CONVEX_URL = electronEnv.CONVEX_URL;
 const WORKOS_CLIENT_ID = electronEnv.WORKOS_CLIENT_ID;
@@ -177,8 +178,23 @@ async function startBackgroundSync(): Promise<void> {
       return;
     }
 
-    const syncManager = getSyncManager({
+    // Initialize SyncCoordinator FIRST - this manages all sync operations
+    const coordinator = getSyncCoordinator({
       getAuthToken: getValidAccessToken,
+      onAuthInvalid: () => {
+        console.log("[Main] Auth invalid from coordinator, notifying renderer");
+        mainWindow?.webContents.send("auth:stateChanged", {
+          isAuthenticated: false,
+          user: null,
+        });
+      },
+      tokenTtlSeconds: 3600, // WorkOS tokens last 1 hour
+      refreshThreshold: 0.8, // Refresh at 80% (48 mins)
+    });
+    console.log("[Main] SyncCoordinator initialized");
+
+    const syncManager = getSyncManager({
+      getAuthToken: () => coordinator.getValidToken(), // Use coordinator's token
       onProgress: (progress: SyncProgress) => {
         // Notify renderer of sync progress
         mainWindow?.webContents.send("sync:progress", progress);
@@ -191,10 +207,12 @@ async function startBackgroundSync(): Promise<void> {
           user: null,
         });
       },
-      // Wire contacts sync for recovery flows
+      // Wire contacts sync for recovery flows - goes through coordinator
       syncContacts: async () => {
-        const result = await syncContactsToConvex(getValidAccessToken, true);
-        return { contactsCount: result.contactsCount };
+        return coordinator.scheduleContactsSync(async () => {
+          const result = await syncContactsToConvex(() => coordinator.getValidToken(), true);
+          mainWindow?.webContents.send("contacts:synced", result);
+        }).then(() => ({ contactsCount: 0 })); // SyncManager expects return value
       },
     });
 
@@ -281,18 +299,23 @@ async function startLinkedInMessagingSync(): Promise<void> {
 
 /**
  * Start watching for contacts changes and sync when detected.
+ * Uses SyncCoordinator to serialize with iMessage sync.
  */
 function startContactsWatcher(): void {
   const watcher = getContactsWatcher();
+  const coordinator = getSyncCoordinator();
 
   watcher.on("change", async () => {
-    console.log("[Main] Contacts changed, syncing to Convex...");
+    console.log("[Main] Contacts changed, scheduling sync via coordinator...");
     try {
-      const result = await syncContactsToConvex(getValidAccessToken, true);
-      console.log(
-        `[Main] Contacts sync complete: ${result.contactsCount} contacts in ${Math.round(result.elapsed)}ms`
-      );
-      mainWindow?.webContents.send("contacts:synced", result);
+      // Schedule through coordinator to prevent race with iMessage sync
+      await coordinator.scheduleContactsSync(async () => {
+        const result = await syncContactsToConvex(() => coordinator.getValidToken(), true);
+        console.log(
+          `[Main] Contacts sync complete: ${result.contactsCount} contacts in ${Math.round(result.elapsed)}ms`
+        );
+        mainWindow?.webContents.send("contacts:synced", result);
+      });
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       console.error("[Main] Contacts sync error:", message);

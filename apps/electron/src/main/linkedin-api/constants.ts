@@ -30,7 +30,7 @@ export const API_URLS = {
   messagingMessages: 'https://www.linkedin.com/voyager/api/voyagerMessagingDashMessengerMessages',
   pushRegistration: 'https://www.linkedin.com/voyager/api/voyagerNotificationsDashPushRegistration',
   messengerConversations: 'https://www.linkedin.com/voyager/api/voyagerMessagingDashMessengerConversations',
-  connections: 'https://www.linkedin.com/voyager/api/voyagerRelationshipsDashConnections',
+  connections: 'https://www.linkedin.com/voyager/api/relationships/dash/connections',
   search: 'https://www.linkedin.com/voyager/api/voyagerSearchDash',
 } as const
 

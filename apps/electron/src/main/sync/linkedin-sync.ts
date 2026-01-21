@@ -456,9 +456,7 @@ export class LinkedInSyncManager {
    * LinkedIn API sometimes returns { text: "value" } instead of "value".
    */
   private extractText(value: unknown): string {
-    if (typeof value === 'string') {
-      return value
-    }
+    if (typeof value === 'string') return value
     if (value && typeof value === 'object' && 'text' in value) {
       return String((value as { text: unknown }).text)
     }
@@ -479,6 +477,7 @@ export class LinkedInSyncManager {
       text: this.extractText(m.body.text),
       deliveredAt: m.deliveredAt,
       senderURN: m.sender.entityURN,
+      senderProfileUrl: m.sender.participantType.member?.profileUrl || undefined,
       senderFirstName: this.extractText(
         m.sender.participantType.member?.firstName ??
         m.sender.participantType.organization?.name ??

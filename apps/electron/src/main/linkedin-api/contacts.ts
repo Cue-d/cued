@@ -17,14 +17,22 @@ interface ConnectionsApiResponse {
     data?: {
       '*relationshipsDashConnectionsByMember'?: string
     }
+    /** Paging info may be nested in data */
+    paging?: PagingInfo
+    metadata?: {
+      paging?: PagingInfo
+    }
   }
   included?: ConnectionElement[]
-  paging?: {
-    count?: number
-    start?: number
-    total?: number
-    links?: Array<{ rel: string; href: string }>
-  }
+  /** Paging info at top level (older format) */
+  paging?: PagingInfo
+}
+
+interface PagingInfo {
+  count?: number
+  start?: number
+  total?: number
+  links?: Array<{ rel: string; href: string }>
 }
 
 interface ConnectionElement {
@@ -32,7 +40,20 @@ interface ConnectionElement {
   entityUrn?: string
   createdAt?: number
   connectedMember?: string
+  /** Embedded member data (old format) */
   connectedMemberResolutionResult?: ConnectedMemberResult
+  /** Reference to member in included array (normalized format) */
+  '*connectedMemberResolutionResult'?: string
+}
+
+interface ProfileElement {
+  $type?: string
+  entityUrn?: string
+  firstName?: string
+  lastName?: string
+  headline?: string
+  publicIdentifier?: string
+  profilePicture?: ProfilePicture
 }
 
 interface ConnectedMemberResult {
@@ -111,36 +132,43 @@ export async function getConnections(
   const count = PAGINATION_DEFAULTS.connectionsCount
 
   const queryParams = new URLSearchParams({
-    decorationId: 'com.linkedin.voyager.dash.deco.relationships.ConnectionListWithProfile-1',
+    decorationId: 'com.linkedin.voyager.dash.deco.web.mynetwork.ConnectionListWithProfile-15',
     count: count.toString(),
     start: start.toString(),
     q: 'search',
     sortType: 'RECENTLY_ADDED',
   })
 
-  const response = await newGetRequest(
-    `${API_URLS.connections}?${queryParams.toString()}`,
-    client.cookies
-  )
+  const url = `${API_URLS.connections}?${queryParams.toString()}`
+
+  const response = await newGetRequest(url, client.cookies)
     .withHeader('Accept', CONTENT_TYPES.linkedInNormalized)
     .withXLIHeaders()
     .doJSON<ConnectionsApiResponse>()
 
+  // Paging can be at multiple levels depending on API version
+  const paging = response.paging ?? response.data?.paging ?? response.data?.metadata?.paging
+
   const connections = parseConnectionsResponse(response)
 
-  const total = response.paging?.total ?? 0
-  const nextStart = start + count
-  const hasMore = nextStart < total
+  // Determine if there are more pages to fetch
+  const nextStart = start + connections.length
+  const total = paging?.total
+  const actualReturnedCount = response.included?.length ?? 0
+  const hasMore = total !== undefined && total > 0
+    ? nextStart < total
+    : actualReturnedCount >= count && connections.length > 0
 
   return {
     connections,
-    metadata: { start, count: connections.length, total },
+    metadata: { start, count: connections.length, total: total ?? connections.length },
     ...(hasMore ? { cursor: nextStart.toString() } : {}),
   }
 }
 
 /**
  * Parse the connections API response into Connection[] type
+ * Handles LinkedIn's normalized JSON format where profiles are separate from connections
  */
 function parseConnectionsResponse(response: ConnectionsApiResponse): Connection[] {
   if (!response.included) {
@@ -149,12 +177,37 @@ function parseConnectionsResponse(response: ConnectionsApiResponse): Connection[
 
   const connections: Connection[] = []
 
+  // Build a lookup map of Profile elements by entityUrn
+  // LinkedIn's normalized format stores profiles separately and references them by URN
+  const profileMap = new Map<string, ProfileElement>()
+
+  for (const element of response.included) {
+    if (element.$type === 'com.linkedin.voyager.dash.identity.profile.Profile') {
+      const profile = element as unknown as ProfileElement
+      if (profile.entityUrn) {
+        profileMap.set(profile.entityUrn, profile)
+      }
+    }
+  }
+
   for (const element of response.included) {
     if (element.$type !== 'com.linkedin.voyager.dash.relationships.Connection') {
       continue
     }
 
-    const member = element.connectedMemberResolutionResult
+    // Try embedded data first (old format), then lookup by reference (normalized format)
+    let member: ConnectedMemberResult | ProfileElement | undefined = element.connectedMemberResolutionResult
+
+    if (!member) {
+      // LinkedIn's normalized format uses '*connectedMemberResolutionResult' as a reference
+      const memberRef = (element as Record<string, unknown>)['*connectedMemberResolutionResult'] as string
+        ?? element.connectedMember
+
+      if (memberRef) {
+        member = profileMap.get(memberRef)
+      }
+    }
+
     if (!member) {
       continue
     }

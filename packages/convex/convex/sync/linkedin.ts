@@ -11,6 +11,7 @@ import {
   scheduleIncomingMessageEvents,
   SEVEN_DAYS_MS,
   getOrCreateIntegration,
+  normalizeLinkedInUrl,
 } from "./shared";
 
 // ============================================================================
@@ -82,6 +83,7 @@ export const linkedInMessageInput = v.object({
   text: v.string(),
   deliveredAt: v.number(), // Unix ms
   senderURN: v.string(),
+  senderProfileUrl: v.optional(v.string()), // Profile URL if available
   senderFirstName: v.string(),
   senderLastName: v.string(),
   messageBodyRenderFormat: v.union(
@@ -259,9 +261,6 @@ export async function syncLinkedInMessagesInternal(
     existingMessages.map((m) => m.platformMessageId)
   );
 
-  // Get current user's LinkedIn URN for isFromMe detection
-  const user = await ctx.db.get(userId);
-  const userLinkedInHandle = await getUserLinkedInURN(ctx, userId);
 
   // Track conversations with recent incoming messages for action analysis
   const cutoff = Date.now() - SEVEN_DAYS_MS;
@@ -303,10 +302,8 @@ export async function syncLinkedInMessagesInternal(
           continue;
         }
 
-        // Determine if message is from current user
-        const isFromMe = userLinkedInHandle
-          ? msg.senderURN === userLinkedInHandle
-          : false;
+        // TODO: Implement isFromMe detection when user's LinkedIn URN is stored
+        const isFromMe = false;
 
         // Resolve sender to contact (if not from me)
         let senderContactId: Id<"contacts"> | undefined;
@@ -316,7 +313,8 @@ export async function syncLinkedInMessagesInternal(
             userId,
             msg.senderURN,
             msg.senderFirstName,
-            msg.senderLastName
+            msg.senderLastName,
+            msg.senderProfileUrl
           );
 
           // Track for action analysis if recent
@@ -396,15 +394,16 @@ async function getOrCreateLinkedInContact(
   participant: LinkedInParticipantInput
 ): Promise<Id<"contacts">> {
   // Normalize profile URL for consistent lookups
-  const normalizedHandle = normalizeLinkedInProfileUrl(participant.profileUrl);
+  const normalizedHandle = normalizeLinkedInUrl(participant.profileUrl);
 
   // Check if we already have a handle for this LinkedIn user
+  // NOTE: Using .first() instead of .unique() to handle duplicates gracefully
   const existingHandle = await ctx.db
     .query("contactHandles")
     .withIndex("by_user_handle", (q) =>
       q.eq("userId", userId).eq("handle", normalizedHandle)
     )
-    .unique();
+    .first();
 
   if (existingHandle) {
     // Update contact info if we have better data
@@ -438,26 +437,31 @@ async function getOrCreateLinkedInContact(
 }
 
 /**
- * Get or create a contact from sender URN and name.
- * Used when we only have sender info from a message.
+ * Get or create a contact from sender info (preferring profileUrl over URN).
+ * Used when syncing messages - prefers profileUrl for deduplication with connections.
  */
 async function getOrCreateLinkedInContactByURN(
   ctx: MutationCtx,
   userId: Id<"users">,
   senderURN: string,
   firstName: string,
-  lastName: string
+  lastName: string,
+  profileUrl?: string
 ): Promise<Id<"contacts">> {
-  // Use URN as handle since we may not have full profile URL
-  const normalizedHandle = senderURN.toLowerCase();
+  // Prefer profile URL over URN for handle (matches connections sync format)
+  const hasProfileUrl = profileUrl && profileUrl.trim().length > 0;
+  const normalizedHandle = hasProfileUrl
+    ? normalizeLinkedInUrl(profileUrl)
+    : senderURN.toLowerCase();
 
-  // Check if we already have a handle for this URN
+  // Check if we already have a handle for this user
+  // NOTE: Using .first() instead of .unique() to handle duplicates gracefully
   const existingHandle = await ctx.db
     .query("contactHandles")
     .withIndex("by_user_handle", (q) =>
       q.eq("userId", userId).eq("handle", normalizedHandle)
     )
-    .unique();
+    .first();
 
   if (existingHandle) {
     // Update display name if we have a better one
@@ -482,7 +486,7 @@ async function getOrCreateLinkedInContactByURN(
     displayName: displayName || senderURN,
   });
 
-  // Create handle for URN
+  // Create handle (URL preferred, fallback to URN)
   await ctx.db.insert("contactHandles", {
     userId,
     contactId,
@@ -492,41 +496,6 @@ async function getOrCreateLinkedInContactByURN(
   });
 
   return contactId;
-}
-
-/**
- * Normalize LinkedIn profile URL for consistent lookups.
- * Strips query params, trailing slashes, and lowercases.
- */
-function normalizeLinkedInProfileUrl(url: string): string {
-  if (!url) return "";
-  // Remove query params and fragments
-  const cleaned = url.split("?")[0].split("#")[0];
-  // Remove trailing slash
-  const trimmed = cleaned.endsWith("/") ? cleaned.slice(0, -1) : cleaned;
-  return trimmed.toLowerCase();
-}
-
-/**
- * Get user's LinkedIn URN for isFromMe detection.
- * Looks for a linkedin_url handle associated with the user's contact.
- */
-async function getUserLinkedInURN(
-  ctx: MutationCtx,
-  userId: Id<"users">
-): Promise<string | null> {
-  // Check if user has stored their own LinkedIn handle
-  // This would typically be set during LinkedIn auth
-  const integration = await ctx.db
-    .query("integrations")
-    .withIndex("by_user_platform", (q) =>
-      q.eq("userId", userId).eq("platform", "linkedin")
-    )
-    .unique();
-
-  // The sync cursor could store the user's URN if needed
-  // For now return null - we'll rely on other methods to detect isFromMe
-  return null;
 }
 
 // ============================================================================

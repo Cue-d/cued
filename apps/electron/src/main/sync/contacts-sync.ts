@@ -2,6 +2,9 @@
  * Syncs contacts from macOS Contacts.app to Convex.
  *
  * Uses the ContactsManager to fetch contacts and the Convex API to sync them.
+ *
+ * IMPORTANT: This sync MUST be coordinated via SyncCoordinator to prevent
+ * race conditions with iMessage sync that also writes to contactHandles.
  */
 
 import { ConvexHttpClient } from "convex/browser";
@@ -12,6 +15,31 @@ import { getContactsManager } from "./contacts";
 const CONVEX_URL = electronEnv.CONVEX_URL;
 
 const BATCH_SIZE = 50;
+
+// Logging helper with timestamp and structured data
+function log(
+  level: "info" | "warn" | "error" | "debug",
+  message: string,
+  data?: Record<string, unknown>
+): void {
+  const prefix = `[ContactsSync]`;
+  const dataStr = data ? ` ${JSON.stringify(data)}` : "";
+  const fullMessage = `${prefix} ${message}${dataStr}`;
+
+  switch (level) {
+    case "error":
+      console.error(fullMessage);
+      break;
+    case "warn":
+      console.warn(fullMessage);
+      break;
+    case "debug":
+      if (process.env.DEBUG_SYNC) console.log(fullMessage);
+      break;
+    default:
+      console.log(fullMessage);
+  }
+}
 
 export interface ContactsSyncResult {
   contactsCount: number;
@@ -71,14 +99,22 @@ export async function syncContactsToConvex(
     client.setAuth(token);
 
     // Fetch contacts from macOS Contacts.app
+    log("info", "Fetching contacts from macOS", { forceRefresh });
+    const fetchStart = performance.now();
     const contactsManager = getContactsManager();
     const contacts = await contactsManager.fetchContacts(forceRefresh);
+    const fetchElapsed = Math.round(performance.now() - fetchStart);
 
     if (contacts.length === 0) {
-      console.log("[ContactsSync] No contacts to sync");
+      log("info", "No contacts to sync", { fetchElapsed });
       result.elapsed = performance.now() - startTime;
       return result;
     }
+
+    log("info", "Fetched contacts from macOS", {
+      count: contacts.length,
+      fetchElapsed,
+    });
 
     // Convert to Convex format and sync in batches
     const convexContacts = contacts.map((c) => ({
@@ -88,13 +124,35 @@ export async function syncContactsToConvex(
       emails: c.emails,
     }));
 
+    const totalBatches = Math.ceil(convexContacts.length / BATCH_SIZE);
+    log("info", "Starting batch sync to Convex", {
+      totalContacts: convexContacts.length,
+      batchSize: BATCH_SIZE,
+      totalBatches,
+    });
+
     // Sync in batches with auth retry
     for (let i = 0; i < convexContacts.length; i += BATCH_SIZE) {
+      const batchNum = Math.floor(i / BATCH_SIZE) + 1;
       const batch = convexContacts.slice(i, i + BATCH_SIZE);
+      const batchStart = performance.now();
 
       try {
+        log("debug", `Processing batch ${batchNum}/${totalBatches}`, {
+          batchSize: batch.length,
+        });
+
         const batchResult = await client.mutation(api.sync.syncContacts, {
           contacts: batch,
+        });
+
+        const batchElapsed = Math.round(performance.now() - batchStart);
+        log("debug", `Batch ${batchNum} complete`, {
+          new: batchResult.contactsCount,
+          updated: batchResult.updatedCount,
+          handles: batchResult.handlesCount,
+          errors: batchResult.errors.length,
+          elapsed: batchElapsed,
         });
 
         result.contactsCount += batchResult.contactsCount;
@@ -104,7 +162,7 @@ export async function syncContactsToConvex(
       } catch (error) {
         // If auth error, try refreshing token and retry once
         if (isAuthError(error)) {
-          console.log("[ContactsSync] Got auth error, force refreshing token and retrying...");
+          log("warn", "Auth error, refreshing token and retrying", { batch: batchNum });
           const newToken = await getAuthToken(true);
           if (!newToken) {
             throw new Error("Token refresh failed, cannot retry request");
@@ -125,22 +183,30 @@ export async function syncContactsToConvex(
       }
     }
 
-    console.log(
-      `[ContactsSync] Synced ${result.contactsCount} contacts (${result.updatedCount} updated, ${result.handlesCount} handles)`
-    );
+    const totalElapsed = Math.round(performance.now() - startTime);
+    log("info", "Sync complete", {
+      newContacts: result.contactsCount,
+      updatedContacts: result.updatedCount,
+      handles: result.handlesCount,
+      errors: result.errors.length,
+      elapsed: totalElapsed,
+    });
 
-    // Task 2.7c: Update server contacts sync state for recovery
+    // Update server contacts sync state for recovery
     try {
       await client.mutation(api.sync.updateContactsSyncState, {
         platform: "imessage",
         contactsCount: contacts.length,
       });
+      log("debug", "Updated server sync state");
     } catch (e) {
-      console.warn("[ContactsSync] Failed to update contacts sync state:", e);
+      log("warn", "Failed to update contacts sync state", {
+        error: e instanceof Error ? e.message : String(e),
+      });
     }
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    console.error("[ContactsSync] Error:", message);
+    log("error", "Sync failed", { error: message });
     result.errors.push(message);
   }
 

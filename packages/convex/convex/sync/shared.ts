@@ -8,7 +8,7 @@ import { v } from "convex/values";
 import type { Doc, Id } from "../_generated/dataModel";
 import type { MutationCtx, QueryCtx } from "../_generated/server";
 import { internal } from "../_generated/api";
-import { normalizePhone } from "@prm/shared";
+import { normalizePhone, getPhoneVariants } from "@prm/shared";
 import { normalizeEmail } from "@prm/ai";
 
 // ============================================================================
@@ -91,6 +91,20 @@ export function normalizeHandle(handle: string): string {
   return normalizePhone(handle);
 }
 
+/**
+ * Normalize LinkedIn URL to canonical format for consistent deduplication.
+ * Returns: https://www.linkedin.com/in/username (lowercased)
+ */
+export function normalizeLinkedInUrl(url: string): string {
+  if (!url) return "";
+  const clean = url.split("?")[0].split("#")[0].replace(/\/+$/, "");
+  const match = clean.match(/linkedin\.com\/in\/([^/]+)/i);
+  if (match) {
+    return `https://www.linkedin.com/in/${match[1].toLowerCase()}`;
+  }
+  return clean.toLowerCase();
+}
+
 // ============================================================================
 // User Management
 // ============================================================================
@@ -156,6 +170,8 @@ export async function createPlaceholderContact(
 
 /**
  * Batch resolve handles to contact IDs.
+ * Uses phone variants for phone handles to handle format differences
+ * (e.g., "+15551234567" vs "5551234567").
  */
 export async function batchResolveHandles(
   ctx: MutationCtx,
@@ -164,24 +180,46 @@ export async function batchResolveHandles(
 ): Promise<Map<string, Id<"contacts">>> {
   const handleToContact = new Map<string, Id<"contacts">>();
 
+  // Build variant map: variant → original handle
+  // This allows us to query all variants and map back to original
+  const variantToOriginal = new Map<string, string>();
+  const allVariants: string[] = [];
+
+  for (const handle of handles) {
+    const isPhone = !handle.includes("@");
+    const variants = isPhone ? getPhoneVariants(handle) : [handle];
+    for (const variant of variants) {
+      if (!variantToOriginal.has(variant)) {
+        variantToOriginal.set(variant, handle);
+        allVariants.push(variant);
+      }
+    }
+  }
+
   // Fetch in parallel batches of 50 to stay under Convex 4096 read limit
+  // NOTE: Using .first() instead of .unique() to gracefully handle duplicates
+  // that may have been created by past race conditions. The cleanup migration
+  // will remove these duplicates.
   const batchSize = 50;
-  for (let i = 0; i < handles.length; i += batchSize) {
-    const batch = handles.slice(i, i + batchSize);
-    const promises = batch.map((handle) =>
+  for (let i = 0; i < allVariants.length; i += batchSize) {
+    const batch = allVariants.slice(i, i + batchSize);
+    const promises = batch.map((variant) =>
       ctx.db
         .query("contactHandles")
         .withIndex("by_user_handle", (q) =>
-          q.eq("userId", userId).eq("handle", handle)
+          q.eq("userId", userId).eq("handle", variant)
         )
-        .unique()
+        .first() // Use .first() to handle duplicates gracefully
     );
     const batchResults = await Promise.all(promises);
 
     for (let j = 0; j < batch.length; j++) {
       const result = batchResults[j];
       if (result) {
-        handleToContact.set(batch[j], result.contactId);
+        const originalHandle = variantToOriginal.get(batch[j]);
+        if (originalHandle && !handleToContact.has(originalHandle)) {
+          handleToContact.set(originalHandle, result.contactId);
+        }
       }
     }
   }
