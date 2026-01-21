@@ -1,2 +1,3 @@
-export type * from "./imessage/index.js";
-export * from "./nango/index.js";
+export type * from "./imessage/index";
+export * from "./nango/index";
+export * from "./slack/index";

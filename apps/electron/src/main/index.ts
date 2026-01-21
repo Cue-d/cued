@@ -11,8 +11,10 @@ import {
   initAuth,
   getAuthState,
   getValidAccessToken,
+  forceRefreshToken,
   startDeviceAuth,
   signOut,
+  setOnTokenRefreshed,
 } from "./auth";
 import { getSyncManager, type SyncProgress } from "./sync/sync-manager";
 import { getContactsWatcher } from "./sync/contacts-watcher";
@@ -23,6 +25,8 @@ import { getLinkedInSyncManager } from "./sync/linkedin-sync";
 import { LinkedInScraper } from "./sync/linkedin";
 import { getMessageQueueProcessor } from "./queue/message-queue-processor";
 import { getReactiveConvexClient } from "./convex-client";
+import { getSlackSyncManager } from "./sync/slack-sync";
+import { getAllSlackCredentials } from "./auth/slack-credentials";
 import { getSyncCoordinator } from "./sync/sync-coordinator";
 
 const CONVEX_URL = electronEnv.CONVEX_URL;
@@ -240,11 +244,15 @@ async function startBackgroundSync(): Promise<void> {
 
     // Start presence heartbeat for mobile to detect desktop online status
     const heartbeatManager = getHeartbeatManager(getValidAccessToken);
+    heartbeatManager.setForceRefreshCallback(forceRefreshToken);
     heartbeatManager.start();
     console.log("[Main] Presence heartbeat started");
 
     // Auto-start LinkedIn messaging sync if already logged in
     startLinkedInMessagingSync();
+
+    // Auto-start Slack messaging sync if credentials are stored
+    startSlackMessagingSync();
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : String(err);
     console.error("[Main] Failed to start background sync:", message);
@@ -298,6 +306,60 @@ async function startLinkedInMessagingSync(): Promise<void> {
 }
 
 /**
+ * Auto-start Slack messaging sync if user has stored credentials.
+ */
+async function startSlackMessagingSync(): Promise<void> {
+  try {
+    const allCredentials = getAllSlackCredentials();
+
+    if (allCredentials.length === 0) {
+      console.log("[Main] No Slack credentials found, skipping auto-start");
+      return;
+    }
+
+    console.log(`[Main] Found ${allCredentials.length} Slack workspace(s), starting sync...`);
+
+    for (const creds of allCredentials) {
+      const manager = getSlackSyncManager({ teamId: creds.teamId });
+
+      // Initialize the manager (loads credentials, creates client)
+      const initialized = await manager.initialize();
+      if (!initialized) {
+        console.log(`[Main] Slack manager for ${creds.teamName} failed to initialize`);
+        continue;
+      }
+
+      manager.setTokenProvider(getValidAccessToken);
+      manager.setForceRefreshCallback(forceRefreshToken);
+
+      // Set up progress callback to notify renderer
+      manager.setProgressCallback((progress) => {
+        mainWindow?.webContents.send("social:slack:messagingSyncProgress", {
+          ...progress,
+          teamId: manager.getTeamId(),
+        });
+      });
+
+      // Set up auth invalid callback
+      manager.setAuthInvalidCallback(() => {
+        console.log(`[Main] Slack auth invalid for ${creds.teamName}, stopping sync`);
+        mainWindow?.webContents.send("social:slack:authInvalid", {
+          teamId: manager.getTeamId(),
+        });
+      });
+
+      // Start sync
+      await manager.start();
+      console.log(`[Main] Slack messaging sync auto-started for ${creds.teamName}`);
+    }
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : String(err);
+    console.log("[Main] Slack auto-start failed (non-fatal):", message);
+    // Non-fatal - user can manually start later
+  }
+}
+
+/**
  * Start watching for contacts changes and sync when detected.
  * Uses SyncCoordinator to serialize with iMessage sync.
  */
@@ -333,6 +395,12 @@ function startContactsWatcher(): void {
 app.whenReady().then(() => {
   // Initialize auth with WorkOS client ID
   initAuth(WORKOS_CLIENT_ID);
+
+  // Register callback to notify renderer when tokens are refreshed
+  setOnTokenRefreshed((authState) => {
+    console.log("[Main] Token refreshed, notifying renderer");
+    mainWindow?.webContents.send("auth:stateChanged", authState);
+  });
 
   // Set up IPC handlers before creating window
   setupAuthIpcHandlers();

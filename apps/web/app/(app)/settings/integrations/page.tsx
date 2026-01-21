@@ -28,7 +28,8 @@ const INTEGRATIONS: IntegrationConfig[] = [
     name: "iMessage",
     description: "Sync messages from macOS Messages app",
     icon: <MessageCircleIcon className="size-5" />,
-    nangoIntegrationId: null, // Uses Electron app
+    nangoIntegrationId: null,
+    integrationType: "electron-local",
     color: "text-green-500",
   },
   {
@@ -37,14 +38,16 @@ const INTEGRATIONS: IntegrationConfig[] = [
     description: "Connect your Gmail account to sync emails",
     icon: <MailIcon className="size-5" />,
     nangoIntegrationId: "google",
+    integrationType: "nango",
     color: "text-red-500",
   },
   {
     id: "slack",
     name: "Slack",
-    description: "Connect Slack to sync direct messages",
+    description: "Connect Slack via desktop app to sync messages",
     icon: <HashIcon className="size-5" />,
-    nangoIntegrationId: "slack",
+    nangoIntegrationId: null, // Now uses native Electron webview
+    integrationType: "electron-webview",
     color: "text-purple-500",
   },
 ];
@@ -89,8 +92,21 @@ export default function IntegrationsPage() {
   }, [integrations]);
 
   async function handleConnect(config: IntegrationConfig) {
+    // Handle electron-webview integrations (like Slack)
+    if (config.integrationType === "electron-webview") {
+      setError(`${config.name} connection requires the PRM desktop app. Open the desktop app and click Connect.`);
+      return;
+    }
+
+    // Handle electron-local integrations (like iMessage)
+    if (config.integrationType === "electron-local") {
+      setError(`${config.name} sync requires the PRM desktop app to be running.`);
+      return;
+    }
+
+    // Handle Nango OAuth integrations
     if (!config.nangoIntegrationId) {
-      setError("iMessage sync requires the PRM desktop app");
+      setError("Integration not properly configured");
       return;
     }
     if (!accessToken) {
@@ -133,6 +149,13 @@ export default function IntegrationsPage() {
   }
 
   async function handleDisconnect(config: IntegrationConfig) {
+    // Handle electron-webview disconnects (like Slack)
+    if (config.integrationType === "electron-webview") {
+      setError(`${config.name} disconnect requires the PRM desktop app. Open the desktop app settings to disconnect.`);
+      return;
+    }
+
+    // Nango disconnect
     if (!config.nangoIntegrationId || !accessToken) return;
 
     const status = statusByPlatform.get(config.id);
@@ -246,8 +269,11 @@ export default function IntegrationsPage() {
                 messages locally
               </li>
               <li>
-                <strong>Gmail/Slack:</strong> Click Connect to authorize PRM to read your
-                messages
+                <strong>Gmail:</strong> Click Connect to authorize PRM to read your emails
+              </li>
+              <li>
+                <strong>Slack:</strong> Use the desktop app to login with your Slack workspace
+                (credentials stay local)
               </li>
               <li>
                 <strong>LinkedIn/X:</strong> Use the desktop app to login and scrape your

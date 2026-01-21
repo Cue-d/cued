@@ -9,7 +9,6 @@ import {
   Progress,
   ProgressTrack,
   ProgressIndicator,
-  Input,
   Separator,
   Skeleton,
 } from "@prm/ui";
@@ -17,9 +16,10 @@ import {
   useAuthState,
   useSyncProgress,
   useLinkedIn,
-  useTwitter,
+  useSlack,
   useElectron,
   type SyncProgress,
+  type LinkedInSyncProgress,
 } from "./hooks/use-electron";
 export function App() {
   const auth = useAuthState();
@@ -138,7 +138,7 @@ export function App() {
                 Social Networks
               </p>
               <LinkedInCard />
-              <TwitterCard />
+              <SlackCard />
             </div>
           </CardContent>
         </Card>
@@ -272,6 +272,23 @@ function SyncStatus({
   );
 }
 
+function formatLinkedInSyncStatus(progress: LinkedInSyncProgress | null): string {
+  if (!progress) return "Not syncing";
+
+  switch (progress.status) {
+    case "realtime":
+      return "⚡ Realtime connected";
+    case "syncing":
+      return "↻ Syncing...";
+    case "error":
+      return `✗ Error: ${progress.error ?? "Unknown error"}`;
+    default:
+      return progress.lastSyncAt
+        ? `Last sync: ${new Date(progress.lastSyncAt).toLocaleTimeString()}`
+        : "Not syncing";
+  }
+}
+
 function LinkedInCard() {
   const { isLoggedIn, isLoading, syncProgress, login, startSync, stopSync, scrape } =
     useLinkedIn();
@@ -291,8 +308,7 @@ function LinkedInCard() {
     return unsub;
   }, [electron]);
 
-  const isSyncing =
-    syncProgress?.status === "syncing" || syncProgress?.status === "realtime";
+  const isSyncing = syncProgress?.status === "syncing";
 
   return (
     <div className="bg-muted/50 rounded-lg p-3 space-y-3">
@@ -342,15 +358,7 @@ function LinkedInCard() {
         <div>
           <p className="text-sm">Messaging Sync</p>
           <p className="text-xs text-muted-foreground">
-            {syncProgress?.status === "realtime"
-              ? "⚡ Realtime connected"
-              : syncProgress?.status === "syncing"
-                ? "↻ Syncing..."
-                : syncProgress?.status === "error"
-                  ? `✗ Error: ${syncProgress.error}`
-                  : syncProgress?.lastSyncAt
-                    ? `Last sync: ${new Date(syncProgress.lastSyncAt).toLocaleTimeString()}`
-                    : "Not syncing"}
+            {formatLinkedInSyncStatus(syncProgress)}
           </p>
         </div>
         <div className="flex gap-1">
@@ -383,8 +391,7 @@ function LinkedInCard() {
             <span className="text-muted-foreground">
               {syncProgress.totalConversationsSynced} convos ·{" "}
               {syncProgress.totalMessagesSynced} msgs
-              {syncProgress.realtimeConnected ? " ⚡" : ""}
-            </span>
+                          </span>
           </div>
           <ProgressTrack className="h-1.5">
             <ProgressIndicator className={isSyncing ? "animate-pulse" : ""} />
@@ -395,37 +402,39 @@ function LinkedInCard() {
   );
 }
 
-function TwitterCard() {
-  const { isLoggedIn, isLoading, login, scrapeMutuals } = useTwitter();
-  const [username, setUsername] = useState("");
-  const [scrapeProgress, setScrapeProgress] = useState<string | null>(null);
-  const electron = useElectron();
+type SyncProgressStatus = {
+  status?: "idle" | "syncing" | "realtime" | "error";
+  lastSyncAt?: number;
+  error?: string;
+};
 
-  useEffect(() => {
-    const unsub = electron.social.onTwitterProgress((progress) => {
-      if (progress.status === "starting") {
-        setScrapeProgress(`Scraping ${progress.type}...`);
-      } else if (progress.status === "complete") {
-        setScrapeProgress(`✓ Found ${progress.count} ${progress.type}`);
-      } else if (progress.status === "error") {
-        setScrapeProgress(`Error: ${progress.error}`);
-      }
-    });
-    return unsub;
-  }, [electron]);
+function formatSyncStatus(progress: SyncProgressStatus | undefined): string {
+  if (!progress) return "Ready";
 
-  const handleScrape = async () => {
-    const cleanUsername = username.replace(/^@/, "").trim();
-    if (!cleanUsername) {
-      setScrapeProgress("Please enter a username");
-      return;
-    }
-    setScrapeProgress(`Scraping mutuals for @${cleanUsername}...`);
-    const result = await scrapeMutuals(cleanUsername);
-    if (result.success) {
-      setScrapeProgress(`✓ Found ${result.count} mutuals`);
-    } else {
-      setScrapeProgress(`Error: ${result.error}`);
+  switch (progress.status) {
+    case "realtime":
+      return "⚡ Realtime";
+    case "syncing":
+      return "↻ Syncing...";
+    case "error":
+      return `✗ ${progress.error ?? "Unknown error"}`;
+    default:
+      return progress.lastSyncAt
+        ? `Synced ${new Date(progress.lastSyncAt).toLocaleTimeString()}`
+        : "Ready";
+  }
+}
+
+function SlackCard() {
+  const { isConnected, workspaces, isLoading, syncProgress, login, disconnect, startSync, stopSync } =
+    useSlack();
+
+  const isSyncing = syncProgress?.status === "syncing";
+
+  const handleLogin = async () => {
+    const result = await login();
+    if (!result.success && result.error) {
+      console.error("Slack login failed:", result.error);
     }
   };
 
@@ -433,15 +442,15 @@ function TwitterCard() {
     <div className="bg-muted/50 rounded-lg p-3 space-y-3">
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
-          <span className="text-xl">𝕏</span>
+          <span className="text-xl">#</span>
           <div>
-            <p className="font-semibold text-sm">X (Twitter)</p>
+            <p className="font-semibold text-sm">Slack</p>
             <p className="text-xs text-muted-foreground">
               {isLoading
                 ? "Checking..."
-                : isLoggedIn
-                  ? "✓ Logged in"
-                  : "Not logged in"}
+                : isConnected
+                  ? `✓ ${workspaces.length} workspace${workspaces.length > 1 ? "s" : ""} connected`
+                  : "Not connected"}
             </p>
           </div>
         </div>
@@ -450,32 +459,127 @@ function TwitterCard() {
             variant="secondary"
             size="sm"
             className="text-xs px-2 py-1 h-auto"
-            onClick={login}
+            onClick={handleLogin}
           >
-            Login
-          </Button>
-          <Button
-            variant="secondary"
-            size="sm"
-            className="text-xs px-2 py-1 h-auto"
-            disabled={!isLoggedIn}
-            onClick={handleScrape}
-          >
-            Scrape
+            {isConnected ? "Add Workspace" : "Login"}
           </Button>
         </div>
       </div>
 
-      <Input
-        type="text"
-        placeholder="@username for mutuals"
-        value={username}
-        onChange={(e) => setUsername(e.target.value)}
-        className="text-sm h-8"
-      />
+      {/* Connected Workspaces List */}
+      {workspaces.length > 0 && (
+        <>
+          <Separator />
+          <div className="space-y-2">
+            <p className="text-xs uppercase tracking-wider text-muted-foreground">
+              Connected Workspaces
+            </p>
+            {workspaces.map((workspace) => {
+              const wsProgress = workspace.syncProgress;
+              const wsIsSyncing = wsProgress?.status === "syncing";
 
-      {scrapeProgress && (
-        <p className="text-xs text-muted-foreground">{scrapeProgress}</p>
+              return (
+                <div
+                  key={workspace.teamId}
+                  className="bg-background/50 rounded p-2 space-y-2"
+                >
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="text-sm font-medium">{workspace.teamName}</p>
+                      <p className="text-xs text-muted-foreground">
+                        {formatSyncStatus(wsProgress)}
+                      </p>
+                    </div>
+                    <div className="flex gap-1">
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="text-xs px-2 py-1 h-auto"
+                        disabled={wsIsSyncing}
+                        onClick={() => startSync(workspace.teamId)}
+                        title="Start sync"
+                      >
+                        ▶
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="text-xs px-2 py-1 h-auto"
+                        disabled={!wsIsSyncing}
+                        onClick={() => stopSync(workspace.teamId)}
+                        title="Stop sync"
+                      >
+                        ⏹
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="text-xs px-2 py-1 h-auto text-destructive hover:text-destructive"
+                        onClick={() => disconnect(workspace.teamId)}
+                        title="Disconnect"
+                      >
+                        ✕
+                      </Button>
+                    </div>
+                  </div>
+
+                  {/* Workspace-specific progress */}
+                  {wsProgress && (wsProgress.totalMessagesSynced > 0 || wsIsSyncing) && (
+                    <div className="text-xs text-muted-foreground">
+                      {wsProgress.totalConversationsSynced} convos · {wsProgress.totalMessagesSynced} msgs
+                                          </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </>
+      )}
+
+      {/* Global Sync Controls (when connected) */}
+      {isConnected && workspaces.length > 1 && (
+        <>
+          <Separator />
+          <div className="flex items-center justify-between">
+            <p className="text-sm">All Workspaces</p>
+            <div className="flex gap-1">
+              <Button
+                variant="secondary"
+                size="sm"
+                className="text-xs px-2 py-1 h-auto"
+                disabled={isSyncing}
+                onClick={() => startSync()}
+              >
+                Start All
+              </Button>
+              <Button
+                variant="secondary"
+                size="sm"
+                className="text-xs px-2 py-1 h-auto"
+                disabled={!isSyncing}
+                onClick={() => stopSync()}
+              >
+                Stop All
+              </Button>
+            </div>
+          </div>
+        </>
+      )}
+
+      {/* Aggregated Messages Progress */}
+      {syncProgress && (syncProgress.totalMessagesSynced > 0 || isSyncing) && workspaces.length === 1 && (
+        <Progress value={isSyncing ? null : 100}>
+          <div className="flex justify-between w-full text-xs mb-1">
+            <span>Messages</span>
+            <span className="text-muted-foreground">
+              {syncProgress.totalConversationsSynced} convos ·{" "}
+              {syncProgress.totalMessagesSynced} msgs
+                          </span>
+          </div>
+          <ProgressTrack className="h-1.5">
+            <ProgressIndicator className={isSyncing ? "animate-pulse" : ""} />
+          </ProgressTrack>
+        </Progress>
       )}
     </div>
   );

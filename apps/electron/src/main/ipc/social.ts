@@ -11,8 +11,22 @@ import {
   getLinkedInSyncManager,
   type LinkedInSyncProgress,
 } from "../sync/linkedin-sync";
+import {
+  getSlackSyncManager,
+  getAllSlackSyncManagers,
+  removeSlackSyncManager,
+  initializeAllSlackSyncManagers,
+  type SlackSyncProgress,
+} from "../sync/slack-sync";
+import { openSlackLogin, clearSlackSession } from "../auth/slack-login";
+import {
+  getSlackCredentials,
+  getAllSlackCredentials,
+  clearSlackCredentials,
+  deleteSlackCredentials,
+} from "../auth/slack-credentials";
 import { getAdapter } from "../adapters";
-import { getValidAccessToken } from "../auth";
+import { getValidAccessToken, forceRefreshToken } from "../auth";
 import { electronEnv } from "@prm/env/electron";
 
 // Singleton scraper instances to maintain state across calls
@@ -68,6 +82,41 @@ export interface SocialSyncResult {
   totalContacts?: number;
   newContacts?: number;
   updatedContacts?: number;
+  error?: string;
+}
+
+// Slack types
+export interface SlackWorkspaceInfo {
+  teamId: string;
+  teamName: string;
+  userId: string;
+  isConnected: boolean;
+  syncProgress?: SlackSyncProgress;
+}
+
+export interface SlackStatusResult {
+  isConnected: boolean;
+  teamName?: string;
+  workspaces?: SlackWorkspaceInfo[];
+  error?: string;
+}
+
+export interface SlackLoginResult {
+  success: boolean;
+  teamId?: string;
+  teamName?: string;
+  error?: string;
+}
+
+export interface SlackSyncStatusResult {
+  connected: boolean;
+  syncProgress?: SlackSyncProgress;
+  workspaces?: SlackWorkspaceInfo[];
+  error?: string;
+}
+
+export interface SlackSyncResult {
+  success: boolean;
   error?: string;
 }
 
@@ -555,6 +604,273 @@ export function setupSocialIpcHandlers(mainWindow: BrowserWindow | null): void {
     }
   );
 
+  // ============================================================================
+  // Slack handlers (Native integration - Task 5.1)
+  // ============================================================================
+
+  /**
+   * Check Slack connection status - returns all connected workspaces.
+   */
+  ipcMain.handle("social:slack:status", async (): Promise<SlackStatusResult> => {
+    try {
+      const allCredentials = getAllSlackCredentials();
+      if (allCredentials.length === 0) {
+        return { isConnected: false, workspaces: [] };
+      }
+
+      // Build workspace info for all connected workspaces
+      const workspaces: SlackWorkspaceInfo[] = allCredentials.map((creds) => {
+        const manager = getSlackSyncManager({ teamId: creds.teamId });
+        return {
+          teamId: creds.teamId,
+          teamName: creds.teamName,
+          userId: creds.userId,
+          isConnected: true,
+          syncProgress: manager.getProgress(),
+        };
+      });
+
+      return {
+        isConnected: workspaces.length > 0,
+        teamName: workspaces[0]?.teamName, // Legacy field for backward compatibility
+        workspaces,
+      };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.error("[Social IPC] Slack status check failed:", message);
+      return { isConnected: false, workspaces: [], error: message };
+    }
+  });
+
+  /**
+   * Open Slack login in Electron BrowserWindow.
+   * Extracts xoxc- token from localStorage and d cookie from session.
+   * Supports adding multiple workspaces.
+   */
+  ipcMain.handle("social:slack:login", async (): Promise<SlackLoginResult> => {
+    try {
+      console.log("[Social IPC] Opening Slack login...");
+      const result = await openSlackLogin();
+
+      if (!result.success || !result.credentials) {
+        return {
+          success: false,
+          error: result.error ?? "Login failed",
+        };
+      }
+
+      // Store credentials in sync manager (creates new manager for this team)
+      const syncManager = getSlackSyncManager({ teamId: result.credentials.teamId });
+      syncManager.setCredentials({
+        token: result.credentials.token,
+        cookie: result.credentials.cookie,
+        teamId: result.credentials.teamId,
+        teamName: result.credentials.teamName,
+        userId: result.credentials.userId,
+      });
+
+      console.log(`[Social IPC] Slack login successful: ${result.credentials.teamName} (${result.credentials.teamId})`);
+      return {
+        success: true,
+        teamId: result.credentials.teamId,
+        teamName: result.credentials.teamName,
+      };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.error("[Social IPC] Slack login failed:", message);
+      return { success: false, error: message };
+    }
+  });
+
+  /**
+   * Disconnect Slack - clears credentials and stops sync.
+   * If teamId is provided, disconnects only that workspace.
+   * If teamId is not provided, disconnects all workspaces.
+   */
+  ipcMain.handle(
+    "social:slack:disconnect",
+    async (_event, teamId?: string): Promise<SlackSyncResult> => {
+      try {
+        if (teamId) {
+          console.log(`[Social IPC] Disconnecting Slack workspace ${teamId}...`);
+          const manager = getSlackSyncManager({ teamId });
+          await manager.disconnect();
+          removeSlackSyncManager(teamId);
+        } else {
+          console.log("[Social IPC] Disconnecting all Slack workspaces...");
+          const managers = getAllSlackSyncManagers();
+          for (const manager of managers) {
+            await manager.disconnect();
+          }
+          // Clear session cookies from Electron
+          await clearSlackSession();
+        }
+
+        console.log("[Social IPC] Slack disconnected");
+        return { success: true };
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        console.error("[Social IPC] Slack disconnect failed:", message);
+        return { success: false, error: message };
+      }
+    }
+  );
+
+  /**
+   * List all connected Slack workspaces.
+   */
+  ipcMain.handle(
+    "social:slack:listWorkspaces",
+    async (): Promise<{ workspaces: SlackWorkspaceInfo[] }> => {
+      try {
+        const allCredentials = getAllSlackCredentials();
+        const workspaces: SlackWorkspaceInfo[] = allCredentials.map((creds) => {
+          const manager = getSlackSyncManager({ teamId: creds.teamId });
+          return {
+            teamId: creds.teamId,
+            teamName: creds.teamName,
+            userId: creds.userId,
+            isConnected: true,
+            syncProgress: manager.getProgress(),
+          };
+        });
+        return { workspaces };
+      } catch (error) {
+        console.error("[Social IPC] List workspaces failed:", error);
+        return { workspaces: [] };
+      }
+    }
+  );
+
+  /**
+   * Get Slack messaging sync status for all workspaces.
+   */
+  ipcMain.handle(
+    "social:slack:messagingStatus",
+    async (): Promise<SlackSyncStatusResult> => {
+      try {
+        const allCredentials = getAllSlackCredentials();
+        const workspaces: SlackWorkspaceInfo[] = allCredentials.map((creds) => {
+          const manager = getSlackSyncManager({ teamId: creds.teamId });
+          const progress = manager.getProgress();
+          return {
+            teamId: creds.teamId,
+            teamName: creds.teamName,
+            userId: creds.userId,
+            isConnected: manager.hasCredentials() && progress.status !== "error",
+            syncProgress: progress,
+          };
+        });
+
+        const anyConnected = workspaces.some((w) => w.isConnected);
+        return {
+          connected: anyConnected,
+          syncProgress: workspaces[0]?.syncProgress, // Legacy field
+          workspaces,
+        };
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        console.error("[Social IPC] Slack messaging status check failed:", message);
+        return { connected: false, workspaces: [], error: message };
+      }
+    }
+  );
+
+  /**
+   * Start Slack messaging sync for all workspaces (or a specific one).
+   * @param teamId - Optional team ID to start sync for only that workspace
+   */
+  ipcMain.handle(
+    "social:slack:startMessagingSync",
+    async (_event, teamId?: string): Promise<SlackSyncResult> => {
+      try {
+        const setupAndStartManager = async (manager: ReturnType<typeof getSlackSyncManager>) => {
+          manager.setTokenProvider(getValidAccessToken);
+          manager.setForceRefreshCallback(forceRefreshToken);
+
+          // Set up progress callback with team ID in the event
+          manager.setProgressCallback((progress) => {
+            mainWindow?.webContents.send("social:slack:messagingSyncProgress", {
+              ...progress,
+              teamId: manager.getTeamId(),
+            });
+          });
+
+          manager.setAuthInvalidCallback(() => {
+            console.log(`[Social IPC] Slack auth invalid for ${manager.getTeamId()}, stopping sync`);
+            mainWindow?.webContents.send("social:slack:authInvalid", {
+              teamId: manager.getTeamId(),
+            });
+          });
+
+          await manager.start();
+        };
+
+        if (teamId) {
+          console.log(`[Social IPC] Starting Slack messaging sync for ${teamId}...`);
+          const manager = getSlackSyncManager({ teamId });
+          await setupAndStartManager(manager);
+        } else {
+          console.log("[Social IPC] Starting Slack messaging sync for all workspaces...");
+          const allCredentials = getAllSlackCredentials();
+          for (const creds of allCredentials) {
+            const manager = getSlackSyncManager({ teamId: creds.teamId });
+            await setupAndStartManager(manager);
+          }
+        }
+
+        console.log("[Social IPC] Slack messaging sync started");
+        return { success: true };
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        console.error("[Social IPC] Slack messaging sync start failed:", message);
+        return { success: false, error: message };
+      }
+    }
+  );
+
+  /**
+   * Stop Slack messaging sync for all workspaces (or a specific one).
+   * @param teamId - Optional team ID to stop sync for only that workspace
+   */
+  ipcMain.handle(
+    "social:slack:stopMessagingSync",
+    async (_event, teamId?: string): Promise<SlackSyncResult> => {
+      try {
+        if (teamId) {
+          const manager = getSlackSyncManager({ teamId });
+          manager.stop();
+          console.log(`[Social IPC] Slack messaging sync stopped for ${teamId}`);
+        } else {
+          const managers = getAllSlackSyncManagers();
+          for (const manager of managers) {
+            manager.stop();
+          }
+          console.log("[Social IPC] Slack messaging sync stopped for all workspaces");
+        }
+        return { success: true };
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        console.error("[Social IPC] Slack messaging sync stop failed:", message);
+        return { success: false, error: message };
+      }
+    }
+  );
+
+  /**
+   * Get current Slack messaging sync progress.
+   */
+  ipcMain.handle(
+    "social:slack:getSyncProgress",
+    async (): Promise<SlackSyncProgress> => {
+      const syncManager = getSlackSyncManager();
+      return syncManager.getProgress();
+    }
+  );
+
+  // Slack progress listeners
+  // Note: The renderer subscribes via onSlackMessagingSyncProgress
+
   console.log("[Social IPC] Social scraper IPC handlers registered");
 }
 
@@ -564,8 +880,14 @@ export function setupSocialIpcHandlers(mainWindow: BrowserWindow | null): void {
 export async function cleanupSocialScrapers(): Promise<void> {
   try {
     // Stop LinkedIn sync manager
-    const syncManager = getLinkedInSyncManager();
-    syncManager.stop();
+    const linkedInSyncManager = getLinkedInSyncManager();
+    linkedInSyncManager.stop();
+
+    // Stop all Slack sync managers
+    const slackManagers = getAllSlackSyncManagers();
+    for (const manager of slackManagers) {
+      manager.stop();
+    }
 
     if (linkedInScraper) {
       await linkedInScraper.closeBrowser();

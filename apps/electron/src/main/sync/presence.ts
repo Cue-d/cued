@@ -11,12 +11,14 @@ const CONVEX_URL = electronEnv.CONVEX_URL;
 const HEARTBEAT_INTERVAL_MS = 15_000;
 
 type TokenProvider = () => Promise<string | null>;
+type ForceRefreshProvider = () => Promise<string | null>;
 
 /**
  * Heartbeat manager for presence tracking.
  */
 export class HeartbeatManager {
   private getToken: TokenProvider;
+  private forceRefresh: ForceRefreshProvider | null = null;
   private client: ConvexHttpClient;
   private intervalId: NodeJS.Timeout | null = null;
   private isSending = false;
@@ -24,6 +26,22 @@ export class HeartbeatManager {
   constructor(getToken: TokenProvider) {
     this.getToken = getToken;
     this.client = new ConvexHttpClient(CONVEX_URL);
+  }
+
+  /**
+   * Set the force refresh callback for auth error recovery.
+   */
+  setForceRefreshCallback(callback: ForceRefreshProvider): void {
+    this.forceRefresh = callback;
+  }
+
+  private isAuthError(error: unknown): boolean {
+    const message = error instanceof Error ? error.message : String(error);
+    return (
+      message.includes('InvalidAuthHeader') ||
+      message.includes('Token expired') ||
+      message.includes('Could not validate token')
+    );
   }
 
   start(): void {
@@ -63,6 +81,23 @@ export class HeartbeatManager {
         appVersion: app.getVersion(),
       });
     } catch (error) {
+      // Try to recover from auth errors
+      if (this.isAuthError(error) && this.forceRefresh) {
+        console.log("[Presence] Auth error detected, force refreshing token...");
+        try {
+          const newToken = await this.forceRefresh();
+          if (newToken) {
+            this.client.setAuth(newToken);
+            await this.client.mutation(api.presence.heartbeat, {
+              appVersion: app.getVersion(),
+            });
+            console.log("[Presence] Heartbeat succeeded after token refresh");
+            return;
+          }
+        } catch (retryError) {
+          console.error("[Presence] Heartbeat retry failed:", getErrorMessage(retryError));
+        }
+      }
       console.error("[Presence] Heartbeat failed:", getErrorMessage(error));
     } finally {
       this.isSending = false;

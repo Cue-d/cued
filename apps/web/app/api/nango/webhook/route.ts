@@ -105,9 +105,9 @@ async function handleSyncWebhook(payload: NangoWebhookPayload): Promise<NextResp
 
   // Map provider to pull endpoints (some providers have multiple syncs)
   const pullEndpoints: Record<string, string[]> = {
-    slack: ["pull-slack"],
     google: ["pull-gmail", "pull-google-contacts"],
   };
+  // Slack now uses native Electron integration, not Nango
 
   const endpoints = pullEndpoints[providerConfigKey];
   if (!endpoints) {

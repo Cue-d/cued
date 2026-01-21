@@ -6,6 +6,7 @@ import type { ActionPlatform, PlatformAdapter } from "@prm/shared";
 
 import { IMessageAdapter } from "./imessage-adapter.js";
 import { LinkedInAdapter } from "./linkedin-adapter.js";
+import { SlackAdapter } from "./slack-adapter.js";
 
 /**
  * Singleton adapter instances.
@@ -22,8 +23,8 @@ const adapterRegistry: Partial<
 > = {
   imessage: IMessageAdapter,
   linkedin: LinkedInAdapter,
+  slack: SlackAdapter,
   // Future adapters:
-  // slack: SlackAdapter,
   // signal: SignalAdapter,
   // whatsapp: WhatsAppAdapter,
   // twitter: TwitterAdapter,
@@ -33,7 +34,7 @@ const adapterRegistry: Partial<
  * Platforms that use server-side sending (via Nango) instead of Electron adapters.
  * These are handled by the Convex action directly, not the message queue processor.
  */
-export const SERVER_SIDE_PLATFORMS: ActionPlatform[] = ["gmail", "slack"];
+export const SERVER_SIDE_PLATFORMS: ActionPlatform[] = ["gmail"];
 
 /**
  * Get the adapter for a given platform.
@@ -94,3 +95,4 @@ export function getSupportedPlatforms(): ActionPlatform[] {
 // Re-export adapter classes for testing
 export { IMessageAdapter } from "./imessage-adapter.js";
 export { LinkedInAdapter } from "./linkedin-adapter.js";
+export { SlackAdapter } from "./slack-adapter.js";

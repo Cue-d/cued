@@ -200,31 +200,6 @@ describe("POST /api/nango/webhook - Sync Events", () => {
     );
   });
 
-  it("triggers Slack pull on successful Slack sync", async () => {
-    mockFetch.mockResolvedValue({
-      ok: true,
-      json: async () => ({ success: true }),
-    });
-
-    const payload = {
-      type: "sync",
-      operation: "success",
-      success: true,
-      connectionId: "conn_slack",
-      providerConfigKey: "slack",
-      endUser: { endUserId: "user_xyz" },
-    };
-
-    const response = await POST(createRequest(payload));
-
-    expect(response.status).toBe(200);
-    expect(mockFetch).toHaveBeenCalledTimes(1);
-    expect(mockFetch).toHaveBeenCalledWith(
-      expect.stringContaining("/api/nango/pull-slack"),
-      expect.any(Object)
-    );
-  });
-
   it("does not process unsuccessful syncs", async () => {
     const payload = {
       type: "sync",
@@ -273,7 +248,7 @@ describe("POST /api/nango/webhook - Sync Events", () => {
       operation: "success",
       success: true,
       connectionId: "conn_123",
-      providerConfigKey: "slack",
+      providerConfigKey: "google",
       endUser: { endUserId: "user_abc" },
     };
 

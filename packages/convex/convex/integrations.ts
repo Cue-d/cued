@@ -225,6 +225,190 @@ export const disconnectNango = mutation({
 });
 
 // ============================================================================
+// Native Slack Integration (Local-Only Auth)
+// ============================================================================
+
+/**
+ * Update Slack connection status from Electron.
+ * Stores ONLY metadata (teamId, teamName, userId, isConnected).
+ * NO tokens or cookies are stored in Convex - those stay local.
+ * Supports multiple workspaces per user via slackTeamId.
+ */
+export const updateSlackStatus = mutation({
+  args: {
+    workosUserId: v.string(),
+    teamId: v.string(),
+    teamName: v.string(),
+    userId: v.string(), // Slack user ID
+    isConnected: v.boolean(),
+  },
+  handler: async (ctx, args) => {
+    // Find or create user
+    let user = await findUserByWorkosId(ctx, args.workosUserId);
+    if (!user) {
+      throw new Error("User not found");
+    }
+
+    // Check if Slack integration already exists for this specific team
+    const existing = await ctx.db
+      .query("integrations")
+      .withIndex("by_user_platform_team", (q) =>
+        q.eq("userId", user._id).eq("platform", "slack").eq("slackTeamId", args.teamId)
+      )
+      .unique();
+
+    if (existing) {
+      // Update existing integration
+      await ctx.db.patch(existing._id, {
+        connectedAt: args.isConnected ? Date.now() : existing.connectedAt,
+        slackTeamId: args.teamId,
+        syncState: {
+          ...existing.syncState,
+          isConnected: args.isConnected,
+          lastError: args.isConnected ? undefined : existing.syncState.lastError,
+        },
+      });
+
+      console.log(
+        `[Slack] Updated status for team ${args.teamName} (${args.teamId}), user ${args.userId}, connected: ${args.isConnected}`
+      );
+
+      return { integrationId: existing._id, updated: true };
+    }
+
+    // Create new integration for this workspace
+    const integrationId = await ctx.db.insert("integrations", {
+      userId: user._id,
+      platform: "slack",
+      slackTeamId: args.teamId,
+      connectedAt: args.isConnected ? Date.now() : undefined,
+      syncState: {
+        isConnected: args.isConnected,
+      },
+    });
+
+    console.log(
+      `[Slack] Created integration for team ${args.teamName} (${args.teamId}), user ${args.userId}`
+    );
+
+    return { integrationId, updated: false };
+  },
+});
+
+/**
+ * Get Slack connection status for all workspaces.
+ * Returns an array of connected workspaces (supports multi-workspace).
+ */
+export const getSlackStatus = query({
+  args: {},
+  handler: async (ctx) => {
+    const user = await getAuthenticatedUser(ctx);
+    if (!user) {
+      return { isConnected: false, workspaces: [] };
+    }
+
+    // Get all Slack integrations for this user
+    const integrations = await ctx.db
+      .query("integrations")
+      .withIndex("by_user_platform", (q) =>
+        q.eq("userId", user._id).eq("platform", "slack")
+      )
+      .collect();
+
+    if (integrations.length === 0) {
+      return { isConnected: false, workspaces: [] };
+    }
+
+    const workspaces = integrations
+      .filter((i) => i.syncState.isConnected)
+      .map((i) => ({
+        teamId: i.slackTeamId ?? null,
+        isConnected: i.syncState.isConnected,
+        lastSyncAt: i.syncState.lastSyncAt ?? null,
+        lastError: i.syncState.lastError ?? null,
+        totalMessagesSynced: i.syncState.totalMessagesSynced ?? 0,
+      }));
+
+    // For backward compatibility, also return top-level isConnected
+    return {
+      isConnected: workspaces.some((w) => w.isConnected),
+      workspaces,
+      // Legacy fields from first workspace (backward compatibility)
+      lastSyncAt: workspaces[0]?.lastSyncAt ?? null,
+      lastError: workspaces[0]?.lastError ?? null,
+      totalMessagesSynced: workspaces.reduce((sum, w) => sum + (w.totalMessagesSynced ?? 0), 0),
+    };
+  },
+});
+
+/**
+ * Disconnect Slack integration.
+ * Called when user disconnects from Electron settings.
+ * If teamId is provided, disconnects only that workspace.
+ * If teamId is not provided, disconnects all Slack workspaces.
+ */
+export const disconnectSlack = mutation({
+  args: {
+    workosUserId: v.string(),
+    teamId: v.optional(v.string()),
+  },
+  handler: async (ctx, args) => {
+    const user = await findUserByWorkosId(ctx, args.workosUserId);
+    if (!user) {
+      return { success: false, error: "User not found" };
+    }
+
+    // If teamId specified, disconnect only that workspace
+    if (args.teamId) {
+      const integration = await ctx.db
+        .query("integrations")
+        .withIndex("by_user_platform_team", (q) =>
+          q.eq("userId", user._id).eq("platform", "slack").eq("slackTeamId", args.teamId)
+        )
+        .unique();
+
+      if (!integration) {
+        return { success: false, error: "No Slack integration found for this team" };
+      }
+
+      await ctx.db.patch(integration._id, {
+        syncState: {
+          ...integration.syncState,
+          isConnected: false,
+        },
+      });
+
+      console.log(`[Slack] Disconnected workspace ${args.teamId}`);
+      return { success: true };
+    }
+
+    // Otherwise, disconnect all Slack workspaces
+    const integrations = await ctx.db
+      .query("integrations")
+      .withIndex("by_user_platform", (q) =>
+        q.eq("userId", user._id).eq("platform", "slack")
+      )
+      .collect();
+
+    if (integrations.length === 0) {
+      return { success: false, error: "No Slack integrations found" };
+    }
+
+    for (const integration of integrations) {
+      await ctx.db.patch(integration._id, {
+        syncState: {
+          ...integration.syncState,
+          isConnected: false,
+        },
+      });
+    }
+
+    console.log(`[Slack] Disconnected ${integrations.length} workspaces`);
+    return { success: true };
+  },
+});
+
+// ============================================================================
 // Debug/Test Queries
 // ============================================================================
 

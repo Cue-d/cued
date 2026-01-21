@@ -29,6 +29,13 @@ interface InboxResult {
 const EMPTY_INBOX: InboxResult = { conversations: [], nextCursor: null };
 
 /**
+ * Get sort key for a conversation (lastMessageAt or _creationTime as fallback).
+ */
+function getConversationSortKey(c: Doc<"conversations">): number {
+  return c.lastMessageAt ?? c._creationTime;
+}
+
+/**
  * Shared inbox fetching logic used by both authenticated and test queries.
  */
 async function fetchInbox(
@@ -39,27 +46,33 @@ async function fetchInbox(
   const limit = args.limit ?? 50;
   const cursorTimestamp = args.cursor ? parseInt(args.cursor, 10) : undefined;
 
-  // Build query with optional cursor filter
-  const conversationsQuery = ctx.db
-    .query("conversations")
-    .withIndex("by_user_last_message", (q) => {
-      const base = q.eq("userId", userId);
-      return cursorTimestamp !== undefined
-        ? base.lt("lastMessageAt", cursorTimestamp)
-        : base;
-    })
-    .order("desc");
+  // Use platform-specific index when filtering, otherwise get all user conversations
+  // This ensures we include conversations without lastMessageAt
+  const conversationsQuery = args.platform
+    ? ctx.db
+        .query("conversations")
+        .withIndex("by_user_platform", (q) =>
+          q.eq("userId", userId).eq("platform", args.platform!)
+        )
+    : ctx.db
+        .query("conversations")
+        .withIndex("by_user", (q) => q.eq("userId", userId));
 
-  // Fetch one extra to determine if there's a next page
-  const conversations = await conversationsQuery.take(limit + 1);
+  // Fetch all matching conversations (we'll sort and paginate in memory)
+  const allConversations = await conversationsQuery.collect();
 
-  // Filter by platform if specified
-  const filtered = args.platform
-    ? conversations.filter((c) => c.platform === args.platform)
-    : conversations;
+  // Sort by lastMessageAt descending (use _creationTime as fallback)
+  const sorted = allConversations.sort(
+    (a, b) => getConversationSortKey(b) - getConversationSortKey(a)
+  );
 
-  const hasMore = filtered.length > limit;
-  const page = hasMore ? filtered.slice(0, limit) : filtered;
+  // Apply cursor filter if provided
+  const afterCursor = cursorTimestamp
+    ? sorted.filter((c) => getConversationSortKey(c) < cursorTimestamp)
+    : sorted;
+
+  const hasMore = afterCursor.length > limit;
+  const page = hasMore ? afterCursor.slice(0, limit) : afterCursor;
 
   // Resolve participant contact names and handles
   const conversationsWithParticipants = await Promise.all(
@@ -98,8 +111,8 @@ async function fetchInbox(
 
   const lastItem = page[page.length - 1];
   const nextCursor =
-    hasMore && lastItem?.lastMessageAt
-      ? String(lastItem.lastMessageAt)
+    hasMore && lastItem
+      ? String(getConversationSortKey(lastItem))
       : null;
 
   return { conversations: conversationsWithParticipants, nextCursor };

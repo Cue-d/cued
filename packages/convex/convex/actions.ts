@@ -801,23 +801,34 @@ export const swipeAction = mutation({
         let messageSent = false;
         let queuedMessageId: Id<"messageQueue"> | null = null;
 
-        // Handle iMessage and LinkedIn sending via unified message queue
+        // Handle iMessage, LinkedIn, and Slack sending via unified message queue
         // These platforms have Electron adapters and support undo via the queue
         if (
-          (platform === "imessage" || platform === "linkedin") &&
+          (platform === "imessage" || platform === "linkedin" || platform === "slack") &&
           responseText &&
           conversation
         ) {
           // Get recipient info from conversation
-          const isGroup = conversation.conversationType === "group";
+          const isGroup =
+            conversation.conversationType === "group" ||
+            conversation.conversationType === "channel";
 
           // For groups, we need the chat identifier (from platformConversationId)
           // For 1:1, we need the recipient's handle
           let recipientHandle = "";
           let recipientContactId: Id<"contacts"> | undefined;
+          // Slack always needs chatIdentifier (channel ID) for both DMs and channels
+          let chatIdentifier: string | undefined;
 
-          if (!isGroup && conversation.participantContactIds.length > 0) {
-            // Get the first participant's handle for 1:1 chats
+          if (platform === "slack") {
+            // Slack uses platformConversationId (channel ID) for all messages
+            chatIdentifier = conversation.platformConversationId;
+            // For Slack DMs, get the contact info
+            if (!isGroup && conversation.participantContactIds.length > 0) {
+              recipientContactId = conversation.participantContactIds[0];
+            }
+          } else if (!isGroup && conversation.participantContactIds.length > 0) {
+            // Get the first participant's handle for 1:1 chats (iMessage/LinkedIn)
             const participantId = conversation.participantContactIds[0];
             recipientContactId = participantId;
 
@@ -838,10 +849,15 @@ export const swipeAction = mutation({
               // The adapter will use this to send the message
               recipientHandle = conversation.platformConversationId ?? "";
             }
+          } else if (isGroup) {
+            // For iMessage/LinkedIn groups, use platformConversationId
+            chatIdentifier = conversation.platformConversationId;
           }
 
           // Queue message for Electron to send (with undo window based on user settings)
-          if (recipientHandle || isGroup) {
+          // Slack: always has chatIdentifier
+          // iMessage/LinkedIn: needs recipientHandle for DMs or isGroup for group chats
+          if (chatIdentifier || recipientHandle || isGroup) {
             const delaySeconds = user.undoSendDelaySeconds ?? 30;
             const scheduledFor = now + delaySeconds * 1000;
 
@@ -852,7 +868,7 @@ export const swipeAction = mutation({
               recipientContactId,
               text: responseText,
               isGroup,
-              chatIdentifier: isGroup ? conversation.platformConversationId : undefined,
+              chatIdentifier,
               conversationId: conversation._id,
               actionId: args.actionId,
               status: "pending",

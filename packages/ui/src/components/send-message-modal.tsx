@@ -3,7 +3,6 @@ import { Send } from "lucide-react"
 import { PLATFORM_CONFIG, type ActionPlatform } from "@prm/shared"
 import { cn } from "../lib/utils"
 import { Button } from "./ui/button"
-import { Textarea } from "./ui/textarea"
 import {
   Dialog,
   DialogContent,
@@ -19,6 +18,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "./ui/select"
+import { Textarea } from "./ui/textarea"
 
 /** Contact with available platforms for sending */
 export interface SendMessageContact {

@@ -66,6 +66,55 @@ export interface LinkedInSyncResult {
   error?: string;
 }
 
+// Slack types (Native integration - Task 5.1) - Multi-workspace support
+export interface SlackWorkspaceInfo {
+  teamId: string;
+  teamName: string;
+  userId: string;
+  isConnected: boolean;
+  syncProgress?: SlackSyncProgress;
+}
+
+export interface SlackStatusResult {
+  isConnected: boolean;
+  teamName?: string;
+  workspaces?: SlackWorkspaceInfo[];
+  error?: string;
+}
+
+export interface SlackLoginResult {
+  success: boolean;
+  teamId?: string;
+  teamName?: string;
+  error?: string;
+}
+
+export interface SlackSyncProgress {
+  status: "idle" | "syncing" | "error";
+  totalConversationsSynced: number;
+  totalMessagesSynced: number;
+  lastSyncAt?: number;
+  teamName?: string;
+  teamId?: string;
+  error?: string;
+}
+
+export interface SlackMessagingStatus {
+  connected: boolean;
+  syncProgress?: SlackSyncProgress;
+  workspaces?: SlackWorkspaceInfo[];
+  error?: string;
+}
+
+export interface SlackSyncResult {
+  success: boolean;
+  error?: string;
+}
+
+export interface SlackListWorkspacesResult {
+  workspaces: SlackWorkspaceInfo[];
+}
+
 // Global type declaration
 declare global {
   interface Window {
@@ -119,6 +168,19 @@ declare global {
         onTwitterProgress: (
           callback: (progress: SocialProgress) => void
         ) => () => void;
+        // Slack - Native Integration (Task 5.1) - Multi-workspace support
+        slackStatus: () => Promise<SlackStatusResult>;
+        slackLogin: () => Promise<SlackLoginResult>;
+        slackDisconnect: (teamId?: string) => Promise<SlackSyncResult>;
+        slackListWorkspaces: () => Promise<SlackListWorkspacesResult>;
+        slackMessagingStatus: () => Promise<SlackMessagingStatus>;
+        slackStartMessagingSync: (teamId?: string) => Promise<SlackSyncResult>;
+        slackStopMessagingSync: (teamId?: string) => Promise<SlackSyncResult>;
+        slackGetSyncProgress: () => Promise<SlackSyncProgress>;
+        onSlackMessagingSyncProgress: (
+          callback: (progress: SlackSyncProgress) => void
+        ) => () => void;
+        onSlackAuthInvalid: (callback: () => void) => () => void;
       };
     };
   }
@@ -315,4 +377,128 @@ export function useTwitter() {
   );
 
   return { isLoggedIn, isLoading, login, scrapeMutuals };
+}
+
+/**
+ * Hook to manage Slack native integration (Task 5.1) - Multi-workspace support
+ */
+export function useSlack() {
+  const [workspaces, setWorkspaces] = useState<SlackWorkspaceInfo[]>([]);
+  const [syncProgress, setSyncProgress] = useState<SlackSyncProgress | null>(
+    null
+  );
+  const [isLoading, setIsLoading] = useState(true);
+  const electron = useElectron();
+
+  // Derived state
+  const isConnected = workspaces.length > 0;
+
+  // Refresh workspaces list
+  const refreshWorkspaces = useCallback(async () => {
+    const result = await electron.social.slackListWorkspaces();
+    setWorkspaces(result.workspaces);
+    return result.workspaces;
+  }, [electron]);
+
+  useEffect(() => {
+    // Check initial status and load workspaces
+    electron.social.slackStatus().then((result) => {
+      setWorkspaces(result.workspaces ?? []);
+      setIsLoading(false);
+
+      if (result.isConnected) {
+        electron.social.slackMessagingStatus().then((status) => {
+          if (status.syncProgress) {
+            setSyncProgress(status.syncProgress);
+          }
+        }).catch((err) => {
+          console.error('[useSlack] Failed to get messaging status:', err);
+        });
+      }
+    }).catch((err) => {
+      console.error('[useSlack] Failed to check Slack status:', err);
+      setIsLoading(false);
+    });
+
+    // Subscribe to messaging sync progress
+    const unsubProgress = electron.social.onSlackMessagingSyncProgress(
+      (progress) => {
+        setSyncProgress(progress);
+        // Update workspace sync progress
+        if (progress.teamId) {
+          setWorkspaces((prev) =>
+            prev.map((ws) =>
+              ws.teamId === progress.teamId
+                ? { ...ws, syncProgress: progress }
+                : ws
+            )
+          );
+        }
+      }
+    );
+
+    // Subscribe to auth invalid
+    const unsubAuth = electron.social.onSlackAuthInvalid(() => {
+      setWorkspaces([]);
+      setSyncProgress(null);
+    });
+
+    return () => {
+      unsubProgress();
+      unsubAuth();
+    };
+  }, [electron]);
+
+  const login = useCallback(async () => {
+    const result = await electron.social.slackLogin();
+    if (result.success) {
+      // Refresh workspaces to get complete data including userId
+      await refreshWorkspaces();
+    }
+    return result;
+  }, [electron, refreshWorkspaces]);
+
+  const disconnect = useCallback(
+    async (teamId?: string) => {
+      const result = await electron.social.slackDisconnect(teamId);
+      if (result.success) {
+        if (teamId) {
+          // Remove specific workspace
+          setWorkspaces((prev) => prev.filter((ws) => ws.teamId !== teamId));
+        } else {
+          // Remove all workspaces
+          setWorkspaces([]);
+        }
+        setSyncProgress(null);
+      }
+      return result;
+    },
+    [electron]
+  );
+
+  const startSync = useCallback(
+    async (teamId?: string) => {
+      return await electron.social.slackStartMessagingSync(teamId);
+    },
+    [electron]
+  );
+
+  const stopSync = useCallback(
+    async (teamId?: string) => {
+      return await electron.social.slackStopMessagingSync(teamId);
+    },
+    [electron]
+  );
+
+  return {
+    isConnected,
+    workspaces,
+    isLoading,
+    syncProgress,
+    login,
+    disconnect,
+    startSync,
+    stopSync,
+    refreshWorkspaces,
+  };
 }

@@ -15,9 +15,7 @@ export default authkitMiddleware({
       "/api/nango/webhook",
       "/api/nango/pull-gmail",
       "/api/nango/pull-google-contacts",
-      "/api/nango/pull-slack",
       "/api/gmail/send",
-      "/api/slack/send",
       // Electron app sync routes (use Bearer token auth)
       "/api/sync/social",
       "/api/sync/imessage",

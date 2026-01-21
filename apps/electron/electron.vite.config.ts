@@ -9,7 +9,16 @@ const rootDir = resolve(__dirname, "../..");
 export default defineConfig({
   main: {
     envDir: rootDir,
+    resolve: {
+      alias: {
+        "@prm/integrations": resolve(__dirname, "../../packages/integrations/src"),
+      },
+    },
     build: {
+      // Force workspace packages to be bundled (not treated as external)
+      externalizeDeps: {
+        exclude: ["@prm/integrations"],
+      },
       rollupOptions: {
         input: {
           index: resolve(__dirname, "src/main/index.ts"),

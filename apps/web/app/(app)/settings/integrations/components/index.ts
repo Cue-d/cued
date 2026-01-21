@@ -1,6 +1,7 @@
 export {
   IntegrationCard,
   type IntegrationConfig,
+  type IntegrationType,
   type Platform,
 } from "./integration-card";
 

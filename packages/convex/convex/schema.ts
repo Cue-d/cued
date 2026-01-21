@@ -93,6 +93,8 @@ const schema = defineSchema({
     pipedreamAccountId: v.optional(v.string()),
     nangoConnectionId: v.optional(v.string()),
     connectedAt: v.optional(v.number()),
+    // Slack-specific: team ID for multi-workspace support
+    slackTeamId: v.optional(v.string()),
     syncState: v.object({
       isConnected: v.boolean(),
       lastSyncAt: v.optional(v.number()),
@@ -108,7 +110,8 @@ const schema = defineSchema({
     }),
   })
     .index("by_user", ["userId"])
-    .index("by_user_platform", ["userId", "platform"]),
+    .index("by_user_platform", ["userId", "platform"])
+    .index("by_user_platform_team", ["userId", "platform", "slackTeamId"]),
 
   contacts: defineTable({
     userId: v.id("users"),
@@ -158,6 +161,7 @@ const schema = defineSchema({
     displayName: v.optional(v.string()),
   })
     .index("by_user", ["userId"])
+    .index("by_user_platform", ["userId", "platform"])
     .index("by_user_last_message", ["userId", "lastMessageAt"])
     .index("by_platform_conversation", ["userId", "platform", "platformConversationId"]),
 

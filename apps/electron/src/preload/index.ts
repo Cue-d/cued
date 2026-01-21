@@ -92,5 +92,35 @@ contextBridge.exposeInMainWorld('electron', {
       ipcRenderer.on('social:twitter:scrapeProgress', handler)
       return () => ipcRenderer.removeListener('social:twitter:scrapeProgress', handler)
     },
+
+    // Slack - Native Integration (Task 5.1) - Multi-workspace support
+    slackStatus: (): Promise<unknown> => ipcRenderer.invoke('social:slack:status'),
+    slackLogin: (): Promise<unknown> => ipcRenderer.invoke('social:slack:login'),
+    slackDisconnect: (teamId?: string): Promise<unknown> =>
+      ipcRenderer.invoke('social:slack:disconnect', teamId),
+    slackListWorkspaces: (): Promise<unknown> =>
+      ipcRenderer.invoke('social:slack:listWorkspaces'),
+
+    // Slack - Messaging Sync (supports optional teamId for specific workspace)
+    slackMessagingStatus: (): Promise<unknown> =>
+      ipcRenderer.invoke('social:slack:messagingStatus'),
+    slackStartMessagingSync: (teamId?: string): Promise<unknown> =>
+      ipcRenderer.invoke('social:slack:startMessagingSync', teamId),
+    slackStopMessagingSync: (teamId?: string): Promise<unknown> =>
+      ipcRenderer.invoke('social:slack:stopMessagingSync', teamId),
+    slackGetSyncProgress: (): Promise<unknown> =>
+      ipcRenderer.invoke('social:slack:getSyncProgress'),
+
+    // Progress listeners - Slack
+    onSlackMessagingSyncProgress: (callback: (progress: unknown) => void) => {
+      const handler = (_event: IpcRendererEvent, progress: unknown) => callback(progress)
+      ipcRenderer.on('social:slack:messagingSyncProgress', handler)
+      return () => ipcRenderer.removeListener('social:slack:messagingSyncProgress', handler)
+    },
+    onSlackAuthInvalid: (callback: () => void) => {
+      const handler = () => callback()
+      ipcRenderer.on('social:slack:authInvalid', handler)
+      return () => ipcRenderer.removeListener('social:slack:authInvalid', handler)
+    },
   },
 })

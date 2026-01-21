@@ -28,9 +28,16 @@ const MAX_CONCURRENT_SENDS = 5;
  * When the undo window expires, a server-side scheduled mutation updates
  * the message, triggering the subscription to fire.
  */
+/** Delay before retrying messages that failed due to auth (5 seconds) */
+const AUTH_RETRY_DELAY_MS = 5000;
+
+/** Maximum auth retries before giving up on a message */
+const MAX_AUTH_RETRIES = 6; // 30 seconds total
+
 export class MessageQueueProcessor {
   private subscription: Unsubscribe<{ messages: Doc<"messageQueue">[] }> | null = null;
   private processingIds = new Set<string>();
+  private authRetryCount = new Map<string, number>();
   private stopped = false;
 
   /**
@@ -60,6 +67,29 @@ export class MessageQueueProcessor {
         this.handleSubscriptionError();
       }
     );
+
+    // Do an initial poll after a short delay to catch any pending messages
+    // This handles the case where messages were queued while the app was closed
+    setTimeout(() => this.pollOnce(), 2000);
+  }
+
+  /**
+   * Poll once for pending messages.
+   * Used on startup to process any backlog.
+   */
+  async pollOnce(): Promise<void> {
+    if (this.stopped) return;
+
+    try {
+      const client = getReactiveConvexClient();
+      const result = await client.query(api.messageQueue.getQueuedMessages, { limit: 20 });
+      console.log(`[MessageQueueProcessor] Initial poll found ${result.messages.length} pending messages`);
+      if (result.messages.length > 0) {
+        await this.handleQueueUpdate(result.messages);
+      }
+    } catch (error) {
+      console.error("[MessageQueueProcessor] Initial poll failed:", error);
+    }
   }
 
   /**
@@ -107,6 +137,8 @@ export class MessageQueueProcessor {
     );
     if (newMessages.length === 0) return;
 
+    console.log(`[MessageQueueProcessor] Processing ${newMessages.length} messages`);
+
     // Process messages with concurrency limit
     const batch = newMessages.slice(0, MAX_CONCURRENT_SENDS);
     await Promise.all(batch.map((m) => this.processMessage(m)));
@@ -139,9 +171,23 @@ export class MessageQueueProcessor {
       // Check if adapter is authenticated
       const isAuth = await adapter.isAuthenticated();
       if (!isAuth) {
-        // Don't mark as failed - let it retry when user authenticates
+        const retryCount = this.authRetryCount.get(messageId) ?? 0;
+        if (retryCount < MAX_AUTH_RETRIES) {
+          this.authRetryCount.set(messageId, retryCount + 1);
+          // Schedule retry after delay - adapter may become authenticated
+          setTimeout(() => {
+            this.processingIds.delete(messageId);
+            this.processMessage(message);
+          }, AUTH_RETRY_DELAY_MS);
+          return;
+        }
+        console.warn(`[MessageQueueProcessor] ${message.platform} not authenticated after ${MAX_AUTH_RETRIES} retries`);
+        this.authRetryCount.delete(messageId);
         return;
       }
+
+      // Clear retry count on successful auth
+      this.authRetryCount.delete(messageId);
 
       await this.updateStatus(messageId, "sending");
 

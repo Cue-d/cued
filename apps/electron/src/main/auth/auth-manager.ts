@@ -29,11 +29,22 @@ export interface AuthCallbacks {
 
 let currentClientId: string | null = null;
 
+/** Callback when tokens are refreshed */
+let onTokenRefreshedCallback: ((state: AuthState) => void) | null = null;
+
 /**
  * Initialize the auth manager with WorkOS client ID.
  */
 export function initAuth(clientId: string): void {
   currentClientId = clientId;
+}
+
+/**
+ * Set callback to be called when tokens are refreshed.
+ * Useful for notifying the UI when auth state is restored.
+ */
+export function setOnTokenRefreshed(callback: (state: AuthState) => void): void {
+  onTokenRefreshedCallback = callback;
 }
 
 const UNAUTHENTICATED_STATE: AuthState = { isAuthenticated: false, user: null };
@@ -58,6 +69,10 @@ export function getAuthState(): AuthState {
   };
 }
 
+// Track last successful refresh to avoid rapid retry loops
+let lastRefreshTime = 0;
+const MIN_REFRESH_INTERVAL_MS = 5000; // Don't refresh more than once per 5 seconds
+
 /**
  * Get a valid access token, refreshing if necessary.
  * Implements proactive token refresh with 5 minute buffer.
@@ -80,17 +95,64 @@ export async function getValidAccessToken(
     return tokens.accessToken;
   }
 
+  // Rate limit refresh attempts
+  const timeSinceLastRefresh = Date.now() - lastRefreshTime;
+  if (timeSinceLastRefresh < MIN_REFRESH_INTERVAL_MS) {
+    console.log(`[Auth] Skipping refresh, last refresh was ${timeSinceLastRefresh}ms ago`);
+    return tokens.accessToken; // Return current token, let caller handle error
+  }
+
+  console.log(`[Auth] Token needs refresh: expires in ${Math.round(timeUntilExpiry / 1000)}s (buffer: ${bufferMs / 1000}s)`);
+
   if (tokens.refreshToken) {
     try {
+      console.log("[Auth] Token expired or expiring, attempting refresh...");
+      lastRefreshTime = Date.now();
       const newTokens = await refreshAccessToken(tokens.refreshToken);
+      console.log("[Auth] Token refreshed successfully");
       return newTokens.accessToken;
-    } catch {
+    } catch (error) {
       // Refresh failed, user needs to re-authenticate
+      console.error("[Auth] Token refresh failed:", error instanceof Error ? error.message : String(error));
       return null;
     }
   }
 
   return null;
+}
+
+/**
+ * Check if an error is an auth/token error from Convex.
+ */
+export function isAuthError(error: unknown): boolean {
+  if (error instanceof Error) {
+    const message = error.message.toLowerCase();
+    return (
+      message.includes("invalidauthheader") ||
+      message.includes("token expired") ||
+      message.includes("could not validate token") ||
+      message.includes("unauthorized") ||
+      message.includes("unauthenticated")
+    );
+  }
+  if (typeof error === "string") {
+    const lower = error.toLowerCase();
+    return (
+      lower.includes("invalidauthheader") ||
+      lower.includes("token expired") ||
+      lower.includes("could not validate token")
+    );
+  }
+  return false;
+}
+
+/**
+ * Force refresh the token immediately, regardless of expiry time.
+ * Use this when you receive an auth error from the server.
+ */
+export async function forceRefreshToken(): Promise<string | null> {
+  console.log("[Auth] Force refreshing token due to auth error...");
+  return getValidAccessToken(true);
 }
 
 /**
@@ -123,6 +185,19 @@ async function refreshAccessToken(refreshToken: string): Promise<StoredTokens> {
   const data = (await response.json()) as TokenResponse;
   const storedTokens = tokenResponseToStoredTokens(data);
   storeTokens(storedTokens);
+
+  // Notify UI that auth is restored
+  if (onTokenRefreshedCallback) {
+    onTokenRefreshedCallback({
+      isAuthenticated: true,
+      user: {
+        id: storedTokens.userId,
+        email: storedTokens.email,
+        firstName: storedTokens.firstName,
+        lastName: storedTokens.lastName,
+      },
+    });
+  }
 
   return storedTokens;
 }

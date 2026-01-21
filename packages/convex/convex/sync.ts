@@ -44,6 +44,11 @@ import {
 import {
   slackMessageInput,
   syncSlackMessagesInternal,
+  nativeSlackConversationInput,
+  nativeSlackMessageInput,
+  slackMentionedUserInput,
+  syncSlackConversationsInternal,
+  syncSlackNativeMessagesInternal,
 } from "./sync/slack";
 import {
   linkedInConversationsBatchInput,
@@ -378,6 +383,59 @@ export const syncSlackMessages = mutation({
     }
 
     return syncSlackMessagesInternal(ctx, user._id, args.messages);
+  },
+});
+
+/**
+ * Sync Slack conversations from native Electron integration.
+ * Creates contacts from DM participants only.
+ */
+export const syncSlackConversations = mutation({
+  args: {
+    slackUserId: v.string(),
+    conversations: v.array(nativeSlackConversationInput),
+  },
+  handler: async (ctx, args) => {
+    const identity = await ctx.auth.getUserIdentity();
+    if (!identity) {
+      throw new Error("Unauthorized: Must be authenticated to sync Slack");
+    }
+
+    const user = await getOrCreateUser(ctx, identity);
+    return syncSlackConversationsInternal(
+      ctx,
+      user._id,
+      args.slackUserId,
+      args.conversations
+    );
+  },
+});
+
+/**
+ * Sync Slack messages from native Electron integration.
+ * Properly detects isFromMe by comparing sender to slackUserId.
+ * Also creates contacts for mentioned users if provided.
+ */
+export const syncSlackNativeMessages = mutation({
+  args: {
+    slackUserId: v.string(),
+    messages: v.array(nativeSlackMessageInput),
+    mentionedUsers: v.optional(v.array(slackMentionedUserInput)),
+  },
+  handler: async (ctx, args) => {
+    const identity = await ctx.auth.getUserIdentity();
+    if (!identity) {
+      throw new Error("Unauthorized: Must be authenticated to sync Slack");
+    }
+
+    const user = await getOrCreateUser(ctx, identity);
+    return syncSlackNativeMessagesInternal(
+      ctx,
+      user._id,
+      args.slackUserId,
+      args.messages,
+      args.mentionedUsers
+    );
   },
 });
 

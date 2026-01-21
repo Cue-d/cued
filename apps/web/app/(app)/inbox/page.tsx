@@ -110,7 +110,13 @@ export default function InboxPage() {
       const recipientHandle = isGroup ? "" : (participant?.handle ?? "");
       const recipientContactId = participant?._id;
 
-      if (!isGroup && !recipientHandle) {
+      // Slack always needs chatIdentifier (channel ID) for both DMs and channels
+      // Other platforms only need it for group chats
+      const isSlack = selectedConversation.platform === "slack";
+      const needsChatIdentifier = isSlack || isGroup;
+
+      // Slack uses chatIdentifier; other platforms need recipientHandle for DMs
+      if (!needsChatIdentifier && !recipientHandle) {
         return;
       }
 
@@ -122,7 +128,7 @@ export default function InboxPage() {
           : undefined,
         text: replyText.trim(),
         isGroup,
-        chatIdentifier: isGroup
+        chatIdentifier: needsChatIdentifier
           ? selectedConversation.platformConversationId
           : undefined,
         conversationId: selectedConversation._id as Id<"conversations">,
