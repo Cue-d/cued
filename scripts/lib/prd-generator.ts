@@ -182,11 +182,78 @@ export function generatePRD(issue: ParsedIssue): PRD {
     throw new Error(`Failed to generate PRD: ${response.error}`);
   }
 
-  // Parse JSON from response (handle markdown code blocks)
-  let jsonStr = response.output;
-  const jsonMatch = jsonStr.match(/```(?:json)?\s*([\s\S]*?)```/);
-  if (jsonMatch) {
-    jsonStr = jsonMatch[1];
+  // Parse JSON from response with robust boundary detection
+  let jsonStr = response.output.trim();
+
+  // If output already starts with JSON, find matching closing brace/bracket
+  if (jsonStr.startsWith('{') || jsonStr.startsWith('[')) {
+    const openChar = jsonStr[0];
+    const closeChar = openChar === '{' ? '}' : ']';
+    let depth = 0;
+    let inString = false;
+    let escapeNext = false;
+    let endIdx = -1;
+
+    for (let i = 0; i < jsonStr.length; i++) {
+      const c = jsonStr[i];
+
+      if (escapeNext) {
+        escapeNext = false;
+        continue;
+      }
+
+      if (c === '\\' && inString) {
+        escapeNext = true;
+        continue;
+      }
+
+      if (c === '"' && !escapeNext) {
+        inString = !inString;
+        continue;
+      }
+
+      if (!inString) {
+        if (c === openChar) depth++;
+        else if (c === closeChar) {
+          depth--;
+          if (depth === 0) {
+            endIdx = i;
+            break;
+          }
+        }
+      }
+    }
+
+    if (endIdx > 0) {
+      jsonStr = jsonStr.substring(0, endIdx + 1);
+    }
+  } else {
+    // Output doesn't start with JSON - try to extract from code blocks or find JSON
+    const jsonMatch = jsonStr.match(/```json\s*([\s\S]*?)```/);
+    if (jsonMatch) {
+      jsonStr = jsonMatch[1].trim();
+    } else {
+      // Find first { or [ and extract to matching close
+      const firstBrace = jsonStr.indexOf('{');
+      const firstBracket = jsonStr.indexOf('[');
+
+      let startIdx = -1;
+      if (firstBrace !== -1 && (firstBracket === -1 || firstBrace < firstBracket)) {
+        startIdx = firstBrace;
+      } else if (firstBracket !== -1) {
+        startIdx = firstBracket;
+      }
+
+      if (startIdx !== -1) {
+        const endBrace = jsonStr.lastIndexOf('}');
+        const endBracket = jsonStr.lastIndexOf(']');
+        const endIdx = Math.max(endBrace, endBracket);
+
+        if (endIdx > startIdx) {
+          jsonStr = jsonStr.substring(startIdx, endIdx + 1);
+        }
+      }
+    }
   }
 
   const parsed = JSON.parse(jsonStr);
