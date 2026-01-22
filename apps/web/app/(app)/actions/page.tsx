@@ -6,9 +6,15 @@ import { api } from "@prm/convex"
 import {
   CardStack,
   MessageResponseCard,
+  ResolveContactCard,
+  ActionFilterChips,
+  ACTION_FILTER_GROUPS,
   type SwipeDirection,
   type DisplayMessage,
   type DraftOption,
+  type FilterGroup,
+  type ContactHandle,
+  type MergeSource,
 } from "@prm/ui"
 import { Button, Skeleton } from "@prm/ui"
 import type { Id } from "@prm/convex"
@@ -55,6 +61,12 @@ interface EnrichedAction {
   conversationId: Id<"conversations"> | null
   contactId: Id<"contacts"> | null
   contactName: string | null
+  secondaryContactId: Id<"contacts"> | null
+  secondaryContactName: string | null
+  // Denormalized merge data for resolve_contact actions
+  mergeConfidence: number | null
+  mergeSource: string | null
+  mergeReasoning: string | null
   platform: string | null
 }
 
@@ -67,12 +79,30 @@ interface ActionWithId {
 }
 
 const EMPTY_ACTIONS: EnrichedAction[] = []
+const EMPTY_COUNTS: Record<string, number> = {}
 
 export default function ActionsPage() {
-  // Fetch pending actions list
-  const actionsResult = useQuery(api.actions.getPendingActions, { limit: 20 })
+  // Filter state
+  const [activeFilter, setActiveFilter] = React.useState<FilterGroup>("all")
+
+  // Get action types to filter by based on active filter group
+  const filterConfig = ACTION_FILTER_GROUPS[activeFilter]
+  const filterTypes = filterConfig.types as readonly string[] | null
+
+  // Fetch pending actions list (no server-side type filter since groups have multiple types)
+  const actionsResult = useQuery(api.actions.getPendingActions, { limit: 50 })
   const countResult = useQuery(api.actions.getPendingActionCount, {})
-  const actions = actionsResult?.actions ?? EMPTY_ACTIONS
+  const countsResult = useQuery(api.actions.getActionCountsByType, {})
+
+  // Filter actions client-side based on active filter group
+  const rawActions = actionsResult?.actions ?? EMPTY_ACTIONS
+  const actions = React.useMemo(() => {
+    if (!filterTypes) return rawActions // "all" filter
+    return rawActions.filter((a) => filterTypes.includes(a.type))
+  }, [rawActions, filterTypes])
+
+  const counts = countsResult?.counts ?? EMPTY_COUNTS
+  const totalFromCounts = countsResult?.total ?? 0
   const totalCount = countResult?.count ?? 0
   const loading = actionsResult === undefined
 
@@ -332,12 +362,85 @@ export default function ActionsPage() {
         </span>
       </div>
 
+      {/* Filter Panel - Right Sidebar */}
+      <div className="absolute top-4 right-4 mt-14 z-10">
+        <div className="bg-card border rounded-lg p-3 shadow-sm">
+          <div className="text-xs font-medium text-muted-foreground mb-2">
+            Filter
+          </div>
+          <ActionFilterChips
+            counts={counts}
+            total={totalFromCounts}
+            activeFilter={activeFilter}
+            onFilterChange={setActiveFilter}
+            vertical
+          />
+        </div>
+      </div>
+
       {/* Card Stack */}
       <CardStack<ActionWithId>
         actions={cardActions}
-        totalCount={totalCount}
+        totalCount={filterTypes ? actions.length : totalCount}
         onSwipe={handleSwipe}
         renderCard={(item, { isTop, responseText, onResponseChange }) => {
+          // Handle resolve_contact actions with dedicated card
+          if (item.action.type === "resolve_contact") {
+            // For resolve_contact, use context to get both contacts with handles
+            if (isTop && contextResult) {
+              const { contact, secondaryContact } = contextResult
+
+              // Map handles to ContactHandle format (context uses handleType/handle fields)
+              const mapHandles = (handles: Array<{ handleType: string; handle: string; platform: string }> | undefined): ContactHandle[] => {
+                if (!handles) return []
+                return handles.map((h) => ({
+                  type: h.handleType as ContactHandle["type"],
+                  value: h.handle,
+                  platform: h.platform as ContactHandle["platform"],
+                }))
+              }
+
+              return (
+                <ResolveContactCard
+                  contact1={{
+                    name: contact?.displayName ?? item.action.contactName ?? "Unknown",
+                    company: contact?.company,
+                    handles: mapHandles(contact?.handles),
+                  }}
+                  contact2={{
+                    name: secondaryContact?.displayName ?? item.action.secondaryContactName ?? "Unknown",
+                    company: secondaryContact?.company,
+                    handles: mapHandles(secondaryContact?.handles),
+                  }}
+                  confidence={item.action.mergeConfidence ?? 0}
+                  source={(item.action.mergeSource ?? "email_match") as MergeSource}
+                  reasoning={item.action.mergeReasoning}
+                  className="h-full"
+                />
+              )
+            }
+
+            // Minimal view for non-top resolve_contact cards
+            return (
+              <ResolveContactCard
+                contact1={{
+                  name: item.action.contactName ?? "Unknown",
+                  company: null,
+                  handles: [],
+                }}
+                contact2={{
+                  name: item.action.secondaryContactName ?? "Unknown",
+                  company: null,
+                  handles: [],
+                }}
+                confidence={item.action.mergeConfidence ?? 0}
+                source={(item.action.mergeSource ?? "email_match") as MergeSource}
+                reasoning={item.action.mergeReasoning}
+                className="h-full"
+              />
+            )
+          }
+
           // Use local state if available, otherwise fall back to server draft
           const text =
             responseTexts[item.id] ??

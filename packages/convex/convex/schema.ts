@@ -43,7 +43,10 @@ export const mergeSuggestionStatusValidator = v.union(
 
 export const mergeSourceValidator = v.union(
   v.literal("email_match"),
-  v.literal("phone_match")
+  v.literal("phone_match"),
+  v.literal("exact_name_match"),
+  v.literal("fuzzy_name_match"),
+  v.literal("llm_fuzzy_match")
 );
 
 export const actionStatusValidator = v.union(
@@ -240,6 +243,10 @@ const schema = defineSchema({
     messageId: v.optional(v.id("messages")),
     secondaryContactId: v.optional(v.id("contacts")), // For resolve_contact actions
     mergeSuggestionId: v.optional(v.id("mergeSuggestions")), // For resolve_contact actions
+    // Denormalized merge suggestion data (for resolve_contact actions)
+    mergeConfidence: v.optional(v.number()),
+    mergeSource: v.optional(mergeSourceValidator),
+    mergeReasoning: v.optional(v.string()),
     platform: v.optional(platformValidator),
     // User-edited draft response
     draftResponse: v.optional(v.string()),

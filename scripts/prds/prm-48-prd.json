@@ -1,0 +1,255 @@
+{
+  "project": "Contact Matching Pipeline (Tiered Deterministic + Fuzzy)",
+  "description": "Implement tiered contact matching pipeline during sync: handle match → exact name → fuzzy name with confidence-based merge suggestions",
+  "linearIssueId": "PRM-48",
+  "target_stack": [
+    "packages/convex/convex/contactResolution.ts",
+    "packages/ai/src/contact-resolution/"
+  ],
+  "decisions": {
+    "tier1_confidence": "1.0 (handle match - phone/email)",
+    "tier2_confidence": "0.95 (exact name match after normalization)",
+    "tier3_confidence": "0.60-0.94 (fuzzy name match using Jaro-Winkler)",
+    "auto_merge_threshold": "0.95+ (tier 1 and exact name can auto-merge)",
+    "suggest_merge_threshold": "0.60-0.94 (fuzzy matches need human review)",
+    "source_values": "phone_match|email_match|exact_name_match|fuzzy_name_match"
+  },
+  "documentation": [
+    {
+      "url": "https://en.wikipedia.org/wiki/Jaro%E2%80%93Winkler_distance",
+      "title": "Jaro-Winkler Distance",
+      "reason": "Algorithm reference for fuzzy-name.ts implementation"
+    }
+  ],
+  "reference_repos": [],
+  "tasks": [
+    {
+      "id": "1.0",
+      "phase": 1,
+      "mode": "afk",
+      "category": "setup",
+      "description": "Extend merge source enum to support all tiers",
+      "steps": [
+        "In packages/convex/convex/schema.ts, add 'exact_name_match' and 'fuzzy_name_match' to mergeSourceValidator",
+        "Verify: pnpm typecheck && pnpm lint - must pass"
+      ],
+      "passes": true
+    },
+    {
+      "id": "1.1",
+      "phase": 1,
+      "mode": "afk",
+      "category": "setup",
+      "description": "Export fuzzy-name module from @prm/ai contact-resolution index",
+      "steps": [
+        "In packages/ai/src/contact-resolution/index.ts, add exports for nameSimilarity, namesMatch, NAME_MATCH_THRESHOLDS from fuzzy-name.ts",
+        "Verify: pnpm typecheck && pnpm lint - must pass"
+      ],
+      "passes": true
+    },
+    {
+      "id": "2.0",
+      "phase": 2,
+      "mode": "afk",
+      "category": "functional",
+      "description": "Create MatchResult type with confidence and source",
+      "steps": [
+        "In packages/convex/convex/contactResolution.ts, define MatchResult type: { contactId: Id<'contacts'>, confidence: number, source: 'phone_match'|'email_match'|'exact_name_match'|'fuzzy_name_match', matchedValue?: string }",
+        "Update existing findBestMatch return type to MatchResult | null",
+        "Verify: pnpm typecheck && pnpm lint - must pass"
+      ],
+      "passes": true,
+      "dependencies": [
+        "1.0"
+      ]
+    },
+    {
+      "id": "2.1",
+      "phase": 2,
+      "mode": "afk",
+      "category": "functional",
+      "description": "Implement Tier 1: Handle matching (phone/email) with confidence 1.0",
+      "steps": [
+        "In packages/convex/convex/contactResolution.ts, extract handle matching logic from findBestMatch into new function matchByHandle(contact1, contact2): MatchResult | null",
+        "Check emails first using emailsMatch from deterministic.ts, return {confidence: 1.0, source: 'email_match'}",
+        "Then check phones using phonesMatch from @prm/shared, return {confidence: 1.0, source: 'phone_match'}",
+        "Include matchedValue in result for audit trail",
+        "Verify: pnpm typecheck && pnpm lint - must pass"
+      ],
+      "passes": true,
+      "dependencies": [
+        "2.0"
+      ]
+    },
+    {
+      "id": "2.2",
+      "phase": 2,
+      "mode": "afk",
+      "category": "functional",
+      "description": "Implement Tier 2: Exact name matching with confidence 0.95",
+      "steps": [
+        "In packages/convex/convex/contactResolution.ts, add function matchByExactName(contact1, contact2): MatchResult | null",
+        "Normalize both displayNames: lowercase, trim, remove extra spaces",
+        "If normalized names are equal and non-empty, return {confidence: 0.95, source: 'exact_name_match', matchedValue: normalizedName}",
+        "Skip if either contact has no displayName or displayName looks like phone/email (use existing looksLikePhone/looksLikeEmail)",
+        "Verify: pnpm typecheck && pnpm lint - must pass"
+      ],
+      "passes": true,
+      "dependencies": [
+        "2.0"
+      ]
+    },
+    {
+      "id": "2.3",
+      "phase": 2,
+      "mode": "afk",
+      "category": "functional",
+      "description": "Implement Tier 3: Fuzzy name matching with Jaro-Winkler scores",
+      "steps": [
+        "In packages/convex/convex/contactResolution.ts, add function matchByFuzzyName(contact1, contact2): MatchResult | null",
+        "Import nameSimilarity, NAME_MATCH_THRESHOLDS from @prm/ai contact-resolution",
+        "Skip if either displayName looks like phone/email or is empty",
+        "Calculate similarity score using nameSimilarity(name1, name2)",
+        "If score >= NAME_MATCH_THRESHOLDS.MINIMUM (0.60), return {confidence: score, source: 'fuzzy_name_match', matchedValue: `${name1} ~ ${name2}`}",
+        "Verify: pnpm typecheck && pnpm lint - must pass"
+      ],
+      "passes": true,
+      "dependencies": [
+        "1.1",
+        "2.0"
+      ]
+    },
+    {
+      "id": "3.0",
+      "phase": 3,
+      "mode": "afk",
+      "category": "integration",
+      "description": "Integrate tiered matching into findBestMatch function",
+      "steps": [
+        "In packages/convex/convex/contactResolution.ts, refactor findBestMatch to call tiers in order: matchByHandle → matchByExactName → matchByFuzzyName",
+        "Return first non-null result (highest priority tier wins)",
+        "Preserve backward compatibility: function signature unchanged",
+        "Verify: pnpm typecheck && pnpm lint - must pass"
+      ],
+      "passes": true,
+      "dependencies": [
+        "2.1",
+        "2.2",
+        "2.3"
+      ]
+    },
+    {
+      "id": "3.1",
+      "phase": 3,
+      "mode": "afk",
+      "category": "integration",
+      "description": "Update merge suggestion creation to use MatchResult source and confidence",
+      "steps": [
+        "In packages/convex/convex/contactResolution.ts findDuplicateCandidatesInternal, pass match.source and match.confidence to createMergeSuggestion",
+        "In createMergeSuggestion internal mutation, accept source param from MatchResult instead of hardcoding",
+        "Priority formula already uses confidence: Math.round((1 - confidence) * 100) - verify this works for fuzzy scores",
+        "Verify: pnpm typecheck && pnpm lint - must pass"
+      ],
+      "passes": true,
+      "dependencies": [
+        "3.0"
+      ]
+    },
+    {
+      "id": "4.0",
+      "phase": 4,
+      "mode": "afk",
+      "category": "refactor",
+      "description": "Add early exit optimization for handle-indexed matching",
+      "steps": [
+        "In findDuplicateCandidatesInternal, after handle-index lookup returns candidates, run tier 1 (handle) matching first",
+        "Only run tier 2/3 (name matching) if no handle match found",
+        "This preserves O(n) complexity for most cases while adding name matching",
+        "Verify: pnpm typecheck && pnpm lint - must pass"
+      ],
+      "passes": true,
+      "dependencies": [
+        "3.1"
+      ]
+    },
+    {
+      "id": "5.0",
+      "phase": 5,
+      "mode": "afk",
+      "category": "testing",
+      "description": "Add unit tests for Tier 1 (handle matching)",
+      "steps": [
+        "In packages/convex/convex/__tests__/contactResolution.test.ts, add test suite for matchByHandle",
+        "Test: email exact match returns confidence 1.0 and source 'email_match'",
+        "Test: phone variant match (10-digit vs 11-digit) returns confidence 1.0 and source 'phone_match'",
+        "Test: no match returns null",
+        "Run: cd packages/convex && pnpm test",
+        "Verify: pnpm typecheck && pnpm lint - must pass"
+      ],
+      "passes": true,
+      "dependencies": [
+        "2.1"
+      ]
+    },
+    {
+      "id": "5.1",
+      "phase": 5,
+      "mode": "afk",
+      "category": "testing",
+      "description": "Add unit tests for Tier 2 (exact name matching)",
+      "steps": [
+        "In packages/convex/convex/__tests__/contactResolution.test.ts, add test suite for matchByExactName",
+        "Test: exact name match (case insensitive) returns confidence 0.95",
+        "Test: names with extra spaces normalize and match",
+        "Test: phone-like displayName skipped (returns null)",
+        "Test: email-like displayName skipped",
+        "Run: cd packages/convex && pnpm test",
+        "Verify: pnpm typecheck && pnpm lint - must pass"
+      ],
+      "passes": true,
+      "dependencies": [
+        "2.2"
+      ]
+    },
+    {
+      "id": "5.2",
+      "phase": 5,
+      "mode": "afk",
+      "category": "testing",
+      "description": "Add unit tests for Tier 3 (fuzzy name matching)",
+      "steps": [
+        "In packages/convex/convex/__tests__/contactResolution.test.ts, add test suite for matchByFuzzyName",
+        "Test: 'Robert Smith' vs 'Bob Smith' returns score >= 0.60 (nickname expansion)",
+        "Test: 'John Doe' vs 'Jon Doe' returns score >= 0.80 (typo tolerance)",
+        "Test: completely different names return null (below 0.60)",
+        "Test: phone-like displayName skipped",
+        "Run: cd packages/convex && pnpm test",
+        "Verify: pnpm typecheck && pnpm lint - must pass"
+      ],
+      "passes": true,
+      "dependencies": [
+        "2.3"
+      ]
+    },
+    {
+      "id": "5.3",
+      "phase": 5,
+      "mode": "afk",
+      "category": "testing",
+      "description": "Add integration test for tiered pipeline priority",
+      "steps": [
+        "In packages/convex/convex/__tests__/contactResolution.test.ts, add test for findBestMatch tier ordering",
+        "Test: contact with matching email AND fuzzy name returns email_match (tier 1 wins)",
+        "Test: contact with exact name AND fuzzy name returns exact_name_match (tier 2 wins)",
+        "Test: contact with only fuzzy name match returns fuzzy_name_match (tier 3)",
+        "Test: merge suggestion created with correct source field",
+        "Run: cd packages/convex && pnpm test",
+        "Verify: pnpm typecheck && pnpm lint - must pass"
+      ],
+      "passes": true,
+      "dependencies": [
+        "3.1"
+      ]
+    }
+  ]
+}

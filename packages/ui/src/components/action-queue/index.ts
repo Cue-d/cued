@@ -34,3 +34,25 @@ export type {
   ContactCardRef,
   ExistingContact,
 } from "./contact-card"
+
+export {
+  ResolveContactCard,
+  ContactPanel,
+  SourceBadge,
+} from "./resolve-contact-card"
+export type {
+  ResolveContactCardProps,
+  ContactHandle,
+  ContactPanelProps,
+  MergeSource,
+  SourceBadgeProps,
+} from "./resolve-contact-card"
+
+export {
+  ActionFilterChips,
+  ACTION_FILTER_GROUPS,
+} from "./action-filter-chips"
+export type {
+  ActionFilterChipsProps,
+  FilterGroup,
+} from "./action-filter-chips"

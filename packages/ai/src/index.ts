@@ -127,4 +127,11 @@ export {
   getNameMatchResult,
   NAME_MATCH_THRESHOLDS,
   type NameMatchResult,
+  // LLM-based fuzzy match decision
+  decideFuzzyMatch,
+  decideFuzzyMatchWithRetry,
+  FuzzyMatchDecisionSchema,
+  LLM_CONFIDENCE_THRESHOLD,
+  type ContactMatchInput,
+  type FuzzyMatchDecision,
 } from "./contact-resolution";

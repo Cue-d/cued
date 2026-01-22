@@ -2,7 +2,6 @@ export * from "./components/ui"
 export * from "./components/unified-inbox"
 export * from "./components/assistant"
 export * from "./components/action-queue"
-export * from "./components/contacts"
 
 // ai-elements - shadcn registry components for AI chat interfaces
 export {

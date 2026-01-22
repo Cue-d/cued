@@ -16,7 +16,6 @@ import { v } from "convex/values";
 import type { Doc, Id } from "./_generated/dataModel";
 import type { MutationCtx } from "./_generated/server";
 import { mutation, query } from "./_generated/server";
-import { internal } from "./_generated/api";
 import { platformValidator } from "./schema";
 import { findUserByWorkosId } from "./lib/auth";
 
@@ -530,14 +529,6 @@ async function syncSocialContactsInternal(
     } catch (e) {
       result.errors.push(`Failed to sync ${contact.name}: ${e}`);
     }
-  }
-
-  // Schedule merge candidate search for each new contact
-  for (const info of newContactsInfo) {
-    await ctx.scheduler.runAfter(0, internal.contactResolution.findMergeCandidatesForContact, {
-      userId,
-      contactId: info.contactId,
-    });
   }
 
   // Create new_connection actions for enrichment (limit 20 per sync)

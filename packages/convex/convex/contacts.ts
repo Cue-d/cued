@@ -1,5 +1,5 @@
 import { v } from "convex/values";
-import { mutation, query } from "./_generated/server";
+import { mutation, query, internalQuery } from "./_generated/server";
 import type { MutationCtx, QueryCtx } from "./_generated/server";
 import type { Doc, Id } from "./_generated/dataModel";
 import { getAuthenticatedUser } from "./lib/auth";
@@ -150,15 +150,15 @@ export const getPendingMergeSuggestions = query({
     const user = await getAuthenticatedUser(ctx);
     if (!user) return { suggestions: [] };
 
-    const limit = Math.min(args.limit ?? 20, 50);
-
-    const suggestions = await ctx.db
+    // Use limit if provided, otherwise return all (typically < 100)
+    const query = ctx.db
       .query("mergeSuggestions")
       .withIndex("by_user_status", (q) =>
         q.eq("userId", user._id).eq("status", "pending")
       )
-      .order("desc")
-      .take(limit);
+      .order("desc");
+
+    const suggestions = args.limit ? await query.take(args.limit) : await query.collect();
 
     // Fetch contact details for each suggestion
     const enrichedSuggestions = await Promise.all(
@@ -655,6 +655,18 @@ async function getContactWithHandles(ctx: QueryCtx, contactId: Id<"contacts">) {
     })),
   };
 }
+
+/**
+ * Internal query to get a contact with handles (for use by internalActions).
+ */
+export const getContactWithHandlesInternal = internalQuery({
+  args: {
+    contactId: v.id("contacts"),
+  },
+  handler: async (ctx, args) => {
+    return getContactWithHandles(ctx, args.contactId);
+  },
+});
 
 /**
  * Clean up a resolve_contact action when its merge suggestion is resolved.

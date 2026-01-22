@@ -6,78 +6,40 @@ import {
   mutation,
 } from "./_generated/server";
 import { internal } from "./_generated/api";
-import type { Doc, Id } from "./_generated/dataModel";
+import type { Id } from "./_generated/dataModel";
 import { getAuthenticatedUser } from "./lib/auth";
-import { normalizeEmail, emailsMatch, phonesMatch } from "@prm/ai";
+import { normalizeEmail, nameSimilarity, NAME_MATCH_THRESHOLDS, getPhoneVariants, phonesMatch } from "@prm/ai";
 
-type ContactWithHandles = Doc<"contacts"> & {
-  handles: Array<{
-    type: "phone" | "email" | "slack_id" | "linkedin_url" | "twitter_handle";
-    value: string;
-    platform: "imessage" | "gmail" | "slack" | "linkedin" | "twitter" | "signal" | "whatsapp";
-  }>;
+// TODO: Re-enable LLM matching once basic name matching is working
+// LLM matching implementation lives in: @prm/ai (packages/ai/src/contact-resolution/llm-match.ts)
+// - decideFuzzyMatchWithRetry(): calls GPT to verify if two fuzzy-matched contacts are the same person
+// - LLM_CONFIDENCE_THRESHOLD (0.70): minimum confidence to create a merge suggestion
+// import { decideFuzzyMatchWithRetry, LLM_CONFIDENCE_THRESHOLD } from "@prm/ai";
+
+type DuplicatePair = {
+  contact1Id: Id<"contacts">;
+  contact2Id: Id<"contacts">;
+  confidence: number;
+  source:
+    | "email_match"
+    | "phone_match"
+    | "exact_name_match"
+    | "fuzzy_name_match"
+    | "llm_fuzzy_match";
+  sharedHandle?: string;
 };
 
-/** Find merge candidates for a specific contact after sync. */
-export const findMergeCandidatesForContact = internalAction({
-  args: {
-    userId: v.id("users"),
-    contactId: v.id("contacts"),
-  },
-  handler: async (ctx, args) => {
-    // Get the target contact with handles
-    const targetContact = await ctx.runQuery(
-      internal.contactResolution.getContactWithHandlesInternal,
-      { contactId: args.contactId }
-    );
+/** Get or create a Set in a Map. */
+function getOrCreateSet<K, V>(map: Map<K, Set<V>>, key: K): Set<V> {
+  let set = map.get(key);
+  if (!set) {
+    set = new Set();
+    map.set(key, set);
+  }
+  return set;
+}
 
-    if (!targetContact) return { matches: [] };
-
-    // Get all other contacts for comparison
-    const allContacts = await ctx.runQuery(
-      internal.contactResolution.getAllContactsWithHandlesInternal,
-      { userId: args.userId, excludeContactId: args.contactId }
-    );
-
-    const matches: Array<{
-      contactId: Id<"contacts">;
-      confidence: number;
-      source: "email_match" | "phone_match";
-      reasoning: string;
-    }> = [];
-
-    for (const candidate of allContacts) {
-      const match = findBestMatch(targetContact, candidate);
-      if (match) {
-        matches.push({
-          contactId: candidate._id,
-          confidence: match.confidence,
-          source: match.source,
-          reasoning: match.reasoning,
-        });
-      }
-    }
-
-    // Create merge suggestions for all matches (exact email/phone matches)
-    for (const match of matches) {
-      await ctx.runMutation(
-        internal.contactResolution.createMergeSuggestionInternal,
-        {
-          userId: args.userId,
-          contact1Id: match.contactId,
-          contact2Id: args.contactId,
-          confidence: match.confidence,
-          source: match.source,
-          reasoning: match.reasoning,
-        }
-      );
-    }
-
-    return { matches };
-  },
-});
-
-/** Scan all contacts for merge candidates using handle-based indexing. */
+/** Scan all contacts for merge candidates using handle + name matching. */
 export const scanAllContactsForMerges = internalAction({
   args: {
     userId: v.id("users"),
@@ -89,38 +51,102 @@ export const scanAllContactsForMerges = internalAction({
     contactsScanned: number;
     comparisonsPerformed: number;
     suggestionsCreated: number;
+    errors: string[];
   }> => {
-    const duplicatePairs = await ctx.runQuery(
+    const result = await ctx.runQuery(
       internal.contactResolution.findDuplicateCandidatesInternal,
       { userId: args.userId }
     );
 
     let suggestionsCreated = 0;
+    const errors: string[] = [];
 
-    for (const pair of duplicatePairs) {
-      await ctx.runMutation(
-        internal.contactResolution.createMergeSuggestionInternal,
-        {
-          userId: args.userId,
-          contact1Id: pair.contact1Id,
-          contact2Id: pair.contact2Id,
-          confidence: pair.confidence,
-          source: pair.source,
-          reasoning: `${(pair.confidence * 100).toFixed(0)}% match via ${pair.source}`,
-        }
-      );
-      suggestionsCreated++;
+    // Process all duplicate pairs (handle matches + name matches)
+    for (const pair of result.duplicatePairs) {
+      try {
+        const createResult = await ctx.runMutation(
+          internal.contactResolution.createMergeSuggestionInternal,
+          {
+            userId: args.userId,
+            contact1Id: pair.contact1Id,
+            contact2Id: pair.contact2Id,
+            confidence: pair.confidence,
+            source: pair.source,
+            reasoning: `${(pair.confidence * 100).toFixed(0)}% match via ${pair.source}`,
+          }
+        );
+        if (createResult.created) suggestionsCreated++;
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        console.error(
+          `[scanAllContactsForMerges] Failed to create suggestion: ` +
+            `${pair.contact1Id} <-> ${pair.contact2Id} (${pair.source}): ${msg}`
+        );
+        errors.push(`${pair.source}: ${msg}`);
+      }
     }
 
+    // TODO: Re-enable LLM verification for fuzzy matches
+    // When re-enabling:
+    // 1. Import decideFuzzyMatchWithRetry, LLM_CONFIDENCE_THRESHOLD from @prm/ai
+    // 2. Fetch contacts with handles: ctx.runQuery(internal.contacts.getContactWithHandlesInternal, ...)
+    // 3. Call decideFuzzyMatchWithRetry({ contact1, contact2, fuzzyScore })
+    // 4. Only create suggestion if llmResult.samePerson && llmResult.confidence >= LLM_CONFIDENCE_THRESHOLD
+    // For now, create suggestions for fuzzy matches without LLM verification
+    for (const fuzzy of result.fuzzyPairs) {
+      try {
+        const createResult = await ctx.runMutation(
+          internal.contactResolution.createMergeSuggestionInternal,
+          {
+            userId: args.userId,
+            contact1Id: fuzzy.contact1Id,
+            contact2Id: fuzzy.contact2Id,
+            confidence: fuzzy.confidence,
+            source: fuzzy.source,
+            reasoning: `${(fuzzy.confidence * 100).toFixed(0)}% name similarity (needs review)`,
+          }
+        );
+        if (createResult.created) suggestionsCreated++;
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        console.error(
+          `[scanAllContactsForMerges] Failed to create fuzzy suggestion: ` +
+            `${fuzzy.contact1Id} <-> ${fuzzy.contact2Id}: ${msg}`
+        );
+        errors.push(`fuzzy_name_match: ${msg}`);
+      }
+    }
+
+    // Batch update user's pending action count to avoid OCC conflicts
+    if (suggestionsCreated > 0) {
+      await ctx.runMutation(
+        internal.contactResolution.incrementPendingActionCount,
+        { userId: args.userId, count: suggestionsCreated }
+      );
+    }
+
+    const totalComparisons =
+      result.duplicatePairs.length + result.fuzzyPairs.length;
+
     return {
-      contactsScanned: duplicatePairs.length * 2,
-      comparisonsPerformed: duplicatePairs.length,
+      contactsScanned: totalComparisons * 2,
+      comparisonsPerformed: totalComparisons,
       suggestionsCreated,
+      errors,
     };
   },
 });
 
-/** Find duplicate candidates by indexing handles (O(n) instead of O(n²)). */
+/**
+ * Find duplicate candidates using INDEX-BASED matching for both handles and names.
+ *
+ * Both use the same O(n) approach:
+ * 1. Build index: key → Set<contactIds>
+ * 2. Only compare contacts that share a key
+ *
+ * Handle matching: key = normalized email/phone
+ * Name matching: key = name token (each word in the name)
+ */
 export const findDuplicateCandidatesInternal = internalQuery({
   args: {
     userId: v.id("users"),
@@ -136,52 +162,110 @@ export const findDuplicateCandidatesInternal = internalQuery({
       .withIndex("by_user", (q) => q.eq("userId", args.userId))
       .collect();
 
+    // Build handle index (email/phone → contactIds)
+    // Only index valid emails (must contain @) and phones (must have 7+ digits)
     const handleToContacts = new Map<string, Set<Id<"contacts">>>();
 
     for (const handle of handles) {
-      const normalizedValue =
-        handle.handleType === "email"
-          ? normalizeEmail(handle.handle)
-          : handle.handle.toLowerCase();
+      // Skip empty or whitespace-only handles
+      const rawValue = handle.handle?.trim();
+      if (!rawValue) continue;
 
-      if (!handleToContacts.has(normalizedValue)) {
-        handleToContacts.set(normalizedValue, new Set());
+      if (handle.handleType === "email") {
+        // Only index valid-looking emails (must contain @)
+        if (!rawValue.includes("@")) continue;
+        const normalized = normalizeEmail(rawValue);
+        if (normalized && normalized.includes("@")) {
+          getOrCreateSet(handleToContacts, normalized).add(handle.contactId);
+        }
+      } else if (handle.handleType === "phone") {
+        // Only index valid-looking phones (7+ digits)
+        const digitsOnly = rawValue.replace(/\D/g, "");
+        if (digitsOnly.length >= 7) {
+          // Index ALL variants so different formats match (e.g., +15551234567 and 5551234567)
+          const variants = getPhoneVariants(rawValue);
+          for (const variant of variants) {
+            getOrCreateSet(handleToContacts, variant).add(handle.contactId);
+          }
+        }
       }
-      handleToContacts.get(normalizedValue)!.add(handle.contactId);
+      // Skip other handle types (linkedin_id, slack_id, etc.) - they're not used for merge matching
     }
 
-    // Index displayNames that look like email/phone as fallback
+    // Also index displayNames that look like email/phone (for contacts without proper handles)
     for (const contact of contacts) {
-      if (looksLikeEmail(contact.displayName)) {
-        const normalized = normalizeEmail(contact.displayName);
-        if (!handleToContacts.has(normalized)) {
-          handleToContacts.set(normalized, new Set());
+      const name = contact.displayName?.trim();
+      if (!name) continue;
+
+      if (looksLikeEmail(name)) {
+        const normalized = normalizeEmail(name);
+        // Double-check normalization result is valid
+        if (normalized && normalized.includes("@")) {
+          getOrCreateSet(handleToContacts, normalized).add(contact._id);
         }
-        handleToContacts.get(normalized)!.add(contact._id);
-      } else if (looksLikePhone(contact.displayName)) {
-        const normalized = contact.displayName.replace(/[\s\-\(\)\.]/g, "");
-        if (!handleToContacts.has(normalized)) {
-          handleToContacts.set(normalized, new Set());
+      } else if (looksLikePhone(name)) {
+        const digitsOnly = name.replace(/\D/g, "");
+        if (digitsOnly.length >= 7) {
+          // Index ALL variants so different formats match
+          const variants = getPhoneVariants(name);
+          for (const variant of variants) {
+            getOrCreateSet(handleToContacts, variant).add(contact._id);
+          }
         }
-        handleToContacts.get(normalized)!.add(contact._id);
       }
     }
 
-    const duplicatePairs: Array<{
-      contact1Id: Id<"contacts">;
-      contact2Id: Id<"contacts">;
-      confidence: number;
-      source: "email_match" | "phone_match";
-      sharedHandle: string;
-    }> = [];
+    // Build name token index (token → contactIds)
+    // "John Doe" → tokens: ["john", "doe"]
+    // Only compare contacts that share at least one token
+    const nameTokenToContacts = new Map<string, Set<Id<"contacts">>>();
+    const contactIdToContact = new Map<Id<"contacts">, (typeof contacts)[0]>();
 
+    // Build contactId → handles map for conflict detection
+    const contactIdToHandles = new Map<Id<"contacts">, typeof handles>();
+    for (const handle of handles) {
+      const existing = contactIdToHandles.get(handle.contactId) ?? [];
+      existing.push(handle);
+      contactIdToHandles.set(handle.contactId, existing);
+    }
+
+    for (const contact of contacts) {
+      const name = contact.displayName;
+
+      // Skip placeholder contacts (emails/phones as names) and dismissed
+      if (
+        contact.isDismissed ||
+        !name.trim() ||
+        looksLikeEmail(name) ||
+        looksLikePhone(name)
+      ) {
+        continue;
+      }
+
+      contactIdToContact.set(contact._id, contact);
+
+      // Extract name tokens (lowercase words, min 2 chars to avoid initials)
+      const tokens = name
+        .toLowerCase()
+        .split(/\s+/)
+        .filter((t) => t.length >= 2);
+
+      for (const token of tokens) {
+        getOrCreateSet(nameTokenToContacts, token).add(contact._id);
+      }
+    }
+
+    // Find duplicates from handle index
+    const duplicatePairs: DuplicatePair[] = [];
+    const fuzzyPairs: DuplicatePair[] = [];
     const seenPairs = new Set<string>();
+    const matchedByHandle = new Set<Id<"contacts">>();
 
     for (const [handle, contactIds] of handleToContacts.entries()) {
       if (contactIds.size < 2) continue;
 
       const contactArray = Array.from(contactIds);
-      const isEmail = handle.includes("@");
+      const source = handle.includes("@") ? "email_match" : "phone_match";
 
       for (let i = 0; i < contactArray.length; i++) {
         for (let j = i + 1; j < contactArray.length; j++) {
@@ -196,14 +280,123 @@ export const findDuplicateCandidatesInternal = internalQuery({
             contact1Id: id1,
             contact2Id: id2,
             confidence: 1.0,
-            source: isEmail ? "email_match" : "phone_match",
+            source,
             sharedHandle: handle,
+          });
+
+          matchedByHandle.add(id1);
+          matchedByHandle.add(id2);
+        }
+      }
+    }
+
+    // Helper: Check if two contacts have conflicting unique identifiers
+    // Only considers phones and linkedin_id as "unique" - emails are excluded since
+    // people often have multiple emails (work/personal) for the same person
+    // Uses phonesMatch for proper phone variant handling (+1 vs 10-digit)
+    const hasConflictingHandles = (
+      handles1: typeof handles | undefined,
+      handles2: typeof handles | undefined
+    ): boolean => {
+      if (!handles1 || !handles2) return false;
+
+      // Only check truly unique identifiers: phone, linkedin_id
+      // Emails excluded - people often have work + personal emails
+      const uniqueTypes = ["phone", "linkedin_id"];
+
+      // Group handles by type
+      const byType1 = new Map<string, string[]>();
+      const byType2 = new Map<string, string[]>();
+
+      for (const h of handles1) {
+        if (!uniqueTypes.includes(h.handleType)) continue;
+        const vals = byType1.get(h.handleType) ?? [];
+        vals.push(h.handle);
+        byType1.set(h.handleType, vals);
+      }
+      for (const h of handles2) {
+        if (!uniqueTypes.includes(h.handleType)) continue;
+        const vals = byType2.get(h.handleType) ?? [];
+        vals.push(h.handle);
+        byType2.set(h.handleType, vals);
+      }
+
+      // Check each handle type - if both have exactly 1 and they differ, conflict
+      for (const [type, vals1] of byType1.entries()) {
+        const vals2 = byType2.get(type);
+        if (!vals2) continue;
+
+        // Both have exactly 1 handle of this type
+        if (vals1.length === 1 && vals2.length === 1) {
+          const v1 = vals1[0];
+          const v2 = vals2[0];
+
+          if (type === "phone") {
+            // Use phonesMatch which handles +1 variants
+            if (!phonesMatch(v1, v2)) {
+              return true; // Different phones = conflict
+            }
+          } else {
+            // For linkedin_id, use lowercase comparison
+            if (v1.toLowerCase() !== v2.toLowerCase()) {
+              return true;
+            }
+          }
+        }
+      }
+
+      return false;
+    };
+
+    // Find duplicates from name token index
+    // Compare contacts that share a token - seenPairs prevents duplicate suggestions
+    for (const [, contactIds] of nameTokenToContacts.entries()) {
+      // Skip very common tokens that would cause too many comparisons
+      if (contactIds.size < 2 || contactIds.size > 50) continue;
+
+      const contactArray = Array.from(contactIds);
+
+      for (let i = 0; i < contactArray.length; i++) {
+        for (let j = i + 1; j < contactArray.length; j++) {
+          const id1 = contactArray[i];
+          const id2 = contactArray[j];
+          const pairKey = [id1, id2].sort().join("-");
+
+          if (seenPairs.has(pairKey)) continue;
+
+          const c1 = contactIdToContact.get(id1);
+          const c2 = contactIdToContact.get(id2);
+          if (!c1 || !c2) continue;
+
+          // Check for conflicting unique identifiers (different phone, email, linkedin, etc.)
+          const handles1 = contactIdToHandles.get(id1);
+          const handles2 = contactIdToHandles.get(id2);
+
+          if (hasConflictingHandles(handles1, handles2)) {
+            // Skip this pair - they have different unique identifiers
+            seenPairs.add(pairKey);
+            continue;
+          }
+
+          // Expensive Jaro-Winkler comparison
+          const score = nameSimilarity(c1.displayName, c2.displayName);
+          if (score < NAME_MATCH_THRESHOLDS.MINIMUM) continue;
+
+          seenPairs.add(pairKey);
+          const isExactMatch = score >= NAME_MATCH_THRESHOLDS.AUTO_MERGE;
+          const targetArray = isExactMatch ? duplicatePairs : fuzzyPairs;
+
+          targetArray.push({
+            contact1Id: id1,
+            contact2Id: id2,
+            confidence: score,
+            source: isExactMatch ? "exact_name_match" : "fuzzy_name_match",
           });
         }
       }
     }
 
-    return duplicatePairs;
+    return { duplicatePairs, fuzzyPairs };
   },
 });
 
@@ -224,102 +417,63 @@ export const triggerMergeScan = mutation({
   },
 });
 
-export const getContactWithHandlesInternal = internalQuery({
-  args: {
-    contactId: v.id("contacts"),
-  },
-  handler: async (ctx, args): Promise<ContactWithHandles | null> => {
-    const contact = await ctx.db.get(args.contactId);
-    if (!contact) return null;
-
-    const handles = await ctx.db
-      .query("contactHandles")
-      .withIndex("by_contact", (q) => q.eq("contactId", args.contactId))
-      .collect();
-
-    return {
-      ...contact,
-      handles: handles.map((h) => ({
-        type: h.handleType,
-        value: h.handle,
-        platform: h.platform,
-      })),
-    };
-  },
-});
-
-export const getAllContactsWithHandlesInternal = internalQuery({
-  args: {
-    userId: v.id("users"),
-    excludeContactId: v.optional(v.id("contacts")),
-  },
-  handler: async (ctx, args): Promise<ContactWithHandles[]> => {
-    let contacts = await ctx.db
-      .query("contacts")
-      .withIndex("by_user", (q) => q.eq("userId", args.userId))
-      .collect();
-
-    if (args.excludeContactId) {
-      contacts = contacts.filter((c) => c._id !== args.excludeContactId);
-    }
-
-    const contactsWithHandles = await Promise.all(
-      contacts.map(async (contact) => {
-        const handles = await ctx.db
-          .query("contactHandles")
-          .withIndex("by_contact", (q) => q.eq("contactId", contact._id))
-          .collect();
-
-        return {
-          ...contact,
-          handles: handles.map((h) => ({
-            type: h.handleType,
-            value: h.handle,
-            platform: h.platform,
-          })),
-        };
-      })
-    );
-
-    return contactsWithHandles;
-  },
-});
-
 export const createMergeSuggestionInternal = internalMutation({
   args: {
     userId: v.id("users"),
     contact1Id: v.id("contacts"),
     contact2Id: v.id("contacts"),
     confidence: v.number(),
-    source: v.union(v.literal("email_match"), v.literal("phone_match")),
+    source: v.union(
+      v.literal("email_match"),
+      v.literal("phone_match"),
+      v.literal("exact_name_match"),
+      v.literal("fuzzy_name_match"),
+      v.literal("llm_fuzzy_match")
+    ),
     reasoning: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
-    const [existing, existingReverse] = await Promise.all([
-      ctx.db
-        .query("mergeSuggestions")
-        .withIndex("by_contacts", (q) =>
-          q.eq("contact1Id", args.contact1Id).eq("contact2Id", args.contact2Id)
-        )
-        .unique(),
-      ctx.db
-        .query("mergeSuggestions")
-        .withIndex("by_contacts", (q) =>
-          q.eq("contact1Id", args.contact2Id).eq("contact2Id", args.contact1Id)
-        )
-        .unique(),
-    ]);
+    // Normalize order: always put smaller ID first to ensure consistency
+    const [c1, c2] =
+      args.contact1Id < args.contact2Id
+        ? [args.contact1Id, args.contact2Id]
+        : [args.contact2Id, args.contact1Id];
 
-    if (existing || existingReverse) {
-      return { created: false, reason: "Already exists" };
+    // Check for existing merge suggestion (only need to check one direction now)
+    const existingSuggestion = await ctx.db
+      .query("mergeSuggestions")
+      .withIndex("by_contacts", (q) => q.eq("contact1Id", c1).eq("contact2Id", c2))
+      .unique();
+
+    if (existingSuggestion) {
+      return { created: false, reason: "Suggestion already exists" };
+    }
+
+    // Also check for existing resolve_contact action for this pair
+    const existingAction = await ctx.db
+      .query("actions")
+      .withIndex("by_user_status", (q) =>
+        q.eq("userId", args.userId).eq("status", "pending")
+      )
+      .filter((q) =>
+        q.and(
+          q.eq(q.field("type"), "resolve_contact"),
+          q.eq(q.field("contactId"), c1),
+          q.eq(q.field("secondaryContactId"), c2)
+        )
+      )
+      .first();
+
+    if (existingAction) {
+      return { created: false, reason: "Action already exists" };
     }
 
     const now = Date.now();
 
     const suggestionId = await ctx.db.insert("mergeSuggestions", {
       userId: args.userId,
-      contact1Id: args.contact1Id,
-      contact2Id: args.contact2Id,
+      contact1Id: c1,
+      contact2Id: c2,
       confidence: args.confidence,
       source: args.source,
       reasoning: args.reasoning,
@@ -334,22 +488,42 @@ export const createMergeSuggestionInternal = internalMutation({
       type: "resolve_contact",
       status: "pending",
       priority,
-      contactId: args.contact1Id,
-      secondaryContactId: args.contact2Id,
+      contactId: c1,
+      secondaryContactId: c2,
       mergeSuggestionId: suggestionId,
+      // Denormalized merge data for UI rendering
+      mergeConfidence: args.confidence,
+      mergeSource: args.source,
+      mergeReasoning: args.reasoning,
       reason: `${args.source}: ${(args.confidence * 100).toFixed(0)}% match`,
       llmReason: args.reasoning,
       createdAt: now,
     });
 
-    const user = await ctx.db.get(args.userId);
-    if (user) {
-      await ctx.db.patch(args.userId, {
-        pendingActionCount: (user.pendingActionCount ?? 0) + 1,
-      });
-    }
-
+    // Note: pendingActionCount is updated by the caller in batch to avoid OCC conflicts
     return { created: true, suggestionId };
+  },
+});
+
+/** Increment user's pending action count by a given amount (batched to avoid OCC). */
+export const incrementPendingActionCount = internalMutation({
+  args: {
+    userId: v.id("users"),
+    count: v.number(),
+  },
+  handler: async (ctx, args) => {
+    if (args.count <= 0) return;
+    const user = await ctx.db.get(args.userId);
+    if (!user) {
+      console.error(
+        `[incrementPendingActionCount] User not found: ${args.userId}. ` +
+          `Failed to increment pendingActionCount by ${args.count}.`
+      );
+      return;
+    }
+    await ctx.db.patch(args.userId, {
+      pendingActionCount: (user.pendingActionCount ?? 0) + args.count,
+    });
   },
 });
 
@@ -357,7 +531,13 @@ export const autoMergeContacts = internalMutation({
   args: {
     primaryContactId: v.id("contacts"),
     secondaryContactId: v.id("contacts"),
-    source: v.union(v.literal("email_match"), v.literal("phone_match")),
+    source: v.union(
+      v.literal("email_match"),
+      v.literal("phone_match"),
+      v.literal("exact_name_match"),
+      v.literal("fuzzy_name_match"),
+      v.literal("llm_fuzzy_match")
+    ),
     reasoning: v.string(),
   },
   handler: async (ctx, args) => {
@@ -455,12 +635,6 @@ export const autoMergeContacts = internalMutation({
   },
 });
 
-type MatchResult = {
-  confidence: number;
-  source: "email_match" | "phone_match";
-  reasoning: string;
-};
-
 function looksLikeEmail(value: string): boolean {
   return value.includes("@") && value.includes(".");
 }
@@ -472,75 +646,59 @@ function looksLikePhone(value: string): boolean {
   );
 }
 
-/** Extract handles of a specific type, including displayName as fallback. */
-function getHandleValues(
-  contact: ContactWithHandles,
-  type: "email" | "phone"
-): string[] {
-  const handleValues = contact.handles
-    .filter((h) => h.type === type)
-    .map((h) => h.value);
+/** Clear pending resolve_contact actions and merge suggestions in batches (for cleanup after bug fixes). */
+export const clearPendingMergeSuggestions = mutation({
+  args: {},
+  handler: async (ctx) => {
+    const user = await getAuthenticatedUser(ctx);
+    if (!user) throw new Error("Unauthorized");
 
-  if (type === "email" && looksLikeEmail(contact.displayName)) {
-    const normalized = contact.displayName.toLowerCase().trim();
-    if (!handleValues.some((v) => v.toLowerCase() === normalized)) {
-      handleValues.push(normalized);
+    const BATCH_SIZE = 500; // Stay well under the 4096 read limit
+
+    // Delete batch of pending merge suggestions
+    const pendingSuggestions = await ctx.db
+      .query("mergeSuggestions")
+      .withIndex("by_user_status", (q) =>
+        q.eq("userId", user._id).eq("status", "pending")
+      )
+      .take(BATCH_SIZE);
+
+    for (const suggestion of pendingSuggestions) {
+      await ctx.db.delete(suggestion._id);
     }
-  }
 
-  if (type === "phone" && looksLikePhone(contact.displayName)) {
-    const normalized = contact.displayName.replace(/[\s\-\(\)\.]/g, "");
-    if (!handleValues.includes(normalized)) {
-      handleValues.push(normalized);
+    // Delete batch of pending resolve_contact actions
+    const pendingActions = await ctx.db
+      .query("actions")
+      .withIndex("by_user_status", (q) =>
+        q.eq("userId", user._id).eq("status", "pending")
+      )
+      .filter((q) => q.eq(q.field("type"), "resolve_contact"))
+      .take(BATCH_SIZE);
+
+    for (const action of pendingActions) {
+      await ctx.db.delete(action._id);
     }
-  }
 
-  return handleValues;
-}
-
-function findMatchingPair<T>(
-  values1: T[],
-  values2: T[],
-  matcher: (a: T, b: T) => boolean
-): [T, T] | null {
-  for (const v1 of values1) {
-    for (const v2 of values2) {
-      if (matcher(v1, v2)) return [v1, v2];
+    // Update user's pending action count
+    if (pendingActions.length > 0) {
+      await ctx.db.patch(user._id, {
+        pendingActionCount: Math.max(
+          0,
+          (user.pendingActionCount ?? 0) - pendingActions.length
+        ),
+      });
     }
-  }
-  return null;
-}
 
-function findBestMatch(
-  contact1: ContactWithHandles,
-  contact2: ContactWithHandles
-): MatchResult | null {
-  const emailMatch = findMatchingPair(
-    getHandleValues(contact1, "email"),
-    getHandleValues(contact2, "email"),
-    emailsMatch
-  );
-  if (emailMatch) {
+    // Check if there's more to delete
+    const hasMore =
+      pendingSuggestions.length === BATCH_SIZE ||
+      pendingActions.length === BATCH_SIZE;
+
     return {
-      confidence: 1.0,
-      source: "email_match",
-      reasoning: `Matching email: ${normalizeEmail(emailMatch[0])}`,
+      suggestionsCleared: pendingSuggestions.length,
+      actionsCleared: pendingActions.length,
+      hasMore, // UI should call again if true
     };
-  }
-
-  const phoneMatch = findMatchingPair(
-    getHandleValues(contact1, "phone"),
-    getHandleValues(contact2, "phone"),
-    phonesMatch
-  );
-  if (phoneMatch) {
-    return {
-      confidence: 1.0,
-      source: "phone_match",
-      reasoning: `Matching phone: ${phoneMatch[0]}`,
-    };
-  }
-
-  return null;
-}
-
+  },
+});

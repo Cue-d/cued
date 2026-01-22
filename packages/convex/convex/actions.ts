@@ -96,6 +96,10 @@ async function enrichAction(
   secondaryContactId: Id<"contacts"> | null;
   secondaryContactName: string | null;
   mergeSuggestionId: Id<"mergeSuggestions"> | null;
+  // Denormalized merge data for resolve_contact actions
+  mergeConfidence: number | null;
+  mergeSource: string | null;
+  mergeReasoning: string | null;
   platform: string | null;
 }> {
   const [conversation, contact, secondaryContact] = await Promise.all([
@@ -156,6 +160,10 @@ async function enrichAction(
     secondaryContactId: action.secondaryContactId ?? null,
     secondaryContactName: secondaryContact?.displayName ?? null,
     mergeSuggestionId: action.mergeSuggestionId ?? null,
+    // Denormalized merge data for resolve_contact actions
+    mergeConfidence: action.mergeConfidence ?? null,
+    mergeSource: action.mergeSource ?? null,
+    mergeReasoning: action.mergeReasoning ?? null,
     platform,
   };
 }
@@ -350,6 +358,7 @@ export const getPendingActions = query({
   args: {
     limit: v.optional(v.number()),
     cursor: v.optional(v.number()), // createdAt timestamp of last action
+    type: v.optional(actionTypeValidator), // Filter by action type
   },
   handler: async (ctx, args) => {
     const user = await getAuthenticatedUser(ctx);
@@ -357,7 +366,12 @@ export const getPendingActions = query({
 
     const limit = Math.min(args.limit ?? 20, 100);
 
-    const actionable = await fetchActionableActions(ctx, user._id);
+    let actionable = await fetchActionableActions(ctx, user._id);
+
+    // Filter by type if provided
+    if (args.type) {
+      actionable = actionable.filter((a) => a.type === args.type);
+    }
 
     // Sort by priority DESC, then createdAt DESC
     actionable.sort((a, b) => {
@@ -620,6 +634,28 @@ export const getPendingActionCount = query({
 });
 
 /**
+ * Get counts of pending actions grouped by type.
+ * Used for filter badges in action queue UI.
+ */
+export const getActionCountsByType = query({
+  args: {},
+  handler: async (ctx) => {
+    const user = await getAuthenticatedUser(ctx);
+    if (!user) return { counts: {}, total: 0 };
+
+    const actionable = await fetchActionableActions(ctx, user._id);
+
+    // Group by type
+    const counts: Record<string, number> = {};
+    for (const action of actionable) {
+      counts[action.type] = (counts[action.type] ?? 0) + 1;
+    }
+
+    return { counts, total: actionable.length };
+  },
+});
+
+/**
  * Swipe direction type for action gestures.
  */
 const swipeDirectionValidator = v.union(
@@ -707,7 +743,12 @@ export const swipeAction = mutation({
           }
 
           // Get the merge source from the suggestion if available
-          let mergeSource: "email_match" | "phone_match" = "email_match";
+          let mergeSource:
+            | "email_match"
+            | "phone_match"
+            | "exact_name_match"
+            | "fuzzy_name_match"
+            | "llm_fuzzy_match" = "email_match";
           if (action.mergeSuggestionId) {
             const suggestion = await ctx.db.get(action.mergeSuggestionId);
             if (suggestion) {

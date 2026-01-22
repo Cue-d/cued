@@ -113,7 +113,7 @@ describe("getNameMatchResult", () => {
 describe("NAME_MATCH_THRESHOLDS", () => {
   it("has correct threshold values", () => {
     expect(NAME_MATCH_THRESHOLDS.AUTO_MERGE).toBe(0.95);
-    expect(NAME_MATCH_THRESHOLDS.SUGGEST_MERGE).toBe(0.80);
-    expect(NAME_MATCH_THRESHOLDS.MINIMUM).toBe(0.60);
+    expect(NAME_MATCH_THRESHOLDS.SUGGEST_MERGE).toBe(0.85);
+    expect(NAME_MATCH_THRESHOLDS.MINIMUM).toBe(0.75);
   });
 });

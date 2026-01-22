@@ -7,7 +7,6 @@ import type { Infer } from "convex/values";
 import { v } from "convex/values";
 import type { Doc, Id } from "../_generated/dataModel";
 import type { MutationCtx } from "../_generated/server";
-import { internal } from "../_generated/api";
 import { getPhoneVariants as getPhoneVariantsShared } from "@prm/shared";
 import {
   handleInput,
@@ -380,35 +379,18 @@ export async function syncContactsInternal(
     errors: [] as string[],
   };
 
-  // Track contacts that need merge candidate search (new or got new handles)
-  const contactsToCheckForMerges: Id<"contacts">[] = [];
-
   for (const contact of contacts) {
     try {
       const syncResult = await upsertContactWithHandles(ctx, userId, contact);
       if (syncResult.isNew) {
         result.contactsCount++;
-        contactsToCheckForMerges.push(syncResult.contactId);
       } else {
         result.updatedCount++;
-        // Also check for merges if new handles were added
-        if (syncResult.handlesAdded > 0) {
-          contactsToCheckForMerges.push(syncResult.contactId);
-        }
       }
       result.handlesCount += syncResult.handlesAdded;
     } catch (e) {
       result.errors.push(`Failed to sync contact ${contact.displayName}: ${e}`);
     }
-  }
-
-  // Schedule merge candidate search for contacts with new/updated handles
-  for (const contactId of contactsToCheckForMerges) {
-    await ctx.scheduler.runAfter(
-      0,
-      internal.contactResolution.findMergeCandidatesForContact,
-      { userId, contactId }
-    );
   }
 
   return result;
@@ -452,7 +434,7 @@ async function upsertContactWithHandles(
   userId: Id<"users">,
   contact: ContactInput
 ): Promise<{ isNew: boolean; handlesAdded: number; contactId: Id<"contacts"> }> {
-  // Collect all normalized handles
+  // Collect all normalized handles, filtering out empty values
   const handles = [
     ...contact.phoneNumbers.map((p) => ({
       value: normalizeHandle(p),
@@ -462,7 +444,13 @@ async function upsertContactWithHandles(
       value: normalizeHandle(e),
       type: "email" as const,
     })),
-  ];
+  ].filter((h) => h.value.trim() !== "");
+
+  // Skip contacts with no valid handles AND no displayName
+  const hasValidDisplayName = contact.displayName.trim() !== "";
+  if (!hasValidDisplayName && handles.length === 0) {
+    throw new Error("Contact has no displayName and no valid handles");
+  }
 
   // Find existing contact by any handle
   let contactId: Id<"contacts"> | null = null;
@@ -472,8 +460,14 @@ async function upsertContactWithHandles(
   }
 
   const isNew = contactId === null;
+
+  // Use displayName if provided, otherwise use first handle as placeholder
+  const displayName = hasValidDisplayName
+    ? contact.displayName
+    : handles[0]?.value ?? "";
+
   const contactData = {
-    displayName: contact.displayName,
+    displayName,
     company: contact.company ?? undefined,
   };
 

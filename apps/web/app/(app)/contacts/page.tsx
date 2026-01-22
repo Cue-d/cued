@@ -2,14 +2,10 @@
 
 import * as React from "react"
 import { useQuery, useMutation } from "convex/react"
-import { Mail, MessageSquare, Phone, AlertCircle, Users, Search, Loader2, ScanSearch, Send } from "lucide-react"
+import { Mail, MessageSquare, Phone, Users, Search, Loader2, ScanSearch, Send, Trash2 } from "lucide-react"
 import { api } from "@prm/convex"
 import { getInitials, type ActionPlatform } from "@prm/shared"
 import {
-  MergeCard,
-  type MergeContact,
-  type MergeSuggestion,
-  type ContactHandle,
   SendMessageModal,
   type SendMessageContact,
 } from "@prm/ui"
@@ -244,11 +240,6 @@ export default function ContactsPage() {
     setAllContacts([])
   }, [debouncedSearch])
 
-  // Fetch pending merge suggestions
-  const suggestionsResult = useQuery(api.contacts.getPendingMergeSuggestions, { limit: 10 })
-  const suggestions = suggestionsResult?.suggestions ?? []
-  const suggestionsLoading = suggestionsResult === undefined
-
   // Fetch contacts list with search and pagination
   const contactsResult = useQuery(api.contacts.getContacts, {
     limit: 50,
@@ -298,14 +289,12 @@ export default function ContactsPage() {
   }, [contactsResult?.nextCursor, isLoadingMore, debouncedSearch])
 
   // Mutations
-  const mergeContacts = useMutation(api.contacts.mergeContacts)
-  const rejectMerge = useMutation(api.contacts.rejectMerge)
   const triggerMergeScan = useMutation(api.contactResolution.triggerMergeScan)
+  const clearMergeSuggestions = useMutation(api.contactResolution.clearPendingMergeSuggestions)
   const queueMessage = useMutation(api.messageQueue.queueMessage)
 
-  // Track loading states for individual cards
-  const [loadingStates, setLoadingStates] = React.useState<Record<string, boolean>>({})
   const [isScanning, setIsScanning] = React.useState(false)
+  const [isClearing, setIsClearing] = React.useState(false)
 
   const handleTriggerScan = React.useCallback(async () => {
     setIsScanning(true)
@@ -319,35 +308,25 @@ export default function ContactsPage() {
     }
   }, [triggerMergeScan])
 
-  const handleMerge = React.useCallback(async (
-    suggestionId: Id<"mergeSuggestions">,
-    primaryId: Id<"contacts">,
-    secondaryId: Id<"contacts">
-  ) => {
-    setLoadingStates(prev => ({ ...prev, [suggestionId]: true }))
+  const handleClearSuggestions = React.useCallback(async () => {
+    setIsClearing(true)
+    let totalCleared = 0
     try {
-      await mergeContacts({
-        primaryContactId: primaryId,
-        secondaryContactId: secondaryId,
-        suggestionId,
-      })
+      // Keep calling until all batches are cleared
+      let hasMore = true
+      while (hasMore) {
+        const result = await clearMergeSuggestions({})
+        totalCleared += result.actionsCleared
+        hasMore = result.hasMore
+        console.log(`Cleared batch: ${result.actionsCleared} actions, ${result.suggestionsCleared} suggestions. More: ${hasMore}`)
+      }
+      console.log(`Total cleared: ${totalCleared}`)
     } catch (error) {
-      console.error("Failed to merge contacts:", error)
+      console.error("Failed to clear suggestions:", error)
     } finally {
-      setLoadingStates(prev => ({ ...prev, [suggestionId]: false }))
+      setIsClearing(false)
     }
-  }, [mergeContacts])
-
-  const handleReject = React.useCallback(async (suggestionId: Id<"mergeSuggestions">) => {
-    setLoadingStates(prev => ({ ...prev, [suggestionId]: true }))
-    try {
-      await rejectMerge({ suggestionId })
-    } catch (error) {
-      console.error("Failed to reject merge:", error)
-    } finally {
-      setLoadingStates(prev => ({ ...prev, [suggestionId]: false }))
-    }
-  }, [rejectMerge])
+  }, [clearMergeSuggestions])
 
   // Send message handlers
   const handleOpenSendModal = React.useCallback((contact: SendMessageContact) => {
@@ -374,7 +353,7 @@ export default function ContactsPage() {
   }, [queueMessage])
 
   // Loading skeleton
-  if (suggestionsLoading && contactsLoading && allContacts.length === 0) {
+  if (contactsLoading && allContacts.length === 0) {
     return (
       <div className="flex h-full flex-col">
         <div className="border-b">
@@ -419,6 +398,19 @@ export default function ContactsPage() {
             </div>
             <Button
               variant="outline"
+              onClick={handleClearSuggestions}
+              disabled={isClearing}
+              className="gap-2 shrink-0"
+              title="Clear all pending merge suggestions"
+            >
+              {isClearing ? (
+                <Loader2 className="w-4 h-4 animate-spin" />
+              ) : (
+                <Trash2 className="w-4 h-4" />
+              )}
+            </Button>
+            <Button
+              variant="outline"
               onClick={handleTriggerScan}
               disabled={isScanning}
               className="gap-2 shrink-0"
@@ -442,57 +434,6 @@ export default function ContactsPage() {
       {/* Content */}
       <div className="flex-1 overflow-y-auto">
         <div className="mx-auto max-w-2xl space-y-8 p-6">
-          {/* Merge Suggestions Section - hidden during search */}
-          {suggestions.length > 0 && !debouncedSearch && (
-            <section>
-              <div className="flex items-center gap-2 mb-4">
-                <AlertCircle className="w-5 h-5 text-amber-500" />
-                <h2 className="text-lg font-semibold">Possible Duplicates</h2>
-                <Badge variant="secondary" className="ml-2">{suggestions.length}</Badge>
-              </div>
-              <div className="grid gap-4">
-                {suggestions.map((suggestion) => {
-                  if (!suggestion.contact1 || !suggestion.contact2) return null
-
-                  const contact1: MergeContact = {
-                    _id: suggestion.contact1._id,
-                    displayName: suggestion.contact1.displayName,
-                    company: suggestion.contact1.company,
-                    notes: suggestion.contact1.notes,
-                    handles: suggestion.contact1.handles as ContactHandle[],
-                  }
-
-                  const contact2: MergeContact = {
-                    _id: suggestion.contact2._id,
-                    displayName: suggestion.contact2.displayName,
-                    company: suggestion.contact2.company,
-                    notes: suggestion.contact2.notes,
-                    handles: suggestion.contact2.handles as ContactHandle[],
-                  }
-
-                  const mergeSuggestion: MergeSuggestion = {
-                    _id: suggestion._id,
-                    confidence: suggestion.confidence,
-                    source: suggestion.source as MergeSuggestion["source"],
-                    reasoning: suggestion.reasoning,
-                  }
-
-                  return (
-                    <MergeCard
-                      key={suggestion._id}
-                      contact1={contact1}
-                      contact2={contact2}
-                      suggestion={mergeSuggestion}
-                      onMerge={() => handleMerge(suggestion._id, suggestion.contact1Id, suggestion.contact2Id)}
-                      onReject={() => handleReject(suggestion._id)}
-                      isLoading={loadingStates[suggestion._id] ?? false}
-                    />
-                  )
-                })}
-              </div>
-            </section>
-          )}
-
           {/* All Contacts Section */}
           <section>
             <div className="flex items-center gap-2 mb-4">

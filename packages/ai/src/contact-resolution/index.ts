@@ -22,3 +22,12 @@ export {
   NAME_MATCH_THRESHOLDS,
   type NameMatchResult,
 } from "./fuzzy-name";
+
+export {
+  decideFuzzyMatch,
+  decideFuzzyMatchWithRetry,
+  FuzzyMatchDecisionSchema,
+  LLM_CONFIDENCE_THRESHOLD,
+  type ContactMatchInput,
+  type FuzzyMatchDecision,
+} from "./llm-match";

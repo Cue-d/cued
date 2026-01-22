@@ -269,6 +269,9 @@ export function jaroWinklerSimilarity(s1: string, s2: string): number {
  * Calculate name similarity score between two names.
  * Uses Jaro-Winkler with nickname normalization.
  *
+ * IMPORTANT: Requires BOTH first and last names to be somewhat similar.
+ * Sharing only a last name (e.g., "Brandon Zhu" vs "Elise Zhu") is NOT enough.
+ *
  * @returns Score from 0 to 1
  */
 export function nameSimilarity(name1: string, name2: string): number {
@@ -280,50 +283,76 @@ export function nameSimilarity(name1: string, name2: string): number {
   // Exact match after normalization
   if (parts1.join(" ") === parts2.join(" ")) return 1;
 
-  // Try different matching strategies
+  // Handle "F. Last" or "F Last" format (initial + last name) FIRST
+  // This prevents false negatives like "J. Smith" vs "John Smith"
+  // Check for single letter or single letter with period
+  const isInitial = (s: string) => s.length === 1 || (s.length === 2 && s.endsWith("."));
+  const getInitialLetter = (s: string) => s.replace(".", "")[0];
 
-  // Strategy 1: Full name comparison
-  const fullScore = jaroWinklerSimilarity(parts1.join(" "), parts2.join(" "));
+  const hasInitial =
+    (parts1.length >= 2 && isInitial(parts1[0])) ||
+    (parts2.length >= 2 && isInitial(parts2[0]));
 
-  // Strategy 2: First + Last name comparison (ignore middle names)
-  let firstLastScore = 0;
-  if (parts1.length >= 1 && parts2.length >= 1) {
-    const first1 = parts1[0];
-    const last1 = parts1[parts1.length - 1];
-    const first2 = parts2[0];
-    const last2 = parts2[parts2.length - 1];
-
-    const firstScore = jaroWinklerSimilarity(first1, first2);
-    const lastScore = jaroWinklerSimilarity(last1, last2);
-
-    // Weight last name higher (more unique)
-    firstLastScore = firstScore * 0.4 + lastScore * 0.6;
-  }
-
-  // Strategy 3: Handle "F. Last" format (initial + last name)
-  let initialScore = 0;
-  if (
-    (parts1.length >= 2 && parts1[0].length === 1) ||
-    (parts2.length >= 2 && parts2[0].length === 1)
-  ) {
-    const [short, long] =
-      parts1[0].length === 1 ? [parts1, parts2] : [parts2, parts1];
+  if (hasInitial) {
+    const [short, long] = isInitial(parts1[0]) ? [parts1, parts2] : [parts2, parts1];
     if (short.length >= 2 && long.length >= 1) {
-      const initial = short[0];
+      const initial = getInitialLetter(short[0]);
       const shortLast = short[short.length - 1];
       const longFirst = long[0];
       const longLast = long[long.length - 1];
 
       // Check if initial matches first letter of full first name
       if (longFirst.startsWith(initial)) {
-        const lastScore = jaroWinklerSimilarity(shortLast, longLast);
-        initialScore = 0.3 + lastScore * 0.7; // Give 0.3 for initial match + last name score
+        const lastMatchScore = jaroWinklerSimilarity(shortLast, longLast);
+        // If last names match well, this is likely the same person
+        if (lastMatchScore >= 0.8) {
+          return 0.3 + lastMatchScore * 0.7; // Returns ~0.86-1.0 for good matches
+        }
       }
     }
   }
 
+  // Extract first and last names
+  const first1 = parts1[0];
+  const last1 = parts1.length > 1 ? parts1[parts1.length - 1] : first1;
+  const first2 = parts2[0];
+  const last2 = parts2.length > 1 ? parts2[parts2.length - 1] : first2;
+
+  const firstScore = jaroWinklerSimilarity(first1, first2);
+  const lastScore = jaroWinklerSimilarity(last1, last2);
+
+  // CRITICAL: Detect "same last name, completely different first name" pattern
+  // This catches false positives like "Brandon Zhu" vs "Elise Zhu"
+  // Use a higher threshold (0.75) to ensure first names are genuinely different
+  const lastNamesMatch = lastScore >= 0.90;
+  const firstNamesVeryDifferent = firstScore < 0.75;
+
+  if (lastNamesMatch && firstNamesVeryDifferent) {
+    // Same last name but different first name = different person
+    // Cap score well below MINIMUM threshold
+    return Math.min(0.40, firstScore);
+  }
+
+  // Same pattern for first names matching but last names different
+  // This is less common but handles cases like "John Smith" vs "John Smythe"
+  // being incorrectly matched with "John Jones"
+  const firstNamesMatch = firstScore >= 0.90;
+  const lastNamesVeryDifferent = lastScore < 0.60;
+
+  if (firstNamesMatch && lastNamesVeryDifferent) {
+    // Same first name, very different last name = likely different person
+    return Math.min(0.50, lastScore);
+  }
+
+  // Strategy 1: Full name comparison
+  const fullScore = jaroWinklerSimilarity(parts1.join(" "), parts2.join(" "));
+
+  // Strategy 2: First + Last name comparison (ignore middle names)
+  // Weight equally - both must be similar for a good match
+  const firstLastScore = firstScore * 0.5 + lastScore * 0.5;
+
   // Return the highest score from all strategies
-  return Math.max(fullScore, firstLastScore, initialScore);
+  return Math.max(fullScore, firstLastScore);
 }
 
 /**
@@ -368,12 +397,13 @@ export function getNameMatchResult(name1: string, name2: string): NameMatchResul
 
 /**
  * Thresholds for name matching decisions.
+ * These are intentionally high to avoid false positives.
  */
 export const NAME_MATCH_THRESHOLDS = {
-  /** Auto-merge threshold (very high confidence) */
+  /** Auto-merge threshold (very high confidence - both names nearly identical) */
   AUTO_MERGE: 0.95,
   /** Suggest merge threshold (high confidence, needs review) */
-  SUGGEST_MERGE: 0.80,
+  SUGGEST_MERGE: 0.85,
   /** Minimum threshold to even consider a match */
-  MINIMUM: 0.60,
+  MINIMUM: 0.75,
 };

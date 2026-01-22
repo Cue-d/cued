@@ -1,0 +1,213 @@
+{
+  "project": "LLM-Based Fuzzy Match Decision",
+  "description": "Add LLM verification layer for fuzzy name matches in contact resolution pipeline. Before creating action cards for fuzzy matches (Tier 3), use gpt-5-mini to analyze contact metadata and decide if contacts are the same person.",
+  "linearIssueId": "PRM-49",
+  "target_stack": [
+    "packages/ai/src/contact-resolution/",
+    "packages/convex/convex/contactResolution.ts",
+    "packages/convex/convex/schema.ts"
+  ],
+  "decisions": {
+    "model": "gpt-5-mini for cost efficiency",
+    "trigger": "Tier 3 fuzzy matches only (confidence 0.60-0.94)",
+    "skip_llm_for": "Tier 1 (handle match) and Tier 2 (exact name) - deterministic, no LLM needed",
+    "minimum_fuzzy_score_for_llm": "0.60 (NAME_MATCH_THRESHOLDS.MINIMUM)",
+    "llm_confidence_threshold": "0.70 to create action card",
+    "store_reasoning": "In mergeSuggestions.reasoning and actions.llmReason fields"
+  },
+  "documentation": [
+    {
+      "url": "https://sdk.vercel.ai/docs/ai-sdk-core/generating-structured-data",
+      "title": "Vercel AI SDK - Structured Data Generation",
+      "reason": "Pattern for generateObject with Zod schemas - already used in generate-action.ts"
+    },
+    {
+      "url": "https://platform.openai.com/docs/guides/structured-outputs",
+      "title": "OpenAI Structured Outputs",
+      "reason": "Understanding JSON mode and function calling for reliable structured responses"
+    }
+  ],
+  "reference_repos": [],
+  "tasks": [
+    {
+      "id": "1.0",
+      "phase": 1,
+      "mode": "afk",
+      "category": "setup",
+      "description": "Create LLM fuzzy match decision module with Zod schema",
+      "steps": [
+        "Create packages/ai/src/contact-resolution/llm-match.ts",
+        "Define ContactMatchInput type: { contact1: { displayName, company?, handles[] }, contact2: { displayName, company?, handles[] }, fuzzyScore: number }",
+        "Define FuzzyMatchDecision Zod schema: { samePerson: boolean, confidence: number (0-1), reasoning: string }",
+        "Add system prompt for contact matching decision",
+        "Export decideFuzzyMatch(input: ContactMatchInput): Promise<FuzzyMatchDecision>",
+        "Verify: pnpm typecheck && pnpm lint - must pass"
+      ],
+      "passes": true
+    },
+    {
+      "id": "1.1",
+      "phase": 1,
+      "mode": "afk",
+      "category": "setup",
+      "description": "Export new module from packages/ai index",
+      "steps": [
+        "Edit packages/ai/src/contact-resolution/index.ts to export from ./llm-match",
+        "Edit packages/ai/src/index.ts to include contact-resolution exports if not present",
+        "Verify: pnpm typecheck && pnpm lint - must pass"
+      ],
+      "passes": true,
+      "dependencies": [
+        "1.0"
+      ]
+    },
+    {
+      "id": "2.0",
+      "phase": 2,
+      "mode": "afk",
+      "category": "functional",
+      "description": "Implement decideFuzzyMatch function using generateObject",
+      "steps": [
+        "Import openai provider and FAST_MODEL from ../openai",
+        "Import generateObject from 'ai' and z from 'zod'",
+        "Build prompt with both contacts' names, handles, companies, and fuzzy score",
+        "Call generateObject with FuzzyMatchDecision schema",
+        "Return structured decision with samePerson, confidence, reasoning",
+        "Verify: pnpm typecheck && pnpm lint - must pass"
+      ],
+      "passes": true,
+      "dependencies": [
+        "1.0"
+      ]
+    },
+    {
+      "id": "2.1",
+      "phase": 2,
+      "mode": "afk",
+      "category": "functional",
+      "description": "Add retry wrapper and error handling",
+      "steps": [
+        "Create decideFuzzyMatchWithRetry(input, maxRetries=2): Promise<FuzzyMatchDecision>",
+        "Return safe default { samePerson: false, confidence: 0, reasoning: 'LLM failed' } on all retries exhausted",
+        "Use exponential backoff pattern from generate-action.ts",
+        "Verify: pnpm typecheck && pnpm lint - must pass"
+      ],
+      "passes": true,
+      "dependencies": [
+        "2.0"
+      ]
+    },
+    {
+      "id": "3.0",
+      "phase": 3,
+      "mode": "afk",
+      "category": "integration",
+      "description": "Integrate LLM decision into contactResolution.ts",
+      "steps": [
+        "Import decideFuzzyMatchWithRetry from @prm/ai in contactResolution.ts",
+        "In findMergeCandidatesForContact, after fuzzy match found, call LLM for verification",
+        "Only proceed to createMergeSuggestionInternal if samePerson=true AND confidence >= 0.70",
+        "Pass LLM reasoning to createMergeSuggestionInternal as reasoning parameter",
+        "Verify: pnpm typecheck && pnpm lint - must pass"
+      ],
+      "passes": true,
+      "dependencies": [
+        "2.1"
+      ]
+    },
+    {
+      "id": "3.1",
+      "phase": 3,
+      "mode": "afk",
+      "category": "integration",
+      "description": "Add LLM source type to schema validators",
+      "steps": [
+        "Edit packages/convex/convex/schema.ts mergeSourceValidator to add 'llm_fuzzy_match' literal",
+        "Update MatchResult type in contactResolution.ts to include 'llm_fuzzy_match' source",
+        "Update createMergeSuggestionInternal args to accept new source",
+        "Verify: pnpm typecheck && pnpm lint - must pass"
+      ],
+      "passes": true,
+      "dependencies": [
+        "3.0"
+      ]
+    },
+    {
+      "id": "4.0",
+      "phase": 4,
+      "mode": "afk",
+      "category": "refactor",
+      "description": "Update action card display to show LLM reasoning",
+      "steps": [
+        "Confirm llmReason field already stored in actions table (exists per schema)",
+        "Confirm MergeCard component in packages/ui/src/components/contacts/merge-card.tsx displays reasoning",
+        "If reasoning not displayed, add it below confidence score in merge card UI",
+        "Verify: pnpm typecheck && pnpm lint - must pass"
+      ],
+      "passes": true,
+      "dependencies": [
+        "3.1"
+      ]
+    },
+    {
+      "id": "5.0",
+      "phase": 5,
+      "mode": "afk",
+      "category": "testing",
+      "description": "Add unit tests for decideFuzzyMatch function",
+      "steps": [
+        "Create packages/ai/src/contact-resolution/llm-match.test.ts",
+        "Mock generateObject from 'ai' using vi.mock",
+        "Test: same person with high confidence returns samePerson=true",
+        "Test: different people returns samePerson=false",
+        "Test: retry exhausted returns safe default",
+        "Test: handles empty/missing company gracefully",
+        "Run: cd packages/ai && pnpm test llm-match.test.ts",
+        "Verify: pnpm typecheck && pnpm lint - must pass"
+      ],
+      "passes": true,
+      "dependencies": [
+        "2.1"
+      ]
+    },
+    {
+      "id": "5.1",
+      "phase": 5,
+      "mode": "afk",
+      "category": "testing",
+      "description": "Add integration tests for LLM-gated fuzzy matching flow",
+      "steps": [
+        "Edit packages/convex/convex/__tests__/contactResolution.test.ts",
+        "Add test: fuzzy match below confidence threshold does NOT create action",
+        "Add test: fuzzy match with LLM samePerson=true creates action with llm_fuzzy_match source",
+        "Add test: fuzzy match with LLM samePerson=false does NOT create action",
+        "Mock the LLM call at the @prm/ai module boundary",
+        "Run: cd packages/convex && pnpm test contactResolution.test.ts",
+        "Verify: pnpm typecheck && pnpm lint - must pass"
+      ],
+      "passes": true,
+      "dependencies": [
+        "3.1",
+        "5.0"
+      ]
+    },
+    {
+      "id": "5.2",
+      "phase": 5,
+      "mode": "afk",
+      "category": "testing",
+      "description": "Verify cost efficiency with token estimation",
+      "steps": [
+        "Add token counting comment in llm-match.ts prompt section",
+        "Estimate: ~200-300 tokens input (2 contacts + prompt), ~50 tokens output",
+        "At gpt-5-mini pricing, ~$0.0001 per decision",
+        "Document expected cost per merge candidate in code comment",
+        "Verify: pnpm typecheck && pnpm lint - must pass"
+      ],
+      "passes": true,
+      "dependencies": [
+        "2.0"
+      ]
+    }
+  ]
+}
