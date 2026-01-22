@@ -11,7 +11,6 @@ import {
   internalMutation,
   internalQuery,
   mutation,
-  query,
 } from "./_generated/server";
 import { internal } from "./_generated/api";
 import { platformValidator } from "./schema";
@@ -149,24 +148,6 @@ export const isAlreadyQueued = internalQuery({
   },
 });
 
-/**
- * Check if a pending action exists for this conversation.
- * Uses by_conversation_status index for efficient lookups.
- */
-export const hasPendingActionForConversation = internalQuery({
-  args: {
-    conversationId: v.id("conversations"),
-  },
-  handler: async (ctx, args): Promise<boolean> => {
-    const existing = await ctx.db
-      .query("actions")
-      .withIndex("by_conversation_status", (q) =>
-        q.eq("conversationId", args.conversationId).eq("status", "pending")
-      )
-      .first();
-    return existing !== null;
-  },
-});
 
 /**
  * Queue a conversation for LLM analysis.
@@ -264,7 +245,7 @@ export const scanForUnansweredConversations = internalAction({
 
       // Skip if pending action already exists
       const hasPending = await ctx.runQuery(
-        internal.actionQueue.hasPendingActionForConversation,
+        internal.actionEvents.hasPendingActionForConversation,
         { conversationId: conversation._id }
       );
 
@@ -323,60 +304,6 @@ export const scanForUnansweredConversations = internalAction({
   },
 });
 
-// ============================================================================
-// Task 7.7: Process analysis queue
-// ============================================================================
-
-/**
- * Get queue stats for monitoring.
- */
-export const getQueueStats = query({
-  args: {},
-  handler: async (ctx) => {
-    const identity = await ctx.auth.getUserIdentity();
-    if (!identity) return null;
-
-    const user = await ctx.db
-      .query("users")
-      .withIndex("by_workos_id", (q) => q.eq("workosUserId", identity.subject))
-      .unique();
-
-    if (!user) return null;
-
-    const pending = await ctx.db
-      .query("actionAnalysisQueue")
-      .withIndex("by_user_status", (q) =>
-        q.eq("userId", user._id).eq("status", "pending")
-      )
-      .collect();
-
-    const processing = await ctx.db
-      .query("actionAnalysisQueue")
-      .withIndex("by_user_status", (q) =>
-        q.eq("userId", user._id).eq("status", "processing")
-      )
-      .collect();
-
-    // Get today's completed count
-    const todayStart = new Date();
-    todayStart.setHours(0, 0, 0, 0);
-
-    const completed = await ctx.db
-      .query("actionAnalysisQueue")
-      .withIndex("by_user_status", (q) =>
-        q.eq("userId", user._id).eq("status", "completed")
-      )
-      .filter((q) => q.gte(q.field("completedAt"), todayStart.getTime()))
-      .collect();
-
-    return {
-      pending: pending.length,
-      processing: processing.length,
-      completedToday: completed.length,
-    };
-  },
-});
-
 /**
  * Manually trigger scan for unanswered conversations (for testing).
  * Public mutation to allow manual testing.
@@ -413,81 +340,7 @@ export const triggerScanForUnanswered = mutation({
   },
 });
 
-/**
- * Trigger processing of the analysis queue.
- * Task 7.7: Schedules the analyzeConversation action.
- * Called by cron every 30 seconds.
- */
-export const triggerQueueProcessing = internalMutation({
-  args: {},
-  handler: async (ctx) => {
-    // Get next pending entry
-    const nextEntry = await ctx.db
-      .query("actionAnalysisQueue")
-      .withIndex("by_priority", (q) => q.eq("status", "pending"))
-      .order("desc")
-      .first();
 
-    if (!nextEntry) {
-      return { scheduled: false, reason: "Queue empty" };
-    }
-
-    // Schedule the action to run immediately
-    await ctx.scheduler.runAfter(0, internal.actionAnalysis.analyzeConversation, {
-      queueEntryId: nextEntry._id,
-    });
-
-    return { scheduled: true, queueEntryId: nextEntry._id };
-  },
-});
-
-/**
- * Scan all users for unanswered conversations.
- * Called by cron - iterates through all connected integrations.
- */
-export const scanAllUsersForUnanswered = internalMutation({
-  args: {},
-  handler: async (ctx) => {
-    // Get all connected integrations
-    const integrations = await ctx.db
-      .query("integrations")
-      .filter((q) => q.eq(q.field("syncState.isConnected"), true))
-      .collect();
-
-    const results: Array<{
-      userId: string;
-      platform: string;
-      queued: number;
-      filtered: number;
-    }> = [];
-
-    for (const integration of integrations) {
-      // Schedule the scan action to run immediately
-      // (Can't call actions directly from mutations, so we schedule them)
-      await ctx.scheduler.runAfter(
-        0,
-        internal.actionQueue.scanForUnansweredConversations,
-        {
-          userId: integration.userId,
-          platform: integration.platform,
-        }
-      );
-
-      results.push({
-        userId: integration.userId as string,
-        platform: integration.platform,
-        queued: 0, // Will be populated by the scheduled action
-        filtered: 0,
-      });
-    }
-
-    return {
-      usersScanned: results.length,
-      totalQueued: results.reduce((sum, r) => sum + r.queued, 0),
-      totalFiltered: results.reduce((sum, r) => sum + r.filtered, 0),
-    };
-  },
-});
 
 // ============================================================================
 // Task 7.17: EOD Contact Scan - Daily scan for new contacts

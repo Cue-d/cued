@@ -7,7 +7,6 @@
 import { v } from "convex/values";
 import type { Doc, Id } from "./_generated/dataModel";
 import {
-  action,
   internalAction,
   internalMutation,
   internalQuery,
@@ -481,26 +480,3 @@ export const analyzeConversation = internalAction({
   },
 });
 
-/**
- * Process the next item in the analysis queue.
- * Returns true if an item was processed, false if queue is empty.
- */
-export const processNextInQueue = action({
-  args: {},
-  handler: async (ctx): Promise<{ processed: boolean; result?: AnalysisResult }> => {
-    const nextEntry = await ctx.runQuery(
-      internal.actionAnalysis.getNextPendingAnalysis,
-      {}
-    );
-
-    if (!nextEntry) {
-      return { processed: false };
-    }
-
-    const result = await ctx.runAction(internal.actionAnalysis.analyzeConversation, {
-      queueEntryId: nextEntry._id,
-    });
-
-    return { processed: true, result: result.result };
-  },
-});

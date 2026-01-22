@@ -1133,26 +1133,6 @@ export const extractStyleProfile = action({
   },
 });
 
-/** Get current user's style profile */
-export const getStyleProfile = query({
-  args: {
-    platform: stylePlatformValidator,
-  },
-  handler: async (ctx, args) => {
-    const user = await getAuthenticatedUser(ctx);
-    if (!user) return null;
-
-    const profile = await ctx.db
-      .query("userStyleProfiles")
-      .withIndex("by_user_platform", (q) =>
-        q.eq("userId", user._id).eq("platform", args.platform)
-      )
-      .first();
-
-    return profile;
-  },
-});
-
 /** Get all style profiles for the current user */
 export const getAllStyleProfiles = query({
   args: {},

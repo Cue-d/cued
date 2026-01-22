@@ -443,28 +443,6 @@ async function extractMemoriesForContact(
   );
 }
 
-/**
- * Reset memory processing state to reprocess all messages.
- */
-export const resetMemoryProcessingState = internalMutation({
-  args: {
-    userId: v.id("users"),
-    platform: platformValidator,
-  },
-  handler: async (ctx, args) => {
-    const integration = await findIntegration(ctx, args.userId, args.platform);
-    if (!integration) return;
-
-    await ctx.db.patch(integration._id, {
-      syncState: {
-        ...integration.syncState,
-        lastMemoryProcessedAt: undefined,
-        totalMessagesProcessedForMemory: 0,
-        totalMemoriesExtracted: 0,
-      },
-    });
-  },
-});
 
 // ============================================================================
 // Task 3.13c: Automatic memory extraction on sync
