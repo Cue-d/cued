@@ -4,11 +4,20 @@ import * as React from "react";
 import { useChat } from "@ai-sdk/react";
 import { useAccessToken } from "@workos-inc/authkit-nextjs/components";
 import { DefaultChatTransport, type UIMessage } from "ai";
+import { useConvex } from "convex/react";
+import { api } from "@prm/convex";
 import {
   AssistantView,
   type MessageWithToolInvocations,
   type ToolInvocation,
+  type MentionSearchResult,
 } from "@prm/ui";
+
+// Track mentions with both ID and display text to detect deletions
+interface TrackedMention {
+  id: string;
+  displayText: string; // e.g., "@John Smith" or "@John Smith (Acme)"
+}
 
 function getTextContent(msg: UIMessage): string {
   return msg.parts
@@ -65,14 +74,60 @@ function getToolInvocations(msg: UIMessage): ToolInvocation[] {
 
 export default function AssistantPage() {
   const [input, setInput] = React.useState("");
+  const [trackedMentions, setTrackedMentions] = React.useState<TrackedMention[]>(
+    []
+  );
   const { accessToken } = useAccessToken();
+  const convex = useConvex();
 
   const accessTokenRef = React.useRef(accessToken);
   React.useEffect(() => {
     accessTokenRef.current = accessToken;
   }, [accessToken]);
 
-  // Create transport once - ref ensures fetch always uses latest token
+  // Search contacts for @mentions
+  const searchContacts = React.useCallback(
+    async (query: string): Promise<MentionSearchResult[]> => {
+      try {
+        const result = await convex.query(api.search.searchContacts, {
+          query: query || "",
+          limit: 10,
+        });
+        return result.results;
+      } catch (error) {
+        console.error("Failed to search contacts:", error);
+        return [];
+      }
+    },
+    [convex]
+  );
+
+  // Handle mention insertion - track contact IDs and display names
+  const handleMentionInsert = React.useCallback(
+    (contact: MentionSearchResult) => {
+      setTrackedMentions((prev) => {
+        // Avoid duplicates
+        if (prev.some((m) => m.id === contact._id)) return prev;
+        // Store the display name pattern to detect if mention was deleted
+        return [...prev, { id: contact._id, displayText: `@${contact.displayName}` }];
+      });
+    },
+    []
+  );
+
+  // Ref to track current trackedMentions for use in fetch
+  const trackedMentionsRef = React.useRef(trackedMentions);
+  React.useEffect(() => {
+    trackedMentionsRef.current = trackedMentions;
+  }, [trackedMentions]);
+
+  // Ref to track current input for filtering mentions at send time
+  const inputRef = React.useRef(input);
+  React.useEffect(() => {
+    inputRef.current = input;
+  }, [input]);
+
+  // Create transport once - ref ensures fetch always uses latest token and mentions
   const chatTransport = React.useMemo(
     () =>
       // eslint-disable-next-line react-hooks/refs
@@ -80,14 +135,39 @@ export default function AssistantPage() {
         api: "/api/chat",
         fetch: (url, options) => {
           const token = accessTokenRef.current;
+          const tracked = trackedMentionsRef.current;
+          const currentInput = inputRef.current;
           const headers = {
             ...options?.headers,
             ...(token ? { Authorization: `Bearer ${token}` } : {}),
           };
-          return fetch(url, { ...options, headers });
+
+          // Filter to only contact IDs whose mention text is still in the input
+          // This handles the case where user deleted a mention after inserting it
+          const activeContactIds = tracked
+            .filter((m) => currentInput.includes(m.displayText))
+            .map((m) => m.id);
+
+          // Inject mentionedContactIds into the request body
+          let body = options?.body;
+          if (body && activeContactIds.length > 0) {
+            try {
+              const parsed = JSON.parse(body as string);
+              parsed.mentionedContactIds = activeContactIds;
+              body = JSON.stringify(parsed);
+            } catch (error) {
+              // Log error - this indicates unexpected body format from AI SDK
+              console.error(
+                "Failed to inject mentionedContactIds into request body. Mentions will not be sent.",
+                { bodyType: typeof body, contactCount: activeContactIds.length, error }
+              );
+            }
+          }
+
+          return fetch(url, { ...options, body, headers });
         },
       }),
-    [] // Stable transport - ref provides latest token
+    [] // Stable transport - refs provide latest values
   );
 
   const { messages, sendMessage, status, error, stop } = useChat({
@@ -109,6 +189,8 @@ export default function AssistantPage() {
     if (!input.trim()) return;
     sendMessage({ parts: [{ type: "text", text: input }] });
     setInput("");
+    // Clear tracked mentions after submission
+    setTrackedMentions([]);
   }
 
   return (
@@ -121,6 +203,8 @@ export default function AssistantPage() {
       isLoading={isLoading}
       error={error}
       className="h-full"
+      searchContacts={searchContacts}
+      onMentionInsert={handleMentionInsert}
     />
   );
 }

@@ -1,5 +1,6 @@
 import * as React from "react"
 import { Bot, ChevronDown, User } from "lucide-react"
+import { MentionText, hasMentions } from "./mention-text"
 import { ToolArtifact } from "./tool-artifact"
 import { cn } from "../../lib/utils"
 import { Loader } from "../ai-elements/loader"
@@ -120,7 +121,11 @@ export function ChatMessage({
             {message.content ? (
               isUser ? (
                 <p className="whitespace-pre-wrap text-[15px] leading-relaxed">
-                  {message.content}
+                  {hasMentions(message.content) ? (
+                    <MentionText text={message.content} />
+                  ) : (
+                    message.content
+                  )}
                 </p>
               ) : (
                 <MessageResponse className="text-[15px] leading-relaxed">

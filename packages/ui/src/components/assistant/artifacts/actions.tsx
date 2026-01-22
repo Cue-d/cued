@@ -97,6 +97,10 @@ export const actionsArtifact = new Artifact<
   parse: (result) => {
     if (!result || typeof result !== "object") return null
     const data = result as Record<string, unknown>
+    // Support both 'results' (new standard) and 'actions' (legacy)
+    if (Array.isArray(data.results)) {
+      return data.results as ActionSearchResult[]
+    }
     if (Array.isArray(data.actions)) {
       return data.actions as ActionSearchResult[]
     }

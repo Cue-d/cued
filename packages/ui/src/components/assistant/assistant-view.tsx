@@ -19,6 +19,7 @@ import {
   usePromptInputAttachments,
 } from "../ai-elements/prompt-input";
 import { Suggestions, Suggestion } from "../ai-elements/suggestion";
+import type { MentionSearchResult } from "./mention-types";
 import type { MessageWithToolInvocations, SuggestedPrompt } from "./types";
 
 function AttachmentButton() {
@@ -40,6 +41,10 @@ interface AssistantViewProps {
   error?: Error | null;
   suggestedPrompts?: SuggestedPrompt[];
   className?: string;
+  /** Function to search contacts for @mentions */
+  searchContacts?: (query: string) => Promise<MentionSearchResult[]>;
+  /** Called when a mention is inserted in the input */
+  onMentionInsert?: (contact: MentionSearchResult) => void;
 }
 
 const DEFAULT_PROMPTS: SuggestedPrompt[] = [
@@ -67,6 +72,8 @@ export function AssistantView({
   error,
   suggestedPrompts = DEFAULT_PROMPTS,
   className,
+  searchContacts,
+  onMentionInsert,
 }: AssistantViewProps) {
   const isEmpty = messages.length === 0;
 
@@ -138,6 +145,8 @@ export function AssistantView({
               onChange={(e) => onInputChange(e.target.value)}
               placeholder="Ask about your conversations..."
               className="min-h-12"
+              searchContacts={searchContacts}
+              onMentionInsert={onMentionInsert}
             />
             <PromptInputFooter>
               <PromptInputTools>

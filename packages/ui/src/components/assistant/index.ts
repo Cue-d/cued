@@ -21,3 +21,18 @@ export {
   CrossSmallIcon,
   LoaderIcon,
 } from "./icons"
+
+// Mention types and components
+export {
+  type MentionedContact,
+  type MentionSearchResult,
+  MENTION_REGEX,
+  MENTION_DISPLAY_REGEX,
+  parseMentions,
+  formatMention,
+  formatMentionDisplay,
+  extractMentions,
+} from "./mention-types"
+export { useMention, type MentionState, type UseMentionReturn } from "./use-mention"
+export { MentionPicker, type MentionPickerProps } from "./mention-picker"
+export { MentionText, hasMentions, type MentionTextProps } from "./mention-text"

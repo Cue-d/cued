@@ -31,6 +31,9 @@ import {
 } from "lucide-react";
 import { nanoid } from "nanoid";
 import { cn } from "../../lib/utils";
+import { MentionPicker } from "../assistant/mention-picker";
+import { formatMentionDisplay } from "../assistant/mention-types";
+import { useMention } from "../assistant/use-mention";
 import { Button } from "../ui/button";
 import {
   Command,
@@ -65,6 +68,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "../ui/select";
+import type { MentionSearchResult } from "../assistant/mention-types";
 import type { ChatStatus, FileUIPart } from "ai";
 
 // ============================================================================
@@ -601,10 +605,12 @@ export const PromptInput = ({
     : openFileDialogLocal;
 
   // Let provider know about our hidden file input so external menus can call openFileDialog()
+  // Using narrow dependency on the specific function rather than the whole controller object
+  const registerFileInput = controller?.__registerFileInput;
   useEffect(() => {
-    if (!usingProvider) return;
-    controller.__registerFileInput(inputRef, () => inputRef.current?.click());
-  }, [usingProvider, controller]);
+    if (!usingProvider || !registerFileInput) return;
+    registerFileInput(inputRef, () => inputRef.current?.click());
+  }, [usingProvider, registerFileInput]);
 
   // Note: File input cannot be programmatically set for security reasons
   // The syncHiddenInput prop is no longer functional
@@ -693,10 +699,14 @@ export const PromptInput = ({
       return new Promise((resolve) => {
         const reader = new FileReader();
         reader.onloadend = () => resolve(reader.result as string);
-        reader.onerror = () => resolve(null);
+        reader.onerror = (error) => {
+          console.warn("FileReader failed to convert blob to data URL:", error);
+          resolve(null);
+        };
         reader.readAsDataURL(blob);
       });
-    } catch {
+    } catch (error) {
+      console.warn("Failed to convert blob URL to data URL:", url, error);
       return null;
     }
   };
@@ -820,21 +830,238 @@ export const PromptInputBody = ({
 
 export type PromptInputTextareaProps = ComponentProps<
   typeof InputGroupTextarea
->;
+> & {
+  /** Function to search contacts for @mentions */
+  searchContacts?: (query: string) => Promise<MentionSearchResult[]>;
+  /** Called when a mention is inserted */
+  onMentionInsert?: (contact: MentionSearchResult) => void;
+};
+
+/**
+ * Get caret coordinates relative to the viewport
+ */
+function getCaretCoordinates(
+  textarea: HTMLTextAreaElement,
+  position: number
+): { top: number; left: number; height: number } {
+  const div = document.createElement("div");
+  const styles = getComputedStyle(textarea);
+
+  // Copy relevant styles from textarea to mirror div
+  const styleProps = [
+    "fontFamily",
+    "fontSize",
+    "fontWeight",
+    "fontStyle",
+    "letterSpacing",
+    "textTransform",
+    "wordSpacing",
+    "textIndent",
+    "whiteSpace",
+    "wordWrap",
+    "wordBreak",
+    "overflowWrap",
+    "lineHeight",
+    "paddingTop",
+    "paddingRight",
+    "paddingBottom",
+    "paddingLeft",
+    "borderTopWidth",
+    "borderRightWidth",
+    "borderBottomWidth",
+    "borderLeftWidth",
+    "boxSizing",
+  ] as const;
+
+  div.style.position = "absolute";
+  div.style.visibility = "hidden";
+  div.style.whiteSpace = "pre-wrap";
+  div.style.wordWrap = "break-word";
+  div.style.overflow = "hidden";
+  div.style.width = `${textarea.offsetWidth}px`;
+
+  for (const prop of styleProps) {
+    div.style[prop] = styles[prop];
+  }
+
+  // Set content up to caret position
+  div.textContent = textarea.value.substring(0, position);
+
+  // Add span at caret position
+  const span = document.createElement("span");
+  span.textContent = "\u200b"; // Zero-width space
+  div.appendChild(span);
+
+  document.body.appendChild(div);
+
+  const textareaRect = textarea.getBoundingClientRect();
+  const spanRect = span.getBoundingClientRect();
+  const divRect = div.getBoundingClientRect();
+
+  // Calculate position relative to viewport, accounting for scroll
+  const coords = {
+    top: textareaRect.top + (spanRect.top - divRect.top) - textarea.scrollTop,
+    left:
+      textareaRect.left + (spanRect.left - divRect.left) - textarea.scrollLeft,
+    height: parseInt(styles.lineHeight) || parseInt(styles.fontSize) * 1.2,
+  };
+
+  document.body.removeChild(div);
+  return coords;
+}
 
 export const PromptInputTextarea = ({
   onChange,
   onKeyDown,
   className,
   placeholder = "What would you like to know?",
+  searchContacts,
+  onMentionInsert,
   ...props
 }: PromptInputTextareaProps) => {
   const controller = useOptionalPromptInputController();
   const attachments = usePromptInputAttachments();
   const [isComposing, setIsComposing] = useState(false);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const [selectedIndex, setSelectedIndex] = useState(0);
+  const contactsRef = useRef<MentionSearchResult[]>([]);
+  const duplicateNamesRef = useRef<Set<string>>(new Set());
+
+  // Mention state
+  const mention = useMention();
+
+  // Refs for stable callback access (useLatest pattern - rule 8.2)
+  const mentionRef = useRef(mention);
+  const controllerRef = useRef(controller);
+  const onMentionInsertRef = useRef(onMentionInsert);
+  const propsValueRef = useRef(props.value);
+  const onChangeRef = useRef(onChange);
+  const searchContactsRef = useRef(searchContacts);
+
+  // Keep refs in sync with latest values
+  useEffect(() => {
+    mentionRef.current = mention;
+    controllerRef.current = controller;
+    onMentionInsertRef.current = onMentionInsert;
+    propsValueRef.current = props.value;
+    onChangeRef.current = onChange;
+    searchContactsRef.current = searchContacts;
+  });
+
+  // Track contacts for keyboard selection and precompute duplicates
+  const handleContactsChange = useCallback(
+    (contacts: MentionSearchResult[]) => {
+      contactsRef.current = contacts;
+      // Precompute duplicate names for efficient lookup during keyboard selection
+      const nameCounts = new Map<string, number>();
+      for (const c of contacts) {
+        const name = c.displayName?.toLowerCase() || "";
+        nameCounts.set(name, (nameCounts.get(name) || 0) + 1);
+      }
+      const dups = new Set<string>();
+      for (const [name, count] of nameCounts) {
+        if (count > 1) dups.add(name);
+      }
+      duplicateNamesRef.current = dups;
+    },
+    []
+  );
+
+  // Handle @ detection and mention picker activation (stable callback using refs)
+  const handleMentionDetection = useCallback(
+    (value: string, cursorPosition: number, textarea: HTMLTextAreaElement) => {
+      const currentSearchContacts = searchContactsRef.current;
+      const currentMention = mentionRef.current;
+
+      if (!currentSearchContacts || currentMention.justClosedRef.current) return;
+
+      // Find the @ symbol before cursor
+      const textBeforeCursor = value.substring(0, cursorPosition);
+      const lastAtIndex = textBeforeCursor.lastIndexOf("@");
+
+      if (lastAtIndex === -1) {
+        if (currentMention.active) currentMention.close();
+        return;
+      }
+
+      // Check if @ is at start or preceded by whitespace
+      const charBeforeAt = textBeforeCursor[lastAtIndex - 1];
+      const isValidTrigger =
+        lastAtIndex === 0 || /\s/.test(charBeforeAt || "");
+
+      if (!isValidTrigger) {
+        if (currentMention.active) currentMention.close();
+        return;
+      }
+
+      // Get query text after @
+      const queryText = textBeforeCursor.substring(lastAtIndex + 1);
+
+      // Check if query contains whitespace (completed mention or moved away)
+      // Allow spaces in names, but close if cursor moved before @
+      if (cursorPosition <= lastAtIndex) {
+        if (currentMention.active) currentMention.close();
+        return;
+      }
+
+      // Activate or update mention picker
+      if (!currentMention.active) {
+        const coords = getCaretCoordinates(textarea, lastAtIndex);
+        const rect = new DOMRect(coords.left, coords.top, 0, coords.height);
+        currentMention.activate(lastAtIndex, rect);
+      }
+      currentMention.updateQuery(queryText);
+    },
+    [] // Empty deps - callback is stable, uses refs for latest values
+  );
 
   const handleKeyDown: KeyboardEventHandler<HTMLTextAreaElement> = (event) => {
-    // Call the external onKeyDown handler first
+    // Handle mention picker keyboard navigation first
+    if (mention.active) {
+      if (event.key === "ArrowDown") {
+        event.preventDefault();
+        const maxIndex = Math.max(0, contactsRef.current.length - 1);
+        setSelectedIndex((prev) => Math.min(prev + 1, maxIndex));
+        return;
+      }
+      if (event.key === "ArrowUp") {
+        event.preventDefault();
+        setSelectedIndex((prev) => Math.max(0, prev - 1));
+        return;
+      }
+      if (event.key === "Escape") {
+        event.preventDefault();
+        mention.close();
+        return;
+      }
+      if (event.key === "Tab" || event.key === "Enter") {
+        // Select the contact at the current index
+        const contacts = contactsRef.current;
+        const boundedIndex = Math.min(
+          selectedIndex,
+          Math.max(0, contacts.length - 1)
+        );
+        const selectedContact = contacts[boundedIndex];
+        if (selectedContact) {
+          event.preventDefault();
+          // Get context for disambiguation if duplicate (using precomputed set)
+          const name = selectedContact.displayName?.toLowerCase() || "";
+          const hasDuplicate = duplicateNamesRef.current.has(name);
+          let context: string | null = null;
+          if (hasDuplicate) {
+            context =
+              selectedContact.company ||
+              selectedContact.handles?.find((h) => h.type === "email")?.value ||
+              selectedContact.handles?.find((h) => h.type === "phone")?.value ||
+              null;
+          }
+          handleMentionSelect(selectedContact, context);
+          return;
+        }
+      }
+    }
+
+    // Call the external onKeyDown handler
     onKeyDown?.(event);
 
     // If the external handler prevented default, don't run internal logic
@@ -843,6 +1070,12 @@ export const PromptInputTextarea = ({
     }
 
     if (event.key === "Enter") {
+      // Don't submit if mention picker is open
+      if (mention.active) {
+        event.preventDefault();
+        return;
+      }
+
       if (isComposing || event.nativeEvent.isComposing) {
         return;
       }
@@ -875,7 +1108,83 @@ export const PromptInputTextarea = ({
         attachments.remove(lastAttachment.id);
       }
     }
+
+    // Close mention picker on backspace if at trigger position
+    if (event.key === "Backspace" && mention.active) {
+      const textarea = event.currentTarget;
+      const cursorPosition = textarea.selectionStart || 0;
+      if (cursorPosition <= mention.triggerIndex) {
+        mention.close();
+      }
+    }
   };
+
+  // Stable callback using refs (avoids recreation on every state change)
+  const handleMentionSelect = useCallback(
+    (contact: MentionSearchResult, context?: string | null) => {
+      const textarea = textareaRef.current;
+      if (!textarea) return;
+
+      // Access current values via refs for stability
+      const currentController = controllerRef.current;
+      const currentMention = mentionRef.current;
+      const currentPropsValue = propsValueRef.current;
+
+      // Get current value from controller or directly from textarea/props
+      const currentValue = currentController
+        ? currentController.textInput.value
+        : (currentPropsValue as string) ?? textarea.value;
+
+      const mentionText = formatMentionDisplay(
+        {
+          id: contact._id,
+          displayName: contact.displayName,
+          company: contact.company,
+        },
+        context
+      );
+
+      // Replace @query with mention
+      const beforeMention = currentValue.substring(
+        0,
+        currentMention.triggerIndex
+      );
+      const cursorPosition = textarea.selectionStart || currentValue.length;
+      const afterMention = currentValue.substring(cursorPosition);
+
+      const newValue = beforeMention + mentionText + " " + afterMention;
+
+      // Update value via controller or synthetic event
+      if (currentController) {
+        currentController.textInput.setInput(newValue);
+      } else {
+        // Create a synthetic event to trigger onChange
+        const nativeInputValueSetter = Object.getOwnPropertyDescriptor(
+          window.HTMLTextAreaElement.prototype,
+          "value"
+        )?.set;
+        if (nativeInputValueSetter) {
+          nativeInputValueSetter.call(textarea, newValue);
+          const event = new Event("input", { bubbles: true });
+          textarea.dispatchEvent(event);
+        }
+      }
+
+      // Close picker
+      currentMention.close();
+
+      // Notify parent
+      onMentionInsertRef.current?.(contact);
+
+      // Focus textarea and set cursor after mention
+      setTimeout(() => {
+        textarea.focus();
+        const newCursorPosition = beforeMention.length + mentionText.length + 1;
+        textarea.setSelectionRange(newCursorPosition, newCursorPosition);
+      }, 0);
+    },
+    [] // Empty deps - callback is stable, uses refs for latest values
+  );
 
   const handlePaste: ClipboardEventHandler<HTMLTextAreaElement> = (event) => {
     const items = event.clipboardData?.items;
@@ -902,30 +1211,66 @@ export const PromptInputTextarea = ({
     }
   };
 
-  const controlledProps = controller
-    ? {
-        value: controller.textInput.value,
-        onChange: (event: ChangeEvent<HTMLTextAreaElement>) => {
-          controller.textInput.setInput(event.currentTarget.value);
-          onChange?.(event);
-        },
+  // Stable onChange handler using refs (avoids recreation on every render)
+  const handleChange = useCallback(
+    (event: ChangeEvent<HTMLTextAreaElement>) => {
+      const currentController = controllerRef.current;
+      const newValue = event.currentTarget.value;
+      const cursorPosition = event.currentTarget.selectionStart || 0;
+
+      if (currentController) {
+        currentController.textInput.setInput(newValue);
       }
-    : {
-        onChange,
-      };
+      onChangeRef.current?.(event);
+
+      // Check for @ mention trigger
+      handleMentionDetection(newValue, cursorPosition, event.currentTarget);
+    },
+    [handleMentionDetection]
+  );
+
+  // Memoize controlledProps to avoid object recreation on every render
+  const controlledProps = useMemo(
+    () =>
+      controller
+        ? {
+            value: controller.textInput.value,
+            onChange: handleChange,
+          }
+        : {
+            onChange: handleChange,
+          },
+    [controller, handleChange]
+  );
 
   return (
-    <InputGroupTextarea
-      className={cn("field-sizing-content max-h-48 min-h-16", className)}
-      name="message"
-      onCompositionEnd={() => setIsComposing(false)}
-      onCompositionStart={() => setIsComposing(true)}
-      onKeyDown={handleKeyDown}
-      onPaste={handlePaste}
-      placeholder={placeholder}
-      {...props}
-      {...controlledProps}
-    />
+    <>
+      <InputGroupTextarea
+        ref={textareaRef}
+        className={cn("field-sizing-content max-h-48 min-h-16", className)}
+        name="message"
+        onCompositionEnd={() => setIsComposing(false)}
+        onCompositionStart={() => setIsComposing(true)}
+        onKeyDown={handleKeyDown}
+        onPaste={handlePaste}
+        placeholder={placeholder}
+        {...props}
+        {...controlledProps}
+      />
+      {searchContacts && (
+        <MentionPicker
+          open={mention.active}
+          query={mention.query}
+          anchorRect={mention.anchorRect}
+          onSelect={handleMentionSelect}
+          onClose={mention.close}
+          searchFn={searchContacts}
+          selectedIndex={selectedIndex}
+          onSelectedIndexChange={setSelectedIndex}
+          onContactsChange={handleContactsChange}
+        />
+      )}
+    </>
   );
 };
 

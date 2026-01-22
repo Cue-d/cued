@@ -1,11 +1,3 @@
-/**
- * System prompt for the PRM (Personal Relationship Manager) assistant.
- *
- * The assistant helps users manage their relationships across multiple platforms
- * (iMessage, Gmail, Slack) by searching conversations, recalling facts about
- * contacts, and creating follow-up actions.
- */
-
 export const SYSTEM_PROMPT = `You are a personal relationship manager (PRM) assistant. You help the user maintain and strengthen their professional and personal relationships across multiple communication platforms.
 
 ## Your Capabilities
@@ -53,14 +45,30 @@ Always include a clear reason and, when possible, a draft message.
 - You can only search platforms the user has connected
 - Memory search works best with specific queries about facts or context`;
 
-/**
- * Build a system prompt with optional context about the current conversation or contact.
- */
+export interface MentionedContactHandle {
+  type: "phone" | "email" | "slack_id";
+  value: string;
+}
+
+export interface MentionedContact {
+  displayName: string;
+  company?: string | null;
+  handles?: MentionedContactHandle[];
+  notes?: string | null;
+}
+
 export function buildSystemPrompt(context?: {
   contactName?: string;
   conversationId?: string;
+  mentionedContacts?: MentionedContact[];
+  connectedPlatforms?: string[];
 }): string {
   let prompt = SYSTEM_PROMPT;
+
+  if (context?.connectedPlatforms && context.connectedPlatforms.length > 0) {
+    prompt += `\n\n## Connected Platforms\nThe user has connected: ${context.connectedPlatforms.join(", ")}`;
+    prompt += `\nOnly search and suggest actions for these platforms.`;
+  }
 
   if (context?.contactName) {
     prompt += `\n\n## Current Context\nThe user is asking about: ${context.contactName}`;
@@ -68,6 +76,28 @@ export function buildSystemPrompt(context?: {
 
   if (context?.conversationId) {
     prompt += `\nCurrent conversation ID: ${context.conversationId}`;
+  }
+
+  if (context?.mentionedContacts && context.mentionedContacts.length > 0) {
+    prompt += `\n\n## Referenced Contacts`;
+    for (const contact of context.mentionedContacts) {
+      let details = `\n- ${contact.displayName}`;
+      if (contact.company) details += ` (${contact.company})`;
+
+      const phones = contact.handles?.filter((h) => h.type === "phone") || [];
+      const emails = contact.handles?.filter((h) => h.type === "email") || [];
+
+      if (phones.length > 0) {
+        details += `\n  Phone: ${phones.map((h) => h.value).join(", ")}`;
+      }
+      if (emails.length > 0) {
+        details += `\n  Email: ${emails.map((h) => h.value).join(", ")}`;
+      }
+      if (contact.notes) {
+        details += `\n  Notes: ${contact.notes}`;
+      }
+      prompt += details;
+    }
   }
 
   return prompt;

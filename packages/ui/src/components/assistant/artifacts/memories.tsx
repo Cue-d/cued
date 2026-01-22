@@ -42,6 +42,10 @@ export const memoriesArtifact = new Artifact<"search_memories", MemoryResult[]>(
   parse: (result) => {
     if (!result || typeof result !== "object") return null
     const data = result as Record<string, unknown>
+    // Support both 'results' (new standard) and 'memories' (legacy)
+    if (Array.isArray(data.results)) {
+      return data.results as MemoryResult[]
+    }
     if (Array.isArray(data.memories)) {
       return data.memories as MemoryResult[]
     }

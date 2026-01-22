@@ -15,6 +15,11 @@ export {
   getConversationsTool,
   searchMemoriesTool,
   searchActionsTool,
+  // Centralized tool registry
+  createChatTools,
+  createToolResult,
+  type ToolConvexClient,
+  type ConvexApi,
 } from "./tools";
 
 export {
@@ -32,7 +37,12 @@ export {
   type Mem0ConfigSettings,
 } from "./mem0";
 
-export { SYSTEM_PROMPT, buildSystemPrompt } from "./prompts/system";
+export {
+  SYSTEM_PROMPT,
+  buildSystemPrompt,
+  type MentionedContact,
+  type MentionedContactHandle,
+} from "./prompts/system";
 export {
   CUSTOM_FACT_EXTRACTION_PROMPT,
   CUSTOM_UPDATE_MEMORY_PROMPT,
