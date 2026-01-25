@@ -29,3 +29,18 @@ export function getInitials(name: string): string {
     .slice(0, 2)
     .toUpperCase();
 }
+
+/**
+ * Truncate text to a maximum length, adding ellipsis if needed.
+ *
+ * @param text - The text to truncate
+ * @param maxLength - Maximum length including ellipsis
+ * @returns Truncated text with "..." if it exceeded maxLength
+ *
+ * @example
+ * truncate("Hello World", 8) // "Hello..."
+ * truncate("Hi", 8) // "Hi"
+ */
+export function truncate(text: string, maxLength: number): string {
+  return text.length <= maxLength ? text : text.slice(0, maxLength - 3) + "...";
+}

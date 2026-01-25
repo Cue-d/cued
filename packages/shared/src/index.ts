@@ -10,7 +10,7 @@ export {
 } from "./phone.js";
 
 // Utility functions
-export { getInitials } from "./utils/index.js";
+export { getInitials, truncate } from "./utils/index.js";
 export {
   formatTime,
   formatRelativeTime,

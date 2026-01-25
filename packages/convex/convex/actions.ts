@@ -4,28 +4,12 @@ import type { MutationCtx, QueryCtx } from "./_generated/server";
 import { action, internalMutation, mutation, query } from "./_generated/server";
 import { api, internal } from "./_generated/api";
 import { getAuthenticatedUser, requireAuthenticatedUser } from "./lib/auth";
+import { adjustPendingActionCount } from "./lib/actions";
 import {
   actionStatusValidator,
   actionTypeValidator,
   platformValidator,
 } from "./schema";
-
-/**
- * Helper to adjust the pending action count on a user.
- * Call with delta=1 when adding a pending action, delta=-1 when removing.
- */
-async function adjustPendingActionCount(
-  ctx: MutationCtx,
-  userId: Id<"users">,
-  delta: number
-): Promise<void> {
-  const user = await ctx.db.get(userId);
-  if (!user) return;
-
-  const currentCount = user.pendingActionCount ?? 0;
-  const newCount = Math.max(0, currentCount + delta);
-  await ctx.db.patch(userId, { pendingActionCount: newCount });
-}
 
 /**
  * Fetch all actionable items: pending actions + snoozed actions that are due.

@@ -1,5 +1,6 @@
 import { generateObject } from "ai";
 import { z } from "zod";
+import { truncate } from "@prm/shared";
 import { openai, FAST_MODEL } from "../openai";
 import { classifyRisk, type RiskClassification } from "../filters/risk-classifier";
 import { type StyleProfile, formatStyleForPrompt } from "../style/extract-style";
@@ -175,11 +176,6 @@ export interface GenerateActionWithStyleInput extends GenerateActionInput {
   similarReplies?: SimilarReply[];
   /** User policies/rules to follow */
   userPolicies?: UserPolicy[];
-}
-
-/** Truncate text to max length, adding ellipsis if needed */
-function truncate(text: string, maxLength: number): string {
-  return text.length <= maxLength ? text : text.slice(0, maxLength - 3) + "...";
 }
 
 /** Format timestamp as relative time */

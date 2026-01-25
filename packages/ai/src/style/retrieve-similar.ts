@@ -1,4 +1,5 @@
 import { embed } from "ai";
+import { truncate } from "@prm/shared";
 import { openai } from "../openai";
 
 /** Platform types */
@@ -187,13 +188,4 @@ export function formatSimilarRepliesForPrompt(
   });
 
   return `## Similar Past Replies\n${formatted.join("\n\n")}`;
-}
-
-/**
- * Truncate text to max length with ellipsis.
- */
-function truncate(text: string, maxLength: number): string {
-  return text.length <= maxLength
-    ? text
-    : text.slice(0, maxLength - 3) + "...";
 }

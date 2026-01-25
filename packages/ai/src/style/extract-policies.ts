@@ -1,5 +1,6 @@
 import { generateObject } from "ai";
 import { z } from "zod";
+import { truncate } from "@prm/shared";
 import { openai, FAST_MODEL } from "../openai";
 
 /** A user policy/rule extracted from behavior patterns */
@@ -248,13 +249,4 @@ function extractKeywords(rule: string): string[] {
     .replace(/[^\w\s]/g, "")
     .split(/\s+/)
     .filter((w) => w.length > 2 && !stopWords.has(w));
-}
-
-/**
- * Truncate text to max length with ellipsis.
- */
-function truncate(text: string, maxLength: number): string {
-  return text.length <= maxLength
-    ? text
-    : text.slice(0, maxLength - 3) + "...";
 }
