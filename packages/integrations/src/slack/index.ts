@@ -7,7 +7,7 @@ export {
   SlackAuthError,
   SlackRequestError,
   SlackRateLimitError,
-  isAuthError,
+  isSlackAuthError,
   isTokenExpiredError,
 } from './request'
 

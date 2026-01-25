@@ -604,7 +604,7 @@ describe("sync", () => {
       });
 
       expect(result.messagesCount).toBe(0);
-      expect(result.skippedNewsletters).toBe(1);
+      expect(result.skippedFiltered).toBe(1);
     });
 
     it("deduplicates Gmail messages by id", async () => {
@@ -715,384 +715,6 @@ describe("sync", () => {
       });
 
       expect(conversations[0].lastMessageText).toBe("Re: Thread subject");
-    });
-  });
-
-  // ============================================================================
-  // Slack Sync Tests (syncSlackMessages)
-  // ============================================================================
-  describe("syncSlackMessages mutation", () => {
-    it("throws for unknown user", async () => {
-      const t = convexTest(schema, modules);
-
-      await expect(
-        t.mutation(api.sync.syncSlackMessages, {
-          workosUserId: "unknown_user",
-          messages: [],
-        })
-      ).rejects.toThrow("User not found");
-    });
-
-    it("syncs Slack DM message and creates conversation", async () => {
-      const t = convexTest(schema, modules);
-
-      const { userId, workosUserId } = await t.run(async (ctx) => {
-        const userData = createTestUserData();
-        const id = await ctx.db.insert("users", userData);
-        return { userId: id, workosUserId: userData.workosUserId };
-      });
-
-      const result = await t.mutation(api.sync.syncSlackMessages, {
-        workosUserId,
-        messages: [
-          {
-            id: "msg_1",
-            channelId: "D12345678",
-            channelType: "im",
-            channelName: "alice",
-            userId: "U12345678",
-            userName: "Alice Smith",
-            text: "Hey, how's it going?",
-            ts: "1234567890.123456",
-            isThreadParent: false,
-            isBot: false,
-            sentAt: new Date().toISOString(),
-          },
-        ],
-      });
-
-      expect(result.messagesCount).toBe(1);
-      expect(result.conversationsCount).toBe(1);
-
-      // Verify conversation
-      const conversations = await t.run(async (ctx) => {
-        return ctx.db
-          .query("conversations")
-          .withIndex("by_user", (q) => q.eq("userId", userId))
-          .collect();
-      });
-
-      expect(conversations).toHaveLength(1);
-      expect(conversations[0].platform).toBe("slack");
-      expect(conversations[0].conversationType).toBe("dm");
-      expect(conversations[0].displayName).toBe("alice");
-    });
-
-    it("creates contact with Slack user ID handle", async () => {
-      const t = convexTest(schema, modules);
-
-      const { userId, workosUserId } = await t.run(async (ctx) => {
-        const userData = createTestUserData();
-        const id = await ctx.db.insert("users", userData);
-        return { userId: id, workosUserId: userData.workosUserId };
-      });
-
-      await t.mutation(api.sync.syncSlackMessages, {
-        workosUserId,
-        messages: [
-          {
-            id: "msg_1",
-            channelId: "D12345678",
-            channelType: "im",
-            userId: "U87654321",
-            userName: "Bob Wilson",
-            text: "Hello!",
-            ts: "1234567890.123456",
-            isThreadParent: false,
-            isBot: false,
-            sentAt: new Date().toISOString(),
-          },
-        ],
-      });
-
-      // Verify contact was created
-      const contacts = await t.run(async (ctx) => {
-        return ctx.db
-          .query("contacts")
-          .withIndex("by_user", (q) => q.eq("userId", userId))
-          .collect();
-      });
-
-      expect(contacts).toHaveLength(1);
-      expect(contacts[0].displayName).toBe("Bob Wilson");
-
-      // Verify handle
-      const handles = await t.run(async (ctx) => {
-        return ctx.db
-          .query("contactHandles")
-          .withIndex("by_user", (q) => q.eq("userId", userId))
-          .collect();
-      });
-
-      expect(handles).toHaveLength(1);
-      expect(handles[0].handleType).toBe("slack_id");
-      expect(handles[0].handle).toBe("U87654321");
-      expect(handles[0].platform).toBe("slack");
-    });
-
-    it("skips bot messages", async () => {
-      const t = convexTest(schema, modules);
-
-      const { workosUserId } = await t.run(async (ctx) => {
-        const userData = createTestUserData();
-        await ctx.db.insert("users", userData);
-        return { workosUserId: userData.workosUserId };
-      });
-
-      const result = await t.mutation(api.sync.syncSlackMessages, {
-        workosUserId,
-        messages: [
-          {
-            id: "msg_1",
-            channelId: "C12345678",
-            channelType: "channel",
-            userId: "B12345678", // Bot user
-            text: "Bot message",
-            ts: "1234567890.123456",
-            isThreadParent: false,
-            isBot: true,
-            sentAt: new Date().toISOString(),
-          },
-        ],
-      });
-
-      expect(result.messagesCount).toBe(0);
-    });
-
-    it("handles channel conversation type", async () => {
-      const t = convexTest(schema, modules);
-
-      const { userId, workosUserId } = await t.run(async (ctx) => {
-        const userData = createTestUserData();
-        const id = await ctx.db.insert("users", userData);
-        return { userId: id, workosUserId: userData.workosUserId };
-      });
-
-      await t.mutation(api.sync.syncSlackMessages, {
-        workosUserId,
-        messages: [
-          {
-            id: "msg_1",
-            channelId: "C12345678",
-            channelType: "channel",
-            channelName: "general",
-            userId: "U12345678",
-            text: "Channel message",
-            ts: "1234567890.123456",
-            isThreadParent: false,
-            isBot: false,
-            sentAt: new Date().toISOString(),
-          },
-        ],
-      });
-
-      const conversations = await t.run(async (ctx) => {
-        return ctx.db
-          .query("conversations")
-          .withIndex("by_user", (q) => q.eq("userId", userId))
-          .collect();
-      });
-
-      expect(conversations[0].conversationType).toBe("channel");
-      expect(conversations[0].displayName).toBe("general");
-    });
-
-    it("handles mpim (multi-party IM) as group", async () => {
-      const t = convexTest(schema, modules);
-
-      const { userId, workosUserId } = await t.run(async (ctx) => {
-        const userData = createTestUserData();
-        const id = await ctx.db.insert("users", userData);
-        return { userId: id, workosUserId: userData.workosUserId };
-      });
-
-      await t.mutation(api.sync.syncSlackMessages, {
-        workosUserId,
-        messages: [
-          {
-            id: "msg_1",
-            channelId: "G12345678",
-            channelType: "mpim",
-            channelName: "alice-bob-charlie",
-            userId: "U12345678",
-            text: "Group DM message",
-            ts: "1234567890.123456",
-            isThreadParent: false,
-            isBot: false,
-            sentAt: new Date().toISOString(),
-          },
-        ],
-      });
-
-      const conversations = await t.run(async (ctx) => {
-        return ctx.db
-          .query("conversations")
-          .withIndex("by_user", (q) => q.eq("userId", userId))
-          .collect();
-      });
-
-      expect(conversations[0].conversationType).toBe("group");
-    });
-
-    it("deduplicates Slack messages by ts", async () => {
-      const t = convexTest(schema, modules);
-
-      const { userId, workosUserId } = await t.run(async (ctx) => {
-        const userData = createTestUserData();
-        const id = await ctx.db.insert("users", userData);
-        return { userId: id, workosUserId: userData.workosUserId };
-      });
-
-      // First sync
-      const result1 = await t.mutation(api.sync.syncSlackMessages, {
-        workosUserId,
-        messages: [
-          {
-            id: "msg_1",
-            channelId: "C12345678",
-            channelType: "channel",
-            userId: "U12345678",
-            text: "Original",
-            ts: "1234567890.000001",
-            isThreadParent: false,
-            isBot: false,
-            sentAt: new Date().toISOString(),
-          },
-        ],
-      });
-
-      expect(result1.messagesCount).toBe(1);
-
-      // Second sync with same ts
-      const result2 = await t.mutation(api.sync.syncSlackMessages, {
-        workosUserId,
-        messages: [
-          {
-            id: "msg_1",
-            channelId: "C12345678",
-            channelType: "channel",
-            userId: "U12345678",
-            text: "Duplicate",
-            ts: "1234567890.000001", // Same ts
-            isThreadParent: false,
-            isBot: false,
-            sentAt: new Date().toISOString(),
-          },
-        ],
-      });
-
-      expect(result2.messagesCount).toBe(0);
-
-      // Verify only one message
-      const messages = await t.run(async (ctx) => {
-        return ctx.db
-          .query("messages")
-          .withIndex("by_user", (q) => q.eq("userId", userId))
-          .collect();
-      });
-
-      expect(messages).toHaveLength(1);
-    });
-
-    it("stores thread information", async () => {
-      const t = convexTest(schema, modules);
-
-      const { userId, workosUserId } = await t.run(async (ctx) => {
-        const userData = createTestUserData();
-        const id = await ctx.db.insert("users", userData);
-        return { userId: id, workosUserId: userData.workosUserId };
-      });
-
-      await t.mutation(api.sync.syncSlackMessages, {
-        workosUserId,
-        messages: [
-          {
-            id: "msg_1",
-            channelId: "C12345678",
-            channelType: "channel",
-            userId: "U12345678",
-            text: "Thread parent",
-            ts: "1234567890.000001",
-            isThreadParent: true,
-            isBot: false,
-            sentAt: new Date().toISOString(),
-          },
-          {
-            id: "msg_2",
-            channelId: "C12345678",
-            channelType: "channel",
-            userId: "U12345678",
-            text: "Thread reply",
-            ts: "1234567890.000002",
-            threadTs: "1234567890.000001",
-            isThreadParent: false,
-            isBot: false,
-            sentAt: new Date().toISOString(),
-          },
-        ],
-      });
-
-      const messages = await t.run(async (ctx) => {
-        return ctx.db
-          .query("messages")
-          .withIndex("by_user", (q) => q.eq("userId", userId))
-          .collect();
-      });
-
-      // Find the thread reply
-      const threadReply = messages.find(m => m.content === "Thread reply");
-      expect(threadReply?.threadTs).toBe("1234567890.000001");
-      expect(threadReply?.isThreadParent).toBe(false);
-
-      // Find the parent
-      const threadParent = messages.find(m => m.content === "Thread parent");
-      expect(threadParent?.isThreadParent).toBe(true);
-    });
-
-    it("stores reactions on messages", async () => {
-      const t = convexTest(schema, modules);
-
-      const { userId, workosUserId } = await t.run(async (ctx) => {
-        const userData = createTestUserData();
-        const id = await ctx.db.insert("users", userData);
-        return { userId: id, workosUserId: userData.workosUserId };
-      });
-
-      await t.mutation(api.sync.syncSlackMessages, {
-        workosUserId,
-        messages: [
-          {
-            id: "msg_1",
-            channelId: "C12345678",
-            channelType: "channel",
-            userId: "U12345678",
-            text: "Message with reactions",
-            ts: "1234567890.000001",
-            isThreadParent: false,
-            isBot: false,
-            sentAt: new Date().toISOString(),
-            reactions: [
-              { name: "thumbsup", count: 2, users: ["U111", "U222"] },
-              { name: "heart", count: 1, users: ["U333"] },
-            ],
-          },
-        ],
-      });
-
-      const messages = await t.run(async (ctx) => {
-        return ctx.db
-          .query("messages")
-          .withIndex("by_user", (q) => q.eq("userId", userId))
-          .collect();
-      });
-
-      expect(messages[0].reactions).toHaveLength(2);
-      expect(messages[0].reactions).toEqual(
-        expect.arrayContaining([
-          expect.objectContaining({ emoji: ":thumbsup:" }),
-          expect.objectContaining({ emoji: ":heart:" }),
-        ])
-      );
     });
   });
 
@@ -1220,6 +842,106 @@ describe("sync", () => {
       expect(handles).toHaveLength(1);
       expect(handles[0].contactId).toBe(contacts[0]._id);
     });
+
+    it("resolves phone variant collision - multiple formats map to same contact", async () => {
+      const t = convexTest(schema, modules);
+      const { asUser, userId } = await setupAuthenticatedUser(t);
+
+      // Create a contact with phone handle stored as +1 format
+      const contactId = await t.run(async (ctx) => {
+        const id = await ctx.db.insert("contacts", createTestContactData(userId, {
+          displayName: "Alice Smith",
+        }));
+        // Store the handle with +1 format
+        await ctx.db.insert("contactHandles", createTestContactHandleData(userId, id, {
+          handleType: "phone",
+          handle: "+15551234567",
+          platform: "imessage",
+        }));
+        return id;
+      });
+
+      // Sync messages from two different phone format variants of the same number
+      // Both should resolve to the same contact Alice Smith
+      await asUser.mutation(api.sync.syncMessages, {
+        batch: {
+          cursor: 100,
+          chats: [
+            {
+              id: 1,
+              identifier: "chat_1",
+              displayName: null,
+              isGroup: false,
+              participants: [
+                // Format 1: with +1 (same as stored)
+                { id: 1, identifier: "+15551234567", service: "iMessage" },
+              ],
+            },
+            {
+              id: 2,
+              identifier: "chat_2",
+              displayName: null,
+              isGroup: false,
+              participants: [
+                // Format 2: 11-digit without + (variant)
+                { id: 2, identifier: "15551234567", service: "iMessage" },
+              ],
+            },
+          ],
+          messages: [
+            {
+              id: 1,
+              chatId: 1,
+              text: "Message from +1 format",
+              timestamp: Math.floor(Date.now() / 1000),
+              isFromMe: false,
+              isRead: true,
+              readAt: null,
+              hasAttachments: false,
+              sender: { id: 1, identifier: "+15551234567", service: "iMessage" },
+            },
+            {
+              id: 2,
+              chatId: 2,
+              text: "Message from 11-digit format",
+              timestamp: Math.floor(Date.now() / 1000),
+              isFromMe: false,
+              isRead: true,
+              readAt: null,
+              hasAttachments: false,
+              sender: { id: 2, identifier: "15551234567", service: "iMessage" },
+            },
+          ],
+          handles: [
+            { id: 1, identifier: "+15551234567", service: "iMessage" },
+            { id: 2, identifier: "15551234567", service: "iMessage" },
+          ],
+        },
+      });
+
+      // Verify both messages link to the same existing contact
+      const messages = await t.run(async (ctx) => {
+        return ctx.db
+          .query("messages")
+          .withIndex("by_user", (q) => q.eq("userId", userId))
+          .collect();
+      });
+
+      expect(messages).toHaveLength(2);
+      expect(messages[0].senderContactId).toBe(contactId);
+      expect(messages[1].senderContactId).toBe(contactId);
+
+      // Verify no new contacts were created (only the original one exists)
+      const contacts = await t.run(async (ctx) => {
+        return ctx.db
+          .query("contacts")
+          .withIndex("by_user", (q) => q.eq("userId", userId))
+          .collect();
+      });
+
+      expect(contacts).toHaveLength(1);
+      expect(contacts[0].displayName).toBe("Alice Smith");
+    });
   });
 
   // ============================================================================
@@ -1260,11 +982,14 @@ describe("sync", () => {
         await ctx.db.insert("integrations", {
           userId,
           platform: "imessage",
-          syncState: {
-            isConnected: true,
-            lastSyncCursor: "12345",
-            lastSyncAt,
-          },
+          isConnected: true,
+        });
+        await ctx.db.insert("syncCursors", {
+          userId,
+          platform: "imessage",
+          cursorData: { lastSyncCursor: "12345" },
+          lastSyncAt,
+          syncMode: "incremental",
         });
       });
 
@@ -1300,32 +1025,36 @@ describe("sync", () => {
         cursor: "500",
       });
 
-      const integration = await t.run(async (ctx) => {
+      const syncCursor = await t.run(async (ctx) => {
         return ctx.db
-          .query("integrations")
+          .query("syncCursors")
           .withIndex("by_user_platform", (q) =>
             q.eq("userId", userId).eq("platform", "imessage")
           )
           .unique();
       });
 
-      expect(integration?.syncState.lastSyncCursor).toBe("500");
-      expect(integration?.syncState.lastSyncAt).toBeGreaterThan(0);
+      expect(syncCursor?.cursorData?.lastSyncCursor).toBe("500");
+      expect(syncCursor?.lastSyncAt).toBeGreaterThan(0);
     });
 
     it("updates existing integration cursor", async () => {
       const t = convexTest(schema, modules);
       const { asUser, userId } = await setupAuthenticatedUser(t);
 
-      // Create existing integration
+      // Create existing integration and sync cursor
       await t.run(async (ctx) => {
         await ctx.db.insert("integrations", {
           userId,
           platform: "imessage",
-          syncState: {
-            isConnected: true,
-            lastSyncCursor: "100",
-          },
+          isConnected: true,
+        });
+        await ctx.db.insert("syncCursors", {
+          userId,
+          platform: "imessage",
+          cursorData: { lastSyncCursor: "100" },
+          lastSyncAt: Date.now(),
+          syncMode: "incremental",
         });
       });
 
@@ -1334,36 +1063,39 @@ describe("sync", () => {
         cursor: "200",
       });
 
-      const integration = await t.run(async (ctx) => {
+      const syncCursor = await t.run(async (ctx) => {
         return ctx.db
-          .query("integrations")
+          .query("syncCursors")
           .withIndex("by_user_platform", (q) =>
             q.eq("userId", userId).eq("platform", "imessage")
           )
           .unique();
       });
 
-      expect(integration?.syncState.lastSyncCursor).toBe("200");
+      expect(syncCursor?.cursorData?.lastSyncCursor).toBe("200");
     });
   });
 
   describe("resetSyncState mutation", () => {
-    it("resets integration sync state", async () => {
+    it("resets sync cursor state", async () => {
       const t = convexTest(schema, modules);
       const { asUser, userId } = await setupAuthenticatedUser(t);
 
-      // Create integration with existing state
+      // Create integration and sync cursor with existing state
       await t.run(async (ctx) => {
         await ctx.db.insert("integrations", {
           userId,
           platform: "imessage",
-          syncState: {
-            isConnected: true,
-            lastSyncCursor: "99999",
-            lastSyncAt: Date.now(),
-            totalMessagesSynced: 1000,
-            totalContactsSynced: 50,
-          },
+          isConnected: true,
+        });
+        await ctx.db.insert("syncCursors", {
+          userId,
+          platform: "imessage",
+          cursorData: { lastSyncCursor: "99999" },
+          lastSyncAt: Date.now(),
+          syncMode: "incremental",
+          totalMessagesSynced: 1000,
+          totalContactsSynced: 50,
         });
       });
 
@@ -1371,18 +1103,18 @@ describe("sync", () => {
         platform: "imessage",
       });
 
-      const integration = await t.run(async (ctx) => {
+      const syncCursor = await t.run(async (ctx) => {
         return ctx.db
-          .query("integrations")
+          .query("syncCursors")
           .withIndex("by_user_platform", (q) =>
             q.eq("userId", userId).eq("platform", "imessage")
           )
           .unique();
       });
 
-      expect(integration?.syncState.lastSyncCursor).toBe("0");
-      expect(integration?.syncState.totalMessagesSynced).toBe(0);
-      expect(integration?.syncState.totalContactsSynced).toBe(0);
+      expect(syncCursor?.cursorData?.lastSyncCursor).toBe("0");
+      expect(syncCursor?.totalMessagesSynced).toBe(0);
+      expect(syncCursor?.totalContactsSynced).toBe(0);
     });
   });
 });

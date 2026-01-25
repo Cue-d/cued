@@ -167,6 +167,7 @@ export const queueMessage = mutation({
     chatIdentifier: v.optional(v.string()),
     conversationId: v.optional(v.id("conversations")),
     actionId: v.optional(v.id("actions")),
+    workspaceId: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
     const user = await getAuthenticatedUser(ctx);
@@ -186,6 +187,7 @@ export const queueMessage = mutation({
       chatIdentifier: args.chatIdentifier,
       conversationId: args.conversationId,
       actionId: args.actionId,
+      workspaceId: args.workspaceId,
       status: "pending",
       scheduledFor,
       attempts: 0,

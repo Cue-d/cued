@@ -30,7 +30,6 @@
     "dotenv": "^17.2.3",
     "electron-liquid-glass": "^1.1.1",
     "electron-updater": "^6.7.3",
-    "playwright": "^1.57.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
     "sharp": "^0.34.5"

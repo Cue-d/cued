@@ -9,6 +9,7 @@ import type {
 } from "@prm/shared";
 import { getLinkedInSyncManager } from "../sync/linkedin-sync.js";
 import { sendMessage } from "../linkedin-api/messages.js";
+import { getSyncDebugLogger } from "../sync/sync-debug-logger.js";
 
 /**
  * Determine if an error is retryable (transient) vs permanent.
@@ -99,11 +100,37 @@ export class LinkedInAdapter implements PlatformAdapter {
     }
 
     try {
+      const logger = getSyncDebugLogger();
+
       // Ensure we have the user entity URN (required for sending)
       await client.fetchSelf();
 
       // Send the message
+      console.log(`[LinkedInAdapter] Sending message to threadId: ${message.threadId}`);
+      logger.logCustomEvent('linkedin', 'send_message_start', { threadId: message.threadId });
       const sentMessage = await sendMessage(client, message.threadId, message.text);
+      console.log(`[LinkedInAdapter] Message sent successfully, entityURN: ${sentMessage.entityURN}`);
+      logger.logCustomEvent('linkedin', 'send_message_success', {
+        threadId: message.threadId,
+        entityURN: sentMessage.entityURN,
+      });
+
+      // Sync the sent message directly to Convex without re-fetching
+      // This avoids calling getMessages() which can fail with
+      // "Internal error fetching data from downstream"
+      console.log(`[LinkedInAdapter] Syncing sent message directly: ${sentMessage.entityURN}`);
+      logger.logCustomEvent('linkedin', 'sync_sent_message_trigger', {
+        threadId: message.threadId,
+        entityURN: sentMessage.entityURN,
+      });
+      syncManager.syncSentMessage(sentMessage).catch((err) => {
+        const errMsg = err instanceof Error ? err.message : String(err);
+        console.error("[LinkedInAdapter] Sync sent message failed:", err);
+        logger.logSyncError('linkedin', `sync_sent_message_catch: ${errMsg}`, {
+          threadId: message.threadId,
+          entityURN: sentMessage.entityURN,
+        });
+      });
 
       return {
         success: true,
@@ -112,6 +139,7 @@ export class LinkedInAdapter implements PlatformAdapter {
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);
       console.error("[LinkedInAdapter] Send failed:", errorMessage);
+      getSyncDebugLogger().logSyncError('linkedin', `send_failed: ${errorMessage}`, { threadId: message.threadId });
 
       return {
         success: false,

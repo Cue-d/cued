@@ -8,6 +8,8 @@ import {
   clearTokens,
   StoredTokens,
 } from "./token-storage";
+import { isAuthError, AuthRetryOptions } from "./auth-utils";
+import { ConvexHttpClient } from "convex/browser";
 
 const REFRESH_ENDPOINT = "https://api.workos.com/user_management/authenticate";
 
@@ -121,30 +123,8 @@ export async function getValidAccessToken(
   return null;
 }
 
-/**
- * Check if an error is an auth/token error from Convex.
- */
-export function isAuthError(error: unknown): boolean {
-  if (error instanceof Error) {
-    const message = error.message.toLowerCase();
-    return (
-      message.includes("invalidauthheader") ||
-      message.includes("token expired") ||
-      message.includes("could not validate token") ||
-      message.includes("unauthorized") ||
-      message.includes("unauthenticated")
-    );
-  }
-  if (typeof error === "string") {
-    const lower = error.toLowerCase();
-    return (
-      lower.includes("invalidauthheader") ||
-      lower.includes("token expired") ||
-      lower.includes("could not validate token")
-    );
-  }
-  return false;
-}
+// Re-export isAuthError for backwards compatibility
+export { isAuthError } from "./auth-utils";
 
 /**
  * Force refresh the token immediately, regardless of expiry time.
@@ -244,6 +224,45 @@ export async function startDeviceAuth(
  */
 export function signOut(): void {
   clearTokens();
+}
+
+// ============================================================================
+// Centralized Auth for Sync Managers
+// ============================================================================
+
+/**
+ * Create AuthRetryOptions for use with withAuthRetry.
+ * Accepts a ConvexHttpClient to ensure the token is set on the client after refresh.
+ *
+ * @param client - The ConvexHttpClient to set auth on after token refresh
+ */
+export function createAuthRetryOptions(client: ConvexHttpClient): AuthRetryOptions {
+  return {
+    getValidToken: async (forceRefresh) => {
+      const token = await getValidAccessToken(forceRefresh);
+      if (token) {
+        client.setAuth(token);
+      }
+      return token;
+    },
+    onAuthInvalid: () => {
+      console.log("[Auth] Auth invalid, user needs to re-authenticate");
+    },
+  };
+}
+
+/**
+ * Set auth token on a Convex client.
+ * @returns The token if set successfully, null otherwise
+ */
+export async function setConvexAuth(
+  client: ConvexHttpClient
+): Promise<string | null> {
+  const token = await getValidAccessToken();
+  if (token) {
+    client.setAuth(token);
+  }
+  return token;
 }
 
 /**

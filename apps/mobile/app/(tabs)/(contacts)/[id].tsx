@@ -10,9 +10,9 @@ import { SymbolView } from "expo-symbols";
 import { useQuery, useMutation } from "convex/react";
 import { api } from "@prm/convex/convex/_generated/api";
 import { getInitials, formatPhoneNumber, type ActionPlatform } from "@prm/shared";
-import { getThemeColors } from "@/lib/utils";
 import { SendMessageSheet, type SendMessageContact } from "@/components/send-message-sheet";
 import { UndoSendToast } from "@/components/undo-send-toast";
+import { getThemeColors } from "@/lib/utils";
 import type { Id } from "@prm/convex/convex/_generated/dataModel";
 import type { SFSymbol } from "sf-symbols-typescript";
 
@@ -36,7 +36,7 @@ function getHandleIcon(type: string): SFSymbol {
       return "envelope.fill";
     case "slack_id":
       return "number";
-    case "linkedin_url":
+    case "linkedin_handle":
       return "link";
     case "twitter_handle":
       return "at";
@@ -54,7 +54,7 @@ function getHandleTypeLabel(type: string): string {
       return "Email";
     case "slack_id":
       return "Slack";
-    case "linkedin_url":
+    case "linkedin_handle":
       return "LinkedIn";
     case "twitter_handle":
       return "Twitter";
@@ -176,7 +176,7 @@ function handleTypeToPlatform(type: string): ActionPlatform | null {
   switch (type) {
     case "phone":
       return "imessage";
-    case "linkedin_url":
+    case "linkedin_handle":
       return "linkedin";
     default:
       return null;

@@ -31,6 +31,7 @@ import type {
   SlackConversationsListResponse,
   SlackConversationsHistoryResponse,
   SlackConversationsRepliesResponse,
+  SlackConversationsMembersResponse,
   SlackMessage,
   SlackPostMessageResponse,
 } from './types'
@@ -225,6 +226,34 @@ export class SlackClient {
     return {
       messages: response.messages ?? [],
       hasMore: response.has_more ?? false,
+      nextCursor: response.response_metadata?.next_cursor,
+    }
+  }
+
+  /**
+   * Get conversation members
+   * @param channel - Channel/conversation ID
+   * @param options - Pagination options
+   */
+  async getConversationMembers(
+    channel: string,
+    options: {
+      cursor?: string
+      limit?: number
+    } = {}
+  ): Promise<{ members: string[]; nextCursor?: string }> {
+    const { cursor, limit = PAGINATION.defaultLimit } = options
+
+    const response = await newPostRequest(SLACK_API_URLS.conversationsMembers, this.credentials)
+      .withParams({
+        channel,
+        limit,
+        cursor,
+      })
+      .doJSON<SlackConversationsMembersResponse>()
+
+    return {
+      members: response.members ?? [],
       nextCursor: response.response_metadata?.next_cursor,
     }
   }

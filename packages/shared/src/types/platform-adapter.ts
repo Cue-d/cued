@@ -37,6 +37,8 @@ export interface QueuedMessage {
   groupHandles?: string[];
   /** Optional thread/conversation ID for replies */
   threadId?: string;
+  /** For multi-workspace platforms (Slack teamId, Gmail email address) */
+  workspaceId?: string;
 }
 
 /**

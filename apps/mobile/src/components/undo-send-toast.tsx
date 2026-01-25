@@ -6,10 +6,10 @@
  */
 
 import { useState, useEffect, useCallback } from "react";
-import { View, Text, Pressable, Animated } from "react-native";
+import { View, Text, Pressable } from "react-native";
+import { GlassView, isLiquidGlassAvailable } from "expo-glass-effect";
 import * as Haptics from "expo-haptics";
 import { SymbolView } from "expo-symbols";
-import { GlassView, isLiquidGlassAvailable } from "expo-glass-effect";
 import { PLATFORM_CONFIG, type ActionPlatform } from "@prm/shared";
 import { cn } from "@/lib/utils";
 

@@ -4,6 +4,7 @@
  */
 import { ConvexHttpClient } from "convex/browser";
 import { api } from "@prm/convex";
+import { isAuthError } from "../auth/auth-utils";
 import { app } from "electron";
 import { electronEnv } from "@prm/env/electron";
 
@@ -35,14 +36,6 @@ export class HeartbeatManager {
     this.forceRefresh = callback;
   }
 
-  private isAuthError(error: unknown): boolean {
-    const message = error instanceof Error ? error.message : String(error);
-    return (
-      message.includes('InvalidAuthHeader') ||
-      message.includes('Token expired') ||
-      message.includes('Could not validate token')
-    );
-  }
 
   start(): void {
     if (this.intervalId) return;
@@ -82,7 +75,7 @@ export class HeartbeatManager {
       });
     } catch (error) {
       // Try to recover from auth errors
-      if (this.isAuthError(error) && this.forceRefresh) {
+      if (isAuthError(error) && this.forceRefresh) {
         console.log("[Presence] Auth error detected, force refreshing token...");
         try {
           const newToken = await this.forceRefresh();

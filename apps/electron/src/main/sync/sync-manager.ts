@@ -2,24 +2,39 @@
  * Sync manager for batched incremental iMessage sync.
  *
  * Handles:
- * - Batching messages to stay under Convex limits (~2500/batch)
- * - Incremental sync using ROWID cursor
+ * - Batching messages to stay under Convex limits (~1000/batch)
+ * - Incremental sync using ROWID cursor stored in cloud (Convex syncCursors table)
  * - Background sync on interval
  * - Progress reporting
  * - Attachment upload to Convex storage
+ *
+ * Sync strategy: Always sync newest messages first (DESC order).
+ * - cursor tracks the highest fully-synced ROWID
+ * - When new messages exist (cursor < maxRowid), sync from maxRowid down to cursor
+ * - After completing, update cursor to maxRowid
+ *
+ * Cursor storage: Uses Convex syncCursors table for multi-device support.
+ * No local cursor file - app reinstall resumes from cloud cursor.
  */
 
-import { app } from "electron";
-import * as fs from "node:fs";
-import * as path from "node:path";
 import { ConvexHttpClient } from "convex/browser";
 import { api } from "@prm/convex";
 import type { Id } from "@prm/convex";
-import type { Message } from "@prm/integrations";
+import { withAuthRetry } from "../auth/auth-utils";
 import { electronEnv } from "@prm/env/electron";
 import { ChatDb } from "./chat-db";
 import { uploadAttachments } from "./attachment-uploader";
 import { getContactsManager } from "./contacts";
+import { getSyncDebugLogger } from "./sync-debug-logger";
+import {
+  createConvexClient,
+  loadCursor,
+  saveCursor,
+  createSyncGuard,
+  createAuthRetryOptions,
+  setConvexAuth,
+} from "./shared";
+import { getValidAccessToken } from "../auth/auth-manager";
 
 /** Attachment with Convex storage IDs (properly typed) */
 interface ConvexAttachment {
@@ -31,23 +46,18 @@ interface ConvexAttachment {
 }
 
 // Performance tuning constants
-const BATCH_SIZE = 1000; // Reduced to stay under Convex 4096 read limit per mutation
-const CONCURRENT_BATCHES = 5; // Increased parallelism to compensate for smaller batches
-const SYNC_INTERVAL_MS = 30_000; // 30 seconds
-const CONVEX_URL = electronEnv.CONVEX_URL;
+const BATCH_SIZE = 1000;
+const CONCURRENT_BATCHES = 5;
+const SYNC_INTERVAL_MS = 30_000;
 
 // Current sync version - must match CURRENT_SYNC_VERSION in packages/convex/convex/sync.ts
 const CURRENT_SYNC_VERSION = 1;
 
 /**
- * Cursor state for dual-mode sync:
- * - Full sync (DESC): Fetches recent messages first, from maxRowid down to 0
- * - Incremental sync (ASC): Fetches new messages from cursor upward
+ * Simple cursor state: tracks highest fully-synced ROWID.
  */
 interface CursorState {
-  cursor: number; // ASC incremental cursor (highest synced ROWID)
-  fullSyncStartRowid?: number; // maxRowid when full sync started
-  fullSyncCursor?: number; // current position in DESC sync (upper bound for next batch)
+  cursor: number;
   updatedAt: number;
 }
 
@@ -63,7 +73,7 @@ export interface SyncProgress {
     estimatedBatchesRemaining: number;
   };
   error?: string;
-  recoveryReason?: string; // Why recovery was triggered
+  recoveryReason?: string;
 }
 
 export interface SyncState {
@@ -73,139 +83,51 @@ export interface SyncState {
   totalContactsSynced: number;
   syncVersion: number;
   isConnected: boolean;
-  // Task 2.7c: Contacts sync state
   lastContactsSyncAt: number | null;
 }
 
 export interface SyncManagerOptions {
   onProgress?: (progress: SyncProgress) => void;
-  getAuthToken?: (forceRefresh?: boolean) => Promise<string | null>; // Token provider that refreshes as needed
-  onAuthInvalid?: () => void; // Called when auth fails and cannot be refreshed
-  syncAttachments?: boolean; // Enable attachment upload (default: false for faster initial sync)
-  syncContacts?: () => Promise<{ contactsCount: number }>; // Contact sync function for recovery
+  syncAttachments?: boolean;
+  syncContacts?: () => Promise<{ contactsCount: number }>;
 }
 
 export class SyncManager {
   private chatDb: ChatDb | null = null;
   private client: ConvexHttpClient;
   private intervalId: NodeJS.Timeout | null = null;
-  private isRunning = false;
+  private syncGuard = createSyncGuard();
   private isInitialized = false;
   private progress: SyncProgress = {
     status: "idle",
     totalMessagesSynced: 0,
   };
   private options: SyncManagerOptions;
-  private cursorPath: string;
+  private cursorState: CursorState = { cursor: 0, updatedAt: Date.now() };
 
   constructor(options: SyncManagerOptions = {}) {
     this.options = options;
-    this.client = new ConvexHttpClient(CONVEX_URL);
-    this.cursorPath = path.join(app.getPath("userData"), "sync_cursor.json");
+    this.client = createConvexClient();
   }
 
-  /**
-   * Set the token provider function.
-   */
-  setTokenProvider(getAuthToken: () => Promise<string | null>): void {
-    this.options.getAuthToken = getAuthToken;
-  }
-
-  /**
-   * Set the progress callback.
-   */
   setProgressCallback(onProgress: (progress: SyncProgress) => void): void {
     this.options.onProgress = onProgress;
   }
 
-  /**
-   * Set the auth invalid callback.
-   */
-  setAuthInvalidCallback(onAuthInvalid: () => void): void {
-    this.options.onAuthInvalid = onAuthInvalid;
-  }
-
-  /**
-   * Refresh and set the auth token on the client.
-   * Returns true if a valid token was set, false otherwise.
-   * @param forceRefresh - If true, force a token refresh regardless of expiry
-   */
-  private async refreshAuth(forceRefresh = false): Promise<boolean> {
-    if (!this.options.getAuthToken) {
-      console.warn("[SyncManager] No token provider configured");
-      return false;
-    }
-
-    const token = await this.options.getAuthToken(forceRefresh);
+  private async refreshAuth(): Promise<string | null> {
+    const token = await setConvexAuth(this.client);
     if (!token) {
-      console.warn("[SyncManager] Token provider returned no token");
-      return false;
+      console.warn("[SyncManager] No auth token available");
     }
-
-    this.client.setAuth(token);
-    return true;
+    return token;
   }
 
-  /**
-   * Execute a mutation with 401 retry logic.
-   * If the mutation fails with 401 (Unauthenticated), refresh the token and retry once.
-   */
-  private async executeMutationWithRetry<T>(
-    mutationFn: () => Promise<T>
-  ): Promise<T> {
-    try {
-      return await mutationFn();
-    } catch (error: unknown) {
-      if (!this.isAuthError(error)) {
-        throw error;
-      }
-
-      console.log(
-        "[SyncManager] Got auth error, force refreshing token and retrying..."
-      );
-
-      // Force refresh since the server rejected our token
-      const hasAuth = await this.refreshAuth(true);
-      if (!hasAuth) {
-        // Notify that auth is invalid so UI can update
-        this.options.onAuthInvalid?.();
-        throw new Error("Token refresh failed, cannot retry request");
-      }
-
-      console.log("[SyncManager] Token refreshed, retrying mutation...");
-      return await mutationFn();
-    }
-  }
-
-  /**
-   * Check if an error is an authentication error (401).
-   */
-  private isAuthError(error: unknown): boolean {
-    if (error instanceof Error) {
-      const message = error.message.toLowerCase();
-      // Convex returns "Unauthenticated" for auth errors
-      // WorkOS returns "InvalidAuthHeader" with "Token expired" message
-      return (
-        message.includes("unauthenticated") ||
-        message.includes("401") ||
-        message.includes("unauthorized") ||
-        message.includes("invalidauthheader") ||
-        message.includes("token expired")
-      );
-    }
-    return false;
-  }
-
-  /**
-   * Start background sync on interval.
-   */
   async start(): Promise<void> {
     if (this.intervalId) return;
 
     console.log("[SyncManager] Starting background sync...");
 
     if (!this.isInitialized) {
-      // Refresh auth before fetching cursor from server
       await this.refreshAuth();
       await this.initializeCursorFromServer();
     }
@@ -215,43 +137,50 @@ export class SyncManager {
   }
 
   /**
-   * Initialize sync state from server, detecting recovery scenarios.
+   * Initialize sync state from cloud cursor, detecting recovery scenarios.
    */
   private async initializeCursorFromServer(): Promise<void> {
     this.isInitialized = true;
 
     try {
+      const cloudCursor = await loadCursor<CursorState>(this.client, "imessage");
+
+      // @ts-ignore - TS2589: Convex's generated types hit TypeScript's depth limit
       const syncState = (await this.client.query(api.sync.getSyncState, {
         platform: "imessage",
       })) as SyncState | null;
 
-      const localCursor = this.loadCursorState().cursor;
-
-      // Task 2.7c: Pre-load local contacts count before recovery detection
       await this.preloadLocalContactsCount();
 
-      // Check for recovery scenarios
-      const recoveryReason = this.detectRecoveryScenario(syncState);
+      const recoveryReason = this.detectRecoveryScenario(cloudCursor, syncState);
+      const logger = getSyncDebugLogger();
 
       if (recoveryReason) {
         console.log(`[SyncManager] Recovery triggered: ${recoveryReason}`);
+        logger.logSyncEvent({
+          platform: "imessage",
+          event: "sync_start",
+          details: { mode: "recovery", reason: recoveryReason },
+        });
         this.updateProgress({
           status: "recovery",
           recoveryReason,
         });
 
-        // Initialize full sync state (DESC from maxRowid to 0)
+        // Reset cursor to 0 for full sync
+        await this.saveCursorState({ cursor: 0, updatedAt: Date.now() });
+
         const chatDb = this.getChatDb();
         const maxRowid = chatDb.getMaxMessageRowid();
-        this.saveCursorState({
-          cursor: 0,
-          fullSyncStartRowid: maxRowid,
-          fullSyncCursor: maxRowid,
-          updatedAt: Date.now(),
-        });
         console.log(
           `[SyncManager] Full sync initialized: will fetch ${maxRowid} messages DESC`
         );
+
+        logger.logCursorState("imessage", {
+          cursor: 0,
+          maxRowid,
+          mode: "full",
+        });
 
         // Sync contacts first if available
         if (this.options.syncContacts) {
@@ -274,80 +203,92 @@ export class SyncManager {
         return;
       }
 
-      // No recovery needed - use max of server and local cursor
-      if (!syncState?.cursor) return;
-
-      const serverCursor = parseInt(syncState.cursor, 10);
-      const cursor = Math.max(serverCursor, localCursor);
-
-      if (cursor > 0) {
-        this.saveCursorState({ cursor, updatedAt: Date.now() });
+      // No recovery needed - restore cursor from cloud
+      if (cloudCursor) {
+        this.cursorState = {
+          cursor: cloudCursor.cursorData.cursor ?? 0,
+          updatedAt: cloudCursor.lastSyncAt ?? Date.now(),
+        };
         console.log(
-          `[SyncManager] Cursor initialized: ${cursor} (server: ${serverCursor}, local: ${localCursor})`
+          `[SyncManager] Cursor restored from cloud: ${this.cursorState.cursor}`
         );
       }
 
-      // Update progress with server totals
-      this.updateProgress({
-        totalMessagesSynced: syncState.totalMessagesSynced || 0,
-        totalContactsSynced: syncState.totalContactsSynced || 0,
-      });
+      if (syncState) {
+        this.updateProgress({
+          totalMessagesSynced: syncState.totalMessagesSynced || 0,
+          totalContactsSynced: syncState.totalContactsSynced || 0,
+        });
+      }
     } catch (e: unknown) {
       const message = e instanceof Error ? e.message : String(e);
       console.warn(
-        "[SyncManager] Server sync state fetch failed, using local:",
+        "[SyncManager] Cloud cursor fetch failed, starting fresh:",
         message
       );
+      this.cursorState = { cursor: 0, updatedAt: Date.now() };
     }
   }
 
   /**
    * Detect if a recovery (full re-sync) is needed.
-   * Returns the reason for recovery, or null if no recovery needed.
    */
-  private detectRecoveryScenario(syncState: SyncState | null): string | null {
-    const hasLocalCursorFile = fs.existsSync(this.cursorPath);
-
-    // Scenario 1: Fresh install (no local cursor file and no server state)
-    if (!hasLocalCursorFile && !syncState) {
-      return "Fresh install detected";
+  private detectRecoveryScenario(
+    cloudCursor: { cursorData: CursorState; lastSyncAt: number } | null,
+    syncState: SyncState | null
+  ): string | null {
+    if (!cloudCursor) {
+      return "Fresh install detected (no cloud cursor)";
     }
 
-    // Scenario 2: Local cache cleared (no local cursor file but server has state)
-    if (
-      !hasLocalCursorFile &&
-      syncState &&
-      parseInt(syncState.cursor, 10) > 0
-    ) {
-      return "Local cache cleared (server has sync state but no local cursor)";
-    }
-
-    // Scenario 3: Schema version mismatch
     if (syncState && syncState.syncVersion !== CURRENT_SYNC_VERSION) {
       return `Schema version mismatch (server: ${syncState.syncVersion}, client: ${CURRENT_SYNC_VERSION})`;
     }
 
-    // Task 2.7c: Scenario 4: Contacts count mismatch >10%
-    // This detects bulk additions/deletions in Contacts.app
-    if (syncState && syncState.totalContactsSynced > 0) {
-      const localContactsCount = this.getLocalContactsCount();
-      if (localContactsCount > 0) {
-        const serverCount = syncState.totalContactsSynced;
-        const difference = Math.abs(localContactsCount - serverCount);
-        const threshold = Math.max(serverCount, localContactsCount) * 0.1;
-        if (difference > threshold) {
-          return `Contacts count mismatch >10% (local: ${localContactsCount}, server: ${serverCount})`;
-        }
-      }
+    // Contacts count mismatch detection for recovery
+    const localContactsCount = this.getLocalContactsCount();
+    const serverCount = syncState?.totalContactsSynced ?? 0;
+
+    console.log(
+      `[SyncManager] Recovery check: local=${localContactsCount}, server=${serverCount}`
+    );
+
+    // Skip if server has no contacts yet (initial sync)
+    if (serverCount === 0) {
+      console.log(
+        `[SyncManager] Skipping recovery: serverCount=0 (initial sync)`
+      );
+      return null;
+    }
+
+    // Skip if local has no contacts (can't determine mismatch)
+    if (localContactsCount === 0) {
+      console.log(
+        `[SyncManager] Skipping recovery: localCount=0 (no local contacts)`
+      );
+      return null;
+    }
+
+    // Skip if local has more contacts than server (pending sync, not data loss)
+    // This can happen when new contacts are added locally but not yet synced
+    if (localContactsCount > serverCount) {
+      console.log(
+        `[SyncManager] Skipping recovery: local > server (pending sync)`
+      );
+      return null;
+    }
+
+    // Check for significant data loss (server has fewer contacts than expected)
+    // Use 15% threshold to account for dedup variance
+    const difference = serverCount - localContactsCount;
+    const threshold = serverCount * 0.15;
+    if (difference > threshold) {
+      return `Contacts count mismatch >15% (local: ${localContactsCount}, server: ${serverCount}, diff: ${difference})`;
     }
 
     return null;
   }
 
-  /**
-   * Get local contacts count from ContactsManager cache.
-   * Returns 0 if cache is not loaded.
-   */
   private getLocalContactsCount(): number {
     try {
       const contactsManager = getContactsManager();
@@ -357,14 +298,9 @@ export class SyncManager {
     }
   }
 
-  /**
-   * Pre-load local contacts to ensure cache is populated for recovery detection.
-   * Uses cache if available, otherwise fetches fresh from Contacts.app.
-   */
   private async preloadLocalContactsCount(): Promise<void> {
     try {
       const contactsManager = getContactsManager();
-      // fetchContacts uses cache by default, only fetches if expired
       await contactsManager.fetchContacts(false);
       console.log(
         `[SyncManager] Local contacts loaded: ${contactsManager.getCacheSize()}`
@@ -374,18 +310,12 @@ export class SyncManager {
     }
   }
 
-  /**
-   * Set the contacts sync function for recovery flows.
-   */
   setSyncContactsCallback(
     syncContacts: () => Promise<{ contactsCount: number }>
   ): void {
     this.options.syncContacts = syncContacts;
   }
 
-  /**
-   * Stop background sync.
-   */
   stop(): void {
     if (this.intervalId) {
       clearInterval(this.intervalId);
@@ -396,130 +326,116 @@ export class SyncManager {
   }
 
   /**
-   * Run a single sync cycle with parallel batch uploads for improved performance.
-   * Uses CONCURRENT_BATCHES parallel uploads to maximize throughput.
-   *
-   * Dual-mode sync:
-   * - Full sync (DESC): When fullSyncStartRowid is set, fetches recent messages first
-   * - Incremental sync (ASC): Normal mode, fetches new messages from cursor upward
+   * Run a single sync cycle.
+   * Always syncs newest messages first (DESC) from maxRowid down to cursor.
    */
   async runSync(): Promise<void> {
-    if (this.isRunning) return;
+    if (!this.syncGuard.tryStart()) return;
 
-    this.isRunning = true;
     this.updateProgress({ status: "syncing" });
 
+    const syncStartTime = Date.now();
+    const logger = getSyncDebugLogger();
+    const cursor = this.cursorState.cursor;
+    const isFullSync = cursor === 0;
+    logger.logSyncStart("imessage", isFullSync ? "full" : "incremental");
+
     try {
-      // Refresh auth token before each sync cycle
-      const hasAuth = await this.refreshAuth();
-      if (!hasAuth) {
+      const token = await this.refreshAuth();
+      if (!token) {
         this.updateProgress({
           status: "error",
           error: "Not authenticated",
           currentBatch: undefined,
         });
-        // Notify that auth is invalid so UI can update
-        this.options.onAuthInvalid?.();
+        logger.logSyncError("imessage", "Not authenticated");
         return;
       }
 
       const chatDb = this.getChatDb();
       const maxRowid = chatDb.getMaxMessageRowid();
-      const state = this.loadCursorState();
 
-      // Check for full sync mode (fullSyncStartRowid is set)
-      if (state.fullSyncStartRowid !== undefined) {
-        const fullSyncStartRowid = state.fullSyncStartRowid;
-        const fullSyncCursor = state.fullSyncCursor ?? fullSyncStartRowid;
-        await this.runFullSyncDesc(
-          chatDb,
-          fullSyncCursor,
-          fullSyncStartRowid,
-          maxRowid
-        );
-      } else {
-        const messagesSynced = await this.runIncrementalSyncAsc(
-          chatDb,
-          state.cursor,
-          maxRowid
-        );
+      logger.logCursorState("imessage", {
+        cursor,
+        maxRowid,
+        mode: isFullSync ? "full" : "incremental",
+      });
 
-        // Trigger memory processing for incremental sync
-        if (messagesSynced > 0) {
-          this.triggerMemoryProcessing().catch((e) => {
-            console.warn(
-              "[SyncManager] Memory processing failed (non-blocking):",
-              e
-            );
-          });
-        }
+      if (cursor >= maxRowid) {
+        this.updateProgress({
+          status: "idle",
+          lastSyncAt: Date.now(),
+          currentBatch: undefined,
+        });
+        return;
       }
+
+      // Sync from maxRowid down to cursor (DESC order, newest first)
+      const messagesSynced = await this.syncDescending(chatDb, cursor, maxRowid);
+
+      // Trigger memory processing if we synced any messages
+      if (messagesSynced > 0) {
+        this.triggerMemoryProcessing().catch((e) => {
+          console.warn(
+            "[SyncManager] Memory processing failed (non-blocking):",
+            e
+          );
+        });
+      }
+
+      logger.logSyncComplete("imessage", {
+        messagesProcessed: this.progress.totalMessagesSynced,
+        durationMs: Date.now() - syncStartTime,
+      });
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : String(error);
       console.error("[SyncManager] Sync error:", message);
+      logger.logSyncError("imessage", message);
       this.updateProgress({
         status: "error",
         error: message,
         currentBatch: undefined,
       });
     } finally {
-      this.isRunning = false;
+      this.syncGuard.finish();
     }
   }
 
   /**
-   * Core batch sync loop used by both full sync (DESC) and incremental sync (ASC).
-   * @param direction - "desc" for newest-first full sync, "asc" for incremental sync
-   * @param initialCursor - Starting cursor position
-   * @param bound - Upper bound for ASC (maxRowid), lower bound for DESC (0)
-   * @param estimatedTotal - Estimated total messages to sync (for progress)
-   * @param fetchBatch - Function to fetch the next batch
-   * @param saveCursor - Function to save cursor state after each batch
-   * @returns Total messages synced and final cursor
+   * Sync messages from maxRowid down to cursor in DESC order.
+   * Processes batches in parallel for performance.
+   * @returns Total messages synced
    */
-  private async runBatchSyncLoop(
+  private async syncDescending(
     chatDb: ChatDb,
-    direction: "asc" | "desc",
-    initialCursor: number,
-    bound: number,
-    estimatedTotal: number,
-    saveCursor: (cursor: number) => void
-  ): Promise<{ totalMessagesSynced: number; finalCursor: number }> {
-    const label = direction === "desc" ? "DESC" : "ASC";
-    const hasMore =
-      direction === "desc"
-        ? (cursor: number) => cursor > bound
-        : (cursor: number) => cursor < bound;
-    const fetchBatch =
-      direction === "desc"
-        ? (cursor: number) => chatDb.buildSyncBatchDescending(cursor, 0, BATCH_SIZE)
-        : (cursor: number) => chatDb.buildSyncBatch(cursor, BATCH_SIZE);
-    const mergeCursors =
-      direction === "desc"
-        ? (cursors: number[]) => Math.min(...cursors)
-        : (cursors: number[]) => Math.max(...cursors);
+    cursor: number,
+    maxRowid: number
+  ): Promise<number> {
+    console.log(`[SyncManager] Sync DESC: from ${maxRowid} down to ${cursor}`);
 
-    let cursor = initialCursor;
     const totalStart = performance.now();
-    let totalMessagesSynced = 0;
-    let batchNumber = 0;
+    const estimatedTotal = maxRowid - cursor;
     const estimatedTotalBatches = Math.ceil(estimatedTotal / BATCH_SIZE);
 
-    while (hasMore(cursor)) {
+    let currentUpperBound = maxRowid;
+    let totalMessagesSynced = 0;
+    let batchNumber = 0;
+
+    while (currentUpperBound > cursor) {
       // Read multiple batches for parallel processing
       const batchesToProcess: Array<{
-        batch: ReturnType<typeof fetchBatch>;
+        batch: ReturnType<typeof chatDb.buildSyncBatchDescending>;
         batchNum: number;
       }> = [];
 
-      let tempCursor = cursor;
-      for (let i = 0; i < CONCURRENT_BATCHES && hasMore(tempCursor); i++) {
-        const batch = fetchBatch(tempCursor);
+      let tempUpperBound = currentUpperBound;
+      for (let i = 0; i < CONCURRENT_BATCHES && tempUpperBound > cursor; i++) {
+        const batch = chatDb.buildSyncBatchDescending(tempUpperBound, cursor, BATCH_SIZE);
         if (batch.messages.length === 0) break;
 
         batchNumber++;
         batchesToProcess.push({ batch, batchNum: batchNumber });
-        tempCursor = batch.cursor;
+        tempUpperBound = batch.cursor;
       }
 
       if (batchesToProcess.length === 0) break;
@@ -547,155 +463,39 @@ export class SyncManager {
       );
 
       const batchTime = performance.now() - batchStart;
-      const batchMsgCount = results.reduce(
-        (sum, r) => sum + r.messagesCount,
-        0
-      );
+      const batchMsgCount = results.reduce((sum, r) => sum + r.messagesCount, 0);
       const rate = Math.round(batchMsgCount / (batchTime / 1000));
 
+      const firstBatch = batchesToProcess[0].batchNum;
+      const lastBatch = batchesToProcess[batchesToProcess.length - 1].batchNum;
       console.log(
-        `[SyncManager] ${label} batches ${batchesToProcess[0].batchNum}-${batchesToProcess[batchesToProcess.length - 1].batchNum}: ${batchMsgCount} msgs (${Math.round(batchTime)}ms, ${rate}/s)`
+        `[SyncManager] DESC batches ${firstBatch}-${lastBatch}: ${batchMsgCount} msgs (${Math.round(batchTime)}ms, ${rate}/s)`
       );
 
-      cursor = mergeCursors(batchesToProcess.map((b) => b.batch.cursor));
-      saveCursor(cursor);
+      // Update upper bound to continue from lowest processed ROWID
+      currentUpperBound = Math.min(...batchesToProcess.map((b) => b.batch.cursor));
 
       totalMessagesSynced += batchMsgCount;
       this.updateProgress({
-        lastCursor: cursor,
-        totalMessagesSynced:
-          this.progress.totalMessagesSynced + batchMsgCount,
+        totalMessagesSynced: this.progress.totalMessagesSynced + batchMsgCount,
       });
     }
+
+    // After completing DESC sync, update cursor to maxRowid
+    await this.saveCursorState({ cursor: maxRowid, updatedAt: Date.now() });
+    await this.updateServerSyncMetadata(maxRowid);
 
     const totalTime = performance.now() - totalStart;
     const overallRate =
-      totalTime > 0
-        ? Math.round(totalMessagesSynced / (totalTime / 1000))
-        : 0;
+      totalTime > 0 ? Math.round(totalMessagesSynced / (totalTime / 1000)) : 0;
     console.log(
-      `[SyncManager] ${label} sync complete: ${totalMessagesSynced} msgs in ${Math.round(totalTime / 1000)}s (${overallRate}/s overall)`
+      `[SyncManager] DESC sync complete: ${totalMessagesSynced} msgs in ${Math.round(totalTime / 1000)}s (${overallRate}/s overall)`
     );
-
-    return { totalMessagesSynced, finalCursor: cursor };
-  }
-
-  /**
-   * Full sync in DESC order (newest messages first).
-   * Used for fresh installs and recovery scenarios.
-   * @param fullSyncCursor - Current position in DESC sync (upper bound for next batch)
-   * @param fullSyncStartRowid - The maxRowid when full sync started (for transition to incremental)
-   * @param maxRowid - Current maxRowid (to detect messages that arrived during sync)
-   */
-  private async runFullSyncDesc(
-    chatDb: ChatDb,
-    fullSyncCursor: number,
-    fullSyncStartRowid: number,
-    maxRowid: number
-  ): Promise<void> {
-    console.log(
-      `[SyncManager] Full sync DESC: from ${fullSyncCursor} down to 0 (started at ${fullSyncStartRowid})`
-    );
-
-    const { totalMessagesSynced } = await this.runBatchSyncLoop(
-      chatDb,
-      "desc",
-      fullSyncCursor,
-      0,
-      fullSyncCursor,
-      (cursor) =>
-        this.saveCursorState({
-          cursor: 0,
-          fullSyncStartRowid,
-          fullSyncCursor: cursor,
-          updatedAt: Date.now(),
-        })
-    );
-
-    // Transition to incremental mode: cursor = fullSyncStartRowid
-    // This catches any messages that arrived during full sync
-    this.saveCursorState({
-      cursor: fullSyncStartRowid,
-      updatedAt: Date.now(),
-    });
-
-    console.log(
-      `[SyncManager] Transitioned to incremental mode, cursor=${fullSyncStartRowid}`
-    );
-
-    // Update server sync metadata
-    await this.updateServerSyncMetadata(fullSyncStartRowid);
-
-    // Check for new messages that arrived during full sync
-    let catchUpMessagesSynced = 0;
-    if (fullSyncStartRowid < maxRowid) {
-      console.log(
-        `[SyncManager] Catching up ${maxRowid - fullSyncStartRowid} new messages from during full sync`
-      );
-      catchUpMessagesSynced = await this.runIncrementalSyncAsc(
-        chatDb,
-        fullSyncStartRowid,
-        maxRowid
-      );
-    } else {
-      this.updateProgress({
-        status: "idle",
-        lastSyncAt: Date.now(),
-        currentBatch: undefined,
-        recoveryReason: undefined,
-      });
-    }
-
-    // Trigger memory processing once for all messages synced (full sync + catch-up)
-    const totalSyncedThisCycle = totalMessagesSynced + catchUpMessagesSynced;
-    if (totalSyncedThisCycle > 0) {
-      this.triggerMemoryProcessing().catch((e) => {
-        console.warn(
-          "[SyncManager] Memory processing failed (non-blocking):",
-          e
-        );
-      });
-    }
-  }
-
-  /**
-   * Incremental sync in ASC order (oldest first for new messages).
-   * Standard sync mode after full sync is complete.
-   * @returns Total messages synced (caller handles memory processing)
-   */
-  private async runIncrementalSyncAsc(
-    chatDb: ChatDb,
-    cursor: number,
-    maxRowid: number
-  ): Promise<number> {
-    if (cursor >= maxRowid) {
-      this.updateProgress({
-        status: "idle",
-        lastSyncAt: Date.now(),
-        currentBatch: undefined,
-      });
-      return 0;
-    }
-
-    console.log(
-      `[SyncManager] Incremental sync ASC: from ${cursor} to ${maxRowid}`
-    );
-
-    const { totalMessagesSynced, finalCursor } = await this.runBatchSyncLoop(
-      chatDb,
-      "asc",
-      cursor,
-      maxRowid,
-      maxRowid - cursor,
-      (newCursor) => this.saveCursorState({ cursor: newCursor, updatedAt: Date.now() })
-    );
-
-    // Update server sync metadata
-    await this.updateServerSyncMetadata(finalCursor);
 
     this.updateProgress({
       status: "idle",
       lastSyncAt: Date.now(),
+      lastCursor: maxRowid,
       currentBatch: undefined,
       recoveryReason: undefined,
     });
@@ -703,19 +503,18 @@ export class SyncManager {
     return totalMessagesSynced;
   }
 
-  /**
-   * Update server sync metadata after sync cycle.
-   */
   private async updateServerSyncMetadata(cursor: number): Promise<void> {
     try {
-      await this.executeMutationWithRetry(() =>
-        this.client.mutation(api.sync.updateSyncMetadata, {
-          platform: "imessage",
-          cursor: String(cursor),
-          totalMessagesSynced: this.progress.totalMessagesSynced,
-          totalContactsSynced: this.progress.totalContactsSynced || 0,
-          syncVersion: CURRENT_SYNC_VERSION,
-        })
+      await withAuthRetry(
+        () =>
+          this.client.mutation(api.sync.updateSyncMetadata, {
+            platform: "imessage",
+            cursor: String(cursor),
+            totalMessagesSynced: this.progress.totalMessagesSynced,
+            totalContactsSynced: this.progress.totalContactsSynced || 0,
+            syncVersion: CURRENT_SYNC_VERSION,
+          }),
+        createAuthRetryOptions(this.client)
       );
     } catch (e) {
       console.warn("[SyncManager] Failed to update sync metadata:", e);
@@ -724,16 +523,48 @@ export class SyncManager {
 
   /**
    * Process a single batch: upload attachments and sync to Convex.
-   * Extracted to enable parallel processing.
    */
   private async processSingleBatch(
     batch: ReturnType<ChatDb["buildSyncBatch"]>,
     batchNum: number
   ): Promise<{ messagesCount: number; chatsCount: number; errors: string[] }> {
-    // Upload attachments if explicitly enabled (disabled by default for faster initial sync)
+    const logger = getSyncDebugLogger();
+    const messageRowids = batch.messages.map((m) => m.id);
+    const rowidRange =
+      messageRowids.length > 0
+        ? { min: Math.min(...messageRowids), max: Math.max(...messageRowids) }
+        : undefined;
+
+    logger.logBatchDetails("imessage", {
+      batchNumber: batchNum,
+      direction: "desc",
+      cursorBefore: messageRowids.length > 0 ? messageRowids[0] : batch.cursor,
+      cursorAfter: batch.cursor,
+      messagesInBatch: batch.messages.length,
+      chatsInBatch: batch.chats.length,
+      rowidRange,
+    });
+
+    if (batchNum === 1) {
+      logger.logRawBatch("imessage", batchNum, {
+        cursor: batch.cursor,
+        messages: batch.messages.map((m) => ({
+          id: m.id,
+          chatId: m.chatId,
+          timestamp: m.timestamp,
+          text: m.text,
+        })),
+        chats: batch.chats.map((c) => ({
+          id: c.id,
+          displayName: c.displayName,
+          isGroup: c.isGroup,
+        })),
+      });
+    }
+
+    // Upload attachments if enabled
     const uploadedAttachmentMap = new Map<number, ConvexAttachment[]>();
     if (this.options.syncAttachments === true) {
-      // Process attachments in parallel for this batch
       const attachmentPromises = batch.messages
         .filter((msg) => msg.attachments?.length)
         .map(async (message) => {
@@ -773,7 +604,7 @@ export class SyncManager {
       }
     }
 
-    // Transform batch for Convex sync, including uploaded attachments
+    // Transform batch for Convex sync
     const syncBatch = {
       ...batch,
       messages: batch.messages.map(
@@ -794,9 +625,9 @@ export class SyncManager {
       ),
     };
 
-    // Execute mutation with 401 retry logic
-    const result = await this.executeMutationWithRetry(() =>
-      this.client.mutation(api.sync.syncMessages, { batch: syncBatch })
+    const result = await withAuthRetry(
+      () => this.client.mutation(api.sync.syncMessages, { batch: syncBatch }),
+      createAuthRetryOptions(this.client)
     );
 
     if (result.errors.length > 0) {
@@ -804,36 +635,36 @@ export class SyncManager {
         `[SyncManager] Batch ${batchNum} errors:`,
         result.errors.slice(0, 3)
       );
+      for (const error of result.errors) {
+        logger.logSyncError("imessage", error, { batchNumber: batchNum });
+      }
     }
+
+    logger.logBatchComplete("imessage", {
+      batchNumber: batchNum,
+      messagesProcessed: result.messagesCount,
+      messagesFiltered: batch.messages.length - result.messagesCount,
+    });
 
     return result;
   }
 
-  /**
-   * Get current sync progress.
-   */
   getProgress(): SyncProgress {
     return { ...this.progress };
   }
 
   /**
-   * Force a full resync by resetting cursor (local only, for testing).
-   * Sets up DESC sync from current maxRowid.
+   * Force a full resync by resetting cursor.
    */
-  resetCursor(): void {
-    const chatDb = this.getChatDb();
-    const maxRowid = chatDb.getMaxMessageRowid();
-    this.saveCursorState({
-      cursor: 0,
-      fullSyncStartRowid: maxRowid,
-      fullSyncCursor: maxRowid,
-      updatedAt: Date.now(),
-    });
+  async resetCursor(): Promise<void> {
+    await this.saveCursorState({ cursor: 0, updatedAt: Date.now() });
     this.updateProgress({
       lastCursor: 0,
       totalMessagesSynced: 0,
       totalContactsSynced: 0,
     });
+    const chatDb = this.getChatDb();
+    const maxRowid = chatDb.getMaxMessageRowid();
     console.log(
       `[SyncManager] Cursor reset, next sync will be full sync DESC (${maxRowid} messages)`
     );
@@ -841,14 +672,12 @@ export class SyncManager {
 
   /**
    * Force a full re-sync (messages + contacts) by resetting both local and server state.
-   * This is the recommended recovery method for users.
    */
   async forceFullSync(): Promise<void> {
     console.log("[SyncManager] Force full sync triggered");
 
-    // Refresh auth first
-    const hasAuth = await this.refreshAuth();
-    if (!hasAuth) {
+    const token = await this.refreshAuth();
+    if (!token) {
       console.error("[SyncManager] Cannot force sync: not authenticated");
       this.updateProgress({
         status: "error",
@@ -859,25 +688,22 @@ export class SyncManager {
 
     // Reset server sync state
     try {
-      await this.executeMutationWithRetry(() =>
-        this.client.mutation(api.sync.resetSyncState, {
-          platform: "imessage",
-        })
+      await withAuthRetry(
+        () =>
+          this.client.mutation(api.sync.resetSyncState, {
+            platform: "imessage",
+          }),
+        createAuthRetryOptions(this.client)
       );
       console.log("[SyncManager] Server sync state reset");
     } catch (e) {
       console.warn("[SyncManager] Failed to reset server sync state:", e);
     }
 
-    // Initialize full sync state (DESC from maxRowid to 0)
+    await this.saveCursorState({ cursor: 0, updatedAt: Date.now() });
+
     const chatDb = this.getChatDb();
     const maxRowid = chatDb.getMaxMessageRowid();
-    this.saveCursorState({
-      cursor: 0,
-      fullSyncStartRowid: maxRowid,
-      fullSyncCursor: maxRowid,
-      updatedAt: Date.now(),
-    });
     console.log(
       `[SyncManager] Force full sync: will fetch ${maxRowid} messages DESC`
     );
@@ -908,16 +734,11 @@ export class SyncManager {
       }
     }
 
-    // Now run message sync
     await this.runSync();
   }
 
-  /**
-   * Trigger async memory extraction for newly synced messages.
-   * Non-blocking - errors are logged but don't affect sync.
-   */
   private async triggerMemoryProcessing(): Promise<void> {
-    const token = await this.options.getAuthToken?.();
+    const token = await getValidAccessToken();
     if (!token) {
       console.log("[SyncManager] No auth token, skipping memory processing");
       return;
@@ -942,7 +763,6 @@ export class SyncManager {
         return;
       }
 
-      // Check content-type before parsing JSON to avoid errors when server returns HTML
       const contentType = response.headers.get("content-type") || "";
       if (!contentType.includes("application/json")) {
         console.warn(
@@ -956,7 +776,6 @@ export class SyncManager {
         `[SyncManager] Memory processing: ${result.memoriesExtracted ?? 0} memories from ${result.messagesProcessed ?? 0} messages`
       );
     } catch (e) {
-      // Network errors are non-fatal
       console.warn("[SyncManager] Memory sync request failed:", e);
     }
   }
@@ -976,32 +795,14 @@ export class SyncManager {
   }
 
   private loadCursorState(): CursorState {
-    try {
-      if (fs.existsSync(this.cursorPath)) {
-        const data = JSON.parse(fs.readFileSync(this.cursorPath, "utf-8"));
-        return {
-          cursor: data.cursor || 0,
-          fullSyncStartRowid: data.fullSyncStartRowid,
-          fullSyncCursor: data.fullSyncCursor,
-          updatedAt: data.updatedAt || Date.now(),
-        };
-      }
-    } catch (e) {
-      console.warn("[SyncManager] Failed to load cursor state:", e);
-    }
-    return { cursor: 0, updatedAt: Date.now() };
+    return this.cursorState;
   }
 
-  private saveCursorState(state: CursorState): void {
-    try {
-      const dir = path.dirname(this.cursorPath);
-      if (!fs.existsSync(dir)) {
-        fs.mkdirSync(dir, { recursive: true });
-      }
-      fs.writeFileSync(this.cursorPath, JSON.stringify(state));
-    } catch (e) {
-      console.warn("[SyncManager] Failed to save cursor state:", e);
-    }
+  private async saveCursorState(state: CursorState): Promise<void> {
+    this.cursorState = state;
+    await saveCursor(this.client, "imessage", state, {
+      syncMode: state.cursor === 0 ? "full" : "incremental",
+    });
   }
 
   private updateProgress(update: Partial<SyncProgress>): void {

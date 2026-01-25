@@ -17,9 +17,9 @@ import {
   ScrollView,
   useColorScheme,
 } from "react-native";
+import { GlassView, isLiquidGlassAvailable } from "expo-glass-effect";
 import * as Haptics from "expo-haptics";
 import { SymbolView } from "expo-symbols";
-import { GlassView, isLiquidGlassAvailable } from "expo-glass-effect";
 import { PLATFORM_CONFIG, type ActionPlatform } from "@prm/shared";
 import { cn } from "@/lib/utils";
 
@@ -30,12 +30,12 @@ export interface SendMessageContact {
   /** Display name */
   name: string;
   /** Available platforms with their handles */
-  platforms: Array<{
+  platforms: {
     platform: ActionPlatform;
     handle: string;
     /** Optional display label (e.g., "Work", "Personal") */
     label?: string;
-  }>;
+  }[];
 }
 
 export interface SendMessageSheetProps {

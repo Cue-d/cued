@@ -11,11 +11,13 @@ import { getPhoneVariants as getPhoneVariantsShared } from "@prm/shared";
 import {
   handleInput,
   normalizeHandle,
-  createPlaceholderContact,
+  getOrCreateContact,
   batchResolveHandles,
   scheduleIncomingMessageEvents,
   scheduleOutgoingMessageEvents,
   SEVEN_DAYS_MS,
+  BATCH_SIZE,
+  logSyncError,
 } from "./shared";
 
 // ============================================================================
@@ -97,6 +99,12 @@ export async function syncMessagesInternal(
   const conversationMap = new Map(
     existingConversations.map((c) => [c.platformConversationId, c._id])
   );
+  // Track existing lastMessageAt to avoid overwriting with older timestamps (important for DESC sync)
+  const existingLastMessageAt = new Map(
+    existingConversations
+      .filter((c) => c.lastMessageAt !== undefined)
+      .map((c) => [c._id, c.lastMessageAt!])
+  );
 
   // OPTIMIZATION 2: Batch lookup existing messages by platformMessageId
   const messageIds = batch.messages.map((m) => String(m.id));
@@ -146,15 +154,34 @@ export async function syncMessagesInternal(
           const normalizedHandle = normalizeHandle(participant.identifier);
           let contactId = handleToContact.get(normalizedHandle);
           if (!contactId) {
-            // Create placeholder contact
-            contactId = await createPlaceholderContact(
-              ctx,
-              userId,
-              participant.identifier
-            );
+            // Create contact from handle
+            const handleType = participant.identifier.includes("@") ? "email" : "phone";
+            const result = await getOrCreateContact(ctx, userId, "imessage", [
+              { value: participant.identifier, type: handleType },
+            ]);
+            contactId = result.contactId;
             handleToContact.set(normalizedHandle, contactId);
           }
           participantContactIds.push(contactId);
+        }
+
+        // For group chats without explicit name, concatenate participant names
+        let groupDisplayName: string | undefined;
+        if (chat.isGroup) {
+          if (chat.displayName) {
+            groupDisplayName = chat.displayName;
+          } else {
+            // Fetch participant contacts to build display name
+            const participantContacts = await Promise.all(
+              participantContactIds.map((id) => ctx.db.get(id))
+            );
+            const names = participantContacts
+              .filter((c): c is NonNullable<typeof c> => c !== null)
+              .map((c) => c.displayName);
+            if (names.length > 0) {
+              groupDisplayName = names.join(", ");
+            }
+          }
         }
 
         const conversationId = await ctx.db.insert("conversations", {
@@ -164,13 +191,13 @@ export async function syncMessagesInternal(
           conversationType: chat.isGroup ? "group" : "dm",
           participantContactIds,
           unreadCount: 0,
-          displayName: chat.isGroup ? (chat.displayName ?? undefined) : undefined,
+          displayName: groupDisplayName,
         });
         chatIdMap.set(chat.id, conversationId);
       }
       result.chatsCount++;
     } catch (e) {
-      result.errors.push(`Failed to sync chat ${chat.id}: ${e}`);
+      result.errors.push(logSyncError("iMessage", "sync chat", String(chat.id), e));
     }
   }
 
@@ -202,7 +229,7 @@ export async function syncMessagesInternal(
 
     const conversationId = chatIdMap.get(message.chatId);
     if (!conversationId) {
-      result.errors.push(`No conversation found for chat ${message.chatId}`);
+      result.errors.push(logSyncError("iMessage", "find conversation for message", String(message.chatId), "conversation not found"));
       continue;
     }
 
@@ -212,12 +239,12 @@ export async function syncMessagesInternal(
       const normalizedHandle = normalizeHandle(message.sender.identifier);
       senderContactId = handleToContact.get(normalizedHandle);
       if (!senderContactId) {
-        // Create placeholder contact
-        senderContactId = await createPlaceholderContact(
-          ctx,
-          userId,
-          message.sender.identifier
-        );
+        // Create contact from handle
+        const handleType = message.sender.identifier.includes("@") ? "email" : "phone";
+        const result = await getOrCreateContact(ctx, userId, "imessage", [
+          { value: message.sender.identifier, type: handleType },
+        ]);
+        senderContactId = result.contactId;
         handleToContact.set(normalizedHandle, senderContactId);
       }
     }
@@ -254,12 +281,18 @@ export async function syncMessagesInternal(
     result.messagesCount++;
   }
 
-  // Update lastMessage fields on conversations
+  // Update lastMessage fields on conversations (only if newer than existing)
+  // This prevents DESC sync batches from overwriting with older timestamps
   for (const [conversationId, update] of conversationUpdates) {
-    await ctx.db.patch(conversationId, {
-      lastMessageText: update.text,
-      lastMessageAt: update.timestamp,
-    });
+    const existingTimestamp = existingLastMessageAt.get(conversationId);
+    if (existingTimestamp === undefined || update.timestamp > existingTimestamp) {
+      await ctx.db.patch(conversationId, {
+        lastMessageText: update.text,
+        lastMessageAt: update.timestamp,
+      });
+      // Update tracking map for subsequent batches within same sync cycle
+      existingLastMessageAt.set(conversationId, update.timestamp);
+    }
   }
 
   // Schedule action analysis for new messages (event-driven)
@@ -296,10 +329,8 @@ async function batchFetchConversations(
 ): Promise<Doc<"conversations">[]> {
   const results: Doc<"conversations">[] = [];
 
-  // Fetch in parallel batches of 50 to stay under Convex 4096 read limit
-  const batchSize = 50;
-  for (let i = 0; i < platformConversationIds.length; i += batchSize) {
-    const batch = platformConversationIds.slice(i, i + batchSize);
+  for (let i = 0; i < platformConversationIds.length; i += BATCH_SIZE) {
+    const batch = platformConversationIds.slice(i, i + BATCH_SIZE);
     const promises = batch.map((id) =>
       ctx.db
         .query("conversations")
@@ -328,10 +359,8 @@ async function batchFetchMessages(
 ): Promise<Doc<"messages">[]> {
   const results: Doc<"messages">[] = [];
 
-  // Fetch in parallel batches of 50 to stay under Convex 4096 read limit
-  const batchSize = 50;
-  for (let i = 0; i < platformMessageIds.length; i += batchSize) {
-    const batch = platformMessageIds.slice(i, i + batchSize);
+  for (let i = 0; i < platformMessageIds.length; i += BATCH_SIZE) {
+    const batch = platformMessageIds.slice(i, i + BATCH_SIZE);
     const promises = batch.map((id) =>
       ctx.db
         .query("messages")
@@ -389,7 +418,7 @@ export async function syncContactsInternal(
       }
       result.handlesCount += syncResult.handlesAdded;
     } catch (e) {
-      result.errors.push(`Failed to sync contact ${contact.displayName}: ${e}`);
+      result.errors.push(logSyncError("iMessage", "sync contact", contact.displayName, e));
     }
   }
 
@@ -410,13 +439,12 @@ export async function findContactByHandle(
       : [handle.value];
 
   for (const variant of variants) {
-    // NOTE: Using .first() instead of .unique() to handle duplicates gracefully
     const existing = await ctx.db
       .query("contactHandles")
       .withIndex("by_user_handle", (q) =>
         q.eq("userId", userId).eq("handle", variant)
       )
-      .first();
+      .unique();
 
     if (existing) {
       return existing.contactId;
@@ -478,7 +506,6 @@ async function upsertContactWithHandles(
   }
 
   // Add missing handles or update mislinked ones
-  // NOTE: Using .first() instead of .unique() to handle duplicates gracefully
   let handlesAdded = 0;
   for (const handle of handles) {
     const existing = await ctx.db
@@ -486,7 +513,7 @@ async function upsertContactWithHandles(
       .withIndex("by_user_handle", (q) =>
         q.eq("userId", userId).eq("handle", handle.value)
       )
-      .first();
+      .unique();
 
     if (!existing) {
       await ctx.db.insert("contactHandles", {

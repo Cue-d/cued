@@ -28,6 +28,8 @@ export const API_URLS = {
   commonMe: 'https://www.linkedin.com/voyager/api/me',
   mediaUploadMetadata: 'https://www.linkedin.com/voyager/api/voyagerVideoDashMediaUploadMetadata',
   messagingMessages: 'https://www.linkedin.com/voyager/api/voyagerMessagingDashMessengerMessages',
+  /** Base URL for messaging conversations - append /{conversationId}/events */
+  messagingConversations: 'https://www.linkedin.com/voyager/api/messaging/conversations',
   pushRegistration: 'https://www.linkedin.com/voyager/api/voyagerNotificationsDashPushRegistration',
   messengerConversations: 'https://www.linkedin.com/voyager/api/voyagerMessagingDashMessengerConversations',
   connections: 'https://www.linkedin.com/voyager/api/relationships/dash/connections',
@@ -143,7 +145,7 @@ export const DEFAULT_X_LI_TRACK = JSON.stringify({
 export const RETRY_CONFIG = {
   maxRetries: 5,
   baseDelayMs: 1000, // Exponential backoff: 1s, 2s, 4s, 8s, 16s
-  retryableStatusCodes: [502, 503, 504],
+  retryableStatusCodes: [429, 502, 503, 504],
   authErrorStatusCodes: [401, 403],
 } as const
 

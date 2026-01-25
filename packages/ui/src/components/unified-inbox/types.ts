@@ -26,6 +26,8 @@ export interface InboxConversation {
   lastMessageText: string | null
   lastMessageAt: number | null
   unreadCount: number
+  /** For multi-workspace platforms (Slack teamId, Gmail email address) */
+  workspaceId: string | null
 }
 
 export interface InboxResult {

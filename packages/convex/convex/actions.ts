@@ -886,12 +886,14 @@ export const swipeAction = mutation({
                 recipientHandle = handleDoc.handle;
               }
             } else if (platform === "linkedin") {
-              // LinkedIn uses platformConversationId (thread URN) as the identifier
-              // The adapter will use this to send the message
+              // LinkedIn uses platformConversationId (thread URN) as chatIdentifier
+              // The LinkedIn adapter expects threadId which maps to chatIdentifier
+              chatIdentifier = conversation.platformConversationId;
               recipientHandle = conversation.platformConversationId ?? "";
             }
           } else if (isGroup) {
-            // For iMessage/LinkedIn groups, use platformConversationId
+            // For iMessage groups, use platformConversationId
+            // (LinkedIn groups are handled above)
             chatIdentifier = conversation.platformConversationId;
           }
 
@@ -912,6 +914,7 @@ export const swipeAction = mutation({
               chatIdentifier,
               conversationId: conversation._id,
               actionId: args.actionId,
+              workspaceId: conversation.workspaceId,
               status: "pending",
               scheduledFor,
               attempts: 0,
@@ -1127,7 +1130,7 @@ export const extractStyleProfile = action({
     sampleCount?: number;
     error?: string;
   }> => {
-    // Get current user ID
+    // @ts-ignore - TS2589: Type instantiation depth limit (known Convex issue)
     const userId = await ctx.runQuery(api.actions.getCurrentUserId, {});
     if (!userId) {
       return { success: false, error: "Not authenticated" };
@@ -1154,6 +1157,7 @@ export const extractStyleProfile = action({
       const profile = await extractStyle(messages, args.platform);
 
       // Save to database
+      // @ts-ignore - TS2589: Type instantiation depth limit (known Convex issue)
       await ctx.runMutation(internal.actions.saveStyleProfile, {
         userId,
         platform: args.platform,

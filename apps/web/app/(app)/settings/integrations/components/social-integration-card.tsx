@@ -1,6 +1,5 @@
 "use client";
 
-import { useState } from "react";
 import {
   CheckCircle2Icon,
   XCircleIcon,
@@ -9,10 +8,10 @@ import {
   UsersIcon,
 } from "lucide-react";
 import { formatRelativeTime } from "@prm/shared";
-import { Button, Skeleton, Input } from "@prm/ui";
+import { Button, Skeleton } from "@prm/ui";
 
 export interface SocialIntegrationConfig {
-  id: "linkedin" | "twitter";
+  id: "linkedin";
   name: string;
   description: string;
   icon: React.ReactNode;
@@ -88,8 +87,6 @@ export function SocialIntegrationCard({
   lastSyncAt,
   totalContactsSynced,
 }: SocialIntegrationCardProps) {
-  const [twitterUsername, setTwitterUsername] = useState("");
-
   return (
     <div className="rounded-lg border bg-card">
       <div className="flex items-center justify-between p-4">
@@ -109,21 +106,6 @@ export function SocialIntegrationCard({
           <SocialActionButton isConnected={isConnected} isLoading={isLoading} />
         </div>
       </div>
-
-      {/* Twitter username input */}
-      {config.id === "twitter" && (
-        <div className="border-t px-4 py-3">
-          <label className="text-xs text-muted-foreground block mb-1.5">
-            Username to scrape mutuals for
-          </label>
-          <Input
-            placeholder="@username"
-            value={twitterUsername}
-            onChange={(e) => setTwitterUsername(e.target.value)}
-            className="h-8 text-sm"
-          />
-        </div>
-      )}
 
       {/* Stats section */}
       {(isConnected || totalContactsSynced > 0) && (

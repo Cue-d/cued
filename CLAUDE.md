@@ -2,15 +2,25 @@
 
 ## What This Is
 
-PRM is a cloud-based personal relationship manager. Multi-platform messaging (iMessage, Gmail, Slack) with AI-powered action suggestions.
+PRM is a cloud-based personal relationship manager. Multi-platform messaging (iMessage, Gmail, Slack, LinkedIn) with AI-powered action suggestions.
 
 ## Architecture
 
 ```
-apps/web (Next.js 16) ←→ packages/convex (Convex) ←→ Nango (Gmail/Slack)
+apps/web (Next.js 16) ←→ packages/convex (Convex) ←→ Nango (Gmail)
                                     ↑
-apps/electron (macOS) ─── iMessage sync ───┘
+                          ┌─────────┴─────────┐
+apps/electron (macOS) ────┤                   │
+  ├── iMessage sync       │   Cloud Cursors   │
+  ├── LinkedIn sync       │   (syncCursors)   │
+  ├── Slack sync          │                   │
+  └── macOS Contacts      └───────────────────┘
 ```
+
+**Data Flow:**
+- Electron → Convex: Messages, conversations, contacts synced via mutations
+- Convex → Electron: Sync cursors queried for incremental sync resume
+- Web/Mobile → Convex: Real-time subscriptions for UI updates
 
 ## Monorepo Structure
 
@@ -18,14 +28,14 @@ apps/electron (macOS) ─── iMessage sync ───┘
 apps/
   web/              Next.js app (marketing + authenticated app)
   mobile/           Expo React Native app (iOS)
-  electron/         macOS sync client (iMessage, Contacts)
+  electron/         macOS sync client (iMessage, LinkedIn, Slack, Contacts)
 
 packages/
   shared/           Source of truth for utils, types, constants (@prm/shared)
   ui/               Shared React components (@prm/ui)
   convex/           Database schema + functions (@prm/convex)
   ai/               LLM tools, Mem0 integration (@prm/ai)
-  integrations/     iMessage, Nango adapters (@prm/integrations)
+  integrations/     iMessage, Slack, Nango adapters (@prm/integrations)
 ```
 
 ### packages/shared (Source of Truth)
@@ -33,7 +43,8 @@ packages/
 All shared utilities, types, and constants live here. Import from `@prm/shared`:
 
 - **Utils**: `getInitials`, `formatTime`, `formatRelativeTime`, `formatTimestamp`
-- **Phone**: `normalizePhone`, `formatPhoneNumber`, `phonesMatch`
+- **Phone**: `normalizePhone`, `formatPhoneNumber`, `phonesMatch`, `getPhoneVariants`
+- **LinkedIn**: `normalizeLinkedInHandle`, `extractLinkedInURN`, `isValidLinkedInURN`, `parseLinkedInURN`
 - **Types**: `DraftOption`, `DraftRiskFlag`, `DisplayMessage`, `ContactFormData`
 - **Constants**: `PLATFORM_CONFIG`, `ActionPlatform`, `getPlatformConfig`
 
@@ -54,17 +65,39 @@ components/
 
 ### packages/convex Sync Architecture
 
-Sync logic is modularized by platform (~2,900 LOC total, split into focused modules):
+Sync logic is modularized by platform with separated concerns:
 
 ```
 convex/
-  sync.ts              Orchestrator (exports public API, ~600 LOC)
+  sync.ts              Orchestrator (exports public API)
+  syncCursors.ts       Cloud-based cursor management (multi-device sync)
+  debug.ts             Debug queries and platform-specific data reset utilities
   sync/
-    shared.ts          Common utilities (handle resolution, contact creation)
+    shared.ts          Common utilities (handle resolution, contact creation, cursor helpers)
+    filters.ts         Message filtering (OTP, spam, phishing detection)
     imessage.ts        iMessage and macOS Contacts sync
     gmail.ts           Gmail emails and Google Contacts sync
     slack.ts           Slack messages sync
     linkedin.ts        LinkedIn messages sync
+```
+
+**Key Design Principles:**
+
+1. **Separation of concerns**: `integrations` table = connection state, `syncCursors` table = sync state
+2. **Cloud cursors**: Sync state stored in Convex (not local files), enabling multi-device sync
+3. **Multi-workspace support**: Gmail/Slack use `workspaceId` for multiple accounts per platform
+4. **Message filtering**: Unified filtering rules applied during sync (OTP codes, automated senders, phishing)
+
+**syncCursors Table Schema:**
+```typescript
+{
+  userId, platform, workspaceId?,     // Identity
+  cursorData,                         // Platform-specific (historyId, timestamp, etc.)
+  syncMode: "full" | "incremental",   // Current sync mode
+  fullSyncProgress?,                  // For resumable full syncs
+  totalMessagesSynced?, totalContactsSynced?,  // Stats
+  lastMemoryProcessedAt?, totalMemoriesExtracted?  // Memory processing
+}
 ```
 
 ## Quick Start
@@ -82,8 +115,12 @@ Web app: http://localhost:3000
 |---------|-------|
 | Database schema | `packages/convex/convex/schema.ts` |
 | Sync logic | `packages/convex/convex/sync.ts`, `sync/*.ts` |
+| Sync cursors | `packages/convex/convex/syncCursors.ts`, `sync/shared.ts` |
+| Message filtering | `packages/convex/convex/sync/filters.ts` |
+| Debug/reset utils | `packages/convex/convex/debug.ts` |
 | Actions queue | `packages/convex/convex/actions.ts`, `actionQueue.ts` |
 | Shared utils/types | `packages/shared/src/` |
+| LinkedIn utils | `packages/shared/src/linkedin.ts` |
 | Contact resolution | `packages/ai/src/contact-resolution/` |
 | LLM tools | `packages/ai/src/tools/` |
 | AI chat UI | `packages/ui/src/components/assistant/` |
@@ -91,6 +128,9 @@ Web app: http://localhost:3000
 | Action cards | `packages/ui/src/components/action-queue/` |
 | Gmail/Slack | `packages/integrations/src/nango/` |
 | iMessage sync | `apps/electron/src/main/sync/` |
+| LinkedIn sync | `apps/electron/src/main/sync/linkedin-sync.ts` |
+| Slack sync | `apps/electron/src/main/sync/slack-sync.ts` |
+| Sync coordinator | `apps/electron/src/main/sync/sync-coordinator.ts` |
 | Swift contacts CLI | `apps/electron/swift/` |
 | Web routes | `apps/web/app/(app)/`, `app/api/` |
 | Mobile routes | `apps/mobile/app/` |
@@ -170,6 +210,14 @@ pnpm dev      # Start Electron in dev mode
 pnpm build    # Build distributable
 ```
 
+**Sync Components:**
+- `sync-coordinator.ts` - Orchestrates all platform syncs
+- `sync-manager.ts` - Core sync state machine
+- `linkedin-sync.ts` - LinkedIn messages via web scraping
+- `slack-sync.ts` - Slack messages via native API
+- `contacts-sync.ts` - macOS Contacts.app integration
+- `chat-db.ts` - iMessage SQLite database access
+
 Swift contacts CLI: `apps/electron/swift/`
 Build Swift: `cd apps/electron/swift && swift build -c release`
 
@@ -242,36 +290,8 @@ The Ralph scripts are thin wrappers for manual iteration:
 
 ```bash
 ./ralph-once.sh prds/slack-native-integration-prd.json  # Single iteration
-./afk-ralph.sh prds/slack-native-integration-prd.json 10  # 10 iterations
+./afk-ralph.sh prds/slack-native-integration-prd.json 10  # 10 afk iterations
 ```
-
-Both use the same prompt pattern - ONE Claude session handles multiple tasks.
-
-### When to Use What
-
-| User says | Action |
-|-----------|--------|
-| "work on PRM-123" | `pnpm prd start PRM-123` |
-| "start PRM-123" | `pnpm prd start PRM-123` |
-| "create PRD for PRM-123" | `pnpm prd start PRM-123` |
-| "implement PRM-123" | `pnpm prd start PRM-123 --run` |
-| "continue PRM-123" | `pnpm prd run prds/prm-123-prd.json` |
-| "sync progress" | `pnpm prd sync prds/prm-123-prd.json` |
-
-### After PR Creation
-
-**MUST** link PR to Linear:
-```bash
-cd scripts && pnpm prd link-pr PRM-123 <pr-url>
-```
-
-### Direct Linear MCP Commands
-
-For manual operations:
-- `mcp__linear__list_issues` - List issues
-- `mcp__linear__get_issue` - Get details
-- `mcp__linear__update_issue` - Update status
-- `mcp__linear__create_comment` - Add comments
 
 ## Plan Mode
 

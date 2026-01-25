@@ -16,6 +16,12 @@ import type { QueryCtx, MutationCtx } from "./_generated/server";
 import { internal } from "./_generated/api";
 import { getAuthenticatedUser } from "./lib/auth";
 import { platformValidator } from "./schema";
+import { logSyncError } from "./sync/shared";
+import {
+  collectCursors,
+  aggregateCursorStats,
+  findEarliestMemoryCursor,
+} from "./lib/cursors";
 
 // Rate limiting: ~100 messages per minute = ~1.67 msgs/sec
 // Process in batches of 50, with delay between batches
@@ -179,6 +185,11 @@ export const getMessagesForMemoryProcessing = internalQuery({
 
 /**
  * Update memory processing state after a batch is processed.
+ * Updates syncCursors table (single source of truth for sync state).
+ *
+ * For multi-workspace platforms, only updates the "source of truth" cursor
+ * (the one with the earliest lastMemoryProcessedAt). This prevents double-counting
+ * when aggregateCursorStats sums values across all workspace cursors.
  */
 export const updateMemoryProcessingState = internalMutation({
   args: {
@@ -189,24 +200,30 @@ export const updateMemoryProcessingState = internalMutation({
     memoriesExtracted: v.number(),
   },
   handler: async (ctx, args) => {
-    const integration = await findIntegration(ctx, args.userId, args.platform);
-    if (!integration) {
+    const cursors = await collectCursors(ctx, args.userId, args.platform);
+
+    if (cursors.length === 0) {
       throw new Error(
-        `No integration found for user ${args.userId} platform ${args.platform}`
+        `No sync cursor found for user ${args.userId} platform ${args.platform}`
       );
     }
 
-    const { syncState } = integration;
-    await ctx.db.patch(integration._id, {
-      syncState: {
-        ...syncState,
-        lastMemoryProcessedAt: args.lastProcessedAt,
-        totalMessagesProcessedForMemory:
-          (syncState.totalMessagesProcessedForMemory ?? 0) +
-          args.messagesProcessed,
-        totalMemoriesExtracted:
-          (syncState.totalMemoriesExtracted ?? 0) + args.memoriesExtracted,
-      },
+    // Use the "earliest" cursor as the single source of truth for memory stats.
+    // This prevents double-counting when aggregateCursorStats sums across workspaces.
+    const sourceCursor = findEarliestMemoryCursor(cursors);
+    if (!sourceCursor) {
+      throw new Error(
+        `No source cursor found for user ${args.userId} platform ${args.platform}`
+      );
+    }
+
+    await ctx.db.patch(sourceCursor._id, {
+      lastMemoryProcessedAt: args.lastProcessedAt,
+      totalMessagesProcessedForMemory:
+        (sourceCursor.totalMessagesProcessedForMemory ?? 0) +
+        args.messagesProcessed,
+      totalMemoriesExtracted:
+        (sourceCursor.totalMemoriesExtracted ?? 0) + args.memoriesExtracted,
     });
   },
 });
@@ -258,7 +275,8 @@ export const upsertContactMemoryStats = internalMutation({
 
 /**
  * Get memory processing status for a user.
- * Returns stats from integration syncState (no expensive message collection).
+ * Returns stats from syncCursors table (no expensive message collection).
+ * Aggregates across all workspaces for multi-workspace platforms (Slack, Gmail).
  */
 export const getMemoryProcessingStatus = query({
   args: {
@@ -268,16 +286,16 @@ export const getMemoryProcessingStatus = query({
     const user = await getAuthenticatedUser(ctx);
     if (!user) return null;
 
-    const integration = await findIntegration(ctx, user._id, args.platform);
-    if (!integration) return null;
+    const cursors = await collectCursors(ctx, user._id, args.platform);
+    if (cursors.length === 0) return null;
 
-    const { syncState } = integration;
+    const stats = aggregateCursorStats(cursors);
+
     return {
-      lastProcessedAt: syncState.lastMemoryProcessedAt ?? null,
-      totalMessagesProcessed: syncState.totalMessagesProcessedForMemory ?? 0,
-      totalMemoriesExtracted: syncState.totalMemoriesExtracted ?? 0,
-      // Use totalMessagesSynced from syncState instead of expensive count
-      totalMessages: syncState.totalMessagesSynced ?? 0,
+      lastProcessedAt: stats.lastMemoryProcessedAt,
+      totalMessagesProcessed: stats.totalMessagesProcessedForMemory,
+      totalMemoriesExtracted: stats.totalMemoriesExtracted,
+      totalMessages: stats.totalMessagesSynced,
     };
   },
 });
@@ -311,12 +329,12 @@ export const processMemoryBatch = action({
       throw new Error("User not found");
     }
 
-    // Get current memory processing cursor
-    const integration = await ctx.runQuery(internal.memories.getIntegration, {
+    // Get current memory processing cursor from syncCursors
+    const syncCursor = await ctx.runQuery(internal.memories.getSyncCursor, {
       userId: user._id,
       platform: args.platform,
     });
-    const cursor = integration?.syncState.lastMemoryProcessedAt ?? undefined;
+    const cursor = syncCursor?.lastMemoryProcessedAt ?? undefined;
 
     // Get messages to process
     const messages = await ctx.runQuery(
@@ -366,9 +384,7 @@ export const processMemoryBatch = action({
           memoriesExtracted: memoriesForContact,
         });
       } catch (e) {
-        result.errors.push(
-          `Failed to extract memories for ${group.contactName}: ${e}`
-        );
+        result.errors.push(logSyncError("Memory", "extract memories", group.contactName, e));
       }
     }
 
@@ -417,6 +433,22 @@ export const getIntegration = internalQuery({
 });
 
 /**
+ * Internal helper to get sync cursor for memory processing.
+ * For multi-workspace platforms, returns aggregated memory stats
+ * using min(lastMemoryProcessedAt) to ensure no messages are skipped.
+ */
+export const getSyncCursor = internalQuery({
+  args: {
+    userId: v.id("users"),
+    platform: platformValidator,
+  },
+  handler: async (ctx, args) => {
+    const cursors = await collectCursors(ctx, args.userId, args.platform);
+    return findEarliestMemoryCursor(cursors);
+  },
+});
+
+/**
  * Extract memories from messages for a specific contact using Mem0.
  */
 async function extractMemoriesForContact(
@@ -443,6 +475,28 @@ async function extractMemoriesForContact(
   );
 }
 
+/**
+ * Reset memory processing state to reprocess all messages.
+ * Resets memory stats in syncCursors table.
+ * For multi-workspace platforms, resets ALL cursors.
+ */
+export const resetMemoryProcessingState = internalMutation({
+  args: {
+    userId: v.id("users"),
+    platform: platformValidator,
+  },
+  handler: async (ctx, args) => {
+    const cursors = await collectCursors(ctx, args.userId, args.platform);
+
+    for (const cursor of cursors) {
+      await ctx.db.patch(cursor._id, {
+        lastMemoryProcessedAt: undefined,
+        totalMessagesProcessedForMemory: 0,
+        totalMemoriesExtracted: 0,
+      });
+    }
+  },
+});
 
 // ============================================================================
 // Task 3.13c: Automatic memory extraction on sync
@@ -584,9 +638,7 @@ export const processNewMessagesForMemory = action({
       }
 
       if (lastError) {
-        result.errors.push(
-          `Failed to extract memories for ${group.contactName}: ${lastError.message}`
-        );
+        result.errors.push(logSyncError("Memory", "extract memories", group.contactName, lastError.message));
       } else {
         // Update per-contact stats on success
         await ctx.runMutation(internal.memories.upsertContactMemoryStats, {

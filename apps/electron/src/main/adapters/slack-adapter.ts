@@ -7,8 +7,9 @@ import type {
   QueuedMessage,
   SendResult,
 } from "@prm/shared";
-import { getSlackSyncManager } from "../sync/slack-sync";
-import { isAuthError, SlackRateLimitError } from "@prm/integrations";
+import { getSlackSyncManager, getAllSlackSyncManagers } from "../sync/slack-sync";
+import { SlackRateLimitError } from "@prm/integrations";
+import { isAuthError } from "../auth/auth-utils";
 
 /** Permanent Slack errors that should not be retried */
 const PERMANENT_ERRORS = [
@@ -63,6 +64,7 @@ export class SlackAdapter implements PlatformAdapter {
    * Send a message via Slack.
    * Requires a threadId (channel ID) for routing.
    * Supports thread replies via threadTs in the threadId (format: "channelId:threadTs").
+   * For multi-workspace support, workspaceId (teamId) is required.
    */
   async send(message: QueuedMessage): Promise<SendResult> {
     // Validate message
@@ -84,7 +86,19 @@ export class SlackAdapter implements PlatformAdapter {
     }
 
     // Get the Slack client from the sync manager
-    const syncManager = getSlackSyncManager();
+    // Use workspaceId (teamId) if provided for multi-workspace support
+    let syncManager;
+    try {
+      syncManager = getSlackSyncManager({ teamId: message.workspaceId });
+    } catch (error) {
+      // If multiple workspaces exist but no teamId provided, return clear error
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      return {
+        success: false,
+        error: errorMessage,
+        retryable: false, // Can't retry without workspace context
+      };
+    }
     const client = syncManager.getClient();
 
     if (!client) {
@@ -136,9 +150,10 @@ export class SlackAdapter implements PlatformAdapter {
 
   /**
    * Check if Slack is authenticated and ready to send.
+   * Returns true if at least one Slack workspace is authenticated.
    */
   async isAuthenticated(): Promise<boolean> {
-    const syncManager = getSlackSyncManager();
-    return syncManager.isAuthenticated();
+    const managers = getAllSlackSyncManagers();
+    return managers.some((m) => m.isAuthenticated());
   }
 }

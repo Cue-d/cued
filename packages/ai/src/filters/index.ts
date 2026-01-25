@@ -9,7 +9,6 @@ export {
   isUrgencySpam,
   isPromotional,
   isBankAlert,
-  isPhishing,
   type FilterResult,
   type FilterInput,
   type SkipReason,

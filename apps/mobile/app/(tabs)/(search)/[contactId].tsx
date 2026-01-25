@@ -35,7 +35,7 @@ function getHandleIcon(type: string): SFSymbol {
       return "envelope.fill";
     case "slack_id":
       return "number";
-    case "linkedin_url":
+    case "linkedin_handle":
       return "link";
     case "twitter_handle":
       return "at";
@@ -53,7 +53,7 @@ function getHandleTypeLabel(type: string): string {
       return "Email";
     case "slack_id":
       return "Slack";
-    case "linkedin_url":
+    case "linkedin_handle":
       return "LinkedIn";
     case "twitter_handle":
       return "Twitter";
@@ -175,7 +175,7 @@ function handleTypeToPlatform(type: string): ActionPlatform | null {
   switch (type) {
     case "phone":
       return "imessage";
-    case "linkedin_url":
+    case "linkedin_handle":
       return "linkedin";
     default:
       return null;
@@ -192,8 +192,6 @@ interface QueuedMessageToast {
 
 export default function ContactDetailScreen(): React.JSX.Element {
   const { contactId } = useLocalSearchParams<{ contactId: string }>();
-  const colorScheme = useColorScheme();
-  const iconColor = colorScheme === "dark" ? "#a1a1aa" : "#71717a";
 
   // State for send message sheet
   const [showSendSheet, setShowSendSheet] = useState(false);

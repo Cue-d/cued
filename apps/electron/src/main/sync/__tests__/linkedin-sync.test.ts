@@ -14,6 +14,18 @@ vi.mock('@prm/env/electron', () => ({
   },
 }))
 
+// Mock electron module for safeStorage
+vi.mock('electron', () => ({
+  safeStorage: {
+    isEncryptionAvailable: vi.fn().mockReturnValue(false),
+    encryptString: vi.fn(),
+    decryptString: vi.fn(),
+  },
+  app: {
+    getPath: vi.fn().mockReturnValue('/tmp/test-app-data'),
+  },
+}))
+
 import { LinkedInSyncManager } from '../linkedin-sync'
 import type { LinkedInClient, ConversationsResult, MessagesResult } from '../../linkedin-api/client'
 import type { Conversation, Message, MessagingParticipant, PagingMetadata } from '../../linkedin-api/types'
@@ -32,9 +44,27 @@ vi.mock('@prm/convex', () => ({
   api: {
     sync: {
       syncLinkedInMessages: 'sync:syncLinkedInMessages',
+      syncLinkedInConversations: 'sync:syncLinkedInConversations',
+    },
+    syncCursors: {
+      getCursor: 'syncCursors:getCursor',
+      saveCursor: 'syncCursors:saveCursor',
+      clearCursor: 'syncCursors:clearCursor',
     },
   },
 }))
+
+// Mock the shared module to bypass auth checks
+vi.mock('../shared', async (importOriginal) => {
+  const original = await importOriginal<typeof import('../shared')>()
+  return {
+    ...original,
+    setConvexAuth: vi.fn().mockResolvedValue('mock-access-token'),
+    loadCursor: vi.fn().mockResolvedValue(null),
+    saveCursor: vi.fn().mockResolvedValue(undefined),
+    clearCursor: vi.fn().mockResolvedValue(undefined),
+  }
+})
 
 // Mock the messages module to avoid importing actual API calls
 vi.mock('../../linkedin-api/messages', () => ({
@@ -42,7 +72,7 @@ vi.mock('../../linkedin-api/messages', () => ({
   getMessagesBefore: vi.fn(),
 }))
 
-import { getMessages } from '../../linkedin-api/messages'
+import { getMessages, getMessagesBefore } from '../../linkedin-api/messages'
 
 // ============================================================================
 // Test Helpers
@@ -143,21 +173,15 @@ describe('LinkedInSyncManager', () => {
   let syncManager: LinkedInSyncManager
   let mockClient: LinkedInClient
   let onProgressMock: ReturnType<typeof vi.fn>
-  let onAuthInvalidMock: ReturnType<typeof vi.fn>
-  let getAuthTokenMock: ReturnType<typeof vi.fn>
 
   beforeEach(() => {
     vi.clearAllMocks()
     vi.useFakeTimers()
 
     onProgressMock = vi.fn()
-    onAuthInvalidMock = vi.fn()
-    getAuthTokenMock = vi.fn().mockResolvedValue('mock-convex-token')
 
     syncManager = new LinkedInSyncManager({
       onProgress: onProgressMock,
-      onAuthInvalid: onAuthInvalidMock,
-      getAuthToken: getAuthTokenMock,
     })
 
     mockClient = createMockLinkedInClient()
@@ -211,15 +235,20 @@ describe('LinkedInSyncManager', () => {
       expect(onProgressMock).toHaveBeenCalled()
     })
 
-    it('uses sync token for incremental fetches', async () => {
+    it('uses sync token for pagination during full sync', async () => {
+      // Create 50 conversations (MAX_CONVERSATIONS_PER_SYNC) so full sync continues
+      const manyConversations = Array.from({ length: 50 }, (_, i) =>
+        createMockConversation(`conv${i}`, ['user1', `user${i + 10}`])
+      )
+
       const mockResult: ConversationsResult = {
-        conversations: [createMockConversation('conv1', ['user1', 'user2'])],
+        conversations: manyConversations,
         syncToken: 'first-sync-token',
         metadata: undefined,
       }
 
       const mockResultSecond: ConversationsResult = {
-        conversations: [createMockConversation('conv3', ['user1', 'user4'])],
+        conversations: [createMockConversation('conv99', ['user1', 'user99'])],
         syncToken: 'second-sync-token',
         metadata: undefined,
       }
@@ -234,11 +263,11 @@ describe('LinkedInSyncManager', () => {
       syncManager.setClient(mockClient)
       vi.mocked(getMessages).mockResolvedValue({ messages: [], metadata: undefined })
 
-      // First sync
+      // First sync - returns max conversations, so full sync continues
       await syncManager.syncConversations()
       expect(getConversationsMock).toHaveBeenCalledWith(undefined)
 
-      // Second sync should use stored sync token
+      // Second sync should use stored sync token (pagination within full sync)
       await syncManager.syncConversations()
       expect(getConversationsMock).toHaveBeenCalledWith('first-sync-token')
     })
@@ -271,16 +300,16 @@ describe('LinkedInSyncManager', () => {
 
       await syncManager.syncConversations()
 
-      // getMessages should be called for each conversation
+      // getMessages should be called for each conversation (URN normalized to fs_conversation)
       expect(getMessages).toHaveBeenCalledTimes(2)
       expect(getMessages).toHaveBeenCalledWith(
         mockClient,
-        'urn:li:fsd_conversation:conv1',
+        'urn:li:fs_conversation:conv1',
         undefined
       )
       expect(getMessages).toHaveBeenCalledWith(
         mockClient,
-        'urn:li:fsd_conversation:conv2',
+        'urn:li:fs_conversation:conv2',
         undefined
       )
     })
@@ -302,6 +331,7 @@ describe('LinkedInSyncManager', () => {
       syncManager.setClient(mockClient)
       await syncManager.syncMessages('urn:li:fsd_conversation:conv1')
 
+      // API calls use original URN format (LinkedIn expects their format)
       expect(getMessages).toHaveBeenCalledWith(
         mockClient,
         'urn:li:fsd_conversation:conv1',
@@ -312,37 +342,64 @@ describe('LinkedInSyncManager', () => {
       expect(progress.totalMessagesSynced).toBe(2)
     })
 
-    it('stores cursor for pagination', async () => {
+    it('paginates using timestamps via getMessagesBefore when first batch is full', async () => {
       const participant = createMockParticipant('user1', 'Test', 'User')
 
-      // First fetch
-      vi.mocked(getMessages)
-        .mockResolvedValueOnce({
-          messages: [createMockMessage('msg1', 'conv1', participant, 'Message 1')],
-          metadata: { start: 0, count: 1, total: 10 },
-        })
-        .mockResolvedValueOnce({
-          messages: [createMockMessage('msg2', 'conv1', participant, 'Message 2')],
-          metadata: { start: 1, count: 1, total: 10 },
-        })
+      // Create 20 messages (full page) with decreasing timestamps
+      const firstBatch = Array.from({ length: 20 }, (_, i) =>
+        createMockMessage(`msg${i}`, 'conv1', participant, `Message ${i}`, 1000 - i)
+      )
+      // Second batch has 5 messages (partial page = end of history)
+      const secondBatch = Array.from({ length: 5 }, (_, i) =>
+        createMockMessage(`msg${i + 20}`, 'conv1', participant, `Message ${i + 20}`, 980 - i - 1)
+      )
+
+      vi.mocked(getMessages).mockResolvedValueOnce({
+        messages: firstBatch,
+        metadata: { start: 0, count: 20, total: 25 },
+      })
+      vi.mocked(getMessagesBefore).mockResolvedValueOnce({
+        messages: secondBatch,
+        metadata: { start: 20, count: 5, total: 25 },
+      })
 
       syncManager.setClient(mockClient)
-
-      // First sync
       await syncManager.syncMessages('urn:li:fsd_conversation:conv1')
-      expect(getMessages).toHaveBeenCalledWith(
+
+      // Should call getMessagesBefore with oldest timestamp from first batch (981)
+      // API calls use original URN format (LinkedIn expects their format)
+      expect(getMessagesBefore).toHaveBeenCalledWith(
         mockClient,
         'urn:li:fsd_conversation:conv1',
-        undefined
+        981 // 1000 - 19 = oldest message timestamp
       )
 
-      // Second sync should use stored cursor
-      await syncManager.syncMessages('urn:li:fsd_conversation:conv1')
-      expect(getMessages).toHaveBeenCalledWith(
-        mockClient,
-        'urn:li:fsd_conversation:conv1',
-        '1' // start (0) + count (1) = 1
+      // Total synced should be 25
+      const progress = syncManager.getProgress()
+      expect(progress.totalMessagesSynced).toBe(25)
+    })
+
+    it('does not paginate when first batch is partial (less than PAGE_SIZE)', async () => {
+      const participant = createMockParticipant('user1', 'Test', 'User')
+
+      // Only 5 messages (partial page = no need to paginate)
+      const messages = Array.from({ length: 5 }, (_, i) =>
+        createMockMessage(`msg${i}`, 'conv1', participant, `Message ${i}`, 1000 - i)
       )
+
+      vi.mocked(getMessages).mockResolvedValueOnce({
+        messages,
+        metadata: { start: 0, count: 5, total: 5 },
+      })
+
+      syncManager.setClient(mockClient)
+      await syncManager.syncMessages('urn:li:fsd_conversation:conv1')
+
+      // Should NOT call getMessagesBefore since first batch was partial
+      expect(getMessagesBefore).not.toHaveBeenCalled()
+
+      const progress = syncManager.getProgress()
+      expect(progress.totalMessagesSynced).toBe(5)
     })
 
     it('updates progress with current conversation info', async () => {
@@ -362,8 +419,9 @@ describe('LinkedInSyncManager', () => {
       )
 
       expect(lastProgressWithConv).toBeDefined()
+      // URN is normalized to fs_conversation format
       expect(lastProgressWithConv![0].currentConversation.conversationId).toBe(
-        'urn:li:fsd_conversation:conv1'
+        'urn:li:fs_conversation:conv1'
       )
     })
 
@@ -383,25 +441,26 @@ describe('LinkedInSyncManager', () => {
 
   describe('pagination: multiple pages of conversations', () => {
     it('handles multiple conversation batches correctly', async () => {
-      // Simulate multiple conversations being synced across batches
-      const batch1Conversations = Array.from({ length: 3 }, (_, i) =>
+      // First batch needs exactly 50 conversations (MAX_CONVERSATIONS_PER_SYNC)
+      // to keep fullSyncState active and preserve sync token for next call
+      const batch1Conversations = Array.from({ length: 50 }, (_, i) =>
         createMockConversation(`conv${i}`, ['user1', `user${i + 10}`], Date.now() - i * 1000)
       )
 
-      const batch2Conversations = Array.from({ length: 2 }, (_, i) =>
-        createMockConversation(`conv${i + 3}`, ['user1', `user${i + 20}`], Date.now() - (i + 3) * 1000)
+      const batch2Conversations = Array.from({ length: 10 }, (_, i) =>
+        createMockConversation(`conv${i + 50}`, ['user1', `user${i + 100}`], Date.now() - (i + 50) * 1000)
       )
 
       const getConversationsMock = vi.fn()
         .mockResolvedValueOnce({
           conversations: batch1Conversations,
           syncToken: 'token-after-batch1',
-          metadata: { start: 0, count: 3, total: 5 },
+          metadata: { start: 0, count: 50, total: 60 },
         })
         .mockResolvedValueOnce({
           conversations: batch2Conversations,
           syncToken: 'token-after-batch2',
-          metadata: { start: 3, count: 2, total: 5 },
+          metadata: { start: 50, count: 10, total: 60 },
         })
 
       mockClient = createMockLinkedInClient({
@@ -410,15 +469,15 @@ describe('LinkedInSyncManager', () => {
       syncManager.setClient(mockClient)
       vi.mocked(getMessages).mockResolvedValue({ messages: [], metadata: undefined })
 
-      // First batch
+      // First batch - returns max conversations, so full sync continues
       await syncManager.syncConversations()
       expect(getConversationsMock).toHaveBeenCalledWith(undefined)
-      expect(syncManager.getProgress().totalConversationsSynced).toBe(3)
+      expect(syncManager.getProgress().totalConversationsSynced).toBe(50)
 
-      // Second batch uses sync token
+      // Second batch uses sync token (pagination within full sync)
       await syncManager.syncConversations()
       expect(getConversationsMock).toHaveBeenCalledWith('token-after-batch1')
-      expect(syncManager.getProgress().totalConversationsSynced).toBe(5)
+      expect(syncManager.getProgress().totalConversationsSynced).toBe(60)
     })
 
     it('respects MAX_CONVERSATIONS_PER_SYNC limit', async () => {
@@ -444,8 +503,8 @@ describe('LinkedInSyncManager', () => {
     })
   })
 
-  describe('error handling: auth error triggers re-login prompt', () => {
-    it('calls onAuthInvalid when auth error occurs', async () => {
+  describe('error handling: auth errors set error status', () => {
+    it('sets error status when auth error occurs', async () => {
       mockClient = createMockLinkedInClient({
         getConversations: vi.fn().mockRejectedValue(
           new LinkedInAuthError('Authentication failed', 401)
@@ -455,12 +514,11 @@ describe('LinkedInSyncManager', () => {
 
       await syncManager.runSync()
 
-      expect(onAuthInvalidMock).toHaveBeenCalled()
       expect(syncManager.getProgress().status).toBe('error')
       expect(syncManager.getProgress().error).toContain('Authentication failed')
     })
 
-    it('detects auth error from error message (401)', async () => {
+    it('sets error status on 401 error', async () => {
       mockClient = createMockLinkedInClient({
         getConversations: vi.fn().mockRejectedValue(new Error('Request failed: 401 Unauthorized')),
       })
@@ -468,10 +526,10 @@ describe('LinkedInSyncManager', () => {
 
       await syncManager.runSync()
 
-      expect(onAuthInvalidMock).toHaveBeenCalled()
+      expect(syncManager.getProgress().status).toBe('error')
     })
 
-    it('detects auth error from error message (403)', async () => {
+    it('sets error status on 403 error', async () => {
       mockClient = createMockLinkedInClient({
         getConversations: vi.fn().mockRejectedValue(new Error('Request failed: 403 Forbidden')),
       })
@@ -479,10 +537,10 @@ describe('LinkedInSyncManager', () => {
 
       await syncManager.runSync()
 
-      expect(onAuthInvalidMock).toHaveBeenCalled()
+      expect(syncManager.getProgress().status).toBe('error')
     })
 
-    it('detects auth error from unauthenticated message', async () => {
+    it('sets error status on unauthenticated error', async () => {
       mockClient = createMockLinkedInClient({
         getConversations: vi.fn().mockRejectedValue(new Error('User is unauthenticated')),
       })
@@ -490,10 +548,10 @@ describe('LinkedInSyncManager', () => {
 
       await syncManager.runSync()
 
-      expect(onAuthInvalidMock).toHaveBeenCalled()
+      expect(syncManager.getProgress().status).toBe('error')
     })
 
-    it('does not call onAuthInvalid for non-auth errors', async () => {
+    it('sets error status for non-auth errors', async () => {
       mockClient = createMockLinkedInClient({
         getConversations: vi.fn().mockRejectedValue(new Error('Network timeout')),
       })
@@ -501,19 +559,7 @@ describe('LinkedInSyncManager', () => {
 
       await syncManager.runSync()
 
-      expect(onAuthInvalidMock).not.toHaveBeenCalled()
       expect(syncManager.getProgress().status).toBe('error')
-    })
-
-    it('calls onAuthInvalid when Convex auth token is null', async () => {
-      getAuthTokenMock.mockResolvedValue(null)
-      syncManager.setClient(mockClient)
-
-      await syncManager.runSync()
-
-      expect(onAuthInvalidMock).toHaveBeenCalled()
-      expect(syncManager.getProgress().status).toBe('error')
-      expect(syncManager.getProgress().error).toBe('Not authenticated')
     })
 
     it('sets error status and message on sync failure', async () => {
@@ -567,7 +613,6 @@ describe('LinkedInSyncManager', () => {
 
       const managerWithCustomProgress = new LinkedInSyncManager({
         onProgress: customProgressMock,
-        getAuthToken: getAuthTokenMock,
       })
 
       mockClient = createMockLinkedInClient({
@@ -705,24 +750,6 @@ describe('LinkedInSyncManager', () => {
   })
 
   describe('callback setters', () => {
-    it('setTokenProvider updates the auth token callback', async () => {
-      const newTokenProvider = vi.fn().mockResolvedValue('new-token')
-      syncManager.setTokenProvider(newTokenProvider)
-
-      mockClient = createMockLinkedInClient({
-        getConversations: vi.fn().mockResolvedValue({
-          conversations: [],
-          syncToken: undefined,
-          metadata: undefined,
-        }),
-      })
-      syncManager.setClient(mockClient)
-
-      await syncManager.runSync()
-
-      expect(newTokenProvider).toHaveBeenCalled()
-    })
-
     it('setProgressCallback updates the progress callback', async () => {
       const newProgressCallback = vi.fn()
       syncManager.setProgressCallback(newProgressCallback)
@@ -739,20 +766,6 @@ describe('LinkedInSyncManager', () => {
       await syncManager.runSync()
 
       expect(newProgressCallback).toHaveBeenCalled()
-    })
-
-    it('setAuthInvalidCallback updates the auth invalid callback', async () => {
-      const newAuthInvalidCallback = vi.fn()
-      syncManager.setAuthInvalidCallback(newAuthInvalidCallback)
-
-      mockClient = createMockLinkedInClient({
-        getConversations: vi.fn().mockRejectedValue(new Error('401 Unauthorized')),
-      })
-      syncManager.setClient(mockClient)
-
-      await syncManager.runSync()
-
-      expect(newAuthInvalidCallback).toHaveBeenCalled()
     })
   })
 })

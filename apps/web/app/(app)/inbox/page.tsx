@@ -1,8 +1,9 @@
 "use client";
 
-import { useState, useRef, useCallback, useEffect } from "react";
+import { useState, useRef, useCallback, useEffect, useMemo } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import { useQuery, useMutation } from "convex/react";
+import { Send, Loader2 } from "lucide-react";
 import { api } from "@prm/convex";
 import {
   InboxConversationList,
@@ -11,7 +12,6 @@ import {
   type InboxMessage,
   type InboxPlatform,
 } from "@prm/ui";
-import { Send, Loader2 } from "lucide-react";
 import type { Id } from "@prm/convex";
 
 type PlatformFilter = InboxPlatform | "all";
@@ -63,7 +63,10 @@ export default function InboxPage() {
     limit: 50,
     platform: platformFilter === "all" ? undefined : platformFilter,
   });
-  const conversations = (inboxResult?.conversations ?? []) as InboxConversation[];
+  const conversations = useMemo(
+    () => (inboxResult?.conversations ?? []) as InboxConversation[],
+    [inboxResult?.conversations]
+  );
   const inboxLoading = inboxResult === undefined;
 
   // Default to first conversation if none selected
@@ -110,10 +113,11 @@ export default function InboxPage() {
       const recipientHandle = isGroup ? "" : (participant?.handle ?? "");
       const recipientContactId = participant?._id;
 
-      // Slack always needs chatIdentifier (channel ID) for both DMs and channels
+      // Slack and LinkedIn always need chatIdentifier (channel/conversation ID)
       // Other platforms only need it for group chats
       const isSlack = selectedConversation.platform === "slack";
-      const needsChatIdentifier = isSlack || isGroup;
+      const isLinkedIn = selectedConversation.platform === "linkedin";
+      const needsChatIdentifier = isSlack || isLinkedIn || isGroup;
 
       // Slack uses chatIdentifier; other platforms need recipientHandle for DMs
       if (!needsChatIdentifier && !recipientHandle) {
@@ -132,6 +136,7 @@ export default function InboxPage() {
           ? selectedConversation.platformConversationId
           : undefined,
         conversationId: selectedConversation._id as Id<"conversations">,
+        workspaceId: selectedConversation.workspaceId ?? undefined,
       });
 
         // Clear input on success

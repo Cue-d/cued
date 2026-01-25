@@ -99,7 +99,6 @@ export {
   isUrgencySpam,
   isPromotional,
   isBankAlert,
-  isPhishing,
   calculatePriority,
   calculateTimePriority,
   calculateContactBoost,

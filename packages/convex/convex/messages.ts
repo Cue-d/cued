@@ -22,6 +22,7 @@ interface InboxResult {
     lastMessageText: string | null;
     lastMessageAt: number | null;
     unreadCount: number;
+    workspaceId: string | null;
   }>;
   nextCursor: string | null;
 }
@@ -61,8 +62,19 @@ async function fetchInbox(
   // Fetch all matching conversations (we'll sort and paginate in memory)
   const allConversations = await conversationsQuery.collect();
 
+  // Filter out Slack channels where user hasn't participated
+  // DMs/group DMs are always shown; channels require userParticipated=true
+  const filteredConversations = allConversations.filter((c) => {
+    // Non-Slack platforms: always show
+    if (c.platform !== "slack") return true;
+    // DMs and group DMs: always show
+    if (c.conversationType === "dm" || c.conversationType === "group") return true;
+    // Slack channels: only show if user has participated
+    return c.userParticipated === true;
+  });
+
   // Sort by lastMessageAt descending (use _creationTime as fallback)
-  const sorted = allConversations.sort(
+  const sorted = filteredConversations.sort(
     (a, b) => getConversationSortKey(b) - getConversationSortKey(a)
   );
 
@@ -105,6 +117,7 @@ async function fetchInbox(
         lastMessageText: conversation.lastMessageText ?? null,
         lastMessageAt: conversation.lastMessageAt ?? null,
         unreadCount: conversation.unreadCount,
+        workspaceId: conversation.workspaceId ?? null,
       };
     })
   );

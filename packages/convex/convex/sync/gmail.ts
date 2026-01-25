@@ -9,8 +9,12 @@ import type { Doc, Id } from "../_generated/dataModel";
 import type { MutationCtx } from "../_generated/server";
 import { normalizeEmail } from "@prm/ai";
 import {
+  getOrCreateContact,
   scheduleIncomingMessageEvents,
+  scheduleOutgoingMessageEvents,
   SEVEN_DAYS_MS,
+  BATCH_SIZE,
+  logSyncError,
 } from "./shared";
 
 // ============================================================================
@@ -33,6 +37,8 @@ export const gmailEmailInput = v.object({
     })
   ),
   threadId: v.string(), // Gmail thread ID
+  /** Gmail label IDs for filtering (e.g., INBOX, SENT, CATEGORY_PROMOTIONS) */
+  labelIds: v.optional(v.array(v.string())),
 });
 
 // ============================================================================
@@ -97,21 +103,90 @@ export function isNewsletterOrAutomated(email: GmailEmailInput): boolean {
 }
 
 // ============================================================================
+// Gmail Label-Based Filtering
+// ============================================================================
+
+/** Labels that indicate the email should be included */
+const INCLUDE_LABELS = new Set(["INBOX", "SENT"]);
+
+/** Labels that indicate the email should be excluded (promotional/social) */
+const EXCLUDE_LABELS = new Set([
+  "CATEGORY_PROMOTIONS",
+  "CATEGORY_SOCIAL",
+  "CATEGORY_UPDATES",
+  "CATEGORY_FORUMS",
+]);
+
+/**
+ * Check if an email should be filtered out based on Gmail labels.
+ * Returns true if the email should be EXCLUDED (filtered out).
+ *
+ * Filtering rules:
+ * 1. If email has any EXCLUDE label → exclude
+ * 2. If email has INBOX or SENT label → include
+ * 3. Otherwise → fall through to content-based filtering
+ */
+export function shouldFilterByLabel(email: GmailEmailInput): boolean | "fallthrough" {
+  const labels = email.labelIds ?? [];
+
+  // Check for exclude labels first (promotions, social, updates, forums)
+  if (labels.some((label) => EXCLUDE_LABELS.has(label))) {
+    return true; // Should be filtered out
+  }
+
+  // Check for include labels (INBOX or SENT)
+  if (labels.some((label) => INCLUDE_LABELS.has(label))) {
+    return false; // Should NOT be filtered out
+  }
+
+  // No decisive label - fall through to content-based filtering
+  return "fallthrough";
+}
+
+/**
+ * Combined filter: first check labels, then fall back to content-based filtering.
+ * Returns true if the email should be EXCLUDED.
+ */
+export function shouldFilterGmailEmail(email: GmailEmailInput): boolean {
+  const labelResult = shouldFilterByLabel(email);
+
+  // If labels gave a definitive answer, use it
+  if (labelResult !== "fallthrough") {
+    return labelResult;
+  }
+
+  // Fall back to content-based newsletter detection
+  return isNewsletterOrAutomated(email);
+}
+
+// ============================================================================
 // Email Parsing
 // ============================================================================
 
 /**
  * Parse email address from "Name <email@example.com>" format.
+ * Also handles simple "email@example.com" format and plus addressing.
  */
 export function parseEmailAddress(fromHeader: string): { name: string; email: string } {
-  // Match "Name <email>" or just "email"
-  const match = fromHeader.match(/^(?:(.+?)\s*)?<?([^\s<>]+@[^\s<>]+)>?$/);
-  if (match) {
+  // Check for "Name <email>" format with angle brackets
+  const bracketMatch = fromHeader.match(/^(.+?)\s*<([^\s<>]+@[^\s<>]+)>$/);
+  if (bracketMatch) {
     return {
-      name: match[1]?.trim() || match[2],
-      email: match[2].toLowerCase(),
+      name: bracketMatch[1].trim(),
+      email: bracketMatch[2].toLowerCase(),
     };
   }
+
+  // Simple email format without angle brackets
+  const simpleMatch = fromHeader.match(/^([^\s<>]+@[^\s<>]+)$/);
+  if (simpleMatch) {
+    return {
+      name: simpleMatch[1],
+      email: simpleMatch[1].toLowerCase(),
+    };
+  }
+
+  // Fallback for malformed input
   return { name: fromHeader, email: fromHeader.toLowerCase() };
 }
 
@@ -130,14 +205,14 @@ export async function syncGmailMessagesInternal(
   const result = {
     messagesCount: 0,
     conversationsCount: 0,
-    skippedNewsletters: 0,
+    skippedFiltered: 0,
     errors: [] as string[],
   };
 
-  // Filter out newsletters/automated emails
+  // Filter out promotional/social emails via labels, then fall back to content-based filtering
   const personalEmails = emails.filter((email) => {
-    if (isNewsletterOrAutomated(email)) {
-      result.skippedNewsletters++;
+    if (shouldFilterGmailEmail(email)) {
+      result.skippedFiltered++;
       return false;
     }
     return true;
@@ -196,17 +271,22 @@ export async function syncGmailMessagesInternal(
       const threadParticipantIds = new Set<Id<"contacts">>();
 
       for (const email of threadEmails) {
-        // Resolve sender email to contact (always, for participant tracking)
-        const senderParsed = parseEmailAddress(email.sender);
-        const senderContactId = await getOrCreateEmailContact(
-          ctx,
-          userId,
-          senderParsed.email,
-          senderParsed.name
-        );
+        // Detect if this is a sent email (from the user)
+        const isFromMe = (email.labelIds ?? []).includes("SENT");
 
-        // Track participant for conversation
-        threadParticipantIds.add(senderContactId);
+        // Only resolve sender to contact if NOT from the user
+        const senderParsed = parseEmailAddress(email.sender);
+        let senderContactId: Id<"contacts"> | undefined;
+        if (!isFromMe) {
+          senderContactId = await getOrCreateEmailContact(
+            ctx,
+            userId,
+            senderParsed.email,
+            senderParsed.name
+          );
+          // Track participant for conversation (only for incoming emails)
+          threadParticipantIds.add(senderContactId);
+        }
 
         // Skip message insert if already exists
         if (existingMessageSet.has(email.id)) {
@@ -227,7 +307,7 @@ export async function syncGmailMessagesInternal(
           content,
           sentAt: sentAtMs,
           senderContactId,
-          isFromMe: false, // Nango sync gets received emails
+          isFromMe,
           platformMessageId: email.id,
         });
 
@@ -252,40 +332,49 @@ export async function syncGmailMessagesInternal(
       }
 
       if (threadParticipantIds.size > 0) {
-        // Merge with existing participants
+        // Merge with existing participants using explicit Set dedup
         const existingConv = await ctx.db.get(conversationId);
-        const existingIds = new Set(existingConv?.participantContactIds ?? []);
-        for (const id of threadParticipantIds) {
-          existingIds.add(id);
+        const existingArr = existingConv?.participantContactIds ?? [];
+        const mergedIds = new Set([...existingArr, ...threadParticipantIds]);
+        // Only update if array actually changed (new participants added)
+        if (mergedIds.size > existingArr.length) {
+          updates.participantContactIds = Array.from(mergedIds);
         }
-        updates.participantContactIds = Array.from(existingIds);
       }
 
       if (Object.keys(updates).length > 0) {
         await ctx.db.patch(conversationId, updates);
       }
     } catch (e) {
-      result.errors.push(`Failed to sync thread ${threadId}: ${e}`);
+      result.errors.push(logSyncError("Gmail", "sync thread", threadId, e));
     }
   }
 
-  // Schedule action analysis for new incoming emails (event-driven)
+  // Schedule action analysis for recent emails (event-driven)
+  // Separate incoming (received) from outgoing (sent) for correct event scheduling
   const cutoff = Date.now() - SEVEN_DAYS_MS;
   const incomingConvos = new Set<Id<"conversations">>();
+  const outgoingConvos = new Set<Id<"conversations">>();
 
   for (const [threadId, threadEmails] of emailsByThread) {
     const conversationId = conversationMap.get(threadId);
     if (!conversationId) continue;
 
-    const hasRecentEmail = threadEmails.some(
-      (email) => new Date(email.date).getTime() >= cutoff
-    );
-    if (hasRecentEmail) {
-      incomingConvos.add(conversationId);
+    for (const email of threadEmails) {
+      const isRecent = new Date(email.date).getTime() >= cutoff;
+      if (!isRecent) continue;
+
+      const isFromMe = (email.labelIds ?? []).includes("SENT");
+      if (isFromMe) {
+        outgoingConvos.add(conversationId);
+      } else {
+        incomingConvos.add(conversationId);
+      }
     }
   }
 
   await scheduleIncomingMessageEvents(ctx, userId, incomingConvos, "gmail");
+  await scheduleOutgoingMessageEvents(ctx, userId, outgoingConvos);
 
   return result;
 }
@@ -296,6 +385,7 @@ export async function syncGmailMessagesInternal(
 
 /**
  * Get or create a contact for an email address.
+ * Uses unified getOrCreateContact from shared.ts.
  */
 async function getOrCreateEmailContact(
   ctx: MutationCtx,
@@ -303,43 +393,14 @@ async function getOrCreateEmailContact(
   email: string,
   displayName: string
 ): Promise<Id<"contacts">> {
-  const normalizedEmailAddr = normalizeEmail(email);
-
-  // Check if we already have a handle for this email
-  const existingHandle = await ctx.db
-    .query("contactHandles")
-    .withIndex("by_user_handle", (q) =>
-      q.eq("userId", userId).eq("handle", normalizedEmailAddr)
-    )
-    .unique();
-
-  if (existingHandle) {
-    // Update display name if we have a better one
-    if (displayName && displayName !== email) {
-      const existingContact = await ctx.db.get(existingHandle.contactId);
-      if (existingContact && existingContact.displayName === email) {
-        await ctx.db.patch(existingHandle.contactId, { displayName });
-      }
-    }
-    return existingHandle.contactId;
-  }
-
-  // Create placeholder contact
-  const contactId = await ctx.db.insert("contacts", {
+  const result = await getOrCreateContact(
+    ctx,
     userId,
-    displayName: displayName || email,
-  });
-
-  // Create handle for email
-  await ctx.db.insert("contactHandles", {
-    userId,
-    contactId,
-    handleType: "email",
-    handle: normalizedEmailAddr,
-    platform: "gmail",
-  });
-
-  return contactId;
+    "gmail",
+    [{ value: email, type: "email" }],
+    displayName || email
+  );
+  return result.contactId;
 }
 
 // ============================================================================
@@ -356,9 +417,8 @@ async function batchFetchGmailConversations(
 ): Promise<Doc<"conversations">[]> {
   const results: Doc<"conversations">[] = [];
 
-  const batchSize = 50;
-  for (let i = 0; i < threadIds.length; i += batchSize) {
-    const batch = threadIds.slice(i, i + batchSize);
+  for (let i = 0; i < threadIds.length; i += BATCH_SIZE) {
+    const batch = threadIds.slice(i, i + BATCH_SIZE);
     const promises = batch.map((id) =>
       ctx.db
         .query("conversations")
@@ -389,9 +449,8 @@ async function batchFetchGmailMessages(
 ): Promise<Doc<"messages">[]> {
   const results: Doc<"messages">[] = [];
 
-  const batchSize = 50;
-  for (let i = 0; i < messageIds.length; i += batchSize) {
-    const batch = messageIds.slice(i, i + batchSize);
+  for (let i = 0; i < messageIds.length; i += BATCH_SIZE) {
+    const batch = messageIds.slice(i, i + BATCH_SIZE);
     const promises = batch.map((id) =>
       ctx.db
         .query("messages")
@@ -464,7 +523,7 @@ export async function syncGoogleContactsInternal(
       }
       result.handlesCount += syncResult.handlesAdded;
     } catch (e) {
-      result.errors.push(`Failed to sync contact ${contact.name}: ${e}`);
+      result.errors.push(logSyncError("Gmail", "sync contact", contact.name, e));
     }
   }
 

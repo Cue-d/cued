@@ -247,11 +247,11 @@ export async function executeLoop(
         });
       }
 
-      // Set timeout (1 hour)
+      // Set timeout (6 hour)
       const timeout = setTimeout(() => {
         child.kill("SIGTERM");
-        resolve({ success: false, output: "Execution timed out after 1 hour" });
-      }, 60 * 60 * 1000);
+        resolve({ success: false, output: "Execution timed out after 6 hour" });
+      }, 6 * 60 * 60 * 1000);
 
       child.on("close", (code) => {
         clearTimeout(timeout);

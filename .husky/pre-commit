@@ -1,11 +1,13 @@
 #!/bin/sh
 
-# Frontend: lint-staged + typecheck
-cd frontend
-pnpm exec lint-staged
-pnpm run typecheck
+# Run Convex tests (required since CI excludes them due to credential requirements)
+# These tests validate schema, mutations, and queries before pushing
+echo "Running Convex tests..."
+cd packages/convex && pnpm test
+if [ $? -ne 0 ]; then
+  echo "❌ Convex tests failed. Please fix before committing."
+  exit 1
+fi
+echo "✅ Convex tests passed"
 
-# Backend: ruff (auto-format and lint with fixes)
-cd ../backend
-uv run ruff format .
-uv run ruff check --fix .
+cd ../..

@@ -9,6 +9,7 @@
 
 import { ConvexHttpClient } from "convex/browser";
 import { api } from "@prm/convex";
+import { isAuthError } from "../auth/auth-utils";
 import { electronEnv } from "@prm/env/electron";
 import { getContactsManager } from "./contacts";
 
@@ -49,22 +50,6 @@ export interface ContactsSyncResult {
   elapsed: number;
 }
 
-/**
- * Check if an error is an authentication error.
- */
-function isAuthError(error: unknown): boolean {
-  if (error instanceof Error) {
-    const message = error.message.toLowerCase();
-    return (
-      message.includes("unauthenticated") ||
-      message.includes("401") ||
-      message.includes("unauthorized") ||
-      message.includes("invalidauthheader") ||
-      message.includes("token expired")
-    );
-  }
-  return false;
-}
 
 /**
  * Sync all contacts from macOS Contacts.app to Convex.

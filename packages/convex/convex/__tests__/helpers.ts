@@ -197,9 +197,6 @@ export function createTestIntegrationData(
     platform: overrides.platform ?? "imessage",
     nangoConnectionId: overrides.nangoConnectionId,
     connectedAt: overrides.connectedAt ?? Date.now(),
-    syncState: {
-      isConnected: true,
-      lastSyncAt: Date.now(),
-    },
+    isConnected: true,
   };
 }

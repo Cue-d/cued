@@ -60,6 +60,7 @@ export class MessageQueueProcessor {
       api.messageQueue.getQueuedMessages,
       { limit: 20 },
       (result) => {
+        console.log(`[MessageQueueProcessor] Subscription update: ${result.messages.length} messages ready`);
         this.handleQueueUpdate(result.messages);
       },
       (error) => {
@@ -199,6 +200,7 @@ export class MessageQueueProcessor {
         text: message.text,
         threadId: message.chatIdentifier,
         groupHandles: message.isGroup ? [message.recipientHandle] : undefined,
+        workspaceId: message.workspaceId,
       };
 
       const result = await adapter.send(queuedMessage);

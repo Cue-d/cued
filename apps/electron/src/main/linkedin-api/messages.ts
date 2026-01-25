@@ -103,23 +103,26 @@ interface RawMessage {
   '*conversation'?: string
 }
 
+/**
+ * Payload for sending a message to an existing conversation.
+ * Uses the /messaging/conversations/{id}/events endpoint.
+ */
 interface SendMessagePayload {
-  message: {
-    body: {
-      attributes: Array<{
-        start: number
-        length: number
-        type: { [key: string]: string }
-      }>
-      text: string
+  eventCreate: {
+    value: {
+      'com.linkedin.voyager.messaging.create.MessageCreate': {
+        attributedBody: {
+          text: string
+          attributes: Array<{
+            start: number
+            length: number
+            type: { [key: string]: string }
+          }>
+        }
+        attachments: Array<unknown>
+      }
     }
-    renderContentUnions?: Array<Record<string, unknown>>
-    originToken: string
-    conversationUrn: string
   }
-  mailboxUrn: string
-  trackingId: string
-  dedupeByClientGeneratedToken: boolean
 }
 
 interface SendMessageResponse {
@@ -145,10 +148,9 @@ export async function getMessages(
   conversationId: string,
   cursor?: string
 ): Promise<MessagesResult> {
-  // Ensure conversationId is a full URN
-  const conversationURN = ensureConversationURN(conversationId)
+  // Convert to msg_conversation URN format for GraphQL API (mautrix-linkedin compatible)
+  const conversationURN = ensureMsgConversationURN(conversationId)
 
-  // URL-encode the conversation URN (contains special chars like parentheses)
   const variables: Record<string, string> = {
     conversationUrn: linkedInEncode(conversationURN),
     count: String(PAGINATION_DEFAULTS.messagesCount),
@@ -156,7 +158,7 @@ export async function getMessages(
 
   // Add cursor if provided (for pagination)
   if (cursor) {
-    variables.start = cursor
+    variables.prevCursor = cursor
   }
 
   const response = await newMessagingGraphQLRequest(
@@ -191,13 +193,13 @@ export async function getMessagesBefore(
   conversationId: string,
   timestamp: number
 ): Promise<MessagesResult> {
-  // Ensure conversationId is a full URN
-  const conversationURN = ensureConversationURN(conversationId)
+  // Convert to msg_conversation URN format for GraphQL API (mautrix-linkedin compatible)
+  const conversationURN = ensureMsgConversationURN(conversationId)
+  const encodedURN = linkedInEncode(conversationURN)
 
-  // URL-encode the conversation URN (contains special chars like parentheses)
   const variables: Record<string, string> = {
-    conversationUrn: linkedInEncode(conversationURN),
-    anchorTimestamp: String(timestamp),
+    conversationUrn: encodedURN,
+    deliveredAt: String(timestamp),
     countBefore: String(PAGINATION_DEFAULTS.messagesCount),
     countAfter: '0',
   }
@@ -223,6 +225,8 @@ export async function getMessagesBefore(
 
 /**
  * Send a message to a conversation.
+ * Uses the /messaging/conversations/{id}/events endpoint (beeper/linkedin compatible).
+ *
  * @param client - The LinkedIn client
  * @param conversationId - The conversation URN or ID
  * @param text - The message text to send
@@ -233,59 +237,89 @@ export async function sendMessage(
   conversationId: string,
   text: string
 ): Promise<Message> {
-  // Ensure conversationId is a full URN
-  const conversationURN = ensureConversationURN(conversationId)
+  // Extract the conversation ID from various URN formats
+  const conversationIdExtracted = extractConversationId(conversationId)
 
   // Get the user's mailbox URN from the authenticated user
   if (!client.userEntityURN) {
     throw new Error('Client must have userEntityURN set to send messages')
   }
 
-  // Convert fsd_profile URN to mailbox URN format
-  // e.g., "urn:li:fsd_profile:ABC123" -> "urn:li:fsd_profile:ABC123"
-  const mailboxURN = client.userEntityURN
-
-  // Generate origin token for deduplication (UUID-like format)
-  const originToken = generateOriginToken()
-  const trackingId = generateTrackingId()
-
   const payload: SendMessagePayload = {
-    message: {
-      body: {
-        attributes: [],
-        text: text,
+    eventCreate: {
+      value: {
+        'com.linkedin.voyager.messaging.create.MessageCreate': {
+          attributedBody: {
+            text: text,
+            attributes: [],
+          },
+          attachments: [],
+        },
       },
-      originToken: originToken,
-      conversationUrn: conversationURN,
     },
-    mailboxUrn: mailboxURN,
-    trackingId: trackingId,
-    dedupeByClientGeneratedToken: true,
   }
 
-  const response = await newPostRequest(API_URLS.messagingMessages, client.cookies)
+  // Build URL: /messaging/conversations/{conversationId}/events?action=create
+  const url = `${API_URLS.messagingConversations}/${encodeURIComponent(conversationIdExtracted)}/events?action=create`
+
+  const response = await newPostRequest(url, client.cookies)
     .withHeader('Accept', CONTENT_TYPES.linkedInNormalized)
     .withXLIHeaders()
     .withJSONPayload(payload)
     .doJSON<SendMessageResponse>()
 
   // Parse the response - LinkedIn returns the created message
+  // IMPORTANT: Use the original conversationId as-is to match how conversations are stored.
+  // Converting to fsd_conversation format would cause mismatches with conversations stored
+  // using msg_conversation format, creating duplicate conversations.
   if (response.value) {
-    return parseRawMessage(response.value, conversationURN)
+    return parseRawMessage(response.value, conversationId)
   }
 
   // If we didn't get the message back, construct a minimal one
+  const originToken = generateOriginToken()
   return {
     entityURN: `urn:li:fsd_message:${originToken}`,
     body: { text, attributes: [] },
     deliveredAt: Date.now(),
     sender: {
-      entityURN: mailboxURN,
+      entityURN: client.userEntityURN,
       participantType: {},
     },
     messageBodyRenderFormat: 'DEFAULT',
-    conversationURN: conversationURN,
+    conversationURN: conversationId,
   }
+}
+
+/**
+ * Extract the conversation ID from various URN formats.
+ * Handles:
+ * - msg_conversation: urn:li:msg_conversation:(urn:li:fsd_profile:XXX,CONV_ID)
+ * - fsd_conversation: urn:li:fsd_conversation:CONV_ID
+ * - Plain ID: CONV_ID
+ */
+function extractConversationId(conversationId: string): string {
+  // Handle msg_conversation format: urn:li:msg_conversation:(urn:li:fsd_profile:XXX,CONV_ID)
+  if (conversationId.startsWith('urn:li:msg_conversation:')) {
+    const match = conversationId.match(/,([^)]+)\)$/)
+    if (match && match[1]) {
+      return match[1]
+    }
+  }
+
+  // Handle fsd_conversation format: urn:li:fsd_conversation:CONV_ID
+  if (conversationId.startsWith('urn:li:fsd_conversation:')) {
+    return conversationId.replace('urn:li:fsd_conversation:', '')
+  }
+
+  // If it's some other URN format, try to extract the ID after the last colon
+  if (conversationId.startsWith('urn:')) {
+    const parts = conversationId.split(':')
+    return parts[parts.length - 1]
+  }
+
+  // Otherwise, assume it's already just the ID
+  return conversationId
 }
 
 // ============================================================================
@@ -293,17 +327,37 @@ export async function sendMessage(
 // ============================================================================
 
 /**
- * Ensure a conversation ID is a full URN.
+ * Convert a conversation ID to msg_conversation URN format for GraphQL messages API.
+ * The mautrix-linkedin Go client uses this format for message fetching queries.
+ *
+ * IMPORTANT: LinkedIn's GraphQL API expects the FULL msg_conversation URN including the profile:
+ *   urn:li:msg_conversation:(urn:li:fsd_profile:XXX,conversationId)
+ * NOT just: urn:li:msg_conversation:conversationId
+ *
  * @param conversationId - The conversation ID or URN
- * @returns The full conversation URN
+ * @returns The full msg_conversation URN format
  */
-function ensureConversationURN(conversationId: string): string {
-  // If it already looks like a URN, return as-is
-  if (conversationId.startsWith('urn:')) {
+function ensureMsgConversationURN(conversationId: string): string {
+  // If already in full msg_conversation format with profile, return as-is
+  if (conversationId.startsWith('urn:li:msg_conversation:(')) {
     return conversationId
   }
-  // Otherwise, construct the URN
-  return `urn:li:fsd_conversation:${conversationId}`
+
+  // If it's just the short msg_conversation format (without profile), return as-is
+  // The API might accept this format in some cases
+  if (conversationId.startsWith('urn:li:msg_conversation:')) {
+    return conversationId
+  }
+
+  // If it's fsd_conversation format, extract and convert
+  // Note: This case may not work well without the profile URN - the API might reject it
+  if (conversationId.startsWith('urn:li:fsd_conversation:')) {
+    const rawId = conversationId.replace('urn:li:fsd_conversation:', '')
+    return `urn:li:msg_conversation:${rawId}`
+  }
+
+  // Otherwise, assume it's a raw ID and wrap it
+  return `urn:li:msg_conversation:${conversationId}`
 }
 
 /**
@@ -426,25 +480,10 @@ function parsePagingMetadata(
 
 /**
  * Generate a unique origin token for message deduplication.
- * Format: UUID v4-like string
  */
 function generateOriginToken(): string {
-  // Generate a UUID-like token
   const timestamp = Date.now().toString(16)
   const random = Math.random().toString(16).substring(2, 10)
   const random2 = Math.random().toString(16).substring(2, 10)
   return `${timestamp}-${random}-${random2}`
-}
-
-/**
- * Generate a tracking ID for the message.
- * LinkedIn uses these for analytics/tracking purposes.
- */
-function generateTrackingId(): string {
-  // Base64-encoded tracking ID with timestamp
-  const timestamp = Date.now()
-  const random = Math.floor(Math.random() * 1000000)
-  const data = `${timestamp}:${random}`
-  // Simple base64 encoding (browser-compatible)
-  return btoa(data).replace(/=/g, '')
 }

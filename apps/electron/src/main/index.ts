@@ -20,9 +20,8 @@ import { getSyncManager, type SyncProgress } from "./sync/sync-manager";
 import { getContactsWatcher } from "./sync/contacts-watcher";
 import { syncContactsToConvex } from "./sync/contacts-sync";
 import { getHeartbeatManager } from "./sync/presence";
-import { setupSocialIpcHandlers, cleanupSocialScrapers } from "./ipc/social";
+import { setupSocialIpcHandlers, cleanupSocialScrapers, getLinkedInScraper } from "./ipc/social";
 import { getLinkedInSyncManager } from "./sync/linkedin-sync";
-import { LinkedInScraper } from "./sync/linkedin";
 import { getMessageQueueProcessor } from "./queue/message-queue-processor";
 import { getReactiveConvexClient } from "./convex-client";
 import { getSlackSyncManager } from "./sync/slack-sync";
@@ -117,65 +116,74 @@ function createWindow(): void {
 }
 
 function setupAuthIpcHandlers(): void {
-  // Get current auth state
-  ipcMain.handle("auth:getState", () => {
-    return getAuthState();
+  // Get current auth state (tries to refresh token if expired)
+  ipcMain.handle("auth:getState", async () => {
+    // Try to get a valid token first - this triggers refresh if access token expired
+    // but we have a valid refresh token. This ensures we return accurate auth state.
+    const token = await getValidAccessToken();
+    if (token) {
+      return getAuthState();
+    }
+    return { isAuthenticated: false, user: null };
   });
 
   // Start device authorization flow
   ipcMain.handle("auth:startLogin", async () => {
-    await startDeviceAuth({
-      onUserCode: (code, uri) => {
-        // Notify renderer to display user code
-        mainWindow?.webContents.send("auth:userCode", code, uri);
-      },
-      onAuthSuccess: async (user) => {
-        // Notify renderer of auth state change
-        mainWindow?.webContents.send("auth:stateChanged", {
-          isAuthenticated: true,
-          user,
-        });
+    try {
+      await startDeviceAuth({
+        onUserCode: (code, uri) => {
+          // Notify renderer to display user code
+          mainWindow?.webContents.send("auth:userCode", code, uri);
+        },
+        onAuthSuccess: async (user) => {
+          // Notify renderer of auth state change
+          mainWindow?.webContents.send("auth:stateChanged", {
+            isAuthenticated: true,
+            user,
+          });
 
-        // Sync user profile to Convex
-        if (user) {
-          try {
-            const token = await getValidAccessToken();
-            if (token) {
-              const convex = new ConvexHttpClient(CONVEX_URL);
-              convex.setAuth(token);
-              await convex.mutation(api.users.syncProfile, {
-                email: user.email,
-                firstName: user.firstName ?? undefined,
-                lastName: user.lastName ?? undefined,
-              });
-              console.log("[Main] User profile synced to Convex");
+          // Sync user profile to Convex
+          if (user) {
+            try {
+              const token = await getValidAccessToken();
+              if (token) {
+                const convex = new ConvexHttpClient(CONVEX_URL);
+                convex.setAuth(token);
+                await convex.mutation(api.users.syncProfile, {
+                  email: user.email,
+                  firstName: user.firstName ?? undefined,
+                  lastName: user.lastName ?? undefined,
+                });
+                console.log("[Main] User profile synced to Convex");
+              }
+            } catch (e) {
+              console.warn("[Main] Failed to sync user profile:", e);
             }
-          } catch (e) {
-            console.warn("[Main] Failed to sync user profile:", e);
           }
-        }
 
-        // Start sync with token provider and auth invalid callback
-        const syncManager = getSyncManager();
-        syncManager.setTokenProvider(getValidAccessToken);
-        syncManager.setAuthInvalidCallback(() => {
-          console.log("[Main] Auth invalid during sync, notifying renderer");
+          // Start sync (uses centralized auth from auth-manager)
+          const syncManager = getSyncManager();
+          syncManager.start();
+        },
+        onAuthError: (error) => {
+          // Notify renderer of auth failure
           mainWindow?.webContents.send("auth:stateChanged", {
             isAuthenticated: false,
             user: null,
+            error,
           });
-        });
-        syncManager.start();
-      },
-      onAuthError: (error) => {
-        // Notify renderer of auth failure
-        mainWindow?.webContents.send("auth:stateChanged", {
-          isAuthenticated: false,
-          user: null,
-          error,
-        });
-      },
-    });
+        },
+      });
+    } catch (error) {
+      // Handle errors that occur before callbacks are invoked (e.g., network errors)
+      const message = error instanceof Error ? error.message : String(error);
+      console.error("[Main] Device auth failed:", message);
+      mainWindow?.webContents.send("auth:stateChanged", {
+        isAuthenticated: false,
+        user: null,
+        error: message,
+      });
+    }
   });
 
   // Sign out
@@ -214,12 +222,15 @@ function setupSyncIpcHandlers(): void {
 
 async function startBackgroundSync(): Promise<void> {
   try {
-    // Check if user is authenticated before starting sync
-    const authState = getAuthState();
-    if (!authState.isAuthenticated) {
-      console.log("[Main] Not authenticated, skipping background sync");
+    // Try to get a valid token - this will refresh if the access token expired
+    // but we have a valid refresh token. The onTokenRefreshed callback will
+    // notify the renderer if refresh succeeds.
+    const token = await getValidAccessToken();
+    if (!token) {
+      console.log("[Main] No valid auth token, skipping background sync");
       return;
     }
+    console.log("[Main] Auth token valid, starting background sync");
 
     // Get managers for integration
     const trayManager = getTrayManager();
@@ -227,6 +238,7 @@ async function startBackgroundSync(): Promise<void> {
     const settingsManager = getSettingsManager();
 
     // Initialize SyncCoordinator FIRST - this manages all sync operations
+    // Token refresh is handled by auth-manager which checks actual expiry
     const coordinator = getSyncCoordinator({
       getAuthToken: getValidAccessToken,
       onAuthInvalid: () => {
@@ -236,13 +248,8 @@ async function startBackgroundSync(): Promise<void> {
           user: null,
         });
       },
-      tokenTtlSeconds: 3600, // WorkOS tokens last 1 hour
-      refreshThreshold: 0.8, // Refresh at 80% (48 mins)
     });
-    console.log("[Main] SyncCoordinator initialized");
-
     const syncManager = getSyncManager({
-      getAuthToken: () => coordinator.getValidToken(), // Use coordinator's token
       onProgress: (progress: SyncProgress) => {
         // Update tray status based on sync progress
         let status: TrayStatus = "idle";
@@ -269,29 +276,36 @@ async function startBackgroundSync(): Promise<void> {
         // Notify renderer of sync progress
         mainWindow?.webContents.send("sync:progress", progress);
       },
-      onAuthInvalid: () => {
-        // Notify renderer that auth is no longer valid
-        console.log("[Main] Auth invalid, notifying renderer");
-        mainWindow?.webContents.send("auth:stateChanged", {
-          isAuthenticated: false,
-          user: null,
-        });
-        // Update tray to error status
-        trayManager.updateStatus("error");
-      },
       // Wire contacts sync for recovery flows - goes through coordinator
       syncContacts: async () => {
-        return coordinator.scheduleContactsSync(async () => {
+        let contactsCount = 0;
+        await coordinator.scheduleContactsSync(async () => {
           const result = await syncContactsToConvex(() => coordinator.getValidToken(), true);
           mainWindow?.webContents.send("contacts:synced", result);
-        }).then(() => ({ contactsCount: 0 })); // SyncManager expects return value
+          contactsCount = result.contactsCount;
+        });
+        return { contactsCount };
       },
     });
 
+    // Run contacts sync BEFORE iMessage sync to ensure contactHandles exist,
+    // preventing duplicate handles from race conditions.
+    console.log("[Main] Running initial contacts sync...");
+    try {
+      await coordinator.scheduleContactsSync(async () => {
+        const result = await syncContactsToConvex(() => coordinator.getValidToken(), true);
+        console.log(`[Main] Initial contacts sync complete: ${result.contactsCount} contacts`);
+        mainWindow?.webContents.send("contacts:synced", result);
+      });
+    } catch (err) {
+      console.warn("[Main] Initial contacts sync failed (continuing anyway):", err);
+    }
+
+    // Now start iMessage sync - contactHandles already exist for known contacts
     syncManager.start();
     console.log("[Main] Background sync started");
 
-    // Start contacts watcher for incremental contact sync
+    // Contacts watcher handles incremental changes going forward
     startContactsWatcher();
 
     // Configure and start the unified message queue processor
@@ -330,10 +344,11 @@ async function startBackgroundSync(): Promise<void> {
 
 /**
  * Auto-start LinkedIn messaging sync if user is already logged in.
+ * Uses singleton scraper to share browser lock with IPC handlers.
  */
 async function startLinkedInMessagingSync(): Promise<void> {
   try {
-    const scraper = new LinkedInScraper();
+    const scraper = getLinkedInScraper();
     const isLoggedIn = await scraper.checkLoginStatus();
 
     if (!isLoggedIn) {
@@ -346,20 +361,13 @@ async function startLinkedInMessagingSync(): Promise<void> {
     // Get API client from scraper
     const apiClient = await scraper.getApiClient();
 
-    // Configure sync manager
+    // Configure sync manager (uses centralized auth from auth-manager)
     const syncManager = getLinkedInSyncManager();
     syncManager.setClient(apiClient);
-    syncManager.setTokenProvider(getValidAccessToken);
 
     // Set up progress callback to notify renderer
     syncManager.setProgressCallback((progress) => {
       mainWindow?.webContents.send("social:linkedin:messagingSyncProgress", progress);
-    });
-
-    // Set up auth invalid callback
-    syncManager.setAuthInvalidCallback(() => {
-      console.log("[Main] LinkedIn auth invalid, stopping sync");
-      mainWindow?.webContents.send("social:linkedin:authInvalid", {});
     });
 
     // Start sync (will use realtime by default)
@@ -397,21 +405,10 @@ async function startSlackMessagingSync(): Promise<void> {
         continue;
       }
 
-      manager.setTokenProvider(getValidAccessToken);
-      manager.setForceRefreshCallback(forceRefreshToken);
-
-      // Set up progress callback to notify renderer
+      // Set up progress callback to notify renderer (uses centralized auth from auth-manager)
       manager.setProgressCallback((progress) => {
         mainWindow?.webContents.send("social:slack:messagingSyncProgress", {
           ...progress,
-          teamId: manager.getTeamId(),
-        });
-      });
-
-      // Set up auth invalid callback
-      manager.setAuthInvalidCallback(() => {
-        console.log(`[Main] Slack auth invalid for ${creds.teamName}, stopping sync`);
-        mainWindow?.webContents.send("social:slack:authInvalid", {
           teamId: manager.getTeamId(),
         });
       });
@@ -528,7 +525,7 @@ app.whenReady().then(() => {
   startBackgroundSync();
 
   // Check initial auth state and notify renderer once window is ready
-  mainWindow?.webContents.once("did-finish-load", () => {
+  mainWindow?.webContents.once("did-finish-load", async () => {
     // Apply Liquid Glass effect on macOS Tahoe+
     if (mainWindow && isTahoe()) {
       try {
@@ -541,8 +538,21 @@ app.whenReady().then(() => {
       }
     }
 
-    const authState = getAuthState();
-    mainWindow?.webContents.send("auth:stateChanged", authState);
+    // Try to get a valid token (which refreshes if needed) before checking auth state.
+    // This ensures the renderer gets the correct auth state even if the access token
+    // was expired but we have a valid refresh token.
+    const token = await getValidAccessToken();
+    if (token) {
+      // Token is valid (possibly refreshed), send authenticated state
+      const authState = getAuthState();
+      mainWindow?.webContents.send("auth:stateChanged", authState);
+    } else {
+      // No valid token, send unauthenticated state
+      mainWindow?.webContents.send("auth:stateChanged", {
+        isAuthenticated: false,
+        user: null,
+      });
+    }
   });
 
   app.on("activate", () => {

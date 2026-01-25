@@ -6,7 +6,6 @@
 
 import { ipcMain, BrowserWindow } from "electron";
 import { LinkedInScraper, type LinkedInConnection } from "../sync/linkedin";
-import { TwitterScraper, type TwitterUser } from "../sync/twitter";
 import {
   getLinkedInSyncManager,
   type LinkedInSyncProgress,
@@ -29,22 +28,18 @@ import { getAdapter } from "../adapters";
 import { getValidAccessToken, forceRefreshToken } from "../auth";
 import { electronEnv } from "@prm/env/electron";
 
-// Singleton scraper instances to maintain state across calls
+// Singleton scraper instance to maintain state across calls
 let linkedInScraper: LinkedInScraper | null = null;
-let twitterScraper: TwitterScraper | null = null;
 
-function getLinkedInScraper(): LinkedInScraper {
+/**
+ * Get the singleton LinkedInScraper instance.
+ * Ensures browser operations are serialized across all callers.
+ */
+export function getLinkedInScraper(): LinkedInScraper {
   if (!linkedInScraper) {
     linkedInScraper = new LinkedInScraper();
   }
   return linkedInScraper;
-}
-
-function getTwitterScraper(): TwitterScraper {
-  if (!twitterScraper) {
-    twitterScraper = new TwitterScraper();
-  }
-  return twitterScraper;
 }
 
 export interface SocialScrapeResult<T> {
@@ -194,7 +189,6 @@ async function syncLinkedInContactsToBackend(
     }
 
     const result = await response.json();
-    console.log(`[Social IPC] Synced ${result.newContacts} new, ${result.updatedContacts} updated contacts`);
 
     return {
       success: true,
@@ -240,7 +234,6 @@ export function setupSocialIpcHandlers(mainWindow: BrowserWindow | null): void {
   ipcMain.handle("social:linkedin:login", async (): Promise<SocialStatusResult> => {
     try {
       const scraper = getLinkedInScraper();
-      console.log("[Social IPC] Opening LinkedIn login...");
       const success = await scraper.loginLinkedIn();
       return { isLoggedIn: success };
     } catch (error) {
@@ -262,7 +255,6 @@ export function setupSocialIpcHandlers(mainWindow: BrowserWindow | null): void {
     ): Promise<SocialScrapeResult<LinkedInConnection>> => {
       try {
         const scraper = getLinkedInScraper();
-        console.log("[Social IPC] Starting LinkedIn API scrape...");
 
         // Notify renderer that scrape is starting
         mainWindow?.webContents.send("social:linkedin:scrapeProgress", {
@@ -308,7 +300,6 @@ export function setupSocialIpcHandlers(mainWindow: BrowserWindow | null): void {
             : undefined,
         });
 
-        console.log(`[Social IPC] LinkedIn API scrape complete: ${connections.length} connections`);
         return { success: true, data: connections, count: connections.length };
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
@@ -362,31 +353,22 @@ export function setupSocialIpcHandlers(mainWindow: BrowserWindow | null): void {
     async (): Promise<LinkedInSyncResult> => {
       try {
         const scraper = getLinkedInScraper();
-        console.log("[Social IPC] Starting LinkedIn messaging sync...");
 
         // Get API client from scraper (will launch browser if needed)
         const apiClient = await scraper.getApiClient();
 
-        // Configure sync manager
+        // Configure sync manager (uses centralized auth from auth-manager)
         const syncManager = getLinkedInSyncManager();
         syncManager.setClient(apiClient);
-        syncManager.setTokenProvider(getValidAccessToken);
 
         // Set up progress callback to notify renderer
         syncManager.setProgressCallback((progress) => {
           mainWindow?.webContents.send("social:linkedin:messagingSyncProgress", progress);
         });
 
-        // Set up auth invalid callback
-        syncManager.setAuthInvalidCallback(() => {
-          console.log("[Social IPC] LinkedIn auth invalid, stopping sync");
-          mainWindow?.webContents.send("social:linkedin:authInvalid", {});
-        });
-
         // Start background sync
         syncManager.start();
 
-        console.log("[Social IPC] LinkedIn messaging sync started");
         return { success: true };
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
@@ -405,7 +387,6 @@ export function setupSocialIpcHandlers(mainWindow: BrowserWindow | null): void {
       try {
         const syncManager = getLinkedInSyncManager();
         syncManager.stop();
-        console.log("[Social IPC] LinkedIn messaging sync stopped");
         return { success: true };
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
@@ -436,7 +417,6 @@ export function setupSocialIpcHandlers(mainWindow: BrowserWindow | null): void {
           };
         }
 
-        console.log(`[Social IPC] Sending LinkedIn message to ${conversationId}...`);
         const result = await adapter.send({
           id: `ipc-${Date.now()}`, // Temporary ID for IPC-based sends
           platform: "linkedin",
@@ -446,7 +426,6 @@ export function setupSocialIpcHandlers(mainWindow: BrowserWindow | null): void {
         });
 
         if (result.success) {
-          console.log("[Social IPC] LinkedIn message sent successfully");
           return { success: true, messageId: result.messageId };
         } else {
           console.error("[Social IPC] LinkedIn send message failed:", result.error);
@@ -468,139 +447,6 @@ export function setupSocialIpcHandlers(mainWindow: BrowserWindow | null): void {
     async (): Promise<LinkedInSyncProgress> => {
       const syncManager = getLinkedInSyncManager();
       return syncManager.getProgress();
-    }
-  );
-
-  // ============================================================================
-  // Twitter/X handlers
-  // ============================================================================
-
-  /**
-   * Check Twitter login status by launching headless browser and checking for session.
-   */
-  ipcMain.handle("social:twitter:status", async (): Promise<SocialStatusResult> => {
-    try {
-      const scraper = getTwitterScraper();
-      const isLoggedIn = await scraper.checkLoginStatus();
-      return { isLoggedIn };
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      console.error("[Social IPC] Twitter status check failed:", message);
-      return { isLoggedIn: false, error: message };
-    }
-  });
-
-  /**
-   * Open Twitter login in visible browser window for user to authenticate.
-   * Waits for login completion or timeout (5 minutes).
-   */
-  ipcMain.handle("social:twitter:login", async (): Promise<SocialStatusResult> => {
-    try {
-      const scraper = getTwitterScraper();
-      console.log("[Social IPC] Opening Twitter login...");
-      const success = await scraper.loginTwitter();
-      return { isLoggedIn: success };
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      console.error("[Social IPC] Twitter login failed:", message);
-      return { isLoggedIn: false, error: message };
-    }
-  });
-
-  /**
-   * Scrape Twitter followers for a given username.
-   */
-  ipcMain.handle(
-    "social:twitter:scrapeFollowers",
-    async (
-      _event,
-      username: string,
-      options?: { maxUsers?: number }
-    ): Promise<SocialScrapeResult<TwitterUser>> => {
-      try {
-        const scraper = getTwitterScraper();
-        console.log(`[Social IPC] Scraping Twitter followers for @${username}...`);
-
-        mainWindow?.webContents.send("social:twitter:scrapeProgress", {
-          status: "starting",
-          type: "followers",
-          count: 0,
-        });
-
-        const followers = await scraper.scrapeFollowers(username, {
-          headless: false, // Show browser so user can see progress
-          maxUsers: options?.maxUsers ?? 500,
-        });
-
-        mainWindow?.webContents.send("social:twitter:scrapeProgress", {
-          status: "complete",
-          type: "followers",
-          count: followers.length,
-        });
-
-        console.log(`[Social IPC] Twitter followers scrape complete: ${followers.length} users`);
-        return { success: true, data: followers, count: followers.length };
-      } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-        console.error("[Social IPC] Twitter followers scrape failed:", message);
-
-        mainWindow?.webContents.send("social:twitter:scrapeProgress", {
-          status: "error",
-          type: "followers",
-          error: message,
-        });
-
-        return { success: false, error: message };
-      }
-    }
-  );
-
-  /**
-   * Scrape mutual followers (intersection of followers and following) for a given username.
-   * This is the most useful for PRM - people who follow you AND you follow back.
-   */
-  ipcMain.handle(
-    "social:twitter:scrapeMutuals",
-    async (
-      _event,
-      username: string,
-      options?: { maxUsers?: number }
-    ): Promise<SocialScrapeResult<TwitterUser>> => {
-      try {
-        const scraper = getTwitterScraper();
-        console.log(`[Social IPC] Scraping Twitter mutuals for @${username}...`);
-
-        mainWindow?.webContents.send("social:twitter:scrapeProgress", {
-          status: "starting",
-          type: "mutuals",
-          count: 0,
-        });
-
-        const mutuals = await scraper.getMutuals(username, {
-          headless: false, // Show browser so user can see progress
-          maxUsers: options?.maxUsers ?? 500,
-        });
-
-        mainWindow?.webContents.send("social:twitter:scrapeProgress", {
-          status: "complete",
-          type: "mutuals",
-          count: mutuals.length,
-        });
-
-        console.log(`[Social IPC] Twitter mutuals scrape complete: ${mutuals.length} users`);
-        return { success: true, data: mutuals, count: mutuals.length };
-      } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-        console.error("[Social IPC] Twitter mutuals scrape failed:", message);
-
-        mainWindow?.webContents.send("social:twitter:scrapeProgress", {
-          status: "error",
-          type: "mutuals",
-          error: message,
-        });
-
-        return { success: false, error: message };
-      }
     }
   );
 
@@ -649,7 +495,6 @@ export function setupSocialIpcHandlers(mainWindow: BrowserWindow | null): void {
    */
   ipcMain.handle("social:slack:login", async (): Promise<SlackLoginResult> => {
     try {
-      console.log("[Social IPC] Opening Slack login...");
       const result = await openSlackLogin();
 
       if (!result.success || !result.credentials) {
@@ -669,7 +514,6 @@ export function setupSocialIpcHandlers(mainWindow: BrowserWindow | null): void {
         userId: result.credentials.userId,
       });
 
-      console.log(`[Social IPC] Slack login successful: ${result.credentials.teamName} (${result.credentials.teamId})`);
       return {
         success: true,
         teamId: result.credentials.teamId,
@@ -692,12 +536,10 @@ export function setupSocialIpcHandlers(mainWindow: BrowserWindow | null): void {
     async (_event, teamId?: string): Promise<SlackSyncResult> => {
       try {
         if (teamId) {
-          console.log(`[Social IPC] Disconnecting Slack workspace ${teamId}...`);
           const manager = getSlackSyncManager({ teamId });
           await manager.disconnect();
           removeSlackSyncManager(teamId);
         } else {
-          console.log("[Social IPC] Disconnecting all Slack workspaces...");
           const managers = getAllSlackSyncManagers();
           for (const manager of managers) {
             await manager.disconnect();
@@ -706,7 +548,6 @@ export function setupSocialIpcHandlers(mainWindow: BrowserWindow | null): void {
           await clearSlackSession();
         }
 
-        console.log("[Social IPC] Slack disconnected");
         return { success: true };
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
@@ -785,20 +626,10 @@ export function setupSocialIpcHandlers(mainWindow: BrowserWindow | null): void {
     async (_event, teamId?: string): Promise<SlackSyncResult> => {
       try {
         const setupAndStartManager = async (manager: ReturnType<typeof getSlackSyncManager>) => {
-          manager.setTokenProvider(getValidAccessToken);
-          manager.setForceRefreshCallback(forceRefreshToken);
-
-          // Set up progress callback with team ID in the event
+          // Set up progress callback with team ID in the event (uses centralized auth from auth-manager)
           manager.setProgressCallback((progress) => {
             mainWindow?.webContents.send("social:slack:messagingSyncProgress", {
               ...progress,
-              teamId: manager.getTeamId(),
-            });
-          });
-
-          manager.setAuthInvalidCallback(() => {
-            console.log(`[Social IPC] Slack auth invalid for ${manager.getTeamId()}, stopping sync`);
-            mainWindow?.webContents.send("social:slack:authInvalid", {
               teamId: manager.getTeamId(),
             });
           });
@@ -807,11 +638,9 @@ export function setupSocialIpcHandlers(mainWindow: BrowserWindow | null): void {
         };
 
         if (teamId) {
-          console.log(`[Social IPC] Starting Slack messaging sync for ${teamId}...`);
           const manager = getSlackSyncManager({ teamId });
           await setupAndStartManager(manager);
         } else {
-          console.log("[Social IPC] Starting Slack messaging sync for all workspaces...");
           const allCredentials = getAllSlackCredentials();
           for (const creds of allCredentials) {
             const manager = getSlackSyncManager({ teamId: creds.teamId });
@@ -819,7 +648,6 @@ export function setupSocialIpcHandlers(mainWindow: BrowserWindow | null): void {
           }
         }
 
-        console.log("[Social IPC] Slack messaging sync started");
         return { success: true };
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
@@ -840,13 +668,11 @@ export function setupSocialIpcHandlers(mainWindow: BrowserWindow | null): void {
         if (teamId) {
           const manager = getSlackSyncManager({ teamId });
           manager.stop();
-          console.log(`[Social IPC] Slack messaging sync stopped for ${teamId}`);
         } else {
           const managers = getAllSlackSyncManagers();
           for (const manager of managers) {
             manager.stop();
           }
-          console.log("[Social IPC] Slack messaging sync stopped for all workspaces");
         }
         return { success: true };
       } catch (error) {
@@ -870,8 +696,6 @@ export function setupSocialIpcHandlers(mainWindow: BrowserWindow | null): void {
 
   // Slack progress listeners
   // Note: The renderer subscribes via onSlackMessagingSyncProgress
-
-  console.log("[Social IPC] Social scraper IPC handlers registered");
 }
 
 /**
@@ -889,15 +713,7 @@ export async function cleanupSocialScrapers(): Promise<void> {
       manager.stop();
     }
 
-    if (linkedInScraper) {
-      await linkedInScraper.closeBrowser();
-      linkedInScraper = null;
-    }
-    if (twitterScraper) {
-      await twitterScraper.closeBrowser();
-      twitterScraper = null;
-    }
-    console.log("[Social IPC] Social scrapers cleaned up");
+    linkedInScraper = null;
   } catch (error) {
     console.error("[Social IPC] Error cleaning up scrapers:", error);
   }

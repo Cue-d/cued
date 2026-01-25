@@ -9,9 +9,9 @@ import {
 import * as Haptics from "expo-haptics";
 import { router } from "expo-router";
 import { SymbolView } from "expo-symbols";
+import { useQuery, useMutation } from "convex/react";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Uniwind, useUniwind } from "uniwind";
-import { useQuery, useMutation } from "convex/react";
 import { api } from "@prm/convex";
 import { getInitials } from "@prm/shared";
 import { getRedirectUri } from "@/lib/auth";

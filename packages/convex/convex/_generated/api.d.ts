@@ -16,9 +16,13 @@ import type * as actions from "../actions.js";
 import type * as contactResolution from "../contactResolution.js";
 import type * as contacts from "../contacts.js";
 import type * as crons from "../crons.js";
+import type * as debug from "../debug.js";
+import type * as debug_cleanupDuplicateHandles from "../debug/cleanupDuplicateHandles.js";
+import type * as debug_findDuplicateHandles from "../debug/findDuplicateHandles.js";
 import type * as files from "../files.js";
 import type * as integrations from "../integrations.js";
 import type * as lib_auth from "../lib/auth.js";
+import type * as lib_cursors from "../lib/cursors.js";
 import type * as memories from "../memories.js";
 import type * as messageQueue from "../messageQueue.js";
 import type * as messages from "../messages.js";
@@ -26,11 +30,13 @@ import type * as presence from "../presence.js";
 import type * as reset from "../reset.js";
 import type * as search from "../search.js";
 import type * as sync from "../sync.js";
+import type * as sync_filters from "../sync/filters.js";
 import type * as sync_gmail from "../sync/gmail.js";
 import type * as sync_imessage from "../sync/imessage.js";
 import type * as sync_linkedin from "../sync/linkedin.js";
 import type * as sync_shared from "../sync/shared.js";
 import type * as sync_slack from "../sync/slack.js";
+import type * as syncCursors from "../syncCursors.js";
 import type * as users from "../users.js";
 
 import type {
@@ -48,9 +54,13 @@ declare const fullApi: ApiFromModules<{
   contactResolution: typeof contactResolution;
   contacts: typeof contacts;
   crons: typeof crons;
+  debug: typeof debug;
+  "debug/cleanupDuplicateHandles": typeof debug_cleanupDuplicateHandles;
+  "debug/findDuplicateHandles": typeof debug_findDuplicateHandles;
   files: typeof files;
   integrations: typeof integrations;
   "lib/auth": typeof lib_auth;
+  "lib/cursors": typeof lib_cursors;
   memories: typeof memories;
   messageQueue: typeof messageQueue;
   messages: typeof messages;
@@ -58,11 +68,13 @@ declare const fullApi: ApiFromModules<{
   reset: typeof reset;
   search: typeof search;
   sync: typeof sync;
+  "sync/filters": typeof sync_filters;
   "sync/gmail": typeof sync_gmail;
   "sync/imessage": typeof sync_imessage;
   "sync/linkedin": typeof sync_linkedin;
   "sync/shared": typeof sync_shared;
   "sync/slack": typeof sync_slack;
+  syncCursors: typeof syncCursors;
   users: typeof users;
 }>;
 

@@ -1,8 +1,9 @@
 "use client";
 
 import { useMemo } from "react";
+import Link from "next/link";
 import { useQuery, useMutation } from "convex/react";
-import { BrainIcon, ClockIcon, SendIcon } from "lucide-react";
+import { BrainIcon, ClockIcon, SendIcon, WrenchIcon, ChevronRightIcon } from "lucide-react";
 import { api } from "@prm/convex";
 import { getInitials } from "@prm/shared";
 import {
@@ -269,6 +270,34 @@ export default function SettingsPage() {
                 </button>
               </div>
             </div>
+          </section>
+
+          {/* Debug Tools Section */}
+          <section>
+            <div className="mb-4">
+              <h2 className="text-sm font-medium text-foreground">Developer</h2>
+              <p className="text-sm text-muted-foreground">
+                Tools for debugging and testing
+              </p>
+            </div>
+
+            <Link
+              href="/settings/debug"
+              className="flex items-center justify-between rounded-lg border bg-card p-4 hover:bg-muted/50 transition-colors"
+            >
+              <div className="flex items-center gap-3">
+                <div className="flex size-9 items-center justify-center rounded-md bg-muted">
+                  <WrenchIcon className="size-4 text-muted-foreground" />
+                </div>
+                <div>
+                  <p className="text-sm font-medium">Debug Tools</p>
+                  <p className="text-xs text-muted-foreground">
+                    Reset sync data and manage integrations
+                  </p>
+                </div>
+              </div>
+              <ChevronRightIcon className="size-4 text-muted-foreground" />
+            </Link>
           </section>
 
           {/* Version Info */}

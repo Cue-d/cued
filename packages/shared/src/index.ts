@@ -42,3 +42,14 @@ export type {
   QueuedMessage,
   PlatformAdapter,
 } from "./types/platform-adapter.js";
+
+// LinkedIn URN utilities
+export {
+  extractIdFromURN,
+  normalizeConversationURN,
+  normalizeMemberURN,
+  isLinkedInURN,
+  isConversationURN,
+  isMemberURN,
+  urnIdsMatch,
+} from "./linkedin.js";

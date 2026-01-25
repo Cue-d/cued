@@ -9,7 +9,6 @@ import {
   isUrgencySpam,
   isPromotional,
   isBankAlert,
-  isPhishing,
   shouldSkipLlmAnalysis,
 } from "./message-filter";
 
@@ -165,18 +164,6 @@ describe("isBankAlert", () => {
 
   it("does not filter contacts", () => {
     expect(isBankAlert("I made a payment of $50", true).shouldSkip).toBe(false);
-  });
-});
-
-describe("isPhishing", () => {
-  it("detects phishing from non-contacts", () => {
-    expect(isPhishing("Verify your account at secure-bank.com", false).shouldSkip).toBe(true);
-    expect(isPhishing("Confirm your password by clicking here", false).shouldSkip).toBe(true);
-    expect(isPhishing("Update your payment information", false).shouldSkip).toBe(true);
-  });
-
-  it("does not filter contacts", () => {
-    expect(isPhishing("Can you verify your account details?", true).shouldSkip).toBe(false);
   });
 });
 

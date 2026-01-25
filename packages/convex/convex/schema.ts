@@ -16,7 +16,8 @@ export const handleTypeValidator = v.union(
   v.literal("phone"),
   v.literal("email"),
   v.literal("slack_id"),
-  v.literal("linkedin_url"),
+  v.literal("linkedin_handle"),
+  v.literal("linkedin_urn"),
   v.literal("twitter_handle")
 );
 
@@ -72,6 +73,11 @@ export const messageStatusValidator = v.union(
   v.literal("failed")
 );
 
+export const syncModeValidator = v.union(
+  v.literal("full"),
+  v.literal("incremental")
+);
+
 const schema = defineSchema({
   users: defineTable({
     workosUserId: v.string(),
@@ -93,24 +99,15 @@ const schema = defineSchema({
   integrations: defineTable({
     userId: v.id("users"),
     platform: platformValidator,
-    pipedreamAccountId: v.optional(v.string()),
     nangoConnectionId: v.optional(v.string()),
     connectedAt: v.optional(v.number()),
     // Slack-specific: team ID for multi-workspace support
     slackTeamId: v.optional(v.string()),
-    syncState: v.object({
-      isConnected: v.boolean(),
-      lastSyncAt: v.optional(v.number()),
-      lastSyncCursor: v.optional(v.string()),
-      lastError: v.optional(v.string()),
-      totalMessagesSynced: v.optional(v.number()),
-      totalContactsSynced: v.optional(v.number()),
-      syncVersion: v.optional(v.number()),
-      lastContactsSyncAt: v.optional(v.number()),
-      lastMemoryProcessedAt: v.optional(v.number()),
-      totalMessagesProcessedForMemory: v.optional(v.number()),
-      totalMemoriesExtracted: v.optional(v.number()),
-    }),
+    // LinkedIn-specific: user's URN for isFromMe detection
+    linkedInUserURN: v.optional(v.string()),
+    // Connection status (not sync status - sync state lives in syncCursors)
+    isConnected: v.boolean(),
+    lastError: v.optional(v.string()),
   })
     .index("by_user", ["userId"])
     .index("by_user_platform", ["userId", "platform"])
@@ -162,6 +159,11 @@ const schema = defineSchema({
     lastMessageAt: v.optional(v.number()), // timestamp in milliseconds
     unreadCount: v.number(),
     displayName: v.optional(v.string()),
+    // For Slack channels: true if user has sent a message or reacted.
+    // DMs are always considered participated. Channels without participation are hidden from inbox.
+    userParticipated: v.optional(v.boolean()),
+    // For multi-workspace platforms (Slack teamId, Gmail email address)
+    workspaceId: v.optional(v.string()),
   })
     .index("by_user", ["userId"])
     .index("by_user_platform", ["userId", "platform"])
@@ -346,6 +348,35 @@ const schema = defineSchema({
     appVersion: v.optional(v.string()),
   }).index("by_user_device", ["userId", "deviceType"]),
 
+  // Cloud sync cursors for multi-device sync support
+  // This is the single source of truth for sync state (replaces integrations.syncState)
+  syncCursors: defineTable({
+    userId: v.id("users"),
+    platform: platformValidator,
+    workspaceId: v.optional(v.string()), // e.g., Gmail email address, Slack teamId
+    cursorData: v.any(), // Platform-specific cursor data (historyId, timestamp, etc.)
+    lastSyncAt: v.number(),
+    syncMode: syncModeValidator,
+    // For resumable full syncs (e.g., iMessage DESC pagination)
+    fullSyncProgress: v.optional(
+      v.object({
+        phase: v.string(), // e.g., "messages", "contacts"
+        offset: v.number(), // Current position in the full sync
+      })
+    ),
+    // Sync stats (moved from integrations.syncState)
+    totalMessagesSynced: v.optional(v.number()),
+    totalContactsSynced: v.optional(v.number()),
+    lastContactsSyncAt: v.optional(v.number()),
+    syncVersion: v.optional(v.number()),
+    // Memory processing stats
+    lastMemoryProcessedAt: v.optional(v.number()),
+    totalMessagesProcessedForMemory: v.optional(v.number()),
+    totalMemoriesExtracted: v.optional(v.number()),
+  })
+    .index("by_user_platform", ["userId", "platform"])
+    .index("by_user_platform_workspace", ["userId", "platform", "workspaceId"]),
+
   // Unified message queue for all platforms (replaces pendingSends)
   messageQueue: defineTable({
     userId: v.id("users"),
@@ -361,6 +392,8 @@ const schema = defineSchema({
     // References
     conversationId: v.optional(v.id("conversations")),
     actionId: v.optional(v.id("actions")), // Link to action that created this
+    // For multi-workspace platforms (Slack teamId, Gmail email address)
+    workspaceId: v.optional(v.string()),
     // Queue status
     status: v.union(
       v.literal("pending"), // Waiting to be sent (in undo window)

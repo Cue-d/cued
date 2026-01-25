@@ -15,8 +15,7 @@ export type SkipReason =
   | "carrier_notification"
   | "urgency_spam_unknown_sender"
   | "promotional_unknown_sender"
-  | "bank_transaction_alert"
-  | "phishing_attempt";
+  | "bank_transaction_alert";
 
 /** Result of applying message filters */
 export interface FilterResult {
@@ -76,10 +75,6 @@ const PROMOTIONAL_PATTERN =
 /** Bank/transaction alerts: Automated banking notifications */
 const BANK_ALERT_PATTERN =
   /(card ending|transaction.{0,20}\$\d|purchase of \$|direct deposit|withdrawal.{0,20}\$|balance.{0,20}\$|payment.{0,20}(received|processed|due))/i;
-
-/** Phishing: Credential harvesting attempts */
-const PHISHING_PATTERN =
-  /(verify|confirm|update).{0,30}(account|password|payment|card|information|identity)|(click|tap|visit).{0,20}(link|here|below).{0,20}(verify|confirm|update|secure)/i;
 
 /** Tracking number pattern (10-30 alphanumeric characters) */
 const TRACKING_NUMBER_PATTERN = /\b[A-Z0-9]{10,30}\b/;
@@ -193,18 +188,6 @@ export function isBankAlert(
   return noSkip();
 }
 
-/** Filter phishing attempts (non-contacts only) */
-export function isPhishing(
-  text?: string | null,
-  isContact = false
-): FilterResult {
-  if (isContact) return noSkip();
-  if (text && PHISHING_PATTERN.test(text)) {
-    return { shouldSkip: true, reason: "phishing_attempt", confidence: 0.9 };
-  }
-  return noSkip();
-}
-
 // =============================================================================
 // MAIN ENTRY POINT
 // =============================================================================
@@ -250,9 +233,6 @@ export function shouldSkipLlmAnalysis(input: FilterInput): FilterResult {
   if (result.shouldSkip) return result;
 
   result = isBankAlert(text, isContact);
-  if (result.shouldSkip) return result;
-
-  result = isPhishing(text, isContact);
   if (result.shouldSkip) return result;
 
   // Tier 4: Lower confidence (only for non-contacts)

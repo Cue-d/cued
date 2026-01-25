@@ -5,13 +5,24 @@
 
 import type { Infer } from "convex/values";
 import { v } from "convex/values";
+import {
+  normalizeConversationURN,
+  normalizeMemberURN,
+  urnIdsMatch,
+} from "@prm/shared";
 import type { Doc, Id } from "../_generated/dataModel";
 import type { MutationCtx } from "../_generated/server";
 import {
+  getOrCreateContact,
   scheduleIncomingMessageEvents,
+  scheduleOutgoingMessageEvents,
   SEVEN_DAYS_MS,
   getOrCreateIntegration,
-  normalizeLinkedInUrl,
+  normalizeLinkedInHandle,
+  upsertSyncCursor,
+  incrementSyncCursorStat,
+  BATCH_SIZE,
+  logSyncError,
 } from "./shared";
 
 // ============================================================================
@@ -101,6 +112,7 @@ export const linkedInMessageInput = v.object({
  */
 export const linkedInConversationsBatchInput = v.object({
   conversations: v.array(linkedInConversationInput),
+  userURN: v.optional(v.string()), // User's LinkedIn URN for filtering self from title
 });
 
 /**
@@ -108,6 +120,7 @@ export const linkedInConversationsBatchInput = v.object({
  */
 export const linkedInMessagesBatchInput = v.object({
   messages: v.array(linkedInMessageInput),
+  userURN: v.optional(v.string()), // User's LinkedIn URN for isFromMe detection
 });
 
 // ============================================================================
@@ -131,7 +144,8 @@ export type LinkedInMessageInput = Infer<typeof linkedInMessageInput>;
 export async function syncLinkedInConversationsInternal(
   ctx: MutationCtx,
   userId: Id<"users">,
-  conversations: LinkedInConversationInput[]
+  conversations: LinkedInConversationInput[],
+  userURN?: string // User's LinkedIn URN for filtering self from title
 ) {
   const result = {
     conversationsCount: 0,
@@ -141,8 +155,10 @@ export async function syncLinkedInConversationsInternal(
     errors: [] as string[],
   };
 
-  // Batch fetch existing conversations by entityURN
-  const conversationURNs = conversations.map((c) => c.entityURN);
+  // Batch fetch existing conversations by entityURN (normalized)
+  const conversationURNs = conversations.map((c) =>
+    normalizeConversationURN(c.entityURN)
+  );
   const existingConversations = await batchFetchLinkedInConversations(
     ctx,
     userId,
@@ -152,13 +168,26 @@ export async function syncLinkedInConversationsInternal(
     existingConversations.map((c) => [c.platformConversationId, c])
   );
 
+  // Get user URN for filtering self from participant list
+  const linkedInUserURN = await getUserLinkedInURN(ctx, userId, userURN);
+
   for (const conv of conversations) {
     try {
-      const existing = conversationMap.get(conv.entityURN);
+      // Normalize conversation URN to canonical format
+      const normalizedURN = normalizeConversationURN(conv.entityURN);
+      const existing = conversationMap.get(normalizedURN);
 
-      // Resolve participants to contact IDs
+      // Resolve participants to contact IDs (filter out self)
       const participantContactIds: Id<"contacts">[] = [];
+      const otherParticipantNames: string[] = [];
       for (const participant of conv.participants) {
+        // Skip self when building participant list for display
+        // Use URN ID comparison since LinkedIn uses different prefixes in different contexts
+        const isSelf = urnIdsMatch(participant.entityURN, linkedInUserURN);
+        if (isSelf) {
+          continue;
+        }
+
         const contactId = await getOrCreateLinkedInContact(
           ctx,
           userId,
@@ -166,27 +195,46 @@ export async function syncLinkedInConversationsInternal(
         );
         participantContactIds.push(contactId);
         result.participantsLinked++;
+
+        // Collect names for display name generation
+        const name = `${participant.firstName} ${participant.lastName}`.trim();
+        if (name) {
+          otherParticipantNames.push(name);
+        }
+      }
+
+      // Build display name from other participants (not self)
+      // For DMs: just the other person's name
+      // For groups: comma-separated names or fallback to original title
+      let displayName: string;
+      if (!conv.groupChat && otherParticipantNames.length === 1) {
+        displayName = otherParticipantNames[0];
+      } else if (otherParticipantNames.length > 0) {
+        displayName = otherParticipantNames.join(", ");
+      } else {
+        displayName = conv.title || "LinkedIn Conversation";
       }
 
       if (existing) {
         // Update existing conversation
+        // Note: lastMessageAt is managed by message sync, not here
+        // Setting it here would overwrite correct values with lastActivityAt
         await ctx.db.patch(existing._id, {
-          displayName: conv.title || existing.displayName,
-          lastMessageAt: conv.lastActivityAt,
+          displayName: displayName || existing.displayName,
           unreadCount: conv.unreadCount,
           participantContactIds,
         });
         result.updatedConversations++;
       } else {
-        // Create new conversation
+        // Create new conversation (use normalized URN)
         await ctx.db.insert("conversations", {
           userId,
           platform: "linkedin",
-          platformConversationId: conv.entityURN,
+          platformConversationId: normalizedURN,
           conversationType: conv.groupChat ? "group" : "dm",
           participantContactIds,
           unreadCount: conv.unreadCount,
-          displayName: conv.title,
+          displayName,
           lastMessageAt: conv.lastActivityAt,
         });
         result.newConversations++;
@@ -194,19 +242,19 @@ export async function syncLinkedInConversationsInternal(
 
       result.conversationsCount++;
     } catch (e) {
-      result.errors.push(`Failed to sync conversation ${conv.entityURN}: ${e}`);
+      result.errors.push(logSyncError("LinkedIn", "sync conversation", conv.entityURN, e));
     }
   }
 
-  // Update integration sync state
+  // Update integration with userURN if provided and clear any error
   const integration = await getOrCreateIntegration(ctx, userId, "linkedin");
   await ctx.db.patch(integration._id, {
-    syncState: {
-      ...integration.syncState,
-      lastSyncAt: Date.now(),
-      lastError: undefined,
-    },
+    ...(userURN && { linkedInUserURN: userURN }),
+    lastError: undefined,
   });
+
+  // Update sync cursor with lastSyncAt
+  await upsertSyncCursor(ctx, userId, "linkedin", {});
 
   return result;
 }
@@ -218,7 +266,8 @@ export async function syncLinkedInConversationsInternal(
 export async function syncLinkedInMessagesInternal(
   ctx: MutationCtx,
   userId: Id<"users">,
-  messages: LinkedInMessageInput[]
+  messages: LinkedInMessageInput[],
+  userURN?: string // User's LinkedIn URN for isFromMe detection
 ) {
   const result = {
     messagesCount: 0,
@@ -231,12 +280,16 @@ export async function syncLinkedInMessagesInternal(
     return result;
   }
 
-  // Group messages by conversation for efficient processing
+  // Get user URN for isFromMe detection
+  const linkedInUserURN = await getUserLinkedInURN(ctx, userId, userURN);
+
+  // Group messages by conversation for efficient processing (use normalized URNs)
   const messagesByConversation = new Map<string, LinkedInMessageInput[]>();
   for (const msg of messages) {
-    const existing = messagesByConversation.get(msg.conversationURN) ?? [];
+    const normalizedConvURN = normalizeConversationURN(msg.conversationURN);
+    const existing = messagesByConversation.get(normalizedConvURN) ?? [];
     existing.push(msg);
-    messagesByConversation.set(msg.conversationURN, existing);
+    messagesByConversation.set(normalizedConvURN, existing);
   }
 
   // Batch fetch existing conversations
@@ -248,6 +301,12 @@ export async function syncLinkedInMessagesInternal(
   );
   const conversationMap = new Map(
     existingConversations.map((c) => [c.platformConversationId, c._id])
+  );
+  // Track existing lastMessageAt to avoid overwriting with older timestamps
+  const existingLastMessageAt = new Map(
+    existingConversations
+      .filter((c) => c.lastMessageAt !== undefined)
+      .map((c) => [c._id, c.lastMessageAt!])
   );
 
   // Batch fetch existing messages for deduplication
@@ -261,10 +320,10 @@ export async function syncLinkedInMessagesInternal(
     existingMessages.map((m) => m.platformMessageId)
   );
 
-
-  // Track conversations with recent incoming messages for action analysis
+  // Track conversations with recent incoming/outgoing messages for action analysis
   const cutoff = Date.now() - SEVEN_DAYS_MS;
   const incomingConvos = new Set<Id<"conversations">>();
+  const outgoingConvos = new Set<Id<"conversations">>();
 
   for (const [conversationURN, convMessages] of messagesByConversation) {
     let conversationId = conversationMap.get(conversationURN);
@@ -302,8 +361,10 @@ export async function syncLinkedInMessagesInternal(
           continue;
         }
 
-        // TODO: Implement isFromMe detection when user's LinkedIn URN is stored
-        const isFromMe = false;
+        // Detect if message is from the user by comparing URN IDs
+        // LinkedIn uses different URN prefixes in different contexts (fsd_profile vs fs_miniProfile)
+        // but the ID portion is consistent
+        const isFromMe = urnIdsMatch(msg.senderURN, linkedInUserURN);
 
         // Resolve sender to contact (if not from me)
         let senderContactId: Id<"contacts"> | undefined;
@@ -317,9 +378,14 @@ export async function syncLinkedInMessagesInternal(
             msg.senderProfileUrl
           );
 
-          // Track for action analysis if recent
+          // Track for action analysis if recent incoming
           if (msg.deliveredAt >= cutoff) {
             hasRecentIncoming = true;
+          }
+        } else {
+          // Track for action analysis if recent outgoing (auto-complete)
+          if (msg.deliveredAt >= cutoff) {
+            outgoingConvos.add(conversationId);
           }
         }
 
@@ -344,16 +410,22 @@ export async function syncLinkedInMessagesInternal(
           latestMessage = { text: msg.text, timestamp: msg.deliveredAt };
         }
       } catch (e) {
-        result.errors.push(`Failed to sync message ${msg.entityURN}: ${e}`);
+        result.errors.push(logSyncError("LinkedIn", "sync message", msg.entityURN, e));
       }
     }
 
-    // Update conversation lastMessage
+    // Update conversation lastMessage (only if newer than existing)
+    // This prevents older message batches from overwriting newer timestamps
     if (latestMessage) {
-      await ctx.db.patch(conversationId, {
-        lastMessageText: latestMessage.text,
-        lastMessageAt: latestMessage.timestamp,
-      });
+      const existingTimestamp = existingLastMessageAt.get(conversationId);
+      if (existingTimestamp === undefined || latestMessage.timestamp > existingTimestamp) {
+        await ctx.db.patch(conversationId, {
+          lastMessageText: latestMessage.text,
+          lastMessageAt: latestMessage.timestamp,
+        });
+        // Update tracking map for subsequent batches within same sync cycle
+        existingLastMessageAt.set(conversationId, latestMessage.timestamp);
+      }
     }
 
     // Track for action analysis
@@ -362,20 +434,19 @@ export async function syncLinkedInMessagesInternal(
     }
   }
 
-  // Schedule action analysis for conversations with new incoming messages
+  // Schedule action analysis for conversations with new messages
   await scheduleIncomingMessageEvents(ctx, userId, incomingConvos, "linkedin");
+  await scheduleOutgoingMessageEvents(ctx, userId, outgoingConvos);
 
-  // Update integration sync state with message count
+  // Update integration with userURN if provided and clear any error
   const integration = await getOrCreateIntegration(ctx, userId, "linkedin");
   await ctx.db.patch(integration._id, {
-    syncState: {
-      ...integration.syncState,
-      lastSyncAt: Date.now(),
-      lastError: undefined,
-      totalMessagesSynced:
-        (integration.syncState.totalMessagesSynced ?? 0) + result.newMessages,
-    },
+    ...(userURN && { linkedInUserURN: userURN }),
+    lastError: undefined,
   });
+
+  // Update sync cursor with stats
+  await incrementSyncCursorStat(ctx, userId, "linkedin", "totalMessagesSynced", result.newMessages);
 
   return result;
 }
@@ -385,60 +456,63 @@ export async function syncLinkedInMessagesInternal(
 // ============================================================================
 
 /**
+ * Get the user's LinkedIn URN, either from the provided parameter or from the integration record.
+ */
+async function getUserLinkedInURN(
+  ctx: MutationCtx,
+  userId: Id<"users">,
+  providedURN?: string
+): Promise<string | undefined> {
+  if (providedURN) return providedURN;
+
+  const integration = await ctx.db
+    .query("integrations")
+    .withIndex("by_user_platform", (q) =>
+      q.eq("userId", userId).eq("platform", "linkedin")
+    )
+    .unique();
+  return integration?.linkedInUserURN;
+}
+
+/**
  * Get or create a contact for a LinkedIn participant.
- * Links contact by LinkedIn profile URL.
+ * Always stores URN as stable identifier, plus normalized slug if profileUrl available.
+ * This prevents duplicate contacts when profileUrl becomes available after initial sync.
+ * Uses unified getOrCreateContact from shared.ts.
  */
 async function getOrCreateLinkedInContact(
   ctx: MutationCtx,
   userId: Id<"users">,
   participant: LinkedInParticipantInput
 ): Promise<Id<"contacts">> {
-  // Normalize profile URL for consistent lookups
-  const normalizedHandle = normalizeLinkedInUrl(participant.profileUrl);
+  // Normalize and store URN as stable identifier (for deduplication)
+  const normalizedURN = normalizeMemberURN(participant.entityURN).toLowerCase();
+  const handles: { value: string; type: "linkedin_urn" | "linkedin_handle" }[] = [
+    { value: normalizedURN, type: "linkedin_urn" },
+  ];
 
-  // Check if we already have a handle for this LinkedIn user
-  // NOTE: Using .first() instead of .unique() to handle duplicates gracefully
-  const existingHandle = await ctx.db
-    .query("contactHandles")
-    .withIndex("by_user_handle", (q) =>
-      q.eq("userId", userId).eq("handle", normalizedHandle)
-    )
-    .first();
-
-  if (existingHandle) {
-    // Update contact info if we have better data
-    const existingContact = await ctx.db.get(existingHandle.contactId);
-    if (existingContact) {
-      const displayName = `${participant.firstName} ${participant.lastName}`.trim();
-      if (displayName && existingContact.displayName !== displayName) {
-        await ctx.db.patch(existingHandle.contactId, { displayName });
-      }
-    }
-    return existingHandle.contactId;
+  // If profile URL available, also store normalized slug (for display)
+  if (participant.profileUrl) {
+    const normalizedSlug = normalizeLinkedInHandle(participant.profileUrl);
+    handles.push({ value: normalizedSlug, type: "linkedin_handle" });
   }
 
-  // Create new contact
   const displayName = `${participant.firstName} ${participant.lastName}`.trim();
-  const contactId = await ctx.db.insert("contacts", {
+  const result = await getOrCreateContact(
+    ctx,
     userId,
-    displayName: displayName || "LinkedIn User",
-  });
-
-  // Create handle for LinkedIn profile URL
-  await ctx.db.insert("contactHandles", {
-    userId,
-    contactId,
-    handleType: "linkedin_url",
-    handle: normalizedHandle,
-    platform: "linkedin",
-  });
-
-  return contactId;
+    "linkedin",
+    handles,
+    displayName || "LinkedIn User"
+  );
+  return result.contactId;
 }
 
 /**
- * Get or create a contact from sender info (preferring profileUrl over URN).
- * Used when syncing messages - prefers profileUrl for deduplication with connections.
+ * Get or create a contact from sender info (used in message sync).
+ * Always stores URN as stable identifier, plus normalized slug if profileUrl available.
+ * This prevents duplicate contacts when profileUrl becomes available after initial sync.
+ * Uses unified getOrCreateContact from shared.ts.
  */
 async function getOrCreateLinkedInContactByURN(
   ctx: MutationCtx,
@@ -448,54 +522,28 @@ async function getOrCreateLinkedInContactByURN(
   lastName: string,
   profileUrl?: string
 ): Promise<Id<"contacts">> {
-  // Prefer profile URL over URN for handle (matches connections sync format)
+  // Normalize and store URN as stable identifier (for deduplication)
+  const normalizedURN = normalizeMemberURN(senderURN).toLowerCase();
+  const handles: { value: string; type: "linkedin_urn" | "linkedin_handle" }[] = [
+    { value: normalizedURN, type: "linkedin_urn" },
+  ];
+
+  // If profile URL available, also store normalized slug (for display)
   const hasProfileUrl = profileUrl && profileUrl.trim().length > 0;
-  const normalizedHandle = hasProfileUrl
-    ? normalizeLinkedInUrl(profileUrl)
-    : senderURN.toLowerCase();
-
-  // Check if we already have a handle for this user
-  // NOTE: Using .first() instead of .unique() to handle duplicates gracefully
-  const existingHandle = await ctx.db
-    .query("contactHandles")
-    .withIndex("by_user_handle", (q) =>
-      q.eq("userId", userId).eq("handle", normalizedHandle)
-    )
-    .first();
-
-  if (existingHandle) {
-    // Update display name if we have a better one
-    const existingContact = await ctx.db.get(existingHandle.contactId);
-    if (existingContact) {
-      const displayName = `${firstName} ${lastName}`.trim();
-      if (
-        displayName &&
-        existingContact.displayName !== displayName &&
-        existingContact.displayName === senderURN
-      ) {
-        await ctx.db.patch(existingHandle.contactId, { displayName });
-      }
-    }
-    return existingHandle.contactId;
+  if (hasProfileUrl) {
+    const normalizedSlug = normalizeLinkedInHandle(profileUrl);
+    handles.push({ value: normalizedSlug, type: "linkedin_handle" });
   }
 
-  // Create new contact
   const displayName = `${firstName} ${lastName}`.trim();
-  const contactId = await ctx.db.insert("contacts", {
+  const result = await getOrCreateContact(
+    ctx,
     userId,
-    displayName: displayName || senderURN,
-  });
-
-  // Create handle (URL preferred, fallback to URN)
-  await ctx.db.insert("contactHandles", {
-    userId,
-    contactId,
-    handleType: "linkedin_url",
-    handle: normalizedHandle,
-    platform: "linkedin",
-  });
-
-  return contactId;
+    "linkedin",
+    handles,
+    displayName || senderURN
+  );
+  return result.contactId;
 }
 
 // ============================================================================
@@ -512,9 +560,8 @@ async function batchFetchLinkedInConversations(
 ): Promise<Doc<"conversations">[]> {
   const results: Doc<"conversations">[] = [];
 
-  const batchSize = 50;
-  for (let i = 0; i < conversationURNs.length; i += batchSize) {
-    const batch = conversationURNs.slice(i, i + batchSize);
+  for (let i = 0; i < conversationURNs.length; i += BATCH_SIZE) {
+    const batch = conversationURNs.slice(i, i + BATCH_SIZE);
     const promises = batch.map((urn) =>
       ctx.db
         .query("conversations")
@@ -545,9 +592,8 @@ async function batchFetchLinkedInMessages(
 ): Promise<Doc<"messages">[]> {
   const results: Doc<"messages">[] = [];
 
-  const batchSize = 50;
-  for (let i = 0; i < messageURNs.length; i += batchSize) {
-    const batch = messageURNs.slice(i, i + batchSize);
+  for (let i = 0; i < messageURNs.length; i += BATCH_SIZE) {
+    const batch = messageURNs.slice(i, i + BATCH_SIZE);
     const promises = batch.map((urn) =>
       ctx.db
         .query("messages")

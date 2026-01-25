@@ -28,13 +28,14 @@
 
 import { ConvexHttpClient } from 'convex/browser'
 import { api } from '@prm/convex'
-import { electronEnv } from '@prm/env/electron'
 import {
   SlackClient,
   isTokenExpiredError,
   type SlackConversation,
   type SlackMessage,
 } from '@prm/integrations'
+import { isAuthError, withAuthRetry } from '../auth/auth-utils'
+import { getAuthState } from '../auth/auth-manager'
 import {
   getSlackCredentials,
   getAllSlackCredentials,
@@ -42,9 +43,16 @@ import {
   deleteSlackCredentials,
   type SlackStoredCredentials,
 } from '../auth/slack-credentials'
-import { app } from 'electron'
-import * as fs from 'fs'
-import * as path from 'path'
+import { getSyncDebugLogger } from './sync-debug-logger'
+import {
+  createConvexClient,
+  loadCursor,
+  saveCursor,
+  clearCursor,
+  createSyncGuard,
+  createAuthRetryOptions,
+  setConvexAuth,
+} from './shared'
 
 // ============================================================================
 // Constants
@@ -53,13 +61,31 @@ import * as path from 'path'
 /** Polling interval: 30 seconds */
 const POLL_INTERVAL_MS = 30 * 1000
 
-/** Convex URL from environment */
-const CONVEX_URL = electronEnv.CONVEX_URL
-
+/** Conversations to fetch per page from Slack API (max 1000, we use 100 for reliability) */
 const CONVERSATIONS_PER_PAGE = 100
+
+/** Messages to fetch per page within a conversation (Slack default limit) */
 const MAX_MESSAGES_PER_CONVERSATION = 100
-const MAX_TOTAL_CONVERSATIONS = 0 // 0 = unlimited
-const MESSAGE_HISTORY_YEARS = 2
+
+/**
+ * Maximum pages of messages to fetch per conversation.
+ * At 100 messages/page, this caps at 1000 messages per conversation.
+ * This prevents infinite loops on very active channels and keeps sync times reasonable.
+ * Older messages can be fetched via on-demand history loading if needed.
+ */
+const MAX_MESSAGE_PAGES_PER_CONVERSATION = 10
+
+/** 0 = unlimited conversations. Set to a positive number to limit for testing. */
+const MAX_TOTAL_CONVERSATIONS = 0
+
+/**
+ * Years of message history to sync on initial full sync.
+ * 1 year provides good historical context for relationship insights while
+ * keeping initial sync time under 10 minutes for typical workspaces.
+ * Older messages won't appear in the UI but that's acceptable - recent
+ * context is what matters for relationship management.
+ */
+const MESSAGE_HISTORY_YEARS = 1
 
 /** Maximum number of Slack workspaces that can be connected */
 const MAX_WORKSPACES = 10
@@ -87,62 +113,26 @@ function getOldestMessageTimestamp(): string {
 }
 
 // ============================================================================
-// Cursor Persistence (incremental sync across app restarts)
+// Cursor State (synced to cloud via Convex)
 // ============================================================================
+
+/** State for resumable full sync - allows continuing after crash/restart */
+export interface SlackFullSyncState {
+  /** Position in conversation list pagination */
+  conversationListCursor: string | null
+  /** Conversations that have been fully synced (messages fetched) */
+  completedConversations: string[]
+  /** Total conversations seen so far (for progress tracking) */
+  totalConversationsSeen: number
+}
 
 export interface SlackCursorState {
   conversationCursors: Record<string, string>
   conversationListCursor: string | null
   lastSyncAt: number
   teamId: string
-}
-
-function getSlackCursorPath(teamId: string): string {
-  const userDataPath = app.getPath('userData')
-  return path.join(userDataPath, `slack_sync_cursor_${teamId}.json`)
-}
-
-function loadSlackCursorState(teamId: string): SlackCursorState | null {
-  try {
-    const cursorPath = getSlackCursorPath(teamId)
-    if (fs.existsSync(cursorPath)) {
-      const data = JSON.parse(fs.readFileSync(cursorPath, 'utf-8'))
-      return {
-        conversationCursors: data.conversationCursors || {},
-        conversationListCursor: data.conversationListCursor ?? null,
-        lastSyncAt: data.lastSyncAt || 0,
-        teamId: data.teamId || teamId,
-      }
-    }
-  } catch (e) {
-    console.warn(`[SlackSync] Failed to load cursor state for ${teamId}:`, e)
-  }
-  return null
-}
-
-function saveSlackCursorState(state: SlackCursorState): void {
-  try {
-    const cursorPath = getSlackCursorPath(state.teamId)
-    const dir = path.dirname(cursorPath)
-    if (!fs.existsSync(dir)) {
-      fs.mkdirSync(dir, { recursive: true })
-    }
-    fs.writeFileSync(cursorPath, JSON.stringify(state, null, 2))
-  } catch (e) {
-    console.warn(`[SlackSync] Failed to save cursor state:`, e)
-  }
-}
-
-function clearSlackCursorState(teamId: string): void {
-  try {
-    const cursorPath = getSlackCursorPath(teamId)
-    if (fs.existsSync(cursorPath)) {
-      fs.unlinkSync(cursorPath)
-      console.log(`[SlackSync] Cleared cursor state for ${teamId}`)
-    }
-  } catch (e) {
-    console.warn(`[SlackSync] Failed to clear cursor state:`, e)
-  }
+  /** State for resumable full sync - present during full sync, cleared on completion */
+  fullSyncState?: SlackFullSyncState
 }
 
 // ============================================================================
@@ -164,8 +154,6 @@ export interface SlackSyncProgress {
 
 export interface SlackSyncManagerOptions {
   onProgress?: (progress: SlackSyncProgress) => void
-  getAuthToken?: () => Promise<string | null>
-  onAuthInvalid?: () => void
   teamId?: string
 }
 
@@ -185,7 +173,7 @@ export class SlackSyncManager {
   private conversationListCursor: string | null = null
   private lastSyncAt: number = 0
   private pollIntervalId: NodeJS.Timeout | null = null
-  private isRunning = false
+  private syncGuard = createSyncGuard()
   private progress: SlackSyncProgress = {
     status: 'idle',
     totalConversationsSynced: 0,
@@ -193,13 +181,14 @@ export class SlackSyncManager {
   }
   private options: SlackSyncManagerOptions
   private teamId: string | null = null
-  private forceRefreshToken: (() => Promise<string | null>) | null = null
   /** Cache of Slack user info to avoid repeated API calls */
   private userCache: Map<string, CachedSlackUser> = new Map()
+  /** State for resumable full sync */
+  private fullSyncState: SlackFullSyncState | null = null
 
   constructor(options: SlackSyncManagerOptions = {}) {
     this.options = options
-    this.convexClient = new ConvexHttpClient(CONVEX_URL)
+    this.convexClient = createConvexClient()
     this.teamId = options.teamId ?? null
   }
 
@@ -255,17 +244,31 @@ export class SlackSyncManager {
       cookie: this.credentials.cookie,
     })
 
-    // Load persisted cursor state for incremental sync
-    const cursorState = loadSlackCursorState(this.credentials.teamId)
-    if (cursorState) {
-      console.log(`[SlackSync] Loaded cursor state from ${new Date(cursorState.lastSyncAt).toISOString()}`)
-      this.conversationCursors = new Map(Object.entries(cursorState.conversationCursors))
-      this.conversationListCursor = cursorState.conversationListCursor
-      this.lastSyncAt = cursorState.lastSyncAt
-    }
-
+    // Cursor state will be loaded from cloud in start() after auth is set up
     this.updateProgress({ teamName: this.credentials.teamName })
     return true
+  }
+
+  /**
+   * Initialize cursor state from cloud (Convex).
+   * Must be called after Convex auth is set up.
+   */
+  private async initializeCursorFromCloud(): Promise<void> {
+    if (!this.credentials?.teamId) return
+
+    const cursor = await loadCursor<SlackCursorState>(this.convexClient, 'slack', this.credentials.teamId)
+
+    if (cursor) {
+      const cursorState = cursor.cursorData
+      this.conversationCursors = new Map(Object.entries(cursorState.conversationCursors || {}))
+      this.conversationListCursor = cursorState.conversationListCursor ?? null
+      this.lastSyncAt = cursorState.lastSyncAt || 0
+
+      // Restore full sync state if present (resumable sync)
+      if (cursorState.fullSyncState) {
+        this.fullSyncState = cursorState.fullSyncState
+      }
+    }
   }
 
   setCredentials(credentials: Omit<SlackStoredCredentials, 'savedAt'>): void {
@@ -292,16 +295,11 @@ export class SlackSyncManager {
       }
     }
 
-    // Set up Convex auth
-    if (this.options.getAuthToken) {
-      const token = await this.options.getAuthToken()
-      if (token) {
-        this.convexClient.setAuth(token)
-      } else {
-        this.options.onAuthInvalid?.()
-        this.updateProgress({ status: 'error', error: 'Not authenticated' })
-        return
-      }
+    // Set up Convex auth using centralized auth manager
+    const token = await setConvexAuth(this.convexClient)
+    if (!token) {
+      this.updateProgress({ status: 'error', error: 'Not authenticated' })
+      return
     }
 
     // Validate Slack credentials
@@ -311,10 +309,27 @@ export class SlackSyncManager {
         throw new Error('Slack auth test failed')
       }
       console.log(`[SlackSync] Authenticated as ${authResult.user} in ${authResult.team}`)
+
+      // Update Slack integration status in Convex (creates if not exists)
+      const authState = getAuthState()
+      if (authState.user && this.credentials) {
+        try {
+          await this.convexClient.mutation(api.integrations.updateSlackStatus, {
+            workosUserId: authState.user.id,
+            teamId: this.credentials.teamId,
+            teamName: this.credentials.teamName,
+            userId: this.credentials.userId,
+            isConnected: true,
+          })
+          console.log(`[SlackSync] Updated integration status for team ${this.credentials.teamName}`)
+        } catch (error) {
+          // Non-fatal - continue with sync even if integration update fails
+          console.error('[SlackSync] Failed to update integration status:', error)
+        }
+      }
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error)
       if (isTokenExpiredError(error)) {
-        this.options.onAuthInvalid?.()
         this.updateProgress({ status: 'error', error: 'Slack session expired' })
         return
       }
@@ -322,6 +337,9 @@ export class SlackSyncManager {
       this.updateProgress({ status: 'error', error: `Slack auth failed: ${errorMessage}` })
       throw error
     }
+
+    // Load cursor state from cloud (now that auth is set up)
+    await this.initializeCursorFromCloud()
 
     // Run initial full sync (non-blocking - failures won't prevent polling from starting)
     console.log('[SlackSync] Running initial sync...')
@@ -353,14 +371,36 @@ export class SlackSyncManager {
 
   /**
    * Disconnect and clear credentials.
+   * Uses centralized auth internally for clearing cursor.
    */
   async disconnect(clearCursors: boolean = true): Promise<void> {
     const teamId = this.credentials?.teamId ?? this.teamId
+    const teamName = this.credentials?.teamName ?? 'unknown'
+    const userId = this.credentials?.userId ?? ''
+
     this.stop()
+
+    // Update integration status to disconnected
+    const authState = getAuthState()
+    if (authState.user && teamId) {
+      try {
+        await this.convexClient.mutation(api.integrations.updateSlackStatus, {
+          workosUserId: authState.user.id,
+          teamId,
+          teamName,
+          userId,
+          isConnected: false,
+        })
+        console.log(`[SlackSync] Marked integration as disconnected for team ${teamName}`)
+      } catch (error) {
+        console.error('[SlackSync] Failed to update integration status:', error)
+      }
+    }
+
     if (teamId) {
       deleteSlackCredentials(teamId)
       if (clearCursors) {
-        clearSlackCursorState(teamId)
+        await clearCursor(this.convexClient, 'slack', teamId)
       }
     }
     this.client = null
@@ -374,7 +414,7 @@ export class SlackSyncManager {
    * Skips if a sync is already running.
    */
   async triggerSync(): Promise<void> {
-    if (this.isRunning) {
+    if (this.syncGuard.isRunning()) {
       console.log('[SlackSync] Sync already running, skipping trigger')
       return
     }
@@ -391,47 +431,50 @@ export class SlackSyncManager {
    * Uses incremental sync based on lastSyncAt timestamp.
    */
   async runSync(): Promise<void> {
-    if (this.isRunning) return
+    if (!this.syncGuard.tryStart()) return
 
     if (!this.client) {
       this.updateProgress({ status: 'error', error: 'Slack client not configured' })
+      this.syncGuard.finish()
       return
     }
 
-    this.isRunning = true
     this.updateProgress({ status: 'syncing' })
 
+    const syncStartTime = Date.now()
+    const logger = getSyncDebugLogger()
+    const isFullSync = this.lastSyncAt === 0 || this.fullSyncState !== null
+    logger.logSyncStart('slack', isFullSync ? 'full' : 'incremental')
+
     try {
-      // Re-auth if needed
-      if (this.options.getAuthToken) {
-        const token = await this.options.getAuthToken()
-        if (token) {
-          this.convexClient.setAuth(token)
-        } else {
-          this.options.onAuthInvalid?.()
-          this.updateProgress({ status: 'error', error: 'Not authenticated' })
-          return
-        }
+      // Re-auth if needed using centralized auth
+      const token = await setConvexAuth(this.convexClient)
+      if (!token) {
+        this.updateProgress({ status: 'error', error: 'Not authenticated' })
+        logger.logSyncError('slack', 'Not authenticated')
+        return
       }
 
       await this.syncConversations()
 
-      // Update lastSyncAt and persist cursor state
+      // Update lastSyncAt and persist cursor state to cloud
       this.lastSyncAt = Date.now()
-      this.persistCursorState()
+      await this.persistCursorState()
 
       this.updateProgress({
         status: 'idle',
         lastSyncAt: this.lastSyncAt,
         currentConversation: undefined,
       })
+
+      logger.logSyncComplete('slack', {
+        conversationsProcessed: this.progress.totalConversationsSynced,
+        durationMs: Date.now() - syncStartTime,
+      })
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)
       console.error(`[SlackSync] Sync error: ${message}`)
-
-      if (isTokenExpiredError(error)) {
-        this.options.onAuthInvalid?.()
-      }
+      logger.logSyncError('slack', message)
 
       this.updateProgress({
         status: 'error',
@@ -439,24 +482,42 @@ export class SlackSyncManager {
         currentConversation: undefined,
       })
     } finally {
-      this.isRunning = false
+      this.syncGuard.finish()
     }
   }
 
   /**
    * Sync conversations from Slack.
+   * Supports resumable full sync - if interrupted, will continue from where it left off.
    */
   async syncConversations(): Promise<void> {
     if (!this.client) throw new Error('Client not set')
 
-    let cursor = this.conversationListCursor ?? undefined
+    const isFullSync = this.lastSyncAt === 0 || this.fullSyncState !== null
     let totalSynced = 0
 
-    const limitLabel = MAX_TOTAL_CONVERSATIONS > 0 ? MAX_TOTAL_CONVERSATIONS : 'unlimited'
-    console.log(`[SlackSync] Starting conversation sync (limit: ${limitLabel})`)
+    // Initialize or restore full sync state
+    if (isFullSync && !this.fullSyncState) {
+      // Starting a new full sync
+      this.fullSyncState = {
+        conversationListCursor: null,
+        completedConversations: [],
+        totalConversationsSeen: 0,
+      }
+      // Persist initial state so we can resume if interrupted
+      await this.persistCursorState()
+    }
 
-    const hasReachedLimit = (): boolean =>
-      MAX_TOTAL_CONVERSATIONS > 0 && totalSynced >= MAX_TOTAL_CONVERSATIONS
+    // For full sync, use the saved cursor position; for incremental, start fresh
+    let cursor = isFullSync
+      ? (this.fullSyncState?.conversationListCursor ?? undefined)
+      : (this.conversationListCursor ?? undefined)
+
+    const completedSet = new Set(this.fullSyncState?.completedConversations ?? [])
+
+    function hasReachedLimit(): boolean {
+      return MAX_TOTAL_CONVERSATIONS > 0 && totalSynced >= MAX_TOTAL_CONVERSATIONS
+    }
 
     do {
       const result = await this.client.listConversations({
@@ -465,9 +526,17 @@ export class SlackSyncManager {
         limit: CONVERSATIONS_PER_PAGE,
       })
 
-      console.log(`[SlackSync] Fetched ${result.conversations.length} conversations`)
+      // Track total conversations seen for progress
+      if (this.fullSyncState) {
+        this.fullSyncState.totalConversationsSeen += result.conversations.length
+      }
 
       for (const conversation of result.conversations) {
+        // Skip if already completed in a previous run (resumable sync)
+        if (completedSet.has(conversation.id)) {
+          continue
+        }
+
         try {
           await this.syncConversationToConvex(conversation)
           await this.syncMessages(conversation.id)
@@ -477,26 +546,47 @@ export class SlackSyncManager {
             totalConversationsSynced: this.progress.totalConversationsSynced + 1,
           })
 
+          // Mark conversation as completed and persist (resumable sync)
+          if (this.fullSyncState) {
+            this.fullSyncState.completedConversations.push(conversation.id)
+            completedSet.add(conversation.id)
+            // Persist after each conversation so we can resume
+            await this.persistCursorState()
+          }
+
           if (hasReachedLimit()) break
         } catch (error) {
           const msg = error instanceof Error ? error.message : String(error)
           console.error(`[SlackSync] Error syncing conversation ${conversation.id}: ${msg}`)
-          if (this.isConvexAuthError(error)) {
+          if (isAuthError(error)) {
             throw error
           }
+          // For other errors, continue with next conversation
+          // TODO: For resumable sync, track failed conversations separately so they
+          // can be retried on next sync attempt. Add `failedConversations: string[]`
+          // to SlackFullSyncState and retry them before moving to new conversations.
         }
       }
 
       cursor = result.nextCursor
+
+      // Update cursor position for resumable sync
+      if (this.fullSyncState) {
+        this.fullSyncState.conversationListCursor = cursor ?? null
+      }
       this.conversationListCursor = cursor ?? null
     } while (cursor && !hasReachedLimit())
 
-    console.log(`[SlackSync] Conversation sync complete: ${totalSynced} conversations synced`)
+    // Full sync complete - clear fullSyncState
+    if (isFullSync) {
+      this.fullSyncState = null
+    }
   }
 
   /**
    * Sync messages for a specific conversation.
    * Uses lastSyncAt for incremental sync (only fetches new messages).
+   * Paginates through all available messages up to MAX_MESSAGE_PAGES_PER_CONVERSATION pages.
    */
   async syncMessages(channelId: string): Promise<void> {
     if (!this.client) throw new Error('Client not set')
@@ -505,7 +595,7 @@ export class SlackSyncManager {
       currentConversation: { conversationId: channelId, messagesInConversation: 0 },
     })
 
-    const cursor = this.conversationCursors.get(channelId)
+    let cursor = this.conversationCursors.get(channelId)
 
     // INCREMENTAL SYNC: Use lastSyncAt to only fetch new messages
     // Subtract 5 minutes as buffer for any messages that may have been in-flight
@@ -514,109 +604,112 @@ export class SlackSyncManager {
       ? ((this.lastSyncAt - 5 * 60 * 1000) / 1000).toFixed(6)
       : getOldestMessageTimestamp()
 
-    const result = await this.client.getHistory(channelId, {
-      cursor,
-      limit: MAX_MESSAGES_PER_CONVERSATION,
-      oldest,
-    })
+    let totalMessagesSyncedForChannel = 0
+    let pageCount = 0
 
-    if (result.messages.length === 0) {
-      return
-    }
+    // Paginate through all messages, up to MAX_MESSAGE_PAGES_PER_CONVERSATION pages
+    do {
+      const result = await this.client.getHistory(channelId, {
+        cursor,
+        limit: MAX_MESSAGES_PER_CONVERSATION,
+        oldest,
+      })
 
-    await this.syncMessagesToConvex(channelId, result.messages)
+      if (result.messages.length === 0) {
+        break
+      }
 
-    if (result.nextCursor) {
-      this.conversationCursors.set(channelId, result.nextCursor)
-    }
+      await this.syncMessagesToConvex(channelId, result.messages)
+      totalMessagesSyncedForChannel += result.messages.length
+      pageCount++
 
-    this.updateProgress({
-      totalMessagesSynced: this.progress.totalMessagesSynced + result.messages.length,
-      currentConversation: { conversationId: channelId, messagesInConversation: result.messages.length },
-    })
+      // Update cursor for next page
+      cursor = result.nextCursor
+      if (cursor) {
+        this.conversationCursors.set(channelId, cursor)
+      }
+
+      this.updateProgress({
+        totalMessagesSynced: this.progress.totalMessagesSynced + result.messages.length,
+        currentConversation: { conversationId: channelId, messagesInConversation: totalMessagesSyncedForChannel },
+      })
+    } while (cursor && pageCount < MAX_MESSAGE_PAGES_PER_CONVERSATION)
   }
 
   // ============================================================================
   // Convex Sync Methods
   // ============================================================================
 
-  setForceRefreshCallback(callback: () => Promise<string | null>): void {
-    this.forceRefreshToken = callback
-  }
+  /**
+   * Resolve display name for a group DM (mpim) conversation.
+   * Fetches member IDs and resolves each to their display name.
+   */
+  private async resolveMpimDisplayName(conversationId: string): Promise<string | undefined> {
+    if (!this.client || !this.credentials) return undefined
 
-  private async ensureFreshAuth(): Promise<boolean> {
-    if (this.options.getAuthToken) {
-      const token = await this.options.getAuthToken()
-      if (token) {
-        this.convexClient.setAuth(token)
-        return true
-      } else {
-        this.options.onAuthInvalid?.()
-        return false
-      }
-    }
-    return true
-  }
-
-  private isConvexAuthError(error: unknown): boolean {
-    const message = error instanceof Error ? error.message : String(error)
-    return (
-      message.includes('InvalidAuthHeader') ||
-      message.includes('Token expired') ||
-      message.includes('Could not validate token')
-    )
-  }
-
-  private async withAuthRetry<T>(operation: () => Promise<T>): Promise<T> {
     try {
-      return await operation()
-    } catch (error) {
-      if (this.isConvexAuthError(error) && this.forceRefreshToken) {
-        console.log('[SlackSync] Auth error detected, force refreshing token...')
-        const newToken = await this.forceRefreshToken()
-        if (newToken) {
-          this.convexClient.setAuth(newToken)
-          return await operation()
-        } else {
-          this.options.onAuthInvalid?.()
+      const { members } = await this.client.getConversationMembers(conversationId)
+      if (!members || members.length === 0) return undefined
+
+      // Filter out the current user and resolve display names
+      const otherMembers = members.filter((id) => id !== this.credentials!.userId)
+      const displayNames: string[] = []
+
+      for (const memberId of otherMembers) {
+        const user = await this.getSlackUser(memberId)
+        if (user) {
+          displayNames.push(user.name)
         }
       }
-      throw error
+
+      if (displayNames.length === 0) return undefined
+
+      // Join names with comma, truncate if too long
+      const joined = displayNames.join(', ')
+      return joined.length > 100 ? `${joined.slice(0, 97)}...` : joined
+    } catch (error) {
+      console.warn(`[SlackSync] Failed to resolve mpim display name for ${conversationId}:`, error)
+      return undefined
     }
   }
 
   private async syncConversationToConvex(conversation: SlackConversation): Promise<void> {
     if (!this.credentials) throw new Error('No credentials')
 
-    if (!(await this.ensureFreshAuth())) {
-      throw new Error('Auth token refresh failed')
+    // Resolve display name for group DMs (mpim)
+    let resolvedName = conversation.name ?? undefined
+    if (conversation.is_mpim) {
+      const mpimName = await this.resolveMpimDisplayName(conversation.id)
+      if (mpimName) {
+        resolvedName = mpimName
+      }
     }
 
-    await this.withAuthRetry(() => this.convexClient.mutation(api.sync.syncSlackConversations, {
-      slackUserId: this.credentials!.userId,
-      conversations: [{
-        id: conversation.id,
-        name: conversation.name ?? undefined,
-        isChannel: conversation.is_channel ?? false,
-        isIm: conversation.is_im ?? false,
-        isMpim: conversation.is_mpim ?? false,
-        isPrivate: conversation.is_private ?? false,
-        isArchived: conversation.is_archived ?? false,
-        userId: conversation.user ?? undefined,
-        unreadCount: conversation.unread_count ?? 0,
-        lastRead: conversation.last_read ?? undefined,
-        latestTs: conversation.latest?.ts,
-        latestText: conversation.latest?.text,
-      }],
-    }))
+    await withAuthRetry(
+      () => this.convexClient.mutation(api.sync.syncSlackConversations, {
+        slackUserId: this.credentials!.userId,
+        teamId: this.credentials!.teamId,
+        conversations: [{
+          id: conversation.id,
+          name: resolvedName,
+          isChannel: conversation.is_channel ?? false,
+          isIm: conversation.is_im ?? false,
+          isMpim: conversation.is_mpim ?? false,
+          isPrivate: conversation.is_private ?? false,
+          isArchived: conversation.is_archived ?? false,
+          userId: conversation.user ?? undefined,
+          unreadCount: conversation.unread_count ?? 0,
+          lastRead: conversation.last_read ?? undefined,
+          latestTs: conversation.latest?.ts,
+          latestText: conversation.latest?.text,
+        }],
+      }),
+      createAuthRetryOptions(this.convexClient)
+    )
   }
 
   private async syncMessagesToConvex(channelId: string, messages: SlackMessage[]): Promise<void> {
     if (!this.credentials) throw new Error('No credentials')
-
-    if (!(await this.ensureFreshAuth())) {
-      throw new Error('Auth token refresh failed')
-    }
 
     // Pre-fetch all message senders' user info
     const senderIds = messages
@@ -666,27 +759,23 @@ export class SlackSyncManager {
       email: u.email,
     }))
 
-    await this.withAuthRetry(() => this.convexClient.mutation(api.sync.syncSlackNativeMessages, {
-      slackUserId: this.credentials!.userId,
-      messages: transformedMessages,
-      mentionedUsers: mentionedUsersArray,
-    }))
+    await withAuthRetry(
+      () => this.convexClient.mutation(api.sync.syncSlackNativeMessages, {
+        slackUserId: this.credentials!.userId,
+        teamId: this.credentials!.teamId,
+        messages: transformedMessages,
+        mentionedUsers: mentionedUsersArray,
+      }),
+      createAuthRetryOptions(this.convexClient)
+    )
   }
 
   // ============================================================================
   // Helper Methods
   // ============================================================================
 
-  setTokenProvider(getAuthToken: () => Promise<string | null>): void {
-    this.options.getAuthToken = getAuthToken
-  }
-
   setProgressCallback(onProgress: (progress: SlackSyncProgress) => void): void {
     this.options.onProgress = onProgress
-  }
-
-  setAuthInvalidCallback(onAuthInvalid: () => void): void {
-    this.options.onAuthInvalid = onAuthInvalid
   }
 
   reset(): void {
@@ -694,6 +783,7 @@ export class SlackSyncManager {
     this.conversationListCursor = null
     this.lastSyncAt = 0
     this.userCache.clear()
+    this.fullSyncState = null
     this.progress = {
       status: 'idle',
       totalConversationsSynced: 0,
@@ -701,7 +791,11 @@ export class SlackSyncManager {
     }
   }
 
-  private persistCursorState(): void {
+  /**
+   * Persist cursor state to cloud (Convex).
+   * Uses centralized auth internally.
+   */
+  private async persistCursorState(): Promise<void> {
     if (!this.credentials?.teamId) return
 
     const state: SlackCursorState = {
@@ -709,8 +803,14 @@ export class SlackSyncManager {
       conversationListCursor: this.conversationListCursor,
       lastSyncAt: this.lastSyncAt,
       teamId: this.credentials.teamId,
+      fullSyncState: this.fullSyncState ?? undefined,
     }
-    saveSlackCursorState(state)
+
+    const syncMode = this.fullSyncState !== null || this.lastSyncAt === 0 ? 'full' : 'incremental'
+    await saveCursor(this.convexClient, 'slack', state, {
+      syncMode,
+      workspaceId: this.credentials.teamId,
+    })
   }
 
   private updateProgress(update: Partial<SlackSyncProgress>): void {
@@ -790,10 +890,6 @@ export class SlackSyncManager {
     for (const id of entriesToRemove) {
       this.userCache.delete(id)
     }
-
-    if (entriesToRemove.length > 0) {
-      console.log(`[SlackSync] Pruned ${entriesToRemove.length} entries from user cache`)
-    }
   }
 
   /**
@@ -860,7 +956,6 @@ export class SlackSyncManager {
 
     if (uncachedIds.length === 0) return
 
-    console.log(`[SlackSync] Prefetching ${uncachedIds.length} users...`)
     await Promise.all(uncachedIds.map((id) => this.getSlackUser(id)))
   }
 }

@@ -77,7 +77,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     console.log("Gmail sync complete:", {
       messages: result.messagesCount,
       conversations: result.conversationsCount,
-      skipped: result.skippedNewsletters,
+      skipped: result.skippedFiltered,
     });
 
     return NextResponse.json({

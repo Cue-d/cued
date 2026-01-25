@@ -152,6 +152,15 @@ export interface SlackConversationsRepliesResponse {
   }
 }
 
+export interface SlackConversationsMembersResponse {
+  ok: boolean
+  error?: string
+  members?: string[]
+  response_metadata?: {
+    next_cursor?: string
+  }
+}
+
 // ============================================================================
 // Messages
 // ============================================================================

@@ -19,7 +19,7 @@
 #   - Claude in Chrome extension (v1.0.36+)
 #   - Dev server running: pnpm dev (in apps/web)
 
-set -e
+# Don't use set -e - we handle errors with retries in the main loop
 
 # Ensure PATH includes common locations for claude CLI
 export PATH="$HOME/.local/bin:$HOME/.npm-global/bin:/usr/local/bin:/opt/homebrew/bin:$PATH"
@@ -153,7 +153,11 @@ for ((i=1; i<=$ITERATIONS; i++)); do
 
   OUTPUT_FILE="/tmp/ralph-iteration-$i.txt"
 
-  $CLAUDE_CMD "@$PRD_FILE @$PROGRESS_FILE \
+  # Retry loop for transient API errors
+  MAX_RETRIES=3
+  RETRY_DELAY=5
+  for ((retry=1; retry<=MAX_RETRIES; retry++)); do
+    if $CLAUDE_CMD "@$PRD_FILE @$PROGRESS_FILE \
 
 ## CONTEXT
 This is PRODUCTION CODE. Quality over speed.
@@ -203,14 +207,17 @@ The PRD also has a 'parallel_groups' object defining which tasks can run concurr
 
 7. Implement the task, then verify ALL steps in the task's 'steps' array.
 
-8. Run ALL feedback loops:
-   - TypeScript: pnpm lint && pnpm typecheck (MUST pass)
-   - Tests: pnpm test (MUST pass if tests exist)
-   Do NOT commit if any feedback loop fails.
+8. Run feedback loops (only relevant tests, not full suite):
+   - TypeScript: pnpm typecheck (MUST pass)
+   - Tests: Run ONLY tests related to the changed code (use --grep or file path)
+   Do NOT commit if feedback loops fail.
 
-9. Commit with a descriptive message.
+9. IMMEDIATELY commit your changes using git:
+   - git add <files you changed>
+   - git commit -m 'fix(scope): description'
+   This is REQUIRED. Do not skip this step. Do not batch commits.
 
-10. Update $PRD_FILE: set passes=true for the completed task.
+10. Update $PRD_FILE: set passes=true for the completed task. Save the file.
 
 11. Update $PROGRESS_FILE with:
     - Date/time and task ID + description
@@ -222,8 +229,20 @@ The PRD also has a 'parallel_groups' object defining which tasks can run concurr
 12. Check if ALL tasks in $PRD_FILE have passes=true.
     If so, output exactly: <promise>COMPLETE</promise>
 
-For single tasks: complete ONE task per iteration.
-For parallel groups: spawn sub-agents and complete ALL tasks in the group." | tee "$OUTPUT_FILE"
+CRITICAL: You MUST commit before the iteration ends. No commit = failed iteration.
+For single tasks: implement, test, commit, update PRD - ONE task per iteration." | tee "$OUTPUT_FILE"; then
+      break  # Success, exit retry loop
+    else
+      echo "Claude command failed (attempt $retry/$MAX_RETRIES)"
+      if [ $retry -lt $MAX_RETRIES ]; then
+        echo "Retrying in ${RETRY_DELAY}s..."
+        sleep $RETRY_DELAY
+        RETRY_DELAY=$((RETRY_DELAY * 2))  # Exponential backoff
+      else
+        echo "All retries exhausted, continuing to next iteration..."
+      fi
+    fi
+  done
 
   echo ""
 

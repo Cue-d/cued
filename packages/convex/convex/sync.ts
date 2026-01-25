@@ -24,8 +24,16 @@ import {
   getOrCreateUser,
   findIntegration,
   getOrCreateIntegration,
+  findSyncCursor,
   CURRENT_SYNC_VERSION,
-  normalizeLinkedInUrl,
+  normalizeLinkedInHandle,
+  upsertSyncCursor,
+  incrementSyncCursorStat,
+  clearIntegrationError,
+  MAX_GMAIL_ACCOUNTS,
+  MAX_NEW_CONNECTION_ACTIONS,
+  MULTI_WORKSPACE_PLATFORMS,
+  logSyncError,
 } from "./sync/shared";
 import {
   syncBatchInput,
@@ -41,8 +49,6 @@ import {
   syncGoogleContactsInternal,
 } from "./sync/gmail";
 import {
-  slackMessageInput,
-  syncSlackMessagesInternal,
   nativeSlackConversationInput,
   nativeSlackMessageInput,
   slackMentionedUserInput,
@@ -116,37 +122,59 @@ export const syncContacts = mutation({
 // ============================================================================
 
 /**
- * Get the sync cursor for a platform from the integrations table.
+ * Get the sync cursor for a platform from the syncCursors table.
+ * For multi-workspace platforms (Gmail, Slack), workspaceId is required.
  */
 export const getSyncCursor = query({
   args: {
     platform: platformValidator,
+    workspaceId: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
     const identity = await ctx.auth.getUserIdentity();
     if (!identity) return null;
 
+    // Require workspaceId for multi-workspace platforms
+    const isMultiWorkspace = MULTI_WORKSPACE_PLATFORMS.includes(
+      args.platform as (typeof MULTI_WORKSPACE_PLATFORMS)[number]
+    );
+    if (isMultiWorkspace && !args.workspaceId) {
+      throw new Error(`workspaceId is required for ${args.platform}`);
+    }
+
     const user = await findUserByWorkosId(ctx, identity.subject);
     if (!user) return null;
 
-    const integration = await findIntegration(ctx, user._id, args.platform);
+    const cursor = await findSyncCursor(ctx, user._id, args.platform, args.workspaceId);
+
     return {
-      cursor: integration?.syncState.lastSyncCursor ?? "0",
-      lastSyncAt: integration?.syncState.lastSyncAt ?? null,
+      cursor: cursor?.cursorData?.lastSyncCursor ?? "0",
+      lastSyncAt: cursor?.lastSyncAt ?? null,
     };
   },
 });
 
 /**
  * Get full sync state for a platform, including metadata for recovery decisions.
+ * Combines data from syncCursors (sync state) and integrations (connection state).
+ * For multi-workspace platforms (Gmail, Slack), workspaceId is required.
  */
 export const getSyncState = query({
   args: {
     platform: platformValidator,
+    workspaceId: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
     const identity = await ctx.auth.getUserIdentity();
     if (!identity) return null;
+
+    // Require workspaceId for multi-workspace platforms
+    const isMultiWorkspace = MULTI_WORKSPACE_PLATFORMS.includes(
+      args.platform as (typeof MULTI_WORKSPACE_PLATFORMS)[number]
+    );
+    if (isMultiWorkspace && !args.workspaceId) {
+      throw new Error(`workspaceId is required for ${args.platform}`);
+    }
 
     const user = await findUserByWorkosId(ctx, identity.subject);
     if (!user) return null;
@@ -154,14 +182,16 @@ export const getSyncState = query({
     const integration = await findIntegration(ctx, user._id, args.platform);
     if (!integration) return null;
 
+    const cursor = await findSyncCursor(ctx, user._id, args.platform, args.workspaceId);
+
     return {
-      cursor: integration.syncState.lastSyncCursor ?? "0",
-      lastSyncAt: integration.syncState.lastSyncAt ?? null,
-      totalMessagesSynced: integration.syncState.totalMessagesSynced ?? 0,
-      totalContactsSynced: integration.syncState.totalContactsSynced ?? 0,
-      syncVersion: integration.syncState.syncVersion ?? 0,
-      isConnected: integration.syncState.isConnected,
-      lastContactsSyncAt: integration.syncState.lastContactsSyncAt ?? null,
+      cursor: cursor?.cursorData?.lastSyncCursor ?? "0",
+      lastSyncAt: cursor?.lastSyncAt ?? null,
+      totalMessagesSynced: cursor?.totalMessagesSynced ?? 0,
+      totalContactsSynced: cursor?.totalContactsSynced ?? 0,
+      syncVersion: cursor?.syncVersion ?? 0,
+      isConnected: integration.isConnected,
+      lastContactsSyncAt: cursor?.lastContactsSyncAt ?? null,
     };
   },
 });
@@ -181,20 +211,12 @@ export const updateSyncCursor = mutation({
     }
 
     const user = await getOrCreateUser(ctx, identity);
-    const integration = await getOrCreateIntegration(
-      ctx,
-      user._id,
-      args.platform
-    );
+    await getOrCreateIntegration(ctx, user._id, args.platform);
 
-    await ctx.db.patch(integration._id, {
-      syncState: {
-        ...integration.syncState,
-        lastSyncCursor: args.cursor,
-        lastSyncAt: Date.now(),
-        lastError: undefined,
-      },
+    await upsertSyncCursor(ctx, user._id, args.platform, {
+      cursorData: { lastSyncCursor: args.cursor },
     });
+    await clearIntegrationError(ctx, user._id, args.platform);
 
     return { success: true };
   },
@@ -219,25 +241,15 @@ export const updateSyncMetadata = mutation({
     }
 
     const user = await getOrCreateUser(ctx, identity);
-    const integration = await getOrCreateIntegration(
-      ctx,
-      user._id,
-      args.platform
-    );
+    await getOrCreateIntegration(ctx, user._id, args.platform);
 
-    await ctx.db.patch(integration._id, {
-      syncState: {
-        ...integration.syncState,
-        lastSyncCursor: args.cursor,
-        lastSyncAt: Date.now(),
-        lastError: undefined,
-        totalMessagesSynced:
-          args.totalMessagesSynced ?? integration.syncState.totalMessagesSynced,
-        totalContactsSynced:
-          args.totalContactsSynced ?? integration.syncState.totalContactsSynced,
-        syncVersion: args.syncVersion ?? integration.syncState.syncVersion,
-      },
+    await upsertSyncCursor(ctx, user._id, args.platform, {
+      cursorData: { lastSyncCursor: args.cursor },
+      totalMessagesSynced: args.totalMessagesSynced,
+      totalContactsSynced: args.totalContactsSynced,
+      syncVersion: args.syncVersion,
     });
+    await clearIntegrationError(ctx, user._id, args.platform);
 
     return { success: true };
   },
@@ -246,10 +258,13 @@ export const updateSyncMetadata = mutation({
 /**
  * Reset sync state to trigger full re-sync.
  * Clears cursor and message count so recovery flow triggers full sync.
+ * For multi-workspace platforms (Gmail, Slack), workspaceId is required to reset specific workspace.
+ * Without workspaceId for multi-workspace platforms, resets ALL workspaces.
  */
 export const resetSyncState = mutation({
   args: {
     platform: platformValidator,
+    workspaceId: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
     const identity = await ctx.auth.getUserIdentity();
@@ -258,20 +273,50 @@ export const resetSyncState = mutation({
     }
 
     const user = await getOrCreateUser(ctx, identity);
-    const integration = await findIntegration(ctx, user._id, args.platform);
+    const isMultiWorkspace = MULTI_WORKSPACE_PLATFORMS.includes(
+      args.platform as (typeof MULTI_WORKSPACE_PLATFORMS)[number]
+    );
 
+    // Delete existing sync cursor(s) to trigger full resync
+    if (args.workspaceId) {
+      const existingCursor = await findSyncCursor(ctx, user._id, args.platform, args.workspaceId);
+      if (existingCursor) {
+        await ctx.db.delete(existingCursor._id);
+      }
+    } else {
+      // Delete all cursors for this platform
+      const existingCursors = await ctx.db
+        .query("syncCursors")
+        .withIndex("by_user_platform", (q) =>
+          q.eq("userId", user._id).eq("platform", args.platform)
+        )
+        .collect();
+
+      for (const cursor of existingCursors) {
+        await ctx.db.delete(cursor._id);
+      }
+    }
+
+    // Create fresh cursor with reset state
+    // Skip for multi-workspace platforms without workspaceId (they reset ALL workspaces)
+    const shouldCreateFreshCursor = args.workspaceId || !isMultiWorkspace;
+    if (shouldCreateFreshCursor) {
+      await upsertSyncCursor(ctx, user._id, args.platform, {
+        cursorData: { lastSyncCursor: "0" },
+        syncMode: "full",
+        totalMessagesSynced: 0,
+        totalContactsSynced: 0,
+        syncVersion: CURRENT_SYNC_VERSION,
+        workspaceId: args.workspaceId,
+      });
+    }
+
+    // Reset integration connection state
+    const integration = await findIntegration(ctx, user._id, args.platform);
     if (integration) {
       await ctx.db.patch(integration._id, {
-        syncState: {
-          isConnected: true,
-          lastSyncCursor: "0",
-          lastSyncAt: undefined,
-          lastError: undefined,
-          totalMessagesSynced: 0,
-          totalContactsSynced: 0,
-          syncVersion: CURRENT_SYNC_VERSION,
-          lastContactsSyncAt: undefined,
-        },
+        isConnected: true,
+        lastError: undefined,
       });
     }
 
@@ -295,20 +340,13 @@ export const updateContactsSyncState = mutation({
     }
 
     const user = await getOrCreateUser(ctx, identity);
-    const integration = await getOrCreateIntegration(
-      ctx,
-      user._id,
-      args.platform
-    );
+    await getOrCreateIntegration(ctx, user._id, args.platform);
 
-    await ctx.db.patch(integration._id, {
-      syncState: {
-        ...integration.syncState,
-        totalContactsSynced: args.contactsCount,
-        lastContactsSyncAt: Date.now(),
-        lastError: undefined,
-      },
+    await upsertSyncCursor(ctx, user._id, args.platform, {
+      totalContactsSynced: args.contactsCount,
+      lastContactsSyncAt: Date.now(),
     });
+    await clearIntegrationError(ctx, user._id, args.platform);
 
     return { success: true };
   },
@@ -321,11 +359,18 @@ export const updateContactsSyncState = mutation({
 /**
  * Sync Gmail emails from Nango to Convex.
  * Called via API endpoint when Nango sync completes.
+ * Supports multi-account via accountEmail parameter.
  */
 export const syncGmailMessages = mutation({
   args: {
     workosUserId: v.string(),
     emails: v.array(gmailEmailInput),
+    /** Gmail account email for multi-account support (workspaceId) */
+    accountEmail: v.optional(v.string()),
+    /** Optional historyId from Gmail API for incremental sync tracking */
+    historyId: v.optional(v.string()),
+    /** Sync mode: 'full' on initial sync or historyId expiration, 'incremental' otherwise */
+    syncMode: v.optional(v.union(v.literal("full"), v.literal("incremental"))),
   },
   handler: async (ctx, args) => {
     const user = await findUserByWorkosId(ctx, args.workosUserId);
@@ -333,7 +378,148 @@ export const syncGmailMessages = mutation({
       throw new Error(`User not found for WorkOS ID: ${args.workosUserId}`);
     }
 
+    // Check multi-account limit if this is a new account
+    if (args.accountEmail) {
+      const existingCursors = await ctx.db
+        .query("syncCursors")
+        .withIndex("by_user_platform", (q) =>
+          q.eq("userId", user._id).eq("platform", "gmail")
+        )
+        .collect();
+
+      const isNewAccount = !existingCursors.some(
+        (c) => c.workspaceId === args.accountEmail
+      );
+
+      if (isNewAccount && existingCursors.length >= MAX_GMAIL_ACCOUNTS) {
+        throw new Error(
+          `Maximum Gmail accounts (${MAX_GMAIL_ACCOUNTS}) reached. Disconnect an account before adding a new one.`
+        );
+      }
+
+      // Update cursor state for this Gmail account
+      const cursorData = {
+        historyId: args.historyId,
+        lastSyncAt: Date.now(),
+        messageCount: args.emails.length,
+      };
+
+      await ctx.db
+        .query("syncCursors")
+        .withIndex("by_user_platform_workspace", (q) =>
+          q
+            .eq("userId", user._id)
+            .eq("platform", "gmail")
+            .eq("workspaceId", args.accountEmail)
+        )
+        .unique()
+        .then(async (existing) => {
+          if (existing) {
+            await ctx.db.patch(existing._id, {
+              cursorData,
+              lastSyncAt: Date.now(),
+              syncMode: args.syncMode ?? "incremental",
+            });
+          } else {
+            await ctx.db.insert("syncCursors", {
+              userId: user._id,
+              platform: "gmail",
+              workspaceId: args.accountEmail,
+              cursorData,
+              lastSyncAt: Date.now(),
+              syncMode: args.syncMode ?? "full",
+            });
+          }
+        });
+    }
+
     return syncGmailMessagesInternal(ctx, user._id, args.emails);
+  },
+});
+
+/**
+ * Get Gmail cursor state for a specific account.
+ * Used to check historyId and determine if full resync is needed.
+ */
+export const getGmailCursor = query({
+  args: {
+    accountEmail: v.string(),
+  },
+  handler: async (ctx, args) => {
+    const identity = await ctx.auth.getUserIdentity();
+    if (!identity) {
+      return null;
+    }
+
+    const user = await ctx.db
+      .query("users")
+      .withIndex("by_workos_id", (q) => q.eq("workosUserId", identity.subject))
+      .unique();
+
+    if (!user) {
+      return null;
+    }
+
+    const cursor = await ctx.db
+      .query("syncCursors")
+      .withIndex("by_user_platform_workspace", (q) =>
+        q
+          .eq("userId", user._id)
+          .eq("platform", "gmail")
+          .eq("workspaceId", args.accountEmail)
+      )
+      .unique();
+
+    if (!cursor) {
+      return null;
+    }
+
+    return {
+      historyId: (cursor.cursorData as { historyId?: string })?.historyId,
+      lastSyncAt: cursor.lastSyncAt,
+      syncMode: cursor.syncMode,
+    };
+  },
+});
+
+/**
+ * Handle Gmail historyId expiration.
+ * Called when history.list returns 404 - resets cursor for full resync.
+ */
+export const handleGmailHistoryExpiration = mutation({
+  args: {
+    workosUserId: v.string(),
+    accountEmail: v.string(),
+  },
+  handler: async (ctx, args) => {
+    const user = await findUserByWorkosId(ctx, args.workosUserId);
+    if (!user) {
+      throw new Error(`User not found for WorkOS ID: ${args.workosUserId}`);
+    }
+
+    const cursor = await ctx.db
+      .query("syncCursors")
+      .withIndex("by_user_platform_workspace", (q) =>
+        q
+          .eq("userId", user._id)
+          .eq("platform", "gmail")
+          .eq("workspaceId", args.accountEmail)
+      )
+      .unique();
+
+    if (cursor) {
+      // Clear historyId and set to full sync mode
+      await ctx.db.patch(cursor._id, {
+        cursorData: {
+          historyId: null,
+          historyExpiredAt: Date.now(),
+          lastSyncAt: cursor.lastSyncAt,
+        },
+        syncMode: "full",
+      });
+    }
+
+    return { reset: true };
   },
 });
 
@@ -367,31 +553,13 @@ export const syncGoogleContacts = mutation({
 // ============================================================================
 
 /**
- * Sync Slack messages from Nango to Convex.
- * Called via API endpoint when Nango sync completes.
- */
-export const syncSlackMessages = mutation({
-  args: {
-    workosUserId: v.string(),
-    messages: v.array(slackMessageInput),
-  },
-  handler: async (ctx, args) => {
-    const user = await findUserByWorkosId(ctx, args.workosUserId);
-    if (!user) {
-      throw new Error(`User not found for WorkOS ID: ${args.workosUserId}`);
-    }
-
-    return syncSlackMessagesInternal(ctx, user._id, args.messages);
-  },
-});
-
-/**
  * Sync Slack conversations from native Electron integration.
  * Creates contacts from DM participants only.
  */
 export const syncSlackConversations = mutation({
   args: {
     slackUserId: v.string(),
+    teamId: v.string(),
     conversations: v.array(nativeSlackConversationInput),
   },
   handler: async (ctx, args) => {
@@ -405,6 +573,7 @@ export const syncSlackConversations = mutation({
       ctx,
       user._id,
       args.slackUserId,
+      args.teamId,
       args.conversations
     );
   },
@@ -418,6 +587,7 @@ export const syncSlackConversations = mutation({
 export const syncSlackNativeMessages = mutation({
   args: {
     slackUserId: v.string(),
+    teamId: v.string(),
     messages: v.array(nativeSlackMessageInput),
     mentionedUsers: v.optional(v.array(slackMentionedUserInput)),
   },
@@ -432,6 +602,7 @@ export const syncSlackNativeMessages = mutation({
       ctx,
       user._id,
       args.slackUserId,
+      args.teamId,
       args.messages,
       args.mentionedUsers
     );
@@ -493,7 +664,7 @@ async function syncSocialContactsInternal(
     duplicatesSkipped: 0,
   };
 
-  const handleType = platform === "linkedin" ? "linkedin_url" : "twitter_handle";
+  const handleType = platform === "linkedin" ? "linkedin_handle" : "twitter_handle";
   const newContactsInfo: Array<{
     contactId: Id<"contacts">;
     headline: string | null;
@@ -504,7 +675,7 @@ async function syncSocialContactsInternal(
   const seenHandles = new Set<string>();
   const deduplicatedContacts: SocialContactInput[] = [];
   for (const contact of contacts) {
-    const normalizedHandle = normalizeLinkedInUrl(contact.profileUrl);
+    const normalizedHandle = normalizeLinkedInHandle(contact.profileUrl);
     if (seenHandles.has(normalizedHandle)) {
       result.duplicatesSkipped++;
       continue;
@@ -527,12 +698,11 @@ async function syncSocialContactsInternal(
         result.updatedContacts++;
       }
     } catch (e) {
-      result.errors.push(`Failed to sync ${contact.name}: ${e}`);
+      result.errors.push(logSyncError(platform, "sync contact", contact.name, e));
     }
   }
 
   // Create new_connection actions for enrichment (limit 20 per sync)
-  const MAX_NEW_CONNECTION_ACTIONS = 20;
   const actionsToCreate = newContactsInfo.slice(0, MAX_NEW_CONNECTION_ACTIONS);
   const now = Date.now();
 
@@ -561,16 +731,12 @@ async function syncSocialContactsInternal(
     }
   }
 
-  // Update integration sync state
-  const integration = await getOrCreateIntegration(ctx, userId, platform);
-  await ctx.db.patch(integration._id, {
-    syncState: {
-      ...integration.syncState,
-      lastSyncAt: syncedAt,
-      lastError: undefined,
-      totalContactsSynced: (integration.syncState.totalContactsSynced ?? 0) + result.newContacts,
-    },
-  });
+  // Update sync cursor with stats
+  await incrementSyncCursorStat(ctx, userId, platform, "totalContactsSynced", result.newContacts);
+
+  // Ensure integration exists and clear any error
+  await getOrCreateIntegration(ctx, userId, platform);
+  await clearIntegrationError(ctx, userId, platform);
 
   return result;
 }
@@ -585,19 +751,18 @@ async function upsertSocialContact(
   ctx: MutationCtx,
   userId: Id<"users">,
   platform: SocialPlatform,
-  handleType: "linkedin_url" | "twitter_handle",
+  handleType: "linkedin_handle" | "twitter_handle",
   contact: SocialContactInput
 ): Promise<{ isNew: boolean; contactId: Id<"contacts"> }> {
   const normalizedHandle =
     platform === "linkedin"
-      ? normalizeLinkedInUrl(contact.profileUrl)
+      ? normalizeLinkedInHandle(contact.profileUrl)
       : contact.handle.toLowerCase().replace(/^@/, "");
 
-  // NOTE: Using .first() instead of .unique() to handle duplicates gracefully
   const existingHandle = await ctx.db
     .query("contactHandles")
     .withIndex("by_user_handle", (q) => q.eq("userId", userId).eq("handle", normalizedHandle))
-    .first();
+    .unique();
 
   if (existingHandle) {
     const existingContact = await ctx.db.get(existingHandle.contactId);
@@ -650,7 +815,7 @@ export const syncLinkedInConversations = mutation({
     }
 
     const user = await getOrCreateUser(ctx, identity);
-    return syncLinkedInConversationsInternal(ctx, user._id, args.conversations);
+    return syncLinkedInConversationsInternal(ctx, user._id, args.conversations, args.userURN);
   },
 });
 
@@ -673,6 +838,6 @@ export const syncLinkedInMessages = mutation({
     }
 
     const user = await getOrCreateUser(ctx, identity);
-    return syncLinkedInMessagesInternal(ctx, user._id, args.messages);
+    return syncLinkedInMessagesInternal(ctx, user._id, args.messages, args.userURN);
   },
 });

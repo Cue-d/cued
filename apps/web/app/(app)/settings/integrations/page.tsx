@@ -11,7 +11,6 @@ import {
   HashIcon,
   ArrowLeftIcon,
   LinkedinIcon,
-  TwitterIcon,
 } from "lucide-react";
 import { api } from "@prm/convex";
 import {
@@ -60,13 +59,7 @@ const SOCIAL_INTEGRATIONS: SocialIntegrationConfig[] = [
     icon: <LinkedinIcon className="size-5" />,
     color: "text-blue-600",
   },
-  {
-    id: "twitter",
-    name: "X (Twitter)",
-    description: "Scrape mutual followers from X",
-    icon: <TwitterIcon className="size-5" />,
-    color: "text-sky-500",
-  },
+  // X (Twitter) integration disabled - scraping broken by API changes
 ];
 
 export default function IntegrationsPage() {
@@ -276,7 +269,7 @@ export default function IntegrationsPage() {
                 (credentials stay local)
               </li>
               <li>
-                <strong>LinkedIn/X:</strong> Use the desktop app to login and scrape your
+                <strong>LinkedIn:</strong> Use the desktop app to login and scrape your
                 connections
               </li>
               <li>Your data is securely synced and never shared</li>

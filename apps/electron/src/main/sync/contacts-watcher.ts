@@ -96,14 +96,14 @@ export class ContactsWatcher extends EventEmitter<ContactsWatcherEvents> {
       });
 
       this.process.on("exit", (code, signal) => {
-        console.log(`[ContactsWatcher] Process exited (code=${code}, signal=${signal})`);
+        if (code !== 0) {
+          console.warn(`[ContactsWatcher] Process exited unexpectedly (code=${code}, signal=${signal})`);
+        }
         this.process = null;
         if (this.isRunning) {
           this.scheduleRestart();
         }
       });
-
-      console.log("[ContactsWatcher] Started watch process");
     } catch (err) {
       console.error("[ContactsWatcher] Failed to start:", err);
       this.emit("error", err instanceof Error ? err : new Error(String(err)));
@@ -126,7 +126,6 @@ export class ContactsWatcher extends EventEmitter<ContactsWatcherEvents> {
   private scheduleRestart(): void {
     if (!this.isRunning || this.restartTimeout) return;
 
-    console.log(`[ContactsWatcher] Restarting in ${RESTART_DELAY_MS}ms...`);
     this.restartTimeout = setTimeout(() => {
       this.restartTimeout = null;
       if (this.isRunning) {
@@ -154,11 +153,9 @@ export class ContactsWatcher extends EventEmitter<ContactsWatcherEvents> {
   private handleEvent(event: WatchEvent): void {
     switch (event.type) {
       case "started":
-        console.log("[ContactsWatcher] Watch started:", event.message);
         this.emit("started");
         break;
       case "changed":
-        console.log("[ContactsWatcher] Contacts changed at", event.timestamp);
         this.emit("change");
         break;
       case "error":
@@ -177,12 +174,9 @@ export class ContactsWatcher extends EventEmitter<ContactsWatcherEvents> {
 
     this.fallbackInterval = setInterval(() => {
       if (this.isRunning) {
-        console.log("[ContactsWatcher] Hourly fallback sync");
         this.emit("change");
       }
     }, HOURLY_INTERVAL_MS);
-
-    console.log("[ContactsWatcher] Started hourly fallback polling");
   }
 
   private stopFallbackPolling(): void {

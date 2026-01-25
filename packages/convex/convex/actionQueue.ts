@@ -31,6 +31,13 @@ interface ScanResult {
   filtered: number;
 }
 
+// Type for getUnansweredConversations return (breaks TS2589 type depth limit)
+interface UnansweredConversation {
+  conversation: Doc<"conversations">;
+  lastMessage: Doc<"messages">;
+  primaryContact: Doc<"contacts"> | null;
+}
+
 /**
  * Get conversations with unanswered messages for a user.
  * Returns conversations where:
@@ -214,14 +221,14 @@ export const scanForUnansweredConversations = internalAction({
     const gracePeriodMs = GRACE_PERIOD_HOURS * 60 * 60 * 1000;
 
     // Get unanswered conversations
-    const conversations = await ctx.runQuery(
+    const conversations = (await ctx.runQuery(
       internal.actionQueue.getUnansweredConversations,
       {
         userId: args.userId,
         thresholdMs,
         limit: MAX_QUEUE_PER_RUN,
       }
-    );
+    )) as UnansweredConversation[];
 
     // Import filters dynamically
     const { shouldSkipLlmAnalysis, calculatePriority } = await import("@prm/ai");
@@ -339,7 +346,6 @@ export const triggerScanForUnanswered = mutation({
     return { success: true, message: `Scan scheduled for ${platforms.join(", ")}` };
   },
 });
-
 
 
 // ============================================================================
@@ -556,6 +562,7 @@ export const scanForNewContacts = internalAction({
 /**
  * Scan all users for new contacts.
  * Task 7.17: Called by daily cron at 9 PM.
+ * TODO: Remove this in favor of automatically creating new_contact actions for new contacts.
  */
 export const scanAllUsersForNewContacts = internalMutation({
   args: {},
@@ -563,7 +570,7 @@ export const scanAllUsersForNewContacts = internalMutation({
     // Get all users with connected integrations
     const integrations = await ctx.db
       .query("integrations")
-      .filter((q) => q.eq(q.field("syncState.isConnected"), true))
+      .filter((q) => q.eq(q.field("isConnected"), true))
       .collect();
 
     // Get unique user IDs

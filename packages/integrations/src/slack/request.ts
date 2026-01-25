@@ -285,9 +285,9 @@ function sleep(ms: number): Promise<void> {
 }
 
 /**
- * Check if an error is a Slack auth error
+ * Check if an error is a Slack auth error (type guard)
  */
-export function isAuthError(error: unknown): error is SlackAuthError {
+export function isSlackAuthError(error: unknown): error is SlackAuthError {
   return error instanceof SlackAuthError
 }
 

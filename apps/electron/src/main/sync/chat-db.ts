@@ -502,7 +502,7 @@ export class ChatDb {
     return {
       id: row.id,
       identifier: row.identifier,
-      displayName: row.name || row.identifier,
+      displayName: row.name || null, // Don't fall back to identifier - let sync code build name from participants
       isGroup: row.is_group === 1,
       participants,
     };

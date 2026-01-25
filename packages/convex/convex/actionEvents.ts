@@ -164,10 +164,11 @@ export const onIncomingMessage = internalAction({
   },
   handler: async (ctx, args): Promise<IncomingMessageResult> => {
     // 1. Check if pending action already exists
-    const hasPending = await ctx.runQuery(
-      internal.actionEvents.hasPendingActionForConversation,
-      { conversationId: args.conversationId }
-    );
+    // @ts-ignore - TS2589: Type instantiation depth limit (known Convex issue)
+    const hasPendingQuery = internal.actionEvents.hasPendingActionForConversation;
+    const hasPending = await ctx.runQuery(hasPendingQuery, {
+      conversationId: args.conversationId,
+    });
     if (hasPending) {
       return { skipped: true, reason: "pending_action_exists" };
     }
@@ -309,6 +310,220 @@ export const onIncomingMessage = internalAction({
       actionCreated: true,
       actionId: actionId as string,
     };
+  },
+});
+
+// ============================================================================
+// Batched event handlers
+// ============================================================================
+
+/**
+ * Batch handler for user sent messages - processes multiple conversations in one call.
+ * More efficient than O(n) scheduler calls for many conversations.
+ */
+export const onUserSentMessageBatch = internalMutation({
+  args: {
+    userId: v.id("users"),
+    conversationIds: v.array(v.id("conversations")),
+  },
+  handler: async (ctx, args): Promise<{ totalCompleted: number }> => {
+    let totalCompleted = 0;
+
+    for (const conversationId of args.conversationIds) {
+      const pendingActions = await ctx.db
+        .query("actions")
+        .withIndex("by_conversation_status", (q) =>
+          q.eq("conversationId", conversationId).eq("status", "pending")
+        )
+        .collect();
+
+      if (pendingActions.length === 0) continue;
+
+      const now = Date.now();
+      for (const action of pendingActions) {
+        await ctx.db.patch(action._id, {
+          status: "completed",
+          completedAt: now,
+          reason: "User sent message in conversation",
+        });
+      }
+
+      await adjustPendingActionCount(ctx, args.userId, -pendingActions.length);
+      totalCompleted += pendingActions.length;
+    }
+
+    return { totalCompleted };
+  },
+});
+
+/**
+ * Batch handler for incoming messages - schedules individual analysis actions.
+ * Each conversation is processed independently via scheduler to avoid timeout issues.
+ */
+export const onIncomingMessageBatch = internalAction({
+  args: {
+    userId: v.id("users"),
+    conversationIds: v.array(v.id("conversations")),
+    platform: platformValidator,
+  },
+  handler: async (ctx, args): Promise<{ processed: number; skipped: number }> => {
+    let processed = 0;
+    let skipped = 0;
+
+    // Process each conversation sequentially to avoid overwhelming the system
+    // Each conversation's analysis is CPU/LLM intensive so we don't parallelize
+    // TODO: For very large batches, this sequential processing could be slow.
+    // Consider: (1) chunking into smaller batches with progress tracking,
+    // (2) limited parallelism (e.g., Promise.all with concurrency limit),
+    // (3) or moving to a queue-based approach for better scalability.
+    for (const conversationId of args.conversationIds) {
+      // 1. Check if pending action already exists
+      const hasPending = await ctx.runQuery(
+        internal.actionEvents.hasPendingActionForConversation,
+        { conversationId }
+      );
+      if (hasPending) {
+        skipped++;
+        continue;
+      }
+
+      // 2. Check if snoozed action exists that hasn't expired
+      const hasSnoozed = await ctx.runQuery(
+        internal.actionEvents.hasActiveSnoozedAction,
+        { conversationId }
+      );
+      if (hasSnoozed) {
+        skipped++;
+        continue;
+      }
+
+      // 3. Check if discarded action exists with no new messages since
+      const latestDiscarded = await ctx.runQuery(
+        internal.actionEvents.getLatestDiscardedAction,
+        { conversationId }
+      );
+      if (latestDiscarded) {
+        const latestMessageTime = await ctx.runQuery(
+          internal.actionEvents.getLatestMessageTime,
+          { conversationId }
+        );
+        if (latestMessageTime && latestMessageTime <= latestDiscarded.discardedAt) {
+          skipped++;
+          continue;
+        }
+      }
+
+      // 4. Get conversation context
+      const context = await ctx.runQuery(
+        internal.actionAnalysis.getConversationContext,
+        { conversationId }
+      );
+      if (!context) {
+        skipped++;
+        continue;
+      }
+
+      const { conversation, primaryContact } = context;
+
+      // 5. Get recent messages
+      const messages = await ctx.runQuery(
+        internal.actionAnalysis.getRecentMessages,
+        { conversationId, limit: 10 }
+      );
+      if (messages.length === 0) {
+        skipped++;
+        continue;
+      }
+
+      // 6. Apply message filters (OTP, spam, etc.)
+      const lastMessage = messages[messages.length - 1];
+      const { shouldSkipLlmAnalysis } = await import("@prm/ai");
+
+      const filterResult = shouldSkipLlmAnalysis({
+        text: lastMessage.content,
+        personName: primaryContact?.displayName,
+        isContact: primaryContact !== null,
+      });
+
+      if (filterResult.shouldSkip) {
+        skipped++;
+        continue;
+      }
+
+      // 7. Calculate hours since last message
+      const hoursSinceLastMessage = lastMessage
+        ? (Date.now() - lastMessage.sentAt) / (1000 * 60 * 60)
+        : 0;
+
+      // 8. Get recent actions for LLM context
+      const recentActions = await ctx.runQuery(
+        internal.actionAnalysis.getRecentActionsForConversation,
+        {
+          userId: args.userId,
+          conversationId,
+          limit: 5,
+          daysBack: 7,
+        }
+      );
+
+      // 9. Fetch contact memories (optional enhancement)
+      const { generateActionWithRetry, fetchContactMemories } = await import("@prm/ai");
+
+      const contactMemories = primaryContact
+        ? await fetchContactMemories(
+            primaryContact.displayName,
+            args.userId.toString(),
+            primaryContact._id.toString()
+          )
+        : [];
+
+      // 10. Run LLM analysis
+      const suggestion = await generateActionWithRetry({
+        contact: {
+          displayName: primaryContact?.displayName ?? "Unknown",
+          company: primaryContact?.company ?? undefined,
+          notes: primaryContact?.notes ?? undefined,
+          isKnownContact: primaryContact !== null,
+          tags: primaryContact?.tags ?? undefined,
+          importance: primaryContact?.importance ?? undefined,
+        },
+        messages,
+        platform: conversation.platform,
+        hoursSinceLastMessage,
+        recentActions,
+        contactMemories,
+      });
+
+      if (!suggestion.shouldCreateAction) {
+        skipped++;
+        continue;
+      }
+
+      // 11. Parse remindAt if provided
+      let snoozedUntil: number | undefined;
+      if (suggestion.remindAt) {
+        const parsed = Date.parse(suggestion.remindAt);
+        if (!isNaN(parsed)) {
+          snoozedUntil = parsed;
+        }
+      }
+
+      // 12. Create the action
+      await ctx.runMutation(internal.actionAnalysis.createActionFromSuggestion, {
+        userId: args.userId,
+        conversationId,
+        contactId: primaryContact?._id,
+        type: suggestion.type ?? "respond",
+        priority: suggestion.priority ?? 50,
+        platform: conversation.platform,
+        llmReason: suggestion.reason ?? undefined,
+        snoozedUntil,
+      });
+
+      processed++;
+    }
+
+    return { processed, skipped };
   },
 });
 

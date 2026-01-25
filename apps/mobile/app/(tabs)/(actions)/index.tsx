@@ -10,13 +10,11 @@ import { useRouter } from "expo-router";
 import { useMutation, useQuery } from "convex/react";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { api } from "@prm/convex/convex/_generated/api";
-import type { ActionPlatform } from "@prm/shared";
 import { ActionButtons } from "@/components/action-buttons";
 import { CardStack } from "@/components/card-stack";
 import {
   MessageResponseCard,
   ContactCard,
-  type ActionPlatform as CardActionPlatform,
   type DisplayMessage,
   type ContactFormData,
   type DraftOption,
@@ -28,6 +26,7 @@ import { useActions } from "@/hooks/useActions";
 import { useElectronPresence } from "@/hooks/useElectronPresence";
 import type { SwipeDirection } from "@/components/swipeable-card";
 import type { Id } from "@prm/convex/convex/_generated/dataModel";
+import type { ActionPlatform } from "@prm/shared";
 
 /** Draft option from Convex (with string label) */
 type ConvexDraftOption = {

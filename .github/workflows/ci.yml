@@ -35,7 +35,7 @@ jobs:
         run: pnpm exec turbo lint
 
       - name: Typecheck
-        run: pnpm exec turbo typecheck
+        run: pnpm exec turbo typecheck --filter='!@prm/convex'
 
       - name: Test
-        run: pnpm exec turbo test
+        run: pnpm exec turbo test --filter='!@prm/convex'
