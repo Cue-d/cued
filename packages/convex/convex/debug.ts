@@ -5,6 +5,104 @@ import { platformValidator } from "./schema";
 import { getAuthenticatedUser } from "./lib/auth";
 
 // ============================================================================
+// LinkedIn Handle Analysis
+// ============================================================================
+
+/**
+ * Analyze LinkedIn handle data to understand URN vs vanity URL distribution.
+ * Returns stats on how many contacts have vanity URLs vs only URN identifiers.
+ * Pass userId for CLI usage, otherwise uses authenticated user.
+ */
+export const getLinkedInHandleStats = query({
+  args: {
+    userId: v.optional(v.id("users")),
+  },
+  handler: async (ctx, args) => {
+    let userId = args.userId;
+    if (!userId) {
+      const user = await getAuthenticatedUser(ctx);
+      if (!user) return null;
+      userId = user._id;
+    }
+
+    // Get all LinkedIn handles for this user
+    const handles = await ctx.db
+      .query("contactHandles")
+      .withIndex("by_user", (q) => q.eq("userId", userId))
+      .collect();
+
+    const linkedInHandles = handles.filter(
+      (h) => h.handleType === "linkedin_handle" || h.handleType === "linkedin_urn"
+    );
+
+    // Group by contact
+    const contactHandleMap = new Map<string, { urns: string[]; vanityUrls: string[] }>();
+    for (const handle of linkedInHandles) {
+      const contactId = handle.contactId as string;
+      if (!contactHandleMap.has(contactId)) {
+        contactHandleMap.set(contactId, { urns: [], vanityUrls: [] });
+      }
+      const entry = contactHandleMap.get(contactId)!;
+      
+      if (handle.handleType === "linkedin_urn") {
+        entry.urns.push(handle.handle);
+      } else if (handle.handleType === "linkedin_handle") {
+        // Check if it looks like a URN ID (starts with ACo) vs vanity URL slug
+        if (handle.handle.startsWith("aco") || handle.handle.match(/^[a-z0-9_-]{20,}$/i)) {
+          // This is a URN-style ID that slipped through
+          entry.urns.push(handle.handle);
+        } else {
+          entry.vanityUrls.push(handle.handle);
+        }
+      }
+    }
+
+    // Calculate stats
+    let contactsWithVanityUrl = 0;
+    let contactsWithOnlyUrn = 0;
+    const sampleContactsWithOnlyUrn: Array<{ contactId: string; urns: string[] }> = [];
+
+    for (const [contactId, data] of contactHandleMap) {
+      if (data.vanityUrls.length > 0) {
+        contactsWithVanityUrl++;
+      } else if (data.urns.length > 0) {
+        contactsWithOnlyUrn++;
+        if (sampleContactsWithOnlyUrn.length < 10) {
+          sampleContactsWithOnlyUrn.push({ contactId, urns: data.urns });
+        }
+      }
+    }
+
+    // Get LinkedIn conversations and messages count
+    const conversations = await ctx.db
+      .query("conversations")
+      .withIndex("by_user_platform", (q) =>
+        q.eq("userId", userId).eq("platform", "linkedin")
+      )
+      .collect();
+
+    const sampleMessages = await ctx.db
+      .query("messages")
+      .withIndex("by_user", (q) => q.eq("userId", userId))
+      .take(10000);
+    const linkedInMessages = sampleMessages.filter((m) => m.platform === "linkedin");
+
+    return {
+      totalLinkedInContacts: contactHandleMap.size,
+      contactsWithVanityUrl,
+      contactsWithOnlyUrn,
+      percentMissingVanityUrl: contactHandleMap.size > 0 
+        ? Math.round((contactsWithOnlyUrn / contactHandleMap.size) * 100) 
+        : 0,
+      totalLinkedInConversations: conversations.length,
+      totalLinkedInMessages: linkedInMessages.length,
+      sampleContactsWithOnlyUrn,
+      totalHandles: linkedInHandles.length,
+    };
+  },
+});
+
+// ============================================================================
 // Debug Queries for Slack Sync
 // ============================================================================
 
