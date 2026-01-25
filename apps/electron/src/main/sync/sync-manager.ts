@@ -48,7 +48,7 @@ interface ConvexAttachment {
 // Performance tuning constants
 const BATCH_SIZE = 1000;
 const CONCURRENT_BATCHES = 5;
-const SYNC_INTERVAL_MS = 30_000;
+const SYNC_INTERVAL_MS = 5_000;
 
 // Current sync version - must match CURRENT_SYNC_VERSION in packages/convex/convex/sync.ts
 const CURRENT_SYNC_VERSION = 1;
