@@ -208,7 +208,7 @@ export class ChatDb {
       FROM message m
       INNER JOIN chat_message_join cmj ON cmj.message_id = m.ROWID
       LEFT JOIN handle h ON h.ROWID = m.handle_id
-      WHERE m.ROWID > ?
+      WHERE m.ROWID > ? AND m.item_type = 0
       ORDER BY m.ROWID
       LIMIT ?
     `);
@@ -238,7 +238,7 @@ export class ChatDb {
       FROM message m
       INNER JOIN chat_message_join cmj ON cmj.message_id = m.ROWID
       LEFT JOIN handle h ON h.ROWID = m.handle_id
-      WHERE m.ROWID <= ? AND m.ROWID > ?
+      WHERE m.ROWID <= ? AND m.ROWID > ? AND m.item_type = 0
       ORDER BY m.ROWID DESC
       LIMIT ?
     `);
