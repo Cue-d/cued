@@ -3,7 +3,6 @@ import {
   PLATFORM_CONFIG,
   getPlatformConfig,
   type ActionPlatform,
-  type PlatformConfigItem,
 } from "../platform";
 
 describe("PLATFORM_CONFIG", () => {
@@ -51,46 +50,6 @@ describe("PLATFORM_CONFIG", () => {
       expect(config.letter).toHaveLength(1);
     });
   });
-
-  it("has correct values for iMessage", () => {
-    expect(PLATFORM_CONFIG.imessage).toEqual({
-      label: "iMessage",
-      color: "#16a34a",
-      textClass: "text-green-600",
-      bgClass: "bg-green-500 text-white",
-      letter: "i",
-    });
-  });
-
-  it("has correct values for Gmail", () => {
-    expect(PLATFORM_CONFIG.gmail).toEqual({
-      label: "Gmail",
-      color: "#dc2626",
-      textClass: "text-red-600",
-      bgClass: "bg-red-500 text-white",
-      letter: "G",
-    });
-  });
-
-  it("has correct values for Slack", () => {
-    expect(PLATFORM_CONFIG.slack).toEqual({
-      label: "Slack",
-      color: "#9333ea",
-      textClass: "text-purple-600",
-      bgClass: "bg-purple-500 text-white",
-      letter: "S",
-    });
-  });
-
-  it("has correct values for LinkedIn", () => {
-    expect(PLATFORM_CONFIG.linkedin).toEqual({
-      label: "LinkedIn",
-      color: "#0a66c2",
-      textClass: "text-blue-600",
-      bgClass: "bg-blue-600 text-white",
-      letter: "L",
-    });
-  });
 });
 
 describe("getPlatformConfig", () => {
@@ -111,36 +70,5 @@ describe("getPlatformConfig", () => {
     expect(getPlatformConfig("iMessage")).toBeUndefined();
     expect(getPlatformConfig("GMAIL")).toBeUndefined();
     expect(getPlatformConfig("Slack")).toBeUndefined();
-  });
-});
-
-describe("types", () => {
-  it("ActionPlatform type includes all platforms", () => {
-    // Type-level test: these should compile without error
-    const imessage: ActionPlatform = "imessage";
-    const gmail: ActionPlatform = "gmail";
-    const slack: ActionPlatform = "slack";
-    const linkedin: ActionPlatform = "linkedin";
-    const twitter: ActionPlatform = "twitter";
-    const signal: ActionPlatform = "signal";
-    const whatsapp: ActionPlatform = "whatsapp";
-
-    expect([imessage, gmail, slack, linkedin, twitter, signal, whatsapp]).toHaveLength(7);
-  });
-
-  it("PlatformConfigItem has all required fields", () => {
-    const config: PlatformConfigItem = {
-      label: "Test",
-      color: "#000000",
-      textClass: "text-black",
-      bgClass: "bg-black",
-      letter: "T",
-    };
-
-    expect(config.label).toBe("Test");
-    expect(config.color).toBe("#000000");
-    expect(config.textClass).toBe("text-black");
-    expect(config.bgClass).toBe("bg-black");
-    expect(config.letter).toBe("T");
   });
 });

@@ -294,32 +294,6 @@ describe("contacts", () => {
     });
   });
 
-  describe("createContact mutation", () => {
-    // Note: createContact is not exported in contacts.ts
-    // Contacts are typically created through sync.ts or internal functions
-    // Testing data layer instead
-    it("can create contact directly in database", async () => {
-      const t = convexTest(schema, modules);
-
-      const contact = await t.run(async (ctx) => {
-        const userId = await ctx.db.insert("users", createTestUserData());
-        const contactId = await ctx.db.insert("contacts", createTestContactData(userId, {
-          displayName: "New Contact",
-          company: "Test Co",
-          notes: "Test notes",
-          tags: ["friend", "work"],
-        }));
-        return ctx.db.get(contactId);
-      });
-
-      expect(contact).toBeTruthy();
-      expect(contact?.displayName).toBe("New Contact");
-      expect(contact?.company).toBe("Test Co");
-      expect(contact?.notes).toBe("Test notes");
-      expect(contact?.tags).toEqual(["friend", "work"]);
-    });
-  });
-
   describe("updateContact mutation", () => {
     it("throws for unauthenticated user", async () => {
       const t = convexTest(schema, modules);

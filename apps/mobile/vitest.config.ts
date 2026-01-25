@@ -22,7 +22,10 @@ export default defineConfig({
       // Mock convex/server to avoid TypeScript-only declaration files
       "convex/server": path.resolve(__dirname, "./src/test/mocks/convex-server.ts"),
       "@prm/convex": path.resolve(__dirname, "../../packages/convex"),
-      "@prm/shared": path.resolve(__dirname, "../../packages/shared"),
+      // Point to source files directly for proper resolution in tests
+      "@prm/shared": path.resolve(__dirname, "../../packages/shared/src/index.ts"),
+      "@prm/env/client": path.resolve(__dirname, "../../packages/env/src/client.ts"),
+      "@prm/env": path.resolve(__dirname, "../../packages/env/src/index.ts"),
       "react-native": path.resolve(__dirname, "./src/test/mocks/react-native.ts"),
     },
   },

@@ -31,9 +31,6 @@ export const SLACK_API_URLS = {
   // Reactions
   reactionsAdd: `${SLACK_API_BASE}/reactions.add`,
   reactionsRemove: `${SLACK_API_BASE}/reactions.remove`,
-
-  // RTM (Real Time Messaging)
-  rtmConnect: `${SLACK_API_BASE}/rtm.connect`,
 } as const
 
 // ============================================================================
@@ -71,20 +68,4 @@ export const RETRY_CONFIG = {
 export const PAGINATION = {
   defaultLimit: 100,
   maxLimit: 1000,
-} as const
-
-// ============================================================================
-// RTM WebSocket
-// ============================================================================
-
-export const RTM_CONFIG = {
-  // Ping interval in milliseconds
-  pingIntervalMs: 30000,
-  // Pong timeout in milliseconds
-  pongTimeoutMs: 5000,
-  // Reconnect delays (exponential backoff)
-  reconnectBaseDelayMs: 1000,
-  reconnectMaxDelayMs: 60000,
-  // Max reconnect attempts before giving up
-  maxReconnectAttempts: 10,
 } as const

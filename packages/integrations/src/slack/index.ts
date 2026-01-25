@@ -11,7 +11,7 @@ export {
   isTokenExpiredError,
 } from './request'
 
-export { SLACK_API_URLS, SLACK_API_BASE, PAGINATION, RTM_CONFIG } from './constants'
+export { SLACK_API_URLS, SLACK_API_BASE, PAGINATION } from './constants'
 
 export type {
   // Auth
@@ -36,14 +36,6 @@ export type {
   SlackFile,
   SlackPostMessageRequest,
   SlackPostMessageResponse,
-  // RTM
-  SlackRTMConnectResponse,
-  SlackRTMEventType,
-  SlackRTMEvent,
-  SlackRTMMessageEvent,
-  SlackRTMReactionEvent,
-  SlackRTMTypingEvent,
-  SlackEventHandlers,
   // Errors
   SlackErrorResponse,
 } from './types'

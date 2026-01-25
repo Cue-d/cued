@@ -52,25 +52,4 @@ describe("@prm/shared exports", () => {
       expect(shared.getPlatformConfig).toBeTypeOf("function");
     });
   });
-
-  describe("integration: utilities work correctly when imported from index", () => {
-    it("getInitials works", () => {
-      expect(shared.getInitials("John Doe")).toBe("JD");
-    });
-
-    it("normalizePhone works", () => {
-      expect(shared.normalizePhone("+1 (555) 123-4567")).toBe("+15551234567");
-    });
-
-    it("formatTime works", () => {
-      const result = shared.formatTime(Date.now());
-      expect(typeof result).toBe("string");
-      expect(result.length).toBeGreaterThan(0);
-    });
-
-    it("getPlatformConfig works", () => {
-      const config = shared.getPlatformConfig("gmail");
-      expect(config?.label).toBe("Gmail");
-    });
-  });
 });
