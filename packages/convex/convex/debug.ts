@@ -32,7 +32,7 @@ export const getLinkedInHandleStats = query({
       .collect();
 
     const linkedInHandles = handles.filter(
-      (h) => h.handleType === "linkedin_handle" || h.handleType === "linkedin_urn"
+      (h) => h.platform === "linkedin" && (h.handleType === "username" || h.handleType === "urn")
     );
 
     // Group by contact
@@ -44,9 +44,9 @@ export const getLinkedInHandleStats = query({
       }
       const entry = contactHandleMap.get(contactId)!;
       
-      if (handle.handleType === "linkedin_urn") {
+      if (handle.handleType === "urn") {
         entry.urns.push(handle.handle);
-      } else if (handle.handleType === "linkedin_handle") {
+      } else if (handle.handleType === "username") {
         // Check if it looks like a URN ID (starts with ACo) vs vanity URL slug
         if (handle.handle.startsWith("aco") || handle.handle.match(/^[a-z0-9_-]{20,}$/i)) {
           // This is a URN-style ID that slipped through

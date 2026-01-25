@@ -618,6 +618,8 @@ const socialContactInput = v.object({
   handle: v.string(),
   profileUrl: v.string(),
   headline: v.union(v.string(), v.null()),
+  /** LinkedIn profile ID (URN ID portion) for matching with messaging contacts */
+  profileId: v.optional(v.string()),
 });
 
 const socialPlatformValidator = v.union(
@@ -664,7 +666,7 @@ async function syncSocialContactsInternal(
     duplicatesSkipped: 0,
   };
 
-  const handleType = platform === "linkedin" ? "linkedin_handle" : "twitter_handle";
+  const handleType = platform === "linkedin" ? "username" : "twitter_handle";
   const newContactsInfo: Array<{
     contactId: Id<"contacts">;
     headline: string | null;
@@ -751,7 +753,7 @@ async function upsertSocialContact(
   ctx: MutationCtx,
   userId: Id<"users">,
   platform: SocialPlatform,
-  handleType: "linkedin_handle" | "twitter_handle",
+  handleType: "username" | "twitter_handle",
   contact: SocialContactInput
 ): Promise<{ isNew: boolean; contactId: Id<"contacts"> }> {
   const normalizedHandle =
@@ -759,10 +761,26 @@ async function upsertSocialContact(
       ? normalizeLinkedInHandle(contact.profileUrl)
       : contact.handle.toLowerCase().replace(/^@/, "");
 
-  const existingHandle = await ctx.db
-    .query("contactHandles")
-    .withIndex("by_user_handle", (q) => q.eq("userId", userId).eq("handle", normalizedHandle))
-    .unique();
+  // For LinkedIn, also create URN for matching with messaging contacts
+  const linkedInUrn = platform === "linkedin" && contact.profileId
+    ? `urn:li:member:${contact.profileId}`.toLowerCase()
+    : null;
+
+  // Try to find existing contact by username handle first
+  let existingHandle = normalizedHandle
+    ? await ctx.db
+        .query("contactHandles")
+        .withIndex("by_user_handle", (q) => q.eq("userId", userId).eq("handle", normalizedHandle))
+        .unique()
+    : null;
+
+  // If not found by username, try to find by URN (for LinkedIn - dedup with messaging contacts)
+  if (!existingHandle && linkedInUrn) {
+    existingHandle = await ctx.db
+      .query("contactHandles")
+      .withIndex("by_user_handle", (q) => q.eq("userId", userId).eq("handle", linkedInUrn))
+      .unique();
+  }
 
   if (existingHandle) {
     const existingContact = await ctx.db.get(existingHandle.contactId);
@@ -770,6 +788,22 @@ async function upsertSocialContact(
       const company = extractCompanyFromHeadline(contact.headline);
       if (company && !existingContact.company) {
         await ctx.db.patch(existingHandle.contactId, { company });
+      }
+      // If we found by URN but don't have username handle, add it
+      if (normalizedHandle && existingHandle.handle !== normalizedHandle) {
+        const hasUsernameHandle = await ctx.db
+          .query("contactHandles")
+          .withIndex("by_user_handle", (q) => q.eq("userId", userId).eq("handle", normalizedHandle))
+          .unique();
+        if (!hasUsernameHandle) {
+          await ctx.db.insert("contactHandles", {
+            userId,
+            contactId: existingHandle.contactId,
+            handleType,
+            handle: normalizedHandle,
+            platform,
+          });
+        }
       }
     }
     return { isNew: false, contactId: existingHandle.contactId };
@@ -782,13 +816,27 @@ async function upsertSocialContact(
     company,
   });
 
-  await ctx.db.insert("contactHandles", {
-    userId,
-    contactId,
-    handleType,
-    handle: normalizedHandle,
-    platform,
-  });
+  // Insert username handle
+  if (normalizedHandle) {
+    await ctx.db.insert("contactHandles", {
+      userId,
+      contactId,
+      handleType,
+      handle: normalizedHandle,
+      platform,
+    });
+  }
+
+  // Also insert URN handle for LinkedIn (for matching with messaging)
+  if (linkedInUrn) {
+    await ctx.db.insert("contactHandles", {
+      userId,
+      contactId,
+      handleType: "urn",
+      handle: linkedInUrn,
+      platform,
+    });
+  }
 
   return { isNew: true, contactId };
 }

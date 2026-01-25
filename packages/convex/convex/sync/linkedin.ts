@@ -487,14 +487,16 @@ async function getOrCreateLinkedInContact(
 ): Promise<Id<"contacts">> {
   // Normalize and store URN as stable identifier (for deduplication)
   const normalizedURN = normalizeMemberURN(participant.entityURN).toLowerCase();
-  const handles: { value: string; type: "linkedin_urn" | "linkedin_handle" }[] = [
-    { value: normalizedURN, type: "linkedin_urn" },
+  const handles: { value: string; type: "urn" | "username" }[] = [
+    { value: normalizedURN, type: "urn" },
   ];
 
   // If profile URL available, also store normalized slug (for display)
   if (participant.profileUrl) {
     const normalizedSlug = normalizeLinkedInHandle(participant.profileUrl);
-    handles.push({ value: normalizedSlug, type: "linkedin_handle" });
+    if (normalizedSlug) {
+      handles.push({ value: normalizedSlug, type: "username" });
+    }
   }
 
   const displayName = `${participant.firstName} ${participant.lastName}`.trim();
@@ -524,15 +526,17 @@ async function getOrCreateLinkedInContactByURN(
 ): Promise<Id<"contacts">> {
   // Normalize and store URN as stable identifier (for deduplication)
   const normalizedURN = normalizeMemberURN(senderURN).toLowerCase();
-  const handles: { value: string; type: "linkedin_urn" | "linkedin_handle" }[] = [
-    { value: normalizedURN, type: "linkedin_urn" },
+  const handles: { value: string; type: "urn" | "username" }[] = [
+    { value: normalizedURN, type: "urn" },
   ];
 
   // If profile URL available, also store normalized slug (for display)
   const hasProfileUrl = profileUrl && profileUrl.trim().length > 0;
   if (hasProfileUrl) {
     const normalizedSlug = normalizeLinkedInHandle(profileUrl);
-    handles.push({ value: normalizedSlug, type: "linkedin_handle" });
+    if (normalizedSlug) {
+      handles.push({ value: normalizedSlug, type: "username" });
+    }
   }
 
   const displayName = `${firstName} ${lastName}`.trim();

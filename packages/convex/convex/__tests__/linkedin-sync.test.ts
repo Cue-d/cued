@@ -655,8 +655,8 @@ describe("LinkedIn Sync", () => {
       // Now creates both URN handle (for deduplication) and slug handle (for display)
       // URN is normalized to urn:li:member:{id} format
       expect(handles).toHaveLength(2);
-      const urnHandle = handles.find((h) => h.handleType === "linkedin_urn");
-      const slugHandle = handles.find((h) => h.handleType === "linkedin_handle");
+      const urnHandle = handles.find((h) => h.handleType === "urn");
+      const slugHandle = handles.find((h) => h.handleType === "username");
       expect(urnHandle?.handle).toBe("urn:li:member:test123"); // Normalized from fs_miniProfile
       expect(slugHandle?.handle).toBe("alice-smith");
     });
