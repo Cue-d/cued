@@ -166,12 +166,7 @@ export default function ActionDetailScreen(): React.JSX.Element {
     [id, router, swipeAction, responseText],
   );
 
-  // Initialize response text from draft
-  const draftText =
-    data?.action?.draftResponse ?? data?.action?.draftOptions?.[0]?.text ?? "";
-  if (responseText === "" && draftText) {
-    setResponseText(draftText);
-  }
+  // Note: Response text starts empty - no auto-drafting
 
   // Loading state
   if (!data) {

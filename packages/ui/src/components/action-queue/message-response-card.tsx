@@ -1,29 +1,25 @@
 "use client"
 
 import * as React from "react"
-import { AlertTriangle } from "lucide-react"
 import {
   getInitials,
   formatRelativeTime,
   type ActionPlatform,
-  type DraftOption,
   type DisplayMessage,
 } from "@prm/shared"
 import { cn } from "../../lib/utils"
 import { Avatar, AvatarFallback } from "../ui/avatar"
 import { Card, CardContent, CardFooter, CardHeader } from "../ui/card"
-import { DraftSelector } from "./message-response-card/draft-selector"
 import { MessageBubble } from "./message-response-card/message-bubble"
 import { PlatformBadge } from "./message-response-card/platform-badge"
 import { ResponseInput } from "./message-response-card/response-input"
 
 /** Re-export types for backwards compatibility */
-export type { ActionPlatform, DraftRiskFlag, DraftOption, DraftLabel, MessageAttachment, DisplayMessage } from "@prm/shared"
+export type { ActionPlatform, MessageAttachment, DisplayMessage } from "@prm/shared"
 
 /** Re-export sub-components for advanced usage */
 export { PlatformBadge, PLATFORM_ICONS, type PlatformBadgeProps } from "./message-response-card/platform-badge"
 export { MessageBubble, ReactionBadges, DeliveryStatus, AttachmentDisplay, type MessageBubbleProps } from "./message-response-card/message-bubble"
-export { DraftSelector, DraftOptionButton, type DraftSelectorProps } from "./message-response-card/draft-selector"
 export { ResponseInput, type ResponseInputProps } from "./message-response-card/response-input"
 
 export interface MessageResponseCardProps {
@@ -47,14 +43,6 @@ export interface MessageResponseCardProps {
   availablePlatforms?: ActionPlatform[]
   /** Called when platform changes */
   onPlatformChange?: (platform: ActionPlatform) => void
-  /** Draft options (new multi-option system) */
-  draftOptions?: DraftOption[]
-  /** Called when a draft option is selected */
-  onOptionSelect?: (option: DraftOption, index: number) => void
-  /** Overall risk level for the action */
-  riskLevel?: "low" | "medium" | "high"
-  /** Whether approval is required before sending */
-  requiresApproval?: boolean
 }
 
 export interface MessageResponseCardRef {
@@ -64,7 +52,7 @@ export interface MessageResponseCardRef {
 /**
  * MessageResponseCard component for action queue.
  * Displays message history and response textarea.
- * Composed of PlatformBadge, MessageBubble, DraftSelector, and ResponseInput.
+ * Composed of PlatformBadge, MessageBubble, and ResponseInput.
  */
 export const MessageResponseCard = React.forwardRef<
   MessageResponseCardRef,
@@ -81,36 +69,11 @@ export const MessageResponseCard = React.forwardRef<
     platform,
     availablePlatforms,
     onPlatformChange,
-    draftOptions,
-    onOptionSelect,
-    riskLevel,
   },
   ref
 ) {
   const textareaRef = React.useRef<HTMLTextAreaElement>(null)
   const scrollContainerRef = React.useRef<HTMLDivElement>(null)
-  const [showOptions, setShowOptions] = React.useState(true)
-
-  // Handle option selection: populate textarea and hide options
-  const handleOptionSelect = React.useCallback(
-    (option: DraftOption, index: number) => {
-      onResponseChange(option.text)
-      setShowOptions(false)
-      onOptionSelect?.(option, index)
-      // Auto-focus the textarea after selecting
-      setTimeout(() => {
-        textareaRef.current?.focus()
-      }, 100)
-    },
-    [onResponseChange, onOptionSelect]
-  )
-
-  // Show options again if text is cleared
-  React.useEffect(() => {
-    if (responseText === "" && draftOptions && draftOptions.length > 0) {
-      setShowOptions(true)
-    }
-  }, [responseText, draftOptions])
 
   React.useImperativeHandle(ref, () => ({
     focusInput: () => {
@@ -211,39 +174,12 @@ export const MessageResponseCard = React.forwardRef<
         </div>
       </CardContent>
 
-      {/* Draft Options */}
-      {draftOptions && draftOptions.length > 0 && showOptions && (
-        <DraftSelector
-          draftOptions={draftOptions}
-          onOptionSelect={handleOptionSelect}
-        />
-      )}
-
-      {/* Risk Warning */}
-      {riskLevel && riskLevel !== "low" && (
-        <div className={cn(
-          "mx-4 mb-2 px-3 py-2 rounded-lg text-xs flex items-center gap-2",
-          riskLevel === "high"
-            ? "bg-red-50 text-red-700 dark:bg-red-950 dark:text-red-300"
-            : "bg-amber-50 text-amber-700 dark:bg-amber-950 dark:text-amber-300"
-        )}>
-          <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
-          <span>
-            {riskLevel === "high"
-              ? "Review carefully before sending"
-              : "Contains commitment or sensitive content"}
-          </span>
-        </div>
-      )}
-
       {/* Response Input */}
       <CardFooter className="p-4 bg-transparent" data-selectable="true">
         <ResponseInput
           value={responseText}
           onChange={onResponseChange}
-          placeholder={draftOptions && draftOptions.length > 0
-            ? "Select an option above or type your own..."
-            : "Type your response... (swipe right to send)"}
+          placeholder="Type your response... (swipe right to send)"
           textareaRef={textareaRef}
         />
       </CardFooter>

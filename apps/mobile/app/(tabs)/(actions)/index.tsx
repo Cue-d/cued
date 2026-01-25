@@ -17,7 +17,6 @@ import {
   ContactCard,
   type DisplayMessage,
   type ContactFormData,
-  type DraftOption,
 } from "@/components/cards";
 import { ErrorBoundary } from "@/components/error-boundary";
 import { SkeletonStack } from "@/components/skeleton-card";
@@ -28,28 +27,12 @@ import type { SwipeDirection } from "@/components/swipeable-card";
 import type { Id } from "@prm/convex/convex/_generated/dataModel";
 import type { ActionPlatform } from "@prm/shared";
 
-/** Draft option from Convex (with string label) */
-type ConvexDraftOption = {
-  text: string;
-  label: string;
-  confidence: number;
-  assumptions: string[];
-  styleSources: string[];
-  riskFlags: { type: string; trigger: string }[];
-};
-
 /** Action type from Convex getPendingActions */
 type EnrichedAction = {
   _id: string;
   type: string;
   status: string;
   priority: number;
-  draftResponse: string | null;
-  draftOptions: ConvexDraftOption[] | null;
-  selectedOptionIndex: number | null;
-  riskLevel: "low" | "medium" | "high" | null;
-  riskFlags: string[] | null;
-  requiresApproval: boolean | null;
   reason: string | null;
   llmReason: string | null;
   createdAt: number;
@@ -144,15 +127,10 @@ export default function ActionsScreen(): React.JSX.Element {
     action: action as EnrichedAction,
   }));
 
-  // Get response text for an action (prefer user edits, then draft options)
+  // Get response text for an action
   const getResponseText = useCallback(
     (action: EnrichedAction): string => {
-      return (
-        responseTexts[action._id] ??
-        action.draftResponse ??
-        action.draftOptions?.[0]?.text ??
-        ""
-      );
+      return responseTexts[action._id] ?? "";
     },
     [responseTexts],
   );
@@ -165,7 +143,7 @@ export default function ActionsScreen(): React.JSX.Element {
           name: action.contactName ?? "",
           company: "",
           tags: "",
-          notes: action.draftResponse ?? "",
+          notes: "",
         }
       );
     },
@@ -287,15 +265,6 @@ export default function ActionsScreen(): React.JSX.Element {
       if (MESSAGE_ACTION_TYPES.includes(action.type)) {
         // Use messages from context for the top card, empty for others
         const messages = isTopCard ? topActionMessages : [];
-        // Use draftOptions from context for top card, or from action directly
-        const rawOptions = isTopCard
-          ? (actionContext?.action?.draftOptions ?? action.draftOptions)
-          : action.draftOptions;
-        // Cast label to the expected union type
-        const options = rawOptions?.map((opt) => ({
-          ...opt,
-          label: opt.label as DraftOption["label"],
-        }));
 
         return (
           <MessageResponseCard
@@ -306,7 +275,6 @@ export default function ActionsScreen(): React.JSX.Element {
             onResponseChange={(text) => handleResponseChange(action._id, text)}
             platform={(action.platform as ActionPlatform) ?? undefined}
             isDesktopOnline={isDesktopOnline}
-            draftOptions={options}
           />
         );
       }
@@ -348,7 +316,6 @@ export default function ActionsScreen(): React.JSX.Element {
       handleContactFormChange,
       topActionMessages,
       isDesktopOnline,
-      actionContext?.action?.draftOptions,
     ],
   );
 

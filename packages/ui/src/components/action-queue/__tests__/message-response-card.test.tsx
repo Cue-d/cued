@@ -3,7 +3,6 @@ import { describe, it, expect, vi } from "vitest";
 import {
   MessageResponseCard,
   type DisplayMessage,
-  type DraftOption,
 } from "../message-response-card";
 
 describe("MessageResponseCard", () => {
@@ -78,97 +77,6 @@ describe("MessageResponseCard", () => {
     expect(screen.getByText("No recent messages")).toBeInTheDocument();
   });
 
-  describe("draft options", () => {
-    const mockDraftOptions: DraftOption[] = [
-      {
-        text: "Sure, I'd be happy to help!",
-        label: "direct",
-        confidence: 0.9,
-        assumptions: [],
-        styleSources: [],
-        riskFlags: [],
-      },
-      {
-        text: "Let me think about it and get back to you.",
-        label: "diplomatic",
-        confidence: 0.85,
-        assumptions: [],
-        styleSources: [],
-        riskFlags: [],
-      },
-    ];
-
-    it("renders draft options when provided", () => {
-      render(
-        <MessageResponseCard
-          {...defaultProps}
-          draftOptions={mockDraftOptions}
-        />
-      );
-
-      expect(screen.getByText("Suggested replies")).toBeInTheDocument();
-      expect(screen.getByText("Sure, I'd be happy to help!")).toBeInTheDocument();
-      expect(
-        screen.getByText("Let me think about it and get back to you.")
-      ).toBeInTheDocument();
-    });
-
-    it("renders draft option labels", () => {
-      render(
-        <MessageResponseCard
-          {...defaultProps}
-          draftOptions={mockDraftOptions}
-        />
-      );
-
-      expect(screen.getByText("Direct")).toBeInTheDocument();
-      expect(screen.getByText("Diplomatic")).toBeInTheDocument();
-    });
-
-    it("calls onOptionSelect and populates textarea when option clicked", () => {
-      const onOptionSelect = vi.fn();
-      const onResponseChange = vi.fn();
-
-      render(
-        <MessageResponseCard
-          {...defaultProps}
-          draftOptions={mockDraftOptions}
-          onOptionSelect={onOptionSelect}
-          onResponseChange={onResponseChange}
-        />
-      );
-
-      const directButton = screen.getByText("Sure, I'd be happy to help!");
-      fireEvent.click(directButton);
-
-      expect(onResponseChange).toHaveBeenCalledWith("Sure, I'd be happy to help!");
-      expect(onOptionSelect).toHaveBeenCalledWith(mockDraftOptions[0], 0);
-    });
-
-    it("shows risk warning for draft options with risk flags", () => {
-      const optionsWithRisk: DraftOption[] = [
-        {
-          text: "Yes, I'll definitely be there at 3pm.",
-          label: "direct",
-          confidence: 0.8,
-          assumptions: [],
-          styleSources: [],
-          riskFlags: [{ type: "commitment", trigger: "definitely be there" }],
-        },
-      ];
-
-      render(
-        <MessageResponseCard
-          {...defaultProps}
-          draftOptions={optionsWithRisk}
-        />
-      );
-
-      expect(screen.getByText(/commitment/i)).toBeInTheDocument();
-      expect(screen.getByText(/"definitely be there"/)).toBeInTheDocument();
-    });
-  });
-
   describe("platform selector", () => {
     it("renders platform badge when platform provided", () => {
       render(
@@ -193,50 +101,6 @@ describe("MessageResponseCard", () => {
 
       // Should show current platform with dropdown trigger
       expect(screen.getByText("iMessage")).toBeInTheDocument();
-    });
-  });
-
-  describe("risk level warnings", () => {
-    it("shows warning for medium risk level", () => {
-      render(
-        <MessageResponseCard
-          {...defaultProps}
-          riskLevel="medium"
-        />
-      );
-
-      expect(
-        screen.getByText(/contains commitment or sensitive content/i)
-      ).toBeInTheDocument();
-    });
-
-    it("shows warning for high risk level", () => {
-      render(
-        <MessageResponseCard
-          {...defaultProps}
-          riskLevel="high"
-        />
-      );
-
-      expect(
-        screen.getByText(/review carefully before sending/i)
-      ).toBeInTheDocument();
-    });
-
-    it("does not show warning for low risk level", () => {
-      render(
-        <MessageResponseCard
-          {...defaultProps}
-          riskLevel="low"
-        />
-      );
-
-      expect(
-        screen.queryByText(/contains commitment or sensitive content/i)
-      ).not.toBeInTheDocument();
-      expect(
-        screen.queryByText(/review carefully before sending/i)
-      ).not.toBeInTheDocument();
     });
   });
 });

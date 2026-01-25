@@ -1,7 +1,7 @@
 import React from "react";
 import { render, screen, fireEvent } from "@testing-library/react";
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { MessageResponseCard, type MessageResponseCardProps, type DisplayMessage, type DraftOption } from "../message-response-card";
+import { MessageResponseCard, type MessageResponseCardProps, type DisplayMessage } from "../message-response-card";
 
 // Ensure React is globally available for JSX transform
 globalThis.React = React;
@@ -247,60 +247,6 @@ describe("MessageResponseCard", () => {
 
       const input = screen.getByTestId("chat-input");
       expect(input.getAttribute("placeholder")).toBe("Message...");
-    });
-  });
-
-  describe("draft options / suggestion chips", () => {
-    const draftOptions: DraftOption[] = [
-      { text: "Sounds good!", label: "direct", confidence: 0.9, assumptions: [], styleSources: [], riskFlags: [] },
-      { text: "Thank you for reaching out.", label: "diplomatic", confidence: 0.85, assumptions: [], styleSources: [], riskFlags: [] },
-      { text: "I'll have to pass on this.", label: "boundary", confidence: 0.8, assumptions: [], styleSources: [], riskFlags: [] },
-    ];
-
-    it("renders draft option chips", () => {
-      render(<MessageResponseCard {...defaultProps} draftOptions={draftOptions} />);
-
-      expect(screen.getByText("Sounds good!")).toBeDefined();
-      expect(screen.getByText("Thank you for reaching out.")).toBeDefined();
-      expect(screen.getByText("I'll have to pass on this.")).toBeDefined();
-    });
-
-    it("does not render chips when no draft options", () => {
-      render(<MessageResponseCard {...defaultProps} draftOptions={[]} />);
-
-      expect(screen.queryByText("Sounds good!")).toBeNull();
-    });
-
-    it("calls onOptionSelect when chip is pressed", () => {
-      const onOptionSelect = vi.fn();
-      render(
-        <MessageResponseCard
-          {...defaultProps}
-          draftOptions={draftOptions}
-          onOptionSelect={onOptionSelect}
-        />
-      );
-
-      // Find and click the first chip's pressable
-      const chip = screen.getByText("Sounds good!");
-      const pressable = chip.closest("pressable");
-      if (pressable) {
-        fireEvent.click(pressable);
-      }
-    });
-
-    it("updates response text when chip is selected", () => {
-      const onResponseChange = vi.fn();
-      render(
-        <MessageResponseCard
-          {...defaultProps}
-          draftOptions={draftOptions}
-          onResponseChange={onResponseChange}
-        />
-      );
-
-      // Chips should be rendered
-      expect(screen.getByText("Sounds good!")).toBeDefined();
     });
   });
 

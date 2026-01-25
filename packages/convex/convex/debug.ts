@@ -347,23 +347,6 @@ export const deleteBatchFiltered = internalMutation({
         return { deleted, hasMore };
       }
 
-      case "userStyleProfiles": {
-        const docs = await ctx.db
-          .query("userStyleProfiles")
-          .withIndex("by_user_platform", (q) => q.eq("userId", userId))
-          .take(batchSize * 2);
-        for (const doc of docs) {
-          if (!filterByPlatform || platforms!.includes(doc.platform as Platform)) {
-            await ctx.db.delete(doc._id);
-            deleted++;
-            if (deleted >= batchSize) break;
-          }
-        }
-        // Continue if: full page fetched (more docs might exist) OR hit deletion limit (didn't scan all fetched docs)
-        const hasMore = docs.length === batchSize * 2 || deleted >= batchSize;
-        return { deleted, hasMore };
-      }
-
       // Non-platform tables (only deleted when no platform filter)
       case "actionAnalysisQueue": {
         if (filterByPlatform) return { deleted: 0, hasMore: false };

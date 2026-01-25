@@ -1,7 +1,7 @@
 "use client"
 
 import * as React from "react"
-import { useQuery, useMutation, useAction } from "convex/react"
+import { useQuery, useMutation } from "convex/react"
 import { api } from "@prm/convex"
 import {
   CardStack,
@@ -11,7 +11,6 @@ import {
   ACTION_FILTER_GROUPS,
   type SwipeDirection,
   type DisplayMessage,
-  type DraftOption,
   type FilterGroup,
   type ContactHandle,
   type MergeSource,
@@ -19,39 +18,12 @@ import {
 import { Button, Skeleton } from "@prm/ui"
 import type { Id } from "@prm/convex"
 
-/** Supported platforms for style extraction */
-type StylePlatform = "imessage" | "gmail" | "slack"
-const STYLE_PLATFORMS: StylePlatform[] = ["imessage", "gmail", "slack"]
-
-/** Platform display names */
-const PLATFORM_LABELS: Record<StylePlatform, string> = {
-  imessage: "iMessage",
-  gmail: "Gmail",
-  slack: "Slack",
-}
-
-/** Draft option from Convex (with string label) */
-interface ConvexDraftOption {
-  text: string
-  label: string
-  confidence: number
-  assumptions: string[]
-  styleSources: string[]
-  riskFlags: { type: string; trigger: string }[]
-}
-
 /** Action type matching enriched actions from getPendingActions */
 interface EnrichedAction {
   _id: Id<"actions">
   type: string
   status: string
   priority: number
-  draftResponse: string | null
-  draftOptions: ConvexDraftOption[] | null
-  selectedOptionIndex: number | null
-  riskLevel: "low" | "medium" | "high" | null
-  riskFlags: string[] | null
-  requiresApproval: boolean | null
   reason: string | null
   llmReason: string | null
   createdAt: number
@@ -115,28 +87,12 @@ export default function ActionsPage() {
     topActionId ? { actionId: topActionId, messageLimit: 15 } : "skip"
   )
 
-  // Mutations and actions
+  // Mutations
   const swipeAction = useMutation(api.actions.swipeAction)
-  const updateDraftResponse = useMutation(api.actions.updateDraftResponse)
   const triggerScan = useMutation(api.actionQueue.triggerScanForUnanswered)
-  const generateDrafts = useAction(api.actions.generateDraftOptions)
-  const extractStyle = useAction(api.actions.extractStyleProfile)
-
-  // Fetch existing style profiles
-  const styleProfiles = useQuery(api.actions.getAllStyleProfiles, {})
 
   // Scan state
   const [scanning, setScanning] = React.useState(false)
-  // Generate drafts state
-  const [generating, setGenerating] = React.useState(false)
-  const [generateError, setGenerateError] = React.useState<string | null>(null)
-  // Extract style state
-  const [extractingStyle, setExtractingStyle] = React.useState<string | null>(null)
-  const [styleResult, setStyleResult] = React.useState<{
-    platform: string
-    profile?: Record<string, unknown>
-    error?: string
-  } | null>(null)
 
   const handleScan = React.useCallback(async () => {
     setScanning(true)
@@ -149,82 +105,18 @@ export default function ActionsPage() {
     }
   }, [triggerScan])
 
-  // Generate draft options for the top action
-  const handleGenerateDrafts = React.useCallback(async () => {
-    if (!topActionId) return
-    setGenerating(true)
-    setGenerateError(null)
-    try {
-      const result = await generateDrafts({ actionId: topActionId })
-      if (!result.success) {
-        setGenerateError(result.error ?? "Failed to generate drafts")
-      }
-    } catch (error) {
-      console.error("Failed to generate drafts:", error)
-      setGenerateError(error instanceof Error ? error.message : "Unknown error")
-    } finally {
-      setGenerating(false)
-    }
-  }, [topActionId, generateDrafts])
-
-  // Extract style profile for a platform
-  const handleExtractStyle = React.useCallback(
-    async (platform: "imessage" | "gmail" | "slack") => {
-      setExtractingStyle(platform)
-      setStyleResult(null)
-      try {
-        const result = await extractStyle({ platform })
-        if (result.success && result.profile) {
-          setStyleResult({ platform, profile: result.profile })
-        } else {
-          setStyleResult({ platform, error: result.error ?? "Failed to extract style" })
-        }
-      } catch (error) {
-        console.error("Failed to extract style:", error)
-        setStyleResult({
-          platform,
-          error: error instanceof Error ? error.message : "Unknown error",
-        })
-      } finally {
-        setExtractingStyle(null)
-      }
-    },
-    [extractStyle]
-  )
-
   // Track response texts locally (optimistic)
   const [responseTexts, setResponseTexts] = React.useState<
     Record<string, string>
   >({})
 
-  // Handle response text changes with debounced server sync
+  // Handle response text changes
   const handleResponseChange = React.useCallback(
     (actionId: string, text: string) => {
       setResponseTexts((prev) => ({ ...prev, [actionId]: text }))
     },
     []
   )
-
-  // Debounced sync to server
-  const syncTimeoutRef = React.useRef<NodeJS.Timeout | null>(null)
-  React.useEffect(() => {
-    if (topActionId && responseTexts[topActionId]) {
-      if (syncTimeoutRef.current) {
-        clearTimeout(syncTimeoutRef.current)
-      }
-      syncTimeoutRef.current = setTimeout(() => {
-        updateDraftResponse({
-          actionId: topActionId,
-          draftResponse: responseTexts[topActionId],
-        }).catch(console.error)
-      }, 500)
-    }
-    return () => {
-      if (syncTimeoutRef.current) {
-        clearTimeout(syncTimeoutRef.current)
-      }
-    }
-  }, [topActionId, responseTexts, updateDraftResponse])
 
   // Handle swipe
   const handleSwipe = React.useCallback(
@@ -282,60 +174,8 @@ export default function ActionsPage() {
 
   return (
     <div className="h-full flex flex-col">
-      {/* Style Profiles Panel - Top Left */}
-      <div className="absolute top-4 left-4 z-10 max-w-sm">
-        <div className="bg-card border rounded-lg p-3 shadow-sm">
-          <div className="text-xs font-medium text-muted-foreground mb-2">
-            Style Profiles
-          </div>
-          <div className="flex flex-wrap gap-2">
-            {STYLE_PLATFORMS.map((platform) => {
-              const hasProfile = styleProfiles?.some((p) => p.platform === platform)
-              const isExtracting = extractingStyle === platform
-              const label = PLATFORM_LABELS[platform]
-              const prefix = hasProfile ? "\u2713 " : "+ "
-
-              return (
-                <Button
-                  key={platform}
-                  variant={hasProfile ? "secondary" : "outline"}
-                  size="sm"
-                  onClick={() => handleExtractStyle(platform)}
-                  disabled={isExtracting}
-                  className="text-xs"
-                >
-                  {isExtracting ? "..." : `${prefix}${label}`}
-                </Button>
-              )
-            })}
-          </div>
-          {styleResult?.error && (
-            <div className="mt-2 text-xs text-destructive">{styleResult.error}</div>
-          )}
-          {styleResult?.profile && !styleResult.error && (
-            <div className="mt-2 text-xs text-muted-foreground">
-              <div>Greeting: {String(styleResult.profile.greetingStyle)}</div>
-              <div>Sign-off: {String(styleResult.profile.signOffStyle)}</div>
-              <div>
-                Formality: {String(styleResult.profile.formalityScore)}/5 |
-                Brevity: {String(styleResult.profile.brevityScore)}/5
-              </div>
-            </div>
-          )}
-        </div>
-      </div>
-
       {/* Header with action buttons and keyboard hints */}
       <div className="absolute top-4 right-4 flex items-center gap-4 z-10">
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={handleGenerateDrafts}
-          disabled={generating || !topActionId}
-          title={generateError ?? undefined}
-        >
-          {generating ? "Generating..." : "Generate Drafts"}
-        </Button>
         <Button
           variant="outline"
           size="sm"
@@ -441,16 +281,12 @@ export default function ActionsPage() {
             )
           }
 
-          // Use local state if available, otherwise fall back to server draft
-          const text =
-            responseTexts[item.id] ??
-            item.action.draftResponse ??
-            responseText ??
-            ""
+          // Use local state if available, otherwise fall back to prop
+          const text = responseTexts[item.id] ?? responseText ?? ""
 
           // For top card, use full context if available
           if (isTop && contextResult) {
-            const { contact, conversation, messages, action: actionContext } = contextResult
+            const { contact, conversation, messages } = contextResult
             // For groups/channels, use conversation displayName; for DMs use contact
             const isGroup = conversation?.conversationType !== "dm"
             const personName = isGroup
@@ -481,13 +317,6 @@ export default function ActionsPage() {
               .find((m) => !m.isFromMe)
             const messageTimestamp = latestReceivedMsg?.sentAt
 
-            // Get draft options from context (most up-to-date) or action
-            const rawOptions = actionContext?.draftOptions ?? item.action.draftOptions
-            const draftOptions: DraftOption[] | undefined = rawOptions?.map((opt) => ({
-              ...opt,
-              label: opt.label as DraftOption["label"],
-            }))
-
             return (
               <MessageResponseCard
                 personName={personName}
@@ -500,9 +329,6 @@ export default function ActionsPage() {
                 }}
                 autoFocus={isTop}
                 className="h-full"
-                draftOptions={draftOptions}
-                riskLevel={actionContext?.riskLevel ?? item.action.riskLevel ?? undefined}
-                requiresApproval={actionContext?.requiresApproval ?? item.action.requiresApproval ?? undefined}
               />
             )
           }

@@ -28,9 +28,6 @@ export {
 
 // Action queue types
 export type {
-  DraftRiskFlag,
-  DraftLabel,
-  DraftOption,
   MessageAttachment,
   DisplayMessage,
   ContactFormData,

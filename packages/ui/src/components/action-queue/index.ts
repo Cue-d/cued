@@ -22,9 +22,6 @@ export type {
   DisplayMessage,
   MessageAttachment,
   ActionPlatform,
-  DraftOption,
-  DraftRiskFlag,
-  DraftLabel,
   ContactFormData,
 } from "@prm/shared"
 
