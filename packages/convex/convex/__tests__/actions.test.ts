@@ -293,79 +293,6 @@ describe("actions", () => {
       expect(result).toBe(0);
     });
   });
-
-  describe("draft options", () => {
-    it("can save and retrieve draft options", async () => {
-      const t = convexTest(schema, modules);
-
-      const action = await t.run(async (ctx) => {
-        const userId = await ctx.db.insert("users", createTestUserData());
-
-        const draftOptions = [
-          {
-            text: "Thanks for your message!",
-            label: "direct",
-            confidence: 0.9,
-            assumptions: [],
-            styleSources: [],
-            riskFlags: [],
-          },
-          {
-            text: "I appreciate you reaching out.",
-            label: "diplomatic",
-            confidence: 0.85,
-            assumptions: [],
-            styleSources: [],
-            riskFlags: [],
-          },
-        ];
-
-        const actionId = await ctx.db.insert("actions", {
-          ...createTestActionData(userId),
-          draftOptions,
-          selectedOptionIndex: 0,
-          draftResponse: draftOptions[0].text,
-        });
-
-        return ctx.db.get(actionId);
-      });
-
-      expect(action?.draftOptions).toHaveLength(2);
-      expect(action?.selectedOptionIndex).toBe(0);
-      expect(action?.draftResponse).toBe("Thanks for your message!");
-    });
-
-    it("can update selected option", async () => {
-      const t = convexTest(schema, modules);
-
-      const result = await t.run(async (ctx) => {
-        const userId = await ctx.db.insert("users", createTestUserData());
-
-        const draftOptions = [
-          { text: "Option 1", label: "direct", confidence: 0.9, assumptions: [], styleSources: [], riskFlags: [] },
-          { text: "Option 2", label: "diplomatic", confidence: 0.85, assumptions: [], styleSources: [], riskFlags: [] },
-        ];
-
-        const actionId = await ctx.db.insert("actions", {
-          ...createTestActionData(userId),
-          draftOptions,
-          selectedOptionIndex: 0,
-          draftResponse: draftOptions[0].text,
-        });
-
-        // Simulate selectDraftOption
-        await ctx.db.patch(actionId, {
-          selectedOptionIndex: 1,
-          draftResponse: draftOptions[1].text,
-        });
-
-        return ctx.db.get(actionId);
-      });
-
-      expect(result?.selectedOptionIndex).toBe(1);
-      expect(result?.draftResponse).toBe("Option 2");
-    });
-  });
 });
 
 /**
@@ -603,31 +530,14 @@ describe("actions API", () => {
         conversationId,
         contactId,
         platform: "imessage",
-        draftResponse: "Test draft",
         reason: "Needs follow up",
         llmReason: "AI determined follow up needed",
-        riskLevel: "low",
-        riskFlags: ["scheduling"],
-        requiresApproval: false,
-        draftOptions: [
-          {
-            text: "Draft 1",
-            label: "direct",
-            confidence: 0.9,
-            assumptions: [],
-            styleSources: [],
-            riskFlags: [],
-          },
-        ],
       });
 
       const action = await t.run(async (ctx) => ctx.db.get(result.actionId));
       expect(action?.type).toBe("follow_up");
       expect(action?.priority).toBe(75);
       expect(action?.platform).toBe("imessage");
-      expect(action?.draftResponse).toBe("Test draft");
-      expect(action?.riskLevel).toBe("low");
-      expect(action?.draftOptions).toHaveLength(1);
     });
 
     it("increments pendingActionCount on user", async () => {
@@ -932,7 +842,6 @@ describe("actions API", () => {
         return ctx.db.insert("actions", createTestActionData(userId, {
           status: "pending",
           type: "respond",
-          draftResponse: "Hello!",
         }));
       });
 
@@ -968,9 +877,6 @@ describe("actions API", () => {
 
       expect(result.success).toBe(true);
       expect(result.responseText).toBe("Custom response");
-
-      const action = await t.run(async (ctx) => ctx.db.get(actionId));
-      expect(action?.draftResponse).toBe("Custom response");
     });
 
     it("handles left swipe for new_connection - sets importance to -1", async () => {
@@ -1043,134 +949,6 @@ describe("actions API", () => {
 
       const user = await t.run(async (ctx) => ctx.db.get(userId));
       expect(user?.pendingActionCount).toBe(0);
-    });
-  });
-
-  describe("selectDraftOption mutation", () => {
-    it("throws for unauthenticated user", async () => {
-      const t = convexTest(schema, modules);
-
-      const actionId = await t.run(async (ctx) => {
-        const userId = await ctx.db.insert("users", createTestUserData());
-        return ctx.db.insert("actions", {
-          ...createTestActionData(userId),
-          draftOptions: [
-            { text: "Option 1", label: "direct", confidence: 0.9, assumptions: [], styleSources: [], riskFlags: [] },
-          ],
-        });
-      });
-
-      await expect(
-        t.mutation(api.actions.selectDraftOption, {
-          actionId,
-          optionIndex: 0,
-        })
-      ).rejects.toThrow("Unauthorized");
-    });
-
-    it("selects draft option and updates draftResponse", async () => {
-      const t = convexTest(schema, modules);
-      const { asUser, userId } = await setupAuthenticatedUser(t);
-
-      const actionId = await t.run(async (ctx) => {
-        return ctx.db.insert("actions", {
-          ...createTestActionData(userId),
-          draftOptions: [
-            { text: "First option", label: "direct", confidence: 0.9, assumptions: [], styleSources: [], riskFlags: [] },
-            { text: "Second option", label: "diplomatic", confidence: 0.85, assumptions: [], styleSources: [], riskFlags: [] },
-          ],
-          selectedOptionIndex: 0,
-          draftResponse: "First option",
-        });
-      });
-
-      const result = await asUser.mutation(api.actions.selectDraftOption, {
-        actionId,
-        optionIndex: 1,
-      });
-
-      expect(result.success).toBe(true);
-      expect(result.selectedText).toBe("Second option");
-
-      const action = await t.run(async (ctx) => ctx.db.get(actionId));
-      expect(action?.selectedOptionIndex).toBe(1);
-      expect(action?.draftResponse).toBe("Second option");
-    });
-
-    it("throws for invalid option index", async () => {
-      const t = convexTest(schema, modules);
-      const { asUser, userId } = await setupAuthenticatedUser(t);
-
-      const actionId = await t.run(async (ctx) => {
-        return ctx.db.insert("actions", {
-          ...createTestActionData(userId),
-          draftOptions: [
-            { text: "Only option", label: "direct", confidence: 0.9, assumptions: [], styleSources: [], riskFlags: [] },
-          ],
-        });
-      });
-
-      await expect(
-        asUser.mutation(api.actions.selectDraftOption, {
-          actionId,
-          optionIndex: 5, // Out of bounds
-        })
-      ).rejects.toThrow("Invalid option index");
-    });
-
-    it("throws when action has no draft options", async () => {
-      const t = convexTest(schema, modules);
-      const { asUser, userId } = await setupAuthenticatedUser(t);
-
-      const actionId = await t.run(async (ctx) => {
-        return ctx.db.insert("actions", createTestActionData(userId));
-      });
-
-      await expect(
-        asUser.mutation(api.actions.selectDraftOption, {
-          actionId,
-          optionIndex: 0,
-        })
-      ).rejects.toThrow("Invalid option index");
-    });
-  });
-
-  describe("updateDraftResponse mutation", () => {
-    it("throws for unauthenticated user", async () => {
-      const t = convexTest(schema, modules);
-
-      const actionId = await t.run(async (ctx) => {
-        const userId = await ctx.db.insert("users", createTestUserData());
-        return ctx.db.insert("actions", createTestActionData(userId));
-      });
-
-      await expect(
-        t.mutation(api.actions.updateDraftResponse, {
-          actionId,
-          draftResponse: "Updated draft",
-        })
-      ).rejects.toThrow("Unauthorized");
-    });
-
-    it("updates draft response text", async () => {
-      const t = convexTest(schema, modules);
-      const { asUser, userId } = await setupAuthenticatedUser(t);
-
-      const actionId = await t.run(async (ctx) => {
-        return ctx.db.insert("actions", createTestActionData(userId, {
-          draftResponse: "Original draft",
-        }));
-      });
-
-      const result = await asUser.mutation(api.actions.updateDraftResponse, {
-        actionId,
-        draftResponse: "Updated draft text",
-      });
-
-      expect(result.success).toBe(true);
-
-      const action = await t.run(async (ctx) => ctx.db.get(actionId));
-      expect(action?.draftResponse).toBe("Updated draft text");
     });
   });
 
