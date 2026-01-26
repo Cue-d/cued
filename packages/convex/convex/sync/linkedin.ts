@@ -617,3 +617,183 @@ async function batchFetchLinkedInMessages(
 
   return results;
 }
+
+// ============================================================================
+// Username Resolution (Public Identifier Lookup)
+// ============================================================================
+
+/**
+ * Validator for username resolution input
+ */
+export const usernameResolutionInput = v.object({
+  memberId: v.string(), // URN ID portion, e.g., "ACoAAEFsIqIB..."
+  publicIdentifier: v.string(), // Vanity URL, e.g., "theotarr"
+});
+
+/**
+ * Find LinkedIn contacts that only have URN handles (missing username).
+ * Returns contacts that need profile lookup to resolve their public identifier.
+ * 
+ * @param ctx - Mutation context
+ * @param userId - User ID
+ * @param limit - Maximum number of contacts to return (default 50)
+ * @returns Contacts needing username resolution, with their URN member ID
+ */
+export async function findContactsMissingUsernames(
+  ctx: MutationCtx,
+  userId: Id<"users">,
+  limit: number = 50
+): Promise<Array<{ contactId: Id<"contacts">; memberId: string; displayName: string }>> {
+  // Get all handles for this user and filter for LinkedIn URNs
+  const allHandles = await ctx.db
+    .query("contactHandles")
+    .withIndex("by_user", (q) => q.eq("userId", userId))
+    .collect();
+
+  // Filter for LinkedIn URN handles
+  const urnHandles = allHandles.filter(
+    (h) => h.platform === "linkedin" && h.handleType === "urn"
+  );
+
+  const contactsNeedingResolution: Array<{
+    contactId: Id<"contacts">;
+    memberId: string;
+    displayName: string;
+  }> = [];
+
+  // Build a set of contact IDs that already have username handles
+  const contactsWithUsernames = new Set(
+    allHandles
+      .filter((h) => h.platform === "linkedin" && h.handleType === "username")
+      .map((h) => h.contactId.toString())
+  );
+
+  for (const urnHandle of urnHandles) {
+    if (contactsNeedingResolution.length >= limit) break;
+
+    // Skip if this contact already has a username handle
+    if (contactsWithUsernames.has(urnHandle.contactId.toString())) {
+      continue;
+    }
+
+    // Extract member ID from URN (e.g., "urn:li:member:ACoAAEFsIqIB..." -> "ACoAAEFsIqIB...")
+    const memberIdMatch = urnHandle.handle.match(
+      /urn:li:(?:fsd_profile|member):([^,)]+)/i
+    );
+    if (memberIdMatch) {
+      const contact = await ctx.db.get(urnHandle.contactId);
+      contactsNeedingResolution.push({
+        contactId: urnHandle.contactId,
+        memberId: memberIdMatch[1],
+        displayName: contact?.displayName ?? "Unknown",
+      });
+    }
+  }
+
+  return contactsNeedingResolution;
+}
+
+/**
+ * Add username handles to LinkedIn contacts that were resolved via profile lookup.
+ * 
+ * @param ctx - Mutation context
+ * @param userId - User ID
+ * @param resolutions - Array of resolved member ID -> public identifier mappings
+ * @returns Number of handles added
+ */
+export async function addResolvedUsernames(
+  ctx: MutationCtx,
+  userId: Id<"users">,
+  resolutions: Array<Infer<typeof usernameResolutionInput>>
+): Promise<{ added: number; skipped: number }> {
+  let added = 0;
+  let skipped = 0;
+
+  for (const { memberId, publicIdentifier } of resolutions) {
+    // Skip empty public identifiers
+    if (!publicIdentifier || publicIdentifier.trim() === "") {
+      skipped++;
+      continue;
+    }
+
+    // Normalize the public identifier
+    const normalizedUsername = normalizeLinkedInHandle(publicIdentifier);
+    if (!normalizedUsername) {
+      skipped++;
+      continue;
+    }
+
+    // Find the URN handle for this member ID
+    const urnValue = `urn:li:member:${memberId}`.toLowerCase();
+    const urnHandle = await ctx.db
+      .query("contactHandles")
+      .withIndex("by_user_handle", (q) =>
+        q.eq("userId", userId).eq("handle", urnValue)
+      )
+      .unique();
+
+    if (!urnHandle) {
+      // Try fsd_profile format
+      const fsdUrnValue = `urn:li:fsd_profile:${memberId}`.toLowerCase();
+      const fsdHandle = await ctx.db
+        .query("contactHandles")
+        .withIndex("by_user_handle", (q) =>
+          q.eq("userId", userId).eq("handle", fsdUrnValue)
+        )
+        .unique();
+
+      if (!fsdHandle) {
+        skipped++;
+        continue;
+      }
+
+      // Check if username already exists for this contact
+      const existingUsername = await ctx.db
+        .query("contactHandles")
+        .withIndex("by_user_handle", (q) =>
+          q.eq("userId", userId).eq("handle", normalizedUsername)
+        )
+        .unique();
+
+      if (existingUsername) {
+        skipped++;
+        continue;
+      }
+
+      // Add the username handle
+      await ctx.db.insert("contactHandles", {
+        userId,
+        contactId: fsdHandle.contactId,
+        handleType: "username",
+        handle: normalizedUsername,
+        platform: "linkedin",
+      });
+      added++;
+    } else {
+      // Check if username already exists for this contact
+      const existingUsername = await ctx.db
+        .query("contactHandles")
+        .withIndex("by_user_handle", (q) =>
+          q.eq("userId", userId).eq("handle", normalizedUsername)
+        )
+        .unique();
+
+      if (existingUsername) {
+        skipped++;
+        continue;
+      }
+
+      // Add the username handle
+      await ctx.db.insert("contactHandles", {
+        userId,
+        contactId: urnHandle.contactId,
+        handleType: "username",
+        handle: normalizedUsername,
+        platform: "linkedin",
+      });
+      added++;
+    }
+  }
+
+  return { added, skipped };
+}

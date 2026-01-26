@@ -60,6 +60,9 @@ import {
   linkedInMessagesBatchInput,
   syncLinkedInConversationsInternal,
   syncLinkedInMessagesInternal,
+  findContactsMissingUsernames,
+  addResolvedUsernames,
+  usernameResolutionInput,
 } from "./sync/linkedin";
 
 // Re-export for backwards compatibility
@@ -887,5 +890,57 @@ export const syncLinkedInMessages = mutation({
 
     const user = await getOrCreateUser(ctx, identity);
     return syncLinkedInMessagesInternal(ctx, user._id, args.messages, args.userURN);
+  },
+});
+
+/**
+ * Find LinkedIn contacts that only have URN handles (missing public identifier/username).
+ * Called after messaging sync to identify contacts needing profile lookup.
+ *
+ * @returns List of contacts with their member ID for profile lookup
+ */
+export const findLinkedInContactsMissingUsernames = query({
+  args: {
+    limit: v.optional(v.number()),
+  },
+  handler: async (ctx, args) => {
+    const identity = await ctx.auth.getUserIdentity();
+    if (!identity) {
+      return { contacts: [] };
+    }
+
+    const user = await findUserByWorkosId(ctx, identity.subject);
+    if (!user) {
+      return { contacts: [] };
+    }
+
+    const contacts = await findContactsMissingUsernames(
+      ctx as unknown as MutationCtx,
+      user._id,
+      args.limit ?? 50
+    );
+    return { contacts };
+  },
+});
+
+/**
+ * Add resolved usernames (public identifiers) to LinkedIn contacts.
+ * Called after profile lookup to update contacts with their vanity URLs.
+ *
+ * @param resolutions - Array of member ID to public identifier mappings
+ * @returns Number of handles added and skipped
+ */
+export const addLinkedInUsernames = mutation({
+  args: {
+    resolutions: v.array(usernameResolutionInput),
+  },
+  handler: async (ctx, args) => {
+    const identity = await ctx.auth.getUserIdentity();
+    if (!identity) {
+      throw new Error("Unauthorized: Must be authenticated to add LinkedIn usernames");
+    }
+
+    const user = await getOrCreateUser(ctx, identity);
+    return addResolvedUsernames(ctx, user._id, args.resolutions);
   },
 });
