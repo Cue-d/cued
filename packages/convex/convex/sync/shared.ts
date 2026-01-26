@@ -137,6 +137,14 @@ export function normalizeHandle(handle: string): string {
 }
 
 /**
+ * Check if a string is a LinkedIn member ID (not a vanity URL).
+ * Member IDs start with "ACo" and contain underscores, e.g., "ACoAAEFsIqIBOE41g26VjbAiCGu9BF3oH1_wtOw"
+ */
+function isLinkedInMemberId(value: string): boolean {
+  return value.startsWith("ACo") && value.includes("_");
+}
+
+/**
  * Validate a LinkedIn handle format.
  * LinkedIn handles: alphanumeric + hyphens, 3-100 characters.
  */
@@ -148,6 +156,7 @@ function isValidLinkedInHandle(handle: string): boolean {
  * Normalize LinkedIn handle to canonical format for consistent deduplication.
  * Extracts username from URL or returns cleaned handle.
  * Returns: lowercase username (e.g., "johndoe") or empty string if invalid.
+ * Note: Returns empty for member IDs (not vanity URLs) - this is expected behavior.
  */
 export function normalizeLinkedInHandle(input: string): string {
   if (!input) return "";
@@ -157,6 +166,10 @@ export function normalizeLinkedInHandle(input: string): string {
     const handle = match[1];
     if (isValidLinkedInHandle(handle)) {
       return handle.toLowerCase();
+    }
+    // Member IDs (e.g., ACoAAEFsIqIB...) are not vanity URLs - silently return empty
+    if (isLinkedInMemberId(handle)) {
+      return "";
     }
     console.warn(`[LinkedIn] Invalid handle extracted from URL: ${handle}`);
     return "";
