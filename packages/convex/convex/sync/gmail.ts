@@ -14,6 +14,7 @@ import {
   scheduleOutgoingMessageEvents,
   SEVEN_DAYS_MS,
   logSyncError,
+  shouldUpdateDisplayName,
 } from "./shared";
 import { batchFetchConversations, batchFetchMessages } from "./batch-utils";
 
@@ -580,13 +581,9 @@ async function upsertGoogleContact(
     if (existingContact) {
       const updates: { displayName?: string; company?: string } = {};
 
-      // Update display name if current is just a handle/placeholder
-      if (
-        contact.name &&
-        (existingContact.displayName.includes("@") ||
-          existingContact.displayName.startsWith("+") ||
-          existingContact.displayName.match(/^\d+$/))
-      ) {
+      // Update display name if current is placeholder and we have a better one
+      const primaryHandle = handles[0]?.value ?? existingContact.displayName;
+      if (shouldUpdateDisplayName(existingContact.displayName, contact.name, primaryHandle)) {
         updates.displayName = contact.name;
       }
 
