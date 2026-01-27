@@ -26,10 +26,22 @@ vi.mock('electron', () => ({
   },
 }))
 
-import { LinkedInSyncManager } from '../linkedin-sync'
-import type { LinkedInClient, ConversationsResult, MessagesResult } from '../../linkedin-api/client'
-import type { Conversation, Message, MessagingParticipant, PagingMetadata } from '../../linkedin-api/types'
-import { LinkedInAuthError } from '../../linkedin-api/request'
+// Mock @prm/shared for normalizeConversationURN
+vi.mock('@prm/shared', async (importOriginal) => {
+  const original = await importOriginal<typeof import('@prm/shared')>()
+  return {
+    ...original,
+    // Normalize fsd_conversation to fs_conversation (matches real implementation)
+    normalizeConversationURN: vi.fn((urn: string) =>
+      urn.replace('fsd_conversation', 'fs_conversation')
+    ),
+  }
+})
+
+import { LinkedInSyncManager } from '../sync'
+import type { LinkedInClient, ConversationsResult, MessagesResult } from '../api/client'
+import type { Conversation, Message, MessagingParticipant, PagingMetadata } from '../api/types'
+import { LinkedInAuthError } from '../api/request'
 
 // Mock the Convex client
 vi.mock('convex/browser', () => ({
@@ -54,9 +66,9 @@ vi.mock('@prm/convex', () => ({
   },
 }))
 
-// Mock the shared module to bypass auth checks
-vi.mock('../shared', async (importOriginal) => {
-  const original = await importOriginal<typeof import('../shared')>()
+// Mock the cursor module to bypass auth checks
+vi.mock('../../../sync/cursor', async (importOriginal) => {
+  const original = await importOriginal<typeof import('../../../sync/cursor')>()
   return {
     ...original,
     setConvexAuth: vi.fn().mockResolvedValue('mock-access-token'),
@@ -67,12 +79,12 @@ vi.mock('../shared', async (importOriginal) => {
 })
 
 // Mock the messages module to avoid importing actual API calls
-vi.mock('../../linkedin-api/messages', () => ({
+vi.mock('../api/messages', () => ({
   getMessages: vi.fn(),
   getMessagesBefore: vi.fn(),
 }))
 
-import { getMessages, getMessagesBefore } from '../../linkedin-api/messages'
+import { getMessages, getMessagesBefore } from '../api/messages'
 
 // ============================================================================
 // Test Helpers

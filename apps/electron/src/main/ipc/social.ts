@@ -5,25 +5,25 @@
  */
 
 import { ipcMain, BrowserWindow } from "electron";
-import { LinkedInScraper, type LinkedInConnection } from "../sync/linkedin";
 import {
+  LinkedInScraper,
   getLinkedInSyncManager,
+  type LinkedInConnection,
   type LinkedInSyncProgress,
-} from "../sync/linkedin-sync";
+} from "../platforms/linkedin";
 import {
   getSlackSyncManager,
   getAllSlackSyncManagers,
   removeSlackSyncManager,
   initializeAllSlackSyncManagers,
-  type SlackSyncProgress,
-} from "../sync/slack-sync";
-import { openSlackLogin, clearSlackSession } from "../auth/slack-login";
-import {
+  openSlackLogin,
+  clearSlackSession,
   getSlackCredentials,
   getAllSlackCredentials,
   clearSlackCredentials,
   deleteSlackCredentials,
-} from "../auth/slack-credentials";
+  type SlackSyncProgress,
+} from "../platforms/slack";
 import { getAdapter } from "../adapters";
 import { getValidAccessToken, forceRefreshToken } from "../auth";
 import { electronEnv } from "@prm/env/electron";

@@ -11,7 +11,7 @@ import { execSync } from "child_process";
 import { accessSync, constants, existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from "fs";
 import { homedir } from "os";
 import { dirname, join } from "path";
-import { ResolvedContact } from "./types";
+import { ResolvedContact } from "../imessage/types";
 import { normalizePhone, getPhoneVariants } from "@prm/shared";
 
 /** Default cache directory for contacts */

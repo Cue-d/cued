@@ -1,3 +1,3 @@
 export type * from "./imessage/index";
 export * from "./nango/index";
-export * from "./slack/index";
+// Slack integration moved to apps/electron/src/main/platforms/slack/

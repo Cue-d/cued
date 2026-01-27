@@ -7,9 +7,9 @@ import type {
   QueuedMessage,
   SendResult,
 } from "@prm/shared";
-import { getSlackSyncManager, getAllSlackSyncManagers } from "../sync/slack-sync";
-import { SlackRateLimitError } from "@prm/integrations";
-import { isAuthError } from "../auth/auth-utils";
+import { getSlackSyncManager, getAllSlackSyncManagers } from "./sync";
+import { SlackRateLimitError } from "./api";
+import { isAuthError } from "../../auth/auth-utils";
 
 /** Permanent Slack errors that should not be retried */
 const PERMANENT_ERRORS = [

@@ -33,26 +33,26 @@ import {
   isTokenExpiredError,
   type SlackConversation,
   type SlackMessage,
-} from '@prm/integrations'
-import { isAuthError, withAuthRetry } from '../auth/auth-utils'
-import { getAuthState } from '../auth/auth-manager'
+} from './api'
+import { isAuthError, withAuthRetry } from '../../auth/auth-utils'
+import { getAuthState } from '../../auth/auth-manager'
 import {
   getSlackCredentials,
   getAllSlackCredentials,
   saveSlackCredentials,
   deleteSlackCredentials,
   type SlackStoredCredentials,
-} from '../auth/slack-credentials'
-import { getSyncDebugLogger } from './sync-debug-logger'
+} from './auth'
+import { getSyncDebugLogger } from '../../sync/debug-logger'
 import {
   createConvexClient,
   loadCursor,
   saveCursor,
   clearCursor,
-  createSyncGuard,
   createAuthRetryOptions,
   setConvexAuth,
-} from './shared'
+} from '../../sync/cursor'
+import { createSyncGuard } from '../../sync/guard'
 
 // ============================================================================
 // Constants

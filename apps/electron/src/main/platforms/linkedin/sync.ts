@@ -7,22 +7,22 @@
 import { ConvexHttpClient } from 'convex/browser'
 import { api } from '@prm/convex'
 import { normalizeConversationURN } from '@prm/shared'
-import { isAuthError, withAuthRetry } from '../auth/auth-utils'
-import type { LinkedInClient } from '../linkedin-api/client'
-import type { Conversation, Message, EventHandlers } from '../linkedin-api/types'
-export type { Message } from '../linkedin-api/types'
-import { getMessages, getMessagesBefore } from '../linkedin-api/messages'
-import { getProfilesByMemberIds } from '../linkedin-api/profile'
-import { getSyncDebugLogger, type FilteredMessageLog } from './sync-debug-logger'
+import { withAuthRetry } from '../../auth/auth-utils'
+import type { LinkedInClient } from './api/client'
+import type { Conversation, Message, EventHandlers } from './api/types'
+export type { Message } from './api/types'
+import { getMessages, getMessagesBefore } from './api/messages'
+import { getProfilesByMemberIds } from './api/profile'
+import { getSyncDebugLogger, type FilteredMessageLog } from '../../sync/debug-logger'
 import {
   createConvexClient,
   loadCursor,
   saveCursor,
   clearCursor,
-  createSyncGuard,
   createAuthRetryOptions,
   setConvexAuth,
-} from './shared'
+} from '../../sync/cursor'
+import { createSyncGuard } from '../../sync/guard'
 
 // ============================================================================
 // Constants

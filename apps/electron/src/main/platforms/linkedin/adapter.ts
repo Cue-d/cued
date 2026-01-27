@@ -7,9 +7,9 @@ import type {
   QueuedMessage,
   SendResult,
 } from "@prm/shared";
-import { getLinkedInSyncManager } from "../sync/linkedin-sync.js";
-import { sendMessage } from "../linkedin-api/messages.js";
-import { getSyncDebugLogger } from "../sync/sync-debug-logger.js";
+import { getLinkedInSyncManager } from "./sync";
+import { sendMessage } from "./api/messages";
+import { getSyncDebugLogger } from "../../sync/debug-logger";
 
 /**
  * Determine if an error is retryable (transient) vs permanent.

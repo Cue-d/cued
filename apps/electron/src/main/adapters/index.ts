@@ -4,9 +4,9 @@
  */
 import type { ActionPlatform, PlatformAdapter } from "@prm/shared";
 
-import { IMessageAdapter } from "./imessage-adapter.js";
-import { LinkedInAdapter } from "./linkedin-adapter.js";
-import { SlackAdapter } from "./slack-adapter.js";
+import { IMessageAdapter } from "../platforms/imessage/adapter";
+import { LinkedInAdapter } from "../platforms/linkedin/adapter";
+import { SlackAdapter } from "../platforms/slack/adapter";
 
 /**
  * Singleton adapter instances.
@@ -93,6 +93,6 @@ export function getSupportedPlatforms(): ActionPlatform[] {
 }
 
 // Re-export adapter classes for testing
-export { IMessageAdapter } from "./imessage-adapter.js";
-export { LinkedInAdapter } from "./linkedin-adapter.js";
-export { SlackAdapter } from "./slack-adapter.js";
+export { IMessageAdapter } from "../platforms/imessage/adapter";
+export { LinkedInAdapter } from "../platforms/linkedin/adapter";
+export { SlackAdapter } from "../platforms/slack/adapter";

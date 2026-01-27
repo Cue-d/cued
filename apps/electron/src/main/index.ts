@@ -16,17 +16,15 @@ import {
   signOut,
   setOnTokenRefreshed,
 } from "./auth";
-import { getSyncManager, type SyncProgress } from "./sync/sync-manager";
-import { getContactsWatcher } from "./sync/contacts-watcher";
-import { syncContactsToConvex } from "./sync/contacts-sync";
+import { getSyncManager, type SyncProgress } from "./platforms/imessage";
+import { getContactsWatcher, syncContactsToConvex } from "./platforms/contacts";
 import { getHeartbeatManager } from "./sync/presence";
 import { setupSocialIpcHandlers, cleanupSocialScrapers, getLinkedInScraper } from "./ipc/social";
-import { getLinkedInSyncManager } from "./sync/linkedin-sync";
+import { getLinkedInSyncManager } from "./platforms/linkedin";
 import { getMessageQueueProcessor } from "./queue/message-queue-processor";
 import { getReactiveConvexClient } from "./convex-client";
-import { getSlackSyncManager } from "./sync/slack-sync";
-import { getAllSlackCredentials } from "./auth/slack-credentials";
-import { getSyncCoordinator } from "./sync/sync-coordinator";
+import { getSlackSyncManager, getAllSlackCredentials } from "./platforms/slack";
+import { getSyncCoordinator } from "./sync/coordinator";
 import { getTrayManager, type TrayStatus } from "./tray";
 import { getPowerManager } from "./power";
 import { getSettingsManager, SettingsManager } from "./settings";

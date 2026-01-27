@@ -4,7 +4,7 @@
 import { BrowserWindow, session, safeStorage, app } from 'electron'
 import { existsSync, readFileSync, writeFileSync, mkdirSync, unlinkSync } from 'fs'
 import { dirname, join } from 'path'
-import type { Cookie } from '../linkedin-api/types'
+import type { Cookie } from './api/types'
 
 export interface LinkedInLoginResult {
   success: boolean

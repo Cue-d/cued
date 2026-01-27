@@ -7,7 +7,7 @@
 
 import { ChildProcess, spawn } from "child_process";
 import { EventEmitter } from "events";
-import { isSwiftContactsAvailable, getContactsManager } from "./contacts";
+import { isSwiftContactsAvailable, getContactsManager } from "./manager";
 
 /** Watch event types from the Swift CLI */
 interface WatchEvent {

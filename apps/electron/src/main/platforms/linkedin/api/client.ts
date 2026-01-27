@@ -379,7 +379,7 @@ export class LinkedInClient {
    * @param memberUrn - The member URN or ID to resolve
    * @returns Promise resolving to profile lookup result
    */
-  async getProfileByMemberUrn(memberUrn: string): Promise<import('./profile').ProfileLookupResult> {
+  async getProfileByMemberUrn(memberUrn: string): Promise<import('./profile').ProfileLookupResult | null> {
     const { getProfileByMemberUrn } = await import('./profile')
     return getProfileByMemberUrn(this, memberUrn)
   }

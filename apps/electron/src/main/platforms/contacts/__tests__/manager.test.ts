@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, vi, afterEach } from "vitest";
-import { ContactsManager, ContactsError, ContactsAccessDeniedError, isSwiftContactsAvailable } from "../contacts";
+import { ContactsManager, ContactsError, ContactsAccessDeniedError, isSwiftContactsAvailable } from "../manager";
 
 // Mock fs module
 vi.mock("fs", async () => {

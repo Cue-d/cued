@@ -19,20 +19,20 @@
 
 import { ConvexHttpClient } from "convex/browser";
 import { api } from "@prm/convex";
-import { withAuthRetry } from "../auth/auth-utils";
+import { withAuthRetry } from "../../auth/auth-utils";
 import { electronEnv } from "@prm/env/electron";
 import { ChatDb } from "./chat-db";
-import { getContactsManager } from "./contacts";
-import { getSyncDebugLogger } from "./sync-debug-logger";
+import { getContactsManager } from "../contacts";
+import { getSyncDebugLogger } from "../../sync/debug-logger";
 import {
   createConvexClient,
   loadCursor,
   saveCursor,
-  createSyncGuard,
   createAuthRetryOptions,
   setConvexAuth,
-} from "./shared";
-import { getValidAccessToken } from "../auth/auth-manager";
+} from "../../sync/cursor";
+import { createSyncGuard } from "../../sync/guard";
+import { getValidAccessToken } from "../../auth/auth-manager";
 
 // Performance tuning constants
 const BATCH_SIZE = 1000;

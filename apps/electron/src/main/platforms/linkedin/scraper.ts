@@ -6,9 +6,9 @@ import {
   loadStoredCookies,
   checkStoredLoginStatus,
   clearLinkedInSession,
-} from '../auth/linkedin-login'
-import { LinkedInClient, getConnections } from '../linkedin-api'
-import type { Cookie, Connection } from '../linkedin-api'
+} from './auth'
+import { LinkedInClient, getConnections } from './api'
+import type { Cookie, Connection } from './api'
 
 export interface LinkedInConnection {
   name: string

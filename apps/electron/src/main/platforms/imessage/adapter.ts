@@ -9,7 +9,7 @@ import type {
   QueuedMessage,
   SendResult,
 } from "@prm/shared";
-import { getSyncManager } from "../sync/sync-manager.js";
+import { getSyncManager } from "./sync";
 
 const execAsync = promisify(exec);
 

@@ -63,6 +63,9 @@ export async function getProfileByMemberId(
   return results[0] ?? null
 }
 
+/** Alias for getProfileByMemberId (for URN-based lookups) */
+export const getProfileByMemberUrn = getProfileByMemberId
+
 /**
  * Batch look up profiles by member IDs to get public identifiers.
  * More efficient than individual lookups. Limited to 50 at a time.
