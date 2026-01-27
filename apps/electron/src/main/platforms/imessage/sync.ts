@@ -75,12 +75,12 @@ export interface SyncState {
   lastContactsSyncAt: number | null;
 }
 
-export interface SyncManagerOptions {
+export interface IMessageSyncManagerOptions {
   onProgress?: (progress: SyncProgress) => void;
   syncContacts?: () => Promise<{ contactsCount: number }>;
 }
 
-export class SyncManager {
+export class IMessageSyncManager {
   private chatDb: ChatDb | null = null;
   private client: ConvexHttpClient;
   private intervalId: NodeJS.Timeout | null = null;
@@ -90,10 +90,10 @@ export class SyncManager {
     status: "idle",
     totalMessagesSynced: 0,
   };
-  private options: SyncManagerOptions;
+  private options: IMessageSyncManagerOptions;
   private cursorState: CursorState = { cursor: 0, updatedAt: Date.now() };
 
-  constructor(options: SyncManagerOptions = {}) {
+  constructor(options: IMessageSyncManagerOptions = {}) {
     this.options = options;
     this.client = createConvexClient();
   }
@@ -105,7 +105,7 @@ export class SyncManager {
   private async refreshAuth(): Promise<string | null> {
     const token = await setConvexAuth(this.client);
     if (!token) {
-      console.warn("[SyncManager] No auth token available");
+      console.warn("[IMessageSyncManager] No auth token available");
     }
     return token;
   }
@@ -113,7 +113,7 @@ export class SyncManager {
   async start(): Promise<void> {
     if (this.intervalId) return;
 
-    console.log("[SyncManager] Starting background sync...");
+    console.log("[IMessageSyncManager] Starting background sync...");
 
     if (!this.isInitialized) {
       await this.refreshAuth();
@@ -144,7 +144,7 @@ export class SyncManager {
       const logger = getSyncDebugLogger();
 
       if (recoveryReason) {
-        console.log(`[SyncManager] Recovery triggered: ${recoveryReason}`);
+        console.log(`[IMessageSyncManager] Recovery triggered: ${recoveryReason}`);
         logger.logSyncEvent({
           platform: "imessage",
           event: "sync_start",
@@ -161,7 +161,7 @@ export class SyncManager {
         const chatDb = this.getChatDb();
         const maxRowid = chatDb.getMaxMessageRowid();
         console.log(
-          `[SyncManager] Full sync initialized: will fetch ${maxRowid} messages DESC`
+          `[IMessageSyncManager] Full sync initialized: will fetch ${maxRowid} messages DESC`
         );
 
         logger.logCursorState("imessage", {
@@ -174,17 +174,17 @@ export class SyncManager {
         if (this.options.syncContacts) {
           try {
             console.log(
-              "[SyncManager] Running contacts sync as part of recovery..."
+              "[IMessageSyncManager] Running contacts sync as part of recovery..."
             );
             const contactResult = await this.options.syncContacts();
             console.log(
-              `[SyncManager] Recovery contacts sync complete: ${contactResult.contactsCount} contacts`
+              `[IMessageSyncManager] Recovery contacts sync complete: ${contactResult.contactsCount} contacts`
             );
             this.updateProgress({
               totalContactsSynced: contactResult.contactsCount,
             });
           } catch (e) {
-            console.warn("[SyncManager] Recovery contacts sync failed:", e);
+            console.warn("[IMessageSyncManager] Recovery contacts sync failed:", e);
           }
         }
 
@@ -198,7 +198,7 @@ export class SyncManager {
           updatedAt: cloudCursor.lastSyncAt ?? Date.now(),
         };
         console.log(
-          `[SyncManager] Cursor restored from cloud: ${this.cursorState.cursor}`
+          `[IMessageSyncManager] Cursor restored from cloud: ${this.cursorState.cursor}`
         );
       }
 
@@ -211,7 +211,7 @@ export class SyncManager {
     } catch (e: unknown) {
       const message = e instanceof Error ? e.message : String(e);
       console.warn(
-        "[SyncManager] Cloud cursor fetch failed, starting fresh:",
+        "[IMessageSyncManager] Cloud cursor fetch failed, starting fresh:",
         message
       );
       this.cursorState = { cursor: 0, updatedAt: Date.now() };
@@ -238,13 +238,13 @@ export class SyncManager {
     const serverCount = syncState?.totalContactsSynced ?? 0;
 
     console.log(
-      `[SyncManager] Recovery check: local=${localContactsCount}, server=${serverCount}`
+      `[IMessageSyncManager] Recovery check: local=${localContactsCount}, server=${serverCount}`
     );
 
     // Skip if server has no contacts yet (initial sync)
     if (serverCount === 0) {
       console.log(
-        `[SyncManager] Skipping recovery: serverCount=0 (initial sync)`
+        `[IMessageSyncManager] Skipping recovery: serverCount=0 (initial sync)`
       );
       return null;
     }
@@ -252,7 +252,7 @@ export class SyncManager {
     // Skip if local has no contacts (can't determine mismatch)
     if (localContactsCount === 0) {
       console.log(
-        `[SyncManager] Skipping recovery: localCount=0 (no local contacts)`
+        `[IMessageSyncManager] Skipping recovery: localCount=0 (no local contacts)`
       );
       return null;
     }
@@ -261,7 +261,7 @@ export class SyncManager {
     // This can happen when new contacts are added locally but not yet synced
     if (localContactsCount > serverCount) {
       console.log(
-        `[SyncManager] Skipping recovery: local > server (pending sync)`
+        `[IMessageSyncManager] Skipping recovery: local > server (pending sync)`
       );
       return null;
     }
@@ -291,10 +291,10 @@ export class SyncManager {
       const contactsManager = getContactsManager();
       await contactsManager.fetchContacts(false);
       console.log(
-        `[SyncManager] Local contacts loaded: ${contactsManager.getCacheSize()}`
+        `[IMessageSyncManager] Local contacts loaded: ${contactsManager.getCacheSize()}`
       );
     } catch (e) {
-      console.warn("[SyncManager] Failed to preload contacts:", e);
+      console.warn("[IMessageSyncManager] Failed to preload contacts:", e);
     }
   }
 
@@ -310,7 +310,7 @@ export class SyncManager {
       this.intervalId = null;
     }
     this.closeChatDb();
-    console.log("[SyncManager] Stopped background sync");
+    console.log("[IMessageSyncManager] Stopped background sync");
   }
 
   /**
@@ -365,7 +365,7 @@ export class SyncManager {
       if (messagesSynced > 0) {
         this.triggerMemoryProcessing().catch((e) => {
           console.warn(
-            "[SyncManager] Memory processing failed (non-blocking):",
+            "[IMessageSyncManager] Memory processing failed (non-blocking):",
             e
           );
         });
@@ -377,7 +377,7 @@ export class SyncManager {
       });
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : String(error);
-      console.error("[SyncManager] Sync error:", message);
+      console.error("[IMessageSyncManager] Sync error:", message);
       logger.logSyncError("imessage", message);
       this.updateProgress({
         status: "error",
@@ -399,7 +399,7 @@ export class SyncManager {
     cursor: number,
     maxRowid: number
   ): Promise<number> {
-    console.log(`[SyncManager] Sync DESC: from ${maxRowid} down to ${cursor}`);
+    console.log(`[IMessageSyncManager] Sync DESC: from ${maxRowid} down to ${cursor}`);
 
     const totalStart = performance.now();
     const estimatedTotal = maxRowid - cursor;
@@ -457,7 +457,7 @@ export class SyncManager {
       const firstBatch = batchesToProcess[0].batchNum;
       const lastBatch = batchesToProcess[batchesToProcess.length - 1].batchNum;
       console.log(
-        `[SyncManager] DESC batches ${firstBatch}-${lastBatch}: ${batchMsgCount} msgs (${Math.round(batchTime)}ms, ${rate}/s)`
+        `[IMessageSyncManager] DESC batches ${firstBatch}-${lastBatch}: ${batchMsgCount} msgs (${Math.round(batchTime)}ms, ${rate}/s)`
       );
 
       // Update upper bound to continue from lowest processed ROWID
@@ -477,7 +477,7 @@ export class SyncManager {
     const overallRate =
       totalTime > 0 ? Math.round(totalMessagesSynced / (totalTime / 1000)) : 0;
     console.log(
-      `[SyncManager] DESC sync complete: ${totalMessagesSynced} msgs in ${Math.round(totalTime / 1000)}s (${overallRate}/s overall)`
+      `[IMessageSyncManager] DESC sync complete: ${totalMessagesSynced} msgs in ${Math.round(totalTime / 1000)}s (${overallRate}/s overall)`
     );
 
     this.updateProgress({
@@ -505,7 +505,7 @@ export class SyncManager {
         createAuthRetryOptions(this.client)
       );
     } catch (e) {
-      console.warn("[SyncManager] Failed to update sync metadata:", e);
+      console.warn("[IMessageSyncManager] Failed to update sync metadata:", e);
     }
   }
 
@@ -571,7 +571,7 @@ export class SyncManager {
 
     if (result.errors.length > 0) {
       console.warn(
-        `[SyncManager] Batch ${batchNum} errors:`,
+        `[IMessageSyncManager] Batch ${batchNum} errors:`,
         result.errors.slice(0, 3)
       );
       for (const error of result.errors) {
@@ -605,7 +605,7 @@ export class SyncManager {
     const chatDb = this.getChatDb();
     const maxRowid = chatDb.getMaxMessageRowid();
     console.log(
-      `[SyncManager] Cursor reset, next sync will be full sync DESC (${maxRowid} messages)`
+      `[IMessageSyncManager] Cursor reset, next sync will be full sync DESC (${maxRowid} messages)`
     );
   }
 
@@ -613,11 +613,11 @@ export class SyncManager {
    * Force a full re-sync (messages + contacts) by resetting both local and server state.
    */
   async forceFullSync(): Promise<void> {
-    console.log("[SyncManager] Force full sync triggered");
+    console.log("[IMessageSyncManager] Force full sync triggered");
 
     const token = await this.refreshAuth();
     if (!token) {
-      console.error("[SyncManager] Cannot force sync: not authenticated");
+      console.error("[IMessageSyncManager] Cannot force sync: not authenticated");
       this.updateProgress({
         status: "error",
         error: "Not authenticated",
@@ -634,9 +634,9 @@ export class SyncManager {
           }),
         createAuthRetryOptions(this.client)
       );
-      console.log("[SyncManager] Server sync state reset");
+      console.log("[IMessageSyncManager] Server sync state reset");
     } catch (e) {
-      console.warn("[SyncManager] Failed to reset server sync state:", e);
+      console.warn("[IMessageSyncManager] Failed to reset server sync state:", e);
     }
 
     await this.saveCursorState({ cursor: 0, updatedAt: Date.now() });
@@ -644,7 +644,7 @@ export class SyncManager {
     const chatDb = this.getChatDb();
     const maxRowid = chatDb.getMaxMessageRowid();
     console.log(
-      `[SyncManager] Force full sync: will fetch ${maxRowid} messages DESC`
+      `[IMessageSyncManager] Force full sync: will fetch ${maxRowid} messages DESC`
     );
 
     this.updateProgress({
@@ -659,17 +659,17 @@ export class SyncManager {
     if (this.options.syncContacts) {
       try {
         console.log(
-          "[SyncManager] Running contacts sync as part of force full sync..."
+          "[IMessageSyncManager] Running contacts sync as part of force full sync..."
         );
         const contactResult = await this.options.syncContacts();
         console.log(
-          `[SyncManager] Force full sync contacts complete: ${contactResult.contactsCount} contacts`
+          `[IMessageSyncManager] Force full sync contacts complete: ${contactResult.contactsCount} contacts`
         );
         this.updateProgress({
           totalContactsSynced: contactResult.contactsCount,
         });
       } catch (e) {
-        console.warn("[SyncManager] Force full sync contacts failed:", e);
+        console.warn("[IMessageSyncManager] Force full sync contacts failed:", e);
       }
     }
 
@@ -679,7 +679,7 @@ export class SyncManager {
   private async triggerMemoryProcessing(): Promise<void> {
     const token = await getValidAccessToken();
     if (!token) {
-      console.log("[SyncManager] No auth token, skipping memory processing");
+      console.log("[IMessageSyncManager] No auth token, skipping memory processing");
       return;
     }
 
@@ -697,7 +697,7 @@ export class SyncManager {
       if (!response.ok) {
         const text = await response.text();
         console.warn(
-          `[SyncManager] Memory sync returned ${response.status}: ${text.slice(0, 200)}`
+          `[IMessageSyncManager] Memory sync returned ${response.status}: ${text.slice(0, 200)}`
         );
         return;
       }
@@ -705,17 +705,17 @@ export class SyncManager {
       const contentType = response.headers.get("content-type") || "";
       if (!contentType.includes("application/json")) {
         console.warn(
-          `[SyncManager] Memory sync returned non-JSON content-type: ${contentType}`
+          `[IMessageSyncManager] Memory sync returned non-JSON content-type: ${contentType}`
         );
         return;
       }
 
       const result = await response.json();
       console.log(
-        `[SyncManager] Memory processing: ${result.memoriesExtracted ?? 0} memories from ${result.messagesProcessed ?? 0} messages`
+        `[IMessageSyncManager] Memory processing: ${result.memoriesExtracted ?? 0} memories from ${result.messagesProcessed ?? 0} messages`
       );
     } catch (e) {
-      console.warn("[SyncManager] Memory sync request failed:", e);
+      console.warn("[IMessageSyncManager] Memory sync request failed:", e);
     }
   }
 
@@ -751,11 +751,11 @@ export class SyncManager {
 }
 
 // Singleton instance
-let syncManager: SyncManager | null = null;
+let imessageSyncManager: IMessageSyncManager | null = null;
 
-export function getSyncManager(options?: SyncManagerOptions): SyncManager {
-  if (!syncManager) {
-    syncManager = new SyncManager(options);
+export function getIMessageSyncManager(options?: IMessageSyncManagerOptions): IMessageSyncManager {
+  if (!imessageSyncManager) {
+    imessageSyncManager = new IMessageSyncManager(options);
   }
-  return syncManager;
+  return imessageSyncManager;
 }

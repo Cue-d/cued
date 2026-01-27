@@ -9,7 +9,7 @@ import type {
   QueuedMessage,
   SendResult,
 } from "@prm/shared";
-import { getSyncManager } from "./sync";
+import { getIMessageSyncManager } from "./sync";
 
 const execAsync = promisify(exec);
 
@@ -47,7 +47,7 @@ async function sendToIndividual(
     await execAsync(`osascript -e '${script.replace(/'/g, "'\\''")}'`);
 
     // Trigger immediate sync to fetch our sent message
-    getSyncManager().runSync().catch((err) => {
+    getIMessageSyncManager().runSync().catch((err) => {
       console.warn("[IMessageAdapter] Post-send sync failed:", err);
     });
 
@@ -84,7 +84,7 @@ async function sendToGroup(
     await execAsync(`osascript -e '${script.replace(/'/g, "'\\''")}'`);
 
     // Trigger immediate sync to fetch our sent message
-    getSyncManager().runSync().catch((err) => {
+    getIMessageSyncManager().runSync().catch((err) => {
       console.warn("[IMessageAdapter] Post-send sync failed:", err);
     });
 

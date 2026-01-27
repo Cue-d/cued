@@ -26,10 +26,10 @@ export { extractTextFromAttributedBody } from './attributed-body'
 
 // Sync manager
 export {
-  SyncManager,
-  getSyncManager,
+  IMessageSyncManager,
+  getIMessageSyncManager,
   type SyncProgress,
-  type SyncManagerOptions,
+  type IMessageSyncManagerOptions,
 } from './sync'
 
 // Platform adapter for message queue

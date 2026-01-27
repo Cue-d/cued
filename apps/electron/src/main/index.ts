@@ -16,7 +16,7 @@ import {
   signOut,
   setOnTokenRefreshed,
 } from "./auth";
-import { getSyncManager, type SyncProgress } from "./platforms/imessage";
+import { getIMessageSyncManager, type SyncProgress } from "./platforms/imessage";
 import { getContactsWatcher, syncContactsToConvex } from "./platforms/contacts";
 import { getHeartbeatManager } from "./sync/presence";
 import { setupSocialIpcHandlers, cleanupSocialScrapers, getLinkedInScraper } from "./ipc/social";
@@ -160,7 +160,7 @@ function setupAuthIpcHandlers(): void {
           }
 
           // Start sync (uses centralized auth from auth-manager)
-          const syncManager = getSyncManager();
+          const syncManager = getIMessageSyncManager();
           syncManager.start();
         },
         onAuthError: (error) => {
@@ -187,7 +187,7 @@ function setupAuthIpcHandlers(): void {
   // Sign out
   ipcMain.handle("auth:signOut", () => {
     signOut();
-    getSyncManager().stop();
+    getIMessageSyncManager().stop();
     mainWindow?.webContents.send("auth:stateChanged", {
       isAuthenticated: false,
       user: null,
@@ -196,23 +196,23 @@ function setupAuthIpcHandlers(): void {
 }
 
 function setupSyncIpcHandlers(): void {
-  ipcMain.handle("sync:getProgress", () => getSyncManager().getProgress());
+  ipcMain.handle("sync:getProgress", () => getIMessageSyncManager().getProgress());
 
   ipcMain.handle("sync:runNow", async () => {
-    const manager = getSyncManager();
+    const manager = getIMessageSyncManager();
     await manager.runSync();
     return manager.getProgress();
   });
 
   ipcMain.handle("sync:reset", () => {
-    const manager = getSyncManager();
+    const manager = getIMessageSyncManager();
     manager.resetCursor();
     return manager.getProgress();
   });
 
   // Force full sync: resets both server and local state, then re-syncs messages + contacts
   ipcMain.handle("sync:forceFullSync", async () => {
-    const manager = getSyncManager();
+    const manager = getIMessageSyncManager();
     await manager.forceFullSync();
     return manager.getProgress();
   });
@@ -247,7 +247,7 @@ async function startBackgroundSync(): Promise<void> {
         });
       },
     });
-    const syncManager = getSyncManager({
+    const syncManager = getIMessageSyncManager({
       onProgress: (progress: SyncProgress) => {
         // Update tray status based on sync progress
         let status: TrayStatus = "idle";
@@ -485,7 +485,7 @@ app.whenReady().then(() => {
       }
     },
     onSyncNow: async () => {
-      const manager = getSyncManager();
+      const manager = getIMessageSyncManager();
       await manager.runSync();
     },
     onPreferences: () => {
@@ -510,7 +510,7 @@ app.whenReady().then(() => {
     onResume: () => {
       // Trigger immediate sync on system resume
       console.log("[Main] System resumed, triggering sync");
-      getSyncManager().runSync();
+      getIMessageSyncManager().runSync();
     },
   });
   powerManager.setMainWindow(mainWindow);
@@ -572,7 +572,7 @@ app.on("before-quit", () => {
 
 app.on("will-quit", async () => {
   // Gracefully stop services that are always initialized
-  getSyncManager().stop();
+  getIMessageSyncManager().stop();
   getContactsWatcher().stop();
 
   // Stop services that may not be initialized (ignore errors)
