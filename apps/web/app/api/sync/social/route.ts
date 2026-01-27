@@ -16,6 +16,8 @@ export interface SocialContact {
   profileUrl: string;
   headline: string | null;
   platform: SocialPlatform;
+  /** LinkedIn profile ID (URN ID portion) for matching with messaging contacts */
+  profileId?: string;
 }
 
 export interface SocialSyncBatch {
@@ -99,6 +101,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
         handle: c.handle,
         profileUrl: c.profileUrl,
         headline: c.headline,
+        profileId: c.profileId,
       })),
       syncedAt: batch.syncedAt,
     });

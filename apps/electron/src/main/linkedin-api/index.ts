@@ -28,7 +28,7 @@ export * from './messages'
 // Contacts (connections and search)
 export * from './contacts'
 
-// Profile lookup (vanity URL resolution)
+// Profile lookup (member ID to public identifier/vanity URL)
 export * from './profile'
 
 // Realtime SSE connection

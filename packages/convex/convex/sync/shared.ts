@@ -283,10 +283,11 @@ function normalizeHandleByType(value: string, type: HandleType): string {
       return normalizePhone(value);
     case "email":
       return normalizeEmail(value);
-    case "linkedin_handle":
+    case "username":
+      // LinkedIn vanity URLs - extract and normalize
       return normalizeLinkedInHandle(value);
-    case "linkedin_urn":
-      // LinkedIn URNs are already unique, just lowercase for consistency
+    case "urn":
+      // Platform URNs are already unique, just lowercase for consistency
       return value.toLowerCase();
     case "slack_id":
       // Slack IDs are already normalized (e.g., "U12345678")

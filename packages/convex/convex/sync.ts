@@ -58,6 +58,9 @@ import {
   linkedInMessagesBatchInput,
   syncLinkedInConversationsInternal,
   syncLinkedInMessagesInternal,
+  findContactsMissingUsernames,
+  addResolvedUsernames,
+  usernameResolutionInput,
 } from "./sync/linkedin";
 
 // Re-export for backwards compatibility
@@ -616,6 +619,8 @@ const socialContactInput = v.object({
   handle: v.string(),
   profileUrl: v.string(),
   headline: v.union(v.string(), v.null()),
+  /** LinkedIn profile ID (URN ID portion) for matching with messaging contacts */
+  profileId: v.optional(v.string()),
 });
 
 const socialPlatformValidator = v.union(
@@ -662,7 +667,7 @@ async function syncSocialContactsInternal(
     duplicatesSkipped: 0,
   };
 
-  const handleType = platform === "linkedin" ? "linkedin_handle" : "twitter_handle";
+  const handleType = platform === "linkedin" ? "username" : "twitter_handle";
   const newContactsInfo: Array<{
     contactId: Id<"contacts">;
     headline: string | null;
@@ -670,15 +675,18 @@ async function syncSocialContactsInternal(
   }> = [];
 
   // Deduplicate contacts within batch by normalized handle
+  // Skip deduplication for empty handles (invalid URLs) to avoid false positives
   const seenHandles = new Set<string>();
   const deduplicatedContacts: SocialContactInput[] = [];
   for (const contact of contacts) {
     const normalizedHandle = normalizeLinkedInHandle(contact.profileUrl);
-    if (seenHandles.has(normalizedHandle)) {
+    if (normalizedHandle && seenHandles.has(normalizedHandle)) {
       result.duplicatesSkipped++;
       continue;
     }
-    seenHandles.add(normalizedHandle);
+    if (normalizedHandle) {
+      seenHandles.add(normalizedHandle);
+    }
     deduplicatedContacts.push(contact);
   }
 
@@ -749,7 +757,7 @@ async function upsertSocialContact(
   ctx: MutationCtx,
   userId: Id<"users">,
   platform: SocialPlatform,
-  handleType: "linkedin_handle" | "twitter_handle",
+  handleType: "username" | "twitter_handle",
   contact: SocialContactInput
 ): Promise<{ isNew: boolean; contactId: Id<"contacts"> }> {
   const normalizedHandle =
@@ -757,10 +765,26 @@ async function upsertSocialContact(
       ? normalizeLinkedInHandle(contact.profileUrl)
       : contact.handle.toLowerCase().replace(/^@/, "");
 
-  const existingHandle = await ctx.db
-    .query("contactHandles")
-    .withIndex("by_user_handle", (q) => q.eq("userId", userId).eq("handle", normalizedHandle))
-    .unique();
+  // For LinkedIn, also create URN for matching with messaging contacts
+  const linkedInUrn = platform === "linkedin" && contact.profileId
+    ? `urn:li:member:${contact.profileId}`.toLowerCase()
+    : null;
+
+  // Try to find existing contact by username handle first
+  let existingHandle = normalizedHandle
+    ? await ctx.db
+        .query("contactHandles")
+        .withIndex("by_user_handle", (q) => q.eq("userId", userId).eq("handle", normalizedHandle))
+        .unique()
+    : null;
+
+  // If not found by username, try to find by URN (for LinkedIn - dedup with messaging contacts)
+  if (!existingHandle && linkedInUrn) {
+    existingHandle = await ctx.db
+      .query("contactHandles")
+      .withIndex("by_user_handle", (q) => q.eq("userId", userId).eq("handle", linkedInUrn))
+      .unique();
+  }
 
   if (existingHandle) {
     const existingContact = await ctx.db.get(existingHandle.contactId);
@@ -768,6 +792,22 @@ async function upsertSocialContact(
       const company = extractCompanyFromHeadline(contact.headline);
       if (company && !existingContact.company) {
         await ctx.db.patch(existingHandle.contactId, { company });
+      }
+      // If we found by URN but don't have username handle, add it
+      if (normalizedHandle && existingHandle.handle !== normalizedHandle) {
+        const hasUsernameHandle = await ctx.db
+          .query("contactHandles")
+          .withIndex("by_user_handle", (q) => q.eq("userId", userId).eq("handle", normalizedHandle))
+          .unique();
+        if (!hasUsernameHandle) {
+          await ctx.db.insert("contactHandles", {
+            userId,
+            contactId: existingHandle.contactId,
+            handleType,
+            handle: normalizedHandle,
+            platform,
+          });
+        }
       }
     }
     return { isNew: false, contactId: existingHandle.contactId };
@@ -780,13 +820,27 @@ async function upsertSocialContact(
     company,
   });
 
-  await ctx.db.insert("contactHandles", {
-    userId,
-    contactId,
-    handleType,
-    handle: normalizedHandle,
-    platform,
-  });
+  // Insert username handle
+  if (normalizedHandle) {
+    await ctx.db.insert("contactHandles", {
+      userId,
+      contactId,
+      handleType,
+      handle: normalizedHandle,
+      platform,
+    });
+  }
+
+  // Also insert URN handle for LinkedIn (for matching with messaging)
+  if (linkedInUrn) {
+    await ctx.db.insert("contactHandles", {
+      userId,
+      contactId,
+      handleType: "urn",
+      handle: linkedInUrn,
+      platform,
+    });
+  }
 
   return { isNew: true, contactId };
 }
@@ -837,5 +891,57 @@ export const syncLinkedInMessages = mutation({
 
     const user = await getOrCreateUser(ctx, identity);
     return syncLinkedInMessagesInternal(ctx, user._id, args.messages, args.userURN);
+  },
+});
+
+/**
+ * Find LinkedIn contacts that only have URN handles (missing public identifier/username).
+ * Called after messaging sync to identify contacts needing profile lookup.
+ *
+ * @returns List of contacts with their member ID for profile lookup
+ */
+export const findLinkedInContactsMissingUsernames = query({
+  args: {
+    limit: v.optional(v.number()),
+  },
+  handler: async (ctx, args) => {
+    const identity = await ctx.auth.getUserIdentity();
+    if (!identity) {
+      return { contacts: [] };
+    }
+
+    const user = await findUserByWorkosId(ctx, identity.subject);
+    if (!user) {
+      return { contacts: [] };
+    }
+
+    const contacts = await findContactsMissingUsernames(
+      ctx as unknown as MutationCtx,
+      user._id,
+      args.limit ?? 50
+    );
+    return { contacts };
+  },
+});
+
+/**
+ * Add resolved usernames (public identifiers) to LinkedIn contacts.
+ * Called after profile lookup to update contacts with their vanity URLs.
+ *
+ * @param resolutions - Array of member ID to public identifier mappings
+ * @returns Number of handles added and skipped
+ */
+export const addLinkedInUsernames = mutation({
+  args: {
+    resolutions: v.array(usernameResolutionInput),
+  },
+  handler: async (ctx, args) => {
+    const identity = await ctx.auth.getUserIdentity();
+    if (!identity) {
+      throw new Error("Unauthorized: Must be authenticated to add LinkedIn usernames");
+    }
+
+    const user = await getOrCreateUser(ctx, identity);
+    return addResolvedUsernames(ctx, user._id, args.resolutions);
   },
 });

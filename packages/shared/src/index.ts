@@ -72,5 +72,6 @@ export {
   isMemberURN,
   urnIdsMatch,
   isValidLinkedInHandle,
+  isLinkedInMemberId,
   normalizeLinkedInHandle,
 } from "./linkedin.js";

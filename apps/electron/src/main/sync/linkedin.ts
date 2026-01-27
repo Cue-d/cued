@@ -15,6 +15,8 @@ export interface LinkedInConnection {
   profileUrl: string
   headline: string | null
   connectedDate: string | null
+  /** LinkedIn profile ID (URN ID portion) for matching with messaging contacts */
+  profileId?: string
 }
 
 /** LinkedIn scraper for extracting connection data using stored cookies */

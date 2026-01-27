@@ -40,8 +40,8 @@ function HandleIcon({ type }: { type: ContactHandle["type"] }) {
       return <Mail className="w-3 h-3" />
     case "slack_id":
       return <MessageSquare className="w-3 h-3" />
-    case "linkedin_handle":
-    case "linkedin_urn":
+    case "username":
+    case "urn":
       return <Linkedin className="w-3 h-3" />
     case "twitter_handle":
       return <Twitter className="w-3 h-3" />

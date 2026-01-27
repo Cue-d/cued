@@ -1,166 +1,181 @@
 /**
- * LinkedIn Profile API
- * Fetches profile data including publicIdentifier (vanity URL slug)
+ * LinkedIn Profile Lookup API
+ * Resolves member IDs to public identifiers (vanity URLs)
  */
 
 import type { LinkedInClient } from './client'
+import type { VectorImage } from './types'
 import { API_URLS, CONTENT_TYPES } from './constants'
-import { newGetRequest } from './request'
+import { newGetRequest, linkedInEncode } from './request'
 
 // ============================================================================
-// Response Types (internal)
-// ============================================================================
-
-interface ProfileApiResponse {
-  data?: {
-    data?: {
-      identityDashProfilesByMemberIdentity?: {
-        elements?: ProfileElement[]
-      }
-    }
-  }
-  included?: IncludedElement[]
-}
-
-interface IncludedElement {
-  $type?: string
-  entityUrn?: string
-  publicIdentifier?: string
-  firstName?: string
-  lastName?: string
-  headline?: string
-}
-
-interface ProfileElement {
-  '*elements'?: string[]
-  elements?: ProfileData[]
-}
-
-interface ProfileData {
-  entityUrn?: string
-  publicIdentifier?: string
-  firstName?: string
-  lastName?: string
-  headline?: string
-}
-
-// ============================================================================
-// Profile Lookup Result
+// Types
 // ============================================================================
 
 export interface ProfileLookupResult {
-  /** The member URN that was looked up */
-  memberUrn: string
-  /** The publicIdentifier (vanity URL slug) if found */
+  memberId: string
   publicIdentifier: string | null
-  /** Display name */
+  firstName: string | null
+  lastName: string | null
+  headline: string | null
+  picture: VectorImage | null
+}
+
+interface RawMiniProfile {
+  entityUrn?: string
+  publicIdentifier?: string
   firstName?: string
   lastName?: string
-  headline?: string
+  occupation?: string
+  profilePicture?: {
+    displayImageReference?: {
+      vectorImage?: {
+        rootUrl?: string
+        artifacts?: Array<{
+          width?: number
+          height?: number
+          fileIdentifyingUrlPathSegment: string
+        }>
+      }
+    }
+  }
+  $type?: string
+}
+
+interface ProfileApiResponse {
+  data?: Record<string, unknown>
+  included?: RawMiniProfile[]
 }
 
 // ============================================================================
-// Profile API
+// Profile Lookup
 // ============================================================================
 
 /**
- * Get public identifier (vanity URL slug) for a member URN.
- * This resolves URN-style profile IDs (ACoAABsfBygBj0...) to human-readable slugs (johndoe).
+ * Look up a single profile by member ID to get public identifier.
+ * Uses the Voyager identity API.
+ */
+export async function getProfileByMemberId(
+  client: LinkedInClient,
+  memberId: string
+): Promise<ProfileLookupResult | null> {
+  const results = await getProfilesByMemberIds(client, [memberId])
+  return results[0] ?? null
+}
+
+/**
+ * Batch look up profiles by member IDs to get public identifiers.
+ * More efficient than individual lookups. Limited to 50 at a time.
  *
  * @param client - LinkedIn client with valid cookies
- * @param memberUrn - The member URN (e.g., "urn:li:fsd_profile:ABC123" or just "ABC123")
- * @returns Profile lookup result with publicIdentifier if found
+ * @param memberIds - Array of member IDs (the URN ID portion, e.g., "ACoAAEFsIqIB...")
+ * @returns Array of profile results (same order as input)
  */
-export async function getProfileByMemberUrn(
+export async function getProfilesByMemberIds(
   client: LinkedInClient,
-  memberUrn: string
-): Promise<ProfileLookupResult> {
-  // Extract the ID portion from URN if full URN provided
-  const memberId = memberUrn.includes(':') ? memberUrn.split(':').pop() ?? memberUrn : memberUrn
+  memberIds: string[]
+): Promise<(ProfileLookupResult | null)[]> {
+  if (memberIds.length === 0) return []
+  if (memberIds.length > 50) {
+    throw new Error('Cannot look up more than 50 profiles at once')
+  }
 
-  // Use the identity/profiles API to get the publicIdentifier
-  // This endpoint accepts the member ID and returns profile data including the vanity slug
-  const url = `${API_URLS.voyagerGraphQL}?variables=(memberIdentity:${memberId})&queryId=voyagerIdentityDashProfiles.c48b0a5fff41e26ec14e54a3fcb92e18`
+  const cookies = client.cookies
+  if (!cookies.length) {
+    throw new Error('No cookies available for profile lookup')
+  }
 
-  const response = await newGetRequest(url, client.cookies)
-    .withHeader('Accept', CONTENT_TYPES.linkedInNormalized)
-    .withXLIHeaders()
-    .doJSON<ProfileApiResponse>()
+  // Build the profile URN list for the query
+  const profileUrns = memberIds.map((id) => linkedInEncode(`urn:li:fsd_profile:${id}`))
 
-  // Look for the profile in included array (normalized format)
-  const profile = response.included?.find(
-    (item) =>
-      item.$type?.includes('Profile') &&
-      item.entityUrn?.includes(memberId)
+  // Use the profiles decoration API with a simple decoration
+  const queryId = 'voyagerIdentityDashProfiles.a3a77e9201f50ec7c2cd9e8cdae3ef38'
+
+  const queryParams = new URLSearchParams({
+    variables: `(profileUrns:List(${profileUrns.join(',')}))`,
+    queryId,
+  })
+
+  const url = `${API_URLS.voyagerGraphQL}?${queryParams.toString()}`
+
+  try {
+    const response = await newGetRequest(url, cookies)
+      .withHeader('Accept', CONTENT_TYPES.linkedInNormalized)
+      .withXLIHeaders()
+      .doJSON<ProfileApiResponse>()
+
+    // Parse the included array for mini profiles
+    const profileMap = new Map<string, ProfileLookupResult>()
+
+    if (response.included) {
+      for (const item of response.included) {
+        if (item.$type === 'com.linkedin.voyager.dash.identity.profile.Profile' ||
+            item.$type === 'com.linkedin.voyager.identity.shared.MiniProfile') {
+          // Extract member ID from entityUrn
+          const memberIdMatch = item.entityUrn?.match(/urn:li:(?:fsd_profile|member):([^,)]+)/)
+          if (memberIdMatch) {
+            const id = memberIdMatch[1]
+            profileMap.set(id, {
+              memberId: id,
+              publicIdentifier: item.publicIdentifier ?? null,
+              firstName: item.firstName ?? null,
+              lastName: item.lastName ?? null,
+              headline: item.occupation ?? null,
+              picture: parseVectorImage(item.profilePicture),
+            })
+          }
+        }
+      }
+    }
+
+    // Return results in the same order as input
+    return memberIds.map((id) => profileMap.get(id) ?? null)
+  } catch (error) {
+    console.error('[LinkedIn] Profile lookup failed:', error)
+    return memberIds.map(() => null)
+  }
+}
+
+/**
+ * Look up profiles by URNs (full URN format).
+ * Convenience wrapper that extracts member IDs from URNs.
+ */
+export async function getProfilesByURNs(
+  client: LinkedInClient,
+  urns: string[]
+): Promise<(ProfileLookupResult | null)[]> {
+  const memberIds = urns.map((urn) => {
+    const match = urn.match(/urn:li:(?:fsd_profile|member):([^,)]+)/)
+    return match?.[1] ?? ''
+  }).filter(Boolean)
+
+  if (memberIds.length !== urns.length) {
+    console.warn('[LinkedIn] Some URNs could not be parsed')
+  }
+
+  return getProfilesByMemberIds(client, memberIds)
+}
+
+// ============================================================================
+// Helpers
+// ============================================================================
+
+function parseVectorImage(
+  profilePicture: RawMiniProfile['profilePicture']
+): VectorImage | null {
+  const vectorImage = profilePicture?.displayImageReference?.vectorImage
+  const artifacts = vectorImage?.artifacts
+  if (!vectorImage?.rootUrl || !artifacts?.length) {
+    return null
+  }
+
+  const largest = artifacts.reduce((prev, curr) =>
+    (curr.width ?? 0) > (prev.width ?? 0) ? curr : prev
   )
 
-  if (profile?.publicIdentifier) {
-    return {
-      memberUrn,
-      publicIdentifier: profile.publicIdentifier,
-      firstName: profile.firstName,
-      lastName: profile.lastName,
-      headline: profile.headline,
-    }
-  }
-
-  // Fallback: check data.data structure
-  const profileElements = response.data?.data?.identityDashProfilesByMemberIdentity?.elements
-  // ProfileElement contains nested ProfileData in its elements array
-  const profileData = profileElements?.[0]?.elements?.[0]
-
-  if (profileData?.publicIdentifier) {
-    return {
-      memberUrn,
-      publicIdentifier: profileData.publicIdentifier,
-      firstName: profileData.firstName,
-      lastName: profileData.lastName,
-      headline: profileData.headline,
-    }
-  }
-
   return {
-    memberUrn,
-    publicIdentifier: null,
+    url: `${vectorImage.rootUrl}${largest.fileIdentifyingUrlPathSegment}`,
+    width: largest.width,
+    height: largest.height,
   }
-}
-
-/**
- * Batch resolve multiple member URNs to public identifiers.
- * Uses single requests per URN (LinkedIn doesn't have a batch endpoint).
- * Includes rate limiting to avoid API throttling.
- *
- * @param client - LinkedIn client with valid cookies
- * @param memberUrns - Array of member URNs to resolve
- * @param options - Options for batch resolution
- * @returns Map of memberUrn -> publicIdentifier (null if not found)
- */
-export async function batchGetPublicIdentifiers(
-  client: LinkedInClient,
-  memberUrns: string[],
-  options: { delayMs?: number; onProgress?: (completed: number, total: number) => void } = {}
-): Promise<Map<string, string | null>> {
-  const { delayMs = 200, onProgress } = options
-  const results = new Map<string, string | null>()
-
-  for (let i = 0; i < memberUrns.length; i++) {
-    const urn = memberUrns[i]
-
-    try {
-      const result = await getProfileByMemberUrn(client, urn)
-      results.set(urn, result.publicIdentifier)
-    } catch (error) {
-      console.warn(`[LinkedIn] Failed to resolve profile for ${urn}:`, error)
-      results.set(urn, null)
-    }
-
-    onProgress?.(i + 1, memberUrns.length)
-
-    // Rate limiting delay between requests (skip after last)
-    if (i < memberUrns.length - 1 && delayMs > 0) {
-      await new Promise((resolve) => setTimeout(resolve, delayMs))
-    }
-  }
-
-  return results
 }

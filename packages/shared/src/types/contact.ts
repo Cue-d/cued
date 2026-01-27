@@ -10,8 +10,8 @@ export type HandleType =
   | "phone"
   | "email"
   | "slack_id"
-  | "linkedin_handle"
-  | "linkedin_urn"
+  | "username"      // vanity URLs (linkedin)
+  | "urn"           // platform URNs (linkedin)
   | "twitter_handle";
 
 /**

@@ -142,6 +142,7 @@ async function syncLinkedInContactsToBackend(
       profileUrl: conn.profileUrl,
       headline: conn.headline,
       platform: "linkedin" as const,
+      profileId: conn.profileId,
     }));
 
     const response = await fetch(`${baseUrl}/api/sync/social`, {
@@ -274,6 +275,7 @@ export function setupSocialIpcHandlers(mainWindow: BrowserWindow | null): void {
           profileUrl: conn.profileUrl,
           headline: conn.headline ?? null,
           connectedDate: conn.connectionDate ?? null,
+          profileId: conn.profileId,
         }));
 
         // Sync connections to backend

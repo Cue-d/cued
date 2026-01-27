@@ -12,6 +12,7 @@ import type { LinkedInClient } from '../linkedin-api/client'
 import type { Conversation, Message, EventHandlers } from '../linkedin-api/types'
 export type { Message } from '../linkedin-api/types'
 import { getMessages, getMessagesBefore } from '../linkedin-api/messages'
+import { getProfilesByMemberIds } from '../linkedin-api/profile'
 import { getSyncDebugLogger, type FilteredMessageLog } from './sync-debug-logger'
 import {
   createConvexClient,
@@ -56,6 +57,12 @@ const MAX_CONVERSATIONS_PER_SYNC = 50
  * Historical messages are fetched via getMessagesBefore() pagination.
  */
 const MAX_MESSAGES_PER_CONVERSATION = 100
+
+/**
+ * Maximum contacts to resolve usernames for in a single batch.
+ * LinkedIn's API accepts up to 50 profiles at a time.
+ */
+const USERNAME_RESOLUTION_BATCH_SIZE = 50
 
 // ============================================================================
 // Cursor State (synced to cloud via Convex)
@@ -486,6 +493,10 @@ export class LinkedInSyncManager {
       this.lastSyncAt = Date.now()
       await this.persistCursorState()
 
+      // Resolve missing usernames (public identifiers) for contacts
+      // This runs after sync completes to fill in vanity URLs for messaging contacts
+      await this.resolveUsernamesAfterSync()
+
       this.updateProgress({
         status: this.progress.realtimeConnected ? 'realtime' : 'idle',
         lastSyncAt: this.lastSyncAt,
@@ -508,6 +519,67 @@ export class LinkedInSyncManager {
       })
     } finally {
       this.syncGuard.finish()
+    }
+  }
+
+  /**
+   * Resolve missing usernames (public identifiers) for LinkedIn contacts.
+   * Contacts from messaging sync often only have URN handles.
+   * This method looks them up via LinkedIn's profile API and adds username handles.
+   */
+  async resolveUsernamesAfterSync(): Promise<void> {
+    if (!this._client) {
+      console.log('[LinkedInSync] No client, skipping username resolution')
+      return
+    }
+
+    try {
+      // Query Convex for contacts missing usernames
+      const result = await this.convexClient.query(
+        api.sync.findLinkedInContactsMissingUsernames,
+        { limit: USERNAME_RESOLUTION_BATCH_SIZE }
+      )
+
+      const contacts = result.contacts
+      if (!contacts || contacts.length === 0) {
+        return
+      }
+
+      console.log(`[LinkedInSync] Resolving ${contacts.length} missing usernames...`)
+
+      // Extract member IDs for lookup
+      const memberIds = contacts.map((c) => c.memberId)
+
+      // Batch lookup profiles via LinkedIn API
+      const profiles = await getProfilesByMemberIds(this._client, memberIds)
+
+      // Build resolutions array with successful lookups
+      const resolutions = profiles
+        .map((profile, i) =>
+          profile?.publicIdentifier
+            ? { memberId: contacts[i].memberId, publicIdentifier: profile.publicIdentifier }
+            : null
+        )
+        .filter((r): r is NonNullable<typeof r> => r !== null)
+
+      if (resolutions.length === 0) {
+        console.log('[LinkedInSync] No usernames to resolve')
+        return
+      }
+
+      // Update Convex with resolved usernames
+      const updateResult = await this.convexClient.mutation(
+        api.sync.addLinkedInUsernames,
+        { resolutions }
+      )
+
+      console.log(
+        `[LinkedInSync] Username resolution: ${updateResult.added} added, ${updateResult.skipped} skipped`
+      )
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      console.warn(`[LinkedInSync] Username resolution failed: ${message}`)
+      // Don't throw - this is a non-critical operation
     }
   }
 
