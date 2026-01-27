@@ -13,10 +13,10 @@ import {
   Input,
   Label,
 } from "@prm/ui";
+// Platforms with active sync adapters (subset of ActionPlatform)
+type ResetablePlatform = "imessage" | "gmail" | "slack" | "linkedin";
 
-type Platform = "imessage" | "gmail" | "slack" | "linkedin";
-
-const PLATFORM_NAMES: Record<Platform, string> = {
+const PLATFORM_NAMES: Record<ResetablePlatform, string> = {
   imessage: "iMessage",
   gmail: "Gmail",
   slack: "Slack",
@@ -26,7 +26,7 @@ const PLATFORM_NAMES: Record<Platform, string> = {
 interface ResetConfirmationModalProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  platforms: Platform[] | null; // null = all platforms
+  platforms: ResetablePlatform[] | null; // null = all platforms
   onConfirm: () => Promise<void>;
   isResetting: boolean;
 }

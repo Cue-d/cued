@@ -1,9 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
-import { ConvexHttpClient } from "convex/browser";
 import { api } from "@prm/convex";
-import { env } from "@prm/env/server";
-
-const convex = new ConvexHttpClient(env.NEXT_PUBLIC_CONVEX_URL!);
+import {
+  extractBearerToken,
+  extractErrorMessage,
+  isAuthError,
+  getConvexClient,
+} from "@/lib/api-utils";
 
 // Types for social sync batch
 export type SocialPlatform = "linkedin" | "twitter";
@@ -30,26 +32,6 @@ export interface SocialSyncResult {
   updatedContacts: number;
 }
 
-function extractBearerToken(request: NextRequest): string | null {
-  const authHeader = request.headers.get("Authorization");
-  if (!authHeader?.startsWith("Bearer ")) return null;
-  return authHeader.slice(7);
-}
-
-function isAuthError(message: string): boolean {
-  return message.includes("Unauthorized") || message.includes("auth");
-}
-
-function errorResponse(
-  error: string,
-  status: number,
-  details?: string
-): NextResponse {
-  return NextResponse.json(details ? { error, details } : { error }, {
-    status,
-  });
-}
-
 /**
  * POST /api/sync/social - Receive social contacts batch and forward to Convex.
  *
@@ -59,53 +41,55 @@ function errorResponse(
 export async function POST(request: NextRequest): Promise<NextResponse> {
   const token = extractBearerToken(request);
   if (!token) {
-    return errorResponse("Missing or invalid Authorization header", 401);
+    return NextResponse.json({ error: "Missing or invalid Authorization header" }, { status: 401 });
   }
 
   let batch: SocialSyncBatch;
   try {
     batch = await request.json();
   } catch {
-    return errorResponse("Invalid JSON body", 400);
+    return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
   }
 
   // Validate platform
   if (!batch.platform || !["linkedin", "twitter"].includes(batch.platform)) {
-    return errorResponse(
-      'Missing or invalid platform field. Must be "linkedin" or "twitter"',
-      400
+    return NextResponse.json(
+      { error: 'Missing or invalid platform field. Must be "linkedin" or "twitter"' },
+      { status: 400 }
     );
   }
 
   // Validate contacts array
   if (!Array.isArray(batch.contacts)) {
-    return errorResponse("Missing or invalid contacts array", 400);
+    return NextResponse.json({ error: "Missing or invalid contacts array" }, { status: 400 });
   }
 
   // Validate each contact
   for (let i = 0; i < batch.contacts.length; i++) {
     const contact = batch.contacts[i];
     if (!contact.name || typeof contact.name !== "string") {
-      return errorResponse(`Contact at index ${i} missing valid name`, 400);
+      return NextResponse.json({ error: `Contact at index ${i} missing valid name` }, { status: 400 });
     }
     if (!contact.handle || typeof contact.handle !== "string") {
-      return errorResponse(`Contact at index ${i} missing valid handle`, 400);
+      return NextResponse.json({ error: `Contact at index ${i} missing valid handle` }, { status: 400 });
     }
     if (!contact.profileUrl || typeof contact.profileUrl !== "string") {
-      return errorResponse(`Contact at index ${i} missing valid profileUrl`, 400);
+      return NextResponse.json({ error: `Contact at index ${i} missing valid profileUrl` }, { status: 400 });
     }
     if (!contact.platform || contact.platform !== batch.platform) {
-      return errorResponse(
-        `Contact at index ${i} has mismatched platform`,
-        400
+      return NextResponse.json(
+        { error: `Contact at index ${i} has mismatched platform` },
+        { status: 400 }
       );
     }
   }
 
   // Validate syncedAt timestamp
   if (typeof batch.syncedAt !== "number" || batch.syncedAt <= 0) {
-    return errorResponse("Missing or invalid syncedAt timestamp", 400);
+    return NextResponse.json({ error: "Missing or invalid syncedAt timestamp" }, { status: 400 });
   }
+
+  const convex = getConvexClient();
 
   try {
     convex.setAuth(token);
@@ -124,11 +108,11 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
 
     return NextResponse.json(result);
   } catch (error) {
-    const message = error instanceof Error ? error.message : "Sync failed";
+    const message = extractErrorMessage(error, "Sync failed");
     if (isAuthError(message)) {
-      return errorResponse("Authentication failed", 401, message);
+      return NextResponse.json({ error: "Authentication failed", details: message }, { status: 401 });
     }
     console.error("Social sync error:", error);
-    return errorResponse("Social sync failed", 500, message);
+    return NextResponse.json({ error: "Social sync failed", details: message }, { status: 500 });
   }
 }

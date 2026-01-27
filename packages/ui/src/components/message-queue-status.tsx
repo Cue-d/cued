@@ -8,7 +8,7 @@ import {
   X,
   XCircle,
 } from "lucide-react"
-import { PLATFORM_CONFIG, type ActionPlatform } from "@prm/shared"
+import { PLATFORM_CONFIG, formatRelativeTime, type ActionPlatform } from "@prm/shared"
 import { cn } from "../lib/utils"
 import { Button } from "./ui/button"
 import {
@@ -125,29 +125,6 @@ function PlatformBadge({ platform }: { platform: ActionPlatform }) {
   )
 }
 
-/** Format relative time */
-function formatRelativeTime(timestamp: number): string {
-  const now = Date.now()
-  const diff = now - timestamp
-  const seconds = Math.floor(diff / 1000)
-  const minutes = Math.floor(seconds / 60)
-  const hours = Math.floor(minutes / 60)
-  const days = Math.floor(hours / 24)
-
-  if (diff < 0) {
-    // Future time (for pending messages)
-    const absDiff = -diff
-    const secs = Math.floor(absDiff / 1000)
-    if (secs < 60) return `in ${secs}s`
-    return `in ${Math.floor(secs / 60)}m`
-  }
-
-  if (seconds < 60) return "just now"
-  if (minutes < 60) return `${minutes}m ago`
-  if (hours < 24) return `${hours}h ago`
-  return `${days}d ago`
-}
-
 /** Single message row in the list */
 function MessageRow({
   message,
@@ -168,7 +145,7 @@ function MessageRow({
   const canCancel = message.status === "pending"
   const timeDisplay =
     message.status === "pending"
-      ? formatRelativeTime(message.scheduledFor)
+      ? formatRelativeTime(message.scheduledFor, { allowFuture: true })
       : message.sentAt
         ? formatRelativeTime(message.sentAt)
         : formatRelativeTime(message.createdAt)

@@ -17,9 +17,6 @@ import {
 } from "../ui/select";
 import { Textarea } from "../ui/textarea";
 
-/** Re-export ContactFormData for backwards compatibility */
-export type { ContactFormData } from "@prm/shared";
-
 /** Existing contact for linking dropdown */
 export interface ExistingContact {
   id: string;

@@ -10,30 +10,29 @@
  * - Uses per-message memoryExtractedAt tracking for deduplication
  * - Returns hasMore to indicate if more processing is needed
  */
-import { NextResponse } from "next/server";
-import { ConvexHttpClient } from "convex/browser";
+import { NextRequest, NextResponse } from "next/server";
 import { api } from "@prm/convex";
-import { env } from "@prm/env/server";
+import {
+  getAuthenticatedConvexClient,
+  extractErrorMessage,
+} from "@/lib/api-utils";
+import type { SyncPlatform } from "@prm/shared";
 
-const convex = new ConvexHttpClient(env.NEXT_PUBLIC_CONVEX_URL!);
+// Only platforms that support memory processing
+type MemoryPlatform = Extract<SyncPlatform, "imessage" | "gmail" | "slack">;
+const VALID_PLATFORMS: MemoryPlatform[] = ["imessage", "gmail", "slack"];
 
-type Platform = "imessage" | "gmail" | "slack";
-const VALID_PLATFORMS: Platform[] = ["imessage", "gmail", "slack"];
-
-function parsePlatform(value: unknown): Platform {
-  if (typeof value === "string" && VALID_PLATFORMS.includes(value as Platform)) {
-    return value as Platform;
+function parsePlatform(value: unknown): MemoryPlatform {
+  if (typeof value === "string" && VALID_PLATFORMS.includes(value as MemoryPlatform)) {
+    return value as MemoryPlatform;
   }
   return "imessage";
 }
 
-export async function POST(req: Request): Promise<Response> {
-  const token = req.headers.get("authorization")?.replace("Bearer ", "");
-  if (!token) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
-
-  convex.setAuth(token);
+export async function POST(req: NextRequest): Promise<NextResponse> {
+  const authResult = getAuthenticatedConvexClient(req);
+  if ("error" in authResult) return authResult.error;
+  const { convex } = authResult;
 
   const body = await req.json().catch(() => ({}));
   const platform = parsePlatform(body.platform);
@@ -45,8 +44,7 @@ export async function POST(req: Request): Promise<Response> {
     return NextResponse.json({ success: true, ...result });
   } catch (error) {
     console.error("Error processing memories for new messages:", error);
-    const message = error instanceof Error ? error.message : "Unknown error";
-    return NextResponse.json({ error: message }, { status: 500 });
+    return NextResponse.json({ error: extractErrorMessage(error) }, { status: 500 });
   }
 }
 
@@ -54,13 +52,10 @@ export async function POST(req: Request): Promise<Response> {
  * GET /api/memories/sync
  * Returns count of unprocessed messages waiting for memory extraction.
  */
-export async function GET(req: Request): Promise<Response> {
-  const token = req.headers.get("authorization")?.replace("Bearer ", "");
-  if (!token) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
-
-  convex.setAuth(token);
+export async function GET(req: NextRequest): Promise<NextResponse> {
+  const authResult = getAuthenticatedConvexClient(req);
+  if ("error" in authResult) return authResult.error;
+  const { convex } = authResult;
 
   try {
     const status = await convex.query(api.memories.getUnprocessedMessageCount, {});
@@ -70,7 +65,6 @@ export async function GET(req: Request): Promise<Response> {
     return NextResponse.json(status);
   } catch (error) {
     console.error("Error getting unprocessed message count:", error);
-    const message = error instanceof Error ? error.message : "Unknown error";
-    return NextResponse.json({ error: message }, { status: 500 });
+    return NextResponse.json({ error: extractErrorMessage(error) }, { status: 500 });
   }
 }

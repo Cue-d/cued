@@ -1,9 +1,7 @@
 import { render, screen, fireEvent } from "@testing-library/react";
 import { describe, it, expect, vi } from "vitest";
-import {
-  MessageResponseCard,
-  type DisplayMessage,
-} from "../message-response-card";
+import { type DisplayMessage } from "@prm/shared";
+import { MessageResponseCard } from "../message-response-card";
 
 describe("MessageResponseCard", () => {
   const mockMessages: DisplayMessage[] = [

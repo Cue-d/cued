@@ -8,7 +8,14 @@ import { v } from "convex/values";
 import type { Doc, Id } from "../_generated/dataModel";
 import type { MutationCtx, QueryCtx } from "../_generated/server";
 import { internal } from "../_generated/api";
-import { normalizePhone, getPhoneVariants } from "@prm/shared";
+import {
+  normalizePhone,
+  getPhoneVariants,
+  normalizeLinkedInHandle,
+  type SyncPlatform,
+  type HandleType,
+  type ContactHandleInput,
+} from "@prm/shared";
 import { normalizeEmail } from "@prm/ai";
 
 // ============================================================================
@@ -39,11 +46,6 @@ export const BATCH_SIZE = 50;
  */
 export const MAX_NEW_CONNECTION_ACTIONS = 20;
 
-/**
- * Platforms that support multiple workspaces (e.g., Slack teams, Gmail accounts).
- * These require workspaceId in sync cursor operations.
- */
-export const MULTI_WORKSPACE_PLATFORMS = ["slack", "gmail"] as const;
 
 // ============================================================================
 // Shared Validators
@@ -136,50 +138,6 @@ export function normalizeHandle(handle: string): string {
   return normalizePhone(handle);
 }
 
-/**
- * Check if a string is a LinkedIn member ID (not a vanity URL).
- * Member IDs start with "ACo" and contain underscores, e.g., "ACoAAEFsIqIBOE41g26VjbAiCGu9BF3oH1_wtOw"
- */
-function isLinkedInMemberId(value: string): boolean {
-  return value.startsWith("ACo") && value.includes("_");
-}
-
-/**
- * Validate a LinkedIn handle format.
- * LinkedIn handles: alphanumeric + hyphens, 3-100 characters.
- */
-function isValidLinkedInHandle(handle: string): boolean {
-  return /^[a-zA-Z0-9-]{3,100}$/.test(handle);
-}
-
-/**
- * Normalize LinkedIn handle to canonical format for consistent deduplication.
- * Extracts username from URL or returns cleaned handle.
- * Returns: lowercase username (e.g., "johndoe") or empty string if invalid.
- * Note: Returns empty for member IDs (not vanity URLs) - this is expected behavior.
- */
-export function normalizeLinkedInHandle(input: string): string {
-  if (!input) return "";
-  const clean = input.split("?")[0].split("#")[0].replace(/\/+$/, "");
-  const match = clean.match(/linkedin\.com\/in\/([^/]+)/i);
-  if (match) {
-    const handle = match[1];
-    if (isValidLinkedInHandle(handle)) {
-      return handle.toLowerCase();
-    }
-    // Member IDs (e.g., ACoAAEFsIqIB...) are not vanity URLs - silently return empty
-    if (isLinkedInMemberId(handle)) {
-      return "";
-    }
-    console.warn(`[LinkedIn] Invalid handle extracted from URL: ${handle}`);
-    return "";
-  }
-  // Already a handle - validate and lowercase
-  if (isValidLinkedInHandle(clean)) {
-    return clean.toLowerCase();
-  }
-  return "";
-}
 
 // ============================================================================
 // User Management
@@ -213,17 +171,6 @@ export async function getOrCreateUser(
 // ============================================================================
 // Contact Management
 // ============================================================================
-
-/** Handle types for contact creation */
-type HandleType = "phone" | "email" | "slack_id" | "username" | "urn" | "twitter_handle";
-
-/** Input for creating or finding a contact */
-export interface ContactHandleInput {
-  /** The raw handle value (phone, email, slack ID, LinkedIn URL, etc.) */
-  value: string;
-  /** The type of handle - determines normalization and storage */
-  type: HandleType;
-}
 
 /** Result from getOrCreateContact */
 export interface GetOrCreateContactResult {
@@ -486,8 +433,7 @@ export async function batchResolveHandles(
 // Sync Cursor Management
 // ============================================================================
 
-/** Platform type for sync operations */
-type SyncPlatform = "imessage" | "gmail" | "slack" | "linkedin" | "twitter" | "signal" | "whatsapp";
+// SyncPlatform is now imported from @prm/shared
 
 /** Options for upserting a sync cursor */
 export interface UpsertSyncCursorOptions {

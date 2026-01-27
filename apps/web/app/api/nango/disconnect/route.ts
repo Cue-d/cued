@@ -1,27 +1,18 @@
 import { NextRequest, NextResponse } from "next/server";
 import { Nango } from "@nangohq/node";
-import { ConvexHttpClient } from "convex/browser";
 import { api } from "@prm/convex";
 import { env } from "@prm/env/server";
+import { getAuthenticatedConvexClient } from "@/lib/api-utils";
 
-const convex = new ConvexHttpClient(env.NEXT_PUBLIC_CONVEX_URL!);
 const nango = new Nango({ secretKey: env.NANGO_SECRET_KEY });
 
-function extractBearerToken(request: NextRequest): string | null {
-  const authHeader = request.headers.get("Authorization");
-  if (!authHeader?.startsWith("Bearer ")) return null;
-  return authHeader.slice(7);
-}
-
 export async function POST(request: NextRequest) {
-  const token = extractBearerToken(request);
-  if (!token) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
+  const authResult = getAuthenticatedConvexClient(request);
+  if ("error" in authResult) return authResult.error;
+  const { convex } = authResult;
 
   try {
     // Get user from Convex
-    convex.setAuth(token);
     const identity = await convex.query(api.users.getCurrentUser, {});
     if (!identity) {
       return NextResponse.json({ error: "User not found" }, { status: 401 });
@@ -30,10 +21,7 @@ export async function POST(request: NextRequest) {
     const { nangoConnectionId, providerConfigKey } = await request.json();
 
     if (!nangoConnectionId || !providerConfigKey) {
-      return NextResponse.json(
-        { error: "Missing nangoConnectionId or providerConfigKey" },
-        { status: 400 }
-      );
+      return NextResponse.json({ error: "Missing nangoConnectionId or providerConfigKey" }, { status: 400 });
     }
 
     console.log("Attempting to delete Nango connection:", {
@@ -60,9 +48,6 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ success: true });
   } catch (error) {
     console.error("Failed to disconnect:", error);
-    return NextResponse.json(
-      { error: "Failed to disconnect integration" },
-      { status: 500 }
-    );
+    return NextResponse.json({ error: "Failed to disconnect integration" }, { status: 500 });
   }
 }

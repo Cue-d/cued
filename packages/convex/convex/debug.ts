@@ -3,6 +3,7 @@ import { internal } from "./_generated/api";
 import { v } from "convex/values";
 import { platformValidator } from "./schema";
 import { getAuthenticatedUser } from "./lib/auth";
+import type { ActionPlatform } from "@prm/shared";
 
 // ============================================================================
 // LinkedIn Handle Analysis
@@ -208,8 +209,6 @@ export const getSlackConversationMessages = query({
 const MESSAGE_BATCH_SIZE = 2000;
 const DEFAULT_BATCH_SIZE = 500;
 
-type Platform = "imessage" | "gmail" | "slack" | "linkedin" | "twitter" | "signal" | "whatsapp";
-
 /**
  * Internal mutation to delete a batch of platform-filtered documents.
  */
@@ -233,7 +232,7 @@ export const deleteBatchFiltered = internalMutation({
           .withIndex("by_user", (q) => q.eq("userId", userId))
           .take(batchSize * 2); // Fetch more to account for filtering
         for (const doc of docs) {
-          if (!filterByPlatform || platforms!.includes(doc.platform as Platform)) {
+          if (!filterByPlatform || platforms!.includes(doc.platform as ActionPlatform)) {
             await ctx.db.delete(doc._id);
             deleted++;
             if (deleted >= batchSize) break;
@@ -250,7 +249,7 @@ export const deleteBatchFiltered = internalMutation({
           .withIndex("by_user", (q) => q.eq("userId", userId))
           .take(batchSize * 2);
         for (const doc of docs) {
-          if (!filterByPlatform || platforms!.includes(doc.platform as Platform)) {
+          if (!filterByPlatform || platforms!.includes(doc.platform as ActionPlatform)) {
             await ctx.db.delete(doc._id);
             deleted++;
             if (deleted >= batchSize) break;
@@ -267,7 +266,7 @@ export const deleteBatchFiltered = internalMutation({
           .withIndex("by_user", (q) => q.eq("userId", userId))
           .take(batchSize * 2);
         for (const doc of docs) {
-          if (!filterByPlatform || platforms!.includes(doc.platform as Platform)) {
+          if (!filterByPlatform || platforms!.includes(doc.platform as ActionPlatform)) {
             await ctx.db.delete(doc._id);
             deleted++;
             if (deleted >= batchSize) break;
@@ -284,7 +283,7 @@ export const deleteBatchFiltered = internalMutation({
           .withIndex("by_user_platform", (q) => q.eq("userId", userId))
           .take(batchSize * 2);
         for (const doc of docs) {
-          if (!filterByPlatform || platforms!.includes(doc.platform as Platform)) {
+          if (!filterByPlatform || platforms!.includes(doc.platform as ActionPlatform)) {
             await ctx.db.delete(doc._id);
             deleted++;
             if (deleted >= batchSize) break;
@@ -301,7 +300,7 @@ export const deleteBatchFiltered = internalMutation({
           .withIndex("by_user", (q) => q.eq("userId", userId))
           .take(batchSize * 2);
         for (const doc of docs) {
-          if (!filterByPlatform || platforms!.includes(doc.platform as Platform)) {
+          if (!filterByPlatform || platforms!.includes(doc.platform as ActionPlatform)) {
             await ctx.db.delete(doc._id);
             deleted++;
             if (deleted >= batchSize) break;
@@ -319,7 +318,7 @@ export const deleteBatchFiltered = internalMutation({
           .take(batchSize * 2);
         for (const doc of docs) {
           // Actions without platform are deleted when deleting all, kept when filtering
-          if (!filterByPlatform || (doc.platform && platforms!.includes(doc.platform as Platform))) {
+          if (!filterByPlatform || (doc.platform && platforms!.includes(doc.platform as ActionPlatform))) {
             await ctx.db.delete(doc._id);
             deleted++;
             if (deleted >= batchSize) break;
@@ -336,7 +335,7 @@ export const deleteBatchFiltered = internalMutation({
           .withIndex("by_user_status", (q) => q.eq("userId", userId))
           .take(batchSize * 2);
         for (const doc of docs) {
-          if (!filterByPlatform || platforms!.includes(doc.platform as Platform)) {
+          if (!filterByPlatform || platforms!.includes(doc.platform as ActionPlatform)) {
             await ctx.db.delete(doc._id);
             deleted++;
             if (deleted >= batchSize) break;
@@ -473,7 +472,7 @@ export const disconnectIntegrations = internalMutation({
 
     let disconnected = 0;
     for (const integration of integrations) {
-      if (!filterByPlatform || platforms!.includes(integration.platform as Platform)) {
+      if (!filterByPlatform || platforms!.includes(integration.platform as ActionPlatform)) {
         await ctx.db.patch(integration._id, {
           isConnected: false,
           nangoConnectionId: undefined,

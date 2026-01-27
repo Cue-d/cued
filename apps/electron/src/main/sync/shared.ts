@@ -12,15 +12,10 @@ import { api } from '@prm/convex'
 import { withAuthRetry } from '../auth/auth-utils'
 import { electronEnv } from '@prm/env/electron'
 import { createAuthRetryOptions, setConvexAuth } from '../auth/auth-manager'
+import type { SyncPlatform } from '@prm/shared'
 
 // Re-export centralized auth helpers for convenience
 export { createAuthRetryOptions, setConvexAuth }
-
-// ============================================================================
-// Types
-// ============================================================================
-
-export type SyncPlatform = 'imessage' | 'linkedin' | 'slack' | 'gmail'
 
 export type SyncMode = 'full' | 'incremental'
 

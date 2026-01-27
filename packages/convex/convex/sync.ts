@@ -19,20 +19,18 @@ import { mutation, query } from "./_generated/server";
 import { platformValidator } from "./schema";
 import { findUserByWorkosId } from "./lib/auth";
 
-// Import from platform modules
+import { normalizeLinkedInHandle, MULTI_WORKSPACE_PLATFORMS } from "@prm/shared";
 import {
   getOrCreateUser,
   findIntegration,
   getOrCreateIntegration,
   findSyncCursor,
   CURRENT_SYNC_VERSION,
-  normalizeLinkedInHandle,
   upsertSyncCursor,
   incrementSyncCursorStat,
   clearIntegrationError,
   MAX_GMAIL_ACCOUNTS,
   MAX_NEW_CONNECTION_ACTIONS,
-  MULTI_WORKSPACE_PLATFORMS,
   logSyncError,
 } from "./sync/shared";
 import {

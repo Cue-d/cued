@@ -1,7 +1,8 @@
 import React from "react";
 import { render, screen, fireEvent } from "@testing-library/react";
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { MessageResponseCard, type MessageResponseCardProps, type DisplayMessage } from "../message-response-card";
+import { type DisplayMessage } from "@prm/shared";
+import { MessageResponseCard, type MessageResponseCardProps } from "../message-response-card";
 
 // Ensure React is globally available for JSX transform
 globalThis.React = React;

@@ -5,15 +5,7 @@
  */
 import type { Doc, Id } from "../_generated/dataModel";
 import type { QueryCtx, MutationCtx } from "../_generated/server";
-
-type Platform =
-  | "imessage"
-  | "gmail"
-  | "slack"
-  | "linkedin"
-  | "twitter"
-  | "signal"
-  | "whatsapp";
+import type { ActionPlatform } from "@prm/shared";
 
 /**
  * Take the max of two nullable timestamps.
@@ -41,7 +33,7 @@ export interface AggregatedCursorStats {
 export function collectCursors(
   ctx: QueryCtx | MutationCtx,
   userId: Id<"users">,
-  platform: Platform
+  platform: ActionPlatform
 ): Promise<Doc<"syncCursors">[]> {
   return ctx.db
     .query("syncCursors")

@@ -17,10 +17,3 @@ export {
   type ContactCardProps,
 } from "./contact-card";
 
-// Re-export shared types from @prm/shared for backwards compatibility
-export type {
-  ActionPlatform,
-  MessageAttachment,
-  DisplayMessage,
-  ContactFormData,
-} from "@prm/shared";

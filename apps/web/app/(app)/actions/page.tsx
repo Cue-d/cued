@@ -3,6 +3,7 @@
 import * as React from "react"
 import { useQuery, useMutation } from "convex/react"
 import { api } from "@prm/convex"
+import { type EnrichedAction, type ContactHandle, type DisplayMessage } from "@prm/shared"
 import {
   CardStack,
   MessageResponseCard,
@@ -10,37 +11,11 @@ import {
   ActionFilterChips,
   ACTION_FILTER_GROUPS,
   type SwipeDirection,
-  type DisplayMessage,
   type FilterGroup,
-  type ContactHandle,
   type MergeSource,
 } from "@prm/ui"
 import { Button, Skeleton } from "@prm/ui"
 import type { Id } from "@prm/convex"
-
-/** Action type matching enriched actions from getPendingActions */
-interface EnrichedAction {
-  _id: Id<"actions">
-  type: string
-  status: string
-  priority: number
-  reason: string | null
-  llmReason: string | null
-  createdAt: number
-  snoozedUntil: number | null
-  completedAt: number | null
-  discardedAt: number | null
-  conversationId: Id<"conversations"> | null
-  contactId: Id<"contacts"> | null
-  contactName: string | null
-  secondaryContactId: Id<"contacts"> | null
-  secondaryContactName: string | null
-  // Denormalized merge data for resolve_contact actions
-  mergeConfidence: number | null
-  mergeSource: string | null
-  mergeReasoning: string | null
-  platform: string | null
-}
 
 /** Map action with context to CardStack ActionItem format */
 interface ActionWithId {
@@ -84,7 +59,7 @@ export default function ActionsPage() {
   // Fetch full context for top action only
   const contextResult = useQuery(
     api.actions.getActionWithContext,
-    topActionId ? { actionId: topActionId, messageLimit: 15 } : "skip"
+    topActionId ? { actionId: topActionId as Id<"actions">, messageLimit: 15 } : "skip"
   )
 
   // Mutations

@@ -12,22 +12,17 @@
  * Rate limiting: Processes ~50 messages per call.
  * For 148k messages at 5-minute intervals, full backfill takes ~24 hours.
  */
-import { NextResponse } from "next/server";
-import { ConvexHttpClient } from "convex/browser";
+import { NextRequest, NextResponse } from "next/server";
 import { api } from "@prm/convex";
-import { env } from "@prm/env/server";
+import {
+  extractErrorMessage,
+  getAuthenticatedConvexClient,
+} from "@/lib/api-utils";
 
-const convex = new ConvexHttpClient(env.NEXT_PUBLIC_CONVEX_URL!);
-
-export async function POST(req: Request) {
-  // Get auth token from header
-  const token = req.headers.get("authorization")?.replace("Bearer ", "");
-
-  if (!token) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
-
-  convex.setAuth(token);
+export async function POST(req: NextRequest) {
+  const authResult = getAuthenticatedConvexClient(req);
+  if ("error" in authResult) return authResult.error;
+  const { convex } = authResult;
 
   // Parse optional platform from body (defaults to "imessage")
   let platform: "imessage" | "gmail" | "slack" = "imessage";
@@ -52,8 +47,7 @@ export async function POST(req: Request) {
     });
   } catch (error) {
     console.error("Error processing memory batch:", error);
-    const message = error instanceof Error ? error.message : "Unknown error";
-    return NextResponse.json({ error: message }, { status: 500 });
+    return NextResponse.json({ error: extractErrorMessage(error) }, { status: 500 });
   }
 }
 
@@ -61,15 +55,10 @@ export async function POST(req: Request) {
  * GET /api/memories/process
  * Returns the current memory processing status.
  */
-export async function GET(req: Request) {
-  // Get auth token from header
-  const token = req.headers.get("authorization")?.replace("Bearer ", "");
-
-  if (!token) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
-
-  convex.setAuth(token);
+export async function GET(req: NextRequest) {
+  const authResult = getAuthenticatedConvexClient(req);
+  if ("error" in authResult) return authResult.error;
+  const { convex } = authResult;
 
   // Parse optional platform from query (defaults to "imessage")
   const url = new URL(req.url);
@@ -99,7 +88,6 @@ export async function GET(req: Request) {
     });
   } catch (error) {
     console.error("Error getting memory processing status:", error);
-    const message = error instanceof Error ? error.message : "Unknown error";
-    return NextResponse.json({ error: message }, { status: 500 });
+    return NextResponse.json({ error: extractErrorMessage(error) }, { status: 500 });
   }
 }

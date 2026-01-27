@@ -156,3 +156,76 @@ export function urnIdsMatch(
     id1.toLowerCase() === id2.toLowerCase()
   );
 }
+
+// ============================================================================
+// LinkedIn Handle Utilities
+// ============================================================================
+
+/**
+ * LinkedIn handle regex pattern: alphanumeric + hyphens, 3-100 characters.
+ */
+const LINKEDIN_HANDLE_PATTERN = /^[a-zA-Z0-9-]{3,100}$/;
+
+/**
+ * Validate a LinkedIn handle.
+ * LinkedIn handles are alphanumeric with hyphens, 3-100 characters.
+ *
+ * @param handle - The handle to validate
+ * @returns True if the handle is valid
+ */
+export function isValidLinkedInHandle(handle: string): boolean {
+  return LINKEDIN_HANDLE_PATTERN.test(handle);
+}
+
+/**
+ * Check if a string is a LinkedIn member ID (not a vanity URL).
+ * Member IDs start with "ACo" and contain underscores, e.g., "ACoAAEFsIqIBOE41g26VjbAiCGu9BF3oH1_wtOw"
+ *
+ * @param value - The string to check
+ * @returns True if the string looks like a member ID
+ */
+export function isLinkedInMemberId(value: string): boolean {
+  return value.startsWith("ACo") && value.includes("_");
+}
+
+/**
+ * Normalize LinkedIn handle to canonical format for consistent deduplication.
+ * Extracts handle from URLs and normalizes to lowercase.
+ * Returns empty for member IDs (not vanity URLs) - this is expected behavior.
+ *
+ * @param input - LinkedIn handle or URL (e.g., "john-doe" or "https://linkedin.com/in/john-doe")
+ * @returns Normalized lowercase handle, or empty string if invalid/member ID
+ *
+ * @example
+ * normalizeLinkedInHandle("John-Doe") // => "john-doe"
+ * normalizeLinkedInHandle("https://linkedin.com/in/jane-smith") // => "jane-smith"
+ * normalizeLinkedInHandle("invalid!handle") // => ""
+ * normalizeLinkedInHandle("ACoAAEFsIqIB...") // => "" (member ID, not vanity URL)
+ */
+export function normalizeLinkedInHandle(input: string): string {
+  if (!input) return "";
+
+  // Clean up URL parameters and trailing slashes
+  const clean = input.split("?")[0].split("#")[0].replace(/\/+$/, "");
+
+  // Try to extract handle from URL
+  const match = clean.match(/linkedin\.com\/in\/([^/]+)/i);
+  if (match) {
+    const handle = match[1];
+    if (isValidLinkedInHandle(handle)) {
+      return handle.toLowerCase();
+    }
+    // Member IDs (e.g., ACoAAEFsIqIB...) are not vanity URLs - silently return empty
+    if (isLinkedInMemberId(handle)) {
+      return "";
+    }
+    return "";
+  }
+
+  // Already a handle - validate and lowercase
+  if (isValidLinkedInHandle(clean)) {
+    return clean.toLowerCase();
+  }
+
+  return "";
+}

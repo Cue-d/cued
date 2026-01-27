@@ -2,6 +2,7 @@ import { generateObject } from "ai";
 import { z } from "zod";
 import { truncate } from "@prm/shared";
 import { openai, FAST_MODEL } from "../openai";
+import { withRetry } from "../utils";
 
 /** Action types that can be suggested by the LLM */
 const ACTION_TYPES = ["respond", "follow_up", "send_message"] as const;
@@ -292,11 +293,6 @@ export async function generateAction(
   return object;
 }
 
-/** Delay execution for exponential backoff */
-function delay(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
 /**
  * Generate action with retry on failure.
  * Returns a safe default if LLM fails after retries.
@@ -305,27 +301,16 @@ export async function generateActionWithRetry(
   input: GenerateActionInput,
   maxRetries = 2
 ): Promise<ActionSuggestion> {
-  const totalAttempts = maxRetries + 1;
-  let lastError: Error | undefined;
-
-  for (let attempt = 1; attempt <= totalAttempts; attempt++) {
-    try {
-      return await generateAction(input);
-    } catch (error) {
-      lastError = error instanceof Error ? error : new Error(String(error));
-      if (attempt < totalAttempts) {
-        await delay(1000 * attempt);
-      }
-    }
-  }
-
-  console.error("generateAction failed after retries:", lastError?.message);
-  return {
-    shouldCreateAction: false,
-    type: null,
-    priority: null,
-    reason: `LLM analysis failed: ${lastError?.message ?? "unknown error"}`,
-    suggestedResponse: null,
-    remindAt: null,
-  };
+  return withRetry(() => generateAction(input), {
+    maxRetries,
+    defaultValue: {
+      shouldCreateAction: false,
+      type: null,
+      priority: null,
+      reason: "LLM analysis failed after retries",
+      suggestedResponse: null,
+      remindAt: null,
+    },
+    logPrefix: "generateAction",
+  });
 }

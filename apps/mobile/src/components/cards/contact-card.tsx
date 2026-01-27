@@ -15,9 +15,6 @@ import { SymbolView } from "expo-symbols";
 import { getInitials, PLATFORM_CONFIG, type ActionPlatform, type ContactFormData } from "@prm/shared";
 import { cn, getThemeColors } from "@/lib/utils";
 
-/** Re-export types for backwards compatibility */
-export type { ContactFormData } from "@prm/shared";
-
 /** Re-export ActionPlatform as ContactPlatform for this component */
 export type ContactPlatform = ActionPlatform;
 

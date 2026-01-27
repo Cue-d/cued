@@ -9,6 +9,7 @@
 import { app } from 'electron'
 import { appendFileSync, existsSync, mkdirSync, statSync, renameSync, writeFileSync } from 'fs'
 import { join, dirname } from 'path'
+import type { SyncPlatform } from '@prm/shared'
 
 // ============================================================================
 // Constants
@@ -22,10 +23,9 @@ const MAX_ROTATED_LOGS = 3 // Keep up to 3 rotated logs
 // Types
 // ============================================================================
 
-export type Platform = 'imessage' | 'gmail' | 'slack' | 'linkedin'
 
 export interface FilteredMessageLog {
-  platform: Platform
+  platform: SyncPlatform
   messageId: string
   filterReason: string
   senderName?: string
@@ -35,7 +35,7 @@ export interface FilteredMessageLog {
 }
 
 export interface SyncEventLog {
-  platform: Platform
+  platform: SyncPlatform
   event: 'sync_start' | 'sync_complete' | 'sync_error' | 'batch_complete'
   details?: Record<string, unknown>
 }
@@ -151,7 +151,7 @@ class SyncDebugLogger {
   /**
    * Log a batch of filtered messages efficiently.
    */
-  logFilteredBatch(platform: Platform, filtered: FilteredMessageLog[]): void {
+  logFilteredBatch(platform: SyncPlatform, filtered: FilteredMessageLog[]): void {
     if (filtered.length === 0) return
 
     this.writeLine(`FILTERED_BATCH [${platform}] count=${filtered.length}`)
@@ -174,7 +174,7 @@ class SyncDebugLogger {
   /**
    * Log sync start.
    */
-  logSyncStart(platform: Platform, mode?: 'full' | 'incremental'): void {
+  logSyncStart(platform: SyncPlatform, mode?: 'full' | 'incremental'): void {
     this.logSyncEvent({
       platform,
       event: 'sync_start',
@@ -186,7 +186,7 @@ class SyncDebugLogger {
    * Log sync completion.
    */
   logSyncComplete(
-    platform: Platform,
+    platform: SyncPlatform,
     stats: {
       messagesProcessed?: number
       messagesFiltered?: number
@@ -206,7 +206,7 @@ class SyncDebugLogger {
   /**
    * Log sync error.
    */
-  logSyncError(platform: Platform, error: string, context?: Record<string, unknown>): void {
+  logSyncError(platform: SyncPlatform, error: string, context?: Record<string, unknown>): void {
     this.logSyncEvent({
       platform,
       event: 'sync_error',
@@ -218,7 +218,7 @@ class SyncDebugLogger {
    * Log batch completion with filtering stats.
    */
   logBatchComplete(
-    platform: Platform,
+    platform: SyncPlatform,
     stats: {
       batchNumber: number
       messagesProcessed: number
@@ -237,7 +237,7 @@ class SyncDebugLogger {
    * Log detailed cursor state for debugging initial sync issues.
    */
   logCursorState(
-    platform: Platform,
+    platform: SyncPlatform,
     state: {
       cursor: number
       fullSyncStartRowid?: number
@@ -257,7 +257,7 @@ class SyncDebugLogger {
    * Log batch details before processing.
    */
   logBatchDetails(
-    platform: Platform,
+    platform: SyncPlatform,
     details: {
       batchNumber: number
       direction: 'asc' | 'desc'
@@ -282,7 +282,7 @@ class SyncDebugLogger {
    * Log when a chat is skipped during sync.
    */
   logSkippedChat(
-    platform: Platform,
+    platform: SyncPlatform,
     chatId: number | string,
     reason: string
   ): void {
@@ -293,7 +293,7 @@ class SyncDebugLogger {
    * Log when a message is skipped during sync.
    */
   logSkippedMessage(
-    platform: Platform,
+    platform: SyncPlatform,
     messageId: number | string,
     reason: string,
     details?: { chatId?: number | string; content?: string }
@@ -308,7 +308,7 @@ class SyncDebugLogger {
    * Log full sync transition to incremental mode.
    */
   logFullSyncTransition(
-    platform: Platform,
+    platform: SyncPlatform,
     details: {
       fullSyncStartRowid: number
       currentMaxRowid: number
@@ -327,7 +327,7 @@ class SyncDebugLogger {
    * Log raw batch data for deep debugging.
    */
   logRawBatch(
-    platform: Platform,
+    platform: SyncPlatform,
     batchNumber: number,
     batch: {
       cursor: number
@@ -354,7 +354,7 @@ class SyncDebugLogger {
    * Log a custom event (for debugging specific flows).
    */
   logCustomEvent(
-    platform: Platform,
+    platform: SyncPlatform,
     eventName: string,
     details?: Record<string, unknown>
   ): void {
@@ -393,6 +393,6 @@ export function logFilteredMessage(log: FilteredMessageLog): void {
 /**
  * Convenience function to log filtered batch.
  */
-export function logFilteredBatch(platform: Platform, filtered: FilteredMessageLog[]): void {
+export function logFilteredBatch(platform: SyncPlatform, filtered: FilteredMessageLog[]): void {
   getSyncDebugLogger().logFilteredBatch(platform, filtered)
 }

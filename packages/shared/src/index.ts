@@ -16,13 +16,17 @@ export {
   formatRelativeTime,
   formatTimestamp,
   type FormatTimestampOptions,
+  type FormatRelativeTimeOptions,
 } from "./utils/time.js";
 
 // Platform constants
 export {
   PLATFORM_CONFIG,
+  MULTI_WORKSPACE_PLATFORMS,
   getPlatformConfig,
   type ActionPlatform,
+  type SyncPlatform,
+  type MultiWorkspacePlatform,
   type PlatformConfigItem,
 } from "./constants/platform.js";
 
@@ -31,7 +35,26 @@ export type {
   MessageAttachment,
   DisplayMessage,
   ContactFormData,
+  EnrichedAction,
 } from "./types/actions.js";
+
+// Contact types
+export type {
+  HandleType,
+  HandlePlatform,
+  ContactHandle,
+  ContactHandleInput,
+} from "./types/contact.js";
+
+// Action constants
+export {
+  ACTION_TYPES,
+  MESSAGE_ACTION_TYPES,
+  CONTACT_ACTION_TYPES,
+  isMessageActionType,
+  isContactActionType,
+  type ActionType,
+} from "./constants/actions.js";
 
 // Platform adapter types (for message queue)
 export type {
@@ -40,7 +63,7 @@ export type {
   PlatformAdapter,
 } from "./types/platform-adapter.js";
 
-// LinkedIn URN utilities
+// LinkedIn URN and handle utilities
 export {
   extractIdFromURN,
   normalizeConversationURN,
@@ -49,4 +72,7 @@ export {
   isConversationURN,
   isMemberURN,
   urnIdsMatch,
+  isValidLinkedInHandle,
+  isLinkedInMemberId,
+  normalizeLinkedInHandle,
 } from "./linkedin.js";

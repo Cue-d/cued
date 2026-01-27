@@ -17,14 +17,6 @@ export type {
   MessageResponseCardRef,
 } from "./message-response-card"
 
-// Re-export shared types from @prm/shared for backwards compatibility
-export type {
-  DisplayMessage,
-  MessageAttachment,
-  ActionPlatform,
-  ContactFormData,
-} from "@prm/shared"
-
 export { ContactCard } from "./contact-card"
 export type {
   ContactCardProps,
@@ -39,7 +31,6 @@ export {
 } from "./resolve-contact-card"
 export type {
   ResolveContactCardProps,
-  ContactHandle,
   ContactPanelProps,
   MergeSource,
   SourceBadgeProps,

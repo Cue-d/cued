@@ -1,21 +1,15 @@
-import { NextResponse } from "next/server";
-import { ConvexHttpClient } from "convex/browser";
+import { NextRequest, NextResponse } from "next/server";
 import { addContactMemories, type ConversationMessage } from "@prm/ai";
-import { api } from "@prm/convex";
-import { env } from "@prm/env/server";
-import type { Id } from "@prm/convex";
+import { api, type Id } from "@prm/convex";
+import {
+  extractErrorMessage,
+  getAuthenticatedConvexClient,
+} from "@/lib/api-utils";
 
-const convex = new ConvexHttpClient(env.NEXT_PUBLIC_CONVEX_URL!);
-
-export async function POST(req: Request) {
-  // Get auth token from header
-  const token = req.headers.get("authorization")?.replace("Bearer ", "");
-
-  if (!token) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
-
-  convex.setAuth(token);
+export async function POST(req: NextRequest) {
+  const authResult = getAuthenticatedConvexClient(req);
+  if ("error" in authResult) return authResult.error;
+  const { convex } = authResult;
 
   // Get user identity
   let userId: string | null = null;
@@ -34,10 +28,7 @@ export async function POST(req: Request) {
   const { conversationId, limit = 50 } = body;
 
   if (!conversationId) {
-    return NextResponse.json(
-      { error: "conversationId is required" },
-      { status: 400 }
-    );
+    return NextResponse.json({ error: "conversationId is required" }, { status: 400 });
   }
 
   try {
@@ -100,7 +91,6 @@ export async function POST(req: Request) {
     });
   } catch (error) {
     console.error("Error adding memories:", error);
-    const message = error instanceof Error ? error.message : "Unknown error";
-    return NextResponse.json({ error: message }, { status: 500 });
+    return NextResponse.json({ error: extractErrorMessage(error) }, { status: 500 });
   }
 }

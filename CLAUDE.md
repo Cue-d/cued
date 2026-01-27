@@ -45,8 +45,8 @@ All shared utilities, types, and constants live here. Import from `@prm/shared`:
 - **Utils**: `getInitials`, `formatTime`, `formatRelativeTime`, `formatTimestamp`
 - **Phone**: `normalizePhone`, `formatPhoneNumber`, `phonesMatch`, `getPhoneVariants`
 - **LinkedIn**: `normalizeLinkedInHandle`, `extractLinkedInURN`, `isValidLinkedInURN`, `parseLinkedInURN`
-- **Types**: `DraftOption`, `DraftRiskFlag`, `DisplayMessage`, `ContactFormData`
-- **Constants**: `PLATFORM_CONFIG`, `ActionPlatform`, `getPlatformConfig`
+- **Types**: `DisplayMessage`, `ContactFormData`, `EnrichedAction`, `ContactHandle`, `HandleType`
+- **Constants**: `PLATFORM_CONFIG`, `ActionPlatform`, `ACTION_TYPES`, `isMessageActionType`, `isContactActionType`
 
 ### packages/ui Component Organization
 
@@ -151,6 +151,37 @@ Web app: http://localhost:3000
 - Don't use `"use client"` in packages/ui (it's a shared library)
 - Don't modify Convex `_generated/` files
 - Don't duplicate utilities that exist in `@prm/shared`
+
+### Preventing Code Duplication
+
+**Before creating types/interfaces:**
+1. Check `packages/shared/src/types/` for existing definitions
+2. If adding contact, message, or action types → use `@prm/shared`
+
+**Before creating utilities:**
+1. Check `packages/shared/src/` for existing utils (phone, linkedin, time)
+2. Check `packages/convex/convex/sync/shared.ts` for sync utils
+3. Check `apps/electron/src/main/sync/shared.ts` for electron sync utils
+
+**Canonical type locations:**
+| Type | Location |
+|------|----------|
+| `ContactHandle`, `HandleType` | `@prm/shared/types/contact` |
+| `DisplayMessage`, `EnrichedAction` | `@prm/shared/types/actions` |
+| `ACTION_TYPES`, `isMessageActionType` | `@prm/shared/constants/actions` |
+| `PLATFORM_CONFIG`, `ActionPlatform` | `@prm/shared/constants/platform` |
+
+**Sync code patterns:**
+| Pattern | Location |
+|---------|----------|
+| `batchFetchConversations`, `batchFetchMessages` | `packages/convex/convex/sync/batch-utils.ts` |
+| `getOrCreateContact`, `batchResolveHandles` | `packages/convex/convex/sync/shared.ts` |
+| Cursor management | `packages/convex/convex/sync/shared.ts` |
+
+**Time formatting:**
+- Use `formatRelativeTime` from `@prm/shared` (supports `{ allowFuture: true }` for future times)
+- Use `formatTimestamp` for smart date/time formatting
+- Don't create local formatRelativeTime functions
 
 ## Commands
 

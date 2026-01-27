@@ -1,11 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { Nango } from "@nangohq/node";
-import { ConvexHttpClient } from "convex/browser";
 import { api } from "@prm/convex";
 import { env } from "@prm/env/server";
+import { extractErrorMessage, getConvexClient } from "@/lib/api-utils";
 
 const nango = new Nango({ secretKey: env.NANGO_SECRET_KEY });
-const convex = new ConvexHttpClient(env.NEXT_PUBLIC_CONVEX_URL!);
 
 interface GmailEmail {
   id: string;
@@ -69,6 +68,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     });
 
     // Sync to Convex
+    const convex = getConvexClient();
     const result = await convex.mutation(api.sync.syncGmailMessages, {
       workosUserId,
       emails: cleanedRecords,
@@ -86,7 +86,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       recordsProcessed: records.length,
     });
   } catch (error) {
-    const message = error instanceof Error ? error.message : "Pull failed";
+    const message = extractErrorMessage(error, "Pull failed");
     console.error("Gmail pull error:", message);
     return NextResponse.json({ error: message }, { status: 500 });
   }

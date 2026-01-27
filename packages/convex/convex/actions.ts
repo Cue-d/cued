@@ -10,6 +10,7 @@ import {
   actionTypeValidator,
   platformValidator,
 } from "./schema";
+import type { EnrichedAction } from "@prm/shared";
 
 /**
  * Fetch all actionable items: pending actions + snoozed actions that are due.
@@ -47,29 +48,7 @@ async function fetchActionableActions(
 async function enrichAction(
   ctx: QueryCtx,
   action: Doc<"actions">
-): Promise<{
-  _id: Id<"actions">;
-  type: Doc<"actions">["type"];
-  status: Doc<"actions">["status"];
-  priority: number;
-  reason: string | null;
-  llmReason: string | null;
-  createdAt: number;
-  snoozedUntil: number | null;
-  completedAt: number | null;
-  discardedAt: number | null;
-  conversationId: Id<"conversations"> | null;
-  contactId: Id<"contacts"> | null;
-  contactName: string | null;
-  secondaryContactId: Id<"contacts"> | null;
-  secondaryContactName: string | null;
-  mergeSuggestionId: Id<"mergeSuggestions"> | null;
-  // Denormalized merge data for resolve_contact actions
-  mergeConfidence: number | null;
-  mergeSource: string | null;
-  mergeReasoning: string | null;
-  platform: string | null;
-}> {
+): Promise<EnrichedAction> {
   const [conversation, contact, secondaryContact] = await Promise.all([
     action.conversationId ? ctx.db.get(action.conversationId) : null,
     action.contactId ? ctx.db.get(action.contactId) : null,

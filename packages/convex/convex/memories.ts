@@ -22,13 +22,13 @@ import {
   aggregateCursorStats,
   findEarliestMemoryCursor,
 } from "./lib/cursors";
+import type { ActionPlatform } from "@prm/shared";
 
 // Rate limiting: ~100 messages per minute = ~1.67 msgs/sec
 // Process in batches of 50, with delay between batches
 const BATCH_SIZE = 50;
 const MIN_MESSAGE_LENGTH = 10; // Skip very short messages
 
-type Platform = "imessage" | "gmail" | "slack" | "linkedin" | "twitter" | "signal" | "whatsapp";
 
 /** Message data enriched with contact/conversation context. */
 interface EnrichedMessage {
@@ -56,7 +56,7 @@ interface MessageGroup {
 function findIntegration(
   ctx: QueryCtx | MutationCtx,
   userId: Id<"users">,
-  platform: Platform
+  platform: ActionPlatform
 ): Promise<Doc<"integrations"> | null> {
   return ctx.db
     .query("integrations")

@@ -1,6 +1,7 @@
 import * as React from "react"
 import { ArrowLeftRight } from "lucide-react"
-import { ContactPanel, type ContactHandle } from "./contact-panel"
+import { type ContactHandle } from "@prm/shared"
+import { ContactPanel } from "./contact-panel"
 import { SourceBadge, type MergeSource } from "./source-badge"
 import { cn } from "../../../lib/utils"
 import { Badge } from "../../ui/badge"

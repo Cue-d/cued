@@ -1,4 +1,5 @@
 import { z } from "zod";
+import type { ContactHandle } from "@prm/shared";
 import { getErrorMessage, type Tool, type ToolResult } from "../types";
 
 const inputSchema = z.object({
@@ -8,12 +9,6 @@ const inputSchema = z.object({
     .optional()
     .describe("Maximum number of results to return (default: 20, max: 50)"),
 });
-
-interface ContactHandle {
-  type: "phone" | "email" | "slack_id";
-  value: string;
-  platform: string;
-}
 
 interface ContactSearchResult {
   _id: string;

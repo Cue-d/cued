@@ -14,9 +14,6 @@ import { MessageBubble } from "./message-response-card/message-bubble"
 import { PlatformBadge } from "./message-response-card/platform-badge"
 import { ResponseInput } from "./message-response-card/response-input"
 
-/** Re-export types for backwards compatibility */
-export type { ActionPlatform, MessageAttachment, DisplayMessage } from "@prm/shared"
-
 /** Re-export sub-components for advanced usage */
 export { PlatformBadge, PLATFORM_ICONS, type PlatformBadgeProps } from "./message-response-card/platform-badge"
 export { MessageBubble, ReactionBadges, DeliveryStatus, AttachmentDisplay, type MessageBubbleProps } from "./message-response-card/message-bubble"

@@ -13,9 +13,9 @@ import {
   scheduleIncomingMessageEvents,
   scheduleOutgoingMessageEvents,
   SEVEN_DAYS_MS,
-  BATCH_SIZE,
   logSyncError,
 } from "./shared";
+import { batchFetchConversations, batchFetchMessages } from "./batch-utils";
 
 // ============================================================================
 // Validators
@@ -228,9 +228,10 @@ export async function syncGmailMessagesInternal(
 
   // Batch fetch existing conversations
   const threadIds = [...emailsByThread.keys()];
-  const existingConversations = await batchFetchGmailConversations(
+  const existingConversations = await batchFetchConversations(
     ctx,
     userId,
+    "gmail",
     threadIds
   );
   const conversationMap = new Map(
@@ -239,7 +240,7 @@ export async function syncGmailMessagesInternal(
 
   // Batch fetch existing messages
   const messageIds = personalEmails.map((e) => e.id);
-  const existingMessages = await batchFetchGmailMessages(ctx, userId, messageIds);
+  const existingMessages = await batchFetchMessages(ctx, userId, "gmail", messageIds);
   const existingMessageSet = new Set(
     existingMessages.map((m) => m.platformMessageId)
   );
@@ -404,68 +405,6 @@ async function getOrCreateEmailContact(
 }
 
 // ============================================================================
-// Batch Fetch Helpers
-// ============================================================================
-
-/**
- * Batch fetch existing Gmail conversations by thread ID.
- */
-async function batchFetchGmailConversations(
-  ctx: MutationCtx,
-  userId: Id<"users">,
-  threadIds: string[]
-): Promise<Doc<"conversations">[]> {
-  const results: Doc<"conversations">[] = [];
-
-  for (let i = 0; i < threadIds.length; i += BATCH_SIZE) {
-    const batch = threadIds.slice(i, i + BATCH_SIZE);
-    const promises = batch.map((id) =>
-      ctx.db
-        .query("conversations")
-        .withIndex("by_platform_conversation", (q) =>
-          q
-            .eq("userId", userId)
-            .eq("platform", "gmail")
-            .eq("platformConversationId", id)
-        )
-        .unique()
-    );
-    const batchResults = await Promise.all(promises);
-    results.push(
-      ...batchResults.filter((c): c is Doc<"conversations"> => c !== null)
-    );
-  }
-
-  return results;
-}
-
-/**
- * Batch fetch existing Gmail messages by message ID.
- */
-async function batchFetchGmailMessages(
-  ctx: MutationCtx,
-  userId: Id<"users">,
-  messageIds: string[]
-): Promise<Doc<"messages">[]> {
-  const results: Doc<"messages">[] = [];
-
-  for (let i = 0; i < messageIds.length; i += BATCH_SIZE) {
-    const batch = messageIds.slice(i, i + BATCH_SIZE);
-    const promises = batch.map((id) =>
-      ctx.db
-        .query("messages")
-        .withIndex("by_platform_message", (q) =>
-          q.eq("userId", userId).eq("platform", "gmail").eq("platformMessageId", id)
-        )
-        .unique()
-    );
-    const batchResults = await Promise.all(promises);
-    results.push(...batchResults.filter((m): m is Doc<"messages"> => m !== null));
-  }
-
-  return results;
-}
-
 // ============================================================================
 // Google Contacts Sync
 // ============================================================================
