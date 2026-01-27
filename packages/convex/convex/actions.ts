@@ -406,19 +406,6 @@ export const getActionWithContext = query({
           senderName = sender?.displayName ?? null;
         }
 
-        // Resolve attachment URLs
-        const attachmentsWithUrls = msg.attachments
-          ? await Promise.all(
-              msg.attachments.map(async (att) => ({
-                ...att,
-                url: await ctx.storage.getUrl(att.storageId),
-                thumbnailUrl: att.thumbnailStorageId
-                  ? await ctx.storage.getUrl(att.thumbnailStorageId)
-                  : null,
-              }))
-            )
-          : null;
-
         return {
           _id: msg._id,
           content: msg.content,
@@ -427,7 +414,6 @@ export const getActionWithContext = query({
           senderName,
           status: msg.status,
           reactions: msg.reactions,
-          attachments: attachmentsWithUrls,
         };
       })
     );

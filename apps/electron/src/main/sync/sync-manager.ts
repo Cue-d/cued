@@ -19,11 +19,9 @@
 
 import { ConvexHttpClient } from "convex/browser";
 import { api } from "@prm/convex";
-import type { Id } from "@prm/convex";
 import { withAuthRetry } from "../auth/auth-utils";
 import { electronEnv } from "@prm/env/electron";
 import { ChatDb } from "./chat-db";
-import { uploadAttachments } from "./attachment-uploader";
 import { getContactsManager } from "./contacts";
 import { getSyncDebugLogger } from "./sync-debug-logger";
 import {
@@ -35,15 +33,6 @@ import {
   setConvexAuth,
 } from "./shared";
 import { getValidAccessToken } from "../auth/auth-manager";
-
-/** Attachment with Convex storage IDs (properly typed) */
-interface ConvexAttachment {
-  filename: string;
-  mimeType: string;
-  size: number;
-  storageId: Id<"_storage">;
-  thumbnailStorageId?: Id<"_storage">;
-}
 
 // Performance tuning constants
 const BATCH_SIZE = 1000;
@@ -88,7 +77,6 @@ export interface SyncState {
 
 export interface SyncManagerOptions {
   onProgress?: (progress: SyncProgress) => void;
-  syncAttachments?: boolean;
   syncContacts?: () => Promise<{ contactsCount: number }>;
 }
 
@@ -562,48 +550,6 @@ export class SyncManager {
       });
     }
 
-    // Upload attachments if enabled
-    const uploadedAttachmentMap = new Map<number, ConvexAttachment[]>();
-    if (this.options.syncAttachments === true) {
-      const attachmentPromises = batch.messages
-        .filter((msg) => msg.attachments?.length)
-        .map(async (message) => {
-          try {
-            const uploaded = await uploadAttachments(
-              this.client,
-              message.attachments!
-            );
-            if (uploaded.length > 0) {
-              const convexAttachments: ConvexAttachment[] = uploaded.map(
-                (att) => ({
-                  filename: att.filename,
-                  mimeType: att.mimeType,
-                  size: att.size,
-                  storageId: att.storageId as Id<"_storage">,
-                  thumbnailStorageId: att.thumbnailStorageId
-                    ? (att.thumbnailStorageId as Id<"_storage">)
-                    : undefined,
-                })
-              );
-              return { messageId: message.id, attachments: convexAttachments };
-            }
-          } catch (e) {
-            console.warn(
-              `[SyncManager] Batch ${batchNum}: Failed to upload attachments for message ${message.id}:`,
-              e
-            );
-          }
-          return null;
-        });
-
-      const attachmentResults = await Promise.all(attachmentPromises);
-      for (const result of attachmentResults) {
-        if (result) {
-          uploadedAttachmentMap.set(result.messageId, result.attachments);
-        }
-      }
-    }
-
     // Transform batch for Convex sync
     const syncBatch = {
       ...batch,
@@ -612,16 +558,9 @@ export class SyncManager {
           guid,
           status,
           errorCode,
-          attachments: localAttachments,
           reactions,
           ...rest
-        }) => {
-          const uploadedAtts = uploadedAttachmentMap.get(rest.id);
-          return {
-            ...rest,
-            attachments: uploadedAtts,
-          };
-        }
+        }) => rest
       ),
     };
 

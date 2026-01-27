@@ -278,12 +278,6 @@ export default function ActionsPage() {
               status: msg.status,
               // Extract emoji strings from reaction objects
               reactions: msg.reactions?.map((r) => r.emoji) ?? null,
-              attachments: msg.attachments?.map((att) => ({
-                filename: att.filename ?? null,
-                mimeType: att.mimeType ?? null,
-                url: att.url ?? null,
-                thumbnailUrl: att.thumbnailUrl ?? null,
-              })),
             }))
 
             // Get message timestamp from latest non-self message

@@ -183,17 +183,6 @@ const schema = defineSchema({
         })
       )
     ),
-    attachments: v.optional(
-      v.array(
-        v.object({
-          filename: v.string(),
-          mimeType: v.string(),
-          size: v.number(),
-          storageId: v.id("_storage"), // Convex file storage ID
-          thumbnailStorageId: v.optional(v.id("_storage")),
-        })
-      )
-    ),
     memoryExtractedAt: v.optional(v.number()),
   })
     .index("by_user", ["userId"])

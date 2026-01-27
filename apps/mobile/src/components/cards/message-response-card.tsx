@@ -7,8 +7,7 @@
  */
 
 import { useMemo, useRef, useCallback } from "react";
-import { View, Text, ScrollView, useColorScheme } from "react-native";
-import { Image } from "expo-image";
+import { View, Text, ScrollView } from "react-native";
 import { SymbolView, type SFSymbol } from "expo-symbols";
 import {
   getInitials,
@@ -16,11 +15,10 @@ import {
   formatRelativeTime,
   PLATFORM_CONFIG,
   type ActionPlatform,
-  type MessageAttachment,
   type DisplayMessage,
 } from "@prm/shared";
 import { ChatInput } from "@/components/chat/chat-input";
-import { cn, getThemeColors } from "@/lib/utils";
+import { cn } from "@/lib/utils";
 import type { ScrollView as ScrollViewType } from "react-native";
 
 /** Platform icons (platform-specific SF Symbols) */
@@ -111,47 +109,6 @@ function DeliveryStatus({ status }: { status?: string | null }): React.JSX.Eleme
   );
 }
 
-/** Attachment display component */
-function AttachmentDisplay({
-  attachments,
-  mutedColor,
-}: {
-  attachments: MessageAttachment[];
-  mutedColor: string;
-}): React.JSX.Element {
-  return (
-    <View className="mb-1 gap-1">
-      {attachments.map((att, idx) => {
-        const isImage = att.mimeType?.startsWith("image/");
-        const url = att.thumbnailUrl || att.url;
-
-        if (isImage && url) {
-          return (
-            <Image
-              key={idx}
-              source={{ uri: url }}
-              className="w-[200px] h-[200px] rounded-lg object-cover"
-              accessibilityLabel={att.filename || "Image attachment"}
-            />
-          );
-        }
-
-        return (
-          <View
-            key={idx}
-            className="flex-row items-center gap-2"
-          >
-            <SymbolView name="doc.fill" size={12} tintColor={mutedColor} />
-            <Text className="text-xs text-muted-foreground" numberOfLines={1}>
-              {att.filename || "Attachment"}
-            </Text>
-          </View>
-        );
-      })}
-    </View>
-  );
-}
-
 /** Reaction badges component */
 function ReactionBadges({
   reactions,
@@ -191,9 +148,6 @@ export function MessageResponseCard({
   platform,
   isDesktopOnline,
 }: MessageResponseCardProps): React.JSX.Element {
-  const colorScheme = useColorScheme();
-  const isDark = colorScheme === "dark";
-  const colors = getThemeColors(isDark);
   const initials = getInitials(personName);
   const scrollViewRef = useRef<ScrollViewType>(null);
 
@@ -256,11 +210,7 @@ export function MessageResponseCard({
         {sortedMessages.length > 0 ? (
           sortedMessages.map((msg) => {
             const hasReactions = msg.reactions && msg.reactions.length > 0;
-            const hasAttachments = msg.attachments && msg.attachments.length > 0;
-            const hasText =
-              msg.content &&
-              msg.content.trim().length > 0 &&
-              !(hasAttachments && msg.content.trim() === "[attachment]");
+            const hasText = msg.content && msg.content.trim().length > 0;
 
             return (
               <View
@@ -288,9 +238,6 @@ export function MessageResponseCard({
                       isSent={msg.isFromMe}
                     />
                   )}
-                  {hasAttachments && (
-                    <AttachmentDisplay attachments={msg.attachments!} mutedColor={colors.mutedForeground} />
-                  )}
                   {hasText && msg.content && (
                     <Text
                       className={cn(
@@ -302,7 +249,7 @@ export function MessageResponseCard({
                       {msg.content}
                     </Text>
                   )}
-                  {!hasText && !hasAttachments && (
+                  {!hasText && (
                     <Text className="text-sm text-muted-foreground">
                       [No text]
                     </Text>

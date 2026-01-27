@@ -1,7 +1,7 @@
 "use client"
 
 import * as React from "react"
-import { formatTime, type MessageAttachment } from "@prm/shared"
+import { formatTime } from "@prm/shared"
 import { cn } from "../../../lib/utils"
 
 /** Reaction badges component */
@@ -57,45 +57,6 @@ export function DeliveryStatus({ status }: { status?: string | null }) {
   )
 }
 
-/** Attachment display component */
-export function AttachmentDisplay({
-  attachments,
-}: {
-  attachments: MessageAttachment[]
-}) {
-  return (
-    <div className="space-y-1 mb-1">
-      {attachments.map((att, idx) => {
-        const isImage = att.mimeType?.startsWith("image/")
-        const url = att.thumbnailUrl || att.url
-
-        if (isImage && url) {
-          return (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img
-              key={idx}
-              src={url}
-              alt={att.filename || "Image"}
-              className="max-w-[200px] max-h-[200px] rounded-lg object-cover"
-            />
-          )
-        }
-
-        return (
-          <div
-            key={idx}
-            className="flex items-center gap-2 text-xs text-muted-foreground"
-          >
-            <span className="truncate max-w-[150px]">
-              {att.filename || "Attachment"}
-            </span>
-          </div>
-        )
-      })}
-    </div>
-  )
-}
-
 export interface MessageBubbleProps {
   /** Unique message ID */
   id: string
@@ -111,13 +72,11 @@ export interface MessageBubbleProps {
   status?: string | null
   /** Reactions on the message */
   reactions?: string[] | null
-  /** Attachments */
-  attachments?: MessageAttachment[] | null
 }
 
 /**
  * MessageBubble component - renders a single chat message with optional
- * attachments, reactions, and delivery status.
+ * reactions and delivery status.
  */
 export function MessageBubble({
   content,
@@ -126,14 +85,9 @@ export function MessageBubble({
   senderName,
   status,
   reactions,
-  attachments,
 }: MessageBubbleProps) {
   const hasReactions = reactions && reactions.length > 0
-  const hasAttachments = attachments && attachments.length > 0
-  const hasText =
-    content &&
-    content.trim().length > 0 &&
-    !(hasAttachments && content.trim() === "[attachment]")
+  const hasText = content && content.trim().length > 0
 
   return (
     <div
@@ -166,9 +120,6 @@ export function MessageBubble({
           {hasReactions && (
             <ReactionBadges reactions={reactions!} isSent={isFromMe} />
           )}
-          {hasAttachments && (
-            <AttachmentDisplay attachments={attachments!} />
-          )}
           {hasText && content && (
             <p
               className="whitespace-pre-wrap break-words select-text"
@@ -177,7 +128,7 @@ export function MessageBubble({
               {content}
             </p>
           )}
-          {!hasText && !hasAttachments && (
+          {!hasText && (
             <p className="whitespace-pre-wrap break-words">
               [No text]
             </p>

@@ -127,12 +127,6 @@ export default function ActionDetailScreen(): React.JSX.Element {
       status: msg.status,
       // Extract just the emoji strings from reaction objects
       reactions: msg.reactions?.map((r) => r.emoji) ?? null,
-      attachments: msg.attachments?.map((att) => ({
-        filename: att.filename,
-        mimeType: att.mimeType,
-        url: att.url,
-        thumbnailUrl: att.thumbnailUrl,
-      })),
     })) ?? [];
 
   // Handle swipe action

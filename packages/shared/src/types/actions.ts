@@ -4,20 +4,6 @@
  */
 
 /**
- * Attachment metadata for a message.
- */
-export interface MessageAttachment {
-  /** Original filename, if available */
-  filename: string | null;
-  /** MIME type of the attachment */
-  mimeType: string | null;
-  /** URL to access the attachment */
-  url: string | null;
-  /** URL to a thumbnail preview, if available */
-  thumbnailUrl?: string | null;
-}
-
-/**
  * Message data for display in the action queue.
  * Represents a single message in a conversation thread.
  */
@@ -36,8 +22,6 @@ export interface DisplayMessage {
   status?: string | null;
   /** Reaction emojis on this message */
   reactions?: string[] | null;
-  /** File attachments */
-  attachments?: MessageAttachment[] | null;
 }
 
 /**

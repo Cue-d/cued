@@ -9,7 +9,6 @@ import Database from "better-sqlite3";
 import { homedir } from "os";
 import { join } from "path";
 import type {
-  Attachment,
   Chat,
   Handle,
   Message,
@@ -134,17 +133,6 @@ interface ReactionRow {
   date: number | null;
 }
 
-interface AttachmentRow {
-  id: number;
-  message_id: number;
-  filename: string | null;
-  mime_type: string | null;
-  uti: string | null;
-  total_bytes: number;
-  is_outgoing: number;
-  created_date: number | null;
-}
-
 interface ChatRow {
   id: number;
   identifier: string;
@@ -172,7 +160,6 @@ export class ChatDb {
   private stmtGetChatParticipants: Database.Statement<[number]>;
   private stmtGetChatById: Database.Statement<[number, number]>;
   private stmtGetReactionsForGuids: Database.Statement<[string]>;
-  private stmtGetAttachmentsForMessages: Database.Statement<[string]>;
 
   /**
    * Create a new ChatDb instance.
@@ -297,22 +284,6 @@ export class ChatDb {
       FROM chat c
       LEFT JOIN participant_counts pc ON pc.chat_id = c.ROWID
       WHERE c.ROWID = ?
-    `);
-
-    // Query to get attachments for a list of message ROWIDs
-    this.stmtGetAttachmentsForMessages = this.db.prepare(`
-      SELECT
-        a.ROWID as id,
-        maj.message_id,
-        a.filename,
-        a.mime_type,
-        a.uti,
-        a.total_bytes,
-        a.is_outgoing,
-        a.created_date
-      FROM attachment a
-      INNER JOIN message_attachment_join maj ON maj.attachment_id = a.ROWID
-      WHERE maj.message_id IN (SELECT value FROM json_each(?))
     `);
   }
 
@@ -445,50 +416,6 @@ export class ChatDb {
   }
 
   /**
-   * Get attachments for a list of message ROWIDs.
-   * @param messageIds - Array of message ROWIDs to get attachments for
-   * @returns Map of message ROWID to array of attachments
-   */
-  getAttachmentsForMessages(messageIds: number[]): Map<number, Attachment[]> {
-    if (messageIds.length === 0) {
-      return new Map();
-    }
-
-    const rows = this.stmtGetAttachmentsForMessages.all(
-      JSON.stringify(messageIds)
-    ) as AttachmentRow[];
-
-    const attachmentMap = new Map<number, Attachment[]>();
-
-    for (const row of rows) {
-      // Skip attachments without a filename (can happen with deleted files)
-      if (!row.filename) continue;
-
-      // Extract just the filename from the full path
-      const pathParts = row.filename.split("/");
-      const filename = pathParts[pathParts.length - 1] || "attachment";
-
-      const attachment: Attachment = {
-        id: row.id,
-        filename,
-        path: row.filename, // Full path for file access
-        mimeType: row.mime_type,
-        uti: row.uti,
-        size: row.total_bytes,
-        isOutgoing: row.is_outgoing === 1,
-        createdAt: appleToUnix(row.created_date),
-      };
-
-      if (!attachmentMap.has(row.message_id)) {
-        attachmentMap.set(row.message_id, []);
-      }
-      attachmentMap.get(row.message_id)!.push(attachment);
-    }
-
-    return attachmentMap;
-  }
-
-  /**
    * Get a single chat by ID with participant info.
    */
   getChat(chatId: number): Chat | null {
@@ -522,7 +449,7 @@ export class ChatDb {
   }
 
   /**
-   * Hydrate messages with reactions, attachments, chats, and handles.
+   * Hydrate messages with reactions, chats, and handles.
    * Shared by both ASC and DESC sync batch builders.
    */
   private hydrateMessages(messages: Message[]): {
@@ -538,21 +465,6 @@ export class ChatDb {
       const reactions = reactionMap.get(msg.guid);
       if (reactions) {
         msg.reactions = reactions;
-      }
-    }
-
-    // Fetch attachments for messages that have them
-    const messagesWithAttachments = messages.filter((m) => m.hasAttachments);
-    if (messagesWithAttachments.length > 0) {
-      const messageIds = messagesWithAttachments.map((m) => m.id);
-      const attachmentMap = this.getAttachmentsForMessages(messageIds);
-
-      // Attach attachments to their messages
-      for (const msg of messagesWithAttachments) {
-        const attachments = attachmentMap.get(msg.id);
-        if (attachments) {
-          msg.attachments = attachments;
-        }
       }
     }
 

@@ -32,15 +32,6 @@ const chatInput = v.object({
   participants: v.array(handleInput),
 });
 
-/** Validator for uploaded attachments (after Convex storage upload) */
-const uploadedAttachmentInput = v.object({
-  filename: v.string(),
-  mimeType: v.string(),
-  size: v.number(),
-  storageId: v.id("_storage"),
-  thumbnailStorageId: v.optional(v.id("_storage")),
-});
-
 const messageInput = v.object({
   id: v.number(),
   chatId: v.number(),
@@ -50,7 +41,6 @@ const messageInput = v.object({
   isRead: v.boolean(),
   readAt: v.union(v.number(), v.null()),
   hasAttachments: v.boolean(),
-  attachments: v.optional(v.array(uploadedAttachmentInput)),
   sender: v.union(handleInput, v.null()),
 });
 
@@ -217,7 +207,6 @@ export async function syncMessagesInternal(
     senderContactId: Id<"contacts"> | undefined;
     isFromMe: boolean;
     platformMessageId: string;
-    attachments?: typeof batch.messages[number]["attachments"];
   }> = [];
 
   for (const message of batch.messages) {
@@ -259,10 +248,6 @@ export async function syncMessagesInternal(
       senderContactId,
       isFromMe: message.isFromMe,
       platformMessageId,
-      attachments:
-        message.attachments && message.attachments.length > 0
-          ? message.attachments
-          : undefined,
     });
 
     // Track latest message per conversation for lastMessage update

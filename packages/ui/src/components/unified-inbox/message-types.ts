@@ -10,14 +10,6 @@ export interface InboxMessageSender {
   displayName: string
 }
 
-export interface InboxMessageAttachment {
-  filename: string
-  mimeType: string
-  size: number
-  url: string
-  thumbnailUrl: string | null
-}
-
 export interface InboxMessage {
   _id: string
   content: string
@@ -25,7 +17,6 @@ export interface InboxMessage {
   isFromMe: boolean
   platform: InboxPlatform
   sender: InboxMessageSender | null
-  attachments?: InboxMessageAttachment[]
 }
 
 export interface InboxMessagesResult {

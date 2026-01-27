@@ -195,27 +195,12 @@ export const getMessages = query({
     const hasMore = messages.length > limit;
     const page = hasMore ? messages.slice(0, limit) : messages;
 
-    // Resolve sender contacts and attachment URLs
+    // Resolve sender contacts
     const messagesWithSender = await Promise.all(
       page.map(async (message) => {
         const sender = message.senderContactId
           ? await ctx.db.get(message.senderContactId)
           : null;
-
-        // Resolve attachment storage URLs
-        const attachments = message.attachments?.length
-          ? await Promise.all(
-              message.attachments.map(async (att) => ({
-                filename: att.filename,
-                mimeType: att.mimeType,
-                size: att.size,
-                url: (await ctx.storage.getUrl(att.storageId)) ?? "",
-                thumbnailUrl: att.thumbnailStorageId
-                  ? ((await ctx.storage.getUrl(att.thumbnailStorageId)) ?? null)
-                  : null,
-              }))
-            )
-          : undefined;
 
         return {
           _id: message._id,
@@ -226,7 +211,6 @@ export const getMessages = query({
           sender: sender
             ? { _id: sender._id, displayName: sender.displayName }
             : null,
-          attachments,
         };
       })
     );

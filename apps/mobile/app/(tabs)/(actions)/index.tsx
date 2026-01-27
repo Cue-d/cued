@@ -77,12 +77,6 @@ export default function ActionsScreen(): React.JSX.Element {
       senderName: msg.senderName,
       status: msg.status,
       reactions: msg.reactions?.map((r) => r.emoji) ?? null,
-      attachments: msg.attachments?.map((att) => ({
-        filename: att.filename ?? null,
-        mimeType: att.mimeType ?? null,
-        url: att.url ?? null,
-        thumbnailUrl: att.thumbnailUrl ?? null,
-      })),
     }));
   }, [actionContext?.messages]);
 

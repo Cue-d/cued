@@ -16,7 +16,7 @@ import { ResponseInput } from "./message-response-card/response-input"
 
 /** Re-export sub-components for advanced usage */
 export { PlatformBadge, PLATFORM_ICONS, type PlatformBadgeProps } from "./message-response-card/platform-badge"
-export { MessageBubble, ReactionBadges, DeliveryStatus, AttachmentDisplay, type MessageBubbleProps } from "./message-response-card/message-bubble"
+export { MessageBubble, ReactionBadges, DeliveryStatus, type MessageBubbleProps } from "./message-response-card/message-bubble"
 export { ResponseInput, type ResponseInputProps } from "./message-response-card/response-input"
 
 export interface MessageResponseCardProps {
@@ -159,7 +159,6 @@ export const MessageResponseCard = React.forwardRef<
                   senderName={msg.senderName}
                   status={msg.status}
                   reactions={msg.reactions}
-                  attachments={msg.attachments}
                 />
               ))
             ) : (
