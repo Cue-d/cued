@@ -23,9 +23,6 @@ import { ChatInput } from "@/components/chat/chat-input";
 import { cn, getThemeColors } from "@/lib/utils";
 import type { ScrollView as ScrollViewType } from "react-native";
 
-/** Re-export types for backwards compatibility */
-export type { ActionPlatform, MessageAttachment, DisplayMessage } from "@prm/shared";
-
 /** Platform icons (platform-specific SF Symbols) */
 const PLATFORM_SYMBOLS: Record<ActionPlatform, SFSymbol> = {
   imessage: "message.fill",

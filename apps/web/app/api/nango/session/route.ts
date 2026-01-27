@@ -1,33 +1,24 @@
 import { NextRequest, NextResponse } from "next/server";
 import { Nango } from "@nangohq/node";
-import { ConvexHttpClient } from "convex/browser";
 import { api } from "@prm/convex";
 import { env } from "@prm/env/server";
+import { extractBearerToken, getConvexClient } from "@/lib/api-utils";
 
-const convex = new ConvexHttpClient(env.NEXT_PUBLIC_CONVEX_URL!);
 const nango = new Nango({ secretKey: env.NANGO_SECRET_KEY });
-
-function extractBearerToken(request: NextRequest): string | null {
-  const authHeader = request.headers.get("Authorization");
-  if (!authHeader?.startsWith("Bearer ")) return null;
-  return authHeader.slice(7);
-}
-
-function errorResponse(error: string, status: number, details?: string): NextResponse {
-  return NextResponse.json(details ? { error, details } : { error }, { status });
-}
 
 export async function POST(request: NextRequest): Promise<NextResponse> {
   const token = extractBearerToken(request);
   if (!token) {
-    return errorResponse("Missing or invalid Authorization header", 401);
+    return NextResponse.json({ error: "Missing or invalid Authorization header" }, { status: 401 });
   }
+
+  const convex = getConvexClient();
 
   try {
     convex.setAuth(token);
     const identity = await convex.query(api.users.getCurrentUser, {});
     if (!identity) {
-      return errorResponse("User not found", 401);
+      return NextResponse.json({ error: "User not found" }, { status: 401 });
     }
 
     // Get user profile for display name
@@ -66,6 +57,6 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       message = error.message;
     }
     console.error("Nango session error:", message);
-    return errorResponse("Failed to create connect session", 500, message);
+    return NextResponse.json({ error: "Failed to create connect session", details: message }, { status: 500 });
   }
 }

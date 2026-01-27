@@ -17,9 +17,22 @@ export function formatTime(timestamp: number): string {
 }
 
 /**
+ * Options for formatRelativeTime
+ */
+export interface FormatRelativeTimeOptions {
+  /**
+   * Whether to show future times (e.g., "in 5m").
+   * If false (default), future times return "just now".
+   * @default false
+   */
+  allowFuture?: boolean;
+}
+
+/**
  * Format a timestamp as a relative time string (e.g., "5m ago", "2h ago").
  *
  * @param timestamp - Unix timestamp in milliseconds
+ * @param options - Formatting options
  * @returns Relative time string
  *
  * @example
@@ -28,10 +41,31 @@ export function formatTime(timestamp: number): string {
  * formatRelativeTime(Date.now() - 7200000) // "2h ago"
  * formatRelativeTime(Date.now() - 172800000) // "2d ago"
  * formatRelativeTime(Date.now() - 864000000) // "1/5/2026" (>7 days)
+ *
+ * // With allowFuture option
+ * formatRelativeTime(Date.now() + 30000, { allowFuture: true }) // "in 30s"
+ * formatRelativeTime(Date.now() + 300000, { allowFuture: true }) // "in 5m"
  */
-export function formatRelativeTime(timestamp: number): string {
+export function formatRelativeTime(
+  timestamp: number,
+  options: FormatRelativeTimeOptions = {}
+): string {
+  const { allowFuture = false } = options;
   const now = Date.now();
   const diff = now - timestamp;
+
+  // Handle future times
+  if (diff < 0) {
+    if (!allowFuture) return "just now";
+    const absDiff = -diff;
+    const secs = Math.floor(absDiff / 1000);
+    if (secs < 60) return `in ${secs}s`;
+    const mins = Math.floor(secs / 60);
+    if (mins < 60) return `in ${mins}m`;
+    const hrs = Math.floor(mins / 60);
+    return `in ${hrs}h`;
+  }
+
   const seconds = Math.floor(diff / 1000);
   const minutes = Math.floor(seconds / 60);
   const hours = Math.floor(minutes / 60);

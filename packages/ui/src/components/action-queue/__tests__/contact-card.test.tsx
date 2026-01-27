@@ -1,6 +1,7 @@
 import { render, screen, fireEvent } from "@testing-library/react";
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { ContactCard, type ContactFormData, type ExistingContact } from "../contact-card";
+import { type ContactFormData } from "@prm/shared";
+import { ContactCard, type ExistingContact } from "../contact-card";
 
 describe("ContactCard", () => {
   const defaultFormData: ContactFormData = {

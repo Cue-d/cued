@@ -7,6 +7,7 @@
 import { generateObject } from "ai";
 import { z } from "zod";
 import { openai, FAST_MODEL } from "../openai";
+import { withRetry } from "../utils";
 
 /** Input for LLM fuzzy match decision */
 export interface ContactMatchInput {
@@ -102,11 +103,6 @@ export async function decideFuzzyMatch(
   return object;
 }
 
-/** Delay execution for exponential backoff */
-function delay(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
 /**
  * Decide fuzzy match with retry on failure.
  * Returns safe default if LLM fails after retries.
@@ -115,27 +111,13 @@ export async function decideFuzzyMatchWithRetry(
   input: ContactMatchInput,
   maxRetries = 2
 ): Promise<FuzzyMatchDecision> {
-  const totalAttempts = maxRetries + 1;
-  let lastError: Error | undefined;
-
-  for (let attempt = 1; attempt <= totalAttempts; attempt++) {
-    try {
-      return await decideFuzzyMatch(input);
-    } catch (error) {
-      lastError = error instanceof Error ? error : new Error(String(error));
-      if (attempt < totalAttempts) {
-        // Exponential backoff: 1s, 2s
-        await delay(1000 * attempt);
-      }
-    }
-  }
-
-  console.error("decideFuzzyMatch failed after retries:", lastError?.message);
-
-  // Safe default: don't merge on LLM failure
-  return {
-    samePerson: false,
-    confidence: 0,
-    reasoning: `LLM analysis failed: ${lastError?.message ?? "unknown error"}`,
-  };
+  return withRetry(() => decideFuzzyMatch(input), {
+    maxRetries,
+    defaultValue: {
+      samePerson: false,
+      confidence: 0,
+      reasoning: "LLM analysis failed after retries",
+    },
+    logPrefix: "decideFuzzyMatch",
+  });
 }

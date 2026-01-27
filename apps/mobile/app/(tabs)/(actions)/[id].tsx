@@ -11,10 +11,9 @@ import * as Haptics from "expo-haptics";
 import { useLocalSearchParams, useRouter, Stack } from "expo-router";
 import { useQuery, useMutation } from "convex/react";
 import { api } from "@prm/convex/convex/_generated/api";
-import { getInitials, formatTime, formatRelativeTime } from "@prm/shared";
+import { getInitials, formatTime, formatRelativeTime, type DisplayMessage } from "@prm/shared";
 import { ActionButtons } from "@/components/action-buttons";
 import { useElectronPresence } from "@/hooks/useElectronPresence";
-import type { DisplayMessage } from "@/components/cards";
 import type { SwipeDirection } from "@/components/swipeable-card";
 import type { Id } from "@prm/convex/convex/_generated/dataModel";
 

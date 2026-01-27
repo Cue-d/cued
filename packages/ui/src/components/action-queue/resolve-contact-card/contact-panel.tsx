@@ -1,17 +1,10 @@
 import * as React from "react"
-import { Mail, MessageSquare, Phone, ChevronDown, ChevronUp } from "lucide-react"
-import { getInitials } from "@prm/shared"
+import { Mail, MessageSquare, Phone, ChevronDown, ChevronUp, Linkedin, Twitter, User } from "lucide-react"
+import { getInitials, type ContactHandle } from "@prm/shared"
 import { cn } from "../../../lib/utils"
 import { Avatar, AvatarFallback } from "../../ui/avatar"
 import { Badge } from "../../ui/badge"
 import { Button } from "../../ui/button"
-
-/** Handle type for contacts */
-export interface ContactHandle {
-  type: "phone" | "email" | "slack_id"
-  value: string
-  platform: "imessage" | "gmail" | "slack"
-}
 
 export interface ContactPanelProps {
   name: string
@@ -29,6 +22,10 @@ function getPlatformColor(platform: string): string {
       return "bg-red-500/10 text-red-600 border-red-200"
     case "slack":
       return "bg-purple-500/10 text-purple-600 border-purple-200"
+    case "linkedin":
+      return "bg-blue-500/10 text-blue-600 border-blue-200"
+    case "twitter":
+      return "bg-sky-500/10 text-sky-600 border-sky-200"
     default:
       return "bg-muted text-muted-foreground"
   }
@@ -43,6 +40,13 @@ function HandleIcon({ type }: { type: ContactHandle["type"] }) {
       return <Mail className="w-3 h-3" />
     case "slack_id":
       return <MessageSquare className="w-3 h-3" />
+    case "linkedin_handle":
+    case "linkedin_urn":
+      return <Linkedin className="w-3 h-3" />
+    case "twitter_handle":
+      return <Twitter className="w-3 h-3" />
+    default:
+      return <User className="w-3 h-3" />
   }
 }
 

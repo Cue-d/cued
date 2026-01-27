@@ -26,6 +26,24 @@ export type ActionPlatform =
   | "whatsapp";
 
 /**
+ * Platforms that support sync operations.
+ * Same as ActionPlatform since schema allows all platforms in syncCursors.
+ * In practice, only imessage, gmail, slack, and linkedin have active sync adapters.
+ */
+export type SyncPlatform = ActionPlatform;
+
+/**
+ * Platforms that support multiple workspaces (e.g., Slack teams, Gmail accounts).
+ * These require workspaceId in sync cursor operations.
+ */
+export const MULTI_WORKSPACE_PLATFORMS = ["slack", "gmail"] as const;
+
+/**
+ * Type for multi-workspace platforms.
+ */
+export type MultiWorkspacePlatform = (typeof MULTI_WORKSPACE_PLATFORMS)[number];
+
+/**
  * Platform configuration object.
  */
 export interface PlatformConfigItem {

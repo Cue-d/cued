@@ -8,6 +8,7 @@ import { v } from "convex/values";
 import {
   normalizeConversationURN,
   normalizeMemberURN,
+  normalizeLinkedInHandle,
   urnIdsMatch,
 } from "@prm/shared";
 import type { Doc, Id } from "../_generated/dataModel";
@@ -18,7 +19,6 @@ import {
   scheduleOutgoingMessageEvents,
   SEVEN_DAYS_MS,
   getOrCreateIntegration,
-  normalizeLinkedInHandle,
   upsertSyncCursor,
   incrementSyncCursorStat,
   BATCH_SIZE,

@@ -6,22 +6,12 @@ import {
   buildPlatformAggregates,
   aggregateCursorStats,
 } from "./lib/cursors";
-
-const platformValidator = v.union(
-  v.literal("imessage"),
-  v.literal("gmail"),
-  v.literal("slack"),
-  v.literal("linkedin"),
-  v.literal("twitter"),
-  v.literal("signal"),
-  v.literal("whatsapp")
-);
-
-type Platform = "imessage" | "gmail" | "slack" | "linkedin" | "twitter" | "signal" | "whatsapp";
+import { platformValidator } from "./schema";
+import type { ActionPlatform } from "@prm/shared";
 
 // Map Nango integration IDs to our platform enum
-function nangoToPlatform(nangoIntegrationId: string): Platform | null {
-  const mapping: Record<string, Platform> = {
+function nangoToPlatform(nangoIntegrationId: string): ActionPlatform | null {
+  const mapping: Record<string, ActionPlatform> = {
     google: "gmail",
     slack: "slack",
   };

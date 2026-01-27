@@ -156,3 +156,59 @@ export function urnIdsMatch(
     id1.toLowerCase() === id2.toLowerCase()
   );
 }
+
+// ============================================================================
+// LinkedIn Handle Utilities
+// ============================================================================
+
+/**
+ * LinkedIn handle regex pattern: alphanumeric + hyphens, 3-100 characters.
+ */
+const LINKEDIN_HANDLE_PATTERN = /^[a-zA-Z0-9-]{3,100}$/;
+
+/**
+ * Validate a LinkedIn handle.
+ * LinkedIn handles are alphanumeric with hyphens, 3-100 characters.
+ *
+ * @param handle - The handle to validate
+ * @returns True if the handle is valid
+ */
+export function isValidLinkedInHandle(handle: string): boolean {
+  return LINKEDIN_HANDLE_PATTERN.test(handle);
+}
+
+/**
+ * Normalize LinkedIn handle to canonical format for consistent deduplication.
+ * Extracts handle from URLs and normalizes to lowercase.
+ *
+ * @param input - LinkedIn handle or URL (e.g., "john-doe" or "https://linkedin.com/in/john-doe")
+ * @returns Normalized lowercase handle, or empty string if invalid
+ *
+ * @example
+ * normalizeLinkedInHandle("John-Doe") // => "john-doe"
+ * normalizeLinkedInHandle("https://linkedin.com/in/jane-smith") // => "jane-smith"
+ * normalizeLinkedInHandle("invalid!handle") // => ""
+ */
+export function normalizeLinkedInHandle(input: string): string {
+  if (!input) return "";
+
+  // Clean up URL parameters and trailing slashes
+  const clean = input.split("?")[0].split("#")[0].replace(/\/+$/, "");
+
+  // Try to extract handle from URL
+  const match = clean.match(/linkedin\.com\/in\/([^/]+)/i);
+  if (match) {
+    const handle = match[1];
+    if (isValidLinkedInHandle(handle)) {
+      return handle.toLowerCase();
+    }
+    return "";
+  }
+
+  // Already a handle - validate and lowercase
+  if (isValidLinkedInHandle(clean)) {
+    return clean.toLowerCase();
+  }
+
+  return "";
+}

@@ -1,9 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
-import { ConvexHttpClient } from "convex/browser";
 import { api } from "@prm/convex";
 import { env } from "@prm/env/server";
-
-const convex = new ConvexHttpClient(env.NEXT_PUBLIC_CONVEX_URL!);
+import { extractErrorMessage, getConvexClient } from "@/lib/api-utils";
 
 interface NangoWebhookPayload {
   type: "auth" | "sync";
@@ -42,7 +40,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     // Unknown type - acknowledge but don't process
     return NextResponse.json({ received: true, processed: false, reason: "Unknown type" });
   } catch (error) {
-    const message = error instanceof Error ? error.message : "Webhook processing failed";
+    const message = extractErrorMessage(error, "Webhook processing failed");
     console.error("Nango webhook error:", message);
     return NextResponse.json({ error: message }, { status: 500 });
   }
@@ -59,6 +57,8 @@ async function handleAuthWebhook(payload: NangoWebhookPayload): Promise<NextResp
     console.error("Nango auth webhook missing required fields:", payload);
     return NextResponse.json({ error: "Missing required fields" }, { status: 400 });
   }
+
+  const convex = getConvexClient();
 
   // Handle connection creation
   if (operation === "creation" && success && connectionId) {
@@ -144,7 +144,7 @@ async function handleSyncWebhook(payload: NangoWebhookPayload): Promise<NextResp
         results[endpoint] = result;
       }
     } catch (e) {
-      const errorMsg = e instanceof Error ? e.message : "Unknown error";
+      const errorMsg = extractErrorMessage(e);
       console.error(`${endpoint} pull error:`, errorMsg);
       errors[endpoint] = errorMsg;
     }

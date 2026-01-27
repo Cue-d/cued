@@ -1,7 +1,8 @@
 import React from "react";
 import { render, screen } from "@testing-library/react";
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { ContactCard, type ContactCardProps, type ContactFormData } from "../contact-card";
+import { type ContactFormData } from "@prm/shared";
+import { ContactCard, type ContactCardProps } from "../contact-card";
 
 // Ensure React is globally available for JSX transform
 globalThis.React = React;

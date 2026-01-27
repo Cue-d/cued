@@ -6,10 +6,11 @@ import {
   RefreshCwIcon,
   LinkIcon,
 } from "lucide-react";
-import { formatRelativeTime } from "@prm/shared";
+import { formatRelativeTime, type ActionPlatform } from "@prm/shared";
 import { Button, Skeleton } from "@prm/ui";
 
-export type Platform = "imessage" | "gmail" | "slack" | "linkedin" | "twitter" | "signal" | "whatsapp";
+// Re-export Platform type from @prm/shared for convenience
+export type Platform = ActionPlatform;
 
 /** Type of integration connection method */
 export type IntegrationType = "nango" | "electron-local" | "electron-webview";

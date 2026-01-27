@@ -1,30 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
-import { ConvexHttpClient } from "convex/browser";
 import { api } from "@prm/convex";
-import { env } from "@prm/env/server";
+import {
+  extractBearerToken,
+  extractErrorMessage,
+  isAuthError,
+  getConvexClient,
+} from "@/lib/api-utils";
 import type { SyncBatch, SyncResult } from "@prm/integrations/imessage";
-
-const convex = new ConvexHttpClient(env.NEXT_PUBLIC_CONVEX_URL!);
-
-function extractBearerToken(request: NextRequest): string | null {
-  const authHeader = request.headers.get("Authorization");
-  if (!authHeader?.startsWith("Bearer ")) return null;
-  return authHeader.slice(7);
-}
-
-function isAuthError(message: string): boolean {
-  return message.includes("Unauthorized") || message.includes("auth");
-}
-
-function errorResponse(
-  error: string,
-  status: number,
-  details?: string,
-): NextResponse {
-  return NextResponse.json(details ? { error, details } : { error }, {
-    status,
-  });
-}
 
 /**
  * GET /api/sync/imessage - Fetch current sync cursor from Convex.
@@ -32,8 +14,10 @@ function errorResponse(
 export async function GET(request: NextRequest): Promise<NextResponse> {
   const token = extractBearerToken(request);
   if (!token) {
-    return errorResponse("Missing or invalid Authorization header", 401);
+    return NextResponse.json({ error: "Missing or invalid Authorization header" }, { status: 401 });
   }
+
+  const convex = getConvexClient();
 
   try {
     convex.setAuth(token);
@@ -42,17 +26,17 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     });
 
     if (!result) {
-      return errorResponse("Authentication failed", 401);
+      return NextResponse.json({ error: "Authentication failed" }, { status: 401 });
     }
 
     return NextResponse.json(result);
   } catch (error) {
-    const message = error instanceof Error ? error.message : "Query failed";
+    const message = extractErrorMessage(error, "Query failed");
     if (isAuthError(message)) {
-      return errorResponse("Authentication failed", 401, message);
+      return NextResponse.json({ error: "Authentication failed", details: message }, { status: 401 });
     }
     console.error("Cursor fetch error:", error);
-    return errorResponse("Failed to fetch cursor", 500, message);
+    return NextResponse.json({ error: "Failed to fetch cursor", details: message }, { status: 500 });
   }
 }
 
@@ -62,23 +46,25 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
 export async function POST(request: NextRequest): Promise<NextResponse> {
   const token = extractBearerToken(request);
   if (!token) {
-    return errorResponse("Missing or invalid Authorization header", 401);
+    return NextResponse.json({ error: "Missing or invalid Authorization header" }, { status: 401 });
   }
 
   let batch: SyncBatch;
   try {
     batch = await request.json();
   } catch {
-    return errorResponse("Invalid JSON body", 400);
+    return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
   }
 
   if (typeof batch.cursor !== "number") {
-    return errorResponse("Missing or invalid cursor field", 400);
+    return NextResponse.json({ error: "Missing or invalid cursor field" }, { status: 400 });
   }
 
   if (!Array.isArray(batch.chats) || !Array.isArray(batch.messages)) {
-    return errorResponse("Missing or invalid chats/messages arrays", 400);
+    return NextResponse.json({ error: "Missing or invalid chats/messages arrays" }, { status: 400 });
   }
+
+  const convex = getConvexClient();
 
   try {
     convex.setAuth(token);
@@ -113,11 +99,11 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
 
     return NextResponse.json(result);
   } catch (error) {
-    const message = error instanceof Error ? error.message : "Sync failed";
+    const message = extractErrorMessage(error, "Sync failed");
     if (isAuthError(message)) {
-      return errorResponse("Authentication failed", 401, message);
+      return NextResponse.json({ error: "Authentication failed", details: message }, { status: 401 });
     }
     console.error("Sync error:", error);
-    return errorResponse("Sync failed", 500, message);
+    return NextResponse.json({ error: "Sync failed", details: message }, { status: 500 });
   }
 }

@@ -7,11 +7,8 @@ import {
   createChatTools,
   type MentionedContact,
 } from "@prm/ai";
-import { api } from "@prm/convex";
-import { env } from "@prm/env/server";
-import type { Id } from "@prm/convex";
-
-const convex = new ConvexHttpClient(env.NEXT_PUBLIC_CONVEX_URL!);
+import { api, type Id } from "@prm/convex";
+import { getConvexClient } from "@/lib/api-utils";
 
 interface UIMessage {
   id: string;
@@ -82,6 +79,7 @@ export async function POST(req: Request) {
         .slice(0, 10)
     : [];
 
+  const convex = getConvexClient();
   if (token) {
     convex.setAuth(token);
   }

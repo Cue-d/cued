@@ -20,6 +20,7 @@ import {
 } from "@prm/ui";
 import { ResetConfirmationModal } from "./components/reset-confirmation-modal";
 
+// Platforms with active sync adapters - matches ResetConfirmationModal
 type Platform = "imessage" | "gmail" | "slack" | "linkedin";
 
 const PLATFORMS: { id: Platform; name: string }[] = [
