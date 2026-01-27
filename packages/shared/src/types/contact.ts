@@ -5,13 +5,22 @@
 
 /**
  * Types of contact handles supported across the platform.
+ *
+ * @remarks
+ * Platform-specific mappings:
+ * - `phone` - E.164 phone numbers (iMessage, WhatsApp)
+ * - `email` - Email addresses (Gmail, iMessage)
+ * - `slack_id` - Slack user IDs (format: UXXXXXXXX)
+ * - `username` - LinkedIn vanity URLs (linkedin.com/in/username)
+ * - `urn` - LinkedIn URNs (format: urn:li:member:123456)
+ * - `twitter_handle` - Twitter/X usernames (@handle)
  */
 export type HandleType =
   | "phone"
   | "email"
   | "slack_id"
-  | "username"      // vanity URLs (linkedin)
-  | "urn"           // platform URNs (linkedin)
+  | "username"
+  | "urn"
   | "twitter_handle";
 
 /**
