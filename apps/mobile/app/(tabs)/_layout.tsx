@@ -1,11 +1,5 @@
 import { useColorScheme } from "react-native";
-import {
-  NativeTabs,
-  NativeTabTrigger,
-  Icon,
-  Label,
-  Badge,
-} from "expo-router/unstable-native-tabs";
+import { NativeTabs } from "expo-router/unstable-native-tabs";
 import { usePendingActionCount } from "@/hooks/usePendingActionCount";
 import { getThemeColors } from "@/lib/utils";
 
@@ -16,20 +10,22 @@ export default function TabsLayout() {
 
   return (
     <NativeTabs minimizeBehavior="onScrollDown" tintColor={colors.primary}>
-      <NativeTabTrigger name="(actions)">
-        <Icon sf={{ default: "tray", selected: "tray.fill" }} />
-        <Label>Actions</Label>
-        <Badge hidden={count === 0}>{count > 0 ? String(count) : undefined}</Badge>
-      </NativeTabTrigger>
+      <NativeTabs.Trigger name="(actions)">
+        <NativeTabs.Trigger.Icon sf={{ default: "tray", selected: "tray.fill" }} />
+        <NativeTabs.Trigger.Label>Actions</NativeTabs.Trigger.Label>
+        <NativeTabs.Trigger.Badge hidden={count === 0}>
+          {count > 0 ? String(count) : undefined}
+        </NativeTabs.Trigger.Badge>
+      </NativeTabs.Trigger>
 
-      <NativeTabTrigger name="(agent)">
-        <Icon sf={{ default: "sparkles", selected: "sparkles" }} />
-        <Label>Agent</Label>
-      </NativeTabTrigger>
+      <NativeTabs.Trigger name="(agent)">
+        <NativeTabs.Trigger.Icon sf={{ default: "sparkles", selected: "sparkles" }} />
+        <NativeTabs.Trigger.Label>Agent</NativeTabs.Trigger.Label>
+      </NativeTabs.Trigger>
 
-      <NativeTabTrigger name="(search)" role="search">
-        <Label>Search</Label>
-      </NativeTabTrigger>
+      <NativeTabs.Trigger name="(search)" role="search">
+        <NativeTabs.Trigger.Label>Search</NativeTabs.Trigger.Label>
+      </NativeTabs.Trigger>
     </NativeTabs>
   );
 }
