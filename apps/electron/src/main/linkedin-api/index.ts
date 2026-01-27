@@ -28,5 +28,8 @@ export * from './messages'
 // Contacts (connections and search)
 export * from './contacts'
 
+// Profile lookup (vanity URL resolution)
+export * from './profile'
+
 // Realtime SSE connection
 export * from './realtime'

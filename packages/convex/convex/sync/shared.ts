@@ -137,8 +137,6 @@ export function normalizeHandle(handle: string): string {
   }
   return normalizePhone(handle);
 }
-
-
 // ============================================================================
 // User Management
 // ============================================================================

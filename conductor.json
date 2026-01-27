@@ -1,6 +1,6 @@
 {
   "scripts": {
-    "setup": "pnpm install",
+    "setup": "pnpm install && mkdir -p ~/.config/prm && ([ -f ~/.config/prm/.env.local ] || ([ -f apps/web/.env.local ] && cp apps/web/.env.local ~/.config/prm/.env.local)) && ln -sf ~/.config/prm/.env.local apps/web/.env.local",
     "run": "pnpm dev",
     "test": "pnpm test",
     "lint": "pnpm lint && pnpm typecheck",

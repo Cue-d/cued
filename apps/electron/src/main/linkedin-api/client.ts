@@ -372,4 +372,15 @@ export class LinkedInClient {
     const { searchPeople } = await import('./contacts')
     return searchPeople(this, query)
   }
+
+  /**
+   * Get the public identifier (vanity URL slug) for a member URN.
+   * Resolves URN-style IDs like "ACoAABsfBygBj0mn..." to vanity URLs like "johndoe".
+   * @param memberUrn - The member URN or ID to resolve
+   * @returns Promise resolving to profile lookup result
+   */
+  async getProfileByMemberUrn(memberUrn: string): Promise<import('./profile').ProfileLookupResult> {
+    const { getProfileByMemberUrn } = await import('./profile')
+    return getProfileByMemberUrn(this, memberUrn)
+  }
 }

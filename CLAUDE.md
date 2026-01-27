@@ -262,67 +262,50 @@ Build Swift: `cd apps/electron/swift && swift build -c release`
 | Swift build fails | Requires macOS 15+ and Swift 6.0+ |
 
 
-## Linear Integration & PRD Automation
+## Ralph System (GitHub Issues → Claude)
 
-We use Linear MCP to track features and automatically generate PRDs.
+GitHub issues ARE the PRDs. No separate PRD files needed.
 
-### One-Shot Command (PREFERRED)
+### Workflow
 
-When user says "work on PRM-123" or "start PRM-123":
+```
+/write-a-prd → GitHub Issue → ralph-once.sh → Claude → Commit → Close Issue
+```
+
+1. **Create PRD**: Run `/write-a-prd` skill - guides through problem discovery, solution design, creates GitHub issue
+2. **Execute**: Ralph scripts fetch issues via `gh issue list`, pass to Claude with `prds/prompt.md`
+3. **Implement**: Claude picks highest-priority issue, implements, commits
+4. **Complete**: Progress logged to `progress.txt`, issue closed
+
+### Commands
 
 ```bash
-cd scripts && pnpm prd start PRM-123
+# Create PRD (in Claude Code)
+/write-a-prd
+
+# Execute
+./ralph-once.sh                    # Single iteration (HITL)
+./ralph-once.sh --issue 123        # Target specific issue
+./ralph-once.sh --sandbox          # Docker sandbox (mounts ~/.claude for OAuth)
+./ralph-once.sh --port 3001        # Custom dev server port
+
+./afk-ralph.sh 10                  # 10 iterations (AFK)
+./afk-ralph.sh 10 --issue 123      # Target specific issue
+
+# View issues
+pnpm prd list                      # List open GitHub issues
+pnpm prd view 123                  # View issue #123
 ```
 
-This single command:
-1. Fetches Linear issue
-2. Generates PRD with tasks + documentation refs
-3. Updates Linear status → "In Progress"
-4. Creates git branch `theotarr/prm-123-feature-name`
+Worktrees managed by Conductor via `conductor.json`.
 
-Add `--run` to immediately start executing tasks.
+### Key Files
 
-### PRD JSON Schema
-
-Generated PRDs include documentation fields for AI context:
-
-```json
-{
-  "project": "Feature Name",
-  "linearIssueId": "PRM-123",
-  "documentation": [
-    {"url": "https://docs.example.com", "title": "API Docs", "reason": "Needed for X"}
-  ],
-  "reference_repos": [
-    {"url": "https://github.com/foo/bar", "description": "Similar pattern"}
-  ],
-  "tasks": [...]
-}
-```
-
-AI agents should **fetch these docs** before executing tasks.
-
-### CLI Commands
-
-| Command | Description |
-|---------|-------------|
-| `pnpm prd start PRM-123` | One-shot: pull + status + branch |
-| `pnpm prd start PRM-123 --run` | Same + immediately run tasks |
-| `pnpm prd pull PRM-123` | Just generate PRD |
-| `pnpm prd run prds/prm-123-prd.json` | Execute tasks (Ralph loop) |
-| `pnpm prd run prds/prm-123-prd.json --dry-run` | Show what would execute |
-| `pnpm prd sync prds/prm-123-prd.json` | Sync progress to Linear |
-| `pnpm prd status prds/prm-123-prd.json` | Show completion status |
-| `pnpm prd link-pr PRM-123 <url>` | Link PR to issue |
-
-### Ralph Shell Scripts
-
-The Ralph scripts are thin wrappers for manual iteration:
-
-```bash
-./ralph-once.sh prds/slack-native-integration-prd.json  # Single iteration
-./afk-ralph.sh prds/slack-native-integration-prd.json 10  # 10 afk iterations
-```
+| File | Purpose |
+|------|---------|
+| `prds/prompt.md` | Execution instructions for Claude |
+| `progress.txt` | Log of completed work |
+| `.claude/skills/write-a-prd/SKILL.md` | PRD creation skill |
 
 ## Plan Mode
 
