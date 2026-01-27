@@ -54,10 +54,12 @@ export class SyncCoordinator extends EventEmitter {
   private runningOperations: Set<SyncOperation> = new Set()
 
   // Lock groups: operations that write to shared resources must not run concurrently
-  // contacts + imessage both write to contactHandles table
+  // All sync operations write to contactHandles table via getOrCreateContact
   private static readonly CONTACT_WRITERS = new Set<SyncOperation>([
     'contacts',
     'imessage',
+    'linkedin',
+    'slack',
   ])
   private contactWriteLockHolder: SyncOperation | null = null
 
