@@ -23,19 +23,13 @@ export async function GET(req: Request) {
   }
 
   // Note: Cron jobs need a way to authenticate as each user to process their messages.
-  // For now, this endpoint just returns status. Users should call /api/memories/process
-  // directly with their auth token for batch processing.
-  //
   // In a production system, you'd either:
   // 1. Store user tokens securely and process in background
   // 2. Use a system-level auth token with admin privileges
   // 3. Queue jobs per-user and process when they're active
-  //
-  // For MVP, we rely on manual triggering via the web UI or authenticated API calls.
 
   return NextResponse.json({
     message: "Memory processing cron endpoint",
-    note: "Use POST /api/memories/process with user auth token for batch processing",
     timestamp: new Date().toISOString(),
   });
 }

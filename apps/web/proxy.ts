@@ -18,7 +18,6 @@ export default authkitMiddleware({
       "/api/gmail/send",
       // Electron app sync routes (use Bearer token auth)
       "/api/sync/social",
-      "/api/sync/imessage",
     ],
   },
 });
