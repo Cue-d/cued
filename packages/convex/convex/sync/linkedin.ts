@@ -204,16 +204,11 @@ export async function syncLinkedInConversationsInternal(
       }
 
       // Build display name from other participants (not self)
-      // For DMs: just the other person's name
-      // For groups: comma-separated names or fallback to original title
-      let displayName: string;
-      if (!conv.groupChat && otherParticipantNames.length === 1) {
-        displayName = otherParticipantNames[0];
-      } else if (otherParticipantNames.length > 0) {
-        displayName = otherParticipantNames.join(", ");
-      } else {
-        displayName = conv.title || "LinkedIn Conversation";
-      }
+      // For DMs: single name, for groups: comma-separated, fallback to title
+      const displayName =
+        otherParticipantNames.length > 0
+          ? otherParticipantNames.join(", ")
+          : conv.title || "LinkedIn Conversation";
 
       if (existing) {
         // Update existing conversation
@@ -475,46 +470,57 @@ async function getUserLinkedInURN(
 }
 
 /**
- * Get or create a contact for a LinkedIn participant.
- * Always stores URN as stable identifier, plus normalized slug if profileUrl available.
- * This prevents duplicate contacts when profileUrl becomes available after initial sync.
+ * Get or create a LinkedIn contact by URN and optional profile URL.
+ * Stores URN as stable identifier (for deduplication) and normalized slug (for display).
  * Uses unified getOrCreateContact from shared.ts.
+ */
+async function getOrCreateLinkedInContactInternal(
+  ctx: MutationCtx,
+  userId: Id<"users">,
+  urn: string,
+  firstName: string,
+  lastName: string,
+  profileUrl?: string,
+  fallbackName?: string
+): Promise<Id<"contacts">> {
+  const normalizedURN = normalizeMemberURN(urn).toLowerCase();
+  const handles: { value: string; type: "urn" | "username" }[] = [
+    { value: normalizedURN, type: "urn" },
+  ];
+
+  // Add normalized slug if profile URL is available
+  if (profileUrl && profileUrl.trim()) {
+    const normalizedSlug = normalizeLinkedInHandle(profileUrl);
+    if (normalizedSlug) {
+      handles.push({ value: normalizedSlug, type: "username" });
+    }
+  }
+
+  const displayName = `${firstName} ${lastName}`.trim() || fallbackName || "LinkedIn User";
+  const result = await getOrCreateContact(ctx, userId, "linkedin", handles, displayName);
+  return result.contactId;
+}
+
+/**
+ * Get or create a contact for a LinkedIn participant.
  */
 async function getOrCreateLinkedInContact(
   ctx: MutationCtx,
   userId: Id<"users">,
   participant: LinkedInParticipantInput
 ): Promise<Id<"contacts">> {
-  // Normalize and store URN as stable identifier (for deduplication)
-  const normalizedURN = normalizeMemberURN(participant.entityURN).toLowerCase();
-  const handles: { value: string; type: "urn" | "username" }[] = [
-    { value: normalizedURN, type: "urn" },
-  ];
-
-  // If profile URL available, also store normalized slug (for display)
-  if (participant.profileUrl) {
-    const normalizedSlug = normalizeLinkedInHandle(participant.profileUrl);
-    if (normalizedSlug) {
-      handles.push({ value: normalizedSlug, type: "username" });
-    }
-  }
-
-  const displayName = `${participant.firstName} ${participant.lastName}`.trim();
-  const result = await getOrCreateContact(
+  return getOrCreateLinkedInContactInternal(
     ctx,
     userId,
-    "linkedin",
-    handles,
-    displayName || "LinkedIn User"
+    participant.entityURN,
+    participant.firstName,
+    participant.lastName,
+    participant.profileUrl
   );
-  return result.contactId;
 }
 
 /**
  * Get or create a contact from sender info (used in message sync).
- * Always stores URN as stable identifier, plus normalized slug if profileUrl available.
- * This prevents duplicate contacts when profileUrl becomes available after initial sync.
- * Uses unified getOrCreateContact from shared.ts.
  */
 async function getOrCreateLinkedInContactByURN(
   ctx: MutationCtx,
@@ -524,30 +530,15 @@ async function getOrCreateLinkedInContactByURN(
   lastName: string,
   profileUrl?: string
 ): Promise<Id<"contacts">> {
-  // Normalize and store URN as stable identifier (for deduplication)
-  const normalizedURN = normalizeMemberURN(senderURN).toLowerCase();
-  const handles: { value: string; type: "urn" | "username" }[] = [
-    { value: normalizedURN, type: "urn" },
-  ];
-
-  // If profile URL available, also store normalized slug (for display)
-  const hasProfileUrl = profileUrl && profileUrl.trim().length > 0;
-  if (hasProfileUrl) {
-    const normalizedSlug = normalizeLinkedInHandle(profileUrl);
-    if (normalizedSlug) {
-      handles.push({ value: normalizedSlug, type: "username" });
-    }
-  }
-
-  const displayName = `${firstName} ${lastName}`.trim();
-  const result = await getOrCreateContact(
+  return getOrCreateLinkedInContactInternal(
     ctx,
     userId,
-    "linkedin",
-    handles,
-    displayName || senderURN
+    senderURN,
+    firstName,
+    lastName,
+    profileUrl,
+    senderURN // Fallback to URN if no name
   );
-  return result.contactId;
 }
 
 // ============================================================================
@@ -695,7 +686,7 @@ export async function findContactsMissingUsernames(
 
 /**
  * Add username handles to LinkedIn contacts that were resolved via profile lookup.
- * 
+ *
  * @param ctx - Mutation context
  * @param userId - User ID
  * @param resolutions - Array of resolved member ID -> public identifier mappings
@@ -723,76 +714,53 @@ export async function addResolvedUsernames(
       continue;
     }
 
-    // Find the URN handle for this member ID
-    const urnValue = `urn:li:member:${memberId}`.toLowerCase();
-    const urnHandle = await ctx.db
+    // Find the URN handle for this member ID (try both formats)
+    const urnFormats = [
+      `urn:li:member:${memberId}`.toLowerCase(),
+      `urn:li:fsd_profile:${memberId}`.toLowerCase(),
+    ];
+
+    let contactId: Id<"contacts"> | null = null;
+    for (const urnValue of urnFormats) {
+      const handle = await ctx.db
+        .query("contactHandles")
+        .withIndex("by_user_handle", (q) =>
+          q.eq("userId", userId).eq("handle", urnValue)
+        )
+        .unique();
+      if (handle) {
+        contactId = handle.contactId;
+        break;
+      }
+    }
+
+    if (!contactId) {
+      skipped++;
+      continue;
+    }
+
+    // Check if username already exists
+    const existingUsername = await ctx.db
       .query("contactHandles")
       .withIndex("by_user_handle", (q) =>
-        q.eq("userId", userId).eq("handle", urnValue)
+        q.eq("userId", userId).eq("handle", normalizedUsername)
       )
       .unique();
 
-    if (!urnHandle) {
-      // Try fsd_profile format
-      const fsdUrnValue = `urn:li:fsd_profile:${memberId}`.toLowerCase();
-      const fsdHandle = await ctx.db
-        .query("contactHandles")
-        .withIndex("by_user_handle", (q) =>
-          q.eq("userId", userId).eq("handle", fsdUrnValue)
-        )
-        .unique();
-
-      if (!fsdHandle) {
-        skipped++;
-        continue;
-      }
-
-      // Check if username already exists for this contact
-      const existingUsername = await ctx.db
-        .query("contactHandles")
-        .withIndex("by_user_handle", (q) =>
-          q.eq("userId", userId).eq("handle", normalizedUsername)
-        )
-        .unique();
-
-      if (existingUsername) {
-        skipped++;
-        continue;
-      }
-
-      // Add the username handle
-      await ctx.db.insert("contactHandles", {
-        userId,
-        contactId: fsdHandle.contactId,
-        handleType: "username",
-        handle: normalizedUsername,
-        platform: "linkedin",
-      });
-      added++;
-    } else {
-      // Check if username already exists for this contact
-      const existingUsername = await ctx.db
-        .query("contactHandles")
-        .withIndex("by_user_handle", (q) =>
-          q.eq("userId", userId).eq("handle", normalizedUsername)
-        )
-        .unique();
-
-      if (existingUsername) {
-        skipped++;
-        continue;
-      }
-
-      // Add the username handle
-      await ctx.db.insert("contactHandles", {
-        userId,
-        contactId: urnHandle.contactId,
-        handleType: "username",
-        handle: normalizedUsername,
-        platform: "linkedin",
-      });
-      added++;
+    if (existingUsername) {
+      skipped++;
+      continue;
     }
+
+    // Add the username handle
+    await ctx.db.insert("contactHandles", {
+      userId,
+      contactId,
+      handleType: "username",
+      handle: normalizedUsername,
+      platform: "linkedin",
+    });
+    added++;
   }
 
   return { added, skipped };

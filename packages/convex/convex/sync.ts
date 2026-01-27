@@ -677,15 +677,18 @@ async function syncSocialContactsInternal(
   }> = [];
 
   // Deduplicate contacts within batch by normalized handle
+  // Skip deduplication for empty handles (invalid URLs) to avoid false positives
   const seenHandles = new Set<string>();
   const deduplicatedContacts: SocialContactInput[] = [];
   for (const contact of contacts) {
     const normalizedHandle = normalizeLinkedInHandle(contact.profileUrl);
-    if (seenHandles.has(normalizedHandle)) {
+    if (normalizedHandle && seenHandles.has(normalizedHandle)) {
       result.duplicatesSkipped++;
       continue;
     }
-    seenHandles.add(normalizedHandle);
+    if (normalizedHandle) {
+      seenHandles.add(normalizedHandle);
+    }
     deduplicatedContacts.push(contact);
   }
 

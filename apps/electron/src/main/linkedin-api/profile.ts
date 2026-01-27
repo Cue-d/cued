@@ -164,12 +164,12 @@ function parseVectorImage(
   profilePicture: RawMiniProfile['profilePicture']
 ): VectorImage | null {
   const vectorImage = profilePicture?.displayImageReference?.vectorImage
-  if (!vectorImage?.rootUrl || !vectorImage.artifacts?.length) {
+  const artifacts = vectorImage?.artifacts
+  if (!vectorImage?.rootUrl || !artifacts?.length) {
     return null
   }
 
-  // Get the largest artifact
-  const largest = vectorImage.artifacts.reduce((prev, curr) =>
+  const largest = artifacts.reduce((prev, curr) =>
     (curr.width ?? 0) > (prev.width ?? 0) ? curr : prev
   )
 

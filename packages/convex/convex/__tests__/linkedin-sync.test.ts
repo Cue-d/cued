@@ -223,7 +223,9 @@ describe("LinkedIn Sync", () => {
 
       expect(conversation?.displayName).toBe("Alice Smith");
       expect(conversation?.unreadCount).toBe(2);
-      expect(conversation?.lastMessageAt).toBe(5000);
+      // Note: lastMessageAt is NOT updated by conversation sync (only by message sync)
+      // This is intentional - see comment in syncLinkedInConversationsInternal
+      expect(conversation?.lastMessageAt).toBe(1000);
     });
 
     it("creates group conversation for groupChat=true", async () => {

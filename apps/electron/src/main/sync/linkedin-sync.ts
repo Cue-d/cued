@@ -554,16 +554,13 @@ export class LinkedInSyncManager {
       const profiles = await getProfilesByMemberIds(this._client, memberIds)
 
       // Build resolutions array with successful lookups
-      const resolutions: Array<{ memberId: string; publicIdentifier: string }> = []
-      for (let i = 0; i < profiles.length; i++) {
-        const profile = profiles[i]
-        if (profile?.publicIdentifier) {
-          resolutions.push({
-            memberId: contacts[i].memberId,
-            publicIdentifier: profile.publicIdentifier,
-          })
-        }
-      }
+      const resolutions = profiles
+        .map((profile, i) =>
+          profile?.publicIdentifier
+            ? { memberId: contacts[i].memberId, publicIdentifier: profile.publicIdentifier }
+            : null
+        )
+        .filter((r): r is NonNullable<typeof r> => r !== null)
 
       if (resolutions.length === 0) {
         console.log('[LinkedInSync] No usernames to resolve')
