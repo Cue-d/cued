@@ -25,6 +25,7 @@ export const MESSAGE_ACTION_TYPES = [
 export const CONTACT_ACTION_TYPES = [
   ACTION_TYPES.EOD_CONTACT,
   ACTION_TYPES.NEW_CONNECTION,
+  ACTION_TYPES.RESOLVE_CONTACT,
 ] as const;
 
 /** Check if an action type is a message action */
