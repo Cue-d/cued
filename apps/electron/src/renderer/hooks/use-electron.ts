@@ -115,7 +115,7 @@ export interface SlackListWorkspacesResult {
   workspaces: SlackWorkspaceInfo[];
 }
 
-// Global type declaration
+// Global type declaration for the unified sync API
 declare global {
   interface Window {
     electron: {
@@ -132,55 +132,41 @@ declare global {
         onUserCode: (callback: (code: string, uri: string) => void) => () => void;
       };
       sync: {
-        getProgress: () => Promise<SyncProgress>;
-        runNow: () => Promise<SyncProgress>;
-        reset: () => Promise<SyncProgress>;
-        forceFullSync: () => Promise<SyncProgress>;
-        onProgress: (callback: (progress: SyncProgress) => void) => () => void;
-      };
-      social: {
-        linkedinStatus: () => Promise<SocialStatusResult>;
-        linkedinLogin: () => Promise<SocialStatusResult>;
-        linkedinScrape: (options?: {
-          maxConnections?: number;
-        }) => Promise<SocialScrapeResult>;
-        linkedinMessagingStatus: () => Promise<LinkedInMessagingStatus>;
-        linkedinStartMessagingSync: () => Promise<LinkedInSyncResult>;
-        linkedinStopMessagingSync: () => Promise<LinkedInSyncResult>;
-        linkedinSendMessage: (
-          conversationId: string,
-          text: string
-        ) => Promise<unknown>;
-        linkedinGetSyncProgress: () => Promise<LinkedInSyncProgress>;
-        twitterStatus: () => Promise<SocialStatusResult>;
-        twitterLogin: () => Promise<SocialStatusResult>;
-        twitterScrapeMutuals: (
-          username: string,
-          options?: { maxUsers?: number }
-        ) => Promise<SocialScrapeResult>;
-        onLinkedinProgress: (
-          callback: (progress: SocialProgress) => void
-        ) => () => void;
-        onLinkedinMessagingSyncProgress: (
-          callback: (progress: LinkedInSyncProgress) => void
-        ) => () => void;
-        onLinkedinAuthInvalid: (callback: () => void) => () => void;
-        onTwitterProgress: (
-          callback: (progress: SocialProgress) => void
-        ) => () => void;
-        // Slack - Native Integration (Task 5.1) - Multi-workspace support
-        slackStatus: () => Promise<SlackStatusResult>;
-        slackLogin: () => Promise<SlackLoginResult>;
-        slackDisconnect: (teamId?: string) => Promise<SlackSyncResult>;
-        slackListWorkspaces: () => Promise<SlackListWorkspacesResult>;
-        slackMessagingStatus: () => Promise<SlackMessagingStatus>;
-        slackStartMessagingSync: (teamId?: string) => Promise<SlackSyncResult>;
-        slackStopMessagingSync: (teamId?: string) => Promise<SlackSyncResult>;
-        slackGetSyncProgress: () => Promise<SlackSyncProgress>;
-        onSlackMessagingSyncProgress: (
-          callback: (progress: SlackSyncProgress) => void
-        ) => () => void;
-        onSlackAuthInvalid: (callback: () => void) => () => void;
+        // iMessage sync
+        imessage: {
+          getProgress: () => Promise<SyncProgress>;
+          runNow: () => Promise<SyncProgress>;
+          reset: () => Promise<SyncProgress>;
+          forceFullSync: () => Promise<SyncProgress>;
+          onProgress: (callback: (progress: SyncProgress) => void) => () => void;
+        };
+        // LinkedIn sync
+        linkedin: {
+          status: () => Promise<SocialStatusResult>;
+          login: () => Promise<SocialStatusResult>;
+          scrape: (options?: { maxConnections?: number }) => Promise<SocialScrapeResult>;
+          messagingStatus: () => Promise<LinkedInMessagingStatus>;
+          start: () => Promise<LinkedInSyncResult>;
+          stop: () => Promise<LinkedInSyncResult>;
+          sendMessage: (conversationId: string, text: string) => Promise<unknown>;
+          getProgress: () => Promise<LinkedInSyncProgress>;
+          onProgress: (callback: (progress: LinkedInSyncProgress) => void) => () => void;
+          onScrapeProgress: (callback: (progress: SocialProgress) => void) => () => void;
+          onAuthInvalid: (callback: () => void) => () => void;
+        };
+        // Slack sync
+        slack: {
+          status: () => Promise<SlackStatusResult>;
+          login: () => Promise<SlackLoginResult>;
+          disconnect: (teamId?: string) => Promise<SlackSyncResult>;
+          listWorkspaces: () => Promise<SlackListWorkspacesResult>;
+          messagingStatus: () => Promise<SlackMessagingStatus>;
+          start: (teamId?: string) => Promise<SlackSyncResult>;
+          stop: (teamId?: string) => Promise<SlackSyncResult>;
+          getProgress: () => Promise<SlackSyncProgress>;
+          onProgress: (callback: (progress: SlackSyncProgress) => void) => () => void;
+          onAuthInvalid: (callback: () => void) => () => void;
+        };
       };
     };
   }
@@ -246,9 +232,9 @@ export function useAuthState() {
 }
 
 /**
- * Hook to manage sync progress
+ * Hook to manage iMessage sync progress
  */
-export function useSyncProgress() {
+export function useIMessageSync() {
   const [progress, setProgress] = useState<SyncProgress>({
     status: "idle",
     totalMessagesSynced: 0,
@@ -257,20 +243,41 @@ export function useSyncProgress() {
 
   useEffect(() => {
     // Get initial sync progress
-    electron.sync.getProgress().then(setProgress);
+    electron.sync.imessage.getProgress().then(setProgress);
 
     // Subscribe to progress updates
-    const unsub = electron.sync.onProgress(setProgress);
+    const unsub = electron.sync.imessage.onProgress(setProgress);
     return unsub;
   }, [electron]);
 
-  const forceSync = useCallback(async () => {
-    const result = await electron.sync.forceFullSync();
+  const runNow = useCallback(async () => {
+    const result = await electron.sync.imessage.runNow();
     setProgress(result);
     return result;
   }, [electron]);
 
-  return { progress, forceSync };
+  const reset = useCallback(async () => {
+    const result = await electron.sync.imessage.reset();
+    setProgress(result);
+    return result;
+  }, [electron]);
+
+  const forceFullSync = useCallback(async () => {
+    const result = await electron.sync.imessage.forceFullSync();
+    setProgress(result);
+    return result;
+  }, [electron]);
+
+  return { progress, runNow, reset, forceFullSync };
+}
+
+/**
+ * Hook to manage sync progress (alias for backwards compatibility)
+ * @deprecated Use useIMessageSync instead
+ */
+export function useSyncProgress() {
+  const { progress, forceFullSync } = useIMessageSync();
+  return { progress, forceSync: forceFullSync };
 }
 
 /**
@@ -286,12 +293,12 @@ export function useLinkedIn() {
 
   useEffect(() => {
     // Check initial status
-    electron.social.linkedinStatus().then((result) => {
+    electron.sync.linkedin.status().then((result) => {
       setIsLoggedIn(result.isLoggedIn);
       setIsLoading(false);
 
       if (result.isLoggedIn) {
-        electron.social.linkedinMessagingStatus().then((status) => {
+        electron.sync.linkedin.messagingStatus().then((status) => {
           if (status.syncProgress) {
             setSyncProgress(status.syncProgress);
           }
@@ -300,12 +307,10 @@ export function useLinkedIn() {
     });
 
     // Subscribe to messaging sync progress
-    const unsubProgress = electron.social.onLinkedinMessagingSyncProgress(
-      setSyncProgress
-    );
+    const unsubProgress = electron.sync.linkedin.onProgress(setSyncProgress);
 
     // Subscribe to auth invalid
-    const unsubAuth = electron.social.onLinkedinAuthInvalid(() => {
+    const unsubAuth = electron.sync.linkedin.onAuthInvalid(() => {
       setIsLoggedIn(false);
       setSyncProgress(null);
     });
@@ -317,22 +322,22 @@ export function useLinkedIn() {
   }, [electron]);
 
   const login = useCallback(async () => {
-    const result = await electron.social.linkedinLogin();
+    const result = await electron.sync.linkedin.login();
     setIsLoggedIn(result.isLoggedIn);
     return result;
   }, [electron]);
 
   const startSync = useCallback(async () => {
-    return await electron.social.linkedinStartMessagingSync();
+    return await electron.sync.linkedin.start();
   }, [electron]);
 
   const stopSync = useCallback(async () => {
-    return await electron.social.linkedinStopMessagingSync();
+    return await electron.sync.linkedin.stop();
   }, [electron]);
 
   const scrape = useCallback(
     async (options?: { maxConnections?: number }) => {
-      return await electron.social.linkedinScrape(options);
+      return await electron.sync.linkedin.scrape(options);
     },
     [electron]
   );
@@ -349,38 +354,7 @@ export function useLinkedIn() {
 }
 
 /**
- * Hook to manage Twitter status
- */
-export function useTwitter() {
-  const [isLoggedIn, setIsLoggedIn] = useState(false);
-  const [isLoading, setIsLoading] = useState(true);
-  const electron = useElectron();
-
-  useEffect(() => {
-    electron.social.twitterStatus().then((result) => {
-      setIsLoggedIn(result.isLoggedIn);
-      setIsLoading(false);
-    });
-  }, [electron]);
-
-  const login = useCallback(async () => {
-    const result = await electron.social.twitterLogin();
-    setIsLoggedIn(result.isLoggedIn);
-    return result;
-  }, [electron]);
-
-  const scrapeMutuals = useCallback(
-    async (username: string, options?: { maxUsers?: number }) => {
-      return await electron.social.twitterScrapeMutuals(username, options);
-    },
-    [electron]
-  );
-
-  return { isLoggedIn, isLoading, login, scrapeMutuals };
-}
-
-/**
- * Hook to manage Slack native integration (Task 5.1) - Multi-workspace support
+ * Hook to manage Slack native integration - Multi-workspace support
  */
 export function useSlack() {
   const [workspaces, setWorkspaces] = useState<SlackWorkspaceInfo[]>([]);
@@ -395,19 +369,19 @@ export function useSlack() {
 
   // Refresh workspaces list
   const refreshWorkspaces = useCallback(async () => {
-    const result = await electron.social.slackListWorkspaces();
+    const result = await electron.sync.slack.listWorkspaces();
     setWorkspaces(result.workspaces);
     return result.workspaces;
   }, [electron]);
 
   useEffect(() => {
     // Check initial status and load workspaces
-    electron.social.slackStatus().then((result) => {
+    electron.sync.slack.status().then((result) => {
       setWorkspaces(result.workspaces ?? []);
       setIsLoading(false);
 
       if (result.isConnected) {
-        electron.social.slackMessagingStatus().then((status) => {
+        electron.sync.slack.messagingStatus().then((status) => {
           if (status.syncProgress) {
             setSyncProgress(status.syncProgress);
           }
@@ -421,24 +395,22 @@ export function useSlack() {
     });
 
     // Subscribe to messaging sync progress
-    const unsubProgress = electron.social.onSlackMessagingSyncProgress(
-      (progress) => {
-        setSyncProgress(progress);
-        // Update workspace sync progress
-        if (progress.teamId) {
-          setWorkspaces((prev) =>
-            prev.map((ws) =>
-              ws.teamId === progress.teamId
-                ? { ...ws, syncProgress: progress }
-                : ws
-            )
-          );
-        }
+    const unsubProgress = electron.sync.slack.onProgress((progress) => {
+      setSyncProgress(progress);
+      // Update workspace sync progress
+      if (progress.teamId) {
+        setWorkspaces((prev) =>
+          prev.map((ws) =>
+            ws.teamId === progress.teamId
+              ? { ...ws, syncProgress: progress }
+              : ws
+          )
+        );
       }
-    );
+    });
 
     // Subscribe to auth invalid
-    const unsubAuth = electron.social.onSlackAuthInvalid(() => {
+    const unsubAuth = electron.sync.slack.onAuthInvalid(() => {
       setWorkspaces([]);
       setSyncProgress(null);
     });
@@ -450,7 +422,7 @@ export function useSlack() {
   }, [electron]);
 
   const login = useCallback(async () => {
-    const result = await electron.social.slackLogin();
+    const result = await electron.sync.slack.login();
     if (result.success) {
       // Refresh workspaces to get complete data including userId
       await refreshWorkspaces();
@@ -460,7 +432,7 @@ export function useSlack() {
 
   const disconnect = useCallback(
     async (teamId?: string) => {
-      const result = await electron.social.slackDisconnect(teamId);
+      const result = await electron.sync.slack.disconnect(teamId);
       if (result.success) {
         if (teamId) {
           // Remove specific workspace
@@ -478,14 +450,14 @@ export function useSlack() {
 
   const startSync = useCallback(
     async (teamId?: string) => {
-      return await electron.social.slackStartMessagingSync(teamId);
+      return await electron.sync.slack.start(teamId);
     },
     [electron]
   );
 
   const stopSync = useCallback(
     async (teamId?: string) => {
-      return await electron.social.slackStopMessagingSync(teamId);
+      return await electron.sync.slack.stop(teamId);
     },
     [electron]
   );

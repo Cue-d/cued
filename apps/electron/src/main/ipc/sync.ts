@@ -1,10 +1,10 @@
 /**
- * IPC handlers for social platform scrapers (LinkedIn, Twitter)
- * Task 8.9: Wire Electron IPC to social scraper classes
- * Task 4.1: Add LinkedIn messaging IPC handlers
+ * Unified IPC handlers for all platform sync operations.
+ * Consolidates iMessage, LinkedIn, and Slack sync under the sync: namespace.
  */
 
 import { ipcMain, BrowserWindow } from "electron";
+import { getIMessageSyncManager } from "../platforms/imessage";
 import {
   LinkedInScraper,
   getLinkedInSyncManager,
@@ -15,17 +15,13 @@ import {
   getSlackSyncManager,
   getAllSlackSyncManagers,
   removeSlackSyncManager,
-  initializeAllSlackSyncManagers,
   openSlackLogin,
   clearSlackSession,
-  getSlackCredentials,
   getAllSlackCredentials,
-  clearSlackCredentials,
-  deleteSlackCredentials,
   type SlackSyncProgress,
 } from "../platforms/slack";
 import { getAdapter } from "../adapters";
-import { getValidAccessToken, forceRefreshToken } from "../auth";
+import { getValidAccessToken } from "../auth";
 import { electronEnv } from "@prm/env/electron";
 
 // Singleton scraper instance to maintain state across calls
@@ -42,6 +38,10 @@ export function getLinkedInScraper(): LinkedInScraper {
   return linkedInScraper;
 }
 
+// ============================================================================
+// Types
+// ============================================================================
+
 export interface SocialScrapeResult<T> {
   success: boolean;
   data?: T[];
@@ -54,7 +54,6 @@ export interface SocialStatusResult {
   error?: string;
 }
 
-// LinkedIn messaging types
 export interface LinkedInMessagingStatusResult {
   connected: boolean;
   syncProgress?: LinkedInSyncProgress;
@@ -80,7 +79,6 @@ export interface SocialSyncResult {
   error?: string;
 }
 
-// Slack types
 export interface SlackWorkspaceInfo {
   teamId: string;
   teamName: string;
@@ -115,6 +113,10 @@ export interface SlackSyncResult {
   error?: string;
 }
 
+// ============================================================================
+// Helper Functions
+// ============================================================================
+
 /**
  * Sync scraped social contacts to the backend.
  * Maps connections to SocialContact format and POSTs to /api/sync/social.
@@ -127,7 +129,6 @@ async function syncLinkedInContactsToBackend(
   const MAX_RETRIES = 2;
 
   try {
-    // Force refresh token if this is a retry
     const token = await getValidAccessToken(retryCount > 0);
     if (!token) {
       return { success: false, error: "No auth token available" };
@@ -135,7 +136,6 @@ async function syncLinkedInContactsToBackend(
 
     const baseUrl = electronEnv.API_BASE_URL || "http://localhost:3000";
 
-    // Map LinkedInConnection to SocialContact format expected by API
     const contacts = connections.map((conn) => ({
       name: conn.name,
       handle: conn.profileUrl,
@@ -158,14 +158,12 @@ async function syncLinkedInContactsToBackend(
       }),
     });
 
-    // Check for auth errors and retry with fresh token
     if (response.status === 401 && retryCount < MAX_RETRIES) {
       return syncLinkedInContactsToBackend(connections, retryCount + 1);
     }
 
     if (!response.ok) {
       const text = await response.text();
-      // Retry on auth-related HTML responses (redirects to login page)
       if (text.includes("<!DOCTYPE") && retryCount < MAX_RETRIES) {
         return syncLinkedInContactsToBackend(connections, retryCount + 1);
       }
@@ -175,14 +173,12 @@ async function syncLinkedInContactsToBackend(
       };
     }
 
-    // Check content-type before parsing JSON
     const contentType = response.headers.get("content-type") || "";
     if (!contentType.includes("application/json")) {
       const htmlBody = await response.text();
       if (htmlBody.includes("404") || htmlBody.includes("Not Found")) {
         return { success: false, error: "API route not found (404)" };
       }
-      // Retry with fresh token - HTML response usually means auth redirect
       if (retryCount < MAX_RETRIES) {
         return syncLinkedInContactsToBackend(connections, retryCount + 1);
       }
@@ -199,57 +195,88 @@ async function syncLinkedInContactsToBackend(
     };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    console.error("[Social IPC] LinkedIn sync to backend failed:", message);
+    console.error("[Sync IPC] LinkedIn sync to backend failed:", message);
     return { success: false, error: message };
   }
 }
 
-/**
- * Set up IPC handlers for social scraping functionality.
- * Call this once during app initialization in main/index.ts
- */
-export function setupSocialIpcHandlers(mainWindow: BrowserWindow | null): void {
-  // ============================================================================
-  // LinkedIn handlers
-  // ============================================================================
+// ============================================================================
+// Main Setup Function
+// ============================================================================
 
-  /**
-   * Check LinkedIn login status by launching headless browser and checking for session.
-   */
-  ipcMain.handle("social:linkedin:status", async (): Promise<SocialStatusResult> => {
+/**
+ * Set up all sync IPC handlers for iMessage, LinkedIn, and Slack.
+ * Call this once during app initialization in main/index.ts.
+ */
+export function setupAllSyncIpcHandlers(mainWindow: BrowserWindow | null): void {
+  setupIMessageHandlers(mainWindow);
+  setupLinkedInHandlers(mainWindow);
+  setupSlackHandlers(mainWindow);
+}
+
+// ============================================================================
+// iMessage Handlers
+// ============================================================================
+
+function setupIMessageHandlers(_mainWindow: BrowserWindow | null): void {
+  // Note: The sync manager is configured in startBackgroundSync() with onProgress and syncContacts callbacks.
+  // These handlers just expose the manager's methods via IPC.
+
+  ipcMain.handle("sync:imessage:getProgress", () => getIMessageSyncManager().getProgress());
+
+  ipcMain.handle("sync:imessage:runNow", async () => {
+    const manager = getIMessageSyncManager();
+    await manager.runSync();
+    return manager.getProgress();
+  });
+
+  ipcMain.handle("sync:imessage:reset", () => {
+    const manager = getIMessageSyncManager();
+    manager.resetCursor();
+    return manager.getProgress();
+  });
+
+  ipcMain.handle("sync:imessage:forceFullSync", async () => {
+    const manager = getIMessageSyncManager();
+    await manager.forceFullSync();
+    return manager.getProgress();
+  });
+}
+
+// ============================================================================
+// LinkedIn Handlers
+// ============================================================================
+
+function setupLinkedInHandlers(mainWindow: BrowserWindow | null): void {
+  // Status check
+  ipcMain.handle("sync:linkedin:status", async (): Promise<SocialStatusResult> => {
     try {
       const scraper = getLinkedInScraper();
       const isLoggedIn = await scraper.checkLoginStatus();
       return { isLoggedIn };
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      console.error("[Social IPC] LinkedIn status check failed:", message);
+      console.error("[Sync IPC] LinkedIn status check failed:", message);
       return { isLoggedIn: false, error: message };
     }
   });
 
-  /**
-   * Open LinkedIn login in visible browser window for user to authenticate.
-   * Waits for login completion or timeout (5 minutes).
-   */
-  ipcMain.handle("social:linkedin:login", async (): Promise<SocialStatusResult> => {
+  // Login
+  ipcMain.handle("sync:linkedin:login", async (): Promise<SocialStatusResult> => {
     try {
       const scraper = getLinkedInScraper();
       const success = await scraper.loginLinkedIn();
       return { isLoggedIn: success };
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      console.error("[Social IPC] LinkedIn login failed:", message);
+      console.error("[Sync IPC] LinkedIn login failed:", message);
       return { isLoggedIn: false, error: message };
     }
   });
 
-  /**
-   * Scrape LinkedIn connections using the API (faster and more reliable than Playwright).
-   * Requires user to be logged in (call login first if needed).
-   */
+  // Scrape connections
   ipcMain.handle(
-    "social:linkedin:scrape",
+    "sync:linkedin:scrape",
     async (
       _event,
       options?: { maxConnections?: number }
@@ -257,19 +284,15 @@ export function setupSocialIpcHandlers(mainWindow: BrowserWindow | null): void {
       try {
         const scraper = getLinkedInScraper();
 
-        // Notify renderer that scrape is starting
-        mainWindow?.webContents.send("social:linkedin:scrapeProgress", {
+        mainWindow?.webContents.send("sync:linkedin:scrapeProgress", {
           status: "starting",
           count: 0,
         });
 
-        // Use API-based scraping instead of Playwright DOM scraping
-        // Pass maxConnections only if explicitly provided (undefined = fetch all)
         const apiConnections = await scraper.scrapeConnectionsViaApi({
           maxConnections: options?.maxConnections,
         });
 
-        // Convert API Connection[] to LinkedInConnection[] format for UI compatibility
         const connections: LinkedInConnection[] = apiConnections.map((conn) => ({
           name: `${conn.firstName} ${conn.lastName}`.trim(),
           profileUrl: conn.profileUrl,
@@ -278,20 +301,17 @@ export function setupSocialIpcHandlers(mainWindow: BrowserWindow | null): void {
           profileId: conn.profileId,
         }));
 
-        // Sync connections to backend
-        mainWindow?.webContents.send("social:linkedin:scrapeProgress", {
+        mainWindow?.webContents.send("sync:linkedin:scrapeProgress", {
           status: "syncing",
           count: connections.length,
         });
 
         const syncResult = await syncLinkedInContactsToBackend(connections);
         if (!syncResult.success) {
-          console.warn(`[Social IPC] LinkedIn backend sync failed: ${syncResult.error}`);
-          // Continue even if sync fails - scrape was successful
+          console.warn(`[Sync IPC] LinkedIn backend sync failed: ${syncResult.error}`);
         }
 
-        // Notify renderer of completion
-        mainWindow?.webContents.send("social:linkedin:scrapeProgress", {
+        mainWindow?.webContents.send("sync:linkedin:scrapeProgress", {
           status: "complete",
           count: connections.length,
           syncResult: syncResult.success
@@ -305,9 +325,9 @@ export function setupSocialIpcHandlers(mainWindow: BrowserWindow | null): void {
         return { success: true, data: connections, count: connections.length };
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
-        console.error("[Social IPC] LinkedIn API scrape failed:", message);
+        console.error("[Sync IPC] LinkedIn API scrape failed:", message);
 
-        mainWindow?.webContents.send("social:linkedin:scrapeProgress", {
+        mainWindow?.webContents.send("sync:linkedin:scrapeProgress", {
           status: "error",
           error: message,
         });
@@ -317,16 +337,9 @@ export function setupSocialIpcHandlers(mainWindow: BrowserWindow | null): void {
     }
   );
 
-  // ============================================================================
-  // LinkedIn messaging handlers
-  // ============================================================================
-
-  /**
-   * Get LinkedIn messaging sync status.
-   * Returns connection status and current sync progress.
-   */
+  // Messaging status
   ipcMain.handle(
-    "social:linkedin:messagingStatus",
+    "sync:linkedin:messagingStatus",
     async (): Promise<LinkedInMessagingStatusResult> => {
       try {
         const syncManager = getLinkedInSyncManager();
@@ -339,71 +352,51 @@ export function setupSocialIpcHandlers(mainWindow: BrowserWindow | null): void {
         };
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
-        console.error("[Social IPC] LinkedIn messaging status check failed:", message);
+        console.error("[Sync IPC] LinkedIn messaging status check failed:", message);
         return { connected: false, error: message };
       }
     }
   );
 
-  /**
-   * Start LinkedIn messaging sync.
-   * Requires user to be logged in first (call social:linkedin:login).
-   * Sets up the sync manager with the LinkedIn API client from the scraper.
-   */
-  ipcMain.handle(
-    "social:linkedin:startMessagingSync",
-    async (): Promise<LinkedInSyncResult> => {
-      try {
-        const scraper = getLinkedInScraper();
+  // Start messaging sync
+  ipcMain.handle("sync:linkedin:start", async (): Promise<LinkedInSyncResult> => {
+    try {
+      const scraper = getLinkedInScraper();
+      const apiClient = await scraper.getApiClient();
 
-        // Get API client from scraper (will launch browser if needed)
-        const apiClient = await scraper.getApiClient();
+      const syncManager = getLinkedInSyncManager();
+      syncManager.setClient(apiClient);
 
-        // Configure sync manager (uses centralized auth from auth-manager)
-        const syncManager = getLinkedInSyncManager();
-        syncManager.setClient(apiClient);
+      syncManager.setProgressCallback((progress) => {
+        mainWindow?.webContents.send("sync:linkedin:progress", progress);
+      });
 
-        // Set up progress callback to notify renderer
-        syncManager.setProgressCallback((progress) => {
-          mainWindow?.webContents.send("social:linkedin:messagingSyncProgress", progress);
-        });
+      syncManager.start();
 
-        // Start background sync
-        syncManager.start();
-
-        return { success: true };
-      } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-        console.error("[Social IPC] LinkedIn messaging sync start failed:", message);
-        return { success: false, error: message };
-      }
+      return { success: true };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.error("[Sync IPC] LinkedIn messaging sync start failed:", message);
+      return { success: false, error: message };
     }
-  );
+  });
 
-  /**
-   * Stop LinkedIn messaging sync.
-   */
-  ipcMain.handle(
-    "social:linkedin:stopMessagingSync",
-    async (): Promise<LinkedInSyncResult> => {
-      try {
-        const syncManager = getLinkedInSyncManager();
-        syncManager.stop();
-        return { success: true };
-      } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-        console.error("[Social IPC] LinkedIn messaging sync stop failed:", message);
-        return { success: false, error: message };
-      }
+  // Stop messaging sync
+  ipcMain.handle("sync:linkedin:stop", async (): Promise<LinkedInSyncResult> => {
+    try {
+      const syncManager = getLinkedInSyncManager();
+      syncManager.stop();
+      return { success: true };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.error("[Sync IPC] LinkedIn messaging sync stop failed:", message);
+      return { success: false, error: message };
     }
-  );
+  });
 
-  /**
-   * Send a message via LinkedIn using the platform adapter.
-   * For queued sends with undo support, use the messageQueue API instead.
-   */
+  // Send message
   ipcMain.handle(
-    "social:linkedin:sendMessage",
+    "sync:linkedin:sendMessage",
     async (
       _event,
       conversationId: string,
@@ -420,53 +413,47 @@ export function setupSocialIpcHandlers(mainWindow: BrowserWindow | null): void {
         }
 
         const result = await adapter.send({
-          id: `ipc-${Date.now()}`, // Temporary ID for IPC-based sends
+          id: `ipc-${Date.now()}`,
           platform: "linkedin",
-          recipientHandle: conversationId, // Not used by LinkedIn adapter
+          recipientHandle: conversationId,
           text,
-          threadId: conversationId, // LinkedIn adapter uses threadId for conversation URN
+          threadId: conversationId,
         });
 
         if (result.success) {
           return { success: true, messageId: result.messageId };
         } else {
-          console.error("[Social IPC] LinkedIn send message failed:", result.error);
+          console.error("[Sync IPC] LinkedIn send message failed:", result.error);
           return { success: false, error: result.error };
         }
       } catch (error) {
         const errorMessage = error instanceof Error ? error.message : String(error);
-        console.error("[Social IPC] LinkedIn send message failed:", errorMessage);
+        console.error("[Sync IPC] LinkedIn send message failed:", errorMessage);
         return { success: false, error: errorMessage };
       }
     }
   );
 
-  /**
-   * Get current LinkedIn messaging sync progress.
-   */
-  ipcMain.handle(
-    "social:linkedin:getSyncProgress",
-    async (): Promise<LinkedInSyncProgress> => {
-      const syncManager = getLinkedInSyncManager();
-      return syncManager.getProgress();
-    }
-  );
+  // Get sync progress
+  ipcMain.handle("sync:linkedin:getProgress", async (): Promise<LinkedInSyncProgress> => {
+    const syncManager = getLinkedInSyncManager();
+    return syncManager.getProgress();
+  });
+}
 
-  // ============================================================================
-  // Slack handlers (Native integration - Task 5.1)
-  // ============================================================================
+// ============================================================================
+// Slack Handlers
+// ============================================================================
 
-  /**
-   * Check Slack connection status - returns all connected workspaces.
-   */
-  ipcMain.handle("social:slack:status", async (): Promise<SlackStatusResult> => {
+function setupSlackHandlers(mainWindow: BrowserWindow | null): void {
+  // Status check
+  ipcMain.handle("sync:slack:status", async (): Promise<SlackStatusResult> => {
     try {
       const allCredentials = getAllSlackCredentials();
       if (allCredentials.length === 0) {
         return { isConnected: false, workspaces: [] };
       }
 
-      // Build workspace info for all connected workspaces
       const workspaces: SlackWorkspaceInfo[] = allCredentials.map((creds) => {
         const manager = getSlackSyncManager({ teamId: creds.teamId });
         return {
@@ -480,22 +467,18 @@ export function setupSocialIpcHandlers(mainWindow: BrowserWindow | null): void {
 
       return {
         isConnected: workspaces.length > 0,
-        teamName: workspaces[0]?.teamName, // Legacy field for backward compatibility
+        teamName: workspaces[0]?.teamName,
         workspaces,
       };
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      console.error("[Social IPC] Slack status check failed:", message);
+      console.error("[Sync IPC] Slack status check failed:", message);
       return { isConnected: false, workspaces: [], error: message };
     }
   });
 
-  /**
-   * Open Slack login in Electron BrowserWindow.
-   * Extracts xoxc- token from localStorage and d cookie from session.
-   * Supports adding multiple workspaces.
-   */
-  ipcMain.handle("social:slack:login", async (): Promise<SlackLoginResult> => {
+  // Login
+  ipcMain.handle("sync:slack:login", async (): Promise<SlackLoginResult> => {
     try {
       const result = await openSlackLogin();
 
@@ -506,7 +489,6 @@ export function setupSocialIpcHandlers(mainWindow: BrowserWindow | null): void {
         };
       }
 
-      // Store credentials in sync manager (creates new manager for this team)
       const syncManager = getSlackSyncManager({ teamId: result.credentials.teamId });
       syncManager.setCredentials({
         token: result.credentials.token,
@@ -523,18 +505,14 @@ export function setupSocialIpcHandlers(mainWindow: BrowserWindow | null): void {
       };
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      console.error("[Social IPC] Slack login failed:", message);
+      console.error("[Sync IPC] Slack login failed:", message);
       return { success: false, error: message };
     }
   });
 
-  /**
-   * Disconnect Slack - clears credentials and stops sync.
-   * If teamId is provided, disconnects only that workspace.
-   * If teamId is not provided, disconnects all workspaces.
-   */
+  // Disconnect
   ipcMain.handle(
-    "social:slack:disconnect",
+    "sync:slack:disconnect",
     async (_event, teamId?: string): Promise<SlackSyncResult> => {
       try {
         if (teamId) {
@@ -546,24 +524,21 @@ export function setupSocialIpcHandlers(mainWindow: BrowserWindow | null): void {
           for (const manager of managers) {
             await manager.disconnect();
           }
-          // Clear session cookies from Electron
           await clearSlackSession();
         }
 
         return { success: true };
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
-        console.error("[Social IPC] Slack disconnect failed:", message);
+        console.error("[Sync IPC] Slack disconnect failed:", message);
         return { success: false, error: message };
       }
     }
   );
 
-  /**
-   * List all connected Slack workspaces.
-   */
+  // List workspaces
   ipcMain.handle(
-    "social:slack:listWorkspaces",
+    "sync:slack:listWorkspaces",
     async (): Promise<{ workspaces: SlackWorkspaceInfo[] }> => {
       try {
         const allCredentials = getAllSlackCredentials();
@@ -579,17 +554,15 @@ export function setupSocialIpcHandlers(mainWindow: BrowserWindow | null): void {
         });
         return { workspaces };
       } catch (error) {
-        console.error("[Social IPC] List workspaces failed:", error);
+        console.error("[Sync IPC] List workspaces failed:", error);
         return { workspaces: [] };
       }
     }
   );
 
-  /**
-   * Get Slack messaging sync status for all workspaces.
-   */
+  // Messaging status
   ipcMain.handle(
-    "social:slack:messagingStatus",
+    "sync:slack:messagingStatus",
     async (): Promise<SlackSyncStatusResult> => {
       try {
         const allCredentials = getAllSlackCredentials();
@@ -608,29 +581,25 @@ export function setupSocialIpcHandlers(mainWindow: BrowserWindow | null): void {
         const anyConnected = workspaces.some((w) => w.isConnected);
         return {
           connected: anyConnected,
-          syncProgress: workspaces[0]?.syncProgress, // Legacy field
+          syncProgress: workspaces[0]?.syncProgress,
           workspaces,
         };
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
-        console.error("[Social IPC] Slack messaging status check failed:", message);
+        console.error("[Sync IPC] Slack messaging status check failed:", message);
         return { connected: false, workspaces: [], error: message };
       }
     }
   );
 
-  /**
-   * Start Slack messaging sync for all workspaces (or a specific one).
-   * @param teamId - Optional team ID to start sync for only that workspace
-   */
+  // Start messaging sync
   ipcMain.handle(
-    "social:slack:startMessagingSync",
+    "sync:slack:start",
     async (_event, teamId?: string): Promise<SlackSyncResult> => {
       try {
         const setupAndStartManager = async (manager: ReturnType<typeof getSlackSyncManager>) => {
-          // Set up progress callback with team ID in the event (uses centralized auth from auth-manager)
           manager.setProgressCallback((progress) => {
-            mainWindow?.webContents.send("social:slack:messagingSyncProgress", {
+            mainWindow?.webContents.send("sync:slack:progress", {
               ...progress,
               teamId: manager.getTeamId(),
             });
@@ -653,18 +622,15 @@ export function setupSocialIpcHandlers(mainWindow: BrowserWindow | null): void {
         return { success: true };
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
-        console.error("[Social IPC] Slack messaging sync start failed:", message);
+        console.error("[Sync IPC] Slack messaging sync start failed:", message);
         return { success: false, error: message };
       }
     }
   );
 
-  /**
-   * Stop Slack messaging sync for all workspaces (or a specific one).
-   * @param teamId - Optional team ID to stop sync for only that workspace
-   */
+  // Stop messaging sync
   ipcMain.handle(
-    "social:slack:stopMessagingSync",
+    "sync:slack:stop",
     async (_event, teamId?: string): Promise<SlackSyncResult> => {
       try {
         if (teamId) {
@@ -679,32 +645,31 @@ export function setupSocialIpcHandlers(mainWindow: BrowserWindow | null): void {
         return { success: true };
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
-        console.error("[Social IPC] Slack messaging sync stop failed:", message);
+        console.error("[Sync IPC] Slack messaging sync stop failed:", message);
         return { success: false, error: message };
       }
     }
   );
 
-  /**
-   * Get current Slack messaging sync progress.
-   */
-  ipcMain.handle(
-    "social:slack:getSyncProgress",
-    async (): Promise<SlackSyncProgress> => {
-      const syncManager = getSlackSyncManager();
-      return syncManager.getProgress();
-    }
-  );
-
-  // Slack progress listeners
-  // Note: The renderer subscribes via onSlackMessagingSyncProgress
+  // Get sync progress
+  ipcMain.handle("sync:slack:getProgress", async (): Promise<SlackSyncProgress> => {
+    const syncManager = getSlackSyncManager();
+    return syncManager.getProgress();
+  });
 }
 
+// ============================================================================
+// Cleanup
+// ============================================================================
+
 /**
- * Clean up scraper instances and sync managers on app quit.
+ * Clean up sync managers on app quit.
  */
-export async function cleanupSocialScrapers(): Promise<void> {
+export async function cleanupSyncManagers(): Promise<void> {
   try {
+    // Stop iMessage sync
+    getIMessageSyncManager().stop();
+
     // Stop LinkedIn sync manager
     const linkedInSyncManager = getLinkedInSyncManager();
     linkedInSyncManager.stop();
@@ -717,6 +682,6 @@ export async function cleanupSocialScrapers(): Promise<void> {
 
     linkedInScraper = null;
   } catch (error) {
-    console.error("[Social IPC] Error cleaning up scrapers:", error);
+    console.error("[Sync IPC] Error cleaning up sync managers:", error);
   }
 }

@@ -296,7 +296,7 @@ function LinkedInCard() {
   const electron = useElectron();
 
   useEffect(() => {
-    const unsub = electron.social.onLinkedinProgress((progress) => {
+    const unsub = electron.sync.linkedin.onScrapeProgress((progress) => {
       if (progress.status === "starting") {
         setScrapeProgress("Scraping...");
       } else if (progress.status === "complete") {

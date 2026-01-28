@@ -19,7 +19,7 @@ import {
 import { getIMessageSyncManager, type SyncProgress } from "./platforms/imessage";
 import { getContactsWatcher, syncContactsToConvex } from "./platforms/contacts";
 import { getHeartbeatManager } from "./sync/presence";
-import { setupSocialIpcHandlers, cleanupSocialScrapers, getLinkedInScraper } from "./ipc/social";
+import { setupAllSyncIpcHandlers, cleanupSyncManagers, getLinkedInScraper } from "./ipc/sync";
 import { getLinkedInSyncManager } from "./platforms/linkedin";
 import { getMessageQueueProcessor } from "./queue/message-queue-processor";
 import { getReactiveConvexClient } from "./convex-client";
@@ -195,28 +195,6 @@ function setupAuthIpcHandlers(): void {
   });
 }
 
-function setupSyncIpcHandlers(): void {
-  ipcMain.handle("sync:getProgress", () => getIMessageSyncManager().getProgress());
-
-  ipcMain.handle("sync:runNow", async () => {
-    const manager = getIMessageSyncManager();
-    await manager.runSync();
-    return manager.getProgress();
-  });
-
-  ipcMain.handle("sync:reset", () => {
-    const manager = getIMessageSyncManager();
-    manager.resetCursor();
-    return manager.getProgress();
-  });
-
-  // Force full sync: resets both server and local state, then re-syncs messages + contacts
-  ipcMain.handle("sync:forceFullSync", async () => {
-    const manager = getIMessageSyncManager();
-    await manager.forceFullSync();
-    return manager.getProgress();
-  });
-}
 
 async function startBackgroundSync(): Promise<void> {
   try {
@@ -272,7 +250,7 @@ async function startBackgroundSync(): Promise<void> {
         );
 
         // Notify renderer of sync progress
-        mainWindow?.webContents.send("sync:progress", progress);
+        mainWindow?.webContents.send("sync:imessage:progress", progress);
       },
       // Wire contacts sync for recovery flows - goes through coordinator
       syncContacts: async () => {
@@ -365,7 +343,7 @@ async function startLinkedInMessagingSync(): Promise<void> {
 
     // Set up progress callback to notify renderer
     syncManager.setProgressCallback((progress) => {
-      mainWindow?.webContents.send("social:linkedin:messagingSyncProgress", progress);
+      mainWindow?.webContents.send("sync:linkedin:progress", progress);
     });
 
     // Start sync (will use realtime by default)
@@ -405,7 +383,7 @@ async function startSlackMessagingSync(): Promise<void> {
 
       // Set up progress callback to notify renderer (uses centralized auth from auth-manager)
       manager.setProgressCallback((progress) => {
-        mainWindow?.webContents.send("social:slack:messagingSyncProgress", {
+        mainWindow?.webContents.send("sync:slack:progress", {
           ...progress,
           teamId: manager.getTeamId(),
         });
@@ -471,7 +449,6 @@ app.whenReady().then(() => {
 
   // Set up IPC handlers before creating window
   setupAuthIpcHandlers();
-  setupSyncIpcHandlers();
 
   createWindow();
 
@@ -516,8 +493,8 @@ app.whenReady().then(() => {
   powerManager.setMainWindow(mainWindow);
   powerManager.setupIpcHandlers();
 
-  // Set up social IPC handlers after window is created (needs mainWindow reference)
-  setupSocialIpcHandlers(mainWindow);
+  // Set up unified sync IPC handlers (iMessage, LinkedIn, Slack) after window is created
+  setupAllSyncIpcHandlers(mainWindow);
 
   // Start background sync
   startBackgroundSync();
@@ -571,8 +548,7 @@ app.on("before-quit", () => {
 });
 
 app.on("will-quit", async () => {
-  // Gracefully stop services that are always initialized
-  getIMessageSyncManager().stop();
+  // Gracefully stop contacts watcher (sync managers cleaned up in cleanupSyncManagers)
   getContactsWatcher().stop();
 
   // Stop services that may not be initialized (ignore errors)
@@ -589,5 +565,5 @@ app.on("will-quit", async () => {
   await safeCleanup(() => getHeartbeatManager().stop());
   await safeCleanup(() => getTrayManager().destroy());
   await safeCleanup(() => getPowerManager().destroy());
-  await cleanupSocialScrapers();
+  await cleanupSyncManagers();
 });
