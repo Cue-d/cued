@@ -18,7 +18,7 @@ export {
 } from './sync'
 
 // Connections scraper
-export { LinkedInScraper, type LinkedInConnection } from './scraper'
+export { LinkedInScraper, type LinkedInConnection, type IncrementalScrapeResult } from './scraper'
 
 // Platform adapter for message queue
 export { LinkedInAdapter } from './adapter'

@@ -23,6 +23,7 @@ import {
 import { getAdapter } from "../adapters";
 import { getValidAccessToken } from "../auth";
 import { electronEnv } from "@prm/env/electron";
+import { runAllSyncs, type RunAllSyncsResult } from "../sync/run-all";
 
 // Singleton scraper instance to maintain state across calls
 let linkedInScraper: LinkedInScraper | null = null;
@@ -212,6 +213,21 @@ export function setupAllSyncIpcHandlers(mainWindow: BrowserWindow | null): void 
   setupIMessageHandlers(mainWindow);
   setupLinkedInHandlers(mainWindow);
   setupSlackHandlers(mainWindow);
+  setupUnifiedSyncHandler(mainWindow);
+}
+
+// ============================================================================
+// Unified Sync Handler
+// ============================================================================
+
+function setupUnifiedSyncHandler(_mainWindow: BrowserWindow | null): void {
+  // Run all platform syncs sequentially
+  ipcMain.handle("sync:runAll", async (): Promise<RunAllSyncsResult> => {
+    return runAllSyncs({
+      getAuthToken: getValidAccessToken,
+      linkedInScraper: getLinkedInScraper(),
+    });
+  });
 }
 
 // ============================================================================
