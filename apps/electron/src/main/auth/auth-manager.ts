@@ -123,9 +123,6 @@ export async function getValidAccessToken(
   return null;
 }
 
-// Re-export isAuthError for backwards compatibility
-export { isAuthError } from "./auth-utils";
-
 /**
  * Force refresh the token immediately, regardless of expiry time.
  * Use this when you receive an auth error from the server.

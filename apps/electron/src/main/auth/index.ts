@@ -4,7 +4,6 @@ export {
   getAuthState,
   getValidAccessToken,
   forceRefreshToken,
-  isAuthError,
   startDeviceAuth,
   signOut,
   setOnTokenRefreshed,
