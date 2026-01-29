@@ -14,9 +14,8 @@ import {
   createSyncActorMachine,
   type SyncActorInput,
   type SyncActorContextExtended,
-  getActorId,
-} from './sync-actor'
-import { type SyncPhase, type SyncTypeId, SYNC_CONFIGS, getSyncKey } from '../types'
+} from './sync-actor.js'
+import { type SyncPhase, SYNC_CONFIGS, getSyncKey } from '../types.js'
 
 // ============================================================================
 // Types
@@ -40,6 +39,8 @@ export interface OrchestratorContext {
   lastError: string | null
   /** Last full sync timestamp */
   lastFullSyncAt: number | null
+  /** Whether a sync was requested while running */
+  pendingSyncRequest: boolean
 }
 
 export type OrchestratorEvent =
@@ -61,13 +62,9 @@ function getActorsForPhase(
   actorConfigs: Map<string, SyncActorInput>,
   phase: SyncPhase
 ): string[] {
-  const result: string[] = []
-  for (const [key, config] of actorConfigs) {
-    if (SYNC_CONFIGS[config.syncType].phase === phase) {
-      result.push(key)
-    }
-  }
-  return result
+  return Array.from(actorConfigs.entries())
+    .filter(([, config]) => SYNC_CONFIGS[config.syncType].phase === phase)
+    .map(([key]) => key)
 }
 
 function isPhaseComplete(
@@ -77,6 +74,17 @@ function isPhaseComplete(
 ): boolean {
   const phaseActors = getActorsForPhase(actorConfigs, phase)
   return phaseActors.every((id) => completedActors.has(id))
+}
+
+function wouldCompletePhase(
+  completedActors: Set<string>,
+  actorConfigs: Map<string, SyncActorInput>,
+  phase: SyncPhase,
+  newActorId: string
+): boolean {
+  const withNew = new Set(completedActors)
+  withNew.add(newActorId)
+  return isPhaseComplete(withNew, actorConfigs, phase)
 }
 
 // ============================================================================
@@ -124,39 +132,39 @@ export const orchestratorMachine = setup({
       const newSubscriptions = new Map(context.actorSubscriptions)
 
       for (const [key, config] of context.actorConfigs) {
-        if (!newActors.has(key)) {
-          const machine = createSyncActorMachine(config)
-          const actor = createActor(machine, { input: config })
+        if (newActors.has(key)) continue
 
-          // Subscribe to actor state changes to detect completion
-          const subscription = actor.subscribe((snapshot) => {
-            try {
-              const actorContext = snapshot.context as SyncActorContextExtended
-              if (actorContext.syncCycleComplete) {
-                const phase = SYNC_CONFIGS[config.syncType].phase
-                if (actorContext.lastSyncSuccess) {
-                  self.send({ type: 'ACTOR_COMPLETED', actorId: key, phase })
-                } else {
-                  const error = actorContext.lastError ||
-                    `Sync failed for ${config.syncType} but no error message was captured`
-                  console.error(`[Orchestrator] Actor ${key} failed:`, error)
-                  self.send({ type: 'ACTOR_ERROR', actorId: key, error })
-                }
+        const machine = createSyncActorMachine(config)
+        const actor = createActor(machine, { input: config })
+        const phase = SYNC_CONFIGS[config.syncType].phase
+
+        // Track previous state to only fire event on transition to complete
+        let prevSyncCycleComplete = false
+        const subscription = actor.subscribe((snapshot) => {
+          try {
+            const actorContext = snapshot.context as SyncActorContextExtended
+            // Only send event when transitioning from incomplete to complete
+            if (actorContext.syncCycleComplete && !prevSyncCycleComplete) {
+              if (actorContext.lastSyncSuccess) {
+                self.send({ type: 'ACTOR_COMPLETED', actorId: key, phase })
+              } else {
+                const error = actorContext.lastError ?? `Sync failed for ${config.syncType}`
+                console.error(`[Orchestrator] Actor ${key} failed:`, error)
+                self.send({ type: 'ACTOR_ERROR', actorId: key, error })
               }
-            } catch (subscriptionError) {
-              const errorMsg = subscriptionError instanceof Error
-                ? subscriptionError.message
-                : String(subscriptionError)
-              console.error(`[Orchestrator] Error in actor subscription for ${key}:`, subscriptionError)
-              self.send({ type: 'ACTOR_ERROR', actorId: key, error: `Subscription error: ${errorMsg}` })
             }
-          })
+            prevSyncCycleComplete = actorContext.syncCycleComplete
+          } catch (err) {
+            const errorMsg = err instanceof Error ? err.message : String(err)
+            console.error(`[Orchestrator] Error in actor subscription for ${key}:`, err)
+            self.send({ type: 'ACTOR_ERROR', actorId: key, error: `Subscription error: ${errorMsg}` })
+          }
+        })
 
-          actor.start()
-          newActors.set(key, actor as SyncActorRef)
-          newSubscriptions.set(key, subscription)
-          console.log(`[Orchestrator] Spawned actor: ${key}`)
-        }
+        actor.start()
+        newActors.set(key, actor as SyncActorRef)
+        newSubscriptions.set(key, subscription)
+        console.log(`[Orchestrator] Spawned actor: ${key}`)
       }
       return { actors: newActors, actorSubscriptions: newSubscriptions }
     }),
@@ -225,6 +233,13 @@ export const orchestratorMachine = setup({
       console.log(`[Orchestrator] ${params.phase} phase complete`)
     },
     setRunning: assign({ isRunning: () => true }),
+    queueSyncRequest: assign({
+      pendingSyncRequest: () => {
+        console.log('[Orchestrator] Sync requested while running, will run after current cycle')
+        return true
+      },
+    }),
+    clearPendingSyncRequest: assign({ pendingSyncRequest: () => false }),
   },
   guards: {
     hasContactsActors: ({ context }) => {
@@ -239,6 +254,7 @@ export const orchestratorMachine = setup({
     isMessagesPhaseComplete: ({ context }) => {
       return isPhaseComplete(context.completedActors, context.actorConfigs, 'messages')
     },
+    hasPendingSyncRequest: ({ context }) => context.pendingSyncRequest,
   },
 }).createMachine({
   id: 'sync-orchestrator',
@@ -250,6 +266,7 @@ export const orchestratorMachine = setup({
     isRunning: false,
     lastError: null,
     lastFullSyncAt: null,
+    pendingSyncRequest: false,
   },
   initial: 'idle',
   on: {
@@ -281,6 +298,10 @@ export const orchestratorMachine = setup({
           target: 'stopped',
           actions: ['stopAllActors'],
         },
+        // Queue sync request if one arrives during running state
+        SYNC_NOW: {
+          actions: ['queueSyncRequest'],
+        },
         // ACTOR_ERROR also marks the actor as completed so phase can proceed
         // This handles the case where an actor exhausts retries
         ACTOR_ERROR: {
@@ -299,12 +320,9 @@ export const orchestratorMachine = setup({
           on: {
             ACTOR_COMPLETED: [
               {
-                guard: ({ context, event }) => {
-                  if (event.type !== 'ACTOR_COMPLETED') return false
-                  const newCompleted = new Set(context.completedActors)
-                  newCompleted.add(event.actorId)
-                  return isPhaseComplete(newCompleted, context.actorConfigs, 'contacts')
-                },
+                guard: ({ context, event }) =>
+                  event.type === 'ACTOR_COMPLETED' &&
+                  wouldCompletePhase(context.completedActors, context.actorConfigs, 'contacts', event.actorId),
                 target: 'barrier',
                 actions: ['markActorCompleted'],
               },
@@ -337,12 +355,9 @@ export const orchestratorMachine = setup({
           on: {
             ACTOR_COMPLETED: [
               {
-                guard: ({ context, event }) => {
-                  if (event.type !== 'ACTOR_COMPLETED') return false
-                  const newCompleted = new Set(context.completedActors)
-                  newCompleted.add(event.actorId)
-                  return isPhaseComplete(newCompleted, context.actorConfigs, 'messages')
-                },
+                guard: ({ context, event }) =>
+                  event.type === 'ACTOR_COMPLETED' &&
+                  wouldCompletePhase(context.completedActors, context.actorConfigs, 'messages', event.actorId),
                 target: '#sync-orchestrator.complete',
                 actions: ['markActorCompleted'],
               },
@@ -359,9 +374,16 @@ export const orchestratorMachine = setup({
         { type: 'logPhaseComplete', params: { phase: 'messages' as SyncPhase } },
         'recordSyncComplete',
       ],
-      always: {
-        target: 'idle',
-      },
+      always: [
+        {
+          guard: 'hasPendingSyncRequest',
+          target: 'running',
+          actions: ['clearPendingSyncRequest'],
+        },
+        {
+          target: 'idle',
+        },
+      ],
     },
     stopped: {
       type: 'final',

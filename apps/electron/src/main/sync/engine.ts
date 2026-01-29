@@ -11,8 +11,8 @@
 
 import { createActor, type ActorRefFrom } from 'xstate'
 import { createBrowserInspector } from '@statelyai/inspect'
-import { orchestratorMachine, type OrchestratorEvent } from './machines/orchestrator'
-import { type SyncActorInput } from './machines/sync-actor'
+import { orchestratorMachine } from './machines/orchestrator.js'
+import { type SyncActorInput } from './machines/sync-actor.js'
 import {
   type SyncTypeId,
   type SyncFunction,
@@ -21,7 +21,7 @@ import {
   type SyncPhase,
   SYNC_CONFIGS,
   getSyncKey,
-} from './types'
+} from './types.js'
 
 // ============================================================================
 // Types
@@ -85,11 +85,18 @@ export class SyncEngine {
     })
 
     // Subscribe to state changes for progress reporting
-    this.orchestrator.subscribe((snapshot) => {
-      this.reportProgress(snapshot)
+    this.orchestrator.subscribe(() => {
+      this.reportProgress()
     })
 
     console.log('[SyncEngine] Initialized')
+  }
+
+  /**
+   * Check if the engine has been initialized.
+   */
+  isInitialized(): boolean {
+    return this.orchestrator !== null
   }
 
   /**
@@ -301,55 +308,52 @@ export class SyncEngine {
    */
   getProgress(): SyncProgress {
     const status = this.getStatus()
-
-    // Aggregate platform results
     const platforms: SyncProgress['platforms'] = {}
 
     for (const actor of status.actors) {
       switch (actor.syncType) {
         case 'contacts':
-          platforms.contacts = {
-            synced: actor.totalContactsSynced,
-            updated: 0, // Not tracked separately
-          }
+          platforms.contacts = { synced: actor.totalContactsSynced, updated: 0 }
           break
+
         case 'imessage':
-          platforms.imessage = {
+          platforms.imessage = { messages: actor.totalMessagesSynced }
+          break
+
+        case 'linkedin':
+          platforms.linkedin = {
+            contacts: platforms.linkedin?.contacts ?? 0,
             messages: actor.totalMessagesSynced,
           }
           break
-        case 'linkedin':
-        case 'linkedin_contacts': {
-          const existing = platforms.linkedin ?? { contacts: 0, messages: 0 }
-          if (actor.syncType === 'linkedin_contacts') {
-            existing.contacts = actor.totalContactsSynced
-          } else {
-            existing.messages = actor.totalMessagesSynced
+
+        case 'linkedin_contacts':
+          platforms.linkedin = {
+            contacts: actor.totalContactsSynced,
+            messages: platforms.linkedin?.messages ?? 0,
           }
-          platforms.linkedin = existing
           break
-        }
-        case 'slack': {
-          const existing = platforms.slack ?? { messages: 0, workspaces: 0 }
-          existing.messages += actor.totalMessagesSynced
-          existing.workspaces += 1
-          platforms.slack = existing
+
+        case 'slack':
+          platforms.slack = {
+            messages: (platforms.slack?.messages ?? 0) + actor.totalMessagesSynced,
+            workspaces: (platforms.slack?.workspaces ?? 0) + 1,
+          }
           break
-        }
       }
     }
 
-    // Determine current platform being synced
-    let currentPlatform: SyncTypeId | undefined
-    for (const actor of status.actors) {
-      if (actor.state === 'syncing') {
-        currentPlatform = actor.syncType
-        break
-      }
+    const currentPlatform = status.actors.find((a) => a.state === 'syncing')?.syncType
+
+    let progressStatus: SyncProgress['status'] = 'idle'
+    if (status.isRunning) {
+      progressStatus = 'syncing'
+    } else if (status.error) {
+      progressStatus = 'error'
     }
 
     return {
-      status: status.isRunning ? 'syncing' : status.error ? 'error' : 'idle',
+      status: progressStatus,
       currentPlatform,
       lastSyncAt: status.lastFullSyncAt ?? undefined,
       platforms,
@@ -364,14 +368,12 @@ export class SyncEngine {
     this.progressCallback = callback
   }
 
-  private reportProgress(snapshot: ReturnType<OrchestratorRef['getSnapshot']>): void {
+  private reportProgress(): void {
     if (!this.progressCallback) return
 
     try {
-      const progress = this.getProgress()
-      this.progressCallback(progress)
+      this.progressCallback(this.getProgress())
     } catch (error) {
-      // Don't let callback errors crash the sync engine
       console.error('[SyncEngine] Progress callback threw an error:', error)
     }
   }

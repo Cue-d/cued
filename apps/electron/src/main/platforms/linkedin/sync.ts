@@ -177,8 +177,8 @@ export class LinkedInSyncManager {
     return this._client
   }
 
-  /** Set the LinkedIn client */
-  setClient(client: LinkedInClient): void {
+  /** Set or clear the LinkedIn client */
+  setClient(client: LinkedInClient | null): void {
     this._client = client
   }
 

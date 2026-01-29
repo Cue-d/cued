@@ -10,19 +10,19 @@
  */
 
 import { api } from '@prm/convex'
-import { type SyncResult, type SyncFunction } from './types'
-import { getIMessageSyncManager } from '../platforms/imessage'
+import { type SyncResult, type SyncFunction } from './types.js'
+import { getIMessageSyncManager } from '../platforms/imessage/index.js'
 import {
   getLinkedInSyncManager,
   type LinkedInScraper,
   type IncrementalScrapeResult,
-} from '../platforms/linkedin'
+} from '../platforms/linkedin/index.js'
 import {
   getSlackSyncManager,
   getAllSlackCredentials,
-} from '../platforms/slack'
-import { syncContactsToConvex } from '../platforms/contacts/sync'
-import { createConvexClient, setConvexAuth } from './cursor'
+} from '../platforms/slack/index.js'
+import { syncContactsToConvex } from '../platforms/contacts/sync.js'
+import { createConvexClient, setConvexAuth } from './cursor.js'
 
 // ============================================================================
 // Types
@@ -34,44 +34,47 @@ export interface SyncFunctionOptions {
 }
 
 // ============================================================================
+// Helpers
+// ============================================================================
+
+function getErrorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error)
+}
+
+function formatSyncErrors(errors: string[]): string {
+  const preview = errors.slice(0, 3).join('; ')
+  const suffix = errors.length > 3 ? '...' : ''
+  return `${errors.length} error(s): ${preview}${suffix}`
+}
+
+// ============================================================================
 // iMessage Sync
 // ============================================================================
 
 /**
  * Create sync function for iMessage messages.
  */
-export function createIMessageSyncFn(options: SyncFunctionOptions): SyncFunction {
+export function createIMessageSyncFn(_options: SyncFunctionOptions): SyncFunction {
   return async (): Promise<SyncResult> => {
     const manager = getIMessageSyncManager()
-
-    // Get initial count
-    const before = manager.getProgress()
-    const initialMessages = before.totalMessagesSynced
+    const initialMessages = manager.getProgress().totalMessagesSynced
 
     try {
       await manager.runSync()
 
       const after = manager.getProgress()
-      const messagesSynced = after.totalMessagesSynced - initialMessages
-
       if (after.status === 'error') {
-        return {
-          success: false,
-          error: after.error ?? 'iMessage sync failed',
-        }
+        return { success: false, error: after.error ?? 'iMessage sync failed' }
       }
 
       return {
         success: true,
-        messagesSynced: Math.max(0, messagesSynced),
+        messagesSynced: Math.max(0, after.totalMessagesSynced - initialMessages),
       }
     } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : String(error)
+      const errorMessage = getErrorMessage(error)
       console.error('[IMessageSync] Error:', errorMessage)
-      return {
-        success: false,
-        error: errorMessage,
-      }
+      return { success: false, error: errorMessage }
     }
   }
 }
@@ -87,29 +90,25 @@ export function createContactsSyncFn(options: SyncFunctionOptions): SyncFunction
   return async (): Promise<SyncResult> => {
     try {
       const result = await syncContactsToConvex(options.getAuthToken)
+      const totalSynced = result.contactsCount + result.updatedCount
 
       if (result.errors.length > 0) {
         console.error('[ContactsSync] Completed with errors:', {
           errorCount: result.errors.length,
           errors: result.errors,
-          partialSuccess: result.contactsCount + result.updatedCount,
+          partialSuccess: totalSynced,
         })
       }
 
       return {
         success: result.errors.length === 0,
-        contactsSynced: result.contactsCount + result.updatedCount,
-        error: result.errors.length > 0
-          ? `${result.errors.length} error(s): ${result.errors.slice(0, 3).join('; ')}${result.errors.length > 3 ? '...' : ''}`
-          : undefined,
+        contactsSynced: totalSynced,
+        error: result.errors.length > 0 ? formatSyncErrors(result.errors) : undefined,
       }
     } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : String(error)
+      const errorMessage = getErrorMessage(error)
       console.error('[ContactsSync] Error:', errorMessage)
-      return {
-        success: false,
-        error: errorMessage,
-      }
+      return { success: false, error: errorMessage }
     }
   }
 }
@@ -126,64 +125,43 @@ export function createLinkedInMessagesSyncFn(
 ): SyncFunction {
   return async (): Promise<SyncResult> => {
     if (!options.linkedInScraper) {
-      return {
-        success: false,
-        error: 'LinkedIn scraper not provided',
-      }
+      return { success: false, error: 'LinkedIn scraper not provided' }
+    }
+
+    const isLoggedIn = await options.linkedInScraper.checkLoginStatus()
+    if (!isLoggedIn) {
+      return { success: false, error: 'LinkedIn not logged in' }
     }
 
     const manager = getLinkedInSyncManager()
 
-    // Check if logged in
-    const isLoggedIn = await options.linkedInScraper.checkLoginStatus()
-    if (!isLoggedIn) {
-      return {
-        success: false,
-        error: 'LinkedIn not logged in',
-      }
-    }
-
-    // Ensure client is set
     try {
       const apiClient = await options.linkedInScraper.getApiClient()
       manager.setClient(apiClient)
     } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : String(error)
+      const errorMessage = getErrorMessage(error)
       console.error('[LinkedInMessagesSync] Failed to get API client:', errorMessage)
-      return {
-        success: false,
-        error: errorMessage,
-      }
+      return { success: false, error: errorMessage }
     }
 
-    // Get initial counts
-    const before = manager.getProgress()
-    const initialMessages = before.totalMessagesSynced
+    const initialMessages = manager.getProgress().totalMessagesSynced
 
     try {
       await manager.runSync()
 
       const after = manager.getProgress()
-      const messagesSynced = after.totalMessagesSynced - initialMessages
-
       if (after.status === 'error') {
-        return {
-          success: false,
-          error: after.error ?? 'LinkedIn sync failed',
-        }
+        return { success: false, error: after.error ?? 'LinkedIn sync failed' }
       }
 
       return {
         success: true,
-        messagesSynced: Math.max(0, messagesSynced),
+        messagesSynced: Math.max(0, after.totalMessagesSynced - initialMessages),
       }
     } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : String(error)
+      const errorMessage = getErrorMessage(error)
       console.error('[LinkedInMessagesSync] Error:', errorMessage)
-      return {
-        success: false,
-        error: errorMessage,
-      }
+      return { success: false, error: errorMessage }
     }
   }
 }
@@ -197,65 +175,45 @@ export function createLinkedInContactsSyncFn(
 ): SyncFunction {
   return async (): Promise<SyncResult> => {
     if (!options.linkedInScraper) {
-      return {
-        success: false,
-        error: 'LinkedIn scraper not provided',
-      }
+      return { success: false, error: 'LinkedIn scraper not provided' }
     }
 
-    // Check if logged in
     const isLoggedIn = await options.linkedInScraper.checkLoginStatus()
     if (!isLoggedIn) {
-      return {
-        success: false,
-        error: 'LinkedIn not logged in',
-      }
+      return { success: false, error: 'LinkedIn not logged in' }
     }
 
     try {
-      // Initialize scraper for contacts sync (sets up Convex client with auth)
       const initialized = await options.linkedInScraper.initializeForContactsSync()
       if (!initialized) {
-        return {
-          success: false,
-          error: 'Failed to initialize LinkedIn contacts sync - not authenticated',
-        }
+        return { success: false, error: 'Failed to initialize LinkedIn contacts sync - not authenticated' }
       }
 
-      // Scrape connections incrementally (uses anchor-based cursor)
       console.log('[LinkedInContactsSync] Starting incremental scrape...')
       const result: IncrementalScrapeResult =
         await options.linkedInScraper.scrapeConnectionsIncremental()
 
       if (result.connections.length === 0) {
         console.log('[LinkedInContactsSync] No new connections to sync')
-        return {
-          success: true,
-          contactsSynced: 0,
-        }
+        return { success: true, contactsSynced: 0 }
       }
 
       console.log(
         `[LinkedInContactsSync] Found ${result.connections.length} new connections, syncing to Convex...`
       )
 
-      // Convert connections to the format expected by syncSocialContacts
       const contacts = result.connections.map((conn) => ({
         name: `${conn.firstName} ${conn.lastName}`.trim(),
-        handle: conn.profileUrl, // Will be normalized by Convex
+        handle: conn.profileUrl,
         profileUrl: conn.profileUrl,
         headline: conn.headline ?? null,
-        profileId: conn.profileId, // URN ID for matching with messaging contacts
+        profileId: conn.profileId,
       }))
 
-      // Create Convex client and sync contacts
       const convexClient = createConvexClient()
       const token = await setConvexAuth(convexClient)
       if (!token) {
-        return {
-          success: false,
-          error: 'Failed to authenticate with Convex',
-        }
+        return { success: false, error: 'Failed to authenticate with Convex' }
       }
 
       const syncResult = await convexClient.mutation(api.sync.syncSocialContacts, {
@@ -268,21 +226,16 @@ export function createLinkedInContactsSyncFn(
         `[LinkedInContactsSync] Synced ${syncResult.newContacts} new, ${syncResult.updatedContacts} updated contacts`
       )
 
+      const totalSynced = syncResult.newContacts + syncResult.updatedContacts
       return {
         success: syncResult.errors.length === 0,
-        contactsSynced: syncResult.newContacts + syncResult.updatedContacts,
-        error:
-          syncResult.errors.length > 0
-            ? `${syncResult.errors.length} error(s): ${syncResult.errors.slice(0, 3).join('; ')}${syncResult.errors.length > 3 ? '...' : ''}`
-            : undefined,
+        contactsSynced: totalSynced,
+        error: syncResult.errors.length > 0 ? formatSyncErrors(syncResult.errors) : undefined,
       }
     } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : String(error)
+      const errorMessage = getErrorMessage(error)
       console.error('[LinkedInContactsSync] Error:', errorMessage)
-      return {
-        success: false,
-        error: errorMessage,
-      }
+      return { success: false, error: errorMessage }
     }
   }
 }
@@ -295,51 +248,37 @@ export function createLinkedInContactsSyncFn(
  * Create sync function for a specific Slack workspace.
  */
 export function createSlackSyncFn(
-  options: SyncFunctionOptions,
+  _options: SyncFunctionOptions,
   teamId: string
 ): SyncFunction {
   return async (): Promise<SyncResult> => {
     const manager = getSlackSyncManager({ teamId })
 
     if (!manager.isAuthenticated()) {
-      // Try to initialize
       const initialized = await manager.initialize()
       if (!initialized) {
-        return {
-          success: false,
-          error: `Slack workspace ${teamId} not authenticated`,
-        }
+        return { success: false, error: `Slack workspace ${teamId} not authenticated` }
       }
     }
 
-    // Get initial counts
-    const before = manager.getProgress()
-    const initialMessages = before.totalMessagesSynced
+    const initialMessages = manager.getProgress().totalMessagesSynced
 
     try {
       await manager.runSync()
 
       const after = manager.getProgress()
-      const messagesSynced = after.totalMessagesSynced - initialMessages
-
       if (after.status === 'error') {
-        return {
-          success: false,
-          error: after.error ?? 'Slack sync failed',
-        }
+        return { success: false, error: after.error ?? 'Slack sync failed' }
       }
 
       return {
         success: true,
-        messagesSynced: Math.max(0, messagesSynced),
+        messagesSynced: Math.max(0, after.totalMessagesSynced - initialMessages),
       }
     } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : String(error)
+      const errorMessage = getErrorMessage(error)
       console.error(`[SlackSync:${teamId}] Error:`, errorMessage)
-      return {
-        success: false,
-        error: errorMessage,
-      }
+      return { success: false, error: errorMessage }
     }
   }
 }

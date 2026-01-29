@@ -159,9 +159,15 @@ function setupAuthIpcHandlers(): void {
             }
           }
 
-          // Trigger sync via XState engine (engine is already started in startBackgroundSync)
+          // Initialize and start sync engine if this is first login
+          // (startBackgroundSync returned early due to no token at startup)
           const engine = getSyncEngine();
-          engine.syncNow();
+          if (!engine.isInitialized()) {
+            console.log("[Main] First login - initializing sync engine");
+            await startBackgroundSync();
+          } else {
+            engine.syncNow();
+          }
         },
         onAuthError: (error) => {
           // Notify renderer of auth failure
