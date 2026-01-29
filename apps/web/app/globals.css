@@ -1,20 +1,35 @@
 @import "tailwindcss";
 @import "@prm/ui/styles/theme.css";
 
+/* Suisse font-face declarations */
+@font-face {
+  font-family: "suisse";
+  src: url("../../../packages/ui/src/assets/fonts/Suisse Regular.ttf") format("truetype");
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "suisse";
+  src: url("../../../packages/ui/src/assets/fonts/Suisse Medium.ttf") format("truetype");
+  font-weight: 500;
+  font-style: normal;
+  font-display: swap;
+}
+
 /* Scan UI package for Tailwind classes */
 @source "../../../packages/ui/src/**/*.{ts,tsx}";
-
-@theme inline {
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
-}
 
 * {
   border-color: var(--color-border);
 }
 
+html {
+  font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+}
+
 body {
   background: var(--color-background);
   color: var(--color-foreground);
-  font-family: var(--font-geist-sans), Arial, Helvetica, sans-serif;
 }

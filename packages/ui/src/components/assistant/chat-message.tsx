@@ -92,7 +92,7 @@ export function ChatMessage({
             className={cn(
               "text-xs ring-2 ring-background",
               isUser
-                ? "bg-linear-to-br from-primary to-primary/80 text-primary-foreground shadow-md shadow-primary/20"
+                ? "bg-primary text-primary-foreground"
                 : "bg-muted text-muted-foreground"
             )}
           >
@@ -114,7 +114,7 @@ export function ChatMessage({
             className={cn(
               "rounded-2xl px-4 py-3",
               isUser
-                ? "rounded-br-md bg-linear-to-br from-primary to-primary/90 text-primary-foreground shadow-lg shadow-primary/15"
+                ? "rounded-br-md bg-primary text-primary-foreground"
                 : "rounded-bl-md bg-muted/60 text-foreground backdrop-blur-sm border border-border/30"
             )}
           >

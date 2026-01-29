@@ -16,7 +16,7 @@ export function ReactionBadges({
   return (
     <div
       className={cn(
-        "absolute -top-3 flex gap-0.5 px-2 py-1 rounded-full bg-muted shadow-sm text-sm z-10 border",
+        "absolute -top-3 flex gap-0.5 px-2 py-1 rounded-full bg-muted text-sm z-10 border",
         isSent ? "-left-3" : "-right-3"
       )}
     >
@@ -110,7 +110,7 @@ export function MessageBubble({
       >
         <div
           className={cn(
-            "relative rounded-2xl px-4 py-2 text-sm break-words",
+            "relative rounded-2xl px-4 py-2 text-sm wrap-break-words",
             isFromMe
               ? "bg-primary text-primary-foreground"
               : "bg-muted text-foreground"
@@ -122,14 +122,14 @@ export function MessageBubble({
           )}
           {hasText && content && (
             <p
-              className="whitespace-pre-wrap break-words select-text"
+              className="whitespace-pre-wrap wrap-break-words select-text"
               data-selectable="true"
             >
               {content}
             </p>
           )}
           {!hasText && (
-            <p className="whitespace-pre-wrap break-words">
+            <p className="whitespace-pre-wrap wrap-break-words">
               [No text]
             </p>
           )}

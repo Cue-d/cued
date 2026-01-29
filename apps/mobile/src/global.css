@@ -5,17 +5,14 @@
 /* Scan app/ directory for class names (global.css is in src/) */
 @source "../app";
 
-/* Platform-specific font families */
-@media ios {
-  :root {
-    --font-sans: system-ui;
-    --font-mono: ui-monospace;
-  }
+/* Custom font family - "Suisse Intl" from font metadata (nameID 1) */
+/* On iOS, the font family name comes from the font file's name table (nameID 1) */
+@theme {
+  --font-sans: "Suisse Intl";
+  --font-mono: ui-monospace;
 }
 
-@media android {
-  :root {
-    --font-sans: normal;
-    --font-mono: monospace;
-  }
+/* Define font-sans utility for React Native */
+@utility font-sans {
+  font-family: "Suisse Intl";
 }

@@ -157,7 +157,7 @@ export default function ActionsPage() {
 
       {/* Filter Panel - Right Sidebar */}
       <div className="absolute top-4 right-4 mt-14 z-10">
-        <div className="bg-card border rounded-lg p-3 shadow-sm">
+        <div className="bg-card border rounded-lg p-3">
           <div className="text-xs font-medium text-muted-foreground mb-2">
             Filter
           </div>

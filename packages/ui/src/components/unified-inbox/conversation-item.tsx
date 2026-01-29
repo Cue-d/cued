@@ -49,13 +49,13 @@ export function InboxConversationItem({
         "group w-full flex items-center gap-3 px-3 py-3 rounded-xl text-left relative",
         "transition-all duration-200 ease-out",
         isSelected
-          ? "bg-primary text-primary-foreground shadow-md shadow-primary/20"
+          ? "bg-primary text-primary-foreground"
           : "hover:bg-muted/80 active:scale-[0.98]"
       )}
     >
       {/* Unread indicator */}
       {hasUnread && !isSelected && (
-        <div className="absolute left-1.5 top-1/2 -translate-y-1/2 w-2 h-2 bg-primary rounded-full shadow-sm shadow-primary/50 animate-pulse" />
+        <div className="absolute left-1.5 top-1/2 -translate-y-1/2 w-2 h-2 bg-primary rounded-full animate-pulse" />
       )}
 
       <div className={cn(

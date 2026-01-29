@@ -6,8 +6,26 @@
 /* Source for Tailwind to scan components */
 @source "../../../../packages/ui/src/**/*.{ts,tsx}";
 
+/* Suisse font-face declarations for Electron */
+@font-face {
+  font-family: "suisse";
+  src: url("./assets/fonts/Suisse Regular.ttf") format("truetype");
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "suisse";
+  src: url("./assets/fonts/Suisse Medium.ttf") format("truetype");
+  font-weight: 500;
+  font-style: normal;
+  font-display: swap;
+}
+
 :root {
-  font-family: -apple-system, BlinkMacSystemFont, "SF Pro", system-ui, sans-serif;
+  font-family: suisse, -apple-system, BlinkMacSystemFont, "SF Pro", system-ui, sans-serif;
+  font-feature-settings: "cv02", "cv03", "cv04", "cv11";
 }
 
 html,
@@ -17,7 +35,7 @@ body {
 }
 
 body {
-  color: var(--foreground);
+  color: var(--color-foreground);
 }
 
 /* Drag region for window title bar */

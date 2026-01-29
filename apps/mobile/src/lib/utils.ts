@@ -16,7 +16,7 @@ export const themeColors = {
     secondaryBackground: "#F5F5F4", // stone-100 (for grouped settings)
     mutedForeground: "#71717A", // zinc-500
     foreground: "#18181B", // zinc-900
-    primary: "#EA580C", // orange-600
+    primary: "#3D3D3D", // oklch(30.52% 0 0) - design system primary
     destructive: "#DC2626", // red-600
     success: "#16A34A", // green-600
     warning: "#D97706", // amber-600
@@ -29,7 +29,7 @@ export const themeColors = {
     secondaryBackground: "#0C0A09", // stone-950 (darker than cards for contrast)
     mutedForeground: "#A1A1AA", // zinc-400
     foreground: "#FAFAFA", // zinc-50
-    primary: "#F97316", // orange-500
+    primary: "#FAFAF9", // oklch(98.8% 0.0041 91.45) - design system primary
     destructive: "#EF4444", // red-500
     success: "#22C55E", // green-500
     warning: "#F59E0B", // amber-500

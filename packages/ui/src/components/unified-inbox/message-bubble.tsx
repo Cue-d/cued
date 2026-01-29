@@ -39,9 +39,9 @@ export function InboxMessageBubble({
       {hasContent && (
         <div
           className={cn(
-            "max-w-[75%] px-4 py-2.5 rounded-2xl break-words transition-all duration-200",
+            "max-w-[75%] px-4 py-2.5 rounded-2xl wrap-break-words transition-all duration-200",
             message.isFromMe
-              ? "bg-gradient-to-br from-primary to-primary/90 text-primary-foreground rounded-br-lg shadow-md shadow-primary/15"
+              ? "bg-primary text-primary-foreground rounded-br-lg"
               : "bg-muted/70 text-foreground rounded-bl-lg border border-border/20"
           )}
         >

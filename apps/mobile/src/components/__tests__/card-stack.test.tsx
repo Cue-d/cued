@@ -17,7 +17,7 @@ vi.mock("@/lib/utils", () => ({
     background: "#FFFFFF",
     foreground: "#18181B",
     mutedForeground: "#71717A",
-    primary: "#EA580C",
+    primary: "#3D3D3D",
   }),
 }));
 

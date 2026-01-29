@@ -369,7 +369,7 @@ function PureMultimodalInput({
               </Button>
             ) : (
               <PromptInputSubmit
-                className="size-9 rounded-xl bg-linear-to-br from-primary to-primary/80 text-primary-foreground shadow-md shadow-primary/20 transition-all duration-200 hover:shadow-lg hover:shadow-primary/30 hover:scale-105 active:scale-95 disabled:bg-muted disabled:text-muted-foreground disabled:shadow-none disabled:from-muted disabled:to-muted"
+                className="size-9 rounded-xl bg-primary text-primary-foreground transition-all duration-200 hover:scale-105 active:scale-95 disabled:bg-muted disabled:text-muted-foreground"
                 data-testid="send-button"
                 disabled={!input.trim() && attachments.length === 0}
                 isLoading={isSubmitting}
