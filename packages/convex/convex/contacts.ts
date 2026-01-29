@@ -140,6 +140,135 @@ export const getContact = query({
 });
 
 /**
+ * Get a contact profile with all related data for the detail view.
+ * Includes: handles, conversations, recent messages, memory stats.
+ */
+export const getContactProfile = query({
+  args: {
+    contactId: v.id("contacts"),
+  },
+  handler: async (ctx, args) => {
+    const user = await getAuthenticatedUser(ctx);
+    if (!user) return null;
+
+    const contact = await ctx.db.get(args.contactId);
+    if (!contact || contact.userId !== user._id) return null;
+
+    // Fetch handles
+    const handles = await ctx.db
+      .query("contactHandles")
+      .withIndex("by_contact", (q) => q.eq("contactId", args.contactId))
+      .collect();
+
+    // Fetch all conversations for this user and filter by participant
+    const allConversations = await ctx.db
+      .query("conversations")
+      .withIndex("by_user", (q) => q.eq("userId", user._id))
+      .collect();
+
+    const conversations = allConversations
+      .filter((c) => c.participantContactIds.includes(args.contactId))
+      .sort((a, b) => (b.lastMessageAt ?? 0) - (a.lastMessageAt ?? 0))
+      .slice(0, 10);
+
+    // Fetch recent messages from these conversations
+    const recentMessages = await Promise.all(
+      conversations.slice(0, 5).map(async (conv) => {
+        const messages = await ctx.db
+          .query("messages")
+          .withIndex("by_conversation", (q) => q.eq("conversationId", conv._id))
+          .order("desc")
+          .take(10);
+        return messages.map((m) => ({
+          ...m,
+          conversationDisplayName: conv.displayName,
+          conversationPlatform: conv.platform,
+        }));
+      })
+    );
+
+    // Fetch messages sent by this contact directly
+    const messagesByContact = await ctx.db
+      .query("messages")
+      .withIndex("by_sender_contact", (q) => q.eq("senderContactId", args.contactId))
+      .order("desc")
+      .take(50);
+
+    // Combine and dedupe messages, sort by sentAt
+    const allMessages = [...recentMessages.flat(), ...messagesByContact];
+    const uniqueMessages = Array.from(
+      new Map(allMessages.map((m) => [m._id, m])).values()
+    ).sort((a, b) => b.sentAt - a.sentAt);
+
+    // Fetch memory stats for this contact
+    const memoryStats = await ctx.db
+      .query("contactMemoryStats")
+      .withIndex("by_contact", (q) => q.eq("contactId", args.contactId))
+      .unique();
+
+    // Fetch recent actions related to this contact
+    const actions = await ctx.db
+      .query("actions")
+      .withIndex("by_contact", (q) => q.eq("contactId", args.contactId))
+      .order("desc")
+      .take(10);
+
+    // Calculate activity stats
+    const THIRTY_DAYS_MS = 30 * 24 * 60 * 60 * 1000;
+    const recentMessageCount = uniqueMessages.filter(
+      (m) => m.sentAt > Date.now() - THIRTY_DAYS_MS
+    ).length;
+
+    return {
+      contact: {
+        ...contact,
+        handles: handles.map((h) => ({
+          type: h.handleType,
+          value: h.handle,
+          platform: h.platform,
+        })),
+      },
+      conversations: conversations.map((c) => ({
+        _id: c._id,
+        platform: c.platform,
+        displayName: c.displayName,
+        lastMessageText: c.lastMessageText,
+        lastMessageAt: c.lastMessageAt,
+        conversationType: c.conversationType,
+      })),
+      messages: uniqueMessages.slice(0, 50).map((m) => ({
+        _id: m._id,
+        content: m.content,
+        sentAt: m.sentAt,
+        isFromMe: m.isFromMe,
+        platform: m.platform,
+      })),
+      memoryStats: memoryStats
+        ? {
+            messagesProcessed: memoryStats.messagesProcessed,
+            memoriesExtracted: memoryStats.memoriesExtracted,
+            lastExtractedAt: memoryStats.lastExtractedAt,
+          }
+        : null,
+      actions: actions.map((a) => ({
+        _id: a._id,
+        type: a.type,
+        status: a.status,
+        createdAt: a.createdAt,
+        completedAt: a.completedAt,
+      })),
+      stats: {
+        totalConversations: conversations.length,
+        totalMessages: uniqueMessages.length,
+        recentMessageCount,
+        lastContactedAt: uniqueMessages[0]?.sentAt ?? null,
+        platformsUsed: [...new Set(handles.map((h) => h.platform))],
+      },
+    };
+  },
+});
+
+/**
  * Get pending merge suggestions for the current user.
  */
 export const getPendingMergeSuggestions = query({
