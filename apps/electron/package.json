@@ -25,14 +25,17 @@
     "@prm/integrations": "workspace:*",
     "@prm/shared": "workspace:*",
     "@prm/ui": "workspace:*",
+    "@statelyai/inspect": "^0.4.0",
     "better-sqlite3": "^12.6.0",
+    "chokidar": "^5.0.0",
     "convex": "^1.31.5",
     "dotenv": "^17.2.3",
     "electron-liquid-glass": "^1.1.1",
     "electron-updater": "^6.7.3",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
-    "sharp": "^0.34.5"
+    "sharp": "^0.34.5",
+    "xstate": "^5.26.0"
   },
   "devDependencies": {
     "@electron/notarize": "^2.5.0",

@@ -1,6 +1,9 @@
 import { useState, useEffect, useCallback } from "react";
 
-// Types for Electron IPC API
+// ============================================================================
+// Auth Types
+// ============================================================================
+
 export interface AuthUser {
   id: string;
   email: string;
@@ -12,43 +15,38 @@ export interface AuthState {
   user: AuthUser | null;
 }
 
-export interface SyncProgress {
-  status: "idle" | "syncing" | "error" | "recovery";
+// ============================================================================
+// Unified Sync Types
+// ============================================================================
+
+export interface PlatformSyncResult {
+  contacts?: { synced: number; updated: number };
+  linkedin?: { contacts: number; messages: number };
+  slack?: { messages: number; workspaces: number };
+  imessage?: { messages: number };
+}
+
+export interface UnifiedSyncProgress {
+  status: "idle" | "syncing" | "error";
+  currentPlatform?: "contacts" | "linkedin" | "slack" | "imessage";
   lastSyncAt?: number;
-  lastCursor?: number;
-  totalMessagesSynced: number;
-  totalContactsSynced?: number;
-  currentBatch?: {
-    messagesInBatch: number;
-    batchNumber: number;
-    estimatedBatchesRemaining: number;
-  };
-  error?: string;
-  recoveryReason?: string;
-}
-
-export interface SocialStatusResult {
-  isLoggedIn: boolean;
+  platforms: PlatformSyncResult;
   error?: string;
 }
 
-export interface SocialScrapeResult {
+export interface UnifiedSyncResult {
   success: boolean;
-  data?: unknown[];
+  skipped?: boolean;
   error?: string;
-  count?: number;
+  platforms: PlatformSyncResult;
 }
 
-export interface SocialProgress {
-  status: "starting" | "complete" | "error";
-  count?: number;
-  type?: string;
-  error?: string;
-}
+// ============================================================================
+// LinkedIn Types
+// ============================================================================
 
-export interface LinkedInMessagingStatus {
-  connected: boolean;
-  syncProgress?: LinkedInSyncProgress;
+export interface LinkedInStatusResult {
+  isLoggedIn: boolean;
   error?: string;
 }
 
@@ -61,12 +59,26 @@ export interface LinkedInSyncProgress {
   error?: string;
 }
 
-export interface LinkedInSyncResult {
+export interface LinkedInSendMessageResult {
   success: boolean;
+  messageId?: string;
   error?: string;
 }
 
-// Slack types (Native integration - Task 5.1) - Multi-workspace support
+// ============================================================================
+// Slack Types
+// ============================================================================
+
+export interface SlackSyncProgress {
+  status: "idle" | "syncing" | "error";
+  totalConversationsSynced: number;
+  totalMessagesSynced: number;
+  lastSyncAt?: number;
+  teamName?: string;
+  teamId?: string;
+  error?: string;
+}
+
 export interface SlackWorkspaceInfo {
   teamId: string;
   teamName: string;
@@ -89,33 +101,15 @@ export interface SlackLoginResult {
   error?: string;
 }
 
-export interface SlackSyncProgress {
-  status: "idle" | "syncing" | "error";
-  totalConversationsSynced: number;
-  totalMessagesSynced: number;
-  lastSyncAt?: number;
-  teamName?: string;
-  teamId?: string;
-  error?: string;
-}
-
-export interface SlackMessagingStatus {
-  connected: boolean;
-  syncProgress?: SlackSyncProgress;
-  workspaces?: SlackWorkspaceInfo[];
-  error?: string;
-}
-
-export interface SlackSyncResult {
+export interface SlackDisconnectResult {
   success: boolean;
   error?: string;
 }
 
-export interface SlackListWorkspacesResult {
-  workspaces: SlackWorkspaceInfo[];
-}
+// ============================================================================
+// Window Type Declaration
+// ============================================================================
 
-// Global type declaration for the unified sync API
 declare global {
   interface Window {
     electron: {
@@ -132,45 +126,35 @@ declare global {
         onUserCode: (callback: (code: string, uri: string) => void) => () => void;
       };
       sync: {
-        // iMessage sync
-        imessage: {
-          getProgress: () => Promise<SyncProgress>;
-          runNow: () => Promise<SyncProgress>;
-          reset: () => Promise<SyncProgress>;
-          forceFullSync: () => Promise<SyncProgress>;
-          onProgress: (callback: (progress: SyncProgress) => void) => () => void;
-        };
-        // LinkedIn sync
+        // Unified sync
+        runAll: () => Promise<UnifiedSyncResult>;
+        runNow: () => Promise<UnifiedSyncResult>;
+        getProgress: () => Promise<UnifiedSyncProgress>;
+        onProgress: (callback: (progress: UnifiedSyncProgress) => void) => () => void;
+        // LinkedIn (login/status only)
         linkedin: {
-          status: () => Promise<SocialStatusResult>;
-          login: () => Promise<SocialStatusResult>;
-          scrape: (options?: { maxConnections?: number }) => Promise<SocialScrapeResult>;
-          messagingStatus: () => Promise<LinkedInMessagingStatus>;
-          start: () => Promise<LinkedInSyncResult>;
-          stop: () => Promise<LinkedInSyncResult>;
-          sendMessage: (conversationId: string, text: string) => Promise<unknown>;
+          status: () => Promise<LinkedInStatusResult>;
+          login: () => Promise<LinkedInStatusResult>;
+          logout: () => Promise<{ success: boolean; error?: string }>;
+          sendMessage: (conversationId: string, text: string) => Promise<LinkedInSendMessageResult>;
           getProgress: () => Promise<LinkedInSyncProgress>;
-          onProgress: (callback: (progress: LinkedInSyncProgress) => void) => () => void;
-          onScrapeProgress: (callback: (progress: SocialProgress) => void) => () => void;
-          onAuthInvalid: (callback: () => void) => () => void;
         };
-        // Slack sync
+        // Slack (login/status/disconnect only)
         slack: {
           status: () => Promise<SlackStatusResult>;
           login: () => Promise<SlackLoginResult>;
-          disconnect: (teamId?: string) => Promise<SlackSyncResult>;
-          listWorkspaces: () => Promise<SlackListWorkspacesResult>;
-          messagingStatus: () => Promise<SlackMessagingStatus>;
-          start: (teamId?: string) => Promise<SlackSyncResult>;
-          stop: (teamId?: string) => Promise<SlackSyncResult>;
+          disconnect: (teamId?: string) => Promise<SlackDisconnectResult>;
+          listWorkspaces: () => Promise<{ workspaces: SlackWorkspaceInfo[] }>;
           getProgress: () => Promise<SlackSyncProgress>;
-          onProgress: (callback: (progress: SlackSyncProgress) => void) => () => void;
-          onAuthInvalid: (callback: () => void) => () => void;
         };
       };
     };
   }
 }
+
+// ============================================================================
+// Hooks
+// ============================================================================
 
 /**
  * Hook to access the Electron API
@@ -232,62 +216,56 @@ export function useAuthState() {
 }
 
 /**
- * Hook to manage iMessage sync progress
+ * Hook to manage unified sync
  */
-export function useIMessageSync() {
-  const [progress, setProgress] = useState<SyncProgress>({
+export function useUnifiedSync() {
+  const [progress, setProgress] = useState<UnifiedSyncProgress>({
     status: "idle",
-    totalMessagesSynced: 0,
+    platforms: {},
   });
+  const [isLoading, setIsLoading] = useState(true);
   const electron = useElectron();
 
   useEffect(() => {
-    // Get initial sync progress
-    electron.sync.imessage.getProgress().then(setProgress);
+    // Get initial progress
+    electron.sync.getProgress().then((p) => {
+      setProgress(p);
+      setIsLoading(false);
+    });
 
     // Subscribe to progress updates
-    const unsub = electron.sync.imessage.onProgress(setProgress);
+    const unsub = electron.sync.onProgress(setProgress);
     return unsub;
   }, [electron]);
 
   const runNow = useCallback(async () => {
-    const result = await electron.sync.imessage.runNow();
-    setProgress(result);
+    const result = await electron.sync.runNow();
     return result;
   }, [electron]);
 
-  const reset = useCallback(async () => {
-    const result = await electron.sync.imessage.reset();
-    setProgress(result);
+  const runAll = useCallback(async () => {
+    const result = await electron.sync.runAll();
     return result;
   }, [electron]);
 
-  const forceFullSync = useCallback(async () => {
-    const result = await electron.sync.imessage.forceFullSync();
-    setProgress(result);
-    return result;
-  }, [electron]);
-
-  return { progress, runNow, reset, forceFullSync };
+  return {
+    progress,
+    isLoading,
+    isSyncing: progress.status === "syncing",
+    lastSyncAt: progress.lastSyncAt,
+    currentPlatform: progress.currentPlatform,
+    platforms: progress.platforms,
+    error: progress.error,
+    runNow,
+    runAll,
+  };
 }
 
 /**
- * Hook to manage sync progress (alias for backwards compatibility)
- * @deprecated Use useIMessageSync instead
- */
-export function useSyncProgress() {
-  const { progress, forceFullSync } = useIMessageSync();
-  return { progress, forceSync: forceFullSync };
-}
-
-/**
- * Hook to manage LinkedIn status and sync
+ * Hook to manage LinkedIn connection (login/status only, sync handled by unified sync)
  */
 export function useLinkedIn() {
   const [isLoggedIn, setIsLoggedIn] = useState(false);
-  const [syncProgress, setSyncProgress] = useState<LinkedInSyncProgress | null>(
-    null
-  );
   const [isLoading, setIsLoading] = useState(true);
   const electron = useElectron();
 
@@ -296,29 +274,7 @@ export function useLinkedIn() {
     electron.sync.linkedin.status().then((result) => {
       setIsLoggedIn(result.isLoggedIn);
       setIsLoading(false);
-
-      if (result.isLoggedIn) {
-        electron.sync.linkedin.messagingStatus().then((status) => {
-          if (status.syncProgress) {
-            setSyncProgress(status.syncProgress);
-          }
-        });
-      }
     });
-
-    // Subscribe to messaging sync progress
-    const unsubProgress = electron.sync.linkedin.onProgress(setSyncProgress);
-
-    // Subscribe to auth invalid
-    const unsubAuth = electron.sync.linkedin.onAuthInvalid(() => {
-      setIsLoggedIn(false);
-      setSyncProgress(null);
-    });
-
-    return () => {
-      unsubProgress();
-      unsubAuth();
-    };
   }, [electron]);
 
   const login = useCallback(async () => {
@@ -327,17 +283,17 @@ export function useLinkedIn() {
     return result;
   }, [electron]);
 
-  const startSync = useCallback(async () => {
-    return await electron.sync.linkedin.start();
+  const logout = useCallback(async () => {
+    const result = await electron.sync.linkedin.logout();
+    if (result.success) {
+      setIsLoggedIn(false);
+    }
+    return result;
   }, [electron]);
 
-  const stopSync = useCallback(async () => {
-    return await electron.sync.linkedin.stop();
-  }, [electron]);
-
-  const scrape = useCallback(
-    async (options?: { maxConnections?: number }) => {
-      return await electron.sync.linkedin.scrape(options);
+  const sendMessage = useCallback(
+    async (conversationId: string, text: string) => {
+      return await electron.sync.linkedin.sendMessage(conversationId, text);
     },
     [electron]
   );
@@ -345,29 +301,22 @@ export function useLinkedIn() {
   return {
     isLoggedIn,
     isLoading,
-    syncProgress,
     login,
-    startSync,
-    stopSync,
-    scrape,
+    logout,
+    sendMessage,
   };
 }
 
 /**
- * Hook to manage Slack native integration - Multi-workspace support
+ * Hook to manage Slack connection (login/status/disconnect only, sync handled by unified sync)
  */
 export function useSlack() {
   const [workspaces, setWorkspaces] = useState<SlackWorkspaceInfo[]>([]);
-  const [syncProgress, setSyncProgress] = useState<SlackSyncProgress | null>(
-    null
-  );
   const [isLoading, setIsLoading] = useState(true);
   const electron = useElectron();
 
-  // Derived state
   const isConnected = workspaces.length > 0;
 
-  // Refresh workspaces list
   const refreshWorkspaces = useCallback(async () => {
     const result = await electron.sync.slack.listWorkspaces();
     setWorkspaces(result.workspaces);
@@ -376,55 +325,21 @@ export function useSlack() {
 
   useEffect(() => {
     // Check initial status and load workspaces
-    electron.sync.slack.status().then((result) => {
-      setWorkspaces(result.workspaces ?? []);
-      setIsLoading(false);
-
-      if (result.isConnected) {
-        electron.sync.slack.messagingStatus().then((status) => {
-          if (status.syncProgress) {
-            setSyncProgress(status.syncProgress);
-          }
-        }).catch((err) => {
-          console.error('[useSlack] Failed to get messaging status:', err);
-        });
-      }
-    }).catch((err) => {
-      console.error('[useSlack] Failed to check Slack status:', err);
-      setIsLoading(false);
-    });
-
-    // Subscribe to messaging sync progress
-    const unsubProgress = electron.sync.slack.onProgress((progress) => {
-      setSyncProgress(progress);
-      // Update workspace sync progress
-      if (progress.teamId) {
-        setWorkspaces((prev) =>
-          prev.map((ws) =>
-            ws.teamId === progress.teamId
-              ? { ...ws, syncProgress: progress }
-              : ws
-          )
-        );
-      }
-    });
-
-    // Subscribe to auth invalid
-    const unsubAuth = electron.sync.slack.onAuthInvalid(() => {
-      setWorkspaces([]);
-      setSyncProgress(null);
-    });
-
-    return () => {
-      unsubProgress();
-      unsubAuth();
-    };
+    electron.sync.slack
+      .status()
+      .then((result) => {
+        setWorkspaces(result.workspaces ?? []);
+        setIsLoading(false);
+      })
+      .catch((err) => {
+        console.error("[useSlack] Failed to check Slack status:", err);
+        setIsLoading(false);
+      });
   }, [electron]);
 
   const login = useCallback(async () => {
     const result = await electron.sync.slack.login();
     if (result.success) {
-      // Refresh workspaces to get complete data including userId
       await refreshWorkspaces();
     }
     return result;
@@ -435,29 +350,12 @@ export function useSlack() {
       const result = await electron.sync.slack.disconnect(teamId);
       if (result.success) {
         if (teamId) {
-          // Remove specific workspace
           setWorkspaces((prev) => prev.filter((ws) => ws.teamId !== teamId));
         } else {
-          // Remove all workspaces
           setWorkspaces([]);
         }
-        setSyncProgress(null);
       }
       return result;
-    },
-    [electron]
-  );
-
-  const startSync = useCallback(
-    async (teamId?: string) => {
-      return await electron.sync.slack.start(teamId);
-    },
-    [electron]
-  );
-
-  const stopSync = useCallback(
-    async (teamId?: string) => {
-      return await electron.sync.slack.stop(teamId);
     },
     [electron]
   );
@@ -466,11 +364,46 @@ export function useSlack() {
     isConnected,
     workspaces,
     isLoading,
-    syncProgress,
     login,
     disconnect,
-    startSync,
-    stopSync,
     refreshWorkspaces,
+  };
+}
+
+// ============================================================================
+// Deprecated Hooks (for backwards compatibility)
+// ============================================================================
+
+/**
+ * @deprecated Use useUnifiedSync instead
+ */
+export function useSyncProgress() {
+  const { progress, runNow } = useUnifiedSync();
+  return {
+    progress: {
+      status: progress.status,
+      totalMessagesSynced: progress.platforms.imessage?.messages ?? 0,
+      lastSyncAt: progress.lastSyncAt,
+    },
+    forceSync: runNow,
+  };
+}
+
+/**
+ * @deprecated Use useUnifiedSync instead
+ */
+export function useIMessageSync() {
+  const { progress, runNow } = useUnifiedSync();
+  return {
+    progress: {
+      status: progress.status,
+      totalMessagesSynced: progress.platforms.imessage?.messages ?? 0,
+      lastSyncAt: progress.lastSyncAt,
+    },
+    runNow,
+    reset: async () => {
+      console.warn("reset() is deprecated - use unified sync instead");
+    },
+    forceFullSync: runNow,
   };
 }

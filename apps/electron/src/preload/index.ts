@@ -33,86 +33,36 @@ contextBridge.exposeInMainWorld('electron', {
     // Unified Sync (runs all platforms)
     // ============================================================================
     runAll: (): Promise<unknown> => ipcRenderer.invoke('sync:runAll'),
-
-    // ============================================================================
-    // iMessage Sync
-    // ============================================================================
-    imessage: {
-      getProgress: (): Promise<unknown> => ipcRenderer.invoke('sync:imessage:getProgress'),
-      runNow: (): Promise<unknown> => ipcRenderer.invoke('sync:imessage:runNow'),
-      reset: (): Promise<unknown> => ipcRenderer.invoke('sync:imessage:reset'),
-      forceFullSync: (): Promise<unknown> => ipcRenderer.invoke('sync:imessage:forceFullSync'),
-      onProgress: (callback: (progress: unknown) => void) => {
-        const handler = (_event: IpcRendererEvent, progress: unknown) => callback(progress)
-        ipcRenderer.on('sync:imessage:progress', handler)
-        return () => ipcRenderer.removeListener('sync:imessage:progress', handler)
-      },
+    runNow: (): Promise<unknown> => ipcRenderer.invoke('sync:runNow'),
+    getProgress: (): Promise<unknown> => ipcRenderer.invoke('sync:getProgress'),
+    onProgress: (callback: (progress: unknown) => void) => {
+      const handler = (_event: IpcRendererEvent, progress: unknown) => callback(progress)
+      ipcRenderer.on('sync:progress', handler)
+      return () => ipcRenderer.removeListener('sync:progress', handler)
     },
 
     // ============================================================================
-    // LinkedIn Sync
+    // LinkedIn (Login/Status/SendMessage only)
     // ============================================================================
     linkedin: {
-      // Connection status
       status: (): Promise<unknown> => ipcRenderer.invoke('sync:linkedin:status'),
       login: (): Promise<unknown> => ipcRenderer.invoke('sync:linkedin:login'),
-      scrape: (options?: { maxConnections?: number }): Promise<unknown> =>
-        ipcRenderer.invoke('sync:linkedin:scrape', options),
-
-      // Messaging sync
-      messagingStatus: (): Promise<unknown> => ipcRenderer.invoke('sync:linkedin:messagingStatus'),
-      start: (): Promise<unknown> => ipcRenderer.invoke('sync:linkedin:start'),
-      stop: (): Promise<unknown> => ipcRenderer.invoke('sync:linkedin:stop'),
+      logout: (): Promise<unknown> => ipcRenderer.invoke('sync:linkedin:logout'),
       sendMessage: (conversationId: string, text: string): Promise<unknown> =>
         ipcRenderer.invoke('sync:linkedin:sendMessage', conversationId, text),
       getProgress: (): Promise<unknown> => ipcRenderer.invoke('sync:linkedin:getProgress'),
-
-      // Progress listeners
-      onProgress: (callback: (progress: unknown) => void) => {
-        const handler = (_event: IpcRendererEvent, progress: unknown) => callback(progress)
-        ipcRenderer.on('sync:linkedin:progress', handler)
-        return () => ipcRenderer.removeListener('sync:linkedin:progress', handler)
-      },
-      onScrapeProgress: (callback: (progress: unknown) => void) => {
-        const handler = (_event: IpcRendererEvent, progress: unknown) => callback(progress)
-        ipcRenderer.on('sync:linkedin:scrapeProgress', handler)
-        return () => ipcRenderer.removeListener('sync:linkedin:scrapeProgress', handler)
-      },
-      onAuthInvalid: (callback: () => void) => {
-        const handler = () => callback()
-        ipcRenderer.on('sync:linkedin:authInvalid', handler)
-        return () => ipcRenderer.removeListener('sync:linkedin:authInvalid', handler)
-      },
     },
 
     // ============================================================================
-    // Slack Sync
+    // Slack (Login/Status/Disconnect only)
     // ============================================================================
     slack: {
-      // Connection status
       status: (): Promise<unknown> => ipcRenderer.invoke('sync:slack:status'),
       login: (): Promise<unknown> => ipcRenderer.invoke('sync:slack:login'),
       disconnect: (teamId?: string): Promise<unknown> =>
         ipcRenderer.invoke('sync:slack:disconnect', teamId),
       listWorkspaces: (): Promise<unknown> => ipcRenderer.invoke('sync:slack:listWorkspaces'),
-
-      // Messaging sync
-      messagingStatus: (): Promise<unknown> => ipcRenderer.invoke('sync:slack:messagingStatus'),
-      start: (teamId?: string): Promise<unknown> => ipcRenderer.invoke('sync:slack:start', teamId),
-      stop: (teamId?: string): Promise<unknown> => ipcRenderer.invoke('sync:slack:stop', teamId),
       getProgress: (): Promise<unknown> => ipcRenderer.invoke('sync:slack:getProgress'),
-
-      // Progress listeners
-      onProgress: (callback: (progress: unknown) => void) => {
-        const handler = (_event: IpcRendererEvent, progress: unknown) => callback(progress)
-        ipcRenderer.on('sync:slack:progress', handler)
-        return () => ipcRenderer.removeListener('sync:slack:progress', handler)
-      },
-      onAuthInvalid: (callback: () => void) => {
-        const handler = () => callback()
-        ipcRenderer.on('sync:slack:authInvalid', handler)
-        return () => ipcRenderer.removeListener('sync:slack:authInvalid', handler)
-      },
     },
   },
 })

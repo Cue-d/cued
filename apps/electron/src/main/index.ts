@@ -16,15 +16,15 @@ import {
   signOut,
   setOnTokenRefreshed,
 } from "./auth";
-import { getIMessageSyncManager, type SyncProgress } from "./platforms/imessage";
-import { getContactsWatcher, syncContactsToConvex } from "./platforms/contacts";
+import { getIMessageSyncManager } from "./platforms/imessage";
+import { getContactsWatcher } from "./platforms/contacts";
 import { getHeartbeatManager } from "./sync/presence";
 import { setupAllSyncIpcHandlers, cleanupSyncManagers, getLinkedInScraper } from "./ipc/sync";
-import { getLinkedInSyncManager } from "./platforms/linkedin";
 import { getMessageQueueProcessor } from "./queue/message-queue-processor";
 import { getReactiveConvexClient } from "./convex-client";
-import { getSlackSyncManager, getAllSlackCredentials } from "./platforms/slack";
-import { getSyncCoordinator } from "./sync/coordinator";
+import { getSyncEngine } from "./sync/engine";
+import { createAllSyncFunctions } from "./sync/sync-functions";
+import { getIMessageWatcher } from "./sync/triggers/fsevents";
 import { getTrayManager, type TrayStatus } from "./tray";
 import { getPowerManager } from "./power";
 import { getSettingsManager, SettingsManager } from "./settings";
@@ -159,9 +159,9 @@ function setupAuthIpcHandlers(): void {
             }
           }
 
-          // Start sync (uses centralized auth from auth-manager)
-          const syncManager = getIMessageSyncManager();
-          syncManager.start();
+          // Trigger sync via XState engine (engine is already started in startBackgroundSync)
+          const engine = getSyncEngine();
+          engine.syncNow();
         },
         onAuthError: (error) => {
           // Notify renderer of auth failure
@@ -187,7 +187,9 @@ function setupAuthIpcHandlers(): void {
   // Sign out
   ipcMain.handle("auth:signOut", () => {
     signOut();
-    getIMessageSyncManager().stop();
+    // Stop the XState sync engine
+    const engine = getSyncEngine();
+    engine.stop();
     mainWindow?.webContents.send("auth:stateChanged", {
       isAuthenticated: false,
       user: null,
@@ -213,79 +215,42 @@ async function startBackgroundSync(): Promise<void> {
     const powerManager = getPowerManager();
     const settingsManager = getSettingsManager();
 
-    // Initialize SyncCoordinator FIRST - this manages all sync operations
-    // Token refresh is handled by auth-manager which checks actual expiry
-    const coordinator = getSyncCoordinator({
-      getAuthToken: getValidAccessToken,
-      onAuthInvalid: () => {
-        console.log("[Main] Auth invalid from coordinator, notifying renderer");
-        mainWindow?.webContents.send("auth:stateChanged", {
-          isAuthenticated: false,
-          user: null,
-        });
-      },
+    // Initialize the XState sync engine
+    const engine = getSyncEngine({
+      enableInspector: electronEnv.NODE_ENV === "development",
     });
-    const syncManager = getIMessageSyncManager({
-      onProgress: (progress: SyncProgress) => {
-        // Update tray status based on sync progress
-        let status: TrayStatus = "idle";
-        if (progress.status === "syncing") {
-          status = "syncing";
-          // Prevent sleep during sync if enabled in settings
-          if (settingsManager.getPreventSleepWhileSyncing()) {
-            powerManager.startPreventingSleep();
-          }
-        } else if (progress.status === "error") {
-          status = "error";
-          // Stop preventing sleep on error
-          powerManager.stopPreventingSleep();
-        } else {
-          // Stop preventing sleep when idle
-          powerManager.stopPreventingSleep();
+    engine.initialize();
+
+    // Set up progress callback for tray and renderer
+    engine.setProgressCallback((progress) => {
+      // Update tray status based on sync progress
+      let status: TrayStatus = "idle";
+      if (progress.status === "syncing") {
+        status = "syncing";
+        // Prevent sleep during sync if enabled in settings
+        if (settingsManager.getPreventSleepWhileSyncing()) {
+          powerManager.startPreventingSleep();
         }
+      } else if (progress.status === "error") {
+        status = "error";
+        powerManager.stopPreventingSleep();
+      } else {
+        powerManager.stopPreventingSleep();
+      }
 
-        trayManager.updateStatus(
-          status,
-          progress.lastSyncAt ? new Date(progress.lastSyncAt) : undefined
-        );
+      trayManager.updateStatus(
+        status,
+        progress.lastSyncAt ? new Date(progress.lastSyncAt) : undefined
+      );
 
-        // Notify renderer of sync progress
-        mainWindow?.webContents.send("sync:imessage:progress", progress);
-      },
-      // Wire contacts sync for recovery flows - goes through coordinator
-      syncContacts: async () => {
-        let contactsCount = 0;
-        await coordinator.scheduleContactsSync(async () => {
-          const result = await syncContactsToConvex(() => coordinator.getValidToken(), true);
-          mainWindow?.webContents.send("contacts:synced", result);
-          contactsCount = result.contactsCount;
-        });
-        return { contactsCount };
-      },
+      // Notify renderer of unified sync progress
+      mainWindow?.webContents.send("sync:progress", progress);
     });
 
-    // Run contacts sync BEFORE iMessage sync to ensure contactHandles exist,
-    // preventing duplicate handles from race conditions.
-    console.log("[Main] Running initial contacts sync...");
-    try {
-      await coordinator.scheduleContactsSync(async () => {
-        const result = await syncContactsToConvex(() => coordinator.getValidToken(), true);
-        console.log(`[Main] Initial contacts sync complete: ${result.contactsCount} contacts`);
-        mainWindow?.webContents.send("contacts:synced", result);
-      });
-    } catch (err) {
-      console.warn("[Main] Initial contacts sync failed (continuing anyway):", err);
-    }
-
-    // Now start iMessage sync - contactHandles already exist for known contacts
-    syncManager.start();
-    console.log("[Main] Background sync started");
-
-    // Contacts watcher handles incremental changes going forward
-    startContactsWatcher();
+    // Initialize iMessage sync manager (needed for runSync calls)
+    getIMessageSyncManager();
 
     // Configure and start the unified message queue processor
-    // This replaces the old iMessage sender with a multi-platform queue
     const reactiveClient = getReactiveConvexClient();
     reactiveClient.setTokenProvider(getValidAccessToken);
     reactiveClient.setAuthInvalidCallback(() => {
@@ -306,11 +271,30 @@ async function startBackgroundSync(): Promise<void> {
     heartbeatManager.start();
     console.log("[Main] Presence heartbeat started");
 
-    // Auto-start LinkedIn messaging sync if already logged in
-    startLinkedInMessagingSync();
+    // Start contacts watcher for incremental changes
+    startContactsWatcher();
 
-    // Auto-start Slack messaging sync if credentials are stored
-    startSlackMessagingSync();
+    // Register all sync functions with the engine
+    const registrations = await createAllSyncFunctions({
+      getAuthToken: getValidAccessToken,
+      linkedInScraper: getLinkedInScraper(),
+    });
+
+    for (const reg of registrations) {
+      engine.registerSync(reg.syncType, reg.syncFn, reg.workspaceId);
+    }
+
+    // Start iMessage file watcher for event-driven sync
+    const imessageWatcher = getIMessageWatcher();
+    imessageWatcher.on("change", () => {
+      console.log("[Main] iMessage DB changed, triggering sync");
+      engine.syncNow();
+    });
+    imessageWatcher.start();
+
+    // Start the sync engine (runs initial sync and starts timers)
+    engine.start();
+    console.log("[Main] XState sync engine started");
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : String(err);
     console.error("[Main] Failed to start background sync:", message);
@@ -319,106 +303,17 @@ async function startBackgroundSync(): Promise<void> {
 }
 
 /**
- * Auto-start LinkedIn messaging sync if user is already logged in.
- * Uses singleton scraper to share browser lock with IPC handlers.
- */
-async function startLinkedInMessagingSync(): Promise<void> {
-  try {
-    const scraper = getLinkedInScraper();
-    const isLoggedIn = await scraper.checkLoginStatus();
-
-    if (!isLoggedIn) {
-      console.log("[Main] LinkedIn not logged in, skipping auto-start");
-      return;
-    }
-
-    console.log("[Main] LinkedIn logged in, starting messaging sync...");
-
-    // Get API client from scraper
-    const apiClient = await scraper.getApiClient();
-
-    // Configure sync manager (uses centralized auth from auth-manager)
-    const syncManager = getLinkedInSyncManager();
-    syncManager.setClient(apiClient);
-
-    // Set up progress callback to notify renderer
-    syncManager.setProgressCallback((progress) => {
-      mainWindow?.webContents.send("sync:linkedin:progress", progress);
-    });
-
-    // Start sync (will use realtime by default)
-    await syncManager.start();
-
-    console.log("[Main] LinkedIn messaging sync auto-started");
-  } catch (err: unknown) {
-    const message = err instanceof Error ? err.message : String(err);
-    console.log("[Main] LinkedIn auto-start failed (non-fatal):", message);
-    // Non-fatal - user can manually start later
-  }
-}
-
-/**
- * Auto-start Slack messaging sync if user has stored credentials.
- */
-async function startSlackMessagingSync(): Promise<void> {
-  try {
-    const allCredentials = getAllSlackCredentials();
-
-    if (allCredentials.length === 0) {
-      console.log("[Main] No Slack credentials found, skipping auto-start");
-      return;
-    }
-
-    console.log(`[Main] Found ${allCredentials.length} Slack workspace(s), starting sync...`);
-
-    for (const creds of allCredentials) {
-      const manager = getSlackSyncManager({ teamId: creds.teamId });
-
-      // Initialize the manager (loads credentials, creates client)
-      const initialized = await manager.initialize();
-      if (!initialized) {
-        console.log(`[Main] Slack manager for ${creds.teamName} failed to initialize`);
-        continue;
-      }
-
-      // Set up progress callback to notify renderer (uses centralized auth from auth-manager)
-      manager.setProgressCallback((progress) => {
-        mainWindow?.webContents.send("sync:slack:progress", {
-          ...progress,
-          teamId: manager.getTeamId(),
-        });
-      });
-
-      // Start sync
-      await manager.start();
-      console.log(`[Main] Slack messaging sync auto-started for ${creds.teamName}`);
-    }
-  } catch (err: unknown) {
-    const message = err instanceof Error ? err.message : String(err);
-    console.log("[Main] Slack auto-start failed (non-fatal):", message);
-    // Non-fatal - user can manually start later
-  }
-}
-
-/**
- * Start watching for contacts changes and sync when detected.
- * Uses SyncCoordinator to serialize with iMessage sync.
+ * Start watching for contacts changes and trigger sync when detected.
  */
 function startContactsWatcher(): void {
   const watcher = getContactsWatcher();
-  const coordinator = getSyncCoordinator();
 
-  watcher.on("change", async () => {
-    console.log("[Main] Contacts changed, scheduling sync via coordinator...");
+  watcher.on("change", () => {
+    console.log("[Main] Contacts changed, triggering sync...");
     try {
-      // Schedule through coordinator to prevent race with iMessage sync
-      await coordinator.scheduleContactsSync(async () => {
-        const result = await syncContactsToConvex(() => coordinator.getValidToken(), true);
-        console.log(
-          `[Main] Contacts sync complete: ${result.contactsCount} contacts in ${Math.round(result.elapsed)}ms`
-        );
-        mainWindow?.webContents.send("contacts:synced", result);
-      });
+      // Trigger immediate sync via XState engine
+      const engine = getSyncEngine();
+      engine.syncNow();
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       console.error("[Main] Contacts sync error:", message);
@@ -461,9 +356,9 @@ app.whenReady().then(() => {
         app.dock?.show();
       }
     },
-    onSyncNow: async () => {
-      const manager = getIMessageSyncManager();
-      await manager.runSync();
+    onSyncNow: () => {
+      const engine = getSyncEngine();
+      engine.syncNow();
     },
     onPreferences: () => {
       // Show window and navigate to preferences
@@ -487,7 +382,8 @@ app.whenReady().then(() => {
     onResume: () => {
       // Trigger immediate sync on system resume
       console.log("[Main] System resumed, triggering sync");
-      getIMessageSyncManager().runSync();
+      const engine = getSyncEngine();
+      engine.syncNow();
     },
   });
   powerManager.setMainWindow(mainWindow);
@@ -548,7 +444,14 @@ app.on("before-quit", () => {
 });
 
 app.on("will-quit", async () => {
-  // Gracefully stop contacts watcher (sync managers cleaned up in cleanupSyncManagers)
+  // Stop the XState sync engine first
+  const engine = getSyncEngine();
+  engine.stop();
+
+  // Stop iMessage watcher
+  getIMessageWatcher().stop();
+
+  // Gracefully stop contacts watcher
   getContactsWatcher().stop();
 
   // Stop services that may not be initialized (ignore errors)
