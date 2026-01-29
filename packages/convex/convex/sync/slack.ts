@@ -17,7 +17,7 @@ import {
   SEVEN_DAYS_MS,
   logSyncError,
 } from "./shared";
-import { batchFetchConversations, batchFetchMessages } from "./batch-utils";
+import { batchFetchConversations, batchFetchMessages } from "./batchUtils";
 import { isSlackBot } from "./filters";
 
 // ============================================================================

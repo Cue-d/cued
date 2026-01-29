@@ -586,11 +586,12 @@ export const autoMergeContacts = internalMutation({
       }
     }
 
-    // Update messages
+    // Update messages (use by_sender_contact index for efficiency)
     const messages = await ctx.db
       .query("messages")
-      .withIndex("by_user", (q) => q.eq("userId", primary.userId))
-      .filter((q) => q.eq(q.field("senderContactId"), args.secondaryContactId))
+      .withIndex("by_sender_contact", (q) =>
+        q.eq("senderContactId", args.secondaryContactId)
+      )
       .collect();
 
     for (const msg of messages) {

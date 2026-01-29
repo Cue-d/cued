@@ -3,8 +3,8 @@
  * Handles sending messages via the message queue.
  */
 
-import type { Id } from "../../_generated/dataModel";
-import { internal } from "../../_generated/api";
+import type { Id } from "../_generated/dataModel";
+import { internal } from "../_generated/api";
 import type {
   ActionSwipeHandler,
   SwipeHandlerContext,

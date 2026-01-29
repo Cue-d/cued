@@ -11,6 +11,7 @@ import {
   platformValidator,
 } from "./schema";
 import type { EnrichedAction } from "@prm/shared";
+import { executeSwipeHandler } from "./swipeHandlers/registry";
 
 /**
  * Fetch all actionable items: pending actions + snoozed actions that are due.
@@ -539,8 +540,6 @@ export const swipeAction = mutation({
     responseText: v.optional(v.string()), // Optional response text for direction='right'
   },
   handler: async (ctx, args) => {
-    const { executeSwipeHandler } = await import("./actions/handlers/registry");
-
     const user = await requireAuthenticatedUser(ctx);
     const now = Date.now();
 

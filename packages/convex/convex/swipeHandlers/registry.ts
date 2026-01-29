@@ -11,9 +11,9 @@ import type {
 } from "./types";
 import { defaultSnoozeHandler } from "./types";
 import { respondHandler, followUpHandler, sendMessageHandler } from "./message";
-import { resolveContactHandler } from "./resolve-contact";
-import { newConnectionHandler } from "./new-connection";
-import { eodContactHandler } from "./eod-contact";
+import { resolveContactHandler } from "./resolveContact";
+import { newConnectionHandler } from "./newConnection";
+import { eodContactHandler } from "./eodContact";
 
 /**
  * Registry mapping action types to their handlers.

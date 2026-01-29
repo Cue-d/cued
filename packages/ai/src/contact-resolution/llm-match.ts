@@ -1,13 +1,14 @@
 /**
  * LLM-based fuzzy match decision for contact resolution.
  * Uses gpt-5-mini to analyze contact metadata and decide if contacts are the same person.
- * Triggered for Tier 3 fuzzy matches (confidence 0.60-0.94).
+ * Triggered for Tier 3 fuzzy matches (see MATCH_TIERS in thresholds.ts).
  */
 
 import { generateObject } from "ai";
 import { z } from "zod";
 import { openai, FAST_MODEL } from "../openai";
 import { withRetry } from "../utils";
+import { LLM } from "./thresholds";
 
 /** Input for LLM fuzzy match decision */
 export interface ContactMatchInput {
@@ -21,7 +22,7 @@ export interface ContactMatchInput {
     company?: string;
     handles: string[];
   };
-  /** Jaro-Winkler fuzzy match score (0.60-0.94) */
+  /** Jaro-Winkler fuzzy match score (TIER_3_LLM_REVIEW <= score < TIER_1_DETERMINISTIC) */
   fuzzyScore: number;
 }
 
@@ -41,9 +42,6 @@ export const FuzzyMatchDecisionSchema = z.object({
 });
 
 export type FuzzyMatchDecision = z.infer<typeof FuzzyMatchDecisionSchema>;
-
-/** LLM confidence threshold to create action card */
-export const LLM_CONFIDENCE_THRESHOLD = 0.70;
 
 /** System prompt for contact matching decision */
 const SYSTEM_PROMPT = `You are analyzing two contact records to determine if they refer to the same person.
@@ -109,7 +107,7 @@ export async function decideFuzzyMatch(
  */
 export async function decideFuzzyMatchWithRetry(
   input: ContactMatchInput,
-  maxRetries = 2
+  maxRetries = LLM.MAX_RETRIES
 ): Promise<FuzzyMatchDecision> {
   return withRetry(() => decideFuzzyMatch(input), {
     maxRetries,

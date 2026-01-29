@@ -174,7 +174,7 @@ Web app: http://localhost:3000
 **Sync code patterns:**
 | Pattern | Location |
 |---------|----------|
-| `batchFetchConversations`, `batchFetchMessages` | `packages/convex/convex/sync/batch-utils.ts` |
+| `batchFetchConversations`, `batchFetchMessages` | `packages/convex/convex/sync/batchUtils.ts` |
 | `getOrCreateContact`, `batchResolveHandles` | `packages/convex/convex/sync/shared.ts` |
 | Cursor management | `packages/convex/convex/sync/shared.ts` |
 

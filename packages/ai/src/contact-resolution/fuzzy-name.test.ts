@@ -5,8 +5,8 @@ import {
   nameSimilarity,
   namesMatch,
   getNameMatchResult,
-  NAME_MATCH_THRESHOLDS,
 } from "./fuzzy-name";
+import { NAME_MATCH_THRESHOLDS } from "./thresholds";
 
 describe("normalizeName", () => {
   it("lowercases and trims", () => {
@@ -73,7 +73,7 @@ describe("nameSimilarity", () => {
 
   it("returns high score for similar names", () => {
     const score = nameSimilarity("John Smith", "Jon Smith");
-    expect(score).toBeGreaterThan(0.85);
+    expect(score).toBeGreaterThanOrEqual(0.9);
   });
 
   it("returns low score for different names", () => {
@@ -87,7 +87,8 @@ describe("namesMatch", () => {
     expect(namesMatch("John Smith", "John Smith")).toBe(true);
   });
 
-  it("matches with default threshold (0.85)", () => {
+  it("matches with default threshold (0.9)", () => {
+    // Jon Smith vs John Smith scores ~0.93, above 0.9 threshold
     expect(namesMatch("John Smith", "Jon Smith")).toBe(true);
   });
 
@@ -113,7 +114,7 @@ describe("getNameMatchResult", () => {
 describe("NAME_MATCH_THRESHOLDS", () => {
   it("has correct threshold values", () => {
     expect(NAME_MATCH_THRESHOLDS.AUTO_MERGE).toBe(0.95);
-    expect(NAME_MATCH_THRESHOLDS.SUGGEST_MERGE).toBe(0.85);
-    expect(NAME_MATCH_THRESHOLDS.MINIMUM).toBe(0.75);
+    expect(NAME_MATCH_THRESHOLDS.SUGGEST_MERGE).toBe(0.9);
+    expect(NAME_MATCH_THRESHOLDS.MINIMUM).toBe(0.6);
   });
 });

@@ -16,7 +16,7 @@ import {
   logSyncError,
   shouldUpdateDisplayName,
 } from "./shared";
-import { batchFetchConversations, batchFetchMessages } from "./batch-utils";
+import { batchFetchConversations, batchFetchMessages } from "./batchUtils";
 
 // ============================================================================
 // Validators

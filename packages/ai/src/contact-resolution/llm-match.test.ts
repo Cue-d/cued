@@ -8,11 +8,8 @@ vi.mock("ai", () => ({
 
 // Import after mocking
 import { generateObject } from "ai";
-import {
-  decideFuzzyMatch,
-  decideFuzzyMatchWithRetry,
-  LLM_CONFIDENCE_THRESHOLD,
-} from "./llm-match";
+import { decideFuzzyMatch, decideFuzzyMatchWithRetry } from "./llm-match";
+import { LLM_CONFIDENCE_THRESHOLD } from "./thresholds";
 
 const mockedGenerateObject = vi.mocked(generateObject);
 

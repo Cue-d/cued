@@ -18,7 +18,7 @@ import {
   SEVEN_DAYS_MS,
   logSyncError,
 } from "./shared";
-import { batchFetchConversations, batchFetchMessages } from "./batch-utils";
+import { batchFetchConversations, batchFetchMessages } from "./batchUtils";
 
 // ============================================================================
 // Validators
@@ -42,6 +42,8 @@ const messageInput = v.object({
   readAt: v.union(v.number(), v.null()),
   hasAttachments: v.boolean(),
   sender: v.union(handleInput, v.null()),
+  // Allow attachments field from Electron but don't store it (not in schema)
+  attachments: v.optional(v.array(v.any())),
 });
 
 export const syncBatchInput = v.object({

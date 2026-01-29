@@ -3,8 +3,8 @@
  * Each action type implements these interfaces for backend processing.
  */
 
-import type { Doc, Id } from "../../_generated/dataModel";
-import type { MutationCtx } from "../../_generated/server";
+import type { Doc, Id } from "../_generated/dataModel";
+import type { MutationCtx } from "../_generated/server";
 
 /**
  * Context passed to all swipe handlers.

@@ -3,7 +3,7 @@
  * Handles merging duplicate contacts.
  */
 
-import { internal } from "../../_generated/api";
+import { internal } from "../_generated/api";
 import type {
   ActionSwipeHandler,
   SwipeHandlerContext,

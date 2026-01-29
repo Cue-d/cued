@@ -3,6 +3,8 @@
  * Task 6.0b: Match contacts by similar names using Jaro-Winkler + nicknames.
  */
 
+import { CONFIDENCE, JARO_WINKLER } from "./thresholds";
+
 /**
  * Common nickname mappings.
  * Maps nicknames to their canonical full names.
@@ -260,9 +262,8 @@ export function jaroWinklerSimilarity(s1: string, s2: string): number {
     }
   }
 
-  // Winkler modification (scaling factor p = 0.1)
-  const p = 0.1;
-  return jaro + prefixLength * p * (1 - jaro);
+  // Winkler modification
+  return jaro + prefixLength * JARO_WINKLER.SCALING_FACTOR * (1 - jaro);
 }
 
 /**
@@ -286,7 +287,8 @@ export function nameSimilarity(name1: string, name2: string): number {
   // Handle "F. Last" or "F Last" format (initial + last name) FIRST
   // This prevents false negatives like "J. Smith" vs "John Smith"
   // Check for single letter or single letter with period
-  const isInitial = (s: string) => s.length === 1 || (s.length === 2 && s.endsWith("."));
+  const isInitial = (s: string) =>
+    s.length === 1 || (s.length === 2 && s.endsWith("."));
   const getInitialLetter = (s: string) => s.replace(".", "")[0];
 
   const hasInitial =
@@ -294,7 +296,9 @@ export function nameSimilarity(name1: string, name2: string): number {
     (parts2.length >= 2 && isInitial(parts2[0]));
 
   if (hasInitial) {
-    const [short, long] = isInitial(parts1[0]) ? [parts1, parts2] : [parts2, parts1];
+    const [short, long] = isInitial(parts1[0])
+      ? [parts1, parts2]
+      : [parts2, parts1];
     if (short.length >= 2 && long.length >= 1) {
       const initial = getInitialLetter(short[0]);
       const shortLast = short[short.length - 1];
@@ -305,7 +309,7 @@ export function nameSimilarity(name1: string, name2: string): number {
       if (longFirst.startsWith(initial)) {
         const lastMatchScore = jaroWinklerSimilarity(shortLast, longLast);
         // If last names match well, this is likely the same person
-        if (lastMatchScore >= 0.8) {
+        if (lastMatchScore >= CONFIDENCE.MEDIUM) {
           return 0.3 + lastMatchScore * 0.7; // Returns ~0.86-1.0 for good matches
         }
       }
@@ -323,25 +327,22 @@ export function nameSimilarity(name1: string, name2: string): number {
 
   // CRITICAL: Detect "same last name, completely different first name" pattern
   // This catches false positives like "Brandon Zhu" vs "Elise Zhu"
-  // Use a higher threshold (0.75) to ensure first names are genuinely different
-  const lastNamesMatch = lastScore >= 0.90;
-  const firstNamesVeryDifferent = firstScore < 0.75;
+  const lastNamesMatch = lastScore >= CONFIDENCE.HIGH;
+  const firstNamesVeryDifferent = firstScore <= CONFIDENCE.LOW;
 
   if (lastNamesMatch && firstNamesVeryDifferent) {
     // Same last name but different first name = different person
-    // Cap score well below MINIMUM threshold
-    return Math.min(0.40, firstScore);
+    return Math.min(CONFIDENCE.REJECTION_CAP, firstScore);
   }
 
   // Same pattern for first names matching but last names different
-  // This is less common but handles cases like "John Smith" vs "John Smythe"
-  // being incorrectly matched with "John Jones"
-  const firstNamesMatch = firstScore >= 0.90;
-  const lastNamesVeryDifferent = lastScore < 0.60;
+  // e.g., "John Smith" shouldn't match "John Jones"
+  const firstNamesMatch = firstScore >= CONFIDENCE.HIGH;
+  const lastNamesVeryDifferent = lastScore <= CONFIDENCE.LOW;
 
   if (firstNamesMatch && lastNamesVeryDifferent) {
     // Same first name, very different last name = likely different person
-    return Math.min(0.50, lastScore);
+    return Math.min(CONFIDENCE.REJECTION_CAP, lastScore);
   }
 
   // Strategy 1: Full name comparison
@@ -360,13 +361,13 @@ export function nameSimilarity(name1: string, name2: string): number {
  *
  * @param name1 First name
  * @param name2 Second name
- * @param threshold Minimum similarity score (default 0.85)
+ * @param threshold Minimum similarity score (default CONFIDENCE.MEDIUM)
  * @returns Whether names match above threshold
  */
 export function namesMatch(
   name1: string,
   name2: string,
-  threshold = 0.85
+  threshold: number = CONFIDENCE.MEDIUM,
 ): boolean {
   return nameSimilarity(name1, name2) >= threshold;
 }
@@ -384,26 +385,17 @@ export interface NameMatchResult {
 /**
  * Get detailed name match result.
  */
-export function getNameMatchResult(name1: string, name2: string): NameMatchResult {
+export function getNameMatchResult(
+  name1: string,
+  name2: string,
+): NameMatchResult {
   const confidence = nameSimilarity(name1, name2);
 
   return {
-    matches: confidence >= 0.85,
+    matches: confidence >= CONFIDENCE.MEDIUM,
     confidence,
     normalizedName1: getCanonicalParts(name1).join(" "),
     normalizedName2: getCanonicalParts(name2).join(" "),
   };
 }
 
-/**
- * Thresholds for name matching decisions.
- * These are intentionally high to avoid false positives.
- */
-export const NAME_MATCH_THRESHOLDS = {
-  /** Auto-merge threshold (very high confidence - both names nearly identical) */
-  AUTO_MERGE: 0.95,
-  /** Suggest merge threshold (high confidence, needs review) */
-  SUGGEST_MERGE: 0.85,
-  /** Minimum threshold to even consider a match */
-  MINIMUM: 0.75,
-};

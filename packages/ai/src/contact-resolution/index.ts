@@ -19,7 +19,6 @@ export {
   nameSimilarity,
   namesMatch,
   getNameMatchResult,
-  NAME_MATCH_THRESHOLDS,
   type NameMatchResult,
 } from "./fuzzy-name";
 
@@ -27,7 +26,14 @@ export {
   decideFuzzyMatch,
   decideFuzzyMatchWithRetry,
   FuzzyMatchDecisionSchema,
-  LLM_CONFIDENCE_THRESHOLD,
   type ContactMatchInput,
   type FuzzyMatchDecision,
 } from "./llm-match";
+
+export {
+  CONFIDENCE,
+  JARO_WINKLER,
+  LLM,
+  NAME_MATCH_THRESHOLDS,
+  LLM_CONFIDENCE_THRESHOLD,
+} from "./thresholds";
