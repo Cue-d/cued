@@ -32,7 +32,10 @@ import {
 import { nanoid } from "nanoid";
 import { cn } from "../../lib/utils";
 import { MentionPicker } from "../assistant/mention-picker";
-import { formatMentionDisplay } from "../assistant/mention-types";
+import {
+  formatMentionDisplay,
+  matchMentionAtStart,
+} from "../assistant/mention-types";
 import { useMention } from "../assistant/use-mention";
 import { Button } from "../ui/button";
 import {
@@ -990,6 +993,15 @@ export const PromptInputTextarea = ({
         lastAtIndex === 0 || /\s/.test(charBeforeAt || "");
 
       if (!isValidTrigger) {
+        if (currentMention.active) currentMention.close();
+        return;
+      }
+
+      // Check if cursor is after an already-completed mention (not at its end while typing)
+      // Use > instead of >= so typing @Jo doesn't close picker (cursor at end of partial match)
+      const textFromAt = value.substring(lastAtIndex);
+      const completedMention = matchMentionAtStart(textFromAt);
+      if (completedMention && cursorPosition > lastAtIndex + completedMention.length) {
         if (currentMention.active) currentMention.close();
         return;
       }

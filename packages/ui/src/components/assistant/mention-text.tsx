@@ -78,13 +78,15 @@ export function MentionText({ text, className }: MentionTextProps) {
         }
 
         // Render mention as a styled span
+        // Uses currentColor with color-mix to work on both user (orange) and assistant (gray) bubbles
         return (
           <span
             key={index}
-            className={cn(
-              "inline-flex items-center rounded-md px-1.5 py-0.5 font-semibold",
-              "bg-primary/15 text-primary border border-primary/20"
-            )}
+            className="inline-flex items-center rounded-md border px-1.5 py-0.5 font-semibold"
+            style={{
+              backgroundColor: "color-mix(in srgb, currentColor 15%, transparent)",
+              borderColor: "color-mix(in srgb, currentColor 20%, transparent)",
+            }}
           >
             @{part.displayText}
           </span>

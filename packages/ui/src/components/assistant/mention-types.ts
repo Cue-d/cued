@@ -100,3 +100,15 @@ export function extractMentions(text: string): MentionedContact[] {
 
   return mentions
 }
+
+/**
+ * Find a completed mention at the start of text (anchored match).
+ * Returns the full match string if found, null otherwise.
+ * Uses non-global regex to avoid shared state issues with concurrent renders.
+ */
+export function matchMentionAtStart(text: string): string | null {
+  const match = text.match(
+    /^@([A-Z][A-Za-z]*(?:\s+[A-Z][A-Za-z]*)*(?:\s*\([^)]+\))?)(?=\s|$|[.,!?;:])/
+  )
+  return match ? match[0] : null
+}
