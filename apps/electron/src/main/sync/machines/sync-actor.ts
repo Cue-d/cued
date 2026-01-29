@@ -110,9 +110,11 @@ export const createSyncActorMachine = (input: SyncActorInput) => {
       recordError: assign(({ event }) => {
         if (!('error' in event)) {
           console.error('[SyncActor] recordError received event without error:', event)
-          return { lastError: 'Unknown error' }
+          return { lastError: 'Unknown error - no error object in event' }
         }
         const error = event.error
+        // Log the FULL error with stack trace for debugging
+        console.error('[SyncActor] Sync error:', error)
         const errorMessage =
           error instanceof Error ? error.message : String(error)
         return {

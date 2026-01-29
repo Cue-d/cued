@@ -367,8 +367,13 @@ export class SyncEngine {
   private reportProgress(snapshot: ReturnType<OrchestratorRef['getSnapshot']>): void {
     if (!this.progressCallback) return
 
-    const progress = this.getProgress()
-    this.progressCallback(progress)
+    try {
+      const progress = this.getProgress()
+      this.progressCallback(progress)
+    } catch (error) {
+      // Don't let callback errors crash the sync engine
+      console.error('[SyncEngine] Progress callback threw an error:', error)
+    }
   }
 
   // ============================================================================

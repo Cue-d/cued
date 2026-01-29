@@ -110,10 +110,9 @@ export function setupAllSyncIpcHandlers(mainWindow: BrowserWindow | null): void 
 function setupUnifiedSyncHandlers(mainWindow: BrowserWindow | null): void {
   const engine = getSyncEngine();
 
-  // Set up progress callback to notify renderer
-  engine.setProgressCallback((progress) => {
-    mainWindow?.webContents.send("sync:progress", progress);
-  });
+  // Note: Progress callback is set in index.ts startBackgroundSync() which handles
+  // both tray/power management and renderer notification. Don't set it here to avoid
+  // overwriting that callback.
 
   // Run all platform syncs
   ipcMain.handle("sync:runAll", async (): Promise<RunAllSyncsResult> => {
@@ -190,7 +189,12 @@ function setupLinkedInHandlers(mainWindow: BrowserWindow | null): void {
           const syncManager = getLinkedInSyncManager();
           syncManager.setClient(apiClient);
         } catch (e) {
-          console.warn("[Sync IPC] Could not set up LinkedIn sync manager:", e);
+          const setupError = e instanceof Error ? e.message : String(e);
+          console.error("[Sync IPC] LinkedIn login succeeded but sync setup failed:", e);
+          return {
+            isLoggedIn: false,
+            error: `Login succeeded but sync setup failed: ${setupError}`,
+          };
         }
       }
 
@@ -402,8 +406,9 @@ function setupSlackHandlers(_mainWindow: BrowserWindow | null): void {
         });
         return { workspaces };
       } catch (error) {
-        console.error("[Sync IPC] List workspaces failed:", error);
-        return { workspaces: [] };
+        const message = error instanceof Error ? error.message : String(error);
+        console.error("[Sync IPC] List workspaces failed:", message);
+        return { workspaces: [], error: message };
       }
     }
   );

@@ -86,13 +86,19 @@ export function createContactsSyncFn(options: SyncFunctionOptions): SyncFunction
       const result = await syncContactsToConvex(options.getAuthToken)
 
       if (result.errors.length > 0) {
-        console.warn('[ContactsSync] Errors:', result.errors.slice(0, 3))
+        console.error('[ContactsSync] Completed with errors:', {
+          errorCount: result.errors.length,
+          errors: result.errors,
+          partialSuccess: result.contactsCount + result.updatedCount,
+        })
       }
 
       return {
         success: result.errors.length === 0,
         contactsSynced: result.contactsCount + result.updatedCount,
-        error: result.errors.length > 0 ? result.errors[0] : undefined,
+        error: result.errors.length > 0
+          ? `${result.errors.length} error(s): ${result.errors.slice(0, 3).join('; ')}${result.errors.length > 3 ? '...' : ''}`
+          : undefined,
       }
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error)

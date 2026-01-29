@@ -454,19 +454,19 @@ app.on("will-quit", async () => {
   // Gracefully stop contacts watcher
   getContactsWatcher().stop();
 
-  // Stop services that may not be initialized (ignore errors)
-  const safeCleanup = async (fn: () => void | Promise<void>): Promise<void> => {
+  // Stop services that may not be initialized - log warnings but don't fail shutdown
+  const safeCleanup = async (fn: () => void | Promise<void>, name: string): Promise<void> => {
     try {
       await fn();
-    } catch {
-      // Service may not be initialized
+    } catch (error) {
+      console.warn(`[Main] Cleanup failed for ${name}:`, error instanceof Error ? error.message : error);
     }
   };
 
-  await safeCleanup(() => getMessageQueueProcessor().stop());
-  await safeCleanup(() => getReactiveConvexClient().close());
-  await safeCleanup(() => getHeartbeatManager().stop());
-  await safeCleanup(() => getTrayManager().destroy());
-  await safeCleanup(() => getPowerManager().destroy());
+  await safeCleanup(() => getMessageQueueProcessor().stop(), 'MessageQueueProcessor');
+  await safeCleanup(() => getReactiveConvexClient().close(), 'ReactiveConvexClient');
+  await safeCleanup(() => getHeartbeatManager().stop(), 'HeartbeatManager');
+  await safeCleanup(() => getTrayManager().destroy(), 'TrayManager');
+  await safeCleanup(() => getPowerManager().destroy(), 'PowerManager');
   await cleanupSyncManagers();
 });

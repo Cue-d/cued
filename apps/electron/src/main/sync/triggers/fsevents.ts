@@ -92,7 +92,10 @@ export class IMessageWatcher extends EventEmitter<FSEventsTriggerEvents> {
     }
 
     if (this.watcher) {
-      this.watcher.close()
+      // Close returns a Promise - handle it asynchronously
+      this.watcher.close().catch((err) => {
+        console.warn('[IMessageWatcher] Error closing watcher:', err)
+      })
       this.watcher = null
     }
 

@@ -9,7 +9,7 @@
  * contact resolution.
  */
 
-import { setup, assign, createActor, type ActorRefFrom, type AnyActorRef } from 'xstate'
+import { setup, assign, createActor, type ActorRefFrom } from 'xstate'
 import {
   createSyncActorMachine,
   type SyncActorInput,
@@ -130,18 +130,25 @@ export const orchestratorMachine = setup({
 
           // Subscribe to actor state changes to detect completion
           const subscription = actor.subscribe((snapshot) => {
-            const actorContext = snapshot.context as SyncActorContextExtended
-            if (actorContext.syncCycleComplete) {
-              const phase = SYNC_CONFIGS[config.syncType].phase
-              if (actorContext.lastSyncSuccess) {
-                self.send({ type: 'ACTOR_COMPLETED', actorId: key, phase })
-              } else {
-                self.send({
-                  type: 'ACTOR_ERROR',
-                  actorId: key,
-                  error: actorContext.lastError ?? 'Unknown error',
-                })
+            try {
+              const actorContext = snapshot.context as SyncActorContextExtended
+              if (actorContext.syncCycleComplete) {
+                const phase = SYNC_CONFIGS[config.syncType].phase
+                if (actorContext.lastSyncSuccess) {
+                  self.send({ type: 'ACTOR_COMPLETED', actorId: key, phase })
+                } else {
+                  const error = actorContext.lastError ||
+                    `Sync failed for ${config.syncType} but no error message was captured`
+                  console.error(`[Orchestrator] Actor ${key} failed:`, error)
+                  self.send({ type: 'ACTOR_ERROR', actorId: key, error })
+                }
               }
+            } catch (subscriptionError) {
+              const errorMsg = subscriptionError instanceof Error
+                ? subscriptionError.message
+                : String(subscriptionError)
+              console.error(`[Orchestrator] Error in actor subscription for ${key}:`, subscriptionError)
+              self.send({ type: 'ACTOR_ERROR', actorId: key, error: `Subscription error: ${errorMsg}` })
             }
           })
 
