@@ -143,69 +143,12 @@ export interface SyncActorContext {
 }
 
 /**
- * Events that can be sent to a sync actor.
- */
-export type SyncActorEvent =
-  | { type: 'SYNC' } // Trigger a sync
-  | { type: 'SYNC_COMPLETE'; messagesSynced?: number; contactsSynced?: number }
-  | { type: 'SYNC_ERROR'; error: string }
-  | { type: 'RESET_BACKOFF' }
-  | { type: 'STOP' }
-
-/**
- * States for a sync actor.
+ * States for a sync actor (used for status reporting).
  */
 export type SyncActorState = 'idle' | 'syncing' | 'backoff' | 'stopped'
 
-// ============================================================================
-// Orchestrator Types
-// ============================================================================
-
-/**
- * Context for the orchestrator machine.
- */
-export interface OrchestratorContext {
-  /** Current phase */
-  currentPhase: SyncPhase | null
-  /** Actors in contacts phase that have completed */
-  completedContactsActors: Set<string>
-  /** Actors in contacts phase total */
-  totalContactsActors: number
-  /** Actors in messages phase that have completed */
-  completedMessagesActors: Set<string>
-  /** Actors in messages phase total */
-  totalMessagesActors: number
-  /** Whether the engine is running */
-  isRunning: boolean
-  /** Last error if any */
-  lastError: string | null
-  /** Last full sync timestamp */
-  lastFullSyncAt: number | null
-}
-
-/**
- * Events for the orchestrator machine.
- */
-export type OrchestratorEvent =
-  | { type: 'START' }
-  | { type: 'STOP' }
-  | { type: 'SYNC_NOW' } // Trigger immediate sync
-  | { type: 'ACTOR_COMPLETED'; actorId: string; phase: SyncPhase }
-  | { type: 'ACTOR_ERROR'; actorId: string; error: string }
-  | { type: 'CONTACTS_PHASE_COMPLETE' }
-  | { type: 'MESSAGES_PHASE_COMPLETE' }
-  | { type: 'REGISTER_ACTOR'; actorId: string; phase: SyncPhase }
-  | { type: 'UNREGISTER_ACTOR'; actorId: string }
-
-/**
- * States for the orchestrator machine.
- */
-export type OrchestratorState =
-  | 'idle'
-  | 'contactsPhase'
-  | 'barrier' // Waiting for all contacts to complete
-  | 'messagesPhase'
-  | 'stopped'
+// Note: Orchestrator types are defined in ./machines/orchestrator.ts
+// Note: Sync actor events are defined in ./machines/sync-actor.ts
 
 // ============================================================================
 // Engine Types

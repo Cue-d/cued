@@ -63,9 +63,11 @@ export function createIMessageSyncFn(options: SyncFunctionOptions): SyncFunction
         messagesSynced: Math.max(0, messagesSynced),
       }
     } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error)
+      console.error('[IMessageSync] Error:', errorMessage)
       return {
         success: false,
-        error: error instanceof Error ? error.message : String(error),
+        error: errorMessage,
       }
     }
   }
@@ -93,9 +95,11 @@ export function createContactsSyncFn(options: SyncFunctionOptions): SyncFunction
         error: result.errors.length > 0 ? result.errors[0] : undefined,
       }
     } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error)
+      console.error('[ContactsSync] Error:', errorMessage)
       return {
         success: false,
-        error: error instanceof Error ? error.message : String(error),
+        error: errorMessage,
       }
     }
   }
@@ -135,9 +139,11 @@ export function createLinkedInMessagesSyncFn(
       const apiClient = await options.linkedInScraper.getApiClient()
       manager.setClient(apiClient)
     } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error)
+      console.error('[LinkedInMessagesSync] Failed to get API client:', errorMessage)
       return {
         success: false,
-        error: error instanceof Error ? error.message : String(error),
+        error: errorMessage,
       }
     }
 
@@ -163,9 +169,11 @@ export function createLinkedInMessagesSyncFn(
         messagesSynced: Math.max(0, messagesSynced),
       }
     } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error)
+      console.error('[LinkedInMessagesSync] Error:', errorMessage)
       return {
         success: false,
-        error: error instanceof Error ? error.message : String(error),
+        error: errorMessage,
       }
     }
   }
@@ -173,14 +181,19 @@ export function createLinkedInMessagesSyncFn(
 
 /**
  * Create sync function for LinkedIn contacts.
- * Note: LinkedIn contacts are synced as part of messages sync - this is a placeholder.
+ *
+ * Note: LinkedIn contacts are discovered and synced as part of message sync
+ * (conversations include participant info). This placeholder ensures the
+ * contacts phase has a LinkedIn actor to satisfy the two-phase barrier,
+ * but the actual contact syncing happens in createLinkedInMessagesSyncFn.
  */
 export function createLinkedInContactsSyncFn(
   options: SyncFunctionOptions
 ): SyncFunction {
   return async (): Promise<SyncResult> => {
-    // LinkedIn contacts are synced as part of messages sync
-    // This placeholder exists for the two-phase architecture
+    console.log('[LinkedInContactsSync] Skipping - contacts synced with messages')
+    // LinkedIn contacts are discovered from conversation participants during message sync.
+    // This placeholder satisfies the two-phase architecture requirement.
     return {
       success: true,
       contactsSynced: 0,
@@ -235,9 +248,11 @@ export function createSlackSyncFn(
         messagesSynced: Math.max(0, messagesSynced),
       }
     } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error)
+      console.error(`[SlackSync:${teamId}] Error:`, errorMessage)
       return {
         success: false,
-        error: error instanceof Error ? error.message : String(error),
+        error: errorMessage,
       }
     }
   }

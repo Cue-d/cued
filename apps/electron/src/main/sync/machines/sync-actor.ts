@@ -5,10 +5,13 @@
  * sync actor that handles:
  * - Executing sync operations
  * - Exponential backoff on errors
- * - Reporting completion to parent orchestrator
+ * - Tracking completion status (engine subscribes to state changes)
+ *
+ * Note: Does NOT use sendParent() since actors are created with createActor()
+ * rather than spawn(). The engine subscribes to actor state changes instead.
  */
 
-import { setup, assign, fromPromise, sendParent } from 'xstate'
+import { setup, assign, fromPromise } from 'xstate'
 import {
   type SyncTypeId,
   type SyncActorContext,
@@ -31,16 +34,27 @@ export interface SyncActorInput {
 // Actor Events
 // ============================================================================
 
-type SyncActorEvents =
+export type SyncActorEvents =
   | { type: 'SYNC' }
   | { type: 'STOP' }
   | { type: 'RESET_BACKOFF' }
 
 // ============================================================================
+// Extended Context with completion tracking
+// ============================================================================
+
+export interface SyncActorContextExtended extends SyncActorContext {
+  /** Whether the last sync cycle completed (success or max retries exhausted) */
+  syncCycleComplete: boolean
+  /** Whether the last sync cycle was successful */
+  lastSyncSuccess: boolean
+}
+
+// ============================================================================
 // Helper to get actor ID
 // ============================================================================
 
-function getActorId(context: SyncActorContext): string {
+export function getActorId(context: SyncActorContext): string {
   return context.workspaceId
     ? `${context.syncType}:${context.workspaceId}`
     : context.syncType
@@ -55,7 +69,7 @@ export const createSyncActorMachine = (input: SyncActorInput) => {
 
   return setup({
     types: {
-      context: {} as SyncActorContext,
+      context: {} as SyncActorContextExtended,
       events: {} as SyncActorEvents,
       input: {} as SyncActorInput,
     },
@@ -77,52 +91,62 @@ export const createSyncActorMachine = (input: SyncActorInput) => {
         backoffMs: () => config.initialBackoffMs,
       }),
       recordSuccess: assign(({ context, event }) => {
-        const doneEvent = event as { type: string; output: SyncResult }
+        if (!('output' in event)) {
+          console.error('[SyncActor] recordSuccess received event without output:', event)
+          return {}
+        }
+        const output = event.output as SyncResult | undefined
         return {
           lastSyncAt: Date.now(),
           lastError: null,
+          lastSyncSuccess: true,
+          syncCycleComplete: true,
           totalMessagesSynced:
-            context.totalMessagesSynced + (doneEvent.output?.messagesSynced ?? 0),
+            context.totalMessagesSynced + (output?.messagesSynced ?? 0),
           totalContactsSynced:
-            context.totalContactsSynced + (doneEvent.output?.contactsSynced ?? 0),
+            context.totalContactsSynced + (output?.contactsSynced ?? 0),
         }
       }),
       recordError: assign(({ event }) => {
-        const errorEvent = event as { type: string; error: unknown }
+        if (!('error' in event)) {
+          console.error('[SyncActor] recordError received event without error:', event)
+          return { lastError: 'Unknown error' }
+        }
+        const error = event.error
         const errorMessage =
-          errorEvent.error instanceof Error
-            ? errorEvent.error.message
-            : String(errorEvent.error)
+          error instanceof Error ? error.message : String(error)
         return {
           lastError: errorMessage,
+          lastSyncSuccess: false,
         }
       }),
-      notifyParentComplete: sendParent(({ context }) => ({
-        type: 'ACTOR_COMPLETED' as const,
-        actorId: getActorId(context),
-        phase: config.phase,
-      })),
-      notifyParentError: sendParent(({ context }) => ({
-        type: 'ACTOR_ERROR' as const,
-        actorId: getActorId(context),
-        error: context.lastError ?? 'Unknown error',
-      })),
+      markCycleComplete: assign({
+        syncCycleComplete: () => true,
+      }),
+      clearCycleComplete: assign({
+        syncCycleComplete: () => false,
+      }),
       logSyncStart: ({ context }) => {
         console.log(`[SyncActor:${getActorId(context)}] Starting sync...`)
       },
       logSyncComplete: ({ context, event }) => {
-        const doneEvent = event as { type: string; output: SyncResult }
+        if (!('output' in event)) return
+        const output = event.output as SyncResult | undefined
         console.log(
-          `[SyncActor:${getActorId(context)}] Sync complete. Messages: ${doneEvent.output?.messagesSynced ?? 0}, Contacts: ${doneEvent.output?.contactsSynced ?? 0}`
+          `[SyncActor:${getActorId(context)}] Sync complete. Messages: ${output?.messagesSynced ?? 0}, Contacts: ${output?.contactsSynced ?? 0}`
         )
       },
       logSyncError: ({ context, event }) => {
-        const errorEvent = event as { type: string; error: unknown }
+        if (!('error' in event)) return
+        const error = event.error
         const errorMessage =
-          errorEvent.error instanceof Error
-            ? errorEvent.error.message
-            : String(errorEvent.error)
+          error instanceof Error ? error.message : String(error)
         console.error(`[SyncActor:${getActorId(context)}] Sync error: ${errorMessage}`)
+      },
+      logMaxRetriesExhausted: ({ context }) => {
+        console.error(
+          `[SyncActor:${getActorId(context)}] Max retries (${config.maxRetries}) exhausted. Last error: ${context.lastError}`
+        )
       },
     },
     guards: {
@@ -144,6 +168,8 @@ export const createSyncActorMachine = (input: SyncActorInput) => {
       lastError: null,
       totalMessagesSynced: 0,
       totalContactsSynced: 0,
+      syncCycleComplete: false,
+      lastSyncSuccess: false,
     },
     initial: 'idle',
     states: {
@@ -151,7 +177,7 @@ export const createSyncActorMachine = (input: SyncActorInput) => {
         on: {
           SYNC: {
             target: 'syncing',
-            actions: ['logSyncStart'],
+            actions: ['clearCycleComplete', 'logSyncStart'],
           },
           STOP: 'stopped',
         },
@@ -167,7 +193,6 @@ export const createSyncActorMachine = (input: SyncActorInput) => {
               'resetRetry',
               'recordSuccess',
               'logSyncComplete',
-              'notifyParentComplete',
             ],
           },
           onError: [
@@ -181,11 +206,13 @@ export const createSyncActorMachine = (input: SyncActorInput) => {
               ],
             },
             {
+              // Max retries exhausted - mark cycle complete with error
               target: 'idle',
               actions: [
                 'recordError',
                 'logSyncError',
-                'notifyParentError',
+                'logMaxRetriesExhausted',
+                'markCycleComplete',
               ],
             },
           ],

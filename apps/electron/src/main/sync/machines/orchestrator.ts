@@ -9,8 +9,13 @@
  * contact resolution.
  */
 
-import { setup, assign, createActor, type ActorRefFrom } from 'xstate'
-import { createSyncActorMachine, type SyncActorInput } from './sync-actor'
+import { setup, assign, createActor, type ActorRefFrom, type AnyActorRef } from 'xstate'
+import {
+  createSyncActorMachine,
+  type SyncActorInput,
+  type SyncActorContextExtended,
+  getActorId,
+} from './sync-actor'
 import { type SyncPhase, type SyncTypeId, SYNC_CONFIGS, getSyncKey } from '../types'
 
 // ============================================================================
@@ -18,6 +23,7 @@ import { type SyncPhase, type SyncTypeId, SYNC_CONFIGS, getSyncKey } from '../ty
 // ============================================================================
 
 type SyncActorRef = ActorRefFrom<ReturnType<typeof createSyncActorMachine>>
+type Subscription = { unsubscribe: () => void }
 
 export interface OrchestratorContext {
   /** Registered sync actors by key (syncType or syncType:workspaceId) */
@@ -26,6 +32,8 @@ export interface OrchestratorContext {
   actorConfigs: Map<string, SyncActorInput>
   /** Actors that have completed in current sync cycle */
   completedActors: Set<string>
+  /** Subscriptions to actor state changes */
+  actorSubscriptions: Map<string, Subscription>
   /** Whether currently running a sync cycle */
   isRunning: boolean
   /** Last error if any */
@@ -92,33 +100,71 @@ export const orchestratorMachine = setup({
       if (event.type !== 'UNREGISTER_ACTOR') return {}
       const newConfigs = new Map(context.actorConfigs)
       const newActors = new Map(context.actors)
+      const newSubscriptions = new Map(context.actorSubscriptions)
+
+      // Clean up subscription
+      const subscription = newSubscriptions.get(event.actorId)
+      if (subscription) {
+        subscription.unsubscribe()
+        newSubscriptions.delete(event.actorId)
+      }
+
+      // Stop and remove actor
       const actor = newActors.get(event.actorId)
       if (actor) {
         actor.send({ type: 'STOP' })
         newActors.delete(event.actorId)
       }
+
       newConfigs.delete(event.actorId)
-      return { actorConfigs: newConfigs, actors: newActors }
+      return { actorConfigs: newConfigs, actors: newActors, actorSubscriptions: newSubscriptions }
     }),
-    spawnActors: assign(({ context }) => {
+    spawnActors: assign(({ context, self }) => {
       const newActors = new Map(context.actors)
+      const newSubscriptions = new Map(context.actorSubscriptions)
+
       for (const [key, config] of context.actorConfigs) {
         if (!newActors.has(key)) {
           const machine = createSyncActorMachine(config)
           const actor = createActor(machine, { input: config })
+
+          // Subscribe to actor state changes to detect completion
+          const subscription = actor.subscribe((snapshot) => {
+            const actorContext = snapshot.context as SyncActorContextExtended
+            if (actorContext.syncCycleComplete) {
+              const phase = SYNC_CONFIGS[config.syncType].phase
+              if (actorContext.lastSyncSuccess) {
+                self.send({ type: 'ACTOR_COMPLETED', actorId: key, phase })
+              } else {
+                self.send({
+                  type: 'ACTOR_ERROR',
+                  actorId: key,
+                  error: actorContext.lastError ?? 'Unknown error',
+                })
+              }
+            }
+          })
+
           actor.start()
           newActors.set(key, actor as SyncActorRef)
+          newSubscriptions.set(key, subscription)
           console.log(`[Orchestrator] Spawned actor: ${key}`)
         }
       }
-      return { actors: newActors }
+      return { actors: newActors, actorSubscriptions: newSubscriptions }
     }),
     stopAllActors: assign(({ context }) => {
+      // Unsubscribe from all actors first
+      for (const [key, subscription] of context.actorSubscriptions) {
+        subscription.unsubscribe()
+        console.log(`[Orchestrator] Unsubscribed from actor: ${key}`)
+      }
+      // Then stop all actors
       for (const [key, actor] of context.actors) {
         console.log(`[Orchestrator] Stopping actor: ${key}`)
         actor.send({ type: 'STOP' })
       }
-      return { actors: new Map(), isRunning: false }
+      return { actors: new Map(), actorSubscriptions: new Map(), isRunning: false }
     }),
     clearCompletedActors: assign({
       completedActors: () => new Set<string>(),
@@ -131,7 +177,16 @@ export const orchestratorMachine = setup({
     }),
     recordError: assign(({ event }) => {
       if (event.type !== 'ACTOR_ERROR') return {}
+      console.error(`[Orchestrator] Actor error: ${event.actorId} - ${event.error}`)
       return { lastError: event.error }
+    }),
+    // Mark actor as completed even on error so phase can proceed
+    markActorCompletedFromError: assign(({ context, event }) => {
+      if (event.type !== 'ACTOR_ERROR') return {}
+      const newCompleted = new Set(context.completedActors)
+      newCompleted.add(event.actorId)
+      console.log(`[Orchestrator] Marking errored actor as completed: ${event.actorId}`)
+      return { completedActors: newCompleted }
     }),
     recordSyncComplete: assign({
       lastFullSyncAt: () => Date.now(),
@@ -184,6 +239,7 @@ export const orchestratorMachine = setup({
     actors: new Map(),
     actorConfigs: new Map(),
     completedActors: new Set(),
+    actorSubscriptions: new Map(),
     isRunning: false,
     lastError: null,
     lastFullSyncAt: null,
@@ -218,8 +274,10 @@ export const orchestratorMachine = setup({
           target: 'stopped',
           actions: ['stopAllActors'],
         },
+        // ACTOR_ERROR also marks the actor as completed so phase can proceed
+        // This handles the case where an actor exhausts retries
         ACTOR_ERROR: {
-          actions: ['recordError'],
+          actions: ['recordError', 'markActorCompletedFromError'],
         },
       },
       states: {

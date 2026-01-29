@@ -49,7 +49,7 @@ export class SyncEngine {
   private progressCallback?: (progress: SyncProgress) => void
   private inspector: ReturnType<typeof createBrowserInspector> | null = null
   private isStarted = false
-  private timerIntervals: Map<string, NodeJS.Timeout> = new Map()
+  private syncTimer: NodeJS.Timeout | null = null
 
   constructor(private options: SyncEngineOptions = {}) {
     this.progressCallback = options.onProgress
@@ -134,13 +134,6 @@ export class SyncEngine {
     const key = getSyncKey(syncType, workspaceId)
     this.syncFunctions.delete(key)
 
-    // Clear any interval timer
-    const timer = this.timerIntervals.get(key)
-    if (timer) {
-      clearInterval(timer)
-      this.timerIntervals.delete(key)
-    }
-
     this.orchestrator.send({
       type: 'UNREGISTER_ACTOR',
       actorId: key,
@@ -194,15 +187,17 @@ export class SyncEngine {
 
   /**
    * Trigger an immediate sync cycle.
+   * @returns true if sync was triggered, false if engine not running
    */
-  syncNow(): void {
+  syncNow(): boolean {
     if (!this.orchestrator || !this.isStarted) {
       console.warn('[SyncEngine] Not running, cannot trigger sync')
-      return
+      return false
     }
 
     this.orchestrator.send({ type: 'SYNC_NOW' })
     console.log('[SyncEngine] Triggered immediate sync')
+    return true
   }
 
   // ============================================================================
@@ -210,30 +205,35 @@ export class SyncEngine {
   // ============================================================================
 
   private startTimers(): void {
-    for (const [key, syncFn] of this.syncFunctions) {
+    // Find minimum interval from all registered sync types
+    let minIntervalMs = Infinity
+    for (const key of this.syncFunctions.keys()) {
       const [syncType] = key.split(':') as [SyncTypeId]
       const config = SYNC_CONFIGS[syncType]
-
-      // Set up interval timer
-      const timer = setInterval(() => {
-        if (this.isStarted) {
-          this.orchestrator?.send({ type: 'SYNC_NOW' })
-        }
-      }, config.defaultIntervalMs)
-
-      this.timerIntervals.set(key, timer)
-      console.log(
-        `[SyncEngine] Started timer for ${key} (${config.defaultIntervalMs}ms)`
-      )
+      minIntervalMs = Math.min(minIntervalMs, config.defaultIntervalMs)
     }
+
+    // Default to 30 seconds if no syncs registered
+    if (minIntervalMs === Infinity) {
+      minIntervalMs = 30 * 1000
+    }
+
+    // Single timer triggers full sync cycle
+    this.syncTimer = setInterval(() => {
+      if (this.isStarted) {
+        this.orchestrator?.send({ type: 'SYNC_NOW' })
+      }
+    }, minIntervalMs)
+
+    console.log(`[SyncEngine] Started sync timer (${minIntervalMs}ms interval)`)
   }
 
   private stopTimers(): void {
-    for (const [key, timer] of this.timerIntervals) {
-      clearInterval(timer)
-      console.log(`[SyncEngine] Stopped timer for ${key}`)
+    if (this.syncTimer) {
+      clearInterval(this.syncTimer)
+      this.syncTimer = null
+      console.log('[SyncEngine] Stopped sync timer')
     }
-    this.timerIntervals.clear()
   }
 
   // ============================================================================
