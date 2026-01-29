@@ -28,7 +28,7 @@
     "@statelyai/inspect": "^0.4.0",
     "better-sqlite3": "^12.6.0",
     "chokidar": "^5.0.0",
-    "convex": "^1.31.5",
+    "convex": "^1.31.6",
     "dotenv": "^17.2.3",
     "electron-liquid-glass": "^1.1.1",
     "electron-updater": "^6.7.3",

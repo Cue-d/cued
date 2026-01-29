@@ -293,6 +293,7 @@ describe("actions", () => {
       expect(result).toBe(0);
     });
   });
+
 });
 
 /**
@@ -538,6 +539,8 @@ describe("actions API", () => {
       expect(action?.type).toBe("follow_up");
       expect(action?.priority).toBe(75);
       expect(action?.platform).toBe("imessage");
+      expect(action?.reason).toBe("Needs follow up");
+      expect(action?.llmReason).toBe("AI determined follow up needed");
     });
 
     it("increments pendingActionCount on user", async () => {

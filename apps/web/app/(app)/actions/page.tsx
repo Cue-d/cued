@@ -52,12 +52,12 @@ export default function ActionsPage() {
   const loading = actionsResult === undefined
 
   // Get top action ID for context fetch
-  const topActionId = actions.length > 0 ? actions[0]._id : null
+  const topActionId = actions.length > 0 ? (actions[0]._id as Id<"actions">) : null
 
   // Fetch full context for top action only
   const contextResult = useQuery(
     api.actions.getActionWithContext,
-    topActionId ? { actionId: topActionId as Id<"actions">, messageLimit: 15 } : "skip"
+    topActionId ? { actionId: topActionId, messageLimit: 15 } : "skip"
   )
 
   // Mutations

@@ -101,4 +101,5 @@ describe("MessageResponseCard", () => {
       expect(screen.getByText("iMessage")).toBeInTheDocument();
     });
   });
+
 });

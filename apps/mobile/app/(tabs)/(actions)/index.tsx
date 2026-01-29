@@ -10,14 +10,7 @@ import { useRouter } from "expo-router";
 import { useMutation, useQuery } from "convex/react";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { api } from "@prm/convex/convex/_generated/api";
-import {
-  type ActionPlatform,
-  type EnrichedAction,
-  type DisplayMessage,
-  type ContactFormData,
-  isMessageActionType,
-  isContactActionType,
-} from "@prm/shared";
+import { type DisplayMessage, type ContactFormData, type ActionPlatform } from "@prm/shared";
 import { ActionButtons } from "@/components/action-buttons";
 import { CardStack } from "@/components/card-stack";
 import { MessageResponseCard, ContactCard } from "@/components/cards";
@@ -29,11 +22,38 @@ import { useElectronPresence } from "@/hooks/useElectronPresence";
 import type { SwipeDirection } from "@/components/swipeable-card";
 import type { Id } from "@prm/convex/convex/_generated/dataModel";
 
+/** Action type from Convex getPendingActions */
+type EnrichedAction = {
+  _id: string;
+  type: string;
+  status: string;
+  priority: number;
+  reason: string | null;
+  llmReason: string | null;
+  createdAt: number;
+  snoozedUntil: number | null;
+  completedAt: number | null;
+  discardedAt: number | null;
+  conversationId: string | null;
+  contactId: string | null;
+  contactName: string | null;
+  secondaryContactId: string | null;
+  secondaryContactName: string | null;
+  mergeSuggestionId: string | null;
+  platform: string | null;
+};
+
 /** Map action to CardStack item format */
 interface ActionItem {
   id: string;
   action: EnrichedAction;
 }
+
+/** Action types that use MessageResponseCard */
+const MESSAGE_ACTION_TYPES = ["respond", "follow_up", "send_message"];
+
+/** Action types that use ContactCard */
+const CONTACT_ACTION_TYPES = ["eod_contact", "new_connection"];
 
 /** Data for a queued message toast */
 interface QueuedMessageToast {
@@ -231,7 +251,7 @@ export default function ActionsScreen(): React.JSX.Element {
       const isTopCard = index === 0;
 
       // Message-based actions (respond, follow_up, send_message)
-      if (isMessageActionType(action.type)) {
+      if (MESSAGE_ACTION_TYPES.includes(action.type)) {
         // Use messages from context for the top card, empty for others
         const messages = isTopCard ? topActionMessages : [];
 
@@ -249,7 +269,7 @@ export default function ActionsScreen(): React.JSX.Element {
       }
 
       // Contact-based actions (eod_contact, new_connection)
-      if (isContactActionType(action.type)) {
+      if (CONTACT_ACTION_TYPES.includes(action.type)) {
         return (
           <ContactCard
             personName={action.contactName ?? "New Contact"}

@@ -374,9 +374,10 @@ export class LinkedInClient {
   }
 
   /**
-   * Get the public identifier (vanity URL slug) for a member URN.
+   * Get the public identifier (vanity URL slug) for a member URN or ID.
    * Resolves URN-style IDs like "ACoAABsfBygBj0mn..." to vanity URLs like "johndoe".
-   * @param memberUrn - The member URN or ID to resolve
+   * Accepts both full URNs (urn:li:member:ACoAAB...) and bare IDs (ACoAAB...).
+   * @param memberUrn - The member URN or bare ID to resolve
    * @returns Promise resolving to profile lookup result
    */
   async getProfileByMemberUrn(memberUrn: string): Promise<import('./profile').ProfileLookupResult | null> {

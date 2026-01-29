@@ -667,7 +667,7 @@ async function syncSocialContactsInternal(
     duplicatesSkipped: 0,
   };
 
-  const handleType = platform === "linkedin" ? "username" : "twitter_handle";
+  const handleType = platform === "linkedin" ? "linkedin_handle" : "twitter_handle";
   const newContactsInfo: Array<{
     contactId: Id<"contacts">;
     headline: string | null;
@@ -757,7 +757,7 @@ async function upsertSocialContact(
   ctx: MutationCtx,
   userId: Id<"users">,
   platform: SocialPlatform,
-  handleType: "username" | "twitter_handle",
+  handleType: "linkedin_handle" | "twitter_handle",
   contact: SocialContactInput
 ): Promise<{ isNew: boolean; contactId: Id<"contacts"> }> {
   const normalizedHandle =
@@ -836,7 +836,7 @@ async function upsertSocialContact(
     await ctx.db.insert("contactHandles", {
       userId,
       contactId,
-      handleType: "urn",
+      handleType: "linkedin_urn",
       handle: linkedInUrn,
       platform,
     });

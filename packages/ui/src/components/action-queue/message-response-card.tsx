@@ -49,7 +49,7 @@ export interface MessageResponseCardRef {
 /**
  * MessageResponseCard component for action queue.
  * Displays message history and response textarea.
- * Composed of PlatformBadge, MessageBubble, and ResponseInput.
+ * Composed of PlatformBadge, MessageBubble, DraftSelector, and ResponseInput.
  */
 export const MessageResponseCard = React.forwardRef<
   MessageResponseCardRef,

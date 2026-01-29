@@ -17,6 +17,15 @@ import { actionTypeValidator, platformValidator } from "./schema";
 /** Result from LLM analysis */
 type AnalysisResult = "action_created" | "no_action" | "error";
 
+/** Message type returned by getRecentMessages */
+interface RecentMessage {
+  _id: Id<"messages">;
+  content: string;
+  isFromMe: boolean;
+  sentAt: number;
+  senderName: string | undefined;
+}
+
 // ============================================================================
 // Internal queries for fetching data within actions
 // ============================================================================
@@ -54,15 +63,23 @@ export const getConversationContext = internalQuery({
     const conversation = await ctx.db.get(args.conversationId);
     if (!conversation) return null;
 
-    // Get primary contact (first participant for DMs)
-    let primaryContact: Doc<"contacts"> | null = null;
-    if (conversation.participantContactIds.length > 0) {
-      primaryContact = await ctx.db.get(conversation.participantContactIds[0]);
-    }
+    // Get all participant contacts
+    const participants = await Promise.all(
+      conversation.participantContactIds.map((id) => ctx.db.get(id))
+    );
+    const validParticipants = participants.filter(
+      (p): p is Doc<"contacts"> => p !== null
+    );
+    const participantNames = validParticipants.map((p) => p.displayName);
+
+    // Primary contact is first non-null participant (for DMs)
+    // This handles the case where the first participant contact was deleted
+    const primaryContact = validParticipants[0] ?? null;
 
     return {
       conversation,
       primaryContact,
+      participantNames,
     };
   },
 });
@@ -93,6 +110,7 @@ export const getRecentMessages = internalQuery({
           senderName = contact?.displayName;
         }
         return {
+          _id: msg._id,
           content: msg.content,
           isFromMe: msg.isFromMe,
           sentAt: msg.sentAt,
@@ -224,19 +242,21 @@ export const markAnalysisSkipped = internalMutation({
 /**
  * Create an action from LLM suggestion.
  * Atomically checks for existing pending action to prevent race conditions.
+ * Returns action ID on success, or undefined if action already exists (race condition).
  */
 export const createActionFromSuggestion = internalMutation({
   args: {
     userId: v.id("users"),
     conversationId: v.id("conversations"),
     contactId: v.optional(v.id("contacts")),
+    messageId: v.optional(v.id("messages")), // Trigger message ID for embedding tracking
     type: actionTypeValidator,
     priority: v.number(),
     platform: platformValidator,
     llmReason: v.optional(v.string()),
     snoozedUntil: v.optional(v.number()),
   },
-  handler: async (ctx, args) => {
+  handler: async (ctx, args): Promise<Id<"actions"> | undefined> => {
     // Atomic check: prevent race condition where multiple events create duplicate actions
     const existingPending = await ctx.db
       .query("actions")
@@ -247,7 +267,7 @@ export const createActionFromSuggestion = internalMutation({
 
     if (existingPending) {
       // Action already exists for this conversation, skip creation
-      return null;
+      return undefined;
     }
 
     const isPending = !args.snoozedUntil;
@@ -259,6 +279,7 @@ export const createActionFromSuggestion = internalMutation({
       priority: args.priority,
       conversationId: args.conversationId,
       contactId: args.contactId,
+      messageId: args.messageId,
       platform: args.platform,
       llmReason: args.llmReason,
       snoozedUntil: args.snoozedUntil,
@@ -354,10 +375,10 @@ export const analyzeConversation = internalAction({
         return { success: false, result: "error", error: "Conversation not found" };
       }
 
-      const { conversation, primaryContact } = context;
+      const { conversation, primaryContact, participantNames } = context;
 
       // Get recent messages
-      const messages = await ctx.runQuery(
+      const messages: RecentMessage[] = await ctx.runQuery(
         internal.actionAnalysis.getRecentMessages,
         {
           conversationId: queueEntry.conversationId,
@@ -390,6 +411,37 @@ export const analyzeConversation = internalAction({
           daysBack: 7,
         }
       );
+
+      // Process messages for embedding (find trigger, compute embedding, check skip)
+      const embeddingResult = await ctx.runAction(
+        internal.embeddings.processMessagesForEmbedding,
+        {
+          userId: queueEntry.userId,
+          messages: messages.map((m) => ({
+            _id: m._id,
+            content: m.content,
+            isFromMe: m.isFromMe,
+            sentAt: m.sentAt,
+            senderName: m.senderName,
+          })),
+          conversation: {
+            platform: conversation.platform,
+            conversationType: conversation.conversationType,
+            displayName: conversation.displayName,
+            workspaceId: conversation.workspaceId,
+          },
+          contactName: primaryContact?.displayName ?? "Unknown",
+          participantNames,
+        }
+      );
+
+      if (embeddingResult.shouldSkip) {
+        await ctx.runMutation(internal.actionAnalysis.markAnalysisSkipped, {
+          queueEntryId: args.queueEntryId,
+          skipReason: embeddingResult.skipReason ?? "Similar messages historically dismissed",
+        });
+        return { success: true, result: "no_action" };
+      }
 
       // Build input for LLM
       const { generateActionWithRetry, fetchContactMemories } = await import("@prm/ai");
@@ -447,6 +499,7 @@ export const analyzeConversation = internalAction({
             conversation.conversationType === "dm"
               ? primaryContact?._id
               : undefined,
+          messageId: embeddingResult.triggerMessageId,
           type: suggestion.type ?? "respond",
           priority: suggestion.priority ?? 50,
           platform: conversation.platform,
@@ -454,6 +507,33 @@ export const analyzeConversation = internalAction({
           snoozedUntil,
         }
       );
+
+      // Race condition: another event created an action while we were analyzing
+      if (!actionId) {
+        await ctx.runMutation(internal.actionAnalysis.markAnalysisCompleted, {
+          queueEntryId: args.queueEntryId,
+          result: "no_action",
+          skipReason: "Pending action already exists (race condition)",
+        });
+        return { success: true, result: "no_action" };
+      }
+
+      // Store embedding on the action (no separate table, no race condition)
+      if (embeddingResult.embedding && embeddingResult.embeddingInput) {
+        try {
+          await ctx.runMutation(internal.embeddings.storeEmbedding, {
+            actionId,
+            embedding: embeddingResult.embedding,
+            embeddingInput: embeddingResult.embeddingInput,
+          });
+        } catch (error) {
+          // Non-critical, don't fail the action creation - but log for debugging
+          console.error(
+            `[ActionAnalysis] Failed to store embedding for action ${actionId}:`,
+            error
+          );
+        }
+      }
 
       await ctx.runMutation(internal.actionAnalysis.markAnalysisCompleted, {
         queueEntryId: args.queueEntryId,
@@ -463,7 +543,7 @@ export const analyzeConversation = internalAction({
       return {
         success: true,
         result: "action_created",
-        actionId: actionId as string,
+        actionId,
       };
     } catch (error) {
       const errorMessage =

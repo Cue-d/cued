@@ -287,7 +287,9 @@ export async function syncGmailMessagesInternal(
             senderParsed.name
           );
           // Track participant for conversation (only for incoming emails)
-          threadParticipantIds.add(senderContactId);
+          if (senderContactId) {
+            threadParticipantIds.add(senderContactId);
+          }
         }
 
         // Skip message insert if already exists
@@ -394,7 +396,7 @@ async function getOrCreateEmailContact(
   userId: Id<"users">,
   email: string,
   displayName: string
-): Promise<Id<"contacts">> {
+): Promise<Id<"contacts"> | undefined> {
   const result = await getOrCreateContact(
     ctx,
     userId,
@@ -402,7 +404,7 @@ async function getOrCreateEmailContact(
     [{ value: email, type: "email" }],
     displayName || email
   );
-  return result.contactId;
+  return result?.contactId;
 }
 
 // ============================================================================

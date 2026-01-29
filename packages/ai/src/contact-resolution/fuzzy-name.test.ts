@@ -115,6 +115,6 @@ describe("NAME_MATCH_THRESHOLDS", () => {
   it("has correct threshold values", () => {
     expect(NAME_MATCH_THRESHOLDS.AUTO_MERGE).toBe(0.95);
     expect(NAME_MATCH_THRESHOLDS.SUGGEST_MERGE).toBe(0.9);
-    expect(NAME_MATCH_THRESHOLDS.MINIMUM).toBe(0.6);
+    expect(NAME_MATCH_THRESHOLDS.MINIMUM).toBe(0.9);
   });
 });

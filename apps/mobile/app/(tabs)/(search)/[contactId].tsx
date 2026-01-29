@@ -35,9 +35,9 @@ function getHandleIcon(type: string): SFSymbol {
       return "envelope.fill";
     case "slack_id":
       return "number";
-    case "username":
+    case "linkedin_handle":
       return "link";
-    case "urn":
+    case "linkedin_urn":
       return "link";
     case "twitter_handle":
       return "at";
@@ -55,9 +55,9 @@ function getHandleTypeLabel(type: string): string {
       return "Email";
     case "slack_id":
       return "Slack";
-    case "username":
+    case "linkedin_handle":
       return "LinkedIn";
-    case "urn":
+    case "linkedin_urn":
       return "LinkedIn URN";
     case "twitter_handle":
       return "Twitter";
@@ -179,7 +179,7 @@ function handleTypeToPlatform(type: string): ActionPlatform | null {
   switch (type) {
     case "phone":
       return "imessage";
-    case "username":
+    case "linkedin_handle":
       return "linkedin";
     default:
       return null;

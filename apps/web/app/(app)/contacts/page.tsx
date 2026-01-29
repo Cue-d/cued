@@ -96,7 +96,7 @@ function toActionPlatform(platform: string): ActionPlatform | null {
 const SENDABLE_HANDLE_TYPES: Record<string, string> = {
   imessage: "phone",
   gmail: "email",
-  linkedin: "username",
+  linkedin: "linkedin_handle",
   slack: "slack_id",
 }
 

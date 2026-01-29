@@ -1,8 +1,9 @@
 import { v } from "convex/values";
+import type { EnrichedAction } from "@prm/shared";
 import type { Doc, Id } from "./_generated/dataModel";
 import type { MutationCtx, QueryCtx } from "./_generated/server";
-import { mutation, query } from "./_generated/server";
-import { internal } from "./_generated/api";
+import { action, internalMutation, mutation, query } from "./_generated/server";
+import { api, internal } from "./_generated/api";
 import { getAuthenticatedUser, requireAuthenticatedUser } from "./lib/auth";
 import { adjustPendingActionCount } from "./lib/actions";
 import {
@@ -10,7 +11,6 @@ import {
   actionTypeValidator,
   platformValidator,
 } from "./schema";
-import type { EnrichedAction } from "@prm/shared";
 import { executeSwipeHandler } from "./swipeHandlers/registry";
 
 /**
@@ -102,7 +102,6 @@ async function enrichAction(
     secondaryContactId: action.secondaryContactId ?? null,
     secondaryContactName: secondaryContact?.displayName ?? null,
     mergeSuggestionId: action.mergeSuggestionId ?? null,
-    // Denormalized merge data for resolve_contact actions
     mergeConfidence: action.mergeConfidence ?? null,
     mergeSource: action.mergeSource ?? null,
     mergeReasoning: action.mergeReasoning ?? null,
@@ -589,3 +588,5 @@ export const swipeAction = mutation({
     return response;
   },
 });
+
+

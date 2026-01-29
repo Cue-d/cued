@@ -17,6 +17,7 @@ import type * as contactResolution from "../contactResolution.js";
 import type * as contacts from "../contacts.js";
 import type * as crons from "../crons.js";
 import type * as debug from "../debug.js";
+import type * as embeddings from "../embeddings.js";
 import type * as integrations from "../integrations.js";
 import type * as lib_actions from "../lib/actions.js";
 import type * as lib_auth from "../lib/auth.js";
@@ -35,7 +36,6 @@ import type * as swipeHandlers_resolveContact from "../swipeHandlers/resolveCont
 import type * as swipeHandlers_types from "../swipeHandlers/types.js";
 import type * as sync from "../sync.js";
 import type * as sync_batchUtils from "../sync/batchUtils.js";
-import type * as sync_filters from "../sync/filters.js";
 import type * as sync_gmail from "../sync/gmail.js";
 import type * as sync_imessage from "../sync/imessage.js";
 import type * as sync_linkedin from "../sync/linkedin.js";
@@ -60,6 +60,7 @@ declare const fullApi: ApiFromModules<{
   contacts: typeof contacts;
   crons: typeof crons;
   debug: typeof debug;
+  embeddings: typeof embeddings;
   integrations: typeof integrations;
   "lib/actions": typeof lib_actions;
   "lib/auth": typeof lib_auth;
@@ -78,7 +79,6 @@ declare const fullApi: ApiFromModules<{
   "swipeHandlers/types": typeof swipeHandlers_types;
   sync: typeof sync;
   "sync/batchUtils": typeof sync_batchUtils;
-  "sync/filters": typeof sync_filters;
   "sync/gmail": typeof sync_gmail;
   "sync/imessage": typeof sync_imessage;
   "sync/linkedin": typeof sync_linkedin;

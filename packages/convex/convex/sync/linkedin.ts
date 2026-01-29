@@ -10,6 +10,7 @@ import {
   normalizeMemberURN,
   normalizeLinkedInHandle,
   urnIdsMatch,
+  extractIdFromURN,
 } from "@prm/shared";
 import type { Doc, Id } from "../_generated/dataModel";
 import type { MutationCtx } from "../_generated/server";
@@ -484,20 +485,23 @@ async function getOrCreateLinkedInContactInternal(
   fallbackName?: string
 ): Promise<Id<"contacts">> {
   const normalizedURN = normalizeMemberURN(urn).toLowerCase();
-  const handles: { value: string; type: "urn" | "username" }[] = [
-    { value: normalizedURN, type: "urn" },
+  const handles: { value: string; type: "linkedin_urn" | "linkedin_handle" }[] = [
+    { value: normalizedURN, type: "linkedin_urn" },
   ];
 
   // Add normalized slug if profile URL is available
   if (profileUrl && profileUrl.trim()) {
     const normalizedSlug = normalizeLinkedInHandle(profileUrl);
     if (normalizedSlug) {
-      handles.push({ value: normalizedSlug, type: "username" });
+      handles.push({ value: normalizedSlug, type: "linkedin_handle" });
     }
   }
 
   const displayName = `${firstName} ${lastName}`.trim() || fallbackName || "LinkedIn User";
   const result = await getOrCreateContact(ctx, userId, "linkedin", handles, displayName);
+  if (!result) {
+    throw new Error(`Failed to create LinkedIn contact for ${displayName}`);
+  }
   return result.contactId;
 }
 
@@ -643,7 +647,7 @@ export async function findContactsMissingUsernames(
 
   // Filter for LinkedIn URN handles
   const urnHandles = allHandles.filter(
-    (h) => h.platform === "linkedin" && h.handleType === "urn"
+    (h) => h.platform === "linkedin" && h.handleType === "linkedin_urn"
   );
 
   const contactsNeedingResolution: Array<{
@@ -652,10 +656,10 @@ export async function findContactsMissingUsernames(
     displayName: string;
   }> = [];
 
-  // Build a set of contact IDs that already have username handles
+  // Build a set of contact IDs that already have linkedin_handle handles
   const contactsWithUsernames = new Set(
     allHandles
-      .filter((h) => h.platform === "linkedin" && h.handleType === "username")
+      .filter((h) => h.platform === "linkedin" && h.handleType === "linkedin_handle")
       .map((h) => h.contactId.toString())
   );
 
@@ -667,15 +671,13 @@ export async function findContactsMissingUsernames(
       continue;
     }
 
-    // Extract member ID from URN (e.g., "urn:li:member:ACoAAEFsIqIB..." -> "ACoAAEFsIqIB...")
-    const memberIdMatch = urnHandle.handle.match(
-      /urn:li:(?:fsd_profile|member):([^,)]+)/i
-    );
-    if (memberIdMatch) {
+    // Extract member ID from URN using shared utility
+    const memberId = extractIdFromURN(urnHandle.handle);
+    if (memberId) {
       const contact = await ctx.db.get(urnHandle.contactId);
       contactsNeedingResolution.push({
         contactId: urnHandle.contactId,
-        memberId: memberIdMatch[1],
+        memberId,
         displayName: contact?.displayName ?? "Unknown",
       });
     }
@@ -752,11 +754,11 @@ export async function addResolvedUsernames(
       continue;
     }
 
-    // Add the username handle
+    // Add the linkedin_handle handle
     await ctx.db.insert("contactHandles", {
       userId,
       contactId,
-      handleType: "username",
+      handleType: "linkedin_handle",
       handle: normalizedUsername,
       platform: "linkedin",
     });

@@ -214,7 +214,7 @@ export default function ContactDetailPage() {
       imessage: "phone",
       gmail: "email",
       slack: "slack_id",
-      linkedin: "username",
+      linkedin: "linkedin_handle",
     }
 
     const platforms: Array<{ platform: ActionPlatform; handle: string }> = []

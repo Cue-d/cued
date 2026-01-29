@@ -138,8 +138,8 @@ export function createTestActionData(
     contactId: Id<"contacts">;
     messageId: Id<"messages">;
     platform: "imessage" | "gmail" | "slack";
-    draftResponse: string;
     reason: string;
+    llmReason: string;
     createdAt: number;
     snoozedUntil: number;
   }> = {}
@@ -153,8 +153,8 @@ export function createTestActionData(
     contactId: overrides.contactId,
     messageId: overrides.messageId,
     platform: overrides.platform,
-    draftResponse: overrides.draftResponse,
     reason: overrides.reason,
+    llmReason: overrides.llmReason,
     createdAt: overrides.createdAt ?? Date.now(),
     snoozedUntil: overrides.snoozedUntil,
   };

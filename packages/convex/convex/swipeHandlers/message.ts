@@ -1,3 +1,4 @@
+"use node";
 /**
  * Message action handlers (respond, follow_up, send_message).
  * Handles sending messages via the message queue.

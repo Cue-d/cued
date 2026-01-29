@@ -1,3 +1,4 @@
+"use node";
 /**
  * New connection action handler.
  * Handles saving notes for new contacts.

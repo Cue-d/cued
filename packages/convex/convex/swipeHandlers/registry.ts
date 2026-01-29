@@ -1,3 +1,4 @@
+"use node";
 /**
  * Handler Registry - Maps action types to their swipe handlers.
  */

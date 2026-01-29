@@ -11,16 +11,16 @@
  * - `phone` - E.164 phone numbers (iMessage, WhatsApp)
  * - `email` - Email addresses (Gmail, iMessage)
  * - `slack_id` - Slack user IDs (format: UXXXXXXXX)
- * - `username` - LinkedIn vanity URLs (linkedin.com/in/username)
- * - `urn` - LinkedIn URNs (format: urn:li:member:123456)
+ * - `linkedin_handle` - LinkedIn vanity URLs (linkedin.com/in/username)
+ * - `linkedin_urn` - LinkedIn URNs (format: urn:li:member:123456)
  * - `twitter_handle` - Twitter/X usernames (@handle)
  */
 export type HandleType =
   | "phone"
   | "email"
   | "slack_id"
-  | "username"
-  | "urn"
+  | "linkedin_handle"
+  | "linkedin_urn"
   | "twitter_handle";
 
 /**

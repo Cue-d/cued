@@ -16,8 +16,8 @@ export const handleTypeValidator = v.union(
   v.literal("phone"),
   v.literal("email"),
   v.literal("slack_id"),
-  v.literal("username"),  // vanity URLs (linkedin)
-  v.literal("urn"),       // platform URNs (linkedin)
+  v.literal("linkedin_handle"),  // vanity URLs (linkedin)
+  v.literal("linkedin_urn"),     // platform URNs (linkedin)
   v.literal("twitter_handle")
 );
 
@@ -215,6 +215,9 @@ const schema = defineSchema({
     // Reasons: reason = heuristic/manual, llmReason = AI-generated explanation
     reason: v.optional(v.string()),
     llmReason: v.optional(v.string()),
+    // Embedding for similarity search (action intelligence)
+    embedding: v.optional(v.array(v.float64())),
+    embeddingInput: v.optional(v.string()), // Full formatted input for debugging
     // Timestamps
     createdAt: v.number(),
     snoozedUntil: v.optional(v.number()),
@@ -224,7 +227,13 @@ const schema = defineSchema({
     .index("by_user", ["userId"])
     .index("by_user_status", ["userId", "status"])
     .index("by_conversation_status", ["conversationId", "status"])
-    .index("by_contact", ["contactId"]),
+    .index("by_contact", ["contactId"])
+    .index("by_message", ["messageId"])
+    .vectorIndex("by_embedding", {
+      vectorField: "embedding",
+      dimensions: 1536,
+      filterFields: ["userId"],
+    }),
 
   actionAnalysisQueue: defineTable({
     conversationId: v.id("conversations"),

@@ -12,9 +12,6 @@ import {
   normalizePhone,
   getPhoneVariants,
   normalizeLinkedInHandle,
-  type SyncPlatform,
-  type HandleType,
-  type ContactHandleInput,
 } from "@prm/shared";
 import { normalizeEmail } from "@prm/ai";
 
@@ -46,6 +43,33 @@ export const BATCH_SIZE = 50;
  */
 export const MAX_NEW_CONNECTION_ACTIONS = 20;
 
+/**
+ * Platforms that support multiple workspaces (e.g., Slack teams, Gmail accounts).
+ * These require workspaceId in sync cursor operations.
+ */
+export const MULTI_WORKSPACE_PLATFORMS = ["slack", "gmail"] as const;
+
+// ============================================================================
+// Slack Helpers
+// ============================================================================
+
+/**
+ * Check if a Slack user ID belongs to a bot.
+ * Bot user IDs start with "B" or are the special USLACKBOT ID.
+ */
+export function isSlackBot(senderId: string): boolean {
+  // Bot user IDs start with "B" (e.g., B12345)
+  if (senderId.startsWith("B")) {
+    return true;
+  }
+
+  // Slackbot has a special user ID
+  if (senderId === "USLACKBOT") {
+    return true;
+  }
+
+  return false;
+}
 
 // ============================================================================
 // Shared Validators
@@ -137,6 +161,10 @@ export function normalizeHandle(handle: string): string {
   }
   return normalizePhone(handle);
 }
+
+// normalizeLinkedInHandle is imported from @prm/shared
+export { normalizeLinkedInHandle };
+
 // ============================================================================
 // User Management
 // ============================================================================
@@ -170,6 +198,17 @@ export async function getOrCreateUser(
 // Contact Management
 // ============================================================================
 
+/** Handle types for contact creation */
+type HandleType = "phone" | "email" | "slack_id" | "linkedin_handle" | "linkedin_urn" | "twitter_handle";
+
+/** Input for creating or finding a contact */
+export interface ContactHandleInput {
+  /** The raw handle value (phone, email, slack ID, LinkedIn URL, etc.) */
+  value: string;
+  /** The type of handle - determines normalization and storage */
+  type: HandleType;
+}
+
 /** Result from getOrCreateContact */
 export interface GetOrCreateContactResult {
   contactId: Id<"contacts">;
@@ -199,9 +238,10 @@ export async function getOrCreateContact(
   handles: ContactHandleInput[],
   displayName?: string,
   metadata?: { company?: string; notes?: string }
-): Promise<GetOrCreateContactResult> {
+): Promise<GetOrCreateContactResult | undefined> {
   if (handles.length === 0) {
-    throw new Error("getOrCreateContact requires at least one handle");
+    console.warn("[Sync] getOrCreateContact called with no handles");
+    return undefined;
   }
 
   // Normalize all handles and filter out empty results
@@ -218,9 +258,10 @@ export async function getOrCreateContact(
       return true;
     });
 
-  // If all handles normalized to empty, we can't create a contact
+  // If all handles normalized to empty, we can't create a contact - return undefined to allow caller to continue
   if (normalizedHandles.length === 0) {
-    throw new Error(`getOrCreateContact: all handles normalized to empty for ${handles.map(h => h.value).join(", ")}`);
+    console.warn(`[Sync] All handles normalized to empty for: ${handles.map(h => `"${h.value}" (${h.type})`).join(", ")}`);
+    return undefined;
   }
 
   // Try to find existing contact by any handle (with phone variants)
@@ -283,11 +324,10 @@ function normalizeHandleByType(value: string, type: HandleType): string {
       return normalizePhone(value);
     case "email":
       return normalizeEmail(value);
-    case "username":
-      // LinkedIn vanity URLs - extract and normalize
+    case "linkedin_handle":
       return normalizeLinkedInHandle(value);
-    case "urn":
-      // Platform URNs are already unique, just lowercase for consistency
+    case "linkedin_urn":
+      // LinkedIn URNs are already unique, just lowercase for consistency
       return value.toLowerCase();
     case "slack_id":
       // Slack IDs are already normalized (e.g., "U12345678")
@@ -431,7 +471,8 @@ export async function batchResolveHandles(
 // Sync Cursor Management
 // ============================================================================
 
-// SyncPlatform is now imported from @prm/shared
+/** Platform type for sync operations */
+type SyncPlatform = "imessage" | "gmail" | "slack" | "linkedin" | "twitter" | "signal" | "whatsapp";
 
 /** Options for upserting a sync cursor */
 export interface UpsertSyncCursorOptions {

@@ -15,10 +15,10 @@ import {
   type GetOrCreateContactResult,
   scheduleIncomingMessageEvents,
   SEVEN_DAYS_MS,
+  BATCH_SIZE,
   logSyncError,
+  isSlackBot,
 } from "./shared";
-import { batchFetchConversations, batchFetchMessages } from "./batchUtils";
-import { isSlackBot } from "./filters";
 
 // ============================================================================
 // Helper Functions
@@ -33,7 +33,7 @@ async function getOrCreateSlackContact(
   userId: Id<"users">,
   slackUserId: string,
   displayName?: string
-): Promise<GetOrCreateContactResult> {
+): Promise<GetOrCreateContactResult | undefined> {
   return getOrCreateContact(
     ctx,
     userId,
@@ -41,6 +41,67 @@ async function getOrCreateSlackContact(
     [{ value: slackUserId, type: "slack_id" }],
     displayName || slackUserId
   );
+}
+
+// ============================================================================
+// Batch Fetch Helpers
+// ============================================================================
+
+/**
+ * Batch fetch existing Slack conversations by channel ID.
+ */
+async function batchFetchSlackConversations(
+  ctx: MutationCtx,
+  userId: Id<"users">,
+  channelIds: string[]
+): Promise<Doc<"conversations">[]> {
+  const results: Doc<"conversations">[] = [];
+
+  for (let i = 0; i < channelIds.length; i += BATCH_SIZE) {
+    const batch = channelIds.slice(i, i + BATCH_SIZE);
+    const promises = batch.map((id) =>
+      ctx.db
+        .query("conversations")
+        .withIndex("by_platform_conversation", (q) =>
+          q
+            .eq("userId", userId)
+            .eq("platform", "slack")
+            .eq("platformConversationId", id)
+        )
+        .unique()
+    );
+    const batchResults = await Promise.all(promises);
+    results.push(...batchResults.filter((c): c is Doc<"conversations"> => c !== null));
+  }
+
+  return results;
+}
+
+/**
+ * Batch fetch existing Slack messages by timestamp.
+ */
+async function batchFetchSlackMessages(
+  ctx: MutationCtx,
+  userId: Id<"users">,
+  messageTs: string[]
+): Promise<Doc<"messages">[]> {
+  const results: Doc<"messages">[] = [];
+
+  for (let i = 0; i < messageTs.length; i += BATCH_SIZE) {
+    const batch = messageTs.slice(i, i + BATCH_SIZE);
+    const promises = batch.map((ts) =>
+      ctx.db
+        .query("messages")
+        .withIndex("by_platform_message", (q) =>
+          q.eq("userId", userId).eq("platform", "slack").eq("platformMessageId", ts)
+        )
+        .unique()
+    );
+    const batchResults = await Promise.all(promises);
+    results.push(...batchResults.filter((m): m is Doc<"messages"> => m !== null));
+  }
+
+  return results;
 }
 
 // ============================================================================
@@ -147,8 +208,10 @@ export async function syncSlackConversationsInternal(
       let participantContactIds: Id<"contacts">[] = [];
       if (conv.isIm && conv.userId) {
         const contactResult = await getOrCreateSlackContact(ctx, userId, conv.userId);
-        participantContactIds = [contactResult.contactId];
-        if (contactResult.created) result.contactsCreated++;
+        if (contactResult) {
+          participantContactIds = [contactResult.contactId];
+          if (contactResult.created) result.contactsCreated++;
+        }
       }
 
       // Build display name
@@ -241,7 +304,7 @@ export async function syncSlackNativeMessagesInternal(
           user.slackUserId,
           user.displayName
         );
-        if (contactResult.created) {
+        if (contactResult?.created) {
           result.contactsCreated++;
         }
       } catch (e) {
@@ -260,12 +323,12 @@ export async function syncSlackNativeMessagesInternal(
 
   // Batch fetch existing messages
   const messageTs = messages.map((m) => m.ts);
-  const existingMessages = await batchFetchMessages(ctx, userId, "slack", messageTs);
+  const existingMessages = await batchFetchSlackMessages(ctx, userId, messageTs);
   const existingMessageSet = new Set(existingMessages.map((m) => m.platformMessageId));
 
   // Batch fetch conversations
   const channelIds = [...messagesByChannel.keys()];
-  const existingConversations = await batchFetchConversations(ctx, userId, "slack", channelIds);
+  const existingConversations = await batchFetchSlackConversations(ctx, userId, channelIds);
   const conversationMap = new Map(
     existingConversations.map((c) => [c.platformConversationId, c._id])
   );
@@ -324,7 +387,7 @@ export async function syncSlackNativeMessagesInternal(
             msg.userId,
             msg.userName // Pass display name if available
           );
-          senderContactId = contactResult.contactId;
+          senderContactId = contactResult?.contactId;
         }
 
         // Map reactions and check if user reacted

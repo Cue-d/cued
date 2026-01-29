@@ -1,3 +1,4 @@
+"use node";
 /**
  * Resolve contact action handler.
  * Handles merging duplicate contacts.

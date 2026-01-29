@@ -4,6 +4,20 @@
  */
 
 /**
+ * Attachment metadata for a message.
+ */
+export interface MessageAttachment {
+  /** Original filename, if available */
+  filename: string | null;
+  /** MIME type of the attachment */
+  mimeType: string | null;
+  /** URL to access the attachment */
+  url: string | null;
+  /** URL to a thumbnail preview, if available */
+  thumbnailUrl?: string | null;
+}
+
+/**
  * Message data for display in the action queue.
  * Represents a single message in a conversation thread.
  */
@@ -22,6 +36,8 @@ export interface DisplayMessage {
   status?: string | null;
   /** Reaction emojis on this message */
   reactions?: string[] | null;
+  /** File attachments */
+  attachments?: MessageAttachment[] | null;
 }
 
 /**
@@ -76,14 +92,14 @@ export interface EnrichedAction {
   secondaryContactId: string | null;
   /** Secondary contact display name */
   secondaryContactName: string | null;
+  /** Merge suggestion ID (for resolve_contact actions) */
+  mergeSuggestionId: string | null;
   /** Merge confidence score */
-  mergeConfidence?: number | null;
+  mergeConfidence: number | null;
   /** Source of merge suggestion */
-  mergeSource?: string | null;
+  mergeSource: string | null;
   /** Reasoning for merge */
-  mergeReasoning?: string | null;
-  /** Merge suggestion ID */
-  mergeSuggestionId?: string | null;
+  mergeReasoning: string | null;
   /** Platform (imessage, gmail, etc.) */
   platform: string | null;
 }

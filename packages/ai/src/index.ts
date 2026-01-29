@@ -83,6 +83,15 @@ export {
   type CalculatePriorityInput,
 } from "./filters";
 
+// Embedding utilities for action intelligence
+export {
+  buildEmbeddingInput,
+  embedText,
+  embedTexts,
+  type MessageContext,
+  type EmbeddingMetadata,
+} from "./embeddings";
+
 // Task 6.0a/6.0b: Contact resolution utilities
 export {
   normalizeEmail,

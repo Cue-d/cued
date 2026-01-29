@@ -115,7 +115,7 @@ export async function getProfilesByMemberIds(
         if (item.$type === 'com.linkedin.voyager.dash.identity.profile.Profile' ||
             item.$type === 'com.linkedin.voyager.identity.shared.MiniProfile') {
           // Extract member ID from entityUrn
-          const memberIdMatch = item.entityUrn?.match(/urn:li:(?:fsd_profile|member):([^,)]+)/)
+          const memberIdMatch = item.entityUrn?.match(/urn:li:(?:fsd_profile|fs_miniProfile|member):([^,)]+)/)
           if (memberIdMatch) {
             const id = memberIdMatch[1]
             profileMap.set(id, {
@@ -148,7 +148,7 @@ export async function getProfilesByURNs(
   urns: string[]
 ): Promise<(ProfileLookupResult | null)[]> {
   const memberIds = urns.map((urn) => {
-    const match = urn.match(/urn:li:(?:fsd_profile|member):([^,)]+)/)
+    const match = urn.match(/urn:li:(?:fsd_profile|fs_miniProfile|member):([^,)]+)/)
     return match?.[1] ?? ''
   }).filter(Boolean)
 

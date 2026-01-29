@@ -152,10 +152,15 @@ export async function syncMessagesInternal(
             const result = await getOrCreateContact(ctx, userId, "imessage", [
               { value: participant.identifier, type: handleType },
             ]);
-            contactId = result.contactId;
-            handleToContact.set(normalizedHandle, contactId);
+            if (result) {
+              contactId = result.contactId;
+              handleToContact.set(normalizedHandle, contactId);
+            }
+            // If result is undefined, handle was invalid - skip this participant
           }
-          participantContactIds.push(contactId);
+          if (contactId) {
+            participantContactIds.push(contactId);
+          }
         }
 
         // For group chats without explicit name, concatenate participant names
@@ -236,8 +241,11 @@ export async function syncMessagesInternal(
         const result = await getOrCreateContact(ctx, userId, "imessage", [
           { value: message.sender.identifier, type: handleType },
         ]);
-        senderContactId = result.contactId;
-        handleToContact.set(normalizedHandle, senderContactId);
+        if (result) {
+          senderContactId = result.contactId;
+          handleToContact.set(normalizedHandle, senderContactId);
+        }
+        // If result is undefined, handle was invalid - continue without sender contact
       }
     }
 

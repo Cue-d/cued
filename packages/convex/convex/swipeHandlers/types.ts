@@ -1,3 +1,4 @@
+"use node";
 /**
  * Types for action swipe handlers.
  * Each action type implements these interfaces for backend processing.

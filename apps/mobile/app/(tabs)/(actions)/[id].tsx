@@ -159,8 +159,6 @@ export default function ActionDetailScreen(): React.JSX.Element {
     [id, router, swipeAction, responseText],
   );
 
-  // Note: Response text starts empty - no auto-drafting
-
   // Loading state
   if (!data) {
     return (

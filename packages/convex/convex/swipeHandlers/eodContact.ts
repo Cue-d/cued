@@ -1,3 +1,4 @@
+"use node";
 /**
  * End of Day contact action handler.
  * Handles reviewing/updating contact info at end of day.
