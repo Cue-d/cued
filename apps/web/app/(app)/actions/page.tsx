@@ -3,16 +3,14 @@
 import * as React from "react"
 import { useQuery, useMutation } from "convex/react"
 import { api } from "@prm/convex"
-import { type EnrichedAction, type ContactHandle, type DisplayMessage } from "@prm/shared"
+import { type EnrichedAction } from "@prm/shared"
 import {
   CardStack,
-  MessageResponseCard,
-  ResolveContactCard,
   ActionFilterChips,
   ACTION_FILTER_GROUPS,
   type SwipeDirection,
   type FilterGroup,
-  type MergeSource,
+  type ActionContext,
 } from "@prm/ui"
 import { Button, Skeleton } from "@prm/ui"
 import type { Id } from "@prm/convex"
@@ -80,19 +78,6 @@ export default function ActionsPage() {
     }
   }, [triggerScan])
 
-  // Track response texts locally (optimistic)
-  const [responseTexts, setResponseTexts] = React.useState<
-    Record<string, string>
-  >({})
-
-  // Handle response text changes
-  const handleResponseChange = React.useCallback(
-    (actionId: string, text: string) => {
-      setResponseTexts((prev) => ({ ...prev, [actionId]: text }))
-    },
-    []
-  )
-
   // Handle swipe
   const handleSwipe = React.useCallback(
     async (
@@ -107,13 +92,6 @@ export default function ActionsPage() {
           direction,
           responseText,
           snoozedUntil,
-        })
-
-        // Clean up local state
-        setResponseTexts((prev) => {
-          const next = { ...prev }
-          delete next[actionId]
-          return next
         })
       } catch (error) {
         console.error("Failed to swipe action:", error)
@@ -193,130 +171,12 @@ export default function ActionsPage() {
         </div>
       </div>
 
-      {/* Card Stack */}
+      {/* Card Stack - using internal registry via topActionContext */}
       <CardStack<ActionWithId>
         actions={cardActions}
         totalCount={filterTypes ? actions.length : totalCount}
         onSwipe={handleSwipe}
-        renderCard={(item, { isTop, responseText, onResponseChange }) => {
-          // Handle resolve_contact actions with dedicated card
-          if (item.action.type === "resolve_contact") {
-            // For resolve_contact, use context to get both contacts with handles
-            if (isTop && contextResult) {
-              const { contact, secondaryContact } = contextResult
-
-              // Map handles to ContactHandle format (context uses handleType/handle fields)
-              const mapHandles = (handles: Array<{ handleType: string; handle: string; platform: string }> | undefined): ContactHandle[] => {
-                if (!handles) return []
-                return handles.map((h) => ({
-                  type: h.handleType as ContactHandle["type"],
-                  value: h.handle,
-                  platform: h.platform as ContactHandle["platform"],
-                }))
-              }
-
-              return (
-                <ResolveContactCard
-                  contact1={{
-                    name: contact?.displayName ?? item.action.contactName ?? "Unknown",
-                    company: contact?.company,
-                    handles: mapHandles(contact?.handles),
-                  }}
-                  contact2={{
-                    name: secondaryContact?.displayName ?? item.action.secondaryContactName ?? "Unknown",
-                    company: secondaryContact?.company,
-                    handles: mapHandles(secondaryContact?.handles),
-                  }}
-                  confidence={item.action.mergeConfidence ?? 0}
-                  source={(item.action.mergeSource ?? "email_match") as MergeSource}
-                  reasoning={item.action.mergeReasoning}
-                  className="h-full"
-                />
-              )
-            }
-
-            // Minimal view for non-top resolve_contact cards
-            return (
-              <ResolveContactCard
-                contact1={{
-                  name: item.action.contactName ?? "Unknown",
-                  company: null,
-                  handles: [],
-                }}
-                contact2={{
-                  name: item.action.secondaryContactName ?? "Unknown",
-                  company: null,
-                  handles: [],
-                }}
-                confidence={item.action.mergeConfidence ?? 0}
-                source={(item.action.mergeSource ?? "email_match") as MergeSource}
-                reasoning={item.action.mergeReasoning}
-                className="h-full"
-              />
-            )
-          }
-
-          // Use local state if available, otherwise fall back to prop
-          const text = responseTexts[item.id] ?? responseText ?? ""
-
-          // For top card, use full context if available
-          if (isTop && contextResult) {
-            const { contact, conversation, messages } = contextResult
-            // For groups/channels, use conversation displayName; for DMs use contact
-            const isGroup = conversation?.conversationType !== "dm"
-            const personName = isGroup
-              ? (conversation?.displayName ?? item.action.contactName ?? "Group Chat")
-              : (contact?.displayName ?? item.action.contactName ?? "Unknown")
-
-            // Map messages to DisplayMessage format
-            const displayMessages: DisplayMessage[] = messages.map((msg) => ({
-              _id: msg._id,
-              content: msg.content,
-              sentAt: msg.sentAt,
-              isFromMe: msg.isFromMe,
-              senderName: msg.senderName,
-              status: msg.status,
-              // Extract emoji strings from reaction objects
-              reactions: msg.reactions?.map((r) => r.emoji) ?? null,
-            }))
-
-            // Get message timestamp from latest non-self message
-            const latestReceivedMsg = [...messages]
-              .reverse()
-              .find((m) => !m.isFromMe)
-            const messageTimestamp = latestReceivedMsg?.sentAt
-
-            return (
-              <MessageResponseCard
-                personName={personName}
-                messageTimestamp={messageTimestamp}
-                messages={displayMessages}
-                responseText={text}
-                onResponseChange={(newText) => {
-                  onResponseChange(newText)
-                  handleResponseChange(item.id, newText)
-                }}
-                autoFocus={isTop}
-                className="h-full"
-              />
-            )
-          }
-
-          // For non-top cards or while loading context, show minimal view
-          return (
-            <MessageResponseCard
-              personName={item.action.contactName ?? "Unknown"}
-              messages={[]}
-              responseText={text}
-              onResponseChange={(newText) => {
-                onResponseChange(newText)
-                handleResponseChange(item.id, newText)
-              }}
-              autoFocus={false}
-              className="h-full"
-            />
-          )
-        }}
+        topActionContext={contextResult as ActionContext | null}
       />
     </div>
   )

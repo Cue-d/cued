@@ -96,7 +96,7 @@ function toActionPlatform(platform: string): ActionPlatform | null {
 const SENDABLE_HANDLE_TYPES: Record<string, string> = {
   imessage: "phone",
   gmail: "email",
-  linkedin: "linkedin_id",
+  linkedin: "username",
   slack: "slack_id",
 }
 
@@ -402,9 +402,8 @@ export default function ContactsPage() {
           </div>
         </div>
         <div className="flex-1 overflow-y-auto">
-          <div className="mx-auto max-w-2xl space-y-6 p-6">
-            <Skeleton className="h-8 w-48" />
-            <div className="grid gap-4">
+          <div className="mx-auto max-w-2xl space-y-8 p-6">
+            <div className="space-y-4">
               <Skeleton className="h-16 w-full rounded-xl" />
               <Skeleton className="h-16 w-full rounded-xl" />
               <Skeleton className="h-16 w-full rounded-xl" />
@@ -439,33 +438,28 @@ export default function ContactsPage() {
             </div>
             <Button
               variant="outline"
+              size="icon"
+              onClick={handleTriggerScan}
+              disabled={isScanning}
+              title="Scan for duplicate contacts"
+            >
+              {isScanning ? (
+                <Loader2 className="w-4 h-4 animate-spin" />
+              ) : (
+                <ScanSearch className="w-4 h-4" />
+              )}
+            </Button>
+            <Button
+              variant="outline"
+              size="icon"
               onClick={handleClearSuggestions}
               disabled={isClearing}
-              className="gap-2 shrink-0"
-              title="Clear all pending merge suggestions"
+              title="Clear pending merge suggestions"
             >
               {isClearing ? (
                 <Loader2 className="w-4 h-4 animate-spin" />
               ) : (
                 <Trash2 className="w-4 h-4" />
-              )}
-            </Button>
-            <Button
-              variant="outline"
-              onClick={handleTriggerScan}
-              disabled={isScanning}
-              className="gap-2 shrink-0"
-            >
-              {isScanning ? (
-                <>
-                  <Loader2 className="w-4 h-4 animate-spin" />
-                  Scanning...
-                </>
-              ) : (
-                <>
-                  <ScanSearch className="w-4 h-4" />
-                  Find Duplicates
-                </>
               )}
             </Button>
           </div>

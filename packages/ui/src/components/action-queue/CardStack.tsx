@@ -3,18 +3,23 @@
 import * as React from "react"
 import { PartyPopper } from "lucide-react"
 import { AnimatePresence, motion } from "motion/react"
+import { renderActionCard } from "../../actions/cards/registry"
+import type { ActionContext } from "../../actions/types"
 import { cn } from "../../lib/utils"
 import {
   Tooltip,
   TooltipContent,
   TooltipTrigger,
 } from "../ui/tooltip"
+import type { EnrichedAction } from "@prm/shared"
 
 export type SwipeDirection = "left" | "right" | "up"
 
 export interface ActionItem {
   id: string
   type: string
+  /** Enriched action data (required when using internal registry) */
+  action?: EnrichedAction
   [key: string]: unknown
 }
 
@@ -30,8 +35,11 @@ export interface CardStackProps<T extends ActionItem> {
     responseText?: string,
     snoozedUntil?: number
   ) => Promise<void>
-  /** Render function for each card's content */
-  renderCard: (
+  /**
+   * Render function for each card's content.
+   * Optional when actions include EnrichedAction data - will use internal registry.
+   */
+  renderCard?: (
     action: T,
     options: {
       isTop: boolean
@@ -40,6 +48,8 @@ export interface CardStackProps<T extends ActionItem> {
       autoFocus: boolean
     }
   ) => React.ReactNode
+  /** Context for the top action (only needed when using internal registry) */
+  topActionContext?: ActionContext | null
   /** Optional custom empty state */
   emptyState?: React.ReactNode
   /** Optional class name for container */
@@ -51,12 +61,14 @@ const VISIBLE_CARDS = 3
 /**
  * CardStack component for the action queue.
  * Displays a stack of cards with animations and keyboard navigation.
+ * Can use either a custom renderCard function or the internal card registry.
  */
 export function CardStack<T extends ActionItem>({
   actions,
   totalCount,
   onSwipe,
   renderCard,
+  topActionContext,
   emptyState,
   className,
 }: CardStackProps<T>) {
@@ -267,12 +279,24 @@ export function CardStack<T extends ActionItem>({
                     !isTop && "pointer-events-none opacity-80"
                   )}
                 >
-                  {renderCard(action, {
-                    isTop,
-                    responseText: responseTexts[action.id] || "",
-                    onResponseChange: (text) => handleResponseChange(action.id, text),
-                    autoFocus: false,
-                  })}
+                  {renderCard
+                    ? renderCard(action, {
+                        isTop,
+                        responseText: responseTexts[action.id] || "",
+                        onResponseChange: (text) => handleResponseChange(action.id, text),
+                        autoFocus: false,
+                      })
+                    : action.action
+                      ? renderActionCard({
+                          action: action.action,
+                          isTop,
+                          context: isTop ? topActionContext : null,
+                          responseText: responseTexts[action.id] || "",
+                          onResponseChange: (text) => handleResponseChange(action.id, text),
+                          autoFocus: false,
+                          className: "h-full",
+                        })
+                      : null}
                 </div>
               </motion.div>
             )

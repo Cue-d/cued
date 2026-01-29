@@ -45,7 +45,7 @@ export type {
   ContactHandleInput,
 } from "./types/contact.js";
 
-// Action constants
+// Action constants (legacy - use action registry for new code)
 export {
   ACTION_TYPES,
   MESSAGE_ACTION_TYPES,
@@ -54,6 +54,35 @@ export {
   isContactActionType,
   type ActionType,
 } from "./constants/actions.js";
+
+// Action Registry (preferred)
+export {
+  // Types
+  type ActionIcon,
+  type SwipeLabels,
+  type ActionMetadata,
+  type ValidationContext,
+  type ActionDefinition,
+  type ActionRegistryType,
+  type RegisteredActionType,
+  // Input types
+  type MessageResponseInput,
+  type NewConnectionInput,
+  type ResolveContactInput,
+  type EODContactInput,
+  // Registry
+  ACTION_REGISTRY,
+  // Helpers
+  getActionMetadata,
+  getActionDefinition,
+  isMessageAction,
+  isContactAction,
+  getActionTypesByCategory,
+  getAllActionTypes,
+  getSwipeLabels,
+  hasResponseInput,
+  hasContactForm,
+} from "./actions/registry.js";
 
 // Platform adapter types (for message queue)
 export type {

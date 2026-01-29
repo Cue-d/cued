@@ -8,6 +8,9 @@ export type {
   SwipeDirection,
 } from "./CardStack"
 
+// Re-export ActionContext for convenience
+export type { ActionContext } from "../../actions/types"
+
 export { SwipeableCard } from "./swipeable-card"
 export type { SwipeableCardProps } from "./swipeable-card"
 

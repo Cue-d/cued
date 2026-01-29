@@ -1,8 +1,13 @@
 import * as React from "react"
+import { getActionTypesByCategory } from "@prm/shared"
 import { cn } from "../../lib/utils"
 import { Button } from "../ui/button"
 
-/** Filter group definitions */
+// Derive filter groups from the action registry
+const messageTypes = getActionTypesByCategory("message")
+const contactTypes = getActionTypesByCategory("contact")
+
+/** Filter group definitions - derived from action registry */
 export const ACTION_FILTER_GROUPS = {
   all: {
     label: "All",
@@ -10,15 +15,20 @@ export const ACTION_FILTER_GROUPS = {
   },
   messages: {
     label: "Messages",
-    types: ["respond", "send_message"],
+    // respond, send_message (message category actions for direct responses)
+    types: messageTypes.filter((t) => t === "respond" || t === "send_message"),
   },
   contacts: {
     label: "Contacts",
-    types: ["resolve_contact", "new_connection"],
+    // resolve_contact, new_connection (contact actions for contact management)
+    types: contactTypes.filter((t) => t === "resolve_contact" || t === "new_connection"),
   },
   followups: {
     label: "Follow-ups",
-    types: ["follow_up", "eod_contact"],
+    // follow_up, eod_contact (remaining actions for scheduled follow-ups)
+    types: [...messageTypes, ...contactTypes].filter(
+      (t) => t === "follow_up" || t === "eod_contact"
+    ),
   },
 } as const
 

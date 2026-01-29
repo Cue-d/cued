@@ -189,7 +189,7 @@ export const findDuplicateCandidatesInternal = internalQuery({
           }
         }
       }
-      // Skip other handle types (linkedin_id, slack_id, etc.) - they're not used for merge matching
+      // Skip other handle types (username, slack_id, etc.) - they're not used for merge matching
     }
 
     // Also index displayNames that look like email/phone (for contacts without proper handles)
@@ -291,7 +291,7 @@ export const findDuplicateCandidatesInternal = internalQuery({
     }
 
     // Helper: Check if two contacts have conflicting unique identifiers
-    // Only considers phones and linkedin_id as "unique" - emails are excluded since
+    // Only considers phones and LinkedIn usernames as "unique" - emails are excluded since
     // people often have multiple emails (work/personal) for the same person
     // Uses phonesMatch for proper phone variant handling (+1 vs 10-digit)
     const hasConflictingHandles = (
@@ -300,9 +300,9 @@ export const findDuplicateCandidatesInternal = internalQuery({
     ): boolean => {
       if (!handles1 || !handles2) return false;
 
-      // Only check truly unique identifiers: phone, linkedin_id
+      // Only check truly unique identifiers: phone, username (LinkedIn)
       // Emails excluded - people often have work + personal emails
-      const uniqueTypes = ["phone", "linkedin_id"];
+      const uniqueTypes = ["phone", "username"];
 
       // Group handles by type
       const byType1 = new Map<string, string[]>();
@@ -337,7 +337,7 @@ export const findDuplicateCandidatesInternal = internalQuery({
               return true; // Different phones = conflict
             }
           } else {
-            // For linkedin_id, use lowercase comparison
+            // For username (LinkedIn), use lowercase comparison
             if (v1.toLowerCase() !== v2.toLowerCase()) {
               return true;
             }

@@ -526,6 +526,7 @@ const swipeDirectionValidator = v.union(
 
 /**
  * Handle swipe action with platform routing.
+ * Uses the action handler registry to dispatch to the appropriate handler.
  * - left: discard action
  * - right: complete/send message
  * - up: snooze action until specified time
@@ -538,6 +539,8 @@ export const swipeAction = mutation({
     responseText: v.optional(v.string()), // Optional response text for direction='right'
   },
   handler: async (ctx, args) => {
+    const { executeSwipeHandler } = await import("./actions/handlers/registry");
+
     const user = await requireAuthenticatedUser(ctx);
     const now = Date.now();
 
@@ -548,274 +551,42 @@ export const swipeAction = mutation({
 
     const wasPending = action.status === "pending";
 
-    switch (args.direction) {
-      case "left": {
-        if (action.type === "resolve_contact" && action.mergeSuggestionId) {
-          await ctx.db.patch(action.mergeSuggestionId, {
-            status: "rejected",
-            resolvedAt: now,
-          });
-        }
+    // Execute the handler for this action type
+    const result = await executeSwipeHandler(
+      action.type,
+      args.direction,
+      { ctx, user, action, now },
+      { responseText: args.responseText, snoozedUntil: args.snoozedUntil }
+    );
 
-        // Task 8.7: Mark new_connection contact as "not important" (-1)
-        if (action.type === "new_connection" && action.contactId) {
-          await ctx.db.patch(action.contactId, {
-            importance: -1,
-          });
-        }
-
-        // Discard action
-        await ctx.db.patch(args.actionId, {
-          status: "discarded",
-          discardedAt: now,
-        });
-
-        // Decrement counter if was pending
-        if (wasPending) {
-          await adjustPendingActionCount(ctx, user._id, -1);
-        }
-
-        return { success: true, status: "discarded" };
-      }
-
-      case "up": {
-        // Snooze action
-        if (!args.snoozedUntil) {
-          throw new Error("snoozedUntil is required for snooze action");
-        }
-        await ctx.db.patch(args.actionId, {
-          status: "snoozed",
-          snoozedUntil: args.snoozedUntil,
-        });
-
-        // Decrement counter if was pending
-        if (wasPending) {
-          await adjustPendingActionCount(ctx, user._id, -1);
-        }
-
-        return { success: true, status: "snoozed", snoozedUntil: args.snoozedUntil };
-      }
-
-      case "right": {
-        if (action.type === "resolve_contact") {
-          if (!action.contactId || !action.secondaryContactId) {
-            throw new Error("resolve_contact action missing contact IDs");
-          }
-
-          // Get the merge source from the suggestion if available
-          let mergeSource:
-            | "email_match"
-            | "phone_match"
-            | "exact_name_match"
-            | "fuzzy_name_match"
-            | "llm_fuzzy_match" = "email_match";
-          if (action.mergeSuggestionId) {
-            const suggestion = await ctx.db.get(action.mergeSuggestionId);
-            if (suggestion) {
-              mergeSource = suggestion.source;
-            }
-          }
-
-          await ctx.scheduler.runAfter(
-            0,
-            internal.contactResolution.autoMergeContacts,
-            {
-              primaryContactId: action.contactId,
-              secondaryContactId: action.secondaryContactId,
-              source: mergeSource,
-              reasoning: "User approved merge via action swipe",
-            }
-          );
-
-          if (action.mergeSuggestionId) {
-            await ctx.db.patch(action.mergeSuggestionId, {
-              status: "approved",
-              resolvedAt: now,
-            });
-          }
-
-          await ctx.db.patch(args.actionId, {
-            status: "completed",
-            completedAt: now,
-          });
-
-          // Decrement counter if was pending
-          if (wasPending) {
-            await adjustPendingActionCount(ctx, user._id, -1);
-          }
-
-          return {
-            success: true,
-            status: "completed",
-            merged: true,
-            primaryContactId: action.contactId,
-          };
-        }
-
-        // Task 8.7: Handle new_connection - save notes to contact
-        if (action.type === "new_connection" && action.contactId) {
-          // Save responseText as notes on the contact
-          if (args.responseText) {
-            await ctx.db.patch(action.contactId, {
-              notes: args.responseText,
-            });
-          }
-
-          await ctx.db.patch(args.actionId, {
-            status: "completed",
-            completedAt: now,
-          });
-
-          // Decrement counter if was pending
-          if (wasPending) {
-            await adjustPendingActionCount(ctx, user._id, -1);
-          }
-
-          return {
-            success: true,
-            status: "completed",
-            contactId: action.contactId,
-            notesSaved: !!args.responseText,
-          };
-        }
-
-        // Complete action and potentially send message
-        const responseText = args.responseText;
-
-        // Get conversation to determine platform
-        const conversation = action.conversationId
-          ? await ctx.db.get(action.conversationId)
-          : null;
-        const platform = (action.platform ?? conversation?.platform) as
-          | "imessage"
-          | "gmail"
-          | "slack"
-          | "linkedin"
-          | "twitter"
-          | "signal"
-          | "whatsapp"
-          | undefined;
-
-        let messageSent = false;
-        let queuedMessageId: Id<"messageQueue"> | null = null;
-
-        // Handle iMessage, LinkedIn, and Slack sending via unified message queue
-        // These platforms have Electron adapters and support undo via the queue
-        if (
-          (platform === "imessage" || platform === "linkedin" || platform === "slack") &&
-          responseText &&
-          conversation
-        ) {
-          // Get recipient info from conversation
-          const isGroup =
-            conversation.conversationType === "group" ||
-            conversation.conversationType === "channel";
-
-          // For groups, we need the chat identifier (from platformConversationId)
-          // For 1:1, we need the recipient's handle
-          let recipientHandle = "";
-          let recipientContactId: Id<"contacts"> | undefined;
-          // Slack always needs chatIdentifier (channel ID) for both DMs and channels
-          let chatIdentifier: string | undefined;
-
-          if (platform === "slack") {
-            // Slack uses platformConversationId (channel ID) for all messages
-            chatIdentifier = conversation.platformConversationId;
-            // For Slack DMs, get the contact info
-            if (!isGroup && conversation.participantContactIds.length > 0) {
-              recipientContactId = conversation.participantContactIds[0];
-            }
-          } else if (!isGroup && conversation.participantContactIds.length > 0) {
-            // Get the first participant's handle for 1:1 chats (iMessage/LinkedIn)
-            const participantId = conversation.participantContactIds[0];
-            recipientContactId = participantId;
-
-            // For iMessage, get the phone/email handle
-            // For LinkedIn, the platformConversationId is the thread URN
-            if (platform === "imessage") {
-              const handleDoc = await ctx.db
-                .query("contactHandles")
-                .withIndex("by_contact", (q) => q.eq("contactId", participantId))
-                .filter((q) => q.eq(q.field("platform"), "imessage"))
-                .first();
-
-              if (handleDoc) {
-                recipientHandle = handleDoc.handle;
-              }
-            } else if (platform === "linkedin") {
-              // LinkedIn uses platformConversationId (thread URN) as chatIdentifier
-              // The LinkedIn adapter expects threadId which maps to chatIdentifier
-              chatIdentifier = conversation.platformConversationId;
-              recipientHandle = conversation.platformConversationId ?? "";
-            }
-          } else if (isGroup) {
-            // For iMessage groups, use platformConversationId
-            // (LinkedIn groups are handled above)
-            chatIdentifier = conversation.platformConversationId;
-          }
-
-          // Queue message for Electron to send (with undo window based on user settings)
-          // Slack: always has chatIdentifier
-          // iMessage/LinkedIn: needs recipientHandle for DMs or isGroup for group chats
-          if (chatIdentifier || recipientHandle || isGroup) {
-            const delaySeconds = user.undoSendDelaySeconds ?? 30;
-            const scheduledFor = now + delaySeconds * 1000;
-
-            const messageId = await ctx.db.insert("messageQueue", {
-              userId: user._id,
-              platform,
-              recipientHandle,
-              recipientContactId,
-              text: responseText,
-              isGroup,
-              chatIdentifier,
-              conversationId: conversation._id,
-              actionId: args.actionId,
-              workspaceId: conversation.workspaceId,
-              status: "pending",
-              scheduledFor,
-              attempts: 0,
-              createdAt: now,
-            });
-
-            // Schedule markReady to trigger subscription update when undo window expires
-            await ctx.scheduler.runAt(
-              scheduledFor,
-              internal.messageQueue.markReady,
-              { messageId }
-            );
-
-            queuedMessageId = messageId;
-            messageSent = true;
-          }
-        }
-
-        // Note: Gmail uses Nango server-side actions (not the message queue)
-        // Gmail sending is not yet integrated with the new queue system
-
-        // Mark action as completed
-        await ctx.db.patch(args.actionId, {
-          status: "completed",
-          completedAt: now,
-        });
-
-        // Decrement counter if was pending
-        if (wasPending) {
-          await adjustPendingActionCount(ctx, user._id, -1);
-        }
-
-        return {
-          success: true,
-          status: "completed",
-          platform,
-          messageSent,
-          queuedMessageId,
-          responseText,
-        };
-      }
-
-      default:
-        throw new Error(`Unknown swipe direction: ${args.direction}`);
+    // Update action status based on handler result
+    const updates: Partial<Doc<"actions">> = { status: result.status };
+    if (result.status === "completed") {
+      updates.completedAt = now;
+    } else if (result.status === "discarded") {
+      updates.discardedAt = now;
+    } else if (result.status === "snoozed" && args.snoozedUntil) {
+      updates.snoozedUntil = args.snoozedUntil;
     }
+    await ctx.db.patch(args.actionId, updates);
+
+    // Adjust pending action count if was pending (handlers always return non-pending status)
+    if (wasPending) {
+      await adjustPendingActionCount(ctx, user._id, -1);
+    }
+
+    // Build return with explicit optional fields for TypeScript
+    const response: {
+      success: boolean;
+      status: "completed" | "discarded" | "snoozed";
+      queuedMessageId?: string;
+      [key: string]: unknown;
+    } = {
+      success: result.success,
+      status: result.status,
+      ...result.data,
+    };
+
+    return response;
   },
 });

@@ -2,6 +2,12 @@ export * from "./components/ui"
 export * from "./components/unified-inbox"
 export * from "./components/assistant"
 export * from "./components/action-queue"
+// Action card registry
+export type { ActionContext, ActionCardProps, ActionCardComponent } from "./actions/types"
+export { MessageCard, RespondCard, FollowUpCard, SendMessageCard } from "./actions/cards/message-card"
+export { ResolveContactCardWrapper } from "./actions/cards/resolve-contact-card-wrapper"
+export { ContactCardWrapper, NewConnectionCard, EODContactCard } from "./actions/cards/contact-card-wrapper"
+export { getCardComponent, renderActionCard, hasCardComponent } from "./actions/cards/registry"
 
 // ai-elements - shadcn registry components for AI chat interfaces
 export {
