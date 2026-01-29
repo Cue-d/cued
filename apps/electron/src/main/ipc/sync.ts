@@ -391,7 +391,7 @@ function setupSlackHandlers(_mainWindow: BrowserWindow | null): void {
   // List workspaces
   ipcMain.handle(
     "sync:slack:listWorkspaces",
-    async (): Promise<{ workspaces: SlackWorkspaceInfo[] }> => {
+    async (): Promise<{ workspaces: SlackWorkspaceInfo[]; error?: string }> => {
       try {
         const allCredentials = getAllSlackCredentials();
         const workspaces: SlackWorkspaceInfo[] = allCredentials.map((creds) => {

@@ -9,17 +9,20 @@
  * 2. Returns a SyncResult with messagesSynced/contactsSynced counts
  */
 
+import { api } from '@prm/convex'
 import { type SyncResult, type SyncFunction } from './types'
 import { getIMessageSyncManager } from '../platforms/imessage'
 import {
   getLinkedInSyncManager,
   type LinkedInScraper,
+  type IncrementalScrapeResult,
 } from '../platforms/linkedin'
 import {
   getSlackSyncManager,
   getAllSlackCredentials,
 } from '../platforms/slack'
 import { syncContactsToConvex } from '../platforms/contacts/sync'
+import { createConvexClient, setConvexAuth } from './cursor'
 
 // ============================================================================
 // Types
@@ -187,22 +190,99 @@ export function createLinkedInMessagesSyncFn(
 
 /**
  * Create sync function for LinkedIn contacts.
- *
- * Note: LinkedIn contacts are discovered and synced as part of message sync
- * (conversations include participant info). This placeholder ensures the
- * contacts phase has a LinkedIn actor to satisfy the two-phase barrier,
- * but the actual contact syncing happens in createLinkedInMessagesSyncFn.
+ * Uses incremental scraping to fetch new connections since last sync.
  */
 export function createLinkedInContactsSyncFn(
   options: SyncFunctionOptions
 ): SyncFunction {
   return async (): Promise<SyncResult> => {
-    console.log('[LinkedInContactsSync] Skipping - contacts synced with messages')
-    // LinkedIn contacts are discovered from conversation participants during message sync.
-    // This placeholder satisfies the two-phase architecture requirement.
-    return {
-      success: true,
-      contactsSynced: 0,
+    if (!options.linkedInScraper) {
+      return {
+        success: false,
+        error: 'LinkedIn scraper not provided',
+      }
+    }
+
+    // Check if logged in
+    const isLoggedIn = await options.linkedInScraper.checkLoginStatus()
+    if (!isLoggedIn) {
+      return {
+        success: false,
+        error: 'LinkedIn not logged in',
+      }
+    }
+
+    try {
+      // Initialize scraper for contacts sync (sets up Convex client with auth)
+      const initialized = await options.linkedInScraper.initializeForContactsSync()
+      if (!initialized) {
+        return {
+          success: false,
+          error: 'Failed to initialize LinkedIn contacts sync - not authenticated',
+        }
+      }
+
+      // Scrape connections incrementally (uses anchor-based cursor)
+      console.log('[LinkedInContactsSync] Starting incremental scrape...')
+      const result: IncrementalScrapeResult =
+        await options.linkedInScraper.scrapeConnectionsIncremental()
+
+      if (result.connections.length === 0) {
+        console.log('[LinkedInContactsSync] No new connections to sync')
+        return {
+          success: true,
+          contactsSynced: 0,
+        }
+      }
+
+      console.log(
+        `[LinkedInContactsSync] Found ${result.connections.length} new connections, syncing to Convex...`
+      )
+
+      // Convert connections to the format expected by syncSocialContacts
+      const contacts = result.connections.map((conn) => ({
+        name: `${conn.firstName} ${conn.lastName}`.trim(),
+        handle: conn.profileUrl, // Will be normalized by Convex
+        profileUrl: conn.profileUrl,
+        headline: conn.headline ?? null,
+        profileId: conn.profileId, // URN ID for matching with messaging contacts
+      }))
+
+      // Create Convex client and sync contacts
+      const convexClient = createConvexClient()
+      const token = await setConvexAuth(convexClient)
+      if (!token) {
+        return {
+          success: false,
+          error: 'Failed to authenticate with Convex',
+        }
+      }
+
+      const syncResult = await convexClient.mutation(api.sync.syncSocialContacts, {
+        platform: 'linkedin',
+        contacts,
+        syncedAt: Date.now(),
+      })
+
+      console.log(
+        `[LinkedInContactsSync] Synced ${syncResult.newContacts} new, ${syncResult.updatedContacts} updated contacts`
+      )
+
+      return {
+        success: syncResult.errors.length === 0,
+        contactsSynced: syncResult.newContacts + syncResult.updatedContacts,
+        error:
+          syncResult.errors.length > 0
+            ? `${syncResult.errors.length} error(s): ${syncResult.errors.slice(0, 3).join('; ')}${syncResult.errors.length > 3 ? '...' : ''}`
+            : undefined,
+      }
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error)
+      console.error('[LinkedInContactsSync] Error:', errorMessage)
+      return {
+        success: false,
+        error: errorMessage,
+      }
     }
   }
 }
