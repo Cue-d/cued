@@ -1,7 +1,7 @@
 import { generateObject } from "ai";
 import { z } from "zod";
 import { truncate } from "@prm/shared";
-import { openai, FAST_MODEL } from "../openai";
+import { gateway, MODEL } from "../gateway";
 import { withRetry } from "../utils";
 
 /** Action types that can be suggested by the LLM */
@@ -219,7 +219,7 @@ When suggesting a response:
 
 /**
  * Generate an action suggestion for a conversation using LLM.
- * Uses gpt-4o-mini for cost efficiency with structured output.
+ * Uses Kimi K2.5 thinking via Vercel AI Gateway.
  */
 export async function generateAction(
   input: GenerateActionInput
@@ -284,7 +284,7 @@ export async function generateAction(
   const contextPrompt = buildContextPrompt(input);
 
   const { object } = await generateObject({
-    model: openai(FAST_MODEL),
+    model: gateway(MODEL),
     schema: ActionSuggestionSchema,
     system: SYSTEM_PROMPT,
     prompt: `Analyze this conversation and decide if an action is needed:\n\n${contextPrompt}`,

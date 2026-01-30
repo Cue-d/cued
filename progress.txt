@@ -1,5 +1,36 @@
 # Ralph Progress Log
 
+## 2026-01-29
+
+### Issue #159: PRD: Implement Vercel AI Gateway with Kimi K2.5 Thinking
+- **Status:** Completed
+- **Files changed:**
+  - packages/ai/src/gateway.ts (new - replaces openai.ts)
+  - packages/ai/src/gateway.test.ts (new - replaces openai.test.ts)
+  - packages/ai/src/index.ts
+  - packages/ai/src/actions/generate-action.ts
+  - packages/ai/src/contact-resolution/llm-match.ts
+  - packages/ai/package.json
+  - packages/env/src/schemas.ts
+  - packages/env/src/convex.ts
+  - packages/ui/src/components/assistant/chat-message.tsx
+  - apps/web/app/api/chat/route.ts
+  - apps/web/app/(app)/assistant/page.tsx
+  - apps/web/package.json
+  - turbo.json
+  - .env.example
+- **Changes:**
+  - Replaced @ai-sdk/openai with @ai-sdk/gateway (v3.0.29)
+  - Switched from gpt-5-mini/gpt-5-nano to single MODEL = "moonshotai/kimi-k2.5-thinking"
+  - Renamed OPENAI_API_KEY to AI_GATEWAY_API_KEY (optional - OIDC auth on Vercel)
+  - Added reasoning UI to chat messages using existing Reasoning component
+  - Temperature set to 1.0 for thinking mode as recommended
+- **Key decisions:**
+  - Single model constant simplifies config vs DEFAULT_MODEL/FAST_MODEL split
+  - Kept API key optional since Vercel OIDC handles production auth
+  - Reasoning displays before message content, auto-collapses after streaming
+- **Notes:** Mem0 integration unchanged - uses own provider config
+
 ## 2026-01-27
 
 ### Issue #114: Test: Add timestamp to scripts/README.md

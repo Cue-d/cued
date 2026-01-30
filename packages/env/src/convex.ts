@@ -6,7 +6,7 @@
  * We provide typed access without heavy validation overhead
  */
 
-type ConvexEnvKey = "NANGO_SECRET_KEY" | "WORKOS_CLIENT_ID" | "OPENAI_API_KEY" | "OPENAI_BASE_URL"
+type ConvexEnvKey = "NANGO_SECRET_KEY" | "WORKOS_CLIENT_ID" | "AI_GATEWAY_API_KEY"
 
 /**
  * Typed access to Convex environment variables
@@ -19,11 +19,8 @@ export const convexEnv = {
   get WORKOS_CLIENT_ID() {
     return process.env.WORKOS_CLIENT_ID
   },
-  get OPENAI_API_KEY() {
-    return process.env.OPENAI_API_KEY
-  },
-  get OPENAI_BASE_URL() {
-    return process.env.OPENAI_BASE_URL
+  get AI_GATEWAY_API_KEY() {
+    return process.env.AI_GATEWAY_API_KEY
   },
 } as const
 

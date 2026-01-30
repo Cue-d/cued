@@ -37,7 +37,7 @@ let _env: FullServerEnv | null = null
  *
  * @example
  * import { env } from "@prm/env/server"
- * const apiKey = env.OPENAI_API_KEY
+ * const apiKey = env.AI_GATEWAY_API_KEY
  */
 export const env = new Proxy({} as FullServerEnv, {
   get(_, prop: string) {

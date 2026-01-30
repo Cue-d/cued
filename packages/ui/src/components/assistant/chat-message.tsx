@@ -9,6 +9,11 @@ import {
   MessageContent,
   MessageResponse,
 } from "../ai-elements/message"
+import {
+  Reasoning,
+  ReasoningTrigger,
+  ReasoningContent,
+} from "../ai-elements/reasoning"
 import { Avatar, AvatarFallback } from "../ui/avatar"
 import {
   Collapsible,
@@ -33,6 +38,7 @@ export interface AssistantMessage {
 
 export interface MessageWithToolInvocations extends AssistantMessage {
   toolInvocations?: ToolInvocation[]
+  reasoning?: string
 }
 
 interface ChatMessageProps {
@@ -110,6 +116,14 @@ export function ChatMessage({
             isUser ? "items-end" : "items-start"
           )}
         >
+          {/* Reasoning content (for thinking models) */}
+          {!isUser && message.reasoning && (
+            <Reasoning isStreaming={isStreaming && !message.content}>
+              <ReasoningTrigger />
+              <ReasoningContent>{message.reasoning}</ReasoningContent>
+            </Reasoning>
+          )}
+
           <MessageContent
             className={cn(
               "rounded-2xl px-4 py-3",

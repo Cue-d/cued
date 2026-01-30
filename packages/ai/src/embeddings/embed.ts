@@ -4,7 +4,7 @@
  */
 import { embed, embedMany } from "ai";
 import { EMBEDDING_MODEL } from "@prm/shared";
-import { openai } from "../openai";
+import { gateway } from "../gateway";
 
 /**
  * Message context for building embedding input.
@@ -91,7 +91,7 @@ export function buildEmbeddingInput(
  */
 export async function embedText(text: string): Promise<number[]> {
   const { embedding } = await embed({
-    model: openai.embedding(EMBEDDING_MODEL),
+    model: gateway.textEmbeddingModel(`openai/${EMBEDDING_MODEL}`),
     value: text,
   });
   return embedding;
@@ -105,7 +105,7 @@ export async function embedTexts(texts: string[]): Promise<number[][]> {
   if (texts.length === 0) return [];
 
   const { embeddings } = await embedMany({
-    model: openai.embedding(EMBEDDING_MODEL),
+    model: gateway.textEmbeddingModel(`openai/${EMBEDDING_MODEL}`),
     values: texts,
   });
   return embeddings;

@@ -6,7 +6,7 @@ export type {
 } from "./types";
 export { getErrorMessage } from "./types";
 
-export { openai, DEFAULT_MODEL, FAST_MODEL } from "./openai";
+export { gateway, MODEL } from "./gateway";
 
 export {
   searchMessagesTool,

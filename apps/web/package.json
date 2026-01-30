@@ -14,7 +14,7 @@
     "test:e2e:ui": "playwright test --ui"
   },
   "dependencies": {
-    "@ai-sdk/openai": "^3.0.9",
+    "@ai-sdk/gateway": "^3.0.29",
     "@ai-sdk/react": "^3.0.35",
     "@base-ui/react": "^1.0.0",
     "@convex-dev/workos": "^0.0.1",

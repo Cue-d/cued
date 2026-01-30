@@ -1,8 +1,8 @@
 import { streamText, stepCountIs } from "ai";
 import { ConvexHttpClient } from "convex/browser";
 import {
-  openai,
-  DEFAULT_MODEL,
+  gateway,
+  MODEL,
   buildSystemPrompt,
   createChatTools,
   type MentionedContact,
@@ -119,7 +119,7 @@ export async function POST(req: Request) {
   );
 
   const result = streamText({
-    model: openai(DEFAULT_MODEL),
+    model: gateway(MODEL),
     system: systemPrompt,
     messages,
     tools,

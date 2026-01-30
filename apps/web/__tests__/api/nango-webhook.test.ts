@@ -9,7 +9,7 @@ vi.mock("@prm/env/server", () => ({
   env: {
     NEXT_PUBLIC_CONVEX_URL: "https://test.convex.cloud",
     NANGO_SECRET_KEY: "test-nango-key",
-    OPENAI_API_KEY: "test-openai-key",
+    AI_GATEWAY_API_KEY: "test-ai-gateway-key",
   },
 }));
 

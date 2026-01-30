@@ -1,7 +1,7 @@
 /**
  * Task 7.6: Analyze conversations with LLM to generate action suggestions.
  *
- * This module processes queued conversations through OpenAI to determine
+ * This module processes queued conversations through Vercel AI Gateway to determine
  * if user action is needed (respond, follow-up, etc.).
  */
 import { v } from "convex/values";
@@ -313,7 +313,7 @@ interface AnalyzeConversationResult {
 
 /**
  * Analyze a conversation with LLM to generate action suggestions.
- * This is a Convex action because it calls external APIs (OpenAI).
+ * This is a Convex action because it calls external APIs (Vercel AI Gateway).
  */
 export const analyzeConversation = internalAction({
   args: {

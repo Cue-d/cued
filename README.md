@@ -101,7 +101,7 @@ NEXT_PUBLIC_WORKOS_REDIRECT_URI=http://localhost:3000/callback
 
 # Optional: Integrations
 NANGO_SECRET_KEY=xxx          # Gmail/Slack sync (see NANGO_SETUP.md)
-OPENAI_API_KEY=sk-xxx         # AI features
+AI_GATEWAY_API_KEY=xxx        # AI features (Vercel AI Gateway, optional on Vercel deployments)
 MEM0_API_KEY=xxx              # Memory features
 ```
 

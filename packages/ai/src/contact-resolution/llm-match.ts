@@ -1,12 +1,13 @@
 /**
  * LLM-based fuzzy match decision for contact resolution.
- * Uses gpt-5-mini to analyze contact metadata and decide if contacts are the same person.
+ * Uses Kimi K2.5 thinking via Vercel AI Gateway to analyze contact metadata
+ * and decide if contacts are the same person.
  * Triggered for Tier 3 fuzzy matches (see MATCH_TIERS in thresholds.ts).
  */
 
 import { generateObject } from "ai";
 import { z } from "zod";
-import { openai, FAST_MODEL } from "../openai";
+import { gateway, MODEL } from "../gateway";
 import { withRetry } from "../utils";
 import { LLM } from "./thresholds";
 
@@ -83,8 +84,7 @@ Are these the same person? Consider name similarity, company match, and any over
  * Use LLM to decide if two fuzzy-matched contacts are the same person.
  * Called for Tier 3 matches (0.60 <= fuzzyScore < 0.95).
  *
- * Token estimate: ~200-300 tokens input (2 contacts + prompt), ~50 tokens output
- * At gpt-5-mini pricing, ~$0.0001 per decision
+ * Uses Kimi K2.5 thinking via Vercel AI Gateway for reasoning capabilities.
  */
 export async function decideFuzzyMatch(
   input: ContactMatchInput
@@ -92,7 +92,7 @@ export async function decideFuzzyMatch(
   const prompt = buildMatchPrompt(input);
 
   const { object } = await generateObject({
-    model: openai(FAST_MODEL),
+    model: gateway(MODEL),
     schema: FuzzyMatchDecisionSchema,
     system: SYSTEM_PROMPT,
     prompt,

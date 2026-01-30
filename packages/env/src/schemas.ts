@@ -8,9 +8,8 @@ export const serverSchema = z.object({
   // Nango Integration Platform
   NANGO_SECRET_KEY: z.string().min(1, "NANGO_SECRET_KEY is required"),
 
-  // OpenAI
-  OPENAI_API_KEY: z.string().min(1, "OPENAI_API_KEY is required"),
-  OPENAI_BASE_URL: z.string().url().optional(),
+  // AI Gateway (supports OIDC auth on Vercel, so optional)
+  AI_GATEWAY_API_KEY: z.string().optional(),
 
   // Mem0
   MEM0_API_KEY: z.string().optional(),

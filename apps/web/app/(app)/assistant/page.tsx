@@ -72,6 +72,17 @@ function getToolInvocations(msg: UIMessage): ToolInvocation[] {
     });
 }
 
+function getReasoningContent(msg: UIMessage): string | undefined {
+  // Extract reasoning content from thinking model responses
+  // AI SDK uses { type: "reasoning", text: string } for reasoning parts
+  const reasoningParts = msg.parts.filter(
+    (part): part is { type: "reasoning"; text: string } =>
+      part.type === "reasoning"
+  );
+  if (reasoningParts.length === 0) return undefined;
+  return reasoningParts.map((part) => part.text).join("\n\n");
+}
+
 export default function AssistantPage() {
   const [input, setInput] = React.useState("");
   const [trackedMentions, setTrackedMentions] = React.useState<TrackedMention[]>(
@@ -182,6 +193,7 @@ export default function AssistantPage() {
       role: msg.role as "user" | "assistant",
       content: getTextContent(msg),
       toolInvocations: getToolInvocations(msg),
+      reasoning: getReasoningContent(msg),
     })
   );
 
