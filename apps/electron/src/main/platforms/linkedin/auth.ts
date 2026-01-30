@@ -150,7 +150,30 @@ export async function clearLinkedInSession(): Promise<void> {
 async function extractCookiesFromSession(
   linkedInSession: Electron.Session
 ): Promise<{ cookies: Cookie[]; isAuthenticated: boolean }> {
-  const sessionCookies = await linkedInSession.cookies.get({ domain: '.linkedin.com' })
+  // Get all cookies without domain filter, then filter locally
+  // This is necessary because LinkedIn sets cookies on different domains:
+  // - li_at is typically on .linkedin.com
+  // - JSESSIONID may be on www.linkedin.com or .www.linkedin.com
+  // Electron's domain filter with '.linkedin.com' may not match www.linkedin.com cookies
+  const allCookies = await linkedInSession.cookies.get({})
+  const sessionCookies = allCookies.filter(
+    (c) => c.domain?.includes('linkedin.com') ?? false
+  )
+
+  console.log(
+    `[LinkedIn Login] All cookies: ${allCookies.length}, LinkedIn cookies: ${sessionCookies.length}`
+  )
+
+  // Log the auth-related cookies for debugging
+  const authCookies = sessionCookies.filter(
+    (c) => c.name === 'li_at' || c.name === 'JSESSIONID'
+  )
+  if (authCookies.length > 0) {
+    console.log(
+      '[LinkedIn Login] Auth cookies found:',
+      authCookies.map((c) => `${c.name}@${c.domain}`)
+    )
+  }
 
   const cookies: Cookie[] = sessionCookies.map((c) => ({
     name: c.name,
