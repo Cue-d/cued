@@ -1,5 +1,5 @@
 {
-  "name": "@prm/ai",
+  "name": "@cued/ai",
   "version": "0.0.0",
   "type": "module",
   "main": "./src/index.ts",
@@ -16,7 +16,7 @@
   "dependencies": {
     "@ai-sdk/gateway": "^3.0.29",
     "@mem0/vercel-ai-provider": "^2.0.4",
-    "@prm/shared": "workspace:*",
+    "@cued/shared": "workspace:*",
     "ai": "^6.0.33",
     "zod": "^4.3.5"
   },

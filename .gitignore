@@ -1,4 +1,4 @@
-# PRM Project .gitignore
+# Cued Project .gitignore
 
 # ============================================================
 # Node.js / Electron
@@ -29,9 +29,9 @@ apps/electron/.electron-vite/
 *.sqlite
 *.sqlite3
 
-# PRM cache directories
-.prm/
-backend/.prm/
+# Cued cache directories
+.cued/
+backend/.cued/
 
 # Contact and message caches
 **/cache/

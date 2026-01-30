@@ -1,7 +1,7 @@
 import { Platform } from "react-native";
 import { ExtensionStorage } from "@bacons/apple-targets";
 
-const APP_GROUP_ID = "group.com.prm.mobile";
+const APP_GROUP_ID = "group.so.cued.app";
 const PENDING_ACTION_COUNT_KEY = "pendingActionCount";
 const ACTIONS_LIST_KEY = "actionsList";
 

@@ -2,7 +2,7 @@
  * Adapter registry for the unified message queue.
  * Routes messages to platform-specific adapters (iMessage, LinkedIn, etc.)
  */
-import type { ActionPlatform, PlatformAdapter } from "@prm/shared";
+import type { ActionPlatform, PlatformAdapter } from "@cued/shared";
 
 import { IMessageAdapter } from "../platforms/imessage/adapter";
 import { LinkedInAdapter } from "../platforms/linkedin/adapter";

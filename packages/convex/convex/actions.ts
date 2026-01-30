@@ -1,5 +1,5 @@
 import { v } from "convex/values";
-import type { EnrichedAction } from "@prm/shared";
+import type { EnrichedAction } from "@cued/shared";
 import type { Doc, Id } from "./_generated/dataModel";
 import type { MutationCtx, QueryCtx } from "./_generated/server";
 import { action, internalMutation, mutation, query } from "./_generated/server";

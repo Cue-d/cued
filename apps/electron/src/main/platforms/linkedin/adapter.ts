@@ -6,7 +6,7 @@ import type {
   PlatformAdapter,
   QueuedMessage,
   SendResult,
-} from "@prm/shared";
+} from "@cued/shared";
 import { getLinkedInSyncManager } from "./sync";
 import { sendMessage } from "./api/messages";
 import { getSyncDebugLogger } from "../../sync/debug-logger";

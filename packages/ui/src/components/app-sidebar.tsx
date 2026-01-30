@@ -13,6 +13,7 @@ import {
   MoonIcon,
   ChevronsUpDownIcon,
 } from "lucide-react";
+import { CuedLogoStatic } from "./cued-logo";
 import { useTheme } from "next-themes";
 import { cn } from "../lib/utils";
 import { Avatar, AvatarFallback } from "./ui/avatar";
@@ -100,10 +101,8 @@ export function AppSidebar({
     <Sidebar {...props} variant="inset">
       <SidebarHeader className="border-b border-sidebar-border p-4">
         <div className="flex items-center gap-2">
-          <div className="flex size-8 items-center justify-center rounded-lg bg-sidebar-primary text-sidebar-primary-foreground">
-            <MessageSquareIcon className="size-4" />
-          </div>
-          <span className="font-semibold">PRM</span>
+          <CuedLogoStatic size={32} className="text-sidebar-primary" />
+          <span className="font-semibold">Cued</span>
         </div>
       </SidebarHeader>
       <SidebarContent>

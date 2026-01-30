@@ -1,6 +1,6 @@
-# @prm/convex
+# @cued/convex
 
-Convex backend package for PRM.
+Convex backend package for Cued.
 
 ## Setup
 

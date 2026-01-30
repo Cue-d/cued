@@ -22,7 +22,7 @@ Task 4.2 requires manual configuration in the Nango dashboard and Google Cloud C
 3. Navigate to **APIs & Services** → **OAuth consent screen**
 4. Configure the consent screen:
    - **User Type**: External (for testing, can use Internal for Google Workspace)
-   - **App name**: PRM (or your app name)
+   - **App name**: Cued (or your app name)
    - **User support email**: Your email
    - **Developer contact**: Your email
 5. Add **Scopes** (click "Add or Remove Scopes"):
@@ -37,7 +37,7 @@ Task 4.2 requires manual configuration in the Nango dashboard and Google Cloud C
 2. Click **+ CREATE CREDENTIALS** → **OAuth client ID**
 3. Configure:
    - **Application type**: Web application
-   - **Name**: PRM Nango Integration
+   - **Name**: Cued Nango Integration
    - **Authorized redirect URIs**: Paste the **Callback URL from Nango** (from Step 1)
 4. Click **Create**
 5. Copy the **Client ID** and **Client Secret**

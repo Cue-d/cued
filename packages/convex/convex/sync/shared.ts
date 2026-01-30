@@ -12,8 +12,8 @@ import {
   normalizePhone,
   getPhoneVariants,
   normalizeLinkedInHandle,
-} from "@prm/shared";
-import { normalizeEmail } from "@prm/ai";
+} from "@cued/shared";
+import { normalizeEmail } from "@cued/ai";
 
 // ============================================================================
 // Shared Constants
@@ -152,8 +152,8 @@ export async function scheduleOutgoingMessageEvents(
 
 /**
  * Normalize a handle for consistent lookups.
- * - Phone numbers: use normalizePhone from @prm/shared
- * - Emails: use normalizeEmail from @prm/ai (handles Gmail dots, plus-addressing)
+ * - Phone numbers: use normalizePhone from @cued/shared
+ * - Emails: use normalizeEmail from @cued/ai (handles Gmail dots, plus-addressing)
  */
 export function normalizeHandle(handle: string): string {
   if (handle.includes("@")) {
@@ -162,7 +162,7 @@ export function normalizeHandle(handle: string): string {
   return normalizePhone(handle);
 }
 
-// normalizeLinkedInHandle is imported from @prm/shared
+// normalizeLinkedInHandle is imported from @cued/shared
 export { normalizeLinkedInHandle };
 
 // ============================================================================

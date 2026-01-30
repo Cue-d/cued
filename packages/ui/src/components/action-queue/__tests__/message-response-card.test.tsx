@@ -1,6 +1,6 @@
 import { render, screen, fireEvent } from "@testing-library/react";
 import { describe, it, expect, vi } from "vitest";
-import { type DisplayMessage } from "@prm/shared";
+import { type DisplayMessage } from "@cued/shared";
 import { MessageResponseCard } from "../message-response-card";
 
 describe("MessageResponseCard", () => {

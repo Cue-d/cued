@@ -8,7 +8,7 @@ import {
   X,
   XCircle,
 } from "lucide-react"
-import { PLATFORM_CONFIG, formatRelativeTime, type ActionPlatform } from "@prm/shared"
+import { PLATFORM_CONFIG, formatRelativeTime, type ActionPlatform } from "@cued/shared"
 import { cn } from "../lib/utils"
 import { Button } from "./ui/button"
 import {

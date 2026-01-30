@@ -6,7 +6,7 @@
  *
  * @example
  * ```ts
- * import { PLATFORM_CONFIG, type ActionPlatform } from "@prm/shared";
+ * import { PLATFORM_CONFIG, type ActionPlatform } from "@cued/shared";
  *
  * const platform: ActionPlatform = "imessage";
  * const { label, color, bgClass, textClass } = PLATFORM_CONFIG[platform];

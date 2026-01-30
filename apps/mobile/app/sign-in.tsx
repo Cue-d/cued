@@ -171,10 +171,7 @@ export default function SignInScreen(): React.ReactElement {
             <SymbolView name="person.2.fill" size={44} tintColor="white" />
           </View>
           <Text className="text-4xl font-bold text-foreground tracking-tight">
-            PRM
-          </Text>
-          <Text className="text-[17px] text-muted-foreground mt-1">
-            Personal Relationship Manager
+            Cued
           </Text>
         </Animated.View>
 

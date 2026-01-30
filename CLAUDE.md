@@ -1,8 +1,8 @@
-# CLAUDE.md - PRM Codebase Guide
+# CLAUDE.md - Cued Codebase Guide
 
 ## What This Is
 
-PRM is a cloud-based personal relationship manager. Multi-platform messaging (iMessage, Gmail, Slack, LinkedIn) with AI-powered action suggestions.
+Cued is a cloud-based personal relationship manager. Multi-platform messaging (iMessage, Gmail, Slack, LinkedIn) with AI-powered action suggestions.
 
 ## Architecture
 
@@ -31,16 +31,16 @@ apps/
   electron/         macOS sync client (iMessage, LinkedIn, Slack, Contacts)
 
 packages/
-  shared/           Source of truth for utils, types, constants (@prm/shared)
-  ui/               Shared React components (@prm/ui)
-  convex/           Database schema + functions (@prm/convex)
-  ai/               LLM tools, Mem0 integration (@prm/ai)
-  integrations/     iMessage, Slack, Nango adapters (@prm/integrations)
+  shared/           Source of truth for utils, types, constants (@cued/shared)
+  ui/               Shared React components (@cued/ui)
+  convex/           Database schema + functions (@cued/convex)
+  ai/               LLM tools, Mem0 integration (@cued/ai)
+  integrations/     iMessage, Slack, Nango adapters (@cued/integrations)
 ```
 
 ### packages/shared (Source of Truth)
 
-All shared utilities, types, and constants live here. Import from `@prm/shared`:
+All shared utilities, types, and constants live here. Import from `@cued/shared`:
 
 - **Utils**: `getInitials`, `formatTime`, `formatRelativeTime`, `formatTimestamp`
 - **Phone**: `normalizePhone`, `formatPhoneNumber`, `phonesMatch`, `getPhoneVariants`
@@ -139,9 +139,9 @@ Web app: http://localhost:3000
 
 ### DO
 
-- Use `@prm/*` for monorepo packages (`@prm/shared`, `@prm/ui`, `@prm/convex`)
+- Use `@cued/*` for monorepo packages (`@cued/shared`, `@cued/ui`, `@cued/convex`)
 - Use `@/` path aliases for app-local imports
-- Import shared utils/types from `@prm/shared` (not local definitions)
+- Import shared utils/types from `@cued/shared` (not local definitions)
 - Run `pnpm lint && pnpm typecheck` before commits
 - Use `pnpm dlx shadcn@latest add [component] --yes` to add UI components
 - Verify shadcn imports use `@/` aliases after adding
@@ -150,13 +150,13 @@ Web app: http://localhost:3000
 
 - Don't use `"use client"` in packages/ui (it's a shared library)
 - Don't modify Convex `_generated/` files
-- Don't duplicate utilities that exist in `@prm/shared`
+- Don't duplicate utilities that exist in `@cued/shared`
 
 ### Preventing Code Duplication
 
 **Before creating types/interfaces:**
 1. Check `packages/shared/src/types/` for existing definitions
-2. If adding contact, message, or action types → use `@prm/shared`
+2. If adding contact, message, or action types → use `@cued/shared`
 
 **Before creating utilities:**
 1. Check `packages/shared/src/` for existing utils (phone, linkedin, time)
@@ -166,10 +166,10 @@ Web app: http://localhost:3000
 **Canonical type locations:**
 | Type | Location |
 |------|----------|
-| `ContactHandle`, `HandleType` | `@prm/shared/types/contact` |
-| `DisplayMessage`, `EnrichedAction` | `@prm/shared/types/actions` |
-| `ACTION_TYPES`, `isMessageActionType` | `@prm/shared/constants/actions` |
-| `PLATFORM_CONFIG`, `ActionPlatform` | `@prm/shared/constants/platform` |
+| `ContactHandle`, `HandleType` | `@cued/shared/types/contact` |
+| `DisplayMessage`, `EnrichedAction` | `@cued/shared/types/actions` |
+| `ACTION_TYPES`, `isMessageActionType` | `@cued/shared/constants/actions` |
+| `PLATFORM_CONFIG`, `ActionPlatform` | `@cued/shared/constants/platform` |
 
 **Sync code patterns:**
 | Pattern | Location |
@@ -179,7 +179,7 @@ Web app: http://localhost:3000
 | Cursor management | `packages/convex/convex/sync/shared.ts` |
 
 **Time formatting:**
-- Use `formatRelativeTime` from `@prm/shared` (supports `{ allowFuture: true }` for future times)
+- Use `formatRelativeTime` from `@cued/shared` (supports `{ allowFuture: true }` for future times)
 - Use `formatTimestamp` for smart date/time formatting
 - Don't create local formatRelativeTime functions
 

@@ -11,7 +11,7 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "../ui/tooltip"
-import type { EnrichedAction } from "@prm/shared"
+import type { EnrichedAction } from "@cued/shared"
 
 export type SwipeDirection = "left" | "right" | "up"
 

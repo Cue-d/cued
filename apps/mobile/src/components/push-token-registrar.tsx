@@ -1,6 +1,6 @@
 import { useEffect, useRef } from "react";
 import { useMutation } from "convex/react";
-import { api } from "@prm/convex/convex/_generated/api";
+import { api } from "@cued/convex/convex/_generated/api";
 import { registerForPushNotifications } from "@/lib/notifications";
 import { useAuth } from "@/providers/AuthProvider";
 

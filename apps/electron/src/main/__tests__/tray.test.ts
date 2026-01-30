@@ -77,12 +77,12 @@ describe("TrayManager", () => {
       const menuTemplate = MenuMock.mock.calls[0][0] as Array<{ label?: string; type?: string }>;
 
       // Check for required items
-      const showItem = menuTemplate.find((item) => item.label === "Show PRM");
+      const showItem = menuTemplate.find((item) => item.label === "Show Cued");
       const syncItem = menuTemplate.find(
         (item) => item.label === "Sync Now" || item.label === "Syncing..."
       );
       const prefsItem = menuTemplate.find((item) => item.label === "Preferences...");
-      const quitItem = menuTemplate.find((item) => item.label === "Quit PRM");
+      const quitItem = menuTemplate.find((item) => item.label === "Quit Cued");
       const separators = menuTemplate.filter((item) => item.type === "separator");
 
       expect(showItem).toBeDefined();
@@ -94,14 +94,14 @@ describe("TrayManager", () => {
   });
 
   describe("callbacks", () => {
-    it("calls onShowWindow callback when Show PRM clicked", () => {
+    it("calls onShowWindow callback when Show Cued clicked", () => {
       const onShowWindow = vi.fn();
       trayManager = new TrayManager({ onShowWindow });
       trayManager.create();
 
       const MenuMock = Menu.buildFromTemplate as ReturnType<typeof vi.fn>;
       const menuTemplate = MenuMock.mock.calls[0][0] as Array<{ label?: string; click?: () => void }>;
-      const showItem = menuTemplate.find((item) => item.label === "Show PRM");
+      const showItem = menuTemplate.find((item) => item.label === "Show Cued");
       showItem?.click?.();
 
       expect(onShowWindow).toHaveBeenCalled();
@@ -127,7 +127,7 @@ describe("TrayManager", () => {
 
       const MenuMock = Menu.buildFromTemplate as ReturnType<typeof vi.fn>;
       const menuTemplate = MenuMock.mock.calls[0][0] as Array<{ label?: string; click?: () => void }>;
-      const quitItem = menuTemplate.find((item) => item.label === "Quit PRM");
+      const quitItem = menuTemplate.find((item) => item.label === "Quit Cued");
       quitItem?.click?.();
 
       expect(onQuit).toHaveBeenCalled();

@@ -7,8 +7,8 @@ import {
   ExternalLinkIcon,
   UsersIcon,
 } from "lucide-react";
-import { formatRelativeTime } from "@prm/shared";
-import { Button, Skeleton } from "@prm/ui";
+import { formatRelativeTime } from "@cued/shared";
+import { Button, Skeleton } from "@cued/ui";
 
 export interface SocialIntegrationConfig {
   id: "linkedin";
@@ -127,7 +127,7 @@ export function SocialIntegrationCard({
       {/* Desktop app required notice */}
       <div className="border-t px-4 py-2 bg-muted/30">
         <p className="text-xs text-muted-foreground">
-          💡 Requires the PRM desktop app to scrape social connections
+          💡 Requires the Cued desktop app to scrape social connections
         </p>
       </div>
     </div>

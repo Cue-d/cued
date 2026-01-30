@@ -1,4 +1,4 @@
-import { formatTimestamp as formatTimestampShared } from "@prm/shared"
+import { formatTimestamp as formatTimestampShared } from "@cued/shared"
 import { InboxConversationAvatar } from "./conversation-avatar"
 import { InboxPlatformBadge } from "./platform-badge"
 import { cn } from "../../lib/utils"

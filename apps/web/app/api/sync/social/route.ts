@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { api } from "@prm/convex";
+import { api } from "@cued/convex";
 import {
   extractBearerToken,
   extractErrorMessage,

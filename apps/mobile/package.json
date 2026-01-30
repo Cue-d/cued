@@ -16,9 +16,9 @@
   "dependencies": {
     "@ai-sdk/react": "^3.0.35",
     "@bacons/apple-targets": "^3.0.7",
-    "@prm/convex": "workspace:*",
-    "@prm/env": "workspace:*",
-    "@prm/shared": "workspace:*",
+    "@cued/convex": "workspace:*",
+    "@cued/env": "workspace:*",
+    "@cued/shared": "workspace:*",
     "@react-native-community/datetimepicker": "8.6.0",
     "ai": "^6.0.33",
     "clsx": "^2.1.1",

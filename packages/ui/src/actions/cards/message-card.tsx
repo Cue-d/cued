@@ -6,7 +6,7 @@
 import * as React from "react";
 import { MessageResponseCard } from "../../components/action-queue/message-response-card";
 import type { ActionCardProps } from "../types";
-import type { DisplayMessage } from "@prm/shared";
+import type { DisplayMessage } from "@cued/shared";
 
 /**
  * Message card for respond/follow_up/send_message actions.

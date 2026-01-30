@@ -5,7 +5,7 @@
  */
 import type { Doc, Id } from "../_generated/dataModel";
 import type { QueryCtx, MutationCtx } from "../_generated/server";
-import type { ActionPlatform } from "@prm/shared";
+import type { ActionPlatform } from "@cued/shared";
 
 /**
  * Take the max of two nullable timestamps.

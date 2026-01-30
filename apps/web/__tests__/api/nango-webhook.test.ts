@@ -5,7 +5,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 const mockConvexMutation = vi.hoisted(() => vi.fn());
 
 // Mock environment variables before importing route
-vi.mock("@prm/env/server", () => ({
+vi.mock("@cued/env/server", () => ({
   env: {
     NEXT_PUBLIC_CONVEX_URL: "https://test.convex.cloud",
     NANGO_SECRET_KEY: "test-nango-key",
@@ -19,7 +19,7 @@ vi.mock("convex/browser", () => ({
   })),
 }));
 
-vi.mock("@prm/convex", () => ({
+vi.mock("@cued/convex", () => ({
   api: {
     integrations: {
       connectNango: "integrations:connectNango",

@@ -5,13 +5,13 @@ import { useChat } from "@ai-sdk/react";
 import { useAccessToken } from "@workos-inc/authkit-nextjs/components";
 import { DefaultChatTransport, type UIMessage } from "ai";
 import { useConvex } from "convex/react";
-import { api } from "@prm/convex";
+import { api } from "@cued/convex";
 import {
   AssistantView,
   type MessageWithToolInvocations,
   type ToolInvocation,
   type MentionSearchResult,
-} from "@prm/ui";
+} from "@cued/ui";
 
 // Track mentions with both ID and display text to detect deletions
 interface TrackedMention {

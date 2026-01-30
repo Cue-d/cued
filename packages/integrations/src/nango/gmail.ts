@@ -1,5 +1,5 @@
 import { Nango } from "@nangohq/node";
-import { env } from "@prm/env/server";
+import { env } from "@cued/env/server";
 
 /**
  * Input for sending a Gmail email

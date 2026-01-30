@@ -12,7 +12,7 @@
 import { useMemo } from "react";
 import { View, Text, ScrollView, TextInput, useColorScheme } from "react-native";
 import { SymbolView } from "expo-symbols";
-import { getInitials, PLATFORM_CONFIG, type ActionPlatform, type ContactFormData } from "@prm/shared";
+import { getInitials, PLATFORM_CONFIG, type ActionPlatform, type ContactFormData } from "@cued/shared";
 import { cn, getThemeColors } from "@/lib/utils";
 
 /** Re-export ActionPlatform as ContactPlatform for this component */

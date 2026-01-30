@@ -1,5 +1,5 @@
 /**
- * Settings manager for PRM Electron app.
+ * Settings manager for Cued Electron app.
  *
  * Features:
  * - Auto-launch on login configuration

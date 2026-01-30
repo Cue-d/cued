@@ -1,7 +1,7 @@
 import { Pressable, View, Text } from "react-native";
 import * as Haptics from "expo-haptics";
 import { router } from "expo-router";
-import { getInitials } from "@prm/shared";
+import { getInitials } from "@cued/shared";
 import { getDisplayName } from "@/lib/utils";
 import { useAuth } from "@/providers/AuthProvider";
 

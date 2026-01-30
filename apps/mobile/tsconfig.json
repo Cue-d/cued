@@ -7,7 +7,7 @@
       "@/*": [
         "./src/*"
       ],
-      "@prm/convex/*": [
+      "@cued/convex/*": [
         "../../packages/convex/*"
       ]
     }

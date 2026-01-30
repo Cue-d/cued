@@ -18,7 +18,7 @@ struct ActionCountEntry: TimelineEntry {
 /// Provides timeline data for the widget
 struct ActionCountProvider: TimelineProvider {
     /// App Group identifier for shared data access
-    private let appGroupId = "group.com.prm.mobile"
+    private let appGroupId = "group.so.cued.app"
     private let countKey = "pendingActionCount"
 
     /// Reads the pending action count from shared UserDefaults
@@ -102,7 +102,7 @@ struct ActionCountWidget: Widget {
         StaticConfiguration(kind: kind, provider: ActionCountProvider()) { entry in
             ActionCountWidgetView(entry: entry)
         }
-        .configurationDisplayName("PRM Actions")
+        .configurationDisplayName("Cued Actions")
         .description("Shows your pending action count")
         .supportedFamilies([.systemSmall, .systemMedium])
         .contentMarginsDisabled()

@@ -8,11 +8,11 @@ import * as Haptics from "expo-haptics";
 import { useLocalSearchParams, Stack } from "expo-router";
 import { SymbolView } from "expo-symbols";
 import { useQuery, useMutation } from "convex/react";
-import { api } from "@prm/convex/convex/_generated/api";
-import { getInitials, formatPhoneNumber, type ActionPlatform } from "@prm/shared";
+import { api } from "@cued/convex/convex/_generated/api";
+import { getInitials, formatPhoneNumber, type ActionPlatform } from "@cued/shared";
 import { SendMessageSheet, type SendMessageContact } from "@/components/send-message-sheet";
 import { UndoSendToast } from "@/components/undo-send-toast";
-import type { Id } from "@prm/convex/convex/_generated/dataModel";
+import type { Id } from "@cued/convex/convex/_generated/dataModel";
 import type { SFSymbol } from "sf-symbols-typescript";
 
 /** Avatar component */

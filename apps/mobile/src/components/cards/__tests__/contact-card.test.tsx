@@ -1,7 +1,7 @@
 import React from "react";
 import { render, screen } from "@testing-library/react";
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { type ContactFormData } from "@prm/shared";
+import { type ContactFormData } from "@cued/shared";
 import { ContactCard, type ContactCardProps } from "../contact-card";
 
 // Ensure React is globally available for JSX transform

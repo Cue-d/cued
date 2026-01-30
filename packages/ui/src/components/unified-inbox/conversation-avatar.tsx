@@ -1,4 +1,4 @@
-import { getInitials } from "@prm/shared"
+import { getInitials } from "@cued/shared"
 import { cn } from "../../lib/utils"
 import type { InboxParticipant, InboxConversationType } from "./types"
 import type React from "react"

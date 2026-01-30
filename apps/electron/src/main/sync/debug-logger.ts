@@ -2,14 +2,14 @@
  * Sync Debug Logger
  * Logs filtered messages and sync events to a local file for debugging.
  *
- * Log file location: ~/Library/Application Support/PRM/sync-debug.log
+ * Log file location: ~/Library/Application Support/Cued/sync-debug.log
  * (or equivalent userData path on other platforms)
  */
 
 import { app } from 'electron'
 import { appendFileSync, existsSync, mkdirSync, statSync, renameSync, writeFileSync } from 'fs'
 import { join, dirname } from 'path'
-import type { SyncPlatform } from '@prm/shared'
+import type { SyncPlatform } from '@cued/shared'
 
 // ============================================================================
 // Constants

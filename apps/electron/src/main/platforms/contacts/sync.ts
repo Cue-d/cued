@@ -8,9 +8,9 @@
  */
 
 import { ConvexHttpClient } from "convex/browser";
-import { api } from "@prm/convex";
+import { api } from "@cued/convex";
 import { isAuthError } from "../../auth/auth-utils";
-import { electronEnv } from "@prm/env/electron";
+import { electronEnv } from "@cued/env/electron";
 import { getContactsManager } from "./manager";
 
 const CONVEX_URL = electronEnv.CONVEX_URL;

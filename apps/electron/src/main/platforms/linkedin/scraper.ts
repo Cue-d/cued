@@ -2,7 +2,7 @@
 // Uses Electron BrowserWindow for login, then API for data fetching
 
 import { ConvexHttpClient } from 'convex/browser'
-import { api } from '@prm/convex'
+import { api } from '@cued/convex'
 import {
   openLinkedInLogin,
   loadStoredCookies,

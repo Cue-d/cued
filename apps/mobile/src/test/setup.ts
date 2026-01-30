@@ -99,8 +99,8 @@ vi.mock("expo-secure-store", () => ({
 vi.mock("expo-constants", () => ({
   default: {
     expoConfig: {
-      name: "PRM",
-      slug: "prm",
+      name: "Cued",
+      slug: "cued",
       extra: {},
     },
     manifest: null,
@@ -145,7 +145,7 @@ vi.mock("expo-clipboard", () => ({
 
 // Mock expo-linking
 vi.mock("expo-linking", () => ({
-  createURL: (path: string) => `prm://${path}`,
+  createURL: (path: string) => `cued://${path}`,
   parse: (url: string) => ({ path: url, queryParams: {} }),
   openURL: vi.fn(),
   canOpenURL: vi.fn().mockResolvedValue(true),
@@ -297,7 +297,7 @@ vi.mock("convex/react", () => ({
   ConvexProvider: ({ children }: { children?: React.ReactNode }) => children,
 }));
 
-// Note: @prm/convex/convex/_generated/api is mocked via vitest.config.ts alias to ./mocks/convex-api.ts
+// Note: @cued/convex/convex/_generated/api is mocked via vitest.config.ts alias to ./mocks/convex-api.ts
 
 // Mock widget data (iOS specific)
 vi.mock("@/lib/widget-data", () => ({

@@ -7,7 +7,7 @@ import {
   aggregateCursorStats,
 } from "./lib/cursors";
 import { platformValidator } from "./schema";
-import type { ActionPlatform } from "@prm/shared";
+import type { ActionPlatform } from "@cued/shared";
 
 // Map Nango integration IDs to our platform enum
 function nangoToPlatform(nangoIntegrationId: string): ActionPlatform | null {

@@ -12,9 +12,9 @@ import { useLocalSearchParams, useRouter } from "expo-router";
 import { SymbolView } from "expo-symbols";
 import DateTimePicker from "@react-native-community/datetimepicker";
 import { useMutation } from "convex/react";
-import { api } from "@prm/convex/convex/_generated/api";
+import { api } from "@cued/convex/convex/_generated/api";
 import { getThemeColors } from "@/lib/utils";
-import type { Id } from "@prm/convex/convex/_generated/dataModel";
+import type { Id } from "@cued/convex/convex/_generated/dataModel";
 import type { StyleProp, ViewStyle } from "react-native";
 import type { SFSymbol } from "sf-symbols-typescript";
 

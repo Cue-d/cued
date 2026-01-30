@@ -1,6 +1,6 @@
 import * as React from "react"
 import { UndoSendToast } from "./undo-send-toast"
-import type { ActionPlatform } from "@prm/shared"
+import type { ActionPlatform } from "@cued/shared"
 
 /** Message data from getPendingMessages query */
 export interface PendingMessage {

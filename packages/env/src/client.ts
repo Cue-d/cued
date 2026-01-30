@@ -49,7 +49,7 @@ function createClientEnv(): ClientEnv {
  * Validated at module load time (build time for Next.js/Expo)
  *
  * @example
- * import { clientEnv } from "@prm/env/client"
+ * import { clientEnv } from "@cued/env/client"
  * const convexUrl = clientEnv.NEXT_PUBLIC_CONVEX_URL
  */
 export const clientEnv = createClientEnv()

@@ -2,7 +2,7 @@
 
 import * as React from "react";
 import { Building2, Clock, FileText, Link, Tag, User } from "lucide-react";
-import { getInitials, type ContactFormData } from "@prm/shared";
+import { getInitials, type ContactFormData } from "@cued/shared";
 import { cn } from "../../lib/utils";
 import { Avatar, AvatarFallback } from "../ui/avatar";
 import { Badge } from "../ui/badge";

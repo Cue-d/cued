@@ -27,7 +27,7 @@ export function getErrorMessage(error: unknown, fallback: string): string {
   return error instanceof Error ? error.message : fallback;
 }
 
-/** PRM tool definition, designed for use with Vercel AI SDK's tool() helper. */
+/** Cued tool definition, designed for use with Vercel AI SDK's tool() helper. */
 export interface Tool<TInput extends z.ZodTypeAny, TOutput> {
   name: string;
   description: string;

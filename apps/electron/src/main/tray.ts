@@ -1,5 +1,5 @@
 /**
- * TrayManager - System tray icon and context menu for PRM.
+ * TrayManager - System tray icon and context menu for Cued.
  *
  * Features:
  * - System tray icon with template image for macOS (adapts to light/dark mode)
@@ -41,7 +41,7 @@ export class TrayManager {
 
     try {
       this.tray = new Tray(icon);
-      this.tray.setToolTip("PRM");
+      this.tray.setToolTip("Cued");
       this.updateContextMenu();
       this.tray.on("click", () => this.showWindow());
     } catch (e) {
@@ -156,18 +156,18 @@ export class TrayManager {
   private updateTooltip(): void {
     if (!this.tray) return;
 
-    let tooltip = "PRM";
+    let tooltip = "Cued";
     switch (this.status) {
       case "syncing":
-        tooltip = "PRM - Syncing...";
+        tooltip = "Cued - Syncing...";
         break;
       case "error":
-        tooltip = "PRM - Sync Error";
+        tooltip = "Cued - Sync Error";
         break;
       case "idle":
         if (this.lastSyncTime) {
           const timeAgo = this.formatTimeAgo(this.lastSyncTime);
-          tooltip = `PRM - Last sync: ${timeAgo}`;
+          tooltip = `Cued - Last sync: ${timeAgo}`;
         }
         break;
     }
@@ -195,7 +195,7 @@ export class TrayManager {
 
     const menuTemplate: MenuItemConstructorOptions[] = [
       {
-        label: "Show PRM",
+        label: "Show Cued",
         click: () => {
           // Delegate to callback which handles dock visibility on macOS
           this.options.onShowWindow?.();
@@ -213,7 +213,7 @@ export class TrayManager {
       },
       { type: "separator" },
       {
-        label: "Quit PRM",
+        label: "Quit Cued",
         click: () => {
           this.options.onQuit?.();
           app.quit();

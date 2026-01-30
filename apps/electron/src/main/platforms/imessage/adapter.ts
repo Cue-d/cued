@@ -8,7 +8,7 @@ import type {
   PlatformAdapter,
   QueuedMessage,
   SendResult,
-} from "@prm/shared";
+} from "@cued/shared";
 import { getIMessageSyncManager } from "./sync";
 
 const execAsync = promisify(exec);

@@ -9,7 +9,7 @@ import {
   type MergeSource,
 } from "../../components/action-queue/resolve-contact-card";
 import type { ActionCardProps } from "../types";
-import type { ContactHandle } from "@prm/shared";
+import type { ContactHandle } from "@cued/shared";
 
 /**
  * Map context handles to ContactHandle format.

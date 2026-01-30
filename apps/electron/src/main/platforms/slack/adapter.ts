@@ -6,7 +6,7 @@ import type {
   PlatformAdapter,
   QueuedMessage,
   SendResult,
-} from "@prm/shared";
+} from "@cued/shared";
 import { getSlackSyncManager, getAllSlackSyncManagers } from "./sync";
 import { SlackRateLimitError } from "./api";
 import { isAuthError } from "../../auth/auth-utils";

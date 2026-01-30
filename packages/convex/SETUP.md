@@ -18,7 +18,7 @@ Task 1.6 requires interactive setup that must be completed manually.
 
    The CLI will prompt:
    - **"Would you like to create a new project?"** → Yes
-   - **Project name** → Enter "prm" (or your preferred name)
+   - **Project name** → Enter "cued" (or your preferred name)
    - **Team** → Select your team or create a new one
 
    This will:

@@ -38,7 +38,7 @@ export const searchMemoriesTool: Tool<typeof inputSchema, MemoryResult[]> = {
   inputSchema,
   execute: async (input, options): Promise<ToolResult<MemoryResult[]>> => {
     try {
-      // user_id = PRM user, contactId = filter by who the memory is about
+      // user_id = Cued user, contactId = filter by who the memory is about
       const memories = await getMemories(input.query, {
         user_id: options.context.userId,
         filters: input.contactId ? { contact_id: input.contactId } : undefined,

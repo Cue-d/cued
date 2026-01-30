@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { Nango } from "@nangohq/node";
-import { api } from "@prm/convex";
-import { env } from "@prm/env/server";
+import { api } from "@cued/convex";
+import { env } from "@cued/env/server";
 import { extractErrorMessage, getConvexClient } from "@/lib/api-utils";
 
 const nango = new Nango({ secretKey: env.NANGO_SECRET_KEY });

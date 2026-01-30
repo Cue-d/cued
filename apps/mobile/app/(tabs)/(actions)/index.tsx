@@ -9,8 +9,8 @@ import * as Haptics from "expo-haptics";
 import { useRouter } from "expo-router";
 import { useMutation, useQuery } from "convex/react";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { api } from "@prm/convex/convex/_generated/api";
-import { type DisplayMessage, type ContactFormData, type ActionPlatform } from "@prm/shared";
+import { api } from "@cued/convex/convex/_generated/api";
+import { type DisplayMessage, type ContactFormData, type ActionPlatform } from "@cued/shared";
 import { ActionButtons } from "@/components/action-buttons";
 import { CardStack } from "@/components/card-stack";
 import { MessageResponseCard, ContactCard } from "@/components/cards";
@@ -20,7 +20,7 @@ import { UndoSendToast } from "@/components/undo-send-toast";
 import { useActions } from "@/hooks/useActions";
 import { useElectronPresence } from "@/hooks/useElectronPresence";
 import type { SwipeDirection } from "@/components/swipeable-card";
-import type { Id } from "@prm/convex/convex/_generated/dataModel";
+import type { Id } from "@cued/convex/convex/_generated/dataModel";
 
 /** Action type from Convex getPendingActions */
 type EnrichedAction = {

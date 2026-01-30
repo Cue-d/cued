@@ -6,7 +6,7 @@
 import { v } from "convex/values";
 import { mutation, query } from "./_generated/server";
 import { platformValidator, syncModeValidator } from "./schema";
-import { MULTI_WORKSPACE_PLATFORMS } from "@prm/shared";
+import { MULTI_WORKSPACE_PLATFORMS } from "@cued/shared";
 import {
   findSyncCursor,
   upsertSyncCursor as upsertSyncCursorHelper,

@@ -3,7 +3,7 @@
  * These mirror the Convex query return types from packages/convex/convex/messages.ts
  */
 
-import type { ActionPlatform } from "@prm/shared"
+import type { ActionPlatform } from "@cued/shared"
 
 /** Platform type for inbox - re-exported from shared for convenience */
 export type InboxPlatform = ActionPlatform

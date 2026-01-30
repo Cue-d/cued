@@ -1,4 +1,4 @@
-# PRM - Personal Relationship Manager
+# Cued
 
 A cloud-based personal CRM with multi-platform messaging (iMessage, Gmail, Slack) and AI-powered action suggestions.
 
@@ -69,8 +69,8 @@ npx expo run:ios --device
 
 For physical device testing, you need an Apple Developer account:
 
-1. Open `apps/mobile/ios/PRM.xcworkspace` in Xcode
-2. Select the PRM target → Signing & Capabilities
+1. Open `apps/mobile/ios/Cued.xcworkspace` in Xcode
+2. Select the Cued target → Signing & Capabilities
 3. Select your Team and let Xcode manage signing
 4. Or use EAS with `eas build --profile preview` (handles signing automatically)
 
@@ -196,21 +196,21 @@ cd scripts && pnpm install
 
 ```bash
 # Pull Linear issue → Generate PRD
-pnpm prd pull PRM-123
+pnpm prd pull CUED-123
 
 # Execute PRD tasks
-pnpm prd run prds/prm-123-prd.json
+pnpm prd run prds/cued-123-prd.json
 
 # Sync progress back to Linear
-pnpm prd sync prds/prm-123-prd.json
+pnpm prd sync prds/cued-123-prd.json
 
 # Link PR to Linear issue (after creating PR)
-pnpm prd link-pr PRM-123 https://github.com/org/repo/pull/456
+pnpm prd link-pr CUED-123 https://github.com/org/repo/pull/456
 ```
 
 ### Branch Naming
 
-Use Linear issue IDs: `theotarr/prm-123-dark-mode`
+Use Linear issue IDs: `theotarr/cued-123-dark-mode`
 
 See [scripts/README.md](./scripts/README.md) for full PRD CLI documentation.
 

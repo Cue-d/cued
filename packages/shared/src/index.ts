@@ -1,5 +1,5 @@
 /**
- * @prm/shared - Shared utilities for PRM
+ * @cued/shared - Shared utilities for Cued
  */
 
 export {

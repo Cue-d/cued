@@ -1,10 +1,10 @@
 import WidgetKit
 import SwiftUI
 
-/// Main entry point for PRM widgets
+/// Main entry point for Cued widgets
 /// WidgetBundle allows grouping multiple widgets
 @main
-struct PRMWidgetBundle: WidgetBundle {
+struct CuedWidgetBundle: WidgetBundle {
     var body: some Widget {
         ActionCountWidget()
         ActionsListWidget()

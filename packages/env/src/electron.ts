@@ -38,7 +38,7 @@ let _env: ElectronEnv | null = null
  * Validates on first access and throws if required vars are missing
  *
  * @example
- * import { electronEnv } from "@prm/env/electron"
+ * import { electronEnv } from "@cued/env/electron"
  * const convexUrl = electronEnv.CONVEX_URL
  */
 export const electronEnv = new Proxy({} as ElectronEnv, {

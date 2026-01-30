@@ -36,7 +36,7 @@ let _env: FullServerEnv | null = null
  * Validates on first access and throws if required vars are missing
  *
  * @example
- * import { env } from "@prm/env/server"
+ * import { env } from "@cued/env/server"
  * const apiKey = env.AI_GATEWAY_API_KEY
  */
 export const env = new Proxy({} as FullServerEnv, {

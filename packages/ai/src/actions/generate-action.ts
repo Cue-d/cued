@@ -1,6 +1,6 @@
 import { generateObject } from "ai";
 import { z } from "zod";
-import { truncate } from "@prm/shared";
+import { truncate } from "@cued/shared";
 import { gateway, MODEL } from "../gateway";
 import { withRetry } from "../utils";
 

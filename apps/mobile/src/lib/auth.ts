@@ -2,14 +2,14 @@ import * as AuthSession from "expo-auth-session";
 import * as Crypto from "expo-crypto";
 import * as SecureStore from "expo-secure-store";
 import * as WebBrowser from "expo-web-browser";
-import { clientEnv } from "@prm/env/client";
+import { clientEnv } from "@cued/env/client";
 
 WebBrowser.maybeCompleteAuthSession();
 
 const STORAGE_KEYS = {
-  accessToken: "prm_access_token",
-  refreshToken: "prm_refresh_token",
-  user: "prm_user",
+  accessToken: "cued_access_token",
+  refreshToken: "cued_refresh_token",
+  user: "cued_user",
 } as const;
 
 const WORKOS_CLIENT_ID = clientEnv.EXPO_PUBLIC_WORKOS_CLIENT_ID ?? "";
@@ -17,12 +17,12 @@ const WORKOS_AUTH_ENDPOINT = "https://api.workos.com/user_management/authorize";
 const WORKOS_TOKEN_ENDPOINT = "https://api.workos.com/user_management/authenticate";
 
 const WORKOS_REDIRECT_URI = AuthSession.makeRedirectUri({
-  scheme: "prm",
+  scheme: "cued",
   path: "auth/callback",
 });
 
 if (__DEV__) {
-  console.log("[PRM Auth] Redirect URI:", WORKOS_REDIRECT_URI);
+  console.log("[Cued Auth] Redirect URI:", WORKOS_REDIRECT_URI);
 }
 
 export type OAuthProvider = "GoogleOAuth" | "AppleOAuth";
@@ -116,7 +116,7 @@ export async function refreshAccessToken(): Promise<AuthResult | null> {
   const refreshToken = await getRefreshToken();
   if (!refreshToken) {
     if (__DEV__) {
-      console.log("[PRM Auth] No refresh token available");
+      console.log("[Cued Auth] No refresh token available");
     }
     return null;
   }
@@ -135,7 +135,7 @@ export async function refreshAccessToken(): Promise<AuthResult | null> {
     if (!response.ok) {
       const errorText = await response.text();
       if (__DEV__) {
-        console.log("[PRM Auth] Token refresh failed:", errorText);
+        console.log("[Cued Auth] Token refresh failed:", errorText);
       }
       // Clear invalid tokens
       await signOut();
@@ -157,13 +157,13 @@ export async function refreshAccessToken(): Promise<AuthResult | null> {
     ]);
 
     if (__DEV__) {
-      console.log("[PRM Auth] Token refreshed successfully");
+      console.log("[Cued Auth] Token refreshed successfully");
     }
 
     return authResult;
   } catch (error) {
     if (__DEV__) {
-      console.error("[PRM Auth] Token refresh error:", error);
+      console.error("[Cued Auth] Token refresh error:", error);
     }
     return null;
   }

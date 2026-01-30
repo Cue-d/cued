@@ -1,5 +1,5 @@
 import { z } from "zod";
-import type { ContactHandle } from "@prm/shared";
+import type { ContactHandle } from "@cued/shared";
 import { getErrorMessage, type Tool, type ToolResult } from "../types";
 
 const inputSchema = z.object({

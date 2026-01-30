@@ -1,7 +1,7 @@
 "use client"
 
 import { Mail, MessageCircle } from "lucide-react"
-export { formatRelativeTime } from "@prm/shared"
+export { formatRelativeTime } from "@cued/shared"
 
 export function PlatformIcon({ platform }: { platform: string }) {
   if (platform === "gmail") {

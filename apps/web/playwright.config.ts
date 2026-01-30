@@ -2,7 +2,7 @@ import path from "path";
 import { defineConfig, devices } from "@playwright/test";
 
 /**
- * E2E test configuration for PRM web app.
+ * E2E test configuration for Cued web app.
  *
  * Projects:
  * - setup: Handles authentication state setup (runs once before authenticated tests)

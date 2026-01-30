@@ -3,10 +3,10 @@
  * Sends periodic heartbeats to Convex so mobile can detect if desktop is online.
  */
 import { ConvexHttpClient } from "convex/browser";
-import { api } from "@prm/convex";
+import { api } from "@cued/convex";
 import { isAuthError } from "../auth/auth-utils";
 import { app } from "electron";
-import { electronEnv } from "@prm/env/electron";
+import { electronEnv } from "@cued/env/electron";
 
 const CONVEX_URL = electronEnv.CONVEX_URL;
 const HEARTBEAT_INTERVAL_MS = 15_000;

@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { withAuth } from "@workos-inc/authkit-nextjs";
+import { CuedLogoStatic } from "@cued/ui";
 
 export default async function MarketingLayout({
   children,
@@ -18,8 +19,9 @@ export default async function MarketingLayout({
       {/* Header */}
       <header className="absolute top-0 left-0 right-0 z-50">
         <nav className="flex h-16 items-center justify-between px-6 lg:px-8">
-          <Link href="/" className="flex items-center">
-            <span className="text-lg font-medium tracking-tight">PRM</span>
+          <Link href="/" className="flex items-center gap-2">
+            <CuedLogoStatic size={28} className="text-primary" />
+            <span className="text-lg font-medium tracking-tight">Cued</span>
           </Link>
           <div className="flex items-center gap-2">
             <Link
@@ -39,7 +41,7 @@ export default async function MarketingLayout({
       <footer className="absolute bottom-0 left-0 right-0 z-50">
         <div className="flex h-16 items-center justify-center px-6 lg:px-8">
           <p className="text-sm text-muted-foreground">
-            &copy; {new Date().getFullYear()} PRM
+            &copy; {new Date().getFullYear()} Cued
           </p>
         </div>
       </footer>

@@ -1,7 +1,7 @@
 /**
  * Apple Contacts integration for Electron.
  *
- * Fetches contacts from Contacts.app using Swift CLI (prm-contacts) for high performance
+ * Fetches contacts from Contacts.app using Swift CLI (cued-contacts) for high performance
  * (~100x faster than AppleScript). Falls back gracefully with clear error messages if unavailable.
  *
  * Based on backend/services/macos/contacts.py
@@ -12,10 +12,10 @@ import { accessSync, constants, existsSync, mkdirSync, readFileSync, unlinkSync,
 import { homedir } from "os";
 import { dirname, join } from "path";
 import { ResolvedContact } from "../imessage/types";
-import { normalizePhone, getPhoneVariants } from "@prm/shared";
+import { normalizePhone, getPhoneVariants } from "@cued/shared";
 
 /** Default cache directory for contacts */
-const CACHE_DIR = join(homedir(), ".prm");
+const CACHE_DIR = join(homedir(), ".cued");
 const CACHE_FILE = join(CACHE_DIR, "contacts_cache.json");
 
 /** Cache expiry in milliseconds (24 hours) */
@@ -25,7 +25,7 @@ const CACHE_EXPIRY_MS = 24 * 60 * 60 * 1000;
 const CLI_TIMEOUT_MS = 30000;
 
 /** Environment variable to override the binary path */
-const CONTACTS_BINARY_ENV_VAR = "PRM_CONTACTS_BINARY";
+const CONTACTS_BINARY_ENV_VAR = "CUED_CONTACTS_BINARY";
 
 /** Cached contacts data structure */
 interface ContactsCache {
@@ -37,7 +37,7 @@ interface ContactsCache {
   handleIndex: Record<string, number>;
 }
 
-/** JSON output from prm-contacts CLI */
+/** JSON output from cued-contacts CLI */
 interface ContactsCliOutput {
   contacts: Array<{
     name: string;
@@ -49,18 +49,18 @@ interface ContactsCliOutput {
   elapsed_seconds: number;
 }
 
-/** JSON error output from prm-contacts CLI */
+/** JSON error output from cued-contacts CLI */
 interface ContactsCliError {
   error: string;
 }
 
 /**
- * Get the path to the prm-contacts binary.
+ * Get the path to the cued-contacts binary.
  *
  * Checks in order:
- * 1. Environment variable PRM_CONTACTS_BINARY
- * 2. Packaged app location (resources/swift/prm-contacts) - for production
- * 3. Development location (swift/.build/release/prm-contacts) - for development
+ * 1. Environment variable CUED_CONTACTS_BINARY
+ * 2. Packaged app location (resources/swift/cued-contacts) - for production
+ * 3. Development location (swift/.build/release/cued-contacts) - for development
  */
 function getContactsBinaryPath(): string {
   // 1. Check environment variable
@@ -70,10 +70,10 @@ function getContactsBinaryPath(): string {
   }
 
   // 2. Check packaged app location (Electron resources)
-  // When packaged, the structure is: resources/swift/prm-contacts
+  // When packaged, the structure is: resources/swift/cued-contacts
   const resourcesPath = process.resourcesPath;
   if (resourcesPath) {
-    const packagedPath = join(resourcesPath, "swift", "prm-contacts");
+    const packagedPath = join(resourcesPath, "swift", "cued-contacts");
     if (existsSync(packagedPath)) {
       return packagedPath;
     }
@@ -81,8 +81,8 @@ function getContactsBinaryPath(): string {
 
   // 3. Development location - relative to built output
   // Built file is at: apps/electron/out/main/index.js
-  // Binary is at: apps/electron/swift/.build/release/prm-contacts
-  const devPath = join(__dirname, "..", "..", "swift", ".build", "release", "prm-contacts");
+  // Binary is at: apps/electron/swift/.build/release/cued-contacts
+  const devPath = join(__dirname, "..", "..", "swift", ".build", "release", "cued-contacts");
   return devPath;
 }
 
@@ -225,7 +225,7 @@ export class ContactsManager {
     if (!existsSync(this.binaryPath)) {
       throw new ContactsError(
         `Swift contacts binary not found at ${this.binaryPath}. ` +
-        `Build it with: cd apps/electron/swift && swift build -c release --product prm-contacts`
+        `Build it with: cd apps/electron/swift && swift build -c release --product cued-contacts`
       );
     }
 

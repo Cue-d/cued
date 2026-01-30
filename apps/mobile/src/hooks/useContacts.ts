@@ -1,6 +1,6 @@
 import { useQuery } from "convex/react";
-import { api } from "@prm/convex/convex/_generated/api";
-import type { Id } from "@prm/convex/convex/_generated/dataModel";
+import { api } from "@cued/convex/convex/_generated/api";
+import type { Id } from "@cued/convex/convex/_generated/dataModel";
 
 /**
  * Hook for fetching contacts from Convex.

@@ -1,5 +1,5 @@
 /**
- * Shared utility functions for PRM
+ * Shared utility functions for Cued
  */
 
 /**

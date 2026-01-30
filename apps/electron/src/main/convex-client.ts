@@ -11,7 +11,7 @@ import type {
   FunctionArgs,
   FunctionReturnType,
 } from "convex/server";
-import { electronEnv } from "@prm/env/electron";
+import { electronEnv } from "@cued/env/electron";
 
 const CONVEX_URL = electronEnv.CONVEX_URL;
 

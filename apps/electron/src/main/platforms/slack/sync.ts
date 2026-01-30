@@ -27,7 +27,7 @@
  */
 
 import { ConvexHttpClient } from 'convex/browser'
-import { api } from '@prm/convex'
+import { api } from '@cued/convex'
 import {
   SlackClient,
   isTokenExpiredError,

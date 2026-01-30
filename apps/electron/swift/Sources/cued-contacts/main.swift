@@ -1,9 +1,9 @@
 import Contacts
 import Foundation
 
-/// PRM Contacts CLI - Fetches all contacts from macOS Contacts.app
+/// Cued Contacts CLI - Fetches all contacts from macOS Contacts.app
 ///
-/// Usage: prm-contacts [options]
+/// Usage: cued-contacts [options]
 ///
 /// Options:
 ///   --json          Output JSON (default when not a tty)
@@ -19,7 +19,7 @@ import Foundation
 ///   2 - Access denied (permission issue)
 
 @main
-struct PRMContacts {
+struct CuedContacts {
     static func main() {
         let args = CommandLine.arguments
         let prettyPrint = args.contains("--pretty")

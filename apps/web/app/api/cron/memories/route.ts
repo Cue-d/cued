@@ -7,7 +7,7 @@
  * Security: Protected by CRON_SECRET environment variable.
  */
 import { NextResponse } from "next/server";
-import { env } from "@prm/env/server";
+import { env } from "@cued/env/server";
 
 export async function GET(req: Request) {
   // Verify cron secret for security

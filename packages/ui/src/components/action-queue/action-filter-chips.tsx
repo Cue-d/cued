@@ -1,5 +1,5 @@
 import * as React from "react"
-import { getActionTypesByCategory } from "@prm/shared"
+import { getActionTypesByCategory } from "@cued/shared"
 import { cn } from "../../lib/utils"
 import { Button } from "../ui/button"
 

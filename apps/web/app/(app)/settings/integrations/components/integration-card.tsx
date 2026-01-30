@@ -6,10 +6,10 @@ import {
   RefreshCwIcon,
   LinkIcon,
 } from "lucide-react";
-import { formatRelativeTime, type ActionPlatform } from "@prm/shared";
-import { Button, Skeleton } from "@prm/ui";
+import { formatRelativeTime, type ActionPlatform } from "@cued/shared";
+import { Button, Skeleton } from "@cued/ui";
 
-// Re-export Platform type from @prm/shared for convenience
+// Re-export Platform type from @cued/shared for convenience
 export type Platform = ActionPlatform;
 
 /** Type of integration connection method */

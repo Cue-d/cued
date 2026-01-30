@@ -2,7 +2,7 @@
 
 import * as React from "react"
 import { MessageSquare, Mail, Hash, Linkedin, ChevronDown, Twitter, Phone } from "lucide-react"
-import { PLATFORM_CONFIG, type ActionPlatform } from "@prm/shared"
+import { PLATFORM_CONFIG, type ActionPlatform } from "@cued/shared"
 import { cn } from "../../../lib/utils"
 import {
   DropdownMenu,

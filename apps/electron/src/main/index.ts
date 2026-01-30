@@ -5,8 +5,8 @@ import { join } from "node:path";
 import { app, BrowserWindow, ipcMain } from "electron";
 import liquidGlass from "electron-liquid-glass";
 import { ConvexHttpClient } from "convex/browser";
-import { api } from "@prm/convex";
-import { electronEnv } from "@prm/env/electron";
+import { api } from "@cued/convex";
+import { electronEnv } from "@cued/env/electron";
 import {
   initAuth,
   getAuthState,

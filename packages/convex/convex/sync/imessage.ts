@@ -7,7 +7,7 @@ import type { Infer } from "convex/values";
 import { v } from "convex/values";
 import type { Doc, Id } from "../_generated/dataModel";
 import type { MutationCtx } from "../_generated/server";
-import { getPhoneVariants as getPhoneVariantsShared } from "@prm/shared";
+import { getPhoneVariants as getPhoneVariantsShared } from "@cued/shared";
 import {
   handleInput,
   normalizeHandle,

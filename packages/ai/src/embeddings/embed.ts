@@ -3,7 +3,7 @@
  * Generates embeddings for messages to enable similarity search and skip logic.
  */
 import { embed, embedMany } from "ai";
-import { EMBEDDING_MODEL } from "@prm/shared";
+import { EMBEDDING_MODEL } from "@cued/shared";
 import { gateway } from "../gateway";
 
 /**

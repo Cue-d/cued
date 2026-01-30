@@ -12,8 +12,8 @@ import { SymbolView } from "expo-symbols";
 import { useQuery, useMutation } from "convex/react";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Uniwind, useUniwind } from "uniwind";
-import { api } from "@prm/convex";
-import { getInitials } from "@prm/shared";
+import { api } from "@cued/convex";
+import { getInitials } from "@cued/shared";
 import { getRedirectUri } from "@/lib/auth";
 import { cn, getDisplayName, getThemeColors } from "@/lib/utils";
 import { useAuth } from "@/providers/AuthProvider";
@@ -253,7 +253,7 @@ export default function SettingsScreen(): React.ReactElement {
         />
       </SettingsSection>
 
-      <Text className="text-center text-muted-foreground text-xs mt-6">PRM v1.0.0</Text>
+      <Text className="text-center text-muted-foreground text-xs mt-6">Cued v1.0.0</Text>
     </SafeAreaView>
   );
 }

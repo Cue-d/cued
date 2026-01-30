@@ -1,4 +1,4 @@
-# PRM Mobile App
+# Cued Mobile App
 
 Expo React Native app for iOS and Android.
 

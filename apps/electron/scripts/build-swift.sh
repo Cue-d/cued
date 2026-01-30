@@ -7,11 +7,11 @@ set -e
 # Path to swift directory (inside apps/electron)
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SWIFT_DIR="$SCRIPT_DIR/../swift"
-BINARY_PATH="$SWIFT_DIR/.build/release/prm-contacts"
+BINARY_PATH="$SWIFT_DIR/.build/release/cued-contacts"
 
 # Check if binary already exists
 if [ -f "$BINARY_PATH" ]; then
-  echo "[build-swift] prm-contacts binary already exists"
+  echo "[build-swift] cued-contacts binary already exists"
   exit 0
 fi
 
@@ -22,12 +22,12 @@ if [ ! -d "$SWIFT_DIR" ]; then
   exit 0
 fi
 
-echo "[build-swift] Building prm-contacts..."
+echo "[build-swift] Building cued-contacts..."
 cd "$SWIFT_DIR"
-swift build -c release --product prm-contacts
+swift build -c release --product cued-contacts
 
 if [ -f "$BINARY_PATH" ]; then
-  echo "[build-swift] Successfully built prm-contacts"
+  echo "[build-swift] Successfully built cued-contacts"
 else
   echo "[build-swift] Warning: Build completed but binary not found"
 fi

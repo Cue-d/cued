@@ -9,7 +9,7 @@
  * 2. Returns a SyncResult with messagesSynced/contactsSynced counts
  */
 
-import { api } from '@prm/convex'
+import { api } from '@cued/convex'
 import { type SyncResult, type SyncFunction } from './types.js'
 import { getIMessageSyncManager } from '../platforms/imessage/index.js'
 import {

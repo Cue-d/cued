@@ -3,7 +3,7 @@ import { View, Text, useColorScheme } from "react-native";
 import { isLiquidGlassAvailable, GlassView } from "expo-glass-effect";
 import { SymbolView } from "expo-symbols";
 import { FadeIn } from "react-native-reanimated";
-import { formatRelativeTime } from "@prm/shared";
+import { formatRelativeTime } from "@cued/shared";
 import { AnimatedView } from "@/components/animated";
 import { getThemeColors } from "@/lib/utils";
 import type { ToolInvocation } from "./chat-message";

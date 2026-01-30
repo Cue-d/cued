@@ -1,5 +1,5 @@
 /**
- * Watches for macOS Contacts.app changes using the prm-contacts Swift CLI.
+ * Watches for macOS Contacts.app changes using the cued-contacts Swift CLI.
  *
  * The Swift CLI outputs JSON lines when contacts change, which we parse and
  * emit as events. Falls back to hourly polling if watch mode is unavailable.

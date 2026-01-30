@@ -1,5 +1,5 @@
 {
-  "name": "@prm/integrations",
+  "name": "@cued/integrations",
   "version": "0.0.0",
   "type": "module",
   "main": "./src/index.ts",
@@ -15,7 +15,7 @@
   },
   "dependencies": {
     "@nangohq/node": "^0.45.0",
-    "@prm/env": "workspace:*"
+    "@cued/env": "workspace:*"
   },
   "devDependencies": {
     "@types/node": "^22.10.5",

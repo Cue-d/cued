@@ -10,14 +10,14 @@ import {
   Loader2Icon,
   CheckCircleIcon,
 } from "lucide-react";
-import { api } from "@prm/convex";
+import { api } from "@cued/convex";
 import {
   Button,
   Checkbox,
   Label,
   RadioGroup,
   RadioGroupItem,
-} from "@prm/ui";
+} from "@cued/ui";
 import { ResetConfirmationModal } from "./components/reset-confirmation-modal";
 
 // Platforms with active sync adapters - matches ResetConfirmationModal

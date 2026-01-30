@@ -11,7 +11,7 @@ import {
   normalizeLinkedInHandle,
   urnIdsMatch,
   extractIdFromURN,
-} from "@prm/shared";
+} from "@cued/shared";
 import type { Doc, Id } from "../_generated/dataModel";
 import type { MutationCtx } from "../_generated/server";
 import {

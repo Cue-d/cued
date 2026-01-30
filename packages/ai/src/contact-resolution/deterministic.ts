@@ -3,7 +3,7 @@
  * Task 6.0a: Match contacts by exact email/phone with normalization.
  */
 
-import { normalizePhone, getPhoneVariants } from "@prm/shared";
+import { normalizePhone, getPhoneVariants } from "@cued/shared";
 
 /**
  * Normalize email address for matching.

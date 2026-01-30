@@ -2,7 +2,7 @@
 module.exports = {
   type: "widget",
   name: "ActionCountWidget",
-  displayName: "PRM Actions",
+  displayName: "Cued Actions",
   // Widget bundle identifier appended to main app identifier
   bundleIdentifier: ".widget",
   // iOS 17+ for modern widget styling
@@ -10,7 +10,7 @@ module.exports = {
   frameworks: ["SwiftUI", "WidgetKit"],
   entitlements: {
     // App Group for sharing data between main app and widget
-    "com.apple.security.application-groups": ["group.com.prm.mobile"],
+    "com.apple.security.application-groups": ["group.so.cued.app"],
   },
   colors: {
     // iOS system blue as accent color

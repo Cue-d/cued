@@ -6,8 +6,8 @@ import {
   buildSystemPrompt,
   createChatTools,
   type MentionedContact,
-} from "@prm/ai";
-import { api, type Id } from "@prm/convex";
+} from "@cued/ai";
+import { api, type Id } from "@cued/convex";
 import { getConvexClient } from "@/lib/api-utils";
 
 interface UIMessage {

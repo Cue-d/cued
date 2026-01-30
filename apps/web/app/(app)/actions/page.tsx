@@ -2,8 +2,8 @@
 
 import * as React from "react"
 import { useQuery, useMutation } from "convex/react"
-import { api } from "@prm/convex"
-import { type EnrichedAction } from "@prm/shared"
+import { api } from "@cued/convex"
+import { type EnrichedAction } from "@cued/shared"
 import {
   CardStack,
   ActionFilterChips,
@@ -11,9 +11,9 @@ import {
   type SwipeDirection,
   type FilterGroup,
   type ActionContext,
-} from "@prm/ui"
-import { Button, Skeleton } from "@prm/ui"
-import type { Id } from "@prm/convex"
+} from "@cued/ui"
+import { Button, Skeleton } from "@cued/ui"
+import type { Id } from "@cued/convex"
 
 /** Map action with context to CardStack ActionItem format */
 interface ActionWithId {

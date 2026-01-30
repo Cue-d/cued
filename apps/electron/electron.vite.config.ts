@@ -11,13 +11,13 @@ export default defineConfig({
     envDir: rootDir,
     resolve: {
       alias: {
-        "@prm/integrations": resolve(__dirname, "../../packages/integrations/src"),
+        "@cued/integrations": resolve(__dirname, "../../packages/integrations/src"),
       },
     },
     build: {
       // Force workspace packages to be bundled (not treated as external)
       externalizeDeps: {
-        exclude: ["@prm/integrations"],
+        exclude: ["@cued/integrations"],
       },
       rollupOptions: {
         input: {
@@ -42,8 +42,8 @@ export default defineConfig({
     resolve: {
       alias: {
         "@": resolve(__dirname, "src/renderer"),
-        "@prm/ui": resolve(__dirname, "../../packages/ui/src"),
-        "@prm/shared": resolve(__dirname, "../../packages/shared/src"),
+        "@cued/ui": resolve(__dirname, "../../packages/ui/src"),
+        "@cued/shared": resolve(__dirname, "../../packages/shared/src"),
       },
       dedupe: ["react", "react-dom"],
     },

@@ -6,11 +6,11 @@
  */
 
 import { ConvexHttpClient } from 'convex/browser'
-import { api } from '@prm/convex'
+import { api } from '@cued/convex'
 import { withAuthRetry } from '../auth/auth-utils'
-import { electronEnv } from '@prm/env/electron'
+import { electronEnv } from '@cued/env/electron'
 import { createAuthRetryOptions, setConvexAuth } from '../auth/auth-manager'
-import type { SyncPlatform } from '@prm/shared'
+import type { SyncPlatform } from '@cued/shared'
 
 // Re-export centralized auth helpers for convenience
 export { createAuthRetryOptions, setConvexAuth }

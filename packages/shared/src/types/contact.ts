@@ -1,6 +1,6 @@
 /**
  * Shared types for contacts and handles.
- * Canonical definitions - import from @prm/shared, don't redefine.
+ * Canonical definitions - import from @cued/shared, don't redefine.
  */
 
 /**

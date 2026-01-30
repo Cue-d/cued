@@ -1,6 +1,6 @@
 import * as React from "react"
 import { X } from "lucide-react"
-import { PLATFORM_CONFIG, type ActionPlatform } from "@prm/shared"
+import { PLATFORM_CONFIG, type ActionPlatform } from "@cued/shared"
 import { cn } from "../lib/utils"
 import { Button } from "./ui/button"
 

@@ -3,7 +3,7 @@
 import { ReactNode, useCallback, useEffect, useRef } from "react";
 import { signOut } from "@workos-inc/authkit-nextjs";
 import { useQuery, useMutation } from "convex/react";
-import { api, Id } from "@prm/convex";
+import { api, Id } from "@cued/convex";
 import {
   SidebarProvider,
   SidebarInset,
@@ -11,7 +11,7 @@ import {
   CommandMenu,
   UndoSendProvider,
   type PendingMessage,
-} from "@prm/ui";
+} from "@cued/ui";
 
 interface WorkosProfile {
   email: string;

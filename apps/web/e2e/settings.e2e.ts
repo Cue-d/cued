@@ -58,7 +58,7 @@ test.describe("Settings Page", () => {
     await page.goto("/settings");
     await page.waitForLoadState("networkidle");
 
-    await expect(page.getByText(/PRM v[\d.]+/)).toBeVisible();
+    await expect(page.getByText(/Cued v[\d.]+/)).toBeVisible();
   });
 });
 
@@ -108,7 +108,7 @@ test.describe("Integrations Page", () => {
     await page.waitForLoadState("networkidle");
 
     await expect(page.getByText("How it works")).toBeVisible();
-    await expect(page.getByText(/Install the PRM desktop app/)).toBeVisible();
+    await expect(page.getByText(/Install the Cued desktop app/)).toBeVisible();
   });
 
   test("iMessage integration shows desktop app requirement", async ({ page }) => {

@@ -4,7 +4,7 @@ import "./globals.css";
 import type { Metadata } from "next";
 
 export const metadata: Metadata = {
-  title: "PRM - Personal Relationship Manager",
+  title: "Cued",
   description:
     "Cloud-based personal relationship manager for iMessage, Gmail, and Slack",
 };

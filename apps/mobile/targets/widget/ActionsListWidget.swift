@@ -29,7 +29,7 @@ struct ActionsListEntry: TimelineEntry {
 // MARK: - Timeline Provider
 
 struct ActionsListProvider: TimelineProvider {
-    private let appGroupId = "group.com.prm.mobile"
+    private let appGroupId = "group.so.cued.app"
     private let actionsKey = "actionsList"
 
     /// Reads actions list from shared UserDefaults

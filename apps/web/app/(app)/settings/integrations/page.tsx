@@ -12,7 +12,7 @@ import {
   ArrowLeftIcon,
   LinkedinIcon,
 } from "lucide-react";
-import { api } from "@prm/convex";
+import { api } from "@cued/convex";
 import {
   IntegrationCard,
   SocialIntegrationCard,
@@ -87,13 +87,13 @@ export default function IntegrationsPage() {
   async function handleConnect(config: IntegrationConfig) {
     // Handle electron-webview integrations (like Slack)
     if (config.integrationType === "electron-webview") {
-      setError(`${config.name} connection requires the PRM desktop app. Open the desktop app and click Connect.`);
+      setError(`${config.name} connection requires the Cued desktop app. Open the desktop app and click Connect.`);
       return;
     }
 
     // Handle electron-local integrations (like iMessage)
     if (config.integrationType === "electron-local") {
-      setError(`${config.name} sync requires the PRM desktop app to be running.`);
+      setError(`${config.name} sync requires the Cued desktop app to be running.`);
       return;
     }
 
@@ -144,7 +144,7 @@ export default function IntegrationsPage() {
   async function handleDisconnect(config: IntegrationConfig) {
     // Handle electron-webview disconnects (like Slack)
     if (config.integrationType === "electron-webview") {
-      setError(`${config.name} disconnect requires the PRM desktop app. Open the desktop app settings to disconnect.`);
+      setError(`${config.name} disconnect requires the Cued desktop app. Open the desktop app settings to disconnect.`);
       return;
     }
 
@@ -203,7 +203,7 @@ export default function IntegrationsPage() {
       <div className="flex-1 overflow-y-auto">
         <div className="mx-auto max-w-2xl space-y-6 p-6">
           <p className="text-sm text-muted-foreground">
-            Connect your messaging platforms to sync conversations and contacts into PRM.
+            Connect your messaging platforms to sync conversations and contacts into Cued.
           </p>
 
           {error && (
@@ -258,11 +258,11 @@ export default function IntegrationsPage() {
             <h3 className="text-sm font-medium mb-2">How it works</h3>
             <ul className="text-sm text-muted-foreground space-y-1">
               <li>
-                <strong>iMessage:</strong> Install the PRM desktop app on your Mac to sync
+                <strong>iMessage:</strong> Install the Cued desktop app on your Mac to sync
                 messages locally
               </li>
               <li>
-                <strong>Gmail:</strong> Click Connect to authorize PRM to read your emails
+                <strong>Gmail:</strong> Click Connect to authorize Cued to read your emails
               </li>
               <li>
                 <strong>Slack:</strong> Use the desktop app to login with your Slack workspace

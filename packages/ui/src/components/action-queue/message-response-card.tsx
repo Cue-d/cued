@@ -6,7 +6,7 @@ import {
   formatRelativeTime,
   type ActionPlatform,
   type DisplayMessage,
-} from "@prm/shared"
+} from "@cued/shared"
 import { cn } from "../../lib/utils"
 import { Avatar, AvatarFallback } from "../ui/avatar"
 import { Card, CardContent, CardFooter, CardHeader } from "../ui/card"

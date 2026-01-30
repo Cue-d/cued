@@ -15,17 +15,17 @@ import {
   Trash2,
   ChevronRight,
 } from "lucide-react"
-import { api } from "@prm/convex"
+import { api } from "@cued/convex"
 import {
   getInitials,
   normalizePhone,
   type ActionPlatform,
   PLATFORM_CONFIG,
-} from "@prm/shared"
+} from "@cued/shared"
 import {
   SendMessageModal,
   type SendMessageContact,
-} from "@prm/ui"
+} from "@cued/ui"
 import {
   Card,
   CardContent,
@@ -35,8 +35,8 @@ import {
   AvatarFallback,
   Input,
   Button,
-} from "@prm/ui"
-import type { Id } from "@prm/convex"
+} from "@cued/ui"
+import type { Id } from "@cued/convex"
 
 function HandleIcon({ type }: { type: string }) {
   switch (type) {

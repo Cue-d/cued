@@ -1,6 +1,6 @@
 import * as React from "react"
 import { Mail, MessageSquare, Phone, ChevronDown, ChevronUp, Linkedin, Twitter, User } from "lucide-react"
-import { getInitials, type ContactHandle } from "@prm/shared"
+import { getInitials, type ContactHandle } from "@cued/shared"
 import { cn } from "../../../lib/utils"
 import { Avatar, AvatarFallback } from "../../ui/avatar"
 import { Badge } from "../../ui/badge"

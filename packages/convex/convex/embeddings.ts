@@ -10,7 +10,7 @@ import {
   SIMILAR_LIMIT,
   MIN_HISTORY_FOR_SKIP,
   ACTION_SIMILARITY_WINDOW_MS,
-} from "@prm/shared";
+} from "@cued/shared";
 import type { Doc, Id } from "./_generated/dataModel";
 import {
   internalAction,
@@ -289,7 +289,7 @@ export const processMessagesForEmbedding = internalAction({
       }));
 
     // Import embedding helpers
-    const { buildEmbeddingInput, embedText } = await import("@prm/ai");
+    const { buildEmbeddingInput, embedText } = await import("@cued/ai");
 
     // Build embedding input
     const embeddingInput = buildEmbeddingInput(
@@ -374,7 +374,7 @@ export const debugFindSimilar = internalAction({
     limit: v.optional(v.number()),
   },
   handler: async (ctx, args): Promise<DebugFindSimilarResult> => {
-    const { embedText } = await import("@prm/ai");
+    const { embedText } = await import("@cued/ai");
 
     // Embed the test input
     const embedding = await embedText(args.testInput);

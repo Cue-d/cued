@@ -7,12 +7,12 @@ module.exports = defineConfig([
   // Ignore convex generated files (not available in CI)
   {
     settings: {
-      "import-x/ignore": ["@prm/convex/convex/_generated"],
+      "import-x/ignore": ["@cued/convex/convex/_generated"],
     },
     rules: {
       "import/no-unresolved": [
         "error",
-        { ignore: ["@prm/convex/convex/_generated"] },
+        { ignore: ["@cued/convex/convex/_generated"] },
       ],
     },
   },
@@ -37,8 +37,8 @@ module.exports = defineConfig([
             { pattern: "react", group: "external", position: "before" },
             { pattern: "react-native", group: "external", position: "before" },
             { pattern: "expo-**", group: "external", position: "before" },
-            // Monorepo packages (@prm/*)
-            { pattern: "@prm/**", group: "internal", position: "before" },
+            // Monorepo packages (@cued/*)
+            { pattern: "@cued/**", group: "internal", position: "before" },
             // Local aliases (@/*)
             { pattern: "@/**", group: "internal", position: "after" },
           ],

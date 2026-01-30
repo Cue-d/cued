@@ -6,7 +6,7 @@
 import * as React from "react";
 import { ContactCard } from "../../components/action-queue/contact-card";
 import type { ActionCardProps } from "../types";
-import type { ContactFormData } from "@prm/shared";
+import type { ContactFormData } from "@cued/shared";
 
 /**
  * Contact card state management.

@@ -5,8 +5,8 @@
  */
 
 import { ConvexHttpClient } from 'convex/browser'
-import { api } from '@prm/convex'
-import { normalizeConversationURN } from '@prm/shared'
+import { api } from '@cued/convex'
+import { normalizeConversationURN } from '@cued/shared'
 import { withAuthRetry } from '../../auth/auth-utils'
 import type { LinkedInClient } from './api/client'
 import type { Conversation, Message, EventHandlers } from './api/types'

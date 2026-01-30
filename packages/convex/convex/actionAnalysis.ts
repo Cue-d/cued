@@ -444,7 +444,7 @@ export const analyzeConversation = internalAction({
       }
 
       // Build input for LLM
-      const { generateActionWithRetry, fetchContactMemories } = await import("@prm/ai");
+      const { generateActionWithRetry, fetchContactMemories } = await import("@cued/ai");
 
       // Fetch memories about this contact for better context (optional, non-blocking)
       const contactMemories = primaryContact

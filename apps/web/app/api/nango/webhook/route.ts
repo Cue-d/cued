@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import { api } from "@prm/convex";
-import { env } from "@prm/env/server";
+import { api } from "@cued/convex";
+import { env } from "@cued/env/server";
 import { extractErrorMessage, getConvexClient } from "@/lib/api-utils";
 
 interface NangoWebhookPayload {

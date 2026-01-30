@@ -1,7 +1,7 @@
 "use client"
 
 import * as React from "react"
-import { formatTime } from "@prm/shared"
+import { formatTime } from "@cued/shared"
 import { cn } from "../../../lib/utils"
 
 /** Reaction badges component */

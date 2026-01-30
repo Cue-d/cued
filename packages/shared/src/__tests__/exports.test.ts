@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import * as shared from "../index";
 
-describe("@prm/shared exports", () => {
+describe("@cued/shared exports", () => {
   describe("phone utilities", () => {
     it("exports normalizePhone", () => {
       expect(shared.normalizePhone).toBeTypeOf("function");

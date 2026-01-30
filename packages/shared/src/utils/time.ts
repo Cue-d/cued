@@ -1,5 +1,5 @@
 /**
- * Time formatting utilities for PRM
+ * Time formatting utilities for Cued
  */
 
 /**

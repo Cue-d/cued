@@ -18,14 +18,14 @@ export default defineConfig({
     alias: {
       "@": path.resolve(__dirname, "./src"),
       // Mock convex API to avoid TypeScript-only declaration files
-      "@prm/convex/convex/_generated/api": path.resolve(__dirname, "./src/test/mocks/convex-api.ts"),
+      "@cued/convex/convex/_generated/api": path.resolve(__dirname, "./src/test/mocks/convex-api.ts"),
       // Mock convex/server to avoid TypeScript-only declaration files
       "convex/server": path.resolve(__dirname, "./src/test/mocks/convex-server.ts"),
-      "@prm/convex": path.resolve(__dirname, "../../packages/convex"),
+      "@cued/convex": path.resolve(__dirname, "../../packages/convex"),
       // Point to source files directly for proper resolution in tests
-      "@prm/shared": path.resolve(__dirname, "../../packages/shared/src/index.ts"),
-      "@prm/env/client": path.resolve(__dirname, "../../packages/env/src/client.ts"),
-      "@prm/env": path.resolve(__dirname, "../../packages/env/src/index.ts"),
+      "@cued/shared": path.resolve(__dirname, "../../packages/shared/src/index.ts"),
+      "@cued/env/client": path.resolve(__dirname, "../../packages/env/src/client.ts"),
+      "@cued/env": path.resolve(__dirname, "../../packages/env/src/index.ts"),
       "react-native": path.resolve(__dirname, "./src/test/mocks/react-native.ts"),
     },
   },

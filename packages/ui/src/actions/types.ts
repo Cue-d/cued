@@ -2,7 +2,7 @@
  * Types for action card rendering.
  */
 
-import type { EnrichedAction, DisplayMessage, ContactHandle } from "@prm/shared";
+import type { EnrichedAction, DisplayMessage, ContactHandle } from "@cued/shared";
 
 /**
  * Context data for the top action card.

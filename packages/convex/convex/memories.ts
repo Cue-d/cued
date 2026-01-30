@@ -22,7 +22,7 @@ import {
   aggregateCursorStats,
   findEarliestMemoryCursor,
 } from "./lib/cursors";
-import type { ActionPlatform } from "@prm/shared";
+import type { ActionPlatform } from "@cued/shared";
 
 // Rate limiting: ~100 messages per minute = ~1.67 msgs/sec
 // Process in batches of 50, with delay between batches
@@ -466,7 +466,7 @@ async function extractMemoriesForContact(
     content: m.content,
   }));
 
-  const { addContactMemories } = await import("@prm/ai");
+  const { addContactMemories } = await import("@cued/ai");
   return addContactMemories(
     conversationMessages,
     userId,

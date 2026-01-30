@@ -4,15 +4,15 @@ import { useState, useRef, useCallback, useEffect, useMemo } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import { useQuery, useMutation } from "convex/react";
 import { Send, Loader2 } from "lucide-react";
-import { api } from "@prm/convex";
+import { api } from "@cued/convex";
 import {
   InboxConversationList,
   InboxMessageThread,
   type InboxConversation,
   type InboxMessage,
   type InboxPlatform,
-} from "@prm/ui";
-import type { Id } from "@prm/convex";
+} from "@cued/ui";
+import type { Id } from "@cued/convex";
 
 type PlatformFilter = InboxPlatform | "all";
 

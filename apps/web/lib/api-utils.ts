@@ -4,7 +4,7 @@
  */
 import { NextRequest, NextResponse } from "next/server";
 import { ConvexHttpClient } from "convex/browser";
-import { env } from "@prm/env/server";
+import { env } from "@cued/env/server";
 
 /**
  * Create a Convex HTTP client.

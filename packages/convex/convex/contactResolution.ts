@@ -8,13 +8,13 @@ import {
 import { internal } from "./_generated/api";
 import type { Id } from "./_generated/dataModel";
 import { getAuthenticatedUser } from "./lib/auth";
-import { normalizeEmail, nameSimilarity, NAME_MATCH_THRESHOLDS, getPhoneVariants, phonesMatch } from "@prm/ai";
+import { normalizeEmail, nameSimilarity, NAME_MATCH_THRESHOLDS, getPhoneVariants, phonesMatch } from "@cued/ai";
 
 // TODO: Re-enable LLM matching once basic name matching is working
-// LLM matching implementation lives in: @prm/ai (packages/ai/src/contact-resolution/llm-match.ts)
+// LLM matching implementation lives in: @cued/ai (packages/ai/src/contact-resolution/llm-match.ts)
 // - decideFuzzyMatchWithRetry(): calls GPT to verify if two fuzzy-matched contacts are the same person
 // - LLM_CONFIDENCE_THRESHOLD (0.70): minimum confidence to create a merge suggestion
-// import { decideFuzzyMatchWithRetry, LLM_CONFIDENCE_THRESHOLD } from "@prm/ai";
+// import { decideFuzzyMatchWithRetry, LLM_CONFIDENCE_THRESHOLD } from "@cued/ai";
 
 type DuplicatePair = {
   contact1Id: Id<"contacts">;
@@ -88,7 +88,7 @@ export const scanAllContactsForMerges = internalAction({
 
     // TODO: Re-enable LLM verification for fuzzy matches
     // When re-enabling:
-    // 1. Import decideFuzzyMatchWithRetry, LLM_CONFIDENCE_THRESHOLD from @prm/ai
+    // 1. Import decideFuzzyMatchWithRetry, LLM_CONFIDENCE_THRESHOLD from @cued/ai
     // 2. Fetch contacts with handles: ctx.runQuery(internal.contacts.getContactWithHandlesInternal, ...)
     // 3. Call decideFuzzyMatchWithRetry({ contact1, contact2, fuzzyScore })
     // 4. Only create suggestion if llmResult.samePerson && llmResult.confidence >= LLM_CONFIDENCE_THRESHOLD

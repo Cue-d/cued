@@ -12,7 +12,7 @@ import {
   Button,
   Input,
   Label,
-} from "@prm/ui";
+} from "@cued/ui";
 // Platforms with active sync adapters (subset of ActionPlatform)
 type ResetablePlatform = "imessage" | "gmail" | "slack" | "linkedin";
 

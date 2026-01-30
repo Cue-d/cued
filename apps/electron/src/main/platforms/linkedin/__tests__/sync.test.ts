@@ -6,7 +6,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 
 // Mock environment variables before importing linkedin-sync
-vi.mock('@prm/env/electron', () => ({
+vi.mock('@cued/env/electron', () => ({
   electronEnv: {
     CONVEX_URL: 'https://test.convex.cloud',
     WORKOS_CLIENT_ID: 'client_test',
@@ -26,9 +26,9 @@ vi.mock('electron', () => ({
   },
 }))
 
-// Mock @prm/shared for normalizeConversationURN
-vi.mock('@prm/shared', async (importOriginal) => {
-  const original = await importOriginal<typeof import('@prm/shared')>()
+// Mock @cued/shared for normalizeConversationURN
+vi.mock('@cued/shared', async (importOriginal) => {
+  const original = await importOriginal<typeof import('@cued/shared')>()
   return {
     ...original,
     // Normalize fsd_conversation to fs_conversation (matches real implementation)
@@ -51,8 +51,8 @@ vi.mock('convex/browser', () => ({
   })),
 }))
 
-// Mock @prm/convex api
-vi.mock('@prm/convex', () => ({
+// Mock @cued/convex api
+vi.mock('@cued/convex', () => ({
   api: {
     sync: {
       syncLinkedInMessages: 'sync:syncLinkedInMessages',

@@ -51,7 +51,7 @@ describe("ContactsManager", () => {
     vi.clearAllMocks();
     // Default: binary exists
     vi.mocked(existsSync).mockImplementation((path) => {
-      if (typeof path === "string" && path.includes("prm-contacts")) {
+      if (typeof path === "string" && path.includes("cued-contacts")) {
         return true;
       }
       return false;
@@ -85,7 +85,7 @@ describe("ContactsManager", () => {
         if (typeof path === "string" && path.includes("contacts_cache.json")) {
           return true;
         }
-        if (typeof path === "string" && path.includes("prm-contacts")) {
+        if (typeof path === "string" && path.includes("cued-contacts")) {
           return true;
         }
         return false;
@@ -110,7 +110,7 @@ describe("ContactsManager", () => {
         if (typeof path === "string" && path.includes("contacts_cache.json")) {
           return true;
         }
-        if (typeof path === "string" && path.includes("prm-contacts")) {
+        if (typeof path === "string" && path.includes("cued-contacts")) {
           return true;
         }
         return false;
@@ -129,7 +129,7 @@ describe("ContactsManager", () => {
 
     it("fetches from Swift CLI when no cache exists", async () => {
       vi.mocked(existsSync).mockImplementation((path) => {
-        if (typeof path === "string" && path.includes("prm-contacts")) {
+        if (typeof path === "string" && path.includes("cued-contacts")) {
           return true;
         }
         return false;
@@ -158,7 +158,7 @@ describe("ContactsManager", () => {
         if (typeof path === "string" && path.includes("contacts_cache.json")) {
           return true;
         }
-        if (typeof path === "string" && path.includes("prm-contacts")) {
+        if (typeof path === "string" && path.includes("cued-contacts")) {
           return true;
         }
         return false;
@@ -178,7 +178,7 @@ describe("ContactsManager", () => {
   describe("resolveHandle", () => {
     beforeEach(async () => {
       vi.mocked(existsSync).mockImplementation((path) => {
-        if (typeof path === "string" && path.includes("prm-contacts")) {
+        if (typeof path === "string" && path.includes("cued-contacts")) {
           return true;
         }
         return false;
@@ -239,7 +239,7 @@ describe("ContactsManager", () => {
   describe("resolveHandles", () => {
     beforeEach(async () => {
       vi.mocked(existsSync).mockImplementation((path) => {
-        if (typeof path === "string" && path.includes("prm-contacts")) {
+        if (typeof path === "string" && path.includes("cued-contacts")) {
           return true;
         }
         return false;
@@ -266,7 +266,7 @@ describe("ContactsManager", () => {
   describe("getContact", () => {
     beforeEach(async () => {
       vi.mocked(existsSync).mockImplementation((path) => {
-        if (typeof path === "string" && path.includes("prm-contacts")) {
+        if (typeof path === "string" && path.includes("cued-contacts")) {
           return true;
         }
         return false;
@@ -302,7 +302,7 @@ describe("ContactsManager", () => {
 
     it("throws ContactsAccessDeniedError when exit code 2", async () => {
       vi.mocked(existsSync).mockImplementation((path) => {
-        if (typeof path === "string" && path.includes("prm-contacts")) {
+        if (typeof path === "string" && path.includes("cued-contacts")) {
           return true;
         }
         return false;
@@ -319,7 +319,7 @@ describe("ContactsManager", () => {
 
     it("throws ContactsError for other exit codes", async () => {
       vi.mocked(existsSync).mockImplementation((path) => {
-        if (typeof path === "string" && path.includes("prm-contacts")) {
+        if (typeof path === "string" && path.includes("cued-contacts")) {
           return true;
         }
         return false;
@@ -343,7 +343,7 @@ describe("ContactsManager", () => {
 
     it("isCacheLoaded returns true after fetch", async () => {
       vi.mocked(existsSync).mockImplementation((path) => {
-        if (typeof path === "string" && path.includes("prm-contacts")) {
+        if (typeof path === "string" && path.includes("cued-contacts")) {
           return true;
         }
         return false;
@@ -357,7 +357,7 @@ describe("ContactsManager", () => {
 
     it("getCacheSize returns contact count", async () => {
       vi.mocked(existsSync).mockImplementation((path) => {
-        if (typeof path === "string" && path.includes("prm-contacts")) {
+        if (typeof path === "string" && path.includes("cued-contacts")) {
           return true;
         }
         return false;
@@ -376,7 +376,7 @@ describe("ContactsManager", () => {
 
     it("clearMemoryCache resets state", async () => {
       vi.mocked(existsSync).mockImplementation((path) => {
-        if (typeof path === "string" && path.includes("prm-contacts")) {
+        if (typeof path === "string" && path.includes("cued-contacts")) {
           return true;
         }
         return false;
@@ -394,7 +394,7 @@ describe("ContactsManager", () => {
   describe("getBinaryPath", () => {
     it("returns the binary path", () => {
       const path = manager.getBinaryPath();
-      expect(path).toContain("prm-contacts");
+      expect(path).toContain("cued-contacts");
     });
   });
 });

@@ -11,12 +11,12 @@
  * - Returns hasMore to indicate if more processing is needed
  */
 import { NextRequest, NextResponse } from "next/server";
-import { api } from "@prm/convex";
+import { api } from "@cued/convex";
 import {
   getAuthenticatedConvexClient,
   extractErrorMessage,
 } from "@/lib/api-utils";
-import type { SyncPlatform } from "@prm/shared";
+import type { SyncPlatform } from "@cued/shared";
 
 // Only platforms that support memory processing
 type MemoryPlatform = Extract<SyncPlatform, "imessage" | "gmail" | "slack">;

@@ -19,7 +19,7 @@ import { mutation, query } from "./_generated/server";
 import { platformValidator } from "./schema";
 import { findUserByWorkosId } from "./lib/auth";
 
-import { normalizeLinkedInHandle, MULTI_WORKSPACE_PLATFORMS } from "@prm/shared";
+import { normalizeLinkedInHandle, MULTI_WORKSPACE_PLATFORMS } from "@cued/shared";
 import {
   getOrCreateUser,
   findIntegration,

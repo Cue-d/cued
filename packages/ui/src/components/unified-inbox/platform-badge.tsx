@@ -1,4 +1,4 @@
-import { PLATFORM_CONFIG } from "@prm/shared"
+import { PLATFORM_CONFIG } from "@cued/shared"
 import { cn } from "../../lib/utils"
 import type { InboxPlatform } from "./types"
 import type React from "react"

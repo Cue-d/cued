@@ -1,6 +1,6 @@
 import { ConvexReactClient } from "convex/react";
 import { createMMKV, type MMKV } from "react-native-mmkv";
-import { clientEnv } from "@prm/env/client";
+import { clientEnv } from "@cued/env/client";
 
 // MMKV storage instance for Convex cache
 // Uses a dedicated instance ID to isolate from other app storage

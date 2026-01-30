@@ -202,7 +202,7 @@ export const markAsSkipped = internalMutation({
 /**
  * Scan for unanswered conversations and queue for LLM analysis.
  * Task 7.5: Called by cron every 5 minutes.
- * Uses internalAction because it needs to import @prm/ai for filtering.
+ * Uses internalAction because it needs to import @cued/ai for filtering.
  */
 export const scanForUnansweredConversations = internalAction({
   args: {
@@ -231,7 +231,7 @@ export const scanForUnansweredConversations = internalAction({
     )) as UnansweredConversation[];
 
     // Import filters dynamically
-    const { shouldSkipLlmAnalysis, calculatePriority } = await import("@prm/ai");
+    const { shouldSkipLlmAnalysis, calculatePriority } = await import("@cued/ai");
 
     for (const { conversation, lastMessage, primaryContact } of conversations) {
       result.processed++;

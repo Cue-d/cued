@@ -1,8 +1,8 @@
 {
-  "name": "@prm/electron",
+  "name": "@cued/electron",
   "version": "0.0.1",
   "private": true,
-  "description": "PRM macOS Electron app for iMessage sync",
+  "description": "Cued macOS Electron app for iMessage sync",
   "main": "out/main/index.js",
   "scripts": {
     "postinstall": "npx @electron/rebuild -f -w better-sqlite3 && bash scripts/sign-dev.sh",
@@ -20,11 +20,11 @@
     "postrebuild": "bash scripts/sign-dev.sh"
   },
   "dependencies": {
-    "@prm/convex": "workspace:*",
-    "@prm/env": "workspace:*",
-    "@prm/integrations": "workspace:*",
-    "@prm/shared": "workspace:*",
-    "@prm/ui": "workspace:*",
+    "@cued/convex": "workspace:*",
+    "@cued/env": "workspace:*",
+    "@cued/integrations": "workspace:*",
+    "@cued/shared": "workspace:*",
+    "@cued/ui": "workspace:*",
     "@statelyai/inspect": "^0.4.0",
     "better-sqlite3": "^12.6.0",
     "chokidar": "^5.0.0",

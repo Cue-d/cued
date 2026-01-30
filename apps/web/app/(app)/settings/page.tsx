@@ -4,8 +4,8 @@ import { useMemo } from "react";
 import Link from "next/link";
 import { useQuery, useMutation } from "convex/react";
 import { BrainIcon, ClockIcon, SendIcon, WrenchIcon, ChevronRightIcon } from "lucide-react";
-import { api } from "@prm/convex";
-import { getInitials, formatRelativeTime } from "@prm/shared";
+import { api } from "@cued/convex";
+import { getInitials, formatRelativeTime } from "@cued/shared";
 import {
   Avatar,
   AvatarFallback,
@@ -16,7 +16,7 @@ import {
   SelectItem,
   SelectTrigger,
   SelectValue,
-} from "@prm/ui";
+} from "@cued/ui";
 
 const UNDO_DELAY_OPTIONS = [
   { value: 3, label: "3 seconds" },
@@ -288,7 +288,7 @@ export default function SettingsPage() {
           {/* Version Info */}
           <div className="pb-6 text-center">
             <p className="text-xs text-muted-foreground">
-              PRM v0.1.0 · Made with care
+              Cued v0.1.0 · Made with care
             </p>
           </div>
         </div>

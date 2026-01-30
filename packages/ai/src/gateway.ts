@@ -1,7 +1,7 @@
 import { createGateway } from "@ai-sdk/gateway";
 
 /**
- * Vercel AI Gateway provider instance configured for PRM.
+ * Vercel AI Gateway provider instance configured for Cued.
  * Uses AI_GATEWAY_API_KEY from environment.
  * Supports OIDC authentication on Vercel deployments (no API key needed).
  *

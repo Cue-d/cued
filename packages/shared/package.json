@@ -1,5 +1,5 @@
 {
-  "name": "@prm/shared",
+  "name": "@cued/shared",
   "version": "0.0.0",
   "type": "module",
   "main": "./dist/index.js",

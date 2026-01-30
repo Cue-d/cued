@@ -9,9 +9,9 @@
  * - Handles retries with exponential backoff
  * - Updates message status in Convex after send attempts
  */
-import { api } from "@prm/convex";
-import type { Id, Doc } from "@prm/convex";
-import type { ActionPlatform, QueuedMessage } from "@prm/shared";
+import { api } from "@cued/convex";
+import type { Id, Doc } from "@cued/convex";
+import type { ActionPlatform, QueuedMessage } from "@cued/shared";
 import {
   getReactiveConvexClient,
   type Unsubscribe,

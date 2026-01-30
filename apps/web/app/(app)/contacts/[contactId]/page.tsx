@@ -23,14 +23,14 @@ import {
   User,
   X,
 } from "lucide-react"
-import { fetchContactMemories, type ContactMemoryItem } from "@prm/ai"
-import { api } from "@prm/convex"
+import { fetchContactMemories, type ContactMemoryItem } from "@cued/ai"
+import { api } from "@cued/convex"
 import {
   getInitials,
   formatRelativeTime,
   PLATFORM_CONFIG,
   type ActionPlatform,
-} from "@prm/shared"
+} from "@cued/shared"
 import {
   Avatar,
   AvatarFallback,
@@ -44,8 +44,8 @@ import {
   Textarea,
   SendMessageModal,
   type SendMessageContact,
-} from "@prm/ui"
-import type { Id } from "@prm/convex"
+} from "@cued/ui"
+import type { Id } from "@cued/convex"
 
 function HandleIcon({ type }: { type: string }) {
   switch (type) {

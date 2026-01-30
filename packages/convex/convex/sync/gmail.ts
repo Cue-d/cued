@@ -7,7 +7,7 @@ import type { Infer } from "convex/values";
 import { v } from "convex/values";
 import type { Doc, Id } from "../_generated/dataModel";
 import type { MutationCtx } from "../_generated/server";
-import { normalizeEmail } from "@prm/ai";
+import { normalizeEmail } from "@cued/ai";
 import {
   getOrCreateContact,
   scheduleIncomingMessageEvents,
@@ -485,7 +485,7 @@ async function handleDeletedGoogleContact(
   contact: GoogleContactInput
 ): Promise<boolean> {
   // Import here to avoid circular dependency
-  const { normalizePhone } = await import("@prm/shared");
+  const { normalizePhone } = await import("@cued/shared");
 
   // Collect all handles to find the contact
   const allHandles = [
@@ -545,7 +545,7 @@ async function upsertGoogleContact(
   contact: GoogleContactInput
 ): Promise<{ isNew: boolean; handlesAdded: number }> {
   // Import here to avoid circular dependency
-  const { normalizePhone } = await import("@prm/shared");
+  const { normalizePhone } = await import("@cued/shared");
   const { findContactByHandle } = await import("./imessage");
 
   // Collect all normalized handles

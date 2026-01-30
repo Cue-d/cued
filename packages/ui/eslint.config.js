@@ -22,8 +22,8 @@ const config = [
           pathGroups: [
             // React first
             { pattern: "react", group: "external", position: "before" },
-            // Monorepo packages (@prm/*)
-            { pattern: "@prm/**", group: "internal", position: "before" },
+            // Monorepo packages (@cued/*)
+            { pattern: "@cued/**", group: "internal", position: "before" },
             // Relative imports
             { pattern: "../**", group: "parent" },
             { pattern: "./**", group: "sibling" },

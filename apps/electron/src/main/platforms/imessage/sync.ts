@@ -18,9 +18,9 @@
  */
 
 import { ConvexHttpClient } from "convex/browser";
-import { api } from "@prm/convex";
+import { api } from "@cued/convex";
 import { withAuthRetry } from "../../auth/auth-utils";
-import { electronEnv } from "@prm/env/electron";
+import { electronEnv } from "@cued/env/electron";
 import { ChatDb } from "./chat-db";
 import { getContactsManager } from "../contacts";
 import { getSyncDebugLogger } from "../../sync/debug-logger";

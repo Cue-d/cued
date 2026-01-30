@@ -201,7 +201,7 @@ export const onIncomingMessage = internalAction({
 
     // 6. Apply message filters (OTP, spam, etc.)
     const lastMessage = messages[messages.length - 1];
-    const { shouldSkipLlmAnalysis } = await import("@prm/ai");
+    const { shouldSkipLlmAnalysis } = await import("@cued/ai");
 
     const filterResult = shouldSkipLlmAnalysis({
       text: lastMessage.content,
@@ -257,7 +257,7 @@ export const onIncomingMessage = internalAction({
     );
 
     // 11. Fetch contact memories (optional enhancement, non-blocking)
-    const { generateActionWithRetry, fetchContactMemories } = await import("@prm/ai");
+    const { generateActionWithRetry, fetchContactMemories } = await import("@cued/ai");
 
     const contactMemories = primaryContact
       ? await fetchContactMemories(
@@ -467,7 +467,7 @@ export const onIncomingMessageBatch = internalAction({
 
       // 6. Apply message filters (OTP, spam, etc.)
       const lastMessage = messages[messages.length - 1];
-      const { shouldSkipLlmAnalysis } = await import("@prm/ai");
+      const { shouldSkipLlmAnalysis } = await import("@cued/ai");
 
       const filterResult = shouldSkipLlmAnalysis({
         text: lastMessage.content,
@@ -525,7 +525,7 @@ export const onIncomingMessageBatch = internalAction({
       );
 
       // Fetch contact memories (optional enhancement)
-      const { generateActionWithRetry, fetchContactMemories } = await import("@prm/ai");
+      const { generateActionWithRetry, fetchContactMemories } = await import("@cued/ai");
 
       const contactMemories = primaryContact
         ? await fetchContactMemories(

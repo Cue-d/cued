@@ -11,7 +11,7 @@ import {
   ProgressIndicator,
   Separator,
   Skeleton,
-} from "@prm/ui";
+} from "@cued/ui";
 import {
   useAuthState,
   useUnifiedSync,
@@ -70,7 +70,7 @@ export function App() {
                 <span className="text-sm">Not signed in</span>
               </div>
               <p className="text-sm text-muted-foreground">
-                Sign in to sync your iMessages with PRM
+                Sign in to sync your iMessages with Cued
               </p>
               <Button onClick={auth.login} className="w-full">
                 Sign In

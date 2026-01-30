@@ -27,19 +27,19 @@ importers:
 
   apps/electron:
     dependencies:
-      '@prm/convex':
+      '@cued/convex':
         specifier: workspace:*
         version: link:../../packages/convex
-      '@prm/env':
+      '@cued/env':
         specifier: workspace:*
         version: link:../../packages/env
-      '@prm/integrations':
+      '@cued/integrations':
         specifier: workspace:*
         version: link:../../packages/integrations
-      '@prm/shared':
+      '@cued/shared':
         specifier: workspace:*
         version: link:../../packages/shared
-      '@prm/ui':
+      '@cued/ui':
         specifier: workspace:*
         version: link:../../packages/ui
       '@statelyai/inspect':
@@ -130,13 +130,13 @@ importers:
       '@bacons/apple-targets':
         specifier: ^3.0.7
         version: 3.0.7
-      '@prm/convex':
+      '@cued/convex':
         specifier: workspace:*
         version: link:../../packages/convex
-      '@prm/env':
+      '@cued/env':
         specifier: workspace:*
         version: link:../../packages/env
-      '@prm/shared':
+      '@cued/shared':
         specifier: workspace:*
         version: link:../../packages/shared
       '@react-native-community/datetimepicker':
@@ -308,30 +308,30 @@ importers:
       '@convex-dev/workos':
         specifier: ^0.0.1
         version: 0.0.1(@edge-runtime/vm@4.0.4)(@types/debug@4.1.12)(@types/node@20.19.29)(convex@1.31.6(react@19.2.3))(jiti@2.6.1)(jsdom@26.1.0)(lightningcss@1.30.1)(react@19.2.3)(terser@5.46.0)(tsx@4.21.0)(typescript@5.9.3)(yaml@2.8.2)
+      '@cued/ai':
+        specifier: workspace:*
+        version: link:../../packages/ai
+      '@cued/convex':
+        specifier: workspace:*
+        version: link:../../packages/convex
+      '@cued/env':
+        specifier: workspace:*
+        version: link:../../packages/env
+      '@cued/integrations':
+        specifier: workspace:*
+        version: link:../../packages/integrations
+      '@cued/shared':
+        specifier: workspace:*
+        version: link:../../packages/shared
+      '@cued/ui':
+        specifier: workspace:*
+        version: link:../../packages/ui
       '@nangohq/frontend':
         specifier: ^0.69.22
         version: 0.69.22
       '@nangohq/node':
         specifier: ^0.69.22
         version: 0.69.22
-      '@prm/ai':
-        specifier: workspace:*
-        version: link:../../packages/ai
-      '@prm/convex':
-        specifier: workspace:*
-        version: link:../../packages/convex
-      '@prm/env':
-        specifier: workspace:*
-        version: link:../../packages/env
-      '@prm/integrations':
-        specifier: workspace:*
-        version: link:../../packages/integrations
-      '@prm/shared':
-        specifier: workspace:*
-        version: link:../../packages/shared
-      '@prm/ui':
-        specifier: workspace:*
-        version: link:../../packages/ui
       '@workos-inc/authkit-nextjs':
         specifier: ^2.13.0
         version: 2.13.0(next@16.1.2(@opentelemetry/api@1.9.0)(@playwright/test@1.57.0)(babel-plugin-react-compiler@1.0.0)(react-dom@19.2.3(react@19.2.3))(react@19.2.3))(react-dom@19.2.3(react@19.2.3))(react@19.2.3)
@@ -408,12 +408,12 @@ importers:
       '@ai-sdk/gateway':
         specifier: ^3.0.29
         version: 3.0.29(zod@4.3.5)
+      '@cued/shared':
+        specifier: workspace:*
+        version: link:../shared
       '@mem0/vercel-ai-provider':
         specifier: ^2.0.4
         version: 2.0.5(zod@4.3.5)
-      '@prm/shared':
-        specifier: workspace:*
-        version: link:../shared
       ai:
         specifier: ^6.0.33
         version: 6.0.33(zod@4.3.5)
@@ -433,13 +433,13 @@ importers:
 
   packages/convex:
     dependencies:
-      '@prm/ai':
+      '@cued/ai':
         specifier: workspace:*
         version: link:../ai
-      '@prm/env':
+      '@cued/env':
         specifier: workspace:*
         version: link:../env
-      '@prm/shared':
+      '@cued/shared':
         specifier: workspace:*
         version: link:../shared
       convex:
@@ -480,12 +480,12 @@ importers:
 
   packages/integrations:
     dependencies:
+      '@cued/env':
+        specifier: workspace:*
+        version: link:../env
       '@nangohq/node':
         specifier: ^0.45.0
         version: 0.45.1
-      '@prm/env':
-        specifier: workspace:*
-        version: link:../env
     devDependencies:
       '@types/node':
         specifier: ^22.10.5
@@ -520,7 +520,7 @@ importers:
       '@base-ui/react':
         specifier: ^1.0.0
         version: 1.0.0(@types/react@19.2.8)(react-dom@19.2.3(react@19.2.3))(react@19.2.3)
-      '@prm/shared':
+      '@cued/shared':
         specifier: workspace:*
         version: link:../shared
       '@radix-ui/react-use-controllable-state':
@@ -13816,7 +13816,7 @@ snapshots:
       '@typescript-eslint/eslint-plugin': 8.53.0(@typescript-eslint/parser@8.53.0(eslint@9.39.2(jiti@2.6.1))(typescript@5.9.3))(eslint@9.39.2(jiti@2.6.1))(typescript@5.9.3)
       '@typescript-eslint/parser': 8.53.0(eslint@9.39.2(jiti@2.6.1))(typescript@5.9.3)
       eslint: 9.39.2(jiti@2.6.1)
-      eslint-import-resolver-typescript: 3.10.1(eslint-plugin-import-x@4.16.1(@typescript-eslint/utils@8.53.0(eslint@9.39.2(jiti@2.6.1))(typescript@5.9.3))(eslint-import-resolver-node@0.3.9)(eslint@9.39.2(jiti@2.6.1)))(eslint-plugin-import@2.32.0)(eslint@9.39.2(jiti@2.6.1))
+      eslint-import-resolver-typescript: 3.10.1(eslint-plugin-import-x@4.16.1(@typescript-eslint/utils@8.53.0(eslint@9.39.2(jiti@2.6.1))(typescript@5.9.3))(eslint-import-resolver-node@0.3.9)(eslint@9.39.2(jiti@2.6.1)))(eslint-plugin-import@2.32.0(@typescript-eslint/parser@8.53.0(eslint@9.39.2(jiti@2.6.1))(typescript@5.9.3))(eslint@9.39.2(jiti@2.6.1)))(eslint@9.39.2(jiti@2.6.1))
       eslint-plugin-expo: 1.0.0(eslint@9.39.2(jiti@2.6.1))(typescript@5.9.3)
       eslint-plugin-import: 2.32.0(@typescript-eslint/parser@8.53.0(eslint@9.39.2(jiti@2.6.1))(typescript@5.9.3))(eslint-import-resolver-typescript@3.10.1)(eslint@9.39.2(jiti@2.6.1))
       eslint-plugin-react: 7.37.5(eslint@9.39.2(jiti@2.6.1))
@@ -13915,22 +13915,6 @@ snapshots:
     transitivePeerDependencies:
       - supports-color
 
-  eslint-import-resolver-typescript@3.10.1(eslint-plugin-import-x@4.16.1(@typescript-eslint/utils@8.53.0(eslint@9.39.2(jiti@2.6.1))(typescript@5.9.3))(eslint-import-resolver-node@0.3.9)(eslint@9.39.2(jiti@2.6.1)))(eslint-plugin-import@2.32.0)(eslint@9.39.2(jiti@2.6.1)):
-    dependencies:
-      '@nolyfill/is-core-module': 1.0.39
-      debug: 4.4.3
-      eslint: 9.39.2(jiti@2.6.1)
-      get-tsconfig: 4.13.0
-      is-bun-module: 2.0.0
-      stable-hash: 0.0.5
-      tinyglobby: 0.2.15
-      unrs-resolver: 1.11.1
-    optionalDependencies:
-      eslint-plugin-import: 2.32.0(@typescript-eslint/parser@8.53.0(eslint@9.39.2(jiti@2.6.1))(typescript@5.9.3))(eslint-import-resolver-typescript@3.10.1)(eslint@9.39.2(jiti@2.6.1))
-      eslint-plugin-import-x: 4.16.1(@typescript-eslint/utils@8.53.0(eslint@9.39.2(jiti@2.6.1))(typescript@5.9.3))(eslint-import-resolver-node@0.3.9)(eslint@9.39.2(jiti@2.6.1))
-    transitivePeerDependencies:
-      - supports-color
-
   eslint-module-utils@2.12.1(@typescript-eslint/parser@8.53.0(eslint@9.39.2(jiti@2.6.1))(typescript@5.9.3))(eslint-import-resolver-node@0.3.9)(eslint-import-resolver-typescript@3.10.1)(eslint@9.39.2(jiti@2.6.1)):
     dependencies:
       debug: 3.2.7
@@ -13938,7 +13922,7 @@ snapshots:
       '@typescript-eslint/parser': 8.53.0(eslint@9.39.2(jiti@2.6.1))(typescript@5.9.3)
       eslint: 9.39.2(jiti@2.6.1)
       eslint-import-resolver-node: 0.3.9
-      eslint-import-resolver-typescript: 3.10.1(eslint-plugin-import-x@4.16.1(@typescript-eslint/utils@8.53.0(eslint@9.39.2(jiti@2.6.1))(typescript@5.9.3))(eslint-import-resolver-node@0.3.9)(eslint@9.39.2(jiti@2.6.1)))(eslint-plugin-import@2.32.0)(eslint@9.39.2(jiti@2.6.1))
+      eslint-import-resolver-typescript: 3.10.1(eslint-plugin-import-x@4.16.1(@typescript-eslint/utils@8.53.0(eslint@9.39.2(jiti@2.6.1))(typescript@5.9.3))(eslint-import-resolver-node@0.3.9)(eslint@9.39.2(jiti@2.6.1)))(eslint-plugin-import@2.32.0(@typescript-eslint/parser@8.53.0(eslint@9.39.2(jiti@2.6.1))(typescript@5.9.3))(eslint@9.39.2(jiti@2.6.1)))(eslint@9.39.2(jiti@2.6.1))
     transitivePeerDependencies:
       - supports-color
 

@@ -1,5 +1,5 @@
 /**
- * PowerManager - Sleep prevention and power event handling for PRM.
+ * PowerManager - Sleep prevention and power event handling for Cued.
  *
  * Features:
  * - Prevent system sleep during active sync using powerSaveBlocker

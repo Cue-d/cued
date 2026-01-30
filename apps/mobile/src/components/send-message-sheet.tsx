@@ -20,7 +20,7 @@ import {
 import { GlassView, isLiquidGlassAvailable } from "expo-glass-effect";
 import * as Haptics from "expo-haptics";
 import { SymbolView } from "expo-symbols";
-import { PLATFORM_CONFIG, type ActionPlatform } from "@prm/shared";
+import { PLATFORM_CONFIG, type ActionPlatform } from "@cued/shared";
 import { cn } from "@/lib/utils";
 
 /** Contact with available platforms for sending */

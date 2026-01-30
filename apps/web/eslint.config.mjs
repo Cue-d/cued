@@ -27,8 +27,8 @@ const eslintConfig = defineConfig([
             { pattern: "react", group: "external", position: "before" },
             { pattern: "react-dom/**", group: "external", position: "before" },
             { pattern: "next/**", group: "external", position: "before" },
-            // Monorepo packages (@prm/*)
-            { pattern: "@prm/**", group: "internal", position: "before" },
+            // Monorepo packages (@cued/*)
+            { pattern: "@cued/**", group: "internal", position: "before" },
             // Local aliases (@/*)
             { pattern: "@/**", group: "internal", position: "after" },
           ],

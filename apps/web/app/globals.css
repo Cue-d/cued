@@ -1,5 +1,5 @@
 @import "tailwindcss";
-@import "@prm/ui/styles/theme.css";
+@import "@cued/ui/styles/theme.css";
 
 /* Suisse font-face declarations */
 @font-face {

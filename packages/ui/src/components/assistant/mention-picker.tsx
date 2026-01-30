@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { UserIcon } from "lucide-react"
 import { createPortal } from "react-dom"
-import { getInitials } from "@prm/shared"
+import { getInitials } from "@cued/shared"
 import { cn } from "../../lib/utils"
 import { Avatar, AvatarFallback } from "../ui/avatar"
 import {

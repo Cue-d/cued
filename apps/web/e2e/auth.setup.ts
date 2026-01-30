@@ -5,7 +5,7 @@ import { test as setup, expect } from "@playwright/test";
  * Authentication Setup for E2E Tests
  *
  * This file handles authentication state setup for E2E tests.
- * Since PRM uses WorkOS AuthKit (external OAuth), we have two approaches:
+ * Since Cued uses WorkOS AuthKit (external OAuth), we have two approaches:
  *
  * 1. Manual auth state capture (recommended for local development):
  *    - Run the app, sign in manually
