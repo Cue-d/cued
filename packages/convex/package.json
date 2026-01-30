@@ -9,7 +9,7 @@
   },
   "scripts": {
     "dev": "convex dev",
-    "build": "[ -z \"$CONVEX_DEPLOYMENT\" ] && echo 'Skipping codegen - using committed types' || convex codegen --typecheck=disable",
+    "build": "if [ -n \"$CI\" ] || [ -z \"$CONVEX_DEPLOYMENT\" ]; then echo 'Skipping codegen - using committed types'; else convex codegen --typecheck=disable; fi",
     "typecheck": "echo 'Skipping typecheck - TS2589 errors in large Convex codebases are expected'",
     "test": "vitest",
     "test:once": "vitest run",
