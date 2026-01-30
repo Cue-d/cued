@@ -368,9 +368,9 @@ export const syncGmailMessages = mutation({
     emails: v.array(gmailEmailInput),
     /** Gmail account email for multi-account support (workspaceId) */
     accountEmail: v.optional(v.string()),
-    /** Optional historyId from Gmail API for incremental sync tracking */
-    historyId: v.optional(v.string()),
-    /** Sync mode: 'full' on initial sync or historyId expiration, 'incremental' otherwise */
+    /** Nango cursor from _nango_metadata.cursor for precise incremental sync */
+    nangoCursor: v.optional(v.string()),
+    /** Sync mode: 'full' on initial sync, 'incremental' otherwise */
     syncMode: v.optional(v.union(v.literal("full"), v.literal("incremental"))),
   },
   handler: async (ctx, args) => {
@@ -399,13 +399,15 @@ export const syncGmailMessages = mutation({
       }
 
       // Update cursor state for this Gmail account
+      // Store Nango cursor for precise incremental sync (more reliable than historyId)
+      const now = Date.now();
       const cursorData = {
-        historyId: args.historyId,
-        lastSyncAt: Date.now(),
+        nangoCursor: args.nangoCursor,
+        lastSyncAt: now,
         messageCount: args.emails.length,
       };
 
-      await ctx.db
+      const existing = await ctx.db
         .query("syncCursors")
         .withIndex("by_user_platform_workspace", (q) =>
           q
@@ -413,50 +415,56 @@ export const syncGmailMessages = mutation({
             .eq("platform", "gmail")
             .eq("workspaceId", args.accountEmail)
         )
-        .unique()
-        .then(async (existing) => {
-          if (existing) {
-            await ctx.db.patch(existing._id, {
-              cursorData,
-              lastSyncAt: Date.now(),
-              syncMode: args.syncMode ?? "incremental",
-            });
-          } else {
-            await ctx.db.insert("syncCursors", {
-              userId: user._id,
-              platform: "gmail",
-              workspaceId: args.accountEmail,
-              cursorData,
-              lastSyncAt: Date.now(),
-              syncMode: args.syncMode ?? "full",
-            });
-          }
+        .unique();
+
+      if (existing) {
+        await ctx.db.patch(existing._id, {
+          cursorData,
+          lastSyncAt: now,
+          syncMode: args.syncMode ?? "incremental",
+          totalMessagesSynced: (existing.totalMessagesSynced ?? 0) + args.emails.length,
         });
+      } else {
+        await ctx.db.insert("syncCursors", {
+          userId: user._id,
+          platform: "gmail",
+          workspaceId: args.accountEmail,
+          cursorData,
+          lastSyncAt: now,
+          syncMode: args.syncMode ?? "full",
+          totalMessagesSynced: args.emails.length,
+        });
+      }
     }
 
-    return syncGmailMessagesInternal(ctx, user._id, args.emails);
+    return syncGmailMessagesInternal(ctx, user._id, args.emails, args.accountEmail);
   },
 });
 
 /**
  * Get Gmail cursor state for a specific account.
- * Used to check historyId and determine if full resync is needed.
+ * Used by pull endpoint to get stored Nango cursor for incremental sync.
+ * Accepts workosUserId for API route access (no auth context).
+ *
+ * Security note: This query allows workosUserId to bypass auth context.
+ * This is intentional for server-side API routes that don't have Convex auth.
+ * The workosUserId should never be exposed to client-side code.
+ * Only sync cursor metadata is returned (no sensitive data).
  */
 export const getGmailCursor = query({
   args: {
     accountEmail: v.string(),
+    /** WorkOS user ID for API route access (bypasses auth). Server-side only. */
+    workosUserId: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
-    const identity = await ctx.auth.getUserIdentity();
-    if (!identity) {
+    // Resolve workosUserId from arg (API route) or auth context
+    const workosUserId = args.workosUserId ?? (await ctx.auth.getUserIdentity())?.subject;
+    if (!workosUserId) {
       return null;
     }
 
-    const user = await ctx.db
-      .query("users")
-      .withIndex("by_workos_id", (q) => q.eq("workosUserId", identity.subject))
-      .unique();
-
+    const user = await findUserByWorkosId(ctx, workosUserId);
     if (!user) {
       return null;
     }
@@ -476,7 +484,7 @@ export const getGmailCursor = query({
     }
 
     return {
-      historyId: (cursor.cursorData as { historyId?: string })?.historyId,
+      cursorData: cursor.cursorData as { nangoCursor?: string },
       lastSyncAt: cursor.lastSyncAt,
       syncMode: cursor.syncMode,
     };
@@ -484,8 +492,8 @@ export const getGmailCursor = query({
 });
 
 /**
- * Handle Gmail historyId expiration.
- * Called when history.list returns 404 - resets cursor for full resync.
+ * Handle Gmail cursor expiration.
+ * Called when Nango sync needs to reset - clears cursor for full resync.
  */
 export const handleGmailHistoryExpiration = mutation({
   args: {
@@ -509,11 +517,11 @@ export const handleGmailHistoryExpiration = mutation({
       .unique();
 
     if (cursor) {
-      // Clear historyId and set to full sync mode
+      // Clear nangoCursor and set to full sync mode
       await ctx.db.patch(cursor._id, {
         cursorData: {
-          historyId: null,
-          historyExpiredAt: Date.now(),
+          nangoCursor: null,
+          cursorExpiredAt: Date.now(),
           lastSyncAt: cursor.lastSyncAt,
         },
         syncMode: "full",

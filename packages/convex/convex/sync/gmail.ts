@@ -197,11 +197,13 @@ export function parseEmailAddress(fromHeader: string): { name: string; email: st
 
 /**
  * Internal sync logic for Gmail messages.
+ * @param accountEmail - Gmail account email for multi-account workspaceId tracking
  */
 export async function syncGmailMessagesInternal(
   ctx: MutationCtx,
   userId: Id<"users">,
-  emails: GmailEmailInput[]
+  emails: GmailEmailInput[],
+  accountEmail?: string
 ) {
   const result = {
     messagesCount: 0,
@@ -263,6 +265,7 @@ export async function syncGmailMessagesInternal(
           participantContactIds: [],
           unreadCount: 0,
           displayName: firstEmail.subject || parsed.name,
+          ...(accountEmail && { workspaceId: accountEmail }),
         });
         conversationMap.set(threadId, conversationId);
         result.conversationsCount++;

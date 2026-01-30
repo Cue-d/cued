@@ -26,7 +26,8 @@ const GmailEmail = z.object({
     subject: z.string(),
     body: z.string().optional(),
     attachments: Attachment.array(),
-    threadId: z.string()
+    threadId: z.string(),
+    labelIds: z.array(z.string()).optional()
 });
 type GmailEmail = z.infer<typeof GmailEmail>;
 
@@ -156,6 +157,7 @@ function mapEmail(messageDetail: Schema$Message, headers: Record<string, string>
         subject: headers['Subject'] || '',
         body: bodyObj.body,
         attachments,
-        threadId: messageDetail.threadId
+        threadId: messageDetail.threadId,
+        labelIds: messageDetail.labelIds ?? undefined
     };
 }

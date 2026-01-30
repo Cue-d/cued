@@ -20,6 +20,17 @@ interface GmailEmail {
     attachmentId: string;
   }>;
   threadId: string;
+  labelIds?: string[];
+}
+
+interface NangoRecord extends GmailEmail {
+  _nango_metadata?: {
+    cursor?: string;
+    first_seen_at?: string;
+    last_modified_at?: string;
+    last_action?: string;
+    deleted_at?: string | null;
+  };
 }
 
 /**
@@ -44,11 +55,33 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       );
     }
 
+    // Get connection to extract account email for multi-account support
+    const connection = await nango.getConnection("google", connectionId);
+    const rawEmail = (connection?.credentials as { raw?: { email?: unknown } })?.raw?.email;
+    const accountEmail = typeof rawEmail === "string" ? rawEmail : undefined;
+
+    if (!accountEmail) {
+      console.warn("Gmail connection missing account email, sync will not track multi-account state");
+    }
+
+    // Check if we have an existing cursor for incremental sync
+    const convex = getConvexClient();
+    let storedCursor: string | undefined;
+    if (accountEmail) {
+      const cursorResult = await convex.query(api.sync.getGmailCursor, {
+        accountEmail,
+        workosUserId, // Pass workosUserId for API route access (no auth context)
+      });
+      storedCursor = cursorResult?.cursorData?.nangoCursor as string | undefined;
+    }
+
     // Fetch records from Nango (model name must match sync definition)
-    const { records } = await nango.listRecords<GmailEmail>({
+    // If we have a stored cursor, use it for precise incremental sync
+    const { records } = await nango.listRecords<NangoRecord>({
       providerConfigKey: "google",
       connectionId,
       model: "GmailEmail",
+      ...(storedCursor && { cursor: storedCursor }),
     });
 
     if (!records || records.length === 0) {
@@ -59,22 +92,36 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       });
     }
 
+    // Extract cursor from last record for next sync
+    const lastRecord = records[records.length - 1];
+    const nangoCursor = lastRecord._nango_metadata?.cursor;
+
+    if (!nangoCursor && records.length > 0) {
+      console.warn("Gmail sync: Last record missing cursor metadata, next sync may fall back to full sync");
+    }
+
     // Strip Nango metadata before sending to Convex
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const cleanedRecords = records.map((record: any) => {
+    const cleanedRecords = records.map((record: NangoRecord) => {
       // eslint-disable-next-line @typescript-eslint/no-unused-vars
       const { _nango_metadata, ...email } = record;
       return email as GmailEmail;
     });
 
-    // Sync to Convex
-    const convex = getConvexClient();
+    // Determine sync mode: full if no stored cursor, incremental otherwise
+    const syncMode = storedCursor ? "incremental" : "full";
+
+    // Sync to Convex with account email and cursor for multi-account tracking
     const result = await convex.mutation(api.sync.syncGmailMessages, {
       workosUserId,
       emails: cleanedRecords,
+      accountEmail,
+      nangoCursor,
+      syncMode,
     });
 
     console.log("Gmail sync complete:", {
+      accountEmail,
+      syncMode,
       messages: result.messagesCount,
       conversations: result.conversationsCount,
       skipped: result.skippedFiltered,
@@ -84,6 +131,8 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       success: true,
       result,
       recordsProcessed: records.length,
+      accountEmail,
+      syncMode,
     });
   } catch (error) {
     const message = extractErrorMessage(error, "Pull failed");

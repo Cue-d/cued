@@ -33,6 +33,24 @@
 
 ## 2026-01-27
 
+### Issue #111: Migrate Gmail to unified sync structure with proper contact resolution and message queue integration
+- **Status:** Completed
+- **Files changed:**
+  - `nango-integrations/google/syncs/emails.ts` - Added labelIds to GmailEmail schema
+  - `apps/web/app/api/nango/pull-gmail/route.ts` - Get accountEmail from Nango connection, query stored cursor, pass nangoCursor/accountEmail/syncMode to Convex
+  - `packages/convex/convex/sync.ts` - Updated syncGmailMessages to accept nangoCursor, store it in cursorData, track totalMessagesSynced; updated getGmailCursor to accept workosUserId and return nangoCursor
+  - `packages/convex/convex/sync/gmail.ts` - Added accountEmail param to syncGmailMessagesInternal, store workspaceId on conversations
+  - `apps/web/__tests__/api/pull-gmail.test.ts` - Updated tests for new multi-account and cursor behavior
+- **Key decisions:**
+  - Use Nango's `_nango_metadata.cursor` for precise incremental sync (more reliable than historyId)
+  - Store `accountEmail` as `workspaceId` on both `syncCursors` and `conversations` for multi-account isolation
+  - syncMode determined by presence of stored cursor: missing = "full", present = "incremental"
+  - Kept SENT label for isFromMe detection (reliable direct indicator from Gmail API)
+  - Backward compatible: accountEmail/nangoCursor are optional
+- **Notes:**
+  - Debug reset already supports Gmail via existing resetPlatformData action
+  - Nango handles retry logic (7x exponential backoff) so no custom recovery needed
+
 ### Issue #114: Test: Add timestamp to scripts/README.md
 - **Status:** Completed
 - **Files changed:** scripts/README.md
