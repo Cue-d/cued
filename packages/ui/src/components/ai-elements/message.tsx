@@ -1,3 +1,5 @@
+"use client";
+
 import { createContext, memo, useContext, useEffect, useState } from "react";
 import {
   ChevronLeftIcon,

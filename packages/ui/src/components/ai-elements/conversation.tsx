@@ -1,3 +1,5 @@
+"use client";
+
 import { useCallback } from "react";
 import { ArrowDownIcon } from "lucide-react";
 import { StickToBottom, useStickToBottomContext } from "use-stick-to-bottom";
