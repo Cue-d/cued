@@ -6,7 +6,8 @@
   "build": {
     "base": {
       "ios": {
-        "resourceClass": "m-medium"
+        "resourceClass": "m-medium",
+        "image": "latest"
       },
       "android": {
         "resourceClass": "medium"
