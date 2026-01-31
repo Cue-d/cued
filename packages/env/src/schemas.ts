@@ -16,6 +16,10 @@ export const serverSchema = z.object({
 
   // Cron job security
   CRON_SECRET: z.string().optional(),
+
+  // WorkOS Auth
+  WORKOS_API_KEY: z.string().optional(),
+  WORKOS_COOKIE_PASSWORD: z.string().min(32, "WORKOS_COOKIE_PASSWORD must be at least 32 characters"),
 })
 
 /**
