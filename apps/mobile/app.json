@@ -13,7 +13,26 @@
       "expo-web-browser",
       "expo-secure-store",
       "expo-notifications",
-      "@bacons/apple-targets",
+      [
+        "expo-widgets",
+        {
+          "groupIdentifier": "group.so.cued.app",
+          "widgets": [
+            {
+              "name": "ActionCountWidget",
+              "displayName": "Cued Actions",
+              "description": "Shows your pending action count",
+              "supportedFamilies": ["systemSmall", "systemMedium"]
+            },
+            {
+              "name": "ActionsListWidget",
+              "displayName": "Contacts to Reply",
+              "description": "People waiting for your response",
+              "supportedFamilies": ["systemSmall", "systemMedium"]
+            }
+          ]
+        }
+      ],
       [
         "expo-font",
         {

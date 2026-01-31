@@ -8,19 +8,10 @@ import { vi } from "vitest";
 // Ensure React is globally available for JSX transform in components
 globalThis.React = React;
 
-// Mock @bacons/apple-targets (iOS widget extension storage)
-vi.mock("@bacons/apple-targets", () => {
-  class MockExtensionStorage {
-    groupId: string;
-    constructor(groupId: string) {
-      this.groupId = groupId;
-    }
-    set = vi.fn();
-    get = vi.fn().mockReturnValue(null);
-    static reloadWidget = vi.fn();
-  }
-  return { ExtensionStorage: MockExtensionStorage };
-});
+// Define __DEV__ as false to skip expo dev-only code paths that try to load metro modules
+(globalThis as unknown as { __DEV__: boolean }).__DEV__ = false;
+
+// Note: expo-widgets and expo/fetch are mocked via vitest.config.ts aliases
 
 // Mock expo-router - store mock functions so tests can access them
 const mockRouterPush = vi.fn();

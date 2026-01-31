@@ -13,20 +13,31 @@ export default defineConfig({
       include: ["src/**/*.{ts,tsx}"],
       exclude: ["src/test/**", "src/**/*.test.{ts,tsx}"],
     },
+    // Exclude expo from server deps to prevent native module loading
+    server: {
+      deps: {
+        external: [/^expo/, /^@expo/],
+      },
+    },
   },
   resolve: {
-    alias: {
-      "@": path.resolve(__dirname, "./src"),
+    alias: [
+      // Mock widget-data BEFORE the @ alias so it takes precedence
+      { find: /^@\/lib\/widget-data$/, replacement: path.resolve(__dirname, "./src/test/mocks/widget-data.ts") },
+      { find: "@", replacement: path.resolve(__dirname, "./src") },
       // Mock convex API to avoid TypeScript-only declaration files
-      "@cued/convex/convex/_generated/api": path.resolve(__dirname, "./src/test/mocks/convex-api.ts"),
+      { find: "@cued/convex/convex/_generated/api", replacement: path.resolve(__dirname, "./src/test/mocks/convex-api.ts") },
       // Mock convex/server to avoid TypeScript-only declaration files
-      "convex/server": path.resolve(__dirname, "./src/test/mocks/convex-server.ts"),
-      "@cued/convex": path.resolve(__dirname, "../../packages/convex"),
+      { find: "convex/server", replacement: path.resolve(__dirname, "./src/test/mocks/convex-server.ts") },
+      { find: "@cued/convex", replacement: path.resolve(__dirname, "../../packages/convex") },
       // Point to source files directly for proper resolution in tests
-      "@cued/shared": path.resolve(__dirname, "../../packages/shared/src/index.ts"),
-      "@cued/env/client": path.resolve(__dirname, "../../packages/env/src/client.ts"),
-      "@cued/env": path.resolve(__dirname, "../../packages/env/src/index.ts"),
-      "react-native": path.resolve(__dirname, "./src/test/mocks/react-native.ts"),
-    },
+      { find: "@cued/shared", replacement: path.resolve(__dirname, "../../packages/shared/src/index.ts") },
+      { find: "@cued/env/client", replacement: path.resolve(__dirname, "../../packages/env/src/client.ts") },
+      { find: "@cued/env", replacement: path.resolve(__dirname, "../../packages/env/src/index.ts") },
+      { find: "react-native", replacement: path.resolve(__dirname, "./src/test/mocks/react-native.ts") },
+      // Mock expo modules to avoid native module loading in tests
+      { find: "expo-widgets", replacement: path.resolve(__dirname, "./src/test/mocks/expo-widgets.ts") },
+      { find: "expo/fetch", replacement: path.resolve(__dirname, "./src/test/mocks/expo-fetch.ts") },
+    ],
   },
 });
