@@ -167,12 +167,8 @@ export {
 } from "./components/ai-elements/suggestion"
 
 export { AppSidebar } from "./components/app-sidebar"
-export {
-  CuedLogo,
-  CuedLogoLoading,
-  CuedLogoStatic,
-  CuedLogoMono,
-} from "./components/cued-logo"
+export { CuedLogo, CuedLogoLoading } from "./components/cued-logo"
+export { CuedLogoStatic, CuedLogoMono } from "./components/cued-logo-static"
 export { CommandMenu } from "./components/command-menu"
 export { UndoSendToast, type UndoSendToastProps } from "./components/undo-send-toast"
 export {

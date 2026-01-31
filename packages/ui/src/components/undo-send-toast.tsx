@@ -1,3 +1,5 @@
+"use client"
+
 import * as React from "react"
 import { X } from "lucide-react"
 import { PLATFORM_CONFIG, type ActionPlatform } from "@cued/shared"

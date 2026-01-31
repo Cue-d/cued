@@ -13,8 +13,9 @@ import {
   MoonIcon,
   ChevronsUpDownIcon,
 } from "lucide-react";
-import { CuedLogoStatic } from "./cued-logo";
+import { motion, AnimatePresence } from "motion/react";
 import { useTheme } from "next-themes";
+import { CuedLogo } from "./cued-logo";
 import { cn } from "../lib/utils";
 import { Avatar, AvatarFallback } from "./ui/avatar";
 import {
@@ -64,6 +65,8 @@ export function AppSidebar({
   const [mounted, setMounted] = React.useState(false);
   const [prevCount, setPrevCount] = React.useState(actionCount);
   const [isAnimating, setIsAnimating] = React.useState(false);
+  const [logoHovered, setLogoHovered] = React.useState(false);
+  const logoGroupRef = React.useRef<HTMLDivElement>(null);
 
   // Animate badge when count changes
   React.useEffect(() => {
@@ -100,9 +103,36 @@ export function AppSidebar({
   return (
     <Sidebar {...props} variant="inset">
       <SidebarHeader className="border-b border-sidebar-border p-4">
-        <div className="flex items-center gap-2">
-          <CuedLogoStatic size={32} className="text-sidebar-primary" />
-          <span className="font-semibold">Cued</span>
+        <div
+          ref={logoGroupRef}
+          className="flex items-center gap-2 cursor-pointer"
+          onMouseEnter={() => setLogoHovered(true)}
+          onMouseLeave={() => setLogoHovered(false)}
+        >
+          <CuedLogo size={24} interactive trackingRef={logoGroupRef} />
+          <span className="font-semibold inline-flex">
+            <span>Cue</span>
+            <span className="relative inline-flex">
+              <AnimatePresence>
+                {logoHovered && (
+                  <motion.span
+                    className="inline-block"
+                    initial={{ opacity: 0, rotate: -4, width: 0, filter: "blur(3px)" }}
+                    animate={{ opacity: 1, rotate: 8, width: "auto", filter: "blur(0px)" }}
+                    exit={{ opacity: 0, rotate: -4, width: 0, filter: "blur(3px)" }}
+                    transition={{
+                      type: "spring",
+                      stiffness: 325,
+                      damping: 25,
+                    }}
+                  >
+                    &apos;
+                  </motion.span>
+                )}
+              </AnimatePresence>
+              <span>d</span>
+            </span>
+          </span>
         </div>
       </SidebarHeader>
       <SidebarContent>
