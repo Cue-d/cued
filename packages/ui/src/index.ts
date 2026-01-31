@@ -1,4 +1,5 @@
 export * from "./components/ui"
+export * from "./hooks"
 export * from "./components/unified-inbox"
 export * from "./components/assistant"
 export * from "./components/action-queue"

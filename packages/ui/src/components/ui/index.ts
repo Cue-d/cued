@@ -309,3 +309,6 @@ export {
   TooltipContent,
   TooltipProvider,
 } from "./tooltip"
+
+// Staggering Text
+export { StaggeringText } from "./staggering-text"

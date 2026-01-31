@@ -1,17 +1,10 @@
-import { redirect } from "next/navigation";
-import { withAuth } from "@workos-inc/authkit-nextjs";
 import { MarketingHeader } from "./marketing-header";
 
-export default async function MarketingLayout({
+export default function MarketingLayout({
   children,
 }: {
   children: React.ReactNode;
 }) {
-  const { user } = await withAuth();
-
-  if (user) {
-    redirect("/inbox");
-  }
 
   return (
     <div className="flex min-h-screen flex-col bg-background">

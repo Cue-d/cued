@@ -1,36 +1,11 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useState } from "react";
 import Link from "next/link";
-import { AnimatePresence, LayoutGroup, motion } from "framer-motion";
-
-const words = [
-  "texts",
-  "follow-ups",
-  "friends",
-  "emails",
-  "Slacks",
-  "intros",
-  "prospects",
-  "deals",
-  "leads",
-  "contacts",
-];
+import { LayoutGroup, motion } from "framer-motion";
 
 export default function Home() {
-  const [currentIndex, setCurrentIndex] = useState(0);
-  const [isAnimating, setIsAnimating] = useState(false);
-
-  const nextWord = useCallback(() => {
-    if (!isAnimating) {
-      setCurrentIndex((prev) => (prev + 1) % words.length);
-    }
-  }, [isAnimating]);
-
-  useEffect(() => {
-    const interval = setInterval(nextWord, 3000);
-    return () => clearInterval(interval);
-  }, [nextWord]);
+  const [isHovering, setIsHovering] = useState(false);
 
   return (
     <div className="relative flex min-h-screen flex-col items-center justify-center px-6">
@@ -62,7 +37,9 @@ export default function Home() {
             </motion.span>
             <motion.span
               layout
-              className="relative inline-flex"
+              className="relative inline-flex cursor-pointer"
+              onMouseEnter={() => setIsHovering(true)}
+              onMouseLeave={() => setIsHovering(false)}
               transition={{
                 layout: {
                   type: "spring",
@@ -71,14 +48,7 @@ export default function Home() {
                 },
               }}
             >
-              <AnimatePresence mode="wait">
-                <StaggerText
-                  key={words[currentIndex]}
-                  text={words[currentIndex]}
-                  onAnimationStart={() => setIsAnimating(true)}
-                  onAnimationComplete={() => setIsAnimating(false)}
-                />
-              </AnimatePresence>
+              <StaggerText text="texts" isHovering={isHovering} />
             </motion.span>
           </motion.h1>
         </LayoutGroup>
@@ -88,7 +58,7 @@ export default function Home() {
         <div className="mt-8 flex items-center gap-4">
           <Link
             href="/sign-up"
-            className="inline-flex h-11 items-center justify-center rounded-full bg-primary px-6 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90"
+            className="inline-flex h-14 items-center justify-center rounded-full bg-primary px-10 text-lg font-medium text-primary-foreground transition-colors hover:bg-primary/90"
           >
             Get Started
           </Link>
@@ -113,37 +83,16 @@ export default function Home() {
 
 function StaggerText({
   text,
-  onAnimationStart,
-  onAnimationComplete,
+  isHovering,
 }: {
   text: string;
-  onAnimationStart?: () => void;
-  onAnimationComplete?: () => void;
+  isHovering: boolean;
 }) {
   const characters = text.split("");
-  const animationStarted = useRef(false);
-  const completedCount = useRef(0);
-
-  const handleAnimationStart = () => {
-    if (!animationStarted.current) {
-      animationStarted.current = true;
-      onAnimationStart?.();
-    }
-  };
-
-  const handleAnimationComplete = () => {
-    completedCount.current += 1;
-    if (completedCount.current === characters.length) {
-      onAnimationComplete?.();
-    }
-  };
 
   return (
     <motion.span
       layout
-      initial="hidden"
-      animate="visible"
-      exit="exit"
       className="inline-flex text-muted-foreground"
       aria-label={text}
       transition={{
@@ -159,34 +108,28 @@ function StaggerText({
           key={index}
           className="inline-block"
           style={char === " " ? { width: "0.25em" } : undefined}
+          animate={isHovering ? "visible" : "hidden"}
+          initial={false}
           variants={{
             hidden: {
-              opacity: 0,
-              y: 20,
-              rotateX: 90,
-              filter: "blur(4px)",
-            },
-            visible: {
               opacity: 1,
               y: 0,
               rotateX: 0,
               filter: "blur(0px)",
             },
-            exit: {
-              opacity: 0,
-              y: -20,
-              rotateX: -90,
-              filter: "blur(4px)",
+            visible: {
+              opacity: 1,
+              y: -4,
+              rotateX: -10,
+              filter: "blur(0px)",
             },
           }}
           transition={{
             type: "spring",
-            stiffness: 200,
-            damping: 20,
-            delay: index * 0.03,
+            stiffness: 300,
+            damping: 25,
+            delay: index * 0.02,
           }}
-          onAnimationStart={index === 0 ? handleAnimationStart : undefined}
-          onAnimationComplete={handleAnimationComplete}
         >
           {char === " " ? "\u00A0" : char}
         </motion.span>
