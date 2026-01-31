@@ -5,6 +5,7 @@ import {
   XCircleIcon,
   RefreshCwIcon,
   LinkIcon,
+  XIcon,
 } from "lucide-react";
 import { formatRelativeTime, type ActionPlatform } from "@cued/shared";
 import { Button, Skeleton } from "@cued/ui";
@@ -60,6 +61,8 @@ interface IntegrationButtonProps {
   isDisconnecting: boolean;
   isLoading: boolean;
   integrationType: IntegrationType;
+  /** When true, per-account disconnect buttons are available, hide main disconnect */
+  hasPerAccountDisconnect?: boolean;
   onConnect: () => void;
   onDisconnect: () => void;
 }
@@ -70,6 +73,7 @@ export function IntegrationButton({
   isDisconnecting,
   isLoading,
   integrationType,
+  hasPerAccountDisconnect,
   onConnect,
   onDisconnect,
 }: IntegrationButtonProps) {
@@ -79,6 +83,19 @@ export function IntegrationButton({
 
   // Connected state - show disconnect for nango and electron-webview types
   if (isConnected) {
+    // For nango integrations with per-account disconnect, show "Add Account" instead
+    if (integrationType === "nango" && hasPerAccountDisconnect) {
+      return (
+        <Button variant="outline" size="sm" onClick={onConnect} disabled={isConnecting}>
+          {isConnecting ? (
+            <RefreshCwIcon className="size-4 animate-spin mr-2" />
+          ) : (
+            <LinkIcon className="size-4 mr-2" />
+          )}
+          Add Account
+        </Button>
+      );
+    }
     if (integrationType === "nango" || integrationType === "electron-webview") {
       return (
         <Button variant="outline" size="sm" onClick={onDisconnect} disabled={isDisconnecting}>
@@ -125,17 +142,28 @@ export function IntegrationButton({
   );
 }
 
+export interface IntegrationAccount {
+  workspaceId: string;
+  nangoConnectionId: string | null;
+  lastSyncAt: number | null;
+  totalMessagesSynced: number;
+}
+
 interface IntegrationCardProps {
   config: IntegrationConfig;
   isConnected: boolean;
   isConnecting: boolean;
   isDisconnecting: boolean;
+  /** Account currently being disconnected (by workspaceId) */
+  disconnectingAccount?: string | null;
   isLoading: boolean;
   lastSyncAt: number | null;
-  /** Additional text to show when connected (e.g., team name for Slack) */
-  connectedDetail?: string | null;
+  /** Connected accounts for multi-workspace platforms (Gmail, Slack) */
+  accounts?: IntegrationAccount[] | null;
   onConnect: () => void;
   onDisconnect: () => void;
+  /** Disconnect a specific account by its nangoConnectionId */
+  onDisconnectAccount?: (nangoConnectionId: string) => void;
 }
 
 export function IntegrationCard({
@@ -143,12 +171,18 @@ export function IntegrationCard({
   isConnected,
   isConnecting,
   isDisconnecting,
+  disconnectingAccount,
   isLoading,
   lastSyncAt,
-  connectedDetail,
+  accounts,
   onConnect,
   onDisconnect,
+  onDisconnectAccount,
 }: IntegrationCardProps) {
+  const hasAccounts = accounts && accounts.length > 0;
+  // Check if any account has per-account disconnect capability (has nangoConnectionId)
+  const hasPerAccountDisconnect = accounts?.some((a) => a.nangoConnectionId) ?? false;
+
   return (
     <div className="rounded-lg border bg-card">
       <div className="flex items-center justify-between p-4">
@@ -171,22 +205,58 @@ export function IntegrationCard({
             isDisconnecting={isDisconnecting}
             isLoading={isLoading}
             integrationType={config.integrationType}
+            hasPerAccountDisconnect={hasPerAccountDisconnect}
             onConnect={onConnect}
             onDisconnect={onDisconnect}
           />
         </div>
       </div>
 
-      {isConnected && (lastSyncAt || connectedDetail) && (
+      {/* Show connected accounts for multi-workspace platforms */}
+      {isConnected && hasAccounts && (
+        <div className="border-t px-4 py-3 space-y-2">
+          <p className="text-xs font-medium text-muted-foreground">Connected accounts</p>
+          {accounts.map((account) => {
+            const isAccountDisconnecting = disconnectingAccount === account.workspaceId;
+            return (
+              <div
+                key={account.workspaceId}
+                className="flex items-center justify-between text-xs gap-2"
+              >
+                <span className="font-medium truncate max-w-[200px]">{account.workspaceId}</span>
+                <div className="flex items-center gap-2">
+                  <span className="text-muted-foreground">
+                    {account.lastSyncAt
+                      ? `Synced ${formatRelativeTime(account.lastSyncAt)}`
+                      : "Not synced"}
+                  </span>
+                  {account.nangoConnectionId && onDisconnectAccount && (
+                    <button
+                      onClick={() => onDisconnectAccount(account.nangoConnectionId!)}
+                      disabled={isAccountDisconnecting}
+                      className="p-1 rounded hover:bg-muted text-muted-foreground hover:text-foreground transition-colors disabled:opacity-50"
+                      title="Disconnect account"
+                    >
+                      {isAccountDisconnecting ? (
+                        <RefreshCwIcon className="size-3.5 animate-spin" />
+                      ) : (
+                        <XIcon className="size-3.5" />
+                      )}
+                    </button>
+                  )}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {/* Fallback: show single lastSyncAt for non-multi-workspace platforms */}
+      {isConnected && !hasAccounts && lastSyncAt && (
         <div className="border-t px-4 py-2 flex items-center gap-3">
-          {connectedDetail && (
-            <span className="text-xs font-medium">{connectedDetail}</span>
-          )}
-          {lastSyncAt && (
-            <p className="text-xs text-muted-foreground">
-              Last synced {formatRelativeTime(lastSyncAt)}
-            </p>
-          )}
+          <p className="text-xs text-muted-foreground">
+            Last synced {formatRelativeTime(lastSyncAt)}
+          </p>
         </div>
       )}
     </div>

@@ -40,6 +40,31 @@ export const getUserIntegrations = query({
     const cursorMap = buildCursorMap(cursors);
     const platformAggregates = buildPlatformAggregates(cursors);
 
+    // Build Gmail accounts list from integrations (each has its own nangoConnectionId)
+    const gmailAccounts = integrations
+      .filter((i) => i.platform === "gmail" && i.isConnected && i.accountEmail)
+      .map((i) => {
+        const cursor = cursorMap.get(`gmail:${i.accountEmail}`);
+        return {
+          workspaceId: i.accountEmail!,
+          nangoConnectionId: i.nangoConnectionId ?? null,
+          lastSyncAt: cursor?.lastSyncAt ?? null,
+          totalMessagesSynced: cursor?.totalMessagesSynced ?? 0,
+        };
+      });
+
+    const slackWorkspaces = integrations
+      .filter((i) => i.platform === "slack" && i.isConnected && i.slackTeamId)
+      .map((i) => {
+        const cursor = cursorMap.get(`slack:${i.slackTeamId}`);
+        return {
+          workspaceId: i.slackTeamId!,
+          nangoConnectionId: null, // Slack uses local auth, not Nango
+          lastSyncAt: cursor?.lastSyncAt ?? null,
+          totalMessagesSynced: cursor?.totalMessagesSynced ?? 0,
+        };
+      });
+
     return {
       integrations: integrations.map((int) => {
         // For Slack with slackTeamId, look up by composite key
@@ -59,6 +84,19 @@ export const getUserIntegrations = query({
           }
         }
 
+        // Attach accounts for multi-workspace platforms
+        let accounts: Array<{
+          workspaceId: string;
+          nangoConnectionId: string | null;
+          lastSyncAt: number | null;
+          totalMessagesSynced: number;
+        }> | null = null;
+        if (int.platform === "gmail") {
+          accounts = gmailAccounts;
+        } else if (int.platform === "slack") {
+          accounts = slackWorkspaces;
+        }
+
         return {
           _id: int._id,
           platform: int.platform,
@@ -68,6 +106,7 @@ export const getUserIntegrations = query({
           totalMessagesSynced:
             cursor?.totalMessagesSynced ?? aggregateStats?.totalMessagesSynced ?? 0,
           nangoConnectionId: int.nangoConnectionId ?? null,
+          accounts,
         };
       }),
     };
@@ -152,6 +191,7 @@ export const getIntegration = query({
 /**
  * Connect a Nango integration. Called from webhook when user completes OAuth.
  * Uses WorkOS ID to find or create user.
+ * For Gmail, creates separate integration records per account (by email).
  */
 export const connectNango = mutation({
   args: {
@@ -180,7 +220,41 @@ export const connectNango = mutation({
       }
     }
 
-    // Check if integration already exists
+    // For Gmail, use per-account lookup (similar to Slack's per-team pattern)
+    if (platform === "gmail" && args.email) {
+      const existing = await ctx.db
+        .query("integrations")
+        .withIndex("by_user_platform_account", (q) =>
+          q.eq("userId", user._id).eq("platform", "gmail").eq("accountEmail", args.email)
+        )
+        .unique();
+
+      if (existing) {
+        await ctx.db.patch(existing._id, {
+          nangoConnectionId: args.nangoConnectionId,
+          connectedAt: Date.now(),
+          isConnected: true,
+          lastError: undefined,
+        });
+        console.log(`[Gmail] Updated integration for account ${args.email}`);
+        return { integrationId: existing._id, updated: true };
+      }
+
+      // Create new integration for this Gmail account
+      const integrationId = await ctx.db.insert("integrations", {
+        userId: user._id,
+        platform: "gmail",
+        nangoConnectionId: args.nangoConnectionId,
+        accountEmail: args.email,
+        connectedAt: Date.now(),
+        isConnected: true,
+      });
+
+      console.log(`[Gmail] Created integration for account ${args.email}`);
+      return { integrationId, updated: false };
+    }
+
+    // For other platforms, use existing by_user_platform lookup
     const existing = await ctx.db
       .query("integrations")
       .withIndex("by_user_platform", (q) =>

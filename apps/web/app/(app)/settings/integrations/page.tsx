@@ -15,9 +15,8 @@ import {
 import { api } from "@cued/convex";
 import {
   IntegrationCard,
-  SocialIntegrationCard,
+  type IntegrationAccount,
   type IntegrationConfig,
-  type SocialIntegrationConfig,
   type Platform,
 } from "./components";
 
@@ -45,21 +44,19 @@ const INTEGRATIONS: IntegrationConfig[] = [
     name: "Slack",
     description: "Connect Slack via desktop app to sync messages",
     icon: <HashIcon className="size-5" />,
-    nangoIntegrationId: null, // Now uses native Electron webview
+    nangoIntegrationId: null,
     integrationType: "electron-webview",
     color: "text-purple-500",
   },
-];
-
-const SOCIAL_INTEGRATIONS: SocialIntegrationConfig[] = [
   {
     id: "linkedin",
     name: "LinkedIn",
-    description: "Scrape your LinkedIn connections",
+    description: "Sync LinkedIn messages via desktop app",
     icon: <LinkedinIcon className="size-5" />,
+    nangoIntegrationId: null,
+    integrationType: "electron-webview",
     color: "text-blue-600",
   },
-  // X (Twitter) integration disabled - scraping broken by API changes
 ];
 
 export default function IntegrationsPage() {
@@ -67,18 +64,35 @@ export default function IntegrationsPage() {
   const integrations = useQuery(api.integrations.getUserIntegrations);
   const [connecting, setConnecting] = useState<Platform | null>(null);
   const [disconnecting, setDisconnecting] = useState<Platform | null>(null);
+  const [disconnectingAccount, setDisconnectingAccount] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const statusByPlatform = useMemo(() => {
     const map = new Map<
       Platform,
-      { isConnected: boolean; lastSyncAt: number | null; nangoConnectionId: string | null }
+      {
+        isConnected: boolean;
+        lastSyncAt: number | null;
+        nangoConnectionId: string | null;
+        accounts: IntegrationAccount[] | null;
+      }
     >();
     for (const int of integrations?.integrations ?? []) {
+      const existing = map.get(int.platform);
+      const newAccounts = int.accounts ?? [];
+      // Dedupe accounts by workspaceId (backend attaches full list to each integration)
+      const existingIds = new Set((existing?.accounts ?? []).map((a) => a.workspaceId));
+      const uniqueNewAccounts = newAccounts.filter((a) => !existingIds.has(a.workspaceId));
+      const mergedAccounts = [...(existing?.accounts ?? []), ...uniqueNewAccounts];
       map.set(int.platform, {
-        isConnected: int.isConnected,
-        lastSyncAt: int.lastSyncAt,
-        nangoConnectionId: int.nangoConnectionId,
+        // Aggregate: connected if ANY integration for this platform is connected
+        isConnected: (existing?.isConnected ?? false) || int.isConnected,
+        // Take most recent sync time
+        lastSyncAt: Math.max(existing?.lastSyncAt ?? 0, int.lastSyncAt ?? 0) || null,
+        // Keep first non-null connection ID
+        nangoConnectionId: existing?.nangoConnectionId ?? int.nangoConnectionId,
+        // Deduplicated accounts
+        accounts: mergedAccounts.length > 0 ? mergedAccounts : null,
       });
     }
     return map;
@@ -184,6 +198,40 @@ export default function IntegrationsPage() {
     }
   }
 
+  async function handleDisconnectAccount(
+    config: IntegrationConfig,
+    nangoConnectionId: string,
+    workspaceId: string
+  ) {
+    if (!config.nangoIntegrationId || !accessToken) return;
+
+    setDisconnectingAccount(workspaceId);
+    setError(null);
+
+    try {
+      const res = await fetch("/api/nango/disconnect", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          nangoConnectionId,
+          providerConfigKey: config.nangoIntegrationId,
+        }),
+      });
+
+      if (!res.ok) {
+        const data = await res.json();
+        throw new Error(data.error || "Failed to disconnect");
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Disconnect failed");
+    } finally {
+      setDisconnectingAccount(null);
+    }
+  }
+
   const isLoading = integrations === undefined;
 
   return (
@@ -222,36 +270,21 @@ export default function IntegrationsPage() {
                   isConnected={status?.isConnected ?? false}
                   isConnecting={connecting === config.id}
                   isDisconnecting={disconnecting === config.id}
+                  disconnectingAccount={disconnectingAccount}
                   isLoading={isLoading}
                   lastSyncAt={status?.lastSyncAt ?? null}
+                  accounts={status?.accounts}
                   onConnect={() => handleConnect(config)}
                   onDisconnect={() => handleDisconnect(config)}
+                  onDisconnectAccount={(nangoConnectionId) => {
+                    const account = status?.accounts?.find(a => a.nangoConnectionId === nangoConnectionId);
+                    if (account) {
+                      handleDisconnectAccount(config, nangoConnectionId, account.workspaceId);
+                    }
+                  }}
                 />
               );
             })}
-          </div>
-
-          {/* Social Network Scrapers Section */}
-          <div className="pt-4">
-            <h2 className="text-sm font-medium text-muted-foreground mb-4">Social Networks</h2>
-            <div className="space-y-4">
-              {SOCIAL_INTEGRATIONS.map((config) => {
-                const status = statusByPlatform.get(config.id);
-                return (
-                  <SocialIntegrationCard
-                    key={config.id}
-                    config={config}
-                    isConnected={status?.isConnected ?? false}
-                    isLoading={isLoading}
-                    lastSyncAt={status?.lastSyncAt ?? null}
-                    totalContactsSynced={
-                      integrations?.integrations.find((i) => i.platform === config.id)
-                        ?.totalMessagesSynced ?? 0
-                    }
-                  />
-                );
-              })}
-            </div>
           </div>
 
           <div className="rounded-lg border bg-muted/30 p-4">
