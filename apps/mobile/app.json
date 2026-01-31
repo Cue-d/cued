@@ -82,23 +82,6 @@
     "extra": {
       "router": {},
       "eas": {
-        "build": {
-          "experimental": {
-            "ios": {
-              "appExtensions": [
-                {
-                  "bundleIdentifier": "so.cued.app.widget",
-                  "targetName": "ActionCountWidget",
-                  "entitlements": {
-                    "com.apple.security.application-groups": [
-                      "group.so.cued.app"
-                    ]
-                  }
-                }
-              ]
-            }
-          }
-        },
         "projectId": "f6e69a25-51dc-41d6-a506-979310837443"
       }
     }

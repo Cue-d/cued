@@ -24,6 +24,9 @@ export default defineConfig({
     alias: [
       // Mock widget-data BEFORE the @ alias so it takes precedence
       { find: /^@\/lib\/widget-data$/, replacement: path.resolve(__dirname, "./src/test/mocks/widget-data.ts") },
+      // Widgets are in root widgets/ directory for expo-widgets
+      { find: /^@\/widgets$/, replacement: path.resolve(__dirname, "./widgets/index.ts") },
+      { find: /^@\/widgets\/(.*)$/, replacement: path.resolve(__dirname, "./widgets/$1") },
       { find: "@", replacement: path.resolve(__dirname, "./src") },
       // Mock convex API to avoid TypeScript-only declaration files
       { find: "@cued/convex/convex/_generated/api", replacement: path.resolve(__dirname, "./src/test/mocks/convex-api.ts") },

@@ -7,6 +7,12 @@
       "@/*": [
         "./src/*"
       ],
+      "@/widgets": [
+        "./widgets/index"
+      ],
+      "@/widgets/*": [
+        "./widgets/*"
+      ],
       "@cued/convex/*": [
         "../../packages/convex/*"
       ]
@@ -15,6 +21,7 @@
   "include": [
     "src",
     "app",
+    "widgets",
     "*.ts",
     "*.js"
   ],
