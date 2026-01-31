@@ -4,30 +4,65 @@
     "appVersionSource": "remote"
   },
   "build": {
+    "base": {
+      "ios": {
+        "resourceClass": "m-medium"
+      },
+      "android": {
+        "resourceClass": "medium"
+      }
+    },
     "development": {
+      "extends": "base",
       "developmentClient": true,
       "distribution": "internal",
       "ios": {
         "simulator": true
       }
     },
-    "preview": {
+    "development:device": {
+      "extends": "base",
+      "developmentClient": true,
       "distribution": "internal",
       "ios": {
         "simulator": false
       }
     },
+    "preview": {
+      "extends": "base",
+      "distribution": "internal",
+      "channel": "preview",
+      "ios": {
+        "simulator": false
+      }
+    },
     "production": {
-      "autoIncrement": true
+      "extends": "base",
+      "autoIncrement": true,
+      "channel": "production"
+    },
+    "development-simulator": {
+      "developmentClient": true,
+      "distribution": "internal",
+      "ios": {
+        "simulator": true
+      },
+      "environment": "development"
     }
   },
   "submit": {
-    "production": {
+    "base": {
       "ios": {
-        "appleId": "${APPLE_ID}",
-        "ascAppId": "${ASC_APP_ID}",
-        "appleTeamId": "${APPLE_TEAM_ID}"
+        "appleId": "theodoretarr@icloud.com",
+        "ascAppId": "6758527444",
+        "appleTeamId": "8MW6NC736H"
       }
+    },
+    "preview": {
+      "extends": "base"
+    },
+    "production": {
+      "extends": "base"
     }
   }
 }
