@@ -95,8 +95,6 @@ NEXT_PUBLIC_CONVEX_URL=https://your-project-name.convex.cloud
 
 # Required: WorkOS Auth
 WORKOS_CLIENT_ID=client_xxx
-WORKOS_API_KEY=sk_xxx
-WORKOS_COOKIE_PASSWORD=32-char-random-string
 NEXT_PUBLIC_WORKOS_REDIRECT_URI=http://localhost:3000/callback
 
 # Optional: Integrations
