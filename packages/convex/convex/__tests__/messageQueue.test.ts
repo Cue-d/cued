@@ -10,7 +10,10 @@ import { describe, expect, it } from "vitest";
 import schema from "../schema";
 import { modules } from "./test.setup";
 import { createTestUserData, createTestIdentity } from "./helpers";
+import { useSchedulerCleanup } from "./schedulerCleanup";
 import { api } from "../_generated/api";
+
+const { trackTest } = useSchedulerCleanup();
 
 /** Helper to set up an authenticated test environment */
 async function setupAuthenticatedUser(t: ReturnType<typeof convexTest>) {
@@ -36,7 +39,7 @@ describe("messageQueue", () => {
 
   describe("queueMessage mutation", () => {
     it("throws for unauthenticated user", async () => {
-      const t = convexTest(schema, modules);
+      const t = trackTest(convexTest(schema, modules));
 
       await expect(
         t.mutation(api.messageQueue.queueMessage, {
@@ -49,7 +52,7 @@ describe("messageQueue", () => {
     });
 
     it("queues message with 30s delay (undo window)", async () => {
-      const t = convexTest(schema, modules);
+      const t = trackTest(convexTest(schema, modules));
       const { asUser } = await setupAuthenticatedUser(t);
 
       const before = Date.now();
@@ -81,7 +84,7 @@ describe("messageQueue", () => {
     });
 
     it("queues message with all optional fields", async () => {
-      const t = convexTest(schema, modules);
+      const t = trackTest(convexTest(schema, modules));
       const { asUser, userId } = await setupAuthenticatedUser(t);
 
       // Create a contact for the optional field
@@ -110,7 +113,7 @@ describe("messageQueue", () => {
     });
 
     it("queues group message", async () => {
-      const t = convexTest(schema, modules);
+      const t = trackTest(convexTest(schema, modules));
       const { asUser } = await setupAuthenticatedUser(t);
 
       const result = await asUser.mutation(api.messageQueue.queueMessage, {
@@ -131,7 +134,7 @@ describe("messageQueue", () => {
 
   describe("cancelMessage mutation", () => {
     it("throws for unauthenticated user", async () => {
-      const t = convexTest(schema, modules);
+      const t = trackTest(convexTest(schema, modules));
 
       // Create a message to try to cancel
       const messageId = await t.run(async (ctx) => {
@@ -155,7 +158,7 @@ describe("messageQueue", () => {
     });
 
     it("cancels a pending message", async () => {
-      const t = convexTest(schema, modules);
+      const t = trackTest(convexTest(schema, modules));
       const { asUser, userId } = await setupAuthenticatedUser(t);
 
       const messageId = await t.run(async (ctx) => {
@@ -184,7 +187,7 @@ describe("messageQueue", () => {
     });
 
     it("throws when trying to cancel non-pending message", async () => {
-      const t = convexTest(schema, modules);
+      const t = trackTest(convexTest(schema, modules));
       const { asUser, userId } = await setupAuthenticatedUser(t);
 
       // Create a message that's already sent
@@ -209,7 +212,7 @@ describe("messageQueue", () => {
     });
 
     it("throws when message belongs to different user", async () => {
-      const t = convexTest(schema, modules);
+      const t = trackTest(convexTest(schema, modules));
       const { asUser } = await setupAuthenticatedUser(t);
 
       // Create a message for a different user
@@ -237,7 +240,7 @@ describe("messageQueue", () => {
     });
 
     it("throws for cancelled message", async () => {
-      const t = convexTest(schema, modules);
+      const t = trackTest(convexTest(schema, modules));
       const { asUser, userId } = await setupAuthenticatedUser(t);
 
       const messageId = await t.run(async (ctx) => {
@@ -263,7 +266,7 @@ describe("messageQueue", () => {
 
   describe("updateMessageStatus mutation", () => {
     it("throws for unauthenticated user", async () => {
-      const t = convexTest(schema, modules);
+      const t = trackTest(convexTest(schema, modules));
 
       const messageId = await t.run(async (ctx) => {
         const userId = await ctx.db.insert("users", createTestUserData());
@@ -289,7 +292,7 @@ describe("messageQueue", () => {
     });
 
     it("updates status to sending and increments attempts", async () => {
-      const t = convexTest(schema, modules);
+      const t = trackTest(convexTest(schema, modules));
       const { asUser, userId } = await setupAuthenticatedUser(t);
 
       const messageId = await t.run(async (ctx) => {
@@ -323,7 +326,7 @@ describe("messageQueue", () => {
     });
 
     it("updates status to sent with sentAt timestamp", async () => {
-      const t = convexTest(schema, modules);
+      const t = trackTest(convexTest(schema, modules));
       const { asUser, userId } = await setupAuthenticatedUser(t);
 
       const messageId = await t.run(async (ctx) => {
@@ -356,7 +359,7 @@ describe("messageQueue", () => {
     });
 
     it("auto-retries failed message under max attempts", async () => {
-      const t = convexTest(schema, modules);
+      const t = trackTest(convexTest(schema, modules));
       const { asUser, userId } = await setupAuthenticatedUser(t);
 
       const messageId = await t.run(async (ctx) => {
@@ -392,7 +395,7 @@ describe("messageQueue", () => {
     });
 
     it("marks as failed when max attempts reached", async () => {
-      const t = convexTest(schema, modules);
+      const t = trackTest(convexTest(schema, modules));
       const { asUser, userId } = await setupAuthenticatedUser(t);
 
       const messageId = await t.run(async (ctx) => {
@@ -427,7 +430,7 @@ describe("messageQueue", () => {
     });
 
     it("throws when message belongs to different user", async () => {
-      const t = convexTest(schema, modules);
+      const t = trackTest(convexTest(schema, modules));
       const { asUser } = await setupAuthenticatedUser(t);
 
       const messageId = await t.run(async (ctx) => {
@@ -459,7 +462,7 @@ describe("messageQueue", () => {
 
   describe("retryMessage mutation", () => {
     it("throws for unauthenticated user", async () => {
-      const t = convexTest(schema, modules);
+      const t = trackTest(convexTest(schema, modules));
 
       const messageId = await t.run(async (ctx) => {
         const userId = await ctx.db.insert("users", createTestUserData());
@@ -483,7 +486,7 @@ describe("messageQueue", () => {
     });
 
     it("retries failed message - resets attempts and status", async () => {
-      const t = convexTest(schema, modules);
+      const t = trackTest(convexTest(schema, modules));
       const { asUser, userId } = await setupAuthenticatedUser(t);
 
       const messageId = await t.run(async (ctx) => {
@@ -519,7 +522,7 @@ describe("messageQueue", () => {
     });
 
     it("throws when trying to retry non-failed message", async () => {
-      const t = convexTest(schema, modules);
+      const t = trackTest(convexTest(schema, modules));
       const { asUser, userId } = await setupAuthenticatedUser(t);
 
       const messageId = await t.run(async (ctx) => {
@@ -542,7 +545,7 @@ describe("messageQueue", () => {
     });
 
     it("throws when message belongs to different user", async () => {
-      const t = convexTest(schema, modules);
+      const t = trackTest(convexTest(schema, modules));
       const { asUser } = await setupAuthenticatedUser(t);
 
       const messageId = await t.run(async (ctx) => {
@@ -576,7 +579,7 @@ describe("messageQueue", () => {
 
   describe("getQueuedMessages query", () => {
     it("returns empty array for unauthenticated user", async () => {
-      const t = convexTest(schema, modules);
+      const t = trackTest(convexTest(schema, modules));
 
       const result = await t.query(api.messageQueue.getQueuedMessages, {});
 
@@ -584,7 +587,7 @@ describe("messageQueue", () => {
     });
 
     it("returns messages where scheduledFor < now (past undo window)", async () => {
-      const t = convexTest(schema, modules);
+      const t = trackTest(convexTest(schema, modules));
       const { asUser, userId } = await setupAuthenticatedUser(t);
 
       const now = Date.now();
@@ -624,7 +627,7 @@ describe("messageQueue", () => {
     });
 
     it("only returns pending messages", async () => {
-      const t = convexTest(schema, modules);
+      const t = trackTest(convexTest(schema, modules));
       const { asUser, userId } = await setupAuthenticatedUser(t);
 
       const now = Date.now();
@@ -680,7 +683,7 @@ describe("messageQueue", () => {
     });
 
     it("filters by platform when specified", async () => {
-      const t = convexTest(schema, modules);
+      const t = trackTest(convexTest(schema, modules));
       const { asUser, userId } = await setupAuthenticatedUser(t);
 
       const now = Date.now();
@@ -721,7 +724,7 @@ describe("messageQueue", () => {
     });
 
     it("respects limit parameter", async () => {
-      const t = convexTest(schema, modules);
+      const t = trackTest(convexTest(schema, modules));
       const { asUser, userId } = await setupAuthenticatedUser(t);
 
       const now = Date.now();
@@ -751,7 +754,7 @@ describe("messageQueue", () => {
     });
 
     it("sorts by scheduledFor (oldest first)", async () => {
-      const t = convexTest(schema, modules);
+      const t = trackTest(convexTest(schema, modules));
       const { asUser, userId } = await setupAuthenticatedUser(t);
 
       const now = Date.now();
@@ -792,7 +795,7 @@ describe("messageQueue", () => {
 
   describe("getPendingMessages query", () => {
     it("returns empty array for unauthenticated user", async () => {
-      const t = convexTest(schema, modules);
+      const t = trackTest(convexTest(schema, modules));
 
       const result = await t.query(api.messageQueue.getPendingMessages, {});
 
@@ -800,7 +803,7 @@ describe("messageQueue", () => {
     });
 
     it("returns messages still in undo window (scheduledFor > now)", async () => {
-      const t = convexTest(schema, modules);
+      const t = trackTest(convexTest(schema, modules));
       const { asUser, userId } = await setupAuthenticatedUser(t);
 
       const now = Date.now();
@@ -840,7 +843,7 @@ describe("messageQueue", () => {
     });
 
     it("includes timeRemainingMs for each message", async () => {
-      const t = convexTest(schema, modules);
+      const t = trackTest(convexTest(schema, modules));
       const { asUser, userId } = await setupAuthenticatedUser(t);
 
       const now = Date.now();
@@ -870,7 +873,7 @@ describe("messageQueue", () => {
     });
 
     it("only returns pending status messages", async () => {
-      const t = convexTest(schema, modules);
+      const t = trackTest(convexTest(schema, modules));
       const { asUser, userId } = await setupAuthenticatedUser(t);
 
       const now = Date.now();
@@ -914,7 +917,7 @@ describe("messageQueue", () => {
 
   describe("getMessageQueueStats query", () => {
     it("returns zeros for unauthenticated user", async () => {
-      const t = convexTest(schema, modules);
+      const t = trackTest(convexTest(schema, modules));
 
       const result = await t.query(api.messageQueue.getMessageQueueStats, {});
 
@@ -929,7 +932,7 @@ describe("messageQueue", () => {
     });
 
     it("returns correct counts by status", async () => {
-      const t = convexTest(schema, modules);
+      const t = trackTest(convexTest(schema, modules));
       const { asUser, userId } = await setupAuthenticatedUser(t);
 
       const now = Date.now();
@@ -1033,7 +1036,7 @@ describe("messageQueue", () => {
     });
 
     it("only counts messages for authenticated user", async () => {
-      const t = convexTest(schema, modules);
+      const t = trackTest(convexTest(schema, modules));
       const { asUser, userId } = await setupAuthenticatedUser(t);
 
       const now = Date.now();

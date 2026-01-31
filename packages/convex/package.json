@@ -16,6 +16,7 @@
     "test:coverage": "vitest run --coverage"
   },
   "dependencies": {
+    "@nangohq/node": "^0.45.1",
     "@cued/ai": "workspace:*",
     "@cued/env": "workspace:*",
     "@cued/shared": "workspace:*",

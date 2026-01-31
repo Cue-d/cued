@@ -159,14 +159,12 @@ function setupAuthIpcHandlers(): void {
             }
           }
 
-          // Initialize and start sync engine if this is first login
-          // (startBackgroundSync returned early due to no token at startup)
+          // Initialize/start sync engine if not running (e.g., first login or after sign-out)
           const engine = getSyncEngine();
-          if (!engine.isInitialized()) {
-            console.log("[Main] First login - initializing sync engine");
+          const triggered = engine.syncNow();
+          if (!triggered) {
+            console.log("[Main] Sync engine not running - starting background sync");
             await startBackgroundSync();
-          } else {
-            engine.syncNow();
           }
         },
         onAuthError: (error) => {

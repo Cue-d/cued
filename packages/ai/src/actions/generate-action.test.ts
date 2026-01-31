@@ -4,12 +4,20 @@ import type { GenerateActionInput } from "./generate-action";
 
 // Mock the AI SDK
 vi.mock("ai", () => ({
-  generateObject: vi.fn(),
+  generateText: vi.fn(),
+  Output: {
+    object: vi.fn(),
+  },
 }));
 
-import { generateObject } from "ai";
+import { generateText } from "ai";
 
-const mockGenerateObject = vi.mocked(generateObject);
+const mockGenerateText = vi.mocked(generateText);
+
+/** Helper to create mock structured output response */
+function mockObjectResponse(obj: Record<string, unknown>): { experimental_output: Record<string, unknown> } {
+  return { experimental_output: obj };
+}
 
 describe("generateAction", () => {
   beforeEach(() => {
@@ -42,7 +50,7 @@ describe("generateAction", () => {
 
     expect(result.shouldCreateAction).toBe(false);
     expect(result.reason).toContain("Empty conversation");
-    expect(mockGenerateObject).not.toHaveBeenCalled();
+    expect(mockGenerateText).not.toHaveBeenCalled();
   });
 
   it("returns no action when user sent last message", async () => {
@@ -59,23 +67,23 @@ describe("generateAction", () => {
 
     expect(result.shouldCreateAction).toBe(false);
     expect(result.reason).toContain("User sent the last message");
-    expect(mockGenerateObject).not.toHaveBeenCalled();
+    expect(mockGenerateText).not.toHaveBeenCalled();
   });
 
   it("calls LLM for valid conversation needing analysis", async () => {
-    mockGenerateObject.mockResolvedValueOnce({
-      object: {
+    mockGenerateText.mockResolvedValueOnce(
+      mockObjectResponse({
         shouldCreateAction: true,
         type: "respond",
         priority: 70,
         reason: "Direct question asking for report",
         suggestedResponse: "Sure, I'll send it over shortly!",
-      },
-    } as never);
+      }) as never
+    );
 
     const result = await generateAction(baseInput);
 
-    expect(mockGenerateObject).toHaveBeenCalledOnce();
+    expect(mockGenerateText).toHaveBeenCalledOnce();
     expect(result.shouldCreateAction).toBe(true);
     expect(result.type).toBe("respond");
     expect(result.priority).toBe(70);
@@ -83,13 +91,13 @@ describe("generateAction", () => {
   });
 
   it("passes correct context to LLM", async () => {
-    mockGenerateObject.mockResolvedValueOnce({
-      object: { shouldCreateAction: false },
-    } as never);
+    mockGenerateText.mockResolvedValueOnce(
+      mockObjectResponse({ shouldCreateAction: false }) as never
+    );
 
     await generateAction(baseInput);
 
-    const call = mockGenerateObject.mock.calls[0];
+    const call = mockGenerateText.mock.calls[0];
     const prompt = (call as unknown[])[0] as { prompt: string };
 
     expect(prompt.prompt).toContain("John Doe");
@@ -99,9 +107,9 @@ describe("generateAction", () => {
   });
 
   it("includes recent actions in context when provided", async () => {
-    mockGenerateObject.mockResolvedValueOnce({
-      object: { shouldCreateAction: false },
-    } as never);
+    mockGenerateText.mockResolvedValueOnce(
+      mockObjectResponse({ shouldCreateAction: false }) as never
+    );
 
     await generateAction({
       ...baseInput,
@@ -111,7 +119,7 @@ describe("generateAction", () => {
       ],
     });
 
-    const call = mockGenerateObject.mock.calls[0];
+    const call = mockGenerateText.mock.calls[0];
     const prompt = (call as unknown[])[0] as { prompt: string };
 
     expect(prompt.prompt).toContain("Recent Actions");
@@ -120,13 +128,13 @@ describe("generateAction", () => {
   });
 
   it("omits recent actions section when none provided", async () => {
-    mockGenerateObject.mockResolvedValueOnce({
-      object: { shouldCreateAction: false },
-    } as never);
+    mockGenerateText.mockResolvedValueOnce(
+      mockObjectResponse({ shouldCreateAction: false }) as never
+    );
 
     await generateAction(baseInput);
 
-    const call = mockGenerateObject.mock.calls[0];
+    const call = mockGenerateText.mock.calls[0];
     const prompt = (call as unknown[])[0] as { prompt: string };
 
     expect(prompt.prompt).not.toContain("Recent Actions");
@@ -142,7 +150,7 @@ describe("generateAction", () => {
 
     expect(result.shouldCreateAction).toBe(false);
     expect(result.reason).toContain("Pending action already exists");
-    expect(mockGenerateObject).not.toHaveBeenCalled();
+    expect(mockGenerateText).not.toHaveBeenCalled();
   });
 
   it("skips LLM when no new messages since last action", async () => {
@@ -166,13 +174,13 @@ describe("generateAction", () => {
 
     expect(result.shouldCreateAction).toBe(false);
     expect(result.reason).toContain("No new messages since last action");
-    expect(mockGenerateObject).not.toHaveBeenCalled();
+    expect(mockGenerateText).not.toHaveBeenCalled();
   });
 
   it("calls LLM when there are new messages since last action", async () => {
-    mockGenerateObject.mockResolvedValueOnce({
-      object: { shouldCreateAction: true, type: "respond", priority: 50 },
-    } as never);
+    mockGenerateText.mockResolvedValueOnce(
+      mockObjectResponse({ shouldCreateAction: true, type: "respond", priority: 50 }) as never
+    );
 
     const actionTime = Date.now() - 7200000; // 2 hours ago
     const messageTime = Date.now() - 3600000; // 1 hour ago (after action)
@@ -192,16 +200,16 @@ describe("generateAction", () => {
       ],
     });
 
-    expect(mockGenerateObject).toHaveBeenCalledOnce();
+    expect(mockGenerateText).toHaveBeenCalledOnce();
   });
 
   it("handles LLM returning no action needed", async () => {
-    mockGenerateObject.mockResolvedValueOnce({
-      object: {
+    mockGenerateText.mockResolvedValueOnce(
+      mockObjectResponse({
         shouldCreateAction: false,
         reason: "Conversation ended naturally",
-      },
-    } as never);
+      }) as never
+    );
 
     const result = await generateAction(baseInput);
 
@@ -232,42 +240,42 @@ describe("generateActionWithRetry", () => {
   };
 
   it("returns result on first success", async () => {
-    mockGenerateObject.mockResolvedValueOnce({
-      object: {
+    mockGenerateText.mockResolvedValueOnce(
+      mockObjectResponse({
         shouldCreateAction: true,
         type: "respond",
         priority: 60,
-      },
-    } as never);
+      }) as never
+    );
 
     const result = await generateActionWithRetry(baseInput);
 
-    expect(mockGenerateObject).toHaveBeenCalledOnce();
+    expect(mockGenerateText).toHaveBeenCalledOnce();
     expect(result.shouldCreateAction).toBe(true);
   });
 
   it("retries on failure and succeeds", async () => {
-    mockGenerateObject
+    mockGenerateText
       .mockRejectedValueOnce(new Error("Rate limited"))
-      .mockResolvedValueOnce({
-        object: {
+      .mockResolvedValueOnce(
+        mockObjectResponse({
           shouldCreateAction: true,
           type: "follow_up",
-        },
-      } as never);
+        }) as never
+      );
 
     const result = await generateActionWithRetry(baseInput, 1);
 
-    expect(mockGenerateObject).toHaveBeenCalledTimes(2);
+    expect(mockGenerateText).toHaveBeenCalledTimes(2);
     expect(result.shouldCreateAction).toBe(true);
   });
 
   it("returns safe default after max retries", async () => {
-    mockGenerateObject.mockRejectedValue(new Error("API Error"));
+    mockGenerateText.mockRejectedValue(new Error("API Error"));
 
     const result = await generateActionWithRetry(baseInput, 1);
 
-    expect(mockGenerateObject).toHaveBeenCalledTimes(2);
+    expect(mockGenerateText).toHaveBeenCalledTimes(2);
     expect(result.shouldCreateAction).toBe(false);
     expect(result.reason).toContain("LLM analysis failed");
   });
@@ -278,7 +286,7 @@ describe("generateActionWithRetry", () => {
       messages: [],
     });
 
-    expect(mockGenerateObject).not.toHaveBeenCalled();
+    expect(mockGenerateText).not.toHaveBeenCalled();
     expect(result.shouldCreateAction).toBe(false);
   });
 });

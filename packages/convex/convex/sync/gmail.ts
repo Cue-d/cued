@@ -8,6 +8,7 @@ import { v } from "convex/values";
 import type { Doc, Id } from "../_generated/dataModel";
 import type { MutationCtx } from "../_generated/server";
 import { normalizeEmail } from "@cued/ai";
+import { normalizePhone } from "@cued/shared";
 import {
   getOrCreateContact,
   scheduleIncomingMessageEvents,
@@ -17,6 +18,7 @@ import {
   shouldUpdateDisplayName,
 } from "./shared";
 import { batchFetchConversations, batchFetchMessages } from "./batchUtils";
+import { findContactByHandle } from "./imessage";
 
 // ============================================================================
 // Validators
@@ -191,6 +193,44 @@ export function parseEmailAddress(fromHeader: string): { name: string; email: st
   return { name: fromHeader, email: fromHeader.toLowerCase() };
 }
 
+/**
+ * Parse a recipients header into individual email addresses.
+ * Handles "Name <email>" and bare email formats.
+ */
+function parseRecipientAddresses(
+  recipientsHeader?: string
+): Array<{ name: string; email: string }> {
+  if (!recipientsHeader) return [];
+
+  const results: Array<{ name: string; email: string }> = [];
+  const seen = new Set<string>();
+
+  // Capture bracketed addresses first (supports names with commas).
+  const bracketRegex = /([^<]*?)<\s*([^\s<>]+@[^\s<>]+)\s*>/g;
+  let match: RegExpExecArray | null;
+  while ((match = bracketRegex.exec(recipientsHeader)) !== null) {
+    const email = match[2].toLowerCase();
+    if (seen.has(email)) continue;
+    const rawName = match[1]?.trim() ?? "";
+    const name = rawName.replace(/^"|"$/g, "").trim() || email;
+    results.push({ name, email });
+    seen.add(email);
+  }
+
+  // Remove bracketed parts before scanning for bare emails.
+  const remaining = recipientsHeader.replace(/([^<]*?)<\s*([^\s<>]+@[^\s<>]+)\s*>/g, " ");
+  const bareRegex = /([^\s<>,;]+@[^\s<>,;]+)/g;
+  let bareMatch: RegExpExecArray | null;
+  while ((bareMatch = bareRegex.exec(remaining)) !== null) {
+    const email = bareMatch[1].toLowerCase();
+    if (seen.has(email)) continue;
+    results.push({ name: email, email });
+    seen.add(email);
+  }
+
+  return results;
+}
+
 // ============================================================================
 // Gmail Sync Implementation
 // ============================================================================
@@ -292,6 +332,20 @@ export async function syncGmailMessagesInternal(
           // Track participant for conversation (only for incoming emails)
           if (senderContactId) {
             threadParticipantIds.add(senderContactId);
+          }
+        } else {
+          // For sent emails, resolve recipients as participants
+          const recipients = parseRecipientAddresses(email.recipients);
+          for (const recipient of recipients) {
+            const recipientContactId = await getOrCreateEmailContact(
+              ctx,
+              userId,
+              recipient.email,
+              recipient.name
+            );
+            if (recipientContactId) {
+              threadParticipantIds.add(recipientContactId);
+            }
           }
         }
 
@@ -484,9 +538,6 @@ async function handleDeletedGoogleContact(
   userId: Id<"users">,
   contact: GoogleContactInput
 ): Promise<boolean> {
-  // Import here to avoid circular dependency
-  const { normalizePhone } = await import("@cued/shared");
-
   // Collect all handles to find the contact
   const allHandles = [
     ...contact.emails.map((e) => normalizeEmail(e)),
@@ -544,10 +595,6 @@ async function upsertGoogleContact(
   userId: Id<"users">,
   contact: GoogleContactInput
 ): Promise<{ isNew: boolean; handlesAdded: number }> {
-  // Import here to avoid circular dependency
-  const { normalizePhone } = await import("@cued/shared");
-  const { findContactByHandle } = await import("./imessage");
-
   // Collect all normalized handles
   const handles: Array<{ value: string; type: "phone" | "email" }> = [
     ...contact.phones.map((p) => ({

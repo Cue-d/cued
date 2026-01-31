@@ -64,7 +64,9 @@ export function createIMessageSyncFn(_options: SyncFunctionOptions): SyncFunctio
 
       const after = manager.getProgress()
       if (after.status === 'error') {
-        return { success: false, error: after.error ?? 'iMessage sync failed' }
+        const errorMessage = after.error ?? 'iMessage sync failed'
+        console.error('[IMessageSync] Error:', errorMessage)
+        throw new Error(errorMessage)
       }
 
       return {
@@ -74,7 +76,7 @@ export function createIMessageSyncFn(_options: SyncFunctionOptions): SyncFunctio
     } catch (error) {
       const errorMessage = getErrorMessage(error)
       console.error('[IMessageSync] Error:', errorMessage)
-      return { success: false, error: errorMessage }
+      throw new Error(errorMessage)
     }
   }
 }
@@ -93,22 +95,23 @@ export function createContactsSyncFn(options: SyncFunctionOptions): SyncFunction
       const totalSynced = result.contactsCount + result.updatedCount
 
       if (result.errors.length > 0) {
+        const errorMessage = formatSyncErrors(result.errors)
         console.error('[ContactsSync] Completed with errors:', {
           errorCount: result.errors.length,
           errors: result.errors,
           partialSuccess: totalSynced,
         })
+        throw new Error(errorMessage)
       }
 
       return {
-        success: result.errors.length === 0,
+        success: true,
         contactsSynced: totalSynced,
-        error: result.errors.length > 0 ? formatSyncErrors(result.errors) : undefined,
       }
     } catch (error) {
       const errorMessage = getErrorMessage(error)
       console.error('[ContactsSync] Error:', errorMessage)
-      return { success: false, error: errorMessage }
+      throw new Error(errorMessage)
     }
   }
 }
@@ -125,12 +128,12 @@ export function createLinkedInMessagesSyncFn(
 ): SyncFunction {
   return async (): Promise<SyncResult> => {
     if (!options.linkedInScraper) {
-      return { success: false, error: 'LinkedIn scraper not provided' }
+      throw new Error('LinkedIn scraper not provided')
     }
 
     const isLoggedIn = await options.linkedInScraper.checkLoginStatus()
     if (!isLoggedIn) {
-      return { success: false, error: 'LinkedIn not logged in' }
+      throw new Error('LinkedIn not logged in')
     }
 
     const manager = getLinkedInSyncManager()
@@ -141,7 +144,7 @@ export function createLinkedInMessagesSyncFn(
     } catch (error) {
       const errorMessage = getErrorMessage(error)
       console.error('[LinkedInMessagesSync] Failed to get API client:', errorMessage)
-      return { success: false, error: errorMessage }
+      throw new Error(errorMessage)
     }
 
     const initialMessages = manager.getProgress().totalMessagesSynced
@@ -151,7 +154,9 @@ export function createLinkedInMessagesSyncFn(
 
       const after = manager.getProgress()
       if (after.status === 'error') {
-        return { success: false, error: after.error ?? 'LinkedIn sync failed' }
+        const errorMessage = after.error ?? 'LinkedIn sync failed'
+        console.error('[LinkedInMessagesSync] Error:', errorMessage)
+        throw new Error(errorMessage)
       }
 
       return {
@@ -161,7 +166,7 @@ export function createLinkedInMessagesSyncFn(
     } catch (error) {
       const errorMessage = getErrorMessage(error)
       console.error('[LinkedInMessagesSync] Error:', errorMessage)
-      return { success: false, error: errorMessage }
+      throw new Error(errorMessage)
     }
   }
 }
@@ -175,18 +180,18 @@ export function createLinkedInContactsSyncFn(
 ): SyncFunction {
   return async (): Promise<SyncResult> => {
     if (!options.linkedInScraper) {
-      return { success: false, error: 'LinkedIn scraper not provided' }
+      throw new Error('LinkedIn scraper not provided')
     }
 
     const isLoggedIn = await options.linkedInScraper.checkLoginStatus()
     if (!isLoggedIn) {
-      return { success: false, error: 'LinkedIn not logged in' }
+      throw new Error('LinkedIn not logged in')
     }
 
     try {
       const initialized = await options.linkedInScraper.initializeForContactsSync()
       if (!initialized) {
-        return { success: false, error: 'Failed to initialize LinkedIn contacts sync - not authenticated' }
+        throw new Error('Failed to initialize LinkedIn contacts sync - not authenticated')
       }
 
       console.log('[LinkedInContactsSync] Starting incremental scrape...')
@@ -213,7 +218,7 @@ export function createLinkedInContactsSyncFn(
       const convexClient = createConvexClient()
       const token = await setConvexAuth(convexClient)
       if (!token) {
-        return { success: false, error: 'Failed to authenticate with Convex' }
+        throw new Error('Failed to authenticate with Convex')
       }
 
       const syncResult = await convexClient.mutation(api.sync.syncSocialContacts, {
@@ -227,15 +232,21 @@ export function createLinkedInContactsSyncFn(
       )
 
       const totalSynced = syncResult.newContacts + syncResult.updatedContacts
+
+      if (syncResult.errors.length > 0) {
+        const errorMessage = formatSyncErrors(syncResult.errors)
+        console.error('[LinkedInContactsSync] Completed with errors:', errorMessage)
+        throw new Error(errorMessage)
+      }
+
       return {
-        success: syncResult.errors.length === 0,
+        success: true,
         contactsSynced: totalSynced,
-        error: syncResult.errors.length > 0 ? formatSyncErrors(syncResult.errors) : undefined,
       }
     } catch (error) {
       const errorMessage = getErrorMessage(error)
       console.error('[LinkedInContactsSync] Error:', errorMessage)
-      return { success: false, error: errorMessage }
+      throw new Error(errorMessage)
     }
   }
 }
@@ -257,7 +268,7 @@ export function createSlackSyncFn(
     if (!manager.isAuthenticated()) {
       const initialized = await manager.initialize()
       if (!initialized) {
-        return { success: false, error: `Slack workspace ${teamId} not authenticated` }
+        throw new Error(`Slack workspace ${teamId} not authenticated`)
       }
     }
 
@@ -268,7 +279,9 @@ export function createSlackSyncFn(
 
       const after = manager.getProgress()
       if (after.status === 'error') {
-        return { success: false, error: after.error ?? 'Slack sync failed' }
+        const errorMessage = after.error ?? 'Slack sync failed'
+        console.error(`[SlackSync:${teamId}] Error:`, errorMessage)
+        throw new Error(errorMessage)
       }
 
       return {
@@ -278,7 +291,7 @@ export function createSlackSyncFn(
     } catch (error) {
       const errorMessage = getErrorMessage(error)
       console.error(`[SlackSync:${teamId}] Error:`, errorMessage)
-      return { success: false, error: errorMessage }
+      throw new Error(errorMessage)
     }
   }
 }

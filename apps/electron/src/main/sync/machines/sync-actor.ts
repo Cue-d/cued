@@ -60,6 +60,19 @@ export function getActorId(context: SyncActorContext): string {
     : context.syncType
 }
 
+function isNonRetryableError(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error)
+  const normalized = message.toLowerCase()
+
+  return (
+    normalized.includes('full disk access') ||
+    normalized.includes('operation not permitted') ||
+    normalized.includes('eperm') ||
+    normalized.includes('unable to open database file') ||
+    normalized.includes('sqlite_cantopen')
+  )
+}
+
 // ============================================================================
 // Sync Actor Machine
 // ============================================================================
@@ -152,7 +165,13 @@ export const createSyncActorMachine = (input: SyncActorInput) => {
       },
     },
     guards: {
-      canRetry: ({ context }) => context.retryCount < config.maxRetries,
+      canRetry: ({ context, event }) => {
+        const error = (event as { error?: unknown } | undefined)?.error
+        if (error && isNonRetryableError(error)) {
+          return false
+        }
+        return context.retryCount < config.maxRetries
+      },
     },
     delays: {
       backoffDelay: ({ context }) => context.backoffMs,

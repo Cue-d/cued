@@ -42,6 +42,25 @@ const SYNC_INTERVAL_MS = 5_000;
 // Current sync version - must match CURRENT_SYNC_VERSION in packages/convex/convex/sync.ts
 const CURRENT_SYNC_VERSION = 1;
 
+const FULL_DISK_ACCESS_ERROR =
+  "Full Disk Access is required to read Messages. Please grant Full Disk Access to PRM and restart the app.";
+
+function getFullDiskAccessError(error: unknown): string | null {
+  const message = error instanceof Error ? error.message : String(error);
+  const normalized = message.toLowerCase();
+
+  if (
+    normalized.includes("operation not permitted") ||
+    normalized.includes("eperm") ||
+    normalized.includes("unable to open database file") ||
+    normalized.includes("sqlite_cantopen")
+  ) {
+    return FULL_DISK_ACCESS_ERROR;
+  }
+
+  return null;
+}
+
 /**
  * Simple cursor state: tracks highest fully-synced ROWID.
  */
@@ -376,7 +395,7 @@ export class IMessageSyncManager {
         durationMs: Date.now() - syncStartTime,
       });
     } catch (error: unknown) {
-      const message = error instanceof Error ? error.message : String(error);
+      const message = getFullDiskAccessError(error) ?? (error instanceof Error ? error.message : String(error));
       console.error("[IMessageSyncManager] Sync error:", message);
       logger.logSyncError("imessage", message);
       this.updateProgress({

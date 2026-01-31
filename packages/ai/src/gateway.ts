@@ -14,5 +14,8 @@ export const gateway = createGateway({
   apiKey: process.env.AI_GATEWAY_API_KEY,
 });
 
-// Single model for all AI tasks - Kimi K2.5
+// Default model for general AI tasks - Kimi K2.5
 export const MODEL = "moonshotai/kimi-k2.5";
+
+// Model for structured object generation - GPT-5 nano (better schema adherence)
+export const OBJECT_MODEL = "openai/gpt-5-nano";

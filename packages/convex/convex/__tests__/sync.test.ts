@@ -22,7 +22,10 @@ import {
   createTestIdentity,
   createTestIntegrationData,
 } from "./helpers";
+import { useSchedulerCleanup } from "./schedulerCleanup";
 import { api } from "../_generated/api";
+
+const { trackTest } = useSchedulerCleanup();
 
 /**
  * Helper to set up an authenticated test environment.
@@ -49,7 +52,7 @@ describe("sync", () => {
   // ============================================================================
   describe("syncMessages mutation (iMessage)", () => {
     it("throws for unauthenticated user", async () => {
-      const t = convexTest(schema, modules);
+      const t = trackTest(convexTest(schema, modules));
 
       await expect(
         t.mutation(api.sync.syncMessages, {
@@ -64,7 +67,7 @@ describe("sync", () => {
     });
 
     it("syncs new conversation from iMessage chat", async () => {
-      const t = convexTest(schema, modules);
+      const t = trackTest(convexTest(schema, modules));
       const { asUser, userId } = await setupAuthenticatedUser(t);
 
       const result = await asUser.mutation(api.sync.syncMessages, {
@@ -105,7 +108,7 @@ describe("sync", () => {
     });
 
     it("syncs new messages and updates conversation lastMessage", async () => {
-      const t = convexTest(schema, modules);
+      const t = trackTest(convexTest(schema, modules));
       const { asUser, userId } = await setupAuthenticatedUser(t);
 
       const timestamp = Math.floor(Date.now() / 1000);
@@ -172,7 +175,7 @@ describe("sync", () => {
     });
 
     it("creates placeholder contact for unknown sender", async () => {
-      const t = convexTest(schema, modules);
+      const t = trackTest(convexTest(schema, modules));
       const { asUser, userId } = await setupAuthenticatedUser(t);
 
       await asUser.mutation(api.sync.syncMessages, {
@@ -232,7 +235,7 @@ describe("sync", () => {
     });
 
     it("resolves existing contact by phone number", async () => {
-      const t = convexTest(schema, modules);
+      const t = trackTest(convexTest(schema, modules));
       const { asUser, userId } = await setupAuthenticatedUser(t);
 
       // Create existing contact with handle
@@ -303,7 +306,7 @@ describe("sync", () => {
     });
 
     it("deduplicates messages by platformMessageId", async () => {
-      const t = convexTest(schema, modules);
+      const t = trackTest(convexTest(schema, modules));
       const { asUser, userId } = await setupAuthenticatedUser(t);
 
       // First sync - should create message
@@ -379,7 +382,7 @@ describe("sync", () => {
     });
 
     it("handles group chat with multiple participants", async () => {
-      const t = convexTest(schema, modules);
+      const t = trackTest(convexTest(schema, modules));
       const { asUser, userId } = await setupAuthenticatedUser(t);
 
       await asUser.mutation(api.sync.syncMessages, {
@@ -422,7 +425,7 @@ describe("sync", () => {
     });
 
     it("handles messages with email handles", async () => {
-      const t = convexTest(schema, modules);
+      const t = trackTest(convexTest(schema, modules));
       const { asUser, userId } = await setupAuthenticatedUser(t);
 
       await asUser.mutation(api.sync.syncMessages, {
@@ -476,7 +479,7 @@ describe("sync", () => {
   // ============================================================================
   describe("syncGmailMessages mutation", () => {
     it("throws for unknown user", async () => {
-      const t = convexTest(schema, modules);
+      const t = trackTest(convexTest(schema, modules));
 
       await expect(
         t.mutation(api.sync.syncGmailMessages, {
@@ -487,7 +490,7 @@ describe("sync", () => {
     });
 
     it("syncs Gmail email and creates conversation", async () => {
-      const t = convexTest(schema, modules);
+      const t = trackTest(convexTest(schema, modules));
 
       // Create user (no auth context for webhook mutations)
       const { userId, workosUserId } = await t.run(async (ctx) => {
@@ -530,7 +533,7 @@ describe("sync", () => {
     });
 
     it("creates contact from email sender", async () => {
-      const t = convexTest(schema, modules);
+      const t = trackTest(convexTest(schema, modules));
 
       const { userId, workosUserId } = await t.run(async (ctx) => {
         const userData = createTestUserData();
@@ -579,7 +582,7 @@ describe("sync", () => {
     });
 
     it("skips newsletter emails", async () => {
-      const t = convexTest(schema, modules);
+      const t = trackTest(convexTest(schema, modules));
 
       const { workosUserId } = await t.run(async (ctx) => {
         const userData = createTestUserData();
@@ -608,7 +611,7 @@ describe("sync", () => {
     });
 
     it("deduplicates Gmail messages by id", async () => {
-      const t = convexTest(schema, modules);
+      const t = trackTest(convexTest(schema, modules));
 
       const { userId, workosUserId } = await t.run(async (ctx) => {
         const userData = createTestUserData();
@@ -666,7 +669,7 @@ describe("sync", () => {
     });
 
     it("groups emails by thread and updates conversation", async () => {
-      const t = convexTest(schema, modules);
+      const t = trackTest(convexTest(schema, modules));
 
       const { userId, workosUserId } = await t.run(async (ctx) => {
         const userData = createTestUserData();
@@ -723,7 +726,7 @@ describe("sync", () => {
   // ============================================================================
   describe("contact resolution during sync", () => {
     it("resolves contact by normalized email across platforms", async () => {
-      const t = convexTest(schema, modules);
+      const t = trackTest(convexTest(schema, modules));
       const { asUser, userId } = await setupAuthenticatedUser(t);
 
       // Create contact with gmail handle
@@ -785,7 +788,7 @@ describe("sync", () => {
     });
 
     it("creates new contact when no handle match found", async () => {
-      const t = convexTest(schema, modules);
+      const t = trackTest(convexTest(schema, modules));
       const { asUser, userId } = await setupAuthenticatedUser(t);
 
       // Sync message from unknown sender
@@ -844,7 +847,7 @@ describe("sync", () => {
     });
 
     it("resolves phone variant collision - multiple formats map to same contact", async () => {
-      const t = convexTest(schema, modules);
+      const t = trackTest(convexTest(schema, modules));
       const { asUser, userId } = await setupAuthenticatedUser(t);
 
       // Create a contact with phone handle stored as +1 format
@@ -949,7 +952,7 @@ describe("sync", () => {
   // ============================================================================
   describe("getSyncCursor query", () => {
     it("returns null for unauthenticated user", async () => {
-      const t = convexTest(schema, modules);
+      const t = trackTest(convexTest(schema, modules));
 
       const result = await t.query(api.sync.getSyncCursor, {
         platform: "imessage",
@@ -959,7 +962,7 @@ describe("sync", () => {
     });
 
     it("returns default cursor when no integration exists", async () => {
-      const t = convexTest(schema, modules);
+      const t = trackTest(convexTest(schema, modules));
       const { asUser } = await setupAuthenticatedUser(t);
 
       const result = await asUser.query(api.sync.getSyncCursor, {
@@ -973,7 +976,7 @@ describe("sync", () => {
     });
 
     it("returns cursor from existing integration", async () => {
-      const t = convexTest(schema, modules);
+      const t = trackTest(convexTest(schema, modules));
       const { asUser, userId } = await setupAuthenticatedUser(t);
 
       const lastSyncAt = Date.now();
@@ -1006,7 +1009,7 @@ describe("sync", () => {
 
   describe("updateSyncCursor mutation", () => {
     it("throws for unauthenticated user", async () => {
-      const t = convexTest(schema, modules);
+      const t = trackTest(convexTest(schema, modules));
 
       await expect(
         t.mutation(api.sync.updateSyncCursor, {
@@ -1017,7 +1020,7 @@ describe("sync", () => {
     });
 
     it("creates integration and sets cursor", async () => {
-      const t = convexTest(schema, modules);
+      const t = trackTest(convexTest(schema, modules));
       const { asUser, userId } = await setupAuthenticatedUser(t);
 
       await asUser.mutation(api.sync.updateSyncCursor, {
@@ -1039,7 +1042,7 @@ describe("sync", () => {
     });
 
     it("updates existing integration cursor", async () => {
-      const t = convexTest(schema, modules);
+      const t = trackTest(convexTest(schema, modules));
       const { asUser, userId } = await setupAuthenticatedUser(t);
 
       // Create existing integration and sync cursor
@@ -1078,7 +1081,7 @@ describe("sync", () => {
 
   describe("resetSyncState mutation", () => {
     it("resets sync cursor state", async () => {
-      const t = convexTest(schema, modules);
+      const t = trackTest(convexTest(schema, modules));
       const { asUser, userId } = await setupAuthenticatedUser(t);
 
       // Create integration and sync cursor with existing state

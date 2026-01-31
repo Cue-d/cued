@@ -32,12 +32,15 @@ export async function withRetry<T>(
       return await fn();
     } catch (error) {
       lastError = error instanceof Error ? error : new Error(String(error));
+      console.warn(`[${logPrefix}] Attempt ${attempt}/${totalAttempts} failed:`, lastError.message);
       if (attempt < totalAttempts) {
-        await delay(1000 * attempt);
+        const delayMs = 1000 * attempt;
+        console.log(`[${logPrefix}] Retrying in ${delayMs}ms...`);
+        await delay(delayMs);
       }
     }
   }
 
-  console.error(`${logPrefix} failed after retries:`, lastError?.message);
+  console.error(`[${logPrefix}] All ${totalAttempts} attempts failed. Returning default value.`);
   return defaultValue;
 }

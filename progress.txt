@@ -1,5 +1,37 @@
 # Ralph Progress Log
 
+## 2026-01-30
+
+### Issue #166: PRD: Move Nango webhook to Convex HTTP endpoint
+- **Status:** Completed
+- **Files changed:**
+  - packages/convex/convex/http.ts (new) - HTTP router with `/nango/webhook` POST endpoint
+  - packages/convex/convex/nango.ts (new) - Node.js actions for Nango SDK operations (`"use node"`)
+  - packages/convex/convex/schema.ts - Added `accountEmail` field and `by_nango_connection` index to integrations
+  - packages/convex/convex/integrations.ts - Updated `connectNango` for multi-account Gmail, `disconnectNango` uses new index
+  - packages/convex/package.json - Added `@nangohq/node` dependency
+  - packages/convex/convex/__tests__/integrations.test.ts (new) - Tests for multi-account support
+- **Files deleted:**
+  - apps/web/app/api/nango/webhook/route.ts
+  - apps/web/app/api/nango/pull-gmail/route.ts
+  - apps/web/app/api/nango/pull-google-contacts/route.ts
+  - apps/web/__tests__/api/nango-webhook.test.ts
+  - apps/web/__tests__/api/pull-gmail.test.ts
+- **Key decisions:**
+  - Webhook verifies signature via `nango.verifyIncomingWebhookRequest()` before processing
+  - Gmail allows multiple accounts per user (different `nangoConnectionId`), other platforms single-account
+  - `by_nango_connection` index enables efficient O(1) lookup by connectionId
+  - Retry logic: exponential backoff (2m, 4m, 8m), max 3 attempts, uses `ctx.scheduler.runAfter()`
+  - Auth handlers route to existing `connectNango`/`disconnectNango` mutations
+  - Sync handlers call internal actions for Nango SDK operations (requires Node.js runtime)
+- **Webhook URL change:**
+  - Old: `https://prm.app/api/nango/webhook`
+  - New: `https://<deployment>.convex.site/nango/webhook`
+- **Notes:**
+  - Must update Nango Dashboard webhook URL after deployment
+  - Add `NANGO_SECRET_KEY` to Convex dashboard (already exists in Next.js env, needs to be added to Convex)
+  - Session and disconnect routes remain in Next.js (used by UI)
+
 ## 2026-01-29
 
 ### Issue #159: PRD: Implement Vercel AI Gateway with Kimi K2.5 Thinking

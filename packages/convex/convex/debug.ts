@@ -527,3 +527,98 @@ export const resetPlatformData = action({
     };
   },
 });
+
+// ============================================================================
+// Platform Sync Debug Query
+// ============================================================================
+
+/**
+ * Get sync status for a specific platform. Useful for debugging sync issues.
+ * Shows: conversations, recent messages, cursors, and what might be filtered.
+ */
+export const getPlatformSyncStatus = query({
+  args: {
+    platform: platformValidator,
+  },
+  handler: async (ctx, args) => {
+    const user = await getAuthenticatedUser(ctx);
+    if (!user) return null;
+
+    // Get conversations for this platform
+    const conversations = await ctx.db
+      .query("conversations")
+      .withIndex("by_user_platform", (q) =>
+        q.eq("userId", user._id).eq("platform", args.platform)
+      )
+      .collect();
+
+    // Get sync cursors
+    const cursors = await ctx.db
+      .query("syncCursors")
+      .withIndex("by_user_platform", (q) =>
+        q.eq("userId", user._id).eq("platform", args.platform)
+      )
+      .collect();
+
+    // Get recent platform messages (take 50 total, filter to platform)
+    // Note: No by_user_platform index on messages, so we filter post-query
+    const recentMessages = await ctx.db
+      .query("messages")
+      .withIndex("by_user", (q) => q.eq("userId", user._id))
+      .order("desc")
+      .take(50);
+    const platformMessages = recentMessages.filter((m) => m.platform === args.platform);
+
+    // Get pending actions for this platform
+    const pendingActions = await ctx.db
+      .query("actions")
+      .withIndex("by_user_status", (q) => q.eq("userId", user._id).eq("status", "pending"))
+      .collect();
+    const platformActions = pendingActions.filter((a) => a.platform === args.platform);
+
+    // Get integration status
+    const integration = await ctx.db
+      .query("integrations")
+      .withIndex("by_user_platform", (q) =>
+        q.eq("userId", user._id).eq("platform", args.platform)
+      )
+      .unique();
+
+    return {
+      platform: args.platform,
+      integration: integration
+        ? {
+            isConnected: integration.isConnected,
+            nangoConnectionId: integration.nangoConnectionId,
+            lastError: integration.lastError,
+          }
+        : null,
+      cursors: cursors.map((c) => ({
+        workspaceId: c.workspaceId,
+        lastSyncAt: c.lastSyncAt ? new Date(c.lastSyncAt).toISOString() : null,
+        syncMode: c.syncMode,
+        totalMessagesSynced: c.totalMessagesSynced,
+        cursorData: c.cursorData,
+      })),
+      stats: {
+        totalConversations: conversations.length,
+        totalRecentMessages: platformMessages.length,
+        pendingActions: platformActions.length,
+      },
+      recentConversations: conversations.slice(0, 10).map((c) => ({
+        id: c._id,
+        displayName: c.displayName,
+        lastMessageAt: c.lastMessageAt ? new Date(c.lastMessageAt).toISOString() : null,
+        lastMessageText: c.lastMessageText?.slice(0, 50),
+        workspaceId: c.workspaceId,
+      })),
+      recentMessages: platformMessages.slice(0, 10).map((m) => ({
+        id: m._id,
+        content: m.content?.slice(0, 100),
+        sentAt: new Date(m.sentAt).toISOString(),
+        isFromMe: m.isFromMe,
+        platformMessageId: m.platformMessageId,
+      })),
+    };
+  },
+});

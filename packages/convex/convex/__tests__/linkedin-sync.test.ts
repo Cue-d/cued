@@ -10,7 +10,10 @@ import { describe, expect, it } from "vitest";
 import schema from "../schema";
 import { modules } from "./test.setup";
 import { createTestUserData, createTestIdentity } from "./helpers";
+import { useSchedulerCleanup } from "./schedulerCleanup";
 import { api } from "../_generated/api";
+
+const { trackTest } = useSchedulerCleanup();
 
 /**
  * Helper to set up an authenticated test environment.
@@ -118,7 +121,7 @@ describe("LinkedIn Sync", () => {
   // ============================================================================
   describe("syncLinkedInConversations", () => {
     it("throws for unauthenticated user", async () => {
-      const t = convexTest(schema, modules);
+      const t = trackTest(convexTest(schema, modules));
 
       await expect(
         t.mutation(api.sync.syncLinkedInConversations, {
@@ -128,7 +131,7 @@ describe("LinkedIn Sync", () => {
     });
 
     it("creates new conversation and links participant", async () => {
-      const t = convexTest(schema, modules);
+      const t = trackTest(convexTest(schema, modules));
       const { userId, asUser } = await setupAuthenticatedUser(t);
 
       const participant = createParticipant({
@@ -180,7 +183,7 @@ describe("LinkedIn Sync", () => {
     });
 
     it("updates existing conversation", async () => {
-      const t = convexTest(schema, modules);
+      const t = trackTest(convexTest(schema, modules));
       const { userId, asUser } = await setupAuthenticatedUser(t);
 
       // Create existing conversation
@@ -229,7 +232,7 @@ describe("LinkedIn Sync", () => {
     });
 
     it("creates group conversation for groupChat=true", async () => {
-      const t = convexTest(schema, modules);
+      const t = trackTest(convexTest(schema, modules));
       const { userId, asUser } = await setupAuthenticatedUser(t);
 
       const result = await asUser.mutation(api.sync.syncLinkedInConversations, {
@@ -266,7 +269,7 @@ describe("LinkedIn Sync", () => {
     });
 
     it("deduplicates contacts by profile URL", async () => {
-      const t = convexTest(schema, modules);
+      const t = trackTest(convexTest(schema, modules));
       const { userId, asUser } = await setupAuthenticatedUser(t);
 
       const profileUrl = "https://www.linkedin.com/in/alice-smith";
@@ -302,7 +305,7 @@ describe("LinkedIn Sync", () => {
   // ============================================================================
   describe("syncLinkedInMessages", () => {
     it("throws for unauthenticated user", async () => {
-      const t = convexTest(schema, modules);
+      const t = trackTest(convexTest(schema, modules));
 
       await expect(
         t.mutation(api.sync.syncLinkedInMessages, {
@@ -312,7 +315,7 @@ describe("LinkedIn Sync", () => {
     });
 
     it("creates message and sender contact", async () => {
-      const t = convexTest(schema, modules);
+      const t = trackTest(convexTest(schema, modules));
       const { userId, asUser } = await setupAuthenticatedUser(t);
 
       const conversationURN = "urn:li:fs_conversation:123";
@@ -358,7 +361,7 @@ describe("LinkedIn Sync", () => {
     });
 
     it("detects isFromMe using linkedInUserURN", async () => {
-      const t = convexTest(schema, modules);
+      const t = trackTest(convexTest(schema, modules));
       const { userId, asUser } = await setupAuthenticatedUser(t);
 
       const userURN = "urn:li:fs_miniProfile:myprofile";
@@ -416,7 +419,7 @@ describe("LinkedIn Sync", () => {
     });
 
     it("detects isFromMe with different URN prefixes (fsd_profile vs fs_miniProfile)", async () => {
-      const t = convexTest(schema, modules);
+      const t = trackTest(convexTest(schema, modules));
       const { userId, asUser } = await setupAuthenticatedUser(t);
 
       // User URN stored as fsd_profile (from /me endpoint)
@@ -476,7 +479,7 @@ describe("LinkedIn Sync", () => {
     });
 
     it("deduplicates messages by entityURN", async () => {
-      const t = convexTest(schema, modules);
+      const t = trackTest(convexTest(schema, modules));
       const { userId, asUser } = await setupAuthenticatedUser(t);
 
       const conversationURN = "urn:li:fs_conversation:123";
@@ -518,7 +521,7 @@ describe("LinkedIn Sync", () => {
     });
 
     it("skips RECALLED and SYSTEM messages", async () => {
-      const t = convexTest(schema, modules);
+      const t = trackTest(convexTest(schema, modules));
       const { asUser } = await setupAuthenticatedUser(t);
 
       const conversationURN = "urn:li:fs_conversation:123";
@@ -548,7 +551,7 @@ describe("LinkedIn Sync", () => {
     });
 
     it("creates conversation if it doesn't exist", async () => {
-      const t = convexTest(schema, modules);
+      const t = trackTest(convexTest(schema, modules));
       const { userId, asUser } = await setupAuthenticatedUser(t);
 
       const conversationURN = "urn:li:fs_conversation:new";
@@ -579,7 +582,7 @@ describe("LinkedIn Sync", () => {
     });
 
     it("updates conversation lastMessage", async () => {
-      const t = convexTest(schema, modules);
+      const t = trackTest(convexTest(schema, modules));
       const { userId, asUser } = await setupAuthenticatedUser(t);
 
       const conversationURN = "urn:li:fs_conversation:123";
@@ -627,7 +630,7 @@ describe("LinkedIn Sync", () => {
   // ============================================================================
   describe("LinkedIn URL normalization", () => {
     it("normalizes profile URLs with query params", async () => {
-      const t = convexTest(schema, modules);
+      const t = trackTest(convexTest(schema, modules));
       const { userId, asUser } = await setupAuthenticatedUser(t);
 
       const testURN = "urn:li:fs_miniProfile:test123";
@@ -664,7 +667,7 @@ describe("LinkedIn Sync", () => {
     });
 
     it("normalizes different LinkedIn URL formats", async () => {
-      const t = convexTest(schema, modules);
+      const t = trackTest(convexTest(schema, modules));
       const { userId, asUser } = await setupAuthenticatedUser(t);
 
       // Sync with different URL formats pointing to same profile

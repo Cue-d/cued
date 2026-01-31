@@ -65,6 +65,12 @@ function isAuthPage(url: string): boolean {
   return url.includes('/login') || url.includes('/authwall') || url.includes('/checkpoint')
 }
 
+function isLinkedInCookieDomain(domain: string | undefined): boolean {
+  if (!domain) return false
+  const normalized = domain.startsWith('.') ? domain.slice(1) : domain
+  return normalized === 'linkedin.com' || normalized.endsWith('.linkedin.com')
+}
+
 /** Check if cookies contain required auth tokens (li_at and JSESSIONID) */
 function hasRequiredAuthCookies(cookies: Cookie[]): boolean {
   const hasLiAt = cookies.some((c) => c.name === 'li_at' && c.value)
@@ -156,16 +162,16 @@ async function extractCookiesFromSession(
   // - JSESSIONID may be on www.linkedin.com or .www.linkedin.com
   // Electron's domain filter with '.linkedin.com' may not match www.linkedin.com cookies
   const allCookies = await linkedInSession.cookies.get({})
-  const sessionCookies = allCookies.filter(
+  const linkedInCookies = allCookies.filter(
     (c) => c.domain?.includes('linkedin.com') ?? false
   )
 
   console.log(
-    `[LinkedIn Login] All cookies: ${allCookies.length}, LinkedIn cookies: ${sessionCookies.length}`
+    `[LinkedIn Login] All cookies: ${allCookies.length}, LinkedIn cookies: ${linkedInCookies.length}`
   )
 
   // Log the auth-related cookies for debugging
-  const authCookies = sessionCookies.filter(
+  const authCookies = linkedInCookies.filter(
     (c) => c.name === 'li_at' || c.name === 'JSESSIONID'
   )
   if (authCookies.length > 0) {
@@ -175,7 +181,7 @@ async function extractCookiesFromSession(
     )
   }
 
-  const cookies: Cookie[] = sessionCookies.map((c) => ({
+  const cookies: Cookie[] = linkedInCookies.map((c) => ({
     name: c.name,
     value: c.value,
     domain: c.domain ?? '.linkedin.com',

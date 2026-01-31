@@ -1,7 +1,7 @@
-import { generateObject } from "ai";
+import { generateText, Output } from "ai";
 import { z } from "zod";
 import { truncate } from "@cued/shared";
-import { gateway, MODEL } from "../gateway";
+import { gateway, OBJECT_MODEL } from "../gateway";
 import { withRetry } from "../utils";
 
 /** Action types that can be suggested by the LLM */
@@ -18,8 +18,6 @@ export const ActionSuggestionSchema = z.object({
     .describe("Action type: respond (reply needed), follow_up (reminder), send_message (outreach). Null if no action needed."),
   priority: z
     .number()
-    .min(0)
-    .max(100)
     .nullable()
     .describe("Priority score 0-100 (higher = more urgent). Null if no action needed."),
   reason: z
@@ -283,14 +281,34 @@ export async function generateAction(
 
   const contextPrompt = buildContextPrompt(input);
 
-  const { object } = await generateObject({
-    model: gateway(MODEL),
-    schema: ActionSuggestionSchema,
+  // Use generateText with Output.object for structured output
+  const result = await generateText({
+    model: gateway(OBJECT_MODEL),
     system: SYSTEM_PROMPT,
     prompt: `Analyze this conversation and decide if an action is needed:\n\n${contextPrompt}`,
+    experimental_output: Output.object({
+      schema: ActionSuggestionSchema,
+    }),
   });
 
-  return object;
+  // Log for debugging schema validation issues
+  if (!result.experimental_output) {
+    console.error("[generateAction] Schema validation failed:", {
+      text: truncate(result.text, 1000),
+      finishReason: result.finishReason,
+      contact: input.contact.displayName,
+    });
+    throw new Error(`No object generated: response did not match schema.`);
+  }
+
+  const output = result.experimental_output;
+
+  // Clamp priority to valid range (LLM might return out-of-range values)
+  if (output.priority !== null && output.priority !== undefined) {
+    output.priority = Math.max(0, Math.min(100, output.priority));
+  }
+
+  return output;
 }
 
 /**

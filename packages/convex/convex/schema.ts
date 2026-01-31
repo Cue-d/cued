@@ -101,10 +101,10 @@ const schema = defineSchema({
     platform: platformValidator,
     nangoConnectionId: v.optional(v.string()),
     connectedAt: v.optional(v.number()),
-    // Slack-specific: team ID for multi-workspace support
-    slackTeamId: v.optional(v.string()),
     // Gmail-specific: account email for multi-account support
     accountEmail: v.optional(v.string()),
+    // Slack-specific: team ID for multi-workspace support
+    slackTeamId: v.optional(v.string()),
     // LinkedIn-specific: user's URN for isFromMe detection
     linkedInUserURN: v.optional(v.string()),
     // Connection status (not sync status - sync state lives in syncCursors)
@@ -114,6 +114,7 @@ const schema = defineSchema({
     .index("by_user", ["userId"])
     .index("by_user_platform", ["userId", "platform"])
     .index("by_user_platform_team", ["userId", "platform", "slackTeamId"])
+    .index("by_nango_connection", ["nangoConnectionId"])
     .index("by_user_platform_account", ["userId", "platform", "accountEmail"]),
 
   contacts: defineTable({

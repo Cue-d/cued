@@ -18,6 +18,7 @@ electron-app/.webpack/
 apps/electron/out/
 apps/electron/dist/
 apps/electron/.electron-vite/
+apps/electron/electron.vite.config.*.mjs
 
 # ============================================================
 # Application Data & Caches

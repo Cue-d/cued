@@ -123,14 +123,15 @@ export const getIntegrationStatus = query({
       return null;
     }
 
-    const integration = await ctx.db
+    // Use .collect() for multi-account platforms (Gmail can have multiple accounts)
+    const integrations = await ctx.db
       .query("integrations")
       .withIndex("by_user_platform", (q) =>
         q.eq("userId", user._id).eq("platform", args.platform)
       )
-      .unique();
+      .collect();
 
-    if (!integration) {
+    if (integrations.length === 0) {
       return { isConnected: false };
     }
 
@@ -144,10 +145,17 @@ export const getIntegrationStatus = query({
 
     const stats = aggregateCursorStats(cursors);
 
+    // Aggregate across all integrations: connected if any is connected
+    const connectedIntegrations = integrations.filter((i) => i.isConnected);
+    const isConnected = connectedIntegrations.length > 0;
+    // Use first error found (if any)
+    const lastError = integrations.find((i) => i.lastError)?.lastError ?? null;
+
     return {
-      isConnected: integration.isConnected,
+      isConnected,
+      connectedAccounts: connectedIntegrations.length,
       lastSyncAt: stats.lastSyncAt,
-      lastError: integration.lastError ?? null,
+      lastError,
       totalMessagesSynced: stats.totalMessagesSynced,
     };
   },
@@ -156,11 +164,16 @@ export const getIntegrationStatus = query({
 /**
  * Get integration by WorkOS user ID and platform.
  * Task 5.8: Used by API routes to get Nango connection ID for message sending.
+ *
+ * For multi-account platforms (Gmail):
+ * - If accountEmail is provided, returns that specific account
+ * - Otherwise, returns the first connected account
  */
 export const getIntegration = query({
   args: {
     workosUserId: v.string(),
     platform: platformValidator,
+    accountEmail: v.optional(v.string()), // For Gmail multi-account: identifies which account
   },
   handler: async (ctx, args) => {
     const user = await findUserByWorkosId(ctx, args.workosUserId);
@@ -168,15 +181,28 @@ export const getIntegration = query({
       return null;
     }
 
-    const integration = await ctx.db
+    // For multi-account platforms, collect all and filter
+    const integrations = await ctx.db
       .query("integrations")
       .withIndex("by_user_platform", (q) =>
         q.eq("userId", user._id).eq("platform", args.platform)
       )
-      .unique();
+      .collect();
 
-    if (!integration) {
+    if (integrations.length === 0) {
       return null;
+    }
+
+    // If accountEmail provided (for Gmail), find that specific account only
+    let integration;
+    if (args.accountEmail) {
+      integration = integrations.find((i) => i.accountEmail === args.accountEmail);
+      if (!integration) {
+        return null;
+      }
+    } else {
+      // Fall back to first connected integration, or just first if none connected
+      integration = integrations.find((i) => i.isConnected) ?? integrations[0];
     }
 
     return {
@@ -184,6 +210,7 @@ export const getIntegration = query({
       platform: integration.platform,
       nangoConnectionId: integration.nangoConnectionId ?? null,
       isConnected: integration.isConnected,
+      accountEmail: integration.accountEmail ?? null,
     };
   },
 });
@@ -191,14 +218,17 @@ export const getIntegration = query({
 /**
  * Connect a Nango integration. Called from webhook when user completes OAuth.
  * Uses WorkOS ID to find or create user.
- * For Gmail, creates separate integration records per account (by email).
+ *
+ * Multi-account support:
+ * - For Gmail, allows multiple integrations per platform (one per Google account)
+ * - Looks up by nangoConnectionId first, then falls back to (userId, platform) for single-account platforms
  */
 export const connectNango = mutation({
   args: {
     workosUserId: v.string(),
     nangoIntegrationId: v.string(), // e.g., "google", "slack"
     nangoConnectionId: v.string(),
-    email: v.optional(v.string()), // From endUser.endUserEmail
+    email: v.optional(v.string()), // From endUser.endUserEmail (account email for Gmail)
   },
   handler: async (ctx, args) => {
     const platform = nangoToPlatform(args.nangoIntegrationId);
@@ -220,57 +250,70 @@ export const connectNango = mutation({
       }
     }
 
-    // For Gmail, use per-account lookup (similar to Slack's per-team pattern)
+    // First, check if this exact connection already exists (re-connection case)
+    const existingByConnection = await ctx.db
+      .query("integrations")
+      .withIndex("by_nango_connection", (q) =>
+        q.eq("nangoConnectionId", args.nangoConnectionId)
+      )
+      .unique();
+
+    if (existingByConnection) {
+      // Verify user owns this integration (security check)
+      if (existingByConnection.userId !== user._id) {
+        throw new Error("Integration belongs to another user");
+      }
+      // Update existing integration (same connection reconnecting)
+      await ctx.db.patch(existingByConnection._id, {
+        connectedAt: Date.now(),
+        isConnected: true,
+        lastError: undefined,
+        accountEmail: args.email, // Update account email if provided
+      });
+      return { integrationId: existingByConnection._id, updated: true };
+    }
+
+    // For Gmail: check if an integration already exists for this account email
+    // This handles the case where Nango issues a new connectionId for the same Google account
     if (platform === "gmail" && args.email) {
-      const existing = await ctx.db
+      const existingByAccount = await ctx.db
         .query("integrations")
         .withIndex("by_user_platform_account", (q) =>
           q.eq("userId", user._id).eq("platform", "gmail").eq("accountEmail", args.email)
         )
         .unique();
 
-      if (existing) {
-        await ctx.db.patch(existing._id, {
+      if (existingByAccount) {
+        // Update existing Gmail integration for this account (new connectionId for same account)
+        await ctx.db.patch(existingByAccount._id, {
           nangoConnectionId: args.nangoConnectionId,
           connectedAt: Date.now(),
           isConnected: true,
           lastError: undefined,
         });
-        console.log(`[Gmail] Updated integration for account ${args.email}`);
-        return { integrationId: existing._id, updated: true };
+        return { integrationId: existingByAccount._id, updated: true };
       }
-
-      // Create new integration for this Gmail account
-      const integrationId = await ctx.db.insert("integrations", {
-        userId: user._id,
-        platform: "gmail",
-        nangoConnectionId: args.nangoConnectionId,
-        accountEmail: args.email,
-        connectedAt: Date.now(),
-        isConnected: true,
-      });
-
-      console.log(`[Gmail] Created integration for account ${args.email}`);
-      return { integrationId, updated: false };
     }
 
-    // For other platforms, use existing by_user_platform lookup
-    const existing = await ctx.db
-      .query("integrations")
-      .withIndex("by_user_platform", (q) =>
-        q.eq("userId", user._id).eq("platform", platform)
-      )
-      .unique();
+    // For single-account platforms, check if one already exists
+    if (platform !== "gmail") {
+      const existingByPlatform = await ctx.db
+        .query("integrations")
+        .withIndex("by_user_platform", (q) =>
+          q.eq("userId", user._id).eq("platform", platform)
+        )
+        .unique();
 
-    if (existing) {
-      // Update existing integration
-      await ctx.db.patch(existing._id, {
-        nangoConnectionId: args.nangoConnectionId,
-        connectedAt: Date.now(),
-        isConnected: true,
-        lastError: undefined,
-      });
-      return { integrationId: existing._id, updated: true };
+      if (existingByPlatform) {
+        // Update existing single-account integration
+        await ctx.db.patch(existingByPlatform._id, {
+          nangoConnectionId: args.nangoConnectionId,
+          connectedAt: Date.now(),
+          isConnected: true,
+          lastError: undefined,
+        });
+        return { integrationId: existingByPlatform._id, updated: true };
+      }
     }
 
     // Create new integration
@@ -278,6 +321,7 @@ export const connectNango = mutation({
       userId: user._id,
       platform,
       nangoConnectionId: args.nangoConnectionId,
+      accountEmail: platform === "gmail" ? args.email : undefined,
       connectedAt: Date.now(),
       isConnected: true,
     });
@@ -288,6 +332,7 @@ export const connectNango = mutation({
 
 /**
  * Disconnect a Nango integration. Called from webhook when connection is deleted.
+ * Uses by_nango_connection index for efficient lookup.
  */
 export const disconnectNango = mutation({
   args: {
@@ -295,23 +340,22 @@ export const disconnectNango = mutation({
     nangoConnectionId: v.string(),
   },
   handler: async (ctx, args) => {
-    const user = await findUserByWorkosId(ctx, args.workosUserId);
-    if (!user) {
-      return { success: false, error: "User not found" };
-    }
-
-    // Find integration by nangoConnectionId
-    const integrations = await ctx.db
+    // Find integration by nangoConnectionId directly (efficient index lookup)
+    const integration = await ctx.db
       .query("integrations")
-      .withIndex("by_user", (q) => q.eq("userId", user._id))
-      .collect();
-
-    const integration = integrations.find(
-      (i) => i.nangoConnectionId === args.nangoConnectionId
-    );
+      .withIndex("by_nango_connection", (q) =>
+        q.eq("nangoConnectionId", args.nangoConnectionId)
+      )
+      .unique();
 
     if (!integration) {
       return { success: false, error: "Integration not found" };
+    }
+
+    // Verify user owns this integration (security check)
+    const user = await findUserByWorkosId(ctx, args.workosUserId);
+    if (!user || integration.userId !== user._id) {
+      return { success: false, error: "User mismatch" };
     }
 
     // Update to disconnected state
