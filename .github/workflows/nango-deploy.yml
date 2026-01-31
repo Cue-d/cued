@@ -1,0 +1,68 @@
+name: Deploy Nango Integrations
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "nango-integrations/**"
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: "Environment to deploy to"
+        required: true
+        default: "dev"
+        type: choice
+        options:
+          - dev
+          - prod
+      allow_destructive:
+        description: "Allow destructive changes (removing syncs/actions)"
+        required: false
+        default: false
+        type: boolean
+
+concurrency:
+  group: nango-deploy-${{ github.event.inputs.environment || 'dev' }}
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Deploy to ${{ github.event.inputs.environment || 'dev' }}
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: nango-integrations
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Compile integrations
+        run: npm run compile
+
+      - name: Set environment
+        id: env
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "stage=${{ github.event.inputs.environment }}" >> $GITHUB_OUTPUT
+          else
+            echo "stage=dev" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Deploy to Nango
+        env:
+          NANGO_SECRET_KEY: ${{ steps.env.outputs.stage == 'prod' && secrets.NANGO_SECRET_KEY_PROD || secrets.NANGO_SECRET_KEY_DEV }}
+        run: |
+          DEPLOY_FLAGS=""
+          if [ "${{ github.event.inputs.allow_destructive }}" = "true" ]; then
+            DEPLOY_FLAGS="--allow-destructive"
+          fi
+          npx nango deploy ${{ steps.env.outputs.stage }} $DEPLOY_FLAGS --auto-confirm
