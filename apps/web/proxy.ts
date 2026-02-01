@@ -8,6 +8,7 @@ export default authkitMiddleware({
       "/",
       "/sign-in",
       "/sign-up",
+      "/manifesto",
       "/callback",
       // API routes that handle their own auth or are called by external services
       "/api/chat",
