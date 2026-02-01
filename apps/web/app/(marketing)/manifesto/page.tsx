@@ -66,7 +66,7 @@ export default function ManifestoPage() {
         <div className="mt-36 flex justify-center">
           <Link
             href="/sign-up"
-            className="group inline-flex w-full h-22 items-center justify-between rounded-full bg-primary px-8 text-4xl tracking-tighter font-medium text-primary-foreground transition-colors hover:bg-primary/90"
+            className="group inline-flex w-full h-22 items-center justify-between rounded-full bg-primary px-10 text-4xl tracking-tighter font-medium text-primary-foreground transition-colors hover:bg-primary/90"
             onMouseEnter={() => setIsHovered(true)}
             onMouseLeave={() => setIsHovered(false)}
           >

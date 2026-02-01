@@ -1,3 +1,4 @@
+import { useEffect, useRef, useState } from "react";
 import { AnimatePresence, motion } from "motion/react";
 import { useInViewLoop } from "../../hooks/use-in-view-loop";
 
@@ -22,7 +23,31 @@ export function StaggeringText({
     1500,
     controlledHover === undefined
   );
-  const hover = controlledHover !== undefined ? controlledHover : internalHover;
+  const targetHover = controlledHover !== undefined ? controlledHover : internalHover;
+
+  // Track animation state to prevent interruption
+  const [displayedHover, setDisplayedHover] = useState(targetHover);
+  const isAnimatingRef = useRef(false);
+  const pendingHoverRef = useRef<boolean | null>(null);
+
+  // When target hover changes, either apply immediately or queue for later
+  useEffect(() => {
+    if (targetHover === displayedHover) {
+      pendingHoverRef.current = null;
+      return;
+    }
+
+    if (isAnimatingRef.current) {
+      // Animation in progress - queue the new state
+      pendingHoverRef.current = targetHover;
+    } else {
+      // No animation - apply immediately
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setDisplayedHover(targetHover);
+    }
+  }, [targetHover, displayedHover]);
+
+  const hover = displayedHover;
   const chunks = children.split("");
 
   const target = {
@@ -77,12 +102,19 @@ export function StaggeringText({
                 }}
                 onAnimationStart={() => {
                   if (index === 0) {
+                    isAnimatingRef.current = true;
                     onAnimationStart?.();
                   }
                 }}
                 onAnimationComplete={() => {
                   if (index === chunks.length - 1) {
+                    isAnimatingRef.current = false;
                     onAnimationComplete?.();
+                    // Apply pending hover state if any
+                    if (pendingHoverRef.current !== null) {
+                      setDisplayedHover(pendingHoverRef.current);
+                      pendingHoverRef.current = null;
+                    }
                   }
                 }}
                 transition={{
