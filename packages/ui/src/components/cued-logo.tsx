@@ -39,13 +39,10 @@ export function CuedLogo({
 }: CuedLogoAnimatedProps) {
   const svgRef = useRef<SVGSVGElement>(null);
   const [dotOffset, setDotOffset] = useState({ x: 0, y: 0 });
-  // Track velocity for fluid warping effect
-  const [velocity, setVelocity] = useState({ x: 0, y: 0 });
-  const lastPosRef = useRef({ x: 0, y: 0 });
   const filterId = useId();
 
-  const handleMouseMove = useCallback(
-    (e: MouseEvent | React.MouseEvent) => {
+  const handlePointerMove = useCallback(
+    (clientX: number, clientY: number) => {
       if (!interactive || !svgRef.current) return;
 
       const rect = svgRef.current.getBoundingClientRect();
@@ -53,33 +50,42 @@ export function CuedLogo({
       const centerY = rect.top + rect.height / 2;
 
       // Calculate distance from center (normalized to -1 to 1)
-      const dx = (e.clientX - centerX) / (rect.width / 2);
-      const dy = (e.clientY - centerY) / (rect.height / 2);
+      const dx = (clientX - centerX) / (rect.width / 2);
+      const dy = (clientY - centerY) / (rect.height / 2);
 
-      // Limit movement to a small radius (max 2 units in viewBox space)
-      const maxOffset = 2;
+      // Limit movement to a small radius (max 1.5 units for subtler effect)
+      const maxOffset = 1.5;
       const distance = Math.sqrt(dx * dx + dy * dy);
       const scale = distance > 1 ? 1 / distance : 1;
 
       const newX = dx * scale * maxOffset;
       const newY = dy * scale * maxOffset;
 
-      // Calculate velocity for fluid warping
-      const vx = newX - lastPosRef.current.x;
-      const vy = newY - lastPosRef.current.y;
-      lastPosRef.current = { x: newX, y: newY };
-
       setDotOffset({ x: newX, y: newY });
-      setVelocity({ x: vx, y: vy });
     },
     [interactive],
   );
 
-  const handleMouseLeave = useCallback(() => {
+  const handleMouseMove = useCallback(
+    (e: MouseEvent | React.MouseEvent) => {
+      handlePointerMove(e.clientX, e.clientY);
+    },
+    [handlePointerMove],
+  );
+
+  const handleTouchMove = useCallback(
+    (e: TouchEvent) => {
+      if (e.touches.length > 0) {
+        const touch = e.touches[0];
+        handlePointerMove(touch.clientX, touch.clientY);
+      }
+    },
+    [handlePointerMove],
+  );
+
+  const handlePointerLeave = useCallback(() => {
     if (!interactive) return;
     setDotOffset({ x: 0, y: 0 });
-    setVelocity({ x: 0, y: 0 });
-    lastPosRef.current = { x: 0, y: 0 };
   }, [interactive]);
 
   // Attach listeners to tracking element if using external ref
@@ -88,13 +94,19 @@ export function CuedLogo({
 
     const el = trackingRef.current;
     el.addEventListener("mousemove", handleMouseMove);
-    el.addEventListener("mouseleave", handleMouseLeave);
+    el.addEventListener("mouseleave", handlePointerLeave);
+    el.addEventListener("touchmove", handleTouchMove, { passive: true });
+    el.addEventListener("touchend", handlePointerLeave);
+    el.addEventListener("touchcancel", handlePointerLeave);
 
     return () => {
       el.removeEventListener("mousemove", handleMouseMove);
-      el.removeEventListener("mouseleave", handleMouseLeave);
+      el.removeEventListener("mouseleave", handlePointerLeave);
+      el.removeEventListener("touchmove", handleTouchMove);
+      el.removeEventListener("touchend", handlePointerLeave);
+      el.removeEventListener("touchcancel", handlePointerLeave);
     };
-  }, [trackingRef, interactive, handleMouseMove, handleMouseLeave]);
+  }, [trackingRef, interactive, handleMouseMove, handleTouchMove, handlePointerLeave]);
 
   const rollVariants: Variants = {
     idle: { rotate: 0 },
@@ -122,7 +134,15 @@ export function CuedLogo({
       initial="idle"
       animate={animate ? "rolling" : "idle"}
       onMouseMove={trackingRef ? undefined : handleMouseMove}
-      onMouseLeave={trackingRef ? undefined : handleMouseLeave}
+      onMouseLeave={trackingRef ? undefined : handlePointerLeave}
+      onTouchMove={trackingRef ? undefined : (e) => {
+        if (e.touches.length > 0) {
+          const touch = e.touches[0];
+          handlePointerMove(touch.clientX, touch.clientY);
+        }
+      }}
+      onTouchEnd={trackingRef ? undefined : handlePointerLeave}
+      onTouchCancel={trackingRef ? undefined : handlePointerLeave}
     >
       <defs>
         {/* Drop shadow (box shadow) */}
@@ -173,30 +193,21 @@ export function CuedLogo({
           filter={`url(#inner-shadow-${filterId})`}
         />
       </g>
-      {/* Center dot - elliptical with fluid warping */}
-      <motion.ellipse
+      {/* Center dot - simple circle with smooth position tracking */}
+      <motion.circle
         cx={16}
         cy={16}
+        r={3}
         fill="var(--background)"
         animate={{
           cx: 16 + dotOffset.x,
           cy: 16 + dotOffset.y,
-          // Base ellipse: slightly wider than tall (3.6 x 3.3)
-          // Warp based on velocity: stretch in movement direction
-          rx: 3 + Math.abs(velocity.x) * 1.2 - Math.abs(velocity.y) * 0.4,
-          ry: 2.8 + Math.abs(velocity.y) * 1.2 - Math.abs(velocity.x) * 0.4,
-          // Rotate ellipse toward movement direction for fluid feel
-          rotate: velocity.x !== 0 || velocity.y !== 0
-            ? Math.atan2(velocity.y, velocity.x) * (180 / Math.PI)
-            : 0,
         }}
         transition={{
           type: "spring",
-          stiffness: 220,
-          damping: 32,
-          mass: 0.8,
+          stiffness: 300,
+          damping: 30,
         }}
-        style={{ transformOrigin: "center" }}
       />
     </motion.svg>
   );

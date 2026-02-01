@@ -10,6 +10,7 @@
 @theme {
   /* Font families */
   --font-sans: suisse, Inter Variable, Inter, system-ui, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif;
+  --font-serif: signifier, Georgia, "Times New Roman", Times, serif;
   --font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
   --font-feature-settings: "cv02", "cv03", "cv04", "cv11";
 

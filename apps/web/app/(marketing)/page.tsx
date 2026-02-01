@@ -1,58 +1,17 @@
 "use client";
 
-import { useState } from "react";
 import Link from "next/link";
-import { LayoutGroup, motion } from "motion/react";
 
 export default function Home() {
-  const [isHovering, setIsHovering] = useState(false);
-
   return (
     <div className="relative flex min-h-screen flex-col items-center justify-center px-6">
       {/* Hero */}
       <div className="flex flex-col items-center text-center">
-        <LayoutGroup>
-          <motion.h1
-            layout
-            className="flex items-baseline justify-center gap-[0.2em] text-4xl font-medium tracking-tighter sm:text-5xl md:text-5xl"
-            transition={{
-              layout: {
-                type: "spring",
-                stiffness: 300,
-                damping: 30,
-              },
-            }}
-          >
-            <motion.span
-              layout
-              transition={{
-                layout: {
-                  type: "spring",
-                  stiffness: 300,
-                  damping: 30,
-                },
-              }}
-            >
-              Never miss
-            </motion.span>
-            <motion.span
-              layout
-              className="relative inline-flex cursor-pointer"
-              onMouseEnter={() => setIsHovering(true)}
-              onMouseLeave={() => setIsHovering(false)}
-              transition={{
-                layout: {
-                  type: "spring",
-                  stiffness: 300,
-                  damping: 30,
-                },
-              }}
-            >
-              <StaggerText text="texts" isHovering={isHovering} />
-            </motion.span>
-          </motion.h1>
-        </LayoutGroup>
-        <p className="mt-2 max-w-xl text-pretty text-lg text-muted-foreground">
+        <div className="mx-auto mb-8 w-[72px] h-[1.5px] bg-black/10 dark:bg-white/10" />
+          <h1 className="flex items-baseline font-serif text-pretty max-w-xl justify-center gap-[0.2em] text-4xl tracking-tighter sm:text-5xl md:text-5xl">
+            Relationships are compounding assets.
+          </h1>
+        <p className="mt-8 max-w-xl text-pretty text-lg text-muted-foreground">
           A unified inbox so you never drop a conversation.
         </p>
         <div className="mt-8 flex items-center gap-4">
@@ -78,63 +37,6 @@ export default function Home() {
         </div>
       </div>
     </div>
-  );
-}
-
-function StaggerText({
-  text,
-  isHovering,
-}: {
-  text: string;
-  isHovering: boolean;
-}) {
-  const characters = text.split("");
-
-  return (
-    <motion.span
-      layout
-      className="inline-flex text-muted-foreground"
-      aria-label={text}
-      transition={{
-        layout: {
-          type: "spring",
-          stiffness: 300,
-          damping: 30,
-        },
-      }}
-    >
-      {characters.map((char, index) => (
-        <motion.span
-          key={index}
-          className="inline-block"
-          style={char === " " ? { width: "0.25em" } : undefined}
-          animate={isHovering ? "visible" : "hidden"}
-          initial={false}
-          variants={{
-            hidden: {
-              opacity: 1,
-              y: 0,
-              rotateX: 0,
-              filter: "blur(0px)",
-            },
-            visible: {
-              opacity: 1,
-              y: -4,
-              rotateX: -10,
-              filter: "blur(0px)",
-            },
-          }}
-          transition={{
-            type: "spring",
-            stiffness: 300,
-            damping: 25,
-            delay: index * 0.02,
-          }}
-        >
-          {char === " " ? "\u00A0" : char}
-        </motion.span>
-      ))}
-    </motion.span>
   );
 }
 
