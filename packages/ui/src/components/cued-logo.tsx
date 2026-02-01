@@ -197,7 +197,7 @@ export function CuedLogo({
       <motion.circle
         cx={16}
         cy={16}
-        r={3}
+        r={2}
         fill="var(--background)"
         animate={{
           cx: 16 + dotOffset.x,
