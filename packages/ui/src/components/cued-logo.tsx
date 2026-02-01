@@ -158,7 +158,7 @@ export function CuedLogo({
             dy="1"
             stdDeviation="1.5"
             floodColor="black"
-            floodOpacity="0.12"
+            floodOpacity="0.08"
           />
         </filter>
         {/* Inner shadow filter */}
@@ -174,7 +174,7 @@ export function CuedLogo({
           </feComponentTransfer>
           <feGaussianBlur stdDeviation="3" />
           <feOffset dx="0" dy="2" result="offsetblur" />
-          <feFlood floodColor="black" floodOpacity="0.35" />
+          <feFlood floodColor="black" floodOpacity="0.45" />
           <feComposite in2="offsetblur" operator="in" />
           <feComposite in2="SourceAlpha" operator="in" />
           <feMerge>
@@ -189,7 +189,7 @@ export function CuedLogo({
           cx="16"
           cy="16"
           r="13"
-          fill="var(--foreground)"
+          fill="var(--color-logo-ball)"
           filter={`url(#inner-shadow-${filterId})`}
         />
       </g>
@@ -197,8 +197,8 @@ export function CuedLogo({
       <motion.circle
         cx={16}
         cy={16}
-        r={2}
-        fill="var(--background)"
+        r={2.5}
+        fill="var(--color-orange)"
         animate={{
           cx: 16 + dotOffset.x,
           cy: 16 + dotOffset.y,

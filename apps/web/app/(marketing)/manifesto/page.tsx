@@ -11,7 +11,7 @@ export default function ManifestoPage() {
   return (
     <div className="relative flex min-h-screen flex-col items-center justify-center px-6 py-24">
       <article className="mx-auto max-w-2xl">
-        <h1 className="text-4xl font-medium tracking-tight sm:text-5xl">
+        <h1 className="text-4xl font-serif tracking-tight sm:text-5xl">
           Manifesto
         </h1>
 

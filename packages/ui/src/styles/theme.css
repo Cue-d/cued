@@ -61,6 +61,12 @@
   --color-accent-emerald-foreground: var(--accent-emerald-foreground);
   --color-highlight-blue: var(--highlight-blue);
 
+  /* Orange accent color */
+  --color-orange: var(--orange);
+  
+  /* Logo ball color */
+  --color-logo-ball: var(--logo-ball);
+
   /* Chart colors */
   --color-chart-1: var(--chart-1);
   --color-chart-2: var(--chart-2);
@@ -181,6 +187,9 @@
   /* Card */
   --card: oklch(100% 0 0);
   --card-foreground: oklch(20.5% 0 0);
+  
+  /* Logo ball - white in light mode */
+  --logo-ball: oklch(100% 0 0);
 
   /* Border/Input */
   --border: oklch(92% 0.003 90);
@@ -256,6 +265,9 @@
   /* Surface */
   --surface: oklch(28% 0 0);
   --surface-foreground: oklch(85% 0 0);
+
+  /* Orange accent color */
+  --orange: color(display-p3 0.99 0.4 0.02);
 }
 
 .dark {
@@ -279,6 +291,9 @@
   /* Card */
   --card: oklch(24% 0.003 100);
   --card-foreground: oklch(98.8% 0.0041 91.45);
+  
+  /* Logo ball - light in dark mode */
+  --logo-ball: oklch(98.8% 0.0041 91.45);
 
   /* Border/Input */
   --border: oklch(28% 0.003 100);
@@ -354,4 +369,7 @@
   /* Surface */
   --surface: oklch(28% 0 0);
   --surface-foreground: oklch(85% 0 0);
+
+  /* Orange accent color */
+  --orange: color(display-p3 0.99 0.4 0.02);
 }

@@ -76,12 +76,12 @@ export function CuedLogoStatic({
           cx="16"
           cy="16"
           r="14"
-          fill="var(--foreground)"
+          fill="var(--color-logo-ball)"
           filter="url(#cued-logo-inner-shadow)"
         />
       </g>
-      {/* Center dot - inverts with theme */}
-      <circle cx="16" cy="16" r="3.5" fill="var(--background)" />
+      {/* Center dot */}
+      <circle cx="16" cy="16" r="3.5" fill="var(--color-orange)" />
     </svg>
   );
 }

@@ -15,15 +15,15 @@ export function MarketingHeader() {
         <Link
           href="/"
           ref={logoGroupRef}
-          className="flex items-center gap-2"
+          className="flex items-center gap-1.5"
           onMouseEnter={() => setLogoHovered(true)}
           onMouseLeave={() => setLogoHovered(false)}
           onTouchStart={() => setLogoHovered(true)}
           onTouchEnd={() => setLogoHovered(false)}
           onTouchCancel={() => setLogoHovered(false)}
         >
-          <CuedLogo size={28} interactive trackingRef={logoGroupRef} />
-          <span className="text-lg font-medium tracking-tight inline-flex">
+          <CuedLogo size={24} interactive trackingRef={logoGroupRef} />
+          <span className="text-lg font-medium tracking-tighter inline-flex">
             <span>Cue</span>
             <span className="relative inline-flex">
               <AnimatePresence>

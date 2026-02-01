@@ -1,27 +1,17 @@
 "use client";
 
-import Link from "next/link";
-
 export default function Home() {
   return (
     <div className="relative flex min-h-screen flex-col items-center justify-center px-6">
       {/* Hero */}
       <div className="flex flex-col items-center text-center">
-        <div className="mx-auto mb-8 w-[72px] h-[1.5px] bg-black/10 dark:bg-white/10" />
+        <div className="mx-auto mb-8 w-[72px] h-[1.5px] bg-border" />
           <h1 className="flex items-baseline font-serif text-pretty max-w-xl justify-center gap-[0.2em] text-4xl tracking-tighter sm:text-5xl md:text-5xl">
-            Relationships are compounding assets.
+            Relationships are your compounding asset.
           </h1>
-        <p className="mt-8 max-w-xl text-pretty text-lg text-muted-foreground">
-          A unified inbox so you never drop a conversation.
+        <p className="mt-8 max-w-md text-pretty text-lg text-muted-foreground">
+          A unified inbox that enriches your network and surfaces opportunities for you.
         </p>
-        <div className="mt-8 flex items-center gap-4">
-          <Link
-            href="/sign-up"
-            className="inline-flex h-14 items-center justify-center rounded-full bg-primary px-10 text-lg font-medium text-primary-foreground transition-colors hover:bg-primary/90"
-          >
-            Get Started
-          </Link>
-        </div>
 
       </div>
 

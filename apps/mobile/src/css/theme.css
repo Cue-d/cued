@@ -84,6 +84,13 @@
       --color-surface: oklch(28% 0 0);
       --color-surface-foreground: oklch(85% 0 0);
 
+      /* Orange accent color */
+      --color-orange: color(display-p3 0.99 0.4 0.02);
+      
+      /* Logo ball - white in light mode */
+      --logo-ball: oklch(100% 0 0);
+      --color-logo-ball: var(--logo-ball);
+
       /* Sidebar (for tablet layouts) */
       --color-sidebar: #efedec;
       --color-sidebar-foreground: oklch(14.5% 0 0);
@@ -176,6 +183,13 @@
       /* Surface */
       --color-surface: oklch(28% 0 0);
       --color-surface-foreground: oklch(85% 0 0);
+
+      /* Orange accent color */
+      --color-orange: color(display-p3 0.99 0.4 0.02);
+      
+      /* Logo ball - white in light mode */
+      --logo-ball: oklch(100% 0 0);
+      --color-logo-ball: var(--logo-ball);
 
       /* Sidebar (for tablet layouts) */
       --color-sidebar: oklch(18% 0 0);
