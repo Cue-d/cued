@@ -133,25 +133,8 @@ To receive connection events (required for the UI to show "Connected" status):
 1. In Nango Dashboard, go to **Environment Settings**
 2. Scroll to **Webhooks** section
 3. Enable **Send New Connection Creation Webhooks**
-4. Set **Webhook URL** to your deployment URL:
-   - Local: `https://your-ngrok-url.ngrok.io/api/nango/webhook` (use ngrok for local testing)
-   - Production: `https://your-domain.com/api/nango/webhook`
+4. Set **Webhook URL** to `https://<deployment>.convex.site/nango/webhook`
 5. Save the settings
-
-### Local Testing with ngrok
-
-For local development, expose your local server:
-
-```bash
-# Install ngrok if needed
-brew install ngrok
-
-# Start ngrok tunnel
-ngrok http 3000
-
-# Copy the https URL (e.g., https://abc123.ngrok.io)
-# Set as webhook URL in Nango Dashboard
-```
 
 ## Send Email Action (Task 4.8)
 
