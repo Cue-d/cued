@@ -16,6 +16,7 @@
       [
         "expo-widgets",
         {
+          "bundleIdentifier": "so.cued.app.widgets",
           "groupIdentifier": "group.so.cued.app",
           "widgets": [
             {
@@ -83,15 +84,15 @@
       "router": {},
       "eas": {
         "build": {
-          "experimental": {
-            "ios": {
-              "appExtensions": [
-                {
-                  "bundleIdentifier": "so.cued.app.widgets",
-                  "targetName": "widgets",
-                  "entitlements": {
-                    "com.apple.security.application-groups": [
-                      "group.so.cued.app"
+              "experimental": {
+                "ios": {
+                  "appExtensions": [
+                    {
+                      "bundleIdentifier": "so.cued.app.widgets",
+                      "targetName": "ExpoWidgetsTarget",
+                      "entitlements": {
+                        "com.apple.security.application-groups": [
+                          "group.so.cued.app"
                     ]
                   }
                 }
