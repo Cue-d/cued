@@ -28,7 +28,7 @@ concurrency:
 jobs:
   deploy:
     name: Deploy to ${{ github.event.inputs.environment || 'dev' }}
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     defaults:
       run:
         working-directory: nango-integrations
