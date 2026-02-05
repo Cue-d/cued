@@ -118,3 +118,41 @@ describe("NAME_MATCH_THRESHOLDS", () => {
     expect(NAME_MATCH_THRESHOLDS.MINIMUM).toBe(0.9);
   });
 });
+
+describe("false positive prevention", () => {
+  it("rejects same first name with completely different last name", () => {
+    // Alex Olan vs Alex Xiang - obviously different people
+    const score = nameSimilarity("Alex Olan", "Alex Xiang");
+    expect(score).toBeLessThanOrEqual(0.4);
+  });
+
+  it("rejects same first name with similar but different last name", () => {
+    // John Williams vs John Wilson - similar prefix but different people
+    const score = nameSimilarity("John Williams", "John Wilson");
+    expect(score).toBeLessThanOrEqual(0.4);
+  });
+
+  it("rejects same last name with completely different first name", () => {
+    // Brandon Zhu vs Elise Zhu - same family, different person
+    const score = nameSimilarity("Brandon Zhu", "Elise Zhu");
+    expect(score).toBeLessThanOrEqual(0.4);
+  });
+
+  it("still matches typos in first name", () => {
+    // John Smith vs Jon Smith - likely same person with typo
+    const score = nameSimilarity("John Smith", "Jon Smith");
+    expect(score).toBeGreaterThanOrEqual(0.9);
+  });
+
+  it("still matches nicknames", () => {
+    // Mike Johnson vs Michael Johnson - same person
+    const score = nameSimilarity("Mike Johnson", "Michael Johnson");
+    expect(score).toBe(1);
+  });
+
+  it("still matches when last names share significant substring", () => {
+    // John McDonald vs Jon MacDonald - likely same person
+    const score = nameSimilarity("John McDonald", "Jon MacDonald");
+    expect(score).toBeGreaterThan(0.8);
+  });
+});

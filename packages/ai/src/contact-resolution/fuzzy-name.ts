@@ -6,6 +6,21 @@
 import { CONFIDENCE, JARO_WINKLER } from "./thresholds";
 
 /**
+ * Check if two strings share a common substring of at least minLength characters.
+ */
+function hasCommonSubstring(s1: string, s2: string, minLength: number): boolean {
+  if (s1.length < minLength || s2.length < minLength) return false;
+  const shorter = s1.length <= s2.length ? s1 : s2;
+  const longer = s1.length <= s2.length ? s2 : s1;
+
+  for (let i = 0; i <= shorter.length - minLength; i++) {
+    const substring = shorter.slice(i, i + minLength);
+    if (longer.includes(substring)) return true;
+  }
+  return false;
+}
+
+/**
  * Common nickname mappings.
  * Maps nicknames to their canonical full names.
  */
@@ -328,7 +343,12 @@ export function nameSimilarity(name1: string, name2: string): number {
   // CRITICAL: Detect "same last name, completely different first name" pattern
   // This catches false positives like "Brandon Zhu" vs "Elise Zhu"
   const lastNamesMatch = lastScore >= CONFIDENCE.HIGH;
-  const firstNamesVeryDifferent = firstScore <= CONFIDENCE.LOW;
+  // First names are "very different" if score is below GUARD_THRESHOLD,
+  // UNLESS the score is >= LOW AND there's a common substring (allows spelling variations like McDonald/MacDonald)
+  // This ensures names like "John Williams" vs "John Wilson" are rejected even if they share "wil"
+  const firstNamesVeryDifferent =
+    firstScore < CONFIDENCE.GUARD_THRESHOLD &&
+    !(firstScore >= CONFIDENCE.LOW && hasCommonSubstring(first1, first2, 3));
 
   if (lastNamesMatch && firstNamesVeryDifferent) {
     // Same last name but different first name = different person
@@ -336,9 +356,14 @@ export function nameSimilarity(name1: string, name2: string): number {
   }
 
   // Same pattern for first names matching but last names different
-  // e.g., "John Smith" shouldn't match "John Jones"
+  // e.g., "Alex Olan" shouldn't match "Alex Xiang"
   const firstNamesMatch = firstScore >= CONFIDENCE.HIGH;
-  const lastNamesVeryDifferent = lastScore <= CONFIDENCE.LOW;
+  // Last names are "very different" if score is below GUARD_THRESHOLD,
+  // UNLESS the score is >= LOW AND there's a common substring (allows spelling variations like McDonald/MacDonald)
+  // This ensures names like "John Williams" vs "John Wilson" are rejected even if they share "wil"
+  const lastNamesVeryDifferent =
+    lastScore < CONFIDENCE.GUARD_THRESHOLD &&
+    !(lastScore >= CONFIDENCE.LOW && hasCommonSubstring(last1, last2, 3));
 
   if (firstNamesMatch && lastNamesVeryDifferent) {
     // Same first name, very different last name = likely different person

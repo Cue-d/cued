@@ -28,6 +28,8 @@ export {
   FuzzyMatchDecisionSchema,
   type ContactMatchInput,
   type FuzzyMatchDecision,
+  type TypedHandle,
+  type MessageSnippet,
 } from "./llm-match";
 
 export {

@@ -10,9 +10,7 @@ import {
   Users,
   Search,
   Loader2,
-  ScanSearch,
   Send,
-  Trash2,
   ChevronRight,
 } from "lucide-react"
 import { api } from "@cued/convex"
@@ -325,40 +323,7 @@ export default function ContactsPage() {
     return () => observer.disconnect()
   }, [contactsResult?.nextCursor, isLoadingMore, debouncedSearch])
 
-  const triggerMergeScan = useMutation(api.contactResolution.triggerMergeScan)
-  const clearMergeSuggestions = useMutation(
-    api.contactResolution.clearPendingMergeSuggestions
-  )
   const queueMessage = useMutation(api.messageQueue.queueMessage)
-
-  const [isScanning, setIsScanning] = React.useState(false)
-  const [isClearing, setIsClearing] = React.useState(false)
-
-  const handleTriggerScan = React.useCallback(async () => {
-    setIsScanning(true)
-    try {
-      await triggerMergeScan({})
-    } catch (error) {
-      console.error("Failed to trigger merge scan:", error)
-    } finally {
-      setTimeout(() => setIsScanning(false), 2000)
-    }
-  }, [triggerMergeScan])
-
-  const handleClearSuggestions = React.useCallback(async () => {
-    setIsClearing(true)
-    try {
-      let hasMore = true
-      while (hasMore) {
-        const result = await clearMergeSuggestions({})
-        hasMore = result.hasMore
-      }
-    } catch (error) {
-      console.error("Failed to clear suggestions:", error)
-    } finally {
-      setIsClearing(false)
-    }
-  }, [clearMergeSuggestions])
 
   const handleOpenSendModal = React.useCallback((contact: SendMessageContact) => {
     setSelectedContact(contact)
@@ -422,46 +387,18 @@ export default function ContactsPage() {
       {/* Sticky Search Bar */}
       <div className="sticky top-0 z-10 bg-background border-b">
         <div className="mx-auto max-w-2xl px-6 py-4">
-          <div className="flex items-center gap-3">
-            <div className="relative flex-1">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-              <Input
-                type="text"
-                placeholder="Search people..."
-                value={searchInput}
-                onChange={(e) => setSearchInput(e.target.value)}
-                className="pl-9 pr-4"
-              />
-              {contactsLoading && debouncedSearch && (
-                <Loader2 className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground animate-spin" />
-              )}
-            </div>
-            <Button
-              variant="outline"
-              size="icon"
-              onClick={handleTriggerScan}
-              disabled={isScanning}
-              title="Scan for duplicate contacts"
-            >
-              {isScanning ? (
-                <Loader2 className="w-4 h-4 animate-spin" />
-              ) : (
-                <ScanSearch className="w-4 h-4" />
-              )}
-            </Button>
-            <Button
-              variant="outline"
-              size="icon"
-              onClick={handleClearSuggestions}
-              disabled={isClearing}
-              title="Clear pending merge suggestions"
-            >
-              {isClearing ? (
-                <Loader2 className="w-4 h-4 animate-spin" />
-              ) : (
-                <Trash2 className="w-4 h-4" />
-              )}
-            </Button>
+          <div className="relative">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+            <Input
+              type="text"
+              placeholder="Search people..."
+              value={searchInput}
+              onChange={(e) => setSearchInput(e.target.value)}
+              className="pl-9 pr-4"
+            />
+            {contactsLoading && debouncedSearch && (
+              <Loader2 className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground animate-spin" />
+            )}
           </div>
         </div>
       </div>

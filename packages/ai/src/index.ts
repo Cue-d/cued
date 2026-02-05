@@ -115,4 +115,6 @@ export {
   LLM_CONFIDENCE_THRESHOLD,
   type ContactMatchInput,
   type FuzzyMatchDecision,
+  type TypedHandle,
+  type MessageSnippet,
 } from "./contact-resolution";

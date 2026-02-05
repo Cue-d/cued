@@ -38,4 +38,12 @@ crons.daily(
   internal.actionQueue.scanAllUsersForNewContacts
 );
 
+// Daily scan for contact merge candidates at 6 AM UTC
+// Uses LLM to verify fuzzy name matches before suggesting merges
+crons.daily(
+  "daily-merge-scan",
+  { hourUTC: 6, minuteUTC: 0 }, // 6 AM UTC
+  internal.contactResolution.dailyMergeScanAllUsers
+);
+
 export default crons;

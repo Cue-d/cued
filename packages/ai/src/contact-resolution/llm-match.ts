@@ -11,17 +11,36 @@ import { gateway, MODEL } from "../gateway";
 import { withRetry } from "../utils";
 import { LLM } from "./thresholds";
 
+/** A message snippet for context */
+export interface MessageSnippet {
+  text: string;
+  timestamp: string;
+  platform: string;
+  isFromContact: boolean;
+  conversationType: "dm" | "group" | "channel";
+}
+
+/** A contact handle with type information */
+export interface TypedHandle {
+  type: "email" | "phone" | "linkedin" | "slack" | "other";
+  value: string;
+}
+
 /** Input for LLM fuzzy match decision */
 export interface ContactMatchInput {
   contact1: {
     displayName: string;
     company?: string;
-    handles: string[];
+    handles: string[] | TypedHandle[];
+    recentMessages?: MessageSnippet[];
+    notes?: string;
   };
   contact2: {
     displayName: string;
     company?: string;
-    handles: string[];
+    handles: string[] | TypedHandle[];
+    recentMessages?: MessageSnippet[];
+    notes?: string;
   };
   /** Jaro-Winkler fuzzy match score (TIER_3_LLM_REVIEW <= score < TIER_1_DETERMINISTIC) */
   fuzzyScore: number;
@@ -50,10 +69,43 @@ const SYSTEM_PROMPT = `You are analyzing two contact records to determine if the
 Consider these factors:
 1. **Names**: Are the names similar? Account for nicknames (Bob/Robert), typos, middle names, and name variations.
 2. **Company**: If both have company info, do they match or conflict?
-3. **Handles**: Do any email addresses, phone numbers, or social handles overlap or suggest the same person?
+3. **Handles**: Do any email addresses, phone numbers, LinkedIn usernames, or social handles overlap or suggest the same person?
+4. **Message Context**: If provided, do the message snippets suggest these are the same or different people? Look for context clues, topics, writing style, and any identifying information.
 
 Be conservative: only return samePerson=true if you're reasonably confident they're the same person.
-Return samePerson=false if there's significant evidence they're different people (e.g., different companies, conflicting handles).`;
+Return samePerson=false if there's significant evidence they're different people (e.g., different companies, conflicting handles, messages that clearly indicate different identities).`;
+
+/**
+ * Format handles for display, supporting both string[] and TypedHandle[]
+ */
+function formatHandles(handles: string[] | TypedHandle[]): string {
+  if (handles.length === 0) return "";
+
+  // Check if first element is a TypedHandle
+  if (typeof handles[0] === "object" && "type" in handles[0]) {
+    return (handles as TypedHandle[])
+      .map((h) => `${h.type}: ${h.value}`)
+      .join(", ");
+  }
+  return (handles as string[]).join(", ");
+}
+
+/**
+ * Format message snippets for display
+ */
+function formatMessages(messages?: MessageSnippet[]): string {
+  if (!messages || messages.length === 0) return "";
+
+  return messages
+    .map((m) => {
+      const sender = m.isFromContact ? "Them" : "You";
+      const convType = m.conversationType === "dm" ? "" : ` (${m.conversationType})`;
+      const text = m.text.slice(0, 100);
+      const ellipsis = m.text.length > 100 ? "..." : "";
+      return `  - [${sender}, ${m.platform}${convType}]: "${text}${ellipsis}"`;
+    })
+    .join("\n");
+}
 
 /**
  * Build prompt with contact metadata for LLM analysis.
@@ -61,12 +113,21 @@ Return samePerson=false if there's significant evidence they're different people
 function buildMatchPrompt(input: ContactMatchInput): string {
   const { contact1, contact2, fuzzyScore } = input;
 
-  const formatContact = (c: ContactMatchInput["contact1"], label: string): string => {
+  const formatContact = (
+    c: ContactMatchInput["contact1"],
+    label: string
+  ): string => {
     const lines = [`${label}:`];
     lines.push(`  Name: ${c.displayName}`);
     if (c.company) lines.push(`  Company: ${c.company}`);
-    if (c.handles.length > 0) {
-      lines.push(`  Handles: ${c.handles.join(", ")}`);
+    if (c.notes) lines.push(`  Notes: ${c.notes.slice(0, 100)}${c.notes.length > 100 ? "..." : ""}`);
+    const handlesStr = formatHandles(c.handles);
+    if (handlesStr) {
+      lines.push(`  Handles: ${handlesStr}`);
+    }
+    const messagesStr = formatMessages(c.recentMessages);
+    if (messagesStr) {
+      lines.push(`  Recent messages:\n${messagesStr}`);
     }
     return lines.join("\n");
   };
@@ -77,7 +138,7 @@ ${formatContact(contact1, "Contact 1")}
 
 ${formatContact(contact2, "Contact 2")}
 
-Are these the same person? Consider name similarity, company match, and any overlapping handles.`;
+Are these the same person? Consider name similarity, company match, overlapping handles, and any context from messages.`;
 }
 
 /**

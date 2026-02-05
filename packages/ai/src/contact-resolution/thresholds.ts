@@ -12,9 +12,11 @@ export const CONFIDENCE = {
   /** Medium - suggest merge, high confidence */
   MEDIUM: 0.9,
   /** Low - needs review, triggers LLM analysis */
-  LOW: 0.6,
+  LOW: 0.75,
   /** Cap for rejected matches (e.g., same family, different person) */
   REJECTION_CAP: 0.4,
+  /** Guard threshold for same-first-different-last detection */
+  GUARD_THRESHOLD: 0.8,
 } as const;
 
 /**

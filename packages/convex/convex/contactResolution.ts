@@ -8,13 +8,33 @@ import {
 import { internal } from "./_generated/api";
 import type { Id } from "./_generated/dataModel";
 import { getAuthenticatedUser } from "./lib/auth";
-import { normalizeEmail, nameSimilarity, NAME_MATCH_THRESHOLDS, getPhoneVariants, phonesMatch } from "@cued/ai";
+import {
+  normalizeEmail,
+  nameSimilarity,
+  NAME_MATCH_THRESHOLDS,
+  getPhoneVariants,
+  phonesMatch,
+  decideFuzzyMatchWithRetry,
+  LLM_CONFIDENCE_THRESHOLD,
+} from "@cued/ai";
+import type { TypedHandle, MessageSnippet } from "@cued/ai";
 
-// TODO: Re-enable LLM matching once basic name matching is working
-// LLM matching implementation lives in: @cued/ai (packages/ai/src/contact-resolution/llm-match.ts)
-// - decideFuzzyMatchWithRetry(): calls GPT to verify if two fuzzy-matched contacts are the same person
-// - LLM_CONFIDENCE_THRESHOLD (0.70): minimum confidence to create a merge suggestion
-// import { decideFuzzyMatchWithRetry, LLM_CONFIDENCE_THRESHOLD } from "@cued/ai";
+/** Map handle type to TypedHandle type */
+function toTypedHandleType(handleType: string): TypedHandle["type"] {
+  switch (handleType) {
+    case "email":
+      return "email";
+    case "phone":
+      return "phone";
+    case "linkedin_handle":
+    case "linkedin_urn":
+      return "linkedin";
+    case "slack_id":
+      return "slack";
+    default:
+      return "other";
+  }
+}
 
 type DuplicatePair = {
   contact1Id: Id<"contacts">;
@@ -38,6 +58,91 @@ function getOrCreateSet<K, V>(map: Map<K, Set<V>>, key: K): Set<V> {
   }
   return set;
 }
+
+/** Get contact data formatted for LLM match verification. */
+export const getContactForLLMInternal = internalQuery({
+  args: {
+    contactId: v.id("contacts"),
+  },
+  handler: async (ctx, args) => {
+    const contact = await ctx.db.get(args.contactId);
+    if (!contact) return null;
+
+    // Get handles
+    const handles = await ctx.db
+      .query("contactHandles")
+      .withIndex("by_contact", (q) => q.eq("contactId", args.contactId))
+      .collect();
+
+    // Get recent messages from conversations with this contact
+    const allConversations = await ctx.db
+      .query("conversations")
+      .withIndex("by_user", (q) => q.eq("userId", contact.userId))
+      .collect();
+
+    const conversations = allConversations
+      .filter((c) => c.participantContactIds.includes(args.contactId))
+      .slice(0, 5);
+
+    // Get recent messages from these conversations
+    const recentMessages: MessageSnippet[] = [];
+    for (const conv of conversations) {
+      // Get messages FROM this contact (not random group chat msgs)
+      const contactMsgs = await ctx.db
+        .query("messages")
+        .withIndex("by_conversation", (q) => q.eq("conversationId", conv._id))
+        .filter((q) => q.eq(q.field("senderContactId"), args.contactId))
+        .order("desc")
+        .take(3);
+
+      for (const msg of contactMsgs) {
+        if (msg.content && recentMessages.length < 5) {
+          recentMessages.push({
+            text: msg.content.slice(0, 200),
+            timestamp: new Date(msg.sentAt).toISOString(),
+            platform: conv.platform,
+            isFromContact: true,
+            conversationType: conv.conversationType,
+          });
+        }
+      }
+
+      // Also get user's messages in this conversation (for context)
+      const userMsgs = await ctx.db
+        .query("messages")
+        .withIndex("by_conversation", (q) => q.eq("conversationId", conv._id))
+        .filter((q) => q.eq(q.field("isFromMe"), true))
+        .order("desc")
+        .take(2);
+
+      for (const msg of userMsgs) {
+        if (msg.content && recentMessages.length < 7) {
+          recentMessages.push({
+            text: msg.content.slice(0, 200),
+            timestamp: new Date(msg.sentAt).toISOString(),
+            platform: conv.platform,
+            isFromContact: false,
+            conversationType: conv.conversationType,
+          });
+        }
+      }
+    }
+
+    // Format handles as TypedHandle[]
+    const typedHandles: TypedHandle[] = handles.map((h) => ({
+      type: toTypedHandleType(h.handleType),
+      value: h.handle,
+    }));
+
+    return {
+      displayName: contact.displayName,
+      company: contact.company,
+      handles: typedHandles,
+      recentMessages,
+      notes: contact.notes,
+    };
+  },
+});
 
 /** Scan all contacts for merge candidates using handle + name matching. */
 export const scanAllContactsForMerges = internalAction({
@@ -86,31 +191,60 @@ export const scanAllContactsForMerges = internalAction({
       }
     }
 
-    // TODO: Re-enable LLM verification for fuzzy matches
-    // When re-enabling:
-    // 1. Import decideFuzzyMatchWithRetry, LLM_CONFIDENCE_THRESHOLD from @cued/ai
-    // 2. Fetch contacts with handles: ctx.runQuery(internal.contacts.getContactWithHandlesInternal, ...)
-    // 3. Call decideFuzzyMatchWithRetry({ contact1, contact2, fuzzyScore })
-    // 4. Only create suggestion if llmResult.samePerson && llmResult.confidence >= LLM_CONFIDENCE_THRESHOLD
-    // For now, create suggestions for fuzzy matches without LLM verification
+    // LLM verification for fuzzy matches
     for (const fuzzy of result.fuzzyPairs) {
       try {
+        // Fetch contact data with handles and messages for LLM
+        const [contact1Data, contact2Data] = await Promise.all([
+          ctx.runQuery(internal.contactResolution.getContactForLLMInternal, {
+            contactId: fuzzy.contact1Id,
+          }),
+          ctx.runQuery(internal.contactResolution.getContactForLLMInternal, {
+            contactId: fuzzy.contact2Id,
+          }),
+        ]);
+
+        if (!contact1Data || !contact2Data) {
+          errors.push(`fuzzy_name_match: Contact not found`);
+          continue;
+        }
+
+        // Call LLM for verification
+        const llmResult = await decideFuzzyMatchWithRetry({
+          contact1: contact1Data,
+          contact2: contact2Data,
+          fuzzyScore: fuzzy.confidence,
+        });
+
+        // Only create suggestion if LLM confirms same person with sufficient confidence
+        if (
+          !llmResult.samePerson ||
+          llmResult.confidence < LLM_CONFIDENCE_THRESHOLD
+        ) {
+          console.log(
+            `[scanAllContactsForMerges] LLM rejected fuzzy match: ` +
+              `${contact1Data.displayName} <-> ${contact2Data.displayName} ` +
+              `(samePerson=${llmResult.samePerson}, confidence=${llmResult.confidence})`
+          );
+          continue;
+        }
+
         const createResult = await ctx.runMutation(
           internal.contactResolution.createMergeSuggestionInternal,
           {
             userId: args.userId,
             contact1Id: fuzzy.contact1Id,
             contact2Id: fuzzy.contact2Id,
-            confidence: fuzzy.confidence,
-            source: fuzzy.source,
-            reasoning: `${(fuzzy.confidence * 100).toFixed(0)}% name similarity (needs review)`,
+            confidence: llmResult.confidence,
+            source: "llm_fuzzy_match",
+            reasoning: llmResult.reasoning,
           }
         );
         if (createResult.created) suggestionsCreated++;
       } catch (e) {
         const msg = e instanceof Error ? e.message : String(e);
         console.error(
-          `[scanAllContactsForMerges] Failed to create fuzzy suggestion: ` +
+          `[scanAllContactsForMerges] Failed to process fuzzy match: ` +
             `${fuzzy.contact1Id} <-> ${fuzzy.contact2Id}: ${msg}`
         );
         errors.push(`fuzzy_name_match: ${msg}`);
@@ -414,6 +548,41 @@ export const triggerMergeScan = mutation({
     );
 
     return { success: true, message: "Merge scan scheduled" };
+  },
+});
+
+/**
+ * Daily cron job to scan all users for merge candidates.
+ * Schedules scanAllContactsForMerges for each user with connected integrations.
+ */
+export const dailyMergeScanAllUsers = internalMutation({
+  args: {},
+  handler: async (ctx) => {
+    // Get all users with connected integrations
+    const integrations = await ctx.db
+      .query("integrations")
+      .filter((q) => q.eq(q.field("isConnected"), true))
+      .collect();
+
+    // Get unique user IDs
+    const userIds = [...new Set(integrations.map((i) => i.userId))];
+
+    let scheduled = 0;
+    for (const userId of userIds) {
+      // Stagger scans to avoid overwhelming the system
+      // Each scan starts 5 seconds after the previous
+      await ctx.scheduler.runAfter(
+        scheduled * 5000,
+        internal.contactResolution.scanAllContactsForMerges,
+        { userId }
+      );
+      scheduled++;
+    }
+
+    console.log(
+      `[dailyMergeScanAllUsers] Scheduled merge scans for ${scheduled} users`
+    );
+    return { usersScheduled: scheduled };
   },
 });
 
