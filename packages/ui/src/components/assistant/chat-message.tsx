@@ -126,10 +126,10 @@ export function ChatMessage({
 
           <MessageContent
             className={cn(
-              "rounded-2xl px-4 py-3",
+              "rounded-[8px] px-4 py-3",
               isUser
-                ? "rounded-br-md bg-primary text-primary-foreground"
-                : "rounded-bl-md bg-muted/60 text-foreground backdrop-blur-sm border border-border/30"
+                ? "bg-primary text-primary-foreground"
+                : "bg-background text-foreground shadow-minimal"
             )}
           >
             {message.content ? (

@@ -57,6 +57,8 @@ export function DeliveryStatus({ status }: { status?: string | null }) {
   )
 }
 
+export type MessageSpacing = "tight" | "normal" | "wide"
+
 export interface MessageBubbleProps {
   /** Unique message ID */
   id: string
@@ -72,12 +74,18 @@ export interface MessageBubbleProps {
   status?: string | null
   /** Reactions on the message */
   reactions?: string[] | null
+  /** Whether to show sender name (for deduplication) */
+  showSenderName?: boolean
+  /** Spacing above this message */
+  spacing?: MessageSpacing
 }
 
-/**
- * MessageBubble component - renders a single chat message with optional
- * reactions and delivery status.
- */
+const SPACING_CLASSES: Record<MessageSpacing, string> = {
+  tight: "mt-0.5",
+  normal: "mt-2",
+  wide: "mt-4",
+}
+
 export function MessageBubble({
   content,
   isFromMe,
@@ -85,6 +93,8 @@ export function MessageBubble({
   senderName,
   status,
   reactions,
+  showSenderName = true,
+  spacing = "normal",
 }: MessageBubbleProps) {
   const hasReactions = reactions && reactions.length > 0
   const hasText = content && content.trim().length > 0
@@ -94,10 +104,11 @@ export function MessageBubble({
       className={cn(
         "flex flex-col w-full",
         isFromMe ? "items-end" : "items-start",
-        hasReactions && "mb-2"
+        hasReactions && "mb-2",
+        SPACING_CLASSES[spacing]
       )}
     >
-      {!isFromMe && senderName && (
+      {showSenderName && !isFromMe && senderName && (
         <p className="text-xs font-medium opacity-70 mb-1 ml-1">
           {senderName}
         </p>
@@ -110,10 +121,10 @@ export function MessageBubble({
       >
         <div
           className={cn(
-            "relative rounded-2xl px-4 py-2 text-sm wrap-break-words",
+            "relative rounded-[8px] px-4 py-2 text-sm wrap-break-words",
             isFromMe
               ? "bg-primary text-primary-foreground"
-              : "bg-muted text-foreground"
+              : "bg-background text-foreground shadow-minimal"
           )}
           style={{ maxWidth: "85%", width: "fit-content" }}
         >

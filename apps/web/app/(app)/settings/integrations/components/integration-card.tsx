@@ -10,14 +10,14 @@ import {
 import { formatRelativeTime, type ActionPlatform } from "@cued/shared";
 import { Button, Skeleton } from "@cued/ui";
 
-// Re-export Platform type from @cued/shared for convenience
+/** Type alias for ActionPlatform for convenience */
 export type Platform = ActionPlatform;
 
 /** Type of integration connection method */
 export type IntegrationType = "nango" | "electron-local" | "electron-webview";
 
 export interface IntegrationConfig {
-  id: Platform;
+  id: ActionPlatform;
   name: string;
   description: string;
   icon: React.ReactNode;
@@ -107,37 +107,23 @@ export function IntegrationButton({
     return null;
   }
 
-  // Not connected state
-  if (integrationType === "nango") {
+  // Not connected state - electron-local (iMessage) requires desktop app
+  if (integrationType === "electron-local") {
     return (
-      <Button variant="default" size="sm" onClick={onConnect} disabled={isConnecting}>
-        {isConnecting ? (
-          <RefreshCwIcon className="size-4 animate-spin mr-2" />
-        ) : (
-          <LinkIcon className="size-4 mr-2" />
-        )}
-        Connect
+      <Button variant="outline" size="sm" disabled>
+        Desktop App Required
       </Button>
     );
   }
 
-  if (integrationType === "electron-webview") {
-    return (
-      <Button variant="default" size="sm" onClick={onConnect} disabled={isConnecting}>
-        {isConnecting ? (
-          <RefreshCwIcon className="size-4 animate-spin mr-2" />
-        ) : (
-          <LinkIcon className="size-4 mr-2" />
-        )}
-        Connect via Desktop
-      </Button>
-    );
-  }
+  // nango or electron-webview - show connect button
+  const connectLabel = integrationType === "electron-webview" ? "Connect via Desktop" : "Connect";
+  const ConnectIcon = isConnecting ? RefreshCwIcon : LinkIcon;
 
-  // electron-local (iMessage)
   return (
-    <Button variant="outline" size="sm" disabled>
-      Desktop App Required
+    <Button variant="default" size="sm" onClick={onConnect} disabled={isConnecting}>
+      <ConnectIcon className={`size-4 mr-2 ${isConnecting ? "animate-spin" : ""}`} />
+      {connectLabel}
     </Button>
   );
 }

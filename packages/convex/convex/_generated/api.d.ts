@@ -8,7 +8,6 @@
  * @module
  */
 
-import type * as __tests___helpers from "../__tests__/helpers.js";
 import type * as actionAnalysis from "../actionAnalysis.js";
 import type * as actionEvents from "../actionEvents.js";
 import type * as actionQueue from "../actionQueue.js";
@@ -54,7 +53,6 @@ import type {
 } from "convex/server";
 
 declare const fullApi: ApiFromModules<{
-  "__tests__/helpers": typeof __tests___helpers;
   actionAnalysis: typeof actionAnalysis;
   actionEvents: typeof actionEvents;
   actionQueue: typeof actionQueue;

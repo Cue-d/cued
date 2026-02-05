@@ -7,9 +7,89 @@
    - Mobile: Uses expo-font in _layout.tsx
 */
 
+/* =============================================================================
+   SHADOW UTILITIES - Craft Agents design system
+============================================================================= */
+
+@layer utilities {
+  /* Minimal shadow - subtle border ring + 2 blur layers */
+  .shadow-minimal {
+    box-shadow:
+      rgba(0, 0, 0, 0) 0px 0px 0px 0px,
+      rgba(0, 0, 0, 0) 0px 0px 0px 0px,
+      rgba(var(--foreground-rgb, 0 0 0), 0.06) 0px 0px 0px 1px,
+      rgba(0, 0, 0, 0.06) 0px 1px 1px -0.5px,
+      rgba(0, 0, 0, 0.06) 0px 3px 3px -1.5px;
+  }
+
+  /* Middle shadow - adds 3rd blur layer */
+  .shadow-middle {
+    box-shadow:
+      rgba(0, 0, 0, 0) 0px 0px 0px 0px,
+      rgba(0, 0, 0, 0) 0px 0px 0px 0px,
+      rgba(var(--foreground-rgb, 0 0 0), 0.06) 0px 0px 0px 1px,
+      rgba(0, 0, 0, 0.06) 0px 1px 1px -0.5px,
+      rgba(0, 0, 0, 0.06) 0px 3px 3px -1.5px,
+      rgba(0, 0, 0, 0.06) 0px 6px 6px -3px;
+  }
+
+  /* Medium shadow - adds 4th blur layer */
+  .shadow-medium {
+    box-shadow:
+      rgba(0, 0, 0, 0) 0px 0px 0px 0px,
+      rgba(0, 0, 0, 0) 0px 0px 0px 0px,
+      rgba(var(--foreground-rgb, 0 0 0), 0.06) 0px 0px 0px 1px,
+      rgba(0, 0, 0, 0.06) 0px 1px 1px -0.5px,
+      rgba(0, 0, 0, 0.06) 0px 3px 3px -1.5px,
+      rgba(0, 0, 0, 0.06) 0px 6px 6px -3px,
+      rgba(0, 0, 0, 0.04) 0px 12px 12px -6px;
+  }
+
+  /* Hero shadow - medium base with larger soft layers for floating effect */
+  .shadow-hero {
+    box-shadow:
+      rgba(0, 0, 0, 0) 0px 0px 0px 0px,
+      rgba(0, 0, 0, 0) 0px 0px 0px 0px,
+      rgba(var(--foreground-rgb, 0 0 0), 0.06) 0px 0px 0px 1px,
+      rgba(0, 0, 0, 0.06) 0px 1px 1px -0.5px,
+      rgba(0, 0, 0, 0.06) 0px 3px 3px -1.5px,
+      rgba(0, 0, 0, 0.06) 0px 6px 6px -3px,
+      rgba(0, 0, 0, 0.04) 0px 12px 12px -6px,
+      rgba(0, 0, 0, 0.03) 0px 24px 32px -12px,
+      rgba(0, 0, 0, 0.02) 0px 48px 64px -24px;
+  }
+
+  /* Strong shadow - 4 blur layers for emphasis */
+  .shadow-strong {
+    box-shadow:
+      rgba(0, 0, 0, 0) 0px 0px 0px 0px,
+      rgba(0, 0, 0, 0) 0px 0px 0px 0px,
+      rgba(var(--foreground-rgb, 0 0 0), 0.06) 0px 0px 0px 1px,
+      rgba(0, 0, 0, 0.06) 0px 1px 1px -0.5px,
+      rgba(0, 0, 0, 0.06) 0px 3px 3px -1.5px,
+      rgba(0, 0, 0, 0.06) 0px 6px 6px -3px,
+      rgba(0, 0, 0, 0.04) 0px 12px 12px -6px,
+      rgba(0, 0, 0, 0.04) 0px 24px 24px -12px;
+  }
+
+  /* Tinted shadow - use with style={{ '--shadow-color': 'r, g, b' }} */
+  .shadow-tinted {
+    --shadow-color: 0, 0, 0;
+    --shadow-border-opacity: 0.08;
+    --shadow-blur-opacity: 0.06;
+    box-shadow:
+      rgba(var(--shadow-color), 0) 0px 0px 0px 0px,
+      rgba(var(--shadow-color), 0) 0px 0px 0px 0px,
+      rgba(var(--shadow-color), calc(var(--shadow-border-opacity) * 1.5)) 0px 0px 0px 1px,
+      rgba(var(--shadow-color), var(--shadow-border-opacity)) 0px 1px 1px -0.5px,
+      rgba(var(--shadow-color), var(--shadow-blur-opacity)) 0px 3px 3px -1.5px,
+      rgba(var(--shadow-color), calc(var(--shadow-blur-opacity) * 0.67)) 0px 6px 6px -3px;
+  }
+}
+
 @theme {
   /* Font families */
-  --font-sans: suisse, Inter Variable, Inter, system-ui, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif;
+  --font-sans: Inter, system-ui, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif;
   --font-serif: signifier, Georgia, "Times New Roman", Times, serif;
   --font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
   --font-feature-settings: "cv02", "cv03", "cv04", "cv11";
@@ -17,6 +97,13 @@
   /* Color mappings */
   --color-background: var(--background);
   --color-foreground: var(--foreground);
+
+  /* Foreground mix variants */
+  --color-foreground-2: var(--foreground-2);
+  --color-foreground-3: var(--foreground-3);
+  --color-foreground-5: var(--foreground-5);
+  --color-foreground-7: var(--foreground-7);
+  --color-foreground-10: var(--foreground-10);
   --color-card: var(--card);
   --color-card-foreground: var(--card-foreground);
   --color-popover: var(--popover);
@@ -170,6 +257,14 @@
   /* Core colors */
   --background: oklch(97.5% 0.003 85);
   --foreground: oklch(14.5% 0 0);
+  --foreground-rgb: 0, 0, 0;
+
+  /* Foreground mix variants (solid interpolation toward background) */
+  --foreground-2: color-mix(in srgb, var(--foreground) 2%, var(--background));
+  --foreground-3: color-mix(in srgb, var(--foreground) 3%, var(--background));
+  --foreground-5: color-mix(in srgb, var(--foreground) 5%, var(--background));
+  --foreground-7: color-mix(in srgb, var(--foreground) 7%, var(--background));
+  --foreground-10: color-mix(in srgb, var(--foreground) 10%, var(--background));
 
   /* Muted */
   --muted: oklch(97.5% 0.003 85);
@@ -274,6 +369,16 @@
   /* Core colors */
   --background: oklch(20% 0 0);
   --foreground: oklch(98.8% 0.0041 91.45);
+  --foreground-rgb: 255, 255, 255;
+  --shadow-border-opacity: 0.15;
+  --shadow-blur-opacity: 0.12;
+
+  /* Foreground mix variants (solid interpolation toward background) */
+  --foreground-2: color-mix(in srgb, var(--foreground) 2%, var(--background));
+  --foreground-3: color-mix(in srgb, var(--foreground) 3%, var(--background));
+  --foreground-5: color-mix(in srgb, var(--foreground) 5%, var(--background));
+  --foreground-7: color-mix(in srgb, var(--foreground) 7%, var(--background));
+  --foreground-10: color-mix(in srgb, var(--foreground) 10%, var(--background));
 
   /* Muted */
   --muted: oklch(24% 0.003 100);

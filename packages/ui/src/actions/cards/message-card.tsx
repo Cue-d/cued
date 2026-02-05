@@ -17,6 +17,9 @@ export function MessageCard({
   context,
   responseText,
   onResponseChange,
+  onSend,
+  onDismiss,
+  isSending,
   autoFocus,
   className,
 }: ActionCardProps) {
@@ -52,6 +55,9 @@ export function MessageCard({
         messages={displayMessages}
         responseText={responseText}
         onResponseChange={onResponseChange}
+        onSend={onSend}
+        onDismiss={onDismiss}
+        isSending={isSending}
         autoFocus={autoFocus}
         className={className}
       />
@@ -65,6 +71,9 @@ export function MessageCard({
       messages={[]}
       responseText={responseText}
       onResponseChange={onResponseChange}
+      onSend={onSend}
+      onDismiss={onDismiss}
+      isSending={isSending}
       autoFocus={false}
       className={className}
     />

@@ -2,10 +2,19 @@ import { cn } from "../../lib/utils"
 import type { InboxMessage } from "./message-types"
 import type React from "react"
 
+export type InboxMessageSpacing = "tight" | "normal" | "wide"
+
 interface InboxMessageBubbleProps {
   message: InboxMessage
   showTimestamp?: boolean
   showSenderName?: boolean
+  spacing?: InboxMessageSpacing
+}
+
+const SPACING_CLASSES: Record<InboxMessageSpacing, string> = {
+  tight: "mt-0.5",
+  normal: "mt-2",
+  wide: "mt-4",
 }
 
 function formatMessageTime(timestamp: number): string {
@@ -17,6 +26,7 @@ export function InboxMessageBubble({
   message,
   showTimestamp = false,
   showSenderName = false,
+  spacing = "normal",
 }: InboxMessageBubbleProps): React.ReactElement {
   const senderName = message.sender?.displayName
   const hasContent = message.content.trim().length > 0
@@ -24,8 +34,9 @@ export function InboxMessageBubble({
   return (
     <div
       className={cn(
-        "flex flex-col mb-1.5 group",
-        message.isFromMe ? "items-end" : "items-start"
+        "flex flex-col group",
+        message.isFromMe ? "items-end" : "items-start",
+        SPACING_CLASSES[spacing]
       )}
     >
       {/* Sender name for received messages */}
@@ -39,10 +50,10 @@ export function InboxMessageBubble({
       {hasContent && (
         <div
           className={cn(
-            "max-w-[75%] px-4 py-2.5 rounded-2xl wrap-break-words transition-all duration-200",
+            "max-w-[75%] px-4 py-2.5 rounded-[8px] wrap-break-words transition-all duration-200",
             message.isFromMe
-              ? "bg-primary text-primary-foreground rounded-br-lg"
-              : "bg-muted/70 text-foreground rounded-bl-lg border border-border/20"
+              ? "bg-primary text-primary-foreground"
+              : "bg-background text-foreground shadow-minimal"
           )}
         >
           <p className="text-[15px] leading-relaxed whitespace-pre-wrap">

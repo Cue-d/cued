@@ -6,32 +6,15 @@
 /* Source for Tailwind to scan components */
 @source "../../../../packages/ui/src/**/*.{ts,tsx}";
 
-/* Suisse font-face declarations for Electron */
-@font-face {
-  font-family: "suisse";
-  src: url("./assets/fonts/Suisse Regular.ttf") format("truetype");
-  font-weight: 400;
-  font-style: normal;
-  font-display: swap;
-}
-
-@font-face {
-  font-family: "suisse";
-  src: url("./assets/fonts/Suisse Medium.ttf") format("truetype");
-  font-weight: 500;
-  font-style: normal;
-  font-display: swap;
-}
-
 :root {
-  font-family: suisse, -apple-system, BlinkMacSystemFont, "SF Pro", system-ui, sans-serif;
-  font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro", system-ui, sans-serif;
 }
 
 html,
-body {
+body,
+#root {
+  height: 100%;
   background: transparent;
-  min-height: 100vh;
 }
 
 body {
@@ -45,4 +28,48 @@ body {
 
 .no-drag {
   -webkit-app-region: no-drag;
+}
+
+/* Panel shadow system */
+.shadow-panel {
+  box-shadow:
+    rgba(0, 0, 0, 0.06) 0px 0px 0px 1px,
+    rgba(0, 0, 0, 0.04) 0px 1px 1px -0.5px,
+    rgba(0, 0, 0, 0.04) 0px 3px 3px -1.5px;
+}
+
+/* Z-index scale */
+:root {
+  --z-base: 0;
+  --z-local: 10;
+  --z-sticky: 20;
+  --z-titlebar: 40;
+  --z-panel: 50;
+  --z-dropdown: 100;
+  --z-tooltip: 150;
+  --z-modal: 200;
+  --z-overlay: 300;
+}
+
+/* Custom scrollbar styling for transparent gutters */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: color-mix(in srgb, var(--color-foreground) 15%, transparent);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: color-mix(in srgb, var(--color-foreground) 25%, transparent);
+}
+
+::-webkit-scrollbar-corner {
+  background: transparent;
 }

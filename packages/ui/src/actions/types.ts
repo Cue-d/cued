@@ -85,6 +85,12 @@ export interface ActionCardProps {
   responseText: string;
   /** Called when response text changes */
   onResponseChange: (text: string) => void;
+  /** Called when user triggers send */
+  onSend?: () => void;
+  /** Called when user dismisses the action */
+  onDismiss?: () => void;
+  /** Whether a send is in progress */
+  isSending?: boolean;
   /** Whether to auto-focus input */
   autoFocus: boolean;
   /** Optional className */

@@ -1,5 +1,32 @@
 # Ralph Progress Log
 
+## 2026-02-02
+
+### Issue #196: PRD: Craft Agents-style 3-panel layout for Actions / Contacts / Chats / Settings
+- **Status:** Completed
+- **Files created:**
+  - `packages/ui/src/components/three-panel-layout/three-panel-layout.tsx` - Shared ThreePanelLayout, PanelHeader, PanelContent, ListItem, EmptyState components
+  - `packages/ui/src/components/three-panel-layout/index.ts` - Barrel export
+- **Files changed:**
+  - `packages/ui/src/index.ts` - Added three-panel-layout export
+  - `apps/web/app/(app)/actions/page.tsx` - Refactored from card stack to list/detail layout with action list, detail view, Discard/Snooze/Send controls
+  - `apps/web/app/(app)/contacts/page.tsx` - Refactored to list/detail layout with inline contact detail (combined contacts list + detail page)
+  - `apps/web/app/(app)/assistant/page.tsx` - Refactored to list/detail layout with placeholder "New chat" list, chat UI on right
+  - `apps/web/app/(app)/settings/page.tsx` - Refactored to list/detail layout with settings sections list on left
+- **Key decisions:**
+  - ThreePanelLayout is 2-panel (list + detail) since global AppSidebar is managed by parent layout
+  - Panel widths resizable with localStorage persistence per `storageKey`
+  - List panel: min 280px, max 480px, default 320px
+  - URL-based selection for contacts (`?contact=id`) and settings (`?section=memory`)
+  - Actions: list shows action type icon, contact name, platform badge, reason snippet; detail shows full action card with response textarea
+  - Contacts: merged list page and [contactId] detail page into single 3-panel view
+  - Assistant: "New chat" placeholder with "Chat history coming soon" note, no model selector as specified
+  - Settings: sections in list (Memory Sync, Messages, Account, Developer), detail shows selected section content
+- **Notes:**
+  - Inbox page unchanged per PRD (explicitly out of scope)
+  - Keyboard shortcuts preserved on Actions page (←/↑/→ for discard/snooze/send)
+  - Contact detail includes memories, message timeline, edit mode - all functionality preserved from original detail page
+
 ## 2026-01-30
 
 ### Issue #166: PRD: Move Nango webhook to Convex HTTP endpoint

@@ -2,7 +2,7 @@
 import "./env.js";
 
 import { join } from "node:path";
-import { app, BrowserWindow, ipcMain } from "electron";
+import { app, BrowserWindow, ipcMain, shell } from "electron";
 import liquidGlass from "electron-liquid-glass";
 import { ConvexHttpClient } from "convex/browser";
 import { api } from "@cued/convex";
@@ -21,7 +21,7 @@ import { getContactsWatcher } from "./platforms/contacts";
 import { getHeartbeatManager } from "./sync/presence";
 import { setupAllSyncIpcHandlers, cleanupSyncManagers, getLinkedInScraper } from "./ipc/sync";
 import { getMessageQueueProcessor } from "./queue/message-queue-processor";
-import { getReactiveConvexClient } from "./convex-client";
+import { getConvexClient } from "./convex-client";
 import { getSyncEngine } from "./sync/engine";
 import { createAllSyncFunctions } from "./sync/sync-functions";
 import { getIMessageWatcher } from "./sync/triggers/fsevents";
@@ -75,9 +75,12 @@ function createWindow(): void {
     mainWindow.setWindowButtonVisibility(true);
   }
 
-  // In development, load from dev server
+  // In development, load from dev server (prefer electron-vite's injected URL)
   // In production, load from built files
-  if (electronEnv.NODE_ENV === "development") {
+  const devServerUrl = process.env.VITE_DEV_SERVER_URL;
+  if (devServerUrl) {
+    mainWindow.loadURL(devServerUrl);
+  } else if (electronEnv.NODE_ENV === "development") {
     mainWindow.loadURL("http://localhost:5173");
   } else {
     mainWindow.loadFile(join(__dirname, "../renderer/index.html"));
@@ -199,8 +202,52 @@ function setupAuthIpcHandlers(): void {
       user: null,
     });
   });
+
+  // Get access token for renderer authentication
+  ipcMain.handle("auth:getAccessToken", async () => {
+    return await getValidAccessToken();
+  });
 }
 
+function setupConfigIpcHandlers(): void {
+  ipcMain.handle("config:getConvexUrl", () => CONVEX_URL);
+  ipcMain.handle("config:getAppUrl", () => electronEnv.API_BASE_URL ?? "http://localhost:3000");
+}
+
+function setupShellIpcHandlers(): void {
+  ipcMain.handle("shell:openExternal", async (_event, url: string) => {
+    // Validate URL scheme to prevent arbitrary protocol handlers
+    try {
+      const parsed = new URL(url);
+      const allowedSchemes = electronEnv.NODE_ENV === "development"
+        ? ["https:", "http:"]
+        : ["https:"];
+
+      if (!allowedSchemes.includes(parsed.protocol)) {
+        console.warn(`[Main] Rejected openExternal for non-allowed scheme: ${parsed.protocol}`);
+        return false;
+      }
+
+      await shell.openExternal(url);
+      return true;
+    } catch (error) {
+      console.warn(`[Main] Rejected openExternal for invalid URL: ${url}`);
+      return false;
+    }
+  });
+}
+
+/**
+ * Safely execute cleanup function, logging warnings on failure.
+ */
+async function safeCleanup(fn: () => void | Promise<void>, name: string): Promise<void> {
+  try {
+    await fn();
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    console.warn(`[Main] Cleanup failed for ${name}:`, message);
+  }
+}
 
 async function startBackgroundSync(): Promise<void> {
   try {
@@ -255,10 +302,10 @@ async function startBackgroundSync(): Promise<void> {
     getIMessageSyncManager();
 
     // Configure and start the unified message queue processor
-    const reactiveClient = getReactiveConvexClient();
+    const reactiveClient = getConvexClient();
     reactiveClient.setTokenProvider(getValidAccessToken);
     reactiveClient.setAuthInvalidCallback(() => {
-      console.log("[Main] ReactiveConvexClient auth invalid, notifying renderer");
+      console.log("[Main] ConvexClient auth invalid, notifying renderer");
       mainWindow?.webContents.send("auth:stateChanged", {
         isAuthenticated: false,
         user: null,
@@ -348,6 +395,8 @@ app.whenReady().then(() => {
 
   // Set up IPC handlers before creating window
   setupAuthIpcHandlers();
+  setupConfigIpcHandlers();
+  setupShellIpcHandlers();
 
   createWindow();
 
@@ -448,29 +497,16 @@ app.on("before-quit", () => {
 });
 
 app.on("will-quit", async () => {
-  // Stop the XState sync engine first
-  const engine = getSyncEngine();
-  engine.stop();
-
-  // Stop iMessage watcher
+  // Stop sync engine and watchers
+  getSyncEngine().stop();
   getIMessageWatcher().stop();
-
-  // Gracefully stop contacts watcher
   getContactsWatcher().stop();
 
-  // Stop services that may not be initialized - log warnings but don't fail shutdown
-  const safeCleanup = async (fn: () => void | Promise<void>, name: string): Promise<void> => {
-    try {
-      await fn();
-    } catch (error) {
-      console.warn(`[Main] Cleanup failed for ${name}:`, error instanceof Error ? error.message : error);
-    }
-  };
-
-  await safeCleanup(() => getMessageQueueProcessor().stop(), 'MessageQueueProcessor');
-  await safeCleanup(() => getReactiveConvexClient().close(), 'ReactiveConvexClient');
-  await safeCleanup(() => getHeartbeatManager().stop(), 'HeartbeatManager');
-  await safeCleanup(() => getTrayManager().destroy(), 'TrayManager');
-  await safeCleanup(() => getPowerManager().destroy(), 'PowerManager');
+  // Cleanup services (may not be initialized)
+  await safeCleanup(() => getMessageQueueProcessor().stop(), "MessageQueueProcessor");
+  await safeCleanup(() => getConvexClient().close(), "ConvexClient");
+  await safeCleanup(() => getHeartbeatManager().stop(), "HeartbeatManager");
+  await safeCleanup(() => getTrayManager().destroy(), "TrayManager");
+  await safeCleanup(() => getPowerManager().destroy(), "PowerManager");
   await cleanupSyncManagers();
 });

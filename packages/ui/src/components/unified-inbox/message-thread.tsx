@@ -2,7 +2,7 @@
 
 import { useEffect, useRef } from "react"
 import { InboxConversationAvatar } from "./conversation-avatar"
-import { InboxMessageBubble } from "./message-bubble"
+import { InboxMessageBubble, type InboxMessageSpacing } from "./message-bubble"
 import { InboxPlatformBadge } from "./platform-badge"
 import { cn } from "../../lib/utils"
 import type { InboxMessage } from "./message-types"
@@ -84,6 +84,25 @@ function shouldShowSenderName(
 
   // Show if sender changed
   return message.sender?._id !== prevMessage.sender?._id
+}
+
+function getMessageSpacing(
+  message: InboxMessage,
+  prevMessage: InboxMessage | undefined
+): InboxMessageSpacing {
+  if (!prevMessage) return "normal"
+
+  // Different sender direction = wide gap
+  if (message.isFromMe !== prevMessage.isFromMe) return "wide"
+
+  // Same sender direction but different person (group chat) = wide gap
+  if (!message.isFromMe && message.sender?._id !== prevMessage.sender?._id) {
+    return "wide"
+  }
+
+  // Same sender - check time gap (>2 min = normal spacing)
+  const timeDiffMinutes = (message.sentAt - prevMessage.sentAt) / 1000 / 60
+  return timeDiffMinutes > 2 ? "normal" : "tight"
 }
 
 export function InboxMessageThread({
@@ -196,7 +215,7 @@ export function InboxMessageThread({
             </div>
 
             {/* Messages for this date */}
-            <div className="space-y-1.5">
+            <div>
               {dateMessages.map((message, idx) => {
                 const prevMessage = idx > 0 ? dateMessages[idx - 1] : undefined
                 const isLast = idx === dateMessages.length - 1
@@ -207,6 +226,7 @@ export function InboxMessageThread({
                     message={message}
                     showTimestamp={shouldShowTimestamp(message, prevMessage, isLast)}
                     showSenderName={shouldShowSenderName(message, prevMessage, isGroup)}
+                    spacing={getMessageSpacing(message, prevMessage)}
                   />
                 )
               })}

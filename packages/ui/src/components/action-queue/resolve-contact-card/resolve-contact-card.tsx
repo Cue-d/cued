@@ -46,7 +46,7 @@ export function ResolveContactCard({
   const confidencePercent = Math.round(confidence * 100)
 
   return (
-    <Card className={cn("w-full h-full flex flex-col", className)}>
+    <Card className={cn("w-full h-full flex flex-col bg-transparent", className)}>
       <CardHeader className="pb-2 flex-shrink-0">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">

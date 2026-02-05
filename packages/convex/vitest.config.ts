@@ -13,13 +13,13 @@ export default defineConfig({
         inline: ["convex-test"],
       },
     },
-    include: ["convex/**/__tests__/**/*.test.ts"],
+    include: ["tests/**/*.test.ts"],
     coverage: {
       provider: "v8",
       include: ["convex/**/*.ts"],
       exclude: [
         "convex/_generated/**",
-        "convex/**/__tests__/**",
+        "tests/**",
         "convex/**/*.test.ts",
       ],
     },

@@ -3,9 +3,6 @@
 import * as React from "react";
 import {
   InboxIcon,
-  ListTodoIcon,
-  MessageSquareIcon,
-  UsersIcon,
   LinkIcon,
   SettingsIcon,
   LogOutIcon,
@@ -16,7 +13,6 @@ import {
 import { motion, AnimatePresence } from "motion/react";
 import { useTheme } from "next-themes";
 import { CuedLogo } from "./cued-logo";
-import { cn } from "../lib/utils";
 import { Avatar, AvatarFallback } from "./ui/avatar";
 import {
   DropdownMenu,
@@ -33,16 +29,12 @@ import {
   SidebarGroupContent,
   SidebarHeader,
   SidebarMenu,
-  SidebarMenuBadge,
   SidebarMenuButton,
   SidebarMenuItem,
 } from "./ui/sidebar";
 
 const navigation = [
   { title: "Inbox", href: "/inbox", icon: InboxIcon },
-  { title: "Actions", href: "/actions", icon: ListTodoIcon },
-  { title: "Assistant", href: "/assistant", icon: MessageSquareIcon },
-  { title: "Contacts", href: "/contacts", icon: UsersIcon },
 ];
 
 interface AppSidebarProps extends React.ComponentProps<typeof Sidebar> {
@@ -51,33 +43,17 @@ interface AppSidebarProps extends React.ComponentProps<typeof Sidebar> {
     email?: string;
   } | null;
   onSignOut?: () => void;
-  /** Number of pending actions for badge */
-  actionCount?: number;
 }
 
 export function AppSidebar({
   user,
   onSignOut,
-  actionCount = 0,
   ...props
 }: AppSidebarProps) {
   const { setTheme, resolvedTheme } = useTheme();
   const [mounted, setMounted] = React.useState(false);
-  const [prevCount, setPrevCount] = React.useState(actionCount);
-  const [isAnimating, setIsAnimating] = React.useState(false);
   const [logoHovered, setLogoHovered] = React.useState(false);
   const logoGroupRef = React.useRef<HTMLDivElement>(null);
-
-  // Animate badge when count changes
-  React.useEffect(() => {
-    if (actionCount !== prevCount && actionCount > 0) {
-      setIsAnimating(true);
-      const timer = setTimeout(() => setIsAnimating(false), 300);
-      setPrevCount(actionCount);
-      return () => clearTimeout(timer);
-    }
-    setPrevCount(actionCount);
-  }, [actionCount, prevCount]);
 
   React.useEffect(() => {
     setMounted(true);
@@ -145,16 +121,6 @@ export function AppSidebar({
                     <Icon className="size-4" />
                     <span>{title}</span>
                   </SidebarMenuButton>
-                  {title === "Actions" && actionCount > 0 && (
-                    <SidebarMenuBadge
-                      className={cn(
-                        "transition-transform duration-200",
-                        isAnimating && "scale-125"
-                      )}
-                    >
-                      {actionCount > 99 ? "99+" : actionCount}
-                    </SidebarMenuBadge>
-                  )}
                 </SidebarMenuItem>
               ))}
             </SidebarMenu>

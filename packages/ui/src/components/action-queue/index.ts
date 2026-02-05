@@ -1,18 +1,8 @@
 export { SnoozePicker } from "./SnoozePicker"
 export type { SnoozePickerProps } from "./SnoozePicker"
 
-export { CardStack } from "./CardStack"
-export type {
-  CardStackProps,
-  ActionItem,
-  SwipeDirection,
-} from "./CardStack"
-
 // Re-export ActionContext for convenience
 export type { ActionContext } from "../../actions/types"
-
-export { SwipeableCard } from "./swipeable-card"
-export type { SwipeableCardProps } from "./swipeable-card"
 
 export { MessageResponseCard } from "./message-response-card"
 export type {
@@ -40,10 +30,13 @@ export type {
 } from "./resolve-contact-card"
 
 export {
-  ActionFilterChips,
   ACTION_FILTER_GROUPS,
-} from "./action-filter-chips"
-export type {
-  ActionFilterChipsProps,
-  FilterGroup,
-} from "./action-filter-chips"
+  getGroupCount,
+  type FilterGroup,
+} from "./filter-utils"
+
+export { ActionFilterChips } from "./action-filter-chips"
+export type { ActionFilterChipsProps } from "./action-filter-chips"
+
+export { ActionFilterDropdown } from "./action-filter-dropdown"
+export type { ActionFilterDropdownProps } from "./action-filter-dropdown"

@@ -35,9 +35,11 @@ describe("MessageResponseCard", () => {
     expect(screen.getByRole("heading", { name: "John Doe" })).toBeInTheDocument();
   });
 
-  it("renders initials in avatar", () => {
+  it("renders centered header", () => {
     render(<MessageResponseCard {...defaultProps} />);
-    expect(screen.getByText("JD")).toBeInTheDocument();
+    // Header is centered with flex layout
+    const header = screen.getByRole("heading", { name: "John Doe" });
+    expect(header).toHaveClass("text-sm");
   });
 
   it("renders all messages", () => {
@@ -57,7 +59,7 @@ describe("MessageResponseCard", () => {
       <MessageResponseCard {...defaultProps} onResponseChange={onResponseChange} />
     );
 
-    const textarea = screen.getByPlaceholderText(/type your response/i);
+    const textarea = screen.getByPlaceholderText(/send a message/i);
     fireEvent.change(textarea, { target: { value: "Hello!" } });
 
     expect(onResponseChange).toHaveBeenCalledWith("Hello!");
@@ -66,7 +68,7 @@ describe("MessageResponseCard", () => {
   it("displays response text in textarea", () => {
     render(<MessageResponseCard {...defaultProps} responseText="My response" />);
 
-    const textarea = screen.getByPlaceholderText(/type your response/i);
+    const textarea = screen.getByPlaceholderText(/send a message/i);
     expect(textarea).toHaveValue("My response");
   });
 

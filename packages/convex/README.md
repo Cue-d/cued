@@ -39,10 +39,9 @@ Tests use [convex-test](https://docs.convex.dev/testing/convex-test) with Vitest
 ### Test Structure
 
 ```
-convex/
-  __tests__/
-    helpers.ts       # Test utilities and data factories
-    actions.test.ts  # Tests for actions.ts
+tests/
+  helpers.util.ts  # Test utilities and data factories
+  actions.test.ts  # Tests for actions.ts
     contacts.test.ts # Tests for contacts.ts
     sync.test.ts     # Tests for sync.ts
 ```
@@ -74,7 +73,7 @@ describe("actions", () => {
 
 - **Direct DB access**: Use `t.run()` to directly read/write the database
 - **Schema validation**: Pass `schema` to `convexTest()` for proper type checking
-- **Test helpers**: Use factories from `helpers.ts` for consistent test data
+- **Test helpers**: Use factories from `helpers.util.ts` for consistent test data
 - **Isolated tests**: Each test starts with a fresh, empty database
 
 ### Limitations

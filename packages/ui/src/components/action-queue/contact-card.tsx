@@ -114,7 +114,7 @@ export const ContactCard = React.forwardRef<ContactCardRef, ContactCardProps>(
     return (
       <Card
         className={cn(
-          "w-full h-full flex flex-col overflow-hidden gap-0 border-0 p-0",
+          "w-full h-full flex flex-col overflow-hidden gap-0 border-0 p-0 bg-transparent",
           className
         )}
       >

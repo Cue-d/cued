@@ -1,38 +1,8 @@
-import * as React from "react"
-import { getActionTypesByCategory } from "@cued/shared"
+import { ACTION_FILTER_GROUPS, getGroupCount, type FilterGroup } from "./filter-utils"
 import { cn } from "../../lib/utils"
 import { Button } from "../ui/button"
 
-// Derive filter groups from the action registry
-const messageTypes = getActionTypesByCategory("message")
-const contactTypes = getActionTypesByCategory("contact")
-
-/** Filter group definitions - derived from action registry */
-export const ACTION_FILTER_GROUPS = {
-  all: {
-    label: "All",
-    types: null, // null means no filter
-  },
-  messages: {
-    label: "Messages",
-    // respond, send_message (message category actions for direct responses)
-    types: messageTypes.filter((t) => t === "respond" || t === "send_message"),
-  },
-  contacts: {
-    label: "Contacts",
-    // resolve_contact, new_connection (contact actions for contact management)
-    types: contactTypes.filter((t) => t === "resolve_contact" || t === "new_connection"),
-  },
-  followups: {
-    label: "Follow-ups",
-    // follow_up, eod_contact (remaining actions for scheduled follow-ups)
-    types: [...messageTypes, ...contactTypes].filter(
-      (t) => t === "follow_up" || t === "eod_contact"
-    ),
-  },
-} as const
-
-export type FilterGroup = keyof typeof ACTION_FILTER_GROUPS
+export { ACTION_FILTER_GROUPS, type FilterGroup }
 
 export interface ActionFilterChipsProps {
   /** Counts by action type { respond: 5, resolve_contact: 3, ... } */
@@ -47,19 +17,6 @@ export interface ActionFilterChipsProps {
   vertical?: boolean
   /** Optional class name */
   className?: string
-}
-
-/** Calculate count for a filter group */
-function getGroupCount(
-  group: FilterGroup,
-  counts: Record<string, number>,
-  total: number
-): number {
-  const config = ACTION_FILTER_GROUPS[group]
-  if (config.types === null) {
-    return total
-  }
-  return config.types.reduce((sum, type) => sum + (counts[type] ?? 0), 0)
 }
 
 export function ActionFilterChips({

@@ -3,6 +3,7 @@ export * from "./hooks"
 export * from "./components/unified-inbox"
 export * from "./components/assistant"
 export * from "./components/action-queue"
+export * from "./components/three-panel-layout"
 // Action card registry
 export type { ActionContext, ActionCardProps, ActionCardComponent } from "./actions/types"
 export { MessageCard, RespondCard, FollowUpCard, SendMessageCard } from "./actions/cards/message-card"

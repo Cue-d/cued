@@ -13,7 +13,7 @@ import { api } from "@cued/convex";
 import type { Id, Doc } from "@cued/convex";
 import type { ActionPlatform, QueuedMessage } from "@cued/shared";
 import {
-  getReactiveConvexClient,
+  getConvexClient,
   type Unsubscribe,
 } from "../convex-client.js";
 import { getAdapter, SERVER_SIDE_PLATFORMS } from "../adapters/index.js";
@@ -50,7 +50,7 @@ export class MessageQueueProcessor {
     }
 
     this.stopped = false;
-    const client = getReactiveConvexClient();
+    const client = getConvexClient();
 
     console.log("[MessageQueueProcessor] Starting WebSocket subscription...");
 
@@ -82,7 +82,7 @@ export class MessageQueueProcessor {
     if (this.stopped) return;
 
     try {
-      const client = getReactiveConvexClient();
+      const client = getConvexClient();
       const result = await client.query(api.messageQueue.getQueuedMessages, { limit: 20 });
       console.log(`[MessageQueueProcessor] Initial poll found ${result.messages.length} pending messages`);
       if (result.messages.length > 0) {
@@ -229,7 +229,7 @@ export class MessageQueueProcessor {
     error?: string
   ): Promise<void> {
     try {
-      const client = getReactiveConvexClient();
+      const client = getConvexClient();
       await client.mutation(api.messageQueue.updateMessageStatus, {
         messageId,
         status,

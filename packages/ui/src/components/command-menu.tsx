@@ -3,9 +3,6 @@
 import * as React from "react"
 import {
   InboxIcon,
-  ListTodoIcon,
-  MessageSquareIcon,
-  UsersIcon,
   SettingsIcon,
   Search,
 } from "lucide-react"
@@ -29,9 +26,6 @@ interface NavItem {
 
 const navItems: NavItem[] = [
   { label: "Inbox", href: "/inbox", icon: <InboxIcon className="w-4 h-4" />, shortcut: "⌘1" },
-  { label: "Actions", href: "/actions", icon: <ListTodoIcon className="w-4 h-4" />, shortcut: "⌘2" },
-  { label: "Assistant", href: "/assistant", icon: <MessageSquareIcon className="w-4 h-4" />, shortcut: "⌘3" },
-  { label: "Contacts", href: "/contacts", icon: <UsersIcon className="w-4 h-4" />, shortcut: "⌘4" },
   { label: "Settings", href: "/settings", icon: <SettingsIcon className="w-4 h-4" /> },
 ]
 
@@ -60,10 +54,10 @@ export function CommandMenu({ open: controlledOpen, onOpenChange }: CommandMenuP
         return
       }
 
-      // Cmd+1/2/3/4 for quick navigation
+      // Cmd+1/2 for quick navigation
       if ((e.metaKey || e.ctrlKey) && !e.shiftKey && !e.altKey) {
         const num = parseInt(e.key)
-        if (num >= 1 && num <= 4) {
+        if (num >= 1 && num <= navItems.length) {
           e.preventDefault()
           const item = navItems[num - 1]
           if (item) {

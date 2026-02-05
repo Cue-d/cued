@@ -291,7 +291,7 @@ export default function ActionDetailScreen(): React.JSX.Element {
               <TextInput
                 value={responseText}
                 onChangeText={setResponseText}
-                placeholder="Type your response..."
+                placeholder="Send a message..."
                 placeholderTextColorClassName="accent-muted-foreground"
                 multiline
                 className="min-h-[100px] bg-sf-secondaryBg rounded-xl p-3 text-sf-label text-sm"

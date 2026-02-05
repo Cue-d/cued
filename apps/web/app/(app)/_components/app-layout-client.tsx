@@ -3,7 +3,7 @@
 import { ReactNode, useCallback, useEffect, useRef } from "react";
 import { signOut } from "@workos-inc/authkit-nextjs";
 import { useQuery, useMutation } from "convex/react";
-import { api, Id } from "@cued/convex";
+import { api, type Id } from "@cued/convex";
 import {
   SidebarProvider,
   SidebarInset,
@@ -30,7 +30,6 @@ export function AppLayoutClient({
   workosProfile,
 }: AppLayoutClientProps) {
   const userProfile = useQuery(api.users.getProfile);
-  const actionCountResult = useQuery(api.actions.getPendingActionCount, {});
   const syncProfile = useMutation(api.users.syncProfile);
   const hasSynced = useRef(false);
 
@@ -84,8 +83,6 @@ export function AppLayoutClient({
       }
     : null;
 
-  const actionCount = actionCountResult?.count ?? 0;
-
   const handleSignOut = useCallback(() => {
     signOut();
   }, []);
@@ -97,7 +94,7 @@ export function AppLayoutClient({
       onSendNow={handleSendNow}
     >
       <SidebarProvider>
-        <AppSidebar user={user} onSignOut={handleSignOut} actionCount={actionCount} />
+        <AppSidebar user={user} onSignOut={handleSignOut} />
         <SidebarInset>{children}</SidebarInset>
         <CommandMenu />
       </SidebarProvider>

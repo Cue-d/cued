@@ -1,5 +1,5 @@
-import * as React from "react"
-import { Mail, MessageSquare, Phone, ChevronDown, ChevronUp, Linkedin, Twitter, User } from "lucide-react"
+import { useState } from "react"
+import { ChevronDown, ChevronUp, Linkedin, Mail, MessageSquare, Phone, Twitter, User } from "lucide-react"
 import { getInitials, type ContactHandle } from "@cued/shared"
 import { cn } from "../../../lib/utils"
 import { Avatar, AvatarFallback } from "../../ui/avatar"
@@ -68,7 +68,7 @@ function HandleRow({ handle }: { handle: ContactHandle }) {
 
 export function ContactPanel({ name, company, handles, className }: ContactPanelProps) {
   const initials = getInitials(name)
-  const [expanded, setExpanded] = React.useState(false)
+  const [expanded, setExpanded] = useState(false)
 
   // Show first 2 handles collapsed, all when expanded
   const visibleHandles = expanded ? handles : handles.slice(0, 2)

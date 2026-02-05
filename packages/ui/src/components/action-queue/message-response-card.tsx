@@ -1,22 +1,22 @@
 "use client"
 
 import * as React from "react"
+import { X } from "lucide-react"
 import {
-  getInitials,
-  formatRelativeTime,
   type ActionPlatform,
   type DisplayMessage,
 } from "@cued/shared"
 import { cn } from "../../lib/utils"
-import { Avatar, AvatarFallback } from "../ui/avatar"
+import { Button } from "../ui/button"
 import { Card, CardContent, CardFooter, CardHeader } from "../ui/card"
+import { Tooltip, TooltipTrigger, TooltipContent } from "../ui/tooltip"
 import { MessageBubble } from "./message-response-card/message-bubble"
 import { PlatformBadge } from "./message-response-card/platform-badge"
 import { ResponseInput } from "./message-response-card/response-input"
 
 /** Re-export sub-components for advanced usage */
 export { PlatformBadge, PLATFORM_ICONS, type PlatformBadgeProps } from "./message-response-card/platform-badge"
-export { MessageBubble, ReactionBadges, DeliveryStatus, type MessageBubbleProps } from "./message-response-card/message-bubble"
+export { MessageBubble, ReactionBadges, DeliveryStatus, type MessageBubbleProps, type MessageSpacing } from "./message-response-card/message-bubble"
 export { ResponseInput, type ResponseInputProps } from "./message-response-card/response-input"
 
 export interface MessageResponseCardProps {
@@ -30,6 +30,12 @@ export interface MessageResponseCardProps {
   responseText: string
   /** Called when response text changes */
   onResponseChange: (text: string) => void
+  /** Called when user triggers send */
+  onSend?: () => void
+  /** Called when user dismisses the action */
+  onDismiss?: () => void
+  /** Whether a send is in progress */
+  isSending?: boolean
   /** Optional class name */
   className?: string
   /** Auto-focus textarea on mount */
@@ -61,6 +67,9 @@ export const MessageResponseCard = React.forwardRef<
     messages,
     responseText,
     onResponseChange,
+    onSend,
+    onDismiss,
+    isSending = false,
     className,
     autoFocus = true,
     platform,
@@ -97,46 +106,79 @@ export const MessageResponseCard = React.forwardRef<
     return () => clearTimeout(timer)
   }, [messages])
 
-  const initials = getInitials(personName)
-
   // Sort messages chronologically (oldest first)
   const sortedMessages = React.useMemo(
     () => [...messages].sort((a, b) => a.sentAt - b.sentAt),
     [messages]
   )
 
+  function shouldShowSenderName(msg: DisplayMessage, idx: number): boolean {
+    if (msg.isFromMe) return false
+    if (!msg.senderName) return false
+    if (idx === 0) return true
+    const prevMsg = sortedMessages[idx - 1]
+    if (prevMsg.isFromMe) return true
+    return prevMsg.senderName !== msg.senderName
+  }
+
+  function getMessageSpacing(msg: DisplayMessage, idx: number): "tight" | "normal" | "wide" {
+    if (idx === 0) return "normal"
+    const prevMsg = sortedMessages[idx - 1]
+
+    // Different sender direction = wide gap
+    if (msg.isFromMe !== prevMsg.isFromMe) return "wide"
+
+    // Same sender direction but different person (group chat) = wide gap
+    if (!msg.isFromMe && msg.senderName !== prevMsg.senderName) return "wide"
+
+    // Same sender - check time gap (>2 min = normal spacing)
+    const timeDiffMinutes = (msg.sentAt - prevMsg.sentAt) / 1000 / 60
+    return timeDiffMinutes > 2 ? "normal" : "tight"
+  }
+
   return (
     <Card
       className={cn(
-        "w-full h-full flex flex-col overflow-hidden gap-0 border-0 p-0",
+        "w-full h-full flex flex-col overflow-hidden gap-0 border-0 p-0 bg-transparent",
         className
       )}
     >
       {/* Header */}
-      <CardHeader className="shrink-0 p-4">
-        <div className="flex items-center gap-x-3">
-          <Avatar size="sm">
-            <AvatarFallback>{initials}</AvatarFallback>
-          </Avatar>
-          <div className="flex-1 min-w-0">
+      <CardHeader className="shrink-0 py-3">
+        <div className="flex items-center">
+          <div className="flex-1" />
+          <div className="flex items-center justify-center">
             <h3 className="font-semibold text-sm text-foreground truncate">
               {personName}
             </h3>
-            {messageTimestamp && (
-              <p className="text-xs text-muted-foreground">
-                {formatRelativeTime(messageTimestamp)}
-              </p>
+
+            {/* Platform Selector */}
+            {platform && (
+              <PlatformBadge
+                platform={platform}
+                availablePlatforms={availablePlatforms}
+                onPlatformChange={onPlatformChange}
+              />
             )}
           </div>
-
-          {/* Platform Selector */}
-          {platform && (
-            <PlatformBadge
-              platform={platform}
-              availablePlatforms={availablePlatforms}
-              onPlatformChange={onPlatformChange}
-            />
-          )}
+          <div className="flex-1 flex justify-end">
+            {onDismiss && (
+              <Tooltip>
+                <TooltipTrigger>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    onClick={onDismiss}
+                    aria-label="Dismiss action"
+                    className="size-8"
+                  >
+                    <X className="size-4" />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent>Dismiss</TooltipContent>
+              </Tooltip>
+            )}
+          </div>
         </div>
       </CardHeader>
 
@@ -147,9 +189,9 @@ export const MessageResponseCard = React.forwardRef<
           className="h-full overflow-y-auto [&::-webkit-scrollbar]:w-2 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:bg-border/50 [scrollbar-width:thin]"
           style={{ scrollbarColor: "rgba(128, 128, 128, 0.5) transparent" }}
         >
-          <div className="py-4 px-4 space-y-2">
+          <div className="py-4 px-4">
             {sortedMessages.length > 0 ? (
-              sortedMessages.map((msg) => (
+              sortedMessages.map((msg, idx) => (
                 <MessageBubble
                   key={msg._id}
                   id={msg._id}
@@ -159,6 +201,8 @@ export const MessageResponseCard = React.forwardRef<
                   senderName={msg.senderName}
                   status={msg.status}
                   reactions={msg.reactions}
+                  showSenderName={shouldShowSenderName(msg, idx)}
+                  spacing={getMessageSpacing(msg, idx)}
                 />
               ))
             ) : (
@@ -171,11 +215,13 @@ export const MessageResponseCard = React.forwardRef<
       </CardContent>
 
       {/* Response Input */}
-      <CardFooter className="p-4 bg-transparent" data-selectable="true">
+      <CardFooter className="p-2 bg-transparent" data-selectable="true">
         <ResponseInput
           value={responseText}
           onChange={onResponseChange}
-          placeholder="Type your response... (swipe right to send)"
+          onSend={onSend}
+          isSending={isSending}
+          placeholder="Send a message..."
           textareaRef={textareaRef}
         />
       </CardFooter>

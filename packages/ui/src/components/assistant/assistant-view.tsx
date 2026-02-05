@@ -127,10 +127,11 @@ export function AssistantView({
         <ConversationScrollButton />
       </Conversation>
 
-      <div className="bg-background/95 px-4 py-5 backdrop-blur-xl">
+      <div className="p-2">
         <div className="mx-auto max-w-2xl">
           <PromptInput
             accept="image/*"
+            className="border border-border/60 bg-background/80 rounded-lg backdrop-blur-sm transition-all focus-within:border-primary/40 focus-within:shadow-md focus-within:shadow-primary/5 [&>[data-slot=input-group]]:border-0 [&>[data-slot=input-group]]:shadow-none [&>[data-slot=input-group]]:bg-transparent"
             multiple
             onSubmit={(message) => {
               if (!message.text.trim() && message.files.length === 0) return;

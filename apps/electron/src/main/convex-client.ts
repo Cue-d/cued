@@ -1,5 +1,5 @@
 /**
- * Reactive ConvexClient singleton for Electron.
+ * ConvexClient singleton for Electron.
  * Provides WebSocket-based subscriptions for real-time query updates.
  *
  * Unlike ConvexHttpClient (used for one-shot requests), this client maintains
@@ -30,7 +30,7 @@ export type Unsubscribe<T> = {
 
 type TokenProvider = (forceRefresh?: boolean) => Promise<string | null>;
 
-export interface ReactiveConvexClientOptions {
+export interface ConvexClientOptions {
   /** Function to get a valid auth token (should handle refresh internally) */
   getAuthToken?: TokenProvider;
   /** Called when auth becomes invalid and cannot be refreshed */
@@ -43,7 +43,7 @@ export interface ReactiveConvexClientOptions {
  * - Type-safe subscribe() helper for reactive queries
  * - Type-safe mutation() helper for mutations
  */
-class ReactiveConvexClient {
+class ElectronConvexClient {
   private client: ConvexClient;
   private tokenProvider: TokenProvider | null = null;
   private onAuthInvalid: (() => void) | null = null;
@@ -80,7 +80,7 @@ class ReactiveConvexClient {
       async () => {
         const token = await this.tokenProvider?.();
         if (!token) {
-          console.warn("[ReactiveConvexClient] Token provider returned null");
+          console.warn("[ConvexClient] Token provider returned null");
           return null;
         }
         return token;
@@ -88,7 +88,7 @@ class ReactiveConvexClient {
       (isAuth) => {
         const wasAuthenticated = this.isAuthenticated;
         this.isAuthenticated = isAuth;
-        console.log(`[ReactiveConvexClient] Auth state changed: ${isAuth}`);
+        console.log(`[ConvexClient] Auth state changed: ${isAuth}`);
 
         // Notify if auth was lost
         if (wasAuthenticated && !isAuth) {
@@ -190,18 +190,18 @@ class ReactiveConvexClient {
 }
 
 // Singleton instance
-let instance: ReactiveConvexClient | null = null;
+let instance: ElectronConvexClient | null = null;
 
 /**
- * Get the singleton ReactiveConvexClient instance.
+ * Get the singleton ElectronConvexClient instance.
  *
  * @param options - Optional configuration (only applied on first call)
  */
-export function getReactiveConvexClient(
-  options?: ReactiveConvexClientOptions
-): ReactiveConvexClient {
+export function getConvexClient(
+  options?: ConvexClientOptions
+): ElectronConvexClient {
   if (!instance) {
-    instance = new ReactiveConvexClient();
+    instance = new ElectronConvexClient();
     if (options?.getAuthToken) {
       instance.setTokenProvider(options.getAuthToken);
     }
@@ -212,4 +212,4 @@ export function getReactiveConvexClient(
   return instance;
 }
 
-export { ReactiveConvexClient };
+export { ElectronConvexClient };
