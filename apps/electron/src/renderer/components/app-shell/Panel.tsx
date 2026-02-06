@@ -19,7 +19,7 @@ export interface PanelProps {
 /**
  * Panel - Base container component for app panels
  * Provides consistent styling for panel containers including:
- * - Background color (theme-aware using foreground-2)
+ * - Background color
  * - Overflow handling
  * - Shadow and rounded corners matching Craft Agents design
  */
@@ -42,7 +42,7 @@ export function Panel({
   return (
     <div
       className={cn(
-        'h-full flex flex-col min-w-0 overflow-hidden bg-foreground-2 shadow-middle',
+        'h-full flex flex-col min-w-0 overflow-hidden bg-background shadow-middle',
         roundedClasses[position],
         variant === 'grow' && 'flex-1',
         variant === 'shrink' && 'shrink-0',
@@ -95,7 +95,7 @@ export function PanelHeader({
       </div>
 
       {children && (
-        <div className="no-drag shrink-0 flex items-center gap-2">
+        <div className="no-drag absolute right-4 top-1/2 -translate-y-1/2 flex items-center gap-2">
           {children}
         </div>
       )}

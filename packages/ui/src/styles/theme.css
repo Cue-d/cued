@@ -98,12 +98,6 @@
   --color-background: var(--background);
   --color-foreground: var(--foreground);
 
-  /* Foreground mix variants */
-  --color-foreground-2: var(--foreground-2);
-  --color-foreground-3: var(--foreground-3);
-  --color-foreground-5: var(--foreground-5);
-  --color-foreground-7: var(--foreground-7);
-  --color-foreground-10: var(--foreground-10);
   --color-card: var(--card);
   --color-card-foreground: var(--card-foreground);
   --color-popover: var(--popover);
@@ -259,13 +253,6 @@
   --foreground: oklch(14.5% 0 0);
   --foreground-rgb: 0, 0, 0;
 
-  /* Foreground mix variants (solid interpolation toward background) */
-  --foreground-2: color-mix(in srgb, var(--foreground) 2%, var(--background));
-  --foreground-3: color-mix(in srgb, var(--foreground) 3%, var(--background));
-  --foreground-5: color-mix(in srgb, var(--foreground) 5%, var(--background));
-  --foreground-7: color-mix(in srgb, var(--foreground) 7%, var(--background));
-  --foreground-10: color-mix(in srgb, var(--foreground) 10%, var(--background));
-
   /* Muted */
   --muted: oklch(97.5% 0.003 85);
   --muted-foreground: oklch(55.6% 0 0);
@@ -372,13 +359,6 @@
   --foreground-rgb: 255, 255, 255;
   --shadow-border-opacity: 0.15;
   --shadow-blur-opacity: 0.12;
-
-  /* Foreground mix variants (solid interpolation toward background) */
-  --foreground-2: color-mix(in srgb, var(--foreground) 2%, var(--background));
-  --foreground-3: color-mix(in srgb, var(--foreground) 3%, var(--background));
-  --foreground-5: color-mix(in srgb, var(--foreground) 5%, var(--background));
-  --foreground-7: color-mix(in srgb, var(--foreground) 7%, var(--background));
-  --foreground-10: color-mix(in srgb, var(--foreground) 10%, var(--background));
 
   /* Muted */
   --muted: oklch(24% 0.003 100);

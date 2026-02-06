@@ -4,9 +4,24 @@ import {
   Users,
   HelpCircle,
   PanelLeftClose,
+  Settings,
+  Puzzle,
+  Keyboard,
+  LogOut,
+  MessageCircle,
+  BookOpen,
   type LucideIcon,
 } from 'lucide-react'
-import { Badge, cn } from '@cued/ui'
+import {
+  Badge,
+  cn,
+  DropdownMenu,
+  DropdownMenuTrigger,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuShortcut,
+} from '@cued/ui'
 import { type ActionPlatform } from '@cued/shared'
 import { IntegrationsMenu } from './IntegrationsMenu'
 import { type UserProfile } from './types'
@@ -30,8 +45,11 @@ interface LeftSidebarProps {
   onNavigate: (page: NavPage) => void
   /** Navigate directly to shortcuts page */
   onNavigateToShortcuts?: () => void
+  /** Navigate directly to integrations page */
+  onNavigateToIntegrations?: () => void
+  /** Sign out callback */
+  onSignOut?: () => void
   actionCount?: number
-  contactCount?: number
   isCollapsed?: boolean
   /** User profile for bottom section */
   user?: UserProfile | null
@@ -50,8 +68,9 @@ export function LeftSidebar({
   currentPage,
   onNavigate,
   onNavigateToShortcuts,
+  onNavigateToIntegrations,
+  onSignOut,
   actionCount,
-  contactCount,
   isCollapsed = false,
   user,
   onToggle,
@@ -62,8 +81,6 @@ export function LeftSidebar({
     switch (id) {
       case 'actions':
         return actionCount
-      case 'contacts':
-        return contactCount
       default:
         return undefined
     }
@@ -140,31 +157,62 @@ export function LeftSidebar({
       {/* Bottom Section: Profile + Help */}
       <div className="mt-auto shrink-0 py-2 px-2">
         <div className="flex items-center gap-1">
-          {/* Profile button */}
-          <button
-            onClick={() => onNavigate('settings')}
-            className={cn(
-              'flex items-center gap-2 cursor-pointer flex-1 min-w-0 px-2 py-1.5 rounded-md',
-              'text-foreground hover:bg-foreground/5',
-              'focus:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2',
-              isCollapsed && 'h-9 w-9 shrink-0 justify-center p-0'
-            )}
-          >
-            {/* Avatar */}
-            <div className="h-5 w-5 rounded-full bg-foreground text-background text-[10px] font-medium flex items-center justify-center shrink-0 ring-1 ring-border/50">
-              {userInitial}
-            </div>
-            <span className="text-sm truncate text-accent-foreground">{displayName}</span>
-          </button>
+          {/* Profile dropdown */}
+          <DropdownMenu>
+            <DropdownMenuTrigger
+              className={cn(
+                'flex items-center gap-2 cursor-pointer flex-1 min-w-0 px-2 py-1.5 rounded-md',
+                'text-foreground hover:bg-foreground/5',
+                'focus:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2',
+                isCollapsed && 'h-9 w-9 shrink-0 justify-center p-0'
+              )}
+            >
+              <div className="h-5 w-5 rounded-full bg-foreground text-background text-[10px] font-medium flex items-center justify-center shrink-0 ring-1 ring-border/50">
+                {userInitial}
+              </div>
+              <span className="text-sm truncate text-accent-foreground">{displayName}</span>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent side="top" align="start" sideOffset={8} className="min-w-[180px]">
+              <DropdownMenuItem onClick={() => onNavigate('settings')}>
+                <Settings className="h-4 w-4" />
+                Settings
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={onNavigateToIntegrations}>
+                <Puzzle className="h-4 w-4" />
+                Integrations
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={onNavigateToShortcuts}>
+                <Keyboard className="h-4 w-4" />
+                Shortcuts
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem variant="destructive" onClick={onSignOut}>
+                <LogOut className="h-4 w-4" />
+                Sign out
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
 
-          {/* Help button */}
-          <button
-            onClick={onNavigateToShortcuts}
-            className="flex items-center justify-center h-7 w-7 rounded-[6px] select-none outline-none hover:bg-foreground/5 focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-ring"
-            title="Keyboard shortcuts"
-          >
-            <HelpCircle className="h-4 w-4 text-foreground/60" />
-          </button>
+          {/* Help dropdown */}
+          <DropdownMenu>
+            <DropdownMenuTrigger
+              className="flex items-center justify-center h-7 w-7 rounded-[6px] select-none outline-none hover:bg-foreground/5 focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-ring"
+            >
+              <HelpCircle className="h-4 w-4 text-foreground/60" />
+            </DropdownMenuTrigger>
+            <DropdownMenuContent side="top" align="end" sideOffset={8} className="min-w-[180px]">
+              <DropdownMenuItem disabled>
+                <MessageCircle className="h-4 w-4" />
+                Feedback
+                <DropdownMenuShortcut className="text-[10px] font-normal tracking-normal">Coming soon...</DropdownMenuShortcut>
+              </DropdownMenuItem>
+              <DropdownMenuItem disabled>
+                <BookOpen className="h-4 w-4" />
+                Docs
+                <DropdownMenuShortcut className="text-[10px] font-normal tracking-normal">Coming soon...</DropdownMenuShortcut>
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
         </div>
       </div>
     </div>

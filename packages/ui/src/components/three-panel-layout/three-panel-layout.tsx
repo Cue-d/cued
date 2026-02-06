@@ -1,6 +1,5 @@
-"use client"
-
 import * as React from "react"
+import { type AnimatedIconHandle } from "../../hooks/use-animated-icon"
 import { cn } from "../../lib/utils"
 
 const STORAGE_PREFIX = "three-panel-"
@@ -231,21 +230,41 @@ export function ListItem({ children, selected, onClick, className }: ListItemPro
 
 /**
  * EmptyState - A consistent empty state for panels
+ *
+ * Supports lucide-animated icons via `animatedIcon`. These auto-play
+ * their entrance animation on mount and loop every few seconds.
  */
 interface EmptyStateProps {
   icon?: React.ReactNode
+  /** A lucide-animated icon component. Will auto-play on mount and loop. Takes precedence over `icon`. */
+  animatedIcon?: React.ForwardRefExoticComponent<React.RefAttributes<AnimatedIconHandle> & { size?: number }>
   title: string
   description?: string
   action?: React.ReactNode
   className?: string
 }
 
-export function EmptyState({ icon, title, description, action, className }: EmptyStateProps) {
+function AnimatedEmptyIcon({ Component }: { Component: React.ForwardRefExoticComponent<React.RefAttributes<AnimatedIconHandle> & { size?: number }> }) {
+  const iconRef = React.useRef<AnimatedIconHandle>(null)
+
+  React.useEffect(() => {
+    if (!iconRef.current) return
+    iconRef.current.startAnimation()
+    const interval = setInterval(() => {
+      iconRef.current?.startAnimation()
+    }, 4000)
+    return () => clearInterval(interval)
+  }, [])
+
+  return <Component ref={iconRef} size={24} />
+}
+
+export function EmptyState({ icon, animatedIcon, title, description, action, className }: EmptyStateProps) {
   return (
     <div className={cn("flex flex-col items-center justify-center h-full text-center px-6", className)}>
-      {icon && (
-        <div className="w-12 h-12 rounded-full bg-muted flex items-center justify-center mb-4">
-          {icon}
+      {(animatedIcon || icon) && (
+        <div className="w-12 h-12 rounded-full bg-muted flex items-center justify-center mb-4 text-muted-foreground">
+          {animatedIcon ? <AnimatedEmptyIcon Component={animatedIcon} /> : icon}
         </div>
       )}
       <h3 className="font-semibold text-lg">{title}</h3>

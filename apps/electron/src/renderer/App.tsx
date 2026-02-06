@@ -1,5 +1,5 @@
-import { useState, useCallback, useEffect, useMemo } from "react"
-import { ConvexProvider, ConvexReactClient } from "convex/react"
+import { useState, useEffect, useCallback, useMemo } from "react"
+import { ConvexProviderWithAuth, ConvexReactClient } from "convex/react"
 import {
   Card,
   CardContent,
@@ -19,13 +19,43 @@ import { AssistantPage } from "./pages/AssistantPage"
 import { ContactsPage } from "./pages/ContactsPage"
 import { SettingsPage, type SettingsSubpage } from "./pages/SettingsPage"
 
-function AuthenticatedApp({ convexUrl, user }: { convexUrl: string; user?: { firstName?: string | null; lastName?: string | null; email?: string | null } | null }) {
+/**
+ * Auth hook for ConvexProviderWithAuth.
+ * Ensures queries only fire after the token is available.
+ */
+function useElectronConvexAuth() {
+  const { getAccessToken } = useConvexClient()
+  const auth = useAuthState()
+
+  const fetchAccessToken = useCallback(
+    async (_opts: { forceRefreshToken: boolean }) => {
+      // Electron's getAccessToken always returns a fresh token via
+      // getValidAccessToken() in the main process, so forceRefreshToken
+      // is inherently handled.
+      const token = await getAccessToken()
+      return token ?? null
+    },
+    [getAccessToken]
+  )
+
+  return {
+    isLoading: auth.isLoading,
+    isAuthenticated: auth.isAuthenticated,
+    fetchAccessToken,
+  }
+}
+
+function AuthenticatedApp({ convexUrl, user, onSignOut }: { convexUrl: string; user?: { firstName?: string | null; lastName?: string | null; email?: string | null } | null; onSignOut: () => void }) {
   const [currentPage, setCurrentPage] = useState<NavPage>("actions")
   const [actionCount, setActionCount] = useState(0)
-  const [contactCount, setContactCount] = useState(0)
   const [settingsSubpage, setSettingsSubpage] = useState<SettingsSubpage>('general')
   const [convex] = useState(() => new ConvexReactClient(convexUrl))
-  const { getAccessToken } = useConvexClient()
+
+  useEffect(() => {
+    return () => {
+      convex.close()
+    }
+  }, [convex])
 
   // Integration status hooks
   const { isLoggedIn: linkedInConnected } = useLinkedIn()
@@ -39,11 +69,6 @@ function AuthenticatedApp({ convexUrl, user }: { convexUrl: string; user?: { fir
     return platforms
   }, [linkedInConnected, slackConnected])
 
-  // Set up Convex auth
-  useEffect(() => {
-    convex.setAuth(getAccessToken)
-  }, [convex, getAccessToken])
-
   const handleNavigate = useCallback((page: NavPage) => setCurrentPage(page), [])
 
   const handleNavigateToShortcuts = useCallback(() => {
@@ -51,8 +76,7 @@ function AuthenticatedApp({ convexUrl, user }: { convexUrl: string; user?: { fir
     setSettingsSubpage('shortcuts')
   }, [])
 
-  const handlePlatformClick = useCallback(() => {
-    // Navigate to settings integrations section
+  const handleNavigateToIntegrations = useCallback(() => {
     setCurrentPage('settings')
     setSettingsSubpage('integrations')
   }, [])
@@ -64,7 +88,7 @@ function AuthenticatedApp({ convexUrl, user }: { convexUrl: string; user?: { fir
       case "assistant":
         return <AssistantPage />
       case "contacts":
-        return <ContactsPage onContactCountChange={setContactCount} />
+        return <ContactsPage />
       case "settings":
         return <SettingsPage subpage={settingsSubpage} onSubpageChange={setSettingsSubpage} />
       default:
@@ -74,20 +98,21 @@ function AuthenticatedApp({ convexUrl, user }: { convexUrl: string; user?: { fir
 
   return (
     <FocusProvider>
-      <ConvexProvider client={convex}>
+      <ConvexProviderWithAuth client={convex} useAuth={useElectronConvexAuth}>
         <AppShell
           currentPage={currentPage}
           onNavigate={handleNavigate}
           onNavigateToShortcuts={handleNavigateToShortcuts}
+          onNavigateToIntegrations={handleNavigateToIntegrations}
+          onSignOut={onSignOut}
           actionCount={actionCount}
-          contactCount={contactCount}
           user={user}
           connectedPlatforms={connectedPlatforms}
-          onPlatformClick={handlePlatformClick}
+          onPlatformClick={handleNavigateToIntegrations}
         >
           {renderPage()}
         </AppShell>
-      </ConvexProvider>
+      </ConvexProviderWithAuth>
     </FocusProvider>
   )
 }
@@ -190,5 +215,5 @@ function AppWithElectron() {
     )
   }
 
-  return <AuthenticatedApp convexUrl={convexUrl} user={auth.user} />
+  return <AuthenticatedApp convexUrl={convexUrl} user={auth.user} onSignOut={auth.signOut} />
 }

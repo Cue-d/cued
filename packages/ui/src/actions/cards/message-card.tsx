@@ -22,6 +22,8 @@ export function MessageCard({
   isSending,
   autoFocus,
   className,
+  openInApp,
+  onLinkClick,
 }: ActionCardProps) {
   // For top card with context, render with full data
   if (isTop && context) {
@@ -60,6 +62,8 @@ export function MessageCard({
         isSending={isSending}
         autoFocus={autoFocus}
         className={className}
+        openInApp={openInApp}
+        onLinkClick={onLinkClick}
       />
     );
   }
@@ -76,6 +80,8 @@ export function MessageCard({
       isSending={isSending}
       autoFocus={false}
       className={className}
+      openInApp={openInApp}
+      onLinkClick={onLinkClick}
     />
   );
 }

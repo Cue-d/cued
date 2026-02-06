@@ -1,5 +1,6 @@
 import { PLATFORM_CONFIG } from "@cued/shared"
 import { cn } from "../../lib/utils"
+import { PlatformIcon } from "../platform-icons"
 import type { InboxPlatform } from "./types"
 import type React from "react"
 
@@ -14,13 +15,13 @@ export function InboxPlatformBadge({ platform, className }: InboxPlatformBadgePr
   return (
     <span
       className={cn(
-        "inline-flex items-center justify-center w-4 h-4 rounded-full text-[10px] font-medium shrink-0",
+        "inline-flex items-center justify-center w-4 h-4 rounded-full shrink-0",
         config.bgClass,
         className
       )}
       title={config.label}
     >
-      {config.letter}
+      <PlatformIcon platform={platform} className="w-2.5 h-2.5" />
     </span>
   )
 }

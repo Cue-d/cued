@@ -100,11 +100,10 @@ describe("ChatMessage", () => {
       expect(message).toBeInTheDocument();
     });
 
-    it("renders user message with flex-row-reverse layout", () => {
+    it("renders user message with right-aligned layout", () => {
       const { container } = render(<ChatMessage message={userMessage} />);
-      // User messages should be on the right side with flex-row-reverse
-      const messageWrapper = container.querySelector(".flex-row-reverse");
-      expect(messageWrapper).toBeInTheDocument();
+      const messageWrapper = container.firstElementChild;
+      expect(messageWrapper).toHaveClass("flex", "flex-col", "items-end", "w-full");
     });
   });
 
@@ -125,11 +124,10 @@ describe("ChatMessage", () => {
       expect(screen.getByTestId("streamdown")).toBeInTheDocument();
     });
 
-    it("renders assistant message with flex-row layout", () => {
+    it("renders assistant message with assistant container layout", () => {
       const { container } = render(<ChatMessage message={assistantMessage} />);
-      // Assistant messages should be on the left side with flex-row
-      const messageWrapper = container.querySelector(".flex-row");
-      expect(messageWrapper).toBeInTheDocument();
+      const messageWrapper = container.firstElementChild;
+      expect(messageWrapper).toHaveClass("w-full", "space-y-1");
     });
   });
 
@@ -145,7 +143,7 @@ describe("ChatMessage", () => {
       expect(screen.getByTestId("loader")).toBeInTheDocument();
     });
 
-    it("does not show streaming indicator when content exists", () => {
+    it("shows response streaming indicator when content exists", () => {
       const message: MessageWithToolInvocations = {
         id: "msg-3",
         role: "assistant",
@@ -153,7 +151,7 @@ describe("ChatMessage", () => {
       };
 
       render(<ChatMessage message={message} isStreaming={true} />);
-      expect(screen.queryByTestId("loader")).not.toBeInTheDocument();
+      expect(screen.getByText("Streaming...")).toBeInTheDocument();
     });
   });
 
@@ -175,7 +173,7 @@ describe("ChatMessage", () => {
         };
 
         render(<ChatMessage message={message} />);
-        expect(screen.getByText(/Using search messages.../i)).toBeInTheDocument();
+        expect(screen.getByText(/search messages\.\.\./i)).toBeInTheDocument();
         // Should show loader for pending call
         expect(screen.getByTestId("loader")).toBeInTheDocument();
       });
@@ -196,7 +194,7 @@ describe("ChatMessage", () => {
         };
 
         render(<ChatMessage message={message} />);
-        expect(screen.getByText(/Using search contacts.../i)).toBeInTheDocument();
+        expect(screen.getByText(/search contacts\.\.\./i)).toBeInTheDocument();
       });
 
       it("shows multiple pending tool calls", () => {
@@ -221,8 +219,9 @@ describe("ChatMessage", () => {
         };
 
         render(<ChatMessage message={message} />);
-        expect(screen.getByText(/Using search messages.../i)).toBeInTheDocument();
-        expect(screen.getByText(/Using search contacts.../i)).toBeInTheDocument();
+        expect(
+          screen.getByText(/search messages,\s*search contacts\.\.\./i)
+        ).toBeInTheDocument();
       });
     });
 
@@ -275,7 +274,7 @@ describe("ChatMessage", () => {
         };
 
         render(<ChatMessage message={message} />);
-        expect(screen.getByTestId("collapsible")).toBeInTheDocument();
+        expect(screen.getAllByTestId("collapsible")).toHaveLength(2);
         expect(screen.getByText("2 tool results")).toBeInTheDocument();
       });
 
@@ -326,7 +325,7 @@ describe("ChatMessage", () => {
         render(<ChatMessage message={message} />);
         // Should show both completed artifact and pending indicator
         expect(screen.getByTestId("tool-artifact")).toBeInTheDocument();
-        expect(screen.getByText(/Using search contacts.../i)).toBeInTheDocument();
+        expect(screen.getByText(/search contacts\.\.\./i)).toBeInTheDocument();
       });
     });
   });

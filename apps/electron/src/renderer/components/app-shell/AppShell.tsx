@@ -29,10 +29,12 @@ interface AppShellProps {
   onNavigate: (page: NavPage) => void
   /** Navigate directly to shortcuts page */
   onNavigateToShortcuts?: () => void
+  /** Navigate directly to integrations page */
+  onNavigateToIntegrations?: () => void
+  /** Sign out callback */
+  onSignOut?: () => void
   /** Action count for badge */
   actionCount?: number
-  /** Contact count for badge */
-  contactCount?: number
   /** Page content - renders inside the main content area */
   children?: React.ReactNode
   /** Whether the sidebar is visible (controlled) */
@@ -56,8 +58,9 @@ export function AppShell({
   currentPage,
   onNavigate,
   onNavigateToShortcuts,
+  onNavigateToIntegrations,
+  onSignOut,
   actionCount,
-  contactCount,
   children,
   isSidebarVisible: controlledSidebarVisible,
   onSidebarVisibilityChange,
@@ -140,7 +143,7 @@ export function AppShell({
   }, [isResizing])
 
   return (
-    <div className="h-full flex items-stretch relative">
+    <div className="h-full flex items-stretch relative bg-background/65">
       {/* Left Sidebar */}
       <motion.div
         initial={false}
@@ -153,8 +156,9 @@ export function AppShell({
               currentPage={currentPage}
               onNavigate={onNavigate}
               onNavigateToShortcuts={onNavigateToShortcuts}
+              onNavigateToIntegrations={onNavigateToIntegrations}
+              onSignOut={onSignOut}
               actionCount={actionCount}
-              contactCount={contactCount}
               isCollapsed={!isSidebarVisible}
               user={user}
               onToggle={toggleSidebar}

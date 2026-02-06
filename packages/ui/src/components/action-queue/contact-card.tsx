@@ -1,8 +1,7 @@
-"use client";
-
 import * as React from "react";
 import { Building2, Clock, FileText, Link, Tag, User } from "lucide-react";
 import { getInitials, type ContactFormData } from "@cued/shared";
+import { OpenInAppButton } from "./open-in-app-button";
 import { cn } from "../../lib/utils";
 import { Avatar, AvatarFallback } from "../ui/avatar";
 import { Badge } from "../ui/badge";
@@ -16,6 +15,7 @@ import {
   SelectValue,
 } from "../ui/select";
 import { Textarea } from "../ui/textarea";
+import type { OpenInAppConfig } from "../../actions/types";
 
 /** Existing contact for linking dropdown */
 export interface ExistingContact {
@@ -41,6 +41,8 @@ export interface ContactCardProps {
   className?: string;
   /** Auto-focus name input on mount */
   autoFocus?: boolean;
+  /** Open-in-app deeplink config */
+  openInApp?: OpenInAppConfig | null;
 }
 
 export interface ContactCardRef {
@@ -83,6 +85,7 @@ export const ContactCard = React.forwardRef<ContactCardRef, ContactCardProps>(
       existingContacts = [],
       className,
       autoFocus = true,
+      openInApp,
     },
     ref
   ) {
@@ -147,6 +150,7 @@ export const ContactCard = React.forwardRef<ContactCardRef, ContactCardProps>(
               </div>
               <p className="text-xs text-muted-foreground">at {meetingTime}</p>
             </div>
+            {openInApp && <OpenInAppButton config={openInApp} tooltip="⌘O" />}
           </div>
         </CardHeader>
 

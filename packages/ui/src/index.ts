@@ -5,7 +5,7 @@ export * from "./components/assistant"
 export * from "./components/action-queue"
 export * from "./components/three-panel-layout"
 // Action card registry
-export type { ActionContext, ActionCardProps, ActionCardComponent } from "./actions/types"
+export type { ActionContext, ActionCardProps, ActionCardComponent, OpenInAppConfig } from "./actions/types"
 export { MessageCard, RespondCard, FollowUpCard, SendMessageCard } from "./actions/cards/message-card"
 export { ResolveContactCardWrapper } from "./actions/cards/resolve-contact-card-wrapper"
 export { ContactCardWrapper, NewConnectionCard, EODContactCard } from "./actions/cards/contact-card-wrapper"
@@ -193,3 +193,16 @@ export {
   type SendMessageContact,
 } from "./components/send-message-modal"
 export { cn } from "./lib/utils"
+export {
+  PlatformIcon,
+  PLATFORM_ICON_COMPONENTS,
+  IMessageIcon,
+  GmailIcon,
+  GmailColorIcon,
+  SlackIcon,
+  LinkedInIcon,
+  TwitterIcon,
+  SignalIcon,
+  WhatsAppIcon,
+  type PlatformIconProps,
+} from "./components/platform-icons"

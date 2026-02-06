@@ -35,6 +35,8 @@ export function ResolveContactCardWrapper({
   isTop,
   context,
   className,
+  contact1OpenInApp,
+  contact2OpenInApp,
 }: ActionCardProps) {
   const hasContext = isTop && context;
   const { contact, secondaryContact } = context ?? {};
@@ -55,6 +57,8 @@ export function ResolveContactCardWrapper({
       source={(action.mergeSource ?? "email_match") as MergeSource}
       reasoning={action.mergeReasoning}
       className={className}
+      contact1OpenInApp={contact1OpenInApp ?? null}
+      contact2OpenInApp={contact2OpenInApp ?? null}
     />
   );
 }

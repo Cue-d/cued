@@ -1,9 +1,8 @@
-"use client"
-
 import * as React from "react"
-import { MessageSquare, Mail, Hash, Linkedin, ChevronDown, Twitter, Phone } from "lucide-react"
+import { ChevronDown } from "lucide-react"
 import { PLATFORM_CONFIG, type ActionPlatform } from "@cued/shared"
 import { cn } from "../../../lib/utils"
+import { PlatformIcon } from "../../platform-icons"
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -11,15 +10,15 @@ import {
   DropdownMenuTrigger,
 } from "../../ui/dropdown-menu"
 
-/** Platform icons (platform-specific, not in shared config) */
+/** Platform icons (re-exported for backwards compatibility) */
 export const PLATFORM_ICONS: Record<ActionPlatform, React.ReactNode> = {
-  imessage: <MessageSquare className="w-3.5 h-3.5" />,
-  gmail: <Mail className="w-3.5 h-3.5" />,
-  slack: <Hash className="w-3.5 h-3.5" />,
-  linkedin: <Linkedin className="w-3.5 h-3.5" />,
-  twitter: <Twitter className="w-3.5 h-3.5" />,
-  signal: <Phone className="w-3.5 h-3.5" />,
-  whatsapp: <Phone className="w-3.5 h-3.5" />,
+  imessage: <PlatformIcon platform="imessage" className="w-3.5 h-3.5" />,
+  gmail: <PlatformIcon platform="gmail" className="w-3.5 h-3.5" />,
+  slack: <PlatformIcon platform="slack" className="w-3.5 h-3.5" />,
+  linkedin: <PlatformIcon platform="linkedin" className="w-3.5 h-3.5" />,
+  twitter: <PlatformIcon platform="twitter" className="w-3.5 h-3.5" />,
+  signal: <PlatformIcon platform="signal" className="w-3.5 h-3.5" />,
+  whatsapp: <PlatformIcon platform="whatsapp" className="w-3.5 h-3.5" />,
 }
 
 export interface PlatformBadgeProps {

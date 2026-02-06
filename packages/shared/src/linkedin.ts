@@ -173,6 +173,24 @@ export function urnIdsMatch(
   );
 }
 
+/**
+ * Extract the LinkedIn messaging thread ID from a conversation URN.
+ * Handles nested URN formats with embedded profile URNs.
+ *
+ * @example
+ * extractLinkedInThreadId("urn:li:fs_conversation:(urn:li:fsd_profile:XXX,2-abc==)") // => "2-abc=="
+ * extractLinkedInThreadId("urn:li:fs_conversation:simple-id") // => "simple-id"
+ * extractLinkedInThreadId("2-abc==") // => "2-abc=="
+ */
+export function extractLinkedInThreadId(platformConversationId: string): string {
+  // Handle nested format: urn:li:{type}:(urn:li:fsd_profile:XXX,CONV_ID)
+  const commaMatch = platformConversationId.match(/,([^)]+)\)$/);
+  if (commaMatch) return commaMatch[1];
+
+  // Handle simple URN: urn:li:{type}:ID
+  return extractIdFromURN(platformConversationId) ?? platformConversationId;
+}
+
 // ============================================================================
 // LinkedIn Handle Normalization
 // ============================================================================

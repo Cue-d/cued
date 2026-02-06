@@ -113,4 +113,5 @@ export {
   urnIdsMatch,
   isValidLinkedInHandle,
   normalizeLinkedInHandle,
+  extractLinkedInThreadId,
 } from "./linkedin.js";

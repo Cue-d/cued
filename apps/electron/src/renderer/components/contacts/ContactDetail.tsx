@@ -12,14 +12,11 @@ import {
   ChevronDown,
   ChevronUp,
   Edit2,
-  Lightbulb,
   Save,
-  Sparkles,
   Tag,
   User,
   X,
 } from "lucide-react"
-import { fetchContactMemories, type ContactMemoryItem } from "@cued/ai"
 import { api } from "@cued/convex"
 import {
   getInitials,
@@ -30,6 +27,9 @@ import {
 } from "@cued/shared"
 import {
   EmptyState,
+  PlatformIcon,
+  SearchIcon,
+  UserIcon,
   type SendMessageContact,
 } from "@cued/ui"
 import {
@@ -46,14 +46,19 @@ import {
 } from "@cued/ui"
 import type { Id } from "@cued/convex"
 
-function HandleIcon({ type }: { type: string }) {
+/** Handle types worth displaying to the user (hide internal IDs like slack_id, linkedin_urn) */
+export const VISIBLE_HANDLE_TYPES = new Set(["phone", "email", "linkedin_handle", "twitter_handle"])
+
+export function HandleIcon({ type }: { type: string }) {
   switch (type) {
     case "phone":
       return <Phone className="w-3 h-3 text-muted-foreground" />
     case "email":
       return <Mail className="w-3 h-3 text-muted-foreground" />
-    case "slack_id":
-      return <MessageSquare className="w-3 h-3 text-muted-foreground" />
+    case "linkedin_handle":
+      return <PlatformIcon platform="linkedin" className="w-3 h-3 text-muted-foreground" />
+    case "twitter_handle":
+      return <PlatformIcon platform="twitter" className="w-3 h-3 text-muted-foreground" />
     default:
       return null
   }
@@ -119,8 +124,9 @@ function PlatformBadge({ platform }: { platform: ActionPlatform }) {
   return (
     <Badge
       variant="secondary"
-      className={`text-xs ${config?.bgClass ?? ""} ${config?.textClass ?? ""}`}
+      className={`text-xs gap-1 ${config?.bgClass ?? ""}`}
     >
+      <PlatformIcon platform={platform} className="w-3 h-3" />
       {config?.label ?? platform}
     </Badge>
   )
@@ -181,10 +187,6 @@ export function ContactDetail({ contactId, onSendMessage }: ContactDetailProps) 
   })
   const [isSaving, setIsSaving] = React.useState(false)
 
-  const [memories, setMemories] = React.useState<ContactMemoryItem[]>([])
-  const [memoriesLoading, setMemoriesLoading] = React.useState(false)
-  const [memoriesExpanded, setMemoriesExpanded] = React.useState(true)
-
   const [timelineExpanded, setTimelineExpanded] = React.useState(true)
   const [showAllMessages, setShowAllMessages] = React.useState(false)
 
@@ -198,27 +200,6 @@ export function ContactDetail({ contactId, onSendMessage }: ContactDetailProps) 
       })
     }
   }, [profile?.contact])
-
-  React.useEffect(() => {
-    async function loadMemories() {
-      if (!profile?.contact || !contactId) return
-      setMemoriesLoading(true)
-      try {
-        const result = await fetchContactMemories(
-          profile.contact.displayName,
-          profile.contact.userId,
-          contactId,
-          20
-        )
-        setMemories(result)
-      } catch (e) {
-        console.error("Failed to fetch memories:", e)
-      } finally {
-        setMemoriesLoading(false)
-      }
-    }
-    loadMemories()
-  }, [profile?.contact, contactId])
 
   const handleSave = async () => {
     if (!contactId) return
@@ -269,9 +250,9 @@ export function ContactDetail({ contactId, onSendMessage }: ContactDetailProps) 
   if (!contactId) {
     return (
       <EmptyState
-        icon={<User className="w-6 h-6 text-muted-foreground" />}
+        animatedIcon={SearchIcon}
         title="Select a contact"
-        description="Choose a contact from the list to view details"
+        description="Choose someone from the list to view their profile"
       />
     )
   }
@@ -289,14 +270,14 @@ export function ContactDetail({ contactId, onSendMessage }: ContactDetailProps) 
   if (profile === null) {
     return (
       <EmptyState
-        icon={<User className="w-6 h-6 text-muted-foreground" />}
+        animatedIcon={UserIcon}
         title="Contact not found"
-        description="This contact may have been deleted"
+        description="This contact may have been removed or merged"
       />
     )
   }
 
-  const { contact, conversations, messages, memoryStats, stats } = profile
+  const { contact, conversations, messages, stats } = profile
   const displayMessages = showAllMessages ? messages : messages.slice(0, 10)
 
   return (
@@ -373,7 +354,7 @@ export function ContactDetail({ contactId, onSendMessage }: ContactDetailProps) 
       <div className="flex-1 overflow-y-auto">
         <div className="max-w-3xl space-y-6 p-6">
           {/* Quick Stats */}
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+          <div className="grid grid-cols-3 gap-4">
             <Card>
               <CardContent className="p-4 text-center">
                 <MessageSquare className="w-5 h-5 mx-auto mb-1 text-muted-foreground" />
@@ -390,15 +371,6 @@ export function ContactDetail({ contactId, onSendMessage }: ContactDetailProps) 
                   {stats.recentMessageCount}
                 </div>
                 <div className="text-xs text-muted-foreground">Last 30 days</div>
-              </CardContent>
-            </Card>
-            <Card>
-              <CardContent className="p-4 text-center">
-                <Sparkles className="w-5 h-5 mx-auto mb-1 text-muted-foreground" />
-                <div className="text-2xl font-semibold">
-                  {memoryStats?.memoriesExtracted ?? 0}
-                </div>
-                <div className="text-xs text-muted-foreground">Memories</div>
               </CardContent>
             </Card>
             <Card>
@@ -477,7 +449,9 @@ export function ContactDetail({ contactId, onSendMessage }: ContactDetailProps) 
                   Contact Methods
                 </div>
                 <div className="space-y-2">
-                  {contact.handles.map((handle, i) => (
+                  {contact.handles
+                    .filter((h) => VISIBLE_HANDLE_TYPES.has(h.type))
+                    .map((handle, i) => (
                     <div key={i} className="flex items-center gap-3 text-sm">
                       <HandleIcon type={handle.type} />
                       <span className="flex-1 font-mono text-sm">
@@ -517,55 +491,6 @@ export function ContactDetail({ contactId, onSendMessage }: ContactDetailProps) 
                 </p>
               )}
             </CardContent>
-          </Card>
-
-          {/* AI Memories */}
-          <Card>
-            <CardHeader
-              className="pb-3 cursor-pointer"
-              onClick={() => setMemoriesExpanded(!memoriesExpanded)}
-            >
-              <div className="flex items-center justify-between">
-                <h2 className="font-semibold flex items-center gap-2">
-                  <Lightbulb className="w-4 h-4" />
-                  What I Know
-                  {memories.length > 0 && (
-                    <Badge variant="secondary" className="ml-2">
-                      {memories.length}
-                    </Badge>
-                  )}
-                </h2>
-                {memoriesExpanded ? (
-                  <ChevronUp className="w-4 h-4 text-muted-foreground" />
-                ) : (
-                  <ChevronDown className="w-4 h-4 text-muted-foreground" />
-                )}
-              </div>
-            </CardHeader>
-            {memoriesExpanded && (
-              <CardContent>
-                {memoriesLoading ? (
-                  <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                    <Loader2 className="w-4 h-4 animate-spin" />
-                    Loading memories...
-                  </div>
-                ) : memories.length > 0 ? (
-                  <ul className="space-y-2">
-                    {memories.map((m, i) => (
-                      <li key={i} className="flex items-start gap-2 text-sm">
-                        <Sparkles className="w-3 h-3 mt-1 text-amber-500 shrink-0" />
-                        <span>{m.memory}</span>
-                      </li>
-                    ))}
-                  </ul>
-                ) : (
-                  <p className="text-sm text-muted-foreground">
-                    No memories extracted yet. Memories are automatically
-                    learned from conversations.
-                  </p>
-                )}
-              </CardContent>
-            )}
           </Card>
 
           {/* Recent Conversations */}

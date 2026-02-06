@@ -19,6 +19,7 @@ export function ContactCardWrapper({
   onResponseChange,
   autoFocus,
   className,
+  openInApp,
 }: ActionCardProps) {
   // Use local state for form data, with responseText as the notes field
   const [formData, setFormData] = React.useState<ContactFormData>(() => ({
@@ -49,6 +50,7 @@ export function ContactCardWrapper({
       onFormChange={handleFormChange}
       autoFocus={isTop && autoFocus}
       className={className}
+      openInApp={openInApp}
     />
   );
 }

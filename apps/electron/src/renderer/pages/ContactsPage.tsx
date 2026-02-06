@@ -1,13 +1,11 @@
 import * as React from "react"
 import { useQuery, useMutation } from "convex/react"
 import {
-  Mail,
-  MessageSquare,
-  Phone,
   Users,
   Search,
   Loader2,
 } from "lucide-react"
+import { motion, AnimatePresence } from "motion/react"
 import { api } from "@cued/convex"
 import {
   getInitials,
@@ -17,7 +15,10 @@ import {
 import {
   SendMessageModal,
   EmptyState,
+  PlatformIcon,
   type SendMessageContact,
+  ActionFilterDropdown,
+  type ActionFilterDropdownRef,
 } from "@cued/ui"
 import {
   Skeleton,
@@ -28,19 +29,17 @@ import {
 } from "@cued/ui"
 import type { Id } from "@cued/convex"
 import { Panel, PanelHeader } from "../components/app-shell"
-import { ContactDetail, deduplicateHandles, prioritizeHandles } from "../components/contacts/ContactDetail"
+import { ContactDetail, HandleIcon, deduplicateHandles, prioritizeHandles, VISIBLE_HANDLE_TYPES } from "../components/contacts/ContactDetail"
 
-function HandleIcon({ type }: { type: string }) {
-  switch (type) {
-    case "phone":
-      return <Phone className="w-3 h-3 text-muted-foreground" />
-    case "email":
-      return <Mail className="w-3 h-3 text-muted-foreground" />
-    case "slack_id":
-      return <MessageSquare className="w-3 h-3 text-muted-foreground" />
-    default:
-      return null
-  }
+/** Returns true if the display name looks like an actual person name (not a phone/ID/email) */
+function isRealContactName(displayName: string): boolean {
+  const trimmed = displayName.trim()
+  if (!trimmed) return false
+  if (/^[\d+\-(). ]+$/.test(trimmed)) return false
+  if (/^[UW][A-Z0-9]{8,}$/i.test(trimmed)) return false
+  if (trimmed.startsWith("urn:li:")) return false
+  if (/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmed)) return false
+  return true
 }
 
 interface ContactListItemProps {
@@ -56,7 +55,8 @@ interface ContactListItemProps {
 
 function ContactListItem({ contact, selected, onClick }: ContactListItemProps) {
   const uniqueHandles = deduplicateHandles(contact.handles)
-  const prioritizedHandles = prioritizeHandles(uniqueHandles)
+  const visibleHandles = uniqueHandles.filter((h) => VISIBLE_HANDLE_TYPES.has(h.type))
+  const prioritizedHandles = prioritizeHandles(visibleHandles)
   const displayedHandles = prioritizedHandles.slice(0, 2)
   const platforms = [...new Set(contact.handles.map((h) => h.platform))]
 
@@ -64,7 +64,7 @@ function ContactListItem({ contact, selected, onClick }: ContactListItemProps) {
     <button
       type="button"
       onClick={onClick}
-      className={`w-full text-left px-3 py-2.5 rounded-lg transition-colors ${
+      className={`w-full text-left px-3 py-2.5 cursor-pointer rounded-lg transition-colors ${
         selected ? "bg-foreground/[0.07]" : "hover:bg-foreground/5"
       }`}
     >
@@ -91,9 +91,9 @@ function ContactListItem({ contact, selected, onClick }: ContactListItemProps) {
                   <Badge
                     key={platform}
                     variant="secondary"
-                    className={`text-[10px] px-1.5 py-0 ${config?.bgClass ?? ""} ${config?.textClass ?? ""}`}
+                    className={`text-[10px] px-1.5 py-0 ${config?.bgClass ?? ""}`}
                   >
-                    {config?.letter ?? platform.charAt(0).toUpperCase()}
+                    <PlatformIcon platform={platform as ActionPlatform} className="w-2.5 h-2.5" />
                   </Badge>
                 )
               })}
@@ -128,11 +128,7 @@ function useDebounce<T>(value: T, delay: number): T {
 
 type ContactCursor = { displayName: string; _id: Id<"contacts"> }
 
-interface ContactsPageProps {
-  onContactCountChange?: (count: number) => void
-}
-
-export function ContactsPage({ onContactCountChange }: ContactsPageProps): React.JSX.Element {
+export function ContactsPage(): React.JSX.Element {
   const [selectedContactId, setSelectedContactId] =
     React.useState<Id<"contacts"> | null>(null)
   const [searchInput, setSearchInput] = React.useState("")
@@ -141,6 +137,11 @@ export function ContactsPage({ onContactCountChange }: ContactsPageProps): React
   const [sendModalOpen, setSendModalOpen] = React.useState(false)
   const [selectedSendContact, setSelectedSendContact] =
     React.useState<SendMessageContact | null>(null)
+
+  // Platform filter state
+  const filterRef = React.useRef<ActionFilterDropdownRef>(null)
+  const [activePlatforms, setActivePlatforms] = React.useState<Set<ActionPlatform>>(new Set())
+  const [namedOnly, setNamedOnly] = React.useState(true)
 
   const [cursor, setCursor] = React.useState<ContactCursor | undefined>(
     undefined
@@ -154,6 +155,7 @@ export function ContactsPage({ onContactCountChange }: ContactsPageProps): React
     }>
   >([])
   const [isLoadingMore, setIsLoadingMore] = React.useState(false)
+  const autoLoadAttemptsRef = React.useRef(0)
 
   const loadMoreRef = React.useRef<HTMLDivElement>(null)
 
@@ -168,15 +170,9 @@ export function ContactsPage({ onContactCountChange }: ContactsPageProps): React
     searchQuery: debouncedSearch || undefined,
   })
   const contactsLoading = contactsResult === undefined
-  const totalCount = allContacts.length
   const hasMore =
     contactsResult?.nextCursor !== null &&
     contactsResult?.nextCursor !== undefined
-
-  // Report contact count to parent
-  React.useEffect(() => {
-    onContactCountChange?.(totalCount)
-  }, [totalCount, onContactCountChange])
 
   React.useEffect(() => {
     if (contactsResult?.contacts) {
@@ -254,8 +250,96 @@ export function ContactsPage({ onContactCountChange }: ContactsPageProps): React
     [queueMessage]
   )
 
-  const displayContacts =
-    allContacts.length > 0 ? allContacts : contactsResult?.contacts ?? []
+  const rawDisplayContacts = React.useMemo(
+    () => (allContacts.length > 0 ? allContacts : contactsResult?.contacts ?? []),
+    [allContacts, contactsResult?.contacts]
+  )
+
+  const displayContacts = React.useMemo(() => {
+    let contacts = rawDisplayContacts
+    if (namedOnly) {
+      contacts = contacts.filter((c) => isRealContactName(c.displayName))
+    }
+    if (activePlatforms.size > 0) {
+      contacts = contacts.filter((c) =>
+        c.handles.some((h) => activePlatforms.has(h.platform as ActionPlatform))
+      )
+    }
+    return contacts
+  }, [rawDisplayContacts, activePlatforms, namedOnly])
+
+  // Auto-load more pages when client-side filters leave too few visible contacts
+  // (e.g. phone-number contacts sort first alphabetically and get filtered out)
+  // Cap at 5 consecutive auto-loads to prevent runaway queries.
+  React.useEffect(() => {
+    if (
+      displayContacts.length < 10 &&
+      contactsResult?.nextCursor &&
+      !isLoadingMore &&
+      !debouncedSearch &&
+      autoLoadAttemptsRef.current < 5
+    ) {
+      autoLoadAttemptsRef.current++
+      setIsLoadingMore(true)
+      setCursor(contactsResult.nextCursor)
+    }
+  }, [displayContacts.length, contactsResult?.nextCursor, isLoadingMore, debouncedSearch])
+
+  // Reset auto-load counter when filters change
+  React.useEffect(() => {
+    autoLoadAttemptsRef.current = 0
+  }, [activePlatforms, namedOnly, debouncedSearch])
+
+  const filteredCount = displayContacts.length
+
+  // Compute platform counts from all contacts
+  const platformCounts = React.useMemo(() => {
+    const counts: Partial<Record<ActionPlatform, number>> = {}
+    for (const contact of rawDisplayContacts) {
+      const platforms = new Set(contact.handles.map((h) => h.platform))
+      for (const p of platforms) {
+        const ap = p as ActionPlatform
+        counts[ap] = (counts[ap] ?? 0) + 1
+      }
+    }
+    return counts
+  }, [rawDisplayContacts])
+
+  // Keyboard navigation
+  React.useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (
+        e.target instanceof HTMLInputElement ||
+        e.target instanceof HTMLTextAreaElement
+      ) {
+        return
+      }
+      if (e.key === "ArrowUp" && displayContacts.length > 0) {
+        e.preventDefault()
+        const currentIndex = displayContacts.findIndex(
+          (c) => c._id === selectedContactId
+        )
+        if (currentIndex > 0) {
+          setSelectedContactId(displayContacts[currentIndex - 1]._id)
+        }
+      } else if (e.key === "ArrowDown" && displayContacts.length > 0) {
+        e.preventDefault()
+        const currentIndex = displayContacts.findIndex(
+          (c) => c._id === selectedContactId
+        )
+        if (currentIndex < displayContacts.length - 1) {
+          setSelectedContactId(displayContacts[currentIndex + 1]._id)
+        } else if (currentIndex === -1) {
+          setSelectedContactId(displayContacts[0]._id)
+        }
+      } else if (e.key === "f" || e.key === "F") {
+        e.preventDefault()
+        filterRef.current?.open()
+      }
+    }
+    window.addEventListener("keydown", handleKeyDown)
+    return () => window.removeEventListener("keydown", handleKeyDown)
+  }, [displayContacts, selectedContactId])
 
   // Loading skeleton (only on initial load, not when searching)
   if (contactsLoading && allContacts.length === 0 && !searchInput) {
@@ -263,9 +347,6 @@ export function ContactsPage({ onContactCountChange }: ContactsPageProps): React
       <>
         <Panel variant="shrink" width={320} position="first">
           <PanelHeader title="Contacts" />
-          <div className="flex gap-1.5 px-3 pb-2">
-            <Skeleton className="h-6 w-14 rounded-full" />
-          </div>
           <div className="p-3 space-y-2">
             <Skeleton className="h-10 w-full mb-3" />
             {[1, 2, 3, 4, 5].map((i) => (
@@ -285,14 +366,35 @@ export function ContactsPage({ onContactCountChange }: ContactsPageProps): React
     <>
       {/* List Panel */}
       <Panel variant="shrink" width={320} position="first">
-        <PanelHeader title="Contacts" />
-
-        {/* Count Chip */}
-        <div className="flex gap-1.5 px-3 pb-2">
-          <span className="px-2.5 py-1 rounded-full text-xs font-medium bg-foreground text-background">
-            All {totalCount > 0 && <span className="ml-1 opacity-70">{totalCount}</span>}
-          </span>
-        </div>
+        <PanelHeader title="Contacts">
+          <ActionFilterDropdown
+            ref={filterRef}
+            counts={{}}
+            total={filteredCount}
+            activeFilter="all"
+            onFilterChange={() => {}}
+            platformCounts={platformCounts}
+            activePlatforms={activePlatforms}
+            onPlatformToggle={(platform) => {
+              setActivePlatforms((prev) => {
+                const next = new Set(prev)
+                if (next.has(platform)) {
+                  next.delete(platform)
+                } else {
+                  next.add(platform)
+                }
+                return next
+              })
+            }}
+            toggles={[
+              {
+                label: "Named contacts only",
+                active: namedOnly,
+                onToggle: () => setNamedOnly((prev) => !prev),
+              },
+            ]}
+          />
+        </PanelHeader>
 
         {/* Search */}
         <div className="px-3 py-2">
@@ -316,20 +418,29 @@ export function ContactsPage({ onContactCountChange }: ContactsPageProps): React
           {displayContacts.length === 0 ? (
             <EmptyState
               icon={<Users className="w-6 h-6 text-muted-foreground" />}
-              title={debouncedSearch ? `No results for "${debouncedSearch}"` : "No contacts yet"}
-              description={!debouncedSearch ? "Connect Gmail or iMessage to import contacts." : undefined}
+              title={debouncedSearch ? `No results for "${debouncedSearch}"` : activePlatforms.size > 0 ? "No contacts on this platform" : "No contacts yet"}
+              description={!debouncedSearch && activePlatforms.size === 0 ? "Connect Gmail or iMessage to import contacts." : undefined}
               className="py-12"
             />
           ) : (
             <>
-              {displayContacts.map((contact) => (
-                <ContactListItem
-                  key={contact._id}
-                  contact={contact}
-                  selected={selectedContactId === contact._id}
-                  onClick={() => setSelectedContactId(contact._id)}
-                />
-              ))}
+              <AnimatePresence mode="popLayout">
+                {displayContacts.map((contact) => (
+                  <motion.div
+                    key={contact._id}
+                    layout
+                    initial={{ opacity: 1 }}
+                    exit={{ opacity: 0, scale: 0.95 }}
+                    transition={{ duration: 0.12, ease: "easeOut" }}
+                  >
+                    <ContactListItem
+                      contact={contact}
+                      selected={selectedContactId === contact._id}
+                      onClick={() => setSelectedContactId(contact._id)}
+                    />
+                  </motion.div>
+                ))}
+              </AnimatePresence>
               {hasMore && !debouncedSearch && (
                 <div ref={loadMoreRef} className="p-4 flex justify-center">
                   {isLoadingMore && (

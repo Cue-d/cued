@@ -38,6 +38,7 @@ export default defineConfig({
     },
   },
   renderer: {
+    envDir: rootDir,
     plugins: [react(), tailwindcss()],
     resolve: {
       alias: {

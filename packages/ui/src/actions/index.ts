@@ -2,6 +2,7 @@ export type {
   ActionContext,
   ActionCardProps,
   ActionCardComponent,
+  OpenInAppConfig,
 } from "./types";
 
 export { MessageCard, RespondCard, FollowUpCard, SendMessageCard } from "./cards/message-card";

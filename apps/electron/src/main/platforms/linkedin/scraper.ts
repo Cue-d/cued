@@ -189,7 +189,7 @@ export class LinkedInScraper {
 
     // Load cursor from Convex
     const cursor = await loadCursor<ContactsCursorState>(this.convexClient, 'linkedin')
-    const anchorSet = new Set(cursor?.cursorData.anchorConnections.map((a) => a.profileId) ?? [])
+    const anchorSet = new Set(cursor?.cursorData?.anchorConnections?.map((a) => a.profileId) ?? [])
     const hasAnchors = anchorSet.size > 0
 
     console.log(
@@ -236,7 +236,7 @@ export class LinkedInScraper {
       }
 
       // Save new anchors (first 5 connections from this sync)
-      await this.saveContactsCursor(newConnections, cursor?.cursorData.anchorConnections)
+      await this.saveContactsCursor(newConnections, cursor?.cursorData?.anchorConnections)
 
       console.log(
         `[LinkedIn Scraper] Incremental scrape complete: ${newConnections.length} new connections, ${pagesFetched} pages, hitAnchor: ${hitAnchor}`

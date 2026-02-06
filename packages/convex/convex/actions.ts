@@ -441,9 +441,11 @@ export const getActionWithContext = query({
         ? {
             _id: conversation._id,
             platform: conversation.platform,
+            platformConversationId: conversation.platformConversationId,
             conversationType: conversation.conversationType,
             displayName: conversation.displayName ?? null,
             lastMessageAt: conversation.lastMessageAt ?? null,
+            workspaceId: conversation.workspaceId ?? null,
           }
         : null,
       contact: contact
@@ -588,5 +590,3 @@ export const swipeAction = mutation({
     return response;
   },
 });
-
-

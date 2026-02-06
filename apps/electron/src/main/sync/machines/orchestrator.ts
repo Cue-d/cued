@@ -164,19 +164,14 @@ export const orchestratorMachine = setup({
         actor.start()
         newActors.set(key, actor as SyncActorRef)
         newSubscriptions.set(key, subscription)
-        console.log(`[Orchestrator] Spawned actor: ${key}`)
       }
       return { actors: newActors, actorSubscriptions: newSubscriptions }
     }),
     stopAllActors: assign(({ context }) => {
-      // Unsubscribe from all actors first
-      for (const [key, subscription] of context.actorSubscriptions) {
+      for (const [, subscription] of context.actorSubscriptions) {
         subscription.unsubscribe()
-        console.log(`[Orchestrator] Unsubscribed from actor: ${key}`)
       }
-      // Then stop all actors
-      for (const [key, actor] of context.actors) {
-        console.log(`[Orchestrator] Stopping actor: ${key}`)
+      for (const [, actor] of context.actors) {
         actor.send({ type: 'STOP' })
       }
       return { actors: new Map(), actorSubscriptions: new Map(), isRunning: false }
@@ -200,44 +195,32 @@ export const orchestratorMachine = setup({
       if (event.type !== 'ACTOR_ERROR') return {}
       const newCompleted = new Set(context.completedActors)
       newCompleted.add(event.actorId)
-      console.log(`[Orchestrator] Marking errored actor as completed: ${event.actorId}`)
       return { completedActors: newCompleted }
     }),
     recordSyncComplete: assign({
-      lastFullSyncAt: () => Date.now(),
+      lastFullSyncAt: () => {
+        console.log('[Orchestrator] Sync cycle complete')
+        return Date.now()
+      },
       isRunning: () => false,
     }),
     startContactsPhase: ({ context }) => {
-      console.log('[Orchestrator] Starting contacts phase')
       const contactsActors = getActorsForPhase(context.actorConfigs, 'contacts')
+      console.log(`[Orchestrator] Starting contacts phase (${contactsActors.length} actors)`)
       for (const key of contactsActors) {
-        const actor = context.actors.get(key)
-        if (actor) {
-          console.log(`[Orchestrator] Triggering sync for: ${key}`)
-          actor.send({ type: 'SYNC' })
-        }
+        context.actors.get(key)?.send({ type: 'SYNC' })
       }
     },
     startMessagesPhase: ({ context }) => {
-      console.log('[Orchestrator] Starting messages phase')
       const messagesActors = getActorsForPhase(context.actorConfigs, 'messages')
+      console.log(`[Orchestrator] Starting messages phase (${messagesActors.length} actors)`)
       for (const key of messagesActors) {
-        const actor = context.actors.get(key)
-        if (actor) {
-          console.log(`[Orchestrator] Triggering sync for: ${key}`)
-          actor.send({ type: 'SYNC' })
-        }
+        context.actors.get(key)?.send({ type: 'SYNC' })
       }
-    },
-    logPhaseComplete: (_, params: { phase: SyncPhase }) => {
-      console.log(`[Orchestrator] ${params.phase} phase complete`)
     },
     setRunning: assign({ isRunning: () => true }),
     queueSyncRequest: assign({
-      pendingSyncRequest: () => {
-        console.log('[Orchestrator] Sync requested while running, will run after current cycle')
-        return true
-      },
+      pendingSyncRequest: () => true,
     }),
     clearPendingSyncRequest: assign({ pendingSyncRequest: () => false }),
   },
@@ -333,7 +316,6 @@ export const orchestratorMachine = setup({
           },
         },
         barrier: {
-          entry: [{ type: 'logPhaseComplete', params: { phase: 'contacts' as SyncPhase } }],
           always: [
             {
               guard: 'hasMessagesActors',
@@ -370,10 +352,7 @@ export const orchestratorMachine = setup({
       },
     },
     complete: {
-      entry: [
-        { type: 'logPhaseComplete', params: { phase: 'messages' as SyncPhase } },
-        'recordSyncComplete',
-      ],
+      entry: ['recordSyncComplete'],
       always: [
         {
           guard: 'hasPendingSyncRequest',

@@ -198,7 +198,14 @@ export function createLinkedInContactsSyncFn(
       const result: IncrementalScrapeResult =
         await options.linkedInScraper.scrapeConnectionsIncremental()
 
-      if (result.connections.length === 0) {
+      console.log('[LinkedInContactsSync] Scrape result:', JSON.stringify({
+        hasConnections: !!result?.connections,
+        connectionCount: result?.connections?.length ?? 'undefined',
+        hitAnchor: result?.hitAnchor,
+        pagesFetched: result?.pagesFetched,
+      }))
+
+      if (!result?.connections || result.connections.length === 0) {
         console.log('[LinkedInContactsSync] No new connections to sync')
         return { success: true, contactsSynced: 0 }
       }

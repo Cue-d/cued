@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   extractIdFromURN,
+  extractLinkedInThreadId,
   normalizeConversationURN,
   normalizeMemberURN,
   isLinkedInURN,
@@ -259,6 +260,34 @@ describe("LinkedIn URN utilities", () => {
       // After normalization, both become urn:li:member:ABC123
       expect(normalizeMemberURN(nested)).toBe(member);
       expect(urnIdsMatch(normalizeMemberURN(nested), member)).toBe(true);
+    });
+  });
+
+  describe("extractLinkedInThreadId", () => {
+    it("extracts thread ID from nested fs_conversation URN", () => {
+      expect(
+        extractLinkedInThreadId(
+          "urn:li:fs_conversation:(urn:li:fsd_profile:XXX,2-abc==)"
+        )
+      ).toBe("2-abc==");
+    });
+
+    it("extracts ID from simple conversation URN", () => {
+      expect(
+        extractLinkedInThreadId("urn:li:fs_conversation:simple-id")
+      ).toBe("simple-id");
+    });
+
+    it("returns plain string as-is when not a URN", () => {
+      expect(extractLinkedInThreadId("2-abc==")).toBe("2-abc==");
+    });
+
+    it("extracts thread ID from nested fsd_conversation URN", () => {
+      expect(
+        extractLinkedInThreadId(
+          "urn:li:fsd_conversation:(urn:li:fsd_profile:ABC,thread-123)"
+        )
+      ).toBe("thread-123");
     });
   });
 });

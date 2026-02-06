@@ -312,3 +312,10 @@ export {
 
 // Staggering Text
 export { StaggeringText } from "./staggering-text"
+
+// Animated Icons (lucide-animated)
+export { SparklesIcon, type SparklesIconHandle } from "./sparkles"
+export { PartyPopperIcon, type PartyPopperIconHandle } from "./party-popper"
+export { SearchIcon, type SearchIconHandle } from "./search"
+export { UserIcon, type UserIconHandle } from "./user"
+export { UserCheckIcon, type UserCheckIconHandle } from "./user-check"

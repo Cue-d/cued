@@ -2,7 +2,7 @@
  * Types for action card rendering.
  */
 
-import type { EnrichedAction, DisplayMessage, ContactHandle } from "@cued/shared";
+import type { EnrichedAction } from "@cued/shared";
 
 /**
  * Context data for the top action card.
@@ -29,9 +29,11 @@ export interface ActionContext {
   conversation: {
     _id: string;
     platform: string;
+    platformConversationId: string;
     conversationType: string;
     displayName: string | null;
     lastMessageAt: number | null;
+    workspaceId: string | null;
   } | null;
   /** Primary contact */
   contact: {
@@ -95,6 +97,22 @@ export interface ActionCardProps {
   autoFocus: boolean;
   /** Optional className */
   className?: string;
+  /** Open-in-app deeplink config */
+  openInApp?: OpenInAppConfig | null;
+  /** Per-contact open-in-app config for resolve_contact (contact 1) */
+  contact1OpenInApp?: OpenInAppConfig | null;
+  /** Per-contact open-in-app config for resolve_contact (contact 2) */
+  contact2OpenInApp?: OpenInAppConfig | null;
+  /** Called when a link in a message is clicked. Receives the URL. */
+  onLinkClick?: (url: string) => void;
+}
+
+/** Open-in-app config for deeplink buttons */
+export interface OpenInAppConfig {
+  onOpenInApp?: () => void;
+  label?: string | null;
+  icon?: React.ReactNode;
+  disabledReason?: string | null;
 }
 
 /**

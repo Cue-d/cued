@@ -39,4 +39,4 @@ export { ActionFilterChips } from "./action-filter-chips"
 export type { ActionFilterChipsProps } from "./action-filter-chips"
 
 export { ActionFilterDropdown } from "./action-filter-dropdown"
-export type { ActionFilterDropdownProps } from "./action-filter-dropdown"
+export type { ActionFilterDropdownProps, ActionFilterDropdownRef, FilterToggle } from "./action-filter-dropdown"

@@ -5,14 +5,14 @@ import Link from "next/link";
 import Nango from "@nangohq/frontend";
 import { useAccessToken } from "@workos-inc/authkit-nextjs/components";
 import { useQuery } from "convex/react";
-import {
-  MessageCircleIcon,
-  MailIcon,
-  HashIcon,
-  ArrowLeftIcon,
-  LinkedinIcon,
-} from "lucide-react";
+import { ArrowLeftIcon } from "lucide-react";
 import { api } from "@cued/convex";
+import {
+  IMessageIcon,
+  GmailColorIcon,
+  SlackIcon,
+  LinkedInIcon,
+} from "@cued/ui";
 import {
   IntegrationCard,
   type IntegrationAccount,
@@ -25,7 +25,7 @@ const INTEGRATIONS: IntegrationConfig[] = [
     id: "imessage",
     name: "iMessage",
     description: "Sync messages from macOS Messages app",
-    icon: <MessageCircleIcon className="size-5" />,
+    icon: <IMessageIcon className="size-5" />,
     nangoIntegrationId: null,
     integrationType: "electron-local",
     color: "text-green-500",
@@ -34,7 +34,7 @@ const INTEGRATIONS: IntegrationConfig[] = [
     id: "gmail",
     name: "Gmail",
     description: "Connect your Gmail account to sync emails",
-    icon: <MailIcon className="size-5" />,
+    icon: <GmailColorIcon className="size-5" />,
     nangoIntegrationId: "google",
     integrationType: "nango",
     color: "text-red-500",
@@ -43,7 +43,7 @@ const INTEGRATIONS: IntegrationConfig[] = [
     id: "slack",
     name: "Slack",
     description: "Connect Slack via desktop app to sync messages",
-    icon: <HashIcon className="size-5" />,
+    icon: <SlackIcon className="size-5" />,
     nangoIntegrationId: null,
     integrationType: "electron-webview",
     color: "text-purple-500",
@@ -52,7 +52,7 @@ const INTEGRATIONS: IntegrationConfig[] = [
     id: "linkedin",
     name: "LinkedIn",
     description: "Sync LinkedIn messages via desktop app",
-    icon: <LinkedinIcon className="size-5" />,
+    icon: <LinkedInIcon className="size-5" />,
     nangoIntegrationId: null,
     integrationType: "electron-webview",
     color: "text-blue-600",

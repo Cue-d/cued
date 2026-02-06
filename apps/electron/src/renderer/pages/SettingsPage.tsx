@@ -222,6 +222,13 @@ const shortcutSections: ShortcutSection[] = [
       { keys: ['→'], description: 'Send / complete action' },
       { keys: ['S'], description: 'Snooze action' },
       { keys: ['I'], description: 'Focus response input' },
+      { keys: ['F'], description: 'Open filter dropdown' },
+    ],
+  },
+  {
+    title: 'Contacts',
+    shortcuts: [
+      { keys: ['F'], description: 'Open filter dropdown' },
     ],
   },
   {

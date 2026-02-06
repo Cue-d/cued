@@ -1,21 +1,18 @@
-"use client"
-
 import * as React from "react"
-import { X } from "lucide-react"
 import {
   type ActionPlatform,
   type DisplayMessage,
 } from "@cued/shared"
 import { cn } from "../../lib/utils"
-import { Button } from "../ui/button"
 import { Card, CardContent, CardFooter, CardHeader } from "../ui/card"
-import { Tooltip, TooltipTrigger, TooltipContent } from "../ui/tooltip"
 import { MessageBubble } from "./message-response-card/message-bubble"
 import { PlatformBadge } from "./message-response-card/platform-badge"
 import { ResponseInput } from "./message-response-card/response-input"
+import { OpenInAppButton } from "./open-in-app-button"
+import type { OpenInAppConfig } from "../../actions/types"
 
 /** Re-export sub-components for advanced usage */
-export { PlatformBadge, PLATFORM_ICONS, type PlatformBadgeProps } from "./message-response-card/platform-badge"
+export { PlatformBadge, type PlatformBadgeProps } from "./message-response-card/platform-badge"
 export { MessageBubble, ReactionBadges, DeliveryStatus, type MessageBubbleProps, type MessageSpacing } from "./message-response-card/message-bubble"
 export { ResponseInput, type ResponseInputProps } from "./message-response-card/response-input"
 
@@ -46,6 +43,10 @@ export interface MessageResponseCardProps {
   availablePlatforms?: ActionPlatform[]
   /** Called when platform changes */
   onPlatformChange?: (platform: ActionPlatform) => void
+  /** Open-in-app deeplink config */
+  openInApp?: OpenInAppConfig | null
+  /** Called when a link in a message is clicked. Receives the URL. */
+  onLinkClick?: (url: string) => void
 }
 
 export interface MessageResponseCardRef {
@@ -75,6 +76,8 @@ export const MessageResponseCard = React.forwardRef<
     platform,
     availablePlatforms,
     onPlatformChange,
+    openInApp,
+    onLinkClick,
   },
   ref
 ) {
@@ -105,6 +108,18 @@ export const MessageResponseCard = React.forwardRef<
     }, 0)
     return () => clearTimeout(timer)
   }, [messages])
+
+  // Intercept link clicks in message bubbles
+  const handleContainerClick = React.useCallback(
+    (e: React.MouseEvent) => {
+      const target = (e.target as HTMLElement).closest("a")
+      if (target && target.href && onLinkClick) {
+        e.preventDefault()
+        onLinkClick(target.href)
+      }
+    },
+    [onLinkClick]
+  )
 
   // Sort messages chronologically (oldest first)
   const sortedMessages = React.useMemo(
@@ -162,22 +177,7 @@ export const MessageResponseCard = React.forwardRef<
             )}
           </div>
           <div className="flex-1 flex justify-end">
-            {onDismiss && (
-              <Tooltip>
-                <TooltipTrigger>
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    onClick={onDismiss}
-                    aria-label="Dismiss action"
-                    className="size-8"
-                  >
-                    <X className="size-4" />
-                  </Button>
-                </TooltipTrigger>
-                <TooltipContent>Dismiss</TooltipContent>
-              </Tooltip>
-            )}
+            {openInApp && <OpenInAppButton config={openInApp} tooltip="⌘O" />}
           </div>
         </div>
       </CardHeader>
@@ -186,8 +186,9 @@ export const MessageResponseCard = React.forwardRef<
       <CardContent className="flex-1 p-0 min-h-0">
         <div
           ref={scrollContainerRef}
-          className="h-full overflow-y-auto [&::-webkit-scrollbar]:w-2 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:bg-border/50 [scrollbar-width:thin]"
+          className="h-full overflow-y-auto overflow-x-hidden [&::-webkit-scrollbar]:w-2 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:bg-border/50 [scrollbar-width:thin]"
           style={{ scrollbarColor: "rgba(128, 128, 128, 0.5) transparent" }}
+          onClick={handleContainerClick}
         >
           <div className="py-4 px-4">
             {sortedMessages.length > 0 ? (
@@ -203,6 +204,7 @@ export const MessageResponseCard = React.forwardRef<
                   reactions={msg.reactions}
                   showSenderName={shouldShowSenderName(msg, idx)}
                   spacing={getMessageSpacing(msg, idx)}
+                  platform={platform}
                 />
               ))
             ) : (

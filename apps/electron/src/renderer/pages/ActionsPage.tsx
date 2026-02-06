@@ -1,8 +1,6 @@
 import * as React from "react"
 import { useQuery, useMutation } from "convex/react"
 import {
-  PartyPopper,
-  Search,
   Clock,
   MessageSquare,
   UserPlus,
@@ -10,15 +8,18 @@ import {
 } from "lucide-react"
 import { AnimatePresence } from "motion/react"
 import { api } from "@cued/convex"
-import { type EnrichedAction } from "@cued/shared"
+import { type EnrichedAction, PLATFORM_CONFIG, type ActionPlatform, extractLinkedInThreadId } from "@cued/shared"
 import {
   ACTION_FILTER_GROUPS,
   type FilterGroup,
   type ActionContext,
+  type OpenInAppConfig,
 } from "@cued/ui"
 import { renderActionCard } from "@cued/ui"
-import { Skeleton, Button, EmptyState } from "@cued/ui"
+import { ActionFilterDropdown, type ActionFilterDropdownRef } from "@cued/ui"
+import { Skeleton, Button, EmptyState, PlatformIcon, SparklesIcon, PartyPopperIcon } from "@cued/ui"
 import type { Id } from "@cued/convex"
+import { useElectron } from "../hooks/use-electron"
 import { Panel, PanelHeader } from "../components/app-shell"
 import { SnoozeModal } from "../components/SnoozeModal"
 import { SwipeableActionListItem } from "../components/SwipeableActionListItem"
@@ -45,6 +46,116 @@ function getActionTypeConfig(type: string): { icon: React.ReactNode; label: stri
   return { ...DEFAULT_ACTION_CONFIG, label: type }
 }
 
+type DeeplinkResult =
+  | { type: "available"; url: string }
+  | { type: "disabled"; reason: string }
+  | null
+
+/** Build a deep link URL for a single handle (no conversation context). */
+function buildHandleDeeplink(platform: string, handleType: string, handle: string): string | null {
+  switch (platform) {
+    case "imessage":
+      return (handleType === "phone" || handleType === "email") ? `imessage://${handle}` : null
+    case "gmail":
+      return handleType === "email" ? `mailto:${handle}` : null
+    case "linkedin":
+      return handleType === "linkedin_handle" ? `https://www.linkedin.com/in/${handle}` : null
+    default:
+      return null
+  }
+}
+
+/** Deep link with conversation context (thread-level), falls back to handle-level. */
+function getPlatformDeeplink(
+  platform: string,
+  context: ActionContext | null,
+): DeeplinkResult {
+  if (!context) return null
+
+  const { conversation, contact } = context
+
+  // Conversation-level deep links
+  switch (platform) {
+    case "imessage":
+      if (conversation?.conversationType === "group") {
+        return { type: "disabled", reason: "Deep linking isn't supported for iMessage group chats" }
+      }
+      break
+    case "gmail":
+      if (conversation?.platformConversationId) {
+        return { type: "available", url: `https://mail.google.com/mail/u/0/#inbox/${conversation.platformConversationId}` }
+      }
+      break
+    case "slack":
+      if (conversation?.platformConversationId && conversation?.workspaceId) {
+        return { type: "available", url: `slack://channel?team=${conversation.workspaceId}&id=${conversation.platformConversationId}` }
+      }
+      return null
+    case "linkedin":
+      if (conversation?.platformConversationId) {
+        const threadId = extractLinkedInThreadId(conversation.platformConversationId)
+        return { type: "available", url: `https://www.linkedin.com/messaging/thread/${threadId}` }
+      }
+      break
+  }
+
+  // Fallback: handle-level deep link
+  if (contact?.handles) {
+    for (const h of contact.handles) {
+      if (h.platform === platform) {
+        const url = buildHandleDeeplink(h.platform, h.handleType, h.handle)
+        if (url) return { type: "available", url }
+      }
+    }
+  }
+
+  return null
+}
+
+/** Deep link for a contact based on handles (no conversation context). */
+function getContactDeeplink(
+  handles: Array<{ handleType: string; handle: string; platform: string }> | undefined,
+): (DeeplinkResult & { platform?: string }) | null {
+  if (!handles?.length) return null
+
+  for (const h of handles) {
+    const url = buildHandleDeeplink(h.platform, h.handleType, h.handle)
+    if (url) return { type: "available", url, platform: h.platform }
+  }
+
+  // Fallback: email handles regardless of platform
+  const emailHandle = handles.find((h) => h.handleType === "email")
+  if (emailHandle) {
+    return { type: "available", url: `mailto:${emailHandle.handle}`, platform: "gmail" }
+  }
+
+  return null
+}
+
+/** Build OpenInAppConfig from a deeplink result. */
+function buildOpenInAppConfig(
+  deeplinkResult: (DeeplinkResult & { platform?: string }) | null,
+  openExternal: (url: string) => void,
+): OpenInAppConfig | null {
+  if (!deeplinkResult) return null
+  const p = deeplinkResult.platform as ActionPlatform | undefined
+  const config = p ? PLATFORM_CONFIG[p] : null
+  if (!config || !p) return null
+
+  return {
+    onOpenInApp: deeplinkResult.type === "available"
+      ? () => openExternal(deeplinkResult.url)
+      : undefined,
+    label: `Open ${config.label}`,
+    icon: (
+      <span className={deeplinkResult.type === "disabled" ? undefined : config.textClass}>
+        <PlatformIcon platform={p} className="w-3.5 h-3.5" />
+      </span>
+    ),
+    disabledReason: deeplinkResult.type === "disabled" ? deeplinkResult.reason : null,
+  }
+}
+
 interface ActionDetailProps {
   action: EnrichedAction | null
   context: ActionContext | null
@@ -53,6 +164,7 @@ interface ActionDetailProps {
   onSend?: () => void
   onDismiss?: () => void
   isSending?: boolean
+  openExternal: (url: string) => void
 }
 
 function ActionDetail({
@@ -63,16 +175,32 @@ function ActionDetail({
   onSend,
   onDismiss,
   isSending,
+  openExternal,
 }: ActionDetailProps) {
   if (!action) {
     return (
       <EmptyState
-        icon={<Search className="w-6 h-6 text-muted-foreground" />}
+        animatedIcon={SparklesIcon}
         title="Select an action"
-        description="Choose an action from the list to view details"
+        description="Pick one from the list to review and respond"
       />
     )
   }
+
+  const platform = (action.platform ?? context?.conversation?.platform) as ActionPlatform | undefined
+  const deeplinkResult = platform ? getPlatformDeeplink(platform, context) : null
+  const openInApp = buildOpenInAppConfig(
+    deeplinkResult ? { ...deeplinkResult, platform } : null,
+    openExternal,
+  )
+
+  // Per-contact deep links for resolve_contact actions
+  const contact1OpenInApp = action.type === "resolve_contact" && context?.contact
+    ? buildOpenInAppConfig(getContactDeeplink(context.contact.handles), openExternal)
+    : null
+  const contact2OpenInApp = action.type === "resolve_contact" && context?.secondaryContact
+    ? buildOpenInAppConfig(getContactDeeplink(context.secondaryContact.handles), openExternal)
+    : null
 
   return (
     <div className="flex flex-col h-full">
@@ -88,6 +216,10 @@ function ActionDetail({
           isSending,
           autoFocus: false,
           className: "h-full border-0 shadow-none rounded-none",
+          openInApp,
+          contact1OpenInApp,
+          contact2OpenInApp,
+          onLinkClick: (url: string) => openExternal(url),
         })}
       </div>
     </div>
@@ -101,8 +233,12 @@ interface ActionsPageProps {
 export function ActionsPage({
   onActionCountChange,
 }: ActionsPageProps): React.JSX.Element {
+  const electron = useElectron()
+
   // Filter state
+  const filterRef = React.useRef<ActionFilterDropdownRef>(null)
   const [activeFilter, setActiveFilter] = React.useState<FilterGroup>("all")
+  const [activePlatforms, setActivePlatforms] = React.useState<Set<ActionPlatform>>(new Set())
   const [selectedActionId, setSelectedActionId] = React.useState<string | null>(
     null
   )
@@ -129,18 +265,42 @@ export function ActionsPage({
   }>(HIDDEN_UNDO_TOAST)
 
   // Get action types to filter by based on active filter group
-  const filterConfig = ACTION_FILTER_GROUPS[activeFilter]
-  const filterTypes = filterConfig.types as readonly string[] | null
+  const filterTypes = React.useMemo(
+    () => ACTION_FILTER_GROUPS[activeFilter].types as readonly string[] | null,
+    [activeFilter]
+  )
 
   // Fetch pending actions list
   const actionsResult = useQuery(api.actions.getPendingActions, { limit: 50 })
   const countsResult = useQuery(api.actions.getActionCountsByType, {})
 
-  // Filter actions client-side based on active filter group
+  // Filter actions client-side based on active filter group + platform
   const rawActions = actionsResult?.actions ?? EMPTY_ACTIONS
   const actions = React.useMemo(() => {
-    if (!filterTypes) return rawActions
-    return rawActions.filter((a) => filterTypes.includes(a.type))
+    let filtered = rawActions
+    if (filterTypes) {
+      filtered = filtered.filter((a) => filterTypes.includes(a.type))
+    }
+    if (activePlatforms.size > 0) {
+      filtered = filtered.filter((a) => a.platform != null && activePlatforms.has(a.platform as ActionPlatform))
+    }
+    return filtered
+  }, [rawActions, filterTypes, activePlatforms])
+
+  // Compute platform counts from type-filtered actions (so platform counts update when type filter changes)
+  const platformCounts = React.useMemo(() => {
+    let typeFiltered = rawActions
+    if (filterTypes) {
+      typeFiltered = typeFiltered.filter((a) => filterTypes.includes(a.type))
+    }
+    const counts: Partial<Record<ActionPlatform, number>> = {}
+    for (const action of typeFiltered) {
+      if (action.platform) {
+        const p = action.platform as ActionPlatform
+        counts[p] = (counts[p] ?? 0) + 1
+      }
+    }
+    return counts
   }, [rawActions, filterTypes])
 
   const counts = countsResult?.counts ?? EMPTY_COUNTS
@@ -152,13 +312,24 @@ export function ActionsPage({
     onActionCountChange?.(totalFromCounts)
   }, [totalFromCounts, onActionCountChange])
 
-  // Auto-select first action when list changes
+  // Track selected action's index so we can select the next one after removal
+  const selectedIndexRef = React.useRef(0)
+  React.useEffect(() => {
+    if (selectedActionId) {
+      const idx = actions.findIndex((a) => a._id === selectedActionId)
+      if (idx !== -1) selectedIndexRef.current = idx
+    }
+  }, [selectedActionId, actions])
+
+  // Auto-select next action when current is removed, or first action on initial load
   React.useEffect(() => {
     if (
       actions.length > 0 &&
       (!selectedActionId || !actions.find((a) => a._id === selectedActionId))
     ) {
-      setSelectedActionId(actions[0]._id)
+      // Select the action at the same index (next one moved up) or last if at end
+      const nextIndex = Math.min(selectedIndexRef.current, actions.length - 1)
+      setSelectedActionId(actions[nextIndex]._id)
     } else if (actions.length === 0) {
       setSelectedActionId(null)
     }
@@ -175,6 +346,7 @@ export function ActionsPage({
       ? { actionId: selectedActionId as Id<"actions">, messageLimit: 15 }
       : "skip"
   )
+  const actionContext: ActionContext | null = (contextResult ?? null) as ActionContext | null
 
   // Mutations
   const swipeAction = useMutation(api.actions.swipeAction)
@@ -349,9 +521,26 @@ export function ActionsPage({
     setUndoToast(HIDDEN_UNDO_TOAST)
   }, [])
 
+  // Open in platform app
+  const handleOpenInApp = React.useCallback(() => {
+    const platform = selectedAction?.platform ?? actionContext?.conversation?.platform
+    if (!platform) return
+    const result = getPlatformDeeplink(platform, actionContext)
+    if (result?.type === "available") {
+      electron.shell.openExternal(result.url)
+    }
+  }, [selectedAction, actionContext, electron])
+
   // Keyboard navigation
   React.useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
+      // Cmd+O: Open in platform app (works even when focused in inputs)
+      if ((e.metaKey || e.ctrlKey) && e.key === "o") {
+        e.preventDefault()
+        handleOpenInApp()
+        return
+      }
+
       // Ignore when typing in inputs
       if (
         e.target instanceof HTMLInputElement ||
@@ -416,12 +605,16 @@ export function ActionsPage({
           "[data-response-input]"
         ) as HTMLTextAreaElement | null
         textarea?.focus()
+      } else if (e.key === "f" || e.key === "F") {
+        // Open filter dropdown
+        e.preventDefault()
+        filterRef.current?.open()
       }
     }
 
     window.addEventListener("keydown", handleKeyDown)
     return () => window.removeEventListener("keydown", handleKeyDown)
-  }, [handleSwipe, actions, selectedActionId, isMultiSelectMode, clearSelection, handleBulkDismiss])
+  }, [handleSwipe, handleOpenInApp, actions, selectedActionId, isMultiSelectMode, clearSelection, handleBulkDismiss])
 
   // Loading skeleton
   if (loading) {
@@ -430,11 +623,6 @@ export function ActionsPage({
         {/* List Panel */}
         <Panel variant="shrink" width={320} position="first">
           <PanelHeader title="Actions" />
-          <div className="flex gap-1.5 px-3 pb-2">
-            {[1, 2, 3, 4].map((i) => (
-              <Skeleton key={i} className="h-6 w-16 rounded-full" />
-            ))}
-          </div>
           <div className="p-3 space-y-2">
             {[1, 2, 3, 4, 5].map((i) => (
               <Skeleton key={i} className="h-20 w-full rounded-lg" />
@@ -454,53 +642,36 @@ export function ActionsPage({
     <>
       {/* List Panel */}
       <Panel variant="shrink" width={320} position="first">
-        <PanelHeader title="Actions" />
-
-        {/* Filter Chips */}
-        <div className="flex gap-1.5 px-3 pb-2 flex-wrap">
-          {(
-            Object.entries(ACTION_FILTER_GROUPS) as [
-              FilterGroup,
-              (typeof ACTION_FILTER_GROUPS)[FilterGroup]
-            ][]
-          ).map(([key, config]) => {
-            const count =
-              config.types === null
-                ? totalFromCounts
-                : config.types.reduce(
-                    (sum, type) => sum + (counts[type] ?? 0),
-                    0
-                  )
-            // Hide non-"all" filters with zero count
-            if (key !== "all" && count === 0) return null
-            const isActive = activeFilter === key
-            return (
-              <button
-                key={key}
-                type="button"
-                onClick={() => setActiveFilter(isActive ? "all" : key)}
-                className={`no-drag px-2.5 py-1 rounded-full text-xs font-medium cursor-pointer ${
-                  isActive
-                    ? "bg-foreground text-background"
-                    : "bg-foreground/10 text-foreground/70 hover:bg-foreground/15"
-                }`}
-              >
-                {config.label}
-                {count > 0 && (
-                  <span className="ml-1 opacity-70">{count}</span>
-                )}
-              </button>
-            )
-          })}
-        </div>
+        <PanelHeader title="Actions">
+          <ActionFilterDropdown
+            ref={filterRef}
+            counts={counts}
+            total={totalFromCounts}
+            activeFilter={activeFilter}
+            onFilterChange={setActiveFilter}
+            platformCounts={platformCounts}
+            activePlatforms={activePlatforms}
+            onPlatformToggle={(platform) => {
+              setActivePlatforms((prev) => {
+                const next = new Set(prev)
+                if (next.has(platform)) {
+                  next.delete(platform)
+                } else {
+                  next.add(platform)
+                }
+                return next
+              })
+            }}
+          />
+        </PanelHeader>
 
         {/* Action List */}
         <div className="flex-1 overflow-y-auto p-2">
           {actions.length === 0 ? (
             <EmptyState
-              icon={<PartyPopper className="w-6 h-6 text-muted-foreground" />}
-              title="All caught up!"
-              description="New actions will appear here."
+              animatedIcon={PartyPopperIcon}
+              title="You're all caught up"
+              description="New actions will appear as Cued finds opportunities"
               className="py-12"
             />
           ) : (
@@ -546,12 +717,13 @@ export function ActionsPage({
       <Panel position="last">
         <ActionDetail
           action={selectedAction}
-          context={(contextResult as ActionContext | undefined) ?? null}
+          context={actionContext}
           responseText={currentResponseText}
           onResponseChange={handleResponseChange}
           onSend={() => handleSwipe("right")}
           onDismiss={() => handleSwipe("left")}
           isSending={isProcessing}
+          openExternal={(url) => electron.shell.openExternal(url)}
         />
       </Panel>
 
