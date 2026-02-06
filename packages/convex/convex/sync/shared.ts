@@ -12,6 +12,7 @@ import {
   normalizePhone,
   getPhoneVariants,
   normalizeLinkedInHandle,
+  normalizeMemberURN,
 } from "@cued/shared";
 import { normalizeEmail } from "@cued/ai";
 
@@ -327,8 +328,7 @@ function normalizeHandleByType(value: string, type: HandleType): string {
     case "linkedin_handle":
       return normalizeLinkedInHandle(value);
     case "linkedin_urn":
-      // LinkedIn URNs are already unique, just lowercase for consistency
-      return value.toLowerCase();
+      return normalizeMemberURN(value).toLowerCase();
     case "slack_id":
       // Slack IDs are already normalized (e.g., "U12345678")
       return value;

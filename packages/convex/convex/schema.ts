@@ -47,7 +47,8 @@ export const mergeSourceValidator = v.union(
   v.literal("phone_match"),
   v.literal("exact_name_match"),
   v.literal("fuzzy_name_match"),
-  v.literal("llm_fuzzy_match")
+  v.literal("llm_fuzzy_match"),
+  v.literal("linkedin_urn_match")
 );
 
 export const actionStatusValidator = v.union(

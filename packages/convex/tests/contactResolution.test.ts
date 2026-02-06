@@ -475,6 +475,81 @@ describe("contactResolution", () => {
       expect(result.fuzzyPairs).toHaveLength(0);
     });
 
+    it("excludes URN displayNames from name matching", async () => {
+      const t = convexTest(schema, modules);
+      const { userId } = await setupAuthenticatedUser(t);
+
+      await t.run(async (ctx) => {
+        // Contact with LinkedIn URN as displayName (placeholder)
+        await ctx.db.insert(
+          "contacts",
+          createTestContactData(userId, {
+            displayName:
+              "urn:li:msg_messagingparticipant:urn:li:fsd_profile:ABC123",
+          })
+        );
+        // Another contact with similar URN tokens
+        await ctx.db.insert(
+          "contacts",
+          createTestContactData(userId, {
+            displayName: "urn:li:member:ABC123",
+          })
+        );
+      });
+
+      const result = await t.query(
+        internal.contactResolution.findDuplicateCandidatesInternal,
+        { userId }
+      );
+
+      // URN-like names should not trigger name matching
+      expect(result.duplicatePairs).toHaveLength(0);
+      expect(result.fuzzyPairs).toHaveLength(0);
+    });
+
+    it("detects conflicting linkedin_handle values", async () => {
+      const t = convexTest(schema, modules);
+      const { userId } = await setupAuthenticatedUser(t);
+
+      await t.run(async (ctx) => {
+        const c1 = await ctx.db.insert(
+          "contacts",
+          createTestContactData(userId, { displayName: "Soham Bafana" })
+        );
+        const c2 = await ctx.db.insert(
+          "contacts",
+          createTestContactData(userId, { displayName: "Soham Bafana" })
+        );
+
+        // Different LinkedIn handles = different people
+        await ctx.db.insert(
+          "contactHandles",
+          createTestContactHandleData(userId, c1, {
+            handleType: "linkedin_handle",
+            handle: "soham-bafana",
+            platform: "linkedin",
+          })
+        );
+        await ctx.db.insert(
+          "contactHandles",
+          createTestContactHandleData(userId, c2, {
+            handleType: "linkedin_handle",
+            handle: "different-soham",
+            platform: "linkedin",
+          })
+        );
+      });
+
+      const result = await t.query(
+        internal.contactResolution.findDuplicateCandidatesInternal,
+        { userId }
+      );
+
+      // Same name but different LinkedIn handles = conflict, should not match
+      expect(result.duplicatePairs).toHaveLength(0);
+      expect(result.fuzzyPairs).toHaveLength(0);
+    });
+
     it("excludes email-like displayNames from name matching", async () => {
       const t = convexTest(schema, modules);
       const { userId } = await setupAuthenticatedUser(t);
@@ -499,6 +574,95 @@ describe("contactResolution", () => {
 
       // Email-like names should not trigger name matching (only handle matching)
       expect(result.fuzzyPairs).toHaveLength(0);
+    });
+
+    it("matches contacts with different LinkedIn URN formats for same member ID", async () => {
+      const t = convexTest(schema, modules);
+      const { userId } = await setupAuthenticatedUser(t);
+
+      const [contact1Id, contact2Id] = await t.run(async (ctx) => {
+        const c1 = await ctx.db.insert(
+          "contacts",
+          createTestContactData(userId, { displayName: "Soham Bafana" })
+        );
+        const c2 = await ctx.db.insert(
+          "contacts",
+          createTestContactData(userId, { displayName: "Soham B" })
+        );
+
+        // Contact 1 has a fsd_profile URN (normalizes to urn:li:member:abc123)
+        await ctx.db.insert(
+          "contactHandles",
+          createTestContactHandleData(userId, c1, {
+            handleType: "linkedin_urn",
+            handle: "urn:li:fsd_profile:abc123",
+            platform: "linkedin",
+          })
+        );
+        // Contact 2 has the canonical member URN format for the same ID
+        await ctx.db.insert(
+          "contactHandles",
+          createTestContactHandleData(userId, c2, {
+            handleType: "linkedin_urn",
+            handle: "urn:li:member:abc123",
+            platform: "linkedin",
+          })
+        );
+
+        return [c1, c2];
+      });
+
+      const result = await t.query(
+        internal.contactResolution.findDuplicateCandidatesInternal,
+        { userId }
+      );
+
+      expect(result.duplicatePairs).toHaveLength(1);
+      expect(result.duplicatePairs[0].confidence).toBe(1.0);
+      expect(result.duplicatePairs[0].source).toBe("linkedin_urn_match");
+      expect(
+        [result.duplicatePairs[0].contact1Id, result.duplicatePairs[0].contact2Id].sort()
+      ).toEqual([contact1Id, contact2Id].sort());
+    });
+
+    it("does not match contacts with different LinkedIn member IDs", async () => {
+      const t = convexTest(schema, modules);
+      const { userId } = await setupAuthenticatedUser(t);
+
+      await t.run(async (ctx) => {
+        const c1 = await ctx.db.insert(
+          "contacts",
+          createTestContactData(userId, { displayName: "Person A" })
+        );
+        const c2 = await ctx.db.insert(
+          "contacts",
+          createTestContactData(userId, { displayName: "Person B" })
+        );
+
+        await ctx.db.insert(
+          "contactHandles",
+          createTestContactHandleData(userId, c1, {
+            handleType: "linkedin_urn",
+            handle: "urn:li:member:abc123",
+            platform: "linkedin",
+          })
+        );
+        await ctx.db.insert(
+          "contactHandles",
+          createTestContactHandleData(userId, c2, {
+            handleType: "linkedin_urn",
+            handle: "urn:li:member:xyz789",
+            platform: "linkedin",
+          })
+        );
+      });
+
+      const result = await t.query(
+        internal.contactResolution.findDuplicateCandidatesInternal,
+        { userId }
+      );
+
+      expect(result.duplicatePairs).toHaveLength(0);
     });
 
     it("does not duplicate suggestions for contacts already matched by handle", async () => {
@@ -544,6 +708,131 @@ describe("contactResolution", () => {
       expect(result.duplicatePairs).toHaveLength(1);
       expect(result.duplicatePairs[0].source).toBe("email_match");
       expect(result.fuzzyPairs).toHaveLength(0);
+    });
+  });
+
+  describe("autoMergeContacts", () => {
+    it("keeps the higher-quality contact as primary even if args order is reversed", async () => {
+      const t = convexTest(schema, modules);
+      const { userId } = await setupAuthenticatedUser(t);
+
+      const [placeholderId, richId] = await t.run(async (ctx) => {
+        const placeholder = await ctx.db.insert(
+          "contacts",
+          createTestContactData(userId, {
+            displayName: "urn:li:member:abc123",
+          })
+        );
+        const rich = await ctx.db.insert(
+          "contacts",
+          createTestContactData(userId, {
+            displayName: "Jane Doe",
+            company: "Acme",
+            notes: "Met at conference",
+          })
+        );
+
+        await ctx.db.insert(
+          "contactHandles",
+          createTestContactHandleData(userId, placeholder, {
+            handleType: "linkedin_urn",
+            handle: "urn:li:member:abc123",
+            platform: "linkedin",
+          })
+        );
+        await ctx.db.insert(
+          "contactHandles",
+          createTestContactHandleData(userId, rich, {
+            handleType: "linkedin_urn",
+            handle: "urn:li:msg_messagingparticipant:urn:li:fsd_profile:abc123",
+            platform: "linkedin",
+          })
+        );
+
+        return [placeholder, rich];
+      });
+
+      await t.mutation(internal.contactResolution.autoMergeContacts, {
+        primaryContactId: placeholderId,
+        secondaryContactId: richId,
+        source: "linkedin_urn_match",
+        reasoning: "test",
+      });
+
+      await t.run(async (ctx) => {
+        const placeholder = await ctx.db.get(placeholderId);
+        const rich = await ctx.db.get(richId);
+
+        expect(placeholder).toBeNull();
+        expect(rich).not.toBeNull();
+        expect(rich?.displayName).toBe("Jane Doe");
+      });
+    });
+
+    it("deduplicates equivalent linkedin_urn handles during merge", async () => {
+      const t = convexTest(schema, modules);
+      const { userId } = await setupAuthenticatedUser(t);
+
+      const [primaryId, secondaryId] = await t.run(async (ctx) => {
+        const primary = await ctx.db.insert(
+          "contacts",
+          createTestContactData(userId, { displayName: "Jane Doe", company: "Acme" })
+        );
+        const secondary = await ctx.db.insert(
+          "contacts",
+          createTestContactData(userId, { displayName: "Jane D" })
+        );
+
+        await ctx.db.insert(
+          "contactHandles",
+          createTestContactHandleData(userId, primary, {
+            handleType: "linkedin_urn",
+            handle: "urn:li:member:abc123",
+            platform: "linkedin",
+          })
+        );
+        await ctx.db.insert(
+          "contactHandles",
+          createTestContactHandleData(userId, secondary, {
+            handleType: "linkedin_urn",
+            handle: "urn:li:msg_messagingparticipant:urn:li:fsd_profile:abc123",
+            platform: "linkedin",
+          })
+        );
+        await ctx.db.insert(
+          "contactHandles",
+          createTestContactHandleData(userId, secondary, {
+            handleType: "phone",
+            handle: "+15551234567",
+            platform: "imessage",
+          })
+        );
+
+        return [primary, secondary];
+      });
+
+      await t.mutation(internal.contactResolution.autoMergeContacts, {
+        primaryContactId: primaryId,
+        secondaryContactId: secondaryId,
+        source: "linkedin_urn_match",
+        reasoning: "test",
+      });
+
+      await t.run(async (ctx) => {
+        const mergedHandles = await ctx.db
+          .query("contactHandles")
+          .withIndex("by_contact", (q) => q.eq("contactId", primaryId))
+          .collect();
+
+        const linkedInUrnHandles = mergedHandles.filter(
+          (h) => h.handleType === "linkedin_urn"
+        );
+        const phoneHandles = mergedHandles.filter((h) => h.handleType === "phone");
+
+        expect(linkedInUrnHandles).toHaveLength(1);
+        expect(linkedInUrnHandles[0].handle).toBe("urn:li:member:abc123");
+        expect(phoneHandles).toHaveLength(1);
+      });
     });
   });
 });

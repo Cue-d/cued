@@ -123,6 +123,36 @@ describe("LinkedIn URN utilities", () => {
     it("handles empty/null input gracefully", () => {
       expect(normalizeMemberURN("")).toBe("");
     });
+
+    it("normalizes nested msg_messagingparticipant with fsd_profile", () => {
+      expect(
+        normalizeMemberURN(
+          "urn:li:msg_messagingparticipant:urn:li:fsd_profile:ABC123"
+        )
+      ).toBe("urn:li:member:ABC123");
+    });
+
+    it("normalizes nested msg_messagingparticipant with fs_miniProfile", () => {
+      expect(
+        normalizeMemberURN(
+          "urn:li:msg_messagingparticipant:urn:li:fs_miniProfile:XYZ789"
+        )
+      ).toBe("urn:li:member:XYZ789");
+    });
+
+    it("normalizes nested msg_messagingparticipant with member", () => {
+      expect(
+        normalizeMemberURN(
+          "urn:li:msg_messagingparticipant:urn:li:member:DEF456"
+        )
+      ).toBe("urn:li:member:DEF456");
+    });
+
+    it("normalizes non-nested msg_messagingparticipant (bare ID)", () => {
+      expect(
+        normalizeMemberURN("urn:li:msg_messagingparticipant:ABC123")
+      ).toBe("urn:li:member:ABC123");
+    });
   });
 
   describe("isLinkedInURN", () => {
@@ -158,6 +188,15 @@ describe("LinkedIn URN utilities", () => {
       expect(isMemberURN("urn:li:member:123")).toBe(true);
       expect(isMemberURN("urn:li:fs_miniProfile:456")).toBe(true);
       expect(isMemberURN("urn:li:fsd_profile:ABC")).toBe(true);
+    });
+
+    it("returns true for msg_messagingparticipant URNs", () => {
+      expect(isMemberURN("urn:li:msg_messagingparticipant:ABC123")).toBe(true);
+      expect(
+        isMemberURN(
+          "urn:li:msg_messagingparticipant:urn:li:fsd_profile:ABC123"
+        )
+      ).toBe(true);
     });
 
     it("returns false for non-member URNs", () => {
@@ -211,6 +250,15 @@ describe("LinkedIn URN utilities", () => {
       expect(
         urnIdsMatch("urn:li:fs_conversation:ID123", "urn:li:fsd_conversation:id123")
       ).toBe(true);
+    });
+
+    it("matches msg_messagingparticipant URNs with member URNs after normalization", () => {
+      // urnIdsMatch works on raw URNs — for nested URNs, normalize first
+      const nested = "urn:li:msg_messagingparticipant:urn:li:fsd_profile:ABC123";
+      const member = "urn:li:member:ABC123";
+      // After normalization, both become urn:li:member:ABC123
+      expect(normalizeMemberURN(nested)).toBe(member);
+      expect(urnIdsMatch(normalizeMemberURN(nested), member)).toBe(true);
     });
   });
 });

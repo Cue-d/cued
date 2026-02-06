@@ -6,7 +6,7 @@ import {
   mutation,
 } from "./_generated/server";
 import { internal } from "./_generated/api";
-import type { Id } from "./_generated/dataModel";
+import type { Doc, Id } from "./_generated/dataModel";
 import { getAuthenticatedUser } from "./lib/auth";
 import {
   normalizeEmail,
@@ -17,7 +17,17 @@ import {
   decideFuzzyMatchWithRetry,
   LLM_CONFIDENCE_THRESHOLD,
 } from "@cued/ai";
+import {
+  normalizeMemberURN,
+  extractIdFromURN,
+  isLinkedInURN,
+  normalizePhone,
+  normalizeLinkedInHandle,
+} from "@cued/shared";
 import type { TypedHandle, MessageSnippet } from "@cued/ai";
+
+const MAX_CONVERSATIONS_FOR_LLM_LOOKUP = 100;
+const MAX_CONVERSATIONS_FOR_LLM_CONTEXT = 5;
 
 /** Map handle type to TypedHandle type */
 function toTypedHandleType(handleType: string): TypedHandle["type"] {
@@ -45,7 +55,8 @@ type DuplicatePair = {
     | "phone_match"
     | "exact_name_match"
     | "fuzzy_name_match"
-    | "llm_fuzzy_match";
+    | "llm_fuzzy_match"
+    | "linkedin_urn_match";
   sharedHandle?: string;
 };
 
@@ -74,15 +85,16 @@ export const getContactForLLMInternal = internalQuery({
       .withIndex("by_contact", (q) => q.eq("contactId", args.contactId))
       .collect();
 
-    // Get recent messages from conversations with this contact
-    const allConversations = await ctx.db
+    // Bound lookup to avoid unbounded per-pair reads during fuzzy scan.
+    const recentConversations = await ctx.db
       .query("conversations")
-      .withIndex("by_user", (q) => q.eq("userId", contact.userId))
-      .collect();
+      .withIndex("by_user_last_message", (q) => q.eq("userId", contact.userId))
+      .order("desc")
+      .take(MAX_CONVERSATIONS_FOR_LLM_LOOKUP);
 
-    const conversations = allConversations
+    const conversations = recentConversations
       .filter((c) => c.participantContactIds.includes(args.contactId))
-      .slice(0, 5);
+      .slice(0, MAX_CONVERSATIONS_FOR_LLM_CONTEXT);
 
     // Get recent messages from these conversations
     const recentMessages: MessageSnippet[] = [];
@@ -169,6 +181,20 @@ export const scanAllContactsForMerges = internalAction({
     // Process all duplicate pairs (handle matches + name matches)
     for (const pair of result.duplicatePairs) {
       try {
+        // LinkedIn URN matches are certain (same member ID) — auto-merge directly
+        if (pair.source === "linkedin_urn_match") {
+          await ctx.runMutation(
+            internal.contactResolution.autoMergeContacts,
+            {
+              primaryContactId: pair.contact1Id,
+              secondaryContactId: pair.contact2Id,
+              source: pair.source,
+              reasoning: `Same LinkedIn member ID`,
+            }
+          );
+          continue;
+        }
+
         const createResult = await ctx.runMutation(
           internal.contactResolution.createMergeSuggestionInternal,
           {
@@ -322,8 +348,16 @@ export const findDuplicateCandidatesInternal = internalQuery({
             getOrCreateSet(handleToContacts, variant).add(handle.contactId);
           }
         }
+      } else if (handle.handleType === "linkedin_urn") {
+        // Normalize URN and index by extracted member ID
+        const normalized = normalizeMemberURN(rawValue).toLowerCase();
+        const memberId = extractIdFromURN(normalized);
+        if (memberId) {
+          getOrCreateSet(handleToContacts, `linkedin_urn:${memberId}`).add(
+            handle.contactId
+          );
+        }
       }
-      // Skip other handle types (username, slack_id, etc.) - they're not used for merge matching
     }
 
     // Also index displayNames that look like email/phone (for contacts without proper handles)
@@ -366,12 +400,13 @@ export const findDuplicateCandidatesInternal = internalQuery({
     for (const contact of contacts) {
       const name = contact.displayName;
 
-      // Skip placeholder contacts (emails/phones as names) and dismissed
+      // Skip placeholder contacts (emails/phones/URNs as names) and dismissed
       if (
         contact.isDismissed ||
         !name.trim() ||
         looksLikeEmail(name) ||
-        looksLikePhone(name)
+        looksLikePhone(name) ||
+        isLinkedInURN(name)
       ) {
         continue;
       }
@@ -399,7 +434,14 @@ export const findDuplicateCandidatesInternal = internalQuery({
       if (contactIds.size < 2) continue;
 
       const contactArray = Array.from(contactIds);
-      const source = handle.includes("@") ? "email_match" : "phone_match";
+      let source: DuplicatePair["source"];
+      if (handle.startsWith("linkedin_urn:")) {
+        source = "linkedin_urn_match";
+      } else if (handle.includes("@")) {
+        source = "email_match";
+      } else {
+        source = "phone_match";
+      }
 
       for (let i = 0; i < contactArray.length; i++) {
         for (let j = i + 1; j < contactArray.length; j++) {
@@ -434,9 +476,9 @@ export const findDuplicateCandidatesInternal = internalQuery({
     ): boolean => {
       if (!handles1 || !handles2) return false;
 
-      // Only check truly unique identifiers: phone, username (LinkedIn)
+      // Only check truly unique identifiers: phone, LinkedIn handle
       // Emails excluded - people often have work + personal emails
-      const uniqueTypes = ["phone", "username"];
+      const uniqueTypes = ["phone", "linkedin_handle", "linkedin_urn"];
 
       // Group handles by type
       const byType1 = new Map<string, string[]>();
@@ -471,7 +513,7 @@ export const findDuplicateCandidatesInternal = internalQuery({
               return true; // Different phones = conflict
             }
           } else {
-            // For username (LinkedIn), use lowercase comparison
+            // For LinkedIn handles, use lowercase comparison
             if (v1.toLowerCase() !== v2.toLowerCase()) {
               return true;
             }
@@ -597,7 +639,8 @@ export const createMergeSuggestionInternal = internalMutation({
       v.literal("phone_match"),
       v.literal("exact_name_match"),
       v.literal("fuzzy_name_match"),
-      v.literal("llm_fuzzy_match")
+      v.literal("llm_fuzzy_match"),
+      v.literal("linkedin_urn_match")
     ),
     reasoning: v.optional(v.string()),
   },
@@ -705,30 +748,66 @@ export const autoMergeContacts = internalMutation({
       v.literal("phone_match"),
       v.literal("exact_name_match"),
       v.literal("fuzzy_name_match"),
-      v.literal("llm_fuzzy_match")
+      v.literal("llm_fuzzy_match"),
+      v.literal("linkedin_urn_match")
     ),
     reasoning: v.string(),
   },
   handler: async (ctx, args) => {
-    const [primary, secondary] = await Promise.all([
+    const [contactA, contactB] = await Promise.all([
       ctx.db.get(args.primaryContactId),
       ctx.db.get(args.secondaryContactId),
     ]);
 
-    if (!primary || !secondary) {
+    if (!contactA || !contactB) {
       return { success: false, reason: "Contact not found" };
     }
 
-    // Move handles from secondary to primary
-    const secondaryHandles = await ctx.db
-      .query("contactHandles")
-      .withIndex("by_contact", (q) =>
-        q.eq("contactId", args.secondaryContactId)
-      )
-      .collect();
+    // Fetch handles for both contacts before choosing primary, so we can
+    // choose the higher-quality record and dedupe with canonical keys.
+    const [handlesA, handlesB] = await Promise.all([
+      ctx.db
+        .query("contactHandles")
+        .withIndex("by_contact", (q) =>
+          q.eq("contactId", args.primaryContactId)
+        )
+        .collect(),
+      ctx.db
+        .query("contactHandles")
+        .withIndex("by_contact", (q) =>
+          q.eq("contactId", args.secondaryContactId)
+        )
+        .collect(),
+    ]);
+
+    const preferredIsA =
+      getContactQualityScore(contactA, handlesA) >=
+      getContactQualityScore(contactB, handlesB);
+
+    const primaryContactId = preferredIsA
+      ? args.primaryContactId
+      : args.secondaryContactId;
+    const secondaryContactId = preferredIsA
+      ? args.secondaryContactId
+      : args.primaryContactId;
+    const primary = preferredIsA ? contactA : contactB;
+    const secondary = preferredIsA ? contactB : contactA;
+    const primaryHandles = preferredIsA ? handlesA : handlesB;
+    const secondaryHandles = preferredIsA ? handlesB : handlesA;
+
+    const existingHandleKeys = new Set(
+      primaryHandles.map((h) => buildHandleDedupKey(h.handleType, h.handle))
+    );
 
     for (const handle of secondaryHandles) {
-      await ctx.db.patch(handle._id, { contactId: args.primaryContactId });
+      const key = buildHandleDedupKey(handle.handleType, handle.handle);
+      if (existingHandleKeys.has(key)) {
+        // Primary already has this handle — delete the duplicate
+        await ctx.db.delete(handle._id);
+      } else {
+        await ctx.db.patch(handle._id, { contactId: primaryContactId });
+        existingHandleKeys.add(key);
+      }
     }
 
     // Update conversations
@@ -738,16 +817,14 @@ export const autoMergeContacts = internalMutation({
       .collect();
 
     for (const conv of conversations) {
-      if (conv.participantContactIds.includes(args.secondaryContactId)) {
+      if (conv.participantContactIds.includes(secondaryContactId)) {
         const withoutSecondary = conv.participantContactIds.filter(
-          (id) => id !== args.secondaryContactId
+          (id) => id !== secondaryContactId
         );
-        const hasPrimary = conv.participantContactIds.includes(
-          args.primaryContactId
-        );
+        const hasPrimary = conv.participantContactIds.includes(primaryContactId);
         const updatedParticipants = hasPrimary
           ? withoutSecondary
-          : [...withoutSecondary, args.primaryContactId];
+          : [...withoutSecondary, primaryContactId];
 
         await ctx.db.patch(conv._id, {
           participantContactIds: updatedParticipants,
@@ -759,12 +836,12 @@ export const autoMergeContacts = internalMutation({
     const messages = await ctx.db
       .query("messages")
       .withIndex("by_sender_contact", (q) =>
-        q.eq("senderContactId", args.secondaryContactId)
+        q.eq("senderContactId", secondaryContactId)
       )
       .collect();
 
     for (const msg of messages) {
-      await ctx.db.patch(msg._id, { senderContactId: args.primaryContactId });
+      await ctx.db.patch(msg._id, { senderContactId: primaryContactId });
     }
 
     // Merge contact metadata
@@ -783,16 +860,16 @@ export const autoMergeContacts = internalMutation({
       updates.importance = secondary.importance;
     }
     if (Object.keys(updates).length > 0) {
-      await ctx.db.patch(args.primaryContactId, updates);
+      await ctx.db.patch(primaryContactId, updates);
     }
 
-    await ctx.db.delete(args.secondaryContactId);
+    await ctx.db.delete(secondaryContactId);
 
     // Log merge for audit trail
     await ctx.db.insert("mergeSuggestions", {
       userId: primary.userId,
-      contact1Id: args.primaryContactId,
-      contact2Id: args.secondaryContactId, // Will be invalid after delete, but kept for audit
+      contact1Id: primaryContactId,
+      contact2Id: secondaryContactId, // Will be invalid after delete, but kept for audit
       confidence: 1.0,
       source: args.source,
       reasoning: `Auto-merged: ${args.reasoning}`,
@@ -804,6 +881,64 @@ export const autoMergeContacts = internalMutation({
     return { success: true, handlesMovedCount: secondaryHandles.length };
   },
 });
+
+function normalizeHandleForDedup(handleType: string, handle: string): string {
+  const trimmed = handle.trim();
+  if (!trimmed) return "";
+
+  switch (handleType) {
+    case "email":
+      return normalizeEmail(trimmed) || trimmed.toLowerCase();
+    case "phone":
+      return normalizePhone(trimmed);
+    case "linkedin_urn":
+      return normalizeMemberURN(trimmed).toLowerCase();
+    case "linkedin_handle":
+      return normalizeLinkedInHandle(trimmed) || trimmed.toLowerCase();
+    case "twitter_handle":
+      return trimmed.toLowerCase().replace(/^@/, "");
+    default:
+      return trimmed;
+  }
+}
+
+function buildHandleDedupKey(handleType: string, handle: string): string {
+  const normalized = normalizeHandleForDedup(handleType, handle);
+  return `${handleType}:${normalized || handle.trim()}`;
+}
+
+function isPlaceholderDisplayName(value: string): boolean {
+  const name = value.trim();
+  return (
+    !name ||
+    looksLikeEmail(name) ||
+    looksLikePhone(name) ||
+    isLinkedInURN(name) ||
+    /^U[A-Z0-9]+$/i.test(name) ||
+    /^linkedin user$/i.test(name)
+  );
+}
+
+function getContactQualityScore(
+  contact: Doc<"contacts">,
+  handles: Doc<"contactHandles">[]
+): number {
+  let score = 0;
+  if (!isPlaceholderDisplayName(contact.displayName)) score += 100;
+  if (contact.displayName.trim().split(/\s+/).filter(Boolean).length >= 2) {
+    score += 10;
+  }
+  if (contact.company) score += 8;
+  if (contact.notes) score += 8;
+  if (contact.importance !== undefined) score += 4;
+
+  const uniqueHandleCount = new Set(
+    handles.map((h) => buildHandleDedupKey(h.handleType, h.handle))
+  ).size;
+  score += Math.min(10, uniqueHandleCount);
+
+  return score;
+}
 
 function looksLikeEmail(value: string): boolean {
   return value.includes("@") && value.includes(".");

@@ -27,7 +27,8 @@ export const resolveContactHandler: ActionSwipeHandler = {
       | "phone_match"
       | "exact_name_match"
       | "fuzzy_name_match"
-      | "llm_fuzzy_match" = "email_match";
+      | "llm_fuzzy_match"
+      | "linkedin_urn_match" = "email_match";
 
     if (action.mergeSuggestionId) {
       const suggestion = await ctx.db.get(action.mergeSuggestionId);

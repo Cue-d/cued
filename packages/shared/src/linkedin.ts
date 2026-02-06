@@ -14,6 +14,7 @@
  * - urn:li:member:{id}
  * - urn:li:fs_miniProfile:{id}
  * - urn:li:fsd_profile:{id}
+ * - urn:li:msg_messagingparticipant:{id} (or nested: urn:li:msg_messagingparticipant:urn:li:fsd_profile:{id})
  */
 
 // Conversation URN patterns - order matters (most specific first)
@@ -89,6 +90,20 @@ export function normalizeConversationURN(urn: string): string {
 export function normalizeMemberURN(urn: string): string {
   if (!urn) return urn;
 
+  // Handle nested msg_messagingparticipant URNs (e.g., urn:li:msg_messagingparticipant:urn:li:fsd_profile:ID)
+  const msgParticipantMatch = urn.match(
+    /^urn:li:msg_messagingparticipant:(.+)$/
+  );
+  if (msgParticipantMatch) {
+    const inner = msgParticipantMatch[1];
+    // If inner value is itself a URN, recursively normalize it
+    if (inner.startsWith("urn:li:")) {
+      return normalizeMemberURN(inner);
+    }
+    // Non-nested: treat inner value as the member ID directly
+    return `urn:li:member:${inner}`;
+  }
+
   for (const pattern of MEMBER_PATTERNS) {
     const match = urn.match(pattern);
     if (match) {
@@ -127,6 +142,7 @@ export function isConversationURN(value: string): boolean {
  * @returns True if the string is a member URN
  */
 export function isMemberURN(value: string): boolean {
+  if (/^urn:li:msg_messagingparticipant:/.test(value)) return true;
   return MEMBER_PATTERNS.some((p) => p.test(value));
 }
 

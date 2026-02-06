@@ -167,9 +167,9 @@ export function createTestContactHandleData(
   userId: Id<"users">,
   contactId: Id<"contacts">,
   overrides: Partial<{
-    handleType: "phone" | "email" | "slack_id";
+    handleType: "phone" | "email" | "slack_id" | "linkedin_handle" | "linkedin_urn" | "twitter_handle";
     handle: string;
-    platform: "imessage" | "gmail" | "slack";
+    platform: "imessage" | "gmail" | "slack" | "linkedin" | "twitter" | "signal" | "whatsapp";
   }> = {}
 ) {
   return {
