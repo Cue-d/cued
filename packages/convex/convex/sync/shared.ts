@@ -344,7 +344,7 @@ function normalizeHandleByType(value: string, type: HandleType): string {
  * Check if a string looks like a placeholder/identifier rather than a real name.
  */
 function isPlaceholderName(name: string): boolean {
-  if (!name) return true;
+  if (!name || !name.trim()) return true;
   // Slack user ID (e.g., "U12345678")
   if (/^U[A-Z0-9]+$/i.test(name)) return true;
   // LinkedIn URN (e.g., "urn:li:member:123")

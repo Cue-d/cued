@@ -17,6 +17,7 @@ import type {
   SyncBatch,
 } from "./types";
 import { extractTextFromAttributedBody } from "./attributed-body";
+import { normalizeChatDbHandleIdentifier } from "./handle-normalization";
 
 /**
  * Map iMessage tapback type codes to emoji.
@@ -338,7 +339,9 @@ export class ChatDb {
         row.sender_id !== null
           ? {
               id: row.sender_id,
-              identifier: row.sender_identifier ?? "",
+              identifier: normalizeChatDbHandleIdentifier(
+                row.sender_identifier ?? ""
+              ),
               service: row.sender_service ?? "iMessage",
             }
           : null;
@@ -401,7 +404,9 @@ export class ChatDb {
 
       const reaction: Reaction = {
         emoji,
-        reactorIdentifier: row.reactor_identifier ?? "",
+        reactorIdentifier: normalizeChatDbHandleIdentifier(
+          row.reactor_identifier ?? ""
+        ),
         isFromMe: row.is_from_me === 1,
         timestamp: appleToUnix(row.date) ?? 0,
       };
@@ -443,7 +448,7 @@ export class ChatDb {
 
     return rows.map((row) => ({
       id: row.id,
-      identifier: row.identifier,
+      identifier: normalizeChatDbHandleIdentifier(row.identifier),
       service: row.service,
     }));
   }
