@@ -14,6 +14,9 @@ export const serverSchema = z.object({
   // Mem0
   MEM0_API_KEY: z.string().optional(),
 
+  // EnrichLayer (LinkedIn profile enrichment)
+  ENRICHLAYER_API_KEY: z.string().optional(),
+
   // Cron job security
   CRON_SECRET: z.string().optional(),
 
