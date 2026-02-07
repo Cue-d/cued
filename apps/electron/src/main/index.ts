@@ -52,6 +52,78 @@ function isTahoe(): boolean {
   return major >= 26;
 }
 
+/**
+ * Renderer diagnostics piped to main process logs.
+ * Helps debug blank/empty window states without opening devtools.
+ */
+function attachRendererDebugLogging(window: BrowserWindow): void {
+  if (electronEnv.NODE_ENV !== "development") {
+    return;
+  }
+
+  const wc = window.webContents;
+
+  wc.on("did-start-loading", () => {
+    console.log("[Renderer] did-start-loading");
+  });
+
+  wc.on("dom-ready", () => {
+    console.log("[Renderer] dom-ready");
+  });
+
+  wc.on("did-finish-load", () => {
+    console.log("[Renderer] did-finish-load", wc.getURL());
+  });
+
+  wc.on("did-fail-load", (_event, code, description, url, isMainFrame) => {
+    console.error("[Renderer] did-fail-load", {
+      code,
+      description,
+      isMainFrame,
+      url,
+    });
+  });
+
+  wc.on("render-process-gone", (_event, details) => {
+    console.error("[Renderer] render-process-gone", details);
+  });
+
+  wc.on("console-message", (_event, detailsOrLevel, message, line, sourceId) => {
+    let level: number;
+    let text: string;
+    let lineNumber: number;
+    let source: string;
+
+    if (typeof detailsOrLevel === "object" && detailsOrLevel !== null) {
+      const details = detailsOrLevel as {
+        level?: number;
+        lineNumber?: number;
+        message?: string;
+        sourceId?: string;
+      };
+      level = details.level ?? 0;
+      text = details.message ?? "";
+      lineNumber = details.lineNumber ?? 0;
+      source = details.sourceId ?? "";
+    } else {
+      level = Number(detailsOrLevel ?? 0);
+      text = message ?? "";
+      lineNumber = line ?? 0;
+      source = sourceId ?? "";
+    }
+
+    const levelMap = {
+      0: "LOG",
+      1: "WARN",
+      2: "ERROR",
+      3: "DEBUG",
+      4: "INFO",
+    } as const;
+    const label = levelMap[level as keyof typeof levelMap] ?? `LEVEL_${level}`;
+    console.log(`[RendererConsole:${label}] ${text} (${source}:${lineNumber})`);
+  });
+}
+
 function createWindow(): void {
   const useLiquidGlass = isTahoe();
   const launchedHidden = SettingsManager.wasLaunchedHidden();
@@ -70,6 +142,8 @@ function createWindow(): void {
     },
   });
 
+  attachRendererDebugLogging(mainWindow);
+
   // Apply Liquid Glass effect on macOS Tahoe+
   if (useLiquidGlass) {
     mainWindow.setWindowButtonVisibility(true);
@@ -77,7 +151,7 @@ function createWindow(): void {
 
   // In development, load from dev server (prefer electron-vite's injected URL)
   // In production, load from built files
-  const devServerUrl = process.env.VITE_DEV_SERVER_URL;
+  const devServerUrl = process.env.ELECTRON_RENDERER_URL;
   if (devServerUrl) {
     mainWindow.loadURL(devServerUrl);
   } else if (electronEnv.NODE_ENV === "development") {
@@ -302,10 +376,18 @@ async function startBackgroundSync(): Promise<void> {
     getIMessageSyncManager();
 
     // Configure and start the unified message queue processor
-    const reactiveClient = getConvexClient();
-    reactiveClient.setTokenProvider(getValidAccessToken);
-    reactiveClient.setAuthInvalidCallback(() => {
-      console.log("[Main] ConvexClient auth invalid, notifying renderer");
+    const convexClient = getConvexClient();
+    convexClient.setTokenProvider(getValidAccessToken);
+    convexClient.setAuthInvalidCallback(async () => {
+      console.log("[Main] ConvexClient auth invalid, attempting token refresh...");
+      const token = await forceRefreshToken();
+      if (token) {
+        // Refresh succeeded - onTokenRefreshedCallback already notified the renderer
+        console.log("[Main] Token refreshed after auth invalid");
+        return;
+      }
+      // Refresh truly failed (e.g., refresh token expired) - notify renderer
+      console.log("[Main] Token refresh failed, notifying renderer of auth loss");
       mainWindow?.webContents.send("auth:stateChanged", {
         isAuthenticated: false,
         user: null,

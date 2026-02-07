@@ -1,5 +1,5 @@
-import { useState, useEffect, useCallback, useMemo } from "react"
-import { ConvexProviderWithAuth, ConvexReactClient } from "convex/react"
+import { useState, useCallback, useMemo } from "react"
+import { ConvexProviderWithAuth } from "convex/react"
 import {
   Card,
   CardContent,
@@ -18,6 +18,7 @@ import { ActionsPage } from "./pages/ActionsPage"
 import { AssistantPage } from "./pages/AssistantPage"
 import { ContactsPage } from "./pages/ContactsPage"
 import { SettingsPage, type SettingsSubpage } from "./pages/SettingsPage"
+import { getOrCreateConvexClient } from "./lib/convex-client-singleton"
 
 /**
  * Auth hook for ConvexProviderWithAuth.
@@ -49,13 +50,7 @@ function AuthenticatedApp({ convexUrl, user, onSignOut }: { convexUrl: string; u
   const [currentPage, setCurrentPage] = useState<NavPage>("actions")
   const [actionCount, setActionCount] = useState(0)
   const [settingsSubpage, setSettingsSubpage] = useState<SettingsSubpage>('general')
-  const [convex] = useState(() => new ConvexReactClient(convexUrl))
-
-  useEffect(() => {
-    return () => {
-      convex.close()
-    }
-  }, [convex])
+  const convex = useMemo(() => getOrCreateConvexClient(convexUrl), [convexUrl])
 
   // Integration status hooks
   const { isLoggedIn: linkedInConnected } = useLinkedIn()
