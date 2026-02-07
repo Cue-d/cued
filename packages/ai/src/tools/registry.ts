@@ -1,6 +1,5 @@
 import { tool } from "ai";
 import { z } from "zod/v4";
-import { getMemories } from "../mem0";
 
 const searchMessagesSchema = z.object({
   query: z.string().describe("Search query to match against message content"),
@@ -51,14 +50,6 @@ const createActionSchema = z.object({
     .describe("Specific message this action responds to"),
   reason: z.string().optional().describe("Why this action was created"),
   priority: z.number().optional().describe("Priority 0-100 (default: 50)"),
-});
-
-const searchMemoriesSchema = z.object({
-  query: z.string().describe("What to search for in memories"),
-  contactId: z
-    .string()
-    .optional()
-    .describe("Filter memories about a specific contact"),
 });
 
 const searchActionsSchema = z.object({
@@ -190,44 +181,6 @@ export function createChatTools(
           }
         ) as { actionId: string };
         return { actionId, type: input.type, priority: input.priority ?? 50, reason: input.reason, created: true };
-      },
-    }),
-
-    search_memories: tool({
-      description:
-        "Search stored memories about contacts and past interactions. " +
-        "Memories contain facts, preferences, and context learned from conversations. " +
-        "Use this to recall what you know about a person before composing a message.",
-      inputSchema: searchMemoriesSchema,
-      execute: async (input: z.infer<typeof searchMemoriesSchema>) => {
-        if (!userId) return createToolResult([], "Not authenticated");
-
-        try {
-          const memories = await getMemories(input.query, {
-            user_id: userId,
-            filters: input.contactId ? { contact_id: input.contactId } : undefined,
-          });
-
-          type MemoryResult = { id: string; memory?: string; score?: number };
-          const results = ((memories as MemoryResult[]) || [])
-            .filter((m) => m.memory)
-            .map((m) => ({ id: m.id, memory: m.memory, score: m.score }));
-
-          return createToolResult(results);
-        } catch (error) {
-          const message =
-            error instanceof Error ? error.message : "Unknown error";
-          if (
-            message.includes("API key") ||
-            message.includes("MEM0_API_KEY")
-          ) {
-            return createToolResult(
-              [],
-              "Mem0 not configured. Set MEM0_API_KEY environment variable."
-            );
-          }
-          return createToolResult([], message);
-        }
       },
     }),
 

@@ -18,9 +18,6 @@ export type { ConversationResult } from "./conversations"
 export { actionCreatedArtifact } from "./action-created"
 export type { ActionResult } from "./action-created"
 
-export { memoriesArtifact } from "./memories"
-export type { MemoryResult } from "./memories"
-
 export { actionsArtifact } from "./actions"
 export type { ActionSearchResult } from "./actions"
 
@@ -28,7 +25,6 @@ import { actionCreatedArtifact } from "./action-created"
 import { actionsArtifact } from "./actions"
 import { contactsArtifact } from "./contacts"
 import { conversationsArtifact } from "./conversations"
-import { memoriesArtifact } from "./memories"
 import { searchMessagesArtifact } from "./search-messages"
 
 /** Registry of all artifact definitions */
@@ -37,7 +33,6 @@ export const artifactDefinitions = [
   contactsArtifact,
   conversationsArtifact,
   actionCreatedArtifact,
-  memoriesArtifact,
   actionsArtifact,
 ] as const
 

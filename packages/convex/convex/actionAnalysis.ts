@@ -444,16 +444,7 @@ export const analyzeConversation = internalAction({
       }
 
       // Build input for LLM
-      const { generateActionWithRetry, fetchContactMemories } = await import("@cued/ai");
-
-      // Fetch memories about this contact for better context (optional, non-blocking)
-      const contactMemories = primaryContact
-        ? await fetchContactMemories(
-            primaryContact.displayName,
-            queueEntry.userId.toString(),
-            primaryContact._id.toString()
-          )
-        : [];
+      const { generateActionWithRetry } = await import("@cued/ai");
 
       const suggestion = await generateActionWithRetry({
         contact: {
@@ -468,7 +459,6 @@ export const analyzeConversation = internalAction({
         platform: conversation.platform,
         hoursSinceLastMessage,
         recentActions,
-        contactMemories,
       });
 
       if (!suggestion.shouldCreateAction) {

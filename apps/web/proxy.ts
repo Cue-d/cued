@@ -12,7 +12,6 @@ export default authkitMiddleware({
       "/callback",
       // API routes that handle their own auth or are called by external services
       "/api/chat",
-      "/api/memories/:path*",
       "/api/nango/webhook",
       "/api/nango/pull-gmail",
       "/api/nango/pull-google-contacts",

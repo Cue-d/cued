@@ -34,7 +34,7 @@ packages/
   shared/           Source of truth for utils, types, constants (@cued/shared)
   ui/               Shared React components (@cued/ui)
   convex/           Database schema + functions (@cued/convex)
-  ai/               LLM tools, Mem0 integration (@cued/ai)
+  ai/               LLM tools, action generation (@cued/ai)
   integrations/     iMessage, Slack, Nango adapters (@cued/integrations)
 ```
 
@@ -96,7 +96,6 @@ convex/
   syncMode: "full" | "incremental",   // Current sync mode
   fullSyncProgress?,                  // For resumable full syncs
   totalMessagesSynced?, totalContactsSynced?,  // Stats
-  lastMemoryProcessedAt?, totalMemoriesExtracted?  // Memory processing
 }
 ```
 

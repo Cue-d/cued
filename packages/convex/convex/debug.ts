@@ -276,19 +276,6 @@ export const deleteBatchFiltered = internalMutation({
         return { deleted, hasMore: docs.length === batchSize };
       }
 
-      case "contactMemoryStats": {
-        if (filterByPlatform) return { deleted: 0, hasMore: false };
-        const docs = await ctx.db
-          .query("contactMemoryStats")
-          .withIndex("by_user_recent", (q) => q.eq("userId", userId))
-          .take(batchSize);
-        for (const doc of docs) {
-          await ctx.db.delete(doc._id);
-          deleted++;
-        }
-        return { deleted, hasMore: docs.length === batchSize };
-      }
-
       case "devicePresence": {
         if (filterByPlatform) return { deleted: 0, hasMore: false };
         const docs = await ctx.db
@@ -419,8 +406,7 @@ export const resetPlatformData = action({
       throw new Error("Not authenticated");
     }
 
-    // Get user from identity (use memories.getUserByWorkosId which is already defined)
-    const user = await ctx.runQuery(internal.memories.getUserByWorkosId, {
+    const user = await ctx.runQuery(internal.users.getUserByWorkosId, {
       workosUserId: identity.subject,
     });
     if (!user) {
@@ -445,7 +431,6 @@ export const resetPlatformData = action({
     const globalTables = [
       "actionAnalysisQueue",
       "mergeSuggestions",
-      "contactMemoryStats",
       "devicePresence",
     ];
 

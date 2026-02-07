@@ -1,20 +1,17 @@
 "use client";
 
 import * as React from "react";
-import { useMemo } from "react";
 import Link from "next/link";
 import { useSearchParams, useRouter } from "next/navigation";
 import { useQuery, useMutation } from "convex/react";
 import {
-  BrainIcon,
-  ClockIcon,
   SendIcon,
   WrenchIcon,
   ChevronRightIcon,
   UserIcon,
 } from "lucide-react";
 import { api } from "@cued/convex";
-import { getInitials, formatRelativeTime } from "@cued/shared";
+import { getInitials } from "@cued/shared";
 import {
   ThreePanelLayout,
   PanelHeader,
@@ -22,7 +19,6 @@ import {
   ListItem,
   Avatar,
   AvatarFallback,
-  Skeleton,
   Separator,
   Select,
   SelectContent,
@@ -43,150 +39,12 @@ const UNDO_DELAY_OPTIONS = [
 
 // Settings sections
 const SETTINGS_SECTIONS = [
-  { id: "memory", label: "Memory Sync", icon: BrainIcon },
   { id: "messages", label: "Messages", icon: SendIcon },
   { id: "account", label: "Account", icon: UserIcon },
   { id: "developer", label: "Developer", icon: WrenchIcon },
 ] as const;
 
 type SettingSection = typeof SETTINGS_SECTIONS[number]["id"];
-
-function MemorySyncSection() {
-  const memoryStats = useQuery(api.memories.getMemoryStatsByContact);
-  const processingStatus = useQuery(api.memories.getMemoryProcessingStatus, {
-    platform: "imessage",
-  });
-
-  const isMemoryLoading =
-    memoryStats === undefined || processingStatus === undefined;
-  const totalMemories = processingStatus?.totalMemoriesExtracted ?? 0;
-  const totalProcessed = processingStatus?.totalMessagesProcessed ?? 0;
-  const memoryRows = useMemo(
-    () => (memoryStats ?? []).slice(0, 12),
-    [memoryStats]
-  );
-
-  return (
-    <div className="space-y-6">
-      <div>
-        <h2 className="text-lg font-semibold">Memory Sync</h2>
-        <p className="text-sm text-muted-foreground mt-1">
-          View memories extracted from your conversations
-        </p>
-      </div>
-
-      <Card>
-        <CardContent className="p-4">
-          <div className="flex items-center gap-3 mb-4">
-            <div className="flex size-9 items-center justify-center rounded-md bg-muted">
-              <BrainIcon className="size-4 text-muted-foreground" />
-            </div>
-            <div>
-              <p className="text-sm font-medium">Extraction status</p>
-              <p className="text-xs text-muted-foreground">
-                Automatically runs after each sync
-              </p>
-            </div>
-          </div>
-
-          <div className="grid grid-cols-2 gap-3">
-            <div className="rounded-md border bg-muted/30 p-3">
-              {isMemoryLoading ? (
-                <Skeleton className="h-6 w-16 mb-1" />
-              ) : (
-                <div className="text-lg font-semibold">
-                  {totalMemories}
-                </div>
-              )}
-              <div className="text-xs text-muted-foreground">
-                Memories extracted
-              </div>
-            </div>
-            <div className="rounded-md border bg-muted/30 p-3">
-              {isMemoryLoading ? (
-                <Skeleton className="h-6 w-16 mb-1" />
-              ) : (
-                <div className="text-lg font-semibold">
-                  {totalProcessed}
-                </div>
-              )}
-              <div className="text-xs text-muted-foreground">
-                Messages processed
-              </div>
-            </div>
-          </div>
-
-          <div className="mt-4 space-y-2">
-            <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
-              Recent contacts
-            </p>
-            {isMemoryLoading ? (
-              <div className="space-y-2">
-                {[1, 2, 3].map((i) => (
-                  <div
-                    key={i}
-                    className="flex items-center justify-between rounded-md border p-2"
-                  >
-                    <div className="flex items-center gap-3">
-                      <Skeleton className="size-8 rounded-full" />
-                      <div>
-                        <Skeleton className="h-3 w-28 mb-1" />
-                        <Skeleton className="h-3 w-20" />
-                      </div>
-                    </div>
-                    <Skeleton className="h-4 w-12" />
-                  </div>
-                ))}
-              </div>
-            ) : memoryRows.length === 0 ? (
-              <div className="rounded-md border bg-muted/20 p-3 text-xs text-muted-foreground">
-                No memories extracted yet. Sync messages to get started.
-              </div>
-            ) : (
-              <div className="space-y-2">
-                {memoryRows.map((stat) => (
-                  <div
-                    key={stat.contactId}
-                    className="flex items-center justify-between rounded-md border p-2"
-                  >
-                    <div className="flex items-center gap-3">
-                      <Avatar className="size-8">
-                        <AvatarFallback className="text-[10px]">
-                          {getInitials(stat.displayName)}
-                        </AvatarFallback>
-                      </Avatar>
-                      <div className="min-w-0">
-                        <p className="text-sm font-medium truncate">
-                          {stat.displayName}
-                        </p>
-                        {stat.company ? (
-                          <p className="text-xs text-muted-foreground truncate">
-                            {stat.company}
-                          </p>
-                        ) : (
-                          <p className="text-xs text-muted-foreground">
-                            {stat.messagesProcessed} messages
-                          </p>
-                        )}
-                      </div>
-                    </div>
-                    <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                      <span className="font-medium text-foreground">
-                        {stat.messagesProcessed}
-                      </span>
-                      <ClockIcon className="size-3" />
-                      {formatRelativeTime(stat.lastExtractedAt)}
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-        </CardContent>
-      </Card>
-    </div>
-  );
-}
 
 function MessagesSection() {
   const userSettings = useQuery(api.users.getSettings);
@@ -322,8 +180,6 @@ function DeveloperSection() {
 
 function SettingsSectionContent({ section }: { section: SettingSection }) {
   switch (section) {
-    case "memory":
-      return <MemorySyncSection />;
     case "messages":
       return <MessagesSection />;
     case "account":
@@ -338,7 +194,7 @@ function SettingsSectionContent({ section }: { section: SettingSection }) {
 export default function SettingsPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const selectedSection = (searchParams.get("section") ?? "memory") as SettingSection;
+  const selectedSection = (searchParams.get("section") ?? "messages") as SettingSection;
 
   const handleSectionSelect = React.useCallback(
     (sectionId: SettingSection) => {

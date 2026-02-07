@@ -180,7 +180,7 @@ export const getContact = query({
 
 /**
  * Get a contact profile with all related data for the detail view.
- * Includes: handles, conversations, recent messages, memory stats.
+ * Includes: handles, conversations, recent messages.
  */
 export const getContactProfile = query({
   args: {
@@ -239,12 +239,6 @@ export const getContactProfile = query({
       new Map(allMessages.map((m) => [m._id, m])).values()
     ).sort((a, b) => b.sentAt - a.sentAt);
 
-    // Fetch memory stats for this contact
-    const memoryStats = await ctx.db
-      .query("contactMemoryStats")
-      .withIndex("by_contact", (q) => q.eq("contactId", args.contactId))
-      .unique();
-
     // Fetch recent actions related to this contact
     const actions = await ctx.db
       .query("actions")
@@ -282,13 +276,6 @@ export const getContactProfile = query({
         isFromMe: m.isFromMe,
         platform: m.platform,
       })),
-      memoryStats: memoryStats
-        ? {
-            messagesProcessed: memoryStats.messagesProcessed,
-            memoriesExtracted: memoryStats.memoriesExtracted,
-            lastExtractedAt: memoryStats.lastExtractedAt,
-          }
-        : null,
       actions: actions.map((a) => ({
         _id: a._id,
         type: a.type,

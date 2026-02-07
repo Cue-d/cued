@@ -20,7 +20,6 @@
 import { ConvexHttpClient } from "convex/browser";
 import { api } from "@cued/convex";
 import { withAuthRetry } from "../../auth/auth-utils";
-import { electronEnv } from "@cued/env/electron";
 import { ChatDb } from "./chat-db";
 import { getContactsManager } from "../contacts";
 import { getSyncDebugLogger } from "../../sync/debug-logger";
@@ -32,7 +31,6 @@ import {
   setConvexAuth,
 } from "../../sync/cursor";
 import { createSyncGuard } from "../../sync/guard";
-import { getValidAccessToken } from "../../auth/auth-manager";
 
 // Performance tuning constants
 const BATCH_SIZE = 1000;
@@ -380,16 +378,6 @@ export class IMessageSyncManager {
       // Sync from maxRowid down to cursor (DESC order, newest first)
       const messagesSynced = await this.syncDescending(chatDb, cursor, maxRowid);
 
-      // Trigger memory processing if we synced any messages
-      if (messagesSynced > 0) {
-        this.triggerMemoryProcessing().catch((e) => {
-          console.warn(
-            "[IMessageSyncManager] Memory processing failed (non-blocking):",
-            e
-          );
-        });
-      }
-
       logger.logSyncComplete("imessage", {
         messagesProcessed: this.progress.totalMessagesSynced,
         durationMs: Date.now() - syncStartTime,
@@ -693,49 +681,6 @@ export class IMessageSyncManager {
     }
 
     await this.runSync();
-  }
-
-  private async triggerMemoryProcessing(): Promise<void> {
-    const token = await getValidAccessToken();
-    if (!token) {
-      console.log("[IMessageSyncManager] No auth token, skipping memory processing");
-      return;
-    }
-
-    const baseUrl = electronEnv.API_BASE_URL || "http://localhost:3000";
-    try {
-      const response = await fetch(`${baseUrl}/api/memories/sync`, {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${token}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({ platform: "imessage" }),
-      });
-
-      if (!response.ok) {
-        const text = await response.text();
-        console.warn(
-          `[IMessageSyncManager] Memory sync returned ${response.status}: ${text.slice(0, 200)}`
-        );
-        return;
-      }
-
-      const contentType = response.headers.get("content-type") || "";
-      if (!contentType.includes("application/json")) {
-        console.warn(
-          `[IMessageSyncManager] Memory sync returned non-JSON content-type: ${contentType}`
-        );
-        return;
-      }
-
-      const result = await response.json();
-      console.log(
-        `[IMessageSyncManager] Memory processing: ${result.memoriesExtracted ?? 0} memories from ${result.messagesProcessed ?? 0} messages`
-      );
-    } catch (e) {
-      console.warn("[IMessageSyncManager] Memory sync request failed:", e);
-    }
   }
 
   private getChatDb(): ChatDb {

@@ -489,10 +489,6 @@ export interface UpsertSyncCursorOptions {
   totalContactsSynced?: number;
   lastContactsSyncAt?: number;
   syncVersion?: number;
-  /** Memory processing stats */
-  lastMemoryProcessedAt?: number;
-  totalMessagesProcessedForMemory?: number;
-  totalMemoriesExtracted?: number;
 }
 
 /**
@@ -552,15 +548,6 @@ export async function upsertSyncCursor(
         lastContactsSyncAt: options.lastContactsSyncAt,
       }),
       ...(options.syncVersion !== undefined && { syncVersion: options.syncVersion }),
-      ...(options.lastMemoryProcessedAt !== undefined && {
-        lastMemoryProcessedAt: options.lastMemoryProcessedAt,
-      }),
-      ...(options.totalMessagesProcessedForMemory !== undefined && {
-        totalMessagesProcessedForMemory: options.totalMessagesProcessedForMemory,
-      }),
-      ...(options.totalMemoriesExtracted !== undefined && {
-        totalMemoriesExtracted: options.totalMemoriesExtracted,
-      }),
     });
     return existingCursor._id;
   } else {
@@ -577,9 +564,6 @@ export async function upsertSyncCursor(
       ...(options.totalContactsSynced !== undefined && { totalContactsSynced: options.totalContactsSynced }),
       ...(options.lastContactsSyncAt !== undefined && { lastContactsSyncAt: options.lastContactsSyncAt }),
       ...(options.syncVersion !== undefined && { syncVersion: options.syncVersion }),
-      ...(options.lastMemoryProcessedAt !== undefined && { lastMemoryProcessedAt: options.lastMemoryProcessedAt }),
-      ...(options.totalMessagesProcessedForMemory !== undefined && { totalMessagesProcessedForMemory: options.totalMessagesProcessedForMemory }),
-      ...(options.totalMemoriesExtracted !== undefined && { totalMemoriesExtracted: options.totalMemoriesExtracted }),
     });
   }
 }

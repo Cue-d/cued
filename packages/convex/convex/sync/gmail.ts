@@ -56,7 +56,7 @@ export type GmailEmailInput = Infer<typeof gmailEmailInput>;
 
 /**
  * Check if an email is likely a newsletter or automated message.
- * Used to filter out emails that shouldn't create memories.
+ * Used to filter out non-conversational emails during sync.
  */
 export function isNewsletterOrAutomated(email: GmailEmailInput): boolean {
   const senderLower = email.sender.toLowerCase();

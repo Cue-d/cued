@@ -188,7 +188,6 @@ const schema = defineSchema({
         })
       )
     ),
-    memoryExtractedAt: v.optional(v.number()),
   })
     .index("by_user", ["userId"])
     .index("by_conversation", ["conversationId", "sentAt"])
@@ -277,18 +276,6 @@ const schema = defineSchema({
     .index("by_user_status", ["userId", "status"])
     .index("by_contacts", ["contact1Id", "contact2Id"]),
 
-  contactMemoryStats: defineTable({
-    userId: v.id("users"),
-    contactId: v.id("contacts"),
-    displayName: v.string(), // Denormalized for display
-    company: v.optional(v.string()), // Denormalized for display
-    messagesProcessed: v.number(),
-    memoriesExtracted: v.number(),
-    lastExtractedAt: v.number(),
-  })
-    .index("by_user_recent", ["userId", "lastExtractedAt"])
-    .index("by_contact", ["contactId"]),
-
   // Device presence tracking for remote send capability
   devicePresence: defineTable({
     userId: v.id("users"),
@@ -318,10 +305,6 @@ const schema = defineSchema({
     totalContactsSynced: v.optional(v.number()),
     lastContactsSyncAt: v.optional(v.number()),
     syncVersion: v.optional(v.number()),
-    // Memory processing stats
-    lastMemoryProcessedAt: v.optional(v.number()),
-    totalMessagesProcessedForMemory: v.optional(v.number()),
-    totalMemoriesExtracted: v.optional(v.number()),
   })
     .index("by_user_platform", ["userId", "platform"])
     .index("by_user_platform_workspace", ["userId", "platform", "workspaceId"]),

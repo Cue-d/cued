@@ -256,18 +256,9 @@ export const onIncomingMessage = internalAction({
       }
     );
 
-    // 11. Fetch contact memories (optional enhancement, non-blocking)
-    const { generateActionWithRetry, fetchContactMemories } = await import("@cued/ai");
+    // 11. Run LLM analysis
+    const { generateActionWithRetry } = await import("@cued/ai");
 
-    const contactMemories = primaryContact
-      ? await fetchContactMemories(
-          primaryContact.displayName,
-          args.userId.toString(),
-          primaryContact._id.toString()
-        )
-      : [];
-
-    // 12. Run LLM analysis
     const suggestion = await generateActionWithRetry({
       contact: {
         displayName: primaryContact?.displayName ?? "Unknown",
@@ -281,7 +272,6 @@ export const onIncomingMessage = internalAction({
       platform: conversation.platform,
       hoursSinceLastMessage,
       recentActions,
-      contactMemories,
     });
 
     if (!suggestion.shouldCreateAction) {
@@ -524,18 +514,9 @@ export const onIncomingMessageBatch = internalAction({
         }
       );
 
-      // Fetch contact memories (optional enhancement)
-      const { generateActionWithRetry, fetchContactMemories } = await import("@cued/ai");
+      // 11. Run LLM analysis
+      const { generateActionWithRetry } = await import("@cued/ai");
 
-      const contactMemories = primaryContact
-        ? await fetchContactMemories(
-            primaryContact.displayName,
-            args.userId.toString(),
-            primaryContact._id.toString()
-          )
-        : [];
-
-      // 12. Run LLM analysis
       const suggestion = await generateActionWithRetry({
         contact: {
           displayName: primaryContact?.displayName ?? "Unknown",
@@ -549,7 +530,6 @@ export const onIncomingMessageBatch = internalAction({
         platform: conversation.platform,
         hoursSinceLastMessage,
         recentActions,
-        contactMemories,
       });
 
       if (!suggestion.shouldCreateAction) {

@@ -2,7 +2,7 @@
  * Convex scheduled functions (crons).
  *
  * Note: Cron jobs can only call queries and mutations, not actions.
- * For tasks that need to call external APIs (Vercel AI Gateway, Mem0), we use
+ * For tasks that need to call external APIs (Vercel AI Gateway), we use
  * mutations that schedule actions via ctx.scheduler.runAfter().
  *
  * Action analysis is now event-driven (triggered from sync.ts on new messages).

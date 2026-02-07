@@ -13,7 +13,6 @@ export {
   searchContactsTool,
   createActionTool,
   getConversationsTool,
-  searchMemoriesTool,
   searchActionsTool,
   // Centralized tool registry
   createChatTools,
@@ -23,31 +22,11 @@ export {
 } from "./tools";
 
 export {
-  createMem0Provider,
-  addContactMemories,
-  addMemories,
-  getMemories,
-  retrieveMemories,
-  searchMemories,
-  fetchContactMemories,
-  type AddMemoriesResult,
-  type ConversationMessage,
-  type ContactMemoryItem,
-  type Mem0Provider,
-  type Mem0ConfigSettings,
-} from "./mem0";
-
-export {
   SYSTEM_PROMPT,
   buildSystemPrompt,
   type MentionedContact,
   type MentionedContactHandle,
 } from "./prompts/system";
-export {
-  CUSTOM_FACT_EXTRACTION_PROMPT,
-  CUSTOM_UPDATE_MEMORY_PROMPT,
-  buildMemoryInstructions,
-} from "./prompts/memory";
 
 export {
   ActionSuggestionSchema,
@@ -55,7 +34,6 @@ export {
   generateActionWithRetry,
   type ActionSuggestion,
   type ContactInfo,
-  type ContactMemory,
   type ActionMessage,
   type GenerateActionInput,
   type RecentAction,

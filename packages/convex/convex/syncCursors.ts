@@ -102,9 +102,6 @@ export const upsertSyncCursor = mutation({
     totalContactsSynced: v.optional(v.number()),
     lastContactsSyncAt: v.optional(v.number()),
     syncVersion: v.optional(v.number()),
-    lastMemoryProcessedAt: v.optional(v.number()),
-    totalMessagesProcessedForMemory: v.optional(v.number()),
-    totalMemoriesExtracted: v.optional(v.number()),
   },
   handler: async (ctx, args) => {
     const identity = await ctx.auth.getUserIdentity();
@@ -143,16 +140,12 @@ export const upsertSyncCursor = mutation({
       totalContactsSynced: args.totalContactsSynced,
       lastContactsSyncAt: args.lastContactsSyncAt,
       syncVersion: args.syncVersion,
-      lastMemoryProcessedAt: args.lastMemoryProcessedAt,
-      totalMessagesProcessedForMemory: args.totalMessagesProcessedForMemory,
-      totalMemoriesExtracted: args.totalMemoriesExtracted,
     });
   },
 });
 
 /**
  * Update only the stats fields on a sync cursor without changing cursor data.
- * Useful for memory processing progress updates.
  *
  * For multi-workspace platforms (slack, gmail), workspaceId is required.
  */
@@ -164,9 +157,6 @@ export const updateSyncStats = mutation({
     totalContactsSynced: v.optional(v.number()),
     lastContactsSyncAt: v.optional(v.number()),
     syncVersion: v.optional(v.number()),
-    lastMemoryProcessedAt: v.optional(v.number()),
-    totalMessagesProcessedForMemory: v.optional(v.number()),
-    totalMemoriesExtracted: v.optional(v.number()),
   },
   handler: async (ctx, args) => {
     const identity = await ctx.auth.getUserIdentity();
@@ -215,15 +205,6 @@ export const updateSyncStats = mutation({
         lastContactsSyncAt: args.lastContactsSyncAt,
       }),
       ...(args.syncVersion !== undefined && { syncVersion: args.syncVersion }),
-      ...(args.lastMemoryProcessedAt !== undefined && {
-        lastMemoryProcessedAt: args.lastMemoryProcessedAt,
-      }),
-      ...(args.totalMessagesProcessedForMemory !== undefined && {
-        totalMessagesProcessedForMemory: args.totalMessagesProcessedForMemory,
-      }),
-      ...(args.totalMemoriesExtracted !== undefined && {
-        totalMemoriesExtracted: args.totalMemoriesExtracted,
-      }),
     });
 
     return existingCursor._id;

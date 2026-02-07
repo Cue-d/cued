@@ -1,10 +1,21 @@
 import { v } from "convex/values";
-import { mutation, query } from "./_generated/server";
+import { internalQuery, mutation, query } from "./_generated/server";
 import { findUserByWorkosId } from "./lib/auth";
 import { UNDO_DELAY_OPTIONS } from "./messageQueue";
 
 /** Default undo send delay in seconds */
 const DEFAULT_UNDO_DELAY_SECONDS = 30;
+
+/**
+ * Internal query to find user by WorkOS ID.
+ * Used by actions that need to resolve the authenticated user.
+ */
+export const getUserByWorkosId = internalQuery({
+  args: { workosUserId: v.string() },
+  handler: async (ctx, args) => {
+    return findUserByWorkosId(ctx, args.workosUserId);
+  },
+});
 
 /**
  * Get the current authenticated user's identity from JWT.

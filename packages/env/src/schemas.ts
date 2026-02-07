@@ -11,9 +11,6 @@ export const serverSchema = z.object({
   // AI Gateway (supports OIDC auth on Vercel, so optional)
   AI_GATEWAY_API_KEY: z.string().optional(),
 
-  // Mem0
-  MEM0_API_KEY: z.string().optional(),
-
   // EnrichLayer (LinkedIn profile enrichment)
   ENRICHLAYER_API_KEY: z.string().optional(),
 

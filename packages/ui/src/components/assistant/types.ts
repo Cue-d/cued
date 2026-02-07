@@ -4,7 +4,6 @@ export type {
   ContactResult,
   ConversationResult,
   ActionResult,
-  MemoryResult,
   ActionSearchResult,
 } from "./artifacts"
 

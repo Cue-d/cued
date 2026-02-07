@@ -21,9 +21,6 @@ export interface AggregatedCursorStats {
   lastSyncAt: number | null;
   totalMessagesSynced: number;
   totalContactsSynced: number;
-  totalMessagesProcessedForMemory: number;
-  totalMemoriesExtracted: number;
-  lastMemoryProcessedAt: number | null;
 }
 
 /**
@@ -55,9 +52,6 @@ export function aggregateCursorStats(
       lastSyncAt: null,
       totalMessagesSynced: 0,
       totalContactsSynced: 0,
-      totalMessagesProcessedForMemory: 0,
-      totalMemoriesExtracted: 0,
-      lastMemoryProcessedAt: null,
     };
   }
 
@@ -68,23 +62,11 @@ export function aggregateCursorStats(
         acc.totalMessagesSynced + (cursor.totalMessagesSynced ?? 0),
       totalContactsSynced:
         acc.totalContactsSynced + (cursor.totalContactsSynced ?? 0),
-      totalMessagesProcessedForMemory:
-        acc.totalMessagesProcessedForMemory +
-        (cursor.totalMessagesProcessedForMemory ?? 0),
-      totalMemoriesExtracted:
-        acc.totalMemoriesExtracted + (cursor.totalMemoriesExtracted ?? 0),
-      lastMemoryProcessedAt: maxTimestamp(
-        acc.lastMemoryProcessedAt,
-        cursor.lastMemoryProcessedAt ?? null
-      ),
     }),
     {
       lastSyncAt: null as number | null,
       totalMessagesSynced: 0,
       totalContactsSynced: 0,
-      totalMessagesProcessedForMemory: 0,
-      totalMemoriesExtracted: 0,
-      lastMemoryProcessedAt: null as number | null,
     }
   );
 }
@@ -134,19 +116,3 @@ export function buildPlatformAggregates(
   return aggregates;
 }
 
-/**
- * Find the cursor with the earliest lastMemoryProcessedAt.
- * Used to ensure no messages are skipped during memory processing.
- */
-export function findEarliestMemoryCursor(
-  cursors: Doc<"syncCursors">[]
-): Doc<"syncCursors"> | null {
-  if (cursors.length === 0) return null;
-  if (cursors.length === 1) return cursors[0];
-
-  return cursors.reduce((earliest, cursor) => {
-    const cursorTime = cursor.lastMemoryProcessedAt ?? 0;
-    const earliestTime = earliest.lastMemoryProcessedAt ?? 0;
-    return cursorTime < earliestTime ? cursor : earliest;
-  });
-}

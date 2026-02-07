@@ -48,14 +48,6 @@ export interface ContactInfo {
   importance?: number;
 }
 
-/** Memory about a contact from past interactions */
-export interface ContactMemory {
-  /** The memory content (fact, preference, context) */
-  memory: string;
-  /** When this memory was created */
-  createdAt?: string;
-}
-
 /** Recent action for context (to avoid duplicates) */
 export interface RecentAction {
   type: string; // "respond", "follow_up", etc.
@@ -79,8 +71,6 @@ export interface GenerateActionInput {
   hoursSinceLastMessage: number;
   /** Recent actions for this conversation (to avoid duplicates) */
   recentActions?: RecentAction[];
-  /** Memories about this contact from past interactions */
-  contactMemories?: ContactMemory[];
 }
 
 /** Format timestamp as relative time */
@@ -99,7 +89,7 @@ function formatTimestampRelative(timestamp: number): string {
 
 /** Build context prompt from conversation data */
 function buildContextPrompt(input: GenerateActionInput): string {
-  const { contact, messages, platform, hoursSinceLastMessage, recentActions, contactMemories } = input;
+  const { contact, messages, platform, hoursSinceLastMessage, recentActions } = input;
 
   // Contact info section
   const contactLines = [`Contact: ${contact.displayName}`];
@@ -143,22 +133,13 @@ function buildContextPrompt(input: GenerateActionInput): string {
     recentActionsSection = `\n## Recent Actions\n${actionLines.join("\n")}\n`;
   }
 
-  // Memories section (context from past interactions)
-  let memoriesSection = "";
-  if (contactMemories && contactMemories.length > 0) {
-    const memoryLines = contactMemories.slice(0, 10).map((mem) => {
-      return `- ${truncate(mem.memory, 200)}`;
-    });
-    memoriesSection = `\n## What You Know About This Person\n${memoryLines.join("\n")}\n`;
-  }
-
   return `## Context
 Platform: ${platform}
 Time since last message: ${formatRelativeTime(hoursSinceLastMessage)}
 
 ## Contact Information
 ${contactLines.join("\n")}
-${memoriesSection}${recentActionsSection}
+${recentActionsSection}
 ## Recent Messages (oldest to newest)
 ${messageLines.join("\n")}`;
 }
@@ -188,7 +169,7 @@ Do NOT create an action when:
 
 ## Using Contact Context
 When context about the contact is available:
-- Use memories to personalize suggested responses
+- Use available contact context to personalize suggested responses
 - Reference shared history or past topics when relevant
 - Adjust priority based on contact importance and relationship
 - Consider company/professional context for business relationships
@@ -209,7 +190,7 @@ When context about the contact is available:
 ## Response Guidelines
 When suggesting a response:
 - Match the tone and formality of the conversation
-- Use context from memories to make responses more personal
+- Use context from the conversation to make responses more personal
 - Reference relevant shared context when appropriate
 - Keep it concise and natural
 - Don't over-explain or be overly formal

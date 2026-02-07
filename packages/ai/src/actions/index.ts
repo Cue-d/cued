@@ -4,7 +4,6 @@ export {
   generateActionWithRetry,
   type ActionSuggestion,
   type ContactInfo,
-  type ContactMemory,
   type ActionMessage,
   type GenerateActionInput,
   type RecentAction,
