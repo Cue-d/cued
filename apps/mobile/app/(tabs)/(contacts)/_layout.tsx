@@ -1,7 +1,12 @@
+import { useColorScheme } from "react-native";
 import { Stack } from "expo-router/stack";
 import { HeaderAvatar } from "@/components/header-avatar";
+import { getThemeColors } from "@/lib/utils";
 
 export default function ContactsLayout() {
+  const colorScheme = useColorScheme();
+  const colors = getThemeColors(colorScheme === "dark");
+
   return (
     <Stack
       screenOptions={{
@@ -9,6 +14,7 @@ export default function ContactsLayout() {
         headerLargeTitle: true,
         headerBlurEffect: "none",
         headerLargeStyle: { backgroundColor: "transparent" },
+        contentStyle: { backgroundColor: colors.background },
       }}
     >
       <Stack.Screen

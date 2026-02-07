@@ -1,3 +1,4 @@
+import { Linking } from "react-native";
 import { type ClassValue, clsx } from "clsx";
 import { twMerge } from "tailwind-merge";
 import type { WorkOSUser } from "@/lib/auth";
@@ -44,10 +45,38 @@ export function getThemeColors(isDark: boolean) {
   return isDark ? themeColors.dark : themeColors.light;
 }
 
+/** Returns true if the display name looks like an actual person name (not a phone/ID/email) */
+export function isRealContactName(displayName: string): boolean {
+  const trimmed = displayName.trim();
+  if (!trimmed) return false;
+  if (/^[\d+\-(). ]+$/.test(trimmed)) return false;
+  if (/^[UW][A-Z0-9]{8,}$/i.test(trimmed)) return false;
+  if (trimmed.startsWith("urn:li:")) return false;
+  if (/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmed)) return false;
+  return true;
+}
+
 export function getDisplayName(user: WorkOSUser | null): string {
   if (!user) return "User";
   if (user.first_name && user.last_name) {
     return `${user.first_name} ${user.last_name}`;
   }
   return user.email?.split("@")[0] || "User";
+}
+
+// ── Deep linking ─────────────────────────────────────────────────
+// Re-export shared deep link utilities for convenience
+export {
+  getPlatformDeeplink,
+  getContactDeeplink,
+  getOpenInAppLabel,
+} from "@cued/shared";
+
+/** Open a URL in the platform's native app via React Native Linking. */
+export async function openDeeplink(url: string): Promise<void> {
+  try {
+    await Linking.openURL(url);
+  } catch (error) {
+    console.warn("Failed to open deep link:", url, error);
+  }
 }

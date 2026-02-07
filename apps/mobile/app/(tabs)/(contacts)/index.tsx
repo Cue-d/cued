@@ -24,7 +24,7 @@ import {
 } from "@/components/contact-list-item";
 import { ErrorBoundary } from "@/components/error-boundary";
 import { useContacts } from "@/hooks/useContacts";
-import { getThemeColors } from "@/lib/utils";
+import { getThemeColors, isRealContactName } from "@/lib/utils";
 
 /** Section type for alphabetical grouping */
 interface ContactSection {
@@ -41,6 +41,7 @@ function mapContact(contact: {
 }): ContactListItemData {
   const phoneHandle = contact.handles?.find((h) => h.type === "phone");
   const emailHandle = contact.handles?.find((h) => h.type === "email");
+  const platforms = [...new Set(contact.handles?.map((h) => h.platform) ?? [])];
 
   return {
     id: contact._id,
@@ -48,6 +49,7 @@ function mapContact(contact: {
     company: contact.company,
     phoneNumber: phoneHandle?.value,
     email: emailHandle?.value,
+    platforms,
   };
 }
 
@@ -137,9 +139,11 @@ export default function ContactsScreen(): React.JSX.Element {
     searchQuery: searchQuery || undefined,
   });
 
-  // Map and group contacts
+  // Map and group contacts, filtering to named contacts only
   const sections = useMemo(() => {
-    const mapped = contacts.map(mapContact);
+    const mapped = contacts
+      .filter((c) => isRealContactName(c.displayName))
+      .map(mapContact);
     return groupContactsByLetter(mapped);
   }, [contacts]);
 
@@ -174,7 +178,7 @@ export default function ContactsScreen(): React.JSX.Element {
     return <LoadingState />;
   }
 
-  const totalContacts = contacts.length;
+  const totalContacts = sections.reduce((sum, s) => sum + s.data.length, 0);
 
   return (
     <ErrorBoundary>

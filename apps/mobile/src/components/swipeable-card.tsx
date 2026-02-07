@@ -17,12 +17,17 @@ import { Gesture, GestureDetector } from "react-native-gesture-handler";
 import {
   useSharedValue,
   useAnimatedStyle,
+  useAnimatedProps,
   withSpring,
   interpolate,
   runOnJS,
   type SharedValue,
 } from "react-native-reanimated";
+import Animated from "react-native-reanimated";
+import Svg, { Circle } from "react-native-svg";
 import { AnimatedView } from "@/components/animated";
+
+const AnimatedCircle = Animated.createAnimatedComponent(Circle);
 
 export type SwipeDirection = "left" | "right" | "up";
 
@@ -83,7 +88,7 @@ function getDirectionColor(dir: Direction, defaultColor: string): string {
 const PROGRESS_SIZE = 64;
 const STROKE_WIDTH = 6;
 
-/** Radial progress ring component - clockwise from top center */
+/** SVG-based radial progress ring - clean, crisp, no clipping artifacts */
 function RadialProgress({
   progress,
   direction,
@@ -92,122 +97,45 @@ function RadialProgress({
   direction: SharedValue<Direction>;
 }): React.JSX.Element {
   const size = PROGRESS_SIZE;
-  const halfSize = size / 2;
+  const center = size / 2;
+  const radius = (size - STROKE_WIDTH) / 2;
+  const circumference = 2 * Math.PI * radius;
 
-  // Right arc (0-50% progress) - rotates clockwise from -180° to 0°
-  const rightArcStyle = useAnimatedStyle(() => {
+  const animatedProps = useAnimatedProps(() => {
     "worklet";
-    const rotation = interpolate(progress.value, [0, 0.5], [-180, 0], "clamp");
+    const strokeColor = getDirectionColor(direction.value, COLORS.default);
     return {
-      transform: [{ rotate: `${rotation}deg` }],
-      borderColor: getDirectionColor(direction.value, COLORS.default),
+      strokeDashoffset: circumference * (1 - progress.value),
+      stroke: strokeColor,
     };
   });
-
-  // Left arc (50-100% progress) - rotates clockwise from 180° to 360°
-  const leftArcStyle = useAnimatedStyle(() => {
-    "worklet";
-    const rotation = interpolate(progress.value, [0.5, 1], [180, 360], "clamp");
-    return {
-      transform: [{ rotate: `${rotation}deg` }],
-      borderColor: getDirectionColor(direction.value, COLORS.default),
-    };
-  });
-
-  // Hide left container until 50% progress
-  const leftContainerStyle = useAnimatedStyle(() => {
-    "worklet";
-    return { opacity: progress.value > 0.5 ? 1 : 0 };
-  });
-
-  // Right semicircle arc shape (right half of a ring)
-  const rightArcShape = {
-    width: halfSize,
-    height: size,
-    borderWidth: STROKE_WIDTH,
-    borderLeftWidth: 0,
-    borderTopRightRadius: halfSize,
-    borderBottomRightRadius: halfSize,
-  };
-
-  // Left semicircle arc shape (left half of a ring)
-  const leftArcShape = {
-    width: halfSize,
-    height: size,
-    borderWidth: STROKE_WIDTH,
-    borderRightWidth: 0,
-    borderTopLeftRadius: halfSize,
-    borderBottomLeftRadius: halfSize,
-  };
 
   return (
-    <View
-      style={{
-        width: size,
-        height: size,
-        position: "absolute",
-      }}
-    >
-      {/* Background track */}
-      <View
-        style={{
-          position: "absolute",
-          width: size,
-          height: size,
-          borderRadius: halfSize,
-          borderWidth: STROKE_WIDTH,
-          borderColor: "rgba(255,255,255,0.2)",
-        }}
-      />
-
-      {/* Right half container (0-50%) - clips to right side */}
-      <View
-        style={{
-          position: "absolute",
-          width: halfSize,
-          height: size,
-          left: halfSize,
-          overflow: "hidden",
-        }}
-      >
-        <AnimatedView
-          style={[
-            rightArcShape,
-            rightArcStyle,
-            {
-              position: "absolute",
-              left: 0,
-              transformOrigin: `${STROKE_WIDTH / 2}px ${halfSize}px`,
-            },
-          ]}
+    <View style={{ width: size, height: size, position: "absolute" }}>
+      <Svg width={size} height={size}>
+        {/* Background track */}
+        <Circle
+          cx={center}
+          cy={center}
+          r={radius}
+          stroke="rgba(255,255,255,0.15)"
+          strokeWidth={STROKE_WIDTH}
+          fill="none"
         />
-      </View>
-
-      {/* Left half container (50-100%) - clips to left side */}
-      <AnimatedView
-        style={[
-          leftContainerStyle,
-          {
-            position: "absolute",
-            width: halfSize,
-            height: size,
-            left: 0,
-            overflow: "hidden",
-          },
-        ]}
-      >
-        <AnimatedView
-          style={[
-            leftArcShape,
-            leftArcStyle,
-            {
-              position: "absolute",
-              right: 0,
-              transformOrigin: `${halfSize - STROKE_WIDTH / 2}px ${halfSize}px`,
-            },
-          ]}
+        {/* Animated progress arc */}
+        <AnimatedCircle
+          cx={center}
+          cy={center}
+          r={radius}
+          strokeWidth={STROKE_WIDTH}
+          fill="none"
+          strokeLinecap="round"
+          strokeDasharray={circumference}
+          animatedProps={animatedProps}
+          // Rotate -90° so progress starts from top
+          transform={`rotate(-90 ${center} ${center})`}
         />
-      </AnimatedView>
+      </Svg>
     </View>
   );
 }
@@ -327,10 +255,15 @@ export function SwipeableCard({
   const translateY = useSharedValue(0);
   const progress = useSharedValue(0);
   const direction = useSharedValue<Direction>("none");
+  const hasReachedThreshold = useSharedValue(false);
   const isAnimatingRef = useRef(false);
 
   const triggerHaptic = (): void => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+  };
+
+  const triggerThresholdHaptic = (): void => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
   };
 
   const triggerSuccessHaptic = (): void => {
@@ -407,6 +340,7 @@ export function SwipeableCard({
   const panGesture = Gesture.Pan()
     .enabled(!disabled && !isAnimatingRef.current)
     .onStart(() => {
+      hasReachedThreshold.value = false;
       runOnJS(triggerHaptic)();
     })
     .onUpdate((event) => {
@@ -416,17 +350,26 @@ export function SwipeableCard({
       const absX = Math.abs(event.translationX);
       const absY = Math.abs(event.translationY);
 
+      let newProgress = 0;
       // Horizontal swipe takes priority
       if (absX > absY && absX > 10) {
         direction.value = event.translationX > 0 ? "right" : "left";
-        progress.value = Math.min(absX / SWIPE_THRESHOLD_X, 1);
+        newProgress = Math.min(absX / SWIPE_THRESHOLD_X, 1);
       } else if (absY > absX && event.translationY < -10) {
         direction.value = "up";
-        progress.value = Math.min(absY / SWIPE_THRESHOLD_Y, 1);
+        newProgress = Math.min(absY / SWIPE_THRESHOLD_Y, 1);
       } else {
         direction.value = "none";
-        progress.value = 0;
+        newProgress = 0;
       }
+
+      // Haptic when crossing threshold in either direction
+      const atThreshold = newProgress >= 1;
+      if (atThreshold && !hasReachedThreshold.value) {
+        runOnJS(triggerThresholdHaptic)();
+      }
+      hasReachedThreshold.value = atThreshold;
+      progress.value = newProgress;
     })
     .onEnd((event) => {
       const { translationX, translationY } = event;
@@ -500,7 +443,7 @@ export function SwipeableCard({
     <GlassView
       style={{
         flex: 1,
-        borderRadius: 24,
+        borderRadius: 32,
         overflow: "hidden",
       }}
     >
@@ -508,15 +451,16 @@ export function SwipeableCard({
     </GlassView>
   ) : (
     <View
-      className="flex-1 bg-card rounded-3xl overflow-hidden"
+      className="flex-1 bg-card overflow-hidden"
       style={{
+        borderRadius: 32,
         borderWidth: 1,
-        borderColor: "rgba(0, 0, 0, 0.08)",
+        borderColor: "rgba(255, 255, 255, 0.08)",
         shadowColor: "#000",
-        shadowOffset: { width: 0, height: 4 },
-        shadowOpacity: 0.12,
-        shadowRadius: 16,
-        elevation: 8,
+        shadowOffset: { width: 0, height: 8 },
+        shadowOpacity: 0.15,
+        shadowRadius: 24,
+        elevation: 10,
       }}
     >
       {CardContent}

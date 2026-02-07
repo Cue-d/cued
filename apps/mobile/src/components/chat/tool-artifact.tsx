@@ -5,6 +5,7 @@ import { SymbolView } from "expo-symbols";
 import { FadeIn } from "react-native-reanimated";
 import { formatRelativeTime } from "@cued/shared";
 import { AnimatedView } from "@/components/animated";
+import { PlatformIcon } from "@/components/platform-icons";
 import { getThemeColors } from "@/lib/utils";
 import type { ToolInvocation } from "./chat-message";
 import type { SFSymbol } from "sf-symbols-typescript";
@@ -38,34 +39,6 @@ interface ActionCreatedResult {
   reason?: string;
 }
 
-// Platform icon mapping
-function getPlatformIcon(platform: string): SFSymbol {
-  switch (platform.toLowerCase()) {
-    case "imessage":
-      return "message.fill";
-    case "gmail":
-    case "email":
-      return "envelope.fill";
-    case "slack":
-      return "number";
-    default:
-      return "message.fill";
-  }
-}
-
-function getPlatformColor(platform: string): string {
-  switch (platform.toLowerCase()) {
-    case "imessage":
-      return "#34C759"; // green
-    case "gmail":
-    case "email":
-      return "#EA4335"; // red
-    case "slack":
-      return "#611F69"; // purple
-    default:
-      return "#8E8E93"; // gray
-  }
-}
 
 // Artifact Header
 function ArtifactHeader({
@@ -135,11 +108,7 @@ function SearchMessagesArtifact({ data, mutedColor }: { data: SearchMessageResul
         {data.slice(0, 5).map((result) => (
           <ArtifactCard key={result._id}>
             <View className="flex-row items-center gap-2 mb-1">
-              <SymbolView
-                name={getPlatformIcon(result.platform)}
-                size={12}
-                tintColor={getPlatformColor(result.platform)}
-              />
+              <PlatformIcon platform={result.platform} size={12} />
               <Text className="text-xs font-medium text-foreground">
                 {result.isFromMe ? "You" : result.senderName || "Unknown"}
               </Text>
@@ -216,11 +185,7 @@ function SearchContactsArtifact({ data, mutedColor }: { data: ContactResult[]; m
                         key={i}
                         className="flex-row items-center gap-1 bg-muted rounded-full px-2 py-0.5"
                       >
-                        <SymbolView
-                          name={getPlatformIcon(handle.platform)}
-                          size={10}
-                          tintColor={getPlatformColor(handle.platform)}
-                        />
+                        <PlatformIcon platform={handle.platform} size={10} />
                         <Text
                           className="text-[10px] text-muted-foreground max-w-[80px]"
                           numberOfLines={1}

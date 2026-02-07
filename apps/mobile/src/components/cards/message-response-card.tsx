@@ -7,35 +7,22 @@
  */
 
 import { useMemo, useRef, useCallback } from "react";
-import { View, Text, ScrollView, useColorScheme } from "react-native";
+import { View, Text, ScrollView, Pressable, useColorScheme } from "react-native";
 import { Image } from "expo-image";
-import { SymbolView, type SFSymbol } from "expo-symbols";
+import { SymbolView } from "expo-symbols";
 import {
-  getInitials,
   formatTime,
-  formatRelativeTime,
-  PLATFORM_CONFIG,
   type ActionPlatform,
   type MessageAttachment,
   type DisplayMessage,
 } from "@cued/shared";
 import { ChatInput } from "@/components/chat/chat-input";
+import { PlatformIcon } from "@/components/platform-icons";
 import { cn, getThemeColors } from "@/lib/utils";
 import type { ScrollView as ScrollViewType } from "react-native";
 
 /** Re-export types for backwards compatibility */
 export type { ActionPlatform, MessageAttachment, DisplayMessage } from "@cued/shared";
-
-/** Platform icons (platform-specific SF Symbols) */
-const PLATFORM_SYMBOLS: Record<ActionPlatform, SFSymbol> = {
-  imessage: "message.fill",
-  gmail: "envelope.fill",
-  slack: "number",
-  linkedin: "person.2.fill",
-  twitter: "bird.fill",
-  signal: "phone.fill",
-  whatsapp: "phone.fill",
-};
 
 export interface MessageResponseCardProps {
   /** Person name for header */
@@ -54,45 +41,8 @@ export interface MessageResponseCardProps {
   platform?: ActionPlatform;
   /** Whether the desktop app is online (for iMessage remote send) */
   isDesktopOnline?: boolean;
-}
-
-/** Avatar component with initials */
-function Avatar({
-  initials,
-  className,
-}: {
-  initials: string;
-  className?: string;
-}): React.JSX.Element {
-  return (
-    <View
-      className={cn(
-        "w-10 h-10 rounded-full bg-muted items-center justify-center",
-        className,
-      )}
-    >
-      <Text className="text-foreground font-semibold text-sm">{initials}</Text>
-    </View>
-  );
-}
-
-/** Platform badge component */
-function PlatformBadge({
-  platform,
-}: {
-  platform: ActionPlatform;
-}): React.JSX.Element {
-  const config = PLATFORM_CONFIG[platform];
-  return (
-    <View className="flex-row items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-card">
-      <SymbolView
-        name={PLATFORM_SYMBOLS[platform]}
-        size={14}
-        tintColor={config.color}
-      />
-      <Text className="text-xs font-medium text-foreground">{config.label}</Text>
-    </View>
-  );
+  /** Called when the platform icon is pressed to open in app */
+  onOpenInApp?: (() => void) | null;
 }
 
 /** Status display config */
@@ -193,11 +143,11 @@ export function MessageResponseCard({
   className,
   platform,
   isDesktopOnline,
+  onOpenInApp,
 }: MessageResponseCardProps): React.JSX.Element {
   const colorScheme = useColorScheme();
   const isDark = colorScheme === "dark";
   const colors = getThemeColors(isDark);
-  const initials = getInitials(personName);
   const scrollViewRef = useRef<ScrollViewType>(null);
 
   // Sort messages chronologically (oldest first)
@@ -215,36 +165,30 @@ export function MessageResponseCard({
 
   return (
     <View className={cn("flex-1 overflow-hidden", className)}>
-      {/* Header */}
-      <View className="p-4 flex-row items-center gap-3">
-        <Avatar initials={initials} />
-        <View className="flex-1 min-w-0">
+      {/* Header - centered name, platform top-right */}
+      <View className="px-4 pt-4 pb-2">
+        <View className="flex-row items-center justify-center relative">
           <Text
-            className="font-semibold text-sm text-foreground"
+            className="font-semibold text-base text-foreground text-center"
             numberOfLines={1}
           >
             {personName}
           </Text>
-          {messageTimestamp && (
-            <Text className="text-xs text-muted-foreground">
-              {formatRelativeTime(messageTimestamp)}
-            </Text>
+          {platform && (
+            <Pressable
+              className={cn(
+                "absolute right-0 flex-row items-center gap-1.5 rounded-lg px-2.5 py-1.5",
+                onOpenInApp ? "bg-muted active:opacity-70" : "bg-muted/40 opacity-50",
+              )}
+              onPress={onOpenInApp ?? undefined}
+              disabled={!onOpenInApp}
+              accessibilityLabel={onOpenInApp ? `Open in ${platform}` : platform}
+              accessibilityRole={onOpenInApp ? "button" : undefined}
+            >
+              <PlatformIcon platform={platform} size={12} />
+              <Text className="text-xs font-medium text-foreground">Open</Text>
+            </Pressable>
           )}
-        </View>
-
-        {/* Platform Badge + Desktop Status */}
-        <View className="flex-row items-center gap-2">
-          {platform === "imessage" && isDesktopOnline !== undefined && (
-            <View className="flex-row items-center gap-1.5">
-              <View
-                className={`w-2 h-2 rounded-full ${isDesktopOnline ? "bg-green-500" : "bg-muted-foreground"}`}
-              />
-              <Text className="text-xs text-muted-foreground">
-                {isDesktopOnline ? "Online" : "Offline"}
-              </Text>
-            </View>
-          )}
-          {platform && <PlatformBadge platform={platform} />}
         </View>
       </View>
 
@@ -298,7 +242,7 @@ export function MessageResponseCard({
                     <Text
                       className={cn(
                         "text-sm",
-                        msg.isFromMe ? "text-white" : "text-foreground",
+                        msg.isFromMe ? "text-primary-foreground" : "text-foreground",
                       )}
                       selectable
                     >
@@ -319,7 +263,7 @@ export function MessageResponseCard({
                     <Text
                       className={cn(
                         "text-[10px]",
-                        msg.isFromMe ? "text-white/60" : "text-muted-foreground",
+                        msg.isFromMe ? "text-primary-foreground/60" : "text-muted-foreground",
                       )}
                     >
                       {formatTime(msg.sentAt)}
@@ -329,7 +273,7 @@ export function MessageResponseCard({
                         <Text
                           className={cn(
                             "text-[10px] mx-0.5",
-                            msg.isFromMe ? "text-white/60" : "text-muted-foreground",
+                            msg.isFromMe ? "text-primary-foreground/60" : "text-muted-foreground",
                           )}
                         >
                           ·

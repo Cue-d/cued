@@ -29,8 +29,6 @@ describe("ChatInput", () => {
 
   // Helper to query elements since RN components render as lowercase tags
   const getTextInput = (container: HTMLElement) => container.querySelector("textinput");
-  const getAddButton = (container: HTMLElement) =>
-    container.querySelector('pressable[accessibilitylabel="Add attachment"]');
   const getSendButton = (container: HTMLElement) =>
     container.querySelector('pressable[accessibilitylabel="Send message"]');
 
@@ -70,12 +68,6 @@ describe("ChatInput", () => {
       expect(sendButton).not.toBeNull();
     });
 
-    it("renders add attachment button", () => {
-      const { container } = render(<ChatInput {...defaultProps} />);
-
-      const addButton = getAddButton(container);
-      expect(addButton).not.toBeNull();
-    });
   });
 
   describe("input state", () => {
@@ -150,19 +142,6 @@ describe("ChatInput", () => {
       expect(sendButton?.getAttribute("accessibilitystate")).toBeDefined();
     });
 
-    it("has add attachment button accessibility label", () => {
-      const { container } = render(<ChatInput {...defaultProps} />);
-
-      const addButton = getAddButton(container);
-      expect(addButton).not.toBeNull();
-    });
-
-    it("has add attachment button accessibility role", () => {
-      const { container } = render(<ChatInput {...defaultProps} />);
-
-      const addButton = getAddButton(container);
-      expect(addButton?.getAttribute("accessibilityrole")).toBe("button");
-    });
   });
 
   describe("keyboard handling options", () => {

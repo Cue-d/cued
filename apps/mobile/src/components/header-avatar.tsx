@@ -30,7 +30,7 @@ export function HeaderAvatar({ size = 32 }: HeaderAvatarProps): React.ReactEleme
         style={{ width: size, height: size }}
       >
         <Text
-          className="font-bold ml-[1] text-muted-foreground"
+          className="font-bold text-muted-foreground"
           style={{
             width: size,
             fontSize: size * 0.5,

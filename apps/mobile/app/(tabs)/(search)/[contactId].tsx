@@ -3,13 +3,14 @@
  */
 
 import { useState, useCallback, useMemo } from "react";
-import { View, Text, ScrollView, Pressable, useColorScheme, PlatformColor } from "react-native";
+import { View, Text, ScrollView, Pressable, PlatformColor } from "react-native";
 import * as Haptics from "expo-haptics";
 import { useLocalSearchParams, Stack } from "expo-router";
 import { SymbolView } from "expo-symbols";
 import { useQuery, useMutation } from "convex/react";
 import { api } from "@cued/convex/convex/_generated/api";
-import { getInitials, formatPhoneNumber, type ActionPlatform } from "@cued/shared";
+import { getInitials, formatPhoneNumber, PLATFORM_CONFIG, type ActionPlatform } from "@cued/shared";
+import { PlatformIcon } from "@/components/platform-icons";
 import { SendMessageSheet, type SendMessageContact } from "@/components/send-message-sheet";
 import { UndoSendToast } from "@/components/undo-send-toast";
 import type { Id } from "@cued/convex/convex/_generated/dataModel";
@@ -66,55 +67,29 @@ function getHandleTypeLabel(type: string): string {
   }
 }
 
-/** Platform to display label */
+/** Get platform label from PLATFORM_CONFIG */
 function getPlatformLabel(platform: string): string {
-  switch (platform) {
-    case "imessage":
-      return "iMessage";
-    case "gmail":
-      return "Gmail";
-    case "slack":
-      return "Slack";
-    case "linkedin":
-      return "LinkedIn";
-    case "twitter":
-      return "Twitter";
-    default:
-      return platform;
-  }
+  return PLATFORM_CONFIG[platform as ActionPlatform]?.label ?? platform;
 }
 
-/** Platform to tint color */
-function getPlatformColor(platform: string): string {
-  switch (platform) {
-    case "imessage":
-      return "#34C759"; // iOS green
-    case "gmail":
-      return "#EA4335"; // Gmail red
-    case "slack":
-      return "#4A154B"; // Slack purple
-    case "linkedin":
-      return "#0A66C2"; // LinkedIn blue
-    case "twitter":
-      return "#1DA1F2"; // Twitter blue
-    default:
-      return "#8E8E93"; // iOS gray
-  }
-}
+/** Handle types worth displaying to the user (hide internal IDs like slack_id, linkedin_urn) */
+const VISIBLE_HANDLE_TYPES = new Set(["phone", "email", "linkedin_handle", "twitter_handle"]);
 
-/** Group handles by platform */
+/** Group handles by platform, filtering to user-visible types only */
 type Handle = { type: string; value: string; platform: string };
 type GroupedHandles = Record<string, Handle[]>;
 
 function groupHandlesByPlatform(handles: Handle[]): GroupedHandles {
-  return handles.reduce<GroupedHandles>((acc, handle) => {
-    const platform = handle.platform;
-    if (!acc[platform]) {
-      acc[platform] = [];
-    }
-    acc[platform].push(handle);
-    return acc;
-  }, {});
+  return handles
+    .filter((h) => VISIBLE_HANDLE_TYPES.has(h.type))
+    .reduce<GroupedHandles>((acc, handle) => {
+      const platform = handle.platform;
+      if (!acc[platform]) {
+        acc[platform] = [];
+      }
+      acc[platform].push(handle);
+      return acc;
+    }, {});
 }
 
 /** Tag badge component */
@@ -129,7 +104,7 @@ function TagBadge({ tag }: { tag: string }): React.JSX.Element {
 /** Section header component */
 function SectionHeader({ title }: { title: string }): React.JSX.Element {
   return (
-    <Text className="text-[13px] font-semibold text-muted-foreground mb-2 mx-4">
+    <Text style={{ fontSize: 13, fontWeight: "600", color: PlatformColor("secondaryLabel"), marginBottom: 8, marginHorizontal: 16 }}>
       {title}
     </Text>
   );
@@ -143,27 +118,28 @@ function HandleRow({
   handle: Handle;
   isFirst: boolean;
 }): React.JSX.Element {
-  const colorScheme = useColorScheme();
-  const iconColor = colorScheme === "dark" ? "#a1a1aa" : "#71717a";
-
   // Format phone numbers for display
   const displayValue =
     handle.type === "phone" ? formatPhoneNumber(handle.value) : handle.value;
 
   return (
     <Pressable
-      className={`flex-row items-center px-4 py-3 active:bg-muted ${!isFirst ? "border-t border-border" : ""}`}
+      style={!isFirst ? { borderTopWidth: 1, borderTopColor: PlatformColor("separator") } : undefined}
+      className="flex-row items-center px-4 py-3 active:bg-muted"
       accessibilityRole="button"
       accessibilityLabel={`${getHandleTypeLabel(handle.type)}: ${displayValue}`}
     >
-      <View className="w-8 h-8 rounded-full bg-muted items-center justify-center mr-3">
-        <SymbolView name={getHandleIcon(handle.type)} size={14} tintColor={iconColor} />
+      <View
+        className="w-8 h-8 rounded-full items-center justify-center mr-3"
+        style={{ backgroundColor: PlatformColor("tertiarySystemFill") }}
+      >
+        <SymbolView name={getHandleIcon(handle.type)} size={14} tintColor={PlatformColor("secondaryLabel")} />
       </View>
       <View className="flex-1">
-        <Text className="text-xs text-muted-foreground">
+        <Text style={{ fontSize: 12, color: PlatformColor("secondaryLabel") }}>
           {getHandleTypeLabel(handle.type)}
         </Text>
-        <Text className="text-base text-foreground mt-0.5" selectable>
+        <Text style={{ fontSize: 16, color: PlatformColor("label"), marginTop: 2 }} selectable>
           {displayValue}
         </Text>
       </View>
@@ -302,7 +278,7 @@ export default function ContactDetailScreen(): React.JSX.Element {
   // Loading state
   if (contact === undefined) {
     return (
-      <View style={{ flex: 1, backgroundColor: PlatformColor("systemGroupedBackground") }}>
+      <View className="flex-1 bg-background">
         <Stack.Screen
           options={{
             headerLargeTitle: false,
@@ -310,7 +286,7 @@ export default function ContactDetailScreen(): React.JSX.Element {
           }}
         />
         <View className="flex-1 items-center justify-center">
-          <Text className="text-muted-foreground">Loading...</Text>
+          <Text style={{ color: PlatformColor("secondaryLabel") }}>Loading...</Text>
         </View>
       </View>
     );
@@ -319,7 +295,7 @@ export default function ContactDetailScreen(): React.JSX.Element {
   // Contact not found
   if (contact === null) {
     return (
-      <View style={{ flex: 1, backgroundColor: PlatformColor("systemGroupedBackground") }}>
+      <View className="flex-1 bg-background">
         <Stack.Screen
           options={{
             headerLargeTitle: false,
@@ -327,10 +303,10 @@ export default function ContactDetailScreen(): React.JSX.Element {
           }}
         />
         <View className="flex-1 items-center justify-center">
-          <Text className="text-lg font-semibold text-foreground">
+          <Text style={{ fontSize: 18, fontWeight: "600", color: PlatformColor("label") }}>
             Contact not found
           </Text>
-          <Text className="text-muted-foreground mt-2">
+          <Text style={{ color: PlatformColor("secondaryLabel"), marginTop: 8 }}>
             This contact may have been deleted.
           </Text>
         </View>
@@ -345,11 +321,10 @@ export default function ContactDetailScreen(): React.JSX.Element {
   const hasNotes = contact.notes && contact.notes.trim().length > 0;
 
   return (
-    <View style={{ flex: 1, backgroundColor: PlatformColor("systemGroupedBackground") }}>
+    <View className="flex-1 bg-background">
       <Stack.Screen
         options={{
-          headerLargeTitle: false,
-          title: contact.displayName,
+          title: "",
         }}
       />
       <ScrollView
@@ -358,13 +333,13 @@ export default function ContactDetailScreen(): React.JSX.Element {
         contentContainerStyle={{ paddingBottom: 100 }}
       >
         {/* Profile Header */}
-        <View className="items-center pt-6 pb-4">
+        <View className="items-center pb-4">
           <Avatar initials={initials} />
-          <Text className="text-2xl font-bold text-foreground mt-4">
+          <Text style={{ fontSize: 24, fontWeight: "700", color: PlatformColor("label"), marginTop: 16 }}>
             {contact.displayName}
           </Text>
           {contact.company && (
-            <Text className="text-base text-muted-foreground mt-1">
+            <Text style={{ fontSize: 16, color: PlatformColor("secondaryLabel"), marginTop: 4 }}>
               {contact.company}
             </Text>
           )}
@@ -373,16 +348,11 @@ export default function ContactDetailScreen(): React.JSX.Element {
           {sendableContact && (
             <Pressable
               onPress={handleOpenSendSheet}
-              className="flex-row items-center gap-2 mt-4 px-4 py-2 rounded-xl bg-primary"
+              className="flex-row items-center gap-2 mt-4 px-4 py-2.5 rounded-xl bg-primary"
               accessibilityRole="button"
               accessibilityLabel="Send message"
             >
-              <SymbolView
-                name="paperplane.fill"
-                size={16}
-                tintColor="#FFFFFF"
-              />
-              <Text className="text-base font-medium text-white">
+              <Text className="text-base font-medium text-primary-foreground">
                 Send Message
               </Text>
             </Pressable>
@@ -391,28 +361,26 @@ export default function ContactDetailScreen(): React.JSX.Element {
 
         {/* Handles grouped by platform */}
         {platforms.length > 0 && (
-          <View className="mb-6">
+          <View style={{ marginBottom: 24 }}>
             {platforms.map((platform) => (
-              <View key={platform} className="mb-4">
+              <View key={platform} style={{ marginBottom: 16 }}>
                 {/* Platform header */}
-                <View className="flex-row items-center mx-4 mb-2">
-                  <View
-                    className="w-6 h-6 rounded-md items-center justify-center mr-2"
-                    style={{ backgroundColor: `${getPlatformColor(platform)}20` }}
-                  >
-                    <SymbolView
-                      name="circle.fill"
-                      size={8}
-                      tintColor={getPlatformColor(platform)}
-                    />
-                  </View>
-                  <Text className="text-sm font-medium text-foreground">
+                <View style={{ flexDirection: "row", alignItems: "center", marginHorizontal: 16, marginBottom: 8 }}>
+                  <PlatformIcon platform={platform as ActionPlatform} size={18} />
+                  <Text style={{ fontSize: 14, fontWeight: "500", color: PlatformColor("label"), marginLeft: 8 }}>
                     {getPlatformLabel(platform)}
                   </Text>
                 </View>
 
                 {/* Handle rows */}
-                <View className="mx-4 rounded-xl bg-card overflow-hidden">
+                <View
+                  style={{
+                    marginHorizontal: 16,
+                    borderRadius: 12,
+                    overflow: "hidden",
+                    backgroundColor: PlatformColor("secondarySystemGroupedBackground"),
+                  }}
+                >
                   {groupedHandles[platform].map((handle, idx) => (
                     <HandleRow
                       key={`${handle.type}-${handle.value}`}
@@ -428,7 +396,7 @@ export default function ContactDetailScreen(): React.JSX.Element {
 
         {/* Tags */}
         {hasTags && (
-          <View className="mb-6">
+          <View style={{ marginBottom: 24 }}>
             <SectionHeader title="Tags" />
             <View className="flex-row flex-wrap mx-4">
               {contact.tags!.map((tag) => (
@@ -440,10 +408,17 @@ export default function ContactDetailScreen(): React.JSX.Element {
 
         {/* Notes */}
         {hasNotes && (
-          <View className="mb-6">
+          <View style={{ marginBottom: 24 }}>
             <SectionHeader title="Notes" />
-            <View className="mx-4 p-4 rounded-xl bg-card">
-              <Text className="text-base text-foreground" selectable>
+            <View
+              style={{
+                marginHorizontal: 16,
+                padding: 16,
+                borderRadius: 12,
+                backgroundColor: PlatformColor("secondarySystemGroupedBackground"),
+              }}
+            >
+              <Text style={{ fontSize: 16, color: PlatformColor("label") }} selectable>
                 {contact.notes}
               </Text>
             </View>
@@ -494,15 +469,20 @@ export default function ContactDetailScreen(): React.JSX.Element {
 
 /** Recent conversations placeholder component */
 function RecentConversationsPlaceholder(): React.JSX.Element {
-  const colorScheme = useColorScheme();
-  const iconColor = colorScheme === "dark" ? "#6b7280" : "#9ca3af";
-
   return (
-    <View className="mb-6">
+    <View style={{ marginBottom: 24 }}>
       <SectionHeader title="Recent Conversations" />
-      <View className="mx-4 p-4 rounded-xl bg-card items-center">
-        <SymbolView name="text.bubble" size={32} tintColor={iconColor} />
-        <Text className="text-sm text-muted-foreground mt-2">
+      <View
+        style={{
+          marginHorizontal: 16,
+          padding: 16,
+          borderRadius: 12,
+          backgroundColor: PlatformColor("secondarySystemGroupedBackground"),
+          alignItems: "center",
+        }}
+      >
+        <SymbolView name="text.bubble" size={32} tintColor={PlatformColor("tertiaryLabel")} />
+        <Text style={{ fontSize: 14, color: PlatformColor("secondaryLabel"), marginTop: 8 }}>
           Conversation history coming soon
         </Text>
       </View>

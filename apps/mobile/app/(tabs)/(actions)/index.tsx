@@ -1,47 +1,49 @@
 /**
  * Actions tab main screen.
  * Displays pending actions as swipeable cards using Convex data.
+ * Action buttons and undo toasts are now in the BottomAccessory and sheet.
  */
 
-import { useState, useCallback, useMemo } from "react";
+import { useState, useCallback, useMemo, useEffect } from "react";
 import { View, Text } from "react-native";
 import * as Haptics from "expo-haptics";
-import { useRouter } from "expo-router";
+import { useRouter, useSegments } from "expo-router";
+import { BottomSheet, Group, Host, RNHostView } from "@expo/ui/swift-ui";
+import { presentationDetents } from "@expo/ui/swift-ui/modifiers";
 import { useMutation, useQuery } from "convex/react";
+import Animated, {
+  useSharedValue,
+  useAnimatedStyle,
+  withTiming,
+} from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { api } from "@cued/convex/convex/_generated/api";
-import { type DisplayMessage, type ContactFormData, type ActionPlatform } from "@cued/shared";
-import { ActionButtons } from "@/components/action-buttons";
+import {
+  type DisplayMessage,
+  type ContactFormData,
+  type ActionPlatform,
+  type ContactHandle,
+  type EnrichedAction,
+} from "@cued/shared";
+import { ActionListSheet } from "@/components/action-list-sheet";
 import { CardStack } from "@/components/card-stack";
-import { MessageResponseCard, ContactCard } from "@/components/cards";
+import {
+  MessageResponseCard,
+  ContactCard,
+  ResolveContactCard,
+  type MergeSource,
+} from "@/components/cards";
 import { ErrorBoundary } from "@/components/error-boundary";
 import { SkeletonStack } from "@/components/skeleton-card";
-import { UndoSendToast } from "@/components/undo-send-toast";
-import { useActions } from "@/hooks/useActions";
+import { useActionQueue } from "@/contexts/action-queue-context";
 import { useElectronPresence } from "@/hooks/useElectronPresence";
+import {
+  getPlatformDeeplink,
+  getContactDeeplink,
+  openDeeplink,
+} from "@/lib/utils";
 import type { SwipeDirection } from "@/components/swipeable-card";
 import type { Id } from "@cued/convex/convex/_generated/dataModel";
-
-/** Action type from Convex getPendingActions */
-type EnrichedAction = {
-  _id: string;
-  type: string;
-  status: string;
-  priority: number;
-  reason: string | null;
-  llmReason: string | null;
-  createdAt: number;
-  snoozedUntil: number | null;
-  completedAt: number | null;
-  discardedAt: number | null;
-  conversationId: string | null;
-  contactId: string | null;
-  contactName: string | null;
-  secondaryContactId: string | null;
-  secondaryContactName: string | null;
-  mergeSuggestionId: string | null;
-  platform: string | null;
-};
 
 /** Map action to CardStack item format */
 interface ActionItem {
@@ -55,33 +57,52 @@ const MESSAGE_ACTION_TYPES = ["respond", "follow_up", "send_message"];
 /** Action types that use ContactCard */
 const CONTACT_ACTION_TYPES = ["eod_contact", "new_connection"];
 
-/** Data for a queued message toast */
-interface QueuedMessageToast {
-  messageId: string;
-  platform: ActionPlatform;
-  recipientName: string;
-  messagePreview?: string;
-}
-
 export default function ActionsScreen(): React.JSX.Element {
   const router = useRouter();
+  const segments = useSegments();
   const insets = useSafeAreaInsets();
-  const { actions, isLoading } = useActions({ limit: 20 });
+  const {
+    actions,
+    isLoading,
+    addQueuedMessage,
+    focusedActionId,
+    setFocusedActionId,
+    isSheetOpen,
+    setIsSheetOpen,
+  } = useActionQueue();
   const { isOnline: isDesktopOnline } = useElectronPresence();
   const swipeAction = useMutation(api.actions.swipeAction);
-  const cancelMessage = useMutation(api.messageQueue.cancelMessage);
-  const [triggerSwipe, setTriggerSwipe] = useState<SwipeDirection | null>(null);
 
-  // Track queued messages for undo toast display
-  const [queuedMessages, setQueuedMessages] = useState<QueuedMessageToast[]>([]);
+  // Fade out card stack when leaving the tab to avoid visual glitches
+  // @ts-expect-error - segments is an array of strings
+  const isActive = segments[1] === "(actions)";
+  const screenOpacity = useSharedValue(1);
+  const fadeStyle = useAnimatedStyle(() => ({ opacity: screenOpacity.value }));
+
+  useEffect(() => {
+    screenOpacity.value = withTiming(isActive ? 1 : 0, { duration: 150 });
+  }, [isActive, screenOpacity]);
+
+  // Reorder actions to show focused action on top (without mutating queue)
+  const displayActions = useMemo(() => {
+    if (!focusedActionId) return actions;
+    const focusedIdx = actions.findIndex((a) => a._id === focusedActionId);
+    if (focusedIdx <= 0) return actions;
+    const focused = actions[focusedIdx];
+    return [
+      focused,
+      ...actions.slice(0, focusedIdx),
+      ...actions.slice(focusedIdx + 1),
+    ];
+  }, [actions, focusedActionId]);
 
   // Get the top action ID for fetching context with messages
-  const topActionId = actions[0]?._id as Id<"actions"> | undefined;
+  const topActionId = displayActions[0]?._id as Id<"actions"> | undefined;
 
   // Fetch context for the top action (includes messages)
   const actionContext = useQuery(
     api.actions.getActionWithContext,
-    topActionId ? { actionId: topActionId, messageLimit: 15 } : "skip"
+    topActionId ? { actionId: topActionId, messageLimit: 15 } : "skip",
   );
 
   // Map messages from context to DisplayMessage format
@@ -111,12 +132,11 @@ export default function ActionsScreen(): React.JSX.Element {
   >({});
 
   // Transform actions to CardStack items
-  const cardItems: ActionItem[] = actions.map((action) => ({
+  const cardItems: ActionItem[] = displayActions.map((action) => ({
     id: action._id,
     action: action as EnrichedAction,
   }));
 
-  // Get response text for an action
   const getResponseText = useCallback(
     (action: EnrichedAction): string => {
       return responseTexts[action._id] ?? "";
@@ -124,7 +144,6 @@ export default function ActionsScreen(): React.JSX.Element {
     [responseTexts],
   );
 
-  // Get contact form data for an action
   const getContactFormData = useCallback(
     (action: EnrichedAction): ContactFormData => {
       return (
@@ -139,15 +158,10 @@ export default function ActionsScreen(): React.JSX.Element {
     [contactForms],
   );
 
-  // Handle response text change
-  const handleResponseChange = useCallback(
-    (actionId: string, text: string) => {
-      setResponseTexts((prev) => ({ ...prev, [actionId]: text }));
-    },
-    [],
-  );
+  const handleResponseChange = useCallback((actionId: string, text: string) => {
+    setResponseTexts((prev) => ({ ...prev, [actionId]: text }));
+  }, []);
 
-  // Handle contact form change
   const handleContactFormChange = useCallback(
     (actionId: string, data: ContactFormData) => {
       setContactForms((prev) => ({ ...prev, [actionId]: data }));
@@ -159,7 +173,11 @@ export default function ActionsScreen(): React.JSX.Element {
   const handleSwipe = useCallback(
     async (item: ActionItem, direction: SwipeDirection) => {
       const { action } = item;
-      setTriggerSwipe(null);
+
+      // Clear focused action on swipe
+      if (focusedActionId === action._id) {
+        setFocusedActionId(null);
+      }
 
       // Snooze: navigate to picker sheet
       if (direction === "up") {
@@ -170,22 +188,26 @@ export default function ActionsScreen(): React.JSX.Element {
         return;
       }
 
-      // Right = send, Left = skip
+      // Left = skip
       if (direction === "left") {
         try {
           await swipeAction({
             actionId: action._id as Id<"actions">,
             direction,
           });
-          await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+          await Haptics.notificationAsync(
+            Haptics.NotificationFeedbackType.Success,
+          );
         } catch (error) {
           console.error("Failed to skip action:", error);
-          await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+          await Haptics.notificationAsync(
+            Haptics.NotificationFeedbackType.Error,
+          );
         }
         return;
       }
 
-      // direction === "right" - send with response text
+      // Right = send with response text
       const responseText =
         action.type === "new_connection"
           ? getContactFormData(action).notes
@@ -197,51 +219,34 @@ export default function ActionsScreen(): React.JSX.Element {
           direction,
           responseText,
         });
-        await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+        await Haptics.notificationAsync(
+          Haptics.NotificationFeedbackType.Success,
+        );
 
-        // Show undo toast for queued messages (iMessage, LinkedIn)
+        // Add queued message to context for display in accessory/sheet
         if (result?.queuedMessageId && action.platform) {
-          setQueuedMessages((prev) => [
-            ...prev,
-            {
-              messageId: result.queuedMessageId as string,
-              platform: action.platform as ActionPlatform,
-              recipientName: action.contactName ?? "Unknown",
-              messagePreview: responseText,
-            },
-          ]);
+          addQueuedMessage({
+            messageId: result.queuedMessageId as string,
+            platform: action.platform as ActionPlatform,
+            recipientName: action.contactName ?? "Unknown",
+            messagePreview: responseText,
+            scheduledFor: Date.now() + 30 * 1000,
+          });
         }
       } catch (error) {
         console.error("Failed to swipe action:", error);
         await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
       }
     },
-    [router, swipeAction, getResponseText, getContactFormData],
-  );
-
-  // Handle button press from ActionButtons
-  const handleButtonSwipe = useCallback(
-    (direction: SwipeDirection) => {
-      if (actions.length === 0) return;
-      setTriggerSwipe(direction);
-    },
-    [actions.length],
-  );
-
-  // Handle undo for a queued message
-  const handleUndoMessage = useCallback(
-    async (messageId: string) => {
-      await cancelMessage({ messageId: messageId as Id<"messageQueue"> });
-    },
-    [cancelMessage],
-  );
-
-  // Handle toast dismissal (remove from local state)
-  const handleToastDismiss = useCallback(
-    (messageId: string, _reason: "sent" | "cancelled" | "closed") => {
-      setQueuedMessages((prev) => prev.filter((m) => m.messageId !== messageId));
-    },
-    [],
+    [
+      router,
+      swipeAction,
+      getResponseText,
+      getContactFormData,
+      addQueuedMessage,
+      focusedActionId,
+      setFocusedActionId,
+    ],
   );
 
   // Render card based on action type
@@ -250,10 +255,22 @@ export default function ActionsScreen(): React.JSX.Element {
       const { action } = item;
       const isTopCard = index === 0;
 
-      // Message-based actions (respond, follow_up, send_message)
       if (MESSAGE_ACTION_TYPES.includes(action.type)) {
-        // Use messages from context for the top card, empty for others
         const messages = isTopCard ? topActionMessages : [];
+        const platform = action.platform ?? undefined;
+
+        // Build deep link for "open in app"
+        let onOpenInApp: (() => void) | null = null;
+        if (isTopCard && platform) {
+          const result = getPlatformDeeplink(
+            platform,
+            actionContext?.conversation ?? null,
+            actionContext?.contact ?? null,
+          );
+          if (result?.type === "available") {
+            onOpenInApp = () => openDeeplink(result.url);
+          }
+        }
 
         return (
           <MessageResponseCard
@@ -262,26 +279,83 @@ export default function ActionsScreen(): React.JSX.Element {
             messages={messages}
             responseText={getResponseText(action)}
             onResponseChange={(text) => handleResponseChange(action._id, text)}
-            platform={(action.platform as ActionPlatform) ?? undefined}
+            platform={(platform as ActionPlatform) ?? undefined}
             isDesktopOnline={isDesktopOnline}
+            onOpenInApp={onOpenInApp}
           />
         );
       }
 
-      // Contact-based actions (eod_contact, new_connection)
+      if (action.type === "resolve_contact") {
+        const contact = isTopCard ? actionContext?.contact : null;
+        const secondary = isTopCard ? actionContext?.secondaryContact : null;
+        const mapHandles = (
+          handles?: { handleType: string; handle: string; platform: string }[],
+        ): ContactHandle[] =>
+          (handles ?? []).map((h) => ({
+            type: h.handleType as ContactHandle["type"],
+            value: h.handle,
+            platform: h.platform as ContactHandle["platform"],
+          }));
+
+        // Build deep links for each contact's "Open" button
+        const c1Link = isTopCard ? getContactDeeplink(contact?.handles) : null;
+        const c2Link = isTopCard ? getContactDeeplink(secondary?.handles) : null;
+
+        return (
+          <ResolveContactCard
+            contact1={{
+              name: contact?.displayName ?? action.contactName ?? "Unknown",
+              company: contact?.company,
+              handles: mapHandles(contact?.handles),
+            }}
+            contact2={{
+              name:
+                secondary?.displayName ??
+                action.secondaryContactName ??
+                "Unknown",
+              company: secondary?.company,
+              handles: mapHandles(secondary?.handles),
+            }}
+            confidence={action.mergeConfidence ?? 0}
+            source={(action.mergeSource ?? "email_match") as MergeSource}
+            reasoning={action.mergeReasoning}
+            onOpenContact1={c1Link?.type === "available" ? () => openDeeplink(c1Link.url) : null}
+            onOpenContact2={c2Link?.type === "available" ? () => openDeeplink(c2Link.url) : null}
+            contact1Platform={c1Link?.platform ?? null}
+            contact2Platform={c2Link?.platform ?? null}
+          />
+        );
+      }
+
       if (CONTACT_ACTION_TYPES.includes(action.type)) {
+        const platform = action.platform ?? undefined;
+
+        // Build deep link for contact cards
+        let onOpenInApp: (() => void) | null = null;
+        if (isTopCard && platform) {
+          const result = getPlatformDeeplink(
+            platform,
+            actionContext?.conversation ?? null,
+            actionContext?.contact ?? null,
+          );
+          if (result?.type === "available") {
+            onOpenInApp = () => openDeeplink(result.url);
+          }
+        }
+
         return (
           <ContactCard
             personName={action.contactName ?? "New Contact"}
             createdAt={action.createdAt}
-            platform={(action.platform as ActionPlatform) ?? undefined}
+            platform={(platform as ActionPlatform) ?? undefined}
             formData={getContactFormData(action)}
             onFormChange={(data) => handleContactFormChange(action._id, data)}
+            onOpenInApp={onOpenInApp}
           />
         );
       }
 
-      // Fallback for unknown action types
       return (
         <View className="flex-1 p-4 items-center justify-center">
           <Text className="text-sf-label text-center text-lg font-semibold">
@@ -304,66 +378,45 @@ export default function ActionsScreen(): React.JSX.Element {
       handleResponseChange,
       handleContactFormChange,
       topActionMessages,
+      actionContext,
       isDesktopOnline,
     ],
   );
 
-  // Get top action for button state
-  const topAction = actions[0];
-
-  // Loading state - show skeleton cards matching CardStack layout
   if (isLoading) {
     return <SkeletonStack />;
   }
 
+  // Top padding to clear transparent header (safe area + nav bar)
+  const paddingTop = insets.top + 64;
+  // Bottom padding to avoid overlap with tab bar + toolbar
+  const paddingBottom = 56 + 50 + insets.bottom; // tab bar + toolbar + safe area
+
   return (
     <ErrorBoundary>
-      <View className="flex-1 bg-background pt-24">
-        <CardStack
-          actions={cardItems}
-          totalCount={actions.length}
-          onSwipe={handleSwipe}
-          renderCard={renderCard}
-          triggerSwipe={triggerSwipe}
-        />
+      <Animated.View className="flex-1 bg-background" style={[fadeStyle]}>
+        <View style={{ flex: 1, paddingTop, paddingBottom }}>
+          <CardStack
+            actions={cardItems}
+            totalCount={displayActions.length}
+            onSwipe={handleSwipe}
+            renderCard={renderCard}
+          />
+        </View>
 
-        {/* Bottom action buttons - positioned above tab bar */}
-        {actions.length > 0 && (
-          <View style={{ marginBottom: 56 + insets.bottom }}>
-            <ActionButtons
-              onSwipe={handleButtonSwipe}
-              disabled={!topAction}
-              skipLabel="Skip"
-              sendLabel="Send"
-            />
-          </View>
-        )}
-
-        {/* Undo send toasts for queued messages */}
-        {queuedMessages.length > 0 && (
-          <View
-            style={{
-              position: "absolute",
-              bottom: 56 + insets.bottom + 80,
-              left: 0,
-              right: 0,
-              gap: 8,
-            }}
+        <Host style={{ position: "absolute" }}>
+          <BottomSheet
+            isPresented={isSheetOpen}
+            onIsPresentedChange={setIsSheetOpen}
           >
-            {queuedMessages.slice(0, 3).map((msg) => (
-              <UndoSendToast
-                key={msg.messageId}
-                messageId={msg.messageId}
-                platform={msg.platform}
-                recipientName={msg.recipientName}
-                messagePreview={msg.messagePreview}
-                onUndo={handleUndoMessage}
-                onDismiss={handleToastDismiss}
-              />
-            ))}
-          </View>
-        )}
-      </View>
+            <Group modifiers={[presentationDetents(["medium", "large"])]}>
+              <RNHostView>
+                <ActionListSheet />
+              </RNHostView>
+            </Group>
+          </BottomSheet>
+        </Host>
+      </Animated.View>
     </ErrorBoundary>
   );
 }

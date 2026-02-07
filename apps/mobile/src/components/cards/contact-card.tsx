@@ -10,9 +10,10 @@
  */
 
 import { useMemo } from "react";
-import { View, Text, ScrollView, TextInput, useColorScheme } from "react-native";
+import { View, Text, ScrollView, TextInput, Pressable, useColorScheme } from "react-native";
 import { SymbolView } from "expo-symbols";
-import { getInitials, PLATFORM_CONFIG, type ActionPlatform, type ContactFormData } from "@cued/shared";
+import { type ActionPlatform, type ContactFormData } from "@cued/shared";
+import { PlatformIcon } from "@/components/platform-icons";
 import { cn, getThemeColors } from "@/lib/utils";
 
 /** Re-export ActionPlatform as ContactPlatform for this component */
@@ -31,54 +32,8 @@ export interface ContactCardProps {
   onFormChange: (data: ContactFormData) => void;
   /** Optional class name */
   className?: string;
-}
-
-/** Format timestamp to time string */
-function formatMeetingTime(timestamp: number): string {
-  const date = new Date(timestamp);
-  return date.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
-}
-
-/** Avatar component with initials */
-function Avatar({
-  initials,
-  className,
-}: {
-  initials: string;
-  className?: string;
-}): React.JSX.Element {
-  return (
-    <View
-      className={cn(
-        "w-10 h-10 rounded-full bg-muted items-center justify-center",
-        className,
-      )}
-    >
-      <Text className="text-foreground font-semibold text-sm">{initials}</Text>
-    </View>
-  );
-}
-
-/** Platform badge component */
-function PlatformBadge({
-  platform,
-}: {
-  platform: ContactPlatform;
-}): React.JSX.Element {
-  const config = PLATFORM_CONFIG[platform];
-  return (
-    <View
-      className="px-2 py-0.5 rounded-md"
-      style={{ backgroundColor: `${config.color}15` }}
-    >
-      <Text
-        className="text-[10px] font-medium"
-        style={{ color: config.color }}
-      >
-        {config.label}
-      </Text>
-    </View>
-  );
+  /** Called when the platform icon is pressed to open in app */
+  onOpenInApp?: (() => void) | null;
 }
 
 /** Form field with icon and input */
@@ -139,11 +94,10 @@ export function ContactCard({
   formData,
   onFormChange,
   className,
+  onOpenInApp,
 }: ContactCardProps): React.JSX.Element {
   const colorScheme = useColorScheme();
   const colors = getThemeColors(colorScheme === "dark");
-  const initials = getInitials(personName);
-  const meetingTime = createdAt ? formatMeetingTime(createdAt) : "earlier";
 
   // Parse tags from comma-separated string
   const tagList = useMemo(
@@ -158,33 +112,38 @@ export function ContactCard({
   return (
     <View
       className={cn(
-        "flex-1 bg-card rounded-2xl overflow-hidden",
+        "flex-1 overflow-hidden",
         className,
       )}
     >
-      {/* Header */}
-      <View className="p-4 flex-row items-center gap-3">
-        <Avatar initials={initials} />
-        <View className="flex-1 min-w-0">
-          <View className="flex-row items-center gap-1.5 mb-0.5">
-            <SymbolView name="clock" size={12} tintColor={colors.mutedForeground} />
-            <Text className="text-xs text-muted-foreground">
-              You met someone new today
-            </Text>
-          </View>
-          <View className="flex-row items-center gap-2">
-            <Text
-              className="font-semibold text-sm text-foreground"
-              numberOfLines={1}
-            >
-              {personName}
-            </Text>
-            {platform && <PlatformBadge platform={platform} />}
-          </View>
-          <Text className="text-xs text-muted-foreground">
-            at {meetingTime}
+      {/* Header - centered name, platform top-right */}
+      <View className="px-4 pt-4 pb-2">
+        <View className="flex-row items-center justify-center relative">
+          <Text
+            className="font-semibold text-base text-foreground text-center"
+            numberOfLines={1}
+          >
+            {personName}
           </Text>
+          {platform && (
+            <Pressable
+              className={cn(
+                "absolute right-0 flex-row items-center gap-1.5 rounded-lg px-2.5 py-1.5",
+                onOpenInApp ? "bg-muted active:opacity-70" : "bg-muted/40 opacity-50",
+              )}
+              onPress={onOpenInApp ?? undefined}
+              disabled={!onOpenInApp}
+              accessibilityLabel={onOpenInApp ? `Open in ${platform}` : platform}
+              accessibilityRole={onOpenInApp ? "button" : undefined}
+            >
+              <PlatformIcon platform={platform} size={12} />
+              <Text className="text-xs font-medium text-foreground">Open</Text>
+            </Pressable>
+          )}
         </View>
+        <Text className="text-xs text-muted-foreground text-center mt-1">
+          New connection
+        </Text>
       </View>
 
       {/* Form Content */}

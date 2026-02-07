@@ -8,20 +8,19 @@
 import { type ReactNode } from "react";
 import { View, Text, useWindowDimensions, useColorScheme } from "react-native";
 import { SymbolView } from "expo-symbols";
-import { FadeIn, FadeOut, Layout } from "react-native-reanimated";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { FadeIn, FadeOut, LinearTransition } from "react-native-reanimated";
 import { AnimatedView } from "@/components/animated";
 import { getThemeColors } from "@/lib/utils";
 import { SwipeableCard, type SwipeDirection } from "./swipeable-card";
 
-// Number of visible cards in the stack
-const VISIBLE_CARDS = 3;
+// Number of visible cards in the stack (top card + 1 behind)
+const VISIBLE_CARDS = 2;
 
 // Scale reduction per card in stack (1 - index * SCALE_OFFSET)
-const SCALE_OFFSET = 0.04;
+const SCALE_OFFSET = 0.075;
 
 // Vertical offset per card in stack (index * Y_OFFSET)
-const Y_OFFSET = 8;
+const Y_OFFSET = 18;
 
 export interface CardStackItem {
   id: string;
@@ -47,18 +46,13 @@ export function CardStack<T extends CardStackItem>({
   renderCard,
   triggerSwipe,
 }: CardStackProps<T>): React.JSX.Element {
-  const { width: screenWidth, height: screenHeight } = useWindowDimensions();
-  const insets = useSafeAreaInsets();
+  const { width: screenWidth } = useWindowDimensions();
   const colorScheme = useColorScheme();
   const colors = getThemeColors(colorScheme === "dark");
   // Show only top VISIBLE_CARDS
   const visibleCards = actions.slice(0, VISIBLE_CARDS);
 
-  // Calculate card dimensions to fill more of the screen
-  // Leave space for: top safe area, bottom buttons (~70), tab bar (~60), and some padding
   const cardWidth = Math.min(screenWidth - 32, 400);
-  const availableHeight = screenHeight - insets.top - 200; // 200 = buttons + tab bar + padding
-  const cardHeight = Math.min(availableHeight, screenHeight * 0.65); // Max 65% of screen height
 
   const handleSwipe = (item: T, direction: SwipeDirection): void => {
     onSwipe(item, direction);
@@ -89,11 +83,10 @@ export function CardStack<T extends CardStackItem>({
   }
 
   return (
-    <View className="flex-1 items-center justify-center px-4">
-      {/* Card stack */}
+    <View className="flex-1 items-center px-4 pb-3">
       <View
-        className="relative"
-        style={{ width: cardWidth, height: cardHeight }}
+        className="relative flex-1"
+        style={{ width: cardWidth }}
       >
         {visibleCards.map((item, index) => {
           const isTopCard = index === 0;
@@ -111,7 +104,7 @@ export function CardStack<T extends CardStackItem>({
               }}
               entering={FadeIn.duration(200)}
               exiting={FadeOut.duration(200)}
-              layout={Layout.springify()}
+              layout={LinearTransition.springify()}
             >
               <SwipeableCard
                 onSwipe={(direction) => handleSwipe(item, direction)}

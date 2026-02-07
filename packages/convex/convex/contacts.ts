@@ -1,4 +1,5 @@
 import { v } from "convex/values";
+import { paginationOptsValidator, type PaginationResult } from "convex/server";
 import { mutation, query, internalQuery } from "./_generated/server";
 import type { MutationCtx, QueryCtx } from "./_generated/server";
 import type { Doc, Id } from "./_generated/dataModel";
@@ -106,6 +107,44 @@ export const getContacts = query({
         ? { displayName: lastContact.displayName, _id: lastContact._id }
         : null,
     };
+  },
+});
+
+/**
+ * Paginated contacts list for infinite scroll.
+ * Returns contacts sorted alphabetically with handles, excluding dismissed.
+ */
+export const listContactsPaginated = query({
+  args: { paginationOpts: paginationOptsValidator },
+  handler: async (ctx, args) => {
+    const user = await getAuthenticatedUser(ctx);
+    if (!user)
+      return { page: [], isDone: true, continueCursor: "" } as PaginationResult<never>;
+
+    const results = await ctx.db
+      .query("contacts")
+      .withIndex("by_user_display_name", (q) => q.eq("userId", user._id))
+      .filter((q) => q.neq(q.field("isDismissed"), true))
+      .paginate(args.paginationOpts);
+
+    const enrichedPage = await Promise.all(
+      results.page.map(async (contact) => {
+        const handles = await ctx.db
+          .query("contactHandles")
+          .withIndex("by_contact", (q) => q.eq("contactId", contact._id))
+          .collect();
+        return {
+          ...contact,
+          handles: handles.map((h) => ({
+            type: h.handleType,
+            value: h.handle,
+            platform: h.platform,
+          })),
+        };
+      })
+    );
+
+    return { ...results, page: enrichedPage };
   },
 });
 

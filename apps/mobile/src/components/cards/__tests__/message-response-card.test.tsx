@@ -64,18 +64,6 @@ describe("MessageResponseCard", () => {
       expect(screen.getByText("John Doe")).toBeDefined();
     });
 
-    it("renders initials from person name", () => {
-      render(<MessageResponseCard {...defaultProps} />);
-
-      expect(screen.getByText("JD")).toBeDefined();
-    });
-
-    it("renders single initial for single-word name", () => {
-      render(<MessageResponseCard {...defaultProps} personName="Madonna" />);
-
-      expect(screen.getByText("M")).toBeDefined();
-    });
-
     it("renders relative time when timestamp provided", () => {
       const timestamp = Date.now() - 5 * 60 * 1000; // 5 minutes ago
       render(<MessageResponseCard {...defaultProps} messageTimestamp={timestamp} />);
@@ -94,51 +82,31 @@ describe("MessageResponseCard", () => {
   });
 
   describe("platform badge", () => {
-    it("renders iMessage platform badge", () => {
-      render(<MessageResponseCard {...defaultProps} platform="imessage" />);
+    it("renders platform badge with Open text for iMessage", () => {
+      const { container } = render(<MessageResponseCard {...defaultProps} platform="imessage" />);
 
-      expect(screen.getByText("iMessage")).toBeDefined();
+      expect(screen.getByText("Open")).toBeDefined();
+      expect(container.querySelector('pressable[accessibilitylabel="imessage"]')).not.toBeNull();
     });
 
-    it("renders Gmail platform badge", () => {
-      render(<MessageResponseCard {...defaultProps} platform="gmail" />);
+    it("renders platform badge with Open text for Gmail", () => {
+      const { container } = render(<MessageResponseCard {...defaultProps} platform="gmail" />);
 
-      expect(screen.getByText("Gmail")).toBeDefined();
+      expect(screen.getByText("Open")).toBeDefined();
+      expect(container.querySelector('pressable[accessibilitylabel="gmail"]')).not.toBeNull();
     });
 
-    it("renders Slack platform badge", () => {
-      render(<MessageResponseCard {...defaultProps} platform="slack" />);
+    it("renders platform badge with Open text for Slack", () => {
+      const { container } = render(<MessageResponseCard {...defaultProps} platform="slack" />);
 
-      expect(screen.getByText("Slack")).toBeDefined();
+      expect(screen.getByText("Open")).toBeDefined();
+      expect(container.querySelector('pressable[accessibilitylabel="slack"]')).not.toBeNull();
     });
 
     it("does not render platform badge when not provided", () => {
       render(<MessageResponseCard {...defaultProps} />);
 
-      expect(screen.queryByText("iMessage")).toBeNull();
-      expect(screen.queryByText("Gmail")).toBeNull();
-      expect(screen.queryByText("Slack")).toBeNull();
-    });
-  });
-
-  describe("desktop status", () => {
-    it("renders Online status when desktop is online for iMessage", () => {
-      render(<MessageResponseCard {...defaultProps} platform="imessage" isDesktopOnline={true} />);
-
-      expect(screen.getByText("Online")).toBeDefined();
-    });
-
-    it("renders Offline status when desktop is offline for iMessage", () => {
-      render(<MessageResponseCard {...defaultProps} platform="imessage" isDesktopOnline={false} />);
-
-      expect(screen.getByText("Offline")).toBeDefined();
-    });
-
-    it("does not render desktop status for non-iMessage platforms", () => {
-      render(<MessageResponseCard {...defaultProps} platform="gmail" isDesktopOnline={true} />);
-
-      expect(screen.queryByText("Online")).toBeNull();
-      expect(screen.queryByText("Offline")).toBeNull();
+      expect(screen.queryByText("Open")).toBeNull();
     });
   });
 

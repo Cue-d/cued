@@ -159,6 +159,20 @@ vi.mock("expo-symbols", () => ({
   SFSymbol: {},
 }));
 
+// Mock react-native-svg
+vi.mock("react-native-svg", () => ({
+  default: ({ children }: { children?: React.ReactNode }) =>
+    React.createElement("svg", null, children),
+  Circle: (props: Record<string, unknown>) =>
+    React.createElement("circle", props),
+  Rect: (props: Record<string, unknown>) =>
+    React.createElement("rect", props),
+  Path: (props: Record<string, unknown>) =>
+    React.createElement("path", props),
+  Svg: ({ children }: { children?: React.ReactNode }) =>
+    React.createElement("svg", null, children),
+}));
+
 // Mock expo-glass-effect
 vi.mock("expo-glass-effect", () => ({
   GlassView: ({ children }: { children?: React.ReactNode }) => children,
@@ -209,6 +223,7 @@ vi.mock("react-native-reanimated", () => {
     SlideInRight: createChainableAnimation(),
     SlideOutRight: createChainableAnimation(),
     Layout: createChainableAnimation(),
+    LinearTransition: createChainableAnimation(),
     Easing: {
       linear: (x: number) => x,
       ease: (x: number) => x,

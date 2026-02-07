@@ -115,3 +115,14 @@ export {
   normalizeLinkedInHandle,
   extractLinkedInThreadId,
 } from "./linkedin.js";
+
+// Deep link utilities
+export {
+  buildHandleDeeplink,
+  getPlatformDeeplink,
+  getContactDeeplink,
+  getOpenInAppLabel,
+  type DeeplinkResult,
+  type DeeplinkConversationContext,
+  type DeeplinkContactContext,
+} from "./deeplinks.js";

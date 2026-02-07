@@ -1,15 +1,19 @@
-import { useState, useMemo } from "react";
-import { View, Text, ScrollView, Pressable, PlatformColor } from "react-native";
+import { useState, useMemo, useCallback } from "react";
+import { View, Text, FlatList, ScrollView, Pressable, PlatformColor, ActivityIndicator } from "react-native";
 import { BlurView } from "expo-blur";
 import { GlassView, isLiquidGlassAvailable } from "expo-glass-effect";
 import * as Haptics from "expo-haptics";
 import { Stack, useRouter } from "expo-router";
 import { SymbolView } from "expo-symbols";
-import { useContacts } from "@/hooks/useContacts";
+import { usePaginatedQuery } from "convex/react";
+import { api } from "@cued/convex/convex/_generated/api";
 import { useSearch, type SearchContactResult, type SearchMessageResult } from "@/hooks/useSearch";
-import type { SFSymbols7_0 } from "sf-symbols-typescript";
+import { PlatformIcon } from "@/components/platform-icons";
+import { isRealContactName } from "@/lib/utils";
+import { type ActionPlatform } from "@cued/shared";
 
 const AVATAR_SIZE = 40;
+const PAGE_SIZE = 50;
 
 const avatarStyle = {
   width: AVATAR_SIZE,
@@ -42,6 +46,7 @@ function ContactResultCard({ contact }: { contact: SearchContactResult }): React
   const phoneHandle = contact.handles.find((h) => h.type === "phone");
   const emailHandle = contact.handles.find((h) => h.type === "email");
   const subtitle = contact.company || phoneHandle?.value || emailHandle?.value;
+  const platforms = [...new Set(contact.handles.map((h) => h.platform))];
 
   const handlePress = () => {
     Haptics.selectionAsync();
@@ -66,29 +71,31 @@ function ContactResultCard({ contact }: { contact: SearchContactResult }): React
           >
             {contact.displayName}
           </Text>
-          {subtitle && (
-            <Text
-              style={{ fontSize: 14, color: PlatformColor("secondaryLabel"), marginTop: 2 }}
-              numberOfLines={1}
-            >
-              {subtitle}
-            </Text>
-          )}
+          <View style={{ flexDirection: "row", alignItems: "center", gap: 6, marginTop: 2 }}>
+            {subtitle && (
+              <Text
+                style={{ fontSize: 14, color: PlatformColor("secondaryLabel") }}
+                numberOfLines={1}
+              >
+                {subtitle}
+              </Text>
+            )}
+            {platforms.length > 0 && (
+              <View style={{ flexDirection: "row", gap: 4, alignItems: "center" }}>
+                {platforms.map((platform) => (
+                  <PlatformIcon
+                    key={platform}
+                    platform={platform as ActionPlatform}
+                    size={14}
+                  />
+                ))}
+              </View>
+            )}
+          </View>
         </View>
         <SymbolView name="chevron.right" tintColor={PlatformColor("tertiaryLabel")} size={14} />
     </Pressable>
   );
-}
-
-function getPlatformIcon(platform: string): SFSymbols7_0 {
-  switch (platform) {
-    case "imessage":
-      return "message.fill";
-    case "gmail":
-      return "envelope.fill";
-    default:
-      return "bubble.left.fill";
-  }
 }
 
 function formatMessageDate(sentAt: number): string {
@@ -102,7 +109,6 @@ function formatMessageDate(sentAt: number): string {
 }
 
 function MessageResultCard({ message }: { message: SearchMessageResult }): React.ReactElement {
-  const platformIcon = getPlatformIcon(message.platform);
   const formattedDate = useMemo(() => formatMessageDate(message.sentAt), [message.sentAt]);
   const displayName = message.conversationName || message.senderName || "Unknown";
   const messagePreview = message.isFromMe ? `You: ${message.content}` : message.content;
@@ -113,7 +119,7 @@ function MessageResultCard({ message }: { message: SearchMessageResult }): React
       style={{ flexDirection: "row", alignItems: "flex-start", padding: 12, gap: 12 }}
     >
       <View style={avatarStyle}>
-        <SymbolView name={platformIcon} tintColor={PlatformColor("secondaryLabel")} size={20} />
+        <PlatformIcon platform={message.platform} size={20} />
       </View>
       <View style={{ flex: 1 }}>
         <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center" }}>
@@ -148,14 +154,10 @@ function SectionHeader({ title }: { title: string }): React.ReactElement {
   );
 }
 
-function EmptyState({ hasQuery }: { hasQuery: boolean }): React.ReactElement {
-  const icon = hasQuery ? "magnifyingglass" : "text.magnifyingglass";
-  const title = hasQuery ? "No Results" : "Search Messages & Contacts";
-  const subtitle = hasQuery ? "Try a different search term" : "Type at least 2 characters to search";
-
+function EmptySearchState(): React.ReactElement {
   return (
     <View style={{ alignItems: "center", paddingHorizontal: 32, paddingTop: 48 }}>
-      <SymbolView name={icon} tintColor={PlatformColor("tertiaryLabel")} size={48} />
+      <SymbolView name="magnifyingglass" tintColor={PlatformColor("tertiaryLabel")} size={48} />
       <Text
         style={{
           fontSize: 17,
@@ -165,7 +167,7 @@ function EmptyState({ hasQuery }: { hasQuery: boolean }): React.ReactElement {
           textAlign: "center",
         }}
       >
-        {title}
+        No Results
       </Text>
       <Text
         style={{
@@ -175,7 +177,7 @@ function EmptyState({ hasQuery }: { hasQuery: boolean }): React.ReactElement {
           textAlign: "center",
         }}
       >
-        {subtitle}
+        Try a different search term
       </Text>
     </View>
   );
@@ -202,7 +204,7 @@ function Separator(): React.ReactElement {
   return <View style={{ height: 1, backgroundColor: PlatformColor("separator"), marginLeft: 64 }} />;
 }
 
-function ResultsList({
+function SearchResultsList({
   contacts,
   messages,
 }: {
@@ -239,40 +241,89 @@ function ResultsList({
   );
 }
 
+function DefaultContactsList(): React.ReactElement {
+  const { results, status, loadMore } = usePaginatedQuery(
+    api.contacts.listContactsPaginated,
+    {},
+    { initialNumItems: PAGE_SIZE }
+  );
+
+  const contacts: SearchContactResult[] = useMemo(
+    () =>
+      results
+        .filter((c) => isRealContactName(c.displayName))
+        .map((c) => ({
+          _id: c._id,
+          displayName: c.displayName,
+          company: c.company ?? null,
+          handles: c.handles ?? [],
+        })),
+    [results]
+  );
+
+  const handleEndReached = useCallback(() => {
+    if (status === "CanLoadMore") {
+      loadMore(PAGE_SIZE);
+    }
+  }, [status, loadMore]);
+
+  const renderItem = useCallback(
+    ({ item }: { item: SearchContactResult }) => <ContactResultCard contact={item} />,
+    []
+  );
+
+  const renderSeparator = useCallback(() => <Separator />, []);
+
+  const keyExtractor = useCallback((item: SearchContactResult) => item._id, []);
+
+  if (status === "LoadingFirstPage") {
+    return <LoadingState />;
+  }
+
+  return (
+    <FlatList
+      data={contacts}
+      renderItem={renderItem}
+      keyExtractor={keyExtractor}
+      ItemSeparatorComponent={renderSeparator}
+      contentInsetAdjustmentBehavior="automatic"
+      contentContainerStyle={{ padding: 16 }}
+      onEndReached={handleEndReached}
+      onEndReachedThreshold={0.5}
+      ListFooterComponent={
+        status === "LoadingMore" ? (
+          <View style={{ paddingVertical: 16, alignItems: "center" }}>
+            <ActivityIndicator />
+          </View>
+        ) : null
+      }
+    />
+  );
+}
+
 export default function SearchScreen(): React.ReactElement {
   const [searchQuery, setSearchQuery] = useState("");
   const { messages, contacts: searchContacts, isLoading: isSearching, hasQuery } = useSearch({
     query: searchQuery,
   });
-  const { contacts: defaultContacts, isLoading: isLoadingContacts } = useContacts({ limit: 50 });
-
-  const mappedDefaultContacts: SearchContactResult[] = useMemo(
-    () =>
-      defaultContacts.map((c) => ({
-        _id: c._id,
-        displayName: c.displayName,
-        company: c.company ?? null,
-        handles: c.handles ?? [],
-      })),
-    [defaultContacts]
-  );
-
-  const displayContacts = hasQuery ? searchContacts : mappedDefaultContacts;
-  const isLoading = hasQuery ? isSearching : isLoadingContacts;
-  const hasResults = displayContacts.length > 0 || messages.length > 0;
 
   function handleSearchChange(event: { nativeEvent: { text: string } }): void {
     setSearchQuery(event.nativeEvent.text);
   }
 
   function renderContent(): React.ReactNode {
-    if (isLoading) return <LoadingState />;
-    if (!hasResults && hasQuery) return <EmptyState hasQuery={hasQuery} />;
-    return <ResultsList contacts={displayContacts} messages={messages} />;
+    if (!hasQuery) {
+      return <DefaultContactsList />;
+    }
+    if (isSearching) return <LoadingState />;
+    if (searchContacts.length === 0 && messages.length === 0) {
+      return <EmptySearchState />;
+    }
+    return <SearchResultsList contacts={searchContacts} messages={messages} />;
   }
 
   return (
-    <View style={{ flex: 1, backgroundColor: PlatformColor("systemGroupedBackground") }}>
+    <View className="flex-1 bg-background">
       <Stack.Screen
         options={{
           title: "",

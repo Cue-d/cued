@@ -5,7 +5,7 @@
  * - Keyboard-friendly ScrollView for message display
  * - SuggestedPrompts when messages are empty
  * - Animated keyboard handling
- * - ChatInput positioned at bottom
+ * - ChatInput rendered in the NativeTabs.BottomAccessory (via ChatContext)
  *
  * Based on expo-ai chat UI design
  */
@@ -22,12 +22,13 @@ import Animated, {
   useSharedValue,
 } from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { ChatInput } from "@/components/chat/chat-input";
 import { ChatMessage } from "@/components/chat/chat-message";
 import { SuggestedPrompts } from "@/components/chat/suggested-prompts";
 import { ErrorBoundary } from "@/components/error-boundary";
-import { useChat } from "@/hooks/useChat";
-import { getAccessToken } from "@/lib/auth";
+import { useAgentChat } from "@/contexts/chat-context";
+
+// Tab bar (~56) + BottomAccessory (~50)
+const TAB_BAR_AND_ACCESSORY_HEIGHT = 106;
 
 /**
  * Keyboard-friendly ScrollView that auto-scrolls to bottom
@@ -65,16 +66,12 @@ function KeyboardFriendlyScrollView({
   }, [ref]);
 
   const scrollToBottomIfNotPanning = useCallback(() => {
-    if (
-      keyboard.state.value === KeyboardState.OPENING ||
-      keyboard.state.value === KeyboardState.CLOSING ||
-      isScrollViewControlled.value
-    ) {
+    if (isScrollViewControlled.value) {
       return;
     }
     scrollToBottom();
     onContentSizeChange?.();
-  }, [keyboard, isScrollViewControlled, scrollToBottom, onContentSizeChange]);
+  }, [isScrollViewControlled, scrollToBottom, onContentSizeChange]);
 
   useDerivedValue(() => {
     const currentState = keyboard.state.value;
@@ -120,11 +117,12 @@ function KeyboardFriendlyScrollView({
     }
   });
 
-  const keyboardBlurUnderlayStyle = useAnimatedStyle(() => {
-    const height = Math.max(keyboard.height.value, bottom);
-    return {
-      height,
-    };
+  // Bottom spacer: accounts for tab bar + accessory when keyboard is closed,
+  // or keyboard height when keyboard is open
+  const bottomSpacerStyle = useAnimatedStyle(() => {
+    const tabBarPadding = TAB_BAR_AND_ACCESSORY_HEIGHT + bottom;
+    const height = Math.max(keyboard.height.value, tabBarPadding);
+    return { height };
   }, [bottom]);
 
   return (
@@ -154,20 +152,15 @@ function KeyboardFriendlyScrollView({
     >
       {children}
       {Platform.OS !== "web" && (
-        <Animated.View style={keyboardBlurUnderlayStyle} />
+        <Animated.View style={bottomSpacerStyle} />
       )}
     </Animated.ScrollView>
   );
 }
 
 export default function AgentScreen() {
-  const { messages, input, setInput, sendMessage, isLoading, error } =
-    useChat({ getAccessToken });
+  const { messages, sendMessage, isLoading, error } = useAgentChat();
   const { bottom } = useSafeAreaInsets();
-
-  const handleSendMessage = useCallback(async () => {
-    await sendMessage();
-  }, [sendMessage]);
 
   const handleSelectPrompt = useCallback(
     async (prompt: string) => {
@@ -215,14 +208,6 @@ export default function AgentScreen() {
             </Text>
           </View>
         )}
-
-        {/* Chat input */}
-        <ChatInput
-          value={input}
-          onChangeText={setInput}
-          onSubmit={handleSendMessage}
-          disabled={isLoading}
-        />
       </View>
     </ErrorBoundary>
   );

@@ -47,66 +47,39 @@ describe("ContactCard", () => {
       expect(screen.getByText("John Doe")).toBeDefined();
     });
 
-    it("renders initials from person name", () => {
+    it("renders 'New connection' subtitle", () => {
       render(<ContactCard {...defaultProps} />);
 
-      expect(screen.getByText("JD")).toBeDefined();
-    });
-
-    it("renders single initial for single-word name", () => {
-      render(<ContactCard {...defaultProps} personName="Madonna" />);
-
-      expect(screen.getByText("M")).toBeDefined();
-    });
-
-    it("renders 'You met someone new today' text", () => {
-      render(<ContactCard {...defaultProps} />);
-
-      expect(screen.getByText("You met someone new today")).toBeDefined();
-    });
-
-    it("renders meeting time when createdAt provided", () => {
-      const timestamp = new Date().setHours(14, 30, 0, 0); // 2:30 PM
-      render(<ContactCard {...defaultProps} createdAt={timestamp} />);
-
-      // Should render "at [time]" format - find the time text element
-      // The timestamp renders as "at 2:30 PM" or similar in a separate element
-      const timeElements = screen.getAllByText(/at/);
-      expect(timeElements.length).toBeGreaterThan(0);
-    });
-
-    it("renders 'earlier' when createdAt not provided", () => {
-      render(<ContactCard {...defaultProps} />);
-
-      expect(screen.getByText("at earlier")).toBeDefined();
+      expect(screen.getByText("New connection")).toBeDefined();
     });
   });
 
   describe("platform badge", () => {
-    it("renders iMessage platform badge", () => {
-      render(<ContactCard {...defaultProps} platform="imessage" />);
+    it("renders platform badge with Open text for iMessage", () => {
+      const { container } = render(<ContactCard {...defaultProps} platform="imessage" />);
 
-      expect(screen.getByText("iMessage")).toBeDefined();
+      expect(screen.getByText("Open")).toBeDefined();
+      expect(container.querySelector('pressable[accessibilitylabel="imessage"]')).not.toBeNull();
     });
 
-    it("renders Gmail platform badge", () => {
-      render(<ContactCard {...defaultProps} platform="gmail" />);
+    it("renders platform badge with Open text for Gmail", () => {
+      const { container } = render(<ContactCard {...defaultProps} platform="gmail" />);
 
-      expect(screen.getByText("Gmail")).toBeDefined();
+      expect(screen.getByText("Open")).toBeDefined();
+      expect(container.querySelector('pressable[accessibilitylabel="gmail"]')).not.toBeNull();
     });
 
-    it("renders Slack platform badge", () => {
-      render(<ContactCard {...defaultProps} platform="slack" />);
+    it("renders platform badge with Open text for Slack", () => {
+      const { container } = render(<ContactCard {...defaultProps} platform="slack" />);
 
-      expect(screen.getByText("Slack")).toBeDefined();
+      expect(screen.getByText("Open")).toBeDefined();
+      expect(container.querySelector('pressable[accessibilitylabel="slack"]')).not.toBeNull();
     });
 
     it("does not render platform badge when null", () => {
       render(<ContactCard {...defaultProps} platform={null} />);
 
-      expect(screen.queryByText("iMessage")).toBeNull();
-      expect(screen.queryByText("Gmail")).toBeNull();
-      expect(screen.queryByText("Slack")).toBeNull();
+      expect(screen.queryByText("Open")).toBeNull();
     });
   });
 
@@ -243,7 +216,7 @@ describe("ContactCard", () => {
       render(<ContactCard {...defaultProps} personName="" />);
 
       // Should still render without crashing
-      expect(screen.getByText("You met someone new today")).toBeDefined();
+      expect(screen.getByText("New connection")).toBeDefined();
     });
 
     it("handles special characters in person name", () => {

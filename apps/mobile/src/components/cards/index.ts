@@ -17,3 +17,10 @@ export {
   type ContactCardProps,
 } from "./contact-card";
 
+// ResolveContactCard
+export {
+  ResolveContactCard,
+  type ResolveContactCardProps,
+  type MergeSource,
+} from "./resolve-contact-card";
+

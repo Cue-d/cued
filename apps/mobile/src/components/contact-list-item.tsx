@@ -1,13 +1,14 @@
 /**
  * ContactListItem component for contacts list.
- * Modern iOS-style contact row.
+ * Modern iOS-style contact row with platform badges.
  */
 
 import { View, Text, Pressable, useColorScheme } from "react-native";
 import * as Haptics from "expo-haptics";
 import { useRouter } from "expo-router";
 import { SymbolView } from "expo-symbols";
-import { getInitials } from "@cued/shared";
+import { getInitials, type ActionPlatform } from "@cued/shared";
+import { PlatformIcon } from "@/components/platform-icons";
 import { getThemeColors } from "@/lib/utils";
 
 export interface ContactListItemData {
@@ -16,13 +17,14 @@ export interface ContactListItemData {
   company?: string | null;
   phoneNumber?: string | null;
   email?: string | null;
+  platforms?: string[];
 }
 
 export interface ContactListItemProps {
   contact: ContactListItemData;
 }
 
-/** ContactListItem - Modern iOS-style contact row. */
+/** ContactListItem - Modern iOS-style contact row with platform indicators. */
 export function ContactListItem({
   contact,
 }: ContactListItemProps): React.JSX.Element {
@@ -54,14 +56,27 @@ export function ContactListItem({
           {contact.displayName}
         </Text>
 
-        {contact.company && (
-          <Text
-            className="text-sm text-muted-foreground mt-0.5"
-            numberOfLines={1}
-          >
-            {contact.company}
-          </Text>
-        )}
+        <View className="flex-row items-center gap-2 mt-0.5">
+          {contact.company && (
+            <Text
+              className="text-sm text-muted-foreground"
+              numberOfLines={1}
+            >
+              {contact.company}
+            </Text>
+          )}
+          {contact.platforms && contact.platforms.length > 0 && (
+            <View className="flex-row items-center gap-1.5">
+              {contact.platforms.map((platform) => (
+                <PlatformIcon
+                  key={platform}
+                  platform={platform as ActionPlatform}
+                  size={14}
+                />
+              ))}
+            </View>
+          )}
+        </View>
       </View>
 
       <SymbolView name="chevron.right" tintColor={colors.mutedForeground} size={14} />

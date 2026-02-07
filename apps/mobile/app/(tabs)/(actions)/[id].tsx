@@ -1,8 +1,7 @@
 /**
  * Action detail screen - displays full context for an action.
  *
- * Task 7.5: Add action detail route for full context.
- * Shows complete message thread, action details, and ActionButtons.
+ * Shows complete message thread, action details, and toolbar actions.
  */
 
 import { useState, useCallback } from "react";
@@ -12,7 +11,6 @@ import { useLocalSearchParams, useRouter, Stack } from "expo-router";
 import { useQuery, useMutation } from "convex/react";
 import { api } from "@cued/convex/convex/_generated/api";
 import { getInitials, formatTime, formatRelativeTime, type DisplayMessage } from "@cued/shared";
-import { ActionButtons } from "@/components/action-buttons";
 import { useElectronPresence } from "@/hooks/useElectronPresence";
 import type { SwipeDirection } from "@/components/swipeable-card";
 import type { Id } from "@cued/convex/convex/_generated/dataModel";
@@ -325,10 +323,14 @@ export default function ActionDetailScreen(): React.JSX.Element {
           )}
         </ScrollView>
 
-        {/* Action Buttons */}
-        <View className="px-4 pb-8 bg-sf-bg">
-          <ActionButtons onSwipe={handleSwipe} />
-        </View>
+        {/* Bottom toolbar actions */}
+        <Stack.Toolbar placement="bottom">
+          <Stack.Toolbar.Button icon="xmark" onPress={() => handleSwipe("left")} />
+          <Stack.Toolbar.Spacer />
+          <Stack.Toolbar.Button icon="clock" onPress={() => handleSwipe("up")} />
+          <Stack.Toolbar.Spacer />
+          <Stack.Toolbar.Button icon="checkmark" onPress={() => handleSwipe("right")} tintColor="#1B5E3D" />
+        </Stack.Toolbar>
       </View>
     </>
   );

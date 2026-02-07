@@ -28,7 +28,7 @@ setCustomTextInput({ style: defaultFontStyle });
 
 function LoadingScreen() {
   return (
-    <View className="flex-1 items-center justify-center bg-neutral-50 dark:bg-black">
+    <View className="flex-1 items-center justify-center bg-background">
       <ActivityIndicator size="large" />
     </View>
   );
@@ -100,7 +100,7 @@ function AuthenticatedApp() {
           options={{
             headerShown: false,
             presentation: "modal",
-            contentStyle: { backgroundColor: colors.secondaryBackground },
+            contentStyle: { backgroundColor: colors.background },
           }}
         />
       </Stack>

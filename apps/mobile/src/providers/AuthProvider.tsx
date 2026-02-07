@@ -120,14 +120,23 @@ export function useAuth(): AuthContextType {
 export function useAuthForConvex(): {
   isLoading: boolean;
   isAuthenticated: boolean;
-  fetchAccessToken: () => Promise<string | null>;
+  fetchAccessToken: (opts: { forceRefreshToken: boolean }) => Promise<string | null>;
 } {
   const { isAuthenticated, isLoading } = useAuth();
 
-  const fetchAccessToken = useCallback(async (): Promise<string | null> => {
-    if (!isAuthenticated) return null;
-    return getAccessToken();
-  }, [isAuthenticated]);
+  const fetchAccessToken = useCallback(
+    async ({ forceRefreshToken }: { forceRefreshToken: boolean }): Promise<string | null> => {
+      if (!isAuthenticated) return null;
+
+      if (forceRefreshToken) {
+        const result = await refreshAccessToken();
+        return result?.accessToken ?? null;
+      }
+
+      return getAccessToken();
+    },
+    [isAuthenticated]
+  );
 
   return useMemo(
     () => ({ isLoading, isAuthenticated, fetchAccessToken }),

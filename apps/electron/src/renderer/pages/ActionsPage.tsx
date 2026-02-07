@@ -8,7 +8,7 @@ import {
 } from "lucide-react"
 import { AnimatePresence } from "motion/react"
 import { api } from "@cued/convex"
-import { type EnrichedAction, PLATFORM_CONFIG, type ActionPlatform, extractLinkedInThreadId } from "@cued/shared"
+import { type EnrichedAction, PLATFORM_CONFIG, type ActionPlatform, getPlatformDeeplink, getContactDeeplink, type DeeplinkResult } from "@cued/shared"
 import {
   ACTION_FILTER_GROUPS,
   type FilterGroup,
@@ -44,92 +44,6 @@ function getActionTypeConfig(type: string): { icon: React.ReactNode; label: stri
   const config = ACTION_TYPE_CONFIG[type]
   if (config) return config
   return { ...DEFAULT_ACTION_CONFIG, label: type }
-}
-
-type DeeplinkResult =
-  | { type: "available"; url: string }
-  | { type: "disabled"; reason: string }
-  | null
-
-/** Build a deep link URL for a single handle (no conversation context). */
-function buildHandleDeeplink(platform: string, handleType: string, handle: string): string | null {
-  switch (platform) {
-    case "imessage":
-      return (handleType === "phone" || handleType === "email") ? `imessage://${handle}` : null
-    case "gmail":
-      return handleType === "email" ? `mailto:${handle}` : null
-    case "linkedin":
-      return handleType === "linkedin_handle" ? `https://www.linkedin.com/in/${handle}` : null
-    default:
-      return null
-  }
-}
-
-/** Deep link with conversation context (thread-level), falls back to handle-level. */
-function getPlatformDeeplink(
-  platform: string,
-  context: ActionContext | null,
-): DeeplinkResult {
-  if (!context) return null
-
-  const { conversation, contact } = context
-
-  // Conversation-level deep links
-  switch (platform) {
-    case "imessage":
-      if (conversation?.conversationType === "group") {
-        return { type: "disabled", reason: "Deep linking isn't supported for iMessage group chats" }
-      }
-      break
-    case "gmail":
-      if (conversation?.platformConversationId) {
-        return { type: "available", url: `https://mail.google.com/mail/u/0/#inbox/${conversation.platformConversationId}` }
-      }
-      break
-    case "slack":
-      if (conversation?.platformConversationId && conversation?.workspaceId) {
-        return { type: "available", url: `slack://channel?team=${conversation.workspaceId}&id=${conversation.platformConversationId}` }
-      }
-      return null
-    case "linkedin":
-      if (conversation?.platformConversationId) {
-        const threadId = extractLinkedInThreadId(conversation.platformConversationId)
-        return { type: "available", url: `https://www.linkedin.com/messaging/thread/${threadId}` }
-      }
-      break
-  }
-
-  // Fallback: handle-level deep link
-  if (contact?.handles) {
-    for (const h of contact.handles) {
-      if (h.platform === platform) {
-        const url = buildHandleDeeplink(h.platform, h.handleType, h.handle)
-        if (url) return { type: "available", url }
-      }
-    }
-  }
-
-  return null
-}
-
-/** Deep link for a contact based on handles (no conversation context). */
-function getContactDeeplink(
-  handles: Array<{ handleType: string; handle: string; platform: string }> | undefined,
-): (DeeplinkResult & { platform?: string }) | null {
-  if (!handles?.length) return null
-
-  for (const h of handles) {
-    const url = buildHandleDeeplink(h.platform, h.handleType, h.handle)
-    if (url) return { type: "available", url, platform: h.platform }
-  }
-
-  // Fallback: email handles regardless of platform
-  const emailHandle = handles.find((h) => h.handleType === "email")
-  if (emailHandle) {
-    return { type: "available", url: `mailto:${emailHandle.handle}`, platform: "gmail" }
-  }
-
-  return null
 }
 
 /** Build OpenInAppConfig from a deeplink result. */
@@ -188,7 +102,7 @@ function ActionDetail({
   }
 
   const platform = (action.platform ?? context?.conversation?.platform) as ActionPlatform | undefined
-  const deeplinkResult = platform ? getPlatformDeeplink(platform, context) : null
+  const deeplinkResult = platform ? getPlatformDeeplink(platform, context?.conversation ?? null, context?.contact ?? null) : null
   const openInApp = buildOpenInAppConfig(
     deeplinkResult ? { ...deeplinkResult, platform } : null,
     openExternal,
@@ -525,7 +439,7 @@ export function ActionsPage({
   const handleOpenInApp = React.useCallback(() => {
     const platform = selectedAction?.platform ?? actionContext?.conversation?.platform
     if (!platform) return
-    const result = getPlatformDeeplink(platform, actionContext)
+    const result = getPlatformDeeplink(platform, actionContext?.conversation ?? null, actionContext?.contact ?? null)
     if (result?.type === "available") {
       electron.shell.openExternal(result.url)
     }

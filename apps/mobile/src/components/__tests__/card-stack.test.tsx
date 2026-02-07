@@ -101,7 +101,7 @@ describe("CardStack", () => {
   });
 
   describe("rendering cards", () => {
-    it("renders visible cards", () => {
+    it("renders visible cards (max 2)", () => {
       render(
         <CardStack
           actions={defaultActions}
@@ -113,10 +113,10 @@ describe("CardStack", () => {
 
       expect(screen.getByTestId("card-1")).toBeDefined();
       expect(screen.getByTestId("card-2")).toBeDefined();
-      expect(screen.getByTestId("card-3")).toBeDefined();
+      expect(screen.queryByTestId("card-3")).toBeNull();
     });
 
-    it("renders maximum 3 visible cards even with more actions", () => {
+    it("renders maximum 2 visible cards even with more actions", () => {
       const manyActions: TestAction[] = [
         { id: "1", title: "Action 1" },
         { id: "2", title: "Action 2" },
@@ -136,29 +136,25 @@ describe("CardStack", () => {
 
       expect(screen.getByTestId("card-1")).toBeDefined();
       expect(screen.getByTestId("card-2")).toBeDefined();
-      expect(screen.getByTestId("card-3")).toBeDefined();
-      expect(screen.queryByTestId("card-4")).toBeNull();
-      expect(screen.queryByTestId("card-5")).toBeNull();
+      expect(screen.queryByTestId("card-3")).toBeNull();
     });
 
-    it("renders less than 3 cards if fewer available", () => {
+    it("renders less than 2 cards if fewer available", () => {
       const fewActions: TestAction[] = [
         { id: "1", title: "Action 1" },
-        { id: "2", title: "Action 2" },
       ];
 
       render(
         <CardStack
           actions={fewActions}
-          totalCount={2}
+          totalCount={1}
           onSwipe={mockOnSwipe}
           renderCard={mockRenderCard}
         />
       );
 
       expect(screen.getByTestId("card-1")).toBeDefined();
-      expect(screen.getByTestId("card-2")).toBeDefined();
-      expect(screen.queryByTestId("card-3")).toBeNull();
+      expect(screen.queryByTestId("card-2")).toBeNull();
     });
 
     it("calls renderCard with correct arguments", () => {
@@ -171,10 +167,9 @@ describe("CardStack", () => {
         />
       );
 
-      expect(mockRenderCard).toHaveBeenCalledTimes(3);
+      expect(mockRenderCard).toHaveBeenCalledTimes(2);
       expect(mockRenderCard).toHaveBeenCalledWith(defaultActions[0], 0);
       expect(mockRenderCard).toHaveBeenCalledWith(defaultActions[1], 1);
-      expect(mockRenderCard).toHaveBeenCalledWith(defaultActions[2], 2);
     });
   });
 
@@ -205,9 +200,8 @@ describe("CardStack", () => {
       );
 
       const cards = screen.getAllByTestId("swipeable-card");
-      // Cards at index 1 and 2 should be disabled
+      // Second card should be disabled
       expect(cards[1].getAttribute("data-disabled")).toBe("true");
-      expect(cards[2].getAttribute("data-disabled")).toBe("true");
     });
   });
 
@@ -227,7 +221,6 @@ describe("CardStack", () => {
       expect(cards[0].getAttribute("data-trigger-swipe")).toBe("right");
       // Non-top cards get null, which getAttribute returns as null (not "null")
       expect(cards[1].getAttribute("data-trigger-swipe")).toBeNull();
-      expect(cards[2].getAttribute("data-trigger-swipe")).toBeNull();
     });
 
     it("passes null triggerSwipe when not provided", () => {

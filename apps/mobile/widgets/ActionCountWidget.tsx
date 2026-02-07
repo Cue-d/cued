@@ -1,4 +1,4 @@
-import { Text, VStack } from "@expo/ui/swift-ui";
+import { Text, VStack, Host } from "@expo/ui/swift-ui";
 import {
   font,
   foregroundStyle,

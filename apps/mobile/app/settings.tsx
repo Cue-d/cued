@@ -1,6 +1,7 @@
 import {
   Alert,
   ActivityIndicator,
+  ScrollView,
   View,
   Text,
   Pressable,
@@ -13,8 +14,11 @@ import { useQuery, useMutation } from "convex/react";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Uniwind, useUniwind } from "uniwind";
 import { api } from "@cued/convex";
-import { getInitials } from "@cued/shared";
+import { getInitials, PLATFORM_CONFIG, formatRelativeTime } from "@cued/shared";
+import type { ActionPlatform } from "@cued/shared";
 import { getRedirectUri } from "@/lib/auth";
+import { useElectronPresence } from "@/hooks/useElectronPresence";
+import { PlatformIcon } from "@/components/platform-icons";
 import { cn, getDisplayName, getThemeColors } from "@/lib/utils";
 import { useAuth } from "@/providers/AuthProvider";
 
@@ -76,7 +80,7 @@ function SettingsRow({
         <SymbolView name={icon as any} size={20} tintColor={iconColor} />
       </View>
       <Text className={cn("flex-1 text-base text-foreground", destructive && "text-destructive")}>{label}</Text>
-      {value && <Text className={cn("text-base text-muted-foreground", destructive && "text-destructive-foreground")}>{value}</Text>}
+      {value ? <Text className={cn("text-base text-muted-foreground", destructive && "text-destructive-foreground")}>{value}</Text> : null}
       {onPress && !destructive && (
         <SymbolView name="chevron.right" size={13} tintColor={colors.mutedForeground} />
       )}
@@ -93,13 +97,13 @@ function SettingsSection({
 }): React.ReactElement {
   return (
     <View className="mb-8 px-4 py-2">
-      {title && (
+      {title ? (
         <View className="px-1 mb-2">
           <Text className="text-muted-foreground text-xs">
             {title}
           </Text>
         </View>
-      )}
+      ) : null}
       <View className="bg-card rounded-xl overflow-hidden">{children}</View>
     </View>
   );
@@ -108,6 +112,61 @@ function SettingsSection({
 function Divider(): React.ReactElement {
   // Offset: px-4 row padding (16px) + w-7 icon (28px) + gap-3 (12px) = 56px = ml-14
   return <View className="h-px bg-border ml-14" />;
+}
+
+const SYNC_PLATFORMS: ActionPlatform[] = ["imessage", "gmail", "slack", "linkedin"];
+
+function StatusDot({ color }: { color: string }): React.ReactElement {
+  return (
+    <View
+      className="rounded-full"
+      style={{ width: 8, height: 8, backgroundColor: color }}
+    />
+  );
+}
+
+function IntegrationRow({
+  platform,
+  label,
+  isConnected,
+  detail,
+  platformColor,
+}: {
+  platform: ActionPlatform;
+  label: string;
+  isConnected: boolean;
+  detail?: string;
+  platformColor: string;
+}): React.ReactElement {
+  const colorScheme = useColorScheme();
+  const colors = getThemeColors(colorScheme === "dark");
+
+  return (
+    <View className="flex-row items-center gap-3 px-4 py-3">
+      <View className="w-7 items-center">
+        <PlatformIcon
+          platform={platform}
+          size={20}
+          color={isConnected ? platformColor : colors.mutedForeground}
+        />
+      </View>
+      <View className="flex-1">
+        <Text className="text-base text-foreground">{label}</Text>
+        {detail ? (
+          <Text className="text-xs text-muted-foreground mt-0.5">{detail}</Text>
+        ) : null}
+      </View>
+      <View className="flex-row items-center gap-1.5">
+        <StatusDot color={isConnected ? "#16a34a" : colors.mutedForeground} />
+        <Text
+          className="text-sm"
+          style={{ color: isConnected ? "#16a34a" : colors.mutedForeground }}
+        >
+          {isConnected ? "Connected" : "Not connected"}
+        </Text>
+      </View>
+    </View>
+  );
 }
 
 const THEME_OPTIONS = [
@@ -126,6 +185,10 @@ export default function SettingsScreen(): React.ReactElement {
   const displayName = getDisplayName(user);
   const activeTheme: ThemeValue = hasAdaptiveThemes ? "system" : theme;
   const activeThemeLabel = THEME_OPTIONS.find((o) => o.value === activeTheme)?.label;
+
+  // Sync & integrations
+  const { isOnline: desktopOnline, lastSeen } = useElectronPresence();
+  const integrationsData = useQuery(api.integrations.getUserIntegrations);
 
   // Undo send delay settings
   const userSettings = useQuery(api.users.getSettings);
@@ -189,7 +252,8 @@ export default function SettingsScreen(): React.ReactElement {
   }
 
   return (
-    <SafeAreaView className="flex-1" style={{ backgroundColor: colors.secondaryBackground }}>
+    <SafeAreaView className="flex-1 bg-background">
+      <ScrollView contentContainerClassName="pb-12">
       <View className="items-center mt-12">
         <Avatar name={displayName} size={80} />
         <Text className="text-xl font-semibold text-foreground mt-3">{displayName}</Text>
@@ -204,6 +268,59 @@ export default function SettingsScreen(): React.ReactElement {
           label="Email Verified"
           value={user?.email_verified ? "Yes" : "No"}
         />
+      </SettingsSection>
+
+      <SettingsSection title="Sync & Integrations">
+        <View className="flex-row items-center gap-3 px-4 py-3">
+          <View className="w-7 items-center">
+            <SymbolView
+              name={"desktopcomputer" as any}
+              size={20}
+              tintColor={desktopOnline ? colors.foreground : colors.mutedForeground}
+            />
+          </View>
+          <View className="flex-1">
+            <Text className="text-base text-foreground">Desktop App</Text>
+            {!desktopOnline && lastSeen ? (
+              <Text className="text-xs text-muted-foreground mt-0.5">
+                Last seen {formatRelativeTime(lastSeen)}
+              </Text>
+            ) : null}
+          </View>
+          <View className="flex-row items-center gap-1.5">
+            <StatusDot color={desktopOnline ? "#16a34a" : colors.mutedForeground} />
+            <Text
+              className="text-sm"
+              style={{ color: desktopOnline ? "#16a34a" : colors.mutedForeground }}
+            >
+              {desktopOnline ? "Online" : "Offline"}
+            </Text>
+          </View>
+        </View>
+        {SYNC_PLATFORMS.map((platform) => {
+          const integration = integrationsData?.integrations.find(
+            (int) => int.platform === platform
+          );
+          const config = PLATFORM_CONFIG[platform];
+          const isConnected = integration?.isConnected ?? false;
+          const msgCount = integration?.totalMessagesSynced ?? 0;
+          const detail = isConnected && msgCount > 0
+            ? `${msgCount.toLocaleString()} messages synced`
+            : undefined;
+
+          return (
+            <View key={platform}>
+              <Divider />
+              <IntegrationRow
+                platform={platform}
+                label={config.label}
+                isConnected={isConnected}
+                detail={detail}
+                platformColor={config.color}
+              />
+            </View>
+          );
+        })}
       </SettingsSection>
 
       <SettingsSection title="App">
@@ -254,6 +371,7 @@ export default function SettingsScreen(): React.ReactElement {
       </SettingsSection>
 
       <Text className="text-center text-muted-foreground text-xs mt-6">Cued v1.0.0</Text>
+      </ScrollView>
     </SafeAreaView>
   );
 }

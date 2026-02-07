@@ -33,7 +33,6 @@ export interface ChatInputProps {
   value: string;
   onChangeText: (text: string) => void;
   onSubmit?: () => void;
-  onPlusPress?: () => void;
   placeholder?: string;
   disabled?: boolean;
   /** Disable keyboard-responsive positioning (for use in cards) */
@@ -77,7 +76,6 @@ export function ChatInput({
   value,
   onChangeText,
   onSubmit,
-  onPlusPress,
   placeholder = "Ask anything...",
   disabled = false,
   disableKeyboardHandling = false,
@@ -127,20 +125,6 @@ export function ChatInput({
 
   const inputContent = (
     <View className="flex-row items-center flex-1 gap-3 px-4 h-11">
-      <Pressable
-        onPress={onPlusPress}
-        hitSlop={8}
-        accessibilityLabel="Add attachment"
-        accessibilityRole="button"
-      >
-        <SymbolView
-          name="plus"
-          size={20}
-          weight="medium"
-          tintColor={colors.mutedForeground}
-        />
-      </Pressable>
-
       <TextInput
         className="flex-1 h-11 text-foreground text-base pt-2"
         value={value}
