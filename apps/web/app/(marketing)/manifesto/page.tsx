@@ -21,7 +21,7 @@ export default function ManifestoPage() {
   const [isHovered, setIsHovered] = useState(false);
 
   return (
-    <div className="relative flex flex-col items-center px-6 py-24">
+    <div className="relative flex min-h-screen flex-col items-center bg-sidebar px-6 py-24">
       <article className="mx-auto max-w-[540px]">
         <h1 className="text-4xl tracking-tight font-serif">Manifesto</h1>
         <div className="mt-6 space-y-6 text-[17px] text-pretty leading-relaxed tracking-tight font-[450] text-secondary-foreground/80">

@@ -576,6 +576,11 @@ function StackCard({
     <motion.div
       className="absolute inset-0"
       style={{ zIndex: total - index }}
+      initial={{
+        y: style.y,
+        scale: style.scale,
+        opacity: style.opacity,
+      }}
       animate={{
         y: style.y,
         scale: style.scale,
@@ -598,7 +603,7 @@ function StackCard({
         whileHover={isTop ? { scale: 1.008 } : undefined}
         whileTap={isTop ? { scale: 0.985 } : undefined}
         transition={{ type: "spring", stiffness: 200, damping: 25 }}
-        drag={isTop ? true : false}
+        drag={isTop}
         dragElastic={0.7}
         dragConstraints={{ left: 0, right: 0, top: 0, bottom: 0 }}
         onDragStart={isTop ? () => onDragStateChange(true) : undefined}

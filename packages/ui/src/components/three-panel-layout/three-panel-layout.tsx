@@ -1,3 +1,5 @@
+"use client"
+
 import * as React from "react"
 import { type AnimatedIconHandle } from "../../hooks/use-animated-icon"
 import { cn } from "../../lib/utils"

@@ -62,14 +62,7 @@ export function MarketingHeader() {
             </span>
           </span>
         </Link>
-        <div className="flex items-center gap-2">
-          <Link
-            href="/manifesto"
-            className="inline-flex h-9 items-center justify-center rounded-md px-3 text-sm font-medium text-muted-foreground transition-colors hover:text-foreground"
-          >
-            Manifesto
-          </Link>
-        </div>
+
       </nav>
     </header>
   );
