@@ -142,15 +142,26 @@ Web app: http://localhost:3000
 - Use `@cued/*` for monorepo packages (`@cued/shared`, `@cued/ui`, `@cued/convex`)
 - Use `@/` path aliases for app-local imports
 - Import shared utils/types from `@cued/shared` (not local definitions)
-- Run `pnpm lint && pnpm typecheck` before commits
-- Use `pnpm dlx shadcn@latest add [component] --yes` to add UI components
-- Verify shadcn imports use `@/` aliases after adding
+- Run relevant tests for changed packages before creating a PR.
 
 ### DON'T
 
-- Don't use `"use client"` in packages/ui (it's a shared library)
 - Don't modify Convex `_generated/` files
 - Don't duplicate utilities that exist in `@cued/shared`
+
+### Creating PRs
+
+Before creating a PR, run the relevant tests for the packages you changed:
+
+```bash
+cd packages/convex && pnpm test     # Convex schema/function changes
+cd packages/shared && pnpm test     # Shared utils/types changes
+cd packages/ui && pnpm test         # UI component changes
+cd apps/mobile && pnpm test         # Mobile app changes
+cd apps/web && pnpm test:e2e        # Web app E2E tests (if UI/routing changed)
+```
+
+The pre-commit hook enforces `pnpm typecheck`, `pnpm lint`, and Convex tests. You don't need to run those manually — they run automatically on commit.
 
 ### Preventing Code Duplication
 

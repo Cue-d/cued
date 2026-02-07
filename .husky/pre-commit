@@ -1,7 +1,21 @@
 #!/bin/sh
 
-# Run Convex tests (required since CI excludes them due to credential requirements)
-# These tests validate schema, mutations, and queries before pushing
+echo "Running typecheck..."
+pnpm typecheck
+if [ $? -ne 0 ]; then
+  echo "❌ Typecheck failed. Please fix before committing."
+  exit 1
+fi
+echo "✅ Typecheck passed"
+
+echo "Running lint..."
+pnpm lint
+if [ $? -ne 0 ]; then
+  echo "❌ Lint failed. Please fix before committing."
+  exit 1
+fi
+echo "✅ Lint passed"
+
 echo "Running Convex tests..."
 cd packages/convex && pnpm test
 if [ $? -ne 0 ]; then
