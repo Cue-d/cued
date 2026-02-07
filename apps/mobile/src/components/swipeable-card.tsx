@@ -149,7 +149,12 @@ function SwipeProgressOverlay({
   direction: SharedValue<Direction>;
 }): React.JSX.Element {
   const containerStyle = useAnimatedStyle(() => {
-    const opacity = interpolate(progress.value, [0, 0.15, 0.3], [0, 0, 1], "clamp");
+    const opacity = interpolate(
+      progress.value,
+      [0, 0.15, 0.3],
+      [0, 0, 1],
+      "clamp",
+    );
     return { opacity };
   });
 
@@ -170,7 +175,12 @@ function SwipeProgressOverlay({
 
   const circleStyle = useAnimatedStyle(() => {
     "worklet";
-    const scale = interpolate(progress.value, [0, 0.3, 0.6, 1], [0.5, 0.7, 0.9, 1], "clamp");
+    const scale = interpolate(
+      progress.value,
+      [0, 0.3, 0.6, 1],
+      [0.5, 0.7, 0.9, 1],
+      "clamp",
+    );
     return {
       backgroundColor: getDirectionColor(direction.value, COLORS.defaultBg),
       transform: [{ scale }],
@@ -202,11 +212,14 @@ function SwipeProgressOverlay({
   );
 }
 
-const DIRECTION_ICONS: readonly { dir: SwipeDirection; name: "checkmark" | "xmark" | "clock" }[] = [
-    { dir: "right", name: "checkmark" },
-    { dir: "left", name: "xmark" },
-    { dir: "up", name: "clock" },
-  ];
+const DIRECTION_ICONS: readonly {
+  dir: SwipeDirection;
+  name: "checkmark" | "xmark" | "clock";
+}[] = [
+  { dir: "right", name: "checkmark" },
+  { dir: "left", name: "xmark" },
+  { dir: "up", name: "clock" },
+];
 
 /** Icon component that changes based on swipe direction */
 function DirectionIcon({
@@ -217,7 +230,12 @@ function DirectionIcon({
   return (
     <View className="w-6 h-6 items-center justify-center">
       {DIRECTION_ICONS.map(({ dir, name }) => (
-        <DirectionIconItem key={dir} direction={direction} targetDir={dir} iconName={name} />
+        <DirectionIconItem
+          key={dir}
+          direction={direction}
+          targetDir={dir}
+          iconName={name}
+        />
       ))}
     </View>
   );
@@ -315,16 +333,24 @@ export function SwipeableCard({
     const peekTimeout = setTimeout(() => {
       switch (triggerSwipe) {
         case "right":
-          translateX.value = withSpring(500, SPRING_CONFIG);
+          translateX.value = withSpring(500, SPRING_CONFIG, (finished) => {
+            if (finished) {
+              runOnJS(handleSwipe)("right");
+            }
+          });
           break;
         case "left":
-          translateX.value = withSpring(-500, SPRING_CONFIG);
+          translateX.value = withSpring(-500, SPRING_CONFIG, (finished) => {
+            if (finished) {
+              runOnJS(handleSwipe)("left");
+            }
+          });
           break;
         case "up":
           resetToCenter();
+          handleSwipe("up");
           break;
       }
-      handleSwipe(triggerSwipe);
     }, 180);
 
     const resetTimeout = setTimeout(() => {
@@ -335,7 +361,15 @@ export function SwipeableCard({
       clearTimeout(peekTimeout);
       clearTimeout(resetTimeout);
     };
-  }, [triggerSwipe, handleSwipe, translateX, translateY, progress, direction, resetToCenter]);
+  }, [
+    triggerSwipe,
+    handleSwipe,
+    translateX,
+    translateY,
+    progress,
+    direction,
+    resetToCenter,
+  ]);
 
   const panGesture = Gesture.Pan()
     .enabled(!disabled && !isAnimatingRef.current)
@@ -376,12 +410,18 @@ export function SwipeableCard({
 
       if (translationX > SWIPE_THRESHOLD_X) {
         isAnimatingRef.current = true;
-        translateX.value = withSpring(500, SPRING_CONFIG);
-        runOnJS(handleSwipe)("right");
+        translateX.value = withSpring(500, SPRING_CONFIG, (finished) => {
+          if (finished) {
+            runOnJS(handleSwipe)("right");
+          }
+        });
       } else if (translationX < -SWIPE_THRESHOLD_X) {
         isAnimatingRef.current = true;
-        translateX.value = withSpring(-500, SPRING_CONFIG);
-        runOnJS(handleSwipe)("left");
+        translateX.value = withSpring(-500, SPRING_CONFIG, (finished) => {
+          if (finished) {
+            runOnJS(handleSwipe)("left");
+          }
+        });
       } else if (translationY < -SWIPE_THRESHOLD_Y) {
         runOnJS(resetToCenter)();
         runOnJS(handleSwipe)("up");
@@ -416,7 +456,12 @@ export function SwipeableCard({
     "worklet";
     return {
       backgroundColor: getDirectionColor(direction.value, "transparent"),
-      opacity: interpolate(progress.value, [0, 0.3, 1], [0, 0.08, 0.2], "clamp"),
+      opacity: interpolate(
+        progress.value,
+        [0, 0.3, 1],
+        [0, 0.08, 0.2],
+        "clamp",
+      ),
     };
   });
 

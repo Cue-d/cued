@@ -15,7 +15,7 @@ export function MarketingHeader() {
         <Link
           href="/"
           ref={logoGroupRef}
-          className="flex items-center gap-1.5"
+          className="flex items-center gap-1.5 active:scale-98 transition-transform"
           onMouseEnter={() => setLogoHovered(true)}
           onMouseLeave={() => setLogoHovered(false)}
           onTouchStart={() => setLogoHovered(true)}
@@ -23,20 +23,35 @@ export function MarketingHeader() {
           onTouchCancel={() => setLogoHovered(false)}
         >
           <CuedLogo size={24} interactive trackingRef={logoGroupRef} />
-          <span className="text-lg font-medium tracking-tighter inline-flex">
+          <span className="text-lg font-[550] tracking-[-0.075em] inline-flex">
             <span>Cue</span>
             <span className="relative inline-flex">
               <AnimatePresence>
                 {logoHovered && (
                   <motion.span
-                    className="inline-block"
-                    initial={{ opacity: 0, rotate: -4, width: 0, filter: "blur(3px)" }}
-                    animate={{ opacity: 1, rotate: 8, width: "auto", filter: "blur(0px)" }}
-                    exit={{ opacity: 0, rotate: -4, width: 0, filter: "blur(3px)" }}
+                    className="inline-block -tracking-widest"
+                    initial={{
+                      opacity: 0,
+                      rotate: -4,
+                      width: 0,
+                      filter: "blur(3px)",
+                    }}
+                    animate={{
+                      opacity: 1,
+                      rotate: 8,
+                      width: "auto",
+                      filter: "blur(0px)",
+                    }}
+                    exit={{
+                      opacity: 0,
+                      rotate: -4,
+                      width: 0,
+                      filter: "blur(3px)",
+                    }}
                     transition={{
                       type: "spring",
-                      stiffness: 325,
-                      damping: 25,
+                      stiffness: 400,
+                      damping: 27.5,
                     }}
                   >
                     &apos;

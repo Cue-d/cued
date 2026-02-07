@@ -5,19 +5,19 @@
  * Only the top card is interactive.
  */
 
-import { type ReactNode } from "react";
+import { type ReactNode, useEffect, useRef } from "react";
 import { View, Text, useWindowDimensions, useColorScheme } from "react-native";
 import { SymbolView } from "expo-symbols";
-import { FadeIn, FadeOut, LinearTransition } from "react-native-reanimated";
+import { FadeIn } from "react-native-reanimated";
 import { AnimatedView } from "@/components/animated";
 import { getThemeColors } from "@/lib/utils";
 import { SwipeableCard, type SwipeDirection } from "./swipeable-card";
 
-// Number of visible cards in the stack (top card + 1 behind)
-const VISIBLE_CARDS = 2;
-
 // Scale reduction per card in stack (1 - index * SCALE_OFFSET)
 const SCALE_OFFSET = 0.075;
+const BOTTOM_SCALE = 1 - SCALE_OFFSET;
+const BOTTOM_SIZE_PERCENT = `${BOTTOM_SCALE * 100}%`;
+const BOTTOM_LEFT_PERCENT = `${(SCALE_OFFSET * 100) / 2}%`;
 
 // Vertical offset per card in stack (index * Y_OFFSET)
 const Y_OFFSET = 18;
@@ -49,8 +49,11 @@ export function CardStack<T extends CardStackItem>({
   const { width: screenWidth } = useWindowDimensions();
   const colorScheme = useColorScheme();
   const colors = getThemeColors(colorScheme === "dark");
-  // Show only top VISIBLE_CARDS
-  const visibleCards = actions.slice(0, VISIBLE_CARDS);
+  const topItem = actions[0];
+  const bottomItem = actions[1];
+  const prevTopIdRef = useRef<string | undefined>(topItem?.id);
+  const prevBottomIdRef = useRef<string | undefined>(bottomItem?.id);
+  const hasRenderedRef = useRef(false);
 
   const cardWidth = Math.min(screenWidth - 32, 400);
 
@@ -58,14 +61,24 @@ export function CardStack<T extends CardStackItem>({
     onSwipe(item, direction);
   };
 
+  const shouldAnimateTopContent =
+    hasRenderedRef.current && !!topItem && prevTopIdRef.current !== topItem.id;
+  const shouldAnimateBottomContent =
+    hasRenderedRef.current &&
+    !!bottomItem &&
+    prevBottomIdRef.current !== bottomItem.id;
+
+  useEffect(() => {
+    hasRenderedRef.current = true;
+    prevTopIdRef.current = topItem?.id;
+    prevBottomIdRef.current = bottomItem?.id;
+  }, [topItem?.id, bottomItem?.id]);
+
   // Empty state when no actions
   if (actions.length === 0) {
     return (
       <View className="flex-1 items-center justify-center px-4">
-        <AnimatedView
-          entering={FadeIn.duration(300)}
-          className="items-center"
-        >
+        <AnimatedView entering={FadeIn.duration(300)} className="items-center">
           <SymbolView
             name="party.popper"
             size={64}
@@ -84,39 +97,77 @@ export function CardStack<T extends CardStackItem>({
 
   return (
     <View className="flex-1 items-center px-4 pb-3">
-      <View
-        className="relative flex-1"
-        style={{ width: cardWidth }}
-      >
-        {visibleCards.map((item, index) => {
-          const isTopCard = index === 0;
-          const scale = 1 - index * SCALE_OFFSET;
-          const translateY = index * Y_OFFSET;
-          const zIndex = VISIBLE_CARDS - index;
-
-          return (
+      <View className="relative flex-1" style={{ width: cardWidth }}>
+        {topItem ? (
+          <View
+            key="stack-slot-top"
+            className="absolute inset-0"
+            style={{
+              zIndex: 2,
+              transform: [{ scale: 1 }, { translateY: 0 }],
+            }}
+          >
             <AnimatedView
-              key={item.id}
-              className="absolute inset-0"
-              style={{
-                zIndex,
-                transform: [{ scale }, { translateY }],
-              }}
-              entering={FadeIn.duration(200)}
-              exiting={FadeOut.duration(200)}
-              layout={LinearTransition.springify()}
+              key={topItem.id}
+              className="w-full h-full"
+              entering={
+                shouldAnimateTopContent
+                  ? FadeIn.duration(180).withInitialValues({
+                      opacity: 0.9,
+                      transform: [
+                        { scale: 1 - SCALE_OFFSET },
+                        { translateY: Y_OFFSET },
+                      ],
+                    })
+                  : undefined
+              }
             >
               <SwipeableCard
-                onSwipe={(direction) => handleSwipe(item, direction)}
-                disabled={!isTopCard}
-                triggerSwipe={isTopCard ? triggerSwipe : null}
+                onSwipe={(direction) => handleSwipe(topItem, direction)}
+                disabled={false}
+                triggerSwipe={triggerSwipe}
                 className="w-full h-full"
               >
-                {renderCard(item, index)}
+                {renderCard(topItem, 0)}
               </SwipeableCard>
             </AnimatedView>
-          );
-        })}
+          </View>
+        ) : null}
+
+        {bottomItem ? (
+          <View
+            key="stack-slot-bottom"
+            className="absolute"
+            style={{
+              zIndex: 1,
+              top: Y_OFFSET,
+              left: BOTTOM_LEFT_PERCENT,
+              width: BOTTOM_SIZE_PERCENT,
+              height: BOTTOM_SIZE_PERCENT,
+            }}
+          >
+            <AnimatedView
+              key={bottomItem.id}
+              className="w-full h-full"
+              entering={
+                shouldAnimateBottomContent
+                  ? FadeIn.duration(140).withInitialValues({
+                      opacity: 0,
+                    })
+                  : undefined
+              }
+            >
+              <SwipeableCard
+                onSwipe={(direction) => handleSwipe(bottomItem, direction)}
+                disabled={true}
+                triggerSwipe={null}
+                className="w-full h-full"
+              >
+                {renderCard(bottomItem, 1)}
+              </SwipeableCard>
+            </AnimatedView>
+          </View>
+        ) : null}
       </View>
     </View>
   );

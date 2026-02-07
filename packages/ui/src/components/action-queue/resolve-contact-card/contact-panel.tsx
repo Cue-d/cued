@@ -1,3 +1,5 @@
+"use client"
+
 import { useState } from "react"
 import { ChevronDown, ChevronUp, Linkedin, Mail, MessageSquare, Phone, Twitter, User } from "lucide-react"
 import { getInitials, type ContactHandle } from "@cued/shared"

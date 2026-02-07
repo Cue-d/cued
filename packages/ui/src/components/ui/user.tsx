@@ -1,3 +1,5 @@
+"use client";
+
 import { forwardRef, useCallback } from "react";
 import { motion } from "motion/react";
 import { useAnimatedIcon, type AnimatedIconHandle, type MotionControls } from "../../hooks/use-animated-icon";

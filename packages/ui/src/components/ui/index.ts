@@ -310,9 +310,6 @@ export {
   TooltipProvider,
 } from "./tooltip"
 
-// Staggering Text
-export { StaggeringText } from "./staggering-text"
-
 // Animated Icons (lucide-animated)
 export { SparklesIcon, type SparklesIconHandle } from "./sparkles"
 export { PartyPopperIcon, type PartyPopperIconHandle } from "./party-popper"

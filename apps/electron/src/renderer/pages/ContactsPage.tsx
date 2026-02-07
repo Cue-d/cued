@@ -17,9 +17,8 @@ import {
   EmptyState,
   PlatformIcon,
   type SendMessageContact,
-  ActionFilterDropdown,
-  type ActionFilterDropdownRef,
 } from "@cued/ui"
+import { ActionFilterDropdown, type ActionFilterDropdownRef } from "../components/action-filter-dropdown"
 import {
   Skeleton,
   Badge,

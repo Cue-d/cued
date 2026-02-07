@@ -16,7 +16,7 @@ import {
   type OpenInAppConfig,
 } from "@cued/ui"
 import { renderActionCard } from "@cued/ui"
-import { ActionFilterDropdown, type ActionFilterDropdownRef } from "@cued/ui"
+import { ActionFilterDropdown, type ActionFilterDropdownRef } from "../components/action-filter-dropdown"
 import { Skeleton, Button, EmptyState, PlatformIcon, SparklesIcon, PartyPopperIcon } from "@cued/ui"
 import type { Id } from "@cued/convex"
 import { useElectron } from "../hooks/use-electron"
