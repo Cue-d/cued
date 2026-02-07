@@ -550,7 +550,7 @@ async function handleDeletedGoogleContact(
       .withIndex("by_user_handle", (q) =>
         q.eq("userId", userId).eq("handle", handle)
       )
-      .unique();
+      .first();
 
     if (existingHandle) {
       // Remove handles that came from Gmail (not iMessage or Slack)
@@ -661,7 +661,7 @@ async function upsertGoogleContact(
       .withIndex("by_user_handle", (q) =>
         q.eq("userId", userId).eq("handle", handle.value)
       )
-      .unique();
+      .first();
 
     if (!existing) {
       // Add new handle linked to this contact

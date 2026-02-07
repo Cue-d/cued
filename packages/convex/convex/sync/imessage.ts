@@ -376,7 +376,7 @@ export async function findContactByHandle(
       .withIndex("by_user_handle", (q) =>
         q.eq("userId", userId).eq("handle", variant)
       )
-      .unique();
+      .first();
 
     if (existing) {
       return existing.contactId;
@@ -445,7 +445,7 @@ async function upsertContactWithHandles(
       .withIndex("by_user_handle", (q) =>
         q.eq("userId", userId).eq("handle", handle.value)
       )
-      .unique();
+      .first();
 
     if (!existing) {
       await ctx.db.insert("contactHandles", {

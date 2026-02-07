@@ -278,7 +278,7 @@ export async function getOrCreateContact(
         .withIndex("by_user_handle", (q) =>
           q.eq("userId", userId).eq("handle", variant)
         )
-        .unique();
+        .first();
 
       if (existing) {
         // Found existing contact - update displayName if we have a better one
@@ -444,7 +444,7 @@ export async function batchResolveHandles(
         .withIndex("by_user_handle", (q) =>
           q.eq("userId", userId).eq("handle", variant)
         )
-        .unique()
+        .first()
     );
     const batchResults = await Promise.all(promises);
 

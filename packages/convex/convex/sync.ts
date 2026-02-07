@@ -783,7 +783,7 @@ async function upsertSocialContact(
     ? await ctx.db
         .query("contactHandles")
         .withIndex("by_user_handle", (q) => q.eq("userId", userId).eq("handle", normalizedHandle))
-        .unique()
+        .first()
     : null;
 
   // If not found by username, try to find by URN (for LinkedIn - dedup with messaging contacts)
@@ -791,7 +791,7 @@ async function upsertSocialContact(
     existingHandle = await ctx.db
       .query("contactHandles")
       .withIndex("by_user_handle", (q) => q.eq("userId", userId).eq("handle", linkedInUrn))
-      .unique();
+      .first();
   }
 
   if (existingHandle) {
@@ -806,7 +806,7 @@ async function upsertSocialContact(
         const hasUsernameHandle = await ctx.db
           .query("contactHandles")
           .withIndex("by_user_handle", (q) => q.eq("userId", userId).eq("handle", normalizedHandle))
-          .unique();
+          .first();
         if (!hasUsernameHandle) {
           await ctx.db.insert("contactHandles", {
             userId,
