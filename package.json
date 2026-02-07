@@ -20,6 +20,14 @@
     "node": ">=18.0.0"
   },
   "pnpm": {
+    "onlyBuiltDependencies": [
+      "better-sqlite3",
+      "electron",
+      "electron-winstaller",
+      "esbuild",
+      "sharp",
+      "unrs-resolver"
+    ],
     "overrides": {
       "@types/react": "19.2.8",
       "lightningcss": "1.30.1"
