@@ -24,7 +24,12 @@ import {
 import { getIMessageSyncManager } from "./platforms/imessage";
 import { getContactsWatcher } from "./platforms/contacts";
 import { getHeartbeatManager } from "./sync/presence";
-import { setupAllSyncIpcHandlers, cleanupSyncManagers, getLinkedInScraper } from "./ipc/sync";
+import {
+  setupAllSyncIpcHandlers,
+  cleanupSyncManagers,
+  getLinkedInScraper,
+  getTwitterScraper,
+} from "./ipc/sync";
 import { getMessageQueueProcessor } from "./queue/message-queue-processor";
 import { getConvexClient } from "./convex-client";
 import { getSyncEngine } from "./sync/engine";
@@ -416,6 +421,7 @@ async function startBackgroundSync(): Promise<void> {
     const registrations = await createAllSyncFunctions({
       getAuthToken: getValidAccessToken,
       linkedInScraper: getLinkedInScraper(),
+      twitterScraper: getTwitterScraper(),
     });
 
     for (const reg of registrations) {

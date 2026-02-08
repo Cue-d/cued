@@ -22,6 +22,9 @@ import {
   getOrCreateIntegration,
   upsertSyncCursor,
   incrementSyncCursorStat,
+  clearIntegrationError,
+  MAX_NEW_CONNECTION_ACTIONS,
+  extractCompanyFromHeadline,
   BATCH_SIZE,
   logSyncError,
 } from "./shared";
@@ -766,4 +769,180 @@ export async function addResolvedUsernames(
   }
 
   return { added, skipped };
+}
+
+// ============================================================================
+// LinkedIn Contacts Sync
+// ============================================================================
+
+export const linkedInContactInput = v.object({
+  name: v.string(),
+  profileUrl: v.string(),
+  headline: v.union(v.string(), v.null()),
+  profileId: v.optional(v.string()),
+});
+
+export const linkedInContactsBatchInput = v.object({
+  contacts: v.array(linkedInContactInput),
+});
+
+type LinkedInContactInput = Infer<typeof linkedInContactInput>;
+
+export async function syncLinkedInContactsInternal(
+  ctx: MutationCtx,
+  userId: Id<"users">,
+  contacts: LinkedInContactInput[]
+) {
+  const result = {
+    totalContacts: contacts.length,
+    newContacts: 0,
+    updatedContacts: 0,
+    actionsCreated: 0,
+    errors: [] as string[],
+    duplicatesSkipped: 0,
+  };
+
+  // Deduplicate within batch by normalized LinkedIn handle
+  const seenHandles = new Set<string>();
+  const deduped: LinkedInContactInput[] = [];
+  for (const contact of contacts) {
+    const normalized = normalizeLinkedInHandle(contact.profileUrl);
+    if (normalized && seenHandles.has(normalized)) {
+      result.duplicatesSkipped++;
+      continue;
+    }
+    if (normalized) {
+      seenHandles.add(normalized);
+    }
+    deduped.push(contact);
+  }
+
+  const newContactsInfo: Array<{
+    contactId: Id<"contacts">;
+    headline: string | null;
+    profileUrl: string;
+  }> = [];
+
+  for (const contact of deduped) {
+    try {
+      const normalizedHandle = normalizeLinkedInHandle(contact.profileUrl);
+      const linkedInUrn = contact.profileId
+        ? `urn:li:member:${contact.profileId}`.toLowerCase()
+        : null;
+
+      // Try to find existing contact by username handle first
+      let existingHandle = normalizedHandle
+        ? await ctx.db
+            .query("contactHandles")
+            .withIndex("by_user_handle", (q) => q.eq("userId", userId).eq("handle", normalizedHandle))
+            .unique()
+        : null;
+
+      // Fallback: find by URN
+      if (!existingHandle && linkedInUrn) {
+        existingHandle = await ctx.db
+          .query("contactHandles")
+          .withIndex("by_user_handle", (q) => q.eq("userId", userId).eq("handle", linkedInUrn))
+          .unique();
+      }
+
+      if (existingHandle) {
+        const existingContact = await ctx.db.get(existingHandle.contactId);
+        if (existingContact) {
+          const company = extractCompanyFromHeadline(contact.headline);
+          if (company && !existingContact.company) {
+            await ctx.db.patch(existingHandle.contactId, { company });
+          }
+          // If found by URN but missing username handle, add it
+          if (normalizedHandle && existingHandle.handle !== normalizedHandle) {
+            const hasUsernameHandle = await ctx.db
+              .query("contactHandles")
+              .withIndex("by_user_handle", (q) => q.eq("userId", userId).eq("handle", normalizedHandle))
+              .unique();
+            if (!hasUsernameHandle) {
+              await ctx.db.insert("contactHandles", {
+                userId,
+                contactId: existingHandle.contactId,
+                handleType: "linkedin_handle",
+                handle: normalizedHandle,
+                platform: "linkedin",
+              });
+            }
+          }
+        }
+        result.updatedContacts++;
+      } else {
+        // Create new contact
+        const company = extractCompanyFromHeadline(contact.headline);
+        const contactId = await ctx.db.insert("contacts", {
+          userId,
+          displayName: contact.name,
+          company,
+        });
+
+        if (normalizedHandle) {
+          await ctx.db.insert("contactHandles", {
+            userId,
+            contactId,
+            handleType: "linkedin_handle",
+            handle: normalizedHandle,
+            platform: "linkedin",
+          });
+        }
+
+        if (linkedInUrn) {
+          await ctx.db.insert("contactHandles", {
+            userId,
+            contactId,
+            handleType: "linkedin_urn",
+            handle: linkedInUrn,
+            platform: "linkedin",
+          });
+        }
+
+        result.newContacts++;
+        newContactsInfo.push({
+          contactId,
+          headline: contact.headline,
+          profileUrl: contact.profileUrl,
+        });
+      }
+    } catch (e) {
+      result.errors.push(logSyncError("LinkedIn", "sync contact", contact.name, e));
+    }
+  }
+
+  // Create new_connection actions (limit per sync)
+  const actionsToCreate = newContactsInfo.slice(0, MAX_NEW_CONNECTION_ACTIONS);
+  const now = Date.now();
+
+  for (const info of actionsToCreate) {
+    await ctx.db.insert("actions", {
+      userId,
+      type: "new_connection",
+      status: "pending",
+      priority: 40,
+      contactId: info.contactId,
+      platform: "linkedin",
+      llmReason: info.headline ?? undefined,
+      reason: info.profileUrl,
+      createdAt: now,
+    });
+    result.actionsCreated++;
+  }
+
+  if (result.actionsCreated > 0) {
+    const user = await ctx.db.get(userId);
+    if (user) {
+      await ctx.db.patch(userId, {
+        pendingActionCount: (user.pendingActionCount ?? 0) + result.actionsCreated,
+      });
+    }
+  }
+
+  await incrementSyncCursorStat(ctx, userId, "linkedin", "totalContactsSynced", result.newContacts);
+  await getOrCreateIntegration(ctx, userId, "linkedin");
+  await clearIntegrationError(ctx, userId, "linkedin");
+
+  return result;
 }

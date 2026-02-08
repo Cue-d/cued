@@ -64,23 +64,26 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     return NextResponse.json({ error: "Missing or invalid contacts array" }, { status: 400 });
   }
 
-  // Validate each contact
+  // Validate each contact (per-platform requirements)
   for (let i = 0; i < batch.contacts.length; i++) {
     const contact = batch.contacts[i];
     if (!contact.name || typeof contact.name !== "string") {
       return NextResponse.json({ error: `Contact at index ${i} missing valid name` }, { status: 400 });
-    }
-    if (!contact.handle || typeof contact.handle !== "string") {
-      return NextResponse.json({ error: `Contact at index ${i} missing valid handle` }, { status: 400 });
-    }
-    if (!contact.profileUrl || typeof contact.profileUrl !== "string") {
-      return NextResponse.json({ error: `Contact at index ${i} missing valid profileUrl` }, { status: 400 });
     }
     if (!contact.platform || contact.platform !== batch.platform) {
       return NextResponse.json(
         { error: `Contact at index ${i} has mismatched platform` },
         { status: 400 }
       );
+    }
+    if (batch.platform === "linkedin") {
+      if (!contact.profileUrl || typeof contact.profileUrl !== "string") {
+        return NextResponse.json({ error: `Contact at index ${i} missing valid profileUrl` }, { status: 400 });
+      }
+    } else if (batch.platform === "twitter") {
+      if (!contact.handle || typeof contact.handle !== "string") {
+        return NextResponse.json({ error: `Contact at index ${i} missing valid handle` }, { status: 400 });
+      }
     }
   }
 
@@ -94,17 +97,25 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   try {
     convex.setAuth(token);
 
-    const result = await convex.mutation(api.sync.syncSocialContacts, {
-      platform: batch.platform,
-      contacts: batch.contacts.map((c) => ({
-        name: c.name,
-        handle: c.handle,
-        profileUrl: c.profileUrl,
-        headline: c.headline,
-        profileId: c.profileId,
-      })),
-      syncedAt: batch.syncedAt,
-    });
+    let result;
+    if (batch.platform === "linkedin") {
+      result = await convex.mutation(api.sync.syncLinkedInContacts, {
+        contacts: batch.contacts.map((c) => ({
+          name: c.name,
+          profileUrl: c.profileUrl,
+          headline: c.headline,
+          profileId: c.profileId,
+        })),
+      });
+    } else {
+      result = await convex.mutation(api.sync.syncTwitterContacts, {
+        contacts: batch.contacts.map((c) => ({
+          name: c.name,
+          handle: c.handle,
+          bio: c.headline,
+        })),
+      });
+    }
 
     return NextResponse.json(result);
   } catch (error) {

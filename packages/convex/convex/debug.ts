@@ -1,4 +1,4 @@
-import { action, internalMutation, query } from "./_generated/server";
+import { action, internalMutation, mutation, query } from "./_generated/server";
 import { internal } from "./_generated/api";
 import { v } from "convex/values";
 import { platformValidator } from "./schema";
@@ -604,6 +604,73 @@ export const getPlatformSyncStatus = query({
         isFromMe: m.isFromMe,
         platformMessageId: m.platformMessageId,
       })),
+    };
+  },
+});
+
+// ============================================================================
+// Retroactive Action Analysis
+// ============================================================================
+
+const MS_PER_DAY = 24 * 60 * 60 * 1000;
+
+/**
+ * Trigger action analysis for existing conversations on a platform.
+ * Finds conversations with recent incoming messages but no pending action,
+ * and schedules onIncomingMessageBatch to analyze them.
+ */
+export const triggerActionAnalysis = mutation({
+  args: {
+    platform: platformValidator,
+    daysBack: v.optional(v.number()),
+  },
+  handler: async (ctx, args) => {
+    const user = await getAuthenticatedUser(ctx);
+    if (!user) throw new Error("Not authenticated");
+
+    const daysBack = args.daysBack ?? 7;
+    const cutoff = Date.now() - daysBack * MS_PER_DAY;
+
+    const conversations = await ctx.db
+      .query("conversations")
+      .withIndex("by_user_platform", (q) =>
+        q.eq("userId", user._id).eq("platform", args.platform)
+      )
+      .collect();
+
+    const pendingActions = await ctx.db
+      .query("actions")
+      .withIndex("by_user_status", (q) =>
+        q.eq("userId", user._id).eq("status", "pending")
+      )
+      .collect();
+
+    const conversationsWithPending = new Set(
+      pendingActions
+        .filter((a) => a.conversationId)
+        .map((a) => a.conversationId!.toString())
+    );
+
+    const eligible = conversations.filter(
+      (c) =>
+        c.lastMessageAt &&
+        c.lastMessageAt >= cutoff &&
+        !conversationsWithPending.has(c._id.toString())
+    );
+
+    if (eligible.length > 0) {
+      await ctx.scheduler.runAfter(0, internal.actionEvents.onIncomingMessageBatch, {
+        userId: user._id,
+        conversationIds: eligible.map((c) => c._id),
+        platform: args.platform,
+      });
+    }
+
+    return {
+      totalConversations: conversations.length,
+      eligibleForAnalysis: eligible.length,
+      skippedWithPendingAction: conversationsWithPending.size,
+      cutoffDate: new Date(cutoff).toISOString(),
     };
   },
 });

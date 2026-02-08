@@ -164,6 +164,12 @@ tsconfig.tsbuildinfo
 **/tsconfig.tsbuildinfo
 
 # ============================================================
+# Twitter Scripts (session/scrape data)
+# ============================================================
+scripts/twitter/.cookies.json
+scripts/twitter/.contacts.json
+
+# ============================================================
 # Temporary & Misc
 # ============================================================
 *.tmp

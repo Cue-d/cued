@@ -20,6 +20,7 @@ import {
   useAuthState,
   useUnifiedSync,
   useLinkedIn,
+  useTwitter,
   useSlack,
   useSignal,
   useElectron,
@@ -374,6 +375,7 @@ function GeneralContent() {
 
 function IntegrationsContent({ sync }: { sync: ReturnType<typeof useUnifiedSync> }) {
   const { isLoggedIn: linkedInLoggedIn, isLoading: linkedInLoading, login: linkedInLogin, logout: linkedInLogout } = useLinkedIn()
+  const { isLoggedIn: twitterLoggedIn, isLoading: twitterLoading, login: twitterLogin, logout: twitterLogout } = useTwitter()
   const { isConnected: slackConnected, workspaces: slackWorkspaces, isLoading: slackLoading, login: slackLogin, disconnect: slackDisconnect } = useSlack()
   const { isLoggedIn: signalLoggedIn, isLoading: signalLoading, setup: signalSetup, openLinkTerminal: signalOpenLink, checkLink: signalCheckLink, logout: signalLogout } = useSignal()
   const [signalDialogOpen, setSignalDialogOpen] = React.useState(false)
@@ -390,12 +392,14 @@ function IntegrationsContent({ sync }: { sync: ReturnType<typeof useUnifiedSync>
   const totalMessages =
     (sync.progress.platforms.imessage?.messages ?? 0) +
     (sync.progress.platforms.linkedin?.messages ?? 0) +
+    (sync.progress.platforms.twitter?.messages ?? 0) +
     (sync.progress.platforms.signal?.messages ?? 0) +
     (sync.progress.platforms.slack?.messages ?? 0)
 
   const totalContacts =
     (sync.progress.platforms.contacts?.synced ?? 0) +
     (sync.progress.platforms.linkedin?.contacts ?? 0) +
+    (sync.progress.platforms.twitter?.contacts ?? 0) +
     (sync.progress.platforms.signal?.contacts ?? 0)
 
   const isSyncing = sync.progress.status === "syncing"
@@ -492,6 +496,35 @@ function IntegrationsContent({ sync }: { sync: ReturnType<typeof useUnifiedSync>
                       {slackConnected ? "Add" : "Connect"}
                     </Button>
                   </SettingsRow>
+                </SettingsCard>
+              </SettingsSection>
+
+              {/* Twitter/X */}
+              <SettingsSection title="Twitter / X" description={twitterLoading ? "Checking..." : twitterLoggedIn ? "Connected" : "Not connected"}>
+                <SettingsCard>
+                  <SettingsRow
+                    label="Connection"
+                    description={twitterLoggedIn ? "Messages and contacts will sync automatically" : "Connect to sync Twitter/X messages and contacts"}
+                  >
+                    {twitterLoggedIn && (
+                      <Badge variant="secondary" className="bg-green-500/10 text-green-500 mr-2">
+                        Connected
+                      </Badge>
+                    )}
+                    <Button variant="outline" size="sm" onClick={twitterLoggedIn ? twitterLogout : twitterLogin}>
+                      {twitterLoggedIn ? "Disconnect" : "Connect"}
+                    </Button>
+                  </SettingsRow>
+                  {twitterLoggedIn && (
+                    <>
+                      <SettingsRow label="Messages" description={`${(sync.progress.platforms.twitter?.messages ?? 0).toLocaleString()} synced`}>
+                        {isSyncing && sync.progress.currentPlatform === "twitter" && <div className="w-2 h-2 rounded-full bg-green-500 animate-pulse" />}
+                      </SettingsRow>
+                      <SettingsRow label="Contacts" description={`${(sync.progress.platforms.twitter?.contacts ?? 0).toLocaleString()} synced`}>
+                        {isSyncing && sync.progress.currentPlatform === "twitter_contacts" && <div className="w-2 h-2 rounded-full bg-green-500 animate-pulse" />}
+                      </SettingsRow>
+                    </>
+                  )}
                 </SettingsCard>
               </SettingsSection>
 

@@ -19,9 +19,9 @@ export const handleTypeValidator = v.union(
   v.literal("signal_id"),
   v.literal("linkedin_handle"),  // vanity URLs (linkedin)
   v.literal("linkedin_urn"),     // platform URNs (linkedin)
-  v.literal("urn"),              // legacy
+  v.literal("urn"),              // legacy URNs
   v.literal("twitter_handle"),
-  v.literal("twitter_user_id")
+  v.literal("twitter_user_id")   // stable numeric user IDs (twitter)
 );
 
 export const conversationTypeValidator = v.union(

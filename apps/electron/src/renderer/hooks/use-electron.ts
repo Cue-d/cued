@@ -11,6 +11,9 @@ export type {
   LinkedInStatusResult,
   LinkedInSyncProgress,
   LinkedInSendMessageResult,
+  TwitterStatusResult,
+  TwitterSyncProgress,
+  TwitterSendMessageResult,
   SignalStatusResult,
   SignalSyncProgress,
   SignalSendMessageResult,
@@ -31,6 +34,8 @@ import type {
   UnifiedSyncResult,
   LinkedInStatusResult,
   LinkedInSendMessageResult,
+  TwitterStatusResult,
+  TwitterSendMessageResult,
   SignalLoginCredentials,
   SignalSetupResult,
   SignalLoginResult,
@@ -172,6 +177,46 @@ export function useLinkedIn(): UseLinkedInReturn {
 
   const sendMessage = useCallback(
     (conversationId: string, text: string) => electron.sync.linkedin.sendMessage(conversationId, text),
+    [electron]
+  )
+
+  return { isLoading, isLoggedIn, login, logout, sendMessage }
+}
+
+interface UseTwitterReturn {
+  isLoading: boolean
+  isLoggedIn: boolean
+  login: () => Promise<TwitterStatusResult>
+  logout: () => Promise<{ error?: string; success: boolean }>
+  sendMessage: (conversationId: string, text: string) => Promise<TwitterSendMessageResult>
+}
+
+export function useTwitter(): UseTwitterReturn {
+  const [isLoggedIn, setIsLoggedIn] = useState(false)
+  const [isLoading, setIsLoading] = useState(true)
+  const electron = useElectron()
+
+  useEffect(() => {
+    electron.sync.twitter.status().then((result) => {
+      setIsLoggedIn(result.isLoggedIn)
+      setIsLoading(false)
+    })
+  }, [electron])
+
+  const login = useCallback(async () => {
+    const result = await electron.sync.twitter.login()
+    setIsLoggedIn(result.isLoggedIn)
+    return result
+  }, [electron])
+
+  const logout = useCallback(async () => {
+    const result = await electron.sync.twitter.logout()
+    if (result.success) setIsLoggedIn(false)
+    return result
+  }, [electron])
+
+  const sendMessage = useCallback(
+    (conversationId: string, text: string) => electron.sync.twitter.sendMessage(conversationId, text),
     [electron]
   )
 

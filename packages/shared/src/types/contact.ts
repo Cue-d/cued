@@ -15,6 +15,7 @@
  * - `linkedin_handle` - LinkedIn vanity URLs (linkedin.com/in/username)
  * - `linkedin_urn` - LinkedIn URNs (format: urn:li:member:123456)
  * - `twitter_handle` - Twitter/X usernames (@handle)
+ * - `twitter_user_id` - Twitter/X numeric user IDs
  */
 export type HandleType =
   | "phone"
@@ -23,7 +24,8 @@ export type HandleType =
   | "signal_id"
   | "linkedin_handle"
   | "linkedin_urn"
-  | "twitter_handle";
+  | "twitter_handle"
+  | "twitter_user_id";
 
 /**
  * Platforms that a handle can be associated with.

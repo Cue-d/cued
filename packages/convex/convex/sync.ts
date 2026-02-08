@@ -8,19 +8,19 @@
  * - ./sync/imessage.ts - iMessage and macOS Contacts sync
  * - ./sync/gmail.ts - Gmail emails and Google Contacts sync
  * - ./sync/slack.ts - Slack messages sync
+ * - ./sync/linkedin.ts - LinkedIn messages and contacts sync
+ * - ./sync/twitter.ts - Twitter/X messages and contacts sync
  * - ./sync/signal.ts - Signal messages sync
  * - ./sync/shared.ts - Common utilities and helpers
  */
 
-import type { Infer } from "convex/values";
 import { v } from "convex/values";
-import type { Doc, Id } from "./_generated/dataModel";
 import type { MutationCtx } from "./_generated/server";
 import { mutation, query } from "./_generated/server";
 import { platformValidator } from "./schema";
 import { findUserByWorkosId } from "./lib/auth";
 
-import { normalizeLinkedInHandle, MULTI_WORKSPACE_PLATFORMS } from "@cued/shared";
+import { MULTI_WORKSPACE_PLATFORMS } from "@cued/shared";
 import {
   getOrCreateUser,
   findIntegration,
@@ -28,18 +28,16 @@ import {
   findSyncCursor,
   CURRENT_SYNC_VERSION,
   upsertSyncCursor,
-  incrementSyncCursorStat,
   clearIntegrationError,
   MAX_GMAIL_ACCOUNTS,
-  MAX_NEW_CONNECTION_ACTIONS,
   logSyncError,
+  incrementSyncCursorStat,
 } from "./sync/shared";
 import {
   syncBatchInput,
   syncMessagesInternal,
   contactInput,
   syncContactsInternal,
-  findContactByHandle,
 } from "./sync/imessage";
 import {
   gmailEmailInput,
@@ -62,7 +60,17 @@ import {
   findContactsMissingUsernames,
   addResolvedUsernames,
   usernameResolutionInput,
+  linkedInContactsBatchInput,
+  syncLinkedInContactsInternal,
 } from "./sync/linkedin";
+import {
+  twitterConversationsBatchInput,
+  twitterMessagesBatchInput,
+  syncTwitterConversationsInternal,
+  syncTwitterMessagesInternal,
+  twitterContactsBatchInput,
+  syncTwitterContactsInternal,
+} from "./sync/twitter";
 import {
   signalMessagesBatchInput,
   syncSignalMessagesInternal,
@@ -624,239 +632,44 @@ export const syncSlackNativeMessages = mutation({
 });
 
 // ============================================================================
-// Social Contacts Sync (LinkedIn, Twitter)
+// LinkedIn Contacts Sync
 // ============================================================================
 
-const socialContactInput = v.object({
-  name: v.string(),
-  handle: v.string(),
-  profileUrl: v.string(),
-  headline: v.union(v.string(), v.null()),
-  /** LinkedIn profile ID (URN ID portion) for matching with messaging contacts */
-  profileId: v.optional(v.string()),
-});
-
-const socialPlatformValidator = v.union(
-  v.literal("linkedin"),
-  v.literal("twitter")
-);
-
-type SocialContactInput = Infer<typeof socialContactInput>;
-type SocialPlatform = Infer<typeof socialPlatformValidator>;
-
 /**
- * Sync social contacts from Electron scrapers to Convex.
+ * Sync LinkedIn contacts from Electron scraper to Convex.
  */
-export const syncSocialContacts = mutation({
-  args: {
-    platform: socialPlatformValidator,
-    contacts: v.array(socialContactInput),
-    syncedAt: v.number(),
-  },
+export const syncLinkedInContacts = mutation({
+  args: linkedInContactsBatchInput,
   handler: async (ctx, args) => {
     const identity = await ctx.auth.getUserIdentity();
     if (!identity) {
-      throw new Error("Unauthorized: Must be authenticated to sync social contacts");
+      throw new Error("Unauthorized: Must be authenticated to sync LinkedIn contacts");
     }
 
     const user = await getOrCreateUser(ctx, identity);
-    return syncSocialContactsInternal(ctx, user._id, args.platform, args.contacts, args.syncedAt);
+    return syncLinkedInContactsInternal(ctx, user._id, args.contacts);
   },
 });
 
-async function syncSocialContactsInternal(
-  ctx: MutationCtx,
-  userId: Id<"users">,
-  platform: SocialPlatform,
-  contacts: SocialContactInput[],
-  syncedAt: number
-) {
-  const result = {
-    totalContacts: contacts.length,
-    newContacts: 0,
-    updatedContacts: 0,
-    actionsCreated: 0,
-    errors: [] as string[],
-    duplicatesSkipped: 0,
-  };
+// ============================================================================
+// Twitter Contacts Sync
+// ============================================================================
 
-  const handleType = platform === "linkedin" ? "linkedin_handle" : "twitter_handle";
-  const newContactsInfo: Array<{
-    contactId: Id<"contacts">;
-    headline: string | null;
-    profileUrl: string;
-  }> = [];
-
-  // Deduplicate contacts within batch by normalized handle
-  // Skip deduplication for empty handles (invalid URLs) to avoid false positives
-  const seenHandles = new Set<string>();
-  const deduplicatedContacts: SocialContactInput[] = [];
-  for (const contact of contacts) {
-    const normalizedHandle = normalizeLinkedInHandle(contact.profileUrl);
-    if (normalizedHandle && seenHandles.has(normalizedHandle)) {
-      result.duplicatesSkipped++;
-      continue;
+/**
+ * Sync Twitter contacts from Electron scraper to Convex.
+ */
+export const syncTwitterContacts = mutation({
+  args: twitterContactsBatchInput,
+  handler: async (ctx, args) => {
+    const identity = await ctx.auth.getUserIdentity();
+    if (!identity) {
+      throw new Error("Unauthorized: Must be authenticated to sync Twitter contacts");
     }
-    if (normalizedHandle) {
-      seenHandles.add(normalizedHandle);
-    }
-    deduplicatedContacts.push(contact);
-  }
 
-  for (const contact of deduplicatedContacts) {
-    try {
-      const upsertResult = await upsertSocialContact(ctx, userId, platform, handleType, contact);
-      if (upsertResult.isNew) {
-        result.newContacts++;
-        newContactsInfo.push({
-          contactId: upsertResult.contactId,
-          headline: contact.headline,
-          profileUrl: contact.profileUrl,
-        });
-      } else {
-        result.updatedContacts++;
-      }
-    } catch (e) {
-      result.errors.push(logSyncError(platform, "sync contact", contact.name, e));
-    }
-  }
-
-  // Create new_connection actions for enrichment (limit 20 per sync)
-  const actionsToCreate = newContactsInfo.slice(0, MAX_NEW_CONNECTION_ACTIONS);
-  const now = Date.now();
-
-  for (const info of actionsToCreate) {
-    await ctx.db.insert("actions", {
-      userId,
-      type: "new_connection",
-      status: "pending",
-      priority: 40, // Medium-low priority for enrichment prompts
-      contactId: info.contactId,
-      platform,
-      llmReason: info.headline ?? undefined,
-      reason: info.profileUrl,
-      createdAt: now,
-    });
-    result.actionsCreated++;
-  }
-
-  // Increment pending action count for user
-  if (result.actionsCreated > 0) {
-    const user = await ctx.db.get(userId);
-    if (user) {
-      await ctx.db.patch(userId, {
-        pendingActionCount: (user.pendingActionCount ?? 0) + result.actionsCreated,
-      });
-    }
-  }
-
-  // Update sync cursor with stats
-  await incrementSyncCursorStat(ctx, userId, platform, "totalContactsSynced", result.newContacts);
-
-  // Ensure integration exists and clear any error
-  await getOrCreateIntegration(ctx, userId, platform);
-  await clearIntegrationError(ctx, userId, platform);
-
-  return result;
-}
-
-function extractCompanyFromHeadline(headline: string | null): string | undefined {
-  if (!headline) return undefined;
-  const match = headline.match(/\s+(?:at|@)\s+(.+?)(?:\s*[|•·-]|$)/i);
-  return match ? match[1].trim() : undefined;
-}
-
-async function upsertSocialContact(
-  ctx: MutationCtx,
-  userId: Id<"users">,
-  platform: SocialPlatform,
-  handleType: "linkedin_handle" | "twitter_handle",
-  contact: SocialContactInput
-): Promise<{ isNew: boolean; contactId: Id<"contacts"> }> {
-  const normalizedHandle =
-    platform === "linkedin"
-      ? normalizeLinkedInHandle(contact.profileUrl)
-      : contact.handle.toLowerCase().replace(/^@/, "");
-
-  // For LinkedIn, also create URN for matching with messaging contacts
-  const linkedInUrn = platform === "linkedin" && contact.profileId
-    ? `urn:li:member:${contact.profileId}`.toLowerCase()
-    : null;
-
-  // Try to find existing contact by username handle first
-  let existingHandle = normalizedHandle
-    ? await ctx.db
-        .query("contactHandles")
-        .withIndex("by_user_handle", (q) => q.eq("userId", userId).eq("handle", normalizedHandle))
-        .first()
-    : null;
-
-  // If not found by username, try to find by URN (for LinkedIn - dedup with messaging contacts)
-  if (!existingHandle && linkedInUrn) {
-    existingHandle = await ctx.db
-      .query("contactHandles")
-      .withIndex("by_user_handle", (q) => q.eq("userId", userId).eq("handle", linkedInUrn))
-      .first();
-  }
-
-  if (existingHandle) {
-    const existingContact = await ctx.db.get(existingHandle.contactId);
-    if (existingContact) {
-      const company = extractCompanyFromHeadline(contact.headline);
-      if (company && !existingContact.company) {
-        await ctx.db.patch(existingHandle.contactId, { company });
-      }
-      // If we found by URN but don't have username handle, add it
-      if (normalizedHandle && existingHandle.handle !== normalizedHandle) {
-        const hasUsernameHandle = await ctx.db
-          .query("contactHandles")
-          .withIndex("by_user_handle", (q) => q.eq("userId", userId).eq("handle", normalizedHandle))
-          .first();
-        if (!hasUsernameHandle) {
-          await ctx.db.insert("contactHandles", {
-            userId,
-            contactId: existingHandle.contactId,
-            handleType,
-            handle: normalizedHandle,
-            platform,
-          });
-        }
-      }
-    }
-    return { isNew: false, contactId: existingHandle.contactId };
-  }
-
-  const company = extractCompanyFromHeadline(contact.headline);
-  const contactId = await ctx.db.insert("contacts", {
-    userId,
-    displayName: contact.name,
-    company,
-  });
-
-  // Insert username handle
-  if (normalizedHandle) {
-    await ctx.db.insert("contactHandles", {
-      userId,
-      contactId,
-      handleType,
-      handle: normalizedHandle,
-      platform,
-    });
-  }
-
-  // Also insert URN handle for LinkedIn (for matching with messaging)
-  if (linkedInUrn) {
-    await ctx.db.insert("contactHandles", {
-      userId,
-      contactId,
-      handleType: "linkedin_urn",
-      handle: linkedInUrn,
-      platform,
-    });
-  }
-
-  return { isNew: true, contactId };
-}
+    const user = await getOrCreateUser(ctx, identity);
+    return syncTwitterContactsInternal(ctx, user._id, args.contacts);
+  },
+});
 
 // ============================================================================
 // Signal Contacts Sync
@@ -1001,5 +814,43 @@ export const addLinkedInUsernames = mutation({
 
     const user = await getOrCreateUser(ctx, identity);
     return addResolvedUsernames(ctx, user._id, args.resolutions);
+  },
+});
+
+// ============================================================================
+// Twitter/X Messaging Sync
+// ============================================================================
+
+/**
+ * Sync Twitter/X conversations from Electron to Convex.
+ * Called by TwitterSyncManager when fetching conversation metadata.
+ */
+export const syncTwitterConversations = mutation({
+  args: twitterConversationsBatchInput,
+  handler: async (ctx, args) => {
+    const identity = await ctx.auth.getUserIdentity();
+    if (!identity) {
+      throw new Error("Unauthorized: Must be authenticated to sync Twitter conversations");
+    }
+
+    const user = await getOrCreateUser(ctx, identity);
+    return syncTwitterConversationsInternal(ctx, user._id, args.conversations, args.twitterUserId);
+  },
+});
+
+/**
+ * Sync Twitter/X messages from Electron to Convex.
+ * Called by TwitterSyncManager when fetching conversation events.
+ */
+export const syncTwitterMessages = mutation({
+  args: twitterMessagesBatchInput,
+  handler: async (ctx, args) => {
+    const identity = await ctx.auth.getUserIdentity();
+    if (!identity) {
+      throw new Error("Unauthorized: Must be authenticated to sync Twitter messages");
+    }
+
+    const user = await getOrCreateUser(ctx, identity);
+    return syncTwitterMessagesInternal(ctx, user._id, args.messages, args.twitterUserId);
   },
 });

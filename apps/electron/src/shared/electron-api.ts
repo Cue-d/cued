@@ -23,12 +23,13 @@ export interface PlatformSyncResult {
   contacts?: { synced: number; updated: number }
   imessage?: { messages: number }
   linkedin?: { contacts: number; messages: number }
+  twitter?: { contacts: number; messages: number }
   signal?: { contacts: number; messages: number }
   slack?: { messages: number; workspaces: number }
 }
 
 export interface UnifiedSyncProgress {
-  currentPlatform?: "contacts" | "imessage" | "linkedin" | "signal" | "slack"
+  currentPlatform?: "contacts" | "imessage" | "linkedin" | "twitter" | "twitter_contacts" | "linkedin_contacts" | "signal" | "signal_contacts" | "slack"
   error?: string
   lastSyncAt?: number
   platforms: PlatformSyncResult
@@ -58,6 +59,27 @@ export interface LinkedInSyncProgress {
 }
 
 export interface LinkedInSendMessageResult {
+  error?: string
+  messageId?: string
+  success: boolean
+}
+
+// Twitter types
+export interface TwitterStatusResult {
+  error?: string
+  isLoggedIn: boolean
+}
+
+export interface TwitterSyncProgress {
+  error?: string
+  lastSyncAt?: number
+  status: "error" | "idle" | "syncing"
+  totalConversationsSynced: number
+  totalMessagesSynced: number
+  totalContactsSynced: number
+}
+
+export interface TwitterSendMessageResult {
   error?: string
   messageId?: string
   success: boolean
@@ -184,6 +206,14 @@ export interface ElectronAPI {
       logout: () => Promise<{ error?: string; success: boolean }>
       sendMessage: (conversationId: string, text: string) => Promise<LinkedInSendMessageResult>
       getProgress: () => Promise<LinkedInSyncProgress>
+    }
+
+    twitter: {
+      status: () => Promise<TwitterStatusResult>
+      login: () => Promise<TwitterStatusResult>
+      logout: () => Promise<{ error?: string; success: boolean }>
+      sendMessage: (conversationId: string, text: string) => Promise<TwitterSendMessageResult>
+      getProgress: () => Promise<TwitterSyncProgress>
     }
 
     slack: {

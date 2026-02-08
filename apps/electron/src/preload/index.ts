@@ -5,6 +5,9 @@ import type {
   LinkedInSendMessageResult,
   LinkedInStatusResult,
   LinkedInSyncProgress,
+  TwitterSendMessageResult,
+  TwitterStatusResult,
+  TwitterSyncProgress,
   SignalLoginCredentials,
   SignalLoginResult,
   SignalSendMessageResult,
@@ -72,6 +75,16 @@ const api: ElectronAPI = {
       sendMessage: (conversationId: string, text: string): Promise<LinkedInSendMessageResult> =>
         ipcRenderer.invoke("sync:linkedin:sendMessage", conversationId, text),
       getProgress: (): Promise<LinkedInSyncProgress> => ipcRenderer.invoke("sync:linkedin:getProgress"),
+    },
+
+    // Twitter/X
+    twitter: {
+      status: (): Promise<TwitterStatusResult> => ipcRenderer.invoke("sync:twitter:status"),
+      login: (): Promise<TwitterStatusResult> => ipcRenderer.invoke("sync:twitter:login"),
+      logout: (): Promise<{ error?: string; success: boolean }> => ipcRenderer.invoke("sync:twitter:logout"),
+      sendMessage: (conversationId: string, text: string): Promise<TwitterSendMessageResult> =>
+        ipcRenderer.invoke("sync:twitter:sendMessage", conversationId, text),
+      getProgress: (): Promise<TwitterSyncProgress> => ipcRenderer.invoke("sync:twitter:getProgress"),
     },
 
     // Slack

@@ -18,6 +18,10 @@ import {
   type IncrementalScrapeResult,
 } from '../platforms/linkedin/index.js'
 import {
+  getTwitterSyncManager,
+  type TwitterScraper,
+} from '../platforms/twitter/index.js'
+import {
   getSlackSyncManager,
   getAllSlackCredentials,
 } from '../platforms/slack/index.js'
@@ -37,6 +41,7 @@ import { createConvexClient, setConvexAuth } from './cursor.js'
 export interface SyncFunctionOptions {
   getAuthToken: () => Promise<string | null>
   linkedInScraper?: LinkedInScraper
+  twitterScraper?: TwitterScraper
 }
 
 // ============================================================================
@@ -222,7 +227,6 @@ export function createLinkedInContactsSyncFn(
 
       const contacts = result.connections.map((conn) => ({
         name: `${conn.firstName} ${conn.lastName}`.trim(),
-        handle: conn.profileUrl,
         profileUrl: conn.profileUrl,
         headline: conn.headline ?? null,
         profileId: conn.profileId,
@@ -234,10 +238,8 @@ export function createLinkedInContactsSyncFn(
         throw new Error('Failed to authenticate with Convex')
       }
 
-      const syncResult = await convexClient.mutation(api.sync.syncSocialContacts, {
-        platform: 'linkedin',
+      const syncResult = await convexClient.mutation(api.sync.syncLinkedInContacts, {
         contacts,
-        syncedAt: Date.now(),
       })
 
       console.log(
@@ -259,6 +261,113 @@ export function createLinkedInContactsSyncFn(
     } catch (error) {
       const errorMessage = getErrorMessage(error)
       console.error('[LinkedInContactsSync] Error:', errorMessage)
+      throw new Error(errorMessage)
+    }
+  }
+}
+
+// ============================================================================
+// Twitter Sync
+// ============================================================================
+
+/**
+ * Create sync function for Twitter/X messages.
+ */
+export function createTwitterMessagesSyncFn(
+  options: SyncFunctionOptions
+): SyncFunction {
+  return async (): Promise<SyncResult> => {
+    if (!options.twitterScraper) {
+      throw new Error('Twitter scraper not provided')
+    }
+
+    const isLoggedIn = await options.twitterScraper.checkLoginStatus()
+    if (!isLoggedIn) {
+      throw new Error('Twitter not logged in')
+    }
+
+    const manager = getTwitterSyncManager()
+
+    try {
+      const apiClient = await options.twitterScraper.getApiClient()
+      manager.setClient(apiClient)
+    } catch (error) {
+      const errorMessage = getErrorMessage(error)
+      console.error('[TwitterMessagesSync] Failed to get API client:', errorMessage)
+      throw new Error(errorMessage)
+    }
+
+    const initialMessages = manager.getProgress().totalMessagesSynced
+    const initialContacts = manager.getProgress().totalContactsSynced
+
+    try {
+      await manager.runSync()
+
+      const after = manager.getProgress()
+      if (after.status === 'error') {
+        const errorMessage = after.error ?? 'Twitter sync failed'
+        console.error('[TwitterMessagesSync] Error:', errorMessage)
+        throw new Error(errorMessage)
+      }
+
+      return {
+        success: true,
+        messagesSynced: Math.max(0, after.totalMessagesSynced - initialMessages),
+        contactsSynced: Math.max(0, after.totalContactsSynced - initialContacts),
+      }
+    } catch (error) {
+      const errorMessage = getErrorMessage(error)
+      console.error('[TwitterMessagesSync] Error:', errorMessage)
+      throw new Error(errorMessage)
+    }
+  }
+}
+
+/**
+ * Create sync function for Twitter/X contacts (followers/following mutuals).
+ * Uses BrowserWindow DOM scraping with 24h cooldown.
+ */
+export function createTwitterContactsSyncFn(
+  options: SyncFunctionOptions
+): SyncFunction {
+  return async (): Promise<SyncResult> => {
+    if (!options.twitterScraper) {
+      throw new Error('Twitter scraper not provided')
+    }
+
+    const isLoggedIn = await options.twitterScraper.checkLoginStatus()
+    if (!isLoggedIn) {
+      throw new Error('Twitter not logged in')
+    }
+
+    const manager = getTwitterSyncManager()
+
+    try {
+      const apiClient = await options.twitterScraper.getApiClient()
+      manager.setClient(apiClient)
+      if (!apiClient.isSessionInitialized()) {
+        await apiClient.initializeSession()
+      }
+    } catch (error) {
+      const errorMessage = getErrorMessage(error)
+      console.error('[TwitterContactsSync] Failed to get API client:', errorMessage)
+      throw new Error(errorMessage)
+    }
+
+    try {
+      const result = await manager.syncContacts(options.twitterScraper)
+
+      if (result.skipped) {
+        console.log('[TwitterContactsSync] Skipped (cooldown)')
+      }
+
+      return {
+        success: true,
+        contactsSynced: result.contactsSynced,
+      }
+    } catch (error) {
+      const errorMessage = getErrorMessage(error)
+      console.error('[TwitterContactsSync] Error:', errorMessage)
       throw new Error(errorMessage)
     }
   }
@@ -448,7 +557,7 @@ export function createSlackSyncFn(
  * Also returns workspace IDs for multi-instance types like Slack.
  */
 export interface SyncFunctionRegistration {
-  syncType: 'contacts' | 'imessage' | 'linkedin' | 'linkedin_contacts' | 'signal' | 'signal_contacts' | 'slack'
+  syncType: 'contacts' | 'imessage' | 'linkedin' | 'twitter' | 'twitter_contacts' | 'linkedin_contacts' | 'signal' | 'signal_contacts' | 'slack'
   workspaceId?: string
   syncFn: SyncFunction
 }
@@ -470,7 +579,7 @@ export async function createAllSyncFunctions(
     syncFn: createIMessageSyncFn(options),
   })
 
-  // LinkedIn contacts sync (phase 1) - placeholder
+  // LinkedIn contacts sync (phase 1)
   if (options.linkedInScraper) {
     registrations.push({
       syncType: 'linkedin_contacts',
@@ -481,6 +590,19 @@ export async function createAllSyncFunctions(
     registrations.push({
       syncType: 'linkedin',
       syncFn: createLinkedInMessagesSyncFn(options),
+    })
+  }
+
+  // Twitter messages (phase 2) and contacts (phase 1)
+  if (options.twitterScraper) {
+    registrations.push({
+      syncType: 'twitter_contacts',
+      syncFn: createTwitterContactsSyncFn(options),
+    })
+
+    registrations.push({
+      syncType: 'twitter',
+      syncFn: createTwitterMessagesSyncFn(options),
     })
   }
 

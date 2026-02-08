@@ -22,7 +22,6 @@ import type * as integrations from "../integrations.js";
 import type * as lib_actions from "../lib/actions.js";
 import type * as lib_auth from "../lib/auth.js";
 import type * as lib_cursors from "../lib/cursors.js";
-import type * as memories from "../memories.js";
 import type * as messageQueue from "../messageQueue.js";
 import type * as messages from "../messages.js";
 import type * as nango from "../nango.js";
@@ -44,6 +43,7 @@ import type * as sync_linkedin from "../sync/linkedin.js";
 import type * as sync_shared from "../sync/shared.js";
 import type * as sync_signal from "../sync/signal.js";
 import type * as sync_slack from "../sync/slack.js";
+import type * as sync_twitter from "../sync/twitter.js";
 import type * as syncCursors from "../syncCursors.js";
 import type * as users from "../users.js";
 
@@ -68,7 +68,6 @@ declare const fullApi: ApiFromModules<{
   "lib/actions": typeof lib_actions;
   "lib/auth": typeof lib_auth;
   "lib/cursors": typeof lib_cursors;
-  memories: typeof memories;
   messageQueue: typeof messageQueue;
   messages: typeof messages;
   nango: typeof nango;
@@ -90,6 +89,7 @@ declare const fullApi: ApiFromModules<{
   "sync/shared": typeof sync_shared;
   "sync/signal": typeof sync_signal;
   "sync/slack": typeof sync_slack;
+  "sync/twitter": typeof sync_twitter;
   syncCursors: typeof syncCursors;
   users: typeof users;
 }>;

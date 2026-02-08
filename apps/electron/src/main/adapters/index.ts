@@ -8,6 +8,7 @@ import { IMessageAdapter } from "../platforms/imessage/adapter";
 import { LinkedInAdapter } from "../platforms/linkedin/adapter";
 import { SignalAdapter } from "../platforms/signal/adapter";
 import { SlackAdapter } from "../platforms/slack/adapter";
+import { TwitterAdapter } from "../platforms/twitter/adapter";
 
 /**
  * Singleton adapter instances.
@@ -26,8 +27,8 @@ const adapterRegistry: Partial<
   linkedin: LinkedInAdapter,
   signal: SignalAdapter,
   slack: SlackAdapter,
+  twitter: TwitterAdapter,
   // whatsapp: WhatsAppAdapter,
-  // twitter: TwitterAdapter,
 };
 
 /**
@@ -97,3 +98,4 @@ export { IMessageAdapter } from "../platforms/imessage/adapter";
 export { LinkedInAdapter } from "../platforms/linkedin/adapter";
 export { SignalAdapter } from "../platforms/signal/adapter";
 export { SlackAdapter } from "../platforms/slack/adapter";
+export { TwitterAdapter } from "../platforms/twitter/adapter";

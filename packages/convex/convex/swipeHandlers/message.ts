@@ -42,9 +42,13 @@ export const messageHandler: ActionSwipeHandler = {
     let messageSent = false;
     let queuedMessageId: Id<"messageQueue"> | null = null;
 
-    // Handle iMessage, LinkedIn, Slack, and Signal sending via unified message queue
+    // Handle iMessage, LinkedIn, Twitter, Slack, and Signal sending via unified message queue
     const isQueueablePlatform =
-      platform === "imessage" || platform === "linkedin" || platform === "slack" || platform === "signal";
+      platform === "imessage" ||
+      platform === "linkedin" ||
+      platform === "twitter" ||
+      platform === "slack" ||
+      platform === "signal";
 
     if (isQueueablePlatform && responseText) {
       // Validate conversation exists for queueable platforms
@@ -92,11 +96,11 @@ export const messageHandler: ActionSwipeHandler = {
               `Cannot send iMessage: no phone or email handle found for contact.`
             );
           }
-        } else if (platform === "linkedin") {
+        } else if (platform === "linkedin" || platform === "twitter") {
           chatIdentifier = conversation.platformConversationId;
           if (!chatIdentifier) {
             throw new Error(
-              `Cannot send LinkedIn message: missing thread ID for conversation.`
+              `Cannot send ${platform} message: missing thread ID for conversation.`
             );
           }
           recipientHandle = chatIdentifier;

@@ -336,6 +336,20 @@ export class SyncEngine {
           }
           break
 
+        case 'twitter':
+          platforms.twitter = {
+            contacts: platforms.twitter?.contacts ?? 0,
+            messages: actor.totalMessagesSynced,
+          }
+          break
+
+        case 'twitter_contacts':
+          platforms.twitter = {
+            contacts: actor.totalContactsSynced,
+            messages: platforms.twitter?.messages ?? 0,
+          }
+          break
+
         case 'slack':
           platforms.slack = {
             messages: (platforms.slack?.messages ?? 0) + actor.totalMessagesSynced,

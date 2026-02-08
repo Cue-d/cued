@@ -5,7 +5,7 @@ import Link from "next/link";
 import Nango from "@nangohq/frontend";
 import { useAccessToken } from "@workos-inc/authkit-nextjs/components";
 import { useQuery } from "convex/react";
-import { ArrowLeftIcon } from "lucide-react";
+import { ArrowLeftIcon, TwitterIcon } from "lucide-react";
 import { api } from "@cued/convex";
 import {
   IMessageIcon,
@@ -56,6 +56,15 @@ const INTEGRATIONS: IntegrationConfig[] = [
     nangoIntegrationId: null,
     integrationType: "electron-webview",
     color: "text-blue-600",
+  },
+  {
+    id: "twitter",
+    name: "X (Twitter)",
+    description: "Sync DMs and contacts via desktop app",
+    icon: <TwitterIcon className="size-5" />,
+    nangoIntegrationId: null,
+    integrationType: "electron-webview",
+    color: "text-sky-500",
   },
 ];
 
@@ -304,6 +313,10 @@ export default function IntegrationsPage() {
               <li>
                 <strong>LinkedIn:</strong> Use the desktop app to login and scrape your
                 connections
+              </li>
+              <li>
+                <strong>X (Twitter):</strong> Use the desktop app to login and sync DMs and
+                mutual contacts
               </li>
               <li>Your data is securely synced and never shared</li>
             </ul>

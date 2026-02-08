@@ -14,6 +14,8 @@
  * - contacts: macOS Contacts.app sync (phase 1: contacts)
  * - imessage: iMessage messages sync (phase 3: messages)
  * - linkedin: LinkedIn messages sync (phase 3: messages)
+ * - twitter: Twitter/X messages sync (phase 3: messages)
+ * - twitter_contacts: Twitter/X contacts sync (phase 1: contacts)
  * - linkedin_contacts: LinkedIn contacts sync (phase 1: contacts)
  * - signal_contacts: Signal contacts sync (phase 2: contacts_dependent) - waits for macOS contacts
  * - slack: Slack messages sync (phase 3: messages) - one per workspace
@@ -22,6 +24,8 @@ export type SyncTypeId =
   | 'contacts'
   | 'imessage'
   | 'linkedin'
+  | 'twitter'
+  | 'twitter_contacts'
   | 'linkedin_contacts'
   | 'signal'
   | 'signal_contacts'
@@ -106,6 +110,28 @@ export const SYNC_CONFIGS: Record<SyncTypeId, SyncTypeConfig> = {
     maxBackoffMs: 60 * 1000,
     maxRetries: 3,
     supportsEventTrigger: true, // SSE real-time events
+    supportsMultipleInstances: false,
+  },
+  twitter: {
+    id: 'twitter',
+    label: 'Twitter Messages',
+    phase: 'messages',
+    defaultIntervalMs: 10 * 1000, // 10 seconds (matches mautrix polling interval)
+    initialBackoffMs: 2000,
+    maxBackoffMs: 60 * 1000,
+    maxRetries: 3,
+    supportsEventTrigger: true, // SSE dm_update triggers immediate sync
+    supportsMultipleInstances: false,
+  },
+  twitter_contacts: {
+    id: 'twitter_contacts',
+    label: 'Twitter Contacts',
+    phase: 'contacts',
+    defaultIntervalMs: 24 * 60 * 60 * 1000, // 24 hours (cooldown-based)
+    initialBackoffMs: 5000,
+    maxBackoffMs: 5 * 60 * 1000,
+    maxRetries: 2,
+    supportsEventTrigger: false,
     supportsMultipleInstances: false,
   },
   signal: {
@@ -217,6 +243,7 @@ export interface SyncProgress {
   platforms: {
     contacts?: { synced: number; updated: number }
     linkedin?: { contacts: number; messages: number }
+    twitter?: { contacts: number; messages: number }
     signal?: { contacts: number; messages: number }
     slack?: { messages: number; workspaces: number }
     imessage?: { messages: number }

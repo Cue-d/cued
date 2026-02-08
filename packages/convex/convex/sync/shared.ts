@@ -1,6 +1,6 @@
 /**
  * Shared utilities for sync operations across all platforms.
- * Contains validators, types, and helper functions used by iMessage, Gmail, and Slack sync.
+ * Contains validators, types, and helper functions used by iMessage, Gmail, Slack, LinkedIn, and Twitter sync.
  */
 
 import type { Infer } from "convex/values";
@@ -89,6 +89,19 @@ export const handleInput = v.object({
 export type HandleInput = Infer<typeof handleInput>;
 
 // ============================================================================
+// Contact Helpers
+// ============================================================================
+
+/**
+ * Extract company name from a headline string (e.g., "Engineer at Google").
+ */
+export function extractCompanyFromHeadline(headline: string | null): string | undefined {
+  if (!headline) return undefined;
+  const match = headline.match(/\s+(?:at|@)\s+(.+?)(?:\s*[|•·-]|$)/i);
+  return match ? match[1].trim() : undefined;
+}
+
+// ============================================================================
 // Error Logging Helpers
 // ============================================================================
 
@@ -119,7 +132,7 @@ export async function scheduleIncomingMessageEvents(
   ctx: MutationCtx,
   userId: Id<"users">,
   conversationIds: Set<Id<"conversations">>,
-  platform: "imessage" | "gmail" | "slack" | "linkedin" | "signal"
+  platform: "imessage" | "gmail" | "slack" | "linkedin" | "twitter" | "signal"
 ): Promise<void> {
   if (conversationIds.size === 0) return;
 
@@ -200,7 +213,7 @@ export async function getOrCreateUser(
 // ============================================================================
 
 /** Handle types for contact creation */
-type HandleType = "phone" | "email" | "slack_id" | "signal_id" | "linkedin_handle" | "linkedin_urn" | "twitter_handle";
+type HandleType = "phone" | "email" | "slack_id" | "signal_id" | "linkedin_handle" | "linkedin_urn" | "twitter_handle" | "twitter_user_id";
 
 /** Input for creating or finding a contact */
 export interface ContactHandleInput {
@@ -235,7 +248,7 @@ export interface GetOrCreateContactResult {
 export async function getOrCreateContact(
   ctx: MutationCtx,
   userId: Id<"users">,
-  platform: "imessage" | "gmail" | "slack" | "linkedin" | "signal",
+  platform: "imessage" | "gmail" | "slack" | "linkedin" | "twitter" | "signal",
   handles: ContactHandleInput[],
   displayName?: string,
   metadata?: { company?: string; notes?: string }
@@ -338,6 +351,9 @@ function normalizeHandleByType(value: string, type: HandleType): string {
     case "twitter_handle":
       // Lowercase Twitter handles
       return value.toLowerCase().replace(/^@/, "");
+    case "twitter_user_id":
+      // Numeric user IDs are stable, return as-is
+      return value;
     default:
       return value;
   }

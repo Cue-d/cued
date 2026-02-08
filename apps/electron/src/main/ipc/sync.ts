@@ -12,6 +12,11 @@ import {
   type LinkedInSyncProgress,
 } from "../platforms/linkedin/index.js";
 import {
+  TwitterScraper,
+  getTwitterSyncManager,
+  type TwitterSyncProgress,
+} from "../platforms/twitter/index.js";
+import {
   getSlackSyncManager,
   getAllSlackSyncManagers,
   removeSlackSyncManager,
@@ -42,6 +47,7 @@ import { type SyncProgress } from "../sync/types.js";
 
 // Singleton scraper instance to maintain state across calls
 let linkedInScraper: LinkedInScraper | null = null;
+let twitterScraper: TwitterScraper | null = null;
 
 /**
  * Get the singleton LinkedInScraper instance.
@@ -54,6 +60,17 @@ export function getLinkedInScraper(): LinkedInScraper {
   return linkedInScraper;
 }
 
+/**
+ * Get the singleton TwitterScraper instance.
+ * Ensures browser operations are serialized across all callers.
+ */
+export function getTwitterScraper(): TwitterScraper {
+  if (!twitterScraper) {
+    twitterScraper = new TwitterScraper();
+  }
+  return twitterScraper;
+}
+
 // ============================================================================
 // Types
 // ============================================================================
@@ -63,7 +80,7 @@ export interface SocialStatusResult {
   error?: string;
 }
 
-export interface LinkedInSendMessageResult {
+export interface SendMessageResult {
   success: boolean;
   messageId?: string;
   error?: string;
@@ -123,6 +140,7 @@ function getErrorMessage(error: unknown): string {
 export function setupAllSyncIpcHandlers(mainWindow: BrowserWindow | null): void {
   setupUnifiedSyncHandlers(mainWindow);
   setupLinkedInHandlers(mainWindow);
+  setupTwitterHandlers(mainWindow);
   setupSlackHandlers(mainWindow);
   setupSignalHandlers(mainWindow);
 }
@@ -229,7 +247,7 @@ function setupLinkedInHandlers(_mainWindow: BrowserWindow | null): void {
   // Send message (needed for messaging functionality)
   ipcMain.handle(
     "sync:linkedin:sendMessage",
-    async (_event, conversationId: string, text: string): Promise<LinkedInSendMessageResult> => {
+    async (_event, conversationId: string, text: string): Promise<SendMessageResult> => {
       try {
         const adapter = getAdapter("linkedin");
         if (!adapter) {
@@ -262,6 +280,113 @@ function setupLinkedInHandlers(_mainWindow: BrowserWindow | null): void {
   ipcMain.handle("sync:linkedin:getProgress", async (): Promise<LinkedInSyncProgress> => {
     const syncManager = getLinkedInSyncManager();
     return syncManager.getProgress();
+  });
+}
+
+// ============================================================================
+// Twitter Handlers (Login/Status/SendMessage only)
+// ============================================================================
+
+function setupTwitterHandlers(_mainWindow: BrowserWindow | null): void {
+  // Status check
+  ipcMain.handle("sync:twitter:status", async (): Promise<SocialStatusResult> => {
+    try {
+      const isLoggedIn = await getTwitterScraper().checkLoginStatus();
+      return { isLoggedIn };
+    } catch (error) {
+      const message = getErrorMessage(error);
+      console.error("[Sync IPC] Twitter status check failed:", message);
+      return { isLoggedIn: false, error: message };
+    }
+  });
+
+  // Login
+  ipcMain.handle("sync:twitter:login", async (): Promise<SocialStatusResult> => {
+    try {
+      const scraper = getTwitterScraper();
+      const success = await scraper.loginTwitter();
+
+      if (success) {
+        try {
+          const apiClient = await scraper.getApiClient();
+          getTwitterSyncManager().setClient(apiClient);
+        } catch (e) {
+          const setupError = getErrorMessage(e);
+          console.error("[Sync IPC] Twitter login succeeded but sync setup failed:", e);
+          return { isLoggedIn: false, error: `Login succeeded but sync setup failed: ${setupError}` };
+        }
+      }
+
+      return { isLoggedIn: success };
+    } catch (error) {
+      const message = getErrorMessage(error);
+      console.error("[Sync IPC] Twitter login failed:", message);
+      return { isLoggedIn: false, error: message };
+    }
+  });
+
+  // Logout
+  ipcMain.handle("sync:twitter:logout", async (): Promise<{ success: boolean; error?: string }> => {
+    try {
+      await getTwitterScraper().logout();
+      getTwitterSyncManager().setClient(null);
+      return { success: true };
+    } catch (error) {
+      const message = getErrorMessage(error);
+      console.error("[Sync IPC] Twitter logout failed:", message);
+      return { success: false, error: message };
+    }
+  });
+
+  // Send message
+  ipcMain.handle(
+    "sync:twitter:sendMessage",
+    async (_event, conversationId: string, text: string): Promise<SendMessageResult> => {
+      try {
+        const adapter = getAdapter("twitter");
+        if (!adapter) {
+          return { success: false, error: "Twitter adapter not available" };
+        }
+
+        const result = await adapter.send({
+          id: `ipc-${Date.now()}`,
+          platform: "twitter",
+          recipientHandle: conversationId,
+          text,
+          threadId: conversationId,
+        });
+
+        if (!result.success) {
+          console.error("[Sync IPC] Twitter send message failed:", result.error);
+          return { success: false, error: result.error };
+        }
+
+        return { success: true, messageId: result.messageId };
+      } catch (error) {
+        const errorMessage = getErrorMessage(error);
+        console.error("[Sync IPC] Twitter send message failed:", errorMessage);
+        return { success: false, error: errorMessage };
+      }
+    }
+  );
+
+  // Get sync progress (for status display)
+  ipcMain.handle("sync:twitter:getProgress", async (): Promise<TwitterSyncProgress> => {
+    const syncManager = getTwitterSyncManager();
+    return syncManager.getProgress();
+  });
+
+  // Sync contacts (followers/following mutuals)
+  ipcMain.handle("sync:twitter:syncContacts", async (): Promise<{ contactsSynced: number; skipped: boolean; error?: string }> => {
+    try {
+      const scraper = getTwitterScraper();
+      const syncManager = getTwitterSyncManager();
+      return await syncManager.syncContacts(scraper);
+    } catch (error) {
+      const message = getErrorMessage(error);
+      console.error("[Sync IPC] Twitter contacts sync failed:", message);
+      return { contactsSynced: 0, skipped: false, error: message };
+    }
   });
 }
 
@@ -527,6 +652,10 @@ export async function cleanupSyncManagers(): Promise<void> {
     const linkedInSyncManager = getLinkedInSyncManager();
     linkedInSyncManager.stop();
 
+    // Stop Twitter sync manager
+    const twitterSyncManager = getTwitterSyncManager();
+    twitterSyncManager.stop();
+
     // Stop all Slack sync managers
     const slackManagers = getAllSlackSyncManagers();
     for (const manager of slackManagers) {
@@ -538,6 +667,7 @@ export async function cleanupSyncManagers(): Promise<void> {
     signalManager.stop();
 
     linkedInScraper = null;
+    twitterScraper = null;
   } catch (error) {
     console.error("[Sync IPC] Error cleaning up sync managers:", error);
   }

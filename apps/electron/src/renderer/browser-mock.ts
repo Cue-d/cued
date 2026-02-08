@@ -91,6 +91,19 @@ if (!window.electron && import.meta.env.DEV) {
         }),
       },
 
+      twitter: {
+        status: async () => ({ isLoggedIn: false }),
+        login: async () => ({ isLoggedIn: false }),
+        logout: async () => ({ success: true }),
+        sendMessage: async () => ({ success: false, error: "Browser mock" }),
+        getProgress: async () => ({
+          status: "idle",
+          totalConversationsSynced: 0,
+          totalMessagesSynced: 0,
+          totalContactsSynced: 0,
+        }),
+      },
+
       slack: {
         status: async () => ({ isConnected: false }),
         login: async () => ({ success: false, error: "Browser mock" }),
