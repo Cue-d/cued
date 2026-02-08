@@ -288,37 +288,23 @@ export function createTwitterMessagesSyncFn(
 
     const manager = getTwitterSyncManager()
 
-    try {
-      const apiClient = await options.twitterScraper.getApiClient()
-      manager.setClient(apiClient)
-    } catch (error) {
-      const errorMessage = getErrorMessage(error)
-      console.error('[TwitterMessagesSync] Failed to get API client:', errorMessage)
-      throw new Error(errorMessage)
-    }
+    const apiClient = await options.twitterScraper.getApiClient()
+    manager.setClient(apiClient)
 
     const initialMessages = manager.getProgress().totalMessagesSynced
     const initialContacts = manager.getProgress().totalContactsSynced
 
-    try {
-      await manager.runSync()
+    await manager.runSync()
 
-      const after = manager.getProgress()
-      if (after.status === 'error') {
-        const errorMessage = after.error ?? 'Twitter sync failed'
-        console.error('[TwitterMessagesSync] Error:', errorMessage)
-        throw new Error(errorMessage)
-      }
+    const after = manager.getProgress()
+    if (after.status === 'error') {
+      throw new Error(after.error ?? 'Twitter sync failed')
+    }
 
-      return {
-        success: true,
-        messagesSynced: Math.max(0, after.totalMessagesSynced - initialMessages),
-        contactsSynced: Math.max(0, after.totalContactsSynced - initialContacts),
-      }
-    } catch (error) {
-      const errorMessage = getErrorMessage(error)
-      console.error('[TwitterMessagesSync] Error:', errorMessage)
-      throw new Error(errorMessage)
+    return {
+      success: true,
+      messagesSynced: Math.max(0, after.totalMessagesSynced - initialMessages),
+      contactsSynced: Math.max(0, after.totalContactsSynced - initialContacts),
     }
   }
 }
@@ -342,33 +328,16 @@ export function createTwitterContactsSyncFn(
 
     const manager = getTwitterSyncManager()
 
-    try {
-      const apiClient = await options.twitterScraper.getApiClient()
-      manager.setClient(apiClient)
-      if (!apiClient.isSessionInitialized()) {
-        await apiClient.initializeSession()
-      }
-    } catch (error) {
-      const errorMessage = getErrorMessage(error)
-      console.error('[TwitterContactsSync] Failed to get API client:', errorMessage)
-      throw new Error(errorMessage)
+    const apiClient = await options.twitterScraper.getApiClient()
+    manager.setClient(apiClient)
+    if (!apiClient.isSessionInitialized()) {
+      await apiClient.initializeSession()
     }
 
-    try {
-      const result = await manager.syncContacts(options.twitterScraper)
-
-      if (result.skipped) {
-        console.log('[TwitterContactsSync] Skipped (cooldown)')
-      }
-
-      return {
-        success: true,
-        contactsSynced: result.contactsSynced,
-      }
-    } catch (error) {
-      const errorMessage = getErrorMessage(error)
-      console.error('[TwitterContactsSync] Error:', errorMessage)
-      throw new Error(errorMessage)
+    const result = await manager.syncContacts(options.twitterScraper)
+    return {
+      success: true,
+      contactsSynced: result.contactsSynced,
     }
   }
 }
@@ -390,24 +359,16 @@ export function createSignalSyncFn(_options: SyncFunctionOptions): SyncFunction 
 
     const initialMessages = manager.getProgress().totalMessagesSynced
 
-    try {
-      await manager.runSync()
+    await manager.runSync()
 
-      const after = manager.getProgress()
-      if (after.status === 'error') {
-        const errorMessage = after.error ?? 'Signal sync failed'
-        console.error('[SignalSync] Error:', errorMessage)
-        throw new Error(errorMessage)
-      }
+    const after = manager.getProgress()
+    if (after.status === 'error') {
+      throw new Error(after.error ?? 'Signal sync failed')
+    }
 
-      return {
-        success: true,
-        messagesSynced: Math.max(0, after.totalMessagesSynced - initialMessages),
-      }
-    } catch (error) {
-      const errorMessage = getErrorMessage(error)
-      console.error('[SignalSync] Error:', errorMessage)
-      throw new Error(errorMessage)
+    return {
+      success: true,
+      messagesSynced: Math.max(0, after.totalMessagesSynced - initialMessages),
     }
   }
 }
@@ -491,12 +452,9 @@ export function createSignalContactsSyncFn(_options: SyncFunctionOptions): SyncF
     }
 
     const totalSynced = totalNew + totalUpdated
-    console.log(`[SignalContactsSync] Synced ${totalNew} new, ${totalUpdated} updated contacts`)
 
     if (errors.length > 0) {
-      const errorMessage = formatSyncErrors(errors)
-      console.error('[SignalContactsSync] Completed with errors:', errorMessage)
-      throw new Error(errorMessage)
+      throw new Error(formatSyncErrors(errors))
     }
 
     return { success: true, contactsSynced: totalSynced }

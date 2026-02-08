@@ -126,8 +126,6 @@ export const createSyncActorMachine = (input: SyncActorInput) => {
           return { lastError: 'Unknown error - no error object in event' }
         }
         const error = event.error
-        // Log the FULL error with stack trace for debugging
-        console.error('[SyncActor] Sync error:', error)
         const errorMessage =
           error instanceof Error ? error.message : String(error)
         return {
@@ -142,25 +140,29 @@ export const createSyncActorMachine = (input: SyncActorInput) => {
         syncCycleComplete: () => false,
       }),
       logSyncStart: ({ context }) => {
-        console.log(`[SyncActor:${getActorId(context)}] Starting sync...`)
+        // Only log first attempt, not retries
+        if (context.retryCount === 0) {
+          console.log(`[SyncActor:${getActorId(context)}] Starting sync...`)
+        }
       },
       logSyncComplete: ({ context, event }) => {
         if (!('output' in event)) return
         const output = event.output as SyncResult | undefined
-        console.log(
-          `[SyncActor:${getActorId(context)}] Sync complete. Messages: ${output?.messagesSynced ?? 0}, Contacts: ${output?.contactsSynced ?? 0}`
-        )
+        const msgs = output?.messagesSynced ?? 0
+        const contacts = output?.contactsSynced ?? 0
+        // Skip logging zero-result syncs to reduce noise
+        if (msgs > 0 || contacts > 0) {
+          console.log(
+            `[SyncActor:${getActorId(context)}] Sync complete. Messages: ${msgs}, Contacts: ${contacts}`
+          )
+        }
       },
-      logSyncError: ({ context, event }) => {
-        if (!('error' in event)) return
-        const error = event.error
-        const errorMessage =
-          error instanceof Error ? error.message : String(error)
-        console.error(`[SyncActor:${getActorId(context)}] Sync error: ${errorMessage}`)
+      logSyncError: () => {
+        // Errors are logged once via logMaxRetriesExhausted — no-op here to avoid duplicate logs
       },
       logMaxRetriesExhausted: ({ context }) => {
-        console.error(
-          `[SyncActor:${getActorId(context)}] Max retries (${config.maxRetries}) exhausted. Last error: ${context.lastError}`
+        console.warn(
+          `[SyncActor:${getActorId(context)}] Max retries (${config.maxRetries}) exhausted: ${context.lastError}`
         )
       },
     },

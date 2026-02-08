@@ -369,7 +369,6 @@ export class SignalSyncManager {
       })
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error)
-      console.error('[SignalSync] Error:', errorMessage)
       this.updateProgress({
         status: 'error',
         error: errorMessage,

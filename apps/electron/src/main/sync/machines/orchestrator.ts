@@ -150,7 +150,6 @@ export const orchestratorMachine = setup({
                 self.send({ type: 'ACTOR_COMPLETED', actorId: key, phase })
               } else {
                 const error = actorContext.lastError ?? `Sync failed for ${config.syncType}`
-                console.error(`[Orchestrator] Actor ${key} failed:`, error)
                 self.send({ type: 'ACTOR_ERROR', actorId: key, error })
               }
             }
@@ -188,7 +187,6 @@ export const orchestratorMachine = setup({
     }),
     recordError: assign(({ event }) => {
       if (event.type !== 'ACTOR_ERROR') return {}
-      console.error(`[Orchestrator] Actor error: ${event.actorId} - ${event.error}`)
       return { lastError: event.error }
     }),
     // Mark actor as completed even on error so phase can proceed
@@ -213,14 +211,10 @@ export const orchestratorMachine = setup({
       }
     },
     startContactsDependentPhase: ({ context }) => {
-      console.log('[Orchestrator] Starting contacts_dependent phase')
       const dependentActors = getActorsForPhase(context.actorConfigs, 'contacts_dependent')
+      console.log(`[Orchestrator] Starting contacts_dependent phase (${dependentActors.length} actors)`)
       for (const key of dependentActors) {
-        const actor = context.actors.get(key)
-        if (actor) {
-          console.log(`[Orchestrator] Triggering sync for: ${key}`)
-          actor.send({ type: 'SYNC' })
-        }
+        context.actors.get(key)?.send({ type: 'SYNC' })
       }
     },
     startMessagesPhase: ({ context }) => {

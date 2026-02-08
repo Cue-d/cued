@@ -203,7 +203,6 @@ export class SyncEngine {
     }
 
     this.orchestrator.send({ type: 'SYNC_NOW' })
-    console.log('[SyncEngine] Triggered immediate sync')
     return true
   }
 

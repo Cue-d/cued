@@ -351,7 +351,6 @@ export class TwitterSyncManager {
       })
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)
-      const stack = error instanceof Error ? error.stack : undefined
 
       if (isAuthError(error)) {
         logger.logSyncError('twitter', `Auth error: ${message}`)
@@ -361,9 +360,6 @@ export class TwitterSyncManager {
         this.updateProgress({ status: 'error', error: `Rate limited — will retry next cycle` })
       } else {
         logger.logSyncError('twitter', message)
-        if (stack) {
-          console.error('[TwitterSync] Full stack trace:', stack)
-        }
         this.updateProgress({ status: 'error', error: message })
       }
     } finally {
