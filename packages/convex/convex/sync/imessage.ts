@@ -15,6 +15,7 @@ import {
   batchResolveHandles,
   scheduleIncomingMessageEvents,
   scheduleOutgoingMessageEvents,
+  shouldUpdateDisplayName,
   SEVEN_DAYS_MS,
   logSyncError,
 } from "./shared";
@@ -331,7 +332,8 @@ export type ContactInput = Infer<typeof contactInput>;
 export async function syncContactsInternal(
   ctx: MutationCtx,
   userId: Id<"users">,
-  contacts: ContactInput[]
+  contacts: ContactInput[],
+  platform: "imessage" | "signal" = "imessage"
 ) {
   const result = {
     contactsCount: 0,
@@ -342,7 +344,7 @@ export async function syncContactsInternal(
 
   for (const contact of contacts) {
     try {
-      const syncResult = await upsertContactWithHandles(ctx, userId, contact);
+      const syncResult = await upsertContactWithHandles(ctx, userId, contact, platform);
       if (syncResult.isNew) {
         result.contactsCount++;
       } else {
@@ -350,7 +352,7 @@ export async function syncContactsInternal(
       }
       result.handlesCount += syncResult.handlesAdded;
     } catch (e) {
-      result.errors.push(logSyncError("iMessage", "sync contact", contact.displayName, e));
+      result.errors.push(logSyncError(platform, "sync contact", contact.displayName, e));
     }
   }
 
@@ -392,7 +394,8 @@ export async function findContactByHandle(
 async function upsertContactWithHandles(
   ctx: MutationCtx,
   userId: Id<"users">,
-  contact: ContactInput
+  contact: ContactInput,
+  platform: "imessage" | "signal" = "imessage"
 ): Promise<{ isNew: boolean; handlesAdded: number; contactId: Id<"contacts"> }> {
   // Collect all normalized handles, filtering out empty values
   const handles = [
@@ -432,7 +435,14 @@ async function upsertContactWithHandles(
   };
 
   if (contactId) {
-    await ctx.db.patch(contactId, contactData);
+    const existing = await ctx.db.get(contactId);
+    const primaryHandle = handles[0]?.value ?? "";
+    if (existing && shouldUpdateDisplayName(existing.displayName, displayName, primaryHandle)) {
+      await ctx.db.patch(contactId, { displayName });
+    }
+    if (contactData.company) {
+      await ctx.db.patch(contactId, { company: contactData.company });
+    }
   } else {
     contactId = await ctx.db.insert("contacts", { userId, ...contactData });
   }
@@ -440,24 +450,43 @@ async function upsertContactWithHandles(
   // Add missing handles or update mislinked ones
   let handlesAdded = 0;
   for (const handle of handles) {
-    const existing = await ctx.db
+    const existingHandles = await ctx.db
       .query("contactHandles")
       .withIndex("by_user_handle", (q) =>
         q.eq("userId", userId).eq("handle", handle.value)
       )
-      .first();
+      .collect();
 
-    if (!existing) {
+    const existingForPlatform = existingHandles.find((h) => h.platform === platform);
+    const existingAny = existingHandles[0];
+
+    if (!existingAny) {
+      // No handle exists at all — create it
       await ctx.db.insert("contactHandles", {
         userId,
         contactId,
         handleType: handle.type,
         handle: handle.value,
-        platform: "imessage",
+        platform,
       });
       handlesAdded++;
-    } else if (existing.contactId !== contactId) {
-      await ctx.db.patch(existing._id, { contactId });
+    } else if (!existingForPlatform) {
+      // Handle exists for another platform — also create one for this platform
+      // so the UI knows this contact is reachable on this platform
+      await ctx.db.insert("contactHandles", {
+        userId,
+        contactId,
+        handleType: handle.type,
+        handle: handle.value,
+        platform,
+      });
+      handlesAdded++;
+      // Fix mislinked handles
+      if (existingAny.contactId !== contactId) {
+        await ctx.db.patch(existingAny._id, { contactId });
+      }
+    } else if (existingForPlatform.contactId !== contactId) {
+      await ctx.db.patch(existingForPlatform._id, { contactId });
     }
   }
 

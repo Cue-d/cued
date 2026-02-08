@@ -7,6 +7,7 @@ const DISPLAY_PLATFORMS: ActionPlatform[] = [
   'gmail',
   'slack',
   'linkedin',
+  'signal',
 ]
 
 interface IntegrationsMenuProps {

@@ -119,7 +119,7 @@ export async function scheduleIncomingMessageEvents(
   ctx: MutationCtx,
   userId: Id<"users">,
   conversationIds: Set<Id<"conversations">>,
-  platform: "imessage" | "gmail" | "slack" | "linkedin"
+  platform: "imessage" | "gmail" | "slack" | "linkedin" | "signal"
 ): Promise<void> {
   if (conversationIds.size === 0) return;
 
@@ -200,7 +200,7 @@ export async function getOrCreateUser(
 // ============================================================================
 
 /** Handle types for contact creation */
-type HandleType = "phone" | "email" | "slack_id" | "linkedin_handle" | "linkedin_urn" | "twitter_handle";
+type HandleType = "phone" | "email" | "slack_id" | "signal_id" | "linkedin_handle" | "linkedin_urn" | "twitter_handle";
 
 /** Input for creating or finding a contact */
 export interface ContactHandleInput {
@@ -235,7 +235,7 @@ export interface GetOrCreateContactResult {
 export async function getOrCreateContact(
   ctx: MutationCtx,
   userId: Id<"users">,
-  platform: "imessage" | "gmail" | "slack" | "linkedin",
+  platform: "imessage" | "gmail" | "slack" | "linkedin" | "signal",
   handles: ContactHandleInput[],
   displayName?: string,
   metadata?: { company?: string; notes?: string }
@@ -332,6 +332,9 @@ function normalizeHandleByType(value: string, type: HandleType): string {
     case "slack_id":
       // Slack IDs are already normalized (e.g., "U12345678")
       return value;
+    case "signal_id":
+      // Normalize Signal UUIDs to lowercase (RFC 4122 case-insensitive)
+      return value.toLowerCase().trim();
     case "twitter_handle":
       // Lowercase Twitter handles
       return value.toLowerCase().replace(/^@/, "");

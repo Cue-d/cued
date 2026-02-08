@@ -42,6 +42,7 @@ import type * as sync_gmail from "../sync/gmail.js";
 import type * as sync_imessage from "../sync/imessage.js";
 import type * as sync_linkedin from "../sync/linkedin.js";
 import type * as sync_shared from "../sync/shared.js";
+import type * as sync_signal from "../sync/signal.js";
 import type * as sync_slack from "../sync/slack.js";
 import type * as syncCursors from "../syncCursors.js";
 import type * as users from "../users.js";
@@ -87,6 +88,7 @@ declare const fullApi: ApiFromModules<{
   "sync/imessage": typeof sync_imessage;
   "sync/linkedin": typeof sync_linkedin;
   "sync/shared": typeof sync_shared;
+  "sync/signal": typeof sync_signal;
   "sync/slack": typeof sync_slack;
   syncCursors: typeof syncCursors;
   users: typeof users;

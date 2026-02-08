@@ -5,6 +5,12 @@ import type {
   LinkedInSendMessageResult,
   LinkedInStatusResult,
   LinkedInSyncProgress,
+  SignalLoginCredentials,
+  SignalLoginResult,
+  SignalSendMessageResult,
+  SignalSetupResult,
+  SignalStatusResult,
+  SignalSyncProgress,
   SlackDisconnectResult,
   SlackLoginResult,
   SlackStatusResult,
@@ -76,6 +82,21 @@ const api: ElectronAPI = {
         ipcRenderer.invoke("sync:slack:disconnect", teamId),
       listWorkspaces: (): Promise<{ workspaces: SlackWorkspaceInfo[] }> => ipcRenderer.invoke("sync:slack:listWorkspaces"),
       getProgress: (): Promise<SlackSyncProgress> => ipcRenderer.invoke("sync:slack:getProgress"),
+    },
+
+    // Signal
+    signal: {
+      status: (): Promise<SignalStatusResult> => ipcRenderer.invoke("sync:signal:status"),
+      setup: (credentials?: SignalLoginCredentials): Promise<SignalSetupResult> =>
+        ipcRenderer.invoke("sync:signal:setup", credentials),
+      openLinkTerminal: (cliPath: string): Promise<{ success: boolean; error?: string }> =>
+        ipcRenderer.invoke("sync:signal:openLinkTerminal", cliPath),
+      checkLink: (cliPath: string): Promise<SignalLoginResult> =>
+        ipcRenderer.invoke("sync:signal:checkLink", cliPath),
+      logout: (): Promise<{ error?: string; success: boolean }> => ipcRenderer.invoke("sync:signal:logout"),
+      sendMessage: (threadOrRecipient: string, text: string): Promise<SignalSendMessageResult> =>
+        ipcRenderer.invoke("sync:signal:sendMessage", threadOrRecipient, text),
+      getProgress: (): Promise<SignalSyncProgress> => ipcRenderer.invoke("sync:signal:getProgress"),
     },
   },
 };

@@ -1,6 +1,11 @@
 // Load env vars FIRST before any other imports
 import "./env.js";
 
+// Catch unhandled promise rejections to prevent silent crashes
+process.on("unhandledRejection", (reason) => {
+  console.error("[Main] Unhandled rejection:", reason);
+});
+
 import { join } from "node:path";
 import { app, BrowserWindow, ipcMain, shell } from "electron";
 import liquidGlass from "electron-liquid-glass";

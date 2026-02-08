@@ -21,8 +21,10 @@ import {
   useUnifiedSync,
   useLinkedIn,
   useSlack,
+  useSignal,
   useElectron,
 } from "../hooks/use-electron"
+import { SignalLoginDialog } from "../components/SignalLoginDialog"
 import { cmdKey } from "../lib/platform"
 
 // ============================================
@@ -373,6 +375,8 @@ function GeneralContent() {
 function IntegrationsContent({ sync }: { sync: ReturnType<typeof useUnifiedSync> }) {
   const { isLoggedIn: linkedInLoggedIn, isLoading: linkedInLoading, login: linkedInLogin, logout: linkedInLogout } = useLinkedIn()
   const { isConnected: slackConnected, workspaces: slackWorkspaces, isLoading: slackLoading, login: slackLogin, disconnect: slackDisconnect } = useSlack()
+  const { isLoggedIn: signalLoggedIn, isLoading: signalLoading, setup: signalSetup, openLinkTerminal: signalOpenLink, checkLink: signalCheckLink, logout: signalLogout } = useSignal()
+  const [signalDialogOpen, setSignalDialogOpen] = React.useState(false)
   const electron = useElectron()
   const gmailStatus = useQuery(api.integrations.getIntegrationStatus, { platform: "gmail" })
   const gmailConnected = gmailStatus?.isConnected ?? false
@@ -386,11 +390,13 @@ function IntegrationsContent({ sync }: { sync: ReturnType<typeof useUnifiedSync>
   const totalMessages =
     (sync.progress.platforms.imessage?.messages ?? 0) +
     (sync.progress.platforms.linkedin?.messages ?? 0) +
+    (sync.progress.platforms.signal?.messages ?? 0) +
     (sync.progress.platforms.slack?.messages ?? 0)
 
   const totalContacts =
     (sync.progress.platforms.contacts?.synced ?? 0) +
-    (sync.progress.platforms.linkedin?.contacts ?? 0)
+    (sync.progress.platforms.linkedin?.contacts ?? 0) +
+    (sync.progress.platforms.signal?.contacts ?? 0)
 
   const isSyncing = sync.progress.status === "syncing"
 
@@ -488,6 +494,38 @@ function IntegrationsContent({ sync }: { sync: ReturnType<typeof useUnifiedSync>
                   </SettingsRow>
                 </SettingsCard>
               </SettingsSection>
+
+              {/* Signal */}
+              <SettingsSection title="Signal" description={signalLoading ? "Checking..." : signalLoggedIn ? "Connected" : "Not connected"}>
+                <SettingsCard>
+                  <SettingsRow
+                    label="Connection"
+                    description={signalLoggedIn ? "Messages will sync automatically" : "Connect to sync Signal messages"}
+                  >
+                    {signalLoggedIn && (
+                      <Badge variant="secondary" className="bg-green-500/10 text-green-500 mr-2">
+                        Connected
+                      </Badge>
+                    )}
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={signalLoggedIn ? signalLogout : () => setSignalDialogOpen(true)}
+                    >
+                      {signalLoggedIn ? "Disconnect" : "Connect"}
+                    </Button>
+                  </SettingsRow>
+                </SettingsCard>
+              </SettingsSection>
+
+              <SignalLoginDialog
+                open={signalDialogOpen}
+                onOpenChange={setSignalDialogOpen}
+                onSuccess={() => {}}
+                setup={signalSetup}
+                openLinkTerminal={signalOpenLink}
+                checkLink={signalCheckLink}
+              />
 
               {/* Gmail */}
               <SettingsSection title="Gmail" description={gmailLoading ? "Checking..." : gmailConnected ? "Connected" : "Not connected"}>

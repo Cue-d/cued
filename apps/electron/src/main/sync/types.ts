@@ -2,7 +2,7 @@
  * Types for XState-based Sync Engine
  *
  * Defines sync type identifiers, configurations, and event types
- * for the two-phase orchestrated sync system.
+ * for the three-phase orchestrated sync system.
  */
 
 // ============================================================================
@@ -12,23 +12,28 @@
 /**
  * Sync type identifiers.
  * - contacts: macOS Contacts.app sync (phase 1: contacts)
- * - imessage: iMessage messages sync (phase 2: messages)
- * - linkedin: LinkedIn messages sync (phase 2: messages)
+ * - imessage: iMessage messages sync (phase 3: messages)
+ * - linkedin: LinkedIn messages sync (phase 3: messages)
  * - linkedin_contacts: LinkedIn contacts sync (phase 1: contacts)
- * - slack: Slack messages sync (phase 2: messages) - one per workspace
+ * - signal_contacts: Signal contacts sync (phase 2: contacts_dependent) - waits for macOS contacts
+ * - slack: Slack messages sync (phase 3: messages) - one per workspace
  */
 export type SyncTypeId =
   | 'contacts'
   | 'imessage'
   | 'linkedin'
   | 'linkedin_contacts'
+  | 'signal'
+  | 'signal_contacts'
   | 'slack'
 
 /**
- * Phase type for two-phase sync.
- * Phase 1 (contacts) completes before Phase 2 (messages) begins.
+ * Phase type for three-phase sync.
+ * Phase 1 (contacts) completes before Phase 2 (contacts_dependent) begins.
+ * Phase 2 (contacts_dependent) completes before Phase 3 (messages) begins.
+ * This prevents OCC conflicts when dependent contact syncs write to the same rows.
  */
-export type SyncPhase = 'contacts' | 'messages'
+export type SyncPhase = 'contacts' | 'contacts_dependent' | 'messages'
 
 // ============================================================================
 // Sync Configuration
@@ -101,6 +106,28 @@ export const SYNC_CONFIGS: Record<SyncTypeId, SyncTypeConfig> = {
     maxBackoffMs: 60 * 1000,
     maxRetries: 3,
     supportsEventTrigger: true, // SSE real-time events
+    supportsMultipleInstances: false,
+  },
+  signal: {
+    id: 'signal',
+    label: 'Signal',
+    phase: 'messages',
+    defaultIntervalMs: 15 * 1000, // 15 seconds
+    initialBackoffMs: 2000,
+    maxBackoffMs: 60 * 1000,
+    maxRetries: 3,
+    supportsEventTrigger: false,
+    supportsMultipleInstances: false,
+  },
+  signal_contacts: {
+    id: 'signal_contacts',
+    label: 'Signal Contacts',
+    phase: 'contacts_dependent',
+    defaultIntervalMs: 10 * 60 * 1000, // 10 minutes
+    initialBackoffMs: 2000,
+    maxBackoffMs: 60 * 1000,
+    maxRetries: 3,
+    supportsEventTrigger: false,
     supportsMultipleInstances: false,
   },
   slack: {
@@ -190,6 +217,7 @@ export interface SyncProgress {
   platforms: {
     contacts?: { synced: number; updated: number }
     linkedin?: { contacts: number; messages: number }
+    signal?: { contacts: number; messages: number }
     slack?: { messages: number; workspaces: number }
     imessage?: { messages: number }
   }

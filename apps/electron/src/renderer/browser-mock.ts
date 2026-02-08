@@ -102,6 +102,19 @@ if (!window.electron && import.meta.env.DEV) {
           totalMessagesSynced: 0,
         }),
       },
+
+      signal: {
+        status: async () => ({ isLoggedIn: false }),
+        setup: async () => ({ success: false, steps: [], error: "Browser mock" }),
+        openLinkTerminal: async () => ({ success: false, error: "Browser mock" }),
+        checkLink: async () => ({ success: false, isLoggedIn: false }),
+        logout: async () => ({ success: true }),
+        sendMessage: async () => ({ success: false, error: "Browser mock" }),
+        getProgress: async () => ({
+          status: "idle",
+          totalMessagesSynced: 0,
+        }),
+      },
     },
   }
 

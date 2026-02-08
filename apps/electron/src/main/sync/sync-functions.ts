@@ -21,6 +21,12 @@ import {
   getSlackSyncManager,
   getAllSlackCredentials,
 } from '../platforms/slack/index.js'
+import {
+  getSignalSyncManager,
+  SignalClient,
+  type SignalContact,
+  loadSignalCredentials,
+} from '../platforms/signal/index.js'
 import { syncContactsToConvex } from '../platforms/contacts/sync.js'
 import { createConvexClient, setConvexAuth } from './cursor.js'
 
@@ -259,6 +265,136 @@ export function createLinkedInContactsSyncFn(
 }
 
 // ============================================================================
+// Signal Sync
+// ============================================================================
+
+/**
+ * Create sync function for Signal messages.
+ */
+export function createSignalSyncFn(_options: SyncFunctionOptions): SyncFunction {
+  return async (): Promise<SyncResult> => {
+    const manager = getSignalSyncManager()
+    const initialized = await manager.initialize()
+    if (!initialized) {
+      throw new Error('Signal not configured or unavailable')
+    }
+
+    const initialMessages = manager.getProgress().totalMessagesSynced
+
+    try {
+      await manager.runSync()
+
+      const after = manager.getProgress()
+      if (after.status === 'error') {
+        const errorMessage = after.error ?? 'Signal sync failed'
+        console.error('[SignalSync] Error:', errorMessage)
+        throw new Error(errorMessage)
+      }
+
+      return {
+        success: true,
+        messagesSynced: Math.max(0, after.totalMessagesSynced - initialMessages),
+      }
+    } catch (error) {
+      const errorMessage = getErrorMessage(error)
+      console.error('[SignalSync] Error:', errorMessage)
+      throw new Error(errorMessage)
+    }
+  }
+}
+
+/**
+ * Create sync function for Signal contacts.
+ * Fetches contacts from signal-cli and syncs to Convex using the shared contacts mutation.
+ */
+export function createSignalContactsSyncFn(_options: SyncFunctionOptions): SyncFunction {
+  return async (): Promise<SyncResult> => {
+    // Use the sync manager's client when available — it routes through the daemon
+    // and avoids signal-cli data-directory lock contention with the running daemon.
+    const manager = getSignalSyncManager()
+    const initialized = await manager.initialize()
+    const managerClient = initialized ? manager.getClient() : null
+
+    let contacts: SignalContact[]
+
+    if (managerClient) {
+      contacts = await managerClient.listContacts()
+    } else {
+      // Fallback: standalone client (no daemon running)
+      const credentials = loadSignalCredentials()
+      if (!credentials) {
+        throw new Error('Signal not configured')
+      }
+
+      const client = new SignalClient({
+        account: credentials.account,
+        cliPath: credentials.cliPath,
+      })
+
+      if (!(await client.isAvailable())) {
+        throw new Error('signal-cli not available')
+      }
+
+      contacts = await client.listContacts()
+    }
+    if (contacts.length === 0) {
+      return { success: true, contactsSynced: 0 }
+    }
+
+    // Transform Signal contacts to the shared contact input format
+    const contactInputs = contacts.map((c: SignalContact) => {
+      const name = c.name?.trim()
+        || [c.profile?.givenName, c.profile?.familyName].filter(Boolean).join(' ').trim()
+        || [c.givenName, c.familyName].filter(Boolean).join(' ').trim()
+        || c.number
+      return {
+        displayName: name,
+        company: null,
+        phoneNumbers: [c.number],
+        emails: [] as string[],
+      }
+    })
+
+    const convexClient = createConvexClient()
+    const token = await setConvexAuth(convexClient)
+    if (!token) {
+      throw new Error('Failed to authenticate with Convex')
+    }
+
+    // Use syncSignalContacts — merges with existing macOS contacts by phone number,
+    // and tags new handles with platform "signal" so they link to Signal conversations
+    const BATCH_SIZE = 50
+    let totalNew = 0
+    let totalUpdated = 0
+    const errors: string[] = []
+
+    for (let i = 0; i < contactInputs.length; i += BATCH_SIZE) {
+      const batch = contactInputs.slice(i, i + BATCH_SIZE)
+      try {
+        const result = await convexClient.mutation(api.sync.syncSignalContacts, { contacts: batch })
+        totalNew += result.contactsCount
+        totalUpdated += result.updatedCount
+        errors.push(...result.errors)
+      } catch (error) {
+        const msg = error instanceof Error ? error.message : String(error)
+        errors.push(msg)
+      }
+    }
+
+    const totalSynced = totalNew + totalUpdated
+    console.log(`[SignalContactsSync] Synced ${totalNew} new, ${totalUpdated} updated contacts`)
+
+    if (errors.length > 0) {
+      const errorMessage = formatSyncErrors(errors)
+      console.error('[SignalContactsSync] Completed with errors:', errorMessage)
+      throw new Error(errorMessage)
+    }
+
+    return { success: true, contactsSynced: totalSynced }
+  }
+}
+
+// ============================================================================
 // Slack Sync
 // ============================================================================
 
@@ -312,7 +448,7 @@ export function createSlackSyncFn(
  * Also returns workspace IDs for multi-instance types like Slack.
  */
 export interface SyncFunctionRegistration {
-  syncType: 'contacts' | 'imessage' | 'linkedin' | 'linkedin_contacts' | 'slack'
+  syncType: 'contacts' | 'imessage' | 'linkedin' | 'linkedin_contacts' | 'signal' | 'signal_contacts' | 'slack'
   workspaceId?: string
   syncFn: SyncFunction
 }
@@ -345,6 +481,22 @@ export async function createAllSyncFunctions(
     registrations.push({
       syncType: 'linkedin',
       syncFn: createLinkedInMessagesSyncFn(options),
+    })
+  }
+
+  // Signal syncs - only register if credentials exist
+  const signalCredentials = loadSignalCredentials()
+  if (signalCredentials) {
+    // Signal contacts sync (phase 2: contacts_dependent - runs after macOS contacts)
+    registrations.push({
+      syncType: 'signal_contacts',
+      syncFn: createSignalContactsSyncFn(options),
+    })
+
+    // Signal messages sync (phase 3)
+    registrations.push({
+      syncType: 'signal',
+      syncFn: createSignalSyncFn(options),
     })
   }
 

@@ -16,9 +16,12 @@ export const handleTypeValidator = v.union(
   v.literal("phone"),
   v.literal("email"),
   v.literal("slack_id"),
+  v.literal("signal_id"),
   v.literal("linkedin_handle"),  // vanity URLs (linkedin)
   v.literal("linkedin_urn"),     // platform URNs (linkedin)
-  v.literal("twitter_handle")
+  v.literal("urn"),              // legacy
+  v.literal("twitter_handle"),
+  v.literal("twitter_user_id")
 );
 
 export const conversationTypeValidator = v.union(

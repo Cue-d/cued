@@ -28,7 +28,7 @@ export type ActionPlatform =
 /**
  * Platforms that support sync operations.
  * Same as ActionPlatform since schema allows all platforms in syncCursors.
- * In practice, only imessage, gmail, slack, and linkedin have active sync adapters.
+ * In practice, imessage, gmail, slack, linkedin, and signal have active sync adapters.
  */
 export type SyncPlatform = ActionPlatform;
 

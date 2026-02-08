@@ -11,6 +11,12 @@ export type {
   LinkedInStatusResult,
   LinkedInSyncProgress,
   LinkedInSendMessageResult,
+  SignalStatusResult,
+  SignalSyncProgress,
+  SignalSendMessageResult,
+  SignalLoginCredentials,
+  SignalSetupResult,
+  SignalLoginResult,
   SlackSyncProgress,
   SlackWorkspaceInfo,
   SlackStatusResult,
@@ -25,6 +31,10 @@ import type {
   UnifiedSyncResult,
   LinkedInStatusResult,
   LinkedInSendMessageResult,
+  SignalLoginCredentials,
+  SignalSetupResult,
+  SignalLoginResult,
+  SignalSendMessageResult,
   SlackWorkspaceInfo,
   SlackLoginResult,
   SlackDisconnectResult,
@@ -219,6 +229,62 @@ export function useSlack(): UseSlackReturn {
   )
 
   return { disconnect, isConnected: workspaces.length > 0, isLoading, login, refreshWorkspaces, workspaces }
+}
+
+interface UseSignalReturn {
+  isLoading: boolean
+  isLoggedIn: boolean
+  setup: (credentials?: SignalLoginCredentials) => Promise<SignalSetupResult>
+  openLinkTerminal: (cliPath: string) => Promise<{ success: boolean; error?: string }>
+  checkLink: (cliPath: string) => Promise<SignalLoginResult>
+  logout: () => Promise<{ error?: string; success: boolean }>
+  sendMessage: (threadOrRecipient: string, text: string) => Promise<SignalSendMessageResult>
+}
+
+export function useSignal(): UseSignalReturn {
+  const [isLoggedIn, setIsLoggedIn] = useState(false)
+  const [isLoading, setIsLoading] = useState(true)
+  const electron = useElectron()
+
+  useEffect(() => {
+    electron.sync.signal.status().then((result) => {
+      setIsLoggedIn(result.isLoggedIn)
+      setIsLoading(false)
+    })
+  }, [electron])
+
+  const setup = useCallback(
+    (credentials?: SignalLoginCredentials) => electron.sync.signal.setup(credentials),
+    [electron]
+  )
+
+  const openLinkTerminal = useCallback(
+    (cliPath: string) => electron.sync.signal.openLinkTerminal(cliPath),
+    [electron]
+  )
+
+  const checkLink = useCallback(
+    async (cliPath: string) => {
+      const result = await electron.sync.signal.checkLink(cliPath)
+      if (result.isLoggedIn) setIsLoggedIn(true)
+      return result
+    },
+    [electron]
+  )
+
+  const logout = useCallback(async () => {
+    const result = await electron.sync.signal.logout()
+    if (result.success) setIsLoggedIn(false)
+    return result
+  }, [electron])
+
+  const sendMessage = useCallback(
+    (threadOrRecipient: string, text: string) =>
+      electron.sync.signal.sendMessage(threadOrRecipient, text),
+    [electron]
+  )
+
+  return { isLoading, isLoggedIn, setup, openLinkTerminal, checkLink, logout, sendMessage }
 }
 
 interface UseConvexClientReturn {

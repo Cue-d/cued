@@ -271,6 +271,8 @@ export class SyncEngine {
       const runningState = (stateValue as { running: string }).running
       if (runningState === 'contactsPhase') {
         currentPhase = 'contacts'
+      } else if (runningState === 'contactsDependentPhase') {
+        currentPhase = 'contacts_dependent'
       } else if (runningState === 'messagesPhase') {
         currentPhase = 'messages'
       }
@@ -338,6 +340,20 @@ export class SyncEngine {
           platforms.slack = {
             messages: (platforms.slack?.messages ?? 0) + actor.totalMessagesSynced,
             workspaces: (platforms.slack?.workspaces ?? 0) + 1,
+          }
+          break
+
+        case 'signal':
+          platforms.signal = {
+            contacts: platforms.signal?.contacts ?? 0,
+            messages: actor.totalMessagesSynced,
+          }
+          break
+
+        case 'signal_contacts':
+          platforms.signal = {
+            contacts: actor.totalContactsSynced,
+            messages: platforms.signal?.messages ?? 0,
           }
           break
       }

@@ -729,7 +729,7 @@ export async function addResolvedUsernames(
         .withIndex("by_user_handle", (q) =>
           q.eq("userId", userId).eq("handle", urnValue)
         )
-        .unique();
+        .first();
       if (handle) {
         contactId = handle.contactId;
         break;
@@ -747,7 +747,7 @@ export async function addResolvedUsernames(
       .withIndex("by_user_handle", (q) =>
         q.eq("userId", userId).eq("handle", normalizedUsername)
       )
-      .unique();
+      .first();
 
     if (existingUsername) {
       skipped++;

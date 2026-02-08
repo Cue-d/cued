@@ -11,6 +11,7 @@
  * - `phone` - E.164 phone numbers (iMessage, WhatsApp)
  * - `email` - Email addresses (Gmail, iMessage)
  * - `slack_id` - Slack user IDs (format: UXXXXXXXX)
+ * - `signal_id` - Signal protocol identifiers (UUIDs, normalized to lowercase)
  * - `linkedin_handle` - LinkedIn vanity URLs (linkedin.com/in/username)
  * - `linkedin_urn` - LinkedIn URNs (format: urn:li:member:123456)
  * - `twitter_handle` - Twitter/X usernames (@handle)
@@ -19,6 +20,7 @@ export type HandleType =
   | "phone"
   | "email"
   | "slack_id"
+  | "signal_id"
   | "linkedin_handle"
   | "linkedin_urn"
   | "twitter_handle";
@@ -31,7 +33,8 @@ export type HandlePlatform =
   | "gmail"
   | "slack"
   | "linkedin"
-  | "twitter";
+  | "twitter"
+  | "signal";
 
 /**
  * A contact handle (phone, email, social ID, etc.)

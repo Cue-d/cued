@@ -1,12 +1,13 @@
 /**
  * XState v5 Orchestrator Machine
  *
- * Coordinates two-phase sync:
+ * Coordinates three-phase sync:
  * Phase 1: Contacts sync (macOS Contacts, LinkedIn contacts)
- * Phase 2: Messages sync (iMessage, LinkedIn, Slack) - starts after contacts complete
+ * Phase 2: Dependent contacts sync (Signal contacts) - starts after phase 1 to avoid OCC conflicts
+ * Phase 3: Messages sync (iMessage, LinkedIn, Slack, Signal) - starts after contacts complete
  *
  * This ensures contacts are available before processing messages for proper
- * contact resolution.
+ * contact resolution, and avoids OCC conflicts from concurrent contact mutations.
  */
 
 import { setup, assign, createActor, type ActorRefFrom } from 'xstate'
@@ -211,12 +212,32 @@ export const orchestratorMachine = setup({
         context.actors.get(key)?.send({ type: 'SYNC' })
       }
     },
+    startContactsDependentPhase: ({ context }) => {
+      console.log('[Orchestrator] Starting contacts_dependent phase')
+      const dependentActors = getActorsForPhase(context.actorConfigs, 'contacts_dependent')
+      for (const key of dependentActors) {
+        const actor = context.actors.get(key)
+        if (actor) {
+          console.log(`[Orchestrator] Triggering sync for: ${key}`)
+          actor.send({ type: 'SYNC' })
+        }
+      }
+    },
     startMessagesPhase: ({ context }) => {
       const messagesActors = getActorsForPhase(context.actorConfigs, 'messages')
       console.log(`[Orchestrator] Starting messages phase (${messagesActors.length} actors)`)
       for (const key of messagesActors) {
         context.actors.get(key)?.send({ type: 'SYNC' })
       }
+    },
+    logContactsPhaseComplete: () => {
+      console.log('[Orchestrator] contacts phase complete')
+    },
+    logContactsDependentPhaseComplete: () => {
+      console.log('[Orchestrator] contacts_dependent phase complete')
+    },
+    logMessagesPhaseComplete: () => {
+      console.log('[Orchestrator] messages phase complete')
     },
     setRunning: assign({ isRunning: () => true }),
     queueSyncRequest: assign({
@@ -228,11 +249,17 @@ export const orchestratorMachine = setup({
     hasContactsActors: ({ context }) => {
       return getActorsForPhase(context.actorConfigs, 'contacts').length > 0
     },
+    hasContactsDependentActors: ({ context }) => {
+      return getActorsForPhase(context.actorConfigs, 'contacts_dependent').length > 0
+    },
     hasMessagesActors: ({ context }) => {
       return getActorsForPhase(context.actorConfigs, 'messages').length > 0
     },
     isContactsPhaseComplete: ({ context }) => {
       return isPhaseComplete(context.completedActors, context.actorConfigs, 'contacts')
+    },
+    isContactsDependentPhaseComplete: ({ context }) => {
+      return isPhaseComplete(context.completedActors, context.actorConfigs, 'contacts_dependent')
     },
     isMessagesPhaseComplete: ({ context }) => {
       return isPhaseComplete(context.completedActors, context.actorConfigs, 'messages')
@@ -316,6 +343,46 @@ export const orchestratorMachine = setup({
           },
         },
         barrier: {
+          entry: ['logContactsPhaseComplete'],
+          always: [
+            {
+              guard: 'hasContactsDependentActors',
+              target: 'contactsDependentPhase',
+            },
+            {
+              guard: 'hasMessagesActors',
+              target: 'messagesPhase',
+            },
+            {
+              target: '#sync-orchestrator.complete',
+            },
+          ],
+        },
+        contactsDependentPhase: {
+          entry: ['startContactsDependentPhase'],
+          always: [
+            {
+              guard: 'isContactsDependentPhaseComplete',
+              target: 'contactsDependentBarrier',
+            },
+          ],
+          on: {
+            ACTOR_COMPLETED: [
+              {
+                guard: ({ context, event }) =>
+                  event.type === 'ACTOR_COMPLETED' &&
+                  wouldCompletePhase(context.completedActors, context.actorConfigs, 'contacts_dependent', event.actorId),
+                target: 'contactsDependentBarrier',
+                actions: ['markActorCompleted'],
+              },
+              {
+                actions: ['markActorCompleted'],
+              },
+            ],
+          },
+        },
+        contactsDependentBarrier: {
+          entry: ['logContactsDependentPhaseComplete'],
           always: [
             {
               guard: 'hasMessagesActors',
@@ -352,7 +419,10 @@ export const orchestratorMachine = setup({
       },
     },
     complete: {
-      entry: ['recordSyncComplete'],
+      entry: [
+        'logMessagesPhaseComplete',
+        'recordSyncComplete',
+      ],
       always: [
         {
           guard: 'hasPendingSyncRequest',

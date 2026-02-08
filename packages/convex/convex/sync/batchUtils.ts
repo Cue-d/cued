@@ -7,7 +7,7 @@ import type { Doc, Id } from "../_generated/dataModel";
 import type { MutationCtx } from "../_generated/server";
 import { BATCH_SIZE } from "./shared";
 
-type Platform = "imessage" | "gmail" | "slack" | "linkedin";
+type Platform = "imessage" | "gmail" | "slack" | "linkedin" | "signal";
 
 /**
  * Batch fetch existing conversations by platform and platformConversationId.

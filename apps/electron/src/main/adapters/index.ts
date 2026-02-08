@@ -6,6 +6,7 @@ import type { ActionPlatform, PlatformAdapter } from "@cued/shared";
 
 import { IMessageAdapter } from "../platforms/imessage/adapter";
 import { LinkedInAdapter } from "../platforms/linkedin/adapter";
+import { SignalAdapter } from "../platforms/signal/adapter";
 import { SlackAdapter } from "../platforms/slack/adapter";
 
 /**
@@ -23,9 +24,8 @@ const adapterRegistry: Partial<
 > = {
   imessage: IMessageAdapter,
   linkedin: LinkedInAdapter,
+  signal: SignalAdapter,
   slack: SlackAdapter,
-  // Future adapters:
-  // signal: SignalAdapter,
   // whatsapp: WhatsAppAdapter,
   // twitter: TwitterAdapter,
 };
@@ -95,4 +95,5 @@ export function getSupportedPlatforms(): ActionPlatform[] {
 // Re-export adapter classes for testing
 export { IMessageAdapter } from "../platforms/imessage/adapter";
 export { LinkedInAdapter } from "../platforms/linkedin/adapter";
+export { SignalAdapter } from "../platforms/signal/adapter";
 export { SlackAdapter } from "../platforms/slack/adapter";

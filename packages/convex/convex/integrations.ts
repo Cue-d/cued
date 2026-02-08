@@ -115,7 +115,13 @@ export const getUserIntegrations = query({
 
 export const getIntegrationStatus = query({
   args: {
-    platform: v.union(v.literal("imessage"), v.literal("gmail"), v.literal("slack")),
+    platform: v.union(
+      v.literal("imessage"),
+      v.literal("gmail"),
+      v.literal("slack"),
+      v.literal("linkedin"),
+      v.literal("signal")
+    ),
   },
   handler: async (ctx, args) => {
     const user = await getAuthenticatedUser(ctx);

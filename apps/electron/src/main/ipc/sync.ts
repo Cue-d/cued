@@ -20,6 +20,22 @@ import {
   getAllSlackCredentials,
   type SlackSyncProgress,
 } from "../platforms/slack/index.js";
+import {
+  checkSignalLoginStatus,
+  setupSignalCli,
+  startLinkInTerminal,
+  checkLinkResult,
+  clearSignalCredentials,
+  getSignalSyncManager,
+  type SignalSyncProgress,
+} from "../platforms/signal/index.js";
+import type {
+  SignalLoginCredentials,
+  SignalLoginResult,
+  SignalSetupResult,
+  SignalSendMessageResult,
+  SignalStatusResult,
+} from "../../shared/electron-api";
 import { getAdapter } from "../adapters/index.js";
 import { getSyncEngine } from "../sync/engine.js";
 import { type SyncProgress } from "../sync/types.js";
@@ -108,6 +124,7 @@ export function setupAllSyncIpcHandlers(mainWindow: BrowserWindow | null): void 
   setupUnifiedSyncHandlers(mainWindow);
   setupLinkedInHandlers(mainWindow);
   setupSlackHandlers(mainWindow);
+  setupSignalHandlers(mainWindow);
 }
 
 // ============================================================================
@@ -369,6 +386,131 @@ function setupSlackHandlers(_mainWindow: BrowserWindow | null): void {
 }
 
 // ============================================================================
+// Signal Handlers (Setup/Link/Status/SendMessage only)
+// ============================================================================
+
+function setupSignalHandlers(_mainWindow: BrowserWindow | null): void {
+  // Status check
+  ipcMain.handle("sync:signal:status", async (): Promise<SignalStatusResult> => {
+    try {
+      const result = await checkSignalLoginStatus();
+      return { isLoggedIn: result.isLoggedIn, error: result.error };
+    } catch (error) {
+      const message = getErrorMessage(error);
+      console.error("[Sync IPC] Signal status check failed:", message);
+      return { isLoggedIn: false, error: message };
+    }
+  });
+
+  // Setup (Java check + signal-cli download)
+  ipcMain.handle(
+    "sync:signal:setup",
+    async (_event, credentials?: SignalLoginCredentials): Promise<SignalSetupResult> => {
+      try {
+        return await setupSignalCli(credentials);
+      } catch (error) {
+        const message = getErrorMessage(error);
+        console.error("[Sync IPC] Signal setup failed:", message);
+        return { success: false, steps: [], error: message };
+      }
+    }
+  );
+
+  // Open Terminal.app for linking
+  ipcMain.handle(
+    "sync:signal:openLinkTerminal",
+    async (_event, cliPath: string): Promise<{ success: boolean; error?: string }> => {
+      try {
+        return await startLinkInTerminal(cliPath);
+      } catch (error) {
+        const message = getErrorMessage(error);
+        console.error("[Sync IPC] Signal open link terminal failed:", message);
+        return { success: false, error: message };
+      }
+    }
+  );
+
+  // Check if linking completed
+  ipcMain.handle(
+    "sync:signal:checkLink",
+    async (_event, cliPath: string): Promise<SignalLoginResult> => {
+      try {
+        const result = await checkLinkResult(cliPath);
+
+        // Register sync functions with the engine after successful link
+        if (result.success && result.isLoggedIn) {
+          const { createSignalSyncFn, createSignalContactsSyncFn } = await import("../sync/sync-functions.js");
+          const { getValidAccessToken } = await import("../auth/index.js");
+          const syncOptions = { getAuthToken: getValidAccessToken };
+
+          getSyncEngine().registerSync("signal_contacts", createSignalContactsSyncFn(syncOptions));
+          getSyncEngine().registerSync("signal", createSignalSyncFn(syncOptions));
+        }
+
+        return result;
+      } catch (error) {
+        const message = getErrorMessage(error);
+        console.error("[Sync IPC] Signal check link failed:", message);
+        return { success: false, isLoggedIn: false, error: message };
+      }
+    }
+  );
+
+  // Logout
+  ipcMain.handle("sync:signal:logout", async (): Promise<{ success: boolean; error?: string }> => {
+    try {
+      getSyncEngine().unregisterSync("signal");
+      getSyncEngine().unregisterSync("signal_contacts");
+      const manager = getSignalSyncManager();
+      await manager.disconnect();
+      clearSignalCredentials();
+      return { success: true };
+    } catch (error) {
+      const message = getErrorMessage(error);
+      console.error("[Sync IPC] Signal logout failed:", message);
+      return { success: false, error: message };
+    }
+  });
+
+  // Send message
+  ipcMain.handle(
+    "sync:signal:sendMessage",
+    async (_event, threadOrRecipient: string, text: string): Promise<SignalSendMessageResult> => {
+      try {
+        const adapter = getAdapter("signal");
+        if (!adapter) {
+          return { success: false, error: "Signal adapter not available" };
+        }
+
+        const result = await adapter.send({
+          id: `ipc-${Date.now()}`,
+          platform: "signal",
+          recipientHandle: threadOrRecipient,
+          text,
+          threadId: threadOrRecipient,
+        });
+
+        if (!result.success) {
+          return { success: false, error: result.error };
+        }
+
+        return { success: true, messageId: result.messageId };
+      } catch (error) {
+        const errorMessage = getErrorMessage(error);
+        console.error("[Sync IPC] Signal send message failed:", errorMessage);
+        return { success: false, error: errorMessage };
+      }
+    }
+  );
+
+  // Get sync progress
+  ipcMain.handle("sync:signal:getProgress", async (): Promise<SignalSyncProgress> => {
+    const manager = getSignalSyncManager();
+    return manager.getProgress();
+  });
+}
+
+// ============================================================================
 // Cleanup
 // ============================================================================
 
@@ -390,6 +532,10 @@ export async function cleanupSyncManagers(): Promise<void> {
     for (const manager of slackManagers) {
       manager.stop();
     }
+
+    // Stop Signal sync manager
+    const signalManager = getSignalSyncManager();
+    signalManager.stop();
 
     linkedInScraper = null;
   } catch (error) {

@@ -10,7 +10,7 @@ import {
   Skeleton,
 } from "@cued/ui"
 import { type ActionPlatform } from "@cued/shared"
-import { useAuthState, useConvexClient, useLinkedIn, useSlack } from "./hooks/use-electron"
+import { useAuthState, useConvexClient, useLinkedIn, useSlack, useSignal } from "./hooks/use-electron"
 import { ThemeProvider } from "./hooks/use-theme"
 import { AppShell, type NavPage } from "./components/app-shell"
 import { FocusProvider } from "./context/FocusContext"
@@ -55,14 +55,16 @@ function AuthenticatedApp({ convexUrl, user, onSignOut }: { convexUrl: string; u
   // Integration status hooks
   const { isLoggedIn: linkedInConnected } = useLinkedIn()
   const { isConnected: slackConnected } = useSlack()
+  const { isLoggedIn: signalConnected } = useSignal()
 
   // Build connected platforms list
   const connectedPlatforms = useMemo(() => {
     const platforms: ActionPlatform[] = ['imessage'] // iMessage always connected on macOS
     if (linkedInConnected) platforms.push('linkedin')
     if (slackConnected) platforms.push('slack')
+    if (signalConnected) platforms.push('signal')
     return platforms
-  }, [linkedInConnected, slackConnected])
+  }, [linkedInConnected, slackConnected, signalConnected])
 
   const handleNavigate = useCallback((page: NavPage) => setCurrentPage(page), [])
 

@@ -23,11 +23,12 @@ export interface PlatformSyncResult {
   contacts?: { synced: number; updated: number }
   imessage?: { messages: number }
   linkedin?: { contacts: number; messages: number }
+  signal?: { contacts: number; messages: number }
   slack?: { messages: number; workspaces: number }
 }
 
 export interface UnifiedSyncProgress {
-  currentPlatform?: "contacts" | "imessage" | "linkedin" | "slack"
+  currentPlatform?: "contacts" | "imessage" | "linkedin" | "signal" | "slack"
   error?: string
   lastSyncAt?: number
   platforms: PlatformSyncResult
@@ -60,6 +61,49 @@ export interface LinkedInSendMessageResult {
   error?: string
   messageId?: string
   success: boolean
+}
+
+// Signal types
+export interface SignalStatusResult {
+  error?: string
+  isLoggedIn: boolean
+}
+
+export interface SignalSyncProgress {
+  error?: string
+  lastSyncAt?: number
+  status: "error" | "idle" | "syncing"
+  totalMessagesSynced: number
+}
+
+export interface SignalSendMessageResult {
+  error?: string
+  messageId?: string
+  success: boolean
+}
+
+export interface SignalLoginCredentials {
+  cliPath?: string
+}
+
+export interface SignalValidationStep {
+  step: "java" | "install" | "link"
+  status: "pending" | "running" | "success" | "error"
+  error?: string
+}
+
+export interface SignalSetupResult {
+  success: boolean
+  cliPath?: string
+  steps: SignalValidationStep[]
+  error?: string
+}
+
+export interface SignalLoginResult {
+  success: boolean
+  isLoggedIn: boolean
+  steps?: SignalValidationStep[]
+  error?: string
 }
 
 // Slack types
@@ -148,6 +192,16 @@ export interface ElectronAPI {
       disconnect: (teamId?: string) => Promise<SlackDisconnectResult>
       listWorkspaces: () => Promise<{ workspaces: SlackWorkspaceInfo[] }>
       getProgress: () => Promise<SlackSyncProgress>
+    }
+
+    signal: {
+      status: () => Promise<SignalStatusResult>
+      setup: (credentials?: SignalLoginCredentials) => Promise<SignalSetupResult>
+      openLinkTerminal: (cliPath: string) => Promise<{ success: boolean; error?: string }>
+      checkLink: (cliPath: string) => Promise<SignalLoginResult>
+      logout: () => Promise<{ error?: string; success: boolean }>
+      sendMessage: (threadOrRecipient: string, text: string) => Promise<SignalSendMessageResult>
+      getProgress: () => Promise<SignalSyncProgress>
     }
   }
 }

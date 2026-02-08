@@ -8,6 +8,7 @@
  * - ./sync/imessage.ts - iMessage and macOS Contacts sync
  * - ./sync/gmail.ts - Gmail emails and Google Contacts sync
  * - ./sync/slack.ts - Slack messages sync
+ * - ./sync/signal.ts - Signal messages sync
  * - ./sync/shared.ts - Common utilities and helpers
  */
 
@@ -62,6 +63,10 @@ import {
   addResolvedUsernames,
   usernameResolutionInput,
 } from "./sync/linkedin";
+import {
+  signalMessagesBatchInput,
+  syncSignalMessagesInternal,
+} from "./sync/signal";
 
 // Re-export for backwards compatibility
 export { CURRENT_SYNC_VERSION };
@@ -852,6 +857,51 @@ async function upsertSocialContact(
 
   return { isNew: true, contactId };
 }
+
+// ============================================================================
+// Signal Contacts Sync
+// ============================================================================
+
+/**
+ * Sync Signal contacts to Convex.
+ * Reuses the shared contact upsert logic with phone-based dedup.
+ * Contacts with matching phone numbers merge with existing macOS contacts.
+ */
+export const syncSignalContacts = mutation({
+  args: {
+    contacts: v.array(contactInput),
+  },
+  handler: async (ctx, args) => {
+    const identity = await ctx.auth.getUserIdentity();
+    if (!identity) {
+      throw new Error("Unauthorized: Must be authenticated to sync Signal contacts");
+    }
+
+    const user = await getOrCreateUser(ctx, identity);
+    return syncContactsInternal(ctx, user._id, args.contacts, "signal");
+  },
+});
+
+// ============================================================================
+// Signal Messaging Sync
+// ============================================================================
+
+/**
+ * Sync Signal messages from Electron to Convex.
+ * Called by SignalSyncManager after polling signal-cli.
+ */
+export const syncSignalMessages = mutation({
+  args: signalMessagesBatchInput,
+  handler: async (ctx, args) => {
+    const identity = await ctx.auth.getUserIdentity();
+    if (!identity) {
+      throw new Error("Unauthorized: Must be authenticated to sync Signal messages");
+    }
+
+    const user = await getOrCreateUser(ctx, identity);
+    return syncSignalMessagesInternal(ctx, user._id, args.messages);
+  },
+});
 
 // ============================================================================
 // LinkedIn Messaging Sync

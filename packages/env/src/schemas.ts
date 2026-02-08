@@ -56,6 +56,8 @@ export const electronSchema = z.object({
   CONVEX_URL: z.string().url("CONVEX_URL must be a valid URL"),
   WORKOS_CLIENT_ID: z.string().min(1, "WORKOS_CLIENT_ID is required"),
   API_BASE_URL: z.string().url().optional(),
+  SIGNAL_ACCOUNT: z.string().optional(),
+  SIGNAL_CLI_PATH: z.string().optional(),
   NODE_ENV: z.enum(["development", "production", "test"]).optional(),
 })
 

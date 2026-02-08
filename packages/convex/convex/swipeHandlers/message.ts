@@ -42,9 +42,9 @@ export const messageHandler: ActionSwipeHandler = {
     let messageSent = false;
     let queuedMessageId: Id<"messageQueue"> | null = null;
 
-    // Handle iMessage, LinkedIn, and Slack sending via unified message queue
+    // Handle iMessage, LinkedIn, Slack, and Signal sending via unified message queue
     const isQueueablePlatform =
-      platform === "imessage" || platform === "linkedin" || platform === "slack";
+      platform === "imessage" || platform === "linkedin" || platform === "slack" || platform === "signal";
 
     if (isQueueablePlatform && responseText) {
       // Validate conversation exists for queueable platforms
@@ -100,6 +100,26 @@ export const messageHandler: ActionSwipeHandler = {
             );
           }
           recipientHandle = chatIdentifier;
+        } else if (platform === "signal") {
+          const handles = await ctx.db
+            .query("contactHandles")
+            .withIndex("by_contact", (q) => q.eq("contactId", participantId))
+            .collect();
+
+          const signalHandle =
+            handles.find((h) => h.platform === "signal") ??
+            handles.find((h) => h.platform === "imessage" && h.handleType === "phone");
+
+          if (!signalHandle) {
+            throw new Error(
+              `Cannot send Signal message: no Signal handle found for contact.`
+            );
+          }
+
+          recipientHandle = signalHandle.handle;
+          chatIdentifier =
+            conversation.platformConversationId ||
+            `dm:${recipientHandle.toLowerCase()}`;
         }
       } else if (isGroup) {
         chatIdentifier = conversation.platformConversationId;
