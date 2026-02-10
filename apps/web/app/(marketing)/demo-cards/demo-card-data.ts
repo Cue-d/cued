@@ -102,33 +102,27 @@ export const DEMO_CARDS: DemoCard[] = [
     personName: "Sarah Chen",
     messages: [
       {
-        id: "m0",
-        content: "Really enjoyed your talk on product-led growth btw",
-        isFromMe: false,
-        senderName: "Sarah Chen",
-      },
-      {
         id: "m1",
         content:
-          "Hey! It was great meeting you at the conference yesterday. Would love to grab coffee sometime this week.",
+          "Great meeting you at the conference! Would love to grab coffee this week.",
         isFromMe: false,
         senderName: "Sarah Chen",
       },
       {
         id: "m2",
-        content:
-          "Also, I mentioned that intro to our head of product — still happy to make that happen if you're interested.",
-        isFromMe: false,
-        senderName: "Sarah Chen",
-      },
-      {
-        id: "m3",
         content: "Sounds great! How about Thursday morning?",
         isFromMe: true,
       },
+      {
+        id: "m3",
+        content:
+          "Thursday works! I also mentioned that intro to our head of product — still happy to make that happen.",
+        isFromMe: false,
+        senderName: "Sarah Chen",
+      },
     ],
     draftText:
-      "That would be amazing — Thursday at 10am works for me! And yes, I'd love the intro to your head of product. Really appreciate it!",
+      "Thursday at 10am works! And yes, I'd love the intro. Really appreciate it.",
     reason: "respond",
   },
   {
@@ -138,21 +132,15 @@ export const DEMO_CARDS: DemoCard[] = [
     personName: "James Park",
     messages: [
       {
-        id: "m3b",
-        content: "Great chatting at the founders dinner last week.",
-        isFromMe: true,
-      },
-      {
         id: "m4",
         content:
-          "Likewise! I've put together the partnership proposal we discussed. Let me know when you have a chance to review.",
+          "I've put together the partnership proposal we discussed. Let me know when you can review.",
         isFromMe: false,
         senderName: "James Park",
       },
       {
         id: "m5",
-        content:
-          "Thanks James! I'll take a look this week and get back to you.",
+        content: "Thanks James! I'll take a look this week.",
         isFromMe: true,
       },
       {
@@ -163,7 +151,7 @@ export const DEMO_CARDS: DemoCard[] = [
       },
     ],
     draftText:
-      "Hey James — I've reviewed the proposal and it looks solid. A few thoughts I'd love to discuss. Free for a quick call tomorrow afternoon?",
+      "Reviewed the proposal — looks solid. Free for a quick call tomorrow afternoon?",
     reason: "follow_up",
   },
   {
@@ -175,26 +163,25 @@ export const DEMO_CARDS: DemoCard[] = [
       {
         id: "m7",
         content:
-          "Hi! I saw your post about hiring for a senior eng role. I have someone who'd be a perfect fit — she led infra at Datadog for 3 years.",
+          "I saw your post about hiring for a senior eng role. I have someone who'd be a perfect fit.",
         isFromMe: false,
         senderName: "Priya Sharma",
       },
       {
         id: "m8",
-        content:
-          "Oh amazing, we're definitely still looking. Can you tell me more about her background?",
+        content: "Oh amazing, we're definitely still looking. Tell me more?",
         isFromMe: true,
       },
       {
         id: "m9",
         content:
-          "For sure — she specializes in distributed systems and has scaled teams from 5 to 30. Want me to intro you two?",
+          "She led infra at Datadog for 3 years. Want me to intro you two?",
         isFromMe: false,
         senderName: "Priya Sharma",
       },
     ],
     draftText:
-      "That sounds like a great fit! Yes please, would love an intro. Happy to chat with her this week if she's available.",
+      "That sounds like a great fit! Yes please, would love an intro.",
     reason: "respond",
   },
   {
@@ -226,8 +213,7 @@ export const DEMO_CARDS: DemoCard[] = [
     personName: "Alex Rivera",
     company: "Figma",
     tags: ["design", "met at offsite"],
-    notes:
-      "Lead designer on FigJam. Interested in collaboration on our design system.",
+    notes: "Lead designer on FigJam. Interested in design system collaboration.",
   },
   {
     type: "message",
@@ -237,8 +223,7 @@ export const DEMO_CARDS: DemoCard[] = [
     messages: [
       {
         id: "m10",
-        content:
-          "Hey — quick q. Are you still planning to attend the YC demo day next Tuesday?",
+        content: "Are you going to YC demo day next Tuesday?",
         isFromMe: false,
         senderName: "Dana Kim",
       },
@@ -250,13 +235,13 @@ export const DEMO_CARDS: DemoCard[] = [
       {
         id: "m12",
         content:
-          "Yeah! Want to grab dinner after? I know a few other founders going and we could do a group thing.",
+          "Yeah! Want to grab dinner after? I know a few other founders going.",
         isFromMe: false,
         senderName: "Dana Kim",
       },
     ],
     draftText:
-      "That sounds awesome! Count me in. Want me to reach out to a couple people on my end too?",
+      "Count me in! Want me to reach out to a couple people on my end too?",
     reason: "respond",
   },
   {
@@ -273,20 +258,18 @@ export const DEMO_CARDS: DemoCard[] = [
       },
       {
         id: "m14",
-        content:
-          "Thanks Lena! We should catch up soon — it's been way too long.",
+        content: "Thanks Lena! We should catch up — it's been too long.",
         isFromMe: true,
       },
       {
         id: "m15",
         content:
-          "Yes!! Let's do brunch this weekend? I know a great new spot in Hayes Valley.",
+          "Yes!! Brunch this weekend? Great new spot in Hayes Valley.",
         isFromMe: false,
         senderName: "Lena Torres",
       },
     ],
-    draftText:
-      "That sounds perfect! Saturday or Sunday works for me. Just send me the address!",
+    draftText: "That sounds perfect! Saturday or Sunday works for me.",
     reason: "respond",
   },
   {
@@ -298,26 +281,25 @@ export const DEMO_CARDS: DemoCard[] = [
       {
         id: "m16",
         content:
-          "Following up from our meeting last week. The team was really impressed with your product demo.",
+          "Following up — the team was impressed with your product demo.",
         isFromMe: false,
         senderName: "Ryan Kessler",
       },
       {
         id: "m17",
-        content:
-          "That's great to hear! Happy to answer any follow-up questions.",
+        content: "Great to hear! Happy to answer any follow-up questions.",
         isFromMe: true,
       },
       {
         id: "m18",
         content:
-          "We'd love to schedule a deeper dive with our technical team. Would next Wednesday work?",
+          "We'd love a deeper dive with our technical team. Would next Wednesday work?",
         isFromMe: false,
         senderName: "Ryan Kessler",
       },
     ],
     draftText:
-      "Wednesday works great! I'll prepare a more detailed technical walkthrough. Should I include our API documentation ahead of time?",
+      "Wednesday works! I'll prepare a technical walkthrough. Should I send API docs ahead of time?",
     reason: "follow_up",
   },
   {
@@ -327,8 +309,7 @@ export const DEMO_CARDS: DemoCard[] = [
     personName: "Tomoko Sato",
     company: "Notion",
     tags: ["product", "SF meetup"],
-    notes:
-      "PM on Notion's integrations team. Interested in potential API partnership.",
+    notes: "PM on Notion integrations. Interested in API partnership.",
   },
   {
     type: "resolve",

@@ -1,5 +1,5 @@
 import { ArrowUp } from "lucide-react";
-import { PlatformIcon, platformColor } from "./shared";
+import { PlatformBadge } from "./shared";
 import type { DemoMessage, DemoPlatform } from "../demo-card-data";
 
 interface DemoMessageCardProps {
@@ -20,17 +20,15 @@ export function DemoMessageCard({
   return (
     <div className="flex h-full w-full flex-col">
       {/* Header */}
-      <div className="flex shrink-0 items-center justify-center gap-2 px-6 py-4">
-        <span className={platformColor(platform)}>
-          <PlatformIcon platform={platform} className="size-4" />
-        </span>
+      <div className="flex shrink-0 items-center justify-center gap-2.5 px-8 py-5">
+        <PlatformBadge platform={platform} />
         <span className="text-sm font-semibold text-foreground">
           {personName}
         </span>
       </div>
 
       {/* Messages */}
-      <div className="flex flex-1 flex-col justify-end gap-2 overflow-hidden px-6 py-4">
+      <div className="flex flex-1 flex-col justify-end gap-2.5 overflow-hidden px-8 py-4">
         {reason && (
           <div className="mb-1 self-center">
             <span className="rounded-full bg-muted px-2.5 py-0.5 text-[10px] font-medium text-muted-foreground shadow-sm">
@@ -57,7 +55,7 @@ export function DemoMessageCard({
       </div>
 
       {/* Draft response */}
-      <div className="shrink-0 px-5 pb-5 pt-2">
+      <div className="shrink-0 px-7 pb-6 pt-2">
         <div className="flex items-end gap-2 rounded-xl bg-muted/40 px-4 py-3 shadow-sm">
           <p className="flex-1 text-[13px] leading-relaxed text-foreground/60 line-clamp-3">
             {draftText}

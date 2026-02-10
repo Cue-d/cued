@@ -1,6 +1,6 @@
 import { ArrowLeftRight } from "lucide-react";
 import { getInitials } from "@cued/shared";
-import { PlatformIcon, platformColor } from "./shared";
+import { PlatformBadge } from "./shared";
 import type { DemoContact } from "../demo-card-data";
 
 interface DemoResolveCardProps {
@@ -66,9 +66,7 @@ function ContactPanel({ contact }: { contact: DemoContact }) {
               key={i}
               className="flex items-center gap-2 text-xs text-muted-foreground"
             >
-              <span className={platformColor(handle.platform)}>
-                <PlatformIcon platform={handle.platform} className="size-3" />
-              </span>
+              <PlatformBadge platform={handle.platform} />
               <span className="truncate">{handle.value}</span>
             </div>
           ))}
@@ -90,7 +88,7 @@ export function DemoResolveCard({
   return (
     <div className="flex h-full w-full flex-col">
       {/* Header */}
-      <div className="shrink-0 p-6 pb-3">
+      <div className="shrink-0 px-8 pt-7 pb-4">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
             <span className="text-sm font-semibold">Possible duplicate</span>
@@ -110,7 +108,7 @@ export function DemoResolveCard({
       </div>
 
       {/* Side-by-side comparison */}
-      <div className="flex flex-1 items-start gap-3 px-6 py-3">
+      <div className="flex flex-1 items-start gap-3 px-8 py-4">
         <ContactPanel contact={contact1} />
         <div className="flex shrink-0 items-center justify-center py-4">
           <ArrowLeftRight className="size-4 text-muted-foreground/50" />

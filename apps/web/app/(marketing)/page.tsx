@@ -78,10 +78,10 @@ export default function Home() {
         </nav>
         <div className="flex flex-col items-center text-center lg:items-start lg:text-left">
           <div className="mx-auto mb-8 h-[1.5px] w-[72px] bg-border lg:mx-0" />
-          <h1 className="max-w-xl font-serif text-pretty text-4xl tracking-tighter sm:text-5xl">
+          <h1 className="max-w-xl font-serif text-pretty text-4xl tracking-tighter sm:text-[2.75rem] lg:text-5xl">
             Relationships are your compounding asset.
           </h1>
-          <p className="mt-8 max-w-md text-pretty text-lg text-muted-foreground">
+          <p className="mt-6 max-w-md text-pretty text-lg text-muted-foreground">
             A unified inbox that enriches your network and surfaces
             opportunities for you.
           </p>

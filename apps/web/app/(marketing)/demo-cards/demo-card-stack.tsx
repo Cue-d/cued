@@ -427,22 +427,36 @@ function showDemoToast(type: ToastType, personName: string) {
 
 // ── Countdown badge ──
 
+function AnimatedDigit({ digit }: { digit: string }) {
+  return (
+    <span className="relative inline-flex w-[0.58em] justify-center overflow-hidden">
+      <AnimatePresence mode="popLayout">
+        <motion.span
+          key={digit}
+          initial={{ opacity: 0, y: 8, filter: "blur(3px)" }}
+          animate={{ opacity: 1, y: 0, filter: "blur(0px)" }}
+          exit={{ opacity: 0, y: -8, filter: "blur(3px)" }}
+          transition={{ duration: 0.25, ease: "easeInOut" }}
+        >
+          {digit}
+        </motion.span>
+      </AnimatePresence>
+    </span>
+  );
+}
+
 function CountdownBadge({ count }: { count: number }) {
+  const digits = String(count).split("");
+
   return (
     <div className="absolute -bottom-14 left-1/2 z-50 -translate-x-1/2">
       <div className="flex items-center justify-center rounded-full bg-primary px-2.5 py-1 text-xs font-semibold tabular-nums text-primary-foreground shadow-lg">
-        <AnimatePresence mode="popLayout">
-          <motion.span
-            key={count}
-            initial={{ opacity: 0, filter: "blur(4px)", y: 6 }}
-            animate={{ opacity: 1, filter: "blur(0px)", y: 0 }}
-            exit={{ opacity: 0, filter: "blur(4px)", y: -6 }}
-            transition={{ duration: 0.3, ease: "easeInOut" }}
-          >
-            {count}
-          </motion.span>
-        </AnimatePresence>
-        <span className="ml-1">left</span>
+        <span className="inline-flex">
+          {digits.map((d, i) => (
+            <AnimatedDigit key={i} digit={d} />
+          ))}
+        </span>
+        <span className="ml-1">in queue</span>
       </div>
     </div>
   );
