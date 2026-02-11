@@ -1,18 +1,17 @@
 /**
  * Apple Contacts integration for Electron.
  *
- * Fetches contacts from Contacts.app using Swift CLI (cued-contacts) for high performance
- * (~100x faster than AppleScript). Falls back gracefully with clear error messages if unavailable.
- *
- * Based on backend/services/macos/contacts.py
+ * Fetches contacts from Contacts.app using node-mac-contacts native module.
+ * Provides cached lookup by phone number or email address.
  */
 
-import { execSync } from "child_process";
-import { accessSync, constants, existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from "fs";
+import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from "fs";
 import { homedir } from "os";
-import { dirname, join } from "path";
+import { join } from "path";
 import { ResolvedContact } from "../imessage/types";
 import { normalizePhone, getPhoneVariants } from "@cued/shared";
+import { loadNativeModule } from "../../native-module-loader";
+import type { NodeMacContacts } from "./types";
 
 /** Default cache directory for contacts */
 const CACHE_DIR = join(homedir(), ".cued");
@@ -20,12 +19,6 @@ const CACHE_FILE = join(CACHE_DIR, "contacts_cache.json");
 
 /** Cache expiry in milliseconds (24 hours) */
 const CACHE_EXPIRY_MS = 24 * 60 * 60 * 1000;
-
-/** Timeout for Swift CLI in milliseconds */
-const CLI_TIMEOUT_MS = 30000;
-
-/** Environment variable to override the binary path */
-const CONTACTS_BINARY_ENV_VAR = "CUED_CONTACTS_BINARY";
 
 /** Cached contacts data structure */
 interface ContactsCache {
@@ -37,66 +30,14 @@ interface ContactsCache {
   handleIndex: Record<string, number>;
 }
 
-/** JSON output from cued-contacts CLI */
-interface ContactsCliOutput {
-  contacts: Array<{
-    name: string;
-    emails: string[];
-    phones: string[];
-    company?: string | null;
-  }>;
-  count: number;
-  elapsed_seconds: number;
-}
+/** Lazily loaded native module */
+let _contacts: NodeMacContacts | null = null;
 
-/** JSON error output from cued-contacts CLI */
-interface ContactsCliError {
-  error: string;
-}
-
-/**
- * Get the path to the cued-contacts binary.
- *
- * Checks in order:
- * 1. Environment variable CUED_CONTACTS_BINARY
- * 2. Packaged app location (resources/swift/cued-contacts) - for production
- * 3. Development location (swift/.build/release/cued-contacts) - for development
- */
-function getContactsBinaryPath(): string {
-  // 1. Check environment variable
-  const envPath = process.env[CONTACTS_BINARY_ENV_VAR];
-  if (envPath) {
-    return envPath;
+function getContactsModule(): NodeMacContacts {
+  if (!_contacts) {
+    _contacts = loadNativeModule<NodeMacContacts>("node-mac-contacts");
   }
-
-  // 2. Check packaged app location (Electron resources)
-  // When packaged, the structure is: resources/swift/cued-contacts
-  const resourcesPath = process.resourcesPath;
-  if (resourcesPath) {
-    const packagedPath = join(resourcesPath, "swift", "cued-contacts");
-    if (existsSync(packagedPath)) {
-      return packagedPath;
-    }
-  }
-
-  // 3. Development location - relative to built output
-  // Built file is at: apps/electron/out/main/index.js
-  // Binary is at: apps/electron/swift/.build/release/cued-contacts
-  const devPath = join(__dirname, "..", "..", "swift", ".build", "release", "cued-contacts");
-  return devPath;
-}
-
-/**
- * Check if the Swift contacts CLI is available.
- */
-export function isSwiftContactsAvailable(): boolean {
-  const binaryPath = getContactsBinaryPath();
-  try {
-    accessSync(binaryPath, constants.X_OK);
-    return true;
-  } catch {
-    return false;
-  }
+  return _contacts;
 }
 
 /**
@@ -104,11 +45,6 @@ export function isSwiftContactsAvailable(): boolean {
  */
 export class ContactsManager {
   private cache: ContactsCache | null = null;
-  private binaryPath: string;
-
-  constructor() {
-    this.binaryPath = getContactsBinaryPath();
-  }
 
   /**
    * Fetch all contacts from Apple Contacts.app.
@@ -127,8 +63,8 @@ export class ContactsManager {
       }
     }
 
-    // Fetch from Contacts.app via Swift CLI
-    const contacts = await this.fetchFromSwiftCli();
+    // Fetch from Contacts.app via native module
+    const contacts = this.fetchFromNativeModule();
 
     // Build cache with index
     this.cache = this.buildCache(contacts);
@@ -213,71 +149,30 @@ export class ContactsManager {
     }
   }
 
-  /**
-   * Get the path to the Swift CLI binary being used.
-   */
-  getBinaryPath(): string {
-    return this.binaryPath;
-  }
+  private fetchFromNativeModule(): ResolvedContact[] {
+    const contacts = getContactsModule();
 
-  private async fetchFromSwiftCli(): Promise<ResolvedContact[]> {
-    // Check if binary exists
-    if (!existsSync(this.binaryPath)) {
-      throw new ContactsError(
-        `Swift contacts binary not found at ${this.binaryPath}. ` +
-        `Build it with: cd apps/electron/swift && swift build -c release --product cued-contacts`
+    const status = contacts.getAuthStatus();
+    console.log(`[Contacts] Auth status: ${status}`);
+    if (status === "Denied" || status === "Not Authorized") {
+      throw new ContactsAccessDeniedError(
+        "Contacts access denied. Grant access in System Settings > Privacy & Security > Contacts."
       );
     }
 
-    try {
-      const result = execSync(`"${this.binaryPath}" --json`, {
-        encoding: "utf-8",
-        timeout: CLI_TIMEOUT_MS,
-        maxBuffer: 50 * 1024 * 1024, // 50MB buffer for large contact lists
-      });
+    const start = Date.now();
+    const raw = contacts.getAllContacts(["organizationName"]);
+    console.log(`[Contacts] Fetched ${raw.length} contacts in ${Date.now() - start}ms`);
 
-      const output = JSON.parse(result) as ContactsCliOutput;
-
-      return output.contacts.map((c) => ({
-        displayName: c.name,
-        company: c.company ?? null,
-        phoneNumbers: c.phones,
-        emails: c.emails,
-      }));
-    } catch (error) {
-      // Handle execSync errors (includes exit code)
-      if (error && typeof error === "object" && "status" in error) {
-        const execError = error as { status: number; stderr?: string };
-
-        // Exit code 2 = access denied
-        if (execError.status === 2) {
-          const errorMsg = this.parseCliError(execError.stderr);
-          throw new ContactsAccessDeniedError(
-            errorMsg || "Contacts access denied. Grant access in System Settings > Privacy & Security > Contacts."
-          );
-        }
-
-        // Other exit codes
-        const errorMsg = this.parseCliError(execError.stderr);
-        throw new ContactsError(errorMsg || `Contacts fetch failed with exit code ${execError.status}`);
-      }
-
-      // Generic error
-      if (error instanceof Error) {
-        throw new ContactsError(`Failed to fetch contacts: ${error.message}`);
-      }
-      throw new ContactsError("Failed to fetch contacts: unknown error");
-    }
-  }
-
-  private parseCliError(stderr?: string): string | null {
-    if (!stderr) return null;
-    try {
-      const errorOutput = JSON.parse(stderr.trim()) as ContactsCliError;
-      return errorOutput.error;
-    } catch {
-      return stderr.trim() || null;
-    }
+    return raw.map((c) => {
+      const fullName = [c.firstName, c.lastName].filter(Boolean).join(" ");
+      return {
+        displayName: fullName || c.organizationName || "Unknown",
+        company: c.organizationName ?? null,
+        phoneNumbers: c.phoneNumbers,
+        emails: c.emailAddresses,
+      };
+    });
   }
 
   private buildCache(contacts: ResolvedContact[]): ContactsCache {

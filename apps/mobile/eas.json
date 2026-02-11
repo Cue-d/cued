@@ -11,7 +11,8 @@
       },
       "android": {
         "resourceClass": "medium"
-      }
+      },
+      "channel": "base"
     },
     "development": {
       "extends": "base",
@@ -19,23 +20,19 @@
       "distribution": "internal",
       "ios": {
         "simulator": true
-      }
+      },
+      "channel": "development"
     },
-    "development:device": {
+    "development-device": {
       "extends": "base",
       "developmentClient": true,
       "distribution": "internal",
-      "ios": {
-        "simulator": false
-      }
+      "channel": "development-device"
     },
     "preview": {
       "extends": "base",
       "distribution": "internal",
-      "channel": "preview",
-      "ios": {
-        "simulator": false
-      }
+      "channel": "preview"
     },
     "production": {
       "extends": "base",
@@ -48,7 +45,8 @@
       "ios": {
         "simulator": true
       },
-      "environment": "development"
+      "environment": "development",
+      "channel": "development-simulator"
     }
   },
   "submit": {

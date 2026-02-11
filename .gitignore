@@ -141,6 +141,9 @@ apps/mobile/targets/widget/generated.entitlements
 # ============================================================
 # Swift Package Manager build directory
 apps/electron/swift/.build/
+
+# Native addon build artifacts
+apps/electron/native/*/build/
 # Swift Package.resolved (lock file - uncomment to track)
 # apps/electron/swift/Package.resolved
 

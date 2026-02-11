@@ -7,7 +7,8 @@
  */
 
 import { useMemo, useRef, useCallback } from "react";
-import { View, Text, ScrollView, Pressable, useColorScheme } from "react-native";
+import { View, Text, ScrollView, Pressable, Linking, useColorScheme } from "react-native";
+import * as Haptics from "expo-haptics";
 import { Image } from "expo-image";
 import { SymbolView } from "expo-symbols";
 import {
@@ -43,6 +44,89 @@ export interface MessageResponseCardProps {
   isDesktopOnline?: boolean;
   /** Called when the platform icon is pressed to open in app */
   onOpenInApp?: (() => void) | null;
+  /** Called when the send button is pressed */
+  onSend?: () => void;
+}
+
+/**
+ * Parse Slack-style markup in message content into React Native Text elements.
+ * Handles:
+ *  - `<URL|label>` → pressable link with label text
+ *  - `<URL>` → pressable link showing truncated URL
+ *  - `<@USER_ID>` / `<@USER_ID|name>` → @mention
+ *  - `<#CHANNEL_ID|name>` → #channel
+ */
+function parseSlackContent(text: string, textClassName: string): React.ReactNode[] {
+  const parts: React.ReactNode[] = [];
+  const regex = /<([^>]+)>/g;
+  let lastIndex = 0;
+  let match: RegExpExecArray | null;
+
+  while ((match = regex.exec(text)) !== null) {
+    if (match.index > lastIndex) {
+      parts.push(text.slice(lastIndex, match.index));
+    }
+
+    const inner = match[1];
+
+    if (inner.startsWith("@")) {
+      const pipeIdx = inner.indexOf("|");
+      const label = pipeIdx !== -1 ? inner.slice(pipeIdx + 1) : inner;
+      parts.push(
+        <Text key={match.index} className={`${textClassName} font-medium`}>
+          {pipeIdx !== -1 ? `@${label}` : label}
+        </Text>,
+      );
+    } else if (inner.startsWith("#")) {
+      const pipeIdx = inner.indexOf("|");
+      const label = pipeIdx !== -1 ? inner.slice(pipeIdx + 1) : inner;
+      parts.push(
+        <Text key={match.index} className={`${textClassName} font-medium`}>
+          {pipeIdx !== -1 ? `#${label}` : label}
+        </Text>,
+      );
+    } else if (inner.startsWith("http://") || inner.startsWith("https://") || inner.startsWith("mailto:")) {
+      const pipeIdx = inner.indexOf("|");
+      const url = pipeIdx !== -1 ? inner.slice(0, pipeIdx) : inner;
+      const label = pipeIdx !== -1 ? inner.slice(pipeIdx + 1) : undefined;
+
+      let displayText: string;
+      if (label) {
+        displayText = label;
+      } else {
+        try {
+          const parsed = new URL(url);
+          const path = parsed.pathname === "/" ? "" : parsed.pathname;
+          displayText = parsed.hostname + path;
+          if (displayText.length > 50) {
+            displayText = displayText.slice(0, 47) + "...";
+          }
+        } catch {
+          displayText = url.length > 50 ? url.slice(0, 47) + "..." : url;
+        }
+      }
+
+      parts.push(
+        <Text
+          key={match.index}
+          className="text-blue-500"
+          onPress={() => Linking.openURL(url)}
+        >
+          {displayText}
+        </Text>,
+      );
+    } else {
+      parts.push(`<${inner}>`);
+    }
+
+    lastIndex = match.index + match[0].length;
+  }
+
+  if (lastIndex < text.length) {
+    parts.push(text.slice(lastIndex));
+  }
+
+  return parts;
 }
 
 /** Status display config */
@@ -144,6 +228,7 @@ export function MessageResponseCard({
   platform,
   isDesktopOnline,
   onOpenInApp,
+  onSend,
 }: MessageResponseCardProps): React.JSX.Element {
   const colorScheme = useColorScheme();
   const isDark = colorScheme === "dark";
@@ -180,7 +265,10 @@ export function MessageResponseCard({
                 "absolute right-0 flex-row items-center gap-1.5 rounded-lg px-2.5 py-1.5",
                 onOpenInApp ? "bg-muted active:opacity-70" : "bg-muted/40 opacity-50",
               )}
-              onPress={onOpenInApp ?? undefined}
+              onPress={() => {
+                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                onOpenInApp?.();
+              }}
               disabled={!onOpenInApp}
               accessibilityLabel={onOpenInApp ? `Open in ${platform}` : platform}
               accessibilityRole={onOpenInApp ? "button" : undefined}
@@ -246,7 +334,9 @@ export function MessageResponseCard({
                       )}
                       selectable
                     >
-                      {msg.content}
+                      {platform === "slack"
+                        ? parseSlackContent(msg.content, msg.isFromMe ? "text-primary-foreground" : "text-foreground")
+                        : msg.content}
                     </Text>
                   )}
                   {!hasText && !hasAttachments && (
@@ -297,6 +387,7 @@ export function MessageResponseCard({
       <ChatInput
         value={responseText}
         onChangeText={onResponseChange}
+        onSubmit={onSend}
         placeholder="Message..."
         disableKeyboardHandling
         insideGlassContainer

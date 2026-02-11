@@ -166,10 +166,27 @@ export interface SlackDisconnectResult {
   success: boolean
 }
 
+// Permission types
+export interface PermissionStatus {
+  fullDiskAccess: boolean
+  contacts: boolean
+}
+
+// Auto-updater types
+export interface UpdaterStatus {
+  status: "downloading" | "ready" | "error"
+  version?: string
+}
+
 /**
  * The complete Electron API exposed to the renderer via contextBridge.
  */
 export interface ElectronAPI {
+  settings: {
+    getSyncHistoryDays: () => Promise<number>
+    setSyncHistoryDays: (days: number) => Promise<number>
+  }
+
   versions: {
     node: () => string
     chrome: () => string
@@ -178,7 +195,7 @@ export interface ElectronAPI {
 
   config: {
     getConvexUrl: () => Promise<string>
-    getAccessToken: () => Promise<string | null>
+    getAccessToken: (forceRefresh?: boolean) => Promise<string | null>
     getAppUrl: () => Promise<string>
   }
 
@@ -192,6 +209,17 @@ export interface ElectronAPI {
     signOut: () => Promise<void>
     onAuthChange: (callback: (state: AuthState) => void) => () => void
     onUserCode: (callback: (code: string, uri: string) => void) => () => void
+  }
+
+  updater: {
+    onStatus: (callback: (status: UpdaterStatus) => void) => () => void
+    quitAndInstall: () => Promise<void>
+  }
+
+  permissions: {
+    check: () => Promise<PermissionStatus>
+    openFullDiskAccessSettings: () => Promise<void>
+    openContactsSettings: () => Promise<void>
   }
 
   sync: {

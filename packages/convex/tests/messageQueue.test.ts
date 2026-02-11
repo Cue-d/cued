@@ -130,6 +130,107 @@ describe("messageQueue", () => {
       expect(message?.isGroup).toBe(true);
       expect(message?.chatIdentifier).toBe("chat;-;group-chat-id");
     });
+
+    it("resolves LinkedIn chatIdentifier from conversationId when missing", async () => {
+      const t = trackTest(convexTest(schema, modules));
+      const { asUser, userId } = await setupAuthenticatedUser(t);
+
+      const contactId = await t.run(async (ctx) => {
+        return ctx.db.insert("contacts", {
+          userId,
+          displayName: "LinkedIn Contact",
+        });
+      });
+
+      const conversationId = await t.run(async (ctx) => {
+        return ctx.db.insert("conversations", {
+          userId,
+          platform: "linkedin",
+          platformConversationId: "urn:li:fsd_conversation:abc123",
+          conversationType: "dm",
+          participantContactIds: [contactId],
+          unreadCount: 0,
+          lastMessageAt: Date.now(),
+        });
+      });
+
+      const result = await asUser.mutation(api.messageQueue.queueMessage, {
+        platform: "linkedin",
+        recipientHandle: "linkedin-handle",
+        recipientContactId: contactId,
+        conversationId,
+        text: "Hello!",
+        isGroup: false,
+      });
+
+      const message = await t.run(async (ctx) => ctx.db.get(result.messageId));
+      expect(message?.conversationId).toEqual(conversationId);
+      expect(message?.chatIdentifier).toBe("urn:li:fsd_conversation:abc123");
+    });
+
+    it("resolves LinkedIn conversation from recipientContactId when conversationId missing", async () => {
+      const t = trackTest(convexTest(schema, modules));
+      const { asUser, userId } = await setupAuthenticatedUser(t);
+
+      const contactId = await t.run(async (ctx) => {
+        return ctx.db.insert("contacts", {
+          userId,
+          displayName: "LinkedIn Contact",
+        });
+      });
+
+      const now = Date.now();
+      await t.run(async (ctx) => {
+        await ctx.db.insert("conversations", {
+          userId,
+          platform: "linkedin",
+          platformConversationId: "urn:li:fsd_conversation:older",
+          conversationType: "dm",
+          participantContactIds: [contactId],
+          unreadCount: 0,
+          lastMessageAt: now - 1000,
+        });
+      });
+      const newerConversationId = await t.run(async (ctx) => {
+        return ctx.db.insert("conversations", {
+          userId,
+          platform: "linkedin",
+          platformConversationId: "urn:li:fsd_conversation:newer",
+          conversationType: "dm",
+          participantContactIds: [contactId],
+          unreadCount: 0,
+          lastMessageAt: now,
+        });
+      });
+
+      const result = await asUser.mutation(api.messageQueue.queueMessage, {
+        platform: "linkedin",
+        recipientHandle: "linkedin-handle",
+        recipientContactId: contactId,
+        text: "Hello!",
+        isGroup: false,
+      });
+
+      const message = await t.run(async (ctx) => ctx.db.get(result.messageId));
+      expect(message?.conversationId).toEqual(newerConversationId);
+      expect(message?.chatIdentifier).toBe("urn:li:fsd_conversation:newer");
+    });
+
+    it("throws when LinkedIn thread cannot be resolved", async () => {
+      const t = trackTest(convexTest(schema, modules));
+      const { asUser } = await setupAuthenticatedUser(t);
+
+      await expect(
+        asUser.mutation(api.messageQueue.queueMessage, {
+          platform: "linkedin",
+          recipientHandle: "linkedin-handle",
+          text: "Hello!",
+          isGroup: false,
+        })
+      ).rejects.toThrow(
+        "LinkedIn messages require an existing conversation"
+      );
+    });
   });
 
   describe("cancelMessage mutation", () => {

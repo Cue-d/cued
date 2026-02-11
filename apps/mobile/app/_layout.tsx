@@ -1,16 +1,17 @@
 import "../src/global.css";
 import { useEffect, useRef } from "react";
-import { ActivityIndicator, View, useColorScheme } from "react-native";
+import { ActivityIndicator, AppState, View, useColorScheme } from "react-native";
 import * as Notifications from "expo-notifications";
 import { useRouter } from "expo-router";
-import { Stack } from "expo-router/stack";
 import * as SplashScreen from "expo-splash-screen";
+import * as Updates from "expo-updates";
+import { Stack } from "expo-router/stack";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
-import { SafeAreaProvider } from "react-native-safe-area-context";
 import {
   setCustomText,
   setCustomTextInput,
 } from "react-native-global-props";
+import { SafeAreaProvider } from "react-native-safe-area-context";
 import { PushTokenRegistrar } from "@/components/push-token-registrar";
 import { configureNotifications } from "@/lib/notifications";
 import { getThemeColors } from "@/lib/utils";
@@ -20,6 +21,36 @@ import SignInScreen from "./sign-in";
 
 // Hide splash screen immediately since fonts are embedded at build time
 SplashScreen.preventAutoHideAsync();
+
+function useOTAUpdates() {
+  useEffect(() => {
+    if (__DEV__) return;
+
+    async function checkForUpdate() {
+      try {
+        const update = await Updates.checkForUpdateAsync();
+        if (update.isAvailable) {
+          await Updates.fetchUpdateAsync();
+          await Updates.reloadAsync();
+        }
+      } catch (e) {
+        console.log("[OTA] Update check failed:", e);
+      }
+    }
+
+    // Check on mount
+    checkForUpdate();
+
+    // Check when app comes to foreground
+    const subscription = AppState.addEventListener("change", (state) => {
+      if (state === "active") {
+        checkForUpdate();
+      }
+    });
+
+    return () => subscription.remove();
+  }, []);
+}
 
 // Set default font for all Text and TextInput components
 const defaultFontStyle = { fontFamily: "Suisse Intl" };
@@ -109,8 +140,7 @@ function AuthenticatedApp() {
 }
 
 export default function RootLayout() {
-  // Fonts are embedded at build time via expo-font config plugin in app.json
-  // No need for useFonts hook - fonts are available immediately
+  useOTAUpdates();
   useEffect(() => {
     SplashScreen.hideAsync();
   }, []);

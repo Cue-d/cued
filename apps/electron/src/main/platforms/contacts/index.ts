@@ -9,7 +9,6 @@
 export {
   ContactsManager,
   getContactsManager,
-  isSwiftContactsAvailable,
 } from './manager'
 
 // Contacts sync to Convex

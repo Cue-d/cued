@@ -10,10 +10,8 @@ export default function ActionsLayout(): React.JSX.Element {
   return (
     <Stack
       screenOptions={{
-        headerTransparent: true,
+        headerTransparent: false,
         headerLargeTitle: true,
-        headerBlurEffect: "none",
-        headerLargeStyle: { backgroundColor: "transparent" },
         contentStyle: { backgroundColor: colors.background },
       }}
     >

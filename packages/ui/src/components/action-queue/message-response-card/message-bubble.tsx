@@ -159,6 +159,8 @@ export interface MessageBubbleProps {
   sentAt: number
   /** Sender name (for received messages) */
   senderName?: string | null
+  /** Contact ID of the sender */
+  senderContactId?: string | null
   /** Delivery status */
   status?: string | null
   /** Reactions on the message */
@@ -169,6 +171,8 @@ export interface MessageBubbleProps {
   spacing?: MessageSpacing
   /** Platform the message is from — Slack content gets special markup parsing */
   platform?: string
+  /** Called when a contact name is clicked */
+  onContactClick?: (contactId: string) => void
 }
 
 const SPACING_CLASSES: Record<MessageSpacing, string> = {
@@ -182,11 +186,13 @@ export function MessageBubble({
   isFromMe,
   sentAt,
   senderName,
+  senderContactId,
   status,
   reactions,
   showSenderName = true,
   spacing = "normal",
   platform,
+  onContactClick,
 }: MessageBubbleProps) {
   const hasReactions = reactions && reactions.length > 0
   const hasText = content && content.trim().length > 0
@@ -206,9 +212,19 @@ export function MessageBubble({
       )}
     >
       {showSenderName && !isFromMe && senderName && (
-        <p className="text-xs font-medium opacity-70 mb-1 ml-1">
-          {senderName}
-        </p>
+        senderContactId && onContactClick ? (
+          <button
+            type="button"
+            onClick={() => onContactClick(senderContactId)}
+            className="text-xs font-medium opacity-70 mb-1 ml-1 hover:underline hover:opacity-100 transition-opacity cursor-pointer text-left"
+          >
+            {senderName}
+          </button>
+        ) : (
+          <p className="text-xs font-medium opacity-70 mb-1 ml-1">
+            {senderName}
+          </p>
+        )
       )}
       <div
         className={cn(

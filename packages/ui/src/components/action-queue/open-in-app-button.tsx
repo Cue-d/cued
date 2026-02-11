@@ -26,14 +26,14 @@ export function OpenInAppButton({ config, size = "md", tooltip = "Open" }: OpenI
             role="button"
             aria-disabled="true"
             className={cn(
-              "flex items-center gap-1 rounded-md font-medium bg-muted/40 text-muted-foreground cursor-not-allowed opacity-50",
+              "flex items-center gap-1 rounded-md font-medium text-muted-foreground cursor-not-allowed opacity-50 whitespace-nowrap",
               padding, textSize,
               size === "md" && "gap-1.5 rounded-lg"
             )}
           />}
         >
           {config.icon}
-          {config.label}
+          Open
           <ExternalLink className={iconSize} />
         </TooltipTrigger>
         <TooltipContent side="bottom">
@@ -50,14 +50,14 @@ export function OpenInAppButton({ config, size = "md", tooltip = "Open" }: OpenI
           type="button"
           onClick={config.onOpenInApp}
           className={cn(
-            "flex items-center gap-1 rounded-md font-medium bg-muted/60 hover:bg-muted text-foreground/80 hover:text-foreground transition-colors cursor-pointer",
+            "flex items-center gap-1 rounded-sm font-medium text-foreground hover:bg-muted cursor-pointer whitespace-nowrap",
             padding, textSize,
             size === "md" && "gap-1.5 rounded-lg"
           )}
         />}
       >
         {config.icon}
-        {config.label}
+        Open
         <ExternalLink className={cn(iconSize, "text-muted-foreground")} />
       </TooltipTrigger>
       <TooltipContent side="bottom">{tooltip}</TooltipContent>

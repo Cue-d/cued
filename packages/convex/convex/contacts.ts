@@ -179,6 +179,80 @@ export const getContact = query({
 });
 
 /**
+ * Get contacts alphabetically adjacent to a given contact.
+ * Returns a few contacts before and after in the sorted list.
+ */
+export const getAdjacentContacts = query({
+  args: {
+    contactId: v.id("contacts"),
+    count: v.optional(v.number()),
+  },
+  handler: async (ctx, args) => {
+    const user = await getAuthenticatedUser(ctx);
+    if (!user) return { before: [], after: [] };
+
+    const count = Math.min(args.count ?? 3, 10);
+
+    const contact = await ctx.db.get(args.contactId);
+    if (!contact || contact.userId !== user._id) return { before: [], after: [] };
+
+    const name = contact.displayName;
+
+    // Contacts after (alphabetically)
+    const after = await ctx.db
+      .query("contacts")
+      .withIndex("by_user_display_name", (q) => q.eq("userId", user._id))
+      .filter((q) =>
+        q.and(
+          q.neq(q.field("_id"), args.contactId),
+          q.neq(q.field("isDismissed"), true),
+          q.or(
+            q.gt(q.field("displayName"), name),
+            q.and(
+              q.eq(q.field("displayName"), name),
+              q.gt(q.field("_id"), args.contactId)
+            )
+          )
+        )
+      )
+      .take(count);
+
+    // Contacts before (alphabetically, descending)
+    const beforeRaw = await ctx.db
+      .query("contacts")
+      .withIndex("by_user_display_name", (q) => q.eq("userId", user._id))
+      .order("desc")
+      .filter((q) =>
+        q.and(
+          q.neq(q.field("_id"), args.contactId),
+          q.neq(q.field("isDismissed"), true),
+          q.or(
+            q.lt(q.field("displayName"), name),
+            q.and(
+              q.eq(q.field("displayName"), name),
+              q.lt(q.field("_id"), args.contactId)
+            )
+          )
+        )
+      )
+      .take(count);
+
+    return {
+      before: beforeRaw.reverse().map((c) => ({
+        _id: c._id,
+        displayName: c.displayName,
+        company: c.company,
+      })),
+      after: after.map((c) => ({
+        _id: c._id,
+        displayName: c.displayName,
+        company: c.company,
+      })),
+    };
+  },
+});
+
+/**
  * Get a contact profile with all related data for the detail view.
  * Includes: handles, conversations, recent messages.
  */

@@ -8,7 +8,6 @@ process.on("unhandledRejection", (reason) => {
 
 import { join } from "node:path";
 import { app, BrowserWindow, ipcMain, shell } from "electron";
-import liquidGlass from "electron-liquid-glass";
 import { ConvexHttpClient } from "convex/browser";
 import { api } from "@cued/convex";
 import { electronEnv } from "@cued/env/electron";
@@ -38,6 +37,9 @@ import { getIMessageWatcher } from "./sync/triggers/fsevents";
 import { getTrayManager, type TrayStatus } from "./tray";
 import { getPowerManager } from "./power";
 import { getSettingsManager, SettingsManager } from "./settings";
+import { initAutoUpdater, stopAutoUpdater, quitAndInstall } from "./auto-updater";
+import { loadNativeModule } from "./native-module-loader";
+import { setupPermissionIpcHandlers, requestContactsAccessOnStartup } from "./ipc/permissions";
 
 const CONVEX_URL = electronEnv.CONVEX_URL;
 const WORKOS_CLIENT_ID = electronEnv.WORKOS_CLIENT_ID;
@@ -60,6 +62,38 @@ function isTahoe(): boolean {
   if (process.platform !== "darwin") return false;
   const [major] = process.getSystemVersion().split(".").map(Number);
   return major >= 26;
+}
+
+type LiquidGlassModule = {
+  addView: (
+    nativeWindowHandle: Buffer,
+    options: { cornerRadius?: number; tintColor?: string }
+  ) => void;
+};
+
+let liquidGlassModule: LiquidGlassModule | null | undefined;
+
+function loadLiquidGlass(): LiquidGlassModule | null {
+  if (liquidGlassModule !== undefined) {
+    return liquidGlassModule;
+  }
+
+  try {
+    const mod = loadNativeModule<{ default?: LiquidGlassModule } | LiquidGlassModule>(
+      "electron-liquid-glass",
+      { fallbackEntrypoint: "dist/index.cjs" }
+    );
+    liquidGlassModule = ((mod as { default?: LiquidGlassModule }).default ??
+      mod) as LiquidGlassModule;
+    return liquidGlassModule;
+  } catch (error) {
+    console.warn(
+      "[Main] electron-liquid-glass is unavailable; continuing without Liquid Glass effect.",
+      error
+    );
+    liquidGlassModule = null;
+    return null;
+  }
 }
 
 /**
@@ -288,8 +322,8 @@ function setupAuthIpcHandlers(): void {
   });
 
   // Get access token for renderer authentication
-  ipcMain.handle("auth:getAccessToken", async () => {
-    return await getValidAccessToken();
+  ipcMain.handle("auth:getAccessToken", async (_event, forceRefresh = false) => {
+    return await getValidAccessToken(Boolean(forceRefresh));
   });
 }
 
@@ -490,8 +524,15 @@ app.whenReady().then(() => {
   setupAuthIpcHandlers();
   setupConfigIpcHandlers();
   setupShellIpcHandlers();
+  setupPermissionIpcHandlers();
 
   createWindow();
+
+  // Initialize auto-updater in production
+  if (electronEnv.NODE_ENV !== "development" && mainWindow) {
+    initAutoUpdater(mainWindow);
+  }
+  ipcMain.handle("updater:quitAndInstall", () => quitAndInstall());
 
   // Initialize tray manager with callbacks
   const trayManager = getTrayManager({
@@ -543,10 +584,13 @@ app.whenReady().then(() => {
 
   // Check initial auth state and notify renderer once window is ready
   mainWindow?.webContents.once("did-finish-load", async () => {
+    // Trigger native macOS Contacts permission prompt (must happen after window is visible)
+    await requestContactsAccessOnStartup();
     // Apply Liquid Glass effect on macOS Tahoe+
     if (mainWindow && isTahoe()) {
       try {
-        liquidGlass.addView(mainWindow.getNativeWindowHandle(), {
+        const liquidGlass = loadLiquidGlass();
+        liquidGlass?.addView(mainWindow.getNativeWindowHandle(), {
           cornerRadius: 12,
           tintColor: "#00000010",
         });
@@ -594,6 +638,7 @@ app.on("will-quit", async () => {
   getSyncEngine().stop();
   getIMessageWatcher().stop();
   getContactsWatcher().stop();
+  stopAutoUpdater();
 
   // Cleanup services (may not be initialized)
   await safeCleanup(() => getMessageQueueProcessor().stop(), "MessageQueueProcessor");

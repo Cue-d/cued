@@ -303,7 +303,7 @@ vi.mock("convex/react", () => ({
   ConvexProvider: ({ children }: { children?: React.ReactNode }) => children,
 }));
 
-// Note: @cued/convex/convex/_generated/api is mocked via vitest.config.ts alias to ./mocks/convex-api.ts
+// Note: @cued/convex is mocked via vitest.config.ts alias to ./mocks/convex-api.ts
 
 // Mock widget data (iOS specific)
 vi.mock("@/lib/widget-data", () => ({

@@ -25,6 +25,7 @@ export type {
   SlackStatusResult,
   SlackLoginResult,
   SlackDisconnectResult,
+  UpdaterStatus,
 } from "../../shared/electron-api"
 
 import type {
@@ -43,6 +44,7 @@ import type {
   SlackWorkspaceInfo,
   SlackLoginResult,
   SlackDisconnectResult,
+  UpdaterStatus,
 } from "../../shared/electron-api"
 
 // Window Type Declaration
@@ -334,7 +336,7 @@ export function useSignal(): UseSignalReturn {
 
 interface UseConvexClientReturn {
   convexUrl: string | null
-  getAccessToken: () => Promise<string | null>
+  getAccessToken: (forceRefresh?: boolean) => Promise<string | null>
   isLoading: boolean
 }
 
@@ -357,7 +359,30 @@ export function useConvexClient(): UseConvexClientReturn {
       })
   }, [electron])
 
-  const getAccessToken = useCallback(() => electron.config.getAccessToken(), [electron])
+  const getAccessToken = useCallback(
+    (forceRefresh = false) => electron.config.getAccessToken(forceRefresh),
+    [electron]
+  )
 
   return { convexUrl, getAccessToken, isLoading }
+}
+
+interface UseAutoUpdaterReturn {
+  status: UpdaterStatus | null
+  quitAndInstall: () => void
+}
+
+export function useAutoUpdater(): UseAutoUpdaterReturn {
+  const [status, setStatus] = useState<UpdaterStatus | null>(null)
+  const electron = useElectron()
+
+  useEffect(() => {
+    return electron.updater.onStatus(setStatus)
+  }, [electron])
+
+  const doQuitAndInstall = useCallback(() => {
+    electron.updater.quitAndInstall()
+  }, [electron])
+
+  return { status, quitAndInstall: doQuitAndInstall }
 }

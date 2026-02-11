@@ -23,6 +23,7 @@ import {
   setConvexAuth,
 } from '../../sync/cursor'
 import { createSyncGuard } from '../../sync/guard'
+import { getSyncCutoffMs } from '../../sync/history-cutoff'
 
 // ============================================================================
 // Constants
@@ -720,6 +721,11 @@ export class LinkedInSyncManager {
         )
         currentTimestamp = oldestMessage.deliveredAt
 
+        // Stop if we've reached the syncHistoryDays cutoff
+        if (currentTimestamp < getSyncCutoffMs()) {
+          break
+        }
+
         // If we got fewer messages than requested, we've reached the end
         if (result.messages.length < 20) {
           break
@@ -796,6 +802,11 @@ export class LinkedInSyncManager {
           }
 
           oldestTimestamp = historyResult.messages[historyResult.messages.length - 1]?.deliveredAt
+
+          // Stop if we've reached the syncHistoryDays cutoff
+          if (oldestTimestamp && oldestTimestamp < getSyncCutoffMs()) {
+            break
+          }
         } catch {
           console.warn(`[LinkedInSync] Pagination failed for ${normalizedConversationId}, stopping`)
           break

@@ -2,24 +2,16 @@ import * as React from "react"
 import { useQuery, useMutation } from "convex/react"
 import {
   Mail,
-  MessageSquare,
   Phone,
   Loader2,
-  Send,
-  Building2,
-  Calendar,
-  Clock,
   ChevronDown,
   ChevronUp,
   Edit2,
   Save,
-  Tag,
-  User,
   X,
 } from "lucide-react"
 import { api } from "@cued/convex"
 import {
-  getInitials,
   normalizePhone,
   formatRelativeTime,
   type ActionPlatform,
@@ -28,23 +20,20 @@ import {
 import {
   EmptyState,
   PlatformIcon,
+  ScrollArea,
   SearchIcon,
   UserIcon,
-  type SendMessageContact,
 } from "@cued/ui"
 import {
-  Card,
-  CardContent,
-  CardHeader,
   Skeleton,
   Badge,
-  Avatar,
-  AvatarFallback,
   Input,
   Button,
   Textarea,
 } from "@cued/ui"
 import type { Id } from "@cued/convex"
+import { PanelHeader } from "../app-shell"
+import { SettingsSection, SettingsCard, SettingsRow } from "../settings-card"
 
 /** Handle types worth displaying to the user (hide internal IDs like slack_id, linkedin_urn) */
 export const VISIBLE_HANDLE_TYPES = new Set(["phone", "email", "linkedin_handle", "twitter_handle"])
@@ -94,13 +83,6 @@ export function deduplicateHandles(
   return Array.from(seen.values())
 }
 
-export const SENDABLE_HANDLE_TYPES: Record<string, string> = {
-  imessage: "phone",
-  gmail: "email",
-  linkedin: "linkedin_handle",
-  slack: "slack_id",
-}
-
 export function prioritizeHandles(
   handles: Array<{ type: string; value: string; platform: string }>
 ): Array<{ type: string; value: string; platform: string }> {
@@ -117,6 +99,13 @@ export function prioritizeHandles(
     if (emails[i]) result.push(emails[i])
   }
   return [...result, ...others]
+}
+
+const HANDLE_TYPE_LABELS: Record<string, string> = {
+  phone: "Phone",
+  email: "Email",
+  linkedin_handle: "LinkedIn",
+  twitter_handle: "Twitter",
 }
 
 function PlatformBadge({ platform }: { platform: ActionPlatform }) {
@@ -168,10 +157,9 @@ function TimelineMessage({
 
 interface ContactDetailProps {
   contactId: Id<"contacts"> | null
-  onSendMessage: (contact: SendMessageContact) => void
 }
 
-export function ContactDetail({ contactId, onSendMessage }: ContactDetailProps) {
+export function ContactDetail({ contactId }: ContactDetailProps) {
   const profile = useQuery(
     api.contacts.getContactProfile,
     contactId ? { contactId } : "skip"
@@ -225,28 +213,6 @@ export function ContactDetail({ contactId, onSendMessage }: ContactDetailProps) 
     }
   }
 
-  const sendContact = React.useMemo((): SendMessageContact | undefined => {
-    if (!profile?.contact || !contactId) return undefined
-
-    const platforms: Array<{ platform: ActionPlatform; handle: string }> = []
-    for (const handle of profile.contact.handles) {
-      const expectedType = SENDABLE_HANDLE_TYPES[handle.platform]
-      if (expectedType && handle.type === expectedType) {
-        platforms.push({
-          platform: handle.platform as ActionPlatform,
-          handle: handle.value,
-        })
-      }
-    }
-
-    if (platforms.length === 0) return undefined
-    return {
-      id: contactId,
-      name: profile.contact.displayName,
-      platforms,
-    }
-  }, [profile?.contact, contactId])
-
   if (!contactId) {
     return (
       <EmptyState
@@ -259,10 +225,13 @@ export function ContactDetail({ contactId, onSendMessage }: ContactDetailProps) 
 
   if (profile === undefined) {
     return (
-      <div className="p-6 space-y-6">
-        <Skeleton className="h-32 w-full" />
-        <Skeleton className="h-48 w-full" />
-        <Skeleton className="h-64 w-full" />
+      <div className="h-full flex flex-col">
+        <PanelHeader title="Contact" />
+        <div className="px-5 py-7 max-w-3xl mx-auto space-y-6 w-full">
+          <Skeleton className="h-20 w-full rounded-xl" />
+          <Skeleton className="h-40 w-full rounded-xl" />
+          <Skeleton className="h-24 w-full rounded-xl" />
+        </div>
       </div>
     )
   }
@@ -279,129 +248,81 @@ export function ContactDetail({ contactId, onSendMessage }: ContactDetailProps) 
 
   const { contact, conversations, messages, stats } = profile
   const displayMessages = showAllMessages ? messages : messages.slice(0, 10)
+  const visibleHandles = contact.handles.filter((h) => VISIBLE_HANDLE_TYPES.has(h.type))
 
   return (
-    <div className="flex flex-col h-full">
-      {/* Header */}
-      <div className="shrink-0 p-4">
-        <div className="flex items-center gap-4">
-          <Avatar size="lg">
-            <AvatarFallback className="text-lg">
-              {getInitials(contact.displayName)}
-            </AvatarFallback>
-          </Avatar>
-          <div className="flex-1 min-w-0">
-            {isEditing ? (
-              <Input
-                value={editForm.displayName}
-                onChange={(e) =>
-                  setEditForm((f) => ({ ...f, displayName: e.target.value }))
-                }
-                className="text-xl font-semibold"
-              />
-            ) : (
-              <h1 className="text-xl font-semibold truncate">
-                {contact.displayName}
-              </h1>
-            )}
-            {contact.company && !isEditing && (
-              <p className="text-sm text-muted-foreground">{contact.company}</p>
-            )}
-          </div>
-          <div className="flex items-center gap-2">
-            {sendContact && (
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => onSendMessage(sendContact)}
-              >
-                <Send className="w-4 h-4 mr-2" />
-                Message
-              </Button>
-            )}
-            {isEditing ? (
-              <>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => setIsEditing(false)}
-                >
-                  <X className="w-4 h-4" />
-                </Button>
-                <Button size="sm" onClick={handleSave} disabled={isSaving}>
-                  {isSaving ? (
-                    <Loader2 className="w-4 h-4 animate-spin" />
-                  ) : (
-                    <Save className="w-4 h-4 mr-2" />
-                  )}
-                  Save
-                </Button>
-              </>
-            ) : (
+    <div className="h-full flex flex-col">
+      <PanelHeader title={contact.displayName} subtitle={contact.company || undefined}>
+        <div className="flex items-center gap-1.5">
+          {isEditing ? (
+            <>
               <Button
                 variant="ghost"
                 size="sm"
-                onClick={() => setIsEditing(true)}
+                onClick={() => setIsEditing(false)}
               >
-                <Edit2 className="w-4 h-4" />
+                <X className="w-3.5 h-3.5" />
               </Button>
-            )}
-          </div>
+              <Button size="sm" onClick={handleSave} disabled={isSaving}>
+                {isSaving ? (
+                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                ) : (
+                  <>
+                    <Save className="w-3.5 h-3.5 mr-1.5" />
+                    Save
+                  </>
+                )}
+              </Button>
+            </>
+          ) : (
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => setIsEditing(true)}
+            >
+              <Edit2 className="w-3.5 h-3.5" />
+            </Button>
+          )}
         </div>
-      </div>
+      </PanelHeader>
 
-      {/* Content */}
-      <div className="flex-1 overflow-y-auto">
-        <div className="max-w-3xl space-y-6 p-6">
-          {/* Quick Stats */}
-          <div className="grid grid-cols-3 gap-4">
-            <Card>
-              <CardContent className="p-4 text-center">
-                <MessageSquare className="w-5 h-5 mx-auto mb-1 text-muted-foreground" />
-                <div className="text-2xl font-semibold">
-                  {stats.totalMessages}
-                </div>
-                <div className="text-xs text-muted-foreground">Messages</div>
-              </CardContent>
-            </Card>
-            <Card>
-              <CardContent className="p-4 text-center">
-                <Calendar className="w-5 h-5 mx-auto mb-1 text-muted-foreground" />
-                <div className="text-2xl font-semibold">
-                  {stats.recentMessageCount}
-                </div>
-                <div className="text-xs text-muted-foreground">Last 30 days</div>
-              </CardContent>
-            </Card>
-            <Card>
-              <CardContent className="p-4 text-center">
-                <Clock className="w-5 h-5 mx-auto mb-1 text-muted-foreground" />
-                <div className="text-sm font-medium">
-                  {stats.lastContactedAt
-                    ? formatRelativeTime(stats.lastContactedAt)
-                    : "Never"}
-                </div>
-                <div className="text-xs text-muted-foreground">Last contact</div>
-              </CardContent>
-            </Card>
-          </div>
-
-          {/* Contact Details */}
-          <Card>
-            <CardHeader className="pb-3">
-              <h2 className="font-semibold flex items-center gap-2">
-                <User className="w-4 h-4" />
-                Details
-              </h2>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              {/* Company */}
-              <div className="flex items-start gap-3">
-                <Building2 className="w-4 h-4 mt-1 text-muted-foreground" />
-                <div className="flex-1">
-                  <div className="text-xs text-muted-foreground mb-1">
-                    Company
+      <div className="flex-1 min-h-0">
+        <ScrollArea className="h-full">
+          <div className="px-5 py-7 max-w-3xl mx-auto space-y-8">
+            {/* Overview */}
+            <SettingsSection title="Overview">
+              <SettingsCard>
+                <SettingsRow label="Messages" description={`${stats.totalMessages} total`} />
+                <SettingsRow label="Recent" description={`${stats.recentMessageCount} in last 30 days`} />
+                <SettingsRow
+                  label="Last contacted"
+                  description={stats.lastContactedAt ? formatRelativeTime(stats.lastContactedAt) : "Never"}
+                />
+                <SettingsRow label="Platforms">
+                  <div className="flex gap-1.5">
+                    {[...new Set(contact.handles.map((h) => h.platform))].map((p) => (
+                      <PlatformBadge key={p} platform={p as ActionPlatform} />
+                    ))}
                   </div>
+                </SettingsRow>
+              </SettingsCard>
+            </SettingsSection>
+
+            {/* Details */}
+            <SettingsSection title="Details">
+              <SettingsCard>
+                {isEditing ? (
+                  <SettingsRow label="Name">
+                    <Input
+                      value={editForm.displayName}
+                      onChange={(e) =>
+                        setEditForm((f) => ({ ...f, displayName: e.target.value }))
+                      }
+                      className="w-48"
+                    />
+                  </SettingsRow>
+                ) : null}
+                <SettingsRow label="Company">
                   {isEditing ? (
                     <Input
                       value={editForm.company}
@@ -409,25 +330,23 @@ export function ContactDetail({ contactId, onSendMessage }: ContactDetailProps) 
                         setEditForm((f) => ({ ...f, company: e.target.value }))
                       }
                       placeholder="Company name"
+                      className="w-48"
                     />
                   ) : (
-                    <div>{contact.company || "—"}</div>
+                    <span className="text-sm text-muted-foreground">
+                      {contact.company || "\u2014"}
+                    </span>
                   )}
-                </div>
-              </div>
-
-              {/* Tags */}
-              <div className="flex items-start gap-3">
-                <Tag className="w-4 h-4 mt-1 text-muted-foreground" />
-                <div className="flex-1">
-                  <div className="text-xs text-muted-foreground mb-1">Tags</div>
+                </SettingsRow>
+                <SettingsRow label="Tags">
                   {isEditing ? (
                     <Input
                       value={editForm.tags}
                       onChange={(e) =>
                         setEditForm((f) => ({ ...f, tags: e.target.value }))
                       }
-                      placeholder="Comma-separated tags"
+                      placeholder="Comma-separated"
+                      className="w-48"
                     />
                   ) : contact.tags && contact.tags.length > 0 ? (
                     <div className="flex flex-wrap gap-1">
@@ -438,150 +357,123 @@ export function ContactDetail({ contactId, onSendMessage }: ContactDetailProps) 
                       ))}
                     </div>
                   ) : (
-                    <div className="text-muted-foreground">—</div>
+                    <span className="text-sm text-muted-foreground">{"\u2014"}</span>
+                  )}
+                </SettingsRow>
+                {visibleHandles.map((handle, i) => (
+                  <SettingsRow
+                    key={i}
+                    label={HANDLE_TYPE_LABELS[handle.type] ?? handle.type}
+                    description={handle.value}
+                  >
+                    <PlatformBadge platform={handle.platform as ActionPlatform} />
+                  </SettingsRow>
+                ))}
+              </SettingsCard>
+            </SettingsSection>
+
+            {/* Notes */}
+            <SettingsSection title="Notes">
+              <SettingsCard divided={false}>
+                <div className="px-4 py-3.5">
+                  {isEditing ? (
+                    <Textarea
+                      value={editForm.notes}
+                      onChange={(e) =>
+                        setEditForm((f) => ({ ...f, notes: e.target.value }))
+                      }
+                      placeholder="Add notes about this contact..."
+                      rows={4}
+                    />
+                  ) : contact.notes ? (
+                    <p className="text-sm whitespace-pre-wrap">{contact.notes}</p>
+                  ) : (
+                    <p className="text-sm text-muted-foreground">
+                      No notes yet. Click edit to add some.
+                    </p>
                   )}
                 </div>
-              </div>
+              </SettingsCard>
+            </SettingsSection>
 
-              {/* Handles */}
-              <div>
-                <div className="text-xs text-muted-foreground mb-2">
-                  Contact Methods
-                </div>
-                <div className="space-y-2">
-                  {contact.handles
-                    .filter((h) => VISIBLE_HANDLE_TYPES.has(h.type))
-                    .map((handle, i) => (
-                    <div key={i} className="flex items-center gap-3 text-sm">
-                      <HandleIcon type={handle.type} />
-                      <span className="flex-1 font-mono text-sm">
-                        {handle.value}
-                      </span>
-                      <PlatformBadge platform={handle.platform as ActionPlatform} />
-                    </div>
-                  ))}
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-
-          {/* Notes */}
-          <Card>
-            <CardHeader className="pb-3">
-              <h2 className="font-semibold flex items-center gap-2">
-                <Edit2 className="w-4 h-4" />
-                Notes
-              </h2>
-            </CardHeader>
-            <CardContent>
-              {isEditing ? (
-                <Textarea
-                  value={editForm.notes}
-                  onChange={(e) =>
-                    setEditForm((f) => ({ ...f, notes: e.target.value }))
-                  }
-                  placeholder="Add notes about this contact..."
-                  rows={4}
-                />
-              ) : contact.notes ? (
-                <p className="text-sm whitespace-pre-wrap">{contact.notes}</p>
-              ) : (
-                <p className="text-sm text-muted-foreground">
-                  No notes yet. Click edit to add some.
-                </p>
-              )}
-            </CardContent>
-          </Card>
-
-          {/* Recent Conversations */}
-          {conversations.length > 0 && (
-            <Card>
-              <CardHeader className="pb-3">
-                <h2 className="font-semibold flex items-center gap-2">
-                  <MessageSquare className="w-4 h-4" />
-                  Recent Conversations
-                </h2>
-              </CardHeader>
-              <CardContent>
-                <div className="space-y-3">
+            {/* Recent Conversations */}
+            {conversations.length > 0 && (
+              <SettingsSection title="Conversations">
+                <SettingsCard>
                   {conversations.map((conv) => (
-                    <div
+                    <SettingsRow
                       key={conv._id}
-                      className="flex items-center gap-3 p-2 rounded-lg hover:bg-muted/50"
+                      label={conv.displayName || "Direct Message"}
+                      description={conv.lastMessageText || undefined}
                     >
-                      <PlatformBadge platform={conv.platform} />
-                      <div className="flex-1 min-w-0">
-                        <div className="text-sm font-medium truncate">
-                          {conv.displayName || "Direct Message"}
-                        </div>
-                        {conv.lastMessageText && (
-                          <div className="text-xs text-muted-foreground truncate">
-                            {conv.lastMessageText}
-                          </div>
+                      <div className="flex items-center gap-2">
+                        <PlatformBadge platform={conv.platform} />
+                        {conv.lastMessageAt && (
+                          <span className="text-xs text-muted-foreground">
+                            {formatRelativeTime(conv.lastMessageAt)}
+                          </span>
                         )}
                       </div>
-                      {conv.lastMessageAt && (
-                        <div className="text-xs text-muted-foreground">
-                          {formatRelativeTime(conv.lastMessageAt)}
-                        </div>
-                      )}
-                    </div>
+                    </SettingsRow>
                   ))}
-                </div>
-              </CardContent>
-            </Card>
-          )}
+                </SettingsCard>
+              </SettingsSection>
+            )}
 
-          {/* Message Timeline */}
-          <Card>
-            <CardHeader
-              className="pb-3 cursor-pointer"
-              onClick={() => setTimelineExpanded(!timelineExpanded)}
-            >
-              <div className="flex items-center justify-between">
-                <h2 className="font-semibold flex items-center gap-2">
-                  <Clock className="w-4 h-4" />
-                  Message Timeline
-                  <Badge variant="secondary" className="ml-2">
-                    {messages.length}
-                  </Badge>
-                </h2>
-                {timelineExpanded ? (
-                  <ChevronUp className="w-4 h-4 text-muted-foreground" />
-                ) : (
-                  <ChevronDown className="w-4 h-4 text-muted-foreground" />
-                )}
-              </div>
-            </CardHeader>
-            {timelineExpanded && (
-              <CardContent>
-                {messages.length > 0 ? (
-                  <div className="space-y-3">
-                    {displayMessages.map((msg) => (
-                      <TimelineMessage key={msg._id} message={msg} />
-                    ))}
-                    {messages.length > 10 && (
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        className="w-full"
-                        onClick={() => setShowAllMessages(!showAllMessages)}
-                      >
-                        {showAllMessages
-                          ? "Show less"
-                          : `Show ${messages.length - 10} more messages`}
-                      </Button>
+            {/* Message Timeline */}
+            <SettingsSection title="Messages">
+              <SettingsCard divided={false}>
+                <button
+                  type="button"
+                  className="w-full flex items-center justify-between px-4 py-3.5 cursor-pointer"
+                  onClick={() => setTimelineExpanded(!timelineExpanded)}
+                >
+                  <span className="text-sm font-medium">
+                    Timeline
+                  </span>
+                  <div className="flex items-center gap-2">
+                    <Badge variant="secondary">{messages.length}</Badge>
+                    {timelineExpanded ? (
+                      <ChevronUp className="w-4 h-4 text-muted-foreground" />
+                    ) : (
+                      <ChevronDown className="w-4 h-4 text-muted-foreground" />
                     )}
                   </div>
-                ) : (
-                  <p className="text-sm text-muted-foreground">
-                    No messages yet.
-                  </p>
+                </button>
+                {timelineExpanded && (
+                  <>
+                    <div className="h-px bg-border/50 mx-4" />
+                    <div className="px-4 py-3.5">
+                      {messages.length > 0 ? (
+                        <div className="space-y-3">
+                          {displayMessages.map((msg) => (
+                            <TimelineMessage key={msg._id} message={msg} />
+                          ))}
+                          {messages.length > 10 && (
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              className="w-full"
+                              onClick={() => setShowAllMessages(!showAllMessages)}
+                            >
+                              {showAllMessages
+                                ? "Show less"
+                                : `Show ${messages.length - 10} more messages`}
+                            </Button>
+                          )}
+                        </div>
+                      ) : (
+                        <p className="text-sm text-muted-foreground">
+                          No messages yet.
+                        </p>
+                      )}
+                    </div>
+                  </>
                 )}
-              </CardContent>
-            )}
-          </Card>
-        </div>
+              </SettingsCard>
+            </SettingsSection>
+          </div>
+        </ScrollArea>
       </div>
     </div>
   )

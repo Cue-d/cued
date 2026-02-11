@@ -8,9 +8,9 @@ import { useQuery } from "convex/react";
 import { ArrowLeftIcon, TwitterIcon } from "lucide-react";
 import { api } from "@cued/convex";
 import {
-  IMessageIcon,
+  IMessageColorIcon,
   GmailColorIcon,
-  SlackIcon,
+  SlackColorIcon,
   LinkedInIcon,
 } from "@cued/ui";
 import {
@@ -25,7 +25,7 @@ const INTEGRATIONS: IntegrationConfig[] = [
     id: "imessage",
     name: "iMessage",
     description: "Sync messages from macOS Messages app",
-    icon: <IMessageIcon className="size-5" />,
+    icon: <IMessageColorIcon className="size-5" />,
     nangoIntegrationId: null,
     integrationType: "electron-local",
     color: "text-green-500",
@@ -43,7 +43,7 @@ const INTEGRATIONS: IntegrationConfig[] = [
     id: "slack",
     name: "Slack",
     description: "Connect Slack via desktop app to sync messages",
-    icon: <SlackIcon className="size-5" />,
+    icon: <SlackColorIcon className="size-5" />,
     nangoIntegrationId: null,
     integrationType: "electron-webview",
     color: "text-purple-500",

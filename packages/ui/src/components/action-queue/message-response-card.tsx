@@ -9,6 +9,7 @@ import { MessageBubble } from "./message-response-card/message-bubble"
 import { PlatformBadge } from "./message-response-card/platform-badge"
 import { ResponseInput } from "./message-response-card/response-input"
 import { OpenInAppButton } from "./open-in-app-button"
+import { ParticipantsHoverCard, type Participant } from "./participants-hover-card"
 import type { OpenInAppConfig } from "../../actions/types"
 
 /** Re-export sub-components for advanced usage */
@@ -47,6 +48,12 @@ export interface MessageResponseCardProps {
   openInApp?: OpenInAppConfig | null
   /** Called when a link in a message is clicked. Receives the URL. */
   onLinkClick?: (url: string) => void
+  /** Conversation participants (for hover card on header) */
+  participants?: Participant[]
+  /** Primary contact ID (for DM header click) */
+  contactId?: string | null
+  /** Called when a contact name is clicked */
+  onContactClick?: (contactId: string) => void
 }
 
 export interface MessageResponseCardRef {
@@ -78,6 +85,9 @@ export const MessageResponseCard = React.forwardRef<
     onPlatformChange,
     openInApp,
     onLinkClick,
+    participants,
+    contactId,
+    onContactClick,
   },
   ref
 ) {
@@ -158,25 +168,32 @@ export const MessageResponseCard = React.forwardRef<
         className
       )}
     >
-      {/* Header */}
-      <CardHeader className="shrink-0 py-3">
-        <div className="flex items-center">
-          <div className="flex-1" />
-          <div className="flex items-center justify-center">
+      {/* Header - fixed h-10 to align with PanelHeader in left column */}
+      <CardHeader className="shrink-0 h-10 py-0 flex items-center">
+        <div className="flex items-center justify-center w-full">
+          {participants && participants.length > 0 ? (
+            <ParticipantsHoverCard
+              participants={participants}
+              onContactClick={onContactClick}
+            >
+              <h3 className="font-semibold text-sm text-foreground truncate hover:underline cursor-pointer">
+                {personName}
+              </h3>
+            </ParticipantsHoverCard>
+          ) : contactId && onContactClick ? (
+            <button
+              type="button"
+              onClick={() => onContactClick(contactId)}
+              className="font-semibold text-sm text-foreground truncate hover:underline cursor-pointer"
+            >
+              {personName}
+            </button>
+          ) : (
             <h3 className="font-semibold text-sm text-foreground truncate">
               {personName}
             </h3>
-
-            {/* Platform Selector */}
-            {platform && (
-              <PlatformBadge
-                platform={platform}
-                availablePlatforms={availablePlatforms}
-                onPlatformChange={onPlatformChange}
-              />
-            )}
-          </div>
-          <div className="flex-1 flex justify-end">
+          )}
+          <div className="absolute right-2 top-2">
             {openInApp && <OpenInAppButton config={openInApp} tooltip="⌘O" />}
           </div>
         </div>
@@ -200,11 +217,13 @@ export const MessageResponseCard = React.forwardRef<
                   isFromMe={msg.isFromMe}
                   sentAt={msg.sentAt}
                   senderName={msg.senderName}
+                  senderContactId={msg.senderContactId}
                   status={msg.status}
                   reactions={msg.reactions}
                   showSenderName={shouldShowSenderName(msg, idx)}
                   spacing={getMessageSpacing(msg, idx)}
                   platform={platform}
+                  onContactClick={onContactClick}
                 />
               ))
             ) : (

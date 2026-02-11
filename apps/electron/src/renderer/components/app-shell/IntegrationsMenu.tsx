@@ -1,5 +1,5 @@
 import { PLATFORM_CONFIG, type ActionPlatform } from '@cued/shared'
-import { cn, PLATFORM_ICON_COMPONENTS, GmailColorIcon } from '@cued/ui'
+import { cn, PLATFORM_ICON_COMPONENTS, GmailColorIcon, SlackColorIcon } from '@cued/ui'
 
 /** Platforms to display in order */
 const DISPLAY_PLATFORMS: ActionPlatform[] = [
@@ -38,7 +38,7 @@ export function IntegrationsMenu({
       {/* Platform icons */}
       <div className="flex items-center gap-0.5 px-2 pb-2.5 pt-0.5 flex-wrap">
         {DISPLAY_PLATFORMS.map((platform) => {
-          const Icon = platform === 'gmail' ? GmailColorIcon : PLATFORM_ICON_COMPONENTS[platform]
+          const Icon = platform === 'gmail' ? GmailColorIcon : platform === 'slack' ? SlackColorIcon : PLATFORM_ICON_COMPONENTS[platform]
           const config = PLATFORM_CONFIG[platform]
           const isConnected = connectedPlatforms.includes(platform)
 

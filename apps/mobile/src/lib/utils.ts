@@ -26,7 +26,7 @@ export const themeColors = {
     black: "#000000",
   },
   dark: {
-    background: "#1C1917", // stone-900 (matches oklch 0.147 0.004 49.25)
+    background: "#161616", // oklch(20% 0 0) - matches CSS --color-background
     secondaryBackground: "#0C0A09", // stone-950 (darker than cards for contrast)
     mutedForeground: "#A1A1AA", // zinc-400
     foreground: "#FAFAFA", // zinc-50

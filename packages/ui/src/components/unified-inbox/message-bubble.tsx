@@ -9,6 +9,7 @@ interface InboxMessageBubbleProps {
   showTimestamp?: boolean
   showSenderName?: boolean
   spacing?: InboxMessageSpacing
+  onContactClick?: (contactId: string) => void
 }
 
 const SPACING_CLASSES: Record<InboxMessageSpacing, string> = {
@@ -27,8 +28,10 @@ export function InboxMessageBubble({
   showTimestamp = false,
   showSenderName = false,
   spacing = "normal",
+  onContactClick,
 }: InboxMessageBubbleProps): React.ReactElement {
   const senderName = message.sender?.displayName
+  const senderId = message.sender?._id
   const hasContent = message.content.trim().length > 0
 
   return (
@@ -41,9 +44,19 @@ export function InboxMessageBubble({
     >
       {/* Sender name for received messages */}
       {showSenderName && !message.isFromMe && senderName && (
-        <span className="text-xs font-medium text-muted-foreground mb-1.5 ml-1">
-          {senderName}
-        </span>
+        senderId && onContactClick ? (
+          <button
+            type="button"
+            onClick={() => onContactClick(senderId)}
+            className="text-xs font-medium text-muted-foreground mb-1.5 ml-1 hover:underline hover:text-foreground transition-colors cursor-pointer text-left"
+          >
+            {senderName}
+          </button>
+        ) : (
+          <span className="text-xs font-medium text-muted-foreground mb-1.5 ml-1">
+            {senderName}
+          </span>
+        )
       )}
 
       {/* Message bubble - only show if there's content */}

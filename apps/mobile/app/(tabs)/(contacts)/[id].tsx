@@ -2,13 +2,13 @@
  * Contact detail screen - displays full contact profile.
  */
 
-import { useState, useCallback, useMemo } from "react";
+import { useState, useCallback, useMemo, memo } from "react";
 import { View, Text, ScrollView, Pressable, PlatformColor } from "react-native";
 import * as Haptics from "expo-haptics";
-import { useLocalSearchParams, Stack } from "expo-router";
+import { useLocalSearchParams, useRouter, Stack } from "expo-router";
 import { SymbolView } from "expo-symbols";
 import { useQuery, useMutation } from "convex/react";
-import { api } from "@cued/convex/convex/_generated/api";
+import { api } from "@cued/convex";
 import { getInitials, formatPhoneNumber, formatRelativeTime, PLATFORM_CONFIG, type ActionPlatform } from "@cued/shared";
 import { PlatformIcon } from "@/components/platform-icons";
 import { SendMessageSheet, type SendMessageContact } from "@/components/send-message-sheet";
@@ -177,8 +177,15 @@ export default function ContactDetailScreen(): React.JSX.Element {
   const [showSendSheet, setShowSendSheet] = useState(false);
   const [queuedMessages, setQueuedMessages] = useState<QueuedMessageToast[]>([]);
 
+  const router = useRouter();
+
   const profile = useQuery(api.contacts.getContactProfile, {
     contactId: id as Id<"contacts">,
+  });
+
+  const adjacent = useQuery(api.contacts.getAdjacentContacts, {
+    contactId: id as Id<"contacts">,
+    count: 3,
   });
 
   // Mutations for message queue
@@ -347,24 +354,6 @@ export default function ContactDetailScreen(): React.JSX.Element {
             </Text>
           )}
 
-          {/* Send Message Button */}
-          {sendableContact && (
-            <Pressable
-              onPress={handleOpenSendSheet}
-              className="flex-row items-center gap-2 mt-4 px-4 py-2.5 rounded-xl bg-primary"
-              accessibilityRole="button"
-              accessibilityLabel="Send message"
-            >
-              <SymbolView
-                name="paperplane.fill"
-                size={16}
-                tintColor="#18181B"
-              />
-              <Text className="text-base font-medium text-primary-foreground">
-                Send Message
-              </Text>
-            </Pressable>
-          )}
         </View>
 
         {/* Handles grouped by platform */}
@@ -455,6 +444,68 @@ export default function ContactDetailScreen(): React.JSX.Element {
             </View>
           </View>
         )}
+
+        {/* Nearby Contacts (alphabetical) */}
+        {adjacent && (adjacent.before.length > 0 || adjacent.after.length > 0) && (
+          <View style={{ marginBottom: 24 }}>
+            <SectionHeader title="Nearby Contacts" />
+            <View
+              style={{
+                marginHorizontal: 16,
+                borderRadius: 12,
+                overflow: "hidden",
+                backgroundColor: PlatformColor("secondarySystemGroupedBackground"),
+              }}
+            >
+              {adjacent.before.map((c, idx) => (
+                <NearbyContactRow
+                  key={c._id}
+                  contact={c}
+                  isFirst={idx === 0}
+                  onPress={() => {
+                    Haptics.selectionAsync();
+                    router.push(`/(tabs)/(contacts)/${c._id}`);
+                  }}
+                />
+              ))}
+              {/* Current contact - highlighted */}
+              <View
+                style={{
+                  flexDirection: "row",
+                  alignItems: "center",
+                  paddingHorizontal: 16,
+                  paddingVertical: 12,
+                  backgroundColor: PlatformColor("tertiarySystemFill"),
+                  borderTopWidth: adjacent.before.length > 0 ? 1 : 0,
+                  borderTopColor: PlatformColor("separator"),
+                }}
+              >
+                <View
+                  className="w-8 h-8 rounded-full items-center justify-center mr-3"
+                  style={{ backgroundColor: PlatformColor("systemBlue") }}
+                >
+                  <Text style={{ fontSize: 13, fontWeight: "600", color: "white" }}>
+                    {getInitials(contact.displayName)}
+                  </Text>
+                </View>
+                <Text style={{ fontSize: 16, fontWeight: "600", color: PlatformColor("label") }} numberOfLines={1}>
+                  {contact.displayName}
+                </Text>
+              </View>
+              {adjacent.after.map((c, idx) => (
+                <NearbyContactRow
+                  key={c._id}
+                  contact={c}
+                  isFirst={false}
+                  onPress={() => {
+                    Haptics.selectionAsync();
+                    router.push(`/(tabs)/(contacts)/${c._id}`);
+                  }}
+                />
+              ))}
+            </View>
+          </View>
+        )}
       </ScrollView>
 
       {/* Undo send toasts for queued messages */}
@@ -494,6 +545,47 @@ export default function ContactDetailScreen(): React.JSX.Element {
     </View>
   );
 }
+
+/** Nearby contact row - tappable row for alphabetically adjacent contacts */
+const NearbyContactRow = memo(function NearbyContactRow({
+  contact,
+  isFirst,
+  onPress,
+}: {
+  contact: { _id: string; displayName: string; company?: string | null };
+  isFirst: boolean;
+  onPress: () => void;
+}): React.JSX.Element {
+  return (
+    <Pressable
+      onPress={onPress}
+      style={!isFirst ? { borderTopWidth: 1, borderTopColor: PlatformColor("separator") } : undefined}
+      className="flex-row items-center px-4 py-3 active:bg-muted"
+      accessibilityRole="button"
+      accessibilityLabel={`Go to ${contact.displayName}`}
+    >
+      <View
+        className="w-8 h-8 rounded-full items-center justify-center mr-3"
+        style={{ backgroundColor: PlatformColor("tertiarySystemFill") }}
+      >
+        <Text style={{ fontSize: 13, fontWeight: "500", color: PlatformColor("secondaryLabel") }}>
+          {getInitials(contact.displayName)}
+        </Text>
+      </View>
+      <View className="flex-1" style={{ minWidth: 0 }}>
+        <Text style={{ fontSize: 16, color: PlatformColor("label") }} numberOfLines={1}>
+          {contact.displayName}
+        </Text>
+        {contact.company && (
+          <Text style={{ fontSize: 13, color: PlatformColor("secondaryLabel"), marginTop: 1 }} numberOfLines={1}>
+            {contact.company}
+          </Text>
+        )}
+      </View>
+      <SymbolView name="chevron.right" size={12} tintColor={PlatformColor("tertiaryLabel")} />
+    </Pressable>
+  );
+});
 
 /** Conversation row component for recent conversations */
 function ConversationRow({

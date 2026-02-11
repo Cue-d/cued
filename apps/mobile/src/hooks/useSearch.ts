@@ -1,5 +1,5 @@
 import { useQuery } from "convex/react";
-import { api } from "@cued/convex/convex/_generated/api";
+import { api } from "@cued/convex";
 import type { Id } from "@cued/convex/convex/_generated/dataModel";
 
 interface UseSearchOptions {

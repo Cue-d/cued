@@ -143,6 +143,8 @@ async function checkMessagesAvailable(): Promise<boolean> {
     const { stdout } = await execAsync(
       `osascript -e '${script.replace(/'/g, "'\\''")}'`
     );
+    const processRunning = stdout.trim() === "true";
+
     // Also verify iMessage service exists
     const checkIMessageScript = `
       tell application "Messages"
@@ -152,7 +154,8 @@ async function checkMessagesAvailable(): Promise<boolean> {
     const { stdout: iMessageResult } = await execAsync(
       `osascript -e '${checkIMessageScript.replace(/'/g, "'\\''")}'`
     );
-    return iMessageResult.trim() === "true";
+    const hasIMessageAccount = iMessageResult.trim() === "true";
+    return processRunning && hasIMessageAccount;
   } catch {
     return false;
   }

@@ -5,6 +5,7 @@ import type {
   LinkedInSendMessageResult,
   LinkedInStatusResult,
   LinkedInSyncProgress,
+  PermissionStatus,
   TwitterSendMessageResult,
   TwitterStatusResult,
   TwitterSyncProgress,
@@ -21,9 +22,15 @@ import type {
   SlackWorkspaceInfo,
   UnifiedSyncProgress,
   UnifiedSyncResult,
+  UpdaterStatus,
 } from "../shared/electron-api";
 
 const api: ElectronAPI = {
+  settings: {
+    getSyncHistoryDays: (): Promise<number> => ipcRenderer.invoke("settings:getSyncHistoryDays"),
+    setSyncHistoryDays: (days: number): Promise<number> => ipcRenderer.invoke("settings:setSyncHistoryDays", days),
+  },
+
   versions: {
     node: () => process.versions.node,
     chrome: () => process.versions.chrome,
@@ -32,7 +39,8 @@ const api: ElectronAPI = {
 
   config: {
     getConvexUrl: (): Promise<string> => ipcRenderer.invoke("config:getConvexUrl"),
-    getAccessToken: (): Promise<string | null> => ipcRenderer.invoke("auth:getAccessToken"),
+    getAccessToken: (forceRefresh = false): Promise<string | null> =>
+      ipcRenderer.invoke("auth:getAccessToken", forceRefresh),
     getAppUrl: (): Promise<string> => ipcRenderer.invoke("config:getAppUrl"),
   },
 
@@ -54,6 +62,21 @@ const api: ElectronAPI = {
       ipcRenderer.on("auth:userCode", handler);
       return () => ipcRenderer.removeListener("auth:userCode", handler);
     },
+  },
+
+  updater: {
+    onStatus: (callback: (status: UpdaterStatus) => void) => {
+      const handler = (_event: IpcRendererEvent, status: UpdaterStatus) => callback(status);
+      ipcRenderer.on("updater:status", handler);
+      return () => ipcRenderer.removeListener("updater:status", handler);
+    },
+    quitAndInstall: (): Promise<void> => ipcRenderer.invoke("updater:quitAndInstall"),
+  },
+
+  permissions: {
+    check: (): Promise<PermissionStatus> => ipcRenderer.invoke("permissions:check"),
+    openFullDiskAccessSettings: (): Promise<void> => ipcRenderer.invoke("permissions:openFullDiskAccessSettings"),
+    openContactsSettings: (): Promise<void> => ipcRenderer.invoke("permissions:openContactsSettings"),
   },
 
   sync: {

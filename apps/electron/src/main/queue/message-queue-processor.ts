@@ -20,6 +20,8 @@ import { getAdapter, SERVER_SIDE_PLATFORMS } from "../adapters/index.js";
 
 /** Maximum concurrent sends to prevent overload */
 const MAX_CONCURRENT_SENDS = 5;
+/** Fallback poll interval in case subscription updates are missed */
+const FALLBACK_POLL_INTERVAL_MS = 10000;
 
 /**
  * MessageQueueProcessor handles sending messages from the unified queue.
@@ -36,6 +38,7 @@ const MAX_AUTH_RETRIES = 6; // 30 seconds total
 
 export class MessageQueueProcessor {
   private subscription: Unsubscribe<{ messages: Doc<"messageQueue">[] }> | null = null;
+  private fallbackPollInterval: NodeJS.Timeout | null = null;
   private processingIds = new Set<string>();
   private authRetryCount = new Map<string, number>();
   private stopped = false;
@@ -60,7 +63,11 @@ export class MessageQueueProcessor {
       api.messageQueue.getQueuedMessages,
       { limit: 20 },
       (result) => {
-        console.log(`[MessageQueueProcessor] Subscription update: ${result.messages.length} messages ready`);
+        if (result.messages.length > 0) {
+          console.log(
+            `[MessageQueueProcessor] Subscription update: ${result.messages.length} messages ready`
+          );
+        }
         this.handleQueueUpdate(result.messages);
       },
       (error) => {
@@ -71,25 +78,40 @@ export class MessageQueueProcessor {
 
     // Do an initial poll after a short delay to catch any pending messages
     // This handles the case where messages were queued while the app was closed
-    setTimeout(() => this.pollOnce(), 2000);
+    setTimeout(() => this.pollOnce("startup"), 2000);
+
+    if (!this.fallbackPollInterval) {
+      this.fallbackPollInterval = setInterval(() => {
+        if (!this.stopped) {
+          this.pollOnce("fallback");
+        }
+      }, FALLBACK_POLL_INTERVAL_MS);
+      console.log(
+        `[MessageQueueProcessor] Fallback polling enabled (${FALLBACK_POLL_INTERVAL_MS}ms interval)`
+      );
+    }
   }
 
   /**
    * Poll once for pending messages.
    * Used on startup to process any backlog.
    */
-  async pollOnce(): Promise<void> {
+  async pollOnce(source: "startup" | "fallback" = "startup"): Promise<void> {
     if (this.stopped) return;
 
     try {
       const client = getConvexClient();
       const result = await client.query(api.messageQueue.getQueuedMessages, { limit: 20 });
-      console.log(`[MessageQueueProcessor] Initial poll found ${result.messages.length} pending messages`);
+      if (result.messages.length > 0 || source === "startup") {
+        console.log(
+          `[MessageQueueProcessor] ${source} poll found ${result.messages.length} pending messages`
+        );
+      }
       if (result.messages.length > 0) {
         await this.handleQueueUpdate(result.messages);
       }
     } catch (error) {
-      console.error("[MessageQueueProcessor] Initial poll failed:", error);
+      console.error(`[MessageQueueProcessor] ${source} poll failed:`, error);
     }
   }
 
@@ -102,6 +124,10 @@ export class MessageQueueProcessor {
     if (this.subscription) {
       this.subscription.unsubscribe();
       this.subscription = null;
+    }
+    if (this.fallbackPollInterval) {
+      clearInterval(this.fallbackPollInterval);
+      this.fallbackPollInterval = null;
     }
   }
 
@@ -137,8 +163,6 @@ export class MessageQueueProcessor {
       (m) => !this.processingIds.has(m._id)
     );
     if (newMessages.length === 0) return;
-
-    console.log(`[MessageQueueProcessor] Processing ${newMessages.length} messages`);
 
     // Process messages with concurrency limit
     const batch = newMessages.slice(0, MAX_CONCURRENT_SENDS);

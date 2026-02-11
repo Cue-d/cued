@@ -31,6 +31,7 @@ import {
   setConvexAuth,
 } from "../../sync/cursor";
 import { createSyncGuard } from "../../sync/guard";
+import { getSyncCutoffMs } from "../../sync/history-cutoff";
 
 // Performance tuning constants
 const BATCH_SIZE = 1000;
@@ -406,6 +407,16 @@ export class IMessageSyncManager {
     cursor: number,
     maxRowid: number
   ): Promise<number> {
+    // On full sync, apply syncHistoryDays cutoff to skip very old messages
+    if (cursor === 0) {
+      const cutoffSeconds = Math.floor(getSyncCutoffMs() / 1000);
+      const minRowid = chatDb.getMinRowidForDate(cutoffSeconds);
+      if (minRowid > 0) {
+        cursor = minRowid - 1;
+        console.log(`[IMessageSyncManager] Applying syncHistoryDays cutoff: minRowid=${minRowid}`);
+      }
+    }
+
     console.log(`[IMessageSyncManager] Sync DESC: from ${maxRowid} down to ${cursor}`);
 
     const totalStart = performance.now();

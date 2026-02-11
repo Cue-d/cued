@@ -29,7 +29,7 @@ export default defineConfig({
       { find: /^@\/widgets\/(.*)$/, replacement: path.resolve(__dirname, "./widgets/$1") },
       { find: "@", replacement: path.resolve(__dirname, "./src") },
       // Mock convex API to avoid TypeScript-only declaration files
-      { find: "@cued/convex/convex/_generated/api", replacement: path.resolve(__dirname, "./src/test/mocks/convex-api.ts") },
+      { find: /^@cued\/convex$/, replacement: path.resolve(__dirname, "./src/test/mocks/convex-api.ts") },
       // Mock convex/server to avoid TypeScript-only declaration files
       { find: "convex/server", replacement: path.resolve(__dirname, "./src/test/mocks/convex-server.ts") },
       { find: "@cued/convex", replacement: path.resolve(__dirname, "../../packages/convex") },

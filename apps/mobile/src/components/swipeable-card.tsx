@@ -373,6 +373,8 @@ export function SwipeableCard({
 
   const panGesture = Gesture.Pan()
     .enabled(!disabled && !isAnimatingRef.current)
+    .activeOffsetX([-10, 10])
+    .activeOffsetY([-10, 10])
     .onStart(() => {
       hasReachedThreshold.value = false;
       runOnJS(triggerHaptic)();

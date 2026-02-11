@@ -176,6 +176,53 @@ export const queueMessage = mutation({
     const now = Date.now();
     const delaySeconds = user.undoSendDelaySeconds ?? DEFAULT_UNDO_DELAY_SECONDS;
     const scheduledFor = now + delaySeconds * 1000;
+    const requiresThreadId =
+      args.platform === "linkedin" || args.platform === "slack";
+    let resolvedConversationId = args.conversationId;
+    let resolvedChatIdentifier = args.chatIdentifier;
+    let resolvedWorkspaceId = args.workspaceId;
+
+    if (requiresThreadId && !resolvedChatIdentifier) {
+      // First try explicit conversationId if provided
+      if (resolvedConversationId) {
+        const conversation = await ctx.db.get(resolvedConversationId);
+        if (
+          conversation &&
+          conversation.userId === user._id &&
+          conversation.platform === args.platform
+        ) {
+          resolvedChatIdentifier = conversation.platformConversationId;
+          resolvedWorkspaceId = resolvedWorkspaceId ?? conversation.workspaceId;
+        }
+      }
+
+      // Otherwise resolve from recipient contact + platform (pick most recent)
+      if (!resolvedChatIdentifier && args.recipientContactId) {
+        const conversations = await ctx.db
+          .query("conversations")
+          .withIndex("by_user_platform", (q) =>
+            q.eq("userId", user._id).eq("platform", args.platform)
+          )
+          .collect();
+
+        const matchedConversation = conversations
+          .filter((c) => c.participantContactIds.includes(args.recipientContactId!))
+          .sort((a, b) => (b.lastMessageAt ?? 0) - (a.lastMessageAt ?? 0))[0];
+
+        if (matchedConversation) {
+          resolvedConversationId = matchedConversation._id;
+          resolvedChatIdentifier = matchedConversation.platformConversationId;
+          resolvedWorkspaceId = resolvedWorkspaceId ?? matchedConversation.workspaceId;
+        }
+      }
+    }
+
+    if (requiresThreadId && !resolvedChatIdentifier) {
+      const platformLabel = args.platform === "linkedin" ? "LinkedIn" : "Slack";
+      throw new Error(
+        `${platformLabel} messages require an existing conversation. Open an existing ${platformLabel} thread first so we can resolve a conversation ID.`
+      );
+    }
 
     const messageId = await ctx.db.insert("messageQueue", {
       userId: user._id,
@@ -184,10 +231,10 @@ export const queueMessage = mutation({
       recipientContactId: args.recipientContactId,
       text: args.text,
       isGroup: args.isGroup,
-      chatIdentifier: args.chatIdentifier,
-      conversationId: args.conversationId,
+      chatIdentifier: resolvedChatIdentifier,
+      conversationId: resolvedConversationId,
       actionId: args.actionId,
-      workspaceId: args.workspaceId,
+      workspaceId: resolvedWorkspaceId,
       status: "pending",
       scheduledFor,
       attempts: 0,

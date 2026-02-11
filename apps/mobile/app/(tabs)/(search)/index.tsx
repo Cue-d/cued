@@ -6,7 +6,7 @@ import * as Haptics from "expo-haptics";
 import { Stack, useRouter } from "expo-router";
 import { SymbolView } from "expo-symbols";
 import { usePaginatedQuery } from "convex/react";
-import { api } from "@cued/convex/convex/_generated/api";
+import { api } from "@cued/convex";
 import { useSearch, type SearchContactResult, type SearchMessageResult } from "@/hooks/useSearch";
 import { PlatformIcon } from "@/components/platform-icons";
 import { isRealContactName } from "@/lib/utils";
@@ -59,7 +59,7 @@ function ContactResultCard({ contact }: { contact: SearchContactResult }): React
   return (
     <Pressable
       onPress={handlePress}
-      style={{ flexDirection: "row", alignItems: "center", padding: 12, gap: 12 }}
+      style={{ flexDirection: "row", alignItems: "center", paddingHorizontal: 16, paddingVertical: 12, gap: 12 }}
     >
         <View style={avatarStyle}>
           <SymbolView name="person.fill" tintColor={PlatformColor("secondaryLabel")} size={20} />
@@ -287,7 +287,7 @@ function DefaultContactsList(): React.ReactElement {
       keyExtractor={keyExtractor}
       ItemSeparatorComponent={renderSeparator}
       contentInsetAdjustmentBehavior="automatic"
-      contentContainerStyle={{ padding: 16 }}
+      contentContainerStyle={{ paddingVertical: 16 }}
       onEndReached={handleEndReached}
       onEndReachedThreshold={0.5}
       ListFooterComponent={

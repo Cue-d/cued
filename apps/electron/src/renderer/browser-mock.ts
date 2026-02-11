@@ -22,6 +22,11 @@ if (!window.electron && import.meta.env.DEV) {
   const noop = () => () => {}
 
   const mock: ElectronAPI = {
+    settings: {
+      getSyncHistoryDays: async () => 90,
+      setSyncHistoryDays: async (days: number) => days,
+    },
+
     versions: {
       node: () => "mock",
       chrome: () => navigator.userAgent,
@@ -30,7 +35,7 @@ if (!window.electron && import.meta.env.DEV) {
 
     config: {
       getConvexUrl: async () => CONVEX_URL ?? "",
-      getAccessToken: async () => localStorage.getItem("__cued_dev_token"),
+      getAccessToken: async (_forceRefresh?: boolean) => localStorage.getItem("__cued_dev_token"),
       getAppUrl: async () => "http://localhost:3000",
     },
 
@@ -70,6 +75,17 @@ if (!window.electron && import.meta.env.DEV) {
       },
       onAuthChange: () => noop(),
       onUserCode: () => noop(),
+    },
+
+    updater: {
+      onStatus: () => noop(),
+      quitAndInstall: async () => {},
+    },
+
+    permissions: {
+      check: async () => ({ fullDiskAccess: false, contacts: false }),
+      openFullDiskAccessSettings: async () => {},
+      openContactsSettings: async () => {},
     },
 
     sync: {

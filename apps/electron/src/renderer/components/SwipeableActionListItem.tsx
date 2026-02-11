@@ -13,7 +13,7 @@ import {
   PLATFORM_CONFIG,
   type ActionPlatform,
 } from "@cued/shared"
-import { Badge, Avatar, AvatarFallback, Button, PlatformIcon } from "@cued/ui"
+import { Avatar, AvatarBadge, AvatarFallback, Button, cn, PlatformIcon } from "@cued/ui"
 
 const SWIPE_THRESHOLD = 50
 const BUTTON_WIDTH = 72
@@ -33,6 +33,7 @@ interface SwipeableActionListItemProps {
   onClick: (e: React.MouseEvent) => void
   onDiscard: () => void
   typeConfig: { icon: React.ReactNode; label: string }
+  onContactClick?: (contactId: string) => void
 }
 
 export function SwipeableActionListItem({
@@ -43,6 +44,7 @@ export function SwipeableActionListItem({
   onClick,
   onDiscard,
   typeConfig,
+  onContactClick,
 }: SwipeableActionListItemProps) {
   const x = useMotionValue(0)
   const buttonOpacity = useTransform(x, [-BUTTON_WIDTH, -20], [1, 0])
@@ -154,6 +156,7 @@ export function SwipeableActionListItem({
   return (
     <motion.div
       ref={containerRef}
+      data-action-id={action._id}
       className="relative overflow-hidden rounded-lg mb-1"
       layout
       initial={{ opacity: 1 }}
@@ -192,37 +195,44 @@ export function SwipeableActionListItem({
         <div className="flex items-start gap-3">
           {showCheckbox ? (
             <div
-              className={`size-8 rounded-full flex items-center justify-center shrink-0 transition-colors ${
+              className={`size-6 rounded-full flex items-center justify-center shrink-0 transition-colors ${
                 multiSelected
                   ? "bg-primary text-primary-foreground"
                   : "bg-muted border border-border"
               }`}
             >
-              {multiSelected && <Check  />}
+              {multiSelected && <Check className="size-3" />}
             </div>
           ) : (
-            <Avatar size="sm" className="mt-0.5">
-              <AvatarFallback>
-                {action.contactName ? getInitials(action.contactName) : "?"}
+            <Avatar>
+              <AvatarFallback className={platformConfig?.bgClass}>
+                {getInitials(action.contactName ?? "")}
               </AvatarFallback>
+              {platformConfig && platform && (
+                <AvatarBadge className={cn(platformConfig.bgClass, "size-4! [&>svg]:size-2.5! ring-0!")}>
+                  <PlatformIcon platform={platform}/>
+                </AvatarBadge>
+              )}
             </Avatar>
           )}
           <div className="flex-1 min-w-0">
-            <div className="flex items-center gap-2">
+            {action.contactId && onContactClick ? (
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation()
+                  onContactClick(action.contactId!)
+                }}
+                className="font-medium text-sm truncate hover:underline cursor-pointer text-left"
+              >
+                {action.contactName}
+              </button>
+            ) : (
               <span className="font-medium text-sm truncate">
-                {action.contactName ?? "Unknown"}
+                {action.contactName}
               </span>
-              {platformConfig && platform && (
-                <Badge
-                  variant="secondary"
-                  className={`text-[10px] px-1.5 py-0 shrink-0 ${platformConfig.bgClass}`}
-                >
-                  <PlatformIcon platform={platform} className="w-2.5 h-2.5" />
-                </Badge>
-              )}
-            </div>
-            <div className="flex items-center gap-1.5 mt-0.5 text-xs text-muted-foreground">
-              {typeConfig.icon}
+            )}
+            <div className="flex items-center gap-1 mt-0.5 text-xs text-muted-foreground">
               <span>{typeConfig.label}</span>
               <span className="text-muted-foreground/50">·</span>
               <span>{formatRelativeTime(action.createdAt)}</span>

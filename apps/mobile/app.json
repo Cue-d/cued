@@ -9,7 +9,6 @@
     "userInterfaceStyle": "automatic",
     "plugins": [
       "expo-router",
-      "@react-native-community/datetimepicker",
       "expo-web-browser",
       "expo-secure-store",
       "expo-notifications",
@@ -23,13 +22,19 @@
               "name": "ActionCountWidget",
               "displayName": "Cued Actions",
               "description": "Shows your pending action count",
-              "supportedFamilies": ["systemSmall", "systemMedium"]
+              "supportedFamilies": [
+                "systemSmall",
+                "systemMedium"
+              ]
             },
             {
               "name": "ActionsListWidget",
               "displayName": "Contacts to Reply",
               "description": "People waiting for your response",
-              "supportedFamilies": ["systemSmall", "systemMedium"]
+              "supportedFamilies": [
+                "systemSmall",
+                "systemMedium"
+              ]
             }
           ]
         }
@@ -42,7 +47,8 @@
             "./assets/fonts/Suisse Medium.ttf"
           ]
         }
-      ]
+      ],
+      "expo-image"
     ],
     "splash": {
       "image": "./assets/splash.png",
@@ -84,15 +90,15 @@
       "router": {},
       "eas": {
         "build": {
-              "experimental": {
-                "ios": {
-                  "appExtensions": [
-                    {
-                      "bundleIdentifier": "so.cued.app.widgets",
-                      "targetName": "ExpoWidgetsTarget",
-                      "entitlements": {
-                        "com.apple.security.application-groups": [
-                          "group.so.cued.app"
+          "experimental": {
+            "ios": {
+              "appExtensions": [
+                {
+                  "bundleIdentifier": "so.cued.app.widgets",
+                  "targetName": "ExpoWidgetsTarget",
+                  "entitlements": {
+                    "com.apple.security.application-groups": [
+                      "group.so.cued.app"
                     ]
                   }
                 }
@@ -102,6 +108,15 @@
         },
         "projectId": "f6e69a25-51dc-41d6-a506-979310837443"
       }
+    },
+    "runtimeVersion": {
+      "policy": "appVersion"
+    },
+    "updates": {
+      "url": "https://u.expo.dev/f6e69a25-51dc-41d6-a506-979310837443",
+      "enabled": true,
+      "fallbackToCacheTimeout": 0,
+      "checkAutomatically": "ON_LOAD"
     }
   }
 }

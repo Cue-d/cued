@@ -33,6 +33,8 @@ export interface ActionFilterDropdownProps {
   onPlatformToggle?: (platform: ActionPlatform) => void
   /** Boolean toggle filters (e.g. "Named contacts only") */
   toggles?: FilterToggle[]
+  /** Number of records visible after filtering (shown as badge on filter icon) */
+  filteredCount?: number
   /** Optional class name */
   className?: string
 }
@@ -55,6 +57,7 @@ export const ActionFilterDropdown = forwardRef<ActionFilterDropdownRef, ActionFi
   activePlatforms,
   onPlatformToggle,
   toggles,
+  filteredCount,
   className,
 }: ActionFilterDropdownProps, ref) {
   const groups = Object.entries(ACTION_FILTER_GROUPS) as [
@@ -330,7 +333,7 @@ export const ActionFilterDropdown = forwardRef<ActionFilterDropdownRef, ActionFi
           aria-expanded={open}
           onClick={handleToggle}
           className={cn(
-            "inline-flex items-center justify-center no-drag cursor-pointer",
+            "relative inline-flex items-center justify-center no-drag cursor-pointer",
             "h-7 w-7 shrink-0 rounded-[4px]",
             "text-muted-foreground hover:text-foreground hover:bg-foreground/3",
             "data-[state=open]:text-foreground data-[state=open]:bg-foreground/3",
@@ -342,6 +345,11 @@ export const ActionFilterDropdown = forwardRef<ActionFilterDropdownRef, ActionFi
           render={<button ref={triggerRef} type="button" />}
         >
           <ListFilter className="h-4 w-4" />
+          {filteredCount !== undefined && filteredCount > 0 && (
+            <span className="absolute -bottom-1 -right-1.5 flex items-center justify-center min-w-[16px] h-4 px-1 rounded-full bg-primary text-primary-foreground text-[10px] font-semibold tabular-nums leading-none">
+              {filteredCount > 99 ? "99+" : filteredCount}
+            </span>
+          )}
         </TooltipTrigger>
         <TooltipContent side="bottom">
           <span className="flex items-center gap-1.5">

@@ -9,7 +9,7 @@ import { View, Text, ScrollView, TextInput } from "react-native";
 import * as Haptics from "expo-haptics";
 import { useLocalSearchParams, useRouter, Stack } from "expo-router";
 import { useQuery, useMutation } from "convex/react";
-import { api } from "@cued/convex/convex/_generated/api";
+import { api } from "@cued/convex";
 import { getInitials, formatTime, formatRelativeTime, type DisplayMessage } from "@cued/shared";
 import { useElectronPresence } from "@/hooks/useElectronPresence";
 import type { SwipeDirection } from "@/components/swipeable-card";
@@ -208,130 +208,126 @@ export default function ActionDetailScreen(): React.JSX.Element {
           title: contactName,
         }}
       />
-      <View className="flex-1">
-        <ScrollView
-          className="flex-1"
-          contentInsetAdjustmentBehavior="automatic"
-          contentContainerClassName="pb-4"
-        >
-          {/* Contact Header */}
-          <View className="items-center pt-4 pb-6">
-            <Avatar initials={initials} size="large" />
-            <Text className="text-lg font-semibold text-sf-label mt-3">
-              {contactName}
+      <Stack.Toolbar placement="bottom">
+        <Stack.Toolbar.Button icon="xmark" onPress={() => handleSwipe("left")} />
+        <Stack.Toolbar.Spacer />
+        <Stack.Toolbar.Button icon="clock" onPress={() => handleSwipe("up")} />
+        <Stack.Toolbar.Spacer />
+        <Stack.Toolbar.Button icon="checkmark" onPress={() => handleSwipe("right")} tintColor="#1B5E3D" />
+      </Stack.Toolbar>
+      <ScrollView
+        className="flex-1"
+        contentInsetAdjustmentBehavior="automatic"
+        contentContainerClassName="pb-4"
+      >
+        {/* Contact Header */}
+        <View className="items-center pt-4 pb-6">
+          <Avatar initials={initials} size="large" />
+          <Text className="text-lg font-semibold text-sf-label mt-3">
+            {contactName}
+          </Text>
+          {contact?.company && (
+            <Text className="text-sm text-sf-secondaryLabel mt-1">
+              {contact.company}
             </Text>
-            {contact?.company && (
-              <Text className="text-sm text-sf-secondaryLabel mt-1">
-                {contact.company}
-              </Text>
-            )}
-          </View>
-
-          {/* Action Details */}
-          <View className="mx-4 mb-4 p-4 rounded-2xl bg-sf-secondaryBg">
-            <View className="flex-row justify-between items-center mb-2">
-              <Text className="text-sm font-medium text-sf-label">
-                {getActionTypeLabel(action.type)}
-              </Text>
-              <Text className="text-xs text-sf-secondaryLabel">
-                {formatRelativeTime(action.createdAt)}
-              </Text>
-            </View>
-            {action.reason && (
-              <Text className="text-sm text-sf-secondaryLabel mb-2">
-                {action.reason}
-              </Text>
-            )}
-            {action.llmReason && (
-              <Text className="text-xs text-sf-tertiaryLabel italic">
-                {action.llmReason}
-              </Text>
-            )}
-            {conversation && (
-              <View className="flex-row items-center justify-between mt-2 pt-2 border-t border-sf-separator">
-                <Text className="text-xs text-sf-tertiaryLabel">
-                  {getPlatformLabel(action.platform)}
-                </Text>
-                {action.platform === "imessage" && (
-                  <View className="flex-row items-center gap-1.5">
-                    <View
-                      className={`w-2 h-2 rounded-full ${isDesktopOnline ? "bg-green-500" : "bg-sf-tertiaryLabel"}`}
-                    />
-                    <Text className="text-xs text-sf-tertiaryLabel">
-                      {isDesktopOnline ? "Desktop Online" : "Desktop Offline"}
-                    </Text>
-                  </View>
-                )}
-              </View>
-            )}
-          </View>
-
-          {/* Message Thread */}
-          {messages.length > 0 && (
-            <View className="mx-4 mb-4">
-              <Text className="text-sm font-medium text-sf-label mb-3">
-                Recent Messages
-              </Text>
-              <View className="gap-2">
-                {messages.map((msg) => (
-                  <MessageBubble key={msg._id} message={msg} />
-                ))}
-              </View>
-            </View>
           )}
+        </View>
 
-          {/* Response Input (for message actions) */}
-          {(action.type === "respond" || action.type === "follow_up") && (
-            <View className="mx-4 mb-4">
-              <Text className="text-sm font-medium text-sf-label mb-2">
-                Your Response
-              </Text>
-              <TextInput
-                value={responseText}
-                onChangeText={setResponseText}
-                placeholder="Send a message..."
-                placeholderTextColorClassName="accent-muted-foreground"
-                multiline
-                className="min-h-[100px] bg-sf-secondaryBg rounded-xl p-3 text-sf-label text-sm"
-                accessibilityLabel="Response input"
-              />
-            </View>
+        {/* Action Details */}
+        <View className="mx-4 mb-4 p-4 rounded-2xl bg-sf-secondaryBg">
+          <View className="flex-row justify-between items-center mb-2">
+            <Text className="text-sm font-medium text-sf-label">
+              {getActionTypeLabel(action.type)}
+            </Text>
+            <Text className="text-xs text-sf-secondaryLabel">
+              {formatRelativeTime(action.createdAt)}
+            </Text>
+          </View>
+          {action.reason && (
+            <Text className="text-sm text-sf-secondaryLabel mb-2">
+              {action.reason}
+            </Text>
           )}
-
-          {/* Contact Handles */}
-          {contact?.handles && contact.handles.length > 0 && (
-            <View className="mx-4 mb-4">
-              <Text className="text-sm font-medium text-sf-label mb-2">
-                Contact Info
+          {action.llmReason && (
+            <Text className="text-xs text-sf-tertiaryLabel italic">
+              {action.llmReason}
+            </Text>
+          )}
+          {conversation && (
+            <View className="flex-row items-center justify-between mt-2 pt-2 border-t border-sf-separator">
+              <Text className="text-xs text-sf-tertiaryLabel">
+                {getPlatformLabel(action.platform)}
               </Text>
-              <View className="bg-sf-secondaryBg rounded-xl overflow-hidden">
-                {contact.handles.map((h, idx) => (
+              {action.platform === "imessage" && (
+                <View className="flex-row items-center gap-1.5">
                   <View
-                    key={idx}
-                    className={`p-3 flex-row items-center ${idx > 0 ? "border-t border-sf-separator" : ""}`}
-                  >
-                    <Text className="text-xs text-sf-secondaryLabel w-20">
-                      {h.platform}
-                    </Text>
-                    <Text className="text-sm text-sf-label flex-1" selectable>
-                      {h.handle}
-                    </Text>
-                  </View>
-                ))}
-              </View>
+                    className={`w-2 h-2 rounded-full ${isDesktopOnline ? "bg-green-500" : "bg-sf-tertiaryLabel"}`}
+                  />
+                  <Text className="text-xs text-sf-tertiaryLabel">
+                    {isDesktopOnline ? "Desktop Online" : "Desktop Offline"}
+                  </Text>
+                </View>
+              )}
             </View>
           )}
-        </ScrollView>
+        </View>
 
-        {/* Bottom toolbar actions */}
-        <Stack.Toolbar placement="bottom">
-          <Stack.Toolbar.Button icon="xmark" onPress={() => handleSwipe("left")} />
-          <Stack.Toolbar.Spacer />
-          <Stack.Toolbar.Button icon="clock" onPress={() => handleSwipe("up")} />
-          <Stack.Toolbar.Spacer />
-          <Stack.Toolbar.Button icon="checkmark" onPress={() => handleSwipe("right")} tintColor="#1B5E3D" />
-        </Stack.Toolbar>
-      </View>
+        {/* Message Thread */}
+        {messages.length > 0 && (
+          <View className="mx-4 mb-4">
+            <Text className="text-sm font-medium text-sf-label mb-3">
+              Recent Messages
+            </Text>
+            <View className="gap-2">
+              {messages.map((msg) => (
+                <MessageBubble key={msg._id} message={msg} />
+              ))}
+            </View>
+          </View>
+        )}
+
+        {/* Response Input (for message actions) */}
+        {(action.type === "respond" || action.type === "follow_up") && (
+          <View className="mx-4 mb-4">
+            <Text className="text-sm font-medium text-sf-label mb-2">
+              Your Response
+            </Text>
+            <TextInput
+              value={responseText}
+              onChangeText={setResponseText}
+              placeholder="Send a message..."
+              placeholderTextColorClassName="accent-muted-foreground"
+              multiline
+              className="min-h-[100px] bg-sf-secondaryBg rounded-xl p-3 text-sf-label text-sm"
+              accessibilityLabel="Response input"
+            />
+          </View>
+        )}
+
+        {/* Contact Handles */}
+        {contact?.handles && contact.handles.length > 0 && (
+          <View className="mx-4 mb-4">
+            <Text className="text-sm font-medium text-sf-label mb-2">
+              Contact Info
+            </Text>
+            <View className="bg-sf-secondaryBg rounded-xl overflow-hidden">
+              {contact.handles.map((h, idx) => (
+                <View
+                  key={idx}
+                  className={`p-3 flex-row items-center ${idx > 0 ? "border-t border-sf-separator" : ""}`}
+                >
+                  <Text className="text-xs text-sf-secondaryLabel w-20">
+                    {h.platform}
+                  </Text>
+                  <Text className="text-sm text-sf-label flex-1" selectable>
+                    {h.handle}
+                  </Text>
+                </View>
+              ))}
+            </View>
+          </View>
+        )}
+      </ScrollView>
     </>
   );
 }

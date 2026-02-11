@@ -179,6 +179,7 @@ export const messageHandler: ActionSwipeHandler = {
         platform,
         messageSent,
         queuedMessageId,
+        scheduledFor: queuedMessageId ? now + (user.undoSendDelaySeconds ?? 30) * 1000 : undefined,
         responseText,
       },
     };

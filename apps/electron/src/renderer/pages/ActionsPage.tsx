@@ -79,6 +79,7 @@ interface ActionDetailProps {
   onDismiss?: () => void
   isSending?: boolean
   openExternal: (url: string) => void
+  onContactClick?: (contactId: string) => void
 }
 
 function ActionDetail({
@@ -90,6 +91,7 @@ function ActionDetail({
   onDismiss,
   isSending,
   openExternal,
+  onContactClick,
 }: ActionDetailProps) {
   if (!action) {
     return (
@@ -134,6 +136,7 @@ function ActionDetail({
           contact1OpenInApp,
           contact2OpenInApp,
           onLinkClick: (url: string) => openExternal(url),
+          onContactClick,
         })}
       </div>
     </div>
@@ -142,10 +145,12 @@ function ActionDetail({
 
 interface ActionsPageProps {
   onActionCountChange?: (count: number) => void
+  onContactClick?: (contactId: string) => void
 }
 
 export function ActionsPage({
   onActionCountChange,
+  onContactClick,
 }: ActionsPageProps): React.JSX.Element {
   const electron = useElectron()
 
@@ -497,7 +502,9 @@ export function ActionsPage({
           (a) => a._id === selectedActionId
         )
         if (currentIndex > 0) {
-          setSelectedActionId(actions[currentIndex - 1]._id)
+          const nextId = actions[currentIndex - 1]._id
+          setSelectedActionId(nextId)
+          document.querySelector(`[data-action-id="${nextId}"]`)?.scrollIntoView({ block: "nearest" })
         }
       } else if (e.key === "ArrowDown" && actions.length > 0) {
         // Navigate to next action in list
@@ -506,7 +513,9 @@ export function ActionsPage({
           (a) => a._id === selectedActionId
         )
         if (currentIndex < actions.length - 1) {
-          setSelectedActionId(actions[currentIndex + 1]._id)
+          const nextId = actions[currentIndex + 1]._id
+          setSelectedActionId(nextId)
+          document.querySelector(`[data-action-id="${nextId}"]`)?.scrollIntoView({ block: "nearest" })
         }
       } else if (e.key === "s" || e.key === "S") {
         // Snooze action - opens modal
@@ -565,6 +574,7 @@ export function ActionsPage({
             onFilterChange={setActiveFilter}
             platformCounts={platformCounts}
             activePlatforms={activePlatforms}
+            filteredCount={actions.length}
             onPlatformToggle={(platform) => {
               setActivePlatforms((prev) => {
                 const next = new Set(prev)
@@ -600,6 +610,7 @@ export function ActionsPage({
                   onClick={(e) => handleItemClick(action._id, e)}
                   onDiscard={() => handleDiscardAction(action._id)}
                   typeConfig={getActionTypeConfig(action.type)}
+                  onContactClick={onContactClick}
                 />
               ))}
             </AnimatePresence>
@@ -638,6 +649,7 @@ export function ActionsPage({
           onDismiss={() => handleSwipe("left")}
           isSending={isProcessing}
           openExternal={(url) => electron.shell.openExternal(url)}
+          onContactClick={onContactClick}
         />
       </Panel>
 

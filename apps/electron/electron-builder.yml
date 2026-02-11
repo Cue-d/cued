@@ -6,17 +6,32 @@ directories:
   buildResources: resources
   output: dist
 
+# Only include bundled output (all JS deps are bundled by Vite).
+# Native modules are handled separately via extraResources below.
 files:
   - out/**/*
-  - node_modules/**/*
-  - "!node_modules/**/*.{md,ts,map}"
-  - "!node_modules/**/test/**"
-  - "!node_modules/**/docs/**"
-  - "!node_modules/**/.github/**"
+  - "!node_modules"
 
-# Include native modules properly
-asarUnpack:
-  - node_modules/better-sqlite3/**/*
+# Copy native modules into app.asar.unpacked/node_modules/ so main process
+# can resolve them at runtime from process.resourcesPath.
+extraResources:
+  - from: "node_modules/better-sqlite3"
+    to: "app.asar.unpacked/node_modules/better-sqlite3"
+  - from: "node_modules/electron-liquid-glass"
+    to: "app.asar.unpacked/node_modules/electron-liquid-glass"
+  - from: "node_modules/bindings"
+    to: "app.asar.unpacked/node_modules/bindings"
+  - from: "node_modules/file-uri-to-path"
+    to: "app.asar.unpacked/node_modules/file-uri-to-path"
+  - from: "node_modules/node-gyp-build"
+    to: "app.asar.unpacked/node_modules/node-gyp-build"
+  - from: "node_modules/node-mac-contacts"
+    to: "app.asar.unpacked/node_modules/node-mac-contacts"
+
+publish:
+  provider: github
+  owner: Cue-d
+  repo: cued-releases
 
 # macOS configuration
 mac:
@@ -25,14 +40,17 @@ mac:
       arch:
         - arm64
         - x64
+    - target: zip
+      arch:
+        - arm64
+        - x64
   category: public.app-category.productivity
   hardenedRuntime: true
   gatekeeperAssess: false
   entitlements: resources/entitlements.mac.plist
   entitlementsInherit: resources/entitlements.mac.plist
-  # Sign all files including native modules
-  signIgnore:
-    - "!node_modules/better-sqlite3/**/*.node"
+  extendInfo:
+    NSContactsUsageDescription: "Cued needs access to your contacts to sync and manage your relationships."
 
 # DMG configuration
 dmg:

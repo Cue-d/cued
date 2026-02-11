@@ -6,12 +6,18 @@
  */
 
 import { useCallback, useState, useEffect } from "react";
-import { View, Text, Pressable, ScrollView, useColorScheme } from "react-native";
+import {
+  View,
+  Text,
+  Pressable,
+  ScrollView,
+  useColorScheme,
+} from "react-native";
 import * as Haptics from "expo-haptics";
 import { useRouter } from "expo-router";
 import { SymbolView, type SymbolViewProps } from "expo-symbols";
 import { useMutation } from "convex/react";
-import { api } from "@cued/convex/convex/_generated/api";
+import { api } from "@cued/convex";
 import { PLATFORM_CONFIG, type ActionPlatform } from "@cued/shared";
 import {
   useActionQueue,
@@ -19,21 +25,31 @@ import {
   type ActionTypeFilter,
 } from "@/contexts/action-queue-context";
 import { getThemeColors } from "@/lib/utils";
-import { PlatformIcon } from "./platform-icons";
 import { ActionListRow } from "./action-list-row";
-import type { Id } from "@cued/convex/convex/_generated/dataModel";
+import { PlatformIcon } from "./platform-icons";
+import type { Id } from "@cued/convex";
 
 /** Platform filter entries */
-const PLATFORM_FILTERS: { key: Exclude<PlatformFilter, "all">; platform: ActionPlatform }[] = [
+const PLATFORM_FILTERS: {
+  key: Exclude<PlatformFilter, "all">;
+  platform: ActionPlatform;
+}[] = [
   { key: "imessage", platform: "imessage" },
   { key: "gmail", platform: "gmail" },
   { key: "slack", platform: "slack" },
   { key: "linkedin", platform: "linkedin" },
+  { key: "twitter", platform: "twitter" },
+  { key: "signal", platform: "signal" },
 ];
 
 /** Action type filter entries */
-const TYPE_FILTERS: { key: Exclude<ActionTypeFilter, "all">; symbol: SymbolViewProps["name"]; color: string }[] = [
-  { key: "messages", symbol: "text.bubble.fill", color: "#007AFF" },
+const TYPE_FILTERS: {
+  key: Exclude<ActionTypeFilter, "all">;
+  symbol: SymbolViewProps["name"];
+  color: string;
+}[] = [
+  { key: "respond", symbol: "arrowshape.turn.up.left.fill", color: "#007AFF" },
+  { key: "followups", symbol: "clock.arrow.circlepath", color: "#FF9500" },
   { key: "contacts", symbol: "person.2.fill", color: "#AF52DE" },
 ];
 
@@ -93,7 +109,9 @@ function FilterSeparator({ isDark }: { isDark: boolean }): React.JSX.Element {
 
 /** Hook to get a live countdown from a scheduledFor timestamp */
 function useCountdown(scheduledFor: number): number {
-  const [remaining, setRemaining] = useState(() => Math.max(0, scheduledFor - Date.now()));
+  const [remaining, setRemaining] = useState(() =>
+    Math.max(0, scheduledFor - Date.now()),
+  );
   useEffect(() => {
     if (remaining <= 0) return;
     const interval = setInterval(() => {
@@ -117,14 +135,27 @@ function MessageStatus({
   const colors = getThemeColors(isDark);
   if (remainingMs <= 0) {
     return (
-      <Text style={{ fontSize: 11, fontWeight: "600", color: colors.mutedForeground }}>
+      <Text
+        style={{
+          fontSize: 11,
+          fontWeight: "600",
+          color: colors.mutedForeground,
+        }}
+      >
         Sent
       </Text>
     );
   }
   const seconds = Math.ceil(remainingMs / 1000);
   return (
-    <Text style={{ fontSize: 11, fontWeight: "600", color: colors.mutedForeground, fontVariant: ["tabular-nums"] }}>
+    <Text
+      style={{
+        fontSize: 11,
+        fontWeight: "600",
+        color: colors.mutedForeground,
+        fontVariant: ["tabular-nums"],
+      }}
+    >
       {seconds}s
     </Text>
   );
@@ -138,6 +169,7 @@ function QueuedMessageRow({
   messagePreview,
   scheduledFor,
   onUndo,
+  onDismiss,
   isDark,
 }: {
   messageId: string;
@@ -146,11 +178,19 @@ function QueuedMessageRow({
   messagePreview?: string;
   scheduledFor: number;
   onUndo: (messageId: string) => void;
+  onDismiss: (messageId: string) => void;
   isDark: boolean;
 }): React.JSX.Element {
   const colors = getThemeColors(isDark);
   const remainingMs = useCountdown(scheduledFor);
   const isPending = remainingMs > 0;
+
+  // Auto-dismiss 2s after countdown expires
+  useEffect(() => {
+    if (isPending) return;
+    const timeout = setTimeout(() => onDismiss(messageId), 2000);
+    return () => clearTimeout(timeout);
+  }, [isPending, messageId, onDismiss]);
 
   const preview = messagePreview
     ? messagePreview.length > 40
@@ -207,7 +247,13 @@ function QueuedMessageRow({
             borderColor: isDark ? "rgba(255,255,255,0.15)" : "rgba(0,0,0,0.1)",
           }}
         >
-          <Text style={{ fontSize: 12, fontWeight: "600", color: colors.foreground }}>
+          <Text
+            style={{
+              fontSize: 12,
+              fontWeight: "600",
+              color: colors.foreground,
+            }}
+          >
             Undo
           </Text>
         </Pressable>
@@ -226,6 +272,7 @@ export function ActionListSheet(): React.JSX.Element {
     filteredActions,
     queuedMessages,
     handleUndoMessage,
+    handleToastDismiss,
     platformFilter,
     setPlatformFilter,
     typeFilter,
@@ -252,7 +299,9 @@ export function ActionListSheet(): React.JSX.Element {
           actionId: actionId as Id<"actions">,
           direction: "right",
         });
-        await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+        await Haptics.notificationAsync(
+          Haptics.NotificationFeedbackType.Success,
+        );
       } catch {
         await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
       }
@@ -268,7 +317,9 @@ export function ActionListSheet(): React.JSX.Element {
           actionId: actionId as Id<"actions">,
           direction: "left",
         });
-        await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+        await Haptics.notificationAsync(
+          Haptics.NotificationFeedbackType.Success,
+        );
       } catch {
         await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
       }
@@ -292,69 +343,85 @@ export function ActionListSheet(): React.JSX.Element {
 
   return (
     <View className="flex-1">
-      <View
-        style={{
+      <ScrollView
+        horizontal
+        showsHorizontalScrollIndicator={false}
+        style={{ flexGrow: 0 }}
+        contentContainerStyle={{
           flexDirection: "row",
           alignItems: "center",
-          padding: 24,
+          paddingHorizontal: 16,
+          paddingVertical: 10,
+          marginTop: 10,
+          gap: 4,
         }}
       >
+        {/* Platform filters */}
+        {PLATFORM_FILTERS.map((f) => {
+          const isActive = platformFilter === f.key;
+          const platformColor = PLATFORM_CONFIG[f.platform]?.color;
+          return (
+            <FilterButton
+              key={f.key}
+              isActive={isActive}
+              activeColor={platformColor}
+              onPress={() => setPlatformFilter(isActive ? "all" : f.key)}
+              isDark={isDark}
+              icon={
+                <PlatformIcon
+                  platform={f.platform}
+                  size={16}
+                  color={
+                    isActive
+                      ? platformColor
+                      : isDark
+                        ? "rgba(255,255,255,0.4)"
+                        : "rgba(0,0,0,0.3)"
+                  }
+                />
+              }
+            />
+          );
+        })}
 
-        {/* Filter icons */}
-        <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
-          {/* Platform filters */}
-          {PLATFORM_FILTERS.map((f) => {
-            const isActive = platformFilter === f.key;
-            const platformColor = PLATFORM_CONFIG[f.platform]?.color;
-            return (
-              <FilterButton
-                key={f.key}
-                isActive={isActive}
-                activeColor={platformColor}
-                onPress={() => setPlatformFilter(isActive ? "all" : f.key)}
-                isDark={isDark}
-                icon={
-                  <PlatformIcon
-                    platform={f.platform}
-                    size={16}
-                    color={isActive ? platformColor : isDark ? "rgba(255,255,255,0.4)" : "rgba(0,0,0,0.3)"}
-                  />
-                }
-              />
-            );
-          })}
+        <FilterSeparator isDark={isDark} />
 
-          <FilterSeparator isDark={isDark} />
-
-          {/* Action type filters */}
-          {TYPE_FILTERS.map((f) => {
-            const isActive = typeFilter === f.key;
-            return (
-              <FilterButton
-                key={f.key}
-                isActive={isActive}
-                activeColor={f.color}
-                onPress={() => setTypeFilter(isActive ? "all" : f.key)}
-                isDark={isDark}
-                icon={
-                  <SymbolView
-                    name={f.symbol}
-                    size={16}
-                    tintColor={isActive ? f.color : isDark ? "rgba(255,255,255,0.4)" : "rgba(0,0,0,0.3)"}
-                  />
-                }
-              />
-            );
-          })}
-        </View>
-      </View>
+        {/* Action type filters */}
+        {TYPE_FILTERS.map((f) => {
+          const isActive = typeFilter === f.key;
+          return (
+            <FilterButton
+              key={f.key}
+              isActive={isActive}
+              activeColor={f.color}
+              onPress={() => setTypeFilter(isActive ? "all" : f.key)}
+              isDark={isDark}
+              icon={
+                <SymbolView
+                  name={f.symbol}
+                  size={16}
+                  tintColor={
+                    isActive
+                      ? f.color
+                      : isDark
+                        ? "rgba(255,255,255,0.4)"
+                        : "rgba(0,0,0,0.3)"
+                  }
+                />
+              }
+            />
+          );
+        })}
+      </ScrollView>
 
       {/* Queued messages - fixed at bottom above actions */}
       {queuedMessages.length > 0 && (
         <View
           style={{
             borderBottomWidth: 1,
-            borderBottomColor: isDark ? "rgba(255,255,255,0.08)" : "rgba(0,0,0,0.06)",
+            borderBottomColor: isDark
+              ? "rgba(255,255,255,0.08)"
+              : "rgba(0,0,0,0.06)",
             paddingBottom: 4,
           }}
         >
@@ -368,6 +435,7 @@ export function ActionListSheet(): React.JSX.Element {
               paddingHorizontal: 16,
               paddingTop: 4,
               paddingBottom: 4,
+              marginBottom: 6,
             }}
           >
             Pending
@@ -381,45 +449,56 @@ export function ActionListSheet(): React.JSX.Element {
               messagePreview={msg.messagePreview}
               scheduledFor={msg.scheduledFor}
               onUndo={handleUndoMessage}
+              onDismiss={(id) => handleToastDismiss(id, "sent")}
               isDark={isDark}
             />
           ))}
         </View>
       )}
 
-<ScrollView style={{ flex: 1 }}>
-
-      {/* Action list */}
-      {filteredActions.length === 0 ? (
-        <View style={{ alignItems: "center", paddingVertical: 40 }}>
-          <SymbolView name="tray" size={40} tintColor={colors.mutedForeground} />
-          <Text style={{ fontSize: 15, color: colors.mutedForeground, marginTop: 12 }}>
-            {hasActiveFilters ? "No matching actions" : "All caught up!"}
-          </Text>
-        </View>
-      ) : (
-        filteredActions.map((item, index) => (
-          <View key={item._id}>
-            {index > 0 && (
-              <View
-                style={{
-                  height: 1,
-                  backgroundColor: isDark ? "rgba(255,255,255,0.08)" : "rgba(0,0,0,0.06)",
-                  marginLeft: 64,
-                }}
-              />
-            )}
-            <ActionListRow
-              action={item}
-              onPress={handleRowPress}
-              onSend={handleSend}
-              onSkip={handleSkip}
-              onSnooze={handleSnooze}
+      <ScrollView style={{ flex: 1 }}>
+        {/* Action list */}
+        {filteredActions.length === 0 ? (
+          <View style={{ alignItems: "center", paddingVertical: 40 }}>
+            <SymbolView
+              name="tray"
+              size={40}
+              tintColor={colors.mutedForeground}
             />
+            <Text
+              style={{
+                fontSize: 15,
+                color: colors.mutedForeground,
+                marginTop: 12,
+              }}
+            >
+              {hasActiveFilters ? "No matching actions" : "All caught up!"}
+            </Text>
           </View>
-        ))
-      )}
-    </ScrollView>
+        ) : (
+          filteredActions.map((item, index) => (
+            <View key={item._id}>
+              {index > 0 && (
+                <View
+                  style={{
+                    height: 1,
+                    backgroundColor: isDark
+                      ? "rgba(255,255,255,0.08)"
+                      : "rgba(0,0,0,0.06)",
+                  }}
+                />
+              )}
+              <ActionListRow
+                action={item}
+                onPress={handleRowPress}
+                onSend={handleSend}
+                onSkip={handleSkip}
+                onSnooze={handleSnooze}
+              />
+            </View>
+          ))
+        )}
+      </ScrollView>
     </View>
   );
 }

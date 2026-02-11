@@ -7,6 +7,7 @@
 
 import { useState } from "react";
 import { View, Text, Pressable, useColorScheme } from "react-native";
+import * as Haptics from "expo-haptics";
 import { SymbolView, type SymbolViewProps } from "expo-symbols";
 import { getInitials, PLATFORM_CONFIG, type ContactHandle, type ActionPlatform } from "@cued/shared";
 import { PlatformIcon } from "@/components/platform-icons";
@@ -131,7 +132,10 @@ function OpenInAppButton({
   const label = config ? `Open ${config.label}` : "Open";
   return (
     <Pressable
-      onPress={onPress}
+      onPress={() => {
+        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+        onPress();
+      }}
       className="flex-row items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-muted active:opacity-70"
       accessibilityLabel={label}
       accessibilityRole="button"

@@ -10,7 +10,7 @@ import {
   Skeleton,
 } from "@cued/ui"
 import { type ActionPlatform } from "@cued/shared"
-import { useAuthState, useConvexClient, useLinkedIn, useTwitter, useSlack, useSignal } from "./hooks/use-electron"
+import { useAuthState, useAutoUpdater, useConvexClient, useLinkedIn, useTwitter, useSlack, useSignal } from "./hooks/use-electron"
 import { ThemeProvider } from "./hooks/use-theme"
 import { AppShell, type NavPage } from "./components/app-shell"
 import { FocusProvider } from "./context/FocusContext"
@@ -29,11 +29,8 @@ function useElectronConvexAuth() {
   const auth = useAuthState()
 
   const fetchAccessToken = useCallback(
-    async (_opts: { forceRefreshToken: boolean }) => {
-      // Electron's getAccessToken always returns a fresh token via
-      // getValidAccessToken() in the main process, so forceRefreshToken
-      // is inherently handled.
-      const token = await getAccessToken()
+    async ({ forceRefreshToken }: { forceRefreshToken: boolean }) => {
+      const token = await getAccessToken(forceRefreshToken)
       return token ?? null
     },
     [getAccessToken]
@@ -46,10 +43,26 @@ function useElectronConvexAuth() {
   }
 }
 
+function UpdateBanner() {
+  const { status, quitAndInstall } = useAutoUpdater()
+
+  if (!status || status.status !== "ready") return null
+
+  return (
+    <div className="flex items-center justify-between px-4 py-2 bg-primary text-primary-foreground text-sm">
+      <span>Update{status.version ? ` v${status.version}` : ""} ready</span>
+      <Button size="sm" variant="secondary" onClick={quitAndInstall}>
+        Restart
+      </Button>
+    </div>
+  )
+}
+
 function AuthenticatedApp({ convexUrl, user, onSignOut }: { convexUrl: string; user?: { firstName?: string | null; lastName?: string | null; email?: string | null } | null; onSignOut: () => void }) {
   const [currentPage, setCurrentPage] = useState<NavPage>("actions")
   const [actionCount, setActionCount] = useState(0)
   const [settingsSubpage, setSettingsSubpage] = useState<SettingsSubpage>('general')
+  const [pendingContactId, setPendingContactId] = useState<string | null>(null)
   const convex = useMemo(() => getOrCreateConvexClient(convexUrl), [convexUrl])
 
   // Integration status hooks
@@ -68,7 +81,10 @@ function AuthenticatedApp({ convexUrl, user, onSignOut }: { convexUrl: string; u
     return platforms
   }, [linkedInConnected, twitterConnected, slackConnected, signalConnected])
 
-  const handleNavigate = useCallback((page: NavPage) => setCurrentPage(page), [])
+  const handleNavigate = useCallback((page: NavPage) => {
+    if (page !== 'contacts') setPendingContactId(null)
+    setCurrentPage(page)
+  }, [])
 
   const handleNavigateToShortcuts = useCallback(() => {
     setCurrentPage('settings')
@@ -80,24 +96,30 @@ function AuthenticatedApp({ convexUrl, user, onSignOut }: { convexUrl: string; u
     setSettingsSubpage('integrations')
   }, [])
 
+  const handleNavigateToContact = useCallback((contactId: string) => {
+    setPendingContactId(contactId)
+    setCurrentPage('contacts')
+  }, [])
+
   const renderPage = () => {
     switch (currentPage) {
       case "actions":
-        return <ActionsPage onActionCountChange={setActionCount} />
+        return <ActionsPage onActionCountChange={setActionCount} onContactClick={handleNavigateToContact} />
       case "assistant":
         return <AssistantPage />
       case "contacts":
-        return <ContactsPage />
+        return <ContactsPage initialContactId={pendingContactId} onInitialContactConsumed={() => setPendingContactId(null)} />
       case "settings":
         return <SettingsPage subpage={settingsSubpage} onSubpageChange={setSettingsSubpage} />
       default:
-        return <ActionsPage onActionCountChange={setActionCount} />
+        return <ActionsPage onActionCountChange={setActionCount} onContactClick={handleNavigateToContact} />
     }
   }
 
   return (
     <FocusProvider>
       <ConvexProviderWithAuth client={convex} useAuth={useElectronConvexAuth}>
+        <UpdateBanner />
         <AppShell
           currentPage={currentPage}
           onNavigate={handleNavigate}

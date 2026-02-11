@@ -15,12 +15,15 @@ export interface AppSettings {
   autoLaunchEnabled: boolean;
   startMinimized: boolean;
   preventSleepWhileSyncing: boolean;
+  /** How many days of message history to sync on initial/full sync. */
+  syncHistoryDays: number;
 }
 
 const DEFAULT_SETTINGS: AppSettings = {
   autoLaunchEnabled: false,
   startMinimized: false,
   preventSleepWhileSyncing: true,
+  syncHistoryDays: 90,
 };
 
 export class SettingsManager {
@@ -126,10 +129,26 @@ export class SettingsManager {
   }
 
   /**
+   * Get sync history days setting.
+   */
+  getSyncHistoryDays(): number {
+    return this.settings.syncHistoryDays;
+  }
+
+  /**
+   * Set how many days of history to sync.
+   */
+  setSyncHistoryDays(days: number): void {
+    this.settings.syncHistoryDays = Math.max(1, Math.round(days));
+    this.saveSettings();
+    console.log(`[SettingsManager] Sync history days set to ${this.settings.syncHistoryDays}`);
+  }
+
+  /**
    * Generic setter for boolean settings.
    */
   private setSetting(key: keyof AppSettings, enabled: boolean, label: string): void {
-    this.settings[key] = enabled;
+    (this.settings[key] as boolean) = enabled;
     this.saveSettings();
     console.log(`[SettingsManager] ${label} ${enabled ? "enabled" : "disabled"}`);
   }
@@ -188,6 +207,15 @@ export class SettingsManager {
 
     ipcMain.handle("settings:getLoginItemSettings", () => {
       return this.getLoginItemSettings();
+    });
+
+    ipcMain.handle("settings:getSyncHistoryDays", () => {
+      return this.getSyncHistoryDays();
+    });
+
+    ipcMain.handle("settings:setSyncHistoryDays", (_, days: number) => {
+      this.setSyncHistoryDays(days);
+      return this.getSyncHistoryDays();
     });
   }
 }

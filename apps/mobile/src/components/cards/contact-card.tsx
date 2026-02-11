@@ -11,6 +11,7 @@
 
 import { useMemo } from "react";
 import { View, Text, ScrollView, TextInput, Pressable, useColorScheme } from "react-native";
+import * as Haptics from "expo-haptics";
 import { SymbolView } from "expo-symbols";
 import { type ActionPlatform, type ContactFormData } from "@cued/shared";
 import { PlatformIcon } from "@/components/platform-icons";
@@ -131,7 +132,10 @@ export function ContactCard({
                 "absolute right-0 flex-row items-center gap-1.5 rounded-lg px-2.5 py-1.5",
                 onOpenInApp ? "bg-muted active:opacity-70" : "bg-muted/40 opacity-50",
               )}
-              onPress={onOpenInApp ?? undefined}
+              onPress={() => {
+                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                onOpenInApp?.();
+              }}
               disabled={!onOpenInApp}
               accessibilityLabel={onOpenInApp ? `Open in ${platform}` : platform}
               accessibilityRole={onOpenInApp ? "button" : undefined}

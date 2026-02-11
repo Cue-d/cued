@@ -160,6 +160,46 @@ describe("SettingsManager", () => {
     });
   });
 
+  describe("sync history days settings", () => {
+    describe("getSyncHistoryDays()", () => {
+      it("returns 90 by default", () => {
+        expect(settingsManager.getSyncHistoryDays()).toBe(90);
+      });
+    });
+
+    describe("setSyncHistoryDays()", () => {
+      it("updates sync history days", () => {
+        settingsManager.setSyncHistoryDays(30);
+
+        expect(settingsManager.getSyncHistoryDays()).toBe(30);
+      });
+
+      it("rounds to integer", () => {
+        settingsManager.setSyncHistoryDays(45.7);
+
+        expect(settingsManager.getSyncHistoryDays()).toBe(46);
+      });
+
+      it("enforces minimum of 1", () => {
+        settingsManager.setSyncHistoryDays(0);
+
+        expect(settingsManager.getSyncHistoryDays()).toBe(1);
+      });
+
+      it("saves settings to disk", () => {
+        settingsManager.setSyncHistoryDays(180);
+
+        expect(fs.writeFileSync).toHaveBeenCalled();
+        const calls = vi.mocked(fs.writeFileSync).mock.calls;
+        const lastCall = calls[calls.length - 1];
+        expect(String(lastCall[0])).toContain("settings.json");
+        const content = String(lastCall[1]);
+        expect(content).toContain('"syncHistoryDays"');
+        expect(content).toContain("180");
+      });
+    });
+  });
+
   describe("prevent sleep settings", () => {
     describe("getPreventSleepWhileSyncing()", () => {
       it("returns true by default", () => {
@@ -302,6 +342,24 @@ describe("SettingsManager", () => {
 
       expect(ipcMain.handle).toHaveBeenCalledWith(
         "settings:getLoginItemSettings",
+        expect.any(Function)
+      );
+    });
+
+    it("registers settings:getSyncHistoryDays handler", () => {
+      settingsManager.setupIpcHandlers();
+
+      expect(ipcMain.handle).toHaveBeenCalledWith(
+        "settings:getSyncHistoryDays",
+        expect.any(Function)
+      );
+    });
+
+    it("registers settings:setSyncHistoryDays handler", () => {
+      settingsManager.setupIpcHandlers();
+
+      expect(ipcMain.handle).toHaveBeenCalledWith(
+        "settings:setSyncHistoryDays",
         expect.any(Function)
       );
     });

@@ -24,10 +24,11 @@ export function MessageCard({
   className,
   openInApp,
   onLinkClick,
+  onContactClick,
 }: ActionCardProps) {
   // For top card with context, render with full data
   if (isTop && context) {
-    const { contact, conversation, messages } = context;
+    const { contact, conversation, messages, participants } = context;
 
     // For groups/channels, use conversation displayName; for DMs use contact
     const isGroup = conversation?.conversationType !== "dm";
@@ -42,6 +43,7 @@ export function MessageCard({
       sentAt: msg.sentAt,
       isFromMe: msg.isFromMe,
       senderName: msg.senderName,
+      senderContactId: msg.senderContactId,
       status: msg.status,
       reactions: msg.reactions?.map((r) => r.emoji) ?? null,
     }));
@@ -64,6 +66,9 @@ export function MessageCard({
         className={className}
         openInApp={openInApp}
         onLinkClick={onLinkClick}
+        participants={participants}
+        contactId={contact?._id}
+        onContactClick={onContactClick}
       />
     );
   }
@@ -82,6 +87,8 @@ export function MessageCard({
       className={className}
       openInApp={openInApp}
       onLinkClick={onLinkClick}
+      contactId={action.contactId}
+      onContactClick={onContactClick}
     />
   );
 }

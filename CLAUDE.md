@@ -130,7 +130,7 @@ Web app: http://localhost:3000
 | LinkedIn sync | `apps/electron/src/main/sync/linkedin-sync.ts` |
 | Slack sync | `apps/electron/src/main/sync/slack-sync.ts` |
 | Sync coordinator | `apps/electron/src/main/sync/sync-coordinator.ts` |
-| Swift contacts CLI | `apps/electron/swift/` |
+| Contacts integration | `apps/electron/src/main/platforms/contacts/` |
 | Web routes | `apps/web/app/(app)/`, `app/api/` |
 | Mobile routes | `apps/mobile/app/` |
 
@@ -259,8 +259,7 @@ pnpm build    # Build distributable
 - `contacts-sync.ts` - macOS Contacts.app integration
 - `chat-db.ts` - iMessage SQLite database access
 
-Swift contacts CLI: `apps/electron/swift/`
-Build Swift: `cd apps/electron/swift && swift build -c release`
+**Contacts:** Uses `node-mac-contacts` native module (not Swift CLI). Provides in-process access to macOS Contacts.app via CNContactStore. Permission requests, contact fetching, and change listening all happen in the Electron main process.
 
 ## Common Issues
 
@@ -269,7 +268,7 @@ Build Swift: `cd apps/electron/swift && swift build -c release`
 | "Error accessing messages database" | Grant Full Disk Access to terminal |
 | "Contacts access denied" | Grant Contacts access in System Settings |
 | Convex types missing | Run `cd packages/convex && pnpm dev` once |
-| Swift build fails | Requires macOS 15+ and Swift 6.0+ |
+| `node-mac-contacts` build fails | Needs `node-addon-api@^8` override (see root package.json pnpm.overrides) |
 
 
 ## Ralph System (GitHub Issues → Claude)

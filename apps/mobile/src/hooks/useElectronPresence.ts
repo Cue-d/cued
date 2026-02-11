@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { useQuery } from "convex/react";
-import { api } from "@cued/convex/convex/_generated/api";
+import { api } from "@cued/convex";
 
 // Poll every 15 seconds to check desktop status
 const POLL_INTERVAL_MS = 15_000;

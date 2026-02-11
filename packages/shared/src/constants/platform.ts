@@ -77,9 +77,9 @@ export interface PlatformConfigItem {
 export const PLATFORM_CONFIG: Record<ActionPlatform, PlatformConfigItem> = {
   imessage: {
     label: "iMessage",
-    color: "#16a34a",
-    textClass: "text-green-600",
-    bgClass: "bg-green-500 text-white",
+    color: "#34C759",
+    textClass: "text-[#34C759]",
+    bgClass: "bg-[#34C759] text-white",
     letter: "i",
   },
   gmail: {
@@ -91,7 +91,7 @@ export const PLATFORM_CONFIG: Record<ActionPlatform, PlatformConfigItem> = {
   },
   slack: {
     label: "Slack",
-    color: "#9333ea",
+    color: "#4A154B",
     textClass: "text-purple-600",
     bgClass: "bg-purple-500 text-white",
     letter: "S",

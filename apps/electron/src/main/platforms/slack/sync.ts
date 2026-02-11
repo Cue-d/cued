@@ -53,6 +53,7 @@ import {
   setConvexAuth,
 } from '../../sync/cursor'
 import { createSyncGuard } from '../../sync/guard'
+import { getSyncCutoffMs } from '../../sync/history-cutoff'
 
 // ============================================================================
 // Constants
@@ -78,15 +79,6 @@ const MAX_MESSAGE_PAGES_PER_CONVERSATION = 10
 /** 0 = unlimited conversations. Set to a positive number to limit for testing. */
 const MAX_TOTAL_CONVERSATIONS = 0
 
-/**
- * Years of message history to sync on initial full sync.
- * 1 year provides good historical context for relationship insights while
- * keeping initial sync time under 10 minutes for typical workspaces.
- * Older messages won't appear in the UI but that's acceptable - recent
- * context is what matters for relationship management.
- */
-const MESSAGE_HISTORY_YEARS = 1
-
 /** Maximum number of Slack workspaces that can be connected */
 const MAX_WORKSPACES = 10
 
@@ -108,8 +100,7 @@ interface CachedSlackUser {
 }
 
 function getOldestMessageTimestamp(): string {
-  const yearsAgoMs = Date.now() - MESSAGE_HISTORY_YEARS * 365 * 24 * 60 * 60 * 1000
-  return (yearsAgoMs / 1000).toFixed(6)
+  return (getSyncCutoffMs() / 1000).toFixed(6)
 }
 
 // ============================================================================

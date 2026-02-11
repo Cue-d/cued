@@ -118,7 +118,7 @@ function EmptyState() {
 
 /** Item separator */
 function ItemSeparator() {
-  return <View className="h-px bg-border ml-[72px]" />;
+  return <View className="h-px bg-border" />;
 }
 
 /** Loading state */

@@ -1,20 +1,17 @@
 /**
- * Watches for macOS Contacts.app changes using the cued-contacts Swift CLI.
+ * Watches for macOS Contacts.app changes using the node-mac-contacts listener.
  *
- * The Swift CLI outputs JSON lines when contacts change, which we parse and
- * emit as events. Falls back to hourly polling if watch mode is unavailable.
+ * Listens for CNContactStoreDidChange notifications in-process and emits
+ * change events so the sync engine can re-fetch contacts.
+ * Falls back to hourly polling if the native listener is unavailable.
  */
 
-import { ChildProcess, spawn } from "child_process";
 import { EventEmitter } from "events";
-import { isSwiftContactsAvailable, getContactsManager } from "./manager";
+import { loadNativeModule } from "../../native-module-loader";
+import type { NodeMacContacts } from "./types";
 
-/** Watch event types from the Swift CLI */
-interface WatchEvent {
-  type: "started" | "changed" | "error";
-  timestamp: string;
-  message: string | null;
-}
+/** One hour in milliseconds */
+const FALLBACK_POLL_INTERVAL_MS = 60 * 60 * 1000;
 
 /** ContactsWatcher events */
 export interface ContactsWatcherEvents {
@@ -24,34 +21,32 @@ export interface ContactsWatcherEvents {
   stopped: [];
 }
 
-/** One hour in milliseconds */
-const HOURLY_INTERVAL_MS = 60 * 60 * 1000;
-
-/** Restart delay after crash */
-const RESTART_DELAY_MS = 5000;
-
 /**
- * Watches for contacts changes via Swift CLI or hourly fallback.
+ * Watches for contacts changes via native CNContactStore notifications.
+ * Falls back to hourly polling if the native module fails to load.
  */
 export class ContactsWatcher extends EventEmitter<ContactsWatcherEvents> {
-  private process: ChildProcess | null = null;
-  private fallbackInterval: ReturnType<typeof setInterval> | null = null;
   private isRunning = false;
-  private restartTimeout: ReturnType<typeof setTimeout> | null = null;
-  private buffer = "";
+  private contacts: NodeMacContacts | null = null;
+  private fallbackInterval: ReturnType<typeof setInterval> | null = null;
 
   /**
    * Start watching for contact changes.
-   * Uses Swift CLI watch mode if available, otherwise falls back to hourly polling.
    */
   start(): void {
     if (this.isRunning) return;
     this.isRunning = true;
 
-    if (isSwiftContactsAvailable()) {
-      this.startWatchProcess();
-    } else {
-      console.log("[ContactsWatcher] Swift CLI unavailable, using hourly fallback");
+    try {
+      this.contacts = loadNativeModule<NodeMacContacts>("node-mac-contacts");
+      this.contacts.listener.setup();
+      this.contacts.listener.on("contact-changed", () => {
+        this.emit("change");
+      });
+      this.emit("started");
+    } catch (err) {
+      console.warn("[ContactsWatcher] Native listener unavailable, falling back to hourly polling:", err);
+      this.emit("error", err instanceof Error ? err : new Error(String(err)));
       this.startFallbackPolling();
     }
   }
@@ -61,7 +56,10 @@ export class ContactsWatcher extends EventEmitter<ContactsWatcherEvents> {
    */
   stop(): void {
     this.isRunning = false;
-    this.stopWatchProcess();
+    if (this.contacts) {
+      this.contacts.listener.remove();
+      this.contacts = null;
+    }
     this.stopFallbackPolling();
     this.emit("stopped");
   }
@@ -71,98 +69,6 @@ export class ContactsWatcher extends EventEmitter<ContactsWatcherEvents> {
    */
   isWatching(): boolean {
     return this.isRunning;
-  }
-
-  private startWatchProcess(): void {
-    const binaryPath = getContactsManager().getBinaryPath();
-
-    try {
-      this.process = spawn(binaryPath, ["--watch"], {
-        stdio: ["ignore", "pipe", "pipe"],
-      });
-
-      this.process.stdout?.on("data", (data: Buffer) => {
-        this.handleOutput(data.toString());
-      });
-
-      this.process.stderr?.on("data", (data: Buffer) => {
-        console.error("[ContactsWatcher] stderr:", data.toString().trim());
-      });
-
-      this.process.on("error", (err) => {
-        console.error("[ContactsWatcher] Process error:", err.message);
-        this.emit("error", err);
-        this.scheduleRestart();
-      });
-
-      this.process.on("exit", (code, signal) => {
-        if (code !== 0) {
-          console.warn(`[ContactsWatcher] Process exited unexpectedly (code=${code}, signal=${signal})`);
-        }
-        this.process = null;
-        if (this.isRunning) {
-          this.scheduleRestart();
-        }
-      });
-    } catch (err) {
-      console.error("[ContactsWatcher] Failed to start:", err);
-      this.emit("error", err instanceof Error ? err : new Error(String(err)));
-      this.startFallbackPolling();
-    }
-  }
-
-  private stopWatchProcess(): void {
-    if (this.restartTimeout) {
-      clearTimeout(this.restartTimeout);
-      this.restartTimeout = null;
-    }
-
-    if (this.process) {
-      this.process.kill("SIGTERM");
-      this.process = null;
-    }
-  }
-
-  private scheduleRestart(): void {
-    if (!this.isRunning || this.restartTimeout) return;
-
-    this.restartTimeout = setTimeout(() => {
-      this.restartTimeout = null;
-      if (this.isRunning) {
-        this.startWatchProcess();
-      }
-    }, RESTART_DELAY_MS);
-  }
-
-  private handleOutput(data: string): void {
-    this.buffer += data;
-    const lines = this.buffer.split("\n");
-    this.buffer = lines.pop() || "";
-
-    for (const line of lines) {
-      if (!line.trim()) continue;
-      try {
-        const event = JSON.parse(line) as WatchEvent;
-        this.handleEvent(event);
-      } catch {
-        console.warn("[ContactsWatcher] Invalid JSON line:", line);
-      }
-    }
-  }
-
-  private handleEvent(event: WatchEvent): void {
-    switch (event.type) {
-      case "started":
-        this.emit("started");
-        break;
-      case "changed":
-        this.emit("change");
-        break;
-      case "error":
-        console.error("[ContactsWatcher] Error:", event.message);
-        this.emit("error", new Error(event.message || "Unknown error"));
-        break;
-    }
   }
 
   private startFallbackPolling(): void {
@@ -176,7 +82,7 @@ export class ContactsWatcher extends EventEmitter<ContactsWatcherEvents> {
       if (this.isRunning) {
         this.emit("change");
       }
-    }, HOURLY_INTERVAL_MS);
+    }, FALLBACK_POLL_INTERVAL_MS);
   }
 
   private stopFallbackPolling(): void {

@@ -38,3 +38,6 @@ export {
 export { ActionFilterChips } from "./action-filter-chips"
 export type { ActionFilterChipsProps } from "./action-filter-chips"
 
+export { ParticipantsHoverCard } from "./participants-hover-card"
+export type { Participant, } from "./participants-hover-card"
+

@@ -15,8 +15,8 @@ import {
   type ReactNode,
 } from "react";
 import { useMutation } from "convex/react";
-import { api } from "@cued/convex/convex/_generated/api";
-import { type ActionPlatform, type EnrichedAction, isMessageActionType, isContactActionType } from "@cued/shared";
+import { api } from "@cued/convex";
+import { type ActionPlatform, type EnrichedAction } from "@cued/shared";
 import { useActions } from "@/hooks/useActions";
 import type { Id } from "@cued/convex/convex/_generated/dataModel";
 
@@ -31,7 +31,7 @@ export interface QueuedMessageToast {
 }
 
 /** Action type filter options (grouped) */
-export type ActionTypeFilter = "all" | "messages" | "contacts";
+export type ActionTypeFilter = "all" | "respond" | "followups" | "contacts";
 
 /** Platform filter options */
 export type PlatformFilter = "all" | ActionPlatform;
@@ -78,7 +78,7 @@ interface ActionQueueContextValue {
 const ActionQueueContext = createContext<ActionQueueContextValue | null>(null);
 
 export function ActionQueueProvider({ children }: { children: ReactNode }): React.JSX.Element {
-  const { actions: rawActions, isLoading } = useActions({ limit: 20 });
+  const { actions: rawActions, isLoading } = useActions({ limit: 50 });
   const cancelMessage = useMutation(api.messageQueue.cancelMessage);
 
   // Cast actions to our enriched type
@@ -106,8 +106,9 @@ export function ActionQueueProvider({ children }: { children: ReactNode }): Reac
   const filteredActions = useMemo(() => {
     return actions.filter((action) => {
       if (platformFilter !== "all" && action.platform !== platformFilter) return false;
-      if (typeFilter === "messages" && !isMessageActionType(action.type)) return false;
-      if (typeFilter === "contacts" && !isContactActionType(action.type)) return false;
+      if (typeFilter === "respond" && action.type !== "respond") return false;
+      if (typeFilter === "followups" && action.type !== "follow_up") return false;
+      if (typeFilter === "contacts" && action.type !== "resolve_contact" && action.type !== "new_connection" && action.type !== "eod_contact") return false;
       return true;
     });
   }, [actions, platformFilter, typeFilter]);
@@ -118,6 +119,7 @@ export function ActionQueueProvider({ children }: { children: ReactNode }): Reac
 
   const handleUndoMessage = useCallback(
     async (messageId: string) => {
+      setQueuedMessages((prev) => prev.filter((m) => m.messageId !== messageId));
       await cancelMessage({ messageId: messageId as Id<"messageQueue"> });
     },
     [cancelMessage],

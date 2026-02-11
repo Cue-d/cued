@@ -5,9 +5,9 @@
  * Uses better-sqlite3 for synchronous, high-performance SQLite access.
  */
 
-import Database from "better-sqlite3";
 import { homedir } from "os";
 import { join } from "path";
+import type Database from "better-sqlite3";
 import type {
   Chat,
   Handle,
@@ -18,6 +18,16 @@ import type {
 } from "./types";
 import { extractTextFromAttributedBody } from "./attributed-body";
 import { normalizeChatDbHandleIdentifier } from "./handle-normalization";
+import { loadNativeModule } from "../../native-module-loader";
+
+let _BetterSqlite3: typeof Database | null = null;
+
+function getBetterSqlite3(): typeof Database {
+  if (!_BetterSqlite3) {
+    _BetterSqlite3 = loadNativeModule<typeof Database>("better-sqlite3");
+  }
+  return _BetterSqlite3;
+}
 
 /**
  * Map iMessage tapback type codes to emoji.
@@ -168,7 +178,8 @@ export class ChatDb {
    */
   constructor(path: string = DEFAULT_CHAT_DB_PATH) {
     // Open read-only to avoid conflicts with Messages.app
-    this.db = new Database(path, { readonly: true, fileMustExist: true });
+    const BetterSqlite3 = getBetterSqlite3();
+    this.db = new BetterSqlite3(path, { readonly: true, fileMustExist: true });
 
     // Prepare commonly-used statements for performance
     // Note: LIMIT is required to avoid loading too many messages at once
@@ -298,6 +309,20 @@ export class ChatDb {
   // =========================================================================
   // SYNC SUPPORT QUERIES
   // =========================================================================
+
+  /**
+   * Get the minimum ROWID for messages on or after a given Unix timestamp.
+   * Used to limit how far back a full sync goes based on syncHistoryDays.
+   * @param unixSeconds - Unix timestamp in seconds
+   * @returns The minimum ROWID, or 0 if no messages match
+   */
+  getMinRowidForDate(unixSeconds: number): number {
+    const appleNs = (unixSeconds - APPLE_EPOCH_OFFSET) * 1_000_000_000;
+    const row = this.db
+      .prepare("SELECT MIN(ROWID) as min_rowid FROM message WHERE date >= ?")
+      .get(appleNs) as { min_rowid: number | null } | undefined;
+    return row?.min_rowid ?? 0;
+  }
 
   /**
    * Get the highest message ROWID.

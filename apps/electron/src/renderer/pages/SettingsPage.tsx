@@ -14,8 +14,10 @@ import {
   cn,
 } from "@cued/ui"
 import { Settings, Keyboard, Sun, Moon, Monitor, Plug } from "lucide-react"
+import type { PermissionStatus } from "../../shared/electron-api"
 import { useTheme, type Theme } from "../hooks/use-theme"
 import { Panel, PanelHeader } from "../components/app-shell"
+import { SettingsSection, SettingsCard, SettingsRow } from "../components/settings-card"
 import {
   useAuthState,
   useUnifiedSync,
@@ -27,83 +29,6 @@ import {
 } from "../hooks/use-electron"
 import { SignalLoginDialog } from "../components/SignalLoginDialog"
 import { cmdKey } from "../lib/platform"
-
-// ============================================
-// Settings UI Components (Craft Agents Style)
-// ============================================
-
-interface SettingsSectionProps {
-  title: string
-  description?: React.ReactNode
-  children: React.ReactNode
-  className?: string
-}
-
-function SettingsSection({ title, description, children, className }: SettingsSectionProps) {
-  return (
-    <section className={cn("space-y-3", className)}>
-      <div className="flex items-start justify-between gap-4 pl-1">
-        <div className="space-y-0.5">
-          <h3 className="text-base font-semibold">{title}</h3>
-          {description && (
-            <p className="text-sm text-muted-foreground">{description}</p>
-          )}
-        </div>
-      </div>
-      {children}
-    </section>
-  )
-}
-
-interface SettingsCardProps {
-  children: React.ReactNode
-  className?: string
-  divided?: boolean
-}
-
-function SettingsCard({ children, className, divided = true }: SettingsCardProps) {
-  const childArray = React.Children.toArray(children).filter(Boolean)
-
-  return (
-    <div className={cn("rounded-xl bg-background shadow-minimal overflow-hidden", className)}>
-      {divided && childArray.length > 1
-        ? childArray.map((child, index) => (
-            <React.Fragment key={index}>
-              {index > 0 && <div className="h-px bg-border/50 mx-4" />}
-              {child}
-            </React.Fragment>
-          ))
-        : children}
-    </div>
-  )
-}
-
-interface SettingsRowProps {
-  label: string
-  description?: string
-  children?: React.ReactNode
-  action?: React.ReactNode
-  className?: string
-}
-
-function SettingsRow({ label, description, children, action, className }: SettingsRowProps) {
-  return (
-    <div className={cn("w-full flex items-center justify-between text-left px-4 py-3.5", className)}>
-      <div className="flex-1 min-w-0">
-        <div className="text-sm font-medium">{label}</div>
-        {description && (
-          <div className="text-sm text-muted-foreground mt-0 truncate">{description}</div>
-        )}
-      </div>
-      {(children || action) && (
-        <div className="flex items-center gap-3 ml-4 shrink-0">
-          {children}
-          {action}
-        </div>
-      )}
-    </div>
-  )
-}
 
 interface SettingsToggleProps {
   label: string
@@ -273,12 +198,94 @@ function ShortcutsContent() {
   )
 }
 
+function usePermissions() {
+  const electron = useElectron()
+  const [permissions, setPermissions] = React.useState<PermissionStatus | null>(null)
+  const [isChecking, setIsChecking] = React.useState(true)
+
+  const check = React.useCallback(async () => {
+    setIsChecking(true)
+    try {
+      const status = await electron.permissions.check()
+      setPermissions(status)
+    } catch (error) {
+      console.error("Failed to check permissions:", error)
+    } finally {
+      setIsChecking(false)
+    }
+  }, [electron])
+
+  // Check on mount
+  React.useEffect(() => {
+    check()
+  }, [check])
+
+  // Re-check when window regains focus
+  React.useEffect(() => {
+    const handleFocus = () => { check() }
+    window.addEventListener("focus", handleFocus)
+    return () => window.removeEventListener("focus", handleFocus)
+  }, [check])
+
+  return { permissions, isChecking, recheck: check }
+}
+
+function PermissionRow({
+  label,
+  description,
+  granted,
+  isChecking,
+  onOpenSettings,
+}: {
+  label: string
+  description: string
+  granted: boolean | undefined
+  isChecking: boolean
+  onOpenSettings: () => void
+}) {
+  return (
+    <SettingsRow label={label} description={description}>
+      {isChecking ? (
+        <div className="w-2 h-2 rounded-full bg-muted-foreground animate-pulse" />
+      ) : granted ? (
+        <Badge variant="secondary" className="bg-green-500/10 text-green-500">
+          Granted
+        </Badge>
+      ) : (
+        <div className="flex items-center gap-2">
+          <Badge variant="secondary" className="bg-amber-500/10 text-amber-500">
+            Not Granted
+          </Badge>
+          <Button variant="outline" size="sm" onClick={onOpenSettings}>
+            Open Settings
+          </Button>
+        </div>
+      )}
+    </SettingsRow>
+  )
+}
+
+const SYNC_HISTORY_OPTIONS = [
+  { value: 30, label: "30 days" },
+  { value: 60, label: "60 days" },
+  { value: 90, label: "90 days" },
+  { value: 180, label: "180 days" },
+  { value: 365, label: "1 year" },
+]
+
 function GeneralContent() {
   const auth = useAuthState()
+  const electron = useElectron()
+  const { permissions, isChecking } = usePermissions()
   const userSettings = useQuery(api.users.getSettings)
   const updateUndoDelay = useMutation(api.users.updateUndoSendDelay)
   const { theme, setTheme } = useTheme()
   const fullName = [auth.user?.firstName, auth.user?.lastName].filter(Boolean).join(' ')
+  const [syncHistoryDays, setSyncHistoryDays] = React.useState<number>(90)
+
+  React.useEffect(() => {
+    electron.settings.getSyncHistoryDays().then(setSyncHistoryDays)
+  }, [electron])
 
   return (
     <div className="h-full flex flex-col">
@@ -308,6 +315,26 @@ function GeneralContent() {
                 </SettingsCard>
               </SettingsSection>
 
+              {/* Permissions */}
+              <SettingsSection title="Permissions" description="Required for syncing iMessage and contacts">
+                <SettingsCard>
+                  <PermissionRow
+                    label="Full Disk Access"
+                    description="Required to read iMessage database"
+                    granted={permissions?.fullDiskAccess}
+                    isChecking={isChecking}
+                    onOpenSettings={() => electron.permissions.openFullDiskAccessSettings()}
+                  />
+                  <PermissionRow
+                    label="Contacts"
+                    description="Required to sync macOS contacts"
+                    granted={permissions?.contacts}
+                    isChecking={isChecking}
+                    onOpenSettings={() => electron.permissions.openContactsSettings()}
+                  />
+                </SettingsCard>
+              </SettingsSection>
+
               {/* Appearance */}
               <SettingsSection title="Appearance" description="Choose how Cued looks">
                 <SettingsCard>
@@ -334,6 +361,41 @@ function GeneralContent() {
                         )
                       })}
                     </div>
+                  </SettingsRow>
+                </SettingsCard>
+              </SettingsSection>
+
+              {/* Sync History */}
+              <SettingsSection title="Sync History" description="How far back to sync messages on initial sync">
+                <SettingsCard>
+                  <SettingsRow
+                    label="History window"
+                    description="Applies to iMessage, Slack, LinkedIn, and Twitter"
+                  >
+                    <Select
+                      value={String(syncHistoryDays)}
+                      onValueChange={async (value) => {
+                        const days = Number(value)
+                        setSyncHistoryDays(days)
+                        try {
+                          const saved = await electron.settings.setSyncHistoryDays(days)
+                          setSyncHistoryDays(saved)
+                        } catch (e) {
+                          console.error("Failed to save sync history days:", e)
+                        }
+                      }}
+                    >
+                      <SelectTrigger className="w-[140px]">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {SYNC_HISTORY_OPTIONS.map((option) => (
+                          <SelectItem key={option.value} value={String(option.value)}>
+                            {option.label}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
                   </SettingsRow>
                 </SettingsCard>
               </SettingsSection>

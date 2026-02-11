@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, vi, afterEach } from "vitest";
-import { ContactsManager, ContactsError, ContactsAccessDeniedError, isSwiftContactsAvailable } from "../manager";
+import { ContactsManager, ContactsError, ContactsAccessDeniedError } from "../manager";
 
 // Mock fs module
 vi.mock("fs", async () => {
@@ -11,36 +11,55 @@ vi.mock("fs", async () => {
     writeFileSync: vi.fn(),
     mkdirSync: vi.fn(),
     unlinkSync: vi.fn(),
-    accessSync: vi.fn(),
-    constants: actual.constants,
   };
 });
-
-// Mock child_process
-vi.mock("child_process", () => ({
-  execSync: vi.fn(),
-}));
 
 // Mock os for homedir
 vi.mock("os", () => ({
   homedir: () => "/Users/test",
 }));
 
-import { existsSync, readFileSync, writeFileSync, accessSync } from "fs";
-import { execSync } from "child_process";
+// Mock native module loader
+const mockGetAllContacts = vi.fn();
+const mockGetAuthStatus = vi.fn();
+const mockRequestAccess = vi.fn();
 
-/** Helper to create Swift CLI JSON output format */
-function createCliOutput(contacts: Array<{ name: string; phones: string[]; emails: string[]; company?: string }>) {
-  return JSON.stringify({
-    contacts: contacts.map(c => ({
-      name: c.name,
-      phones: c.phones,
-      emails: c.emails,
-      company: c.company ?? null,
-    })),
-    count: contacts.length,
-    elapsed_seconds: 0.05,
-  });
+vi.mock("../../../native-module-loader", () => ({
+  loadNativeModule: vi.fn(() => ({
+    getAllContacts: mockGetAllContacts,
+    getAuthStatus: mockGetAuthStatus,
+    requestAccess: mockRequestAccess,
+    listener: {
+      setup: vi.fn(),
+      remove: vi.fn(),
+      on: vi.fn(),
+      removeAllListeners: vi.fn(),
+    },
+  })),
+}));
+
+import { existsSync, readFileSync, writeFileSync } from "fs";
+
+/** Helper to create node-mac-contacts return format */
+function createMockContacts(
+  contacts: Array<{
+    firstName?: string;
+    lastName?: string;
+    phones?: string[];
+    emails?: string[];
+    company?: string;
+  }>
+) {
+  return contacts.map((c, i) => ({
+    identifier: `id-${i}`,
+    firstName: c.firstName ?? "",
+    lastName: c.lastName ?? "",
+    nickname: "",
+    birthday: "",
+    phoneNumbers: c.phones ?? [],
+    emailAddresses: c.emails ?? [],
+    organizationName: c.company,
+  }));
 }
 
 describe("ContactsManager", () => {
@@ -49,13 +68,8 @@ describe("ContactsManager", () => {
   beforeEach(() => {
     manager = new ContactsManager();
     vi.clearAllMocks();
-    // Default: binary exists
-    vi.mocked(existsSync).mockImplementation((path) => {
-      if (typeof path === "string" && path.includes("cued-contacts")) {
-        return true;
-      }
-      return false;
-    });
+    // Default: authorized
+    mockGetAuthStatus.mockReturnValue("Authorized");
   });
 
   afterEach(() => {
@@ -85,9 +99,6 @@ describe("ContactsManager", () => {
         if (typeof path === "string" && path.includes("contacts_cache.json")) {
           return true;
         }
-        if (typeof path === "string" && path.includes("cued-contacts")) {
-          return true;
-        }
         return false;
       });
       vi.mocked(readFileSync).mockReturnValue(JSON.stringify(cachedData));
@@ -96,7 +107,7 @@ describe("ContactsManager", () => {
 
       expect(contacts).toHaveLength(1);
       expect(contacts[0].displayName).toBe("John Doe");
-      expect(execSync).not.toHaveBeenCalled();
+      expect(mockGetAllContacts).not.toHaveBeenCalled();
     });
 
     it("skips expired cache and fetches fresh", async () => {
@@ -110,32 +121,24 @@ describe("ContactsManager", () => {
         if (typeof path === "string" && path.includes("contacts_cache.json")) {
           return true;
         }
-        if (typeof path === "string" && path.includes("cued-contacts")) {
-          return true;
-        }
         return false;
       });
       vi.mocked(readFileSync).mockReturnValue(JSON.stringify(expiredCache));
-      vi.mocked(execSync).mockReturnValue(
-        createCliOutput([{ name: "New Contact", phones: ["+15559999999"], emails: [] }])
+      mockGetAllContacts.mockReturnValue(
+        createMockContacts([{ firstName: "New", lastName: "Contact", phones: ["+15559999999"] }])
       );
 
       const contacts = await manager.fetchContacts();
 
       expect(contacts).toHaveLength(1);
       expect(contacts[0].displayName).toBe("New Contact");
-      expect(execSync).toHaveBeenCalled();
+      expect(mockGetAllContacts).toHaveBeenCalled();
     });
 
-    it("fetches from Swift CLI when no cache exists", async () => {
-      vi.mocked(existsSync).mockImplementation((path) => {
-        if (typeof path === "string" && path.includes("cued-contacts")) {
-          return true;
-        }
-        return false;
-      });
-      vi.mocked(execSync).mockReturnValue(
-        createCliOutput([{ name: "Jane Smith", company: "Tech Co", phones: ["+15551111111"], emails: ["jane@tech.co"] }])
+    it("fetches from native module when no cache exists", async () => {
+      vi.mocked(existsSync).mockReturnValue(false);
+      mockGetAllContacts.mockReturnValue(
+        createMockContacts([{ firstName: "Jane", lastName: "Smith", company: "Tech Co", phones: ["+15551111111"], emails: ["jane@tech.co"] }])
       );
 
       const contacts = await manager.fetchContacts();
@@ -143,7 +146,7 @@ describe("ContactsManager", () => {
       expect(contacts).toHaveLength(1);
       expect(contacts[0].displayName).toBe("Jane Smith");
       expect(contacts[0].company).toBe("Tech Co");
-      expect(execSync).toHaveBeenCalled();
+      expect(mockGetAllContacts).toHaveBeenCalled();
       expect(writeFileSync).toHaveBeenCalled();
     });
 
@@ -158,35 +161,27 @@ describe("ContactsManager", () => {
         if (typeof path === "string" && path.includes("contacts_cache.json")) {
           return true;
         }
-        if (typeof path === "string" && path.includes("cued-contacts")) {
-          return true;
-        }
         return false;
       });
       vi.mocked(readFileSync).mockReturnValue(JSON.stringify(cachedData));
-      vi.mocked(execSync).mockReturnValue(
-        createCliOutput([{ name: "Fresh", phones: [], emails: [] }])
+      mockGetAllContacts.mockReturnValue(
+        createMockContacts([{ firstName: "Fresh", phones: [] }])
       );
 
       const contacts = await manager.fetchContacts(true);
 
       expect(contacts[0].displayName).toBe("Fresh");
-      expect(execSync).toHaveBeenCalled();
+      expect(mockGetAllContacts).toHaveBeenCalled();
     });
   });
 
   describe("resolveHandle", () => {
     beforeEach(async () => {
-      vi.mocked(existsSync).mockImplementation((path) => {
-        if (typeof path === "string" && path.includes("cued-contacts")) {
-          return true;
-        }
-        return false;
-      });
-      vi.mocked(execSync).mockReturnValue(
-        createCliOutput([
-          { name: "Alice", phones: ["+15551234567", "+15559876543"], emails: ["alice@example.com"] },
-          { name: "Bob", phones: ["555-111-2222"], emails: ["bob@work.com", "bob@personal.com"] },
+      vi.mocked(existsSync).mockReturnValue(false);
+      mockGetAllContacts.mockReturnValue(
+        createMockContacts([
+          { firstName: "Alice", phones: ["+15551234567", "+15559876543"], emails: ["alice@example.com"] },
+          { firstName: "Bob", phones: ["555-111-2222"], emails: ["bob@work.com", "bob@personal.com"] },
         ])
       );
       await manager.fetchContacts();
@@ -238,16 +233,11 @@ describe("ContactsManager", () => {
 
   describe("resolveHandles", () => {
     beforeEach(async () => {
-      vi.mocked(existsSync).mockImplementation((path) => {
-        if (typeof path === "string" && path.includes("cued-contacts")) {
-          return true;
-        }
-        return false;
-      });
-      vi.mocked(execSync).mockReturnValue(
-        createCliOutput([
-          { name: "Alice", phones: ["+15551234567"], emails: [] },
-          { name: "Bob", phones: ["+15559999999"], emails: [] },
+      vi.mocked(existsSync).mockReturnValue(false);
+      mockGetAllContacts.mockReturnValue(
+        createMockContacts([
+          { firstName: "Alice", phones: ["+15551234567"] },
+          { firstName: "Bob", phones: ["+15559999999"] },
         ])
       );
       await manager.fetchContacts();
@@ -265,14 +255,9 @@ describe("ContactsManager", () => {
 
   describe("getContact", () => {
     beforeEach(async () => {
-      vi.mocked(existsSync).mockImplementation((path) => {
-        if (typeof path === "string" && path.includes("cued-contacts")) {
-          return true;
-        }
-        return false;
-      });
-      vi.mocked(execSync).mockReturnValue(
-        createCliOutput([{ name: "Alice", company: "Acme", phones: ["+15551234567"], emails: ["alice@acme.com"] }])
+      vi.mocked(existsSync).mockReturnValue(false);
+      mockGetAllContacts.mockReturnValue(
+        createMockContacts([{ firstName: "Alice", company: "Acme", phones: ["+15551234567"], emails: ["alice@acme.com"] }])
       );
       await manager.fetchContacts();
     });
@@ -293,46 +278,18 @@ describe("ContactsManager", () => {
   });
 
   describe("error handling", () => {
-    it("throws ContactsError when binary not found", async () => {
+    it("throws ContactsAccessDeniedError when access denied", async () => {
       vi.mocked(existsSync).mockReturnValue(false);
-
-      await expect(manager.fetchContacts()).rejects.toThrow(ContactsError);
-      await expect(manager.fetchContacts()).rejects.toThrow(/binary not found/);
-    });
-
-    it("throws ContactsAccessDeniedError when exit code 2", async () => {
-      vi.mocked(existsSync).mockImplementation((path) => {
-        if (typeof path === "string" && path.includes("cued-contacts")) {
-          return true;
-        }
-        return false;
-      });
-      vi.mocked(execSync).mockImplementation(() => {
-        const error = new Error("Command failed") as Error & { status: number; stderr: string };
-        error.status = 2;
-        error.stderr = JSON.stringify({ error: "Contacts access denied" });
-        throw error;
-      });
+      mockGetAuthStatus.mockReturnValue("Denied");
 
       await expect(manager.fetchContacts()).rejects.toThrow(ContactsAccessDeniedError);
     });
 
-    it("throws ContactsError for other exit codes", async () => {
-      vi.mocked(existsSync).mockImplementation((path) => {
-        if (typeof path === "string" && path.includes("cued-contacts")) {
-          return true;
-        }
-        return false;
-      });
-      vi.mocked(execSync).mockImplementation(() => {
-        const error = new Error("Command failed") as Error & { status: number; stderr: string };
-        error.status = 1;
-        error.stderr = JSON.stringify({ error: "Some other error" });
-        throw error;
-      });
+    it("throws ContactsAccessDeniedError when not authorized", async () => {
+      vi.mocked(existsSync).mockReturnValue(false);
+      mockGetAuthStatus.mockReturnValue("Not Authorized");
 
-      await expect(manager.fetchContacts()).rejects.toThrow(ContactsError);
-      await expect(manager.fetchContacts()).rejects.toThrow("Some other error");
+      await expect(manager.fetchContacts()).rejects.toThrow(ContactsAccessDeniedError);
     });
   });
 
@@ -342,13 +299,8 @@ describe("ContactsManager", () => {
     });
 
     it("isCacheLoaded returns true after fetch", async () => {
-      vi.mocked(existsSync).mockImplementation((path) => {
-        if (typeof path === "string" && path.includes("cued-contacts")) {
-          return true;
-        }
-        return false;
-      });
-      vi.mocked(execSync).mockReturnValue(createCliOutput([]));
+      vi.mocked(existsSync).mockReturnValue(false);
+      mockGetAllContacts.mockReturnValue(createMockContacts([]));
 
       await manager.fetchContacts();
 
@@ -356,16 +308,11 @@ describe("ContactsManager", () => {
     });
 
     it("getCacheSize returns contact count", async () => {
-      vi.mocked(existsSync).mockImplementation((path) => {
-        if (typeof path === "string" && path.includes("cued-contacts")) {
-          return true;
-        }
-        return false;
-      });
-      vi.mocked(execSync).mockReturnValue(
-        createCliOutput([
-          { name: "A", phones: ["1"], emails: [] },
-          { name: "B", phones: ["2"], emails: [] },
+      vi.mocked(existsSync).mockReturnValue(false);
+      mockGetAllContacts.mockReturnValue(
+        createMockContacts([
+          { firstName: "A", phones: ["1"] },
+          { firstName: "B", phones: ["2"] },
         ])
       );
 
@@ -375,13 +322,8 @@ describe("ContactsManager", () => {
     });
 
     it("clearMemoryCache resets state", async () => {
-      vi.mocked(existsSync).mockImplementation((path) => {
-        if (typeof path === "string" && path.includes("cued-contacts")) {
-          return true;
-        }
-        return false;
-      });
-      vi.mocked(execSync).mockReturnValue(createCliOutput([{ name: "Test", phones: ["1"], emails: [] }]));
+      vi.mocked(existsSync).mockReturnValue(false);
+      mockGetAllContacts.mockReturnValue(createMockContacts([{ firstName: "Test", phones: ["1"] }]));
 
       await manager.fetchContacts();
       expect(manager.isCacheLoaded()).toBe(true);
@@ -389,27 +331,6 @@ describe("ContactsManager", () => {
       manager.clearMemoryCache();
       expect(manager.isCacheLoaded()).toBe(false);
     });
-  });
-
-  describe("getBinaryPath", () => {
-    it("returns the binary path", () => {
-      const path = manager.getBinaryPath();
-      expect(path).toContain("cued-contacts");
-    });
-  });
-});
-
-describe("isSwiftContactsAvailable", () => {
-  it("returns true when binary is executable", () => {
-    vi.mocked(accessSync).mockImplementation(() => {});
-    expect(isSwiftContactsAvailable()).toBe(true);
-  });
-
-  it("returns false when binary is not executable", () => {
-    vi.mocked(accessSync).mockImplementation(() => {
-      throw new Error("ENOENT");
-    });
-    expect(isSwiftContactsAvailable()).toBe(false);
   });
 });
 

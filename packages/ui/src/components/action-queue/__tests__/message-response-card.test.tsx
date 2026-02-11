@@ -77,8 +77,8 @@ describe("MessageResponseCard", () => {
     expect(screen.getByText("No recent messages")).toBeInTheDocument();
   });
 
-  describe("platform selector", () => {
-    it("renders platform badge when platform provided", () => {
+  describe("platform prop", () => {
+    it("accepts platform prop without error", () => {
       render(
         <MessageResponseCard
           {...defaultProps}
@@ -86,10 +86,11 @@ describe("MessageResponseCard", () => {
         />
       );
 
-      expect(screen.getByText("iMessage")).toBeInTheDocument();
+      // Platform is passed through to MessageBubble, not rendered as a badge in the card
+      expect(screen.getByRole("heading", { name: "John Doe" })).toBeInTheDocument();
     });
 
-    it("renders platform dropdown when multiple platforms available", () => {
+    it("accepts availablePlatforms and onPlatformChange props", () => {
       render(
         <MessageResponseCard
           {...defaultProps}
@@ -99,8 +100,8 @@ describe("MessageResponseCard", () => {
         />
       );
 
-      // Should show current platform with dropdown trigger
-      expect(screen.getByText("iMessage")).toBeInTheDocument();
+      // Props are accepted without error; platform selector was moved out of this component
+      expect(screen.getByRole("heading", { name: "John Doe" })).toBeInTheDocument();
     });
   });
 

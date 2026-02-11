@@ -32,6 +32,7 @@ import { defaultDMRequestQuery, parseTwitterEvent } from './api'
 import { isAuthError, isRateLimitError, isStaleCursorError } from './api/errors'
 import { TwitterStreamClient } from './api/stream'
 import type { TwitterScraper } from './scraper'
+import { getSyncCutoffMs } from '../../sync/history-cutoff'
 
 // ============================================================================
 // Cursor State
@@ -686,6 +687,13 @@ export class TwitterSyncManager {
           const batchNew = result.newMessages ?? 0
           totalSynced += batchNew
           pageNewMessages += batchNew
+        }
+
+        // Stop if oldest message on this page is beyond syncHistoryDays cutoff
+        const oldestSentAt = messages.length > 0 ? Math.min(...messages.map(m => m.sentAt)) : 0
+        if (oldestSentAt > 0 && oldestSentAt < getSyncCutoffMs()) {
+          console.log(`[TwitterSync] backfill ${conversationId}: reached syncHistoryDays cutoff`)
+          break
         }
 
         // Early exit: if this page had messages but all already exist in DB,

@@ -4,20 +4,20 @@
  * Action buttons and undo toasts are now in the BottomAccessory and sheet.
  */
 
-import { useState, useCallback, useMemo, useEffect } from "react";
+import { useState, useCallback, useMemo } from "react";
 import { View, Text } from "react-native";
 import * as Haptics from "expo-haptics";
 import { useRouter, useSegments } from "expo-router";
 import { BottomSheet, Group, Host, RNHostView } from "@expo/ui/swift-ui";
-import { presentationDetents } from "@expo/ui/swift-ui/modifiers";
+import {
+  presentationDetents,
+  presentationDragIndicator,
+} from "@expo/ui/swift-ui/modifiers";
 import { useMutation, useQuery } from "convex/react";
-import Animated, {
-  useSharedValue,
-  useAnimatedStyle,
-  withTiming,
-} from "react-native-reanimated";
+import { FadeIn } from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { api } from "@cued/convex/convex/_generated/api";
+import { AnimatedView } from "@/components/animated";
+import { api } from "@cued/convex";
 import {
   type DisplayMessage,
   type ContactFormData,
@@ -57,7 +57,7 @@ const MESSAGE_ACTION_TYPES = ["respond", "follow_up", "send_message"];
 /** Action types that use ContactCard */
 const CONTACT_ACTION_TYPES = ["eod_contact", "new_connection"];
 
-export default function ActionsScreen(): React.JSX.Element {
+export default function ActionsScreen(): React.JSX.Element | null {
   const router = useRouter();
   const segments = useSegments();
   const insets = useSafeAreaInsets();
@@ -73,15 +73,9 @@ export default function ActionsScreen(): React.JSX.Element {
   const { isOnline: isDesktopOnline } = useElectronPresence();
   const swipeAction = useMutation(api.actions.swipeAction);
 
-  // Fade out card stack when leaving the tab to avoid visual glitches
+  // Unmount card stack when leaving the tab to avoid stale glass/animation state
   // @ts-expect-error - segments is an array of strings
   const isActive = segments[1] === "(actions)";
-  const screenOpacity = useSharedValue(1);
-  const fadeStyle = useAnimatedStyle(() => ({ opacity: screenOpacity.value }));
-
-  useEffect(() => {
-    screenOpacity.value = withTiming(isActive ? 1 : 0, { duration: 150 });
-  }, [isActive, screenOpacity]);
 
   // Reorder actions to show focused action on top (without mutating queue)
   const displayActions = useMemo(() => {
@@ -230,7 +224,8 @@ export default function ActionsScreen(): React.JSX.Element {
             platform: action.platform as ActionPlatform,
             recipientName: action.contactName ?? "Unknown",
             messagePreview: responseText,
-            scheduledFor: Date.now() + 30 * 1000,
+            scheduledFor:
+              (result.scheduledFor as number) ?? Date.now() + 30 * 1000,
           });
         }
       } catch (error) {
@@ -282,6 +277,7 @@ export default function ActionsScreen(): React.JSX.Element {
             platform={(platform as ActionPlatform) ?? undefined}
             isDesktopOnline={isDesktopOnline}
             onOpenInApp={onOpenInApp}
+            onSend={() => handleSwipe(item, "right")}
           />
         );
       }
@@ -300,7 +296,9 @@ export default function ActionsScreen(): React.JSX.Element {
 
         // Build deep links for each contact's "Open" button
         const c1Link = isTopCard ? getContactDeeplink(contact?.handles) : null;
-        const c2Link = isTopCard ? getContactDeeplink(secondary?.handles) : null;
+        const c2Link = isTopCard
+          ? getContactDeeplink(secondary?.handles)
+          : null;
 
         return (
           <ResolveContactCard
@@ -320,8 +318,16 @@ export default function ActionsScreen(): React.JSX.Element {
             confidence={action.mergeConfidence ?? 0}
             source={(action.mergeSource ?? "email_match") as MergeSource}
             reasoning={action.mergeReasoning}
-            onOpenContact1={c1Link?.type === "available" ? () => openDeeplink(c1Link.url) : null}
-            onOpenContact2={c2Link?.type === "available" ? () => openDeeplink(c2Link.url) : null}
+            onOpenContact1={
+              c1Link?.type === "available"
+                ? () => openDeeplink(c1Link.url)
+                : null
+            }
+            onOpenContact2={
+              c2Link?.type === "available"
+                ? () => openDeeplink(c2Link.url)
+                : null
+            }
             contact1Platform={c1Link?.platform ?? null}
             contact2Platform={c2Link?.platform ?? null}
           />
@@ -372,15 +378,7 @@ export default function ActionsScreen(): React.JSX.Element {
         </View>
       );
     },
-    [
-      getResponseText,
-      getContactFormData,
-      handleResponseChange,
-      handleContactFormChange,
-      topActionMessages,
-      actionContext,
-      isDesktopOnline,
-    ],
+    [topActionMessages, getResponseText, isDesktopOnline, actionContext?.conversation, actionContext?.contact, actionContext?.secondaryContact, handleResponseChange, handleSwipe, getContactFormData, handleContactFormChange],
   );
 
   if (isLoading) {
@@ -392,9 +390,14 @@ export default function ActionsScreen(): React.JSX.Element {
   // Bottom padding to avoid overlap with tab bar + toolbar
   const paddingBottom = 56 + 50 + insets.bottom; // tab bar + toolbar + safe area
 
+  if (!isActive) return null;
+
   return (
     <ErrorBoundary>
-      <Animated.View className="flex-1 bg-background" style={[fadeStyle]}>
+      <AnimatedView
+        entering={FadeIn.duration(150)}
+        className="flex-1 bg-background"
+      >
         <View style={{ flex: 1, paddingTop, paddingBottom }}>
           <CardStack
             actions={cardItems}
@@ -409,14 +412,19 @@ export default function ActionsScreen(): React.JSX.Element {
             isPresented={isSheetOpen}
             onIsPresentedChange={setIsSheetOpen}
           >
-            <Group modifiers={[presentationDetents(["medium", "large"])]}>
+            <Group
+              modifiers={[
+                presentationDetents(["medium", "large"]),
+                presentationDragIndicator("hidden"),
+              ]}
+            >
               <RNHostView>
                 <ActionListSheet />
               </RNHostView>
             </Group>
           </BottomSheet>
         </Host>
-      </Animated.View>
+      </AnimatedView>
     </ErrorBoundary>
   );
 }

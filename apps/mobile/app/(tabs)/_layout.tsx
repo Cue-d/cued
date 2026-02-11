@@ -1,4 +1,4 @@
-import { Platform, useColorScheme } from "react-native";
+import { useColorScheme } from "react-native";
 import { useSegments } from "expo-router";
 import { NativeTabs } from "expo-router/unstable-native-tabs";
 import { ActionQueueAccessory } from "@/components/action-queue-accessory";
@@ -18,12 +18,9 @@ function TabsLayoutInner() {
   // @ts-expect-error - segments is an array of strings
   const isAgentTab = segments[1] === "(agent)";
 
-  const isIOS26Plus = Platform.OS === "ios" && Number(Platform.Version) >= 26;
-  const shouldRenderBottomAccessory = (isActionsTab || isAgentTab) && !isIOS26Plus;
-
   return (
     <NativeTabs minimizeBehavior="onScrollDown" tintColor={colors.primary}>
-      {shouldRenderBottomAccessory && (
+      {(isActionsTab || isAgentTab) && (
         <NativeTabs.BottomAccessory>
           {isAgentTab ? <AgentChatAccessory /> : <ActionQueueAccessory />}
         </NativeTabs.BottomAccessory>

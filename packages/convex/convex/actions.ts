@@ -384,6 +384,29 @@ export const getActionWithContext = query({
           .collect()
       : [];
 
+    // Resolve conversation participants with their platforms
+    const participantContactIds = conversation?.participantContactIds ?? [];
+    const participantContacts = await Promise.all(
+      participantContactIds.map((id) => ctx.db.get(id))
+    );
+    const participantHandles = await Promise.all(
+      participantContactIds.map((id) =>
+        ctx.db
+          .query("contactHandles")
+          .withIndex("by_contact", (q) => q.eq("contactId", id))
+          .collect()
+      )
+    );
+    const participants = participantContacts
+      .map((c, i) => {
+        if (!c) return null;
+        const platforms = [
+          ...new Set(participantHandles[i].map((h) => h.platform)),
+        ];
+        return { _id: c._id, displayName: c.displayName, platforms };
+      })
+      .filter((p): p is NonNullable<typeof p> => p !== null);
+
     // Get recent messages from the conversation
     const messages = action.conversationId
       ? await ctx.db
@@ -412,6 +435,7 @@ export const getActionWithContext = query({
           sentAt: msg.sentAt,
           isFromMe: msg.isFromMe,
           senderName,
+          senderContactId: msg.senderContactId ?? null,
           status: msg.status,
           reactions: msg.reactions,
         };
@@ -476,6 +500,7 @@ export const getActionWithContext = query({
             })),
           }
         : null,
+      participants,
       messages: messagesWithSender,
     };
   },

@@ -61,6 +61,12 @@ export interface ActionContext {
       platform: string;
     }>;
   } | null;
+  /** Conversation participants with their platform info */
+  participants: Array<{
+    _id: string;
+    displayName: string;
+    platforms: string[];
+  }>;
   /** Recent messages */
   messages: Array<{
     _id: string;
@@ -68,6 +74,7 @@ export interface ActionContext {
     sentAt: number;
     isFromMe: boolean;
     senderName: string | null;
+    senderContactId: string | null;
     status: string | null;
     reactions: Array<{ emoji: string }> | null;
   }>;
@@ -105,6 +112,8 @@ export interface ActionCardProps {
   contact2OpenInApp?: OpenInAppConfig | null;
   /** Called when a link in a message is clicked. Receives the URL. */
   onLinkClick?: (url: string) => void;
+  /** Called when a contact name is clicked. Receives the contact ID. */
+  onContactClick?: (contactId: string) => void;
 }
 
 /** Open-in-app config for deeplink buttons */

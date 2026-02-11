@@ -15,6 +15,7 @@ interface InboxMessageThreadProps {
   hasMore?: boolean
   onLoadMore?: () => void
   className?: string
+  onContactClick?: (contactId: string) => void
 }
 
 function formatDateDivider(date: Date): string {
@@ -112,6 +113,7 @@ export function InboxMessageThread({
   hasMore = false,
   onLoadMore,
   className,
+  onContactClick,
 }: InboxMessageThreadProps): React.ReactElement {
   const scrollRef = useRef<HTMLDivElement>(null)
   const messagesEndRef = useRef<HTMLDivElement>(null)
@@ -152,7 +154,17 @@ export function InboxMessageThread({
             />
           </div>
           <div className="flex flex-col">
-            <span className="font-semibold text-foreground tracking-tight">{displayName}</span>
+            {!isGroup && conversation.participants[0]?._id && onContactClick ? (
+              <button
+                type="button"
+                onClick={() => onContactClick(conversation.participants[0]._id)}
+                className="font-semibold text-foreground tracking-tight text-left hover:underline cursor-pointer"
+              >
+                {displayName}
+              </button>
+            ) : (
+              <span className="font-semibold text-foreground tracking-tight">{displayName}</span>
+            )}
             {isGroup && conversation.participants.length > 1 && (
               <span className="text-xs text-muted-foreground">
                 {conversation.participants.length} participants
@@ -227,6 +239,7 @@ export function InboxMessageThread({
                     showTimestamp={shouldShowTimestamp(message, prevMessage, isLast)}
                     showSenderName={shouldShowSenderName(message, prevMessage, isGroup)}
                     spacing={getMessageSpacing(message, prevMessage)}
+                    onContactClick={onContactClick}
                   />
                 )
               })}

@@ -1,6 +1,6 @@
 import { useEffect, useMemo } from "react";
 import { useQuery } from "convex/react";
-import { api } from "@cued/convex/convex/_generated/api";
+import { api } from "@cued/convex";
 import { updateWidgetActionsList } from "@/lib/widget-data";
 
 /**

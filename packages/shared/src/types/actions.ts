@@ -32,6 +32,8 @@ export interface DisplayMessage {
   isFromMe: boolean;
   /** Display name of the sender */
   senderName: string | null;
+  /** Contact ID of the sender */
+  senderContactId?: string | null;
   /** Delivery status (sent, delivered, read, etc.) */
   status?: string | null;
   /** Reaction emojis on this message */

@@ -1,5 +1,5 @@
 import * as React from "react"
-import { useQuery, useMutation } from "convex/react"
+import { useQuery } from "convex/react"
 import {
   Users,
   Search,
@@ -13,10 +13,8 @@ import {
   PLATFORM_CONFIG,
 } from "@cued/shared"
 import {
-  SendMessageModal,
   EmptyState,
   PlatformIcon,
-  type SendMessageContact,
 } from "@cued/ui"
 import { ActionFilterDropdown, type ActionFilterDropdownRef } from "../components/action-filter-dropdown"
 import {
@@ -127,15 +125,24 @@ function useDebounce<T>(value: T, delay: number): T {
 
 type ContactCursor = { displayName: string; _id: Id<"contacts"> }
 
-export function ContactsPage(): React.JSX.Element {
+interface ContactsPageProps {
+  initialContactId?: string | null
+  onInitialContactConsumed?: () => void
+}
+
+export function ContactsPage({ initialContactId, onInitialContactConsumed }: ContactsPageProps): React.JSX.Element {
   const [selectedContactId, setSelectedContactId] =
     React.useState<Id<"contacts"> | null>(null)
+
+  // Navigate to initial contact when provided
+  React.useEffect(() => {
+    if (initialContactId) {
+      setSelectedContactId(initialContactId as Id<"contacts">)
+      onInitialContactConsumed?.()
+    }
+  }, [initialContactId, onInitialContactConsumed])
   const [searchInput, setSearchInput] = React.useState("")
   const debouncedSearch = useDebounce(searchInput, 300)
-
-  const [sendModalOpen, setSendModalOpen] = React.useState(false)
-  const [selectedSendContact, setSelectedSendContact] =
-    React.useState<SendMessageContact | null>(null)
 
   // Platform filter state
   const filterRef = React.useRef<ActionFilterDropdownRef>(null)
@@ -213,41 +220,6 @@ export function ContactsPage(): React.JSX.Element {
     observer.observe(sentinel)
     return () => observer.disconnect()
   }, [contactsResult?.nextCursor, isLoadingMore, debouncedSearch])
-
-  const queueMessage = useMutation(api.messageQueue.queueMessage)
-
-  const handleOpenSendModal = React.useCallback(
-    (contact: SendMessageContact) => {
-      setSelectedSendContact(contact)
-      setSendModalOpen(true)
-    },
-    []
-  )
-
-  const handleSendMessage = React.useCallback(
-    async (params: {
-      platform: ActionPlatform
-      recipientHandle: string
-      recipientContactId?: string
-      text: string
-      conversationId?: string
-    }) => {
-      const result = await queueMessage({
-        platform: params.platform,
-        recipientHandle: params.recipientHandle,
-        recipientContactId: params.recipientContactId as
-          | Id<"contacts">
-          | undefined,
-        text: params.text,
-        isGroup: false,
-        conversationId: params.conversationId as
-          | Id<"conversations">
-          | undefined,
-      })
-      return result
-    },
-    [queueMessage]
-  )
 
   const rawDisplayContacts = React.useMemo(
     () => (allContacts.length > 0 ? allContacts : contactsResult?.contacts ?? []),
@@ -374,6 +346,7 @@ export function ContactsPage(): React.JSX.Element {
             onFilterChange={() => {}}
             platformCounts={platformCounts}
             activePlatforms={activePlatforms}
+            filteredCount={filteredCount}
             onPlatformToggle={(platform) => {
               setActivePlatforms((prev) => {
                 const next = new Set(prev)
@@ -456,17 +429,8 @@ export function ContactsPage(): React.JSX.Element {
       <Panel position="last">
         <ContactDetail
           contactId={selectedContactId}
-          onSendMessage={handleOpenSendModal}
         />
       </Panel>
-
-      {/* Send Message Modal */}
-      <SendMessageModal
-        open={sendModalOpen}
-        onOpenChange={setSendModalOpen}
-        contact={selectedSendContact ?? undefined}
-        onSend={handleSendMessage}
-      />
     </>
   )
 }
