@@ -495,8 +495,8 @@ importers:
         specifier: workspace:*
         version: link:../shared
       '@nangohq/node':
-        specifier: ^0.45.1
-        version: 0.45.1
+        specifier: ^0.69.22
+        version: 0.69.22
       convex:
         specifier: ^1.31.7
         version: 1.31.7(react@19.2.3)
@@ -800,8 +800,8 @@ packages:
     resolution: {integrity: sha512-lOoVRwADj8hjf7al89tvQ2a1lf53Z+7tiXMgpZJL3maQPDxh0DgLMN62B2MKUOFcoodBHLMbDM6WAbKgNy5Suw==}
     engines: {node: '>=6.9.0'}
 
-  '@babel/generator@7.29.0':
-    resolution: {integrity: sha512-vSH118/wwM/pLR38g/Sgk05sNtro6TlTJKuiMXDaZqPUfjTFcudpCOt00IhOfj+1BFAX+UFAlzCU+6WXr3GLFQ==}
+  '@babel/generator@7.29.1':
+    resolution: {integrity: sha512-qsaF+9Qcm2Qv8SRIMMscAvG4O3lJ0F1GuMo5HR/Bp02LopNgnZBC/EkbevHFeGs4ls/oPz9v+Bsmzbkbe+0dUw==}
     engines: {node: '>=6.9.0'}
 
   '@babel/helper-annotate-as-pure@7.27.3':
@@ -9263,7 +9263,7 @@ snapshots:
       '@jridgewell/trace-mapping': 0.3.31
       jsesc: 3.1.0
 
-  '@babel/generator@7.29.0':
+  '@babel/generator@7.29.1':
     dependencies:
       '@babel/parser': 7.29.0
       '@babel/types': 7.29.0
@@ -9880,7 +9880,7 @@ snapshots:
   '@babel/traverse@7.29.0':
     dependencies:
       '@babel/code-frame': 7.29.0
-      '@babel/generator': 7.29.0
+      '@babel/generator': 7.29.1
       '@babel/helper-globals': 7.28.0
       '@babel/parser': 7.29.0
       '@babel/template': 7.28.6
@@ -10590,7 +10590,7 @@ snapshots:
     dependencies:
       '@babel/code-frame': 7.29.0
       '@babel/core': 7.28.6
-      '@babel/generator': 7.29.0
+      '@babel/generator': 7.29.1
       '@expo/config': 55.0.4
       '@expo/env': 2.1.0
       '@expo/json-file': 10.0.12
@@ -13036,7 +13036,7 @@ snapshots:
 
   babel-preset-expo@55.0.4(@babel/core@7.28.6)(@babel/runtime@7.28.6)(expo-widgets@55.0.0-alpha.6)(expo@55.0.0-preview.10)(react-refresh@0.14.2):
     dependencies:
-      '@babel/generator': 7.29.0
+      '@babel/generator': 7.29.1
       '@babel/helper-module-imports': 7.28.6
       '@babel/plugin-proposal-decorators': 7.28.6(@babel/core@7.28.6)
       '@babel/plugin-proposal-export-default-from': 7.27.1(@babel/core@7.28.6)

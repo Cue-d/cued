@@ -1,8 +1,7 @@
 /**
  * Tests for contact resolution and duplicate detection.
  *
- * Tests the batch duplicate detection pipeline (findDuplicateCandidatesInternal).
- * Contact resolution is now manual-only via triggerMergeScan.
+ * Covers both manual full-scan and event-driven targeted merge checks.
  */
 
 import { convexTest } from "convex-test";
@@ -13,6 +12,7 @@ import {
   createTestUserData,
   createTestContactData,
   createTestContactHandleData,
+  createTestActionData,
   createTestIdentity,
 } from "./helpers.util";
 import { internal } from "../convex/_generated/api";
@@ -30,7 +30,7 @@ async function setupAuthenticatedUser(t: ReturnType<typeof convexTest>) {
       createTestUserData({
         workosUserId: identity.subject,
         pendingActionCount: 0,
-      })
+      }),
     );
   });
 
@@ -47,11 +47,11 @@ describe("contactResolution", () => {
       const [contact1Id, contact2Id] = await t.run(async (ctx) => {
         const c1 = await ctx.db.insert(
           "contacts",
-          createTestContactData(userId, { displayName: "John Doe" })
+          createTestContactData(userId, { displayName: "John Doe" }),
         );
         const c2 = await ctx.db.insert(
           "contacts",
-          createTestContactData(userId, { displayName: "Johnny D" })
+          createTestContactData(userId, { displayName: "Johnny D" }),
         );
 
         // Add same email to both
@@ -61,7 +61,7 @@ describe("contactResolution", () => {
             handleType: "email",
             handle: "john@example.com",
             platform: "gmail",
-          })
+          }),
         );
         await ctx.db.insert(
           "contactHandles",
@@ -69,7 +69,7 @@ describe("contactResolution", () => {
             handleType: "email",
             handle: "john@example.com",
             platform: "gmail",
-          })
+          }),
         );
 
         return [c1, c2];
@@ -78,14 +78,17 @@ describe("contactResolution", () => {
       // Run duplicate scan
       const result = await t.query(
         internal.contactResolution.findDuplicateCandidatesInternal,
-        { userId }
+        { userId },
       );
 
       expect(result.duplicatePairs).toHaveLength(1);
       expect(result.duplicatePairs[0].confidence).toBe(1.0);
       expect(result.duplicatePairs[0].source).toBe("email_match");
       expect(
-        [result.duplicatePairs[0].contact1Id, result.duplicatePairs[0].contact2Id].sort()
+        [
+          result.duplicatePairs[0].contact1Id,
+          result.duplicatePairs[0].contact2Id,
+        ].sort(),
       ).toEqual([contact1Id, contact2Id].sort());
     });
 
@@ -96,11 +99,11 @@ describe("contactResolution", () => {
       await t.run(async (ctx) => {
         const c1 = await ctx.db.insert(
           "contacts",
-          createTestContactData(userId, { displayName: "Jane Doe" })
+          createTestContactData(userId, { displayName: "Jane Doe" }),
         );
         const c2 = await ctx.db.insert(
           "contacts",
-          createTestContactData(userId, { displayName: "Jane D" })
+          createTestContactData(userId, { displayName: "Jane D" }),
         );
 
         // Add phone with same value
@@ -110,7 +113,7 @@ describe("contactResolution", () => {
             handleType: "phone",
             handle: "+15551234567",
             platform: "imessage",
-          })
+          }),
         );
         await ctx.db.insert(
           "contactHandles",
@@ -118,13 +121,13 @@ describe("contactResolution", () => {
             handleType: "phone",
             handle: "+15551234567",
             platform: "imessage",
-          })
+          }),
         );
       });
 
       const result = await t.query(
         internal.contactResolution.findDuplicateCandidatesInternal,
-        { userId }
+        { userId },
       );
 
       expect(result.duplicatePairs).toHaveLength(1);
@@ -139,11 +142,11 @@ describe("contactResolution", () => {
       await t.run(async (ctx) => {
         const c1 = await ctx.db.insert(
           "contacts",
-          createTestContactData(userId, { displayName: "Alice" })
+          createTestContactData(userId, { displayName: "Alice" }),
         );
         const c2 = await ctx.db.insert(
           "contacts",
-          createTestContactData(userId, { displayName: "Bob" })
+          createTestContactData(userId, { displayName: "Bob" }),
         );
 
         await ctx.db.insert(
@@ -152,7 +155,7 @@ describe("contactResolution", () => {
             handleType: "email",
             handle: "alice@example.com",
             platform: "gmail",
-          })
+          }),
         );
         await ctx.db.insert(
           "contactHandles",
@@ -160,13 +163,13 @@ describe("contactResolution", () => {
             handleType: "email",
             handle: "bob@example.com",
             platform: "gmail",
-          })
+          }),
         );
       });
 
       const result = await t.query(
         internal.contactResolution.findDuplicateCandidatesInternal,
-        { userId }
+        { userId },
       );
 
       expect(result.duplicatePairs).toHaveLength(0);
@@ -181,12 +184,12 @@ describe("contactResolution", () => {
         // Contact 1 has email as displayName
         const c1 = await ctx.db.insert(
           "contacts",
-          createTestContactData(userId, { displayName: "john@example.com" })
+          createTestContactData(userId, { displayName: "john@example.com" }),
         );
         // Contact 2 has same email as handle
         const c2 = await ctx.db.insert(
           "contacts",
-          createTestContactData(userId, { displayName: "John Doe" })
+          createTestContactData(userId, { displayName: "John Doe" }),
         );
 
         await ctx.db.insert(
@@ -195,13 +198,13 @@ describe("contactResolution", () => {
             handleType: "email",
             handle: "john@example.com",
             platform: "gmail",
-          })
+          }),
         );
       });
 
       const result = await t.query(
         internal.contactResolution.findDuplicateCandidatesInternal,
-        { userId }
+        { userId },
       );
 
       expect(result.duplicatePairs).toHaveLength(1);
@@ -216,12 +219,12 @@ describe("contactResolution", () => {
         // Contact 1 has phone as displayName
         const c1 = await ctx.db.insert(
           "contacts",
-          createTestContactData(userId, { displayName: "555-123-4567" })
+          createTestContactData(userId, { displayName: "555-123-4567" }),
         );
         // Contact 2 has same phone as handle (normalized)
         const c2 = await ctx.db.insert(
           "contacts",
-          createTestContactData(userId, { displayName: "John Doe" })
+          createTestContactData(userId, { displayName: "John Doe" }),
         );
 
         await ctx.db.insert(
@@ -230,13 +233,13 @@ describe("contactResolution", () => {
             handleType: "phone",
             handle: "5551234567",
             platform: "imessage",
-          })
+          }),
         );
       });
 
       const result = await t.query(
         internal.contactResolution.findDuplicateCandidatesInternal,
-        { userId }
+        { userId },
       );
 
       expect(result.duplicatePairs).toHaveLength(1);
@@ -250,15 +253,15 @@ describe("contactResolution", () => {
       await t.run(async (ctx) => {
         const c1 = await ctx.db.insert(
           "contacts",
-          createTestContactData(userId, { displayName: "Person 1" })
+          createTestContactData(userId, { displayName: "Person 1" }),
         );
         const c2 = await ctx.db.insert(
           "contacts",
-          createTestContactData(userId, { displayName: "Person 2" })
+          createTestContactData(userId, { displayName: "Person 2" }),
         );
         const c3 = await ctx.db.insert(
           "contacts",
-          createTestContactData(userId, { displayName: "Person 3" })
+          createTestContactData(userId, { displayName: "Person 3" }),
         );
 
         // All three have the same email
@@ -269,7 +272,7 @@ describe("contactResolution", () => {
             handleType: "email",
             handle: sharedEmail,
             platform: "gmail",
-          })
+          }),
         );
         await ctx.db.insert(
           "contactHandles",
@@ -277,7 +280,7 @@ describe("contactResolution", () => {
             handleType: "email",
             handle: sharedEmail,
             platform: "gmail",
-          })
+          }),
         );
         await ctx.db.insert(
           "contactHandles",
@@ -285,13 +288,13 @@ describe("contactResolution", () => {
             handleType: "email",
             handle: sharedEmail,
             platform: "gmail",
-          })
+          }),
         );
       });
 
       const result = await t.query(
         internal.contactResolution.findDuplicateCandidatesInternal,
-        { userId }
+        { userId },
       );
 
       // Should find 3 pairs: (c1,c2), (c1,c3), (c2,c3)
@@ -312,11 +315,11 @@ describe("contactResolution", () => {
         // Two contacts with identical names but different handles
         const c1 = await ctx.db.insert(
           "contacts",
-          createTestContactData(userId, { displayName: "John Smith" })
+          createTestContactData(userId, { displayName: "John Smith" }),
         );
         const c2 = await ctx.db.insert(
           "contacts",
-          createTestContactData(userId, { displayName: "John Smith" })
+          createTestContactData(userId, { displayName: "John Smith" }),
         );
 
         // Different emails so they won't match by handle
@@ -326,7 +329,7 @@ describe("contactResolution", () => {
             handleType: "email",
             handle: "john.work@example.com",
             platform: "gmail",
-          })
+          }),
         );
         await ctx.db.insert(
           "contactHandles",
@@ -334,7 +337,7 @@ describe("contactResolution", () => {
             handleType: "email",
             handle: "john.personal@example.com",
             platform: "gmail",
-          })
+          }),
         );
 
         return [c1, c2];
@@ -342,7 +345,7 @@ describe("contactResolution", () => {
 
       const result = await t.query(
         internal.contactResolution.findDuplicateCandidatesInternal,
-        { userId }
+        { userId },
       );
 
       // Exact name match (score >= 0.95) goes to duplicatePairs
@@ -350,7 +353,10 @@ describe("contactResolution", () => {
       expect(result.duplicatePairs[0].source).toBe("exact_name_match");
       expect(result.duplicatePairs[0].confidence).toBeGreaterThanOrEqual(0.95);
       expect(
-        [result.duplicatePairs[0].contact1Id, result.duplicatePairs[0].contact2Id].sort()
+        [
+          result.duplicatePairs[0].contact1Id,
+          result.duplicatePairs[0].contact2Id,
+        ].sort(),
       ).toEqual([contact1Id, contact2Id].sort());
     });
 
@@ -363,11 +369,11 @@ describe("contactResolution", () => {
         // Using names with high Jaro-Winkler similarity (0.60-0.95 range)
         const c1 = await ctx.db.insert(
           "contacts",
-          createTestContactData(userId, { displayName: "Michael Johnson" })
+          createTestContactData(userId, { displayName: "Michael Johnson" }),
         );
         const c2 = await ctx.db.insert(
           "contacts",
-          createTestContactData(userId, { displayName: "Micheal Johnson" }) // common misspelling
+          createTestContactData(userId, { displayName: "Micheal Johnson" }), // common misspelling
         );
 
         // Different emails
@@ -377,7 +383,7 @@ describe("contactResolution", () => {
             handleType: "email",
             handle: "michael@example.com",
             platform: "gmail",
-          })
+          }),
         );
         await ctx.db.insert(
           "contactHandles",
@@ -385,13 +391,13 @@ describe("contactResolution", () => {
             handleType: "email",
             handle: "micheal@example.com",
             platform: "gmail",
-          })
+          }),
         );
       });
 
       const result = await t.query(
         internal.contactResolution.findDuplicateCandidatesInternal,
-        { userId }
+        { userId },
       );
 
       // Names with misspellings should match as fuzzy or exact depending on score
@@ -411,11 +417,11 @@ describe("contactResolution", () => {
         // Two contacts with completely different names
         const c1 = await ctx.db.insert(
           "contacts",
-          createTestContactData(userId, { displayName: "Alice Johnson" })
+          createTestContactData(userId, { displayName: "Alice Johnson" }),
         );
         const c2 = await ctx.db.insert(
           "contacts",
-          createTestContactData(userId, { displayName: "Robert Williams" })
+          createTestContactData(userId, { displayName: "Robert Williams" }),
         );
 
         // Different emails
@@ -425,7 +431,7 @@ describe("contactResolution", () => {
             handleType: "email",
             handle: "alice@example.com",
             platform: "gmail",
-          })
+          }),
         );
         await ctx.db.insert(
           "contactHandles",
@@ -433,13 +439,13 @@ describe("contactResolution", () => {
             handleType: "email",
             handle: "robert@example.com",
             platform: "gmail",
-          })
+          }),
         );
       });
 
       const result = await t.query(
         internal.contactResolution.findDuplicateCandidatesInternal,
-        { userId }
+        { userId },
       );
 
       // No name-based matches for dissimilar names
@@ -455,7 +461,7 @@ describe("contactResolution", () => {
         // Regular contact
         await ctx.db.insert(
           "contacts",
-          createTestContactData(userId, { displayName: "John Smith" })
+          createTestContactData(userId, { displayName: "John Smith" }),
         );
         // Dismissed contact with same name - insert directly to set isDismissed
         await ctx.db.insert("contacts", {
@@ -467,7 +473,7 @@ describe("contactResolution", () => {
 
       const result = await t.query(
         internal.contactResolution.findDuplicateCandidatesInternal,
-        { userId }
+        { userId },
       );
 
       // Dismissed contact should be excluded from name matching
@@ -486,20 +492,20 @@ describe("contactResolution", () => {
           createTestContactData(userId, {
             displayName:
               "urn:li:msg_messagingparticipant:urn:li:fsd_profile:ABC123",
-          })
+          }),
         );
         // Another contact with similar URN tokens
         await ctx.db.insert(
           "contacts",
           createTestContactData(userId, {
             displayName: "urn:li:member:ABC123",
-          })
+          }),
         );
       });
 
       const result = await t.query(
         internal.contactResolution.findDuplicateCandidatesInternal,
-        { userId }
+        { userId },
       );
 
       // URN-like names should not trigger name matching
@@ -514,11 +520,11 @@ describe("contactResolution", () => {
       await t.run(async (ctx) => {
         const c1 = await ctx.db.insert(
           "contacts",
-          createTestContactData(userId, { displayName: "Soham Bafana" })
+          createTestContactData(userId, { displayName: "Soham Bafana" }),
         );
         const c2 = await ctx.db.insert(
           "contacts",
-          createTestContactData(userId, { displayName: "Soham Bafana" })
+          createTestContactData(userId, { displayName: "Soham Bafana" }),
         );
 
         // Different LinkedIn handles = different people
@@ -528,7 +534,7 @@ describe("contactResolution", () => {
             handleType: "linkedin_handle",
             handle: "soham-bafana",
             platform: "linkedin",
-          })
+          }),
         );
         await ctx.db.insert(
           "contactHandles",
@@ -536,16 +542,102 @@ describe("contactResolution", () => {
             handleType: "linkedin_handle",
             handle: "different-soham",
             platform: "linkedin",
-          })
+          }),
         );
       });
 
       const result = await t.query(
         internal.contactResolution.findDuplicateCandidatesInternal,
-        { userId }
+        { userId },
       );
 
       // Same name but different LinkedIn handles = conflict, should not match
+      expect(result.duplicatePairs).toHaveLength(0);
+      expect(result.fuzzyPairs).toHaveLength(0);
+    });
+
+    it("detects conflicting slack_id values", async () => {
+      const t = convexTest(schema, modules);
+      const { userId } = await setupAuthenticatedUser(t);
+
+      await t.run(async (ctx) => {
+        const c1 = await ctx.db.insert(
+          "contacts",
+          createTestContactData(userId, { displayName: "Anya" }),
+        );
+        const c2 = await ctx.db.insert(
+          "contacts",
+          createTestContactData(userId, { displayName: "Anya" }),
+        );
+
+        // Different Slack user IDs = different people
+        await ctx.db.insert(
+          "contactHandles",
+          createTestContactHandleData(userId, c1, {
+            handleType: "slack_id",
+            handle: "U09CJ1JG5J6",
+            platform: "slack",
+          }),
+        );
+        await ctx.db.insert(
+          "contactHandles",
+          createTestContactHandleData(userId, c2, {
+            handleType: "slack_id",
+            handle: "U02E46S2NJC",
+            platform: "slack",
+          }),
+        );
+      });
+
+      const result = await t.query(
+        internal.contactResolution.findDuplicateCandidatesInternal,
+        { userId },
+      );
+
+      // Same name but different Slack IDs = conflict, should not match
+      expect(result.duplicatePairs).toHaveLength(0);
+      expect(result.fuzzyPairs).toHaveLength(0);
+    });
+
+    it("detects conflicting twitter_handle values", async () => {
+      const t = convexTest(schema, modules);
+      const { userId } = await setupAuthenticatedUser(t);
+
+      await t.run(async (ctx) => {
+        const c1 = await ctx.db.insert(
+          "contacts",
+          createTestContactData(userId, { displayName: "Alex Johnson" }),
+        );
+        const c2 = await ctx.db.insert(
+          "contacts",
+          createTestContactData(userId, { displayName: "Alex Johnson" }),
+        );
+
+        // Different Twitter handles = different people
+        await ctx.db.insert(
+          "contactHandles",
+          createTestContactHandleData(userId, c1, {
+            handleType: "twitter_handle",
+            handle: "alexj_dev",
+            platform: "twitter",
+          }),
+        );
+        await ctx.db.insert(
+          "contactHandles",
+          createTestContactHandleData(userId, c2, {
+            handleType: "twitter_handle",
+            handle: "alex_johnson",
+            platform: "twitter",
+          }),
+        );
+      });
+
+      const result = await t.query(
+        internal.contactResolution.findDuplicateCandidatesInternal,
+        { userId },
+      );
+
+      // Same name but different Twitter handles = conflict, should not match
       expect(result.duplicatePairs).toHaveLength(0);
       expect(result.fuzzyPairs).toHaveLength(0);
     });
@@ -558,18 +650,18 @@ describe("contactResolution", () => {
         // Contact with email as displayName (placeholder)
         await ctx.db.insert(
           "contacts",
-          createTestContactData(userId, { displayName: "john@example.com" })
+          createTestContactData(userId, { displayName: "john@example.com" }),
         );
         // Another contact with similar email as displayName
         await ctx.db.insert(
           "contacts",
-          createTestContactData(userId, { displayName: "john@company.com" })
+          createTestContactData(userId, { displayName: "john@company.com" }),
         );
       });
 
       const result = await t.query(
         internal.contactResolution.findDuplicateCandidatesInternal,
-        { userId }
+        { userId },
       );
 
       // Email-like names should not trigger name matching (only handle matching)
@@ -583,11 +675,11 @@ describe("contactResolution", () => {
       const [contact1Id, contact2Id] = await t.run(async (ctx) => {
         const c1 = await ctx.db.insert(
           "contacts",
-          createTestContactData(userId, { displayName: "Soham Bafana" })
+          createTestContactData(userId, { displayName: "Soham Bafana" }),
         );
         const c2 = await ctx.db.insert(
           "contacts",
-          createTestContactData(userId, { displayName: "Soham B" })
+          createTestContactData(userId, { displayName: "Soham B" }),
         );
 
         // Contact 1 has a fsd_profile URN (normalizes to urn:li:member:abc123)
@@ -597,7 +689,7 @@ describe("contactResolution", () => {
             handleType: "linkedin_urn",
             handle: "urn:li:fsd_profile:abc123",
             platform: "linkedin",
-          })
+          }),
         );
         // Contact 2 has the canonical member URN format for the same ID
         await ctx.db.insert(
@@ -606,7 +698,7 @@ describe("contactResolution", () => {
             handleType: "linkedin_urn",
             handle: "urn:li:member:abc123",
             platform: "linkedin",
-          })
+          }),
         );
 
         return [c1, c2];
@@ -614,14 +706,17 @@ describe("contactResolution", () => {
 
       const result = await t.query(
         internal.contactResolution.findDuplicateCandidatesInternal,
-        { userId }
+        { userId },
       );
 
       expect(result.duplicatePairs).toHaveLength(1);
       expect(result.duplicatePairs[0].confidence).toBe(1.0);
       expect(result.duplicatePairs[0].source).toBe("linkedin_urn_match");
       expect(
-        [result.duplicatePairs[0].contact1Id, result.duplicatePairs[0].contact2Id].sort()
+        [
+          result.duplicatePairs[0].contact1Id,
+          result.duplicatePairs[0].contact2Id,
+        ].sort(),
       ).toEqual([contact1Id, contact2Id].sort());
     });
 
@@ -632,11 +727,11 @@ describe("contactResolution", () => {
       await t.run(async (ctx) => {
         const c1 = await ctx.db.insert(
           "contacts",
-          createTestContactData(userId, { displayName: "Person A" })
+          createTestContactData(userId, { displayName: "Person A" }),
         );
         const c2 = await ctx.db.insert(
           "contacts",
-          createTestContactData(userId, { displayName: "Person B" })
+          createTestContactData(userId, { displayName: "Person B" }),
         );
 
         await ctx.db.insert(
@@ -645,7 +740,7 @@ describe("contactResolution", () => {
             handleType: "linkedin_urn",
             handle: "urn:li:member:abc123",
             platform: "linkedin",
-          })
+          }),
         );
         await ctx.db.insert(
           "contactHandles",
@@ -653,13 +748,13 @@ describe("contactResolution", () => {
             handleType: "linkedin_urn",
             handle: "urn:li:member:xyz789",
             platform: "linkedin",
-          })
+          }),
         );
       });
 
       const result = await t.query(
         internal.contactResolution.findDuplicateCandidatesInternal,
-        { userId }
+        { userId },
       );
 
       expect(result.duplicatePairs).toHaveLength(0);
@@ -673,11 +768,11 @@ describe("contactResolution", () => {
         // Two contacts with same name AND same email
         const c1 = await ctx.db.insert(
           "contacts",
-          createTestContactData(userId, { displayName: "John Smith" })
+          createTestContactData(userId, { displayName: "John Smith" }),
         );
         const c2 = await ctx.db.insert(
           "contacts",
-          createTestContactData(userId, { displayName: "John Smith" })
+          createTestContactData(userId, { displayName: "John Smith" }),
         );
 
         // Same email on both
@@ -687,7 +782,7 @@ describe("contactResolution", () => {
             handleType: "email",
             handle: "john@example.com",
             platform: "gmail",
-          })
+          }),
         );
         await ctx.db.insert(
           "contactHandles",
@@ -695,19 +790,206 @@ describe("contactResolution", () => {
             handleType: "email",
             handle: "john@example.com",
             platform: "gmail",
-          })
+          }),
         );
       });
 
       const result = await t.query(
         internal.contactResolution.findDuplicateCandidatesInternal,
-        { userId }
+        { userId },
       );
 
       // Should only get 1 pair (email_match), not 2 (email + name)
       expect(result.duplicatePairs).toHaveLength(1);
       expect(result.duplicatePairs[0].source).toBe("email_match");
       expect(result.fuzzyPairs).toHaveLength(0);
+    });
+  });
+
+  describe("event-driven targeted merge checks", () => {
+    it("findDuplicateCandidatesInternal only returns pairs for the target contact", async () => {
+      const t = convexTest(schema, modules);
+      const { userId } = await setupAuthenticatedUser(t);
+
+      const [contact1Id, contact2Id, contact3Id] = await t.run(async (ctx) => {
+        const c1 = await ctx.db.insert(
+          "contacts",
+          createTestContactData(userId, { displayName: "John One" }),
+        );
+        const c2 = await ctx.db.insert(
+          "contacts",
+          createTestContactData(userId, { displayName: "John Two" }),
+        );
+        const c3 = await ctx.db.insert(
+          "contacts",
+          createTestContactData(userId, { displayName: "Jane Three" }),
+        );
+
+        await ctx.db.insert(
+          "contactHandles",
+          createTestContactHandleData(userId, c1, {
+            handleType: "email",
+            handle: "shared@example.com",
+            platform: "gmail",
+          }),
+        );
+        await ctx.db.insert(
+          "contactHandles",
+          createTestContactHandleData(userId, c2, {
+            handleType: "email",
+            handle: "shared@example.com",
+            platform: "gmail",
+          }),
+        );
+
+        return [c1, c2, c3];
+      });
+
+      const targetResult = await t.query(
+        internal.contactResolution.findDuplicateCandidatesInternal,
+        { userId, contactId: contact1Id },
+      );
+
+      expect(targetResult.duplicatePairs).toHaveLength(1);
+      expect(targetResult.duplicatePairs[0].source).toBe("email_match");
+      expect(
+        [
+          targetResult.duplicatePairs[0].contact1Id,
+          targetResult.duplicatePairs[0].contact2Id,
+        ].sort(),
+      ).toEqual([contact1Id, contact2Id].sort());
+
+      const unrelatedResult = await t.query(
+        internal.contactResolution.findDuplicateCandidatesInternal,
+        { userId, contactId: contact3Id },
+      );
+      expect(unrelatedResult.duplicatePairs).toHaveLength(0);
+      expect(unrelatedResult.fuzzyPairs).toHaveLength(0);
+    });
+
+    it("checkMergesForContact auto-merges deterministic email matches", async () => {
+      const t = convexTest(schema, modules);
+      const { userId } = await setupAuthenticatedUser(t);
+
+      const [contact1Id, contact2Id] = await t.run(async (ctx) => {
+        const c1 = await ctx.db.insert(
+          "contacts",
+          createTestContactData(userId, { displayName: "john@example.com" }),
+        );
+        const c2 = await ctx.db.insert(
+          "contacts",
+          createTestContactData(userId, {
+            displayName: "John Doe",
+            company: "Acme",
+          }),
+        );
+
+        await ctx.db.insert(
+          "contactHandles",
+          createTestContactHandleData(userId, c1, {
+            handleType: "email",
+            handle: "john@example.com",
+            platform: "gmail",
+          }),
+        );
+        await ctx.db.insert(
+          "contactHandles",
+          createTestContactHandleData(userId, c2, {
+            handleType: "email",
+            handle: "john@example.com",
+            platform: "gmail",
+          }),
+        );
+
+        return [c1, c2];
+      });
+
+      const actionResult = await t.action(
+        internal.contactResolution.checkMergesForContact,
+        { userId, contactId: contact1Id },
+      );
+
+      expect(actionResult.suggestionsCreated).toBe(0);
+      expect(actionResult.errors).toEqual([]);
+
+      await t.run(async (ctx) => {
+        const contacts = await ctx.db
+          .query("contacts")
+          .withIndex("by_user", (q) => q.eq("userId", userId))
+          .collect();
+        expect(contacts).toHaveLength(1);
+
+        const approvedMerges = await ctx.db
+          .query("mergeSuggestions")
+          .withIndex("by_user_status", (q) =>
+            q.eq("userId", userId).eq("status", "approved"),
+          )
+          .collect();
+        expect(approvedMerges).toHaveLength(1);
+        expect(approvedMerges[0].source).toBe("email_match");
+
+        const c1 = await ctx.db.get(contact1Id);
+        const c2 = await ctx.db.get(contact2Id);
+        expect(c1 === null || c2 === null).toBe(true);
+      });
+    });
+
+    it("checkMergesForContact keeps exact name matches as suggestions", async () => {
+      const t = convexTest(schema, modules);
+      const { userId } = await setupAuthenticatedUser(t);
+
+      const [contact1Id, contact2Id] = await t.run(async (ctx) => {
+        const c1 = await ctx.db.insert(
+          "contacts",
+          createTestContactData(userId, { displayName: "Taylor Smith" }),
+        );
+        const c2 = await ctx.db.insert(
+          "contacts",
+          createTestContactData(userId, { displayName: "Taylor Smith" }),
+        );
+
+        await ctx.db.insert(
+          "contactHandles",
+          createTestContactHandleData(userId, c1, {
+            handleType: "email",
+            handle: "taylor.work@example.com",
+            platform: "gmail",
+          }),
+        );
+        await ctx.db.insert(
+          "contactHandles",
+          createTestContactHandleData(userId, c2, {
+            handleType: "email",
+            handle: "taylor.personal@example.com",
+            platform: "gmail",
+          }),
+        );
+
+        return [c1, c2];
+      });
+
+      const actionResult = await t.action(
+        internal.contactResolution.checkMergesForContact,
+        { userId, contactId: contact1Id },
+      );
+      expect(actionResult.errors).toEqual([]);
+      expect(actionResult.suggestionsCreated).toBe(1);
+
+      await t.run(async (ctx) => {
+        const c1 = await ctx.db.get(contact1Id);
+        const c2 = await ctx.db.get(contact2Id);
+        expect(c1).not.toBeNull();
+        expect(c2).not.toBeNull();
+
+        const pendingSuggestions = await ctx.db
+          .query("mergeSuggestions")
+          .withIndex("by_user_status", (q) =>
+            q.eq("userId", userId).eq("status", "pending"),
+          )
+          .collect();
+        expect(pendingSuggestions).toHaveLength(1);
+        expect(pendingSuggestions[0].source).toBe("exact_name_match");
+      });
     });
   });
 
@@ -721,7 +1003,7 @@ describe("contactResolution", () => {
           "contacts",
           createTestContactData(userId, {
             displayName: "urn:li:member:abc123",
-          })
+          }),
         );
         const rich = await ctx.db.insert(
           "contacts",
@@ -729,7 +1011,7 @@ describe("contactResolution", () => {
             displayName: "Jane Doe",
             company: "Acme",
             notes: "Met at conference",
-          })
+          }),
         );
 
         await ctx.db.insert(
@@ -738,7 +1020,7 @@ describe("contactResolution", () => {
             handleType: "linkedin_urn",
             handle: "urn:li:member:abc123",
             platform: "linkedin",
-          })
+          }),
         );
         await ctx.db.insert(
           "contactHandles",
@@ -746,7 +1028,7 @@ describe("contactResolution", () => {
             handleType: "linkedin_urn",
             handle: "urn:li:msg_messagingparticipant:urn:li:fsd_profile:abc123",
             platform: "linkedin",
-          })
+          }),
         );
 
         return [placeholder, rich];
@@ -776,11 +1058,14 @@ describe("contactResolution", () => {
       const [primaryId, secondaryId] = await t.run(async (ctx) => {
         const primary = await ctx.db.insert(
           "contacts",
-          createTestContactData(userId, { displayName: "Jane Doe", company: "Acme" })
+          createTestContactData(userId, {
+            displayName: "Jane Doe",
+            company: "Acme",
+          }),
         );
         const secondary = await ctx.db.insert(
           "contacts",
-          createTestContactData(userId, { displayName: "Jane D" })
+          createTestContactData(userId, { displayName: "Jane D" }),
         );
 
         await ctx.db.insert(
@@ -789,7 +1074,7 @@ describe("contactResolution", () => {
             handleType: "linkedin_urn",
             handle: "urn:li:member:abc123",
             platform: "linkedin",
-          })
+          }),
         );
         await ctx.db.insert(
           "contactHandles",
@@ -797,7 +1082,7 @@ describe("contactResolution", () => {
             handleType: "linkedin_urn",
             handle: "urn:li:msg_messagingparticipant:urn:li:fsd_profile:abc123",
             platform: "linkedin",
-          })
+          }),
         );
         await ctx.db.insert(
           "contactHandles",
@@ -805,7 +1090,7 @@ describe("contactResolution", () => {
             handleType: "phone",
             handle: "+15551234567",
             platform: "imessage",
-          })
+          }),
         );
 
         return [primary, secondary];
@@ -825,13 +1110,145 @@ describe("contactResolution", () => {
           .collect();
 
         const linkedInUrnHandles = mergedHandles.filter(
-          (h) => h.handleType === "linkedin_urn"
+          (h) => h.handleType === "linkedin_urn",
         );
-        const phoneHandles = mergedHandles.filter((h) => h.handleType === "phone");
+        const phoneHandles = mergedHandles.filter(
+          (h) => h.handleType === "phone",
+        );
 
         expect(linkedInUrnHandles).toHaveLength(1);
         expect(linkedInUrnHandles[0].handle).toBe("urn:li:member:abc123");
         expect(phoneHandles).toHaveLength(1);
+      });
+    });
+
+    it("resolves pending merge work that references the secondary contact", async () => {
+      const t = convexTest(schema, modules);
+      const { userId } = await setupAuthenticatedUser(t);
+
+      const {
+        primaryId,
+        secondaryId,
+        otherId,
+        pairSuggestionId,
+        unrelatedSuggestionId,
+        pairActionId,
+        unrelatedActionId,
+        followUpActionId,
+      } = await t.run(async (ctx) => {
+        const primaryId = await ctx.db.insert(
+          "contacts",
+          createTestContactData(userId, {
+            displayName: "Jane Doe",
+            company: "Acme",
+          }),
+        );
+        const secondaryId = await ctx.db.insert(
+          "contacts",
+          createTestContactData(userId, {
+            displayName: "jane@example.com",
+          }),
+        );
+        const otherId = await ctx.db.insert(
+          "contacts",
+          createTestContactData(userId, {
+            displayName: "Another Person",
+          }),
+        );
+
+        await ctx.db.patch(userId, { pendingActionCount: 2 });
+
+        const pairSuggestionId = await ctx.db.insert("mergeSuggestions", {
+          userId,
+          contact1Id: primaryId,
+          contact2Id: secondaryId,
+          confidence: 0.99,
+          source: "email_match",
+          status: "pending",
+          createdAt: Date.now(),
+        });
+
+        const unrelatedSuggestionId = await ctx.db.insert("mergeSuggestions", {
+          userId,
+          contact1Id: otherId,
+          contact2Id: secondaryId,
+          confidence: 0.72,
+          source: "fuzzy_name_match",
+          status: "pending",
+          createdAt: Date.now(),
+        });
+
+        const pairActionId = await ctx.db.insert("actions", {
+          ...createTestActionData(userId, {
+            type: "resolve_contact",
+            status: "pending",
+            contactId: secondaryId,
+          }),
+          secondaryContactId: primaryId,
+          mergeSuggestionId: pairSuggestionId,
+        });
+
+        const unrelatedActionId = await ctx.db.insert("actions", {
+          ...createTestActionData(userId, {
+            type: "resolve_contact",
+            status: "pending",
+            contactId: otherId,
+          }),
+          secondaryContactId: secondaryId,
+          mergeSuggestionId: unrelatedSuggestionId,
+        });
+
+        const followUpActionId = await ctx.db.insert(
+          "actions",
+          createTestActionData(userId, {
+            type: "follow_up",
+            status: "pending",
+            contactId: secondaryId,
+          }),
+        );
+
+        return {
+          primaryId,
+          secondaryId,
+          otherId,
+          pairSuggestionId,
+          unrelatedSuggestionId,
+          pairActionId,
+          unrelatedActionId,
+          followUpActionId,
+        };
+      });
+
+      await t.mutation(internal.contactResolution.autoMergeContacts, {
+        primaryContactId: primaryId,
+        secondaryContactId: secondaryId,
+        source: "email_match",
+        reasoning: "deterministic handle match",
+      });
+
+      await t.run(async (ctx) => {
+        expect(await ctx.db.get(secondaryId)).toBeNull();
+        expect(await ctx.db.get(otherId)).not.toBeNull();
+
+        const pairSuggestion = await ctx.db.get(pairSuggestionId);
+        const unrelatedSuggestion = await ctx.db.get(unrelatedSuggestionId);
+        expect(pairSuggestion?.status).toBe("approved");
+        expect(pairSuggestion?.resolvedAt).toBeDefined();
+        expect(unrelatedSuggestion?.status).toBe("rejected");
+        expect(unrelatedSuggestion?.resolvedAt).toBeDefined();
+
+        const pairAction = await ctx.db.get(pairActionId);
+        const unrelatedAction = await ctx.db.get(unrelatedActionId);
+        expect(pairAction?.status).toBe("completed");
+        expect(pairAction?.completedAt).toBeDefined();
+        expect(unrelatedAction?.status).toBe("discarded");
+        expect(unrelatedAction?.discardedAt).toBeDefined();
+
+        const followUpAction = await ctx.db.get(followUpActionId);
+        expect(followUpAction?.contactId).toBe(primaryId);
+
+        const user = await ctx.db.get(userId);
+        expect(user?.pendingActionCount).toBe(0);
       });
     });
   });

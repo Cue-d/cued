@@ -5,6 +5,7 @@ import {
   internalQuery,
   mutation,
 } from "./_generated/server";
+import type { ActionCtx, MutationCtx } from "./_generated/server";
 import { internal } from "./_generated/api";
 import type { Doc, Id } from "./_generated/dataModel";
 import { getAuthenticatedUser } from "./lib/auth";
@@ -21,10 +22,10 @@ import {
   normalizeMemberURN,
   extractIdFromURN,
   isLinkedInURN,
-  normalizePhone,
-  normalizeLinkedInHandle,
 } from "@cued/shared";
 import type { TypedHandle, MessageSnippet } from "@cued/ai";
+import { scheduleContactMergeCheck } from "./lib/contactMergeScheduling";
+import { normalizeHandleValue } from "./lib/normalizeHandle";
 
 const MAX_CONVERSATIONS_FOR_LLM_LOOKUP = 100;
 const MAX_CONVERSATIONS_FOR_LLM_CONTEXT = 5;
@@ -60,6 +61,13 @@ type DuplicatePair = {
   sharedHandle?: string;
 };
 
+type DuplicateCandidateResult = {
+  duplicatePairs: DuplicatePair[];
+  fuzzyPairs: DuplicatePair[];
+};
+
+const MAX_NAME_TOKEN_BUCKET_SIZE = 50;
+
 /** Get or create a Set in a Map. */
 function getOrCreateSet<K, V>(map: Map<K, Set<V>>, key: K): Set<V> {
   let set = map.get(key);
@@ -68,6 +76,326 @@ function getOrCreateSet<K, V>(map: Map<K, Set<V>>, key: K): Set<V> {
     map.set(key, set);
   }
   return set;
+}
+
+function getPairKey(
+  contact1Id: Id<"contacts">,
+  contact2Id: Id<"contacts">,
+): string {
+  return [contact1Id, contact2Id].sort().join("-");
+}
+
+function getNameTokens(name: string): string[] {
+  return name
+    .toLowerCase()
+    .split(/\s+/)
+    .filter((token) => token.length >= 2);
+}
+
+function shouldIncludeContactInNameMatching(contact: Doc<"contacts">): boolean {
+  const name = contact.displayName;
+  return (
+    !contact.isDismissed &&
+    !!name.trim() &&
+    !looksLikeEmail(name) &&
+    !looksLikePhone(name) &&
+    !isLinkedInURN(name)
+  );
+}
+
+function buildContactHandlesByContactId(
+  handles: Doc<"contactHandles">[],
+): Map<Id<"contacts">, Doc<"contactHandles">[]> {
+  const contactIdToHandles = new Map<Id<"contacts">, Doc<"contactHandles">[]>();
+  for (const handle of handles) {
+    const existing = contactIdToHandles.get(handle.contactId) ?? [];
+    existing.push(handle);
+    contactIdToHandles.set(handle.contactId, existing);
+  }
+  return contactIdToHandles;
+}
+
+function buildHandleToContactsIndex(
+  contacts: Doc<"contacts">[],
+  handles: Doc<"contactHandles">[],
+): Map<string, Set<Id<"contacts">>> {
+  const handleToContacts = new Map<string, Set<Id<"contacts">>>();
+
+  for (const handle of handles) {
+    const rawValue = handle.handle?.trim();
+    if (!rawValue) continue;
+
+    if (handle.handleType === "email") {
+      if (!rawValue.includes("@")) continue;
+      const normalized = normalizeEmail(rawValue);
+      if (normalized && normalized.includes("@")) {
+        getOrCreateSet(handleToContacts, normalized).add(handle.contactId);
+      }
+    } else if (handle.handleType === "phone") {
+      const digitsOnly = rawValue.replace(/\D/g, "");
+      if (digitsOnly.length >= 7) {
+        const variants = getPhoneVariants(rawValue);
+        for (const variant of variants) {
+          getOrCreateSet(handleToContacts, variant).add(handle.contactId);
+        }
+      }
+    } else if (handle.handleType === "linkedin_urn") {
+      const normalized = normalizeMemberURN(rawValue).toLowerCase();
+      const memberId = extractIdFromURN(normalized);
+      if (memberId) {
+        getOrCreateSet(handleToContacts, `linkedin_urn:${memberId}`).add(
+          handle.contactId,
+        );
+      }
+    }
+  }
+
+  for (const contact of contacts) {
+    const name = contact.displayName?.trim();
+    if (!name) continue;
+
+    if (looksLikeEmail(name)) {
+      const normalized = normalizeEmail(name);
+      if (normalized && normalized.includes("@")) {
+        getOrCreateSet(handleToContacts, normalized).add(contact._id);
+      }
+    } else if (looksLikePhone(name)) {
+      const digitsOnly = name.replace(/\D/g, "");
+      if (digitsOnly.length >= 7) {
+        const variants = getPhoneVariants(name);
+        for (const variant of variants) {
+          getOrCreateSet(handleToContacts, variant).add(contact._id);
+        }
+      }
+    }
+  }
+
+  return handleToContacts;
+}
+
+function buildNameTokenToContactsIndex(
+  contacts: Doc<"contacts">[],
+): Map<string, Set<Id<"contacts">>> {
+  const nameTokenToContacts = new Map<string, Set<Id<"contacts">>>();
+
+  for (const contact of contacts) {
+    if (!shouldIncludeContactInNameMatching(contact)) continue;
+
+    for (const token of getNameTokens(contact.displayName)) {
+      getOrCreateSet(nameTokenToContacts, token).add(contact._id);
+    }
+  }
+
+  return nameTokenToContacts;
+}
+
+function hasConflictingHandles(
+  handles1: Doc<"contactHandles">[] | undefined,
+  handles2: Doc<"contactHandles">[] | undefined,
+): boolean {
+  if (!handles1 || !handles2) return false;
+
+  const uniqueTypes = ["phone", "linkedin_handle", "linkedin_urn", "slack_id", "twitter_handle"];
+  const byType1 = new Map<string, string[]>();
+  const byType2 = new Map<string, string[]>();
+
+  for (const h of handles1) {
+    if (!uniqueTypes.includes(h.handleType)) continue;
+    const vals = byType1.get(h.handleType) ?? [];
+    vals.push(h.handle);
+    byType1.set(h.handleType, vals);
+  }
+  for (const h of handles2) {
+    if (!uniqueTypes.includes(h.handleType)) continue;
+    const vals = byType2.get(h.handleType) ?? [];
+    vals.push(h.handle);
+    byType2.set(h.handleType, vals);
+  }
+
+  for (const [type, vals1] of byType1.entries()) {
+    const vals2 = byType2.get(type);
+    if (!vals2) continue;
+
+    if (vals1.length === 1 && vals2.length === 1) {
+      const v1 = vals1[0];
+      const v2 = vals2[0];
+
+      if (type === "phone") {
+        if (!phonesMatch(v1, v2)) {
+          return true;
+        }
+      } else if (v1.toLowerCase() !== v2.toLowerCase()) {
+        return true;
+      }
+    }
+  }
+
+  return false;
+}
+
+function getDuplicateSourceForHandle(
+  handleKey: string,
+): DuplicatePair["source"] {
+  if (handleKey.startsWith("linkedin_urn:")) {
+    return "linkedin_urn_match";
+  }
+  if (handleKey.includes("@")) {
+    return "email_match";
+  }
+  return "phone_match";
+}
+
+function isDeterministicHandleSource(source: DuplicatePair["source"]): boolean {
+  return (
+    source === "email_match" ||
+    source === "phone_match" ||
+    source === "linkedin_urn_match"
+  );
+}
+
+function getAutoMergeReason(pair: DuplicatePair): string {
+  if (pair.source === "linkedin_urn_match") {
+    return "Same LinkedIn member ID";
+  }
+  if (pair.source === "email_match") {
+    return pair.sharedHandle
+      ? `Matching email ${pair.sharedHandle}`
+      : "Matching email";
+  }
+  if (pair.source === "phone_match") {
+    return pair.sharedHandle
+      ? `Matching phone ${pair.sharedHandle}`
+      : "Matching phone";
+  }
+  return `Deterministic match via ${pair.source}`;
+}
+
+/** Accumulated state while processing duplicate/fuzzy candidate pairs. */
+type MergeProcessingResult = {
+  suggestionsCreated: number;
+  errors: string[];
+};
+
+/**
+ * Process deterministic and name-match duplicate pairs -- auto-merging when
+ * the source is a handle match, otherwise creating a suggestion.
+ */
+async function processDuplicatePairs(
+  ctx: ActionCtx,
+  userId: Id<"users">,
+  pairs: DuplicatePair[],
+  callerLabel: string,
+  out: MergeProcessingResult,
+): Promise<void> {
+  for (const pair of pairs) {
+    try {
+      if (isDeterministicHandleSource(pair.source)) {
+        const mergeResult = await ctx.runMutation(
+          internal.contactResolution.autoMergeContacts,
+          {
+            primaryContactId: pair.contact1Id,
+            secondaryContactId: pair.contact2Id,
+            source: pair.source,
+            reasoning: getAutoMergeReason(pair),
+          },
+        );
+        if (!mergeResult.success) {
+          out.errors.push(
+            `${pair.source}: ${mergeResult.reason ?? "Auto-merge failed"}`,
+          );
+        }
+        continue;
+      }
+
+      const createResult = await ctx.runMutation(
+        internal.contactResolution.createMergeSuggestionInternal,
+        {
+          userId,
+          contact1Id: pair.contact1Id,
+          contact2Id: pair.contact2Id,
+          confidence: pair.confidence,
+          source: pair.source,
+          reasoning: `${(pair.confidence * 100).toFixed(0)}% match via ${pair.source}`,
+        },
+      );
+      if (createResult.created) out.suggestionsCreated++;
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      console.error(
+        `[${callerLabel}] Failed to process pair: ` +
+          `${pair.contact1Id} <-> ${pair.contact2Id} (${pair.source}): ${msg}`,
+      );
+      out.errors.push(`${pair.source}: ${msg}`);
+    }
+  }
+}
+
+/**
+ * Process fuzzy name-match pairs -- verifies each via LLM before creating
+ * a merge suggestion.
+ */
+async function processFuzzyPairs(
+  ctx: ActionCtx,
+  userId: Id<"users">,
+  pairs: DuplicatePair[],
+  callerLabel: string,
+  out: MergeProcessingResult,
+): Promise<void> {
+  for (const fuzzy of pairs) {
+    try {
+      const [contact1Data, contact2Data] = await Promise.all([
+        ctx.runQuery(internal.contactResolution.getContactForLLMInternal, {
+          contactId: fuzzy.contact1Id,
+        }),
+        ctx.runQuery(internal.contactResolution.getContactForLLMInternal, {
+          contactId: fuzzy.contact2Id,
+        }),
+      ]);
+
+      if (!contact1Data || !contact2Data) {
+        out.errors.push("fuzzy_name_match: Contact not found");
+        continue;
+      }
+
+      const llmResult = await decideFuzzyMatchWithRetry({
+        contact1: contact1Data,
+        contact2: contact2Data,
+        fuzzyScore: fuzzy.confidence,
+      });
+
+      if (
+        !llmResult.samePerson ||
+        llmResult.confidence < LLM_CONFIDENCE_THRESHOLD
+      ) {
+        console.log(
+          `[${callerLabel}] LLM rejected fuzzy match: ` +
+            `${contact1Data.displayName} <-> ${contact2Data.displayName} ` +
+            `(samePerson=${llmResult.samePerson}, confidence=${llmResult.confidence})`,
+        );
+        continue;
+      }
+
+      const createResult = await ctx.runMutation(
+        internal.contactResolution.createMergeSuggestionInternal,
+        {
+          userId,
+          contact1Id: fuzzy.contact1Id,
+          contact2Id: fuzzy.contact2Id,
+          confidence: llmResult.confidence,
+          source: "llm_fuzzy_match",
+          reasoning: llmResult.reasoning,
+        },
+      );
+      if (createResult.created) out.suggestionsCreated++;
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      console.error(
+        `[${callerLabel}] Failed to process fuzzy match: ` +
+          `${fuzzy.contact1Id} <-> ${fuzzy.contact2Id}: ${msg}`,
+      );
+      out.errors.push(`fuzzy_name_match: ${msg}`);
+    }
+  }
 }
 
 /** Get contact data formatted for LLM match verification. */
@@ -156,162 +484,105 @@ export const getContactForLLMInternal = internalQuery({
   },
 });
 
+/** Process candidates and record suggestions, returning merge stats. */
+async function processAndRecordCandidates(
+  ctx: ActionCtx,
+  userId: Id<"users">,
+  candidates: DuplicateCandidateResult,
+  label: string,
+): Promise<MergeProcessingResult> {
+  const out: MergeProcessingResult = { suggestionsCreated: 0, errors: [] };
+
+  await processDuplicatePairs(ctx, userId, candidates.duplicatePairs, label, out);
+  await processFuzzyPairs(ctx, userId, candidates.fuzzyPairs, label, out);
+
+  if (out.suggestionsCreated > 0) {
+    await ctx.runMutation(
+      internal.contactResolution.incrementPendingActionCount,
+      { userId, count: out.suggestionsCreated },
+    );
+  }
+
+  return out;
+}
+
 /** Scan all contacts for merge candidates using handle + name matching. */
 export const scanAllContactsForMerges = internalAction({
   args: {
     userId: v.id("users"),
   },
-  handler: async (
-    ctx,
-    args
-  ): Promise<{
-    contactsScanned: number;
+  handler: async (ctx, args): Promise<{
     comparisonsPerformed: number;
     suggestionsCreated: number;
     errors: string[];
   }> => {
-    const result = await ctx.runQuery(
+    const candidates = await ctx.runQuery(
       internal.contactResolution.findDuplicateCandidatesInternal,
-      { userId: args.userId }
+      { userId: args.userId },
     );
 
-    let suggestionsCreated = 0;
-    const errors: string[] = [];
-
-    // Process all duplicate pairs (handle matches + name matches)
-    for (const pair of result.duplicatePairs) {
-      try {
-        // LinkedIn URN matches are certain (same member ID) — auto-merge directly
-        if (pair.source === "linkedin_urn_match") {
-          await ctx.runMutation(
-            internal.contactResolution.autoMergeContacts,
-            {
-              primaryContactId: pair.contact1Id,
-              secondaryContactId: pair.contact2Id,
-              source: pair.source,
-              reasoning: `Same LinkedIn member ID`,
-            }
-          );
-          continue;
-        }
-
-        const createResult = await ctx.runMutation(
-          internal.contactResolution.createMergeSuggestionInternal,
-          {
-            userId: args.userId,
-            contact1Id: pair.contact1Id,
-            contact2Id: pair.contact2Id,
-            confidence: pair.confidence,
-            source: pair.source,
-            reasoning: `${(pair.confidence * 100).toFixed(0)}% match via ${pair.source}`,
-          }
-        );
-        if (createResult.created) suggestionsCreated++;
-      } catch (e) {
-        const msg = e instanceof Error ? e.message : String(e);
-        console.error(
-          `[scanAllContactsForMerges] Failed to create suggestion: ` +
-            `${pair.contact1Id} <-> ${pair.contact2Id} (${pair.source}): ${msg}`
-        );
-        errors.push(`${pair.source}: ${msg}`);
-      }
-    }
-
-    // LLM verification for fuzzy matches
-    for (const fuzzy of result.fuzzyPairs) {
-      try {
-        // Fetch contact data with handles and messages for LLM
-        const [contact1Data, contact2Data] = await Promise.all([
-          ctx.runQuery(internal.contactResolution.getContactForLLMInternal, {
-            contactId: fuzzy.contact1Id,
-          }),
-          ctx.runQuery(internal.contactResolution.getContactForLLMInternal, {
-            contactId: fuzzy.contact2Id,
-          }),
-        ]);
-
-        if (!contact1Data || !contact2Data) {
-          errors.push(`fuzzy_name_match: Contact not found`);
-          continue;
-        }
-
-        // Call LLM for verification
-        const llmResult = await decideFuzzyMatchWithRetry({
-          contact1: contact1Data,
-          contact2: contact2Data,
-          fuzzyScore: fuzzy.confidence,
-        });
-
-        // Only create suggestion if LLM confirms same person with sufficient confidence
-        if (
-          !llmResult.samePerson ||
-          llmResult.confidence < LLM_CONFIDENCE_THRESHOLD
-        ) {
-          console.log(
-            `[scanAllContactsForMerges] LLM rejected fuzzy match: ` +
-              `${contact1Data.displayName} <-> ${contact2Data.displayName} ` +
-              `(samePerson=${llmResult.samePerson}, confidence=${llmResult.confidence})`
-          );
-          continue;
-        }
-
-        const createResult = await ctx.runMutation(
-          internal.contactResolution.createMergeSuggestionInternal,
-          {
-            userId: args.userId,
-            contact1Id: fuzzy.contact1Id,
-            contact2Id: fuzzy.contact2Id,
-            confidence: llmResult.confidence,
-            source: "llm_fuzzy_match",
-            reasoning: llmResult.reasoning,
-          }
-        );
-        if (createResult.created) suggestionsCreated++;
-      } catch (e) {
-        const msg = e instanceof Error ? e.message : String(e);
-        console.error(
-          `[scanAllContactsForMerges] Failed to process fuzzy match: ` +
-            `${fuzzy.contact1Id} <-> ${fuzzy.contact2Id}: ${msg}`
-        );
-        errors.push(`fuzzy_name_match: ${msg}`);
-      }
-    }
-
-    // Batch update user's pending action count to avoid OCC conflicts
-    if (suggestionsCreated > 0) {
-      await ctx.runMutation(
-        internal.contactResolution.incrementPendingActionCount,
-        { userId: args.userId, count: suggestionsCreated }
-      );
-    }
+    const out = await processAndRecordCandidates(
+      ctx, args.userId, candidates, "scanAllContactsForMerges",
+    );
 
     const totalComparisons =
-      result.duplicatePairs.length + result.fuzzyPairs.length;
+      candidates.duplicatePairs.length + candidates.fuzzyPairs.length;
 
     return {
-      contactsScanned: totalComparisons * 2,
       comparisonsPerformed: totalComparisons,
-      suggestionsCreated,
-      errors,
+      suggestionsCreated: out.suggestionsCreated,
+      errors: out.errors,
+    };
+  },
+});
+
+/** Check merge candidates for one contact (event-driven path). */
+export const checkMergesForContact = internalAction({
+  args: {
+    userId: v.id("users"),
+    contactId: v.id("contacts"),
+  },
+  handler: async (ctx, args): Promise<{
+    comparisonsPerformed: number;
+    suggestionsCreated: number;
+    errors: string[];
+  }> => {
+    const candidates = await ctx.runQuery(
+      internal.contactResolution.findDuplicateCandidatesInternal,
+      { userId: args.userId, contactId: args.contactId },
+    );
+
+    const out = await processAndRecordCandidates(
+      ctx, args.userId, candidates, "checkMergesForContact",
+    );
+
+    return {
+      comparisonsPerformed:
+        candidates.duplicatePairs.length + candidates.fuzzyPairs.length,
+      suggestionsCreated: out.suggestionsCreated,
+      errors: out.errors,
     };
   },
 });
 
 /**
- * Find duplicate candidates using INDEX-BASED matching for both handles and names.
- *
- * Both use the same O(n) approach:
- * 1. Build index: key → Set<contactIds>
- * 2. Only compare contacts that share a key
- *
- * Handle matching: key = normalized email/phone
- * Name matching: key = name token (each word in the name)
+ * Find duplicate candidates using INDEX-BASED matching for handle and name overlap.
+ * When contactId is provided, only returns pairs involving that contact (event-driven).
+ * When omitted, returns all pairs (full-scan fallback).
  */
 export const findDuplicateCandidatesInternal = internalQuery({
   args: {
     userId: v.id("users"),
+    contactId: v.optional(v.id("contacts")),
   },
-  handler: async (ctx, args) => {
+  handler: async (ctx, args): Promise<DuplicateCandidateResult> => {
+    if (args.contactId) {
+      const targetContact = await ctx.db.get(args.contactId);
+      if (!targetContact || targetContact.userId !== args.userId) {
+        return { duplicatePairs: [], fuzzyPairs: [] };
+      }
+    }
+
     const contacts = await ctx.db
       .query("contacts")
       .withIndex("by_user", (q) => q.eq("userId", args.userId))
@@ -322,259 +593,152 @@ export const findDuplicateCandidatesInternal = internalQuery({
       .withIndex("by_user", (q) => q.eq("userId", args.userId))
       .collect();
 
-    // Build handle index (email/phone → contactIds)
-    // Only index valid emails (must contain @) and phones (must have 7+ digits)
-    const handleToContacts = new Map<string, Set<Id<"contacts">>>();
-
-    for (const handle of handles) {
-      // Skip empty or whitespace-only handles
-      const rawValue = handle.handle?.trim();
-      if (!rawValue) continue;
-
-      if (handle.handleType === "email") {
-        // Only index valid-looking emails (must contain @)
-        if (!rawValue.includes("@")) continue;
-        const normalized = normalizeEmail(rawValue);
-        if (normalized && normalized.includes("@")) {
-          getOrCreateSet(handleToContacts, normalized).add(handle.contactId);
-        }
-      } else if (handle.handleType === "phone") {
-        // Only index valid-looking phones (7+ digits)
-        const digitsOnly = rawValue.replace(/\D/g, "");
-        if (digitsOnly.length >= 7) {
-          // Index ALL variants so different formats match (e.g., +15551234567 and 5551234567)
-          const variants = getPhoneVariants(rawValue);
-          for (const variant of variants) {
-            getOrCreateSet(handleToContacts, variant).add(handle.contactId);
-          }
-        }
-      } else if (handle.handleType === "linkedin_urn") {
-        // Normalize URN and index by extracted member ID
-        const normalized = normalizeMemberURN(rawValue).toLowerCase();
-        const memberId = extractIdFromURN(normalized);
-        if (memberId) {
-          getOrCreateSet(handleToContacts, `linkedin_urn:${memberId}`).add(
-            handle.contactId
-          );
-        }
-      }
-    }
-
-    // Also index displayNames that look like email/phone (for contacts without proper handles)
+    const handleToContacts = buildHandleToContactsIndex(contacts, handles);
+    const nameTokenToContacts = buildNameTokenToContactsIndex(contacts);
+    const contactIdToHandles = buildContactHandlesByContactId(handles);
+    const contactIdToContact = new Map<Id<"contacts">, Doc<"contacts">>();
     for (const contact of contacts) {
-      const name = contact.displayName?.trim();
-      if (!name) continue;
-
-      if (looksLikeEmail(name)) {
-        const normalized = normalizeEmail(name);
-        // Double-check normalization result is valid
-        if (normalized && normalized.includes("@")) {
-          getOrCreateSet(handleToContacts, normalized).add(contact._id);
-        }
-      } else if (looksLikePhone(name)) {
-        const digitsOnly = name.replace(/\D/g, "");
-        if (digitsOnly.length >= 7) {
-          // Index ALL variants so different formats match
-          const variants = getPhoneVariants(name);
-          for (const variant of variants) {
-            getOrCreateSet(handleToContacts, variant).add(contact._id);
-          }
-        }
+      if (shouldIncludeContactInNameMatching(contact)) {
+        contactIdToContact.set(contact._id, contact);
       }
     }
 
-    // Build name token index (token → contactIds)
-    // "John Doe" → tokens: ["john", "doe"]
-    // Only compare contacts that share at least one token
-    const nameTokenToContacts = new Map<string, Set<Id<"contacts">>>();
-    const contactIdToContact = new Map<Id<"contacts">, (typeof contacts)[0]>();
+    return collectDuplicateCandidates(
+      handleToContacts,
+      nameTokenToContacts,
+      contactIdToHandles,
+      contactIdToContact,
+      args.contactId,
+    );
+  },
+});
 
-    // Build contactId → handles map for conflict detection
-    const contactIdToHandles = new Map<Id<"contacts">, typeof handles>();
-    for (const handle of handles) {
-      const existing = contactIdToHandles.get(handle.contactId) ?? [];
-      existing.push(handle);
-      contactIdToHandles.set(handle.contactId, existing);
-    }
+/** Collect duplicate pairs from pre-built indexes, optionally scoped to one contact. */
+function collectDuplicateCandidates(
+  handleToContacts: Map<string, Set<Id<"contacts">>>,
+  nameTokenToContacts: Map<string, Set<Id<"contacts">>>,
+  contactIdToHandles: Map<Id<"contacts">, Doc<"contactHandles">[]>,
+  contactIdToContact: Map<Id<"contacts">, Doc<"contacts">>,
+  targetContactId?: Id<"contacts">,
+): DuplicateCandidateResult {
+  const duplicatePairs: DuplicatePair[] = [];
+  const fuzzyPairs: DuplicatePair[] = [];
+  const seenPairs = new Set<string>();
 
-    for (const contact of contacts) {
-      const name = contact.displayName;
+  // --- Handle-based duplicates ---
+  for (const [handle, contactIds] of handleToContacts.entries()) {
+    if (contactIds.size < 2) continue;
+    if (targetContactId && !contactIds.has(targetContactId)) continue;
 
-      // Skip placeholder contacts (emails/phones/URNs as names) and dismissed
-      if (
-        contact.isDismissed ||
-        !name.trim() ||
-        looksLikeEmail(name) ||
-        looksLikePhone(name) ||
-        isLinkedInURN(name)
-      ) {
-        continue;
+    const source = getDuplicateSourceForHandle(handle);
+
+    if (targetContactId) {
+      for (const otherId of contactIds) {
+        if (otherId === targetContactId) continue;
+        const pairKey = getPairKey(targetContactId, otherId);
+        if (seenPairs.has(pairKey)) continue;
+        seenPairs.add(pairKey);
+        duplicatePairs.push({
+          contact1Id: targetContactId,
+          contact2Id: otherId,
+          confidence: 1.0,
+          source,
+          sharedHandle: handle,
+        });
       }
-
-      contactIdToContact.set(contact._id, contact);
-
-      // Extract name tokens (lowercase words, min 2 chars to avoid initials)
-      const tokens = name
-        .toLowerCase()
-        .split(/\s+/)
-        .filter((t) => t.length >= 2);
-
-      for (const token of tokens) {
-        getOrCreateSet(nameTokenToContacts, token).add(contact._id);
-      }
-    }
-
-    // Find duplicates from handle index
-    const duplicatePairs: DuplicatePair[] = [];
-    const fuzzyPairs: DuplicatePair[] = [];
-    const seenPairs = new Set<string>();
-    const matchedByHandle = new Set<Id<"contacts">>();
-
-    for (const [handle, contactIds] of handleToContacts.entries()) {
-      if (contactIds.size < 2) continue;
-
+    } else {
       const contactArray = Array.from(contactIds);
-      let source: DuplicatePair["source"];
-      if (handle.startsWith("linkedin_urn:")) {
-        source = "linkedin_urn_match";
-      } else if (handle.includes("@")) {
-        source = "email_match";
-      } else {
-        source = "phone_match";
-      }
-
       for (let i = 0; i < contactArray.length; i++) {
         for (let j = i + 1; j < contactArray.length; j++) {
-          const id1 = contactArray[i];
-          const id2 = contactArray[j];
-          const pairKey = [id1, id2].sort().join("-");
-
+          const pairKey = getPairKey(contactArray[i], contactArray[j]);
           if (seenPairs.has(pairKey)) continue;
           seenPairs.add(pairKey);
-
           duplicatePairs.push({
-            contact1Id: id1,
-            contact2Id: id2,
+            contact1Id: contactArray[i],
+            contact2Id: contactArray[j],
             confidence: 1.0,
             source,
             sharedHandle: handle,
           });
-
-          matchedByHandle.add(id1);
-          matchedByHandle.add(id2);
         }
       }
     }
+  }
 
-    // Helper: Check if two contacts have conflicting unique identifiers
-    // Only considers phones and LinkedIn usernames as "unique" - emails are excluded since
-    // people often have multiple emails (work/personal) for the same person
-    // Uses phonesMatch for proper phone variant handling (+1 vs 10-digit)
-    const hasConflictingHandles = (
-      handles1: typeof handles | undefined,
-      handles2: typeof handles | undefined
-    ): boolean => {
-      if (!handles1 || !handles2) return false;
+  // --- Name-based duplicates ---
+  if (targetContactId) {
+    const target = contactIdToContact.get(targetContactId);
+    if (!target) return { duplicatePairs, fuzzyPairs };
 
-      // Only check truly unique identifiers: phone, LinkedIn handle
-      // Emails excluded - people often have work + personal emails
-      const uniqueTypes = ["phone", "linkedin_handle", "linkedin_urn"];
-
-      // Group handles by type
-      const byType1 = new Map<string, string[]>();
-      const byType2 = new Map<string, string[]>();
-
-      for (const h of handles1) {
-        if (!uniqueTypes.includes(h.handleType)) continue;
-        const vals = byType1.get(h.handleType) ?? [];
-        vals.push(h.handle);
-        byType1.set(h.handleType, vals);
+    const nameCandidates = new Set<Id<"contacts">>();
+    for (const token of getNameTokens(target.displayName)) {
+      const bucket = nameTokenToContacts.get(token);
+      if (!bucket || bucket.size < 2 || bucket.size > MAX_NAME_TOKEN_BUCKET_SIZE) continue;
+      for (const id of bucket) {
+        if (id !== targetContactId) nameCandidates.add(id);
       }
-      for (const h of handles2) {
-        if (!uniqueTypes.includes(h.handleType)) continue;
-        const vals = byType2.get(h.handleType) ?? [];
-        vals.push(h.handle);
-        byType2.set(h.handleType, vals);
-      }
+    }
 
-      // Check each handle type - if both have exactly 1 and they differ, conflict
-      for (const [type, vals1] of byType1.entries()) {
-        const vals2 = byType2.get(type);
-        if (!vals2) continue;
-
-        // Both have exactly 1 handle of this type
-        if (vals1.length === 1 && vals2.length === 1) {
-          const v1 = vals1[0];
-          const v2 = vals2[0];
-
-          if (type === "phone") {
-            // Use phonesMatch which handles +1 variants
-            if (!phonesMatch(v1, v2)) {
-              return true; // Different phones = conflict
-            }
-          } else {
-            // For LinkedIn handles, use lowercase comparison
-            if (v1.toLowerCase() !== v2.toLowerCase()) {
-              return true;
-            }
-          }
-        }
-      }
-
-      return false;
-    };
-
-    // Find duplicates from name token index
-    // Compare contacts that share a token - seenPairs prevents duplicate suggestions
+    for (const candidateId of nameCandidates) {
+      addNamePairIfValid(
+        targetContactId, candidateId,
+        seenPairs, contactIdToContact, contactIdToHandles,
+        duplicatePairs, fuzzyPairs,
+      );
+    }
+  } else {
     for (const [, contactIds] of nameTokenToContacts.entries()) {
-      // Skip very common tokens that would cause too many comparisons
-      if (contactIds.size < 2 || contactIds.size > 50) continue;
-
+      if (contactIds.size < 2 || contactIds.size > MAX_NAME_TOKEN_BUCKET_SIZE) continue;
       const contactArray = Array.from(contactIds);
-
       for (let i = 0; i < contactArray.length; i++) {
         for (let j = i + 1; j < contactArray.length; j++) {
-          const id1 = contactArray[i];
-          const id2 = contactArray[j];
-          const pairKey = [id1, id2].sort().join("-");
-
-          if (seenPairs.has(pairKey)) continue;
-
-          const c1 = contactIdToContact.get(id1);
-          const c2 = contactIdToContact.get(id2);
-          if (!c1 || !c2) continue;
-
-          // Check for conflicting unique identifiers (different phone, email, linkedin, etc.)
-          const handles1 = contactIdToHandles.get(id1);
-          const handles2 = contactIdToHandles.get(id2);
-
-          if (hasConflictingHandles(handles1, handles2)) {
-            // Skip this pair - they have different unique identifiers
-            seenPairs.add(pairKey);
-            continue;
-          }
-
-          // Expensive Jaro-Winkler comparison
-          const score = nameSimilarity(c1.displayName, c2.displayName);
-          if (score < NAME_MATCH_THRESHOLDS.MINIMUM) continue;
-
-          seenPairs.add(pairKey);
-          const isExactMatch = score >= NAME_MATCH_THRESHOLDS.AUTO_MERGE;
-          const targetArray = isExactMatch ? duplicatePairs : fuzzyPairs;
-
-          targetArray.push({
-            contact1Id: id1,
-            contact2Id: id2,
-            confidence: score,
-            source: isExactMatch ? "exact_name_match" : "fuzzy_name_match",
-          });
+          addNamePairIfValid(
+            contactArray[i], contactArray[j],
+            seenPairs, contactIdToContact, contactIdToHandles,
+            duplicatePairs, fuzzyPairs,
+          );
         }
       }
     }
+  }
 
-    return { duplicatePairs, fuzzyPairs };
-  },
-});
+  return { duplicatePairs, fuzzyPairs };
+}
+
+/** Score a name pair and push to the appropriate result array if it passes thresholds. */
+function addNamePairIfValid(
+  id1: Id<"contacts">,
+  id2: Id<"contacts">,
+  seenPairs: Set<string>,
+  contactIdToContact: Map<Id<"contacts">, Doc<"contacts">>,
+  contactIdToHandles: Map<Id<"contacts">, Doc<"contactHandles">[]>,
+  duplicatePairs: DuplicatePair[],
+  fuzzyPairs: DuplicatePair[],
+): void {
+  const pairKey = getPairKey(id1, id2);
+  if (seenPairs.has(pairKey)) return;
+
+  const c1 = contactIdToContact.get(id1);
+  const c2 = contactIdToContact.get(id2);
+  if (!c1 || !c2) return;
+
+  if (hasConflictingHandles(contactIdToHandles.get(id1), contactIdToHandles.get(id2))) {
+    seenPairs.add(pairKey);
+    return;
+  }
+
+  const score = nameSimilarity(c1.displayName, c2.displayName);
+  if (score < NAME_MATCH_THRESHOLDS.MINIMUM) return;
+
+  seenPairs.add(pairKey);
+  const isExactMatch = score >= NAME_MATCH_THRESHOLDS.AUTO_MERGE;
+  (isExactMatch ? duplicatePairs : fuzzyPairs).push({
+    contact1Id: id1,
+    contact2Id: id2,
+    confidence: score,
+    source: isExactMatch ? "exact_name_match" : "fuzzy_name_match",
+  });
+}
 
 /** Trigger a full scan for merge candidates (user-facing). */
 export const triggerMergeScan = mutation({
@@ -586,45 +750,10 @@ export const triggerMergeScan = mutation({
     await ctx.scheduler.runAfter(
       0,
       internal.contactResolution.scanAllContactsForMerges,
-      { userId: user._id }
+      { userId: user._id },
     );
 
     return { success: true, message: "Merge scan scheduled" };
-  },
-});
-
-/**
- * Daily cron job to scan all users for merge candidates.
- * Schedules scanAllContactsForMerges for each user with connected integrations.
- */
-export const dailyMergeScanAllUsers = internalMutation({
-  args: {},
-  handler: async (ctx) => {
-    // Get all users with connected integrations
-    const integrations = await ctx.db
-      .query("integrations")
-      .filter((q) => q.eq(q.field("isConnected"), true))
-      .collect();
-
-    // Get unique user IDs
-    const userIds = [...new Set(integrations.map((i) => i.userId))];
-
-    let scheduled = 0;
-    for (const userId of userIds) {
-      // Stagger scans to avoid overwhelming the system
-      // Each scan starts 5 seconds after the previous
-      await ctx.scheduler.runAfter(
-        scheduled * 5000,
-        internal.contactResolution.scanAllContactsForMerges,
-        { userId }
-      );
-      scheduled++;
-    }
-
-    console.log(
-      `[dailyMergeScanAllUsers] Scheduled merge scans for ${scheduled} users`
-    );
-    return { usersScheduled: scheduled };
   },
 });
 
@@ -640,7 +769,7 @@ export const createMergeSuggestionInternal = internalMutation({
       v.literal("exact_name_match"),
       v.literal("fuzzy_name_match"),
       v.literal("llm_fuzzy_match"),
-      v.literal("linkedin_urn_match")
+      v.literal("linkedin_urn_match"),
     ),
     reasoning: v.optional(v.string()),
   },
@@ -654,7 +783,9 @@ export const createMergeSuggestionInternal = internalMutation({
     // Check for existing merge suggestion (only need to check one direction now)
     const existingSuggestion = await ctx.db
       .query("mergeSuggestions")
-      .withIndex("by_contacts", (q) => q.eq("contact1Id", c1).eq("contact2Id", c2))
+      .withIndex("by_contacts", (q) =>
+        q.eq("contact1Id", c1).eq("contact2Id", c2),
+      )
       .unique();
 
     if (existingSuggestion) {
@@ -665,14 +796,14 @@ export const createMergeSuggestionInternal = internalMutation({
     const existingAction = await ctx.db
       .query("actions")
       .withIndex("by_user_status", (q) =>
-        q.eq("userId", args.userId).eq("status", "pending")
+        q.eq("userId", args.userId).eq("status", "pending"),
       )
       .filter((q) =>
         q.and(
           q.eq(q.field("type"), "resolve_contact"),
           q.eq(q.field("contactId"), c1),
-          q.eq(q.field("secondaryContactId"), c2)
-        )
+          q.eq(q.field("secondaryContactId"), c2),
+        ),
       )
       .first();
 
@@ -729,7 +860,7 @@ export const incrementPendingActionCount = internalMutation({
     if (!user) {
       console.error(
         `[incrementPendingActionCount] User not found: ${args.userId}. ` +
-          `Failed to increment pendingActionCount by ${args.count}.`
+          `Failed to increment pendingActionCount by ${args.count}.`,
       );
       return;
     }
@@ -749,11 +880,12 @@ export const autoMergeContacts = internalMutation({
       v.literal("exact_name_match"),
       v.literal("fuzzy_name_match"),
       v.literal("llm_fuzzy_match"),
-      v.literal("linkedin_urn_match")
+      v.literal("linkedin_urn_match"),
     ),
     reasoning: v.string(),
   },
   handler: async (ctx, args) => {
+    const now = Date.now();
     const [contactA, contactB] = await Promise.all([
       ctx.db.get(args.primaryContactId),
       ctx.db.get(args.secondaryContactId),
@@ -769,13 +901,13 @@ export const autoMergeContacts = internalMutation({
       ctx.db
         .query("contactHandles")
         .withIndex("by_contact", (q) =>
-          q.eq("contactId", args.primaryContactId)
+          q.eq("contactId", args.primaryContactId),
         )
         .collect(),
       ctx.db
         .query("contactHandles")
         .withIndex("by_contact", (q) =>
-          q.eq("contactId", args.secondaryContactId)
+          q.eq("contactId", args.secondaryContactId),
         )
         .collect(),
     ]);
@@ -796,7 +928,7 @@ export const autoMergeContacts = internalMutation({
     const secondaryHandles = preferredIsA ? handlesB : handlesA;
 
     const existingHandleKeys = new Set(
-      primaryHandles.map((h) => buildHandleDedupKey(h.handleType, h.handle))
+      primaryHandles.map((h) => buildHandleDedupKey(h.handleType, h.handle)),
     );
 
     for (const handle of secondaryHandles) {
@@ -819,9 +951,10 @@ export const autoMergeContacts = internalMutation({
     for (const conv of conversations) {
       if (conv.participantContactIds.includes(secondaryContactId)) {
         const withoutSecondary = conv.participantContactIds.filter(
-          (id) => id !== secondaryContactId
+          (id) => id !== secondaryContactId,
         );
-        const hasPrimary = conv.participantContactIds.includes(primaryContactId);
+        const hasPrimary =
+          conv.participantContactIds.includes(primaryContactId);
         const updatedParticipants = hasPrimary
           ? withoutSecondary
           : [...withoutSecondary, primaryContactId];
@@ -836,7 +969,7 @@ export const autoMergeContacts = internalMutation({
     const messages = await ctx.db
       .query("messages")
       .withIndex("by_sender_contact", (q) =>
-        q.eq("senderContactId", secondaryContactId)
+        q.eq("senderContactId", secondaryContactId),
       )
       .collect();
 
@@ -863,6 +996,30 @@ export const autoMergeContacts = internalMutation({
       await ctx.db.patch(primaryContactId, updates);
     }
 
+    // Resolve stale merge suggestions and actions that reference the
+    // secondary contact before deleting it.
+    const { affectedSuggestionIds, pairSuggestionIds } =
+      await resolveStaleMergeSuggestions(
+        ctx, primary.userId, primaryContactId, secondaryContactId, now,
+      );
+
+    const resolvedPendingActionCount = await resolveStaleActionsForMerge(
+      ctx, primary.userId, primaryContactId, secondaryContactId,
+      pairSuggestionIds, affectedSuggestionIds, now,
+    );
+
+    if (resolvedPendingActionCount > 0) {
+      const user = await ctx.db.get(primary.userId);
+      if (user) {
+        await ctx.db.patch(primary.userId, {
+          pendingActionCount: Math.max(
+            0,
+            (user.pendingActionCount ?? 0) - resolvedPendingActionCount,
+          ),
+        });
+      }
+    }
+
     await ctx.db.delete(secondaryContactId);
 
     // Log merge for audit trail
@@ -874,36 +1031,154 @@ export const autoMergeContacts = internalMutation({
       source: args.source,
       reasoning: `Auto-merged: ${args.reasoning}`,
       status: "approved",
-      createdAt: Date.now(),
-      resolvedAt: Date.now(),
+      createdAt: now,
+      resolvedAt: now,
     });
+
+    // Schedule a follow-up merge check for the surviving contact so that
+    // transitive duplicates (3+ contacts sharing a handle) coalesce fully.
+    await scheduleContactMergeCheck(ctx, primary.userId, primaryContactId);
 
     return { success: true, handlesMovedCount: secondaryHandles.length };
   },
 });
 
-function normalizeHandleForDedup(handleType: string, handle: string): string {
-  const trimmed = handle.trim();
-  if (!trimmed) return "";
+/**
+ * Resolve pending merge suggestions that reference the secondary contact.
+ * Approves the suggestion for the primary↔secondary pair, rejects others.
+ */
+async function resolveStaleMergeSuggestions(
+  ctx: MutationCtx,
+  userId: Id<"users">,
+  primaryContactId: Id<"contacts">,
+  secondaryContactId: Id<"contacts">,
+  now: number,
+): Promise<{
+  affectedSuggestionIds: Set<Id<"mergeSuggestions">>;
+  pairSuggestionIds: Set<Id<"mergeSuggestions">>;
+}> {
+  const pendingSuggestions = await ctx.db
+    .query("mergeSuggestions")
+    .withIndex("by_user_status", (q) =>
+      q.eq("userId", userId).eq("status", "pending"),
+    )
+    .collect();
 
-  switch (handleType) {
-    case "email":
-      return normalizeEmail(trimmed) || trimmed.toLowerCase();
-    case "phone":
-      return normalizePhone(trimmed);
-    case "linkedin_urn":
-      return normalizeMemberURN(trimmed).toLowerCase();
-    case "linkedin_handle":
-      return normalizeLinkedInHandle(trimmed) || trimmed.toLowerCase();
-    case "twitter_handle":
-      return trimmed.toLowerCase().replace(/^@/, "");
-    default:
-      return trimmed;
+  const affectedSuggestionIds = new Set<Id<"mergeSuggestions">>();
+  const pairSuggestionIds = new Set<Id<"mergeSuggestions">>();
+
+  for (const suggestion of pendingSuggestions) {
+    const touchesSecondary =
+      suggestion.contact1Id === secondaryContactId ||
+      suggestion.contact2Id === secondaryContactId;
+    if (!touchesSecondary) continue;
+
+    const isThisMergePair =
+      (suggestion.contact1Id === primaryContactId &&
+        suggestion.contact2Id === secondaryContactId) ||
+      (suggestion.contact1Id === secondaryContactId &&
+        suggestion.contact2Id === primaryContactId);
+
+    await ctx.db.patch(suggestion._id, {
+      status: isThisMergePair ? "approved" : "rejected",
+      resolvedAt: now,
+    });
+
+    affectedSuggestionIds.add(suggestion._id);
+    if (isThisMergePair) pairSuggestionIds.add(suggestion._id);
   }
+
+  return { affectedSuggestionIds, pairSuggestionIds };
+}
+
+/**
+ * Rewrite or resolve actions that reference the secondary contact.
+ *
+ * 1. Actions whose primary contactId is the secondary → repoint to surviving
+ *    contact, except pending resolve_contact actions which get resolved.
+ * 2. Remaining pending resolve_contact actions that reference the secondary
+ *    via secondaryContactId or an affected mergeSuggestionId also get resolved.
+ *
+ * Returns the total number of pending actions resolved (for pendingActionCount adjustment).
+ */
+async function resolveStaleActionsForMerge(
+  ctx: MutationCtx,
+  userId: Id<"users">,
+  primaryContactId: Id<"contacts">,
+  secondaryContactId: Id<"contacts">,
+  pairSuggestionIds: Set<Id<"mergeSuggestions">>,
+  affectedSuggestionIds: Set<Id<"mergeSuggestions">>,
+  now: number,
+): Promise<number> {
+  let resolvedCount = 0;
+
+  // Step 1: actions indexed by contactId === secondaryContactId
+  const actionsBySecondary = await ctx.db
+    .query("actions")
+    .withIndex("by_contact", (q) => q.eq("contactId", secondaryContactId))
+    .collect();
+
+  const handledActionIds = new Set<Id<"actions">>();
+
+  for (const action of actionsBySecondary) {
+    if (action.type === "resolve_contact" && action.status === "pending") {
+      const isThisMergePair =
+        action.secondaryContactId === primaryContactId ||
+        (!!action.mergeSuggestionId &&
+          pairSuggestionIds.has(action.mergeSuggestionId));
+
+      await ctx.db.patch(action._id, isThisMergePair
+        ? { status: "completed", completedAt: now }
+        : { status: "discarded", discardedAt: now });
+      resolvedCount++;
+      handledActionIds.add(action._id);
+      continue;
+    }
+
+    // Non-resolve actions: repoint to the surviving contact
+    await ctx.db.patch(action._id, { contactId: primaryContactId });
+  }
+
+  // Step 2: pending resolve_contact actions that reference the secondary via
+  // secondaryContactId or an affected mergeSuggestionId (not caught above
+  // because their contactId points elsewhere).
+  const pendingResolveActions = await ctx.db
+    .query("actions")
+    .withIndex("by_user_status", (q) =>
+      q.eq("userId", userId).eq("status", "pending"),
+    )
+    .filter((q) => q.eq(q.field("type"), "resolve_contact"))
+    .collect();
+
+  for (const action of pendingResolveActions) {
+    if (handledActionIds.has(action._id)) continue;
+
+    const touchesSecondary =
+      action.contactId === secondaryContactId ||
+      action.secondaryContactId === secondaryContactId ||
+      (!!action.mergeSuggestionId &&
+        affectedSuggestionIds.has(action.mergeSuggestionId));
+    if (!touchesSecondary) continue;
+
+    const isThisMergePair =
+      (action.contactId === primaryContactId &&
+        action.secondaryContactId === secondaryContactId) ||
+      (action.contactId === secondaryContactId &&
+        action.secondaryContactId === primaryContactId) ||
+      (!!action.mergeSuggestionId &&
+        pairSuggestionIds.has(action.mergeSuggestionId));
+
+    await ctx.db.patch(action._id, isThisMergePair
+      ? { status: "completed", completedAt: now }
+      : { status: "discarded", discardedAt: now });
+    resolvedCount++;
+  }
+
+  return resolvedCount;
 }
 
 function buildHandleDedupKey(handleType: string, handle: string): string {
-  const normalized = normalizeHandleForDedup(handleType, handle);
+  const normalized = normalizeHandleValue(handleType, handle);
   return `${handleType}:${normalized || handle.trim()}`;
 }
 
@@ -921,7 +1196,7 @@ function isPlaceholderDisplayName(value: string): boolean {
 
 function getContactQualityScore(
   contact: Doc<"contacts">,
-  handles: Doc<"contactHandles">[]
+  handles: Doc<"contactHandles">[],
 ): number {
   let score = 0;
   if (!isPlaceholderDisplayName(contact.displayName)) score += 100;
@@ -933,7 +1208,7 @@ function getContactQualityScore(
   if (contact.importance !== undefined) score += 4;
 
   const uniqueHandleCount = new Set(
-    handles.map((h) => buildHandleDedupKey(h.handleType, h.handle))
+    handles.map((h) => buildHandleDedupKey(h.handleType, h.handle)),
   ).size;
   score += Math.min(10, uniqueHandleCount);
 
@@ -964,7 +1239,7 @@ export const clearPendingMergeSuggestions = mutation({
     const pendingSuggestions = await ctx.db
       .query("mergeSuggestions")
       .withIndex("by_user_status", (q) =>
-        q.eq("userId", user._id).eq("status", "pending")
+        q.eq("userId", user._id).eq("status", "pending"),
       )
       .take(BATCH_SIZE);
 
@@ -976,7 +1251,7 @@ export const clearPendingMergeSuggestions = mutation({
     const pendingActions = await ctx.db
       .query("actions")
       .withIndex("by_user_status", (q) =>
-        q.eq("userId", user._id).eq("status", "pending")
+        q.eq("userId", user._id).eq("status", "pending"),
       )
       .filter((q) => q.eq(q.field("type"), "resolve_contact"))
       .take(BATCH_SIZE);
@@ -990,7 +1265,7 @@ export const clearPendingMergeSuggestions = mutation({
       await ctx.db.patch(user._id, {
         pendingActionCount: Math.max(
           0,
-          (user.pendingActionCount ?? 0) - pendingActions.length
+          (user.pendingActionCount ?? 0) - pendingActions.length,
         ),
       });
     }

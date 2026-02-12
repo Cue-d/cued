@@ -19,7 +19,7 @@ const crons = cronJobs();
 crons.interval(
   "wake-snoozed-actions",
   { minutes: 15 },
-  internal.actionEvents.wakeSnoozedActions
+  internal.actionEvents.wakeSnoozedActions,
 );
 
 // Mark stale devices as offline (every 30 seconds)
@@ -27,7 +27,7 @@ crons.interval(
 crons.interval(
   "mark-stale-devices-offline",
   { seconds: 30 },
-  internal.presence.markStaleDevicesOffline
+  internal.presence.markStaleDevicesOffline,
 );
 
 // Daily scan for new contacts at 9 PM UTC
@@ -35,15 +35,7 @@ crons.interval(
 crons.daily(
   "daily-eod-contact-scan",
   { hourUTC: 21, minuteUTC: 0 }, // 9 PM UTC (adjust for user timezone in future)
-  internal.actionQueue.scanAllUsersForNewContacts
-);
-
-// Daily scan for contact merge candidates at 6 AM UTC
-// Uses LLM to verify fuzzy name matches before suggesting merges
-crons.daily(
-  "daily-merge-scan",
-  { hourUTC: 6, minuteUTC: 0 }, // 6 AM UTC
-  internal.contactResolution.dailyMergeScanAllUsers
+  internal.actionQueue.scanAllUsersForNewContacts,
 );
 
 export default crons;

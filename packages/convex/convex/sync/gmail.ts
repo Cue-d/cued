@@ -19,6 +19,7 @@ import {
 } from "./shared";
 import { batchFetchConversations, batchFetchMessages } from "./batchUtils";
 import { findContactByHandle } from "./imessage";
+import { scheduleContactMergeCheck } from "../lib/contactMergeScheduling";
 
 // ============================================================================
 // Validators
@@ -37,7 +38,7 @@ export const gmailEmailInput = v.object({
       mimeType: v.string(),
       size: v.number(),
       attachmentId: v.string(),
-    })
+    }),
   ),
   threadId: v.string(), // Gmail thread ID
   /** Gmail label IDs for filtering (e.g., INBOX, SENT, CATEGORY_PROMOTIONS) */
@@ -129,7 +130,9 @@ const EXCLUDE_LABELS = new Set([
  * 2. If email has INBOX or SENT label → include
  * 3. Otherwise → fall through to content-based filtering
  */
-export function shouldFilterByLabel(email: GmailEmailInput): boolean | "fallthrough" {
+export function shouldFilterByLabel(
+  email: GmailEmailInput,
+): boolean | "fallthrough" {
   const labels = email.labelIds ?? [];
 
   // Check for exclude labels first (promotions, social, updates, forums)
@@ -170,7 +173,10 @@ export function shouldFilterGmailEmail(email: GmailEmailInput): boolean {
  * Parse email address from "Name <email@example.com>" format.
  * Also handles simple "email@example.com" format and plus addressing.
  */
-export function parseEmailAddress(fromHeader: string): { name: string; email: string } {
+export function parseEmailAddress(fromHeader: string): {
+  name: string;
+  email: string;
+} {
   // Check for "Name <email>" format with angle brackets
   const bracketMatch = fromHeader.match(/^(.+?)\s*<([^\s<>]+@[^\s<>]+)>$/);
   if (bracketMatch) {
@@ -198,7 +204,7 @@ export function parseEmailAddress(fromHeader: string): { name: string; email: st
  * Handles "Name <email>" and bare email formats.
  */
 function parseRecipientAddresses(
-  recipientsHeader?: string
+  recipientsHeader?: string,
 ): Array<{ name: string; email: string }> {
   if (!recipientsHeader) return [];
 
@@ -218,7 +224,10 @@ function parseRecipientAddresses(
   }
 
   // Remove bracketed parts before scanning for bare emails.
-  const remaining = recipientsHeader.replace(/([^<]*?)<\s*([^\s<>]+@[^\s<>]+)\s*>/g, " ");
+  const remaining = recipientsHeader.replace(
+    /([^<]*?)<\s*([^\s<>]+@[^\s<>]+)\s*>/g,
+    " ",
+  );
   const bareRegex = /([^\s<>,;]+@[^\s<>,;]+)/g;
   let bareMatch: RegExpExecArray | null;
   while ((bareMatch = bareRegex.exec(remaining)) !== null) {
@@ -243,7 +252,7 @@ export async function syncGmailMessagesInternal(
   ctx: MutationCtx,
   userId: Id<"users">,
   emails: GmailEmailInput[],
-  accountEmail?: string
+  accountEmail?: string,
 ) {
   const result = {
     messagesCount: 0,
@@ -275,17 +284,22 @@ export async function syncGmailMessagesInternal(
     ctx,
     userId,
     "gmail",
-    threadIds
+    threadIds,
   );
   const conversationMap = new Map(
-    existingConversations.map((c) => [c.platformConversationId, c._id])
+    existingConversations.map((c) => [c.platformConversationId, c._id]),
   );
 
   // Batch fetch existing messages
   const messageIds = personalEmails.map((e) => e.id);
-  const existingMessages = await batchFetchMessages(ctx, userId, "gmail", messageIds);
+  const existingMessages = await batchFetchMessages(
+    ctx,
+    userId,
+    "gmail",
+    messageIds,
+  );
   const existingMessageSet = new Set(
-    existingMessages.map((m) => m.platformMessageId)
+    existingMessages.map((m) => m.platformMessageId),
   );
 
   // Process each thread's emails
@@ -327,7 +341,7 @@ export async function syncGmailMessagesInternal(
             ctx,
             userId,
             senderParsed.email,
-            senderParsed.name
+            senderParsed.name,
           );
           // Track participant for conversation (only for incoming emails)
           if (senderContactId) {
@@ -341,7 +355,7 @@ export async function syncGmailMessagesInternal(
               ctx,
               userId,
               recipient.email,
-              recipient.name
+              recipient.name,
             );
             if (recipientContactId) {
               threadParticipantIds.add(recipientContactId);
@@ -452,14 +466,14 @@ async function getOrCreateEmailContact(
   ctx: MutationCtx,
   userId: Id<"users">,
   email: string,
-  displayName: string
+  displayName: string,
 ): Promise<Id<"contacts"> | undefined> {
   const result = await getOrCreateContact(
     ctx,
     userId,
     "gmail",
     [{ value: email, type: "email" }],
-    displayName || email
+    displayName || email,
   );
   return result?.contactId;
 }
@@ -487,7 +501,7 @@ export type GoogleContactInput = Infer<typeof googleContactInput>;
 export async function syncGoogleContactsInternal(
   ctx: MutationCtx,
   userId: Id<"users">,
-  contacts: GoogleContactInput[]
+  contacts: GoogleContactInput[],
 ) {
   const result = {
     contactsCount: 0,
@@ -522,7 +536,9 @@ export async function syncGoogleContactsInternal(
       }
       result.handlesCount += syncResult.handlesAdded;
     } catch (e) {
-      result.errors.push(logSyncError("Gmail", "sync contact", contact.name, e));
+      result.errors.push(
+        logSyncError("Gmail", "sync contact", contact.name, e),
+      );
     }
   }
 
@@ -536,7 +552,7 @@ export async function syncGoogleContactsInternal(
 async function handleDeletedGoogleContact(
   ctx: MutationCtx,
   userId: Id<"users">,
-  contact: GoogleContactInput
+  contact: GoogleContactInput,
 ): Promise<boolean> {
   // Collect all handles to find the contact
   const allHandles = [
@@ -548,7 +564,7 @@ async function handleDeletedGoogleContact(
     const existingHandle = await ctx.db
       .query("contactHandles")
       .withIndex("by_user_handle", (q) =>
-        q.eq("userId", userId).eq("handle", handle)
+        q.eq("userId", userId).eq("handle", handle),
       )
       .first();
 
@@ -557,7 +573,9 @@ async function handleDeletedGoogleContact(
       // We identify Gmail handles by checking if they're email type
       const handlesByContact = await ctx.db
         .query("contactHandles")
-        .withIndex("by_contact", (q) => q.eq("contactId", existingHandle.contactId))
+        .withIndex("by_contact", (q) =>
+          q.eq("contactId", existingHandle.contactId),
+        )
         .collect();
 
       for (const h of handlesByContact) {
@@ -570,7 +588,9 @@ async function handleDeletedGoogleContact(
       // Check if contact has any remaining handles
       const remainingHandles = await ctx.db
         .query("contactHandles")
-        .withIndex("by_contact", (q) => q.eq("contactId", existingHandle.contactId))
+        .withIndex("by_contact", (q) =>
+          q.eq("contactId", existingHandle.contactId),
+        )
         .first();
 
       // If no handles remain, delete the contact too
@@ -593,7 +613,7 @@ async function handleDeletedGoogleContact(
 async function upsertGoogleContact(
   ctx: MutationCtx,
   userId: Id<"users">,
-  contact: GoogleContactInput
+  contact: GoogleContactInput,
 ): Promise<{ isNew: boolean; handlesAdded: number }> {
   // Collect all normalized handles
   const handles: Array<{ value: string; type: "phone" | "email" }> = [
@@ -619,7 +639,8 @@ async function upsertGoogleContact(
     displayName: string;
     company?: string;
   } = {
-    displayName: contact.name || contact.emails[0] || contact.phones[0] || "Unknown",
+    displayName:
+      contact.name || contact.emails[0] || contact.phones[0] || "Unknown",
   };
 
   // Only set company if we have one
@@ -627,6 +648,7 @@ async function upsertGoogleContact(
     contactData.company = contact.company;
   }
 
+  let displayNameUpdated = false;
   if (contactId) {
     // Update existing contact with Google data (only if we have better info)
     const existingContact = await ctx.db.get(contactId);
@@ -635,7 +657,13 @@ async function upsertGoogleContact(
 
       // Update display name if current is placeholder and we have a better one
       const primaryHandle = handles[0]?.value ?? existingContact.displayName;
-      if (shouldUpdateDisplayName(existingContact.displayName, contact.name, primaryHandle)) {
+      if (
+        shouldUpdateDisplayName(
+          existingContact.displayName,
+          contact.name,
+          primaryHandle,
+        )
+      ) {
         updates.displayName = contact.name;
       }
 
@@ -646,6 +674,7 @@ async function upsertGoogleContact(
 
       if (Object.keys(updates).length > 0) {
         await ctx.db.patch(contactId, updates);
+        displayNameUpdated = updates.displayName !== undefined;
       }
     }
   } else {
@@ -655,11 +684,12 @@ async function upsertGoogleContact(
 
   // Add missing handles (link to existing contact)
   let handlesAdded = 0;
+  let handlesRelinked = false;
   for (const handle of handles) {
     const existing = await ctx.db
       .query("contactHandles")
       .withIndex("by_user_handle", (q) =>
-        q.eq("userId", userId).eq("handle", handle.value)
+        q.eq("userId", userId).eq("handle", handle.value),
       )
       .first();
 
@@ -676,7 +706,12 @@ async function upsertGoogleContact(
     } else if (existing.contactId !== contactId) {
       // Handle exists but linked to different contact - update to primary contact
       await ctx.db.patch(existing._id, { contactId });
+      handlesRelinked = true;
     }
+  }
+
+  if (isNew || displayNameUpdated || handlesAdded > 0 || handlesRelinked) {
+    await scheduleContactMergeCheck(ctx, userId, contactId);
   }
 
   return { isNew, handlesAdded };

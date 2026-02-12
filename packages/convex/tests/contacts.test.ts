@@ -6,7 +6,7 @@
  */
 
 import { convexTest } from "convex-test";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import schema from "../convex/schema";
 import { modules } from "./test.setup";
 import {
@@ -19,6 +19,9 @@ import {
   createTestIdentity,
 } from "./helpers.util";
 import { api } from "../convex/_generated/api";
+import { useSchedulerCleanup } from "./schedulerCleanup.util";
+
+const { trackTest } = useSchedulerCleanup();
 
 /**
  * Helper to set up an authenticated test environment.
@@ -30,10 +33,13 @@ async function setupAuthenticatedUser(t: ReturnType<typeof convexTest>) {
 
   // Create user in database with matching workosUserId
   const userId = await t.run(async (ctx) => {
-    return ctx.db.insert("users", createTestUserData({
-      workosUserId: identity.subject,
-      pendingActionCount: 0,
-    }));
+    return ctx.db.insert(
+      "users",
+      createTestUserData({
+        workosUserId: identity.subject,
+        pendingActionCount: 0,
+      }),
+    );
   });
 
   return { asUser, userId, identity };
@@ -42,7 +48,7 @@ async function setupAuthenticatedUser(t: ReturnType<typeof convexTest>) {
 describe("contacts", () => {
   describe("getContacts query", () => {
     it("returns empty array for unauthenticated user", async () => {
-      const t = convexTest(schema, modules);
+      const t = trackTest(convexTest(schema, modules));
 
       const result = await t.query(api.contacts.getContacts, {});
 
@@ -50,17 +56,23 @@ describe("contacts", () => {
     });
 
     it("returns contacts for authenticated user", async () => {
-      const t = convexTest(schema, modules);
+      const t = trackTest(convexTest(schema, modules));
       const { asUser, userId } = await setupAuthenticatedUser(t);
 
       // Create contacts
       await t.run(async (ctx) => {
-        await ctx.db.insert("contacts", createTestContactData(userId, {
-          displayName: "Alice Smith",
-        }));
-        await ctx.db.insert("contacts", createTestContactData(userId, {
-          displayName: "Bob Jones",
-        }));
+        await ctx.db.insert(
+          "contacts",
+          createTestContactData(userId, {
+            displayName: "Alice Smith",
+          }),
+        );
+        await ctx.db.insert(
+          "contacts",
+          createTestContactData(userId, {
+            displayName: "Bob Jones",
+          }),
+        );
       });
 
       const result = await asUser.query(api.contacts.getContacts, {});
@@ -69,19 +81,28 @@ describe("contacts", () => {
     });
 
     it("returns contacts sorted alphabetically by displayName", async () => {
-      const t = convexTest(schema, modules);
+      const t = trackTest(convexTest(schema, modules));
       const { asUser, userId } = await setupAuthenticatedUser(t);
 
       await t.run(async (ctx) => {
-        await ctx.db.insert("contacts", createTestContactData(userId, {
-          displayName: "Zara",
-        }));
-        await ctx.db.insert("contacts", createTestContactData(userId, {
-          displayName: "Alice",
-        }));
-        await ctx.db.insert("contacts", createTestContactData(userId, {
-          displayName: "Mike",
-        }));
+        await ctx.db.insert(
+          "contacts",
+          createTestContactData(userId, {
+            displayName: "Zara",
+          }),
+        );
+        await ctx.db.insert(
+          "contacts",
+          createTestContactData(userId, {
+            displayName: "Alice",
+          }),
+        );
+        await ctx.db.insert(
+          "contacts",
+          createTestContactData(userId, {
+            displayName: "Mike",
+          }),
+        );
       });
 
       const result = await asUser.query(api.contacts.getContacts, {});
@@ -93,25 +114,34 @@ describe("contacts", () => {
     });
 
     it("includes handles for each contact", async () => {
-      const t = convexTest(schema, modules);
+      const t = trackTest(convexTest(schema, modules));
       const { asUser, userId } = await setupAuthenticatedUser(t);
 
       await t.run(async (ctx) => {
-        const contactId = await ctx.db.insert("contacts", createTestContactData(userId, {
-          displayName: "Alice Smith",
-        }));
+        const contactId = await ctx.db.insert(
+          "contacts",
+          createTestContactData(userId, {
+            displayName: "Alice Smith",
+          }),
+        );
 
         // Add multiple handles
-        await ctx.db.insert("contactHandles", createTestContactHandleData(userId, contactId, {
-          handleType: "phone",
-          handle: "+15551234567",
-          platform: "imessage",
-        }));
-        await ctx.db.insert("contactHandles", createTestContactHandleData(userId, contactId, {
-          handleType: "email",
-          handle: "alice@example.com",
-          platform: "gmail",
-        }));
+        await ctx.db.insert(
+          "contactHandles",
+          createTestContactHandleData(userId, contactId, {
+            handleType: "phone",
+            handle: "+15551234567",
+            platform: "imessage",
+          }),
+        );
+        await ctx.db.insert(
+          "contactHandles",
+          createTestContactHandleData(userId, contactId, {
+            handleType: "email",
+            handle: "alice@example.com",
+            platform: "gmail",
+          }),
+        );
       });
 
       const result = await asUser.query(api.contacts.getContacts, {});
@@ -121,19 +151,25 @@ describe("contacts", () => {
       expect(result.contacts[0].handles).toEqual(
         expect.arrayContaining([
           expect.objectContaining({ type: "phone", value: "+15551234567" }),
-          expect.objectContaining({ type: "email", value: "alice@example.com" }),
-        ])
+          expect.objectContaining({
+            type: "email",
+            value: "alice@example.com",
+          }),
+        ]),
       );
     });
 
     it("excludes dismissed contacts", async () => {
-      const t = convexTest(schema, modules);
+      const t = trackTest(convexTest(schema, modules));
       const { asUser, userId } = await setupAuthenticatedUser(t);
 
       await t.run(async (ctx) => {
-        await ctx.db.insert("contacts", createTestContactData(userId, {
-          displayName: "Active Contact",
-        }));
+        await ctx.db.insert(
+          "contacts",
+          createTestContactData(userId, {
+            displayName: "Active Contact",
+          }),
+        );
         await ctx.db.insert("contacts", {
           ...createTestContactData(userId, {
             displayName: "Dismissed Contact",
@@ -149,15 +185,18 @@ describe("contacts", () => {
     });
 
     it("supports cursor-based pagination", async () => {
-      const t = convexTest(schema, modules);
+      const t = trackTest(convexTest(schema, modules));
       const { asUser, userId } = await setupAuthenticatedUser(t);
 
       await t.run(async (ctx) => {
         // Create 5 contacts
         for (const name of ["Alice", "Bob", "Carol", "David", "Eve"]) {
-          await ctx.db.insert("contacts", createTestContactData(userId, {
-            displayName: name,
-          }));
+          await ctx.db.insert(
+            "contacts",
+            createTestContactData(userId, {
+              displayName: name,
+            }),
+          );
         }
       });
 
@@ -188,19 +227,28 @@ describe("contacts", () => {
     });
 
     it("supports search by displayName", async () => {
-      const t = convexTest(schema, modules);
+      const t = trackTest(convexTest(schema, modules));
       const { asUser, userId } = await setupAuthenticatedUser(t);
 
       await t.run(async (ctx) => {
-        await ctx.db.insert("contacts", createTestContactData(userId, {
-          displayName: "Alice Smith",
-        }));
-        await ctx.db.insert("contacts", createTestContactData(userId, {
-          displayName: "Bob Johnson",
-        }));
-        await ctx.db.insert("contacts", createTestContactData(userId, {
-          displayName: "Alice Cooper",
-        }));
+        await ctx.db.insert(
+          "contacts",
+          createTestContactData(userId, {
+            displayName: "Alice Smith",
+          }),
+        );
+        await ctx.db.insert(
+          "contacts",
+          createTestContactData(userId, {
+            displayName: "Bob Johnson",
+          }),
+        );
+        await ctx.db.insert(
+          "contacts",
+          createTestContactData(userId, {
+            displayName: "Alice Cooper",
+          }),
+        );
       });
 
       const result = await asUser.query(api.contacts.getContacts, {
@@ -208,18 +256,23 @@ describe("contacts", () => {
       });
 
       expect(result.contacts).toHaveLength(2);
-      expect(result.contacts.every((c) => c.displayName.includes("Alice"))).toBe(true);
+      expect(
+        result.contacts.every((c) => c.displayName.includes("Alice")),
+      ).toBe(true);
     });
 
     it("respects limit parameter", async () => {
-      const t = convexTest(schema, modules);
+      const t = trackTest(convexTest(schema, modules));
       const { asUser, userId } = await setupAuthenticatedUser(t);
 
       await t.run(async (ctx) => {
         for (let i = 0; i < 10; i++) {
-          await ctx.db.insert("contacts", createTestContactData(userId, {
-            displayName: `Contact ${i}`,
-          }));
+          await ctx.db.insert(
+            "contacts",
+            createTestContactData(userId, {
+              displayName: `Contact ${i}`,
+            }),
+          );
         }
       });
 
@@ -232,7 +285,7 @@ describe("contacts", () => {
 
   describe("getContact query", () => {
     it("returns null for unauthenticated user", async () => {
-      const t = convexTest(schema, modules);
+      const t = trackTest(convexTest(schema, modules));
 
       // Create a contact
       const contactId = await t.run(async (ctx) => {
@@ -246,20 +299,26 @@ describe("contacts", () => {
     });
 
     it("returns contact with handles for authenticated user", async () => {
-      const t = convexTest(schema, modules);
+      const t = trackTest(convexTest(schema, modules));
       const { asUser, userId } = await setupAuthenticatedUser(t);
 
       const contactId = await t.run(async (ctx) => {
-        const contactId = await ctx.db.insert("contacts", createTestContactData(userId, {
-          displayName: "John Doe",
-          company: "Acme Corp",
-          notes: "Met at conference",
-        }));
+        const contactId = await ctx.db.insert(
+          "contacts",
+          createTestContactData(userId, {
+            displayName: "John Doe",
+            company: "Acme Corp",
+            notes: "Met at conference",
+          }),
+        );
 
-        await ctx.db.insert("contactHandles", createTestContactHandleData(userId, contactId, {
-          handleType: "phone",
-          handle: "+15551234567",
-        }));
+        await ctx.db.insert(
+          "contactHandles",
+          createTestContactHandleData(userId, contactId, {
+            handleType: "phone",
+            handle: "+15551234567",
+          }),
+        );
 
         return contactId;
       });
@@ -272,19 +331,22 @@ describe("contacts", () => {
       expect(result?.notes).toBe("Met at conference");
       expect(result?.handles).toHaveLength(1);
       expect(result?.handles[0]).toEqual(
-        expect.objectContaining({ type: "phone", value: "+15551234567" })
+        expect.objectContaining({ type: "phone", value: "+15551234567" }),
       );
     });
 
     it("returns null for contact belonging to different user", async () => {
-      const t = convexTest(schema, modules);
+      const t = trackTest(convexTest(schema, modules));
       const { asUser } = await setupAuthenticatedUser(t);
 
       // Create contact for a different user
       const contactId = await t.run(async (ctx) => {
-        const otherUserId = await ctx.db.insert("users", createTestUserData({
-          workosUserId: "other_user_id",
-        }));
+        const otherUserId = await ctx.db.insert(
+          "users",
+          createTestUserData({
+            workosUserId: "other_user_id",
+          }),
+        );
         return ctx.db.insert("contacts", createTestContactData(otherUserId));
       });
 
@@ -296,7 +358,7 @@ describe("contacts", () => {
 
   describe("updateContact mutation", () => {
     it("throws for unauthenticated user", async () => {
-      const t = convexTest(schema, modules);
+      const t = trackTest(convexTest(schema, modules));
 
       const contactId = await t.run(async (ctx) => {
         const userId = await ctx.db.insert("users", createTestUserData());
@@ -307,18 +369,21 @@ describe("contacts", () => {
         t.mutation(api.contacts.updateContact, {
           contactId,
           displayName: "Updated Name",
-        })
+        }),
       ).rejects.toThrow("Unauthorized");
     });
 
     it("updates contact displayName", async () => {
-      const t = convexTest(schema, modules);
+      const t = trackTest(convexTest(schema, modules));
       const { asUser, userId } = await setupAuthenticatedUser(t);
 
       const contactId = await t.run(async (ctx) => {
-        return ctx.db.insert("contacts", createTestContactData(userId, {
-          displayName: "Original Name",
-        }));
+        return ctx.db.insert(
+          "contacts",
+          createTestContactData(userId, {
+            displayName: "Original Name",
+          }),
+        );
       });
 
       const result = await asUser.mutation(api.contacts.updateContact, {
@@ -333,13 +398,16 @@ describe("contacts", () => {
     });
 
     it("updates contact company", async () => {
-      const t = convexTest(schema, modules);
+      const t = trackTest(convexTest(schema, modules));
       const { asUser, userId } = await setupAuthenticatedUser(t);
 
       const contactId = await t.run(async (ctx) => {
-        return ctx.db.insert("contacts", createTestContactData(userId, {
-          displayName: "John Doe",
-        }));
+        return ctx.db.insert(
+          "contacts",
+          createTestContactData(userId, {
+            displayName: "John Doe",
+          }),
+        );
       });
 
       const result = await asUser.mutation(api.contacts.updateContact, {
@@ -354,7 +422,7 @@ describe("contacts", () => {
     });
 
     it("updates contact notes", async () => {
-      const t = convexTest(schema, modules);
+      const t = trackTest(convexTest(schema, modules));
       const { asUser, userId } = await setupAuthenticatedUser(t);
 
       const contactId = await t.run(async (ctx) => {
@@ -373,13 +441,16 @@ describe("contacts", () => {
     });
 
     it("updates contact importance", async () => {
-      const t = convexTest(schema, modules);
+      const t = trackTest(convexTest(schema, modules));
       const { asUser, userId } = await setupAuthenticatedUser(t);
 
       const contactId = await t.run(async (ctx) => {
-        return ctx.db.insert("contacts", createTestContactData(userId, {
-          importance: 0,
-        }));
+        return ctx.db.insert(
+          "contacts",
+          createTestContactData(userId, {
+            importance: 0,
+          }),
+        );
       });
 
       const result = await asUser.mutation(api.contacts.updateContact, {
@@ -394,13 +465,16 @@ describe("contacts", () => {
     });
 
     it("updates contact tags", async () => {
-      const t = convexTest(schema, modules);
+      const t = trackTest(convexTest(schema, modules));
       const { asUser, userId } = await setupAuthenticatedUser(t);
 
       const contactId = await t.run(async (ctx) => {
-        return ctx.db.insert("contacts", createTestContactData(userId, {
-          tags: ["old-tag"],
-        }));
+        return ctx.db.insert(
+          "contacts",
+          createTestContactData(userId, {
+            tags: ["old-tag"],
+          }),
+        );
       });
 
       const result = await asUser.mutation(api.contacts.updateContact, {
@@ -415,12 +489,15 @@ describe("contacts", () => {
     });
 
     it("throws when contact not found", async () => {
-      const t = convexTest(schema, modules);
+      const t = trackTest(convexTest(schema, modules));
       const { asUser, userId } = await setupAuthenticatedUser(t);
 
       // Create and delete a contact to get an invalid ID
       const fakeContactId = await t.run(async (ctx) => {
-        const id = await ctx.db.insert("contacts", createTestContactData(userId));
+        const id = await ctx.db.insert(
+          "contacts",
+          createTestContactData(userId),
+        );
         await ctx.db.delete(id);
         return id;
       });
@@ -429,19 +506,22 @@ describe("contacts", () => {
         asUser.mutation(api.contacts.updateContact, {
           contactId: fakeContactId,
           displayName: "Test",
-        })
+        }),
       ).rejects.toThrow("Contact not found");
     });
 
     it("throws when contact belongs to different user", async () => {
-      const t = convexTest(schema, modules);
+      const t = trackTest(convexTest(schema, modules));
       const { asUser } = await setupAuthenticatedUser(t);
 
       // Create contact for a different user
       const contactId = await t.run(async (ctx) => {
-        const otherUserId = await ctx.db.insert("users", createTestUserData({
-          workosUserId: "other_user_id",
-        }));
+        const otherUserId = await ctx.db.insert(
+          "users",
+          createTestUserData({
+            workosUserId: "other_user_id",
+          }),
+        );
         return ctx.db.insert("contacts", createTestContactData(otherUserId));
       });
 
@@ -449,23 +529,147 @@ describe("contacts", () => {
         asUser.mutation(api.contacts.updateContact, {
           contactId,
           displayName: "Hacked",
-        })
+        }),
       ).rejects.toThrow("Contact not found");
+    });
+  });
+
+  describe("contact handle mutations", () => {
+    it("addContactHandle normalizes values and triggers merge detection", async () => {
+      const t = trackTest(convexTest(schema, modules));
+      const { asUser, userId } = await setupAuthenticatedUser(t);
+
+      const contactA = await t.run(async (ctx) => {
+        const c1 = await ctx.db.insert(
+          "contacts",
+          createTestContactData(userId, {
+            displayName: "Contact A",
+          }),
+        );
+        const c2 = await ctx.db.insert(
+          "contacts",
+          createTestContactData(userId, {
+            displayName: "Contact B",
+          }),
+        );
+
+        await ctx.db.insert(
+          "contactHandles",
+          createTestContactHandleData(userId, c2, {
+            handleType: "email",
+            handle: "duplicate@example.com",
+            platform: "gmail",
+          }),
+        );
+
+        return c1;
+      });
+
+      const addResult = await asUser.mutation(api.contacts.addContactHandle, {
+        contactId: contactA,
+        handleType: "email",
+        handle: "Duplicate@Example.com",
+        platform: "gmail",
+      });
+
+      expect(addResult.success).toBe(true);
+      expect(addResult.created).toBe(true);
+
+      await t.finishAllScheduledFunctions(() => vi.runOnlyPendingTimers());
+
+      await t.run(async (ctx) => {
+        const contacts = await ctx.db
+          .query("contacts")
+          .withIndex("by_user", (q) => q.eq("userId", userId))
+          .collect();
+        expect(contacts).toHaveLength(1);
+      });
+    });
+
+    it("updateContactHandle updates and normalizes existing handle", async () => {
+      const t = trackTest(convexTest(schema, modules));
+      const { asUser, userId } = await setupAuthenticatedUser(t);
+
+      const handleId = await t.run(async (ctx) => {
+        const contactId = await ctx.db.insert(
+          "contacts",
+          createTestContactData(userId, {
+            displayName: "Handle Test",
+          }),
+        );
+
+        return ctx.db.insert(
+          "contactHandles",
+          createTestContactHandleData(userId, contactId, {
+            handleType: "phone",
+            handle: "(555) 123-4567",
+            platform: "imessage",
+          }),
+        );
+      });
+
+      const result = await asUser.mutation(api.contacts.updateContactHandle, {
+        handleId,
+        handle: "+1 (555) 123-9999",
+      });
+
+      expect(result.success).toBe(true);
+      expect(result.changed).toBe(true);
+
+      const updated = await t.run(async (ctx) => ctx.db.get(handleId));
+      expect(updated?.handle).toBe("+15551239999");
+    });
+
+    it("removeContactHandle deletes a handle", async () => {
+      const t = trackTest(convexTest(schema, modules));
+      const { asUser, userId } = await setupAuthenticatedUser(t);
+
+      const handleId = await t.run(async (ctx) => {
+        const contactId = await ctx.db.insert(
+          "contacts",
+          createTestContactData(userId, {
+            displayName: "Delete Handle Test",
+          }),
+        );
+
+        return ctx.db.insert(
+          "contactHandles",
+          createTestContactHandleData(userId, contactId, {
+            handleType: "email",
+            handle: "delete.me@example.com",
+            platform: "gmail",
+          }),
+        );
+      });
+
+      const result = await asUser.mutation(api.contacts.removeContactHandle, {
+        handleId,
+      });
+      expect(result.success).toBe(true);
+
+      const deleted = await t.run(async (ctx) => ctx.db.get(handleId));
+      expect(deleted).toBeNull();
     });
   });
 
   describe("mergeContacts mutation", () => {
     it("throws for unauthenticated user", async () => {
-      const t = convexTest(schema, modules);
+      const t = trackTest(convexTest(schema, modules));
 
       const { primaryId, secondaryId } = await t.run(async (ctx) => {
         const userId = await ctx.db.insert("users", createTestUserData());
-        const primaryId = await ctx.db.insert("contacts", createTestContactData(userId, {
-          displayName: "Primary",
-        }));
-        const secondaryId = await ctx.db.insert("contacts", createTestContactData(userId, {
-          displayName: "Secondary",
-        }));
+        const primaryId = await ctx.db.insert(
+          "contacts",
+          createTestContactData(userId, {
+            displayName: "Primary",
+          }),
+        );
+        const secondaryId = await ctx.db.insert(
+          "contacts",
+          createTestContactData(userId, {
+            displayName: "Secondary",
+          }),
+        );
         return { primaryId, secondaryId };
       });
 
@@ -473,34 +677,49 @@ describe("contacts", () => {
         t.mutation(api.contacts.mergeContacts, {
           primaryContactId: primaryId,
           secondaryContactId: secondaryId,
-        })
+        }),
       ).rejects.toThrow("Unauthorized");
     });
 
     it("moves handles from secondary to primary contact", async () => {
-      const t = convexTest(schema, modules);
+      const t = trackTest(convexTest(schema, modules));
       const { asUser, userId } = await setupAuthenticatedUser(t);
 
       const { primaryId, secondaryId } = await t.run(async (ctx) => {
-        const primaryId = await ctx.db.insert("contacts", createTestContactData(userId, {
-          displayName: "Primary Contact",
-        }));
-        const secondaryId = await ctx.db.insert("contacts", createTestContactData(userId, {
-          displayName: "Secondary Contact",
-        }));
+        const primaryId = await ctx.db.insert(
+          "contacts",
+          createTestContactData(userId, {
+            displayName: "Primary Contact",
+          }),
+        );
+        const secondaryId = await ctx.db.insert(
+          "contacts",
+          createTestContactData(userId, {
+            displayName: "Secondary Contact",
+          }),
+        );
 
         // Add handles to both
-        await ctx.db.insert("contactHandles", createTestContactHandleData(userId, primaryId, {
-          handle: "+15551111111",
-        }));
-        await ctx.db.insert("contactHandles", createTestContactHandleData(userId, secondaryId, {
-          handle: "+15552222222",
-        }));
-        await ctx.db.insert("contactHandles", createTestContactHandleData(userId, secondaryId, {
-          handleType: "email",
-          handle: "secondary@example.com",
-          platform: "gmail",
-        }));
+        await ctx.db.insert(
+          "contactHandles",
+          createTestContactHandleData(userId, primaryId, {
+            handle: "+15551111111",
+          }),
+        );
+        await ctx.db.insert(
+          "contactHandles",
+          createTestContactHandleData(userId, secondaryId, {
+            handle: "+15552222222",
+          }),
+        );
+        await ctx.db.insert(
+          "contactHandles",
+          createTestContactHandleData(userId, secondaryId, {
+            handleType: "email",
+            handle: "secondary@example.com",
+            platform: "gmail",
+          }),
+        );
 
         return { primaryId, secondaryId };
       });
@@ -528,24 +747,35 @@ describe("contacts", () => {
     });
 
     it("updates conversations referencing secondary contact", async () => {
-      const t = convexTest(schema, modules);
+      const t = trackTest(convexTest(schema, modules));
       const { asUser, userId } = await setupAuthenticatedUser(t);
 
-      const { primaryId, secondaryId, conversationId } = await t.run(async (ctx) => {
-        const primaryId = await ctx.db.insert("contacts", createTestContactData(userId, {
-          displayName: "Primary",
-        }));
-        const secondaryId = await ctx.db.insert("contacts", createTestContactData(userId, {
-          displayName: "Secondary",
-        }));
+      const { primaryId, secondaryId, conversationId } = await t.run(
+        async (ctx) => {
+          const primaryId = await ctx.db.insert(
+            "contacts",
+            createTestContactData(userId, {
+              displayName: "Primary",
+            }),
+          );
+          const secondaryId = await ctx.db.insert(
+            "contacts",
+            createTestContactData(userId, {
+              displayName: "Secondary",
+            }),
+          );
 
-        // Create conversation with secondary contact
-        const conversationId = await ctx.db.insert("conversations", createTestConversationData(userId, {
-          participantContactIds: [secondaryId],
-        }));
+          // Create conversation with secondary contact
+          const conversationId = await ctx.db.insert(
+            "conversations",
+            createTestConversationData(userId, {
+              participantContactIds: [secondaryId],
+            }),
+          );
 
-        return { primaryId, secondaryId, conversationId };
-      });
+          return { primaryId, secondaryId, conversationId };
+        },
+      );
 
       const result = await asUser.mutation(api.contacts.mergeContacts, {
         primaryContactId: primaryId,
@@ -556,30 +786,44 @@ describe("contacts", () => {
       expect(result.conversationsUpdatedCount).toBe(1);
 
       // Verify conversation now references primary
-      const conversation = await t.run(async (ctx) => ctx.db.get(conversationId));
+      const conversation = await t.run(async (ctx) =>
+        ctx.db.get(conversationId),
+      );
       expect(conversation?.participantContactIds).toContain(primaryId);
       expect(conversation?.participantContactIds).not.toContain(secondaryId);
     });
 
     it("updates messages referencing secondary contact", async () => {
-      const t = convexTest(schema, modules);
+      const t = trackTest(convexTest(schema, modules));
       const { asUser, userId } = await setupAuthenticatedUser(t);
 
       const { primaryId, secondaryId, messageId } = await t.run(async (ctx) => {
-        const primaryId = await ctx.db.insert("contacts", createTestContactData(userId, {
-          displayName: "Primary",
-        }));
-        const secondaryId = await ctx.db.insert("contacts", createTestContactData(userId, {
-          displayName: "Secondary",
-        }));
+        const primaryId = await ctx.db.insert(
+          "contacts",
+          createTestContactData(userId, {
+            displayName: "Primary",
+          }),
+        );
+        const secondaryId = await ctx.db.insert(
+          "contacts",
+          createTestContactData(userId, {
+            displayName: "Secondary",
+          }),
+        );
 
-        const conversationId = await ctx.db.insert("conversations", createTestConversationData(userId));
+        const conversationId = await ctx.db.insert(
+          "conversations",
+          createTestConversationData(userId),
+        );
 
         // Create message from secondary contact
-        const messageId = await ctx.db.insert("messages", createTestMessageData(userId, conversationId, {
-          senderContactId: secondaryId,
-          content: "Hello from secondary",
-        }));
+        const messageId = await ctx.db.insert(
+          "messages",
+          createTestMessageData(userId, conversationId, {
+            senderContactId: secondaryId,
+            content: "Hello from secondary",
+          }),
+        );
 
         return { primaryId, secondaryId, messageId };
       });
@@ -598,20 +842,26 @@ describe("contacts", () => {
     });
 
     it("merges metadata - fills gaps from secondary", async () => {
-      const t = convexTest(schema, modules);
+      const t = trackTest(convexTest(schema, modules));
       const { asUser, userId } = await setupAuthenticatedUser(t);
 
       const { primaryId, secondaryId } = await t.run(async (ctx) => {
-        const primaryId = await ctx.db.insert("contacts", createTestContactData(userId, {
-          displayName: "Primary",
-          company: undefined, // No company
-          notes: "Primary notes",
-        }));
-        const secondaryId = await ctx.db.insert("contacts", createTestContactData(userId, {
-          displayName: "Secondary",
-          company: "Secondary Co",
-          notes: "Secondary notes",
-        }));
+        const primaryId = await ctx.db.insert(
+          "contacts",
+          createTestContactData(userId, {
+            displayName: "Primary",
+            company: undefined, // No company
+            notes: "Primary notes",
+          }),
+        );
+        const secondaryId = await ctx.db.insert(
+          "contacts",
+          createTestContactData(userId, {
+            displayName: "Secondary",
+            company: "Secondary Co",
+            notes: "Secondary notes",
+          }),
+        );
 
         return { primaryId, secondaryId };
       });
@@ -629,14 +879,20 @@ describe("contacts", () => {
     });
 
     it("throws when primary contact not found", async () => {
-      const t = convexTest(schema, modules);
+      const t = trackTest(convexTest(schema, modules));
       const { asUser, userId } = await setupAuthenticatedUser(t);
 
       const { fakeId, secondaryId } = await t.run(async (ctx) => {
-        const fakeId = await ctx.db.insert("contacts", createTestContactData(userId));
+        const fakeId = await ctx.db.insert(
+          "contacts",
+          createTestContactData(userId),
+        );
         await ctx.db.delete(fakeId);
 
-        const secondaryId = await ctx.db.insert("contacts", createTestContactData(userId));
+        const secondaryId = await ctx.db.insert(
+          "contacts",
+          createTestContactData(userId),
+        );
         return { fakeId, secondaryId };
       });
 
@@ -644,18 +900,24 @@ describe("contacts", () => {
         asUser.mutation(api.contacts.mergeContacts, {
           primaryContactId: fakeId,
           secondaryContactId: secondaryId,
-        })
+        }),
       ).rejects.toThrow("Primary contact not found");
     });
 
     it("throws when secondary contact not found", async () => {
-      const t = convexTest(schema, modules);
+      const t = trackTest(convexTest(schema, modules));
       const { asUser, userId } = await setupAuthenticatedUser(t);
 
       const { primaryId, fakeId } = await t.run(async (ctx) => {
-        const primaryId = await ctx.db.insert("contacts", createTestContactData(userId));
+        const primaryId = await ctx.db.insert(
+          "contacts",
+          createTestContactData(userId),
+        );
 
-        const fakeId = await ctx.db.insert("contacts", createTestContactData(userId));
+        const fakeId = await ctx.db.insert(
+          "contacts",
+          createTestContactData(userId),
+        );
         await ctx.db.delete(fakeId);
 
         return { primaryId, fakeId };
@@ -665,14 +927,14 @@ describe("contacts", () => {
         asUser.mutation(api.contacts.mergeContacts, {
           primaryContactId: primaryId,
           secondaryContactId: fakeId,
-        })
+        }),
       ).rejects.toThrow("Secondary contact not found");
     });
   });
 
   describe("getPendingMergeSuggestions query", () => {
     it("returns empty for unauthenticated user", async () => {
-      const t = convexTest(schema, modules);
+      const t = trackTest(convexTest(schema, modules));
 
       const result = await t.query(api.contacts.getPendingMergeSuggestions, {});
 
@@ -680,16 +942,22 @@ describe("contacts", () => {
     });
 
     it("returns pending merge suggestions with contact details", async () => {
-      const t = convexTest(schema, modules);
+      const t = trackTest(convexTest(schema, modules));
       const { asUser, userId } = await setupAuthenticatedUser(t);
 
       await t.run(async (ctx) => {
-        const contact1Id = await ctx.db.insert("contacts", createTestContactData(userId, {
-          displayName: "John Doe",
-        }));
-        const contact2Id = await ctx.db.insert("contacts", createTestContactData(userId, {
-          displayName: "John D",
-        }));
+        const contact1Id = await ctx.db.insert(
+          "contacts",
+          createTestContactData(userId, {
+            displayName: "John Doe",
+          }),
+        );
+        const contact2Id = await ctx.db.insert(
+          "contacts",
+          createTestContactData(userId, {
+            displayName: "John D",
+          }),
+        );
 
         await ctx.db.insert("mergeSuggestions", {
           userId,
@@ -702,7 +970,10 @@ describe("contacts", () => {
         });
       });
 
-      const result = await asUser.query(api.contacts.getPendingMergeSuggestions, {});
+      const result = await asUser.query(
+        api.contacts.getPendingMergeSuggestions,
+        {},
+      );
 
       expect(result.suggestions).toHaveLength(1);
       expect(result.suggestions[0].confidence).toBe(0.85);
@@ -711,14 +982,26 @@ describe("contacts", () => {
     });
 
     it("excludes approved and rejected suggestions", async () => {
-      const t = convexTest(schema, modules);
+      const t = trackTest(convexTest(schema, modules));
       const { asUser, userId } = await setupAuthenticatedUser(t);
 
       await t.run(async (ctx) => {
-        const contact1Id = await ctx.db.insert("contacts", createTestContactData(userId));
-        const contact2Id = await ctx.db.insert("contacts", createTestContactData(userId));
-        const contact3Id = await ctx.db.insert("contacts", createTestContactData(userId));
-        const contact4Id = await ctx.db.insert("contacts", createTestContactData(userId));
+        const contact1Id = await ctx.db.insert(
+          "contacts",
+          createTestContactData(userId),
+        );
+        const contact2Id = await ctx.db.insert(
+          "contacts",
+          createTestContactData(userId),
+        );
+        const contact3Id = await ctx.db.insert(
+          "contacts",
+          createTestContactData(userId),
+        );
+        const contact4Id = await ctx.db.insert(
+          "contacts",
+          createTestContactData(userId),
+        );
 
         // Pending
         await ctx.db.insert("mergeSuggestions", {
@@ -754,21 +1037,30 @@ describe("contacts", () => {
         });
       });
 
-      const result = await asUser.query(api.contacts.getPendingMergeSuggestions, {});
+      const result = await asUser.query(
+        api.contacts.getPendingMergeSuggestions,
+        {},
+      );
 
       expect(result.suggestions).toHaveLength(1);
       expect(result.suggestions[0].status).toBe("pending");
     });
 
     it("respects limit parameter", async () => {
-      const t = convexTest(schema, modules);
+      const t = trackTest(convexTest(schema, modules));
       const { asUser, userId } = await setupAuthenticatedUser(t);
 
       await t.run(async (ctx) => {
         // Create 5 merge suggestions
         for (let i = 0; i < 5; i++) {
-          const contact1Id = await ctx.db.insert("contacts", createTestContactData(userId));
-          const contact2Id = await ctx.db.insert("contacts", createTestContactData(userId));
+          const contact1Id = await ctx.db.insert(
+            "contacts",
+            createTestContactData(userId),
+          );
+          const contact2Id = await ctx.db.insert(
+            "contacts",
+            createTestContactData(userId),
+          );
 
           await ctx.db.insert("mergeSuggestions", {
             userId,
@@ -782,7 +1074,10 @@ describe("contacts", () => {
         }
       });
 
-      const result = await asUser.query(api.contacts.getPendingMergeSuggestions, { limit: 2 });
+      const result = await asUser.query(
+        api.contacts.getPendingMergeSuggestions,
+        { limit: 2 },
+      );
 
       expect(result.suggestions).toHaveLength(2);
     });
@@ -790,21 +1085,30 @@ describe("contacts", () => {
 
   describe("getPendingMergeSuggestionCount query", () => {
     it("returns 0 for unauthenticated user", async () => {
-      const t = convexTest(schema, modules);
+      const t = trackTest(convexTest(schema, modules));
 
-      const result = await t.query(api.contacts.getPendingMergeSuggestionCount, {});
+      const result = await t.query(
+        api.contacts.getPendingMergeSuggestionCount,
+        {},
+      );
 
       expect(result).toBe(0);
     });
 
     it("returns count of pending suggestions", async () => {
-      const t = convexTest(schema, modules);
+      const t = trackTest(convexTest(schema, modules));
       const { asUser, userId } = await setupAuthenticatedUser(t);
 
       await t.run(async (ctx) => {
         for (let i = 0; i < 3; i++) {
-          const contact1Id = await ctx.db.insert("contacts", createTestContactData(userId));
-          const contact2Id = await ctx.db.insert("contacts", createTestContactData(userId));
+          const contact1Id = await ctx.db.insert(
+            "contacts",
+            createTestContactData(userId),
+          );
+          const contact2Id = await ctx.db.insert(
+            "contacts",
+            createTestContactData(userId),
+          );
 
           await ctx.db.insert("mergeSuggestions", {
             userId,
@@ -818,7 +1122,10 @@ describe("contacts", () => {
         }
       });
 
-      const result = await asUser.query(api.contacts.getPendingMergeSuggestionCount, {});
+      const result = await asUser.query(
+        api.contacts.getPendingMergeSuggestionCount,
+        {},
+      );
 
       expect(result).toBe(3);
     });
@@ -826,12 +1133,18 @@ describe("contacts", () => {
 
   describe("createMergeSuggestion mutation", () => {
     it("throws for unauthenticated user", async () => {
-      const t = convexTest(schema, modules);
+      const t = trackTest(convexTest(schema, modules));
 
       const { contact1Id, contact2Id } = await t.run(async (ctx) => {
         const userId = await ctx.db.insert("users", createTestUserData());
-        const contact1Id = await ctx.db.insert("contacts", createTestContactData(userId));
-        const contact2Id = await ctx.db.insert("contacts", createTestContactData(userId));
+        const contact1Id = await ctx.db.insert(
+          "contacts",
+          createTestContactData(userId),
+        );
+        const contact2Id = await ctx.db.insert(
+          "contacts",
+          createTestContactData(userId),
+        );
         return { contact1Id, contact2Id };
       });
 
@@ -841,21 +1154,27 @@ describe("contacts", () => {
           contact2Id,
           confidence: 0.9,
           source: "email_match",
-        })
+        }),
       ).rejects.toThrow("Unauthorized");
     });
 
     it("creates merge suggestion", async () => {
-      const t = convexTest(schema, modules);
+      const t = trackTest(convexTest(schema, modules));
       const { asUser, userId } = await setupAuthenticatedUser(t);
 
       const { contact1Id, contact2Id } = await t.run(async (ctx) => {
-        const contact1Id = await ctx.db.insert("contacts", createTestContactData(userId, {
-          displayName: "John Doe",
-        }));
-        const contact2Id = await ctx.db.insert("contacts", createTestContactData(userId, {
-          displayName: "John D.",
-        }));
+        const contact1Id = await ctx.db.insert(
+          "contacts",
+          createTestContactData(userId, {
+            displayName: "John Doe",
+          }),
+        );
+        const contact2Id = await ctx.db.insert(
+          "contacts",
+          createTestContactData(userId, {
+            displayName: "John D.",
+          }),
+        );
         return { contact1Id, contact2Id };
       });
 
@@ -871,7 +1190,9 @@ describe("contacts", () => {
       expect(result.suggestionId).toBeTruthy();
 
       // Verify suggestion was created
-      const suggestion = await t.run(async (ctx) => ctx.db.get(result.suggestionId!));
+      const suggestion = await t.run(async (ctx) =>
+        ctx.db.get(result.suggestionId!),
+      );
       expect(suggestion?.confidence).toBe(0.85);
       expect(suggestion?.source).toBe("email_match");
       expect(suggestion?.reasoning).toBe("Email addresses match");
@@ -879,12 +1200,18 @@ describe("contacts", () => {
     });
 
     it("returns false when suggestion already exists", async () => {
-      const t = convexTest(schema, modules);
+      const t = trackTest(convexTest(schema, modules));
       const { asUser, userId } = await setupAuthenticatedUser(t);
 
       const { contact1Id, contact2Id } = await t.run(async (ctx) => {
-        const contact1Id = await ctx.db.insert("contacts", createTestContactData(userId));
-        const contact2Id = await ctx.db.insert("contacts", createTestContactData(userId));
+        const contact1Id = await ctx.db.insert(
+          "contacts",
+          createTestContactData(userId),
+        );
+        const contact2Id = await ctx.db.insert(
+          "contacts",
+          createTestContactData(userId),
+        );
 
         // Create existing suggestion
         await ctx.db.insert("mergeSuggestions", {
@@ -912,12 +1239,18 @@ describe("contacts", () => {
     });
 
     it("returns false when reverse suggestion already exists", async () => {
-      const t = convexTest(schema, modules);
+      const t = trackTest(convexTest(schema, modules));
       const { asUser, userId } = await setupAuthenticatedUser(t);
 
       const { contact1Id, contact2Id } = await t.run(async (ctx) => {
-        const contact1Id = await ctx.db.insert("contacts", createTestContactData(userId));
-        const contact2Id = await ctx.db.insert("contacts", createTestContactData(userId));
+        const contact1Id = await ctx.db.insert(
+          "contacts",
+          createTestContactData(userId),
+        );
+        const contact2Id = await ctx.db.insert(
+          "contacts",
+          createTestContactData(userId),
+        );
 
         // Create existing suggestion in reverse order
         await ctx.db.insert("mergeSuggestions", {
@@ -945,14 +1278,20 @@ describe("contacts", () => {
     });
 
     it("throws when contact1 not found", async () => {
-      const t = convexTest(schema, modules);
+      const t = trackTest(convexTest(schema, modules));
       const { asUser, userId } = await setupAuthenticatedUser(t);
 
       const { fakeId, contact2Id } = await t.run(async (ctx) => {
-        const fakeId = await ctx.db.insert("contacts", createTestContactData(userId));
+        const fakeId = await ctx.db.insert(
+          "contacts",
+          createTestContactData(userId),
+        );
         await ctx.db.delete(fakeId);
 
-        const contact2Id = await ctx.db.insert("contacts", createTestContactData(userId));
+        const contact2Id = await ctx.db.insert(
+          "contacts",
+          createTestContactData(userId),
+        );
         return { fakeId, contact2Id };
       });
 
@@ -962,19 +1301,25 @@ describe("contacts", () => {
           contact2Id,
           confidence: 0.9,
           source: "email_match",
-        })
+        }),
       ).rejects.toThrow("Contact 1 not found");
     });
   });
 
   describe("rejectMerge mutation", () => {
     it("throws for unauthenticated user", async () => {
-      const t = convexTest(schema, modules);
+      const t = trackTest(convexTest(schema, modules));
 
       const suggestionId = await t.run(async (ctx) => {
         const userId = await ctx.db.insert("users", createTestUserData());
-        const contact1Id = await ctx.db.insert("contacts", createTestContactData(userId));
-        const contact2Id = await ctx.db.insert("contacts", createTestContactData(userId));
+        const contact1Id = await ctx.db.insert(
+          "contacts",
+          createTestContactData(userId),
+        );
+        const contact2Id = await ctx.db.insert(
+          "contacts",
+          createTestContactData(userId),
+        );
 
         return ctx.db.insert("mergeSuggestions", {
           userId,
@@ -988,17 +1333,23 @@ describe("contacts", () => {
       });
 
       await expect(
-        t.mutation(api.contacts.rejectMerge, { suggestionId })
+        t.mutation(api.contacts.rejectMerge, { suggestionId }),
       ).rejects.toThrow("Unauthorized");
     });
 
     it("rejects merge suggestion", async () => {
-      const t = convexTest(schema, modules);
+      const t = trackTest(convexTest(schema, modules));
       const { asUser, userId } = await setupAuthenticatedUser(t);
 
       const suggestionId = await t.run(async (ctx) => {
-        const contact1Id = await ctx.db.insert("contacts", createTestContactData(userId));
-        const contact2Id = await ctx.db.insert("contacts", createTestContactData(userId));
+        const contact1Id = await ctx.db.insert(
+          "contacts",
+          createTestContactData(userId),
+        );
+        const contact2Id = await ctx.db.insert(
+          "contacts",
+          createTestContactData(userId),
+        );
 
         return ctx.db.insert("mergeSuggestions", {
           userId,
@@ -1011,7 +1362,9 @@ describe("contacts", () => {
         });
       });
 
-      const result = await asUser.mutation(api.contacts.rejectMerge, { suggestionId });
+      const result = await asUser.mutation(api.contacts.rejectMerge, {
+        suggestionId,
+      });
 
       expect(result.success).toBe(true);
 
@@ -1021,12 +1374,18 @@ describe("contacts", () => {
     });
 
     it("throws when suggestion not found", async () => {
-      const t = convexTest(schema, modules);
+      const t = trackTest(convexTest(schema, modules));
       const { asUser, userId } = await setupAuthenticatedUser(t);
 
       const fakeId = await t.run(async (ctx) => {
-        const contact1Id = await ctx.db.insert("contacts", createTestContactData(userId));
-        const contact2Id = await ctx.db.insert("contacts", createTestContactData(userId));
+        const contact1Id = await ctx.db.insert(
+          "contacts",
+          createTestContactData(userId),
+        );
+        const contact2Id = await ctx.db.insert(
+          "contacts",
+          createTestContactData(userId),
+        );
 
         const id = await ctx.db.insert("mergeSuggestions", {
           userId,
@@ -1042,32 +1401,38 @@ describe("contacts", () => {
       });
 
       await expect(
-        asUser.mutation(api.contacts.rejectMerge, { suggestionId: fakeId })
+        asUser.mutation(api.contacts.rejectMerge, { suggestionId: fakeId }),
       ).rejects.toThrow("Merge suggestion not found");
     });
   });
 
   describe("dismissContact mutation", () => {
     it("throws for unauthenticated user", async () => {
-      const t = convexTest(schema, modules);
+      const t = trackTest(convexTest(schema, modules));
 
       const { actionId, contactId } = await t.run(async (ctx) => {
         const userId = await ctx.db.insert("users", createTestUserData());
-        const contactId = await ctx.db.insert("contacts", createTestContactData(userId));
-        const actionId = await ctx.db.insert("actions", createTestActionData(userId, {
-          type: "new_connection",
-          contactId,
-        }));
+        const contactId = await ctx.db.insert(
+          "contacts",
+          createTestContactData(userId),
+        );
+        const actionId = await ctx.db.insert(
+          "actions",
+          createTestActionData(userId, {
+            type: "new_connection",
+            contactId,
+          }),
+        );
         return { actionId, contactId };
       });
 
       await expect(
-        t.mutation(api.contacts.dismissContact, { actionId, contactId })
+        t.mutation(api.contacts.dismissContact, { actionId, contactId }),
       ).rejects.toThrow("Unauthorized");
     });
 
     it("marks contact as dismissed and action as discarded", async () => {
-      const t = convexTest(schema, modules);
+      const t = trackTest(convexTest(schema, modules));
       const { asUser, userId } = await setupAuthenticatedUser(t);
 
       await t.run(async (ctx) => {
@@ -1075,12 +1440,18 @@ describe("contacts", () => {
       });
 
       const { actionId, contactId } = await t.run(async (ctx) => {
-        const contactId = await ctx.db.insert("contacts", createTestContactData(userId));
-        const actionId = await ctx.db.insert("actions", createTestActionData(userId, {
-          type: "new_connection",
-          contactId,
-          status: "pending",
-        }));
+        const contactId = await ctx.db.insert(
+          "contacts",
+          createTestContactData(userId),
+        );
+        const actionId = await ctx.db.insert(
+          "actions",
+          createTestActionData(userId, {
+            type: "new_connection",
+            contactId,
+            status: "pending",
+          }),
+        );
         return { actionId, contactId };
       });
 
@@ -1106,12 +1477,18 @@ describe("contacts", () => {
     });
 
     it("throws when action not found", async () => {
-      const t = convexTest(schema, modules);
+      const t = trackTest(convexTest(schema, modules));
       const { asUser, userId } = await setupAuthenticatedUser(t);
 
       const { fakeActionId, contactId } = await t.run(async (ctx) => {
-        const contactId = await ctx.db.insert("contacts", createTestContactData(userId));
-        const fakeActionId = await ctx.db.insert("actions", createTestActionData(userId));
+        const contactId = await ctx.db.insert(
+          "contacts",
+          createTestContactData(userId),
+        );
+        const fakeActionId = await ctx.db.insert(
+          "actions",
+          createTestActionData(userId),
+        );
         await ctx.db.delete(fakeActionId);
         return { fakeActionId, contactId };
       });
@@ -1120,19 +1497,25 @@ describe("contacts", () => {
         asUser.mutation(api.contacts.dismissContact, {
           actionId: fakeActionId,
           contactId,
-        })
+        }),
       ).rejects.toThrow("Action not found");
     });
 
     it("throws when contact not found", async () => {
-      const t = convexTest(schema, modules);
+      const t = trackTest(convexTest(schema, modules));
       const { asUser, userId } = await setupAuthenticatedUser(t);
 
       const { actionId, fakeContactId } = await t.run(async (ctx) => {
-        const fakeContactId = await ctx.db.insert("contacts", createTestContactData(userId));
+        const fakeContactId = await ctx.db.insert(
+          "contacts",
+          createTestContactData(userId),
+        );
         await ctx.db.delete(fakeContactId);
 
-        const actionId = await ctx.db.insert("actions", createTestActionData(userId));
+        const actionId = await ctx.db.insert(
+          "actions",
+          createTestActionData(userId),
+        );
         return { actionId, fakeContactId };
       });
 
@@ -1140,22 +1523,28 @@ describe("contacts", () => {
         asUser.mutation(api.contacts.dismissContact, {
           actionId,
           contactId: fakeContactId,
-        })
+        }),
       ).rejects.toThrow("Contact not found");
     });
   });
 
   describe("saveContactFromCard mutation", () => {
     it("throws for unauthenticated user", async () => {
-      const t = convexTest(schema, modules);
+      const t = trackTest(convexTest(schema, modules));
 
       const { actionId, contactId } = await t.run(async (ctx) => {
         const userId = await ctx.db.insert("users", createTestUserData());
-        const contactId = await ctx.db.insert("contacts", createTestContactData(userId));
-        const actionId = await ctx.db.insert("actions", createTestActionData(userId, {
-          type: "new_connection",
-          contactId,
-        }));
+        const contactId = await ctx.db.insert(
+          "contacts",
+          createTestContactData(userId),
+        );
+        const actionId = await ctx.db.insert(
+          "actions",
+          createTestActionData(userId, {
+            type: "new_connection",
+            contactId,
+          }),
+        );
         return { actionId, contactId };
       });
 
@@ -1164,12 +1553,12 @@ describe("contacts", () => {
           actionId,
           contactId,
           displayName: "John Doe",
-        })
+        }),
       ).rejects.toThrow("Unauthorized");
     });
 
     it("updates contact and completes action", async () => {
-      const t = convexTest(schema, modules);
+      const t = trackTest(convexTest(schema, modules));
       const { asUser, userId } = await setupAuthenticatedUser(t);
 
       await t.run(async (ctx) => {
@@ -1177,14 +1566,20 @@ describe("contacts", () => {
       });
 
       const { actionId, contactId } = await t.run(async (ctx) => {
-        const contactId = await ctx.db.insert("contacts", createTestContactData(userId, {
-          displayName: "Unknown",
-        }));
-        const actionId = await ctx.db.insert("actions", createTestActionData(userId, {
-          type: "new_connection",
-          contactId,
-          status: "pending",
-        }));
+        const contactId = await ctx.db.insert(
+          "contacts",
+          createTestContactData(userId, {
+            displayName: "Unknown",
+          }),
+        );
+        const actionId = await ctx.db.insert(
+          "actions",
+          createTestActionData(userId, {
+            type: "new_connection",
+            contactId,
+            status: "pending",
+          }),
+        );
         return { actionId, contactId };
       });
 
@@ -1219,38 +1614,51 @@ describe("contacts", () => {
     });
 
     it("links to existing contact and merges handles", async () => {
-      const t = convexTest(schema, modules);
+      const t = trackTest(convexTest(schema, modules));
       const { asUser, userId } = await setupAuthenticatedUser(t);
 
       await t.run(async (ctx) => {
         await ctx.db.patch(userId, { pendingActionCount: 1 });
       });
 
-      const { actionId, newContactId, existingContactId, newHandleId } = await t.run(async (ctx) => {
-        // Existing contact
-        const existingContactId = await ctx.db.insert("contacts", createTestContactData(userId, {
-          displayName: "John Doe",
-          company: "Acme Corp",
-        }));
+      const { actionId, newContactId, existingContactId, newHandleId } =
+        await t.run(async (ctx) => {
+          // Existing contact
+          const existingContactId = await ctx.db.insert(
+            "contacts",
+            createTestContactData(userId, {
+              displayName: "John Doe",
+              company: "Acme Corp",
+            }),
+          );
 
-        // New contact (from unknown sender)
-        const newContactId = await ctx.db.insert("contacts", createTestContactData(userId, {
-          displayName: "Unknown",
-        }));
+          // New contact (from unknown sender)
+          const newContactId = await ctx.db.insert(
+            "contacts",
+            createTestContactData(userId, {
+              displayName: "Unknown",
+            }),
+          );
 
-        // Handle on new contact
-        const newHandleId = await ctx.db.insert("contactHandles", createTestContactHandleData(userId, newContactId, {
-          handle: "+15559999999",
-        }));
+          // Handle on new contact
+          const newHandleId = await ctx.db.insert(
+            "contactHandles",
+            createTestContactHandleData(userId, newContactId, {
+              handle: "+15559999999",
+            }),
+          );
 
-        const actionId = await ctx.db.insert("actions", createTestActionData(userId, {
-          type: "eod_contact",
-          contactId: newContactId,
-          status: "pending",
-        }));
+          const actionId = await ctx.db.insert(
+            "actions",
+            createTestActionData(userId, {
+              type: "eod_contact",
+              contactId: newContactId,
+              status: "pending",
+            }),
+          );
 
-        return { actionId, newContactId, existingContactId, newHandleId };
-      });
+          return { actionId, newContactId, existingContactId, newHandleId };
+        });
 
       const result = await asUser.mutation(api.contacts.saveContactFromCard, {
         actionId,
@@ -1273,8 +1681,72 @@ describe("contacts", () => {
       expect(newContact).toBeNull();
 
       // Verify notes appended to existing contact
-      const existingContact = await t.run(async (ctx) => ctx.db.get(existingContactId));
+      const existingContact = await t.run(async (ctx) =>
+        ctx.db.get(existingContactId),
+      );
       expect(existingContact?.notes).toBe("Also known from phone");
+    });
+  });
+
+  describe("merge check coalescing via _scheduled_functions", () => {
+    it("coalesces multiple merge checks for the same user into one pending scan", async () => {
+      const t = trackTest(convexTest(schema, modules));
+      const { asUser, userId } = await setupAuthenticatedUser(t);
+
+      // Create two contacts with handles
+      const { contactA, contactB } = await t.run(async (ctx) => {
+        const contactA = await ctx.db.insert(
+          "contacts",
+          createTestContactData(userId, { displayName: "Contact A" }),
+        );
+        const contactB = await ctx.db.insert(
+          "contacts",
+          createTestContactData(userId, { displayName: "Contact B" }),
+        );
+        return { contactA, contactB };
+      });
+
+      // Add a handle to contact A — triggers scheduleContactMergeCheck
+      await asUser.mutation(api.contacts.addContactHandle, {
+        contactId: contactA,
+        handleType: "email",
+        handle: "a@example.com",
+        platform: "gmail",
+      });
+
+      // Check: exactly one pending scanAllContactsForMerges
+      const pendingAfterFirst = await t.run(async (ctx) => {
+        const all = await ctx.db.system
+          .query("_scheduled_functions")
+          .collect();
+        return all.filter(
+          (fn) =>
+            fn.name.includes("scanAllContactsForMerges") &&
+            fn.state.kind === "pending",
+        );
+      });
+      expect(pendingAfterFirst).toHaveLength(1);
+
+      // Add a handle to contact B — should be coalesced (not create a second scan)
+      await asUser.mutation(api.contacts.addContactHandle, {
+        contactId: contactB,
+        handleType: "email",
+        handle: "b@example.com",
+        platform: "gmail",
+      });
+
+      // Check: still exactly one pending scan
+      const pendingAfterSecond = await t.run(async (ctx) => {
+        const all = await ctx.db.system
+          .query("_scheduled_functions")
+          .collect();
+        return all.filter(
+          (fn) =>
+            fn.name.includes("scanAllContactsForMerges") &&
+            fn.state.kind === "pending",
+        );
+      });
+      expect(pendingAfterSecond).toHaveLength(1);
     });
   });
 });

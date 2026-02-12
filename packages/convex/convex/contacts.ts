@@ -4,7 +4,13 @@ import { mutation, query, internalQuery } from "./_generated/server";
 import type { MutationCtx, QueryCtx } from "./_generated/server";
 import type { Doc, Id } from "./_generated/dataModel";
 import { getAuthenticatedUser } from "./lib/auth";
-import { mergeSuggestionStatusValidator, mergeSourceValidator } from "./schema";
+import {
+  handleTypeValidator,
+  mergeSourceValidator,
+  platformValidator,
+} from "./schema";
+import { scheduleContactMergeCheck } from "./lib/contactMergeScheduling";
+import { normalizeHandleValue } from "./lib/normalizeHandle";
 
 // ============================================================================
 // Contact Queries
@@ -23,7 +29,7 @@ export const getContacts = query({
       v.object({
         displayName: v.string(),
         _id: v.id("contacts"),
-      })
+      }),
     ),
     searchQuery: v.optional(v.string()),
   },
@@ -41,7 +47,7 @@ export const getContacts = query({
       rawContacts = await ctx.db
         .query("contacts")
         .withSearchIndex("search_display_name", (q) =>
-          q.search("displayName", args.searchQuery!).eq("userId", user._id)
+          q.search("displayName", args.searchQuery!).eq("userId", user._id),
         )
         .take(limit + 1);
     } else {
@@ -60,9 +66,9 @@ export const getContacts = query({
             // displayName == cursor.displayName AND _id > cursor._id (tiebreaker)
             q.and(
               q.eq(q.field("displayName"), args.cursor!.displayName),
-              q.gt(q.field("_id"), args.cursor!._id)
-            )
-          )
+              q.gt(q.field("_id"), args.cursor!._id),
+            ),
+          ),
         );
       }
 
@@ -84,8 +90,8 @@ export const getContacts = query({
         ctx.db
           .query("contactHandles")
           .withIndex("by_contact", (q) => q.eq("contactId", contact._id))
-          .collect()
-      )
+          .collect(),
+      ),
     );
 
     // Build contacts with handles
@@ -119,7 +125,11 @@ export const listContactsPaginated = query({
   handler: async (ctx, args) => {
     const user = await getAuthenticatedUser(ctx);
     if (!user)
-      return { page: [], isDone: true, continueCursor: "" } as PaginationResult<never>;
+      return {
+        page: [],
+        isDone: true,
+        continueCursor: "",
+      } as PaginationResult<never>;
 
     const results = await ctx.db
       .query("contacts")
@@ -141,7 +151,7 @@ export const listContactsPaginated = query({
             platform: h.platform,
           })),
         };
-      })
+      }),
     );
 
     return { ...results, page: enrichedPage };
@@ -297,20 +307,22 @@ export const getContactProfile = query({
           conversationDisplayName: conv.displayName,
           conversationPlatform: conv.platform,
         }));
-      })
+      }),
     );
 
     // Fetch messages sent by this contact directly
     const messagesByContact = await ctx.db
       .query("messages")
-      .withIndex("by_sender_contact", (q) => q.eq("senderContactId", args.contactId))
+      .withIndex("by_sender_contact", (q) =>
+        q.eq("senderContactId", args.contactId),
+      )
       .order("desc")
       .take(50);
 
     // Combine and dedupe messages, sort by sentAt
     const allMessages = [...recentMessages.flat(), ...messagesByContact];
     const uniqueMessages = Array.from(
-      new Map(allMessages.map((m) => [m._id, m])).values()
+      new Map(allMessages.map((m) => [m._id, m])).values(),
     ).sort((a, b) => b.sentAt - a.sentAt);
 
     // Fetch recent actions related to this contact
@@ -323,7 +335,7 @@ export const getContactProfile = query({
     // Calculate activity stats
     const THIRTY_DAYS_MS = 30 * 24 * 60 * 60 * 1000;
     const recentMessageCount = uniqueMessages.filter(
-      (m) => m.sentAt > Date.now() - THIRTY_DAYS_MS
+      (m) => m.sentAt > Date.now() - THIRTY_DAYS_MS,
     ).length;
 
     return {
@@ -383,11 +395,13 @@ export const getPendingMergeSuggestions = query({
     const query = ctx.db
       .query("mergeSuggestions")
       .withIndex("by_user_status", (q) =>
-        q.eq("userId", user._id).eq("status", "pending")
+        q.eq("userId", user._id).eq("status", "pending"),
       )
       .order("desc");
 
-    const suggestions = args.limit ? await query.take(args.limit) : await query.collect();
+    const suggestions = args.limit
+      ? await query.take(args.limit)
+      : await query.collect();
 
     // Fetch contact details for each suggestion
     const enrichedSuggestions = await Promise.all(
@@ -402,7 +416,7 @@ export const getPendingMergeSuggestions = query({
           contact1,
           contact2,
         };
-      })
+      }),
     );
 
     return { suggestions: enrichedSuggestions };
@@ -421,7 +435,7 @@ export const getPendingMergeSuggestionCount = query({
     const suggestions = await ctx.db
       .query("mergeSuggestions")
       .withIndex("by_user_status", (q) =>
-        q.eq("userId", user._id).eq("status", "pending")
+        q.eq("userId", user._id).eq("status", "pending"),
       )
       .collect();
 
@@ -462,7 +476,9 @@ export const mergeContacts = mutation({
     // 1. Move all handles from secondary to primary
     const secondaryHandles = await ctx.db
       .query("contactHandles")
-      .withIndex("by_contact", (q) => q.eq("contactId", args.secondaryContactId))
+      .withIndex("by_contact", (q) =>
+        q.eq("contactId", args.secondaryContactId),
+      )
       .collect();
 
     for (const handle of secondaryHandles) {
@@ -479,14 +495,18 @@ export const mergeContacts = mutation({
       if (conv.participantContactIds.includes(args.secondaryContactId)) {
         // Remove secondary, add primary if not already present
         const withoutSecondary = conv.participantContactIds.filter(
-          (id) => id !== args.secondaryContactId
+          (id) => id !== args.secondaryContactId,
         );
-        const hasPrimary = conv.participantContactIds.includes(args.primaryContactId);
+        const hasPrimary = conv.participantContactIds.includes(
+          args.primaryContactId,
+        );
         const updatedParticipants = hasPrimary
           ? withoutSecondary
           : [...withoutSecondary, args.primaryContactId];
 
-        await ctx.db.patch(conv._id, { participantContactIds: updatedParticipants });
+        await ctx.db.patch(conv._id, {
+          participantContactIds: updatedParticipants,
+        });
       }
     }
 
@@ -494,7 +514,7 @@ export const mergeContacts = mutation({
     const messages = await ctx.db
       .query("messages")
       .withIndex("by_sender_contact", (q) =>
-        q.eq("senderContactId", args.secondaryContactId)
+        q.eq("senderContactId", args.secondaryContactId),
       )
       .collect();
 
@@ -505,7 +525,9 @@ export const mergeContacts = mutation({
     // 4. Update all actions referencing secondary contact
     const actions = await ctx.db
       .query("actions")
-      .withIndex("by_contact", (q) => q.eq("contactId", args.secondaryContactId))
+      .withIndex("by_contact", (q) =>
+        q.eq("contactId", args.secondaryContactId),
+      )
       .collect();
 
     for (const action of actions) {
@@ -513,14 +535,18 @@ export const mergeContacts = mutation({
     }
 
     // 5. Merge contact metadata (prefer primary, fill gaps from secondary)
-    const updates: { company?: string; notes?: string; importance?: number } = {};
+    const updates: { company?: string; notes?: string; importance?: number } =
+      {};
     if (!primary.company && secondary.company) {
       updates.company = secondary.company;
     }
     if (!primary.notes && secondary.notes) {
       updates.notes = secondary.notes;
     }
-    if (primary.importance === undefined && secondary.importance !== undefined) {
+    if (
+      primary.importance === undefined &&
+      secondary.importance !== undefined
+    ) {
       updates.importance = secondary.importance;
     }
     if (Object.keys(updates).length > 0) {
@@ -533,7 +559,12 @@ export const mergeContacts = mutation({
         status: "approved",
         resolvedAt: Date.now(),
       });
-      await cleanupResolveContactAction(ctx, user, args.suggestionId, "completed");
+      await cleanupResolveContactAction(
+        ctx,
+        user,
+        args.suggestionId,
+        "completed",
+      );
     }
 
     // 7. Delete secondary contact (last step)
@@ -543,7 +574,7 @@ export const mergeContacts = mutation({
       success: true,
       handlesMovedCount: secondaryHandles.length,
       conversationsUpdatedCount: conversations.filter((c) =>
-        c.participantContactIds.includes(args.secondaryContactId)
+        c.participantContactIds.includes(args.secondaryContactId),
       ).length,
       messagesUpdatedCount: messages.length,
     };
@@ -571,7 +602,12 @@ export const rejectMerge = mutation({
       resolvedAt: Date.now(),
     });
 
-    await cleanupResolveContactAction(ctx, user, args.suggestionId, "discarded");
+    await cleanupResolveContactAction(
+      ctx,
+      user,
+      args.suggestionId,
+      "discarded",
+    );
 
     return { success: true };
   },
@@ -609,14 +645,14 @@ export const createMergeSuggestion = mutation({
     const existing = await ctx.db
       .query("mergeSuggestions")
       .withIndex("by_contacts", (q) =>
-        q.eq("contact1Id", args.contact1Id).eq("contact2Id", args.contact2Id)
+        q.eq("contact1Id", args.contact1Id).eq("contact2Id", args.contact2Id),
       )
       .unique();
 
     const existingReverse = await ctx.db
       .query("mergeSuggestions")
       .withIndex("by_contacts", (q) =>
-        q.eq("contact1Id", args.contact2Id).eq("contact2Id", args.contact1Id)
+        q.eq("contact1Id", args.contact2Id).eq("contact2Id", args.contact1Id),
       )
       .unique();
 
@@ -664,12 +700,169 @@ export const updateContact = mutation({
 
     // Filter out undefined values
     const updates = Object.fromEntries(
-      Object.entries(fields).filter(([, value]) => value !== undefined)
+      Object.entries(fields).filter(([, value]) => value !== undefined),
     );
+    const displayNameChanged =
+      typeof updates.displayName === "string" &&
+      updates.displayName !== contact.displayName;
 
     if (Object.keys(updates).length > 0) {
       await ctx.db.patch(contactId, updates);
+      if (displayNameChanged) {
+        await scheduleContactMergeCheck(ctx, user._id, contactId);
+      }
     }
+
+    return { success: true };
+  },
+});
+
+/**
+ * Add a handle to a contact and trigger event-driven merge detection.
+ */
+export const addContactHandle = mutation({
+  args: {
+    contactId: v.id("contacts"),
+    handleType: handleTypeValidator,
+    handle: v.string(),
+    platform: platformValidator,
+  },
+  handler: async (ctx, args) => {
+    const user = await getAuthenticatedUser(ctx);
+    if (!user) throw new Error("Unauthorized");
+
+    const contact = await ctx.db.get(args.contactId);
+    if (!contact || contact.userId !== user._id) {
+      throw new Error("Contact not found");
+    }
+
+    const normalizedHandle = normalizeHandleValue(
+      args.handleType,
+      args.handle,
+    );
+    if (!normalizedHandle) {
+      throw new Error("Handle cannot be empty");
+    }
+
+    const existingHandles = await ctx.db
+      .query("contactHandles")
+      .withIndex("by_contact", (q) => q.eq("contactId", args.contactId))
+      .collect();
+
+    const duplicateOnContact = existingHandles.find(
+      (h) =>
+        h.handleType === args.handleType &&
+        h.handle === normalizedHandle &&
+        h.platform === args.platform,
+    );
+
+    if (duplicateOnContact) {
+      return {
+        success: true,
+        created: false,
+        handleId: duplicateOnContact._id,
+      };
+    }
+
+    const handleId = await ctx.db.insert("contactHandles", {
+      userId: user._id,
+      contactId: args.contactId,
+      handleType: args.handleType,
+      handle: normalizedHandle,
+      platform: args.platform,
+    });
+
+    await scheduleContactMergeCheck(ctx, user._id, args.contactId);
+
+    return { success: true, created: true, handleId };
+  },
+});
+
+/**
+ * Update a handle's value/type/platform and trigger merge detection.
+ */
+export const updateContactHandle = mutation({
+  args: {
+    handleId: v.id("contactHandles"),
+    handleType: v.optional(handleTypeValidator),
+    handle: v.optional(v.string()),
+    platform: v.optional(platformValidator),
+  },
+  handler: async (ctx, args) => {
+    const user = await getAuthenticatedUser(ctx);
+    if (!user) throw new Error("Unauthorized");
+
+    const existingHandle = await ctx.db.get(args.handleId);
+    if (!existingHandle || existingHandle.userId !== user._id) {
+      throw new Error("Handle not found");
+    }
+
+    const nextType = args.handleType ?? existingHandle.handleType;
+    const rawValue = args.handle ?? existingHandle.handle;
+    const nextHandle = normalizeHandleValue(nextType, rawValue);
+    const nextPlatform = args.platform ?? existingHandle.platform;
+
+    if (!nextHandle) {
+      throw new Error("Handle cannot be empty");
+    }
+
+    const changed =
+      nextType !== existingHandle.handleType ||
+      nextHandle !== existingHandle.handle ||
+      nextPlatform !== existingHandle.platform;
+
+    if (!changed) {
+      return { success: true, changed: false };
+    }
+
+    const siblingHandles = await ctx.db
+      .query("contactHandles")
+      .withIndex("by_contact", (q) =>
+        q.eq("contactId", existingHandle.contactId),
+      )
+      .collect();
+
+    const duplicateSibling = siblingHandles.find(
+      (h) =>
+        h._id !== args.handleId &&
+        h.handleType === nextType &&
+        h.handle === nextHandle &&
+        h.platform === nextPlatform,
+    );
+
+    if (duplicateSibling) {
+      await ctx.db.delete(args.handleId);
+    } else {
+      await ctx.db.patch(args.handleId, {
+        handleType: nextType,
+        handle: nextHandle,
+        platform: nextPlatform,
+      });
+    }
+
+    await scheduleContactMergeCheck(ctx, user._id, existingHandle.contactId);
+
+    return { success: true, changed: true };
+  },
+});
+
+/**
+ * Remove a handle and trigger merge detection for the affected contact.
+ */
+export const removeContactHandle = mutation({
+  args: {
+    handleId: v.id("contactHandles"),
+  },
+  handler: async (ctx, args) => {
+    const user = await getAuthenticatedUser(ctx);
+    if (!user) throw new Error("Unauthorized");
+
+    const handle = await ctx.db.get(args.handleId);
+    if (!handle || handle.userId !== user._id) {
+      throw new Error("Handle not found");
+    }
+
+    await ctx.db.delete(args.handleId);
 
     return { success: true };
   },
@@ -758,9 +951,11 @@ export const saveContactFromCard = mutation({
       for (const conv of conversations) {
         if (conv.participantContactIds.includes(args.contactId)) {
           const withoutNew = conv.participantContactIds.filter(
-            (id) => id !== args.contactId
+            (id) => id !== args.contactId,
           );
-          const hasExisting = conv.participantContactIds.includes(args.linkToContactId);
+          const hasExisting = conv.participantContactIds.includes(
+            args.linkToContactId,
+          );
           const updated = hasExisting
             ? withoutNew
             : [...withoutNew, args.linkToContactId];
@@ -772,7 +967,7 @@ export const saveContactFromCard = mutation({
       const messages = await ctx.db
         .query("messages")
         .withIndex("by_sender_contact", (q) =>
-          q.eq("senderContactId", args.contactId)
+          q.eq("senderContactId", args.contactId),
         )
         .collect();
 
@@ -782,6 +977,8 @@ export const saveContactFromCard = mutation({
 
       // Delete the new contact (now merged)
       await ctx.db.delete(args.contactId);
+
+      await scheduleContactMergeCheck(ctx, user._id, args.linkToContactId);
     } else {
       // Update the contact with form data
       await ctx.db.patch(args.contactId, {
@@ -790,6 +987,10 @@ export const saveContactFromCard = mutation({
         notes: args.notes,
         tags: args.tags,
       });
+
+      if (args.displayName !== contact.displayName) {
+        await scheduleContactMergeCheck(ctx, user._id, args.contactId);
+      }
     }
 
     // Mark action as completed
@@ -905,7 +1106,7 @@ async function cleanupResolveContactAction(
   ctx: MutationCtx,
   user: Doc<"users">,
   suggestionId: Id<"mergeSuggestions">,
-  status: "completed" | "discarded"
+  status: "completed" | "discarded",
 ): Promise<void> {
   const resolveAction = await ctx.db
     .query("actions")
@@ -913,8 +1114,8 @@ async function cleanupResolveContactAction(
     .filter((q) =>
       q.and(
         q.eq(q.field("mergeSuggestionId"), suggestionId),
-        q.eq(q.field("type"), "resolve_contact")
-      )
+        q.eq(q.field("type"), "resolve_contact"),
+      ),
     )
     .first();
 
@@ -922,12 +1123,20 @@ async function cleanupResolveContactAction(
 
   const now = Date.now();
   if (status === "completed") {
-    await ctx.db.patch(resolveAction._id, { status: "completed", completedAt: now });
+    await ctx.db.patch(resolveAction._id, {
+      status: "completed",
+      completedAt: now,
+    });
   } else {
-    await ctx.db.patch(resolveAction._id, { status: "discarded", discardedAt: now });
+    await ctx.db.patch(resolveAction._id, {
+      status: "discarded",
+      discardedAt: now,
+    });
   }
 
   if (user.pendingActionCount && user.pendingActionCount > 0) {
-    await ctx.db.patch(user._id, { pendingActionCount: user.pendingActionCount - 1 });
+    await ctx.db.patch(user._id, {
+      pendingActionCount: user.pendingActionCount - 1,
+    });
   }
 }

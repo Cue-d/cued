@@ -13,8 +13,10 @@ import {
   getPhoneVariants,
   normalizeLinkedInHandle,
   normalizeMemberURN,
+  type HandleType,
 } from "@cued/shared";
 import { normalizeEmail } from "@cued/ai";
+import { scheduleContactMergeCheck } from "../lib/contactMergeScheduling";
 
 // ============================================================================
 // Shared Constants
@@ -95,7 +97,9 @@ export type HandleInput = Infer<typeof handleInput>;
 /**
  * Extract company name from a headline string (e.g., "Engineer at Google").
  */
-export function extractCompanyFromHeadline(headline: string | null): string | undefined {
+export function extractCompanyFromHeadline(
+  headline: string | null,
+): string | undefined {
   if (!headline) return undefined;
   const match = headline.match(/\s+(?:at|@)\s+(.+?)(?:\s*[|•·-]|$)/i);
   return match ? match[1].trim() : undefined;
@@ -113,7 +117,7 @@ export function logSyncError(
   platform: string,
   operation: string,
   identifier: string,
-  error: unknown
+  error: unknown,
 ): string {
   const message = `[${platform} Sync] ${operation} failed for ${identifier}: ${error}`;
   console.error(message);
@@ -132,15 +136,19 @@ export async function scheduleIncomingMessageEvents(
   ctx: MutationCtx,
   userId: Id<"users">,
   conversationIds: Set<Id<"conversations">>,
-  platform: "imessage" | "gmail" | "slack" | "linkedin" | "twitter" | "signal"
+  platform: "imessage" | "gmail" | "slack" | "linkedin" | "twitter" | "signal",
 ): Promise<void> {
   if (conversationIds.size === 0) return;
 
-  await ctx.scheduler.runAfter(0, internal.actionEvents.onIncomingMessageBatch, {
-    userId,
-    conversationIds: Array.from(conversationIds),
-    platform,
-  });
+  await ctx.scheduler.runAfter(
+    0,
+    internal.actionEvents.onIncomingMessageBatch,
+    {
+      userId,
+      conversationIds: Array.from(conversationIds),
+      platform,
+    },
+  );
 }
 
 /**
@@ -150,14 +158,18 @@ export async function scheduleIncomingMessageEvents(
 export async function scheduleOutgoingMessageEvents(
   ctx: MutationCtx,
   userId: Id<"users">,
-  conversationIds: Set<Id<"conversations">>
+  conversationIds: Set<Id<"conversations">>,
 ): Promise<void> {
   if (conversationIds.size === 0) return;
 
-  await ctx.scheduler.runAfter(0, internal.actionEvents.onUserSentMessageBatch, {
-    userId,
-    conversationIds: Array.from(conversationIds),
-  });
+  await ctx.scheduler.runAfter(
+    0,
+    internal.actionEvents.onUserSentMessageBatch,
+    {
+      userId,
+      conversationIds: Array.from(conversationIds),
+    },
+  );
 }
 
 // ============================================================================
@@ -189,7 +201,7 @@ export { normalizeLinkedInHandle };
  */
 export async function getOrCreateUser(
   ctx: MutationCtx,
-  identity: { subject: string; email?: string }
+  identity: { subject: string; email?: string },
 ): Promise<Doc<"users">> {
   const existing = await ctx.db
     .query("users")
@@ -211,9 +223,6 @@ export async function getOrCreateUser(
 // ============================================================================
 // Contact Management
 // ============================================================================
-
-/** Handle types for contact creation */
-type HandleType = "phone" | "email" | "slack_id" | "signal_id" | "linkedin_handle" | "linkedin_urn" | "twitter_handle" | "twitter_user_id";
 
 /** Input for creating or finding a contact */
 export interface ContactHandleInput {
@@ -251,7 +260,7 @@ export async function getOrCreateContact(
   platform: "imessage" | "gmail" | "slack" | "linkedin" | "twitter" | "signal",
   handles: ContactHandleInput[],
   displayName?: string,
-  metadata?: { company?: string; notes?: string }
+  metadata?: { company?: string; notes?: string },
 ): Promise<GetOrCreateContactResult | undefined> {
   if (handles.length === 0) {
     console.warn("[Sync] getOrCreateContact called with no handles");
@@ -266,7 +275,9 @@ export async function getOrCreateContact(
     }))
     .filter((h) => {
       if (!h.normalized || h.normalized.length === 0) {
-        console.warn(`[Sync] Handle normalized to empty, skipping: "${h.value}" (${h.type})`);
+        console.warn(
+          `[Sync] Handle normalized to empty, skipping: "${h.value}" (${h.type})`,
+        );
         return false;
       }
       return true;
@@ -274,7 +285,9 @@ export async function getOrCreateContact(
 
   // If all handles normalized to empty, we can't create a contact - return undefined to allow caller to continue
   if (normalizedHandles.length === 0) {
-    console.warn(`[Sync] All handles normalized to empty for: ${handles.map(h => `"${h.value}" (${h.type})`).join(", ")}`);
+    console.warn(
+      `[Sync] All handles normalized to empty for: ${handles.map((h) => `"${h.value}" (${h.type})`).join(", ")}`,
+    );
     return undefined;
   }
 
@@ -289,17 +302,29 @@ export async function getOrCreateContact(
       const existing = await ctx.db
         .query("contactHandles")
         .withIndex("by_user_handle", (q) =>
-          q.eq("userId", userId).eq("handle", variant)
+          q.eq("userId", userId).eq("handle", variant),
         )
         .first();
 
       if (existing) {
         // Found existing contact - update displayName if we have a better one
+        let displayNameUpdated = false;
         if (displayName) {
           const contact = await ctx.db.get(existing.contactId);
-          if (contact && shouldUpdateDisplayName(contact.displayName, displayName, handle.normalized)) {
+          if (
+            contact &&
+            shouldUpdateDisplayName(
+              contact.displayName,
+              displayName,
+              handle.normalized,
+            )
+          ) {
             await ctx.db.patch(existing.contactId, { displayName });
+            displayNameUpdated = true;
           }
+        }
+        if (displayNameUpdated) {
+          await scheduleContactMergeCheck(ctx, userId, existing.contactId);
         }
         return { contactId: existing.contactId, created: false };
       }
@@ -325,6 +350,8 @@ export async function getOrCreateContact(
       platform,
     });
   }
+
+  await scheduleContactMergeCheck(ctx, userId, contactId);
 
   return { contactId, created: true };
 }
@@ -379,7 +406,10 @@ function isPlaceholderName(name: string): boolean {
  * Count "words" in a name - useful for detecting first+last vs single name.
  */
 function countNameWords(name: string): number {
-  return name.trim().split(/\s+/).filter(w => w.length > 0).length;
+  return name
+    .trim()
+    .split(/\s+/)
+    .filter((w) => w.length > 0).length;
 }
 
 /**
@@ -392,7 +422,7 @@ function countNameWords(name: string): number {
 export function shouldUpdateDisplayName(
   currentName: string,
   newName: string,
-  handle: string
+  handle: string,
 ): boolean {
   if (!newName || newName === currentName) return false;
 
@@ -403,7 +433,11 @@ export function shouldUpdateDisplayName(
   if (newName.toLowerCase() === handle.toLowerCase()) return false;
 
   // Update if current name is the handle itself
-  if (currentName === handle || currentName.toLowerCase() === handle.toLowerCase()) return true;
+  if (
+    currentName === handle ||
+    currentName.toLowerCase() === handle.toLowerCase()
+  )
+    return true;
 
   // Update if current name is a placeholder
   if (isPlaceholderName(currentName)) return true;
@@ -432,7 +466,7 @@ export function shouldUpdateDisplayName(
 export async function batchResolveHandles(
   ctx: MutationCtx,
   userId: Id<"users">,
-  handles: string[]
+  handles: string[],
 ): Promise<Map<string, Id<"contacts">>> {
   const handleToContact = new Map<string, Id<"contacts">>();
 
@@ -461,9 +495,9 @@ export async function batchResolveHandles(
       ctx.db
         .query("contactHandles")
         .withIndex("by_user_handle", (q) =>
-          q.eq("userId", userId).eq("handle", variant)
+          q.eq("userId", userId).eq("handle", variant),
         )
-        .first()
+        .first(),
     );
     const batchResults = await Promise.all(promises);
 
@@ -491,7 +525,14 @@ export async function batchResolveHandles(
 // ============================================================================
 
 /** Platform type for sync operations */
-type SyncPlatform = "imessage" | "gmail" | "slack" | "linkedin" | "twitter" | "signal" | "whatsapp";
+type SyncPlatform =
+  | "imessage"
+  | "gmail"
+  | "slack"
+  | "linkedin"
+  | "twitter"
+  | "signal"
+  | "whatsapp";
 
 /** Options for upserting a sync cursor */
 export interface UpsertSyncCursorOptions {
@@ -518,20 +559,23 @@ export async function findSyncCursor(
   ctx: QueryCtx,
   userId: Id<"users">,
   platform: SyncPlatform,
-  workspaceId?: string
+  workspaceId?: string,
 ): Promise<Doc<"syncCursors"> | null> {
   if (workspaceId) {
     return ctx.db
       .query("syncCursors")
       .withIndex("by_user_platform_workspace", (q) =>
-        q.eq("userId", userId).eq("platform", platform).eq("workspaceId", workspaceId)
+        q
+          .eq("userId", userId)
+          .eq("platform", platform)
+          .eq("workspaceId", workspaceId),
       )
       .unique();
   }
   return ctx.db
     .query("syncCursors")
     .withIndex("by_user_platform", (q) =>
-      q.eq("userId", userId).eq("platform", platform)
+      q.eq("userId", userId).eq("platform", platform),
     )
     .unique();
 }
@@ -545,18 +589,27 @@ export async function upsertSyncCursor(
   ctx: MutationCtx,
   userId: Id<"users">,
   platform: SyncPlatform,
-  options: UpsertSyncCursorOptions = {}
+  options: UpsertSyncCursorOptions = {},
 ): Promise<Id<"syncCursors">> {
   const now = Date.now();
-  const existingCursor = await findSyncCursor(ctx, userId, platform, options.workspaceId);
+  const existingCursor = await findSyncCursor(
+    ctx,
+    userId,
+    platform,
+    options.workspaceId,
+  );
 
   if (existingCursor) {
     // Update existing - only set fields that were provided
     await ctx.db.patch(existingCursor._id, {
       lastSyncAt: now,
-      ...(options.cursorData !== undefined && { cursorData: options.cursorData }),
+      ...(options.cursorData !== undefined && {
+        cursorData: options.cursorData,
+      }),
       ...(options.syncMode !== undefined && { syncMode: options.syncMode }),
-      ...(options.fullSyncProgress !== undefined && { fullSyncProgress: options.fullSyncProgress }),
+      ...(options.fullSyncProgress !== undefined && {
+        fullSyncProgress: options.fullSyncProgress,
+      }),
       ...(options.totalMessagesSynced !== undefined && {
         totalMessagesSynced: options.totalMessagesSynced,
       }),
@@ -566,7 +619,9 @@ export async function upsertSyncCursor(
       ...(options.lastContactsSyncAt !== undefined && {
         lastContactsSyncAt: options.lastContactsSyncAt,
       }),
-      ...(options.syncVersion !== undefined && { syncVersion: options.syncVersion }),
+      ...(options.syncVersion !== undefined && {
+        syncVersion: options.syncVersion,
+      }),
     });
     return existingCursor._id;
   } else {
@@ -577,12 +632,24 @@ export async function upsertSyncCursor(
       cursorData: options.cursorData ?? {},
       lastSyncAt: now,
       syncMode: options.syncMode ?? "incremental",
-      ...(options.workspaceId !== undefined && { workspaceId: options.workspaceId }),
-      ...(options.fullSyncProgress !== undefined && { fullSyncProgress: options.fullSyncProgress }),
-      ...(options.totalMessagesSynced !== undefined && { totalMessagesSynced: options.totalMessagesSynced }),
-      ...(options.totalContactsSynced !== undefined && { totalContactsSynced: options.totalContactsSynced }),
-      ...(options.lastContactsSyncAt !== undefined && { lastContactsSyncAt: options.lastContactsSyncAt }),
-      ...(options.syncVersion !== undefined && { syncVersion: options.syncVersion }),
+      ...(options.workspaceId !== undefined && {
+        workspaceId: options.workspaceId,
+      }),
+      ...(options.fullSyncProgress !== undefined && {
+        fullSyncProgress: options.fullSyncProgress,
+      }),
+      ...(options.totalMessagesSynced !== undefined && {
+        totalMessagesSynced: options.totalMessagesSynced,
+      }),
+      ...(options.totalContactsSynced !== undefined && {
+        totalContactsSynced: options.totalContactsSynced,
+      }),
+      ...(options.lastContactsSyncAt !== undefined && {
+        lastContactsSyncAt: options.lastContactsSyncAt,
+      }),
+      ...(options.syncVersion !== undefined && {
+        syncVersion: options.syncVersion,
+      }),
     });
   }
 }
@@ -597,9 +664,14 @@ export async function incrementSyncCursorStat(
   platform: SyncPlatform,
   stat: "totalMessagesSynced" | "totalContactsSynced",
   increment: number,
-  workspaceId?: string
+  workspaceId?: string,
 ): Promise<void> {
-  const existingCursor = await findSyncCursor(ctx, userId, platform, workspaceId);
+  const existingCursor = await findSyncCursor(
+    ctx,
+    userId,
+    platform,
+    workspaceId,
+  );
 
   if (existingCursor) {
     const currentValue = existingCursor[stat] ?? 0;
@@ -627,7 +699,7 @@ export async function incrementSyncCursorStat(
 export async function clearIntegrationError(
   ctx: MutationCtx,
   userId: Id<"users">,
-  platform: SyncPlatform
+  platform: SyncPlatform,
 ): Promise<void> {
   const integration = await findIntegration(ctx, userId, platform);
   if (integration?.lastError) {
@@ -645,12 +717,19 @@ export async function clearIntegrationError(
 export function findIntegration(
   ctx: QueryCtx,
   userId: Id<"users">,
-  platform: "imessage" | "gmail" | "slack" | "linkedin" | "twitter" | "signal" | "whatsapp"
+  platform:
+    | "imessage"
+    | "gmail"
+    | "slack"
+    | "linkedin"
+    | "twitter"
+    | "signal"
+    | "whatsapp",
 ): Promise<Doc<"integrations"> | null> {
   return ctx.db
     .query("integrations")
     .withIndex("by_user_platform", (q) =>
-      q.eq("userId", userId).eq("platform", platform)
+      q.eq("userId", userId).eq("platform", platform),
     )
     .unique();
 }
@@ -662,7 +741,14 @@ export function findIntegration(
 export async function getOrCreateIntegration(
   ctx: MutationCtx,
   userId: Id<"users">,
-  platform: "imessage" | "gmail" | "slack" | "linkedin" | "twitter" | "signal" | "whatsapp"
+  platform:
+    | "imessage"
+    | "gmail"
+    | "slack"
+    | "linkedin"
+    | "twitter"
+    | "signal"
+    | "whatsapp",
 ): Promise<Doc<"integrations">> {
   const existing = await findIntegration(ctx, userId, platform);
   if (existing) return existing;

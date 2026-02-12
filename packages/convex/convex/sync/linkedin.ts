@@ -28,6 +28,7 @@ import {
   BATCH_SIZE,
   logSyncError,
 } from "./shared";
+import { scheduleContactMergeCheck } from "../lib/contactMergeScheduling";
 
 // ============================================================================
 // Validators
@@ -68,7 +69,7 @@ export const linkedInAttachmentInput = v.object({
     v.literal("file"),
     v.literal("image"),
     v.literal("video"),
-    v.literal("audio")
+    v.literal("audio"),
   ),
   name: v.optional(v.string()),
   url: v.string(),
@@ -105,7 +106,7 @@ export const linkedInMessageInput = v.object({
     v.literal("DEFAULT"),
     v.literal("EDITED"),
     v.literal("RECALLED"),
-    v.literal("SYSTEM")
+    v.literal("SYSTEM"),
   ),
   attachments: v.optional(v.array(linkedInAttachmentInput)),
   reactions: v.optional(v.array(linkedInReactionInput)),
@@ -149,7 +150,7 @@ export async function syncLinkedInConversationsInternal(
   ctx: MutationCtx,
   userId: Id<"users">,
   conversations: LinkedInConversationInput[],
-  userURN?: string // User's LinkedIn URN for filtering self from title
+  userURN?: string, // User's LinkedIn URN for filtering self from title
 ) {
   const result = {
     conversationsCount: 0,
@@ -161,15 +162,15 @@ export async function syncLinkedInConversationsInternal(
 
   // Batch fetch existing conversations by entityURN (normalized)
   const conversationURNs = conversations.map((c) =>
-    normalizeConversationURN(c.entityURN)
+    normalizeConversationURN(c.entityURN),
   );
   const existingConversations = await batchFetchLinkedInConversations(
     ctx,
     userId,
-    conversationURNs
+    conversationURNs,
   );
   const conversationMap = new Map(
-    existingConversations.map((c) => [c.platformConversationId, c])
+    existingConversations.map((c) => [c.platformConversationId, c]),
   );
 
   // Get user URN for filtering self from participant list
@@ -195,7 +196,7 @@ export async function syncLinkedInConversationsInternal(
         const contactId = await getOrCreateLinkedInContact(
           ctx,
           userId,
-          participant
+          participant,
         );
         participantContactIds.push(contactId);
         result.participantsLinked++;
@@ -241,7 +242,9 @@ export async function syncLinkedInConversationsInternal(
 
       result.conversationsCount++;
     } catch (e) {
-      result.errors.push(logSyncError("LinkedIn", "sync conversation", conv.entityURN, e));
+      result.errors.push(
+        logSyncError("LinkedIn", "sync conversation", conv.entityURN, e),
+      );
     }
   }
 
@@ -266,7 +269,7 @@ export async function syncLinkedInMessagesInternal(
   ctx: MutationCtx,
   userId: Id<"users">,
   messages: LinkedInMessageInput[],
-  userURN?: string // User's LinkedIn URN for isFromMe detection
+  userURN?: string, // User's LinkedIn URN for isFromMe detection
 ) {
   const result = {
     messagesCount: 0,
@@ -296,16 +299,16 @@ export async function syncLinkedInMessagesInternal(
   const existingConversations = await batchFetchLinkedInConversations(
     ctx,
     userId,
-    conversationURNs
+    conversationURNs,
   );
   const conversationMap = new Map(
-    existingConversations.map((c) => [c.platformConversationId, c._id])
+    existingConversations.map((c) => [c.platformConversationId, c._id]),
   );
   // Track existing lastMessageAt to avoid overwriting with older timestamps
   const existingLastMessageAt = new Map(
     existingConversations
       .filter((c) => c.lastMessageAt !== undefined)
-      .map((c) => [c._id, c.lastMessageAt!])
+      .map((c) => [c._id, c.lastMessageAt!]),
   );
 
   // Batch fetch existing messages for deduplication
@@ -313,10 +316,10 @@ export async function syncLinkedInMessagesInternal(
   const existingMessages = await batchFetchLinkedInMessages(
     ctx,
     userId,
-    messageURNs
+    messageURNs,
   );
   const existingMessageSet = new Set(
-    existingMessages.map((m) => m.platformMessageId)
+    existingMessages.map((m) => m.platformMessageId),
   );
 
   // Track conversations with recent incoming/outgoing messages for action analysis
@@ -374,7 +377,7 @@ export async function syncLinkedInMessagesInternal(
             msg.senderURN,
             msg.senderFirstName,
             msg.senderLastName,
-            msg.senderProfileUrl
+            msg.senderProfileUrl,
           );
 
           // Track for action analysis if recent incoming
@@ -409,7 +412,9 @@ export async function syncLinkedInMessagesInternal(
           latestMessage = { text: msg.text, timestamp: msg.deliveredAt };
         }
       } catch (e) {
-        result.errors.push(logSyncError("LinkedIn", "sync message", msg.entityURN, e));
+        result.errors.push(
+          logSyncError("LinkedIn", "sync message", msg.entityURN, e),
+        );
       }
     }
 
@@ -417,7 +422,10 @@ export async function syncLinkedInMessagesInternal(
     // This prevents older message batches from overwriting newer timestamps
     if (latestMessage) {
       const existingTimestamp = existingLastMessageAt.get(conversationId);
-      if (existingTimestamp === undefined || latestMessage.timestamp > existingTimestamp) {
+      if (
+        existingTimestamp === undefined ||
+        latestMessage.timestamp > existingTimestamp
+      ) {
         await ctx.db.patch(conversationId, {
           lastMessageText: latestMessage.text,
           lastMessageAt: latestMessage.timestamp,
@@ -445,7 +453,13 @@ export async function syncLinkedInMessagesInternal(
   });
 
   // Update sync cursor with stats
-  await incrementSyncCursorStat(ctx, userId, "linkedin", "totalMessagesSynced", result.newMessages);
+  await incrementSyncCursorStat(
+    ctx,
+    userId,
+    "linkedin",
+    "totalMessagesSynced",
+    result.newMessages,
+  );
 
   return result;
 }
@@ -460,14 +474,14 @@ export async function syncLinkedInMessagesInternal(
 async function getUserLinkedInURN(
   ctx: MutationCtx,
   userId: Id<"users">,
-  providedURN?: string
+  providedURN?: string,
 ): Promise<string | undefined> {
   if (providedURN) return providedURN;
 
   const integration = await ctx.db
     .query("integrations")
     .withIndex("by_user_platform", (q) =>
-      q.eq("userId", userId).eq("platform", "linkedin")
+      q.eq("userId", userId).eq("platform", "linkedin"),
     )
     .unique();
   return integration?.linkedInUserURN;
@@ -485,12 +499,11 @@ async function getOrCreateLinkedInContactInternal(
   firstName: string,
   lastName: string,
   profileUrl?: string,
-  fallbackName?: string
+  fallbackName?: string,
 ): Promise<Id<"contacts">> {
   const normalizedURN = normalizeMemberURN(urn).toLowerCase();
-  const handles: { value: string; type: "linkedin_urn" | "linkedin_handle" }[] = [
-    { value: normalizedURN, type: "linkedin_urn" },
-  ];
+  const handles: { value: string; type: "linkedin_urn" | "linkedin_handle" }[] =
+    [{ value: normalizedURN, type: "linkedin_urn" }];
 
   // Add normalized slug if profile URL is available
   if (profileUrl && profileUrl.trim()) {
@@ -500,8 +513,15 @@ async function getOrCreateLinkedInContactInternal(
     }
   }
 
-  const displayName = `${firstName} ${lastName}`.trim() || fallbackName || "LinkedIn User";
-  const result = await getOrCreateContact(ctx, userId, "linkedin", handles, displayName);
+  const displayName =
+    `${firstName} ${lastName}`.trim() || fallbackName || "LinkedIn User";
+  const result = await getOrCreateContact(
+    ctx,
+    userId,
+    "linkedin",
+    handles,
+    displayName,
+  );
   if (!result) {
     throw new Error(`Failed to create LinkedIn contact for ${displayName}`);
   }
@@ -514,7 +534,7 @@ async function getOrCreateLinkedInContactInternal(
 async function getOrCreateLinkedInContact(
   ctx: MutationCtx,
   userId: Id<"users">,
-  participant: LinkedInParticipantInput
+  participant: LinkedInParticipantInput,
 ): Promise<Id<"contacts">> {
   return getOrCreateLinkedInContactInternal(
     ctx,
@@ -522,7 +542,7 @@ async function getOrCreateLinkedInContact(
     participant.entityURN,
     participant.firstName,
     participant.lastName,
-    participant.profileUrl
+    participant.profileUrl,
   );
 }
 
@@ -535,7 +555,7 @@ async function getOrCreateLinkedInContactByURN(
   senderURN: string,
   firstName: string,
   lastName: string,
-  profileUrl?: string
+  profileUrl?: string,
 ): Promise<Id<"contacts">> {
   return getOrCreateLinkedInContactInternal(
     ctx,
@@ -544,7 +564,7 @@ async function getOrCreateLinkedInContactByURN(
     firstName,
     lastName,
     profileUrl,
-    senderURN // Fallback to URN if no name
+    senderURN, // Fallback to URN if no name
   );
 }
 
@@ -558,7 +578,7 @@ async function getOrCreateLinkedInContactByURN(
 async function batchFetchLinkedInConversations(
   ctx: MutationCtx,
   userId: Id<"users">,
-  conversationURNs: string[]
+  conversationURNs: string[],
 ): Promise<Doc<"conversations">[]> {
   const results: Doc<"conversations">[] = [];
 
@@ -571,13 +591,13 @@ async function batchFetchLinkedInConversations(
           q
             .eq("userId", userId)
             .eq("platform", "linkedin")
-            .eq("platformConversationId", urn)
+            .eq("platformConversationId", urn),
         )
-        .unique()
+        .unique(),
     );
     const batchResults = await Promise.all(promises);
     results.push(
-      ...batchResults.filter((c): c is Doc<"conversations"> => c !== null)
+      ...batchResults.filter((c): c is Doc<"conversations"> => c !== null),
     );
   }
 
@@ -590,7 +610,7 @@ async function batchFetchLinkedInConversations(
 async function batchFetchLinkedInMessages(
   ctx: MutationCtx,
   userId: Id<"users">,
-  messageURNs: string[]
+  messageURNs: string[],
 ): Promise<Doc<"messages">[]> {
   const results: Doc<"messages">[] = [];
 
@@ -603,13 +623,13 @@ async function batchFetchLinkedInMessages(
           q
             .eq("userId", userId)
             .eq("platform", "linkedin")
-            .eq("platformMessageId", urn)
+            .eq("platformMessageId", urn),
         )
-        .unique()
+        .unique(),
     );
     const batchResults = await Promise.all(promises);
     results.push(
-      ...batchResults.filter((m): m is Doc<"messages"> => m !== null)
+      ...batchResults.filter((m): m is Doc<"messages"> => m !== null),
     );
   }
 
@@ -631,7 +651,7 @@ export const usernameResolutionInput = v.object({
 /**
  * Find LinkedIn contacts that only have URN handles (missing username).
  * Returns contacts that need profile lookup to resolve their public identifier.
- * 
+ *
  * @param ctx - Mutation context
  * @param userId - User ID
  * @param limit - Maximum number of contacts to return (default 50)
@@ -640,8 +660,10 @@ export const usernameResolutionInput = v.object({
 export async function findContactsMissingUsernames(
   ctx: MutationCtx,
   userId: Id<"users">,
-  limit: number = 50
-): Promise<Array<{ contactId: Id<"contacts">; memberId: string; displayName: string }>> {
+  limit: number = 50,
+): Promise<
+  Array<{ contactId: Id<"contacts">; memberId: string; displayName: string }>
+> {
   // Get all handles for this user and filter for LinkedIn URNs
   const allHandles = await ctx.db
     .query("contactHandles")
@@ -650,7 +672,7 @@ export async function findContactsMissingUsernames(
 
   // Filter for LinkedIn URN handles
   const urnHandles = allHandles.filter(
-    (h) => h.platform === "linkedin" && h.handleType === "linkedin_urn"
+    (h) => h.platform === "linkedin" && h.handleType === "linkedin_urn",
   );
 
   const contactsNeedingResolution: Array<{
@@ -662,8 +684,10 @@ export async function findContactsMissingUsernames(
   // Build a set of contact IDs that already have linkedin_handle handles
   const contactsWithUsernames = new Set(
     allHandles
-      .filter((h) => h.platform === "linkedin" && h.handleType === "linkedin_handle")
-      .map((h) => h.contactId.toString())
+      .filter(
+        (h) => h.platform === "linkedin" && h.handleType === "linkedin_handle",
+      )
+      .map((h) => h.contactId.toString()),
   );
 
   for (const urnHandle of urnHandles) {
@@ -700,7 +724,7 @@ export async function findContactsMissingUsernames(
 export async function addResolvedUsernames(
   ctx: MutationCtx,
   userId: Id<"users">,
-  resolutions: Array<Infer<typeof usernameResolutionInput>>
+  resolutions: Array<Infer<typeof usernameResolutionInput>>,
 ): Promise<{ added: number; skipped: number }> {
   let added = 0;
   let skipped = 0;
@@ -730,7 +754,7 @@ export async function addResolvedUsernames(
       const handle = await ctx.db
         .query("contactHandles")
         .withIndex("by_user_handle", (q) =>
-          q.eq("userId", userId).eq("handle", urnValue)
+          q.eq("userId", userId).eq("handle", urnValue),
         )
         .first();
       if (handle) {
@@ -748,7 +772,7 @@ export async function addResolvedUsernames(
     const existingUsername = await ctx.db
       .query("contactHandles")
       .withIndex("by_user_handle", (q) =>
-        q.eq("userId", userId).eq("handle", normalizedUsername)
+        q.eq("userId", userId).eq("handle", normalizedUsername),
       )
       .first();
 
@@ -765,6 +789,7 @@ export async function addResolvedUsernames(
       handle: normalizedUsername,
       platform: "linkedin",
     });
+    await scheduleContactMergeCheck(ctx, userId, contactId);
     added++;
   }
 
@@ -791,7 +816,7 @@ type LinkedInContactInput = Infer<typeof linkedInContactInput>;
 export async function syncLinkedInContactsInternal(
   ctx: MutationCtx,
   userId: Id<"users">,
-  contacts: LinkedInContactInput[]
+  contacts: LinkedInContactInput[],
 ) {
   const result = {
     totalContacts: contacts.length,
@@ -829,12 +854,15 @@ export async function syncLinkedInContactsInternal(
       const linkedInUrn = contact.profileId
         ? `urn:li:member:${contact.profileId}`.toLowerCase()
         : null;
+      let mergeCheckContactId: Id<"contacts"> | null = null;
 
       // Try to find existing contact by username handle first
       let existingHandle = normalizedHandle
         ? await ctx.db
             .query("contactHandles")
-            .withIndex("by_user_handle", (q) => q.eq("userId", userId).eq("handle", normalizedHandle))
+            .withIndex("by_user_handle", (q) =>
+              q.eq("userId", userId).eq("handle", normalizedHandle),
+            )
             .unique()
         : null;
 
@@ -842,7 +870,9 @@ export async function syncLinkedInContactsInternal(
       if (!existingHandle && linkedInUrn) {
         existingHandle = await ctx.db
           .query("contactHandles")
-          .withIndex("by_user_handle", (q) => q.eq("userId", userId).eq("handle", linkedInUrn))
+          .withIndex("by_user_handle", (q) =>
+            q.eq("userId", userId).eq("handle", linkedInUrn),
+          )
           .unique();
       }
 
@@ -857,7 +887,9 @@ export async function syncLinkedInContactsInternal(
           if (normalizedHandle && existingHandle.handle !== normalizedHandle) {
             const hasUsernameHandle = await ctx.db
               .query("contactHandles")
-              .withIndex("by_user_handle", (q) => q.eq("userId", userId).eq("handle", normalizedHandle))
+              .withIndex("by_user_handle", (q) =>
+                q.eq("userId", userId).eq("handle", normalizedHandle),
+              )
               .unique();
             if (!hasUsernameHandle) {
               await ctx.db.insert("contactHandles", {
@@ -867,6 +899,7 @@ export async function syncLinkedInContactsInternal(
                 handle: normalizedHandle,
                 platform: "linkedin",
               });
+              mergeCheckContactId = existingHandle.contactId;
             }
           }
         }
@@ -900,6 +933,8 @@ export async function syncLinkedInContactsInternal(
           });
         }
 
+        mergeCheckContactId = contactId;
+
         result.newContacts++;
         newContactsInfo.push({
           contactId,
@@ -907,8 +942,14 @@ export async function syncLinkedInContactsInternal(
           profileUrl: contact.profileUrl,
         });
       }
+
+      if (mergeCheckContactId) {
+        await scheduleContactMergeCheck(ctx, userId, mergeCheckContactId);
+      }
     } catch (e) {
-      result.errors.push(logSyncError("LinkedIn", "sync contact", contact.name, e));
+      result.errors.push(
+        logSyncError("LinkedIn", "sync contact", contact.name, e),
+      );
     }
   }
 
@@ -935,12 +976,19 @@ export async function syncLinkedInContactsInternal(
     const user = await ctx.db.get(userId);
     if (user) {
       await ctx.db.patch(userId, {
-        pendingActionCount: (user.pendingActionCount ?? 0) + result.actionsCreated,
+        pendingActionCount:
+          (user.pendingActionCount ?? 0) + result.actionsCreated,
       });
     }
   }
 
-  await incrementSyncCursorStat(ctx, userId, "linkedin", "totalContactsSynced", result.newContacts);
+  await incrementSyncCursorStat(
+    ctx,
+    userId,
+    "linkedin",
+    "totalContactsSynced",
+    result.newContacts,
+  );
   await getOrCreateIntegration(ctx, userId, "linkedin");
   await clearIntegrationError(ctx, userId, "linkedin");
 

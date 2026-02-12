@@ -10,7 +10,7 @@
  */
 
 import { convexTest } from "convex-test";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import schema from "../convex/schema";
 import { modules } from "./test.setup";
 import {
@@ -24,6 +24,7 @@ import {
 } from "./helpers.util";
 import { useSchedulerCleanup } from "./schedulerCleanup.util";
 import { api } from "../convex/_generated/api";
+import { getOrCreateContact } from "../convex/sync/shared";
 
 const { trackTest } = useSchedulerCleanup();
 
@@ -37,16 +38,72 @@ async function setupAuthenticatedUser(t: ReturnType<typeof convexTest>) {
 
   // Create user in database with matching workosUserId
   const userId = await t.run(async (ctx) => {
-    return ctx.db.insert("users", createTestUserData({
-      workosUserId: identity.subject,
-      pendingActionCount: 0,
-    }));
+    return ctx.db.insert(
+      "users",
+      createTestUserData({
+        workosUserId: identity.subject,
+        pendingActionCount: 0,
+      }),
+    );
   });
 
   return { asUser, userId, identity };
 }
 
 describe("sync", () => {
+  describe("shared contact resolution scheduling", () => {
+    it("schedules event-driven merge checks when displayName improves (shared path)", async () => {
+      const t = trackTest(convexTest(schema, modules));
+      const { userId } = await setupAuthenticatedUser(t);
+
+      await t.run(async (ctx) => {
+        const placeholderContactId = await ctx.db.insert(
+          "contacts",
+          createTestContactData(userId, {
+            displayName: "+15551234567",
+          }),
+        );
+        await ctx.db.insert(
+          "contactHandles",
+          createTestContactHandleData(userId, placeholderContactId, {
+            handleType: "phone",
+            handle: "+15551234567",
+            platform: "signal",
+          }),
+        );
+
+        await ctx.db.insert(
+          "contacts",
+          createTestContactData(userId, {
+            displayName: "Alice Johnson",
+          }),
+        );
+
+        await getOrCreateContact(
+          ctx,
+          userId,
+          "signal",
+          [{ value: "+15551234567", type: "phone" }],
+          "Alice Johnson",
+        );
+      });
+
+      await t.finishAllScheduledFunctions(() => vi.runOnlyPendingTimers());
+
+      await t.run(async (ctx) => {
+        const pendingSuggestions = await ctx.db
+          .query("mergeSuggestions")
+          .withIndex("by_user_status", (q) =>
+            q.eq("userId", userId).eq("status", "pending"),
+          )
+          .collect();
+
+        expect(pendingSuggestions).toHaveLength(1);
+        expect(pendingSuggestions[0].source).toBe("exact_name_match");
+      });
+    });
+  });
+
   // ============================================================================
   // iMessage Sync Tests (syncMessages)
   // ============================================================================
@@ -62,7 +119,7 @@ describe("sync", () => {
             messages: [],
             handles: [],
           },
-        })
+        }),
       ).rejects.toThrow("Unauthorized");
     });
 
@@ -85,9 +142,7 @@ describe("sync", () => {
             },
           ],
           messages: [],
-          handles: [
-            { id: 1, identifier: "+15551234567", service: "iMessage" },
-          ],
+          handles: [{ id: 1, identifier: "+15551234567", service: "iMessage" }],
         },
       });
 
@@ -137,12 +192,14 @@ describe("sync", () => {
               isRead: true,
               readAt: null,
               hasAttachments: false,
-              sender: { id: 1, identifier: "+15551234567", service: "iMessage" },
+              sender: {
+                id: 1,
+                identifier: "+15551234567",
+                service: "iMessage",
+              },
             },
           ],
-          handles: [
-            { id: 1, identifier: "+15551234567", service: "iMessage" },
-          ],
+          handles: [{ id: 1, identifier: "+15551234567", service: "iMessage" }],
         },
       });
 
@@ -202,12 +259,14 @@ describe("sync", () => {
               isRead: true,
               readAt: null,
               hasAttachments: false,
-              sender: { id: 1, identifier: "+15559876543", service: "iMessage" },
+              sender: {
+                id: 1,
+                identifier: "+15559876543",
+                service: "iMessage",
+              },
             },
           ],
-          handles: [
-            { id: 1, identifier: "+15559876543", service: "iMessage" },
-          ],
+          handles: [{ id: 1, identifier: "+15559876543", service: "iMessage" }],
         },
       });
 
@@ -240,14 +299,20 @@ describe("sync", () => {
 
       // Create existing contact with handle
       const contactId = await t.run(async (ctx) => {
-        const id = await ctx.db.insert("contacts", createTestContactData(userId, {
-          displayName: "Alice Smith",
-        }));
-        await ctx.db.insert("contactHandles", createTestContactHandleData(userId, id, {
-          handleType: "phone",
-          handle: "+15551234567",
-          platform: "imessage",
-        }));
+        const id = await ctx.db.insert(
+          "contacts",
+          createTestContactData(userId, {
+            displayName: "Alice Smith",
+          }),
+        );
+        await ctx.db.insert(
+          "contactHandles",
+          createTestContactHandleData(userId, id, {
+            handleType: "phone",
+            handle: "+15551234567",
+            platform: "imessage",
+          }),
+        );
         return id;
       });
 
@@ -275,12 +340,14 @@ describe("sync", () => {
               isRead: true,
               readAt: null,
               hasAttachments: false,
-              sender: { id: 1, identifier: "+15551234567", service: "iMessage" },
+              sender: {
+                id: 1,
+                identifier: "+15551234567",
+                service: "iMessage",
+              },
             },
           ],
-          handles: [
-            { id: 1, identifier: "+15551234567", service: "iMessage" },
-          ],
+          handles: [{ id: 1, identifier: "+15551234567", service: "iMessage" }],
         },
       });
 
@@ -337,9 +404,7 @@ describe("sync", () => {
               sender: null,
             },
           ],
-          handles: [
-            { id: 1, identifier: "+15551234567", service: "iMessage" },
-          ],
+          handles: [{ id: 1, identifier: "+15551234567", service: "iMessage" }],
         },
       });
 
@@ -452,7 +517,11 @@ describe("sync", () => {
               isRead: true,
               readAt: null,
               hasAttachments: false,
-              sender: { id: 1, identifier: "user@example.com", service: "iMessage" },
+              sender: {
+                id: 1,
+                identifier: "user@example.com",
+                service: "iMessage",
+              },
             },
           ],
           handles: [
@@ -485,7 +554,7 @@ describe("sync", () => {
         t.mutation(api.sync.syncGmailMessages, {
           workosUserId: "unknown_user",
           emails: [],
-        })
+        }),
       ).rejects.toThrow("User not found");
     });
 
@@ -731,14 +800,20 @@ describe("sync", () => {
 
       // Create contact with gmail handle
       const contactId = await t.run(async (ctx) => {
-        const id = await ctx.db.insert("contacts", createTestContactData(userId, {
-          displayName: "Alice",
-        }));
-        await ctx.db.insert("contactHandles", createTestContactHandleData(userId, id, {
-          handleType: "email",
-          handle: "alice@gmail.com",
-          platform: "gmail",
-        }));
+        const id = await ctx.db.insert(
+          "contacts",
+          createTestContactData(userId, {
+            displayName: "Alice",
+          }),
+        );
+        await ctx.db.insert(
+          "contactHandles",
+          createTestContactHandleData(userId, id, {
+            handleType: "email",
+            handle: "alice@gmail.com",
+            platform: "gmail",
+          }),
+        );
         return id;
       });
 
@@ -767,7 +842,11 @@ describe("sync", () => {
               isRead: true,
               readAt: null,
               hasAttachments: false,
-              sender: { id: 1, identifier: "ALICE@gmail.com", service: "iMessage" },
+              sender: {
+                id: 1,
+                identifier: "ALICE@gmail.com",
+                service: "iMessage",
+              },
             },
           ],
           handles: [
@@ -816,12 +895,14 @@ describe("sync", () => {
               isRead: true,
               readAt: null,
               hasAttachments: false,
-              sender: { id: 1, identifier: "+15559999999", service: "iMessage" },
+              sender: {
+                id: 1,
+                identifier: "+15559999999",
+                service: "iMessage",
+              },
             },
           ],
-          handles: [
-            { id: 1, identifier: "+15559999999", service: "iMessage" },
-          ],
+          handles: [{ id: 1, identifier: "+15559999999", service: "iMessage" }],
         },
       });
 
@@ -852,15 +933,21 @@ describe("sync", () => {
 
       // Create a contact with phone handle stored as +1 format
       const contactId = await t.run(async (ctx) => {
-        const id = await ctx.db.insert("contacts", createTestContactData(userId, {
-          displayName: "Alice Smith",
-        }));
+        const id = await ctx.db.insert(
+          "contacts",
+          createTestContactData(userId, {
+            displayName: "Alice Smith",
+          }),
+        );
         // Store the handle with +1 format
-        await ctx.db.insert("contactHandles", createTestContactHandleData(userId, id, {
-          handleType: "phone",
-          handle: "+15551234567",
-          platform: "imessage",
-        }));
+        await ctx.db.insert(
+          "contactHandles",
+          createTestContactHandleData(userId, id, {
+            handleType: "phone",
+            handle: "+15551234567",
+            platform: "imessage",
+          }),
+        );
         return id;
       });
 
@@ -901,7 +988,11 @@ describe("sync", () => {
               isRead: true,
               readAt: null,
               hasAttachments: false,
-              sender: { id: 1, identifier: "+15551234567", service: "iMessage" },
+              sender: {
+                id: 1,
+                identifier: "+15551234567",
+                service: "iMessage",
+              },
             },
             {
               id: 2,
@@ -1015,7 +1106,7 @@ describe("sync", () => {
         t.mutation(api.sync.updateSyncCursor, {
           platform: "imessage",
           cursor: "100",
-        })
+        }),
       ).rejects.toThrow("Unauthorized");
     });
 
@@ -1032,7 +1123,7 @@ describe("sync", () => {
         return ctx.db
           .query("syncCursors")
           .withIndex("by_user_platform", (q) =>
-            q.eq("userId", userId).eq("platform", "imessage")
+            q.eq("userId", userId).eq("platform", "imessage"),
           )
           .unique();
       });
@@ -1070,7 +1161,7 @@ describe("sync", () => {
         return ctx.db
           .query("syncCursors")
           .withIndex("by_user_platform", (q) =>
-            q.eq("userId", userId).eq("platform", "imessage")
+            q.eq("userId", userId).eq("platform", "imessage"),
           )
           .unique();
       });
@@ -1110,7 +1201,7 @@ describe("sync", () => {
         return ctx.db
           .query("syncCursors")
           .withIndex("by_user_platform", (q) =>
-            q.eq("userId", userId).eq("platform", "imessage")
+            q.eq("userId", userId).eq("platform", "imessage"),
           )
           .unique();
       });

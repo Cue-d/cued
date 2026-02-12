@@ -20,6 +20,7 @@ import {
   logSyncError,
 } from "./shared";
 import { batchFetchConversations, batchFetchMessages } from "./batchUtils";
+import { scheduleContactMergeCheck } from "../lib/contactMergeScheduling";
 
 // ============================================================================
 // Validators
@@ -73,7 +74,7 @@ export type BatchInput = Infer<typeof syncBatchInput>;
 export async function syncMessagesInternal(
   ctx: MutationCtx,
   userId: Id<"users">,
-  batch: BatchInput
+  batch: BatchInput,
 ) {
   const result = {
     cursor: batch.cursor,
@@ -88,22 +89,29 @@ export async function syncMessagesInternal(
     ctx,
     userId,
     "imessage",
-    conversationIds
+    conversationIds,
   );
   const conversationMap = new Map(
-    existingConversations.map((c) => [c.platformConversationId, c._id])
+    existingConversations.map((c) => [c.platformConversationId, c._id]),
   );
   // Track existing lastMessageAt to avoid overwriting with older timestamps (important for DESC sync)
   const existingLastMessageAt = new Map(
     existingConversations
       .filter((c) => c.lastMessageAt !== undefined)
-      .map((c) => [c._id, c.lastMessageAt!])
+      .map((c) => [c._id, c.lastMessageAt!]),
   );
 
   // OPTIMIZATION 2: Batch lookup existing messages by platformMessageId
   const messageIds = batch.messages.map((m) => String(m.id));
-  const existingMessages = await batchFetchMessages(ctx, userId, "imessage", messageIds);
-  const existingMessageSet = new Set(existingMessages.map((m) => m.platformMessageId));
+  const existingMessages = await batchFetchMessages(
+    ctx,
+    userId,
+    "imessage",
+    messageIds,
+  );
+  const existingMessageSet = new Set(
+    existingMessages.map((m) => m.platformMessageId),
+  );
 
   // OPTIMIZATION 3: Batch lookup handles → contacts for all senders
   const uniqueHandles = new Set<string>();
@@ -117,11 +125,9 @@ export async function syncMessagesInternal(
       uniqueHandles.add(normalizeHandle(p.identifier));
     }
   }
-  const handleToContact = await batchResolveHandles(
-    ctx,
-    userId,
-    [...uniqueHandles]
-  );
+  const handleToContact = await batchResolveHandles(ctx, userId, [
+    ...uniqueHandles,
+  ]);
 
   // Build chat ID lookup (iMessage chat.id -> Convex conversation._id)
   const chatIdMap = new Map<number, Id<"conversations">>();
@@ -149,7 +155,9 @@ export async function syncMessagesInternal(
           let contactId = handleToContact.get(normalizedHandle);
           if (!contactId) {
             // Create contact from handle
-            const handleType = participant.identifier.includes("@") ? "email" : "phone";
+            const handleType = participant.identifier.includes("@")
+              ? "email"
+              : "phone";
             const result = await getOrCreateContact(ctx, userId, "imessage", [
               { value: participant.identifier, type: handleType },
             ]);
@@ -172,7 +180,7 @@ export async function syncMessagesInternal(
           } else {
             // Fetch participant contacts to build display name
             const participantContacts = await Promise.all(
-              participantContactIds.map((id) => ctx.db.get(id))
+              participantContactIds.map((id) => ctx.db.get(id)),
             );
             const names = participantContacts
               .filter((c): c is NonNullable<typeof c> => c !== null)
@@ -196,7 +204,9 @@ export async function syncMessagesInternal(
       }
       result.chatsCount++;
     } catch (e) {
-      result.errors.push(logSyncError("iMessage", "sync chat", String(chat.id), e));
+      result.errors.push(
+        logSyncError("iMessage", "sync chat", String(chat.id), e),
+      );
     }
   }
 
@@ -227,7 +237,14 @@ export async function syncMessagesInternal(
 
     const conversationId = chatIdMap.get(message.chatId);
     if (!conversationId) {
-      result.errors.push(logSyncError("iMessage", "find conversation for message", String(message.chatId), "conversation not found"));
+      result.errors.push(
+        logSyncError(
+          "iMessage",
+          "find conversation for message",
+          String(message.chatId),
+          "conversation not found",
+        ),
+      );
       continue;
     }
 
@@ -238,7 +255,9 @@ export async function syncMessagesInternal(
       senderContactId = handleToContact.get(normalizedHandle);
       if (!senderContactId) {
         // Create contact from handle
-        const handleType = message.sender.identifier.includes("@") ? "email" : "phone";
+        const handleType = message.sender.identifier.includes("@")
+          ? "email"
+          : "phone";
         const result = await getOrCreateContact(ctx, userId, "imessage", [
           { value: message.sender.identifier, type: handleType },
         ]);
@@ -282,7 +301,10 @@ export async function syncMessagesInternal(
   // This prevents DESC sync batches from overwriting with older timestamps
   for (const [conversationId, update] of conversationUpdates) {
     const existingTimestamp = existingLastMessageAt.get(conversationId);
-    if (existingTimestamp === undefined || update.timestamp > existingTimestamp) {
+    if (
+      existingTimestamp === undefined ||
+      update.timestamp > existingTimestamp
+    ) {
       await ctx.db.patch(conversationId, {
         lastMessageText: update.text,
         lastMessageAt: update.timestamp,
@@ -333,7 +355,7 @@ export async function syncContactsInternal(
   ctx: MutationCtx,
   userId: Id<"users">,
   contacts: ContactInput[],
-  platform: "imessage" | "signal" = "imessage"
+  platform: "imessage" | "signal" = "imessage",
 ) {
   const result = {
     contactsCount: 0,
@@ -344,7 +366,12 @@ export async function syncContactsInternal(
 
   for (const contact of contacts) {
     try {
-      const syncResult = await upsertContactWithHandles(ctx, userId, contact, platform);
+      const syncResult = await upsertContactWithHandles(
+        ctx,
+        userId,
+        contact,
+        platform,
+      );
       if (syncResult.isNew) {
         result.contactsCount++;
       } else {
@@ -352,7 +379,9 @@ export async function syncContactsInternal(
       }
       result.handlesCount += syncResult.handlesAdded;
     } catch (e) {
-      result.errors.push(logSyncError(platform, "sync contact", contact.displayName, e));
+      result.errors.push(
+        logSyncError(platform, "sync contact", contact.displayName, e),
+      );
     }
   }
 
@@ -365,7 +394,7 @@ export async function syncContactsInternal(
 export async function findContactByHandle(
   ctx: MutationCtx,
   userId: Id<"users">,
-  handle: { value: string; type: "phone" | "email" }
+  handle: { value: string; type: "phone" | "email" },
 ): Promise<Id<"contacts"> | null> {
   const variants =
     handle.type === "phone"
@@ -376,7 +405,7 @@ export async function findContactByHandle(
     const existing = await ctx.db
       .query("contactHandles")
       .withIndex("by_user_handle", (q) =>
-        q.eq("userId", userId).eq("handle", variant)
+        q.eq("userId", userId).eq("handle", variant),
       )
       .first();
 
@@ -395,8 +424,12 @@ async function upsertContactWithHandles(
   ctx: MutationCtx,
   userId: Id<"users">,
   contact: ContactInput,
-  platform: "imessage" | "signal" = "imessage"
-): Promise<{ isNew: boolean; handlesAdded: number; contactId: Id<"contacts"> }> {
+  platform: "imessage" | "signal" = "imessage",
+): Promise<{
+  isNew: boolean;
+  handlesAdded: number;
+  contactId: Id<"contacts">;
+}> {
   // Collect all normalized handles, filtering out empty values
   const handles = [
     ...contact.phoneNumbers.map((p) => ({
@@ -427,18 +460,23 @@ async function upsertContactWithHandles(
   // Use displayName if provided, otherwise use first handle as placeholder
   const displayName = hasValidDisplayName
     ? contact.displayName
-    : handles[0]?.value ?? "";
+    : (handles[0]?.value ?? "");
 
   const contactData = {
     displayName,
     company: contact.company ?? undefined,
   };
 
+  let displayNameUpdated = false;
   if (contactId) {
     const existing = await ctx.db.get(contactId);
     const primaryHandle = handles[0]?.value ?? "";
-    if (existing && shouldUpdateDisplayName(existing.displayName, displayName, primaryHandle)) {
+    if (
+      existing &&
+      shouldUpdateDisplayName(existing.displayName, displayName, primaryHandle)
+    ) {
       await ctx.db.patch(contactId, { displayName });
+      displayNameUpdated = true;
     }
     if (contactData.company) {
       await ctx.db.patch(contactId, { company: contactData.company });
@@ -449,15 +487,18 @@ async function upsertContactWithHandles(
 
   // Add missing handles or update mislinked ones
   let handlesAdded = 0;
+  let handlesRelinked = false;
   for (const handle of handles) {
     const existingHandles = await ctx.db
       .query("contactHandles")
       .withIndex("by_user_handle", (q) =>
-        q.eq("userId", userId).eq("handle", handle.value)
+        q.eq("userId", userId).eq("handle", handle.value),
       )
       .collect();
 
-    const existingForPlatform = existingHandles.find((h) => h.platform === platform);
+    const existingForPlatform = existingHandles.find(
+      (h) => h.platform === platform,
+    );
     const existingAny = existingHandles[0];
 
     if (!existingAny) {
@@ -484,10 +525,16 @@ async function upsertContactWithHandles(
       // Fix mislinked handles
       if (existingAny.contactId !== contactId) {
         await ctx.db.patch(existingAny._id, { contactId });
+        handlesRelinked = true;
       }
     } else if (existingForPlatform.contactId !== contactId) {
       await ctx.db.patch(existingForPlatform._id, { contactId });
+      handlesRelinked = true;
     }
+  }
+
+  if (isNew || displayNameUpdated || handlesAdded > 0 || handlesRelinked) {
+    await scheduleContactMergeCheck(ctx, userId, contactId);
   }
 
   return { isNew, handlesAdded, contactId };
