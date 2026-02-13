@@ -6,7 +6,6 @@
  *
  * Platform handlers:
  * - ./sync/imessage.ts - iMessage and macOS Contacts sync
- * - ./sync/gmail.ts - Gmail emails and Google Contacts sync
  * - ./sync/slack.ts - Slack messages sync
  * - ./sync/linkedin.ts - LinkedIn messages and contacts sync
  * - ./sync/twitter.ts - Twitter/X messages and contacts sync
@@ -29,7 +28,6 @@ import {
   CURRENT_SYNC_VERSION,
   upsertSyncCursor,
   clearIntegrationError,
-  MAX_GMAIL_ACCOUNTS,
   logSyncError,
   incrementSyncCursorStat,
 } from "./sync/shared";
@@ -39,12 +37,6 @@ import {
   contactInput,
   syncContactsInternal,
 } from "./sync/imessage";
-import {
-  gmailEmailInput,
-  syncGmailMessagesInternal,
-  googleContactInput,
-  syncGoogleContactsInternal,
-} from "./sync/gmail";
 import {
   nativeSlackConversationInput,
   nativeSlackMessageInput,
@@ -137,7 +129,7 @@ export const syncContacts = mutation({
 
 /**
  * Get the sync cursor for a platform from the syncCursors table.
- * For multi-workspace platforms (Gmail, Slack), workspaceId is required.
+ * For multi-workspace platforms (Slack), workspaceId is required.
  */
 export const getSyncCursor = query({
   args: {
@@ -171,7 +163,7 @@ export const getSyncCursor = query({
 /**
  * Get full sync state for a platform, including metadata for recovery decisions.
  * Combines data from syncCursors (sync state) and integrations (connection state).
- * For multi-workspace platforms (Gmail, Slack), workspaceId is required.
+ * For multi-workspace platforms (Slack), workspaceId is required.
  */
 export const getSyncState = query({
   args: {
@@ -272,7 +264,7 @@ export const updateSyncMetadata = mutation({
 /**
  * Reset sync state to trigger full re-sync.
  * Clears cursor and message count so recovery flow triggers full sync.
- * For multi-workspace platforms (Gmail, Slack), workspaceId is required to reset specific workspace.
+ * For multi-workspace platforms (Slack), workspaceId is required to reset specific workspace.
  * Without workspaceId for multi-workspace platforms, resets ALL workspaces.
  */
 export const resetSyncState = mutation({
@@ -363,210 +355,6 @@ export const updateContactsSyncState = mutation({
     await clearIntegrationError(ctx, user._id, args.platform);
 
     return { success: true };
-  },
-});
-
-// ============================================================================
-// Gmail Sync
-// ============================================================================
-
-/**
- * Sync Gmail emails from Nango to Convex.
- * Called via API endpoint when Nango sync completes.
- * Supports multi-account via accountEmail parameter.
- */
-export const syncGmailMessages = mutation({
-  args: {
-    workosUserId: v.string(),
-    emails: v.array(gmailEmailInput),
-    /** Gmail account email for multi-account support (workspaceId) */
-    accountEmail: v.optional(v.string()),
-    /** Nango cursor from _nango_metadata.cursor for precise incremental sync */
-    nangoCursor: v.optional(v.string()),
-    /** Sync mode: 'full' on initial sync, 'incremental' otherwise */
-    syncMode: v.optional(v.union(v.literal("full"), v.literal("incremental"))),
-  },
-  handler: async (ctx, args) => {
-    const user = await findUserByWorkosId(ctx, args.workosUserId);
-    if (!user) {
-      throw new Error(`User not found for WorkOS ID: ${args.workosUserId}`);
-    }
-
-    // Check multi-account limit if this is a new account
-    if (args.accountEmail) {
-      const existingCursors = await ctx.db
-        .query("syncCursors")
-        .withIndex("by_user_platform", (q) =>
-          q.eq("userId", user._id).eq("platform", "gmail")
-        )
-        .collect();
-
-      const isNewAccount = !existingCursors.some(
-        (c) => c.workspaceId === args.accountEmail
-      );
-
-      if (isNewAccount && existingCursors.length >= MAX_GMAIL_ACCOUNTS) {
-        throw new Error(
-          `Maximum Gmail accounts (${MAX_GMAIL_ACCOUNTS}) reached. Disconnect an account before adding a new one.`
-        );
-      }
-
-      // Update cursor state for this Gmail account
-      // Store Nango cursor for precise incremental sync (more reliable than historyId)
-      const now = Date.now();
-      const cursorData = {
-        nangoCursor: args.nangoCursor,
-        lastSyncAt: now,
-        messageCount: args.emails.length,
-      };
-
-      const existing = await ctx.db
-        .query("syncCursors")
-        .withIndex("by_user_platform_workspace", (q) =>
-          q
-            .eq("userId", user._id)
-            .eq("platform", "gmail")
-            .eq("workspaceId", args.accountEmail)
-        )
-        .unique();
-
-      if (existing) {
-        await ctx.db.patch(existing._id, {
-          cursorData,
-          lastSyncAt: now,
-          syncMode: args.syncMode ?? "incremental",
-          totalMessagesSynced: (existing.totalMessagesSynced ?? 0) + args.emails.length,
-        });
-      } else {
-        await ctx.db.insert("syncCursors", {
-          userId: user._id,
-          platform: "gmail",
-          workspaceId: args.accountEmail,
-          cursorData,
-          lastSyncAt: now,
-          syncMode: args.syncMode ?? "full",
-          totalMessagesSynced: args.emails.length,
-        });
-      }
-    }
-
-    return syncGmailMessagesInternal(ctx, user._id, args.emails, args.accountEmail);
-  },
-});
-
-/**
- * Get Gmail cursor state for a specific account.
- * Used by pull endpoint to get stored Nango cursor for incremental sync.
- * Accepts workosUserId for API route access (no auth context).
- *
- * Security note: This query allows workosUserId to bypass auth context.
- * This is intentional for server-side API routes that don't have Convex auth.
- * The workosUserId should never be exposed to client-side code.
- * Only sync cursor metadata is returned (no sensitive data).
- */
-export const getGmailCursor = query({
-  args: {
-    accountEmail: v.string(),
-    /** WorkOS user ID for API route access (bypasses auth). Server-side only. */
-    workosUserId: v.optional(v.string()),
-  },
-  handler: async (ctx, args) => {
-    // Resolve workosUserId from arg (API route) or auth context
-    const workosUserId = args.workosUserId ?? (await ctx.auth.getUserIdentity())?.subject;
-    if (!workosUserId) {
-      return null;
-    }
-
-    const user = await findUserByWorkosId(ctx, workosUserId);
-    if (!user) {
-      return null;
-    }
-
-    const cursor = await ctx.db
-      .query("syncCursors")
-      .withIndex("by_user_platform_workspace", (q) =>
-        q
-          .eq("userId", user._id)
-          .eq("platform", "gmail")
-          .eq("workspaceId", args.accountEmail)
-      )
-      .unique();
-
-    if (!cursor) {
-      return null;
-    }
-
-    return {
-      cursorData: cursor.cursorData as { nangoCursor?: string },
-      lastSyncAt: cursor.lastSyncAt,
-      syncMode: cursor.syncMode,
-    };
-  },
-});
-
-/**
- * Handle Gmail cursor expiration.
- * Called when Nango sync needs to reset - clears cursor for full resync.
- */
-export const handleGmailHistoryExpiration = mutation({
-  args: {
-    workosUserId: v.string(),
-    accountEmail: v.string(),
-  },
-  handler: async (ctx, args) => {
-    const user = await findUserByWorkosId(ctx, args.workosUserId);
-    if (!user) {
-      throw new Error(`User not found for WorkOS ID: ${args.workosUserId}`);
-    }
-
-    const cursor = await ctx.db
-      .query("syncCursors")
-      .withIndex("by_user_platform_workspace", (q) =>
-        q
-          .eq("userId", user._id)
-          .eq("platform", "gmail")
-          .eq("workspaceId", args.accountEmail)
-      )
-      .unique();
-
-    if (cursor) {
-      // Clear nangoCursor and set to full sync mode
-      await ctx.db.patch(cursor._id, {
-        cursorData: {
-          nangoCursor: null,
-          cursorExpiredAt: Date.now(),
-          lastSyncAt: cursor.lastSyncAt,
-        },
-        syncMode: "full",
-      });
-    }
-
-    return { reset: true };
-  },
-});
-
-/**
- * Sync Google Contacts from Nango to Convex.
- * Called via API endpoint when Nango sync completes.
- *
- * This mutation:
- * 1. Upserts contacts by email/phone handle
- * 2. Links handles to contact records
- * 3. Merges with existing iMessage contacts by phone number
- * 4. Handles deleted contacts from Google
- */
-export const syncGoogleContacts = mutation({
-  args: {
-    workosUserId: v.string(),
-    contacts: v.array(googleContactInput),
-  },
-  handler: async (ctx, args) => {
-    const user = await findUserByWorkosId(ctx, args.workosUserId);
-    if (!user) {
-      throw new Error(`User not found for WorkOS ID: ${args.workosUserId}`);
-    }
-
-    return syncGoogleContactsInternal(ctx, user._id, args.contacts);
   },
 });
 

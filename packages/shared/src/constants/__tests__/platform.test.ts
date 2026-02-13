@@ -8,7 +8,6 @@ import {
 describe("PLATFORM_CONFIG", () => {
   const platforms: ActionPlatform[] = [
     "imessage",
-    "gmail",
     "slack",
     "linkedin",
     "twitter",
@@ -55,7 +54,6 @@ describe("PLATFORM_CONFIG", () => {
 describe("getPlatformConfig", () => {
   it("returns config for valid platform keys", () => {
     expect(getPlatformConfig("imessage")).toBe(PLATFORM_CONFIG.imessage);
-    expect(getPlatformConfig("gmail")).toBe(PLATFORM_CONFIG.gmail);
     expect(getPlatformConfig("slack")).toBe(PLATFORM_CONFIG.slack);
     expect(getPlatformConfig("linkedin")).toBe(PLATFORM_CONFIG.linkedin);
   });

@@ -139,7 +139,7 @@ describe("contacts", () => {
           createTestContactHandleData(userId, contactId, {
             handleType: "email",
             handle: "alice@example.com",
-            platform: "gmail",
+            platform: "imessage",
           }),
         );
       });
@@ -558,7 +558,7 @@ describe("contacts", () => {
           createTestContactHandleData(userId, c2, {
             handleType: "email",
             handle: "duplicate@example.com",
-            platform: "gmail",
+            platform: "imessage",
           }),
         );
 
@@ -569,7 +569,7 @@ describe("contacts", () => {
         contactId: contactA,
         handleType: "email",
         handle: "Duplicate@Example.com",
-        platform: "gmail",
+        platform: "imessage",
       });
 
       expect(addResult.success).toBe(true);
@@ -637,7 +637,7 @@ describe("contacts", () => {
           createTestContactHandleData(userId, contactId, {
             handleType: "email",
             handle: "delete.me@example.com",
-            platform: "gmail",
+            platform: "imessage",
           }),
         );
       });
@@ -717,7 +717,7 @@ describe("contacts", () => {
           createTestContactHandleData(userId, secondaryId, {
             handleType: "email",
             handle: "secondary@example.com",
-            platform: "gmail",
+            platform: "imessage",
           }),
         );
 
@@ -1711,7 +1711,7 @@ describe("contacts", () => {
         contactId: contactA,
         handleType: "email",
         handle: "a@example.com",
-        platform: "gmail",
+        platform: "imessage",
       });
 
       // Check: exactly one pending scanAllContactsForMerges
@@ -1732,7 +1732,7 @@ describe("contacts", () => {
         contactId: contactB,
         handleType: "email",
         handle: "b@example.com",
-        platform: "gmail",
+        platform: "imessage",
       });
 
       // Check: still exactly one pending scan

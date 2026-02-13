@@ -7,16 +7,6 @@ import {
   aggregateCursorStats,
 } from "./lib/cursors";
 import { platformValidator } from "./schema";
-import type { ActionPlatform } from "@cued/shared";
-
-// Map Nango integration IDs to our platform enum
-function nangoToPlatform(nangoIntegrationId: string): ActionPlatform | null {
-  const mapping: Record<string, ActionPlatform> = {
-    google: "gmail",
-    slack: "slack",
-  };
-  return mapping[nangoIntegrationId] ?? null;
-}
 
 export const getUserIntegrations = query({
   args: {},
@@ -40,26 +30,12 @@ export const getUserIntegrations = query({
     const cursorMap = buildCursorMap(cursors);
     const platformAggregates = buildPlatformAggregates(cursors);
 
-    // Build Gmail accounts list from integrations (each has its own nangoConnectionId)
-    const gmailAccounts = integrations
-      .filter((i) => i.platform === "gmail" && i.isConnected && i.accountEmail)
-      .map((i) => {
-        const cursor = cursorMap.get(`gmail:${i.accountEmail}`);
-        return {
-          workspaceId: i.accountEmail!,
-          nangoConnectionId: i.nangoConnectionId ?? null,
-          lastSyncAt: cursor?.lastSyncAt ?? null,
-          totalMessagesSynced: cursor?.totalMessagesSynced ?? 0,
-        };
-      });
-
     const slackWorkspaces = integrations
       .filter((i) => i.platform === "slack" && i.isConnected && i.slackTeamId)
       .map((i) => {
         const cursor = cursorMap.get(`slack:${i.slackTeamId}`);
         return {
           workspaceId: i.slackTeamId!,
-          nangoConnectionId: null, // Slack uses local auth, not Nango
           lastSyncAt: cursor?.lastSyncAt ?? null,
           totalMessagesSynced: cursor?.totalMessagesSynced ?? 0,
         };
@@ -76,9 +52,8 @@ export const getUserIntegrations = query({
           cursor = cursorMap.get(`slack:${int.slackTeamId}`);
         } else {
           // For non-workspace platforms (iMessage, LinkedIn), use platform key
-          // For Gmail without account email on integration, use aggregate
           cursor = cursorMap.get(int.platform);
-          if (!cursor && (int.platform === "gmail" || int.platform === "slack")) {
+          if (!cursor && int.platform === "slack") {
             // Multi-workspace platform without specific match: use aggregated stats
             aggregateStats = platformAggregates.get(int.platform);
           }
@@ -87,13 +62,10 @@ export const getUserIntegrations = query({
         // Attach accounts for multi-workspace platforms
         let accounts: Array<{
           workspaceId: string;
-          nangoConnectionId: string | null;
           lastSyncAt: number | null;
           totalMessagesSynced: number;
         }> | null = null;
-        if (int.platform === "gmail") {
-          accounts = gmailAccounts;
-        } else if (int.platform === "slack") {
+        if (int.platform === "slack") {
           accounts = slackWorkspaces;
         }
 
@@ -105,7 +77,6 @@ export const getUserIntegrations = query({
           lastError: int.lastError ?? null,
           totalMessagesSynced:
             cursor?.totalMessagesSynced ?? aggregateStats?.totalMessagesSynced ?? 0,
-          nangoConnectionId: int.nangoConnectionId ?? null,
           accounts,
         };
       }),
@@ -117,7 +88,6 @@ export const getIntegrationStatus = query({
   args: {
     platform: v.union(
       v.literal("imessage"),
-      v.literal("gmail"),
       v.literal("slack"),
       v.literal("linkedin"),
       v.literal("signal")
@@ -129,7 +99,7 @@ export const getIntegrationStatus = query({
       return null;
     }
 
-    // Use .collect() for multi-account platforms (Gmail can have multiple accounts)
+    // Use .collect() for multi-account platforms (Slack can have multiple workspaces)
     const integrations = await ctx.db
       .query("integrations")
       .withIndex("by_user_platform", (q) =>
@@ -141,7 +111,7 @@ export const getIntegrationStatus = query({
       return { isConnected: false };
     }
 
-    // Collect all cursors for this platform (supports multi-workspace: Slack, Gmail)
+    // Collect all cursors for this platform (supports multi-workspace: Slack)
     const cursors = await ctx.db
       .query("syncCursors")
       .withIndex("by_user_platform", (q) =>
@@ -169,17 +139,11 @@ export const getIntegrationStatus = query({
 
 /**
  * Get integration by WorkOS user ID and platform.
- * Task 5.8: Used by API routes to get Nango connection ID for message sending.
- *
- * For multi-account platforms (Gmail):
- * - If accountEmail is provided, returns that specific account
- * - Otherwise, returns the first connected account
  */
 export const getIntegration = query({
   args: {
     workosUserId: v.string(),
     platform: platformValidator,
-    accountEmail: v.optional(v.string()), // For Gmail multi-account: identifies which account
   },
   handler: async (ctx, args) => {
     const user = await findUserByWorkosId(ctx, args.workosUserId);
@@ -199,178 +163,14 @@ export const getIntegration = query({
       return null;
     }
 
-    // If accountEmail provided (for Gmail), find that specific account only
-    let integration;
-    if (args.accountEmail) {
-      integration = integrations.find((i) => i.accountEmail === args.accountEmail);
-      if (!integration) {
-        return null;
-      }
-    } else {
-      // Fall back to first connected integration, or just first if none connected
-      integration = integrations.find((i) => i.isConnected) ?? integrations[0];
-    }
+    // Return first connected integration, or just first if none connected
+    const integration = integrations.find((i) => i.isConnected) ?? integrations[0];
 
     return {
       _id: integration._id,
       platform: integration.platform,
-      nangoConnectionId: integration.nangoConnectionId ?? null,
       isConnected: integration.isConnected,
-      accountEmail: integration.accountEmail ?? null,
     };
-  },
-});
-
-/**
- * Connect a Nango integration. Called from webhook when user completes OAuth.
- * Uses WorkOS ID to find or create user.
- *
- * Multi-account support:
- * - For Gmail, allows multiple integrations per platform (one per Google account)
- * - Looks up by nangoConnectionId first, then falls back to (userId, platform) for single-account platforms
- */
-export const connectNango = mutation({
-  args: {
-    workosUserId: v.string(),
-    nangoIntegrationId: v.string(), // e.g., "google", "slack"
-    nangoConnectionId: v.string(),
-    email: v.optional(v.string()), // From endUser.endUserEmail (account email for Gmail)
-  },
-  handler: async (ctx, args) => {
-    const platform = nangoToPlatform(args.nangoIntegrationId);
-    if (!platform) {
-      throw new Error(`Unknown Nango integration: ${args.nangoIntegrationId}`);
-    }
-
-    // Find or create user
-    let user = await findUserByWorkosId(ctx, args.workosUserId);
-    if (!user) {
-      // Create user if they don't exist (first connection via Nango, no Electron sync yet)
-      const userId = await ctx.db.insert("users", {
-        workosUserId: args.workosUserId,
-        email: args.email ?? "",
-      });
-      user = await ctx.db.get(userId);
-      if (!user) {
-        throw new Error("Failed to create user");
-      }
-    }
-
-    // First, check if this exact connection already exists (re-connection case)
-    const existingByConnection = await ctx.db
-      .query("integrations")
-      .withIndex("by_nango_connection", (q) =>
-        q.eq("nangoConnectionId", args.nangoConnectionId)
-      )
-      .unique();
-
-    if (existingByConnection) {
-      // Verify user owns this integration (security check)
-      if (existingByConnection.userId !== user._id) {
-        throw new Error("Integration belongs to another user");
-      }
-      // Update existing integration (same connection reconnecting)
-      await ctx.db.patch(existingByConnection._id, {
-        connectedAt: Date.now(),
-        isConnected: true,
-        lastError: undefined,
-        accountEmail: args.email, // Update account email if provided
-      });
-      return { integrationId: existingByConnection._id, updated: true };
-    }
-
-    // For Gmail: check if an integration already exists for this account email
-    // This handles the case where Nango issues a new connectionId for the same Google account
-    if (platform === "gmail" && args.email) {
-      const existingByAccount = await ctx.db
-        .query("integrations")
-        .withIndex("by_user_platform_account", (q) =>
-          q.eq("userId", user._id).eq("platform", "gmail").eq("accountEmail", args.email)
-        )
-        .unique();
-
-      if (existingByAccount) {
-        // Update existing Gmail integration for this account (new connectionId for same account)
-        await ctx.db.patch(existingByAccount._id, {
-          nangoConnectionId: args.nangoConnectionId,
-          connectedAt: Date.now(),
-          isConnected: true,
-          lastError: undefined,
-        });
-        return { integrationId: existingByAccount._id, updated: true };
-      }
-    }
-
-    // For single-account platforms, check if one already exists
-    if (platform !== "gmail") {
-      const existingByPlatform = await ctx.db
-        .query("integrations")
-        .withIndex("by_user_platform", (q) =>
-          q.eq("userId", user._id).eq("platform", platform)
-        )
-        .unique();
-
-      if (existingByPlatform) {
-        // Update existing single-account integration
-        await ctx.db.patch(existingByPlatform._id, {
-          nangoConnectionId: args.nangoConnectionId,
-          connectedAt: Date.now(),
-          isConnected: true,
-          lastError: undefined,
-        });
-        return { integrationId: existingByPlatform._id, updated: true };
-      }
-    }
-
-    // Create new integration
-    const integrationId = await ctx.db.insert("integrations", {
-      userId: user._id,
-      platform,
-      nangoConnectionId: args.nangoConnectionId,
-      accountEmail: platform === "gmail" ? args.email : undefined,
-      connectedAt: Date.now(),
-      isConnected: true,
-    });
-
-    return { integrationId, updated: false };
-  },
-});
-
-/**
- * Disconnect a Nango integration. Called from webhook when connection is deleted.
- * Uses by_nango_connection index for efficient lookup.
- */
-export const disconnectNango = mutation({
-  args: {
-    workosUserId: v.string(),
-    nangoConnectionId: v.string(),
-  },
-  handler: async (ctx, args) => {
-    // Find integration by nangoConnectionId directly (efficient index lookup)
-    const integration = await ctx.db
-      .query("integrations")
-      .withIndex("by_nango_connection", (q) =>
-        q.eq("nangoConnectionId", args.nangoConnectionId)
-      )
-      .unique();
-
-    if (!integration) {
-      return { success: false, error: "Integration not found" };
-    }
-
-    // Verify user owns this integration (security check)
-    const user = await findUserByWorkosId(ctx, args.workosUserId);
-    if (!user || integration.userId !== user._id) {
-      return { success: false, error: "User mismatch" };
-    }
-
-    // Update to disconnected state
-    await ctx.db.patch(integration._id, {
-      nangoConnectionId: undefined,
-      isConnected: false,
-    });
-
-    return { success: true };
   },
 });
 
@@ -703,7 +503,6 @@ export const debugIntegrationDetails = query({
       return {
         _id: i._id,
         platform: i.platform,
-        nangoConnectionId: i.nangoConnectionId ?? null,
         slackTeamId: i.slackTeamId ?? null,
         isConnected: i.isConnected,
         lastSyncAt: cursor?.lastSyncAt
@@ -715,84 +514,3 @@ export const debugIntegrationDetails = query({
   },
 });
 
-/**
- * Debug: Get Gmail integration stats.
- * Scoped to the authenticated user only.
- */
-export const debugGmailStats = query({
-  args: {},
-  handler: async (ctx) => {
-    const user = await getAuthenticatedUser(ctx);
-    if (!user) {
-      return null;
-    }
-
-    // Get user's Gmail integrations
-    const userIntegrations = await ctx.db
-      .query("integrations")
-      .withIndex("by_user", (q) => q.eq("userId", user._id))
-      .collect();
-    const gmailIntegrations = userIntegrations.filter((i) => i.platform === "gmail");
-
-    // Get user's Gmail sync cursors
-    const userCursors = await ctx.db
-      .query("syncCursors")
-      .withIndex("by_user_platform", (q) => q.eq("userId", user._id))
-      .collect();
-    const gmailCursors = userCursors.filter((c) => c.platform === "gmail");
-
-    // Aggregate cursor stats (supports multiple Gmail accounts per user)
-    let totalMessagesSynced = 0;
-    let totalContactsSynced = 0;
-    let lastSyncAt = 0;
-    const accounts: string[] = [];
-    for (const cursor of gmailCursors) {
-      totalMessagesSynced += cursor.totalMessagesSynced ?? 0;
-      totalContactsSynced += cursor.totalContactsSynced ?? 0;
-      lastSyncAt = Math.max(lastSyncAt, cursor.lastSyncAt ?? 0);
-      accounts.push(cursor.workspaceId ?? "unknown");
-    }
-
-    // Sample user's Gmail conversations
-    const userConversations = await ctx.db
-      .query("conversations")
-      .withIndex("by_user_platform", (q) =>
-        q.eq("userId", user._id).eq("platform", "gmail")
-      )
-      .order("desc")
-      .take(100);
-
-    // Sample user's Gmail messages (messages table doesn't have by_user_platform index)
-    const recentMessages = await ctx.db
-      .query("messages")
-      .withIndex("by_user_sent_at", (q) => q.eq("userId", user._id))
-      .order("desc")
-      .take(200);
-    const userMessages = recentMessages.filter((m) => m.platform === "gmail").slice(0, 100);
-
-    return {
-      integrations: gmailIntegrations.map((i) => ({
-        _id: i._id,
-        isConnected: i.isConnected,
-        lastSyncAt: lastSyncAt ? new Date(lastSyncAt).toISOString() : null,
-        totalMessagesSynced,
-        totalContactsSynced,
-        hasNangoConnection: !!i.nangoConnectionId,
-        accounts,
-      })),
-      stats: {
-        conversationSample: userConversations.length,
-        messageSample: userMessages.length,
-        note: "Counts are sampled from last 100 records",
-      },
-      sampleConversations: userConversations.slice(0, 5).map((c) => ({
-        _id: c._id,
-        displayName: c.displayName,
-        lastMessageAt: c.lastMessageAt
-          ? new Date(c.lastMessageAt).toISOString()
-          : null,
-        lastMessagePreview: c.lastMessageText?.slice(0, 50),
-      })),
-    };
-  },
-});

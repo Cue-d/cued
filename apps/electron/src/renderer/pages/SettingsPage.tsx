@@ -409,16 +409,6 @@ function IntegrationsContent({ sync }: { sync: ReturnType<typeof useUnifiedSync>
   const { isConnected: slackConnected, workspaces: slackWorkspaces, isLoading: slackLoading, login: slackLogin, disconnect: slackDisconnect } = useSlack()
   const { isLoggedIn: signalLoggedIn, isLoading: signalLoading, setup: signalSetup, openLinkTerminal: signalOpenLink, checkLink: signalCheckLink, logout: signalLogout } = useSignal()
   const [signalDialogOpen, setSignalDialogOpen] = React.useState(false)
-  const electron = useElectron()
-  const gmailStatus = useQuery(api.integrations.getIntegrationStatus, { platform: "gmail" })
-  const gmailConnected = gmailStatus?.isConnected ?? false
-  const gmailLoading = gmailStatus === undefined
-  const [appUrl, setAppUrl] = React.useState<string>("https://www.cued.so")
-
-  React.useEffect(() => {
-    electron.config.getAppUrl().then(setAppUrl)
-  }, [electron])
-
   const totalMessages =
     (sync.progress.platforms.imessage?.messages ?? 0) +
     (sync.progress.platforms.linkedin?.messages ?? 0) +
@@ -589,29 +579,6 @@ function IntegrationsContent({ sync }: { sync: ReturnType<typeof useUnifiedSync>
                 openLinkTerminal={signalOpenLink}
                 checkLink={signalCheckLink}
               />
-
-              {/* Gmail */}
-              <SettingsSection title="Gmail" description={gmailLoading ? "Checking..." : gmailConnected ? "Connected" : "Not connected"}>
-                <SettingsCard>
-                  <SettingsRow
-                    label="Connection"
-                    description={gmailConnected ? "Emails will sync automatically" : "Connect via web app to sync Gmail"}
-                  >
-                    {gmailConnected && (
-                      <Badge variant="secondary" className="bg-green-500/10 text-green-500 mr-2">
-                        Connected
-                      </Badge>
-                    )}
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => electron.shell.openExternal(`${appUrl}/settings/integrations`)}
-                    >
-                      {gmailConnected ? "Manage" : "Connect"}
-                    </Button>
-                  </SettingsRow>
-                </SettingsCard>
-              </SettingsSection>
             </div>
           </div>
         </ScrollArea>

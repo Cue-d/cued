@@ -1,5 +1,5 @@
 // Minimal local types for demo data — no @cued/shared imports needed
-export type DemoPlatform = "imessage" | "gmail" | "slack" | "linkedin";
+export type DemoPlatform = "imessage" | "slack" | "linkedin";
 
 export interface DemoMessage {
   id: string;
@@ -9,7 +9,7 @@ export interface DemoMessage {
 }
 
 export interface DemoHandle {
-  type: "phone" | "email" | "slack_id" | "linkedin_handle";
+  type: "phone" | "slack_id" | "linkedin_handle";
   value: string;
   platform: DemoPlatform;
 }
@@ -127,8 +127,8 @@ export const DEMO_CARDS: DemoCard[] = [
   },
   {
     type: "message",
-    id: "msg-gmail",
-    platform: "gmail",
+    id: "msg-slack-2",
+    platform: "slack",
     personName: "James Park",
     messages: [
       {
@@ -198,13 +198,13 @@ export const DEMO_CARDS: DemoCard[] = [
       name: "Michael Johnson",
       company: "Stripe",
       handles: [
-        { type: "email", value: "mike.j@stripe.com", platform: "gmail" },
+        { type: "slack_id", value: "U04MIKEJ", platform: "slack" },
       ],
     },
     confidence: 0.92,
     source: "fuzzy_name_match",
     reasoning:
-      "Same company, similar name pattern. Likely the same person across iMessage and Gmail.",
+      "Same company, similar name pattern. Likely the same person across iMessage and Slack.",
   },
   {
     type: "contact",
@@ -274,8 +274,8 @@ export const DEMO_CARDS: DemoCard[] = [
   },
   {
     type: "message",
-    id: "msg-gmail-2",
-    platform: "gmail",
+    id: "msg-linkedin-2",
+    platform: "linkedin",
     personName: "Ryan Kessler",
     messages: [
       {
@@ -318,7 +318,7 @@ export const DEMO_CARDS: DemoCard[] = [
       name: "Emily Zhang",
       company: "Anthropic",
       handles: [
-        { type: "email", value: "emily@anthropic.com", platform: "gmail" },
+        { type: "phone", value: "+1 (650) 555-0198", platform: "imessage" },
       ],
     },
     contact2: {
@@ -328,6 +328,6 @@ export const DEMO_CARDS: DemoCard[] = [
     confidence: 0.97,
     source: "exact_name_match",
     reasoning:
-      "Exact name match across Gmail and Slack. Very likely the same person.",
+      "Exact name match across iMessage and Slack. Very likely the same person.",
   },
 ];

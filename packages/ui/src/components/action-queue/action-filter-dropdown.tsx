@@ -25,7 +25,7 @@ export interface ActionFilterDropdownProps {
   activeFilter: FilterGroup
   /** Called when filter changes */
   onFilterChange: (filter: FilterGroup) => void
-  /** Platform counts { imessage: 5, gmail: 3, ... } */
+  /** Platform counts { imessage: 5, slack: 3, ... } */
   platformCounts?: Partial<Record<ActionPlatform, number>>
   /** Currently active platform filters */
   activePlatforms?: Set<ActionPlatform>

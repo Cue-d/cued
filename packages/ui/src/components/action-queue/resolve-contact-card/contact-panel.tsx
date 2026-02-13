@@ -20,8 +20,6 @@ function getPlatformColor(platform: string): string {
   switch (platform.toLowerCase()) {
     case "imessage":
       return "bg-green-500/10 text-green-600 border-green-200"
-    case "gmail":
-      return "bg-red-500/10 text-red-600 border-red-200"
     case "slack":
       return "bg-purple-500/10 text-purple-600 border-purple-200"
     case "linkedin":

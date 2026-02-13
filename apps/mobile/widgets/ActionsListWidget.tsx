@@ -28,8 +28,6 @@ function getPlatformIcon(platform: string | null): {
   switch (platform) {
     case "imessage":
       return { name: "message.fill", color: "#34C759" };
-    case "gmail":
-      return { name: "envelope.fill", color: "#FF3B30" };
     case "slack":
       return { name: "number.square.fill", color: "#AF52DE" };
     case "linkedin":

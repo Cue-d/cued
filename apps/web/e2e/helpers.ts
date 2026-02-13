@@ -130,7 +130,7 @@ export const conversations = {
    */
   async filterByPlatform(
     page: Page,
-    platform: "all" | "imessage" | "gmail" | "slack"
+    platform: "all" | "imessage" | "slack" | "linkedin"
   ): Promise<void> {
     await page.getByRole("button", { name: new RegExp(platform, "i") }).click();
   },
@@ -227,11 +227,11 @@ export const settings = {
   /**
    * Get specific integration by name
    */
-  getIntegration(page: Page, name: "imessage" | "gmail" | "slack"): Locator {
+  getIntegration(page: Page, name: "imessage" | "slack" | "linkedin"): Locator {
     const labels: Record<string, string> = {
       imessage: "iMessage",
-      gmail: "Gmail",
       slack: "Slack",
+      linkedin: "LinkedIn",
     };
     return page.locator(`[data-testid="integration-${name}"]`).or(
       page.getByText(labels[name]).locator("..").locator("..")
@@ -241,7 +241,7 @@ export const settings = {
   /**
    * Check if integration is connected
    */
-  async isConnected(page: Page, name: "imessage" | "gmail" | "slack"): Promise<boolean> {
+  async isConnected(page: Page, name: "imessage" | "slack" | "linkedin"): Promise<boolean> {
     const integration = this.getIntegration(page, name);
     const connectedIndicator = integration.getByText(/connected/i);
     return connectedIndicator.isVisible();

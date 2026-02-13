@@ -25,10 +25,6 @@ const AUTH_ERROR_PATTERNS = [
   'not_authed',
   'account_inactive',
 
-  // Google/Nango specific
-  'invalid_grant',
-  'token has been revoked',
-
   // LinkedIn specific
   'expired_token',
   'invalid_access_token',

@@ -1,6 +1,6 @@
 # Cued
 
-A cloud-based personal CRM with multi-platform messaging (iMessage, Gmail, Slack) and AI-powered action suggestions.
+A cloud-based personal CRM with multi-platform messaging (iMessage, Slack, LinkedIn) and AI-powered action suggestions.
 
 ## Prerequisites
 
@@ -100,7 +100,6 @@ WORKOS_COOKIE_PASSWORD=xxx  # Min 32 chars (generate: openssl rand -base64 32)
 NEXT_PUBLIC_WORKOS_REDIRECT_URI=http://localhost:3000/callback
 
 # Optional: Integrations
-NANGO_SECRET_KEY=xxx          # Gmail/Slack sync (see NANGO_SETUP.md)
 AI_GATEWAY_API_KEY=xxx        # AI features (Vercel AI Gateway, optional on Vercel deployments)
 ```
 

@@ -27,7 +27,7 @@ const getConversationsSchema = z.object({
     .optional()
     .describe("Maximum number of conversations (default: 10, max: 50)"),
   platform: z
-    .enum(["imessage", "gmail", "slack"])
+    .enum(["imessage", "slack"])
     .optional()
     .describe("Filter by platform"),
 });
@@ -114,7 +114,7 @@ export function createChatTools(
     search_messages: tool({
       description:
         "Search through message history to find messages matching a query. " +
-        "Automatically searches ALL connected platforms (iMessage, Gmail, Slack). " +
+        "Automatically searches ALL connected platforms (iMessage, Slack). " +
         "Returns messages with sender info and conversation context. " +
         "Use this to find past conversations, specific topics, or messages from a person.",
       inputSchema: searchMessagesSchema,

@@ -89,11 +89,11 @@ describe("MessageResponseCard", () => {
       expect(container.querySelector('pressable[accessibilitylabel="imessage"]')).not.toBeNull();
     });
 
-    it("renders platform badge with Open text for Gmail", () => {
-      const { container } = render(<MessageResponseCard {...defaultProps} platform="gmail" />);
+    it("renders platform badge with Open text for LinkedIn", () => {
+      const { container } = render(<MessageResponseCard {...defaultProps} platform="linkedin" />);
 
       expect(screen.getByText("Open")).toBeDefined();
-      expect(container.querySelector('pressable[accessibilitylabel="gmail"]')).not.toBeNull();
+      expect(container.querySelector('pressable[accessibilitylabel="linkedin"]')).not.toBeNull();
     });
 
     it("renders platform badge with Open text for Slack", () => {

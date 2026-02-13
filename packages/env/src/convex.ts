@@ -6,16 +6,13 @@
  * We provide typed access without heavy validation overhead
  */
 
-type ConvexEnvKey = "NANGO_SECRET_KEY" | "WORKOS_CLIENT_ID" | "AI_GATEWAY_API_KEY"
+type ConvexEnvKey = "WORKOS_CLIENT_ID" | "AI_GATEWAY_API_KEY"
 
 /**
  * Typed access to Convex environment variables
  * Set these in your Convex dashboard under Settings → Environment Variables
  */
 export const convexEnv = {
-  get NANGO_SECRET_KEY() {
-    return process.env.NANGO_SECRET_KEY
-  },
   get WORKOS_CLIENT_ID() {
     return process.env.WORKOS_CLIENT_ID
   },
@@ -29,7 +26,7 @@ export const convexEnv = {
  * Throws with a clear error message if not set
  *
  * @example
- * const apiKey = requireEnv("NANGO_SECRET_KEY")
+ * const apiKey = requireEnv("AI_GATEWAY_API_KEY")
  */
 export function requireEnv(key: ConvexEnvKey): string {
   const value = convexEnv[key]

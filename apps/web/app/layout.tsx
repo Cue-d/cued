@@ -13,7 +13,7 @@ const inter = Inter({
 export const metadata: Metadata = {
   title: "Cued",
   description:
-    "Cloud-based personal relationship manager for iMessage, Gmail, and Slack",
+    "Cloud-based personal relationship manager for iMessage, Slack, and LinkedIn",
 };
 
 export default function RootLayout({

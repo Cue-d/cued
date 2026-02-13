@@ -92,8 +92,6 @@ function getPlatformLabel(platform: string | null): string {
   switch (platform) {
     case "imessage":
       return "iMessage";
-    case "gmail":
-      return "Gmail";
     case "slack":
       return "Slack";
     default:

@@ -111,15 +111,6 @@ export function CommandMenu({ open: controlledOpen, onOpenChange }: CommandMenuP
           <CommandItem
             onSelect={() => {
               setOpen(false)
-              router.push("/inbox?platform=gmail")
-            }}
-          >
-            <Search className="w-4 h-4" />
-            <span>Filter Gmail</span>
-          </CommandItem>
-          <CommandItem
-            onSelect={() => {
-              setOpen(false)
               router.push("/inbox?platform=slack")
             }}
           >

@@ -14,16 +14,14 @@ import { Button, Skeleton } from "@cued/ui";
 export type Platform = ActionPlatform;
 
 /** Type of integration connection method */
-export type IntegrationType = "nango" | "electron-local" | "electron-webview";
+export type IntegrationType = "electron-local" | "electron-webview";
 
 export interface IntegrationConfig {
   id: ActionPlatform;
   name: string;
   description: string;
   icon: React.ReactNode;
-  /** Nango integration ID for OAuth integrations, null for Electron-based */
-  nangoIntegrationId: string | null;
-  /** How this integration connects: nango (OAuth), electron-local (auto-sync), electron-webview (login required) */
+  /** How this integration connects: electron-local (auto-sync), electron-webview (login required) */
   integrationType: IntegrationType;
   color: string;
 }
@@ -81,22 +79,9 @@ export function IntegrationButton({
     return <Skeleton className="h-9 w-24" />;
   }
 
-  // Connected state - show disconnect for nango and electron-webview types
+  // Connected state - show disconnect for electron-webview types
   if (isConnected) {
-    // For nango integrations with per-account disconnect, show "Add Account" instead
-    if (integrationType === "nango" && hasPerAccountDisconnect) {
-      return (
-        <Button variant="outline" size="sm" onClick={onConnect} disabled={isConnecting}>
-          {isConnecting ? (
-            <RefreshCwIcon className="size-4 animate-spin mr-2" />
-          ) : (
-            <LinkIcon className="size-4 mr-2" />
-          )}
-          Add Account
-        </Button>
-      );
-    }
-    if (integrationType === "nango" || integrationType === "electron-webview") {
+    if (integrationType === "electron-webview") {
       return (
         <Button variant="outline" size="sm" onClick={onDisconnect} disabled={isDisconnecting}>
           {isDisconnecting ? <RefreshCwIcon className="size-4 animate-spin" /> : "Disconnect"}
@@ -116,7 +101,7 @@ export function IntegrationButton({
     );
   }
 
-  // nango or electron-webview - show connect button
+  // electron-webview - show connect button
   const connectLabel = integrationType === "electron-webview" ? "Connect via Desktop" : "Connect";
   const ConnectIcon = isConnecting ? RefreshCwIcon : LinkIcon;
 
@@ -130,7 +115,6 @@ export function IntegrationButton({
 
 export interface IntegrationAccount {
   workspaceId: string;
-  nangoConnectionId: string | null;
   lastSyncAt: number | null;
   totalMessagesSynced: number;
 }
@@ -144,12 +128,12 @@ interface IntegrationCardProps {
   disconnectingAccount?: string | null;
   isLoading: boolean;
   lastSyncAt: number | null;
-  /** Connected accounts for multi-workspace platforms (Gmail, Slack) */
+  /** Connected accounts for multi-workspace platforms (Slack) */
   accounts?: IntegrationAccount[] | null;
   onConnect: () => void;
   onDisconnect: () => void;
-  /** Disconnect a specific account by its nangoConnectionId */
-  onDisconnectAccount?: (nangoConnectionId: string) => void;
+  /** Disconnect a specific account by its workspaceId */
+  onDisconnectAccount?: (workspaceId: string) => void;
 }
 
 export function IntegrationCard({
@@ -166,8 +150,8 @@ export function IntegrationCard({
   onDisconnectAccount,
 }: IntegrationCardProps) {
   const hasAccounts = accounts && accounts.length > 0;
-  // Check if any account has per-account disconnect capability (has nangoConnectionId)
-  const hasPerAccountDisconnect = accounts?.some((a) => a.nangoConnectionId) ?? false;
+  // No per-account disconnect for electron-based integrations
+  const hasPerAccountDisconnect = false;
 
   return (
     <div className="rounded-lg border bg-card">
@@ -210,27 +194,11 @@ export function IntegrationCard({
                 className="flex items-center justify-between text-xs gap-2"
               >
                 <span className="font-medium truncate max-w-[200px]">{account.workspaceId}</span>
-                <div className="flex items-center gap-2">
-                  <span className="text-muted-foreground">
-                    {account.lastSyncAt
-                      ? `Synced ${formatRelativeTime(account.lastSyncAt)}`
-                      : "Not synced"}
-                  </span>
-                  {account.nangoConnectionId && onDisconnectAccount && (
-                    <button
-                      onClick={() => onDisconnectAccount(account.nangoConnectionId!)}
-                      disabled={isAccountDisconnecting}
-                      className="p-1 rounded hover:bg-muted text-muted-foreground hover:text-foreground transition-colors disabled:opacity-50"
-                      title="Disconnect account"
-                    >
-                      {isAccountDisconnecting ? (
-                        <RefreshCwIcon className="size-3.5 animate-spin" />
-                      ) : (
-                        <XIcon className="size-3.5" />
-                      )}
-                    </button>
-                  )}
-                </div>
+                <span className="text-muted-foreground">
+                  {account.lastSyncAt
+                    ? `Synced ${formatRelativeTime(account.lastSyncAt)}`
+                    : "Not synced"}
+                </span>
               </div>
             );
           })}

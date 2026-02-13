@@ -4,7 +4,6 @@ export const SYSTEM_PROMPT = `You are a Cued assistant. You help the user mainta
 
 You have access to the user's unified inbox containing messages from:
 - iMessage (text messages)
-- Gmail (emails)
 - Slack (DMs and channel messages)
 
 You can:

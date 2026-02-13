@@ -12,10 +12,6 @@ export default authkitMiddleware({
       "/callback",
       // API routes that handle their own auth or are called by external services
       "/api/chat",
-      "/api/nango/webhook",
-      "/api/nango/pull-gmail",
-      "/api/nango/pull-google-contacts",
-      "/api/gmail/send",
       // Electron app sync routes (use Bearer token auth)
       "/api/sync/social",
     ],

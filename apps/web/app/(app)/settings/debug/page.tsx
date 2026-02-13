@@ -21,11 +21,10 @@ import {
 import { ResetConfirmationModal } from "./components/reset-confirmation-modal";
 
 // Platforms with active sync adapters - matches ResetConfirmationModal
-type Platform = "imessage" | "gmail" | "slack" | "linkedin";
+type Platform = "imessage" | "slack" | "linkedin";
 
 const PLATFORMS: { id: Platform; name: string }[] = [
   { id: "imessage", name: "iMessage" },
-  { id: "gmail", name: "Gmail" },
   { id: "slack", name: "Slack" },
   { id: "linkedin", name: "LinkedIn" },
 ];

@@ -36,7 +36,7 @@ export interface EmbeddingMetadata {
   conversationName?: string;
   /** All participant names (for group chats) */
   participantNames?: string[];
-  /** Workspace identifier (Slack team name, Gmail account) */
+  /** Workspace identifier (Slack team name, etc) */
   workspaceName?: string;
 }
 

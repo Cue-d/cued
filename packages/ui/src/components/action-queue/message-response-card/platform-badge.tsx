@@ -13,7 +13,6 @@ import {
 /** Platform icons (re-exported for backwards compatibility) */
 export const PLATFORM_ICONS: Record<ActionPlatform, React.ReactNode> = {
   imessage: <PlatformIcon platform="imessage" className="w-3.5 h-3.5" />,
-  gmail: <PlatformIcon platform="gmail" className="w-3.5 h-3.5" />,
   slack: <PlatformIcon platform="slack" className="w-3.5 h-3.5" />,
   linkedin: <PlatformIcon platform="linkedin" className="w-3.5 h-3.5" />,
   twitter: <PlatformIcon platform="twitter" className="w-3.5 h-3.5" />,

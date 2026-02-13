@@ -32,14 +32,14 @@ const adapterRegistry: Partial<
 };
 
 /**
- * Platforms that use server-side sending (via Nango) instead of Electron adapters.
+ * Platforms that use server-side sending instead of Electron adapters.
  * These are handled by the Convex action directly, not the message queue processor.
  */
-export const SERVER_SIDE_PLATFORMS: ActionPlatform[] = ["gmail"];
+export const SERVER_SIDE_PLATFORMS: ActionPlatform[] = [];
 
 /**
  * Get the adapter for a given platform.
- * Returns undefined for platforms without adapters (gmail, slack use server-side).
+ * Returns undefined for platforms without adapters.
  *
  * @param platform - The platform to get an adapter for
  * @returns The adapter instance, or undefined if not supported

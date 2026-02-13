@@ -44,7 +44,6 @@ describe("@cued/shared exports", () => {
     it("exports PLATFORM_CONFIG", () => {
       expect(shared.PLATFORM_CONFIG).toBeTypeOf("object");
       expect(shared.PLATFORM_CONFIG).toHaveProperty("imessage");
-      expect(shared.PLATFORM_CONFIG).toHaveProperty("gmail");
       expect(shared.PLATFORM_CONFIG).toHaveProperty("slack");
     });
 

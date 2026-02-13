@@ -1,6 +1,6 @@
 /**
  * Shared API utilities for Next.js API routes.
- * Reduces duplication across sync, nango, and other API endpoints.
+ * Reduces duplication across sync and other API endpoints.
  */
 import { NextRequest, NextResponse } from "next/server";
 import { ConvexHttpClient } from "convex/browser";

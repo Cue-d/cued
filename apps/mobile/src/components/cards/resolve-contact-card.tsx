@@ -87,7 +87,6 @@ const HANDLE_ICON_MAP: Record<string, SFSymbolName> = {
 
 const PLATFORM_BADGE_COLORS: Record<string, { bg: string; text: string }> = {
   imessage: { bg: "bg-green-500/10", text: "text-green-600" },
-  gmail: { bg: "bg-red-500/10", text: "text-red-600" },
   slack: { bg: "bg-purple-500/10", text: "text-purple-600" },
   linkedin: { bg: "bg-blue-500/10", text: "text-blue-600" },
   twitter: { bg: "bg-sky-500/10", text: "text-sky-600" },

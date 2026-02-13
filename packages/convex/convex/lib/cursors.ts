@@ -1,6 +1,6 @@
 /**
  * Shared utilities for syncCursors aggregation.
- * Supports multi-workspace platforms (Slack, Gmail) where a user may have
+ * Supports multi-workspace platforms (Slack) where a user may have
  * multiple cursors per platform.
  */
 import type { Doc, Id } from "../_generated/dataModel";

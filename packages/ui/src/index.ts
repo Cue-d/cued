@@ -198,8 +198,6 @@ export {
   PLATFORM_ICON_COMPONENTS,
   IMessageIcon,
   IMessageColorIcon,
-  GmailIcon,
-  GmailColorIcon,
   SlackIcon,
   SlackColorIcon,
   LinkedInIcon,

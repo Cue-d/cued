@@ -14,11 +14,10 @@ import {
   Label,
 } from "@cued/ui";
 // Platforms with active sync adapters (subset of ActionPlatform)
-type ResetablePlatform = "imessage" | "gmail" | "slack" | "linkedin";
+type ResetablePlatform = "imessage" | "slack" | "linkedin";
 
 const PLATFORM_NAMES: Record<ResetablePlatform, string> = {
   imessage: "iMessage",
-  gmail: "Gmail",
   slack: "Slack",
   linkedin: "LinkedIn",
 };

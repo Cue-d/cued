@@ -114,7 +114,7 @@ function Divider(): React.ReactElement {
   return <View className="h-px bg-border ml-14" />;
 }
 
-const SYNC_PLATFORMS: ActionPlatform[] = ["imessage", "gmail", "slack", "linkedin"];
+const SYNC_PLATFORMS: ActionPlatform[] = ["imessage", "slack", "linkedin"];
 
 function StatusDot({ color }: { color: string }): React.ReactElement {
   return (

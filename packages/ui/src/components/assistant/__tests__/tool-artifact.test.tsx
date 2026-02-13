@@ -95,7 +95,7 @@ describe("ToolArtifact", () => {
       const result = {
         results: [
           { _id: "1", content: "Hello world", sentAt: Date.now(), platform: "imessage" },
-          { _id: "2", content: "Test message", sentAt: Date.now(), platform: "gmail" },
+          { _id: "2", content: "Test message", sentAt: Date.now(), platform: "slack" },
         ],
       };
 

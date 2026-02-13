@@ -2,7 +2,7 @@
  * Tests for Convex sync functions.
  *
  * Uses convex-test to mock the Convex backend and test
- * iMessage, Gmail, and Slack sync operations.
+ * iMessage, Slack, and other platform sync operations.
  *
  * Note: Sync mutations schedule background functions (contact resolution, action events)
  * that may generate warnings after test completion. This is expected behavior as the
@@ -597,253 +597,6 @@ describe("sync", () => {
   });
 
   // ============================================================================
-  // Gmail Sync Tests (syncGmailMessages)
-  // ============================================================================
-  describe("syncGmailMessages mutation", () => {
-    it("throws for unknown user", async () => {
-      const t = trackTest(convexTest(schema, modules));
-
-      await expect(
-        t.mutation(api.sync.syncGmailMessages, {
-          workosUserId: "unknown_user",
-          emails: [],
-        }),
-      ).rejects.toThrow("User not found");
-    });
-
-    it("syncs Gmail email and creates conversation", async () => {
-      const t = trackTest(convexTest(schema, modules));
-
-      // Create user (no auth context for webhook mutations)
-      const { userId, workosUserId } = await t.run(async (ctx) => {
-        const userData = createTestUserData();
-        const id = await ctx.db.insert("users", userData);
-        return { userId: id, workosUserId: userData.workosUserId };
-      });
-
-      const result = await t.mutation(api.sync.syncGmailMessages, {
-        workosUserId,
-        emails: [
-          {
-            id: "msg_1",
-            sender: "Alice Smith <alice@example.com>",
-            recipients: "me@example.com",
-            date: new Date().toISOString(),
-            subject: "Meeting tomorrow",
-            body: "Let's discuss the project.",
-            attachments: [],
-            threadId: "thread_1",
-          },
-        ],
-      });
-
-      expect(result.messagesCount).toBe(1);
-      expect(result.conversationsCount).toBe(1);
-
-      // Verify conversation was created
-      const conversations = await t.run(async (ctx) => {
-        return ctx.db
-          .query("conversations")
-          .withIndex("by_user", (q) => q.eq("userId", userId))
-          .collect();
-      });
-
-      expect(conversations).toHaveLength(1);
-      expect(conversations[0].platform).toBe("gmail");
-      expect(conversations[0].platformConversationId).toBe("thread_1");
-      expect(conversations[0].displayName).toBe("Meeting tomorrow");
-    });
-
-    it("creates contact from email sender", async () => {
-      const t = trackTest(convexTest(schema, modules));
-
-      const { userId, workosUserId } = await t.run(async (ctx) => {
-        const userData = createTestUserData();
-        const id = await ctx.db.insert("users", userData);
-        return { userId: id, workosUserId: userData.workosUserId };
-      });
-
-      await t.mutation(api.sync.syncGmailMessages, {
-        workosUserId,
-        emails: [
-          {
-            id: "msg_1",
-            sender: "Bob Jones <bob@company.com>",
-            recipients: "me@example.com",
-            date: new Date().toISOString(),
-            subject: "Hello",
-            body: "Test email",
-            attachments: [],
-            threadId: "thread_1",
-          },
-        ],
-      });
-
-      // Verify contact was created with display name
-      const contacts = await t.run(async (ctx) => {
-        return ctx.db
-          .query("contacts")
-          .withIndex("by_user", (q) => q.eq("userId", userId))
-          .collect();
-      });
-
-      expect(contacts).toHaveLength(1);
-      expect(contacts[0].displayName).toBe("Bob Jones");
-
-      // Verify handle was created
-      const handles = await t.run(async (ctx) => {
-        return ctx.db
-          .query("contactHandles")
-          .withIndex("by_user", (q) => q.eq("userId", userId))
-          .collect();
-      });
-
-      expect(handles).toHaveLength(1);
-      expect(handles[0].handle).toBe("bob@company.com");
-      expect(handles[0].platform).toBe("gmail");
-    });
-
-    it("skips newsletter emails", async () => {
-      const t = trackTest(convexTest(schema, modules));
-
-      const { workosUserId } = await t.run(async (ctx) => {
-        const userData = createTestUserData();
-        await ctx.db.insert("users", userData);
-        return { workosUserId: userData.workosUserId };
-      });
-
-      const result = await t.mutation(api.sync.syncGmailMessages, {
-        workosUserId,
-        emails: [
-          {
-            id: "msg_1",
-            sender: "noreply@newsletter.com",
-            recipients: "me@example.com",
-            date: new Date().toISOString(),
-            subject: "[Newsletter] Weekly Digest",
-            body: "Newsletter content",
-            attachments: [],
-            threadId: "thread_1",
-          },
-        ],
-      });
-
-      expect(result.messagesCount).toBe(0);
-      expect(result.skippedFiltered).toBe(1);
-    });
-
-    it("deduplicates Gmail messages by id", async () => {
-      const t = trackTest(convexTest(schema, modules));
-
-      const { userId, workosUserId } = await t.run(async (ctx) => {
-        const userData = createTestUserData();
-        const id = await ctx.db.insert("users", userData);
-        return { userId: id, workosUserId: userData.workosUserId };
-      });
-
-      // First sync
-      const result1 = await t.mutation(api.sync.syncGmailMessages, {
-        workosUserId,
-        emails: [
-          {
-            id: "msg_unique_1",
-            sender: "sender@example.com",
-            recipients: "me@example.com",
-            date: new Date().toISOString(),
-            subject: "Original",
-            body: "Original body",
-            attachments: [],
-            threadId: "thread_1",
-          },
-        ],
-      });
-
-      expect(result1.messagesCount).toBe(1);
-
-      // Second sync with same message ID
-      const result2 = await t.mutation(api.sync.syncGmailMessages, {
-        workosUserId,
-        emails: [
-          {
-            id: "msg_unique_1", // Same ID
-            sender: "sender@example.com",
-            recipients: "me@example.com",
-            date: new Date().toISOString(),
-            subject: "Duplicate",
-            body: "Should be skipped",
-            attachments: [],
-            threadId: "thread_1",
-          },
-        ],
-      });
-
-      expect(result2.messagesCount).toBe(0);
-
-      // Verify only one message exists
-      const messages = await t.run(async (ctx) => {
-        return ctx.db
-          .query("messages")
-          .withIndex("by_user", (q) => q.eq("userId", userId))
-          .collect();
-      });
-
-      expect(messages).toHaveLength(1);
-    });
-
-    it("groups emails by thread and updates conversation", async () => {
-      const t = trackTest(convexTest(schema, modules));
-
-      const { userId, workosUserId } = await t.run(async (ctx) => {
-        const userData = createTestUserData();
-        const id = await ctx.db.insert("users", userData);
-        return { userId: id, workosUserId: userData.workosUserId };
-      });
-
-      const now = Date.now();
-      const earlier = now - 3600000; // 1 hour earlier
-
-      const result = await t.mutation(api.sync.syncGmailMessages, {
-        workosUserId,
-        emails: [
-          {
-            id: "msg_1",
-            sender: "Alice <alice@example.com>",
-            recipients: "me@example.com",
-            date: new Date(earlier).toISOString(),
-            subject: "Thread subject",
-            body: "First message",
-            attachments: [],
-            threadId: "thread_1",
-          },
-          {
-            id: "msg_2",
-            sender: "Alice <alice@example.com>",
-            recipients: "me@example.com",
-            date: new Date(now).toISOString(),
-            subject: "Re: Thread subject",
-            body: "Second message",
-            attachments: [],
-            threadId: "thread_1", // Same thread
-          },
-        ],
-      });
-
-      expect(result.messagesCount).toBe(2);
-      expect(result.conversationsCount).toBe(1); // One conversation for the thread
-
-      // Verify conversation has latest message
-      const conversations = await t.run(async (ctx) => {
-        return ctx.db
-          .query("conversations")
-          .withIndex("by_user", (q) => q.eq("userId", userId))
-          .collect();
-      });
-
-      expect(conversations[0].lastMessageText).toBe("Re: Thread subject");
-    });
-  });
-
-  // ============================================================================
   // Contact Resolution Tests
   // ============================================================================
   describe("contact resolution during sync", () => {
@@ -851,7 +604,7 @@ describe("sync", () => {
       const t = trackTest(convexTest(schema, modules));
       const { asUser, userId } = await setupAuthenticatedUser(t);
 
-      // Create contact with gmail handle
+      // Create contact with email handle
       const contactId = await t.run(async (ctx) => {
         const id = await ctx.db.insert(
           "contacts",
@@ -864,7 +617,7 @@ describe("sync", () => {
           createTestContactHandleData(userId, id, {
             handleType: "email",
             handle: "alice@gmail.com",
-            platform: "gmail",
+            platform: "imessage",
           }),
         );
         return id;

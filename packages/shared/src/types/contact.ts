@@ -32,7 +32,6 @@ export type HandleType =
  */
 export type HandlePlatform =
   | "imessage"
-  | "gmail"
   | "slack"
   | "linkedin"
   | "twitter"

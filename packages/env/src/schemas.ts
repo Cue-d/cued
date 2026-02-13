@@ -5,9 +5,6 @@ import { z } from "zod"
  * These should never be exposed to the client
  */
 export const serverSchema = z.object({
-  // Nango Integration Platform
-  NANGO_SECRET_KEY: z.string().min(1, "NANGO_SECRET_KEY is required"),
-
   // AI Gateway (supports OIDC auth on Vercel, so optional)
   AI_GATEWAY_API_KEY: z.string().optional(),
 

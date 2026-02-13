@@ -16,7 +16,7 @@ import {
  * Get the sync cursor for a platform (and optional workspace).
  * Returns null if no cursor exists.
  *
- * For multi-workspace platforms (slack, gmail), workspaceId is required.
+ * For multi-workspace platforms (slack), workspaceId is required.
  * For single-account platforms (imessage, linkedin), workspaceId is optional.
  */
 export const getSyncCursor = query({
@@ -83,7 +83,7 @@ export const listSyncCursors = query({
  * Upsert a sync cursor (create or update).
  * Uses last-write-wins for multi-device conflict resolution.
  *
- * For multi-workspace platforms (slack, gmail), workspaceId is required.
+ * For multi-workspace platforms (slack), workspaceId is required.
  */
 export const upsertSyncCursor = mutation({
   args: {
@@ -147,7 +147,7 @@ export const upsertSyncCursor = mutation({
 /**
  * Update only the stats fields on a sync cursor without changing cursor data.
  *
- * For multi-workspace platforms (slack, gmail), workspaceId is required.
+ * For multi-workspace platforms (slack), workspaceId is required.
  */
 export const updateSyncStats = mutation({
   args: {
@@ -215,7 +215,7 @@ export const updateSyncStats = mutation({
  * Delete a sync cursor for a specific platform/workspace.
  * Used for cleanup or triggering a fresh full sync.
  *
- * For multi-workspace platforms (slack, gmail), workspaceId is required.
+ * For multi-workspace platforms (slack), workspaceId is required.
  */
 export const deleteSyncCursor = mutation({
   args: {

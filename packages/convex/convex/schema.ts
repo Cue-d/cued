@@ -4,7 +4,6 @@ import { v } from "convex/values";
 // Shared enum validators for type safety and reusability
 export const platformValidator = v.union(
   v.literal("imessage"),
-  v.literal("gmail"),
   v.literal("slack"),
   v.literal("linkedin"),
   v.literal("twitter"),
@@ -103,10 +102,7 @@ const schema = defineSchema({
   integrations: defineTable({
     userId: v.id("users"),
     platform: platformValidator,
-    nangoConnectionId: v.optional(v.string()),
     connectedAt: v.optional(v.number()),
-    // Gmail-specific: account email for multi-account support
-    accountEmail: v.optional(v.string()),
     // Slack-specific: team ID for multi-workspace support
     slackTeamId: v.optional(v.string()),
     // LinkedIn-specific: user's URN for isFromMe detection
@@ -117,9 +113,7 @@ const schema = defineSchema({
   })
     .index("by_user", ["userId"])
     .index("by_user_platform", ["userId", "platform"])
-    .index("by_user_platform_team", ["userId", "platform", "slackTeamId"])
-    .index("by_nango_connection", ["nangoConnectionId"])
-    .index("by_user_platform_account", ["userId", "platform", "accountEmail"]),
+    .index("by_user_platform_team", ["userId", "platform", "slackTeamId"]),
 
   contacts: defineTable({
     userId: v.id("users"),
@@ -151,7 +145,7 @@ const schema = defineSchema({
   conversations: defineTable({
     userId: v.id("users"),
     platform: platformValidator,
-    platformConversationId: v.string(), // chat.db chat_id, Gmail threadId, Slack channel+thread
+    platformConversationId: v.string(), // chat.db chat_id, Slack channel+thread
     conversationType: conversationTypeValidator,
     participantContactIds: v.array(v.id("contacts")), // references to contacts table
     lastMessageText: v.optional(v.string()),
@@ -161,7 +155,7 @@ const schema = defineSchema({
     // For Slack channels: true if user has sent a message or reacted.
     // DMs are always considered participated. Channels without participation are hidden from inbox.
     userParticipated: v.optional(v.boolean()),
-    // For multi-workspace platforms (Slack teamId, Gmail email address)
+    // For multi-workspace platforms (Slack teamId)
     workspaceId: v.optional(v.string()),
   })
     .index("by_user", ["userId"])
@@ -292,7 +286,7 @@ const schema = defineSchema({
   syncCursors: defineTable({
     userId: v.id("users"),
     platform: platformValidator,
-    workspaceId: v.optional(v.string()), // e.g., Gmail email address, Slack teamId
+    workspaceId: v.optional(v.string()), // e.g., Slack teamId
     cursorData: v.any(), // Platform-specific cursor data (historyId, timestamp, etc.)
     lastSyncAt: v.number(),
     syncMode: syncModeValidator,
@@ -327,7 +321,7 @@ const schema = defineSchema({
     // References
     conversationId: v.optional(v.id("conversations")),
     actionId: v.optional(v.id("actions")), // Link to action that created this
-    // For multi-workspace platforms (Slack teamId, Gmail email address)
+    // For multi-workspace platforms (Slack teamId)
     workspaceId: v.optional(v.string()),
     // Queue status
     status: v.union(

@@ -75,7 +75,7 @@ export function createTestContactData(
 export function createTestConversationData(
   userId: Id<"users">,
   overrides: Partial<{
-    platform: "imessage" | "gmail" | "slack";
+    platform: "imessage" | "slack";
     platformConversationId: string;
     conversationType: "dm" | "group" | "channel";
     participantContactIds: Id<"contacts">[];
@@ -105,7 +105,7 @@ export function createTestMessageData(
   userId: Id<"users">,
   conversationId: Id<"conversations">,
   overrides: Partial<{
-    platform: "imessage" | "gmail" | "slack";
+    platform: "imessage" | "slack";
     content: string;
     sentAt: number;
     senderContactId: Id<"contacts">;
@@ -137,7 +137,7 @@ export function createTestActionData(
     conversationId: Id<"conversations">;
     contactId: Id<"contacts">;
     messageId: Id<"messages">;
-    platform: "imessage" | "gmail" | "slack";
+    platform: "imessage" | "slack";
     reason: string;
     llmReason: string;
     createdAt: number;
@@ -169,7 +169,7 @@ export function createTestContactHandleData(
   overrides: Partial<{
     handleType: "phone" | "email" | "slack_id" | "linkedin_handle" | "linkedin_urn" | "twitter_handle";
     handle: string;
-    platform: "imessage" | "gmail" | "slack" | "linkedin" | "twitter" | "signal" | "whatsapp";
+    platform: "imessage" | "slack" | "linkedin" | "twitter" | "signal" | "whatsapp";
   }> = {}
 ) {
   return {
@@ -187,15 +187,13 @@ export function createTestContactHandleData(
 export function createTestIntegrationData(
   userId: Id<"users">,
   overrides: Partial<{
-    platform: "imessage" | "gmail" | "slack";
-    nangoConnectionId: string;
+    platform: "imessage" | "slack";
     connectedAt: number;
   }> = {}
 ) {
   return {
     userId,
     platform: overrides.platform ?? "imessage",
-    nangoConnectionId: overrides.nangoConnectionId,
     connectedAt: overrides.connectedAt ?? Date.now(),
     isConnected: true,
   };

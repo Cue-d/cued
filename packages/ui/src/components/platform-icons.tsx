@@ -35,35 +35,6 @@ export function IMessageColorIcon({ className }: IconProps) {
   )
 }
 
-/** Gmail envelope / M-shape (monochrome, inherits currentColor) */
-export function GmailIcon({ className }: IconProps) {
-  return (
-    <svg
-      viewBox="0 0 24 24"
-      fill="currentColor"
-      className={cn("size-4", className)}
-    >
-      <path d="M20 4H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2Zm0 4-8 5-8-5V6l8 5 8-5v2Z" />
-    </svg>
-  )
-}
-
-/** Gmail official multi-color logo */
-export function GmailColorIcon({ className }: IconProps) {
-  return (
-    <svg
-      viewBox="0 0 122.88 92.12"
-      className={cn("size-4", className)}
-    >
-      <path fill="#4285F4" d="M8.36,92.12h19.54V44.67L0,23.76v60.08C0,88.42,3.78,92.12,8.36,92.12z" />
-      <path fill="#34A853" d="M94.97,92.12h19.54c4.67,0,8.36-3.78,8.36-8.36v-60L94.97,44.67V92.12z" />
-      <path fill="#FBBC04" d="M94.97,8.4v36.27l27.91-20.91V12.58c0-10.37-11.82-16.25-20.11-10.05L94.97,8.4z" />
-      <polygon fill="#EA4335" points="27.9,44.67 27.9,8.4 61.44,33.57 94.97,8.4 94.97,44.67 61.44,69.76" />
-      <path fill="#C5221F" d="M0,12.58v11.18l27.91,20.91V8.4l-7.8-5.87C11.82-3.66,0,2.29,0,12.58z" />
-    </svg>
-  )
-}
-
 /** Slack hashtag logo */
 export function SlackIcon({ className }: IconProps) {
   return (
@@ -154,7 +125,6 @@ export function WhatsAppIcon({ className }: IconProps) {
 /** Map of platform to icon component */
 const PLATFORM_ICON_MAP: Record<ActionPlatform, React.ComponentType<IconProps>> = {
   imessage: IMessageColorIcon,
-  gmail: GmailIcon,
   slack: SlackColorIcon,
   linkedin: LinkedInIcon,
   twitter: TwitterIcon,

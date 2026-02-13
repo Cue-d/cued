@@ -24,8 +24,6 @@
     "@cued/integrations": "workspace:*",
     "@cued/shared": "workspace:*",
     "@cued/ui": "workspace:*",
-    "@nangohq/frontend": "^0.69.22",
-    "@nangohq/node": "^0.69.22",
     "@workos-inc/authkit-nextjs": "^2.13.0",
     "ai": "^6.0.33",
     "convex": "^1.31.7",

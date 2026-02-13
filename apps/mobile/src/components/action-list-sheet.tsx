@@ -35,7 +35,6 @@ const PLATFORM_FILTERS: {
   platform: ActionPlatform;
 }[] = [
   { key: "imessage", platform: "imessage" },
-  { key: "gmail", platform: "gmail" },
   { key: "slack", platform: "slack" },
   { key: "linkedin", platform: "linkedin" },
   { key: "twitter", platform: "twitter" },

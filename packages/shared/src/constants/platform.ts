@@ -18,7 +18,6 @@
  */
 export type ActionPlatform =
   | "imessage"
-  | "gmail"
   | "slack"
   | "linkedin"
   | "twitter"
@@ -33,10 +32,10 @@ export type ActionPlatform =
 export type SyncPlatform = ActionPlatform;
 
 /**
- * Platforms that support multiple workspaces (e.g., Slack teams, Gmail accounts).
+ * Platforms that support multiple workspaces (e.g., Slack teams).
  * These require workspaceId in sync cursor operations.
  */
-export const MULTI_WORKSPACE_PLATFORMS = ["slack", "gmail"] as const;
+export const MULTI_WORKSPACE_PLATFORMS = ["slack"] as const;
 
 /**
  * Type for multi-workspace platforms.
@@ -65,13 +64,13 @@ export interface PlatformConfigItem {
  * @example
  * ```tsx
  * // Web: Use textClass for icons
- * <Mail className={PLATFORM_CONFIG.gmail.textClass} />
+ * <MessageSquare className={PLATFORM_CONFIG.imessage.textClass} />
  *
  * // Mobile: Use color for tintColor
- * <SymbolView tintColor={PLATFORM_CONFIG.gmail.color} />
+ * <SymbolView tintColor={PLATFORM_CONFIG.imessage.color} />
  *
  * // Badge: Use bgClass + letter
- * <span className={PLATFORM_CONFIG.gmail.bgClass}>{PLATFORM_CONFIG.gmail.letter}</span>
+ * <span className={PLATFORM_CONFIG.imessage.bgClass}>{PLATFORM_CONFIG.imessage.letter}</span>
  * ```
  */
 export const PLATFORM_CONFIG: Record<ActionPlatform, PlatformConfigItem> = {
@@ -81,13 +80,6 @@ export const PLATFORM_CONFIG: Record<ActionPlatform, PlatformConfigItem> = {
     textClass: "text-[#34C759]",
     bgClass: "bg-[#34C759] text-white",
     letter: "i",
-  },
-  gmail: {
-    label: "Gmail",
-    color: "#dc2626",
-    textClass: "text-red-600",
-    bgClass: "bg-red-500 text-white",
-    letter: "G",
   },
   slack: {
     label: "Slack",

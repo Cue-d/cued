@@ -31,7 +31,6 @@ export const messageHandler: ActionSwipeHandler = {
 
     const platform = (action.platform ?? conversation?.platform) as
       | "imessage"
-      | "gmail"
       | "slack"
       | "linkedin"
       | "twitter"
@@ -169,8 +168,6 @@ export const messageHandler: ActionSwipeHandler = {
       queuedMessageId = messageId;
       messageSent = true;
     }
-
-    // Note: Gmail uses Nango server-side actions (not message queue)
 
     return {
       success: true,

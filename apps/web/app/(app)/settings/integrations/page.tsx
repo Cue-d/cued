@@ -2,14 +2,11 @@
 
 import { useState, useMemo } from "react";
 import Link from "next/link";
-import Nango from "@nangohq/frontend";
-import { useAccessToken } from "@workos-inc/authkit-nextjs/components";
 import { useQuery } from "convex/react";
 import { ArrowLeftIcon, TwitterIcon } from "lucide-react";
 import { api } from "@cued/convex";
 import {
   IMessageColorIcon,
-  GmailColorIcon,
   SlackColorIcon,
   LinkedInIcon,
 } from "@cued/ui";
@@ -26,25 +23,14 @@ const INTEGRATIONS: IntegrationConfig[] = [
     name: "iMessage",
     description: "Sync messages from macOS Messages app",
     icon: <IMessageColorIcon className="size-5" />,
-    nangoIntegrationId: null,
     integrationType: "electron-local",
     color: "text-green-500",
-  },
-  {
-    id: "gmail",
-    name: "Gmail",
-    description: "Connect your Gmail account to sync emails",
-    icon: <GmailColorIcon className="size-5" />,
-    nangoIntegrationId: "google",
-    integrationType: "nango",
-    color: "text-red-500",
   },
   {
     id: "slack",
     name: "Slack",
     description: "Connect Slack via desktop app to sync messages",
     icon: <SlackColorIcon className="size-5" />,
-    nangoIntegrationId: null,
     integrationType: "electron-webview",
     color: "text-purple-500",
   },
@@ -53,7 +39,6 @@ const INTEGRATIONS: IntegrationConfig[] = [
     name: "LinkedIn",
     description: "Sync LinkedIn messages via desktop app",
     icon: <LinkedInIcon className="size-5" />,
-    nangoIntegrationId: null,
     integrationType: "electron-webview",
     color: "text-blue-600",
   },
@@ -62,14 +47,12 @@ const INTEGRATIONS: IntegrationConfig[] = [
     name: "X (Twitter)",
     description: "Sync DMs and contacts via desktop app",
     icon: <TwitterIcon className="size-5" />,
-    nangoIntegrationId: null,
     integrationType: "electron-webview",
     color: "text-sky-500",
   },
 ];
 
 export default function IntegrationsPage() {
-  const { accessToken } = useAccessToken();
   const integrations = useQuery(api.integrations.getUserIntegrations);
   const [connecting, setConnecting] = useState<Platform | null>(null);
   const [disconnecting, setDisconnecting] = useState<Platform | null>(null);
@@ -82,7 +65,6 @@ export default function IntegrationsPage() {
       {
         isConnected: boolean;
         lastSyncAt: number | null;
-        nangoConnectionId: string | null;
         accounts: IntegrationAccount[] | null;
       }
     >();
@@ -98,8 +80,6 @@ export default function IntegrationsPage() {
         isConnected: (existing?.isConnected ?? false) || int.isConnected,
         // Take most recent sync time
         lastSyncAt: Math.max(existing?.lastSyncAt ?? 0, int.lastSyncAt ?? 0) || null,
-        // Keep first non-null connection ID
-        nangoConnectionId: existing?.nangoConnectionId ?? int.nangoConnectionId,
         // Deduplicated accounts
         accounts: mergedAccounts.length > 0 ? mergedAccounts : null,
       });
@@ -120,48 +100,7 @@ export default function IntegrationsPage() {
       return;
     }
 
-    // Handle Nango OAuth integrations
-    if (!config.nangoIntegrationId) {
-      setError("Integration not properly configured");
-      return;
-    }
-    if (!accessToken) {
-      setError("Not authenticated");
-      return;
-    }
-
-    setConnecting(config.id);
-    setError(null);
-
-    try {
-      const res = await fetch("/api/nango/session", {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${accessToken}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({ allowed_integrations: [config.nangoIntegrationId] }),
-      });
-
-      if (!res.ok) {
-        const data = await res.json();
-        throw new Error(data.error || "Failed to create session");
-      }
-
-      const { sessionToken } = await res.json();
-      const nango = new Nango();
-      const connect = nango.openConnectUI({
-        onEvent: (event) => {
-          if (event.type === "close" || event.type === "connect") {
-            setConnecting(null);
-          }
-        },
-      });
-      connect.setSessionToken(sessionToken);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Connection failed");
-      setConnecting(null);
-    }
+    setError("Integration not properly configured");
   }
 
   async function handleDisconnect(config: IntegrationConfig) {
@@ -170,75 +109,16 @@ export default function IntegrationsPage() {
       setError(`${config.name} disconnect requires the Cued desktop app. Open the desktop app settings to disconnect.`);
       return;
     }
-
-    // Nango disconnect
-    if (!config.nangoIntegrationId || !accessToken) return;
-
-    const status = statusByPlatform.get(config.id);
-    if (!status?.nangoConnectionId) {
-      setError("No connection ID found");
-      return;
-    }
-
-    setDisconnecting(config.id);
-    setError(null);
-
-    try {
-      const res = await fetch("/api/nango/disconnect", {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${accessToken}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          nangoConnectionId: status.nangoConnectionId,
-          providerConfigKey: config.nangoIntegrationId,
-        }),
-      });
-
-      if (!res.ok) {
-        const data = await res.json();
-        throw new Error(data.error || "Failed to disconnect");
-      }
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Disconnect failed");
-    } finally {
-      setDisconnecting(null);
-    }
   }
 
   async function handleDisconnectAccount(
-    config: IntegrationConfig,
-    nangoConnectionId: string,
+    _config: IntegrationConfig,
+    _workspaceId: string,
     workspaceId: string
   ) {
-    if (!config.nangoIntegrationId || !accessToken) return;
-
     setDisconnectingAccount(workspaceId);
-    setError(null);
-
-    try {
-      const res = await fetch("/api/nango/disconnect", {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${accessToken}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          nangoConnectionId,
-          providerConfigKey: config.nangoIntegrationId,
-        }),
-      });
-
-      if (!res.ok) {
-        const data = await res.json();
-        throw new Error(data.error || "Failed to disconnect");
-      }
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Disconnect failed");
-    } finally {
-      setDisconnectingAccount(null);
-    }
+    setError("Account disconnect not supported for this platform");
+    setDisconnectingAccount(null);
   }
 
   const isLoading = integrations === undefined;
@@ -285,10 +165,10 @@ export default function IntegrationsPage() {
                   accounts={status?.accounts}
                   onConnect={() => handleConnect(config)}
                   onDisconnect={() => handleDisconnect(config)}
-                  onDisconnectAccount={(nangoConnectionId) => {
-                    const account = status?.accounts?.find(a => a.nangoConnectionId === nangoConnectionId);
+                  onDisconnectAccount={(workspaceId) => {
+                    const account = status?.accounts?.find(a => a.workspaceId === workspaceId);
                     if (account) {
-                      handleDisconnectAccount(config, nangoConnectionId, account.workspaceId);
+                      handleDisconnectAccount(config, workspaceId, account.workspaceId);
                     }
                   }}
                 />
@@ -302,9 +182,6 @@ export default function IntegrationsPage() {
               <li>
                 <strong>iMessage:</strong> Install the Cued desktop app on your Mac to sync
                 messages locally
-              </li>
-              <li>
-                <strong>Gmail:</strong> Click Connect to authorize Cued to read your emails
               </li>
               <li>
                 <strong>Slack:</strong> Use the desktop app to login with your Slack workspace

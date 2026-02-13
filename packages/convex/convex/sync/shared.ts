@@ -1,6 +1,6 @@
 /**
  * Shared utilities for sync operations across all platforms.
- * Contains validators, types, and helper functions used by iMessage, Gmail, Slack, LinkedIn, and Twitter sync.
+ * Contains validators, types, and helper functions used by iMessage, Slack, LinkedIn, and Twitter sync.
  */
 
 import type { Infer } from "convex/values";
@@ -28,11 +28,6 @@ export const SEVEN_DAYS_MS = 7 * 24 * 60 * 60 * 1000;
 /** Current sync version - increment when schema changes require full re-sync */
 export const CURRENT_SYNC_VERSION = 1;
 
-/**
- * Maximum Gmail accounts a user can connect.
- * Prevents abuse and keeps sync manageable.
- */
-export const MAX_GMAIL_ACCOUNTS = 10;
 
 /**
  * Batch size for parallel database queries.
@@ -47,10 +42,10 @@ export const BATCH_SIZE = 50;
 export const MAX_NEW_CONNECTION_ACTIONS = 20;
 
 /**
- * Platforms that support multiple workspaces (e.g., Slack teams, Gmail accounts).
+ * Platforms that support multiple workspaces (e.g., Slack teams).
  * These require workspaceId in sync cursor operations.
  */
-export const MULTI_WORKSPACE_PLATFORMS = ["slack", "gmail"] as const;
+export const MULTI_WORKSPACE_PLATFORMS = ["slack"] as const;
 
 // ============================================================================
 // Slack Helpers
@@ -136,7 +131,7 @@ export async function scheduleIncomingMessageEvents(
   ctx: MutationCtx,
   userId: Id<"users">,
   conversationIds: Set<Id<"conversations">>,
-  platform: "imessage" | "gmail" | "slack" | "linkedin" | "twitter" | "signal",
+  platform: "imessage" | "slack" | "linkedin" | "twitter" | "signal",
 ): Promise<void> {
   if (conversationIds.size === 0) return;
 
@@ -257,7 +252,7 @@ export interface GetOrCreateContactResult {
 export async function getOrCreateContact(
   ctx: MutationCtx,
   userId: Id<"users">,
-  platform: "imessage" | "gmail" | "slack" | "linkedin" | "twitter" | "signal",
+  platform: "imessage" | "slack" | "linkedin" | "twitter" | "signal",
   handles: ContactHandleInput[],
   displayName?: string,
   metadata?: { company?: string; notes?: string },
@@ -527,7 +522,6 @@ export async function batchResolveHandles(
 /** Platform type for sync operations */
 type SyncPlatform =
   | "imessage"
-  | "gmail"
   | "slack"
   | "linkedin"
   | "twitter"
@@ -719,7 +713,6 @@ export function findIntegration(
   userId: Id<"users">,
   platform:
     | "imessage"
-    | "gmail"
     | "slack"
     | "linkedin"
     | "twitter"
@@ -743,7 +736,6 @@ export async function getOrCreateIntegration(
   userId: Id<"users">,
   platform:
     | "imessage"
-    | "gmail"
     | "slack"
     | "linkedin"
     | "twitter"

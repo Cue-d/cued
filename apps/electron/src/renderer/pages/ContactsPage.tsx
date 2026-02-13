@@ -391,7 +391,7 @@ export function ContactsPage({ initialContactId, onInitialContactConsumed }: Con
             <EmptyState
               icon={<Users className="w-6 h-6 text-muted-foreground" />}
               title={debouncedSearch ? `No results for "${debouncedSearch}"` : activePlatforms.size > 0 ? "No contacts on this platform" : "No contacts yet"}
-              description={!debouncedSearch && activePlatforms.size === 0 ? "Connect Gmail or iMessage to import contacts." : undefined}
+              description={!debouncedSearch && activePlatforms.size === 0 ? "Connect iMessage to import contacts." : undefined}
               className="py-12"
             />
           ) : (

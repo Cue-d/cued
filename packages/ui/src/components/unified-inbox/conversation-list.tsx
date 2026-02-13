@@ -25,7 +25,6 @@ interface InboxConversationListProps {
 const filterButtons: Array<{ value: PlatformFilter; label: string; icon?: React.ReactNode }> = [
   { value: "all", label: "All" },
   { value: "imessage", label: "iMessage", icon: <MessageSquare className="w-3.5 h-3.5" /> },
-  { value: "gmail", label: "Gmail", icon: <Mail className="w-3.5 h-3.5" /> },
   { value: "slack", label: "Slack", icon: <Hash className="w-3.5 h-3.5" /> },
   { value: "linkedin", label: "LinkedIn", icon: <Linkedin className="w-3.5 h-3.5" /> },
 ];

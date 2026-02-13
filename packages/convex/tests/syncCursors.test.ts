@@ -211,9 +211,9 @@ describe("syncCursors", () => {
       const { asUser } = await setupAuthenticatedUser(t);
 
       const cursorId = await asUser.mutation(api.syncCursors.upsertSyncCursor, {
-        platform: "gmail",
-        workspaceId: "user@example.com",
-        cursorData: { historyId: "12345" },
+        platform: "slack",
+        workspaceId: "T87654321",
+        cursorData: { conversationCursors: {} },
         syncMode: "incremental",
       });
 
@@ -221,7 +221,7 @@ describe("syncCursors", () => {
         return ctx.db.get(cursorId);
       });
 
-      expect(cursor?.workspaceId).toBe("user@example.com");
+      expect(cursor?.workspaceId).toBe("T87654321");
     });
 
     it("updates cursor with matching workspaceId", async () => {
@@ -467,8 +467,8 @@ describe("syncCursors", () => {
         });
         await ctx.db.insert("syncCursors", {
           userId,
-          platform: "gmail",
-          workspaceId: "user@example.com",
+          platform: "slack",
+          workspaceId: "T87654321",
           cursorData: {},
           lastSyncAt: Date.now(),
           syncMode: "full",

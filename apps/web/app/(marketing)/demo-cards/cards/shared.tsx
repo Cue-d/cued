@@ -4,7 +4,6 @@ import type { DemoPlatform } from "../demo-card-data";
 // Actual brand colors
 const BRAND_COLORS: Record<DemoPlatform, { fg: string; bg: string }> = {
   imessage: { fg: "#30D158", bg: "rgba(48,209,88,0.12)" },
-  gmail: { fg: "#EA4335", bg: "rgba(234,67,53,0.12)" },
   slack: { fg: "#611F69", bg: "rgba(97,31,105,0.12)" },
   linkedin: { fg: "#0A66C2", bg: "rgba(10,102,194,0.12)" },
 };

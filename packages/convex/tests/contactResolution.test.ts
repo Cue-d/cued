@@ -60,7 +60,7 @@ describe("contactResolution", () => {
           createTestContactHandleData(userId, c1, {
             handleType: "email",
             handle: "john@example.com",
-            platform: "gmail",
+            platform: "imessage",
           }),
         );
         await ctx.db.insert(
@@ -68,7 +68,7 @@ describe("contactResolution", () => {
           createTestContactHandleData(userId, c2, {
             handleType: "email",
             handle: "john@example.com",
-            platform: "gmail",
+            platform: "imessage",
           }),
         );
 
@@ -154,7 +154,7 @@ describe("contactResolution", () => {
           createTestContactHandleData(userId, c1, {
             handleType: "email",
             handle: "alice@example.com",
-            platform: "gmail",
+            platform: "imessage",
           }),
         );
         await ctx.db.insert(
@@ -162,7 +162,7 @@ describe("contactResolution", () => {
           createTestContactHandleData(userId, c2, {
             handleType: "email",
             handle: "bob@example.com",
-            platform: "gmail",
+            platform: "imessage",
           }),
         );
       });
@@ -197,7 +197,7 @@ describe("contactResolution", () => {
           createTestContactHandleData(userId, c2, {
             handleType: "email",
             handle: "john@example.com",
-            platform: "gmail",
+            platform: "imessage",
           }),
         );
       });
@@ -271,7 +271,7 @@ describe("contactResolution", () => {
           createTestContactHandleData(userId, c1, {
             handleType: "email",
             handle: sharedEmail,
-            platform: "gmail",
+            platform: "imessage",
           }),
         );
         await ctx.db.insert(
@@ -279,7 +279,7 @@ describe("contactResolution", () => {
           createTestContactHandleData(userId, c2, {
             handleType: "email",
             handle: sharedEmail,
-            platform: "gmail",
+            platform: "imessage",
           }),
         );
         await ctx.db.insert(
@@ -287,7 +287,7 @@ describe("contactResolution", () => {
           createTestContactHandleData(userId, c3, {
             handleType: "email",
             handle: sharedEmail,
-            platform: "gmail",
+            platform: "imessage",
           }),
         );
       });
@@ -328,7 +328,7 @@ describe("contactResolution", () => {
           createTestContactHandleData(userId, c1, {
             handleType: "email",
             handle: "john.work@example.com",
-            platform: "gmail",
+            platform: "imessage",
           }),
         );
         await ctx.db.insert(
@@ -336,7 +336,7 @@ describe("contactResolution", () => {
           createTestContactHandleData(userId, c2, {
             handleType: "email",
             handle: "john.personal@example.com",
-            platform: "gmail",
+            platform: "imessage",
           }),
         );
 
@@ -382,7 +382,7 @@ describe("contactResolution", () => {
           createTestContactHandleData(userId, c1, {
             handleType: "email",
             handle: "michael@example.com",
-            platform: "gmail",
+            platform: "imessage",
           }),
         );
         await ctx.db.insert(
@@ -390,7 +390,7 @@ describe("contactResolution", () => {
           createTestContactHandleData(userId, c2, {
             handleType: "email",
             handle: "micheal@example.com",
-            platform: "gmail",
+            platform: "imessage",
           }),
         );
       });
@@ -430,7 +430,7 @@ describe("contactResolution", () => {
           createTestContactHandleData(userId, c1, {
             handleType: "email",
             handle: "alice@example.com",
-            platform: "gmail",
+            platform: "imessage",
           }),
         );
         await ctx.db.insert(
@@ -438,7 +438,7 @@ describe("contactResolution", () => {
           createTestContactHandleData(userId, c2, {
             handleType: "email",
             handle: "robert@example.com",
-            platform: "gmail",
+            platform: "imessage",
           }),
         );
       });
@@ -806,7 +806,7 @@ describe("contactResolution", () => {
           createTestContactHandleData(userId, c1, {
             handleType: "email",
             handle: "john@example.com",
-            platform: "gmail",
+            platform: "imessage",
           }),
         );
         await ctx.db.insert(
@@ -814,7 +814,7 @@ describe("contactResolution", () => {
           createTestContactHandleData(userId, c2, {
             handleType: "email",
             handle: "john@example.com",
-            platform: "gmail",
+            platform: "imessage",
           }),
         );
       });
@@ -855,7 +855,7 @@ describe("contactResolution", () => {
           createTestContactHandleData(userId, c1, {
             handleType: "email",
             handle: "shared@example.com",
-            platform: "gmail",
+            platform: "imessage",
           }),
         );
         await ctx.db.insert(
@@ -863,7 +863,7 @@ describe("contactResolution", () => {
           createTestContactHandleData(userId, c2, {
             handleType: "email",
             handle: "shared@example.com",
-            platform: "gmail",
+            platform: "imessage",
           }),
         );
 
@@ -914,7 +914,7 @@ describe("contactResolution", () => {
           createTestContactHandleData(userId, c1, {
             handleType: "email",
             handle: "john@example.com",
-            platform: "gmail",
+            platform: "imessage",
           }),
         );
         await ctx.db.insert(
@@ -922,7 +922,7 @@ describe("contactResolution", () => {
           createTestContactHandleData(userId, c2, {
             handleType: "email",
             handle: "john@example.com",
-            platform: "gmail",
+            platform: "imessage",
           }),
         );
 
@@ -978,7 +978,7 @@ describe("contactResolution", () => {
           createTestContactHandleData(userId, c1, {
             handleType: "email",
             handle: "taylor.work@example.com",
-            platform: "gmail",
+            platform: "imessage",
           }),
         );
         await ctx.db.insert(
@@ -986,7 +986,7 @@ describe("contactResolution", () => {
           createTestContactHandleData(userId, c2, {
             handleType: "email",
             handle: "taylor.personal@example.com",
-            platform: "gmail",
+            platform: "imessage",
           }),
         );
 

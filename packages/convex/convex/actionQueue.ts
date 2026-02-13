@@ -333,7 +333,7 @@ export const triggerScanForUnanswered = mutation({
     // Scan specific platform or all platforms
     const platforms = args.platform
       ? [args.platform]
-      : (["imessage", "gmail", "slack"] as const);
+      : (["imessage", "slack", "linkedin"] as const);
 
     for (const platform of platforms) {
       await ctx.scheduler.runAfter(

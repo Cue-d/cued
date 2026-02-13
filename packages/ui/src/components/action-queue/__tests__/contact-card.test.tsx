@@ -160,7 +160,7 @@ describe("ContactCard", () => {
       render(<ContactCard {...defaultProps} platform={null} />);
       // Should not find any platform text
       expect(screen.queryByText("imessage")).not.toBeInTheDocument();
-      expect(screen.queryByText("gmail")).not.toBeInTheDocument();
+      expect(screen.queryByText("slack")).not.toBeInTheDocument();
     });
   });
 

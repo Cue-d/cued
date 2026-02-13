@@ -79,8 +79,8 @@ test.describe("Integrations Page", () => {
 
     // Check for main integration cards
     await expect(page.getByText("iMessage")).toBeVisible();
-    await expect(page.getByText("Gmail")).toBeVisible();
     await expect(page.getByText("Slack")).toBeVisible();
+    await expect(page.getByText("LinkedIn")).toBeVisible();
   });
 
   test("shows social network integrations section", async ({ page }) => {
@@ -99,8 +99,8 @@ test.describe("Integrations Page", () => {
 
     // Check descriptions
     await expect(page.getByText("Sync messages from macOS Messages app")).toBeVisible();
-    await expect(page.getByText("Connect your Gmail account to sync emails")).toBeVisible();
-    await expect(page.getByText("Connect Slack to sync direct messages")).toBeVisible();
+    await expect(page.getByText("Connect Slack via desktop app to sync messages")).toBeVisible();
+    await expect(page.getByText("Sync LinkedIn messages via desktop app")).toBeVisible();
   });
 
   test("shows how it works section", async ({ page }) => {
@@ -120,13 +120,13 @@ test.describe("Integrations Page", () => {
     await expect(imessageCard).toBeVisible();
   });
 
-  test("Gmail integration shows connect button", async ({ page }) => {
+  test("LinkedIn integration shows desktop app requirement", async ({ page }) => {
     await page.goto("/settings/integrations");
     await page.waitForLoadState("networkidle");
 
-    // Find Gmail card and look for connection UI
-    const gmailCard = page.locator("div").filter({ hasText: /Gmail.*Connect your Gmail account/ }).first();
-    await expect(gmailCard).toBeVisible();
+    // Find LinkedIn card and look for connection UI
+    const linkedinCard = page.locator("div").filter({ hasText: /LinkedIn.*Sync LinkedIn messages/ }).first();
+    await expect(linkedinCard).toBeVisible();
 
     // Should have either Connect button or Connected status
     const connectButton = page.getByRole("button", { name: /connect/i }).first();
@@ -143,7 +143,7 @@ test.describe("Integrations Page", () => {
     await page.waitForLoadState("networkidle");
 
     // Find Slack card
-    const slackCard = page.locator("div").filter({ hasText: /Slack.*Connect Slack to sync/ }).first();
+    const slackCard = page.locator("div").filter({ hasText: /Slack.*Connect Slack via desktop/ }).first();
     await expect(slackCard).toBeVisible();
   });
 

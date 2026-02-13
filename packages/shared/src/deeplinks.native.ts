@@ -36,8 +36,6 @@ export function buildHandleDeeplink(
       return handleType === "phone" || handleType === "email"
         ? `imessage://${handle}`
         : null;
-    case "gmail":
-      return handleType === "email" ? `mailto:${handle}` : null;
     case "linkedin":
       return handleType === "linkedin_handle"
         ? `https://www.linkedin.com/in/${handle}`
@@ -64,14 +62,6 @@ export function getPlatformDeeplink(
           return {
             type: "disabled",
             reason: "Deep linking isn't supported for iMessage group chats",
-          };
-        }
-        break;
-      case "gmail":
-        if (conversation.platformConversationId) {
-          return {
-            type: "available",
-            url: `https://mail.google.com/mail/u/0/#inbox/${conversation.platformConversationId}`,
           };
         }
         break;
@@ -135,7 +125,7 @@ export function getContactDeeplink(
     return {
       type: "available",
       url: `mailto:${emailHandle.handle}`,
-      platform: "gmail",
+      platform: emailHandle.platform,
     };
   }
 

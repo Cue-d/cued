@@ -83,7 +83,7 @@ interface TestContact {
 
 interface TestMessage {
   content: string;
-  platform: "imessage" | "gmail" | "slack";
+  platform: "imessage" | "slack" | "linkedin";
 }
 
 /**

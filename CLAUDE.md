@@ -2,12 +2,12 @@
 
 ## What This Is
 
-Cued is a cloud-based personal relationship manager. Multi-platform messaging (iMessage, Gmail, Slack, LinkedIn) with AI-powered action suggestions.
+Cued is a cloud-based personal relationship manager. Multi-platform messaging (iMessage, Slack, LinkedIn) with AI-powered action suggestions.
 
 ## Architecture
 
 ```
-apps/web (Next.js 16) ←→ packages/convex (Convex) ←→ Nango (Gmail)
+apps/web (Next.js 16) ←→ packages/convex (Convex)
                                     ↑
                           ┌─────────┴─────────┐
 apps/electron (macOS) ────┤                   │
@@ -35,7 +35,7 @@ packages/
   ui/               Shared React components (@cued/ui)
   convex/           Database schema + functions (@cued/convex)
   ai/               LLM tools, action generation (@cued/ai)
-  integrations/     iMessage, Slack, Nango adapters (@cued/integrations)
+  integrations/     iMessage adapters (@cued/integrations)
 ```
 
 ### packages/shared (Source of Truth)
@@ -76,7 +76,6 @@ convex/
     shared.ts          Common utilities (handle resolution, contact creation, cursor helpers)
     filters.ts         Message filtering (OTP, spam, phishing detection)
     imessage.ts        iMessage and macOS Contacts sync
-    gmail.ts           Gmail emails and Google Contacts sync
     slack.ts           Slack messages sync
     linkedin.ts        LinkedIn messages sync
 ```
@@ -85,7 +84,7 @@ convex/
 
 1. **Separation of concerns**: `integrations` table = connection state, `syncCursors` table = sync state
 2. **Cloud cursors**: Sync state stored in Convex (not local files), enabling multi-device sync
-3. **Multi-workspace support**: Gmail/Slack use `workspaceId` for multiple accounts per platform
+3. **Multi-workspace support**: Slack uses `workspaceId` for multiple workspaces per platform
 4. **Message filtering**: Unified filtering rules applied during sync (OTP codes, automated senders, phishing)
 
 **syncCursors Table Schema:**
@@ -125,7 +124,6 @@ Web app: http://localhost:3000
 | AI chat UI | `packages/ui/src/components/assistant/` |
 | Unified inbox | `packages/ui/src/components/unified-inbox/` |
 | Action cards | `packages/ui/src/components/action-queue/` |
-| Gmail/Slack | `packages/integrations/src/nango/` |
 | iMessage sync | `apps/electron/src/main/sync/` |
 | LinkedIn sync | `apps/electron/src/main/sync/linkedin-sync.ts` |
 | Slack sync | `apps/electron/src/main/sync/slack-sync.ts` |

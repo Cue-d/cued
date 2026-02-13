@@ -95,7 +95,7 @@ describe("MessageResponseCard", () => {
         <MessageResponseCard
           {...defaultProps}
           platform="imessage"
-          availablePlatforms={["imessage", "gmail"]}
+          availablePlatforms={["imessage", "slack"]}
           onPlatformChange={vi.fn()}
         />
       );

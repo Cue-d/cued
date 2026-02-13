@@ -110,7 +110,7 @@ export const getSlackConversationMessages = query({
 const MESSAGE_BATCH_SIZE = 2000;
 const DEFAULT_BATCH_SIZE = 500;
 
-type Platform = "imessage" | "gmail" | "slack" | "linkedin" | "twitter" | "signal" | "whatsapp";
+type Platform = "imessage" | "slack" | "linkedin" | "twitter" | "signal" | "whatsapp";
 
 /**
  * Internal mutation to delete a batch of platform-filtered documents.
@@ -365,7 +365,6 @@ export const disconnectIntegrations = internalMutation({
       if (!filterByPlatform || platforms!.includes(integration.platform as Platform)) {
         await ctx.db.patch(integration._id, {
           isConnected: false,
-          nangoConnectionId: undefined,
           lastError: undefined,
         });
         disconnected++;
@@ -574,7 +573,6 @@ export const getPlatformSyncStatus = query({
       integration: integration
         ? {
             isConnected: integration.isConnected,
-            nangoConnectionId: integration.nangoConnectionId,
             lastError: integration.lastError,
           }
         : null,

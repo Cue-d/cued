@@ -36,8 +36,8 @@ test.describe("Inbox Navigation", () => {
     // Check for filter buttons
     await expect(page.getByRole("button", { name: /all/i })).toBeVisible();
     await expect(page.getByRole("button", { name: /imessage/i })).toBeVisible();
-    await expect(page.getByRole("button", { name: /gmail/i })).toBeVisible();
     await expect(page.getByRole("button", { name: /slack/i })).toBeVisible();
+    await expect(page.getByRole("button", { name: /linkedin/i })).toBeVisible();
   });
 
   test("filters conversations by platform", async ({ page }) => {

@@ -180,7 +180,7 @@ export class MessageQueueProcessor {
     this.processingIds.add(messageId);
 
     try {
-      // Skip server-side platforms (Gmail, Slack use Nango)
+      // Skip server-side platforms
       if (SERVER_SIDE_PLATFORMS.includes(message.platform as ActionPlatform)) {
         return;
       }
