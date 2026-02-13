@@ -642,6 +642,31 @@ describe("contactResolution", () => {
       expect(result.fuzzyPairs).toHaveLength(0);
     });
 
+    it("excludes contacts with no handles from name matching", async () => {
+      const t = convexTest(schema, modules);
+      const { userId } = await setupAuthenticatedUser(t);
+
+      await t.run(async (ctx) => {
+        await ctx.db.insert(
+          "contacts",
+          createTestContactData(userId, { displayName: "theotarr" }),
+        );
+        await ctx.db.insert(
+          "contacts",
+          createTestContactData(userId, { displayName: "theotarr" }),
+        );
+      });
+
+      const result = await t.query(
+        internal.contactResolution.findDuplicateCandidatesInternal,
+        { userId },
+      );
+
+      // Handleless contacts should not generate name-based merge suggestions
+      expect(result.duplicatePairs).toHaveLength(0);
+      expect(result.fuzzyPairs).toHaveLength(0);
+    });
+
     it("excludes email-like displayNames from name matching", async () => {
       const t = convexTest(schema, modules);
       const { userId } = await setupAuthenticatedUser(t);

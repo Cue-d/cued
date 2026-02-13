@@ -72,13 +72,20 @@ describe("sync", () => {
           }),
         );
 
-        await ctx.db.insert(
+        const namedContactId = await ctx.db.insert(
           "contacts",
           createTestContactData(userId, {
             displayName: "Alice Johnson",
           }),
         );
-
+        await ctx.db.insert(
+          "contactHandles",
+          createTestContactHandleData(userId, namedContactId, {
+            handleType: "email",
+            handle: "alice@example.com",
+            platform: "gmail",
+          }),
+        );
         await getOrCreateContact(
           ctx,
           userId,
@@ -101,6 +108,52 @@ describe("sync", () => {
         expect(pendingSuggestions).toHaveLength(1);
         expect(pendingSuggestions[0].source).toBe("exact_name_match");
       });
+    });
+  });
+
+  describe("syncContacts — handle-less contact deduplication", () => {
+    it("does not create orphan contacts when contact has no phone or email", async () => {
+      const t = trackTest(convexTest(schema, modules));
+      const { asUser, userId } = await setupAuthenticatedUser(t);
+
+      // Sync a contact with displayName but no handles (e.g., user's own macOS card)
+      const result1 = await asUser.mutation(api.sync.syncContacts, {
+        contacts: [
+          {
+            displayName: "theotarr",
+            company: null,
+            phoneNumbers: [],
+            emails: [],
+          },
+        ],
+      });
+
+      expect(result1.contactsCount).toBe(0);
+      expect(result1.errors).toHaveLength(0);
+
+      // Sync the same contact again — should still not create any
+      const result2 = await asUser.mutation(api.sync.syncContacts, {
+        contacts: [
+          {
+            displayName: "theotarr",
+            company: null,
+            phoneNumbers: [],
+            emails: [],
+          },
+        ],
+      });
+
+      expect(result2.contactsCount).toBe(0);
+
+      // Verify no contacts exist at all
+      const contacts = await t.run(async (ctx) => {
+        return ctx.db
+          .query("contacts")
+          .withIndex("by_user", (q) => q.eq("userId", userId))
+          .collect();
+      });
+
+      expect(contacts).toHaveLength(0);
     });
   });
 

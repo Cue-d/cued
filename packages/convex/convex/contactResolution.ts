@@ -92,14 +92,18 @@ function getNameTokens(name: string): string[] {
     .filter((token) => token.length >= 2);
 }
 
-function shouldIncludeContactInNameMatching(contact: Doc<"contacts">): boolean {
+function shouldIncludeContactInNameMatching(
+  contact: Doc<"contacts">,
+  handles: Doc<"contactHandles">[] | undefined,
+): boolean {
   const name = contact.displayName;
   return (
     !contact.isDismissed &&
     !!name.trim() &&
     !looksLikeEmail(name) &&
     !looksLikePhone(name) &&
-    !isLinkedInURN(name)
+    !isLinkedInURN(name) &&
+    (handles?.some((handle) => !!handle.handle?.trim()) ?? false)
   );
 }
 
@@ -175,11 +179,13 @@ function buildHandleToContactsIndex(
 
 function buildNameTokenToContactsIndex(
   contacts: Doc<"contacts">[],
+  contactIdToHandles: Map<Id<"contacts">, Doc<"contactHandles">[]>,
 ): Map<string, Set<Id<"contacts">>> {
   const nameTokenToContacts = new Map<string, Set<Id<"contacts">>>();
 
   for (const contact of contacts) {
-    if (!shouldIncludeContactInNameMatching(contact)) continue;
+    const handles = contactIdToHandles.get(contact._id);
+    if (!shouldIncludeContactInNameMatching(contact, handles)) continue;
 
     for (const token of getNameTokens(contact.displayName)) {
       getOrCreateSet(nameTokenToContacts, token).add(contact._id);
@@ -593,12 +599,20 @@ export const findDuplicateCandidatesInternal = internalQuery({
       .withIndex("by_user", (q) => q.eq("userId", args.userId))
       .collect();
 
-    const handleToContacts = buildHandleToContactsIndex(contacts, handles);
-    const nameTokenToContacts = buildNameTokenToContactsIndex(contacts);
     const contactIdToHandles = buildContactHandlesByContactId(handles);
+    const handleToContacts = buildHandleToContactsIndex(contacts, handles);
+    const nameTokenToContacts = buildNameTokenToContactsIndex(
+      contacts,
+      contactIdToHandles,
+    );
     const contactIdToContact = new Map<Id<"contacts">, Doc<"contacts">>();
     for (const contact of contacts) {
-      if (shouldIncludeContactInNameMatching(contact)) {
+      if (
+        shouldIncludeContactInNameMatching(
+          contact,
+          contactIdToHandles.get(contact._id),
+        )
+      ) {
         contactIdToContact.set(contact._id, contact);
       }
     }

@@ -372,6 +372,7 @@ export async function syncContactsInternal(
         contact,
         platform,
       );
+      if (syncResult.skipped) continue;
       if (syncResult.isNew) {
         result.contactsCount++;
       } else {
@@ -425,11 +426,10 @@ async function upsertContactWithHandles(
   userId: Id<"users">,
   contact: ContactInput,
   platform: "imessage" | "signal" = "imessage",
-): Promise<{
-  isNew: boolean;
-  handlesAdded: number;
-  contactId: Id<"contacts">;
-}> {
+): Promise<
+  | { skipped: true }
+  | { skipped: false; isNew: boolean; handlesAdded: number; contactId: Id<"contacts"> }
+> {
   // Collect all normalized handles, filtering out empty values
   const handles = [
     ...contact.phoneNumbers.map((p) => ({
@@ -442,11 +442,13 @@ async function upsertContactWithHandles(
     })),
   ].filter((h) => h.value.trim() !== "");
 
-  // Skip contacts with no valid handles AND no displayName
-  const hasValidDisplayName = contact.displayName.trim() !== "";
-  if (!hasValidDisplayName && handles.length === 0) {
-    throw new Error("Contact has no displayName and no valid handles");
+  // Skip contacts with no valid handles — without handles we can't
+  // deduplicate across syncs, which causes phantom duplicates every cycle.
+  if (handles.length === 0) {
+    return { skipped: true };
   }
+
+  const hasValidDisplayName = contact.displayName.trim() !== "";
 
   // Find existing contact by any handle
   let contactId: Id<"contacts"> | null = null;
@@ -537,5 +539,5 @@ async function upsertContactWithHandles(
     await scheduleContactMergeCheck(ctx, userId, contactId);
   }
 
-  return { isNew, handlesAdded, contactId };
+  return { skipped: false as const, isNew, handlesAdded, contactId };
 }
