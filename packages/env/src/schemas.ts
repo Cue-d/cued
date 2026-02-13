@@ -42,11 +42,15 @@ export const clientSchema = z.object({
   NEXT_PUBLIC_CONVEX_URL: z.string().url().optional(),
   NEXT_PUBLIC_APP_URL: z.string().url().optional(),
   NEXT_PUBLIC_WORKOS_REDIRECT_URI: z.string().url().optional(),
+  NEXT_PUBLIC_POSTHOG_KEY: z.string().optional(),
+  NEXT_PUBLIC_POSTHOG_HOST: z.string().optional(),
 
   // Expo public vars
   EXPO_PUBLIC_CONVEX_URL: z.string().url().optional(),
   EXPO_PUBLIC_WORKOS_CLIENT_ID: z.string().optional(),
   EXPO_PUBLIC_API_URL: z.string().url().optional(),
+  EXPO_PUBLIC_POSTHOG_KEY: z.string().optional(),
+  EXPO_PUBLIC_POSTHOG_HOST: z.string().optional(),
 })
 
 /**
@@ -59,6 +63,8 @@ export const electronSchema = z.object({
   SIGNAL_ACCOUNT: z.string().optional(),
   SIGNAL_CLI_PATH: z.string().optional(),
   NODE_ENV: z.enum(["development", "production", "test"]).optional(),
+  POSTHOG_KEY: z.string().optional(),
+  POSTHOG_HOST: z.string().optional(),
 })
 
 /**

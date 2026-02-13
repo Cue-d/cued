@@ -50,6 +50,7 @@
     "expo-web-browser": "~55.0.5",
     "expo-widgets": "55.0.0-alpha.6",
     "metro-cache": "^0.83.3",
+    "posthog-react-native": "^4.33.0",
     "react": "19.2.0",
     "react-native": "0.83.1",
     "react-native-gesture-handler": "~2.30.0",

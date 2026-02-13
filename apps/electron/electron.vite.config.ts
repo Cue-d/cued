@@ -22,6 +22,8 @@ export default defineConfig({
         WORKOS_CLIENT_ID: env.WORKOS_CLIENT_ID,
         API_BASE_URL: env.API_BASE_URL,
         NODE_ENV: env.NODE_ENV,
+        POSTHOG_KEY: env.POSTHOG_KEY,
+        POSTHOG_HOST: env.POSTHOG_HOST,
       }),
     },
     resolve: {

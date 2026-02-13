@@ -1,4 +1,4 @@
-import { useState, useCallback, useMemo } from "react"
+import { useState, useCallback, useEffect, useMemo } from "react"
 import { ConvexProviderWithAuth } from "convex/react"
 import {
   Card,
@@ -19,6 +19,7 @@ import { AssistantPage } from "./pages/AssistantPage"
 import { ContactsPage } from "./pages/ContactsPage"
 import { SettingsPage, type SettingsSubpage } from "./pages/SettingsPage"
 import { getOrCreateConvexClient } from "./lib/convex-client-singleton"
+import { initPostHog, posthog, POSTHOG_KEY } from "./lib/posthog"
 
 /**
  * Auth hook for ConvexProviderWithAuth.
@@ -58,12 +59,29 @@ function UpdateBanner() {
   )
 }
 
-function AuthenticatedApp({ convexUrl, user, onSignOut }: { convexUrl: string; user?: { firstName?: string | null; lastName?: string | null; email?: string | null } | null; onSignOut: () => void }) {
+function AuthenticatedApp({ convexUrl, user, onSignOut }: { convexUrl: string; user?: { id: string; firstName?: string | null; lastName?: string | null; email?: string | null } | null; onSignOut: () => void }) {
   const [currentPage, setCurrentPage] = useState<NavPage>("actions")
   const [actionCount, setActionCount] = useState(0)
   const [settingsSubpage, setSettingsSubpage] = useState<SettingsSubpage>('general')
   const [pendingContactId, setPendingContactId] = useState<string | null>(null)
   const convex = useMemo(() => getOrCreateConvexClient(convexUrl), [convexUrl])
+
+  // Initialize PostHog and identify user
+  useEffect(() => {
+    initPostHog()
+    if (POSTHOG_KEY && user?.id) {
+      const name = [user.firstName, user.lastName].filter(Boolean).join(" ") || undefined
+      posthog.identify(user.id, { email: user.email ?? undefined, name })
+    }
+  }, [user])
+
+  // Track page navigation
+  useEffect(() => {
+    if (POSTHOG_KEY) {
+      posthog.capture("$pageview", { $current_url: `cued-electron:///${currentPage}` })
+    }
+  }, [currentPage])
+
 
   // Integration status hooks
   const { isLoggedIn: linkedInConnected } = useLinkedIn()
@@ -125,7 +143,10 @@ function AuthenticatedApp({ convexUrl, user, onSignOut }: { convexUrl: string; u
           onNavigate={handleNavigate}
           onNavigateToShortcuts={handleNavigateToShortcuts}
           onNavigateToIntegrations={handleNavigateToIntegrations}
-          onSignOut={onSignOut}
+          onSignOut={() => {
+            posthog.reset()
+            onSignOut()
+          }}
           actionCount={actionCount}
           user={user}
           connectedPlatforms={connectedPlatforms}

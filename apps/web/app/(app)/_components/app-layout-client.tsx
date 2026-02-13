@@ -2,6 +2,7 @@
 
 import { ReactNode, useCallback, useEffect, useRef } from "react";
 import { signOut } from "@workos-inc/authkit-nextjs";
+import { posthog } from "@/components/PostHogProvider";
 import { useQuery, useMutation } from "convex/react";
 import { api, type Id } from "@cued/convex";
 import {
@@ -84,8 +85,10 @@ export function AppLayoutClient({
     : null;
 
   const handleSignOut = useCallback(() => {
+    if (process.env.NEXT_PUBLIC_POSTHOG_KEY) posthog.reset();
     signOut();
   }, []);
+
 
   return (
     <UndoSendProvider

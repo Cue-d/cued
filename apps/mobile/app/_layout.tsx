@@ -17,6 +17,7 @@ import { configureNotifications } from "@/lib/notifications";
 import { getThemeColors } from "@/lib/utils";
 import { AuthProvider, useAuth } from "@/providers/AuthProvider";
 import { ConvexProvider } from "@/providers/ConvexProvider";
+import { PostHogProvider } from "@/providers/PostHogProvider";
 import SignInScreen from "./sign-in";
 
 // Hide splash screen immediately since fonts are embedded at build time
@@ -149,7 +150,9 @@ export default function RootLayout() {
     <GestureHandlerRootView style={{ flex: 1 }}>
       <SafeAreaProvider>
         <AuthProvider>
-          <AuthenticatedApp />
+          <PostHogProvider>
+            <AuthenticatedApp />
+          </PostHogProvider>
         </AuthProvider>
       </SafeAreaProvider>
     </GestureHandlerRootView>

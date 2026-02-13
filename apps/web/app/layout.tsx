@@ -1,6 +1,7 @@
 import { Inter } from "next/font/google";
 import { ThemeProvider } from "next-themes";
 import { ConvexClientProvider } from "@/components/ConvexClientProvider";
+import { PostHogProvider } from "@/components/PostHogProvider";
 import "./globals.css";
 import type { Metadata } from "next";
 
@@ -29,7 +30,9 @@ export default function RootLayout({
           enableSystem
           disableTransitionOnChange
         >
-          <ConvexClientProvider>{children}</ConvexClientProvider>
+          <PostHogProvider>
+            <ConvexClientProvider>{children}</ConvexClientProvider>
+          </PostHogProvider>
         </ThemeProvider>
       </body>
     </html>

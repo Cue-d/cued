@@ -1,5 +1,6 @@
 import { ReactNode } from "react";
 import { withAuth } from "@workos-inc/authkit-nextjs";
+import { PostHogIdentify } from "@/components/PostHogIdentify";
 import { AppLayoutClient } from "./_components/app-layout-client";
 
 export default async function AppLayout({ children }: { children: ReactNode }) {
@@ -16,6 +17,9 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
     : undefined;
 
   return (
-    <AppLayoutClient workosProfile={workosProfile}>{children}</AppLayoutClient>
+    <AppLayoutClient workosProfile={workosProfile}>
+      <PostHogIdentify />
+      {children}
+    </AppLayoutClient>
   );
 }

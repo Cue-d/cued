@@ -116,6 +116,20 @@ export {
   extractLinkedInThreadId,
 } from "./linkedin.js";
 
+// Analytics events
+export { ANALYTICS_EVENTS, type AnalyticsEvent } from "./analytics.js";
+export type {
+  SyncStartedProperties,
+  SyncCompletedProperties,
+  SyncFailedProperties,
+  ActionEventProperties,
+  AssistantMessageProperties,
+  AssistantToolProperties,
+  ContactViewedProperties,
+  ContactEditedProperties,
+  ContactMergedProperties,
+} from "./analytics.js";
+
 // Deep link utilities
 export {
   buildHandleDeeplink,

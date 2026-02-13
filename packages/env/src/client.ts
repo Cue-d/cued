@@ -9,11 +9,15 @@ const clientEnvSchema = z.object({
   NEXT_PUBLIC_CONVEX_URL: z.string().url().optional(),
   NEXT_PUBLIC_APP_URL: z.string().url().optional(),
   NEXT_PUBLIC_WORKOS_REDIRECT_URI: z.string().url().optional(),
+  NEXT_PUBLIC_POSTHOG_KEY: z.string().optional(),
+  NEXT_PUBLIC_POSTHOG_HOST: z.string().optional(),
 
   // Expo public vars
   EXPO_PUBLIC_CONVEX_URL: z.string().url().optional(),
   EXPO_PUBLIC_WORKOS_CLIENT_ID: z.string().optional(),
   EXPO_PUBLIC_API_URL: z.string().url().optional(),
+  EXPO_PUBLIC_POSTHOG_KEY: z.string().optional(),
+  EXPO_PUBLIC_POSTHOG_HOST: z.string().optional(),
 })
 
 export type ClientEnv = z.infer<typeof clientEnvSchema>
@@ -29,9 +33,13 @@ function createClientEnv(): ClientEnv {
     NEXT_PUBLIC_CONVEX_URL: process.env.NEXT_PUBLIC_CONVEX_URL,
     NEXT_PUBLIC_APP_URL: process.env.NEXT_PUBLIC_APP_URL,
     NEXT_PUBLIC_WORKOS_REDIRECT_URI: process.env.NEXT_PUBLIC_WORKOS_REDIRECT_URI,
+    NEXT_PUBLIC_POSTHOG_KEY: process.env.NEXT_PUBLIC_POSTHOG_KEY,
+    NEXT_PUBLIC_POSTHOG_HOST: process.env.NEXT_PUBLIC_POSTHOG_HOST,
     EXPO_PUBLIC_CONVEX_URL: process.env.EXPO_PUBLIC_CONVEX_URL,
     EXPO_PUBLIC_WORKOS_CLIENT_ID: process.env.EXPO_PUBLIC_WORKOS_CLIENT_ID,
     EXPO_PUBLIC_API_URL: process.env.EXPO_PUBLIC_API_URL,
+    EXPO_PUBLIC_POSTHOG_KEY: process.env.EXPO_PUBLIC_POSTHOG_KEY,
+    EXPO_PUBLIC_POSTHOG_HOST: process.env.EXPO_PUBLIC_POSTHOG_HOST,
   }
 
   const parsed = clientEnvSchema.safeParse(envObject)
