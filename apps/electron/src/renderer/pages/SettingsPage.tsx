@@ -14,8 +14,8 @@ import {
   cn,
 } from "@cued/ui"
 import { Settings, Keyboard, Sun, Moon, Monitor, Plug } from "lucide-react"
-import type { PermissionStatus } from "../../shared/electron-api"
 import { useTheme, type Theme } from "../hooks/use-theme"
+import { usePermissions } from "../hooks/use-permissions"
 import { Panel, PanelHeader } from "../components/app-shell"
 import { SettingsSection, SettingsCard, SettingsRow } from "../components/settings-card"
 import {
@@ -196,38 +196,6 @@ function ShortcutsContent() {
       </div>
     </div>
   )
-}
-
-function usePermissions() {
-  const electron = useElectron()
-  const [permissions, setPermissions] = React.useState<PermissionStatus | null>(null)
-  const [isChecking, setIsChecking] = React.useState(true)
-
-  const check = React.useCallback(async () => {
-    setIsChecking(true)
-    try {
-      const status = await electron.permissions.check()
-      setPermissions(status)
-    } catch (error) {
-      console.error("Failed to check permissions:", error)
-    } finally {
-      setIsChecking(false)
-    }
-  }, [electron])
-
-  // Check on mount
-  React.useEffect(() => {
-    check()
-  }, [check])
-
-  // Re-check when window regains focus
-  React.useEffect(() => {
-    const handleFocus = () => { check() }
-    window.addEventListener("focus", handleFocus)
-    return () => window.removeEventListener("focus", handleFocus)
-  }, [check])
-
-  return { permissions, isChecking, recheck: check }
 }
 
 function PermissionRow({

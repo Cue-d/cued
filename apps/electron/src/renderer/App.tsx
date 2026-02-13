@@ -20,6 +20,9 @@ import { ContactsPage } from "./pages/ContactsPage"
 import { SettingsPage, type SettingsSubpage } from "./pages/SettingsPage"
 import { getOrCreateConvexClient } from "./lib/convex-client-singleton"
 import { initPostHog, posthog, POSTHOG_KEY } from "./lib/posthog"
+import { OnboardingWizard } from "./components/onboarding/OnboardingWizard"
+
+const ONBOARDING_COMPLETE_KEY = "cued-onboarding-complete"
 
 /**
  * Auth hook for ConvexProviderWithAuth.
@@ -60,11 +63,19 @@ function UpdateBanner() {
 }
 
 function AuthenticatedApp({ convexUrl, user, onSignOut }: { convexUrl: string; user?: { id: string; firstName?: string | null; lastName?: string | null; email?: string | null } | null; onSignOut: () => void }) {
+  const [onboardingComplete, setOnboardingComplete] = useState(
+    () => localStorage.getItem(ONBOARDING_COMPLETE_KEY) === "true"
+  )
   const [currentPage, setCurrentPage] = useState<NavPage>("actions")
   const [actionCount, setActionCount] = useState(0)
   const [settingsSubpage, setSettingsSubpage] = useState<SettingsSubpage>('general')
   const [pendingContactId, setPendingContactId] = useState<string | null>(null)
   const convex = useMemo(() => getOrCreateConvexClient(convexUrl), [convexUrl])
+
+  const handleOnboardingComplete = useCallback(() => {
+    localStorage.setItem(ONBOARDING_COMPLETE_KEY, "true")
+    setOnboardingComplete(true)
+  }, [])
 
   // Initialize PostHog and identify user
   useEffect(() => {
@@ -81,7 +92,6 @@ function AuthenticatedApp({ convexUrl, user, onSignOut }: { convexUrl: string; u
       posthog.capture("$pageview", { $current_url: `cued-electron:///${currentPage}` })
     }
   }, [currentPage])
-
 
   // Integration status hooks
   const { isLoggedIn: linkedInConnected } = useLinkedIn()
@@ -132,6 +142,14 @@ function AuthenticatedApp({ convexUrl, user, onSignOut }: { convexUrl: string; u
       default:
         return <ActionsPage onActionCountChange={setActionCount} onContactClick={handleNavigateToContact} />
     }
+  }
+
+  if (!onboardingComplete) {
+    return (
+      <ConvexProviderWithAuth client={convex} useAuth={useElectronConvexAuth}>
+        <OnboardingWizard user={user} onComplete={handleOnboardingComplete} />
+      </ConvexProviderWithAuth>
+    )
   }
 
   return (
