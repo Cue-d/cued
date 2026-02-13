@@ -513,4 +513,3 @@ export const debugIntegrationDetails = query({
     });
   },
 });
-

@@ -118,10 +118,24 @@ export function ReactionBadges({
 
 /** Delivery status indicator */
 export function DeliveryStatus({ status }: { status?: string | null }) {
+  if (status === "queued") {
+    return (
+      <span className="opacity-60" title="Queued">
+        Queued
+      </span>
+    )
+  }
+  if (status === "sending") {
+    return (
+      <span className="opacity-40 animate-pulse" title="Sending">
+        Sending
+      </span>
+    )
+  }
   if (status === "failed") {
     return (
       <span className="text-destructive" title="Failed to send">
-        !
+        Failed
       </span>
     )
   }

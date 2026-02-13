@@ -38,4 +38,12 @@ crons.daily(
   internal.actionQueue.scanAllUsersForNewContacts,
 );
 
+// Timeout stale queue entries (every 10 seconds)
+// Handles both stuck "sending" and long-waiting "pending" with no desktop sender
+crons.interval(
+  "timeout-stale-sends",
+  { seconds: 10 },
+  internal.messageQueue.timeoutStaleSends
+);
+
 export default crons;

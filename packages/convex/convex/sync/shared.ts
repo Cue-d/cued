@@ -688,6 +688,95 @@ export async function incrementSyncCursorStat(
 }
 
 /**
+ * Resolve the delivery status for a synced message from the message queue.
+ * When a sent message (isFromMe=true) is synced back from the platform,
+ * we check the messageQueue for a matching entry and derive the delivery
+ * status from the platform (e.g. "delivered" for Slack/LinkedIn, "sent" otherwise).
+ */
+export async function resolveMessageStatus(
+  ctx: MutationCtx,
+  userId: Id<"users">,
+  conversationId: Id<"conversations">,
+  content: string,
+  isFromMe: boolean
+): Promise<"sending" | "sent" | "delivered" | "read" | "failed" | undefined> {
+  const bridge = await resolveMessageQueueBridge(
+    ctx,
+    userId,
+    conversationId,
+    content,
+    isFromMe
+  );
+  return bridge.status;
+}
+
+function normalizeContent(value: string): string {
+  return value.trim().replace(/\s+/g, " ");
+}
+
+function queueTimestamp(entry: Doc<"messageQueue">): number {
+  return entry.createdAt;
+}
+
+type MessageQueueBridge = {
+  status: "sending" | "sent" | "delivered" | "read" | "failed" | undefined;
+  sentAt: number | undefined;
+};
+
+/**
+ * Resolve queue bridge data for a synced outgoing message.
+ * Returns both delivery status and queue-derived sentAt to preserve order
+ * when replacing optimistic queue rows with canonical message rows.
+ */
+export async function resolveMessageQueueBridge(
+  ctx: MutationCtx,
+  userId: Id<"users">,
+  conversationId: Id<"conversations">,
+  content: string,
+  isFromMe: boolean,
+  candidateSentAt?: number
+): Promise<MessageQueueBridge> {
+  if (!isFromMe) return { status: undefined, sentAt: undefined };
+
+  const queueEntries = await ctx.db
+    .query("messageQueue")
+    .withIndex("by_user_status", (q) =>
+      q.eq("userId", userId).eq("status", "sent")
+    )
+    .filter((q) => q.eq(q.field("conversationId"), conversationId))
+    .collect();
+
+  const normalizedContent = normalizeContent(content);
+  const matches = queueEntries.filter(
+    (entry) => normalizeContent(entry.text) === normalizedContent
+  );
+
+  if (matches.length === 0) {
+    return { status: undefined, sentAt: undefined };
+  }
+
+  const ranked = [...matches].sort((a, b) => {
+    if (candidateSentAt !== undefined) {
+      const deltaA = Math.abs(queueTimestamp(a) - candidateSentAt);
+      const deltaB = Math.abs(queueTimestamp(b) - candidateSentAt);
+      if (deltaA !== deltaB) return deltaA - deltaB;
+    }
+    return queueTimestamp(b) - queueTimestamp(a);
+  });
+
+  const match = ranked[0];
+  // Platforms where API success means delivered (not just sent)
+  const directDeliveredPlatforms = ["linkedin", "slack", "twitter"];
+  const status = directDeliveredPlatforms.includes(match.platform)
+    ? ("delivered" as const)
+    : ("sent" as const);
+  return {
+    status,
+    sentAt: queueTimestamp(match),
+  };
+}
+
+/**
  * Clear error on integration after successful sync.
  */
 export async function clearIntegrationError(

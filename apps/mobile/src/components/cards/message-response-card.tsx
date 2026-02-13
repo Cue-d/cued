@@ -46,6 +46,8 @@ export interface MessageResponseCardProps {
   onOpenInApp?: (() => void) | null;
   /** Called when the send button is pressed */
   onSend?: () => void;
+  /** Whether this action has been completed (message sent) */
+  isCompleted?: boolean;
 }
 
 /**
@@ -131,6 +133,7 @@ function parseSlackContent(text: string, textClassName: string): React.ReactNode
 
 /** Status display config */
 const STATUS_CONFIG: Record<string, { text: string; className: string }> = {
+  queued: { text: "Queued", className: "text-muted-foreground" },
   failed: { text: "!", className: "text-red-500" },
   read: { text: "Read", className: "text-blue-400" },
   delivered: { text: "Delivered", className: "text-muted-foreground" },
@@ -229,6 +232,7 @@ export function MessageResponseCard({
   isDesktopOnline,
   onOpenInApp,
   onSend,
+  isCompleted = false,
 }: MessageResponseCardProps): React.JSX.Element {
   const colorScheme = useColorScheme();
   const isDark = colorScheme === "dark";
@@ -240,6 +244,9 @@ export function MessageResponseCard({
     () => [...messages].sort((a, b) => a.sentAt - b.sentAt),
     [messages],
   );
+  const requiresDesktopSender = Boolean(platform);
+  const showDesktopOfflineWarning =
+    requiresDesktopSender && isDesktopOnline === false;
 
   // Scroll to bottom when content changes
   const scrollToBottom = useCallback(() => {
@@ -383,15 +390,31 @@ export function MessageResponseCard({
         )}
       </ScrollView>
 
-      {/* Response Input - Liquid Glass Style */}
-      <ChatInput
-        value={responseText}
-        onChangeText={onResponseChange}
-        onSubmit={onSend}
-        placeholder="Message..."
-        disableKeyboardHandling
-        insideGlassContainer
-      />
+      {/* Response Input or Completed State */}
+      {showDesktopOfflineWarning && (
+        <View className="px-4 pb-2">
+          <Text className="text-xs text-muted-foreground">
+            Desktop offline. Messages stay queued until desktop reconnects.
+          </Text>
+        </View>
+      )}
+      {isCompleted ? (
+        <View className="px-4 py-4 items-center justify-center flex-row gap-2">
+          <SymbolView name="checkmark.circle.fill" size={18} tintColor="#1B5E3D" />
+          <Text className="text-sm font-medium text-muted-foreground">
+            Message queued
+          </Text>
+        </View>
+      ) : (
+        <ChatInput
+          value={responseText}
+          onChangeText={onResponseChange}
+          onSubmit={onSend}
+          placeholder="Message..."
+          disableKeyboardHandling
+          insideGlassContainer
+        />
+      )}
     </View>
   );
 }

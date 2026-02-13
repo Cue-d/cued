@@ -23,11 +23,9 @@ import { useElectron } from "../hooks/use-electron"
 import { Panel, PanelHeader } from "../components/app-shell"
 import { SnoozeModal } from "../components/SnoozeModal"
 import { SwipeableActionListItem } from "../components/SwipeableActionListItem"
-import { UndoToast } from "../components/UndoToast"
 
 const EMPTY_ACTIONS: EnrichedAction[] = []
 const EMPTY_COUNTS: Record<string, number> = {}
-const HIDDEN_UNDO_TOAST = { visible: false, message: "", messageId: null }
 
 const ACTION_TYPE_CONFIG: Record<string, { icon: React.ReactNode; label: string }> = {
   respond: { icon: <MessageSquare className="w-4 h-4" />, label: "Reply needed" },
@@ -176,13 +174,6 @@ export function ActionsPage({
   // Snooze modal state
   const [snoozeModalOpen, setSnoozeModalOpen] = React.useState(false)
 
-  // Undo toast state
-  const [undoToast, setUndoToast] = React.useState<{
-    visible: boolean
-    message: string
-    messageId: string | null
-  }>(HIDDEN_UNDO_TOAST)
-
   // Get action types to filter by based on active filter group
   const filterTypes = React.useMemo(
     () => ACTION_FILTER_GROUPS[activeFilter].types as readonly string[] | null,
@@ -269,7 +260,6 @@ export function ActionsPage({
 
   // Mutations
   const swipeAction = useMutation(api.actions.swipeAction)
-  const cancelMessage = useMutation(api.messageQueue.cancelMessage)
 
   // Handle response text change
   const handleResponseChange = React.useCallback(
@@ -301,21 +291,12 @@ export function ActionsPage({
 
       try {
         const responseText = responseTexts[selectedAction._id]
-        const result = await swipeAction({
+        await swipeAction({
           actionId: selectedAction._id as Id<"actions">,
           direction,
           responseText,
           snoozedUntil,
         })
-
-        // Show undo toast for right swipes (sent messages)
-        if (direction === "right" && result.queuedMessageId) {
-          setUndoToast({
-            visible: true,
-            message: "Message queued",
-            messageId: result.queuedMessageId,
-          })
-        }
 
         // Clean up state
         setResponseTexts((prev) => {
@@ -421,23 +402,6 @@ export function ActionsPage({
   // Clear multi-selection
   const clearSelection = React.useCallback(() => {
     setMultiSelectedIds(new Set())
-  }, [])
-
-  // Handle undo
-  const handleUndo = React.useCallback(async () => {
-    if (!undoToast.messageId) return
-    try {
-      await cancelMessage({
-        messageId: undoToast.messageId as Id<"messageQueue">,
-      })
-      setUndoToast(HIDDEN_UNDO_TOAST)
-    } catch (error) {
-      console.error("Failed to cancel message:", error)
-    }
-  }, [undoToast.messageId, cancelMessage])
-
-  const handleDismissToast = React.useCallback(() => {
-    setUndoToast(HIDDEN_UNDO_TOAST)
   }, [])
 
   // Open in platform app
@@ -658,14 +622,6 @@ export function ActionsPage({
         open={snoozeModalOpen}
         onClose={() => setSnoozeModalOpen(false)}
         onSnooze={handleSnooze}
-      />
-
-      {/* Undo Toast */}
-      <UndoToast
-        visible={undoToast.visible}
-        message={undoToast.message}
-        onUndo={handleUndo}
-        onDismiss={handleDismissToast}
       />
     </>
   )

@@ -65,6 +65,7 @@ function MessageBubble({
           className={`text-[10px] mt-1 ${message.isFromMe ? "text-white/60 text-right" : "text-sf-tertiaryLabel"}`}
         >
           {formatTime(message.sentAt)}
+          {message.isFromMe && message.status ? ` · ${message.status === "queued" ? "Queued" : message.status === "sending" ? "Sending" : message.status === "failed" ? "Failed" : message.status === "delivered" ? "Delivered" : message.status === "read" ? "Read" : "Sent"}` : ""}
         </Text>
       </View>
     </View>

@@ -27,6 +27,7 @@ import {
   extractCompanyFromHeadline,
   BATCH_SIZE,
   logSyncError,
+  resolveMessageQueueBridge,
 } from "./shared";
 import { scheduleContactMergeCheck } from "../lib/contactMergeScheduling";
 
@@ -391,25 +392,37 @@ export async function syncLinkedInMessagesInternal(
           }
         }
 
+        const bridge = isFromMe
+          ? await resolveMessageQueueBridge(
+              ctx,
+              userId,
+              conversationId,
+              msg.text,
+              isFromMe,
+              msg.deliveredAt
+            )
+          : { status: undefined, sentAt: undefined };
+        const sentAt = bridge.sentAt ?? msg.deliveredAt;
+
         // Insert message
         await ctx.db.insert("messages", {
           userId,
           conversationId,
           platform: "linkedin",
           content: msg.text,
-          sentAt: msg.deliveredAt,
+          sentAt,
           senderContactId,
           isFromMe,
           platformMessageId: msg.entityURN,
-          // LinkedIn messages don't have thread structure
+          status: bridge.status,
         });
 
         result.newMessages++;
         result.messagesCount++;
 
         // Track latest message for conversation update
-        if (!latestMessage || msg.deliveredAt > latestMessage.timestamp) {
-          latestMessage = { text: msg.text, timestamp: msg.deliveredAt };
+        if (!latestMessage || sentAt > latestMessage.timestamp) {
+          latestMessage = { text: msg.text, timestamp: sentAt };
         }
       } catch (e) {
         result.errors.push(

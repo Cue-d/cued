@@ -127,12 +127,9 @@ export function InboxMessageThread({
     }
   }, [conversation._id])
 
-  // Scroll to bottom when new messages arrive
-  useEffect(() => {
-    if (messages.length > 0 && prevConversationIdRef.current === conversation._id) {
-      messagesEndRef.current?.scrollIntoView({ behavior: "smooth" })
-    }
-  }, [messages.length, conversation._id])
+  // Note: intentionally no auto-scroll on new messages — the conversation-change
+  // scroll above handles initial positioning, and we don't want to hijack the
+  // user's scroll position when sending or receiving messages.
 
   const messagesByDate = groupMessagesByDate(messages)
   const isGroup = conversation.conversationType === "group" || conversation.conversationType === "channel"

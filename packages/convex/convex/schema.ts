@@ -93,8 +93,6 @@ const schema = defineSchema({
     pendingActionCount: v.optional(v.number()),
     // Expo push token for mobile notifications
     expoPushToken: v.optional(v.string()),
-    // Undo send delay in seconds (default 30, options: 3, 5, 10, 15, 30)
-    undoSendDelaySeconds: v.optional(v.number()),
   })
     .index("by_workos_id", ["workosUserId"])
     .index("by_email", ["email"]),
@@ -279,7 +277,9 @@ const schema = defineSchema({
     deviceType: v.literal("electron"), // Future: could add "mobile", "web"
     lastHeartbeatAt: v.number(),
     appVersion: v.optional(v.string()),
-  }).index("by_user_device", ["userId", "deviceType"]),
+  })
+    .index("by_user_device", ["userId", "deviceType"])
+    .index("by_device_type", ["deviceType"]),
 
   // Cloud sync cursors for multi-device sync support
   // This is the single source of truth for sync state (replaces integrations.syncState)
@@ -325,26 +325,35 @@ const schema = defineSchema({
     workspaceId: v.optional(v.string()),
     // Queue status
     status: v.union(
-      v.literal("pending"), // Waiting to be sent (in undo window)
+      v.literal("pending"), // Waiting to be sent
       v.literal("sending"), // Currently being sent
       v.literal("sent"), // Successfully sent
       v.literal("failed"), // Failed to send
-      v.literal("cancelled") // User cancelled during undo window
+      v.literal("cancelled") // Cancelled before send
     ),
     // Scheduling
-    scheduledFor: v.number(), // Timestamp when message should be sent (now + 30s for undo)
+    scheduledFor: v.number(), // Timestamp when message is eligible to send
+    // Per-conversation ordering (auto-incrementing per conversationId)
+    sequenceNumber: v.optional(v.number()),
     // Error handling
     error: v.optional(v.string()),
     attempts: v.number(),
     lastAttemptAt: v.optional(v.number()),
+    // Single-sender lock (per-message claim with 20s lease)
+    processingDeviceId: v.optional(v.string()),
+    processingStartedAt: v.optional(v.number()),
     // Timestamps
     createdAt: v.number(),
     sentAt: v.optional(v.number()),
     cancelledAt: v.optional(v.number()),
   })
     .index("by_user_status", ["userId", "status"])
+    .index("by_status", ["status"])
+    .index("by_status_scheduledFor", ["status", "scheduledFor"])
+    .index("by_user_status_createdAt", ["userId", "status", "createdAt"])
     .index("by_user_pending", ["userId", "scheduledFor"]) // For getting messages ready to send
-    .index("by_user_platform", ["userId", "platform"]),
+    .index("by_user_platform", ["userId", "platform"])
+    .index("by_conversation_sequence", ["conversationId", "sequenceNumber"]),
 });
 
 export default schema;

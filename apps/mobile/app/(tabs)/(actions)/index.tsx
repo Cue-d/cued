@@ -1,10 +1,10 @@
 /**
  * Actions tab main screen.
  * Displays pending actions as swipeable cards using Convex data.
- * Action buttons and undo toasts are now in the BottomAccessory and sheet.
+ * Action buttons and queue state are shown in the BottomAccessory and sheet.
  */
 
-import { useState, useCallback, useMemo } from "react";
+import { useState, useCallback, useMemo, useEffect } from "react";
 import { View, Text } from "react-native";
 import * as Haptics from "expo-haptics";
 import { useRouter, useSegments } from "expo-router";
@@ -49,6 +49,7 @@ import type { Id } from "@cued/convex/convex/_generated/dataModel";
 interface ActionItem {
   id: string;
   action: EnrichedAction;
+  isCompleted?: boolean;
 }
 
 /** Action types that use MessageResponseCard */
@@ -64,31 +65,54 @@ export default function ActionsScreen(): React.JSX.Element | null {
   const {
     actions,
     isLoading,
-    addQueuedMessage,
     focusedActionId,
     setFocusedActionId,
     isSheetOpen,
     setIsSheetOpen,
+    completedActionCache,
+    markActionCompleted,
+    clearCompletedAction,
   } = useActionQueue();
   const { isOnline: isDesktopOnline } = useElectronPresence();
   const swipeAction = useMutation(api.actions.swipeAction);
+
+  // Clear completed action cache when user navigates to a different action via sheet
+  useEffect(() => {
+    if (focusedActionId) {
+      // Clear all cached completed actions when user focuses a new action
+      for (const id of Object.keys(completedActionCache)) {
+        clearCompletedAction(id);
+      }
+    }
+    // Only react to focusedActionId changes, not cache changes
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [focusedActionId]);
 
   // Unmount card stack when leaving the tab to avoid stale glass/animation state
   // @ts-expect-error - segments is an array of strings
   const isActive = segments[1] === "(actions)";
 
-  // Reorder actions to show focused action on top (without mutating queue)
+  // Reorder actions to show focused action on top, and prepend completed actions
   const displayActions = useMemo(() => {
-    if (!focusedActionId) return actions;
-    const focusedIdx = actions.findIndex((a) => a._id === focusedActionId);
-    if (focusedIdx <= 0) return actions;
-    const focused = actions[focusedIdx];
-    return [
-      focused,
-      ...actions.slice(0, focusedIdx),
-      ...actions.slice(focusedIdx + 1),
-    ];
-  }, [actions, focusedActionId]);
+    let base = actions;
+    if (focusedActionId) {
+      const focusedIdx = actions.findIndex((a) => a._id === focusedActionId);
+      if (focusedIdx > 0) {
+        const focused = actions[focusedIdx];
+        base = [
+          focused,
+          ...actions.slice(0, focusedIdx),
+          ...actions.slice(focusedIdx + 1),
+        ];
+      }
+    }
+    // Prepend cached completed actions that are no longer in the pending query
+    const cachedIds = Object.keys(completedActionCache);
+    const cached = cachedIds
+      .filter((id) => !base.some((a) => a._id === id))
+      .map((id) => completedActionCache[id]);
+    return [...cached, ...base];
+  }, [actions, focusedActionId, completedActionCache]);
 
   // Get the top action ID for fetching context with messages
   const topActionId = displayActions[0]?._id as Id<"actions"> | undefined;
@@ -129,6 +153,7 @@ export default function ActionsScreen(): React.JSX.Element | null {
   const cardItems: ActionItem[] = displayActions.map((action) => ({
     id: action._id,
     action: action as EnrichedAction,
+    isCompleted: action._id in completedActionCache,
   }));
 
   const getResponseText = useCallback(
@@ -167,6 +192,13 @@ export default function ActionsScreen(): React.JSX.Element | null {
   const handleSwipe = useCallback(
     async (item: ActionItem, direction: SwipeDirection) => {
       const { action } = item;
+      const isAlreadyCompleted = action._id in completedActionCache;
+
+      // If this action is already completed, any swipe just dismisses it
+      if (isAlreadyCompleted) {
+        clearCompletedAction(action._id);
+        return;
+      }
 
       // Clear focused action on swipe
       if (focusedActionId === action._id) {
@@ -201,14 +233,14 @@ export default function ActionsScreen(): React.JSX.Element | null {
         return;
       }
 
-      // Right = send with response text
+      // Right = send with response text, then keep card visible as completed
       const responseText =
         action.type === "new_connection"
           ? getContactFormData(action).notes
           : getResponseText(action);
 
       try {
-        const result = await swipeAction({
+        await swipeAction({
           actionId: action._id as Id<"actions">,
           direction,
           responseText,
@@ -217,17 +249,9 @@ export default function ActionsScreen(): React.JSX.Element | null {
           Haptics.NotificationFeedbackType.Success,
         );
 
-        // Add queued message to context for display in accessory/sheet
-        if (result?.queuedMessageId && action.platform) {
-          addQueuedMessage({
-            messageId: result.queuedMessageId as string,
-            platform: action.platform as ActionPlatform,
-            recipientName: action.contactName ?? "Unknown",
-            messagePreview: responseText,
-            scheduledFor:
-              (result.scheduledFor as number) ?? Date.now() + 30 * 1000,
-          });
-        }
+        // Cache action locally so it stays visible after Convex removes it
+        markActionCompleted(action);
+
       } catch (error) {
         console.error("Failed to swipe action:", error);
         await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
@@ -238,9 +262,11 @@ export default function ActionsScreen(): React.JSX.Element | null {
       swipeAction,
       getResponseText,
       getContactFormData,
-      addQueuedMessage,
       focusedActionId,
       setFocusedActionId,
+      completedActionCache,
+      markActionCompleted,
+      clearCompletedAction,
     ],
   );
 
@@ -278,6 +304,7 @@ export default function ActionsScreen(): React.JSX.Element | null {
             isDesktopOnline={isDesktopOnline}
             onOpenInApp={onOpenInApp}
             onSend={() => handleSwipe(item, "right")}
+            isCompleted={item.isCompleted}
           />
         );
       }

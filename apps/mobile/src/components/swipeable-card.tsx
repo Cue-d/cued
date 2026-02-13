@@ -38,6 +38,8 @@ export interface SwipeableCardProps {
   className?: string;
   /** Set to trigger a programmatic swipe animation */
   triggerSwipe?: SwipeDirection | null;
+  /** When true, card shows completed overlay and any swipe dismisses it */
+  isCompleted?: boolean;
 }
 
 // Thresholds for triggering swipe actions
@@ -268,6 +270,7 @@ export function SwipeableCard({
   disabled = false,
   className,
   triggerSwipe,
+  isCompleted = false,
 }: SwipeableCardProps): React.JSX.Element {
   const translateX = useSharedValue(0);
   const translateY = useSharedValue(0);
@@ -411,12 +414,19 @@ export function SwipeableCard({
       const { translationX, translationY } = event;
 
       if (translationX > SWIPE_THRESHOLD_X) {
-        isAnimatingRef.current = true;
-        translateX.value = withSpring(500, SPRING_CONFIG, (finished) => {
-          if (finished) {
-            runOnJS(handleSwipe)("right");
-          }
-        });
+        if (isCompleted) {
+          // Completed card: fly off to dismiss
+          isAnimatingRef.current = true;
+          translateX.value = withSpring(500, SPRING_CONFIG, (finished) => {
+            if (finished) {
+              runOnJS(handleSwipe)("right");
+            }
+          });
+        } else {
+          // Non-completed: snap back and trigger send
+          runOnJS(resetToCenter)();
+          runOnJS(handleSwipe)("right");
+        }
       } else if (translationX < -SWIPE_THRESHOLD_X) {
         isAnimatingRef.current = true;
         translateX.value = withSpring(-500, SPRING_CONFIG, (finished) => {
@@ -470,7 +480,16 @@ export function SwipeableCard({
   // Card content with glass effect
   const CardContent = (
     <View className="flex-1 relative overflow-hidden">
-      {/* Background color overlay */}
+      {/* Persistent completed overlay */}
+      {isCompleted && (
+        <View
+          className="absolute inset-0 z-10"
+          style={{ backgroundColor: COLORS.send, opacity: 0.12 }}
+          pointerEvents="none"
+        />
+      )}
+
+      {/* Background color overlay (swipe direction) */}
       <AnimatedView
         style={overlayStyle}
         className="absolute inset-0 z-10"

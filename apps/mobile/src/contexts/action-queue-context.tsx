@@ -3,7 +3,7 @@
  *
  * Lifts state out of the actions screen so that the NativeTabs.BottomAccessory
  * (which renders two copies) and the action list sheet can share a single
- * source of truth for actions, queued messages, filters, and sheet state.
+ * source of truth for actions, filters, and sheet state.
  */
 
 import {
@@ -14,21 +14,8 @@ import {
   useMemo,
   type ReactNode,
 } from "react";
-import { useMutation } from "convex/react";
-import { api } from "@cued/convex";
 import { type ActionPlatform, type EnrichedAction } from "@cued/shared";
 import { useActions } from "@/hooks/useActions";
-import type { Id } from "@cued/convex/convex/_generated/dataModel";
-
-/** Data for a queued message toast */
-export interface QueuedMessageToast {
-  messageId: string;
-  platform: ActionPlatform;
-  recipientName: string;
-  messagePreview?: string;
-  /** Timestamp (ms) when the message will be sent (for countdown display) */
-  scheduledFor: number;
-}
 
 /** Action type filter options (grouped) */
 export type ActionTypeFilter = "all" | "respond" | "followups" | "contacts";
@@ -45,15 +32,6 @@ interface ActionQueueContextValue {
   filteredActions: EnrichedAction[];
   /** The top action (first in the list) */
   topAction: EnrichedAction | undefined;
-
-  /** Queued messages waiting to be sent (with undo capability) */
-  queuedMessages: QueuedMessageToast[];
-  /** Add a queued message to the list */
-  addQueuedMessage: (msg: QueuedMessageToast) => void;
-  /** Cancel a queued message */
-  handleUndoMessage: (messageId: string) => Promise<void>;
-  /** Dismiss a toast (remove from local state) */
-  handleToastDismiss: (messageId: string, reason: "sent" | "cancelled" | "closed") => void;
 
   /** Whether the action list bottom sheet is open */
   isSheetOpen: boolean;
@@ -73,19 +51,22 @@ interface ActionQueueContextValue {
   focusedActionId: string | null;
   /** Set the focused action ID (from sheet row tap) */
   setFocusedActionId: (id: string | null) => void;
+
+  /** Locally cached completed actions (kept visible until dismissed) */
+  completedActionCache: Record<string, EnrichedAction>;
+  /** Cache an action as completed (keeps it visible after Convex removes it) */
+  markActionCompleted: (action: EnrichedAction) => void;
+  /** Remove a completed action from the local cache */
+  clearCompletedAction: (actionId: string) => void;
 }
 
 const ActionQueueContext = createContext<ActionQueueContextValue | null>(null);
 
 export function ActionQueueProvider({ children }: { children: ReactNode }): React.JSX.Element {
   const { actions: rawActions, isLoading } = useActions({ limit: 50 });
-  const cancelMessage = useMutation(api.messageQueue.cancelMessage);
 
   // Cast actions to our enriched type
   const actions = rawActions as EnrichedAction[];
-
-  // Queued messages for undo toasts
-  const [queuedMessages, setQueuedMessages] = useState<QueuedMessageToast[]>([]);
 
   // Sheet state
   const [isSheetOpen, setIsSheetOpen] = useState(false);
@@ -96,6 +77,9 @@ export function ActionQueueProvider({ children }: { children: ReactNode }): Reac
 
   // Focused action (from sheet row tap)
   const [focusedActionId, setFocusedActionId] = useState<string | null>(null);
+
+  // Locally cached completed actions (kept visible until user dismisses)
+  const [completedActionCache, setCompletedActionCache] = useState<Record<string, EnrichedAction>>({});
 
   // Derived: top action (respects focused action from sheet tap)
   const topAction = focusedActionId
@@ -113,24 +97,17 @@ export function ActionQueueProvider({ children }: { children: ReactNode }): Reac
     });
   }, [actions, platformFilter, typeFilter]);
 
-  const addQueuedMessage = useCallback((msg: QueuedMessageToast) => {
-    setQueuedMessages((prev) => [...prev, msg]);
+  const markActionCompleted = useCallback((action: EnrichedAction) => {
+    setCompletedActionCache((prev) => ({ ...prev, [action._id]: action }));
   }, []);
 
-  const handleUndoMessage = useCallback(
-    async (messageId: string) => {
-      setQueuedMessages((prev) => prev.filter((m) => m.messageId !== messageId));
-      await cancelMessage({ messageId: messageId as Id<"messageQueue"> });
-    },
-    [cancelMessage],
-  );
-
-  const handleToastDismiss = useCallback(
-    (messageId: string, _reason: "sent" | "cancelled" | "closed") => {
-      setQueuedMessages((prev) => prev.filter((m) => m.messageId !== messageId));
-    },
-    [],
-  );
+  const clearCompletedAction = useCallback((actionId: string) => {
+    setCompletedActionCache((prev) => {
+      const next = { ...prev };
+      delete next[actionId];
+      return next;
+    });
+  }, []);
 
   const value = useMemo<ActionQueueContextValue>(
     () => ({
@@ -138,10 +115,6 @@ export function ActionQueueProvider({ children }: { children: ReactNode }): Reac
       isLoading,
       filteredActions,
       topAction,
-      queuedMessages,
-      addQueuedMessage,
-      handleUndoMessage,
-      handleToastDismiss,
       isSheetOpen,
       setIsSheetOpen,
       platformFilter,
@@ -150,20 +123,22 @@ export function ActionQueueProvider({ children }: { children: ReactNode }): Reac
       setTypeFilter,
       focusedActionId,
       setFocusedActionId,
+      completedActionCache,
+      markActionCompleted,
+      clearCompletedAction,
     }),
     [
       actions,
       isLoading,
       filteredActions,
       topAction,
-      queuedMessages,
-      addQueuedMessage,
-      handleUndoMessage,
-      handleToastDismiss,
       isSheetOpen,
       platformFilter,
       typeFilter,
       focusedActionId,
+      completedActionCache,
+      markActionCompleted,
+      clearCompletedAction,
     ],
   );
 

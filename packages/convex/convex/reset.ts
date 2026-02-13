@@ -128,3 +128,26 @@ export const migrateRemoveDraftMessage = mutation({
     return { updated, total: actions.length };
   },
 });
+
+/**
+ * Migration: Remove deprecated undoSendDelaySeconds field from users.
+ * The undo send feature was removed but existing documents still have this field.
+ */
+export const migrateRemoveUndoSendDelay = mutation({
+  args: {},
+  handler: async (ctx) => {
+    const users = await ctx.db.query("users").collect();
+
+    let updated = 0;
+    for (const user of users) {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      if ((user as any).undoSendDelaySeconds !== undefined) {
+        const { undoSendDelaySeconds: _, ...rest } = user as typeof user & { undoSendDelaySeconds?: number };
+        await ctx.db.replace(user._id, rest);
+        updated++;
+      }
+    }
+
+    return { updated, total: users.length };
+  },
+});

@@ -12,7 +12,6 @@ import { api } from "@cued/convex";
 import { getInitials, formatPhoneNumber, formatRelativeTime, PLATFORM_CONFIG, type ActionPlatform } from "@cued/shared";
 import { PlatformIcon } from "@/components/platform-icons";
 import { SendMessageSheet, type SendMessageContact } from "@/components/send-message-sheet";
-import { UndoSendToast } from "@/components/undo-send-toast";
 import type { Id } from "@cued/convex/convex/_generated/dataModel";
 import type { SFSymbol } from "sf-symbols-typescript";
 
@@ -162,20 +161,11 @@ function handleTypeToPlatform(type: string): ActionPlatform | null {
   }
 }
 
-/** Data for a queued message toast */
-interface QueuedMessageToast {
-  messageId: string;
-  platform: ActionPlatform;
-  recipientName: string;
-  messagePreview?: string;
-}
-
 export default function ContactDetailScreen(): React.JSX.Element {
   const { id } = useLocalSearchParams<{ id: string }>();
 
   // State for send message sheet
   const [showSendSheet, setShowSendSheet] = useState(false);
-  const [queuedMessages, setQueuedMessages] = useState<QueuedMessageToast[]>([]);
 
   const router = useRouter();
 
@@ -190,7 +180,6 @@ export default function ContactDetailScreen(): React.JSX.Element {
 
   // Mutations for message queue
   const queueMessage = useMutation(api.messageQueue.queueMessage);
-  const cancelMessage = useMutation(api.messageQueue.cancelMessage);
 
   // Build sendable platforms from contact handles
   const sendableContact: SendMessageContact | null = useMemo(() => {
@@ -242,39 +231,9 @@ export default function ContactDetailScreen(): React.JSX.Element {
           ? (params.conversationId as Id<"conversations">)
           : undefined,
       });
-
-      // Show undo toast
-      if (result?.messageId && profile?.contact) {
-        setQueuedMessages((prev) => [
-          ...prev,
-          {
-            messageId: result.messageId as string,
-            platform: params.platform,
-            recipientName: profile.contact.displayName,
-            messagePreview: params.text,
-          },
-        ]);
-      }
-
       return result;
     },
-    [queueMessage, profile?.contact]
-  );
-
-  // Handle undo for a queued message
-  const handleUndoMessage = useCallback(
-    async (messageId: string) => {
-      await cancelMessage({ messageId: messageId as Id<"messageQueue"> });
-    },
-    [cancelMessage]
-  );
-
-  // Handle toast dismissal
-  const handleToastDismiss = useCallback(
-    (messageId: string, _reason: "sent" | "cancelled" | "closed") => {
-      setQueuedMessages((prev) => prev.filter((m) => m.messageId !== messageId));
-    },
-    []
+    [queueMessage]
   );
 
   // Open send sheet
@@ -507,31 +466,6 @@ export default function ContactDetailScreen(): React.JSX.Element {
           </View>
         )}
       </ScrollView>
-
-      {/* Undo send toasts for queued messages */}
-      {queuedMessages.length > 0 && (
-        <View
-          style={{
-            position: "absolute",
-            bottom: 16,
-            left: 0,
-            right: 0,
-            gap: 8,
-          }}
-        >
-          {queuedMessages.slice(0, 3).map((msg) => (
-            <UndoSendToast
-              key={msg.messageId}
-              messageId={msg.messageId}
-              platform={msg.platform}
-              recipientName={msg.recipientName}
-              messagePreview={msg.messagePreview}
-              onUndo={handleUndoMessage}
-              onDismiss={handleToastDismiss}
-            />
-          ))}
-        </View>
-      )}
 
       {/* Send message sheet */}
       {sendableContact && (

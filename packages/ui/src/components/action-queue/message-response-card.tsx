@@ -1,11 +1,13 @@
 import * as React from "react"
+import { CircleCheck } from "lucide-react"
 import {
   type ActionPlatform,
   type DisplayMessage,
 } from "@cued/shared"
 import { cn } from "../../lib/utils"
 import { Card, CardContent, CardFooter, CardHeader } from "../ui/card"
-import { MessageBubble } from "./message-response-card/message-bubble"
+import { InboxMessageBubble, type InboxMessageSpacing } from "../unified-inbox/message-bubble"
+import type { InboxMessage } from "../unified-inbox/message-types"
 import { PlatformBadge } from "./message-response-card/platform-badge"
 import { ResponseInput } from "./message-response-card/response-input"
 import { OpenInAppButton } from "./open-in-app-button"
@@ -54,6 +56,8 @@ export interface MessageResponseCardProps {
   contactId?: string | null
   /** Called when a contact name is clicked */
   onContactClick?: (contactId: string) => void
+  /** Whether this action has been completed (message sent) */
+  isCompleted?: boolean
 }
 
 export interface MessageResponseCardRef {
@@ -88,6 +92,7 @@ export const MessageResponseCard = React.forwardRef<
     participants,
     contactId,
     onContactClick,
+    isCompleted = false,
   },
   ref
 ) {
@@ -137,24 +142,41 @@ export const MessageResponseCard = React.forwardRef<
     [messages]
   )
 
-  function shouldShowSenderName(msg: DisplayMessage, idx: number): boolean {
+  // Convert DisplayMessage to InboxMessage for the shared bubble component
+  const inboxMessages: InboxMessage[] = React.useMemo(
+    () => sortedMessages.map((msg) => ({
+      _id: msg._id,
+      content: msg.content ?? "",
+      sentAt: msg.sentAt,
+      isFromMe: msg.isFromMe,
+      platform: (platform ?? "imessage") as InboxMessage["platform"],
+      sender: msg.senderName ? {
+        _id: msg.senderContactId ?? msg._id,
+        displayName: msg.senderName,
+      } : null,
+      status: msg.status,
+    })),
+    [sortedMessages, platform]
+  )
+
+  function shouldShowSenderName(msg: InboxMessage, idx: number): boolean {
     if (msg.isFromMe) return false
-    if (!msg.senderName) return false
+    if (!msg.sender?.displayName) return false
     if (idx === 0) return true
-    const prevMsg = sortedMessages[idx - 1]
+    const prevMsg = inboxMessages[idx - 1]
     if (prevMsg.isFromMe) return true
-    return prevMsg.senderName !== msg.senderName
+    return prevMsg.sender?.displayName !== msg.sender?.displayName
   }
 
-  function getMessageSpacing(msg: DisplayMessage, idx: number): "tight" | "normal" | "wide" {
+  function getMessageSpacing(msg: InboxMessage, idx: number): InboxMessageSpacing {
     if (idx === 0) return "normal"
-    const prevMsg = sortedMessages[idx - 1]
+    const prevMsg = inboxMessages[idx - 1]
 
     // Different sender direction = wide gap
     if (msg.isFromMe !== prevMsg.isFromMe) return "wide"
 
     // Same sender direction but different person (group chat) = wide gap
-    if (!msg.isFromMe && msg.senderName !== prevMsg.senderName) return "wide"
+    if (!msg.isFromMe && msg.sender?._id !== prevMsg.sender?._id) return "wide"
 
     // Same sender - check time gap (>2 min = normal spacing)
     const timeDiffMinutes = (msg.sentAt - prevMsg.sentAt) / 1000 / 60
@@ -164,10 +186,16 @@ export const MessageResponseCard = React.forwardRef<
   return (
     <Card
       className={cn(
-        "w-full h-full flex flex-col overflow-hidden gap-0 border-0 p-0 bg-transparent",
+        "w-full h-full flex flex-col overflow-hidden gap-0 border-0 p-0 bg-transparent relative",
         className
       )}
     >
+      {isCompleted && (
+        <div
+          className="absolute inset-0 z-10 pointer-events-none rounded-[inherit]"
+          style={{ backgroundColor: "#1B5E3D", opacity: 0.08 }}
+        />
+      )}
       {/* Header - fixed h-10 to align with PanelHeader in left column */}
       <CardHeader className="shrink-0 h-10 py-0 flex items-center">
         <div className="flex items-center justify-center w-full">
@@ -208,21 +236,14 @@ export const MessageResponseCard = React.forwardRef<
           onClick={handleContainerClick}
         >
           <div className="py-4 px-4">
-            {sortedMessages.length > 0 ? (
-              sortedMessages.map((msg, idx) => (
-                <MessageBubble
+            {inboxMessages.length > 0 ? (
+              inboxMessages.map((msg, idx) => (
+                <InboxMessageBubble
                   key={msg._id}
-                  id={msg._id}
-                  content={msg.content}
-                  isFromMe={msg.isFromMe}
-                  sentAt={msg.sentAt}
-                  senderName={msg.senderName}
-                  senderContactId={msg.senderContactId}
-                  status={msg.status}
-                  reactions={msg.reactions}
+                  message={msg}
+                  showTimestamp={true}
                   showSenderName={shouldShowSenderName(msg, idx)}
                   spacing={getMessageSpacing(msg, idx)}
-                  platform={platform}
                   onContactClick={onContactClick}
                 />
               ))
@@ -235,16 +256,25 @@ export const MessageResponseCard = React.forwardRef<
         </div>
       </CardContent>
 
-      {/* Response Input */}
+      {/* Response Input or Completed State */}
       <CardFooter className="p-2 bg-transparent" data-selectable="true">
-        <ResponseInput
-          value={responseText}
-          onChange={onResponseChange}
-          onSend={onSend}
-          isSending={isSending}
-          placeholder="Send a message..."
-          textareaRef={textareaRef}
-        />
+        {isCompleted ? (
+          <div className="flex items-center justify-center gap-2 w-full py-2">
+            <CircleCheck className="w-4 h-4 text-[#1B5E3D]" />
+            <span className="text-sm font-medium text-muted-foreground">
+              Message queued
+            </span>
+          </div>
+        ) : (
+          <ResponseInput
+            value={responseText}
+            onChange={onResponseChange}
+            onSend={onSend}
+            isSending={isSending}
+            placeholder="Send a message..."
+            textareaRef={textareaRef}
+          />
+        )}
       </CardFooter>
     </Card>
   )

@@ -1,5 +1,5 @@
 import * as React from "react"
-import { useQuery, useMutation } from "convex/react"
+import { useQuery } from "convex/react"
 import { api } from "@cued/convex"
 import {
   Button,
@@ -75,14 +75,6 @@ const themeOptions: { value: Theme; label: string; icon: React.ComponentType<{ c
   { value: "light", label: "Light", icon: Sun },
   { value: "dark", label: "Dark", icon: Moon },
 ]
-
-const UNDO_DELAY_OPTIONS = [
-  { value: 3, label: "3 seconds" },
-  { value: 5, label: "5 seconds" },
-  { value: 10, label: "10 seconds" },
-  { value: 15, label: "15 seconds" },
-  { value: 30, label: "30 seconds" },
-] as const
 
 interface SettingsNavItem {
   id: SettingsSubpage
@@ -245,8 +237,6 @@ function GeneralContent() {
   const auth = useAuthState()
   const electron = useElectron()
   const { permissions, isChecking } = usePermissions()
-  const userSettings = useQuery(api.users.getSettings)
-  const updateUndoDelay = useMutation(api.users.updateUndoSendDelay)
   const { theme, setTheme } = useTheme()
   const fullName = [auth.user?.firstName, auth.user?.lastName].filter(Boolean).join(' ')
   const [syncHistoryDays, setSyncHistoryDays] = React.useState<number>(90)
@@ -368,33 +358,6 @@ function GeneralContent() {
                 </SettingsCard>
               </SettingsSection>
 
-              {/* Sending */}
-              <SettingsSection title="Sending" description="Control message sending behavior">
-                <SettingsCard>
-                  <SettingsRow
-                    label="Undo send delay"
-                    description="How long you have to cancel a message"
-                  >
-                    <Select
-                      value={String(userSettings?.undoSendDelaySeconds ?? 30)}
-                      onValueChange={(value) => {
-                        updateUndoDelay({ delaySeconds: Number(value) })
-                      }}
-                    >
-                      <SelectTrigger className="w-[140px]">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {UNDO_DELAY_OPTIONS.map((option) => (
-                          <SelectItem key={option.value} value={String(option.value)}>
-                            {option.label}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </SettingsRow>
-                </SettingsCard>
-              </SettingsSection>
             </div>
           </div>
         </ScrollArea>

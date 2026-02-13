@@ -3,13 +3,8 @@
 import * as React from "react";
 import Link from "next/link";
 import { useSearchParams, useRouter } from "next/navigation";
-import { useQuery, useMutation } from "convex/react";
-import {
-  SendIcon,
-  WrenchIcon,
-  ChevronRightIcon,
-  UserIcon,
-} from "lucide-react";
+import { useQuery } from "convex/react";
+import { WrenchIcon, ChevronRightIcon, UserIcon } from "lucide-react";
 import { api } from "@cued/convex";
 import { getInitials } from "@cued/shared";
 import {
@@ -20,80 +15,17 @@ import {
   Avatar,
   AvatarFallback,
   Separator,
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
   Card,
   CardContent,
 } from "@cued/ui";
 
-const UNDO_DELAY_OPTIONS = [
-  { value: 3, label: "3 seconds" },
-  { value: 5, label: "5 seconds" },
-  { value: 10, label: "10 seconds" },
-  { value: 15, label: "15 seconds" },
-  { value: 30, label: "30 seconds" },
-] as const;
-
 // Settings sections
 const SETTINGS_SECTIONS = [
-  { id: "messages", label: "Messages", icon: SendIcon },
   { id: "account", label: "Account", icon: UserIcon },
   { id: "developer", label: "Developer", icon: WrenchIcon },
 ] as const;
 
 type SettingSection = typeof SETTINGS_SECTIONS[number]["id"];
-
-function MessagesSection() {
-  const userSettings = useQuery(api.users.getSettings);
-  const updateUndoDelay = useMutation(api.users.updateUndoSendDelay);
-
-  return (
-    <div className="space-y-6">
-      <div>
-        <h2 className="text-lg font-semibold">Messages</h2>
-        <p className="text-sm text-muted-foreground mt-1">
-          Configure message sending behavior
-        </p>
-      </div>
-
-      <Card>
-        <CardContent className="p-4">
-          <div className="flex items-center gap-3">
-            <div className="flex size-9 items-center justify-center rounded-md bg-muted">
-              <SendIcon className="size-4 text-muted-foreground" />
-            </div>
-            <div className="flex-1">
-              <p className="text-sm font-medium">Undo send delay</p>
-              <p className="text-xs text-muted-foreground">
-                Time to cancel a message before it sends
-              </p>
-            </div>
-            <Select
-              value={String(userSettings?.undoSendDelaySeconds ?? 30)}
-              onValueChange={(value) => {
-                updateUndoDelay({ delaySeconds: Number(value) });
-              }}
-            >
-              <SelectTrigger className="w-[140px]">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {UNDO_DELAY_OPTIONS.map((option) => (
-                  <SelectItem key={option.value} value={String(option.value)}>
-                    {option.label}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-        </CardContent>
-      </Card>
-    </div>
-  );
-}
 
 function AccountSection() {
   const user = useQuery(api.users.getProfile);
@@ -180,8 +112,6 @@ function DeveloperSection() {
 
 function SettingsSectionContent({ section }: { section: SettingSection }) {
   switch (section) {
-    case "messages":
-      return <MessagesSection />;
     case "account":
       return <AccountSection />;
     case "developer":
@@ -194,7 +124,10 @@ function SettingsSectionContent({ section }: { section: SettingSection }) {
 export default function SettingsPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const selectedSection = (searchParams.get("section") ?? "messages") as SettingSection;
+  const sectionParam = searchParams.get("section");
+  const selectedSection = SETTINGS_SECTIONS.some((section) => section.id === sectionParam)
+    ? (sectionParam as SettingSection)
+    : "account";
 
   const handleSectionSelect = React.useCallback(
     (sectionId: SettingSection) => {

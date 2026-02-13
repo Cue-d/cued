@@ -18,6 +18,7 @@ import {
   shouldUpdateDisplayName,
   SEVEN_DAYS_MS,
   logSyncError,
+  resolveMessageQueueBridge,
 } from "./shared";
 import { batchFetchConversations, batchFetchMessages } from "./batchUtils";
 import { scheduleContactMergeCheck } from "../lib/contactMergeScheduling";
@@ -291,10 +292,47 @@ export async function syncMessagesInternal(
     }
   }
 
-  // Bulk insert messages
+  // Recompute conversation updates from inserted timestamps after queue bridge.
+  conversationUpdates.clear();
+  const analysisCandidates: Array<{
+    conversationId: Id<"conversations">;
+    isFromMe: boolean;
+    sentAt: number;
+  }> = [];
+
+  // Bulk insert messages (with delivery status for sent messages)
   for (const msg of messagesToInsert) {
-    await ctx.db.insert("messages", msg);
+    const bridge = msg.isFromMe
+      ? await resolveMessageQueueBridge(
+          ctx,
+          userId,
+          msg.conversationId,
+          msg.content,
+          msg.isFromMe,
+          msg.sentAt
+        )
+      : { status: undefined, sentAt: undefined };
+    const finalSentAt = bridge.sentAt ?? msg.sentAt;
+
+    await ctx.db.insert("messages", {
+      ...msg,
+      sentAt: finalSentAt,
+      status: bridge.status,
+    });
     result.messagesCount++;
+    analysisCandidates.push({
+      conversationId: msg.conversationId,
+      isFromMe: msg.isFromMe,
+      sentAt: finalSentAt,
+    });
+
+    const existing = conversationUpdates.get(msg.conversationId);
+    if (!existing || finalSentAt > existing.timestamp) {
+      conversationUpdates.set(msg.conversationId, {
+        text: msg.content,
+        timestamp: finalSentAt,
+      });
+    }
   }
 
   // Update lastMessage fields on conversations (only if newer than existing)
@@ -319,7 +357,7 @@ export async function syncMessagesInternal(
   const incomingConvos = new Set<Id<"conversations">>();
   const outgoingConvos = new Set<Id<"conversations">>();
 
-  for (const msg of messagesToInsert) {
+  for (const msg of analysisCandidates) {
     if (msg.sentAt < cutoff) continue;
     if (msg.isFromMe) {
       outgoingConvos.add(msg.conversationId);

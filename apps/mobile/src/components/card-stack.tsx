@@ -24,6 +24,7 @@ const Y_OFFSET = 18;
 
 export interface CardStackItem {
   id: string;
+  isCompleted?: boolean;
 }
 
 export interface CardStackProps<T extends CardStackItem> {
@@ -126,6 +127,7 @@ export function CardStack<T extends CardStackItem>({
                 onSwipe={(direction) => handleSwipe(topItem, direction)}
                 disabled={false}
                 triggerSwipe={triggerSwipe}
+                isCompleted={topItem.isCompleted}
                 className="w-full h-full"
               >
                 {renderCard(topItem, 0)}

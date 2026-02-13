@@ -10,7 +10,7 @@ import {
 import * as Haptics from "expo-haptics";
 import { router } from "expo-router";
 import { SymbolView } from "expo-symbols";
-import { useQuery, useMutation } from "convex/react";
+import { useQuery } from "convex/react";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Uniwind, useUniwind } from "uniwind";
 import { api } from "@cued/convex";
@@ -21,14 +21,6 @@ import { useElectronPresence } from "@/hooks/useElectronPresence";
 import { PlatformIcon } from "@/components/platform-icons";
 import { cn, getDisplayName, getThemeColors } from "@/lib/utils";
 import { useAuth } from "@/providers/AuthProvider";
-
-const UNDO_DELAY_OPTIONS = [
-  { value: 3, label: "3 seconds" },
-  { value: 5, label: "5 seconds" },
-  { value: 10, label: "10 seconds" },
-  { value: 15, label: "15 seconds" },
-  { value: 30, label: "30 seconds" },
-] as const;
 
 function Avatar({ name, size = 80 }: { name: string; size?: number }): React.ReactElement {
   return (
@@ -190,12 +182,6 @@ export default function SettingsScreen(): React.ReactElement {
   const { isOnline: desktopOnline, lastSeen } = useElectronPresence();
   const integrationsData = useQuery(api.integrations.getUserIntegrations);
 
-  // Undo send delay settings
-  const userSettings = useQuery(api.users.getSettings);
-  const updateUndoDelay = useMutation(api.users.updateUndoSendDelay);
-  const currentDelay = userSettings?.undoSendDelaySeconds ?? 30;
-  const currentDelayLabel = UNDO_DELAY_OPTIONS.find((o) => o.value === currentDelay)?.label ?? "30 seconds";
-
   function handleSignOut(): void {
     Alert.alert("Sign Out", "Are you sure you want to sign out?", [
       { text: "Cancel", style: "cancel" },
@@ -232,20 +218,6 @@ export default function SettingsScreen(): React.ReactElement {
         onPress: () => {
           Haptics.selectionAsync();
           Uniwind.setTheme(option.value);
-        },
-      }))
-    );
-  }
-
-  function handleUndoDelayChange(): void {
-    Alert.alert(
-      "Undo Send Delay",
-      "Time to cancel a message before it sends",
-      UNDO_DELAY_OPTIONS.map((option) => ({
-        text: option.label + (currentDelay === option.value ? " ✓" : ""),
-        onPress: () => {
-          Haptics.selectionAsync();
-          updateUndoDelay({ delaySeconds: option.value });
         },
       }))
     );
@@ -335,13 +307,6 @@ export default function SettingsScreen(): React.ReactElement {
           label="Appearance"
           value={activeThemeLabel}
           onPress={handleThemeChange}
-        />
-        <Divider />
-        <SettingsRow
-          icon="clock.arrow.circlepath"
-          label="Undo Send Delay"
-          value={currentDelayLabel}
-          onPress={handleUndoDelayChange}
         />
       </SettingsSection>
 

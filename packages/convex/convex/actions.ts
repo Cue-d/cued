@@ -11,6 +11,10 @@ import {
   actionTypeValidator,
   platformValidator,
 } from "./schema";
+import {
+  getQueuedMessagesForConversation,
+  mapQueueToDisplayMessage,
+} from "./lib/queueMerge";
 import { executeSwipeHandler } from "./swipeHandlers/registry";
 
 /**
@@ -418,8 +422,19 @@ export const getActionWithContext = query({
           .take(messageLimit)
       : [];
 
+    type ActionContextMessage = {
+      _id: Id<"messages">;
+      content: string;
+      sentAt: number;
+      isFromMe: boolean;
+      senderName: string | null;
+      senderContactId: Id<"contacts"> | null;
+      status?: string | null;
+      reactions: Doc<"messages">["reactions"];
+    };
+
     // Resolve sender names for messages
-    const messagesWithSender = await Promise.all(
+    const messagesWithSender: ActionContextMessage[] = await Promise.all(
       messages.map(async (msg) => {
         let senderName: string | null = null;
         if (msg.isFromMe) {
@@ -441,6 +456,16 @@ export const getActionWithContext = query({
         };
       })
     );
+
+    // Merge queued messages for this conversation
+    if (action.conversationId) {
+      const queued = await getQueuedMessagesForConversation(
+        ctx,
+        user._id,
+        action.conversationId
+      );
+      messagesWithSender.push(...queued.map(mapQueueToDisplayMessage));
+    }
 
     // Reverse to show oldest first (chronological order for display)
     messagesWithSender.reverse();
@@ -604,7 +629,6 @@ export const swipeAction = mutation({
     const response: {
       success: boolean;
       status: "completed" | "discarded" | "snoozed";
-      queuedMessageId?: string;
       [key: string]: unknown;
     } = {
       success: result.success,

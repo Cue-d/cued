@@ -20,6 +20,7 @@ import {
   MAX_NEW_CONNECTION_ACTIONS,
   extractCompanyFromHeadline,
   logSyncError,
+  resolveMessageQueueBridge,
 } from "./shared";
 
 // ============================================================================
@@ -260,29 +261,42 @@ export async function syncTwitterMessagesInternal(
         senderContactId = contact?.contactId;
       }
 
+      const bridge = isFromMe
+        ? await resolveMessageQueueBridge(
+            ctx,
+            userId,
+            conv._id,
+            message.text,
+            isFromMe,
+            message.sentAt
+          )
+        : { status: undefined, sentAt: undefined };
+      const finalSentAt = bridge.sentAt ?? message.sentAt;
+
       await ctx.db.insert("messages", {
         userId,
         conversationId: conv._id,
         platform: "twitter",
         content: message.text,
-        sentAt: message.sentAt,
+        sentAt: finalSentAt,
         senderContactId,
         isFromMe,
         platformMessageId: message.messageId,
+        status: bridge.status,
       });
 
-      if (message.sentAt >= (conv.lastMessageAt ?? 0)) {
+      if (finalSentAt >= (conv.lastMessageAt ?? 0)) {
         const newUnread = isFromMe ? conv.unreadCount : conv.unreadCount + 1;
         await ctx.db.patch(conv._id, {
           lastMessageText: message.text,
-          lastMessageAt: message.sentAt,
+          lastMessageAt: finalSentAt,
           unreadCount: newUnread,
         });
-        conv.lastMessageAt = message.sentAt;
+        conv.lastMessageAt = finalSentAt;
         conv.unreadCount = newUnread;
       }
 
-      if (message.sentAt >= cutoff) {
+      if (finalSentAt >= cutoff) {
         (isFromMe ? outgoingConversations : incomingConversations).add(conv._id);
       }
 

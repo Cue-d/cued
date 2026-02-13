@@ -1,10 +1,6 @@
 import { v } from "convex/values";
 import { internalQuery, mutation, query } from "./_generated/server";
 import { findUserByWorkosId } from "./lib/auth";
-import { UNDO_DELAY_OPTIONS } from "./messageQueue";
-
-/** Default undo send delay in seconds */
-const DEFAULT_UNDO_DELAY_SECONDS = 30;
 
 /**
  * Internal query to find user by WorkOS ID.
@@ -55,58 +51,7 @@ export const getProfile = query({
       firstName: user.firstName,
       lastName: user.lastName,
       profilePictureUrl: user.profilePictureUrl,
-      undoSendDelaySeconds: user.undoSendDelaySeconds ?? DEFAULT_UNDO_DELAY_SECONDS,
     };
-  },
-});
-
-/**
- * Get user settings (undo send delay, etc.)
- */
-export const getSettings = query({
-  args: {},
-  handler: async (ctx) => {
-    const identity = await ctx.auth.getUserIdentity();
-    if (!identity) return null;
-
-    const user = await findUserByWorkosId(ctx, identity.subject);
-    if (!user) return null;
-
-    return {
-      undoSendDelaySeconds: user.undoSendDelaySeconds ?? DEFAULT_UNDO_DELAY_SECONDS,
-    };
-  },
-});
-
-/**
- * Update user's undo send delay setting.
- * Valid options: 3, 5, 10, 15, 30 seconds
- */
-export const updateUndoSendDelay = mutation({
-  args: {
-    delaySeconds: v.number(),
-  },
-  handler: async (ctx, args) => {
-    const identity = await ctx.auth.getUserIdentity();
-    if (!identity) {
-      throw new Error("Unauthorized");
-    }
-
-    // Validate delay is one of the allowed options
-    if (!UNDO_DELAY_OPTIONS.includes(args.delaySeconds as typeof UNDO_DELAY_OPTIONS[number])) {
-      throw new Error(`Invalid delay. Must be one of: ${UNDO_DELAY_OPTIONS.join(", ")} seconds`);
-    }
-
-    const user = await findUserByWorkosId(ctx, identity.subject);
-    if (!user) {
-      throw new Error("User not found");
-    }
-
-    await ctx.db.patch(user._id, {
-      undoSendDelaySeconds: args.delaySeconds,
-    });
-
-    return { success: true, delaySeconds: args.delaySeconds };
   },
 });
 

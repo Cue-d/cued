@@ -4,46 +4,42 @@
  */
 import { v } from "convex/values";
 import { internalMutation, mutation, query } from "./_generated/server";
-import { internal } from "./_generated/api";
 import { getAuthenticatedUser } from "./lib/auth";
+import { insertQueuedMessage } from "./lib/queueMessageInsert";
 import { platformValidator } from "./schema";
-
-/** Default undo window in seconds (used when user has no preference) */
-const DEFAULT_UNDO_DELAY_SECONDS = 30;
-
-/** Valid undo delay options in seconds */
-export const UNDO_DELAY_OPTIONS = [3, 5, 10, 15, 30] as const;
 
 /** Maximum retry attempts before marking as failed */
 const MAX_ATTEMPTS = 3;
 
-/**
- * Internal mutation called by scheduler when undo window expires.
- * Touches the message to trigger subscription updates for reactive clients.
- */
-export const markReady = internalMutation({
-  args: { messageId: v.id("messageQueue") },
-  handler: async (ctx, args) => {
-    const message = await ctx.db.get(args.messageId);
-
-    // Only mark as ready if still pending
-    if (!message || message.status !== "pending") {
-      return;
-    }
-
-    // Update scheduledFor to trigger subscription updates
-    // The write operation notifies reactive clients even if value is similar
-    await ctx.db.patch(args.messageId, {
-      scheduledFor: Date.now(),
-    });
-  },
-});
+/** Timeout threshold for the Convex safety net (2x the Electron 15s timeout) */
+const STALE_SEND_THRESHOLD_MS = 30_000;
 
 /**
- * Get messages ready to be sent by Electron.
- * Returns messages where scheduledFor < now && status === "pending".
- * This implements the undo window - messages wait 30s before becoming sendable.
+ * If a message is still pending after this long and no Electron client is online,
+ * mark it failed so the UI doesn't sit on an indefinite "in-flight" state.
  */
+const PENDING_OFFLINE_FAIL_THRESHOLD_MS = 15_000;
+
+/**
+ * Keep in sync with presence.ts STALE_THRESHOLD_MS.
+ * If last heartbeat is older than this, the desktop sender is considered offline.
+ */
+const ELECTRON_PRESENCE_STALE_MS = 30_000;
+
+/** Lease duration for single-sender lock */
+const CLAIM_LEASE_MS = 20_000;
+
+/** Platforms that rely on an online Electron sender. */
+const ELECTRON_MANAGED_PLATFORMS = new Set<string>([
+  "imessage",
+  "slack",
+  "linkedin",
+  "twitter",
+  "signal",
+  "whatsapp",
+] as const);
+
+/** Get messages ready to be sent by Electron. */
 export const getQueuedMessages = query({
   args: {
     limit: v.optional(v.number()),
@@ -56,68 +52,71 @@ export const getQueuedMessages = query({
     const limit = Math.min(args.limit ?? 10, 50);
     const now = Date.now();
 
-    // Get pending messages that are past their scheduled time
-    let messagesQuery = ctx.db
-      .query("messageQueue")
-      .withIndex("by_user_status", (q) =>
-        q.eq("userId", user._id).eq("status", "pending")
-      );
+    const [allPendingMessages, allSendingMessages] = await Promise.all([
+      ctx.db
+        .query("messageQueue")
+        .withIndex("by_user_status", (q) =>
+          q.eq("userId", user._id).eq("status", "pending")
+        )
+        .collect(),
+      ctx.db
+        .query("messageQueue")
+        .withIndex("by_user_status", (q) =>
+          q.eq("userId", user._id).eq("status", "sending")
+        )
+        .collect(),
+    ]);
 
-    const allMessages = await messagesQuery.collect();
-
-    // Filter by scheduledFor < now and optionally by platform
-    let filteredMessages = allMessages.filter((m) => m.scheduledFor <= now);
+    let sendingMessages = allSendingMessages;
+    let readyPendingMessages = allPendingMessages.filter((m) => m.scheduledFor <= now);
 
     if (args.platform) {
-      filteredMessages = filteredMessages.filter(
+      sendingMessages = sendingMessages.filter((m) => m.platform === args.platform);
+      readyPendingMessages = readyPendingMessages.filter(
         (m) => m.platform === args.platform
       );
     }
 
-    // Sort by scheduledFor (oldest first) and take limit
-    const messages = filteredMessages
-      .sort((a, b) => a.scheduledFor - b.scheduledFor)
-      .slice(0, limit);
+    // Time-based queue ordering:
+    // - Messages are released by scheduledFor (oldest first).
+    // - Retries reset scheduledFor to now, intentionally re-ordering them as fresh attempts.
+    // This mirrors platform-visible send order rather than preserving original enqueue order.
+    readyPendingMessages.sort((a, b) => {
+      if (a.scheduledFor !== b.scheduledFor) return a.scheduledFor - b.scheduledFor;
+      return a.createdAt - b.createdAt;
+    });
 
-    return { messages };
-  },
-});
+    // Per-conversation ordering:
+    // - Never release if a message in this conversation is already sending.
+    // - Only release one ready message per conversation in this batch.
+    const sendingConversations = new Set<string>();
+    for (const m of sendingMessages) {
+      if (m.conversationId) {
+        sendingConversations.add(m.conversationId);
+      }
+    }
 
-/**
- * Get pending messages for the current user (for UI display).
- * Returns messages that are still in the undo window (status === "pending" && scheduledFor > now).
- * Used by UndoSendToast and message queue status dashboard.
- */
-export const getPendingMessages = query({
-  args: {
-    limit: v.optional(v.number()),
-  },
-  handler: async (ctx, args) => {
-    const user = await getAuthenticatedUser(ctx);
-    if (!user) return { messages: [] };
+    const eligible: typeof readyPendingMessages = [];
+    const releasedConversations = new Set<string>();
 
-    const limit = Math.min(args.limit ?? 20, 100);
-    const now = Date.now();
+    for (const msg of readyPendingMessages) {
+      if (!msg.conversationId) {
+        eligible.push(msg); // No conversation = always eligible
+        continue;
+      }
 
-    // Get pending messages using the scheduledFor index
-    const allPending = await ctx.db
-      .query("messageQueue")
-      .withIndex("by_user_pending", (q) => q.eq("userId", user._id))
-      .collect();
+      const convId = msg.conversationId;
 
-    // Filter to only pending status messages that are still in undo window
-    const pendingInUndoWindow = allPending
-      .filter((m) => m.status === "pending" && m.scheduledFor > now)
-      .sort((a, b) => a.scheduledFor - b.scheduledFor)
-      .slice(0, limit);
+      // Skip if this conversation already has a message being sent
+      if (sendingConversations.has(convId)) continue;
 
-    // Calculate time remaining for each message
-    const messages = pendingInUndoWindow.map((m) => ({
-      ...m,
-      timeRemainingMs: Math.max(0, m.scheduledFor - now),
-    }));
+      // Only release one ready message per conversation per query result
+      if (releasedConversations.has(convId)) continue;
+      releasedConversations.add(convId);
+      eligible.push(msg);
+    }
 
-    return { messages };
+    return { messages: eligible.slice(0, limit) };
   },
 });
 
@@ -155,7 +154,6 @@ export const getMessageQueueStats = query({
 
 /**
  * Queue a message for sending.
- * Message will be scheduled based on user's undoSendDelaySeconds setting.
  */
 export const queueMessage = mutation({
   args: {
@@ -174,8 +172,7 @@ export const queueMessage = mutation({
     if (!user) throw new Error("Unauthorized");
 
     const now = Date.now();
-    const delaySeconds = user.undoSendDelaySeconds ?? DEFAULT_UNDO_DELAY_SECONDS;
-    const scheduledFor = now + delaySeconds * 1000;
+    const scheduledFor = now;
     const requiresThreadId =
       args.platform === "linkedin" || args.platform === "slack";
     let resolvedConversationId = args.conversationId;
@@ -224,37 +221,24 @@ export const queueMessage = mutation({
       );
     }
 
-    const messageId = await ctx.db.insert("messageQueue", {
+    return insertQueuedMessage(ctx, {
       userId: user._id,
       platform: args.platform,
       recipientHandle: args.recipientHandle,
       recipientContactId: args.recipientContactId,
       text: args.text,
       isGroup: args.isGroup,
-      chatIdentifier: resolvedChatIdentifier,
-      conversationId: resolvedConversationId,
+      chatIdentifier: resolvedChatIdentifier ?? undefined,
+      conversationId: resolvedConversationId ?? undefined,
       actionId: args.actionId,
-      workspaceId: resolvedWorkspaceId,
-      status: "pending",
+      workspaceId: resolvedWorkspaceId ?? undefined,
+      now,
       scheduledFor,
-      attempts: 0,
-      createdAt: now,
     });
-
-    // Schedule markReady to run when undo window expires.
-    // This triggers a data change that notifies reactive clients.
-    await ctx.scheduler.runAt(scheduledFor, internal.messageQueue.markReady, {
-      messageId,
-    });
-
-    return { messageId, scheduledFor };
   },
 });
 
-/**
- * Cancel a pending message (undo send).
- * Only works if message is still pending and within undo window.
- */
+/** Cancel a pending queued message before it is claimed for sending. */
 export const cancelMessage = mutation({
   args: {
     messageId: v.id("messageQueue"),
@@ -272,9 +256,19 @@ export const cancelMessage = mutation({
       throw new Error("Can only cancel pending messages");
     }
 
+    const now = Date.now();
+    if (message.processingDeviceId) {
+      const leaseAge = now - (message.processingStartedAt ?? 0);
+      if (leaseAge < CLAIM_LEASE_MS) {
+        throw new Error("Message is already being processed");
+      }
+    }
+
     await ctx.db.patch(args.messageId, {
       status: "cancelled",
-      cancelledAt: Date.now(),
+      cancelledAt: now,
+      processingDeviceId: undefined,
+      processingStartedAt: undefined,
     });
 
     return { success: true };
@@ -283,7 +277,7 @@ export const cancelMessage = mutation({
 
 /**
  * Update message status.
- * Called by Electron after send attempt.
+ * Called by Electron after send attempt or pre-send validation failures.
  */
 export const updateMessageStatus = mutation({
   args: {
@@ -307,71 +301,90 @@ export const updateMessageStatus = mutation({
     const now = Date.now();
 
     switch (args.status) {
-      case "sending":
+      case "sending": {
+        if (message.status !== "pending") {
+          return { success: false, willRetry: false, reason: "not_pending" as const };
+        }
+
+        if (message.conversationId) {
+          const conversationQueue = await ctx.db
+            .query("messageQueue")
+            .withIndex("by_conversation_sequence", (q) =>
+              q.eq("conversationId", message.conversationId)
+            )
+            .collect();
+          const hasActiveSender = conversationQueue.some(
+            (entry) =>
+              entry._id !== args.messageId &&
+              entry.userId === user._id &&
+              entry.status === "sending"
+          );
+          if (hasActiveSender) {
+            return {
+              success: false,
+              willRetry: false,
+              reason: "conversation_locked" as const,
+            };
+          }
+        }
+
         await ctx.db.patch(args.messageId, {
           status: "sending",
           attempts: message.attempts + 1,
           lastAttemptAt: now,
+          processingStartedAt: now,
         });
         break;
+      }
 
-      case "sent":
+      case "sent": {
+        if (message.status !== "sending") {
+          return { success: false, willRetry: false, reason: "not_sending" as const };
+        }
+
         await ctx.db.patch(args.messageId, {
           status: "sent",
           sentAt: now,
+          processingStartedAt: undefined,
+          processingDeviceId: undefined,
         });
         break;
+      }
 
       case "failed": {
-        // Auto-retry if under max attempts
+        // Pre-send failures (e.g., adapter unavailable / unauthenticated)
+        // can fail directly from pending without retrying in place.
+        if (message.status === "pending") {
+          await ctx.db.patch(args.messageId, {
+            status: "failed",
+            error: args.error,
+            processingStartedAt: undefined,
+            processingDeviceId: undefined,
+          });
+          return { success: true, willRetry: false };
+        }
+
+        if (message.status !== "sending") {
+          return { success: false, willRetry: false, reason: "not_sending" as const };
+        }
+
+        // Auto-retry if under max attempts.
+        // Policy: retries are treated as fresh send attempts and re-enter
+        // the queue at "now", which may re-order them vs original enqueue order.
         const willRetry = message.attempts < MAX_ATTEMPTS;
         await ctx.db.patch(args.messageId, {
           status: willRetry ? "pending" : "failed",
           error: args.error,
+          processingStartedAt: undefined,
+          processingDeviceId: undefined,
           ...(willRetry && { scheduledFor: now }),
         });
-
-        // Schedule markReady to trigger subscription update for retry
-        if (willRetry) {
-          await ctx.scheduler.runAt(now, internal.messageQueue.markReady, {
-            messageId: args.messageId,
-          });
-        }
 
         return { success: true, willRetry };
       }
     }
 
     return { success: true, willRetry: false };
-  },
-});
-
-/**
- * Send a pending message immediately (skip undo window).
- * Sets scheduledFor to now so message is picked up immediately.
- */
-export const sendImmediately = mutation({
-  args: {
-    messageId: v.id("messageQueue"),
-  },
-  handler: async (ctx, args) => {
-    const user = await getAuthenticatedUser(ctx);
-    if (!user) throw new Error("Unauthorized");
-
-    const message = await ctx.db.get(args.messageId);
-    if (!message || message.userId !== user._id) {
-      throw new Error("Message not found");
-    }
-
-    if (message.status !== "pending") {
-      throw new Error("Can only send pending messages immediately");
-    }
-
-    await ctx.db.patch(args.messageId, {
-      scheduledFor: Date.now(),
-    });
-
-    return { success: true };
   },
 });
 
@@ -400,9 +413,173 @@ export const retryMessage = mutation({
       status: "pending",
       error: undefined,
       attempts: 0,
-      scheduledFor: Date.now(), // Schedule for immediate send
+      // Retry policy: enqueue at current time so retry order reflects
+      // actual platform send timing rather than original enqueue position.
+      scheduledFor: Date.now(),
     });
 
+    return { success: true };
+  },
+});
+
+// ============================================================================
+// SINGLE-SENDER LOCK
+// ============================================================================
+
+/**
+ * Claim a message for processing (single-sender lock).
+ * Prevents multiple Electron instances from processing the same message.
+ * Uses a 20s lease — if the claim expires, another device can steal it.
+ */
+export const claimMessage = mutation({
+  args: {
+    messageId: v.id("messageQueue"),
+    deviceId: v.string(),
+  },
+  handler: async (ctx, args) => {
+    const user = await getAuthenticatedUser(ctx);
+    if (!user) throw new Error("Unauthorized");
+
+    const message = await ctx.db.get(args.messageId);
+    if (!message || message.userId !== user._id) {
+      return { success: false, reason: "not_found" as const };
+    }
+
+    if (message.status !== "pending") {
+      return { success: false, reason: "not_pending" as const };
+    }
+
+    // Check if already claimed by another device with an active lease
+    if (message.processingDeviceId && message.processingDeviceId !== args.deviceId) {
+      const leaseAge = Date.now() - (message.processingStartedAt ?? 0);
+      if (leaseAge < CLAIM_LEASE_MS) {
+        return { success: false, reason: "locked" as const };
+      }
+      // Lease expired, steal it
+    }
+
+    await ctx.db.patch(args.messageId, {
+      processingDeviceId: args.deviceId,
+      processingStartedAt: Date.now(),
+    });
+
+    return { success: true, reason: "claimed" as const };
+  },
+});
+
+// ============================================================================
+// TIMEOUT SAFETY NET
+// ============================================================================
+
+/**
+ * Convex safety net for stale queue entries.
+ * Handles:
+ * - "sending" rows stuck after crashes/disconnects
+ * - "pending" rows that are ready but have no online Electron sender
+ */
+export const timeoutStaleSends = internalMutation({
+  args: {},
+  handler: async (ctx) => {
+    const now = Date.now();
+    const sendingThreshold = now - STALE_SEND_THRESHOLD_MS;
+    const pendingOfflineThreshold = now - PENDING_OFFLINE_FAIL_THRESHOLD_MS;
+
+    const [allSending, stalePending, allElectronPresence] = await Promise.all([
+      // Find all messages stuck in "sending" past the threshold
+      ctx.db
+        .query("messageQueue")
+        .withIndex("by_status", (q) => q.eq("status", "sending"))
+        .collect(),
+      // Find pending messages that are ready and have been waiting too long
+      ctx.db
+        .query("messageQueue")
+        .withIndex("by_status_scheduledFor", (q) =>
+          q.eq("status", "pending").lte("scheduledFor", pendingOfflineThreshold)
+        )
+        .collect(),
+      // Current desktop presence by user
+      ctx.db
+        .query("devicePresence")
+        .withIndex("by_device_type", (q) => q.eq("deviceType", "electron"))
+        .collect(),
+    ]);
+
+    const onlineElectronUsers = new Set<string>();
+    for (const presence of allElectronPresence) {
+      if (now - presence.lastHeartbeatAt < ELECTRON_PRESENCE_STALE_MS) {
+        onlineElectronUsers.add(presence.userId as string);
+      }
+    }
+
+    const staleSends = allSending.filter(
+      (m) => (m.processingStartedAt ?? m.lastAttemptAt ?? 0) < sendingThreshold
+    );
+
+    const stalePendingWithoutSender = stalePending.filter((m) => {
+      if (!ELECTRON_MANAGED_PLATFORMS.has(m.platform)) return false;
+      if (onlineElectronUsers.has(m.userId as string)) return false;
+
+      // Respect active claim leases to avoid racing healthy processors.
+      if (m.processingDeviceId) {
+        const leaseAge = now - (m.processingStartedAt ?? 0);
+        if (leaseAge < CLAIM_LEASE_MS) return false;
+      }
+      return true;
+    });
+
+    for (const msg of staleSends) {
+      const willRetry = msg.attempts < MAX_ATTEMPTS;
+      console.log(
+        `[timeoutStaleSends] Message ${msg._id} stuck in sending for ${now - (msg.processingStartedAt ?? 0)}ms, ${willRetry ? "retrying" : "failing"}`
+      );
+
+      await ctx.db.patch(msg._id, {
+        status: willRetry ? "pending" : "failed",
+        error: "Send timed out (safety net)",
+        processingStartedAt: undefined,
+        processingDeviceId: undefined,
+        ...(willRetry && { scheduledFor: now }),
+      });
+    }
+
+    for (const msg of stalePendingWithoutSender) {
+      await ctx.db.patch(msg._id, {
+        status: "failed",
+        error: "Desktop app is offline. Open Cued desktop to send.",
+        processingStartedAt: undefined,
+        processingDeviceId: undefined,
+      });
+    }
+
+    if (staleSends.length > 0 || stalePendingWithoutSender.length > 0) {
+      console.log(
+        `[timeoutStaleSends] Recovered ${staleSends.length} stale sends and failed ${stalePendingWithoutSender.length} pending messages with no desktop sender`
+      );
+    }
+  },
+});
+
+/**
+ * Delete a failed message from the queue.
+ */
+export const deleteMessage = mutation({
+  args: {
+    messageId: v.id("messageQueue"),
+  },
+  handler: async (ctx, args) => {
+    const user = await getAuthenticatedUser(ctx);
+    if (!user) throw new Error("Unauthorized");
+
+    const message = await ctx.db.get(args.messageId);
+    if (!message || message.userId !== user._id) {
+      throw new Error("Message not found");
+    }
+
+    if (message.status !== "failed") {
+      throw new Error("Can only delete failed messages");
+    }
+
+    await ctx.db.delete(args.messageId);
     return { success: true };
   },
 });

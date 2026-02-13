@@ -4,7 +4,6 @@
  *
  * Key features:
  * - Reactive WebSocket subscription to getQueuedMessages for messages ready to send
- * - Server-side scheduler triggers subscription updates when undo window expires
  * - Routes messages to appropriate adapters (iMessage, LinkedIn)
  * - Handles retries with exponential backoff
  * - Updates message status in Convex after send attempts
@@ -27,8 +26,6 @@ const FALLBACK_POLL_INTERVAL_MS = 10000;
  * MessageQueueProcessor handles sending messages from the unified queue.
  *
  * Uses reactive WebSocket subscription to Convex for real-time updates.
- * When the undo window expires, a server-side scheduled mutation updates
- * the message, triggering the subscription to fire.
  */
 /** Delay before retrying messages that failed due to auth (5 seconds) */
 const AUTH_RETRY_DELAY_MS = 5000;
@@ -42,6 +39,7 @@ export class MessageQueueProcessor {
   private processingIds = new Set<string>();
   private authRetryCount = new Map<string, number>();
   private stopped = false;
+  private deviceId: string = `electron-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 
   /**
    * Start processing the message queue.
@@ -58,7 +56,6 @@ export class MessageQueueProcessor {
     console.log("[MessageQueueProcessor] Starting WebSocket subscription...");
 
     // Subscribe to messages ready to send
-    // Server-side scheduler triggers updates when undo window expires
     this.subscription = client.subscribe(
       api.messageQueue.getQueuedMessages,
       { limit: 20 },
@@ -179,9 +176,21 @@ export class MessageQueueProcessor {
     if (this.processingIds.has(messageId)) return;
     this.processingIds.add(messageId);
 
+    let keepInProcessing = false;
     try {
       // Skip server-side platforms
       if (SERVER_SIDE_PLATFORMS.includes(message.platform as ActionPlatform)) {
+        return;
+      }
+
+      // Claim the message (single-sender lock for multi-device)
+      const client = getConvexClient();
+      const claimResult = await client.mutation(api.messageQueue.claimMessage, {
+        messageId,
+        deviceId: this.deviceId,
+      });
+      if (!claimResult.success) {
+        console.log(`[MessageQueueProcessor] Claim failed for ${messageId}: ${claimResult.reason}`);
         return;
       }
 
@@ -199,22 +208,41 @@ export class MessageQueueProcessor {
         const retryCount = this.authRetryCount.get(messageId) ?? 0;
         if (retryCount < MAX_AUTH_RETRIES) {
           this.authRetryCount.set(messageId, retryCount + 1);
-          // Schedule retry after delay - adapter may become authenticated
+          // Keep in processingIds so subscription updates don't re-enter
+          // before the delayed retry fires. The setTimeout handles cleanup.
+          keepInProcessing = true;
           setTimeout(() => {
             this.processingIds.delete(messageId);
-            this.processMessage(message);
+            void this.pollOnce("fallback");
           }, AUTH_RETRY_DELAY_MS);
           return;
         }
         console.warn(`[MessageQueueProcessor] ${message.platform} not authenticated after ${MAX_AUTH_RETRIES} retries`);
         this.authRetryCount.delete(messageId);
+        await this.updateStatus(
+          messageId,
+          "failed",
+          `${message.platform} is not authenticated in the desktop app`
+        );
         return;
       }
 
       // Clear retry count on successful auth
       this.authRetryCount.delete(messageId);
 
-      await this.updateStatus(messageId, "sending");
+      const sendingTransition = await this.updateStatus(messageId, "sending");
+      if (!sendingTransition.success) {
+        if (sendingTransition.reason === "conversation_locked") {
+          console.log(
+            `[MessageQueueProcessor] Conversation locked for ${messageId}; waiting for earlier message to finish`
+          );
+        } else {
+          console.log(
+            `[MessageQueueProcessor] Skipping send for ${messageId}: sending transition was rejected (${sendingTransition.reason ?? "unknown"})`
+          );
+        }
+        return;
+      }
 
       // Convert to QueuedMessage format expected by adapters
       const queuedMessage: QueuedMessage = {
@@ -227,6 +255,8 @@ export class MessageQueueProcessor {
         workspaceId: message.workspaceId,
       };
 
+      // Send the message — no client-side timeout.
+      // If Electron crashes mid-send, the server-side timeoutStaleSends cron recovers it.
       const result = await adapter.send(queuedMessage);
 
       if (result.success) {
@@ -240,7 +270,9 @@ export class MessageQueueProcessor {
       console.error(`[MessageQueueProcessor] Error processing ${messageId}:`, errorMessage);
       await this.updateStatus(messageId, "failed", errorMessage);
     } finally {
-      this.processingIds.delete(messageId);
+      if (!keepInProcessing) {
+        this.processingIds.delete(messageId);
+      }
     }
   }
 
@@ -251,19 +283,25 @@ export class MessageQueueProcessor {
     messageId: Id<"messageQueue">,
     status: "sending" | "sent" | "failed",
     error?: string
-  ): Promise<void> {
+  ): Promise<{ success: boolean; willRetry: boolean; reason?: string }> {
     try {
       const client = getConvexClient();
-      await client.mutation(api.messageQueue.updateMessageStatus, {
+      const result = await client.mutation(api.messageQueue.updateMessageStatus, {
         messageId,
         status,
         error,
       });
+      return {
+        success: Boolean(result?.success),
+        willRetry: Boolean(result?.willRetry),
+        reason: typeof result?.reason === "string" ? result.reason : undefined,
+      };
     } catch (err) {
       console.error(
         `[MessageQueueProcessor] Failed to update status:`,
         err instanceof Error ? err.message : String(err)
       );
+      return { success: false, willRetry: false, reason: "request_failed" };
     }
   }
 

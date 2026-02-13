@@ -5,13 +5,13 @@
  */
 
 import type { Id } from "../_generated/dataModel";
-import { internal } from "../_generated/api";
 import type {
   ActionSwipeHandler,
   SwipeHandlerContext,
   SwipeHandlerResult,
   RightSwipeInput,
 } from "./types";
+import { insertQueuedMessage } from "../lib/queueMessageInsert";
 
 /**
  * Shared handler for message-based actions.
@@ -39,9 +39,8 @@ export const messageHandler: ActionSwipeHandler = {
       | undefined;
 
     let messageSent = false;
-    let queuedMessageId: Id<"messageQueue"> | null = null;
 
-    // Handle iMessage, LinkedIn, Twitter, Slack, and Signal sending via unified message queue
+    // All messaging platforms use the unified message queue
     const isQueueablePlatform =
       platform === "imessage" ||
       platform === "linkedin" ||
@@ -137,11 +136,7 @@ export const messageHandler: ActionSwipeHandler = {
         );
       }
 
-      // Queue message - we've validated routing info above
-      const delaySeconds = user.undoSendDelaySeconds ?? 30;
-      const scheduledFor = now + delaySeconds * 1000;
-
-      const messageId = await ctx.db.insert("messageQueue", {
+      await insertQueuedMessage(ctx, {
         userId: user._id,
         platform,
         recipientHandle,
@@ -152,20 +147,10 @@ export const messageHandler: ActionSwipeHandler = {
         conversationId: conversation._id,
         actionId: action._id,
         workspaceId: conversation.workspaceId,
-        status: "pending",
-        scheduledFor,
-        attempts: 0,
-        createdAt: now,
+        now,
+        scheduledFor: now,
       });
 
-      // Schedule markReady to trigger subscription update
-      await ctx.scheduler.runAt(
-        scheduledFor,
-        internal.messageQueue.markReady,
-        { messageId }
-      );
-
-      queuedMessageId = messageId;
       messageSent = true;
     }
 
@@ -175,8 +160,6 @@ export const messageHandler: ActionSwipeHandler = {
       data: {
         platform,
         messageSent,
-        queuedMessageId,
-        scheduledFor: queuedMessageId ? now + (user.undoSendDelaySeconds ?? 30) * 1000 : undefined,
         responseText,
       },
     };

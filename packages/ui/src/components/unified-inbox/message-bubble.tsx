@@ -1,5 +1,6 @@
 import { cn } from "../../lib/utils"
 import type { InboxMessage } from "./message-types"
+import { DeliveryStatus } from "../action-queue/message-response-card/message-bubble"
 import type React from "react"
 
 export type InboxMessageSpacing = "tight" | "normal" | "wide"
@@ -75,10 +76,16 @@ export function InboxMessageBubble({
         </div>
       )}
 
-      {/* Timestamp */}
+      {/* Timestamp + delivery status */}
       {showTimestamp && (
-        <span className="text-[11px] font-medium text-muted-foreground mt-1.5 tabular-nums opacity-0 group-hover:opacity-100 transition-opacity duration-200">
+        <span className="text-[11px] font-medium text-muted-foreground mt-1.5 tabular-nums opacity-0 group-hover:opacity-100 transition-opacity duration-200 flex items-center gap-1">
           {formatMessageTime(message.sentAt)}
+          {message.isFromMe && message.status && (
+            <>
+              <span>·</span>
+              <DeliveryStatus status={message.status} />
+            </>
+          )}
         </span>
       )}
     </div>

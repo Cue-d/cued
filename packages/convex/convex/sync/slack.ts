@@ -18,6 +18,7 @@ import {
   BATCH_SIZE,
   logSyncError,
   isSlackBot,
+  resolveMessageQueueBridge,
 } from "./shared";
 
 // ============================================================================
@@ -404,25 +405,38 @@ export async function syncSlackNativeMessagesInternal(
           participatedConversations.add(conversationId);
         }
 
+        const bridge = isFromMe
+          ? await resolveMessageQueueBridge(
+              ctx,
+              userId,
+              conversationId,
+              msg.text,
+              isFromMe,
+              sentAtMs
+            )
+          : { status: undefined, sentAt: undefined };
+        const finalSentAt = bridge.sentAt ?? sentAtMs;
+
         await ctx.db.insert("messages", {
           userId,
           conversationId,
           platform: "slack",
           content: msg.text,
-          sentAt: sentAtMs,
+          sentAt: finalSentAt,
           senderContactId,
           isFromMe,
           platformMessageId: msg.ts,
           threadTs: msg.threadTs,
           isThreadParent: msg.isThreadParent,
           reactions: reactions && reactions.length > 0 ? reactions : undefined,
+          status: bridge.status,
         });
 
         result.messagesCount++;
 
         // Track latest for conversation update
-        if (!latestMessage || sentAtMs > latestMessage.timestamp) {
-          latestMessage = { text: msg.text, timestamp: sentAtMs };
+        if (!latestMessage || finalSentAt > latestMessage.timestamp) {
+          latestMessage = { text: msg.text, timestamp: finalSentAt };
         }
       } catch (e) {
         result.errors.push(logSyncError("Slack", "sync message", msg.ts, e));

@@ -2,10 +2,10 @@
  * ActionListSheet - Content for the action queue bottom sheet.
  *
  * Shows a filterable list of all pending actions with context menu
- * actions, and queued/sending messages at the bottom with undo.
+ * actions.
  */
 
-import { useCallback, useState, useEffect } from "react";
+import { useCallback } from "react";
 import {
   View,
   Text,
@@ -106,161 +106,6 @@ function FilterSeparator({ isDark }: { isDark: boolean }): React.JSX.Element {
   );
 }
 
-/** Hook to get a live countdown from a scheduledFor timestamp */
-function useCountdown(scheduledFor: number): number {
-  const [remaining, setRemaining] = useState(() =>
-    Math.max(0, scheduledFor - Date.now()),
-  );
-  useEffect(() => {
-    if (remaining <= 0) return;
-    const interval = setInterval(() => {
-      const next = Math.max(0, scheduledFor - Date.now());
-      setRemaining(next);
-      if (next <= 0) clearInterval(interval);
-    }, 1000);
-    return () => clearInterval(interval);
-  }, [scheduledFor, remaining]);
-  return remaining;
-}
-
-/** Status label for a queued message */
-function MessageStatus({
-  remainingMs,
-  isDark,
-}: {
-  remainingMs: number;
-  isDark: boolean;
-}): React.JSX.Element {
-  const colors = getThemeColors(isDark);
-  if (remainingMs <= 0) {
-    return (
-      <Text
-        style={{
-          fontSize: 11,
-          fontWeight: "600",
-          color: colors.mutedForeground,
-        }}
-      >
-        Sent
-      </Text>
-    );
-  }
-  const seconds = Math.ceil(remainingMs / 1000);
-  return (
-    <Text
-      style={{
-        fontSize: 11,
-        fontWeight: "600",
-        color: colors.mutedForeground,
-        fontVariant: ["tabular-nums"],
-      }}
-    >
-      {seconds}s
-    </Text>
-  );
-}
-
-/** Queued message row (at bottom of sheet) */
-function QueuedMessageRow({
-  messageId,
-  platform,
-  recipientName,
-  messagePreview,
-  scheduledFor,
-  onUndo,
-  onDismiss,
-  isDark,
-}: {
-  messageId: string;
-  platform: ActionPlatform;
-  recipientName: string;
-  messagePreview?: string;
-  scheduledFor: number;
-  onUndo: (messageId: string) => void;
-  onDismiss: (messageId: string) => void;
-  isDark: boolean;
-}): React.JSX.Element {
-  const colors = getThemeColors(isDark);
-  const remainingMs = useCountdown(scheduledFor);
-  const isPending = remainingMs > 0;
-
-  // Auto-dismiss 2s after countdown expires
-  useEffect(() => {
-    if (isPending) return;
-    const timeout = setTimeout(() => onDismiss(messageId), 2000);
-    return () => clearTimeout(timeout);
-  }, [isPending, messageId, onDismiss]);
-
-  const preview = messagePreview
-    ? messagePreview.length > 40
-      ? `${messagePreview.slice(0, 40)}…`
-      : messagePreview
-    : "";
-
-  return (
-    <View
-      style={{
-        flexDirection: "row",
-        alignItems: "center",
-        paddingHorizontal: 16,
-        paddingVertical: 10,
-        gap: 10,
-      }}
-    >
-      {/* Platform icon */}
-      <View
-        style={{
-          width: 28,
-          height: 28,
-          borderRadius: 14,
-          backgroundColor: `${PLATFORM_CONFIG[platform].color}15`,
-          alignItems: "center",
-          justifyContent: "center",
-        }}
-      >
-        <PlatformIcon platform={platform} size={14} />
-      </View>
-
-      {/* Content: ContactName: "message..." */}
-      <View style={{ flex: 1 }}>
-        <Text
-          style={{ fontSize: 13, fontWeight: "500", color: colors.foreground }}
-          numberOfLines={1}
-        >
-          {preview ? `${recipientName}: "${preview}"` : recipientName}
-        </Text>
-      </View>
-
-      {/* Countdown / status */}
-      <MessageStatus remainingMs={remainingMs} isDark={isDark} />
-
-      {/* Undo button (only while pending) */}
-      {isPending && (
-        <Pressable
-          onPress={() => onUndo(messageId)}
-          style={{
-            paddingHorizontal: 12,
-            paddingVertical: 5,
-            borderRadius: 8,
-            borderWidth: 1,
-            borderColor: isDark ? "rgba(255,255,255,0.15)" : "rgba(0,0,0,0.1)",
-          }}
-        >
-          <Text
-            style={{
-              fontSize: 12,
-              fontWeight: "600",
-              color: colors.foreground,
-            }}
-          >
-            Undo
-          </Text>
-        </Pressable>
-      )}
-    </View>
-  );
-}
-
 export function ActionListSheet(): React.JSX.Element {
   const router = useRouter();
   const swipeAction = useMutation(api.actions.swipeAction);
@@ -269,9 +114,6 @@ export function ActionListSheet(): React.JSX.Element {
   const colors = getThemeColors(isDark);
   const {
     filteredActions,
-    queuedMessages,
-    handleUndoMessage,
-    handleToastDismiss,
     platformFilter,
     setPlatformFilter,
     typeFilter,
@@ -412,48 +254,6 @@ export function ActionListSheet(): React.JSX.Element {
           );
         })}
       </ScrollView>
-
-      {/* Queued messages - fixed at bottom above actions */}
-      {queuedMessages.length > 0 && (
-        <View
-          style={{
-            borderBottomWidth: 1,
-            borderBottomColor: isDark
-              ? "rgba(255,255,255,0.08)"
-              : "rgba(0,0,0,0.06)",
-            paddingBottom: 4,
-          }}
-        >
-          <Text
-            style={{
-              fontSize: 12,
-              fontWeight: "600",
-              color: colors.mutedForeground,
-              textTransform: "uppercase",
-              letterSpacing: 0.5,
-              paddingHorizontal: 16,
-              paddingTop: 4,
-              paddingBottom: 4,
-              marginBottom: 6,
-            }}
-          >
-            Pending
-          </Text>
-          {queuedMessages.map((msg) => (
-            <QueuedMessageRow
-              key={msg.messageId}
-              messageId={msg.messageId}
-              platform={msg.platform}
-              recipientName={msg.recipientName}
-              messagePreview={msg.messagePreview}
-              scheduledFor={msg.scheduledFor}
-              onUndo={handleUndoMessage}
-              onDismiss={(id) => handleToastDismiss(id, "sent")}
-              isDark={isDark}
-            />
-          ))}
-        </View>
-      )}
 
       <ScrollView style={{ flex: 1 }}>
         {/* Action list */}

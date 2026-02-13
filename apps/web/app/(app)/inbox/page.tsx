@@ -22,6 +22,7 @@ export default function InboxPage() {
   const [replyText, setReplyText] = useState("");
   const [isSending, setIsSending] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
+  const electronStatus = useQuery(api.presence.getElectronStatus, {});
 
   // Queue message mutation for replies
   const queueMessage = useMutation(api.messageQueue.queueMessage);
@@ -81,10 +82,22 @@ export default function InboxPage() {
     }
   }, [selectedId, conversations, searchParams, router]);
 
-  // Find the selected conversation
+  // Find the selected conversation, caching the last valid value so the thread
+  // doesn't unmount during reactive query recomputation (e.g. after sending).
   const selectedConversation = conversations.find(
     (c) => c._id === effectiveSelectedId
   );
+  const cachedConversationRef = useRef(selectedConversation);
+  if (selectedConversation) {
+    cachedConversationRef.current = selectedConversation;
+  }
+  const activeConversation =
+    selectedConversation ?? cachedConversationRef.current;
+  const requiresDesktopSender = !!activeConversation;
+  const showDesktopOfflineWarning =
+    requiresDesktopSender &&
+    electronStatus !== undefined &&
+    electronStatus.isOnline === false;
 
   // Fetch messages for selected conversation
   const messagesResult = useQuery(
@@ -172,11 +185,11 @@ export default function InboxPage() {
       />
 
       <div className="flex-1 min-w-0 min-h-0 flex flex-col">
-        {selectedConversation ? (
+        {activeConversation ? (
           <>
             <div className="flex-1 min-h-0 overflow-hidden">
               <InboxMessageThread
-                conversation={selectedConversation}
+                conversation={activeConversation}
                 messages={messages}
                 loading={messagesLoading}
                 hasMore={!!messagesResult?.nextCursor}
@@ -184,29 +197,36 @@ export default function InboxPage() {
             </div>
             {/* Reply input - fixed to bottom center */}
             <div className="bg-background/95 px-4 py-4 backdrop-blur-xl border-t border-border">
-              <div className="mx-auto max-w-xl flex items-center gap-2">
-                <input
-                  ref={inputRef}
-                  type="text"
-                  value={replyText}
-                  onChange={(e) => setReplyText(e.target.value)}
-                  onKeyDown={handleKeyDown}
-                  placeholder="Type a reply..."
-                  disabled={isSending}
-                  className="flex-1 h-10 px-4 text-sm bg-muted/50 border border-border rounded-full placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring focus:bg-background transition-colors"
-                />
-                <button
-                  type="button"
-                  onClick={handleSendReply}
-                  disabled={!replyText.trim() || isSending}
-                  className="flex items-center justify-center w-10 h-10 rounded-full bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-                >
-                  {isSending ? (
-                    <Loader2 className="w-4 h-4 animate-spin" />
-                  ) : (
-                    <Send className="w-4 h-4" />
-                  )}
-                </button>
+              <div className="mx-auto max-w-xl flex flex-col gap-2">
+                {showDesktopOfflineWarning && (
+                  <p className="text-xs text-muted-foreground">
+                    Desktop offline. Messages stay queued until desktop reconnects.
+                  </p>
+                )}
+                <div className="flex items-center gap-2">
+                  <input
+                    ref={inputRef}
+                    type="text"
+                    value={replyText}
+                    onChange={(e) => setReplyText(e.target.value)}
+                    onKeyDown={handleKeyDown}
+                    placeholder="Type a reply..."
+                    disabled={isSending}
+                    className="flex-1 h-10 px-4 text-sm bg-muted/50 border border-border rounded-full placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring focus:bg-background transition-colors"
+                  />
+                  <button
+                    type="button"
+                    onClick={handleSendReply}
+                    disabled={!replyText.trim() || isSending}
+                    className="flex items-center justify-center w-10 h-10 rounded-full bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                  >
+                    {isSending ? (
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                    ) : (
+                      <Send className="w-4 h-4" />
+                    )}
+                  </button>
+                </div>
               </div>
             </div>
           </>

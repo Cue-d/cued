@@ -16,6 +16,7 @@ import {
   getOrCreateIntegration,
   incrementSyncCursorStat,
   logSyncError,
+  resolveMessageQueueBridge,
 } from "./shared";
 import { batchFetchConversations, batchFetchMessages } from "./batchUtils";
 
@@ -192,25 +193,38 @@ export async function syncSignalMessagesInternal(
           }
         }
 
+        const bridge = message.isFromMe
+          ? await resolveMessageQueueBridge(
+              ctx,
+              userId,
+              conversation._id,
+              message.text,
+              message.isFromMe,
+              message.sentAt
+            )
+          : { status: undefined, sentAt: undefined };
+        const finalSentAt = bridge.sentAt ?? message.sentAt;
+
         await ctx.db.insert("messages", {
           userId,
           conversationId: conversation._id,
           platform: "signal",
           content: message.text,
-          sentAt: message.sentAt,
+          sentAt: finalSentAt,
           senderContactId,
           isFromMe: message.isFromMe,
           platformMessageId: message.messageId,
+          status: bridge.status,
         });
 
         result.newMessages++;
         result.messagesCount++;
 
-        if (!latestMessage || message.sentAt > latestMessage.timestamp) {
-          latestMessage = { text: message.text, timestamp: message.sentAt };
+        if (!latestMessage || finalSentAt > latestMessage.timestamp) {
+          latestMessage = { text: message.text, timestamp: finalSentAt };
         }
 
-        if (message.sentAt >= cutoff) {
+        if (finalSentAt >= cutoff) {
           if (message.isFromMe) {
             outgoingConversations.add(conversation._id);
           } else {
