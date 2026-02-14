@@ -8,6 +8,7 @@ import { useState, useCallback, useMemo, useEffect } from "react";
 import { View, Text } from "react-native";
 import * as Haptics from "expo-haptics";
 import { useRouter, useSegments } from "expo-router";
+import { useIsFocused } from "@react-navigation/native";
 import { BottomSheet, Group, Host, RNHostView } from "@expo/ui/swift-ui";
 import {
   presentationDetents,
@@ -36,7 +37,7 @@ import {
 import { ErrorBoundary } from "@/components/error-boundary";
 import { SkeletonStack } from "@/components/skeleton-card";
 import { useActionQueue } from "@/contexts/action-queue-context";
-import { useElectronPresence } from "@/hooks/useElectronPresence";
+import { useElectronPrescence } from "@/contexts/electron-presence-context";
 import {
   getPlatformDeeplink,
   getContactDeeplink,
@@ -61,6 +62,7 @@ const CONTACT_ACTION_TYPES = ["eod_contact", "new_connection"];
 export default function ActionsScreen(): React.JSX.Element | null {
   const router = useRouter();
   const segments = useSegments();
+  const isFocused = useIsFocused();
   const insets = useSafeAreaInsets();
   const {
     actions,
@@ -73,7 +75,7 @@ export default function ActionsScreen(): React.JSX.Element | null {
     markActionCompleted,
     clearCompletedAction,
   } = useActionQueue();
-  const { isOnline: isDesktopOnline } = useElectronPresence();
+  const { isOnline: isDesktopOnline } = useElectronPrescence();
   const swipeAction = useMutation(api.actions.swipeAction);
 
   // Clear completed action cache when user navigates to a different action via sheet
@@ -120,7 +122,9 @@ export default function ActionsScreen(): React.JSX.Element | null {
   // Fetch context for the top action (includes messages)
   const actionContext = useQuery(
     api.actions.getActionWithContext,
-    topActionId ? { actionId: topActionId, messageLimit: 15 } : "skip",
+    topActionId && isFocused
+      ? { actionId: topActionId, messageLimit: 15 }
+      : "skip",
   );
 
   // Map messages from context to DisplayMessage format

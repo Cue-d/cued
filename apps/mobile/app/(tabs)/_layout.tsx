@@ -44,8 +44,12 @@ function TabsLayoutInner() {
 }
 
 export default function TabsLayout() {
+  const segments = useSegments();
+  // @ts-expect-error - segments is an array of strings
+  const isActionsTab = segments[1] === "(actions)";
+
   return (
-    <ActionQueueProvider>
+    <ActionQueueProvider enabled={isActionsTab}>
       <ChatProvider>
         <TabsLayoutInner />
       </ChatProvider>

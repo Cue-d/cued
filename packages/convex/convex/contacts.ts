@@ -283,13 +283,14 @@ export const getContactProfile = query({
       .withIndex("by_contact", (q) => q.eq("contactId", args.contactId))
       .collect();
 
-    // Fetch all conversations for this user and filter by participant
-    const allConversations = await ctx.db
+    // Fetch a bounded slice of recent conversations for this user and filter by participant
+    const candidateConversations = await ctx.db
       .query("conversations")
-      .withIndex("by_user", (q) => q.eq("userId", user._id))
-      .collect();
+      .withIndex("by_user_last_message", (q) => q.eq("userId", user._id))
+      .order("desc")
+      .take(100);
 
-    const conversations = allConversations
+    const conversations = candidateConversations
       .filter((c) => c.participantContactIds.includes(args.contactId))
       .sort((a, b) => (b.lastMessageAt ?? 0) - (a.lastMessageAt ?? 0))
       .slice(0, 10);
@@ -338,6 +339,8 @@ export const getContactProfile = query({
       (m) => m.sentAt > Date.now() - THIRTY_DAYS_MS,
     ).length;
 
+    const MAX_MESSAGE_PREVIEW_CHARS = 200;
+
     return {
       contact: {
         ...contact,
@@ -357,7 +360,10 @@ export const getContactProfile = query({
       })),
       messages: uniqueMessages.slice(0, 50).map((m) => ({
         _id: m._id,
-        content: m.content,
+        content:
+          m.content.length > MAX_MESSAGE_PREVIEW_CHARS
+            ? `${m.content.slice(0, MAX_MESSAGE_PREVIEW_CHARS)}...`
+            : m.content,
         sentAt: m.sentAt,
         isFromMe: m.isFromMe,
         platform: m.platform,

@@ -43,15 +43,15 @@ export const hasActiveSnoozedAction = internalQuery({
   args: { conversationId: v.id("conversations") },
   handler: async (ctx, args) => {
     const now = Date.now();
-    const snoozed = await ctx.db
+    const active = await ctx.db
       .query("actions")
       .withIndex("by_conversation_status", (q) =>
         q.eq("conversationId", args.conversationId).eq("status", "snoozed")
       )
-      .collect();
+      .filter((q) => q.gt(q.field("snoozedUntil"), now))
+      .first();
 
-    // Check if any snoozed action hasn't expired yet
-    return snoozed.some((a) => a.snoozedUntil && a.snoozedUntil > now);
+    return active !== null;
   },
 });
 
@@ -600,22 +600,28 @@ export const wakeSnoozedActions = internalMutation({
     const now = Date.now();
     let wokenCount = 0;
 
-    // Get all snoozed actions across all users
-    const snoozedActions = await ctx.db
-      .query("actions")
-      .filter((q) => q.eq(q.field("status"), "snoozed"))
-      .collect();
+    // Query snoozed actions per user to avoid scanning the full actions table.
+    const users = await ctx.db.query("users").collect();
 
-    for (const action of snoozedActions) {
-      if (action.snoozedUntil && action.snoozedUntil <= now) {
-        await ctx.db.patch(action._id, {
-          status: "pending",
-          snoozedUntil: undefined,
-        });
+    for (const user of users) {
+      const snoozedActions = await ctx.db
+        .query("actions")
+        .withIndex("by_user_status", (q) =>
+          q.eq("userId", user._id).eq("status", "snoozed")
+        )
+        .collect();
 
-        // Increment pending count
-        await adjustPendingActionCount(ctx, action.userId, 1);
-        wokenCount++;
+      for (const action of snoozedActions) {
+        if (action.snoozedUntil && action.snoozedUntil <= now) {
+          await ctx.db.patch(action._id, {
+            status: "pending",
+            snoozedUntil: undefined,
+          });
+
+          // Increment pending count
+          await adjustPendingActionCount(ctx, action.userId, 1);
+          wokenCount++;
+        }
       }
     }
 

@@ -21,6 +21,7 @@
     "@expo/dom-webview": "55.0.3",
     "@expo/metro-runtime": "55.0.5",
     "@expo/ui": "55.0.0-preview.5",
+    "@react-navigation/native": "7.1.28",
     "@react-native-community/datetimepicker": "8.6.0",
     "ai": "^6.0.33",
     "babel-preset-expo": "55.0.2",

@@ -13,6 +13,7 @@ import {
 } from "react-native-global-props";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 import { PushTokenRegistrar } from "@/components/push-token-registrar";
+import { ElectronPresenceProvider } from "@/contexts/electron-presence-context";
 import { configureNotifications } from "@/lib/notifications";
 import { getThemeColors } from "@/lib/utils";
 import { AuthProvider, useAuth } from "@/providers/AuthProvider";
@@ -124,18 +125,20 @@ function AuthenticatedApp() {
 
   return (
     <ConvexProvider>
-      <PushTokenRegistrar />
-      <Stack screenOptions={{ headerShown: false }}>
-        <Stack.Screen name="(tabs)" />
-        <Stack.Screen
-          name="settings"
-          options={{
-            headerShown: false,
-            presentation: "modal",
-            contentStyle: { backgroundColor: colors.background },
-          }}
-        />
-      </Stack>
+      <ElectronPresenceProvider>
+        <PushTokenRegistrar />
+        <Stack screenOptions={{ headerShown: false }}>
+          <Stack.Screen name="(tabs)" />
+          <Stack.Screen
+            name="settings"
+            options={{
+              headerShown: false,
+              presentation: "modal",
+              contentStyle: { backgroundColor: colors.background },
+            }}
+          />
+        </Stack>
+      </ElectronPresenceProvider>
     </ConvexProvider>
   );
 }

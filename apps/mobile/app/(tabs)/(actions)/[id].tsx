@@ -11,7 +11,7 @@ import { useLocalSearchParams, useRouter, Stack } from "expo-router";
 import { useQuery, useMutation } from "convex/react";
 import { api } from "@cued/convex";
 import { getInitials, formatTime, formatRelativeTime, type DisplayMessage } from "@cued/shared";
-import { useElectronPresence } from "@/hooks/useElectronPresence";
+import { useElectronPrescence } from "@/contexts/electron-presence-context";
 import type { SwipeDirection } from "@/components/swipeable-card";
 import type { Id } from "@cued/convex/convex/_generated/dataModel";
 
@@ -104,7 +104,7 @@ export default function ActionDetailScreen(): React.JSX.Element {
   const { id } = useLocalSearchParams<{ id: string }>();
   const router = useRouter();
   const [responseText, setResponseText] = useState("");
-  const { isOnline: isDesktopOnline } = useElectronPresence();
+  const { isOnline: isDesktopOnline } = useElectronPrescence();
 
   const data = useQuery(api.actions.getActionWithContext, {
     actionId: id as Id<"actions">,

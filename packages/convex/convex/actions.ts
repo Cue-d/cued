@@ -49,16 +49,86 @@ async function fetchActionableActions(
   return [...pendingActions, ...dueSnoozedActions];
 }
 
-/** Enrich an action with related contact and conversation data. */
-async function enrichAction(
+interface ActionEnrichmentCache {
+  conversations: Map<string, Doc<"conversations">>;
+  contacts: Map<string, Doc<"contacts">>;
+}
+
+async function buildActionEnrichmentCache(
   ctx: QueryCtx,
-  action: Doc<"actions">
-): Promise<EnrichedAction> {
-  const [conversation, contact, secondaryContact] = await Promise.all([
-    action.conversationId ? ctx.db.get(action.conversationId) : null,
-    action.contactId ? ctx.db.get(action.contactId) : null,
-    action.secondaryContactId ? ctx.db.get(action.secondaryContactId) : null,
-  ]);
+  actions: Doc<"actions">[]
+): Promise<ActionEnrichmentCache> {
+  const conversationIds = [
+    ...new Set(
+      actions
+        .map((action) => action.conversationId)
+        .filter((id): id is Id<"conversations"> => id !== undefined)
+    ),
+  ];
+  const conversations = await Promise.all(
+    conversationIds.map((id) => ctx.db.get(id))
+  );
+  const conversationMap = new Map(
+    conversationIds
+      .map((id, i) => [id as string, conversations[i]])
+      .filter(
+        (entry): entry is [string, Doc<"conversations">] =>
+          entry[1] !== null
+      )
+  );
+
+  const contactIds = new Set<Id<"contacts">>();
+  for (const action of actions) {
+    if (action.contactId) {
+      contactIds.add(action.contactId);
+    }
+    if (action.secondaryContactId) {
+      contactIds.add(action.secondaryContactId);
+    }
+  }
+
+  for (const conversation of conversationMap.values()) {
+    if (
+      conversation.conversationType === "group" ||
+      conversation.conversationType === "channel"
+    ) {
+      for (const participantId of conversation.participantContactIds) {
+        contactIds.add(participantId);
+      }
+    }
+  }
+
+  const contactIdList = [...contactIds];
+  const contacts = await Promise.all(contactIdList.map((id) => ctx.db.get(id)));
+  const contactMap = new Map(
+    contactIdList
+      .map((id, i) => [id as string, contacts[i]])
+      .filter(
+        (entry): entry is [string, Doc<"contacts">] =>
+          entry[1] !== null
+      )
+  );
+
+  return {
+    conversations: conversationMap,
+    contacts: contactMap,
+  };
+}
+
+/** Enrich an action with related contact and conversation data. */
+function enrichAction(
+  action: Doc<"actions">,
+  cache: ActionEnrichmentCache
+): EnrichedAction {
+  const conversation = action.conversationId
+    ? cache.conversations.get(action.conversationId as string) ?? null
+    : null;
+  const contact = action.contactId
+    ? cache.contacts.get(action.contactId as string) ?? null
+    : null;
+  const secondaryContact = action.secondaryContactId
+    ? cache.contacts.get(action.secondaryContactId as string) ?? null
+    : null;
 
   // Prefer action.platform if set, otherwise derive from conversation
   const platform = action.platform ?? conversation?.platform ?? null;
@@ -73,13 +143,10 @@ async function enrichAction(
     if (conversation.displayName) {
       contactName = conversation.displayName;
     } else if (conversation.participantContactIds.length) {
-      // Fetch participant names for group chats without displayName
-      const participants = await Promise.all(
-        conversation.participantContactIds.map((id) => ctx.db.get(id))
-      );
-      const names = participants
-        .filter((p): p is NonNullable<typeof p> => p !== null)
-        .map((p) => p.displayName)
+      const names = conversation.participantContactIds
+        .map((id) => cache.contacts.get(id as string))
+        .filter((participant): participant is Doc<"contacts"> => participant !== undefined)
+        .map((participant) => participant.displayName)
         .filter(Boolean);
       contactName = names.length > 0 ? names.join(", ") : null;
     }
@@ -111,6 +178,15 @@ async function enrichAction(
     mergeReasoning: action.mergeReasoning ?? null,
     platform,
   };
+}
+
+async function enrichActions(
+  ctx: QueryCtx,
+  actions: Doc<"actions">[]
+): Promise<EnrichedAction[]> {
+  if (actions.length === 0) return [];
+  const cache = await buildActionEnrichmentCache(ctx, actions);
+  return actions.map((action) => enrichAction(action, cache));
 }
 
 /**
@@ -186,9 +262,7 @@ export const searchActions = query({
     // Apply limit
     const actions = filtered.slice(0, limit);
 
-    const enriched = await Promise.all(
-      actions.map((a) => enrichAction(ctx, a))
-    );
+    const enriched = await enrichActions(ctx, actions);
     return { actions: enriched };
   },
 });
@@ -275,9 +349,7 @@ export const getPendingActions = query({
     const hasMore = page.length > limit;
     const actions = hasMore ? page.slice(0, limit) : page;
 
-    const enriched = await Promise.all(
-      actions.map((a) => enrichAction(ctx, a))
-    );
+    const enriched = await enrichActions(ctx, actions);
 
     const nextCursor =
       hasMore && actions.length > 0

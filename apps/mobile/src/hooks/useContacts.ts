@@ -12,7 +12,7 @@ export function useContacts(options?: {
   searchQuery?: string;
 }) {
   const result = useQuery(api.contacts.getContacts, {
-    limit: options?.limit,
+    limit: options?.limit ?? 50,
     cursor: options?.cursor,
     searchQuery: options?.searchQuery,
   });

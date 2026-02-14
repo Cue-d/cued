@@ -62,8 +62,14 @@ interface ActionQueueContextValue {
 
 const ActionQueueContext = createContext<ActionQueueContextValue | null>(null);
 
-export function ActionQueueProvider({ children }: { children: ReactNode }): React.JSX.Element {
-  const { actions: rawActions, isLoading } = useActions({ limit: 50 });
+export function ActionQueueProvider({
+  children,
+  enabled = true,
+}: {
+  children: ReactNode;
+  enabled?: boolean;
+}): React.JSX.Element {
+  const { actions: rawActions, isLoading } = useActions({ enabled, limit: 50 });
 
   // Cast actions to our enriched type
   const actions = rawActions as EnrichedAction[];

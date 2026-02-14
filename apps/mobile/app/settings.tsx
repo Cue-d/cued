@@ -17,7 +17,7 @@ import { api } from "@cued/convex";
 import { getInitials, PLATFORM_CONFIG, formatRelativeTime } from "@cued/shared";
 import type { ActionPlatform } from "@cued/shared";
 import { getRedirectUri } from "@/lib/auth";
-import { useElectronPresence } from "@/hooks/useElectronPresence";
+import { useElectronPrescence } from "@/contexts/electron-presence-context";
 import { PlatformIcon } from "@/components/platform-icons";
 import { cn, getDisplayName, getThemeColors } from "@/lib/utils";
 import { useAuth } from "@/providers/AuthProvider";
@@ -179,7 +179,7 @@ export default function SettingsScreen(): React.ReactElement {
   const activeThemeLabel = THEME_OPTIONS.find((o) => o.value === activeTheme)?.label;
 
   // Sync & integrations
-  const { isOnline: desktopOnline, lastSeen } = useElectronPresence();
+  const { isOnline: desktopOnline, lastSeen } = useElectronPrescence();
   const integrationsData = useQuery(api.integrations.getUserIntegrations);
 
   function handleSignOut(): void {

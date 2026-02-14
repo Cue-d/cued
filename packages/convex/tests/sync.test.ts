@@ -83,7 +83,7 @@ describe("sync", () => {
           createTestContactHandleData(userId, namedContactId, {
             handleType: "email",
             handle: "alice@example.com",
-            platform: "gmail",
+            platform: "signal",
           }),
         );
         await getOrCreateContact(

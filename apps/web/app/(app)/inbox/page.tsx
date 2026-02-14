@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef, useCallback, useEffect, useMemo } from "react";
+import { useState, useRef, useCallback, useEffect } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import { useQuery, useMutation } from "convex/react";
 import { Send, Loader2 } from "lucide-react";
@@ -15,6 +15,20 @@ import {
 import type { Id } from "@cued/convex";
 
 type PlatformFilter = InboxPlatform | "all";
+
+const INBOX_PAGE_SIZE = 25;
+const MESSAGE_PAGE_SIZE = 30;
+
+function mergeUniqueById<T extends { _id: string }>(items: T[]): T[] {
+  const seen = new Set<string>();
+  const merged: T[] = [];
+  for (const item of items) {
+    if (seen.has(item._id)) continue;
+    seen.add(item._id);
+    merged.push(item);
+  }
+  return merged;
+}
 
 export default function InboxPage() {
   const router = useRouter();
@@ -31,6 +45,10 @@ export default function InboxPage() {
   const selectedId = searchParams.get("conversation");
   const platformParam = searchParams.get("platform") as PlatformFilter | null;
   const platformFilter: PlatformFilter = platformParam ?? "all";
+
+  const [conversationLoadCursor, setConversationLoadCursor] = useState<string | null>(null);
+  const [conversationNextCursor, setConversationNextCursor] = useState<string | null>(null);
+  const [olderConversations, setOlderConversations] = useState<InboxConversation[]>([]);
 
   // Update URL when conversation is selected
   const handleSelectConversation = useCallback(
@@ -59,16 +77,50 @@ export default function InboxPage() {
     router.push(`/inbox${params.toString() ? `?${params.toString()}` : ""}`);
   };
 
-  // Fetch inbox (list of conversations) with platform filter
-  const inboxResult = useQuery(api.messages.getInbox, {
-    limit: 50,
+  // Fetch live first page of inbox conversations
+  const baseInboxResult = useQuery(api.messages.getInbox, {
+    limit: INBOX_PAGE_SIZE,
     platform: platformFilter === "all" ? undefined : platformFilter,
   });
-  const conversations = useMemo(
-    () => (inboxResult?.conversations ?? []) as InboxConversation[],
-    [inboxResult?.conversations]
+
+  // Fetch one older page when requested
+  const loadMoreInboxResult = useQuery(
+    api.messages.getInbox,
+    conversationLoadCursor
+      ? {
+          limit: INBOX_PAGE_SIZE,
+          cursor: conversationLoadCursor,
+          platform: platformFilter === "all" ? undefined : platformFilter,
+        }
+      : "skip"
   );
-  const inboxLoading = inboxResult === undefined;
+
+  const baseConversations = (baseInboxResult?.conversations ?? []) as InboxConversation[];
+  const conversations = mergeUniqueById([...baseConversations, ...olderConversations]);
+
+  // Reset pagination when platform filter changes
+  useEffect(() => {
+    setConversationLoadCursor(null);
+    setConversationNextCursor(null);
+    setOlderConversations([]);
+  }, [platformFilter]);
+
+  // Keep next cursor from first page while no older pages are loaded.
+  useEffect(() => {
+    if (!baseInboxResult) return;
+    if (olderConversations.length === 0) {
+      setConversationNextCursor(baseInboxResult.nextCursor ?? null);
+    }
+  }, [baseInboxResult, olderConversations.length]);
+
+  // Apply one loaded older page
+  useEffect(() => {
+    if (!conversationLoadCursor || !loadMoreInboxResult) return;
+    const page = (loadMoreInboxResult.conversations ?? []) as InboxConversation[];
+    setOlderConversations((prev) => mergeUniqueById([...prev, ...page]));
+    setConversationNextCursor(loadMoreInboxResult.nextCursor ?? null);
+    setConversationLoadCursor(null);
+  }, [conversationLoadCursor, loadMoreInboxResult]);
 
   // Default to first conversation if none selected
   const effectiveSelectedId = selectedId ?? conversations[0]?._id ?? null;
@@ -99,16 +151,93 @@ export default function InboxPage() {
     electronStatus !== undefined &&
     electronStatus.isOnline === false;
 
-  // Fetch messages for selected conversation
-  const messagesResult = useQuery(
+  const [messageLoadCursor, setMessageLoadCursor] = useState<string | null>(null);
+  const [messageNextCursor, setMessageNextCursor] = useState<string | null>(null);
+  const [olderMessages, setOlderMessages] = useState<InboxMessage[]>([]);
+  const [olderMessagesConversationId, setOlderMessagesConversationId] = useState<string | null>(null);
+
+  // Reset message pagination when conversation changes
+  useEffect(() => {
+    setMessageLoadCursor(null);
+    setMessageNextCursor(null);
+    setOlderMessages([]);
+    setOlderMessagesConversationId(null);
+  }, [effectiveSelectedId]);
+
+  // Fetch live first page of messages for selected conversation
+  const baseMessagesResult = useQuery(
     api.messages.getMessages,
     effectiveSelectedId
-      ? { conversationId: effectiveSelectedId as Id<"conversations">, limit: 100 }
+      ? {
+          conversationId: effectiveSelectedId as Id<"conversations">,
+          limit: MESSAGE_PAGE_SIZE,
+        }
       : "skip",
   );
-  const messages = (messagesResult?.messages ?? []) as InboxMessage[];
-  const messagesLoading =
-    effectiveSelectedId !== null && messagesResult === undefined;
+
+  // Fetch one older page of messages when requested
+  const loadMoreMessagesResult = useQuery(
+    api.messages.getMessages,
+    effectiveSelectedId && messageLoadCursor
+      ? {
+          conversationId: effectiveSelectedId as Id<"conversations">,
+          limit: MESSAGE_PAGE_SIZE,
+          cursor: messageLoadCursor,
+        }
+      : "skip",
+  );
+
+  const baseMessages = (baseMessagesResult?.messages ?? []) as InboxMessage[];
+  const olderMessagesForSelectedConversation =
+    olderMessagesConversationId === effectiveSelectedId ? olderMessages : [];
+  const messages = mergeUniqueById([
+    ...baseMessages,
+    ...olderMessagesForSelectedConversation,
+  ]);
+
+  // Keep next cursor from first page while no older pages are loaded.
+  useEffect(() => {
+    if (!baseMessagesResult || !effectiveSelectedId) return;
+    if (olderMessagesConversationId !== effectiveSelectedId || olderMessages.length === 0) {
+      setMessageNextCursor(baseMessagesResult.nextCursor ?? null);
+    }
+  }, [
+    baseMessagesResult,
+    effectiveSelectedId,
+    olderMessagesConversationId,
+    olderMessages.length,
+  ]);
+
+  // Apply one loaded older page
+  useEffect(() => {
+    if (!messageLoadCursor || !loadMoreMessagesResult || !effectiveSelectedId) return;
+    const page = (loadMoreMessagesResult.messages ?? []) as InboxMessage[];
+    setOlderMessages((prev) => mergeUniqueById([...prev, ...page]));
+    setOlderMessagesConversationId(effectiveSelectedId);
+    setMessageNextCursor(loadMoreMessagesResult.nextCursor ?? null);
+    setMessageLoadCursor(null);
+  }, [messageLoadCursor, loadMoreMessagesResult, effectiveSelectedId]);
+
+  const inboxPageLoading =
+    baseInboxResult === undefined ||
+    (conversationLoadCursor !== null && loadMoreInboxResult === undefined);
+  const messagePageLoading =
+    (effectiveSelectedId !== null && baseMessagesResult === undefined) ||
+    (messageLoadCursor !== null && loadMoreMessagesResult === undefined);
+
+  const handleLoadMoreConversations = useCallback(() => {
+    if (!conversationNextCursor) return;
+    if (inboxPageLoading) return;
+    if (conversationLoadCursor !== null) return;
+    setConversationLoadCursor(conversationNextCursor);
+  }, [conversationNextCursor, inboxPageLoading, conversationLoadCursor]);
+
+  const handleLoadMoreMessages = useCallback(() => {
+    if (!messageNextCursor) return;
+    if (messagePageLoading) return;
+    if (messageLoadCursor !== null) return;
+    setMessageLoadCursor(messageNextCursor);
+  }, [messageNextCursor, messagePageLoading, messageLoadCursor]);
 
   // Handle sending a reply message inline
   const handleSendReply = useCallback(async () => {
@@ -178,8 +307,9 @@ export default function InboxPage() {
         conversations={conversations}
         selectedId={effectiveSelectedId}
         onSelect={handleSelectConversation}
-        loading={inboxLoading}
-        hasMore={!!inboxResult?.nextCursor}
+        onLoadMore={handleLoadMoreConversations}
+        loading={inboxPageLoading}
+        hasMore={!!conversationNextCursor}
         platformFilter={platformFilter}
         onFilterChange={handleFilterChange}
       />
@@ -191,8 +321,9 @@ export default function InboxPage() {
               <InboxMessageThread
                 conversation={activeConversation}
                 messages={messages}
-                loading={messagesLoading}
-                hasMore={!!messagesResult?.nextCursor}
+                loading={messagePageLoading}
+                hasMore={!!messageNextCursor}
+                onLoadMore={handleLoadMoreMessages}
               />
             </div>
             {/* Reply input - fixed to bottom center */}

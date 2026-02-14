@@ -9,16 +9,27 @@ import { updateWidgetActionsList } from "@/lib/widget-data";
  * Supports cursor-based pagination.
  * Also syncs actions to iOS widget.
  */
-export function useActions(options?: { limit?: number; cursor?: number }) {
-  const result = useQuery(api.actions.getPendingActions, {
-    limit: options?.limit,
-    cursor: options?.cursor,
-  });
+export function useActions(options?: {
+  enabled?: boolean;
+  limit?: number;
+  cursor?: number;
+}) {
+  const enabled = options?.enabled ?? true;
+  const result = useQuery(
+    api.actions.getPendingActions,
+    enabled
+      ? {
+          limit: options?.limit,
+          cursor: options?.cursor,
+        }
+      : "skip"
+  );
 
   const actions = useMemo(() => result?.actions ?? [], [result?.actions]);
 
   // Sync actions to iOS widget when they change
   useEffect(() => {
+    if (!enabled) return;
     updateWidgetActionsList(
       actions.map((action) => ({
         id: action._id,
@@ -27,12 +38,12 @@ export function useActions(options?: { limit?: number; cursor?: number }) {
         type: action.type,
       }))
     );
-  }, [actions]);
+  }, [actions, enabled]);
 
   return {
     actions,
     nextCursor: result?.nextCursor ?? null,
-    isLoading: result === undefined,
+    isLoading: enabled && result === undefined,
     error: null, // Convex useQuery throws on error, doesn't return it
   };
 }

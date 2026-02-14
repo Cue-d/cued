@@ -56,7 +56,10 @@ describe("useContacts", () => {
           handles: [{ type: "phone", value: "+15551234567" }],
         },
       ];
-      mockUseQuery.mockReturnValue({ contacts: mockContacts, nextCursor: null });
+      mockUseQuery.mockReturnValue({
+        contacts: mockContacts,
+        nextCursor: null,
+      });
 
       const { result } = renderHook(() => useContacts());
 
@@ -102,7 +105,7 @@ describe("useContacts", () => {
       renderHook(() => useContacts({ cursor: cursorId as never }));
 
       expect(mockUseQuery).toHaveBeenCalledWith(expect.anything(), {
-        limit: undefined,
+        limit: 50,
         cursor: cursorId,
         searchQuery: undefined,
       });
@@ -114,7 +117,7 @@ describe("useContacts", () => {
       renderHook(() => useContacts({ searchQuery: "john" }));
 
       expect(mockUseQuery).toHaveBeenCalledWith(expect.anything(), {
-        limit: undefined,
+        limit: 50,
         cursor: undefined,
         searchQuery: "john",
       });
@@ -129,7 +132,7 @@ describe("useContacts", () => {
           limit: 10,
           cursor: cursorId as never,
           searchQuery: "doe",
-        })
+        }),
       );
 
       expect(mockUseQuery).toHaveBeenCalledWith(expect.anything(), {
@@ -147,7 +150,7 @@ describe("useContacts", () => {
       renderHook(() => useContacts({ searchQuery: "" }));
 
       expect(mockUseQuery).toHaveBeenCalledWith(expect.anything(), {
-        limit: undefined,
+        limit: 50,
         cursor: undefined,
         searchQuery: "",
       });
@@ -159,7 +162,7 @@ describe("useContacts", () => {
       renderHook(() => useContacts({ searchQuery: "john@example.com" }));
 
       expect(mockUseQuery).toHaveBeenCalledWith(expect.anything(), {
-        limit: undefined,
+        limit: 50,
         cursor: undefined,
         searchQuery: "john@example.com",
       });
@@ -198,7 +201,7 @@ describe("useContacts", () => {
       });
 
       const { result: secondResult } = renderHook(() =>
-        useContacts({ limit: 2, cursor: nextCursor as never })
+        useContacts({ limit: 2, cursor: nextCursor as never }),
       );
 
       expect(secondResult.current.contacts).toHaveLength(1);
