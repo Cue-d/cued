@@ -177,10 +177,15 @@ export async function scheduleOutgoingMessageEvents(
  * - Emails: use normalizeEmail from @cued/ai (handles Gmail dots, plus-addressing)
  */
 export function normalizeHandle(handle: string): string {
-  if (handle.includes("@")) {
-    return normalizeEmail(handle);
+  const trimmed = handle.trim();
+  const lower = trimmed.toLowerCase();
+  if (lower.startsWith("urn:")) {
+    return lower;
   }
-  return normalizePhone(handle);
+  if (trimmed.includes("@")) {
+    return normalizeEmail(trimmed);
+  }
+  return normalizePhone(trimmed);
 }
 
 // normalizeLinkedInHandle is imported from @cued/shared
@@ -441,8 +446,12 @@ export async function batchResolveHandles(
   const allVariants: string[] = [];
 
   for (const handle of handles) {
-    const isPhone = !handle.includes("@");
-    const variants = isPhone ? getPhoneVariants(handle) : [handle];
+    const trimmed = handle.trim();
+    const isPhone =
+      !trimmed.includes("@") &&
+      !trimmed.toLowerCase().startsWith("urn:") &&
+      /\d/.test(trimmed);
+    const variants = isPhone ? getPhoneVariants(trimmed) : [trimmed];
     for (const variant of variants) {
       if (!variantToOriginals.has(variant)) {
         variantToOriginals.set(variant, new Set([handle]));

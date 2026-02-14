@@ -594,6 +594,157 @@ describe("sync", () => {
       expect(handles).toHaveLength(1);
       expect(handles[0].handleType).toBe("email");
     });
+
+    it("preserves business URNs and uses chat displayName for business DMs", async () => {
+      const t = trackTest(convexTest(schema, modules));
+      const { asUser, userId } = await setupAuthenticatedUser(t);
+
+      const businessUrn = "urn:biz:29896aa3-06a9-4b54-b544-5e113c222d08";
+      const timestamp = Math.floor(Date.now() / 1000);
+
+      await asUser.mutation(api.sync.syncMessages, {
+        batch: {
+          cursor: 100,
+          chats: [
+            {
+              id: 1,
+              identifier: businessUrn,
+              displayName: "Partiful",
+              isGroup: false,
+              participants: [
+                {
+                  id: 1,
+                  identifier: businessUrn.toUpperCase(),
+                  service: "iMessage",
+                },
+              ],
+            },
+          ],
+          messages: [
+            {
+              id: 1,
+              chatId: 1,
+              text: "Welcome to Partiful support",
+              timestamp,
+              isFromMe: false,
+              isRead: true,
+              readAt: null,
+              hasAttachments: false,
+              sender: {
+                id: 1,
+                identifier: businessUrn.toUpperCase(),
+                service: "iMessage",
+              },
+            },
+          ],
+          handles: [
+            {
+              id: 1,
+              identifier: businessUrn.toUpperCase(),
+              service: "iMessage",
+            },
+          ],
+        },
+      });
+
+      const handles = await t.run(async (ctx) => {
+        return ctx.db
+          .query("contactHandles")
+          .withIndex("by_user", (q) => q.eq("userId", userId))
+          .collect();
+      });
+      expect(handles).toHaveLength(1);
+      expect(handles[0].handleType).toBe("urn");
+      expect(handles[0].handle).toBe(businessUrn);
+
+      const contacts = await t.run(async (ctx) => {
+        return ctx.db
+          .query("contacts")
+          .withIndex("by_user", (q) => q.eq("userId", userId))
+          .collect();
+      });
+      expect(contacts).toHaveLength(1);
+      expect(contacts[0].displayName).toBe("Partiful");
+
+      const conversations = await t.run(async (ctx) => {
+        return ctx.db
+          .query("conversations")
+          .withIndex("by_user", (q) => q.eq("userId", userId))
+          .collect();
+      });
+      expect(conversations).toHaveLength(1);
+      expect(conversations[0].conversationType).toBe("dm");
+      expect(conversations[0].displayName).toBe("Partiful");
+      expect(conversations[0].participantContactIds).toEqual([contacts[0]._id]);
+    });
+
+    it("backfills business display names for existing contact and conversation", async () => {
+      const t = trackTest(convexTest(schema, modules));
+      const { asUser, userId } = await setupAuthenticatedUser(t);
+
+      const businessUrn = "urn:biz:29896aa3-06a9-4b54-b544-5e113c222d08";
+
+      await t.run(async (ctx) => {
+        const contactId = await ctx.db.insert(
+          "contacts",
+          createTestContactData(userId, { displayName: businessUrn }),
+        );
+        await ctx.db.insert("contactHandles", {
+          userId,
+          contactId,
+          handleType: "urn",
+          handle: businessUrn,
+          platform: "imessage",
+        });
+        await ctx.db.insert(
+          "conversations",
+          createTestConversationData(userId, {
+            platform: "imessage",
+            platformConversationId: "1",
+            conversationType: "dm",
+            participantContactIds: [contactId],
+          }),
+        );
+      });
+
+      await asUser.mutation(api.sync.syncMessages, {
+        batch: {
+          cursor: 200,
+          chats: [
+            {
+              id: 1,
+              identifier: businessUrn,
+              displayName: "Partiful",
+              isGroup: false,
+              participants: [
+                { id: 1, identifier: businessUrn, service: "iMessage" },
+              ],
+            },
+          ],
+          messages: [],
+          handles: [{ id: 1, identifier: businessUrn, service: "iMessage" }],
+        },
+      });
+
+      const contacts = await t.run(async (ctx) => {
+        return ctx.db
+          .query("contacts")
+          .withIndex("by_user", (q) => q.eq("userId", userId))
+          .collect();
+      });
+      expect(contacts).toHaveLength(1);
+      expect(contacts[0].displayName).toBe("Partiful");
+
+      const conversations = await t.run(async (ctx) => {
+        return ctx.db
+          .query("conversations")
+          .withIndex("by_user", (q) => q.eq("userId", userId))
+          .collect();
+      });
+      expect(conversations).toHaveLength(1);
+      expect(conversations[0].displayName).toBe("Partiful");
+      expect(conversations[0].participantContactIds).toEqual([contacts[0]._id]);
+    });
   });
 
   // ============================================================================

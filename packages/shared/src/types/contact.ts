@@ -14,6 +14,7 @@
  * - `signal_id` - Signal protocol identifiers (UUIDs, normalized to lowercase)
  * - `linkedin_handle` - LinkedIn vanity URLs (linkedin.com/in/username)
  * - `linkedin_urn` - LinkedIn URNs (format: urn:li:member:123456)
+ * - `urn` - Generic URNs (e.g., Apple Business Chat: urn:biz:...)
  * - `twitter_handle` - Twitter/X usernames (@handle)
  * - `twitter_user_id` - Twitter/X numeric user IDs
  */
@@ -24,6 +25,7 @@ export type HandleType =
   | "signal_id"
   | "linkedin_handle"
   | "linkedin_urn"
+  | "urn"
   | "twitter_handle"
   | "twitter_user_id";
 

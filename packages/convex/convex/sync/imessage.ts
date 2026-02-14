@@ -5,7 +5,7 @@
 
 import type { Infer } from "convex/values";
 import { v } from "convex/values";
-import type { Doc, Id } from "../_generated/dataModel";
+import type { Id } from "../_generated/dataModel";
 import type { MutationCtx } from "../_generated/server";
 import { getPhoneVariants as getPhoneVariantsShared } from "@cued/shared";
 import {
@@ -63,6 +63,26 @@ export const syncBatchInput = v.object({
 type ChatInput = Infer<typeof chatInput>;
 type MessageInput = Infer<typeof messageInput>;
 export type BatchInput = Infer<typeof syncBatchInput>;
+
+function isUrnIdentifier(identifier: string): boolean {
+  return identifier.trim().toLowerCase().startsWith("urn:");
+}
+
+function isBusinessUrn(identifier: string): boolean {
+  return identifier.trim().toLowerCase().startsWith("urn:biz:");
+}
+
+function getHandleType(identifier: string): "phone" | "email" | "urn" {
+  if (isUrnIdentifier(identifier)) return "urn";
+  if (identifier.includes("@")) return "email";
+  return "phone";
+}
+
+
+function isBusinessChat(chat: ChatInput): boolean {
+  if (isBusinessUrn(chat.identifier)) return true;
+  return chat.participants.some((p) => isBusinessUrn(p.identifier));
+}
 
 // ============================================================================
 // iMessage Sync Implementation
@@ -129,6 +149,46 @@ export async function syncMessagesInternal(
   const handleToContact = await batchResolveHandles(ctx, userId, [
     ...uniqueHandles,
   ]);
+  const chatById = new Map(batch.chats.map((chat) => [chat.id, chat]));
+
+  const resolveContactByIdentifier = async (
+    identifier: string,
+    displayName?: string,
+  ): Promise<Id<"contacts"> | undefined> => {
+    const normalizedHandle = normalizeHandle(identifier);
+    let contactId = handleToContact.get(normalizedHandle);
+
+    if (!contactId) {
+      const result = await getOrCreateContact(
+        ctx,
+        userId,
+        "imessage",
+        [{ value: identifier, type: getHandleType(identifier) }],
+        displayName,
+      );
+      if (result) {
+        contactId = result.contactId;
+        handleToContact.set(normalizedHandle, contactId);
+      }
+      return contactId;
+    }
+
+    if (displayName) {
+      const existingContact = await ctx.db.get(contactId);
+      if (
+        existingContact &&
+        shouldUpdateDisplayName(
+          existingContact.displayName,
+          displayName,
+          normalizedHandle,
+        )
+      ) {
+        await ctx.db.patch(contactId, { displayName });
+      }
+    }
+
+    return contactId;
+  };
 
   // Build chat ID lookup (iMessage chat.id -> Convex conversation._id)
   const chatIdMap = new Map<number, Id<"conversations">>();
@@ -138,46 +198,58 @@ export async function syncMessagesInternal(
     try {
       const platformConversationId = String(chat.id);
       const existingId = conversationMap.get(platformConversationId);
+      const businessChat = isBusinessChat(chat);
+      const participantContactIds: Id<"contacts">[] = [];
+
+      for (const participant of chat.participants) {
+        const contactId = await resolveContactByIdentifier(
+          participant.identifier,
+          isBusinessUrn(participant.identifier)
+            ? (chat.displayName ?? undefined)
+            : undefined,
+        );
+        if (contactId) {
+          participantContactIds.push(contactId);
+        }
+      }
 
       if (existingId) {
         chatIdMap.set(chat.id, existingId);
-        // Update displayName for existing group chats if not set
-        if (chat.isGroup && chat.displayName) {
-          const existingConv = await ctx.db.get(existingId);
-          if (existingConv && !existingConv.displayName) {
-            await ctx.db.patch(existingId, { displayName: chat.displayName });
+        const existingConv = await ctx.db.get(existingId);
+        if (existingConv) {
+          const updates: {
+            displayName?: string;
+            participantContactIds?: Id<"contacts">[];
+          } = {};
+
+          // Update displayName for existing group chats and business DMs if missing.
+          if ((chat.isGroup || businessChat) && chat.displayName && !existingConv.displayName) {
+            updates.displayName = chat.displayName;
+          }
+
+          // Keep business chat participants aligned to corrected URN-backed contacts.
+          if (businessChat && participantContactIds.length > 0) {
+            const isSameParticipantSet =
+              existingConv.participantContactIds.length ===
+                participantContactIds.length &&
+              participantContactIds.every((id) =>
+                existingConv.participantContactIds.includes(id),
+              );
+            if (!isSameParticipantSet) {
+              updates.participantContactIds = participantContactIds;
+            }
+          }
+
+          if (Object.keys(updates).length > 0) {
+            await ctx.db.patch(existingId, updates);
           }
         }
       } else {
-        // Resolve participant handles to contacts from pre-fetched map
-        const participantContactIds: Id<"contacts">[] = [];
-        for (const participant of chat.participants) {
-          const normalizedHandle = normalizeHandle(participant.identifier);
-          let contactId = handleToContact.get(normalizedHandle);
-          if (!contactId) {
-            // Create contact from handle
-            const handleType = participant.identifier.includes("@")
-              ? "email"
-              : "phone";
-            const result = await getOrCreateContact(ctx, userId, "imessage", [
-              { value: participant.identifier, type: handleType },
-            ]);
-            if (result) {
-              contactId = result.contactId;
-              handleToContact.set(normalizedHandle, contactId);
-            }
-            // If result is undefined, handle was invalid - skip this participant
-          }
-          if (contactId) {
-            participantContactIds.push(contactId);
-          }
-        }
-
         // For group chats without explicit name, concatenate participant names
-        let groupDisplayName: string | undefined;
+        let conversationDisplayName: string | undefined;
         if (chat.isGroup) {
           if (chat.displayName) {
-            groupDisplayName = chat.displayName;
+            conversationDisplayName = chat.displayName;
           } else {
             // Fetch participant contacts to build display name
             const participantContacts = await Promise.all(
@@ -187,9 +259,11 @@ export async function syncMessagesInternal(
               .filter((c): c is NonNullable<typeof c> => c !== null)
               .map((c) => c.displayName);
             if (names.length > 0) {
-              groupDisplayName = names.join(", ");
+              conversationDisplayName = names.join(", ");
             }
           }
+        } else if (businessChat && chat.displayName) {
+          conversationDisplayName = chat.displayName;
         }
 
         const conversationId = await ctx.db.insert("conversations", {
@@ -199,7 +273,7 @@ export async function syncMessagesInternal(
           conversationType: chat.isGroup ? "group" : "dm",
           participantContactIds,
           unreadCount: 0,
-          displayName: groupDisplayName,
+          displayName: conversationDisplayName,
         });
         chatIdMap.set(chat.id, conversationId);
       }
@@ -252,22 +326,13 @@ export async function syncMessagesInternal(
     // Resolve sender from pre-fetched map
     let senderContactId: Id<"contacts"> | undefined;
     if (!message.isFromMe && message.sender) {
-      const normalizedHandle = normalizeHandle(message.sender.identifier);
-      senderContactId = handleToContact.get(normalizedHandle);
-      if (!senderContactId) {
-        // Create contact from handle
-        const handleType = message.sender.identifier.includes("@")
-          ? "email"
-          : "phone";
-        const result = await getOrCreateContact(ctx, userId, "imessage", [
-          { value: message.sender.identifier, type: handleType },
-        ]);
-        if (result) {
-          senderContactId = result.contactId;
-          handleToContact.set(normalizedHandle, senderContactId);
-        }
-        // If result is undefined, handle was invalid - continue without sender contact
-      }
+      const chat = chatById.get(message.chatId);
+      senderContactId = await resolveContactByIdentifier(
+        message.sender.identifier,
+        chat && isBusinessUrn(message.sender.identifier)
+          ? (chat.displayName ?? undefined)
+          : undefined,
+      );
     }
 
     messagesToInsert.push({

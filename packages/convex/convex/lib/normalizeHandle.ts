@@ -23,6 +23,8 @@ export function normalizeHandleValue(
       return normalizePhone(trimmed);
     case "linkedin_urn":
       return normalizeMemberURN(trimmed).toLowerCase();
+    case "urn":
+      return trimmed.toLowerCase();
     case "linkedin_handle":
       return normalizeLinkedInHandle(trimmed) || trimmed.toLowerCase();
     case "twitter_handle":
