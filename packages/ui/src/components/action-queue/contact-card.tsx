@@ -1,6 +1,6 @@
 import * as React from "react";
 import { Building2, Clock, FileText, Link, Tag, User } from "lucide-react";
-import { getInitials, type ContactFormData } from "@cued/shared";
+import { formatTime, getInitials, type ContactFormData } from "@cued/shared";
 import { OpenInAppButton } from "./open-in-app-button";
 import { cn } from "../../lib/utils";
 import { Avatar, AvatarFallback } from "../ui/avatar";
@@ -47,12 +47,6 @@ export interface ContactCardProps {
 
 export interface ContactCardRef {
   focusInput: () => void;
-}
-
-/** Format timestamp to time string */
-function formatMeetingTime(timestamp: number): string {
-  const date = new Date(timestamp);
-  return date.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
 }
 
 /** Platform badge color mapping */
@@ -103,7 +97,7 @@ export const ContactCard = React.forwardRef<ContactCardRef, ContactCardProps>(
     }, [autoFocus]);
 
     const initials = getInitials(personName);
-    const meetingTime = createdAt ? formatMeetingTime(createdAt) : "earlier";
+    const meetingTime = createdAt ? formatTime(createdAt) : "earlier";
 
     // Parse tags from comma-separated string
     const tagList = formData.tags

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { api } from "@cued/convex";
+import type { ActionPlatform } from "@cued/shared";
 import {
   extractBearerToken,
   extractErrorMessage,
@@ -8,7 +9,7 @@ import {
 } from "@/lib/api-utils";
 
 // Types for social sync batch
-export type SocialPlatform = "linkedin" | "twitter";
+export type SocialPlatform = Extract<ActionPlatform, "linkedin" | "twitter">;
 
 export interface SocialContact {
   name: string;

@@ -31,7 +31,7 @@ interface ConnectionStatusProps {
   isLoading: boolean;
 }
 
-export function ConnectionStatus({ isConnected, isLoading }: ConnectionStatusProps) {
+function ConnectionStatus({ isConnected, isLoading }: ConnectionStatusProps) {
   if (isLoading) {
     return <Skeleton className="h-4 w-20" />;
   }
@@ -59,19 +59,16 @@ interface IntegrationButtonProps {
   isDisconnecting: boolean;
   isLoading: boolean;
   integrationType: IntegrationType;
-  /** When true, per-account disconnect buttons are available, hide main disconnect */
-  hasPerAccountDisconnect?: boolean;
   onConnect: () => void;
   onDisconnect: () => void;
 }
 
-export function IntegrationButton({
+function IntegrationButton({
   isConnected,
   isConnecting,
   isDisconnecting,
   isLoading,
   integrationType,
-  hasPerAccountDisconnect,
   onConnect,
   onDisconnect,
 }: IntegrationButtonProps) {
@@ -150,8 +147,6 @@ export function IntegrationCard({
   onDisconnectAccount,
 }: IntegrationCardProps) {
   const hasAccounts = accounts && accounts.length > 0;
-  // No per-account disconnect for electron-based integrations
-  const hasPerAccountDisconnect = false;
 
   return (
     <div className="rounded-lg border bg-card">
@@ -175,7 +170,6 @@ export function IntegrationCard({
             isDisconnecting={isDisconnecting}
             isLoading={isLoading}
             integrationType={config.integrationType}
-            hasPerAccountDisconnect={hasPerAccountDisconnect}
             onConnect={onConnect}
             onDisconnect={onDisconnect}
           />

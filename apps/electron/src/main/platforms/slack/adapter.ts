@@ -7,9 +7,17 @@ import type {
   QueuedMessage,
   SendResult,
 } from "@cued/shared";
-import { getSlackSyncManager, getAllSlackSyncManagers } from "./sync";
-import { SlackRateLimitError } from "./api";
+import {
+  requireMessageText,
+  requireThreadId,
+} from "../../adapters/validation";
 import { isAuthError } from "../../auth/auth-utils";
+import {
+  getErrorMessage,
+  isRetryableError,
+} from "../../sync/error-utils";
+import { SlackRateLimitError } from "./api";
+import { getSlackSyncManager, getAllSlackSyncManagers } from "./sync";
 
 /** Permanent Slack errors that should not be retried */
 const PERMANENT_ERRORS = [
@@ -40,17 +48,14 @@ const TRANSIENT_ERRORS = [
 /**
  * Determine if an error is retryable (transient) vs permanent.
  */
-function isRetryableError(error: unknown): boolean {
+function isRetryableSlackError(error: unknown): boolean {
   if (error instanceof SlackRateLimitError) return true;
   if (isAuthError(error)) return false;
 
-  const lowerError = (error instanceof Error ? error.message : String(error)).toLowerCase();
-
-  if (PERMANENT_ERRORS.some((e) => lowerError.includes(e))) return false;
-  if (TRANSIENT_ERRORS.some((e) => lowerError.includes(e))) return true;
-
-  // Default: assume retryable for unknown transient issues
-  return true;
+  return isRetryableError(error, {
+    permanentPatterns: PERMANENT_ERRORS,
+    transientPatterns: TRANSIENT_ERRORS,
+  });
 }
 
 /**
@@ -67,23 +72,11 @@ export class SlackAdapter implements PlatformAdapter {
    * For multi-workspace support, workspaceId (teamId) is required.
    */
   async send(message: QueuedMessage): Promise<SendResult> {
-    // Validate message
-    if (!message.text) {
-      return {
-        success: false,
-        error: "Message text is required",
-        retryable: false,
-      };
-    }
+    const textValidation = requireMessageText(message);
+    if (!textValidation.ok) return textValidation.result;
 
-    // Slack requires a channel ID (stored in threadId)
-    if (!message.threadId) {
-      return {
-        success: false,
-        error: "Slack messages require a channel ID (threadId)",
-        retryable: false,
-      };
-    }
+    const threadIdValidation = requireThreadId(message, "Slack");
+    if (!threadIdValidation.ok) return threadIdValidation.result;
 
     // Get the Slack client from the sync manager
     // Use workspaceId (teamId) if provided for multi-workspace support
@@ -92,7 +85,7 @@ export class SlackAdapter implements PlatformAdapter {
       syncManager = getSlackSyncManager({ teamId: message.workspaceId });
     } catch (error) {
       // If multiple workspaces exist but no teamId provided, return clear error
-      const errorMessage = error instanceof Error ? error.message : String(error);
+      const errorMessage = getErrorMessage(error);
       return {
         success: false,
         error: errorMessage,
@@ -112,24 +105,24 @@ export class SlackAdapter implements PlatformAdapter {
     try {
       // Parse threadId - may contain thread timestamp for replies
       // Format: "channelId" or "channelId:threadTs"
-      let channelId = message.threadId;
+      let channelId = threadIdValidation.value;
       let threadTs: string | undefined;
 
-      if (message.threadId.includes(":")) {
-        const parts = message.threadId.split(":");
+      if (threadIdValidation.value.includes(":")) {
+        const parts = threadIdValidation.value.split(":");
         channelId = parts[0];
         threadTs = parts[1];
       }
 
       // Send the message
-      const response = await client.postMessage(channelId, message.text, {
+      const response = await client.postMessage(channelId, textValidation.value, {
         threadTs,
       });
 
       // Trigger immediate sync to fetch our sent message and any replies
       // This runs async and doesn't block the send response
       syncManager.triggerSync().catch((err) => {
-        console.warn('[SlackAdapter] Post-send sync failed:', err);
+        console.warn("[SlackAdapter] Post-send sync failed:", err);
       });
 
       return {
@@ -137,13 +130,13 @@ export class SlackAdapter implements PlatformAdapter {
         messageId: response.ts, // Slack message timestamp acts as ID
       };
     } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : String(error);
+      const errorMessage = getErrorMessage(error);
       console.error("[SlackAdapter] Send failed:", errorMessage);
 
       return {
         success: false,
         error: errorMessage,
-        retryable: isRetryableError(error),
+        retryable: isRetryableSlackError(error),
       };
     }
   }

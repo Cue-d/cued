@@ -33,6 +33,7 @@ import {
 } from '../platforms/signal/index.js'
 import { syncContactsToConvex } from '../platforms/contacts/sync.js'
 import { createConvexClient, setConvexAuth } from './cursor.js'
+import { getErrorMessage } from './error-utils.js'
 
 // ============================================================================
 // Types
@@ -42,14 +43,6 @@ export interface SyncFunctionOptions {
   getAuthToken: () => Promise<string | null>
   linkedInScraper?: LinkedInScraper
   twitterScraper?: TwitterScraper
-}
-
-// ============================================================================
-// Helpers
-// ============================================================================
-
-function getErrorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error)
 }
 
 function formatSyncErrors(errors: string[]): string {

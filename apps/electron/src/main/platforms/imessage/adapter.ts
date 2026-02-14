@@ -9,9 +9,27 @@ import type {
   QueuedMessage,
   SendResult,
 } from "@cued/shared";
+import { requireMessageText } from "../../adapters/validation";
+import {
+  getErrorMessage,
+  isRetryableError,
+} from "../../sync/error-utils";
 import { getIMessageSyncManager } from "./sync";
 
 const execAsync = promisify(exec);
+
+const IMESSAGE_PERMANENT_ERROR_PATTERNS = [
+  "not found",
+  "invalid identifier",
+  "not registered with imessage",
+] as const;
+
+const IMESSAGE_TRANSIENT_ERROR_PATTERNS = [
+  "timeout",
+  "connection",
+  "network",
+  "busy",
+] as const;
 
 /**
  * Escape a string for safe use in AppleScript.
@@ -53,12 +71,15 @@ async function sendToIndividual(
 
     return { success: true };
   } catch (error) {
-    const errorMessage = error instanceof Error ? error.message : String(error);
+    const errorMessage = getErrorMessage(error);
     console.error("[IMessageAdapter] Send to individual failed:", errorMessage);
     return {
       success: false,
       error: errorMessage,
-      retryable: isRetryableError(errorMessage),
+      retryable: isRetryableError(errorMessage, {
+        permanentPatterns: IMESSAGE_PERMANENT_ERROR_PATTERNS,
+        transientPatterns: IMESSAGE_TRANSIENT_ERROR_PATTERNS,
+      }),
     };
   }
 }
@@ -90,43 +111,17 @@ async function sendToGroup(
 
     return { success: true };
   } catch (error) {
-    const errorMessage = error instanceof Error ? error.message : String(error);
+    const errorMessage = getErrorMessage(error);
     console.error("[IMessageAdapter] Send to group failed:", errorMessage);
     return {
       success: false,
       error: errorMessage,
-      retryable: isRetryableError(errorMessage),
+      retryable: isRetryableError(errorMessage, {
+        permanentPatterns: IMESSAGE_PERMANENT_ERROR_PATTERNS,
+        transientPatterns: IMESSAGE_TRANSIENT_ERROR_PATTERNS,
+      }),
     };
   }
-}
-
-/**
- * Determine if an error is retryable (transient) vs permanent.
- */
-function isRetryableError(error: string): boolean {
-  const lowerError = error.toLowerCase();
-
-  // Permanent errors - don't retry
-  if (
-    lowerError.includes("not found") ||
-    lowerError.includes("invalid identifier") ||
-    lowerError.includes("not registered with imessage")
-  ) {
-    return false;
-  }
-
-  // Transient errors - retry
-  if (
-    lowerError.includes("timeout") ||
-    lowerError.includes("connection") ||
-    lowerError.includes("network") ||
-    lowerError.includes("busy")
-  ) {
-    return true;
-  }
-
-  // Default: assume retryable
-  return true;
 }
 
 /**
@@ -173,23 +168,17 @@ export class IMessageAdapter implements PlatformAdapter {
    * Handles both individual and group messages.
    */
   async send(message: QueuedMessage): Promise<SendResult> {
-    // Validate message
-    if (!message.text) {
-      return {
-        success: false,
-        error: "Message text is required",
-        retryable: false,
-      };
-    }
+    const textValidation = requireMessageText(message);
+    if (!textValidation.ok) return textValidation.result;
 
     // Group message via chat identifier (threadId contains chat ID)
     if (message.threadId) {
-      return sendToGroup(message.threadId, message.text);
+      return sendToGroup(message.threadId, textValidation.value);
     }
 
     // Individual message via handle
     if (message.recipientHandle) {
-      return sendToIndividual(message.recipientHandle, message.text);
+      return sendToIndividual(message.recipientHandle, textValidation.value);
     }
 
     // No valid target

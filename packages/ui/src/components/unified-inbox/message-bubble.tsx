@@ -2,6 +2,7 @@ import { cn } from "../../lib/utils"
 import type { InboxMessage } from "./message-types"
 import { DeliveryStatus } from "../action-queue/message-response-card/message-bubble"
 import type React from "react"
+import { formatTime } from "@cued/shared"
 
 export type InboxMessageSpacing = "tight" | "normal" | "wide"
 
@@ -17,11 +18,6 @@ const SPACING_CLASSES: Record<InboxMessageSpacing, string> = {
   tight: "mt-0.5",
   normal: "mt-2",
   wide: "mt-4",
-}
-
-function formatMessageTime(timestamp: number): string {
-  const date = new Date(timestamp)
-  return date.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })
 }
 
 export function InboxMessageBubble({
@@ -79,7 +75,7 @@ export function InboxMessageBubble({
       {/* Timestamp + delivery status */}
       {showTimestamp && (
         <span className="text-[11px] font-medium text-muted-foreground mt-1.5 tabular-nums opacity-0 group-hover:opacity-100 transition-opacity duration-200 flex items-center gap-1">
-          {formatMessageTime(message.sentAt)}
+          {formatTime(message.sentAt)}
           {message.isFromMe && message.status && (
             <>
               <span>·</span>

@@ -19,11 +19,9 @@ import {
   RadioGroupItem,
 } from "@cued/ui";
 import { ResetConfirmationModal } from "./components/reset-confirmation-modal";
+import type { ResettablePlatform } from "./platform-types";
 
-// Platforms with active sync adapters - matches ResetConfirmationModal
-type Platform = "imessage" | "slack" | "linkedin";
-
-const PLATFORMS: { id: Platform; name: string }[] = [
+const PLATFORMS: { id: ResettablePlatform; name: string }[] = [
   { id: "imessage", name: "iMessage" },
   { id: "slack", name: "Slack" },
   { id: "linkedin", name: "LinkedIn" },
@@ -33,7 +31,7 @@ export default function DebugSettingsPage() {
   const resetPlatformData = useAction(api.debug.resetPlatformData);
 
   const [resetMode, setResetMode] = useState<"all" | "specific">("all");
-  const [selectedPlatforms, setSelectedPlatforms] = useState<Platform[]>([]);
+  const [selectedPlatforms, setSelectedPlatforms] = useState<ResettablePlatform[]>([]);
   const [showConfirmModal, setShowConfirmModal] = useState(false);
   const [isResetting, setIsResetting] = useState(false);
   const [resetResult, setResetResult] = useState<{
@@ -48,7 +46,7 @@ export default function DebugSettingsPage() {
     resetMode === "all" ||
     (resetMode === "specific" && selectedPlatforms.length > 0);
 
-  function handlePlatformToggle(platform: Platform) {
+  function handlePlatformToggle(platform: ResettablePlatform) {
     setSelectedPlatforms((prev) =>
       prev.includes(platform)
         ? prev.filter((p) => p !== platform)

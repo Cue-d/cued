@@ -7,7 +7,7 @@ import type { Doc, Id } from "../_generated/dataModel";
 import type { MutationCtx } from "../_generated/server";
 import { BATCH_SIZE } from "./shared";
 
-type Platform = "imessage" | "slack" | "linkedin" | "signal";
+type Platform = "imessage" | "slack" | "linkedin" | "signal" | "twitter";
 
 /**
  * Batch fetch existing conversations by platform and platformConversationId.
@@ -89,23 +89,4 @@ export async function batchFetchMessages(
   }
 
   return results;
-}
-
-/**
- * Create a map of platformId -> Doc for quick lookups.
- * Useful when processing batches of items that may or may not exist.
- */
-export function createConversationMap(
-  conversations: Doc<"conversations">[]
-): Map<string, Doc<"conversations">> {
-  return new Map(conversations.map((c) => [c.platformConversationId, c]));
-}
-
-/**
- * Create a map of platformMessageId -> Doc for quick lookups.
- */
-export function createMessageMap(
-  messages: Doc<"messages">[]
-): Map<string, Doc<"messages">> {
-  return new Map(messages.map((m) => [m.platformMessageId, m]));
 }

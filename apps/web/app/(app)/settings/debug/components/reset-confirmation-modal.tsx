@@ -13,10 +13,9 @@ import {
   Input,
   Label,
 } from "@cued/ui";
-// Platforms with active sync adapters (subset of ActionPlatform)
-type ResetablePlatform = "imessage" | "slack" | "linkedin";
+import type { ResettablePlatform } from "../platform-types";
 
-const PLATFORM_NAMES: Record<ResetablePlatform, string> = {
+const PLATFORM_NAMES: Record<ResettablePlatform, string> = {
   imessage: "iMessage",
   slack: "Slack",
   linkedin: "LinkedIn",
@@ -25,7 +24,7 @@ const PLATFORM_NAMES: Record<ResetablePlatform, string> = {
 interface ResetConfirmationModalProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  platforms: ResetablePlatform[] | null; // null = all platforms
+  platforms: ResettablePlatform[] | null; // null = all platforms
   onConfirm: () => Promise<void>;
   isResetting: boolean;
 }

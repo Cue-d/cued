@@ -1,6 +1,6 @@
 import { generateText, Output } from "ai";
 import { z } from "zod";
-import { truncate } from "@cued/shared";
+import { formatRelativeTime, truncate } from "@cued/shared";
 import { gateway, OBJECT_MODEL } from "../gateway";
 import { withRetry } from "../utils";
 
@@ -73,20 +73,6 @@ export interface GenerateActionInput {
   recentActions?: RecentAction[];
 }
 
-/** Format timestamp as relative time */
-function formatRelativeTime(hours: number): string {
-  if (hours < 1) return "just now";
-  if (hours < 24) return `${Math.round(hours)}h ago`;
-  const days = Math.round(hours / 24);
-  return days === 1 ? "1 day ago" : `${days} days ago`;
-}
-
-/** Format timestamp (ms) as relative time from now */
-function formatTimestampRelative(timestamp: number): string {
-  const hours = (Date.now() - timestamp) / (1000 * 60 * 60);
-  return formatRelativeTime(hours);
-}
-
 /** Build context prompt from conversation data */
 function buildContextPrompt(input: GenerateActionInput): string {
   const { contact, messages, platform, hoursSinceLastMessage, recentActions } = input;
@@ -128,14 +114,17 @@ function buildContextPrompt(input: GenerateActionInput): string {
   let recentActionsSection = "";
   if (recentActions && recentActions.length > 0) {
     const actionLines = recentActions.map((action) => {
-      return `- ${action.type} (${action.status}, ${formatTimestampRelative(action.createdAt)})`;
+      return `- ${action.type} (${action.status}, ${formatRelativeTime(action.createdAt)})`;
     });
     recentActionsSection = `\n## Recent Actions\n${actionLines.join("\n")}\n`;
   }
 
+  const lastMessageTimestamp =
+    Date.now() - Math.max(0, hoursSinceLastMessage) * 60 * 60 * 1000;
+
   return `## Context
 Platform: ${platform}
-Time since last message: ${formatRelativeTime(hoursSinceLastMessage)}
+Time since last message: ${formatRelativeTime(lastMessageTimestamp)}
 
 ## Contact Information
 ${contactLines.join("\n")}

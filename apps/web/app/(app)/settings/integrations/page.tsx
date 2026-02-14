@@ -54,9 +54,6 @@ const INTEGRATIONS: IntegrationConfig[] = [
 
 export default function IntegrationsPage() {
   const integrations = useQuery(api.integrations.getUserIntegrations);
-  const [connecting, setConnecting] = useState<Platform | null>(null);
-  const [disconnecting, setDisconnecting] = useState<Platform | null>(null);
-  const [disconnectingAccount, setDisconnectingAccount] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const statusByPlatform = useMemo(() => {
@@ -87,7 +84,7 @@ export default function IntegrationsPage() {
     return map;
   }, [integrations]);
 
-  async function handleConnect(config: IntegrationConfig) {
+  function handleConnect(config: IntegrationConfig) {
     // Handle electron-webview integrations (like Slack)
     if (config.integrationType === "electron-webview") {
       setError(`${config.name} connection requires the Cued desktop app. Open the desktop app and click Connect.`);
@@ -103,7 +100,7 @@ export default function IntegrationsPage() {
     setError("Integration not properly configured");
   }
 
-  async function handleDisconnect(config: IntegrationConfig) {
+  function handleDisconnect(config: IntegrationConfig) {
     // Handle electron-webview disconnects (like Slack)
     if (config.integrationType === "electron-webview") {
       setError(`${config.name} disconnect requires the Cued desktop app. Open the desktop app settings to disconnect.`);
@@ -111,14 +108,11 @@ export default function IntegrationsPage() {
     }
   }
 
-  async function handleDisconnectAccount(
+  function handleDisconnectAccount(
     _config: IntegrationConfig,
-    _workspaceId: string,
-    workspaceId: string
+    _workspaceId: string
   ) {
-    setDisconnectingAccount(workspaceId);
     setError("Account disconnect not supported for this platform");
-    setDisconnectingAccount(null);
   }
 
   const isLoading = integrations === undefined;
@@ -157,9 +151,8 @@ export default function IntegrationsPage() {
                   key={config.id}
                   config={config}
                   isConnected={status?.isConnected ?? false}
-                  isConnecting={connecting === config.id}
-                  isDisconnecting={disconnecting === config.id}
-                  disconnectingAccount={disconnectingAccount}
+                  isConnecting={false}
+                  isDisconnecting={false}
                   isLoading={isLoading}
                   lastSyncAt={status?.lastSyncAt ?? null}
                   accounts={status?.accounts}
@@ -168,7 +161,7 @@ export default function IntegrationsPage() {
                   onDisconnectAccount={(workspaceId) => {
                     const account = status?.accounts?.find(a => a.workspaceId === workspaceId);
                     if (account) {
-                      handleDisconnectAccount(config, workspaceId, account.workspaceId);
+                      handleDisconnectAccount(config, account.workspaceId);
                     }
                   }}
                 />

@@ -12,11 +12,11 @@ import {
   normalizePhone,
   getPhoneVariants,
   normalizeLinkedInHandle,
-  normalizeMemberURN,
   type HandleType,
 } from "@cued/shared";
 import { normalizeEmail } from "@cued/ai";
 import { scheduleContactMergeCheck } from "../lib/contactMergeScheduling";
+import { normalizeHandleValue } from "../lib/normalizeHandle";
 
 // ============================================================================
 // Shared Constants
@@ -266,7 +266,7 @@ export async function getOrCreateContact(
   const normalizedHandles = handles
     .map((h) => ({
       ...h,
-      normalized: normalizeHandleByType(h.value, h.type),
+      normalized: normalizeHandleValue(h.type, h.value),
     }))
     .filter((h) => {
       if (!h.normalized || h.normalized.length === 0) {
@@ -349,36 +349,6 @@ export async function getOrCreateContact(
   await scheduleContactMergeCheck(ctx, userId, contactId);
 
   return { contactId, created: true };
-}
-
-/**
- * Normalize a handle based on its type.
- */
-function normalizeHandleByType(value: string, type: HandleType): string {
-  switch (type) {
-    case "phone":
-      return normalizePhone(value);
-    case "email":
-      return normalizeEmail(value);
-    case "linkedin_handle":
-      return normalizeLinkedInHandle(value);
-    case "linkedin_urn":
-      return normalizeMemberURN(value).toLowerCase();
-    case "slack_id":
-      // Slack IDs are already normalized (e.g., "U12345678")
-      return value;
-    case "signal_id":
-      // Normalize Signal UUIDs to lowercase (RFC 4122 case-insensitive)
-      return value.toLowerCase().trim();
-    case "twitter_handle":
-      // Lowercase Twitter handles
-      return value.toLowerCase().replace(/^@/, "");
-    case "twitter_user_id":
-      // Numeric user IDs are stable, return as-is
-      return value;
-    default:
-      return value;
-  }
 }
 
 /**

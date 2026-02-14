@@ -43,6 +43,7 @@ import type {
 } from "../../shared/electron-api";
 import { getAdapter } from "../adapters/index.js";
 import { getSyncEngine } from "../sync/engine.js";
+import { getErrorMessage } from "../sync/error-utils.js";
 import { type SyncProgress } from "../sync/types.js";
 
 // Singleton scraper instance to maintain state across calls
@@ -119,14 +120,6 @@ export interface RunAllSyncsResult {
   skipped?: boolean;
   error?: string;
   platforms: SyncProgress['platforms'];
-}
-
-// ============================================================================
-// Helpers
-// ============================================================================
-
-function getErrorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
 }
 
 // ============================================================================

@@ -4,33 +4,33 @@
 
 import type { PlatformAdapter, QueuedMessage, SendResult } from '@cued/shared'
 import { getTwitterSyncManager } from './sync'
+import {
+  requireMessageText,
+  requireThreadId,
+} from '../../adapters/validation'
+import {
+  getErrorMessage,
+  isRetryableError,
+} from '../../sync/error-utils'
 
-const NON_RETRYABLE_PATTERNS = ['not found', 'invalid', 'forbidden', 'unauthorized', '401', '403']
-
-function isRetryableError(error: string): boolean {
-  const lower = error.toLowerCase()
-  return !NON_RETRYABLE_PATTERNS.some((pattern) => lower.includes(pattern))
-}
+const TWITTER_PERMANENT_ERROR_PATTERNS = [
+  'not found',
+  'invalid',
+  'forbidden',
+  'unauthorized',
+  '401',
+  '403',
+] as const
 
 export class TwitterAdapter implements PlatformAdapter {
   readonly platform = 'twitter' as const
 
   async send(message: QueuedMessage): Promise<SendResult> {
-    if (!message.text) {
-      return {
-        success: false,
-        error: 'Message text is required',
-        retryable: false,
-      }
-    }
+    const textValidation = requireMessageText(message)
+    if (!textValidation.ok) return textValidation.result
 
-    if (!message.threadId) {
-      return {
-        success: false,
-        error: 'Twitter messages require a conversation ID (threadId)',
-        retryable: false,
-      }
-    }
+    const threadIdValidation = requireThreadId(message, 'Twitter')
+    if (!threadIdValidation.ok) return threadIdValidation.result
 
     const syncManager = getTwitterSyncManager()
     const client = syncManager.client
@@ -52,7 +52,10 @@ export class TwitterAdapter implements PlatformAdapter {
     }
 
     try {
-      const sent = await client.sendDirectMessage(message.threadId, message.text)
+      const sent = await client.sendDirectMessage(
+        threadIdValidation.value,
+        textValidation.value
+      )
 
       if (sent.message) {
         void syncManager.syncSentMessage(sent.message).catch((error) => {
@@ -65,11 +68,13 @@ export class TwitterAdapter implements PlatformAdapter {
         messageId: sent.message?.message_data.id ?? sent.message?.id,
       }
     } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : String(error)
+      const errorMessage = getErrorMessage(error)
       return {
         success: false,
         error: errorMessage,
-        retryable: isRetryableError(errorMessage),
+        retryable: isRetryableError(errorMessage, {
+          permanentPatterns: TWITTER_PERMANENT_ERROR_PATTERNS,
+        }),
       }
     }
   }

@@ -7,47 +7,39 @@ import type {
   QueuedMessage,
   SendResult,
 } from "@cued/shared";
-import { getLinkedInSyncManager } from "./sync";
-import { sendMessage } from "./api/messages";
+import {
+  requireMessageText,
+  requireThreadId,
+} from "../../adapters/validation";
+import {
+  getErrorMessage,
+  isRetryableError,
+} from "../../sync/error-utils";
 import { getSyncDebugLogger } from "../../sync/debug-logger";
+import { sendMessage } from "./api/messages";
+import { getLinkedInSyncManager } from "./sync";
 
-/**
- * Determine if an error is retryable (transient) vs permanent.
- */
-function isRetryableError(error: string): boolean {
-  const lowerError = error.toLowerCase();
+const LINKEDIN_PERMANENT_ERROR_PATTERNS = [
+  "not found",
+  "invalid",
+  "forbidden",
+  "unauthorized",
+  "401",
+  "403",
+  "unauthenticated",
+] as const;
 
-  // Permanent errors - don't retry
-  if (
-    lowerError.includes("not found") ||
-    lowerError.includes("invalid") ||
-    lowerError.includes("forbidden") ||
-    lowerError.includes("unauthorized") ||
-    lowerError.includes("401") ||
-    lowerError.includes("403") ||
-    lowerError.includes("unauthenticated")
-  ) {
-    return false;
-  }
-
-  // Transient errors - retry
-  if (
-    lowerError.includes("timeout") ||
-    lowerError.includes("connection") ||
-    lowerError.includes("network") ||
-    lowerError.includes("rate limit") ||
-    lowerError.includes("429") ||
-    lowerError.includes("500") ||
-    lowerError.includes("502") ||
-    lowerError.includes("503") ||
-    lowerError.includes("504")
-  ) {
-    return true;
-  }
-
-  // Default: assume retryable
-  return true;
-}
+const LINKEDIN_TRANSIENT_ERROR_PATTERNS = [
+  "timeout",
+  "connection",
+  "network",
+  "rate limit",
+  "429",
+  "500",
+  "502",
+  "503",
+  "504",
+] as const;
 
 /**
  * LinkedIn adapter implementing the PlatformAdapter interface.
@@ -61,23 +53,11 @@ export class LinkedInAdapter implements PlatformAdapter {
    * Requires a threadId (conversation URN) for routing.
    */
   async send(message: QueuedMessage): Promise<SendResult> {
-    // Validate message
-    if (!message.text) {
-      return {
-        success: false,
-        error: "Message text is required",
-        retryable: false,
-      };
-    }
+    const textValidation = requireMessageText(message);
+    if (!textValidation.ok) return textValidation.result;
 
-    // LinkedIn requires a conversation ID (threadId)
-    if (!message.threadId) {
-      return {
-        success: false,
-        error: "LinkedIn messages require a conversation ID (threadId)",
-        retryable: false,
-      };
-    }
+    const threadIdValidation = requireThreadId(message, "LinkedIn");
+    if (!threadIdValidation.ok) return threadIdValidation.result;
 
     // Get the LinkedIn client from the sync manager
     const syncManager = getLinkedInSyncManager();
@@ -106,28 +86,33 @@ export class LinkedInAdapter implements PlatformAdapter {
       await client.fetchSelf();
 
       // Send the message
-      console.log(`[LinkedInAdapter] Sending message to threadId: ${message.threadId}`);
-      logger.logCustomEvent('linkedin', 'send_message_start', { threadId: message.threadId });
-      const sentMessage = await sendMessage(client, message.threadId, message.text);
-      console.log(`[LinkedInAdapter] Message sent successfully, entityURN: ${sentMessage.entityURN}`);
-      logger.logCustomEvent('linkedin', 'send_message_success', {
-        threadId: message.threadId,
+      const threadId = threadIdValidation.value;
+      console.log(`[LinkedInAdapter] Sending message to threadId: ${threadId}`);
+      logger.logCustomEvent("linkedin", "send_message_start", { threadId });
+      const sentMessage = await sendMessage(client, threadId, textValidation.value);
+      console.log(
+        `[LinkedInAdapter] Message sent successfully, entityURN: ${sentMessage.entityURN}`,
+      );
+      logger.logCustomEvent("linkedin", "send_message_success", {
+        threadId,
         entityURN: sentMessage.entityURN,
       });
 
       // Sync the sent message directly to Convex without re-fetching
       // This avoids calling getMessages() which can fail with
       // "Internal error fetching data from downstream"
-      console.log(`[LinkedInAdapter] Syncing sent message directly: ${sentMessage.entityURN}`);
-      logger.logCustomEvent('linkedin', 'sync_sent_message_trigger', {
-        threadId: message.threadId,
+      console.log(
+        `[LinkedInAdapter] Syncing sent message directly: ${sentMessage.entityURN}`,
+      );
+      logger.logCustomEvent("linkedin", "sync_sent_message_trigger", {
+        threadId,
         entityURN: sentMessage.entityURN,
       });
       syncManager.syncSentMessage(sentMessage).catch((err) => {
-        const errMsg = err instanceof Error ? err.message : String(err);
+        const errMsg = getErrorMessage(err);
         console.error("[LinkedInAdapter] Sync sent message failed:", err);
-        logger.logSyncError('linkedin', `sync_sent_message_catch: ${errMsg}`, {
-          threadId: message.threadId,
+        logger.logSyncError("linkedin", `sync_sent_message_catch: ${errMsg}`, {
+          threadId,
           entityURN: sentMessage.entityURN,
         });
       });
@@ -137,14 +122,19 @@ export class LinkedInAdapter implements PlatformAdapter {
         messageId: sentMessage.entityURN,
       };
     } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : String(error);
+      const errorMessage = getErrorMessage(error);
       console.error("[LinkedInAdapter] Send failed:", errorMessage);
-      getSyncDebugLogger().logSyncError('linkedin', `send_failed: ${errorMessage}`, { threadId: message.threadId });
+      getSyncDebugLogger().logSyncError("linkedin", `send_failed: ${errorMessage}`, {
+        threadId: threadIdValidation.value,
+      });
 
       return {
         success: false,
         error: errorMessage,
-        retryable: isRetryableError(errorMessage),
+        retryable: isRetryableError(errorMessage, {
+          permanentPatterns: LINKEDIN_PERMANENT_ERROR_PATTERNS,
+          transientPatterns: LINKEDIN_TRANSIENT_ERROR_PATTERNS,
+        }),
       };
     }
   }

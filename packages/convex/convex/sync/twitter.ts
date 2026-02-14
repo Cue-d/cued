@@ -5,14 +5,13 @@
 
 import type { Infer } from "convex/values";
 import { v } from "convex/values";
-import type { Doc, Id } from "../_generated/dataModel";
+import type { Id } from "../_generated/dataModel";
 import type { MutationCtx } from "../_generated/server";
 import {
   getOrCreateContact,
   scheduleIncomingMessageEvents,
   scheduleOutgoingMessageEvents,
   SEVEN_DAYS_MS,
-  BATCH_SIZE,
   getOrCreateIntegration,
   incrementSyncCursorStat,
   upsertSyncCursor,
@@ -22,6 +21,7 @@ import {
   logSyncError,
   resolveMessageQueueBridge,
 } from "./shared";
+import { batchFetchConversations, batchFetchMessages } from "./batchUtils";
 
 // ============================================================================
 // Validators
@@ -93,10 +93,11 @@ export async function syncTwitterConversationsInternal(
     errors: [] as string[],
   };
 
-  const existingConversations = await batchFetchTwitterConversations(
+  const existingConversations = await batchFetchConversations(
     ctx,
     userId,
-    conversations.map((conversation) => conversation.conversationId)
+    "twitter",
+    [...new Set(conversations.map((conversation) => conversation.conversationId))]
   );
   const conversationMap = new Map(
     existingConversations.map((conversation) => [conversation.platformConversationId, conversation])
@@ -207,7 +208,12 @@ export async function syncTwitterMessagesInternal(
 
   // Build lookup maps for deduplication
   const conversationIds = [...new Set(messages.map((m) => m.conversationId))];
-  const existingConversations = await batchFetchTwitterConversations(ctx, userId, conversationIds);
+  const existingConversations = await batchFetchConversations(
+    ctx,
+    userId,
+    "twitter",
+    conversationIds
+  );
 
   // Track conversation state: _id, lastMessageAt, unreadCount
   type ConvState = { _id: Id<"conversations">; lastMessageAt?: number; unreadCount: number };
@@ -218,7 +224,12 @@ export async function syncTwitterMessagesInternal(
     ])
   );
 
-  const existingMessages = await batchFetchTwitterMessages(ctx, userId, messages.map((m) => m.messageId));
+  const existingMessages = await batchFetchMessages(
+    ctx,
+    userId,
+    "twitter",
+    [...new Set(messages.map((m) => m.messageId))]
+  );
   const existingMessageIds = new Set(existingMessages.map((m) => m.platformMessageId));
 
   const incomingConversations = new Set<Id<"conversations">>();
@@ -332,56 +343,6 @@ function buildTwitterHandles(handle: string, userId?: string): TwitterHandle[] {
   }
   handles.push({ value: handle, type: "twitter_handle" });
   return handles;
-}
-
-async function batchFetchTwitterConversations(
-  ctx: MutationCtx,
-  userId: Id<"users">,
-  conversationIds: string[]
-): Promise<Doc<"conversations">[]> {
-  const unique = [...new Set(conversationIds)];
-  const results: Doc<"conversations">[] = [];
-
-  for (let i = 0; i < unique.length; i += BATCH_SIZE) {
-    const batch = await Promise.all(
-      unique.slice(i, i + BATCH_SIZE).map((id) =>
-        ctx.db
-          .query("conversations")
-          .withIndex("by_platform_conversation", (q) =>
-            q.eq("userId", userId).eq("platform", "twitter").eq("platformConversationId", id)
-          )
-          .unique()
-      )
-    );
-    results.push(...batch.filter((c): c is NonNullable<typeof c> => c !== null));
-  }
-
-  return results;
-}
-
-async function batchFetchTwitterMessages(
-  ctx: MutationCtx,
-  userId: Id<"users">,
-  messageIds: string[]
-): Promise<Doc<"messages">[]> {
-  const unique = [...new Set(messageIds)];
-  const results: Doc<"messages">[] = [];
-
-  for (let i = 0; i < unique.length; i += BATCH_SIZE) {
-    const batch = await Promise.all(
-      unique.slice(i, i + BATCH_SIZE).map((id) =>
-        ctx.db
-          .query("messages")
-          .withIndex("by_platform_message", (q) =>
-            q.eq("userId", userId).eq("platform", "twitter").eq("platformMessageId", id)
-          )
-          .unique()
-      )
-    );
-    results.push(...batch.filter((m): m is NonNullable<typeof m> => m !== null));
-  }
-
-  return results;
 }
 
 // ============================================================================

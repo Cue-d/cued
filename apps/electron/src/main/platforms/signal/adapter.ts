@@ -7,31 +7,26 @@ import type {
   QueuedMessage,
   SendResult,
 } from '@cued/shared'
-import { getSignalSyncManager } from './sync'
+import { requireMessageText } from '../../adapters/validation'
+import {
+  getErrorMessage,
+  isRetryableError,
+} from '../../sync/error-utils'
 import type { SignalReceivedMessage } from './client'
+import { getSignalSyncManager } from './sync'
 
-function isRetryableError(error: string): boolean {
-  const lower = error.toLowerCase()
+const SIGNAL_PERMANENT_ERROR_PATTERNS = [
+  'invalid',
+  'not found',
+  'unregistered',
+] as const
 
-  if (
-    lower.includes('invalid') ||
-    lower.includes('not found') ||
-    lower.includes('unregistered')
-  ) {
-    return false
-  }
-
-  if (
-    lower.includes('timeout') ||
-    lower.includes('network') ||
-    lower.includes('connection') ||
-    lower.includes('temporarily')
-  ) {
-    return true
-  }
-
-  return true
-}
+const SIGNAL_TRANSIENT_ERROR_PATTERNS = [
+  'timeout',
+  'network',
+  'connection',
+  'temporarily',
+] as const
 
 function resolveTarget(message: QueuedMessage): {
   recipient?: string
@@ -70,13 +65,8 @@ export class SignalAdapter implements PlatformAdapter {
   readonly platform = 'signal' as const
 
   async send(message: QueuedMessage): Promise<SendResult> {
-    if (!message.text || message.text.trim().length === 0) {
-      return {
-        success: false,
-        error: 'Message text is required',
-        retryable: false,
-      }
-    }
+    const textValidation = requireMessageText(message)
+    if (!textValidation.ok) return textValidation.result
 
     const target = resolveTarget(message)
     if (!target) {
@@ -107,7 +97,7 @@ export class SignalAdapter implements PlatformAdapter {
     }
 
     try {
-      const result = await client.sendMessage(message.text, {
+      const result = await client.sendMessage(textValidation.value, {
         recipient: target.recipient,
         groupId: target.groupId,
       })
@@ -116,7 +106,7 @@ export class SignalAdapter implements PlatformAdapter {
         messageId: `sent:${result.timestamp}:${target.threadId}`,
         threadId: target.threadId,
         threadType: target.threadType,
-        text: message.text,
+        text: textValidation.value,
         sentAt: result.timestamp,
         isFromMe: true,
         peerHandle: target.recipient,
@@ -131,12 +121,15 @@ export class SignalAdapter implements PlatformAdapter {
         messageId: sentMessage.messageId,
       }
     } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : String(error)
+      const errorMessage = getErrorMessage(error)
       console.error('[SignalAdapter] Send failed:', errorMessage)
       return {
         success: false,
         error: errorMessage,
-        retryable: isRetryableError(errorMessage),
+        retryable: isRetryableError(errorMessage, {
+          permanentPatterns: SIGNAL_PERMANENT_ERROR_PATTERNS,
+          transientPatterns: SIGNAL_TRANSIENT_ERROR_PATTERNS,
+        }),
       }
     }
   }

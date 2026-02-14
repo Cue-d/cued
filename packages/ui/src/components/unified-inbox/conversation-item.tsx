@@ -1,4 +1,4 @@
-import { formatTimestamp as formatTimestampShared } from "@cued/shared"
+import { formatTimestamp } from "@cued/shared"
 import { InboxConversationAvatar } from "./conversation-avatar"
 import { InboxPlatformBadge } from "./platform-badge"
 import { cn } from "../../lib/utils"
@@ -9,11 +9,6 @@ interface InboxConversationItemProps {
   conversation: InboxConversation
   isSelected: boolean
   onClick: () => void
-}
-
-function formatTimestamp(timestamp: number | null): string {
-  if (!timestamp) return ""
-  return formatTimestampShared(timestamp, { style: "smart" })
 }
 
 function getConversationName(conversation: InboxConversation): string {
@@ -87,7 +82,9 @@ export function InboxConversationItem({
               isSelected ? "text-primary-foreground/70" : "text-muted-foreground"
             )}
           >
-            {formatTimestamp(conversation.lastMessageAt)}
+            {conversation.lastMessageAt
+              ? formatTimestamp(conversation.lastMessageAt, { style: "smart" })
+              : ""}
           </span>
         </div>
         <p

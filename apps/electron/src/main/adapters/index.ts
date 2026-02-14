@@ -28,7 +28,6 @@ const adapterRegistry: Partial<
   signal: SignalAdapter,
   slack: SlackAdapter,
   twitter: TwitterAdapter,
-  // whatsapp: WhatsAppAdapter,
 };
 
 /**
