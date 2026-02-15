@@ -53,6 +53,12 @@ interface EmbeddingMessage {
   isFromMe: boolean;
   sentAt: number;
   senderName: string | undefined;
+  reactions?: Array<{
+    emoji: string;
+    isFromMe: boolean;
+    timestamp: number;
+    reactorName?: string;
+  }>;
 }
 
 /** Conversation context for embedding */
@@ -256,6 +262,16 @@ export const processMessagesForEmbedding = internalAction({
         isFromMe: v.boolean(),
         sentAt: v.number(),
         senderName: v.optional(v.string()),
+        reactions: v.optional(
+          v.array(
+            v.object({
+              emoji: v.string(),
+              isFromMe: v.boolean(),
+              timestamp: v.number(),
+              reactorName: v.optional(v.string()),
+            })
+          )
+        ),
       })
     ),
     conversation: v.object({
@@ -286,6 +302,7 @@ export const processMessagesForEmbedding = internalAction({
         content: m.content,
         isFromMe: m.isFromMe,
         senderName: m.senderName,
+        reactions: m.reactions,
       }));
 
     // Import embedding helpers
@@ -293,7 +310,11 @@ export const processMessagesForEmbedding = internalAction({
 
     // Build embedding input
     const embeddingInput = buildEmbeddingInput(
-      { content: triggerMessage.content, senderName: triggerMessage.senderName },
+      {
+        content: triggerMessage.content,
+        senderName: triggerMessage.senderName,
+        reactions: triggerMessage.reactions,
+      },
       contextMessages,
       args.conversation.platform,
       args.contactName,

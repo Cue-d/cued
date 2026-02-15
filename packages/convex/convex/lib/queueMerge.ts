@@ -72,6 +72,7 @@ export function mapQueueToInboxMessage(entry: Doc<"messageQueue">) {
     isFromMe: true as const,
     platform: entry.platform,
     status: mapQueueStatus(entry),
+    reactions: null as string[] | null,
     sender: null,
   };
 }

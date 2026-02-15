@@ -56,11 +56,20 @@ export interface RecentAction {
 }
 
 /** Message in conversation history */
+export interface ActionReaction {
+  emoji: string;
+  isFromMe: boolean;
+  timestamp: number;
+  reactorName?: string;
+}
+
+/** Message in conversation history */
 export interface ActionMessage {
   content: string;
   isFromMe: boolean;
   sentAt: number;
   senderName?: string;
+  reactions?: ActionReaction[];
 }
 
 /** Input for action generation */
@@ -74,6 +83,18 @@ export interface GenerateActionInput {
 }
 
 /** Build context prompt from conversation data */
+function formatReactions(reactions?: ActionReaction[]): string {
+  if (!reactions || reactions.length === 0) return "";
+
+  const sorted = [...reactions].sort((a, b) => a.timestamp - b.timestamp);
+  const parts = sorted.map((reaction) => {
+    const reactor = reaction.reactorName ?? (reaction.isFromMe ? "Me" : "Unknown");
+    return `${reactor} ${reaction.emoji}`;
+  });
+
+  return ` (Reactions: ${parts.join(", ")})`;
+}
+
 function buildContextPrompt(input: GenerateActionInput): string {
   const { contact, messages, platform, hoursSinceLastMessage, recentActions } = input;
 
@@ -102,7 +123,7 @@ function buildContextPrompt(input: GenerateActionInput): string {
   const messageLines = recentMessages.map((msg) => {
     const sender = msg.isFromMe ? "Me" : msg.senderName || contact.displayName;
     const content = truncate(msg.content, 500);
-    return `[${sender}]: ${content}`;
+    return `[${sender}]: ${content}${formatReactions(msg.reactions)}`;
   });
 
   // Handle empty conversations
@@ -212,6 +233,19 @@ export async function generateAction(
       type: null,
       priority: null,
       reason: "User sent the last message - waiting for reply",
+      suggestedResponse: null,
+      remindAt: null,
+    };
+  }
+
+  // Deterministic check: user reacted to latest incoming message (acknowledged)
+  const latestIncomingMessage = [...input.messages].reverse().find((m) => !m.isFromMe);
+  if (latestIncomingMessage?.reactions?.some((reaction) => reaction.isFromMe)) {
+    return {
+      shouldCreateAction: false,
+      type: null,
+      priority: null,
+      reason: "User reacted to the latest incoming message",
       suggestedResponse: null,
       remindAt: null,
     };

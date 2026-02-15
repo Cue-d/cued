@@ -5,7 +5,7 @@
 
 import type { Infer } from "convex/values";
 import { v } from "convex/values";
-import type { Id } from "../_generated/dataModel";
+import type { Doc, Id } from "../_generated/dataModel";
 import type { MutationCtx } from "../_generated/server";
 import { getPhoneVariants as getPhoneVariantsShared } from "@cued/shared";
 import {
@@ -35,8 +35,16 @@ const chatInput = v.object({
   participants: v.array(handleInput),
 });
 
+const reactionInput = v.object({
+  emoji: v.string(),
+  reactorIdentifier: v.string(),
+  isFromMe: v.boolean(),
+  timestamp: v.number(),
+});
+
 const messageInput = v.object({
   id: v.number(),
+  guid: v.optional(v.string()),
   chatId: v.number(),
   text: v.union(v.string(), v.null()),
   timestamp: v.number(),
@@ -45,6 +53,7 @@ const messageInput = v.object({
   readAt: v.union(v.number(), v.null()),
   hasAttachments: v.boolean(),
   sender: v.union(handleInput, v.null()),
+  reactions: v.optional(v.array(reactionInput)),
   // Allow attachments field from Electron but don't store it (not in schema)
   attachments: v.optional(v.array(v.any())),
 });
@@ -64,6 +73,113 @@ type ChatInput = Infer<typeof chatInput>;
 type MessageInput = Infer<typeof messageInput>;
 export type BatchInput = Infer<typeof syncBatchInput>;
 
+type StoredReaction = {
+  emoji: string;
+  contactId?: Id<"contacts">;
+  isFromMe: boolean;
+  timestamp: number;
+};
+
+function sortReactions(
+  reactions: Array<{ emoji: string; contactId?: Id<"contacts">; isFromMe: boolean; timestamp: number }>
+): StoredReaction[] {
+  return [...reactions].sort((a, b) => {
+    if (a.timestamp !== b.timestamp) return a.timestamp - b.timestamp;
+    if (a.emoji !== b.emoji) return a.emoji.localeCompare(b.emoji);
+    const aContact = a.contactId ?? "";
+    const bContact = b.contactId ?? "";
+    if (aContact !== bContact) return aContact.localeCompare(bContact);
+    return Number(a.isFromMe) - Number(b.isFromMe);
+  });
+}
+
+function reactionsEqual(
+  existing: Doc<"messages">["reactions"] | undefined,
+  next: StoredReaction[]
+): boolean {
+  const a = sortReactions(existing ?? []);
+  const b = sortReactions(next);
+
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) {
+    if (
+      a[i].emoji !== b[i].emoji ||
+      (a[i].contactId ?? undefined) !== (b[i].contactId ?? undefined) ||
+      a[i].isFromMe !== b[i].isFromMe ||
+      a[i].timestamp !== b[i].timestamp
+    ) {
+      return false;
+    }
+  }
+  return true;
+}
+
+type ReactionIdentityInput = Pick<
+  StoredReaction,
+  "emoji" | "contactId" | "isFromMe" | "timestamp"
+>;
+
+function reactionIdentity(reaction: ReactionIdentityInput): string {
+  return `${reaction.emoji}:${reaction.contactId ?? ""}:${Number(reaction.isFromMe)}:${reaction.timestamp}`;
+}
+
+function hasNewRecentUserReaction(
+  existing: Doc<"messages">["reactions"] | undefined,
+  next: StoredReaction[],
+  cutoff: number
+): boolean {
+  const existingFromMe = new Set(
+    (existing ?? [])
+      .filter((reaction) => reaction.isFromMe)
+      .map((reaction) => reactionIdentity(reaction))
+  );
+
+  return next.some(
+    (reaction) =>
+      reaction.isFromMe &&
+      reaction.timestamp >= cutoff &&
+      !existingFromMe.has(reactionIdentity(reaction))
+  );
+}
+
+async function mapReactionsForStorage(
+  ctx: MutationCtx,
+  userId: Id<"users">,
+  reactions: MessageInput["reactions"],
+  handleToContact: Map<string, Id<"contacts">>
+): Promise<StoredReaction[] | undefined> {
+  if (!reactions) return undefined;
+
+  const mapped: StoredReaction[] = [];
+  for (const reaction of reactions) {
+    let contactId: Id<"contacts"> | undefined;
+
+    if (!reaction.isFromMe && reaction.reactorIdentifier.trim().length > 0) {
+      const normalizedHandle = normalizeHandle(reaction.reactorIdentifier);
+      contactId = handleToContact.get(normalizedHandle);
+      if (!contactId) {
+        const handleType = getHandleType(reaction.reactorIdentifier);
+        const result = await getOrCreateContact(ctx, userId, "imessage", [
+          { value: reaction.reactorIdentifier, type: handleType },
+        ]);
+        if (result) {
+          contactId = result.contactId;
+          handleToContact.set(normalizedHandle, contactId);
+        }
+      }
+    }
+
+    mapped.push({
+      emoji: reaction.emoji,
+      contactId,
+      isFromMe: reaction.isFromMe,
+      timestamp: reaction.timestamp * 1000,
+    });
+  }
+
+  return sortReactions(mapped);
+}
+
 function isUrnIdentifier(identifier: string): boolean {
   return identifier.trim().toLowerCase().startsWith("urn:");
 }
@@ -77,7 +193,6 @@ function getHandleType(identifier: string): "phone" | "email" | "urn" {
   if (identifier.includes("@")) return "email";
   return "phone";
 }
-
 
 function isBusinessChat(chat: ChatInput): boolean {
   if (isBusinessUrn(chat.identifier)) return true;
@@ -130,8 +245,8 @@ export async function syncMessagesInternal(
     "imessage",
     messageIds,
   );
-  const existingMessageSet = new Set(
-    existingMessages.map((m) => m.platformMessageId),
+  const existingMessageMap = new Map(
+    existingMessages.map((m) => [m.platformMessageId, m]),
   );
 
   // OPTIMIZATION 3: Batch lookup handles → contacts for all senders
@@ -139,6 +254,11 @@ export async function syncMessagesInternal(
   for (const msg of batch.messages) {
     if (!msg.isFromMe && msg.sender) {
       uniqueHandles.add(normalizeHandle(msg.sender.identifier));
+    }
+    for (const reaction of msg.reactions ?? []) {
+      if (!reaction.isFromMe && reaction.reactorIdentifier.trim().length > 0) {
+        uniqueHandles.add(normalizeHandle(reaction.reactorIdentifier));
+      }
     }
   }
   for (const chat of batch.chats) {
@@ -300,15 +420,15 @@ export async function syncMessagesInternal(
     senderContactId: Id<"contacts"> | undefined;
     isFromMe: boolean;
     platformMessageId: string;
+    reactions: StoredReaction[] | undefined;
   }> = [];
+
+  const cutoff = Date.now() - SEVEN_DAYS_MS;
+  const incomingConvos = new Set<Id<"conversations">>();
+  const outgoingConvos = new Set<Id<"conversations">>();
 
   for (const message of batch.messages) {
     const platformMessageId = String(message.id);
-
-    // Skip if already exists
-    if (existingMessageSet.has(platformMessageId)) {
-      continue;
-    }
 
     const conversationId = chatIdMap.get(message.chatId);
     if (!conversationId) {
@@ -320,6 +440,26 @@ export async function syncMessagesInternal(
           "conversation not found",
         ),
       );
+      continue;
+    }
+
+    const mappedReactions = await mapReactionsForStorage(
+      ctx,
+      userId,
+      message.reactions,
+      handleToContact,
+    );
+
+    const existingMessage = existingMessageMap.get(platformMessageId);
+    if (existingMessage) {
+      if (mappedReactions && !reactionsEqual(existingMessage.reactions, mappedReactions)) {
+        if (hasNewRecentUserReaction(existingMessage.reactions, mappedReactions, cutoff)) {
+          outgoingConvos.add(conversationId);
+        }
+        await ctx.db.patch(existingMessage._id, {
+          reactions: mappedReactions.length > 0 ? mappedReactions : [],
+        });
+      }
       continue;
     }
 
@@ -344,6 +484,7 @@ export async function syncMessagesInternal(
       senderContactId,
       isFromMe: message.isFromMe,
       platformMessageId,
+      reactions: mappedReactions && mappedReactions.length > 0 ? mappedReactions : undefined,
     });
 
     // Track latest message per conversation for lastMessage update
@@ -355,6 +496,7 @@ export async function syncMessagesInternal(
         timestamp: messageTimestampMs,
       });
     }
+
   }
 
   // Recompute conversation updates from inserted timestamps after queue bridge.
@@ -417,11 +559,7 @@ export async function syncMessagesInternal(
     }
   }
 
-  // Schedule action analysis for new messages (event-driven)
-  const cutoff = Date.now() - SEVEN_DAYS_MS;
-  const incomingConvos = new Set<Id<"conversations">>();
-  const outgoingConvos = new Set<Id<"conversations">>();
-
+  // Schedule action analysis/completion events.
   for (const msg of analysisCandidates) {
     if (msg.sentAt < cutoff) continue;
     if (msg.isFromMe) {
@@ -430,7 +568,6 @@ export async function syncMessagesInternal(
       incomingConvos.add(msg.conversationId);
     }
   }
-
   await scheduleIncomingMessageEvents(ctx, userId, incomingConvos, "imessage");
   await scheduleOutgoingMessageEvents(ctx, userId, outgoingConvos);
 

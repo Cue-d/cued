@@ -23,6 +23,12 @@ export interface MessageContext {
   content: string;
   isFromMe: boolean;
   senderName?: string;
+  reactions?: Array<{
+    emoji: string;
+    isFromMe: boolean;
+    timestamp: number;
+    reactorName?: string;
+  }>;
 }
 
 /**
@@ -50,7 +56,16 @@ export interface EmbeddingMetadata {
  * - "Multi-person group chats" where user often doesn't respond
  */
 export function buildEmbeddingInput(
-  triggerMessage: { content: string; senderName?: string },
+  triggerMessage: {
+    content: string;
+    senderName?: string;
+    reactions?: Array<{
+      emoji: string;
+      isFromMe: boolean;
+      timestamp: number;
+      reactorName?: string;
+    }>;
+  },
   contextMessages: MessageContext[],
   platform: string,
   contactName: string,
@@ -83,15 +98,35 @@ export function buildEmbeddingInput(
 
   lines.push("---");
 
+  const formatReactions = (
+    reactions?: Array<{
+      emoji: string;
+      isFromMe: boolean;
+      timestamp: number;
+      reactorName?: string;
+    }>
+  ): string => {
+    if (!reactions || reactions.length === 0) return "";
+
+    const sorted = [...reactions].sort((a, b) => a.timestamp - b.timestamp);
+    const entries = sorted.map((reaction) => {
+      const reactor = reaction.reactorName ?? (reaction.isFromMe ? "Me" : "Unknown");
+      return `${reactor} ${reaction.emoji}`;
+    });
+    return ` (Reactions: ${entries.join(", ")})`;
+  };
+
   // Add context messages (last N messages before trigger)
   for (const msg of contextMessages) {
     const sender = msg.isFromMe ? "Me" : (msg.senderName ?? contactName);
-    lines.push(`${sender}: ${msg.content}`);
+    lines.push(`${sender}: ${msg.content}${formatReactions(msg.reactions)}`);
   }
 
   // Add trigger message
   const triggerSender = triggerMessage.senderName ?? contactName;
-  lines.push(`${triggerSender}: ${triggerMessage.content}`);
+  lines.push(
+    `${triggerSender}: ${triggerMessage.content}${formatReactions(triggerMessage.reactions)}`
+  );
 
   return lines.join("\n");
 }

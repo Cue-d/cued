@@ -24,6 +24,12 @@ interface RecentMessage {
   isFromMe: boolean;
   sentAt: number;
   senderName: string | undefined;
+  reactions?: Array<{
+    emoji: string;
+    isFromMe: boolean;
+    timestamp: number;
+    reactorName?: string;
+  }>;
 }
 
 // ============================================================================
@@ -101,6 +107,25 @@ export const getRecentMessages = internalQuery({
       .order("desc")
       .take(args.limit);
 
+    const reactionContactIds = new Set<Id<"contacts">>();
+    for (const msg of messages) {
+      for (const reaction of msg.reactions ?? []) {
+        if (!reaction.isFromMe && reaction.contactId) {
+          reactionContactIds.add(reaction.contactId);
+        }
+      }
+    }
+
+    const reactionContactNameMap = new Map<Id<"contacts">, string>();
+    await Promise.all(
+      [...reactionContactIds].map(async (contactId) => {
+        const contact = await ctx.db.get(contactId);
+        if (contact?.displayName) {
+          reactionContactNameMap.set(contactId, contact.displayName);
+        }
+      })
+    );
+
     // Get sender contact names for non-user messages
     const enriched = await Promise.all(
       messages.map(async (msg) => {
@@ -115,6 +140,16 @@ export const getRecentMessages = internalQuery({
           isFromMe: msg.isFromMe,
           sentAt: msg.sentAt,
           senderName,
+          reactions: msg.reactions?.map((reaction) => ({
+            emoji: reaction.emoji,
+            isFromMe: reaction.isFromMe,
+            timestamp: reaction.timestamp,
+            reactorName: reaction.isFromMe
+              ? "Me"
+              : reaction.contactId
+                ? reactionContactNameMap.get(reaction.contactId)
+                : undefined,
+          })),
         };
       })
     );
@@ -423,6 +458,7 @@ export const analyzeConversation = internalAction({
             isFromMe: m.isFromMe,
             sentAt: m.sentAt,
             senderName: m.senderName,
+            reactions: m.reactions,
           })),
           conversation: {
             platform: conversation.platform,
@@ -549,4 +585,3 @@ export const analyzeConversation = internalAction({
     }
   },
 });
-

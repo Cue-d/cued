@@ -19,6 +19,7 @@ import {
   createTestContactHandleData,
   createTestConversationData,
   createTestMessageData,
+  createTestActionData,
   createTestIdentity,
   createTestIntegrationData,
 } from "./helpers.util";
@@ -595,6 +596,429 @@ describe("sync", () => {
       expect(handles[0].handleType).toBe("email");
     });
 
+    it("patches reactions on existing messages and supports reaction removals", async () => {
+      const t = trackTest(convexTest(schema, modules));
+      const { asUser, userId } = await setupAuthenticatedUser(t);
+
+      const nowSeconds = Math.floor(Date.now() / 1000);
+      const chat = {
+        id: 1,
+        identifier: "chat_1",
+        displayName: null,
+        isGroup: false,
+        participants: [{ id: 1, identifier: "+15551234567", service: "iMessage" }],
+      };
+      const handle = { id: 1, identifier: "+15551234567", service: "iMessage" };
+
+      await asUser.mutation(api.sync.syncMessages, {
+        batch: {
+          cursor: 100,
+          chats: [chat],
+          messages: [
+            {
+              id: 99,
+              guid: "message-guid-99",
+              chatId: 1,
+              text: "Message with reactions",
+              timestamp: nowSeconds,
+              isFromMe: false,
+              isRead: true,
+              readAt: null,
+              hasAttachments: false,
+              sender: handle,
+              reactions: [
+                {
+                  emoji: "👍",
+                  reactorIdentifier: "+15551234567",
+                  isFromMe: false,
+                  timestamp: nowSeconds,
+                },
+              ],
+            },
+          ],
+          handles: [handle],
+        },
+      });
+
+      const inserted = await t.run(async (ctx) => {
+        return ctx.db
+          .query("messages")
+          .withIndex("by_user", (q) => q.eq("userId", userId))
+          .collect();
+      });
+      expect(inserted).toHaveLength(1);
+      expect(inserted[0].reactions?.map((r) => r.emoji)).toEqual(["👍"]);
+
+      const updateResult = await asUser.mutation(api.sync.syncMessages, {
+        batch: {
+          cursor: 101,
+          chats: [chat],
+          messages: [
+            {
+              id: 99,
+              guid: "message-guid-99",
+              chatId: 1,
+              text: "Message with reactions",
+              timestamp: nowSeconds,
+              isFromMe: false,
+              isRead: true,
+              readAt: null,
+              hasAttachments: false,
+              sender: handle,
+              reactions: [],
+            },
+          ],
+          handles: [handle],
+        },
+      });
+
+      expect(updateResult.messagesCount).toBe(0);
+
+      const updated = await t.run(async (ctx) => {
+        return ctx.db
+          .query("messages")
+          .withIndex("by_user", (q) => q.eq("userId", userId))
+          .collect();
+      });
+      expect(updated).toHaveLength(1);
+      expect(updated[0].reactions).toEqual([]);
+    });
+
+    it("auto-completes pending actions when user reaction is synced", async () => {
+      const t = trackTest(convexTest(schema, modules));
+      const { asUser, userId } = await setupAuthenticatedUser(t);
+
+      const oldTimestampSeconds = Math.floor(
+        (Date.now() - 8 * 24 * 60 * 60 * 1000) / 1000,
+      );
+      const nowSeconds = Math.floor(Date.now() / 1000);
+      const chat = {
+        id: 1,
+        identifier: "chat_1",
+        displayName: null,
+        isGroup: false,
+        participants: [{ id: 1, identifier: "+15551234567", service: "iMessage" }],
+      };
+      const handle = { id: 1, identifier: "+15551234567", service: "iMessage" };
+
+      await asUser.mutation(api.sync.syncMessages, {
+        batch: {
+          cursor: 100,
+          chats: [chat],
+          messages: [
+            {
+              id: 321,
+              guid: "message-guid-321",
+              chatId: 1,
+              text: "Need to follow up",
+              timestamp: oldTimestampSeconds,
+              isFromMe: false,
+              isRead: true,
+              readAt: null,
+              hasAttachments: false,
+              sender: handle,
+              reactions: [],
+            },
+          ],
+          handles: [handle],
+        },
+      });
+
+      const { conversationId, actionId } = await t.run(async (ctx) => {
+        const conversation = await ctx.db
+          .query("conversations")
+          .withIndex("by_user", (q) => q.eq("userId", userId))
+          .first();
+        if (!conversation) throw new Error("Expected conversation");
+
+        const actionId = await ctx.db.insert(
+          "actions",
+          createTestActionData(userId, {
+            status: "pending",
+            conversationId: conversation._id,
+            platform: "imessage",
+          }),
+        );
+
+        await ctx.db.patch(userId, { pendingActionCount: 1 });
+        return { conversationId: conversation._id, actionId };
+      });
+
+      const updateResult = await asUser.mutation(api.sync.syncMessages, {
+        batch: {
+          cursor: 101,
+          chats: [chat],
+          messages: [
+            {
+              id: 321,
+              guid: "message-guid-321",
+              chatId: 1,
+              text: "Need to follow up",
+              timestamp: oldTimestampSeconds,
+              isFromMe: false,
+              isRead: true,
+              readAt: null,
+              hasAttachments: false,
+              sender: handle,
+              reactions: [
+                {
+                  emoji: "❤️",
+                  reactorIdentifier: "",
+                  isFromMe: true,
+                  timestamp: nowSeconds,
+                },
+              ],
+            },
+          ],
+          handles: [handle],
+        },
+      });
+
+      expect(updateResult.messagesCount).toBe(0);
+
+      await t.finishAllScheduledFunctions(() => vi.runOnlyPendingTimers());
+
+      await t.run(async (ctx) => {
+        const updatedAction = await ctx.db.get(actionId);
+        expect(updatedAction?.status).toBe("completed");
+        expect(updatedAction?.completedAt).toBeTruthy();
+
+        const updatedUser = await ctx.db.get(userId);
+        expect(updatedUser?.pendingActionCount).toBe(0);
+
+        const latestMessage = await ctx.db
+          .query("messages")
+          .withIndex("by_platform_message", (q) =>
+            q.eq("userId", userId).eq("platform", "imessage").eq("platformMessageId", "321"),
+          )
+          .unique();
+        expect(latestMessage?.conversationId).toBe(conversationId);
+        expect(latestMessage?.reactions?.some((r) => r.isFromMe)).toBe(true);
+      });
+    });
+
+    it("does not auto-complete pending actions for non-user reactions", async () => {
+      const t = trackTest(convexTest(schema, modules));
+      const { asUser, userId } = await setupAuthenticatedUser(t);
+
+      const oldTimestampSeconds = Math.floor(
+        (Date.now() - 8 * 24 * 60 * 60 * 1000) / 1000,
+      );
+      const nowSeconds = Math.floor(Date.now() / 1000);
+      const chat = {
+        id: 1,
+        identifier: "chat_1",
+        displayName: null,
+        isGroup: false,
+        participants: [{ id: 1, identifier: "+15551234567", service: "iMessage" }],
+      };
+      const handle = { id: 1, identifier: "+15551234567", service: "iMessage" };
+
+      await asUser.mutation(api.sync.syncMessages, {
+        batch: {
+          cursor: 100,
+          chats: [chat],
+          messages: [
+            {
+              id: 322,
+              guid: "message-guid-322",
+              chatId: 1,
+              text: "Need to follow up",
+              timestamp: oldTimestampSeconds,
+              isFromMe: false,
+              isRead: true,
+              readAt: null,
+              hasAttachments: false,
+              sender: handle,
+              reactions: [],
+            },
+          ],
+          handles: [handle],
+        },
+      });
+
+      const actionId = await t.run(async (ctx) => {
+        const conversation = await ctx.db
+          .query("conversations")
+          .withIndex("by_user", (q) => q.eq("userId", userId))
+          .first();
+        if (!conversation) throw new Error("Expected conversation");
+
+        const pendingActionId = await ctx.db.insert(
+          "actions",
+          createTestActionData(userId, {
+            status: "pending",
+            conversationId: conversation._id,
+            platform: "imessage",
+          }),
+        );
+
+        await ctx.db.patch(userId, { pendingActionCount: 1 });
+        return pendingActionId;
+      });
+
+      const updateResult = await asUser.mutation(api.sync.syncMessages, {
+        batch: {
+          cursor: 101,
+          chats: [chat],
+          messages: [
+            {
+              id: 322,
+              guid: "message-guid-322",
+              chatId: 1,
+              text: "Need to follow up",
+              timestamp: oldTimestampSeconds,
+              isFromMe: false,
+              isRead: true,
+              readAt: null,
+              hasAttachments: false,
+              sender: handle,
+              reactions: [
+                {
+                  emoji: "❤️",
+                  reactorIdentifier: "+15551234567",
+                  isFromMe: false,
+                  timestamp: nowSeconds,
+                },
+              ],
+            },
+          ],
+          handles: [handle],
+        },
+      });
+
+      expect(updateResult.messagesCount).toBe(0);
+
+      await t.finishAllScheduledFunctions(() => vi.runOnlyPendingTimers());
+
+      await t.run(async (ctx) => {
+        const updatedAction = await ctx.db.get(actionId);
+        expect(updatedAction?.status).toBe("pending");
+
+        const updatedUser = await ctx.db.get(userId);
+        expect(updatedUser?.pendingActionCount).toBe(1);
+      });
+    });
+
+    it("does not auto-complete pending actions for unchanged user reactions", async () => {
+      const t = trackTest(convexTest(schema, modules));
+      const { asUser, userId } = await setupAuthenticatedUser(t);
+
+      const oldTimestampSeconds = Math.floor(
+        (Date.now() - 8 * 24 * 60 * 60 * 1000) / 1000,
+      );
+      const existingReactionSeconds = Math.floor(
+        (Date.now() - 3 * 24 * 60 * 60 * 1000) / 1000,
+      );
+      const nowSeconds = Math.floor(Date.now() / 1000);
+      const chat = {
+        id: 1,
+        identifier: "chat_1",
+        displayName: null,
+        isGroup: false,
+        participants: [{ id: 1, identifier: "+15551234567", service: "iMessage" }],
+      };
+      const handle = { id: 1, identifier: "+15551234567", service: "iMessage" };
+
+      await asUser.mutation(api.sync.syncMessages, {
+        batch: {
+          cursor: 100,
+          chats: [chat],
+          messages: [
+            {
+              id: 323,
+              guid: "message-guid-323",
+              chatId: 1,
+              text: "Need to follow up",
+              timestamp: oldTimestampSeconds,
+              isFromMe: false,
+              isRead: true,
+              readAt: null,
+              hasAttachments: false,
+              sender: handle,
+              reactions: [
+                {
+                  emoji: "❤️",
+                  reactorIdentifier: "",
+                  isFromMe: true,
+                  timestamp: existingReactionSeconds,
+                },
+              ],
+            },
+          ],
+          handles: [handle],
+        },
+      });
+
+      const actionId = await t.run(async (ctx) => {
+        const conversation = await ctx.db
+          .query("conversations")
+          .withIndex("by_user", (q) => q.eq("userId", userId))
+          .first();
+        if (!conversation) throw new Error("Expected conversation");
+
+        const pendingActionId = await ctx.db.insert(
+          "actions",
+          createTestActionData(userId, {
+            status: "pending",
+            conversationId: conversation._id,
+            platform: "imessage",
+          }),
+        );
+
+        await ctx.db.patch(userId, { pendingActionCount: 1 });
+        return pendingActionId;
+      });
+
+      const updateResult = await asUser.mutation(api.sync.syncMessages, {
+        batch: {
+          cursor: 101,
+          chats: [chat],
+          messages: [
+            {
+              id: 323,
+              guid: "message-guid-323",
+              chatId: 1,
+              text: "Need to follow up",
+              timestamp: oldTimestampSeconds,
+              isFromMe: false,
+              isRead: true,
+              readAt: null,
+              hasAttachments: false,
+              sender: handle,
+              reactions: [
+                {
+                  emoji: "❤️",
+                  reactorIdentifier: "",
+                  isFromMe: true,
+                  timestamp: existingReactionSeconds,
+                },
+                {
+                  emoji: "😂",
+                  reactorIdentifier: "+15551234567",
+                  isFromMe: false,
+                  timestamp: nowSeconds,
+                },
+              ],
+            },
+          ],
+          handles: [handle],
+        },
+      });
+
+      expect(updateResult.messagesCount).toBe(0);
+
+      await t.finishAllScheduledFunctions(() => vi.runOnlyPendingTimers());
+
+      await t.run(async (ctx) => {
+        const updatedAction = await ctx.db.get(actionId);
+        expect(updatedAction?.status).toBe("pending");
+
+        const updatedUser = await ctx.db.get(userId);
+        expect(updatedUser?.pendingActionCount).toBe(1);
+      });
+    });
+
     it("preserves business URNs and uses chat displayName for business DMs", async () => {
       const t = trackTest(convexTest(schema, modules));
       const { asUser, userId } = await setupAuthenticatedUser(t);
@@ -716,9 +1140,7 @@ describe("sync", () => {
               identifier: businessUrn,
               displayName: "Partiful",
               isGroup: false,
-              participants: [
-                { id: 1, identifier: businessUrn, service: "iMessage" },
-              ],
+              participants: [{ id: 1, identifier: businessUrn, service: "iMessage" }],
             },
           ],
           messages: [],

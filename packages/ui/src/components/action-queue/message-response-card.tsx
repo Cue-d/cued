@@ -154,6 +154,7 @@ export const MessageResponseCard = React.forwardRef<
         _id: msg.senderContactId ?? msg._id,
         displayName: msg.senderName,
       } : null,
+      reactions: msg.reactions ?? null,
       status: msg.status,
     })),
     [sortedMessages, platform]

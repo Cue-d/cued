@@ -349,7 +349,8 @@ describe.skipIf(!Database)("ChatDb SQL queries", () => {
         m.date
       FROM message m
       LEFT JOIN handle h ON h.ROWID = m.handle_id
-      WHERE m.associated_message_type BETWEEN 2000 AND 2005
+      WHERE m.associated_message_type BETWEEN 2000 AND 3007
+      ORDER BY m.ROWID
     `;
 
     it("extracts target GUID from associated_message_guid", () => {
@@ -404,12 +405,12 @@ describe.skipIf(!Database)("ChatDb SQL queries", () => {
       const allRows = db.prepare(SQL_GET_MESSAGES_SINCE).all(0) as AllRow[];
       expect(allRows).toHaveLength(2);
 
-      // Filter out tapbacks (type 2000-3005 are tapbacks)
+      // Filter out tapbacks (type 2000-3007 are tapbacks)
       const contentRows = allRows.filter(
         (row) =>
           row.associated_message_type === 0 ||
           row.associated_message_type < 2000 ||
-          row.associated_message_type > 3005
+          row.associated_message_type > 3007
       );
       expect(contentRows).toHaveLength(1);
       expect(contentRows[0].rowid).toBe(1);
@@ -432,6 +433,35 @@ describe.skipIf(!Database)("ChatDb SQL queries", () => {
       expect(TAPBACK_TYPE_TO_EMOJI[2003]).toBe("😂");
       expect(TAPBACK_TYPE_TO_EMOJI[2004]).toBe("‼️");
       expect(TAPBACK_TYPE_TO_EMOJI[2005]).toBe("❓");
+    });
+
+    it("includes add and removal tapbacks in row order for reconciliation", () => {
+      const appleNow = unixToApple(Math.floor(Date.now() / 1000));
+
+      db.exec(`
+        INSERT INTO message (ROWID, guid, text, date, is_from_me, handle_id, associated_message_guid, associated_message_type)
+        VALUES (1, 'target-guid', 'Original message', ${appleNow - 3000000000000}, 0, 1, NULL, 0);
+
+        INSERT INTO message (ROWID, guid, text, date, is_from_me, handle_id, associated_message_guid, associated_message_type)
+        VALUES (2, 'reaction-add', NULL, ${appleNow - 2000000000000}, 0, 2, 'p:0/target-guid', 2001);
+
+        INSERT INTO message (ROWID, guid, text, date, is_from_me, handle_id, associated_message_guid, associated_message_type)
+        VALUES (3, 'reaction-remove', NULL, ${appleNow - 1000000000000}, 0, 2, 'p:0/target-guid', 3001);
+
+        INSERT INTO chat_message_join (chat_id, message_id) VALUES (1, 1);
+        INSERT INTO chat_message_join (chat_id, message_id) VALUES (1, 2);
+        INSERT INTO chat_message_join (chat_id, message_id) VALUES (1, 3);
+      `);
+
+      interface ReactionRow {
+        rowid: number;
+        associated_message_type: number;
+      }
+      const rows = db.prepare(SQL_GET_REACTIONS).all() as ReactionRow[];
+
+      expect(rows).toHaveLength(2);
+      expect(rows[0]).toMatchObject({ rowid: 2, associated_message_type: 2001 });
+      expect(rows[1]).toMatchObject({ rowid: 3, associated_message_type: 3001 });
     });
   });
 
@@ -570,11 +600,11 @@ describe.skipIf(!Database)("ChatDb SQL queries", () => {
       const allRows = db.prepare(SQL_GET_MESSAGES_DESC).all(3, 0, 100) as MessageRow[];
       expect(allRows).toHaveLength(3);
 
-      // Filter out tapbacks (type 2000-3005)
+      // Filter out tapbacks (type 2000-3007)
       const contentRows = allRows.filter(
         (row) =>
           row.associated_message_type < 2000 ||
-          row.associated_message_type > 3005
+          row.associated_message_type > 3007
       );
       expect(contentRows).toHaveLength(2);
       // DESC order: ROWID 3 first, ROWID 1 second

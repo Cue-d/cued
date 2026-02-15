@@ -1,6 +1,6 @@
 import { cn } from "../../lib/utils"
 import type { InboxMessage } from "./message-types"
-import { DeliveryStatus } from "../action-queue/message-response-card/message-bubble"
+import { DeliveryStatus, ReactionBadges } from "../action-queue/message-response-card/message-bubble"
 import type React from "react"
 import { formatTime } from "@cued/shared"
 
@@ -30,12 +30,14 @@ export function InboxMessageBubble({
   const senderName = message.sender?.displayName
   const senderId = message.sender?._id
   const hasContent = message.content.trim().length > 0
+  const hasReactions = (message.reactions?.length ?? 0) > 0
 
   return (
     <div
       className={cn(
         "flex flex-col group",
         message.isFromMe ? "items-end" : "items-start",
+        hasReactions && "mb-2",
         SPACING_CLASSES[spacing]
       )}
     >
@@ -60,12 +62,15 @@ export function InboxMessageBubble({
       {hasContent && (
         <div
           className={cn(
-            "max-w-[75%] px-4 py-2.5 rounded-[8px] wrap-break-words transition-all duration-200",
+            "relative max-w-[75%] px-4 py-2.5 rounded-[8px] wrap-break-words transition-all duration-200",
             message.isFromMe
               ? "bg-primary text-primary-foreground"
               : "bg-background text-foreground shadow-minimal"
           )}
         >
+          {hasReactions && message.reactions && (
+            <ReactionBadges reactions={message.reactions} isSent={message.isFromMe} />
+          )}
           <p className="text-[15px] leading-relaxed whitespace-pre-wrap">
             {message.content}
           </p>

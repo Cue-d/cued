@@ -106,6 +106,37 @@ describe("generateAction", () => {
     expect(prompt.prompt).toContain("can you send me that report");
   });
 
+  it("includes reaction context with reactor names in prompt", async () => {
+    mockGenerateText.mockResolvedValueOnce(
+      mockObjectResponse({ shouldCreateAction: false }) as never
+    );
+
+    await generateAction({
+      ...baseInput,
+      messages: [
+        {
+          content: "Hey, can you send me that report?",
+          isFromMe: false,
+          sentAt: Date.now() - 3600000,
+          senderName: "John Doe",
+          reactions: [
+            {
+              emoji: "❤️",
+              isFromMe: false,
+              timestamp: Date.now() - 200000,
+              reactorName: "John Doe",
+            },
+          ],
+        },
+      ],
+    });
+
+    const call = mockGenerateText.mock.calls[0];
+    const prompt = (call as unknown[])[0] as { prompt: string };
+
+    expect(prompt.prompt).toContain("Reactions: John Doe ❤️");
+  });
+
   it("includes recent actions in context when provided", async () => {
     mockGenerateText.mockResolvedValueOnce(
       mockObjectResponse({ shouldCreateAction: false }) as never
@@ -201,6 +232,27 @@ describe("generateAction", () => {
     });
 
     expect(mockGenerateText).toHaveBeenCalledOnce();
+  });
+
+  it("skips LLM when user reacted to latest incoming message", async () => {
+    const result = await generateAction({
+      ...baseInput,
+      messages: [
+        {
+          content: "Can you review this?",
+          isFromMe: false,
+          sentAt: Date.now() - 3600000,
+          senderName: "John Doe",
+          reactions: [
+            { emoji: "👍", isFromMe: true, timestamp: Date.now() - 120000, reactorName: "Me" },
+          ],
+        },
+      ],
+    });
+
+    expect(result.shouldCreateAction).toBe(false);
+    expect(result.reason).toContain("User reacted to the latest incoming message");
+    expect(mockGenerateText).not.toHaveBeenCalled();
   });
 
   it("handles LLM returning no action needed", async () => {

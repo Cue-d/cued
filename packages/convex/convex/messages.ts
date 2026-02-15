@@ -501,6 +501,7 @@ export const getMessages = query({
       isFromMe: boolean;
       platform: Doc<"messages">["platform"];
       status?: string | null;
+      reactions: string[] | null;
       sender: { _id: Id<"contacts">; displayName: string } | null;
     };
 
@@ -537,6 +538,7 @@ export const getMessages = query({
         sender: sender
           ? { _id: sender._id, displayName: sender.displayName }
           : null,
+        reactions: message.reactions?.map((reaction) => reaction.emoji) ?? null,
       };
     });
 

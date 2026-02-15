@@ -17,6 +17,7 @@ export interface InboxMessage {
   isFromMe: boolean
   platform: InboxPlatform
   sender: InboxMessageSender | null
+  reactions: string[] | null
   status?: string | null
 }
 

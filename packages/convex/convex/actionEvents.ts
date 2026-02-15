@@ -224,6 +224,7 @@ export const onIncomingMessage = internalAction({
           isFromMe: m.isFromMe,
           sentAt: m.sentAt,
           senderName: m.senderName,
+          reactions: m.reactions,
         })),
         conversation: {
           platform: conversation.platform,
@@ -475,13 +476,14 @@ export const onIncomingMessageBatch = internalAction({
         internal.embeddings.processMessagesForEmbedding,
         {
           userId: args.userId,
-          messages: messages.map((m) => ({
-            _id: m._id,
-            content: m.content,
-            isFromMe: m.isFromMe,
-            sentAt: m.sentAt,
-            senderName: m.senderName,
-          })),
+        messages: messages.map((m) => ({
+          _id: m._id,
+          content: m.content,
+          isFromMe: m.isFromMe,
+          sentAt: m.sentAt,
+          senderName: m.senderName,
+          reactions: m.reactions,
+        })),
           conversation: {
             platform: conversation.platform,
             conversationType: conversation.conversationType,

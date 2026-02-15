@@ -437,7 +437,7 @@ export class IMessageSyncManager {
       let tempUpperBound = currentUpperBound;
       for (let i = 0; i < CONCURRENT_BATCHES && tempUpperBound > cursor; i++) {
         const batch = chatDb.buildSyncBatchDescending(tempUpperBound, cursor, BATCH_SIZE);
-        if (batch.messages.length === 0) break;
+        if (batch.cursor >= tempUpperBound) break;
 
         batchNumber++;
         batchesToProcess.push({ batch, batchNum: batchNumber });
@@ -573,10 +573,8 @@ export class IMessageSyncManager {
       ...batch,
       messages: batch.messages.map(
         ({
-          guid,
           status,
           errorCode,
-          reactions,
           ...rest
         }) => rest
       ),
