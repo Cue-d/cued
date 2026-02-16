@@ -46,6 +46,19 @@ describe("ContactListItem", () => {
       expect(screen.getByText("JD")).toBeDefined();
     });
 
+    it("prefers avatar image over initials when avatarUrl is present", () => {
+      render(
+        <ContactListItem
+          contact={{
+            ...defaultContact,
+            avatarUrl: "https://example.com/avatar.jpg",
+          }}
+        />,
+      );
+
+      expect(screen.queryByText("JD")).toBeNull();
+    });
+
     it("renders company when provided", () => {
       render(<ContactListItem contact={defaultContact} />);
 

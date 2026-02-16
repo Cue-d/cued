@@ -37,6 +37,7 @@ function mapContact(contact: {
   _id: string;
   displayName: string;
   company?: string | null;
+  avatarUrl?: string;
   handles?: { type: string; value: string; platform: string }[];
 }): ContactListItemData {
   const phoneHandle = contact.handles?.find((h) => h.type === "phone");
@@ -47,6 +48,7 @@ function mapContact(contact: {
     id: contact._id,
     displayName: contact.displayName,
     company: contact.company,
+    avatarUrl: contact.avatarUrl,
     phoneNumber: phoneHandle?.value,
     email: emailHandle?.value,
     platforms,

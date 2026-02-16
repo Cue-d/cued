@@ -101,6 +101,7 @@ export const linkedInMessageInput = v.object({
   deliveredAt: v.number(), // Unix ms
   senderURN: v.string(),
   senderProfileUrl: v.optional(v.string()), // Profile URL if available
+  senderPictureUrl: v.optional(v.string()), // Avatar URL if available
   senderFirstName: v.string(),
   senderLastName: v.string(),
   messageBodyRenderFormat: v.union(
@@ -379,6 +380,7 @@ export async function syncLinkedInMessagesInternal(
             msg.senderFirstName,
             msg.senderLastName,
             msg.senderProfileUrl,
+            msg.senderPictureUrl,
           );
 
           // Track for action analysis if recent incoming
@@ -512,6 +514,7 @@ async function getOrCreateLinkedInContactInternal(
   firstName: string,
   lastName: string,
   profileUrl?: string,
+  pictureUrl?: string,
   fallbackName?: string,
 ): Promise<Id<"contacts">> {
   const normalizedURN = normalizeMemberURN(urn).toLowerCase();
@@ -534,6 +537,14 @@ async function getOrCreateLinkedInContactInternal(
     "linkedin",
     handles,
     displayName,
+    {
+      avatar: pictureUrl
+        ? {
+            url: pictureUrl,
+            sourcePlatform: "linkedin",
+          }
+        : undefined,
+    },
   );
   if (!result) {
     throw new Error(`Failed to create LinkedIn contact for ${displayName}`);
@@ -556,6 +567,7 @@ async function getOrCreateLinkedInContact(
     participant.firstName,
     participant.lastName,
     participant.profileUrl,
+    participant.pictureUrl,
   );
 }
 
@@ -569,6 +581,7 @@ async function getOrCreateLinkedInContactByURN(
   firstName: string,
   lastName: string,
   profileUrl?: string,
+  pictureUrl?: string,
 ): Promise<Id<"contacts">> {
   return getOrCreateLinkedInContactInternal(
     ctx,
@@ -577,6 +590,7 @@ async function getOrCreateLinkedInContactByURN(
     firstName,
     lastName,
     profileUrl,
+    pictureUrl,
     senderURN, // Fallback to URN if no name
   );
 }

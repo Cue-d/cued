@@ -239,6 +239,65 @@ export interface GetOrCreateContactResult {
   created: boolean;
 }
 
+export type ContactAvatarSourcePlatform =
+  | "linkedin"
+  | "twitter"
+  | "slack"
+  | "imessage"
+  | "signal";
+
+export interface ContactAvatarInput {
+  url: string;
+  sourcePlatform: ContactAvatarSourcePlatform;
+  updatedAt?: number;
+}
+
+const AVATAR_SOURCE_PRIORITY: Record<ContactAvatarSourcePlatform, number> = {
+  linkedin: 50,
+  twitter: 40,
+  slack: 30,
+  signal: 20,
+  imessage: 10,
+};
+
+function normalizeAvatarUrl(url: string | undefined): string | undefined {
+  if (!url) return undefined;
+  const trimmed = url.trim();
+  return trimmed.length > 0 ? trimmed : undefined;
+}
+
+export function buildContactAvatarPatch(
+  existing: Doc<"contacts">,
+  incoming?: ContactAvatarInput,
+): Partial<Doc<"contacts">> | null {
+  const nextUrl = normalizeAvatarUrl(incoming?.url);
+  if (!nextUrl || !incoming) {
+    return null;
+  }
+
+  const currentUrl = normalizeAvatarUrl(existing.avatarUrl);
+  const currentSource = existing.avatarSourcePlatform;
+  const incomingPriority = AVATAR_SOURCE_PRIORITY[incoming.sourcePlatform];
+  const currentPriority = currentSource
+    ? AVATAR_SOURCE_PRIORITY[currentSource]
+    : 0;
+
+  const shouldUpdate =
+    !currentUrl ||
+    currentUrl !== nextUrl ||
+    incomingPriority > currentPriority;
+
+  if (!shouldUpdate) {
+    return null;
+  }
+
+  return {
+    avatarUrl: nextUrl,
+    avatarSourcePlatform: incoming.sourcePlatform,
+    avatarUpdatedAt: incoming.updatedAt ?? Date.now(),
+  };
+}
+
 /**
  * Unified contact resolution: find or create a contact by handles.
  * Works across all platforms with consistent behavior:
@@ -260,7 +319,7 @@ export async function getOrCreateContact(
   platform: "imessage" | "slack" | "linkedin" | "twitter" | "signal",
   handles: ContactHandleInput[],
   displayName?: string,
-  metadata?: { company?: string; notes?: string },
+  metadata?: { company?: string; notes?: string; avatar?: ContactAvatarInput },
 ): Promise<GetOrCreateContactResult | undefined> {
   if (handles.length === 0) {
     console.warn("[Sync] getOrCreateContact called with no handles");
@@ -308,21 +367,30 @@ export async function getOrCreateContact(
 
       if (existing) {
         // Found existing contact - update displayName if we have a better one
+        const contact = await ctx.db.get(existing.contactId);
+        if (!contact) {
+          continue;
+        }
+
         let displayNameUpdated = false;
+        const contactPatch: Partial<Doc<"contacts">> = {};
+
         if (displayName) {
-          const contact = await ctx.db.get(existing.contactId);
-          if (
-            contact &&
-            shouldUpdateDisplayName(
-              contact.displayName,
-              displayName,
-              handle.normalized,
-            )
-          ) {
-            await ctx.db.patch(existing.contactId, { displayName });
+          if (shouldUpdateDisplayName(contact.displayName, displayName, handle.normalized)) {
+            contactPatch.displayName = displayName;
             displayNameUpdated = true;
           }
         }
+
+        const avatarPatch = buildContactAvatarPatch(contact, metadata?.avatar);
+        if (avatarPatch) {
+          Object.assign(contactPatch, avatarPatch);
+        }
+
+        if (Object.keys(contactPatch).length > 0) {
+          await ctx.db.patch(existing.contactId, contactPatch);
+        }
+
         if (displayNameUpdated) {
           await scheduleContactMergeCheck(ctx, userId, existing.contactId);
         }
@@ -333,11 +401,19 @@ export async function getOrCreateContact(
 
   // No existing contact found - create new one
   const finalDisplayName = displayName || normalizedHandles[0].value;
+  const avatarUrl = normalizeAvatarUrl(metadata?.avatar?.url);
   const contactId = await ctx.db.insert("contacts", {
     userId,
     displayName: finalDisplayName,
     company: metadata?.company,
     notes: metadata?.notes,
+    avatarUrl,
+    avatarSourcePlatform: avatarUrl
+      ? metadata?.avatar?.sourcePlatform
+      : undefined,
+    avatarUpdatedAt: avatarUrl
+      ? (metadata?.avatar?.updatedAt ?? Date.now())
+      : undefined,
   });
 
   // Create all handles

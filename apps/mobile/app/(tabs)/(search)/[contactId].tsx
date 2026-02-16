@@ -2,9 +2,11 @@
  * Contact detail screen - displays full contact profile.
  */
 
+import { useEffect, useState } from "react";
 import { View, Text, ScrollView, Pressable, PlatformColor } from "react-native";
 import { useLocalSearchParams, Stack } from "expo-router";
 import { SymbolView } from "expo-symbols";
+import { Image } from "expo-image";
 import { useQuery } from "convex/react";
 import { api } from "@cued/convex";
 import { getInitials, formatPhoneNumber, PLATFORM_CONFIG, type ActionPlatform } from "@cued/shared";
@@ -13,12 +15,35 @@ import type { Id } from "@cued/convex/convex/_generated/dataModel";
 import type { SFSymbol } from "sf-symbols-typescript";
 
 /** Avatar component */
-function Avatar({ initials }: { initials: string }): React.JSX.Element {
+function Avatar({
+  initials,
+  avatarUrl,
+}: {
+  initials: string;
+  avatarUrl?: string | null;
+}): React.JSX.Element {
+  const [imageFailed, setImageFailed] = useState(false);
+
+  useEffect(() => {
+    setImageFailed(false);
+  }, [avatarUrl]);
+
   return (
     <View className="w-20 h-20 rounded-full bg-muted items-center justify-center">
-      <Text className="text-[28px] font-semibold text-muted-foreground">
-        {initials}
-      </Text>
+      {avatarUrl && !imageFailed ? (
+        <Image
+          source={{ uri: avatarUrl }}
+          style={{ width: 80, height: 80, borderRadius: 40 }}
+          contentFit="cover"
+          cachePolicy="memory-disk"
+          transition={120}
+          onError={() => setImageFailed(true)}
+        />
+      ) : (
+        <Text className="text-[28px] font-semibold text-muted-foreground">
+          {initials}
+        </Text>
+      )}
     </View>
   );
 }
@@ -207,7 +232,10 @@ export default function ContactDetailScreen(): React.JSX.Element {
       >
         {/* Profile Header */}
         <View className="items-center pb-4">
-          <Avatar initials={getInitials(contact.displayName)} />
+          <Avatar
+            initials={getInitials(contact.displayName)}
+            avatarUrl={contact.avatarUrl}
+          />
           <Text style={{ fontSize: 24, fontWeight: "700", color: PlatformColor("label"), marginTop: 16 }}>
             {contact.displayName}
           </Text>

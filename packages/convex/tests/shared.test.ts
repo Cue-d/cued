@@ -3,7 +3,7 @@
  */
 
 import { describe, expect, it } from "vitest";
-import { shouldUpdateDisplayName } from "../convex/sync/shared";
+import { buildContactAvatarPatch, shouldUpdateDisplayName } from "../convex/sync/shared";
 
 describe("shouldUpdateDisplayName", () => {
   describe("basic cases", () => {
@@ -104,5 +104,90 @@ describe("shouldUpdateDisplayName", () => {
       // Current name is good, newName is just the handle - don't update
       expect(shouldUpdateDisplayName("John Smith", "johnsmith", "johnsmith")).toBe(false);
     });
+  });
+});
+
+describe("buildContactAvatarPatch", () => {
+  function makeContact(overrides?: {
+    avatarUrl?: string;
+    avatarSourcePlatform?: "linkedin" | "twitter" | "slack" | "imessage" | "signal";
+    avatarUpdatedAt?: number;
+  }) {
+    return {
+      _id: "contact_1",
+      _creationTime: Date.now(),
+      userId: "user_1",
+      displayName: "Alice",
+      ...overrides,
+    } as never;
+  }
+
+  it("adds avatar when contact has none", () => {
+    const patch = buildContactAvatarPatch(
+      makeContact(),
+      {
+        url: "https://cdn.example.com/avatar-a.png",
+        sourcePlatform: "twitter",
+        updatedAt: 1234,
+      },
+    );
+
+    expect(patch).toEqual({
+      avatarUrl: "https://cdn.example.com/avatar-a.png",
+      avatarSourcePlatform: "twitter",
+      avatarUpdatedAt: 1234,
+    });
+  });
+
+  it("updates avatar when URL changes even if source is lower priority", () => {
+    const patch = buildContactAvatarPatch(
+      makeContact({
+        avatarUrl: "https://cdn.example.com/old.png",
+        avatarSourcePlatform: "linkedin",
+      }),
+      {
+        url: "https://cdn.example.com/new.png",
+        sourcePlatform: "imessage",
+        updatedAt: 5678,
+      },
+    );
+
+    expect(patch).toEqual({
+      avatarUrl: "https://cdn.example.com/new.png",
+      avatarSourcePlatform: "imessage",
+      avatarUpdatedAt: 5678,
+    });
+  });
+
+  it("updates source when a higher-priority source arrives with same URL", () => {
+    const patch = buildContactAvatarPatch(
+      makeContact({
+        avatarUrl: "https://cdn.example.com/avatar.png",
+        avatarSourcePlatform: "slack",
+      }),
+      {
+        url: "https://cdn.example.com/avatar.png",
+        sourcePlatform: "linkedin",
+      },
+    );
+
+    expect(patch?.avatarSourcePlatform).toBe("linkedin");
+    expect(patch?.avatarUrl).toBe("https://cdn.example.com/avatar.png");
+    expect(typeof patch?.avatarUpdatedAt).toBe("number");
+  });
+
+  it("does not patch when incoming URL and source are unchanged", () => {
+    const patch = buildContactAvatarPatch(
+      makeContact({
+        avatarUrl: "https://cdn.example.com/avatar.png",
+        avatarSourcePlatform: "twitter",
+      }),
+      {
+        url: "https://cdn.example.com/avatar.png",
+        sourcePlatform: "twitter",
+      },
+    );
+
+    expect(patch).toBeNull();
   });
 });

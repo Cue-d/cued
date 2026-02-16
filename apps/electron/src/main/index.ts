@@ -7,7 +7,9 @@ process.on("unhandledRejection", (reason) => {
 });
 
 import { join } from "node:path";
-import { app, BrowserWindow, ipcMain, shell } from "electron";
+import { existsSync } from "node:fs";
+import { pathToFileURL } from "node:url";
+import { app, BrowserWindow, ipcMain, net, protocol, shell } from "electron";
 import { ConvexHttpClient } from "convex/browser";
 import { api } from "@cued/convex";
 import { electronEnv } from "@cued/env/electron";
@@ -40,9 +42,25 @@ import { getSettingsManager, SettingsManager } from "./settings";
 import { initAutoUpdater, stopAutoUpdater, quitAndInstall } from "./auto-updater";
 import { loadNativeModule } from "./native-module-loader";
 import { setupPermissionIpcHandlers, requestContactsAccessOnStartup } from "./ipc/permissions";
+import {
+  CONTACT_AVATAR_SCHEME,
+  resolveContactAvatarPathFromUrl,
+} from "./platforms/contacts/avatar-cache";
 
 const CONVEX_URL = electronEnv.CONVEX_URL;
 const WORKOS_CLIENT_ID = electronEnv.WORKOS_CLIENT_ID;
+
+protocol.registerSchemesAsPrivileged([
+  {
+    scheme: CONTACT_AVATAR_SCHEME,
+    privileges: {
+      standard: true,
+      secure: true,
+      supportFetchAPI: true,
+      corsEnabled: true,
+    },
+  },
+]);
 
 let mainWindow: BrowserWindow | null = null;
 
@@ -232,6 +250,17 @@ function createWindow(): void {
   if (launchedHidden) {
     console.log("[Main] App started hidden (--hidden flag or auto-launch)");
   }
+}
+
+function registerContactAvatarProtocol(): void {
+  protocol.handle(CONTACT_AVATAR_SCHEME, async (request) => {
+    const filePath = resolveContactAvatarPathFromUrl(request.url);
+    if (!filePath || !existsSync(filePath)) {
+      return new Response("Not Found", { status: 404 });
+    }
+
+    return net.fetch(pathToFileURL(filePath).toString());
+  });
 }
 
 function setupAuthIpcHandlers(): void {
@@ -507,6 +536,8 @@ function startContactsWatcher(): void {
 }
 
 app.whenReady().then(() => {
+  registerContactAvatarProtocol();
+
   // Initialize auth with WorkOS client ID
   initAuth(WORKOS_CLIENT_ID);
 

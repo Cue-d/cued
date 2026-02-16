@@ -134,6 +134,8 @@ export interface ResolvedContact {
   displayName: string;
   /** Company/organization if available */
   company: string | null;
+  /** Local avatar URL served via the app-managed contact avatar protocol */
+  avatarUrl?: string;
   /** Phone numbers associated with contact */
   phoneNumbers: string[];
   /** Email addresses associated with contact */

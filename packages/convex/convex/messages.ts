@@ -329,9 +329,11 @@ async function fetchInbox(
           _id: Id<"contacts">;
           displayName: string;
           handle?: string;
+          avatarUrl?: string;
         } = {
           _id: contact._id,
           displayName: contact.displayName,
+          avatarUrl: contact.avatarUrl,
         };
         if (isDm) {
           const handle = handleMap.get(`${conversation.platform}:${contactId}`);

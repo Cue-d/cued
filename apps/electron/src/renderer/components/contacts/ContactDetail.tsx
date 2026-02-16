@@ -13,6 +13,7 @@ import {
 import { api } from "@cued/convex"
 import {
   normalizePhone,
+  getInitials,
   formatRelativeTime,
   type ActionPlatform,
   PLATFORM_CONFIG,
@@ -23,6 +24,9 @@ import {
   ScrollArea,
   SearchIcon,
   UserIcon,
+  Avatar,
+  AvatarImage,
+  AvatarFallback,
 } from "@cued/ui"
 import {
   Skeleton,
@@ -249,6 +253,7 @@ export function ContactDetail({ contactId }: ContactDetailProps) {
   const { contact, conversations, messages, stats } = profile
   const displayMessages = showAllMessages ? messages : messages.slice(0, 10)
   const visibleHandles = contact.handles.filter((h) => VISIBLE_HANDLE_TYPES.has(h.type))
+  const initials = getInitials(contact.displayName)
 
   return (
     <div className="h-full flex flex-col">
@@ -289,6 +294,25 @@ export function ContactDetail({ contactId }: ContactDetailProps) {
       <div className="flex-1 min-h-0">
         <ScrollArea className="h-full">
           <div className="px-5 py-7 max-w-3xl mx-auto space-y-8">
+            <SettingsSection title="Profile">
+              <SettingsCard divided={false}>
+                <div className="px-4 py-4 flex items-center gap-4">
+                  <Avatar size="lg">
+                    {contact.avatarUrl ? (
+                      <AvatarImage src={contact.avatarUrl} alt={contact.displayName} />
+                    ) : null}
+                    <AvatarFallback>{initials}</AvatarFallback>
+                  </Avatar>
+                  <div className="min-w-0">
+                    <p className="text-base font-semibold truncate">{contact.displayName}</p>
+                    <p className="text-sm text-muted-foreground truncate">
+                      {contact.company || "No company set"}
+                    </p>
+                  </div>
+                </div>
+              </SettingsCard>
+            </SettingsSection>
+
             {/* Overview */}
             <SettingsSection title="Overview">
               <SettingsCard>

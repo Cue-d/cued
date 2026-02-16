@@ -3,10 +3,12 @@
  * Modern iOS-style contact row with platform badges.
  */
 
+import { useEffect, useState } from "react";
 import { View, Text, Pressable, useColorScheme } from "react-native";
 import * as Haptics from "expo-haptics";
 import { useRouter } from "expo-router";
 import { SymbolView } from "expo-symbols";
+import { Image } from "expo-image";
 import { getInitials, type ActionPlatform } from "@cued/shared";
 import { PlatformIcon } from "@/components/platform-icons";
 import { getThemeColors } from "@/lib/utils";
@@ -15,6 +17,7 @@ export interface ContactListItemData {
   id: string;
   displayName: string;
   company?: string | null;
+  avatarUrl?: string;
   phoneNumber?: string | null;
   email?: string | null;
   platforms?: string[];
@@ -32,6 +35,11 @@ export function ContactListItem({
   const colorScheme = useColorScheme();
   const colors = getThemeColors(colorScheme === "dark");
   const initials = getInitials(contact.displayName);
+  const [imageFailed, setImageFailed] = useState(false);
+
+  useEffect(() => {
+    setImageFailed(false);
+  }, [contact.avatarUrl]);
 
   const handlePress = () => {
     Haptics.selectionAsync();
@@ -46,9 +54,20 @@ export function ContactListItem({
       accessibilityLabel={`View ${contact.displayName}`}
     >
       <View className="w-10 h-10 rounded-full bg-muted items-center justify-center">
-        <Text className="text-muted-foreground font-semibold text-[15px]">
-          {initials}
-        </Text>
+        {contact.avatarUrl && !imageFailed ? (
+          <Image
+            source={{ uri: contact.avatarUrl }}
+            style={{ width: 40, height: 40, borderRadius: 20 }}
+            contentFit="cover"
+            cachePolicy="memory-disk"
+            transition={120}
+            onError={() => setImageFailed(true)}
+          />
+        ) : (
+          <Text className="text-muted-foreground font-semibold text-[15px]">
+            {initials}
+          </Text>
+        )}
       </View>
 
       <View className="flex-1">

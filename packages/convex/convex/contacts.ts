@@ -252,11 +252,13 @@ export const getAdjacentContacts = query({
         _id: c._id,
         displayName: c.displayName,
         company: c.company,
+        avatarUrl: c.avatarUrl,
       })),
       after: after.map((c) => ({
         _id: c._id,
         displayName: c.displayName,
         company: c.company,
+        avatarUrl: c.avatarUrl,
       })),
     };
   },

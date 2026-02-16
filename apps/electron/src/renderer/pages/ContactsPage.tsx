@@ -21,6 +21,7 @@ import {
   Skeleton,
   Badge,
   Avatar,
+  AvatarImage,
   AvatarFallback,
   Input,
 } from "@cued/ui"
@@ -44,6 +45,7 @@ interface ContactListItemProps {
     _id: Id<"contacts">
     displayName: string
     company?: string | null
+    avatarUrl?: string
     handles: Array<{ type: string; value: string; platform: string }>
   }
   selected: boolean
@@ -67,6 +69,9 @@ function ContactListItem({ contact, selected, onClick }: ContactListItemProps) {
     >
       <div className="flex items-center gap-3">
         <Avatar size="sm">
+          {contact.avatarUrl ? (
+            <AvatarImage src={contact.avatarUrl} alt={contact.displayName} />
+          ) : null}
           <AvatarFallback>{getInitials(contact.displayName)}</AvatarFallback>
         </Avatar>
         <div className="flex-1 min-w-0">
@@ -157,6 +162,7 @@ export function ContactsPage({ initialContactId, onInitialContactConsumed }: Con
       _id: Id<"contacts">
       displayName: string
       company?: string | null
+      avatarUrl?: string
       handles: Array<{ type: string; value: string; platform: string }>
     }>
   >([])

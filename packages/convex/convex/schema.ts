@@ -11,6 +11,14 @@ export const platformValidator = v.union(
   v.literal("whatsapp")
 );
 
+export const avatarSourcePlatformValidator = v.union(
+  v.literal("linkedin"),
+  v.literal("twitter"),
+  v.literal("slack"),
+  v.literal("imessage"),
+  v.literal("signal")
+);
+
 export const handleTypeValidator = v.union(
   v.literal("phone"),
   v.literal("email"),
@@ -117,6 +125,9 @@ const schema = defineSchema({
     userId: v.id("users"),
     displayName: v.string(),
     company: v.optional(v.string()),
+    avatarUrl: v.optional(v.string()),
+    avatarSourcePlatform: v.optional(avatarSourcePlatformValidator),
+    avatarUpdatedAt: v.optional(v.number()),
     notes: v.optional(v.string()),
     importance: v.optional(v.number()),
     tags: v.optional(v.array(v.string())),

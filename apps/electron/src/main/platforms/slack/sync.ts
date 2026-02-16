@@ -96,11 +96,32 @@ interface CachedSlackUser {
   name: string
   realName?: string
   email?: string
+  avatarUrl?: string
   fetchedAt: number
 }
 
 function getOldestMessageTimestamp(): string {
   return (getSyncCutoffMs() / 1000).toFixed(6)
+}
+
+function pickBestSlackAvatar(profile: {
+  image_original?: string
+  image_512?: string
+  image_192?: string
+  image_72?: string
+  image_48?: string
+  image_32?: string
+  image_24?: string
+}): string | undefined {
+  return (
+    profile.image_original ||
+    profile.image_512 ||
+    profile.image_192 ||
+    profile.image_72 ||
+    profile.image_48 ||
+    profile.image_32 ||
+    profile.image_24
+  )
 }
 
 // ============================================================================
@@ -675,6 +696,9 @@ export class SlackSyncManager {
         resolvedName = mpimName
       }
     }
+    const dmUser = conversation.is_im && conversation.user
+      ? await this.getSlackUser(conversation.user)
+      : null
 
     await withAuthRetry(
       () => this.convexClient.mutation(api.sync.syncSlackConversations, {
@@ -689,6 +713,8 @@ export class SlackSyncManager {
           isPrivate: conversation.is_private ?? false,
           isArchived: conversation.is_archived ?? false,
           userId: conversation.user ?? undefined,
+          userName: dmUser?.name,
+          userAvatarUrl: dmUser?.avatarUrl,
           unreadCount: conversation.unread_count ?? 0,
           lastRead: conversation.last_read ?? undefined,
           latestTs: conversation.latest?.ts,
@@ -730,6 +756,7 @@ export class SlackSyncManager {
           text: resolvedText,
           userId: senderId,
           userName: senderInfo?.name,
+          userAvatarUrl: senderInfo?.avatarUrl,
           threadTs: m.thread_ts,
           isThreadParent: m.reply_count !== undefined && m.reply_count > 0,
           replyCount: m.reply_count ?? 0,
@@ -748,6 +775,7 @@ export class SlackSyncManager {
       displayName: u.name,
       realName: u.realName,
       email: u.email,
+      avatarUrl: u.avatarUrl,
     }))
 
     await withAuthRetry(
@@ -836,6 +864,7 @@ export class SlackSyncManager {
         name: user.profile.display_name || user.profile.real_name || user.name,
         realName: user.profile.real_name,
         email: user.profile.email,
+        avatarUrl: pickBestSlackAvatar(user.profile),
         fetchedAt: Date.now(),
       }
       // Prune cache if it exceeds max size (remove oldest entries)

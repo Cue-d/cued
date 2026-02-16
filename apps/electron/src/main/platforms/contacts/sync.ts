@@ -107,6 +107,7 @@ export async function syncContactsToConvex(
       company: c.company,
       phoneNumbers: c.phoneNumbers,
       emails: c.emails,
+      avatarUrl: c.avatarUrl,
     }));
 
     const totalBatches = Math.ceil(convexContacts.length / BATCH_SIZE);

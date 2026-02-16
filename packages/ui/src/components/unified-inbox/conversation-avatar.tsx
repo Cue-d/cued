@@ -2,6 +2,7 @@ import { getInitials } from "@cued/shared"
 import { cn } from "../../lib/utils"
 import type { InboxParticipant, InboxConversationType } from "./types"
 import type React from "react"
+import { Avatar, AvatarFallback, AvatarImage } from "../ui/avatar"
 
 interface InboxConversationAvatarProps {
   participants: InboxParticipant[]
@@ -32,17 +33,29 @@ function getColorForName(name: string): string {
   return bgColors[code % bgColors.length]
 }
 
-function SingleAvatar({ name, className }: { name: string; className?: string }): React.ReactElement {
+function SingleAvatar({
+  participant,
+  className,
+}: {
+  participant?: InboxParticipant
+  className?: string
+}): React.ReactElement {
+  const displayName = participant?.displayName || "?"
+
   return (
-    <div
-      className={cn(
-        "rounded-full flex items-center justify-center text-white font-medium shrink-0",
-        getColorForName(name),
-        className
-      )}
-    >
-      {getInitials(name)}
-    </div>
+    <Avatar className={className}>
+      {participant?.avatarUrl ? (
+        <AvatarImage src={participant.avatarUrl} alt={displayName} />
+      ) : null}
+      <AvatarFallback
+        className={cn(
+          "text-white font-medium",
+          getColorForName(displayName)
+        )}
+      >
+        {getInitials(displayName)}
+      </AvatarFallback>
+    </Avatar>
   )
 }
 
@@ -54,22 +67,21 @@ export function InboxConversationAvatar({
 }: InboxConversationAvatarProps): React.ReactElement {
   const isGroup = conversationType === "group" || conversationType === "channel"
   const [first, second] = participants
-  const displayName = first?.displayName || "?"
 
   if (isGroup && participants.length >= 2) {
     return (
       <div className={cn("relative shrink-0", sizeClasses[size], className)}>
         <SingleAvatar
-          name={first?.displayName || "?"}
+          participant={first}
           className="absolute top-0 left-0 w-6 h-6 border-2 border-background text-[10px]"
         />
         <SingleAvatar
-          name={second?.displayName || "?"}
+          participant={second}
           className="absolute bottom-0 right-0 w-6 h-6 border-2 border-background text-[10px]"
         />
       </div>
     )
   }
 
-  return <SingleAvatar name={displayName} className={cn(sizeClasses[size], className)} />
+  return <SingleAvatar participant={first} className={cn(sizeClasses[size], className)} />
 }

@@ -12,6 +12,7 @@ import {
   handleInput,
   normalizeHandle,
   getOrCreateContact,
+  buildContactAvatarPatch,
   batchResolveHandles,
   scheduleIncomingMessageEvents,
   scheduleOutgoingMessageEvents,
@@ -584,6 +585,7 @@ export const contactInput = v.object({
   company: v.union(v.string(), v.null()),
   phoneNumbers: v.array(v.string()),
   emails: v.array(v.string()),
+  avatarUrl: v.optional(v.string()),
 });
 
 export type ContactInput = Infer<typeof contactInput>;
@@ -720,11 +722,32 @@ async function upsertContactWithHandles(
       await ctx.db.patch(contactId, { displayName });
       displayNameUpdated = true;
     }
-    if (contactData.company) {
-      await ctx.db.patch(contactId, { company: contactData.company });
+    if (existing) {
+      const contactPatch: Partial<Doc<"contacts">> = {};
+      if (contactData.company) {
+        contactPatch.company = contactData.company;
+      }
+      const avatarPatch = buildContactAvatarPatch(existing, contact.avatarUrl
+        ? {
+            url: contact.avatarUrl,
+            sourcePlatform: platform,
+          }
+        : undefined);
+      if (avatarPatch) {
+        Object.assign(contactPatch, avatarPatch);
+      }
+      if (Object.keys(contactPatch).length > 0) {
+        await ctx.db.patch(contactId, contactPatch);
+      }
     }
   } else {
-    contactId = await ctx.db.insert("contacts", { userId, ...contactData });
+    contactId = await ctx.db.insert("contacts", {
+      userId,
+      ...contactData,
+      avatarUrl: contact.avatarUrl ?? undefined,
+      avatarSourcePlatform: contact.avatarUrl ? platform : undefined,
+      avatarUpdatedAt: contact.avatarUrl ? Date.now() : undefined,
+    });
   }
 
   // Add missing handles or update mislinked ones

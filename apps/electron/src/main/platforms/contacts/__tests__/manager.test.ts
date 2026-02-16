@@ -48,6 +48,8 @@ function createMockContacts(
     phones?: string[];
     emails?: string[];
     company?: string;
+    contactImage?: Buffer;
+    contactThumbnailImage?: Buffer;
   }>
 ) {
   return contacts.map((c, i) => ({
@@ -59,6 +61,8 @@ function createMockContacts(
     phoneNumbers: c.phones ?? [],
     emailAddresses: c.emails ?? [],
     organizationName: c.company,
+    contactImage: c.contactImage,
+    contactThumbnailImage: c.contactThumbnailImage,
   }));
 }
 
@@ -148,6 +152,27 @@ describe("ContactsManager", () => {
       expect(contacts[0].company).toBe("Tech Co");
       expect(mockGetAllContacts).toHaveBeenCalled();
       expect(writeFileSync).toHaveBeenCalled();
+    });
+
+    it("maps local contact thumbnails to app-managed avatar URLs", async () => {
+      vi.mocked(existsSync).mockReturnValue(false);
+      mockGetAllContacts.mockReturnValue(
+        createMockContacts([
+          {
+            firstName: "Photo",
+            lastName: "Person",
+            phones: ["+15550001111"],
+            contactThumbnailImage: Buffer.from([0xff, 0xd8, 0xff, 0xee]),
+          },
+        ]),
+      );
+
+      const contacts = await manager.fetchContacts();
+
+      expect(mockGetAllContacts).toHaveBeenCalledWith(
+        expect.arrayContaining(["organizationName", "contactThumbnailImage", "contactImage"]),
+      );
+      expect(contacts[0].avatarUrl).toMatch(/^cued-contact-avatar:\/\/avatar\//);
     });
 
     it("forces refresh when requested", async () => {

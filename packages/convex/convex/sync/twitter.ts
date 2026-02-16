@@ -124,7 +124,15 @@ export async function syncTwitterConversationsInternal(
           userId,
           "twitter",
           buildTwitterHandles(handle, participant.userId),
-          displayName
+          displayName,
+          {
+            avatar: participant.profileImageUrl
+              ? {
+                  url: participant.profileImageUrl,
+                  sourcePlatform: "twitter",
+                }
+              : undefined,
+          }
         );
 
         if (contact) {
@@ -267,7 +275,15 @@ export async function syncTwitterMessagesInternal(
         const contact = await getOrCreateContact(
           ctx, userId, "twitter",
           buildTwitterHandles(handle, message.senderId),
-          displayName
+          displayName,
+          {
+            avatar: message.senderProfileImageUrl
+              ? {
+                  url: message.senderProfileImageUrl,
+                  sourcePlatform: "twitter",
+                }
+              : undefined,
+          }
         );
         senderContactId = contact?.contactId;
       }
