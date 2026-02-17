@@ -17,6 +17,7 @@ export interface AppSettings {
   preventSleepWhileSyncing: boolean;
   /** How many days of message history to sync on initial/full sync. */
   syncHistoryDays: number;
+  onboardingCompleted: boolean;
 }
 
 const DEFAULT_SETTINGS: AppSettings = {
@@ -24,6 +25,7 @@ const DEFAULT_SETTINGS: AppSettings = {
   startMinimized: false,
   preventSleepWhileSyncing: true,
   syncHistoryDays: 90,
+  onboardingCompleted: false,
 };
 
 export class SettingsManager {
@@ -145,6 +147,20 @@ export class SettingsManager {
   }
 
   /**
+   * Get onboarding completion state.
+   */
+  getOnboardingCompleted(): boolean {
+    return this.settings.onboardingCompleted;
+  }
+
+  /**
+   * Set onboarding completion state.
+   */
+  setOnboardingCompleted(completed: boolean): void {
+    this.setSetting("onboardingCompleted", completed, "Onboarding completion");
+  }
+
+  /**
    * Generic setter for boolean settings.
    */
   private setSetting(key: keyof AppSettings, enabled: boolean, label: string): void {
@@ -216,6 +232,15 @@ export class SettingsManager {
     ipcMain.handle("settings:setSyncHistoryDays", (_, days: number) => {
       this.setSyncHistoryDays(days);
       return this.getSyncHistoryDays();
+    });
+
+    ipcMain.handle("settings:getOnboardingCompleted", () => {
+      return this.getOnboardingCompleted();
+    });
+
+    ipcMain.handle("settings:setOnboardingCompleted", (_, completed: boolean) => {
+      this.setOnboardingCompleted(completed);
+      return this.getOnboardingCompleted();
     });
   }
 }

@@ -19,6 +19,7 @@ import type * as debug from "../debug.js";
 import type * as embeddings from "../embeddings.js";
 import type * as http from "../http.js";
 import type * as integrations from "../integrations.js";
+import type * as lib_actionSummary from "../lib/actionSummary.js";
 import type * as lib_actions from "../lib/actions.js";
 import type * as lib_auth from "../lib/auth.js";
 import type * as lib_contactMergeScheduling from "../lib/contactMergeScheduling.js";
@@ -66,6 +67,7 @@ declare const fullApi: ApiFromModules<{
   embeddings: typeof embeddings;
   http: typeof http;
   integrations: typeof integrations;
+  "lib/actionSummary": typeof lib_actionSummary;
   "lib/actions": typeof lib_actions;
   "lib/auth": typeof lib_auth;
   "lib/contactMergeScheduling": typeof lib_contactMergeScheduling;

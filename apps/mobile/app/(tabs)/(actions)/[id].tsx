@@ -4,8 +4,8 @@
  * Shows complete message thread, action details, and toolbar actions.
  */
 
-import { useState, useCallback } from "react";
-import { View, Text, ScrollView, TextInput } from "react-native";
+import { useState, useCallback, useMemo } from "react";
+import { View, Text, ScrollView, TextInput, ActivityIndicator } from "react-native";
 import * as Haptics from "expo-haptics";
 import { useLocalSearchParams, useRouter, Stack } from "expo-router";
 import { useQuery, useMutation } from "convex/react";
@@ -14,6 +14,15 @@ import { getInitials, formatTime, formatRelativeTime, type DisplayMessage } from
 import { useElectronPrescence } from "@/contexts/electron-presence-context";
 import type { SwipeDirection } from "@/components/swipeable-card";
 import type { Id } from "@cued/convex/convex/_generated/dataModel";
+
+type ReactionLike = string | { emoji: string };
+
+function normalizeReactions(reactions?: ReactionLike[] | null): string[] | null {
+  if (!reactions || reactions.length === 0) return null;
+  return reactions.map((reaction) =>
+    typeof reaction === "string" ? reaction : reaction.emoji
+  );
+}
 
 /** Avatar component */
 function Avatar({
@@ -113,18 +122,61 @@ export default function ActionDetailScreen(): React.JSX.Element {
 
   const swipeAction = useMutation(api.actions.swipeAction);
 
-  // Transform Convex messages to DisplayMessage format
-  const messages: DisplayMessage[] =
-    data?.messages?.map((msg) => ({
+  // Paginated message loading
+  const MESSAGE_PAGE_SIZE = 25;
+  const [messageLimit, setMessageLimit] = useState(MESSAGE_PAGE_SIZE);
+
+  const conversationId = data?.conversation?._id;
+  const messagesResult = useQuery(
+    api.messages.getMessages,
+    conversationId
+      ? { conversationId: conversationId as Id<"conversations">, limit: messageLimit }
+      : "skip",
+  );
+
+  const hasMoreMessages = messagesResult?.nextCursor != null;
+  const handleLoadMoreMessages = useCallback(() => {
+    setMessageLimit((prev) => prev + MESSAGE_PAGE_SIZE);
+  }, []);
+  const isLoadingMoreMessages = messageLimit > MESSAGE_PAGE_SIZE && messagesResult === undefined;
+
+  // Auto-load older messages when scrolling near the top
+  const handleScroll = useCallback(
+    (event: { nativeEvent: { contentOffset: { y: number } } }) => {
+      const offsetY = event.nativeEvent.contentOffset.y;
+      if (offsetY < 80 && hasMoreMessages && !isLoadingMoreMessages) {
+        handleLoadMoreMessages();
+      }
+    },
+    [hasMoreMessages, isLoadingMoreMessages, handleLoadMoreMessages],
+  );
+
+  // Map paginated messages to DisplayMessage format (getMessages returns newest-first)
+  const messages: DisplayMessage[] = useMemo(() => {
+    const paginatedMsgs = messagesResult?.messages;
+    if (paginatedMsgs) {
+      return [...paginatedMsgs].reverse().map((msg) => ({
+        _id: msg._id,
+        content: msg.content,
+        sentAt: msg.sentAt,
+        isFromMe: msg.isFromMe,
+        senderName: msg.sender?.displayName ?? (msg.isFromMe ? "You" : null),
+        status: msg.status,
+        reactions: normalizeReactions(msg.reactions),
+      }));
+    }
+
+    // Fall back to context messages while paginated query loads
+    return data?.messages?.map((msg) => ({
       _id: msg._id,
       content: msg.content,
       sentAt: msg.sentAt,
       isFromMe: msg.isFromMe,
       senderName: msg.senderName,
       status: msg.status,
-      // Extract just the emoji strings from reaction objects
-      reactions: msg.reactions?.map((r) => r.emoji) ?? null,
+      reactions: normalizeReactions(msg.reactions as ReactionLike[] | null | undefined),
     })) ?? [];
+  }, [messagesResult?.messages, data?.messages]);
 
   // Handle swipe action
   const handleSwipe = useCallback(
@@ -218,6 +270,8 @@ export default function ActionDetailScreen(): React.JSX.Element {
         className="flex-1"
         contentInsetAdjustmentBehavior="automatic"
         contentContainerClassName="pb-4"
+        onScroll={handleScroll}
+        scrollEventThrottle={100}
       >
         {/* Contact Header */}
         <View className="items-center pt-4 pb-6">
@@ -275,8 +329,13 @@ export default function ActionDetailScreen(): React.JSX.Element {
         {messages.length > 0 && (
           <View className="mx-4 mb-4">
             <Text className="text-sm font-medium text-sf-label mb-3">
-              Recent Messages
+              Messages
             </Text>
+            {isLoadingMoreMessages && (
+              <View className="items-center py-2 mb-2">
+                <ActivityIndicator size="small" />
+              </View>
+            )}
             <View className="gap-2">
               {messages.map((msg) => (
                 <MessageBubble key={msg._id} message={msg} />

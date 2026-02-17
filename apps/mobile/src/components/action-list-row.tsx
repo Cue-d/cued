@@ -41,7 +41,10 @@ export function ActionListRow({
   const platform = action.platform as ActionPlatform | undefined;
   const platformConfig = platform ? PLATFORM_CONFIG[platform] : null;
   const contactName = action.contactName ?? "Unknown";
-  const typeLabel = ACTION_TYPE_DISPLAY[action.type] ?? action.type;
+  const typeLabel =
+    action.summary?.trim() ||
+    ACTION_TYPE_DISPLAY[action.type] ||
+    action.type;
   const timeAgo = formatRelativeTime(action.createdAt);
 
   return (

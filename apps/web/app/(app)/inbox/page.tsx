@@ -327,11 +327,12 @@ export default function InboxPage() {
               />
             </div>
             {/* Reply input - fixed to bottom center */}
-            <div className="bg-background/95 px-4 py-4 backdrop-blur-xl border-t border-border">
+            <div className="bg-background/95 px-4 py-4 backdrop-blur-xl border-t border-border shadow-[0_-1px_6px_-2px_rgba(0,0,0,0.06)]">
               <div className="mx-auto max-w-xl flex flex-col gap-2">
                 {showDesktopOfflineWarning && (
                   <p className="text-xs text-muted-foreground">
-                    Desktop offline. Messages stay queued until desktop reconnects.
+                    Desktop offline. Messages queue now and send when desktop reconnects. If desktop
+                    stays offline too long, queued messages fail and can be retried.
                   </p>
                 )}
                 <div className="flex items-center gap-2">

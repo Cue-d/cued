@@ -138,25 +138,36 @@ export function createTestActionData(
     contactId: Id<"contacts">;
     messageId: Id<"messages">;
     platform: "imessage" | "slack";
+    summary: string;
     reason: string;
     llmReason: string;
     createdAt: number;
     snoozedUntil: number;
+    completedAt: number;
+    discardedAt: number;
   }> = {}
 ) {
+  const status = overrides.status ?? "pending";
+  const createdAt = overrides.createdAt ?? Date.now();
+
   return {
     userId,
     type: overrides.type ?? "respond",
-    status: overrides.status ?? "pending",
+    status,
     priority: overrides.priority ?? 50,
     conversationId: overrides.conversationId,
     contactId: overrides.contactId,
     messageId: overrides.messageId,
     platform: overrides.platform,
+    summary: overrides.summary,
     reason: overrides.reason,
     llmReason: overrides.llmReason,
-    createdAt: overrides.createdAt ?? Date.now(),
+    createdAt,
     snoozedUntil: overrides.snoozedUntil,
+    completedAt:
+      overrides.completedAt ?? (status === "completed" ? createdAt : undefined),
+    discardedAt:
+      overrides.discardedAt ?? (status === "discarded" ? createdAt : undefined),
   };
 }
 

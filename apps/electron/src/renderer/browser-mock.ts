@@ -9,6 +9,7 @@
 import type { ElectronAPI } from "../shared/electron-api"
 
 const CONVEX_URL = import.meta.env.VITE_CONVEX_URL as string | undefined
+const ONBOARDING_COMPLETE_KEY = "cued-onboarding-complete"
 
 // Check if we're already in Electron (preload script sets window.electron)
 // Only activate in development — never silently mock in production builds
@@ -25,6 +26,11 @@ if (!window.electron && import.meta.env.DEV) {
     settings: {
       getSyncHistoryDays: async () => 90,
       setSyncHistoryDays: async (days: number) => days,
+      getOnboardingCompleted: async () => localStorage.getItem(ONBOARDING_COMPLETE_KEY) === "true",
+      setOnboardingCompleted: async (completed: boolean) => {
+        localStorage.setItem(ONBOARDING_COMPLETE_KEY, String(completed))
+        return completed
+      },
     },
 
     versions: {

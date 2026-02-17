@@ -1495,7 +1495,7 @@ describe("messageQueue", () => {
   });
 
   describe("timeoutStaleSends internal mutation", () => {
-    it("fails stale pending messages when no desktop sender is online", async () => {
+    it("keeps pending messages queued during short desktop offline windows", async () => {
       const t = trackTest(convexTest(schema, modules));
       const { userId } = await setupAuthenticatedUser(t);
       const now = Date.now();
@@ -1517,8 +1517,35 @@ describe("messageQueue", () => {
       await t.mutation(internal.messageQueue.timeoutStaleSends, {});
 
       const message = await t.run(async (ctx) => ctx.db.get(messageId));
+      expect(message?.status).toBe("pending");
+      expect(message?.error).toBeUndefined();
+    });
+
+    it("fails expired pending messages when desktop sender stays offline", async () => {
+      const t = trackTest(convexTest(schema, modules));
+      const { userId } = await setupAuthenticatedUser(t);
+      const now = Date.now();
+      const thirteenHoursAgo = now - 13 * 60 * 60 * 1000;
+
+      const messageId = await t.run(async (ctx) =>
+        ctx.db.insert("messageQueue", {
+          userId,
+          platform: "imessage",
+          recipientHandle: "+15551234567",
+          text: "Waiting with desktop offline too long",
+          isGroup: false,
+          status: "pending",
+          scheduledFor: thirteenHoursAgo,
+          attempts: 0,
+          createdAt: thirteenHoursAgo,
+        })
+      );
+
+      await t.mutation(internal.messageQueue.timeoutStaleSends, {});
+
+      const message = await t.run(async (ctx) => ctx.db.get(messageId));
       expect(message?.status).toBe("failed");
-      expect(message?.error).toContain("Desktop app is offline");
+      expect(message?.error).toContain("offline too long");
     });
 
     it("keeps stale pending messages queued when desktop sender is online", async () => {

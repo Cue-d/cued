@@ -6,6 +6,7 @@ import { action, internalMutation, mutation, query } from "./_generated/server";
 import { api, internal } from "./_generated/api";
 import { getAuthenticatedUser, requireAuthenticatedUser } from "./lib/auth";
 import { adjustPendingActionCount } from "./lib/actions";
+import { resolveActionSummary } from "./lib/actionSummary";
 import {
   actionStatusValidator,
   actionTypeValidator,
@@ -161,6 +162,7 @@ function enrichAction(
     type: action.type,
     status: action.status,
     priority: action.priority,
+    summary: action.summary ?? resolveActionSummary(action.type),
     reason: action.reason ?? null,
     llmReason: action.llmReason ?? null,
     createdAt: action.createdAt,
@@ -189,6 +191,34 @@ async function enrichActions(
   return actions.map((action) => enrichAction(action, cache));
 }
 
+function normalizeReactionEmojis(
+  reactions:
+    | Doc<"messages">["reactions"]
+    | string[]
+    | null
+    | undefined
+): string[] | null {
+  if (!reactions || reactions.length === 0) return null;
+
+  const normalizeToken = (token: string): string => {
+    const trimmed = token.trim();
+    if (!trimmed) return "";
+    if (trimmed.startsWith(":") && trimmed.endsWith(":")) return trimmed;
+    if (/^[a-z0-9_+-]+$/i.test(trimmed)) return `:${trimmed}:`;
+    return trimmed;
+  };
+
+  const emojis = (reactions as Array<{ emoji?: string; name?: string; reaction?: string } | string>)
+    .map((reaction) => {
+      if (typeof reaction === "string") return normalizeToken(reaction);
+      const raw = reaction?.emoji ?? reaction?.name ?? reaction?.reaction;
+      return typeof raw === "string" ? normalizeToken(raw) : "";
+    })
+    .filter((emoji): emoji is string => typeof emoji === "string" && emoji.length > 0);
+
+  return emojis.length > 0 ? emojis : null;
+}
+
 /**
  * Search actions with filters.
  * Supports filtering by status, type, contactId, conversationId, and date ranges.
@@ -207,7 +237,7 @@ export const searchActions = query({
     const user = await getAuthenticatedUser(ctx);
     if (!user) return { actions: [] };
 
-    const limit = Math.min(args.limit ?? 20, 100);
+    const limit = Math.min(args.limit ?? 20, 500);
 
     // Start with user-filtered query
     let query = ctx.db
@@ -278,6 +308,7 @@ export const createAction = mutation({
     contactId: v.optional(v.id("contacts")),
     messageId: v.optional(v.id("messages")),
     platform: v.optional(platformValidator),
+    summary: v.optional(v.string()),
     reason: v.optional(v.string()),
     llmReason: v.optional(v.string()),
   },
@@ -293,6 +324,7 @@ export const createAction = mutation({
       contactId: args.contactId,
       messageId: args.messageId,
       platform: args.platform,
+      summary: resolveActionSummary(args.type, args.summary),
       reason: args.reason,
       llmReason: args.llmReason,
       createdAt: Date.now(),
@@ -322,7 +354,7 @@ export const getPendingActions = query({
     const user = await getAuthenticatedUser(ctx);
     if (!user) return { actions: [], nextCursor: null };
 
-    const limit = Math.min(args.limit ?? 20, 100);
+    const limit = Math.min(args.limit ?? 20, 500);
 
     let actionable = await fetchActionableActions(ctx, user._id);
 
@@ -354,6 +386,144 @@ export const getPendingActions = query({
     const nextCursor =
       hasMore && actions.length > 0
         ? actions[actions.length - 1].createdAt
+        : null;
+
+    return { actions: enriched, nextCursor };
+  },
+});
+
+/**
+ * Fetch completed and discarded actions for history view.
+ * Returns enriched actions sorted by resolution timestamp (most recent first).
+ */
+const actionHistoryCursorValidator = v.object({
+  resolvedAt: v.number(),
+  actionId: v.id("actions"),
+});
+
+type ActionHistoryCursor = {
+  resolvedAt: number;
+  actionId: Id<"actions">;
+};
+
+const MAX_HISTORY_SCAN_PER_STATUS = 2000;
+
+function getActionResolvedAt(action: Pick<Doc<"actions">, "completedAt" | "discardedAt" | "createdAt">): number {
+  return action.completedAt ?? action.discardedAt ?? action.createdAt;
+}
+
+function compareHistoryActions(a: Doc<"actions">, b: Doc<"actions">): number {
+  const aTime = getActionResolvedAt(a);
+  const bTime = getActionResolvedAt(b);
+  if (bTime !== aTime) return bTime - aTime;
+  return String(b._id).localeCompare(String(a._id));
+}
+
+function isAfterCursor(action: Doc<"actions">, cursor: ActionHistoryCursor): boolean {
+  const resolvedAt = getActionResolvedAt(action);
+  if (resolvedAt < cursor.resolvedAt) return true;
+  if (resolvedAt > cursor.resolvedAt) return false;
+  return String(action._id).localeCompare(String(cursor.actionId)) < 0;
+}
+
+async function loadHistoryCandidatesForStatus(
+  ctx: QueryCtx,
+  userId: Id<"users">,
+  status: "completed" | "discarded",
+  cursor: number | ActionHistoryCursor | undefined,
+  take: number
+): Promise<Doc<"actions">[]> {
+  if (status === "completed") {
+    const queryBuilder = ctx.db.query("actions").withIndex("by_user_status_completed_at", (q) => {
+      const base = q.eq("userId", userId).eq("status", "completed");
+      if (cursor === undefined) return base;
+      // Legacy timestamp cursor has no tie-breaker; strict < avoids page-boundary duplicates.
+      if (typeof cursor === "number") return base.lt("completedAt", cursor);
+      return base.lte("completedAt", cursor.resolvedAt);
+    });
+    return queryBuilder.order("desc").take(take);
+  }
+
+  const queryBuilder = ctx.db.query("actions").withIndex("by_user_status_discarded_at", (q) => {
+    const base = q.eq("userId", userId).eq("status", "discarded");
+    if (cursor === undefined) return base;
+    // Legacy timestamp cursor has no tie-breaker; strict < avoids page-boundary duplicates.
+    if (typeof cursor === "number") return base.lt("discardedAt", cursor);
+    return base.lte("discardedAt", cursor.resolvedAt);
+  });
+  return queryBuilder.order("desc").take(take);
+}
+
+export const getActionHistory = query({
+  args: {
+    limit: v.optional(v.number()),
+    // Backward-compatible: accepts legacy timestamp cursor and object cursor with tie-breaker.
+    cursor: v.optional(v.union(v.number(), actionHistoryCursorValidator)),
+  },
+  handler: async (ctx, args) => {
+    const user = await getAuthenticatedUser(ctx);
+    if (!user) return { actions: [], nextCursor: null };
+
+    const limit = Math.min(args.limit ?? 25, 500);
+    let scanLimit = Math.min(limit + 1, MAX_HISTORY_SCAN_PER_STATUS);
+    let merged: Doc<"actions">[] = [];
+
+    while (true) {
+      const [completedActions, discardedActions] = await Promise.all([
+        loadHistoryCandidatesForStatus(
+          ctx,
+          user._id,
+          "completed",
+          args.cursor as number | ActionHistoryCursor | undefined,
+          scanLimit
+        ),
+        loadHistoryCandidatesForStatus(
+          ctx,
+          user._id,
+          "discarded",
+          args.cursor as number | ActionHistoryCursor | undefined,
+          scanLimit
+        ),
+      ]);
+
+      merged = [...completedActions, ...discardedActions];
+
+      // For object cursors, range queries include same-timestamp rows and we trim
+      // to strict "after cursor" ordering with the _id tie-breaker.
+      if (args.cursor && typeof args.cursor !== "number") {
+        const cursor: ActionHistoryCursor = args.cursor;
+        merged = merged.filter((action) => isAfterCursor(action, cursor));
+      }
+
+      merged.sort(compareHistoryActions);
+
+      const exhausted =
+        completedActions.length < scanLimit && discardedActions.length < scanLimit;
+      if (
+        merged.length >= limit + 1 ||
+        exhausted ||
+        scanLimit >= MAX_HISTORY_SCAN_PER_STATUS
+      ) {
+        break;
+      }
+
+      scanLimit = Math.min(scanLimit * 2, MAX_HISTORY_SCAN_PER_STATUS);
+    }
+
+    // Take limit + 1 to determine if there's more
+    const page = merged.slice(0, limit + 1);
+    const hasMore = page.length > limit;
+    const actions = hasMore ? page.slice(0, limit) : page;
+
+    const enriched = await enrichActions(ctx, actions);
+
+    const lastAction = actions[actions.length - 1];
+    const nextCursor =
+      hasMore && lastAction
+        ? {
+            resolvedAt: getActionResolvedAt(lastAction),
+            actionId: lastAction._id,
+          }
         : null;
 
     return { actions: enriched, nextCursor };
@@ -502,7 +672,7 @@ export const getActionWithContext = query({
       senderName: string | null;
       senderContactId: Id<"contacts"> | null;
       status?: string | null;
-      reactions: Doc<"messages">["reactions"];
+      reactions: Doc<"messages">["reactions"] | string[] | null;
     };
 
     // Resolve sender names for messages
@@ -524,7 +694,7 @@ export const getActionWithContext = query({
           senderName,
           senderContactId: msg.senderContactId ?? null,
           status: msg.status,
-          reactions: msg.reactions,
+          reactions: normalizeReactionEmojis(msg.reactions),
         };
       })
     );
@@ -548,6 +718,7 @@ export const getActionWithContext = query({
         type: action.type,
         status: action.status,
         priority: action.priority,
+        summary: action.summary ?? resolveActionSummary(action.type),
         reason: action.reason ?? null,
         llmReason: action.llmReason ?? null,
         createdAt: action.createdAt,
@@ -709,5 +880,72 @@ export const swipeAction = mutation({
     };
 
     return response;
+  },
+});
+
+/**
+ * Discard multiple actions in a single mutation.
+ * Used by multi-select UI to apply one atomic update instead of many requests.
+ */
+export const discardActionsBulk = mutation({
+  args: {
+    actionIds: v.array(v.id("actions")),
+  },
+  handler: async (ctx, args) => {
+    const user = await requireAuthenticatedUser(ctx);
+    const now = Date.now();
+
+    const actionIds = [...new Set(args.actionIds)] as Id<"actions">[];
+    if (actionIds.length === 0) {
+      return { success: true, discardedCount: 0, pendingDiscardedCount: 0 };
+    }
+
+    const actions = await Promise.all(actionIds.map((actionId) => ctx.db.get(actionId)));
+
+    // Validate ownership up front so the mutation is all-or-nothing.
+    for (const action of actions) {
+      if (!action || action.userId !== user._id) {
+        throw new Error("Action not found");
+      }
+    }
+
+    let pendingDiscardedCount = 0;
+
+    for (let i = 0; i < actions.length; i += 1) {
+      const action = actions[i];
+      const actionId = actionIds[i];
+      if (!action) continue;
+
+      const result = await executeSwipeHandler(
+        action.type,
+        "left",
+        { ctx, user, action, now }
+      );
+
+      if (result.status !== "discarded") {
+        throw new Error(
+          `Left swipe returned unexpected status '${result.status}' for action type '${action.type}'`
+        );
+      }
+
+      await ctx.db.patch(actionId, {
+        status: "discarded",
+        discardedAt: now,
+      });
+
+      if (action.status === "pending") {
+        pendingDiscardedCount += 1;
+      }
+    }
+
+    if (pendingDiscardedCount > 0) {
+      await adjustPendingActionCount(ctx, user._id, -pendingDiscardedCount);
+    }
+
+    return {
+      success: true,
+      discardedCount: actionIds.length,
+      pendingDiscardedCount,
+    };
   },
 });

@@ -13,6 +13,7 @@ import {
   mutation,
 } from "./_generated/server";
 import { internal } from "./_generated/api";
+import { resolveActionSummary } from "./lib/actionSummary";
 import { platformValidator } from "./schema";
 
 // Constants
@@ -479,6 +480,7 @@ export const createEODContactAction = internalMutation({
       contactId: args.contactId,
       conversationId: args.conversationId,
       platform: args.platform,
+      summary: resolveActionSummary("eod_contact"),
       reason: args.reason ?? "New contact needs enrichment",
       createdAt: Date.now(),
     });
@@ -600,4 +602,3 @@ export const scanAllUsersForNewContacts = internalMutation({
     };
   },
 });
-

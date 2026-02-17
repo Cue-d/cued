@@ -1,6 +1,6 @@
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState } from "react"
 import { Command as CommandPrimitive } from "cmdk"
-import { Check, ListFilter } from "lucide-react"
+import { Check, Filter } from 'lucide-react'
 import { createPortal } from "react-dom"
 import { PLATFORM_CONFIG, type ActionPlatform } from "@cued/shared"
 import { ACTION_FILTER_GROUPS, getGroupCount, type FilterGroup, cn, PlatformIcon, Tooltip, TooltipTrigger, TooltipContent } from "@cued/ui"
@@ -231,7 +231,7 @@ export const ActionFilterDropdown = forwardRef<ActionFilterDropdownRef, ActionFi
                         )}
                       >
                         <span className="flex items-center justify-center w-3.5 shrink-0">
-                          {isActive && <Check className="h-3.5 w-3.5" />}
+                          {isActive && <Check size={14} strokeWidth={1.5} />}
                         </span>
                         <span className="flex-1 min-w-0">{config.label}</span>
                         <span className="text-muted-foreground/60 text-xs tabular-nums">
@@ -270,7 +270,7 @@ export const ActionFilterDropdown = forwardRef<ActionFilterDropdownRef, ActionFi
                         >
                           <span className="flex items-center justify-center w-3.5 shrink-0">
                             {isActive ? (
-                              <Check className="h-3.5 w-3.5" />
+                              <Check size={14} strokeWidth={1.5} />
                             ) : (
                               <PlatformIcon platform={platform} className={cn("h-3.5 w-3.5", config.textClass)} />
                             )}
@@ -307,7 +307,7 @@ export const ActionFilterDropdown = forwardRef<ActionFilterDropdownRef, ActionFi
                         )}
                       >
                         <span className="flex items-center justify-center w-3.5 shrink-0">
-                          {toggle.active && <Check className="h-3.5 w-3.5" />}
+                          {toggle.active && <Check size={14} strokeWidth={1.5} />}
                         </span>
                         <span className="flex-1 min-w-0">{toggle.label}</span>
                       </CommandPrimitive.Item>
@@ -341,7 +341,7 @@ export const ActionFilterDropdown = forwardRef<ActionFilterDropdownRef, ActionFi
           data-state={open ? "open" : "closed"}
           render={<button ref={triggerRef} type="button" />}
         >
-          <ListFilter className="h-4 w-4" />
+          <Filter size={16} strokeWidth={1.5} />
           {filteredCount !== undefined && filteredCount > 0 && (
             <span className="absolute -top-1 -right-2 flex items-center justify-center tabular-nums tracking-tight p-0.75 rounded-full bg-primary text-primary-foreground text-[10px] font-semibold leading-none">
               {filteredCount > 99 ? "99+" : filteredCount}

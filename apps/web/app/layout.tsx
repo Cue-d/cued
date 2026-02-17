@@ -14,6 +14,19 @@ export const metadata: Metadata = {
   title: "Cued",
   description:
     "Cloud-based personal relationship manager for iMessage, Slack, and LinkedIn",
+  icons: {
+    icon: [
+      { url: "/favicon.ico" },
+      {
+        url: "/favicon-light.ico",
+        media: "(prefers-color-scheme: light)",
+      },
+      {
+        url: "/favicon-dark.ico",
+        media: "(prefers-color-scheme: dark)",
+      },
+    ],
+  },
 };
 
 export default function RootLayout({

@@ -42,4 +42,41 @@ describe("InboxMessageBubble", () => {
 
     expect(screen.queryByText("👍")).not.toBeInTheDocument();
   });
+
+  it("parses Slack links and mentions", () => {
+    render(
+      <InboxMessageBubble
+        message={{
+          ...baseMessage,
+          platform: "slack",
+          content:
+            "See <https://example.com/path?x=1&amp;y=2|Example &amp; Co> and ping <@U12345|alice>",
+        }}
+      />
+    );
+
+    const link = screen.getByRole("link", { name: "Example & Co" });
+    expect(link).toHaveAttribute("href", "https://example.com/path?x=1&y=2");
+    expect(screen.getByText("@alice")).toBeInTheDocument();
+  });
+
+  it("parses unlabeled Slack links", () => {
+    render(
+      <InboxMessageBubble
+        message={{
+          ...baseMessage,
+          platform: "slack",
+          content: "Docs: <https://example.com/docs/getting-started>",
+        }}
+      />
+    );
+
+    const link = screen.getByRole("link", {
+      name: "example.com/docs/getting-started",
+    });
+    expect(link).toHaveAttribute(
+      "href",
+      "https://example.com/docs/getting-started"
+    );
+  });
 });

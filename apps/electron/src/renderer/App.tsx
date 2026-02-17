@@ -10,7 +10,8 @@ import {
   Skeleton,
 } from "@cued/ui"
 import { type ActionPlatform } from "@cued/shared"
-import { useAuthState, useAutoUpdater, useConvexClient, useLinkedIn, useTwitter, useSlack, useSignal } from "./hooks/use-electron"
+import { Toaster } from "sonner"
+import { useAuthState, useAutoUpdater, useConvexClient, useLinkedIn, useTwitter, useSlack, useSignal, useElectron } from "./hooks/use-electron"
 import { ThemeProvider } from "./hooks/use-theme"
 import { AppShell, type NavPage } from "./components/app-shell"
 import { FocusProvider } from "./context/FocusContext"
@@ -22,7 +23,7 @@ import { getOrCreateConvexClient } from "./lib/convex-client-singleton"
 import { initPostHog, posthog, POSTHOG_KEY } from "./lib/posthog"
 import { OnboardingWizard } from "./components/onboarding/OnboardingWizard"
 
-const ONBOARDING_COMPLETE_KEY = "cued-onboarding-complete"
+const LEGACY_ONBOARDING_COMPLETE_KEY = "cued-onboarding-complete"
 
 /**
  * Auth hook for ConvexProviderWithAuth.
@@ -63,19 +64,65 @@ function UpdateBanner() {
 }
 
 function AuthenticatedApp({ convexUrl, user, onSignOut }: { convexUrl: string; user?: { id: string; firstName?: string | null; lastName?: string | null; email?: string | null } | null; onSignOut: () => void }) {
-  const [onboardingComplete, setOnboardingComplete] = useState(
-    () => localStorage.getItem(ONBOARDING_COMPLETE_KEY) === "true"
-  )
+  const electron = useElectron()
+  const [onboardingComplete, setOnboardingComplete] = useState(false)
+  const [onboardingStateLoading, setOnboardingStateLoading] = useState(true)
   const [currentPage, setCurrentPage] = useState<NavPage>("actions")
   const [actionCount, setActionCount] = useState(0)
   const [settingsSubpage, setSettingsSubpage] = useState<SettingsSubpage>('general')
   const [pendingContactId, setPendingContactId] = useState<string | null>(null)
   const convex = useMemo(() => getOrCreateConvexClient(convexUrl), [convexUrl])
 
-  const handleOnboardingComplete = useCallback(() => {
-    localStorage.setItem(ONBOARDING_COMPLETE_KEY, "true")
+  useEffect(() => {
+    let cancelled = false
+
+    const loadOnboardingState = async () => {
+      try {
+        const completed = await electron.settings.getOnboardingCompleted()
+        if (completed) {
+          if (!cancelled) setOnboardingComplete(true)
+          return
+        }
+
+        // One-time migration path from the older renderer-localStorage key.
+        const legacyCompleted = localStorage.getItem(LEGACY_ONBOARDING_COMPLETE_KEY) === "true"
+        if (legacyCompleted) {
+          try {
+            await electron.settings.setOnboardingCompleted(true)
+            localStorage.removeItem(LEGACY_ONBOARDING_COMPLETE_KEY)
+          } catch (error) {
+            console.warn("[Onboarding] Failed to migrate onboarding completion state:", error)
+          }
+        }
+
+        if (!cancelled) setOnboardingComplete(legacyCompleted)
+      } catch (error) {
+        console.warn("[Onboarding] Failed to load onboarding completion state:", error)
+        if (!cancelled) {
+          setOnboardingComplete(localStorage.getItem(LEGACY_ONBOARDING_COMPLETE_KEY) === "true")
+        }
+      } finally {
+        if (!cancelled) setOnboardingStateLoading(false)
+      }
+    }
+
+    void loadOnboardingState()
+
+    return () => {
+      cancelled = true
+    }
+  }, [electron])
+
+  const handleOnboardingComplete = useCallback(async () => {
+    try {
+      await electron.settings.setOnboardingCompleted(true)
+      localStorage.removeItem(LEGACY_ONBOARDING_COMPLETE_KEY)
+    } catch (error) {
+      console.warn("[Onboarding] Failed to persist onboarding completion state:", error)
+      localStorage.setItem(LEGACY_ONBOARDING_COMPLETE_KEY, "true")
+    }
     setOnboardingComplete(true)
-  }, [])
+  }, [electron])
 
   // Initialize PostHog and identify user
   useEffect(() => {
@@ -144,6 +191,19 @@ function AuthenticatedApp({ convexUrl, user, onSignOut }: { convexUrl: string; u
     }
   }
 
+  if (onboardingStateLoading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center p-8">
+        <Card className="w-full max-w-md" style={{ backgroundColor: 'rgba(30,30,30,0.9)', backdropFilter: 'blur(20px)' }}>
+          <CardContent className="p-6">
+            <Skeleton className="h-8 w-40 mx-auto mb-4" />
+            <Skeleton className="h-4 w-56 mx-auto" />
+          </CardContent>
+        </Card>
+      </div>
+    )
+  }
+
   if (!onboardingComplete) {
     return (
       <ConvexProviderWithAuth client={convex} useAuth={useElectronConvexAuth}>
@@ -195,6 +255,7 @@ export function App() {
   return (
     <ThemeProvider>
       <AppWithElectron />
+      <Toaster />
     </ThemeProvider>
   )
 }

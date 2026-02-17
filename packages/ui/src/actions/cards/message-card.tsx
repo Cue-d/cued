@@ -6,7 +6,40 @@
 import * as React from "react";
 import { MessageResponseCard } from "../../components/action-queue/message-response-card";
 import type { ActionCardProps } from "../types";
-import type { DisplayMessage } from "@cued/shared";
+import type { DisplayMessage, ActionPlatform } from "@cued/shared";
+
+function normalizeReactions(
+  reactions:
+    | Array<{ emoji?: string; name?: string; reaction?: string }>
+    | string[]
+    | null
+    | undefined
+): string[] | null {
+  if (!reactions || reactions.length === 0) return null;
+
+  const normalizeToken = (token: string): string => {
+    const trimmed = token.trim();
+    if (!trimmed) return "";
+    if (trimmed.startsWith(":") && trimmed.endsWith(":")) return trimmed;
+    if (/^[a-z0-9_+-]+$/i.test(trimmed)) return `:${trimmed}:`;
+    return trimmed;
+  };
+
+  if (typeof reactions[0] === "string") {
+    return (reactions as string[])
+      .map((emoji) => normalizeToken(emoji))
+      .filter(
+      (emoji): emoji is string => typeof emoji === "string" && emoji.length > 0
+    );
+  }
+
+  return (reactions as Array<{ emoji?: string; name?: string; reaction?: string }>)
+    .map((reaction) => {
+      const raw = reaction?.emoji ?? reaction?.name ?? reaction?.reaction;
+      return typeof raw === "string" ? normalizeToken(raw) : "";
+    })
+    .filter((emoji): emoji is string => typeof emoji === "string" && emoji.length > 0);
+}
 
 /**
  * Message card for respond/follow_up/send_message actions.
@@ -25,10 +58,15 @@ export function MessageCard({
   openInApp,
   onLinkClick,
   onContactClick,
+  hasMore,
+  onLoadMore,
+  isLoadingMore,
+  readOnly,
 }: ActionCardProps) {
   // For top card with context, render with full data
   if (isTop && context) {
     const { contact, conversation, messages, participants } = context;
+    const platform = (action.platform ?? conversation?.platform ?? null) as ActionPlatform | null;
 
     // For groups/channels, use conversation displayName; for DMs use contact
     const isGroup = conversation?.conversationType !== "dm";
@@ -45,7 +83,7 @@ export function MessageCard({
       senderName: msg.senderName,
       senderContactId: msg.senderContactId,
       status: msg.status,
-      reactions: msg.reactions?.map((r) => r.emoji) ?? null,
+      reactions: normalizeReactions(msg.reactions),
     }));
 
     // Get message timestamp from latest non-self message
@@ -57,18 +95,25 @@ export function MessageCard({
         personName={personName}
         messageTimestamp={messageTimestamp}
         messages={displayMessages}
-        responseText={responseText}
-        onResponseChange={onResponseChange}
-        onSend={onSend}
-        onDismiss={onDismiss}
+        responseText={readOnly ? "" : responseText}
+        onResponseChange={readOnly ? () => {} : onResponseChange}
+        onSend={readOnly ? undefined : onSend}
+        onDismiss={readOnly ? undefined : onDismiss}
         isSending={isSending}
-        autoFocus={autoFocus}
+        autoFocus={readOnly ? false : autoFocus}
         className={className}
+        platform={platform ?? undefined}
         openInApp={openInApp}
         onLinkClick={onLinkClick}
         participants={participants}
         contactId={contact?._id}
         onContactClick={onContactClick}
+        hasMore={hasMore}
+        onLoadMore={onLoadMore}
+        isLoadingMore={isLoadingMore}
+        readOnly={readOnly}
+        resolvedAt={action.completedAt ?? action.discardedAt}
+        resolvedStatus={action.status === "discarded" ? "discarded" : action.status === "completed" ? "completed" : null}
       />
     );
   }
@@ -78,17 +123,21 @@ export function MessageCard({
     <MessageResponseCard
       personName={action.contactName ?? "Unknown"}
       messages={[]}
-      responseText={responseText}
-      onResponseChange={onResponseChange}
-      onSend={onSend}
-      onDismiss={onDismiss}
+      responseText={readOnly ? "" : responseText}
+      onResponseChange={readOnly ? () => {} : onResponseChange}
+      onSend={readOnly ? undefined : onSend}
+      onDismiss={readOnly ? undefined : onDismiss}
       isSending={isSending}
       autoFocus={false}
       className={className}
+      platform={(action.platform as ActionPlatform | null) ?? undefined}
       openInApp={openInApp}
       onLinkClick={onLinkClick}
       contactId={action.contactId}
       onContactClick={onContactClick}
+      readOnly={readOnly}
+      resolvedAt={action.completedAt ?? action.discardedAt}
+      resolvedStatus={action.status === "discarded" ? "discarded" : action.status === "completed" ? "completed" : null}
     />
   );
 }

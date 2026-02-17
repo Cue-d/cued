@@ -1,6 +1,6 @@
 export {
   ResolveContactCard,
   type ResolveContactCardProps,
+  type MergeHandle,
 } from "./resolve-contact-card"
-export { ContactPanel, type ContactPanelProps } from "./contact-panel"
-export { SourceBadge, type MergeSource, type SourceBadgeProps } from "./source-badge"
+export { type MergeSource, type SourceBadgeProps, formatSource } from "./source-badge"

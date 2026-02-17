@@ -169,8 +169,7 @@ export {
 } from "./components/ai-elements/suggestion"
 
 export { AppSidebar } from "./components/app-sidebar"
-export { CuedLogo, CuedLogoLoading } from "./components/cued-logo"
-export { CuedLogoStatic, CuedLogoMono } from "./components/cued-logo-static"
+export { CuedMark } from "./components/cued-mark"
 export { CommandMenu } from "./components/command-menu"
 export {
   MessageQueueStatus,

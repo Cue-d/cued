@@ -4,7 +4,6 @@ import { cn } from "../../lib/utils";
 import {
   Conversation,
   ConversationContent,
-  ConversationEmptyState,
   ConversationScrollButton,
 } from "../ai-elements/conversation";
 import {
@@ -78,45 +77,20 @@ export function AssistantView({
   const isEmpty = messages.length === 0;
 
   return (
-    <div className={cn("flex h-full flex-col", className)}>
-      <Conversation className="flex-1">
+    <div className={cn("flex h-full min-h-0 flex-col", className)}>
+      <Conversation className="min-h-0 flex-1">
         <ConversationContent className="mx-auto max-w-2xl gap-6 px-4 py-8">
-          {isEmpty ? (
-            <ConversationEmptyState className="py-16">
-              <h2 className="mb-3 text-2xl font-semibold tracking-tight text-foreground">
-                Personal Assistant
-              </h2>
-              <p className="mb-8 max-w-md text-center text-[15px] leading-relaxed text-muted-foreground">
-                Ask about your conversations, contacts, and relationships. I can
-                search messages, create follow-ups, and help you stay connected.
-              </p>
-
-              <Suggestions className="justify-center">
-                {suggestedPrompts.map((prompt) => (
-                  <Suggestion
-                    key={prompt.title}
-                    suggestion={prompt.prompt}
-                    onClick={onInputChange}
-                    className="bg-muted/50 hover:bg-muted"
-                  >
-                    {prompt.title}
-                  </Suggestion>
-                ))}
-              </Suggestions>
-            </ConversationEmptyState>
-          ) : (
-            messages.map((message, index) => (
-              <ChatMessage
-                key={message.id}
-                message={message}
-                isStreaming={
-                  isLoading &&
-                  message.role === "assistant" &&
-                  index === messages.length - 1
-                }
-              />
-            ))
-          )}
+          {messages.map((message, index) => (
+            <ChatMessage
+              key={message.id}
+              message={message}
+              isStreaming={
+                isLoading &&
+                message.role === "assistant" &&
+                index === messages.length - 1
+              }
+            />
+          ))}
 
           {error && (
             <div className="rounded-xl border border-destructive/20 bg-destructive/5 px-4 py-3 text-sm text-destructive backdrop-blur-sm">
@@ -127,8 +101,22 @@ export function AssistantView({
         <ConversationScrollButton />
       </Conversation>
 
-      <div className="p-2">
+      <div className="shrink-0 p-2">
         <div className="mx-auto max-w-2xl">
+          {isEmpty && (
+            <Suggestions className="justify-center mb-2">
+              {suggestedPrompts.map((prompt) => (
+                <Suggestion
+                  key={prompt.title}
+                  suggestion={prompt.prompt}
+                  onClick={onInputChange}
+                  className="bg-muted/50 hover:bg-muted"
+                >
+                  {prompt.title}
+                </Suggestion>
+              ))}
+            </Suggestions>
+          )}
           <PromptInput
             accept="image/*"
             className="border border-border/60 bg-background/80 rounded-lg backdrop-blur-sm transition-all focus-within:border-primary/40 focus-within:shadow-md focus-within:shadow-primary/5 [&>[data-slot=input-group]]:border-0 [&>[data-slot=input-group]]:shadow-none [&>[data-slot=input-group]]:bg-transparent"

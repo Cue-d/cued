@@ -485,6 +485,103 @@ describe("actions API", () => {
     });
   });
 
+  describe("getActionHistory query", () => {
+    it("does not skip actions when multiple items share the same resolution timestamp", async () => {
+      const t = convexTest(schema, modules);
+      const { asUser, userId } = await setupAuthenticatedUser(t);
+
+      await t.run(async (ctx) => {
+        await ctx.db.insert("actions", createTestActionData(userId, {
+          status: "completed",
+          createdAt: 300,
+        }));
+        await ctx.db.insert("actions", createTestActionData(userId, {
+          status: "discarded",
+          createdAt: 200,
+        }));
+        await ctx.db.insert("actions", createTestActionData(userId, {
+          status: "discarded",
+          createdAt: 100,
+        }));
+        await ctx.db.insert("actions", createTestActionData(userId, {
+          status: "discarded",
+          createdAt: 100,
+        }));
+        await ctx.db.insert("actions", createTestActionData(userId, {
+          status: "completed",
+          createdAt: 100,
+        }));
+        await ctx.db.insert("actions", createTestActionData(userId, {
+          status: "discarded",
+          createdAt: 50,
+        }));
+      });
+
+      const page1 = await asUser.query(api.actions.getActionHistory, { limit: 3 });
+      expect(page1.actions).toHaveLength(3);
+      expect(page1.nextCursor).toBeTruthy();
+
+      const page2 = await asUser.query(api.actions.getActionHistory, {
+        limit: 3,
+        cursor: page1.nextCursor as any,
+      });
+      expect(page2.actions).toHaveLength(3);
+
+      const allActions = [...page1.actions, ...page2.actions];
+      const uniqueIds = new Set(allActions.map((action) => action._id));
+      expect(uniqueIds.size).toBe(6);
+
+      const hundredCount = allActions.filter((action) => {
+        const resolvedAt =
+          action.completedAt ?? action.discardedAt ?? action.createdAt;
+        return resolvedAt === 100;
+      }).length;
+      expect(hundredCount).toBe(3);
+    });
+
+    it("legacy number cursor does not duplicate page boundary items", async () => {
+      const t = convexTest(schema, modules);
+      const { asUser, userId } = await setupAuthenticatedUser(t);
+
+      await t.run(async (ctx) => {
+        await ctx.db.insert("actions", createTestActionData(userId, {
+          status: "completed",
+          createdAt: 400,
+        }));
+        await ctx.db.insert("actions", createTestActionData(userId, {
+          status: "discarded",
+          createdAt: 300,
+        }));
+        await ctx.db.insert("actions", createTestActionData(userId, {
+          status: "completed",
+          createdAt: 200,
+        }));
+        await ctx.db.insert("actions", createTestActionData(userId, {
+          status: "discarded",
+          createdAt: 100,
+        }));
+      });
+
+      const page1 = await asUser.query(api.actions.getActionHistory, { limit: 2 });
+      expect(page1.actions).toHaveLength(2);
+      expect(page1.nextCursor).toBeTruthy();
+
+      const legacyCursor = (page1.nextCursor as { resolvedAt: number }).resolvedAt;
+      const page2 = await asUser.query(api.actions.getActionHistory, {
+        limit: 2,
+        cursor: legacyCursor,
+      });
+      expect(page2.actions).toHaveLength(2);
+
+      const page1LastId = page1.actions[page1.actions.length - 1]?._id;
+      const page2FirstId = page2.actions[0]?._id;
+      expect(page2FirstId).not.toEqual(page1LastId);
+
+      const allIds = [...page1.actions, ...page2.actions].map((action) => action._id);
+      expect(new Set(allIds).size).toBe(4);
+    });
+  });
+
   describe("createAction mutation", () => {
     it("throws for unauthenticated user", async () => {
       const t = convexTest(schema, modules);
@@ -509,6 +606,7 @@ describe("actions API", () => {
       expect(action?.type).toBe("respond");
       expect(action?.status).toBe("pending");
       expect(action?.priority).toBe(50); // default
+      expect(action?.summary).toBe("Reply needed");
       expect(action?.userId).toEqual(userId);
     });
 
@@ -539,6 +637,7 @@ describe("actions API", () => {
       expect(action?.type).toBe("follow_up");
       expect(action?.priority).toBe(75);
       expect(action?.platform).toBe("imessage");
+      expect(action?.summary).toBe("Follow up");
       expect(action?.reason).toBe("Needs follow up");
       expect(action?.llmReason).toBe("AI determined follow up needed");
     });
@@ -952,6 +1051,133 @@ describe("actions API", () => {
 
       const user = await t.run(async (ctx) => ctx.db.get(userId));
       expect(user?.pendingActionCount).toBe(0);
+    });
+  });
+
+  describe("discardActionsBulk mutation", () => {
+    it("throws for unauthenticated user", async () => {
+      const t = convexTest(schema, modules);
+
+      const actionId = await t.run(async (ctx) => {
+        const userId = await ctx.db.insert("users", createTestUserData());
+        return ctx.db.insert("actions", createTestActionData(userId));
+      });
+
+      await expect(
+        t.mutation(api.actions.discardActionsBulk, {
+          actionIds: [actionId],
+        })
+      ).rejects.toThrow("Unauthorized");
+    });
+
+    it("discards multiple actions in one mutation and adjusts pending count once", async () => {
+      const t = convexTest(schema, modules);
+      const { asUser, userId } = await setupAuthenticatedUser(t);
+
+      await t.run(async (ctx) => {
+        await ctx.db.patch(userId, { pendingActionCount: 2 });
+      });
+
+      const { pendingActionId, snoozedActionId } = await t.run(async (ctx) => {
+        const pendingActionId = await ctx.db.insert("actions", createTestActionData(userId, {
+          status: "pending",
+          type: "respond",
+        }));
+        const snoozedActionId = await ctx.db.insert("actions", createTestActionData(userId, {
+          status: "snoozed",
+          type: "follow_up",
+        }));
+        return { pendingActionId, snoozedActionId };
+      });
+
+      const result = await asUser.mutation(api.actions.discardActionsBulk, {
+        actionIds: [pendingActionId, snoozedActionId],
+      });
+
+      expect(result.success).toBe(true);
+      expect(result.discardedCount).toBe(2);
+      expect(result.pendingDiscardedCount).toBe(1);
+
+      const [pendingAction, snoozedAction, user] = await t.run(async (ctx) =>
+        Promise.all([
+          ctx.db.get(pendingActionId),
+          ctx.db.get(snoozedActionId),
+          ctx.db.get(userId),
+        ])
+      );
+
+      expect(pendingAction?.status).toBe("discarded");
+      expect(pendingAction?.discardedAt).toBeTruthy();
+      expect(snoozedAction?.status).toBe("discarded");
+      expect(snoozedAction?.discardedAt).toBeTruthy();
+      expect(user?.pendingActionCount).toBe(1);
+    });
+
+    it("deduplicates repeated action IDs", async () => {
+      const t = convexTest(schema, modules);
+      const { asUser, userId } = await setupAuthenticatedUser(t);
+
+      await t.run(async (ctx) => {
+        await ctx.db.patch(userId, { pendingActionCount: 1 });
+      });
+
+      const actionId = await t.run(async (ctx) =>
+        ctx.db.insert("actions", createTestActionData(userId, {
+          status: "pending",
+          type: "respond",
+        }))
+      );
+
+      const result = await asUser.mutation(api.actions.discardActionsBulk, {
+        actionIds: [actionId, actionId],
+      });
+
+      expect(result.success).toBe(true);
+      expect(result.discardedCount).toBe(1);
+      expect(result.pendingDiscardedCount).toBe(1);
+
+      const user = await t.run(async (ctx) => ctx.db.get(userId));
+      expect(user?.pendingActionCount).toBe(0);
+    });
+
+    it("fails atomically when any action is unauthorized", async () => {
+      const t = convexTest(schema, modules);
+      const { asUser, userId } = await setupAuthenticatedUser(t);
+
+      await t.run(async (ctx) => {
+        await ctx.db.patch(userId, { pendingActionCount: 1 });
+      });
+
+      const { ownActionId, otherUserActionId } = await t.run(async (ctx) => {
+        const ownActionId = await ctx.db.insert("actions", createTestActionData(userId, {
+          status: "pending",
+          type: "respond",
+        }));
+        const otherUserId = await ctx.db.insert("users", createTestUserData({
+          workosUserId: "other_user_for_bulk_discard",
+        }));
+        const otherUserActionId = await ctx.db.insert(
+          "actions",
+          createTestActionData(otherUserId, {
+            status: "pending",
+            type: "respond",
+          })
+        );
+        return { ownActionId, otherUserActionId };
+      });
+
+      await expect(
+        asUser.mutation(api.actions.discardActionsBulk, {
+          actionIds: [ownActionId, otherUserActionId],
+        })
+      ).rejects.toThrow("Action not found");
+
+      const [ownAction, user] = await t.run(async (ctx) =>
+        Promise.all([ctx.db.get(ownActionId), ctx.db.get(userId)])
+      );
+
+      expect(ownAction?.status).toBe("pending");
+      expect(user?.pendingActionCount).toBe(1);
     });
   });
 

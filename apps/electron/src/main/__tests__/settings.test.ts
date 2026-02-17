@@ -54,6 +54,7 @@ describe("SettingsManager", () => {
       expect(manager.getAutoLaunch()).toBe(false);
       expect(manager.getStartMinimized()).toBe(false);
       expect(manager.getPreventSleepWhileSyncing()).toBe(true);
+      expect(manager.getOnboardingCompleted()).toBe(false);
     });
 
     it("uses default settings if file read fails", () => {
@@ -74,6 +75,7 @@ describe("SettingsManager", () => {
       expect(settings).toHaveProperty("autoLaunchEnabled");
       expect(settings).toHaveProperty("startMinimized");
       expect(settings).toHaveProperty("preventSleepWhileSyncing");
+      expect(settings).toHaveProperty("onboardingCompleted");
     });
 
     it("returns a copy of settings", () => {
@@ -196,6 +198,33 @@ describe("SettingsManager", () => {
         const content = String(lastCall[1]);
         expect(content).toContain('"syncHistoryDays"');
         expect(content).toContain("180");
+      });
+    });
+  });
+
+  describe("onboarding completion settings", () => {
+    describe("getOnboardingCompleted()", () => {
+      it("returns false by default", () => {
+        expect(settingsManager.getOnboardingCompleted()).toBe(false);
+      });
+    });
+
+    describe("setOnboardingCompleted()", () => {
+      it("marks onboarding as completed", () => {
+        settingsManager.setOnboardingCompleted(true);
+        expect(settingsManager.getOnboardingCompleted()).toBe(true);
+      });
+
+      it("saves settings to disk", () => {
+        settingsManager.setOnboardingCompleted(true);
+
+        expect(fs.writeFileSync).toHaveBeenCalled();
+        const calls = vi.mocked(fs.writeFileSync).mock.calls;
+        const lastCall = calls[calls.length - 1];
+        expect(String(lastCall[0])).toContain("settings.json");
+        const content = String(lastCall[1]);
+        expect(content).toContain('"onboardingCompleted"');
+        expect(content).toContain("true");
       });
     });
   });
@@ -360,6 +389,24 @@ describe("SettingsManager", () => {
 
       expect(ipcMain.handle).toHaveBeenCalledWith(
         "settings:setSyncHistoryDays",
+        expect.any(Function)
+      );
+    });
+
+    it("registers settings:getOnboardingCompleted handler", () => {
+      settingsManager.setupIpcHandlers();
+
+      expect(ipcMain.handle).toHaveBeenCalledWith(
+        "settings:getOnboardingCompleted",
+        expect.any(Function)
+      );
+    });
+
+    it("registers settings:setOnboardingCompleted handler", () => {
+      settingsManager.setupIpcHandlers();
+
+      expect(ipcMain.handle).toHaveBeenCalledWith(
+        "settings:setOnboardingCompleted",
         expect.any(Function)
       );
     });

@@ -1,15 +1,13 @@
 import {
   Inbox,
-  MessageSquare,
+  MessageCircle,
   Users,
-  HelpCircle,
-  PanelLeftClose,
   Settings,
   Puzzle,
   Keyboard,
   LogOut,
-  MessageCircle,
-  BookOpen,
+  MessageSquare,
+  PanelLeft,
   type LucideIcon,
 } from 'lucide-react'
 import {
@@ -20,10 +18,8 @@ import {
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuSeparator,
-  DropdownMenuShortcut,
 } from '@cued/ui'
 import { type ActionPlatform } from '@cued/shared'
-import { IntegrationsMenu } from './IntegrationsMenu'
 import { type UserProfile } from './types'
 
 export type NavPage = 'actions' | 'assistant' | 'contacts' | 'settings'
@@ -36,7 +32,7 @@ interface NavItem {
 
 const NAV_ITEMS: NavItem[] = [
   { id: 'actions', title: 'Actions', icon: Inbox },
-  { id: 'assistant', title: 'Assistant', icon: MessageSquare },
+  { id: 'assistant', title: 'Assistant', icon: MessageCircle },
   { id: 'contacts', title: 'Contacts', icon: Users },
 ]
 
@@ -55,9 +51,9 @@ interface LeftSidebarProps {
   user?: UserProfile | null
   /** Callback to toggle sidebar visibility */
   onToggle?: () => void
-  /** Connected platforms for integrations menu */
+  /** Connected platforms for integrations UI */
   connectedPlatforms?: ActionPlatform[]
-  /** Callback when a platform is clicked in integrations menu */
+  /** Callback when an integration platform is clicked */
   onPlatformClick?: (platform: ActionPlatform) => void
 }
 
@@ -74,8 +70,6 @@ export function LeftSidebar({
   isCollapsed = false,
   user,
   onToggle,
-  connectedPlatforms,
-  onPlatformClick,
 }: LeftSidebarProps) {
   const getBadgeCount = (id: NavPage): number | undefined => {
     switch (id) {
@@ -96,10 +90,10 @@ export function LeftSidebar({
       {onToggle && (
         <button
           onClick={onToggle}
-          className="no-drag absolute top-2 right-2 flex items-center justify-center h-6 w-6 rounded-[6px] text-foreground/60 hover:text-foreground hover:bg-foreground/5 focus:outline-none focus-visible:ring-1 focus-visible:ring-ring z-50 cursor-pointer"
+          className="no-drag absolute opacity-70 hover:opacity-100 transition-opacity top-2 right-2 flex items-center justify-center h-6 w-6 rounded-md hover:bg-foreground/5 focus:outline-none focus-visible:ring-1 focus-visible:ring-ring z-50 cursor-pointer"
           title="Toggle sidebar (⌘B)"
         >
-          <PanelLeftClose className="h-3.5 w-3.5" />
+          <PanelLeft size={14} strokeWidth={2} />
         </button>
       )}
 
@@ -108,7 +102,6 @@ export function LeftSidebar({
         <nav className="grid gap-0.5" role="navigation" aria-label="Main navigation">
           {NAV_ITEMS.map((item) => {
             const isActive = currentPage === item.id
-            const Icon = item.icon
             const badgeCount = getBadgeCount(item.id)
 
             return (
@@ -120,15 +113,13 @@ export function LeftSidebar({
                   'focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-ring',
                   'py-[5px] px-2',
                   isActive
-                    ? 'bg-sidebar-accent/50'
-                    : 'hover:bg-sidebar-accent/50'
+                    ? 'bg-foreground/10 font-medium text-foreground'
+                    : 'text-foreground/70 hover:bg-foreground/5 hover:text-foreground'
                 )}
               >
                 <span className="h-3.5 w-3.5 shrink-0 flex items-center justify-center">
-                  <Icon className="h-3.5 w-3.5" />
+                  <item.icon size={14} strokeWidth={2} className={cn(isActive && "text-foreground")} />
                 </span>
-                {!isCollapsed && (
-                  <>
                     <span className="flex-1 text-left">{item.title}</span>
                     {badgeCount !== undefined && badgeCount > 0 && (
                       <Badge
@@ -138,33 +129,21 @@ export function LeftSidebar({
                         {badgeCount > 99 ? '99+' : badgeCount}
                       </Badge>
                     )}
-                  </>
-                )}
               </button>
             )
           })}
         </nav>
       </div>
 
-      {/* Integrations Menu - above bottom section */}
-      {!isCollapsed && (
-        <IntegrationsMenu
-          connectedPlatforms={connectedPlatforms}
-          onPlatformClick={onPlatformClick}
-        />
-      )}
-
-      {/* Bottom Section: Profile + Help */}
+      {/* Bottom Section: Profile */}
       <div className="mt-auto shrink-0 py-2 px-2">
-        <div className="flex items-center gap-1">
-          {/* Profile dropdown */}
-          <DropdownMenu>
+        {/* Profile dropdown */}
+        <DropdownMenu>
             <DropdownMenuTrigger
               className={cn(
                 'flex items-center gap-2 cursor-pointer flex-1 min-w-0 px-2 py-1.5 rounded-md',
                 'text-foreground hover:bg-foreground/5',
                 'focus:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2',
-                isCollapsed && 'h-9 w-9 shrink-0 justify-center p-0'
               )}
             >
               <div className="h-5 w-5 rounded-full bg-foreground text-background text-[10px] font-medium flex items-center justify-center shrink-0 ring-1 ring-border/50">
@@ -174,46 +153,29 @@ export function LeftSidebar({
             </DropdownMenuTrigger>
             <DropdownMenuContent side="top" align="start" sideOffset={8} className="min-w-[180px]">
               <DropdownMenuItem onClick={() => onNavigate('settings')}>
-                <Settings className="h-4 w-4" />
+                <Settings size={16} strokeWidth={1.75} />
                 Settings
               </DropdownMenuItem>
               <DropdownMenuItem onClick={onNavigateToIntegrations}>
-                <Puzzle className="h-4 w-4" />
+                <Puzzle size={16} strokeWidth={1.75} />
                 Integrations
               </DropdownMenuItem>
               <DropdownMenuItem onClick={onNavigateToShortcuts}>
-                <Keyboard className="h-4 w-4" />
+                <Keyboard size={16} strokeWidth={1.75} />
                 Shortcuts
               </DropdownMenuItem>
               <DropdownMenuSeparator />
+              <DropdownMenuItem disabled>
+                <MessageSquare size={16} strokeWidth={1.75} />
+                Feedback
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
               <DropdownMenuItem variant="destructive" onClick={onSignOut}>
-                <LogOut className="h-4 w-4" />
+                <LogOut size={16} strokeWidth={1.75} />
                 Sign out
               </DropdownMenuItem>
             </DropdownMenuContent>
-          </DropdownMenu>
-
-          {/* Help dropdown */}
-          <DropdownMenu>
-            <DropdownMenuTrigger
-              className="flex items-center justify-center h-7 w-7 rounded-[6px] select-none outline-none hover:bg-foreground/5 focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-ring"
-            >
-              <HelpCircle className="h-4 w-4 text-foreground/60" />
-            </DropdownMenuTrigger>
-            <DropdownMenuContent side="top" align="end" sideOffset={8} className="min-w-[180px]">
-              <DropdownMenuItem disabled>
-                <MessageCircle className="h-4 w-4" />
-                Feedback
-                <DropdownMenuShortcut className="text-[10px] font-normal tracking-normal">Coming soon...</DropdownMenuShortcut>
-              </DropdownMenuItem>
-              <DropdownMenuItem disabled>
-                <BookOpen className="h-4 w-4" />
-                Docs
-                <DropdownMenuShortcut className="text-[10px] font-normal tracking-normal">Coming soon...</DropdownMenuShortcut>
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
-        </div>
+        </DropdownMenu>
       </div>
     </div>
   )

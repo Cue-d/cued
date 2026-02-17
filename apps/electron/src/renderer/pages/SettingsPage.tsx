@@ -13,7 +13,7 @@ import {
   Switch,
   cn,
 } from "@cued/ui"
-import { Settings, Keyboard, Sun, Moon, Monitor, Plug } from "lucide-react"
+import { Settings, Keyboard, Sun, Moon, Monitor, Plug, type LucideIcon } from 'lucide-react'
 import { useTheme, type Theme } from "../hooks/use-theme"
 import { usePermissions } from "../hooks/use-permissions"
 import { Panel, PanelHeader } from "../components/app-shell"
@@ -70,7 +70,7 @@ function SettingsToggle({
 
 export type SettingsSubpage = 'general' | 'integrations' | 'shortcuts'
 
-const themeOptions: { value: Theme; label: string; icon: React.ComponentType<{ className?: string }> }[] = [
+const themeOptions: { value: Theme; label: string; icon: LucideIcon }[] = [
   { value: "system", label: "System", icon: Monitor },
   { value: "light", label: "Light", icon: Sun },
   { value: "dark", label: "Dark", icon: Moon },
@@ -79,7 +79,7 @@ const themeOptions: { value: Theme; label: string; icon: React.ComponentType<{ c
 interface SettingsNavItem {
   id: SettingsSubpage
   label: string
-  icon: React.ComponentType<{ className?: string }>
+  icon: LucideIcon
   shortcut?: string
 }
 
@@ -299,7 +299,6 @@ function GeneralContent() {
                   <SettingsRow label="Theme">
                     <div className="flex gap-1.5">
                       {themeOptions.map((option) => {
-                        const Icon = option.icon
                         const isSelected = theme === option.value
                         return (
                           <button
@@ -313,7 +312,7 @@ function GeneralContent() {
                                 : "hover:bg-foreground/5 text-muted-foreground"
                             )}
                           >
-                            <Icon className="w-4 h-4" />
+                            <option.icon size={16} strokeWidth={1.5} />
                             <span>{option.label}</span>
                           </button>
                         )
@@ -586,7 +585,6 @@ export function SettingsPage({ subpage = 'general', onSubpageChange }: SettingsP
         <PanelHeader title="Settings" />
         <div className="flex-1 overflow-y-auto p-2 space-y-1">
           {settingsNavItems.map((item) => {
-            const Icon = item.icon
             const isSelected = activeSubpage === item.id
             return (
               <button
@@ -600,7 +598,7 @@ export function SettingsPage({ subpage = 'general', onSubpageChange }: SettingsP
                     : "hover:bg-foreground/5 text-muted-foreground"
                 )}
               >
-                <Icon className="w-4 h-4 shrink-0" />
+                <item.icon size={16} strokeWidth={1.5} className="shrink-0" />
                 <span className="flex-1 text-left">{item.label}</span>
                 {item.shortcut && (
                   <span className="text-xs text-muted-foreground">{item.shortcut}</span>

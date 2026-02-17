@@ -185,6 +185,8 @@ export interface ElectronAPI {
   settings: {
     getSyncHistoryDays: () => Promise<number>
     setSyncHistoryDays: (days: number) => Promise<number>
+    getOnboardingCompleted: () => Promise<boolean>
+    setOnboardingCompleted: (completed: boolean) => Promise<boolean>
   }
 
   versions: {

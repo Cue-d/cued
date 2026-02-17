@@ -48,22 +48,25 @@
           ]
         }
       ],
-      "expo-image"
+      "expo-image",
+      [
+        "expo-splash-screen",
+        {
+          "image": "./assets/splash-icon.png",
+          "imageWidth": 200,
+          "backgroundColor": "#ffffff",
+          "dark": {
+            "image": "./assets/splash-icon-dark.png",
+            "backgroundColor": "#1C1C1E"
+          }
+        }
+      ]
     ],
-    "splash": {
-      "image": "./assets/splash.png",
-      "resizeMode": "contain",
-      "backgroundColor": "#007AFF"
-    },
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "so.cued.app",
       "appleTeamId": "8MW6NC736H",
-      "icon": {
-        "light": "./assets/icon.png",
-        "dark": "./assets/icon-dark.png",
-        "tinted": "./assets/icon-tinted.png"
-      },
+      "icon": "./assets/cued-icon.icon",
       "entitlements": {
         "com.apple.security.application-groups": [
           "group.so.cued.app"

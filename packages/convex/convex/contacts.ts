@@ -32,6 +32,7 @@ export const getContacts = query({
       }),
     ),
     searchQuery: v.optional(v.string()),
+    namedOnly: v.optional(v.boolean()),
   },
   handler: async (ctx, args) => {
     const user = await getAuthenticatedUser(ctx);
@@ -52,9 +53,15 @@ export const getContacts = query({
         .take(limit + 1);
     } else {
       // Use alphabetical index for sorted results
+      // When namedOnly, use gte("A") to skip phone numbers/symbols that sort
+      // before alphabetic characters — they dominate early pages and get filtered
+      // out client-side, leaving the list empty.
       let contactsQuery = ctx.db
         .query("contacts")
-        .withIndex("by_user_display_name", (q) => q.eq("userId", user._id));
+        .withIndex("by_user_display_name", (q) => {
+          const builder = q.eq("userId", user._id);
+          return args.namedOnly ? builder.gte("displayName", "A") : builder;
+        });
 
       // For cursor-based pagination with alphabetical ordering:
       // Skip contacts until we pass the cursor position

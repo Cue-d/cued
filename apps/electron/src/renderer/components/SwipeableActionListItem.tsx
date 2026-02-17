@@ -1,39 +1,41 @@
-import * as React from "react"
-import { Trash2, Check } from "lucide-react"
-import {
-  motion,
-  useMotionValue,
-  useTransform,
-  animate,
-} from "motion/react"
+import * as React from "react";
+import { Clock, Trash2 } from 'lucide-react'
 import {
   type EnrichedAction,
   formatRelativeTime,
   getInitials,
   PLATFORM_CONFIG,
   type ActionPlatform,
-} from "@cued/shared"
-import { Avatar, AvatarBadge, AvatarFallback, Button, cn, PlatformIcon } from "@cued/ui"
-
-const SWIPE_THRESHOLD = 50
-const BUTTON_WIDTH = 72
-const ELASTIC_LIMIT = 12
-const DEAD_ZONE = 6
-const GESTURE_END_DELAY = 150
-// Stiff spring for smoothing wheel-event jitter during active tracking
-const TRACK_SPRING = { type: "spring" as const, stiffness: 3000, damping: 120 }
-// Softer spring for the final snap — gives it weight
-const SNAP_SPRING = { type: "spring" as const, stiffness: 500, damping: 45 }
+} from "@cued/shared";
+import {
+  Avatar,
+  AvatarBadge,
+  AvatarFallback,
+  Button,
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+  cn,
+  PlatformIcon,
+  formatSource,
+  type MergeSource,
+} from "@cued/ui";
+import { SNOOZE_OPTIONS } from "../lib/snooze-options";
+import { SwipeableListItem } from "./SwipeableListItem";
 
 interface SwipeableActionListItemProps {
-  action: EnrichedAction
-  selected: boolean
-  multiSelected?: boolean
-  showCheckbox?: boolean
-  onClick: (e: React.MouseEvent) => void
-  onDiscard: () => void
-  typeConfig: { icon: React.ReactNode; label: string }
-  onContactClick?: (contactId: string) => void
+  action: EnrichedAction;
+  selected: boolean;
+  multiSelected?: boolean;
+  showCheckbox?: boolean;
+  onClick: (e: React.MouseEvent) => void;
+  onDiscard: () => void;
+  onSnooze: (snoozedUntil: number) => void;
+  typeConfig: { icon: React.ReactNode; label: string };
+  onContactClick?: (contactId: string) => void;
+  openSwipeId?: string | null;
+  onSwipeActiveChange?: (actionId: string | null) => void;
 }
 
 export function SwipeableActionListItem({
@@ -43,208 +45,146 @@ export function SwipeableActionListItem({
   showCheckbox = false,
   onClick,
   onDiscard,
+  onSnooze,
   typeConfig,
   onContactClick,
+  openSwipeId = null,
+  onSwipeActiveChange,
 }: SwipeableActionListItemProps) {
-  const x = useMotionValue(0)
-  const buttonOpacity = useTransform(x, [-BUTTON_WIDTH, -20], [1, 0])
-  const buttonScale = useTransform(x, [-BUTTON_WIDTH, -20], [1, 0.8])
-
-  const containerRef = React.useRef<HTMLDivElement>(null)
-  const cumulativeDelta = React.useRef(0)
-  const gestureTimer = React.useRef<ReturnType<typeof setTimeout>>(undefined)
-  const revealed = React.useRef(false)
-  const gestureActive = React.useRef(false)
-
-  // Reset swipe state when the action changes
-  React.useEffect(() => {
-    revealed.current = false
-    cumulativeDelta.current = 0
-    x.jump(0)
-  }, [action._id, x])
-
-  // Respect reduced motion
-  const prefersReducedMotion = React.useMemo(
-    () => window.matchMedia("(prefers-reduced-motion: reduce)").matches,
-    []
-  )
-
-  const platform = action.platform as ActionPlatform | null
-  const platformConfig = platform ? PLATFORM_CONFIG[platform] : null
-
-  // Two-finger trackpad swipe via wheel events
-  React.useEffect(() => {
-    const el = containerRef.current
-    if (!el || prefersReducedMotion) return
-
-    const handleWheel = (e: WheelEvent) => {
-      // Only handle predominantly horizontal gestures
-      if (Math.abs(e.deltaX) <= Math.abs(e.deltaY)) return
-
-      // Accumulate horizontal delta
-      cumulativeDelta.current -= e.deltaX
-
-      // Dead zone — ignore tiny incidental horizontal movement
-      if (!gestureActive.current) {
-        if (Math.abs(cumulativeDelta.current) < DEAD_ZONE) return
-        gestureActive.current = true
-      }
-
-      e.preventDefault()
-
-      const base = revealed.current ? -BUTTON_WIDTH : 0
-      const raw = base + cumulativeDelta.current
-      // Clamp with slight elastic overshoot for natural feel
-      const clamped = Math.max(
-        -BUTTON_WIDTH - ELASTIC_LIMIT,
-        Math.min(ELASTIC_LIMIT, raw)
-      )
-      // Animate to target with stiff tracking spring — smooths wheel-event jitter
-      animate(x, clamped, TRACK_SPRING)
-
-      // Debounce gesture end detection
-      clearTimeout(gestureTimer.current)
-      gestureTimer.current = setTimeout(() => {
-        gestureActive.current = false
-        const current = x.get()
-
-        if (revealed.current) {
-          // Currently open — close if swiped right enough
-          if (current > -BUTTON_WIDTH + SWIPE_THRESHOLD) {
-            animate(x, 0, SNAP_SPRING)
-            revealed.current = false
-          } else {
-            animate(x, -BUTTON_WIDTH, SNAP_SPRING)
-          }
-        } else {
-          // Currently closed — open if swiped left enough
-          if (current < -SWIPE_THRESHOLD) {
-            animate(x, -BUTTON_WIDTH, SNAP_SPRING)
-            revealed.current = true
-          } else {
-            animate(x, 0, SNAP_SPRING)
-          }
-        }
-
-        cumulativeDelta.current = 0
-      }, GESTURE_END_DELAY)
-    }
-
-    el.addEventListener("wheel", handleWheel, { passive: false })
-    return () => {
-      el.removeEventListener("wheel", handleWheel)
-      clearTimeout(gestureTimer.current)
-    }
-  }, [x, prefersReducedMotion])
-
-  const handleClick = (e: React.MouseEvent) => {
-    // If the delete button is revealed, close it instead of selecting
-    if (revealed.current) {
-      animate(x, 0, SNAP_SPRING)
-      revealed.current = false
-      cumulativeDelta.current = 0
-      return
-    }
-    onClick(e)
+  // For resolve_contact actions, show formatted merge source instead of raw reason
+  let listSummary: string;
+  let showReason = true;
+  if (action.type === "resolve_contact" && action.mergeSource) {
+    const confidence = Math.round((action.mergeConfidence ?? 0) * 100);
+    listSummary = `${formatSource(action.mergeSource as MergeSource)} · ${confidence}%`;
+    showReason = false; // Merge info is already in the summary
+  } else {
+    listSummary = action.summary?.trim() || typeConfig.label;
   }
+
+  const platform = action.platform as ActionPlatform | null;
+  const platformConfig = platform ? PLATFORM_CONFIG[platform] : null;
 
   const handleDiscard = (e: React.MouseEvent) => {
-    e.stopPropagation()
-    onDiscard()
-  }
+    e.stopPropagation();
+    onDiscard();
+  };
+
+  const handleSnoozeSelect = (snoozedUntil: number) => {
+    onSnooze(snoozedUntil);
+  };
 
   return (
-    <motion.div
-      ref={containerRef}
-      data-action-id={action._id}
-      className="relative overflow-hidden rounded-lg mb-1"
-      layout
-      initial={{ opacity: 1 }}
-      exit={{ opacity: 0, scale: 0.95 }}
-      transition={{ duration: 0.12, ease: "easeOut" }}
-    >
-      {/* Revealed discard button */}
-      <motion.div
-        className="absolute inset-y-0 right-0 flex items-center justify-center"
-        style={{
-          width: BUTTON_WIDTH,
-          opacity: buttonOpacity,
-          scale: buttonScale,
-        }}
-      >
-        <Button
-          variant="destructive"
-          size="icon"
-          onClick={handleDiscard}
-          aria-label="Discard action"
-          className="cursor-pointer rounded-full"
-        >
-          <Trash2  />
-        </Button>
-      </motion.div>
-
-      {/* Swipeable content */}
-      <motion.button
-        type="button"
-        onClick={handleClick}
-        style={{ x }}
-        className={`relative w-full text-left px-3 py-2.5 cursor-pointer rounded-lg bg-background ${
-          selected || multiSelected ? "bg-muted" : "hover:bg-muted"
-        }`}
-      >
-        <div className="flex items-start gap-3">
-          {showCheckbox ? (
-            <div
-              className={`size-6 rounded-full flex items-center justify-center shrink-0 transition-colors ${
-                multiSelected
-                  ? "bg-primary text-primary-foreground"
-                  : "bg-muted border border-border"
-              }`}
-            >
-              {multiSelected && <Check className="size-3" />}
-            </div>
-          ) : (
-            <Avatar>
-              <AvatarFallback className={platformConfig?.bgClass}>
-                {getInitials(action.contactName ?? "")}
-              </AvatarFallback>
-              {platformConfig && platform && (
-                <AvatarBadge className={cn(platformConfig.bgClass, "size-4! [&>svg]:size-2.5! ring-0!")}>
-                  <PlatformIcon platform={platform}/>
-                </AvatarBadge>
+    <SwipeableListItem
+      itemId={action._id}
+      selected={selected}
+      multiSelected={multiSelected}
+      showCheckbox={showCheckbox}
+      onClick={onClick}
+      openSwipeId={openSwipeId}
+      onSwipeActiveChange={onSwipeActiveChange}
+      leftAction={{
+        label: "Remind Me",
+        control: (
+          <DropdownMenu>
+            <DropdownMenuTrigger
+              aria-label="Snooze action"
+              onClick={(e) => e.stopPropagation()}
+              className={cn(
+                "inline-flex size-9 cursor-pointer items-center justify-center rounded-full",
+                "border border-input bg-background text-foreground shadow-xs transition-[color,box-shadow]",
+                "hover:bg-accent hover:text-accent-foreground",
+                "focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px]",
+                "outline-none"
               )}
-            </Avatar>
+            >
+              <Clock size={16} strokeWidth={1.5} />
+            </DropdownMenuTrigger>
+            <DropdownMenuContent
+              side="right"
+              align="center"
+              sideOffset={8}
+              className="w-40 min-w-40"
+            >
+              {SNOOZE_OPTIONS.map((option) => (
+                <DropdownMenuItem
+                  key={option.label}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    handleSnoozeSelect(option.getTime());
+                  }}
+                >
+                  {option.label}
+                </DropdownMenuItem>
+              ))}
+            </DropdownMenuContent>
+          </DropdownMenu>
+        ),
+      }}
+      rightAction={{
+        label: "Dismiss",
+        labelClassName: "text-destructive",
+        control: (
+          <Button
+            variant="destructive"
+            size="icon"
+            onClick={handleDiscard}
+            aria-label="Discard action"
+            className="cursor-pointer rounded-full"
+          >
+            <Trash2 size={16} strokeWidth={1.5} />
+          </Button>
+        ),
+      }}
+    >
+      <div className="flex items-center gap-3">
+        <Avatar size="lg">
+          <AvatarFallback>
+            {getInitials(action.contactName ?? "")}
+          </AvatarFallback>
+          {platformConfig && platform && (
+            <AvatarBadge
+              className="size-4.5! [&>svg]:size-3.5! ring-0!"
+              style={{ backgroundColor: platformConfig.color, color: "white" }}
+            >
+              <PlatformIcon platform={platform} />
+            </AvatarBadge>
           )}
-          <div className="flex-1 min-w-0">
-            {action.contactId && onContactClick ? (
-              <button
-                type="button"
-                onClick={(e) => {
-                  e.stopPropagation()
-                  onContactClick(action.contactId!)
-                }}
-                className="font-medium text-sm truncate hover:underline cursor-pointer text-left"
-              >
-                {action.contactName}
-              </button>
-            ) : (
-              <span className="font-medium text-sm truncate">
-                {action.contactName}
-              </span>
-            )}
-            <div className="flex items-center gap-1 mt-0.5 text-xs text-muted-foreground">
-              <span>{typeConfig.label}</span>
-              <span className="text-muted-foreground/50">·</span>
-              <span>{formatRelativeTime(action.createdAt)}</span>
+        </Avatar>
+        <div className="flex-1 min-w-0">
+          <div className="flex items-start gap-2">
+            <div className="min-w-0 flex-1">
+              {action.contactId && onContactClick ? (
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onContactClick(action.contactId!);
+                  }}
+                  className="block max-w-full font-medium text-sm truncate hover:underline cursor-pointer text-left"
+                >
+                  {action.contactName}
+                </button>
+              ) : (
+                <span className="block max-w-full font-medium text-sm truncate">
+                  {action.contactName}
+                </span>
+              )}
             </div>
-            {action.reason && (
-              <p className="text-xs text-muted-foreground mt-1 line-clamp-1">
-                {action.reason}
-              </p>
-            )}
+            <span className="shrink-0 text-[10px] tracking-tight text-muted-foreground tabular-nums">
+              {formatRelativeTime(action.createdAt)}
+            </span>
           </div>
+          <div className="flex items-center gap-1 mt-0.5 text-xs text-muted-foreground">
+            <span>{listSummary}</span>
+          </div>
+          {showReason && action.reason && (
+            <p className="text-xs text-muted-foreground mt-1 line-clamp-1">
+              {action.reason}
+            </p>
+          )}
         </div>
-      </motion.button>
-    </motion.div>
-  )
+      </div>
+    </SwipeableListItem>
+  );
 }

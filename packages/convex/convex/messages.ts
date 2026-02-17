@@ -49,6 +49,34 @@ function normalizeMessageText(text: string): string {
   return text.trim().replace(/\s+/g, " ");
 }
 
+function normalizeReactionEmojis(
+  reactions:
+    | Doc<"messages">["reactions"]
+    | string[]
+    | null
+    | undefined
+): string[] | null {
+  if (!reactions || reactions.length === 0) return null;
+
+  const normalizeToken = (token: string): string => {
+    const trimmed = token.trim();
+    if (!trimmed) return "";
+    if (trimmed.startsWith(":") && trimmed.endsWith(":")) return trimmed;
+    if (/^[a-z0-9_+-]+$/i.test(trimmed)) return `:${trimmed}:`;
+    return trimmed;
+  };
+
+  const emojis = (reactions as Array<{ emoji?: string; name?: string; reaction?: string } | string>)
+    .map((reaction) => {
+      if (typeof reaction === "string") return normalizeToken(reaction);
+      const raw = reaction?.emoji ?? reaction?.name ?? reaction?.reaction;
+      return typeof raw === "string" ? normalizeToken(raw) : "";
+    })
+    .filter((emoji): emoji is string => typeof emoji === "string" && emoji.length > 0);
+
+  return emojis.length > 0 ? emojis : null;
+}
+
 function parseInboxCursor(cursor?: string): ParsedInboxCursor | null {
   if (!cursor) return null;
   const trimmed = cursor.trim();
@@ -502,6 +530,7 @@ export const getMessages = query({
       platform: Doc<"messages">["platform"];
       status?: string | null;
       reactions: string[] | null;
+      senderContactId?: Id<"contacts"> | null;
       sender: { _id: Id<"contacts">; displayName: string } | null;
     };
 
@@ -535,10 +564,11 @@ export const getMessages = query({
         isFromMe: message.isFromMe,
         platform: message.platform,
         status: message.status ?? null,
+        reactions: normalizeReactionEmojis(message.reactions),
+        senderContactId: message.senderContactId ?? null,
         sender: sender
           ? { _id: sender._id, displayName: sender.displayName }
           : null,
-        reactions: message.reactions?.map((reaction) => reaction.emoji) ?? null,
       };
     });
 

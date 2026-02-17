@@ -29,6 +29,9 @@ const api: ElectronAPI = {
   settings: {
     getSyncHistoryDays: (): Promise<number> => ipcRenderer.invoke("settings:getSyncHistoryDays"),
     setSyncHistoryDays: (days: number): Promise<number> => ipcRenderer.invoke("settings:setSyncHistoryDays", days),
+    getOnboardingCompleted: (): Promise<boolean> => ipcRenderer.invoke("settings:getOnboardingCompleted"),
+    setOnboardingCompleted: (completed: boolean): Promise<boolean> =>
+      ipcRenderer.invoke("settings:setOnboardingCompleted", completed),
   },
 
   versions: {

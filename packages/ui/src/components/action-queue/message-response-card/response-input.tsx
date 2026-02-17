@@ -1,7 +1,7 @@
 "use client"
 
 import * as React from "react"
-import { ArrowUp } from "lucide-react"
+import { ArrowUp } from 'lucide-react'
 import { cn } from "../../../lib/utils"
 import { Button } from "../../ui/button"
 import { Textarea } from "../../ui/textarea"
@@ -53,7 +53,7 @@ export function ResponseInput({
         value={value}
         onChange={(e) => onChange(e.target.value)}
         placeholder={placeholder}
-        className="min-h-[80px] max-h-[150px] resize-none bg-background w-full pr-12"
+        className="min-h-[80px] max-h-[150px] resize-none bg-muted/50 w-full pr-12"
         onKeyDown={handleKeyDown}
       />
       {onSend && (
@@ -69,7 +69,7 @@ export function ResponseInput({
             canSend && "bg-primary text-primary-foreground hover:bg-primary/90"
           )}
         >
-          <ArrowUp className="size-4" />
+          <ArrowUp size={16} strokeWidth={1.5} />
         </Button>
       )}
     </div>

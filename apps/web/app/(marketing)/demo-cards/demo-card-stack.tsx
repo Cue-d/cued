@@ -45,6 +45,16 @@ const SWIPE_UP_THRESHOLD = 120;
 const SWIPE_VELOCITY = 400;
 const INITIAL_COUNT = 347;
 const MAX_VISIBLE = 3;
+const INTRO_START_DELAY_S = 0.3;
+const STACK_CARD_STAGGER_S = 0.1;
+const STACK_CARD_INTRO_DURATION_S = 0.45;
+const QUEUE_INTRO_DELAY_S =
+  INTRO_START_DELAY_S +
+  STACK_CARD_STAGGER_S * (MAX_VISIBLE - 1) +
+  STACK_CARD_INTRO_DURATION_S +
+  0.05;
+const CONTROLS_INTRO_DELAY_S = QUEUE_INTRO_DELAY_S + 0.28;
+const INTRO_DISABLE_MS = (CONTROLS_INTRO_DELAY_S + 0.45) * 1000;
 
 // ── Radial progress ring ──
 
@@ -445,11 +455,22 @@ function AnimatedDigit({ digit }: { digit: string }) {
   );
 }
 
-function CountdownBadge({ count }: { count: number }) {
+function CountdownBadge({
+  count,
+  introDelay,
+}: {
+  count: number;
+  introDelay: number;
+}) {
   const digits = String(count).split("");
 
   return (
-    <div className="absolute -bottom-14 left-1/2 z-50 -translate-x-1/2">
+    <motion.div
+      className="absolute -bottom-14 left-1/2 z-50 -translate-x-1/2"
+      initial={{ opacity: 0, y: 10, filter: "blur(4px)" }}
+      animate={{ opacity: 1, y: 0, filter: "blur(0px)" }}
+      transition={{ delay: introDelay, duration: 0.35, ease: "easeOut" }}
+    >
       <div className="flex items-center justify-center rounded-full bg-primary px-2.5 py-1 text-xs font-semibold tabular-nums text-primary-foreground shadow-lg">
         <span className="inline-flex">
           {digits.map((d, i) => (
@@ -458,7 +479,7 @@ function CountdownBadge({ count }: { count: number }) {
         </span>
         <span className="ml-1">in queue</span>
       </div>
-    </div>
+    </motion.div>
   );
 }
 
@@ -522,12 +543,14 @@ function StackCard({
   card,
   index,
   total,
+  introActive,
   onDragStateChange,
   onSwipe,
 }: {
   card: DemoCard;
   index: number;
   total: number;
+  introActive: boolean;
   onDragStateChange: (dragging: boolean) => void;
   onSwipe: (
     direction: "right" | "left" | "up",
@@ -549,6 +572,7 @@ function StackCard({
 
   const hasUpAction = !!getSwipeActions(card).up;
   const style = getStackStyle(index);
+  const introDelay = INTRO_START_DELAY_S + index * STACK_CARD_STAGGER_S;
 
   const handleDragEnd = useCallback(
     (
@@ -590,17 +614,45 @@ function StackCard({
     <motion.div
       className="absolute inset-0"
       style={{ zIndex: total - index }}
-      initial={{
-        y: style.y,
-        scale: style.scale,
-        opacity: style.opacity,
-      }}
+      initial={
+        introActive
+          ? {
+              y: style.y + 24,
+              scale: style.scale * 0.96,
+              opacity: 0,
+              filter: "blur(6px)",
+            }
+          : {
+              y: style.y,
+              scale: style.scale,
+              opacity: style.opacity,
+              filter: "blur(0px)",
+            }
+      }
       animate={{
         y: style.y,
         scale: style.scale,
         opacity: style.opacity,
+        filter: "blur(0px)",
       }}
-      transition={reposition}
+      transition={
+        introActive
+          ? {
+              y: { ...reposition, delay: introDelay },
+              scale: { ...reposition, delay: introDelay },
+              opacity: {
+                delay: introDelay,
+                duration: 0.26,
+                ease: "easeOut",
+              },
+              filter: {
+                delay: introDelay,
+                duration: 0.3,
+                ease: "easeOut",
+              },
+            }
+          : reposition
+      }
     >
       <motion.div
         className={
@@ -757,9 +809,11 @@ function HintPill({
 function SwipeHints({
   card,
   lastKeyDirection,
+  introDelay,
 }: {
   card: DemoCard;
   lastKeyDirection: SwipeDirection;
+  introDelay: number;
 }) {
   const actions = getSwipeActions(card);
   const [breathe, setBreathe] = useState(false);
@@ -774,7 +828,7 @@ function SwipeHints({
       className="flex items-center justify-center gap-5 pt-[92px]"
       initial={{ opacity: 0, y: 8 }}
       animate={{ opacity: 1, y: 0 }}
-      transition={{ delay: 1, duration: 0.5 }}
+      transition={{ delay: introDelay, duration: 0.45, ease: "easeOut" }}
     >
       <HintPill
         direction="left"
@@ -818,10 +872,16 @@ export function DemoCardStack() {
   const [order, setOrder] = useState(() => DEMO_CARDS.map((c) => c.id));
   const [remaining, setRemaining] = useState(INITIAL_COUNT);
   const [exitingCard, setExitingCard] = useState<ExitingCardInfo | null>(null);
+  const [introActive, setIntroActive] = useState(true);
   const isDragging = useRef(false);
   const [lastKeyDirection, setLastKeyDirection] =
     useState<SwipeDirection>(null);
   const swipeCooldown = useRef(false);
+
+  useEffect(() => {
+    const timer = setTimeout(() => setIntroActive(false), INTRO_DISABLE_MS);
+    return () => clearTimeout(timer);
+  }, []);
 
   const cycleTop = useCallback(() => {
     setOrder((prev) => [...prev.slice(1), prev[0]]);
@@ -954,7 +1014,7 @@ export function DemoCardStack() {
       style={{ width: CARD_W + 48, padding: "6px 24px" }}
     >
       <div className="relative" style={{ width: CARD_W, height: CARD_H + 68 }}>
-        <CountdownBadge count={remaining} />
+        <CountdownBadge count={remaining} introDelay={QUEUE_INTRO_DELAY_S} />
 
         {/* Exiting card — animates off independently */}
         {exitingCard && (
@@ -978,6 +1038,7 @@ export function DemoCardStack() {
                 card={card}
                 index={index}
                 total={order.length}
+                introActive={introActive}
                 onDragStateChange={handleDragStateChange}
                 onSwipe={handleSwipe}
               />
@@ -986,7 +1047,11 @@ export function DemoCardStack() {
       </div>
 
       {/* Apple-style swipe hints */}
-      <SwipeHints card={topCard} lastKeyDirection={lastKeyDirection} />
+      <SwipeHints
+        card={topCard}
+        lastKeyDirection={lastKeyDirection}
+        introDelay={CONTROLS_INTRO_DELAY_S}
+      />
     </div>
   );
 }

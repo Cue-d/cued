@@ -1,30 +1,39 @@
 /**
  * Resolve contact card wrapper for resolve_contact actions.
- * Delegates to ResolveContactCard with context mapping.
+ * Flattens both contacts' handles into a single list for the confirmation UI.
  */
 
 import * as React from "react";
 import {
   ResolveContactCard,
   type MergeSource,
+  type MergeHandle,
 } from "../../components/action-queue/resolve-contact-card";
 import type { ActionCardProps } from "../types";
-import type { ContactHandle } from "@cued/shared";
+import { buildHandleDeeplink, type ContactHandle } from "@cued/shared";
 
-/**
- * Map context handles to ContactHandle format.
- */
-function mapHandles(
-  handles:
-    | Array<{ handleType: string; handle: string; platform: string }>
-    | undefined
-): ContactHandle[] {
-  if (!handles) return [];
-  return handles.map((h) => ({
+/** Returns true if the handle value is human-readable (not a raw internal ID). */
+function isHumanReadable(handle: { handleType: string; handle: string }): boolean {
+  // Slack user IDs: U + uppercase alphanumeric (e.g. U09PTRCMMJQ)
+  if (handle.handleType === "slack_id" && /^U[A-Z0-9]+$/.test(handle.handle)) return false
+  // LinkedIn URNs: urn:li:... format
+  if (handle.handleType === "linkedin_urn") return false
+  return true
+}
+
+/** Build a MergeHandle from a context handle, using displayName as fallback for raw IDs. */
+function toMergeHandle(
+  h: { handleType: string; handle: string; platform: string },
+  contactDisplayName: string,
+): MergeHandle {
+  const readable = isHumanReadable(h)
+  return {
     type: h.handleType as ContactHandle["type"],
     value: h.handle,
     platform: h.platform as ContactHandle["platform"],
-  }));
+    displayLabel: readable ? undefined : contactDisplayName,
+    deeplinkUrl: buildHandleDeeplink(h.platform, h.handleType, h.handle) ?? undefined,
+  }
 }
 
 /**
@@ -35,30 +44,34 @@ export function ResolveContactCardWrapper({
   isTop,
   context,
   className,
-  contact1OpenInApp,
-  contact2OpenInApp,
+  onLinkClick,
 }: ActionCardProps) {
   const hasContext = isTop && context;
   const { contact, secondaryContact } = context ?? {};
 
+  // Use primary contact name, fall back to action fields
+  const name = contact?.displayName ?? action.contactName ?? "Unknown";
+
+  // Flatten handles from both contacts into a single list
+  const handles: MergeHandle[] = [];
+  if (hasContext) {
+    for (const h of contact?.handles ?? []) {
+      handles.push(toMergeHandle(h, contact?.displayName ?? name))
+    }
+    for (const h of secondaryContact?.handles ?? []) {
+      handles.push(toMergeHandle(h, secondaryContact?.displayName ?? name))
+    }
+  }
+
   return (
     <ResolveContactCard
-      contact1={{
-        name: contact?.displayName ?? action.contactName ?? "Unknown",
-        company: hasContext ? contact?.company : null,
-        handles: hasContext ? mapHandles(contact?.handles) : [],
-      }}
-      contact2={{
-        name: secondaryContact?.displayName ?? action.secondaryContactName ?? "Unknown",
-        company: hasContext ? secondaryContact?.company : null,
-        handles: hasContext ? mapHandles(secondaryContact?.handles) : [],
-      }}
+      name={name}
+      handles={handles}
       confidence={action.mergeConfidence ?? 0}
       source={(action.mergeSource ?? "email_match") as MergeSource}
       reasoning={action.mergeReasoning}
       className={className}
-      contact1OpenInApp={contact1OpenInApp ?? null}
-      contact2OpenInApp={contact2OpenInApp ?? null}
+      onLinkClick={onLinkClick}
     />
   );
 }

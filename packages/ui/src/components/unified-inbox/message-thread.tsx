@@ -60,12 +60,10 @@ function groupMessagesByDate(
 function shouldShowTimestamp(
   message: InboxMessage,
   prevMessage: InboxMessage | undefined,
-  isLast: boolean
 ): boolean {
-  if (isLast) return true
   if (!prevMessage) return true
 
-  // Show timestamp if sender changed
+  // Show timestamp if sender direction changed
   if (message.isFromMe !== prevMessage.isFromMe) return true
 
   // Show timestamp if more than 5 minutes since previous message
@@ -141,7 +139,7 @@ export function InboxMessageThread({
   return (
     <div className={cn("flex flex-col h-full min-h-0 bg-background", className)}>
       {/* Header */}
-      <div className="h-16 flex items-center justify-between px-5 border-b border-border/50 shrink-0 bg-background/80 backdrop-blur-sm">
+      <div className="h-16 flex items-center justify-between px-5 border-b border-border/50 shrink-0 bg-background/80 backdrop-blur-sm shadow-[0_1px_0_0_rgba(0,0,0,0.03),0_2px_8px_-2px_rgba(0,0,0,0.06)]">
         <div className="flex items-center gap-3.5">
           <div className="transition-transform duration-200 hover:scale-105">
             <InboxConversationAvatar
@@ -227,15 +225,14 @@ export function InboxMessageThread({
             <div>
               {dateMessages.map((message, idx) => {
                 const prevMessage = idx > 0 ? dateMessages[idx - 1] : undefined
-                const isLast = idx === dateMessages.length - 1
+                const showTime = shouldShowTimestamp(message, prevMessage)
 
                 return (
                   <InboxMessageBubble
                     key={message._id}
                     message={message}
-                    showTimestamp={shouldShowTimestamp(message, prevMessage, isLast)}
                     showSenderName={shouldShowSenderName(message, prevMessage, isGroup)}
-                    spacing={getMessageSpacing(message, prevMessage)}
+                    spacing={showTime ? "normal" : getMessageSpacing(message, prevMessage)}
                     onContactClick={onContactClick}
                   />
                 )

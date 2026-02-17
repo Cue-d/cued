@@ -48,9 +48,12 @@ describe("MessageResponseCard", () => {
     expect(screen.getByText("I'm doing great, thanks!")).toBeInTheDocument();
   });
 
-  it("renders delivery status for sent messages", () => {
+  it("handles sent message status without rendering inline delivery text", () => {
     render(<MessageResponseCard {...defaultProps} />);
-    expect(screen.getByText("Delivered")).toBeInTheDocument();
+    // Delivery status indicators are no longer rendered inline in this card.
+    // Ensure sent message content still renders when a status is present.
+    expect(screen.getByText("I'm doing great, thanks!")).toBeInTheDocument();
+    expect(screen.queryByText("Delivered")).not.toBeInTheDocument();
   });
 
   it("calls onResponseChange when typing in textarea", () => {
@@ -75,6 +78,31 @@ describe("MessageResponseCard", () => {
   it("shows empty state when no messages", () => {
     render(<MessageResponseCard {...defaultProps} messages={[]} />);
     expect(screen.getByText("No recent messages")).toBeInTheDocument();
+  });
+
+  it("parses Slack links and mentions when platform is slack", () => {
+    const messages: DisplayMessage[] = [
+      {
+        _id: "slack-msg-1",
+        content:
+          "See <https://example.com/path?x=1&amp;y=2|Example &amp; Co> and ping <@U12345|alice>",
+        isFromMe: false,
+        sentAt: Date.now(),
+        senderName: "Alice",
+      },
+    ];
+
+    render(
+      <MessageResponseCard
+        {...defaultProps}
+        messages={messages}
+        platform="slack"
+      />
+    );
+
+    const link = screen.getByRole("link", { name: "Example & Co" });
+    expect(link).toHaveAttribute("href", "https://example.com/path?x=1&y=2");
+    expect(screen.getByText("@alice")).toBeInTheDocument();
   });
 
   describe("platform prop", () => {

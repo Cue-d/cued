@@ -15,6 +15,8 @@ files:
 # Copy native modules into app.asar.unpacked/node_modules/ so main process
 # can resolve them at runtime from process.resourcesPath.
 extraResources:
+  - from: "resources/trayIconTemplate.png"
+    to: "resources/trayIconTemplate.png"
   - from: "node_modules/better-sqlite3"
     to: "app.asar.unpacked/node_modules/better-sqlite3"
   - from: "node_modules/electron-liquid-glass"
@@ -35,6 +37,7 @@ publish:
 
 # macOS configuration
 mac:
+  icon: resources/icon.icns
   target:
     - target: dmg
       arch:
@@ -51,6 +54,12 @@ mac:
   entitlementsInherit: resources/entitlements.mac.plist
   extendInfo:
     NSContactsUsageDescription: "Cued needs access to your contacts to sync and manage your relationships."
+
+win:
+  icon: resources/icon.ico
+
+linux:
+  icon: resources/icon.png
 
 # DMG configuration
 dmg:

@@ -4,7 +4,7 @@
  * Action buttons and queue state are shown in the BottomAccessory and sheet.
  */
 
-import { useState, useCallback, useMemo, useEffect } from "react";
+import { useState, useCallback, useMemo, useRef, useEffect } from "react";
 import { View, Text } from "react-native";
 import * as Haptics from "expo-haptics";
 import { useRouter, useSegments } from "expo-router";
@@ -46,6 +46,15 @@ import {
 import type { SwipeDirection } from "@/components/swipeable-card";
 import type { Id } from "@cued/convex/convex/_generated/dataModel";
 
+type ReactionLike = string | { emoji: string };
+
+function normalizeReactions(reactions?: ReactionLike[] | null): string[] | null {
+  if (!reactions || reactions.length === 0) return null;
+  return reactions.map((reaction) =>
+    typeof reaction === "string" ? reaction : reaction.emoji
+  );
+}
+
 /** Map action to CardStack item format */
 interface ActionItem {
   id: string;
@@ -58,6 +67,8 @@ const MESSAGE_ACTION_TYPES = ["respond", "follow_up", "send_message"];
 
 /** Action types that use ContactCard */
 const CONTACT_ACTION_TYPES = ["eod_contact", "new_connection"];
+const ACTION_CONTEXT_MESSAGE_LIMIT = 15;
+const MESSAGE_PAGE_SIZE = 25;
 
 export default function ActionsScreen(): React.JSX.Element | null {
   const router = useRouter();
@@ -116,32 +127,90 @@ export default function ActionsScreen(): React.JSX.Element | null {
     return [...cached, ...base];
   }, [actions, focusedActionId, completedActionCache]);
 
-  // Get the top action ID for fetching context with messages
-  const topActionId = displayActions[0]?._id as Id<"actions"> | undefined;
+  // Fetch details for the current top card and prefetch the next card.
+  const topAction = displayActions[0];
+  const nextAction = displayActions[1];
+  const topActionId = topAction?._id as Id<"actions"> | undefined;
+  const nextActionId = nextAction?._id as Id<"actions"> | undefined;
 
   // Fetch context for the top action (includes messages)
   const actionContext = useQuery(
     api.actions.getActionWithContext,
     topActionId && isFocused
-      ? { actionId: topActionId, messageLimit: 15 }
+      ? { actionId: topActionId, messageLimit: ACTION_CONTEXT_MESSAGE_LIMIT }
       : "skip",
   );
 
-  // Map messages from context to DisplayMessage format
-  const topActionMessages: DisplayMessage[] = useMemo(() => {
-    const messages = actionContext?.messages;
-    if (!messages) return [];
+  // Keep one action ahead warm so swiping to the next card is instant.
+  useQuery(
+    api.actions.getActionWithContext,
+    nextActionId && isFocused
+      ? { actionId: nextActionId, messageLimit: ACTION_CONTEXT_MESSAGE_LIMIT }
+      : "skip",
+  );
 
-    return messages.map((msg) => ({
+  // Paginated message loading for top action's conversation
+  const [messageLimit, setMessageLimit] = useState(MESSAGE_PAGE_SIZE);
+
+  // Reset message limit when top action changes
+  const prevTopActionIdRef = useRef(topActionId);
+  if (topActionId !== prevTopActionIdRef.current) {
+    prevTopActionIdRef.current = topActionId;
+    setMessageLimit(MESSAGE_PAGE_SIZE);
+  }
+
+  const topConversationId = actionContext?.conversation?._id;
+  const messagesResult = useQuery(
+    api.messages.getMessages,
+    topConversationId
+      ? { conversationId: topConversationId as Id<"conversations">, limit: messageLimit }
+      : "skip",
+  );
+
+  const nextConversationId = nextAction?.conversationId
+    ? (nextAction.conversationId as Id<"conversations">)
+    : null;
+  useQuery(
+    api.messages.getMessages,
+    nextConversationId && isFocused
+      ? { conversationId: nextConversationId, limit: MESSAGE_PAGE_SIZE }
+      : "skip",
+  );
+
+  // Map paginated messages to DisplayMessage format (getMessages returns newest-first)
+  const topActionMessages: DisplayMessage[] = useMemo(() => {
+    const messages = messagesResult?.messages;
+    if (!messages) {
+      // Fall back to context messages while paginated query loads
+      const ctxMessages = actionContext?.messages;
+      if (!ctxMessages) return [];
+      return ctxMessages.map((msg) => ({
+        _id: msg._id,
+        content: msg.content,
+        sentAt: msg.sentAt,
+        isFromMe: msg.isFromMe,
+        senderName: msg.senderName,
+        status: msg.status,
+        reactions: normalizeReactions(msg.reactions as ReactionLike[] | null | undefined),
+      }));
+    }
+
+    return [...messages].reverse().map((msg) => ({
       _id: msg._id,
       content: msg.content,
       sentAt: msg.sentAt,
       isFromMe: msg.isFromMe,
-      senderName: msg.senderName,
+      senderName: msg.sender?.displayName ?? (msg.isFromMe ? "You" : null),
       status: msg.status,
-      reactions: msg.reactions?.map((r) => r.emoji) ?? null,
+      reactions: normalizeReactions(msg.reactions),
     }));
-  }, [actionContext?.messages]);
+  }, [messagesResult?.messages, actionContext?.messages]);
+
+  const hasMoreMessages = messagesResult?.nextCursor != null;
+  const handleLoadMoreMessages = useCallback(() => {
+    setMessageLimit((prev) => prev + MESSAGE_PAGE_SIZE);
+  }, []);
+  const isLoadingMoreMessages = messageLimit > MESSAGE_PAGE_SIZE && messagesResult === undefined;
 
   // Track response text per action (key = action._id)
   const [responseTexts, setResponseTexts] = useState<Record<string, string>>(
@@ -308,6 +377,9 @@ export default function ActionsScreen(): React.JSX.Element | null {
             isDesktopOnline={isDesktopOnline}
             onOpenInApp={onOpenInApp}
             onSend={() => handleSwipe(item, "right")}
+            hasMore={isTopCard ? hasMoreMessages : undefined}
+            onLoadMore={isTopCard ? handleLoadMoreMessages : undefined}
+            isLoadingMore={isTopCard ? isLoadingMoreMessages : undefined}
             isCompleted={item.isCompleted}
           />
         );
@@ -409,7 +481,7 @@ export default function ActionsScreen(): React.JSX.Element | null {
         </View>
       );
     },
-    [topActionMessages, getResponseText, isDesktopOnline, actionContext?.conversation, actionContext?.contact, actionContext?.secondaryContact, handleResponseChange, handleSwipe, getContactFormData, handleContactFormChange],
+    [topActionMessages, getResponseText, isDesktopOnline, actionContext?.conversation, actionContext?.contact, actionContext?.secondaryContact, handleResponseChange, handleSwipe, getContactFormData, handleContactFormChange, hasMoreMessages, handleLoadMoreMessages, isLoadingMoreMessages],
   );
 
   if (isLoading) {

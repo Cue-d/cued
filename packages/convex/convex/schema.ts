@@ -212,6 +212,7 @@ const schema = defineSchema({
     mergeReasoning: v.optional(v.string()),
     platform: v.optional(platformValidator),
     // Reasons: reason = heuristic/manual, llmReason = AI-generated explanation
+    summary: v.optional(v.string()),
     reason: v.optional(v.string()),
     llmReason: v.optional(v.string()),
     // Embedding for similarity search (action intelligence)
@@ -225,6 +226,8 @@ const schema = defineSchema({
   })
     .index("by_user", ["userId"])
     .index("by_user_status", ["userId", "status"])
+    .index("by_user_status_completed_at", ["userId", "status", "completedAt"])
+    .index("by_user_status_discarded_at", ["userId", "status", "discardedAt"])
     .index("by_conversation_status", ["conversationId", "status"])
     .index("by_contact", ["contactId"])
     .index("by_message", ["messageId"])

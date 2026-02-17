@@ -6,10 +6,10 @@ import {
   Loader2,
   ChevronDown,
   ChevronUp,
-  Edit2,
+  Pencil,
   Save,
   X,
-} from "lucide-react"
+} from 'lucide-react'
 import { api } from "@cued/convex"
 import {
   normalizePhone,
@@ -41,9 +41,9 @@ export const VISIBLE_HANDLE_TYPES = new Set(["phone", "email", "linkedin_handle"
 export function HandleIcon({ type }: { type: string }) {
   switch (type) {
     case "phone":
-      return <Phone className="w-3 h-3 text-muted-foreground" />
+      return <Phone size={12} strokeWidth={1.5} className="text-muted-foreground" />
     case "email":
-      return <Mail className="w-3 h-3 text-muted-foreground" />
+      return <Mail size={12} strokeWidth={1.5} className="text-muted-foreground" />
     case "linkedin_handle":
       return <PlatformIcon platform="linkedin" className="w-3 h-3 text-muted-foreground" />
     case "twitter_handle":
@@ -113,7 +113,8 @@ function PlatformBadge({ platform }: { platform: ActionPlatform }) {
   return (
     <Badge
       variant="secondary"
-      className={`text-xs gap-1 ${config?.bgClass ?? ""}`}
+      className="text-xs gap-1"
+      style={config ? { backgroundColor: config.color, color: 'white' } : undefined}
     >
       <PlatformIcon platform={platform} className="w-3 h-3" />
       {config?.label ?? platform}
@@ -261,14 +262,14 @@ export function ContactDetail({ contactId }: ContactDetailProps) {
                 size="sm"
                 onClick={() => setIsEditing(false)}
               >
-                <X className="w-3.5 h-3.5" />
+                <X size={14} strokeWidth={1.5} />
               </Button>
               <Button size="sm" onClick={handleSave} disabled={isSaving}>
                 {isSaving ? (
-                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                  <Loader2 size={14} strokeWidth={1.5} className="animate-spin" />
                 ) : (
                   <>
-                    <Save className="w-3.5 h-3.5 mr-1.5" />
+                    <Save size={14} strokeWidth={1.5} className="mr-1.5" />
                     Save
                   </>
                 )}
@@ -280,7 +281,7 @@ export function ContactDetail({ contactId }: ContactDetailProps) {
               size="sm"
               onClick={() => setIsEditing(true)}
             >
-              <Edit2 className="w-3.5 h-3.5" />
+              <Pencil size={14} strokeWidth={1.5} />
             </Button>
           )}
         </div>
@@ -434,9 +435,9 @@ export function ContactDetail({ contactId }: ContactDetailProps) {
                   <div className="flex items-center gap-2">
                     <Badge variant="secondary">{messages.length}</Badge>
                     {timelineExpanded ? (
-                      <ChevronUp className="w-4 h-4 text-muted-foreground" />
+                      <ChevronUp size={16} strokeWidth={1.5} className="text-muted-foreground" />
                     ) : (
-                      <ChevronDown className="w-4 h-4 text-muted-foreground" />
+                      <ChevronDown size={16} strokeWidth={1.5} className="text-muted-foreground" />
                     )}
                   </div>
                 </button>

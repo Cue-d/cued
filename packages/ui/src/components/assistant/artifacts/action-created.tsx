@@ -7,6 +7,7 @@ export interface ActionResult {
   actionId: string
   type: string
   priority: number
+  summary?: string
   reason?: string
 }
 
@@ -21,7 +22,7 @@ function ActionCreatedContent({ data }: { data: ActionResult }) {
           Action created
         </p>
         <p className="mt-0.5 text-xs text-muted-foreground">
-          {data.type.replace("_", " ")} - Priority {data.priority}
+          {data.summary || data.type.replace("_", " ")} - Priority {data.priority}
         </p>
         {data.reason && (
           <p className="mt-1 text-sm text-foreground/80">{data.reason}</p>
@@ -45,6 +46,7 @@ export const actionCreatedArtifact = new Artifact<"create_action", ActionResult>
           actionId: data.actionId as string,
           type: (data.type as string) || "unknown",
           priority: (data.priority as number) || 50,
+          summary: data.summary as string | undefined,
           reason: data.reason as string | undefined,
         }
       }
