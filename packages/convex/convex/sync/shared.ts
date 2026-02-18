@@ -17,6 +17,7 @@ import {
 import { normalizeEmail } from "@cued/ai";
 import { scheduleContactMergeCheck } from "../lib/contactMergeScheduling";
 import { normalizeHandleValue } from "../lib/normalizeHandle";
+import { findUserByWorkosId } from "../lib/auth";
 
 // ============================================================================
 // Shared Constants
@@ -203,10 +204,7 @@ export async function getOrCreateUser(
   ctx: MutationCtx,
   identity: { subject: string; email?: string },
 ): Promise<Doc<"users">> {
-  const existing = await ctx.db
-    .query("users")
-    .withIndex("by_workos_id", (q) => q.eq("workosUserId", identity.subject))
-    .unique();
+  const existing = await findUserByWorkosId(ctx, identity.subject);
 
   if (existing) {
     return existing;

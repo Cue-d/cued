@@ -11,6 +11,7 @@ import {
   findSyncCursor,
   upsertSyncCursor as upsertSyncCursorHelper,
 } from "./sync/shared";
+import { findUserByWorkosId } from "./lib/auth";
 
 /**
  * Get the sync cursor for a platform (and optional workspace).
@@ -40,10 +41,7 @@ export const getSyncCursor = query({
       );
     }
 
-    const user = await ctx.db
-      .query("users")
-      .withIndex("by_workos_id", (q) => q.eq("workosUserId", identity.subject))
-      .unique();
+    const user = await findUserByWorkosId(ctx, identity.subject);
 
     if (!user) return null;
 
@@ -63,10 +61,7 @@ export const listSyncCursors = query({
     const identity = await ctx.auth.getUserIdentity();
     if (!identity) return [];
 
-    const user = await ctx.db
-      .query("users")
-      .withIndex("by_workos_id", (q) => q.eq("workosUserId", identity.subject))
-      .unique();
+    const user = await findUserByWorkosId(ctx, identity.subject);
 
     if (!user) return [];
 
@@ -121,10 +116,7 @@ export const upsertSyncCursor = mutation({
       );
     }
 
-    const user = await ctx.db
-      .query("users")
-      .withIndex("by_workos_id", (q) => q.eq("workosUserId", identity.subject))
-      .unique();
+    const user = await findUserByWorkosId(ctx, identity.subject);
 
     if (!user) {
       throw new Error("User not found");
@@ -176,10 +168,7 @@ export const updateSyncStats = mutation({
       );
     }
 
-    const user = await ctx.db
-      .query("users")
-      .withIndex("by_workos_id", (q) => q.eq("workosUserId", identity.subject))
-      .unique();
+    const user = await findUserByWorkosId(ctx, identity.subject);
 
     if (!user) {
       throw new Error("User not found");
@@ -240,10 +229,7 @@ export const deleteSyncCursor = mutation({
       );
     }
 
-    const user = await ctx.db
-      .query("users")
-      .withIndex("by_workos_id", (q) => q.eq("workosUserId", identity.subject))
-      .unique();
+    const user = await findUserByWorkosId(ctx, identity.subject);
 
     if (!user) {
       throw new Error("User not found");
@@ -272,10 +258,7 @@ export const resetAllSyncCursors = mutation({
       throw new Error("Unauthorized: Must be authenticated to reset sync cursors");
     }
 
-    const user = await ctx.db
-      .query("users")
-      .withIndex("by_workos_id", (q) => q.eq("workosUserId", identity.subject))
-      .unique();
+    const user = await findUserByWorkosId(ctx, identity.subject);
 
     if (!user) {
       throw new Error("User not found");

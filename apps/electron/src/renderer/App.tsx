@@ -19,6 +19,7 @@ import { ActionsPage } from "./pages/ActionsPage"
 import { AssistantPage } from "./pages/AssistantPage"
 import { ContactsPage } from "./pages/ContactsPage"
 import { SettingsPage, type SettingsSubpage } from "./pages/SettingsPage"
+import { PageErrorBoundary } from "./components/PageErrorBoundary"
 import { getOrCreateConvexClient } from "./lib/convex-client-singleton"
 import { initPostHog, posthog, POSTHOG_KEY } from "./lib/posthog"
 import { OnboardingWizard } from "./components/onboarding/OnboardingWizard"
@@ -230,7 +231,9 @@ function AuthenticatedApp({ convexUrl, user, onSignOut }: { convexUrl: string; u
           connectedPlatforms={connectedPlatforms}
           onPlatformClick={handleNavigateToIntegrations}
         >
-          {renderPage()}
+          <PageErrorBoundary resetKey={currentPage}>
+            {renderPage()}
+          </PageErrorBoundary>
         </AppShell>
       </ConvexProviderWithAuth>
     </FocusProvider>

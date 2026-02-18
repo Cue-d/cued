@@ -14,6 +14,7 @@ import {
 } from "./_generated/server";
 import { internal } from "./_generated/api";
 import { resolveActionSummary } from "./lib/actionSummary";
+import { findUserByWorkosId } from "./lib/auth";
 import { platformValidator } from "./schema";
 
 // Constants
@@ -324,10 +325,7 @@ export const triggerScanForUnanswered = mutation({
     const identity = await ctx.auth.getUserIdentity();
     if (!identity) throw new Error("Unauthorized");
 
-    const user = await ctx.db
-      .query("users")
-      .withIndex("by_workos_id", (q) => q.eq("workosUserId", identity.subject))
-      .unique();
+    const user = await findUserByWorkosId(ctx, identity.subject);
 
     if (!user) throw new Error("User not found");
 

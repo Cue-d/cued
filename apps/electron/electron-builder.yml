@@ -37,7 +37,7 @@ publish:
 
 # macOS configuration
 mac:
-  icon: resources/icon.icns
+  icon: icon.icns
   target:
     - target: dmg
       arch:
@@ -56,10 +56,10 @@ mac:
     NSContactsUsageDescription: "Cued needs access to your contacts to sync and manage your relationships."
 
 win:
-  icon: resources/icon.ico
+  icon: icon.ico
 
 linux:
-  icon: resources/icon.png
+  icon: icon.png
 
 # DMG configuration
 dmg:
