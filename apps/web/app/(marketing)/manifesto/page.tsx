@@ -355,10 +355,6 @@ export default function ManifestoPage() {
           </p>
 
           <Divider />
-
-          <p className="italic text-secondary-foreground">
-            Your net worth is your network. Start compounding.
-          </p>
         </div>
 
         <div className="flex justify-center mt-32">
