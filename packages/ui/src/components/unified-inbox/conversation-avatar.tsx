@@ -1,8 +1,8 @@
 import { getInitials } from "@cued/shared"
 import { cn } from "../../lib/utils"
+import { Avatar, AvatarFallback, AvatarImage } from "../ui/avatar"
 import type { InboxParticipant, InboxConversationType } from "./types"
 import type React from "react"
-import { Avatar, AvatarFallback, AvatarImage } from "../ui/avatar"
 
 interface InboxConversationAvatarProps {
   participants: InboxParticipant[]
@@ -12,9 +12,23 @@ interface InboxConversationAvatarProps {
 }
 
 const sizeClasses = {
-  sm: "w-8 h-8 text-xs",
-  md: "w-10 h-10 text-sm",
-  lg: "w-12 h-12 text-base",
+  sm: "w-8 h-8",
+  md: "w-10 h-10",
+  lg: "w-12 h-12",
+}
+
+const textSizeClasses = {
+  sm: "text-xs",
+  md: "text-sm",
+  lg: "text-base",
+}
+
+type ConversationAvatarSize = NonNullable<InboxConversationAvatarProps["size"]>
+
+const avatarSizes: Record<ConversationAvatarSize, "default" | "sm" | "lg"> = {
+  sm: "sm",
+  md: "default",
+  lg: "lg",
 }
 
 const bgColors = [
@@ -35,22 +49,27 @@ function getColorForName(name: string): string {
 
 function SingleAvatar({
   participant,
+  size = "md",
   className,
+  textClassName,
 }: {
   participant?: InboxParticipant
+  size?: "sm" | "md" | "lg"
   className?: string
+  textClassName?: string
 }): React.ReactElement {
   const displayName = participant?.displayName || "?"
 
   return (
-    <Avatar className={className}>
+    <Avatar className={className} size={avatarSizes[size]}>
       {participant?.avatarUrl ? (
         <AvatarImage src={participant.avatarUrl} alt={displayName} />
       ) : null}
       <AvatarFallback
         className={cn(
           "text-white font-medium",
-          getColorForName(displayName)
+          getColorForName(displayName),
+          textClassName ?? textSizeClasses[size]
         )}
       >
         {getInitials(displayName)}
@@ -73,15 +92,25 @@ export function InboxConversationAvatar({
       <div className={cn("relative shrink-0", sizeClasses[size], className)}>
         <SingleAvatar
           participant={first}
-          className="absolute top-0 left-0 w-6 h-6 border-2 border-background text-[10px]"
+          size="sm"
+          className="absolute top-0 left-0 w-6 h-6 border-2 border-background"
+          textClassName="text-[10px]"
         />
         <SingleAvatar
           participant={second}
-          className="absolute bottom-0 right-0 w-6 h-6 border-2 border-background text-[10px]"
+          size="sm"
+          className="absolute bottom-0 right-0 w-6 h-6 border-2 border-background"
+          textClassName="text-[10px]"
         />
       </div>
     )
   }
 
-  return <SingleAvatar participant={first} className={cn(sizeClasses[size], className)} />
+  return (
+    <SingleAvatar
+      participant={first}
+      size={size}
+      className={cn(sizeClasses[size], className)}
+    />
+  )
 }
