@@ -37,6 +37,13 @@ export default function ActionsLayout(): React.JSX.Element {
           headerLargeTitle: false,
         }}
       />
+      <Stack.Screen
+        name="history-detail"
+        options={{
+          headerLargeTitle: false,
+          title: "History",
+        }}
+      />
     </Stack>
   );
 }

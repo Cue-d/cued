@@ -25,6 +25,7 @@ import {
 } from "@cued/shared";
 import type { TypedHandle, MessageSnippet } from "@cued/ai";
 import { scheduleContactMergeCheck } from "./lib/contactMergeScheduling";
+import { resolveActionSummary } from "./lib/actionSummary";
 import { normalizeHandleValue } from "./lib/normalizeHandle";
 
 const MAX_CONVERSATIONS_FOR_LLM_LOOKUP = 100;
@@ -852,6 +853,7 @@ export const createMergeSuggestionInternal = internalMutation({
       mergeConfidence: args.confidence,
       mergeSource: args.source,
       mergeReasoning: args.reasoning,
+      summary: resolveActionSummary("resolve_contact"),
       reason: `${args.source}: ${(args.confidence * 100).toFixed(0)}% match`,
       llmReason: args.reasoning,
       createdAt: now,

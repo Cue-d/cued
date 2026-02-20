@@ -7,7 +7,7 @@
  */
 
 import { useMemo, useRef, useCallback } from "react";
-import { View, Text, ScrollView, Pressable, Linking, useColorScheme } from "react-native";
+import { View, Text, ScrollView, Pressable, Linking, useColorScheme, ActivityIndicator } from "react-native";
 import * as Haptics from "expo-haptics";
 import { Image } from "expo-image";
 import { SymbolView } from "expo-symbols";
@@ -46,6 +46,12 @@ export interface MessageResponseCardProps {
   onOpenInApp?: (() => void) | null;
   /** Called when the send button is pressed */
   onSend?: () => void;
+  /** Whether there are older messages to load */
+  hasMore?: boolean;
+  /** Called when user wants to load older messages */
+  onLoadMore?: () => void;
+  /** Whether older messages are currently loading */
+  isLoadingMore?: boolean;
   /** Whether this action has been completed (message sent) */
   isCompleted?: boolean;
 }
@@ -232,6 +238,9 @@ export function MessageResponseCard({
   isDesktopOnline,
   onOpenInApp,
   onSend,
+  hasMore,
+  onLoadMore,
+  isLoadingMore,
   isCompleted = false,
 }: MessageResponseCardProps): React.JSX.Element {
   const colorScheme = useColorScheme();
@@ -248,12 +257,38 @@ export function MessageResponseCard({
   const showDesktopOfflineWarning =
     requiresDesktopSender && isDesktopOnline === false;
 
-  // Scroll to bottom when content changes
-  const scrollToBottom = useCallback(() => {
-    setTimeout(() => {
-      scrollViewRef.current?.scrollToEnd({ animated: false });
-    }, 50);
-  }, []);
+  // Only scroll to bottom on initial load (not when older messages are prepended)
+  const hasScrolledRef = useRef(false);
+  const prevMessageCountRef = useRef(0);
+
+  const handleContentSizeChange = useCallback(() => {
+    const prevCount = prevMessageCountRef.current;
+    const newCount = messages.length;
+    prevMessageCountRef.current = newCount;
+
+    // Initial load or first messages arriving — scroll to bottom
+    if (!hasScrolledRef.current && newCount > 0) {
+      hasScrolledRef.current = true;
+      setTimeout(() => {
+        scrollViewRef.current?.scrollToEnd({ animated: false });
+      }, 50);
+      return;
+    }
+
+    // If messages were added but we already had some, it's older messages being prepended
+    // maintainVisibleContentPosition handles preserving scroll position
+  }, [messages.length]);
+
+  // Auto-load older messages when scrolling near the top
+  const handleScroll = useCallback(
+    (event: { nativeEvent: { contentOffset: { y: number } } }) => {
+      const offsetY = event.nativeEvent.contentOffset.y;
+      if (offsetY < 80 && hasMore && !isLoadingMore && onLoadMore) {
+        onLoadMore();
+      }
+    },
+    [hasMore, isLoadingMore, onLoadMore],
+  );
 
   return (
     <View className={cn("flex-1 overflow-hidden", className)}>
@@ -292,9 +327,16 @@ export function MessageResponseCard({
         ref={scrollViewRef}
         className="flex-1"
         contentContainerClassName="py-4 px-4 gap-2"
-        onLayout={scrollToBottom}
-        onContentSizeChange={scrollToBottom}
+        onContentSizeChange={handleContentSizeChange}
+        onScroll={handleScroll}
+        scrollEventThrottle={100}
+        maintainVisibleContentPosition={{ minIndexForVisible: 0 }}
       >
+        {isLoadingMore && (
+          <View className="items-center py-2 mb-2">
+            <ActivityIndicator size="small" />
+          </View>
+        )}
         {sortedMessages.length > 0 ? (
           sortedMessages.map((msg) => {
             const hasReactions = msg.reactions && msg.reactions.length > 0;

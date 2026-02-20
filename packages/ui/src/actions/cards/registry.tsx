@@ -51,7 +51,7 @@ export function getCardComponent(
  */
 export function renderActionCard(props: ActionCardProps): React.ReactNode {
   const CardComponent = CARD_REGISTRY[props.action.type] ?? UnknownActionCard;
-  return <CardComponent {...props} />;
+  return <CardComponent key={props.action._id} {...props} />;
 }
 
 /**

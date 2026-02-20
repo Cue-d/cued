@@ -1,6 +1,12 @@
 import * as React from "react"
-import { formatTime } from "@cued/shared"
 import { cn } from "../../../lib/utils"
+
+function decodeSlackEntities(text: string): string {
+  return text
+    .replace(/&amp;/g, "&")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+}
 
 /**
  * Parse Slack-style markup in message content into React elements.
@@ -11,16 +17,17 @@ import { cn } from "../../../lib/utils"
  *  - `<#CHANNEL_ID|name>` → #channel
  */
 function parseSlackContent(text: string): React.ReactNode[] {
+  const decodedText = decodeSlackEntities(text)
   // Match <...> tokens in the text
   const parts: React.ReactNode[] = []
   const regex = /<([^>]+)>/g
   let lastIndex = 0
   let match: RegExpExecArray | null
 
-  while ((match = regex.exec(text)) !== null) {
+  while ((match = regex.exec(decodedText)) !== null) {
     // Push text before this match
     if (match.index > lastIndex) {
-      parts.push(text.slice(lastIndex, match.index))
+      parts.push(decodedText.slice(lastIndex, match.index))
     }
 
     const inner = match[1]
@@ -86,8 +93,8 @@ function parseSlackContent(text: string): React.ReactNode[] {
   }
 
   // Push remaining text
-  if (lastIndex < text.length) {
-    parts.push(text.slice(lastIndex))
+  if (lastIndex < decodedText.length) {
+    parts.push(decodedText.slice(lastIndex))
   }
 
   return parts
@@ -248,10 +255,10 @@ export function MessageBubble({
       >
         <div
           className={cn(
-            "relative rounded-[8px] px-4 py-2 text-sm",
+            "relative rounded-lg px-3 py-2 text-sm",
             isFromMe
-              ? "bg-primary text-primary-foreground"
-              : "bg-background text-foreground shadow-minimal"
+              ? "bg-primary/90 text-primary-foreground"
+              : "bg-secondary text-foreground"
           )}
           style={{ maxWidth: "85%", width: "fit-content", overflowWrap: "anywhere" }}
         >
@@ -271,20 +278,6 @@ export function MessageBubble({
               [No text]
             </p>
           )}
-          <p
-            className={cn(
-              "text-[10px] opacity-60 mt-1 flex items-center gap-1",
-              isFromMe ? "justify-end" : "justify-start"
-            )}
-          >
-            {formatTime(sentAt)}
-            {isFromMe && (
-              <>
-                <span className="mx-0.5">·</span>
-                <DeliveryStatus status={status} />
-              </>
-            )}
-          </p>
         </div>
       </div>
     </div>

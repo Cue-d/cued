@@ -48,6 +48,10 @@ const createActionSchema = z.object({
     .string()
     .optional()
     .describe("Specific message this action responds to"),
+  summary: z
+    .string()
+    .optional()
+    .describe("Super-short summary for list cards (2-5 words)"),
   reason: z.string().optional().describe("Why this action was created"),
   priority: z.number().optional().describe("Priority 0-100 (default: 50)"),
 });
@@ -176,11 +180,19 @@ export function createChatTools(
             conversationId: input.conversationId,
             contactId: input.contactId,
             messageId: input.messageId,
+            summary: input.summary,
             reason: input.reason,
             priority: input.priority,
           }
         ) as { actionId: string };
-        return { actionId, type: input.type, priority: input.priority ?? 50, reason: input.reason, created: true };
+        return {
+          actionId,
+          type: input.type,
+          priority: input.priority ?? 50,
+          summary: input.summary,
+          reason: input.reason,
+          created: true,
+        };
       },
     }),
 

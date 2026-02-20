@@ -1,6 +1,9 @@
 import * as React from 'react'
 import { cn } from '@cued/ui'
 
+const OUTER_RADIUS = 10
+const INNER_RADIUS = 8
+
 export interface PanelProps {
   /** Panel sizing behavior */
   variant?: 'shrink' | 'grow'
@@ -31,25 +34,43 @@ export function Panel({
   style,
   children,
 }: PanelProps) {
-  // Rounded corner classes based on position in layout
-  const roundedClasses = {
-    first: 'rounded-l-[14px] rounded-r-[10px]',
-    middle: 'rounded-[10px]',
-    last: 'rounded-l-[10px] rounded-r-[14px]',
-    only: 'rounded-[14px]',
-  }
+  const radiusStyle: React.CSSProperties = {
+    first: {
+      borderTopLeftRadius: OUTER_RADIUS,
+      borderBottomLeftRadius: OUTER_RADIUS,
+      borderTopRightRadius: INNER_RADIUS,
+      borderBottomRightRadius: INNER_RADIUS,
+    },
+    middle: { borderRadius: INNER_RADIUS },
+    last: {
+      borderTopLeftRadius: INNER_RADIUS,
+      borderBottomLeftRadius: INNER_RADIUS,
+      borderTopRightRadius: OUTER_RADIUS,
+      borderBottomRightRadius: OUTER_RADIUS,
+    },
+    only: { borderRadius: OUTER_RADIUS },
+  }[position]
+  const shrinkWidthStyle: React.CSSProperties =
+    variant === 'shrink' && width
+      ? {
+          width: position === 'first'
+            ? `var(--cued-left-panel-width, ${width}px)`
+            : width,
+        }
+      : {}
 
   return (
     <div
       className={cn(
-        'h-full flex flex-col min-w-0 overflow-hidden bg-background shadow-middle',
-        roundedClasses[position],
+        'h-full flex flex-col min-w-0 overflow-hidden shadow-middle',
+        position === 'last' ? 'bg-background/60' : 'bg-background',
         variant === 'grow' && 'flex-1',
         variant === 'shrink' && 'shrink-0',
         className
       )}
       style={{
-        ...(variant === 'shrink' && width ? { width } : {}),
+        ...radiusStyle,
+        ...shrinkWidthStyle,
         ...style,
       }}
     >
@@ -62,35 +83,46 @@ export function Panel({
 interface PanelHeaderProps {
   title?: string
   subtitle?: string
+  /** Custom content rendered in the centered title area instead of `title`/`subtitle` */
+  titleContent?: React.ReactNode
   children?: React.ReactNode
   className?: string
   /** Adds left padding to compensate for macOS stoplight controls */
   compensateForStoplight?: boolean
+  /** Deprecated no-op; retained for compatibility */
+  scrolled?: boolean
 }
 
-export function PanelHeader({
-  title,
-  subtitle,
-  children,
-  className,
-  compensateForStoplight = false,
-}: PanelHeaderProps) {
+export function PanelHeader(props: PanelHeaderProps) {
+  const {
+    title,
+    subtitle,
+    titleContent,
+    children,
+    className,
+    compensateForStoplight = false,
+  } = props
+
   return (
     <div
       className={cn(
-        'drag-region flex items-center h-10 px-4 shrink-0 relative z-50 gap-1',
+        'drag-region flex items-center h-10 px-4 shrink-0 relative z-10 gap-1',
         compensateForStoplight && 'pl-20',
         className
       )}
     >
       <div className="flex-1 min-w-0 flex items-center justify-center select-none gap-2">
-        {title && (
-          <h2 className="text-sm font-semibold truncate leading-tight">
-            {title}
-          </h2>
-        )}
-        {subtitle && (
-          <span className="text-xs text-muted-foreground">{subtitle}</span>
+        {titleContent ?? (
+          <>
+            {title && (
+              <h2 className="text-sm font-semibold truncate leading-tight">
+                {title}
+              </h2>
+            )}
+            {subtitle && (
+              <span className="text-xs text-muted-foreground">{subtitle}</span>
+            )}
+          </>
         )}
       </div>
 

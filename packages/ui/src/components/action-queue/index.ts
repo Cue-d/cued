@@ -19,12 +19,11 @@ export type {
 
 export {
   ResolveContactCard,
-  ContactPanel,
-  SourceBadge,
+  formatSource,
 } from "./resolve-contact-card"
 export type {
   ResolveContactCardProps,
-  ContactPanelProps,
+  MergeHandle,
   MergeSource,
   SourceBadgeProps,
 } from "./resolve-contact-card"

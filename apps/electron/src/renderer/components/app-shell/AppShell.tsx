@@ -13,6 +13,9 @@ const PANEL_EDGE_SPACING = 6
 const DEFAULT_SIDEBAR_WIDTH = 200
 const MIN_SIDEBAR_WIDTH = 180
 const MAX_SIDEBAR_WIDTH = 320
+const DEFAULT_LEFT_PANEL_WIDTH = 320
+const MIN_LEFT_PANEL_WIDTH = 240
+const MAX_LEFT_PANEL_WIDTH = 480
 
 // Spring transition for smooth animations
 const SPRING_TRANSITION = {
@@ -90,8 +93,24 @@ export function AppShell({
     }
     return DEFAULT_SIDEBAR_WIDTH
   })
-  const [isResizing, setIsResizing] = React.useState(false)
-  const [isResizeHovered, setIsResizeHovered] = React.useState(false)
+  const [leftPanelWidth, setLeftPanelWidth] = React.useState(() => {
+    const stored = localStorage.getItem('cued-left-panel-width')
+    if (stored) {
+      const width = parseInt(stored, 10)
+      if (!isNaN(width) && width >= MIN_LEFT_PANEL_WIDTH && width <= MAX_LEFT_PANEL_WIDTH) {
+        return width
+      }
+    }
+    return DEFAULT_LEFT_PANEL_WIDTH
+  })
+  const [isResizing, setIsResizing] = React.useState<'sidebar' | 'left-panel' | null>(null)
+  const [isSidebarResizeHovered, setIsSidebarResizeHovered] = React.useState(false)
+  const [isLeftPanelResizeHovered, setIsLeftPanelResizeHovered] = React.useState(false)
+  const mainContentRef = React.useRef<HTMLDivElement>(null)
+  const hasLeftPanelResize = currentPage === 'actions'
+    || currentPage === 'assistant'
+    || currentPage === 'contacts'
+    || currentPage === 'settings'
 
   // Global keyboard shortcuts
   useGlobalShortcuts({
@@ -116,21 +135,37 @@ export function AppShell({
   React.useEffect(() => {
     localStorage.setItem('cued-sidebar-width', String(sidebarWidth))
   }, [sidebarWidth])
+  React.useEffect(() => {
+    localStorage.setItem('cued-left-panel-width', String(leftPanelWidth))
+  }, [leftPanelWidth])
 
-  // Handle sidebar resize
+  // Handle sidebar + left panel resize
   React.useEffect(() => {
     if (!isResizing) return
 
     const handleMouseMove = (e: MouseEvent) => {
+      if (isResizing === 'sidebar') {
+        const newWidth = Math.max(
+          MIN_SIDEBAR_WIDTH,
+          Math.min(MAX_SIDEBAR_WIDTH, e.clientX)
+        )
+        setSidebarWidth(newWidth)
+        return
+      }
+
+      const mainRect = mainContentRef.current?.getBoundingClientRect()
+      if (!mainRect) return
+
+      const panelStartX = mainRect.left + PANEL_EDGE_SPACING
       const newWidth = Math.max(
-        MIN_SIDEBAR_WIDTH,
-        Math.min(MAX_SIDEBAR_WIDTH, e.clientX)
+        MIN_LEFT_PANEL_WIDTH,
+        Math.min(MAX_LEFT_PANEL_WIDTH, e.clientX - panelStartX)
       )
-      setSidebarWidth(newWidth)
+      setLeftPanelWidth(newWidth)
     }
 
     const handleMouseUp = () => {
-      setIsResizing(false)
+      setIsResizing(null)
     }
 
     document.addEventListener('mousemove', handleMouseMove)
@@ -140,7 +175,7 @@ export function AppShell({
       document.removeEventListener('mousemove', handleMouseMove)
       document.removeEventListener('mouseup', handleMouseUp)
     }
-  }, [isResizing])
+  }, [hasLeftPanelResize, isResizing])
 
   return (
     <div className="h-full flex items-stretch relative bg-background/65">
@@ -148,7 +183,7 @@ export function AppShell({
       <motion.div
         initial={false}
         animate={{ width: isSidebarVisible ? sidebarWidth : 0 }}
-        transition={isResizing ? { duration: 0 } : SPRING_TRANSITION}
+        transition={isResizing === 'sidebar' ? { duration: 0 } : SPRING_TRANSITION}
         className="h-full overflow-hidden shrink-0 relative"
       >
         <div style={{ width: sidebarWidth }} className="h-full font-sans relative">
@@ -172,32 +207,60 @@ export function AppShell({
       <div
         onMouseDown={(e) => {
           e.preventDefault()
-          setIsResizing(true)
+          setIsResizing('sidebar')
         }}
-        onMouseEnter={() => setIsResizeHovered(true)}
+        onMouseEnter={() => setIsSidebarResizeHovered(true)}
         onMouseLeave={() => {
-          if (!isResizing) setIsResizeHovered(false)
+          if (isResizing !== 'sidebar') setIsSidebarResizeHovered(false)
         }}
         className="absolute top-0 w-3 h-full cursor-col-resize z-50 flex justify-center"
         style={{
           left: isSidebarVisible ? sidebarWidth - 6 : -6,
-          transition: isResizing ? undefined : 'left 0.15s ease-out',
+          transition: isResizing === 'sidebar' ? undefined : 'left 0.15s ease-out',
         }}
       >
         <div
           className={cn(
             'w-0.5 h-full transition-colors',
-            isResizing || isResizeHovered ? 'bg-foreground/20' : 'bg-transparent'
+            isResizing === 'sidebar' || isSidebarResizeHovered ? 'bg-foreground/20' : 'bg-transparent'
           )}
         />
       </div>
 
       {/* Main Content Area */}
       <div
-        className="flex-1 overflow-hidden min-w-0 flex h-full"
-        style={{ padding: PANEL_EDGE_SPACING, gap: PANEL_SPACING }}
+        ref={mainContentRef}
+        className="flex-1 overflow-hidden min-w-0 flex h-full relative"
+        style={{
+          padding: PANEL_EDGE_SPACING,
+          gap: PANEL_SPACING,
+          ['--cued-left-panel-width' as string]: `${leftPanelWidth}px`,
+        }}
       >
         {children}
+        {hasLeftPanelResize && (
+          <div
+            onMouseDown={(e) => {
+              e.preventDefault()
+              setIsResizing('left-panel')
+            }}
+            onMouseEnter={() => setIsLeftPanelResizeHovered(true)}
+            onMouseLeave={() => {
+              if (isResizing !== 'left-panel') setIsLeftPanelResizeHovered(false)
+            }}
+            className="absolute top-0 w-3 h-full cursor-col-resize z-50 flex justify-center"
+            style={{
+              left: PANEL_EDGE_SPACING + leftPanelWidth - 6,
+            }}
+          >
+            <div
+              className={cn(
+                'w-0.5 h-full transition-colors',
+                isResizing === 'left-panel' || isLeftPanelResizeHovered ? 'bg-foreground/20' : 'bg-transparent'
+              )}
+            />
+          </div>
+        )}
       </div>
     </div>
   )

@@ -12,6 +12,7 @@ import {
   internalQuery,
 } from "./_generated/server";
 import { internal } from "./_generated/api";
+import { resolveActionSummary } from "./lib/actionSummary";
 import { actionTypeValidator, platformValidator } from "./schema";
 
 /** Result from LLM analysis */
@@ -288,6 +289,7 @@ export const createActionFromSuggestion = internalMutation({
     type: actionTypeValidator,
     priority: v.number(),
     platform: platformValidator,
+    summary: v.optional(v.string()),
     llmReason: v.optional(v.string()),
     snoozedUntil: v.optional(v.number()),
   },
@@ -316,6 +318,7 @@ export const createActionFromSuggestion = internalMutation({
       contactId: args.contactId,
       messageId: args.messageId,
       platform: args.platform,
+      summary: resolveActionSummary(args.type, args.summary),
       llmReason: args.llmReason,
       snoozedUntil: args.snoozedUntil,
       createdAt: Date.now(),
@@ -529,6 +532,7 @@ export const analyzeConversation = internalAction({
           type: suggestion.type ?? "respond",
           priority: suggestion.priority ?? 50,
           platform: conversation.platform,
+          summary: suggestion.summary ?? undefined,
           llmReason: suggestion.reason ?? undefined,
           snoozedUntil,
         }

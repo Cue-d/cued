@@ -1,14 +1,52 @@
 import * as React from "react"
-import { CircleCheck } from "lucide-react"
+import { CheckCircle2 } from 'lucide-react'
 import {
   type ActionPlatform,
   type DisplayMessage,
+  formatTime,
+  formatRelativeTime,
 } from "@cued/shared"
+
+/** Format timestamp as iMessage-style divider: "Today 3:45 PM", "Yesterday", "Mon", "Nov 18 at 2:37 AM" */
+function formatDividerTime(timestamp: number): string {
+  const date = new Date(timestamp)
+  const now = new Date()
+  const time = formatTime(timestamp)
+
+  // Today: "Today 3:45 PM"
+  const isToday =
+    date.getDate() === now.getDate() &&
+    date.getMonth() === now.getMonth() &&
+    date.getFullYear() === now.getFullYear()
+  if (isToday) return `Today ${time}`
+
+  // Yesterday
+  const yesterday = new Date(now)
+  yesterday.setDate(yesterday.getDate() - 1)
+  const isYesterday =
+    date.getDate() === yesterday.getDate() &&
+    date.getMonth() === yesterday.getMonth() &&
+    date.getFullYear() === yesterday.getFullYear()
+  if (isYesterday) return "Yesterday"
+
+  // Within last 7 days: "Mon"
+  const diffDays = Math.floor(
+    (now.getTime() - date.getTime()) / (1000 * 60 * 60 * 24)
+  )
+  if (diffDays < 7) {
+    return date.toLocaleDateString("en-US", { weekday: "short" })
+  }
+
+  // Older: "Nov 18 at 2:37 AM"
+  const monthDay = date.toLocaleDateString("en-US", {
+    month: "short",
+    day: "numeric",
+  })
+  return `${monthDay} at ${time}`
+}
 import { cn } from "../../lib/utils"
 import { Card, CardContent, CardFooter, CardHeader } from "../ui/card"
-import { InboxMessageBubble, type InboxMessageSpacing } from "../unified-inbox/message-bubble"
-import type { InboxMessage } from "../unified-inbox/message-types"
-import { PlatformBadge } from "./message-response-card/platform-badge"
+import { MessageBubble, type MessageSpacing } from "./message-response-card/message-bubble"
 import { ResponseInput } from "./message-response-card/response-input"
 import { OpenInAppButton } from "./open-in-app-button"
 import { ParticipantsHoverCard, type Participant } from "./participants-hover-card"
@@ -56,8 +94,20 @@ export interface MessageResponseCardProps {
   contactId?: string | null
   /** Called when a contact name is clicked */
   onContactClick?: (contactId: string) => void
+  /** Whether there are older messages to load */
+  hasMore?: boolean
+  /** Called when user wants to load older messages */
+  onLoadMore?: () => void
+  /** Whether older messages are currently loading */
+  isLoadingMore?: boolean
   /** Whether this action has been completed (message sent) */
   isCompleted?: boolean
+  /** When true, hides response input and shows read-only status (history view) */
+  readOnly?: boolean
+  /** Resolution timestamp for read-only status display */
+  resolvedAt?: number | null
+  /** Resolution status label for read-only display */
+  resolvedStatus?: "completed" | "discarded" | null
 }
 
 export interface MessageResponseCardRef {
@@ -92,12 +142,21 @@ export const MessageResponseCard = React.forwardRef<
     participants,
     contactId,
     onContactClick,
+    hasMore,
+    onLoadMore,
+    isLoadingMore,
     isCompleted = false,
+    readOnly = false,
+    resolvedAt,
+    resolvedStatus,
   },
   ref
 ) {
   const textareaRef = React.useRef<HTMLTextAreaElement>(null)
   const scrollContainerRef = React.useRef<HTMLDivElement>(null)
+  const prevScrollHeightRef = React.useRef<number>(0)
+  const prevMessageCountRef = React.useRef<number>(0)
+  const initialScrollDoneRef = React.useRef(false)
 
   React.useImperativeHandle(ref, () => ({
     focusInput: () => {
@@ -113,16 +172,51 @@ export const MessageResponseCard = React.forwardRef<
     return () => clearTimeout(timer)
   }, [autoFocus])
 
-  // Scroll to bottom on initial load
+  // Scroll to bottom on initial load, preserve position when older messages prepend
   React.useEffect(() => {
-    const timer = setTimeout(() => {
-      if (scrollContainerRef.current) {
-        scrollContainerRef.current.scrollTop =
-          scrollContainerRef.current.scrollHeight
-      }
-    }, 0)
-    return () => clearTimeout(timer)
+    const el = scrollContainerRef.current
+    if (!el) return
+
+    const prevCount = prevMessageCountRef.current
+    const newCount = messages.length
+
+    if (prevCount === 0 && newCount > 0) {
+      // Initial load — scroll to bottom
+      initialScrollDoneRef.current = false
+      const timer = setTimeout(() => {
+        el.scrollTop = el.scrollHeight
+        initialScrollDoneRef.current = true
+        prevMessageCountRef.current = newCount
+        prevScrollHeightRef.current = el.scrollHeight
+      }, 0)
+      return () => clearTimeout(timer)
+    }
+
+    if (newCount > prevCount && prevCount > 0 && initialScrollDoneRef.current) {
+      // Older messages were prepended — preserve scroll position
+      const prevHeight = prevScrollHeightRef.current
+      const newHeight = el.scrollHeight
+      el.scrollTop += newHeight - prevHeight
+    }
+
+    prevMessageCountRef.current = newCount
+    prevScrollHeightRef.current = el.scrollHeight
   }, [messages])
+
+  // Auto-load older messages when user scrolls near the top
+  React.useEffect(() => {
+    const el = scrollContainerRef.current
+    if (!el) return
+
+    const handleScroll = () => {
+      if (el.scrollTop < 80 && hasMore && !isLoadingMore && onLoadMore) {
+        onLoadMore()
+      }
+    }
+
+    el.addEventListener("scroll", handleScroll, { passive: true })
+    return () => el.removeEventListener("scroll", handleScroll)
+  }, [hasMore, isLoadingMore, onLoadMore])
 
   // Intercept link clicks in message bubbles
   const handleContainerClick = React.useCallback(
@@ -142,46 +236,50 @@ export const MessageResponseCard = React.forwardRef<
     [messages]
   )
 
-  // Convert DisplayMessage to InboxMessage for the shared bubble component
-  const inboxMessages: InboxMessage[] = React.useMemo(
-    () => sortedMessages.map((msg) => ({
-      _id: msg._id,
-      content: msg.content ?? "",
-      sentAt: msg.sentAt,
-      isFromMe: msg.isFromMe,
-      platform: (platform ?? "imessage") as InboxMessage["platform"],
-      sender: msg.senderName ? {
-        _id: msg.senderContactId ?? msg._id,
-        displayName: msg.senderName,
-      } : null,
-      reactions: msg.reactions ?? null,
-      status: msg.status,
-    })),
-    [sortedMessages, platform]
-  )
-
-  function shouldShowSenderName(msg: InboxMessage, idx: number): boolean {
+  function shouldShowSenderName(msg: DisplayMessage, idx: number): boolean {
     if (msg.isFromMe) return false
-    if (!msg.sender?.displayName) return false
+    if (!msg.senderName) return false
     if (idx === 0) return true
-    const prevMsg = inboxMessages[idx - 1]
+    const prevMsg = sortedMessages[idx - 1]
     if (prevMsg.isFromMe) return true
-    return prevMsg.sender?.displayName !== msg.sender?.displayName
+    return prevMsg.senderName !== msg.senderName
   }
 
-  function getMessageSpacing(msg: InboxMessage, idx: number): InboxMessageSpacing {
+  function getMessageSpacing(msg: DisplayMessage, idx: number): MessageSpacing {
     if (idx === 0) return "normal"
-    const prevMsg = inboxMessages[idx - 1]
+    const prevMsg = sortedMessages[idx - 1]
 
     // Different sender direction = wide gap
     if (msg.isFromMe !== prevMsg.isFromMe) return "wide"
 
     // Same sender direction but different person (group chat) = wide gap
-    if (!msg.isFromMe && msg.sender?._id !== prevMsg.sender?._id) return "wide"
+    if (!msg.isFromMe && msg.senderContactId !== prevMsg.senderContactId) return "wide"
 
     // Same sender - check time gap (>2 min = normal spacing)
     const timeDiffMinutes = (msg.sentAt - prevMsg.sentAt) / 1000 / 60
     return timeDiffMinutes > 2 ? "normal" : "tight"
+  }
+
+  function shouldShowTimestamp(msg: DisplayMessage, idx: number): boolean {
+    if (idx === 0) return true
+    const prevMsg = sortedMessages[idx - 1]
+
+    // Only show on significant time gaps (>1 hour), not on sender changes
+    const timeDiffMinutes = (msg.sentAt - prevMsg.sentAt) / 1000 / 60
+    if (timeDiffMinutes <= 60) return false
+
+    // Deduplicate: don't show if label would be identical to the previous shown timestamp
+    const thisLabel = formatDividerTime(msg.sentAt)
+    // Walk back to find the last message that showed a timestamp
+    for (let i = idx - 1; i >= 0; i--) {
+      const prev = sortedMessages[i]
+      const prevPrev = i > 0 ? sortedMessages[i - 1] : undefined
+      // Check if this previous message would have shown a timestamp
+      if (i === 0 || (prevPrev && (prev.sentAt - prevPrev.sentAt) / 1000 / 60 > 60)) {
+        return formatDividerTime(prev.sentAt) !== thisLabel
+      }
+    }
+    return true
   }
 
   return (
@@ -191,14 +289,14 @@ export const MessageResponseCard = React.forwardRef<
         className
       )}
     >
-      {isCompleted && (
+      {isCompleted && !readOnly && (
         <div
           className="absolute inset-0 z-10 pointer-events-none rounded-[inherit]"
           style={{ backgroundColor: "#1B5E3D", opacity: 0.08 }}
         />
       )}
       {/* Header - fixed h-10 to align with PanelHeader in left column */}
-      <CardHeader className="shrink-0 h-10 py-0 flex items-center">
+      <CardHeader className="shrink-0 h-10 py-0 flex items-center relative z-10">
         <div className="flex items-center justify-center w-full">
           {participants && participants.length > 0 ? (
             <ParticipantsHoverCard
@@ -237,17 +335,40 @@ export const MessageResponseCard = React.forwardRef<
           onClick={handleContainerClick}
         >
           <div className="py-4 px-4">
-            {inboxMessages.length > 0 ? (
-              inboxMessages.map((msg, idx) => (
-                <InboxMessageBubble
-                  key={msg._id}
-                  message={msg}
-                  showTimestamp={true}
-                  showSenderName={shouldShowSenderName(msg, idx)}
-                  spacing={getMessageSpacing(msg, idx)}
-                  onContactClick={onContactClick}
-                />
-              ))
+            {isLoadingMore && (
+              <div className="flex justify-center mb-4">
+                <span className="w-4 h-4 border-2 border-muted-foreground/30 border-t-muted-foreground rounded-full animate-spin" />
+              </div>
+            )}
+            {sortedMessages.length > 0 ? (
+              sortedMessages.map((msg, idx) => {
+                const showTime = shouldShowTimestamp(msg, idx)
+                return (
+                  <React.Fragment key={msg._id}>
+                    {showTime && (
+                      <div className="flex justify-center my-4">
+                        <span className="text-[10px] text-muted-foreground font-medium tracking-tight tabular-nums">
+                          {formatDividerTime(msg.sentAt)}
+                        </span>
+                      </div>
+                    )}
+                    <MessageBubble
+                      id={msg._id}
+                      content={msg.content}
+                      isFromMe={msg.isFromMe}
+                      sentAt={msg.sentAt}
+                      senderName={msg.senderName}
+                      senderContactId={msg.senderContactId}
+                      status={msg.status}
+                      reactions={msg.reactions}
+                      showSenderName={shouldShowSenderName(msg, idx)}
+                      spacing={showTime ? "normal" : getMessageSpacing(msg, idx)}
+                      platform={platform}
+                      onContactClick={onContactClick}
+                    />
+                  </React.Fragment>
+                )
+              })
             ) : (
               <div className="flex items-center justify-center h-full text-muted-foreground">
                 <p>No recent messages</p>
@@ -257,11 +378,25 @@ export const MessageResponseCard = React.forwardRef<
         </div>
       </CardContent>
 
-      {/* Response Input or Completed State */}
+      {/* Response Input, Completed State, or Read-Only Status */}
       <CardFooter className="p-2 bg-transparent" data-selectable="true">
-        {isCompleted ? (
+        {readOnly ? (
+          <div className="flex items-center justify-between w-full py-2 px-1">
+            <div className="flex items-center gap-2">
+              <CheckCircle2 size={16} strokeWidth={1.5} className={resolvedStatus === "discarded" ? "text-muted-foreground" : "text-[#1B5E3D]"} />
+              <span className="text-sm font-medium text-muted-foreground">
+                {resolvedStatus === "discarded" ? "Skipped" : "Sent"}
+              </span>
+            </div>
+            {resolvedAt && (
+              <span className="text-xs text-muted-foreground">
+                {formatRelativeTime(resolvedAt)}
+              </span>
+            )}
+          </div>
+        ) : isCompleted ? (
           <div className="flex items-center justify-center gap-2 w-full py-2">
-            <CircleCheck className="w-4 h-4 text-[#1B5E3D]" />
+            <CheckCircle2 size={16} strokeWidth={1.5} className="text-[#1B5E3D]" />
             <span className="text-sm font-medium text-muted-foreground">
               Message queued
             </span>

@@ -20,6 +20,7 @@ export function ContactCardWrapper({
   autoFocus,
   className,
   openInApp,
+  readOnly,
 }: ActionCardProps) {
   // Use local state for form data, with responseText as the notes field
   const [formData, setFormData] = React.useState<ContactFormData>(() => ({
@@ -45,12 +46,12 @@ export function ContactCardWrapper({
     <ContactCard
       personName={action.contactName ?? "New Contact"}
       createdAt={action.createdAt}
-      platform={action.platform}
       formData={formData}
       onFormChange={handleFormChange}
-      autoFocus={isTop && autoFocus}
+      autoFocus={readOnly ? false : isTop && autoFocus}
       className={className}
       openInApp={openInApp}
+      readOnly={readOnly}
     />
   );
 }

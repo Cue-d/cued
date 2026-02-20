@@ -8,10 +8,30 @@ export function findUserByWorkosId(
   ctx: QueryCtx | MutationCtx,
   workosUserId: string
 ): Promise<Doc<"users"> | null> {
-  return ctx.db
-    .query("users")
-    .withIndex("by_workos_id", (q) => q.eq("workosUserId", workosUserId))
-    .unique();
+  return (async () => {
+    const users = await ctx.db
+      .query("users")
+      .withIndex("by_workos_id", (q) => q.eq("workosUserId", workosUserId))
+      .collect();
+
+    if (users.length === 0) return null;
+    if (users.length === 1) return users[0];
+
+    // Guard against duplicate rows for the same WorkOS subject.
+    // Choose the oldest user as canonical to preserve existing linked data.
+    const canonical = users.reduce((oldest, current) =>
+      current._creationTime < oldest._creationTime ? current : oldest
+    );
+
+    console.error("[Auth] Duplicate users found for workosUserId; using canonical user", {
+      workosUserId,
+      count: users.length,
+      canonicalUserId: canonical._id,
+      duplicateUserIds: users.map((user) => user._id),
+    });
+
+    return canonical;
+  })();
 }
 
 /**

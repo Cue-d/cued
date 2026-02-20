@@ -17,6 +17,8 @@ import {
 } from "../convex-client.js";
 import { getAdapter, SERVER_SIDE_PLATFORMS } from "../adapters/index.js";
 
+const LOG_PREFIX = "[MessageQueueProcessor]";
+
 /** Maximum concurrent sends to prevent overload */
 const MAX_CONCURRENT_SENDS = 5;
 /** Fallback poll interval in case subscription updates are missed */
@@ -33,6 +35,23 @@ const AUTH_RETRY_DELAY_MS = 5000;
 /** Maximum auth retries before giving up on a message */
 const MAX_AUTH_RETRIES = 6; // 30 seconds total
 
+function summarizeMessage(message: Doc<"messageQueue">) {
+  return {
+    messageId: message._id,
+    platform: message.platform,
+    status: message.status,
+    attempts: message.attempts,
+    conversationId: message.conversationId ?? null,
+    scheduledInMs: message.scheduledFor - Date.now(),
+    ageMs: Date.now() - message.createdAt,
+    processingDeviceId: message.processingDeviceId ?? null,
+  };
+}
+
+function toErrorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
 export class MessageQueueProcessor {
   private subscription: Unsubscribe<{ messages: Doc<"messageQueue">[] }> | null = null;
   private fallbackPollInterval: NodeJS.Timeout | null = null;
@@ -47,13 +66,18 @@ export class MessageQueueProcessor {
    */
   start(): void {
     if (this.subscription) {
+      console.log(`${LOG_PREFIX} Start requested but subscription already active`);
       return;
     }
 
     this.stopped = false;
     const client = getConvexClient();
 
-    console.log("[MessageQueueProcessor] Starting WebSocket subscription...");
+    console.log(`${LOG_PREFIX} Starting WebSocket subscription`, {
+      deviceId: this.deviceId,
+      maxConcurrentSends: MAX_CONCURRENT_SENDS,
+      fallbackPollIntervalMs: FALLBACK_POLL_INTERVAL_MS,
+    });
 
     // Subscribe to messages ready to send
     this.subscription = client.subscribe(
@@ -61,14 +85,18 @@ export class MessageQueueProcessor {
       { limit: 20 },
       (result) => {
         if (result.messages.length > 0) {
-          console.log(
-            `[MessageQueueProcessor] Subscription update: ${result.messages.length} messages ready`
-          );
+          const sampleMessageIds = result.messages
+            .slice(0, 5)
+            .map((m) => m._id);
+          console.log(`${LOG_PREFIX} Subscription update`, {
+            readyCount: result.messages.length,
+            sampleMessageIds,
+          });
         }
         this.handleQueueUpdate(result.messages);
       },
       (error) => {
-        console.error("[MessageQueueProcessor] Subscription error:", error);
+        console.error(`${LOG_PREFIX} Subscription error`, toErrorMessage(error));
         this.handleSubscriptionError();
       }
     );
@@ -83,9 +111,9 @@ export class MessageQueueProcessor {
           this.pollOnce("fallback");
         }
       }, FALLBACK_POLL_INTERVAL_MS);
-      console.log(
-        `[MessageQueueProcessor] Fallback polling enabled (${FALLBACK_POLL_INTERVAL_MS}ms interval)`
-      );
+      console.log(`${LOG_PREFIX} Fallback polling enabled`, {
+        intervalMs: FALLBACK_POLL_INTERVAL_MS,
+      });
     }
   }
 
@@ -100,15 +128,20 @@ export class MessageQueueProcessor {
       const client = getConvexClient();
       const result = await client.query(api.messageQueue.getQueuedMessages, { limit: 20 });
       if (result.messages.length > 0 || source === "startup") {
-        console.log(
-          `[MessageQueueProcessor] ${source} poll found ${result.messages.length} pending messages`
-        );
+        console.log(`${LOG_PREFIX} Poll result`, {
+          source,
+          readyCount: result.messages.length,
+          sampleMessageIds: result.messages.slice(0, 5).map((m) => m._id),
+        });
       }
       if (result.messages.length > 0) {
         await this.handleQueueUpdate(result.messages);
       }
     } catch (error) {
-      console.error(`[MessageQueueProcessor] ${source} poll failed:`, error);
+      console.error(`${LOG_PREFIX} Poll failed`, {
+        source,
+        error: toErrorMessage(error),
+      });
     }
   }
 
@@ -117,6 +150,11 @@ export class MessageQueueProcessor {
    */
   stop(): void {
     this.stopped = true;
+    console.log(`${LOG_PREFIX} Stopping queue processor`, {
+      inFlightCount: this.processingIds.size,
+      subscriptionActive: this.subscription !== null,
+      fallbackPollActive: this.fallbackPollInterval !== null,
+    });
 
     if (this.subscription) {
       this.subscription.unsubscribe();
@@ -142,7 +180,7 @@ export class MessageQueueProcessor {
     // Retry after delay
     setTimeout(() => {
       if (!this.stopped) {
-        console.log("[MessageQueueProcessor] Reconnecting...");
+        console.log(`${LOG_PREFIX} Reconnecting after subscription error`);
         this.start();
       }
     }, 5000);
@@ -159,10 +197,27 @@ export class MessageQueueProcessor {
     const newMessages = messages.filter(
       (m) => !this.processingIds.has(m._id)
     );
-    if (newMessages.length === 0) return;
+    const skippedAlreadyProcessing = messages.length - newMessages.length;
+    if (newMessages.length === 0) {
+      console.log(`${LOG_PREFIX} Queue update skipped`, {
+        readyCount: messages.length,
+        skippedAlreadyProcessing,
+        inFlightCount: this.processingIds.size,
+      });
+      return;
+    }
 
     // Process messages with concurrency limit
     const batch = newMessages.slice(0, MAX_CONCURRENT_SENDS);
+    console.log(`${LOG_PREFIX} Dispatching queue batch`, {
+      readyCount: messages.length,
+      newCount: newMessages.length,
+      skippedAlreadyProcessing,
+      batchCount: batch.length,
+      backlogCount: Math.max(0, newMessages.length - batch.length),
+      inFlightCount: this.processingIds.size,
+      batchMessageIds: batch.map((m) => m._id),
+    });
     await Promise.all(batch.map((m) => this.processMessage(m)));
   }
 
@@ -175,11 +230,17 @@ export class MessageQueueProcessor {
     // Mark as processing to prevent duplicate sends
     if (this.processingIds.has(messageId)) return;
     this.processingIds.add(messageId);
+    const processStartedAt = Date.now();
+    console.log(`${LOG_PREFIX} Processing message`, summarizeMessage(message));
 
     let keepInProcessing = false;
     try {
       // Skip server-side platforms
       if (SERVER_SIDE_PLATFORMS.includes(message.platform as ActionPlatform)) {
+        console.log(`${LOG_PREFIX} Skipping server-side managed platform`, {
+          messageId,
+          platform: message.platform,
+        });
         return;
       }
 
@@ -190,14 +251,25 @@ export class MessageQueueProcessor {
         deviceId: this.deviceId,
       });
       if (!claimResult.success) {
-        console.log(`[MessageQueueProcessor] Claim failed for ${messageId}: ${claimResult.reason}`);
+        console.log(`${LOG_PREFIX} Claim failed`, {
+          messageId,
+          reason: claimResult.reason,
+          inFlightCount: this.processingIds.size,
+        });
         return;
       }
+      console.log(`${LOG_PREFIX} Claim acquired`, {
+        messageId,
+        deviceId: this.deviceId,
+      });
 
       // Get the adapter for this platform
       const adapter = getAdapter(message.platform as ActionPlatform);
       if (!adapter) {
-        console.error(`[MessageQueueProcessor] No adapter for platform: ${message.platform}`);
+        console.error(`${LOG_PREFIX} No adapter for platform`, {
+          messageId,
+          platform: message.platform,
+        });
         await this.updateStatus(messageId, "failed", `No adapter for platform: ${message.platform}`);
         return;
       }
@@ -208,6 +280,13 @@ export class MessageQueueProcessor {
         const retryCount = this.authRetryCount.get(messageId) ?? 0;
         if (retryCount < MAX_AUTH_RETRIES) {
           this.authRetryCount.set(messageId, retryCount + 1);
+          console.log(`${LOG_PREFIX} Adapter unauthenticated, scheduling retry`, {
+            messageId,
+            platform: message.platform,
+            retryAttempt: retryCount + 1,
+            maxRetries: MAX_AUTH_RETRIES,
+            retryDelayMs: AUTH_RETRY_DELAY_MS,
+          });
           // Keep in processingIds so subscription updates don't re-enter
           // before the delayed retry fires. The setTimeout handles cleanup.
           keepInProcessing = true;
@@ -217,7 +296,11 @@ export class MessageQueueProcessor {
           }, AUTH_RETRY_DELAY_MS);
           return;
         }
-        console.warn(`[MessageQueueProcessor] ${message.platform} not authenticated after ${MAX_AUTH_RETRIES} retries`);
+        console.warn(`${LOG_PREFIX} Adapter still unauthenticated after retries`, {
+          messageId,
+          platform: message.platform,
+          retries: MAX_AUTH_RETRIES,
+        });
         this.authRetryCount.delete(messageId);
         await this.updateStatus(
           messageId,
@@ -233,16 +316,22 @@ export class MessageQueueProcessor {
       const sendingTransition = await this.updateStatus(messageId, "sending");
       if (!sendingTransition.success) {
         if (sendingTransition.reason === "conversation_locked") {
-          console.log(
-            `[MessageQueueProcessor] Conversation locked for ${messageId}; waiting for earlier message to finish`
-          );
+          console.log(`${LOG_PREFIX} Sending transition rejected due to conversation lock`, {
+            messageId,
+            reason: sendingTransition.reason,
+          });
         } else {
-          console.log(
-            `[MessageQueueProcessor] Skipping send for ${messageId}: sending transition was rejected (${sendingTransition.reason ?? "unknown"})`
-          );
+          console.log(`${LOG_PREFIX} Sending transition rejected`, {
+            messageId,
+            reason: sendingTransition.reason ?? "unknown",
+          });
         }
         return;
       }
+      console.log(`${LOG_PREFIX} Message transitioned to sending`, {
+        messageId,
+        platform: message.platform,
+      });
 
       // Convert to QueuedMessage format expected by adapters
       const queuedMessage: QueuedMessage = {
@@ -254,25 +343,55 @@ export class MessageQueueProcessor {
         groupHandles: message.isGroup ? [message.recipientHandle] : undefined,
         workspaceId: message.workspaceId,
       };
+      console.log(`${LOG_PREFIX} Dispatching adapter send`, {
+        messageId,
+        platform: queuedMessage.platform,
+        hasThreadId: Boolean(queuedMessage.threadId),
+        isGroup: Boolean(queuedMessage.groupHandles?.length),
+        textLength: queuedMessage.text.length,
+      });
 
       // Send the message — no client-side timeout.
       // If Electron crashes mid-send, the server-side timeoutStaleSends cron recovers it.
+      const sendStartMs = Date.now();
       const result = await adapter.send(queuedMessage);
+      const sendDurationMs = Date.now() - sendStartMs;
 
       if (result.success) {
+        console.log(`${LOG_PREFIX} Adapter send succeeded`, {
+          messageId,
+          platform: message.platform,
+          adapterMessageId: result.messageId ?? null,
+          durationMs: sendDurationMs,
+        });
         await this.updateStatus(messageId, "sent");
       } else {
-        console.error(`[MessageQueueProcessor] Send failed for ${messageId}: ${result.error}`);
+        console.error(`${LOG_PREFIX} Adapter send failed`, {
+          messageId,
+          platform: message.platform,
+          durationMs: sendDurationMs,
+          error: result.error ?? "unknown",
+          retryable: result.retryable ?? null,
+        });
         await this.updateStatus(messageId, "failed", result.error);
       }
     } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : String(error);
-      console.error(`[MessageQueueProcessor] Error processing ${messageId}:`, errorMessage);
+      const errorMessage = toErrorMessage(error);
+      console.error(`${LOG_PREFIX} Error processing message`, {
+        messageId,
+        error: errorMessage,
+      });
       await this.updateStatus(messageId, "failed", errorMessage);
     } finally {
       if (!keepInProcessing) {
         this.processingIds.delete(messageId);
       }
+      console.log(`${LOG_PREFIX} Finished processing message`, {
+        messageId,
+        durationMs: Date.now() - processStartedAt,
+        keptInProcessing: keepInProcessing,
+        inFlightCount: this.processingIds.size,
+      });
     }
   }
 
@@ -286,20 +405,35 @@ export class MessageQueueProcessor {
   ): Promise<{ success: boolean; willRetry: boolean; reason?: string }> {
     try {
       const client = getConvexClient();
+      console.log(`${LOG_PREFIX} Updating message status`, {
+        messageId,
+        status,
+        hasError: Boolean(error),
+      });
       const result = await client.mutation(api.messageQueue.updateMessageStatus, {
         messageId,
         status,
         error,
       });
-      return {
+      const mappedResult = {
         success: Boolean(result?.success),
         willRetry: Boolean(result?.willRetry),
         reason: typeof result?.reason === "string" ? result.reason : undefined,
       };
+      console.log(`${LOG_PREFIX} Status update result`, {
+        messageId,
+        status,
+        ...mappedResult,
+      });
+      return mappedResult;
     } catch (err) {
       console.error(
-        `[MessageQueueProcessor] Failed to update status:`,
-        err instanceof Error ? err.message : String(err)
+        `${LOG_PREFIX} Failed to update status`,
+        {
+          messageId,
+          status,
+          error: err instanceof Error ? err.message : String(err),
+        }
       );
       return { success: false, willRetry: false, reason: "request_failed" };
     }

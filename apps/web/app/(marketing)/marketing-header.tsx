@@ -1,20 +1,18 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useState } from "react";
 import Link from "next/link";
 import { motion, AnimatePresence } from "motion/react";
-import { CuedLogo } from "@cued/ui";
+import { CuedMark } from "@cued/ui";
 
 export function MarketingHeader() {
   const [logoHovered, setLogoHovered] = useState(false);
-  const logoGroupRef = useRef<HTMLAnchorElement>(null);
 
   return (
     <header className="absolute top-0 left-0 right-0 z-50">
       <nav className="flex h-16 items-center justify-between px-6 lg:px-8">
         <Link
           href="/"
-          ref={logoGroupRef}
           className="flex items-center gap-1.5 active:scale-98 transition-transform"
           onMouseEnter={() => setLogoHovered(true)}
           onMouseLeave={() => setLogoHovered(false)}
@@ -22,14 +20,14 @@ export function MarketingHeader() {
           onTouchEnd={() => setLogoHovered(false)}
           onTouchCancel={() => setLogoHovered(false)}
         >
-          <CuedLogo size={24} interactive trackingRef={logoGroupRef} />
-          <span className="text-lg font-[550] tracking-[-0.075em] inline-flex">
+          <CuedMark size={16} />
+          <span className="text-lg leading-0 font-semibold tracking-[-0.075em] inline-flex">
             <span>Cue</span>
             <span className="relative inline-flex">
               <AnimatePresence>
                 {logoHovered && (
                   <motion.span
-                    className="inline-block -tracking-widest"
+                    className="inline-block leading-0 -tracking-widest"
                     initial={{
                       opacity: 0,
                       rotate: -4,

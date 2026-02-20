@@ -1,27 +1,25 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { motion, AnimatePresence } from "motion/react";
 import { ArrowRight } from "lucide-react";
-import { CuedLogo } from "@cued/ui";
+import { motion, AnimatePresence } from "motion/react";
+import { CuedMark } from "@cued/ui";
 import { StaggeringText } from "./components/staggering-text";
 import { DemoCardStack } from "./demo-cards/demo-card-stack";
 
 export default function Home() {
   const [isHovered, setIsHovered] = useState(false);
   const [logoHovered, setLogoHovered] = useState(false);
-  const logoGroupRef = useRef<HTMLAnchorElement>(null);
   const router = useRouter();
   return (
     <div className="relative flex min-h-screen flex-col lg:flex-row">
       {/* Left Panel */}
       <div className="relative z-10 flex flex-1 flex-col items-center justify-center px-6 pt-24 lg:items-start lg:justify-center lg:bg-sidebar lg:px-16 lg:pt-0">
-        <nav className="absolute top-0 right-0 left-0 flex h-16 items-center justify-between px-6 lg:px-8">
+        <nav className="absolute top-0 right-0 left-0 flex h-16 items-center justify-between px-6 lg:px-16">
           <Link
             href="/"
-            ref={logoGroupRef}
             className="flex items-center gap-1.5 active:scale-98 transition-transform"
             onMouseEnter={() => setLogoHovered(true)}
             onMouseLeave={() => setLogoHovered(false)}
@@ -29,8 +27,8 @@ export default function Home() {
             onTouchEnd={() => setLogoHovered(false)}
             onTouchCancel={() => setLogoHovered(false)}
           >
-            <CuedLogo size={24} interactive trackingRef={logoGroupRef} />
-            <span className="text-lg font-[550] tracking-[-0.075em] inline-flex">
+            <CuedMark size={24} />
+            <span className="text-xl font-[550] tracking-[-0.075em] inline-flex">
               <span>Cue</span>
               <span className="relative inline-flex">
                 <AnimatePresence>
@@ -103,7 +101,7 @@ export default function Home() {
       </div>
 
       {/* Right Panel - Card Stack */}
-      <div className="mt-16 flex flex-1 items-center justify-center overflow-hidden px-6 pb-24 lg:mt-0 lg:pb-0">
+      <div className="mt-16 flex flex-1 items-center justify-center overflow-hidden bg-muted px-6 pb-24 lg:mt-0 lg:pb-0">
         <DemoCardStack />
       </div>
     </div>

@@ -13,6 +13,7 @@ export interface ActionSearchResult {
   status: string
   priority: number
   contactName: string | null
+  summary?: string | null
   reason: string | null
   createdAt: number
   snoozedUntil: number | null
@@ -57,7 +58,7 @@ function ActionsContent({ data }: { data: ActionSearchResult[] }) {
           <div className="min-w-0 flex-1">
             <div className="flex items-center gap-2">
               <span className="text-xs font-medium text-foreground/90">
-                {formatActionType(action.type)}
+                {action.summary || formatActionType(action.type)}
               </span>
               <StatusBadge status={action.status} />
               <span className="text-xs text-muted-foreground/60">
@@ -115,6 +116,7 @@ export const actionsArtifact = new Artifact<
         const text = data
           .map((a) => {
             const parts = [formatActionType(a.type), `[${a.status}]`]
+            if (a.summary) parts.push(a.summary)
             if (a.contactName) parts.push(a.contactName)
             if (a.reason) parts.push(`- ${a.reason}`)
             return parts.join(" ")

@@ -20,6 +20,10 @@ const inputSchema = z.object({
   conversationId: z.string().optional().describe("Conversation ID this action relates to"),
   contactId: z.string().optional().describe("Contact ID this action relates to"),
   messageId: z.string().optional().describe("Specific message ID this action responds to"),
+  summary: z
+    .string()
+    .optional()
+    .describe("Super-short summary for list cards (2-5 words)"),
   reason: z.string().optional().describe("Reason or context for creating this action"),
   priority: z
     .number()
@@ -32,6 +36,7 @@ const inputSchema = z.object({
 interface CreateActionResult {
   actionId: string;
   message: string;
+  summary?: string;
 }
 
 export const createActionTool: Tool<typeof inputSchema, CreateActionResult> = {
@@ -50,6 +55,7 @@ export const createActionTool: Tool<typeof inputSchema, CreateActionResult> = {
           conversationId: input.conversationId,
           contactId: input.contactId,
           messageId: input.messageId,
+          summary: input.summary,
           reason: input.reason,
           priority: input.priority,
         }
@@ -60,6 +66,7 @@ export const createActionTool: Tool<typeof inputSchema, CreateActionResult> = {
         data: {
           actionId: result.actionId,
           message: `Created ${TYPE_LABELS[input.type]} action`,
+          summary: input.summary,
         },
       };
     } catch (error) {

@@ -3,6 +3,9 @@ import { redirect } from "next/navigation";
 import { getSignUpUrl } from "@workos-inc/authkit-nextjs";
 
 export async function GET() {
-  const authorizationUrl = await getSignUpUrl();
+  const state = Buffer.from(JSON.stringify({ returnPathname: "/download" })).toString(
+    "base64"
+  );
+  const authorizationUrl = await getSignUpUrl({ state });
   return redirect(authorizationUrl);
 }

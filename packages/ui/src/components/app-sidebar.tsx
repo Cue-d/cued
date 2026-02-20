@@ -12,7 +12,7 @@ import {
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import { useTheme } from "next-themes";
-import { CuedLogo } from "./cued-logo";
+import { CuedMark } from "./cued-mark";
 import { Avatar, AvatarFallback } from "./ui/avatar";
 import {
   DropdownMenu,
@@ -53,7 +53,6 @@ export function AppSidebar({
   const { setTheme, resolvedTheme } = useTheme();
   const [mounted, setMounted] = React.useState(false);
   const [logoHovered, setLogoHovered] = React.useState(false);
-  const logoGroupRef = React.useRef<HTMLDivElement>(null);
 
   React.useEffect(() => {
     setMounted(true);
@@ -80,12 +79,11 @@ export function AppSidebar({
     <Sidebar {...props} variant="inset">
       <SidebarHeader className="border-b border-sidebar-border p-4">
         <div
-          ref={logoGroupRef}
           className="flex items-center gap-2 cursor-pointer"
           onMouseEnter={() => setLogoHovered(true)}
           onMouseLeave={() => setLogoHovered(false)}
         >
-          <CuedLogo size={24} interactive trackingRef={logoGroupRef} />
+          <CuedMark size={24} />
           <span className="font-semibold inline-flex">
             <span>Cue</span>
             <span className="relative inline-flex">

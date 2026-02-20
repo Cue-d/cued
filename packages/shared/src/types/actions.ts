@@ -72,6 +72,8 @@ export interface EnrichedAction {
   status: string;
   /** Priority level (higher = more important) */
   priority: number;
+  /** Concise list-row summary for the action */
+  summary?: string | null;
   /** User-facing reason for the action */
   reason: string | null;
   /** LLM-generated reasoning */

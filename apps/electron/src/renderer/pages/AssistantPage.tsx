@@ -2,7 +2,7 @@ import * as React from "react"
 import { useChat } from "@ai-sdk/react"
 import { DefaultChatTransport, type UIMessage } from "ai"
 import { useConvex } from "convex/react"
-import { MessageSquare } from "lucide-react"
+import { MessageCircle } from 'lucide-react'
 import { api } from "@cued/convex"
 import {
   AssistantView,
@@ -94,7 +94,7 @@ function ChatListItemRow({
       }`}
     >
       <div className="flex items-center gap-3">
-        <MessageSquare className="w-4 h-4 text-muted-foreground" />
+        <MessageCircle size={16} strokeWidth={1.5} className="text-muted-foreground" />
         <span className="text-sm font-medium">{chat.title}</span>
       </div>
     </button>
@@ -258,6 +258,7 @@ export function AssistantPage(): React.JSX.Element {
 
       {/* Detail Panel */}
       <Panel position="last">
+        <PanelHeader title="New Chat" />
         {chatTransport ? (
           <ChatPanel
             transport={chatTransport}

@@ -26,16 +26,16 @@ export function IntegrationsMenu({
   onPlatformClick,
 }: IntegrationsMenuProps) {
   return (
-    <div className="mx-2 mb-2 rounded-lg bg-foreground/6 border border-foreground/8 overflow-hidden">
+    <div className="mx-2 mb-2 overflow-hidden">
       {/* Header */}
-      <div className="flex items-center px-2.5 py-2">
-        <span className="text-xs font-medium text-foreground/70">
-          Connected accounts
+      <div className="flex items-center px-1 py-1.5">
+        <span className="text-[11px] font-medium text-foreground/40 uppercase tracking-wider">
+          Connected
         </span>
       </div>
 
       {/* Platform icons */}
-      <div className="flex items-center gap-0.5 px-2 pb-2.5 pt-0.5 flex-wrap">
+      <div className="flex items-center gap-0.5 px-0.5 pb-1.5 flex-wrap">
         {DISPLAY_PLATFORMS.map((platform) => {
           const Icon = platform === 'slack' ? SlackColorIcon : PLATFORM_ICON_COMPONENTS[platform]
           const config = PLATFORM_CONFIG[platform]

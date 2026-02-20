@@ -15,10 +15,10 @@ const MAX_ATTEMPTS = 3;
 const STALE_SEND_THRESHOLD_MS = 30_000;
 
 /**
- * If a message is still pending after this long and no Electron client is online,
- * mark it failed so the UI doesn't sit on an indefinite "in-flight" state.
+ * Maximum time a pending message can wait with no desktop sender online.
+ * Messages remain queued until reconnect, then are marked failed after this TTL.
  */
-const PENDING_OFFLINE_FAIL_THRESHOLD_MS = 15_000;
+const OFFLINE_QUEUE_TTL_MS = 12 * 60 * 60 * 1000;
 
 /**
  * Keep in sync with presence.ts STALE_THRESHOLD_MS.
@@ -38,6 +38,12 @@ const ELECTRON_MANAGED_PLATFORMS = new Set<string>([
   "signal",
   "whatsapp",
 ] as const);
+
+const QUEUE_LOG_PREFIX = "[messageQueue]";
+
+function logQueue(event: string, data: Record<string, unknown>) {
+  console.log(`${QUEUE_LOG_PREFIX} ${event}`, data);
+}
 
 /** Get messages ready to be sent by Electron. */
 export const getQueuedMessages = query({
@@ -221,7 +227,7 @@ export const queueMessage = mutation({
       );
     }
 
-    return insertQueuedMessage(ctx, {
+    const queued = await insertQueuedMessage(ctx, {
       userId: user._id,
       platform: args.platform,
       recipientHandle: args.recipientHandle,
@@ -235,6 +241,18 @@ export const queueMessage = mutation({
       now,
       scheduledFor,
     });
+
+    logQueue("queued", {
+      messageId: queued.messageId,
+      userId: user._id,
+      platform: args.platform,
+      conversationId: resolvedConversationId ?? null,
+      scheduledFor: queued.scheduledFor,
+      textLength: args.text.length,
+      isGroup: args.isGroup,
+    });
+
+    return queued;
   },
 });
 
@@ -303,6 +321,12 @@ export const updateMessageStatus = mutation({
     switch (args.status) {
       case "sending": {
         if (message.status !== "pending") {
+          logQueue("updateStatus rejected:not_pending", {
+            messageId: args.messageId,
+            userId: user._id,
+            requestedStatus: args.status,
+            currentStatus: message.status,
+          });
           return { success: false, willRetry: false, reason: "not_pending" as const };
         }
 
@@ -313,13 +337,20 @@ export const updateMessageStatus = mutation({
               q.eq("conversationId", message.conversationId)
             )
             .collect();
-          const hasActiveSender = conversationQueue.some(
+          const activeSender = conversationQueue.find(
             (entry) =>
               entry._id !== args.messageId &&
               entry.userId === user._id &&
               entry.status === "sending"
           );
-          if (hasActiveSender) {
+          if (activeSender) {
+            logQueue("updateStatus rejected:conversation_locked", {
+              messageId: args.messageId,
+              userId: user._id,
+              conversationId: message.conversationId,
+              lockedByMessageId: activeSender._id,
+              lockedByDeviceId: activeSender.processingDeviceId ?? null,
+            });
             return {
               success: false,
               willRetry: false,
@@ -334,11 +365,24 @@ export const updateMessageStatus = mutation({
           lastAttemptAt: now,
           processingStartedAt: now,
         });
+        logQueue("transition pending->sending", {
+          messageId: args.messageId,
+          userId: user._id,
+          platform: message.platform,
+          attempts: message.attempts + 1,
+          conversationId: message.conversationId ?? null,
+        });
         break;
       }
 
       case "sent": {
         if (message.status !== "sending") {
+          logQueue("updateStatus rejected:not_sending", {
+            messageId: args.messageId,
+            userId: user._id,
+            requestedStatus: args.status,
+            currentStatus: message.status,
+          });
           return { success: false, willRetry: false, reason: "not_sending" as const };
         }
 
@@ -347,6 +391,12 @@ export const updateMessageStatus = mutation({
           sentAt: now,
           processingStartedAt: undefined,
           processingDeviceId: undefined,
+        });
+        logQueue("transition sending->sent", {
+          messageId: args.messageId,
+          userId: user._id,
+          platform: message.platform,
+          attempts: message.attempts,
         });
         break;
       }
@@ -361,10 +411,22 @@ export const updateMessageStatus = mutation({
             processingStartedAt: undefined,
             processingDeviceId: undefined,
           });
+          logQueue("transition pending->failed", {
+            messageId: args.messageId,
+            userId: user._id,
+            platform: message.platform,
+            reason: args.error ?? "unknown",
+          });
           return { success: true, willRetry: false };
         }
 
         if (message.status !== "sending") {
+          logQueue("updateStatus rejected:not_sending", {
+            messageId: args.messageId,
+            userId: user._id,
+            requestedStatus: args.status,
+            currentStatus: message.status,
+          });
           return { success: false, willRetry: false, reason: "not_sending" as const };
         }
 
@@ -378,6 +440,16 @@ export const updateMessageStatus = mutation({
           processingStartedAt: undefined,
           processingDeviceId: undefined,
           ...(willRetry && { scheduledFor: now }),
+        });
+        logQueue("transition sending->pending_or_failed", {
+          messageId: args.messageId,
+          userId: user._id,
+          platform: message.platform,
+          willRetry,
+          attempts: message.attempts,
+          maxAttempts: MAX_ATTEMPTS,
+          reason: args.error ?? "unknown",
+          nextScheduledFor: willRetry ? now : null,
         });
 
         return { success: true, willRetry };
@@ -442,10 +514,21 @@ export const claimMessage = mutation({
 
     const message = await ctx.db.get(args.messageId);
     if (!message || message.userId !== user._id) {
+      logQueue("claim rejected:not_found", {
+        messageId: args.messageId,
+        userId: user._id,
+        deviceId: args.deviceId,
+      });
       return { success: false, reason: "not_found" as const };
     }
 
     if (message.status !== "pending") {
+      logQueue("claim rejected:not_pending", {
+        messageId: args.messageId,
+        userId: user._id,
+        deviceId: args.deviceId,
+        currentStatus: message.status,
+      });
       return { success: false, reason: "not_pending" as const };
     }
 
@@ -453,14 +536,36 @@ export const claimMessage = mutation({
     if (message.processingDeviceId && message.processingDeviceId !== args.deviceId) {
       const leaseAge = Date.now() - (message.processingStartedAt ?? 0);
       if (leaseAge < CLAIM_LEASE_MS) {
+        logQueue("claim rejected:locked", {
+          messageId: args.messageId,
+          userId: user._id,
+          deviceId: args.deviceId,
+          lockOwnerDeviceId: message.processingDeviceId,
+          leaseAgeMs: leaseAge,
+          leaseMs: CLAIM_LEASE_MS,
+        });
         return { success: false, reason: "locked" as const };
       }
       // Lease expired, steal it
+      logQueue("claim lease expired, stealing lock", {
+        messageId: args.messageId,
+        userId: user._id,
+        deviceId: args.deviceId,
+        previousDeviceId: message.processingDeviceId,
+        leaseAgeMs: leaseAge,
+      });
     }
 
     await ctx.db.patch(args.messageId, {
       processingDeviceId: args.deviceId,
       processingStartedAt: Date.now(),
+    });
+    logQueue("claim success", {
+      messageId: args.messageId,
+      userId: user._id,
+      deviceId: args.deviceId,
+      platform: message.platform,
+      conversationId: message.conversationId ?? null,
     });
 
     return { success: true, reason: "claimed" as const };
@@ -482,19 +587,19 @@ export const timeoutStaleSends = internalMutation({
   handler: async (ctx) => {
     const now = Date.now();
     const sendingThreshold = now - STALE_SEND_THRESHOLD_MS;
-    const pendingOfflineThreshold = now - PENDING_OFFLINE_FAIL_THRESHOLD_MS;
+    const offlineQueueExpiryThreshold = now - OFFLINE_QUEUE_TTL_MS;
 
-    const [allSending, stalePending, allElectronPresence] = await Promise.all([
+    const [allSending, expiredPending, allElectronPresence] = await Promise.all([
       // Find all messages stuck in "sending" past the threshold
       ctx.db
         .query("messageQueue")
         .withIndex("by_status", (q) => q.eq("status", "sending"))
         .collect(),
-      // Find pending messages that are ready and have been waiting too long
+      // Find pending messages that have exceeded the offline queue TTL
       ctx.db
         .query("messageQueue")
         .withIndex("by_status_scheduledFor", (q) =>
-          q.eq("status", "pending").lte("scheduledFor", pendingOfflineThreshold)
+          q.eq("status", "pending").lte("scheduledFor", offlineQueueExpiryThreshold)
         )
         .collect(),
       // Current desktop presence by user
@@ -515,7 +620,7 @@ export const timeoutStaleSends = internalMutation({
       (m) => (m.processingStartedAt ?? m.lastAttemptAt ?? 0) < sendingThreshold
     );
 
-    const stalePendingWithoutSender = stalePending.filter((m) => {
+    const expiredPendingWithoutSender = expiredPending.filter((m) => {
       if (!ELECTRON_MANAGED_PLATFORMS.has(m.platform)) return false;
       if (onlineElectronUsers.has(m.userId as string)) return false;
 
@@ -542,18 +647,19 @@ export const timeoutStaleSends = internalMutation({
       });
     }
 
-    for (const msg of stalePendingWithoutSender) {
+    for (const msg of expiredPendingWithoutSender) {
       await ctx.db.patch(msg._id, {
         status: "failed",
-        error: "Desktop app is offline. Open Cued desktop to send.",
+        error:
+          "Desktop app stayed offline too long. Open Cued desktop and retry sending.",
         processingStartedAt: undefined,
         processingDeviceId: undefined,
       });
     }
 
-    if (staleSends.length > 0 || stalePendingWithoutSender.length > 0) {
+    if (staleSends.length > 0 || expiredPendingWithoutSender.length > 0) {
       console.log(
-        `[timeoutStaleSends] Recovered ${staleSends.length} stale sends and failed ${stalePendingWithoutSender.length} pending messages with no desktop sender`
+        `[timeoutStaleSends] Recovered ${staleSends.length} stale sends and failed ${expiredPendingWithoutSender.length} pending messages after offline queue TTL expiry`
       );
     }
   },

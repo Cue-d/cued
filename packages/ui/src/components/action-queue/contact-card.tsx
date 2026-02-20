@@ -1,11 +1,10 @@
 import * as React from "react";
-import { Building2, Clock, FileText, Link, Tag, User } from "lucide-react";
+import { ChevronRight } from "lucide-react";
 import { formatTime, getInitials, type ContactFormData } from "@cued/shared";
 import { OpenInAppButton } from "./open-in-app-button";
 import { cn } from "../../lib/utils";
 import { Avatar, AvatarFallback } from "../ui/avatar";
 import { Badge } from "../ui/badge";
-import { Card, CardContent, CardHeader } from "../ui/card";
 import { Input } from "../ui/input";
 import {
   Select,
@@ -29,8 +28,6 @@ export interface ContactCardProps {
   personName: string;
   /** When the contact was first seen */
   createdAt?: number;
-  /** Platform where contact originated */
-  platform?: string | null;
   /** Form data state */
   formData: ContactFormData;
   /** Called when form data changes */
@@ -39,236 +36,200 @@ export interface ContactCardProps {
   existingContacts?: ExistingContact[];
   /** Optional class name */
   className?: string;
-  /** Auto-focus name input on mount */
+  /** Auto-focus notes textarea on mount */
   autoFocus?: boolean;
   /** Open-in-app deeplink config */
   openInApp?: OpenInAppConfig | null;
+  /** When true, disables form inputs (history view) */
+  readOnly?: boolean;
 }
 
 export interface ContactCardRef {
   focusInput: () => void;
 }
 
-/** Platform badge color mapping */
-function getPlatformColor(platform: string | null | undefined): string {
-  switch (platform?.toLowerCase()) {
-    case "imessage":
-      return "bg-green-500/10 text-green-600 border-green-200";
-    case "slack":
-      return "bg-purple-500/10 text-purple-600 border-purple-200";
-    default:
-      return "bg-muted text-muted-foreground";
-  }
-}
-
 /**
  * ContactCard component for action queue.
- * Displays editable contact information with name, company, tags, notes.
+ * Clean, minimal design focused on quick note capture.
  */
 export const ContactCard = React.forwardRef<ContactCardRef, ContactCardProps>(
   function ContactCard(
     {
       personName,
       createdAt,
-      platform,
       formData,
       onFormChange,
       existingContacts = [],
       className,
       autoFocus = true,
       openInApp,
+      readOnly = false,
     },
     ref
   ) {
-    const nameInputRef = React.useRef<HTMLInputElement>(null);
+    const notesRef = React.useRef<HTMLTextAreaElement>(null);
+    const [detailsOpen, setDetailsOpen] = React.useState(
+      () => !!(formData.company || formData.tags)
+    );
 
     React.useImperativeHandle(ref, () => ({
-      focusInput: () => {
-        nameInputRef.current?.focus();
-      },
+      focusInput: () => notesRef.current?.focus(),
     }));
 
     React.useEffect(() => {
       if (!autoFocus) return;
-      const timer = setTimeout(() => {
-        nameInputRef.current?.focus();
-      }, 300);
+      const timer = setTimeout(() => notesRef.current?.focus(), 300);
       return () => clearTimeout(timer);
     }, [autoFocus]);
 
     const initials = getInitials(personName);
     const meetingTime = createdAt ? formatTime(createdAt) : "earlier";
 
-    // Parse tags from comma-separated string
     const tagList = formData.tags
       .split(",")
       .map((t) => t.trim())
       .filter(Boolean);
 
     return (
-      <Card
+      <div
         className={cn(
-          "w-full h-full flex flex-col overflow-hidden gap-0 border-0 p-0 bg-transparent",
+          "w-full h-full flex flex-col overflow-hidden",
           className
         )}
       >
         {/* Header */}
-        <CardHeader className="shrink-0 p-4">
-          <div className="flex items-center gap-x-3">
-            <Avatar size="sm">
-              <AvatarFallback>{initials}</AvatarFallback>
-            </Avatar>
-            <div className="flex-1 min-w-0">
-              <div className="flex items-center gap-2 text-muted-foreground text-xs mb-1">
-                <Clock className="w-3 h-3" />
-                <span>You met someone new today</span>
-              </div>
-              <div className="flex items-center gap-2">
-                <h3 className="font-semibold text-sm text-foreground truncate">
-                  {personName}
-                </h3>
-                {platform && (
-                  <Badge
-                    variant="outline"
-                    className={cn(
-                      "text-[10px] px-1.5 py-0",
-                      getPlatformColor(platform)
-                    )}
-                  >
-                    {platform}
-                  </Badge>
-                )}
-              </div>
-              <p className="text-xs text-muted-foreground">at {meetingTime}</p>
-            </div>
-            {openInApp && <OpenInAppButton config={openInApp} tooltip="⌘O" />}
+        <div className="shrink-0 flex items-center gap-3 px-5 pt-6 pb-4">
+          <Avatar>
+            <AvatarFallback>{initials}</AvatarFallback>
+          </Avatar>
+          <div className="flex-1 min-w-0">
+            <h3 className="text-sm font-semibold text-foreground truncate">
+              {personName}
+            </h3>
+            <p className="text-xs text-muted-foreground">
+              Met today &middot; {meetingTime}
+            </p>
           </div>
-        </CardHeader>
+          {openInApp && <OpenInAppButton config={openInApp} tooltip="⌘O" />}
+        </div>
 
-        {/* Form Content */}
-        <CardContent className="flex-1 p-0 min-h-0">
-          <div
-            className="h-full overflow-y-auto [&::-webkit-scrollbar]:w-2 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:bg-border/50 [scrollbar-width:thin]"
-            style={{ scrollbarColor: "rgba(128, 128, 128, 0.5) transparent" }}
-          >
-            <div className="py-6 px-4 space-y-5">
-              <p className="text-muted-foreground text-sm">
-                Tell me a bit more about them so you can remember this
-                connection later.
-              </p>
+        {/* Content */}
+        <div className="flex-1 min-h-0 overflow-y-auto px-5 pb-5">
+          <p className="text-[13px] text-muted-foreground mb-3">
+            What do you remember about them?
+          </p>
 
-              {/* Name Field */}
-              <div className="space-y-2" data-selectable="true">
-                <label className="flex items-center gap-2 text-sm font-medium text-foreground">
-                  <User className="w-4 h-4 text-muted-foreground" />
-                  Name
-                </label>
-                <Input
-                  ref={nameInputRef}
-                  value={formData.name}
-                  onChange={(e) =>
-                    onFormChange({ ...formData, name: e.target.value })
-                  }
-                  placeholder="Their name..."
-                  className="bg-background"
-                />
-              </div>
+          {/* Notes — hero field, no label */}
+          <Textarea
+            ref={notesRef}
+            value={formData.notes}
+            onChange={(e) =>
+              onFormChange({ ...formData, notes: e.target.value })
+            }
+            placeholder="Where you met, what you talked about, follow-ups..."
+            className="min-h-[160px] max-h-[320px] resize-none"
+            disabled={readOnly}
+            data-selectable="true"
+          />
 
-              {/* Company Field */}
-              <div className="space-y-2" data-selectable="true">
-                <label className="flex items-center gap-2 text-sm font-medium text-foreground">
-                  <Building2 className="w-4 h-4 text-muted-foreground" />
-                  Company
-                </label>
-                <Input
-                  value={formData.company}
-                  onChange={(e) =>
-                    onFormChange({ ...formData, company: e.target.value })
-                  }
-                  placeholder="Where do they work?"
-                  className="bg-background"
-                />
-              </div>
+          {/* Collapsible details */}
+          <div className="mt-4">
+            <button
+              type="button"
+              onClick={() => setDetailsOpen((prev) => !prev)}
+              className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors"
+            >
+              <ChevronRight
+                className={cn(
+                  "w-3 h-3 transition-transform",
+                  detailsOpen && "rotate-90"
+                )}
+              />
+              Add details
+            </button>
 
-              {/* Tags Field */}
-              <div className="space-y-2" data-selectable="true">
-                <label className="flex items-center gap-2 text-sm font-medium text-foreground">
-                  <Tag className="w-4 h-4 text-muted-foreground" />
-                  Tags
-                </label>
-                <Input
-                  value={formData.tags}
-                  onChange={(e) =>
-                    onFormChange({ ...formData, tags: e.target.value })
-                  }
-                  placeholder="work, friend, investor, met at conference..."
-                  className="bg-background"
-                />
-                {tagList.length > 0 && (
-                  <div className="flex flex-wrap gap-1.5 mt-2">
-                    {tagList.map((tag, i) => (
-                      <Badge key={i} variant="secondary" className="text-xs">
-                        {tag}
-                      </Badge>
-                    ))}
+            {detailsOpen && (
+              <div className="mt-3 space-y-2.5">
+                <div data-selectable="true">
+                  <label className="text-xs text-muted-foreground mb-1 block">
+                    Company
+                  </label>
+                  <Input
+                    value={formData.company}
+                    onChange={(e) =>
+                      onFormChange({ ...formData, company: e.target.value })
+                    }
+                    placeholder="Where do they work?"
+                    className="h-8 text-sm"
+                    disabled={readOnly}
+                  />
+                </div>
+
+                <div data-selectable="true">
+                  <label className="text-xs text-muted-foreground mb-1 block">
+                    Tags
+                  </label>
+                  <Input
+                    value={formData.tags}
+                    onChange={(e) =>
+                      onFormChange({ ...formData, tags: e.target.value })
+                    }
+                    placeholder="work, friend, investor..."
+                    className="h-8 text-sm"
+                    disabled={readOnly}
+                  />
+                  {tagList.length > 0 && (
+                    <div className="flex flex-wrap gap-1.5 mt-1.5">
+                      {tagList.map((tag, i) => (
+                        <Badge
+                          key={i}
+                          variant="secondary"
+                          className="text-[11px] px-1.5 py-0"
+                        >
+                          {tag}
+                        </Badge>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                {existingContacts.length > 0 && (
+                  <div data-selectable="true">
+                    <label className="text-xs text-muted-foreground mb-1 block">
+                      Link to existing contact
+                    </label>
+                    <Select
+                      value={formData.linkedContactId ?? ""}
+                      onValueChange={(value) =>
+                        onFormChange({
+                          ...formData,
+                          linkedContactId: value || null,
+                        })
+                      }
+                    >
+                      <SelectTrigger className="w-full h-8 text-sm">
+                        <SelectValue>Select a contact...</SelectValue>
+                      </SelectTrigger>
+                      <SelectContent>
+                        {existingContacts.map((contact) => (
+                          <SelectItem key={contact.id} value={contact.id}>
+                            {contact.name}
+                            {contact.company && (
+                              <span className="text-muted-foreground ml-1">
+                                ({contact.company})
+                              </span>
+                            )}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
                   </div>
                 )}
               </div>
-
-              {/* Notes Field */}
-              <div className="space-y-2" data-selectable="true">
-                <label className="flex items-center gap-2 text-sm font-medium text-foreground">
-                  <FileText className="w-4 h-4 text-muted-foreground" />
-                  Notes
-                </label>
-                <Textarea
-                  value={formData.notes}
-                  onChange={(e) =>
-                    onFormChange({ ...formData, notes: e.target.value })
-                  }
-                  placeholder="Where did you meet? What did you talk about? Any follow-ups?"
-                  className="min-h-[100px] max-h-[200px] resize-none bg-background"
-                />
-              </div>
-
-              {/* Link to Existing Contact */}
-              {existingContacts.length > 0 && (
-                <div className="space-y-2" data-selectable="true">
-                  <label className="flex items-center gap-2 text-sm font-medium text-foreground">
-                    <Link className="w-4 h-4 text-muted-foreground" />
-                    Link to existing contact
-                  </label>
-                  <Select
-                    value={formData.linkedContactId ?? ""}
-                    onValueChange={(value) =>
-                      onFormChange({
-                        ...formData,
-                        linkedContactId: value || null,
-                      })
-                    }
-                  >
-                    <SelectTrigger className="bg-background w-full">
-                      <SelectValue>Select a contact to merge...</SelectValue>
-                    </SelectTrigger>
-                    <SelectContent>
-                      {existingContacts.map((contact) => (
-                        <SelectItem key={contact.id} value={contact.id}>
-                          {contact.name}
-                          {contact.company && (
-                            <span className="text-muted-foreground ml-1">
-                              ({contact.company})
-                            </span>
-                          )}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-              )}
-            </div>
+            )}
           </div>
-        </CardContent>
-      </Card>
+        </div>
+      </div>
     );
   }
 );

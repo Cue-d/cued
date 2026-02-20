@@ -119,23 +119,21 @@ function loadLiquidGlass(): LiquidGlassModule | null {
  * Helps debug blank/empty window states without opening devtools.
  */
 function attachRendererDebugLogging(window: BrowserWindow): void {
-  if (electronEnv.NODE_ENV !== "development") {
-    return;
-  }
-
   const wc = window.webContents;
 
-  wc.on("did-start-loading", () => {
-    console.log("[Renderer] did-start-loading");
-  });
+  if (electronEnv.NODE_ENV === "development") {
+    wc.on("did-start-loading", () => {
+      console.log("[Renderer] did-start-loading");
+    });
 
-  wc.on("dom-ready", () => {
-    console.log("[Renderer] dom-ready");
-  });
+    wc.on("dom-ready", () => {
+      console.log("[Renderer] dom-ready");
+    });
 
-  wc.on("did-finish-load", () => {
-    console.log("[Renderer] did-finish-load", wc.getURL());
-  });
+    wc.on("did-finish-load", () => {
+      console.log("[Renderer] did-finish-load", wc.getURL());
+    });
+  }
 
   wc.on("did-fail-load", (_event, code, description, url, isMainFrame) => {
     console.error("[Renderer] did-fail-load", {

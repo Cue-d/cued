@@ -15,6 +15,7 @@ export interface ActionContext {
     type: string;
     status: string;
     priority: number;
+    summary?: string | null;
     reason: string | null;
     llmReason: string | null;
     createdAt: number;
@@ -76,7 +77,7 @@ export interface ActionContext {
     senderName: string | null;
     senderContactId: string | null;
     status: string | null;
-    reactions: Array<{ emoji: string }> | null;
+    reactions: Array<{ emoji: string }> | string[] | null;
   }>;
 }
 
@@ -102,6 +103,8 @@ export interface ActionCardProps {
   isSending?: boolean;
   /** Whether to auto-focus input */
   autoFocus: boolean;
+  /** When true, hides response input and action buttons (history view) */
+  readOnly?: boolean;
   /** Optional className */
   className?: string;
   /** Open-in-app deeplink config */
@@ -114,6 +117,12 @@ export interface ActionCardProps {
   onLinkClick?: (url: string) => void;
   /** Called when a contact name is clicked. Receives the contact ID. */
   onContactClick?: (contactId: string) => void;
+  /** Whether there are older messages to load */
+  hasMore?: boolean;
+  /** Called when user wants to load older messages */
+  onLoadMore?: () => void;
+  /** Whether older messages are currently loading */
+  isLoadingMore?: boolean;
 }
 
 /** Open-in-app config for deeplink buttons */

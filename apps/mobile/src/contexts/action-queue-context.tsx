@@ -14,6 +14,8 @@ import {
   useMemo,
   type ReactNode,
 } from "react";
+import { useQuery } from "convex/react";
+import { api } from "@cued/convex";
 import { type ActionPlatform, type EnrichedAction } from "@cued/shared";
 import { useActions } from "@/hooks/useActions";
 
@@ -22,6 +24,9 @@ export type ActionTypeFilter = "all" | "respond" | "followups" | "contacts";
 
 /** Platform filter options */
 export type PlatformFilter = "all" | ActionPlatform;
+
+/** Sheet tab: queue (pending) or history (completed/discarded) */
+export type SheetTab = "queue" | "history";
 
 interface ActionQueueContextValue {
   /** All pending actions from Convex */
@@ -58,6 +63,15 @@ interface ActionQueueContextValue {
   markActionCompleted: (action: EnrichedAction) => void;
   /** Remove a completed action from the local cache */
   clearCompletedAction: (actionId: string) => void;
+
+  /** Current sheet tab */
+  sheetTab: SheetTab;
+  /** Switch between queue and history tabs */
+  setSheetTab: (tab: SheetTab) => void;
+  /** History actions (completed + discarded) */
+  historyActions: EnrichedAction[];
+  /** Whether history is still loading */
+  isHistoryLoading: boolean;
 }
 
 const ActionQueueContext = createContext<ActionQueueContextValue | null>(null);
@@ -76,10 +90,22 @@ export function ActionQueueProvider({
 
   // Sheet state
   const [isSheetOpen, setIsSheetOpen] = useState(false);
+  const [sheetTab, setSheetTab] = useState<SheetTab>("queue");
 
   // Filter state
   const [platformFilter, setPlatformFilter] = useState<PlatformFilter>("all");
   const [typeFilter, setTypeFilter] = useState<ActionTypeFilter>("all");
+
+  // History query (only runs when history tab is active)
+  const historyResult = useQuery(
+    api.actions.getActionHistory,
+    sheetTab === "history" ? { limit: 50 } : "skip",
+  );
+  const historyActions = useMemo(
+    () => (historyResult?.actions ?? []) as EnrichedAction[],
+    [historyResult?.actions],
+  );
+  const isHistoryLoading = sheetTab === "history" && historyResult === undefined;
 
   // Focused action (from sheet row tap)
   const [focusedActionId, setFocusedActionId] = useState<string | null>(null);
@@ -132,6 +158,10 @@ export function ActionQueueProvider({
       completedActionCache,
       markActionCompleted,
       clearCompletedAction,
+      sheetTab,
+      setSheetTab,
+      historyActions,
+      isHistoryLoading,
     }),
     [
       actions,
@@ -145,6 +175,9 @@ export function ActionQueueProvider({
       completedActionCache,
       markActionCompleted,
       clearCompletedAction,
+      sheetTab,
+      historyActions,
+      isHistoryLoading,
     ],
   );
 

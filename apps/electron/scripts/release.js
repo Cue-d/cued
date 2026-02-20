@@ -1,10 +1,8 @@
 /**
  * Release script that loads .env before running electron-builder.
  *
- * Builds and publishes to GitHub Releases. Uses --publish always which
- * creates a new draft release or uploads to an existing draft. If you
- * hit conflicts with an existing non-draft release for the same version,
- * bump the version first or delete the old release.
+ * Builds app artifacts locally, then uploads them to GitHub Releases using gh CLI.
+ * Creates a draft release if needed and overwrites matching assets on upload.
  *
  * Required env vars (set via environment or apps/electron/.env):
  * - GH_TOKEN: GitHub Personal Access Token (for publishing to GitHub Releases)
@@ -31,6 +29,7 @@ if (missing.length > 0) {
 }
 
 const cwd = path.resolve(__dirname, "..");
+const releaseRepo = "Cue-d/cued-releases";
 
 // Build the app (without publishing — electron-builder just produces artifacts)
 execSync("electron-vite build && electron-builder --mac --publish never", {
@@ -47,14 +46,32 @@ const distDir = path.join(cwd, "dist");
 
 console.log(`\nUploading artifacts for ${tag}...`);
 try {
-  // Create the release if it doesn't exist (--draft so it's not visible until ready)
-  execSync(
-    `gh release create "${tag}" --repo Cue-d/cued-releases --draft --title "${tag}" --notes "Cued ${tag}" 2>/dev/null || true`,
-    { stdio: "inherit", env: process.env, shell: true }
-  );
+  const releaseExists = (() => {
+    try {
+      execSync(`gh release view "${tag}" --repo ${releaseRepo}`, {
+        stdio: "ignore",
+        env: process.env,
+        shell: true,
+      });
+      return true;
+    } catch {
+      return false;
+    }
+  })();
+
+  if (!releaseExists) {
+    // Create the release if it doesn't exist (--draft so it's not visible until ready)
+    execSync(
+      `gh release create "${tag}" --repo ${releaseRepo} --draft --title "${tag}" --notes "Cued ${tag}"`,
+      { stdio: "inherit", env: process.env, shell: true }
+    );
+  } else {
+    console.log(`Release ${tag} already exists; reusing it`);
+  }
+
   // Upload/overwrite all distributable artifacts
   execSync(
-    `gh release upload "${tag}" --repo Cue-d/cued-releases --clobber "${distDir}"/*.dmg "${distDir}"/*.zip "${distDir}"/*.yml "${distDir}"/*.blockmap 2>/dev/null || true`,
+    `gh release upload "${tag}" --repo ${releaseRepo} --clobber "${distDir}"/*.dmg "${distDir}"/*.zip "${distDir}"/*.yml "${distDir}"/*.blockmap`,
     { stdio: "inherit", env: process.env, shell: true }
   );
   console.log(`Artifacts uploaded to ${tag}`);

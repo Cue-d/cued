@@ -30,6 +30,7 @@ import {
   resolveMessageQueueBridge,
 } from "./shared";
 import { scheduleContactMergeCheck } from "../lib/contactMergeScheduling";
+import { resolveActionSummary } from "../lib/actionSummary";
 
 // ============================================================================
 // Validators
@@ -992,6 +993,7 @@ export async function syncLinkedInContactsInternal(
       priority: 40,
       contactId: info.contactId,
       platform: "linkedin",
+      summary: resolveActionSummary("new_connection"),
       llmReason: info.headline ?? undefined,
       reason: info.profileUrl,
       createdAt: now,

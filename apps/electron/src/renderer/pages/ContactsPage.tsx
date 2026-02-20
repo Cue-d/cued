@@ -1,33 +1,27 @@
 import * as React from "react"
 import { useQuery } from "convex/react"
-import {
-  Users,
-  Search,
-  Loader2,
-} from "lucide-react"
-import { motion, AnimatePresence } from "motion/react"
+import { Users, Search, Loader2 } from 'lucide-react'
+import { AnimatePresence } from "motion/react"
 import { api } from "@cued/convex"
-import {
-  getInitials,
-  type ActionPlatform,
-  PLATFORM_CONFIG,
-} from "@cued/shared"
+import { type ActionPlatform } from "@cued/shared"
 import {
   EmptyState,
-  PlatformIcon,
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
 } from "@cued/ui"
 import { ActionFilterDropdown, type ActionFilterDropdownRef } from "../components/action-filter-dropdown"
-import {
-  Skeleton,
-  Badge,
-  Avatar,
-  AvatarImage,
-  AvatarFallback,
-  Input,
-} from "@cued/ui"
+import { Skeleton, Input } from "@cued/ui"
 import type { Id } from "@cued/convex"
 import { Panel, PanelHeader } from "../components/app-shell"
-import { ContactDetail, HandleIcon, deduplicateHandles, prioritizeHandles, VISIBLE_HANDLE_TYPES } from "../components/contacts/ContactDetail"
+import { ContactDetail } from "../components/contacts/ContactDetail"
+import { SwipeableContactListItem } from "../components/SwipeableContactListItem"
+import { toast } from "sonner"
 
 /** Returns true if the display name looks like an actual person name (not a phone/ID/email) */
 function isRealContactName(displayName: string): boolean {
@@ -38,83 +32,6 @@ function isRealContactName(displayName: string): boolean {
   if (trimmed.startsWith("urn:li:")) return false
   if (/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmed)) return false
   return true
-}
-
-interface ContactListItemProps {
-  contact: {
-    _id: Id<"contacts">
-    displayName: string
-    company?: string | null
-    avatarUrl?: string
-    handles: Array<{ type: string; value: string; platform: string }>
-  }
-  selected: boolean
-  onClick: () => void
-}
-
-function ContactListItem({ contact, selected, onClick }: ContactListItemProps) {
-  const uniqueHandles = deduplicateHandles(contact.handles)
-  const visibleHandles = uniqueHandles.filter((h) => VISIBLE_HANDLE_TYPES.has(h.type))
-  const prioritizedHandles = prioritizeHandles(visibleHandles)
-  const displayedHandles = prioritizedHandles.slice(0, 2)
-  const platforms = [...new Set(contact.handles.map((h) => h.platform))]
-
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      className={`w-full text-left px-3 py-2.5 cursor-pointer rounded-lg transition-colors ${
-        selected ? "bg-foreground/[0.07]" : "hover:bg-foreground/5"
-      }`}
-    >
-      <div className="flex items-center gap-3">
-        <Avatar size="sm">
-          {contact.avatarUrl ? (
-            <AvatarImage src={contact.avatarUrl} alt={contact.displayName} />
-          ) : null}
-          <AvatarFallback>{getInitials(contact.displayName)}</AvatarFallback>
-        </Avatar>
-        <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-2">
-            <span className="font-medium text-sm truncate">
-              {contact.displayName}
-            </span>
-            {contact.company && (
-              <span className="text-xs text-muted-foreground truncate">
-                • {contact.company}
-              </span>
-            )}
-          </div>
-          <div className="flex items-center gap-2 mt-0.5">
-            <div className="flex gap-1">
-              {platforms.slice(0, 3).map((platform) => {
-                const config = PLATFORM_CONFIG[platform as ActionPlatform]
-                return (
-                  <Badge
-                    key={platform}
-                    variant="secondary"
-                    className={`text-[10px] px-1.5 py-0 ${config?.bgClass ?? ""}`}
-                  >
-                    <PlatformIcon platform={platform as ActionPlatform} className="w-2.5 h-2.5" />
-                  </Badge>
-                )
-              })}
-            </div>
-            {displayedHandles.length > 0 && (
-              <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                {displayedHandles.map((handle, i) => (
-                  <span key={i} className="flex items-center gap-1">
-                    <HandleIcon type={handle.type} />
-                    <span className="truncate max-w-[80px]">{handle.value}</span>
-                  </span>
-                ))}
-              </div>
-            )}
-          </div>
-        </div>
-      </div>
-    </button>
-  )
 }
 
 function useDebounce<T>(value: T, delay: number): T {
@@ -130,14 +47,26 @@ function useDebounce<T>(value: T, delay: number): T {
 
 type ContactCursor = { displayName: string; _id: Id<"contacts"> }
 
+type ContactListItem = {
+  _id: Id<"contacts">
+  displayName: string
+  company?: string | null
+  handles: Array<{ type: string; value: string; platform: string }>
+}
+
 interface ContactsPageProps {
   initialContactId?: string | null
   onInitialContactConsumed?: () => void
 }
 
+type PendingRareContactAction = {
+  type: "archive" | "dismiss"
+  contactId: Id<"contacts">
+  contactName: string
+}
+
 export function ContactsPage({ initialContactId, onInitialContactConsumed }: ContactsPageProps): React.JSX.Element {
-  const [selectedContactId, setSelectedContactId] =
-    React.useState<Id<"contacts"> | null>(null)
+  const [selectedContactId, setSelectedContactId] = React.useState<Id<"contacts"> | null>(null)
 
   // Navigate to initial contact when provided
   React.useEffect(() => {
@@ -146,6 +75,7 @@ export function ContactsPage({ initialContactId, onInitialContactConsumed }: Con
       onInitialContactConsumed?.()
     }
   }, [initialContactId, onInitialContactConsumed])
+
   const [searchInput, setSearchInput] = React.useState("")
   const debouncedSearch = useDebounce(searchInput, 300)
 
@@ -154,32 +84,27 @@ export function ContactsPage({ initialContactId, onInitialContactConsumed }: Con
   const [activePlatforms, setActivePlatforms] = React.useState<Set<ActionPlatform>>(new Set())
   const [namedOnly, setNamedOnly] = React.useState(true)
 
-  const [cursor, setCursor] = React.useState<ContactCursor | undefined>(
-    undefined
-  )
-  const [allContacts, setAllContacts] = React.useState<
-    Array<{
-      _id: Id<"contacts">
-      displayName: string
-      company?: string | null
-      avatarUrl?: string
-      handles: Array<{ type: string; value: string; platform: string }>
-    }>
-  >([])
+  const [cursor, setCursor] = React.useState<ContactCursor | undefined>(undefined)
+  const [allContacts, setAllContacts] = React.useState<ContactListItem[]>([])
   const [isLoadingMore, setIsLoadingMore] = React.useState(false)
   const autoLoadAttemptsRef = React.useRef(0)
+
+  const [openSwipeItemId, setOpenSwipeItemId] = React.useState<string | null>(null)
+  const [pendingRareAction, setPendingRareAction] = React.useState<PendingRareContactAction | null>(null)
+  const [isApplyingRareAction, setIsApplyingRareAction] = React.useState(false)
 
   const loadMoreRef = React.useRef<HTMLDivElement>(null)
 
   React.useEffect(() => {
     setCursor(undefined)
     setAllContacts([])
-  }, [debouncedSearch])
+  }, [debouncedSearch, namedOnly])
 
   const contactsResult = useQuery(api.contacts.getContacts, {
     limit: 50,
     cursor,
     searchQuery: debouncedSearch || undefined,
+    namedOnly,
   })
   const contactsLoading = contactsResult === undefined
   const hasMore =
@@ -245,6 +170,12 @@ export function ContactsPage({ initialContactId, onInitialContactConsumed }: Con
     return contacts
   }, [rawDisplayContacts, activePlatforms, namedOnly])
 
+  const visibleContacts = displayContacts
+  const visibleContactsById = React.useMemo(
+    () => new Map(visibleContacts.map((contact) => [contact._id, contact])),
+    [visibleContacts]
+  )
+
   // Auto-load more pages when client-side filters leave too few visible contacts
   // (e.g. phone-number contacts sort first alphabetically and get filtered out)
   // Cap at 5 consecutive auto-loads to prevent runaway queries.
@@ -267,7 +198,68 @@ export function ContactsPage({ initialContactId, onInitialContactConsumed }: Con
     autoLoadAttemptsRef.current = 0
   }, [activePlatforms, namedOnly, debouncedSearch])
 
-  const filteredCount = displayContacts.length
+  const selectedIndexRef = React.useRef(0)
+  React.useEffect(() => {
+    if (selectedContactId) {
+      const idx = visibleContacts.findIndex((c) => c._id === selectedContactId)
+      if (idx !== -1) selectedIndexRef.current = idx
+    }
+  }, [selectedContactId, visibleContacts])
+
+  React.useEffect(() => {
+    if (selectedContactId && !visibleContacts.find((c) => c._id === selectedContactId)) {
+      if (visibleContacts.length === 0) {
+        setSelectedContactId(null)
+        return
+      }
+      const nextIndex = Math.min(selectedIndexRef.current, visibleContacts.length - 1)
+      setSelectedContactId(visibleContacts[nextIndex]._id)
+    }
+  }, [visibleContacts, selectedContactId])
+
+  React.useEffect(() => {
+    if (!openSwipeItemId) return
+    if (!visibleContacts.some((c) => c._id === openSwipeItemId)) {
+      setOpenSwipeItemId(null)
+    }
+  }, [visibleContacts, openSwipeItemId])
+
+  const requestRareAction = React.useCallback(
+    (type: "archive" | "dismiss", contactId: Id<"contacts">) => {
+      const contact = visibleContactsById.get(contactId)
+      if (!contact) return
+      setOpenSwipeItemId(null)
+      setPendingRareAction({
+        type,
+        contactId,
+        contactName: contact.displayName,
+      })
+    },
+    [visibleContactsById]
+  )
+
+  const handleConfirmRareAction = React.useCallback(async () => {
+    if (!pendingRareAction || isApplyingRareAction) return
+
+    setIsApplyingRareAction(true)
+    try {
+      if (pendingRareAction.type === "archive") {
+        toast.info("Archive is coming soon.")
+      } else {
+        toast.info("Dismiss is coming soon.")
+      }
+    } finally {
+      setIsApplyingRareAction(false)
+      setPendingRareAction(null)
+    }
+  }, [pendingRareAction, isApplyingRareAction])
+
+  const selectContact = React.useCallback((contactId: Id<"contacts">) => {
+    setSelectedContactId(contactId)
+    document.querySelector(`[data-swipe-item-id="${contactId}"]`)?.scrollIntoView({ block: "nearest" })
+  }, [])
+
+  const filteredCount = visibleContacts.length
 
   // Compute platform counts from all contacts
   const platformCounts = React.useMemo(() => {
@@ -291,32 +283,40 @@ export function ContactsPage({ initialContactId, onInitialContactConsumed }: Con
       ) {
         return
       }
-      if (e.key === "ArrowUp" && displayContacts.length > 0) {
+
+      if (e.key === "ArrowLeft" && selectedContactId) {
         e.preventDefault()
-        const currentIndex = displayContacts.findIndex(
+        requestRareAction("dismiss", selectedContactId)
+      } else if (e.key === "ArrowRight" && selectedContactId) {
+        e.preventDefault()
+        requestRareAction("archive", selectedContactId)
+      } else if (e.key === "ArrowUp" && visibleContacts.length > 0) {
+        e.preventDefault()
+        const currentIndex = visibleContacts.findIndex(
           (c) => c._id === selectedContactId
         )
         if (currentIndex > 0) {
-          setSelectedContactId(displayContacts[currentIndex - 1]._id)
+          selectContact(visibleContacts[currentIndex - 1]._id)
         }
-      } else if (e.key === "ArrowDown" && displayContacts.length > 0) {
+      } else if (e.key === "ArrowDown" && visibleContacts.length > 0) {
         e.preventDefault()
-        const currentIndex = displayContacts.findIndex(
+        const currentIndex = visibleContacts.findIndex(
           (c) => c._id === selectedContactId
         )
-        if (currentIndex < displayContacts.length - 1) {
-          setSelectedContactId(displayContacts[currentIndex + 1]._id)
+        if (currentIndex < visibleContacts.length - 1) {
+          selectContact(visibleContacts[currentIndex + 1]._id)
         } else if (currentIndex === -1) {
-          setSelectedContactId(displayContacts[0]._id)
+          selectContact(visibleContacts[0]._id)
         }
       } else if (e.key === "f" || e.key === "F") {
         e.preventDefault()
         filterRef.current?.open()
       }
     }
+
     window.addEventListener("keydown", handleKeyDown)
     return () => window.removeEventListener("keydown", handleKeyDown)
-  }, [displayContacts, selectedContactId])
+  }, [selectedContactId, visibleContacts, selectContact, requestRareAction])
 
   // Loading skeleton (only on initial load, not when searching)
   if (contactsLoading && allContacts.length === 0 && !searchInput) {
@@ -377,7 +377,7 @@ export function ContactsPage({ initialContactId, onInitialContactConsumed }: Con
         {/* Search */}
         <div className="px-3 py-2">
           <div className="relative">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+            <Search size={16} strokeWidth={1.5} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
             <Input
               type="text"
               placeholder="Search people..."
@@ -386,16 +386,16 @@ export function ContactsPage({ initialContactId, onInitialContactConsumed }: Con
               className="pl-9 pr-4"
             />
             {contactsLoading && debouncedSearch && (
-              <Loader2 className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground animate-spin" />
+              <Loader2 size={16} strokeWidth={1.5} className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground animate-spin" />
             )}
           </div>
         </div>
 
         {/* Contact List */}
-        <div className="flex-1 overflow-y-auto p-2 space-y-1">
-          {displayContacts.length === 0 ? (
+        <div className="flex-1 overflow-y-auto p-2">
+          {visibleContacts.length === 0 ? (
             <EmptyState
-              icon={<Users className="w-6 h-6 text-muted-foreground" />}
+              icon={<Users size={24} strokeWidth={1.5} className="text-muted-foreground" />}
               title={debouncedSearch ? `No results for "${debouncedSearch}"` : activePlatforms.size > 0 ? "No contacts on this platform" : "No contacts yet"}
               description={!debouncedSearch && activePlatforms.size === 0 ? "Connect iMessage to import contacts." : undefined}
               className="py-12"
@@ -403,26 +403,23 @@ export function ContactsPage({ initialContactId, onInitialContactConsumed }: Con
           ) : (
             <>
               <AnimatePresence mode="popLayout">
-                {displayContacts.map((contact) => (
-                  <motion.div
+                {visibleContacts.map((contact) => (
+                  <SwipeableContactListItem
                     key={contact._id}
-                    layout
-                    initial={{ opacity: 1 }}
-                    exit={{ opacity: 0, scale: 0.95 }}
-                    transition={{ duration: 0.12, ease: "easeOut" }}
-                  >
-                    <ContactListItem
-                      contact={contact}
-                      selected={selectedContactId === contact._id}
-                      onClick={() => setSelectedContactId(contact._id)}
-                    />
-                  </motion.div>
+                    contact={contact}
+                    selected={selectedContactId === contact._id}
+                    onClick={() => selectContact(contact._id)}
+                    onArchive={() => requestRareAction("archive", contact._id)}
+                    onDismiss={() => requestRareAction("dismiss", contact._id)}
+                    openSwipeId={openSwipeItemId}
+                    onSwipeActiveChange={setOpenSwipeItemId}
+                  />
                 ))}
               </AnimatePresence>
               {hasMore && !debouncedSearch && (
                 <div ref={loadMoreRef} className="p-4 flex justify-center">
                   {isLoadingMore && (
-                    <Loader2 className="w-5 h-5 text-muted-foreground animate-spin" />
+                    <Loader2 size={20} strokeWidth={1.5} className="text-muted-foreground animate-spin" />
                   )}
                 </div>
               )}
@@ -437,6 +434,40 @@ export function ContactsPage({ initialContactId, onInitialContactConsumed }: Con
           contactId={selectedContactId}
         />
       </Panel>
+
+      <AlertDialog
+        open={pendingRareAction !== null}
+        onOpenChange={(open) => {
+          if (!open && !isApplyingRareAction) {
+            setPendingRareAction(null)
+          }
+        }}
+      >
+        <AlertDialogContent size="sm">
+          <AlertDialogHeader>
+            <AlertDialogTitle>
+              {pendingRareAction?.type === "archive" ? "Archive contact?" : "Dismiss contact?"}
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              {pendingRareAction?.type === "archive"
+                ? `Archive ${pendingRareAction.contactName}? This removes them from your contacts list.`
+                : `Dismiss ${pendingRareAction?.contactName}? This removes them from contacts and prevents future action suggestions.`}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={isApplyingRareAction}>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              variant={pendingRareAction?.type === "dismiss" ? "destructive" : "default"}
+              onClick={() => {
+                void handleConfirmRareAction()
+              }}
+              disabled={isApplyingRareAction}
+            >
+              {pendingRareAction?.type === "archive" ? "Archive" : "Dismiss"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </>
   )
 }

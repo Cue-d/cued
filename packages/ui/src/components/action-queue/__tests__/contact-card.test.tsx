@@ -15,7 +15,7 @@ describe("ContactCard", () => {
     personName: "Jane Smith",
     formData: defaultFormData,
     onFormChange: vi.fn(),
-    autoFocus: false, // Disable autofocus for tests
+    autoFocus: false,
   };
 
   beforeEach(() => {
@@ -32,17 +32,37 @@ describe("ContactCard", () => {
     expect(screen.getByText("JS")).toBeInTheDocument();
   });
 
-  it("renders meeting context text", () => {
+  it("renders prompt text", () => {
     render(<ContactCard {...defaultProps} />);
-    expect(screen.getByText("You met someone new today")).toBeInTheDocument();
+    expect(
+      screen.getByText("What do you remember about them?")
+    ).toBeInTheDocument();
   });
 
-  it("renders all form fields", () => {
+  it("renders notes textarea immediately visible", () => {
     render(<ContactCard {...defaultProps} />);
-    expect(screen.getByPlaceholderText("Their name...")).toBeInTheDocument();
-    expect(screen.getByPlaceholderText("Where do they work?")).toBeInTheDocument();
-    expect(screen.getByPlaceholderText(/work, friend, investor/)).toBeInTheDocument();
-    expect(screen.getByPlaceholderText(/Where did you meet/)).toBeInTheDocument();
+    expect(
+      screen.getByPlaceholderText(/Where you met/)
+    ).toBeInTheDocument();
+  });
+
+  it("shows detail fields after expanding", () => {
+    render(<ContactCard {...defaultProps} />);
+
+    // Company/Tags should not be visible initially
+    expect(
+      screen.queryByPlaceholderText("Where do they work?")
+    ).not.toBeInTheDocument();
+
+    // Click "Add details" to expand
+    fireEvent.click(screen.getByText("Add details"));
+
+    expect(
+      screen.getByPlaceholderText("Where do they work?")
+    ).toBeInTheDocument();
+    expect(
+      screen.getByPlaceholderText(/work, friend, investor/)
+    ).toBeInTheDocument();
   });
 
   it("displays form data values", () => {
@@ -53,31 +73,33 @@ describe("ContactCard", () => {
       notes: "Met at conference",
     };
 
+    // When company/tags have values, details section auto-expands
     render(<ContactCard {...defaultProps} formData={formData} />);
 
-    expect(screen.getByDisplayValue("John Doe")).toBeInTheDocument();
+    expect(screen.getByDisplayValue("Met at conference")).toBeInTheDocument();
     expect(screen.getByDisplayValue("Acme Inc")).toBeInTheDocument();
     expect(screen.getByDisplayValue("investor, friend")).toBeInTheDocument();
-    expect(screen.getByDisplayValue("Met at conference")).toBeInTheDocument();
   });
 
   describe("form interactions", () => {
-    it("calls onFormChange when name input changes", () => {
+    it("calls onFormChange when notes textarea changes", () => {
       const onFormChange = vi.fn();
       render(<ContactCard {...defaultProps} onFormChange={onFormChange} />);
 
-      const nameInput = screen.getByPlaceholderText("Their name...");
-      fireEvent.change(nameInput, { target: { value: "New Name" } });
+      const notesTextarea = screen.getByPlaceholderText(/Where you met/);
+      fireEvent.change(notesTextarea, { target: { value: "Met at lunch" } });
 
       expect(onFormChange).toHaveBeenCalledWith({
         ...defaultFormData,
-        name: "New Name",
+        notes: "Met at lunch",
       });
     });
 
     it("calls onFormChange when company input changes", () => {
       const onFormChange = vi.fn();
       render(<ContactCard {...defaultProps} onFormChange={onFormChange} />);
+
+      fireEvent.click(screen.getByText("Add details"));
 
       const companyInput = screen.getByPlaceholderText("Where do they work?");
       fireEvent.change(companyInput, { target: { value: "Tech Corp" } });
@@ -92,25 +114,14 @@ describe("ContactCard", () => {
       const onFormChange = vi.fn();
       render(<ContactCard {...defaultProps} onFormChange={onFormChange} />);
 
+      fireEvent.click(screen.getByText("Add details"));
+
       const tagsInput = screen.getByPlaceholderText(/work, friend, investor/);
       fireEvent.change(tagsInput, { target: { value: "work, mentor" } });
 
       expect(onFormChange).toHaveBeenCalledWith({
         ...defaultFormData,
         tags: "work, mentor",
-      });
-    });
-
-    it("calls onFormChange when notes textarea changes", () => {
-      const onFormChange = vi.fn();
-      render(<ContactCard {...defaultProps} onFormChange={onFormChange} />);
-
-      const notesTextarea = screen.getByPlaceholderText(/Where did you meet/);
-      fireEvent.change(notesTextarea, { target: { value: "Met at lunch" } });
-
-      expect(onFormChange).toHaveBeenCalledWith({
-        ...defaultFormData,
-        notes: "Met at lunch",
       });
     });
   });
@@ -122,19 +133,12 @@ describe("ContactCard", () => {
         tags: "investor, friend, mentor",
       };
 
+      // Tags auto-expand details section
       render(<ContactCard {...defaultProps} formData={formData} />);
 
       expect(screen.getByText("investor")).toBeInTheDocument();
       expect(screen.getByText("friend")).toBeInTheDocument();
       expect(screen.getByText("mentor")).toBeInTheDocument();
-    });
-
-    it("does not render tag badges when tags are empty", () => {
-      render(<ContactCard {...defaultProps} />);
-      // The tags input exists but no badges should be rendered
-      const badges = screen.queryAllByRole("status"); // Badges typically don't have a role
-      // Instead, check that specific tag text doesn't appear as a separate badge
-      expect(screen.queryByText("investor")).not.toBeInTheDocument();
     });
 
     it("handles whitespace in tags gracefully", () => {
@@ -150,72 +154,46 @@ describe("ContactCard", () => {
     });
   });
 
-  describe("platform badge", () => {
-    it("renders platform badge when platform is provided", () => {
-      render(<ContactCard {...defaultProps} platform="imessage" />);
-      expect(screen.getByText("imessage")).toBeInTheDocument();
-    });
-
-    it("does not render platform badge when platform is null", () => {
-      render(<ContactCard {...defaultProps} platform={null} />);
-      // Should not find any platform text
-      expect(screen.queryByText("imessage")).not.toBeInTheDocument();
-      expect(screen.queryByText("slack")).not.toBeInTheDocument();
-    });
-  });
-
   describe("existing contacts dropdown", () => {
     const existingContacts: ExistingContact[] = [
       { id: "1", name: "Alice Johnson", company: "Tech Inc" },
       { id: "2", name: "Bob Smith", company: null },
     ];
 
-    it("renders link to existing contact dropdown when contacts provided", () => {
+    it("renders link to existing contact when contacts provided and details open", () => {
       render(
         <ContactCard {...defaultProps} existingContacts={existingContacts} />
       );
-      expect(screen.getByText("Link to existing contact")).toBeInTheDocument();
+
+      fireEvent.click(screen.getByText("Add details"));
+      expect(
+        screen.getByText("Link to existing contact")
+      ).toBeInTheDocument();
     });
 
     it("does not render dropdown when no existing contacts", () => {
       render(<ContactCard {...defaultProps} existingContacts={[]} />);
-      expect(screen.queryByText("Link to existing contact")).not.toBeInTheDocument();
-    });
 
-    it("shows linked contact in form data", () => {
-      const formData: ContactFormData = {
-        ...defaultFormData,
-        linkedContactId: "1",
-      };
-
-      render(
-        <ContactCard
-          {...defaultProps}
-          formData={formData}
-          existingContacts={existingContacts}
-        />
-      );
-
-      expect(screen.getByText("Link to existing contact")).toBeInTheDocument();
+      fireEvent.click(screen.getByText("Add details"));
+      expect(
+        screen.queryByText("Link to existing contact")
+      ).not.toBeInTheDocument();
     });
   });
 
   describe("timestamp formatting", () => {
     it("renders meeting time when createdAt is provided", () => {
-      // Create a specific time (3:45 PM)
       const date = new Date();
       date.setHours(15, 45, 0, 0);
 
       render(<ContactCard {...defaultProps} createdAt={date.getTime()} />);
 
-      // The time format depends on locale, but should contain "at" followed by a time
-      // Look for the specific time format pattern (e.g., "at 3:45 PM")
-      expect(screen.getByText(/at \d+:\d+/)).toBeInTheDocument();
+      expect(screen.getByText(/Met today/)).toBeInTheDocument();
     });
 
     it("shows 'earlier' when no timestamp provided", () => {
       render(<ContactCard {...defaultProps} />);
-      expect(screen.getByText("at earlier")).toBeInTheDocument();
+      expect(screen.getByText(/earlier/)).toBeInTheDocument();
     });
   });
 

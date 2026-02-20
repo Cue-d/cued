@@ -6,6 +6,12 @@ import { withRetry } from "../utils";
 
 /** Action types that can be suggested by the LLM */
 const ACTION_TYPES = ["respond", "follow_up", "send_message"] as const;
+const DEFAULT_SUMMARIES: Record<(typeof ACTION_TYPES)[number], string> = {
+  respond: "Reply needed",
+  follow_up: "Follow up",
+  send_message: "Send message",
+};
+const MAX_SUMMARY_LENGTH = 40;
 
 /** Zod schema for LLM action suggestion output */
 export const ActionSuggestionSchema = z.object({
@@ -24,6 +30,10 @@ export const ActionSuggestionSchema = z.object({
     .string()
     .nullable()
     .describe("Brief explanation of why this action is needed or why not"),
+  summary: z
+    .string()
+    .nullish()
+    .describe("Very short list summary (2-5 words, max 40 chars)"),
   suggestedResponse: z
     .string()
     .nullable()
@@ -154,6 +164,13 @@ ${recentActionsSection}
 ${messageLines.join("\n")}`;
 }
 
+function normalizeSummary(summary?: string | null): string | undefined {
+  const trimmed = summary?.trim();
+  if (!trimmed) return undefined;
+  if (trimmed.length <= MAX_SUMMARY_LENGTH) return trimmed;
+  return `${trimmed.slice(0, MAX_SUMMARY_LENGTH - 3).trimEnd()}...`;
+}
+
 /** System prompt for action generation */
 const SYSTEM_PROMPT = `You are an AI assistant helping a user manage their personal relationships.
 Your task is to analyze a conversation and decide if the user needs to take action.
@@ -204,7 +221,12 @@ When suggesting a response:
 - Reference relevant shared context when appropriate
 - Keep it concise and natural
 - Don't over-explain or be overly formal
-- For professional contexts, be appropriately polite`;
+- For professional contexts, be appropriately polite
+
+## Summary Field
+- If shouldCreateAction=true, include a super-short summary for list cards
+- Keep summary to 2-5 words and under 40 characters
+- Use concrete wording like "Reply needed", "Follow up", or "Send update"`;
 
 /**
  * Generate an action suggestion for a conversation using LLM.
@@ -220,6 +242,7 @@ export async function generateAction(
       type: null,
       priority: null,
       reason: "Empty conversation - no context to analyze",
+      summary: null,
       suggestedResponse: null,
       remindAt: null,
     };
@@ -233,6 +256,7 @@ export async function generateAction(
       type: null,
       priority: null,
       reason: "User sent the last message - waiting for reply",
+      summary: null,
       suggestedResponse: null,
       remindAt: null,
     };
@@ -246,6 +270,7 @@ export async function generateAction(
       type: null,
       priority: null,
       reason: "User reacted to the latest incoming message",
+      summary: null,
       suggestedResponse: null,
       remindAt: null,
     };
@@ -261,6 +286,7 @@ export async function generateAction(
       type: null,
       priority: null,
       reason: "Pending action already exists for this conversation",
+      summary: null,
       suggestedResponse: null,
       remindAt: null,
     };
@@ -277,6 +303,7 @@ export async function generateAction(
         type: null,
         priority: null,
         reason: "No new messages since last action was created",
+        summary: null,
         suggestedResponse: null,
         remindAt: null,
       };
@@ -312,6 +339,13 @@ export async function generateAction(
     output.priority = Math.max(0, Math.min(100, output.priority));
   }
 
+  if (output.shouldCreateAction) {
+    const fallback = output.type ? DEFAULT_SUMMARIES[output.type] : "Action needed";
+    output.summary = normalizeSummary(output.summary) ?? fallback;
+  } else {
+    output.summary = null;
+  }
+
   return output;
 }
 
@@ -330,6 +364,7 @@ export async function generateActionWithRetry(
       type: null,
       priority: null,
       reason: "LLM analysis failed after retries",
+      summary: null,
       suggestedResponse: null,
       remindAt: null,
     },

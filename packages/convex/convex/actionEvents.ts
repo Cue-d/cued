@@ -299,6 +299,7 @@ export const onIncomingMessage = internalAction({
         type: suggestion.type ?? "respond",
         priority: suggestion.priority ?? 50,
         platform: conversation.platform,
+        summary: suggestion.summary ?? undefined,
         llmReason: suggestion.reason ?? undefined,
         snoozedUntil,
       }
@@ -559,6 +560,7 @@ export const onIncomingMessageBatch = internalAction({
           type: suggestion.type ?? "respond",
           priority: suggestion.priority ?? 50,
           platform: conversation.platform,
+          summary: suggestion.summary ?? undefined,
           llmReason: suggestion.reason ?? undefined,
           snoozedUntil,
         }

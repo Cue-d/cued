@@ -22,6 +22,7 @@ import {
   resolveMessageQueueBridge,
 } from "./shared";
 import { batchFetchConversations, batchFetchMessages } from "./batchUtils";
+import { resolveActionSummary } from "../lib/actionSummary";
 
 // ============================================================================
 // Validators
@@ -467,6 +468,7 @@ export async function syncTwitterContactsInternal(
       priority: 40,
       contactId: info.contactId,
       platform: "twitter",
+      summary: resolveActionSummary("new_connection"),
       llmReason: info.bio ?? undefined,
       reason: `https://x.com/${info.handle}`,
       createdAt: now,

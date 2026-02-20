@@ -1,42 +1,69 @@
 import * as React from "react"
 import { useQuery, useMutation } from "convex/react"
-import {
-  Clock,
-  MessageSquare,
-  UserPlus,
-  Trash2,
-} from "lucide-react"
+import { Clock, MessageCircle, UserPlus, Trash2, CheckCircle2, X } from 'lucide-react'
 import { AnimatePresence } from "motion/react"
 import { api } from "@cued/convex"
-import { type EnrichedAction, PLATFORM_CONFIG, type ActionPlatform, getPlatformDeeplink, getContactDeeplink, type DeeplinkResult } from "@cued/shared"
+import { type EnrichedAction, PLATFORM_CONFIG, type ActionPlatform, getPlatformDeeplink, getContactDeeplink, type DeeplinkResult, formatRelativeTime } from "@cued/shared"
 import {
   ACTION_FILTER_GROUPS,
+  getGroupCount,
   type FilterGroup,
   type ActionContext,
   type OpenInAppConfig,
 } from "@cued/ui"
 import { renderActionCard } from "@cued/ui"
 import { ActionFilterDropdown, type ActionFilterDropdownRef } from "../components/action-filter-dropdown"
-import { Skeleton, Button, EmptyState, PlatformIcon, SparklesIcon, PartyPopperIcon } from "@cued/ui"
+import { Skeleton, Button, EmptyState, PlatformIcon, SparklesIcon, PartyPopperIcon, cn } from "@cued/ui"
 import type { Id } from "@cued/convex"
 import { useElectron } from "../hooks/use-electron"
 import { Panel, PanelHeader } from "../components/app-shell"
 import { SnoozeModal } from "../components/SnoozeModal"
 import { SwipeableActionListItem } from "../components/SwipeableActionListItem"
+import { toast } from "sonner"
 
+const PAGE_SIZE = 25
+const MESSAGE_PAGE_SIZE = 25
+const ACTION_CONTEXT_MESSAGE_LIMIT = 15
 const EMPTY_ACTIONS: EnrichedAction[] = []
 const EMPTY_COUNTS: Record<string, number> = {}
 
-const ACTION_TYPE_CONFIG: Record<string, { icon: React.ReactNode; label: string }> = {
-  respond: { icon: <MessageSquare className="w-4 h-4" />, label: "Reply needed" },
-  send_message: { icon: <MessageSquare className="w-4 h-4" />, label: "Send message" },
-  follow_up: { icon: <Clock className="w-4 h-4" />, label: "Follow up" },
-  eod_contact: { icon: <Clock className="w-4 h-4" />, label: "Check in" },
-  new_connection: { icon: <UserPlus className="w-4 h-4" />, label: "New connection" },
-  resolve_contact: { icon: <UserPlus className="w-4 h-4" />, label: "Merge contacts" },
+function normalizeReactions(
+  reactions: Array<{ emoji?: string; name?: string; reaction?: string } | string> | null | undefined
+): string[] | null {
+  if (!reactions || reactions.length === 0) return null
+
+  const normalizeToken = (token: string): string => {
+    const trimmed = token.trim()
+    if (!trimmed) return ""
+    if (trimmed.startsWith(":") && trimmed.endsWith(":")) return trimmed
+    if (/^[a-z0-9_+-]+$/i.test(trimmed)) return `:${trimmed}:`
+    return trimmed
+  }
+
+  const emojis = reactions
+    .map((reaction) => {
+      if (typeof reaction === "string") return normalizeToken(reaction)
+      const raw = reaction?.emoji ?? reaction?.name ?? reaction?.reaction
+      return typeof raw === "string" ? normalizeToken(raw) : ""
+    })
+    .filter(
+      (emoji): emoji is string =>
+        typeof emoji === "string" && emoji.length > 0
+    )
+
+  return emojis.length > 0 ? emojis : null
 }
 
-const DEFAULT_ACTION_CONFIG = { icon: <MessageSquare className="w-4 h-4" />, label: "" }
+const ACTION_TYPE_CONFIG: Record<string, { icon: React.ReactNode; label: string }> = {
+  respond: { icon: <MessageCircle size={16} strokeWidth={1.5} />, label: "Reply needed" },
+  send_message: { icon: <MessageCircle size={16} strokeWidth={1.5} />, label: "Send message" },
+  follow_up: { icon: <Clock size={16} strokeWidth={1.5} />, label: "Follow up" },
+  eod_contact: { icon: <Clock size={16} strokeWidth={1.5} />, label: "Check in" },
+  new_connection: { icon: <UserPlus size={16} strokeWidth={1.5} />, label: "New connection" },
+  resolve_contact: { icon: <UserPlus size={16} strokeWidth={1.5} />, label: "Merge contacts" },
+}
+
+const DEFAULT_ACTION_CONFIG = { icon: <MessageCircle size={16} strokeWidth={1.5} />, label: "" }
 
 function getActionTypeConfig(type: string): { icon: React.ReactNode; label: string } {
   const config = ACTION_TYPE_CONFIG[type]
@@ -78,6 +105,10 @@ interface ActionDetailProps {
   isSending?: boolean
   openExternal: (url: string) => void
   onContactClick?: (contactId: string) => void
+  hasMore?: boolean
+  onLoadMore?: () => void
+  isLoadingMore?: boolean
+  readOnly?: boolean
 }
 
 function ActionDetail({
@@ -90,6 +121,10 @@ function ActionDetail({
   isSending,
   openExternal,
   onContactClick,
+  hasMore,
+  onLoadMore,
+  isLoadingMore,
+  readOnly,
 }: ActionDetailProps) {
   if (!action) {
     return (
@@ -123,10 +158,10 @@ function ActionDetail({
           action,
           isTop: true,
           context,
-          responseText,
-          onResponseChange,
-          onSend,
-          onDismiss,
+          responseText: readOnly ? "" : responseText,
+          onResponseChange: readOnly ? () => {} : onResponseChange,
+          onSend: readOnly ? undefined : onSend,
+          onDismiss: readOnly ? undefined : onDismiss,
           isSending,
           autoFocus: false,
           className: "h-full border-0 shadow-none rounded-none",
@@ -135,6 +170,10 @@ function ActionDetail({
           contact2OpenInApp,
           onLinkClick: (url: string) => openExternal(url),
           onContactClick,
+          hasMore,
+          onLoadMore,
+          isLoadingMore,
+          readOnly,
         })}
       </div>
     </div>
@@ -151,6 +190,10 @@ export function ActionsPage({
   onContactClick,
 }: ActionsPageProps): React.JSX.Element {
   const electron = useElectron()
+
+  // View mode: queue (pending actions) or history (completed/discarded)
+  const [viewMode, setViewMode] = React.useState<"queue" | "history">("queue")
+  const isHistoryMode = viewMode === "history"
 
   // Filter state
   const filterRef = React.useRef<ActionFilterDropdownRef>(null)
@@ -171,8 +214,27 @@ export function ActionsPage({
   const [lastClickedId, setLastClickedId] = React.useState<string | null>(null)
   const isMultiSelectMode = multiSelectedIds.size > 0
 
+  // Infinite scroll state
+  const [loadLimit, setLoadLimit] = React.useState(PAGE_SIZE)
+  const listRef = React.useRef<HTMLDivElement>(null)
+
   // Snooze modal state
   const [snoozeModalOpen, setSnoozeModalOpen] = React.useState(false)
+  const [snoozeTargetActionId, setSnoozeTargetActionId] = React.useState<string | null>(null)
+
+  // Track which row currently has a revealed swipe action
+  const [openSwipeItemId, setOpenSwipeItemId] = React.useState<string | null>(null)
+  const [optimisticallyDiscardedIds, setOptimisticallyDiscardedIds] = React.useState<Set<string>>(new Set())
+
+  // Reset state when switching between queue and history
+  const handleViewModeChange = React.useCallback((mode: "queue" | "history") => {
+    setViewMode(mode)
+    setSelectedActionId(null)
+    setLoadLimit(PAGE_SIZE)
+    setHistoryLoadLimit(PAGE_SIZE)
+    setMultiSelectedIds(new Set())
+    setOpenSwipeItemId(null)
+  }, [])
 
   // Get action types to filter by based on active filter group
   const filterTypes = React.useMemo(
@@ -180,14 +242,94 @@ export function ActionsPage({
     [activeFilter]
   )
 
-  // Fetch pending actions list
-  const actionsResult = useQuery(api.actions.getPendingActions, { limit: 50 })
-  const countsResult = useQuery(api.actions.getActionCountsByType, {})
+  // Fetch pending actions list with progressive limit for infinite scroll
+  const actionsResult = useQuery(api.actions.getPendingActions, !isHistoryMode ? { limit: loadLimit } : "skip")
+  const countsResult = useQuery(api.actions.getActionCountsByType, !isHistoryMode ? {} : "skip")
+
+  // Fetch history actions (completed + discarded)
+  const [historyLoadLimit, setHistoryLoadLimit] = React.useState(PAGE_SIZE)
+  const historyResult = useQuery(api.actions.getActionHistory, isHistoryMode ? { limit: historyLoadLimit } : "skip")
+  const prevHistoryResult = React.useRef(historyResult)
+  if (historyResult !== undefined) {
+    prevHistoryResult.current = historyResult
+  }
+  const effectiveHistoryResult = historyResult ?? prevHistoryResult.current
+  const historyActions = effectiveHistoryResult?.actions ?? EMPTY_ACTIONS
+  const hasMoreHistory = effectiveHistoryResult?.nextCursor != null
+  const isLoadingMoreHistory = historyLoadLimit > PAGE_SIZE && historyResult === undefined
+
+  // Keep previous result while loading more (avoids flash to skeleton on scroll)
+  const prevActionsResult = React.useRef(actionsResult)
+  if (actionsResult !== undefined) {
+    prevActionsResult.current = actionsResult
+  }
+  const effectiveResult = actionsResult ?? prevActionsResult.current
+  const hasMore = effectiveResult?.nextCursor != null
+  const isLoadingMoreActions = loadLimit > PAGE_SIZE && actionsResult === undefined
+
+  // Load more when scrolling near the bottom
+  const handleListScroll = React.useCallback(() => {
+    const el = listRef.current
+    if (!el || !hasMore || isLoadingMoreActions) return
+    const { scrollTop, scrollHeight, clientHeight } = el
+    if (scrollHeight - scrollTop - clientHeight < 200) {
+      setLoadLimit((prev) => prev + PAGE_SIZE)
+    }
+  }, [hasMore, isLoadingMoreActions])
 
   // Filter actions client-side based on active filter group + platform
-  const rawActions = actionsResult?.actions ?? EMPTY_ACTIONS
+  const rawActions = effectiveResult?.actions ?? EMPTY_ACTIONS
+  React.useEffect(() => {
+    if (optimisticallyDiscardedIds.size === 0) return
+
+    const currentIds = new Set(rawActions.map((action) => action._id))
+    setOptimisticallyDiscardedIds((prev) => {
+      let changed = false
+      const next = new Set<string>()
+      for (const actionId of prev) {
+        if (currentIds.has(actionId)) {
+          next.add(actionId)
+        } else {
+          changed = true
+        }
+      }
+      return changed ? next : prev
+    })
+  }, [rawActions, optimisticallyDiscardedIds.size])
+
+  const addOptimisticDiscards = React.useCallback((actionIds: readonly string[]) => {
+    if (actionIds.length === 0) return
+    setOptimisticallyDiscardedIds((prev) => {
+      let changed = false
+      const next = new Set(prev)
+      for (const actionId of actionIds) {
+        if (!next.has(actionId)) {
+          next.add(actionId)
+          changed = true
+        }
+      }
+      return changed ? next : prev
+    })
+  }, [])
+
+  const rollbackOptimisticDiscards = React.useCallback((actionIds: readonly string[]) => {
+    if (actionIds.length === 0) return
+    setOptimisticallyDiscardedIds((prev) => {
+      let changed = false
+      const next = new Set(prev)
+      for (const actionId of actionIds) {
+        if (next.delete(actionId)) changed = true
+      }
+      return changed ? next : prev
+    })
+  }, [])
+
   const actions = React.useMemo(() => {
+    if (isHistoryMode) return historyActions
     let filtered = rawActions
+    if (optimisticallyDiscardedIds.size > 0) {
+      filtered = filtered.filter((a) => !optimisticallyDiscardedIds.has(a._id))
+    }
     if (filterTypes) {
       filtered = filtered.filter((a) => filterTypes.includes(a.type))
     }
@@ -195,11 +337,14 @@ export function ActionsPage({
       filtered = filtered.filter((a) => a.platform != null && activePlatforms.has(a.platform as ActionPlatform))
     }
     return filtered
-  }, [rawActions, filterTypes, activePlatforms])
+  }, [isHistoryMode, historyActions, rawActions, filterTypes, activePlatforms, optimisticallyDiscardedIds])
 
   // Compute platform counts from type-filtered actions (so platform counts update when type filter changes)
   const platformCounts = React.useMemo(() => {
     let typeFiltered = rawActions
+    if (optimisticallyDiscardedIds.size > 0) {
+      typeFiltered = typeFiltered.filter((a) => !optimisticallyDiscardedIds.has(a._id))
+    }
     if (filterTypes) {
       typeFiltered = typeFiltered.filter((a) => filterTypes.includes(a.type))
     }
@@ -211,11 +356,43 @@ export function ActionsPage({
       }
     }
     return counts
-  }, [rawActions, filterTypes])
+  }, [rawActions, filterTypes, optimisticallyDiscardedIds])
 
   const counts = countsResult?.counts ?? EMPTY_COUNTS
   const totalFromCounts = countsResult?.total ?? 0
-  const loading = actionsResult === undefined
+  const loading = isHistoryMode ? historyResult === undefined : effectiveResult === undefined
+
+  const viewModeToggle = (
+    <div className="no-drag flex items-center gap-0.5 bg-muted/60 rounded-md p-0.5">
+      <button
+        onClick={() => handleViewModeChange("queue")}
+        className={cn(
+          "px-3 py-0.5 text-xs font-medium rounded-[5px] transition-colors",
+          viewMode === "queue" ? "bg-background shadow-sm text-foreground" : "text-muted-foreground hover:text-foreground"
+        )}
+      >
+        Queue
+      </button>
+      <button
+        onClick={() => handleViewModeChange("history")}
+        className={cn(
+          "px-3 py-0.5 text-xs font-medium rounded-[5px] transition-colors",
+          viewMode === "history" ? "bg-background shadow-sm text-foreground" : "text-muted-foreground hover:text-foreground"
+        )}
+      >
+        History
+      </button>
+    </div>
+  )
+
+  // Compute the true filtered total from backend counts (not limited by loaded page size)
+  const filteredTotal = React.useMemo(() => {
+    if (activePlatforms.size > 0) {
+      // Platform filtering is client-side only, so use loaded & filtered count
+      return actions.length
+    }
+    return getGroupCount(activeFilter, counts, totalFromCounts)
+  }, [activeFilter, activePlatforms.size, counts, totalFromCounts, actions.length])
 
   // Report action count to parent
   React.useEffect(() => {
@@ -245,21 +422,113 @@ export function ActionsPage({
     }
   }, [actions, selectedActionId])
 
+  // Reset open swipe target if that action disappears
+  React.useEffect(() => {
+    if (!openSwipeItemId) return
+    if (!actions.some((a) => a._id === openSwipeItemId)) {
+      setOpenSwipeItemId(null)
+    }
+  }, [actions, openSwipeItemId])
+
   // Find selected action
   const selectedAction =
     actions.find((a) => a._id === selectedActionId) ?? null
+  const selectedActionIndex = selectedActionId
+    ? actions.findIndex((a) => a._id === selectedActionId)
+    : -1
+  const nextSequentialAction =
+    selectedActionIndex >= 0
+      ? actions[selectedActionIndex + 1] ?? actions[selectedActionIndex - 1] ?? null
+      : null
 
   // Fetch full context for selected action
   const contextResult = useQuery(
     api.actions.getActionWithContext,
     selectedActionId
-      ? { actionId: selectedActionId as Id<"actions">, messageLimit: 15 }
+      ? { actionId: selectedActionId as Id<"actions">, messageLimit: ACTION_CONTEXT_MESSAGE_LIMIT }
       : "skip"
   )
   const actionContext: ActionContext | null = (contextResult ?? null) as ActionContext | null
 
+  // Warm next likely action in cache to reduce latency when advancing.
+  useQuery(
+    api.actions.getActionWithContext,
+    nextSequentialAction
+      ? {
+          actionId: nextSequentialAction._id as Id<"actions">,
+          messageLimit: ACTION_CONTEXT_MESSAGE_LIMIT,
+        }
+      : "skip"
+  )
+
+  // Paginated message loading for selected action's conversation
+  const [messageLimit, setMessageLimit] = React.useState(MESSAGE_PAGE_SIZE)
+
+  // Reset message limit when selected action changes
+  React.useEffect(() => {
+    setMessageLimit(MESSAGE_PAGE_SIZE)
+  }, [selectedActionId])
+
+  const conversationId = actionContext?.conversation?._id
+  const messagesResult = useQuery(
+    api.messages.getMessages,
+    conversationId
+      ? { conversationId: conversationId as Id<"conversations">, limit: messageLimit }
+      : "skip"
+  )
+  const nextConversationId = nextSequentialAction?.conversationId
+  useQuery(
+    api.messages.getMessages,
+    nextConversationId
+      ? { conversationId: nextConversationId as Id<"conversations">, limit: MESSAGE_PAGE_SIZE }
+      : "skip"
+  )
+
+  // Build context with paginated messages (overriding getActionWithContext messages)
+  const paginatedContext = React.useMemo<ActionContext | null>(() => {
+    if (!actionContext) return null
+    if (!messagesResult?.messages) return actionContext
+
+    const fallbackReactionsByMessageId = new Map<string, string[]>()
+    for (const message of actionContext.messages) {
+      const normalized = normalizeReactions(
+        message.reactions as Array<{ emoji?: string } | string> | null | undefined
+      )
+      if (normalized && normalized.length > 0) {
+        fallbackReactionsByMessageId.set(message._id, normalized)
+      }
+    }
+
+    // Map getMessages response to ActionContext.messages format
+    // getMessages returns newest-first, reverse to chronological
+    const paginatedMessages = [...messagesResult.messages].reverse().map((msg) => ({
+      reactions:
+        normalizeReactions(
+          msg.reactions as Array<{ emoji?: string; name?: string; reaction?: string } | string> | null | undefined
+        ) ??
+        fallbackReactionsByMessageId.get(msg._id) ??
+        null,
+      _id: msg._id,
+      content: msg.content,
+      sentAt: msg.sentAt,
+      isFromMe: msg.isFromMe,
+      senderName: msg.sender?.displayName ?? (msg.isFromMe ? "You" : null),
+      senderContactId: msg.senderContactId ?? null,
+      status: msg.status ?? null,
+    }))
+
+    return { ...actionContext, messages: paginatedMessages }
+  }, [actionContext, messagesResult])
+
+  const hasMoreMessages = messagesResult?.nextCursor != null
+  const handleLoadMoreMessages = React.useCallback(() => {
+    setMessageLimit((prev) => prev + MESSAGE_PAGE_SIZE)
+  }, [])
+  const isLoadingMoreMessages = messageLimit > MESSAGE_PAGE_SIZE && messagesResult === undefined
+
   // Mutations
   const swipeAction = useMutation(api.actions.swipeAction)
+  const discardActionsBulk = useMutation(api.actions.discardActionsBulk)
 
   // Handle response text change
   const handleResponseChange = React.useCallback(
@@ -283,13 +552,20 @@ export function ActionsPage({
 
       // For snooze without a time, open the modal
       if (direction === "up" && !snoozedUntil) {
+        setSnoozeTargetActionId(selectedAction._id)
         setSnoozeModalOpen(true)
         return
       }
 
       setIsProcessing(true)
+      const isOptimisticHide =
+        direction === "left" || (direction === "up" && typeof snoozedUntil === "number")
+      if (isOptimisticHide) {
+        addOptimisticDiscards([selectedAction._id])
+      }
 
       try {
+        const actionName = selectedAction.contactName
         const responseText = responseTexts[selectedAction._id]
         await swipeAction({
           actionId: selectedAction._id as Id<"actions">,
@@ -298,6 +574,11 @@ export function ActionsPage({
           snoozedUntil,
         })
 
+        // Show confirmation toast for send
+        if (direction === "right") {
+          toast.success(actionName ? `Message sent to ${actionName}` : "Message sent")
+        }
+
         // Clean up state
         setResponseTexts((prev) => {
           const next = { ...prev }
@@ -305,35 +586,91 @@ export function ActionsPage({
           return next
         })
       } catch (error) {
+        if (direction === "left") {
+          rollbackOptimisticDiscards([selectedAction._id])
+          toast.error("Couldn't discard action. It was restored.")
+        } else if (direction === "up" && typeof snoozedUntil === "number") {
+          rollbackOptimisticDiscards([selectedAction._id])
+          toast.error("Couldn't snooze action. It was restored.")
+        }
         console.error("Failed to swipe action:", error)
       } finally {
         setIsProcessing(false)
+        setOpenSwipeItemId(null)
       }
     },
-    [selectedAction, isProcessing, responseTexts, swipeAction]
+    [selectedAction, isProcessing, responseTexts, addOptimisticDiscards, rollbackOptimisticDiscards, swipeAction]
+  )
+
+  const performSnoozeAction = React.useCallback(
+    async (actionId: string, snoozedUntil: number) => {
+      if (isProcessing) return
+
+      addOptimisticDiscards([actionId])
+      setIsProcessing(true)
+      try {
+        const responseText = responseTexts[actionId]
+        await swipeAction({
+          actionId: actionId as Id<"actions">,
+          direction: "up",
+          responseText,
+          snoozedUntil,
+        })
+        setResponseTexts((prev) => {
+          const next = { ...prev }
+          delete next[actionId]
+          return next
+        })
+      } catch (error) {
+        rollbackOptimisticDiscards([actionId])
+        toast.error("Couldn't snooze action. It was restored.")
+        console.error("Failed to snooze action:", error)
+      } finally {
+        setIsProcessing(false)
+        setOpenSwipeItemId(null)
+      }
+    },
+    [isProcessing, responseTexts, addOptimisticDiscards, rollbackOptimisticDiscards, swipeAction]
   )
 
   // Handle snooze from modal
   const handleSnooze = React.useCallback(
     async (snoozedUntil: number) => {
-      await handleSwipe("up", snoozedUntil)
+      const actionId = snoozeTargetActionId ?? selectedActionId
+      if (!actionId) return
+      await performSnoozeAction(actionId, snoozedUntil)
+      setSnoozeTargetActionId(null)
     },
-    [handleSwipe]
+    [performSnoozeAction, selectedActionId, snoozeTargetActionId]
   )
 
   // Handle discard for a specific action (from swipeable list item)
   const handleDiscardAction = React.useCallback(
     async (actionId: string) => {
+      addOptimisticDiscards([actionId])
+      setOpenSwipeItemId(null)
       try {
         await swipeAction({
           actionId: actionId as Id<"actions">,
           direction: "left",
         })
       } catch (error) {
+        rollbackOptimisticDiscards([actionId])
+        toast.error("Couldn't discard action. It was restored.")
         console.error("Failed to discard action:", error)
       }
     },
-    [swipeAction]
+    [addOptimisticDiscards, rollbackOptimisticDiscards, swipeAction]
+  )
+
+  // Handle snooze from list item swipe action
+  const handleSnoozeAction = React.useCallback(
+    (actionId: string, snoozedUntil: number) => {
+      setSelectedActionId(actionId)
+      setSnoozeTargetActionId(null)
+      void performSnoozeAction(actionId, snoozedUntil)
+    },
+    [performSnoozeAction]
   )
 
   // Handle click with multi-select support
@@ -381,23 +718,41 @@ export function ActionsPage({
   // Handle bulk dismiss
   const handleBulkDismiss = React.useCallback(async () => {
     if (multiSelectedIds.size === 0) return
+    const selectedIds = Array.from(multiSelectedIds)
+    addOptimisticDiscards(selectedIds)
+    setMultiSelectedIds(new Set())
     setIsProcessing(true)
     try {
-      await Promise.all(
-        Array.from(multiSelectedIds).map((id) =>
+      await discardActionsBulk({
+        actionIds: selectedIds as Id<"actions">[],
+      })
+    } catch (error) {
+      // Fallback for clients connected to deployments that don't yet expose discardActionsBulk.
+      const fallbackResults = await Promise.allSettled(
+        selectedIds.map((actionId) =>
           swipeAction({
-            actionId: id as Id<"actions">,
+            actionId: actionId as Id<"actions">,
             direction: "left",
           })
         )
       )
-      setMultiSelectedIds(new Set())
-    } catch (error) {
-      console.error("Failed to bulk dismiss:", error)
+
+      const failedIds = selectedIds.filter(
+        (_actionId, idx) => fallbackResults[idx]?.status === "rejected"
+      )
+      if (failedIds.length > 0) {
+        rollbackOptimisticDiscards(failedIds)
+        toast.error(
+          failedIds.length === 1
+            ? "Couldn't discard 1 action. It was restored."
+            : `Couldn't discard ${failedIds.length} actions. They were restored.`
+        )
+        console.error("Failed to bulk dismiss actions:", error, fallbackResults)
+      }
     } finally {
       setIsProcessing(false)
     }
-  }, [multiSelectedIds, swipeAction])
+  }, [multiSelectedIds, addOptimisticDiscards, discardActionsBulk, rollbackOptimisticDiscards, swipeAction])
 
   // Clear multi-selection
   const clearSelection = React.useCallback(() => {
@@ -453,6 +808,35 @@ export function ActionsPage({
         return
       }
 
+      // H: Toggle between queue and history
+      if (e.key === "h" || e.key === "H") {
+        e.preventDefault()
+        handleViewModeChange(isHistoryMode ? "queue" : "history")
+        return
+      }
+
+      // Disable action keys in history mode
+      if (isHistoryMode) {
+        if (e.key === "ArrowUp" && actions.length > 0) {
+          e.preventDefault()
+          const currentIndex = actions.findIndex((a) => a._id === selectedActionId)
+          if (currentIndex > 0) {
+            const nextId = actions[currentIndex - 1]._id
+            setSelectedActionId(nextId)
+            document.querySelector(`[data-action-item-id="${nextId}"]`)?.scrollIntoView({ block: "nearest" })
+          }
+        } else if (e.key === "ArrowDown" && actions.length > 0) {
+          e.preventDefault()
+          const currentIndex = actions.findIndex((a) => a._id === selectedActionId)
+          if (currentIndex < actions.length - 1) {
+            const nextId = actions[currentIndex + 1]._id
+            setSelectedActionId(nextId)
+            document.querySelector(`[data-action-item-id="${nextId}"]`)?.scrollIntoView({ block: "nearest" })
+          }
+        }
+        return
+      }
+
       if (e.key === "ArrowLeft") {
         e.preventDefault()
         handleSwipe("left")
@@ -468,7 +852,7 @@ export function ActionsPage({
         if (currentIndex > 0) {
           const nextId = actions[currentIndex - 1]._id
           setSelectedActionId(nextId)
-          document.querySelector(`[data-action-id="${nextId}"]`)?.scrollIntoView({ block: "nearest" })
+          document.querySelector(`[data-swipe-item-id="${nextId}"]`)?.scrollIntoView({ block: "nearest" })
         }
       } else if (e.key === "ArrowDown" && actions.length > 0) {
         // Navigate to next action in list
@@ -479,7 +863,7 @@ export function ActionsPage({
         if (currentIndex < actions.length - 1) {
           const nextId = actions[currentIndex + 1]._id
           setSelectedActionId(nextId)
-          document.querySelector(`[data-action-id="${nextId}"]`)?.scrollIntoView({ block: "nearest" })
+          document.querySelector(`[data-swipe-item-id="${nextId}"]`)?.scrollIntoView({ block: "nearest" })
         }
       } else if (e.key === "s" || e.key === "S") {
         // Snooze action - opens modal
@@ -501,7 +885,7 @@ export function ActionsPage({
 
     window.addEventListener("keydown", handleKeyDown)
     return () => window.removeEventListener("keydown", handleKeyDown)
-  }, [handleSwipe, handleOpenInApp, actions, selectedActionId, isMultiSelectMode, clearSelection, handleBulkDismiss])
+  }, [handleSwipe, handleOpenInApp, actions, selectedActionId, isMultiSelectMode, clearSelection, handleBulkDismiss, isHistoryMode, handleViewModeChange])
 
   // Loading skeleton
   if (loading) {
@@ -509,7 +893,7 @@ export function ActionsPage({
       <>
         {/* List Panel */}
         <Panel variant="shrink" width={320} position="first">
-          <PanelHeader title="Actions" />
+          <PanelHeader titleContent={viewModeToggle} />
           <div className="p-3 space-y-2">
             {[1, 2, 3, 4, 5].map((i) => (
               <Skeleton key={i} className="h-20 w-full rounded-lg" />
@@ -529,98 +913,171 @@ export function ActionsPage({
     <>
       {/* List Panel */}
       <Panel variant="shrink" width={320} position="first">
-        <PanelHeader title="Actions">
-          <ActionFilterDropdown
-            ref={filterRef}
-            counts={counts}
-            total={totalFromCounts}
-            activeFilter={activeFilter}
-            onFilterChange={setActiveFilter}
-            platformCounts={platformCounts}
-            activePlatforms={activePlatforms}
-            filteredCount={actions.length}
-            onPlatformToggle={(platform) => {
-              setActivePlatforms((prev) => {
-                const next = new Set(prev)
-                if (next.has(platform)) {
-                  next.delete(platform)
-                } else {
-                  next.add(platform)
-                }
-                return next
-              })
-            }}
-          />
+        <PanelHeader titleContent={viewModeToggle}>
+          {!isHistoryMode && (
+            <ActionFilterDropdown
+              ref={filterRef}
+              counts={counts}
+              total={totalFromCounts}
+              activeFilter={activeFilter}
+              onFilterChange={setActiveFilter}
+              platformCounts={platformCounts}
+              activePlatforms={activePlatforms}
+              filteredCount={filteredTotal}
+              onPlatformToggle={(platform) => {
+                setActivePlatforms((prev) => {
+                  const next = new Set(prev)
+                  if (next.has(platform)) {
+                    next.delete(platform)
+                  } else {
+                    next.add(platform)
+                  }
+                  return next
+                })
+              }}
+            />
+          )}
         </PanelHeader>
 
+        {/* Bulk operations bar (queue mode only) */}
+        {!isHistoryMode && isMultiSelectMode && (
+          <div className="shrink-0 border-b border-border/80 bg-muted/40 px-2 py-1.5">
+            <div className="flex items-center gap-1.5">
+              <span className="text-xs text-muted-foreground tabular-nums">
+                {multiSelectedIds.size} Selected
+              </span>
+              <div className="ml-auto flex items-center gap-1.5">
+                <Button
+                  variant="ghost"
+                  size="xs"
+                  onClick={clearSelection}
+                  disabled={isProcessing}
+                >
+                  Clear
+                </Button>
+                <Button
+                  variant="destructive"
+                  size="xs"
+                  onClick={handleBulkDismiss}
+                  disabled={isProcessing}
+                >
+                  <Trash2 size={14} strokeWidth={1.5} />
+                  Dismiss Selected
+                </Button>
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* Action List */}
-        <div className="flex-1 overflow-y-auto p-2">
+        <div
+          ref={listRef}
+          onScroll={isHistoryMode ? () => {
+            const el = listRef.current
+            if (!el || !hasMoreHistory || isLoadingMoreHistory) return
+            const { scrollTop, scrollHeight, clientHeight } = el
+            if (scrollHeight - scrollTop - clientHeight < 200) {
+              setHistoryLoadLimit((prev) => prev + PAGE_SIZE)
+            }
+          } : handleListScroll}
+          className="flex-1 overflow-y-auto p-2"
+        >
           {actions.length === 0 ? (
             <EmptyState
-              animatedIcon={PartyPopperIcon}
-              title="You're all caught up"
-              description="New actions will appear as Cued finds opportunities"
+              animatedIcon={isHistoryMode ? SparklesIcon : PartyPopperIcon}
+              title={isHistoryMode ? "No history yet" : "You're all caught up"}
+              description={isHistoryMode ? "Completed actions will appear here" : "New actions will appear as Cued finds opportunities"}
               className="py-12"
             />
+          ) : isHistoryMode ? (
+            /* History list items (no swipe) */
+            actions.map((action) => {
+              const resolvedAt = action.completedAt ?? action.discardedAt ?? action.createdAt
+              const isDiscarded = action.status === "discarded"
+              return (
+                <div key={action._id} className="mb-1">
+                  <button
+                    data-action-item-id={action._id}
+                    onClick={() => setSelectedActionId(action._id)}
+                    className={cn(
+                      "w-full text-left px-3 py-2.5 rounded-lg flex items-center gap-3 border transition-colors duration-150 ease-out hover:duration-0",
+                      "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background",
+                      selectedActionId === action._id ? "border-border bg-muted" : "border-transparent bg-background hover:bg-muted"
+                    )}
+                  >
+                    <div className="shrink-0">
+                      {isDiscarded ? (
+                        <X size={16} strokeWidth={1.5} className="text-muted-foreground" />
+                      ) : (
+                        <CheckCircle2 size={16} strokeWidth={1.5} className="text-[#1B5E3D]" />
+                      )}
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-start gap-2">
+                        <span className="min-w-0 flex-1 text-sm font-medium truncate">
+                          {action.contactName ?? "Unknown"}
+                        </span>
+                        <span className="shrink-0 text-[10px] tracking-tight text-muted-foreground tabular-nums">
+                          {formatRelativeTime(resolvedAt)}
+                        </span>
+                      </div>
+                      <div className="flex items-center gap-1 mt-0.5 text-xs text-muted-foreground">
+                        <span>{isDiscarded ? "Skipped" : "Sent"} &middot; {action.summary ?? getActionTypeConfig(action.type).label}</span>
+                      </div>
+                    </div>
+                  </button>
+                </div>
+              )
+            })
           ) : (
             <AnimatePresence mode="popLayout">
               {actions.map((action) => (
                 <SwipeableActionListItem
                   key={action._id}
                   action={action}
-                  selected={selectedActionId === action._id}
+                  selected={!isMultiSelectMode && selectedActionId === action._id}
                   multiSelected={multiSelectedIds.has(action._id)}
                   showCheckbox={isMultiSelectMode}
                   onClick={(e) => handleItemClick(action._id, e)}
                   onDiscard={() => handleDiscardAction(action._id)}
+                  onSnooze={(snoozedUntil) => handleSnoozeAction(action._id, snoozedUntil)}
                   typeConfig={getActionTypeConfig(action.type)}
                   onContactClick={onContactClick}
+                  openSwipeId={openSwipeItemId}
+                  onSwipeActiveChange={setOpenSwipeItemId}
                 />
               ))}
             </AnimatePresence>
           )}
         </div>
-
-        {/* Bulk operations bar */}
-        {isMultiSelectMode && (
-          <div className="shrink-0 p-2 border-t border-border bg-background">
-            <div className="flex items-center justify-between">
-              <span className="text-sm text-muted-foreground">
-                {multiSelectedIds.size} selected
-              </span>
-              <Button
-                variant="destructive"
-                size="sm"
-                onClick={handleBulkDismiss}
-                disabled={isProcessing}
-              >
-                <Trash2 className="size-4 mr-1.5" />
-                Dismiss All
-              </Button>
-            </div>
-          </div>
-        )}
       </Panel>
 
       {/* Detail Panel */}
       <Panel position="last">
         <ActionDetail
           action={selectedAction}
-          context={actionContext}
+          context={paginatedContext}
           responseText={currentResponseText}
           onResponseChange={handleResponseChange}
-          onSend={() => handleSwipe("right")}
-          onDismiss={() => handleSwipe("left")}
+          onSend={isHistoryMode ? undefined : () => handleSwipe("right")}
+          onDismiss={isHistoryMode ? undefined : () => handleSwipe("left")}
           isSending={isProcessing}
           openExternal={(url) => electron.shell.openExternal(url)}
           onContactClick={onContactClick}
+          hasMore={hasMoreMessages}
+          onLoadMore={handleLoadMoreMessages}
+          isLoadingMore={isLoadingMoreMessages}
+          readOnly={isHistoryMode}
         />
       </Panel>
 
       {/* Snooze Modal */}
       <SnoozeModal
         open={snoozeModalOpen}
-        onClose={() => setSnoozeModalOpen(false)}
+        onClose={() => {
+          setSnoozeModalOpen(false)
+          setSnoozeTargetActionId(null)
+        }}
         onSnooze={handleSnooze}
       />
     </>

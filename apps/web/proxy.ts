@@ -6,6 +6,8 @@ export default authkitMiddleware({
     enabled: true,
     unauthenticatedPaths: [
       "/",
+      "/download",
+      "/download/macos",
       "/sign-in",
       "/sign-up",
       "/manifesto",
