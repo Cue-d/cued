@@ -330,6 +330,7 @@ export async function syncSlackNativeMessagesInternal(
 
         // Only create contact for non-me senders
         let senderContactId: Id<"contacts"> | undefined;
+        let senderHandleId: Id<"contactHandles"> | undefined;
         if (!isFromMe) {
           const contactResult = await getOrCreateSlackContact(
             ctx,
@@ -338,6 +339,7 @@ export async function syncSlackNativeMessagesInternal(
             msg.userName // Pass display name if available
           );
           senderContactId = contactResult?.contactId;
+          senderHandleId = contactResult?.handleId;
         }
 
         // Map reactions and check if user reacted
@@ -373,6 +375,7 @@ export async function syncSlackNativeMessagesInternal(
           content: msg.text,
           sentAt: finalSentAt,
           senderContactId,
+          senderHandleId,
           isFromMe,
           platformMessageId: msg.ts,
           threadTs: msg.threadTs,

@@ -12,6 +12,8 @@ import {
   createTestUserData,
   createTestContactData,
   createTestContactHandleData,
+  createTestConversationData,
+  createTestMessageData,
   createTestActionData,
   createTestIdentity,
 } from "./helpers.util";
@@ -1144,6 +1146,99 @@ describe("contactResolution", () => {
         expect(linkedInUrnHandles).toHaveLength(1);
         expect(linkedInUrnHandles[0].handle).toBe("urn:li:member:abc123");
         expect(phoneHandles).toHaveLength(1);
+      });
+    });
+
+    it("repoints senderHandleId to surviving handle when deduping on auto-merge", async () => {
+      const t = convexTest(schema, modules);
+      const { userId } = await setupAuthenticatedUser(t);
+
+      const { primaryId, secondaryId, primaryHandleId, secondaryHandleId, messageId } =
+        await t.run(async (ctx) => {
+          const primaryId = await ctx.db.insert(
+            "contacts",
+            createTestContactData(userId, { displayName: "Primary" }),
+          );
+          const secondaryId = await ctx.db.insert(
+            "contacts",
+            createTestContactData(userId, { displayName: "Secondary" }),
+          );
+
+          const primaryHandleId = await ctx.db.insert(
+            "contactHandles",
+            createTestContactHandleData(userId, primaryId, {
+              handleType: "phone",
+              handle: "+15550001111",
+              platform: "imessage",
+            }),
+          );
+          const secondaryHandleId = await ctx.db.insert(
+            "contactHandles",
+            createTestContactHandleData(userId, secondaryId, {
+              handleType: "phone",
+              handle: "+15550001111",
+              platform: "imessage",
+            }),
+          );
+
+          const conversationId = await ctx.db.insert(
+            "conversations",
+            createTestConversationData(userId, {
+              participantContactIds: [secondaryId],
+            }),
+          );
+          const messageId = await ctx.db.insert("messages", {
+            ...createTestMessageData(userId, conversationId, {
+              senderContactId: secondaryId,
+            }),
+            senderHandleId: secondaryHandleId,
+          });
+
+          return {
+            primaryId,
+            secondaryId,
+            primaryHandleId,
+            secondaryHandleId,
+            messageId,
+          };
+        });
+
+      await t.mutation(internal.contactResolution.autoMergeContacts, {
+        primaryContactId: primaryId,
+        secondaryContactId: secondaryId,
+        source: "phone_match",
+        reasoning: "identical phone",
+      });
+
+      await t.run(async (ctx) => {
+        const message = await ctx.db.get(messageId);
+        const deletedSecondaryHandle = await ctx.db.get(secondaryHandleId);
+        expect(message?.senderContactId).toBe(primaryId);
+        expect(message?.senderHandleId).toBe(primaryHandleId);
+        expect(deletedSecondaryHandle).toBeNull();
+
+        const mergeAudit = await ctx.db
+          .query("contactAuditLog")
+          .withIndex("by_contact", (q) => q.eq("contactId", primaryId))
+          .filter((q) => q.eq(q.field("action"), "merge"))
+          .first();
+        const details = mergeAudit?.details as
+          | {
+              messageIds?: string[];
+              dedupedHandles?: Array<{
+                handleId: string;
+                mergedIntoHandleId: string;
+                handleType: string;
+                handle: string;
+              }>;
+            }
+          | undefined;
+        expect(details?.messageIds).toEqual([messageId]);
+        expect(details?.dedupedHandles).toHaveLength(1);
+        expect(details?.dedupedHandles?.[0]?.handleId).toBe(secondaryHandleId);
+        expect(details?.dedupedHandles?.[0]?.mergedIntoHandleId).toBe(
+          primaryHandleId,
+        );
       });
     });
 

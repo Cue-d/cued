@@ -233,6 +233,8 @@ export interface ContactHandleInput {
 /** Result from getOrCreateContact */
 export interface GetOrCreateContactResult {
   contactId: Id<"contacts">;
+  /** The ID of the first matched/created handle (for senderHandleId on messages) */
+  handleId: Id<"contactHandles">;
   /** True if a new contact was created (vs found existing) */
   created: boolean;
 }
@@ -324,7 +326,7 @@ export async function getOrCreateContact(
         if (displayNameUpdated) {
           await scheduleContactMergeCheck(ctx, userId, existing.contactId);
         }
-        return { contactId: existing.contactId, created: false };
+        return { contactId: existing.contactId, handleId: existing._id, created: false };
       }
     }
   }
@@ -339,19 +341,23 @@ export async function getOrCreateContact(
   });
 
   // Create all handles
+  let firstHandleId: Id<"contactHandles"> | undefined;
   for (const handle of normalizedHandles) {
-    await ctx.db.insert("contactHandles", {
+    const handleId = await ctx.db.insert("contactHandles", {
       userId,
       contactId,
       handleType: handle.type,
       handle: handle.normalized,
       platform,
     });
+    if (!firstHandleId) {
+      firstHandleId = handleId;
+    }
   }
 
   await scheduleContactMergeCheck(ctx, userId, contactId);
 
-  return { contactId, created: true };
+  return { contactId, handleId: firstHandleId!, created: true };
 }
 
 /**
@@ -431,12 +437,18 @@ export function shouldUpdateDisplayName(
  * the same variant (e.g., "+15551234567" and "15551234567" both produce "5551234567").
  * All originals are mapped back when a contact is found.
  */
+/** Result from batchResolveHandles for a single handle */
+export interface ResolvedHandle {
+  contactId: Id<"contacts">;
+  handleId: Id<"contactHandles">;
+}
+
 export async function batchResolveHandles(
   ctx: MutationCtx,
   userId: Id<"users">,
   handles: string[],
-): Promise<Map<string, Id<"contacts">>> {
-  const handleToContact = new Map<string, Id<"contacts">>();
+): Promise<Map<string, ResolvedHandle>> {
+  const handleToResolved = new Map<string, ResolvedHandle>();
 
   // Build variant map: variant → Set of original handles
   // Multiple originals can map to the same variant (phone format differences)
@@ -480,8 +492,11 @@ export async function batchResolveHandles(
         if (originalHandles) {
           // Map all original handles that produced this variant to the contact
           for (const originalHandle of originalHandles) {
-            if (!handleToContact.has(originalHandle)) {
-              handleToContact.set(originalHandle, result.contactId);
+            if (!handleToResolved.has(originalHandle)) {
+              handleToResolved.set(originalHandle, {
+                contactId: result.contactId,
+                handleId: result._id,
+              });
             }
           }
         }
@@ -489,7 +504,7 @@ export async function batchResolveHandles(
     }
   }
 
-  return handleToContact;
+  return handleToResolved;
 }
 
 // ============================================================================

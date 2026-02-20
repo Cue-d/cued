@@ -1,3 +1,5 @@
+import { isLikelyLinkedInMemberId, normalizeLinkedInHandle } from "./linkedin";
+
 export type DeeplinkResult =
   | { type: "available"; url: string }
   | { type: "disabled"; reason: string }
@@ -52,8 +54,10 @@ export function createDeeplinkUtilities({
           ? `imessage://${handle}`
           : null;
       case "linkedin":
-        return handleType === "linkedin_handle"
-          ? `https://www.linkedin.com/in/${handle}`
+        if (handleType !== "linkedin_handle") return null;
+        const normalizedHandle = normalizeLinkedInHandle(handle);
+        return normalizedHandle && !isLikelyLinkedInMemberId(normalizedHandle)
+          ? `https://www.linkedin.com/in/${normalizedHandle}`
           : null;
       case "twitter":
         return handleType === "twitter_handle"

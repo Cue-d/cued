@@ -15,6 +15,7 @@ import {
 import { internal } from "./_generated/api";
 import { adjustPendingActionCount } from "./lib/actions";
 import { platformValidator } from "./schema";
+import { isContactActionable } from "./lib/contactStatus";
 
 // ============================================================================
 // Internal queries
@@ -197,6 +198,18 @@ export const onIncomingMessage = internalAction({
     }
 
     const { conversation, primaryContact, participantNames } = context;
+
+    // 4b. Skip if primary contact is not actionable (archived)
+    if (
+      conversation.conversationType !== "group" &&
+      primaryContact &&
+      !isContactActionable(primaryContact)
+    ) {
+      return {
+        skipped: true,
+        reason: "contact_archived",
+      };
+    }
 
     // 5. Get recent messages
     const messages = await ctx.runQuery(

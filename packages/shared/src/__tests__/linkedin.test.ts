@@ -8,6 +8,7 @@ import {
   isConversationURN,
   isMemberURN,
   urnIdsMatch,
+  isLikelyLinkedInMemberId,
 } from "../linkedin";
 
 describe("LinkedIn URN utilities", () => {
@@ -204,6 +205,26 @@ describe("LinkedIn URN utilities", () => {
       expect(isMemberURN("urn:li:fs_conversation:123")).toBe(false);
       expect(isMemberURN("urn:li:messagingThread:456")).toBe(false);
       expect(isMemberURN("not-a-urn")).toBe(false);
+    });
+  });
+
+  describe("isLikelyLinkedInMemberId", () => {
+    it("returns true for LinkedIn member IDs", () => {
+      expect(isLikelyLinkedInMemberId("ACoAAEFsIqIBxYzabc123def456ghi")).toBe(
+        true
+      );
+      expect(
+        isLikelyLinkedInMemberId(
+          "urn:li:member:ACoAAEFsIqIBxYzabc123def456ghi"
+        )
+      ).toBe(true);
+    });
+
+    it("returns false for normal LinkedIn public handles", () => {
+      expect(isLikelyLinkedInMemberId("theotarr")).toBe(false);
+      expect(
+        isLikelyLinkedInMemberId("https://www.linkedin.com/in/theo-tarr")
+      ).toBe(false);
     });
   });
 

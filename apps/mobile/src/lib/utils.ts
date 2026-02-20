@@ -45,16 +45,7 @@ export function getThemeColors(isDark: boolean) {
   return isDark ? themeColors.dark : themeColors.light;
 }
 
-/** Returns true if the display name looks like an actual person name (not a phone/ID/email) */
-export function isRealContactName(displayName: string): boolean {
-  const trimmed = displayName.trim();
-  if (!trimmed) return false;
-  if (/^[\d+\-(). ]+$/.test(trimmed)) return false;
-  if (/^[UW][A-Z0-9]{8,}$/i.test(trimmed)) return false;
-  if (trimmed.startsWith("urn:li:")) return false;
-  if (/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmed)) return false;
-  return true;
-}
+export { isRealContactName } from "@cued/shared";
 
 export function getDisplayName(user: WorkOSUser | null): string {
   if (!user) return "User";

@@ -261,6 +261,7 @@ export async function syncTwitterMessagesInternal(
       const isFromMe = twitterUserId ? message.senderId === twitterUserId : false;
 
       let senderContactId: Id<"contacts"> | undefined;
+      let senderHandleId: Id<"contactHandles"> | undefined;
       if (!isFromMe) {
         const handle = message.senderScreenName?.trim() || message.senderId;
         const displayName = message.senderName?.trim() || `@${handle}`;
@@ -271,6 +272,7 @@ export async function syncTwitterMessagesInternal(
           displayName
         );
         senderContactId = contact?.contactId;
+        senderHandleId = contact?.handleId;
       }
 
       const bridge = isFromMe
@@ -292,6 +294,7 @@ export async function syncTwitterMessagesInternal(
         content: message.text,
         sentAt: finalSentAt,
         senderContactId,
+        senderHandleId,
         isFromMe,
         platformMessageId: message.messageId,
         status: bridge.status,

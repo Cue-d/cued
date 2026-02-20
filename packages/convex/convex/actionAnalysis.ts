@@ -14,6 +14,7 @@ import {
 import { internal } from "./_generated/api";
 import { resolveActionSummary } from "./lib/actionSummary";
 import { actionTypeValidator, platformValidator } from "./schema";
+import { isContactActionable } from "./lib/contactStatus";
 
 /** Result from LLM analysis */
 type AnalysisResult = "action_created" | "no_action" | "error";
@@ -414,6 +415,20 @@ export const analyzeConversation = internalAction({
       }
 
       const { conversation, primaryContact, participantNames } = context;
+
+      // Skip if primary contact is not actionable (archived)
+      if (
+        conversation.conversationType !== "group" &&
+        primaryContact &&
+        !isContactActionable(primaryContact)
+      ) {
+        await ctx.runMutation(internal.actionAnalysis.markAnalysisCompleted, {
+          queueEntryId: args.queueEntryId,
+          result: "no_action",
+          skipReason: "Contact is not active",
+        });
+        return { success: true, result: "no_action" };
+      }
 
       // Get recent messages
       const messages: RecentMessage[] = await ctx.runQuery(

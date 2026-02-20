@@ -702,5 +702,101 @@ describe("LinkedIn Sync", () => {
 
       expect(contacts).toHaveLength(1);
     });
+
+    it("does not create linkedin_handle from opaque member IDs", async () => {
+      const t = trackTest(convexTest(schema, modules));
+      const { userId, asUser } = await setupAuthenticatedUser(t);
+
+      await asUser.mutation(api.sync.syncLinkedInConversations, {
+        conversations: [
+          createConversation({
+            participants: [
+              createParticipant({
+                entityURN: "urn:li:fs_miniProfile:opaque123",
+                profileUrl: "ACoAAEFsIqIBxYzabc123def456ghi",
+              }),
+            ],
+          }),
+        ],
+      });
+
+      const handles = await t.run(async (ctx) => {
+        return ctx.db
+          .query("contactHandles")
+          .withIndex("by_user", (q) => q.eq("userId", userId))
+          .collect();
+      });
+
+      expect(handles).toHaveLength(1);
+      expect(handles[0].handleType).toBe("linkedin_urn");
+      expect(handles[0].handle).toBe("urn:li:member:opaque123");
+    });
+
+    it("treats opaque linkedin_handle values as missing usernames and replaces them", async () => {
+      const t = trackTest(convexTest(schema, modules));
+      const { userId, asUser } = await setupAuthenticatedUser(t);
+
+      const contactId = await t.run(async (ctx) => {
+        return ctx.db.insert("contacts", {
+          userId,
+          displayName: "Theo Tarr",
+        });
+      });
+
+      await t.run(async (ctx) => {
+        await ctx.db.insert("contactHandles", {
+          userId,
+          contactId,
+          handleType: "linkedin_urn",
+          handle: "urn:li:member:acoaaefsiqibxyzabc123def456ghi",
+          platform: "linkedin",
+        });
+        await ctx.db.insert("contactHandles", {
+          userId,
+          contactId,
+          handleType: "linkedin_handle",
+          handle: "acoaaefsiqibxyzabc123def456ghi",
+          platform: "linkedin",
+        });
+      });
+
+      const missingBefore = await asUser.query(
+        api.sync.findLinkedInContactsMissingUsernames,
+        { limit: 50 }
+      );
+      expect(missingBefore.contacts.map((c) => c.contactId)).toContain(contactId);
+
+      const update = await asUser.mutation(api.sync.addLinkedInUsernames, {
+        resolutions: [
+          {
+            memberId: "ACoAAEFsIqIBxYzabc123def456ghi",
+            publicIdentifier: "theotarr",
+          },
+        ],
+      });
+
+      expect(update.added).toBe(1);
+      expect(update.skipped).toBe(0);
+
+      const handlesAfter = await t.run(async (ctx) => {
+        return ctx.db
+          .query("contactHandles")
+          .withIndex("by_contact", (q) => q.eq("contactId", contactId))
+          .collect();
+      });
+
+      expect(
+        handlesAfter.some(
+          (h) =>
+            h.handleType === "linkedin_handle" &&
+            h.handle === "acoaaefsiqibxyzabc123def456ghi"
+        )
+      ).toBe(false);
+      expect(
+        handlesAfter.some(
+          (h) => h.handleType === "linkedin_handle" && h.handle === "theotarr"
+        )
+      ).toBe(true);
+    });
   });
 });

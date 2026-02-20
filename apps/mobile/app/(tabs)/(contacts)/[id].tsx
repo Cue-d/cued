@@ -9,9 +9,17 @@ import { useLocalSearchParams, useRouter, Stack } from "expo-router";
 import { SymbolView } from "expo-symbols";
 import { useQuery, useMutation } from "convex/react";
 import { api } from "@cued/convex";
-import { getInitials, formatPhoneNumber, formatRelativeTime, PLATFORM_CONFIG, type ActionPlatform } from "@cued/shared";
+import {
+  getInitials,
+  formatPhoneNumber,
+  formatRelativeTime,
+  PLATFORM_CONFIG,
+  getContactAuditActionLabel,
+  type ActionPlatform,
+} from "@cued/shared";
 import { PlatformIcon } from "@/components/platform-icons";
 import { SendMessageSheet, type SendMessageContact } from "@/components/send-message-sheet";
+import { MergeContactSheet } from "@/components/merge-contact-sheet";
 import type { Id } from "@cued/convex/convex/_generated/dataModel";
 import type { SFSymbol } from "sf-symbols-typescript";
 
@@ -101,11 +109,24 @@ function TagBadge({ tag }: { tag: string }): React.JSX.Element {
 }
 
 /** Section header component */
-function SectionHeader({ title }: { title: string }): React.JSX.Element {
+function SectionHeader({
+  title,
+  description,
+}: {
+  title: string;
+  description?: string;
+}): React.JSX.Element {
   return (
-    <Text style={{ fontSize: 13, fontWeight: "600", color: PlatformColor("secondaryLabel"), marginBottom: 8, marginHorizontal: 16 }}>
-      {title}
-    </Text>
+    <View style={{ marginBottom: 8, marginHorizontal: 16 }}>
+      <Text style={{ fontSize: 13, fontWeight: "600", color: PlatformColor("secondaryLabel") }}>
+        {title}
+      </Text>
+      {description && (
+        <Text style={{ fontSize: 12, color: PlatformColor("tertiaryLabel"), marginTop: 4 }}>
+          {description}
+        </Text>
+      )}
+    </View>
   );
 }
 
@@ -161,11 +182,22 @@ function handleTypeToPlatform(type: string): ActionPlatform | null {
   }
 }
 
+/** Status badge component */
+function StatusBadge({ status }: { status: string }): React.JSX.Element | null {
+  if (status === "active") return null;
+  return (
+    <View style={{ backgroundColor: PlatformColor("systemOrange"), paddingHorizontal: 10, paddingVertical: 3, borderRadius: 12, marginTop: 8 }}>
+      <Text style={{ fontSize: 12, fontWeight: "600", color: "white" }}>Archived</Text>
+    </View>
+  );
+}
+
 export default function ContactDetailScreen(): React.JSX.Element {
   const { id } = useLocalSearchParams<{ id: string }>();
 
   // State for send message sheet
   const [showSendSheet, setShowSendSheet] = useState(false);
+  const [showMergeSheet, setShowMergeSheet] = useState(false);
 
   const router = useRouter();
 
@@ -178,8 +210,19 @@ export default function ContactDetailScreen(): React.JSX.Element {
     count: 3,
   });
 
-  // Mutations for message queue
+  const auditHistory = useQuery(api.contacts.getContactAuditHistory, {
+    contactId: id as Id<"contacts">,
+  });
+
+  const unmergeableHistory = useQuery(api.contacts.getUnmergeableHistory, {
+    contactId: id as Id<"contacts">,
+  });
+
+  // Mutations
   const queueMessage = useMutation(api.messageQueue.queueMessage);
+  const setContactStatus = useMutation(api.contacts.setContactStatus);
+  const restoreContact = useMutation(api.contacts.restoreContact);
+  const unmergeContact = useMutation(api.contacts.unmergeContact);
 
   // Build sendable platforms from contact handles
   const sendableContact: SendMessageContact | null = useMemo(() => {
@@ -236,12 +279,6 @@ export default function ContactDetailScreen(): React.JSX.Element {
     [queueMessage]
   );
 
-  // Open send sheet
-  const handleOpenSendSheet = useCallback(() => {
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-    setShowSendSheet(true);
-  }, []);
-
   // Loading state
   if (profile === undefined) {
     return (
@@ -287,6 +324,27 @@ export default function ContactDetailScreen(): React.JSX.Element {
   const platforms = Object.keys(groupedHandles);
   const hasTags = contact.tags && contact.tags.length > 0;
   const hasNotes = contact.notes && contact.notes.trim().length > 0;
+  const contactStatus =
+    contact.isDismissed || contact.status === "archived" || contact.status === "dismissed"
+      ? "archived"
+      : "active";
+  const isActive = contactStatus === "active";
+
+  // Status action handlers
+  const handleArchive = async () => {
+    await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    await setContactStatus({ contactId: id as Id<"contacts">, status: "archived" });
+  };
+
+  const handleRestore = async () => {
+    await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    await restoreContact({ contactId: id as Id<"contacts"> });
+  };
+
+  const handleUnmerge = async (auditLogId: string) => {
+    await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    await unmergeContact({ auditLogId: auditLogId as Id<"contactAuditLog"> });
+  };
 
   return (
     <View className="flex-1 bg-background">
@@ -312,7 +370,7 @@ export default function ContactDetailScreen(): React.JSX.Element {
               {contact.company}
             </Text>
           )}
-
+          <StatusBadge status={contactStatus} />
         </View>
 
         {/* Handles grouped by platform */}
@@ -404,6 +462,127 @@ export default function ContactDetailScreen(): React.JSX.Element {
           </View>
         )}
 
+        {/* Status Actions */}
+        <View style={{ marginBottom: 24 }}>
+          <SectionHeader
+            title="Actions"
+            description="Archive hides this contact and stops new 1:1 action suggestions (group chats may still create actions). You can restore it."
+          />
+          <View
+            style={{
+              marginHorizontal: 16,
+              borderRadius: 12,
+              overflow: "hidden",
+              backgroundColor: PlatformColor("secondarySystemGroupedBackground"),
+            }}
+          >
+            {isActive ? (
+              <>
+                <Pressable
+                  onPress={handleArchive}
+                  className="flex-row items-center px-4 py-3 active:bg-muted"
+                >
+                  <SymbolView name="archivebox" size={18} tintColor={PlatformColor("systemOrange")} />
+                  <Text style={{ fontSize: 16, color: PlatformColor("systemOrange"), marginLeft: 12 }}>
+                    Archive Contact
+                  </Text>
+                </Pressable>
+                <Pressable
+                  onPress={() => {
+                    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+                    setShowMergeSheet(true);
+                  }}
+                  style={{ borderTopWidth: 1, borderTopColor: PlatformColor("separator") }}
+                  className="flex-row items-center px-4 py-3 active:bg-muted"
+                >
+                  <SymbolView name="arrow.triangle.merge" size={18} tintColor={PlatformColor("systemBlue")} />
+                  <Text style={{ fontSize: 16, color: PlatformColor("systemBlue"), marginLeft: 12 }}>
+                    Merge with...
+                  </Text>
+                </Pressable>
+              </>
+            ) : (
+              <Pressable
+                onPress={handleRestore}
+                className="flex-row items-center px-4 py-3 active:bg-muted"
+              >
+                <SymbolView name="arrow.uturn.backward" size={18} tintColor={PlatformColor("systemGreen")} />
+                <Text style={{ fontSize: 16, color: PlatformColor("systemGreen"), marginLeft: 12 }}>
+                  Restore to Active
+                </Text>
+              </Pressable>
+            )}
+          </View>
+        </View>
+
+        {/* Unmerge History */}
+        {unmergeableHistory && unmergeableHistory.length > 0 && (
+          <View style={{ marginBottom: 24 }}>
+            <SectionHeader title="Merge History" />
+            <View
+              style={{
+                marginHorizontal: 16,
+                borderRadius: 12,
+                overflow: "hidden",
+                backgroundColor: PlatformColor("secondarySystemGroupedBackground"),
+              }}
+            >
+              {unmergeableHistory.map((entry, idx) => {
+                const details = entry.details as { secondaryContact?: { displayName?: string } } | undefined;
+                const mergedName = details?.secondaryContact?.displayName ?? "Unknown";
+                return (
+                  <Pressable
+                    key={entry._id}
+                    onPress={() => handleUnmerge(entry._id)}
+                    style={idx > 0 ? { borderTopWidth: 1, borderTopColor: PlatformColor("separator") } : undefined}
+                    className="flex-row items-center px-4 py-3 active:bg-muted"
+                  >
+                    <SymbolView name="arrow.triangle.branch" size={18} tintColor={PlatformColor("systemBlue")} />
+                    <View className="flex-1 ml-3">
+                      <Text style={{ fontSize: 16, color: PlatformColor("label") }}>
+                        Unmerge &quot;{mergedName}&quot;
+                      </Text>
+                      <Text style={{ fontSize: 13, color: PlatformColor("secondaryLabel"), marginTop: 2 }}>
+                        Merged {formatRelativeTime(entry.timestamp)}
+                      </Text>
+                    </View>
+                    <SymbolView name="chevron.right" size={12} tintColor={PlatformColor("tertiaryLabel")} />
+                  </Pressable>
+                );
+              })}
+            </View>
+          </View>
+        )}
+
+        {/* Audit History */}
+        {auditHistory && auditHistory.length > 0 && (
+          <View style={{ marginBottom: 24 }}>
+            <SectionHeader title="History" />
+            <View
+              style={{
+                marginHorizontal: 16,
+                borderRadius: 12,
+                overflow: "hidden",
+                backgroundColor: PlatformColor("secondarySystemGroupedBackground"),
+              }}
+            >
+              {auditHistory.slice(0, 10).map((entry, idx) => (
+                <View
+                    key={entry._id}
+                    style={idx > 0 ? { borderTopWidth: 1, borderTopColor: PlatformColor("separator"), paddingHorizontal: 16, paddingVertical: 10 } : { paddingHorizontal: 16, paddingVertical: 10 }}
+                >
+                  <Text style={{ fontSize: 15, color: PlatformColor("label") }}>
+                    {getContactAuditActionLabel(entry.action)}
+                  </Text>
+                  <Text style={{ fontSize: 13, color: PlatformColor("secondaryLabel"), marginTop: 2 }}>
+                    {formatRelativeTime(entry.timestamp)}
+                  </Text>
+                </View>
+              ))}
+            </View>
+          </View>
+        )}
+
         {/* Nearby Contacts (alphabetical) */}
         {adjacent && (adjacent.before.length > 0 || adjacent.after.length > 0) && (
           <View style={{ marginBottom: 24 }}>
@@ -476,6 +655,13 @@ export default function ContactDetailScreen(): React.JSX.Element {
           onSend={handleSendMessage}
         />
       )}
+
+      {/* Merge contact sheet */}
+      <MergeContactSheet
+        visible={showMergeSheet}
+        onClose={() => setShowMergeSheet(false)}
+        primaryContactId={id as Id<"contacts">}
+      />
     </View>
   );
 }

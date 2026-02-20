@@ -4,17 +4,19 @@ import type { Id } from "@cued/convex/convex/_generated/dataModel";
 
 /**
  * Hook for fetching contacts from Convex.
- * Supports search filtering and cursor-based pagination.
+ * Supports search filtering, status filtering, and cursor-based pagination.
  */
 export function useContacts(options?: {
   limit?: number;
   cursor?: { displayName: string; _id: Id<"contacts"> };
   searchQuery?: string;
+  status?: "active" | "archived";
 }) {
   const result = useQuery(api.contacts.getContacts, {
     limit: options?.limit ?? 50,
     cursor: options?.cursor,
     searchQuery: options?.searchQuery,
+    status: options?.status,
   });
 
   return {

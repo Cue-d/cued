@@ -10,6 +10,7 @@ import type {
   SwipeHandlerContext,
   SwipeHandlerResult,
 } from "./types";
+import { normalizeContactPair } from "../contacts";
 
 export const resolveContactHandler: ActionSwipeHandler = {
   async onSwipeRight({
@@ -78,6 +79,29 @@ export const resolveContactHandler: ActionSwipeHandler = {
         status: "rejected",
         resolvedAt: now,
       });
+    }
+
+    // Insert keep-separate exclusion so this pair is never re-suggested
+    if (action.contactId && action.secondaryContactId) {
+      const [c1, c2] = normalizeContactPair(
+        action.contactId,
+        action.secondaryContactId,
+      );
+      const existing = await ctx.db
+        .query("contactExclusions")
+        .withIndex("by_pair", (q) =>
+          q.eq("contact1Id", c1).eq("contact2Id", c2),
+        )
+        .first();
+
+      if (!existing) {
+        await ctx.db.insert("contactExclusions", {
+          userId: action.userId,
+          contact1Id: c1,
+          contact2Id: c2,
+          createdAt: now,
+        });
+      }
     }
 
     return {

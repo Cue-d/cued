@@ -16,6 +16,7 @@ import { internal } from "./_generated/api";
 import { resolveActionSummary } from "./lib/actionSummary";
 import { findUserByWorkosId } from "./lib/auth";
 import { platformValidator } from "./schema";
+import { isContactActionable } from "./lib/contactStatus";
 
 // Constants
 const UNANSWERED_THRESHOLD_HOURS = 2; // Hours before considering message unanswered
@@ -238,6 +239,16 @@ export const scanForUnansweredConversations = internalAction({
     for (const { conversation, lastMessage, primaryContact } of conversations) {
       result.processed++;
 
+      // Skip if primary contact is not active (archived)
+      if (
+        conversation.conversationType !== "group" &&
+        primaryContact &&
+        !isContactActionable(primaryContact)
+      ) {
+        result.skipped++;
+        continue;
+      }
+
       // Skip if already queued or recently analyzed
       const alreadyQueued = await ctx.runQuery(
         internal.actionQueue.isAlreadyQueued,
@@ -412,6 +423,9 @@ export const getNewContactsForEOD = internalQuery({
 
       // Skip if contact is enriched (has notes or company)
       if (contact.notes || contact.company) continue;
+
+      // Skip if contact is not active (archived)
+      if (!isContactActionable(contact)) continue;
 
       const convData = contactToConversation.get(contactIds[i] as string);
       if (convData) {

@@ -17,6 +17,12 @@ export {
   formatTimestamp,
   type FormatTimestampOptions,
 } from "./utils/time.js";
+export {
+  MERGE_CONFLICT_FIELD_LABELS,
+  CONTACT_AUDIT_ACTION_LABELS,
+  isRealContactName,
+  getContactAuditActionLabel,
+} from "./utils/contact-merge.js";
 
 // Platform constants
 export {
