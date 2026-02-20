@@ -28,6 +28,7 @@ const SQL_GET_MESSAGES_SINCE = `
     m.ROWID as rowid,
     m.guid,
     cmj.chat_id,
+    m.item_type,
     CASE WHEN m.is_from_me = 0 THEN m.handle_id ELSE NULL END as sender_id,
     h.id as sender_identifier,
     h.service as sender_service,
@@ -44,7 +45,7 @@ const SQL_GET_MESSAGES_SINCE = `
   FROM message m
   INNER JOIN chat_message_join cmj ON cmj.message_id = m.ROWID
   LEFT JOIN handle h ON h.ROWID = m.handle_id
-  WHERE m.ROWID > ?
+  WHERE m.ROWID > ? AND m.item_type IN (0, 1, 2)
   ORDER BY m.ROWID
 `;
 
@@ -79,6 +80,7 @@ const SQL_GET_MESSAGES_DESC = `
     m.ROWID as rowid,
     m.guid,
     cmj.chat_id,
+    m.item_type,
     CASE WHEN m.is_from_me = 0 THEN m.handle_id ELSE NULL END as sender_id,
     h.id as sender_identifier,
     h.service as sender_service,
@@ -98,7 +100,7 @@ const SQL_GET_MESSAGES_DESC = `
   FROM message m
   INNER JOIN chat_message_join cmj ON cmj.message_id = m.ROWID
   LEFT JOIN handle h ON h.ROWID = m.handle_id
-  WHERE m.ROWID <= ? AND m.ROWID > ?
+  WHERE m.ROWID <= ? AND m.ROWID > ? AND m.item_type IN (0, 1, 2)
   ORDER BY m.ROWID DESC
   LIMIT ?
 `;
@@ -141,6 +143,7 @@ describe.skipIf(!Database)("ChatDb SQL queries", () => {
         associated_message_guid TEXT,
         associated_message_type INTEGER DEFAULT 0,
         associated_message_emoji TEXT,
+        item_type INTEGER DEFAULT 0,
         FOREIGN KEY (handle_id) REFERENCES handle(ROWID)
       );
 
@@ -230,6 +233,39 @@ describe.skipIf(!Database)("ChatDb SQL queries", () => {
         sender_id: 1,
         sender_identifier: "+15551234567",
       });
+    });
+
+    it("includes group mutability item types and excludes other system metadata", () => {
+      const appleNow = unixToApple(Math.floor(Date.now() / 1000));
+
+      db.exec(`
+        INSERT INTO message (ROWID, guid, text, date, is_from_me, item_type, handle_id)
+        VALUES (10, 'guid-10', 'Normal message', ${appleNow - 4000000000000}, 0, 0, 1);
+
+        INSERT INTO message (ROWID, guid, text, date, is_from_me, item_type, handle_id)
+        VALUES (11, 'guid-11', 'Alice added Bob', ${appleNow - 3000000000000}, 0, 1, 1);
+
+        INSERT INTO message (ROWID, guid, text, date, is_from_me, item_type, handle_id)
+        VALUES (12, 'guid-12', 'Renamed group', ${appleNow - 2000000000000}, 1, 2, NULL);
+
+        INSERT INTO message (ROWID, guid, text, date, is_from_me, item_type, handle_id)
+        VALUES (13, 'guid-13', 'Ignored metadata row', ${appleNow - 1000000000000}, 0, 3, 1);
+
+        INSERT INTO chat_message_join (chat_id, message_id) VALUES (2, 10);
+        INSERT INTO chat_message_join (chat_id, message_id) VALUES (2, 11);
+        INSERT INTO chat_message_join (chat_id, message_id) VALUES (2, 12);
+        INSERT INTO chat_message_join (chat_id, message_id) VALUES (2, 13);
+      `);
+
+      interface ItemTypeRow {
+        rowid: number;
+        guid: string;
+        item_type: number;
+      }
+      const rows = db.prepare(SQL_GET_MESSAGES_SINCE).all(0) as ItemTypeRow[];
+
+      expect(rows.map((r) => r.rowid)).toEqual([10, 11, 12]);
+      expect(rows.map((r) => r.item_type)).toEqual([0, 1, 2]);
     });
   });
 

@@ -112,6 +112,11 @@ describe("buildContactAvatarPatch", () => {
     avatarUrl?: string;
     avatarSourcePlatform?: "linkedin" | "twitter" | "slack" | "imessage" | "signal";
     avatarUpdatedAt?: number;
+    avatarOptions?: Array<{
+      url: string;
+      sourcePlatform: "linkedin" | "twitter" | "slack" | "imessage" | "signal";
+      updatedAt: number;
+    }>;
   }) {
     return {
       _id: "contact_1",
@@ -136,14 +141,22 @@ describe("buildContactAvatarPatch", () => {
       avatarUrl: "https://cdn.example.com/avatar-a.png",
       avatarSourcePlatform: "twitter",
       avatarUpdatedAt: 1234,
+      avatarOptions: [
+        {
+          url: "https://cdn.example.com/avatar-a.png",
+          sourcePlatform: "twitter",
+          updatedAt: 1234,
+        },
+      ],
     });
   });
 
-  it("does not downgrade avatar when URL changes from lower-priority source", () => {
+  it("keeps primary avatar when lower-priority source arrives, but stores it as an option", () => {
     const patch = buildContactAvatarPatch(
       makeContact({
         avatarUrl: "https://cdn.example.com/old.png",
         avatarSourcePlatform: "linkedin",
+        avatarUpdatedAt: 1000,
       }),
       {
         url: "https://cdn.example.com/new.png",
@@ -152,7 +165,23 @@ describe("buildContactAvatarPatch", () => {
       },
     );
 
-    expect(patch).toBeNull();
+    expect(patch).toEqual({
+      avatarUrl: "https://cdn.example.com/old.png",
+      avatarSourcePlatform: "linkedin",
+      avatarUpdatedAt: 1000,
+      avatarOptions: [
+        {
+          url: "https://cdn.example.com/old.png",
+          sourcePlatform: "linkedin",
+          updatedAt: 1000,
+        },
+        {
+          url: "https://cdn.example.com/new.png",
+          sourcePlatform: "imessage",
+          updatedAt: 5678,
+        },
+      ],
+    });
   });
 
   it("updates avatar when URL changes from same source", () => {
@@ -172,6 +201,13 @@ describe("buildContactAvatarPatch", () => {
       avatarUrl: "https://cdn.example.com/new.png",
       avatarSourcePlatform: "twitter",
       avatarUpdatedAt: 5678,
+      avatarOptions: [
+        {
+          url: "https://cdn.example.com/new.png",
+          sourcePlatform: "twitter",
+          updatedAt: 5678,
+        },
+      ],
     });
   });
 
@@ -190,9 +226,21 @@ describe("buildContactAvatarPatch", () => {
     expect(patch?.avatarSourcePlatform).toBe("linkedin");
     expect(patch?.avatarUrl).toBe("https://cdn.example.com/avatar.png");
     expect(typeof patch?.avatarUpdatedAt).toBe("number");
+    expect(patch?.avatarOptions).toEqual([
+      {
+        url: "https://cdn.example.com/avatar.png",
+        sourcePlatform: "linkedin",
+        updatedAt: expect.any(Number),
+      },
+      {
+        url: "https://cdn.example.com/avatar.png",
+        sourcePlatform: "slack",
+        updatedAt: 0,
+      },
+    ]);
   });
 
-  it("does not patch when incoming URL and source are unchanged", () => {
+  it("backfills avatarOptions when incoming URL and source are unchanged", () => {
     const patch = buildContactAvatarPatch(
       makeContact({
         avatarUrl: "https://cdn.example.com/avatar.png",
@@ -204,7 +252,18 @@ describe("buildContactAvatarPatch", () => {
       },
     );
 
-    expect(patch).toBeNull();
+    expect(patch).toEqual({
+      avatarUrl: "https://cdn.example.com/avatar.png",
+      avatarSourcePlatform: "twitter",
+      avatarUpdatedAt: expect.any(Number),
+      avatarOptions: [
+        {
+          url: "https://cdn.example.com/avatar.png",
+          sourcePlatform: "twitter",
+          updatedAt: expect.any(Number),
+        },
+      ],
+    });
   });
 
   it("rejects non-http avatar URLs", () => {

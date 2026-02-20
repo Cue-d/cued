@@ -23,7 +23,10 @@ import {
 } from "./shared";
 import { batchFetchConversations, batchFetchMessages } from "./batchUtils";
 import { scheduleContactMergeCheck } from "../lib/contactMergeScheduling";
-import { normalizePublicAvatarUrl } from "../lib/avatar";
+import {
+  buildPrimaryAvatarFields,
+  normalizeContactAvatarOption,
+} from "../lib/avatar";
 
 // ============================================================================
 // Validators
@@ -48,6 +51,7 @@ const messageInput = v.object({
   id: v.number(),
   guid: v.optional(v.string()),
   chatId: v.number(),
+  itemType: v.optional(v.number()),
   text: v.union(v.string(), v.null()),
   timestamp: v.number(),
   isFromMe: v.boolean(),
@@ -201,6 +205,22 @@ function isBusinessChat(chat: ChatInput): boolean {
   return chat.participants.some((p) => isBusinessUrn(p.identifier));
 }
 
+function getMessageContent(message: MessageInput, chat: ChatInput | undefined): string {
+  if (message.text && message.text.trim().length > 0) {
+    return message.text;
+  }
+
+  if (message.itemType === 2) {
+    return chat?.displayName
+      ? `Group name changed to ${chat.displayName}`
+      : "Group name changed";
+  }
+  if (message.itemType === 1) {
+    return "Group membership changed";
+  }
+  return "";
+}
+
 // ============================================================================
 // iMessage Sync Implementation
 // ============================================================================
@@ -344,13 +364,17 @@ export async function syncMessagesInternal(
             participantContactIds?: Id<"contacts">[];
           } = {};
 
-          // Update displayName for existing group chats and business DMs if missing.
-          if ((chat.isGroup || businessChat) && chat.displayName && !existingConv.displayName) {
+          // Keep displayName in sync for mutable iMessage group/business chats.
+          if (
+            (chat.isGroup || businessChat) &&
+            chat.displayName &&
+            chat.displayName !== existingConv.displayName
+          ) {
             updates.displayName = chat.displayName;
           }
 
-          // Keep business chat participants aligned to corrected URN-backed contacts.
-          if (businessChat && participantContactIds.length > 0) {
+          // Keep participant sets in sync when iMessage group membership changes.
+          if ((chat.isGroup || businessChat) && participantContactIds.length > 0) {
             const isSameParticipantSet =
               existingConv.participantContactIds.length ===
                 participantContactIds.length &&
@@ -423,6 +447,7 @@ export async function syncMessagesInternal(
     isFromMe: boolean;
     platformMessageId: string;
     reactions: StoredReaction[] | undefined;
+    isSystemEvent: boolean;
   }> = [];
 
   const cutoff = Date.now() - SEVEN_DAYS_MS;
@@ -431,6 +456,9 @@ export async function syncMessagesInternal(
 
   for (const message of batch.messages) {
     const platformMessageId = String(message.id);
+    const isSystemEvent = message.itemType !== undefined && message.itemType !== 0;
+    const chat = chatById.get(message.chatId);
+    const content = getMessageContent(message, chat);
 
     const conversationId = chatIdMap.get(message.chatId);
     if (!conversationId) {
@@ -467,8 +495,7 @@ export async function syncMessagesInternal(
 
     // Resolve sender from pre-fetched map
     let senderContactId: Id<"contacts"> | undefined;
-    if (!message.isFromMe && message.sender) {
-      const chat = chatById.get(message.chatId);
+    if (!isSystemEvent && !message.isFromMe && message.sender) {
       senderContactId = await resolveContactByIdentifier(
         message.sender.identifier,
         chat && isBusinessUrn(message.sender.identifier)
@@ -481,12 +508,13 @@ export async function syncMessagesInternal(
       userId,
       conversationId,
       platform: "imessage",
-      content: message.text ?? "",
+      content,
       sentAt: message.timestamp * 1000,
       senderContactId,
       isFromMe: message.isFromMe,
       platformMessageId,
       reactions: mappedReactions && mappedReactions.length > 0 ? mappedReactions : undefined,
+      isSystemEvent,
     });
 
     // Track latest message per conversation for lastMessage update
@@ -494,7 +522,7 @@ export async function syncMessagesInternal(
     const existing = conversationUpdates.get(conversationId);
     if (!existing || messageTimestampMs > existing.timestamp) {
       conversationUpdates.set(conversationId, {
-        text: message.text ?? "",
+        text: content,
         timestamp: messageTimestampMs,
       });
     }
@@ -511,7 +539,7 @@ export async function syncMessagesInternal(
 
   // Bulk insert messages (with delivery status for sent messages)
   for (const msg of messagesToInsert) {
-    const bridge = msg.isFromMe
+    const bridge = msg.isFromMe && !msg.isSystemEvent
       ? await resolveMessageQueueBridge(
           ctx,
           userId,
@@ -523,17 +551,20 @@ export async function syncMessagesInternal(
       : { status: undefined, sentAt: undefined };
     const finalSentAt = bridge.sentAt ?? msg.sentAt;
 
+    const { isSystemEvent, ...messageDoc } = msg;
     await ctx.db.insert("messages", {
-      ...msg,
+      ...messageDoc,
       sentAt: finalSentAt,
       status: bridge.status,
     });
     result.messagesCount++;
-    analysisCandidates.push({
-      conversationId: msg.conversationId,
-      isFromMe: msg.isFromMe,
-      sentAt: finalSentAt,
-    });
+    if (!isSystemEvent) {
+      analysisCandidates.push({
+        conversationId: msg.conversationId,
+        isFromMe: msg.isFromMe,
+        sentAt: finalSentAt,
+      });
+    }
 
     const existing = conversationUpdates.get(msg.conversationId);
     if (!existing || finalSentAt > existing.timestamp) {
@@ -742,13 +773,18 @@ async function upsertContactWithHandles(
       }
     }
   } else {
-    const avatarUrl = normalizePublicAvatarUrl(contact.avatarUrl);
+    const avatarOption = contact.avatarUrl
+      ? normalizeContactAvatarOption({
+          url: contact.avatarUrl,
+          sourcePlatform: platform,
+        })
+      : undefined;
+    const avatarOptions = avatarOption ? [avatarOption] : [];
     contactId = await ctx.db.insert("contacts", {
       userId,
       ...contactData,
-      avatarUrl,
-      avatarSourcePlatform: avatarUrl ? platform : undefined,
-      avatarUpdatedAt: avatarUrl ? Date.now() : undefined,
+      ...buildPrimaryAvatarFields(avatarOptions),
+      avatarOptions: avatarOptions.length > 0 ? avatarOptions : undefined,
     });
   }
 

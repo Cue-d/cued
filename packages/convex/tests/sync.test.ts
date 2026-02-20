@@ -543,6 +543,182 @@ describe("sync", () => {
       expect(conversations[0].participantContactIds).toHaveLength(3);
     });
 
+    it("updates existing group displayName when the chat is renamed", async () => {
+      const t = trackTest(convexTest(schema, modules));
+      const { asUser, userId } = await setupAuthenticatedUser(t);
+
+      const baseTimestamp = Math.floor(Date.now() / 1000);
+
+      await asUser.mutation(api.sync.syncMessages, {
+        batch: {
+          cursor: 100,
+          chats: [
+            {
+              id: 1,
+              identifier: "group_chat_rename",
+              displayName: "Weekend Plans",
+              isGroup: true,
+              participants: [
+                { id: 1, identifier: "+15551111111", service: "iMessage" },
+                { id: 2, identifier: "+15552222222", service: "iMessage" },
+              ],
+            },
+          ],
+          messages: [
+            {
+              id: 1001,
+              chatId: 1,
+              text: "Initial thread",
+              timestamp: baseTimestamp - 60,
+              isFromMe: false,
+              isRead: true,
+              readAt: null,
+              hasAttachments: false,
+              sender: { id: 1, identifier: "+15551111111", service: "iMessage" },
+            },
+          ],
+          handles: [
+            { id: 1, identifier: "+15551111111", service: "iMessage" },
+            { id: 2, identifier: "+15552222222", service: "iMessage" },
+          ],
+        },
+      });
+
+      await asUser.mutation(api.sync.syncMessages, {
+        batch: {
+          cursor: 200,
+          chats: [
+            {
+              id: 1,
+              identifier: "group_chat_rename",
+              displayName: "Ski Trip Crew",
+              isGroup: true,
+              participants: [
+                { id: 1, identifier: "+15551111111", service: "iMessage" },
+                { id: 2, identifier: "+15552222222", service: "iMessage" },
+              ],
+            },
+          ],
+          messages: [
+            {
+              id: 1002,
+              chatId: 1,
+              text: null,
+              itemType: 2,
+              timestamp: baseTimestamp,
+              isFromMe: true,
+              isRead: true,
+              readAt: null,
+              hasAttachments: false,
+              sender: null,
+            },
+          ],
+          handles: [
+            { id: 1, identifier: "+15551111111", service: "iMessage" },
+            { id: 2, identifier: "+15552222222", service: "iMessage" },
+          ],
+        },
+      });
+
+      const conversations = await t.run(async (ctx) => {
+        return ctx.db
+          .query("conversations")
+          .withIndex("by_user", (q) => q.eq("userId", userId))
+          .collect();
+      });
+      expect(conversations).toHaveLength(1);
+      expect(conversations[0].displayName).toBe("Ski Trip Crew");
+    });
+
+    it("updates existing group participants when membership changes", async () => {
+      const t = trackTest(convexTest(schema, modules));
+      const { asUser, userId } = await setupAuthenticatedUser(t);
+
+      const baseTimestamp = Math.floor(Date.now() / 1000);
+
+      await asUser.mutation(api.sync.syncMessages, {
+        batch: {
+          cursor: 100,
+          chats: [
+            {
+              id: 1,
+              identifier: "group_chat_members",
+              displayName: "Trip Chat",
+              isGroup: true,
+              participants: [
+                { id: 1, identifier: "+15551111111", service: "iMessage" },
+                { id: 2, identifier: "+15552222222", service: "iMessage" },
+              ],
+            },
+          ],
+          messages: [
+            {
+              id: 2001,
+              chatId: 1,
+              text: "Kickoff",
+              timestamp: baseTimestamp - 60,
+              isFromMe: false,
+              isRead: true,
+              readAt: null,
+              hasAttachments: false,
+              sender: { id: 1, identifier: "+15551111111", service: "iMessage" },
+            },
+          ],
+          handles: [
+            { id: 1, identifier: "+15551111111", service: "iMessage" },
+            { id: 2, identifier: "+15552222222", service: "iMessage" },
+          ],
+        },
+      });
+
+      await asUser.mutation(api.sync.syncMessages, {
+        batch: {
+          cursor: 200,
+          chats: [
+            {
+              id: 1,
+              identifier: "group_chat_members",
+              displayName: "Trip Chat",
+              isGroup: true,
+              participants: [
+                { id: 1, identifier: "+15551111111", service: "iMessage" },
+                { id: 2, identifier: "+15552222222", service: "iMessage" },
+                { id: 3, identifier: "+15553333333", service: "iMessage" },
+              ],
+            },
+          ],
+          messages: [
+            {
+              id: 2002,
+              chatId: 1,
+              text: null,
+              itemType: 1,
+              timestamp: baseTimestamp,
+              isFromMe: false,
+              isRead: true,
+              readAt: null,
+              hasAttachments: false,
+              sender: { id: 1, identifier: "+15551111111", service: "iMessage" },
+            },
+          ],
+          handles: [
+            { id: 1, identifier: "+15551111111", service: "iMessage" },
+            { id: 2, identifier: "+15552222222", service: "iMessage" },
+            { id: 3, identifier: "+15553333333", service: "iMessage" },
+          ],
+        },
+      });
+
+      const conversations = await t.run(async (ctx) => {
+        return ctx.db
+          .query("conversations")
+          .withIndex("by_user", (q) => q.eq("userId", userId))
+          .collect();
+      });
+      expect(conversations).toHaveLength(1);
+      expect(conversations[0].participantContactIds).toHaveLength(3);
+    });
+
     it("handles messages with email handles", async () => {
       const t = trackTest(convexTest(schema, modules));
       const { asUser, userId } = await setupAuthenticatedUser(t);

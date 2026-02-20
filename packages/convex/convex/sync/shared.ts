@@ -17,7 +17,14 @@ import {
 import { normalizeEmail } from "@cued/ai";
 import { scheduleContactMergeCheck } from "../lib/contactMergeScheduling";
 import { normalizeHandleValue } from "../lib/normalizeHandle";
-import { normalizePublicAvatarUrl } from "../lib/avatar";
+import {
+  type ContactAvatarInput,
+  areContactAvatarOptionsEqual,
+  buildPrimaryAvatarFields,
+  getContactAvatarOptions,
+  normalizeContactAvatarOption,
+  upsertContactAvatarOption,
+} from "../lib/avatar";
 import { findUserByWorkosId } from "../lib/auth";
 
 // ============================================================================
@@ -238,56 +245,31 @@ export interface GetOrCreateContactResult {
   created: boolean;
 }
 
-export type ContactAvatarSourcePlatform =
-  | "linkedin"
-  | "twitter"
-  | "slack"
-  | "imessage"
-  | "signal";
-
-export interface ContactAvatarInput {
-  url: string;
-  sourcePlatform: ContactAvatarSourcePlatform;
-  updatedAt?: number;
-}
-
-const AVATAR_SOURCE_PRIORITY: Record<ContactAvatarSourcePlatform, number> = {
-  linkedin: 50,
-  twitter: 40,
-  slack: 30,
-  signal: 20,
-  imessage: 10,
-};
-
 export function buildContactAvatarPatch(
   existing: Doc<"contacts">,
   incoming?: ContactAvatarInput,
 ): Partial<Doc<"contacts">> | null {
-  const nextUrl = normalizePublicAvatarUrl(incoming?.url);
-  if (!nextUrl || !incoming) {
+  const normalizedIncoming = normalizeContactAvatarOption(incoming);
+  if (!normalizedIncoming) {
     return null;
   }
 
-  const currentUrl = normalizePublicAvatarUrl(existing.avatarUrl);
-  const currentSource = existing.avatarSourcePlatform;
-  const incomingPriority = AVATAR_SOURCE_PRIORITY[incoming.sourcePlatform];
-  const currentPriority = currentSource
-    ? AVATAR_SOURCE_PRIORITY[currentSource]
-    : 0;
+  const existingOptions = getContactAvatarOptions(existing);
+  const nextOptions = upsertContactAvatarOption(existingOptions, normalizedIncoming);
+  const primaryFields = buildPrimaryAvatarFields(nextOptions);
 
-  const shouldUpdate =
-    !currentUrl ||
-    (currentSource === incoming.sourcePlatform && currentUrl !== nextUrl) ||
-    incomingPriority > currentPriority;
+  const primaryUnchanged =
+    existing.avatarUrl === primaryFields.avatarUrl &&
+    existing.avatarSourcePlatform === primaryFields.avatarSourcePlatform &&
+    existing.avatarUpdatedAt === primaryFields.avatarUpdatedAt;
 
-  if (!shouldUpdate) {
+  if (primaryUnchanged && areContactAvatarOptionsEqual(existingOptions, nextOptions)) {
     return null;
   }
 
   return {
-    avatarUrl: nextUrl,
-    avatarSourcePlatform: incoming.sourcePlatform,
-    avatarUpdatedAt: incoming.updatedAt ?? Date.now(),
+    ...primaryFields,
+    avatarOptions: nextOptions,
   };
 }
 
@@ -394,19 +376,15 @@ export async function getOrCreateContact(
 
   // No existing contact found - create new one
   const finalDisplayName = displayName || normalizedHandles[0].value;
-  const avatarUrl = normalizePublicAvatarUrl(metadata?.avatar?.url);
+  const avatarOption = normalizeContactAvatarOption(metadata?.avatar);
+  const avatarOptions = avatarOption ? [avatarOption] : [];
   const contactId = await ctx.db.insert("contacts", {
     userId,
     displayName: finalDisplayName,
     company: metadata?.company,
     notes: metadata?.notes,
-    avatarUrl,
-    avatarSourcePlatform: avatarUrl
-      ? metadata?.avatar?.sourcePlatform
-      : undefined,
-    avatarUpdatedAt: avatarUrl
-      ? (metadata?.avatar?.updatedAt ?? Date.now())
-      : undefined,
+    ...buildPrimaryAvatarFields(avatarOptions),
+    avatarOptions: avatarOptions.length > 0 ? avatarOptions : undefined,
   });
 
   // Create all handles

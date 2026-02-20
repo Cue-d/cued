@@ -65,6 +65,8 @@ export interface Message {
   guid: string;
   /** Chat ROWID this message belongs to */
   chatId: number;
+  /** message.item_type from chat.db (0=normal, 1=member change, 2=name change) */
+  itemType?: number;
   /** Message text content (extracted from text or attributedBody) */
   text: string | null;
   /** Unix timestamp in seconds */

@@ -1,13 +1,23 @@
 import { describe, it, expect, beforeEach, vi, afterEach } from "vitest";
 import { ContactsManager, ContactsError, ContactsAccessDeniedError } from "../manager";
 
-const fsMocks = {
-  existsSync: vi.fn(),
-  readFileSync: vi.fn(),
-  writeFileSync: vi.fn(),
-  mkdirSync: vi.fn(),
-  unlinkSync: vi.fn(),
-};
+const {
+  fsMocks,
+  mockGetAllContacts,
+  mockGetAuthStatus,
+  mockRequestAccess,
+} = vi.hoisted(() => ({
+  fsMocks: {
+    existsSync: vi.fn(),
+    readFileSync: vi.fn(),
+    writeFileSync: vi.fn(),
+    mkdirSync: vi.fn(),
+    unlinkSync: vi.fn(),
+  },
+  mockGetAllContacts: vi.fn(),
+  mockGetAuthStatus: vi.fn(),
+  mockRequestAccess: vi.fn(),
+}));
 
 // Mock fs module (manager.ts imports "fs", avatar-cache.ts imports "node:fs")
 vi.mock("fs", async () => {
@@ -32,11 +42,6 @@ vi.mock("os", () => ({
 vi.mock("node:os", () => ({
   homedir: () => "/Users/test",
 }));
-
-// Mock native module loader
-const mockGetAllContacts = vi.fn();
-const mockGetAuthStatus = vi.fn();
-const mockRequestAccess = vi.fn();
 
 vi.mock("../../../native-module-loader", () => ({
   loadNativeModule: vi.fn(() => ({

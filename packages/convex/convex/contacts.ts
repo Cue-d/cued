@@ -11,7 +11,13 @@ import {
 } from "./schema";
 import { scheduleContactMergeCheck } from "./lib/contactMergeScheduling";
 import { normalizeHandleValue } from "./lib/normalizeHandle";
-import { normalizePublicAvatarUrl } from "./lib/avatar";
+import {
+  areContactAvatarOptionsEqual,
+  buildPrimaryAvatarFields,
+  getContactAvatarOptions,
+  normalizePublicAvatarUrl,
+  upsertContactAvatarOption,
+} from "./lib/avatar";
 
 // ============================================================================
 // Contact Queries
@@ -555,8 +561,7 @@ export const mergeContacts = mutation({
     }
 
     // 5. Merge contact metadata (prefer primary, fill gaps from secondary)
-    const updates: { company?: string; notes?: string; importance?: number } =
-      {};
+    const updates: Partial<Doc<"contacts">> = {};
     if (!primary.company && secondary.company) {
       updates.company = secondary.company;
     }
@@ -569,6 +574,21 @@ export const mergeContacts = mutation({
     ) {
       updates.importance = secondary.importance;
     }
+
+    // Preserve all avatar options from both contacts and keep highest-priority
+    // source as the active avatar fields.
+    const primaryAvatarOptions = getContactAvatarOptions(primary);
+    const secondaryAvatarOptions = getContactAvatarOptions(secondary);
+    let mergedAvatarOptions = primaryAvatarOptions;
+    for (const option of secondaryAvatarOptions) {
+      mergedAvatarOptions = upsertContactAvatarOption(mergedAvatarOptions, option);
+    }
+    if (!areContactAvatarOptionsEqual(primaryAvatarOptions, mergedAvatarOptions)) {
+      Object.assign(updates, buildPrimaryAvatarFields(mergedAvatarOptions), {
+        avatarOptions: mergedAvatarOptions,
+      });
+    }
+
     if (Object.keys(updates).length > 0) {
       await ctx.db.patch(args.primaryContactId, updates);
     }

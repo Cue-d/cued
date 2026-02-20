@@ -19,6 +19,12 @@ export const avatarSourcePlatformValidator = v.union(
   v.literal("signal")
 );
 
+export const contactAvatarOptionValidator = v.object({
+  url: v.string(),
+  sourcePlatform: avatarSourcePlatformValidator,
+  updatedAt: v.number(),
+});
+
 export const handleTypeValidator = v.union(
   v.literal("phone"),
   v.literal("email"),
@@ -128,6 +134,7 @@ const schema = defineSchema({
     avatarUrl: v.optional(v.string()),
     avatarSourcePlatform: v.optional(avatarSourcePlatformValidator),
     avatarUpdatedAt: v.optional(v.number()),
+    avatarOptions: v.optional(v.array(contactAvatarOptionValidator)),
     notes: v.optional(v.string()),
     importance: v.optional(v.number()),
     tags: v.optional(v.array(v.string())),
