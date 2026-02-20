@@ -2,53 +2,19 @@
  * Contact detail screen - displays full contact profile.
  */
 
-import { useState, useCallback, useMemo, memo, useEffect } from "react";
+import { useState, useCallback, useMemo, memo } from "react";
 import { View, Text, ScrollView, Pressable, PlatformColor } from "react-native";
 import * as Haptics from "expo-haptics";
 import { useLocalSearchParams, useRouter, Stack } from "expo-router";
 import { SymbolView } from "expo-symbols";
-import { Image } from "expo-image";
 import { useQuery, useMutation } from "convex/react";
 import { api } from "@cued/convex";
 import { getInitials, formatPhoneNumber, formatRelativeTime, PLATFORM_CONFIG, type ActionPlatform } from "@cued/shared";
 import { PlatformIcon } from "@/components/platform-icons";
+import { ContactAvatar } from "@/components/contact-avatar";
 import { SendMessageSheet, type SendMessageContact } from "@/components/send-message-sheet";
 import type { Id } from "@cued/convex/convex/_generated/dataModel";
 import type { SFSymbol } from "sf-symbols-typescript";
-
-/** Avatar component */
-function Avatar({
-  initials,
-  avatarUrl,
-}: {
-  initials: string;
-  avatarUrl?: string | null;
-}): React.JSX.Element {
-  const [imageFailed, setImageFailed] = useState(false);
-
-  useEffect(() => {
-    setImageFailed(false);
-  }, [avatarUrl]);
-
-  return (
-    <View className="w-20 h-20 rounded-full bg-muted items-center justify-center">
-      {avatarUrl && !imageFailed ? (
-        <Image
-          source={{ uri: avatarUrl }}
-          style={{ width: 80, height: 80, borderRadius: 40 }}
-          contentFit="cover"
-          cachePolicy="memory-disk"
-          transition={120}
-          onError={() => setImageFailed(true)}
-        />
-      ) : (
-        <Text className="text-2xl font-semibold text-muted-foreground">
-          {initials}
-        </Text>
-      )}
-    </View>
-  );
-}
 
 /** Handle type to SF Symbol mapping */
 function getHandleIcon(type: string): SFSymbol {
@@ -327,7 +293,12 @@ export default function ContactDetailScreen(): React.JSX.Element {
       >
         {/* Profile Header */}
         <View className="items-center pt-6 pb-4">
-          <Avatar initials={initials} avatarUrl={contact.avatarUrl} />
+          <ContactAvatar
+            initials={initials}
+            avatarUrl={contact.avatarUrl}
+            size={80}
+            fallbackTextClassName="text-2xl font-semibold text-muted-foreground"
+          />
           <Text style={{ fontSize: 24, fontWeight: "700", color: PlatformColor("label"), marginTop: 16 }}>
             {contact.displayName}
           </Text>
@@ -514,12 +485,6 @@ const NearbyContactRow = memo(function NearbyContactRow({
   isFirst: boolean;
   onPress: () => void;
 }): React.JSX.Element {
-  const [imageFailed, setImageFailed] = useState(false);
-
-  useEffect(() => {
-    setImageFailed(false);
-  }, [contact.avatarUrl]);
-
   return (
     <Pressable
       onPress={onPress}
@@ -528,25 +493,16 @@ const NearbyContactRow = memo(function NearbyContactRow({
       accessibilityRole="button"
       accessibilityLabel={`Go to ${contact.displayName}`}
     >
-      <View
-        className="w-8 h-8 rounded-full items-center justify-center mr-3"
-        style={{ backgroundColor: PlatformColor("tertiarySystemFill") }}
-      >
-        {contact.avatarUrl && !imageFailed ? (
-          <Image
-            source={{ uri: contact.avatarUrl }}
-            style={{ width: 32, height: 32, borderRadius: 16 }}
-            contentFit="cover"
-            cachePolicy="memory-disk"
-            transition={100}
-            onError={() => setImageFailed(true)}
-          />
-        ) : (
-          <Text style={{ fontSize: 13, fontWeight: "500", color: PlatformColor("secondaryLabel") }}>
-            {getInitials(contact.displayName)}
-          </Text>
-        )}
-      </View>
+      <ContactAvatar
+        initials={getInitials(contact.displayName)}
+        avatarUrl={contact.avatarUrl}
+        size={32}
+        className="items-center justify-center mr-3"
+        containerStyle={{ backgroundColor: PlatformColor("tertiarySystemFill") }}
+        fallbackTextClassName="text-[13px] font-medium"
+        fallbackTextStyle={{ color: PlatformColor("secondaryLabel") }}
+        transition={100}
+      />
       <View className="flex-1" style={{ minWidth: 0 }}>
         <Text style={{ fontSize: 16, color: PlatformColor("label") }} numberOfLines={1}>
           {contact.displayName}

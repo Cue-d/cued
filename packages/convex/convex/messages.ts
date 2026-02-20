@@ -7,6 +7,7 @@ import {
   mapQueueToInboxMessage,
 } from "./lib/queueMerge";
 import { platformValidator } from "./schema";
+import { normalizePublicAvatarUrl } from "./lib/avatar";
 
 interface InboxArgs {
   limit?: number;
@@ -333,7 +334,7 @@ async function fetchInbox(
         } = {
           _id: contact._id,
           displayName: contact.displayName,
-          avatarUrl: contact.avatarUrl,
+          avatarUrl: normalizePublicAvatarUrl(contact.avatarUrl),
         };
         if (isDm) {
           const handle = handleMap.get(`${conversation.platform}:${contactId}`);

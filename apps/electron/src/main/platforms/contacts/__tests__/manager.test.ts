@@ -1,21 +1,35 @@
 import { describe, it, expect, beforeEach, vi, afterEach } from "vitest";
 import { ContactsManager, ContactsError, ContactsAccessDeniedError } from "../manager";
 
-// Mock fs module
+const fsMocks = {
+  existsSync: vi.fn(),
+  readFileSync: vi.fn(),
+  writeFileSync: vi.fn(),
+  mkdirSync: vi.fn(),
+  unlinkSync: vi.fn(),
+};
+
+// Mock fs module (manager.ts imports "fs", avatar-cache.ts imports "node:fs")
 vi.mock("fs", async () => {
   const actual = await vi.importActual<typeof import("fs")>("fs");
   return {
     ...actual,
-    existsSync: vi.fn(),
-    readFileSync: vi.fn(),
-    writeFileSync: vi.fn(),
-    mkdirSync: vi.fn(),
-    unlinkSync: vi.fn(),
+    ...fsMocks,
+  };
+});
+vi.mock("node:fs", async () => {
+  const actual = await vi.importActual<typeof import("node:fs")>("node:fs");
+  return {
+    ...actual,
+    ...fsMocks,
   };
 });
 
-// Mock os for homedir
+// Mock os for homedir ("os" and "node:os")
 vi.mock("os", () => ({
+  homedir: () => "/Users/test",
+}));
+vi.mock("node:os", () => ({
   homedir: () => "/Users/test",
 }));
 

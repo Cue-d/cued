@@ -139,7 +139,7 @@ describe("buildContactAvatarPatch", () => {
     });
   });
 
-  it("updates avatar when URL changes even if source is lower priority", () => {
+  it("does not downgrade avatar when URL changes from lower-priority source", () => {
     const patch = buildContactAvatarPatch(
       makeContact({
         avatarUrl: "https://cdn.example.com/old.png",
@@ -152,9 +152,25 @@ describe("buildContactAvatarPatch", () => {
       },
     );
 
+    expect(patch).toBeNull();
+  });
+
+  it("updates avatar when URL changes from same source", () => {
+    const patch = buildContactAvatarPatch(
+      makeContact({
+        avatarUrl: "https://cdn.example.com/old.png",
+        avatarSourcePlatform: "twitter",
+      }),
+      {
+        url: "https://cdn.example.com/new.png",
+        sourcePlatform: "twitter",
+        updatedAt: 5678,
+      },
+    );
+
     expect(patch).toEqual({
       avatarUrl: "https://cdn.example.com/new.png",
-      avatarSourcePlatform: "imessage",
+      avatarSourcePlatform: "twitter",
       avatarUpdatedAt: 5678,
     });
   });
@@ -185,6 +201,18 @@ describe("buildContactAvatarPatch", () => {
       {
         url: "https://cdn.example.com/avatar.png",
         sourcePlatform: "twitter",
+      },
+    );
+
+    expect(patch).toBeNull();
+  });
+
+  it("rejects non-http avatar URLs", () => {
+    const patch = buildContactAvatarPatch(
+      makeContact(),
+      {
+        url: "cued-contact-avatar://avatar/file.jpg",
+        sourcePlatform: "imessage",
       },
     );
 

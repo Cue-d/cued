@@ -23,6 +23,7 @@ import {
 } from "./shared";
 import { batchFetchConversations, batchFetchMessages } from "./batchUtils";
 import { scheduleContactMergeCheck } from "../lib/contactMergeScheduling";
+import { normalizePublicAvatarUrl } from "../lib/avatar";
 
 // ============================================================================
 // Validators
@@ -741,12 +742,13 @@ async function upsertContactWithHandles(
       }
     }
   } else {
+    const avatarUrl = normalizePublicAvatarUrl(contact.avatarUrl);
     contactId = await ctx.db.insert("contacts", {
       userId,
       ...contactData,
-      avatarUrl: contact.avatarUrl ?? undefined,
-      avatarSourcePlatform: contact.avatarUrl ? platform : undefined,
-      avatarUpdatedAt: contact.avatarUrl ? Date.now() : undefined,
+      avatarUrl,
+      avatarSourcePlatform: avatarUrl ? platform : undefined,
+      avatarUpdatedAt: avatarUrl ? Date.now() : undefined,
     });
   }
 

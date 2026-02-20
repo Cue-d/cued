@@ -42,6 +42,19 @@ function log(
   }
 }
 
+function toSyncableAvatarUrl(url: string | undefined): string | undefined {
+  if (!url) return undefined;
+  try {
+    const parsed = new URL(url);
+    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+      return undefined;
+    }
+    return parsed.toString();
+  } catch {
+    return undefined;
+  }
+}
+
 export interface ContactsSyncResult {
   contactsCount: number;
   updatedCount: number;
@@ -107,7 +120,7 @@ export async function syncContactsToConvex(
       company: c.company,
       phoneNumbers: c.phoneNumbers,
       emails: c.emails,
-      avatarUrl: c.avatarUrl,
+      avatarUrl: toSyncableAvatarUrl(c.avatarUrl),
     }));
 
     const totalBatches = Math.ceil(convexContacts.length / BATCH_SIZE);

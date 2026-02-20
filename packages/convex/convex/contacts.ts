@@ -11,6 +11,7 @@ import {
 } from "./schema";
 import { scheduleContactMergeCheck } from "./lib/contactMergeScheduling";
 import { normalizeHandleValue } from "./lib/normalizeHandle";
+import { normalizePublicAvatarUrl } from "./lib/avatar";
 
 // ============================================================================
 // Contact Queries
@@ -97,6 +98,7 @@ export const getContacts = query({
     // Build contacts with handles
     const contactsWithHandles = results.map((contact, i) => ({
       ...contact,
+      avatarUrl: normalizePublicAvatarUrl(contact.avatarUrl),
       handles: allHandles[i].map((h) => ({
         type: h.handleType,
         value: h.handle,
@@ -145,6 +147,7 @@ export const listContactsPaginated = query({
           .collect();
         return {
           ...contact,
+          avatarUrl: normalizePublicAvatarUrl(contact.avatarUrl),
           handles: handles.map((h) => ({
             type: h.handleType,
             value: h.handle,
@@ -179,6 +182,7 @@ export const getContact = query({
 
     return {
       ...contact,
+      avatarUrl: normalizePublicAvatarUrl(contact.avatarUrl),
       handles: handles.map((h) => ({
         type: h.handleType,
         value: h.handle,
@@ -252,13 +256,13 @@ export const getAdjacentContacts = query({
         _id: c._id,
         displayName: c.displayName,
         company: c.company,
-        avatarUrl: c.avatarUrl,
+        avatarUrl: normalizePublicAvatarUrl(c.avatarUrl),
       })),
       after: after.map((c) => ({
         _id: c._id,
         displayName: c.displayName,
         company: c.company,
-        avatarUrl: c.avatarUrl,
+        avatarUrl: normalizePublicAvatarUrl(c.avatarUrl),
       })),
     };
   },
@@ -346,6 +350,7 @@ export const getContactProfile = query({
     return {
       contact: {
         ...contact,
+        avatarUrl: normalizePublicAvatarUrl(contact.avatarUrl),
         handles: handles.map((h) => ({
           type: h.handleType,
           value: h.handle,

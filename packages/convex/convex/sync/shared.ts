@@ -17,6 +17,7 @@ import {
 import { normalizeEmail } from "@cued/ai";
 import { scheduleContactMergeCheck } from "../lib/contactMergeScheduling";
 import { normalizeHandleValue } from "../lib/normalizeHandle";
+import { normalizePublicAvatarUrl } from "../lib/avatar";
 
 // ============================================================================
 // Shared Constants
@@ -260,22 +261,16 @@ const AVATAR_SOURCE_PRIORITY: Record<ContactAvatarSourcePlatform, number> = {
   imessage: 10,
 };
 
-function normalizeAvatarUrl(url: string | undefined): string | undefined {
-  if (!url) return undefined;
-  const trimmed = url.trim();
-  return trimmed.length > 0 ? trimmed : undefined;
-}
-
 export function buildContactAvatarPatch(
   existing: Doc<"contacts">,
   incoming?: ContactAvatarInput,
 ): Partial<Doc<"contacts">> | null {
-  const nextUrl = normalizeAvatarUrl(incoming?.url);
+  const nextUrl = normalizePublicAvatarUrl(incoming?.url);
   if (!nextUrl || !incoming) {
     return null;
   }
 
-  const currentUrl = normalizeAvatarUrl(existing.avatarUrl);
+  const currentUrl = normalizePublicAvatarUrl(existing.avatarUrl);
   const currentSource = existing.avatarSourcePlatform;
   const incomingPriority = AVATAR_SOURCE_PRIORITY[incoming.sourcePlatform];
   const currentPriority = currentSource
@@ -284,7 +279,7 @@ export function buildContactAvatarPatch(
 
   const shouldUpdate =
     !currentUrl ||
-    currentUrl !== nextUrl ||
+    (currentSource === incoming.sourcePlatform && currentUrl !== nextUrl) ||
     incomingPriority > currentPriority;
 
   if (!shouldUpdate) {
@@ -401,7 +396,7 @@ export async function getOrCreateContact(
 
   // No existing contact found - create new one
   const finalDisplayName = displayName || normalizedHandles[0].value;
-  const avatarUrl = normalizeAvatarUrl(metadata?.avatar?.url);
+  const avatarUrl = normalizePublicAvatarUrl(metadata?.avatar?.url);
   const contactId = await ctx.db.insert("contacts", {
     userId,
     displayName: finalDisplayName,
