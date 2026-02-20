@@ -89,9 +89,12 @@ if (!window.electron && import.meta.env.DEV) {
     },
 
     permissions: {
-      check: async () => ({ fullDiskAccess: false, contacts: false }),
+      check: async () => ({ fullDiskAccess: false, contacts: false, messagesAutomation: false }),
+      requestContactsAccess: async () => "Denied",
+      requestMessagesAutomationAccess: async () => "Denied",
       openFullDiskAccessSettings: async () => {},
       openContactsSettings: async () => {},
+      openAutomationSettings: async () => {},
     },
 
     sync: {

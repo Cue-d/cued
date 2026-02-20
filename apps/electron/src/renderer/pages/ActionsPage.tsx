@@ -27,32 +27,6 @@ const ACTION_CONTEXT_MESSAGE_LIMIT = 15
 const EMPTY_ACTIONS: EnrichedAction[] = []
 const EMPTY_COUNTS: Record<string, number> = {}
 
-function normalizeReactions(
-  reactions: Array<{ emoji?: string; name?: string; reaction?: string } | string> | null | undefined
-): string[] | null {
-  if (!reactions || reactions.length === 0) return null
-
-  const normalizeToken = (token: string): string => {
-    const trimmed = token.trim()
-    if (!trimmed) return ""
-    if (trimmed.startsWith(":") && trimmed.endsWith(":")) return trimmed
-    if (/^[a-z0-9_+-]+$/i.test(trimmed)) return `:${trimmed}:`
-    return trimmed
-  }
-
-  const emojis = reactions
-    .map((reaction) => {
-      if (typeof reaction === "string") return normalizeToken(reaction)
-      const raw = reaction?.emoji ?? reaction?.name ?? reaction?.reaction
-      return typeof raw === "string" ? normalizeToken(raw) : ""
-    })
-    .filter(
-      (emoji): emoji is string =>
-        typeof emoji === "string" && emoji.length > 0
-    )
-
-  return emojis.length > 0 ? emojis : null
-}
 
 const ACTION_TYPE_CONFIG: Record<string, { icon: React.ReactNode; label: string }> = {
   respond: { icon: <MessageCircle size={16} strokeWidth={1.5} />, label: "Reply needed" },
@@ -489,25 +463,19 @@ export function ActionsPage({
     if (!actionContext) return null
     if (!messagesResult?.messages) return actionContext
 
-    const fallbackReactionsByMessageId = new Map<string, string[]>()
+    // Build fallback map from action context reactions for messages that
+    // appear in both sources (action context may have richer reactor data)
+    const fallbackReactionsByMessageId = new Map<string, ActionContext["messages"][0]["reactions"]>()
     for (const message of actionContext.messages) {
-      const normalized = normalizeReactions(
-        message.reactions as Array<{ emoji?: string } | string> | null | undefined
-      )
-      if (normalized && normalized.length > 0) {
-        fallbackReactionsByMessageId.set(message._id, normalized)
+      if (message.reactions && message.reactions.length > 0) {
+        fallbackReactionsByMessageId.set(message._id, message.reactions)
       }
     }
 
     // Map getMessages response to ActionContext.messages format
     // getMessages returns newest-first, reverse to chronological
     const paginatedMessages = [...messagesResult.messages].reverse().map((msg) => ({
-      reactions:
-        normalizeReactions(
-          msg.reactions as Array<{ emoji?: string; name?: string; reaction?: string } | string> | null | undefined
-        ) ??
-        fallbackReactionsByMessageId.get(msg._id) ??
-        null,
+      reactions: msg.reactions ?? fallbackReactionsByMessageId.get(msg._id) ?? null,
       _id: msg._id,
       content: msg.content,
       sentAt: msg.sentAt,

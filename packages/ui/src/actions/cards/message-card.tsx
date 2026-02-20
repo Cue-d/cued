@@ -8,39 +8,6 @@ import { MessageResponseCard } from "../../components/action-queue/message-respo
 import type { ActionCardProps } from "../types";
 import type { DisplayMessage, ActionPlatform } from "@cued/shared";
 
-function normalizeReactions(
-  reactions:
-    | Array<{ emoji?: string; name?: string; reaction?: string }>
-    | string[]
-    | null
-    | undefined
-): string[] | null {
-  if (!reactions || reactions.length === 0) return null;
-
-  const normalizeToken = (token: string): string => {
-    const trimmed = token.trim();
-    if (!trimmed) return "";
-    if (trimmed.startsWith(":") && trimmed.endsWith(":")) return trimmed;
-    if (/^[a-z0-9_+-]+$/i.test(trimmed)) return `:${trimmed}:`;
-    return trimmed;
-  };
-
-  if (typeof reactions[0] === "string") {
-    return (reactions as string[])
-      .map((emoji) => normalizeToken(emoji))
-      .filter(
-      (emoji): emoji is string => typeof emoji === "string" && emoji.length > 0
-    );
-  }
-
-  return (reactions as Array<{ emoji?: string; name?: string; reaction?: string }>)
-    .map((reaction) => {
-      const raw = reaction?.emoji ?? reaction?.name ?? reaction?.reaction;
-      return typeof raw === "string" ? normalizeToken(raw) : "";
-    })
-    .filter((emoji): emoji is string => typeof emoji === "string" && emoji.length > 0);
-}
-
 /**
  * Message card for respond/follow_up/send_message actions.
  */
@@ -83,7 +50,7 @@ export function MessageCard({
       senderName: msg.senderName,
       senderContactId: msg.senderContactId,
       status: msg.status,
-      reactions: normalizeReactions(msg.reactions),
+      reactions: msg.reactions,
     }));
 
     // Get message timestamp from latest non-self message

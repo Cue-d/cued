@@ -7,6 +7,11 @@ import {
   mapQueueToInboxMessage,
 } from "./lib/queueMerge";
 import { platformValidator } from "./schema";
+import {
+  groupReactions,
+  collectReactionContactIds,
+  type ReactionGroupResult,
+} from "./lib/reactions";
 
 interface InboxArgs {
   limit?: number;
@@ -49,33 +54,6 @@ function normalizeMessageText(text: string): string {
   return text.trim().replace(/\s+/g, " ");
 }
 
-function normalizeReactionEmojis(
-  reactions:
-    | Doc<"messages">["reactions"]
-    | string[]
-    | null
-    | undefined
-): string[] | null {
-  if (!reactions || reactions.length === 0) return null;
-
-  const normalizeToken = (token: string): string => {
-    const trimmed = token.trim();
-    if (!trimmed) return "";
-    if (trimmed.startsWith(":") && trimmed.endsWith(":")) return trimmed;
-    if (/^[a-z0-9_+-]+$/i.test(trimmed)) return `:${trimmed}:`;
-    return trimmed;
-  };
-
-  const emojis = (reactions as Array<{ emoji?: string; name?: string; reaction?: string } | string>)
-    .map((reaction) => {
-      if (typeof reaction === "string") return normalizeToken(reaction);
-      const raw = reaction?.emoji ?? reaction?.name ?? reaction?.reaction;
-      return typeof raw === "string" ? normalizeToken(raw) : "";
-    })
-    .filter((emoji): emoji is string => typeof emoji === "string" && emoji.length > 0);
-
-  return emojis.length > 0 ? emojis : null;
-}
 
 function parseInboxCursor(cursor?: string): ParsedInboxCursor | null {
   if (!cursor) return null;
@@ -529,12 +507,12 @@ export const getMessages = query({
       isFromMe: boolean;
       platform: Doc<"messages">["platform"];
       status?: string | null;
-      reactions: string[] | null;
+      reactions: ReactionGroupResult[] | null;
       senderContactId?: Id<"contacts"> | null;
       sender: { _id: Id<"contacts">; displayName: string } | null;
     };
 
-    // Batch resolve sender contacts.
+    // Batch resolve sender contacts + reaction contacts.
     const senderIds = [
       ...new Set(
         page
@@ -542,29 +520,47 @@ export const getMessages = query({
           .filter((id): id is Id<"contacts"> => id !== undefined)
       ),
     ];
-    const senders = await Promise.all(senderIds.map((id) => ctx.db.get(id)));
-    const senderMap = new Map(
-      senderIds
-        .map((id, i) => [id as string, senders[i]])
+    const reactionContactIds = collectReactionContactIds(page);
+    const allContactIds = [
+      ...new Set([...senderIds, ...reactionContactIds].map(String)),
+    ] as Id<"contacts">[];
+    const allContacts = await Promise.all(
+      allContactIds.map((id) => ctx.db.get(id))
+    );
+    const contactMap = new Map(
+      allContactIds
+        .map((id, i) => [id as string, allContacts[i]])
         .filter(
-          (entry): entry is [string, Doc<"contacts">] =>
-            entry[1] !== null
+          (entry): entry is [string, Doc<"contacts">] => entry[1] !== null
         )
+    );
+    const contactNameMap = new Map(
+      [...contactMap.entries()].map(([id, c]) => [id, c.displayName])
     );
 
     const messagesWithSender: MessageWithSender[] = page.map((message) => {
+      const content =
+        typeof message.content === "string"
+          ? message.content
+          : message.content == null
+            ? ""
+            : String(message.content);
+      const sentAt =
+        typeof message.sentAt === "number" && Number.isFinite(message.sentAt)
+          ? message.sentAt
+          : 0;
       const sender = message.senderContactId
-        ? senderMap.get(message.senderContactId as string)
+        ? contactMap.get(message.senderContactId as string)
         : null;
 
       return {
         _id: message._id,
-        content: message.content,
-        sentAt: message.sentAt,
+        content,
+        sentAt,
         isFromMe: message.isFromMe,
         platform: message.platform,
         status: message.status ?? null,
-        reactions: normalizeReactionEmojis(message.reactions),
+        reactions: groupReactions(message.reactions, contactNameMap),
         senderContactId: message.senderContactId ?? null,
         sender: sender
           ? { _id: sender._id, displayName: sender.displayName }

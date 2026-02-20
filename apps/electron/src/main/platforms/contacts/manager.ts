@@ -30,6 +30,11 @@ interface ContactsCache {
   handleIndex: Record<string, number>;
 }
 
+interface NativeFetchResult {
+  contacts: ResolvedContact[];
+  shouldPersistCache: boolean;
+}
+
 /** Lazily loaded native module */
 let _contacts: NodeMacContacts | null = null;
 
@@ -64,13 +69,15 @@ export class ContactsManager {
     }
 
     // Fetch from Contacts.app via native module
-    const contacts = this.fetchFromNativeModule();
+    const { contacts, shouldPersistCache } = this.fetchFromNativeModule();
 
     // Build cache with index
     this.cache = this.buildCache(contacts);
 
-    // Save cache to disk
-    this.saveCache(this.cache);
+    // Persist only non-empty snapshots to avoid stale empty-cache lockouts.
+    if (shouldPersistCache) {
+      this.saveCache(this.cache);
+    }
 
     return contacts;
   }
@@ -149,22 +156,28 @@ export class ContactsManager {
     }
   }
 
-  private fetchFromNativeModule(): ResolvedContact[] {
+  private fetchFromNativeModule(): NativeFetchResult {
     const contacts = getContactsModule();
 
     const status = contacts.getAuthStatus();
     console.log(`[Contacts] Auth status: ${status}`);
-    if (status === "Denied" || status === "Not Authorized") {
+    if (status === "Denied" || status === "Restricted") {
       throw new ContactsAccessDeniedError(
         "Contacts access denied. Grant access in System Settings > Privacy & Security > Contacts."
       );
+    }
+    if (status !== "Authorized") {
+      // Startup can race before the permission prompt resolves.
+      // Return no contacts for now, but do not persist an empty cache.
+      console.log("[Contacts] Access not authorized yet; skipping fetch");
+      return { contacts: [], shouldPersistCache: false };
     }
 
     const start = Date.now();
     const raw = contacts.getAllContacts(["organizationName"]);
     console.log(`[Contacts] Fetched ${raw.length} contacts in ${Date.now() - start}ms`);
 
-    return raw.map((c) => {
+    const resolved = raw.map((c) => {
       const fullName = [c.firstName, c.lastName].filter(Boolean).join(" ");
       return {
         displayName: fullName || c.organizationName || "Unknown",
@@ -173,6 +186,11 @@ export class ContactsManager {
         emails: c.emailAddresses,
       };
     });
+
+    return {
+      contacts: resolved,
+      shouldPersistCache: resolved.length > 0,
+    };
   }
 
   private buildCache(contacts: ResolvedContact[]): ContactsCache {
@@ -212,6 +230,11 @@ export class ContactsManager {
 
       const data = readFileSync(CACHE_FILE, "utf-8");
       const cache = JSON.parse(data) as ContactsCache;
+
+      // Treat empty snapshots as stale so we can recover after permission races.
+      if (!Array.isArray(cache.contacts) || cache.contacts.length === 0) {
+        return null;
+      }
 
       // Check if cache is expired
       const fetchedAt = new Date(cache.fetchedAt);

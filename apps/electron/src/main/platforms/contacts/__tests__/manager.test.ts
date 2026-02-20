@@ -150,6 +150,31 @@ describe("ContactsManager", () => {
       expect(writeFileSync).toHaveBeenCalled();
     });
 
+    it("ignores empty cache snapshots and fetches fresh contacts", async () => {
+      const emptyCache = {
+        fetchedAt: new Date().toISOString(),
+        contacts: [],
+        handleIndex: {},
+      };
+
+      vi.mocked(existsSync).mockImplementation((path) => {
+        if (typeof path === "string" && path.includes("contacts_cache.json")) {
+          return true;
+        }
+        return false;
+      });
+      vi.mocked(readFileSync).mockReturnValue(JSON.stringify(emptyCache));
+      mockGetAllContacts.mockReturnValue(
+        createMockContacts([{ firstName: "Fresh", lastName: "Contact", phones: ["+15550001111"] }])
+      );
+
+      const contacts = await manager.fetchContacts();
+
+      expect(contacts).toHaveLength(1);
+      expect(contacts[0].displayName).toBe("Fresh Contact");
+      expect(mockGetAllContacts).toHaveBeenCalled();
+    });
+
     it("forces refresh when requested", async () => {
       const cachedData = {
         fetchedAt: new Date().toISOString(),
@@ -172,6 +197,17 @@ describe("ContactsManager", () => {
 
       expect(contacts[0].displayName).toBe("Fresh");
       expect(mockGetAllContacts).toHaveBeenCalled();
+    });
+
+    it("does not persist cache when access is not determined", async () => {
+      vi.mocked(existsSync).mockReturnValue(false);
+      mockGetAuthStatus.mockReturnValue("Not Determined");
+
+      const contacts = await manager.fetchContacts();
+
+      expect(contacts).toEqual([]);
+      expect(mockGetAllContacts).not.toHaveBeenCalled();
+      expect(writeFileSync).not.toHaveBeenCalled();
     });
   });
 
@@ -285,9 +321,9 @@ describe("ContactsManager", () => {
       await expect(manager.fetchContacts()).rejects.toThrow(ContactsAccessDeniedError);
     });
 
-    it("throws ContactsAccessDeniedError when not authorized", async () => {
+    it("throws ContactsAccessDeniedError when access is restricted", async () => {
       vi.mocked(existsSync).mockReturnValue(false);
-      mockGetAuthStatus.mockReturnValue("Not Authorized");
+      mockGetAuthStatus.mockReturnValue("Restricted");
 
       await expect(manager.fetchContacts()).rejects.toThrow(ContactsAccessDeniedError);
     });

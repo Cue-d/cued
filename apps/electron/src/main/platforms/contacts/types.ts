@@ -15,8 +15,7 @@ export type ContactsAuthStatus =
   | "Not Determined"
   | "Denied"
   | "Authorized"
-  | "Not Authorized"
-  | "Limited";
+  | "Restricted";
 
 /** node-mac-contacts module API. */
 export interface NodeMacContacts {

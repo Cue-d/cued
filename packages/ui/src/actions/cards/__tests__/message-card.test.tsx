@@ -71,7 +71,10 @@ const baseProps: ActionCardProps = {
         senderName: "Alice",
         senderContactId: "contact-1",
         status: null,
-        reactions: ["👍", "🎉"],
+        reactions: [
+          { emoji: "👍", reactors: [{ displayName: "Bob", isFromMe: false }] },
+          { emoji: "🎉", reactors: [{ displayName: "You", isFromMe: true }] },
+        ],
       },
     ],
   },
@@ -81,7 +84,7 @@ const baseProps: ActionCardProps = {
 };
 
 describe("MessageCard", () => {
-  it("preserves reactions when context messages use string[] reactions", () => {
+  it("renders reactions as grouped badges with emoji", () => {
     render(<MessageCard {...baseProps} />);
 
     expect(screen.getByText("👍")).toBeInTheDocument();
@@ -89,49 +92,11 @@ describe("MessageCard", () => {
     expect(screen.getByRole("link", { name: "Example" })).toBeInTheDocument();
   });
 
-  it("preserves reactions across rerenders when reactions change shape during pagination", () => {
-    const firstContext: NonNullable<ActionCardProps["context"]> = {
-      ...baseProps.context!,
-      messages: [
-        {
-          _id: "msg-shared",
-          content: "Message with reaction",
-          sentAt: Date.now(),
-          isFromMe: false,
-          senderName: "Alice",
-          senderContactId: "contact-1",
-          status: null,
-          reactions: [{ emoji: "👍" }],
-        },
-      ],
-    };
+  it("renders reactor initials in reaction badges", () => {
+    render(<MessageCard {...baseProps} />);
 
-    const { rerender } = render(
-      <MessageCard
-        {...baseProps}
-        context={firstContext}
-      />
-    );
-
-    expect(screen.getByText("👍")).toBeInTheDocument();
-
-    const secondContext: NonNullable<ActionCardProps["context"]> = {
-      ...firstContext,
-      messages: [
-        {
-          ...firstContext.messages[0],
-          reactions: ["👍"],
-        },
-      ],
-    };
-
-    rerender(
-      <MessageCard
-        {...baseProps}
-        context={secondContext}
-      />
-    );
-
-    expect(screen.getByText("👍")).toBeInTheDocument();
+    // Initials appear in both badge and hover card
+    expect(screen.getAllByText("B").length).toBeGreaterThanOrEqual(1);
+    expect(screen.getAllByText("Y").length).toBeGreaterThanOrEqual(1);
   });
 });

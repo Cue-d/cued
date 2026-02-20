@@ -1,6 +1,7 @@
 import { cn } from "../../lib/utils"
 import type { InboxMessage } from "./message-types"
-import { DeliveryStatus, ReactionBadges } from "../action-queue/message-response-card/message-bubble"
+import { DeliveryStatus } from "../action-queue/message-response-card/message-bubble"
+import { ReactionGroups } from "../reaction-groups"
 import type React from "react"
 import { formatTime } from "@cued/shared"
 
@@ -130,7 +131,6 @@ export function InboxMessageBubble({
       className={cn(
         "group/msg flex flex-col",
         message.isFromMe ? "items-end" : "items-start",
-        hasReactions && "mb-2",
         SPACING_CLASSES[spacing]
       )}
     >
@@ -155,19 +155,24 @@ export function InboxMessageBubble({
       {hasContent && (
         <div
           className={cn(
-            "relative max-w-[75%] px-4 py-2.5 rounded-[20px] wrap-break-words transition-all duration-200",
+            "max-w-[75%] px-4 py-2.5 rounded-[20px] wrap-break-words transition-all duration-200",
             message.isFromMe
               ? "bg-primary text-primary-foreground"
               : "bg-secondary text-foreground"
           )}
         >
-          {hasReactions && message.reactions && (
-            <ReactionBadges reactions={message.reactions} isSent={message.isFromMe} />
-          )}
           <p className="text-[15px] leading-relaxed whitespace-pre-wrap">
             {renderedContent}
           </p>
         </div>
+      )}
+
+      {/* Reactions below the bubble */}
+      {hasReactions && message.reactions && (
+        <ReactionGroups
+          reactions={message.reactions}
+          className={message.isFromMe ? "justify-end" : "justify-start"}
+        />
       )}
 
       {/* Timestamp/status line; always visible for queued/sending/failed outgoing messages */}

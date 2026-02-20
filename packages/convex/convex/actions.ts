@@ -17,6 +17,11 @@ import {
   mapQueueToDisplayMessage,
 } from "./lib/queueMerge";
 import { executeSwipeHandler } from "./swipeHandlers/registry";
+import {
+  groupReactions,
+  collectReactionContactIds,
+  type ReactionGroupResult,
+} from "./lib/reactions";
 
 /**
  * Fetch all actionable items: pending actions + snoozed actions that are due.
@@ -191,33 +196,6 @@ async function enrichActions(
   return actions.map((action) => enrichAction(action, cache));
 }
 
-function normalizeReactionEmojis(
-  reactions:
-    | Doc<"messages">["reactions"]
-    | string[]
-    | null
-    | undefined
-): string[] | null {
-  if (!reactions || reactions.length === 0) return null;
-
-  const normalizeToken = (token: string): string => {
-    const trimmed = token.trim();
-    if (!trimmed) return "";
-    if (trimmed.startsWith(":") && trimmed.endsWith(":")) return trimmed;
-    if (/^[a-z0-9_+-]+$/i.test(trimmed)) return `:${trimmed}:`;
-    return trimmed;
-  };
-
-  const emojis = (reactions as Array<{ emoji?: string; name?: string; reaction?: string } | string>)
-    .map((reaction) => {
-      if (typeof reaction === "string") return normalizeToken(reaction);
-      const raw = reaction?.emoji ?? reaction?.name ?? reaction?.reaction;
-      return typeof raw === "string" ? normalizeToken(raw) : "";
-    })
-    .filter((emoji): emoji is string => typeof emoji === "string" && emoji.length > 0);
-
-  return emojis.length > 0 ? emojis : null;
-}
 
 /**
  * Search actions with filters.
@@ -672,32 +650,60 @@ export const getActionWithContext = query({
       senderName: string | null;
       senderContactId: Id<"contacts"> | null;
       status?: string | null;
-      reactions: Doc<"messages">["reactions"] | string[] | null;
+      reactions: ReactionGroupResult[] | null;
     };
 
-    // Resolve sender names for messages
-    const messagesWithSender: ActionContextMessage[] = await Promise.all(
-      messages.map(async (msg) => {
-        let senderName: string | null = null;
-        if (msg.isFromMe) {
-          senderName = "You";
-        } else if (msg.senderContactId) {
-          const sender = await ctx.db.get(msg.senderContactId);
-          senderName = sender?.displayName ?? null;
-        }
-
-        return {
-          _id: msg._id,
-          content: msg.content,
-          sentAt: msg.sentAt,
-          isFromMe: msg.isFromMe,
-          senderName,
-          senderContactId: msg.senderContactId ?? null,
-          status: msg.status,
-          reactions: normalizeReactionEmojis(msg.reactions),
-        };
-      })
+    // Batch resolve sender + reaction contacts
+    const senderIds = [
+      ...new Set(
+        messages
+          .map((m) => m.senderContactId)
+          .filter((id): id is Id<"contacts"> => id !== undefined)
+      ),
+    ];
+    const reactionContactIds = collectReactionContactIds(messages);
+    const allContactIds = [
+      ...new Set([...senderIds, ...reactionContactIds].map(String)),
+    ] as Id<"contacts">[];
+    const allContacts = await Promise.all(
+      allContactIds.map((id) => ctx.db.get(id))
     );
+    const contactNameMap = new Map<string, string>();
+    for (let i = 0; i < allContactIds.length; i++) {
+      const contact = allContacts[i];
+      if (contact) contactNameMap.set(allContactIds[i] as string, contact.displayName);
+    }
+
+    const messagesWithSender: ActionContextMessage[] = messages.map((msg) => {
+      const content =
+        typeof msg.content === "string"
+          ? msg.content
+          : msg.content == null
+            ? ""
+            : String(msg.content);
+      const sentAt =
+        typeof msg.sentAt === "number" && Number.isFinite(msg.sentAt)
+          ? msg.sentAt
+          : 0;
+
+      let senderName: string | null = null;
+      if (msg.isFromMe) {
+        senderName = "You";
+      } else if (msg.senderContactId) {
+        senderName = contactNameMap.get(msg.senderContactId as string) ?? null;
+      }
+
+      return {
+        _id: msg._id,
+        content,
+        sentAt,
+        isFromMe: msg.isFromMe,
+        senderName,
+        senderContactId: msg.senderContactId ?? null,
+        status: msg.status,
+        reactions: groupReactions(msg.reactions, contactNameMap),
+      };
+    });
 
     // Merge queued messages for this conversation
     if (action.conversationId) {

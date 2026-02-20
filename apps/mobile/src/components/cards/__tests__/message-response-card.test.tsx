@@ -57,6 +57,14 @@ describe("MessageResponseCard", () => {
     return { ...base, ...overrides };
   };
 
+  const createReactionGroup = (emoji: string, count = 1): NonNullable<DisplayMessage["reactions"]>[number] => ({
+    emoji,
+    reactors: Array.from({ length: count }, (_, i) => ({
+      displayName: `Reactor ${i + 1}`,
+      isFromMe: false,
+    })),
+  });
+
   describe("header rendering", () => {
     it("renders person name", () => {
       render(<MessageResponseCard {...defaultProps} />);
@@ -223,7 +231,7 @@ describe("MessageResponseCard", () => {
       const messages = [
         createMessage({
           content: "Great news!",
-          reactions: ["👍", "❤️"],
+          reactions: [createReactionGroup("👍"), createReactionGroup("❤️")],
         }),
       ];
       render(<MessageResponseCard {...defaultProps} messages={messages} />);
@@ -232,21 +240,26 @@ describe("MessageResponseCard", () => {
       expect(screen.getByText("❤️")).toBeDefined();
     });
 
-    it("limits displayed reactions to 3", () => {
+    it("renders all reaction groups", () => {
       const messages = [
         createMessage({
           content: "Popular message",
-          reactions: ["👍", "❤️", "😂", "🎉", "🔥"],
+          reactions: [
+            createReactionGroup("👍"),
+            createReactionGroup("❤️"),
+            createReactionGroup("😂"),
+            createReactionGroup("🎉"),
+            createReactionGroup("🔥"),
+          ],
         }),
       ];
       render(<MessageResponseCard {...defaultProps} messages={messages} />);
 
-      // Should only show first 3
       expect(screen.getByText("👍")).toBeDefined();
       expect(screen.getByText("❤️")).toBeDefined();
       expect(screen.getByText("😂")).toBeDefined();
-      expect(screen.queryByText("🎉")).toBeNull();
-      expect(screen.queryByText("🔥")).toBeNull();
+      expect(screen.getByText("🎉")).toBeDefined();
+      expect(screen.getByText("🔥")).toBeDefined();
     });
   });
 

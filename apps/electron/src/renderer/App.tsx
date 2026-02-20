@@ -23,8 +23,13 @@ import { PageErrorBoundary } from "./components/PageErrorBoundary"
 import { getOrCreateConvexClient } from "./lib/convex-client-singleton"
 import { initPostHog, posthog, POSTHOG_KEY } from "./lib/posthog"
 import { OnboardingWizard } from "./components/onboarding/OnboardingWizard"
+import type { PermissionStatus } from "../shared/electron-api"
 
 const LEGACY_ONBOARDING_COMPLETE_KEY = "cued-onboarding-complete"
+
+function hasRequiredOnboardingPermissions(status: PermissionStatus): boolean {
+  return status.fullDiskAccess && status.contacts && status.messagesAutomation
+}
 
 /**
  * Auth hook for ConvexProviderWithAuth.
@@ -81,6 +86,17 @@ function AuthenticatedApp({ convexUrl, user, onSignOut }: { convexUrl: string; u
       try {
         const completed = await electron.settings.getOnboardingCompleted()
         if (completed) {
+          try {
+            const permissions = await electron.permissions.check()
+            if (!hasRequiredOnboardingPermissions(permissions)) {
+              console.warn("[Onboarding] Required permissions missing at startup, resetting completion:", permissions)
+              await electron.settings.setOnboardingCompleted(false)
+              if (!cancelled) setOnboardingComplete(false)
+              return
+            }
+          } catch (error) {
+            console.warn("[Onboarding] Failed to validate permissions for completed onboarding state:", error)
+          }
           if (!cancelled) setOnboardingComplete(true)
           return
         }

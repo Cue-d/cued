@@ -14,20 +14,24 @@ const baseMessage: InboxMessage = {
 };
 
 describe("InboxMessageBubble", () => {
-  it("renders reaction badges and truncates to three emojis", () => {
+  it("renders grouped reaction badges with emoji", () => {
     render(
       <InboxMessageBubble
         message={{
           ...baseMessage,
-          reactions: ["👍", "❤️", "😂", "🎉"],
+          reactions: [
+            { emoji: "👍", reactors: [{ displayName: "Bob", isFromMe: false }] },
+            { emoji: "❤️", reactors: [{ displayName: "You", isFromMe: true }] },
+          ],
         }}
       />
     );
 
     expect(screen.getByText("👍")).toBeInTheDocument();
     expect(screen.getByText("❤️")).toBeInTheDocument();
-    expect(screen.getByText("😂")).toBeInTheDocument();
-    expect(screen.queryByText("🎉")).not.toBeInTheDocument();
+    // Initials appear in both badge and hover card
+    expect(screen.getAllByText("B").length).toBeGreaterThanOrEqual(1);
+    expect(screen.getAllByText("Y").length).toBeGreaterThanOrEqual(1);
   });
 
   it("does not render reaction badges when reactions are empty", () => {

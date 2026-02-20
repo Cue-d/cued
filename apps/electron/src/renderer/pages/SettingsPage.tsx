@@ -288,7 +288,12 @@ function GeneralContent() {
                     description="Required to sync macOS contacts"
                     granted={permissions?.contacts}
                     isChecking={isChecking}
-                    onOpenSettings={() => electron.permissions.openContactsSettings()}
+                    onOpenSettings={async () => {
+                      const result = await electron.permissions.requestContactsAccess()
+                      if (result !== "Authorized") {
+                        await electron.permissions.openContactsSettings()
+                      }
+                    }}
                   />
                 </SettingsCard>
               </SettingsSection>
