@@ -6,7 +6,10 @@ import { v } from "convex/values";
 import { internalMutation, mutation, query } from "./_generated/server";
 import { getAuthenticatedUser } from "./lib/auth";
 import { insertQueuedMessage } from "./lib/queueMessageInsert";
-import { platformValidator } from "./schema";
+import {
+  platformValidator,
+  queuedMessageAttachmentValidator,
+} from "./schema";
 
 /** Maximum retry attempts before marking as failed */
 const MAX_ATTEMPTS = 3;
@@ -167,6 +170,7 @@ export const queueMessage = mutation({
     recipientHandle: v.string(),
     recipientContactId: v.optional(v.id("contacts")),
     text: v.string(),
+    attachments: v.optional(v.array(queuedMessageAttachmentValidator)),
     isGroup: v.boolean(),
     chatIdentifier: v.optional(v.string()),
     conversationId: v.optional(v.id("conversations")),
@@ -233,6 +237,7 @@ export const queueMessage = mutation({
       recipientHandle: args.recipientHandle,
       recipientContactId: args.recipientContactId,
       text: args.text,
+      attachments: args.attachments,
       isGroup: args.isGroup,
       chatIdentifier: resolvedChatIdentifier ?? undefined,
       conversationId: resolvedConversationId ?? undefined,
@@ -249,6 +254,7 @@ export const queueMessage = mutation({
       conversationId: resolvedConversationId ?? null,
       scheduledFor: queued.scheduledFor,
       textLength: args.text.length,
+      attachmentsCount: args.attachments?.length ?? 0,
       isGroup: args.isGroup,
     });
 

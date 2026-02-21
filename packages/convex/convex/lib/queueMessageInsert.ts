@@ -1,4 +1,4 @@
-import type { ActionPlatform } from "@cued/shared";
+import type { ActionPlatform, QueuedMessageAttachment } from "@cued/shared";
 import type { Id } from "../_generated/dataModel";
 import type { MutationCtx } from "../_generated/server";
 
@@ -8,6 +8,7 @@ export interface InsertQueuedMessageArgs {
   recipientHandle: string;
   recipientContactId?: Id<"contacts">;
   text: string;
+  attachments?: QueuedMessageAttachment[];
   isGroup: boolean;
   chatIdentifier?: string;
   conversationId?: Id<"conversations">;
@@ -46,6 +47,7 @@ export async function insertQueuedMessage(
     recipientHandle: args.recipientHandle,
     recipientContactId: args.recipientContactId,
     text: args.text,
+    attachments: args.attachments,
     isGroup: args.isGroup,
     chatIdentifier: args.chatIdentifier,
     conversationId: args.conversationId,

@@ -81,6 +81,12 @@ export const syncModeValidator = v.union(
   v.literal("incremental")
 );
 
+export const queuedMessageAttachmentValidator = v.object({
+  localPath: v.string(),
+  filename: v.optional(v.string()),
+  mimeType: v.optional(v.string()),
+});
+
 export const contactStatusValidator = v.union(
   v.literal("active"),
   v.literal("archived"),
@@ -470,6 +476,7 @@ const schema = defineSchema({
     recipientContactId: v.optional(v.id("contacts")),
     // Message content
     text: v.string(),
+    attachments: v.optional(v.array(queuedMessageAttachmentValidator)),
     // For group chats
     isGroup: v.boolean(),
     chatIdentifier: v.optional(v.string()), // Group chat ID if applicable
