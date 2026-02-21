@@ -204,12 +204,14 @@ export function ContactDetail({ contactId }: ContactDetailProps) {
   const [showMergeDialog, setShowMergeDialog] = React.useState(false)
   const [localAvatarUrl, setLocalAvatarUrl] = React.useState<string | null>(null)
   const localAvatarContactId = profile?.contact ? String(profile.contact._id) : null
-  const imessageHandles = React.useMemo(
+  const previousAvatarContactId = React.useRef<string | null>(null)
+  const imessageHandlesKey = React.useMemo(
     () =>
       profile?.contact?.handles
         .filter((handle) => handle.platform === "imessage")
-        .map((handle) => handle.value)
-        .filter(Boolean) ?? [],
+        .map((handle) => handle.value?.trim())
+        .filter((value): value is string => Boolean(value))
+        .join("\0") ?? "",
     [profile?.contact?.handles]
   )
 
@@ -225,11 +227,19 @@ export function ContactDetail({ contactId }: ContactDetailProps) {
   }, [profile?.contact])
 
   React.useEffect(() => {
+    const imessageHandles = imessageHandlesKey ? imessageHandlesKey.split("\0") : []
+    const didContactChange = previousAvatarContactId.current !== localAvatarContactId
+    previousAvatarContactId.current = localAvatarContactId
+
     let isCancelled = false
-    setLocalAvatarUrl(null)
 
     if (!localAvatarContactId || imessageHandles.length === 0) {
+      setLocalAvatarUrl(null)
       return
+    }
+
+    if (didContactChange) {
+      setLocalAvatarUrl(null)
     }
 
     electron.contacts.resolveAvatars([
@@ -253,7 +263,7 @@ export function ContactDetail({ contactId }: ContactDetailProps) {
     return () => {
       isCancelled = true
     }
-  }, [electron, localAvatarContactId, imessageHandles])
+  }, [electron, localAvatarContactId, imessageHandlesKey])
 
   const handleSave = async () => {
     if (!contactId) return
