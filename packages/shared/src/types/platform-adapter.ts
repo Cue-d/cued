@@ -20,6 +20,19 @@ export interface SendResult {
 }
 
 /**
+ * Attachment payload for outbound queued messages.
+ * Phase 1 supports local files only.
+ */
+export interface QueuedMessageAttachment {
+  /** Absolute local file path to send */
+  localPath: string;
+  /** Optional original filename */
+  filename?: string;
+  /** Optional MIME type */
+  mimeType?: string;
+}
+
+/**
  * Message to be sent via an adapter.
  */
 export interface QueuedMessage {
@@ -39,6 +52,8 @@ export interface QueuedMessage {
   threadId?: string;
   /** For multi-workspace platforms (Slack teamId, Gmail email address) */
   workspaceId?: string;
+  /** Optional local file attachments */
+  attachments?: QueuedMessageAttachment[];
 }
 
 /**

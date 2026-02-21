@@ -6,7 +6,10 @@ import { v } from "convex/values";
 import { internalMutation, mutation, query } from "./_generated/server";
 import { getAuthenticatedUser } from "./lib/auth";
 import { insertQueuedMessage } from "./lib/queueMessageInsert";
-import { platformValidator } from "./schema";
+import {
+  platformValidator,
+  queuedMessageAttachmentValidator,
+} from "./schema";
 
 /** Maximum retry attempts before marking as failed */
 const MAX_ATTEMPTS = 3;
@@ -43,6 +46,20 @@ const QUEUE_LOG_PREFIX = "[messageQueue]";
 
 function logQueue(event: string, data: Record<string, unknown>) {
   console.log(`${QUEUE_LOG_PREFIX} ${event}`, data);
+}
+
+function normalizeQueuedAttachments(
+  attachments: Array<{ localPath: string; filename?: string; mimeType?: string }> | undefined
+) {
+  if (!attachments) return undefined;
+
+  return attachments.map((attachment, index) => {
+    const localPath = attachment.localPath.trim();
+    if (localPath.length === 0) {
+      throw new Error(`attachments[${index}].localPath must be a non-empty path`);
+    }
+    return { ...attachment, localPath };
+  });
 }
 
 /** Get messages ready to be sent by Electron. */
@@ -167,6 +184,7 @@ export const queueMessage = mutation({
     recipientHandle: v.string(),
     recipientContactId: v.optional(v.id("contacts")),
     text: v.string(),
+    attachments: v.optional(v.array(queuedMessageAttachmentValidator)),
     isGroup: v.boolean(),
     chatIdentifier: v.optional(v.string()),
     conversationId: v.optional(v.id("conversations")),
@@ -177,6 +195,7 @@ export const queueMessage = mutation({
     const user = await getAuthenticatedUser(ctx);
     if (!user) throw new Error("Unauthorized");
 
+    const normalizedAttachments = normalizeQueuedAttachments(args.attachments);
     const now = Date.now();
     const scheduledFor = now;
     const requiresThreadId =
@@ -233,6 +252,7 @@ export const queueMessage = mutation({
       recipientHandle: args.recipientHandle,
       recipientContactId: args.recipientContactId,
       text: args.text,
+      attachments: normalizedAttachments,
       isGroup: args.isGroup,
       chatIdentifier: resolvedChatIdentifier ?? undefined,
       conversationId: resolvedConversationId ?? undefined,
@@ -249,6 +269,7 @@ export const queueMessage = mutation({
       conversationId: resolvedConversationId ?? null,
       scheduledFor: queued.scheduledFor,
       textLength: args.text.length,
+      attachmentsCount: normalizedAttachments?.length ?? 0,
       isGroup: args.isGroup,
     });
 

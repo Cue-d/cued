@@ -138,6 +138,51 @@ describe("messageQueue", () => {
       expect(message?.chatIdentifier).toBe("chat;-;group-chat-id");
     });
 
+    it("queues iMessage attachments", async () => {
+      const t = trackTest(convexTest(schema, modules));
+      const { asUser } = await setupAuthenticatedUser(t);
+
+      const attachments = [
+        {
+          localPath: "/tmp/image-1.jpg",
+          filename: "image-1.jpg",
+          mimeType: "image/jpeg",
+        },
+        {
+          localPath: "/tmp/image-2.png",
+          filename: "image-2.png",
+          mimeType: "image/png",
+        },
+      ];
+
+      const result = await asUser.mutation(api.messageQueue.queueMessage, {
+        platform: "imessage",
+        recipientHandle: "+15551234567",
+        text: "",
+        attachments,
+        isGroup: false,
+      });
+
+      const message = await t.run(async (ctx) => ctx.db.get(result.messageId));
+      expect(message?.attachments).toEqual(attachments);
+      expect(message?.text).toBe("");
+    });
+
+    it("rejects attachment payloads with empty localPath", async () => {
+      const t = trackTest(convexTest(schema, modules));
+      const { asUser } = await setupAuthenticatedUser(t);
+
+      await expect(
+        asUser.mutation(api.messageQueue.queueMessage, {
+          platform: "imessage",
+          recipientHandle: "+15551234567",
+          text: "",
+          attachments: [{ localPath: "   " }],
+          isGroup: false,
+        })
+      ).rejects.toThrow("attachments[0].localPath must be a non-empty path");
+    });
+
     it("resolves LinkedIn chatIdentifier from conversationId when missing", async () => {
       const t = trackTest(convexTest(schema, modules));
       const { asUser, userId } = await setupAuthenticatedUser(t);

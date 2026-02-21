@@ -106,6 +106,7 @@ export {
 // Platform adapter types (for message queue)
 export type {
   SendResult,
+  QueuedMessageAttachment,
   QueuedMessage,
   PlatformAdapter,
 } from "./types/platform-adapter.js";

@@ -339,6 +339,7 @@ export class MessageQueueProcessor {
         platform: message.platform as ActionPlatform,
         recipientHandle: message.recipientHandle,
         text: message.text,
+        attachments: message.attachments,
         threadId: message.chatIdentifier,
         groupHandles: message.isGroup ? [message.recipientHandle] : undefined,
         workspaceId: message.workspaceId,
@@ -349,6 +350,7 @@ export class MessageQueueProcessor {
         hasThreadId: Boolean(queuedMessage.threadId),
         isGroup: Boolean(queuedMessage.groupHandles?.length),
         textLength: queuedMessage.text.length,
+        attachmentsCount: queuedMessage.attachments?.length ?? 0,
       });
 
       // Send the message — no client-side timeout.

@@ -2,26 +2,34 @@
  * iMessage adapter for the unified message queue.
  * Implements PlatformAdapter interface using AppleScript to send via Messages.app.
  */
-import { exec } from "node:child_process";
-import { promisify } from "node:util";
 import type {
   PlatformAdapter,
   QueuedMessage,
   SendResult,
 } from "@cued/shared";
-import { requireMessageText } from "../../adapters/validation";
 import {
   getErrorMessage,
   isRetryableError,
 } from "../../sync/error-utils";
+import {
+  buildIMessageSendScript,
+  executeAppleScript,
+  type IMessageScriptTarget,
+} from "./applescript";
+import {
+  createSecureAttachmentTempFile,
+  type PreparedAttachmentFile,
+} from "./temp-file-manager";
 import { getIMessageSyncManager } from "./sync";
-
-const execAsync = promisify(exec);
 
 const IMESSAGE_PERMANENT_ERROR_PATTERNS = [
   "not found",
   "invalid identifier",
   "not registered with imessage",
+  "localpath is required",
+  "enoent",
+  "no such file",
+  "attachment path must be a regular file",
 ] as const;
 
 const IMESSAGE_TRANSIENT_ERROR_PATTERNS = [
@@ -31,16 +39,90 @@ const IMESSAGE_TRANSIENT_ERROR_PATTERNS = [
   "busy",
 ] as const;
 
-/**
- * Escape a string for safe use in AppleScript.
- */
-function escapeAppleScript(str: string): string {
-  return str
-    .replace(/\\/g, "\\\\")
-    .replace(/"/g, '\\"')
-    .replace(/\n/g, "\\n")
-    .replace(/\r/g, "\\r")
-    .replace(/\t/g, "\\t");
+function normalizeMessageText(text: string): string | undefined {
+  if (text.trim().length === 0) return undefined;
+  return text;
+}
+
+function triggerPostSendSync(): void {
+  getIMessageSyncManager().runSync().catch((err) => {
+    console.warn("[IMessageAdapter] Post-send sync failed:", err);
+  });
+}
+
+async function cleanupPreparedAttachments(
+  files: PreparedAttachmentFile[]
+): Promise<void> {
+  if (files.length === 0) return;
+
+  const results = await Promise.allSettled(files.map((file) => file.cleanup()));
+  const rejectedCount = results.filter((result) => result.status === "rejected").length;
+  if (rejectedCount > 0) {
+    console.warn("[IMessageAdapter] Attachment cleanup had failures", {
+      attempted: files.length,
+      rejectedCount,
+    });
+  }
+}
+
+async function prepareAttachmentFiles(
+  attachments: QueuedMessage["attachments"]
+): Promise<PreparedAttachmentFile[]> {
+  const prepared: PreparedAttachmentFile[] = [];
+  const attachmentList = attachments ?? [];
+
+  try {
+    for (const attachment of attachmentList) {
+      const localPath = attachment.localPath?.trim();
+      if (!localPath) {
+        throw new Error("Attachment localPath is required");
+      }
+
+      prepared.push(await createSecureAttachmentTempFile(localPath));
+    }
+
+    return prepared;
+  } catch (error) {
+    await cleanupPreparedAttachments(prepared);
+    throw error;
+  }
+}
+
+async function sendToTarget(
+  target: IMessageScriptTarget,
+  text: string | undefined,
+  attachments: QueuedMessage["attachments"]
+): Promise<SendResult> {
+  let preparedAttachments: PreparedAttachmentFile[] = [];
+
+  try {
+    preparedAttachments = await prepareAttachmentFiles(attachments);
+
+    const script = buildIMessageSendScript({
+      target,
+      text,
+      attachmentPaths: preparedAttachments.map((attachment) => attachment.path),
+    });
+
+    await executeAppleScript(script);
+    triggerPostSendSync();
+
+    return { success: true };
+  } catch (error) {
+    const errorMessage = getErrorMessage(error);
+    console.error("[IMessageAdapter] Send failed:", errorMessage);
+
+    return {
+      success: false,
+      error: errorMessage,
+      retryable: isRetryableError(errorMessage, {
+        permanentPatterns: IMESSAGE_PERMANENT_ERROR_PATTERNS,
+        transientPatterns: IMESSAGE_TRANSIENT_ERROR_PATTERNS,
+      }),
+    };
+  } finally {
+    await cleanupPreparedAttachments(preparedAttachments);
+  }
 }
 
 /**
@@ -48,40 +130,10 @@ function escapeAppleScript(str: string): string {
  */
 async function sendToIndividual(
   recipient: string,
-  message: string
+  text: string | undefined,
+  attachments: QueuedMessage["attachments"]
 ): Promise<SendResult> {
-  const escapedRecipient = escapeAppleScript(recipient);
-  const escapedMessage = escapeAppleScript(message);
-
-  const script = `
-    tell application "Messages"
-      set targetService to 1st account whose service type = iMessage
-      set targetBuddy to participant "${escapedRecipient}" of targetService
-      send "${escapedMessage}" to targetBuddy
-    end tell
-  `;
-
-  try {
-    await execAsync(`osascript -e '${script.replace(/'/g, "'\\''")}'`);
-
-    // Trigger immediate sync to fetch our sent message
-    getIMessageSyncManager().runSync().catch((err) => {
-      console.warn("[IMessageAdapter] Post-send sync failed:", err);
-    });
-
-    return { success: true };
-  } catch (error) {
-    const errorMessage = getErrorMessage(error);
-    console.error("[IMessageAdapter] Send to individual failed:", errorMessage);
-    return {
-      success: false,
-      error: errorMessage,
-      retryable: isRetryableError(errorMessage, {
-        permanentPatterns: IMESSAGE_PERMANENT_ERROR_PATTERNS,
-        transientPatterns: IMESSAGE_TRANSIENT_ERROR_PATTERNS,
-      }),
-    };
-  }
+  return sendToTarget({ kind: "individual", recipient }, text, attachments);
 }
 
 /**
@@ -89,39 +141,10 @@ async function sendToIndividual(
  */
 async function sendToGroup(
   chatIdentifier: string,
-  message: string
+  text: string | undefined,
+  attachments: QueuedMessage["attachments"]
 ): Promise<SendResult> {
-  const escapedChat = escapeAppleScript(chatIdentifier);
-  const escapedMessage = escapeAppleScript(message);
-
-  const script = `
-    tell application "Messages"
-      set targetChat to chat id "${escapedChat}"
-      send "${escapedMessage}" to targetChat
-    end tell
-  `;
-
-  try {
-    await execAsync(`osascript -e '${script.replace(/'/g, "'\\''")}'`);
-
-    // Trigger immediate sync to fetch our sent message
-    getIMessageSyncManager().runSync().catch((err) => {
-      console.warn("[IMessageAdapter] Post-send sync failed:", err);
-    });
-
-    return { success: true };
-  } catch (error) {
-    const errorMessage = getErrorMessage(error);
-    console.error("[IMessageAdapter] Send to group failed:", errorMessage);
-    return {
-      success: false,
-      error: errorMessage,
-      retryable: isRetryableError(errorMessage, {
-        permanentPatterns: IMESSAGE_PERMANENT_ERROR_PATTERNS,
-        transientPatterns: IMESSAGE_TRANSIENT_ERROR_PATTERNS,
-      }),
-    };
-  }
+  return sendToTarget({ kind: "group", chatIdentifier }, text, attachments);
 }
 
 /**
@@ -135,10 +158,7 @@ async function checkMessagesAvailable(): Promise<boolean> {
   `;
 
   try {
-    const { stdout } = await execAsync(
-      `osascript -e '${script.replace(/'/g, "'\\''")}'`
-    );
-    const processRunning = stdout.trim() === "true";
+    const processRunning = (await executeAppleScript(script)) === "true";
 
     // Also verify iMessage service exists
     const checkIMessageScript = `
@@ -146,10 +166,9 @@ async function checkMessagesAvailable(): Promise<boolean> {
         return (count of (accounts whose service type = iMessage)) > 0
       end tell
     `;
-    const { stdout: iMessageResult } = await execAsync(
-      `osascript -e '${checkIMessageScript.replace(/'/g, "'\\''")}'`
-    );
-    const hasIMessageAccount = iMessageResult.trim() === "true";
+    const hasIMessageAccount =
+      (await executeAppleScript(checkIMessageScript)) === "true";
+
     return processRunning && hasIMessageAccount;
   } catch {
     return false;
@@ -168,17 +187,25 @@ export class IMessageAdapter implements PlatformAdapter {
    * Handles both individual and group messages.
    */
   async send(message: QueuedMessage): Promise<SendResult> {
-    const textValidation = requireMessageText(message);
-    if (!textValidation.ok) return textValidation.result;
+    const text = normalizeMessageText(message.text);
+    const hasAttachments = (message.attachments?.length ?? 0) > 0;
+
+    if (!text && !hasAttachments) {
+      return {
+        success: false,
+        error: "Message text or attachments are required",
+        retryable: false,
+      };
+    }
 
     // Group message via chat identifier (threadId contains chat ID)
     if (message.threadId) {
-      return sendToGroup(message.threadId, textValidation.value);
+      return sendToGroup(message.threadId, text, message.attachments);
     }
 
     // Individual message via handle
     if (message.recipientHandle) {
-      return sendToIndividual(message.recipientHandle, textValidation.value);
+      return sendToIndividual(message.recipientHandle, text, message.attachments);
     }
 
     // No valid target
