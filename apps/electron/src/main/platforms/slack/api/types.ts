@@ -80,6 +80,15 @@ export interface SlackUsersInfoResponse {
   user?: SlackUser
 }
 
+export interface SlackUsersListResponse {
+  ok: boolean
+  error?: string
+  members?: SlackUser[]
+  response_metadata?: {
+    next_cursor?: string
+  }
+}
+
 // ============================================================================
 // Conversations (Channels, DMs, Groups)
 // ============================================================================

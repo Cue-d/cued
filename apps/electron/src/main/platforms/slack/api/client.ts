@@ -26,6 +26,7 @@ import type {
   SlackCredentials,
   SlackAuthTestResponse,
   SlackUsersInfoResponse,
+  SlackUsersListResponse,
   SlackUser,
   SlackConversation,
   SlackConversationsListResponse,
@@ -48,6 +49,11 @@ export interface ConversationsResult {
 export interface MessagesResult {
   messages: SlackMessage[]
   hasMore: boolean
+  nextCursor?: string
+}
+
+export interface UsersResult {
+  users: SlackUser[]
   nextCursor?: string
 }
 
@@ -117,6 +123,30 @@ export class SlackClient {
       .doJSON<SlackUsersInfoResponse>()
 
     return response.user ?? null
+  }
+
+  /**
+   * List users in workspace (paginated)
+   */
+  async listUsers(options: {
+    cursor?: string
+    limit?: number
+    includeLocale?: boolean
+  } = {}): Promise<UsersResult> {
+    const { cursor, limit = PAGINATION.defaultLimit, includeLocale = false } = options
+
+    const response = await newPostRequest(SLACK_API_URLS.usersList, this.credentials)
+      .withParams({
+        cursor,
+        limit,
+        include_locale: includeLocale,
+      })
+      .doJSON<SlackUsersListResponse>()
+
+    return {
+      users: response.members ?? [],
+      nextCursor: response.response_metadata?.next_cursor,
+    }
   }
 
   // ============================================================================

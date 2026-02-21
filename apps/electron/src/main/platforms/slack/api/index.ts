@@ -1,7 +1,7 @@
 // Slack integration exports
 
 export { SlackClient } from './client'
-export type { ConversationsResult, MessagesResult } from './client'
+export type { ConversationsResult, MessagesResult, UsersResult } from './client'
 
 export {
   SlackAuthError,
@@ -21,6 +21,7 @@ export type {
   SlackUser,
   SlackUserProfile,
   SlackUsersInfoResponse,
+  SlackUsersListResponse,
   // Conversations
   SlackConversation,
   SlackTopic,
