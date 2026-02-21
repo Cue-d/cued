@@ -257,7 +257,23 @@ export function buildContactAvatarPatch(
   }
 
   const existingOptions = getContactAvatarOptions(existing);
-  const nextOptions = upsertContactAvatarOption(existingOptions, normalizedIncoming);
+  const existingForSource = existingOptions.find(
+    (option) => option.sourcePlatform === normalizedIncoming.sourcePlatform,
+  );
+
+  // Most sync callers do not provide an avatar timestamp. In that case, keep the
+  // stored timestamp for unchanged URL+source so no-op syncs do not trigger writes.
+  const incomingOption =
+    incoming?.updatedAt === undefined &&
+    existingForSource &&
+    existingForSource.url === normalizedIncoming.url
+      ? {
+          ...normalizedIncoming,
+          updatedAt: existingForSource.updatedAt,
+        }
+      : normalizedIncoming;
+
+  const nextOptions = upsertContactAvatarOption(existingOptions, incomingOption);
   const primaryFields = buildPrimaryAvatarFields(nextOptions);
 
   const primaryUnchanged =

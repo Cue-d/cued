@@ -255,15 +255,38 @@ describe("buildContactAvatarPatch", () => {
     expect(patch).toEqual({
       avatarUrl: "https://cdn.example.com/avatar.png",
       avatarSourcePlatform: "twitter",
-      avatarUpdatedAt: expect.any(Number),
+      avatarUpdatedAt: 0,
       avatarOptions: [
         {
           url: "https://cdn.example.com/avatar.png",
           sourcePlatform: "twitter",
-          updatedAt: expect.any(Number),
+          updatedAt: 0,
         },
       ],
     });
+  });
+
+  it("returns null when incoming URL/source are unchanged and options already exist", () => {
+    const patch = buildContactAvatarPatch(
+      makeContact({
+        avatarUrl: "https://cdn.example.com/avatar.png",
+        avatarSourcePlatform: "twitter",
+        avatarUpdatedAt: 4321,
+        avatarOptions: [
+          {
+            url: "https://cdn.example.com/avatar.png",
+            sourcePlatform: "twitter",
+            updatedAt: 4321,
+          },
+        ],
+      }),
+      {
+        url: "https://cdn.example.com/avatar.png",
+        sourcePlatform: "twitter",
+      },
+    );
+
+    expect(patch).toBeNull();
   });
 
   it("rejects non-http avatar URLs", () => {
