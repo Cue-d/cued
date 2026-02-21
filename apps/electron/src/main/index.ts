@@ -13,6 +13,7 @@ import { app, BrowserWindow, ipcMain, net, protocol, shell } from "electron";
 import { ConvexHttpClient } from "convex/browser";
 import { api } from "@cued/convex";
 import { electronEnv } from "@cued/env/electron";
+import type { ContactAvatarLookupRequest } from "../shared/electron-api";
 import {
   initAuth,
   getAuthState,
@@ -23,7 +24,7 @@ import {
   setOnTokenRefreshed,
 } from "./auth";
 import { getIMessageSyncManager } from "./platforms/imessage";
-import { getContactsWatcher } from "./platforms/contacts";
+import { getContactsManager, getContactsWatcher } from "./platforms/contacts";
 import { getHeartbeatManager } from "./sync/presence";
 import {
   setupAllSyncIpcHandlers,
@@ -53,6 +54,8 @@ import {
 
 const CONVEX_URL = electronEnv.CONVEX_URL;
 const WORKOS_CLIENT_ID = electronEnv.WORKOS_CLIENT_ID;
+const CONTACT_AVATAR_LOOKUP_REFRESH_INTERVAL_MS = 30_000;
+const CONTACT_AVATAR_LOOKUP_RETRY_BACKOFF_MS = 5_000;
 
 protocol.registerSchemesAsPrivileged([
   {
@@ -386,6 +389,74 @@ function setupShellIpcHandlers(): void {
   });
 }
 
+function setupContactsIpcHandlers(): void {
+  const contactsManager = getContactsManager();
+  let avatarLookupRefreshPromise: Promise<void> | null = null;
+  let lastAvatarLookupRefreshAttemptAt = 0;
+  let lastAvatarLookupRefreshSuccessAt = 0;
+
+  const maybeRefreshContactsCache = async (awaitCompletion: boolean): Promise<void> => {
+    const now = Date.now();
+    const hasSuccessfulRefresh = lastAvatarLookupRefreshSuccessAt > 0;
+    const minInterval = hasSuccessfulRefresh
+      ? CONTACT_AVATAR_LOOKUP_REFRESH_INTERVAL_MS
+      : CONTACT_AVATAR_LOOKUP_RETRY_BACKOFF_MS;
+
+    if (!avatarLookupRefreshPromise && now - lastAvatarLookupRefreshAttemptAt >= minInterval) {
+      lastAvatarLookupRefreshAttemptAt = now;
+      avatarLookupRefreshPromise = (async () => {
+        try {
+          await contactsManager.fetchContacts(false);
+          lastAvatarLookupRefreshSuccessAt = Date.now();
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error);
+          console.warn(`[Main] Failed to refresh contacts cache for avatar lookup: ${message}`);
+        } finally {
+          avatarLookupRefreshPromise = null;
+        }
+      })();
+    }
+
+    if (awaitCompletion && avatarLookupRefreshPromise) {
+      await avatarLookupRefreshPromise;
+    }
+  };
+
+  ipcMain.handle("contacts:resolveAvatars", async (_event, requests: ContactAvatarLookupRequest[]) => {
+    if (!Array.isArray(requests) || requests.length === 0) {
+      return {};
+    }
+
+    if (!contactsManager.isCacheLoaded()) {
+      await maybeRefreshContactsCache(true);
+    } else {
+      void maybeRefreshContactsCache(false);
+    }
+
+    const resolvedAvatars: Record<string, string> = {};
+
+    for (const request of requests) {
+      if (!request || typeof request.contactId !== "string" || !Array.isArray(request.handles)) {
+        continue;
+      }
+
+      for (const handle of request.handles) {
+        if (typeof handle !== "string" || handle.length === 0) {
+          continue;
+        }
+
+        const contact = contactsManager.getContact(handle);
+        if (contact?.avatarUrl) {
+          resolvedAvatars[request.contactId] = contact.avatarUrl;
+          break;
+        }
+      }
+    }
+
+    return resolvedAvatars;
+  });
+}
+
 /**
  * Safely execute cleanup function, logging warnings on failure.
  */
@@ -557,6 +628,7 @@ app.whenReady().then(() => {
   setupAuthIpcHandlers();
   setupConfigIpcHandlers();
   setupShellIpcHandlers();
+  setupContactsIpcHandlers();
   setupPermissionIpcHandlers();
 
   createWindow();
