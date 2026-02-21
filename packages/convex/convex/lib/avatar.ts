@@ -2,6 +2,8 @@
  * Normalize contact avatar URLs for global storage/consumption.
  * Only HTTP(S) URLs are considered cross-device safe.
  */
+import { normalizePublicAvatarUrl } from "@cued/shared";
+
 export type ContactAvatarSourcePlatform =
   | "linkedin"
   | "twitter"
@@ -28,25 +30,7 @@ const AVATAR_SOURCE_PRIORITY: Record<ContactAvatarSourcePlatform, number> = {
   signal: 20,
   imessage: 10,
 };
-
-export function normalizePublicAvatarUrl(
-  url: string | null | undefined,
-): string | undefined {
-  if (!url) return undefined;
-
-  const trimmed = url.trim();
-  if (!trimmed) return undefined;
-
-  try {
-    const parsed = new URL(trimmed);
-    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
-      return undefined;
-    }
-    return parsed.toString();
-  } catch {
-    return undefined;
-  }
-}
+export { normalizePublicAvatarUrl };
 
 export function normalizeContactAvatarOption(
   avatar: ContactAvatarInput | null | undefined,

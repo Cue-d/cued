@@ -9,6 +9,7 @@
 
 import { ConvexHttpClient } from "convex/browser";
 import { api } from "@cued/convex";
+import { normalizePublicAvatarUrl } from "@cued/shared";
 import { isAuthError } from "../../auth/auth-utils";
 import { electronEnv } from "@cued/env/electron";
 import { getContactsManager } from "./manager";
@@ -39,19 +40,6 @@ function log(
       break;
     default:
       console.log(fullMessage);
-  }
-}
-
-function toSyncableAvatarUrl(url: string | undefined): string | undefined {
-  if (!url) return undefined;
-  try {
-    const parsed = new URL(url);
-    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
-      return undefined;
-    }
-    return parsed.toString();
-  } catch {
-    return undefined;
   }
 }
 
@@ -120,7 +108,7 @@ export async function syncContactsToConvex(
       company: c.company,
       phoneNumbers: c.phoneNumbers,
       emails: c.emails,
-      avatarUrl: toSyncableAvatarUrl(c.avatarUrl),
+      avatarUrl: normalizePublicAvatarUrl(c.avatarUrl),
     }));
 
     const totalBatches = Math.ceil(convexContacts.length / BATCH_SIZE);
