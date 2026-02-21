@@ -166,6 +166,12 @@ export interface SlackDisconnectResult {
   success: boolean
 }
 
+// Local contacts/avatar types
+export interface ContactAvatarLookupRequest {
+  contactId: string
+  handles: string[]
+}
+
 // Permission types
 export interface PermissionStatus {
   fullDiskAccess: boolean
@@ -207,6 +213,12 @@ export interface ElectronAPI {
 
   shell: {
     openExternal: (url: string) => Promise<boolean>
+  }
+
+  contacts: {
+    resolveAvatars: (
+      contacts: ContactAvatarLookupRequest[],
+    ) => Promise<Record<string, string>>
   }
 
   auth: {
