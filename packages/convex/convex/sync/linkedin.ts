@@ -31,6 +31,10 @@ import {
   resolveMessageQueueBridge,
   buildContactAvatarPatch,
 } from "./shared";
+import {
+  buildPrimaryAvatarFields,
+  normalizeContactAvatarOption,
+} from "../lib/avatar";
 import { scheduleContactMergeCheck } from "../lib/contactMergeScheduling";
 import { resolveActionSummary } from "../lib/actionSummary";
 
@@ -1002,24 +1006,20 @@ export async function syncLinkedInContactsInternal(
       } else {
         // Create new contact
         const company = extractCompanyFromHeadline(contact.headline);
+        const avatarOption = contact.avatarUrl
+          ? normalizeContactAvatarOption({
+              url: contact.avatarUrl,
+              sourcePlatform: "linkedin",
+            })
+          : undefined;
+        const avatarOptions = avatarOption ? [avatarOption] : [];
         const contactId = await ctx.db.insert("contacts", {
           userId,
           displayName: contact.name,
           company,
+          ...buildPrimaryAvatarFields(avatarOptions),
+          avatarOptions: avatarOptions.length > 0 ? avatarOptions : undefined,
         });
-
-        if (contact.avatarUrl) {
-          const insertedContact = await ctx.db.get(contactId);
-          if (insertedContact) {
-            const avatarPatch = buildContactAvatarPatch(insertedContact, {
-              url: contact.avatarUrl,
-              sourcePlatform: "linkedin",
-            });
-            if (avatarPatch) {
-              await ctx.db.patch(contactId, avatarPatch);
-            }
-          }
-        }
 
         if (normalizedHandle) {
           await ctx.db.insert("contactHandles", {
