@@ -1,6 +1,7 @@
 "use client";
 
 import * as React from "react";
+import { getInitials } from "@cued/shared";
 import {
   InboxIcon,
   LinkIcon,
@@ -60,21 +61,6 @@ export function AppSidebar({
   }, []);
 
   const isDarkMode = mounted && resolvedTheme === "dark";
-
-  const getInitials = (name?: string, email?: string) => {
-    if (name) {
-      return name
-        .split(" ")
-        .map((n) => n[0])
-        .join("")
-        .toUpperCase()
-        .slice(0, 2);
-    }
-    if (email) {
-      return email[0].toUpperCase();
-    }
-    return "U";
-  };
 
   return (
     <Sidebar {...props} variant="inset">
@@ -144,7 +130,7 @@ export function AppSidebar({
                     <AvatarImage src={user.imageUrl} alt={user?.name ?? "User"} />
                   ) : null}
                   <AvatarFallback className="rounded-lg bg-sidebar-primary text-sidebar-primary-foreground text-xs">
-                    {getInitials(user?.name, user?.email)}
+                    {getInitials(user?.name ?? user?.email ?? "User")}
                   </AvatarFallback>
                 </Avatar>
                 <div className="grid flex-1 text-left text-sm leading-tight">
