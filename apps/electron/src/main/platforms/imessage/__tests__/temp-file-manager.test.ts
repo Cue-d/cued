@@ -72,4 +72,23 @@ describe("iMessage temp-file manager", () => {
 
     expect(await readFile(protectedPath, "utf8")).toBe("do-not-delete");
   });
+
+  it("creates unpredictable temp paths in unique directories", async () => {
+    const root = await makeTempRoot("cued-imessage-test-");
+    const sourcePath = join(root, "same-name.png");
+    await writeFile(sourcePath, "bytes", { encoding: "utf8" });
+
+    const first = await createSecureAttachmentTempFile(sourcePath, {
+      tempRootDir: root,
+    });
+    const second = await createSecureAttachmentTempFile(sourcePath, {
+      tempRootDir: root,
+    });
+
+    expect(first.path).not.toBe(second.path);
+    expect(dirname(first.path)).not.toBe(dirname(second.path));
+
+    await first.cleanup();
+    await second.cleanup();
+  });
 });
