@@ -9,6 +9,7 @@ export {
   phonesMatch,
   formatPhoneNumber,
 } from "./phone";
+export { normalizePublicAvatarUrl } from "./avatar";
 
 // Utility functions
 export { getInitials, truncate } from "./utils/index";
