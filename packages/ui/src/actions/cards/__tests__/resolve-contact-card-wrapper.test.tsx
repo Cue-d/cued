@@ -4,6 +4,93 @@ import { ResolveContactCardWrapper } from "../resolve-contact-card-wrapper";
 import type { ActionCardProps } from "../../types";
 
 describe("ResolveContactCardWrapper", () => {
+  it("shows source contact names for each merged handle row", () => {
+    const props: ActionCardProps = {
+      action: {
+        _id: "action-1",
+        type: "resolve_contact",
+        status: "pending",
+        priority: 1,
+        reason: null,
+        llmReason: null,
+        createdAt: Date.now(),
+        snoozedUntil: null,
+        completedAt: null,
+        discardedAt: null,
+        conversationId: null,
+        contactId: "contact-1",
+        contactName: "Alex Klein",
+        secondaryContactId: "contact-2",
+        secondaryContactName: "Alexander Klein",
+        mergeSuggestionId: "merge-1",
+        mergeConfidence: 0.92,
+        mergeSource: "fuzzy_name_match",
+        mergeReasoning: null,
+        platform: "imessage",
+      },
+      isTop: true,
+      context: {
+        action: {
+          _id: "action-1",
+          type: "resolve_contact",
+          status: "pending",
+          priority: 1,
+          reason: null,
+          llmReason: null,
+          createdAt: Date.now(),
+          snoozedUntil: null,
+          completedAt: null,
+          discardedAt: null,
+          platform: "imessage",
+          secondaryContactId: "contact-2",
+          mergeSuggestionId: "merge-1",
+        },
+        conversation: null,
+        contact: {
+          _id: "contact-1",
+          displayName: "Alex Klein",
+          company: null,
+          notes: null,
+          importance: null,
+          handles: [
+            {
+              handleType: "phone",
+              handle: "+15209791562",
+              platform: "imessage",
+            },
+          ],
+        },
+        secondaryContact: {
+          _id: "contact-2",
+          displayName: "Alexander Klein",
+          company: null,
+          notes: null,
+          importance: null,
+          handles: [
+            {
+              handleType: "phone",
+              handle: "+16509300376",
+              platform: "imessage",
+            },
+          ],
+        },
+        participants: [],
+        messages: [],
+      },
+      responseText: "",
+      onResponseChange: vi.fn(),
+      autoFocus: false,
+      onLinkClick: vi.fn(),
+    };
+
+    render(<ResolveContactCardWrapper {...props} />);
+
+    expect(screen.getByText("+15209791562")).toBeInTheDocument();
+    expect(screen.getByText("+16509300376")).toBeInTheDocument();
+    expect(screen.getAllByText("Alex Klein").length).toBeGreaterThanOrEqual(2);
+    expect(screen.getByText("Alexander Klein")).toBeInTheDocument();
+  });
+
   it("shows a clean LinkedIn account label and opens canonical profile URL", () => {
     const onLinkClick = vi.fn();
 

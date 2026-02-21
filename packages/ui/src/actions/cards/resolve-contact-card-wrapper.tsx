@@ -61,6 +61,7 @@ function toMergeHandle(
     value: h.handle,
     platform: h.platform as ContactHandle["platform"],
     displayLabel,
+    sourceContactName: contactDisplayName,
     deeplinkUrl,
   }
 }
