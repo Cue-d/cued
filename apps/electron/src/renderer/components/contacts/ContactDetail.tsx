@@ -43,6 +43,7 @@ import {
 import type { Id } from "@cued/convex"
 import { PanelHeader } from "../app-shell"
 import { SettingsSection, SettingsCard, SettingsRow } from "../settings-card"
+import { useElectron } from "../../hooks/use-electron"
 import { MergeContactDialog } from "./MergeContactDialog"
 
 /** Handle types worth displaying to the user (hide internal IDs like slack_id, linkedin_urn) */
@@ -171,6 +172,7 @@ interface ContactDetailProps {
 }
 
 export function ContactDetail({ contactId }: ContactDetailProps) {
+  const electron = useElectron()
   const profile = useQuery(
     api.contacts.getContactProfile,
     contactId ? { contactId } : "skip"
@@ -200,6 +202,16 @@ export function ContactDetail({ contactId }: ContactDetailProps) {
   const [timelineExpanded, setTimelineExpanded] = React.useState(true)
   const [showAllMessages, setShowAllMessages] = React.useState(false)
   const [showMergeDialog, setShowMergeDialog] = React.useState(false)
+  const [localAvatarUrl, setLocalAvatarUrl] = React.useState<string | null>(null)
+  const localAvatarContactId = profile?.contact ? String(profile.contact._id) : null
+  const imessageHandles = React.useMemo(
+    () =>
+      profile?.contact?.handles
+        .filter((handle) => handle.platform === "imessage")
+        .map((handle) => handle.value)
+        .filter(Boolean) ?? [],
+    [profile?.contact?.handles]
+  )
 
   React.useEffect(() => {
     if (profile?.contact) {
@@ -211,6 +223,37 @@ export function ContactDetail({ contactId }: ContactDetailProps) {
       })
     }
   }, [profile?.contact])
+
+  React.useEffect(() => {
+    let isCancelled = false
+    setLocalAvatarUrl(null)
+
+    if (!localAvatarContactId || imessageHandles.length === 0) {
+      return
+    }
+
+    electron.contacts.resolveAvatars([
+      {
+        contactId: localAvatarContactId,
+        handles: imessageHandles,
+      },
+    ])
+      .then((resolvedAvatars) => {
+        if (!isCancelled) {
+          setLocalAvatarUrl(resolvedAvatars[localAvatarContactId] ?? null)
+        }
+      })
+      .catch((error) => {
+        console.warn("[ContactDetail] Failed to resolve local avatar:", error)
+        if (!isCancelled) {
+          setLocalAvatarUrl(null)
+        }
+      })
+
+    return () => {
+      isCancelled = true
+    }
+  }, [electron, localAvatarContactId, imessageHandles])
 
   const handleSave = async () => {
     if (!contactId) return
@@ -273,6 +316,7 @@ export function ContactDetail({ contactId }: ContactDetailProps) {
   const displayMessages = showAllMessages ? messages : messages.slice(0, 10)
   const visibleHandles = contact.handles.filter((h) => VISIBLE_HANDLE_TYPES.has(h.type))
   const initials = getInitials(contact.displayName)
+  const avatarUrl = localAvatarUrl ?? contact.avatarUrl
   const contactStatus =
     contact.isDismissed || contact.status === "archived" || contact.status === "dismissed"
       ? "archived"
@@ -322,8 +366,8 @@ export function ContactDetail({ contactId }: ContactDetailProps) {
               <SettingsCard divided={false}>
                 <div className="px-4 py-4 flex items-center gap-4">
                   <Avatar size="lg">
-                    {contact.avatarUrl ? (
-                      <AvatarImage src={contact.avatarUrl} alt={contact.displayName} />
+                    {avatarUrl ? (
+                      <AvatarImage src={avatarUrl} alt={contact.displayName} />
                     ) : null}
                     <AvatarFallback>{initials}</AvatarFallback>
                   </Avatar>
