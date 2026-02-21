@@ -168,6 +168,21 @@ describe("messageQueue", () => {
       expect(message?.text).toBe("");
     });
 
+    it("rejects attachment payloads with empty localPath", async () => {
+      const t = trackTest(convexTest(schema, modules));
+      const { asUser } = await setupAuthenticatedUser(t);
+
+      await expect(
+        asUser.mutation(api.messageQueue.queueMessage, {
+          platform: "imessage",
+          recipientHandle: "+15551234567",
+          text: "",
+          attachments: [{ localPath: "   " }],
+          isGroup: false,
+        })
+      ).rejects.toThrow("attachments[0].localPath must be a non-empty path");
+    });
+
     it("resolves LinkedIn chatIdentifier from conversationId when missing", async () => {
       const t = trackTest(convexTest(schema, modules));
       const { asUser, userId } = await setupAuthenticatedUser(t);
