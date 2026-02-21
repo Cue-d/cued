@@ -26,6 +26,7 @@ const IMESSAGE_PERMANENT_ERROR_PATTERNS = [
   "not found",
   "invalid identifier",
   "not registered with imessage",
+  "localpath is required",
   "enoent",
   "no such file",
   "attachment path must be a regular file",
