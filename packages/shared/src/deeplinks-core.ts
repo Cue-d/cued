@@ -20,11 +20,16 @@ interface DeeplinkDependencies {
   getPlatformLabel: (platform: string) => string | undefined;
 }
 
+export interface BuildHandleDeeplinkOptions {
+  intent?: "platform" | "contact";
+}
+
 interface DeeplinkUtilities {
   buildHandleDeeplink: (
     platform: string,
     handleType: string,
     handle: string,
+    options?: BuildHandleDeeplinkOptions,
   ) => string | null;
   getPlatformDeeplink: (
     platform: string,
@@ -47,12 +52,15 @@ export function createDeeplinkUtilities({
     platform: string,
     handleType: string,
     handle: string,
+    options: BuildHandleDeeplinkOptions = {},
   ): string | null {
     switch (platform) {
       case "imessage":
-        return handleType === "phone" || handleType === "email"
-          ? `imessage://${handle}`
-          : null;
+        if (handleType !== "phone" && handleType !== "email") return null;
+        if (options.intent === "contact") {
+          return `addressbook://search/${encodeURIComponent(handle)}`;
+        }
+        return `imessage://${handle}`;
       case "linkedin":
         if (handleType !== "linkedin_handle") return null;
         const normalizedHandle = normalizeLinkedInHandle(handle);

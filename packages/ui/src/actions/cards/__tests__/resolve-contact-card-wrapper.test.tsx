@@ -89,6 +89,11 @@ describe("ResolveContactCardWrapper", () => {
     expect(screen.getByText("+16509300376")).toBeInTheDocument();
     expect(screen.getAllByText("Alex Klein").length).toBeGreaterThanOrEqual(2);
     expect(screen.getByText("Alexander Klein")).toBeInTheDocument();
+
+    fireEvent.click(screen.getAllByRole("button", { name: "Open in iMessage" })[0]);
+    expect(props.onLinkClick).toHaveBeenCalledWith(
+      "addressbook://search/%2B15209791562"
+    );
   });
 
   it("shows a clean LinkedIn account label and opens canonical profile URL", () => {

@@ -340,8 +340,8 @@ function setupShellIpcHandlers(): void {
     try {
       const parsed = new URL(url);
       const allowedSchemes = electronEnv.NODE_ENV === "development"
-        ? ["https:", "http:", "imessage:", "slack:", "mailto:"]
-        : ["https:", "imessage:", "slack:", "mailto:"];
+        ? ["https:", "http:", "imessage:", "slack:", "mailto:", "addressbook:"]
+        : ["https:", "imessage:", "slack:", "mailto:", "addressbook:"];
 
       if (!allowedSchemes.includes(parsed.protocol)) {
         console.warn(`[Main] Rejected openExternal for non-allowed scheme: ${parsed.protocol}`);
