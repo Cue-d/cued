@@ -17,6 +17,7 @@ import {
 import { api } from "@cued/convex"
 import {
   normalizePhone,
+  getInitials,
   formatRelativeTime,
   getContactAuditActionLabel,
   type ActionPlatform,
@@ -28,6 +29,9 @@ import {
   ScrollArea,
   SearchIcon,
   UserIcon,
+  Avatar,
+  AvatarImage,
+  AvatarFallback,
 } from "@cued/ui"
 import {
   Skeleton,
@@ -39,6 +43,7 @@ import {
 import type { Id } from "@cued/convex"
 import { PanelHeader } from "../app-shell"
 import { SettingsSection, SettingsCard, SettingsRow } from "../settings-card"
+import { useElectron } from "../../hooks/use-electron"
 import { MergeContactDialog } from "./MergeContactDialog"
 
 /** Handle types worth displaying to the user (hide internal IDs like slack_id, linkedin_urn) */
@@ -167,6 +172,7 @@ interface ContactDetailProps {
 }
 
 export function ContactDetail({ contactId }: ContactDetailProps) {
+  const electron = useElectron()
   const profile = useQuery(
     api.contacts.getContactProfile,
     contactId ? { contactId } : "skip"
@@ -196,6 +202,18 @@ export function ContactDetail({ contactId }: ContactDetailProps) {
   const [timelineExpanded, setTimelineExpanded] = React.useState(true)
   const [showAllMessages, setShowAllMessages] = React.useState(false)
   const [showMergeDialog, setShowMergeDialog] = React.useState(false)
+  const [localAvatarUrl, setLocalAvatarUrl] = React.useState<string | null>(null)
+  const localAvatarContactId = profile?.contact ? String(profile.contact._id) : null
+  const previousAvatarContactId = React.useRef<string | null>(null)
+  const imessageHandlesKey = React.useMemo(
+    () =>
+      profile?.contact?.handles
+        .filter((handle) => handle.platform === "imessage")
+        .map((handle) => handle.value?.trim())
+        .filter((value): value is string => Boolean(value))
+        .join("\0") ?? "",
+    [profile?.contact?.handles]
+  )
 
   React.useEffect(() => {
     if (profile?.contact) {
@@ -207,6 +225,45 @@ export function ContactDetail({ contactId }: ContactDetailProps) {
       })
     }
   }, [profile?.contact])
+
+  React.useEffect(() => {
+    const imessageHandles = imessageHandlesKey ? imessageHandlesKey.split("\0") : []
+    const didContactChange = previousAvatarContactId.current !== localAvatarContactId
+    previousAvatarContactId.current = localAvatarContactId
+
+    let isCancelled = false
+
+    if (!localAvatarContactId || imessageHandles.length === 0) {
+      setLocalAvatarUrl(null)
+      return
+    }
+
+    if (didContactChange) {
+      setLocalAvatarUrl(null)
+    }
+
+    electron.contacts.resolveAvatars([
+      {
+        contactId: localAvatarContactId,
+        handles: imessageHandles,
+      },
+    ])
+      .then((resolvedAvatars) => {
+        if (!isCancelled) {
+          setLocalAvatarUrl(resolvedAvatars[localAvatarContactId] ?? null)
+        }
+      })
+      .catch((error) => {
+        console.warn("[ContactDetail] Failed to resolve local avatar:", error)
+        if (!isCancelled) {
+          setLocalAvatarUrl(null)
+        }
+      })
+
+    return () => {
+      isCancelled = true
+    }
+  }, [electron, localAvatarContactId, imessageHandlesKey])
 
   const handleSave = async () => {
     if (!contactId) return
@@ -268,6 +325,8 @@ export function ContactDetail({ contactId }: ContactDetailProps) {
   const { contact, conversations, messages, stats } = profile
   const displayMessages = showAllMessages ? messages : messages.slice(0, 10)
   const visibleHandles = contact.handles.filter((h) => VISIBLE_HANDLE_TYPES.has(h.type))
+  const initials = getInitials(contact.displayName)
+  const avatarUrl = localAvatarUrl ?? contact.avatarUrl
   const contactStatus =
     contact.isDismissed || contact.status === "archived" || contact.status === "dismissed"
       ? "archived"
@@ -313,6 +372,25 @@ export function ContactDetail({ contactId }: ContactDetailProps) {
       <div className="flex-1 min-h-0">
         <ScrollArea className="h-full">
           <div className="px-5 py-7 max-w-3xl mx-auto space-y-8">
+            <SettingsSection title="Profile">
+              <SettingsCard divided={false}>
+                <div className="px-4 py-4 flex items-center gap-4">
+                  <Avatar size="lg">
+                    {avatarUrl ? (
+                      <AvatarImage src={avatarUrl} alt={contact.displayName} />
+                    ) : null}
+                    <AvatarFallback>{initials}</AvatarFallback>
+                  </Avatar>
+                  <div className="min-w-0">
+                    <p className="text-base font-semibold truncate">{contact.displayName}</p>
+                    <p className="text-sm text-muted-foreground truncate">
+                      {contact.company || "No company set"}
+                    </p>
+                  </div>
+                </div>
+              </SettingsCard>
+            </SettingsSection>
+
             {/* Overview */}
             <SettingsSection title="Overview">
               <SettingsCard>

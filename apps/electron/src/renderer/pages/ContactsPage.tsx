@@ -21,6 +21,7 @@ import type { Id } from "@cued/convex"
 import { Panel, PanelHeader } from "../components/app-shell"
 import { ContactDetail } from "../components/contacts/ContactDetail"
 import { SwipeableContactListItem } from "../components/SwipeableContactListItem"
+import { useElectron } from "../hooks/use-electron"
 import { toast } from "sonner"
 
 /** Returns true if the display name looks like an actual person name (not a phone/ID/email) */
@@ -51,6 +52,7 @@ type ContactListItem = {
   _id: Id<"contacts">
   displayName: string
   company?: string | null
+  avatarUrl?: string | null
   handles: Array<{ type: string; value: string; platform: string }>
 }
 
@@ -66,6 +68,7 @@ type PendingRareContactAction = {
 }
 
 export function ContactsPage({ initialContactId, onInitialContactConsumed }: ContactsPageProps): React.JSX.Element {
+  const electron = useElectron()
   const [selectedContactId, setSelectedContactId] = React.useState<Id<"contacts"> | null>(null)
 
   // Navigate to initial contact when provided
@@ -95,6 +98,7 @@ export function ContactsPage({ initialContactId, onInitialContactConsumed }: Con
   const [isApplyingRareAction, setIsApplyingRareAction] = React.useState(false)
   const setContactStatusMut = useMutation(api.contacts.setContactStatus)
 
+  const listContainerRef = React.useRef<HTMLDivElement>(null)
   const loadMoreRef = React.useRef<HTMLDivElement>(null)
 
   React.useEffect(() => {
@@ -110,9 +114,16 @@ export function ContactsPage({ initialContactId, onInitialContactConsumed }: Con
     namedOnly,
   })
   const contactsLoading = contactsResult === undefined
+  const nextCursor = contactsResult?.nextCursor
   const hasMore =
-    contactsResult?.nextCursor !== null &&
-    contactsResult?.nextCursor !== undefined
+    nextCursor !== null &&
+    nextCursor !== undefined
+
+  const loadNextPage = React.useCallback(() => {
+    if (!nextCursor || isLoadingMore || debouncedSearch) return
+    setIsLoadingMore(true)
+    setCursor(nextCursor)
+  }, [nextCursor, isLoadingMore, debouncedSearch])
 
   React.useEffect(() => {
     if (contactsResult?.contacts) {
@@ -133,27 +144,42 @@ export function ContactsPage({ initialContactId, onInitialContactConsumed }: Con
 
   React.useEffect(() => {
     const sentinel = loadMoreRef.current
-    if (!sentinel) return
+    const root = listContainerRef.current
+    if (!sentinel || !root || !hasMore || debouncedSearch) return
 
     const observer = new IntersectionObserver(
       (entries) => {
         const entry = entries[0]
-        if (
-          entry.isIntersecting &&
-          contactsResult?.nextCursor &&
-          !isLoadingMore &&
-          !debouncedSearch
-        ) {
-          setIsLoadingMore(true)
-          setCursor(contactsResult.nextCursor)
+        if (entry?.isIntersecting) {
+          loadNextPage()
         }
       },
-      { rootMargin: "100px" }
+      {
+        root,
+        rootMargin: "120px 0px",
+      }
     )
 
     observer.observe(sentinel)
     return () => observer.disconnect()
-  }, [contactsResult?.nextCursor, isLoadingMore, debouncedSearch])
+  }, [hasMore, debouncedSearch, loadNextPage])
+
+  // Fallback for environments where IntersectionObserver events can be flaky.
+  React.useEffect(() => {
+    const list = listContainerRef.current
+    if (!list || !hasMore || debouncedSearch) return
+
+    const onScroll = () => {
+      const distanceFromBottom = list.scrollHeight - list.scrollTop - list.clientHeight
+      if (distanceFromBottom <= 120) {
+        loadNextPage()
+      }
+    }
+
+    list.addEventListener("scroll", onScroll, { passive: true })
+    onScroll()
+    return () => list.removeEventListener("scroll", onScroll)
+  }, [hasMore, debouncedSearch, loadNextPage, allContacts.length])
 
   const rawDisplayContacts = React.useMemo(
     () => (allContacts.length > 0 ? allContacts : contactsResult?.contacts ?? []),
@@ -178,6 +204,58 @@ export function ContactsPage({ initialContactId, onInitialContactConsumed }: Con
     () => new Map(visibleContacts.map((contact) => [contact._id, contact])),
     [visibleContacts]
   )
+  const [localAvatarUrlsByContactId, setLocalAvatarUrlsByContactId] = React.useState<Record<string, string>>({})
+  const localAvatarLookupRequests = React.useMemo(
+    () =>
+      visibleContacts
+        .map((contact) => ({
+          contactId: String(contact._id),
+          handles: contact.handles
+            .filter((handle) => handle.platform === "imessage")
+            .map((handle) => handle.value)
+            .filter(Boolean),
+        }))
+        .filter((request) => request.handles.length > 0),
+    [visibleContacts]
+  )
+
+  React.useEffect(() => {
+    let isCancelled = false
+
+    if (localAvatarLookupRequests.length === 0) {
+      setLocalAvatarUrlsByContactId({})
+      return
+    }
+
+    electron.contacts.resolveAvatars(localAvatarLookupRequests)
+      .then((resolvedAvatars) => {
+        if (!isCancelled) {
+          setLocalAvatarUrlsByContactId(resolvedAvatars)
+        }
+      })
+      .catch((error) => {
+        console.warn("[ContactsPage] Failed to resolve local avatars:", error)
+        if (!isCancelled) {
+          setLocalAvatarUrlsByContactId({})
+        }
+      })
+
+    return () => {
+      isCancelled = true
+    }
+  }, [electron, localAvatarLookupRequests])
+
+  const visibleContactsWithLocalAvatars = React.useMemo(
+    () =>
+      visibleContacts.map((contact) => {
+        const localAvatarUrl = localAvatarUrlsByContactId[String(contact._id)]
+        if (!localAvatarUrl || localAvatarUrl === contact.avatarUrl) {
+          return contact
+        }
+        return { ...contact, avatarUrl: localAvatarUrl }
+      }),
+    [visibleContacts, localAvatarUrlsByContactId]
+  )
 
   // Auto-load more pages when client-side filters leave too few visible contacts
   // (e.g. phone-number contacts sort first alphabetically and get filtered out)
@@ -185,16 +263,15 @@ export function ContactsPage({ initialContactId, onInitialContactConsumed }: Con
   React.useEffect(() => {
     if (
       displayContacts.length < 10 &&
-      contactsResult?.nextCursor &&
+      nextCursor &&
       !isLoadingMore &&
       !debouncedSearch &&
       autoLoadAttemptsRef.current < 5
     ) {
       autoLoadAttemptsRef.current++
-      setIsLoadingMore(true)
-      setCursor(contactsResult.nextCursor)
+      loadNextPage()
     }
-  }, [displayContacts.length, contactsResult?.nextCursor, isLoadingMore, debouncedSearch])
+  }, [displayContacts.length, nextCursor, isLoadingMore, debouncedSearch, loadNextPage])
 
   // Reset auto-load counter when filters change
   React.useEffect(() => {
@@ -412,7 +489,7 @@ export function ContactsPage({ initialContactId, onInitialContactConsumed }: Con
         </div>
 
         {/* Contact List */}
-        <div className="flex-1 overflow-y-auto p-2">
+        <div ref={listContainerRef} className="flex-1 overflow-y-auto p-2">
           {visibleContacts.length === 0 ? (
             <EmptyState
               icon={<Users size={24} strokeWidth={1.5} className="text-muted-foreground" />}
@@ -423,7 +500,7 @@ export function ContactsPage({ initialContactId, onInitialContactConsumed }: Con
           ) : (
             <>
               <AnimatePresence mode="popLayout">
-                {visibleContacts.map((contact) => (
+                {visibleContactsWithLocalAvatars.map((contact) => (
                   <SwipeableContactListItem
                     key={contact._id}
                     contact={contact}

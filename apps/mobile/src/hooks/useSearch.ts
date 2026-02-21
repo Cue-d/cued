@@ -22,6 +22,7 @@ export interface SearchContactResult {
   _id: Id<"contacts">;
   displayName: string;
   company: string | null;
+  avatarUrl?: string | null;
   handles: { type: string; value: string; platform: string }[];
 }
 

@@ -17,6 +17,14 @@ import {
 import { normalizeEmail } from "@cued/ai";
 import { scheduleContactMergeCheck } from "../lib/contactMergeScheduling";
 import { normalizeHandleValue } from "../lib/normalizeHandle";
+import {
+  type ContactAvatarInput,
+  areContactAvatarOptionsEqual,
+  buildPrimaryAvatarFields,
+  getContactAvatarOptions,
+  normalizeContactAvatarOption,
+  upsertContactAvatarOption,
+} from "../lib/avatar";
 import { findUserByWorkosId } from "../lib/auth";
 
 // ============================================================================
@@ -239,6 +247,50 @@ export interface GetOrCreateContactResult {
   created: boolean;
 }
 
+export function buildContactAvatarPatch(
+  existing: Doc<"contacts">,
+  incoming?: ContactAvatarInput,
+): Partial<Doc<"contacts">> | null {
+  const normalizedIncoming = normalizeContactAvatarOption(incoming);
+  if (!normalizedIncoming) {
+    return null;
+  }
+
+  const existingOptions = getContactAvatarOptions(existing);
+  const existingForSource = existingOptions.find(
+    (option) => option.sourcePlatform === normalizedIncoming.sourcePlatform,
+  );
+
+  // Most sync callers do not provide an avatar timestamp. In that case, keep the
+  // stored timestamp for unchanged URL+source so no-op syncs do not trigger writes.
+  const incomingOption =
+    incoming?.updatedAt === undefined &&
+    existingForSource &&
+    existingForSource.url === normalizedIncoming.url
+      ? {
+          ...normalizedIncoming,
+          updatedAt: existingForSource.updatedAt,
+        }
+      : normalizedIncoming;
+
+  const nextOptions = upsertContactAvatarOption(existingOptions, incomingOption);
+  const primaryFields = buildPrimaryAvatarFields(nextOptions);
+
+  const primaryUnchanged =
+    existing.avatarUrl === primaryFields.avatarUrl &&
+    existing.avatarSourcePlatform === primaryFields.avatarSourcePlatform &&
+    existing.avatarUpdatedAt === primaryFields.avatarUpdatedAt;
+
+  if (primaryUnchanged && areContactAvatarOptionsEqual(existingOptions, nextOptions)) {
+    return null;
+  }
+
+  return {
+    ...primaryFields,
+    avatarOptions: nextOptions,
+  };
+}
+
 /**
  * Unified contact resolution: find or create a contact by handles.
  * Works across all platforms with consistent behavior:
@@ -260,7 +312,7 @@ export async function getOrCreateContact(
   platform: "imessage" | "slack" | "linkedin" | "twitter" | "signal",
   handles: ContactHandleInput[],
   displayName?: string,
-  metadata?: { company?: string; notes?: string },
+  metadata?: { company?: string; notes?: string; avatar?: ContactAvatarInput },
 ): Promise<GetOrCreateContactResult | undefined> {
   if (handles.length === 0) {
     console.warn("[Sync] getOrCreateContact called with no handles");
@@ -308,21 +360,30 @@ export async function getOrCreateContact(
 
       if (existing) {
         // Found existing contact - update displayName if we have a better one
+        const contact = await ctx.db.get(existing.contactId);
+        if (!contact) {
+          continue;
+        }
+
         let displayNameUpdated = false;
+        const contactPatch: Partial<Doc<"contacts">> = {};
+
         if (displayName) {
-          const contact = await ctx.db.get(existing.contactId);
-          if (
-            contact &&
-            shouldUpdateDisplayName(
-              contact.displayName,
-              displayName,
-              handle.normalized,
-            )
-          ) {
-            await ctx.db.patch(existing.contactId, { displayName });
+          if (shouldUpdateDisplayName(contact.displayName, displayName, handle.normalized)) {
+            contactPatch.displayName = displayName;
             displayNameUpdated = true;
           }
         }
+
+        const avatarPatch = buildContactAvatarPatch(contact, metadata?.avatar);
+        if (avatarPatch) {
+          Object.assign(contactPatch, avatarPatch);
+        }
+
+        if (Object.keys(contactPatch).length > 0) {
+          await ctx.db.patch(existing.contactId, contactPatch);
+        }
+
         if (displayNameUpdated) {
           await scheduleContactMergeCheck(ctx, userId, existing.contactId);
         }
@@ -333,11 +394,15 @@ export async function getOrCreateContact(
 
   // No existing contact found - create new one
   const finalDisplayName = displayName || normalizedHandles[0].value;
+  const avatarOption = normalizeContactAvatarOption(metadata?.avatar);
+  const avatarOptions = avatarOption ? [avatarOption] : [];
   const contactId = await ctx.db.insert("contacts", {
     userId,
     displayName: finalDisplayName,
     company: metadata?.company,
     notes: metadata?.notes,
+    ...buildPrimaryAvatarFields(avatarOptions),
+    avatarOptions: avatarOptions.length > 0 ? avatarOptions : undefined,
   });
 
   // Create all handles

@@ -9,12 +9,14 @@ import { useRouter } from "expo-router";
 import { SymbolView } from "expo-symbols";
 import { getInitials, type ActionPlatform } from "@cued/shared";
 import { PlatformIcon } from "@/components/platform-icons";
+import { ContactAvatar } from "@/components/contact-avatar";
 import { getThemeColors } from "@/lib/utils";
 
 export interface ContactListItemData {
   id: string;
   displayName: string;
   company?: string | null;
+  avatarUrl?: string;
   phoneNumber?: string | null;
   email?: string | null;
   platforms?: string[];
@@ -45,11 +47,12 @@ export function ContactListItem({
       accessibilityRole="button"
       accessibilityLabel={`View ${contact.displayName}`}
     >
-      <View className="w-10 h-10 rounded-full bg-muted items-center justify-center">
-        <Text className="text-muted-foreground font-semibold text-[15px]">
-          {initials}
-        </Text>
-      </View>
+      <ContactAvatar
+        initials={initials}
+        avatarUrl={contact.avatarUrl}
+        size={40}
+        fallbackTextClassName="text-muted-foreground font-semibold text-[15px]"
+      />
 
       <View className="flex-1">
         <Text className="text-[17px] text-foreground" numberOfLines={1}>

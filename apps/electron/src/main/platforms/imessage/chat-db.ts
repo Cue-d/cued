@@ -150,6 +150,7 @@ interface MessageRow {
   rowid: number;
   guid: string;
   chat_id: number;
+  item_type: number;
   sender_id: number | null;
   sender_identifier: string | null;
   sender_service: string | null;
@@ -224,6 +225,7 @@ export class ChatDb {
         m.ROWID as rowid,
         m.guid,
         cmj.chat_id,
+        m.item_type,
         CASE WHEN m.is_from_me = 0 THEN m.handle_id ELSE NULL END as sender_id,
         h.id as sender_identifier,
         h.service as sender_service,
@@ -243,7 +245,7 @@ export class ChatDb {
       FROM message m
       INNER JOIN chat_message_join cmj ON cmj.message_id = m.ROWID
       LEFT JOIN handle h ON h.ROWID = m.handle_id
-      WHERE m.ROWID > ? AND m.item_type = 0
+      WHERE m.ROWID > ? AND m.item_type IN (0, 1, 2)
       ORDER BY m.ROWID
       LIMIT ?
     `);
@@ -254,6 +256,7 @@ export class ChatDb {
         m.ROWID as rowid,
         m.guid,
         cmj.chat_id,
+        m.item_type,
         CASE WHEN m.is_from_me = 0 THEN m.handle_id ELSE NULL END as sender_id,
         h.id as sender_identifier,
         h.service as sender_service,
@@ -273,7 +276,7 @@ export class ChatDb {
       FROM message m
       INNER JOIN chat_message_join cmj ON cmj.message_id = m.ROWID
       LEFT JOIN handle h ON h.ROWID = m.handle_id
-      WHERE m.ROWID <= ? AND m.ROWID > ? AND m.item_type = 0
+      WHERE m.ROWID <= ? AND m.ROWID > ? AND m.item_type IN (0, 1, 2)
       ORDER BY m.ROWID DESC
       LIMIT ?
     `);
@@ -283,6 +286,7 @@ export class ChatDb {
         m.ROWID as rowid,
         m.guid,
         cmj.chat_id,
+        m.item_type,
         CASE WHEN m.is_from_me = 0 THEN m.handle_id ELSE NULL END as sender_id,
         h.id as sender_identifier,
         h.service as sender_service,
@@ -440,6 +444,7 @@ export class ChatDb {
         id: row.rowid,
         guid: row.guid,
         chatId: row.chat_id,
+        itemType: row.item_type,
         text,
         timestamp,
         isFromMe,

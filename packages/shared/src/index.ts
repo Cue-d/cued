@@ -8,6 +8,7 @@ export {
   phonesMatch,
   formatPhoneNumber,
 } from "./phone.js";
+export { normalizePublicAvatarUrl } from "./avatar.js";
 
 // Utility functions
 export { getInitials, truncate } from "./utils/index.js";

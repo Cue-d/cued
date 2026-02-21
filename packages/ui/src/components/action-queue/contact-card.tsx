@@ -3,7 +3,7 @@ import { ChevronRight } from "lucide-react";
 import { formatTime, getInitials, type ContactFormData } from "@cued/shared";
 import { OpenInAppButton } from "./open-in-app-button";
 import { cn } from "../../lib/utils";
-import { Avatar, AvatarFallback } from "../ui/avatar";
+import { Avatar, AvatarFallback, AvatarImage } from "../ui/avatar";
 import { Badge } from "../ui/badge";
 import { Input } from "../ui/input";
 import {
@@ -26,6 +26,8 @@ export interface ExistingContact {
 export interface ContactCardProps {
   /** Person name for display */
   personName: string;
+  /** Optional avatar URL for display */
+  avatarUrl?: string | null;
   /** When the contact was first seen */
   createdAt?: number;
   /** Form data state */
@@ -56,6 +58,7 @@ export const ContactCard = React.forwardRef<ContactCardRef, ContactCardProps>(
   function ContactCard(
     {
       personName,
+      avatarUrl,
       createdAt,
       formData,
       onFormChange,
@@ -100,6 +103,7 @@ export const ContactCard = React.forwardRef<ContactCardRef, ContactCardProps>(
         {/* Header */}
         <div className="shrink-0 flex items-center gap-3 px-5 pt-6 pb-4">
           <Avatar>
+            {avatarUrl ? <AvatarImage src={avatarUrl} alt={personName} /> : null}
             <AvatarFallback>{initials}</AvatarFallback>
           </Avatar>
           <div className="flex-1 min-w-0">

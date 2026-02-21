@@ -1,28 +1,47 @@
 import { describe, it, expect, beforeEach, vi, afterEach } from "vitest";
 import { ContactsManager, ContactsError, ContactsAccessDeniedError } from "../manager";
 
-// Mock fs module
-vi.mock("fs", async () => {
-  const actual = await vi.importActual<typeof import("fs")>("fs");
-  return {
-    ...actual,
+const {
+  fsMocks,
+  mockGetAllContacts,
+  mockGetAuthStatus,
+  mockRequestAccess,
+} = vi.hoisted(() => ({
+  fsMocks: {
     existsSync: vi.fn(),
     readFileSync: vi.fn(),
     writeFileSync: vi.fn(),
     mkdirSync: vi.fn(),
     unlinkSync: vi.fn(),
+  },
+  mockGetAllContacts: vi.fn(),
+  mockGetAuthStatus: vi.fn(),
+  mockRequestAccess: vi.fn(),
+}));
+
+// Mock fs module (manager.ts imports "fs", avatar-cache.ts imports "node:fs")
+vi.mock("fs", async () => {
+  const actual = await vi.importActual<typeof import("fs")>("fs");
+  return {
+    ...actual,
+    ...fsMocks,
+  };
+});
+vi.mock("node:fs", async () => {
+  const actual = await vi.importActual<typeof import("node:fs")>("node:fs");
+  return {
+    ...actual,
+    ...fsMocks,
   };
 });
 
-// Mock os for homedir
+// Mock os for homedir ("os" and "node:os")
 vi.mock("os", () => ({
   homedir: () => "/Users/test",
 }));
-
-// Mock native module loader
-const mockGetAllContacts = vi.fn();
-const mockGetAuthStatus = vi.fn();
-const mockRequestAccess = vi.fn();
+vi.mock("node:os", () => ({
+  homedir: () => "/Users/test",
+}));
 
 vi.mock("../../../native-module-loader", () => ({
   loadNativeModule: vi.fn(() => ({
@@ -48,6 +67,8 @@ function createMockContacts(
     phones?: string[];
     emails?: string[];
     company?: string;
+    contactImage?: Buffer;
+    contactThumbnailImage?: Buffer;
   }>
 ) {
   return contacts.map((c, i) => ({
@@ -59,6 +80,8 @@ function createMockContacts(
     phoneNumbers: c.phones ?? [],
     emailAddresses: c.emails ?? [],
     organizationName: c.company,
+    contactImage: c.contactImage,
+    contactThumbnailImage: c.contactThumbnailImage,
   }));
 }
 
@@ -148,6 +171,27 @@ describe("ContactsManager", () => {
       expect(contacts[0].company).toBe("Tech Co");
       expect(mockGetAllContacts).toHaveBeenCalled();
       expect(writeFileSync).toHaveBeenCalled();
+    });
+
+    it("maps local contact thumbnails to app-managed avatar URLs", async () => {
+      vi.mocked(existsSync).mockReturnValue(false);
+      mockGetAllContacts.mockReturnValue(
+        createMockContacts([
+          {
+            firstName: "Photo",
+            lastName: "Person",
+            phones: ["+15550001111"],
+            contactThumbnailImage: Buffer.from([0xff, 0xd8, 0xff, 0xee]),
+          },
+        ]),
+      );
+
+      const contacts = await manager.fetchContacts();
+
+      expect(mockGetAllContacts).toHaveBeenCalledWith(
+        expect.arrayContaining(["organizationName", "contactThumbnailImage", "contactImage"]),
+      );
+      expect(contacts[0].avatarUrl).toMatch(/^cued-contact-avatar:\/\/avatar\//);
     });
 
     it("ignores empty cache snapshots and fetches fresh contacts", async () => {

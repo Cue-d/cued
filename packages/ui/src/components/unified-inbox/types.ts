@@ -12,6 +12,7 @@ export type InboxConversationType = "dm" | "group" | "channel"
 export interface InboxParticipant {
   _id: string
   displayName: string
+  avatarUrl?: string
   /** Platform-specific handle for sending (e.g., phone number for iMessage) */
   handle?: string
 }

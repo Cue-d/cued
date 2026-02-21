@@ -2,6 +2,12 @@ import type { Doc, Id } from "../_generated/dataModel";
 import type { MutationCtx } from "../_generated/server";
 import { resolveMergeArtifactsForContactMerge } from "./mergeResolution";
 import { normalizeHandleValue } from "./normalizeHandle";
+import {
+  areContactAvatarOptionsEqual,
+  buildPrimaryAvatarFields,
+  getContactAvatarOptions,
+  upsertContactAvatarOption,
+} from "./avatar";
 
 const MAX_MERGE_AUDIT_MESSAGE_IDS = 2000;
 
@@ -73,14 +79,10 @@ function areStringArraysEqual(
 function buildMergeMetadataChanges(
   args: ExecuteContactMergeArgs,
 ): {
-  updates: Partial<
-    Pick<Doc<"contacts">, "displayName" | "company" | "notes" | "importance" | "tags">
-  >;
+  updates: Partial<Doc<"contacts">>;
   primaryFieldChanges: MergePrimaryFieldChanges;
 } {
-  const updates: Partial<
-    Pick<Doc<"contacts">, "displayName" | "company" | "notes" | "importance" | "tags">
-  > = {};
+  const updates: Partial<Doc<"contacts">> = {};
 
   if (args.actor === "user") {
     const resolutions = args.fieldResolutions;
@@ -289,6 +291,18 @@ export async function executeContactMerge(
   );
 
   const { updates, primaryFieldChanges } = buildMergeMetadataChanges(args);
+  const primaryAvatarOptions = getContactAvatarOptions(args.primaryContact);
+  const secondaryAvatarOptions = getContactAvatarOptions(args.secondaryContact);
+  let mergedAvatarOptions = primaryAvatarOptions;
+  for (const option of secondaryAvatarOptions) {
+    mergedAvatarOptions = upsertContactAvatarOption(mergedAvatarOptions, option);
+  }
+  if (!areContactAvatarOptionsEqual(primaryAvatarOptions, mergedAvatarOptions)) {
+    Object.assign(updates, buildPrimaryAvatarFields(mergedAvatarOptions), {
+      avatarOptions: mergedAvatarOptions,
+    });
+  }
+
   if (Object.keys(updates).length > 0) {
     await ctx.db.patch(args.primaryContactId, updates);
   }

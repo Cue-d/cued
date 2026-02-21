@@ -8,7 +8,8 @@
     "dev": "dotenv -e .env.local -- turbo dev",
     "lint": "dotenv -e .env.local -- turbo lint",
     "typecheck": "dotenv -e .env.local -- turbo typecheck",
-    "test": "dotenv -e .env.local -- turbo test"
+    "test": "dotenv -e .env.local -- turbo test",
+    "verify:avatars": "bash scripts/verify-avatar-runtime.sh"
   },
   "devDependencies": {
     "@types/node": "^25.0.9",

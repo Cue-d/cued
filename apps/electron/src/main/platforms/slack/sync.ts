@@ -33,6 +33,7 @@ import {
   isTokenExpiredError,
   type SlackConversation,
   type SlackMessage,
+  type SlackUser,
 } from './api'
 import { isAuthError, withAuthRetry } from '../../auth/auth-utils'
 import { getAuthState } from '../../auth/auth-manager'
@@ -96,11 +97,40 @@ interface CachedSlackUser {
   name: string
   realName?: string
   email?: string
+  avatarUrl?: string
   fetchedAt: number
+}
+
+interface MentionedSlackUserPayload {
+  slackUserId: string
+  displayName: string
+  realName?: string
+  email?: string
+  avatarUrl?: string
 }
 
 function getOldestMessageTimestamp(): string {
   return (getSyncCutoffMs() / 1000).toFixed(6)
+}
+
+function pickBestSlackAvatar(profile: {
+  image_original?: string
+  image_512?: string
+  image_192?: string
+  image_72?: string
+  image_48?: string
+  image_32?: string
+  image_24?: string
+}): string | undefined {
+  return (
+    profile.image_original ||
+    profile.image_512 ||
+    profile.image_192 ||
+    profile.image_72 ||
+    profile.image_48 ||
+    profile.image_32 ||
+    profile.image_24
+  )
 }
 
 // ============================================================================
@@ -174,6 +204,10 @@ export class SlackSyncManager {
   private teamId: string | null = null
   /** Cache of Slack user info to avoid repeated API calls */
   private userCache: Map<string, CachedSlackUser> = new Map()
+  /** Whether backend validator supports mentionedUsers[].avatarUrl (null = unknown). */
+  private supportsMentionedUserAvatarUrl: boolean | null = null
+  /** Last successful users.list hydration timestamp */
+  private userDirectoryFetchedAt: number | null = null
   /** State for resumable full sync */
   private fullSyncState: SlackFullSyncState | null = null
 
@@ -504,6 +538,11 @@ export class SlackSyncManager {
       ? (this.fullSyncState?.conversationListCursor ?? undefined)
       : (this.conversationListCursor ?? undefined)
 
+    // Warm user cache once per 24h to avoid one users.info call per DM conversation.
+    if (isFullSync) {
+      await this.hydrateUserCacheFromWorkspace()
+    }
+
     const completedSet = new Set(this.fullSyncState?.completedConversations ?? [])
 
     function hasReachedLimit(): boolean {
@@ -675,6 +714,9 @@ export class SlackSyncManager {
         resolvedName = mpimName
       }
     }
+    const dmUser = conversation.is_im && conversation.user
+      ? (this.userCache.get(conversation.user) ?? await this.getSlackUser(conversation.user))
+      : null
 
     await withAuthRetry(
       () => this.convexClient.mutation(api.sync.syncSlackConversations, {
@@ -689,6 +731,8 @@ export class SlackSyncManager {
           isPrivate: conversation.is_private ?? false,
           isArchived: conversation.is_archived ?? false,
           userId: conversation.user ?? undefined,
+          userName: dmUser?.name,
+          userAvatarUrl: dmUser?.avatarUrl,
           unreadCount: conversation.unread_count ?? 0,
           lastRead: conversation.last_read ?? undefined,
           latestTs: conversation.latest?.ts,
@@ -730,6 +774,7 @@ export class SlackSyncManager {
           text: resolvedText,
           userId: senderId,
           userName: senderInfo?.name,
+          userAvatarUrl: senderInfo?.avatarUrl,
           threadTs: m.thread_ts,
           isThreadParent: m.reply_count !== undefined && m.reply_count > 0,
           replyCount: m.reply_count ?? 0,
@@ -743,22 +788,15 @@ export class SlackSyncManager {
     )
 
     // Convert mentioned users to format expected by Convex
-    const mentionedUsersArray = Array.from(allMentionedUsers.values()).map((u) => ({
+    const mentionedUsersArray: MentionedSlackUserPayload[] = Array.from(allMentionedUsers.values()).map((u) => ({
       slackUserId: u.id,
       displayName: u.name,
       realName: u.realName,
       email: u.email,
+      avatarUrl: u.avatarUrl,
     }))
 
-    await withAuthRetry(
-      () => this.convexClient.mutation(api.sync.syncSlackNativeMessages, {
-        slackUserId: this.credentials!.userId,
-        teamId: this.credentials!.teamId,
-        messages: transformedMessages,
-        mentionedUsers: mentionedUsersArray,
-      }),
-      createAuthRetryOptions(this.convexClient)
-    )
+    await this.syncSlackMessagesMutation(transformedMessages, mentionedUsersArray)
   }
 
   // ============================================================================
@@ -774,6 +812,8 @@ export class SlackSyncManager {
     this.conversationListCursor = null
     this.lastSyncAt = 0
     this.userCache.clear()
+    this.supportsMentionedUserAvatarUrl = null
+    this.userDirectoryFetchedAt = null
     this.fullSyncState = null
     this.progress = {
       status: 'idle',
@@ -813,6 +853,55 @@ export class SlackSyncManager {
   // User Resolution Methods
   // ============================================================================
 
+  private buildCachedSlackUser(user: SlackUser): CachedSlackUser {
+    return {
+      id: user.id,
+      name: user.profile.display_name || user.profile.real_name || user.name,
+      realName: user.profile.real_name,
+      email: user.profile.email,
+      avatarUrl: pickBestSlackAvatar(user.profile),
+      fetchedAt: Date.now(),
+    }
+  }
+
+  /**
+   * Populate cache with workspace users to reduce users.info calls during full sync.
+   */
+  private async hydrateUserCacheFromWorkspace(): Promise<void> {
+    if (!this.client) return
+
+    const now = Date.now()
+    if (this.userDirectoryFetchedAt && now - this.userDirectoryFetchedAt < USER_CACHE_TTL_MS) {
+      return
+    }
+
+    let cursor: string | undefined
+
+    try {
+      do {
+        const { users, nextCursor } = await this.client.listUsers({
+          cursor,
+          limit: 200,
+        })
+
+        for (const user of users) {
+          this.userCache.set(user.id, this.buildCachedSlackUser(user))
+        }
+
+        if (this.userCache.size > MAX_USER_CACHE_SIZE) {
+          this.pruneUserCache()
+        }
+
+        cursor = nextCursor
+      } while (cursor)
+
+      this.userDirectoryFetchedAt = now
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      console.warn(`[SlackSync] Failed to hydrate user directory from users.list: ${message}`)
+    }
+  }
+
   /**
    * Get a Slack user by ID, using cache when available.
    * Fetches from API if not cached or cache expired.
@@ -831,13 +920,7 @@ export class SlackSyncManager {
       const user = await this.client.getUserInfo(userId)
       if (!user) return null
 
-      const cachedUser: CachedSlackUser = {
-        id: user.id,
-        name: user.profile.display_name || user.profile.real_name || user.name,
-        realName: user.profile.real_name,
-        email: user.profile.email,
-        fetchedAt: Date.now(),
-      }
+      const cachedUser = this.buildCachedSlackUser(user)
       // Prune cache if it exceeds max size (remove oldest entries)
       if (this.userCache.size > MAX_USER_CACHE_SIZE) {
         this.pruneUserCache()
@@ -880,6 +963,69 @@ export class SlackSyncManager {
 
     for (const id of entriesToRemove) {
       this.userCache.delete(id)
+    }
+  }
+
+  private removeAvatarFromMentionedUsers(
+    mentionedUsers: MentionedSlackUserPayload[]
+  ): Array<Omit<MentionedSlackUserPayload, 'avatarUrl'>> {
+    return mentionedUsers.map(({ avatarUrl: _avatarUrl, ...rest }) => rest)
+  }
+
+  private isMentionedAvatarValidatorError(error: unknown): boolean {
+    const message = error instanceof Error ? error.message : String(error)
+    return (
+      message.includes('ArgumentValidationError') &&
+      message.includes('mentionedUsers') &&
+      message.includes('avatarUrl') &&
+      message.includes('extra field')
+    )
+  }
+
+  private async syncSlackMessagesMutation(
+    transformedMessages: Array<{
+      channelId: string
+      ts: string
+      text: string
+      userId: string
+      userName?: string
+      userAvatarUrl?: string
+      threadTs?: string
+      isThreadParent: boolean
+      replyCount: number
+      reactions?: Array<{ name: string; count: number; users: string[] }>
+    }>,
+    mentionedUsers: MentionedSlackUserPayload[]
+  ): Promise<void> {
+    const runMutation = async (
+      payloadMentionedUsers: MentionedSlackUserPayload[] | Array<Omit<MentionedSlackUserPayload, 'avatarUrl'>>
+    ) =>
+      withAuthRetry(
+        () => this.convexClient.mutation(api.sync.syncSlackNativeMessages, {
+          slackUserId: this.credentials!.userId,
+          teamId: this.credentials!.teamId,
+          messages: transformedMessages,
+          mentionedUsers: payloadMentionedUsers,
+        }),
+        createAuthRetryOptions(this.convexClient)
+      )
+
+    if (this.supportsMentionedUserAvatarUrl === false) {
+      await runMutation(this.removeAvatarFromMentionedUsers(mentionedUsers))
+      return
+    }
+
+    try {
+      await runMutation(mentionedUsers)
+      this.supportsMentionedUserAvatarUrl = true
+    } catch (error) {
+      if (!this.isMentionedAvatarValidatorError(error)) {
+        throw error
+      }
+
+      this.supportsMentionedUserAvatarUrl = false
+      console.warn('[SlackSync] Backend validator rejected mentionedUsers.avatarUrl; retrying without avatarUrl')
+      await runMutation(this.removeAvatarFromMentionedUsers(mentionedUsers))
     }
   }
 

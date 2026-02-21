@@ -5,7 +5,7 @@ import { UserIcon } from "lucide-react"
 import { createPortal } from "react-dom"
 import { getInitials } from "@cued/shared"
 import { cn } from "../../lib/utils"
-import { Avatar, AvatarFallback } from "../ui/avatar"
+import { Avatar, AvatarFallback, AvatarImage } from "../ui/avatar"
 import {
   Command,
   CommandEmpty,
@@ -252,6 +252,9 @@ export function MentionPicker({
                   className="flex cursor-pointer items-center gap-3 px-3 py-2"
                 >
                   <Avatar size="sm">
+                    {contact.avatarUrl ? (
+                      <AvatarImage src={contact.avatarUrl} alt={contact.displayName ?? "Contact"} />
+                    ) : null}
                     <AvatarFallback>
                       {contact.displayName ? (
                         getInitials(contact.displayName)

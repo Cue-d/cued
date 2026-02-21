@@ -9,8 +9,9 @@ import { usePaginatedQuery } from "convex/react";
 import { api } from "@cued/convex";
 import { useSearch, type SearchContactResult, type SearchMessageResult } from "@/hooks/useSearch";
 import { PlatformIcon } from "@/components/platform-icons";
+import { ContactAvatar } from "@/components/contact-avatar";
 import { isRealContactName } from "@/lib/utils";
-import { type ActionPlatform } from "@cued/shared";
+import { getInitials, type ActionPlatform } from "@cued/shared";
 
 const AVATAR_SIZE = 40;
 const PAGE_SIZE = 50;
@@ -61,9 +62,16 @@ function ContactResultCard({ contact }: { contact: SearchContactResult }): React
       onPress={handlePress}
       style={{ flexDirection: "row", alignItems: "center", paddingHorizontal: 16, paddingVertical: 12, gap: 12 }}
     >
-        <View style={avatarStyle}>
-          <SymbolView name="person.fill" tintColor={PlatformColor("secondaryLabel")} size={20} />
-        </View>
+        <ContactAvatar
+          initials={getInitials(contact.displayName)}
+          avatarUrl={contact.avatarUrl}
+          size={AVATAR_SIZE}
+          className="items-center justify-center"
+          containerStyle={{ backgroundColor: PlatformColor("systemGray5") }}
+          fallbackTextClassName="text-[15px] font-semibold"
+          fallbackTextStyle={{ color: PlatformColor("secondaryLabel") }}
+          transition={100}
+        />
         <View style={{ flex: 1 }}>
           <Text
             style={{ fontSize: 16, fontWeight: "500", color: PlatformColor("label") }}
@@ -256,6 +264,7 @@ function DefaultContactsList(): React.ReactElement {
           _id: c._id,
           displayName: c.displayName,
           company: c.company ?? null,
+          avatarUrl: c.avatarUrl ?? null,
           handles: c.handles ?? [],
         })),
     [results]

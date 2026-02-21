@@ -257,6 +257,7 @@ export function createLinkedInContactsSyncFn(
         profileUrl: conn.profileUrl,
         headline: conn.headline ?? null,
         profileId: conn.profileId,
+        avatarUrl: conn.picture?.url,
       }))
 
       const convexClient = createConvexClient()

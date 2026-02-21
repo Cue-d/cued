@@ -33,14 +33,23 @@ async function getOrCreateSlackContact(
   ctx: MutationCtx,
   userId: Id<"users">,
   slackUserId: string,
-  displayName?: string
+  displayName?: string,
+  avatarUrl?: string
 ): Promise<GetOrCreateContactResult | undefined> {
   return getOrCreateContact(
     ctx,
     userId,
     "slack",
     [{ value: slackUserId, type: "slack_id" }],
-    displayName || slackUserId
+    displayName || slackUserId,
+    {
+      avatar: avatarUrl
+        ? {
+            url: avatarUrl,
+            sourcePlatform: "slack",
+          }
+        : undefined,
+    }
   );
 }
 
@@ -60,6 +69,8 @@ export const nativeSlackConversationInput = v.object({
   isPrivate: v.boolean(),
   isArchived: v.boolean(),
   userId: v.optional(v.string()), // DM partner user ID
+  userName: v.optional(v.string()),
+  userAvatarUrl: v.optional(v.string()),
   unreadCount: v.number(),
   lastRead: v.optional(v.string()),
   latestTs: v.optional(v.string()),
@@ -77,6 +88,7 @@ export const nativeSlackMessageInput = v.object({
   text: v.string(),
   userId: v.string(), // Sender Slack user ID
   userName: v.optional(v.string()), // Sender display name (if known)
+  userAvatarUrl: v.optional(v.string()), // Sender avatar URL (if known)
   threadTs: v.optional(v.string()),
   isThreadParent: v.boolean(),
   replyCount: v.number(),
@@ -99,6 +111,7 @@ export const slackMentionedUserInput = v.object({
   displayName: v.string(),
   realName: v.optional(v.string()),
   email: v.optional(v.string()),
+  avatarUrl: v.optional(v.string()),
 });
 
 export type NativeSlackMessageInput = Infer<typeof nativeSlackMessageInput>;
@@ -147,7 +160,13 @@ export async function syncSlackConversationsInternal(
       // For DMs, create contact for the other user
       let participantContactIds: Id<"contacts">[] = [];
       if (conv.isIm && conv.userId) {
-        const contactResult = await getOrCreateSlackContact(ctx, userId, conv.userId);
+        const contactResult = await getOrCreateSlackContact(
+          ctx,
+          userId,
+          conv.userId,
+          conv.userName,
+          conv.userAvatarUrl
+        );
         if (contactResult) {
           participantContactIds = [contactResult.contactId];
           if (contactResult.created) result.contactsCreated++;
@@ -242,7 +261,8 @@ export async function syncSlackNativeMessagesInternal(
           ctx,
           userId,
           user.slackUserId,
-          user.displayName
+          user.displayName,
+          user.avatarUrl
         );
         if (contactResult?.created) {
           result.contactsCreated++;
@@ -336,7 +356,8 @@ export async function syncSlackNativeMessagesInternal(
             ctx,
             userId,
             msg.userId,
-            msg.userName // Pass display name if available
+            msg.userName, // Pass display name if available
+            msg.userAvatarUrl
           );
           senderContactId = contactResult?.contactId;
           senderHandleId = contactResult?.handleId;

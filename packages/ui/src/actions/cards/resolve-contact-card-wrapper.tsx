@@ -100,6 +100,7 @@ export function ResolveContactCardWrapper({
   return (
     <ResolveContactCard
       name={name}
+      avatarUrl={contact?.avatarUrl ?? secondaryContact?.avatarUrl ?? null}
       handles={handles}
       confidence={action.mergeConfidence ?? 0}
       source={(action.mergeSource ?? "email_match") as MergeSource}

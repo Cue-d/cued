@@ -52,6 +52,10 @@ if (!window.electron && import.meta.env.DEV) {
       },
     },
 
+    contacts: {
+      resolveAvatars: async () => ({}),
+    },
+
     auth: {
       getState: async () => {
         const token = localStorage.getItem("__cued_dev_token")

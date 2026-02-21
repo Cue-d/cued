@@ -43,6 +43,7 @@ export interface ActionContext {
     company: string | null;
     notes: string | null;
     importance: number | null;
+    avatarUrl?: string | null;
     handles: Array<{
       handleType: string;
       handle: string;
@@ -56,6 +57,7 @@ export interface ActionContext {
     company: string | null;
     notes: string | null;
     importance: number | null;
+    avatarUrl?: string | null;
     handles: Array<{
       handleType: string;
       handle: string;

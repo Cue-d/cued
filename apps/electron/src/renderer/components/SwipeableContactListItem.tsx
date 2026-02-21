@@ -3,6 +3,7 @@ import { Archive } from "lucide-react";
 import { getInitials, type ActionPlatform, PLATFORM_CONFIG } from "@cued/shared";
 import {
   Avatar,
+  AvatarImage,
   AvatarFallback,
   Badge,
   Button,
@@ -22,6 +23,7 @@ interface ContactListItemContact {
   _id: Id<"contacts">;
   displayName: string;
   company?: string | null;
+  avatarUrl?: string | null;
   handles: Array<{ type: string; value: string; platform: string }>;
 }
 
@@ -78,6 +80,9 @@ export function SwipeableContactListItem({
     >
       <div className="flex items-center gap-3">
         <Avatar size="lg">
+          {contact.avatarUrl ? (
+            <AvatarImage src={contact.avatarUrl} alt={contact.displayName} />
+          ) : null}
           <AvatarFallback>{getInitials(contact.displayName)}</AvatarFallback>
         </Avatar>
         <div className="min-w-0 flex-1">

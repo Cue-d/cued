@@ -14,6 +14,7 @@ export const SLACK_API_URLS = {
 
   // Users
   usersInfo: `${SLACK_API_BASE}/users.info`,
+  usersList: `${SLACK_API_BASE}/users.list`,
   usersProfile: `${SLACK_API_BASE}/users.profile.get`,
 
   // Conversations

@@ -279,6 +279,7 @@ export class TwitterSyncManager {
             handle: user.screen_name,
             userId: user.id_str,
             bio: user.description ?? null,
+            avatarImageUrl: user.profile_image_url_https,
           }))
 
         if (contacts.length > 0) {
@@ -852,6 +853,7 @@ export class TwitterSyncManager {
           handle: user.screen_name,
           userId: user.id_str,
           bio: user.description ?? null,
+          avatarImageUrl: user.profile_image_url_https,
         }))
 
       if (contacts.length > 0) {

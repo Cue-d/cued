@@ -916,6 +916,10 @@ export class LinkedInSyncManager {
       deliveredAt: m.deliveredAt,
       senderURN: m.sender.entityURN,
       senderProfileUrl: m.sender.participantType.member?.profileUrl || undefined,
+      senderPictureUrl:
+        m.sender.participantType.member?.picture?.url ||
+        m.sender.participantType.organization?.logoUrl ||
+        undefined,
       senderFirstName: this.extractText(
         m.sender.participantType.member?.firstName ??
         m.sender.participantType.organization?.name ??

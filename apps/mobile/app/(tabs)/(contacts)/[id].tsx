@@ -18,21 +18,11 @@ import {
   type ActionPlatform,
 } from "@cued/shared";
 import { PlatformIcon } from "@/components/platform-icons";
+import { ContactAvatar } from "@/components/contact-avatar";
 import { SendMessageSheet, type SendMessageContact } from "@/components/send-message-sheet";
 import { MergeContactSheet } from "@/components/merge-contact-sheet";
 import type { Id } from "@cued/convex/convex/_generated/dataModel";
 import type { SFSymbol } from "sf-symbols-typescript";
-
-/** Avatar component */
-function Avatar({ initials }: { initials: string }): React.JSX.Element {
-  return (
-    <View className="w-20 h-20 rounded-full bg-muted items-center justify-center">
-      <Text className="text-2xl font-semibold text-muted-foreground">
-        {initials}
-      </Text>
-    </View>
-  );
-}
 
 /** Handle type to SF Symbol mapping */
 function getHandleIcon(type: string): SFSymbol {
@@ -361,7 +351,12 @@ export default function ContactDetailScreen(): React.JSX.Element {
       >
         {/* Profile Header */}
         <View className="items-center pt-6 pb-4">
-          <Avatar initials={initials} />
+          <ContactAvatar
+            initials={initials}
+            avatarUrl={contact.avatarUrl}
+            size={80}
+            fallbackTextClassName="text-2xl font-semibold text-muted-foreground"
+          />
           <Text style={{ fontSize: 24, fontWeight: "700", color: PlatformColor("label"), marginTop: 16 }}>
             {contact.displayName}
           </Text>
@@ -618,14 +613,16 @@ export default function ContactDetailScreen(): React.JSX.Element {
                   borderTopColor: PlatformColor("separator"),
                 }}
               >
-                <View
-                  className="w-8 h-8 rounded-full items-center justify-center mr-3"
-                  style={{ backgroundColor: PlatformColor("systemBlue") }}
-                >
-                  <Text style={{ fontSize: 13, fontWeight: "600", color: "white" }}>
-                    {getInitials(contact.displayName)}
-                  </Text>
-                </View>
+                <ContactAvatar
+                  initials={getInitials(contact.displayName)}
+                  avatarUrl={contact.avatarUrl}
+                  size={32}
+                  className="items-center justify-center mr-3"
+                  containerStyle={{ backgroundColor: PlatformColor("systemBlue") }}
+                  fallbackTextClassName="text-[13px] font-semibold"
+                  fallbackTextStyle={{ color: "white" }}
+                  transition={100}
+                />
                 <Text style={{ fontSize: 16, fontWeight: "600", color: PlatformColor("label") }} numberOfLines={1}>
                   {contact.displayName}
                 </Text>
@@ -672,7 +669,7 @@ const NearbyContactRow = memo(function NearbyContactRow({
   isFirst,
   onPress,
 }: {
-  contact: { _id: string; displayName: string; company?: string | null };
+  contact: { _id: string; displayName: string; company?: string | null; avatarUrl?: string | null };
   isFirst: boolean;
   onPress: () => void;
 }): React.JSX.Element {
@@ -684,14 +681,16 @@ const NearbyContactRow = memo(function NearbyContactRow({
       accessibilityRole="button"
       accessibilityLabel={`Go to ${contact.displayName}`}
     >
-      <View
-        className="w-8 h-8 rounded-full items-center justify-center mr-3"
-        style={{ backgroundColor: PlatformColor("tertiarySystemFill") }}
-      >
-        <Text style={{ fontSize: 13, fontWeight: "500", color: PlatformColor("secondaryLabel") }}>
-          {getInitials(contact.displayName)}
-        </Text>
-      </View>
+      <ContactAvatar
+        initials={getInitials(contact.displayName)}
+        avatarUrl={contact.avatarUrl}
+        size={32}
+        className="items-center justify-center mr-3"
+        containerStyle={{ backgroundColor: PlatformColor("tertiarySystemFill") }}
+        fallbackTextClassName="text-[13px] font-medium"
+        fallbackTextStyle={{ color: PlatformColor("secondaryLabel") }}
+        transition={100}
+      />
       <View className="flex-1" style={{ minWidth: 0 }}>
         <Text style={{ fontSize: 16, color: PlatformColor("label") }} numberOfLines={1}>
           {contact.displayName}

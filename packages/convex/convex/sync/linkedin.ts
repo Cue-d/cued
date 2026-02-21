@@ -29,7 +29,12 @@ import {
   BATCH_SIZE,
   logSyncError,
   resolveMessageQueueBridge,
+  buildContactAvatarPatch,
 } from "./shared";
+import {
+  buildPrimaryAvatarFields,
+  normalizeContactAvatarOption,
+} from "../lib/avatar";
 import { scheduleContactMergeCheck } from "../lib/contactMergeScheduling";
 import { resolveActionSummary } from "../lib/actionSummary";
 
@@ -103,6 +108,7 @@ export const linkedInMessageInput = v.object({
   deliveredAt: v.number(), // Unix ms
   senderURN: v.string(),
   senderProfileUrl: v.optional(v.string()), // Profile URL if available
+  senderPictureUrl: v.optional(v.string()), // Avatar URL if available
   senderFirstName: v.string(),
   senderLastName: v.string(),
   messageBodyRenderFormat: v.union(
@@ -382,6 +388,7 @@ export async function syncLinkedInMessagesInternal(
             msg.senderFirstName,
             msg.senderLastName,
             msg.senderProfileUrl,
+            msg.senderPictureUrl,
           );
           senderContactId = senderResult.contactId;
           senderHandleId = senderResult.handleId;
@@ -537,6 +544,7 @@ async function getOrCreateLinkedInContactInternal(
   firstName: string,
   lastName: string,
   profileUrl?: string,
+  pictureUrl?: string,
   fallbackName?: string,
 ): Promise<GetOrCreateContactResult> {
   const normalizedURN = normalizeMemberURN(urn).toLowerCase();
@@ -559,6 +567,14 @@ async function getOrCreateLinkedInContactInternal(
     "linkedin",
     handles,
     displayName,
+    {
+      avatar: pictureUrl
+        ? {
+            url: pictureUrl,
+            sourcePlatform: "linkedin",
+          }
+        : undefined,
+    },
   );
   if (!result) {
     throw new Error(`Failed to create LinkedIn contact for ${displayName}`);
@@ -581,6 +597,7 @@ async function getOrCreateLinkedInContact(
     participant.firstName,
     participant.lastName,
     participant.profileUrl,
+    participant.pictureUrl,
   );
 }
 
@@ -594,6 +611,7 @@ async function getOrCreateLinkedInContactByURN(
   firstName: string,
   lastName: string,
   profileUrl?: string,
+  pictureUrl?: string,
 ): Promise<GetOrCreateContactResult> {
   return getOrCreateLinkedInContactInternal(
     ctx,
@@ -602,6 +620,7 @@ async function getOrCreateLinkedInContactByURN(
     firstName,
     lastName,
     profileUrl,
+    pictureUrl,
     senderURN, // Fallback to URN if no name
   );
 }
@@ -864,6 +883,7 @@ export const linkedInContactInput = v.object({
   profileUrl: v.string(),
   headline: v.union(v.string(), v.null()),
   profileId: v.optional(v.string()),
+  avatarUrl: v.optional(v.string()),
 });
 
 export const linkedInContactsBatchInput = v.object({
@@ -940,9 +960,27 @@ export async function syncLinkedInContactsInternal(
       if (existingHandle) {
         const existingContact = await ctx.db.get(existingHandle.contactId);
         if (existingContact) {
+          const contactPatch: Partial<Doc<"contacts">> = {};
           const company = extractCompanyFromHeadline(contact.headline);
           if (company && !existingContact.company) {
-            await ctx.db.patch(existingHandle.contactId, { company });
+            contactPatch.company = company;
+          }
+
+          const avatarPatch = buildContactAvatarPatch(
+            existingContact,
+            contact.avatarUrl
+              ? {
+                  url: contact.avatarUrl,
+                  sourcePlatform: "linkedin",
+                }
+              : undefined,
+          );
+          if (avatarPatch) {
+            Object.assign(contactPatch, avatarPatch);
+          }
+
+          if (Object.keys(contactPatch).length > 0) {
+            await ctx.db.patch(existingHandle.contactId, contactPatch);
           }
           // If found by URN but missing username handle, add it
           if (normalizedHandle && existingHandle.handle !== normalizedHandle) {
@@ -968,10 +1006,19 @@ export async function syncLinkedInContactsInternal(
       } else {
         // Create new contact
         const company = extractCompanyFromHeadline(contact.headline);
+        const avatarOption = contact.avatarUrl
+          ? normalizeContactAvatarOption({
+              url: contact.avatarUrl,
+              sourcePlatform: "linkedin",
+            })
+          : undefined;
+        const avatarOptions = avatarOption ? [avatarOption] : [];
         const contactId = await ctx.db.insert("contacts", {
           userId,
           displayName: contact.name,
           company,
+          ...buildPrimaryAvatarFields(avatarOptions),
+          avatarOptions: avatarOptions.length > 0 ? avatarOptions : undefined,
         });
 
         if (normalizedHandle) {

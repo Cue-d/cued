@@ -49,6 +49,7 @@ export function AppLayoutClient({
     ? {
         name: [userProfile.firstName, userProfile.lastName].filter(Boolean).join(" ") || undefined,
         email: userProfile.email ?? undefined,
+        imageUrl: userProfile.profilePictureUrl ?? undefined,
       }
     : null;
 

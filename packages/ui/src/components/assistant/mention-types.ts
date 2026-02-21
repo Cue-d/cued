@@ -12,6 +12,7 @@ export interface MentionSearchResult {
   _id: string
   displayName: string
   company?: string | null
+  avatarUrl?: string | null
   handles?: Array<{
     type: string
     value: string

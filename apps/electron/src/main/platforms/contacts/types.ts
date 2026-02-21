@@ -8,6 +8,8 @@ export interface NativeContact {
   phoneNumbers: string[];
   emailAddresses: string[];
   organizationName?: string;
+  contactImage?: Buffer;
+  contactThumbnailImage?: Buffer;
 }
 
 /** Auth status strings returned by node-mac-contacts. */
@@ -17,10 +19,26 @@ export type ContactsAuthStatus =
   | "Authorized"
   | "Restricted";
 
+export type ContactExtraProperty =
+  | "jobTitle"
+  | "departmentName"
+  | "organizationName"
+  | "middleName"
+  | "note"
+  | "contactImage"
+  | "contactThumbnailImage"
+  | "instantMessageAddresses"
+  | "socialProfiles";
+
 /** node-mac-contacts module API. */
 export interface NodeMacContacts {
-  getAllContacts(extraProperties?: string[]): NativeContact[];
-  getContactsByName(name: string, extraProperties?: string[]): NativeContact[];
+  getAllContacts(
+    extraProperties?: ContactExtraProperty[],
+  ): NativeContact[];
+  getContactsByName(
+    name: string,
+    extraProperties?: ContactExtraProperty[],
+  ): NativeContact[];
   getAuthStatus(): ContactsAuthStatus;
   requestAccess(): Promise<"Denied" | "Authorized">;
   listener: {

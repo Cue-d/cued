@@ -65,6 +65,8 @@ export interface Message {
   guid: string;
   /** Chat ROWID this message belongs to */
   chatId: number;
+  /** message.item_type from chat.db (0=normal, 1=member change, 2=name change) */
+  itemType?: number;
   /** Message text content (extracted from text or attributedBody) */
   text: string | null;
   /** Unix timestamp in seconds */
@@ -134,6 +136,8 @@ export interface ResolvedContact {
   displayName: string;
   /** Company/organization if available */
   company: string | null;
+  /** Local avatar URL served via the app-managed contact avatar protocol */
+  avatarUrl?: string;
   /** Phone numbers associated with contact */
   phoneNumbers: string[];
   /** Email addresses associated with contact */

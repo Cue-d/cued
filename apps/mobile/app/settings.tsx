@@ -19,21 +19,9 @@ import type { ActionPlatform } from "@cued/shared";
 import { getRedirectUri } from "@/lib/auth";
 import { useElectronPrescence } from "@/contexts/electron-presence-context";
 import { PlatformIcon } from "@/components/platform-icons";
+import { ContactAvatar } from "@/components/contact-avatar";
 import { cn, getDisplayName, getThemeColors } from "@/lib/utils";
 import { useAuth } from "@/providers/AuthProvider";
-
-function Avatar({ name, size = 80 }: { name: string; size?: number }): React.ReactElement {
-  return (
-    <View
-      className="items-center justify-center rounded-full bg-primary"
-      style={{ width: size, height: size }}
-    >
-      <Text className="font-medium text-primary-foreground text-2xl">
-        {getInitials(name)}
-      </Text>
-    </View>
-  );
-}
 
 interface SettingsRowProps {
   icon: string;
@@ -175,6 +163,7 @@ export default function SettingsScreen(): React.ReactElement {
   const colorScheme = useColorScheme();
   const colors = getThemeColors(colorScheme === "dark");
   const displayName = getDisplayName(user);
+  const initials = getInitials(displayName);
   const activeTheme: ThemeValue = hasAdaptiveThemes ? "system" : theme;
   const activeThemeLabel = THEME_OPTIONS.find((o) => o.value === activeTheme)?.label;
 
@@ -227,7 +216,13 @@ export default function SettingsScreen(): React.ReactElement {
     <SafeAreaView className="flex-1 bg-background">
       <ScrollView contentContainerClassName="pb-12">
       <View className="items-center mt-12">
-        <Avatar name={displayName} size={80} />
+        <ContactAvatar
+          initials={initials}
+          avatarUrl={user?.profile_picture_url}
+          size={80}
+          className="items-center justify-center rounded-full bg-primary"
+          fallbackTextClassName="font-medium text-primary-foreground text-2xl"
+        />
         <Text className="text-xl font-semibold text-foreground mt-3">{displayName}</Text>
         <Text className="text-muted-foreground text-[15px] mt-0.5">{user?.email}</Text>
       </View>

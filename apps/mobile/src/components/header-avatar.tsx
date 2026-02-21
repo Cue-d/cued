@@ -1,9 +1,10 @@
-import { Pressable, View, Text } from "react-native";
+import { Pressable } from "react-native";
 import * as Haptics from "expo-haptics";
 import { router } from "expo-router";
 import { getInitials } from "@cued/shared";
 import { getDisplayName } from "@/lib/utils";
 import { useAuth } from "@/providers/AuthProvider";
+import { ContactAvatar } from "@/components/contact-avatar";
 
 interface HeaderAvatarProps {
   size?: number;
@@ -13,6 +14,7 @@ export function HeaderAvatar({ size = 32 }: HeaderAvatarProps): React.ReactEleme
   const { user } = useAuth();
   const displayName = getDisplayName(user);
   const initials = getInitials(displayName);
+  const profilePhotoUrl = user?.profile_picture_url;
 
   function handlePress(): void {
     Haptics.selectionAsync();
@@ -25,23 +27,19 @@ export function HeaderAvatar({ size = 32 }: HeaderAvatarProps): React.ReactEleme
       accessibilityLabel="Open settings"
       accessibilityRole="button"
     >
-      <View
-        className="rounded-full"
-        style={{ width: size, height: size }}
-      >
-        <Text
-          className="font-bold text-muted-foreground"
-          style={{
-            width: size,
-            fontSize: size * 0.5,
-            lineHeight: size,
-            textAlign: "center",
-            textAlignVertical: "center",
-          }}
-        >
-          {initials}
-        </Text>
-      </View>
+      <ContactAvatar
+        initials={initials}
+        avatarUrl={profilePhotoUrl}
+        size={size}
+        fallbackTextClassName="font-bold text-muted-foreground"
+        fallbackTextStyle={{
+          fontSize: size * 0.5,
+          lineHeight: size,
+          textAlign: "center",
+          textAlignVertical: "center",
+        }}
+        transition={100}
+      />
     </Pressable>
   );
 }

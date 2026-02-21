@@ -7,6 +7,7 @@ import {
   mapQueueToInboxMessage,
 } from "./lib/queueMerge";
 import { platformValidator } from "./schema";
+import { normalizePublicAvatarUrl } from "./lib/avatar";
 import {
   groupReactions,
   collectReactionContactIds,
@@ -335,9 +336,11 @@ async function fetchInbox(
           _id: Id<"contacts">;
           displayName: string;
           handle?: string;
+          avatarUrl?: string;
         } = {
           _id: contact._id,
           displayName: contact.displayName,
+          avatarUrl: normalizePublicAvatarUrl(contact.avatarUrl),
         };
         if (isDm) {
           const handle = handleMap.get(`${conversation.platform}:${contactId}`);

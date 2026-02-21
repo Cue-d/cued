@@ -9,19 +9,9 @@ import { useQuery } from "convex/react";
 import { api } from "@cued/convex";
 import { getInitials, formatPhoneNumber, PLATFORM_CONFIG, type ActionPlatform } from "@cued/shared";
 import { PlatformIcon } from "@/components/platform-icons";
+import { ContactAvatar } from "@/components/contact-avatar";
 import type { Id } from "@cued/convex/convex/_generated/dataModel";
 import type { SFSymbol } from "sf-symbols-typescript";
-
-/** Avatar component */
-function Avatar({ initials }: { initials: string }): React.JSX.Element {
-  return (
-    <View className="w-20 h-20 rounded-full bg-muted items-center justify-center">
-      <Text className="text-[28px] font-semibold text-muted-foreground">
-        {initials}
-      </Text>
-    </View>
-  );
-}
 
 /** Handle type to SF Symbol mapping */
 function getHandleIcon(type: string): SFSymbol {
@@ -207,7 +197,12 @@ export default function ContactDetailScreen(): React.JSX.Element {
       >
         {/* Profile Header */}
         <View className="items-center pb-4">
-          <Avatar initials={getInitials(contact.displayName)} />
+          <ContactAvatar
+            initials={getInitials(contact.displayName)}
+            avatarUrl={contact.avatarUrl}
+            size={80}
+            fallbackTextClassName="text-[28px] font-semibold text-muted-foreground"
+          />
           <Text style={{ fontSize: 24, fontWeight: "700", color: PlatformColor("label"), marginTop: 16 }}>
             {contact.displayName}
           </Text>

@@ -6,16 +6,19 @@
  */
 
 import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from "fs";
-import { homedir } from "os";
 import { join } from "path";
 import { ResolvedContact } from "../imessage/types";
 import { normalizePhone, getPhoneVariants } from "@cued/shared";
 import { loadNativeModule } from "../../native-module-loader";
 import type { NodeMacContacts } from "./types";
+import {
+  CONTACTS_CACHE_DIR,
+  cacheContactAvatar,
+  pruneContactAvatarCache,
+} from "./avatar-cache";
 
 /** Default cache directory for contacts */
-const CACHE_DIR = join(homedir(), ".cued");
-const CACHE_FILE = join(CACHE_DIR, "contacts_cache.json");
+const CACHE_FILE = join(CONTACTS_CACHE_DIR, "contacts_cache.json");
 
 /** Cache expiry in milliseconds (24 hours) */
 const CACHE_EXPIRY_MS = 24 * 60 * 60 * 1000;
@@ -174,19 +177,33 @@ export class ContactsManager {
     }
 
     const start = Date.now();
-    const raw = contacts.getAllContacts(["organizationName"]);
+    const raw = contacts.getAllContacts([
+      "organizationName",
+      "contactThumbnailImage",
+      "contactImage",
+    ]);
     console.log(`[Contacts] Fetched ${raw.length} contacts in ${Date.now() - start}ms`);
 
+    const usedAvatarFiles = new Set<string>();
     const resolved = raw.map((c) => {
       const fullName = [c.firstName, c.lastName].filter(Boolean).join(" ");
+      const cachedAvatar = cacheContactAvatar(
+        c.identifier,
+        c.contactThumbnailImage ?? c.contactImage,
+      );
+      if (cachedAvatar) {
+        usedAvatarFiles.add(cachedAvatar.fileName);
+      }
       return {
         displayName: fullName || c.organizationName || "Unknown",
         company: c.organizationName ?? null,
         phoneNumbers: c.phoneNumbers,
         emails: c.emailAddresses,
+        avatarUrl: cachedAvatar?.url,
       };
     });
 
+    pruneContactAvatarCache(usedAvatarFiles);
     return {
       contacts: resolved,
       shouldPersistCache: resolved.length > 0,
@@ -251,8 +268,8 @@ export class ContactsManager {
 
   private saveCache(cache: ContactsCache): void {
     try {
-      if (!existsSync(CACHE_DIR)) {
-        mkdirSync(CACHE_DIR, { recursive: true });
+      if (!existsSync(CONTACTS_CACHE_DIR)) {
+        mkdirSync(CONTACTS_CACHE_DIR, { recursive: true });
       }
       writeFileSync(CACHE_FILE, JSON.stringify(cache, null, 2), "utf-8");
     } catch {

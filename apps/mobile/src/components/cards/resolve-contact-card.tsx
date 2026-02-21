@@ -11,6 +11,7 @@ import * as Haptics from "expo-haptics";
 import { SymbolView, type SymbolViewProps } from "expo-symbols";
 import { getInitials, PLATFORM_CONFIG, type ContactHandle, type ActionPlatform } from "@cued/shared";
 import { PlatformIcon } from "@/components/platform-icons";
+import { ContactAvatar } from "@/components/contact-avatar";
 import { cn, getThemeColors } from "@/lib/utils";
 
 // ── Types ─────────────────────────────────────────────────────────
@@ -26,6 +27,7 @@ export type MergeSource =
 export interface ContactInfo {
   name: string;
   company?: string | null;
+  avatarUrl?: string | null;
   handles: ContactHandle[];
 }
 
@@ -170,11 +172,14 @@ function ContactPanel({
     <View className="gap-2">
       {/* Avatar + Name + Company */}
       <View className="flex-row items-center gap-3">
-        <View className="size-8 rounded-full bg-muted items-center justify-center">
-          <Text className="text-sm font-semibold text-muted-foreground">
-            {initials}
-          </Text>
-        </View>
+        <ContactAvatar
+          initials={initials}
+          avatarUrl={contact.avatarUrl}
+          size={32}
+          className="bg-muted items-center justify-center"
+          fallbackTextClassName="text-sm font-semibold text-muted-foreground"
+          transition={100}
+        />
         <View className="flex-1 min-w-0">
           <Text
             className="font-semibold text-sm text-foreground"

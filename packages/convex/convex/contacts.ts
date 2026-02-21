@@ -13,6 +13,7 @@ import {
 } from "./schema";
 import { scheduleContactMergeCheck } from "./lib/contactMergeScheduling";
 import { normalizeHandleValue } from "./lib/normalizeHandle";
+import { normalizePublicAvatarUrl } from "./lib/avatar";
 import { getContactStatus } from "./lib/contactStatus";
 import {
   buildContactHandleDedupKey,
@@ -145,9 +146,17 @@ export const getContacts = query({
       : rawContacts;
     const hasMore = contacts.length > limit;
     const results = hasMore ? contacts.slice(0, limit) : contacts;
+    const cursorSource = hasMore && results.length > 0
+      ? results[results.length - 1]
+      : null;
 
     if (results.length === 0) {
-      return { contacts: [], nextCursor: null };
+      return {
+        contacts: [],
+        nextCursor: cursorSource
+          ? { displayName: cursorSource.displayName, _id: cursorSource._id }
+          : null,
+      };
     }
 
     // Batch fetch handles for all contacts in parallel
@@ -163,6 +172,7 @@ export const getContacts = query({
     // Build contacts with handles
     const contactsWithHandles = results.map((contact, i) => ({
       ...contact,
+      avatarUrl: normalizePublicAvatarUrl(contact.avatarUrl),
       handles: allHandles[i].map((h) => ({
         type: h.handleType,
         value: h.handle,
@@ -170,13 +180,10 @@ export const getContacts = query({
       })),
     }));
 
-    // Build cursor from last result for pagination
-    const lastContact = results[results.length - 1];
-
     return {
       contacts: contactsWithHandles,
-      nextCursor: hasMore
-        ? { displayName: lastContact.displayName, _id: lastContact._id }
+      nextCursor: cursorSource
+        ? { displayName: cursorSource.displayName, _id: cursorSource._id }
         : null,
     };
   },
@@ -217,6 +224,7 @@ export const listContactsPaginated = query({
           .collect();
         return {
           ...contact,
+          avatarUrl: normalizePublicAvatarUrl(contact.avatarUrl),
           handles: handles.map((h) => ({
             type: h.handleType,
             value: h.handle,
@@ -251,6 +259,7 @@ export const getContact = query({
 
     return {
       ...contact,
+      avatarUrl: normalizePublicAvatarUrl(contact.avatarUrl),
       handles: handles.map((h) => ({
         type: h.handleType,
         value: h.handle,
@@ -328,11 +337,13 @@ export const getAdjacentContacts = query({
         _id: c._id,
         displayName: c.displayName,
         company: c.company,
+        avatarUrl: normalizePublicAvatarUrl(c.avatarUrl),
       })),
       after: after.map((c) => ({
         _id: c._id,
         displayName: c.displayName,
         company: c.company,
+        avatarUrl: normalizePublicAvatarUrl(c.avatarUrl),
       })),
     };
   },
@@ -420,6 +431,7 @@ export const getContactProfile = query({
     return {
       contact: {
         ...contact,
+        avatarUrl: normalizePublicAvatarUrl(contact.avatarUrl),
         handles: handles.map((h) => ({
           type: h.handleType,
           value: h.handle,

@@ -13,6 +13,7 @@ import {
   PanelContent,
   ListItem,
   Avatar,
+  AvatarImage,
   AvatarFallback,
   Separator,
   Card,
@@ -43,6 +44,16 @@ function AccountSection() {
         <CardContent className="p-4">
           <div className="flex items-center gap-4">
             <Avatar className="size-12">
+              {user?.profilePictureUrl ? (
+                <AvatarImage
+                  src={user.profilePictureUrl}
+                  alt={
+                    user?.firstName && user?.lastName
+                      ? `${user.firstName} ${user.lastName}`
+                      : user?.email ?? "User"
+                  }
+                />
+              ) : null}
               <AvatarFallback className="bg-primary text-primary-foreground text-sm">
                 {user?.firstName && user?.lastName
                   ? getInitials(`${user.firstName} ${user.lastName}`)

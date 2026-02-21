@@ -24,6 +24,10 @@ describe("@cued/shared exports", () => {
     it("exports getInitials", () => {
       expect(shared.getInitials).toBeTypeOf("function");
     });
+
+    it("exports normalizePublicAvatarUrl", () => {
+      expect(shared.normalizePublicAvatarUrl).toBeTypeOf("function");
+    });
   });
 
   describe("time utilities", () => {

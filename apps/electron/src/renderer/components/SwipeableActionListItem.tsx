@@ -10,6 +10,7 @@ import {
 import {
   Avatar,
   AvatarBadge,
+  AvatarImage,
   AvatarFallback,
   Button,
   DropdownMenu,
@@ -139,6 +140,9 @@ export function SwipeableActionListItem({
     >
       <div className="flex items-center gap-3">
         <Avatar size="lg">
+          {action.contactAvatarUrl ? (
+            <AvatarImage src={action.contactAvatarUrl} alt={action.contactName ?? "Contact"} />
+          ) : null}
           <AvatarFallback>
             {getInitials(action.contactName ?? "")}
           </AvatarFallback>
