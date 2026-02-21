@@ -269,51 +269,6 @@ pnpm build    # Build distributable
 | `node-mac-contacts` build fails | Needs `node-addon-api@^8` override (see root package.json pnpm.overrides) |
 
 
-## Ralph System (GitHub Issues → Claude)
-
-GitHub issues ARE the PRDs. No separate PRD files needed.
-
-### Workflow
-
-```
-/write-a-prd → GitHub Issue → ralph-once.sh → Claude → Commit → Close Issue
-```
-
-1. **Create PRD**: Run `/write-a-prd` skill - guides through problem discovery, solution design, creates GitHub issue
-2. **Execute**: Ralph scripts fetch issues via `gh issue list`, pass to Claude with `prds/prompt.md`
-3. **Implement**: Claude picks highest-priority issue, implements, commits
-4. **Complete**: Progress logged to `progress.txt`, issue closed
-
-### Commands
-
-```bash
-# Create PRD (in Claude Code)
-/write-a-prd
-
-# Execute
-./ralph-once.sh                    # Single iteration (HITL)
-./ralph-once.sh --issue 123        # Target specific issue
-./ralph-once.sh --sandbox          # Docker sandbox (mounts ~/.claude for OAuth)
-./ralph-once.sh --port 3001        # Custom dev server port
-
-./afk-ralph.sh 10                  # 10 iterations (AFK)
-./afk-ralph.sh 10 --issue 123      # Target specific issue
-
-# View issues
-pnpm prd list                      # List open GitHub issues
-pnpm prd view 123                  # View issue #123
-```
-
-Worktrees managed by Conductor via `conductor.json`.
-
-### Key Files
-
-| File | Purpose |
-|------|---------|
-| `prds/prompt.md` | Execution instructions for Claude |
-| `progress.txt` | Log of completed work |
-| `.claude/skills/write-a-prd/SKILL.md` | PRD creation skill |
-
 ## Plan Mode
 
 - Make the plan extremely concise. Sacrifice grammar for the sake of concision.

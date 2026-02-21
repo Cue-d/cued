@@ -130,7 +130,7 @@ describe("formatPhoneNumber", () => {
   });
 
   it("handles real-world examples", () => {
-    // From PRD: +12078005660 -> +1 (207) 800-5660
+    // Regression case: +12078005660 -> +1 (207) 800-5660
     expect(formatPhoneNumber("+12078005660")).toBe("+1 (207) 800-5660");
   });
 });

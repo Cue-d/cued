@@ -4,15 +4,11 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "prd": "tsx prd.ts",
     "twitter:save-cookies": "tsx twitter/save-cookies.ts",
     "twitter:scrape-contacts": "tsx twitter/scrape-contacts.ts",
     "twitter:sync-contacts": "tsx twitter/sync-contacts.ts",
     "twitter:test-messages": "tsx twitter/test-messages.ts",
     "twitter:trigger-actions": "tsx twitter/trigger-actions.ts"
-  },
-  "bin": {
-    "prd": "./prd.ts"
   },
   "dependencies": {
     "@cued/convex": "workspace:*",

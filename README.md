@@ -173,45 +173,6 @@ This uses ad-hoc signing (no certificate required). For production builds, `elec
 | Code signing errors | Open `.xcworkspace` in Xcode, set Team in Signing & Capabilities |
 | Metro bundler issues | `cd apps/mobile && npx expo start --clear` |
 
-## Linear Integration & PRD CLI
-
-We use Linear MCP to track features and automatically generate PRDs.
-
-### Setup (one-time per teammate)
-
-```bash
-# 1. Add Linear MCP to Claude Code
-claude mcp add-json linear '{"command": "npx", "args": ["-y","mcp-remote","https://mcp.linear.app/sse"]}'
-
-# 2. Complete OAuth in Claude Code
-# Run /mcp and follow the prompts
-
-# 3. Install PRD CLI dependencies
-cd scripts && pnpm install
-```
-
-### PRD Workflow
-
-```bash
-# Pull Linear issue → Generate PRD
-pnpm prd pull CUED-123
-
-# Execute PRD tasks
-pnpm prd run prds/cued-123-prd.json
-
-# Sync progress back to Linear
-pnpm prd sync prds/cued-123-prd.json
-
-# Link PR to Linear issue (after creating PR)
-pnpm prd link-pr CUED-123 https://github.com/org/repo/pull/456
-```
-
-### Branch Naming
-
-Use Linear issue IDs: `theotarr/cued-123-dark-mode`
-
-See [scripts/README.md](./scripts/README.md) for full PRD CLI documentation.
-
 ## Documentation
 
 See [CLAUDE.md](./CLAUDE.md) for detailed development documentation.
