@@ -21,6 +21,7 @@ import type { Id } from "@cued/convex"
 import { Panel, PanelHeader } from "../components/app-shell"
 import { ContactDetail } from "../components/contacts/ContactDetail"
 import { SwipeableContactListItem } from "../components/SwipeableContactListItem"
+import { useElectron } from "../hooks/use-electron"
 import { toast } from "sonner"
 
 /** Returns true if the display name looks like an actual person name (not a phone/ID/email) */
@@ -67,6 +68,7 @@ type PendingRareContactAction = {
 }
 
 export function ContactsPage({ initialContactId, onInitialContactConsumed }: ContactsPageProps): React.JSX.Element {
+  const electron = useElectron()
   const [selectedContactId, setSelectedContactId] = React.useState<Id<"contacts"> | null>(null)
 
   // Navigate to initial contact when provided
@@ -201,6 +203,58 @@ export function ContactsPage({ initialContactId, onInitialContactConsumed }: Con
   const visibleContactsById = React.useMemo(
     () => new Map(visibleContacts.map((contact) => [contact._id, contact])),
     [visibleContacts]
+  )
+  const [localAvatarUrlsByContactId, setLocalAvatarUrlsByContactId] = React.useState<Record<string, string>>({})
+  const localAvatarLookupRequests = React.useMemo(
+    () =>
+      visibleContacts
+        .map((contact) => ({
+          contactId: String(contact._id),
+          handles: contact.handles
+            .filter((handle) => handle.platform === "imessage")
+            .map((handle) => handle.value)
+            .filter(Boolean),
+        }))
+        .filter((request) => request.handles.length > 0),
+    [visibleContacts]
+  )
+
+  React.useEffect(() => {
+    let isCancelled = false
+
+    if (localAvatarLookupRequests.length === 0) {
+      setLocalAvatarUrlsByContactId({})
+      return
+    }
+
+    electron.contacts.resolveAvatars(localAvatarLookupRequests)
+      .then((resolvedAvatars) => {
+        if (!isCancelled) {
+          setLocalAvatarUrlsByContactId(resolvedAvatars)
+        }
+      })
+      .catch((error) => {
+        console.warn("[ContactsPage] Failed to resolve local avatars:", error)
+        if (!isCancelled) {
+          setLocalAvatarUrlsByContactId({})
+        }
+      })
+
+    return () => {
+      isCancelled = true
+    }
+  }, [electron, localAvatarLookupRequests])
+
+  const visibleContactsWithLocalAvatars = React.useMemo(
+    () =>
+      visibleContacts.map((contact) => {
+        const localAvatarUrl = localAvatarUrlsByContactId[String(contact._id)]
+        if (!localAvatarUrl || localAvatarUrl === contact.avatarUrl) {
+          return contact
+        }
+        return { ...contact, avatarUrl: localAvatarUrl }
+      }),
+    [visibleContacts, localAvatarUrlsByContactId]
   )
 
   // Auto-load more pages when client-side filters leave too few visible contacts
@@ -446,7 +500,7 @@ export function ContactsPage({ initialContactId, onInitialContactConsumed }: Con
           ) : (
             <>
               <AnimatePresence mode="popLayout">
-                {visibleContacts.map((contact) => (
+                {visibleContactsWithLocalAvatars.map((contact) => (
                   <SwipeableContactListItem
                     key={contact._id}
                     contact={contact}
