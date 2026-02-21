@@ -371,6 +371,7 @@ export const twitterContactInput = v.object({
   handle: v.string(),
   userId: v.optional(v.string()),
   bio: v.union(v.string(), v.null()),
+  avatarImageUrl: v.optional(v.string()),
 });
 
 export const twitterContactsBatchInput = v.object({
@@ -429,7 +430,19 @@ export async function syncTwitterContactsInternal(
         "twitter",
         buildTwitterHandles(normalized, contact.userId),
         contact.name,
-        company ? { company } : undefined
+        company || contact.avatarImageUrl
+          ? {
+              ...(company ? { company } : {}),
+              ...(contact.avatarImageUrl
+                ? {
+                    avatar: {
+                      url: contact.avatarImageUrl,
+                      sourcePlatform: "twitter" as const,
+                    },
+                  }
+                : {}),
+            }
+          : undefined
       );
 
       if (!contactResult) continue;

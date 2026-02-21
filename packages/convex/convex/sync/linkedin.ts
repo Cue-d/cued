@@ -28,6 +28,7 @@ import {
   BATCH_SIZE,
   logSyncError,
   resolveMessageQueueBridge,
+  buildContactAvatarPatch,
 } from "./shared";
 import { scheduleContactMergeCheck } from "../lib/contactMergeScheduling";
 import { resolveActionSummary } from "../lib/actionSummary";
@@ -833,6 +834,7 @@ export const linkedInContactInput = v.object({
   profileUrl: v.string(),
   headline: v.union(v.string(), v.null()),
   profileId: v.optional(v.string()),
+  avatarUrl: v.optional(v.string()),
 });
 
 export const linkedInContactsBatchInput = v.object({
@@ -907,9 +909,27 @@ export async function syncLinkedInContactsInternal(
       if (existingHandle) {
         const existingContact = await ctx.db.get(existingHandle.contactId);
         if (existingContact) {
+          const contactPatch: Partial<Doc<"contacts">> = {};
           const company = extractCompanyFromHeadline(contact.headline);
           if (company && !existingContact.company) {
-            await ctx.db.patch(existingHandle.contactId, { company });
+            contactPatch.company = company;
+          }
+
+          const avatarPatch = buildContactAvatarPatch(
+            existingContact,
+            contact.avatarUrl
+              ? {
+                  url: contact.avatarUrl,
+                  sourcePlatform: "linkedin",
+                }
+              : undefined,
+          );
+          if (avatarPatch) {
+            Object.assign(contactPatch, avatarPatch);
+          }
+
+          if (Object.keys(contactPatch).length > 0) {
+            await ctx.db.patch(existingHandle.contactId, contactPatch);
           }
           // If found by URN but missing username handle, add it
           if (normalizedHandle && existingHandle.handle !== normalizedHandle) {
@@ -940,6 +960,19 @@ export async function syncLinkedInContactsInternal(
           displayName: contact.name,
           company,
         });
+
+        if (contact.avatarUrl) {
+          const insertedContact = await ctx.db.get(contactId);
+          if (insertedContact) {
+            const avatarPatch = buildContactAvatarPatch(insertedContact, {
+              url: contact.avatarUrl,
+              sourcePlatform: "linkedin",
+            });
+            if (avatarPatch) {
+              await ctx.db.patch(contactId, avatarPatch);
+            }
+          }
+        }
 
         if (normalizedHandle) {
           await ctx.db.insert("contactHandles", {
