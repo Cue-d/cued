@@ -20,6 +20,41 @@ function hasCommonSubstring(s1: string, s2: string, minLength: number): boolean 
   return false;
 }
 
+function hasCommonPrefix(s1: string, s2: string, minLength: number): boolean {
+  if (s1.length < minLength || s2.length < minLength) return false;
+  return s1.slice(0, minLength) === s2.slice(0, minLength);
+}
+
+function levenshteinDistance(a: string, b: string): number {
+  if (a === b) return 0;
+  if (a.length === 0) return b.length;
+  if (b.length === 0) return a.length;
+
+  const previous = new Array(b.length + 1).fill(0);
+  const current = new Array(b.length + 1).fill(0);
+
+  for (let j = 0; j <= b.length; j++) {
+    previous[j] = j;
+  }
+
+  for (let i = 1; i <= a.length; i++) {
+    current[0] = i;
+    for (let j = 1; j <= b.length; j++) {
+      const substitutionCost = a[i - 1] === b[j - 1] ? 0 : 1;
+      current[j] = Math.min(
+        previous[j] + 1,
+        current[j - 1] + 1,
+        previous[j - 1] + substitutionCost,
+      );
+    }
+    for (let j = 0; j <= b.length; j++) {
+      previous[j] = current[j];
+    }
+  }
+
+  return previous[b.length];
+}
+
 /**
  * Common nickname mappings.
  * Maps nicknames to their canonical full names.
@@ -291,8 +326,10 @@ export function jaroWinklerSimilarity(s1: string, s2: string): number {
  * @returns Score from 0 to 1
  */
 export function nameSimilarity(name1: string, name2: string): number {
-  const parts1 = getCanonicalParts(name1);
-  const parts2 = getCanonicalParts(name2);
+  const normalizedParts1 = splitName(name1);
+  const normalizedParts2 = splitName(name2);
+  const parts1 = normalizedParts1.map(getCanonicalName);
+  const parts2 = normalizedParts2.map(getCanonicalName);
 
   if (parts1.length === 0 || parts2.length === 0) return 0;
 
@@ -336,6 +373,8 @@ export function nameSimilarity(name1: string, name2: string): number {
   const last1 = parts1.length > 1 ? parts1[parts1.length - 1] : first1;
   const first2 = parts2[0];
   const last2 = parts2.length > 1 ? parts2[parts2.length - 1] : first2;
+  const rawFirst1 = normalizedParts1[0] ?? first1;
+  const rawFirst2 = normalizedParts2[0] ?? first2;
 
   const firstScore = jaroWinklerSimilarity(first1, first2);
   const lastScore = jaroWinklerSimilarity(last1, last2);
@@ -353,6 +392,21 @@ export function nameSimilarity(name1: string, name2: string): number {
   if (lastNamesMatch && firstNamesVeryDifferent) {
     // Same last name but different first name = different person
     return Math.min(CONFIDENCE.REJECTION_CAP, firstScore);
+  }
+
+  // Additional guard: short first names with small edit distances can still
+  // over-score under Jaro-Winkler (e.g., "John" vs "Josh"). Require a stronger
+  // variant signal before allowing same-last-name matches through.
+  if (lastNamesMatch && first1 !== first2 && firstScore < CONFIDENCE.HIGH) {
+    const firstNameDistance = levenshteinDistance(rawFirst1, rawFirst2);
+    const shortFirstName = Math.min(rawFirst1.length, rawFirst2.length) <= 4;
+    const likelyVariant =
+      firstNameDistance <= 1 &&
+      (!shortFirstName || hasCommonPrefix(rawFirst1, rawFirst2, 2));
+
+    if (!likelyVariant) {
+      return Math.min(CONFIDENCE.REJECTION_CAP, firstScore);
+    }
   }
 
   // Same pattern for first names matching but last names different
@@ -423,4 +477,3 @@ export function getNameMatchResult(
     normalizedName2: getCanonicalParts(name2).join(" "),
   };
 }
-
