@@ -139,6 +139,8 @@ const schema = defineSchema({
     importance: v.optional(v.number()),
     tags: v.optional(v.array(v.string())),
     isDismissed: v.optional(v.boolean()),
+    isArchived: v.optional(v.boolean()),
+    status: v.optional(v.string()),
   })
     .index("by_user", ["userId"])
     .index("by_user_display_name", ["userId", "displayName"])
@@ -186,6 +188,7 @@ const schema = defineSchema({
     content: v.string(),
     sentAt: v.number(), // timestamp in milliseconds
     senderContactId: v.optional(v.id("contacts")), // null if isFromMe=true
+    senderHandleId: v.optional(v.id("contactHandles")), // legacy handle link (pre-contact merge)
     isFromMe: v.boolean(),
     platformMessageId: v.string(),
     threadTs: v.optional(v.string()),
