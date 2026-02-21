@@ -43,6 +43,7 @@ export {
 // Action queue types
 export type {
   MessageAttachment,
+  ReactionGroup,
   DisplayMessage,
   ContactFormData,
   EnrichedAction,

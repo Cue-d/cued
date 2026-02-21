@@ -1,10 +1,12 @@
 import { contextBridge, ipcRenderer, IpcRendererEvent } from "electron";
 import type {
   AuthState,
+  ContactsAccessRequestResult,
   ElectronAPI,
   LinkedInSendMessageResult,
   LinkedInStatusResult,
   LinkedInSyncProgress,
+  MessagesAutomationAccessRequestResult,
   PermissionStatus,
   TwitterSendMessageResult,
   TwitterStatusResult,
@@ -78,8 +80,13 @@ const api: ElectronAPI = {
 
   permissions: {
     check: (): Promise<PermissionStatus> => ipcRenderer.invoke("permissions:check"),
+    requestContactsAccess: (): Promise<ContactsAccessRequestResult> =>
+      ipcRenderer.invoke("permissions:requestContactsAccess"),
+    requestMessagesAutomationAccess: (): Promise<MessagesAutomationAccessRequestResult> =>
+      ipcRenderer.invoke("permissions:requestMessagesAutomationAccess"),
     openFullDiskAccessSettings: (): Promise<void> => ipcRenderer.invoke("permissions:openFullDiskAccessSettings"),
     openContactsSettings: (): Promise<void> => ipcRenderer.invoke("permissions:openContactsSettings"),
+    openAutomationSettings: (): Promise<void> => ipcRenderer.invoke("permissions:openAutomationSettings"),
   },
 
   sync: {

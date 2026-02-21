@@ -226,6 +226,41 @@ describe("contacts", () => {
       expect(page3.nextCursor).toBeNull();
     });
 
+    it("keeps pagination when dismissed contacts are inside the page window", async () => {
+      const t = trackTest(convexTest(schema, modules));
+      const { asUser, userId } = await setupAuthenticatedUser(t);
+
+      await t.run(async (ctx) => {
+        await ctx.db.insert(
+          "contacts",
+          createTestContactData(userId, { displayName: "Alice" }),
+        );
+        await ctx.db.insert("contacts", {
+          ...createTestContactData(userId, { displayName: "Bob" }),
+          isDismissed: true,
+        });
+        await ctx.db.insert(
+          "contacts",
+          createTestContactData(userId, { displayName: "Carol" }),
+        );
+        await ctx.db.insert(
+          "contacts",
+          createTestContactData(userId, { displayName: "David" }),
+        );
+      });
+
+      const page1 = await asUser.query(api.contacts.getContacts, { limit: 2 });
+      expect(page1.contacts.map((c) => c.displayName)).toEqual(["Alice", "Carol"]);
+      expect(page1.nextCursor).toBeTruthy();
+
+      const page2 = await asUser.query(api.contacts.getContacts, {
+        limit: 2,
+        cursor: page1.nextCursor!,
+      });
+      expect(page2.contacts.map((c) => c.displayName)).toEqual(["David"]);
+      expect(page2.nextCursor).toBeNull();
+    });
+
     it("supports search by displayName", async () => {
       const t = trackTest(convexTest(schema, modules));
       const { asUser, userId } = await setupAuthenticatedUser(t);

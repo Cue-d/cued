@@ -2,7 +2,7 @@
  * Types for action card rendering.
  */
 
-import type { EnrichedAction } from "@cued/shared";
+import type { EnrichedAction, ReactionGroup } from "@cued/shared";
 
 /**
  * Context data for the top action card.
@@ -77,7 +77,7 @@ export interface ActionContext {
     senderName: string | null;
     senderContactId: string | null;
     status: string | null;
-    reactions: Array<{ emoji: string }> | string[] | null;
+    reactions: ReactionGroup[] | null;
   }>;
 }
 

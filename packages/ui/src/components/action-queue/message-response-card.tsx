@@ -54,7 +54,7 @@ import type { OpenInAppConfig } from "../../actions/types"
 
 /** Re-export sub-components for advanced usage */
 export { PlatformBadge, type PlatformBadgeProps } from "./message-response-card/platform-badge"
-export { MessageBubble, ReactionBadges, DeliveryStatus, type MessageBubbleProps, type MessageSpacing } from "./message-response-card/message-bubble"
+export { MessageBubble, DeliveryStatus, type MessageBubbleProps, type MessageSpacing } from "./message-response-card/message-bubble"
 export { ResponseInput, type ResponseInputProps } from "./message-response-card/response-input"
 
 export interface MessageResponseCardProps {

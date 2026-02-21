@@ -18,6 +18,19 @@ export interface MessageAttachment {
 }
 
 /**
+ * A group of reactions with the same emoji on a message.
+ */
+export interface ReactionGroup {
+  /** Unicode emoji character */
+  emoji: string;
+  /** People who reacted with this emoji */
+  reactors: Array<{
+    displayName: string;
+    isFromMe: boolean;
+  }>;
+}
+
+/**
  * Message data for display in the action queue.
  * Represents a single message in a conversation thread.
  */
@@ -36,8 +49,8 @@ export interface DisplayMessage {
   senderContactId?: string | null;
   /** Delivery status (sent, delivered, read, etc.) */
   status?: string | null;
-  /** Reaction emojis on this message */
-  reactions?: string[] | null;
+  /** Reactions grouped by emoji */
+  reactions?: ReactionGroup[] | null;
   /** File attachments */
   attachments?: MessageAttachment[] | null;
 }

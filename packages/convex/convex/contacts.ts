@@ -89,13 +89,31 @@ export const getContacts = query({
       rawContacts = await contactsQuery.take(limit + 1);
     }
 
-    // Filter out dismissed contacts
-    const contacts = rawContacts.filter((c) => !c.isDismissed);
-    const hasMore = contacts.length > limit;
-    const results = hasMore ? contacts.slice(0, -1) : contacts;
+    // Filter out dismissed contacts for display, but compute pagination using
+    // the raw window too so dismissed rows cannot terminate pagination early.
+    const visibleContacts = rawContacts.filter((c) => !c.isDismissed);
+    const results = visibleContacts.slice(0, limit);
+    const hasExtraVisible = visibleContacts.length > limit;
+    const hasExtraRaw = rawContacts.length > limit;
+    const hasMore = hasExtraVisible || hasExtraRaw;
+
+    // Cursor source:
+    // - Prefer the last returned visible contact when we know another visible
+    //   contact exists in this window (standard pagination).
+    // - Otherwise use the raw window tail to advance past filtered rows.
+    const cursorSource = hasMore
+      ? (hasExtraVisible
+        ? results[results.length - 1]
+        : rawContacts[rawContacts.length - 1])
+      : null;
 
     if (results.length === 0) {
-      return { contacts: [], nextCursor: null };
+      return {
+        contacts: [],
+        nextCursor: cursorSource
+          ? { displayName: cursorSource.displayName, _id: cursorSource._id }
+          : null,
+      };
     }
 
     // Batch fetch handles for all contacts in parallel
@@ -119,13 +137,10 @@ export const getContacts = query({
       })),
     }));
 
-    // Build cursor from last result for pagination
-    const lastContact = results[results.length - 1];
-
     return {
       contacts: contactsWithHandles,
-      nextCursor: hasMore
-        ? { displayName: lastContact.displayName, _id: lastContact._id }
+      nextCursor: cursorSource
+        ? { displayName: cursorSource.displayName, _id: cursorSource._id }
         : null,
     };
   },

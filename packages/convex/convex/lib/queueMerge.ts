@@ -4,6 +4,7 @@
  */
 import type { Doc, Id } from "../_generated/dataModel";
 import type { QueryCtx } from "../_generated/server";
+import type { ReactionGroupResult } from "./reactions";
 
 /** Statuses that should appear as optimistic messages in conversation threads */
 const VISIBLE_QUEUE_STATUSES = new Set(["pending", "sending", "failed"]);
@@ -72,7 +73,7 @@ export function mapQueueToInboxMessage(entry: Doc<"messageQueue">) {
     isFromMe: true as const,
     platform: entry.platform,
     status: mapQueueStatus(entry),
-    reactions: null as string[] | null,
+    reactions: null as ReactionGroupResult[] | null,
     sender: null,
   };
 }
@@ -89,13 +90,6 @@ export function mapQueueToDisplayMessage(entry: Doc<"messageQueue">) {
     senderName: "You" as string | null,
     senderContactId: null as Id<"contacts"> | null,
     status: mapQueueStatus(entry),
-    reactions: undefined as
-      | Array<{
-          contactId?: Id<"contacts">;
-          isFromMe: boolean;
-          emoji: string;
-          timestamp: number;
-        }>
-      | undefined,
+    reactions: null as ReactionGroupResult[] | null,
   };
 }

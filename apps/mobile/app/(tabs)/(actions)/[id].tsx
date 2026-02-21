@@ -15,14 +15,6 @@ import { useElectronPrescence } from "@/contexts/electron-presence-context";
 import type { SwipeDirection } from "@/components/swipeable-card";
 import type { Id } from "@cued/convex/convex/_generated/dataModel";
 
-type ReactionLike = string | { emoji: string };
-
-function normalizeReactions(reactions?: ReactionLike[] | null): string[] | null {
-  if (!reactions || reactions.length === 0) return null;
-  return reactions.map((reaction) =>
-    typeof reaction === "string" ? reaction : reaction.emoji
-  );
-}
 
 /** Avatar component */
 function Avatar({
@@ -162,7 +154,7 @@ export default function ActionDetailScreen(): React.JSX.Element {
         isFromMe: msg.isFromMe,
         senderName: msg.sender?.displayName ?? (msg.isFromMe ? "You" : null),
         status: msg.status,
-        reactions: normalizeReactions(msg.reactions),
+        reactions: msg.reactions ?? null,
       }));
     }
 
@@ -174,7 +166,7 @@ export default function ActionDetailScreen(): React.JSX.Element {
       isFromMe: msg.isFromMe,
       senderName: msg.senderName,
       status: msg.status,
-      reactions: normalizeReactions(msg.reactions as ReactionLike[] | null | undefined),
+      reactions: msg.reactions ?? null,
     })) ?? [];
   }, [messagesResult?.messages, data?.messages]);
 

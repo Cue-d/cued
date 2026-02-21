@@ -10,6 +10,9 @@
  */
 
 import { api } from '@cued/convex'
+import { accessSync, constants } from 'node:fs'
+import { homedir } from 'node:os'
+import { join } from 'node:path'
 import { type SyncResult, type SyncFunction } from './types.js'
 import { getIMessageSyncManager } from '../platforms/imessage/index.js'
 import {
@@ -51,15 +54,46 @@ function formatSyncErrors(errors: string[]): string {
   return `${errors.length} error(s): ${preview}${suffix}`
 }
 
+const CHAT_DB_PATH = join(homedir(), 'Library', 'Messages', 'chat.db')
+
+function hasFullDiskAccess(): boolean {
+  try {
+    accessSync(CHAT_DB_PATH, constants.R_OK)
+    return true
+  } catch {
+    return false
+  }
+}
+
 // ============================================================================
 // iMessage Sync
 // ============================================================================
+
+let loggedMissingIMessageFullDiskAccess = false
 
 /**
  * Create sync function for iMessage messages.
  */
 export function createIMessageSyncFn(_options: SyncFunctionOptions): SyncFunction {
   return async (): Promise<SyncResult> => {
+    if (!hasFullDiskAccess()) {
+      if (!loggedMissingIMessageFullDiskAccess) {
+        console.warn(
+          '[IMessageSync] Full Disk Access is missing; skipping iMessage sync until permission is granted.'
+        )
+      }
+      loggedMissingIMessageFullDiskAccess = true
+      return {
+        success: true,
+        messagesSynced: 0,
+      }
+    }
+
+    if (loggedMissingIMessageFullDiskAccess) {
+      console.log('[IMessageSync] Full Disk Access restored; resuming iMessage sync.')
+      loggedMissingIMessageFullDiskAccess = false
+    }
+
     const manager = getIMessageSyncManager()
     const initialMessages = manager.getProgress().totalMessagesSynced
 

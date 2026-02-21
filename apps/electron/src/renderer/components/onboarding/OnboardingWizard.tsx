@@ -33,7 +33,17 @@ export function OnboardingWizard({ user, onComplete }: OnboardingWizardProps) {
         return (
           <ContactsContent
             granted={permissions?.contacts ?? false}
-            onOpenSettings={() => electron.permissions.openContactsSettings()}
+            onOpenSettings={async () => {
+              const messagesResult = await electron.permissions.requestMessagesAutomationAccess()
+              const contactsResult = await electron.permissions.requestContactsAccess()
+
+              if (messagesResult !== "Authorized") {
+                await electron.permissions.openAutomationSettings()
+              }
+              if (contactsResult !== "Authorized") {
+                await electron.permissions.openContactsSettings()
+              }
+            }}
             onContinue={() => setStep("complete")}
           />
         )
@@ -42,6 +52,7 @@ export function OnboardingWizard({ user, onComplete }: OnboardingWizardProps) {
           <CompletionContent
             fdaGranted={permissions?.fullDiskAccess ?? false}
             contactsGranted={permissions?.contacts ?? false}
+            messagesAutomationGranted={permissions?.messagesAutomation ?? false}
             onFinish={onComplete}
           />
         )
@@ -132,8 +143,8 @@ function ContactsContent({
   return (
     <StepFormLayout
       icon={<Users />}
-      title="Allow Contacts Access"
-      description="Cued matches messages to your contacts so you know who's reaching out."
+      title="Allow Contacts + Messages"
+      description="Cued needs Contacts access and permission to control Messages for iMessage sending."
       actions={
         <ContinueButton onClick={onContinue} className="w-full">
           Continue
@@ -157,10 +168,12 @@ function ContactsContent({
 function CompletionContent({
   fdaGranted,
   contactsGranted,
+  messagesAutomationGranted,
   onFinish,
 }: {
   fdaGranted: boolean
   contactsGranted: boolean
+  messagesAutomationGranted: boolean
   onFinish: () => void
 }) {
   return (
@@ -178,6 +191,7 @@ function CompletionContent({
       <div className="space-y-2">
         <PermissionSummaryRow label="Full Disk Access" granted={fdaGranted} />
         <PermissionSummaryRow label="Contacts" granted={contactsGranted} />
+        <PermissionSummaryRow label="Messages Automation" granted={messagesAutomationGranted} />
       </div>
     </StepFormLayout>
   )

@@ -1,5 +1,7 @@
 import * as React from "react"
+import type { ReactionGroup } from "@cued/shared"
 import { cn } from "../../../lib/utils"
+import { ReactionGroups } from "../../reaction-groups"
 
 function decodeSlackEntities(text: string): string {
   return text
@@ -100,24 +102,18 @@ function parseSlackContent(text: string): React.ReactNode[] {
   return parts
 }
 
-/** Reaction badges component */
+/** @deprecated Use ReactionGroups from ../../reaction-groups instead */
 export function ReactionBadges({
   reactions,
-  isSent,
 }: {
   reactions: string[]
   isSent: boolean
 }) {
   const displayReactions = reactions.slice(0, 3)
   return (
-    <div
-      className={cn(
-        "absolute -top-3 flex gap-0.5 px-2 py-1 rounded-full bg-muted text-sm z-10 border",
-        isSent ? "-left-3" : "-right-3"
-      )}
-    >
+    <div className="flex gap-0.5 mt-1">
       {displayReactions.map((emoji, idx) => (
-        <span key={idx}>{emoji}</span>
+        <span key={idx} className="text-xs">{emoji}</span>
       ))}
     </div>
   )
@@ -184,8 +180,8 @@ export interface MessageBubbleProps {
   senderContactId?: string | null
   /** Delivery status */
   status?: string | null
-  /** Reactions on the message */
-  reactions?: string[] | null
+  /** Reactions grouped by emoji */
+  reactions?: ReactionGroup[] | null
   /** Whether to show sender name (for deduplication) */
   showSenderName?: boolean
   /** Spacing above this message */
@@ -216,10 +212,10 @@ export function MessageBubble({
   onContactClick,
 }: MessageBubbleProps) {
   const hasReactions = reactions && reactions.length > 0
-  const hasText = content && content.trim().length > 0
+  const hasText = typeof content === "string" && content.trim().length > 0
 
   const renderedContent = React.useMemo(
-    () => (hasText && content ? (platform === "slack" ? parseSlackContent(content) : [content]) : null),
+    () => (hasText && typeof content === "string" ? (platform === "slack" ? parseSlackContent(content) : [content]) : null),
     [hasText, content, platform]
   )
 
@@ -228,7 +224,6 @@ export function MessageBubble({
       className={cn(
         "flex flex-col w-full",
         isFromMe ? "items-end" : "items-start",
-        hasReactions && "mb-2",
         SPACING_CLASSES[spacing]
       )}
     >
@@ -255,16 +250,13 @@ export function MessageBubble({
       >
         <div
           className={cn(
-            "relative rounded-lg px-3 py-2 text-sm",
+            "rounded-lg px-3 py-2 text-sm",
             isFromMe
               ? "bg-primary/90 text-primary-foreground"
               : "bg-secondary text-foreground"
           )}
           style={{ maxWidth: "85%", width: "fit-content", overflowWrap: "anywhere" }}
         >
-          {hasReactions && (
-            <ReactionBadges reactions={reactions!} isSent={isFromMe} />
-          )}
           {renderedContent ? (
             <p
               className="whitespace-pre-wrap select-text"
@@ -280,6 +272,9 @@ export function MessageBubble({
           )}
         </div>
       </div>
+      {hasReactions && (
+        <ReactionGroups reactions={reactions!} className={isFromMe ? "justify-end" : "justify-start"} />
+      )}
     </div>
   )
 }

@@ -672,3 +672,117 @@ export const triggerActionAnalysis = mutation({
     };
   },
 });
+
+/**
+ * Internal helper: list users with high-level platform stats.
+ * Useful for running debug flows via CLI without interactive auth identity.
+ */
+export const listUsersForActionAnalysis = internalMutation({
+  args: {
+    platform: v.optional(platformValidator),
+  },
+  handler: async (ctx, args) => {
+    const users = await ctx.db.query("users").collect();
+    const platform = args.platform;
+
+    const results = await Promise.all(
+      users.map(async (user) => {
+        if (!platform) {
+          return {
+            userId: user._id,
+            workosUserId: user.workosUserId,
+            email: user.email,
+            pendingActionCount: user.pendingActionCount ?? 0,
+          };
+        }
+
+        const conversations = await ctx.db
+          .query("conversations")
+          .withIndex("by_user_platform", (q) =>
+            q.eq("userId", user._id).eq("platform", platform)
+          )
+          .collect();
+
+        const pendingActions = await ctx.db
+          .query("actions")
+          .withIndex("by_user_status", (q) =>
+            q.eq("userId", user._id).eq("status", "pending")
+          )
+          .collect();
+
+        const platformPending = pendingActions.filter((a) => a.platform === platform);
+
+        return {
+          userId: user._id,
+          workosUserId: user.workosUserId,
+          email: user.email,
+          platform,
+          totalConversations: conversations.length,
+          pendingActions: platformPending.length,
+        };
+      })
+    );
+
+    return results;
+  },
+});
+
+/**
+ * Internal helper: trigger retroactive action analysis for a specific user.
+ * This mirrors triggerActionAnalysis but avoids requiring auth identity.
+ */
+export const triggerActionAnalysisForUser = internalMutation({
+  args: {
+    userId: v.id("users"),
+    platform: platformValidator,
+    daysBack: v.optional(v.number()),
+  },
+  handler: async (ctx, args) => {
+    const daysBack = args.daysBack ?? 7;
+    const cutoff = Date.now() - daysBack * MS_PER_DAY;
+
+    const conversations = await ctx.db
+      .query("conversations")
+      .withIndex("by_user_platform", (q) =>
+        q.eq("userId", args.userId).eq("platform", args.platform)
+      )
+      .collect();
+
+    const pendingActions = await ctx.db
+      .query("actions")
+      .withIndex("by_user_status", (q) =>
+        q.eq("userId", args.userId).eq("status", "pending")
+      )
+      .collect();
+
+    const conversationsWithPending = new Set(
+      pendingActions
+        .filter((a) => a.conversationId)
+        .map((a) => a.conversationId!.toString())
+    );
+
+    const eligible = conversations.filter(
+      (c) =>
+        c.lastMessageAt &&
+        c.lastMessageAt >= cutoff &&
+        !conversationsWithPending.has(c._id.toString())
+    );
+
+    if (eligible.length > 0) {
+      await ctx.scheduler.runAfter(0, internal.actionEvents.onIncomingMessageBatch, {
+        userId: args.userId,
+        conversationIds: eligible.map((c) => c._id),
+        platform: args.platform,
+      });
+    }
+
+    return {
+      userId: args.userId,
+      platform: args.platform,
+      totalConversations: conversations.length,
+      eligibleForAnalysis: eligible.length,
+      skippedWithPendingAction: conversationsWithPending.size,
+      cutoffDate: new Date(cutoff).toISOString(),
+    };
+  },
+});

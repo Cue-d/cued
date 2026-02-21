@@ -4,6 +4,7 @@
  */
 
 import type { InboxPlatform } from "./types"
+import type { ReactionGroup } from "@cued/shared"
 
 export interface InboxMessageSender {
   _id: string
@@ -17,7 +18,7 @@ export interface InboxMessage {
   isFromMe: boolean
   platform: InboxPlatform
   sender: InboxMessageSender | null
-  reactions: string[] | null
+  reactions: ReactionGroup[] | null
   status?: string | null
 }
 

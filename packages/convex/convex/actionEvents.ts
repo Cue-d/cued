@@ -132,6 +132,14 @@ type IncomingMessageResult =
   | { skipped: true; reason: string | undefined }
   | { skipped: false; actionCreated: true; actionId: string };
 
+type EmbeddingResult = {
+  shouldSkip: boolean;
+  skipReason?: string;
+  triggerMessageId?: Id<"messages">;
+  embedding?: number[];
+  embeddingInput?: string;
+};
+
 /**
  * Handle incoming message - analyze conversation for potential action.
  * Called from sync.ts when non-user message is inserted.
@@ -213,29 +221,38 @@ export const onIncomingMessage = internalAction({
       return { skipped: true, reason: filterResult.reason };
     }
 
-    // 7. Process messages for embedding (find trigger, compute embedding, check skip)
-    const embeddingResult = await ctx.runAction(
-      internal.embeddings.processMessagesForEmbedding,
-      {
-        userId: args.userId,
-        messages: messages.map((m) => ({
-          _id: m._id,
-          content: m.content,
-          isFromMe: m.isFromMe,
-          sentAt: m.sentAt,
-          senderName: m.senderName,
-          reactions: m.reactions,
-        })),
-        conversation: {
-          platform: conversation.platform,
-          conversationType: conversation.conversationType,
-          displayName: conversation.displayName,
-          workspaceId: conversation.workspaceId,
-        },
-        contactName: primaryContact?.displayName ?? "Unknown",
-        participantNames,
-      }
-    );
+    // 7. Process messages for embedding (find trigger, compute embedding, check skip).
+    // Embeddings are optional for action creation; if this fails we continue with LLM.
+    let embeddingResult: EmbeddingResult = { shouldSkip: false };
+    try {
+      embeddingResult = await ctx.runAction(
+        internal.embeddings.processMessagesForEmbedding,
+        {
+          userId: args.userId,
+          messages: messages.map((m) => ({
+            _id: m._id,
+            content: m.content,
+            isFromMe: m.isFromMe,
+            sentAt: m.sentAt,
+            senderName: m.senderName,
+            reactions: m.reactions,
+          })),
+          conversation: {
+            platform: conversation.platform,
+            conversationType: conversation.conversationType,
+            displayName: conversation.displayName,
+            workspaceId: conversation.workspaceId,
+          },
+          contactName: primaryContact?.displayName ?? "Unknown",
+          participantNames,
+        }
+      );
+    } catch (error) {
+      console.error(
+        `[ActionEvents] Embedding generation failed for conversation ${args.conversationId}:`,
+        error
+      );
+    }
 
     if (embeddingResult.shouldSkip) {
       return { skipped: true, reason: embeddingResult.skipReason ?? "similar_dismissed" };
@@ -399,191 +416,208 @@ export const onIncomingMessageBatch = internalAction({
     // (2) limited parallelism (e.g., Promise.all with concurrency limit),
     // (3) or moving to a queue-based approach for better scalability.
     for (const conversationId of args.conversationIds) {
-      // 1. Check if pending action already exists
-      const hasPending = await ctx.runQuery(
-        internal.actionEvents.hasPendingActionForConversation,
-        { conversationId }
-      );
-      if (hasPending) {
-        skipped++;
-        continue;
-      }
-
-      // 2. Check if snoozed action exists that hasn't expired
-      const hasSnoozed = await ctx.runQuery(
-        internal.actionEvents.hasActiveSnoozedAction,
-        { conversationId }
-      );
-      if (hasSnoozed) {
-        skipped++;
-        continue;
-      }
-
-      // 3. Check if discarded action exists with no new messages since
-      const latestDiscarded = await ctx.runQuery(
-        internal.actionEvents.getLatestDiscardedAction,
-        { conversationId }
-      );
-      if (latestDiscarded) {
-        const latestMessageTime = await ctx.runQuery(
-          internal.actionEvents.getLatestMessageTime,
+      try {
+        // 1. Check if pending action already exists
+        const hasPending = await ctx.runQuery(
+          internal.actionEvents.hasPendingActionForConversation,
           { conversationId }
         );
-        if (latestMessageTime && latestMessageTime <= latestDiscarded.discardedAt) {
+        if (hasPending) {
           skipped++;
           continue;
         }
-      }
 
-      // 4. Get conversation context
-      const context = await ctx.runQuery(
-        internal.actionAnalysis.getConversationContext,
-        { conversationId }
-      );
-      if (!context) {
-        skipped++;
-        continue;
-      }
-
-      const { conversation, primaryContact, participantNames } = context;
-
-      // 5. Get recent messages
-      const messages = await ctx.runQuery(
-        internal.actionAnalysis.getRecentMessages,
-        { conversationId, limit: 10 }
-      );
-      if (messages.length === 0) {
-        skipped++;
-        continue;
-      }
-
-      // 6. Apply message filters (OTP, spam, etc.)
-      const lastMessage = messages[messages.length - 1];
-      const { shouldSkipLlmAnalysis } = await import("@cued/ai");
-
-      const filterResult = shouldSkipLlmAnalysis({
-        text: lastMessage.content,
-        personName: primaryContact?.displayName,
-        isContact: primaryContact !== null,
-      });
-
-      if (filterResult.shouldSkip) {
-        skipped++;
-        continue;
-      }
-
-      // 7. Process messages for embedding (find trigger, compute embedding, check skip)
-      const embeddingResult = await ctx.runAction(
-        internal.embeddings.processMessagesForEmbedding,
-        {
-          userId: args.userId,
-        messages: messages.map((m) => ({
-          _id: m._id,
-          content: m.content,
-          isFromMe: m.isFromMe,
-          sentAt: m.sentAt,
-          senderName: m.senderName,
-          reactions: m.reactions,
-        })),
-          conversation: {
-            platform: conversation.platform,
-            conversationType: conversation.conversationType,
-            displayName: conversation.displayName,
-            workspaceId: conversation.workspaceId,
-          },
-          contactName: primaryContact?.displayName ?? "Unknown",
-          participantNames,
+        // 2. Check if snoozed action exists that hasn't expired
+        const hasSnoozed = await ctx.runQuery(
+          internal.actionEvents.hasActiveSnoozedAction,
+          { conversationId }
+        );
+        if (hasSnoozed) {
+          skipped++;
+          continue;
         }
-      );
 
-      if (embeddingResult.shouldSkip) {
-        skipped++;
-        continue;
-      }
-
-      // 8. Calculate hours since last message
-      const hoursSinceLastMessage = lastMessage
-        ? (Date.now() - lastMessage.sentAt) / (1000 * 60 * 60)
-        : 0;
-
-      // 10. Get recent actions for LLM context
-      const recentActions = await ctx.runQuery(
-        internal.actionAnalysis.getRecentActionsForConversation,
-        {
-          userId: args.userId,
-          conversationId,
-          limit: 5,
-          daysBack: 7,
+        // 3. Check if discarded action exists with no new messages since
+        const latestDiscarded = await ctx.runQuery(
+          internal.actionEvents.getLatestDiscardedAction,
+          { conversationId }
+        );
+        if (latestDiscarded) {
+          const latestMessageTime = await ctx.runQuery(
+            internal.actionEvents.getLatestMessageTime,
+            { conversationId }
+          );
+          if (latestMessageTime && latestMessageTime <= latestDiscarded.discardedAt) {
+            skipped++;
+            continue;
+          }
         }
-      );
 
-      // 11. Run LLM analysis
-      const { generateActionWithRetry } = await import("@cued/ai");
-
-      const suggestion = await generateActionWithRetry({
-        contact: {
-          displayName: primaryContact?.displayName ?? "Unknown",
-          company: primaryContact?.company ?? undefined,
-          notes: primaryContact?.notes ?? undefined,
-          isKnownContact: primaryContact !== null,
-          tags: primaryContact?.tags ?? undefined,
-          importance: primaryContact?.importance ?? undefined,
-        },
-        messages,
-        platform: conversation.platform,
-        hoursSinceLastMessage,
-        recentActions,
-      });
-
-      if (!suggestion.shouldCreateAction) {
-        skipped++;
-        continue;
-      }
-
-      // 13. Parse remindAt if provided
-      let snoozedUntil: number | undefined;
-      if (suggestion.remindAt) {
-        const parsed = Date.parse(suggestion.remindAt);
-        if (!isNaN(parsed)) {
-          snoozedUntil = parsed;
+        // 4. Get conversation context
+        const context = await ctx.runQuery(
+          internal.actionAnalysis.getConversationContext,
+          { conversationId }
+        );
+        if (!context) {
+          skipped++;
+          continue;
         }
-      }
 
-      // 12. Create the action with messageId
-      const actionId = await ctx.runMutation(
-        internal.actionAnalysis.createActionFromSuggestion,
-        {
-          userId: args.userId,
-          conversationId,
-          contactId: primaryContact?._id,
-          messageId: embeddingResult.triggerMessageId,
-          type: suggestion.type ?? "respond",
-          priority: suggestion.priority ?? 50,
-          platform: conversation.platform,
-          summary: suggestion.summary ?? undefined,
-          llmReason: suggestion.reason ?? undefined,
-          snoozedUntil,
+        const { conversation, primaryContact, participantNames } = context;
+
+        // 5. Get recent messages
+        const messages = await ctx.runQuery(
+          internal.actionAnalysis.getRecentMessages,
+          { conversationId, limit: 10 }
+        );
+        if (messages.length === 0) {
+          skipped++;
+          continue;
         }
-      );
 
-      // 13. Store embedding on the action (no separate table, no race condition)
-      if (actionId && embeddingResult.embedding && embeddingResult.embeddingInput) {
+        // 6. Apply message filters (OTP, spam, etc.)
+        const lastMessage = messages[messages.length - 1];
+        const { shouldSkipLlmAnalysis } = await import("@cued/ai");
+
+        const filterResult = shouldSkipLlmAnalysis({
+          text: lastMessage.content,
+          personName: primaryContact?.displayName,
+          isContact: primaryContact !== null,
+        });
+
+        if (filterResult.shouldSkip) {
+          skipped++;
+          continue;
+        }
+
+        // 7. Process messages for embedding (find trigger, compute embedding, check skip).
+        // Embeddings are optional for action creation; if this fails we continue with LLM.
+        let embeddingResult: EmbeddingResult = { shouldSkip: false };
         try {
-          await ctx.runMutation(internal.embeddings.storeEmbedding, {
-            actionId,
-            embedding: embeddingResult.embedding,
-            embeddingInput: embeddingResult.embeddingInput,
-          });
+          embeddingResult = await ctx.runAction(
+            internal.embeddings.processMessagesForEmbedding,
+            {
+              userId: args.userId,
+              messages: messages.map((m) => ({
+                _id: m._id,
+                content: m.content,
+                isFromMe: m.isFromMe,
+                sentAt: m.sentAt,
+                senderName: m.senderName,
+                reactions: m.reactions,
+              })),
+              conversation: {
+                platform: conversation.platform,
+                conversationType: conversation.conversationType,
+                displayName: conversation.displayName,
+                workspaceId: conversation.workspaceId,
+              },
+              contactName: primaryContact?.displayName ?? "Unknown",
+              participantNames,
+            }
+          );
         } catch (error) {
-          // Non-critical, don't fail the action creation
           console.error(
-            `[ActionEvents] Failed to store embedding for action ${actionId}:`,
+            `[ActionEvents] Embedding generation failed for conversation ${conversationId}:`,
             error
           );
         }
-      }
 
-      processed++;
+        if (embeddingResult.shouldSkip) {
+          skipped++;
+          continue;
+        }
+
+        // 8. Calculate hours since last message
+        const hoursSinceLastMessage = lastMessage
+          ? (Date.now() - lastMessage.sentAt) / (1000 * 60 * 60)
+          : 0;
+
+        // 10. Get recent actions for LLM context
+        const recentActions = await ctx.runQuery(
+          internal.actionAnalysis.getRecentActionsForConversation,
+          {
+            userId: args.userId,
+            conversationId,
+            limit: 5,
+            daysBack: 7,
+          }
+        );
+
+        // 11. Run LLM analysis
+        const { generateActionWithRetry } = await import("@cued/ai");
+
+        const suggestion = await generateActionWithRetry({
+          contact: {
+            displayName: primaryContact?.displayName ?? "Unknown",
+            company: primaryContact?.company ?? undefined,
+            notes: primaryContact?.notes ?? undefined,
+            isKnownContact: primaryContact !== null,
+            tags: primaryContact?.tags ?? undefined,
+            importance: primaryContact?.importance ?? undefined,
+          },
+          messages,
+          platform: conversation.platform,
+          hoursSinceLastMessage,
+          recentActions,
+        });
+
+        if (!suggestion.shouldCreateAction) {
+          skipped++;
+          continue;
+        }
+
+        // 13. Parse remindAt if provided
+        let snoozedUntil: number | undefined;
+        if (suggestion.remindAt) {
+          const parsed = Date.parse(suggestion.remindAt);
+          if (!isNaN(parsed)) {
+            snoozedUntil = parsed;
+          }
+        }
+
+        // 12. Create the action with messageId
+        const actionId = await ctx.runMutation(
+          internal.actionAnalysis.createActionFromSuggestion,
+          {
+            userId: args.userId,
+            conversationId,
+            contactId: primaryContact?._id,
+            messageId: embeddingResult.triggerMessageId,
+            type: suggestion.type ?? "respond",
+            priority: suggestion.priority ?? 50,
+            platform: conversation.platform,
+            summary: suggestion.summary ?? undefined,
+            llmReason: suggestion.reason ?? undefined,
+            snoozedUntil,
+          }
+        );
+
+        // 13. Store embedding on the action (no separate table, no race condition)
+        if (actionId && embeddingResult.embedding && embeddingResult.embeddingInput) {
+          try {
+            await ctx.runMutation(internal.embeddings.storeEmbedding, {
+              actionId,
+              embedding: embeddingResult.embedding,
+              embeddingInput: embeddingResult.embeddingInput,
+            });
+          } catch (error) {
+            // Non-critical, don't fail the action creation
+            console.error(
+              `[ActionEvents] Failed to store embedding for action ${actionId}:`,
+              error
+            );
+          }
+        }
+
+        processed++;
+      } catch (error) {
+        skipped++;
+        console.error(
+          `[ActionEvents] Failed to process incoming conversation ${conversationId}:`,
+          error
+        );
+      }
     }
 
     return { processed, skipped };

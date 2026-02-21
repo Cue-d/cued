@@ -201,23 +201,25 @@ function AttachmentDisplay({
 /** Reaction badges component */
 function ReactionBadges({
   reactions,
-  isSent,
 }: {
-  reactions: string[];
+  reactions: DisplayMessage["reactions"];
   isSent: boolean;
-}): React.JSX.Element {
-  const displayReactions = reactions.slice(0, 3);
+}): React.JSX.Element | null {
+  if (!reactions || reactions.length === 0) return null;
   return (
-    <View
-      className={cn(
-        "absolute -top-3 flex-row gap-0.5 px-2 py-1 rounded-full bg-card border border-border z-10",
-        isSent ? "-left-3" : "-right-3",
-      )}
-    >
-      {displayReactions.map((emoji, idx) => (
-        <Text key={idx} className="text-sm">
-          {emoji}
-        </Text>
+    <View className="flex-row flex-wrap gap-1 mt-1">
+      {reactions.map((group) => (
+        <View
+          key={group.emoji}
+          className="flex-row items-center gap-1 rounded-full bg-card border border-border px-2 py-0.5"
+        >
+          <Text className="text-xs">{group.emoji}</Text>
+          {group.reactors.length > 1 && (
+            <Text className="text-[10px] text-muted-foreground">
+              {group.reactors.length}
+            </Text>
+          )}
+        </View>
       ))}
     </View>
   );
@@ -352,7 +354,6 @@ export function MessageResponseCard({
                 className={cn(
                   "w-full",
                   msg.isFromMe ? "items-end" : "items-start",
-                  hasReactions && "mb-2",
                 )}
               >
                 {!msg.isFromMe && msg.senderName && (
@@ -362,16 +363,10 @@ export function MessageResponseCard({
                 )}
                 <View
                   className={cn(
-                    "relative rounded-2xl px-4 py-2 max-w-[85%]",
+                    "rounded-2xl px-4 py-2 max-w-[85%]",
                     msg.isFromMe ? "bg-primary" : "bg-muted",
                   )}
                 >
-                  {hasReactions && (
-                    <ReactionBadges
-                      reactions={msg.reactions!}
-                      isSent={msg.isFromMe}
-                    />
-                  )}
                   {hasAttachments && (
                     <AttachmentDisplay attachments={msg.attachments!} mutedColor={colors.mutedForeground} />
                   )}
@@ -422,6 +417,12 @@ export function MessageResponseCard({
                     )}
                   </View>
                 </View>
+                {hasReactions && (
+                  <ReactionBadges
+                    reactions={msg.reactions}
+                    isSent={msg.isFromMe}
+                  />
+                )}
               </View>
             );
           })

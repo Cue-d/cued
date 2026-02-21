@@ -12,6 +12,7 @@ import { Tray, Menu, nativeImage, app, type BrowserWindow, type MenuItemConstruc
 import * as path from "node:path";
 
 export type TrayStatus = "idle" | "syncing" | "error";
+const MACOS_TRAY_ICON_SIZE = 16;
 
 export interface TrayManagerOptions {
   onShowWindow?: () => void;
@@ -70,8 +71,12 @@ export class TrayManager {
     try {
       const icon = nativeImage.createFromPath(iconPath);
       if (!icon.isEmpty()) {
-        icon.setTemplateImage(true);
-        return icon;
+        const normalizedIcon =
+          process.platform === "darwin"
+            ? icon.resize({ width: MACOS_TRAY_ICON_SIZE, height: MACOS_TRAY_ICON_SIZE, quality: "best" })
+            : icon;
+        normalizedIcon.setTemplateImage(true);
+        return normalizedIcon;
       }
     } catch {
       // Fall through to fallback icon

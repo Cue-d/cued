@@ -170,7 +170,11 @@ export interface SlackDisconnectResult {
 export interface PermissionStatus {
   fullDiskAccess: boolean
   contacts: boolean
+  messagesAutomation: boolean
 }
+
+export type ContactsAccessRequestResult = "Authorized" | "Denied" | "Unavailable"
+export type MessagesAutomationAccessRequestResult = "Authorized" | "Denied" | "Unavailable"
 
 // Auto-updater types
 export interface UpdaterStatus {
@@ -220,8 +224,11 @@ export interface ElectronAPI {
 
   permissions: {
     check: () => Promise<PermissionStatus>
+    requestContactsAccess: () => Promise<ContactsAccessRequestResult>
+    requestMessagesAutomationAccess: () => Promise<MessagesAutomationAccessRequestResult>
     openFullDiskAccessSettings: () => Promise<void>
     openContactsSettings: () => Promise<void>
+    openAutomationSettings: () => Promise<void>
   }
 
   sync: {

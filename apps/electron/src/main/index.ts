@@ -41,7 +41,11 @@ import { getPowerManager } from "./power";
 import { getSettingsManager, SettingsManager } from "./settings";
 import { initAutoUpdater, stopAutoUpdater, quitAndInstall } from "./auto-updater";
 import { loadNativeModule } from "./native-module-loader";
-import { setupPermissionIpcHandlers, requestContactsAccessOnStartup } from "./ipc/permissions";
+import {
+  checkFullDiskAccess,
+  setupPermissionIpcHandlers,
+  requestContactsAccessOnStartup,
+} from "./ipc/permissions";
 import {
   CONTACT_AVATAR_SCHEME,
   resolveContactAvatarPathFromUrl,
@@ -611,8 +615,18 @@ app.whenReady().then(() => {
   // Start background sync
   startBackgroundSync();
 
-  // Check initial auth state and notify renderer once window is ready
-  mainWindow?.webContents.once("did-finish-load", async () => {
+  // Check initial auth state and notify renderer once window is ready.
+  // This handles the race where did-finish-load can fire before listener registration.
+  let windowReadyHandled = false;
+  const onMainWindowReady = async () => {
+    if (windowReadyHandled) return;
+    windowReadyHandled = true;
+
+    const fullDiskAccessGranted = checkFullDiskAccess();
+    console.log(
+      `[Main] Full Disk Access ${fullDiskAccessGranted ? "granted" : "missing"} on startup`
+    );
+
     // Trigger native macOS Contacts permission prompt (must happen after window is visible)
     await requestContactsAccessOnStartup();
     // Apply Liquid Glass effect on macOS Tahoe+
@@ -643,7 +657,15 @@ app.whenReady().then(() => {
         user: null,
       });
     }
-  });
+  };
+
+  if (mainWindow?.webContents.isLoading()) {
+    mainWindow.webContents.once("did-finish-load", () => {
+      void onMainWindowReady();
+    });
+  } else {
+    void onMainWindowReady();
+  }
 
   app.on("activate", () => {
     if (BrowserWindow.getAllWindows().length === 0) {
