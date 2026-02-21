@@ -105,6 +105,8 @@ export interface EnrichedAction {
   contactId: string | null;
   /** Primary contact display name */
   contactName: string | null;
+  /** Primary contact avatar URL */
+  contactAvatarUrl?: string | null;
   /** Secondary contact ID (for merge actions) */
   secondaryContactId: string | null;
   /** Secondary contact display name */

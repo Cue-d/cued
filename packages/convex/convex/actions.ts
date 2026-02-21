@@ -22,6 +22,7 @@ import {
   collectReactionContactIds,
   type ReactionGroupResult,
 } from "./lib/reactions";
+import { normalizePublicAvatarUrl } from "./lib/avatar";
 
 /**
  * Fetch all actionable items: pending actions + snoozed actions that are due.
@@ -177,6 +178,7 @@ function enrichAction(
     conversationId: action.conversationId ?? null,
     contactId: action.contactId ?? null,
     contactName,
+    contactAvatarUrl: normalizePublicAvatarUrl(contact?.avatarUrl),
     secondaryContactId: action.secondaryContactId ?? null,
     secondaryContactName: secondaryContact?.displayName ?? null,
     mergeSuggestionId: action.mergeSuggestionId ?? null,
@@ -753,6 +755,7 @@ export const getActionWithContext = query({
             company: contact.company ?? null,
             notes: contact.notes ?? null,
             importance: contact.importance ?? null,
+            avatarUrl: normalizePublicAvatarUrl(contact.avatarUrl),
             handles: handles.map((h) => ({
               handleType: h.handleType,
               handle: h.handle,
@@ -767,6 +770,7 @@ export const getActionWithContext = query({
             company: secondaryContact.company ?? null,
             notes: secondaryContact.notes ?? null,
             importance: secondaryContact.importance ?? null,
+            avatarUrl: normalizePublicAvatarUrl(secondaryContact.avatarUrl),
             handles: secondaryHandles.map((h) => ({
               handleType: h.handleType,
               handle: h.handle,

@@ -5,6 +5,7 @@ import type { Doc, Id } from "./_generated/dataModel";
 import type { QueryCtx } from "./_generated/server";
 import { query } from "./_generated/server";
 import { getAuthenticatedUser } from "./lib/auth";
+import { normalizePublicAvatarUrl } from "./lib/avatar";
 
 /**
  * Search messages by content using full-text search.
@@ -195,6 +196,7 @@ export const searchContacts = query({
           _id: contactId,
           displayName: match.contact.displayName,
           company: match.contact.company ?? null,
+          avatarUrl: normalizePublicAvatarUrl(match.contact.avatarUrl),
           notes: match.contact.notes ?? null,
           importance: match.contact.importance ?? null,
           matchedHandle: match.matchedHandle ?? null,
