@@ -19,34 +19,25 @@ export type ContactsAuthStatus =
   | "Authorized"
   | "Restricted";
 
+export type ContactExtraProperty =
+  | "jobTitle"
+  | "departmentName"
+  | "organizationName"
+  | "middleName"
+  | "note"
+  | "contactImage"
+  | "contactThumbnailImage"
+  | "instantMessageAddresses"
+  | "socialProfiles";
+
 /** node-mac-contacts module API. */
 export interface NodeMacContacts {
   getAllContacts(
-    extraProperties?: Array<
-      | "jobTitle"
-      | "departmentName"
-      | "organizationName"
-      | "middleName"
-      | "note"
-      | "contactImage"
-      | "contactThumbnailImage"
-      | "instantMessageAddresses"
-      | "socialProfiles"
-    >,
+    extraProperties?: ContactExtraProperty[],
   ): NativeContact[];
   getContactsByName(
     name: string,
-    extraProperties?: Array<
-      | "jobTitle"
-      | "departmentName"
-      | "organizationName"
-      | "middleName"
-      | "note"
-      | "contactImage"
-      | "contactThumbnailImage"
-      | "instantMessageAddresses"
-      | "socialProfiles"
-    >,
+    extraProperties?: ContactExtraProperty[],
   ): NativeContact[];
   getAuthStatus(): ContactsAuthStatus;
   requestAccess(): Promise<"Denied" | "Authorized">;
