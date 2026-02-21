@@ -1018,6 +1018,107 @@ describe("contactResolution", () => {
         expect(pendingSuggestions[0].source).toBe("exact_name_match");
       });
     });
+
+    it("checkMergesForContact does not create reverse duplicate resolve_contact actions", async () => {
+      const t = convexTest(schema, modules);
+      const { userId } = await setupAuthenticatedUser(t);
+
+      const [contact1Id, contact2Id] = await t.run(async (ctx) => {
+        const c1 = await ctx.db.insert(
+          "contacts",
+          createTestContactData(userId, { displayName: "Taylor Smith" }),
+        );
+        const c2 = await ctx.db.insert(
+          "contacts",
+          createTestContactData(userId, { displayName: "Taylor Smith" }),
+        );
+
+        await ctx.db.insert(
+          "contactHandles",
+          createTestContactHandleData(userId, c1, {
+            handleType: "email",
+            handle: "taylor.work@example.com",
+            platform: "imessage",
+          }),
+        );
+        await ctx.db.insert(
+          "contactHandles",
+          createTestContactHandleData(userId, c2, {
+            handleType: "email",
+            handle: "taylor.personal@example.com",
+            platform: "imessage",
+          }),
+        );
+
+        return [c1, c2];
+      });
+
+      await t.run(async (ctx) => {
+        const existingSuggestionId = await ctx.db.insert("mergeSuggestions", {
+          userId,
+          contact1Id: contact2Id,
+          contact2Id: contact1Id,
+          confidence: 0.95,
+          source: "exact_name_match",
+          reasoning: "Legacy reverse-order suggestion",
+          status: "pending",
+          createdAt: Date.now(),
+        });
+
+        await ctx.db.insert("actions", {
+          userId,
+          type: "resolve_contact",
+          status: "pending",
+          priority: 5,
+          contactId: contact2Id,
+          secondaryContactId: contact1Id,
+          mergeSuggestionId: existingSuggestionId,
+          mergeConfidence: 0.95,
+          mergeSource: "exact_name_match",
+          mergeReasoning: "Legacy reverse-order action",
+          createdAt: Date.now(),
+          summary: "Merge contacts",
+          reason: "exact_name_match: 95% match",
+        });
+      });
+
+      const result = await t.action(
+        internal.contactResolution.checkMergesForContact,
+        { userId, contactId: contact1Id },
+      );
+
+      expect(result.errors).toEqual([]);
+      expect(result.suggestionsCreated).toBe(0);
+
+      await t.run(async (ctx) => {
+        const pendingSuggestions = await ctx.db
+          .query("mergeSuggestions")
+          .withIndex("by_user_status", (q) =>
+            q.eq("userId", userId).eq("status", "pending"),
+          )
+          .collect();
+        const pairSuggestions = pendingSuggestions.filter(
+          (s) =>
+            (s.contact1Id === contact1Id && s.contact2Id === contact2Id) ||
+            (s.contact1Id === contact2Id && s.contact2Id === contact1Id),
+        );
+        expect(pairSuggestions).toHaveLength(1);
+
+        const pendingActions = await ctx.db
+          .query("actions")
+          .withIndex("by_user_status", (q) =>
+            q.eq("userId", userId).eq("status", "pending"),
+          )
+          .filter((q) => q.eq(q.field("type"), "resolve_contact"))
+          .collect();
+        const pairActions = pendingActions.filter(
+          (a) =>
+            (a.contactId === contact1Id && a.secondaryContactId === contact2Id) ||
+            (a.contactId === contact2Id && a.secondaryContactId === contact1Id),
+        );
+        expect(pairActions).toHaveLength(1);
+      });
+    });
   });
 
   describe("autoMergeContacts", () => {
