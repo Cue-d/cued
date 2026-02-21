@@ -2,7 +2,7 @@ import * as React from "react"
 import { ExternalLink, Mail, Phone } from "lucide-react"
 import { getInitials, PLATFORM_CONFIG, type ActionPlatform, type ContactHandle } from "@cued/shared"
 import { cn } from "../../../lib/utils"
-import { Avatar, AvatarFallback } from "../../ui/avatar"
+import { Avatar, AvatarFallback, AvatarImage } from "../../ui/avatar"
 import { PlatformIcon } from "../../platform-icons"
 import { formatSource, type MergeSource } from "./source-badge"
 
@@ -16,6 +16,8 @@ export interface MergeHandle extends ContactHandle {
 export interface ResolveContactCardProps {
   /** Shared display name */
   name: string
+  /** Optional avatar URL */
+  avatarUrl?: string | null
   /** Merged list of handles across both contacts */
   handles: MergeHandle[]
   /** Confidence score 0-1 */
@@ -101,6 +103,7 @@ function HandleRow({ handle, onLinkClick }: { handle: MergeHandle; onLinkClick?:
 
 export function ResolveContactCard({
   name,
+  avatarUrl,
   handles,
   confidence,
   source,
@@ -117,6 +120,7 @@ export function ResolveContactCard({
         {/* Avatar + Name */}
         <div className="flex flex-col items-center gap-3">
           <Avatar size="lg" className="size-14">
+            {avatarUrl ? <AvatarImage src={avatarUrl} alt={name} /> : null}
             <AvatarFallback className="text-lg">{initials}</AvatarFallback>
           </Avatar>
           <div className="text-center">

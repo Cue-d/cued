@@ -14,25 +14,30 @@ import {
   formatRelativeTime,
   type DisplayMessage,
 } from "@cued/shared";
+import { ContactAvatar } from "@/components/contact-avatar";
 import type { Id } from "@cued/convex/convex/_generated/dataModel";
 
 
 /** Avatar component */
 function Avatar({
   initials,
+  avatarUrl,
   size = "large",
 }: {
   initials: string;
+  avatarUrl?: string | null;
   size?: "small" | "large";
 }): React.JSX.Element {
-  const sizeClasses =
-    size === "large" ? "w-16 h-16 text-xl" : "w-10 h-10 text-sm";
+  const sizePx = size === "large" ? 64 : 40;
   return (
-    <View
-      className={`rounded-full bg-sf-fill items-center justify-center ${sizeClasses}`}
-    >
-      <Text className="text-sf-label font-semibold">{initials}</Text>
-    </View>
+    <ContactAvatar
+      initials={initials}
+      avatarUrl={avatarUrl}
+      size={sizePx}
+      className="bg-sf-fill items-center justify-center"
+      fallbackTextClassName={size === "large" ? "text-sf-label font-semibold text-xl" : "text-sf-label font-semibold text-sm"}
+      transition={120}
+    />
   );
 }
 
@@ -195,6 +200,7 @@ export default function HistoryDetailScreen(): React.JSX.Element {
   const { action, contact } = data;
   const contactName = contact?.displayName ?? "Unknown";
   const initials = getInitials(contactName);
+  const contactAvatarUrl = contact?.avatarUrl ?? null;
   const isDiscarded = action.status === "discarded";
   const resolvedAt = action.completedAt ?? action.discardedAt ?? action.createdAt;
 
@@ -212,7 +218,7 @@ export default function HistoryDetailScreen(): React.JSX.Element {
       >
         {/* Contact Header */}
         <View className="items-center pt-4 pb-6">
-          <Avatar initials={initials} size="large" />
+          <Avatar initials={initials} avatarUrl={contactAvatarUrl} size="large" />
           <Text className="text-lg font-semibold text-sf-label mt-3">
             {contactName}
           </Text>

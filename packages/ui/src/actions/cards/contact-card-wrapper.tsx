@@ -15,6 +15,7 @@ import type { ContactFormData } from "@cued/shared";
 export function ContactCardWrapper({
   action,
   isTop,
+  context,
   responseText,
   onResponseChange,
   autoFocus,
@@ -45,6 +46,7 @@ export function ContactCardWrapper({
   return (
     <ContactCard
       personName={action.contactName ?? "New Contact"}
+      avatarUrl={(isTop ? context?.contact?.avatarUrl : null) ?? action.contactAvatarUrl ?? null}
       createdAt={action.createdAt}
       formData={formData}
       onFormChange={handleFormChange}

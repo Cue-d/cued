@@ -434,14 +434,16 @@ export default function ContactDetailScreen(): React.JSX.Element {
                   borderTopColor: PlatformColor("separator"),
                 }}
               >
-                <View
-                  className="w-8 h-8 rounded-full items-center justify-center mr-3"
-                  style={{ backgroundColor: PlatformColor("systemBlue") }}
-                >
-                  <Text style={{ fontSize: 13, fontWeight: "600", color: "white" }}>
-                    {getInitials(contact.displayName)}
-                  </Text>
-                </View>
+                <ContactAvatar
+                  initials={getInitials(contact.displayName)}
+                  avatarUrl={contact.avatarUrl}
+                  size={32}
+                  className="items-center justify-center mr-3"
+                  containerStyle={{ backgroundColor: PlatformColor("systemBlue") }}
+                  fallbackTextClassName="text-[13px] font-semibold"
+                  fallbackTextStyle={{ color: "white" }}
+                  transition={100}
+                />
                 <Text style={{ fontSize: 16, fontWeight: "600", color: PlatformColor("label") }} numberOfLines={1}>
                   {contact.displayName}
                 </Text>

@@ -400,6 +400,7 @@ export default function ActionsScreen(): React.JSX.Element | null {
             contact1={{
               name: contact?.displayName ?? action.contactName ?? "Unknown",
               company: contact?.company,
+              avatarUrl: contact?.avatarUrl ?? null,
               handles: mapHandles(contact?.handles),
             }}
             contact2={{
@@ -408,6 +409,7 @@ export default function ActionsScreen(): React.JSX.Element | null {
                 action.secondaryContactName ??
                 "Unknown",
               company: secondary?.company,
+              avatarUrl: secondary?.avatarUrl ?? null,
               handles: mapHandles(secondary?.handles),
             }}
             confidence={action.mergeConfidence ?? 0}
