@@ -18,6 +18,12 @@ export {
   formatTimestamp,
   type FormatTimestampOptions,
 } from "./utils/time";
+export {
+  MERGE_CONFLICT_FIELD_LABELS,
+  CONTACT_AUDIT_ACTION_LABELS,
+  isRealContactName,
+  getContactAuditActionLabel,
+} from "./utils/contact-merge";
 
 // Platform constants
 export {

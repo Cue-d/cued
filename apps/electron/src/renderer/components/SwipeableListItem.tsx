@@ -28,8 +28,8 @@ interface SwipeableListItemProps {
   onClick: (e: React.MouseEvent) => void;
   openSwipeId?: string | null;
   onSwipeActiveChange?: (itemId: string | null) => void;
-  leftAction: SwipeableListItemAction;
-  rightAction: SwipeableListItemAction;
+  leftAction?: SwipeableListItemAction;
+  rightAction?: SwipeableListItemAction;
   children: React.ReactNode;
 }
 
@@ -112,11 +112,10 @@ export function SwipeableListItem({
       e.preventDefault();
 
       const raw = gestureStartX.current + cumulativeDelta.current;
+      const minNegative = rightAction ? -(BUTTON_WIDTH + ELASTIC_LIMIT) : 0;
+      const maxPositive = leftAction ? BUTTON_WIDTH + ELASTIC_LIMIT : 0;
       // Clamp with slight elastic overshoot for natural feel.
-      const clamped = Math.max(
-        -BUTTON_WIDTH - ELASTIC_LIMIT,
-        Math.min(BUTTON_WIDTH + ELASTIC_LIMIT, raw),
-      );
+      const clamped = Math.max(minNegative, Math.min(maxPositive, raw));
       // Set directly for zero-latency tracking; spring only on snap.
       x.set(clamped);
 
@@ -128,13 +127,21 @@ export function SwipeableListItem({
 
         let targetSide: RevealedSide = "none";
         if (revealedSide.current === "left") {
-          targetSide = current > -BUTTON_WIDTH + SWIPE_THRESHOLD ? "none" : "left";
+          targetSide = rightAction
+            ? current > -BUTTON_WIDTH + SWIPE_THRESHOLD
+              ? "none"
+              : "left"
+            : "none";
         } else if (revealedSide.current === "right") {
-          targetSide = current < BUTTON_WIDTH - SWIPE_THRESHOLD ? "none" : "right";
-        } else if (current < -SWIPE_THRESHOLD) {
-          targetSide = "left";
-        } else if (current > SWIPE_THRESHOLD) {
+          targetSide = leftAction
+            ? current < BUTTON_WIDTH - SWIPE_THRESHOLD
+              ? "none"
+              : "right"
+            : "none";
+        } else if (leftAction && current > SWIPE_THRESHOLD) {
           targetSide = "right";
+        } else if (rightAction && current < -SWIPE_THRESHOLD) {
+          targetSide = "left";
         }
 
         const targetX =
@@ -151,7 +158,7 @@ export function SwipeableListItem({
       el.removeEventListener("wheel", handleWheel);
       clearTimeout(gestureTimer.current);
     };
-  }, [itemId, onSwipeActiveChange, prefersReducedMotion, x]);
+  }, [itemId, leftAction, onSwipeActiveChange, prefersReducedMotion, rightAction, x]);
 
   const handleClick = (e: React.MouseEvent) => {
     // If a swipe action is revealed, close it instead of selecting.
@@ -172,43 +179,47 @@ export function SwipeableListItem({
       exit={{ opacity: 0, scale: EXIT_SCALE }}
       transition={{ duration: EXIT_DURATION, ease: "easeOut" }}
     >
-      <motion.div
-        className="absolute inset-y-0 left-0 flex flex-col items-center justify-center gap-1"
-        style={{
-          width: BUTTON_WIDTH,
-          opacity: leftButtonOpacity,
-          scale: leftButtonScale,
-        }}
-      >
-        {leftAction.control}
-        <span
-          className={cn(
-            "text-[10px] font-medium leading-none text-muted-foreground",
-            leftAction.labelClassName,
-          )}
+      {leftAction && (
+        <motion.div
+          className="absolute inset-y-0 left-0 flex flex-col items-center justify-center gap-1"
+          style={{
+            width: BUTTON_WIDTH,
+            opacity: leftButtonOpacity,
+            scale: leftButtonScale,
+          }}
         >
-          {leftAction.label}
-        </span>
-      </motion.div>
+          {leftAction.control}
+          <span
+            className={cn(
+              "text-[10px] font-medium leading-none text-muted-foreground",
+              leftAction.labelClassName,
+            )}
+          >
+            {leftAction.label}
+          </span>
+        </motion.div>
+      )}
 
-      <motion.div
-        className="absolute inset-y-0 right-0 flex flex-col items-center justify-center gap-1"
-        style={{
-          width: BUTTON_WIDTH,
-          opacity: rightButtonOpacity,
-          scale: rightButtonScale,
-        }}
-      >
-        {rightAction.control}
-        <span
-          className={cn(
-            "text-[10px] font-medium leading-none text-muted-foreground",
-            rightAction.labelClassName,
-          )}
+      {rightAction && (
+        <motion.div
+          className="absolute inset-y-0 right-0 flex flex-col items-center justify-center gap-1"
+          style={{
+            width: BUTTON_WIDTH,
+            opacity: rightButtonOpacity,
+            scale: rightButtonScale,
+          }}
         >
-          {rightAction.label}
-        </span>
-      </motion.div>
+          {rightAction.control}
+          <span
+            className={cn(
+              "text-[10px] font-medium leading-none text-muted-foreground",
+              rightAction.labelClassName,
+            )}
+          >
+            {rightAction.label}
+          </span>
+        </motion.div>
+      )}
 
       <motion.button
         type="button"

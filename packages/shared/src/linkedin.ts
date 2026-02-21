@@ -196,6 +196,20 @@ export function extractLinkedInThreadId(platformConversationId: string): string 
 // ============================================================================
 
 /**
+ * Detect likely LinkedIn member IDs (URN ID portion), which are opaque tokens
+ * and should not be treated as public profile usernames.
+ */
+export function isLikelyLinkedInMemberId(input: string): boolean {
+  if (!input) return false;
+
+  const clean = input.split("?")[0].split("#")[0].replace(/\/+$/, "");
+  const candidate = extractIdFromURN(clean) ?? clean;
+
+  // Typical LinkedIn member IDs begin with "ACo" and are long opaque tokens.
+  return /^ACo[A-Za-z0-9_-]{8,}$/i.test(candidate);
+}
+
+/**
  * Validate a LinkedIn handle format.
  * LinkedIn handles: alphanumeric + hyphens, 3-100 characters.
  */

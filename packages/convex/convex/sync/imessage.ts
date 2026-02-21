@@ -288,19 +288,27 @@ export async function syncMessagesInternal(
       uniqueHandles.add(normalizeHandle(p.identifier));
     }
   }
-  const handleToContact = await batchResolveHandles(ctx, userId, [
+  const handleToResolved = await batchResolveHandles(ctx, userId, [
     ...uniqueHandles,
   ]);
+  const handleToContact = new Map<string, Id<"contacts">>(
+    [...handleToResolved.entries()].map(([handle, resolved]) => [
+      handle,
+      resolved.contactId,
+    ]),
+  );
   const chatById = new Map(batch.chats.map((chat) => [chat.id, chat]));
 
   const resolveContactByIdentifier = async (
     identifier: string,
     displayName?: string,
-  ): Promise<Id<"contacts"> | undefined> => {
+  ): Promise<
+    { contactId: Id<"contacts">; handleId: Id<"contactHandles"> } | undefined
+  > => {
     const normalizedHandle = normalizeHandle(identifier);
-    let contactId = handleToContact.get(normalizedHandle);
+    let resolved = handleToResolved.get(normalizedHandle);
 
-    if (!contactId) {
+    if (!resolved) {
       const result = await getOrCreateContact(
         ctx,
         userId,
@@ -309,14 +317,15 @@ export async function syncMessagesInternal(
         displayName,
       );
       if (result) {
-        contactId = result.contactId;
-        handleToContact.set(normalizedHandle, contactId);
+        resolved = { contactId: result.contactId, handleId: result.handleId };
+        handleToResolved.set(normalizedHandle, resolved);
+        handleToContact.set(normalizedHandle, resolved.contactId);
       }
-      return contactId;
+      return resolved;
     }
 
     if (displayName) {
-      const existingContact = await ctx.db.get(contactId);
+      const existingContact = await ctx.db.get(resolved.contactId);
       if (
         existingContact &&
         shouldUpdateDisplayName(
@@ -325,11 +334,13 @@ export async function syncMessagesInternal(
           normalizedHandle,
         )
       ) {
-        await ctx.db.patch(contactId, { displayName });
+        await ctx.db.patch(resolved.contactId, { displayName });
       }
     }
 
-    return contactId;
+    handleToContact.set(normalizedHandle, resolved.contactId);
+
+    return resolved;
   };
 
   // Build chat ID lookup (iMessage chat.id -> Convex conversation._id)
@@ -344,14 +355,14 @@ export async function syncMessagesInternal(
       const participantContactIds: Id<"contacts">[] = [];
 
       for (const participant of chat.participants) {
-        const contactId = await resolveContactByIdentifier(
+        const resolved = await resolveContactByIdentifier(
           participant.identifier,
           isBusinessUrn(participant.identifier)
             ? (chat.displayName ?? undefined)
             : undefined,
         );
-        if (contactId) {
-          participantContactIds.push(contactId);
+        if (resolved) {
+          participantContactIds.push(resolved.contactId);
         }
       }
 
@@ -444,6 +455,7 @@ export async function syncMessagesInternal(
     content: string;
     sentAt: number;
     senderContactId: Id<"contacts"> | undefined;
+    senderHandleId: Id<"contactHandles"> | undefined;
     isFromMe: boolean;
     platformMessageId: string;
     reactions: StoredReaction[] | undefined;
@@ -495,13 +507,16 @@ export async function syncMessagesInternal(
 
     // Resolve sender from pre-fetched map
     let senderContactId: Id<"contacts"> | undefined;
+    let senderHandleId: Id<"contactHandles"> | undefined;
     if (!isSystemEvent && !message.isFromMe && message.sender) {
-      senderContactId = await resolveContactByIdentifier(
+      const resolved = await resolveContactByIdentifier(
         message.sender.identifier,
         chat && isBusinessUrn(message.sender.identifier)
           ? (chat.displayName ?? undefined)
           : undefined,
       );
+      senderContactId = resolved?.contactId;
+      senderHandleId = resolved?.handleId;
     }
 
     messagesToInsert.push({
@@ -511,6 +526,7 @@ export async function syncMessagesInternal(
       content,
       sentAt: message.timestamp * 1000,
       senderContactId,
+      senderHandleId,
       isFromMe: message.isFromMe,
       platformMessageId,
       reactions: mappedReactions && mappedReactions.length > 0 ? mappedReactions : undefined,

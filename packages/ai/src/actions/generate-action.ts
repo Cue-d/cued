@@ -33,7 +33,7 @@ export const ActionSuggestionSchema = z.object({
   summary: z
     .string()
     .nullable()
-    .describe("Very short list summary (2-5 words, max 40 chars)"),
+    .describe("Very short list summary (2-5 words, max 40 chars). Null if no action needed."),
   suggestedResponse: z
     .string()
     .nullable()

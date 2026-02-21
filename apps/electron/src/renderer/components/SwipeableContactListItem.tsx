@@ -1,5 +1,5 @@
 import * as React from "react";
-import { Archive, Trash2 } from "lucide-react";
+import { Archive } from "lucide-react";
 import { getInitials, type ActionPlatform, PLATFORM_CONFIG } from "@cued/shared";
 import {
   Avatar,
@@ -32,7 +32,6 @@ interface SwipeableContactListItemProps {
   selected: boolean;
   onClick: (e: React.MouseEvent) => void;
   onArchive: () => void;
-  onDismiss: () => void;
   openSwipeId?: string | null;
   onSwipeActiveChange?: (contactId: string | null) => void;
 }
@@ -42,7 +41,6 @@ export function SwipeableContactListItem({
   selected,
   onClick,
   onArchive,
-  onDismiss,
   openSwipeId = null,
   onSwipeActiveChange,
 }: SwipeableContactListItemProps) {
@@ -59,7 +57,7 @@ export function SwipeableContactListItem({
       onClick={onClick}
       openSwipeId={openSwipeId}
       onSwipeActiveChange={onSwipeActiveChange}
-      leftAction={{
+      rightAction={{
         label: "Archive",
         control: (
           <Button
@@ -76,24 +74,6 @@ export function SwipeableContactListItem({
             )}
           >
             <Archive size={16} strokeWidth={1.5} />
-          </Button>
-        ),
-      }}
-      rightAction={{
-        label: "Dismiss",
-        labelClassName: "text-destructive",
-        control: (
-          <Button
-            variant="destructive"
-            size="icon"
-            onClick={(e) => {
-              e.stopPropagation();
-              onDismiss();
-            }}
-            aria-label="Dismiss contact"
-            className="cursor-pointer rounded-full"
-          >
-            <Trash2 size={16} strokeWidth={1.5} />
           </Button>
         ),
       }}

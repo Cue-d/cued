@@ -8,16 +8,45 @@ import {
   handleTypeValidator,
   mergeSourceValidator,
   platformValidator,
+  contactStatusValidator,
+  mergeFieldResolutionsValidator,
 } from "./schema";
 import { scheduleContactMergeCheck } from "./lib/contactMergeScheduling";
 import { normalizeHandleValue } from "./lib/normalizeHandle";
+import { normalizePublicAvatarUrl } from "./lib/avatar";
+import { getContactStatus } from "./lib/contactStatus";
 import {
-  areContactAvatarOptionsEqual,
-  buildPrimaryAvatarFields,
-  getContactAvatarOptions,
-  normalizePublicAvatarUrl,
-  upsertContactAvatarOption,
-} from "./lib/avatar";
+  buildContactHandleDedupKey,
+  executeContactMerge,
+  type ContactMergeSource,
+  type MergeConversationSnapshot,
+  type MergeDedupedHandleSnapshot,
+  type MergeFieldResolutions,
+  type MergePrimaryFieldChanges,
+} from "./lib/contactMerge";
+
+// ============================================================================
+/** Normalize contact pair IDs so smaller ID is always first. */
+export function normalizeContactPair(
+  a: Id<"contacts">,
+  b: Id<"contacts">,
+): [Id<"contacts">, Id<"contacts">] {
+  return a < b ? [a, b] : [b, a];
+}
+
+/** Check if a contact pair is in the exclusion list. */
+export async function isExcludedPair(
+  ctx: QueryCtx,
+  contact1Id: Id<"contacts">,
+  contact2Id: Id<"contacts">,
+): Promise<boolean> {
+  const [c1, c2] = normalizeContactPair(contact1Id, contact2Id);
+  const exclusion = await ctx.db
+    .query("contactExclusions")
+    .withIndex("by_pair", (q) => q.eq("contact1Id", c1).eq("contact2Id", c2))
+    .first();
+  return !!exclusion;
+}
 
 // ============================================================================
 // Contact Queries
@@ -39,6 +68,7 @@ export const getContacts = query({
       }),
     ),
     searchQuery: v.optional(v.string()),
+    status: v.optional(contactStatusValidator),
     namedOnly: v.optional(v.boolean()),
   },
   handler: async (ctx, args) => {
@@ -46,18 +76,22 @@ export const getContacts = query({
     if (!user) return { contacts: [], nextCursor: null };
 
     const limit = Math.min(args.limit ?? 50, 100);
+    // Treat legacy "dismissed" filter as archived.
+    const filterStatus = args.status === "dismissed" ? "archived" : (args.status ?? "active");
 
     // Fetch contacts - with search or regular query
     const isSearch = args.searchQuery && args.searchQuery.trim().length > 0;
-    let rawContacts;
+    let rawContacts: Doc<"contacts">[];
 
     if (isSearch) {
+      // Search index can't filter by status, so over-fetch then filter in memory.
+      const searchTake = Math.min(500, Math.max(limit + 1, (limit + 1) * 5));
       rawContacts = await ctx.db
         .query("contacts")
         .withSearchIndex("search_display_name", (q) =>
           q.search("displayName", args.searchQuery!).eq("userId", user._id),
         )
-        .take(limit + 1);
+        .take(searchTake);
     } else {
       // Use alphabetical index for sorted results
       // When namedOnly, use gte("A") to skip phone numbers/symbols that sort
@@ -69,6 +103,23 @@ export const getContacts = query({
           const builder = q.eq("userId", user._id);
           return args.namedOnly ? builder.gte("displayName", "A") : builder;
         });
+
+      contactsQuery = contactsQuery.filter((q) => {
+        switch (filterStatus) {
+          case "archived":
+            return q.or(
+              q.eq(q.field("status"), "archived"),
+              q.eq(q.field("status"), "dismissed"),
+              q.eq(q.field("isDismissed"), true),
+            );
+          default:
+            return q.and(
+              q.neq(q.field("status"), "archived"),
+              q.neq(q.field("status"), "dismissed"),
+              q.neq(q.field("isDismissed"), true),
+            );
+        }
+      });
 
       // For cursor-based pagination with alphabetical ordering:
       // Skip contacts until we pass the cursor position
@@ -89,22 +140,14 @@ export const getContacts = query({
       rawContacts = await contactsQuery.take(limit + 1);
     }
 
-    // Filter out dismissed contacts for display, but compute pagination using
-    // the raw window too so dismissed rows cannot terminate pagination early.
-    const visibleContacts = rawContacts.filter((c) => !c.isDismissed);
-    const results = visibleContacts.slice(0, limit);
-    const hasExtraVisible = visibleContacts.length > limit;
-    const hasExtraRaw = rawContacts.length > limit;
-    const hasMore = hasExtraVisible || hasExtraRaw;
-
-    // Cursor source:
-    // - Prefer the last returned visible contact when we know another visible
-    //   contact exists in this window (standard pagination).
-    // - Otherwise use the raw window tail to advance past filtered rows.
-    const cursorSource = hasMore
-      ? (hasExtraVisible
-        ? results[results.length - 1]
-        : rawContacts[rawContacts.length - 1])
+    // Search path still needs in-memory status filter.
+    const contacts = isSearch
+      ? rawContacts.filter((c) => getContactStatus(c) === filterStatus)
+      : rawContacts;
+    const hasMore = contacts.length > limit;
+    const results = hasMore ? contacts.slice(0, limit) : contacts;
+    const cursorSource = hasMore && results.length > 0
+      ? results[results.length - 1]
       : null;
 
     if (results.length === 0) {
@@ -148,7 +191,7 @@ export const getContacts = query({
 
 /**
  * Paginated contacts list for infinite scroll.
- * Returns contacts sorted alphabetically with handles, excluding dismissed.
+ * Returns contacts sorted alphabetically with handles, excluding non-active.
  */
 export const listContactsPaginated = query({
   args: { paginationOpts: paginationOptsValidator },
@@ -164,7 +207,13 @@ export const listContactsPaginated = query({
     const results = await ctx.db
       .query("contacts")
       .withIndex("by_user_display_name", (q) => q.eq("userId", user._id))
-      .filter((q) => q.neq(q.field("isDismissed"), true))
+      .filter((q) =>
+        q.and(
+          q.neq(q.field("isDismissed"), true),
+          q.neq(q.field("status"), "dismissed"),
+          q.neq(q.field("status"), "archived"),
+        ),
+      )
       .paginate(args.paginationOpts);
 
     const enrichedPage = await Promise.all(
@@ -248,6 +297,8 @@ export const getAdjacentContacts = query({
         q.and(
           q.neq(q.field("_id"), args.contactId),
           q.neq(q.field("isDismissed"), true),
+          q.neq(q.field("status"), "dismissed"),
+          q.neq(q.field("status"), "archived"),
           q.or(
             q.gt(q.field("displayName"), name),
             q.and(
@@ -268,6 +319,8 @@ export const getAdjacentContacts = query({
         q.and(
           q.neq(q.field("_id"), args.contactId),
           q.neq(q.field("isDismissed"), true),
+          q.neq(q.field("status"), "dismissed"),
+          q.neq(q.field("status"), "archived"),
           q.or(
             q.lt(q.field("displayName"), name),
             q.and(
@@ -484,6 +537,82 @@ export const getPendingMergeSuggestionCount = query({
   },
 });
 
+/**
+ * Preview the outcome of merging two contacts.
+ * Shows field conflicts, handle movement, and impact counts.
+ */
+export const mergePreview = query({
+  args: {
+    primaryContactId: v.id("contacts"),
+    secondaryContactId: v.id("contacts"),
+  },
+  handler: async (ctx, args) => {
+    const user = await getAuthenticatedUser(ctx);
+    if (!user) throw new Error("Unauthorized");
+
+    const [primary, secondary] = await Promise.all([
+      ctx.db.get(args.primaryContactId),
+      ctx.db.get(args.secondaryContactId),
+    ]);
+    // Contacts can disappear between selection and preview (e.g. merged/deleted in another session).
+    // Return null so clients can recover gracefully instead of crashing on a thrown query error.
+    if (!primary || primary.userId !== user._id) return null;
+    if (!secondary || secondary.userId !== user._id) return null;
+
+    const [primaryHandles, secondaryHandles] = await Promise.all([
+      ctx.db.query("contactHandles").withIndex("by_contact", (q) => q.eq("contactId", args.primaryContactId)).collect(),
+      ctx.db.query("contactHandles").withIndex("by_contact", (q) => q.eq("contactId", args.secondaryContactId)).collect(),
+    ]);
+
+    // Detect field conflicts
+    const conflicts: { field: string; primaryValue: string | undefined; secondaryValue: string | undefined }[] = [];
+    if (primary.displayName !== secondary.displayName) {
+      conflicts.push({ field: "displayName", primaryValue: primary.displayName, secondaryValue: secondary.displayName });
+    }
+    if (primary.company !== secondary.company && secondary.company) {
+      conflicts.push({ field: "company", primaryValue: primary.company, secondaryValue: secondary.company });
+    }
+    if (primary.notes !== secondary.notes && secondary.notes) {
+      conflicts.push({ field: "notes", primaryValue: primary.notes, secondaryValue: secondary.notes });
+    }
+
+    // Handle dedup: find which secondary handles already exist on primary
+    const primaryHandleKeys = new Set(
+      primaryHandles.map((h) =>
+        buildContactHandleDedupKey(h.handleType, h.handle),
+      ),
+    );
+    const handlesToMove = secondaryHandles.filter(
+      (h) =>
+        !primaryHandleKeys.has(buildContactHandleDedupKey(h.handleType, h.handle)),
+    );
+    const handlesToDedupe = secondaryHandles.filter((h) =>
+      primaryHandleKeys.has(buildContactHandleDedupKey(h.handleType, h.handle)),
+    );
+
+    // Impact counts
+    const conversations = await ctx.db.query("conversations").withIndex("by_user", (q) => q.eq("userId", user._id)).collect();
+    const affectedConversations = conversations.filter((c) => c.participantContactIds.includes(args.secondaryContactId));
+
+    const messages = await ctx.db.query("messages").withIndex("by_sender_contact", (q) => q.eq("senderContactId", args.secondaryContactId)).collect();
+
+    const actions = await ctx.db.query("actions").withIndex("by_contact", (q) => q.eq("contactId", args.secondaryContactId)).collect();
+
+    return {
+      primary: { ...primary, handles: primaryHandles.map((h) => ({ type: h.handleType, value: h.handle, platform: h.platform })) },
+      secondary: { ...secondary, handles: secondaryHandles.map((h) => ({ type: h.handleType, value: h.handle, platform: h.platform })) },
+      conflicts,
+      handlesToMove: handlesToMove.map((h) => ({ type: h.handleType, value: h.handle, platform: h.platform })),
+      handlesToDedupe: handlesToDedupe.map((h) => ({ type: h.handleType, value: h.handle, platform: h.platform })),
+      impact: {
+        conversationsAffected: affectedConversations.length,
+        messagesAffected: messages.length,
+        actionsAffected: actions.length,
+      },
+    };
+  },
+});
+
 // ============================================================================
 // Contact Mutations
 // ============================================================================
@@ -502,6 +631,10 @@ export const mergeContacts = mutation({
     const user = await getAuthenticatedUser(ctx);
     if (!user) throw new Error("Unauthorized");
 
+    if (args.primaryContactId === args.secondaryContactId) {
+      throw new Error("Cannot merge a contact with itself");
+    }
+
     const [primary, secondary] = await Promise.all([
       ctx.db.get(args.primaryContactId),
       ctx.db.get(args.secondaryContactId),
@@ -514,124 +647,97 @@ export const mergeContacts = mutation({
       throw new Error("Secondary contact not found");
     }
 
-    // 1. Move all handles from secondary to primary
-    const secondaryHandles = await ctx.db
-      .query("contactHandles")
-      .withIndex("by_contact", (q) =>
-        q.eq("contactId", args.secondaryContactId),
-      )
-      .collect();
+    if (args.suggestionId) {
+      const suggestion = await ctx.db.get(args.suggestionId);
+      if (!suggestion || suggestion.userId !== user._id) {
+        throw new Error("Merge suggestion not found");
+      }
 
-    for (const handle of secondaryHandles) {
-      await ctx.db.patch(handle._id, { contactId: args.primaryContactId });
-    }
+      const matchesRequestedPair =
+        (suggestion.contact1Id === args.primaryContactId &&
+          suggestion.contact2Id === args.secondaryContactId) ||
+        (suggestion.contact1Id === args.secondaryContactId &&
+          suggestion.contact2Id === args.primaryContactId);
+      if (!matchesRequestedPair) {
+        throw new Error("Merge suggestion does not match selected contacts");
+      }
 
-    // 2. Update all conversations referencing secondary contact
-    const conversations = await ctx.db
-      .query("conversations")
-      .withIndex("by_user", (q) => q.eq("userId", user._id))
-      .collect();
-
-    for (const conv of conversations) {
-      if (conv.participantContactIds.includes(args.secondaryContactId)) {
-        // Remove secondary, add primary if not already present
-        const withoutSecondary = conv.participantContactIds.filter(
-          (id) => id !== args.secondaryContactId,
-        );
-        const hasPrimary = conv.participantContactIds.includes(
-          args.primaryContactId,
-        );
-        const updatedParticipants = hasPrimary
-          ? withoutSecondary
-          : [...withoutSecondary, args.primaryContactId];
-
-        await ctx.db.patch(conv._id, {
-          participantContactIds: updatedParticipants,
+      if (suggestion.status === "pending") {
+        await ctx.db.patch(args.suggestionId, {
+          status: "approved",
+          resolvedAt: Date.now(),
         });
+        await cleanupResolveContactAction(
+          ctx,
+          user,
+          args.suggestionId,
+          "completed",
+        );
       }
     }
 
-    // 3. Update all messages referencing secondary contact
-    const messages = await ctx.db
-      .query("messages")
-      .withIndex("by_sender_contact", (q) =>
-        q.eq("senderContactId", args.secondaryContactId),
-      )
-      .collect();
-
-    for (const msg of messages) {
-      await ctx.db.patch(msg._id, { senderContactId: args.primaryContactId });
-    }
-
-    // 4. Update all actions referencing secondary contact
-    const actions = await ctx.db
-      .query("actions")
-      .withIndex("by_contact", (q) =>
-        q.eq("contactId", args.secondaryContactId),
-      )
-      .collect();
-
-    for (const action of actions) {
-      await ctx.db.patch(action._id, { contactId: args.primaryContactId });
-    }
-
-    // 5. Merge contact metadata (prefer primary, fill gaps from secondary)
-    const updates: Partial<Doc<"contacts">> = {};
-    if (!primary.company && secondary.company) {
-      updates.company = secondary.company;
-    }
-    if (!primary.notes && secondary.notes) {
-      updates.notes = secondary.notes;
-    }
-    if (
-      primary.importance === undefined &&
-      secondary.importance !== undefined
-    ) {
-      updates.importance = secondary.importance;
-    }
-
-    // Preserve all avatar options from both contacts and keep highest-priority
-    // source as the active avatar fields.
-    const primaryAvatarOptions = getContactAvatarOptions(primary);
-    const secondaryAvatarOptions = getContactAvatarOptions(secondary);
-    let mergedAvatarOptions = primaryAvatarOptions;
-    for (const option of secondaryAvatarOptions) {
-      mergedAvatarOptions = upsertContactAvatarOption(mergedAvatarOptions, option);
-    }
-    if (!areContactAvatarOptionsEqual(primaryAvatarOptions, mergedAvatarOptions)) {
-      Object.assign(updates, buildPrimaryAvatarFields(mergedAvatarOptions), {
-        avatarOptions: mergedAvatarOptions,
-      });
-    }
-
-    if (Object.keys(updates).length > 0) {
-      await ctx.db.patch(args.primaryContactId, updates);
-    }
-
-    // 6. Update merge suggestion and clean up action BEFORE deleting contact
-    if (args.suggestionId) {
-      await ctx.db.patch(args.suggestionId, {
-        status: "approved",
-        resolvedAt: Date.now(),
-      });
-      await cleanupResolveContactAction(
-        ctx,
-        user,
-        args.suggestionId,
-        "completed",
-      );
-    }
-
-    // 7. Delete secondary contact (last step)
-    await ctx.db.delete(args.secondaryContactId);
+    const result = await executeContactMerge(ctx, {
+      userId: user._id,
+      primaryContact: primary,
+      secondaryContact: secondary,
+      primaryContactId: args.primaryContactId,
+      secondaryContactId: args.secondaryContactId,
+      actor: "user",
+    });
+    // Re-scan after manual/user merges so transitive duplicates are discovered.
+    await scheduleContactMergeCheck(ctx, user._id, args.primaryContactId);
 
     return {
       success: true,
-      handlesMovedCount: secondaryHandles.length,
-      conversationsUpdatedCount: conversations.filter((c) =>
-        c.participantContactIds.includes(args.secondaryContactId),
-      ).length,
-      messagesUpdatedCount: messages.length,
+      handlesMovedCount: result.handlesMovedCount,
+      conversationsUpdatedCount: result.conversationsUpdatedCount,
+      messagesUpdatedCount: result.messagesUpdatedCount,
+    };
+  },
+});
+
+/**
+ * Manual merge with field conflict resolution.
+ * User picks which value wins for each conflicting field.
+ */
+export const manualMerge = mutation({
+  args: {
+    primaryContactId: v.id("contacts"),
+    secondaryContactId: v.id("contacts"),
+    fieldResolutions: v.optional(mergeFieldResolutionsValidator),
+  },
+  handler: async (ctx, args) => {
+    const user = await getAuthenticatedUser(ctx);
+    if (!user) throw new Error("Unauthorized");
+
+    if (args.primaryContactId === args.secondaryContactId) {
+      throw new Error("Cannot merge a contact with itself");
+    }
+
+    const [primary, secondary] = await Promise.all([
+      ctx.db.get(args.primaryContactId),
+      ctx.db.get(args.secondaryContactId),
+    ]);
+    if (!primary || primary.userId !== user._id) throw new Error("Primary not found");
+    if (!secondary || secondary.userId !== user._id) throw new Error("Secondary not found");
+
+    const result = await executeContactMerge(ctx, {
+      userId: user._id,
+      primaryContact: primary,
+      secondaryContact: secondary,
+      primaryContactId: args.primaryContactId,
+      secondaryContactId: args.secondaryContactId,
+      actor: "user",
+      fieldResolutions: args.fieldResolutions,
+    });
+    // Re-scan after manual/user merges so transitive duplicates are discovered.
+    await scheduleContactMergeCheck(ctx, user._id, args.primaryContactId);
+
+    return {
+      success: true,
+      handlesMovedCount: result.handlesMovedCount,
+      conversationsUpdatedCount: result.conversationsUpdatedCount,
+      messagesUpdatedCount: result.messagesUpdatedCount,
     };
   },
 });
@@ -664,6 +770,14 @@ export const rejectMerge = mutation({
       "discarded",
     );
 
+    // Insert keep-separate exclusion so this pair is never re-suggested
+    await ensureContactExclusion(
+      ctx,
+      user._id,
+      suggestion.contact1Id,
+      suggestion.contact2Id,
+    );
+
     return { success: true };
   },
 });
@@ -683,6 +797,10 @@ export const createMergeSuggestion = mutation({
     const user = await getAuthenticatedUser(ctx);
     if (!user) throw new Error("Unauthorized");
 
+    if (args.contact1Id === args.contact2Id) {
+      return { success: false, reason: "Cannot compare a contact with itself" };
+    }
+
     // Verify both contacts belong to user
     const [contact1, contact2] = await Promise.all([
       ctx.db.get(args.contact1Id),
@@ -694,6 +812,15 @@ export const createMergeSuggestion = mutation({
     }
     if (!contact2 || contact2.userId !== user._id) {
       throw new Error("Contact 2 not found");
+    }
+
+    const [c1, c2] = normalizeContactPair(args.contact1Id, args.contact2Id);
+    const exclusion = await ctx.db
+      .query("contactExclusions")
+      .withIndex("by_pair", (q) => q.eq("contact1Id", c1).eq("contact2Id", c2))
+      .first();
+    if (exclusion) {
+      return { success: false, reason: "Contacts are marked keep-separate" };
     }
 
     // Check if suggestion already exists (in either direction)
@@ -1071,8 +1198,8 @@ export const saveContactFromCard = mutation({
 });
 
 /**
- * Dismiss a contact as spam/not-a-contact.
- * Marks the contact as dismissed and discards the action.
+ * Legacy alias for archive from older clients.
+ * Archives the contact and discards the action.
  */
 export const dismissContact = mutation({
   args: {
@@ -1095,9 +1222,10 @@ export const dismissContact = mutation({
 
     const now = Date.now();
 
-    // Mark contact as dismissed (won't show in contact list, won't create future actions)
+    // Archive contact (won't show in active contacts, won't create individual actions)
     await ctx.db.patch(args.contactId, {
-      isDismissed: true,
+      isDismissed: undefined,
+      status: "archived",
     });
 
     // Mark action as discarded
@@ -1118,9 +1246,719 @@ export const dismissContact = mutation({
   },
 });
 
+/**
+ * Set contact status (active/archived).
+ * Legacy dismissed inputs are treated as archived.
+ * Discards pending actions when archiving.
+ */
+export const setContactStatus = mutation({
+  args: {
+    contactId: v.id("contacts"),
+    status: contactStatusValidator,
+  },
+  handler: async (ctx, args) => {
+    const user = await getAuthenticatedUser(ctx);
+    if (!user) throw new Error("Unauthorized");
+
+    const contact = await ctx.db.get(args.contactId);
+    if (!contact || contact.userId !== user._id) {
+      throw new Error("Contact not found");
+    }
+
+    const targetStatus = args.status === "dismissed" ? "archived" : args.status;
+    const oldStatus = getContactStatus(contact);
+    if (oldStatus === targetStatus) return { success: true };
+
+    const now = Date.now();
+
+    // Store only active/archived status; clear legacy dismissed flag.
+    await ctx.db.patch(args.contactId, {
+      status: targetStatus,
+      isDismissed: undefined,
+    });
+
+    // Discard pending actions when archiving.
+    if (targetStatus !== "active") {
+      const pendingByPrimary = await ctx.db
+        .query("actions")
+        .withIndex("by_contact", (q) => q.eq("contactId", args.contactId))
+        .filter((q) => q.eq(q.field("status"), "pending"))
+        .collect();
+
+      const pendingBySecondary = await ctx.db
+        .query("actions")
+        .withIndex("by_user_status", (q) =>
+          q.eq("userId", user._id).eq("status", "pending"),
+        )
+        .filter((q) => q.eq(q.field("secondaryContactId"), args.contactId))
+        .collect();
+
+      const seenActionIds = new Set(pendingByPrimary.map((action) => action._id));
+      const pendingActions = [
+        ...pendingByPrimary,
+        ...pendingBySecondary.filter((action) => !seenActionIds.has(action._id)),
+      ];
+
+      for (const action of pendingActions) {
+        await ctx.db.patch(action._id, { status: "discarded", discardedAt: now });
+      }
+
+      // Decrement pending action count
+      const currentCount = user.pendingActionCount ?? 0;
+      const newCount = Math.max(0, currentCount - pendingActions.length);
+      if (newCount !== currentCount) {
+        await ctx.db.patch(user._id, { pendingActionCount: newCount });
+      }
+    }
+
+    // Write audit log
+    await ctx.db.insert("contactAuditLog", {
+      userId: user._id,
+      contactId: args.contactId,
+      action: "status_change",
+      actor: "user",
+      details: { oldStatus, newStatus: targetStatus },
+      timestamp: now,
+    });
+
+    return { success: true };
+  },
+});
+
+/**
+ * Restore a contact to active status.
+ */
+export const restoreContact = mutation({
+  args: {
+    contactId: v.id("contacts"),
+  },
+  handler: async (ctx, args) => {
+    const user = await getAuthenticatedUser(ctx);
+    if (!user) throw new Error("Unauthorized");
+
+    const contact = await ctx.db.get(args.contactId);
+    if (!contact || contact.userId !== user._id) {
+      throw new Error("Contact not found");
+    }
+
+    const oldStatus = getContactStatus(contact);
+    if (oldStatus === "active") return { success: true };
+
+    const now = Date.now();
+
+    await ctx.db.patch(args.contactId, {
+      status: "active",
+      isDismissed: undefined,
+    });
+
+    await ctx.db.insert("contactAuditLog", {
+      userId: user._id,
+      contactId: args.contactId,
+      action: "restore",
+      actor: "user",
+      details: { oldStatus },
+      timestamp: now,
+    });
+
+    return { success: true };
+  },
+});
+
+/**
+ * Mark two contacts as intentionally separate (keep-separate).
+ * Prevents future merge suggestions for this pair.
+ */
+export const keepSeparate = mutation({
+  args: {
+    contact1Id: v.id("contacts"),
+    contact2Id: v.id("contacts"),
+    suggestionId: v.optional(v.id("mergeSuggestions")),
+  },
+  handler: async (ctx, args) => {
+    const user = await getAuthenticatedUser(ctx);
+    if (!user) throw new Error("Unauthorized");
+
+    if (args.contact1Id === args.contact2Id) {
+      throw new Error("Cannot keep-separate a contact from itself");
+    }
+
+    const [contact1, contact2] = await Promise.all([
+      ctx.db.get(args.contact1Id),
+      ctx.db.get(args.contact2Id),
+    ]);
+    if (!contact1 || contact1.userId !== user._id) {
+      throw new Error("Contact 1 not found");
+    }
+    if (!contact2 || contact2.userId !== user._id) {
+      throw new Error("Contact 2 not found");
+    }
+
+    const [c1, c2] = normalizeContactPair(args.contact1Id, args.contact2Id);
+    await ensureContactExclusion(ctx, user._id, c1, c2);
+
+    // Reject the suggestion if provided
+    if (args.suggestionId) {
+      const suggestion = await ctx.db.get(args.suggestionId);
+      if (!suggestion || suggestion.userId !== user._id) {
+        throw new Error("Merge suggestion not found");
+      }
+      const [s1, s2] = normalizeContactPair(
+        suggestion.contact1Id,
+        suggestion.contact2Id,
+      );
+      if (s1 !== c1 || s2 !== c2) {
+        throw new Error("Merge suggestion does not match selected contacts");
+      }
+      if (suggestion.status === "pending") {
+        await ctx.db.patch(args.suggestionId, {
+          status: "rejected",
+          resolvedAt: Date.now(),
+        });
+        await cleanupResolveContactAction(ctx, user, args.suggestionId, "discarded");
+      }
+    }
+
+    // Write audit logs for both contacts.
+    const now = Date.now();
+    await ctx.db.insert("contactAuditLog", {
+      userId: user._id,
+      contactId: c1,
+      action: "keep_separate",
+      actor: "user",
+      details: { otherContactId: c2 },
+      timestamp: now,
+    });
+    await ctx.db.insert("contactAuditLog", {
+      userId: user._id,
+      contactId: c2,
+      action: "keep_separate",
+      actor: "user",
+      details: { otherContactId: c1 },
+      timestamp: now,
+    });
+
+    return { success: true };
+  },
+});
+
+/**
+ * Get merge history entries that can be unmerged for a contact.
+ */
+export const getUnmergeableHistory = query({
+  args: { contactId: v.id("contacts") },
+  handler: async (ctx, args) => {
+    const user = await getAuthenticatedUser(ctx);
+    if (!user) return [];
+
+    const [mergeEntries, unmergeEntries] = await Promise.all([
+      ctx.db
+        .query("contactAuditLog")
+        .withIndex("by_contact", (q) => q.eq("contactId", args.contactId))
+        .filter((q) => q.eq(q.field("action"), "merge"))
+        .order("desc")
+        .collect(),
+      ctx.db
+        .query("contactAuditLog")
+        .withIndex("by_contact", (q) => q.eq("contactId", args.contactId))
+        .filter((q) => q.eq(q.field("action"), "unmerge"))
+        .collect(),
+    ]);
+
+    const revertedMergeIds = new Set(
+      unmergeEntries.flatMap((e) =>
+        e.userId === user._id && isUnmergeAuditDetails(e.details)
+          ? [e.details.originalMergeAuditId]
+          : [],
+      ),
+    );
+
+    return mergeEntries.filter(
+      (e) => e.userId === user._id && !revertedMergeIds.has(e._id),
+    );
+  },
+});
+
+/**
+ * Get full audit history for a contact.
+ */
+export const getContactAuditHistory = query({
+  args: { contactId: v.id("contacts") },
+  handler: async (ctx, args) => {
+    const user = await getAuthenticatedUser(ctx);
+    if (!user) return [];
+
+    const entries = await ctx.db
+      .query("contactAuditLog")
+      .withIndex("by_contact", (q) => q.eq("contactId", args.contactId))
+      .order("desc")
+      .collect();
+
+    return entries.filter((e) => e.userId === user._id);
+  },
+});
+
+/**
+ * Unmerge a previously merged contact by restoring from merge snapshot.
+ * Recreates the secondary contact, moves handles and messages back.
+ */
+export const unmergeContact = mutation({
+  args: {
+    auditLogId: v.id("contactAuditLog"),
+  },
+  handler: async (ctx, args) => {
+    const user = await getAuthenticatedUser(ctx);
+    if (!user) throw new Error("Unauthorized");
+
+    const auditEntry = await ctx.db.get(args.auditLogId);
+    if (!auditEntry || auditEntry.userId !== user._id || auditEntry.action !== "merge") {
+      throw new Error("Merge audit entry not found");
+    }
+
+    if (!isMergeAuditDetails(auditEntry.details)) {
+      throw new Error("Merge snapshot missing secondary contact data");
+    }
+    const details = auditEntry.details;
+
+    const primaryContactId = auditEntry.contactId;
+    const primary = await ctx.db.get(primaryContactId);
+    if (!primary) throw new Error("Primary contact no longer exists");
+
+    // Idempotency guard: return existing unmerge result if this merge was already reversed.
+    const priorUnmerges = await ctx.db
+      .query("contactAuditLog")
+      .withIndex("by_contact", (q) => q.eq("contactId", primaryContactId))
+      .filter((q) => q.eq(q.field("action"), "unmerge"))
+      .collect();
+    const existingUnmerge = priorUnmerges.find(
+      (entry) =>
+        isUnmergeAuditDetails(entry.details) &&
+        entry.details.originalMergeAuditId === args.auditLogId,
+    );
+    if (existingUnmerge && isUnmergeAuditDetails(existingUnmerge.details)) {
+      return {
+        success: true,
+        restoredContactId: existingUnmerge.details.restoredContactId,
+        handlesRestored: existingUnmerge.details.handlesRestored,
+        messagesRestored: existingUnmerge.details.messagesRestored,
+        alreadyUnmerged: true,
+      };
+    }
+
+    const now = Date.now();
+
+    // 1. Recreate secondary contact
+    const secondaryContactId = await ctx.db.insert("contacts", {
+      userId: user._id,
+      displayName: details.secondaryContact.displayName,
+      company: details.secondaryContact.company,
+      notes: details.secondaryContact.notes,
+      importance: details.secondaryContact.importance,
+      tags: details.secondaryContact.tags,
+      status: "active",
+    });
+
+    // 2. Move handles back (recreate deduped handles deleted during merge)
+    let handlesRestored = 0;
+    const restoredHandleIds = new Set<Id<"contactHandles">>();
+    const dedupedHandlesById = new Map<Id<"contactHandles">, MergeDedupedHandleSnapshot>(
+      (details.dedupedHandles ?? []).map((snapshot) => [snapshot.handleId, snapshot]),
+    );
+    const restoredDedupedHandleByMergedIntoId = new Map<
+      Id<"contactHandles">,
+      Id<"contactHandles">
+    >();
+    for (const handleId of details.handleIds) {
+      const handle = await ctx.db.get(handleId);
+      if (handle && handle.contactId === primaryContactId) {
+        await ctx.db.patch(handle._id, { contactId: secondaryContactId });
+        handlesRestored++;
+        restoredHandleIds.add(handle._id);
+        continue;
+      }
+
+      const dedupedHandleSnapshot = dedupedHandlesById.get(handleId);
+      if (!dedupedHandleSnapshot) continue;
+
+      const recreatedHandleId = await ctx.db.insert("contactHandles", {
+        userId: user._id,
+        contactId: secondaryContactId,
+        handleType: dedupedHandleSnapshot.handleType,
+        handle: dedupedHandleSnapshot.handle,
+        platform: dedupedHandleSnapshot.platform,
+      });
+      handlesRestored++;
+      restoredHandleIds.add(recreatedHandleId);
+      restoredDedupedHandleByMergedIntoId.set(
+        dedupedHandleSnapshot.mergedIntoHandleId,
+        recreatedHandleId,
+      );
+    }
+
+    // 3. Move messages back.
+    // Older merge audits may include explicit messageIds. Newer audits avoid
+    // large payloads and rely on senderHandleId precision at unmerge time.
+    let messagesRestored = 0;
+    const overflowMessageRefs = details.messageIds?.length
+      ? []
+      : await ctx.db
+          .query("contactMergeMessageRefs")
+          .withIndex("by_merge_audit", (q) => q.eq("mergeAuditId", args.auditLogId))
+          .collect();
+    const explicitMessageIds = details.messageIds?.length
+      ? details.messageIds
+      : [...new Set(overflowMessageRefs.map((ref) => ref.messageId))];
+
+    if (explicitMessageIds.length > 0) {
+      for (const msgId of explicitMessageIds) {
+        const msg = await ctx.db.get(msgId);
+        if (!msg || msg.senderContactId !== primaryContactId) continue;
+
+        const updates: { senderContactId: Id<"contacts">; senderHandleId?: Id<"contactHandles"> } = {
+          senderContactId: secondaryContactId,
+        };
+        if (msg.senderHandleId) {
+          const restoredDedupedHandleId = restoredDedupedHandleByMergedIntoId.get(
+            msg.senderHandleId,
+          );
+          if (restoredDedupedHandleId) {
+            updates.senderHandleId = restoredDedupedHandleId;
+          }
+        }
+
+        await ctx.db.patch(msg._id, updates);
+        messagesRestored++;
+      }
+    } else {
+      const messagesOnPrimary = await ctx.db
+        .query("messages")
+        .withIndex("by_sender_contact", (q) =>
+          q.eq("senderContactId", primaryContactId),
+        )
+        .collect();
+      for (const msg of messagesOnPrimary) {
+        if (!msg.senderHandleId || !restoredHandleIds.has(msg.senderHandleId)) {
+          continue;
+        }
+
+        await ctx.db.patch(msg._id, { senderContactId: secondaryContactId });
+        messagesRestored++;
+      }
+    }
+
+    // 4. Restore conversations based on merge snapshots.
+    for (const snapshot of details.conversationSnapshots) {
+      const conv = await ctx.db.get(snapshot.conversationId);
+      if (!conv) continue;
+
+      let updatedParticipants = conv.participantContactIds;
+      if (!updatedParticipants.includes(secondaryContactId)) {
+        updatedParticipants = [...updatedParticipants, secondaryContactId];
+      }
+
+      if (!snapshot.hadPrimaryBeforeMerge) {
+        updatedParticipants = updatedParticipants.filter(
+          (participantId) => participantId !== primaryContactId,
+        );
+      }
+
+      const participantsChanged =
+        updatedParticipants.length !== conv.participantContactIds.length ||
+        updatedParticipants.some(
+          (participantId, index) =>
+            participantId !== conv.participantContactIds[index],
+        );
+      if (participantsChanged) {
+        await ctx.db.patch(conv._id, {
+          participantContactIds: updatedParticipants,
+        });
+      }
+    }
+
+    // 5. Restore primary fields that were changed by merge, but only if
+    // they still match the merge-applied value (avoid clobbering later edits).
+    const revertUpdates: Partial<
+      Pick<Doc<"contacts">, "displayName" | "company" | "notes" | "importance" | "tags">
+    > = {};
+    const primaryFieldChanges = details.primaryFieldChanges;
+    if (
+      primaryFieldChanges?.displayName &&
+      primary.displayName === primaryFieldChanges.displayName.after
+    ) {
+      revertUpdates.displayName = primaryFieldChanges.displayName.before;
+    }
+    if (
+      primaryFieldChanges?.company &&
+      primary.company === primaryFieldChanges.company.after
+    ) {
+      revertUpdates.company = primaryFieldChanges.company.before;
+    }
+    if (
+      primaryFieldChanges?.notes &&
+      primary.notes === primaryFieldChanges.notes.after
+    ) {
+      revertUpdates.notes = primaryFieldChanges.notes.before;
+    }
+    if (
+      primaryFieldChanges?.importance &&
+      primary.importance === primaryFieldChanges.importance.after
+    ) {
+      revertUpdates.importance = primaryFieldChanges.importance.before;
+    }
+    if (
+      primaryFieldChanges?.tags &&
+      areStringArraysEqual(primary.tags, primaryFieldChanges.tags.after)
+    ) {
+      revertUpdates.tags = primaryFieldChanges.tags.before;
+    }
+    if (Object.keys(revertUpdates).length > 0) {
+      await ctx.db.patch(primaryContactId, revertUpdates);
+    }
+
+    // 6. Write unmerge audit
+    await ctx.db.insert("contactAuditLog", {
+      userId: user._id,
+      contactId: primaryContactId,
+      action: "unmerge",
+      actor: "user",
+      details: {
+        restoredContactId: secondaryContactId,
+        handlesRestored,
+        messagesRestored,
+        originalMergeAuditId: args.auditLogId,
+      },
+      timestamp: now,
+    });
+
+    // Treat unmerge as intentional separation so this pair is not re-suggested.
+    await ensureContactExclusion(ctx, user._id, primaryContactId, secondaryContactId);
+
+    // 7. Trigger merge re-evaluation for both contacts
+    await scheduleContactMergeCheck(ctx, user._id, primaryContactId);
+    await scheduleContactMergeCheck(ctx, user._id, secondaryContactId);
+
+    return {
+      success: true,
+      restoredContactId: secondaryContactId,
+      handlesRestored,
+      messagesRestored,
+    };
+  },
+});
+
+/**
+ * Detach a handle from its current contact.
+ * If targetContactId provided: move handle to that contact.
+ * Otherwise: create a new contact from the handle.
+ * Repoints messages via senderHandleId for precision.
+ */
+export const detachHandle = mutation({
+  args: {
+    handleId: v.id("contactHandles"),
+    targetContactId: v.optional(v.id("contacts")),
+  },
+  handler: async (ctx, args) => {
+    const user = await getAuthenticatedUser(ctx);
+    if (!user) throw new Error("Unauthorized");
+
+    const handle = await ctx.db.get(args.handleId);
+    if (!handle || handle.userId !== user._id) {
+      throw new Error("Handle not found");
+    }
+
+    const sourceContactId = handle.contactId;
+    const sourceContact = await ctx.db.get(sourceContactId);
+    if (!sourceContact) throw new Error("Source contact not found");
+
+    // Ensure source contact has more than one handle (can't detach the last one)
+    const sourceHandles = await ctx.db
+      .query("contactHandles")
+      .withIndex("by_contact", (q) => q.eq("contactId", sourceContactId))
+      .collect();
+
+    if (sourceHandles.length <= 1) {
+      throw new Error("Cannot detach the only handle on a contact");
+    }
+
+    const now = Date.now();
+    let destinationContactId: Id<"contacts">;
+
+    if (args.targetContactId) {
+      // Move to existing contact
+      const target = await ctx.db.get(args.targetContactId);
+      if (!target || target.userId !== user._id) {
+        throw new Error("Target contact not found");
+      }
+      destinationContactId = args.targetContactId;
+    } else {
+      // Create new contact from handle
+      const displayName = handle.handle;
+      destinationContactId = await ctx.db.insert("contacts", {
+        userId: user._id,
+        displayName,
+        status: "active",
+      });
+    }
+
+    // Move the handle
+    await ctx.db.patch(args.handleId, { contactId: destinationContactId });
+
+    // Repoint messages that were sent via this handle
+    const messagesByHandle = await ctx.db
+      .query("messages")
+      .withIndex("by_sender_handle", (q) => q.eq("senderHandleId", args.handleId))
+      .collect();
+
+    for (const msg of messagesByHandle) {
+      await ctx.db.patch(msg._id, { senderContactId: destinationContactId });
+    }
+
+    // Update conversations: add destination to participant lists where source was present
+    // (for conversations that had messages from this handle)
+    const affectedConvIds = new Set(messagesByHandle.map((m) => m.conversationId));
+    for (const convId of affectedConvIds) {
+      const conv = await ctx.db.get(convId);
+      if (conv && !conv.participantContactIds.includes(destinationContactId)) {
+        await ctx.db.patch(convId, {
+          participantContactIds: [...conv.participantContactIds, destinationContactId],
+        });
+      }
+    }
+
+    // Write audit logs
+    await ctx.db.insert("contactAuditLog", {
+      userId: user._id,
+      contactId: sourceContactId,
+      action: "handle_detach",
+      actor: "user",
+      details: {
+        handleId: args.handleId,
+        handleValue: handle.handle,
+        handleType: handle.handleType,
+        destinationContactId,
+        messagesRepointed: messagesByHandle.length,
+      },
+      timestamp: now,
+    });
+
+    if (args.targetContactId) {
+      await ctx.db.insert("contactAuditLog", {
+        userId: user._id,
+        contactId: destinationContactId,
+        action: "handle_move",
+        actor: "user",
+        details: {
+          handleId: args.handleId,
+          handleValue: handle.handle,
+          handleType: handle.handleType,
+          sourceContactId,
+          messagesRepointed: messagesByHandle.length,
+        },
+        timestamp: now,
+      });
+    }
+
+    // Trigger merge re-evaluation for both contacts
+    await scheduleContactMergeCheck(ctx, user._id, sourceContactId);
+    await scheduleContactMergeCheck(ctx, user._id, destinationContactId);
+
+    return {
+      success: true,
+      destinationContactId,
+      messagesRepointed: messagesByHandle.length,
+      createdNewContact: !args.targetContactId,
+    };
+  },
+});
+
 // ============================================================================
 // Internal Helpers
 // ============================================================================
+
+type MergeSource = ContactMergeSource;
+type ContactAuditDetails = Doc<"contactAuditLog">["details"];
+
+type MergeAuditDetails = {
+  secondaryContact: {
+    _id: Id<"contacts">;
+    displayName: string;
+    company?: string;
+    notes?: string;
+    importance?: number;
+    tags?: string[];
+  };
+  handleIds: Id<"contactHandles">[];
+  dedupedHandles?: MergeDedupedHandleSnapshot[];
+  messageIds?: Id<"messages">[];
+  conversationSnapshots: MergeConversationSnapshot[];
+  actionIds?: Id<"actions">[];
+  source?: MergeSource;
+  reasoning?: string;
+  fieldResolutions?: MergeFieldResolutions;
+  primaryFieldChanges?: MergePrimaryFieldChanges;
+};
+
+type UnmergeAuditDetails = {
+  restoredContactId: Id<"contacts">;
+  handlesRestored: number;
+  messagesRestored: number;
+  originalMergeAuditId: Id<"contactAuditLog">;
+};
+
+function isMergeAuditDetails(details: ContactAuditDetails): details is MergeAuditDetails {
+  if (!details || typeof details !== "object") return false;
+  const candidate = details as Partial<MergeAuditDetails>;
+  const conversationSnapshotsValid =
+    Array.isArray(candidate.conversationSnapshots) &&
+    candidate.conversationSnapshots.every(
+      (snapshot) =>
+        !!snapshot &&
+        typeof snapshot === "object" &&
+        snapshot.conversationId !== undefined &&
+        typeof snapshot.hadPrimaryBeforeMerge === "boolean",
+    );
+  const dedupedHandlesValid =
+    candidate.dedupedHandles === undefined ||
+    (Array.isArray(candidate.dedupedHandles) &&
+      candidate.dedupedHandles.every(
+        (snapshot) =>
+          !!snapshot &&
+          typeof snapshot === "object" &&
+          snapshot.handleId !== undefined &&
+          snapshot.mergedIntoHandleId !== undefined &&
+          snapshot.handleType !== undefined &&
+          typeof snapshot.handle === "string" &&
+          snapshot.platform !== undefined,
+      ));
+  return (
+    !!candidate.secondaryContact &&
+    Array.isArray(candidate.handleIds) &&
+    conversationSnapshotsValid &&
+    dedupedHandlesValid
+  );
+}
+
+function isUnmergeAuditDetails(
+  details: ContactAuditDetails,
+): details is UnmergeAuditDetails {
+  if (!details || typeof details !== "object") return false;
+  const candidate = details as Partial<UnmergeAuditDetails>;
+  return (
+    candidate.restoredContactId !== undefined &&
+    candidate.originalMergeAuditId !== undefined &&
+    typeof candidate.handlesRestored === "number" &&
+    typeof candidate.messagesRestored === "number"
+  );
+}
+
+function areStringArraysEqual(
+  left?: string[],
+  right?: string[],
+): boolean {
+  if (!left && !right) return true;
+  if (!left || !right) return false;
+  if (left.length !== right.length) return false;
+  return left.every((value, index) => value === right[index]);
+}
 
 async function getContactWithHandles(ctx: QueryCtx, contactId: Id<"contacts">) {
   const contact = await ctx.db.get(contactId);
@@ -1139,6 +1977,27 @@ async function getContactWithHandles(ctx: QueryCtx, contactId: Id<"contacts">) {
       platform: h.platform,
     })),
   };
+}
+
+async function ensureContactExclusion(
+  ctx: MutationCtx,
+  userId: Id<"users">,
+  contact1Id: Id<"contacts">,
+  contact2Id: Id<"contacts">,
+): Promise<void> {
+  const [c1, c2] = normalizeContactPair(contact1Id, contact2Id);
+  const existingExclusion = await ctx.db
+    .query("contactExclusions")
+    .withIndex("by_pair", (q) => q.eq("contact1Id", c1).eq("contact2Id", c2))
+    .first();
+  if (existingExclusion) return;
+
+  await ctx.db.insert("contactExclusions", {
+    userId,
+    contact1Id: c1,
+    contact2Id: c2,
+    createdAt: Date.now(),
+  });
 }
 
 /**

@@ -184,6 +184,52 @@ describe("contacts", () => {
       expect(result.contacts[0].displayName).toBe("Active Contact");
     });
 
+    it("paginates correctly with status filtering", async () => {
+      const t = trackTest(convexTest(schema, modules));
+      const { asUser, userId } = await setupAuthenticatedUser(t);
+
+      await t.run(async (ctx) => {
+        await ctx.db.insert("contacts", {
+          ...createTestContactData(userId, { displayName: "A Dismissed" }),
+          isDismissed: true,
+        });
+        await ctx.db.insert(
+          "contacts",
+          createTestContactData(userId, { displayName: "B Active" }),
+        );
+        await ctx.db.insert("contacts", {
+          ...createTestContactData(userId, { displayName: "C Archived" }),
+          status: "archived",
+        });
+        await ctx.db.insert(
+          "contacts",
+          createTestContactData(userId, { displayName: "D Active" }),
+        );
+        await ctx.db.insert(
+          "contacts",
+          createTestContactData(userId, { displayName: "E Active" }),
+        );
+      });
+
+      const page1 = await asUser.query(api.contacts.getContacts, {
+        status: "active",
+        limit: 2,
+      });
+      expect(page1.contacts.map((c) => c.displayName)).toEqual([
+        "B Active",
+        "D Active",
+      ]);
+      expect(page1.nextCursor).toBeTruthy();
+
+      const page2 = await asUser.query(api.contacts.getContacts, {
+        status: "active",
+        limit: 2,
+        cursor: page1.nextCursor!,
+      });
+      expect(page2.contacts.map((c) => c.displayName)).toEqual(["E Active"]);
+      expect(page2.nextCursor).toBeNull();
+    });
+
     it("supports cursor-based pagination", async () => {
       const t = trackTest(convexTest(schema, modules));
       const { asUser, userId } = await setupAuthenticatedUser(t);
@@ -388,6 +434,53 @@ describe("contacts", () => {
       const result = await asUser.query(api.contacts.getContact, { contactId });
 
       expect(result).toBeNull();
+    });
+  });
+
+  describe("getAdjacentContacts query", () => {
+    it("excludes archived and dismissed contacts", async () => {
+      const t = trackTest(convexTest(schema, modules));
+      const { asUser, userId } = await setupAuthenticatedUser(t);
+
+      const targetContactId = await t.run(async (ctx) => {
+        await ctx.db.insert(
+          "contacts",
+          createTestContactData(userId, { displayName: "Aaron Active" }),
+        );
+        await ctx.db.insert("contacts", {
+          ...createTestContactData(userId, { displayName: "Beta Archived" }),
+          status: "archived",
+        });
+        const targetContactId = await ctx.db.insert(
+          "contacts",
+          createTestContactData(userId, { displayName: "Charlie Target" }),
+        );
+        await ctx.db.insert("contacts", {
+          ...createTestContactData(userId, {
+            displayName: "Delta Dismissed Status",
+          }),
+          status: "dismissed",
+        });
+        await ctx.db.insert("contacts", {
+          ...createTestContactData(userId, {
+            displayName: "Echo Legacy Dismissed",
+          }),
+          isDismissed: true,
+        });
+        await ctx.db.insert(
+          "contacts",
+          createTestContactData(userId, { displayName: "Foxtrot Active" }),
+        );
+        return targetContactId;
+      });
+
+      const adjacent = await asUser.query(api.contacts.getAdjacentContacts, {
+        contactId: targetContactId,
+        count: 3,
+      });
+
+      expect(adjacent.before.map((c) => c.displayName)).toEqual(["Aaron Active"]);
+      expect(adjacent.after.map((c) => c.displayName)).toEqual(["Foxtrot Active"]);
     });
   });
 
@@ -687,6 +780,77 @@ describe("contacts", () => {
     });
   });
 
+  describe("mergePreview query", () => {
+    it("dedupes handles using normalized keys", async () => {
+      const t = trackTest(convexTest(schema, modules));
+      const { asUser, userId } = await setupAuthenticatedUser(t);
+
+      const { primaryId, secondaryId } = await t.run(async (ctx) => {
+        const primaryId = await ctx.db.insert(
+          "contacts",
+          createTestContactData(userId, {
+            displayName: "Primary Contact",
+          }),
+        );
+        const secondaryId = await ctx.db.insert(
+          "contacts",
+          createTestContactData(userId, {
+            displayName: "Secondary Contact",
+          }),
+        );
+
+        await ctx.db.insert(
+          "contactHandles",
+          createTestContactHandleData(userId, primaryId, {
+            handleType: "email",
+            handle: "shared@example.com",
+            platform: "imessage",
+          }),
+        );
+        await ctx.db.insert(
+          "contactHandles",
+          createTestContactHandleData(userId, secondaryId, {
+            handleType: "email",
+            handle: "Shared@Example.com",
+            platform: "imessage",
+          }),
+        );
+        await ctx.db.insert(
+          "contactHandles",
+          createTestContactHandleData(userId, secondaryId, {
+            handleType: "phone",
+            handle: "+15551112222",
+            platform: "imessage",
+          }),
+        );
+
+        return { primaryId, secondaryId };
+      });
+
+      const preview = await asUser.query(api.contacts.mergePreview, {
+        primaryContactId: primaryId,
+        secondaryContactId: secondaryId,
+      });
+
+      expect(preview).not.toBeNull();
+      expect(preview?.handlesToDedupe).toHaveLength(1);
+      expect(preview?.handlesToDedupe[0]).toEqual(
+        expect.objectContaining({
+          type: "email",
+          value: "Shared@Example.com",
+        }),
+      );
+      expect(preview?.handlesToMove).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            type: "phone",
+            value: "+15551112222",
+          }),
+        ]),
+      );
+    });
+  });
+
   describe("mergeContacts mutation", () => {
     it("throws for unauthenticated user", async () => {
       const t = trackTest(convexTest(schema, modules));
@@ -876,6 +1040,72 @@ describe("contacts", () => {
       expect(message?.senderContactId).toEqual(primaryId);
     });
 
+    it("repoints senderHandleId when deduping duplicate handles during merge", async () => {
+      const t = trackTest(convexTest(schema, modules));
+      const { asUser, userId } = await setupAuthenticatedUser(t);
+
+      const { primaryId, secondaryId, primaryHandleId, secondaryHandleId, messageId } =
+        await t.run(async (ctx) => {
+          const primaryId = await ctx.db.insert(
+            "contacts",
+            createTestContactData(userId, { displayName: "Primary" }),
+          );
+          const secondaryId = await ctx.db.insert(
+            "contacts",
+            createTestContactData(userId, { displayName: "Secondary" }),
+          );
+          const primaryHandleId = await ctx.db.insert(
+            "contactHandles",
+            createTestContactHandleData(userId, primaryId, {
+              handleType: "phone",
+              handle: "+15551234567",
+            }),
+          );
+          const secondaryHandleId = await ctx.db.insert(
+            "contactHandles",
+            createTestContactHandleData(userId, secondaryId, {
+              handleType: "phone",
+              handle: "+15551234567",
+            }),
+          );
+
+          const conversationId = await ctx.db.insert(
+            "conversations",
+            createTestConversationData(userId, {
+              participantContactIds: [secondaryId],
+            }),
+          );
+          const messageId = await ctx.db.insert("messages", {
+            ...createTestMessageData(userId, conversationId, {
+              senderContactId: secondaryId,
+            }),
+            senderHandleId: secondaryHandleId,
+          });
+
+          return {
+            primaryId,
+            secondaryId,
+            primaryHandleId,
+            secondaryHandleId,
+            messageId,
+          };
+        });
+
+      const result = await asUser.mutation(api.contacts.mergeContacts, {
+        primaryContactId: primaryId,
+        secondaryContactId: secondaryId,
+      });
+      expect(result.success).toBe(true);
+
+      const { message, deletedSecondaryHandle } = await t.run(async (ctx) => ({
+        message: await ctx.db.get(messageId),
+        deletedSecondaryHandle: await ctx.db.get(secondaryHandleId),
+      }));
+      expect(message?.senderContactId).toEqual(primaryId);
+      expect(message?.senderHandleId).toEqual(primaryHandleId);
+      expect(deletedSecondaryHandle).toBeNull();
+    });
+
     it("merges metadata - fills gaps from secondary", async () => {
       const t = trackTest(convexTest(schema, modules));
       const { asUser, userId } = await setupAuthenticatedUser(t);
@@ -964,6 +1194,336 @@ describe("contacts", () => {
           secondaryContactId: fakeId,
         }),
       ).rejects.toThrow("Secondary contact not found");
+    });
+
+    it("uses suggestionId to approve pending suggestion and resolve linked action", async () => {
+      const t = trackTest(convexTest(schema, modules));
+      const { asUser, userId } = await setupAuthenticatedUser(t);
+
+      const { primaryId, secondaryId, suggestionId, actionId } = await t.run(
+        async (ctx) => {
+          await ctx.db.patch(userId, { pendingActionCount: 1 });
+
+          const primaryId = await ctx.db.insert(
+            "contacts",
+            createTestContactData(userId, {
+              displayName: "Primary",
+            }),
+          );
+          const secondaryId = await ctx.db.insert(
+            "contacts",
+            createTestContactData(userId, {
+              displayName: "Secondary",
+            }),
+          );
+
+          const suggestionId = await ctx.db.insert("mergeSuggestions", {
+            userId,
+            contact1Id: primaryId,
+            contact2Id: secondaryId,
+            confidence: 0.92,
+            source: "email_match",
+            status: "pending",
+            createdAt: Date.now(),
+          });
+
+          const actionId = await ctx.db.insert("actions", {
+            ...createTestActionData(userId, {
+              type: "resolve_contact",
+              status: "pending",
+              contactId: primaryId,
+            }),
+            secondaryContactId: secondaryId,
+            mergeSuggestionId: suggestionId,
+          });
+
+          return { primaryId, secondaryId, suggestionId, actionId };
+        },
+      );
+
+      const result = await asUser.mutation(api.contacts.mergeContacts, {
+        primaryContactId: primaryId,
+        secondaryContactId: secondaryId,
+        suggestionId,
+      });
+      expect(result.success).toBe(true);
+
+      const { suggestion, action, user } = await t.run(async (ctx) => ({
+        suggestion: await ctx.db.get(suggestionId),
+        action: await ctx.db.get(actionId),
+        user: await ctx.db.get(userId),
+      }));
+
+      expect(suggestion?.status).toBe("approved");
+      expect(suggestion?.resolvedAt).toBeTypeOf("number");
+      expect(action?.status).toBe("completed");
+      expect(action?.completedAt).toBeTypeOf("number");
+      expect(user?.pendingActionCount).toBe(0);
+    });
+
+    it("throws when suggestionId does not match merge pair", async () => {
+      const t = trackTest(convexTest(schema, modules));
+      const { asUser, userId } = await setupAuthenticatedUser(t);
+
+      const { primaryId, secondaryId, mismatchSuggestionId } = await t.run(
+        async (ctx) => {
+          const primaryId = await ctx.db.insert(
+            "contacts",
+            createTestContactData(userId, {
+              displayName: "Primary",
+            }),
+          );
+          const secondaryId = await ctx.db.insert(
+            "contacts",
+            createTestContactData(userId, {
+              displayName: "Secondary",
+            }),
+          );
+          const otherId = await ctx.db.insert(
+            "contacts",
+            createTestContactData(userId, {
+              displayName: "Other",
+            }),
+          );
+
+          const mismatchSuggestionId = await ctx.db.insert("mergeSuggestions", {
+            userId,
+            contact1Id: primaryId,
+            contact2Id: otherId,
+            confidence: 0.66,
+            source: "fuzzy_name_match",
+            status: "pending",
+            createdAt: Date.now(),
+          });
+
+          return { primaryId, secondaryId, mismatchSuggestionId };
+        },
+      );
+
+      await expect(
+        asUser.mutation(api.contacts.mergeContacts, {
+          primaryContactId: primaryId,
+          secondaryContactId: secondaryId,
+          suggestionId: mismatchSuggestionId,
+        }),
+      ).rejects.toThrow("Merge suggestion does not match selected contacts");
+    });
+
+    it("stores compact merge audit details without messageIds payload", async () => {
+      const t = trackTest(convexTest(schema, modules));
+      const { asUser, userId } = await setupAuthenticatedUser(t);
+
+      const { primaryId, secondaryId } = await t.run(async (ctx) => {
+        const primaryId = await ctx.db.insert(
+          "contacts",
+          createTestContactData(userId, { displayName: "Primary" }),
+        );
+        const secondaryId = await ctx.db.insert(
+          "contacts",
+          createTestContactData(userId, { displayName: "Secondary" }),
+        );
+        return { primaryId, secondaryId };
+      });
+
+      const result = await asUser.mutation(api.contacts.mergeContacts, {
+        primaryContactId: primaryId,
+        secondaryContactId: secondaryId,
+      });
+      expect(result.success).toBe(true);
+
+      const mergeEntry = await t.run(async (ctx) =>
+        ctx.db
+          .query("contactAuditLog")
+          .withIndex("by_contact", (q) => q.eq("contactId", primaryId))
+          .filter((q) => q.eq(q.field("action"), "merge"))
+          .first(),
+      );
+      expect(mergeEntry).not.toBeNull();
+      const details = mergeEntry?.details as { messageIds?: string[] } | undefined;
+      expect(details?.messageIds).toBeUndefined();
+    });
+
+    it("schedules a follow-up merge scan for the surviving contact", async () => {
+      const t = trackTest(convexTest(schema, modules));
+      const { asUser, userId } = await setupAuthenticatedUser(t);
+
+      const { primaryId, secondaryId } = await t.run(async (ctx) => {
+        const primaryId = await ctx.db.insert(
+          "contacts",
+          createTestContactData(userId, { displayName: "Primary" }),
+        );
+        const secondaryId = await ctx.db.insert(
+          "contacts",
+          createTestContactData(userId, { displayName: "Secondary" }),
+        );
+        return { primaryId, secondaryId };
+      });
+
+      const result = await asUser.mutation(api.contacts.mergeContacts, {
+        primaryContactId: primaryId,
+        secondaryContactId: secondaryId,
+      });
+      expect(result.success).toBe(true);
+
+      const pendingScans = await t.run(async (ctx) => {
+        const all = await ctx.db.system.query("_scheduled_functions").collect();
+        return all.filter(
+          (fn) =>
+            fn.name.includes("scanAllContactsForMerges") &&
+            fn.state.kind === "pending" &&
+            (fn.args as { userId?: string }[])[0]?.userId === userId,
+        );
+      });
+      expect(pendingScans).toHaveLength(1);
+    });
+  });
+
+  describe("manualMerge mutation", () => {
+    it("resolves pending resolve_contact actions and suggestions tied to merged secondary", async () => {
+      const t = trackTest(convexTest(schema, modules));
+      const { asUser, userId } = await setupAuthenticatedUser(t);
+
+      const {
+        primaryId,
+        secondaryId,
+        pairSuggestionId,
+        pairActionId,
+        otherSuggestionId,
+        otherActionId,
+      } = await t.run(async (ctx) => {
+        await ctx.db.patch(userId, { pendingActionCount: 2 });
+
+        const primaryId = await ctx.db.insert(
+          "contacts",
+          createTestContactData(userId, {
+            displayName: "Primary",
+          }),
+        );
+        const secondaryId = await ctx.db.insert(
+          "contacts",
+          createTestContactData(userId, {
+            displayName: "Secondary",
+          }),
+        );
+        const otherId = await ctx.db.insert(
+          "contacts",
+          createTestContactData(userId, {
+            displayName: "Other",
+          }),
+        );
+
+        const pairSuggestionId = await ctx.db.insert("mergeSuggestions", {
+          userId,
+          contact1Id: primaryId,
+          contact2Id: secondaryId,
+          confidence: 0.95,
+          source: "phone_match",
+          status: "pending",
+          createdAt: Date.now(),
+        });
+
+        const otherSuggestionId = await ctx.db.insert("mergeSuggestions", {
+          userId,
+          contact1Id: otherId,
+          contact2Id: secondaryId,
+          confidence: 0.6,
+          source: "email_match",
+          status: "pending",
+          createdAt: Date.now(),
+        });
+
+        const pairActionId = await ctx.db.insert("actions", {
+          ...createTestActionData(userId, {
+            type: "resolve_contact",
+            status: "pending",
+            contactId: primaryId,
+          }),
+          secondaryContactId: secondaryId,
+          mergeSuggestionId: pairSuggestionId,
+        });
+
+        const otherActionId = await ctx.db.insert("actions", {
+          ...createTestActionData(userId, {
+            type: "resolve_contact",
+            status: "pending",
+            contactId: otherId,
+          }),
+          secondaryContactId: secondaryId,
+          mergeSuggestionId: otherSuggestionId,
+        });
+
+        return {
+          primaryId,
+          secondaryId,
+          pairSuggestionId,
+          pairActionId,
+          otherSuggestionId,
+          otherActionId,
+        };
+      });
+
+      const result = await asUser.mutation(api.contacts.manualMerge, {
+        primaryContactId: primaryId,
+        secondaryContactId: secondaryId,
+      });
+      expect(result.success).toBe(true);
+
+      const {
+        pairSuggestion,
+        otherSuggestion,
+        pairAction,
+        otherAction,
+        user,
+        secondaryContact,
+      } = await t.run(async (ctx) => ({
+        pairSuggestion: await ctx.db.get(pairSuggestionId),
+        otherSuggestion: await ctx.db.get(otherSuggestionId),
+        pairAction: await ctx.db.get(pairActionId),
+        otherAction: await ctx.db.get(otherActionId),
+        user: await ctx.db.get(userId),
+        secondaryContact: await ctx.db.get(secondaryId),
+      }));
+
+      expect(pairSuggestion?.status).toBe("approved");
+      expect(otherSuggestion?.status).toBe("rejected");
+      expect(pairAction?.status).toBe("completed");
+      expect(otherAction?.status).toBe("discarded");
+      expect(user?.pendingActionCount).toBe(0);
+      expect(secondaryContact).toBeNull();
+    });
+
+    it("schedules a follow-up merge scan for the surviving contact", async () => {
+      const t = trackTest(convexTest(schema, modules));
+      const { asUser, userId } = await setupAuthenticatedUser(t);
+
+      const { primaryId, secondaryId } = await t.run(async (ctx) => {
+        const primaryId = await ctx.db.insert(
+          "contacts",
+          createTestContactData(userId, { displayName: "Primary" }),
+        );
+        const secondaryId = await ctx.db.insert(
+          "contacts",
+          createTestContactData(userId, { displayName: "Secondary" }),
+        );
+        return { primaryId, secondaryId };
+      });
+
+      const result = await asUser.mutation(api.contacts.manualMerge, {
+        primaryContactId: primaryId,
+        secondaryContactId: secondaryId,
+      });
+      expect(result.success).toBe(true);
+
+      const pendingScans = await t.run(async (ctx) => {
+        const all = await ctx.db.system.query("_scheduled_functions").collect();
+        return all.filter(
+          (fn) =>
+            fn.name.includes("scanAllContactsForMerges") &&
+            fn.state.kind === "pending" &&
+            (fn.args as { userId?: string }[])[0]?.userId === userId,
+        );
+      });
+      expect(pendingScans).toHaveLength(1);
     });
   });
 
@@ -1339,6 +1899,43 @@ describe("contacts", () => {
         }),
       ).rejects.toThrow("Contact 1 not found");
     });
+
+    it("returns false when pair is marked keep-separate", async () => {
+      const t = trackTest(convexTest(schema, modules));
+      const { asUser, userId } = await setupAuthenticatedUser(t);
+
+      const { contact1Id, contact2Id } = await t.run(async (ctx) => {
+        const contact1Id = await ctx.db.insert(
+          "contacts",
+          createTestContactData(userId),
+        );
+        const contact2Id = await ctx.db.insert(
+          "contacts",
+          createTestContactData(userId),
+        );
+        const [c1, c2] =
+          contact1Id < contact2Id
+            ? [contact1Id, contact2Id]
+            : [contact2Id, contact1Id];
+        await ctx.db.insert("contactExclusions", {
+          userId,
+          contact1Id: c1,
+          contact2Id: c2,
+          createdAt: Date.now(),
+        });
+        return { contact1Id, contact2Id };
+      });
+
+      const result = await asUser.mutation(api.contacts.createMergeSuggestion, {
+        contact1Id,
+        contact2Id,
+        confidence: 0.9,
+        source: "email_match",
+      });
+
+      expect(result.success).toBe(false);
+      expect(result.reason).toBe("Contacts are marked keep-separate");
+    });
   });
 
   describe("rejectMerge mutation", () => {
@@ -1466,7 +2063,7 @@ describe("contacts", () => {
       ).rejects.toThrow("Unauthorized");
     });
 
-    it("marks contact as dismissed and action as discarded", async () => {
+    it("archives contact and marks action as discarded", async () => {
       const t = trackTest(convexTest(schema, modules));
       const { asUser, userId } = await setupAuthenticatedUser(t);
 
@@ -1497,9 +2094,10 @@ describe("contacts", () => {
 
       expect(result.success).toBe(true);
 
-      // Verify contact is dismissed
+      // Verify contact is archived
       const contact = await t.run(async (ctx) => ctx.db.get(contactId));
-      expect(contact?.isDismissed).toBe(true);
+      expect(contact?.status).toBe("archived");
+      expect(contact?.isDismissed).toBeUndefined();
 
       // Verify action is discarded
       const action = await t.run(async (ctx) => ctx.db.get(actionId));
@@ -1560,6 +2158,523 @@ describe("contacts", () => {
           contactId: fakeContactId,
         }),
       ).rejects.toThrow("Contact not found");
+    });
+  });
+
+  describe("keepSeparate mutation", () => {
+    it("throws when suggestion does not match selected contact pair", async () => {
+      const t = trackTest(convexTest(schema, modules));
+      const { asUser, userId } = await setupAuthenticatedUser(t);
+
+      const { contact1Id, contact2Id, mismatchSuggestionId } = await t.run(
+        async (ctx) => {
+          const contact1Id = await ctx.db.insert(
+            "contacts",
+            createTestContactData(userId, { displayName: "Primary" }),
+          );
+          const contact2Id = await ctx.db.insert(
+            "contacts",
+            createTestContactData(userId, { displayName: "Secondary" }),
+          );
+          const otherContactId = await ctx.db.insert(
+            "contacts",
+            createTestContactData(userId, { displayName: "Other" }),
+          );
+
+          const mismatchSuggestionId = await ctx.db.insert("mergeSuggestions", {
+            userId,
+            contact1Id,
+            contact2Id: otherContactId,
+            confidence: 0.72,
+            source: "fuzzy_name_match",
+            status: "pending",
+            createdAt: Date.now(),
+          });
+
+          return { contact1Id, contact2Id, mismatchSuggestionId };
+        },
+      );
+
+      await expect(
+        asUser.mutation(api.contacts.keepSeparate, {
+          contact1Id,
+          contact2Id,
+          suggestionId: mismatchSuggestionId,
+        }),
+      ).rejects.toThrow("Merge suggestion does not match selected contacts");
+    });
+  });
+
+  describe("setContactStatus mutation", () => {
+    it("discards pending actions where contact is either primary or secondary", async () => {
+      const t = trackTest(convexTest(schema, modules));
+      const { asUser, userId } = await setupAuthenticatedUser(t);
+
+      await t.run(async (ctx) => {
+        await ctx.db.patch(userId, { pendingActionCount: 2 });
+      });
+
+      const { primaryContactId, primaryActionId, secondaryActionId } =
+        await t.run(async (ctx) => {
+          const primaryContactId = await ctx.db.insert(
+            "contacts",
+            createTestContactData(userId, { displayName: "Primary" }),
+          );
+          const secondaryContactId = await ctx.db.insert(
+            "contacts",
+            createTestContactData(userId, { displayName: "Secondary" }),
+          );
+
+          const primaryActionId = await ctx.db.insert(
+            "actions",
+            createTestActionData(userId, {
+              type: "new_connection",
+              contactId: primaryContactId,
+              status: "pending",
+            }),
+          );
+
+          const secondaryActionId = await ctx.db.insert("actions", {
+            ...createTestActionData(userId, {
+              type: "resolve_contact",
+              contactId: secondaryContactId,
+              status: "pending",
+            }),
+            secondaryContactId: primaryContactId,
+          });
+
+          return { primaryContactId, primaryActionId, secondaryActionId };
+        });
+
+      const result = await asUser.mutation(api.contacts.setContactStatus, {
+        contactId: primaryContactId,
+        status: "archived",
+      });
+      expect(result.success).toBe(true);
+
+      const [primaryAction, secondaryAction, user] = await t.run(async (ctx) => {
+        const primaryAction = await ctx.db.get(primaryActionId);
+        const secondaryAction = await ctx.db.get(secondaryActionId);
+        const user = await ctx.db.get(userId);
+        return [primaryAction, secondaryAction, user];
+      });
+
+      expect(primaryAction?.status).toBe("discarded");
+      expect(secondaryAction?.status).toBe("discarded");
+      expect(user?.pendingActionCount).toBe(0);
+    });
+  });
+
+  describe("unmergeContact mutation", () => {
+    it("is idempotent for the same merge audit entry", async () => {
+      const t = trackTest(convexTest(schema, modules));
+      const { asUser, userId } = await setupAuthenticatedUser(t);
+
+      const { primaryContactId, secondaryContactId, secondaryHandleId } =
+        await t.run(async (ctx) => {
+          const primaryContactId = await ctx.db.insert(
+            "contacts",
+            createTestContactData(userId, { displayName: "Primary Contact" }),
+          );
+          const secondaryContactId = await ctx.db.insert(
+            "contacts",
+            createTestContactData(userId, { displayName: "Secondary Contact" }),
+          );
+          const secondaryHandleId = await ctx.db.insert(
+            "contactHandles",
+            createTestContactHandleData(userId, secondaryContactId, {
+              handle: "+15550001111",
+            }),
+          );
+          const conversationId = await ctx.db.insert(
+            "conversations",
+            createTestConversationData(userId, {
+              participantContactIds: [primaryContactId, secondaryContactId],
+            }),
+          );
+          await ctx.db.insert("messages", {
+            ...createTestMessageData(userId, conversationId, {
+              senderContactId: secondaryContactId,
+            }),
+            senderHandleId: secondaryHandleId,
+          });
+          return { primaryContactId, secondaryContactId, secondaryHandleId };
+        });
+
+      const mergeResult = await asUser.mutation(api.contacts.mergeContacts, {
+        primaryContactId,
+        secondaryContactId,
+      });
+      expect(mergeResult.success).toBe(true);
+
+      const mergeAuditId = await t.run(async (ctx) => {
+        const entries = await ctx.db
+          .query("contactAuditLog")
+          .withIndex("by_contact", (q) => q.eq("contactId", primaryContactId))
+          .filter((q) => q.eq(q.field("action"), "merge"))
+          .collect();
+        return entries[0]?._id;
+      });
+      expect(mergeAuditId).toBeTruthy();
+
+      const unmergeableBefore = await asUser.query(api.contacts.getUnmergeableHistory, {
+        contactId: primaryContactId,
+      });
+      expect(unmergeableBefore).toHaveLength(1);
+      expect(unmergeableBefore[0]?._id).toEqual(mergeAuditId);
+
+      const first = await asUser.mutation(api.contacts.unmergeContact, {
+        auditLogId: mergeAuditId!,
+      });
+      expect(first.success).toBe(true);
+
+      const second = await asUser.mutation(api.contacts.unmergeContact, {
+        auditLogId: mergeAuditId!,
+      });
+      expect(second.success).toBe(true);
+      expect(second.alreadyUnmerged).toBe(true);
+      expect(second.restoredContactId).toEqual(first.restoredContactId);
+
+      const restoredCount = await t.run(async (ctx) => {
+        const contacts = await ctx.db
+          .query("contacts")
+          .withIndex("by_user", (q) => q.eq("userId", userId))
+          .collect();
+        return contacts.filter((c) => c.displayName === "Secondary Contact")
+          .length;
+      });
+      expect(restoredCount).toBe(1);
+
+      const movedHandle = await t.run(async (ctx) => ctx.db.get(secondaryHandleId));
+      expect(movedHandle?.contactId).toEqual(first.restoredContactId);
+
+      const unmergeableAfter = await asUser.query(api.contacts.getUnmergeableHistory, {
+        contactId: primaryContactId,
+      });
+      expect(unmergeableAfter).toHaveLength(0);
+
+      const exclusion = await t.run(async (ctx) => {
+        const [contact1Id, contact2Id] =
+          primaryContactId < first.restoredContactId
+            ? [primaryContactId, first.restoredContactId]
+            : [first.restoredContactId, primaryContactId];
+        return ctx.db
+          .query("contactExclusions")
+          .withIndex("by_pair", (q) =>
+            q.eq("contact1Id", contact1Id).eq("contact2Id", contact2Id),
+          )
+          .first();
+      });
+      expect(exclusion).toBeTruthy();
+    });
+
+    it("removes primary from conversations where merge had injected it", async () => {
+      const t = trackTest(convexTest(schema, modules));
+      const { asUser, userId } = await setupAuthenticatedUser(t);
+
+      const { primaryContactId, secondaryContactId, conversationId } = await t.run(
+        async (ctx) => {
+          const primaryContactId = await ctx.db.insert(
+            "contacts",
+            createTestContactData(userId, { displayName: "Primary Contact" }),
+          );
+          const secondaryContactId = await ctx.db.insert(
+            "contacts",
+            createTestContactData(userId, { displayName: "Secondary Contact" }),
+          );
+          const conversationId = await ctx.db.insert(
+            "conversations",
+            createTestConversationData(userId, {
+              participantContactIds: [secondaryContactId],
+            }),
+          );
+          return { primaryContactId, secondaryContactId, conversationId };
+        },
+      );
+
+      const mergeResult = await asUser.mutation(api.contacts.mergeContacts, {
+        primaryContactId,
+        secondaryContactId,
+      });
+      expect(mergeResult.success).toBe(true);
+
+      const conversationAfterMerge = await t.run(async (ctx) =>
+        ctx.db.get(conversationId),
+      );
+      expect(conversationAfterMerge?.participantContactIds).toEqual([
+        primaryContactId,
+      ]);
+
+      const mergeAuditId = await t.run(async (ctx) => {
+        const entry = await ctx.db
+          .query("contactAuditLog")
+          .withIndex("by_contact", (q) => q.eq("contactId", primaryContactId))
+          .filter((q) => q.eq(q.field("action"), "merge"))
+          .first();
+        return entry?._id;
+      });
+      expect(mergeAuditId).toBeTruthy();
+
+      const unmergeResult = await asUser.mutation(api.contacts.unmergeContact, {
+        auditLogId: mergeAuditId!,
+      });
+      expect(unmergeResult.success).toBe(true);
+
+      const conversationAfterUnmerge = await t.run(async (ctx) =>
+        ctx.db.get(conversationId),
+      );
+      expect(conversationAfterUnmerge?.participantContactIds).toEqual([
+        unmergeResult.restoredContactId,
+      ]);
+    });
+
+    it("keeps primary in conversations where it existed before merge", async () => {
+      const t = trackTest(convexTest(schema, modules));
+      const { asUser, userId } = await setupAuthenticatedUser(t);
+
+      const { primaryContactId, secondaryContactId, conversationId } = await t.run(
+        async (ctx) => {
+          const primaryContactId = await ctx.db.insert(
+            "contacts",
+            createTestContactData(userId, { displayName: "Primary Contact" }),
+          );
+          const secondaryContactId = await ctx.db.insert(
+            "contacts",
+            createTestContactData(userId, { displayName: "Secondary Contact" }),
+          );
+          const conversationId = await ctx.db.insert(
+            "conversations",
+            createTestConversationData(userId, {
+              participantContactIds: [primaryContactId, secondaryContactId],
+            }),
+          );
+          return { primaryContactId, secondaryContactId, conversationId };
+        },
+      );
+
+      const mergeResult = await asUser.mutation(api.contacts.mergeContacts, {
+        primaryContactId,
+        secondaryContactId,
+      });
+      expect(mergeResult.success).toBe(true);
+
+      const mergeAuditId = await t.run(async (ctx) => {
+        const entry = await ctx.db
+          .query("contactAuditLog")
+          .withIndex("by_contact", (q) => q.eq("contactId", primaryContactId))
+          .filter((q) => q.eq(q.field("action"), "merge"))
+          .first();
+        return entry?._id;
+      });
+      expect(mergeAuditId).toBeTruthy();
+
+      const unmergeResult = await asUser.mutation(api.contacts.unmergeContact, {
+        auditLogId: mergeAuditId!,
+      });
+      expect(unmergeResult.success).toBe(true);
+
+      const conversationAfterUnmerge = await t.run(async (ctx) =>
+        ctx.db.get(conversationId),
+      );
+      expect(conversationAfterUnmerge).not.toBeNull();
+      expect(conversationAfterUnmerge?.participantContactIds).toContain(
+        primaryContactId,
+      );
+      expect(conversationAfterUnmerge?.participantContactIds).toContain(
+        unmergeResult.restoredContactId,
+      );
+      expect(conversationAfterUnmerge?.participantContactIds).toHaveLength(2);
+    });
+
+    it("recreates deduped handles and restores senderHandleId", async () => {
+      const t = trackTest(convexTest(schema, modules));
+      const { asUser, userId } = await setupAuthenticatedUser(t);
+
+      const {
+        primaryContactId,
+        secondaryContactId,
+        primaryHandleId,
+        secondaryHandleId,
+        messageId,
+      } = await t.run(async (ctx) => {
+        const primaryContactId = await ctx.db.insert(
+          "contacts",
+          createTestContactData(userId, { displayName: "Primary" }),
+        );
+        const secondaryContactId = await ctx.db.insert(
+          "contacts",
+          createTestContactData(userId, { displayName: "Secondary" }),
+        );
+
+        const primaryHandleId = await ctx.db.insert(
+          "contactHandles",
+          createTestContactHandleData(userId, primaryContactId, {
+            handleType: "email",
+            handle: "shared@example.com",
+          }),
+        );
+        const secondaryHandleId = await ctx.db.insert(
+          "contactHandles",
+          createTestContactHandleData(userId, secondaryContactId, {
+            handleType: "email",
+            handle: "shared@example.com",
+          }),
+        );
+
+        const conversationId = await ctx.db.insert(
+          "conversations",
+          createTestConversationData(userId, {
+            participantContactIds: [primaryContactId, secondaryContactId],
+          }),
+        );
+        const messageId = await ctx.db.insert("messages", {
+          ...createTestMessageData(userId, conversationId, {
+            senderContactId: secondaryContactId,
+          }),
+          senderHandleId: secondaryHandleId,
+        });
+
+        return {
+          primaryContactId,
+          secondaryContactId,
+          primaryHandleId,
+          secondaryHandleId,
+          messageId,
+        };
+      });
+
+      const mergeResult = await asUser.mutation(api.contacts.mergeContacts, {
+        primaryContactId,
+        secondaryContactId,
+      });
+      expect(mergeResult.success).toBe(true);
+
+      const { mergeAuditId, deletedSecondaryHandle } = await t.run(async (ctx) => {
+        const mergeAudit = await ctx.db
+          .query("contactAuditLog")
+          .withIndex("by_contact", (q) => q.eq("contactId", primaryContactId))
+          .filter((q) => q.eq(q.field("action"), "merge"))
+          .first();
+        const deletedSecondaryHandle = await ctx.db.get(secondaryHandleId);
+        return {
+          mergeAuditId: mergeAudit?._id,
+          deletedSecondaryHandle,
+        };
+      });
+
+      expect(mergeAuditId).toBeTruthy();
+      expect(deletedSecondaryHandle).toBeNull();
+
+      await t.run(async (ctx) => {
+        const mergeAudit = await ctx.db.get(mergeAuditId!);
+        const details =
+          ((mergeAudit?.details ?? {}) as { messageIds?: unknown } & Record<string, unknown>);
+        const { messageIds: _ignored, ...detailsWithoutMessageIds } = details;
+
+        await ctx.db.patch(mergeAuditId!, {
+          details: detailsWithoutMessageIds as any,
+        });
+        await ctx.db.insert("contactMergeMessageRefs", {
+          userId,
+          mergeAuditId: mergeAuditId!,
+          messageId,
+        });
+      });
+
+      const unmergeResult = await asUser.mutation(api.contacts.unmergeContact, {
+        auditLogId: mergeAuditId!,
+      });
+      expect(unmergeResult.success).toBe(true);
+
+      const { restoredHandles, primaryHandle, restoredMessage } = await t.run(async (ctx) => {
+        const restoredHandles = await ctx.db
+          .query("contactHandles")
+          .withIndex("by_contact", (q) =>
+            q.eq("contactId", unmergeResult.restoredContactId),
+          )
+          .collect();
+        const primaryHandle = await ctx.db.get(primaryHandleId);
+        const restoredMessage = await ctx.db.get(messageId);
+        return {
+          restoredHandles,
+          primaryHandle,
+          restoredMessage,
+        };
+      });
+
+      expect(restoredHandles).toHaveLength(1);
+      expect(restoredHandles[0]?.handleType).toBe("email");
+      expect(restoredHandles[0]?.handle).toBe("shared@example.com");
+      expect(primaryHandle?.contactId).toEqual(primaryContactId);
+      expect(restoredMessage?.senderContactId).toEqual(unmergeResult.restoredContactId);
+      expect(restoredMessage?.senderHandleId).toEqual(restoredHandles[0]?._id);
+    });
+
+    it("restores primary fields changed by merge", async () => {
+      const t = trackTest(convexTest(schema, modules));
+      const { asUser, userId } = await setupAuthenticatedUser(t);
+
+      const { primaryContactId, secondaryContactId } = await t.run(async (ctx) => {
+        const primaryContactId = await ctx.db.insert(
+          "contacts",
+          createTestContactData(userId, {
+            displayName: "Original Primary",
+            company: "Original Co",
+            notes: "Original notes",
+            importance: 3,
+            tags: ["vip"],
+          }),
+        );
+        const secondaryContactId = await ctx.db.insert(
+          "contacts",
+          createTestContactData(userId, {
+            displayName: "Secondary Winner",
+            company: "Secondary Co",
+            notes: "Secondary notes",
+            tags: ["friend"],
+          }),
+        );
+        return { primaryContactId, secondaryContactId };
+      });
+
+      const mergeResult = await asUser.mutation(api.contacts.manualMerge, {
+        primaryContactId,
+        secondaryContactId,
+        fieldResolutions: {
+          displayName: "secondary",
+          company: "secondary",
+          notes: "secondary",
+        },
+      });
+      expect(mergeResult.success).toBe(true);
+
+      const mergeAuditId = await t.run(async (ctx) => {
+        const entry = await ctx.db
+          .query("contactAuditLog")
+          .withIndex("by_contact", (q) => q.eq("contactId", primaryContactId))
+          .filter((q) => q.eq(q.field("action"), "merge"))
+          .first();
+        return entry?._id;
+      });
+      expect(mergeAuditId).toBeTruthy();
+
+      const mergedPrimary = await t.run(async (ctx) => ctx.db.get(primaryContactId));
+      expect(mergedPrimary?.displayName).toBe("Secondary Winner");
+      expect(mergedPrimary?.company).toBe("Secondary Co");
+      expect(mergedPrimary?.notes).toBe("Secondary notes");
+      expect(mergedPrimary?.tags).toEqual(["vip", "friend"]);
+
+      const unmergeResult = await asUser.mutation(api.contacts.unmergeContact, {
+        auditLogId: mergeAuditId!,
+      });
+      expect(unmergeResult.success).toBe(true);
+
+      const restoredPrimary = await t.run(async (ctx) => ctx.db.get(primaryContactId));
+      expect(restoredPrimary?.displayName).toBe("Original Primary");
+      expect(restoredPrimary?.company).toBe("Original Co");
+      expect(restoredPrimary?.notes).toBe("Original notes");
+      expect(restoredPrimary?.importance).toBe(3);
+      expect(restoredPrimary?.tags).toEqual(["vip"]);
     });
   });
 

@@ -3,7 +3,7 @@ import { useQuery, useMutation } from "convex/react"
 import { Clock, MessageCircle, UserPlus, Trash2, CheckCircle2, X } from 'lucide-react'
 import { AnimatePresence } from "motion/react"
 import { api } from "@cued/convex"
-import { type EnrichedAction, PLATFORM_CONFIG, type ActionPlatform, getPlatformDeeplink, getContactDeeplink, type DeeplinkResult, formatRelativeTime } from "@cued/shared"
+import { type EnrichedAction, PLATFORM_CONFIG, type ActionPlatform, getPlatformDeeplink, getContactDeeplink, type DeeplinkResult, formatRelativeTime, isMessageActionType } from "@cued/shared"
 import {
   ACTION_FILTER_GROUPS,
   getGroupCount,
@@ -542,8 +542,8 @@ export function ActionsPage({
           snoozedUntil,
         })
 
-        // Show confirmation toast for send
-        if (direction === "right") {
+        // Show confirmation toast only for message send actions.
+        if (direction === "right" && isMessageActionType(selectedAction.type)) {
           toast.success(actionName ? `Message sent to ${actionName}` : "Message sent")
         }
 

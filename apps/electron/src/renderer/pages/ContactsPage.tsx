@@ -1,5 +1,5 @@
 import * as React from "react"
-import { useQuery } from "convex/react"
+import { useMutation, useQuery } from "convex/react"
 import { Users, Search, Loader2 } from 'lucide-react'
 import { AnimatePresence } from "motion/react"
 import { api } from "@cued/convex"
@@ -61,7 +61,7 @@ interface ContactsPageProps {
 }
 
 type PendingRareContactAction = {
-  type: "archive" | "dismiss"
+  type: "archive"
   contactId: Id<"contacts">
   contactName: string
 }
@@ -84,6 +84,7 @@ export function ContactsPage({ initialContactId, onInitialContactConsumed }: Con
   const filterRef = React.useRef<ActionFilterDropdownRef>(null)
   const [activePlatforms, setActivePlatforms] = React.useState<Set<ActionPlatform>>(new Set())
   const [namedOnly, setNamedOnly] = React.useState(true)
+  const [statusFilter, setStatusFilter] = React.useState<"active" | "archived">("active")
 
   const [cursor, setCursor] = React.useState<ContactCursor | undefined>(undefined)
   const [allContacts, setAllContacts] = React.useState<ContactListItem[]>([])
@@ -93,6 +94,7 @@ export function ContactsPage({ initialContactId, onInitialContactConsumed }: Con
   const [openSwipeItemId, setOpenSwipeItemId] = React.useState<string | null>(null)
   const [pendingRareAction, setPendingRareAction] = React.useState<PendingRareContactAction | null>(null)
   const [isApplyingRareAction, setIsApplyingRareAction] = React.useState(false)
+  const setContactStatusMut = useMutation(api.contacts.setContactStatus)
 
   const listContainerRef = React.useRef<HTMLDivElement>(null)
   const loadMoreRef = React.useRef<HTMLDivElement>(null)
@@ -100,12 +102,13 @@ export function ContactsPage({ initialContactId, onInitialContactConsumed }: Con
   React.useEffect(() => {
     setCursor(undefined)
     setAllContacts([])
-  }, [debouncedSearch, namedOnly])
+  }, [debouncedSearch, namedOnly, statusFilter])
 
   const contactsResult = useQuery(api.contacts.getContacts, {
     limit: 50,
     cursor,
     searchQuery: debouncedSearch || undefined,
+    status: statusFilter,
     namedOnly,
   })
   const contactsLoading = contactsResult === undefined
@@ -219,7 +222,7 @@ export function ContactsPage({ initialContactId, onInitialContactConsumed }: Con
   // Reset auto-load counter when filters change
   React.useEffect(() => {
     autoLoadAttemptsRef.current = 0
-  }, [activePlatforms, namedOnly, debouncedSearch])
+  }, [activePlatforms, namedOnly, debouncedSearch, statusFilter])
 
   const selectedIndexRef = React.useRef(0)
   React.useEffect(() => {
@@ -248,7 +251,7 @@ export function ContactsPage({ initialContactId, onInitialContactConsumed }: Con
   }, [visibleContacts, openSwipeItemId])
 
   const requestRareAction = React.useCallback(
-    (type: "archive" | "dismiss", contactId: Id<"contacts">) => {
+    (type: "archive", contactId: Id<"contacts">) => {
       const contact = visibleContactsById.get(contactId)
       if (!contact) return
       setOpenSwipeItemId(null)
@@ -266,16 +269,18 @@ export function ContactsPage({ initialContactId, onInitialContactConsumed }: Con
 
     setIsApplyingRareAction(true)
     try {
-      if (pendingRareAction.type === "archive") {
-        toast.info("Archive is coming soon.")
-      } else {
-        toast.info("Dismiss is coming soon.")
-      }
+      await setContactStatusMut({
+        contactId: pendingRareAction.contactId,
+        status: "archived",
+      })
+      toast.success(`${pendingRareAction.contactName} archived`)
+    } catch {
+      toast.error("Failed to archive contact")
     } finally {
       setIsApplyingRareAction(false)
       setPendingRareAction(null)
     }
-  }, [pendingRareAction, isApplyingRareAction])
+  }, [pendingRareAction, isApplyingRareAction, setContactStatusMut])
 
   const selectContact = React.useCallback((contactId: Id<"contacts">) => {
     setSelectedContactId(contactId)
@@ -307,10 +312,7 @@ export function ContactsPage({ initialContactId, onInitialContactConsumed }: Con
         return
       }
 
-      if (e.key === "ArrowLeft" && selectedContactId) {
-        e.preventDefault()
-        requestRareAction("dismiss", selectedContactId)
-      } else if (e.key === "ArrowRight" && selectedContactId) {
+      if (e.key === "ArrowRight" && selectedContactId) {
         e.preventDefault()
         requestRareAction("archive", selectedContactId)
       } else if (e.key === "ArrowUp" && visibleContacts.length > 0) {
@@ -414,6 +416,24 @@ export function ContactsPage({ initialContactId, onInitialContactConsumed }: Con
           </div>
         </div>
 
+        {/* Status Filter */}
+        <div className="flex gap-1 px-3 pb-2">
+          {(["active", "archived"] as const).map((status) => (
+            <button
+              key={status}
+              type="button"
+              onClick={() => setStatusFilter(status)}
+              className={`px-2.5 py-1 rounded-md text-xs font-medium transition-colors cursor-pointer ${
+                statusFilter === status
+                  ? "bg-foreground text-background"
+                  : "text-muted-foreground hover:bg-foreground/5"
+              }`}
+            >
+              {status.charAt(0).toUpperCase() + status.slice(1)}
+            </button>
+          ))}
+        </div>
+
         {/* Contact List */}
         <div ref={listContainerRef} className="flex-1 overflow-y-auto p-2">
           {visibleContacts.length === 0 ? (
@@ -433,7 +453,6 @@ export function ContactsPage({ initialContactId, onInitialContactConsumed }: Con
                     selected={selectedContactId === contact._id}
                     onClick={() => selectContact(contact._id)}
                     onArchive={() => requestRareAction("archive", contact._id)}
-                    onDismiss={() => requestRareAction("dismiss", contact._id)}
                     openSwipeId={openSwipeItemId}
                     onSwipeActiveChange={setOpenSwipeItemId}
                   />
@@ -469,24 +488,21 @@ export function ContactsPage({ initialContactId, onInitialContactConsumed }: Con
         <AlertDialogContent size="sm">
           <AlertDialogHeader>
             <AlertDialogTitle>
-              {pendingRareAction?.type === "archive" ? "Archive contact?" : "Dismiss contact?"}
+              Archive contact?
             </AlertDialogTitle>
             <AlertDialogDescription>
-              {pendingRareAction?.type === "archive"
-                ? `Archive ${pendingRareAction.contactName}? This removes them from your contacts list.`
-                : `Dismiss ${pendingRareAction?.contactName}? This removes them from contacts and prevents future action suggestions.`}
+              {`Archive ${pendingRareAction?.contactName}? This hides them from active contacts and stops 1:1 action suggestions for this person. Group chats may still create actions.`}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel disabled={isApplyingRareAction}>Cancel</AlertDialogCancel>
             <AlertDialogAction
-              variant={pendingRareAction?.type === "dismiss" ? "destructive" : "default"}
               onClick={() => {
                 void handleConfirmRareAction()
               }}
               disabled={isApplyingRareAction}
             >
-              {pendingRareAction?.type === "archive" ? "Archive" : "Dismiss"}
+              Archive
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

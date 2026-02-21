@@ -16,6 +16,7 @@ import type { Doc, Id } from "../_generated/dataModel";
 import type { MutationCtx } from "../_generated/server";
 import {
   getOrCreateContact,
+  type GetOrCreateContactResult,
   scheduleIncomingMessageEvents,
   scheduleOutgoingMessageEvents,
   SEVEN_DAYS_MS,
@@ -197,12 +198,12 @@ export async function syncLinkedInConversationsInternal(
           continue;
         }
 
-        const contactId = await getOrCreateLinkedInContact(
+        const contactResult = await getOrCreateLinkedInContact(
           ctx,
           userId,
           participant,
         );
-        participantContactIds.push(contactId);
+        participantContactIds.push(contactResult.contactId);
         result.participantsLinked++;
 
         // Collect names for display name generation
@@ -374,8 +375,9 @@ export async function syncLinkedInMessagesInternal(
 
         // Resolve sender to contact (if not from me)
         let senderContactId: Id<"contacts"> | undefined;
+        let senderHandleId: Id<"contactHandles"> | undefined;
         if (!isFromMe) {
-          senderContactId = await getOrCreateLinkedInContactByURN(
+          const senderResult = await getOrCreateLinkedInContactByURN(
             ctx,
             userId,
             msg.senderURN,
@@ -384,6 +386,8 @@ export async function syncLinkedInMessagesInternal(
             msg.senderProfileUrl,
             msg.senderPictureUrl,
           );
+          senderContactId = senderResult.contactId;
+          senderHandleId = senderResult.handleId;
 
           // Track for action analysis if recent incoming
           if (msg.deliveredAt >= cutoff) {
@@ -416,6 +420,7 @@ export async function syncLinkedInMessagesInternal(
           content: msg.text,
           sentAt,
           senderContactId,
+          senderHandleId,
           isFromMe,
           platformMessageId: msg.entityURN,
           status: bridge.status,
@@ -504,6 +509,25 @@ async function getUserLinkedInURN(
   return integration?.linkedInUserURN;
 }
 
+function isLinkedInProfileUrl(value: string): boolean {
+  return /linkedin\.com\/in\//i.test(value);
+}
+
+function isLikelyLinkedInMemberId(value: string): boolean {
+  return /^ACo[A-Za-z0-9_-]{8,}$/i.test(value);
+}
+
+/**
+ * Normalize a potential LinkedIn username value while filtering out opaque member IDs.
+ * LinkedIn messaging payloads may provide member IDs in profileUrl fields.
+ */
+function normalizeNonOpaqueLinkedInHandle(value: string): string {
+  const normalized = normalizeLinkedInHandle(value);
+  if (!normalized) return "";
+  if (isLinkedInProfileUrl(value)) return normalized;
+  return isLikelyLinkedInMemberId(normalized) ? "" : normalized;
+}
+
 /**
  * Get or create a LinkedIn contact by URN and optional profile URL.
  * Stores URN as stable identifier (for deduplication) and normalized slug (for display).
@@ -518,14 +542,14 @@ async function getOrCreateLinkedInContactInternal(
   profileUrl?: string,
   pictureUrl?: string,
   fallbackName?: string,
-): Promise<Id<"contacts">> {
+): Promise<GetOrCreateContactResult> {
   const normalizedURN = normalizeMemberURN(urn).toLowerCase();
   const handles: { value: string; type: "linkedin_urn" | "linkedin_handle" }[] =
     [{ value: normalizedURN, type: "linkedin_urn" }];
 
   // Add normalized slug if profile URL is available
   if (profileUrl && profileUrl.trim()) {
-    const normalizedSlug = normalizeLinkedInHandle(profileUrl);
+    const normalizedSlug = normalizeNonOpaqueLinkedInHandle(profileUrl);
     if (normalizedSlug) {
       handles.push({ value: normalizedSlug, type: "linkedin_handle" });
     }
@@ -551,7 +575,7 @@ async function getOrCreateLinkedInContactInternal(
   if (!result) {
     throw new Error(`Failed to create LinkedIn contact for ${displayName}`);
   }
-  return result.contactId;
+  return result;
 }
 
 /**
@@ -561,7 +585,7 @@ async function getOrCreateLinkedInContact(
   ctx: MutationCtx,
   userId: Id<"users">,
   participant: LinkedInParticipantInput,
-): Promise<Id<"contacts">> {
+): Promise<GetOrCreateContactResult> {
   return getOrCreateLinkedInContactInternal(
     ctx,
     userId,
@@ -584,7 +608,7 @@ async function getOrCreateLinkedInContactByURN(
   lastName: string,
   profileUrl?: string,
   pictureUrl?: string,
-): Promise<Id<"contacts">> {
+): Promise<GetOrCreateContactResult> {
   return getOrCreateLinkedInContactInternal(
     ctx,
     userId,
@@ -714,7 +738,10 @@ export async function findContactsMissingUsernames(
   const contactsWithUsernames = new Set(
     allHandles
       .filter(
-        (h) => h.platform === "linkedin" && h.handleType === "linkedin_handle",
+        (h) =>
+          h.platform === "linkedin" &&
+          h.handleType === "linkedin_handle" &&
+          !isLikelyLinkedInMemberId(h.handle),
       )
       .map((h) => h.contactId.toString()),
   );
@@ -767,7 +794,10 @@ export async function addResolvedUsernames(
 
     // Normalize the public identifier
     const normalizedUsername = normalizeLinkedInHandle(publicIdentifier);
-    if (!normalizedUsername) {
+    if (
+      !normalizedUsername ||
+      isLikelyLinkedInMemberId(normalizedUsername)
+    ) {
       skipped++;
       continue;
     }
@@ -808,6 +838,21 @@ export async function addResolvedUsernames(
     if (existingUsername) {
       skipped++;
       continue;
+    }
+
+    // Remove legacy opaque IDs that were previously stored as linkedin_handle.
+    const contactHandles = await ctx.db
+      .query("contactHandles")
+      .withIndex("by_contact", (q) => q.eq("contactId", contactId))
+      .collect();
+    for (const handle of contactHandles) {
+      if (
+        handle.platform === "linkedin" &&
+        handle.handleType === "linkedin_handle" &&
+        isLikelyLinkedInMemberId(handle.handle)
+      ) {
+        await ctx.db.delete(handle._id);
+      }
     }
 
     // Add the linkedin_handle handle
@@ -861,7 +906,7 @@ export async function syncLinkedInContactsInternal(
   const seenHandles = new Set<string>();
   const deduped: LinkedInContactInput[] = [];
   for (const contact of contacts) {
-    const normalized = normalizeLinkedInHandle(contact.profileUrl);
+    const normalized = normalizeNonOpaqueLinkedInHandle(contact.profileUrl);
     if (normalized && seenHandles.has(normalized)) {
       result.duplicatesSkipped++;
       continue;
@@ -880,7 +925,9 @@ export async function syncLinkedInContactsInternal(
 
   for (const contact of deduped) {
     try {
-      const normalizedHandle = normalizeLinkedInHandle(contact.profileUrl);
+      const normalizedHandle = normalizeNonOpaqueLinkedInHandle(
+        contact.profileUrl,
+      );
       const linkedInUrn = contact.profileId
         ? `urn:li:member:${contact.profileId}`.toLowerCase()
         : null;

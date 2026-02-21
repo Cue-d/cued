@@ -95,6 +95,120 @@ export const syncModeValidator = v.union(
   v.literal("incremental")
 );
 
+export const contactStatusValidator = v.union(
+  v.literal("active"),
+  v.literal("archived"),
+  v.literal("dismissed")
+);
+
+export const contactAuditActionValidator = v.union(
+  v.literal("status_change"),
+  v.literal("merge"),
+  v.literal("unmerge"),
+  v.literal("keep_separate"),
+  v.literal("handle_detach"),
+  v.literal("handle_move"),
+  v.literal("restore")
+);
+
+export const mergeFieldResolutionsValidator = v.object({
+  displayName: v.optional(v.union(v.literal("primary"), v.literal("secondary"))),
+  company: v.optional(v.union(v.literal("primary"), v.literal("secondary"))),
+  notes: v.optional(
+    v.union(v.literal("primary"), v.literal("secondary"), v.literal("merge"))
+  ),
+});
+
+const mergeSecondaryContactSnapshotValidator = v.object({
+  _id: v.id("contacts"),
+  displayName: v.string(),
+  company: v.optional(v.string()),
+  notes: v.optional(v.string()),
+  importance: v.optional(v.number()),
+  tags: v.optional(v.array(v.string())),
+});
+
+const mergeFieldChangeStringValidator = v.object({
+  before: v.optional(v.string()),
+  after: v.optional(v.string()),
+});
+
+const mergeFieldChangeNumberValidator = v.object({
+  before: v.optional(v.number()),
+  after: v.optional(v.number()),
+});
+
+const mergeFieldChangeStringArrayValidator = v.object({
+  before: v.optional(v.array(v.string())),
+  after: v.optional(v.array(v.string())),
+});
+
+const primaryMergeFieldChangesValidator = v.object({
+  displayName: v.optional(v.object({ before: v.string(), after: v.string() })),
+  company: v.optional(mergeFieldChangeStringValidator),
+  notes: v.optional(mergeFieldChangeStringValidator),
+  importance: v.optional(mergeFieldChangeNumberValidator),
+  tags: v.optional(mergeFieldChangeStringArrayValidator),
+});
+
+const dedupedHandleSnapshotValidator = v.object({
+  handleId: v.id("contactHandles"),
+  handleType: handleTypeValidator,
+  handle: v.string(),
+  platform: platformValidator,
+  mergedIntoHandleId: v.id("contactHandles"),
+});
+
+const mergeConversationSnapshotValidator = v.object({
+  conversationId: v.id("conversations"),
+  hadPrimaryBeforeMerge: v.boolean(),
+});
+
+export const contactAuditDetailsValidator = v.union(
+  v.object({
+    oldStatus: contactStatusValidator,
+    newStatus: contactStatusValidator,
+  }),
+  v.object({
+    oldStatus: contactStatusValidator,
+  }),
+  v.object({
+    otherContactId: v.id("contacts"),
+  }),
+  v.object({
+    secondaryContact: mergeSecondaryContactSnapshotValidator,
+    handleIds: v.array(v.id("contactHandles")),
+    dedupedHandles: v.optional(v.array(dedupedHandleSnapshotValidator)),
+    messageIds: v.optional(v.array(v.id("messages"))),
+    conversationSnapshots: v.array(mergeConversationSnapshotValidator),
+    actionIds: v.optional(v.array(v.id("actions"))),
+    source: v.optional(mergeSourceValidator),
+    reasoning: v.optional(v.string()),
+    fieldResolutions: v.optional(mergeFieldResolutionsValidator),
+    primaryFieldChanges: v.optional(primaryMergeFieldChangesValidator),
+  }),
+  v.object({
+    restoredContactId: v.id("contacts"),
+    handlesRestored: v.number(),
+    messagesRestored: v.number(),
+    originalMergeAuditId: v.id("contactAuditLog"),
+  }),
+  v.object({
+    handleId: v.id("contactHandles"),
+    handleValue: v.string(),
+    handleType: handleTypeValidator,
+    destinationContactId: v.id("contacts"),
+    messagesRepointed: v.number(),
+  }),
+  v.object({
+    handleId: v.id("contactHandles"),
+    handleValue: v.string(),
+    handleType: handleTypeValidator,
+    sourceContactId: v.id("contacts"),
+    messagesRepointed: v.number(),
+  })
+);
+
 const schema = defineSchema({
   users: defineTable({
     workosUserId: v.string(),
@@ -139,8 +253,9 @@ const schema = defineSchema({
     importance: v.optional(v.number()),
     tags: v.optional(v.array(v.string())),
     isDismissed: v.optional(v.boolean()),
+    // Legacy compatibility for older deployments; prefer `status` moving forward.
     isArchived: v.optional(v.boolean()),
-    status: v.optional(v.string()),
+    status: v.optional(contactStatusValidator),
   })
     .index("by_user", ["userId"])
     .index("by_user_display_name", ["userId", "displayName"])
@@ -188,7 +303,7 @@ const schema = defineSchema({
     content: v.string(),
     sentAt: v.number(), // timestamp in milliseconds
     senderContactId: v.optional(v.id("contacts")), // null if isFromMe=true
-    senderHandleId: v.optional(v.id("contactHandles")), // legacy handle link (pre-contact merge)
+    senderHandleId: v.optional(v.id("contactHandles")), // which handle sent this message
     isFromMe: v.boolean(),
     platformMessageId: v.string(),
     threadTs: v.optional(v.string()),
@@ -210,6 +325,7 @@ const schema = defineSchema({
     .index("by_platform_message", ["userId", "platform", "platformMessageId"])
     .index("by_user_sent_at", ["userId", "sentAt"])
     .index("by_sender_contact", ["senderContactId"])
+    .index("by_sender_handle", ["senderHandleId"])
     .searchIndex("search_content", {
       searchField: "content",
       filterFields: ["userId", "conversationId"],
@@ -295,6 +411,39 @@ const schema = defineSchema({
     .index("by_user_status", ["userId", "status"])
     .index("by_contacts", ["contact1Id", "contact2Id"]),
 
+  // Keep-separate exclusions: pairs of contacts that should never be merged
+  contactExclusions: defineTable({
+    userId: v.id("users"),
+    contact1Id: v.id("contacts"), // Normalized: always smaller ID first
+    contact2Id: v.id("contacts"),
+    createdAt: v.number(),
+  })
+    .index("by_user", ["userId"])
+    .index("by_pair", ["contact1Id", "contact2Id"]),
+
+  // Audit log for all contact lifecycle operations
+  contactAuditLog: defineTable({
+    userId: v.id("users"),
+    contactId: v.id("contacts"),
+    action: contactAuditActionValidator,
+    actor: v.optional(v.string()), // "user", "system", "auto_merge"
+    details: v.optional(contactAuditDetailsValidator),
+    timestamp: v.number(),
+  })
+    .index("by_contact", ["contactId"])
+    .index("by_user", ["userId"]),
+
+  // Overflow storage for merge snapshot message references when messageIds
+  // would exceed contactAuditLog payload limits.
+  contactMergeMessageRefs: defineTable({
+    userId: v.id("users"),
+    mergeAuditId: v.id("contactAuditLog"),
+    messageId: v.id("messages"),
+  })
+    .index("by_merge_audit", ["mergeAuditId"])
+    .index("by_merge_audit_message", ["mergeAuditId", "messageId"])
+    .index("by_user", ["userId"]),
+
   // Device presence tracking for remote send capability
   devicePresence: defineTable({
     userId: v.id("users"),
@@ -370,6 +519,8 @@ const schema = defineSchema({
     createdAt: v.number(),
     sentAt: v.optional(v.number()),
     cancelledAt: v.optional(v.number()),
+    // Delivery tracking
+    terminalStatus: v.optional(v.string()),
   })
     .index("by_user_status", ["userId", "status"])
     .index("by_status", ["status"])

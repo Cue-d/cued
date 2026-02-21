@@ -10,6 +10,7 @@ import type { MutationCtx } from "../_generated/server";
 import { normalizePhone } from "@cued/shared";
 import {
   getOrCreateContact,
+  type GetOrCreateContactResult,
   scheduleIncomingMessageEvents,
   scheduleOutgoingMessageEvents,
   SEVEN_DAYS_MS,
@@ -62,15 +63,14 @@ async function getOrCreateSignalContact(
   userId: Id<"users">,
   handle: string,
   displayName?: string
-): Promise<Id<"contacts"> | undefined> {
-  const result = await getOrCreateContact(
+): Promise<GetOrCreateContactResult | undefined> {
+  return getOrCreateContact(
     ctx,
     userId,
     "signal",
     [getSignalHandleInput(handle)],
     displayName || handle
   );
-  return result?.contactId;
 }
 
 /**
@@ -138,14 +138,14 @@ export async function syncSignalMessagesInternal(
         threadMessages.find((msg) => !msg.isFromMe)?.senderHandle;
 
       if (peerHandle) {
-        const contactId = await getOrCreateSignalContact(
+        const contactResult = await getOrCreateSignalContact(
           ctx,
           userId,
           peerHandle,
           sample.senderName
         );
-        if (contactId) {
-          participantIds.add(contactId);
+        if (contactResult) {
+          participantIds.add(contactResult.contactId);
         }
       }
     }
@@ -177,18 +177,21 @@ export async function syncSignalMessagesInternal(
         }
 
         let senderContactId: Id<"contacts"> | undefined;
+        let senderHandleId: Id<"contactHandles"> | undefined;
 
         if (!message.isFromMe) {
           const senderHandle = message.senderHandle || message.peerHandle;
           if (senderHandle) {
-            senderContactId = await getOrCreateSignalContact(
+            const contactResult = await getOrCreateSignalContact(
               ctx,
               userId,
               senderHandle,
               message.senderName
             );
-            if (senderContactId) {
-              participantIds.add(senderContactId);
+            if (contactResult) {
+              senderContactId = contactResult.contactId;
+              senderHandleId = contactResult.handleId;
+              participantIds.add(contactResult.contactId);
             }
           }
         }
@@ -212,6 +215,7 @@ export async function syncSignalMessagesInternal(
           content: message.text,
           sentAt: finalSentAt,
           senderContactId,
+          senderHandleId,
           isFromMe: message.isFromMe,
           platformMessageId: message.messageId,
           status: bridge.status,

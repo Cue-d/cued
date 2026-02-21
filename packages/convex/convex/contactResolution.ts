@@ -26,7 +26,11 @@ import {
 import type { TypedHandle, MessageSnippet } from "@cued/ai";
 import { scheduleContactMergeCheck } from "./lib/contactMergeScheduling";
 import { resolveActionSummary } from "./lib/actionSummary";
-import { normalizeHandleValue } from "./lib/normalizeHandle";
+import { isContactActionable } from "./lib/contactStatus";
+import {
+  buildContactHandleDedupKey,
+  executeContactMerge,
+} from "./lib/contactMerge";
 
 const MAX_CONVERSATIONS_FOR_LLM_LOOKUP = 100;
 const MAX_CONVERSATIONS_FOR_LLM_CONTEXT = 5;
@@ -99,7 +103,7 @@ function shouldIncludeContactInNameMatching(
 ): boolean {
   const name = contact.displayName;
   return (
-    !contact.isDismissed &&
+    isContactActionable(contact) &&
     !!name.trim() &&
     !looksLikeEmail(name) &&
     !looksLikePhone(name) &&
@@ -585,20 +589,30 @@ export const findDuplicateCandidatesInternal = internalQuery({
   handler: async (ctx, args): Promise<DuplicateCandidateResult> => {
     if (args.contactId) {
       const targetContact = await ctx.db.get(args.contactId);
-      if (!targetContact || targetContact.userId !== args.userId) {
+      if (
+        !targetContact ||
+        targetContact.userId !== args.userId ||
+        !isContactActionable(targetContact)
+      ) {
         return { duplicatePairs: [], fuzzyPairs: [] };
       }
     }
 
-    const contacts = await ctx.db
+    const allContacts = await ctx.db
       .query("contacts")
       .withIndex("by_user", (q) => q.eq("userId", args.userId))
       .collect();
+    const contacts = allContacts.filter((contact) => isContactActionable(contact));
+    if (contacts.length < 2) {
+      return { duplicatePairs: [], fuzzyPairs: [] };
+    }
 
-    const handles = await ctx.db
+    const activeContactIds = new Set(contacts.map((contact) => contact._id));
+
+    const handles = (await ctx.db
       .query("contactHandles")
       .withIndex("by_user", (q) => q.eq("userId", args.userId))
-      .collect();
+      .collect()).filter((handle) => activeContactIds.has(handle.contactId));
 
     const contactIdToHandles = buildContactHandlesByContactId(handles);
     const handleToContacts = buildHandleToContactsIndex(contacts, handles);
@@ -795,6 +809,16 @@ export const createMergeSuggestionInternal = internalMutation({
         ? [args.contact1Id, args.contact2Id]
         : [args.contact2Id, args.contact1Id];
 
+    // Check keep-separate exclusion
+    const exclusion = await ctx.db
+      .query("contactExclusions")
+      .withIndex("by_pair", (q) => q.eq("contact1Id", c1).eq("contact2Id", c2))
+      .first();
+
+    if (exclusion) {
+      return { created: false, reason: "Pair is excluded (keep-separate)" };
+    }
+
     // Check for existing merge suggestion (only need to check one direction now)
     const existingSuggestion = await ctx.db
       .query("mergeSuggestions")
@@ -911,6 +935,19 @@ export const autoMergeContacts = internalMutation({
       return { success: false, reason: "Contact not found" };
     }
 
+    // Check keep-separate exclusion before merging
+    const [c1, c2] =
+      args.primaryContactId < args.secondaryContactId
+        ? [args.primaryContactId, args.secondaryContactId]
+        : [args.secondaryContactId, args.primaryContactId];
+    const exclusion = await ctx.db
+      .query("contactExclusions")
+      .withIndex("by_pair", (q) => q.eq("contact1Id", c1).eq("contact2Id", c2))
+      .first();
+    if (exclusion) {
+      return { success: false, reason: "Pair is excluded (keep-separate)" };
+    }
+
     // Fetch handles for both contacts before choosing primary, so we can
     // choose the higher-quality record and dedupe with canonical keys.
     const [handlesA, handlesB] = await Promise.all([
@@ -940,103 +977,16 @@ export const autoMergeContacts = internalMutation({
       : args.primaryContactId;
     const primary = preferredIsA ? contactA : contactB;
     const secondary = preferredIsA ? contactB : contactA;
-    const primaryHandles = preferredIsA ? handlesA : handlesB;
-    const secondaryHandles = preferredIsA ? handlesB : handlesA;
-
-    const existingHandleKeys = new Set(
-      primaryHandles.map((h) => buildHandleDedupKey(h.handleType, h.handle)),
-    );
-
-    for (const handle of secondaryHandles) {
-      const key = buildHandleDedupKey(handle.handleType, handle.handle);
-      if (existingHandleKeys.has(key)) {
-        // Primary already has this handle — delete the duplicate
-        await ctx.db.delete(handle._id);
-      } else {
-        await ctx.db.patch(handle._id, { contactId: primaryContactId });
-        existingHandleKeys.add(key);
-      }
-    }
-
-    // Update conversations
-    const conversations = await ctx.db
-      .query("conversations")
-      .withIndex("by_user", (q) => q.eq("userId", primary.userId))
-      .collect();
-
-    for (const conv of conversations) {
-      if (conv.participantContactIds.includes(secondaryContactId)) {
-        const withoutSecondary = conv.participantContactIds.filter(
-          (id) => id !== secondaryContactId,
-        );
-        const hasPrimary =
-          conv.participantContactIds.includes(primaryContactId);
-        const updatedParticipants = hasPrimary
-          ? withoutSecondary
-          : [...withoutSecondary, primaryContactId];
-
-        await ctx.db.patch(conv._id, {
-          participantContactIds: updatedParticipants,
-        });
-      }
-    }
-
-    // Update messages (use by_sender_contact index for efficiency)
-    const messages = await ctx.db
-      .query("messages")
-      .withIndex("by_sender_contact", (q) =>
-        q.eq("senderContactId", secondaryContactId),
-      )
-      .collect();
-
-    for (const msg of messages) {
-      await ctx.db.patch(msg._id, { senderContactId: primaryContactId });
-    }
-
-    // Merge contact metadata
-    const updates: { company?: string; notes?: string; importance?: number } =
-      {};
-    if (!primary.company && secondary.company) {
-      updates.company = secondary.company;
-    }
-    if (!primary.notes && secondary.notes) {
-      updates.notes = secondary.notes;
-    }
-    if (
-      primary.importance === undefined &&
-      secondary.importance !== undefined
-    ) {
-      updates.importance = secondary.importance;
-    }
-    if (Object.keys(updates).length > 0) {
-      await ctx.db.patch(primaryContactId, updates);
-    }
-
-    // Resolve stale merge suggestions and actions that reference the
-    // secondary contact before deleting it.
-    const { affectedSuggestionIds, pairSuggestionIds } =
-      await resolveStaleMergeSuggestions(
-        ctx, primary.userId, primaryContactId, secondaryContactId, now,
-      );
-
-    const resolvedPendingActionCount = await resolveStaleActionsForMerge(
-      ctx, primary.userId, primaryContactId, secondaryContactId,
-      pairSuggestionIds, affectedSuggestionIds, now,
-    );
-
-    if (resolvedPendingActionCount > 0) {
-      const user = await ctx.db.get(primary.userId);
-      if (user) {
-        await ctx.db.patch(primary.userId, {
-          pendingActionCount: Math.max(
-            0,
-            (user.pendingActionCount ?? 0) - resolvedPendingActionCount,
-          ),
-        });
-      }
-    }
-
-    await ctx.db.delete(secondaryContactId);
+    const result = await executeContactMerge(ctx, {
+      userId: primary.userId,
+      primaryContactId,
+      secondaryContactId,
+      primaryContact: primary,
+      secondaryContact: secondary,
+      actor: "auto_merge",
+      source: args.source,
+      reasoning: args.reasoning,
+    });
 
     // Log merge for audit trail
     await ctx.db.insert("mergeSuggestions", {
@@ -1055,148 +1005,9 @@ export const autoMergeContacts = internalMutation({
     // transitive duplicates (3+ contacts sharing a handle) coalesce fully.
     await scheduleContactMergeCheck(ctx, primary.userId, primaryContactId);
 
-    return { success: true, handlesMovedCount: secondaryHandles.length };
+    return { success: true, handlesMovedCount: result.handlesMovedCount };
   },
 });
-
-/**
- * Resolve pending merge suggestions that reference the secondary contact.
- * Approves the suggestion for the primary↔secondary pair, rejects others.
- */
-async function resolveStaleMergeSuggestions(
-  ctx: MutationCtx,
-  userId: Id<"users">,
-  primaryContactId: Id<"contacts">,
-  secondaryContactId: Id<"contacts">,
-  now: number,
-): Promise<{
-  affectedSuggestionIds: Set<Id<"mergeSuggestions">>;
-  pairSuggestionIds: Set<Id<"mergeSuggestions">>;
-}> {
-  const pendingSuggestions = await ctx.db
-    .query("mergeSuggestions")
-    .withIndex("by_user_status", (q) =>
-      q.eq("userId", userId).eq("status", "pending"),
-    )
-    .collect();
-
-  const affectedSuggestionIds = new Set<Id<"mergeSuggestions">>();
-  const pairSuggestionIds = new Set<Id<"mergeSuggestions">>();
-
-  for (const suggestion of pendingSuggestions) {
-    const touchesSecondary =
-      suggestion.contact1Id === secondaryContactId ||
-      suggestion.contact2Id === secondaryContactId;
-    if (!touchesSecondary) continue;
-
-    const isThisMergePair =
-      (suggestion.contact1Id === primaryContactId &&
-        suggestion.contact2Id === secondaryContactId) ||
-      (suggestion.contact1Id === secondaryContactId &&
-        suggestion.contact2Id === primaryContactId);
-
-    await ctx.db.patch(suggestion._id, {
-      status: isThisMergePair ? "approved" : "rejected",
-      resolvedAt: now,
-    });
-
-    affectedSuggestionIds.add(suggestion._id);
-    if (isThisMergePair) pairSuggestionIds.add(suggestion._id);
-  }
-
-  return { affectedSuggestionIds, pairSuggestionIds };
-}
-
-/**
- * Rewrite or resolve actions that reference the secondary contact.
- *
- * 1. Actions whose primary contactId is the secondary → repoint to surviving
- *    contact, except pending resolve_contact actions which get resolved.
- * 2. Remaining pending resolve_contact actions that reference the secondary
- *    via secondaryContactId or an affected mergeSuggestionId also get resolved.
- *
- * Returns the total number of pending actions resolved (for pendingActionCount adjustment).
- */
-async function resolveStaleActionsForMerge(
-  ctx: MutationCtx,
-  userId: Id<"users">,
-  primaryContactId: Id<"contacts">,
-  secondaryContactId: Id<"contacts">,
-  pairSuggestionIds: Set<Id<"mergeSuggestions">>,
-  affectedSuggestionIds: Set<Id<"mergeSuggestions">>,
-  now: number,
-): Promise<number> {
-  let resolvedCount = 0;
-
-  // Step 1: actions indexed by contactId === secondaryContactId
-  const actionsBySecondary = await ctx.db
-    .query("actions")
-    .withIndex("by_contact", (q) => q.eq("contactId", secondaryContactId))
-    .collect();
-
-  const handledActionIds = new Set<Id<"actions">>();
-
-  for (const action of actionsBySecondary) {
-    if (action.type === "resolve_contact" && action.status === "pending") {
-      const isThisMergePair =
-        action.secondaryContactId === primaryContactId ||
-        (!!action.mergeSuggestionId &&
-          pairSuggestionIds.has(action.mergeSuggestionId));
-
-      await ctx.db.patch(action._id, isThisMergePair
-        ? { status: "completed", completedAt: now }
-        : { status: "discarded", discardedAt: now });
-      resolvedCount++;
-      handledActionIds.add(action._id);
-      continue;
-    }
-
-    // Non-resolve actions: repoint to the surviving contact
-    await ctx.db.patch(action._id, { contactId: primaryContactId });
-  }
-
-  // Step 2: pending resolve_contact actions that reference the secondary via
-  // secondaryContactId or an affected mergeSuggestionId (not caught above
-  // because their contactId points elsewhere).
-  const pendingResolveActions = await ctx.db
-    .query("actions")
-    .withIndex("by_user_status", (q) =>
-      q.eq("userId", userId).eq("status", "pending"),
-    )
-    .filter((q) => q.eq(q.field("type"), "resolve_contact"))
-    .collect();
-
-  for (const action of pendingResolveActions) {
-    if (handledActionIds.has(action._id)) continue;
-
-    const touchesSecondary =
-      action.contactId === secondaryContactId ||
-      action.secondaryContactId === secondaryContactId ||
-      (!!action.mergeSuggestionId &&
-        affectedSuggestionIds.has(action.mergeSuggestionId));
-    if (!touchesSecondary) continue;
-
-    const isThisMergePair =
-      (action.contactId === primaryContactId &&
-        action.secondaryContactId === secondaryContactId) ||
-      (action.contactId === secondaryContactId &&
-        action.secondaryContactId === primaryContactId) ||
-      (!!action.mergeSuggestionId &&
-        pairSuggestionIds.has(action.mergeSuggestionId));
-
-    await ctx.db.patch(action._id, isThisMergePair
-      ? { status: "completed", completedAt: now }
-      : { status: "discarded", discardedAt: now });
-    resolvedCount++;
-  }
-
-  return resolvedCount;
-}
-
-function buildHandleDedupKey(handleType: string, handle: string): string {
-  const normalized = normalizeHandleValue(handleType, handle);
-  return `${handleType}:${normalized || handle.trim()}`;
-}
 
 function isPlaceholderDisplayName(value: string): boolean {
   const name = value.trim();
@@ -1224,7 +1035,7 @@ function getContactQualityScore(
   if (contact.importance !== undefined) score += 4;
 
   const uniqueHandleCount = new Set(
-    handles.map((h) => buildHandleDedupKey(h.handleType, h.handle)),
+    handles.map((h) => buildContactHandleDedupKey(h.handleType, h.handle)),
   ).size;
   score += Math.min(10, uniqueHandleCount);
 

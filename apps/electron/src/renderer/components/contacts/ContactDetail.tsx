@@ -9,12 +9,17 @@ import {
   Pencil,
   Save,
   X,
-} from 'lucide-react'
+  Archive,
+  RotateCcw,
+  GitBranch,
+  GitMerge,
+} from "lucide-react"
 import { api } from "@cued/convex"
 import {
   normalizePhone,
   getInitials,
   formatRelativeTime,
+  getContactAuditActionLabel,
   type ActionPlatform,
   PLATFORM_CONFIG,
 } from "@cued/shared"
@@ -38,6 +43,7 @@ import {
 import type { Id } from "@cued/convex"
 import { PanelHeader } from "../app-shell"
 import { SettingsSection, SettingsCard, SettingsRow } from "../settings-card"
+import { MergeContactDialog } from "./MergeContactDialog"
 
 /** Handle types worth displaying to the user (hide internal IDs like slack_id, linkedin_urn) */
 export const VISIBLE_HANDLE_TYPES = new Set(["phone", "email", "linkedin_handle", "twitter_handle"])
@@ -169,7 +175,18 @@ export function ContactDetail({ contactId }: ContactDetailProps) {
     api.contacts.getContactProfile,
     contactId ? { contactId } : "skip"
   )
+  const auditHistory = useQuery(
+    api.contacts.getContactAuditHistory,
+    contactId ? { contactId } : "skip"
+  )
+  const unmergeableHistory = useQuery(
+    api.contacts.getUnmergeableHistory,
+    contactId ? { contactId } : "skip"
+  )
   const updateContact = useMutation(api.contacts.updateContact)
+  const setContactStatus = useMutation(api.contacts.setContactStatus)
+  const restoreContactMut = useMutation(api.contacts.restoreContact)
+  const unmergeContactMut = useMutation(api.contacts.unmergeContact)
 
   const [isEditing, setIsEditing] = React.useState(false)
   const [editForm, setEditForm] = React.useState({
@@ -182,6 +199,7 @@ export function ContactDetail({ contactId }: ContactDetailProps) {
 
   const [timelineExpanded, setTimelineExpanded] = React.useState(true)
   const [showAllMessages, setShowAllMessages] = React.useState(false)
+  const [showMergeDialog, setShowMergeDialog] = React.useState(false)
 
   React.useEffect(() => {
     if (profile?.contact) {
@@ -255,6 +273,11 @@ export function ContactDetail({ contactId }: ContactDetailProps) {
   const displayMessages = showAllMessages ? messages : messages.slice(0, 10)
   const visibleHandles = contact.handles.filter((h) => VISIBLE_HANDLE_TYPES.has(h.type))
   const initials = getInitials(contact.displayName)
+  const contactStatus =
+    contact.isDismissed || contact.status === "archived" || contact.status === "dismissed"
+      ? "archived"
+      : "active"
+  const isActive = contactStatus === "active"
 
   return (
     <div className="h-full flex flex-col">
@@ -317,6 +340,11 @@ export function ContactDetail({ contactId }: ContactDetailProps) {
             {/* Overview */}
             <SettingsSection title="Overview">
               <SettingsCard>
+                <SettingsRow label="Status">
+                  <Badge variant={isActive ? "secondary" : "destructive"}>
+                    {contactStatus.charAt(0).toUpperCase() + contactStatus.slice(1)}
+                  </Badge>
+                </SettingsRow>
                 <SettingsRow label="Messages" description={`${stats.totalMessages} total`} />
                 <SettingsRow label="Recent" description={`${stats.recentMessageCount} in last 30 days`} />
                 <SettingsRow
@@ -497,9 +525,110 @@ export function ContactDetail({ contactId }: ContactDetailProps) {
                 )}
               </SettingsCard>
             </SettingsSection>
+
+            {/* Status Actions */}
+            <SettingsSection
+              title="Actions"
+              description="Archive hides this contact and stops new 1:1 action suggestions (group chats may still create actions). You can restore it."
+            >
+              <SettingsCard>
+                {isActive ? (
+                  <>
+                    <SettingsRow
+                      label="Archive"
+                      description="Hide from active views and stop new 1:1 action suggestions."
+                    >
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => contactId && setContactStatus({ contactId, status: "archived" })}
+                      >
+                        <Archive className="w-3.5 h-3.5 mr-1.5" />
+                        Archive
+                      </Button>
+                    </SettingsRow>
+                    <SettingsRow
+                      label="Merge"
+                      description="Combine duplicates into one contact and remove the extra record."
+                    >
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => setShowMergeDialog(true)}
+                      >
+                        <GitMerge className="w-3.5 h-3.5 mr-1.5" />
+                        Merge with...
+                      </Button>
+                    </SettingsRow>
+                  </>
+                ) : (
+                  <SettingsRow label="Restore">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => contactId && restoreContactMut({ contactId })}
+                    >
+                      <RotateCcw className="w-3.5 h-3.5 mr-1.5" />
+                      Restore to Active
+                    </Button>
+                  </SettingsRow>
+                )}
+              </SettingsCard>
+            </SettingsSection>
+
+            {/* Merge History (Unmerge) */}
+            {unmergeableHistory && unmergeableHistory.length > 0 && (
+              <SettingsSection title="Merge History">
+                <SettingsCard>
+                  {unmergeableHistory.map((entry) => {
+                    const details = entry.details as { secondaryContact?: { displayName?: string } } | undefined
+                    const mergedName = details?.secondaryContact?.displayName ?? "Unknown"
+                    return (
+                      <SettingsRow
+                        key={entry._id}
+                        label={`Merged with "${mergedName}"`}
+                        description={formatRelativeTime(entry.timestamp)}
+                      >
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => unmergeContactMut({ auditLogId: entry._id as Id<"contactAuditLog"> })}
+                        >
+                          <GitBranch className="w-3.5 h-3.5 mr-1.5" />
+                          Unmerge
+                        </Button>
+                      </SettingsRow>
+                    )
+                  })}
+                </SettingsCard>
+              </SettingsSection>
+            )}
+
+            {/* Audit History */}
+            {auditHistory && auditHistory.length > 0 && (
+              <SettingsSection title="History">
+                <SettingsCard>
+                  {auditHistory.slice(0, 10).map((entry) => (
+                    <SettingsRow
+                      key={entry._id}
+                      label={getContactAuditActionLabel(entry.action)}
+                      description={formatRelativeTime(entry.timestamp)}
+                    />
+                  ))}
+                </SettingsCard>
+              </SettingsSection>
+            )}
           </div>
         </ScrollArea>
       </div>
+
+      {contactId && (
+        <MergeContactDialog
+          primaryContactId={contactId}
+          open={showMergeDialog}
+          onClose={() => setShowMergeDialog(false)}
+        />
+      )}
     </div>
   )
 }

@@ -11,6 +11,7 @@ import {
   RefreshControl,
   View,
   Text,
+  Pressable,
   useColorScheme,
   type SectionListRenderItemInfo,
   type SectionListData,
@@ -134,11 +135,51 @@ function LoadingState() {
   );
 }
 
+type ContactStatus = "active" | "archived";
+
+/** Status filter tab bar */
+function StatusFilterBar({
+  selected,
+  onSelect,
+}: {
+  selected: ContactStatus;
+  onSelect: (s: ContactStatus) => void;
+}) {
+  const tabs: { key: ContactStatus; label: string }[] = [
+    { key: "active", label: "Active" },
+    { key: "archived", label: "Archived" },
+  ];
+
+  return (
+    <View className="flex-row px-4 py-2 gap-2 bg-background">
+      {tabs.map((tab) => (
+        <Pressable
+          key={tab.key}
+          onPress={() => onSelect(tab.key)}
+          className={`px-3 py-1.5 rounded-full ${
+            selected === tab.key ? "bg-foreground" : "bg-muted"
+          }`}
+        >
+          <Text
+            className={`text-sm font-medium ${
+              selected === tab.key ? "text-background" : "text-muted-foreground"
+            }`}
+          >
+            {tab.label}
+          </Text>
+        </Pressable>
+      ))}
+    </View>
+  );
+}
+
 export default function ContactsScreen(): React.JSX.Element {
   const [searchQuery, setSearchQuery] = useState("");
+  const [statusFilter, setStatusFilter] = useState<ContactStatus>("active");
   const [isRefreshing, setIsRefreshing] = useState(false);
   const { contacts, isLoading } = useContacts({
     searchQuery: searchQuery || undefined,
+    status: statusFilter,
   });
 
   // Map and group contacts, filtering to named contacts only
@@ -201,6 +242,9 @@ export default function ContactsScreen(): React.JSX.Element {
         keyboardShouldPersistTaps="handled"
         stickySectionHeadersEnabled
         ItemSeparatorComponent={ItemSeparator}
+        ListHeaderComponent={
+          <StatusFilterBar selected={statusFilter} onSelect={setStatusFilter} />
+        }
         ListEmptyComponent={EmptyState}
         ListFooterComponent={
           totalContacts > 0 ? (
