@@ -13,7 +13,7 @@ import {
 import { motion, AnimatePresence } from "motion/react";
 import { useTheme } from "next-themes";
 import { CuedMark } from "./cued-mark";
-import { Avatar, AvatarFallback } from "./ui/avatar";
+import { Avatar, AvatarFallback, AvatarImage } from "./ui/avatar";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -41,6 +41,7 @@ interface AppSidebarProps extends React.ComponentProps<typeof Sidebar> {
   user?: {
     name?: string;
     email?: string;
+    imageUrl?: string;
   } | null;
   onSignOut?: () => void;
 }
@@ -139,6 +140,9 @@ export function AppSidebar({
                 }
               >
                 <Avatar className="size-8 rounded-lg">
+                  {user?.imageUrl ? (
+                    <AvatarImage src={user.imageUrl} alt={user?.name ?? "User"} />
+                  ) : null}
                   <AvatarFallback className="rounded-lg bg-sidebar-primary text-sidebar-primary-foreground text-xs">
                     {getInitials(user?.name, user?.email)}
                   </AvatarFallback>
