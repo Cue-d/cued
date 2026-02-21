@@ -7,11 +7,9 @@ import {
   Pressable,
   useColorScheme,
 } from "react-native";
-import { useEffect, useState } from "react";
 import * as Haptics from "expo-haptics";
 import { router } from "expo-router";
 import { SymbolView } from "expo-symbols";
-import { Image } from "expo-image";
 import { useQuery } from "convex/react";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Uniwind, useUniwind } from "uniwind";
@@ -21,46 +19,9 @@ import type { ActionPlatform } from "@cued/shared";
 import { getRedirectUri } from "@/lib/auth";
 import { useElectronPrescence } from "@/contexts/electron-presence-context";
 import { PlatformIcon } from "@/components/platform-icons";
+import { ContactAvatar } from "@/components/contact-avatar";
 import { cn, getDisplayName, getThemeColors } from "@/lib/utils";
 import { useAuth } from "@/providers/AuthProvider";
-
-function Avatar({
-  name,
-  profilePhotoUrl,
-  size = 80,
-}: {
-  name: string;
-  profilePhotoUrl?: string | null;
-  size?: number;
-}): React.ReactElement {
-  const [imageFailed, setImageFailed] = useState(false);
-
-  useEffect(() => {
-    setImageFailed(false);
-  }, [profilePhotoUrl]);
-
-  return (
-    <View
-      className="items-center justify-center rounded-full bg-primary"
-      style={{ width: size, height: size }}
-    >
-      {profilePhotoUrl && !imageFailed ? (
-        <Image
-          source={{ uri: profilePhotoUrl }}
-          style={{ width: size, height: size, borderRadius: size / 2 }}
-          contentFit="cover"
-          cachePolicy="memory-disk"
-          transition={120}
-          onError={() => setImageFailed(true)}
-        />
-      ) : (
-        <Text className="font-medium text-primary-foreground text-2xl">
-          {getInitials(name)}
-        </Text>
-      )}
-    </View>
-  );
-}
 
 interface SettingsRowProps {
   icon: string;
@@ -202,6 +163,7 @@ export default function SettingsScreen(): React.ReactElement {
   const colorScheme = useColorScheme();
   const colors = getThemeColors(colorScheme === "dark");
   const displayName = getDisplayName(user);
+  const initials = getInitials(displayName);
   const activeTheme: ThemeValue = hasAdaptiveThemes ? "system" : theme;
   const activeThemeLabel = THEME_OPTIONS.find((o) => o.value === activeTheme)?.label;
 
@@ -254,10 +216,12 @@ export default function SettingsScreen(): React.ReactElement {
     <SafeAreaView className="flex-1 bg-background">
       <ScrollView contentContainerClassName="pb-12">
       <View className="items-center mt-12">
-        <Avatar
-          name={displayName}
-          profilePhotoUrl={user?.profile_picture_url}
+        <ContactAvatar
+          initials={initials}
+          avatarUrl={user?.profile_picture_url}
           size={80}
+          className="items-center justify-center rounded-full bg-primary"
+          fallbackTextClassName="font-medium text-primary-foreground text-2xl"
         />
         <Text className="text-xl font-semibold text-foreground mt-3">{displayName}</Text>
         <Text className="text-muted-foreground text-[15px] mt-0.5">{user?.email}</Text>
