@@ -53,6 +53,11 @@ const api: ElectronAPI = {
     openExternal: (url: string): Promise<boolean> => ipcRenderer.invoke("shell:openExternal", url),
   },
 
+  contacts: {
+    resolveAvatars: (contacts): Promise<Record<string, string>> =>
+      ipcRenderer.invoke("contacts:resolveAvatars", contacts),
+  },
+
   auth: {
     getState: (): Promise<AuthState> => ipcRenderer.invoke("auth:getState"),
     startLogin: (): Promise<void> => ipcRenderer.invoke("auth:startLogin"),
