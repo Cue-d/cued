@@ -819,34 +819,57 @@ export const createMergeSuggestionInternal = internalMutation({
       return { created: false, reason: "Pair is excluded (keep-separate)" };
     }
 
-    // Check for existing merge suggestion (only need to check one direction now)
-    const existingSuggestion = await ctx.db
-      .query("mergeSuggestions")
-      .withIndex("by_contacts", (q) =>
-        q.eq("contact1Id", c1).eq("contact2Id", c2),
-      )
-      .unique();
+    // Check both directions to avoid creating duplicates when legacy rows
+    // still exist with non-normalized contact ordering.
+    const [existingSuggestion, existingReverseSuggestion] = await Promise.all([
+      ctx.db
+        .query("mergeSuggestions")
+        .withIndex("by_contacts", (q) =>
+          q.eq("contact1Id", c1).eq("contact2Id", c2),
+        )
+        .first(),
+      ctx.db
+        .query("mergeSuggestions")
+        .withIndex("by_contacts", (q) =>
+          q.eq("contact1Id", c2).eq("contact2Id", c1),
+        )
+        .first(),
+    ]);
 
-    if (existingSuggestion) {
+    if (existingSuggestion || existingReverseSuggestion) {
       return { created: false, reason: "Suggestion already exists" };
     }
 
-    // Also check for existing resolve_contact action for this pair
-    const existingAction = await ctx.db
-      .query("actions")
-      .withIndex("by_user_status", (q) =>
-        q.eq("userId", args.userId).eq("status", "pending"),
-      )
-      .filter((q) =>
-        q.and(
-          q.eq(q.field("type"), "resolve_contact"),
-          q.eq(q.field("contactId"), c1),
-          q.eq(q.field("secondaryContactId"), c2),
-        ),
-      )
-      .first();
+    const [existingAction, existingReverseAction] = await Promise.all([
+      ctx.db
+        .query("actions")
+        .withIndex("by_user_status", (q) =>
+          q.eq("userId", args.userId).eq("status", "pending"),
+        )
+        .filter((q) =>
+          q.and(
+            q.eq(q.field("type"), "resolve_contact"),
+            q.eq(q.field("contactId"), c1),
+            q.eq(q.field("secondaryContactId"), c2),
+          ),
+        )
+        .first(),
+      ctx.db
+        .query("actions")
+        .withIndex("by_user_status", (q) =>
+          q.eq("userId", args.userId).eq("status", "pending"),
+        )
+        .filter((q) =>
+          q.and(
+            q.eq(q.field("type"), "resolve_contact"),
+            q.eq(q.field("contactId"), c2),
+            q.eq(q.field("secondaryContactId"), c1),
+          ),
+        )
+        .first(),
+    ]);
 
-    if (existingAction) {
+    if (existingAction || existingReverseAction) {
       return { created: false, reason: "Action already exists" };
     }
 

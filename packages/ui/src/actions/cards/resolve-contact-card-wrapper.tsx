@@ -47,7 +47,9 @@ function toMergeHandle(
   if (isOpaqueLinkedInId) return null
 
   const deeplinkUrl =
-    buildHandleDeeplink(h.platform, h.handleType, h.handle) ?? undefined
+    buildHandleDeeplink(h.platform, h.handleType, h.handle, {
+      intent: "contact",
+    }) ?? undefined
 
   const displayLabel =
     !readable
@@ -61,6 +63,7 @@ function toMergeHandle(
     value: h.handle,
     platform: h.platform as ContactHandle["platform"],
     displayLabel,
+    sourceContactName: contactDisplayName,
     deeplinkUrl,
   }
 }

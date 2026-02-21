@@ -39,5 +39,19 @@ describe("createDeeplinkUtilities", () => {
         )
       ).toBeNull();
     });
+
+    it("builds an iMessage deeplink by default", () => {
+      expect(buildHandleDeeplink("imessage", "phone", "+15205550123")).toBe(
+        "imessage://+15205550123"
+      );
+    });
+
+    it("builds a Contacts deeplink for contact-intent iMessage handles", () => {
+      expect(
+        buildHandleDeeplink("imessage", "phone", "+15205550123", {
+          intent: "contact",
+        })
+      ).toBe("addressbook://search/%2B15205550123");
+    });
   });
 });

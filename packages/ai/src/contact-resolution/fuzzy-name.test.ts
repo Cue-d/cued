@@ -138,6 +138,18 @@ describe("false positive prevention", () => {
     expect(score).toBeLessThanOrEqual(0.4);
   });
 
+  it("rejects same last name with similar but different short first names", () => {
+    // John Zhu vs Josh Zhu - short-name prefix overlap should not auto-match
+    const score = nameSimilarity("John Zhu", "Josh Zhu");
+    expect(score).toBeLessThanOrEqual(0.4);
+  });
+
+  it("rejects same last name with one-letter insertion on short first names", () => {
+    // Ian Zhu vs Ivan Zhu - phonetic overlap but likely different people
+    const score = nameSimilarity("Ian Zhu", "Ivan Zhu");
+    expect(score).toBeLessThanOrEqual(0.4);
+  });
+
   it("still matches typos in first name", () => {
     // John Smith vs Jon Smith - likely same person with typo
     const score = nameSimilarity("John Smith", "Jon Smith");

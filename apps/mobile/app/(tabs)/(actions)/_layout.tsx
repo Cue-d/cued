@@ -19,6 +19,7 @@ export default function ActionsLayout(): React.JSX.Element {
         name="index"
         options={{
           title: "",
+          headerTransparent: true,
           headerRight: () => <HeaderAvatar />,
         }}
       />

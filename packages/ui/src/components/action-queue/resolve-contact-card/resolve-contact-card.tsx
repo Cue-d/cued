@@ -9,6 +9,8 @@ import { formatSource, type MergeSource } from "./source-badge"
 export interface MergeHandle extends ContactHandle {
   /** Human-readable label to show instead of raw value */
   displayLabel?: string
+  /** Contact name this handle came from */
+  sourceContactName?: string
   /** Deep link URL for opening this handle in its platform app */
   deeplinkUrl?: string
 }
@@ -81,7 +83,14 @@ function HandleRow({ handle, onLinkClick }: { handle: MergeHandle; onLinkClick?:
   return (
     <div className="flex items-center gap-3 px-3.5 py-2.5 rounded-lg bg-muted/50">
       <HandleRowIcon handle={handle} />
-      <span className="flex-1 truncate text-sm">{label}</span>
+      <span className="flex-1 min-w-0">
+        <span className="block truncate text-sm">{label}</span>
+        {handle.sourceContactName ? (
+          <span className="block truncate text-xs text-muted-foreground">
+            {handle.sourceContactName}
+          </span>
+        ) : null}
+      </span>
       {config ? (
         <span className="text-xs text-muted-foreground">{config.label}</span>
       ) : null}
