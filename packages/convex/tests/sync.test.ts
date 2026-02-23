@@ -213,7 +213,69 @@ describe("sync", () => {
 
       expect(conversations).toHaveLength(1);
       expect(conversations[0].platform).toBe("imessage");
-      expect(conversations[0].platformConversationId).toBe("1");
+      expect(conversations[0].platformConversationId).toBe("chat_1");
+    });
+
+    it("reuses conversation when chat ROWID changes but identifier stays the same", async () => {
+      const t = trackTest(convexTest(schema, modules));
+      const { asUser, userId } = await setupAuthenticatedUser(t);
+
+      await asUser.mutation(api.sync.syncMessages, {
+        batch: {
+          cursor: 100,
+          chats: [
+            {
+              id: 1,
+              identifier: "group_identifier_1",
+              displayName: "Original Group",
+              isGroup: true,
+              participants: [
+                { id: 1, identifier: "+15551111111", service: "iMessage" },
+                { id: 2, identifier: "+15552222222", service: "iMessage" },
+              ],
+            },
+          ],
+          messages: [],
+          handles: [
+            { id: 1, identifier: "+15551111111", service: "iMessage" },
+            { id: 2, identifier: "+15552222222", service: "iMessage" },
+          ],
+        },
+      });
+
+      await asUser.mutation(api.sync.syncMessages, {
+        batch: {
+          cursor: 200,
+          chats: [
+            {
+              id: 999,
+              identifier: "group_identifier_1",
+              displayName: "Renamed Group",
+              isGroup: true,
+              participants: [
+                { id: 1, identifier: "+15551111111", service: "iMessage" },
+                { id: 2, identifier: "+15552222222", service: "iMessage" },
+              ],
+            },
+          ],
+          messages: [],
+          handles: [
+            { id: 1, identifier: "+15551111111", service: "iMessage" },
+            { id: 2, identifier: "+15552222222", service: "iMessage" },
+          ],
+        },
+      });
+
+      const conversations = await t.run(async (ctx) => {
+        return ctx.db
+          .query("conversations")
+          .withIndex("by_user", (q) => q.eq("userId", userId))
+          .collect();
+      });
+
+      expect(conversations).toHaveLength(1);
+      expect(conversations[0].platformConversationId).toBe("group_identifier_1");
+      expect(conversations[0].displayName).toBe("Renamed Group");
     });
 
     it("syncs new messages and updates conversation lastMessage", async () => {

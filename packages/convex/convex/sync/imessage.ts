@@ -242,7 +242,7 @@ export async function syncMessagesInternal(
   };
 
   // OPTIMIZATION 1: Batch lookup existing conversations by platformConversationId
-  const conversationIds = batch.chats.map((c) => String(c.id));
+  const conversationIds = batch.chats.map((c) => c.identifier);
   const existingConversations = await batchFetchConversations(
     ctx,
     userId,
@@ -349,7 +349,7 @@ export async function syncMessagesInternal(
   // Process chats - use existing or create new
   for (const chat of batch.chats) {
     try {
-      const platformConversationId = String(chat.id);
+      const platformConversationId = chat.identifier;
       const existingId = conversationMap.get(platformConversationId);
       const businessChat = isBusinessChat(chat);
       const participantContactIds: Id<"contacts">[] = [];
