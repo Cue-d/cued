@@ -1,13 +1,12 @@
 import { z } from "zod";
 import { getErrorMessage, type Tool, type ToolResult } from "../types";
 
-const ACTION_TYPES = ["respond", "follow_up", "send_message", "eod_contact"] as const;
+const ACTION_TYPES = ["respond", "follow_up", "send_message"] as const;
 
 const TYPE_LABELS: Record<(typeof ACTION_TYPES)[number], string> = {
   respond: "response",
   follow_up: "follow-up",
   send_message: "message",
-  eod_contact: "contact review",
 };
 
 const inputSchema = z.object({
@@ -15,7 +14,7 @@ const inputSchema = z.object({
     .enum(ACTION_TYPES)
     .describe(
       "Action type: respond (reply to message), follow_up (scheduled reminder), " +
-        "send_message (new outreach), eod_contact (end-of-day contact review)"
+        "send_message (new outreach)"
     ),
   conversationId: z.string().optional().describe("Conversation ID this action relates to"),
   contactId: z.string().optional().describe("Contact ID this action relates to"),

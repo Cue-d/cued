@@ -7,9 +7,7 @@ export const ACTION_TYPES = {
   RESPOND: "respond",
   FOLLOW_UP: "follow_up",
   SEND_MESSAGE: "send_message",
-  EOD_CONTACT: "eod_contact",
   RESOLVE_CONTACT: "resolve_contact",
-  NEW_CONNECTION: "new_connection",
 } as const;
 
 export type ActionType = (typeof ACTION_TYPES)[keyof typeof ACTION_TYPES];
@@ -23,8 +21,6 @@ export const MESSAGE_ACTION_TYPES = [
 
 /** Action types related to contact management */
 export const CONTACT_ACTION_TYPES = [
-  ACTION_TYPES.EOD_CONTACT,
-  ACTION_TYPES.NEW_CONNECTION,
   ACTION_TYPES.RESOLVE_CONTACT,
 ] as const;
 

@@ -90,10 +90,6 @@ function getActionTypeLabel(type: string): string {
       return "Follow Up";
     case "send_message":
       return "Send Message";
-    case "eod_contact":
-      return "End of Day Contact";
-    case "new_connection":
-      return "New Connection";
     default:
       return type;
   }

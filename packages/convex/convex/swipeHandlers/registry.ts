@@ -13,8 +13,6 @@ import type {
 import { defaultSnoozeHandler } from "./types";
 import { respondHandler, followUpHandler, sendMessageHandler } from "./message";
 import { resolveContactHandler } from "./resolveContact";
-import { newConnectionHandler } from "./newConnection";
-import { eodContactHandler } from "./eodContact";
 
 /**
  * Registry mapping action types to their handlers.
@@ -24,8 +22,6 @@ const HANDLER_REGISTRY: Record<string, ActionSwipeHandler> = {
   follow_up: followUpHandler,
   send_message: sendMessageHandler,
   resolve_contact: resolveContactHandler,
-  new_connection: newConnectionHandler,
-  eod_contact: eodContactHandler,
 };
 
 /**

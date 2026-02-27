@@ -7,7 +7,7 @@ const inputSchema = z.object({
     .optional()
     .describe("Filter by action status"),
   type: z
-    .enum(["respond", "follow_up", "send_message", "eod_contact"])
+    .enum(["respond", "follow_up", "send_message"])
     .optional()
     .describe("Filter by action type"),
   contactId: z.string().optional().describe("Filter by contact ID"),

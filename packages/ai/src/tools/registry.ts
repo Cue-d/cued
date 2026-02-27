@@ -34,10 +34,10 @@ const getConversationsSchema = z.object({
 
 const createActionSchema = z.object({
   type: z
-    .enum(["respond", "follow_up", "send_message", "eod_contact"])
+    .enum(["respond", "follow_up", "send_message"])
     .describe(
       "Action type: respond (reply to message), follow_up (scheduled reminder), " +
-        "send_message (new outreach), eod_contact (end-of-day contact review)"
+        "send_message (new outreach)"
     ),
   conversationId: z
     .string()
@@ -62,7 +62,7 @@ const searchActionsSchema = z.object({
     .optional()
     .describe("Filter by action status"),
   type: z
-    .enum(["respond", "follow_up", "send_message", "eod_contact"])
+    .enum(["respond", "follow_up", "send_message"])
     .optional()
     .describe("Filter by action type"),
   contactId: z.string().optional().describe("Filter by contact ID"),

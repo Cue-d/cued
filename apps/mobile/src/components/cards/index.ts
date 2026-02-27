@@ -10,17 +10,9 @@ export {
   type MessageResponseCardProps,
 } from "./message-response-card";
 
-// ContactCard
-export {
-  ContactCard,
-  type ContactPlatform,
-  type ContactCardProps,
-} from "./contact-card";
-
 // ResolveContactCard
 export {
   ResolveContactCard,
   type ResolveContactCardProps,
   type MergeSource,
 } from "./resolve-contact-card";
-

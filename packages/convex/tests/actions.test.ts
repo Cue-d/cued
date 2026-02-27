@@ -196,7 +196,7 @@ describe("actions", () => {
         // Create multiple actions
         await ctx.db.insert("actions", createTestActionData(userId, { type: "respond" }));
         await ctx.db.insert("actions", createTestActionData(userId, { type: "follow_up" }));
-        await ctx.db.insert("actions", createTestActionData(userId, { type: "new_connection" }));
+        await ctx.db.insert("actions", createTestActionData(userId, { type: "respond" }));
 
         return ctx.db
           .query("actions")
@@ -979,58 +979,6 @@ describe("actions API", () => {
 
       expect(result.success).toBe(true);
       expect(result.responseText).toBe("Custom response");
-    });
-
-    it("handles left swipe for new_connection - sets importance to -1", async () => {
-      const t = convexTest(schema, modules);
-      const { asUser, userId } = await setupAuthenticatedUser(t);
-
-      const { contactId, actionId } = await t.run(async (ctx) => {
-        const contactId = await ctx.db.insert("contacts", createTestContactData(userId, {
-          importance: 0,
-        }));
-        const actionId = await ctx.db.insert("actions", createTestActionData(userId, {
-          status: "pending",
-          type: "new_connection",
-          contactId,
-        }));
-        return { contactId, actionId };
-      });
-
-      await asUser.mutation(api.actions.swipeAction, {
-        actionId,
-        direction: "left",
-      });
-
-      const contact = await t.run(async (ctx) => ctx.db.get(contactId));
-      expect(contact?.importance).toBe(-1);
-    });
-
-    it("handles right swipe for new_connection - saves notes", async () => {
-      const t = convexTest(schema, modules);
-      const { asUser, userId } = await setupAuthenticatedUser(t);
-
-      const { contactId, actionId } = await t.run(async (ctx) => {
-        const contactId = await ctx.db.insert("contacts", createTestContactData(userId));
-        const actionId = await ctx.db.insert("actions", createTestActionData(userId, {
-          status: "pending",
-          type: "new_connection",
-          contactId,
-        }));
-        return { contactId, actionId };
-      });
-
-      const result = await asUser.mutation(api.actions.swipeAction, {
-        actionId,
-        direction: "right",
-        responseText: "Met at conference, interested in collaboration",
-      });
-
-      expect(result.success).toBe(true);
-      expect(result.notesSaved).toBe(true);
-
-      const contact = await t.run(async (ctx) => ctx.db.get(contactId));
-      expect(contact?.notes).toBe("Met at conference, interested in collaboration");
     });
 
     it("does not decrement pendingActionCount below 0", async () => {

@@ -45,12 +45,6 @@ export const CURRENT_SYNC_VERSION = 1;
 export const BATCH_SIZE = 50;
 
 /**
- * Maximum new_connection actions to create per social sync.
- * Prevents flooding the action queue when syncing many connections.
- */
-export const MAX_NEW_CONNECTION_ACTIONS = 20;
-
-/**
  * Platforms that support multiple workspaces (e.g., Slack teams).
  * These require workspaceId in sync cursor operations.
  */

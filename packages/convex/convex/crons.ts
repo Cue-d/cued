@@ -30,14 +30,6 @@ crons.interval(
   internal.presence.markStaleDevicesOffline,
 );
 
-// Daily scan for new contacts at 9 PM UTC
-// Creates eod_contact actions for unenriched contacts from today
-crons.daily(
-  "daily-eod-contact-scan",
-  { hourUTC: 21, minuteUTC: 0 }, // 9 PM UTC (adjust for user timezone in future)
-  internal.actionQueue.scanAllUsersForNewContacts,
-);
-
 // Timeout stale queue entries (every 10 seconds)
 // Handles both stuck "sending" and long-waiting "pending" with no desktop sender
 crons.interval(

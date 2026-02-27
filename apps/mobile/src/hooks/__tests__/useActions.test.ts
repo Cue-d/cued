@@ -61,7 +61,7 @@ describe("useActions", () => {
           _id: "action2",
           contactName: "Jane Smith",
           platform: "imessage",
-          type: "new_connection",
+          type: "respond",
           priority: 50,
           createdAt: 1234567891,
         },
@@ -156,7 +156,7 @@ describe("useActions", () => {
           _id: "action1",
           contactName: null,
           platform: "imessage",
-          type: "new_connection",
+          type: "respond",
         },
       ];
       mockUseQuery.mockReturnValue({ actions: mockActions, nextCursor: null });
@@ -168,7 +168,7 @@ describe("useActions", () => {
           id: "action1",
           contactName: "Unknown",
           platform: "imessage",
-          type: "new_connection",
+          type: "respond",
         },
       ]);
     });
@@ -185,7 +185,7 @@ describe("useActions", () => {
       const initialActions = [{ _id: "action1", contactName: "John", platform: "imessage", type: "message_response" }];
       const newActions = [
         { _id: "action1", contactName: "John", platform: "imessage", type: "message_response" },
-        { _id: "action2", contactName: "Jane", platform: "imessage", type: "new_connection" },
+        { _id: "action2", contactName: "Jane", platform: "imessage", type: "respond" },
       ];
 
       mockUseQuery.mockReturnValue({ actions: initialActions, nextCursor: null });
@@ -200,7 +200,7 @@ describe("useActions", () => {
       expect(mockUpdateWidgetActionsList).toHaveBeenCalledTimes(2);
       expect(mockUpdateWidgetActionsList).toHaveBeenLastCalledWith([
         { id: "action1", contactName: "John", platform: "imessage", type: "message_response" },
-        { id: "action2", contactName: "Jane", platform: "imessage", type: "new_connection" },
+        { id: "action2", contactName: "Jane", platform: "imessage", type: "respond" },
       ]);
     });
   });

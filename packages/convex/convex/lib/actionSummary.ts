@@ -4,9 +4,7 @@ const DEFAULT_ACTION_SUMMARIES: Record<string, string> = {
   respond: "Reply needed",
   follow_up: "Follow up",
   send_message: "Send message",
-  eod_contact: "Check in",
   resolve_contact: "Merge contacts",
-  new_connection: "New connection",
 };
 
 function truncateSummary(text: string): string {

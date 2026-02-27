@@ -24,7 +24,6 @@ import {
   upsertSyncCursor,
   incrementSyncCursorStat,
   clearIntegrationError,
-  MAX_NEW_CONNECTION_ACTIONS,
   extractCompanyFromHeadline,
   BATCH_SIZE,
   logSyncError,
@@ -36,7 +35,6 @@ import {
   normalizeContactAvatarOption,
 } from "../lib/avatar";
 import { scheduleContactMergeCheck } from "../lib/contactMergeScheduling";
-import { resolveActionSummary } from "../lib/actionSummary";
 
 // ============================================================================
 // Validators
@@ -921,12 +919,6 @@ export async function syncLinkedInContactsInternal(
     deduped.push(contact);
   }
 
-  const newContactsInfo: Array<{
-    contactId: Id<"contacts">;
-    headline: string | null;
-    profileUrl: string;
-  }> = [];
-
   for (const contact of deduped) {
     try {
       const normalizedHandle = normalizeNonOpaqueLinkedInHandle(
@@ -1044,11 +1036,6 @@ export async function syncLinkedInContactsInternal(
         mergeCheckContactId = contactId;
 
         result.newContacts++;
-        newContactsInfo.push({
-          contactId,
-          headline: contact.headline,
-          profileUrl: contact.profileUrl,
-        });
       }
 
       if (mergeCheckContactId) {
@@ -1058,36 +1045,6 @@ export async function syncLinkedInContactsInternal(
       result.errors.push(
         logSyncError("LinkedIn", "sync contact", contact.name, e),
       );
-    }
-  }
-
-  // Create new_connection actions (limit per sync)
-  const actionsToCreate = newContactsInfo.slice(0, MAX_NEW_CONNECTION_ACTIONS);
-  const now = Date.now();
-
-  for (const info of actionsToCreate) {
-    await ctx.db.insert("actions", {
-      userId,
-      type: "new_connection",
-      status: "pending",
-      priority: 40,
-      contactId: info.contactId,
-      platform: "linkedin",
-      summary: resolveActionSummary("new_connection"),
-      llmReason: info.headline ?? undefined,
-      reason: info.profileUrl,
-      createdAt: now,
-    });
-    result.actionsCreated++;
-  }
-
-  if (result.actionsCreated > 0) {
-    const user = await ctx.db.get(userId);
-    if (user) {
-      await ctx.db.patch(userId, {
-        pendingActionCount:
-          (user.pendingActionCount ?? 0) + result.actionsCreated,
-      });
     }
   }
 

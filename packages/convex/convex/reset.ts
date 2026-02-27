@@ -128,3 +128,50 @@ export const migrateRemoveDraftMessage = mutation({
     return { updated, total: actions.length };
   },
 });
+
+/**
+ * One-time cleanup: delete legacy contact review actions and recompute pending counts.
+ * Safe to run multiple times (idempotent).
+ */
+export const deleteLegacyContactReviewActions = mutation({
+  args: {},
+  handler: async (ctx) => {
+    const legacyTypes = new Set(["eod_contact", "new_connection"]);
+    const actions = await ctx.db.query("actions").collect();
+
+    const legacyActions = actions.filter((action) => legacyTypes.has(action.type));
+    const affectedUserIds = [...new Set(legacyActions.map((action) => action.userId))];
+
+    const byType: Record<string, number> = {};
+    const byStatus: Record<string, number> = {};
+
+    for (const action of legacyActions) {
+      byType[action.type] = (byType[action.type] ?? 0) + 1;
+      byStatus[action.status] = (byStatus[action.status] ?? 0) + 1;
+      await ctx.db.delete(action._id);
+    }
+
+    for (const userId of affectedUserIds) {
+      const pendingActions = await ctx.db
+        .query("actions")
+        .withIndex("by_user_status", (q) =>
+          q.eq("userId", userId).eq("status", "pending"),
+        )
+        .collect();
+
+      const user = await ctx.db.get(userId);
+      if (user) {
+        await ctx.db.patch(userId, {
+          pendingActionCount: pendingActions.length,
+        });
+      }
+    }
+
+    return {
+      deletedTotal: legacyActions.length,
+      byType,
+      byStatus,
+      usersUpdated: affectedUserIds.length,
+    };
+  },
+});

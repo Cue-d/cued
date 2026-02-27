@@ -171,8 +171,6 @@ const HISTORY_ACTION_TYPE_DISPLAY: Record<string, string> = {
   respond: "Respond",
   follow_up: "Follow up",
   send_message: "Send message",
-  eod_contact: "End of day review",
-  new_connection: "New connection",
 };
 
 /** A single row for history list (no context menu) */

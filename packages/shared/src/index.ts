@@ -86,9 +86,7 @@ export {
   type RegisteredActionType,
   // Input types
   type MessageResponseInput,
-  type NewConnectionInput,
   type ResolveContactInput,
-  type EODContactInput,
   // Registry
   ACTION_REGISTRY,
   // Helpers

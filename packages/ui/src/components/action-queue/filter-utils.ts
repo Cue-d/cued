@@ -16,12 +16,12 @@ export const ACTION_FILTER_GROUPS = {
   },
   contacts: {
     label: "Contacts",
-    types: contactTypes.filter((t) => t === "resolve_contact" || t === "new_connection"),
+    types: contactTypes.filter((t) => t === "resolve_contact"),
   },
   followups: {
     label: "Follow-ups",
     types: [...messageTypes, ...contactTypes].filter(
-      (t) => t === "follow_up" || t === "eod_contact"
+      (t) => t === "follow_up"
     ),
   },
 } as const

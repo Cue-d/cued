@@ -17,8 +17,6 @@ const ACTION_TYPE_DISPLAY: Record<string, string> = {
   respond: "Respond",
   follow_up: "Follow up",
   send_message: "Send message",
-  eod_contact: "End of day review",
-  new_connection: "New connection",
 };
 
 export interface ActionListRowProps {

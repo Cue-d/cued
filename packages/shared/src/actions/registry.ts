@@ -79,19 +79,9 @@ export interface MessageResponseInput {
   responseText: string;
 }
 
-/** Input for new_connection action */
-export interface NewConnectionInput {
-  notes?: string;
-}
-
 /** Input for resolve_contact action */
 export interface ResolveContactInput {
   confirmed: boolean;
-}
-
-/** Input for eod_contact action (End of Day contact review) */
-export interface EODContactInput {
-  notes?: string;
 }
 
 // ============================================================================
@@ -134,18 +124,6 @@ export const sendMessageDefinition: ActionDefinition<MessageResponseInput> = {
   },
 };
 
-export const eodContactDefinition: ActionDefinition<EODContactInput> = {
-  metadata: {
-    type: "eod_contact",
-    displayName: "End of Day Review",
-    category: "contact",
-    icon: { web: "user-check", mobile: "person.badge.clock" },
-    swipeLabels: { right: "Save", left: "Skip", up: "Snooze" },
-    hasResponseInput: false,
-    hasContactForm: true,
-  },
-};
-
 export const resolveContactDefinition: ActionDefinition<ResolveContactInput> = {
   metadata: {
     type: "resolve_contact",
@@ -154,18 +132,6 @@ export const resolveContactDefinition: ActionDefinition<ResolveContactInput> = {
     icon: { web: "git-merge", mobile: "person.2.wave.2" },
     swipeLabels: { right: "Merge", left: "Different", up: "Snooze" },
     hasResponseInput: false,
-    hasContactForm: false,
-  },
-};
-
-export const newConnectionDefinition: ActionDefinition<NewConnectionInput> = {
-  metadata: {
-    type: "new_connection",
-    displayName: "New Connection",
-    category: "contact",
-    icon: { web: "user-plus", mobile: "person.badge.plus" },
-    swipeLabels: { right: "Save", left: "Not Important", up: "Snooze" },
-    hasResponseInput: true, // Uses responseText for notes
     hasContactForm: false,
   },
 };
@@ -181,9 +147,7 @@ export const ACTION_REGISTRY = {
   respond: respondDefinition,
   follow_up: followUpDefinition,
   send_message: sendMessageDefinition,
-  eod_contact: eodContactDefinition,
   resolve_contact: resolveContactDefinition,
-  new_connection: newConnectionDefinition,
 } as const;
 
 export type ActionRegistryType = typeof ACTION_REGISTRY;

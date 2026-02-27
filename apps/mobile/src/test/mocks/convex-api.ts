@@ -22,8 +22,6 @@ export const api = {
     getContact: mockFn("contacts", "getContact"),
     updateContact: mockFn("contacts", "updateContact"),
     mergeContacts: mockFn("contacts", "mergeContacts"),
-    dismissContact: mockFn("contacts", "dismissContact"),
-    saveContactFromCard: mockFn("contacts", "saveContactFromCard"),
     getPendingMergeSuggestions: mockFn("contacts", "getPendingMergeSuggestions"),
     getPendingMergeSuggestionCount: mockFn("contacts", "getPendingMergeSuggestionCount"),
   },

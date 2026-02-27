@@ -124,7 +124,7 @@ export function ActionQueueProvider({
       if (platformFilter !== "all" && action.platform !== platformFilter) return false;
       if (typeFilter === "respond" && action.type !== "respond") return false;
       if (typeFilter === "followups" && action.type !== "follow_up") return false;
-      if (typeFilter === "contacts" && action.type !== "resolve_contact" && action.type !== "new_connection" && action.type !== "eod_contact") return false;
+      if (typeFilter === "contacts" && action.type !== "resolve_contact") return false;
       return true;
     });
   }, [actions, platformFilter, typeFilter]);

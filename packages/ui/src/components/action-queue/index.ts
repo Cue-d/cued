@@ -10,13 +10,6 @@ export type {
   MessageResponseCardRef,
 } from "./message-response-card"
 
-export { ContactCard } from "./contact-card"
-export type {
-  ContactCardProps,
-  ContactCardRef,
-  ExistingContact,
-} from "./contact-card"
-
 export {
   ResolveContactCard,
   formatSource,
@@ -39,4 +32,3 @@ export type { ActionFilterChipsProps } from "./action-filter-chips"
 
 export { ParticipantsHoverCard } from "./participants-hover-card"
 export type { Participant, } from "./participants-hover-card"
-

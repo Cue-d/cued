@@ -32,8 +32,6 @@ const ACTION_TYPE_CONFIG: Record<string, { icon: React.ReactNode; label: string 
   respond: { icon: <MessageCircle size={16} strokeWidth={1.5} />, label: "Reply needed" },
   send_message: { icon: <MessageCircle size={16} strokeWidth={1.5} />, label: "Send message" },
   follow_up: { icon: <Clock size={16} strokeWidth={1.5} />, label: "Follow up" },
-  eod_contact: { icon: <Clock size={16} strokeWidth={1.5} />, label: "Check in" },
-  new_connection: { icon: <UserPlus size={16} strokeWidth={1.5} />, label: "New connection" },
   resolve_contact: { icon: <UserPlus size={16} strokeWidth={1.5} />, label: "Merge contacts" },
 }
 

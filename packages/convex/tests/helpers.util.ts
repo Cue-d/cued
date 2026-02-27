@@ -131,7 +131,7 @@ export function createTestMessageData(
 export function createTestActionData(
   userId: Id<"users">,
   overrides: Partial<{
-    type: "respond" | "follow_up" | "send_message" | "eod_contact" | "resolve_contact" | "new_connection";
+    type: "respond" | "follow_up" | "send_message" | "resolve_contact";
     status: "pending" | "completed" | "discarded" | "snoozed" | "expired";
     priority: number;
     conversationId: Id<"conversations">;

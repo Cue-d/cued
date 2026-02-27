@@ -19,8 +19,6 @@ const ACTION_TYPE_LABELS: Record<string, string> = {
   respond: "Respond to",
   follow_up: "Follow up with",
   send_message: "Message",
-  eod_contact: "Review",
-  new_connection: "New contact:",
 };
 
 function getActionLabel(type: string, contactName: string): string {

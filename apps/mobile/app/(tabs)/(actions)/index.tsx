@@ -21,7 +21,6 @@ import { AnimatedView } from "@/components/animated";
 import { api } from "@cued/convex";
 import {
   type DisplayMessage,
-  type ContactFormData,
   type ActionPlatform,
   type ContactHandle,
   type EnrichedAction,
@@ -30,7 +29,6 @@ import { ActionListSheet } from "@/components/action-list-sheet";
 import { CardStack } from "@/components/card-stack";
 import {
   MessageResponseCard,
-  ContactCard,
   ResolveContactCard,
   type MergeSource,
 } from "@/components/cards";
@@ -57,8 +55,6 @@ interface ActionItem {
 /** Action types that use MessageResponseCard */
 const MESSAGE_ACTION_TYPES = ["respond", "follow_up", "send_message"];
 
-/** Action types that use ContactCard */
-const CONTACT_ACTION_TYPES = ["eod_contact", "new_connection"];
 const ACTION_CONTEXT_MESSAGE_LIMIT = 15;
 const MESSAGE_PAGE_SIZE = 25;
 
@@ -209,11 +205,6 @@ export default function ActionsScreen(): React.JSX.Element | null {
     {},
   );
 
-  // Track contact form data per action (key = action._id)
-  const [contactForms, setContactForms] = useState<
-    Record<string, ContactFormData>
-  >({});
-
   // Transform actions to CardStack items
   const cardItems: ActionItem[] = displayActions.map((action) => ({
     id: action._id,
@@ -228,30 +219,9 @@ export default function ActionsScreen(): React.JSX.Element | null {
     [responseTexts],
   );
 
-  const getContactFormData = useCallback(
-    (action: EnrichedAction): ContactFormData => {
-      return (
-        contactForms[action._id] ?? {
-          name: action.contactName ?? "",
-          company: "",
-          tags: "",
-          notes: "",
-        }
-      );
-    },
-    [contactForms],
-  );
-
   const handleResponseChange = useCallback((actionId: string, text: string) => {
     setResponseTexts((prev) => ({ ...prev, [actionId]: text }));
   }, []);
-
-  const handleContactFormChange = useCallback(
-    (actionId: string, data: ContactFormData) => {
-      setContactForms((prev) => ({ ...prev, [actionId]: data }));
-    },
-    [],
-  );
 
   // Handle swipe with Convex mutation
   const handleSwipe = useCallback(
@@ -299,10 +269,7 @@ export default function ActionsScreen(): React.JSX.Element | null {
       }
 
       // Right = send with response text, then keep card visible as completed
-      const responseText =
-        action.type === "new_connection"
-          ? getContactFormData(action).notes
-          : getResponseText(action);
+      const responseText = getResponseText(action);
 
       try {
         await swipeAction({
@@ -326,7 +293,6 @@ export default function ActionsScreen(): React.JSX.Element | null {
       router,
       swipeAction,
       getResponseText,
-      getContactFormData,
       focusedActionId,
       setFocusedActionId,
       completedActionCache,
@@ -431,34 +397,6 @@ export default function ActionsScreen(): React.JSX.Element | null {
         );
       }
 
-      if (CONTACT_ACTION_TYPES.includes(action.type)) {
-        const platform = action.platform ?? undefined;
-
-        // Build deep link for contact cards
-        let onOpenInApp: (() => void) | null = null;
-        if (isTopCard && platform) {
-          const result = getPlatformDeeplink(
-            platform,
-            actionContext?.conversation ?? null,
-            actionContext?.contact ?? null,
-          );
-          if (result?.type === "available") {
-            onOpenInApp = () => openDeeplink(result.url);
-          }
-        }
-
-        return (
-          <ContactCard
-            personName={action.contactName ?? "New Contact"}
-            createdAt={action.createdAt}
-            platform={(platform as ActionPlatform) ?? undefined}
-            formData={getContactFormData(action)}
-            onFormChange={(data) => handleContactFormChange(action._id, data)}
-            onOpenInApp={onOpenInApp}
-          />
-        );
-      }
-
       return (
         <View className="flex-1 p-4 items-center justify-center">
           <Text className="text-sf-label text-center text-lg font-semibold">
@@ -475,7 +413,7 @@ export default function ActionsScreen(): React.JSX.Element | null {
         </View>
       );
     },
-    [topActionMessages, getResponseText, isDesktopOnline, actionContext?.conversation, actionContext?.contact, actionContext?.secondaryContact, handleResponseChange, handleSwipe, getContactFormData, handleContactFormChange, hasMoreMessages, handleLoadMoreMessages, isLoadingMoreMessages],
+    [topActionMessages, getResponseText, isDesktopOnline, actionContext?.conversation, actionContext?.contact, actionContext?.secondaryContact, handleResponseChange, handleSwipe, hasMoreMessages, handleLoadMoreMessages, isLoadingMoreMessages],
   );
 
   if (isLoading) {

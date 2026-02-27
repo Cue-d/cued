@@ -3,7 +3,6 @@
  */
 
 import * as React from "react";
-import { NewConnectionCard, EODContactCard } from "./contact-card-wrapper";
 import { RespondCard, FollowUpCard, SendMessageCard } from "./message-card";
 import { ResolveContactCardWrapper } from "./resolve-contact-card-wrapper";
 import { Card, CardContent } from "../../components/ui/card";
@@ -32,8 +31,6 @@ const CARD_REGISTRY: Record<string, ActionCardComponent> = {
   follow_up: FollowUpCard,
   send_message: SendMessageCard,
   resolve_contact: ResolveContactCardWrapper,
-  new_connection: NewConnectionCard,
-  eod_contact: EODContactCard,
 };
 
 /**

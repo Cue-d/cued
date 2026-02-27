@@ -8,7 +8,6 @@ export * from "./components/three-panel-layout"
 export type { ActionContext, ActionCardProps, ActionCardComponent, OpenInAppConfig } from "./actions/types"
 export { MessageCard, RespondCard, FollowUpCard, SendMessageCard } from "./actions/cards/message-card"
 export { ResolveContactCardWrapper } from "./actions/cards/resolve-contact-card-wrapper"
-export { ContactCardWrapper, NewConnectionCard, EODContactCard } from "./actions/cards/contact-card-wrapper"
 export { getCardComponent, renderActionCard, hasCardComponent } from "./actions/cards/registry"
 
 // ai-elements - shadcn registry components for AI chat interfaces

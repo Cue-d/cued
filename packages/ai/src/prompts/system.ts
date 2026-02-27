@@ -29,7 +29,6 @@ Actions appear as swipeable cards in the user's action queue. Use them for:
 - **respond**: User needs to reply to a message
 - **follow_up**: User should reach out after some time has passed
 - **send_message**: Proactive outreach to a contact
-- **eod_contact**: End-of-day follow-up with a new contact
 
 Always include a clear reason and, when possible, a draft message.
 

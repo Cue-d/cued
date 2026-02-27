@@ -16,13 +16,11 @@ import {
   incrementSyncCursorStat,
   upsertSyncCursor,
   clearIntegrationError,
-  MAX_NEW_CONNECTION_ACTIONS,
   extractCompanyFromHeadline,
   logSyncError,
   resolveMessageQueueBridge,
 } from "./shared";
 import { batchFetchConversations, batchFetchMessages } from "./batchUtils";
-import { resolveActionSummary } from "../lib/actionSummary";
 
 // ============================================================================
 // Validators
@@ -415,12 +413,6 @@ export async function syncTwitterContactsInternal(
     deduped.push(contact);
   }
 
-  const newContactsInfo: Array<{
-    contactId: Id<"contacts">;
-    bio: string | null;
-    handle: string;
-  }> = [];
-
   for (const contact of deduped) {
     try {
       const normalized = normalizeTwitterHandle(contact.handle);
@@ -452,11 +444,6 @@ export async function syncTwitterContactsInternal(
 
       if (contactResult.created) {
         result.newContacts++;
-        newContactsInfo.push({
-          contactId: contactResult.contactId,
-          bio: contact.bio,
-          handle: contact.handle,
-        });
       } else {
         // Update company if missing on existing contact
         if (company) {
@@ -469,35 +456,6 @@ export async function syncTwitterContactsInternal(
       }
     } catch (e) {
       result.errors.push(logSyncError("Twitter", "sync contact", contact.name, e));
-    }
-  }
-
-  // Create new_connection actions (limit per sync)
-  const actionsToCreate = newContactsInfo.slice(0, MAX_NEW_CONNECTION_ACTIONS);
-  const now = Date.now();
-
-  for (const info of actionsToCreate) {
-    await ctx.db.insert("actions", {
-      userId,
-      type: "new_connection",
-      status: "pending",
-      priority: 40,
-      contactId: info.contactId,
-      platform: "twitter",
-      summary: resolveActionSummary("new_connection"),
-      llmReason: info.bio ?? undefined,
-      reason: `https://x.com/${info.handle}`,
-      createdAt: now,
-    });
-    result.actionsCreated++;
-  }
-
-  if (result.actionsCreated > 0) {
-    const user = await ctx.db.get(userId);
-    if (user) {
-      await ctx.db.patch(userId, {
-        pendingActionCount: (user.pendingActionCount ?? 0) + result.actionsCreated,
-      });
     }
   }
 
