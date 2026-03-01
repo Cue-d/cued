@@ -1255,9 +1255,9 @@ describe("contacts", () => {
       }));
 
       expect(suggestion?.status).toBe("approved");
-      expect(suggestion?.resolvedAt).toBeTypeOf("number");
+      expect(suggestion?.resolvedAt).toBeGreaterThan(0);
       expect(action?.status).toBe("completed");
-      expect(action?.completedAt).toBeTypeOf("number");
+      expect(action?.completedAt).toBeGreaterThan(0);
       expect(user?.pendingActionCount).toBe(0);
     });
 

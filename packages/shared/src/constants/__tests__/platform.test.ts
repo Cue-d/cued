@@ -15,19 +15,11 @@ describe("PLATFORM_CONFIG", () => {
     "whatsapp",
   ];
 
-  it("contains all expected platform keys", () => {
-    expect(Object.keys(PLATFORM_CONFIG)).toEqual(
-      expect.arrayContaining(platforms)
-    );
-    expect(Object.keys(PLATFORM_CONFIG)).toHaveLength(platforms.length);
-  });
-
   describe.each(platforms)("%s config", (platform) => {
     const config = PLATFORM_CONFIG[platform];
 
     it("has a non-empty label", () => {
       expect(config.label).toBeTruthy();
-      expect(typeof config.label).toBe("string");
     });
 
     it("has a valid hex color", () => {

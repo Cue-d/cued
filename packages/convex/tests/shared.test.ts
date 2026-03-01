@@ -225,7 +225,7 @@ describe("buildContactAvatarPatch", () => {
 
     expect(patch?.avatarSourcePlatform).toBe("linkedin");
     expect(patch?.avatarUrl).toBe("https://cdn.example.com/avatar.png");
-    expect(typeof patch?.avatarUpdatedAt).toBe("number");
+    expect(patch?.avatarUpdatedAt).toBeGreaterThan(0);
     expect(patch?.avatarOptions).toEqual([
       {
         url: "https://cdn.example.com/avatar.png",

@@ -53,7 +53,7 @@ describe("LinkedIn contacts sync", () => {
     expect(contacts).toHaveLength(1);
     expect(contacts[0].avatarUrl).toBe("https://cdn.example.com/alice.png");
     expect(contacts[0].avatarSourcePlatform).toBe("linkedin");
-    expect(typeof contacts[0].avatarUpdatedAt).toBe("number");
+    expect(contacts[0].avatarUpdatedAt).toBeGreaterThan(0);
     expect(contacts[0].avatarOptions).toEqual([
       {
         url: "https://cdn.example.com/alice.png",

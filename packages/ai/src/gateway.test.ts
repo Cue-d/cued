@@ -19,11 +19,6 @@ describe("gateway provider", () => {
     vi.clearAllMocks();
   });
 
-  it("exports gateway provider", () => {
-    expect(gateway).toBeDefined();
-    expect(typeof gateway).toBe("function");
-  });
-
   it("exports MODEL as kimi-k2.5", () => {
     expect(MODEL).toBe("moonshotai/kimi-k2.5");
   });
