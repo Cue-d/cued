@@ -92,6 +92,23 @@ function getProjectionBatchSize(): number {
   return Number.isFinite(configured) && configured > 0 ? configured : DEFAULT_PROJECTION_BATCH_SIZE;
 }
 
+function resolveCheckpointSyncMode(
+  runType: "sync" | "sync_resume",
+  priorSyncMode: string | null | undefined,
+  bundleSyncMode: string | null | undefined,
+  hasMore: boolean,
+): "full" | "incremental" {
+  if (hasMore) {
+    return "full";
+  }
+
+  if (runType === "sync_resume" || priorSyncMode === "full") {
+    return "incremental";
+  }
+
+  return bundleSyncMode === "incremental" ? "incremental" : "full";
+}
+
 async function safeEmitHookEvent(
   event: "integration.authenticated" | "sync.completed" | "sync.failed" | "message.received",
   payload: Record<string, unknown>,
@@ -454,10 +471,16 @@ export async function runDaemon(): Promise<void> {
       }
 
       const projection = db.getProjectionBacklog();
+      const checkpointSyncMode = resolveCheckpointSyncMode(
+        currentRun.run_type,
+        checkpoint?.sync_mode,
+        bundle.syncMode,
+        bundle.hasMore ?? false,
+      );
       db.upsertCheckpoint({
         platform: currentRun.platform,
         accountKey,
-        syncMode: bundle.syncMode ?? "full",
+        syncMode: checkpointSyncMode,
         sourceCursor: bundle.sourceCursor,
         rawIngestWatermark: projection.max_raw_event_rowid,
         projectionWatermark: projection.projection_watermark,
@@ -467,12 +490,26 @@ export async function runDaemon(): Promise<void> {
       if (insertedRawEvents > 0) {
         queueProjectionRun(`ingest:${currentRun.platform}:${accountKey}`);
       }
-
       db.finishRun(currentRun.id, {
         ingested: bundle.rawEvents.length,
         insertedRawEvents,
         projectionQueued: insertedRawEvents > 0,
+        hasMore: bundle.hasMore ?? false,
+        syncMode: checkpointSyncMode,
       });
+      if (bundle.hasMore && !db.hasQueuedOrRunningRun(currentRun.platform, accountKey)) {
+        db.queueSyncRun({
+          platform: currentRun.platform,
+          accountKey,
+          runType: "sync_resume",
+          trigger: "ingest_continue",
+          details: {
+            source: currentRun.platform,
+            accountKey,
+            trigger: "ingest_continue",
+          },
+        });
+      }
       await safeEmitHookEvent("sync.completed", {
         runId: currentRun.id,
         platform: currentRun.platform,

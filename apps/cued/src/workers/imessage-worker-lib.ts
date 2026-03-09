@@ -85,8 +85,11 @@ export function buildIMessageSyncBundle(options?: {
   path?: string;
   lastRowId?: number;
   limit?: number;
+  env?: NodeJS.ProcessEnv;
+  repoRoot?: string;
 }): SyncBundle {
-  const loader = resolveIMessageLoader();
+  const limit = options?.limit ?? 500;
+  const loader = resolveIMessageLoader(options?.env ?? process.env, options?.repoRoot);
   const batch =
     loader.kind === "native"
       ? loadBatchFromNativeBinary(loader.path, options)
@@ -211,6 +214,10 @@ export function buildIMessageSyncBundle(options?: {
     sourceAccounts,
     rawEvents,
     sourceCursor: { rowId: batch.cursor },
-    syncMode: options?.lastRowId && options.lastRowId > 0 ? "incremental" : "full",
+    syncMode:
+      options?.lastRowId && options.lastRowId > 0 && batch.messages.length < limit
+        ? "incremental"
+        : "full",
+    hasMore: batch.messages.length >= limit,
   };
 }
