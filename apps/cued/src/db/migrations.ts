@@ -486,7 +486,7 @@ export const MIGRATIONS: Array<{ id: string; sql: string }> = [
     `,
   },
   {
-    id: "0002_projection_state",
+    id: "0004_projection_state",
     sql: `
       CREATE TABLE IF NOT EXISTS projection_state (
         singleton_key TEXT PRIMARY KEY CHECK (singleton_key = 'global'),

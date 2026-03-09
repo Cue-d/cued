@@ -37,6 +37,7 @@ import {
 const DAEMON_VERSION = "0.1.0";
 const DEFAULT_AUTOSYNC_INTERVAL_MS = 60_000;
 const DEFAULT_INGEST_CONCURRENCY = 4;
+const DEFAULT_PROJECTION_BATCH_SIZE = 1_000;
 const NATIVE_WATCH_DEBOUNCE_MS = 1_500;
 
 function now(): number {
@@ -84,6 +85,11 @@ function getAutoSyncIntervalMs(): number {
 function getIngestConcurrency(): number {
   const configured = Number(process.env.CUED_INGEST_CONCURRENCY ?? DEFAULT_INGEST_CONCURRENCY);
   return Number.isFinite(configured) && configured > 0 ? configured : DEFAULT_INGEST_CONCURRENCY;
+}
+
+function getProjectionBatchSize(): number {
+  const configured = Number(process.env.CUED_PROJECTION_BATCH_SIZE ?? DEFAULT_PROJECTION_BATCH_SIZE);
+  return Number.isFinite(configured) && configured > 0 ? configured : DEFAULT_PROJECTION_BATCH_SIZE;
 }
 
 async function safeEmitHookEvent(
@@ -301,6 +307,7 @@ export async function runDaemon(): Promise<void> {
   const startedAt = now();
   const autoSyncIntervalMs = getAutoSyncIntervalMs();
   const ingestConcurrency = getIngestConcurrency();
+  const projectionBatchSize = getProjectionBatchSize();
   const activeAuthSessions = new Map<
     string,
     { child: ChildProcess; platform: Platform; accountKey: string }
@@ -499,8 +506,9 @@ export async function runDaemon(): Promise<void> {
     try {
       const projected = currentRun.run_type === "rebuild"
         ? rebuildProjectedState(db)
-        : projectPendingRawEvents(db);
+        : projectPendingRawEvents(db, { limit: projectionBatchSize });
       db.finishRun(currentRun.id, { projected });
+      queueProjectionRun(`projection:${currentRun.run_type}`);
       await safeEmitHookEvent("sync.completed", {
         runId: currentRun.id,
         platform: currentRun.platform,

@@ -338,4 +338,59 @@ describe("projector", () => {
 
     db.close();
   });
+
+  it("supports batch-limited incremental projection", () => {
+    const db = createDb();
+
+    db.insertRawEvent({
+      id: "contact-1",
+      platform: "contacts",
+      accountKey: "local",
+      entityKind: "contact",
+      eventKind: "observed",
+      observedAt: 1,
+      dedupeKey: "contacts:one",
+      payload: {
+        sourceEntityKey: "contacts:one",
+        fields: { display_name: "One" },
+        handles: [{ type: "email", value: "one@example.com", deterministic: true }],
+      },
+      sourceVersion: "contacts-v1",
+    });
+    db.insertRawEvent({
+      id: "contact-2",
+      platform: "contacts",
+      accountKey: "local",
+      entityKind: "contact",
+      eventKind: "observed",
+      observedAt: 2,
+      dedupeKey: "contacts:two",
+      payload: {
+        sourceEntityKey: "contacts:two",
+        fields: { display_name: "Two" },
+        handles: [{ type: "email", value: "two@example.com", deterministic: true }],
+      },
+      sourceVersion: "contacts-v1",
+    });
+
+    expect(projectPendingRawEvents(db, { limit: 1 })).toEqual({
+      contacts: 1,
+      conversations: 0,
+      messages: 0,
+      rawEvents: 2,
+      appliedRawEvents: 1,
+      projectionWatermark: 1,
+    });
+
+    expect(projectPendingRawEvents(db, { limit: 1 })).toEqual({
+      contacts: 2,
+      conversations: 0,
+      messages: 0,
+      rawEvents: 2,
+      appliedRawEvents: 1,
+      projectionWatermark: 2,
+    });
+
+    db.close();
+  });
 });

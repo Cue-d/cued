@@ -256,7 +256,12 @@ function upsertProjectionState(
   }).run();
 }
 
-export function projectPendingRawEvents(db: CuedDatabase): {
+export function projectPendingRawEvents(
+  db: CuedDatabase,
+  options?: {
+    limit?: number;
+  },
+): {
   contacts: number;
   conversations: number;
   messages: number;
@@ -265,7 +270,7 @@ export function projectPendingRawEvents(db: CuedDatabase): {
   projectionWatermark: number;
 } {
   const projection = db.getProjectionState();
-  const pendingEvents = db.listRawEventsAfter(projection.projection_watermark);
+  const pendingEvents = db.listRawEventsAfter(projection.projection_watermark, options?.limit);
   if (pendingEvents.length === 0) {
     const overview = buildOverview(db);
     return {

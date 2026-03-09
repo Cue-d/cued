@@ -1095,7 +1095,7 @@ export class CuedDatabase {
     }>;
   }
 
-  listRawEventsAfter(rowId: number): Array<{
+  listRawEventsAfter(rowId: number, limit?: number): Array<{
     rowid: number;
     id: string;
     platform: Platform;
@@ -1119,8 +1119,9 @@ export class CuedDatabase {
         FROM raw_events
         WHERE rowid > ?
         ORDER BY rowid ASC
+        LIMIT ?
       `)
-      .all(rowId) as Array<{
+      .all(rowId, limit ?? Number.MAX_SAFE_INTEGER) as Array<{
       rowid: number;
       id: string;
       platform: Platform;
