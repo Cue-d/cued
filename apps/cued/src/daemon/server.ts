@@ -180,7 +180,44 @@ function createDebouncedSyncEnqueuer(
 function startIMessageWatcher(
   db: ReturnType<typeof openCuedDatabase>,
   queueSync: (platform: AdapterPlatform, accountKey: string, trigger: string) => void,
-): FSWatcher | null {
+): FSWatcher | ChildProcess | null {
+  const nativeBinary = resolveMacOSNativeBinary(process.env.CUED_IMESSAGE_NATIVE_BINARY);
+  if (nativeBinary) {
+    const child = spawn(nativeBinary, ["imessage", "watch", "--db-path", DEFAULT_CHAT_DB_PATH], {
+      stdio: ["ignore", "pipe", "pipe"],
+      env: process.env,
+    });
+
+    let stdoutBuffer = "";
+    child.stdout.on("data", (chunk) => {
+      stdoutBuffer += chunk.toString("utf8");
+      let newlineIndex = stdoutBuffer.indexOf("\n");
+      while (newlineIndex >= 0) {
+        const line = stdoutBuffer.slice(0, newlineIndex).trim();
+        stdoutBuffer = stdoutBuffer.slice(newlineIndex + 1);
+        if (line.length > 0) {
+          queueSync("imessage", "local", "native_watch:imessage");
+        }
+        newlineIndex = stdoutBuffer.indexOf("\n");
+      }
+    });
+
+    child.stderr.on("data", (chunk) => {
+      const message = chunk.toString("utf8").trim();
+      if (message.length > 0) {
+        console.warn(`[cued native-watch] imessage watcher: ${message}`);
+      }
+    });
+
+    child.on("exit", (code) => {
+      if (code && code !== 0) {
+        console.warn(`[cued native-watch] imessage watcher exited with code ${code}`);
+      }
+    });
+
+    return child;
+  }
+
   try {
     const targetDir = dirname(DEFAULT_CHAT_DB_PATH);
     const watchedNames = new Set([

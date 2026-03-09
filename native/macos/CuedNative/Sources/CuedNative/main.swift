@@ -7,7 +7,7 @@ import SQLite3
 import WebKit
 
 private let appleEpochOffset = 978_307_200
-private let sqliteTransient = unsafeBitCast(-1, to: sqlite3_destructor_type.self)
+nonisolated(unsafe) private let sqliteTransient = unsafeBitCast(-1, to: sqlite3_destructor_type.self)
 private let defaultMessagesDBPath =
   FileManager.default.homeDirectoryForCurrentUser
   .appendingPathComponent("Library/Messages/chat.db").path
@@ -72,6 +72,10 @@ struct IMessageDumpOptions {
   var limit = 500
 }
 
+struct IMessageWatchOptions {
+  var dbPath: String = defaultMessagesDBPath
+}
+
 struct AuthOpenOptions {
   var platform = ""
   var accountKey = ""
@@ -120,11 +124,12 @@ enum CLIError: Error, LocalizedError {
   case sqlite(String)
   case browser(String)
   case auth(String)
+  case imessageWatch(String)
 
   var errorDescription: String? {
     switch self {
     case .invalidCommand:
-      return "usage: CuedNative contacts dump|status|watch | CuedNative imessage dump [--db-path PATH] [--after-rowid N] [--limit N] | CuedNative browser open --url URL | CuedNative browser close --url-prefix PREFIX | CuedNative auth open --platform PLATFORM --account-key KEY --session-id ID --db-path PATH"
+      return "usage: CuedNative contacts dump|status|watch | CuedNative imessage dump [--db-path PATH] [--after-rowid N] [--limit N] | CuedNative imessage watch [--db-path PATH] | CuedNative browser open --url URL | CuedNative browser close --url-prefix PREFIX | CuedNative auth open --platform PLATFORM --account-key KEY --session-id ID --db-path PATH | CuedNative --menu-bar"
     case .invalidOption(let message):
       return message
     case .contactsAccessDenied:
@@ -134,6 +139,8 @@ enum CLIError: Error, LocalizedError {
     case .browser(let message):
       return message
     case .auth(let message):
+      return message
+    case .imessageWatch(let message):
       return message
     }
   }
@@ -230,6 +237,12 @@ struct CuedNativeCLI {
   @MainActor
   private static func run() throws {
     let arguments = Array(CommandLine.arguments.dropFirst())
+
+    if arguments.isEmpty || arguments == ["--menu-bar"] {
+      runMenuBarApp()
+      return
+    }
+
     guard arguments.count >= 2 else {
       throw CLIError.invalidCommand
     }
@@ -244,6 +257,9 @@ struct CuedNativeCLI {
     case ("imessage", "dump"):
       let options = try parseIMessageOptions(Array(arguments.dropFirst(2)))
       try writeJSON(dumpIMessage(options: options))
+    case ("imessage", "watch"):
+      let options = try parseIMessageWatchOptions(Array(arguments.dropFirst(2)))
+      try streamIMessageChanges(options: options)
     case ("auth", "open"):
       let options = try parseAuthOpenOptions(Array(arguments.dropFirst(2)))
       try writeJSON(runManagedAuth(options: options))
@@ -293,6 +309,27 @@ struct CuedNativeCLI {
           throw CLIError.invalidOption("--limit requires an integer")
         }
         options.limit = value
+      default:
+        throw CLIError.invalidOption("unknown option: \(arguments[index])")
+      }
+      index += 1
+    }
+
+    return options
+  }
+
+  private static func parseIMessageWatchOptions(_ arguments: [String]) throws -> IMessageWatchOptions {
+    var options = IMessageWatchOptions()
+    var index = 0
+
+    while index < arguments.count {
+      switch arguments[index] {
+      case "--db-path":
+        index += 1
+        guard index < arguments.count else {
+          throw CLIError.invalidOption("--db-path requires a value")
+        }
+        options.dbPath = arguments[index]
       default:
         throw CLIError.invalidOption("unknown option: \(arguments[index])")
       }
@@ -626,6 +663,47 @@ struct CuedNativeCLI {
       messages: messages,
       handles: handlesByID.values.sorted { $0.id < $1.id }
     )
+  }
+
+  @MainActor
+  private static func streamIMessageChanges(options: IMessageWatchOptions) throws {
+    let url = URL(fileURLWithPath: options.dbPath)
+    let directoryURL = url.deletingLastPathComponent()
+    guard FileManager.default.fileExists(atPath: directoryURL.path) else {
+      throw CLIError.imessageWatch("messages directory does not exist: \(directoryURL.path)")
+    }
+
+    let fileDescriptor = open(directoryURL.path, O_EVTONLY)
+    guard fileDescriptor >= 0 else {
+      throw CLIError.imessageWatch("unable to watch messages directory: \(directoryURL.path)")
+    }
+
+    try writeJSONLine(WatchEvent(
+      event: "ready",
+      timestamp: Int(Date().timeIntervalSince1970 * 1000)
+    ))
+
+    let source = DispatchSource.makeFileSystemObjectSource(
+      fileDescriptor: fileDescriptor,
+      eventMask: [.write, .extend, .rename, .delete, .attrib],
+      queue: DispatchQueue.main
+    )
+    source.setEventHandler {
+      do {
+        try writeJSONLine(WatchEvent(
+          event: "messages_changed",
+          timestamp: Int(Date().timeIntervalSince1970 * 1000)
+        ))
+      } catch {
+        fputs("\(error.localizedDescription)\n", stderr)
+      }
+    }
+    source.setCancelHandler {
+      close(fileDescriptor)
+    }
+    source.resume()
+
+    RunLoop.main.run()
   }
 
   private static func fetchMessageRows(

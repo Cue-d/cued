@@ -2,6 +2,8 @@
 
 import process from "node:process";
 import { existsSync } from "node:fs";
+import { join, dirname } from "node:path";
+import { fileURLToPath } from "node:url";
 import { CUED_DB_PATH, CUED_LOG_DIR, CUED_SOCKET_PATH, ensureCuedDirs } from "./config.js";
 import { openCuedDatabase } from "./db/database.js";
 import { buildDoctorReport } from "./diagnostics/doctor.js";
@@ -22,16 +24,31 @@ import {
 } from "./integrations/service.js";
 import { runAuthSessionSync } from "./integrations/auth-runtime.js";
 import { doctorHooksConfig, emitHookEvent, HOOK_EVENT_NAMES, initHooksConfig, testHookEvent } from "./hooks/service.js";
+import {
+  getAppBundleInfo,
+  getLaunchAgentStatus,
+  installLaunchAgent,
+  installMacOSApp,
+  uninstallLaunchAgent,
+} from "./macos/install.js";
+import { runSetupTUI } from "./setup.js";
+import { execFileSync } from "node:child_process";
+
+const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), "../../..");
 
 function printHelp(): void {
   console.log(`cued
 
 Usage:
   cued help
+  cued install
   cued daemon
   cued status
   cued doctor
   cued logs
+  cued setup
+  cued launchd install|uninstall|status
+  cued permissions doctor|request [--all|--contacts|--messages|--full-disk-access|--accessibility]
   cued integrations list
   cued integrations status
   cued integrations refresh
@@ -156,6 +173,16 @@ async function main(): Promise<void> {
     return;
   }
 
+  if (command === "setup") {
+    await runSetupTUI();
+    return;
+  }
+
+  if (command === "install") {
+    printJson(installMacOSApp());
+    return;
+  }
+
   if (command === "logs") {
     printJson({
       logDir: CUED_LOG_DIR,
@@ -218,6 +245,54 @@ async function main(): Promise<void> {
   let response;
 
   switch (command) {
+    case "launchd":
+      switch (subcommand) {
+        case "install":
+          printJson(installLaunchAgent());
+          return;
+        case "uninstall":
+          printJson(uninstallLaunchAgent());
+          return;
+        case "status":
+          printJson(getLaunchAgentStatus());
+          return;
+        default:
+          throw new Error("Usage: cued launchd install | uninstall | status");
+      }
+    case "permissions":
+      switch (subcommand) {
+        case "doctor":
+          {
+            const db = openCuedDatabase();
+            try {
+              printJson({
+                app: getAppBundleInfo(),
+                doctor: buildDoctorReport(db),
+              });
+            } finally {
+              db.close();
+            }
+          }
+          return;
+        case "request": {
+          const flags = rest.length > 0 ? rest : ["--all"];
+          printJson({
+            app: getAppBundleInfo(),
+            requested: flags,
+            command: ["bash", "scripts/request-macos-access.sh", ...flags],
+          });
+          execFileSync(
+            "bash",
+            [join(REPO_ROOT, "scripts", "request-macos-access.sh"), ...flags],
+            { stdio: "inherit" },
+          );
+          return;
+        }
+        default:
+          throw new Error(
+            "Usage: cued permissions doctor | request [--all|--contacts|--messages|--full-disk-access|--accessibility]",
+          );
+      }
     case "status":
       response = await sendDaemonRequest({ command: "status" });
       break;
