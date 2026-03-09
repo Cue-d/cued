@@ -465,6 +465,20 @@ private final class DaemonSupervisor {
     startIfNeeded()
   }
 
+  func isLaunching(snapshot: AppStatusSnapshot) -> Bool {
+    guard let daemonProcess, daemonProcess.isRunning else {
+      return false
+    }
+    return !snapshot.daemonRunning
+  }
+
+  func launchPID() -> Int? {
+    guard let daemonProcess, daemonProcess.isRunning else {
+      return nil
+    }
+    return Int(daemonProcess.processIdentifier)
+  }
+
   func stop() {
     daemonProcess?.terminate()
     daemonProcess = nil
@@ -675,6 +689,7 @@ final class MenuBarAppController: NSObject, NSApplicationDelegate {
 
   private func rebuildMenu() {
     let snapshot = statusStore.readSnapshot()
+    let daemonStarting = daemonSupervisor.isLaunching(snapshot: snapshot)
     if let button = statusItem.button {
       if let statusItemImage {
         button.title = ""
@@ -682,18 +697,24 @@ final class MenuBarAppController: NSObject, NSApplicationDelegate {
         button.imagePosition = .imageOnly
       } else {
         button.image = nil
-        button.title = snapshot.daemonRunning ? "Cued" : "Cued!"
+        button.title = snapshot.daemonRunning || daemonStarting ? "Cued" : "Cued!"
         button.imagePosition = .noImage
       }
-      button.toolTip = snapshot.daemonRunning ? "Cued" : "Cued (daemon stopped)"
-      button.appearsDisabled = !snapshot.daemonRunning
+      button.toolTip = snapshot.daemonRunning
+        ? "Cued"
+        : daemonStarting
+          ? "Cued (daemon starting)"
+          : "Cued (daemon stopped)"
+      button.appearsDisabled = !(snapshot.daemonRunning || daemonStarting)
     }
 
     let menu = NSMenu()
     menu.addItem(
       withTitle: snapshot.daemonRunning
         ? "Daemon running\(snapshot.daemonPID.map { " (pid \($0))" } ?? "")"
-        : "Daemon stopped",
+        : daemonStarting
+          ? "Daemon starting\(daemonSupervisor.launchPID().map { " (pid \($0))" } ?? "")"
+          : "Daemon stopped",
       action: nil,
       keyEquivalent: ""
     ).isEnabled = false
@@ -751,15 +772,17 @@ final class MenuBarAppController: NSObject, NSApplicationDelegate {
     }
 
     menu.addItem(.separator())
-    menu.addItem(
-      withTitle: snapshot.daemonRunning ? "Restart Daemon" : "Start Daemon",
+    let startItem = menu.addItem(
+      withTitle: snapshot.daemonRunning ? "Restart Daemon" : daemonStarting ? "Starting Daemon..." : "Start Daemon",
       action: #selector(restartDaemon),
       keyEquivalent: ""
-    ).target = self
+    )
+    startItem.target = self
+    startItem.isEnabled = !daemonStarting
 
     let stopItem = menu.addItem(withTitle: "Stop Daemon", action: #selector(stopDaemon), keyEquivalent: "")
     stopItem.target = self
-    stopItem.isEnabled = snapshot.daemonRunning
+    stopItem.isEnabled = snapshot.daemonRunning || daemonStarting
 
     menu.addItem(withTitle: "Open Setup", action: #selector(openSetup), keyEquivalent: "").target = self
     menu.addItem(withTitle: "Request Permissions", action: #selector(requestPermissions), keyEquivalent: "").target = self
