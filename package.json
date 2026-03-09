@@ -5,9 +5,12 @@
   "packageManager": "pnpm@10.29.3",
   "scripts": {
     "build": "dotenv -e .env.local -- turbo build",
+    "build:app:macos": "bash scripts/build-cued-daemon-app.sh",
+    "build:dmg:macos": "bash scripts/build-cued-dmg.sh",
     "dev": "dotenv -e .env.local -- turbo dev",
     "lint": "dotenv -e .env.local -- turbo lint",
     "permissions:macos": "bash scripts/request-macos-access.sh",
+    "sign:notarize:macos": "bash scripts/sign-and-notarize-cued-app.sh",
     "typecheck": "dotenv -e .env.local -- turbo typecheck",
     "test": "dotenv -e .env.local -- turbo test",
     "verify:avatars": "bash scripts/verify-avatar-runtime.sh"
