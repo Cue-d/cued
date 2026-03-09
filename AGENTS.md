@@ -2,32 +2,30 @@
 
 ## What This Is
 
-Cued is a cloud-based personal relationship manager. Multi-platform messaging (iMessage, Slack, LinkedIn) with AI-powered action suggestions.
+Cued is being rebuilt as a local-only message and contact datastore for agents. The product direction is `apps/cued` + `native/macos/CuedNative` + a local SQLite database at `~/.cued/local.db`.
 
 ## Architecture
 
 ```
-apps/web (Next.js 16) ←→ packages/convex (Convex)
-                                    ↑
-                          ┌─────────┴─────────┐
-apps/electron (macOS) ────┤                   │
-  ├── iMessage sync       │   Cloud Cursors   │
-  ├── LinkedIn sync       │   (syncCursors)   │
-  ├── Slack sync          │                   │
-  └── macOS Contacts      └───────────────────┘
+native/macos/CuedNative (menu bar host, permissions, native windows)
+        |
+        v
+apps/cued (daemon, auth/session model, sync orchestration, projection)
+        |
+        v
+~/.cued/local.db
 ```
 
-**Data Flow:**
-- Electron → Convex: Messages, conversations, contacts synced via mutations
-- Convex → Electron: Sync cursors queried for incremental sync resume
-- Web/Mobile → Convex: Real-time subscriptions for UI updates
+**Current state:**
+- `apps/cued` is the canonical runtime
+- `apps/electron` is reference-only during cutover
+- cloud/web/mobile code is legacy and being removed
 
 ## Monorepo Structure
 
 ```
 apps/
-  web/              Next.js app (marketing + authenticated app)
-  mobile/           Expo React Native app (iOS)
+  cued/             Local daemon and CLI
   electron/         macOS sync client (iMessage, LinkedIn, Slack, Contacts)
 
 packages/
@@ -102,10 +100,9 @@ convex/
 
 ```bash
 pnpm install
-pnpm dev
+pnpm --dir apps/cued build
+swift build --package-path native/macos/CuedNative -c release
 ```
-
-Web app: http://localhost:3000
 
 ## Key Files
 
@@ -129,8 +126,8 @@ Web app: http://localhost:3000
 | Slack sync | `apps/electron/src/main/sync/slack-sync.ts` |
 | Sync coordinator | `apps/electron/src/main/sync/sync-coordinator.ts` |
 | Contacts integration | `apps/electron/src/main/platforms/contacts/` |
-| Web routes | `apps/web/app/(app)/`, `app/api/` |
-| Mobile routes | `apps/mobile/app/` |
+| Local daemon | `apps/cued/src/daemon/`, `src/projector/`, `src/integrations/` |
+| macOS host app | `native/macos/CuedNative/Sources/CuedNative/` |
 
 ## Behaviors
 
@@ -154,8 +151,8 @@ Before creating a PR, run the relevant tests for the packages you changed:
 cd packages/convex && pnpm test     # Convex schema/function changes
 cd packages/shared && pnpm test     # Shared utils/types changes
 cd packages/ui && pnpm test         # UI component changes
-cd apps/mobile && pnpm test         # Mobile app changes
-cd apps/web && pnpm test:e2e        # Web app E2E tests (if UI/routing changed)
+cd apps/cued && pnpm test           # Local daemon/CLI changes
+cd native/macos/CuedNative && swift test   # Native host changes when present
 ```
 
 The pre-commit hook enforces `pnpm typecheck`, `pnpm lint`, and Convex tests. You don't need to run those manually — they run automatically on commit.
@@ -210,12 +207,10 @@ All packages use **Vitest** for unit tests. Coverage goals:
 | packages/shared | >90% | `src/**/__tests__/*.test.ts` |
 | packages/ui | >80% | `src/components/**/__tests__/*.test.tsx` |
 | packages/convex | >50% | `convex/__tests__/*.test.ts` |
-| apps/mobile | >50% | `src/**/__tests__/*.test.ts(x)` |
-
 ```bash
-pnpm test                           # All tests (Vitest)
-cd apps/web && pnpm test:e2e        # E2E tests (Playwright)
-cd packages/convex && pnpm test     # Convex tests (uses convex-test)
+pnpm test                           # Workspace tests (Vitest)
+cd apps/cued && pnpm test           # Local daemon tests
+cd packages/convex && pnpm test     # Legacy cloud tests if touched
 ```
 
 ### Convex Testing
