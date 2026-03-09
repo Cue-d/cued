@@ -97,6 +97,7 @@ private struct MessageRow {
   let senderIdentifier: String?
   let senderService: String?
   let text: String?
+  let attributedBody: Data?
   let unixDate: Int?
   let isFromMe: Bool
   let isSent: Bool
@@ -721,6 +722,7 @@ struct CuedNativeCLI {
         h.id as sender_identifier,
         h.service as sender_service,
         m.text,
+        m.attributedBody,
         CAST(m.date / 1000000000 AS INTEGER) + \(appleEpochOffset) as unix_date,
         m.is_from_me,
         m.is_sent,
@@ -757,15 +759,16 @@ struct CuedNativeCLI {
           senderIdentifier: stringColumn(statement, 5),
           senderService: stringColumn(statement, 6),
           text: stringColumn(statement, 7),
-          unixDate: intColumn(statement, 8),
-          isFromMe: boolColumn(statement, 9),
-          isSent: boolColumn(statement, 10),
-          isDelivered: boolColumn(statement, 11),
-          isRead: boolColumn(statement, 12),
-          unixDateRead: intColumn(statement, 13),
-          errorCode: intColumn(statement, 14) ?? 0,
-          hasAttachments: boolColumn(statement, 15),
-          associatedMessageType: intColumn(statement, 16) ?? 0
+          attributedBody: dataColumn(statement, 8),
+          unixDate: intColumn(statement, 9),
+          isFromMe: boolColumn(statement, 10),
+          isSent: boolColumn(statement, 11),
+          isDelivered: boolColumn(statement, 12),
+          isRead: boolColumn(statement, 13),
+          unixDateRead: intColumn(statement, 14),
+          errorCode: intColumn(statement, 15) ?? 0,
+          hasAttachments: boolColumn(statement, 16),
+          associatedMessageType: intColumn(statement, 17) ?? 0
         )
       }
     )
@@ -791,7 +794,7 @@ struct CuedNativeCLI {
           guid: row.guid,
           chatId: row.chatID,
           itemType: row.itemType,
-          text: row.text,
+          text: row.text ?? extractTextFromAttributedBody(row.attributedBody),
           timestamp: row.unixDate ?? 0,
           isFromMe: row.isFromMe,
           isRead: row.isRead,
@@ -1074,6 +1077,85 @@ struct CuedNativeCLI {
     )
   }
 
+  private static func decodeTypedstreamLength(_ data: [UInt8], offset: Int) -> (bytesConsumed: Int, length: Int)? {
+    guard offset < data.count else {
+      return nil
+    }
+
+    let first = Int(data[offset])
+    if first < 0x80 {
+      return (1, first)
+    }
+
+    let extraBytes = first - 0x80 + 1
+    guard extraBytes >= 2, extraBytes <= 4, offset + extraBytes < data.count else {
+      return nil
+    }
+
+    var value = 0
+    for index in 0..<extraBytes {
+      let byte = Int(data[offset + 1 + index])
+      value |= byte << (index * 8)
+    }
+    return (1 + extraBytes, value)
+  }
+
+  private static func extractTextFromAttributedBody(_ blob: Data?) -> String? {
+    guard let blob, !blob.isEmpty else {
+      return nil
+    }
+
+    let marker = Data("NSString".utf8)
+    guard let markerRange = blob.range(of: marker) else {
+      return nil
+    }
+
+    let afterMarker = blob[markerRange.upperBound...]
+    let bytes = Array(afterMarker)
+    guard bytes.count >= 7 else {
+      return nil
+    }
+
+    for index in 0..<(bytes.count - 6) {
+      let firstByte = bytes[index]
+      guard (firstByte == 0x94 || firstByte == 0x95), bytes.count > index + 4 else {
+        continue
+      }
+      guard bytes[index + 1] == 0x84, bytes[index + 2] == 0x01, bytes[index + 3] == 0x2b else {
+        continue
+      }
+      guard let decoded = decodeTypedstreamLength(bytes, offset: index + 4) else {
+        continue
+      }
+
+      let textStart = index + 4 + decoded.bytesConsumed
+      let textEnd = textStart + decoded.length
+      guard textEnd <= bytes.count else {
+        continue
+      }
+
+      let textData = Data(bytes[textStart..<textEnd])
+      guard let raw = String(data: textData, encoding: .utf8) else {
+        continue
+      }
+
+      let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+      let isAppleInternal =
+        trimmed.isEmpty ||
+        trimmed.hasPrefix("NS") ||
+        trimmed.hasPrefix("_NS") ||
+        trimmed.contains("AttributeName")
+      if isAppleInternal {
+        continue
+      }
+
+      let filtered = trimmed.replacingOccurrences(of: "\u{fffc}", with: "")
+      return filtered.isEmpty ? "[attachment]" : filtered
+    }
+
+    return nil
+  }
+
   private static func nilIfEmpty(_ value: String?) -> String? {
     guard let value else {
       return nil
@@ -1091,6 +1173,17 @@ struct CuedNativeCLI {
     }
 
     return String(cString: value)
+  }
+
+  private static func dataColumn(_ statement: OpaquePointer?, _ index: Int32) -> Data? {
+    guard sqlite3_column_type(statement, index) != SQLITE_NULL,
+      let value = sqlite3_column_blob(statement, index)
+    else {
+      return nil
+    }
+
+    let count = Int(sqlite3_column_bytes(statement, index))
+    return Data(bytes: value, count: count)
   }
 
   private static func intColumn(_ statement: OpaquePointer?, _ index: Int32) -> Int? {
