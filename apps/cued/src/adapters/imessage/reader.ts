@@ -128,7 +128,7 @@ export class IMessageReader {
     `).all(lastRowid, limit) as MessageRow[];
 
     if (rows.length === 0) {
-      return { cursor: lastRowid, chats: [], messages: [], handles: [] };
+      return { cursor: lastRowid, fetchedCount: 0, chats: [], messages: [], handles: [] };
     }
 
     const messages = this.transformMessages(rows);
@@ -154,6 +154,7 @@ export class IMessageReader {
 
     return {
       cursor,
+      fetchedCount: rows.length,
       chats,
       messages,
       handles: [...handlesMap.values()],

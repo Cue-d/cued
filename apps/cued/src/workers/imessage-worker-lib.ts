@@ -12,6 +12,8 @@ import type {
 } from "../types/provider.js";
 import { resolveMacOSNativeBinary } from "./native-binary.js";
 
+const DEFAULT_IMESSAGE_BATCH_LIMIT = 2_000;
+
 function dedupeKey(seed: string): string {
   return createHash("sha256").update(seed).digest("hex");
 }
@@ -60,7 +62,7 @@ function loadBatchFromNativeBinary(
     "--after-rowid",
     String(options?.lastRowId ?? 0),
     "--limit",
-    String(options?.limit ?? 500),
+    String(options?.limit ?? DEFAULT_IMESSAGE_BATCH_LIMIT),
   ];
   const stdout = execFileSync(binaryPath, args, {
     encoding: "utf8",
@@ -75,7 +77,10 @@ function loadBatchFromTypeScript(options?: {
 }): ImsSyncBatch {
   const reader = new IMessageReader(options?.path ?? DEFAULT_CHAT_DB_PATH);
   try {
-    return reader.buildSyncBatch(options?.lastRowId ?? 0, options?.limit ?? 500);
+    return reader.buildSyncBatch(
+      options?.lastRowId ?? 0,
+      options?.limit ?? DEFAULT_IMESSAGE_BATCH_LIMIT,
+    );
   } finally {
     reader.close();
   }
@@ -88,12 +93,13 @@ export function buildIMessageSyncBundle(options?: {
   env?: NodeJS.ProcessEnv;
   repoRoot?: string;
 }): SyncBundle {
-  const limit = options?.limit ?? 500;
+  const limit = options?.limit ?? DEFAULT_IMESSAGE_BATCH_LIMIT;
   const loader = resolveIMessageLoader(options?.env ?? process.env, options?.repoRoot);
   const batch =
     loader.kind === "native"
       ? loadBatchFromNativeBinary(loader.path, options)
       : loadBatchFromTypeScript(options);
+  const hasMore = batch.fetchedCount >= limit;
   const observedBase = Date.now();
 
   const sourceAccounts: SourceAccountInput[] = [
@@ -215,9 +221,9 @@ export function buildIMessageSyncBundle(options?: {
     rawEvents,
     sourceCursor: { rowId: batch.cursor },
     syncMode:
-      options?.lastRowId && options.lastRowId > 0 && batch.messages.length < limit
+      options?.lastRowId && options.lastRowId > 0 && !hasMore
         ? "incremental"
         : "full",
-    hasMore: batch.messages.length >= limit,
+    hasMore,
   };
 }
