@@ -9,7 +9,9 @@ APP_BUNDLE="$DIST_DIR/CuedDaemon.app"
 DMG_PATH="$DIST_DIR/CuedDaemon.dmg"
 STAGING_DIR="$DIST_DIR/dmg-staging"
 
-bash "$APP_BUILDER" >/dev/null
+if [[ ! -d "$APP_BUNDLE" ]]; then
+  bash "$APP_BUILDER" >/dev/null
+fi
 
 rm -rf "$STAGING_DIR" "$DMG_PATH"
 mkdir -p "$STAGING_DIR"
