@@ -6,6 +6,7 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 NATIVE_PACKAGE_DIR="$ROOT_DIR/native/macos/CuedNative"
 DEFAULT_NATIVE_BINARY="$NATIVE_PACKAGE_DIR/.build/release/CuedNative"
 NATIVE_BINARY="${CUED_NATIVE_BINARY:-$DEFAULT_NATIVE_BINARY}"
+PERMISSION_TARGET="${CUED_PERMISSION_TARGET:-$NATIVE_BINARY}"
 
 REQUEST_CONTACTS=0
 REQUEST_MESSAGES=0
@@ -56,7 +57,7 @@ ensure_macos() {
 }
 
 ensure_native_binary() {
-  if [[ $BUILD_NATIVE -eq 0 && -x "$NATIVE_BINARY" ]]; then
+  if [[ -x "$NATIVE_BINARY" ]]; then
     return
   fi
 
@@ -119,10 +120,11 @@ APPLESCRIPT
 open_full_disk_access_help() {
   log "opening Full Disk Access privacy pane"
   open_privacy_pane "Privacy_AllFiles"
-  cat <<'EOF'
+  cat <<EOF
 
 Manual step required:
-  1. Add the app that runs cued commands (Terminal, iTerm, Codex, or another host app).
+  1. Add this app or binary to Full Disk Access:
+     $PERMISSION_TARGET
   2. Enable Full Disk Access for that app.
   3. Restart the app after granting access so SQLite access to Messages data is refreshed.
 
