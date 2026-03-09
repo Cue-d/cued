@@ -53,7 +53,7 @@ export async function runSetupTUI(): Promise<void> {
       output.write("1. Install/refresh app bundle and CLI\n");
       output.write("2. Install launch agent\n");
       output.write("3. Request macOS permissions\n");
-      output.write("4. Show sync/auth status\n");
+      output.write("4. Show local source status\n");
       output.write("5. Connect Slack\n");
       output.write("6. Connect LinkedIn\n");
       output.write("7. Quit\n");
@@ -72,7 +72,7 @@ export async function runSetupTUI(): Promise<void> {
         case "4":
           output.write(`\nMessages: ${doctor.overview?.messages ?? 0}\n`);
           output.write(`Contacts: ${doctor.overview?.contacts ?? 0}\n`);
-          output.write(`Integrations tracked: ${(doctor.recentRuns as unknown[] | undefined)?.length ?? 0}\n`);
+          output.write(`Recent sync runs: ${(doctor.recentRuns as unknown[] | undefined)?.length ?? 0}\n`);
           break;
         case "5":
           output.write("\nRun: cued integrations connect slack default\n");

@@ -6,8 +6,6 @@ export type DaemonRequest =
   | { id: string; command: "integrations-refresh" }
   | { id: string; command: "integrations-connect"; platform: string; accountKey?: string }
   | { id: string; command: "integrations-disconnect"; platform: string; accountKey?: string }
-  | { id: string; command: "integrations-auth-status"; sessionId: string }
-  | { id: string; command: "integrations-auth-cancel"; sessionId: string }
   | { id: string; command: "integrations-enable"; platform: string; accountKey?: string }
   | { id: string; command: "integrations-disable"; platform: string; accountKey?: string }
   | { id: string; command: "sync-run"; source?: string }

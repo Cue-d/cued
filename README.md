@@ -26,7 +26,7 @@ apps/cued (daemon, auth/session model, sync orchestration, projection)
 ~/.cued/local.db (raw events + projected canonical state)
 ```
 
-Reference-only legacy code still exists in `apps/electron` until local parity is complete.
+`apps/electron` still exists only as a cutover reference while `apps/cued` reaches full platform parity.
 
 ## Prerequisites
 
@@ -78,7 +78,7 @@ cued doctor
 ```text
 apps/
   cued/          Local daemon and CLI
-  electron/      Legacy reference implementation during cutover
+  electron/      Historical cutover reference only
 
 native/
   macos/
@@ -86,7 +86,7 @@ native/
 
 packages/
   ai/            LLM tools and contact resolution
-  convex/        Legacy cloud backend code, pending removal
+  convex/        Historical cloud backend code, pending removal
   env/           Shared env schemas
   integrations/  Shared integration helpers
   shared/        Shared types and utilities
@@ -108,5 +108,5 @@ packages/
 ## Notes
 
 - `apps/cued` is the only product runtime moving forward.
-- `apps/electron` remains only as a migration reference until parity is complete.
-- `packages/convex`, `packages/ui`, and other cloud-era code are still present but are not part of the local-only end state.
+- `apps/electron` is not part of the active runtime.
+- `packages/convex`, `packages/ui`, and other cloud-era code are still present but are outside the local-only product surface.

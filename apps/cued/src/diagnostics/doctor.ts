@@ -1,10 +1,9 @@
 import { execFileSync } from "node:child_process";
 import { existsSync } from "node:fs";
-import { homedir } from "node:os";
-import { join } from "node:path";
 import type { CuedDatabase } from "../db/database.js";
 import { listAdapterPlatforms } from "../adapters/registry.js";
 import { DEFAULT_CHAT_DB_PATH, IMessageReader } from "../adapters/imessage/reader.js";
+import { listIntegrationStates } from "../integrations/service.js";
 import { resolveMacOSNativeBinary } from "../workers/native-binary.js";
 
 export interface DoctorCheck {
@@ -46,13 +45,65 @@ function tryReadMessagesDatabase(): DoctorCheck {
     return {
       name: "messages_database",
       status: "error",
-      summary: "Messages database is not readable",
+      summary: "Messages database is not readable from the current process",
       details: {
         path: DEFAULT_CHAT_DB_PATH,
         error: error instanceof Error ? error.message : String(error),
       },
       remediation:
         "Grant Full Disk Access to the app that runs cued, then restart that app and rerun doctor.",
+    };
+  }
+}
+
+function getMessagesNativeHelperCheck(): DoctorCheck {
+  const nativeBinary = resolveMacOSNativeBinary(process.env.CUED_IMESSAGE_NATIVE_BINARY);
+  if (!nativeBinary) {
+    return {
+      name: "messages_native_helper",
+      status: "unknown",
+      summary: "Native Messages helper is not built, so daemon access is using the current process identity",
+      remediation:
+        "Run `pnpm --dir apps/cued build:native:macos` or use the packaged CuedDaemon.app so the daemon uses a stable native helper.",
+    };
+  }
+
+  try {
+    execFileSync(
+      nativeBinary,
+      [
+        "imessage",
+        "dump",
+        "--db-path",
+        DEFAULT_CHAT_DB_PATH,
+        "--after-rowid",
+        "0",
+        "--limit",
+        "1",
+      ],
+      {
+        encoding: "utf8",
+        stdio: ["ignore", "pipe", "pipe"],
+      },
+    );
+
+    return {
+      name: "messages_native_helper",
+      status: "ok",
+      summary: "Native Messages helper can read the Messages database",
+      details: { binary: nativeBinary },
+    };
+  } catch (error) {
+    return {
+      name: "messages_native_helper",
+      status: "error",
+      summary: "Native Messages helper cannot read the Messages database",
+      details: {
+        binary: nativeBinary,
+        error: error instanceof Error ? error.message : String(error),
+      },
+      remediation:
+        "Grant Full Disk Access to the app or binary that the daemon actually launches, then restart it. If you rebuilt the app or native helper, re-grant access because ad-hoc signatures can change the macOS privacy identity.",
     };
   }
 }
@@ -141,33 +192,24 @@ function getMessagesAutomationCheck(): DoctorCheck {
   }
 }
 
-function getLegacyAuthArtifacts(): Record<string, unknown> {
-  const cuedHome = join(homedir(), ".cued");
-  return {
-    authJson: existsSync(join(cuedHome, "auth.json")),
-    agentReplicaDb: existsSync(join(cuedHome, "agent-replica.db")),
-    contactsCache: existsSync(join(cuedHome, "contacts_cache.json")),
-  };
-}
-
 export function buildDoctorReport(db: CuedDatabase): Record<string, unknown> {
   const checks: DoctorCheck[] = [];
 
   if (process.platform === "darwin") {
     checks.push(getContactsPermissionCheck());
     checks.push(tryReadMessagesDatabase());
+    checks.push(getMessagesNativeHelperCheck());
     checks.push(getMessagesAutomationCheck());
   }
 
   return {
     daemon: db.getDaemonState(),
     overview: db.getOverview(),
+    projection: db.getProjectionBacklog(),
     checkpoints: db.listCheckpointSummary(),
     recentRuns: db.listRecentRuns(),
-    migrationsApplied: true,
     registeredAdapters: listAdapterPlatforms(),
-    legacyArtifacts: getLegacyAuthArtifacts(),
-    permissionBootstrapCommand: "pnpm permissions:macos -- --all",
+    integrations: listIntegrationStates(db),
     checks,
   };
 }

@@ -21,7 +21,6 @@ describe("integration state management", () => {
     delete process.env.CUED_CONTACTS_NATIVE_BINARY;
     delete process.env.CUED_IMESSAGE_DB_PATH;
     delete process.env.CUED_SLACK_APP_BINARY;
-    delete process.env.CUED_LEGACY_ELECTRON_USER_DATA_DIRS;
 
     while (tempDirs.length > 0) {
       rmSync(tempDirs.pop()!, { recursive: true, force: true });
@@ -53,7 +52,6 @@ describe("integration state management", () => {
     process.env.CUED_CONTACTS_NATIVE_BINARY = nativeBinaryPath;
     process.env.CUED_IMESSAGE_DB_PATH = join(createTempDir("cued-imessage-"), "missing.db");
     process.env.CUED_SLACK_APP_BINARY = join(createTempDir("cued-no-slack-app-"), "Slack");
-    process.env.CUED_LEGACY_ELECTRON_USER_DATA_DIRS = createTempDir("cued-no-legacy-electron-");
 
     const db = createDb();
     const refreshed = await refreshManagedIntegrationStates(db);
