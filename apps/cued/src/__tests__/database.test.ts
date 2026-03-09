@@ -184,7 +184,7 @@ describe("CuedDatabase", () => {
         platform: "contacts",
         account_key: "local",
         run_type: "sync",
-        status: "running",
+        status: "ingesting",
         details_json: JSON.stringify({ requestId: "abc" }),
       }),
     );
@@ -277,6 +277,19 @@ describe("CuedDatabase", () => {
         payload_json: JSON.stringify({ hello: "world" }),
       },
     ]);
+
+    expect(db.getProjectionState()).toEqual({
+      singleton_key: "global",
+      projection_watermark: 0,
+      last_projected_at: null,
+      last_rebuild_at: null,
+      updated_at: expect.any(Number),
+    });
+    expect(db.getProjectionBacklog()).toEqual({
+      projection_watermark: 0,
+      max_raw_event_rowid: 1,
+      pending_raw_events: 1,
+    });
 
     db.close();
   });

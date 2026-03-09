@@ -38,6 +38,7 @@ const {
   messageReactions,
   messages,
   participantEvents,
+  projectionState,
   rawEvents,
   schemaMigrations,
   sourceAccounts,
@@ -65,6 +66,14 @@ export interface QueuedSyncRun {
   trigger: string;
   started_at: number;
   details_json: string | null;
+}
+
+export interface ProjectionStateRow {
+  singleton_key: "global";
+  projection_watermark: number;
+  last_projected_at: number | null;
+  last_rebuild_at: number | null;
+  updated_at: number;
 }
 
 export type RawEventInput = ProviderRawEventInput;
@@ -310,6 +319,91 @@ export class CuedDatabase {
       sourceAccounts: this.countRows(sourceAccounts),
       integrations: this.countRows(integrationStates),
       authSessions: this.countRows(authSessions),
+    };
+  }
+
+  getProjectionState(): ProjectionStateRow {
+    const row = this.db
+      .select({
+        singleton_key: projectionState.singletonKey,
+        projection_watermark: projectionState.projectionWatermark,
+        last_projected_at: projectionState.lastProjectedAt,
+        last_rebuild_at: projectionState.lastRebuildAt,
+        updated_at: projectionState.updatedAt,
+      })
+      .from(projectionState)
+      .where(eq(projectionState.singletonKey, "global"))
+      .get();
+
+    if (row) {
+      return row as ProjectionStateRow;
+    }
+
+    const fallback: ProjectionStateRow = {
+      singleton_key: "global",
+      projection_watermark: 0,
+      last_projected_at: null,
+      last_rebuild_at: null,
+      updated_at: now(),
+    };
+    this.upsertProjectionState({
+      projectionWatermark: 0,
+      lastProjectedAt: null,
+      lastRebuildAt: null,
+    });
+    return fallback;
+  }
+
+  upsertProjectionState(input: {
+    projectionWatermark: number;
+    lastProjectedAt?: number | null;
+    lastRebuildAt?: number | null;
+  }): void {
+    const values = {
+      singletonKey: "global" as const,
+      projectionWatermark: input.projectionWatermark,
+      lastProjectedAt: input.lastProjectedAt ?? null,
+      lastRebuildAt: input.lastRebuildAt ?? null,
+      updatedAt: now(),
+    };
+
+    this.db
+      .insert(projectionState)
+      .values(values)
+      .onConflictDoUpdate({
+        target: projectionState.singletonKey,
+        set: {
+          projectionWatermark: values.projectionWatermark,
+          lastProjectedAt: values.lastProjectedAt,
+          lastRebuildAt: values.lastRebuildAt,
+          updatedAt: values.updatedAt,
+        },
+      })
+      .run();
+  }
+
+  getProjectionBacklog(): {
+    projection_watermark: number;
+    max_raw_event_rowid: number;
+    pending_raw_events: number;
+  } {
+    const state = this.getProjectionState();
+    const row = this.sqlite
+      .prepare(`
+        SELECT
+          COALESCE(MAX(rowid), 0) AS max_raw_event_rowid,
+          COALESCE(SUM(CASE WHEN rowid > ? THEN 1 ELSE 0 END), 0) AS pending_raw_events
+        FROM raw_events
+      `)
+      .get(state.projection_watermark) as {
+        max_raw_event_rowid: number | null;
+        pending_raw_events: number | null;
+      };
+
+    return {
+      projection_watermark: state.projection_watermark,
+      max_raw_event_rowid: Number(row.max_raw_event_rowid ?? 0),
+      pending_raw_events: Number(row.pending_raw_events ?? 0),
     };
   }
 
@@ -605,7 +699,7 @@ export class CuedDatabase {
           id: syncRuns.id,
         })
         .from(syncRuns)
-        .where(eq(syncRuns.status, "running"))
+        .where(sql`${syncRuns.status} IN ('running', 'ingesting', 'projecting')`)
         .all();
 
       if (stuckRuns.length === 0) {
@@ -668,7 +762,21 @@ export class CuedDatabase {
         .where(and(
           eq(syncRuns.platform, platform),
           accountPredicate,
-          inArray(syncRuns.status, ["queued", "running"]),
+          sql`${syncRuns.status} IN ('queued', 'running', 'ingesting')`,
+        ))
+        .limit(1)
+        .get(),
+    );
+  }
+
+  hasQueuedOrActiveProjectionRun(): boolean {
+    return Boolean(
+      this.db
+        .select({ id: syncRuns.id })
+        .from(syncRuns)
+        .where(and(
+          inArray(syncRuns.runType, ["project", "rebuild"]),
+          sql`${syncRuns.status} IN ('queued', 'running', 'projecting')`,
         ))
         .limit(1)
         .get(),
@@ -731,8 +839,15 @@ export class CuedDatabase {
     }>;
   }
 
-  claimNextQueuedRun(): QueuedSyncRun | null {
+  claimNextQueuedRun(
+    runTypes?: SyncRunType[],
+    nextStatus: SyncRunStatus = "ingesting",
+  ): QueuedSyncRun | null {
     return this.db.transaction((tx) => {
+      const statusPredicate = runTypes && runTypes.length > 0
+        ? and(eq(syncRuns.status, "queued"), inArray(syncRuns.runType, runTypes))
+        : eq(syncRuns.status, "queued");
+
       const row = tx
         .select({
           id: syncRuns.id,
@@ -745,7 +860,7 @@ export class CuedDatabase {
           details_json: syncRuns.detailsJson,
         })
         .from(syncRuns)
-        .where(eq(syncRuns.status, "queued"))
+        .where(statusPredicate)
         .orderBy(asc(syncRuns.startedAt))
         .limit(1)
         .get() as {
@@ -764,12 +879,27 @@ export class CuedDatabase {
       }
 
       tx.update(syncRuns)
-        .set({ status: "running" })
+        .set({ status: nextStatus })
         .where(eq(syncRuns.id, row.id))
         .run();
 
-      return { ...row, status: "running" };
+      return { ...row, status: nextStatus };
     });
+  }
+
+  updateRunStatus(runId: string, status: SyncRunStatus, details?: unknown): void {
+    const values: {
+      status: SyncRunStatus;
+      detailsJson?: string;
+    } = details === undefined
+      ? { status }
+      : { status, detailsJson: JSON.stringify(details) };
+
+    this.db
+      .update(syncRuns)
+      .set(values)
+      .where(eq(syncRuns.id, runId))
+      .run();
   }
 
   finishRun(runId: string, details?: unknown): void {
@@ -962,6 +1092,107 @@ export class CuedDatabase {
       event_kind: string;
       observed_at: number;
       payload_json: string;
+    }>;
+  }
+
+  listRawEventsAfter(rowId: number): Array<{
+    rowid: number;
+    id: string;
+    platform: Platform;
+    account_key: string;
+    entity_kind: RawEventEntityKind;
+    event_kind: string;
+    observed_at: number;
+    payload_json: string;
+  }> {
+    return this.sqlite
+      .prepare(`
+        SELECT
+          rowid,
+          id,
+          platform,
+          account_key,
+          entity_kind,
+          event_kind,
+          observed_at,
+          payload_json
+        FROM raw_events
+        WHERE rowid > ?
+        ORDER BY rowid ASC
+      `)
+      .all(rowId) as Array<{
+      rowid: number;
+      id: string;
+      platform: Platform;
+      account_key: string;
+      entity_kind: RawEventEntityKind;
+      event_kind: string;
+      observed_at: number;
+      payload_json: string;
+    }>;
+  }
+
+  listProjectedContactSourceMap(): Array<{
+    platform: Platform;
+    account_key: string;
+    source_entity_key: string;
+    contact_id: string;
+  }> {
+    return this.db
+      .select({
+        platform: contactSources.platform,
+        account_key: contactSources.accountKey,
+        source_entity_key: contactSources.sourceEntityKey,
+        contact_id: contactSources.contactId,
+      })
+      .from(contactSources)
+      .all() as Array<{
+      platform: Platform;
+      account_key: string;
+      source_entity_key: string;
+      contact_id: string;
+    }>;
+  }
+
+  listDeterministicContactHandles(): Array<{
+    handle_type: string;
+    normalized_value: string;
+    contact_id: string;
+  }> {
+    return this.db
+      .select({
+        handle_type: contactHandles.handleType,
+        normalized_value: contactHandles.normalizedValue,
+        contact_id: contactHandles.contactId,
+      })
+      .from(contactHandles)
+      .where(eq(contactHandles.isDeterministicKey, 1))
+      .all() as Array<{
+      handle_type: string;
+      normalized_value: string;
+      contact_id: string;
+    }>;
+  }
+
+  listConversationMap(): Array<{
+    platform: Platform;
+    account_key: string;
+    source_conversation_key: string;
+    conversation_id: string;
+  }> {
+    return this.db
+      .select({
+        platform: conversations.platform,
+        account_key: conversations.accountKey,
+        source_conversation_key: conversations.sourceConversationKey,
+        conversation_id: conversations.id,
+      })
+      .from(conversations)
+      .all() as Array<{
+      platform: Platform;
+      account_key: string;
+      source_conversation_key: string;
+      conversation_id: string;
     }>;
   }
 

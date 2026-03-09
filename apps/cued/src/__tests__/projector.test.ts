@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { CuedDatabase } from "../db/database.js";
-import { rebuildProjectedState } from "../projector/projector.js";
+import { projectPendingRawEvents, rebuildProjectedState } from "../projector/projector.js";
 
 describe("projector", () => {
   const tempDirs: string[] = [];
@@ -106,6 +106,8 @@ describe("projector", () => {
       conversations: 1,
       messages: 1,
       rawEvents: 4,
+      appliedRawEvents: 4,
+      projectionWatermark: 4,
     });
 
     const ftsRows = db.orm().all<{ count: number }>(sql`SELECT COUNT(*) as count FROM messages_fts`);
@@ -231,6 +233,8 @@ describe("projector", () => {
       conversations: 1,
       messages: 1,
       rawEvents: 4,
+      appliedRawEvents: 4,
+      projectionWatermark: 4,
     });
 
     const participantRows = db.orm().all<{ participant_name: string | null }>(sql`
@@ -246,6 +250,91 @@ describe("projector", () => {
       LEFT JOIN contacts sender ON sender.id = m.sender_contact_id
     `);
     expect(messageRows).toEqual([{ sender_name: "Theo Tarr", reaction_count: 1 }]);
+
+    db.close();
+  });
+
+  it("projects new raw events incrementally without clearing canonical tables", () => {
+    const db = createDb();
+
+    db.insertRawEvent({
+      id: "contacts-ava",
+      platform: "contacts",
+      accountKey: "local",
+      entityKind: "contact",
+      eventKind: "observed",
+      observedAt: 10,
+      dedupeKey: "contacts:ava",
+      payload: {
+        sourceEntityKey: "contacts:ava",
+        fields: { display_name: "Ava Chen" },
+        handles: [{ type: "email", value: "ava@cued.com", deterministic: true }],
+      },
+      sourceVersion: "contacts-v1",
+    });
+
+    expect(projectPendingRawEvents(db)).toEqual({
+      contacts: 1,
+      conversations: 0,
+      messages: 0,
+      rawEvents: 1,
+      appliedRawEvents: 1,
+      projectionWatermark: 1,
+    });
+
+    db.insertRawEvent({
+      id: "conversation-1",
+      platform: "linkedin",
+      accountKey: "default",
+      entityKind: "conversation",
+      eventKind: "observed",
+      observedAt: 20,
+      dedupeKey: "linkedin:thread-1",
+      payload: {
+        sourceConversationKey: "thread-1",
+        conversationType: "dm",
+        participants: [{ sourceEntityKey: "contacts:ava" }],
+      },
+      sourceVersion: "linkedin-v1",
+    });
+    db.insertRawEvent({
+      id: "message-1",
+      platform: "linkedin",
+      accountKey: "default",
+      entityKind: "message",
+      eventKind: "message_created",
+      observedAt: 30,
+      dedupeKey: "linkedin:msg-1",
+      payload: {
+        sourceMessageKey: "msg-1",
+        sourceConversationKey: "thread-1",
+        senderSourceKey: "contacts:ava",
+        sentAt: 25,
+        contentOriginal: "incremental projection",
+      },
+      sourceVersion: "linkedin-v1",
+    });
+
+    expect(projectPendingRawEvents(db)).toEqual({
+      contacts: 1,
+      conversations: 1,
+      messages: 1,
+      rawEvents: 3,
+      appliedRawEvents: 2,
+      projectionWatermark: 3,
+    });
+
+    expect(projectPendingRawEvents(db)).toEqual({
+      contacts: 1,
+      conversations: 1,
+      messages: 1,
+      rawEvents: 3,
+      appliedRawEvents: 0,
+      projectionWatermark: 3,
+    });
+
+    const rows = db.orm().all<{ count: number }>(sql`SELECT COUNT(*) as count FROM messages`);
+    expect(rows).toEqual([{ count: 1 }]);
 
     db.close();
   });

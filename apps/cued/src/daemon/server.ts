@@ -23,7 +23,7 @@ import {
 } from "../integrations/service.js";
 import { startAuthSession } from "../integrations/auth-runtime.js";
 import { doctorHooksConfig, emitHookEvent } from "../hooks/service.js";
-import { rebuildProjectedState } from "../projector/projector.js";
+import { projectPendingRawEvents, rebuildProjectedState } from "../projector/projector.js";
 import {
   getDefaultAccountKeyForPlatform,
   isPlatform,
@@ -33,6 +33,7 @@ import {
 
 const DAEMON_VERSION = "0.1.0";
 const DEFAULT_AUTOSYNC_INTERVAL_MS = 60_000;
+const DEFAULT_INGEST_CONCURRENCY = 4;
 
 function now(): number {
   return Date.now();
@@ -74,6 +75,11 @@ function getAutoSyncTargets(
 function getAutoSyncIntervalMs(): number {
   const configured = Number(process.env.CUED_AUTOSYNC_INTERVAL_MS ?? DEFAULT_AUTOSYNC_INTERVAL_MS);
   return Number.isFinite(configured) && configured > 0 ? configured : DEFAULT_AUTOSYNC_INTERVAL_MS;
+}
+
+function getIngestConcurrency(): number {
+  const configured = Number(process.env.CUED_INGEST_CONCURRENCY ?? DEFAULT_INGEST_CONCURRENCY);
+  return Number.isFinite(configured) && configured > 0 ? configured : DEFAULT_INGEST_CONCURRENCY;
 }
 
 async function safeEmitHookEvent(
@@ -174,13 +180,15 @@ export async function runDaemon(): Promise<void> {
   const db = openCuedDatabase();
   const startedAt = now();
   const autoSyncIntervalMs = getAutoSyncIntervalMs();
+  const ingestConcurrency = getIngestConcurrency();
   const activeAuthSessions = new Map<
     string,
     { child: ChildProcess; platform: Platform; accountKey: string }
   >();
-  let isProcessingRun = false;
+  const activeIngestRuns = new Map<string, Promise<void>>();
+  let isProcessingProjection = false;
 
-  db.failInProgressRuns("Recovered stale running sync after daemon restart");
+  db.failInProgressRuns("Recovered stale in-progress sync after daemon restart");
   await refreshManagedIntegrationStates(db);
 
   if (existsSync(CUED_SOCKET_PATH)) {
@@ -222,128 +230,192 @@ export async function runDaemon(): Promise<void> {
     }
   };
 
-  queueAutoSyncRuns("daemon_start");
-
-  const processNextRun = async () => {
-    if (isProcessingRun) {
-      return;
+  const queueProjectionRun = (trigger: string) => {
+    const backlog = db.getProjectionBacklog();
+    if (backlog.pending_raw_events === 0 || db.hasQueuedOrActiveProjectionRun()) {
+      return null;
     }
-    isProcessingRun = true;
-    let currentRun: ReturnType<typeof db.claimNextQueuedRun> = null;
-    try {
-      currentRun = db.claimNextQueuedRun();
-      if (!currentRun) return;
 
-      if (currentRun.run_type === "rebuild") {
-        const projected = rebuildProjectedState(db);
-        db.finishRun(currentRun.id, { projected });
-        await safeEmitHookEvent("sync.completed", {
-          runId: currentRun.id,
-          platform: currentRun.platform,
-          runType: currentRun.run_type,
-          projected,
-        });
+    return db.queueSyncRun({
+      runType: "project",
+      trigger,
+      details: {
+        trigger,
+        projectionWatermark: backlog.projection_watermark,
+        maxRawEventRowid: backlog.max_raw_event_rowid,
+      },
+    });
+  };
+
+  queueAutoSyncRuns("daemon_start");
+  queueProjectionRun("daemon_start");
+
+  const processIngestRun = async (
+    currentRun: NonNullable<ReturnType<typeof db.claimNextQueuedRun>>,
+  ) => {
+    try {
+      if (
+        (currentRun.run_type !== "sync" && currentRun.run_type !== "sync_resume")
+        || !currentRun.platform
+      ) {
+        db.failRun(
+          currentRun.id,
+          `Unsupported ingest run target: ${currentRun.run_type}:${currentRun.platform ?? "none"}`,
+        );
+        return;
+      }
+      if (!isAdapterPlatform(currentRun.platform)) {
+        db.failRun(currentRun.id, `No adapter registered for platform: ${currentRun.platform}`);
         return;
       }
 
-      if (
-        (currentRun.run_type === "sync" || currentRun.run_type === "sync_resume")
-        && currentRun.platform
-      ) {
-        if (!isAdapterPlatform(currentRun.platform)) {
-          db.failRun(currentRun.id, `No adapter registered for platform: ${currentRun.platform}`);
-          return;
+      const accountKey = currentRun.account_key ?? getDefaultAccountKeyForPlatform(currentRun.platform);
+      const checkpoint = db.getCheckpoint(currentRun.platform, accountKey);
+      const sourceCursor = checkpoint?.source_cursor_json
+        ? (JSON.parse(checkpoint.source_cursor_json) as Record<string, unknown>)
+        : null;
+      const envOverrides: Record<string, string> = {};
+      if (currentRun.platform === "imessage" && typeof sourceCursor?.rowId === "number") {
+        envOverrides.CUED_IMESSAGE_LAST_ROWID = String(sourceCursor.rowId);
+      }
+      if (currentRun.platform === "slack" && typeof sourceCursor?.lastSyncAt === "number") {
+        envOverrides.CUED_SLACK_LAST_SYNC_AT = String(sourceCursor.lastSyncAt);
+      }
+      if (currentRun.platform === "linkedin") {
+        if (typeof sourceCursor?.lastSyncAt === "number") {
+          envOverrides.CUED_LINKEDIN_LAST_SYNC_AT = String(sourceCursor.lastSyncAt);
         }
-        const accountKey = currentRun.account_key ?? getDefaultAccountKeyForPlatform(currentRun.platform);
-        const checkpoint = db.getCheckpoint(currentRun.platform, accountKey);
-        const sourceCursor = checkpoint?.source_cursor_json
-          ? (JSON.parse(checkpoint.source_cursor_json) as Record<string, unknown>)
-          : null;
-        const envOverrides: Record<string, string> = {};
-        if (currentRun.platform === "imessage" && typeof sourceCursor?.rowId === "number") {
-          envOverrides.CUED_IMESSAGE_LAST_ROWID = String(sourceCursor.rowId);
+        if (typeof sourceCursor?.syncToken === "string" && sourceCursor.syncToken.length > 0) {
+          envOverrides.CUED_LINKEDIN_SYNC_TOKEN = sourceCursor.syncToken;
         }
-        if (currentRun.platform === "slack" && typeof sourceCursor?.lastSyncAt === "number") {
-          envOverrides.CUED_SLACK_LAST_SYNC_AT = String(sourceCursor.lastSyncAt);
-        }
-        if (currentRun.platform === "linkedin") {
-          if (typeof sourceCursor?.lastSyncAt === "number") {
-            envOverrides.CUED_LINKEDIN_LAST_SYNC_AT = String(sourceCursor.lastSyncAt);
-          }
-          if (typeof sourceCursor?.syncToken === "string" && sourceCursor.syncToken.length > 0) {
-            envOverrides.CUED_LINKEDIN_SYNC_TOKEN = sourceCursor.syncToken;
-          }
-        }
+      }
 
-        const bundle = await runAdapter(currentRun.platform, accountKey, envOverrides);
-        const inboundMessages: Array<Record<string, unknown>> = [];
-        for (const account of bundle.sourceAccounts) {
-          db.upsertSourceAccount(account);
+      const bundle = await runAdapter(currentRun.platform, accountKey, envOverrides);
+      const inboundMessages: Array<Record<string, unknown>> = [];
+      let insertedRawEvents = 0;
+      for (const account of bundle.sourceAccounts) {
+        db.upsertSourceAccount(account);
+      }
+      for (const rawEvent of bundle.rawEvents) {
+        const inserted = db.insertRawEvent(rawEvent);
+        if (!inserted) {
+          continue;
         }
-        for (const rawEvent of bundle.rawEvents) {
-          const inserted = db.insertRawEvent(rawEvent);
-          if (inserted && isInboundMessageEvent({ ...rawEvent, payload: rawEvent.payload as Record<string, unknown> })) {
-            inboundMessages.push({
-              platform: rawEvent.platform,
-              accountKey: rawEvent.accountKey,
-              observedAt: rawEvent.observedAt,
-              payload: rawEvent.payload,
-            });
-          }
-        }
-        const projected = rebuildProjectedState(db);
-        db.upsertCheckpoint({
-          platform: currentRun.platform,
-          accountKey,
-          syncMode: bundle.syncMode ?? "full",
-          sourceCursor: bundle.sourceCursor,
-          rawIngestWatermark: projected.rawEvents,
-          projectionWatermark: projected.messages,
-          lastSuccessAt: now(),
-        });
-        db.finishRun(currentRun.id, {
-          ingested: bundle.rawEvents.length,
-          projected,
-        });
-        await safeEmitHookEvent("sync.completed", {
-          runId: currentRun.id,
-          platform: currentRun.platform,
-          accountKey,
-          runType: currentRun.run_type,
-          ingested: bundle.rawEvents.length,
-          projected,
-        });
-        for (const message of inboundMessages) {
-          await safeEmitHookEvent("message.received", {
-            runId: currentRun.id,
-            message,
+        insertedRawEvents += 1;
+        if (isInboundMessageEvent({ ...rawEvent, payload: rawEvent.payload as Record<string, unknown> })) {
+          inboundMessages.push({
+            platform: rawEvent.platform,
+            accountKey: rawEvent.accountKey,
+            observedAt: rawEvent.observedAt,
+            payload: rawEvent.payload,
           });
         }
-        return;
       }
 
-      db.failRun(
-        currentRun.id,
-        `Unsupported run target: ${currentRun.run_type}:${currentRun.platform ?? "none"}`,
-      );
-    } catch (error) {
-      if (currentRun) {
-        db.failRun(currentRun.id, error instanceof Error ? error.message : String(error));
-        await safeEmitHookEvent("sync.failed", {
+      const projection = db.getProjectionBacklog();
+      db.upsertCheckpoint({
+        platform: currentRun.platform,
+        accountKey,
+        syncMode: bundle.syncMode ?? "full",
+        sourceCursor: bundle.sourceCursor,
+        rawIngestWatermark: projection.max_raw_event_rowid,
+        projectionWatermark: projection.projection_watermark,
+        lastSuccessAt: now(),
+      });
+
+      if (insertedRawEvents > 0) {
+        queueProjectionRun(`ingest:${currentRun.platform}:${accountKey}`);
+      }
+
+      db.finishRun(currentRun.id, {
+        ingested: bundle.rawEvents.length,
+        insertedRawEvents,
+        projectionQueued: insertedRawEvents > 0,
+      });
+      await safeEmitHookEvent("sync.completed", {
+        runId: currentRun.id,
+        platform: currentRun.platform,
+        accountKey,
+        runType: currentRun.run_type,
+        stage: "ingest",
+        ingested: bundle.rawEvents.length,
+        insertedRawEvents,
+      });
+      for (const message of inboundMessages) {
+        await safeEmitHookEvent("message.received", {
           runId: currentRun.id,
-          platform: currentRun.platform,
-          runType: currentRun.run_type,
-          error: error instanceof Error ? error.message : String(error),
+          message,
         });
       }
-    } finally {
-      isProcessingRun = false;
+    } catch (error) {
+      db.failRun(currentRun.id, error instanceof Error ? error.message : String(error));
+      await safeEmitHookEvent("sync.failed", {
+        runId: currentRun.id,
+        platform: currentRun.platform,
+        runType: currentRun.run_type,
+        stage: "ingest",
+        error: error instanceof Error ? error.message : String(error),
+      });
     }
   };
 
-  const workLoop = setInterval(() => {
-    void processNextRun();
-  }, 500);
+  const processProjectionRun = async (
+    currentRun: NonNullable<ReturnType<typeof db.claimNextQueuedRun>>,
+  ) => {
+    try {
+      const projected = currentRun.run_type === "rebuild"
+        ? rebuildProjectedState(db)
+        : projectPendingRawEvents(db);
+      db.finishRun(currentRun.id, { projected });
+      await safeEmitHookEvent("sync.completed", {
+        runId: currentRun.id,
+        platform: currentRun.platform,
+        runType: currentRun.run_type,
+        stage: "projection",
+        projected,
+      });
+    } catch (error) {
+      db.failRun(currentRun.id, error instanceof Error ? error.message : String(error));
+      await safeEmitHookEvent("sync.failed", {
+        runId: currentRun.id,
+        platform: currentRun.platform,
+        runType: currentRun.run_type,
+        stage: "projection",
+        error: error instanceof Error ? error.message : String(error),
+      });
+    } finally {
+      isProcessingProjection = false;
+    }
+  };
+
+  const ingestLoop = setInterval(() => {
+    while (activeIngestRuns.size < ingestConcurrency) {
+      const currentRun = db.claimNextQueuedRun(["sync", "sync_resume"], "ingesting");
+      if (!currentRun) {
+        break;
+      }
+
+      const promise = processIngestRun(currentRun)
+        .finally(() => {
+          activeIngestRuns.delete(currentRun.id);
+        });
+      activeIngestRuns.set(currentRun.id, promise);
+    }
+  }, 250);
+
+  const projectionLoop = setInterval(() => {
+    if (isProcessingProjection) {
+      return;
+    }
+
+    const currentRun = db.claimNextQueuedRun(["project", "rebuild"], "projecting");
+    if (!currentRun) {
+      return;
+    }
+
+    isProcessingProjection = true;
+    void processProjectionRun(currentRun);
+  }, 250);
 
   const schedulerLoop = setInterval(() => {
     queueAutoSyncRuns("scheduler");
@@ -357,7 +429,8 @@ export async function runDaemon(): Promise<void> {
 
   const shutdown = () => {
     clearInterval(heartbeat);
-    clearInterval(workLoop);
+    clearInterval(ingestLoop);
+    clearInterval(projectionLoop);
     clearInterval(schedulerLoop);
     db.upsertDaemonState({
       pid: null,
@@ -449,6 +522,7 @@ async function dispatchRequest(
           result: {
             daemon: db.getDaemonState(),
             overview: db.getOverview(),
+            projection: db.getProjectionBacklog(),
             checkpoints: db.listCheckpointSummary(),
             recentRuns: db.listRecentRuns(),
             ...buildIntegrationStatus(db),
@@ -462,8 +536,10 @@ async function dispatchRequest(
           ok: true,
           result: {
             ...buildDoctorReport(db),
+            projection: db.getProjectionBacklog(),
             autoSyncTargets: getAutoSyncTargets(db),
             autoSyncIntervalMs: getAutoSyncIntervalMs(),
+            ingestConcurrency: getIngestConcurrency(),
             ...buildIntegrationStatus(db),
             hooks: doctorHooksConfig(),
           },
@@ -603,8 +679,8 @@ async function dispatchRequest(
             runId: db.queueSyncRun({
               runType: "rebuild",
               trigger: "cli",
+              details: { trigger: "cli" },
             }),
-            message: `${request.command} is queued; adapter/projector execution is not implemented yet`,
           },
         };
       case "reset":

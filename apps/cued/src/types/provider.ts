@@ -101,10 +101,16 @@ export const REQUESTABLE_INTEGRATION_PLATFORM_VALUES = PLATFORM_VALUES.filter(
 export const SYNC_MODE_VALUES = ["full", "incremental"] as const;
 export type SyncMode = typeof SYNC_MODE_VALUES[number];
 
-export const SYNC_RUN_TYPE_VALUES = ["sync", "sync_resume", "rebuild"] as const;
+export const SYNC_RUN_TYPE_VALUES = ["sync", "sync_resume", "project", "rebuild"] as const;
 export type SyncRunType = typeof SYNC_RUN_TYPE_VALUES[number];
 
-export const SYNC_RUN_STATUS_VALUES = ["queued", "running", "completed", "failed"] as const;
+export const SYNC_RUN_STATUS_VALUES = [
+  "queued",
+  "ingesting",
+  "projecting",
+  "completed",
+  "failed",
+] as const;
 export type SyncRunStatus = typeof SYNC_RUN_STATUS_VALUES[number];
 
 export const RAW_EVENT_ENTITY_KIND_VALUES = [
