@@ -151,4 +151,102 @@ describe("projector", () => {
 
     db.close();
   });
+
+  it("rebuilds out-of-order Slack-style events without foreign key failures", () => {
+    const db = createDb();
+    const observedAt = 1_710_100_000_000;
+
+    db.insertRawEvent({
+      id: "conversation-before-contact",
+      platform: "slack",
+      accountKey: "T0A9C9RHZ9T",
+      entityKind: "conversation",
+      eventKind: "observed",
+      observedAt,
+      dedupeKey: "slack:conversation:C123",
+      payload: {
+        sourceConversationKey: "slack:T0A9C9RHZ9T:C123",
+        conversationType: "dm",
+        participants: [{ sourceEntityKey: "slack:T0A9C9RHZ9T:U123" }],
+      },
+      sourceVersion: "slack-v1",
+    });
+    db.insertRawEvent({
+      id: "message-before-contact",
+      platform: "slack",
+      accountKey: "T0A9C9RHZ9T",
+      entityKind: "message",
+      eventKind: "message_created",
+      observedAt,
+      dedupeKey: "slack:message:C123:1",
+      payload: {
+        sourceMessageKey: "slack:T0A9C9RHZ9T:C123:1710100000.000100",
+        sourceConversationKey: "slack:T0A9C9RHZ9T:C123",
+        senderSourceKey: "slack:T0A9C9RHZ9T:U123",
+        sentAt: observedAt - 500,
+        contentOriginal: "hello from slack",
+      },
+      sourceVersion: "slack-v1",
+    });
+    db.insertRawEvent({
+      id: "reaction-before-contact",
+      platform: "slack",
+      accountKey: "T0A9C9RHZ9T",
+      entityKind: "reaction",
+      eventKind: "reaction_added",
+      observedAt,
+      dedupeKey: "slack:reaction:C123:1:thumbsup",
+      payload: {
+        sourceMessageKey: "slack:T0A9C9RHZ9T:C123:1710100000.000100",
+        sourceConversationKey: "slack:T0A9C9RHZ9T:C123",
+        reactorSourceKey: "slack:T0A9C9RHZ9T:U123",
+        emoji: ":thumbsup:",
+        timestamp: observedAt - 400,
+        isActive: true,
+      },
+      sourceVersion: "slack-v1",
+    });
+    db.insertRawEvent({
+      id: "contact-after",
+      platform: "slack",
+      accountKey: "T0A9C9RHZ9T",
+      entityKind: "contact",
+      eventKind: "observed",
+      observedAt,
+      dedupeKey: "slack:contact:U123",
+      payload: {
+        sourceEntityKey: "slack:T0A9C9RHZ9T:U123",
+        fields: {
+          display_name: "Theo Tarr",
+        },
+        handles: [
+          { type: "slack_user_id", value: "T0A9C9RHZ9T:U123", deterministic: true },
+        ],
+      },
+      sourceVersion: "slack-v1",
+    });
+
+    expect(rebuildProjectedState(db)).toEqual({
+      contacts: 1,
+      conversations: 1,
+      messages: 1,
+      rawEvents: 4,
+    });
+
+    const participantRows = db.orm().all<{ participant_name: string | null }>(sql`
+      SELECT c.preferred_display_name as participant_name
+      FROM conversation_participants cp
+      JOIN contacts c ON c.id = cp.contact_id
+    `);
+    expect(participantRows).toEqual([{ participant_name: "Theo Tarr" }]);
+
+    const messageRows = db.orm().all<{ sender_name: string | null; reaction_count: number }>(sql`
+      SELECT sender.preferred_display_name as sender_name, m.reaction_count
+      FROM messages m
+      LEFT JOIN contacts sender ON sender.id = m.sender_contact_id
+    `);
+    expect(messageRows).toEqual([{ sender_name: "Theo Tarr", reaction_count: 1 }]);
+
+    db.close();
+  });
 });

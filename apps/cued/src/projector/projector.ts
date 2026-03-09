@@ -76,6 +76,90 @@ function currentBestPriority(
   return row ?? null;
 }
 
+function ensureContactStub(
+  conn: LocalDbExecutor,
+  sourceContactMap: Map<string, string>,
+  platform: Platform,
+  accountKey: string,
+  sourceEntityKey: string | null | undefined,
+  observedAt: number,
+): string | null {
+  if (!sourceEntityKey) {
+    return null;
+  }
+
+  const sourceKey = `${platform}:${accountKey}:${sourceEntityKey}`;
+  const existingContactId = sourceContactMap.get(sourceKey);
+  const contactId = existingContactId ?? hashId("contact", sourceKey);
+  sourceContactMap.set(sourceKey, contactId);
+
+  conn.insert(contacts).values({
+    id: contactId,
+    kind: "person",
+    preferredDisplayName: null,
+    preferredPhotoUrl: null,
+    preferredCompany: null,
+    archived: 0,
+    createdAt: observedAt,
+    updatedAt: observedAt,
+  }).onConflictDoNothing().run();
+
+  return contactId;
+}
+
+function resolveOrEnsureContact(
+  conn: LocalDbExecutor,
+  sourceContactMap: Map<string, string>,
+  platform: Platform,
+  accountKey: string,
+  sourceEntityKey: string | null | undefined,
+  observedAt: number,
+): string | null {
+  if (!sourceEntityKey) {
+    return null;
+  }
+
+  const directKey = `${platform}:${accountKey}:${sourceEntityKey}`;
+  const contactsLocalKey = `contacts:local:${sourceEntityKey}`;
+  const existingContactId = sourceContactMap.get(directKey) ?? sourceContactMap.get(contactsLocalKey) ?? null;
+  if (existingContactId) {
+    return existingContactId;
+  }
+
+  return ensureContactStub(conn, sourceContactMap, platform, accountKey, sourceEntityKey, observedAt);
+}
+
+function ensureConversationStub(
+  conn: LocalDbExecutor,
+  conversationMap: Map<string, string>,
+  platform: Platform,
+  accountKey: string,
+  sourceConversationKey: string,
+  observedAt: number,
+): string {
+  const mapKey = `${platform}:${accountKey}:${sourceConversationKey}`;
+  const existingConversationId = conversationMap.get(mapKey);
+  const conversationId = existingConversationId ?? hashId("conversation", mapKey);
+  conversationMap.set(mapKey, conversationId);
+
+  conn.insert(conversations).values({
+    id: conversationId,
+    platform,
+    accountKey,
+    sourceConversationKey,
+    conversationType: "dm",
+    displayName: null,
+    topic: null,
+    lastMessageAt: null,
+    lastMessagePreview: null,
+    unreadCount: 0,
+    createdAt: observedAt,
+    updatedAt: observedAt,
+  }).onConflictDoNothing().run();
+
+  return conversationId;
+}
+
 export function rebuildProjectedState(db: CuedDatabase): {
   contacts: number;
   conversations: number;
@@ -147,6 +231,7 @@ function projectContactObservation(
     }))
     .sort((left, right) => `${left.type}:${left.normalizedValue}`.localeCompare(`${right.type}:${right.normalizedValue}`));
 
+  const existingSourceContactId = sourceContactMap.get(sourceKey) ?? null;
   const existingContactId = deterministicHandles
     .map((handle) => deterministicHandleMap.get(`${handle.type}:${handle.normalizedValue}`) ?? null)
     .find((contactId): contactId is string => Boolean(contactId));
@@ -155,7 +240,7 @@ function projectContactObservation(
     ? `${deterministicHandles[0].type}:${deterministicHandles[0].normalizedValue}`
     : sourceKey;
 
-  const contactId = existingContactId ?? hashId("contact", preferredIdentity);
+  const contactId = existingSourceContactId ?? existingContactId ?? hashId("contact", preferredIdentity);
   sourceContactMap.set(sourceKey, contactId);
   for (const handle of deterministicHandles) {
     deterministicHandleMap.set(`${handle.type}:${handle.normalizedValue}`, contactId);
@@ -341,8 +426,14 @@ function projectConversationObservation(
   },
 ): void {
   const payload = JSON.parse(event.payload_json) as ConversationObservationPayload;
-  const conversationId = hashId("conversation", `${event.platform}:${event.account_key}:${payload.sourceConversationKey}`);
-  conversationMap.set(`${event.platform}:${event.account_key}:${payload.sourceConversationKey}`, conversationId);
+  const conversationId = ensureConversationStub(
+    conn,
+    conversationMap,
+    event.platform,
+    event.account_key,
+    payload.sourceConversationKey,
+    event.observed_at,
+  );
 
   const conversationObservationValues = {
     id: hashId("conversation_obs", `${conversationId}:${event.id}`),
@@ -402,9 +493,18 @@ function projectConversationObservation(
   }).run();
 
   for (const participant of payload.participants) {
-    const contactId = sourceContactMap.get(`${event.platform}:${event.account_key}:${participant.sourceEntityKey}`)
-      ?? sourceContactMap.get(`contacts:local:${participant.sourceEntityKey}`)
-      ?? hashId("contact", participant.sourceEntityKey);
+    const contactId = resolveOrEnsureContact(
+      conn,
+      sourceContactMap,
+      event.platform,
+      event.account_key,
+      participant.sourceEntityKey,
+      event.observed_at,
+    );
+
+    if (!contactId) {
+      continue;
+    }
 
     const participantValues = {
       conversationId,
@@ -449,12 +549,22 @@ function projectMessageEvent(
 ): void {
   const payload = JSON.parse(event.payload_json) as MessagePayload;
   const messageId = hashId("message", `${event.platform}:${event.account_key}:${payload.sourceMessageKey}`);
-  const conversationId = conversationMap.get(`${event.platform}:${event.account_key}:${payload.sourceConversationKey}`)
-    ?? hashId("conversation", `${event.platform}:${event.account_key}:${payload.sourceConversationKey}`);
-  const senderContactId = sourceContactMap.get(`${event.platform}:${event.account_key}:${payload.senderSourceKey}`)
-    ?? (payload.senderSourceKey
-      ? sourceContactMap.get(`contacts:local:${payload.senderSourceKey}`) ?? null
-      : null);
+  const conversationId = ensureConversationStub(
+    conn,
+    conversationMap,
+    event.platform,
+    event.account_key,
+    payload.sourceConversationKey,
+    event.observed_at,
+  );
+  const senderContactId = resolveOrEnsureContact(
+    conn,
+    sourceContactMap,
+    event.platform,
+    event.account_key,
+    payload.senderSourceKey,
+    event.observed_at,
+  );
 
   const messageEventValues = {
     id: hashId("message_event", `${messageId}:${event.id}`),
@@ -572,13 +682,22 @@ function projectReactionEvent(
 ): void {
   const payload = JSON.parse(event.payload_json) as ReactionPayload;
   const messageId = hashId("message", `${event.platform}:${event.account_key}:${payload.sourceMessageKey}`);
-  const conversationId = conversationMap.get(`${event.platform}:${event.account_key}:${payload.sourceConversationKey}`)
-    ?? hashId("conversation", `${event.platform}:${event.account_key}:${payload.sourceConversationKey}`);
-  const reactorContactId = payload.reactorSourceKey
-    ? sourceContactMap.get(`${event.platform}:${event.account_key}:${payload.reactorSourceKey}`)
-      ?? sourceContactMap.get(`contacts:local:${payload.reactorSourceKey}`)
-      ?? null
-    : null;
+  const conversationId = ensureConversationStub(
+    conn,
+    conversationMap,
+    event.platform,
+    event.account_key,
+    payload.sourceConversationKey,
+    event.observed_at,
+  );
+  const reactorContactId = resolveOrEnsureContact(
+    conn,
+    sourceContactMap,
+    event.platform,
+    event.account_key,
+    payload.reactorSourceKey,
+    event.observed_at,
+  );
 
   const reactionValues = {
     id: hashId("reaction", `${messageId}:${payload.reactorSourceKey ?? "__me__"}:${payload.emoji}`),

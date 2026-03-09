@@ -14,6 +14,7 @@ export class SlackRequestError extends Error {
     public readonly statusCode: number,
     public readonly slackError?: string,
     public readonly response?: string,
+    public readonly retryAfterMs?: number,
   ) {
     super(message);
     this.name = "SlackRequestError";
@@ -72,11 +73,18 @@ class SlackRequest {
         }
 
         if ((RETRY_CONFIG.retryableStatusCodes as readonly number[]).includes(response.status)) {
+          const retryAfterMs = parseRetryAfterMs(response.headers.get("retry-after"));
           if (attempt < RETRY_CONFIG.maxRetries) {
-            await sleep(RETRY_CONFIG.baseDelayMs * Math.pow(2, attempt));
+            await sleep(retryAfterMs ?? RETRY_CONFIG.baseDelayMs * Math.pow(2, attempt));
             continue;
           }
-          throw new SlackRequestError(`Slack request failed: ${response.status}`, response.status);
+          throw new SlackRequestError(
+            `Slack request failed: ${response.status}`,
+            response.status,
+            undefined,
+            undefined,
+            retryAfterMs ?? undefined,
+          );
         }
 
         const text = await response.text();
@@ -108,6 +116,19 @@ class SlackRequest {
 export function newPostRequest(endpoint: string, credentials: SlackCredentials): SlackRequest {
   const url = endpoint.startsWith("http") ? endpoint : `${SLACK_API_BASE}/${endpoint}`;
   return new SlackRequest(url, credentials);
+}
+
+function parseRetryAfterMs(header: string | null): number | null {
+  if (!header) {
+    return null;
+  }
+
+  const seconds = Number(header);
+  if (Number.isFinite(seconds) && seconds >= 0) {
+    return Math.max(1000, Math.round(seconds * 1000));
+  }
+
+  return null;
 }
 
 function sleep(ms: number): Promise<void> {

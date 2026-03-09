@@ -20,6 +20,8 @@ import {
   REQUESTABLE_INTEGRATION_PLATFORM_VALUES,
 } from "../types/provider.js";
 import { resolveMacOSNativeBinary } from "../workers/native-binary.js";
+import { importLegacyLocalAuth } from "./legacy-local-auth.js";
+import { importSlackDesktopAuth } from "./slack-desktop-auth.js";
 
 export interface IntegrationStateSummary {
   platform: Platform;
@@ -382,10 +384,10 @@ export function getIntegrationSummary(
   return summarizeIntegrationStates(db, [row])[0]!;
 }
 
-export function refreshManagedIntegrationStates(db: CuedDatabase): {
+export async function refreshManagedIntegrationStates(db: CuedDatabase): Promise<{
   refreshed: number;
   integrations: IntegrationStateSummary[];
-} {
+}> {
   const managed = buildLocalIntegrationStates().map(addSupportedByDaemonMetadata);
 
   for (const integration of managed) {
@@ -406,8 +408,13 @@ export function refreshManagedIntegrationStates(db: CuedDatabase): {
     });
   }
 
+  const importedDesktop = await importSlackDesktopAuth(db);
+  const importedLegacy = importLegacyLocalAuth(db);
+
   return {
-    refreshed: managed.length,
+    refreshed: managed.length
+      + importedDesktop.filter((entry) => entry.imported).length
+      + importedLegacy.filter((entry) => entry.imported).length,
     integrations: listIntegrationStates(db),
   };
 }

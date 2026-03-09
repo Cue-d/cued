@@ -598,6 +598,43 @@ export class CuedDatabase {
     }).where(eq(authSessions.id, input.id)).run();
   }
 
+  failInProgressRuns(errorMessage: string): number {
+    return this.db.transaction((tx) => {
+      const stuckRuns = tx
+        .select({
+          id: syncRuns.id,
+        })
+        .from(syncRuns)
+        .where(eq(syncRuns.status, "running"))
+        .all();
+
+      if (stuckRuns.length === 0) {
+        return 0;
+      }
+
+      const finishedAt = now();
+      for (const run of stuckRuns) {
+        tx.update(syncRuns)
+          .set({
+            status: "failed",
+            finishedAt,
+          })
+          .where(eq(syncRuns.id, run.id))
+          .run();
+
+        tx.insert(syncRunErrors).values({
+          id: randomUUID(),
+          syncRunId: run.id,
+          errorMessage,
+          detailsJson: null,
+          createdAt: finishedAt,
+        }).run();
+      }
+
+      return stuckRuns.length;
+    });
+  }
+
   queueSyncRun(input: {
     platform?: Platform | null;
     accountKey?: string | null;

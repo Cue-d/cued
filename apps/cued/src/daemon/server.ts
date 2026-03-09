@@ -178,8 +178,10 @@ export async function runDaemon(): Promise<void> {
     string,
     { child: ChildProcess; platform: Platform; accountKey: string }
   >();
+  let isProcessingRun = false;
 
-  refreshManagedIntegrationStates(db);
+  db.failInProgressRuns("Recovered stale running sync after daemon restart");
+  await refreshManagedIntegrationStates(db);
 
   if (existsSync(CUED_SOCKET_PATH)) {
     rmSync(CUED_SOCKET_PATH, { force: true });
@@ -222,7 +224,11 @@ export async function runDaemon(): Promise<void> {
 
   queueAutoSyncRuns("daemon_start");
 
-  const workLoop = setInterval(async () => {
+  const processNextRun = async () => {
+    if (isProcessingRun) {
+      return;
+    }
+    isProcessingRun = true;
     let currentRun: ReturnType<typeof db.claimNextQueuedRun> = null;
     try {
       currentRun = db.claimNextQueuedRun();
@@ -330,7 +336,13 @@ export async function runDaemon(): Promise<void> {
           error: error instanceof Error ? error.message : String(error),
         });
       }
+    } finally {
+      isProcessingRun = false;
     }
+  };
+
+  const workLoop = setInterval(() => {
+    void processNextRun();
   }, 500);
 
   const schedulerLoop = setInterval(() => {
@@ -466,7 +478,7 @@ async function dispatchRequest(
         return {
           id: request.id,
           ok: true,
-          result: refreshManagedIntegrationStates(db),
+          result: await refreshManagedIntegrationStates(db),
         };
       case "integrations-connect":
         {
