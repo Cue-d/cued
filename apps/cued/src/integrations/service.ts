@@ -104,16 +104,6 @@ const REQUESTABLE_INTEGRATIONS: Record<string, RequestableIntegrationConfig> = {
       authCapture: "cookies:li_at,JSESSIONID",
     },
   },
-  twitter: {
-    connectionKind: "browser-session",
-    runtimeKind: "chromium",
-    launchStrategy: "chromium-auth",
-    launchTarget: "https://x.com/i/flow/login",
-    displayName: "X",
-    metadata: {
-      authCapture: "cookies:auth_token,ct0",
-    },
-  },
   whatsapp: {
     connectionKind: "qr-link",
     runtimeKind: "qr_native",

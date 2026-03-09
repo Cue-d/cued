@@ -100,7 +100,6 @@ describe("integration state management", () => {
     expect(listRequestableIntegrationPlatforms()).toEqual([
       "slack",
       "linkedin",
-      "twitter",
       "whatsapp",
       "signal",
     ]);

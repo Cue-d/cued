@@ -66,7 +66,7 @@ export const PLATFORM_DEFINITIONS = {
   twitter: {
     adapter: false,
     defaultAccountKey: "default",
-    requestableIntegration: true,
+    requestableIntegration: false,
     requestableOrder: 3,
   },
   whatsapp: {
