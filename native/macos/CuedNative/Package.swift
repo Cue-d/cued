@@ -14,6 +14,9 @@ let package = Package(
     .executableTarget(
       name: "CuedNative",
       path: "Sources/CuedNative",
+      swiftSettings: [
+        .unsafeFlags(["-parse-as-library"]),
+      ],
       linkerSettings: [
         .linkedLibrary("sqlite3"),
       ]
