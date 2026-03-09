@@ -36,6 +36,9 @@ describe("hooks service", () => {
         expect(doctor.exists).toBe(true);
         expect(doctor.valid).toBe(true);
         expect(doctor.hooks.length).toBeGreaterThan(0);
+        expect(typeof doctor.openClawPath === "string" || doctor.openClawPath === null).toBe(true);
+        expect(contents).toContain("sync.completed");
+        expect(contents).toContain("sync.failed");
     });
     it("runs enabled subprocess hooks with JSON stdin", async () => {
         const home = setTempHome();

@@ -12,30 +12,26 @@ export const HOOK_EVENT_NAMES = [
 function isHookEventName(value) {
     return HOOK_EVENT_NAMES.includes(value);
 }
-function commandExists(command) {
+function resolveCommandPath(command) {
     try {
-        execFileSync("sh", ["-lc", `command -v ${shellQuote(command)}`], {
-            stdio: ["ignore", "ignore", "ignore"],
+        return execFileSync("sh", ["-lc", `command -v ${shellQuote(command)}`], {
+            encoding: "utf8",
+            stdio: ["ignore", "pipe", "ignore"],
         });
-        return true;
     }
     catch {
-        return false;
+        return null;
     }
 }
 function shellQuote(value) {
     return `'${value.replace(/'/g, `'\\''`)}'`;
 }
+function commandExists(command) {
+    return resolveCommandPath(command) !== null;
+}
 function detectOpenClaw() {
-    try {
-        execFileSync("sh", ["-lc", "command -v openclaw"], {
-            stdio: ["ignore", "ignore", "ignore"],
-        });
-        return true;
-    }
-    catch {
-        return false;
-    }
+    const path = resolveCommandPath("openclaw")?.trim() ?? null;
+    return { detected: path !== null, path };
 }
 function normalizeHook(raw) {
     const event = typeof raw.event === "string" && isHookEventName(raw.event)
@@ -69,7 +65,7 @@ export function loadHooksConfig() {
         : [];
     return { path: CUED_HOOKS_PATH, exists: true, hooks };
 }
-function buildSampleHooks(openClawDetected) {
+function buildSampleHooks(openClaw) {
     const config = {
         version: 1,
         hooks: [
@@ -78,6 +74,18 @@ function buildSampleHooks(openClawDetected) {
                 enabled: false,
                 command: "/bin/sh",
                 args: ["-lc", "cat >/tmp/cued-hook-integration-authenticated.json"],
+            },
+            {
+                event: "sync.completed",
+                enabled: false,
+                command: "/bin/sh",
+                args: ["-lc", "cat >/tmp/cued-hook-sync-completed.json"],
+            },
+            {
+                event: "sync.failed",
+                enabled: false,
+                command: "/bin/sh",
+                args: ["-lc", "cat >/tmp/cued-hook-sync-failed.json"],
             },
             {
                 event: "message.received",
@@ -89,9 +97,11 @@ function buildSampleHooks(openClawDetected) {
     };
     const header = [
         "# Cued local hook configuration",
-        "# Hooks are disabled by default. Each hook receives a JSON payload on stdin.",
-        openClawDetected
-            ? "# OpenClaw detected on PATH. Add your own disabled openclaw subprocess hook here if you want one."
+        "# Hooks are disabled by default. Each hook receives one JSON document on stdin.",
+        '# {"event":"message.received","payload":{...}}',
+        "# Hook subprocess failures never block auth or sync.",
+        openClaw.detected
+            ? `# OpenClaw detected at ${openClaw.path}. Add your own disabled subprocess wrapper if you want to bridge Cued events into it.`
             : "# OpenClaw not detected on PATH. You can still add your own subprocess hooks here later.",
         "",
     ].join("\n");
@@ -99,21 +109,33 @@ function buildSampleHooks(openClawDetected) {
 }
 export function initHooksConfig(force = false) {
     ensureCuedDirs();
-    const openClawDetected = detectOpenClaw();
+    const openClaw = detectOpenClaw();
     if (existsSync(CUED_HOOKS_PATH) && !force) {
-        return { path: CUED_HOOKS_PATH, created: false, openClawDetected };
+        return {
+            path: CUED_HOOKS_PATH,
+            created: false,
+            openClawDetected: openClaw.detected,
+            openClawPath: openClaw.path,
+        };
     }
-    writeFileSync(CUED_HOOKS_PATH, buildSampleHooks(openClawDetected), "utf8");
-    return { path: CUED_HOOKS_PATH, created: true, openClawDetected };
+    writeFileSync(CUED_HOOKS_PATH, buildSampleHooks(openClaw), "utf8");
+    return {
+        path: CUED_HOOKS_PATH,
+        created: true,
+        openClawDetected: openClaw.detected,
+        openClawPath: openClaw.path,
+    };
 }
 export function doctorHooksConfig() {
+    const openClaw = detectOpenClaw();
     try {
         const config = loadHooksConfig();
         return {
             path: config.path,
             exists: config.exists,
             valid: true,
-            openClawDetected: detectOpenClaw(),
+            openClawDetected: openClaw.detected,
+            openClawPath: openClaw.path,
             hooks: config.hooks.map((hook) => ({
                 event: hook.event,
                 enabled: hook.enabled,
@@ -127,7 +149,8 @@ export function doctorHooksConfig() {
             path: CUED_HOOKS_PATH,
             exists: existsSync(CUED_HOOKS_PATH),
             valid: false,
-            openClawDetected: detectOpenClaw(),
+            openClawDetected: openClaw.detected,
+            openClawPath: openClaw.path,
             hooks: [],
             error: error instanceof Error ? error.message : String(error),
         };
