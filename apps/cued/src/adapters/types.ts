@@ -7,6 +7,7 @@ export interface SyncBundle {
   rawEvents: ProviderRawEventInput[];
   sourceCursor?: unknown;
   syncMode?: SyncMode;
+  hasMore?: boolean;
 }
 
 export interface AdapterWorkerOutput {
