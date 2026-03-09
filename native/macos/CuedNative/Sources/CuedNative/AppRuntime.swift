@@ -7,6 +7,7 @@ private let appDaemonHeartbeatGraceMs = 20_000
 struct AppIntegrationStatus {
   let platform: String
   let accountKey: String
+  let displayName: String?
   let authState: String
   let enabled: Bool
 }
@@ -121,6 +122,7 @@ private final class AppStatusStore {
   private func queryIntegrations(db: OpaquePointer) -> [AppIntegrationStatus] {
     let sql = """
       SELECT platform, account_key, auth_state, enabled
+      , display_name
       FROM integration_states
       ORDER BY platform, account_key
     """
@@ -137,6 +139,7 @@ private final class AppStatusStore {
         AppIntegrationStatus(
           platform: String(cString: sqlite3_column_text(statement, 0)),
           accountKey: String(cString: sqlite3_column_text(statement, 1)),
+          displayName: sqlite3_column_type(statement, 4) == SQLITE_NULL ? nil : String(cString: sqlite3_column_text(statement, 4)),
           authState: String(cString: sqlite3_column_text(statement, 2)),
           enabled: sqlite3_column_int(statement, 3) == 1
         )
@@ -144,6 +147,10 @@ private final class AppStatusStore {
     }
     return results
   }
+}
+
+private func isConnectedIntegrationState(_ value: String) -> Bool {
+  value == "authorized" || value == "authenticated"
 }
 
 private func integrationStateLabel(_ value: String) -> String {
@@ -162,11 +169,19 @@ private func integrationStateLabel(_ value: String) -> String {
     return "missing"
   case "blocked":
     return "blocked"
+  case "not_determined":
+    return "needs permission"
   case "cancelled":
     return "disconnected"
   default:
     return value.replacingOccurrences(of: "_", with: " ")
   }
+}
+
+private func integrationMenuTitle(_ integration: AppIntegrationStatus) -> String {
+  let title = integration.displayName?.trimmingCharacters(in: .whitespacesAndNewlines)
+  let base = (title?.isEmpty == false) ? title! : "\(integration.platform) \(integration.accountKey)"
+  return "\(base) • \(integrationStateLabel(integration.authState))\(integration.enabled ? "" : " (disabled)")"
 }
 
 @MainActor
@@ -423,20 +438,35 @@ final class MenuBarAppController: NSObject, NSApplicationDelegate {
       item.isEnabled = false
       menu.addItem(item)
     } else {
-      for integration in snapshot.integrations.prefix(8) {
-        let item = NSMenuItem(
-          title: "\(integration.platform) \(integration.accountKey) • \(integrationStateLabel(integration.authState))\(integration.enabled ? "" : " (disabled)")",
-          action: nil,
-          keyEquivalent: ""
-        )
+      let visibleIntegrations = snapshot.integrations.filter { $0.enabled }
+      let connectedIntegrations = visibleIntegrations.filter { isConnectedIntegrationState($0.authState) }
+      let needsAttentionIntegrations = visibleIntegrations.filter { !isConnectedIntegrationState($0.authState) }
+
+      if connectedIntegrations.isEmpty {
+        let item = NSMenuItem(title: "No connected integrations", action: nil, keyEquivalent: "")
         item.isEnabled = false
         menu.addItem(item)
+      } else {
+        let sectionHeader = NSMenuItem(title: "Connected", action: nil, keyEquivalent: "")
+        sectionHeader.isEnabled = false
+        menu.addItem(sectionHeader)
+        for integration in connectedIntegrations {
+          let item = NSMenuItem(title: integrationMenuTitle(integration), action: nil, keyEquivalent: "")
+          item.isEnabled = false
+          menu.addItem(item)
+        }
       }
-      if snapshot.integrations.count > 8 {
-        let remaining = snapshot.integrations.count - 8
-        let item = NSMenuItem(title: "...and \(remaining) more", action: nil, keyEquivalent: "")
-        item.isEnabled = false
-        menu.addItem(item)
+
+      if !needsAttentionIntegrations.isEmpty {
+        menu.addItem(.separator())
+        let sectionHeader = NSMenuItem(title: "Needs Attention", action: nil, keyEquivalent: "")
+        sectionHeader.isEnabled = false
+        menu.addItem(sectionHeader)
+        for integration in needsAttentionIntegrations {
+          let item = NSMenuItem(title: integrationMenuTitle(integration), action: nil, keyEquivalent: "")
+          item.isEnabled = false
+          menu.addItem(item)
+        }
       }
     }
 
@@ -483,10 +513,19 @@ final class MenuBarAppController: NSObject, NSApplicationDelegate {
       return nil
     }
 
-    return URL(fileURLWithPath: executablePath)
-      .deletingLastPathComponent()
-      .appendingPathComponent("../../../../apps/electron/resources/trayIconTemplate.png")
-      .standardizedFileURL.path
+    let executableURL = URL(fileURLWithPath: executablePath)
+    let candidates = [
+      executableURL
+        .deletingLastPathComponent()
+        .appendingPathComponent("../../../../apps/electron/resources/trayIconTemplate.png")
+        .standardizedFileURL.path,
+      executableURL
+        .deletingLastPathComponent()
+        .appendingPathComponent("../../../apps/electron/resources/trayIconTemplate.png")
+        .standardizedFileURL.path,
+    ]
+
+    return candidates.first { FileManager.default.fileExists(atPath: $0) }
   }
 }
 
