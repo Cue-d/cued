@@ -79,6 +79,11 @@ struct AuthOpenOptions {
   var dbPath = ""
 }
 
+struct WatchEvent: Encodable {
+  let event: String
+  let timestamp: Int
+}
+
 private struct MessageRow {
   let rowID: Int
   let guid: String
@@ -119,7 +124,7 @@ enum CLIError: Error, LocalizedError {
   var errorDescription: String? {
     switch self {
     case .invalidCommand:
-      return "usage: CuedNative contacts dump|status | CuedNative imessage dump [--db-path PATH] [--after-rowid N] [--limit N] | CuedNative browser open --url URL | CuedNative browser close --url-prefix PREFIX | CuedNative auth open --platform PLATFORM --account-key KEY --session-id ID --db-path PATH"
+      return "usage: CuedNative contacts dump|status|watch | CuedNative imessage dump [--db-path PATH] [--after-rowid N] [--limit N] | CuedNative browser open --url URL | CuedNative browser close --url-prefix PREFIX | CuedNative auth open --platform PLATFORM --account-key KEY --session-id ID --db-path PATH"
     case .invalidOption(let message):
       return message
     case .contactsAccessDenied:
@@ -234,6 +239,8 @@ struct CuedNativeCLI {
       try writeJSON(dumpContacts())
     case ("contacts", "status"):
       try writeJSON(["status": contactsAuthorizationStatus()])
+    case ("contacts", "watch"):
+      try streamContactChanges()
     case ("imessage", "dump"):
       let options = try parseIMessageOptions(Array(arguments.dropFirst(2)))
       try writeJSON(dumpIMessage(options: options))
@@ -255,6 +262,11 @@ struct CuedNativeCLI {
     let encoder = JSONEncoder()
     let data = try encoder.encode(value)
     FileHandle.standardOutput.write(data)
+  }
+
+  private static func writeJSONLine<T: Encodable>(_ value: T) throws {
+    try writeJSON(value)
+    FileHandle.standardOutput.write(Data("\n".utf8))
   }
 
   private static func parseIMessageOptions(_ arguments: [String]) throws -> IMessageDumpOptions {
@@ -518,6 +530,39 @@ struct CuedNativeCLI {
     }
 
     return records
+  }
+
+  @MainActor
+  private static func streamContactChanges() throws {
+    let store = CNContactStore()
+    try ensureContactsAccess(store: store)
+
+    try writeJSONLine(WatchEvent(
+      event: "ready",
+      timestamp: Int(Date().timeIntervalSince1970 * 1000)
+    ))
+
+    let notificationCenter = NotificationCenter.default
+    let observer = notificationCenter.addObserver(
+      forName: .CNContactStoreDidChange,
+      object: nil,
+      queue: nil
+    ) { _ in
+      do {
+        try writeJSONLine(WatchEvent(
+          event: "contacts_changed",
+          timestamp: Int(Date().timeIntervalSince1970 * 1000)
+        ))
+      } catch {
+        fputs("\(error.localizedDescription)\n", stderr)
+      }
+    }
+
+    defer {
+      notificationCenter.removeObserver(observer)
+    }
+
+    RunLoop.main.run()
   }
 
   private static func contactsAuthorizationStatus() -> String {

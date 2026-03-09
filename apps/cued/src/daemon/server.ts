@@ -1,6 +1,7 @@
 import { createServer, type Socket } from "node:net";
-import type { ChildProcess } from "node:child_process";
-import { existsSync, rmSync } from "node:fs";
+import { spawn, type ChildProcess } from "node:child_process";
+import { existsSync, rmSync, watch, type FSWatcher } from "node:fs";
+import { dirname, basename } from "node:path";
 import process from "node:process";
 import { CUED_SOCKET_PATH } from "../config.js";
 import { openCuedDatabase } from "../db/database.js";
@@ -24,6 +25,8 @@ import {
 import { startAuthSession } from "../integrations/auth-runtime.js";
 import { doctorHooksConfig, emitHookEvent } from "../hooks/service.js";
 import { projectPendingRawEvents, rebuildProjectedState } from "../projector/projector.js";
+import { DEFAULT_CHAT_DB_PATH } from "../adapters/imessage/reader.js";
+import { resolveMacOSNativeBinary } from "../workers/native-binary.js";
 import {
   getDefaultAccountKeyForPlatform,
   isPlatform,
@@ -34,6 +37,7 @@ import {
 const DAEMON_VERSION = "0.1.0";
 const DEFAULT_AUTOSYNC_INTERVAL_MS = 60_000;
 const DEFAULT_INGEST_CONCURRENCY = 4;
+const NATIVE_WATCH_DEBOUNCE_MS = 1_500;
 
 function now(): number {
   return Date.now();
@@ -105,6 +109,122 @@ async function emitAuthenticatedHook(
     integration: getIntegrationSummary(db, platform, accountKey),
     authSession: getAuthSessionSummary(db, sessionId),
   });
+}
+
+function queueNativeTriggeredSync(
+  db: ReturnType<typeof openCuedDatabase>,
+  platform: AdapterPlatform,
+  accountKey: string,
+  trigger: string,
+): void {
+  const integration = db.getIntegrationState(platform, accountKey);
+  if (!integration || integration.enabled !== 1 || integration.sync_capable !== 1) {
+    return;
+  }
+  if (db.hasQueuedOrRunningRun(platform, accountKey)) {
+    return;
+  }
+
+  db.queueSyncRun({
+    platform,
+    accountKey,
+    runType: "sync",
+    trigger,
+    details: { source: platform, accountKey, trigger },
+  });
+}
+
+function createDebouncedSyncEnqueuer(
+  db: ReturnType<typeof openCuedDatabase>,
+): (platform: AdapterPlatform, accountKey: string, trigger: string) => void {
+  const timers = new Map<string, NodeJS.Timeout>();
+
+  return (platform, accountKey, trigger) => {
+    const key = `${platform}:${accountKey}`;
+    const existing = timers.get(key);
+    if (existing) {
+      clearTimeout(existing);
+    }
+
+    const timer = setTimeout(() => {
+      timers.delete(key);
+      queueNativeTriggeredSync(db, platform, accountKey, trigger);
+    }, NATIVE_WATCH_DEBOUNCE_MS);
+    timers.set(key, timer);
+  };
+}
+
+function startIMessageWatcher(
+  db: ReturnType<typeof openCuedDatabase>,
+  queueSync: (platform: AdapterPlatform, accountKey: string, trigger: string) => void,
+): FSWatcher | null {
+  try {
+    const targetDir = dirname(DEFAULT_CHAT_DB_PATH);
+    const watchedNames = new Set([
+      basename(DEFAULT_CHAT_DB_PATH),
+      `${basename(DEFAULT_CHAT_DB_PATH)}-wal`,
+      `${basename(DEFAULT_CHAT_DB_PATH)}-shm`,
+    ]);
+
+    return watch(targetDir, (_eventType, filename) => {
+      if (!filename) {
+        return;
+      }
+      if (!watchedNames.has(filename.toString())) {
+        return;
+      }
+      queueSync("imessage", "local", "native_watch:imessage");
+    });
+  } catch (error) {
+    console.warn(
+      `[cued native-watch] imessage watcher unavailable: ${error instanceof Error ? error.message : String(error)}`,
+    );
+    return null;
+  }
+}
+
+function startContactsWatcher(
+  db: ReturnType<typeof openCuedDatabase>,
+  queueSync: (platform: AdapterPlatform, accountKey: string, trigger: string) => void,
+): ChildProcess | null {
+  const nativeBinary = resolveMacOSNativeBinary(process.env.CUED_CONTACTS_NATIVE_BINARY);
+  if (!nativeBinary) {
+    return null;
+  }
+
+  const child = spawn(nativeBinary, ["contacts", "watch"], {
+    stdio: ["ignore", "pipe", "pipe"],
+    env: process.env,
+  });
+
+  let stdoutBuffer = "";
+  child.stdout.on("data", (chunk) => {
+    stdoutBuffer += chunk.toString("utf8");
+    let newlineIndex = stdoutBuffer.indexOf("\n");
+    while (newlineIndex >= 0) {
+      const line = stdoutBuffer.slice(0, newlineIndex).trim();
+      stdoutBuffer = stdoutBuffer.slice(newlineIndex + 1);
+      if (line.length > 0) {
+        queueSync("contacts", "local", "native_watch:contacts");
+      }
+      newlineIndex = stdoutBuffer.indexOf("\n");
+    }
+  });
+
+  child.stderr.on("data", (chunk) => {
+    const message = chunk.toString("utf8").trim();
+    if (message.length > 0) {
+      console.warn(`[cued native-watch] contacts watcher: ${message}`);
+    }
+  });
+
+  child.on("exit", (code) => {
+    if (code && code !== 0) {
+      console.warn(`[cued native-watch] contacts watcher exited with code ${code}`);
+    }
+  });
+
+  return child;
 }
 
 function isInboundMessageEvent(rawEvent: Record<string, unknown>): boolean {
@@ -187,6 +307,7 @@ export async function runDaemon(): Promise<void> {
   >();
   const activeIngestRuns = new Map<string, Promise<void>>();
   let isProcessingProjection = false;
+  const queueDebouncedNativeSync = createDebouncedSyncEnqueuer(db);
 
   db.failInProgressRuns("Recovered stale in-progress sync after daemon restart");
   await refreshManagedIntegrationStates(db);
@@ -249,6 +370,19 @@ export async function runDaemon(): Promise<void> {
 
   queueAutoSyncRuns("daemon_start");
   queueProjectionRun("daemon_start");
+
+  const nativeWatchers: Array<FSWatcher | ChildProcess> = [];
+  if (process.platform === "darwin") {
+    const imessageWatcher = startIMessageWatcher(db, queueDebouncedNativeSync);
+    if (imessageWatcher) {
+      nativeWatchers.push(imessageWatcher);
+    }
+
+    const contactsWatcher = startContactsWatcher(db, queueDebouncedNativeSync);
+    if (contactsWatcher) {
+      nativeWatchers.push(contactsWatcher);
+    }
+  }
 
   const processIngestRun = async (
     currentRun: NonNullable<ReturnType<typeof db.claimNextQueuedRun>>,
@@ -432,6 +566,15 @@ export async function runDaemon(): Promise<void> {
     clearInterval(ingestLoop);
     clearInterval(projectionLoop);
     clearInterval(schedulerLoop);
+    for (const watcher of nativeWatchers) {
+      if ("close" in watcher && typeof watcher.close === "function") {
+        watcher.close();
+        continue;
+      }
+      if ("kill" in watcher && typeof watcher.kill === "function") {
+        watcher.kill("SIGTERM");
+      }
+    }
     db.upsertDaemonState({
       pid: null,
       startedAt,
