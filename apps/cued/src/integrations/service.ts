@@ -663,11 +663,9 @@ export function disconnectIntegration(
 
 export function buildIntegrationStatus(db: CuedDatabase): {
   integrations: IntegrationStateSummary[];
-  authSessions: AuthSessionSummary[];
 } {
   return {
     integrations: listIntegrationStates(db),
-    authSessions: listAuthSessions(db, 20),
   };
 }
 

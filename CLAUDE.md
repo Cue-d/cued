@@ -18,15 +18,15 @@ apps/cued (daemon, auth/session model, sync orchestration, projection)
 
 **Current state:**
 - `apps/cued` is the canonical runtime
-- `apps/electron` is reference-only during cutover
-- cloud/web/mobile code is legacy and being removed
+- `native/macos/CuedNative` is the macOS host app
+- `apps/electron` is cutover reference only
 
 ## Monorepo Structure
 
 ```
 apps/
   cued/             Local daemon and CLI
-  electron/         macOS sync client (iMessage, LinkedIn, Slack, Signal, Twitter, Contacts)
+  electron/         Historical cutover reference
 
 packages/
   shared/           Source of truth for utils, types, constants (@cued/shared)
@@ -283,7 +283,7 @@ pnpm build    # Deploy to production
 Schema: `packages/convex/convex/schema.ts`
 Functions: `packages/convex/convex/*.ts`
 
-## Electron (macOS)
+## Electron (Reference Only)
 
 ```bash
 cd apps/electron
@@ -316,7 +316,7 @@ Each platform has `sync.ts`, `adapter.ts`, `auth.ts`, `index.ts`, and platform-s
 - `AssistantPage.tsx` - AI assistant chat
 - `SettingsPage.tsx` - App settings
 
-**Contacts:** Uses `node-mac-contacts` native module (not Swift CLI). Provides in-process access to macOS Contacts.app via CNContactStore. Permission requests, contact fetching, and change listening all happen in the Electron main process.
+This code is reference material during cutover and is not part of the active local runtime.
 
 ## Common Issues
 

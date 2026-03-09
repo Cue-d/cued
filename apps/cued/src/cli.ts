@@ -13,7 +13,6 @@ import {
   buildIntegrationStatus,
   connectIntegration,
   disconnectIntegration,
-  getAuthSessionSummary,
   listIntegrationStates,
   listRequestableIntegrationPlatforms,
   completeAuthSession,
@@ -54,8 +53,6 @@ Usage:
   cued integrations refresh
   cued integrations connect <platform> [account]
   cued integrations disconnect <platform> [account]
-  cued integrations auth-status <session-id>
-  cued integrations auth-cancel <session-id>
   cued integrations enable <platform> [account]
   cued integrations disable <platform> [account]
   cued hooks init
@@ -130,13 +127,6 @@ async function handleLocalIntegrationCommand(
           throw new Error("Usage: cued integrations disconnect <platform> [account]");
         }
         return disconnectIntegration(db, rest[0], rest[1]);
-      case "auth-status":
-        if (!rest[0]) {
-          throw new Error("Usage: cued integrations auth-status <session-id>");
-        }
-        return { authSession: getAuthSessionSummary(db, rest[0]) };
-      case "auth-cancel":
-        throw new Error("Auth cancellation requires the cued daemon to be running");
       case "enable":
         if (!rest[0]) {
           throw new Error("Usage: cued integrations enable <platform> [account]");
@@ -149,7 +139,7 @@ async function handleLocalIntegrationCommand(
         return setIntegrationEnabled(db, rest[0], rest[1], false);
       default:
         throw new Error(
-          `Usage: cued integrations list | status | refresh | connect <platform> [account] | disconnect <platform> [account] | auth-status <session-id> | auth-cancel <session-id> | enable <platform> [account] | disable <platform> [account]\nRequestable platforms: ${listRequestableIntegrationPlatforms().join(", ")}`,
+          `Usage: cued integrations list | status | refresh | connect <platform> [account] | disconnect <platform> [account] | enable <platform> [account] | disable <platform> [account]\nRequestable platforms: ${listRequestableIntegrationPlatforms().join(", ")}`,
         );
     }
   } finally {
@@ -209,7 +199,6 @@ async function main(): Promise<void> {
             integrations: listIntegrationStates(db),
             hooks: doctorHooksConfig(),
             socketRunning: false,
-            migrationsApplied: true,
             dbPath: db.dbPath,
           },
     );
@@ -328,24 +317,6 @@ async function main(): Promise<void> {
             accountKey: rest[1],
           });
           break;
-        case "auth-status":
-          if (!rest[0]) {
-            throw new Error("Usage: cued integrations auth-status <session-id>");
-          }
-          response = await sendDaemonRequest({
-            command: "integrations-auth-status",
-            sessionId: rest[0],
-          });
-          break;
-        case "auth-cancel":
-          if (!rest[0]) {
-            throw new Error("Usage: cued integrations auth-cancel <session-id>");
-          }
-          response = await sendDaemonRequest({
-            command: "integrations-auth-cancel",
-            sessionId: rest[0],
-          });
-          break;
         case "enable":
           if (!rest[0]) {
             throw new Error("Usage: cued integrations enable <platform> [account]");
@@ -368,7 +339,7 @@ async function main(): Promise<void> {
           break;
         default:
           throw new Error(
-            `Usage: cued integrations list | status | refresh | connect <platform> [account] | disconnect <platform> [account] | auth-status <session-id> | auth-cancel <session-id> | enable <platform> [account] | disable <platform> [account]\nRequestable platforms: ${listRequestableIntegrationPlatforms().join(", ")}`,
+            `Usage: cued integrations list | status | refresh | connect <platform> [account] | disconnect <platform> [account] | enable <platform> [account] | disable <platform> [account]\nRequestable platforms: ${listRequestableIntegrationPlatforms().join(", ")}`,
           );
       }
       break;

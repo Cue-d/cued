@@ -16,7 +16,6 @@ import {
   disconnectIntegration,
   getAuthSessionSummary,
   getIntegrationSummary,
-  listAuthSessions,
   listIntegrationStates,
   markAuthSessionInProgress,
   refreshManagedIntegrationStates,
@@ -126,11 +125,9 @@ async function emitAuthenticatedHook(
   db: ReturnType<typeof openCuedDatabase>,
   platform: string,
   accountKey: string,
-  sessionId: string,
 ): Promise<void> {
   await safeEmitHookEvent("integration.authenticated", {
     integration: getIntegrationSummary(db, platform, accountKey),
-    authSession: getAuthSessionSummary(db, sessionId),
   });
 }
 
@@ -333,7 +330,7 @@ async function startManagedAuth(
         errorSummary: result.errorSummary ?? null,
       });
       if (completed.integration.authState === "authenticated") {
-        await emitAuthenticatedHook(db, completed.integration.platform, completed.integration.accountKey, running.id);
+        await emitAuthenticatedHook(db, completed.integration.platform, completed.integration.accountKey);
       }
     })
     .catch((error) => {
@@ -761,11 +758,9 @@ async function dispatchRequest(
           ok: true,
           result: {
             ...buildDoctorReport(db),
-            projection: db.getProjectionBacklog(),
             autoSyncTargets: getAutoSyncTargets(db),
             autoSyncIntervalMs: getAutoSyncIntervalMs(),
             ingestConcurrency: getIngestConcurrency(),
-            ...buildIntegrationStatus(db),
             hooks: doctorHooksConfig(),
           },
         };
@@ -801,32 +796,6 @@ async function dispatchRequest(
           ok: true,
           result: disconnectIntegration(db, request.platform, request.accountKey),
         };
-      case "integrations-auth-status":
-        return {
-          id: request.id,
-          ok: true,
-          result: { authSession: getAuthSessionSummary(db, request.sessionId) },
-        };
-      case "integrations-auth-cancel":
-        {
-          const existing = db.getAuthSession(request.sessionId);
-          if (!existing) {
-            throw new Error(`Auth session not found: ${request.sessionId}`);
-          }
-          const active = activeAuthSessions.get(request.sessionId);
-          if (active) {
-            active.child.kill("SIGTERM");
-            activeAuthSessions.delete(request.sessionId);
-          }
-          return {
-            id: request.id,
-            ok: true,
-            result: completeAuthSession(db, request.sessionId, {
-              state: "cancelled",
-              errorSummary: null,
-            }),
-          };
-        }
       case "integrations-enable":
         return {
           id: request.id,

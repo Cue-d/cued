@@ -3,7 +3,7 @@ import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { chromium } from "playwright";
 import type { CuedDatabase } from "../db/database.js";
-import { upsertImportedSlackAuth } from "./legacy-local-auth.js";
+import { storeSlackSession } from "./slack-session-store.js";
 
 declare const localStorage: {
   getItem(key: string): string | null;
@@ -131,7 +131,7 @@ export async function importSlackDesktopAuth(db: CuedDatabase): Promise<Array<{
       }
 
       const sourcePath = getSlackUserDataDir();
-      return teams.map((team) => upsertImportedSlackAuth(db, {
+      return teams.map((team) => storeSlackSession(db, {
         accountKey: team.id,
         teamId: team.id,
         teamName: team.name,
