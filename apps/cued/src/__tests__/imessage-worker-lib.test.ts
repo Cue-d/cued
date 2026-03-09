@@ -23,10 +23,14 @@ describe("imessage worker loader resolution", () => {
     return dir;
   }
 
-  function createSyntheticChatDb(messageCount: number): string {
+  function createSyntheticChatDb(
+    messageCount: number,
+    options?: { filteredRowIds?: number[] },
+  ): string {
     const dir = createTempDir("cued-imessage-db-");
     const dbPath = join(dir, "chat.db");
     const db = new DatabaseSync(dbPath);
+    const filteredRowIds = new Set(options?.filteredRowIds ?? []);
 
     db.exec(`
       CREATE TABLE handle (
@@ -95,7 +99,7 @@ describe("imessage worker loader resolution", () => {
       insertMessage.run(
         `message-${index}`,
         1,
-        `hello ${index}`,
+        filteredRowIds.has(index) ? null : `hello ${index}`,
         null,
         index * 1_000_000_000,
         0,
@@ -106,7 +110,7 @@ describe("imessage worker loader resolution", () => {
         0,
         0,
         0,
-        0,
+        filteredRowIds.has(index) ? 2001 : 0,
         null,
         null,
       );
@@ -159,6 +163,33 @@ describe("imessage worker loader resolution", () => {
     });
     expect(first.hasMore).toBe(true);
     expect(first.syncMode).toBe("full");
+    expect(first.sourceCursor).toEqual({ rowId: 500 });
+
+    const second = buildIMessageSyncBundle({
+      path: chatDbPath,
+      lastRowId: 500,
+      limit: 500,
+      env,
+      repoRoot,
+    });
+    expect(second.hasMore).toBe(false);
+    expect(second.syncMode).toBe("incremental");
+    expect(second.sourceCursor).toEqual({ rowId: 650 });
+  });
+
+  it("keeps paging when the fetched batch includes filtered tapback rows", () => {
+    const chatDbPath = createSyntheticChatDb(650, { filteredRowIds: [500] });
+    const repoRoot = createTempDir("cued-imessage-repo-");
+    const env = { CUED_IMESSAGE_DB_PATH: chatDbPath };
+
+    const first = buildIMessageSyncBundle({
+      path: chatDbPath,
+      limit: 500,
+      env,
+      repoRoot,
+    });
+    expect(first.rawEvents.some((event) => event.entityKind === "message")).toBe(true);
+    expect(first.hasMore).toBe(true);
     expect(first.sourceCursor).toEqual({ rowId: 500 });
 
     const second = buildIMessageSyncBundle({

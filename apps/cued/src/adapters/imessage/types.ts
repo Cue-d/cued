@@ -38,6 +38,7 @@ export interface ImsMessage {
 
 export interface ImsSyncBatch {
   cursor: number;
+  fetchedCount: number;
   chats: ImsChat[];
   messages: ImsMessage[];
   handles: ImsHandle[];

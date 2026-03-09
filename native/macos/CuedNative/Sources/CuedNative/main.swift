@@ -61,6 +61,7 @@ struct IMessageMessage: Codable {
 
 struct IMessageSyncBatch: Codable {
   let cursor: Int
+  let fetchedCount: Int
   let chats: [IMessageChat]
   let messages: [IMessageMessage]
   let handles: [IMessageHandle]
@@ -627,7 +628,13 @@ struct CuedNativeCLI {
     )
 
     if messageRows.isEmpty {
-      return IMessageSyncBatch(cursor: options.afterRowID, chats: [], messages: [], handles: [])
+      return IMessageSyncBatch(
+        cursor: options.afterRowID,
+        fetchedCount: 0,
+        chats: [],
+        messages: [],
+        handles: []
+      )
     }
 
     var messages = transformMessages(rows: messageRows)
@@ -660,6 +667,7 @@ struct CuedNativeCLI {
 
     return IMessageSyncBatch(
       cursor: cursor,
+      fetchedCount: messageRows.count,
       chats: chats,
       messages: messages,
       handles: handlesByID.values.sorted { $0.id < $1.id }
