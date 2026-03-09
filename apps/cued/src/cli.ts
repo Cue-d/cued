@@ -80,7 +80,7 @@ async function handleLocalIntegrationCommand(
       case "status":
         return buildIntegrationStatus(db);
       case "refresh":
-        return refreshManagedIntegrationStates(db);
+        return await refreshManagedIntegrationStates(db);
       case "connect": {
         if (!rest[0]) {
           throw new Error("Usage: cued integrations connect <platform> [account]");
