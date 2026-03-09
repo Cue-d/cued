@@ -19,6 +19,7 @@ apps/electron/out/
 apps/electron/dist/
 apps/electron/.electron-vite/
 apps/electron/electron.vite.config.*.mjs
+apps/cued/dist/
 
 # ============================================================
 # Application Data & Caches
@@ -141,6 +142,7 @@ apps/mobile/targets/widget/generated.entitlements
 # ============================================================
 # Swift Package Manager build directory
 apps/electron/swift/.build/
+native/macos/CuedNative/.build/
 
 # Native addon build artifacts
 apps/electron/native/*/build/

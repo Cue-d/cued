@@ -1,1 +1,0 @@
-{"version":3,"file":"handle-normalization.js","sourceRoot":"","sources":["../../../src/adapters/imessage/handle-normalization.ts"],"names":[],"mappings":"AAAA,MAAM,qBAAqB,GAAG,sBAAsB,CAAC;AAErD,MAAM,UAAU,+BAA+B,CAAC,UAAkB;IAChE,OAAO,UAAU,CAAC,OAAO,CAAC,qBAAqB,EAAE,EAAE,CAAC,CAAC;AACvD,CAAC"}
