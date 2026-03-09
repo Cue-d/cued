@@ -1,4 +1,4 @@
-import { cpSync, existsSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { execFileSync } from "node:child_process";
@@ -13,6 +13,14 @@ function currentUid(): number {
 
 function repoRoot(): string {
   return resolve(dirname(fileURLToPath(import.meta.url)), "../../../../");
+}
+
+function currentAppPath(): string | null {
+  const appPath = process.env.CUED_APP_PATH;
+  if (!appPath || !existsSync(appPath)) {
+    return null;
+  }
+  return appPath;
 }
 
 export function getBuiltAppPath(): string {
@@ -39,6 +47,11 @@ export function resolveInstalledAppPath(): string | null {
 }
 
 export function buildMacOSAppBundle(): { appPath: string } {
+  const bundledAppPath = currentAppPath();
+  if (bundledAppPath) {
+    return { appPath: bundledAppPath };
+  }
+
   const script = join(repoRoot(), "scripts", "build-cued-daemon-app.sh");
   const stdout = execFileSync("bash", [script], {
     cwd: repoRoot(),
@@ -56,9 +69,14 @@ export function installMacOSApp(destinationPath?: string): {
 } {
   const { appPath: sourcePath } = buildMacOSAppBundle();
   const installedAppPath = destinationPath ?? getDefaultInstallAppPath();
-  mkdirSync(dirname(installedAppPath), { recursive: true });
-  rmSync(installedAppPath, { recursive: true, force: true });
-  cpSync(sourcePath, installedAppPath, { recursive: true });
+  const sameBundle = existsSync(sourcePath)
+    && existsSync(installedAppPath)
+    && realpathSync(sourcePath) === realpathSync(installedAppPath);
+  if (!sameBundle) {
+    mkdirSync(dirname(installedAppPath), { recursive: true });
+    rmSync(installedAppPath, { recursive: true, force: true });
+    cpSync(sourcePath, installedAppPath, { recursive: true });
+  }
 
   const cliSource = join(installedAppPath, "Contents", "Resources", "cued-cli");
   const cliDir = join(homedir(), ".local", "bin");

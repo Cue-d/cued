@@ -64,7 +64,7 @@ function getMessagesNativeHelperCheck(): DoctorCheck {
       status: "unknown",
       summary: "Native Messages helper is not built, so daemon access is using the current process identity",
       remediation:
-        "Run `pnpm --dir apps/cued build:native:macos` or use the packaged CuedDaemon.app so the daemon uses a stable native helper.",
+        "Use the packaged CuedDaemon.app or run `cued permissions request --full-disk-access` after rebuilding the native helper in development.",
     };
   }
 
@@ -115,7 +115,7 @@ function getContactsPermissionCheck(): DoctorCheck {
       name: "contacts_permission",
       status: "unknown",
       summary: "Native macOS helper is not built, so Contacts permission could not be checked",
-      remediation: "Run `pnpm --dir apps/cued build:native:macos` or `pnpm permissions:macos -- --contacts`.",
+      remediation: "Run `cued permissions request --contacts` or rebuild the native helper in development.",
     };
   }
 
@@ -140,7 +140,7 @@ function getContactsPermissionCheck(): DoctorCheck {
       status: status === "not_determined" ? "warning" : "error",
       summary: `Contacts access is ${status.replaceAll("_", " ")}`,
       details: { binary: nativeBinary },
-      remediation: "Run `pnpm permissions:macos -- --contacts` to trigger the prompt.",
+      remediation: "Run `cued permissions request --contacts` to trigger the prompt.",
     };
   } catch (error) {
     return {
@@ -151,7 +151,7 @@ function getContactsPermissionCheck(): DoctorCheck {
         binary: nativeBinary,
         error: error instanceof Error ? error.message : String(error),
       },
-      remediation: "Run `pnpm permissions:macos -- --contacts` and confirm the macOS prompt.",
+      remediation: "Run `cued permissions request --contacts` and confirm the macOS prompt.",
     };
   }
 }
@@ -187,7 +187,7 @@ function getMessagesAutomationCheck(): DoctorCheck {
       details: {
         error: error instanceof Error ? error.message : String(error),
       },
-      remediation: "Run `pnpm permissions:macos -- --messages` to trigger the Automation prompt.",
+      remediation: "Run `cued permissions request --messages` to trigger the Automation prompt.",
     };
   }
 }
