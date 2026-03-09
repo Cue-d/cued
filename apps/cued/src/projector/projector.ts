@@ -13,6 +13,8 @@ import {
   messageEvents,
   messageReactions,
   messages,
+  participantEvents,
+  projectionState,
 } from "../db/schema.js";
 import {
   isContactFieldName,
@@ -160,20 +162,182 @@ function ensureConversationStub(
   return conversationId;
 }
 
-export function rebuildProjectedState(db: CuedDatabase): {
+function clearProjectedState(conn: LocalDbExecutor): void {
+  conn.run(sql.raw("DELETE FROM messages_fts"));
+  conn.delete(messageReactions).run();
+  conn.delete(messageEvents).run();
+  conn.delete(participantEvents).run();
+  conn.delete(contactObservations).run();
+  conn.delete(conversationObservations).run();
+  conn.delete(conversationParticipants).run();
+  conn.delete(messages).run();
+  conn.delete(conversations).run();
+  conn.delete(contactFieldValues).run();
+  conn.delete(contactHandles).run();
+  conn.delete(contactSources).run();
+  conn.delete(contacts).run();
+}
+
+function loadProjectionMaps(
+  db: CuedDatabase,
+): {
+  sourceContactMap: Map<string, string>;
+  deterministicHandleMap: Map<string, string>;
+  conversationMap: Map<string, string>;
+} {
+  const sourceContactMap = new Map<string, string>();
+  for (const row of db.listProjectedContactSourceMap()) {
+    sourceContactMap.set(
+      `${row.platform}:${row.account_key}:${row.source_entity_key}`,
+      row.contact_id,
+    );
+  }
+
+  const deterministicHandleMap = new Map<string, string>();
+  for (const row of db.listDeterministicContactHandles()) {
+    deterministicHandleMap.set(
+      `${row.handle_type}:${row.normalized_value}`,
+      row.contact_id,
+    );
+  }
+
+  const conversationMap = new Map<string, string>();
+  for (const row of db.listConversationMap()) {
+    conversationMap.set(
+      `${row.platform}:${row.account_key}:${row.source_conversation_key}`,
+      row.conversation_id,
+    );
+  }
+
+  return {
+    sourceContactMap,
+    deterministicHandleMap,
+    conversationMap,
+  };
+}
+
+function buildOverview(db: CuedDatabase): {
   contacts: number;
   conversations: number;
   messages: number;
   rawEvents: number;
 } {
-  const rawEvents = db.listRawEvents();
-  db.clearProjectedState();
+  const overview = db.getOverview();
+  return {
+    contacts: overview.contacts,
+    conversations: overview.conversations,
+    messages: overview.messages,
+    rawEvents: overview.rawEvents,
+  };
+}
 
-  const sourceContactMap = new Map<string, string>();
-  const deterministicHandleMap = new Map<string, string>();
-  const conversationMap = new Map<string, string>();
+function upsertProjectionState(
+  conn: LocalDbExecutor,
+  input: {
+    projectionWatermark: number;
+    lastProjectedAt: number | null;
+    lastRebuildAt?: number | null;
+  },
+): void {
+  conn.insert(projectionState).values({
+    singletonKey: "global",
+    projectionWatermark: input.projectionWatermark,
+    lastProjectedAt: input.lastProjectedAt,
+    lastRebuildAt: input.lastRebuildAt ?? null,
+    updatedAt: Date.now(),
+  }).onConflictDoUpdate({
+    target: projectionState.singletonKey,
+    set: {
+      projectionWatermark: input.projectionWatermark,
+      lastProjectedAt: input.lastProjectedAt,
+      lastRebuildAt: input.lastRebuildAt ?? sql`${projectionState.lastRebuildAt}`,
+      updatedAt: Date.now(),
+    },
+  }).run();
+}
+
+export function projectPendingRawEvents(db: CuedDatabase): {
+  contacts: number;
+  conversations: number;
+  messages: number;
+  rawEvents: number;
+  appliedRawEvents: number;
+  projectionWatermark: number;
+} {
+  const projection = db.getProjectionState();
+  const pendingEvents = db.listRawEventsAfter(projection.projection_watermark);
+  if (pendingEvents.length === 0) {
+    const overview = buildOverview(db);
+    return {
+      ...overview,
+      appliedRawEvents: 0,
+      projectionWatermark: projection.projection_watermark,
+    };
+  }
+
+  const {
+    sourceContactMap,
+    deterministicHandleMap,
+    conversationMap,
+  } = loadProjectionMaps(db);
 
   db.orm().transaction((tx) => {
+    const projectedAt = Date.now();
+    for (const event of pendingEvents) {
+      if (event.entity_kind === "contact") {
+        projectContactObservation(tx, sourceContactMap, deterministicHandleMap, event);
+        continue;
+      }
+
+      if (event.entity_kind === "conversation") {
+        projectConversationObservation(tx, sourceContactMap, conversationMap, event);
+        continue;
+      }
+
+      if (event.entity_kind === "message") {
+        projectMessageEvent(tx, sourceContactMap, conversationMap, event);
+        continue;
+      }
+
+      if (event.entity_kind === "reaction") {
+        projectReactionEvent(tx, sourceContactMap, conversationMap, event);
+      }
+    }
+
+    refreshConversationDisplayNames(tx);
+    reindexMessagesFts(tx);
+    upsertProjectionState(tx, {
+      projectionWatermark: pendingEvents[pendingEvents.length - 1]!.rowid,
+      lastProjectedAt: projectedAt,
+    });
+  });
+
+  const overview = buildOverview(db);
+  return {
+    ...overview,
+    appliedRawEvents: pendingEvents.length,
+    projectionWatermark: pendingEvents[pendingEvents.length - 1]!.rowid,
+  };
+}
+
+export function rebuildProjectedState(db: CuedDatabase): {
+  contacts: number;
+  conversations: number;
+  messages: number;
+  rawEvents: number;
+  appliedRawEvents: number;
+  projectionWatermark: number;
+} {
+  const rawEvents = db.listRawEventsAfter(0);
+
+  db.orm().transaction((tx) => {
+    const projectedAt = Date.now();
+    clearProjectedState(tx);
+
+    const sourceContactMap = new Map<string, string>();
+    const deterministicHandleMap = new Map<string, string>();
+    const conversationMap = new Map<string, string>();
+
     for (const event of rawEvents) {
       if (event.entity_kind === "contact") {
         projectContactObservation(tx, sourceContactMap, deterministicHandleMap, event);
@@ -197,14 +361,18 @@ export function rebuildProjectedState(db: CuedDatabase): {
 
     refreshConversationDisplayNames(tx);
     reindexMessagesFts(tx);
+    upsertProjectionState(tx, {
+      projectionWatermark: rawEvents[rawEvents.length - 1]?.rowid ?? 0,
+      lastProjectedAt: projectedAt,
+      lastRebuildAt: projectedAt,
+    });
   });
 
-  const overview = db.getOverview();
+  const overview = buildOverview(db);
   return {
-    contacts: overview.contacts,
-    conversations: overview.conversations,
-    messages: overview.messages,
-    rawEvents: overview.rawEvents,
+    ...overview,
+    appliedRawEvents: rawEvents.length,
+    projectionWatermark: rawEvents[rawEvents.length - 1]?.rowid ?? 0,
   };
 }
 

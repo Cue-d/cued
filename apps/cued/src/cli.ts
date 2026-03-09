@@ -170,11 +170,13 @@ async function main(): Promise<void> {
       command === "doctor"
         ? {
             ...buildDoctorReport(db),
+            projection: db.getProjectionBacklog(),
             hooks: doctorHooksConfig(),
           }
         : {
             daemon: db.getDaemonState(),
             overview: db.getOverview(),
+            projection: db.getProjectionBacklog(),
             checkpoints: db.listCheckpointSummary(),
             recentRuns: db.listRecentRuns(),
             integrations: listIntegrationStates(db),

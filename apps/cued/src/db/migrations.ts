@@ -485,4 +485,30 @@ export const MIGRATIONS: Array<{ id: string; sql: string }> = [
       ON auth_sessions(state, requested_at DESC);
     `,
   },
+  {
+    id: "0002_projection_state",
+    sql: `
+      CREATE TABLE IF NOT EXISTS projection_state (
+        singleton_key TEXT PRIMARY KEY CHECK (singleton_key = 'global'),
+        projection_watermark INTEGER NOT NULL DEFAULT 0,
+        last_projected_at INTEGER,
+        last_rebuild_at INTEGER,
+        updated_at INTEGER NOT NULL
+      );
+
+      INSERT OR IGNORE INTO projection_state (
+        singleton_key,
+        projection_watermark,
+        last_projected_at,
+        last_rebuild_at,
+        updated_at
+      ) VALUES (
+        'global',
+        0,
+        NULL,
+        NULL,
+        strftime('%s','now') * 1000
+      );
+    `,
+  },
 ];

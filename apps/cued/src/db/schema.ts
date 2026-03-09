@@ -87,6 +87,14 @@ export const daemonState = sqliteTable("daemon_state", {
   detailsJson: text("details_json"),
 });
 
+export const projectionState = sqliteTable("projection_state", {
+  singletonKey: text("singleton_key").primaryKey(),
+  projectionWatermark: integer("projection_watermark").notNull(),
+  lastProjectedAt: integer("last_projected_at"),
+  lastRebuildAt: integer("last_rebuild_at"),
+  updatedAt: integer("updated_at").notNull(),
+});
+
 export const rawEvents = sqliteTable("raw_events", {
   id: text("id").primaryKey(),
   platform: textEnum("platform", PLATFORM_VALUES).notNull(),
