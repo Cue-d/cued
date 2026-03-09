@@ -53,7 +53,7 @@ export const PLATFORM_DEFINITIONS = {
     requestableOrder: 5,
   },
   slack: {
-    adapter: false,
+    adapter: true,
     defaultAccountKey: "default",
     requestableIntegration: true,
     requestableOrder: 1,
