@@ -5,6 +5,7 @@ import type { AdapterPlatform } from "../types/provider.js";
 
 export async function runAdapter(
   platform: AdapterPlatform,
+  accountKey?: string,
   envOverrides?: Record<string, string>,
 ): Promise<SyncBundle> {
   const definition = getAdapterDefinition(platform);
@@ -15,7 +16,11 @@ export async function runAdapter(
   return new Promise((resolve, reject) => {
     const child = spawn(process.execPath, [definition.workerEntrypoint], {
       stdio: ["ignore", "pipe", "pipe"],
-      env: { ...process.env, ...envOverrides },
+      env: {
+        ...process.env,
+        ...(accountKey ? { CUED_ACCOUNT_KEY: accountKey } : {}),
+        ...envOverrides,
+      },
     });
 
     let stdout = "";

@@ -16,16 +16,30 @@ const DEFAULT_AUTOSYNC_INTERVAL_MS = 60_000;
 function now() {
     return Date.now();
 }
-function getAutoSyncPlatforms(db) {
+function getAutoSyncTargets(db) {
     const configured = process.env.CUED_AUTOSYNC_PLATFORMS
         ?.split(",")
         .map((value) => value.trim())
         .filter(isAdapterPlatform);
     if (configured && configured.length > 0) {
-        return configured;
+        return configured.map((platform) => ({
+            platform,
+            accountKey: getDefaultAccountKeyForPlatform(platform),
+        }));
     }
-    const enabled = db.listEnabledSyncPlatforms().filter(isAdapterPlatform);
-    return enabled.length > 0 ? enabled : listAutoSyncPlatforms();
+    const enabled = db.listEnabledSyncTargets()
+        .filter((target) => isAdapterPlatform(target.platform))
+        .map((target) => ({
+        platform: target.platform,
+        accountKey: target.account_key,
+    }));
+    if (enabled.length > 0) {
+        return enabled;
+    }
+    return listAutoSyncPlatforms().map((platform) => ({
+        platform,
+        accountKey: getDefaultAccountKeyForPlatform(platform),
+    }));
 }
 function getAutoSyncIntervalMs() {
     const configured = Number(process.env.CUED_AUTOSYNC_INTERVAL_MS ?? DEFAULT_AUTOSYNC_INTERVAL_MS);
@@ -120,16 +134,17 @@ export async function runDaemon() {
         });
     }, 5_000);
     const queueAutoSyncRuns = (trigger) => {
-        const autoSyncPlatforms = getAutoSyncPlatforms(db);
-        for (const platform of autoSyncPlatforms) {
-            if (db.hasQueuedOrRunningRun(platform)) {
+        const autoSyncTargets = getAutoSyncTargets(db);
+        for (const target of autoSyncTargets) {
+            if (db.hasQueuedOrRunningRun(target.platform, target.accountKey)) {
                 continue;
             }
             db.queueSyncRun({
-                platform,
+                platform: target.platform,
+                accountKey: target.accountKey,
                 runType: "sync",
                 trigger,
-                details: { source: platform, trigger },
+                details: { source: target.platform, accountKey: target.accountKey, trigger },
             });
         }
     };
@@ -157,7 +172,7 @@ export async function runDaemon() {
                     db.failRun(currentRun.id, `No adapter registered for platform: ${currentRun.platform}`);
                     return;
                 }
-                const accountKey = getDefaultAccountKeyForPlatform(currentRun.platform);
+                const accountKey = currentRun.account_key ?? getDefaultAccountKeyForPlatform(currentRun.platform);
                 const checkpoint = db.getCheckpoint(currentRun.platform, accountKey);
                 const sourceCursor = checkpoint?.source_cursor_json
                     ? JSON.parse(checkpoint.source_cursor_json)
@@ -166,7 +181,7 @@ export async function runDaemon() {
                 if (currentRun.platform === "imessage" && typeof sourceCursor?.rowId === "number") {
                     envOverrides.CUED_IMESSAGE_LAST_ROWID = String(sourceCursor.rowId);
                 }
-                const bundle = await runAdapter(currentRun.platform, envOverrides);
+                const bundle = await runAdapter(currentRun.platform, accountKey, envOverrides);
                 const inboundMessages = [];
                 for (const account of bundle.sourceAccounts) {
                     db.upsertSourceAccount(account);
@@ -318,7 +333,7 @@ async function dispatchRequest(db, request, activeAuthSessions) {
                     ok: true,
                     result: {
                         ...buildDoctorReport(db),
-                        autoSyncPlatforms: getAutoSyncPlatforms(db),
+                        autoSyncTargets: getAutoSyncTargets(db),
                         autoSyncIntervalMs: getAutoSyncIntervalMs(),
                         ...buildIntegrationStatus(db),
                         hooks: doctorHooksConfig(),
@@ -424,19 +439,26 @@ async function dispatchRequest(db, request, activeAuthSessions) {
             case "sync-resume":
                 {
                     const platforms = new Set([
-                        ...getAutoSyncPlatforms(db),
-                        ...db.listCheckpointPlatforms().filter(isAdapterPlatform),
+                        ...getAutoSyncTargets(db).map((target) => `${target.platform}:${target.accountKey}`),
+                        ...db.listCheckpointTargets()
+                            .filter((target) => isAdapterPlatform(target.platform))
+                            .map((target) => `${target.platform}:${target.account_key}`),
                     ]);
                     const queuedRunIds = [];
-                    for (const platform of platforms) {
-                        if (db.hasQueuedOrRunningRun(platform)) {
+                    for (const targetKey of platforms) {
+                        const [platform, accountKey] = targetKey.split(":");
+                        if (!platform || !accountKey || !isAdapterPlatform(platform)) {
+                            continue;
+                        }
+                        if (db.hasQueuedOrRunningRun(platform, accountKey)) {
                             continue;
                         }
                         queuedRunIds.push(db.queueSyncRun({
                             platform,
+                            accountKey,
                             runType: "sync_resume",
                             trigger: "cli",
-                            details: { source: platform },
+                            details: { source: platform, accountKey },
                         }));
                     }
                     return {
@@ -445,7 +467,7 @@ async function dispatchRequest(db, request, activeAuthSessions) {
                         result: {
                             queued: queuedRunIds.length > 0,
                             runIds: queuedRunIds,
-                            platforms: [...platforms],
+                            targets: [...platforms],
                         },
                     };
                 }

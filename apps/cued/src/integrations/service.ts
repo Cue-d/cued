@@ -450,10 +450,13 @@ function ensureRequestableIntegrationState(
     ? getChromiumProfileDir(normalized, resolvedAccountKey)
     : null;
 
+  const supportedByDaemon = new Set<string>(listAdapterPlatforms()).has(normalized);
   db.upsertIntegrationState({
     platform: normalized,
     accountKey: resolvedAccountKey,
-    displayName: accountKey ? `${requested.displayName} ${accountKey}` : requested.displayName,
+    displayName: accountKey && accountKey !== getDefaultAccountKeyForPlatform(normalized)
+      ? `${requested.displayName} ${accountKey}`
+      : requested.displayName,
     authState: existing?.auth_state ?? "requested",
     enabled: existing ? existing.enabled === 1 : true,
     connectionKind: requested.connectionKind,
@@ -464,7 +467,7 @@ function ensureRequestableIntegrationState(
     metadata: {
       ...existingMetadata,
       ...(requested.metadata ?? {}),
-      supportedByDaemon: false,
+      supportedByDaemon,
       authManagedBy: requested.runtimeKind === "chromium" ? "chromium-runtime" : "native-qr-runtime",
       requestedAt: existingMetadata.requestedAt ?? now(),
       runtimeKind: requested.runtimeKind,
@@ -596,6 +599,10 @@ export function completeAuthSession(
   const metadata = integration.metadata_json
     ? (JSON.parse(integration.metadata_json) as Record<string, unknown>)
     : {};
+  const supportedByDaemon = new Set<string>(listAdapterPlatforms()).has(integration.platform);
+  const syncCapable = input.state === "authenticated"
+    ? supportedByDaemon
+    : integration.sync_capable === 1;
   db.upsertIntegrationState({
     platform: integration.platform,
     accountKey: integration.account_key,
@@ -603,7 +610,7 @@ export function completeAuthSession(
     authState: input.state,
     enabled: integration.enabled === 1,
     connectionKind: integration.connection_kind,
-    syncCapable: integration.sync_capable === 1,
+    syncCapable,
     launchStrategy: integration.launch_strategy,
     launchTarget: integration.launch_target,
     importedFrom: integration.imported_from,

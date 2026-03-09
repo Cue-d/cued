@@ -187,6 +187,17 @@ export class CuedDatabase {
             .all()
             .map((row) => row.platform);
     }
+    listEnabledSyncTargets() {
+        return this.db
+            .select({
+            platform: integrationStates.platform,
+            account_key: integrationStates.accountKey,
+        })
+            .from(integrationStates)
+            .where(and(eq(integrationStates.enabled, 1), eq(integrationStates.syncCapable, 1)))
+            .orderBy(asc(integrationStates.platform), asc(integrationStates.accountKey))
+            .all();
+    }
     getIntegrationState(platform, accountKey) {
         return this.db
             .select({
@@ -397,11 +408,14 @@ export class CuedDatabase {
         }).run();
         return id;
     }
-    hasQueuedOrRunningRun(platform) {
+    hasQueuedOrRunningRun(platform, accountKey) {
+        const accountPredicate = accountKey == null
+            ? sql `1 = 1`
+            : eq(syncRuns.accountKey, accountKey);
         return Boolean(this.db
             .select({ id: syncRuns.id })
             .from(syncRuns)
-            .where(and(eq(syncRuns.platform, platform), inArray(syncRuns.status, ["queued", "running"])))
+            .where(and(eq(syncRuns.platform, platform), accountPredicate, inArray(syncRuns.status, ["queued", "running"])))
             .limit(1)
             .get());
     }
@@ -412,6 +426,16 @@ export class CuedDatabase {
             .orderBy(asc(syncCheckpoints.platform))
             .all()
             .map((row) => row.platform);
+    }
+    listCheckpointTargets() {
+        return this.db
+            .select({
+            platform: syncCheckpoints.platform,
+            account_key: syncCheckpoints.accountKey,
+        })
+            .from(syncCheckpoints)
+            .orderBy(asc(syncCheckpoints.platform), asc(syncCheckpoints.accountKey))
+            .all();
     }
     listRecentRuns(limit = 10) {
         return this.db

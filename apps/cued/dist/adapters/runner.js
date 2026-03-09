@@ -1,6 +1,6 @@
 import { spawn } from "node:child_process";
 import { getAdapterDefinition } from "./registry.js";
-export async function runAdapter(platform, envOverrides) {
+export async function runAdapter(platform, accountKey, envOverrides) {
     const definition = getAdapterDefinition(platform);
     if (!definition) {
         throw new Error(`No adapter registered for platform '${platform}'`);
@@ -8,7 +8,11 @@ export async function runAdapter(platform, envOverrides) {
     return new Promise((resolve, reject) => {
         const child = spawn(process.execPath, [definition.workerEntrypoint], {
             stdio: ["ignore", "pipe", "pipe"],
-            env: { ...process.env, ...envOverrides },
+            env: {
+                ...process.env,
+                ...(accountKey ? { CUED_ACCOUNT_KEY: accountKey } : {}),
+                ...envOverrides,
+            },
         });
         let stdout = "";
         let stderr = "";

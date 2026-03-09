@@ -348,6 +348,18 @@ export class CuedDatabase {
       .map((row) => row.platform as Platform);
   }
 
+  listEnabledSyncTargets(): Array<{ platform: Platform; account_key: string }> {
+    return this.db
+      .select({
+        platform: integrationStates.platform,
+        account_key: integrationStates.accountKey,
+      })
+      .from(integrationStates)
+      .where(and(eq(integrationStates.enabled, 1), eq(integrationStates.syncCapable, 1)))
+      .orderBy(asc(integrationStates.platform), asc(integrationStates.accountKey))
+      .all() as Array<{ platform: Platform; account_key: string }>;
+  }
+
   getIntegrationState(platform: Platform, accountKey: string): IntegrationStateRow | null {
     return this.db
       .select({
@@ -608,12 +620,19 @@ export class CuedDatabase {
     return id;
   }
 
-  hasQueuedOrRunningRun(platform: Platform): boolean {
+  hasQueuedOrRunningRun(platform: Platform, accountKey?: string | null): boolean {
+    const accountPredicate = accountKey == null
+      ? sql`1 = 1`
+      : eq(syncRuns.accountKey, accountKey);
     return Boolean(
       this.db
         .select({ id: syncRuns.id })
         .from(syncRuns)
-        .where(and(eq(syncRuns.platform, platform), inArray(syncRuns.status, ["queued", "running"])))
+        .where(and(
+          eq(syncRuns.platform, platform),
+          accountPredicate,
+          inArray(syncRuns.status, ["queued", "running"]),
+        ))
         .limit(1)
         .get(),
     );
@@ -626,6 +645,17 @@ export class CuedDatabase {
       .orderBy(asc(syncCheckpoints.platform))
       .all()
       .map((row) => row.platform);
+  }
+
+  listCheckpointTargets(): Array<{ platform: Platform; account_key: string }> {
+    return this.db
+      .select({
+        platform: syncCheckpoints.platform,
+        account_key: syncCheckpoints.accountKey,
+      })
+      .from(syncCheckpoints)
+      .orderBy(asc(syncCheckpoints.platform), asc(syncCheckpoints.accountKey))
+      .all() as Array<{ platform: Platform; account_key: string }>;
   }
 
   listRecentRuns(limit = 10): Array<{
