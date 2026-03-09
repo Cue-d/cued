@@ -128,6 +128,7 @@ export class CuedDatabase {
   constructor(public readonly dbPath: string = CUED_DB_PATH) {
     ensureCuedDirs();
     this.sqlite = new Database(dbPath);
+    this.sqlite.exec("PRAGMA busy_timeout = 5000");
     this.sqlite.exec("PRAGMA journal_mode = WAL");
     this.sqlite.exec("PRAGMA foreign_keys = ON");
     this.sqlite.exec("PRAGMA synchronous = NORMAL");
