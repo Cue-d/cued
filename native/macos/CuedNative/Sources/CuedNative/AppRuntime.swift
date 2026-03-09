@@ -14,6 +14,7 @@ struct AppIntegrationStatus {
 struct AppStatusSnapshot {
   let daemonRunning: Bool
   let daemonPID: Int?
+  let daemonUpdatedAt: Int?
   let contacts: Int
   let conversations: Int
   let messages: Int
@@ -33,6 +34,7 @@ private final class AppStatusStore {
       return AppStatusSnapshot(
         daemonRunning: false,
         daemonPID: nil,
+        daemonUpdatedAt: nil,
         contacts: 0,
         conversations: 0,
         messages: 0,
@@ -49,6 +51,7 @@ private final class AppStatusStore {
       return AppStatusSnapshot(
         daemonRunning: false,
         daemonPID: nil,
+        daemonUpdatedAt: nil,
         contacts: 0,
         conversations: 0,
         messages: 0,
@@ -69,6 +72,7 @@ private final class AppStatusStore {
     return AppStatusSnapshot(
       daemonRunning: daemonRow.running,
       daemonPID: daemonRow.pid,
+      daemonUpdatedAt: daemonRow.updatedAt,
       contacts: counts[0],
       conversations: counts[1],
       messages: counts[2],
@@ -77,7 +81,7 @@ private final class AppStatusStore {
     )
   }
 
-  private func queryDaemonRow(db: OpaquePointer) -> (running: Bool, pid: Int?) {
+  private func queryDaemonRow(db: OpaquePointer) -> (running: Bool, pid: Int?, updatedAt: Int?) {
     let sql = """
       SELECT pid, updated_at
       FROM daemon_state
@@ -87,18 +91,18 @@ private final class AppStatusStore {
 
     var statement: OpaquePointer?
     guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK, let statement else {
-      return (false, nil)
+      return (false, nil, nil)
     }
     defer { sqlite3_finalize(statement) }
 
     guard sqlite3_step(statement) == SQLITE_ROW else {
-      return (false, nil)
+      return (false, nil, nil)
     }
 
     let pid = sqlite3_column_type(statement, 0) == SQLITE_NULL ? nil : Int(sqlite3_column_int64(statement, 0))
-    let updatedAt = sqlite3_column_type(statement, 1) == SQLITE_NULL ? 0 : Int(sqlite3_column_int64(statement, 1))
-    let running = updatedAt > 0 && (Int(Date().timeIntervalSince1970 * 1000) - updatedAt) < appDaemonHeartbeatGraceMs
-    return (running, pid)
+    let updatedAt = sqlite3_column_type(statement, 1) == SQLITE_NULL ? nil : Int(sqlite3_column_int64(statement, 1))
+    let running = (updatedAt ?? 0) > 0 && (Int(Date().timeIntervalSince1970 * 1000) - (updatedAt ?? 0)) < appDaemonHeartbeatGraceMs
+    return (running, pid, updatedAt)
   }
 
   private func countRows(db: OpaquePointer, table: String) -> Int {
@@ -142,19 +146,46 @@ private final class AppStatusStore {
   }
 }
 
+private func integrationStateLabel(_ value: String) -> String {
+  switch value {
+  case "authorized", "authenticated":
+    return "connected"
+  case "in_progress":
+    return "connecting"
+  case "needs_full_disk_access":
+    return "needs full disk access"
+  case "native_helper_missing":
+    return "needs native helper"
+  case "check_failed":
+    return "check failed"
+  case "missing":
+    return "missing"
+  case "blocked":
+    return "blocked"
+  case "cancelled":
+    return "disconnected"
+  default:
+    return value.replacingOccurrences(of: "_", with: " ")
+  }
+}
+
+@MainActor
 private final class DaemonSupervisor {
   private var daemonProcess: Process?
+  private let daemonLaunchPath: String?
   private let daemonCommand: String
   private let setupCommand: String
   private let permissionsCommand: String
   private let statusStore: AppStatusStore
 
   init(
+    daemonLaunchPath: String?,
     daemonCommand: String,
     setupCommand: String,
     permissionsCommand: String,
     statusStore: AppStatusStore
   ) {
+    self.daemonLaunchPath = daemonLaunchPath
     self.daemonCommand = daemonCommand
     self.setupCommand = setupCommand
     self.permissionsCommand = permissionsCommand
@@ -162,13 +193,26 @@ private final class DaemonSupervisor {
   }
 
   func startIfNeeded() {
-    guard !daemonCommand.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+    guard daemonLaunchPath != nil || !daemonCommand.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
       return
     }
-    guard daemonProcess == nil, !statusStore.readSnapshot().daemonRunning else {
+    let snapshot = statusStore.readSnapshot()
+    if let daemonProcess, !daemonProcess.isRunning {
+      self.daemonProcess = nil
+    }
+    if
+      let daemonProcess,
+      daemonProcess.isRunning,
+      !snapshot.daemonRunning,
+      snapshot.daemonPID == nil || snapshot.daemonPID == Int(daemonProcess.processIdentifier)
+    {
+      daemonProcess.terminate()
+      self.daemonProcess = nil
+    }
+    guard daemonProcess == nil, !snapshot.daemonRunning else {
       return
     }
-    daemonProcess = launchShellCommand(daemonCommand)
+    daemonProcess = launchDaemonProcess()
   }
 
   func restart() {
@@ -189,14 +233,71 @@ private final class DaemonSupervisor {
     _ = launchShellCommand(permissionsCommand)
   }
 
-  private func launchShellCommand(_ command: String) -> Process {
+  private func daemonEnvironment() -> [String: String] {
+    var environment = ProcessInfo.processInfo.environment
+
+    if let executablePath = Bundle.main.executablePath,
+       !executablePath.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    {
+      if environment["CUED_IMESSAGE_NATIVE_BINARY"] == nil {
+        environment["CUED_IMESSAGE_NATIVE_BINARY"] = executablePath
+      }
+      if environment["CUED_CONTACTS_NATIVE_BINARY"] == nil {
+        environment["CUED_CONTACTS_NATIVE_BINARY"] = executablePath
+      }
+    }
+
+    return environment
+  }
+
+  private func launchDaemonProcess() -> Process? {
+    if let daemonLaunchPath, !daemonLaunchPath.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+      let process = Process()
+      process.executableURL = URL(fileURLWithPath: daemonLaunchPath)
+      process.arguments = ["daemon"]
+      process.environment = daemonEnvironment()
+      process.standardOutput = nil
+      process.standardError = nil
+      process.terminationHandler = { [weak self] terminatedProcess in
+        DispatchQueue.main.async {
+          if self?.daemonProcess?.processIdentifier == terminatedProcess.processIdentifier {
+            self?.daemonProcess = nil
+          }
+        }
+      }
+      do {
+        try process.run()
+        return process
+      } catch {
+        return nil
+      }
+    }
+
+    return launchShellCommand(daemonCommand, environment: daemonEnvironment())
+  }
+
+  private func launchShellCommand(_ command: String, environment: [String: String]? = nil) -> Process? {
     let process = Process()
     process.executableURL = URL(fileURLWithPath: "/bin/zsh")
     process.arguments = ["-lc", command]
+    if let environment {
+      process.environment = environment
+    }
     process.standardOutput = nil
     process.standardError = nil
-    try? process.run()
-    return process
+    process.terminationHandler = { [weak self] terminatedProcess in
+      DispatchQueue.main.async {
+        if self?.daemonProcess?.processIdentifier == terminatedProcess.processIdentifier {
+          self?.daemonProcess = nil
+        }
+      }
+    }
+    do {
+      try process.run()
+      return process
+    } catch {
+      return nil
+    }
   }
 
   private func runInTerminal(_ command: String) {
@@ -223,9 +324,10 @@ final class MenuBarAppController: NSObject, NSApplicationDelegate {
   private let daemonSupervisor: DaemonSupervisor
   private var timer: Timer?
 
-  init(dbPath: String, daemonCommand: String, setupCommand: String, permissionsCommand: String) {
+  init(dbPath: String, daemonLaunchPath: String?, daemonCommand: String, setupCommand: String, permissionsCommand: String) {
     self.statusStore = AppStatusStore(dbPath: dbPath)
     self.daemonSupervisor = DaemonSupervisor(
+      daemonLaunchPath: daemonLaunchPath,
       daemonCommand: daemonCommand,
       setupCommand: setupCommand,
       permissionsCommand: permissionsCommand,
@@ -310,7 +412,7 @@ final class MenuBarAppController: NSObject, NSApplicationDelegate {
     } else {
       for integration in snapshot.integrations.prefix(8) {
         let item = NSMenuItem(
-          title: "\(integration.platform) \(integration.accountKey) • \(integration.authState)\(integration.enabled ? "" : " (disabled)")",
+          title: "\(integration.platform) \(integration.accountKey) • \(integrationStateLabel(integration.authState))\(integration.enabled ? "" : " (disabled)")",
           action: nil,
           keyEquivalent: ""
         )
@@ -348,6 +450,7 @@ final class MenuBarAppController: NSObject, NSApplicationDelegate {
 
 @MainActor
 func runMenuBarApp() {
+  let daemonLaunchPath = Bundle.main.path(forResource: "cued-cli", ofType: nil)
   let daemonCommand = (Bundle.main.object(forInfoDictionaryKey: "CuedDaemonCommand") as? String)
     ?? ProcessInfo.processInfo.environment["CUED_DAEMON_COMMAND"]
     ?? ""
@@ -363,6 +466,7 @@ func runMenuBarApp() {
   let app = NSApplication.shared
   let delegate = MenuBarAppController(
     dbPath: dbPath,
+    daemonLaunchPath: daemonLaunchPath,
     daemonCommand: daemonCommand,
     setupCommand: setupCommand,
     permissionsCommand: permissionsCommand
