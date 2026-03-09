@@ -181,6 +181,17 @@ export async function runDaemon() {
                 if (currentRun.platform === "imessage" && typeof sourceCursor?.rowId === "number") {
                     envOverrides.CUED_IMESSAGE_LAST_ROWID = String(sourceCursor.rowId);
                 }
+                if (currentRun.platform === "slack" && typeof sourceCursor?.lastSyncAt === "number") {
+                    envOverrides.CUED_SLACK_LAST_SYNC_AT = String(sourceCursor.lastSyncAt);
+                }
+                if (currentRun.platform === "linkedin") {
+                    if (typeof sourceCursor?.lastSyncAt === "number") {
+                        envOverrides.CUED_LINKEDIN_LAST_SYNC_AT = String(sourceCursor.lastSyncAt);
+                    }
+                    if (typeof sourceCursor?.syncToken === "string" && sourceCursor.syncToken.length > 0) {
+                        envOverrides.CUED_LINKEDIN_SYNC_TOKEN = sourceCursor.syncToken;
+                    }
+                }
                 const bundle = await runAdapter(currentRun.platform, accountKey, envOverrides);
                 const inboundMessages = [];
                 for (const account of bundle.sourceAccounts) {

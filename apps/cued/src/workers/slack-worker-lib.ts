@@ -1,7 +1,6 @@
-import { createHash, randomUUID } from "node:crypto";
-import { execFileSync } from "node:child_process";
-import { openCuedDatabase } from "../db/database.js";
+import { createHash } from "node:crypto";
 import type { SyncBundle } from "../adapters/types.js";
+import { loadIntegrationSecret } from "../integrations/keychain.js";
 import {
   SlackClient,
   type SlackConversation,
@@ -24,12 +23,6 @@ type SlackClientLike = Pick<
   SlackClient,
   "testAuth" | "listUsers" | "listConversations" | "getConversationMembers" | "getHistory"
 >;
-
-interface LoadedSlackAuth {
-  credentials: SlackCredentials;
-  keychainService: string;
-  keychainAccount: string;
-}
 
 function now(): number {
   return Date.now();
@@ -112,40 +105,15 @@ function shouldIncludeMessage(message: SlackMessage): boolean {
   );
 }
 
-function loadSlackAuthFromKeychain(accountKey: string): LoadedSlackAuth {
-  const db = openCuedDatabase();
-  try {
-    const integration = db.getIntegrationState("slack", accountKey);
-    if (!integration?.metadata_json) {
-      throw new Error(`Slack integration not found or not authenticated for account '${accountKey}'`);
-    }
-    const metadata = JSON.parse(integration.metadata_json) as Record<string, unknown>;
-    const keychainService = typeof metadata.keychainService === "string" ? metadata.keychainService : null;
-    const keychainAccount = typeof metadata.keychainAccount === "string" ? metadata.keychainAccount : null;
-    if (!keychainService || !keychainAccount) {
-      throw new Error(`Slack integration '${accountKey}' does not have stored Keychain credentials`);
-    }
-
-    const stdout = execFileSync(
-      "security",
-      ["find-generic-password", "-s", keychainService, "-a", keychainAccount, "-w"],
-      { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] },
-    );
-    const parsed = JSON.parse(stdout) as Record<string, unknown>;
-    if (typeof parsed.token !== "string" || typeof parsed.cookie !== "string") {
-      throw new Error(`Slack Keychain payload for '${accountKey}' is missing token or cookie`);
-    }
-    return {
-      credentials: {
-        token: parsed.token,
-        cookie: parsed.cookie,
-      },
-      keychainService,
-      keychainAccount,
-    };
-  } finally {
-    db.close();
+function loadSlackAuthFromKeychain(accountKey: string): SlackCredentials {
+  const parsed = loadIntegrationSecret("slack", accountKey).secret;
+  if (typeof parsed.token !== "string" || typeof parsed.cookie !== "string") {
+    throw new Error(`Slack Keychain payload for '${accountKey}' is missing token or cookie`);
   }
+  return {
+    token: parsed.token,
+    cookie: parsed.cookie,
+  };
 }
 
 async function listAllUsers(client: SlackClientLike): Promise<SlackUser[]> {
@@ -213,7 +181,7 @@ export async function buildSlackSyncBundle(options?: {
 }): Promise<SyncBundle> {
   const accountKey = options?.accountKey ?? process.env.CUED_ACCOUNT_KEY ?? "default";
   const loadedAuth = options?.client ? null : loadSlackAuthFromKeychain(accountKey);
-  const client = options?.client ?? new SlackClient(loadedAuth!.credentials);
+  const client = options?.client ?? new SlackClient(loadedAuth!);
   const auth = await client.testAuth();
   if (!auth.ok || !auth.team_id || !auth.user_id) {
     throw new Error(`Slack auth test failed for '${accountKey}': ${auth.error ?? "unknown_error"}`);
@@ -239,15 +207,16 @@ export async function buildSlackSyncBundle(options?: {
   const rawEvents: SyncBundle["rawEvents"] = [];
 
   for (const user of users) {
+    const contactId = dedupeKey(`slack:contact:${teamId}:${user.id}`);
     rawEvents.push({
-      id: randomUUID(),
+      id: contactId,
       platform: "slack",
       accountKey,
       entityKind: "contact",
       eventKind: "observed",
       externalEntityId: user.id,
       observedAt: observedBase,
-      dedupeKey: dedupeKey(`slack:contact:${teamId}:${user.id}`),
+      dedupeKey: contactId,
       payload: {
         sourceEntityKey: slackSourceKey(teamId, user.id),
         fields: {
@@ -273,15 +242,16 @@ export async function buildSlackSyncBundle(options?: {
 
   for (const conversation of conversations) {
     const memberIds = await listConversationMembers(client, conversation);
+    const conversationId = dedupeKey(`slack:conversation:${teamId}:${conversation.id}`);
     rawEvents.push({
-      id: randomUUID(),
+      id: conversationId,
       platform: "slack",
       accountKey,
       entityKind: "conversation",
       eventKind: "observed",
       conversationExternalId: conversation.id,
       observedAt: observedBase,
-      dedupeKey: dedupeKey(`slack:conversation:${teamId}:${conversation.id}`),
+      dedupeKey: conversationId,
       payload: {
         sourceConversationKey: `slack:${teamId}:${conversation.id}`,
         conversationType: conversation.is_mpim || conversation.is_channel || conversation.is_group ? "group" : "dm",
@@ -297,8 +267,9 @@ export async function buildSlackSyncBundle(options?: {
     for (const message of messages) {
       const messageTsMs = timestampMs(message.ts) ?? observedBase;
       const attachments = toAttachmentMetadata(message);
+      const messageId = dedupeKey(`slack:message:${teamId}:${conversation.id}:${message.ts}:${message.text ?? ""}:${message.edited?.ts ?? ""}`);
       rawEvents.push({
-        id: randomUUID(),
+        id: messageId,
         platform: "slack",
         accountKey,
         entityKind: "message",
@@ -307,7 +278,7 @@ export async function buildSlackSyncBundle(options?: {
         conversationExternalId: conversation.id,
         occurredAt: messageTsMs,
         observedAt: observedBase,
-        dedupeKey: dedupeKey(`slack:message:${teamId}:${conversation.id}:${message.ts}`),
+        dedupeKey: messageId,
         payload: {
           sourceMessageKey: `slack:${teamId}:${conversation.id}:${message.ts}`,
           sourceConversationKey: `slack:${teamId}:${conversation.id}`,
@@ -326,8 +297,9 @@ export async function buildSlackSyncBundle(options?: {
 
       for (const reaction of message.reactions ?? []) {
         for (const reactorUserId of reaction.users) {
+          const reactionId = dedupeKey(`slack:reaction:${teamId}:${conversation.id}:${message.ts}:${reaction.name}:${reactorUserId}`);
           rawEvents.push({
-            id: randomUUID(),
+            id: reactionId,
             platform: "slack",
             accountKey,
             entityKind: "reaction",
@@ -336,7 +308,7 @@ export async function buildSlackSyncBundle(options?: {
             conversationExternalId: conversation.id,
             occurredAt: messageTsMs,
             observedAt: observedBase,
-            dedupeKey: dedupeKey(`slack:reaction:${teamId}:${conversation.id}:${message.ts}:${reaction.name}:${reactorUserId}`),
+            dedupeKey: reactionId,
             payload: {
               sourceMessageKey: `slack:${teamId}:${conversation.id}:${message.ts}`,
               sourceConversationKey: `slack:${teamId}:${conversation.id}`,
