@@ -28,6 +28,11 @@ const ADAPTER_DEFINITIONS: Record<AdapterPlatform, AdapterDefinition> = {
     workerEntrypoint: join(import.meta.dirname, "../workers/contacts-worker.js"),
     autoSync: true,
   },
+  linkedin: {
+    platform: "linkedin",
+    workerEntrypoint: join(import.meta.dirname, "../workers/linkedin-worker.js"),
+    autoSync: true,
+  },
   slack: {
     platform: "slack",
     workerEntrypoint: join(import.meta.dirname, "../workers/slack-worker.js"),

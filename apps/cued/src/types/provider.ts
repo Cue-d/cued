@@ -41,7 +41,7 @@ export const PLATFORM_DEFINITIONS = {
     requestableIntegration: false,
   },
   linkedin: {
-    adapter: false,
+    adapter: true,
     defaultAccountKey: "default",
     requestableIntegration: true,
     requestableOrder: 2,
