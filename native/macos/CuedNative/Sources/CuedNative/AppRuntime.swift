@@ -319,10 +319,11 @@ private final class DaemonSupervisor {
 
 @MainActor
 final class MenuBarAppController: NSObject, NSApplicationDelegate {
-  private let statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
+  private let statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
   private let statusStore: AppStatusStore
   private let daemonSupervisor: DaemonSupervisor
   private var timer: Timer?
+  private let statusItemImage = MenuBarAppController.loadStatusItemImage()
 
   init(dbPath: String, daemonLaunchPath: String?, daemonCommand: String, setupCommand: String, permissionsCommand: String) {
     self.statusStore = AppStatusStore(dbPath: dbPath)
@@ -379,7 +380,19 @@ final class MenuBarAppController: NSObject, NSApplicationDelegate {
 
   private func rebuildMenu() {
     let snapshot = statusStore.readSnapshot()
-    statusItem.button?.title = snapshot.daemonRunning ? "Cued" : "Cued!"
+    if let button = statusItem.button {
+      if let statusItemImage {
+        button.title = ""
+        button.image = statusItemImage
+        button.imagePosition = .imageOnly
+      } else {
+        button.image = nil
+        button.title = snapshot.daemonRunning ? "Cued" : "Cued!"
+        button.imagePosition = .noImage
+      }
+      button.toolTip = snapshot.daemonRunning ? "Cued" : "Cued (daemon stopped)"
+      button.appearsDisabled = !snapshot.daemonRunning
+    }
 
     let menu = NSMenu()
     menu.addItem(
@@ -445,6 +458,35 @@ final class MenuBarAppController: NSObject, NSApplicationDelegate {
     menu.addItem(withTitle: "Quit", action: #selector(quitApp), keyEquivalent: "q").target = self
 
     statusItem.menu = menu
+  }
+
+  private static func loadStatusItemImage() -> NSImage? {
+    let candidates = [
+      Bundle.main.path(forResource: "trayIconTemplate", ofType: "png"),
+      executableRelativeIconPath(),
+    ]
+
+    for candidate in candidates {
+      guard let candidate, let image = NSImage(contentsOfFile: candidate) else {
+        continue
+      }
+      image.isTemplate = true
+      image.size = NSSize(width: 18, height: 18)
+      return image
+    }
+
+    return nil
+  }
+
+  private static func executableRelativeIconPath() -> String? {
+    guard let executablePath = Bundle.main.executablePath else {
+      return nil
+    }
+
+    return URL(fileURLWithPath: executablePath)
+      .deletingLastPathComponent()
+      .appendingPathComponent("../../../../apps/electron/resources/trayIconTemplate.png")
+      .standardizedFileURL.path
   }
 }
 

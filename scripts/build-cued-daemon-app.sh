@@ -13,6 +13,7 @@ MACOS_DIR="$CONTENTS_DIR/MacOS"
 RESOURCES_DIR="$CONTENTS_DIR/Resources"
 CLI_DIST_DIR="$ROOT_DIR/apps/cued/dist"
 CLI_WRAPPER_SOURCE="$ROOT_DIR/apps/cued/bin/cued-wrapper"
+TRAY_ICON_SOURCE="$ROOT_DIR/apps/electron/resources/trayIconTemplate.png"
 NODE_PATH="${CUED_NODE_PATH:-$(command -v node)}"
 CLI_PATH="${CUED_CLI_PATH:-$CLI_DIST_DIR/cli.js}"
 DB_PATH="${CUED_DB_PATH_OVERRIDE:-$HOME/.cued/local.db}"
@@ -90,5 +91,7 @@ chmod +x "$RESOURCES_DIR/cued-cli"
 
 cp "$CLI_WRAPPER_SOURCE" "$RESOURCES_DIR/cued-dev-wrapper"
 chmod +x "$RESOURCES_DIR/cued-dev-wrapper"
+
+cp "$TRAY_ICON_SOURCE" "$RESOURCES_DIR/trayIconTemplate.png"
 
 echo "$APP_BUNDLE"
