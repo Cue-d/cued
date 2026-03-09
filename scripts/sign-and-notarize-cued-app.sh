@@ -34,9 +34,8 @@ if [[ ! -d "$APP_BUNDLE" ]]; then
   bash "$APP_BUILDER" >/dev/null
 fi
 
-codesign --force --deep --options runtime --sign "$CUED_CODESIGN_IDENTITY" "$APP_BUNDLE"
-
 bash "$DMG_BUILDER" >/dev/null
+codesign --force --deep --options runtime --sign "$CUED_CODESIGN_IDENTITY" "$APP_BUNDLE"
 codesign --force --sign "$CUED_CODESIGN_IDENTITY" "$DMG_PATH"
 
 if [[ -n "${CUED_NOTARY_PROFILE:-}" ]]; then
