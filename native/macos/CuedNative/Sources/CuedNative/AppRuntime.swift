@@ -1,8 +1,13 @@
 import AppKit
+import Contacts
+import Darwin
 import Foundation
 import SQLite3
 
 private let appDaemonHeartbeatGraceMs = 20_000
+private let appMessagesDBPath =
+  FileManager.default.homeDirectoryForCurrentUser
+  .appendingPathComponent("Library/Messages/chat.db").path
 
 struct AppIntegrationStatus {
   let platform: String
@@ -78,7 +83,7 @@ private final class AppStatusStore {
       conversations: counts[1],
       messages: counts[2],
       rawEvents: counts[3],
-      integrations: queryIntegrations(db: db)
+      integrations: mergeLiveLocalIntegrations(queryIntegrations(db: db))
     )
   }
 
@@ -146,6 +151,231 @@ private final class AppStatusStore {
       )
     }
     return results
+  }
+
+  private func mergeLiveLocalIntegrations(_ existing: [AppIntegrationStatus]) -> [AppIntegrationStatus] {
+    var byKey: [String: AppIntegrationStatus] = [:]
+    for integration in existing {
+      byKey[integrationKey(platform: integration.platform, accountKey: integration.accountKey)] = integration
+    }
+
+    upsertLocalIntegration(
+      into: &byKey,
+      platform: "contacts",
+      accountKey: "local",
+      displayName: "Contacts.app",
+      authState: currentContactsAuthState()
+    )
+    upsertLocalIntegration(
+      into: &byKey,
+      platform: "imessage",
+      accountKey: "local",
+      displayName: "Messages",
+      authState: currentIMessageAuthState()
+    )
+
+    return byKey.values.sorted {
+      if $0.platform == $1.platform {
+        return $0.accountKey < $1.accountKey
+      }
+      return $0.platform < $1.platform
+    }
+  }
+
+  private func upsertLocalIntegration(
+    into integrations: inout [String: AppIntegrationStatus],
+    platform: String,
+    accountKey: String,
+    displayName: String,
+    authState: String
+  ) {
+    let key = integrationKey(platform: platform, accountKey: accountKey)
+    let existing = integrations[key]
+    integrations[key] = AppIntegrationStatus(
+      platform: platform,
+      accountKey: accountKey,
+      displayName: existing?.displayName ?? displayName,
+      authState: authState,
+      enabled: existing?.enabled ?? true
+    )
+  }
+
+  private func integrationKey(platform: String, accountKey: String) -> String {
+    "\(platform):\(accountKey)"
+  }
+
+  private func currentContactsAuthState() -> String {
+    switch CNContactStore.authorizationStatus(for: .contacts) {
+    case .authorized:
+      return "authorized"
+    case .notDetermined:
+      return "not_determined"
+    case .denied:
+      return "denied"
+    case .restricted:
+      return "restricted"
+    @unknown default:
+      return "unknown"
+    }
+  }
+
+  private func currentIMessageAuthState() -> String {
+    guard FileManager.default.fileExists(atPath: appMessagesDBPath) else {
+      return "missing"
+    }
+
+    var db: OpaquePointer?
+    guard sqlite3_open_v2(appMessagesDBPath, &db, SQLITE_OPEN_READONLY, nil) == SQLITE_OK, let db else {
+      let message = db.flatMap { String(cString: sqlite3_errmsg($0)) } ?? "unable to open database file"
+      if let db {
+        sqlite3_close(db)
+      }
+      return mapIMessageErrorToAuthState(message)
+    }
+    defer { sqlite3_close(db) }
+
+    var statement: OpaquePointer?
+    guard sqlite3_prepare_v2(db, "SELECT MAX(ROWID) FROM message", -1, &statement, nil) == SQLITE_OK, let statement else {
+      return mapIMessageErrorToAuthState(String(cString: sqlite3_errmsg(db)))
+    }
+    defer { sqlite3_finalize(statement) }
+
+    let result = sqlite3_step(statement)
+    if result == SQLITE_ROW || result == SQLITE_DONE {
+      return "authorized"
+    }
+
+    return mapIMessageErrorToAuthState(String(cString: sqlite3_errmsg(db)))
+  }
+
+  private func mapIMessageErrorToAuthState(_ message: String) -> String {
+    let normalized = message.lowercased()
+    if normalized.contains("authorization denied") || normalized.contains("unable to open database file") {
+      return "needs_full_disk_access"
+    }
+    return "blocked"
+  }
+}
+
+private final class DatabaseActivityMonitor: @unchecked Sendable {
+  private let dbPath: String
+  private let queue = DispatchQueue(label: "dev.cued.status-watch")
+  private let onChange: @MainActor () -> Void
+  private var directorySource: DispatchSourceFileSystemObject?
+  private var dbSource: DispatchSourceFileSystemObject?
+  private var walSource: DispatchSourceFileSystemObject?
+  private var pendingChangeWorkItem: DispatchWorkItem?
+
+  init(dbPath: String, onChange: @escaping @MainActor () -> Void) {
+    self.dbPath = dbPath
+    self.onChange = onChange
+  }
+
+  func start() {
+    queue.async { [weak self] in
+      self?.installWatchers()
+    }
+  }
+
+  func stop() {
+    queue.async { [weak self] in
+      self?.pendingChangeWorkItem?.cancel()
+      self?.cancelWatchers()
+    }
+  }
+
+  private func installWatchers() {
+    cancel(&directorySource)
+    directorySource = makeWatcher(
+      path: directoryPath(),
+      eventMask: [.write, .delete, .rename, .attrib]
+    ) { [weak self] _ in
+      self?.installPathWatchers()
+      self?.scheduleChange()
+    }
+    installPathWatchers()
+  }
+
+  private func installPathWatchers() {
+    cancel(&dbSource)
+    dbSource = makeWatcher(
+      path: dbPath,
+      eventMask: [.write, .extend, .delete, .rename, .revoke, .attrib]
+    ) { [weak self] events in
+      if events.contains(.delete) || events.contains(.rename) || events.contains(.revoke) {
+        self?.installPathWatchers()
+      }
+      self?.scheduleChange()
+    }
+    cancel(&walSource)
+    walSource = makeWatcher(
+      path: "\(dbPath)-wal",
+      eventMask: [.write, .extend, .delete, .rename, .revoke, .attrib]
+    ) { [weak self] events in
+      if events.contains(.delete) || events.contains(.rename) || events.contains(.revoke) {
+        self?.installPathWatchers()
+      }
+      self?.scheduleChange()
+    }
+  }
+
+  private func makeWatcher(
+    path: String,
+    eventMask: DispatchSource.FileSystemEvent,
+    handler: @escaping (DispatchSource.FileSystemEvent) -> Void
+  ) -> DispatchSourceFileSystemObject? {
+    let fd = open(path, O_EVTONLY)
+    guard fd >= 0 else {
+      return nil
+    }
+
+    var source: DispatchSourceFileSystemObject?
+    source = DispatchSource.makeFileSystemObjectSource(
+      fileDescriptor: fd,
+      eventMask: eventMask,
+      queue: queue
+    )
+    source?.setEventHandler { [weak source] in
+      guard let source else {
+        return
+      }
+      handler(source.data)
+    }
+    source?.setCancelHandler {
+      close(fd)
+    }
+    source?.resume()
+    return source
+  }
+
+  private func cancelWatchers() {
+    cancel(&directorySource)
+    cancel(&dbSource)
+    cancel(&walSource)
+  }
+
+  private func cancel(_ source: inout DispatchSourceFileSystemObject?) {
+    source?.cancel()
+    source = nil
+  }
+
+  private func directoryPath() -> String {
+    URL(fileURLWithPath: dbPath).deletingLastPathComponent().path
+  }
+
+  private func scheduleChange() {
+    pendingChangeWorkItem?.cancel()
+    let workItem = DispatchWorkItem { [weak self] in
+      guard let self else {
+        return
+      }
+      let onChange = self.onChange
+      Task { @MainActor in
+        onChange()
+      }
+    }
+    pendingChangeWorkItem = workItem
+    queue.asyncAfter(deadline: .now() + .milliseconds(150), execute: workItem)
   }
 }
 
@@ -241,7 +471,24 @@ private final class DaemonSupervisor {
   }
 
   func openSetupInTerminal() {
-    runInTerminal(setupCommand)
+    let command: String
+    if let daemonLaunchPath, !daemonLaunchPath.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+      command = "\(shellEscape(daemonLaunchPath)) setup"
+    } else {
+      var environment = daemonEnvironment()
+      let bundlePath = Bundle.main.bundlePath.trimmingCharacters(in: .whitespacesAndNewlines)
+      if !bundlePath.isEmpty {
+        environment["CUED_APP_PATH"] = bundlePath
+      }
+      if let executablePath = Bundle.main.executablePath,
+         !executablePath.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+      {
+        environment["CUED_NATIVE_BINARY"] = executablePath
+      }
+      command = shellCommand(setupCommand, environment: environment)
+    }
+
+    runInTerminal(command)
   }
 
   func requestPermissions() {
@@ -270,6 +517,10 @@ private final class DaemonSupervisor {
       if environment["CUED_CONTACTS_NATIVE_BINARY"] == nil {
         environment["CUED_CONTACTS_NATIVE_BINARY"] = executablePath
       }
+    }
+    let bundlePath = Bundle.main.bundlePath.trimmingCharacters(in: .whitespacesAndNewlines)
+    if !bundlePath.isEmpty, environment["CUED_APP_PATH"] == nil {
+      environment["CUED_APP_PATH"] = bundlePath
     }
 
     return environment
@@ -325,6 +576,18 @@ private final class DaemonSupervisor {
     }
   }
 
+  private func shellCommand(_ command: String, environment: [String: String]) -> String {
+    let exports = environment
+      .sorted { $0.key < $1.key }
+      .map { "export \($0.key)=\(shellEscape($0.value))" }
+      .joined(separator: "; ")
+    return exports.isEmpty ? command : "\(exports); \(command)"
+  }
+
+  private func shellEscape(_ value: String) -> String {
+    "'\(value.replacingOccurrences(of: "'", with: "'\"'\"'"))'"
+  }
+
   private func runInTerminal(_ command: String) {
     let escaped = command
       .replacingOccurrences(of: "\\", with: "\\\\")
@@ -345,12 +608,17 @@ private final class DaemonSupervisor {
 @MainActor
 final class MenuBarAppController: NSObject, NSApplicationDelegate {
   private let statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
+  private let dbPath: String
   private let statusStore: AppStatusStore
   private let daemonSupervisor: DaemonSupervisor
+  private lazy var statusMonitor = DatabaseActivityMonitor(dbPath: dbPath) { [weak self] in
+    self?.refreshStatus()
+  }
   private var timer: Timer?
   private let statusItemImage = MenuBarAppController.loadStatusItemImage()
 
   init(dbPath: String, daemonLaunchPath: String?, daemonCommand: String, setupCommand: String, permissionsCommand: String) {
+    self.dbPath = dbPath
     self.statusStore = AppStatusStore(dbPath: dbPath)
     self.daemonSupervisor = DaemonSupervisor(
       daemonLaunchPath: daemonLaunchPath,
@@ -366,6 +634,7 @@ final class MenuBarAppController: NSObject, NSApplicationDelegate {
     NSApp.setActivationPolicy(.accessory)
     daemonSupervisor.startIfNeeded()
     rebuildMenu()
+    statusMonitor.start()
     timer = Timer.scheduledTimer(timeInterval: 5, target: self, selector: #selector(refreshStatus), userInfo: nil, repeats: true)
     if let timer {
       RunLoop.main.add(timer, forMode: .common)
@@ -374,6 +643,7 @@ final class MenuBarAppController: NSObject, NSApplicationDelegate {
 
   func applicationWillTerminate(_ notification: Notification) {
     timer?.invalidate()
+    statusMonitor.stop()
   }
 
   @objc private func restartDaemon() {
