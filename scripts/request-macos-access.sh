@@ -2,11 +2,25 @@
 
 set -euo pipefail
 
-ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ROOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 NATIVE_PACKAGE_DIR="$ROOT_DIR/native/macos/CuedNative"
 DEFAULT_NATIVE_BINARY="$NATIVE_PACKAGE_DIR/.build/release/CuedNative"
+if [[ -z "${CUED_APP_PATH:-}" ]]; then
+  APP_BUNDLE_CANDIDATE="$(cd "$SCRIPT_DIR/../.." 2>/dev/null && pwd || true)"
+  if [[ -n "$APP_BUNDLE_CANDIDATE" && "$(basename "$APP_BUNDLE_CANDIDATE")" == *.app ]]; then
+    CUED_APP_PATH="$APP_BUNDLE_CANDIDATE"
+  fi
+fi
+IS_BUNDLED_APP=0
+if [[ -n "${CUED_APP_PATH:-}" && -d "${CUED_APP_PATH}/Contents/Resources" ]]; then
+  IS_BUNDLED_APP=1
+fi
+if [[ $IS_BUNDLED_APP -eq 1 ]]; then
+  DEFAULT_NATIVE_BINARY="${CUED_APP_PATH}/Contents/MacOS/CuedDaemon"
+fi
 NATIVE_BINARY="${CUED_NATIVE_BINARY:-$DEFAULT_NATIVE_BINARY}"
-PERMISSION_TARGET="${CUED_PERMISSION_TARGET:-$NATIVE_BINARY}"
+PERMISSION_TARGET="${CUED_PERMISSION_TARGET:-${CUED_APP_PATH:-$NATIVE_BINARY}}"
 
 REQUEST_CONTACTS=0
 REQUEST_MESSAGES=0
@@ -59,6 +73,10 @@ ensure_macos() {
 ensure_native_binary() {
   if [[ -x "$NATIVE_BINARY" ]]; then
     return
+  fi
+
+  if [[ $IS_BUNDLED_APP -eq 1 ]]; then
+    die "bundled native binary not found at $NATIVE_BINARY"
   fi
 
   if [[ $BUILD_NATIVE -eq 0 ]]; then

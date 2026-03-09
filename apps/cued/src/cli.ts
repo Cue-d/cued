@@ -33,7 +33,22 @@ import {
 import { runSetupTUI } from "./setup.js";
 import { execFileSync } from "node:child_process";
 
-const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), "../../..");
+const DIST_ROOT = dirname(fileURLToPath(import.meta.url));
+const REPO_ROOT = join(DIST_ROOT, "../../..");
+
+function resolveBundledScriptPath(scriptName: string): string | null {
+  const candidates = [
+    process.env.CUED_BUNDLED_SCRIPT_ROOT ? join(process.env.CUED_BUNDLED_SCRIPT_ROOT, scriptName) : null,
+    join(DIST_ROOT, "../../scripts", scriptName),
+  ].filter((value): value is string => Boolean(value));
+
+  return candidates.find((candidate) => existsSync(candidate)) ?? null;
+}
+
+function resolvePermissionsScriptPath(): string {
+  return resolveBundledScriptPath("request-macos-access.sh")
+    ?? join(REPO_ROOT, "scripts", "request-macos-access.sh");
+}
 
 function printHelp(): void {
   console.log(`cued
@@ -265,14 +280,15 @@ async function main(): Promise<void> {
           return;
         case "request": {
           const flags = rest.length > 0 ? rest : ["--all"];
+          const scriptPath = resolvePermissionsScriptPath();
           printJson({
             app: getAppBundleInfo(),
             requested: flags,
-            command: ["bash", "scripts/request-macos-access.sh", ...flags],
+            command: ["bash", scriptPath, ...flags],
           });
           execFileSync(
             "bash",
-            [join(REPO_ROOT, "scripts", "request-macos-access.sh"), ...flags],
+            [scriptPath, ...flags],
             { stdio: "inherit" },
           );
           return;

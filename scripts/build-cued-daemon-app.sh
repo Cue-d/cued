@@ -11,15 +11,22 @@ APP_BUNDLE="$APP_DIST_DIR/${APP_NAME}.app"
 CONTENTS_DIR="$APP_BUNDLE/Contents"
 MACOS_DIR="$CONTENTS_DIR/MacOS"
 RESOURCES_DIR="$CONTENTS_DIR/Resources"
-CLI_DIST_DIR="$ROOT_DIR/apps/cued/dist"
-CLI_WRAPPER_SOURCE="$ROOT_DIR/apps/cued/bin/cued-wrapper"
+RUNTIME_DIR="$RESOURCES_DIR/cued-runtime"
+RUNTIME_NODE_DIR="$RESOURCES_DIR/runtime/node/bin"
+PERMISSIONS_SCRIPT_SOURCE="$ROOT_DIR/scripts/request-macos-access.sh"
 TRAY_ICON_SOURCE="$ROOT_DIR/apps/electron/resources/trayIconTemplate.png"
 NODE_PATH="${CUED_NODE_PATH:-$(command -v node)}"
-CLI_PATH="${CUED_CLI_PATH:-$CLI_DIST_DIR/cli.js}"
 DB_PATH="${CUED_DB_PATH_OVERRIDE:-$HOME/.cued/local.db}"
-DAEMON_COMMAND="${CUED_DAEMON_COMMAND:-\"$NODE_PATH\" \"$CLI_PATH\" daemon}"
-SETUP_COMMAND="${CUED_SETUP_COMMAND:-\"$NODE_PATH\" \"$CLI_PATH\" setup}"
-PERMISSIONS_COMMAND="${CUED_PERMISSIONS_COMMAND:-cd \"$ROOT_DIR\" && pnpm permissions:macos -- --all}"
+DAEMON_COMMAND="${CUED_DAEMON_COMMAND:-\"\$CUED_APP_PATH/Contents/Resources/cued-cli\" daemon}"
+SETUP_COMMAND="${CUED_SETUP_COMMAND:-\"\$CUED_APP_PATH/Contents/Resources/cued-cli\" setup}"
+PERMISSIONS_COMMAND="${CUED_PERMISSIONS_COMMAND:-\"\$CUED_APP_PATH/Contents/Resources/cued-cli\" permissions request --all}"
+DEPLOY_STAGING_DIR="$(mktemp -d "${TMPDIR:-/tmp}/cued-runtime.XXXXXX")"
+
+cleanup() {
+  rm -rf "$DEPLOY_STAGING_DIR"
+}
+
+trap cleanup EXIT
 
 xml_escape() {
   printf '%s' "$1" \
@@ -32,12 +39,19 @@ mkdir -p "$APP_DIST_DIR"
 
 pnpm --dir "$ROOT_DIR/apps/cued" build >/dev/null
 swift build --package-path "$SWIFT_PACKAGE_DIR" -c release >/dev/null
+pnpm --filter ./apps/cued deploy --legacy --prod "$DEPLOY_STAGING_DIR" >/dev/null
 
 rm -rf "$APP_BUNDLE"
-mkdir -p "$MACOS_DIR" "$RESOURCES_DIR"
+mkdir -p "$MACOS_DIR" "$RESOURCES_DIR" "$RUNTIME_DIR" "$RUNTIME_NODE_DIR"
 
 cp "$SWIFT_BINARY" "$MACOS_DIR/$APP_NAME"
 chmod +x "$MACOS_DIR/$APP_NAME"
+cp "$NODE_PATH" "$RUNTIME_NODE_DIR/node"
+chmod +x "$RUNTIME_NODE_DIR/node"
+cp -R "$DEPLOY_STAGING_DIR/." "$RUNTIME_DIR/"
+mkdir -p "$RESOURCES_DIR/scripts"
+cp "$PERMISSIONS_SCRIPT_SOURCE" "$RESOURCES_DIR/scripts/request-macos-access.sh"
+chmod +x "$RESOURCES_DIR/scripts/request-macos-access.sh"
 
 cat > "$CONTENTS_DIR/Info.plist" <<EOF
 <?xml version="1.0" encoding="UTF-8"?>
@@ -85,12 +99,21 @@ EOF
 cat > "$RESOURCES_DIR/cued-cli" <<EOF
 #!/usr/bin/env bash
 set -euo pipefail
-exec "$NODE_PATH" "$CLI_PATH" "\$@"
+SCRIPT_DIR="\$(cd "\$(dirname "\${BASH_SOURCE[0]}")" && pwd)"
+APP_EXEC="\$SCRIPT_DIR/../MacOS/$APP_NAME"
+APP_BUNDLE_PATH="\$(cd "\$SCRIPT_DIR/../.." && pwd)"
+RUNTIME_ROOT="\$SCRIPT_DIR/cued-runtime"
+SCRIPT_ROOT="\$SCRIPT_DIR/scripts"
+NODE_BIN="\$SCRIPT_DIR/runtime/node/bin/node"
+export PATH="\$(dirname "\$NODE_BIN"):\$PATH"
+export CUED_APP_PATH="\${CUED_APP_PATH:-\$APP_BUNDLE_PATH}"
+export CUED_BUNDLED_RUNTIME_ROOT="\${CUED_BUNDLED_RUNTIME_ROOT:-\$RUNTIME_ROOT}"
+export CUED_BUNDLED_SCRIPT_ROOT="\${CUED_BUNDLED_SCRIPT_ROOT:-\$SCRIPT_ROOT}"
+export CUED_IMESSAGE_NATIVE_BINARY="\${CUED_IMESSAGE_NATIVE_BINARY:-\$APP_EXEC}"
+export CUED_CONTACTS_NATIVE_BINARY="\${CUED_CONTACTS_NATIVE_BINARY:-\$APP_EXEC}"
+exec "\$NODE_BIN" "\$RUNTIME_ROOT/dist/cli.js" "\$@"
 EOF
 chmod +x "$RESOURCES_DIR/cued-cli"
-
-cp "$CLI_WRAPPER_SOURCE" "$RESOURCES_DIR/cued-dev-wrapper"
-chmod +x "$RESOURCES_DIR/cued-dev-wrapper"
 
 cp "$TRAY_ICON_SOURCE" "$RESOURCES_DIR/trayIconTemplate.png"
 
