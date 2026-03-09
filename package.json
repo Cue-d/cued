@@ -1,0 +1,40 @@
+{
+  "name": "cued-monorepo",
+  "private": true,
+  "version": "0.0.0",
+  "packageManager": "pnpm@10.29.3",
+  "scripts": {
+    "build": "dotenv -e .env.local -- turbo build",
+    "dev": "dotenv -e .env.local -- turbo dev",
+    "lint": "dotenv -e .env.local -- turbo lint",
+    "permissions:macos": "bash scripts/request-macos-access.sh",
+    "typecheck": "dotenv -e .env.local -- turbo typecheck",
+    "test": "dotenv -e .env.local -- turbo test",
+    "verify:avatars": "bash scripts/verify-avatar-runtime.sh"
+  },
+  "devDependencies": {
+    "@types/node": "^25.0.9",
+    "dotenv-cli": "^11.0.0",
+    "eslint-plugin-import-x": "^4.16.1",
+    "turbo": "^2.8.3"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "better-sqlite3",
+      "node-mac-contacts",
+      "electron",
+      "electron-winstaller",
+      "esbuild",
+      "sharp",
+      "unrs-resolver"
+    ],
+    "overrides": {
+      "@types/react": "19.2.8",
+      "lightningcss": "1.30.1",
+      "node-mac-contacts>node-addon-api": "^8.3.0"
+    }
+  }
+}

@@ -1,0 +1,2 @@
+#!/bin/sh
+exec /opt/homebrew/bin/node /Users/theotarr/Documents/Development/cued/apps/cued/dist/cli.js "$@"
