@@ -20,7 +20,6 @@ import {
   REQUESTABLE_INTEGRATION_PLATFORM_VALUES,
 } from "../types/provider.js";
 import { resolveMacOSNativeBinary } from "../workers/native-binary.js";
-import { importLegacyLocalAuth } from "./legacy-local-auth.js";
 import { importSlackDesktopAuth } from "./slack-desktop-auth.js";
 
 export interface IntegrationStateSummary {
@@ -409,12 +408,10 @@ export async function refreshManagedIntegrationStates(db: CuedDatabase): Promise
   }
 
   const importedDesktop = await importSlackDesktopAuth(db);
-  const importedLegacy = importLegacyLocalAuth(db);
 
   return {
     refreshed: managed.length
-      + importedDesktop.filter((entry) => entry.imported).length
-      + importedLegacy.filter((entry) => entry.imported).length,
+      + importedDesktop.filter((entry) => entry.imported).length,
     integrations: listIntegrationStates(db),
   };
 }

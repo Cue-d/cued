@@ -25,6 +25,19 @@ export async function runAdapter(
 
     let stdout = "";
     let stderr = "";
+    let settled = false;
+    const timeout = setTimeout(() => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      child.kill("SIGKILL");
+      reject(
+        new Error(
+          `Adapter worker timed out after ${definition.workerTimeoutMs}ms for platform '${platform}'${accountKey ? ` account '${accountKey}'` : ""}`,
+        ),
+      );
+    }, definition.workerTimeoutMs);
 
     child.stdout.on("data", (chunk) => {
       stdout += chunk.toString("utf8");
@@ -34,10 +47,25 @@ export async function runAdapter(
       stderr += chunk.toString("utf8");
     });
 
-    child.on("error", reject);
+    child.on("error", (error) => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      clearTimeout(timeout);
+      reject(error);
+    });
     child.on("close", (code) => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      clearTimeout(timeout);
+
       if (code !== 0) {
-        reject(new Error(stderr || `Adapter worker exited with code ${code}`));
+        const parsedError = parseWorkerError(stdout);
+        const workerError = parsedError ?? stderr.trim();
+        reject(new Error(workerError || `Adapter worker exited with code ${code}`));
         return;
       }
 
@@ -57,4 +85,19 @@ export async function runAdapter(
       resolve(parsed.bundle);
     });
   });
+}
+
+function parseWorkerError(stdout: string): string | null {
+  if (!stdout.trim()) {
+    return null;
+  }
+
+  try {
+    const parsed = JSON.parse(stdout) as AdapterWorkerOutput;
+    return typeof parsed.error === "string" && parsed.error.length > 0
+      ? parsed.error
+      : null;
+  } catch {
+    return null;
+  }
 }
