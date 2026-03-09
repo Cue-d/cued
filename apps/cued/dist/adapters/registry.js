@@ -17,6 +17,11 @@ const ADAPTER_DEFINITIONS = {
         workerEntrypoint: join(import.meta.dirname, "../workers/contacts-worker.js"),
         autoSync: true,
     },
+    slack: {
+        platform: "slack",
+        workerEntrypoint: join(import.meta.dirname, "../workers/slack-worker.js"),
+        autoSync: true,
+    },
 };
 export function listAdapterPlatforms() {
     return [...ADAPTER_PLATFORM_VALUES];
