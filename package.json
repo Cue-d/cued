@@ -7,6 +7,7 @@
     "build": "dotenv -e .env.local -- turbo build",
     "dev": "dotenv -e .env.local -- turbo dev",
     "lint": "dotenv -e .env.local -- turbo lint",
+    "permissions:macos": "bash scripts/request-macos-access.sh",
     "typecheck": "dotenv -e .env.local -- turbo typecheck",
     "test": "dotenv -e .env.local -- turbo test",
     "verify:avatars": "bash scripts/verify-avatar-runtime.sh"

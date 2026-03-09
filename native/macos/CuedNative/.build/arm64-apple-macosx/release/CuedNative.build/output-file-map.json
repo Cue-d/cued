@@ -1,0 +1,13 @@
+{
+  "": {
+    "dependencies": "/Users/theotarr/Documents/Development/cued/native/macos/CuedNative/.build/arm64-apple-macosx/release/CuedNative.build/CuedNative.d",
+    "object": "/Users/theotarr/Documents/Development/cued/native/macos/CuedNative/.build/arm64-apple-macosx/release/CuedNative.build/CuedNative.o",
+    "swift-dependencies": "/Users/theotarr/Documents/Development/cued/native/macos/CuedNative/.build/arm64-apple-macosx/release/CuedNative.build/master.swiftdeps"
+  },
+  "/Users/theotarr/Documents/Development/cued/native/macos/CuedNative/Sources/CuedNative/main.swift": {
+    "object": "/Users/theotarr/Documents/Development/cued/native/macos/CuedNative/.build/arm64-apple-macosx/release/CuedNative.build/main.swift.o",
+    "swiftmodule": "/Users/theotarr/Documents/Development/cued/native/macos/CuedNative/.build/arm64-apple-macosx/release/CuedNative.build/main~partial.swiftmodule",
+    "swift-dependencies": "/Users/theotarr/Documents/Development/cued/native/macos/CuedNative/.build/arm64-apple-macosx/release/CuedNative.build/main.swiftdeps",
+    "diagnostics": "/Users/theotarr/Documents/Development/cued/native/macos/CuedNative/.build/arm64-apple-macosx/release/CuedNative.build/main.dia"
+  }
+}
