@@ -493,29 +493,6 @@ export function buildIntegrationStatus(db) {
         authSessions: listAuthSessions(db, 20),
     };
 }
-export function launchIntegration(db, platform, accountKey) {
-    const integration = getIntegrationSummary(db, platform, accountKey);
-    if (!integration.launchTarget) {
-        return {
-            launched: false,
-            integration,
-            command: null,
-        };
-    }
-    if (integration.launchStrategy === "chromium-auth" || integration.launchStrategy === "qr-native") {
-        return {
-            launched: false,
-            integration,
-            command: null,
-        };
-    }
-    execFileSync("open", [integration.launchTarget], { stdio: "ignore" });
-    return {
-        launched: true,
-        integration,
-        command: ["open", integration.launchTarget],
-    };
-}
 export function getPlatformRuntimeDefaults(platform) {
     const runtimeKind = platform === "contacts" || platform === "imessage"
         ? "native"

@@ -677,36 +677,6 @@ export function buildIntegrationStatus(db: CuedDatabase): {
   };
 }
 
-export function launchIntegration(
-  db: CuedDatabase,
-  platform: string,
-  accountKey?: string,
-): { launched: boolean; integration: IntegrationStateSummary; command: string[] | null } {
-  const integration = getIntegrationSummary(db, platform, accountKey);
-  if (!integration.launchTarget) {
-    return {
-      launched: false,
-      integration,
-      command: null,
-    };
-  }
-
-  if (integration.launchStrategy === "chromium-auth" || integration.launchStrategy === "qr-native") {
-    return {
-      launched: false,
-      integration,
-      command: null,
-    };
-  }
-
-  execFileSync("open", [integration.launchTarget], { stdio: "ignore" });
-  return {
-    launched: true,
-    integration,
-    command: ["open", integration.launchTarget],
-  };
-}
-
 export function getPlatformRuntimeDefaults(platform: Platform): {
   runtimeKind: IntegrationRuntimeKind;
   accountKey: string;

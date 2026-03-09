@@ -22,13 +22,11 @@ Usage:
   cued integrations status
   cued integrations refresh
   cued integrations connect <platform> [account]
-  cued integrations request-access <platform> [account]
   cued integrations disconnect <platform> [account]
   cued integrations auth-status <session-id>
   cued integrations auth-cancel <session-id>
   cued integrations enable <platform> [account]
   cued integrations disable <platform> [account]
-  cued integrations login <platform> [account]
   cued hooks init
   cued hooks doctor
   cued hooks test <event>
@@ -64,12 +62,9 @@ async function handleLocalIntegrationCommand(subcommand, rest) {
                 return buildIntegrationStatus(db);
             case "refresh":
                 return refreshManagedIntegrationStates(db);
-            case "connect":
-            case "request-access":
-            case "login":
-            case "open": {
+            case "connect": {
                 if (!rest[0]) {
-                    throw new Error(`Usage: cued integrations ${subcommand} <platform> [account]`);
+                    throw new Error("Usage: cued integrations connect <platform> [account]");
                 }
                 const requested = connectIntegration(db, rest[0], rest[1]);
                 const running = markAuthSessionInProgress(db, requested.authSession.id, process.pid);
@@ -118,7 +113,7 @@ async function handleLocalIntegrationCommand(subcommand, rest) {
                 }
                 return setIntegrationEnabled(db, rest[0], rest[1], false);
             default:
-                throw new Error(`Usage: cued integrations list | status | refresh | connect <platform> [account] | disconnect <platform> [account] | auth-status <session-id> | auth-cancel <session-id> | enable <platform> [account] | disable <platform> [account] | login <platform> [account]\nRequestable platforms: ${listRequestableIntegrationPlatforms().join(", ")}`);
+                throw new Error(`Usage: cued integrations list | status | refresh | connect <platform> [account] | disconnect <platform> [account] | auth-status <session-id> | auth-cancel <session-id> | enable <platform> [account] | disable <platform> [account]\nRequestable platforms: ${listRequestableIntegrationPlatforms().join(", ")}`);
         }
     }
     finally {
@@ -206,12 +201,11 @@ async function main() {
                     response = await sendDaemonRequest({ command: "integrations-refresh" });
                     break;
                 case "connect":
-                case "request-access":
                     if (!rest[0]) {
-                        throw new Error(`Usage: cued integrations ${subcommand} <platform> [account]`);
+                        throw new Error("Usage: cued integrations connect <platform> [account]");
                     }
                     response = await sendDaemonRequest({
-                        command: subcommand === "connect" ? "integrations-connect" : "integrations-request-access",
+                        command: "integrations-connect",
                         platform: rest[0],
                         accountKey: rest[1],
                     });
@@ -264,19 +258,8 @@ async function main() {
                         accountKey: rest[1],
                     });
                     break;
-                case "login":
-                case "open":
-                    if (!rest[0]) {
-                        throw new Error("Usage: cued integrations login <platform> [account]");
-                    }
-                    response = await sendDaemonRequest({
-                        command: "integrations-connect",
-                        platform: rest[0],
-                        accountKey: rest[1],
-                    });
-                    break;
                 default:
-                    throw new Error(`Usage: cued integrations list | status | refresh | connect <platform> [account] | disconnect <platform> [account] | auth-status <session-id> | auth-cancel <session-id> | enable <platform> [account] | disable <platform> [account] | login <platform> [account]\nRequestable platforms: ${listRequestableIntegrationPlatforms().join(", ")}`);
+                    throw new Error(`Usage: cued integrations list | status | refresh | connect <platform> [account] | disconnect <platform> [account] | auth-status <session-id> | auth-cancel <session-id> | enable <platform> [account] | disable <platform> [account]\nRequestable platforms: ${listRequestableIntegrationPlatforms().join(", ")}`);
             }
             break;
         case "sync":

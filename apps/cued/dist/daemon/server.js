@@ -6,7 +6,7 @@ import { openCuedDatabase } from "../db/database.js";
 import { buildDoctorReport } from "../diagnostics/doctor.js";
 import { runAdapter } from "../adapters/runner.js";
 import { isAdapterPlatform, listAutoSyncPlatforms } from "../adapters/registry.js";
-import { buildIntegrationStatus, completeAuthSession, connectIntegration, disconnectIntegration, getAuthSessionSummary, getIntegrationSummary, launchIntegration, markAuthSessionInProgress, refreshManagedIntegrationStates, setIntegrationEnabled, } from "../integrations/service.js";
+import { buildIntegrationStatus, completeAuthSession, connectIntegration, disconnectIntegration, getAuthSessionSummary, getIntegrationSummary, markAuthSessionInProgress, refreshManagedIntegrationStates, setIntegrationEnabled, } from "../integrations/service.js";
 import { startAuthSession } from "../integrations/auth-runtime.js";
 import { doctorHooksConfig, emitHookEvent } from "../hooks/service.js";
 import { rebuildProjectedState } from "../projector/projector.js";
@@ -363,7 +363,6 @@ async function dispatchRequest(db, request, activeAuthSessions) {
                     result: refreshManagedIntegrationStates(db),
                 };
             case "integrations-connect":
-            case "integrations-request-access":
                 {
                     const started = await startManagedAuth(db, request.platform, request.accountKey, activeAuthSessions);
                     return {
@@ -415,20 +414,6 @@ async function dispatchRequest(db, request, activeAuthSessions) {
                     id: request.id,
                     ok: true,
                     result: setIntegrationEnabled(db, request.platform, request.accountKey, false),
-                };
-            case "integrations-login":
-                if (["slack", "linkedin", "twitter", "x"].includes(request.platform.toLowerCase())) {
-                    return dispatchRequest(db, {
-                        id: request.id,
-                        command: "integrations-connect",
-                        platform: request.platform,
-                        accountKey: request.accountKey,
-                    }, activeAuthSessions);
-                }
-                return {
-                    id: request.id,
-                    ok: true,
-                    result: launchIntegration(db, request.platform, request.accountKey),
                 };
             case "sync-run":
                 if (request.source && !isAdapterPlatform(request.source)) {

@@ -15,7 +15,6 @@ import {
   disconnectIntegration,
   getAuthSessionSummary,
   getIntegrationSummary,
-  launchIntegration,
   listAuthSessions,
   listIntegrationStates,
   markAuthSessionInProgress,
@@ -470,7 +469,6 @@ async function dispatchRequest(
           result: refreshManagedIntegrationStates(db),
         };
       case "integrations-connect":
-      case "integrations-request-access":
         {
           const started = await startManagedAuth(
             db,
@@ -527,24 +525,6 @@ async function dispatchRequest(
           id: request.id,
           ok: true,
           result: setIntegrationEnabled(db, request.platform, request.accountKey, false),
-        };
-      case "integrations-login":
-        if (["slack", "linkedin", "twitter", "x"].includes(request.platform.toLowerCase())) {
-          return dispatchRequest(
-            db,
-            {
-              id: request.id,
-              command: "integrations-connect",
-              platform: request.platform,
-              accountKey: request.accountKey,
-            },
-            activeAuthSessions,
-          );
-        }
-        return {
-          id: request.id,
-          ok: true,
-          result: launchIntegration(db, request.platform, request.accountKey),
         };
       case "sync-run":
         if (request.source && !isAdapterPlatform(request.source)) {
