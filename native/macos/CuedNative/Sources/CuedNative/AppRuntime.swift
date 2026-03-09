@@ -245,7 +245,17 @@ private final class DaemonSupervisor {
   }
 
   func requestPermissions() {
-    _ = launchShellCommand(permissionsCommand)
+    var environment = daemonEnvironment()
+    if let executablePath = Bundle.main.executablePath,
+       !executablePath.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    {
+      environment["CUED_NATIVE_BINARY"] = executablePath
+    }
+    let bundlePath = Bundle.main.bundlePath.trimmingCharacters(in: .whitespacesAndNewlines)
+    if !bundlePath.isEmpty {
+      environment["CUED_PERMISSION_TARGET"] = bundlePath
+    }
+    _ = launchShellCommand(permissionsCommand, environment: environment)
   }
 
   private func daemonEnvironment() -> [String: String] {
