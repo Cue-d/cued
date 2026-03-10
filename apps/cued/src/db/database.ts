@@ -1199,21 +1199,26 @@ export class CuedDatabase {
       }
     });
 
-    const insertedEvents = uniqueEvents.filter((event) => !existingIds.has(event.id));
+    const insertedRowIds = new Map<string, number>();
     let firstInsertedRowId: number | null = null;
     let lastInsertedRowId: number | null = null;
-    if (insertedEvents.length > 0) {
-      for (const chunk of chunkArray(insertedEvents, WRITE_BATCH_SIZE)) {
+    const candidateEvents = uniqueEvents.filter((event) => !existingIds.has(event.id));
+    if (candidateEvents.length > 0) {
+      for (const chunk of chunkArray(candidateEvents, WRITE_BATCH_SIZE)) {
         const rows = this.sqlite
           .prepare(`
-            SELECT rowid
+            SELECT id, rowid
             FROM raw_events
             WHERE id IN (${chunk.map(() => "?").join(", ")})
             ORDER BY rowid ASC
           `)
-          .all(...chunk.map((event) => event.id)) as Array<{ rowid: number }>;
+          .all(...chunk.map((event) => event.id)) as Array<{ id: string; rowid: number }>;
         if (rows.length === 0) {
           continue;
+        }
+
+        for (const row of rows) {
+          insertedRowIds.set(row.id, row.rowid);
         }
 
         if (firstInsertedRowId == null || rows[0]!.rowid < firstInsertedRowId) {
@@ -1225,6 +1230,7 @@ export class CuedDatabase {
         }
       }
     }
+    const insertedEvents = candidateEvents.filter((event) => insertedRowIds.has(event.id));
     return {
       insertedCount: insertedEvents.length,
       insertedEvents,

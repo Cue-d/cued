@@ -4,7 +4,7 @@ import Darwin
 import Foundation
 import SQLite3
 
-private let appDaemonHeartbeatGraceMs = 20_000
+private let appDaemonHeartbeatGraceMs = 120_000
 private let appMessagesDBPath =
   FileManager.default.homeDirectoryForCurrentUser
   .appendingPathComponent("Library/Messages/chat.db").path
@@ -443,15 +443,6 @@ private final class DaemonSupervisor {
     }
     let snapshot = statusStore.readSnapshot()
     if let daemonProcess, !daemonProcess.isRunning {
-      self.daemonProcess = nil
-    }
-    if
-      let daemonProcess,
-      daemonProcess.isRunning,
-      !snapshot.daemonRunning,
-      snapshot.daemonPID == nil || snapshot.daemonPID == Int(daemonProcess.processIdentifier)
-    {
-      daemonProcess.terminate()
       self.daemonProcess = nil
     }
     guard daemonProcess == nil, !snapshot.daemonRunning else {

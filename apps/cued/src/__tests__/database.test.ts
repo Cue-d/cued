@@ -353,4 +353,48 @@ describe("CuedDatabase", () => {
 
     db.close();
   });
+
+  it("counts only dedupe-inserted raw events in batched writes", () => {
+    const db = createDb();
+
+    const duplicateDedupeKey = `contacts:duplicate:${randomUUID()}`;
+    const result = db.insertRawEvents([
+      {
+        id: randomUUID(),
+        platform: "contacts",
+        accountKey: "local",
+        entityKind: "contact",
+        eventKind: "observed",
+        observedAt: 1,
+        dedupeKey: duplicateDedupeKey,
+        payload: {
+          sourceEntityKey: "contacts:one",
+          fields: { display_name: "One" },
+          handles: [{ type: "phone", value: "+15551234567", deterministic: true }],
+        },
+        sourceVersion: "contacts-v1",
+      },
+      {
+        id: randomUUID(),
+        platform: "contacts",
+        accountKey: "local",
+        entityKind: "contact",
+        eventKind: "observed",
+        observedAt: 2,
+        dedupeKey: duplicateDedupeKey,
+        payload: {
+          sourceEntityKey: "contacts:one",
+          fields: { display_name: "One" },
+          handles: [{ type: "phone", value: "+15551234567", deterministic: true }],
+        },
+        sourceVersion: "contacts-v1",
+      },
+    ]);
+
+    expect(result.insertedCount).toBe(1);
+    expect(result.insertedEvents).toHaveLength(1);
+    expect(db.getOverview().rawEvents).toBe(1);
+
+    db.close();
+  });
 });
