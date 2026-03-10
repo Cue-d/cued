@@ -1303,6 +1303,35 @@ export class CuedDatabase {
     }>;
   }
 
+  getRawEventRowIdRange(
+    platform: Platform,
+    accountKey?: string,
+  ): { minRowId: number; maxRowId: number } | null {
+    const clauses = ["platform = ?"];
+    const params: Array<string> = [platform];
+    if (accountKey) {
+      clauses.push("account_key = ?");
+      params.push(accountKey);
+    }
+
+    const row = this.sqlite
+      .prepare(`
+        SELECT MIN(rowid) AS min_rowid, MAX(rowid) AS max_rowid
+        FROM raw_events
+        WHERE ${clauses.join(" AND ")}
+      `)
+      .get(...params) as { min_rowid: number | null; max_rowid: number | null } | undefined;
+
+    if (!row?.min_rowid || !row?.max_rowid) {
+      return null;
+    }
+
+    return {
+      minRowId: row.min_rowid,
+      maxRowId: row.max_rowid,
+    };
+  }
+
   listRawEventsInRange(startRowId: number, endRowId: number, limit?: number): Array<{
     rowid: number;
     id: string;

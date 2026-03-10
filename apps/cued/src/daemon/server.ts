@@ -747,6 +747,7 @@ export async function runDaemon(): Promise<void> {
         insertedRawEvents: insertResult.insertedCount,
       };
 
+      let projectionQueued = false;
       if (
         insertResult.firstInsertedRowId != null
         && insertResult.lastInsertedRowId != null
@@ -759,11 +760,26 @@ export async function runDaemon(): Promise<void> {
           },
           { delayMs: deferredProjectionCoalesceMs },
         );
+        projectionQueued = true;
+      }
+      if (currentRun.platform === "contacts") {
+        const contactsRange = db.getRawEventRowIdRange("contacts", accountKey);
+        if (contactsRange) {
+          queueProjectionRun(
+            `contacts_replay:${accountKey}`,
+            {
+              startRowId: contactsRange.minRowId,
+              endRowId: contactsRange.maxRowId,
+            },
+            { delayMs: 0 },
+          );
+          projectionQueued = true;
+        }
       }
       db.finishRun(currentRun.id, {
         ingested: bundle.rawEvents.length,
         insertedRawEvents: insertResult.insertedCount,
-        projectionQueued: insertResult.insertedCount > 0,
+        projectionQueued,
         hasMore: bundle.hasMore ?? false,
         syncMode: checkpointSyncMode,
         timings,
