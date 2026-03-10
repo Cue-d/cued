@@ -797,12 +797,17 @@ struct CuedNativeCLI {
           sender = nil
         }
 
+        let messageText = resolvedMessageText(
+          text: row.text,
+          attributedBody: row.attributedBody
+        )
+
         return IMessageMessage(
           id: row.rowID,
           guid: row.guid,
           chatId: row.chatID,
           itemType: row.itemType,
-          text: row.text ?? extractTextFromAttributedBody(row.attributedBody),
+          text: messageText,
           timestamp: row.unixDate ?? 0,
           isFromMe: row.isFromMe,
           isRead: row.isRead,
@@ -820,6 +825,20 @@ struct CuedNativeCLI {
           reactions: []
         )
       }
+  }
+
+  private static func resolvedMessageText(
+    text: String?,
+    attributedBody: Data?
+  ) -> String? {
+    if let extracted = extractTextFromAttributedBody(attributedBody) {
+      let trimmed = extracted.trimmingCharacters(in: .whitespacesAndNewlines)
+      if !trimmed.isEmpty {
+        return extracted
+      }
+    }
+
+    return text
   }
 
   private static func fetchChat(
