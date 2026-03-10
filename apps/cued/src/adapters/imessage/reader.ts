@@ -77,6 +77,17 @@ function getTapbackBaseType(type: number): number {
   return isTapbackRemovalType(type) ? type - 1000 : type;
 }
 
+function getMessageText(
+  text: string | null,
+  attributedBody: Uint8Array | null,
+): string | null {
+  const extracted = extractTextFromAttributedBody(attributedBody ? Buffer.from(attributedBody) : null);
+  if (extracted && extracted.trim() !== "") {
+    return extracted;
+  }
+  return text;
+}
+
 export class IMessageReader {
   private readonly db: import("node:sqlite").DatabaseSync;
 
@@ -181,7 +192,7 @@ export class IMessageReader {
         guid: row.guid,
         chatId: row.chat_id,
         itemType: row.item_type,
-        text: row.text ?? extractTextFromAttributedBody(row.attributedBody ? Buffer.from(row.attributedBody) : null),
+        text: getMessageText(row.text, row.attributedBody),
         timestamp: row.unix_date ?? 0,
         isFromMe,
         isRead,

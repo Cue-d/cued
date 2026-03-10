@@ -74,8 +74,14 @@ export function installMacOSApp(destinationPath?: string): {
     && realpathSync(sourcePath) === realpathSync(installedAppPath);
   if (!sameBundle) {
     mkdirSync(dirname(installedAppPath), { recursive: true });
-    rmSync(installedAppPath, { recursive: true, force: true });
-    cpSync(sourcePath, installedAppPath, { recursive: true });
+    if (!existsSync(installedAppPath)) {
+      cpSync(sourcePath, installedAppPath, { recursive: true });
+    } else {
+      // Keep the installed app bundle path stable so macOS privacy grants survive updates.
+      execFileSync("rsync", ["-a", "--delete", `${sourcePath}/`, `${installedAppPath}/`], {
+        stdio: "ignore",
+      });
+    }
   }
 
   const cliSource = join(installedAppPath, "Contents", "Resources", "cued-cli");
