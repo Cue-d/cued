@@ -24,7 +24,7 @@ const ADAPTER_DEFINITIONS: Record<AdapterPlatform, AdapterDefinition> = {
     platform: "imessage",
     workerEntrypoint: join(import.meta.dirname, "../workers/imessage-worker.js"),
     autoSync: true,
-    workerTimeoutMs: 30_000,
+    workerTimeoutMs: 120_000,
   },
   contacts: {
     platform: "contacts",
