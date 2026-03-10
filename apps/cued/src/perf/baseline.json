@@ -1,0 +1,23 @@
+{
+  "imessage_incremental_sync": {
+    "medianMs": 10.278667000000041
+  },
+  "slack_incremental_sync": {
+    "medianMs": 12.710000000000036
+  },
+  "linkedin_incremental_sync": {
+    "medianMs": 6.563957999999957
+  },
+  "incremental_insert_only": {
+    "medianMs": 33.87270800000033
+  },
+  "incremental_webhook_ready": {
+    "medianMs": 130.86020800000006
+  },
+  "incremental_hot_plus_cold": {
+    "medianMs": 180.96754099999998
+  },
+  "projection_replay_10k": {
+    "medianMs": 1856.6902920000002
+  }
+}

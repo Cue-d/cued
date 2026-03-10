@@ -23,12 +23,18 @@ import {
 } from "../integrations/service.js";
 import { startAuthSession } from "../integrations/auth-runtime.js";
 import { doctorHooksConfig, emitHookEvent } from "../hooks/service.js";
-import { projectPendingRawEvents, rebuildProjectedState } from "../projector/projector.js";
+import {
+  projectDeferredRange,
+  projectPendingRawEvents,
+  projectRealtimeRange,
+  rebuildProjectedState,
+} from "../projector/projector.js";
 import { DEFAULT_CHAT_DB_PATH } from "../adapters/imessage/reader.js";
 import { resolveMacOSNativeBinary } from "../workers/native-binary.js";
 import {
   getDefaultAccountKeyForPlatform,
   isPlatform,
+  type ProviderRawEventInput,
   type AdapterPlatform,
   type Platform,
 } from "../types/provider.js";
@@ -37,10 +43,52 @@ const DAEMON_VERSION = "0.1.0";
 const DEFAULT_AUTOSYNC_INTERVAL_MS = 60_000;
 const DEFAULT_INGEST_CONCURRENCY = 4;
 const DEFAULT_PROJECTION_BATCH_SIZE = 1_000;
+const DEFAULT_REALTIME_PROJECTION_ENABLED = true;
+const DEFAULT_DEFERRED_PROJECTION_COALESCE_MS = 250;
 const NATIVE_WATCH_DEBOUNCE_MS = 1_500;
 
 function now(): number {
   return Date.now();
+}
+
+type QueueSchedulers = {
+  wakeIngest: () => void;
+  wakeProjection: () => void;
+};
+
+type IngestTiming = {
+  adapterFetchMs: number;
+  rawEventInsertMs: number;
+  realtimeProjectionMs: number;
+  checkpointUpdateMs: number;
+  webhookReadyMs: number;
+  totalMs: number;
+  insertedRawEvents: number;
+};
+
+type ProjectionRunDetails = {
+  trigger: string;
+  startRowId: number;
+  endRowId: number;
+  projectionWatermark?: number;
+  maxRawEventRowid?: number;
+};
+
+function collectInboundMessages(rawEvents: ProviderRawEventInput[]): Array<Record<string, unknown>> {
+  const inboundMessages: Array<Record<string, unknown>> = [];
+  for (const rawEvent of rawEvents) {
+    if (!isInboundMessageEvent({ ...rawEvent, payload: rawEvent.payload as Record<string, unknown> })) {
+      continue;
+    }
+
+    inboundMessages.push({
+      platform: rawEvent.platform,
+      accountKey: rawEvent.accountKey,
+      observedAt: rawEvent.observedAt,
+      payload: rawEvent.payload,
+    });
+  }
+  return inboundMessages;
 }
 
 function getAutoSyncTargets(
@@ -91,6 +139,55 @@ function getProjectionBatchSize(): number {
   return Number.isFinite(configured) && configured > 0 ? configured : DEFAULT_PROJECTION_BATCH_SIZE;
 }
 
+function getRealtimeProjectionEnabled(): boolean {
+  const configured = process.env.CUED_REALTIME_PROJECTION_ENABLED;
+  if (configured == null) {
+    return DEFAULT_REALTIME_PROJECTION_ENABLED;
+  }
+
+  return !["0", "false", "off", "no"].includes(configured.trim().toLowerCase());
+}
+
+function getRealtimeProjectionBatchSize(): number {
+  const configured = Number(process.env.CUED_REALTIME_PROJECTION_BATCH_SIZE ?? getProjectionBatchSize());
+  return Number.isFinite(configured) && configured > 0 ? configured : getProjectionBatchSize();
+}
+
+function getDeferredProjectionCoalesceMs(): number {
+  const configured = Number(
+    process.env.CUED_DEFERRED_PROJECTION_COALESCE_MS ?? DEFAULT_DEFERRED_PROJECTION_COALESCE_MS,
+  );
+  return Number.isFinite(configured) && configured >= 0
+    ? configured
+    : DEFAULT_DEFERRED_PROJECTION_COALESCE_MS;
+}
+
+function parseProjectionRunDetails(detailsJson: string | null): ProjectionRunDetails | null {
+  if (!detailsJson) {
+    return null;
+  }
+
+  try {
+    const parsed = JSON.parse(detailsJson) as Partial<ProjectionRunDetails>;
+    if (typeof parsed.startRowId !== "number" || typeof parsed.endRowId !== "number") {
+      return null;
+    }
+    return {
+      trigger: typeof parsed.trigger === "string" ? parsed.trigger : "unknown",
+      startRowId: parsed.startRowId,
+      endRowId: parsed.endRowId,
+      projectionWatermark: typeof parsed.projectionWatermark === "number"
+        ? parsed.projectionWatermark
+        : undefined,
+      maxRawEventRowid: typeof parsed.maxRawEventRowid === "number"
+        ? parsed.maxRawEventRowid
+        : undefined,
+    };
+  } catch {
+    return null;
+  }
+}
+
 function resolveCheckpointSyncMode(
   runType: "sync" | "sync_resume",
   priorSyncMode: string | null | undefined,
@@ -136,6 +233,7 @@ function queueNativeTriggeredSync(
   platform: AdapterPlatform,
   accountKey: string,
   trigger: string,
+  wakeIngest: () => void,
 ): void {
   const integration = db.getIntegrationState(platform, accountKey);
   if (!integration || integration.enabled !== 1 || integration.sync_capable !== 1) {
@@ -152,10 +250,12 @@ function queueNativeTriggeredSync(
     trigger,
     details: { source: platform, accountKey, trigger },
   });
+  wakeIngest();
 }
 
 function createDebouncedSyncEnqueuer(
   db: ReturnType<typeof openCuedDatabase>,
+  wakeIngest: () => void,
 ): (platform: AdapterPlatform, accountKey: string, trigger: string) => void {
   const timers = new Map<string, NodeJS.Timeout>();
 
@@ -168,7 +268,7 @@ function createDebouncedSyncEnqueuer(
 
     const timer = setTimeout(() => {
       timers.delete(key);
-      queueNativeTriggeredSync(db, platform, accountKey, trigger);
+      queueNativeTriggeredSync(db, platform, accountKey, trigger, wakeIngest);
     }, NATIVE_WATCH_DEBOUNCE_MS);
     timers.set(key, timer);
   };
@@ -359,13 +459,80 @@ export async function runDaemon(): Promise<void> {
   const autoSyncIntervalMs = getAutoSyncIntervalMs();
   const ingestConcurrency = getIngestConcurrency();
   const projectionBatchSize = getProjectionBatchSize();
+  const realtimeProjectionEnabled = getRealtimeProjectionEnabled();
+  const realtimeProjectionBatchSize = getRealtimeProjectionBatchSize();
+  const deferredProjectionCoalesceMs = getDeferredProjectionCoalesceMs();
   const activeAuthSessions = new Map<
     string,
     { child: ChildProcess; platform: Platform; accountKey: string }
   >();
   const activeIngestRuns = new Map<string, Promise<void>>();
   let isProcessingProjection = false;
-  const queueDebouncedNativeSync = createDebouncedSyncEnqueuer(db);
+  let ingestDrainScheduled = false;
+  let projectionDrainScheduled = false;
+  let projectionDrainTimer: NodeJS.Timeout | null = null;
+
+  const drainIngestQueue = () => {
+    ingestDrainScheduled = false;
+    while (activeIngestRuns.size < ingestConcurrency) {
+      const currentRun = db.claimNextQueuedRun(["sync", "sync_resume"], "ingesting");
+      if (!currentRun) {
+        break;
+      }
+
+      const promise = processIngestRun(currentRun)
+        .finally(() => {
+          activeIngestRuns.delete(currentRun.id);
+          scheduleIngestDrain();
+        });
+      activeIngestRuns.set(currentRun.id, promise);
+    }
+  };
+
+  const scheduleIngestDrain = () => {
+    if (ingestDrainScheduled) {
+      return;
+    }
+    ingestDrainScheduled = true;
+    setImmediate(drainIngestQueue);
+  };
+
+  const drainProjectionQueue = () => {
+    projectionDrainScheduled = false;
+    if (isProcessingProjection) {
+      return;
+    }
+
+    const currentRun = db.claimNextQueuedRun(["project", "rebuild"], "projecting");
+    if (!currentRun) {
+      return;
+    }
+
+    isProcessingProjection = true;
+    void processProjectionRun(currentRun);
+  };
+
+  const scheduleProjectionDrain = (delayMs = 0) => {
+    if (projectionDrainScheduled) {
+      return;
+    }
+    projectionDrainScheduled = true;
+    if (delayMs <= 0) {
+      setImmediate(drainProjectionQueue);
+      return;
+    }
+
+    projectionDrainTimer = setTimeout(() => {
+      projectionDrainTimer = null;
+      drainProjectionQueue();
+    }, delayMs);
+  };
+
+  const schedulers: QueueSchedulers = {
+    wakeIngest: scheduleIngestDrain,
+    wakeProjection: () => scheduleProjectionDrain(),
+  };
+  const queueDebouncedNativeSync = createDebouncedSyncEnqueuer(db, schedulers.wakeIngest);
 
   db.failInProgressRuns("Recovered stale in-progress sync after daemon restart");
   await refreshManagedIntegrationStates(db);
@@ -394,6 +561,7 @@ export async function runDaemon(): Promise<void> {
 
   const queueAutoSyncRuns = (trigger: string) => {
     const autoSyncTargets = getAutoSyncTargets(db);
+    let queuedAny = false;
     for (const target of autoSyncTargets) {
       if (db.hasQueuedOrRunningRun(target.platform, target.accountKey)) {
         continue;
@@ -406,28 +574,74 @@ export async function runDaemon(): Promise<void> {
         trigger,
         details: { source: target.platform, accountKey: target.accountKey, trigger },
       });
+      queuedAny = true;
+    }
+
+    if (queuedAny) {
+      schedulers.wakeIngest();
     }
   };
 
-  const queueProjectionRun = (trigger: string) => {
+  const queueProjectionRun = (
+    trigger: string,
+    range?: { startRowId: number; endRowId: number },
+    options?: { delayMs?: number },
+  ) => {
     const backlog = db.getProjectionBacklog();
-    if (backlog.pending_raw_events === 0 || db.hasQueuedOrActiveProjectionRun()) {
+    const startRowId = range?.startRowId ?? backlog.projection_watermark + 1;
+    const endRowId = range?.endRowId ?? backlog.max_raw_event_rowid;
+    if (endRowId < startRowId) {
       return null;
     }
 
-    return db.queueSyncRun({
+    const queuedProjectionRun = db.getQueuedProjectionRun();
+    if (queuedProjectionRun) {
+      const existingDetails = parseProjectionRunDetails(queuedProjectionRun.details_json);
+      if (!existingDetails) {
+        db.updateRunDetails(queuedProjectionRun.id, {
+          trigger,
+          startRowId,
+          endRowId,
+          projectionWatermark: backlog.projection_watermark,
+          maxRawEventRowid: backlog.max_raw_event_rowid,
+        } satisfies ProjectionRunDetails);
+      } else {
+        db.updateRunDetails(queuedProjectionRun.id, {
+          ...existingDetails,
+          trigger,
+          startRowId: Math.min(existingDetails.startRowId, startRowId),
+          endRowId: Math.max(existingDetails.endRowId, endRowId),
+          projectionWatermark: Math.min(
+            existingDetails.projectionWatermark ?? backlog.projection_watermark,
+            backlog.projection_watermark,
+          ),
+          maxRawEventRowid: Math.max(
+            existingDetails.maxRawEventRowid ?? backlog.max_raw_event_rowid,
+            backlog.max_raw_event_rowid,
+          ),
+        } satisfies ProjectionRunDetails);
+      }
+      scheduleProjectionDrain(options?.delayMs ?? deferredProjectionCoalesceMs);
+      return queuedProjectionRun.id;
+    }
+
+    const runId = db.queueSyncRun({
       runType: "project",
       trigger,
       details: {
         trigger,
+        startRowId,
+        endRowId,
         projectionWatermark: backlog.projection_watermark,
         maxRawEventRowid: backlog.max_raw_event_rowid,
-      },
+      } satisfies ProjectionRunDetails,
     });
+    scheduleProjectionDrain(options?.delayMs ?? deferredProjectionCoalesceMs);
+    return runId;
   };
 
   queueAutoSyncRuns("daemon_start");
-  queueProjectionRun("daemon_start");
+  queueProjectionRun("daemon_start", undefined, { delayMs: 0 });
 
   const nativeWatchers: Array<FSWatcher | ChildProcess> = [];
   if (process.platform === "darwin") {
@@ -445,6 +659,7 @@ export async function runDaemon(): Promise<void> {
   const processIngestRun = async (
     currentRun: NonNullable<ReturnType<typeof db.claimNextQueuedRun>>,
   ) => {
+    const ingestStartedAt = now();
     try {
       if (
         (currentRun.run_type !== "sync" && currentRun.run_type !== "sync_resume")
@@ -482,27 +697,27 @@ export async function runDaemon(): Promise<void> {
         }
       }
 
+      const adapterStartedAt = now();
       const bundle = await runAdapter(currentRun.platform, accountKey, envOverrides);
-      const inboundMessages: Array<Record<string, unknown>> = [];
-      let insertedRawEvents = 0;
-      for (const account of bundle.sourceAccounts) {
-        db.upsertSourceAccount(account);
+      const afterAdapter = now();
+      db.upsertSourceAccounts(bundle.sourceAccounts);
+      const rawEventInsertStartedAt = now();
+      const insertResult = db.insertRawEvents(bundle.rawEvents);
+      const afterRawInsert = now();
+      const realtimeProjectionStartedAt = now();
+      if (
+        realtimeProjectionEnabled
+        && insertResult.firstInsertedRowId != null
+        && insertResult.lastInsertedRowId != null
+      ) {
+        projectRealtimeRange(db, {
+          startRowId: insertResult.firstInsertedRowId,
+          endRowId: insertResult.lastInsertedRowId,
+          batchSize: realtimeProjectionBatchSize,
+        });
       }
-      for (const rawEvent of bundle.rawEvents) {
-        const inserted = db.insertRawEvent(rawEvent);
-        if (!inserted) {
-          continue;
-        }
-        insertedRawEvents += 1;
-        if (isInboundMessageEvent({ ...rawEvent, payload: rawEvent.payload as Record<string, unknown> })) {
-          inboundMessages.push({
-            platform: rawEvent.platform,
-            accountKey: rawEvent.accountKey,
-            observedAt: rawEvent.observedAt,
-            payload: rawEvent.payload,
-          });
-        }
-      }
+      const afterRealtimeProjection = now();
+      const inboundMessages = collectInboundMessages(insertResult.insertedEvents);
 
       const projection = db.getProjectionBacklog();
       const checkpointSyncMode = resolveCheckpointSyncMode(
@@ -511,6 +726,7 @@ export async function runDaemon(): Promise<void> {
         bundle.syncMode,
         bundle.hasMore ?? false,
       );
+      const checkpointStartedAt = now();
       db.upsertCheckpoint({
         platform: currentRun.platform,
         accountKey,
@@ -520,16 +736,37 @@ export async function runDaemon(): Promise<void> {
         projectionWatermark: projection.projection_watermark,
         lastSuccessAt: now(),
       });
+      const afterCheckpoint = now();
+      const timings: IngestTiming = {
+        adapterFetchMs: afterAdapter - adapterStartedAt,
+        rawEventInsertMs: afterRawInsert - rawEventInsertStartedAt,
+        realtimeProjectionMs: afterRealtimeProjection - realtimeProjectionStartedAt,
+        checkpointUpdateMs: afterCheckpoint - checkpointStartedAt,
+        webhookReadyMs: afterCheckpoint - ingestStartedAt,
+        totalMs: afterCheckpoint - ingestStartedAt,
+        insertedRawEvents: insertResult.insertedCount,
+      };
 
-      if (insertedRawEvents > 0) {
-        queueProjectionRun(`ingest:${currentRun.platform}:${accountKey}`);
+      if (
+        insertResult.firstInsertedRowId != null
+        && insertResult.lastInsertedRowId != null
+      ) {
+        queueProjectionRun(
+          `ingest:${currentRun.platform}:${accountKey}`,
+          {
+            startRowId: insertResult.firstInsertedRowId,
+            endRowId: insertResult.lastInsertedRowId,
+          },
+          { delayMs: deferredProjectionCoalesceMs },
+        );
       }
       db.finishRun(currentRun.id, {
         ingested: bundle.rawEvents.length,
-        insertedRawEvents,
-        projectionQueued: insertedRawEvents > 0,
+        insertedRawEvents: insertResult.insertedCount,
+        projectionQueued: insertResult.insertedCount > 0,
         hasMore: bundle.hasMore ?? false,
         syncMode: checkpointSyncMode,
+        timings,
       });
       if (bundle.hasMore && !db.hasQueuedOrRunningRun(currentRun.platform, accountKey)) {
         db.queueSyncRun({
@@ -543,6 +780,7 @@ export async function runDaemon(): Promise<void> {
             trigger: "ingest_continue",
           },
         });
+        schedulers.wakeIngest();
       }
       await safeEmitHookEvent("sync.completed", {
         runId: currentRun.id,
@@ -551,7 +789,8 @@ export async function runDaemon(): Promise<void> {
         runType: currentRun.run_type,
         stage: "ingest",
         ingested: bundle.rawEvents.length,
-        insertedRawEvents,
+        insertedRawEvents: insertResult.insertedCount,
+        timings,
       });
       for (const message of inboundMessages) {
         await safeEmitHookEvent("message.received", {
@@ -574,18 +813,60 @@ export async function runDaemon(): Promise<void> {
   const processProjectionRun = async (
     currentRun: NonNullable<ReturnType<typeof db.claimNextQueuedRun>>,
   ) => {
+    const projectionStartedAt = now();
     try {
+      const projectionDetails = parseProjectionRunDetails(currentRun.details_json);
       const projected = currentRun.run_type === "rebuild"
         ? rebuildProjectedState(db)
-        : projectPendingRawEvents(db, { limit: projectionBatchSize });
-      db.finishRun(currentRun.id, { projected });
-      queueProjectionRun(`projection:${currentRun.run_type}`);
+        : projectionDetails
+          ? projectDeferredRange(db, {
+              startRowId: projectionDetails.startRowId,
+              endRowId: projectionDetails.endRowId,
+              limit: projectionBatchSize,
+            })
+          : (() => {
+              const backlog = db.getProjectionBacklog();
+              return backlog.pending_raw_events === 0
+                ? projectPendingRawEvents(db, { limit: projectionBatchSize })
+                : projectDeferredRange(db, {
+                    startRowId: backlog.projection_watermark + 1,
+                    endRowId: backlog.max_raw_event_rowid,
+                    limit: projectionBatchSize,
+                  });
+            })();
+      const projectionFinishedAt = now();
+      const timings = {
+        projectionMs: projectionFinishedAt - projectionStartedAt,
+        totalMs: projectionFinishedAt - projectionStartedAt,
+      };
+      const deferredProjected = currentRun.run_type === "project"
+        ? projected as ReturnType<typeof projectDeferredRange>
+        : null;
+      db.finishRun(currentRun.id, {
+        projected,
+        timings,
+        range: projectionDetails,
+      });
+      if (deferredProjected?.nextStartRowId != null) {
+        queueProjectionRun(
+          `projection_continue:${currentRun.id}`,
+          {
+            startRowId: deferredProjected.nextStartRowId,
+            endRowId: deferredProjected.rangeEndRowId
+              ?? projectionDetails?.endRowId
+              ?? deferredProjected.projectionWatermark,
+          },
+          { delayMs: 0 },
+        );
+      }
+      queueProjectionRun(`projection:${currentRun.run_type}`, undefined, { delayMs: 0 });
       await safeEmitHookEvent("sync.completed", {
         runId: currentRun.id,
         platform: currentRun.platform,
         runType: currentRun.run_type,
         stage: "projection",
         projected,
+        timings,
       });
     } catch (error) {
       db.failRun(currentRun.id, error instanceof Error ? error.message : String(error));
@@ -598,36 +879,16 @@ export async function runDaemon(): Promise<void> {
       });
     } finally {
       isProcessingProjection = false;
+      schedulers.wakeProjection();
     }
   };
 
   const ingestLoop = setInterval(() => {
-    while (activeIngestRuns.size < ingestConcurrency) {
-      const currentRun = db.claimNextQueuedRun(["sync", "sync_resume"], "ingesting");
-      if (!currentRun) {
-        break;
-      }
-
-      const promise = processIngestRun(currentRun)
-        .finally(() => {
-          activeIngestRuns.delete(currentRun.id);
-        });
-      activeIngestRuns.set(currentRun.id, promise);
-    }
+    schedulers.wakeIngest();
   }, 250);
 
   const projectionLoop = setInterval(() => {
-    if (isProcessingProjection) {
-      return;
-    }
-
-    const currentRun = db.claimNextQueuedRun(["project", "rebuild"], "projecting");
-    if (!currentRun) {
-      return;
-    }
-
-    isProcessingProjection = true;
-    void processProjectionRun(currentRun);
+    schedulers.wakeProjection();
   }, 250);
 
   const schedulerLoop = setInterval(() => {
@@ -635,7 +896,7 @@ export async function runDaemon(): Promise<void> {
   }, autoSyncIntervalMs);
 
   const server = createServer((socket) => {
-    handleSocket(socket, db, activeAuthSessions);
+    handleSocket(socket, db, activeAuthSessions, schedulers);
   });
 
   server.listen(CUED_SOCKET_PATH);
@@ -645,6 +906,10 @@ export async function runDaemon(): Promise<void> {
     clearInterval(ingestLoop);
     clearInterval(projectionLoop);
     clearInterval(schedulerLoop);
+    if (projectionDrainTimer) {
+      clearTimeout(projectionDrainTimer);
+      projectionDrainTimer = null;
+    }
     for (const watcher of nativeWatchers) {
       if ("close" in watcher && typeof watcher.close === "function") {
         watcher.close();
@@ -684,6 +949,7 @@ function handleSocket(
     string,
     { child: ChildProcess; platform: Platform; accountKey: string }
   >,
+  schedulers: QueueSchedulers,
 ): void {
   let buffer = "";
 
@@ -709,7 +975,7 @@ function handleSocket(
           continue;
         }
 
-        void dispatchRequest(db, request, activeAuthSessions)
+        void dispatchRequest(db, request, activeAuthSessions, schedulers)
           .then((response) => writeResponse(socket, response))
           .catch((error) => {
             writeResponse(socket, {
@@ -732,6 +998,7 @@ async function dispatchRequest(
     string,
     { child: ChildProcess; platform: Platform; accountKey: string }
   >,
+  schedulers: QueueSchedulers,
 ): Promise<DaemonResponse> {
   try {
     switch (request.command) {
@@ -761,6 +1028,10 @@ async function dispatchRequest(
             autoSyncTargets: getAutoSyncTargets(db),
             autoSyncIntervalMs: getAutoSyncIntervalMs(),
             ingestConcurrency: getIngestConcurrency(),
+            projectionBatchSize: getProjectionBatchSize(),
+            realtimeProjectionEnabled: getRealtimeProjectionEnabled(),
+            realtimeProjectionBatchSize: getRealtimeProjectionBatchSize(),
+            deferredProjectionCoalesceMs: getDeferredProjectionCoalesceMs(),
             hooks: doctorHooksConfig(),
           },
         };
@@ -817,12 +1088,16 @@ async function dispatchRequest(
           ok: true,
           result: {
             queued: true,
-            runId: db.queueSyncRun({
+            runId: (() => {
+              const runId = db.queueSyncRun({
               platform: request.source && isAdapterPlatform(request.source) ? request.source : null,
               runType: "sync",
               trigger: "cli",
               details: { source: request.source ?? null },
-            }),
+              });
+              schedulers.wakeIngest();
+              return runId;
+            })(),
           },
         };
       case "sync-resume":
@@ -854,6 +1129,10 @@ async function dispatchRequest(
             );
           }
 
+          if (queuedRunIds.length > 0) {
+            schedulers.wakeIngest();
+          }
+
           return {
             id: request.id,
             ok: true,
@@ -870,11 +1149,15 @@ async function dispatchRequest(
           ok: true,
           result: {
             queued: true,
-            runId: db.queueSyncRun({
+            runId: (() => {
+              const runId = db.queueSyncRun({
               runType: "rebuild",
               trigger: "cli",
               details: { trigger: "cli" },
-            }),
+              });
+              schedulers.wakeProjection();
+              return runId;
+            })(),
           },
         };
       case "reset":

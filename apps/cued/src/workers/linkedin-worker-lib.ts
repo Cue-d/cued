@@ -9,6 +9,7 @@ import {
 } from "../adapters/linkedin/api/index.js";
 import type { SyncBundle } from "../adapters/types.js";
 import { loadIntegrationSecret } from "../integrations/keychain.js";
+import { mapWithConcurrency } from "../lib/async.js";
 import type {
   ContactHandleInput,
   ContactObservationPayload,
@@ -22,6 +23,7 @@ const INCREMENTAL_BUFFER_MS = 5 * 60 * 1000;
 const MAX_CONNECTION_PAGES = Number(process.env.CUED_LINKEDIN_CONNECTION_PAGES ?? "25");
 const MAX_CONVERSATION_PAGES = Number(process.env.CUED_LINKEDIN_CONVERSATION_PAGES ?? "50");
 const MAX_MESSAGE_PAGES = Number(process.env.CUED_LINKEDIN_MESSAGE_PAGES ?? "10");
+const DEFAULT_LINKEDIN_FETCH_CONCURRENCY = Number(process.env.CUED_LINKEDIN_FETCH_CONCURRENCY ?? "3");
 
 type LinkedInClientLike = Pick<
   LinkedInClient,
@@ -35,6 +37,12 @@ type LinkedInClientLike = Pick<
 
 function now(): number {
   return Date.now();
+}
+
+function getLinkedInFetchConcurrency(): number {
+  return Number.isFinite(DEFAULT_LINKEDIN_FETCH_CONCURRENCY) && DEFAULT_LINKEDIN_FETCH_CONCURRENCY > 0
+    ? Math.trunc(DEFAULT_LINKEDIN_FETCH_CONCURRENCY)
+    : 3;
 }
 
 function stableId(seed: string): string {
@@ -262,9 +270,22 @@ export async function buildLinkedInSyncBundle(options?: {
   const observedBase = now();
   const cutoffMs = incrementalOldestMs(options?.lastSyncAt);
   const incremental = Boolean(options?.lastSyncAt || options?.syncToken);
-  const userEntityUrn = normalizeMemberUrn(await client.fetchSelf());
-  const { conversations, syncToken } = await listConversations(client, options?.syncToken ?? null);
-  const connections = await listConnections(client, incremental);
+  const fetchConcurrency = getLinkedInFetchConcurrency();
+  const [selfEntityUrn, conversationResult, connections] = await Promise.all([
+    client.fetchSelf(),
+    listConversations(client, options?.syncToken ?? null),
+    listConnections(client, incremental),
+  ]);
+  const userEntityUrn = normalizeMemberUrn(selfEntityUrn);
+  const { conversations, syncToken } = conversationResult;
+  const conversationMessages = await mapWithConcurrency(
+    conversations,
+    fetchConcurrency,
+    async (conversation) => ({
+      conversation,
+      messages: await listMessagesForConversation(client, conversation, cutoffMs, incremental),
+    }),
+  );
 
   const sourceAccounts: SourceAccountInput[] = [
     {
@@ -304,6 +325,7 @@ export async function buildLinkedInSyncBundle(options?: {
           company: connection.headline ?? null,
           photo_url: connection.picture?.url ?? null,
         },
+        sourceProfileUrl: connection.profileUrl ?? null,
         handles: [
           {
             type: "linkedin_profile_id",
@@ -323,10 +345,9 @@ export async function buildLinkedInSyncBundle(options?: {
     });
   }
 
-  for (const conversation of conversations) {
+  for (const { conversation, messages } of conversationMessages) {
     const normalizedConversation = normalizeConversationUrn(conversation.entityURN);
     const participantKeys = conversation.conversationParticipants
-      .filter((participant) => normalizeMemberUrn(participant.entityURN) !== userEntityUrn)
       .map((participant) => participantSourceKey(participant));
 
     const conversationId = stableId(
@@ -349,7 +370,13 @@ export async function buildLinkedInSyncBundle(options?: {
           sourceConversationKey: `linkedin:${normalizedConversation}`,
           conversationType: conversation.groupChat ? "group" : "dm",
           displayName: conversation.title || null,
-          participants: participantKeys.map((sourceEntityKey) => ({ sourceEntityKey })),
+          nativeConversationKey: normalizedConversation,
+          service: "linkedin",
+          unreadCount: conversation.unreadCount,
+          participants: conversation.conversationParticipants.map((participant) => ({
+            sourceEntityKey: participantSourceKey(participant),
+            isSelf: normalizeMemberUrn(participant.entityURN) === userEntityUrn,
+          })),
         } satisfies ConversationObservationPayload,
         sourceVersion: "linkedin-v1",
       });
@@ -382,13 +409,13 @@ export async function buildLinkedInSyncBundle(options?: {
             company: participant.participantType.member?.headline ?? null,
             photo_url: bestParticipantPhoto(participant),
           },
+          sourceProfileUrl: participant.participantType.member?.profileUrl ?? linkedinProfileUrlFromUrn(participant.entityURN),
           handles: participantHandles(participant),
         } satisfies ContactObservationPayload,
         sourceVersion: "linkedin-v1",
       });
     }
 
-    const messages = await listMessagesForConversation(client, conversation, cutoffMs, incremental);
     for (const message of messages) {
       const senderUrn = normalizeMemberUrn(message.sender.entityURN);
       const id = stableId(
@@ -417,15 +444,15 @@ export async function buildLinkedInSyncBundle(options?: {
           sourceConversationKey: `linkedin:${normalizeConversationUrn(message.conversationURN || conversation.entityURN)}`,
           senderSourceKey: senderUrn === userEntityUrn ? null : `linkedin:${senderUrn}`,
           sentAt: message.deliveredAt,
-          contentOriginal: message.body.text,
-          contentCurrent: isDeleted ? "" : message.body.text,
-          statusDelivery: "delivered",
+          content: isDeleted ? "" : message.body.text,
+          service: "linkedin",
+          status: "delivered",
+          isFromMe: senderUrn === userEntityUrn,
           deliveredAt: message.deliveredAt,
           editedAt: isEdited ? message.deliveredAt : null,
           deletedAt: isDeleted ? message.deliveredAt : null,
           isEdited,
           isDeleted,
-          hasAttachments: attachments.length > 0,
           attachments,
         } satisfies MessagePayload,
         sourceVersion: "linkedin-v1",

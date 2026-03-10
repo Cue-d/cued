@@ -123,6 +123,9 @@ describe("buildLinkedInSyncBundle", () => {
         sourceConversationKey: "linkedin:urn:li:fs_conversation:CONV123",
         sourceMessageKey: "linkedin:urn:li:fsd_message:MSG123",
         senderSourceKey: "linkedin:urn:li:member:ACoAAA1",
+        content: "Let’s catch up next week.",
+        service: "linkedin",
+        isFromMe: false,
       }),
     );
   });

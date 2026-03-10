@@ -8,6 +8,7 @@ import {
   type SlackMessage,
   type SlackUser,
 } from "../adapters/slack/api/index.js";
+import { mapWithConcurrency } from "../lib/async.js";
 import type {
   ContactObservationPayload,
   ConversationObservationPayload,
@@ -18,6 +19,7 @@ import type {
 
 const DEFAULT_SYNC_HISTORY_DAYS = Number(process.env.CUED_SYNC_HISTORY_DAYS ?? "730");
 const INCREMENTAL_BUFFER_MS = 5 * 60 * 1000;
+const DEFAULT_SLACK_FETCH_CONCURRENCY = Number(process.env.CUED_SLACK_FETCH_CONCURRENCY ?? "4");
 
 type SlackClientLike = Pick<
   SlackClient,
@@ -26,6 +28,12 @@ type SlackClientLike = Pick<
 
 function now(): number {
   return Date.now();
+}
+
+function getSlackFetchConcurrency(): number {
+  return Number.isFinite(DEFAULT_SLACK_FETCH_CONCURRENCY) && DEFAULT_SLACK_FETCH_CONCURRENCY > 0
+    ? Math.trunc(DEFAULT_SLACK_FETCH_CONCURRENCY)
+    : 4;
 }
 
 function dedupeKey(seed: string): string {
@@ -192,9 +200,27 @@ export async function buildSlackSyncBundle(options?: {
   const selfUserId = auth.user_id;
   const observedBase = now();
   const oldestMs = getOldestMessageMs(options?.lastSyncAt);
-  const users = await listAllUsers(client);
+  const fetchConcurrency = getSlackFetchConcurrency();
+  const [users, conversations] = await Promise.all([
+    listAllUsers(client),
+    listAllConversations(client),
+  ]);
   const usersById = new Map(users.map((user) => [user.id, user]));
-  const conversations = await listAllConversations(client);
+  const conversationResults = await mapWithConcurrency(
+    conversations,
+    fetchConcurrency,
+    async (conversation) => {
+      const [memberIds, messages] = await Promise.all([
+        listConversationMembers(client, conversation),
+        listConversationMessages(client, conversation.id, oldestMs),
+      ]);
+      return {
+        conversation,
+        memberIds,
+        messages,
+      };
+    },
+  );
 
   const sourceAccounts: SourceAccountInput[] = [
     {
@@ -240,8 +266,7 @@ export async function buildSlackSyncBundle(options?: {
     });
   }
 
-  for (const conversation of conversations) {
-    const memberIds = await listConversationMembers(client, conversation);
+  for (const { conversation, memberIds, messages } of conversationResults) {
     const conversationId = dedupeKey(`slack:conversation:${teamId}:${conversation.id}`);
     rawEvents.push({
       id: conversationId,
@@ -256,14 +281,16 @@ export async function buildSlackSyncBundle(options?: {
         sourceConversationKey: `slack:${teamId}:${conversation.id}`,
         conversationType: conversation.is_mpim || conversation.is_channel || conversation.is_group ? "group" : "dm",
         displayName: buildConversationDisplayName(conversation, usersById),
+        nativeConversationKey: conversation.id,
+        service: "slack",
         participants: memberIds.map((memberId) => ({
           sourceEntityKey: slackSourceKey(teamId, memberId),
+          isSelf: memberId === selfUserId,
         })),
       } satisfies ConversationObservationPayload,
       sourceVersion: "slack-v1",
     });
 
-    const messages = await listConversationMessages(client, conversation.id, oldestMs);
     for (const message of messages) {
       const messageTsMs = timestampMs(message.ts) ?? observedBase;
       const attachments = toAttachmentMetadata(message);
@@ -282,14 +309,18 @@ export async function buildSlackSyncBundle(options?: {
         payload: {
           sourceMessageKey: `slack:${teamId}:${conversation.id}:${message.ts}`,
           sourceConversationKey: `slack:${teamId}:${conversation.id}`,
-          senderSourceKey: message.user ? slackSourceKey(teamId, message.user) : null,
+          senderSourceKey:
+            message.user && message.user !== selfUserId
+              ? slackSourceKey(teamId, message.user)
+              : null,
           sentAt: messageTsMs,
-          contentOriginal: message.text || attachments.map((attachment) => String(attachment.title ?? attachment.name ?? attachment.text ?? "")).filter(Boolean).join("\n"),
-          contentCurrent: message.text || attachments.map((attachment) => String(attachment.title ?? attachment.name ?? attachment.text ?? "")).filter(Boolean).join("\n"),
+          content: message.text || attachments.map((attachment) => String(attachment.title ?? attachment.name ?? attachment.text ?? "")).filter(Boolean).join("\n"),
+          service: "slack",
+          status: null,
+          isFromMe: message.user === selfUserId,
           editedAt: timestampMs(message.edited?.ts),
           isEdited: Boolean(message.edited?.ts),
           isDeleted: false,
-          hasAttachments: attachments.length > 0,
           attachments,
         } satisfies MessagePayload,
         sourceVersion: "slack-v1",

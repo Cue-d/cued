@@ -84,7 +84,10 @@ describe("slack worker lib", () => {
     expect(messageEvent?.payload).toEqual(expect.objectContaining({
       sourceConversationKey: "slack:T123:D123",
       senderSourceKey: "slack:T123:U_BEN",
-      hasAttachments: true,
+      content: "Hi from Slack",
+      isFromMe: false,
+      service: "slack",
+      attachments: expect.any(Array),
     }));
   });
 });

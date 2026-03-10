@@ -293,4 +293,64 @@ describe("CuedDatabase", () => {
 
     db.close();
   });
+
+  it("batches source account and raw event writes without duplicating rows", () => {
+    const db = createDb();
+
+    db.upsertSourceAccounts([
+      {
+        platform: "slack",
+        accountKey: "default",
+        displayName: "Slack",
+      },
+      {
+        platform: "slack",
+        accountKey: "default",
+        displayName: "Slack Updated",
+      },
+    ]);
+
+    const insertResult = db.insertRawEvents([
+      {
+        id: "event-1",
+        platform: "slack",
+        accountKey: "default",
+        entityKind: "message",
+        eventKind: "message_created",
+        observedAt: 100,
+        dedupeKey: "event-1",
+        payload: { sourceMessageKey: "m1" },
+      },
+      {
+        id: "event-1",
+        platform: "slack",
+        accountKey: "default",
+        entityKind: "message",
+        eventKind: "message_created",
+        observedAt: 100,
+        dedupeKey: "event-1",
+        payload: { sourceMessageKey: "m1" },
+      },
+      {
+        id: "event-2",
+        platform: "slack",
+        accountKey: "default",
+        entityKind: "message",
+        eventKind: "message_created",
+        observedAt: 101,
+        dedupeKey: "event-2",
+        payload: { sourceMessageKey: "m2" },
+      },
+    ]);
+
+    expect(db.getOverview().sourceAccounts).toBe(1);
+    expect(db.getIntegrationState("slack", "default")).toBeNull();
+    expect(insertResult.insertedCount).toBe(2);
+    expect(insertResult.insertedEvents.map((event) => event.id)).toEqual(["event-1", "event-2"]);
+    expect(insertResult.firstInsertedRowId).toBe(1);
+    expect(insertResult.lastInsertedRowId).toBe(2);
+    expect(db.listRawEvents().map((event) => event.id)).toEqual(["event-1", "event-2"]);
+
+    db.close();
+  });
 });

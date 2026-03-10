@@ -11,7 +11,8 @@
     "build": "tsc -p tsconfig.build.json",
     "build:native:macos": "swift build --package-path ../../native/macos/CuedNative -c release",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run"
+    "test": "vitest run",
+    "test:perf": "tsx src/perf/run.ts"
   },
   "dependencies": {
     "better-sqlite3": "^12.6.0",

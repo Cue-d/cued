@@ -1,35 +1,81 @@
 import { createHash } from "node:crypto";
-import { and, eq, sql } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import type { CuedDatabase, LocalDrizzleDatabase } from "../db/database.js";
 import {
-  contactFieldValues,
   contactHandles,
-  contactObservations,
   contactSources,
   contacts,
-  conversationObservations,
   conversationParticipants,
   conversations,
-  messageEvents,
+  messageAttachments,
   messageReactions,
   messages,
-  participantEvents,
   projectionState,
+  timelineEvents,
 } from "../db/schema.js";
-import {
-  isContactFieldName,
-  type ContactFieldName,
-  type ContactObservationPayload,
-  type ConversationObservationPayload,
-  type MessagePayload,
-  type Platform,
-  type ReactionPayload,
+import type {
+  ContactObservationPayload,
+  ConversationObservationPayload,
+  MessagePayload,
+  Platform,
+  ReactionPayload,
+  TimelineEventPayload,
 } from "../types/provider.js";
 
 type LocalDbExecutor = Pick<
   LocalDrizzleDatabase,
-  "all" | "delete" | "get" | "insert" | "run" | "select" | "update"
+  "all" | "delete" | "insert" | "run" | "select" | "update"
 >;
+
+type RawEventRow = {
+  rowid: number;
+  id: string;
+  platform: Platform;
+  account_key: string;
+  entity_kind: string;
+  event_kind: string;
+  observed_at: number;
+  payload_json: string;
+};
+
+type ProjectionMode = "realtime" | "deferred" | "rebuild";
+
+type ProjectionCache = {
+  initialized: boolean;
+  sourceContactMap: Map<string, string>;
+  deterministicHandleMap: Map<string, string>;
+  conversationMap: Map<string, string>;
+  contactNameMap: Map<string, string | null>;
+  conversationNameMap: Map<string, string | null>;
+};
+
+type ProjectionChangeSet = {
+  dirtyContactIds: Set<string>;
+  dirtyConversationIds: Set<string>;
+  dirtyMessageIds: Set<string>;
+  dirtyReplyMessageIds: Set<string>;
+};
+
+type ProjectableRawEvent = Pick<RawEventRow, "platform" | "account_key" | "observed_at" | "payload_json">;
+
+type ProjectionOverview = {
+  contacts: number;
+  conversations: number;
+  messages: number;
+  rawEvents: number;
+  appliedRawEvents: number;
+  projectionWatermark: number;
+};
+
+export type ProjectionRangeResult = ProjectionOverview & {
+  completed: boolean;
+  nextStartRowId: number | null;
+  rangeStartRowId: number | null;
+  rangeEndRowId: number | null;
+};
+
+const projectionCaches = new WeakMap<CuedDatabase, ProjectionCache>();
+const SQL_CHUNK_SIZE = 200;
 
 function hashId(prefix: string, value: string): string {
   return `${prefix}_${createHash("sha256").update(value).digest("hex").slice(0, 24)}`;
@@ -47,172 +93,123 @@ function normalizeHandle(type: string, value: string): string {
   }
 }
 
-function fieldPriority(platform: Platform, fieldName: ContactFieldName): number {
-  if (platform === "contacts" && (fieldName === "display_name" || fieldName === "photo_url")) {
-    return 100;
-  }
-  if (platform === "contacts") return 90;
-  if (fieldName === "company") return 50;
-  return 40;
-}
-
-function currentBestPriority(
-  conn: LocalDbExecutor,
-  contactId: string,
-  fieldName: ContactFieldName,
-): { priority: number; observedAt: number } | null {
-  const row = conn
-    .select({
-      priority: contactFieldValues.priority,
-      observedAt: contactFieldValues.observedAt,
-    })
-    .from(contactFieldValues)
-    .where(and(
-      eq(contactFieldValues.contactId, contactId),
-      eq(contactFieldValues.fieldName, fieldName),
-      eq(contactFieldValues.isCurrentBest, 1),
-    ))
-    .limit(1)
-    .get();
-
-  return row ?? null;
-}
-
-function ensureContactStub(
-  conn: LocalDbExecutor,
-  sourceContactMap: Map<string, string>,
-  platform: Platform,
-  accountKey: string,
-  sourceEntityKey: string | null | undefined,
-  observedAt: number,
-): string | null {
-  if (!sourceEntityKey) {
+function normalizeText(value: unknown): string | null {
+  if (typeof value !== "string") {
     return null;
   }
-
-  const sourceKey = `${platform}:${accountKey}:${sourceEntityKey}`;
-  const existingContactId = sourceContactMap.get(sourceKey);
-  const contactId = existingContactId ?? hashId("contact", sourceKey);
-  sourceContactMap.set(sourceKey, contactId);
-
-  conn.insert(contacts).values({
-    id: contactId,
-    kind: "person",
-    preferredDisplayName: null,
-    preferredPhotoUrl: null,
-    preferredCompany: null,
-    archived: 0,
-    createdAt: observedAt,
-    updatedAt: observedAt,
-  }).onConflictDoNothing().run();
-
-  return contactId;
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : null;
 }
 
-function resolveOrEnsureContact(
-  conn: LocalDbExecutor,
-  sourceContactMap: Map<string, string>,
-  platform: Platform,
-  accountKey: string,
-  sourceEntityKey: string | null | undefined,
-  observedAt: number,
-): string | null {
-  if (!sourceEntityKey) {
-    return null;
+function normalizeInteger(value: unknown): number | null {
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return Math.trunc(value);
   }
-
-  const directKey = `${platform}:${accountKey}:${sourceEntityKey}`;
-  const contactsLocalKey = `contacts:local:${sourceEntityKey}`;
-  const existingContactId = sourceContactMap.get(directKey) ?? sourceContactMap.get(contactsLocalKey) ?? null;
-  if (existingContactId) {
-    return existingContactId;
+  if (typeof value === "string" && value.trim() !== "") {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? Math.trunc(parsed) : null;
   }
-
-  return ensureContactStub(conn, sourceContactMap, platform, accountKey, sourceEntityKey, observedAt);
+  return null;
 }
 
-function ensureConversationStub(
-  conn: LocalDbExecutor,
-  conversationMap: Map<string, string>,
-  platform: Platform,
-  accountKey: string,
-  sourceConversationKey: string,
-  observedAt: number,
-): string {
-  const mapKey = `${platform}:${accountKey}:${sourceConversationKey}`;
-  const existingConversationId = conversationMap.get(mapKey);
-  const conversationId = existingConversationId ?? hashId("conversation", mapKey);
-  conversationMap.set(mapKey, conversationId);
-
-  conn.insert(conversations).values({
-    id: conversationId,
-    platform,
-    accountKey,
-    sourceConversationKey,
-    conversationType: "dm",
-    displayName: null,
-    topic: null,
-    lastMessageAt: null,
-    lastMessagePreview: null,
-    unreadCount: 0,
-    createdAt: observedAt,
-    updatedAt: observedAt,
-  }).onConflictDoNothing().run();
-
-  return conversationId;
+function boolToInt(value: boolean | undefined | null): number {
+  return value ? 1 : 0;
 }
 
-function clearProjectedState(conn: LocalDbExecutor): void {
-  conn.run(sql.raw("DELETE FROM messages_fts"));
-  conn.delete(messageReactions).run();
-  conn.delete(messageEvents).run();
-  conn.delete(participantEvents).run();
-  conn.delete(contactObservations).run();
-  conn.delete(conversationObservations).run();
-  conn.delete(conversationParticipants).run();
-  conn.delete(messages).run();
-  conn.delete(conversations).run();
-  conn.delete(contactFieldValues).run();
-  conn.delete(contactHandles).run();
-  conn.delete(contactSources).run();
-  conn.delete(contacts).run();
+function hasStringValue(value: string | null | undefined): value is string {
+  return typeof value === "string" && value.length > 0;
 }
 
-function loadProjectionMaps(
-  db: CuedDatabase,
-): {
-  sourceContactMap: Map<string, string>;
-  deterministicHandleMap: Map<string, string>;
-  conversationMap: Map<string, string>;
-} {
-  const sourceContactMap = new Map<string, string>();
+function chunkArray<T>(items: readonly T[], size: number): T[][] {
+  const chunks: T[][] = [];
+  for (let index = 0; index < items.length; index += size) {
+    chunks.push(items.slice(index, index + size));
+  }
+  return chunks;
+}
+
+function sqlValueList(values: readonly (string | number)[]) {
+  return sql.join(values.map((value) => sql`${value}`), sql`, `);
+}
+
+function createProjectionCache(): ProjectionCache {
+  return {
+    initialized: false,
+    sourceContactMap: new Map<string, string>(),
+    deterministicHandleMap: new Map<string, string>(),
+    conversationMap: new Map<string, string>(),
+    contactNameMap: new Map<string, string | null>(),
+    conversationNameMap: new Map<string, string | null>(),
+  };
+}
+
+function hydrateProjectionCache(db: CuedDatabase, cache: ProjectionCache): void {
+  cache.sourceContactMap.clear();
+  cache.deterministicHandleMap.clear();
+  cache.conversationMap.clear();
+  cache.contactNameMap.clear();
+  cache.conversationNameMap.clear();
+
   for (const row of db.listProjectedContactSourceMap()) {
-    sourceContactMap.set(
+    cache.sourceContactMap.set(
       `${row.platform}:${row.account_key}:${row.source_entity_key}`,
       row.contact_id,
     );
   }
 
-  const deterministicHandleMap = new Map<string, string>();
   for (const row of db.listDeterministicContactHandles()) {
-    deterministicHandleMap.set(
+    cache.deterministicHandleMap.set(
       `${row.handle_type}:${row.normalized_value}`,
       row.contact_id,
     );
   }
 
-  const conversationMap = new Map<string, string>();
   for (const row of db.listConversationMap()) {
-    conversationMap.set(
+    cache.conversationMap.set(
       `${row.platform}:${row.account_key}:${row.source_conversation_key}`,
       row.conversation_id,
     );
   }
 
+  for (const row of db.listContactNames()) {
+    cache.contactNameMap.set(row.contact_id, row.name);
+  }
+
+  for (const row of db.listConversationNames()) {
+    cache.conversationNameMap.set(row.conversation_id, row.name);
+  }
+
+  cache.initialized = true;
+}
+
+function getProjectionCache(db: CuedDatabase): ProjectionCache {
+  const existing = projectionCaches.get(db);
+  if (existing) {
+    if (!existing.initialized) {
+      hydrateProjectionCache(db, existing);
+    }
+    return existing;
+  }
+
+  const created = createProjectionCache();
+  hydrateProjectionCache(db, created);
+  projectionCaches.set(db, created);
+  return created;
+}
+
+function resetProjectionCache(db: CuedDatabase): ProjectionCache {
+  const cache = createProjectionCache();
+  cache.initialized = true;
+  projectionCaches.set(db, cache);
+  return cache;
+}
+
+function createProjectionChangeSet(): ProjectionChangeSet {
   return {
-    sourceContactMap,
-    deterministicHandleMap,
-    conversationMap,
+    dirtyContactIds: new Set<string>(),
+    dirtyConversationIds: new Set<string>(),
+    dirtyMessageIds: new Set<string>(),
+    dirtyReplyMessageIds: new Set<string>(),
   };
 }
 
@@ -229,6 +226,200 @@ function buildOverview(db: CuedDatabase): {
     messages: overview.messages,
     rawEvents: overview.rawEvents,
   };
+}
+
+function syncContactNameCache(
+  conn: LocalDbExecutor,
+  cache: ProjectionCache,
+  contactIds: Set<string>,
+): void {
+  for (const chunk of chunkArray([...contactIds], SQL_CHUNK_SIZE)) {
+    const rows = conn.all<{ id: string; name: string | null }>(sql`
+      SELECT id, name
+      FROM contacts
+      WHERE id IN (${sqlValueList(chunk)})
+    `);
+    for (const row of rows) {
+      cache.contactNameMap.set(row.id, row.name);
+    }
+  }
+}
+
+function syncConversationNameCache(
+  conn: LocalDbExecutor,
+  cache: ProjectionCache,
+  conversationIds: Set<string>,
+): void {
+  for (const chunk of chunkArray([...conversationIds], SQL_CHUNK_SIZE)) {
+    const rows = conn.all<{ id: string; name: string | null }>(sql`
+      SELECT id, name
+      FROM conversations
+      WHERE id IN (${sqlValueList(chunk)})
+    `);
+    for (const row of rows) {
+      cache.conversationNameMap.set(row.id, row.name);
+    }
+  }
+}
+
+function ensureContactStub(
+  conn: LocalDbExecutor,
+  cache: ProjectionCache,
+  platform: Platform,
+  accountKey: string,
+  sourceEntityKey: string | null | undefined,
+  observedAt: number,
+): string | null {
+  if (!sourceEntityKey) {
+    return null;
+  }
+
+  const sourceKey = `${platform}:${accountKey}:${sourceEntityKey}`;
+  const existingContactId = cache.sourceContactMap.get(sourceKey);
+  const contactId = existingContactId ?? hashId("contact", sourceKey);
+  cache.sourceContactMap.set(sourceKey, contactId);
+  if (!cache.contactNameMap.has(contactId)) {
+    cache.contactNameMap.set(contactId, null);
+  }
+
+  conn.insert(contacts).values({
+    id: contactId,
+    kind: "person",
+    name: null,
+    photoUrl: null,
+    company: null,
+    archived: 0,
+    createdAt: observedAt,
+    updatedAt: observedAt,
+  }).onConflictDoNothing().run();
+
+  return contactId;
+}
+
+function resolveOrEnsureContact(
+  conn: LocalDbExecutor,
+  cache: ProjectionCache,
+  platform: Platform,
+  accountKey: string,
+  sourceEntityKey: string | null | undefined,
+  observedAt: number,
+): string | null {
+  if (!sourceEntityKey) {
+    return null;
+  }
+
+  const directKey = `${platform}:${accountKey}:${sourceEntityKey}`;
+  const contactsLocalKey = `contacts:local:${sourceEntityKey}`;
+  const existingContactId = cache.sourceContactMap.get(directKey)
+    ?? cache.sourceContactMap.get(contactsLocalKey)
+    ?? null;
+  if (existingContactId) {
+    return existingContactId;
+  }
+
+  return ensureContactStub(conn, cache, platform, accountKey, sourceEntityKey, observedAt);
+}
+
+function ensureConversationStub(
+  conn: LocalDbExecutor,
+  cache: ProjectionCache,
+  platform: Platform,
+  accountKey: string,
+  sourceConversationKey: string,
+  observedAt: number,
+): string {
+  const mapKey = `${platform}:${accountKey}:${sourceConversationKey}`;
+  const existingConversationId = cache.conversationMap.get(mapKey);
+  const conversationId = existingConversationId ?? hashId("conversation", mapKey);
+  cache.conversationMap.set(mapKey, conversationId);
+  if (!cache.conversationNameMap.has(conversationId)) {
+    cache.conversationNameMap.set(conversationId, null);
+  }
+
+  conn.insert(conversations).values({
+    id: conversationId,
+    platform,
+    accountKey,
+    sourceConversationKey,
+    nativeConversationKey: null,
+    type: "dm",
+    subtype: null,
+    service: null,
+    name: null,
+    topic: null,
+    participantNames: null,
+    lastMessageId: null,
+    lastMessageAt: null,
+    lastMessagePreview: null,
+    unreadCount: 0,
+    createdAt: observedAt,
+    updatedAt: observedAt,
+  }).onConflictDoNothing().run();
+
+  return conversationId;
+}
+
+function ensureMessageStub(
+  conn: LocalDbExecutor,
+  cache: ProjectionCache,
+  platform: Platform,
+  accountKey: string,
+  sourceConversationKey: string,
+  platformMessageId: string,
+  observedAt: number,
+): { messageId: string; conversationId: string } {
+  const messageId = hashId("message", `${platform}:${accountKey}:${platformMessageId}`);
+  const conversationId = ensureConversationStub(
+    conn,
+    cache,
+    platform,
+    accountKey,
+    sourceConversationKey,
+    observedAt,
+  );
+
+  conn.insert(messages).values({
+    id: messageId,
+    platform,
+    accountKey,
+    platformMessageId,
+    conversationId,
+    senderContactId: null,
+    senderSourceKey: null,
+    senderName: null,
+    conversationName: null,
+    sentAt: observedAt,
+    service: null,
+    status: null,
+    isFromMe: 0,
+    content: null,
+    deliveredAt: null,
+    readAt: null,
+    editedAt: null,
+    deletedAt: null,
+    replyToMessageId: null,
+    isDeleted: 0,
+    isEdited: 0,
+    attachmentCount: 0,
+    reactionCount: 0,
+    createdAt: observedAt,
+    updatedAt: observedAt,
+  }).onConflictDoNothing().run();
+
+  return { messageId, conversationId };
+}
+
+function clearProjectedState(conn: LocalDbExecutor): void {
+  conn.run(sql.raw("DELETE FROM messages_fts"));
+  conn.delete(timelineEvents).run();
+  conn.delete(messageAttachments).run();
+  conn.delete(messageReactions).run();
+  conn.delete(conversationParticipants).run();
+  conn.delete(messages).run();
+  conn.delete(conversations).run();
+  conn.delete(contactHandles).run();
+  conn.delete(contactSources).run();
+  conn.delete(contacts).run();
 }
 
 function upsertProjectionState(
@@ -248,7 +439,7 @@ function upsertProjectionState(
   }).onConflictDoUpdate({
     target: projectionState.singletonKey,
     set: {
-      projectionWatermark: input.projectionWatermark,
+      projectionWatermark: sql`MAX(${projectionState.projectionWatermark}, ${input.projectionWatermark})`,
       lastProjectedAt: input.lastProjectedAt,
       lastRebuildAt: input.lastRebuildAt ?? sql`${projectionState.lastRebuildAt}`,
       updatedAt: Date.now(),
@@ -256,142 +447,116 @@ function upsertProjectionState(
   }).run();
 }
 
-export function projectPendingRawEvents(
-  db: CuedDatabase,
-  options?: {
-    limit?: number;
-  },
-): {
-  contacts: number;
-  conversations: number;
-  messages: number;
-  rawEvents: number;
-  appliedRawEvents: number;
-  projectionWatermark: number;
-} {
-  const projection = db.getProjectionState();
-  const pendingEvents = db.listRawEventsAfter(projection.projection_watermark, options?.limit);
-  if (pendingEvents.length === 0) {
-    const overview = buildOverview(db);
-    return {
-      ...overview,
-      appliedRawEvents: 0,
-      projectionWatermark: projection.projection_watermark,
-    };
+function projectRealtimeConversationObservation(
+  conn: LocalDbExecutor,
+  cache: ProjectionCache,
+  changes: ProjectionChangeSet,
+  event: ProjectableRawEvent,
+): void {
+  const payload = JSON.parse(event.payload_json) as ConversationObservationPayload;
+  const conversationId = ensureConversationStub(
+    conn,
+    cache,
+    event.platform,
+    event.account_key,
+    payload.sourceConversationKey,
+    event.observed_at,
+  );
+
+  const conversationSet: {
+    updatedAt: number;
+    nativeConversationKey?: string | null;
+    type: "dm" | "group";
+    subtype?: string | null;
+    service?: string | null;
+    name?: string | null;
+    topic?: string | null;
+    unreadCount?: number;
+  } = {
+    updatedAt: event.observed_at,
+    type: payload.conversationType,
+  };
+  if (payload.nativeConversationKey !== undefined) {
+    conversationSet.nativeConversationKey = normalizeText(payload.nativeConversationKey);
+  }
+  if (payload.subtype !== undefined) {
+    conversationSet.subtype = normalizeText(payload.subtype);
+  }
+  if (payload.service !== undefined) {
+    conversationSet.service = normalizeText(payload.service);
+  }
+  if (payload.displayName !== undefined) {
+    conversationSet.name = normalizeText(payload.displayName);
+  }
+  if (payload.topic !== undefined) {
+    conversationSet.topic = normalizeText(payload.topic);
+  }
+  if (payload.unreadCount !== undefined && payload.unreadCount !== null) {
+    conversationSet.unreadCount = payload.unreadCount;
   }
 
-  const {
-    sourceContactMap,
-    deterministicHandleMap,
-    conversationMap,
-  } = loadProjectionMaps(db);
+  conn.update(conversations)
+    .set(conversationSet)
+    .where(eq(conversations.id, conversationId))
+    .run();
 
-  db.orm().transaction((tx) => {
-    const projectedAt = Date.now();
-    for (const event of pendingEvents) {
-      if (event.entity_kind === "contact") {
-        projectContactObservation(tx, sourceContactMap, deterministicHandleMap, event);
-        continue;
-      }
-
-      if (event.entity_kind === "conversation") {
-        projectConversationObservation(tx, sourceContactMap, conversationMap, event);
-        continue;
-      }
-
-      if (event.entity_kind === "message") {
-        projectMessageEvent(tx, sourceContactMap, conversationMap, event);
-        continue;
-      }
-
-      if (event.entity_kind === "reaction") {
-        projectReactionEvent(tx, sourceContactMap, conversationMap, event);
-      }
-    }
-
-    refreshConversationDisplayNames(tx);
-    reindexMessagesFts(tx);
-    upsertProjectionState(tx, {
-      projectionWatermark: pendingEvents[pendingEvents.length - 1]!.rowid,
-      lastProjectedAt: projectedAt,
-    });
-  });
-
-  const overview = buildOverview(db);
-  return {
-    ...overview,
-    appliedRawEvents: pendingEvents.length,
-    projectionWatermark: pendingEvents[pendingEvents.length - 1]!.rowid,
-  };
+  if (payload.displayName !== undefined) {
+    cache.conversationNameMap.set(conversationId, normalizeText(payload.displayName));
+  }
+  changes.dirtyConversationIds.add(conversationId);
 }
 
-export function rebuildProjectedState(db: CuedDatabase): {
-  contacts: number;
-  conversations: number;
-  messages: number;
-  rawEvents: number;
-  appliedRawEvents: number;
-  projectionWatermark: number;
-} {
-  const rawEvents = db.listRawEventsAfter(0);
+function projectRealtimeMessageEvent(
+  conn: LocalDbExecutor,
+  cache: ProjectionCache,
+  changes: ProjectionChangeSet,
+  event: ProjectableRawEvent,
+): void {
+  const payload = JSON.parse(event.payload_json) as MessagePayload;
+  const { messageId, conversationId } = ensureMessageStub(
+    conn,
+    cache,
+    event.platform,
+    event.account_key,
+    payload.sourceConversationKey,
+    payload.sourceMessageKey,
+    event.observed_at,
+  );
 
-  db.orm().transaction((tx) => {
-    const projectedAt = Date.now();
-    clearProjectedState(tx);
+  conn.update(messages)
+    .set({
+      platform: event.platform,
+      accountKey: event.account_key,
+      platformMessageId: payload.sourceMessageKey,
+      conversationId,
+      senderContactId: null,
+      senderSourceKey: payload.senderSourceKey,
+      senderName: null,
+      conversationName: cache.conversationNameMap.get(conversationId) ?? null,
+      sentAt: payload.sentAt,
+      service: normalizeText(payload.service ?? null),
+      status: normalizeText(payload.status ?? null),
+      isFromMe: boolToInt(payload.isFromMe),
+      content: normalizeText(payload.content) ?? payload.content,
+      deliveredAt: payload.deliveredAt ?? null,
+      readAt: payload.readAt ?? null,
+      editedAt: payload.editedAt ?? null,
+      deletedAt: payload.deletedAt ?? null,
+      isDeleted: boolToInt(payload.isDeleted),
+      isEdited: boolToInt(payload.isEdited),
+      updatedAt: event.observed_at,
+    })
+    .where(eq(messages.id, messageId))
+    .run();
 
-    const sourceContactMap = new Map<string, string>();
-    const deterministicHandleMap = new Map<string, string>();
-    const conversationMap = new Map<string, string>();
-
-    for (const event of rawEvents) {
-      if (event.entity_kind === "contact") {
-        projectContactObservation(tx, sourceContactMap, deterministicHandleMap, event);
-        continue;
-      }
-
-      if (event.entity_kind === "conversation") {
-        projectConversationObservation(tx, sourceContactMap, conversationMap, event);
-        continue;
-      }
-
-      if (event.entity_kind === "message") {
-        projectMessageEvent(tx, sourceContactMap, conversationMap, event);
-        continue;
-      }
-
-      if (event.entity_kind === "reaction") {
-        projectReactionEvent(tx, sourceContactMap, conversationMap, event);
-      }
-    }
-
-    refreshConversationDisplayNames(tx);
-    reindexMessagesFts(tx);
-    upsertProjectionState(tx, {
-      projectionWatermark: rawEvents[rawEvents.length - 1]?.rowid ?? 0,
-      lastProjectedAt: projectedAt,
-      lastRebuildAt: projectedAt,
-    });
-  });
-
-  const overview = buildOverview(db);
-  return {
-    ...overview,
-    appliedRawEvents: rawEvents.length,
-    projectionWatermark: rawEvents[rawEvents.length - 1]?.rowid ?? 0,
-  };
+  changes.dirtyConversationIds.add(conversationId);
 }
 
 function projectContactObservation(
   conn: LocalDbExecutor,
-  sourceContactMap: Map<string, string>,
-  deterministicHandleMap: Map<string, string>,
-  event: {
-    id: string;
-    platform: Platform;
-    account_key: string;
-    observed_at: number;
-    payload_json: string;
-  },
+  cache: ProjectionCache,
+  changes: ProjectionChangeSet,
+  event: ProjectableRawEvent,
 ): void {
   const payload = JSON.parse(event.payload_json) as ContactObservationPayload;
   const sourceKey = `${event.platform}:${event.account_key}:${payload.sourceEntityKey}`;
@@ -402,11 +567,12 @@ function projectContactObservation(
       ...handle,
       normalizedValue: normalizeHandle(handle.type, handle.value),
     }))
-    .sort((left, right) => `${left.type}:${left.normalizedValue}`.localeCompare(`${right.type}:${right.normalizedValue}`));
+    .sort((left, right) =>
+      `${left.type}:${left.normalizedValue}`.localeCompare(`${right.type}:${right.normalizedValue}`));
 
-  const existingSourceContactId = sourceContactMap.get(sourceKey) ?? null;
+  const existingSourceContactId = cache.sourceContactMap.get(sourceKey) ?? null;
   const existingContactId = deterministicHandles
-    .map((handle) => deterministicHandleMap.get(`${handle.type}:${handle.normalizedValue}`) ?? null)
+    .map((handle) => cache.deterministicHandleMap.get(`${handle.type}:${handle.normalizedValue}`) ?? null)
     .find((contactId): contactId is string => Boolean(contactId));
 
   const preferredIdentity = deterministicHandles[0]
@@ -414,579 +580,1034 @@ function projectContactObservation(
     : sourceKey;
 
   const contactId = existingSourceContactId ?? existingContactId ?? hashId("contact", preferredIdentity);
-  sourceContactMap.set(sourceKey, contactId);
+  cache.sourceContactMap.set(sourceKey, contactId);
   for (const handle of deterministicHandles) {
-    deterministicHandleMap.set(`${handle.type}:${handle.normalizedValue}`, contactId);
+    cache.deterministicHandleMap.set(`${handle.type}:${handle.normalizedValue}`, contactId);
   }
 
   conn.insert(contacts).values({
     id: contactId,
     kind: "person",
-    preferredDisplayName: payload.fields.display_name ?? null,
-    preferredPhotoUrl: payload.fields.photo_url ?? null,
-    preferredCompany: payload.fields.company ?? null,
+    name: normalizeText(payload.fields.display_name) ?? null,
+    photoUrl: normalizeText(payload.fields.photo_url) ?? null,
+    company: normalizeText(payload.fields.company) ?? null,
     archived: 0,
     createdAt: event.observed_at,
     updatedAt: event.observed_at,
   }).onConflictDoNothing().run();
 
-  const contactObservationValues = {
-    id: hashId("contact_obs", `${contactId}:${event.id}`),
-    platform: event.platform,
-    accountKey: event.account_key,
-    sourceEntityKey: payload.sourceEntityKey,
-    observedAt: event.observed_at,
-    fieldsJson: JSON.stringify(payload.fields),
-    handlesJson: JSON.stringify(payload.handles),
-    rawEventId: event.id,
+  const contactSet: {
+    updatedAt: number;
+    name?: string | null;
+    photoUrl?: string | null;
+    company?: string | null;
+  } = {
+    updatedAt: event.observed_at,
   };
+  if (payload.fields.display_name !== undefined) {
+    contactSet.name = normalizeText(payload.fields.display_name);
+  }
+  if (payload.fields.photo_url !== undefined) {
+    contactSet.photoUrl = normalizeText(payload.fields.photo_url);
+  }
+  if (payload.fields.company !== undefined) {
+    contactSet.company = normalizeText(payload.fields.company);
+  }
 
-  conn.insert(contactObservations).values(contactObservationValues).onConflictDoUpdate({
-    target: contactObservations.id,
-    set: {
-      platform: contactObservationValues.platform,
-      accountKey: contactObservationValues.accountKey,
-      sourceEntityKey: contactObservationValues.sourceEntityKey,
-      observedAt: contactObservationValues.observedAt,
-      fieldsJson: contactObservationValues.fieldsJson,
-      handlesJson: contactObservationValues.handlesJson,
-      rawEventId: contactObservationValues.rawEventId,
-    },
-  }).run();
+  const resolvedName = payload.fields.display_name !== undefined
+    ? normalizeText(payload.fields.display_name)
+    : cache.contactNameMap.get(contactId) ?? null;
+  cache.contactNameMap.set(contactId, resolvedName);
 
-  const contactSourceValues = {
+  conn.update(contacts)
+    .set(contactSet)
+    .where(eq(contacts.id, contactId))
+    .run();
+
+  conn.insert(contactSources).values({
     id: hashId("contact_source", sourceKey),
     contactId,
     platform: event.platform,
     accountKey: event.account_key,
     sourceEntityKey: payload.sourceEntityKey,
-    sourceProfileUrl: null,
+    profileUrl: normalizeText(payload.sourceProfileUrl ?? null),
+    metadataJson: null,
     firstSeenAt: event.observed_at,
     lastSeenAt: event.observed_at,
-    metadataJson: null,
-  };
-
-  conn.insert(contactSources).values(contactSourceValues).onConflictDoUpdate({
+  }).onConflictDoUpdate({
     target: contactSources.id,
     set: {
-      contactId: contactSourceValues.contactId,
-      platform: contactSourceValues.platform,
-      accountKey: contactSourceValues.accountKey,
-      sourceEntityKey: contactSourceValues.sourceEntityKey,
-      sourceProfileUrl: contactSourceValues.sourceProfileUrl,
-      firstSeenAt: contactSourceValues.firstSeenAt,
-      lastSeenAt: contactSourceValues.lastSeenAt,
-      metadataJson: contactSourceValues.metadataJson,
+      contactId,
+      profileUrl: normalizeText(payload.sourceProfileUrl ?? null),
+      metadataJson: null,
+      lastSeenAt: event.observed_at,
     },
   }).run();
 
   for (const handle of payload.handles) {
     const normalizedValue = normalizeHandle(handle.type, handle.value);
-    const contactHandleValues = {
+    conn.insert(contactHandles).values({
       id: hashId("handle", `${contactId}:${handle.type}:${normalizedValue}`),
       contactId,
-      handleType: handle.type,
+      type: handle.type,
       value: handle.value,
       normalizedValue,
-      platformScope: event.platform,
-      accountScope: event.account_key,
-      isDeterministicKey: handle.deterministic ? 1 : 0,
-      createdAt: event.observed_at,
-      updatedAt: event.observed_at,
-    };
-
-    conn.insert(contactHandles).values(contactHandleValues).onConflictDoUpdate({
-      target: contactHandles.id,
-      set: {
-        contactId: contactHandleValues.contactId,
-        handleType: contactHandleValues.handleType,
-        value: contactHandleValues.value,
-        normalizedValue: contactHandleValues.normalizedValue,
-        platformScope: contactHandleValues.platformScope,
-        accountScope: contactHandleValues.accountScope,
-        isDeterministicKey: contactHandleValues.isDeterministicKey,
-        createdAt: contactHandleValues.createdAt,
-        updatedAt: contactHandleValues.updatedAt,
-      },
-    }).run();
-  }
-
-  for (const [fieldName, fieldValue] of Object.entries(payload.fields)) {
-    if (!fieldValue || !isContactFieldName(fieldName)) continue;
-    const priority = fieldPriority(event.platform, fieldName);
-    const current = currentBestPriority(conn, contactId, fieldName);
-    const shouldWin =
-      !current
-      || priority > current.priority
-      || (priority === current.priority && event.observed_at >= current.observedAt);
-
-    if (shouldWin) {
-      conn.update(contactFieldValues)
-        .set({ isCurrentBest: 0 })
-        .where(and(
-          eq(contactFieldValues.contactId, contactId),
-          eq(contactFieldValues.fieldName, fieldName),
-        ))
-        .run();
-    }
-
-    const contactFieldValue = {
-      id: hashId("field", `${contactId}:${fieldName}:${event.platform}:${payload.sourceEntityKey}`),
-      contactId,
-      fieldName,
-      fieldValue,
       platform: event.platform,
       accountKey: event.account_key,
-      sourceEntityKey: payload.sourceEntityKey,
-      priority,
-      observedAt: event.observed_at,
-      isCurrentBest: shouldWin ? 1 : 0,
-    };
-
-    conn.insert(contactFieldValues).values(contactFieldValue).onConflictDoUpdate({
-      target: contactFieldValues.id,
+      isDeterministic: handle.deterministic ? 1 : 0,
+      createdAt: event.observed_at,
+      updatedAt: event.observed_at,
+    }).onConflictDoUpdate({
+      target: contactHandles.id,
       set: {
-        contactId: contactFieldValue.contactId,
-        fieldName: contactFieldValue.fieldName,
-        fieldValue: contactFieldValue.fieldValue,
-        platform: contactFieldValue.platform,
-        accountKey: contactFieldValue.accountKey,
-        sourceEntityKey: contactFieldValue.sourceEntityKey,
-        priority: contactFieldValue.priority,
-        observedAt: contactFieldValue.observedAt,
-        isCurrentBest: contactFieldValue.isCurrentBest,
+        value: handle.value,
+        platform: event.platform,
+        accountKey: event.account_key,
+        isDeterministic: handle.deterministic ? 1 : 0,
+        updatedAt: event.observed_at,
       },
     }).run();
-
-    if (shouldWin && fieldName === "display_name") {
-      conn.update(contacts)
-        .set({
-          preferredDisplayName: fieldValue,
-          updatedAt: event.observed_at,
-        })
-        .where(eq(contacts.id, contactId))
-        .run();
-    } else if (shouldWin && fieldName === "photo_url") {
-      conn.update(contacts)
-        .set({
-          preferredPhotoUrl: fieldValue,
-          updatedAt: event.observed_at,
-        })
-        .where(eq(contacts.id, contactId))
-        .run();
-    } else if (shouldWin && fieldName === "company") {
-      conn.update(contacts)
-        .set({
-          preferredCompany: fieldValue,
-          updatedAt: event.observed_at,
-        })
-        .where(eq(contacts.id, contactId))
-        .run();
-    }
   }
+
+  changes.dirtyContactIds.add(contactId);
 }
 
 function projectConversationObservation(
   conn: LocalDbExecutor,
-  sourceContactMap: Map<string, string>,
-  conversationMap: Map<string, string>,
-  event: {
-    id: string;
-    platform: Platform;
-    account_key: string;
-    observed_at: number;
-    payload_json: string;
-  },
+  cache: ProjectionCache,
+  changes: ProjectionChangeSet,
+  event: ProjectableRawEvent,
 ): void {
   const payload = JSON.parse(event.payload_json) as ConversationObservationPayload;
   const conversationId = ensureConversationStub(
     conn,
-    conversationMap,
+    cache,
     event.platform,
     event.account_key,
     payload.sourceConversationKey,
     event.observed_at,
   );
 
-  const conversationObservationValues = {
-    id: hashId("conversation_obs", `${conversationId}:${event.id}`),
-    platform: event.platform,
-    accountKey: event.account_key,
-    sourceConversationKey: payload.sourceConversationKey,
-    observedAt: event.observed_at,
-    fieldsJson: JSON.stringify({
-      conversation_type: payload.conversationType,
-      display_name: payload.displayName ?? null,
-    }),
-    rawEventId: event.id,
-  };
-
-  conn.insert(conversationObservations).values(conversationObservationValues).onConflictDoUpdate({
-    target: conversationObservations.id,
-    set: {
-      platform: conversationObservationValues.platform,
-      accountKey: conversationObservationValues.accountKey,
-      sourceConversationKey: conversationObservationValues.sourceConversationKey,
-      observedAt: conversationObservationValues.observedAt,
-      fieldsJson: conversationObservationValues.fieldsJson,
-      rawEventId: conversationObservationValues.rawEventId,
-    },
-  }).run();
-
-  const conversationValues = {
-    id: conversationId,
-    platform: event.platform,
-    accountKey: event.account_key,
-    sourceConversationKey: payload.sourceConversationKey,
-    conversationType: payload.conversationType,
-    displayName: payload.displayName ?? null,
-    topic: null,
-    lastMessageAt: null,
-    lastMessagePreview: null,
-    unreadCount: 0,
-    createdAt: event.observed_at,
+  const conversationSet: {
+    updatedAt: number;
+    nativeConversationKey?: string | null;
+    type: "dm" | "group";
+    subtype?: string | null;
+    service?: string | null;
+    name?: string | null;
+    topic?: string | null;
+    unreadCount?: number;
+  } = {
     updatedAt: event.observed_at,
+    type: payload.conversationType,
   };
+  if (payload.nativeConversationKey !== undefined) {
+    conversationSet.nativeConversationKey = normalizeText(payload.nativeConversationKey);
+  }
+  if (payload.subtype !== undefined) {
+    conversationSet.subtype = normalizeText(payload.subtype);
+  }
+  if (payload.service !== undefined) {
+    conversationSet.service = normalizeText(payload.service);
+  }
+  if (payload.displayName !== undefined) {
+    conversationSet.name = normalizeText(payload.displayName);
+  }
+  if (payload.topic !== undefined) {
+    conversationSet.topic = normalizeText(payload.topic);
+  }
+  if (payload.unreadCount !== undefined && payload.unreadCount !== null) {
+    conversationSet.unreadCount = payload.unreadCount;
+  }
 
-  conn.insert(conversations).values(conversationValues).onConflictDoUpdate({
-    target: conversations.id,
-    set: {
-      platform: conversationValues.platform,
-      accountKey: conversationValues.accountKey,
-      sourceConversationKey: conversationValues.sourceConversationKey,
-      conversationType: conversationValues.conversationType,
-      displayName: conversationValues.displayName,
-      topic: conversationValues.topic,
-      lastMessageAt: conversationValues.lastMessageAt,
-      lastMessagePreview: conversationValues.lastMessagePreview,
-      unreadCount: conversationValues.unreadCount,
-      createdAt: conversationValues.createdAt,
-      updatedAt: conversationValues.updatedAt,
-    },
-  }).run();
+  conn.update(conversations)
+    .set(conversationSet)
+    .where(eq(conversations.id, conversationId))
+    .run();
+
+  const resolvedName = payload.displayName !== undefined
+    ? normalizeText(payload.displayName)
+    : cache.conversationNameMap.get(conversationId) ?? null;
+  cache.conversationNameMap.set(conversationId, resolvedName);
 
   for (const participant of payload.participants) {
     const contactId = resolveOrEnsureContact(
       conn,
-      sourceContactMap,
+      cache,
       event.platform,
       event.account_key,
       participant.sourceEntityKey,
       event.observed_at,
     );
-
     if (!contactId) {
       continue;
     }
 
-    const participantValues = {
+    conn.insert(conversationParticipants).values({
       conversationId,
       contactId,
+      sourceParticipantKey: participant.sourceEntityKey,
+      participantName: cache.contactNameMap.get(contactId) ?? null,
       role: null,
+      isSelf: boolToInt(participant.isSelf),
+      isActive: 1,
       joinedAt: event.observed_at,
       leftAt: null,
-      isActive: 1,
-      sourceParticipantKey: participant.sourceEntityKey,
       updatedAt: event.observed_at,
-    };
-
-    conn.insert(conversationParticipants).values(participantValues).onConflictDoUpdate({
+    }).onConflictDoUpdate({
       target: [
         conversationParticipants.conversationId,
         conversationParticipants.contactId,
         conversationParticipants.sourceParticipantKey,
       ],
       set: {
-        role: participantValues.role,
-        joinedAt: participantValues.joinedAt,
-        leftAt: participantValues.leftAt,
-        isActive: participantValues.isActive,
-        updatedAt: participantValues.updatedAt,
+        participantName: cache.contactNameMap.get(contactId) ?? null,
+        isSelf: boolToInt(participant.isSelf),
+        isActive: 1,
+        leftAt: null,
+        updatedAt: event.observed_at,
       },
     }).run();
   }
+
+  changes.dirtyConversationIds.add(conversationId);
 }
 
 function projectMessageEvent(
   conn: LocalDbExecutor,
-  sourceContactMap: Map<string, string>,
-  conversationMap: Map<string, string>,
-  event: {
-    id: string;
-    platform: Platform;
-    account_key: string;
-    event_kind: string;
-    observed_at: number;
-    payload_json: string;
-  },
+  cache: ProjectionCache,
+  changes: ProjectionChangeSet,
+  event: ProjectableRawEvent,
 ): void {
   const payload = JSON.parse(event.payload_json) as MessagePayload;
-  const messageId = hashId("message", `${event.platform}:${event.account_key}:${payload.sourceMessageKey}`);
-  const conversationId = ensureConversationStub(
+  const { messageId, conversationId } = ensureMessageStub(
     conn,
-    conversationMap,
+    cache,
     event.platform,
     event.account_key,
     payload.sourceConversationKey,
+    payload.sourceMessageKey,
     event.observed_at,
   );
+
   const senderContactId = resolveOrEnsureContact(
     conn,
-    sourceContactMap,
+    cache,
     event.platform,
     event.account_key,
     payload.senderSourceKey,
     event.observed_at,
   );
 
-  const messageEventValues = {
-    id: hashId("message_event", `${messageId}:${event.id}`),
-    platform: event.platform,
-    accountKey: event.account_key,
-    sourceMessageKey: payload.sourceMessageKey,
-    sourceConversationKey: payload.sourceConversationKey,
-    eventType: event.event_kind,
-    eventAt: payload.sentAt,
-    senderSourceKey: payload.senderSourceKey,
-    contentOriginal: payload.contentOriginal,
-    contentCurrent: payload.contentCurrent ?? payload.contentOriginal,
-    statusDelivery: payload.statusDelivery ?? null,
-    deleted: payload.isDeleted ? 1 : 0,
-    edited: payload.isEdited ? 1 : 0,
-    metadataJson: JSON.stringify({
-      attachments: payload.attachments ?? [],
-    }),
-    rawEventId: event.id,
-  };
-
-  conn.insert(messageEvents).values(messageEventValues).onConflictDoUpdate({
-    target: messageEvents.id,
-    set: {
-      platform: messageEventValues.platform,
-      accountKey: messageEventValues.accountKey,
-      sourceMessageKey: messageEventValues.sourceMessageKey,
-      sourceConversationKey: messageEventValues.sourceConversationKey,
-      eventType: messageEventValues.eventType,
-      eventAt: messageEventValues.eventAt,
-      senderSourceKey: messageEventValues.senderSourceKey,
-      contentOriginal: messageEventValues.contentOriginal,
-      contentCurrent: messageEventValues.contentCurrent,
-      statusDelivery: messageEventValues.statusDelivery,
-      deleted: messageEventValues.deleted,
-      edited: messageEventValues.edited,
-      metadataJson: messageEventValues.metadataJson,
-      rawEventId: messageEventValues.rawEventId,
-    },
-  }).run();
-
-  const messageValues = {
-    id: messageId,
-    platform: event.platform,
-    accountKey: event.account_key,
-    sourceMessageKey: payload.sourceMessageKey,
-    conversationId,
-    senderContactId: senderContactId ?? null,
-    senderSourceKey: payload.senderSourceKey,
-    sentAt: payload.sentAt,
-    contentOriginal: payload.contentOriginal,
-    contentCurrent: payload.contentCurrent ?? payload.contentOriginal,
-    statusDelivery: payload.statusDelivery ?? null,
-    deliveredAt: payload.deliveredAt ?? null,
-    readAt: payload.readAt ?? null,
-    editedAt: payload.editedAt ?? null,
-    deletedAt: payload.deletedAt ?? null,
-    isDeleted: payload.isDeleted ? 1 : 0,
-    isEdited: payload.isEdited ? 1 : 0,
-    hasAttachments: payload.hasAttachments ? 1 : 0,
-    attachmentMetadataJson: payload.attachments ? JSON.stringify(payload.attachments) : null,
-    reactionCount: 0,
-    createdAt: event.observed_at,
-    updatedAt: event.observed_at,
-  };
-
-  conn.insert(messages).values(messageValues).onConflictDoUpdate({
-    target: messages.id,
-    set: {
-      platform: messageValues.platform,
-      accountKey: messageValues.accountKey,
-      sourceMessageKey: messageValues.sourceMessageKey,
-      conversationId: messageValues.conversationId,
-      senderContactId: messageValues.senderContactId,
-      senderSourceKey: messageValues.senderSourceKey,
-      sentAt: messageValues.sentAt,
-      contentOriginal: messageValues.contentOriginal,
-      contentCurrent: messageValues.contentCurrent,
-      statusDelivery: messageValues.statusDelivery,
-      deliveredAt: messageValues.deliveredAt,
-      readAt: messageValues.readAt,
-      editedAt: messageValues.editedAt,
-      deletedAt: messageValues.deletedAt,
-      isDeleted: messageValues.isDeleted,
-      isEdited: messageValues.isEdited,
-      hasAttachments: messageValues.hasAttachments,
-      attachmentMetadataJson: messageValues.attachmentMetadataJson,
-      reactionCount: messageValues.reactionCount,
-      createdAt: messageValues.createdAt,
-      updatedAt: messageValues.updatedAt,
-    },
-  }).run();
-
-  conn.update(conversations)
+  conn.update(messages)
     .set({
-      lastMessageAt: payload.sentAt,
-      lastMessagePreview: payload.contentCurrent ?? payload.contentOriginal,
+      platform: event.platform,
+      accountKey: event.account_key,
+      platformMessageId: payload.sourceMessageKey,
+      conversationId,
+      senderContactId: senderContactId ?? null,
+      senderSourceKey: payload.senderSourceKey,
+      senderName: senderContactId ? cache.contactNameMap.get(senderContactId) ?? null : null,
+      conversationName: cache.conversationNameMap.get(conversationId) ?? null,
+      sentAt: payload.sentAt,
+      service: normalizeText(payload.service ?? null),
+      status: normalizeText(payload.status ?? null),
+      isFromMe: boolToInt(payload.isFromMe),
+      content: normalizeText(payload.content) ?? payload.content,
+      deliveredAt: payload.deliveredAt ?? null,
+      readAt: payload.readAt ?? null,
+      editedAt: payload.editedAt ?? null,
+      deletedAt: payload.deletedAt ?? null,
+      isDeleted: boolToInt(payload.isDeleted),
+      isEdited: boolToInt(payload.isEdited),
       updatedAt: event.observed_at,
     })
-    .where(eq(conversations.id, conversationId))
+    .where(eq(messages.id, messageId))
     .run();
+
+  changes.dirtyConversationIds.add(conversationId);
+  changes.dirtyMessageIds.add(messageId);
+  if (hasStringValue(payload.replyToSourceMessageKey)) {
+    changes.dirtyReplyMessageIds.add(messageId);
+  }
+
+  const desiredAttachmentIds = new Set<string>();
+  for (const [index, attachment] of (payload.attachments ?? []).entries()) {
+    const sourceAttachmentKey = normalizeText((attachment as { sourceAttachmentKey?: unknown }).sourceAttachmentKey)
+      ?? normalizeText((attachment as { id?: unknown }).id)
+      ?? normalizeText((attachment as { url?: unknown }).url)
+      ?? `${payload.sourceMessageKey}:${index}`;
+    const attachmentId = hashId("attachment", `${messageId}:${sourceAttachmentKey}`);
+    desiredAttachmentIds.add(attachmentId);
+
+    conn.insert(messageAttachments).values({
+      id: attachmentId,
+      messageId,
+      platform: event.platform,
+      accountKey: event.account_key,
+      sourceAttachmentKey,
+      kind: normalizeText((attachment as { kind?: unknown }).kind),
+      mimeType: normalizeText((attachment as { mime_type?: unknown; mimetype?: unknown }).mime_type)
+        ?? normalizeText((attachment as { mimetype?: unknown }).mimetype),
+      filename: normalizeText((attachment as { filename?: unknown; name?: unknown }).filename)
+        ?? normalizeText((attachment as { name?: unknown }).name),
+      title: normalizeText((attachment as { title?: unknown }).title),
+      localPath: normalizeText((attachment as { local_path?: unknown; path?: unknown }).local_path)
+        ?? normalizeText((attachment as { path?: unknown }).path),
+      remoteUrl: normalizeText((attachment as { remote_url?: unknown; url?: unknown }).remote_url)
+        ?? normalizeText((attachment as { url?: unknown }).url),
+      sizeBytes: normalizeInteger((attachment as { size_bytes?: unknown; size?: unknown }).size_bytes)
+        ?? normalizeInteger((attachment as { size?: unknown }).size),
+      textContent: normalizeText((attachment as { text_content?: unknown; text?: unknown }).text_content)
+        ?? normalizeText((attachment as { text?: unknown }).text),
+      metadataJson: JSON.stringify(attachment),
+      createdAt: event.observed_at,
+      updatedAt: event.observed_at,
+    }).onConflictDoUpdate({
+      target: messageAttachments.id,
+      set: {
+        kind: normalizeText((attachment as { kind?: unknown }).kind),
+        mimeType: normalizeText((attachment as { mime_type?: unknown; mimetype?: unknown }).mime_type)
+          ?? normalizeText((attachment as { mimetype?: unknown }).mimetype),
+        filename: normalizeText((attachment as { filename?: unknown; name?: unknown }).filename)
+          ?? normalizeText((attachment as { name?: unknown }).name),
+        title: normalizeText((attachment as { title?: unknown }).title),
+        localPath: normalizeText((attachment as { local_path?: unknown; path?: unknown }).local_path)
+          ?? normalizeText((attachment as { path?: unknown }).path),
+        remoteUrl: normalizeText((attachment as { remote_url?: unknown; url?: unknown }).remote_url)
+          ?? normalizeText((attachment as { url?: unknown }).url),
+        sizeBytes: normalizeInteger((attachment as { size_bytes?: unknown; size?: unknown }).size_bytes)
+          ?? normalizeInteger((attachment as { size?: unknown }).size),
+        textContent: normalizeText((attachment as { text_content?: unknown; text?: unknown }).text_content)
+          ?? normalizeText((attachment as { text?: unknown }).text),
+        metadataJson: JSON.stringify(attachment),
+        updatedAt: event.observed_at,
+      },
+    }).run();
+  }
+
+  const existingAttachments = conn.all<{ id: string }>(sql`
+    SELECT id
+    FROM message_attachments
+    WHERE message_id = ${messageId}
+  `);
+  for (const existingAttachment of existingAttachments) {
+    if (desiredAttachmentIds.has(existingAttachment.id)) {
+      continue;
+    }
+    conn.delete(messageAttachments)
+      .where(eq(messageAttachments.id, existingAttachment.id))
+      .run();
+  }
 }
 
 function projectReactionEvent(
   conn: LocalDbExecutor,
-  sourceContactMap: Map<string, string>,
-  conversationMap: Map<string, string>,
-  event: {
-    id: string;
-    platform: Platform;
-    account_key: string;
-    observed_at: number;
-    payload_json: string;
-  },
+  cache: ProjectionCache,
+  changes: ProjectionChangeSet,
+  event: ProjectableRawEvent,
 ): void {
   const payload = JSON.parse(event.payload_json) as ReactionPayload;
-  const messageId = hashId("message", `${event.platform}:${event.account_key}:${payload.sourceMessageKey}`);
-  const conversationId = ensureConversationStub(
+  const { messageId, conversationId } = ensureMessageStub(
     conn,
-    conversationMap,
+    cache,
     event.platform,
     event.account_key,
     payload.sourceConversationKey,
+    payload.sourceMessageKey,
     event.observed_at,
   );
   const reactorContactId = resolveOrEnsureContact(
     conn,
-    sourceContactMap,
+    cache,
     event.platform,
     event.account_key,
     payload.reactorSourceKey,
     event.observed_at,
   );
 
-  const reactionValues = {
+  conn.insert(messageReactions).values({
     id: hashId("reaction", `${messageId}:${payload.reactorSourceKey ?? "__me__"}:${payload.emoji}`),
     messageId,
     platform: event.platform,
+    accountKey: event.account_key,
     sourceReactionKey: `${payload.sourceMessageKey}:${payload.reactorSourceKey ?? "__me__"}:${payload.emoji}`,
-    emoji: payload.emoji,
     reactorContactId,
     reactorSourceKey: payload.reactorSourceKey,
-    isActive: payload.isActive ? 1 : 0,
+    reactorName: reactorContactId ? cache.contactNameMap.get(reactorContactId) ?? null : null,
+    emoji: payload.emoji,
+    reactionType: normalizeText(payload.reactionType ?? null),
+    isActive: boolToInt(payload.isActive),
     createdAt: payload.timestamp,
     updatedAt: event.observed_at,
-    rawEventId: event.id,
-  };
-
-  conn.insert(messageReactions).values(reactionValues).onConflictDoUpdate({
+  }).onConflictDoUpdate({
     target: messageReactions.id,
     set: {
-      messageId: reactionValues.messageId,
-      platform: reactionValues.platform,
-      sourceReactionKey: reactionValues.sourceReactionKey,
-      emoji: reactionValues.emoji,
-      reactorContactId: reactionValues.reactorContactId,
-      reactorSourceKey: reactionValues.reactorSourceKey,
-      isActive: reactionValues.isActive,
-      createdAt: reactionValues.createdAt,
-      updatedAt: reactionValues.updatedAt,
-      rawEventId: reactionValues.rawEventId,
+      reactorContactId,
+      reactorSourceKey: payload.reactorSourceKey,
+      reactorName: reactorContactId ? cache.contactNameMap.get(reactorContactId) ?? null : null,
+      reactionType: normalizeText(payload.reactionType ?? null),
+      isActive: boolToInt(payload.isActive),
+      updatedAt: event.observed_at,
     },
   }).run();
 
-  const row = conn
-    .select({
-      count: sql<number>`count(*)`,
-    })
-    .from(messageReactions)
-    .where(and(
-      eq(messageReactions.messageId, messageId),
-      eq(messageReactions.isActive, 1),
-    ))
-    .get();
-
-  conn.update(messages)
-    .set({
-      reactionCount: Number(row?.count ?? 0),
-      updatedAt: event.observed_at,
-    })
-    .where(and(eq(messages.id, messageId), eq(messages.conversationId, conversationId)))
-    .run();
+  changes.dirtyConversationIds.add(conversationId);
+  changes.dirtyMessageIds.add(messageId);
 }
 
-function reindexMessagesFts(conn: LocalDbExecutor): void {
-  conn.run(sql.raw("DELETE FROM messages_fts"));
+function projectTimelineEvent(
+  conn: LocalDbExecutor,
+  cache: ProjectionCache,
+  event: ProjectableRawEvent,
+): void {
+  const payload = JSON.parse(event.payload_json) as TimelineEventPayload;
+  const conversationId = ensureConversationStub(
+    conn,
+    cache,
+    event.platform,
+    event.account_key,
+    payload.sourceConversationKey,
+    event.observed_at,
+  );
+  const actorContactId = resolveOrEnsureContact(
+    conn,
+    cache,
+    event.platform,
+    event.account_key,
+    payload.actorSourceKey,
+    event.observed_at,
+  );
+  const subjectContactId = resolveOrEnsureContact(
+    conn,
+    cache,
+    event.platform,
+    event.account_key,
+    payload.subjectSourceKey,
+    event.observed_at,
+  );
 
-  const indexedMessages = conn.all<{
-    id: string;
-    platform: string;
-    content_current: string | null;
-    conversation_name: string | null;
-    sender_name: string | null;
-    participant_names: string | null;
-  }>(sql`
-    SELECT
-      m.id,
-      m.platform,
-      m.content_current,
-      conv.display_name AS conversation_name,
-      sender.preferred_display_name AS sender_name,
-      (
-        SELECT GROUP_CONCAT(c.preferred_display_name, ' | ')
-        FROM conversation_participants cp
-        JOIN contacts c ON c.id = cp.contact_id
-        WHERE cp.conversation_id = conv.id
-          AND cp.is_active = 1
-      ) AS participant_names
-    FROM messages m
-    JOIN conversations conv ON conv.id = m.conversation_id
-    LEFT JOIN contacts sender ON sender.id = m.sender_contact_id
-  `);
+  conn.insert(timelineEvents).values({
+    id: hashId("timeline_event", `${event.platform}:${event.account_key}:${payload.sourceEventKey}`),
+    platform: event.platform,
+    accountKey: event.account_key,
+    conversationId,
+    sourceEventKey: payload.sourceEventKey,
+    eventKind: payload.eventKind,
+    actorContactId,
+    actorSourceKey: payload.actorSourceKey ?? null,
+    actorName: actorContactId ? cache.contactNameMap.get(actorContactId) ?? null : null,
+    subjectContactId,
+    eventAt: payload.eventAt,
+    text: normalizeText(payload.text ?? null),
+    metadataJson: payload.metadata ? JSON.stringify(payload.metadata) : null,
+    createdAt: event.observed_at,
+    updatedAt: event.observed_at,
+  }).onConflictDoUpdate({
+    target: timelineEvents.id,
+    set: {
+      actorContactId,
+      actorSourceKey: payload.actorSourceKey ?? null,
+      actorName: actorContactId ? cache.contactNameMap.get(actorContactId) ?? null : null,
+      subjectContactId,
+      eventAt: payload.eventAt,
+      text: normalizeText(payload.text ?? null),
+      metadataJson: payload.metadata ? JSON.stringify(payload.metadata) : null,
+      updatedAt: event.observed_at,
+    },
+  }).run();
+}
 
-  for (const message of indexedMessages) {
+function refreshConversationSummariesForIds(
+  conn: LocalDbExecutor,
+  conversationIds: Set<string>,
+): void {
+  for (const chunk of chunkArray([...conversationIds], SQL_CHUNK_SIZE)) {
     conn.run(sql`
-      INSERT INTO messages_fts (
-        message_id,
-        platform,
-        sender_name,
-        conversation_name,
-        participant_names,
-        content
-      ) VALUES (
-        ${message.id},
-        ${message.platform},
-        ${message.sender_name ?? null},
-        ${message.conversation_name ?? null},
-        ${message.participant_names ?? null},
-        ${message.content_current ?? ""}
-      )
+      UPDATE conversations
+      SET
+        last_message_id = (
+          SELECT m.id
+          FROM messages m
+          WHERE m.conversation_id = conversations.id
+          ORDER BY m.sent_at DESC, m.updated_at DESC, m.id DESC
+          LIMIT 1
+        ),
+        last_message_at = (
+          SELECT m.sent_at
+          FROM messages m
+          WHERE m.conversation_id = conversations.id
+          ORDER BY m.sent_at DESC, m.updated_at DESC, m.id DESC
+          LIMIT 1
+        ),
+        last_message_preview = (
+          SELECT m.content
+          FROM messages m
+          WHERE m.conversation_id = conversations.id
+          ORDER BY m.sent_at DESC, m.updated_at DESC, m.id DESC
+          LIMIT 1
+        ),
+        unread_count = (
+          SELECT COUNT(*)
+          FROM messages m
+          WHERE m.conversation_id = conversations.id
+            AND m.is_from_me = 0
+            AND m.is_deleted = 0
+            AND m.read_at IS NULL
+        )
+      WHERE id IN (${sqlValueList(chunk)})
     `);
   }
 }
 
-function refreshConversationDisplayNames(conn: LocalDbExecutor): void {
-  conn.run(sql`
-    UPDATE conversations
-    SET display_name = (
-      SELECT
-        CASE
-          WHEN COUNT(*) = 1 THEN MAX(c.preferred_display_name)
-          ELSE GROUP_CONCAT(c.preferred_display_name, ' | ')
-        END
-      FROM conversation_participants cp
-      JOIN contacts c ON c.id = cp.contact_id
-      WHERE cp.conversation_id = conversations.id
-        AND cp.is_active = 1
-    )
-    WHERE (display_name IS NULL OR display_name = '' OR display_name = source_conversation_key)
-      AND conversation_type = 'dm'
-  `);
+function refreshContactFanoutForIds(
+  conn: LocalDbExecutor,
+  contactIds: Set<string>,
+): void {
+  for (const chunk of chunkArray([...contactIds], SQL_CHUNK_SIZE)) {
+    conn.run(sql`
+      UPDATE messages
+      SET sender_name = (
+        SELECT name FROM contacts WHERE id = messages.sender_contact_id
+      )
+      WHERE sender_contact_id IN (${sqlValueList(chunk)})
+    `);
+    conn.run(sql`
+      UPDATE conversation_participants
+      SET participant_name = (
+        SELECT name FROM contacts WHERE id = conversation_participants.contact_id
+      )
+      WHERE contact_id IN (${sqlValueList(chunk)})
+    `);
+    conn.run(sql`
+      UPDATE timeline_events
+      SET actor_name = (
+        SELECT name FROM contacts WHERE id = timeline_events.actor_contact_id
+      )
+      WHERE actor_contact_id IN (${sqlValueList(chunk)})
+    `);
+    conn.run(sql`
+      UPDATE message_reactions
+      SET reactor_name = (
+        SELECT name FROM contacts WHERE id = message_reactions.reactor_contact_id
+      )
+      WHERE reactor_contact_id IN (${sqlValueList(chunk)})
+    `);
+  }
+}
+
+function expandDirtyConversationIds(
+  conn: LocalDbExecutor,
+  changes: ProjectionChangeSet,
+): void {
+  if (changes.dirtyContactIds.size === 0) {
+    return;
+  }
+
+  for (const chunk of chunkArray([...changes.dirtyContactIds], SQL_CHUNK_SIZE)) {
+    const rows = conn.all<{ conversation_id: string }>(sql`
+      SELECT DISTINCT conversation_id
+      FROM conversation_participants
+      WHERE contact_id IN (${sqlValueList(chunk)})
+    `);
+    for (const row of rows) {
+      changes.dirtyConversationIds.add(row.conversation_id);
+    }
+  }
+}
+
+function refreshParticipantNamesForIds(
+  conn: LocalDbExecutor,
+  conversationIds: Set<string>,
+): void {
+  for (const chunk of chunkArray([...conversationIds], SQL_CHUNK_SIZE)) {
+    conn.run(sql`
+      UPDATE conversations
+      SET participant_names = (
+        SELECT GROUP_CONCAT(cp.participant_name, ' | ')
+        FROM conversation_participants cp
+        WHERE cp.conversation_id = conversations.id
+          AND cp.is_active = 1
+          AND cp.participant_name IS NOT NULL
+          AND cp.participant_name <> ''
+      )
+      WHERE id IN (${sqlValueList(chunk)})
+    `);
+  }
+}
+
+function refreshConversationNamesForIds(
+  conn: LocalDbExecutor,
+  conversationIds: Set<string>,
+): void {
+  for (const chunk of chunkArray([...conversationIds], SQL_CHUNK_SIZE)) {
+    conn.run(sql`
+      UPDATE conversations
+      SET name = participant_names
+      WHERE id IN (${sqlValueList(chunk)})
+        AND (name IS NULL OR name = '' OR name = source_conversation_key)
+        AND type = 'dm'
+        AND participant_names IS NOT NULL
+        AND participant_names <> ''
+    `);
+  }
+}
+
+function refreshMessageConversationNamesForIds(
+  conn: LocalDbExecutor,
+  conversationIds: Set<string>,
+): void {
+  for (const chunk of chunkArray([...conversationIds], SQL_CHUNK_SIZE)) {
+    conn.run(sql`
+      UPDATE messages
+      SET conversation_name = (
+        SELECT name FROM conversations WHERE id = messages.conversation_id
+      )
+      WHERE conversation_id IN (${sqlValueList(chunk)})
+    `);
+  }
+}
+
+function expandDirtyMessageIds(
+  conn: LocalDbExecutor,
+  changes: ProjectionChangeSet,
+): void {
+  if (changes.dirtyConversationIds.size > 0) {
+    for (const chunk of chunkArray([...changes.dirtyConversationIds], SQL_CHUNK_SIZE)) {
+      const rows = conn.all<{ id: string }>(sql`
+        SELECT id
+        FROM messages
+        WHERE conversation_id IN (${sqlValueList(chunk)})
+      `);
+      for (const row of rows) {
+        changes.dirtyMessageIds.add(row.id);
+      }
+    }
+  }
+
+  if (changes.dirtyContactIds.size > 0) {
+    for (const chunk of chunkArray([...changes.dirtyContactIds], SQL_CHUNK_SIZE)) {
+      const rows = conn.all<{ id: string }>(sql`
+        SELECT id
+        FROM messages
+        WHERE sender_contact_id IN (${sqlValueList(chunk)})
+      `);
+      for (const row of rows) {
+        changes.dirtyMessageIds.add(row.id);
+      }
+    }
+  }
+}
+
+function refreshAttachmentCountsForIds(
+  conn: LocalDbExecutor,
+  messageIds: Set<string>,
+): void {
+  for (const chunk of chunkArray([...messageIds], SQL_CHUNK_SIZE)) {
+    conn.run(sql`
+      UPDATE messages
+      SET attachment_count = (
+        SELECT COUNT(*)
+        FROM message_attachments ma
+        WHERE ma.message_id = messages.id
+      )
+      WHERE id IN (${sqlValueList(chunk)})
+    `);
+  }
+}
+
+function refreshReactionCountsForIds(
+  conn: LocalDbExecutor,
+  messageIds: Set<string>,
+): void {
+  for (const chunk of chunkArray([...messageIds], SQL_CHUNK_SIZE)) {
+    conn.run(sql`
+      UPDATE messages
+      SET reaction_count = (
+        SELECT COUNT(*)
+        FROM message_reactions mr
+        WHERE mr.message_id = messages.id
+          AND mr.is_active = 1
+      )
+      WHERE id IN (${sqlValueList(chunk)})
+    `);
+  }
+}
+
+function refreshReplyLinksForIds(
+  conn: LocalDbExecutor,
+  messageIds: Set<string>,
+): void {
+  for (const chunk of chunkArray([...messageIds], SQL_CHUNK_SIZE)) {
+    conn.run(sql`
+      UPDATE messages
+      SET reply_to_message_id = (
+        SELECT parent.id
+        FROM raw_events child_re
+        JOIN messages parent
+          ON parent.platform = child_re.platform
+         AND parent.account_key = child_re.account_key
+         AND parent.platform_message_id = json_extract(child_re.payload_json, '$.replyToSourceMessageKey')
+        WHERE child_re.entity_kind = 'message'
+          AND child_re.platform = messages.platform
+          AND child_re.account_key = messages.account_key
+          AND json_extract(child_re.payload_json, '$.sourceMessageKey') = messages.platform_message_id
+        ORDER BY child_re.observed_at DESC, child_re.id DESC
+        LIMIT 1
+      )
+      WHERE id IN (${sqlValueList(chunk)})
+    `);
+  }
+}
+
+function refreshMessageSearchIndexForIds(
+  conn: LocalDbExecutor,
+  messageIds: Set<string>,
+): void {
+  for (const chunk of chunkArray([...messageIds], SQL_CHUNK_SIZE)) {
+    conn.run(sql`
+      DELETE FROM messages_fts
+      WHERE message_id IN (${sqlValueList(chunk)})
+    `);
+    conn.run(sql`
+      INSERT INTO messages_fts (message_id, sender_name, conversation_name, participant_names, attachment_text, content)
+      SELECT message_id, sender_name, conversation_name, participant_names, attachment_text, content
+      FROM message_fts_source
+      WHERE message_id IN (${sqlValueList(chunk)})
+    `);
+  }
+}
+
+function finalizeRealtimeProjection(
+  conn: LocalDbExecutor,
+  conversationIds: Set<string>,
+): void {
+  refreshConversationSummariesForIds(conn, conversationIds);
+}
+
+function finalizeDeferredProjection(
+  conn: LocalDbExecutor,
+  cache: ProjectionCache,
+  changes: ProjectionChangeSet,
+): void {
+  if (changes.dirtyContactIds.size > 0) {
+    refreshContactFanoutForIds(conn, changes.dirtyContactIds);
+    syncContactNameCache(conn, cache, changes.dirtyContactIds);
+  }
+
+  expandDirtyConversationIds(conn, changes);
+  if (changes.dirtyConversationIds.size > 0) {
+    refreshParticipantNamesForIds(conn, changes.dirtyConversationIds);
+    refreshConversationNamesForIds(conn, changes.dirtyConversationIds);
+    syncConversationNameCache(conn, cache, changes.dirtyConversationIds);
+    refreshMessageConversationNamesForIds(conn, changes.dirtyConversationIds);
+    refreshConversationSummariesForIds(conn, changes.dirtyConversationIds);
+  }
+
+  expandDirtyMessageIds(conn, changes);
+  if (changes.dirtyMessageIds.size > 0) {
+    refreshAttachmentCountsForIds(conn, changes.dirtyMessageIds);
+    refreshReactionCountsForIds(conn, changes.dirtyMessageIds);
+    refreshMessageSearchIndexForIds(conn, changes.dirtyMessageIds);
+  }
+
+  if (changes.dirtyReplyMessageIds.size > 0) {
+    refreshReplyLinksForIds(conn, changes.dirtyReplyMessageIds);
+  }
+}
+
+function summarizeResult(
+  db: CuedDatabase,
+  appliedRawEvents: number,
+  projectionWatermark: number,
+  rangeStartRowId: number | null,
+  rangeEndRowId: number | null,
+  completed: boolean,
+  nextStartRowId: number | null,
+): ProjectionRangeResult {
+  const overview = buildOverview(db);
+  return {
+    ...overview,
+    appliedRawEvents,
+    projectionWatermark,
+    completed,
+    nextStartRowId,
+    rangeStartRowId,
+    rangeEndRowId,
+  };
+}
+
+function projectEventBatch(
+  db: CuedDatabase,
+  input: {
+    mode: ProjectionMode;
+    rawEvents: RawEventRow[];
+    projectionWatermark: number | null;
+    lastRebuildAt?: number | null;
+  },
+): void {
+  const cache = input.mode === "rebuild" ? resetProjectionCache(db) : getProjectionCache(db);
+
+  db.orm().transaction((tx) => {
+    const projectedAt = Date.now();
+    const changes = createProjectionChangeSet();
+    if (input.mode === "rebuild") {
+      clearProjectedState(tx);
+    }
+
+    for (const event of input.rawEvents) {
+      const shapedEvent = {
+        platform: event.platform,
+        account_key: event.account_key,
+        observed_at: event.observed_at,
+        payload_json: event.payload_json,
+      };
+
+      if (input.mode === "realtime") {
+        if (event.entity_kind === "conversation") {
+          projectRealtimeConversationObservation(tx, cache, changes, shapedEvent);
+        } else if (event.entity_kind === "message") {
+          projectRealtimeMessageEvent(tx, cache, changes, shapedEvent);
+        }
+        continue;
+      }
+
+      if (event.entity_kind === "contact") {
+        projectContactObservation(tx, cache, changes, shapedEvent);
+        continue;
+      }
+      if (event.entity_kind === "conversation") {
+        projectConversationObservation(tx, cache, changes, shapedEvent);
+        continue;
+      }
+      if (event.entity_kind === "message") {
+        projectMessageEvent(tx, cache, changes, shapedEvent);
+        continue;
+      }
+      if (event.entity_kind === "reaction") {
+        projectReactionEvent(tx, cache, changes, shapedEvent);
+        continue;
+      }
+      if (event.entity_kind === "timeline_event") {
+        projectTimelineEvent(tx, cache, shapedEvent);
+      }
+    }
+
+    if (input.mode === "realtime") {
+      finalizeRealtimeProjection(tx, changes.dirtyConversationIds);
+      return;
+    }
+
+    finalizeDeferredProjection(tx, cache, changes);
+    if (input.projectionWatermark != null) {
+      upsertProjectionState(tx, {
+        projectionWatermark: input.projectionWatermark,
+        lastProjectedAt: projectedAt,
+        lastRebuildAt: input.lastRebuildAt,
+      });
+    }
+  });
+}
+
+function projectRangeInternal(
+  db: CuedDatabase,
+  input: {
+    mode: ProjectionMode;
+    startRowId: number;
+    endRowId: number;
+    limit?: number;
+  },
+): ProjectionRangeResult {
+  if (input.endRowId < input.startRowId) {
+    const projection = db.getProjectionState();
+    return summarizeResult(
+      db,
+      0,
+      projection.projection_watermark,
+      null,
+      null,
+      true,
+      null,
+    );
+  }
+
+  const rawEvents = db.listRawEventsInRange(input.startRowId, input.endRowId, input.limit);
+  if (rawEvents.length === 0) {
+    const projection = db.getProjectionState();
+    return summarizeResult(
+      db,
+      0,
+      projection.projection_watermark,
+      input.startRowId,
+      input.endRowId,
+      true,
+      null,
+    );
+  }
+
+  const appliedEndRowId = rawEvents[rawEvents.length - 1]!.rowid;
+  const completed = appliedEndRowId >= input.endRowId;
+  const nextStartRowId = completed ? null : appliedEndRowId + 1;
+  projectEventBatch(db, {
+    mode: input.mode,
+    rawEvents,
+    projectionWatermark: input.mode === "realtime" ? null : appliedEndRowId,
+    lastRebuildAt: input.mode === "rebuild" ? Date.now() : undefined,
+  });
+
+  const projectionWatermark = input.mode === "realtime"
+    ? db.getProjectionState().projection_watermark
+    : appliedEndRowId;
+
+  return summarizeResult(
+    db,
+    rawEvents.length,
+    projectionWatermark,
+    input.startRowId,
+    input.endRowId,
+    completed,
+    nextStartRowId,
+  );
+}
+
+export function projectRealtimeRange(
+  db: CuedDatabase,
+  options: {
+    startRowId: number;
+    endRowId: number;
+    batchSize?: number;
+  },
+): ProjectionRangeResult {
+  let currentStartRowId = options.startRowId;
+  let lastResult = summarizeResult(db, 0, db.getProjectionState().projection_watermark, null, null, true, null);
+  while (currentStartRowId <= options.endRowId) {
+    const result = projectRangeInternal(db, {
+      mode: "realtime",
+      startRowId: currentStartRowId,
+      endRowId: options.endRowId,
+      limit: options.batchSize,
+    });
+    lastResult = {
+      ...result,
+      appliedRawEvents: lastResult.appliedRawEvents + result.appliedRawEvents,
+      rangeStartRowId: options.startRowId,
+      rangeEndRowId: options.endRowId,
+    };
+    if (result.completed || result.nextStartRowId == null) {
+      break;
+    }
+    currentStartRowId = result.nextStartRowId;
+  }
+  return {
+    ...lastResult,
+    completed: true,
+    nextStartRowId: null,
+    rangeStartRowId: options.startRowId,
+    rangeEndRowId: options.endRowId,
+  };
+}
+
+export function projectDeferredRange(
+  db: CuedDatabase,
+  options: {
+    startRowId: number;
+    endRowId: number;
+    limit?: number;
+  },
+): ProjectionRangeResult {
+  return projectRangeInternal(db, {
+    mode: "deferred",
+    startRowId: options.startRowId,
+    endRowId: options.endRowId,
+    limit: options.limit,
+  });
+}
+
+export function projectPendingRawEvents(
+  db: CuedDatabase,
+  options?: {
+    limit?: number;
+  },
+): ProjectionOverview {
+  const backlog = db.getProjectionBacklog();
+  if (backlog.pending_raw_events === 0) {
+    const result = summarizeResult(
+      db,
+      0,
+      backlog.projection_watermark,
+      null,
+      null,
+      true,
+      null,
+    );
+    return {
+      contacts: result.contacts,
+      conversations: result.conversations,
+      messages: result.messages,
+      rawEvents: result.rawEvents,
+      appliedRawEvents: result.appliedRawEvents,
+      projectionWatermark: result.projectionWatermark,
+    };
+  }
+
+  const result = projectDeferredRange(db, {
+    startRowId: backlog.projection_watermark + 1,
+    endRowId: backlog.max_raw_event_rowid,
+    limit: options?.limit,
+  });
+
+  return {
+    contacts: result.contacts,
+    conversations: result.conversations,
+    messages: result.messages,
+    rawEvents: result.rawEvents,
+    appliedRawEvents: result.appliedRawEvents,
+    projectionWatermark: result.projectionWatermark,
+  };
+}
+
+export function rebuildProjectedState(db: CuedDatabase): ProjectionOverview {
+  const rawEvents = db.listRawEventsAfter(0);
+  if (rawEvents.length === 0) {
+    projectEventBatch(db, {
+      mode: "rebuild",
+      rawEvents: [],
+      projectionWatermark: 0,
+      lastRebuildAt: Date.now(),
+    });
+    const result = summarizeResult(db, 0, 0, null, null, true, null);
+    return {
+      contacts: result.contacts,
+      conversations: result.conversations,
+      messages: result.messages,
+      rawEvents: result.rawEvents,
+      appliedRawEvents: result.appliedRawEvents,
+      projectionWatermark: result.projectionWatermark,
+    };
+  }
+
+  projectEventBatch(db, {
+    mode: "rebuild",
+    rawEvents,
+    projectionWatermark: rawEvents[rawEvents.length - 1]!.rowid,
+    lastRebuildAt: Date.now(),
+  });
+
+  const result = summarizeResult(
+    db,
+    rawEvents.length,
+    rawEvents[rawEvents.length - 1]!.rowid,
+    1,
+    rawEvents[rawEvents.length - 1]!.rowid,
+    true,
+    null,
+  );
+  return {
+    contacts: result.contacts,
+    conversations: result.conversations,
+    messages: result.messages,
+    rawEvents: result.rawEvents,
+    appliedRawEvents: result.appliedRawEvents,
+    projectionWatermark: result.projectionWatermark,
+  };
 }
