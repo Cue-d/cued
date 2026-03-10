@@ -24,20 +24,16 @@ import * as schema from "./schema.js";
 const {
   authSessions,
   contactMergeDecisions,
-  contactObservations,
-  contactFieldValues,
   contactHandles,
   contactSources,
   contacts,
-  conversationObservations,
   conversationParticipants,
   conversations,
   daemonState,
   integrationStates,
-  messageEvents,
+  messageAttachments,
   messageReactions,
   messages,
-  participantEvents,
   projectionState,
   rawEvents,
   schemaMigrations,
@@ -45,6 +41,7 @@ const {
   syncCheckpoints,
   syncRunErrors,
   syncRuns,
+  timelineEvents,
 } = schema;
 
 export interface DaemonStatusRow {
@@ -116,9 +113,18 @@ export interface AuthSessionRow {
 }
 
 export type LocalDrizzleDatabase = BetterSQLite3Database<typeof schema>;
+const WRITE_BATCH_SIZE = 250;
 
 function now(): number {
   return Date.now();
+}
+
+function chunkArray<T>(items: readonly T[], size: number): T[][] {
+  const chunks: T[][] = [];
+  for (let index = 0; index < items.length; index += size) {
+    chunks.push(items.slice(index, index + size));
+  }
+  return chunks;
 }
 
 export class CuedDatabase {
@@ -752,6 +758,44 @@ export class CuedDatabase {
     return id;
   }
 
+  queueSyncRuns(inputs: Array<{
+    platform?: Platform | null;
+    accountKey?: string | null;
+    runType: SyncRunType;
+    trigger: string;
+    details?: unknown;
+  }>): string[] {
+    if (inputs.length === 0) {
+      return [];
+    }
+
+    const queuedAt = now();
+    const runIds: string[] = [];
+    this.db.transaction((tx) => {
+      for (const chunk of chunkArray(inputs, WRITE_BATCH_SIZE)) {
+        const rows = chunk.map((input) => {
+          const id = randomUUID();
+          runIds.push(id);
+          return {
+            id,
+            platform: input.platform ?? null,
+            accountKey: input.accountKey ?? null,
+            runType: input.runType,
+            status: "queued" as const,
+            trigger: input.trigger,
+            startedAt: queuedAt,
+            finishedAt: null,
+            detailsJson: input.details ? JSON.stringify(input.details) : null,
+          };
+        });
+
+        tx.insert(syncRuns).values(rows).run();
+      }
+    });
+
+    return runIds;
+  }
+
   hasQueuedOrRunningRun(platform: Platform, accountKey?: string | null): boolean {
     const accountPredicate = accountKey == null
       ? sql`1 = 1`
@@ -992,6 +1036,45 @@ export class CuedDatabase {
       .run();
   }
 
+  upsertSourceAccounts(inputs: Array<{
+    platform: Platform;
+    accountKey: string;
+    displayName?: string | null;
+    status?: string;
+    metadata?: unknown;
+  }>): void {
+    if (inputs.length === 0) {
+      return;
+    }
+
+    const timestamp = now();
+    this.db.transaction((tx) => {
+      for (const chunk of chunkArray(inputs, WRITE_BATCH_SIZE)) {
+        tx.insert(sourceAccounts)
+          .values(chunk.map((input) => ({
+            id: `${input.platform}:${input.accountKey}`,
+            platform: input.platform,
+            accountKey: input.accountKey,
+            displayName: input.displayName ?? null,
+            status: input.status ?? "active",
+            metadataJson: input.metadata ? JSON.stringify(input.metadata) : null,
+            createdAt: timestamp,
+            updatedAt: timestamp,
+          })))
+          .onConflictDoUpdate({
+            target: [sourceAccounts.platform, sourceAccounts.accountKey],
+            set: {
+              displayName: sql`excluded.display_name`,
+              status: sql`excluded.status`,
+              metadataJson: sql`excluded.metadata_json`,
+              updatedAt: timestamp,
+            },
+          })
+          .run();
+      }
+    });
+  }
+
   upsertCheckpoint(input: {
     platform: Platform;
     accountKey: string;
@@ -1064,6 +1147,92 @@ export class CuedDatabase {
     return Number(result.changes) > 0;
   }
 
+  insertRawEvents(events: RawEventInput[]): {
+    insertedCount: number;
+    insertedEvents: RawEventInput[];
+    firstInsertedRowId: number | null;
+    lastInsertedRowId: number | null;
+  } {
+    if (events.length === 0) {
+      return {
+        insertedCount: 0,
+        insertedEvents: [],
+        firstInsertedRowId: null,
+        lastInsertedRowId: null,
+      };
+    }
+
+    const uniqueEvents = [...new Map(events.map((event) => [event.id, event])).values()];
+    const existingIds = new Set<string>();
+    this.db.transaction((tx) => {
+      for (const chunk of chunkArray(uniqueEvents, WRITE_BATCH_SIZE)) {
+        const rows = tx
+          .select({ id: rawEvents.id })
+          .from(rawEvents)
+          .where(inArray(rawEvents.id, chunk.map((event) => event.id)))
+          .all();
+        for (const row of rows) {
+          existingIds.add(row.id);
+        }
+      }
+
+      for (const chunk of chunkArray(uniqueEvents, WRITE_BATCH_SIZE)) {
+        tx.insert(rawEvents)
+          .values(chunk.map((event) => ({
+            id: event.id,
+            platform: event.platform,
+            accountKey: event.accountKey,
+            entityKind: event.entityKind,
+            eventKind: event.eventKind,
+            externalEventId: event.externalEventId ?? null,
+            externalEntityId: event.externalEntityId ?? null,
+            conversationExternalId: event.conversationExternalId ?? null,
+            occurredAt: event.occurredAt ?? null,
+            observedAt: event.observedAt,
+            cursorJson: event.cursor ? JSON.stringify(event.cursor) : null,
+            dedupeKey: event.dedupeKey,
+            payloadJson: JSON.stringify(event.payload),
+            sourceVersion: event.sourceVersion ?? null,
+          })))
+          .onConflictDoNothing()
+          .run();
+      }
+    });
+
+    const insertedEvents = uniqueEvents.filter((event) => !existingIds.has(event.id));
+    let firstInsertedRowId: number | null = null;
+    let lastInsertedRowId: number | null = null;
+    if (insertedEvents.length > 0) {
+      for (const chunk of chunkArray(insertedEvents, WRITE_BATCH_SIZE)) {
+        const rows = this.sqlite
+          .prepare(`
+            SELECT rowid
+            FROM raw_events
+            WHERE id IN (${chunk.map(() => "?").join(", ")})
+            ORDER BY rowid ASC
+          `)
+          .all(...chunk.map((event) => event.id)) as Array<{ rowid: number }>;
+        if (rows.length === 0) {
+          continue;
+        }
+
+        if (firstInsertedRowId == null || rows[0]!.rowid < firstInsertedRowId) {
+          firstInsertedRowId = rows[0]!.rowid;
+        }
+        const chunkLastRowId = rows[rows.length - 1]!.rowid;
+        if (lastInsertedRowId == null || chunkLastRowId > lastInsertedRowId) {
+          lastInsertedRowId = chunkLastRowId;
+        }
+      }
+    }
+    return {
+      insertedCount: insertedEvents.length,
+      insertedEvents,
+      firstInsertedRowId,
+      lastInsertedRowId,
+    };
+  }
+
   listRawEvents(): Array<{
     id: string;
     platform: Platform;
@@ -1134,6 +1303,81 @@ export class CuedDatabase {
     }>;
   }
 
+  listRawEventsInRange(startRowId: number, endRowId: number, limit?: number): Array<{
+    rowid: number;
+    id: string;
+    platform: Platform;
+    account_key: string;
+    entity_kind: RawEventEntityKind;
+    event_kind: string;
+    observed_at: number;
+    payload_json: string;
+  }> {
+    if (endRowId < startRowId) {
+      return [];
+    }
+
+    return this.sqlite
+      .prepare(`
+        SELECT
+          rowid,
+          id,
+          platform,
+          account_key,
+          entity_kind,
+          event_kind,
+          observed_at,
+          payload_json
+        FROM raw_events
+        WHERE rowid >= ?
+          AND rowid <= ?
+        ORDER BY rowid ASC
+        LIMIT ?
+      `)
+      .all(startRowId, endRowId, limit ?? Number.MAX_SAFE_INTEGER) as Array<{
+      rowid: number;
+      id: string;
+      platform: Platform;
+      account_key: string;
+      entity_kind: RawEventEntityKind;
+      event_kind: string;
+      observed_at: number;
+      payload_json: string;
+    }>;
+  }
+
+  getQueuedProjectionRun(): QueuedSyncRun | null {
+    return this.db
+      .select({
+        id: syncRuns.id,
+        platform: syncRuns.platform,
+        account_key: syncRuns.accountKey,
+        run_type: syncRuns.runType,
+        status: syncRuns.status,
+        trigger: syncRuns.trigger,
+        started_at: syncRuns.startedAt,
+        details_json: syncRuns.detailsJson,
+      })
+      .from(syncRuns)
+      .where(and(
+        eq(syncRuns.status, "queued"),
+        eq(syncRuns.runType, "project"),
+      ))
+      .orderBy(asc(syncRuns.startedAt))
+      .limit(1)
+      .get() as QueuedSyncRun | undefined ?? null;
+  }
+
+  updateRunDetails(runId: string, details: unknown): void {
+    this.db
+      .update(syncRuns)
+      .set({
+        detailsJson: JSON.stringify(details),
+      })
+      .where(eq(syncRuns.id, runId))
+      .run();
+  }
+
   listProjectedContactSourceMap(): Array<{
     platform: Platform;
     account_key: string;
@@ -1163,12 +1407,12 @@ export class CuedDatabase {
   }> {
     return this.db
       .select({
-        handle_type: contactHandles.handleType,
+        handle_type: contactHandles.type,
         normalized_value: contactHandles.normalizedValue,
         contact_id: contactHandles.contactId,
       })
       .from(contactHandles)
-      .where(eq(contactHandles.isDeterministicKey, 1))
+      .where(eq(contactHandles.isDeterministic, 1))
       .all() as Array<{
       handle_type: string;
       normalized_value: string;
@@ -1198,18 +1442,69 @@ export class CuedDatabase {
     }>;
   }
 
+  listContactNames(): Array<{
+    contact_id: string;
+    name: string | null;
+  }> {
+    return this.db
+      .select({
+        contact_id: contacts.id,
+        name: contacts.name,
+      })
+      .from(contacts)
+      .all() as Array<{
+      contact_id: string;
+      name: string | null;
+    }>;
+  }
+
+  listConversationNames(): Array<{
+    conversation_id: string;
+    name: string | null;
+  }> {
+    return this.db
+      .select({
+        conversation_id: conversations.id,
+        name: conversations.name,
+      })
+      .from(conversations)
+      .all() as Array<{
+      conversation_id: string;
+      name: string | null;
+    }>;
+  }
+
+  listMessageMap(): Array<{
+    platform: Platform;
+    account_key: string;
+    platform_message_id: string;
+    message_id: string;
+  }> {
+    return this.db
+      .select({
+        platform: messages.platform,
+        account_key: messages.accountKey,
+        platform_message_id: messages.platformMessageId,
+        message_id: messages.id,
+      })
+      .from(messages)
+      .all() as Array<{
+      platform: Platform;
+      account_key: string;
+      platform_message_id: string;
+      message_id: string;
+    }>;
+  }
+
   clearProjectedState(): void {
     this.db.transaction((tx) => {
       tx.run(sql.raw("DELETE FROM messages_fts"));
+      tx.delete(timelineEvents).run();
+      tx.delete(messageAttachments).run();
       tx.delete(messageReactions).run();
-      tx.delete(messageEvents).run();
-      tx.delete(participantEvents).run();
-      tx.delete(contactObservations).run();
-      tx.delete(conversationObservations).run();
       tx.delete(conversationParticipants).run();
       tx.delete(messages).run();
       tx.delete(conversations).run();
-      tx.delete(contactFieldValues).run();
       tx.delete(contactHandles).run();
       tx.delete(contactSources).run();
       tx.delete(contacts).run();

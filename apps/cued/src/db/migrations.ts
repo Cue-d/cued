@@ -511,4 +511,564 @@ export const MIGRATIONS: Array<{ id: string; sql: string }> = [
       );
     `,
   },
+  {
+    id: "0005_projection_vnext_cut_down",
+    sql: `
+      DROP VIEW IF EXISTS message_reaction_summary;
+      DROP VIEW IF EXISTS message_search_results;
+      DROP VIEW IF EXISTS message_timeline;
+      DROP VIEW IF EXISTS conversation_directory;
+      DROP VIEW IF EXISTS contact_provenance_summary;
+      DROP VIEW IF EXISTS contact_directory;
+      DROP VIEW IF EXISTS message_fts_source;
+
+      DROP TRIGGER IF EXISTS trg_contacts_name_updated;
+      DROP TRIGGER IF EXISTS trg_conversations_name_updated;
+      DROP TRIGGER IF EXISTS trg_conversation_participants_inserted;
+      DROP TRIGGER IF EXISTS trg_conversation_participants_updated;
+      DROP TRIGGER IF EXISTS trg_conversation_participants_deleted;
+      DROP TRIGGER IF EXISTS trg_messages_inserted_fts;
+      DROP TRIGGER IF EXISTS trg_messages_updated_fts;
+      DROP TRIGGER IF EXISTS trg_messages_deleted_fts;
+      DROP TRIGGER IF EXISTS trg_message_attachments_inserted;
+      DROP TRIGGER IF EXISTS trg_message_attachments_updated;
+      DROP TRIGGER IF EXISTS trg_message_attachments_deleted;
+      DROP TRIGGER IF EXISTS trg_message_reactions_inserted;
+      DROP TRIGGER IF EXISTS trg_message_reactions_updated;
+      DROP TRIGGER IF EXISTS trg_message_reactions_deleted;
+
+      DROP INDEX IF EXISTS idx_message_events_lookup;
+      DROP INDEX IF EXISTS idx_contact_field_values_contact;
+      DROP INDEX IF EXISTS idx_contact_handles_lookup;
+      DROP INDEX IF EXISTS idx_contact_sources_contact;
+      DROP INDEX IF EXISTS idx_conversations_lookup;
+      DROP INDEX IF EXISTS idx_messages_conversation;
+      DROP INDEX IF EXISTS idx_messages_sender;
+      DROP TABLE IF EXISTS messages_fts;
+
+      DROP TABLE IF EXISTS message_events;
+      DROP TABLE IF EXISTS participant_events;
+      DROP TABLE IF EXISTS contact_observations;
+      DROP TABLE IF EXISTS conversation_observations;
+      DROP TABLE IF EXISTS contact_field_values;
+      DROP TABLE IF EXISTS message_attachments;
+      DROP TABLE IF EXISTS timeline_events;
+      DROP TABLE IF EXISTS message_reactions;
+      DROP TABLE IF EXISTS messages;
+      DROP TABLE IF EXISTS conversation_participants;
+      DROP TABLE IF EXISTS conversations;
+      DROP TABLE IF EXISTS contact_handles;
+      DROP TABLE IF EXISTS contact_sources;
+      DROP TABLE IF EXISTS contacts;
+
+      CREATE TABLE contacts (
+        id TEXT PRIMARY KEY,
+        kind TEXT NOT NULL DEFAULT 'person',
+        name TEXT,
+        photo_url TEXT,
+        company TEXT,
+        archived INTEGER NOT NULL DEFAULT 0,
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL
+      );
+
+      CREATE TABLE contact_handles (
+        id TEXT PRIMARY KEY,
+        contact_id TEXT NOT NULL REFERENCES contacts(id) ON DELETE CASCADE,
+        type TEXT NOT NULL,
+        value TEXT NOT NULL,
+        normalized_value TEXT NOT NULL,
+        platform TEXT,
+        account_key TEXT,
+        is_deterministic INTEGER NOT NULL DEFAULT 0,
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL
+      );
+
+      CREATE TABLE contact_sources (
+        id TEXT PRIMARY KEY,
+        contact_id TEXT NOT NULL REFERENCES contacts(id) ON DELETE CASCADE,
+        platform TEXT NOT NULL,
+        account_key TEXT NOT NULL,
+        source_entity_key TEXT NOT NULL,
+        profile_url TEXT,
+        metadata_json TEXT,
+        first_seen_at INTEGER NOT NULL,
+        last_seen_at INTEGER NOT NULL,
+        UNIQUE(platform, account_key, source_entity_key)
+      );
+
+      CREATE TABLE conversations (
+        id TEXT PRIMARY KEY,
+        platform TEXT NOT NULL,
+        account_key TEXT NOT NULL,
+        source_conversation_key TEXT NOT NULL,
+        native_conversation_key TEXT,
+        type TEXT NOT NULL,
+        subtype TEXT,
+        service TEXT,
+        name TEXT,
+        topic TEXT,
+        participant_names TEXT,
+        last_message_id TEXT,
+        last_message_at INTEGER,
+        last_message_preview TEXT,
+        unread_count INTEGER NOT NULL DEFAULT 0,
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL,
+        UNIQUE(platform, account_key, source_conversation_key)
+      );
+
+      CREATE TABLE conversation_participants (
+        conversation_id TEXT NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+        contact_id TEXT NOT NULL REFERENCES contacts(id) ON DELETE CASCADE,
+        source_participant_key TEXT,
+        participant_name TEXT,
+        role TEXT,
+        is_self INTEGER NOT NULL DEFAULT 0,
+        is_active INTEGER NOT NULL DEFAULT 1,
+        joined_at INTEGER,
+        left_at INTEGER,
+        updated_at INTEGER NOT NULL,
+        PRIMARY KEY (conversation_id, contact_id, source_participant_key)
+      );
+
+      CREATE TABLE messages (
+        id TEXT PRIMARY KEY,
+        platform TEXT NOT NULL,
+        account_key TEXT NOT NULL,
+        platform_message_id TEXT NOT NULL,
+        conversation_id TEXT NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+        sender_contact_id TEXT REFERENCES contacts(id) ON DELETE SET NULL,
+        sender_source_key TEXT,
+        sender_name TEXT,
+        conversation_name TEXT,
+        sent_at INTEGER NOT NULL,
+        service TEXT,
+        status TEXT,
+        is_from_me INTEGER NOT NULL DEFAULT 0,
+        content TEXT,
+        delivered_at INTEGER,
+        read_at INTEGER,
+        edited_at INTEGER,
+        deleted_at INTEGER,
+        reply_to_message_id TEXT REFERENCES messages(id) ON DELETE SET NULL,
+        is_deleted INTEGER NOT NULL DEFAULT 0,
+        is_edited INTEGER NOT NULL DEFAULT 0,
+        attachment_count INTEGER NOT NULL DEFAULT 0,
+        reaction_count INTEGER NOT NULL DEFAULT 0,
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL,
+        UNIQUE(platform, account_key, platform_message_id)
+      );
+
+      CREATE TABLE message_attachments (
+        id TEXT PRIMARY KEY,
+        message_id TEXT NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
+        platform TEXT NOT NULL,
+        account_key TEXT NOT NULL,
+        source_attachment_key TEXT NOT NULL,
+        kind TEXT,
+        mime_type TEXT,
+        filename TEXT,
+        title TEXT,
+        local_path TEXT,
+        remote_url TEXT,
+        size_bytes INTEGER,
+        text_content TEXT,
+        metadata_json TEXT,
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL,
+        UNIQUE(platform, account_key, source_attachment_key)
+      );
+
+      CREATE TABLE message_reactions (
+        id TEXT PRIMARY KEY,
+        message_id TEXT NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
+        platform TEXT NOT NULL,
+        account_key TEXT NOT NULL,
+        source_reaction_key TEXT NOT NULL,
+        reactor_contact_id TEXT REFERENCES contacts(id) ON DELETE SET NULL,
+        reactor_source_key TEXT,
+        reactor_name TEXT,
+        emoji TEXT NOT NULL,
+        reaction_type TEXT,
+        is_active INTEGER NOT NULL DEFAULT 1,
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL,
+        UNIQUE(platform, account_key, source_reaction_key)
+      );
+
+      CREATE TABLE timeline_events (
+        id TEXT PRIMARY KEY,
+        platform TEXT NOT NULL,
+        account_key TEXT NOT NULL,
+        conversation_id TEXT NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+        source_event_key TEXT NOT NULL,
+        event_kind TEXT NOT NULL,
+        actor_contact_id TEXT REFERENCES contacts(id) ON DELETE SET NULL,
+        actor_source_key TEXT,
+        actor_name TEXT,
+        subject_contact_id TEXT REFERENCES contacts(id) ON DELETE SET NULL,
+        event_at INTEGER NOT NULL,
+        text TEXT,
+        metadata_json TEXT,
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL,
+        UNIQUE(platform, account_key, source_event_key)
+      );
+
+      CREATE VIRTUAL TABLE messages_fts USING fts5(
+        message_id UNINDEXED,
+        sender_name,
+        conversation_name,
+        participant_names,
+        attachment_text,
+        content
+      );
+
+      CREATE INDEX idx_contact_handles_lookup
+      ON contact_handles(type, normalized_value, account_key);
+
+      CREATE INDEX idx_contact_sources_contact
+      ON contact_sources(contact_id, platform, account_key);
+
+      CREATE INDEX idx_conversations_lookup
+      ON conversations(platform, account_key, source_conversation_key);
+
+      CREATE INDEX idx_messages_conversation
+      ON messages(conversation_id, sent_at);
+
+      CREATE INDEX idx_messages_sender
+      ON messages(sender_contact_id, sent_at);
+
+      CREATE INDEX idx_messages_platform_message
+      ON messages(platform, account_key, platform_message_id);
+
+      CREATE INDEX idx_message_attachments_message
+      ON message_attachments(message_id);
+
+      CREATE INDEX idx_message_reactions_message
+      ON message_reactions(message_id, is_active);
+
+      CREATE INDEX idx_timeline_events_conversation
+      ON timeline_events(conversation_id, event_at);
+
+      CREATE VIEW message_fts_source AS
+      SELECT
+        m.id AS message_id,
+        COALESCE(m.sender_name, '') AS sender_name,
+        COALESCE(m.conversation_name, '') AS conversation_name,
+        COALESCE(conv.participant_names, '') AS participant_names,
+        COALESCE((
+          SELECT GROUP_CONCAT(TRIM(COALESCE(ma.filename, '') || ' ' || COALESCE(ma.title, '') || ' ' || COALESCE(ma.text_content, '')), ' ')
+          FROM message_attachments ma
+          WHERE ma.message_id = m.id
+        ), '') AS attachment_text,
+        COALESCE(m.content, '') AS content
+      FROM messages m
+      JOIN conversations conv ON conv.id = m.conversation_id;
+
+      CREATE TRIGGER trg_messages_inserted_fts
+      AFTER INSERT ON messages
+      BEGIN
+        DELETE FROM messages_fts WHERE message_id = NEW.id;
+        INSERT INTO messages_fts (message_id, sender_name, conversation_name, participant_names, attachment_text, content)
+        SELECT message_id, sender_name, conversation_name, participant_names, attachment_text, content
+        FROM message_fts_source
+        WHERE message_id = NEW.id;
+      END;
+
+      CREATE TRIGGER trg_messages_updated_fts
+      AFTER UPDATE OF sender_name, conversation_name, content ON messages
+      BEGIN
+        DELETE FROM messages_fts WHERE message_id = NEW.id;
+        INSERT INTO messages_fts (message_id, sender_name, conversation_name, participant_names, attachment_text, content)
+        SELECT message_id, sender_name, conversation_name, participant_names, attachment_text, content
+        FROM message_fts_source
+        WHERE message_id = NEW.id;
+      END;
+
+      CREATE TRIGGER trg_messages_deleted_fts
+      AFTER DELETE ON messages
+      BEGIN
+        DELETE FROM messages_fts WHERE message_id = OLD.id;
+      END;
+
+      CREATE TRIGGER trg_message_attachments_inserted
+      AFTER INSERT ON message_attachments
+      BEGIN
+        UPDATE messages
+        SET
+          attachment_count = (
+            SELECT COUNT(*) FROM message_attachments WHERE message_id = NEW.message_id
+          ),
+          updated_at = MAX(updated_at, NEW.updated_at)
+        WHERE id = NEW.message_id;
+        DELETE FROM messages_fts WHERE message_id = NEW.message_id;
+        INSERT INTO messages_fts (message_id, sender_name, conversation_name, participant_names, attachment_text, content)
+        SELECT message_id, sender_name, conversation_name, participant_names, attachment_text, content
+        FROM message_fts_source
+        WHERE message_id = NEW.message_id;
+      END;
+
+      CREATE TRIGGER trg_message_attachments_updated
+      AFTER UPDATE ON message_attachments
+      BEGIN
+        UPDATE messages
+        SET
+          attachment_count = (
+            SELECT COUNT(*) FROM message_attachments WHERE message_id = NEW.message_id
+          ),
+          updated_at = MAX(updated_at, NEW.updated_at)
+        WHERE id = NEW.message_id;
+        DELETE FROM messages_fts WHERE message_id = NEW.message_id;
+        INSERT INTO messages_fts (message_id, sender_name, conversation_name, participant_names, attachment_text, content)
+        SELECT message_id, sender_name, conversation_name, participant_names, attachment_text, content
+        FROM message_fts_source
+        WHERE message_id = NEW.message_id;
+      END;
+
+      CREATE TRIGGER trg_message_attachments_deleted
+      AFTER DELETE ON message_attachments
+      BEGIN
+        UPDATE messages
+        SET attachment_count = (
+          SELECT COUNT(*) FROM message_attachments WHERE message_id = OLD.message_id
+        )
+        WHERE id = OLD.message_id;
+        DELETE FROM messages_fts WHERE message_id = OLD.message_id;
+        INSERT INTO messages_fts (message_id, sender_name, conversation_name, participant_names, attachment_text, content)
+        SELECT message_id, sender_name, conversation_name, participant_names, attachment_text, content
+        FROM message_fts_source
+        WHERE message_id = OLD.message_id;
+      END;
+
+      CREATE TRIGGER trg_message_reactions_inserted
+      AFTER INSERT ON message_reactions
+      BEGIN
+        UPDATE messages
+        SET reaction_count = (
+          SELECT COUNT(*) FROM message_reactions WHERE message_id = NEW.message_id AND is_active = 1
+        )
+        WHERE id = NEW.message_id;
+      END;
+
+      CREATE TRIGGER trg_message_reactions_updated
+      AFTER UPDATE ON message_reactions
+      BEGIN
+        UPDATE messages
+        SET reaction_count = (
+          SELECT COUNT(*) FROM message_reactions WHERE message_id = NEW.message_id AND is_active = 1
+        )
+        WHERE id = NEW.message_id;
+      END;
+
+      CREATE TRIGGER trg_message_reactions_deleted
+      AFTER DELETE ON message_reactions
+      BEGIN
+        UPDATE messages
+        SET reaction_count = (
+          SELECT COUNT(*) FROM message_reactions WHERE message_id = OLD.message_id AND is_active = 1
+        )
+        WHERE id = OLD.message_id;
+      END;
+
+      CREATE TRIGGER trg_contacts_name_updated
+      AFTER UPDATE OF name ON contacts
+      BEGIN
+        UPDATE messages
+        SET sender_name = NEW.name
+        WHERE sender_contact_id = NEW.id;
+
+        UPDATE conversation_participants
+        SET participant_name = NEW.name
+        WHERE contact_id = NEW.id;
+
+        UPDATE timeline_events
+        SET actor_name = NEW.name
+        WHERE actor_contact_id = NEW.id;
+
+        UPDATE message_reactions
+        SET reactor_name = NEW.name
+        WHERE reactor_contact_id = NEW.id;
+
+        UPDATE conversations
+        SET participant_names = (
+          SELECT GROUP_CONCAT(cp.participant_name, ' | ')
+          FROM conversation_participants cp
+          WHERE cp.conversation_id = conversations.id
+            AND cp.is_active = 1
+            AND cp.participant_name IS NOT NULL
+            AND cp.participant_name <> ''
+        )
+        WHERE id IN (
+          SELECT DISTINCT conversation_id
+          FROM conversation_participants
+          WHERE contact_id = NEW.id
+        );
+
+        DELETE FROM messages_fts
+        WHERE message_id IN (
+          SELECT id FROM messages WHERE sender_contact_id = NEW.id
+          UNION
+          SELECT m.id
+          FROM messages m
+          JOIN conversation_participants cp ON cp.conversation_id = m.conversation_id
+          WHERE cp.contact_id = NEW.id
+        );
+
+        INSERT INTO messages_fts (message_id, sender_name, conversation_name, participant_names, attachment_text, content)
+        SELECT message_id, sender_name, conversation_name, participant_names, attachment_text, content
+        FROM message_fts_source
+        WHERE message_id IN (
+          SELECT id FROM messages WHERE sender_contact_id = NEW.id
+          UNION
+          SELECT m.id
+          FROM messages m
+          JOIN conversation_participants cp ON cp.conversation_id = m.conversation_id
+          WHERE cp.contact_id = NEW.id
+        );
+      END;
+
+      CREATE TRIGGER trg_conversations_name_updated
+      AFTER UPDATE OF name ON conversations
+      BEGIN
+        UPDATE messages
+        SET conversation_name = NEW.name
+        WHERE conversation_id = NEW.id;
+
+        DELETE FROM messages_fts
+        WHERE message_id IN (
+          SELECT id FROM messages WHERE conversation_id = NEW.id
+        );
+
+        INSERT INTO messages_fts (message_id, sender_name, conversation_name, participant_names, attachment_text, content)
+        SELECT message_id, sender_name, conversation_name, participant_names, attachment_text, content
+        FROM message_fts_source
+        WHERE message_id IN (
+          SELECT id FROM messages WHERE conversation_id = NEW.id
+        );
+      END;
+
+      CREATE TRIGGER trg_conversation_participants_inserted
+      AFTER INSERT ON conversation_participants
+      BEGIN
+        UPDATE conversation_participants
+        SET participant_name = COALESCE(
+          (SELECT name FROM contacts WHERE id = NEW.contact_id),
+          participant_name
+        )
+        WHERE conversation_id = NEW.conversation_id
+          AND contact_id = NEW.contact_id
+          AND COALESCE(source_participant_key, '') = COALESCE(NEW.source_participant_key, '');
+
+        UPDATE conversations
+        SET participant_names = (
+          SELECT GROUP_CONCAT(cp.participant_name, ' | ')
+          FROM conversation_participants cp
+          WHERE cp.conversation_id = NEW.conversation_id
+            AND cp.is_active = 1
+            AND cp.participant_name IS NOT NULL
+            AND cp.participant_name <> ''
+        )
+        WHERE id = NEW.conversation_id;
+
+        DELETE FROM messages_fts
+        WHERE message_id IN (
+          SELECT id FROM messages WHERE conversation_id = NEW.conversation_id
+        );
+
+        INSERT INTO messages_fts (message_id, sender_name, conversation_name, participant_names, attachment_text, content)
+        SELECT message_id, sender_name, conversation_name, participant_names, attachment_text, content
+        FROM message_fts_source
+        WHERE message_id IN (
+          SELECT id FROM messages WHERE conversation_id = NEW.conversation_id
+        );
+      END;
+
+      CREATE TRIGGER trg_conversation_participants_updated
+      AFTER UPDATE ON conversation_participants
+      BEGIN
+        UPDATE conversations
+        SET participant_names = (
+          SELECT GROUP_CONCAT(cp.participant_name, ' | ')
+          FROM conversation_participants cp
+          WHERE cp.conversation_id = NEW.conversation_id
+            AND cp.is_active = 1
+            AND cp.participant_name IS NOT NULL
+            AND cp.participant_name <> ''
+        )
+        WHERE id = NEW.conversation_id;
+
+        DELETE FROM messages_fts
+        WHERE message_id IN (
+          SELECT id FROM messages WHERE conversation_id = NEW.conversation_id
+        );
+
+        INSERT INTO messages_fts (message_id, sender_name, conversation_name, participant_names, attachment_text, content)
+        SELECT message_id, sender_name, conversation_name, participant_names, attachment_text, content
+        FROM message_fts_source
+        WHERE message_id IN (
+          SELECT id FROM messages WHERE conversation_id = NEW.conversation_id
+        );
+      END;
+
+      CREATE TRIGGER trg_conversation_participants_deleted
+      AFTER DELETE ON conversation_participants
+      BEGIN
+        UPDATE conversations
+        SET participant_names = (
+          SELECT GROUP_CONCAT(cp.participant_name, ' | ')
+          FROM conversation_participants cp
+          WHERE cp.conversation_id = OLD.conversation_id
+            AND cp.is_active = 1
+            AND cp.participant_name IS NOT NULL
+            AND cp.participant_name <> ''
+        )
+        WHERE id = OLD.conversation_id;
+
+        DELETE FROM messages_fts
+        WHERE message_id IN (
+          SELECT id FROM messages WHERE conversation_id = OLD.conversation_id
+        );
+
+        INSERT INTO messages_fts (message_id, sender_name, conversation_name, participant_names, attachment_text, content)
+        SELECT message_id, sender_name, conversation_name, participant_names, attachment_text, content
+        FROM message_fts_source
+        WHERE message_id IN (
+          SELECT id FROM messages WHERE conversation_id = OLD.conversation_id
+        );
+      END;
+    `,
+  },
+  {
+    id: "0006_sync_run_indexes",
+    sql: `
+      CREATE INDEX IF NOT EXISTS idx_sync_runs_status_type_started
+      ON sync_runs(status, run_type, started_at);
+
+      CREATE INDEX IF NOT EXISTS idx_sync_runs_platform_account_status_started
+      ON sync_runs(platform, account_key, status, started_at);
+    `,
+  },
+  {
+    id: "0007_projection_trigger_cleanup",
+    sql: `
+      DROP TRIGGER IF EXISTS trg_messages_inserted_fts;
+      DROP TRIGGER IF EXISTS trg_messages_updated_fts;
+      DROP TRIGGER IF EXISTS trg_messages_deleted_fts;
+      DROP TRIGGER IF EXISTS trg_message_attachments_inserted;
+      DROP TRIGGER IF EXISTS trg_message_attachments_updated;
+      DROP TRIGGER IF EXISTS trg_message_attachments_deleted;
+      DROP TRIGGER IF EXISTS trg_message_reactions_inserted;
+      DROP TRIGGER IF EXISTS trg_message_reactions_updated;
+      DROP TRIGGER IF EXISTS trg_message_reactions_deleted;
+      DROP TRIGGER IF EXISTS trg_contacts_name_updated;
+      DROP TRIGGER IF EXISTS trg_conversations_name_updated;
+      DROP TRIGGER IF EXISTS trg_conversation_participants_inserted;
+      DROP TRIGGER IF EXISTS trg_conversation_participants_updated;
+      DROP TRIGGER IF EXISTS trg_conversation_participants_deleted;
+    `,
+  },
 ];

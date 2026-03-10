@@ -139,7 +139,7 @@ export class IMessageReader {
     }
 
     const chatIds = [...new Set(messages.map((message) => message.chatId))];
-    const chats = chatIds.map((chatId) => this.getChat(chatId)).filter((chat): chat is ImsChat => Boolean(chat));
+    const chats = this.getChats(chatIds);
     const handlesMap = new Map<number, ImsHandle>();
     for (const chat of chats) {
       for (const handle of chat.participants) {
@@ -201,13 +201,22 @@ export class IMessageReader {
       });
   }
 
-  private getChat(chatId: number): ImsChat | null {
-    const row = this.db.prepare(`
-      WITH participant_counts AS (
-        SELECT chat_id, COUNT(*) as cnt
-        FROM chat_handle_join
-        WHERE chat_id = ?
-        GROUP BY chat_id
+  private getChats(chatIds: number[]): ImsChat[] {
+    if (chatIds.length === 0) {
+      return [];
+    }
+
+    const jsonChatIds = JSON.stringify(chatIds);
+    const chatRows = this.db.prepare(`
+      WITH requested_chats AS (
+        SELECT CAST(value AS INTEGER) AS chat_id
+        FROM json_each(?)
+      ),
+      participant_counts AS (
+        SELECT chj.chat_id, COUNT(*) as cnt
+        FROM chat_handle_join chj
+        WHERE chj.chat_id IN (SELECT chat_id FROM requested_chats)
+        GROUP BY chj.chat_id
       )
       SELECT
         c.ROWID as id,
@@ -216,34 +225,58 @@ export class IMessageReader {
         COALESCE(pc.cnt, 0) > 1 as is_group
       FROM chat c
       LEFT JOIN participant_counts pc ON pc.chat_id = c.ROWID
-      WHERE c.ROWID = ?
-    `).get(chatId, chatId) as {
+      WHERE c.ROWID IN (SELECT chat_id FROM requested_chats)
+    `).all(jsonChatIds) as Array<{
       id: number;
       identifier: string;
       name: string | null;
       is_group: number;
-    } | undefined;
+    }>;
 
-    if (!row) return null;
+    const participantRows = this.db.prepare(`
+      SELECT
+        chj.chat_id as chat_id,
+        h.ROWID as id,
+        h.id as identifier,
+        h.service as service
+      FROM chat_handle_join chj
+      INNER JOIN handle h ON h.ROWID = chj.handle_id
+      WHERE chj.chat_id IN (
+        SELECT CAST(value AS INTEGER)
+        FROM json_each(?)
+      )
+    `).all(jsonChatIds) as Array<{
+      chat_id: number;
+      id: number;
+      identifier: string;
+      service: string;
+    }>;
 
-    const participants = this.db.prepare(`
-      SELECT h.ROWID as id, h.id as identifier, h.service
-      FROM handle h
-      INNER JOIN chat_handle_join chj ON chj.handle_id = h.ROWID
-      WHERE chj.chat_id = ?
-    `).all(chatId) as Array<{ id: number; identifier: string; service: string }>;
-
-    return {
-      id: row.id,
-      identifier: row.identifier,
-      displayName: row.name ?? null,
-      isGroup: row.is_group === 1,
-      participants: participants.map((participant) => ({
+    const participantsByChatId = new Map<number, ImsHandle[]>();
+    for (const participant of participantRows) {
+      const existing = participantsByChatId.get(participant.chat_id) ?? [];
+      existing.push({
         id: participant.id,
         identifier: normalizeChatDbHandleIdentifier(participant.identifier),
         service: participant.service,
-      })),
-    };
+      });
+      participantsByChatId.set(participant.chat_id, existing);
+    }
+
+    const chatsById = new Map<number, ImsChat>();
+    for (const row of chatRows) {
+      chatsById.set(row.id, {
+        id: row.id,
+        identifier: row.identifier,
+        displayName: row.name ?? null,
+        isGroup: row.is_group === 1,
+        participants: participantsByChatId.get(row.id) ?? [],
+      });
+    }
+
+    return chatIds
+      .map((chatId) => chatsById.get(chatId) ?? null)
+      .filter((chat): chat is ImsChat => Boolean(chat));
   }
 
   private getReactionsForGuids(guids: string[]): Map<string, ImsReaction[]> {

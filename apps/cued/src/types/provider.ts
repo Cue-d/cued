@@ -119,6 +119,7 @@ export const RAW_EVENT_ENTITY_KIND_VALUES = [
   "message",
   "reaction",
   "participant",
+  "timeline_event",
 ] as const;
 export type RawEventEntityKind = typeof RAW_EVENT_ENTITY_KIND_VALUES[number];
 
@@ -200,16 +201,23 @@ export interface ContactObservationPayload {
   sourceEntityKey: string;
   fields: ContactFields;
   handles: ContactHandleInput[];
+  sourceProfileUrl?: string | null;
 }
 
 export interface ConversationParticipantInput {
   sourceEntityKey: string;
+  isSelf?: boolean;
 }
 
 export interface ConversationObservationPayload {
   sourceConversationKey: string;
   conversationType: ConversationType;
   displayName?: string | null;
+  nativeConversationKey?: string | null;
+  subtype?: string | null;
+  service?: string | null;
+  topic?: string | null;
+  unreadCount?: number | null;
   participants: ConversationParticipantInput[];
 }
 
@@ -218,16 +226,17 @@ export interface MessagePayload {
   sourceConversationKey: string;
   senderSourceKey: string | null;
   sentAt: number;
-  contentOriginal: string;
-  contentCurrent?: string;
-  statusDelivery?: string | null;
+  content: string;
+  service?: string | null;
+  status?: string | null;
+  isFromMe?: boolean;
   deliveredAt?: number | null;
   readAt?: number | null;
   editedAt?: number | null;
   deletedAt?: number | null;
+  replyToSourceMessageKey?: string | null;
   isEdited?: boolean;
   isDeleted?: boolean;
-  hasAttachments?: boolean;
   attachments?: Array<Record<string, unknown>>;
 }
 
@@ -236,8 +245,20 @@ export interface ReactionPayload {
   sourceConversationKey: string;
   reactorSourceKey: string | null;
   emoji: string;
+  reactionType?: string | null;
   timestamp: number;
   isActive: boolean;
+}
+
+export interface TimelineEventPayload {
+  sourceEventKey: string;
+  sourceConversationKey: string;
+  eventKind: string;
+  actorSourceKey?: string | null;
+  subjectSourceKey?: string | null;
+  eventAt: number;
+  text?: string | null;
+  metadata?: Record<string, unknown>;
 }
 
 export type RawEventPayload =
@@ -245,6 +266,7 @@ export type RawEventPayload =
   | ConversationObservationPayload
   | MessagePayload
   | ReactionPayload
+  | TimelineEventPayload
   | Record<string, unknown>;
 
 export interface SourceAccountInput {
