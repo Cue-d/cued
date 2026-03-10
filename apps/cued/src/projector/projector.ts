@@ -24,7 +24,7 @@ import type {
 
 type LocalDbExecutor = Pick<
   LocalDrizzleDatabase,
-  "all" | "delete" | "insert" | "run" | "select" | "update"
+  "all" | "delete" | "get" | "insert" | "run" | "select" | "update"
 >;
 
 type RawEventRow = {
@@ -91,6 +91,68 @@ function normalizeHandle(type: string, value: string): string {
     default:
       return trimmed.toLowerCase();
   }
+}
+
+function inferHandleFromSourceEntityKey(
+  sourceEntityKey: string | null | undefined,
+): { type: string; normalizedValue: string } | null {
+  if (!sourceEntityKey || !sourceEntityKey.startsWith("imessage:")) {
+    return null;
+  }
+
+  const identifier = sourceEntityKey.slice("imessage:".length).trim();
+  if (identifier.length === 0) {
+    return null;
+  }
+
+  const type = identifier.includes("@") ? "email" : "phone";
+  return {
+    type,
+    normalizedValue: normalizeHandle(type, identifier),
+  };
+}
+
+function findProjectedContactIdBySourceKey(
+  conn: LocalDbExecutor,
+  sourceEntityKey: string,
+): string | null {
+  const messageRow = conn.get<{ contact_id: string }>(sql`
+    SELECT sender_contact_id AS contact_id
+    FROM messages
+    WHERE sender_source_key = ${sourceEntityKey}
+      AND sender_contact_id IS NOT NULL
+    LIMIT 1
+  `);
+  if (messageRow?.contact_id) {
+    return messageRow.contact_id;
+  }
+
+  const participantRow = conn.get<{ contact_id: string }>(sql`
+    SELECT contact_id
+    FROM conversation_participants
+    WHERE source_participant_key = ${sourceEntityKey}
+    LIMIT 1
+  `);
+  return participantRow?.contact_id ?? null;
+}
+
+function findProjectedContactIdByKnownHandleAliases(
+  conn: LocalDbExecutor,
+  deterministicHandles: Array<{ type: string; normalizedValue: string }>,
+): string | null {
+  for (const handle of deterministicHandles) {
+    if (handle.type !== "phone" && handle.type !== "email") {
+      continue;
+    }
+
+    const sourceEntityKey = `imessage:${handle.normalizedValue}`;
+    const contactId = findProjectedContactIdBySourceKey(conn, sourceEntityKey);
+    if (contactId) {
+      return contactId;
+    }
+  }
+
+  return null;
 }
 
 function normalizeText(value: unknown): string | null {
@@ -315,6 +377,17 @@ function resolveOrEnsureContact(
     ?? null;
   if (existingContactId) {
     return existingContactId;
+  }
+
+  const inferredHandle = inferHandleFromSourceEntityKey(sourceEntityKey);
+  if (inferredHandle) {
+    const handleContactId = cache.deterministicHandleMap.get(
+      `${inferredHandle.type}:${inferredHandle.normalizedValue}`,
+    ) ?? null;
+    if (handleContactId) {
+      cache.sourceContactMap.set(directKey, handleContactId);
+      return handleContactId;
+    }
   }
 
   return ensureContactStub(conn, cache, platform, accountKey, sourceEntityKey, observedAt);
@@ -574,12 +647,18 @@ function projectContactObservation(
   const existingContactId = deterministicHandles
     .map((handle) => cache.deterministicHandleMap.get(`${handle.type}:${handle.normalizedValue}`) ?? null)
     .find((contactId): contactId is string => Boolean(contactId));
+  const existingAliasedContactId = existingContactId == null
+    ? findProjectedContactIdByKnownHandleAliases(conn, deterministicHandles)
+    : null;
 
   const preferredIdentity = deterministicHandles[0]
     ? `${deterministicHandles[0].type}:${deterministicHandles[0].normalizedValue}`
     : sourceKey;
 
-  const contactId = existingSourceContactId ?? existingContactId ?? hashId("contact", preferredIdentity);
+  const contactId = existingSourceContactId
+    ?? existingContactId
+    ?? existingAliasedContactId
+    ?? hashId("contact", preferredIdentity);
   cache.sourceContactMap.set(sourceKey, contactId);
   for (const handle of deterministicHandles) {
     cache.deterministicHandleMap.set(`${handle.type}:${handle.normalizedValue}`, contactId);
@@ -1145,7 +1224,14 @@ function refreshConversationNamesForIds(
       UPDATE conversations
       SET name = participant_names
       WHERE id IN (${sqlValueList(chunk)})
-        AND (name IS NULL OR name = '' OR name = source_conversation_key)
+        AND (
+          name IS NULL
+          OR name = ''
+          OR name = source_conversation_key
+          OR name GLOB '+*'
+          OR name LIKE 'imessage:%'
+          OR name LIKE '%@%'
+        )
         AND type = 'dm'
         AND participant_names IS NOT NULL
         AND participant_names <> ''
@@ -1431,13 +1517,13 @@ function projectRangeInternal(
     );
   }
 
+  const currentProjectionState = db.getProjectionState();
   const rawEvents = db.listRawEventsInRange(input.startRowId, input.endRowId, input.limit);
   if (rawEvents.length === 0) {
-    const projection = db.getProjectionState();
     return summarizeResult(
       db,
       0,
-      projection.projection_watermark,
+      currentProjectionState.projection_watermark,
       input.startRowId,
       input.endRowId,
       true,
@@ -1448,16 +1534,20 @@ function projectRangeInternal(
   const appliedEndRowId = rawEvents[rawEvents.length - 1]!.rowid;
   const completed = appliedEndRowId >= input.endRowId;
   const nextStartRowId = completed ? null : appliedEndRowId + 1;
+  const deferredProjectionWatermark = Math.max(
+    currentProjectionState.projection_watermark,
+    appliedEndRowId,
+  );
   projectEventBatch(db, {
     mode: input.mode,
     rawEvents,
-    projectionWatermark: input.mode === "realtime" ? null : appliedEndRowId,
+    projectionWatermark: input.mode === "realtime" ? null : deferredProjectionWatermark,
     lastRebuildAt: input.mode === "rebuild" ? Date.now() : undefined,
   });
 
   const projectionWatermark = input.mode === "realtime"
     ? db.getProjectionState().projection_watermark
-    : appliedEndRowId;
+    : deferredProjectionWatermark;
 
   return summarizeResult(
     db,

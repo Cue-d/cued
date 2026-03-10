@@ -538,6 +538,153 @@ describe("projector", () => {
     db.close();
   });
 
+  it("replays older contacts observations onto existing imessage stubs without rewinding the watermark", () => {
+    const db = createDb();
+
+    db.insertRawEvent({
+      id: "contacts-ava-phone",
+      platform: "contacts",
+      accountKey: "local",
+      entityKind: "contact",
+      eventKind: "observed",
+      observedAt: 1,
+      dedupeKey: "contacts:ava-phone",
+      payload: {
+        sourceEntityKey: "contacts:ava",
+        fields: { display_name: "Ava Chen" },
+        handles: [{ type: "phone", value: "+1 (555) 123-4567", deterministic: true }],
+      },
+      sourceVersion: "contacts-v1",
+    });
+    db.insertRawEvent({
+      id: "imessage-conversation-ava",
+      platform: "imessage",
+      accountKey: "default",
+      entityKind: "conversation",
+      eventKind: "observed",
+      observedAt: 2,
+      dedupeKey: "imessage:conversation:ava",
+      payload: {
+        sourceConversationKey: "chat-ava",
+        conversationType: "dm",
+        service: "iMessage",
+        displayName: "+15551234567",
+        participants: [{ sourceEntityKey: "imessage:+15551234567" }],
+      },
+      sourceVersion: "imessage-v1",
+    });
+    db.insertRawEvent({
+      id: "imessage-message-ava",
+      platform: "imessage",
+      accountKey: "default",
+      entityKind: "message",
+      eventKind: "message_created",
+      observedAt: 3,
+      dedupeKey: "imessage:message:ava",
+      payload: {
+        sourceMessageKey: "message-ava",
+        sourceConversationKey: "chat-ava",
+        senderSourceKey: "imessage:+15551234567",
+        sentAt: 3,
+        content: "hello from imessage",
+        service: "iMessage",
+        isFromMe: false,
+      },
+      sourceVersion: "imessage-v1",
+    });
+
+    expect(projectDeferredRange(db, {
+      startRowId: 2,
+      endRowId: 3,
+    })).toEqual({
+      contacts: 1,
+      conversations: 1,
+      messages: 1,
+      rawEvents: 3,
+      appliedRawEvents: 2,
+      projectionWatermark: 3,
+      completed: true,
+      nextStartRowId: null,
+      rangeStartRowId: 2,
+      rangeEndRowId: 3,
+    });
+
+    const beforeReplay = db.orm().get<{
+      name: string | null;
+      participant_names: string | null;
+      sender_name: string | null;
+      conversation_name: string | null;
+    }>(sql`
+      SELECT
+        c.name,
+        conv.participant_names,
+        msg.sender_name,
+        msg.conversation_name
+      FROM contacts c
+      JOIN conversation_participants cp ON cp.contact_id = c.id
+      JOIN conversations conv ON conv.id = cp.conversation_id
+      JOIN messages msg ON msg.sender_contact_id = c.id
+      WHERE cp.source_participant_key = 'imessage:+15551234567'
+    `);
+    expect(beforeReplay).toEqual({
+      name: null,
+      participant_names: null,
+      sender_name: null,
+      conversation_name: "+15551234567",
+    });
+
+    expect(projectDeferredRange(db, {
+      startRowId: 1,
+      endRowId: 1,
+    })).toEqual({
+      contacts: 1,
+      conversations: 1,
+      messages: 1,
+      rawEvents: 3,
+      appliedRawEvents: 1,
+      projectionWatermark: 3,
+      completed: true,
+      nextStartRowId: null,
+      rangeStartRowId: 1,
+      rangeEndRowId: 1,
+    });
+
+    const afterReplay = db.orm().get<{
+      name: string | null;
+      participant_names: string | null;
+      sender_name: string | null;
+      conversation_name: string | null;
+      handle_count: number;
+      source_count: number;
+      contact_count: number;
+    }>(sql`
+      SELECT
+        c.name,
+        conv.participant_names,
+        msg.sender_name,
+        msg.conversation_name,
+        (SELECT COUNT(*) FROM contact_handles h WHERE h.contact_id = c.id) AS handle_count,
+        (SELECT COUNT(*) FROM contact_sources s WHERE s.contact_id = c.id) AS source_count,
+        (SELECT COUNT(*) FROM contacts) AS contact_count
+      FROM contacts c
+      JOIN conversation_participants cp ON cp.contact_id = c.id
+      JOIN conversations conv ON conv.id = cp.conversation_id
+      JOIN messages msg ON msg.sender_contact_id = c.id
+      WHERE cp.source_participant_key = 'imessage:+15551234567'
+    `);
+    expect(afterReplay).toEqual({
+      name: "Ava Chen",
+      participant_names: "Ava Chen",
+      sender_name: "Ava Chen",
+      conversation_name: "Ava Chen",
+      handle_count: 1,
+      source_count: 1,
+      contact_count: 1,
+    });
+
+    db.close();
+  });
+
   it("resolves replies, projects attachments, and propagates renamed names", () => {
     const db = createDb();
 
