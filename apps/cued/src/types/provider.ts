@@ -1,13 +1,10 @@
 export const PLATFORM_VALUES = [
   "contacts",
-  "discord",
   "fixture",
   "imessage",
   "linkedin",
   "signal",
   "slack",
-  "telegram",
-  "twitter",
   "whatsapp",
 ] as const;
 export type Platform = typeof PLATFORM_VALUES[number];
@@ -23,11 +20,6 @@ export const PLATFORM_DEFINITIONS = {
   contacts: {
     adapter: true,
     defaultAccountKey: "local",
-    requestableIntegration: false,
-  },
-  discord: {
-    adapter: false,
-    defaultAccountKey: "default",
     requestableIntegration: false,
   },
   fixture: {
@@ -47,7 +39,7 @@ export const PLATFORM_DEFINITIONS = {
     requestableOrder: 2,
   },
   signal: {
-    adapter: false,
+    adapter: true,
     defaultAccountKey: "default",
     requestableIntegration: true,
     requestableOrder: 5,
@@ -58,19 +50,8 @@ export const PLATFORM_DEFINITIONS = {
     requestableIntegration: true,
     requestableOrder: 1,
   },
-  telegram: {
-    adapter: false,
-    defaultAccountKey: "default",
-    requestableIntegration: false,
-  },
-  twitter: {
-    adapter: false,
-    defaultAccountKey: "default",
-    requestableIntegration: false,
-    requestableOrder: 3,
-  },
   whatsapp: {
-    adapter: false,
+    adapter: true,
     defaultAccountKey: "default",
     requestableIntegration: true,
     requestableOrder: 4,
@@ -144,6 +125,7 @@ export const INTEGRATION_AUTH_STATE_VALUES = [
   "native_helper_missing",
   "needs_full_disk_access",
   "not_determined",
+  "outdated",
   "requested",
   "unknown",
 ] as const;

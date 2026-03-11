@@ -7,7 +7,7 @@ declare const localStorage: {
   getItem(key: string): string | null;
 };
 
-type Platform = "slack" | "linkedin" | "twitter";
+type Platform = "slack" | "linkedin";
 type AuthState = "authenticated" | "failed" | "cancelled";
 
 type WorkerArgs = {
@@ -56,7 +56,7 @@ function parseArgs(argv: string[]): WorkerArgs {
   }
 
   const platform = values.get("--platform");
-  if (platform !== "slack" && platform !== "linkedin" && platform !== "twitter") {
+  if (platform !== "slack" && platform !== "linkedin") {
     throw new Error(`Unsupported chromium auth platform: ${platform ?? "missing"}`);
   }
 
@@ -107,13 +107,6 @@ function isSlackWorkspaceUrl(url: string): boolean {
 
 function isLinkedInAuthPage(url: string): boolean {
   return url.includes("/login") || url.includes("/authwall") || url.includes("/checkpoint");
-}
-
-function isTwitterAuthPage(url: string): boolean {
-  return url.includes("/login")
-    || url.includes("/i/flow/login")
-    || url.includes("/account/access")
-    || url.includes("/account/login_challenge");
 }
 
 async function extractSlackAuth(context: BrowserContext, page: Page, accountKey: string): Promise<ExtractedAuth | null> {
@@ -214,44 +207,6 @@ async function extractLinkedInAuth(context: BrowserContext, page: Page, accountK
   };
 }
 
-async function extractTwitterAuth(context: BrowserContext, page: Page, accountKey: string): Promise<ExtractedAuth | null> {
-  if (isTwitterAuthPage(page.url())) {
-    return null;
-  }
-
-  const cookies = await context.cookies(["https://x.com", "https://twitter.com"]);
-  const authToken = cookies.find((cookie) => cookie.name === "auth_token" && (domainMatches(cookie, "x.com") || domainMatches(cookie, "twitter.com")));
-  const ct0 = cookies.find((cookie) => cookie.name === "ct0" && (domainMatches(cookie, "x.com") || domainMatches(cookie, "twitter.com")));
-  if (!authToken?.value || !ct0?.value) {
-    return null;
-  }
-
-  return {
-    keychainService: "dev.cued.auth.twitter",
-    keychainAccount: accountKey,
-    secret: {
-      cookies: cookies
-        .filter((cookie) => domainMatches(cookie, "x.com") || domainMatches(cookie, "twitter.com"))
-        .map((cookie) => ({
-          name: cookie.name,
-          value: cookie.value,
-          domain: cookie.domain,
-          path: cookie.path,
-          expires: cookie.expires,
-          httpOnly: cookie.httpOnly,
-          secure: cookie.secure,
-          sameSite: cookie.sameSite,
-        })),
-      savedAt: Date.now(),
-    },
-    resultSummary: {
-      provider: "twitter",
-      cookieCount: cookies.length,
-      currentUrl: page.url(),
-    },
-  };
-}
-
 async function maybeExtractAuth(
   args: WorkerArgs,
   context: BrowserContext,
@@ -262,8 +217,6 @@ async function maybeExtractAuth(
       return extractSlackAuth(context, page, args.accountKey);
     case "linkedin":
       return extractLinkedInAuth(context, page, args.accountKey);
-    case "twitter":
-      return extractTwitterAuth(context, page, args.accountKey);
   }
 }
 

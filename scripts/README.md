@@ -1,6 +1,6 @@
 # Scripts
 
-Utility scripts for one-off data sync/testing workflows.
+Local build and macOS permission helpers for the headless Cued runtime.
 
 ## macOS Permissions
 
@@ -17,12 +17,4 @@ This bootstrap script will:
 
 macOS does not allow scripts or apps to self-grant Full Disk Access or Accessibility. The script opens the correct pane and prints the manual steps instead.
 
-## Twitter Commands
-
-```bash
-pnpm twitter:save-cookies
-pnpm twitter:scrape-contacts
-pnpm twitter:sync-contacts
-pnpm twitter:test-messages
-pnpm twitter:trigger-actions
-```
+Other files in this directory are invoked directly from the root workspace scripts or local packaging flow.

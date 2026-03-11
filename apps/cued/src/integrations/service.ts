@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { existsSync } from "node:fs";
+import { existsSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { CUED_BROWSER_DIR } from "../config.js";
 import { DEFAULT_CHAT_DB_PATH, IMessageReader } from "../adapters/imessage/reader.js";
@@ -20,6 +20,17 @@ import {
   REQUESTABLE_INTEGRATION_PLATFORM_VALUES,
 } from "../types/provider.js";
 import { resolveMacOSNativeBinary } from "../workers/native-binary.js";
+import {
+  getSignalConfigDir,
+  inspectSignalCli,
+  isSignalCliVersionSupported,
+  readSignalLinkedAccount,
+} from "./signal-cli.js";
+import {
+  getWhatsAppStoreDir,
+  inspectWhatsAppHelper,
+  readWhatsAppHelperStatus,
+} from "./whatsapp-helper.js";
 import { importSlackDesktopAuth } from "./slack-desktop-auth.js";
 
 export interface IntegrationStateSummary {
@@ -117,14 +128,15 @@ const REQUESTABLE_INTEGRATIONS: Record<string, RequestableIntegrationConfig> = {
     },
   },
   signal: {
-    connectionKind: "qr-link",
+    connectionKind: "local-cli",
     runtimeKind: "qr_native",
     launchStrategy: "qr-native",
     launchTarget: null,
     displayName: "Signal",
     metadata: {
-      authCapture: "qr_pairing",
+      authCapture: "signal_cli_link",
       pairingKind: "native_qr",
+      helper: "signal-cli",
     },
   },
 };
@@ -135,8 +147,7 @@ function now(): number {
 
 export function normalizeIntegrationPlatform(platform: string): Platform {
   const normalized = platform.trim().toLowerCase();
-  const aliased = normalized === "x" ? "twitter" : normalized;
-  const parsed = parsePlatform(aliased);
+  const parsed = parsePlatform(normalized);
   if (!parsed) {
     throw new Error(`Unsupported integration platform: ${platform}`);
   }
@@ -249,6 +260,123 @@ function buildLocalIntegrationStates(): ManagedIntegrationState[] {
       artifactPaths: existsSync(chatDbPath) ? [chatDbPath] : [],
     },
   ];
+}
+
+async function buildSignalManagedState(
+  existing: IntegrationStateRow | null,
+): Promise<ManagedIntegrationState | null> {
+  const accountKey = existing?.account_key ?? "default";
+  const configDir = getSignalConfigDir(accountKey);
+  const inspected = await inspectSignalCli();
+  const linkedAccount = readSignalLinkedAccount(configDir);
+  const supportedByDaemon = new Set<string>(listAdapterPlatforms()).has("signal");
+
+  let authState: IntegrationAuthState;
+  if (!inspected.cliPath) {
+    authState = existing?.auth_state === "cancelled" ? "cancelled" : "missing";
+  } else if (!isSignalCliVersionSupported(inspected.version)) {
+    authState = existing?.auth_state === "cancelled" ? "cancelled" : "outdated";
+  } else if (linkedAccount) {
+    authState = "authenticated";
+  } else if (existing?.auth_state === "requested" || existing?.auth_state === "in_progress") {
+    authState = existing.auth_state;
+  } else if (existing?.auth_state === "cancelled") {
+    authState = "cancelled";
+  } else {
+    authState = "blocked";
+  }
+
+  return {
+    platform: "signal",
+    accountKey,
+    displayName: "Signal",
+    authState,
+    enabled: existing ? existing.enabled === 1 : true,
+    connectionKind: "local-cli",
+    runtimeKind: "qr_native",
+    syncCapable: authState === "authenticated" && supportedByDaemon,
+    launchStrategy: "qr-native",
+    launchTarget: null,
+    importedFrom: existing?.imported_from ?? "local-cli",
+    artifactPaths: [configDir],
+    metadata: {
+      authCapture: "signal_cli_link",
+      pairingKind: "native_qr",
+      helper: "signal-cli",
+      authManagedBy: "signal-cli-runtime",
+      runtimeKind: "qr_native",
+      configDir,
+      signalCliPath: inspected.cliPath,
+      signalCliVersion: inspected.version?.raw ?? null,
+      signalLinkedAccount: linkedAccount,
+      signalVersionSupported: isSignalCliVersionSupported(inspected.version),
+      lastVerifiedAt: now(),
+    },
+  };
+}
+
+async function buildWhatsAppManagedState(
+  existing: IntegrationStateRow | null,
+): Promise<ManagedIntegrationState | null> {
+  const accountKey = existing?.account_key ?? "default";
+  const storeDir = getWhatsAppStoreDir(accountKey);
+  const inspected = inspectWhatsAppHelper();
+  const supportedByDaemon = new Set<string>(listAdapterPlatforms()).has("whatsapp");
+
+  let authState: IntegrationAuthState;
+  let accountJid: string | null = null;
+  let pushName: string | null = null;
+  let helperVersion = inspected.version;
+
+  if (!inspected.helperPath) {
+    authState = existing?.auth_state === "cancelled" ? "cancelled" : "missing";
+  } else {
+    try {
+      const status = await readWhatsAppHelperStatus(storeDir);
+      accountJid = status.accountJid;
+      pushName = status.pushName;
+      helperVersion = status.helperVersion ?? helperVersion;
+      if (status.authenticated) {
+        authState = "authenticated";
+      } else if (existing?.auth_state === "requested" || existing?.auth_state === "in_progress") {
+        authState = existing.auth_state;
+      } else if (existing?.auth_state === "cancelled") {
+        authState = "cancelled";
+      } else {
+        authState = "blocked";
+      }
+    } catch {
+      authState = existing?.auth_state === "cancelled" ? "cancelled" : "blocked";
+    }
+  }
+
+  return {
+    platform: "whatsapp",
+    accountKey,
+    displayName: "WhatsApp",
+    authState,
+    enabled: existing ? existing.enabled === 1 : true,
+    connectionKind: "qr-link",
+    runtimeKind: "qr_native",
+    syncCapable: authState === "authenticated" && supportedByDaemon,
+    launchStrategy: "qr-native",
+    launchTarget: null,
+    importedFrom: existing?.imported_from ?? "bundled-helper",
+    artifactPaths: [storeDir],
+    metadata: {
+      authCapture: "qr_pairing",
+      pairingKind: "native_qr",
+      helper: "cued-whatsapp-helper",
+      authManagedBy: "whatsapp-helper-runtime",
+      runtimeKind: "qr_native",
+      storeDir,
+      whatsappHelperPath: inspected.helperPath,
+      whatsappHelperVersion: helperVersion,
+      whatsappAccountJid: accountJid,
+      whatsappPushName: pushName,
+      lastVerifiedAt: now(),
+    },
+  };
 }
 
 function resolveAccountKey(
@@ -408,10 +536,48 @@ export async function refreshManagedIntegrationStates(db: CuedDatabase): Promise
   }
 
   const importedDesktop = await importSlackDesktopAuth(db);
+  const existingSignal = db.listIntegrationStates().find((row) => row.platform === "signal") ?? null;
+  const signalManaged = await buildSignalManagedState(existingSignal);
+  if (signalManaged) {
+    db.upsertIntegrationState({
+      platform: signalManaged.platform,
+      accountKey: signalManaged.accountKey,
+      displayName: signalManaged.displayName,
+      authState: signalManaged.authState,
+      enabled: signalManaged.enabled,
+      connectionKind: signalManaged.connectionKind,
+      syncCapable: signalManaged.syncCapable,
+      launchStrategy: signalManaged.launchStrategy ?? null,
+      launchTarget: signalManaged.launchTarget ?? null,
+      importedFrom: signalManaged.importedFrom,
+      artifactPaths: signalManaged.artifactPaths,
+      metadata: signalManaged.metadata,
+    });
+  }
+  const existingWhatsApp = db.listIntegrationStates().find((row) => row.platform === "whatsapp") ?? null;
+  const whatsAppManaged = await buildWhatsAppManagedState(existingWhatsApp);
+  if (whatsAppManaged) {
+    db.upsertIntegrationState({
+      platform: whatsAppManaged.platform,
+      accountKey: whatsAppManaged.accountKey,
+      displayName: whatsAppManaged.displayName,
+      authState: whatsAppManaged.authState,
+      enabled: whatsAppManaged.enabled,
+      connectionKind: whatsAppManaged.connectionKind,
+      syncCapable: whatsAppManaged.syncCapable,
+      launchStrategy: whatsAppManaged.launchStrategy ?? null,
+      launchTarget: whatsAppManaged.launchTarget ?? null,
+      importedFrom: whatsAppManaged.importedFrom,
+      artifactPaths: whatsAppManaged.artifactPaths,
+      metadata: whatsAppManaged.metadata,
+    });
+  }
 
   return {
     refreshed: managed.length
-      + importedDesktop.filter((entry) => entry.imported).length,
+      + importedDesktop.filter((entry) => entry.imported).length
+      + (signalManaged ? 1 : 0)
+      + (whatsAppManaged ? 1 : 0),
     integrations: listIntegrationStates(db),
   };
 }
@@ -443,6 +609,12 @@ function ensureRequestableIntegrationState(
   const browserProfileDir = requested.runtimeKind === "chromium"
     ? getChromiumProfileDir(normalized, resolvedAccountKey)
     : null;
+  const signalConfigDir = normalized === "signal"
+    ? getSignalConfigDir(resolvedAccountKey)
+    : null;
+  const whatsappStoreDir = normalized === "whatsapp"
+    ? getWhatsAppStoreDir(resolvedAccountKey)
+    : null;
 
   const supportedByDaemon = new Set<string>(listAdapterPlatforms()).has(normalized);
   db.upsertIntegrationState({
@@ -462,10 +634,16 @@ function ensureRequestableIntegrationState(
       ...existingMetadata,
       ...(requested.metadata ?? {}),
       supportedByDaemon,
-      authManagedBy: requested.runtimeKind === "chromium" ? "chromium-runtime" : "native-qr-runtime",
+      authManagedBy: normalized === "signal"
+        ? "signal-cli-runtime"
+        : requested.runtimeKind === "chromium"
+          ? "chromium-runtime"
+          : "native-qr-runtime",
       requestedAt: existingMetadata.requestedAt ?? now(),
       runtimeKind: requested.runtimeKind,
       browserProfileDir,
+      configDir: signalConfigDir,
+      storeDir: whatsappStoreDir,
     },
   });
 
@@ -657,6 +835,13 @@ export function disconnectIntegration(
       disconnectedAt: now(),
     },
   });
+
+  if (integration.platform === "whatsapp") {
+    const storeDir = typeof integration.metadata?.storeDir === "string"
+      ? integration.metadata.storeDir
+      : getWhatsAppStoreDir(integration.accountKey);
+    rmSync(storeDir, { recursive: true, force: true });
+  }
 
   return getIntegrationSummary(db, integration.platform, integration.accountKey);
 }

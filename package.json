@@ -12,8 +12,7 @@
     "permissions:macos": "bash scripts/request-macos-access.sh",
     "sign:notarize:macos": "bash scripts/sign-and-notarize-cued-app.sh",
     "typecheck": "dotenv -e .env.local -- turbo typecheck",
-    "test": "dotenv -e .env.local -- turbo test",
-    "verify:avatars": "bash scripts/verify-avatar-runtime.sh"
+    "test": "dotenv -e .env.local -- turbo test"
   },
   "devDependencies": {
     "@types/node": "^25.0.9",
@@ -28,8 +27,6 @@
     "onlyBuiltDependencies": [
       "better-sqlite3",
       "node-mac-contacts",
-      "electron",
-      "electron-winstaller",
       "esbuild",
       "sharp",
       "unrs-resolver"

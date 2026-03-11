@@ -84,6 +84,12 @@ struct AuthOpenOptions {
   var dbPath = ""
 }
 
+struct AuthQROptions {
+  var title = ""
+  var subtitle = ""
+  var uri = ""
+}
+
 struct WatchEvent: Encodable {
   let event: String
   let timestamp: Int
@@ -131,7 +137,7 @@ enum CLIError: Error, LocalizedError {
   var errorDescription: String? {
     switch self {
     case .invalidCommand:
-      return "usage: CuedNative contacts dump|status|watch | CuedNative imessage dump [--db-path PATH] [--after-rowid N] [--limit N] | CuedNative imessage watch [--db-path PATH] | CuedNative browser open --url URL | CuedNative browser close --url-prefix PREFIX | CuedNative auth open --platform PLATFORM --account-key KEY --session-id ID --db-path PATH | CuedNative --menu-bar"
+      return "usage: CuedNative contacts dump|status|watch | CuedNative imessage dump [--db-path PATH] [--after-rowid N] [--limit N] | CuedNative imessage watch [--db-path PATH] | CuedNative browser open --url URL | CuedNative browser close --url-prefix PREFIX | CuedNative auth open --platform PLATFORM --account-key KEY --session-id ID --db-path PATH | CuedNative auth qr --title TITLE --subtitle TEXT --uri URI | CuedNative --menu-bar"
     case .invalidOption(let message):
       return message
     case .contactsAccessDenied:
@@ -164,6 +170,10 @@ struct NativeAuthResult: Encodable {
   let keychainAccount: String?
   let resultSummary: [String: String]?
   let errorSummary: String?
+}
+
+struct NativeQRResult: Encodable {
+  let state: String
 }
 
 final class ContactsAccessState: @unchecked Sendable {
@@ -265,6 +275,9 @@ struct CuedNativeCLI {
     case ("auth", "open"):
       let options = try parseAuthOpenOptions(Array(arguments.dropFirst(2)))
       try writeJSON(runManagedAuth(options: options))
+    case ("auth", "qr"):
+      let options = try parseAuthQROptions(Array(arguments.dropFirst(2)))
+      try writeJSON(runAuthQRCode(options: options))
     case ("browser", "open"):
       let url = try parseBrowserOpenURL(Array(arguments.dropFirst(2)))
       try writeJSON(openBrowser(urlString: url))
@@ -409,6 +422,45 @@ struct CuedNativeCLI {
     return options
   }
 
+  private static func parseAuthQROptions(_ arguments: [String]) throws -> AuthQROptions {
+    var options = AuthQROptions()
+    var index = 0
+
+    while index < arguments.count {
+      switch arguments[index] {
+      case "--title":
+        index += 1
+        guard index < arguments.count else {
+          throw CLIError.invalidOption("--title requires a value")
+        }
+        options.title = arguments[index]
+      case "--subtitle":
+        index += 1
+        guard index < arguments.count else {
+          throw CLIError.invalidOption("--subtitle requires a value")
+        }
+        options.subtitle = arguments[index]
+      case "--uri":
+        index += 1
+        guard index < arguments.count else {
+          throw CLIError.invalidOption("--uri requires a value")
+        }
+        options.uri = arguments[index]
+      default:
+        throw CLIError.invalidOption("unknown option: \(arguments[index])")
+      }
+      index += 1
+    }
+
+    guard !options.title.isEmpty else {
+      throw CLIError.invalidOption("--title is required")
+    }
+    guard !options.uri.isEmpty else {
+      throw CLIError.invalidOption("--uri is required")
+    }
+    return options
+  }
+
   private static func openBrowser(urlString: String) throws -> BrowserCommandResult {
     guard let url = URL(string: urlString) else {
       throw CLIError.browser("invalid browser URL: \(urlString)")
@@ -529,6 +581,12 @@ struct CuedNativeCLI {
   private static func runManagedAuth(options: AuthOpenOptions) throws -> NativeAuthResult {
     let coordinator = try ManagedAuthCoordinator(options: options)
     return try coordinator.run()
+  }
+
+  @MainActor
+  private static func runAuthQRCode(options: AuthQROptions) throws -> NativeQRResult {
+    let coordinator = QRCodeCoordinator(options: options)
+    return coordinator.run()
   }
 
   private static func dumpContacts() throws -> [ContactRecord] {
@@ -1229,7 +1287,6 @@ struct CuedNativeCLI {
 private enum ManagedAuthPlatform: String {
   case slack
   case linkedin
-  case twitter
 
   var loginURL: URL {
     switch self {
@@ -1237,8 +1294,6 @@ private enum ManagedAuthPlatform: String {
       return URL(string: "https://slack.com/signin")!
     case .linkedin:
       return URL(string: "https://www.linkedin.com/login")!
-    case .twitter:
-      return URL(string: "https://x.com/i/flow/login")!
     }
   }
 
@@ -1248,8 +1303,6 @@ private enum ManagedAuthPlatform: String {
       return "Sign in to Slack"
     case .linkedin:
       return "Sign in to LinkedIn"
-    case .twitter:
-      return "Sign in to X"
     }
   }
 
@@ -1259,6 +1312,135 @@ private enum ManagedAuthPlatform: String {
 
   var desktopUserAgent: String {
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.3 Safari/605.1.15"
+  }
+}
+
+@MainActor
+private final class QRCodeCoordinator: NSObject, NSWindowDelegate {
+  private let options: AuthQROptions
+  private let app = NSApplication.shared
+  private var window: NSWindow?
+  private var finalState = "cancelled"
+
+  init(options: AuthQROptions) {
+    self.options = options
+    super.init()
+  }
+
+  func run() -> NativeQRResult {
+    app.setActivationPolicy(.regular)
+
+    let window = NSWindow(
+      contentRect: NSRect(x: 0, y: 0, width: 420, height: 520),
+      styleMask: [.titled, .closable],
+      backing: .buffered,
+      defer: false
+    )
+    window.center()
+    window.title = options.title
+    window.delegate = self
+
+    let contentView = NSView(frame: window.contentView?.bounds ?? .zero)
+    contentView.translatesAutoresizingMaskIntoConstraints = false
+
+    let stack = NSStackView()
+    stack.orientation = .vertical
+    stack.alignment = .centerX
+    stack.spacing = 16
+    stack.translatesAutoresizingMaskIntoConstraints = false
+
+    let titleLabel = NSTextField(labelWithString: options.title)
+    titleLabel.font = NSFont.systemFont(ofSize: 24, weight: .semibold)
+    titleLabel.alignment = .center
+
+    let subtitleLabel = NSTextField(wrappingLabelWithString: options.subtitle)
+    subtitleLabel.alignment = .center
+    subtitleLabel.maximumNumberOfLines = 0
+    subtitleLabel.textColor = .secondaryLabelColor
+
+    let imageView = NSImageView()
+    imageView.imageScaling = .scaleProportionallyUpOrDown
+    imageView.image = makeQRCodeImage(for: options.uri)
+    imageView.translatesAutoresizingMaskIntoConstraints = false
+
+    let caption = NSTextField(labelWithString: "Close this window to cancel")
+    caption.textColor = .secondaryLabelColor
+    caption.alignment = .center
+
+    stack.addArrangedSubview(titleLabel)
+    stack.addArrangedSubview(subtitleLabel)
+    stack.addArrangedSubview(imageView)
+    stack.addArrangedSubview(caption)
+
+    contentView.addSubview(stack)
+    window.contentView = contentView
+
+    NSLayoutConstraint.activate([
+      stack.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 24),
+      stack.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -24),
+      stack.topAnchor.constraint(equalTo: contentView.topAnchor, constant: 24),
+      stack.bottomAnchor.constraint(lessThanOrEqualTo: contentView.bottomAnchor, constant: -24),
+      imageView.widthAnchor.constraint(equalToConstant: 280),
+      imageView.heightAnchor.constraint(equalToConstant: 280),
+    ])
+
+    window.makeKeyAndOrderFront(nil)
+    self.window = window
+    app.activate(ignoringOtherApps: true)
+    app.run()
+    return NativeQRResult(state: finalState)
+  }
+
+  func closeAsCompleted() {
+    finalState = "completed"
+    stopRunLoop()
+  }
+
+  func windowWillClose(_ notification: Notification) {
+    stopRunLoop()
+  }
+
+  private func stopRunLoop() {
+    if let window {
+      self.window = nil
+      window.orderOut(nil)
+    }
+    app.stop(nil)
+    let event = NSEvent.otherEvent(
+      with: .applicationDefined,
+      location: .zero,
+      modifierFlags: [],
+      timestamp: 0,
+      windowNumber: 0,
+      context: nil,
+      subtype: 0,
+      data1: 0,
+      data2: 0
+    )
+    if let event {
+      app.postEvent(event, atStart: false)
+    }
+  }
+
+  private func makeQRCodeImage(for text: String) -> NSImage? {
+    guard let data = text.data(using: .utf8) else {
+      return nil
+    }
+
+    guard let filter = CIFilter(name: "CIQRCodeGenerator") else {
+      return nil
+    }
+    filter.setValue(data, forKey: "inputMessage")
+    filter.setValue("H", forKey: "inputCorrectionLevel")
+    guard let outputImage = filter.outputImage else {
+      return nil
+    }
+
+    let transformed = outputImage.transformed(by: CGAffineTransform(scaleX: 12, y: 12))
+    let rep = NSCIImageRep(ciImage: transformed)
+    let image = NSImage(size: rep.size)
+    image.addRepresentation(rep)
+    return image
   }
 }
 
@@ -1371,8 +1553,6 @@ private final class ManagedAuthCoordinator: NSObject, NSWindowDelegate, WKNaviga
       extractSlackAuth(from: webView, currentURL: currentURL)
     case .linkedin:
       extractCookieAuth(from: webView, currentURL: currentURL)
-    case .twitter:
-      extractCookieAuth(from: webView, currentURL: currentURL)
     }
   }
 
@@ -1388,11 +1568,6 @@ private final class ManagedAuthCoordinator: NSObject, NSWindowDelegate, WKNaviga
       return !urlString.contains("/login")
         && !urlString.contains("/authwall")
         && !urlString.contains("/checkpoint")
-    case .twitter:
-      guard urlString.contains("x.com") || urlString.contains("twitter.com") else { return false }
-      return !urlString.contains("/i/flow/login")
-        && !urlString.contains("/account/access")
-        && !urlString.contains("/account/login_challenge")
     }
   }
 
@@ -1461,8 +1636,6 @@ private final class ManagedAuthCoordinator: NSObject, NSWindowDelegate, WKNaviga
       switch self.platform {
       case .linkedin:
         requiredCookies = ["li_at", "JSESSIONID"]
-      case .twitter:
-        requiredCookies = ["auth_token", "ct0"]
       case .slack:
         requiredCookies = []
       }
@@ -1502,8 +1675,6 @@ private final class ManagedAuthCoordinator: NSObject, NSWindowDelegate, WKNaviga
           return cookie.domain.contains("slack.com")
         case .linkedin:
           return cookie.domain.contains("linkedin.com")
-        case .twitter:
-          return cookie.domain.contains("x.com") || cookie.domain.contains("twitter.com")
         }
       }
       completion(filtered)

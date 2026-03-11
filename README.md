@@ -26,8 +26,6 @@ apps/cued (daemon, auth/session model, sync orchestration, projection)
 ~/.cued/local.db (raw events + projected canonical state)
 ```
 
-`apps/electron` still exists only as a cutover reference while `apps/cued` reaches full platform parity.
-
 ## Prerequisites
 
 | Requirement | Version | Check |
@@ -78,19 +76,13 @@ cued doctor
 ```text
 apps/
   cued/          Local daemon and CLI
-  electron/      Historical cutover reference only
 
 native/
   macos/
     CuedNative/  macOS host app, permissions, menu bar runtime
 
 packages/
-  ai/            LLM tools and contact resolution
-  convex/        Historical cloud backend code, pending removal
-  env/           Shared env schemas
-  integrations/  Shared integration helpers
   shared/        Shared types and utilities
-  ui/            Legacy shared UI package, pending removal
 ```
 
 ## Scripts
@@ -108,5 +100,4 @@ packages/
 ## Notes
 
 - `apps/cued` is the only product runtime moving forward.
-- `apps/electron` is not part of the active runtime.
-- `packages/convex`, `packages/ui`, and other cloud-era code are still present but are outside the local-only product surface.
+- Legacy Electron/cloud directories may still exist on disk during cleanup, but they are no longer part of the active workspace or shipping runtime.
