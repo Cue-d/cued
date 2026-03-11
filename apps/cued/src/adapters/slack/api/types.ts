@@ -70,9 +70,11 @@ export interface SlackMessage {
   type: string;
   subtype?: string;
   user?: string;
+  bot_id?: string;
   text: string;
   ts: string;
   thread_ts?: string;
+  reply_count?: number;
   reactions?: SlackReaction[];
   attachments?: SlackAttachment[];
   files?: SlackFile[];
@@ -87,6 +89,7 @@ export interface SlackConversation {
   is_im?: boolean;
   is_mpim?: boolean;
   is_private?: boolean;
+  is_archived?: boolean;
   user?: string;
   topic?: { value: string };
   purpose?: { value: string };
@@ -101,6 +104,14 @@ export interface SlackConversationsListResponse {
 }
 
 export interface SlackConversationsHistoryResponse {
+  ok: boolean;
+  error?: string;
+  messages?: SlackMessage[];
+  has_more?: boolean;
+  response_metadata?: { next_cursor?: string };
+}
+
+export interface SlackConversationsRepliesResponse {
   ok: boolean;
   error?: string;
   messages?: SlackMessage[];

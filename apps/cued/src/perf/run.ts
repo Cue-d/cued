@@ -294,6 +294,13 @@ function createSlackClientFixture(conversationCount: number, messagesPerConversa
         nextCursor: offset + pageSize < messages.length ? String(offset + pageSize) : undefined,
       };
     },
+    async getReplies() {
+      return {
+        messages: [],
+        hasMore: false,
+        nextCursor: undefined,
+      };
+    },
   };
 }
 
@@ -668,6 +675,8 @@ async function main(): Promise<void> {
           accountKey: "default",
           lastSyncAt: 1_709_999_000_000,
           client: slackClient,
+          conversationPageLimit: 100,
+          messagesPageLimit: 100,
         });
       }),
       await benchmarkScenario("linkedin_incremental_sync", async () => {

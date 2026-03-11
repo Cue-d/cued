@@ -5,6 +5,7 @@ export const SLACK_API_URLS = {
   usersList: `${SLACK_API_BASE}/users.list`,
   conversationsList: `${SLACK_API_BASE}/conversations.list`,
   conversationsHistory: `${SLACK_API_BASE}/conversations.history`,
+  conversationsReplies: `${SLACK_API_BASE}/conversations.replies`,
   conversationsMembers: `${SLACK_API_BASE}/conversations.members`,
 } as const;
 
