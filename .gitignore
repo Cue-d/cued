@@ -1,8 +1,6 @@
 # Cued Project .gitignore
 
-# ============================================================
-# Node.js / Electron
-# ============================================================
+# Node.js
 node_modules/
 npm-debug.log*
 yarn-debug.log*
@@ -10,38 +8,29 @@ yarn-error.log*
 lerna-debug.log*
 .pnpm-debug.log*
 
-# Electron build outputs
-electron-app/dist/
-electron-app/out/
-electron-app/release/
-electron-app/.webpack/
-apps/electron/out/
-apps/electron/dist/
-apps/electron/.electron-vite/
-apps/electron/electron.vite.config.*.mjs
+# Build outputs
 apps/cued/dist/
+apps/cued/.turbo/
+native/macos/CuedNative/.build/
+native/macos/dist/
+native/helpers/whatsapp-go/.build/
+.turbo/
+tsconfig.tsbuildinfo
+**/tsconfig.tsbuildinfo
 
-# ============================================================
-# Application Data & Caches
-# ============================================================
-# Local app database (contains personal data)
+# Application data and caches
 *.db
 *.db-shm
 *.db-wal
 *.sqlite
 *.sqlite3
-
-# Cued cache directories
 .cued/
-backend/.cued/
-
-# Contact and message caches
+tmp/
+temp/
+.cache/
 **/cache/
-**/*_cache.json
 
-# ============================================================
 # macOS
-# ============================================================
 .DS_Store
 .AppleDouble
 .LSOverride
@@ -60,10 +49,7 @@ Network Trash Folder
 Temporary Items
 .apdisk
 
-# ============================================================
-# IDEs & Editors
-# ============================================================
-# VSCode
+# Editors
 .vscode/
 .vscode/*
 !.vscode/settings.json
@@ -71,30 +57,19 @@ Temporary Items
 !.vscode/launch.json
 !.vscode/extensions.json
 *.code-workspace
-
-# JetBrains (PyCharm, IntelliJ, etc.)
 .idea/
 *.iml
 *.ipr
 *.iws
-
-# Vim
 *.swp
 *.swo
 *~
-
-# Emacs
-*~
 \#*\#
 .\#*
-
-# Sublime Text
 *.sublime-project
 *.sublime-workspace
 
-# ============================================================
-# Environment & Secrets
-# ============================================================
+# Environment and secrets
 .env
 .env.local
 .env.*.local
@@ -102,12 +77,8 @@ Temporary Items
 *.key
 credentials.json
 
-# ============================================================
-# Testing & Coverage
-# ============================================================
+# Testing and coverage
 **/coverage/
-
-# Playwright
 **/test-results/
 **/playwright-report/
 **/playwright/.cache/
@@ -115,10 +86,7 @@ credentials.json
 !**/.auth/.gitkeep
 blob-report/
 
-# ============================================================
-# Build & Distribution
-# ============================================================
-# Packaged applications
+# Packaged artifacts
 *.dmg
 *.pkg
 *.app
@@ -126,60 +94,9 @@ blob-report/
 *.msi
 *.zip
 *.tar.gz
-
-# Documentation builds
 site/
 
-# ============================================================
-# iOS Widgets (Expo)
-# ============================================================
-# Generated widget assets and entitlements
-apps/mobile/targets/widget/Assets.xcassets/
-apps/mobile/targets/widget/generated.entitlements
-
-# ============================================================
-# Swift (Electron contacts CLI)
-# ============================================================
-# Swift Package Manager build directory
-apps/electron/swift/.build/
-native/macos/CuedNative/.build/
-
-# Native addon build artifacts
-apps/electron/native/*/build/
-# Swift Package.resolved (lock file - uncomment to track)
-# apps/electron/swift/Package.resolved
-
-# ============================================================
-# Turborepo
-# ============================================================
-.turbo/
-
-# Package build outputs
-packages/*/dist/
-
-# ============================================================
-# Nango Integrations
-# ============================================================
-nango-integrations/build/
-nango-integrations/.nango/nango.json
-nango-integrations/.nango/schema.json
-
-# TypeScript build info
-tsconfig.tsbuildinfo
-**/tsconfig.tsbuildinfo
-
-# ============================================================
-# Twitter Scripts (session/scrape data)
-# ============================================================
-scripts/twitter/.cookies.json
-scripts/twitter/.contacts.json
-
-# ============================================================
-# Temporary & Misc
-# ============================================================
+# Misc
 *.tmp
 *.temp
-tmp/
-temp/
-.cache/
 .vercel
