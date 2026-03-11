@@ -1,0 +1,80 @@
+name: Release Cued macOS
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version to release (for example 0.1.0-internal.1). Leave empty to use apps/cued/package.json."
+        required: false
+        type: string
+
+jobs:
+  release:
+    runs-on: macos-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - name: Update package versions
+        if: ${{ inputs.version != '' }}
+        run: |
+          node -e '
+            const fs = require("node:fs");
+            const files = ["apps/cued/package.json"];
+            for (const file of files) {
+              const parsed = JSON.parse(fs.readFileSync(file, "utf8"));
+              parsed.version = process.env.VERSION;
+              fs.writeFileSync(file, `${JSON.stringify(parsed, null, 2)}\n`);
+            }
+          '
+        env:
+          VERSION: ${{ inputs.version }}
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build, sign, and notarize app bundle + DMG
+        run: bash scripts/sign-and-notarize-cued-app.sh
+        env:
+          CUED_CODESIGN_IDENTITY: ${{ secrets.CUED_CODESIGN_IDENTITY }}
+          CUED_NOTARY_PROFILE: ${{ secrets.CUED_NOTARY_PROFILE }}
+          CUED_RELEASE_CHANNEL: internal
+
+      - name: Build macOS tarball
+        run: bash scripts/build-cued-tarball.sh
+
+      - name: Build release metadata
+        run: node scripts/build-cued-release-metadata.mjs
+        env:
+          CUED_RELEASE_CHANNEL: internal
+          CUED_RELEASE_REPO: Cue-d/cued
+          CUED_RELEASE_VERSION: ${{ inputs.version }}
+          CUED_RELEASE_TAG: ${{ inputs.version != '' && format('v{0}', inputs.version) || '' }}
+
+      - name: Create or update prerelease
+        run: |
+          VERSION="${{ inputs.version }}"
+          if [[ -z "$VERSION" ]]; then
+            VERSION="$(node -p "require('./apps/cued/package.json').version")"
+          fi
+          TAG="v${VERSION}"
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release edit "$TAG" --prerelease --title "Cued ${VERSION}"
+          else
+            gh release create "$TAG" --prerelease --title "Cued ${VERSION}" --notes "Internal beta release ${VERSION}"
+          fi
+          gh release upload "$TAG" \
+            native/macos/dist/Cued.dmg \
+            native/macos/dist/cued-macos-universal.tar.gz \
+            native/macos/dist/release.json \
+            native/macos/dist/SHA256SUMS \
+            --clobber
+        env:
+          GH_TOKEN: ${{ secrets.GH_TOKEN }}
