@@ -91,6 +91,20 @@ class SlackRequest {
         const data = JSON.parse(text) as T & { ok?: boolean; error?: string };
         if (data.ok === false) {
           const error = data.error ?? "unknown_error";
+          if (error === "ratelimited") {
+            const retryAfterMs = parseRetryAfterMs(response.headers.get("retry-after"));
+            if (attempt < RETRY_CONFIG.maxRetries) {
+              await sleep(retryAfterMs ?? RETRY_CONFIG.baseDelayMs * Math.pow(2, attempt));
+              continue;
+            }
+            throw new SlackRequestError(
+              "Slack API error: ratelimited",
+              response.status || 429,
+              error,
+              text,
+              retryAfterMs ?? undefined,
+            );
+          }
           if ((RETRY_CONFIG.tokenExpiredErrors as readonly string[]).includes(error)) {
             throw new SlackAuthError(`Slack authentication failed: ${error}`, error);
           }

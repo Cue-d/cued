@@ -1,4 +1,4 @@
-import { createServer, type Socket } from "node:net";
+import { createConnection, createServer, type Socket } from "node:net";
 import { spawn, type ChildProcess } from "node:child_process";
 import { existsSync, rmSync, watch, type FSWatcher } from "node:fs";
 import { dirname, basename } from "node:path";
@@ -454,7 +454,9 @@ async function startManagedAuth(
 }
 
 export async function runDaemon(): Promise<void> {
+  await cleanupSocketPath();
   const db = openCuedDatabase();
+  ensureNoActiveDaemonProcess(db);
   const startedAt = now();
   const autoSyncIntervalMs = getAutoSyncIntervalMs();
   const ingestConcurrency = getIngestConcurrency();
@@ -560,25 +562,34 @@ export async function runDaemon(): Promise<void> {
   }, 5_000);
 
   const queueAutoSyncRuns = (trigger: string) => {
-    const autoSyncTargets = getAutoSyncTargets(db);
-    let queuedAny = false;
-    for (const target of autoSyncTargets) {
-      if (db.hasQueuedOrRunningRun(target.platform, target.accountKey)) {
-        continue;
+    try {
+      const autoSyncTargets = getAutoSyncTargets(db);
+      let queuedAny = false;
+      for (const target of autoSyncTargets) {
+        if (db.hasQueuedOrRunningRun(target.platform, target.accountKey)) {
+          continue;
+        }
+
+        db.queueSyncRun({
+          platform: target.platform,
+          accountKey: target.accountKey,
+          runType: "sync",
+          trigger,
+          details: { source: target.platform, accountKey: target.accountKey, trigger },
+        });
+        queuedAny = true;
       }
 
-      db.queueSyncRun({
-        platform: target.platform,
-        accountKey: target.accountKey,
-        runType: "sync",
-        trigger,
-        details: { source: target.platform, accountKey: target.accountKey, trigger },
-      });
-      queuedAny = true;
-    }
-
-    if (queuedAny) {
-      schedulers.wakeIngest();
+      if (queuedAny) {
+        schedulers.wakeIngest();
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      if (/sqlite_(busy|locked)|database is locked|database is busy/i.test(message)) {
+        console.warn(`[cued daemon] autosync queue skipped because SQLite is busy (${trigger})`);
+        return;
+      }
+      throw error;
     }
   };
 
@@ -687,6 +698,9 @@ export async function runDaemon(): Promise<void> {
       }
       if (currentRun.platform === "slack" && typeof sourceCursor?.lastSyncAt === "number") {
         envOverrides.CUED_SLACK_LAST_SYNC_AT = String(sourceCursor.lastSyncAt);
+      }
+      if (currentRun.platform === "slack" && checkpoint?.source_cursor_json) {
+        envOverrides.CUED_SLACK_SOURCE_CURSOR = checkpoint.source_cursor_json;
       }
       if (currentRun.platform === "linkedin") {
         if (typeof sourceCursor?.lastSyncAt === "number") {
@@ -952,6 +966,95 @@ export async function runDaemon(): Promise<void> {
 
   process.on("SIGINT", shutdown);
   process.on("SIGTERM", shutdown);
+}
+
+async function cleanupSocketPath(): Promise<void> {
+  if (!existsSync(CUED_SOCKET_PATH)) {
+    return;
+  }
+
+  const socketState = await probeExistingSocket();
+  if (socketState === "active") {
+    throw new Error(`Cued daemon already running on ${CUED_SOCKET_PATH}`);
+  }
+
+  rmSync(CUED_SOCKET_PATH, { force: true });
+}
+
+async function probeExistingSocket(): Promise<"active" | "stale"> {
+  return new Promise((resolve) => {
+    const socket = createConnection(CUED_SOCKET_PATH);
+    let settled = false;
+    let buffer = "";
+    const timeout = setTimeout(() => {
+      finish("stale");
+    }, 500);
+
+    const finish = (state: "active" | "stale") => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      clearTimeout(timeout);
+      socket.destroy();
+      resolve(state);
+    };
+
+    socket.on("connect", () => {
+      socket.write(`${JSON.stringify({ id: "startup-probe", command: "ping" })}\n`);
+    });
+
+    socket.on("data", (chunk) => {
+      buffer += chunk.toString("utf8");
+      const newlineIndex = buffer.indexOf("\n");
+      if (newlineIndex < 0) {
+        return;
+      }
+
+      try {
+        const response = JSON.parse(buffer.slice(0, newlineIndex)) as {
+          ok?: boolean;
+          result?: { pong?: boolean };
+        };
+        if (response.ok && response.result?.pong === true) {
+          finish("active");
+          return;
+        }
+      } catch {
+        // Treat malformed responses as stale so we can recover the socket path.
+      }
+
+      finish("stale");
+    });
+
+    socket.on("error", () => {
+      finish("stale");
+    });
+  });
+}
+
+function ensureNoActiveDaemonProcess(
+  db: ReturnType<typeof openCuedDatabase>,
+): void {
+  const daemon = db.getDaemonState();
+  if (
+    daemon?.status === "running"
+    && typeof daemon.pid === "number"
+    && daemon.pid > 0
+    && daemon.pid !== process.pid
+    && isProcessRunning(daemon.pid)
+  ) {
+    throw new Error(`Cued daemon already running with pid ${daemon.pid}`);
+  }
+}
+
+function isProcessRunning(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 function writeResponse(socket: Socket, response: DaemonResponse): void {

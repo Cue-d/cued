@@ -6,6 +6,7 @@ import type {
   SlackConversationsHistoryResponse,
   SlackConversationsListResponse,
   SlackConversationsMembersResponse,
+  SlackConversationsRepliesResponse,
   SlackCredentials,
   SlackMessage,
   SlackUser,
@@ -28,6 +29,10 @@ export interface SlackUsersResult {
   nextCursor?: string;
 }
 
+function normalizeCursor(cursor: string | undefined): string | undefined {
+  return cursor && cursor.length > 0 ? cursor : undefined;
+}
+
 export class SlackClient {
   constructor(private readonly credentials: SlackCredentials) {}
 
@@ -36,48 +41,52 @@ export class SlackClient {
       .doJSON<SlackAuthTestResponse>();
   }
 
-  async listUsers(cursor?: string): Promise<SlackUsersResult> {
+  async listUsers(cursor?: string, limit: number = PAGINATION.defaultLimit): Promise<SlackUsersResult> {
     const response = await newPostRequest(SLACK_API_URLS.usersList, this.credentials)
       .withParams({
         cursor,
-        limit: PAGINATION.defaultLimit,
+        limit,
       })
       .doJSON<SlackUsersListResponse>();
 
     return {
       users: response.members ?? [],
-      nextCursor: response.response_metadata?.next_cursor,
+      nextCursor: normalizeCursor(response.response_metadata?.next_cursor),
     };
   }
 
-  async listConversations(cursor?: string): Promise<SlackConversationsResult> {
+  async listConversations(cursor?: string, limit: number = PAGINATION.defaultLimit): Promise<SlackConversationsResult> {
     const response = await newPostRequest(SLACK_API_URLS.conversationsList, this.credentials)
       .withParams({
         types: "im,mpim,private_channel,public_channel",
         exclude_archived: true,
-        limit: PAGINATION.defaultLimit,
+        limit,
         cursor,
       })
       .doJSON<SlackConversationsListResponse>();
 
     return {
       conversations: response.channels ?? [],
-      nextCursor: response.response_metadata?.next_cursor,
+      nextCursor: normalizeCursor(response.response_metadata?.next_cursor),
     };
   }
 
-  async getConversationMembers(channel: string, cursor?: string): Promise<{ members: string[]; nextCursor?: string }> {
+  async getConversationMembers(
+    channel: string,
+    cursor?: string,
+    limit: number = PAGINATION.defaultLimit,
+  ): Promise<{ members: string[]; nextCursor?: string }> {
     const response = await newPostRequest(SLACK_API_URLS.conversationsMembers, this.credentials)
       .withParams({
         channel,
-        limit: PAGINATION.defaultLimit,
+        limit,
         cursor,
       })
       .doJSON<SlackConversationsMembersResponse>();
 
     return {
       members: response.members ?? [],
-      nextCursor: response.response_metadata?.next_cursor,
+      nextCursor: normalizeCursor(response.response_metadata?.next_cursor),
     };
   }
 
@@ -86,12 +95,13 @@ export class SlackClient {
     options: {
       cursor?: string;
       oldest?: string;
+      limit?: number;
     } = {},
   ): Promise<SlackMessagesResult> {
     const response = await newPostRequest(SLACK_API_URLS.conversationsHistory, this.credentials)
       .withParams({
         channel,
-        limit: PAGINATION.defaultLimit,
+        limit: options.limit ?? PAGINATION.defaultLimit,
         cursor: options.cursor,
         oldest: options.oldest,
       })
@@ -100,7 +110,33 @@ export class SlackClient {
     return {
       messages: response.messages ?? [],
       hasMore: response.has_more ?? false,
-      nextCursor: response.response_metadata?.next_cursor,
+      nextCursor: normalizeCursor(response.response_metadata?.next_cursor),
+    };
+  }
+
+  async getReplies(
+    channel: string,
+    threadTs: string,
+    options: {
+      cursor?: string;
+      oldest?: string;
+      limit?: number;
+    } = {},
+  ): Promise<SlackMessagesResult> {
+    const response = await newPostRequest(SLACK_API_URLS.conversationsReplies, this.credentials)
+      .withParams({
+        channel,
+        ts: threadTs,
+        limit: options.limit ?? PAGINATION.defaultLimit,
+        cursor: options.cursor,
+        oldest: options.oldest,
+      })
+      .doJSON<SlackConversationsRepliesResponse>();
+
+    return {
+      messages: response.messages ?? [],
+      hasMore: response.has_more ?? false,
+      nextCursor: normalizeCursor(response.response_metadata?.next_cursor),
     };
   }
 }
