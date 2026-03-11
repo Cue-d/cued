@@ -1,8 +1,0 @@
-{
-  "scripts": {
-    "setup": "pnpm install && mkdir -p ~/.config/cued && ([ -f ~/.config/cued/.env.local ] || ([ -f apps/web/.env.local ] && cp apps/web/.env.local ~/.config/cued/.env.local) || true) && ln -sf ~/.config/cued/.env.local apps/web/.env.local",    "run": "pnpm dev",
-    "test": "pnpm test",
-    "lint": "pnpm lint && pnpm typecheck",
-    "build": "pnpm build"
-  }
-}
