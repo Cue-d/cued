@@ -21,6 +21,8 @@ describe("integration state management", () => {
     delete process.env.CUED_CONTACTS_NATIVE_BINARY;
     delete process.env.CUED_IMESSAGE_DB_PATH;
     delete process.env.CUED_SLACK_APP_BINARY;
+    delete process.env.CUED_SIGNAL_CLI_PATH;
+    delete process.env.CUED_WHATSAPP_HELPER_BINARY;
 
     while (tempDirs.length > 0) {
       rmSync(tempDirs.pop()!, { recursive: true, force: true });
@@ -52,10 +54,12 @@ describe("integration state management", () => {
     process.env.CUED_CONTACTS_NATIVE_BINARY = nativeBinaryPath;
     process.env.CUED_IMESSAGE_DB_PATH = join(createTempDir("cued-imessage-"), "missing.db");
     process.env.CUED_SLACK_APP_BINARY = join(createTempDir("cued-no-slack-app-"), "Slack");
+    process.env.CUED_SIGNAL_CLI_PATH = join(createTempDir("cued-no-signal-cli-"), "signal-cli");
+    process.env.CUED_WHATSAPP_HELPER_BINARY = join(createTempDir("cued-no-whatsapp-helper-"), "cued-whatsapp-helper");
 
     const db = createDb();
     const refreshed = await refreshManagedIntegrationStates(db);
-    expect(refreshed.refreshed).toBe(2);
+    expect(refreshed.refreshed).toBe(4);
     expect(listIntegrationStates(db)).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
@@ -67,6 +71,16 @@ describe("integration state management", () => {
           platform: "imessage",
           accountKey: "local",
           authState: "missing",
+        }),
+        expect.objectContaining({
+          platform: "signal",
+          accountKey: "default",
+          authState: "outdated",
+        }),
+        expect.objectContaining({
+          platform: "whatsapp",
+          accountKey: "default",
+          authState: "blocked",
         }),
       ]),
     );
@@ -109,7 +123,7 @@ describe("integration state management", () => {
       "Unsupported integration platform: gmail",
     );
     expect(() => requestIntegrationAccess(db, "discord")).toThrow(
-      "Unsupported integration request: discord",
+      "Unsupported integration platform: discord",
     );
     db.close();
   });

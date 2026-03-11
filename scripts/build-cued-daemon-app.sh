@@ -13,8 +13,10 @@ MACOS_DIR="$CONTENTS_DIR/MacOS"
 RESOURCES_DIR="$CONTENTS_DIR/Resources"
 RUNTIME_DIR="$RESOURCES_DIR/cued-runtime"
 RUNTIME_NODE_DIR="$RESOURCES_DIR/runtime/node/bin"
+HELPERS_DIR="$RESOURCES_DIR/helpers"
+WHATSAPP_HELPER_SOURCE="$ROOT_DIR/native/helpers/whatsapp-go/.build/cued-whatsapp-helper"
 PERMISSIONS_SCRIPT_SOURCE="$ROOT_DIR/scripts/request-macos-access.sh"
-TRAY_ICON_SOURCE="$ROOT_DIR/apps/electron/resources/trayIconTemplate.png"
+TRAY_ICON_SOURCE="$ROOT_DIR/native/macos/CuedNative/Resources/trayIconTemplate.png"
 NODE_PATH="${CUED_NODE_PATH:-$(command -v node)}"
 DB_PATH="${CUED_DB_PATH_OVERRIDE:-$HOME/.cued/local.db}"
 DAEMON_COMMAND="${CUED_DAEMON_COMMAND:-\"\$CUED_APP_PATH/Contents/Resources/cued-cli\" daemon}"
@@ -39,16 +41,52 @@ mkdir -p "$APP_DIST_DIR"
 
 pnpm --dir "$ROOT_DIR/apps/cued" build >/dev/null
 swift build --package-path "$SWIFT_PACKAGE_DIR" -c release >/dev/null
+mkdir -p "$(dirname "$WHATSAPP_HELPER_SOURCE")"
+(cd "$ROOT_DIR/native/helpers/whatsapp-go" && GOWORK=off go build -o "$WHATSAPP_HELPER_SOURCE" .) >/dev/null
 pnpm --filter ./apps/cued deploy --legacy --prod "$DEPLOY_STAGING_DIR" >/dev/null
 
 rm -rf "$APP_BUNDLE"
-mkdir -p "$MACOS_DIR" "$RESOURCES_DIR" "$RUNTIME_DIR" "$RUNTIME_NODE_DIR"
+mkdir -p "$MACOS_DIR" "$RESOURCES_DIR" "$RUNTIME_DIR" "$RUNTIME_NODE_DIR" "$HELPERS_DIR"
 
 cp "$SWIFT_BINARY" "$MACOS_DIR/$APP_NAME"
 chmod +x "$MACOS_DIR/$APP_NAME"
 cp "$NODE_PATH" "$RUNTIME_NODE_DIR/node"
 chmod +x "$RUNTIME_NODE_DIR/node"
 cp -R "$DEPLOY_STAGING_DIR/." "$RUNTIME_DIR/"
+cp "$WHATSAPP_HELPER_SOURCE" "$HELPERS_DIR/cued-whatsapp-helper"
+chmod +x "$HELPERS_DIR/cued-whatsapp-helper"
+
+# Remove workspace symlinks that escape the bundled runtime; they break app signing.
+"$NODE_PATH" -e '
+const fs = require("node:fs");
+const path = require("node:path");
+
+const runtimeRoot = fs.realpathSync(process.argv[1]);
+
+function visit(dir) {
+  for (const entryName of fs.readdirSync(dir)) {
+    const entryPath = path.join(dir, entryName);
+    const stat = fs.lstatSync(entryPath);
+    if (stat.isDirectory()) {
+      visit(entryPath);
+      continue;
+    }
+    if (!stat.isSymbolicLink()) continue;
+
+    const linkTarget = fs.readlinkSync(entryPath);
+    const resolvedTarget = path.resolve(path.dirname(entryPath), linkTarget);
+    const normalizedTarget = path.normalize(resolvedTarget);
+    if (normalizedTarget === runtimeRoot || normalizedTarget.startsWith(`${runtimeRoot}${path.sep}`)) {
+      continue;
+    }
+    fs.rmSync(entryPath, { force: true });
+  }
+}
+
+visit(runtimeRoot);
+' "$RUNTIME_DIR"
+rm -f "$RUNTIME_DIR/node_modules/cued"
+
 mkdir -p "$RESOURCES_DIR/scripts"
 cp "$PERMISSIONS_SCRIPT_SOURCE" "$RESOURCES_DIR/scripts/request-macos-access.sh"
 chmod +x "$RESOURCES_DIR/scripts/request-macos-access.sh"
@@ -111,10 +149,14 @@ export CUED_BUNDLED_RUNTIME_ROOT="\${CUED_BUNDLED_RUNTIME_ROOT:-\$RUNTIME_ROOT}"
 export CUED_BUNDLED_SCRIPT_ROOT="\${CUED_BUNDLED_SCRIPT_ROOT:-\$SCRIPT_ROOT}"
 export CUED_IMESSAGE_NATIVE_BINARY="\${CUED_IMESSAGE_NATIVE_BINARY:-\$APP_EXEC}"
 export CUED_CONTACTS_NATIVE_BINARY="\${CUED_CONTACTS_NATIVE_BINARY:-\$APP_EXEC}"
+export CUED_WHATSAPP_HELPER_BINARY="\${CUED_WHATSAPP_HELPER_BINARY:-\$SCRIPT_DIR/helpers/cued-whatsapp-helper}"
 exec "\$NODE_BIN" "\$RUNTIME_ROOT/dist/cli.js" "\$@"
 EOF
 chmod +x "$RESOURCES_DIR/cued-cli"
 
 cp "$TRAY_ICON_SOURCE" "$RESOURCES_DIR/trayIconTemplate.png"
+
+# Sign the assembled app bundle so LaunchServices accepts it as an app.
+codesign --force --deep --sign - "$APP_BUNDLE" >/dev/null
 
 echo "$APP_BUNDLE"

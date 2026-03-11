@@ -811,11 +811,11 @@ final class MenuBarAppController: NSObject, NSApplicationDelegate {
     let candidates = [
       executableURL
         .deletingLastPathComponent()
-        .appendingPathComponent("../../../../apps/electron/resources/trayIconTemplate.png")
+        .appendingPathComponent("../../Resources/trayIconTemplate.png")
         .standardizedFileURL.path,
       executableURL
         .deletingLastPathComponent()
-        .appendingPathComponent("../../../apps/electron/resources/trayIconTemplate.png")
+        .appendingPathComponent("../../../Resources/trayIconTemplate.png")
         .standardizedFileURL.path,
     ]
 
