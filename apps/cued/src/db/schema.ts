@@ -86,6 +86,12 @@ export const daemonState = sqliteTable("daemon_state", {
   detailsJson: text("details_json"),
 });
 
+export const appSettings = sqliteTable("app_settings", {
+  key: text("key").primaryKey(),
+  value: text("value"),
+  updatedAt: integer("updated_at").notNull(),
+});
+
 export const projectionState = sqliteTable("projection_state", {
   singletonKey: text("singleton_key").primaryKey(),
   projectionWatermark: integer("projection_watermark").notNull(),
@@ -305,6 +311,24 @@ export const authSessions = sqliteTable("auth_sessions", {
   keychainAccount: text("keychain_account"),
   resultSummaryJson: text("result_summary_json"),
   errorSummary: text("error_summary"),
+  createdAt: integer("created_at").notNull(),
+  updatedAt: integer("updated_at").notNull(),
+});
+
+export const outboundMessages = sqliteTable("outbound_messages", {
+  id: text("id").primaryKey(),
+  platform: textEnum("platform", PLATFORM_VALUES).notNull(),
+  accountKey: text("account_key").notNull(),
+  target: text("target").notNull(),
+  threadId: text("thread_id"),
+  text: text("text").notNull(),
+  status: text("status").notNull(),
+  attemptCount: integer("attempt_count").notNull(),
+  scheduledFor: integer("scheduled_for").notNull(),
+  startedAt: integer("started_at"),
+  finishedAt: integer("finished_at"),
+  lastError: text("last_error"),
+  metadataJson: text("metadata_json"),
   createdAt: integer("created_at").notNull(),
   updatedAt: integer("updated_at").notNull(),
 });

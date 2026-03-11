@@ -3,7 +3,9 @@ import { and, asc, desc, eq, inArray, sql } from "drizzle-orm";
 import { type BetterSQLite3Database, drizzle } from "drizzle-orm/better-sqlite3";
 import type { SQLiteTable } from "drizzle-orm/sqlite-core";
 import Database from "better-sqlite3";
+import { getCurrentAppVersion, getCurrentReleaseChannel } from "../app-metadata.js";
 import { ensureCuedDirs, CUED_DB_PATH } from "../config.js";
+import { normalizePhone } from "../lib/phone.js";
 import type {
   AuthSessionState,
   ConnectionKind,
@@ -22,6 +24,7 @@ import { MIGRATIONS } from "./migrations.js";
 import * as schema from "./schema.js";
 
 const {
+  appSettings,
   authSessions,
   contactMergeDecisions,
   contactHandles,
@@ -34,6 +37,7 @@ const {
   messageAttachments,
   messageReactions,
   messages,
+  outboundMessages,
   projectionState,
   rawEvents,
   schemaMigrations,
@@ -43,6 +47,14 @@ const {
   syncRuns,
   timelineEvents,
 } = schema;
+
+const APP_SETTING_KEYS = {
+  cliSymlinkInstalled: "cli_symlink_installed",
+  installedAppVersion: "installed_app_version",
+  lastReleaseCheckAt: "last_release_check_at",
+  onboardingCompletedVersion: "onboarding_completed_version",
+  releaseChannel: "release_channel",
+} as const;
 
 export interface DaemonStatusRow {
   singleton_key: "daemon";
@@ -71,6 +83,20 @@ export interface ProjectionStateRow {
   last_projected_at: number | null;
   last_rebuild_at: number | null;
   updated_at: number;
+}
+
+export interface AppSettingRow {
+  key: string;
+  value: string | null;
+  updated_at: number;
+}
+
+export interface AppMetadataSnapshot {
+  onboardingCompletedVersion: string | null;
+  releaseChannel: string | null;
+  installedAppVersion: string | null;
+  lastReleaseCheckAt: number | null;
+  cliSymlinkInstalled: boolean;
 }
 
 export type RawEventInput = ProviderRawEventInput;
@@ -110,6 +136,107 @@ export interface AuthSessionRow {
   error_summary: string | null;
   created_at: number;
   updated_at: number;
+}
+
+export interface OutboundMessageRow {
+  id: string;
+  platform: Platform;
+  account_key: string;
+  target: string;
+  thread_id: string | null;
+  text: string;
+  status: string;
+  attempt_count: number;
+  scheduled_for: number;
+  started_at: number | null;
+  finished_at: number | null;
+  last_error: string | null;
+  metadata_json: string | null;
+  created_at: number;
+  updated_at: number;
+}
+
+export interface SignalSendResolution {
+  target: string;
+  threadId: string;
+  resolution: "group" | "signal_id" | "signal_phone" | "phone" | "imessage_phone" | "passthrough";
+  matchedContactIds: string[];
+  matchedName: string | null;
+}
+
+export interface WhatsAppSendResolution {
+  target: string;
+  threadId: string;
+  resolution: "whatsapp_jid" | "phone" | "group" | "passthrough";
+  matchedContactIds: string[];
+  matchedName: string | null;
+}
+
+type SignalSendCandidate = {
+  rank: number;
+  target: string;
+  resolution: Extract<
+    SignalSendResolution["resolution"],
+    "signal_id" | "signal_phone" | "phone" | "imessage_phone"
+  >;
+};
+
+type WhatsAppSendCandidate = {
+  rank: number;
+  target: string;
+  resolution: Extract<WhatsAppSendResolution["resolution"], "whatsapp_jid" | "phone">;
+};
+
+const SIGNAL_UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+function isSignalUuid(value: string): boolean {
+  return SIGNAL_UUID_PATTERN.test(value.trim());
+}
+
+function normalizeSignalThreadRecipient(value: string, resolution: SignalSendResolution["resolution"]): string {
+  const trimmed = value.trim();
+  if (resolution === "signal_id") {
+    return trimmed.toLowerCase();
+  }
+  const normalizedPhone = normalizePhone(trimmed);
+  if (normalizedPhone) {
+    return normalizedPhone;
+  }
+  return trimmed.toLowerCase();
+}
+
+function buildSignalDmThreadId(
+  recipient: string,
+  resolution: SignalSendResolution["resolution"],
+): string {
+  return `dm:${normalizeSignalThreadRecipient(recipient, resolution)}`;
+}
+
+function normalizeSignalHandleLookupValue(value: string): string {
+  const trimmed = value.trim();
+  const normalizedPhone = normalizePhone(trimmed);
+  if (normalizedPhone) {
+    return normalizedPhone;
+  }
+  return trimmed.toLowerCase();
+}
+
+function normalizeWhatsAppJid(value: string): string {
+  return value.trim().toLowerCase();
+}
+
+function buildWhatsAppThreadId(target: string): string {
+  const normalized = normalizeWhatsAppJid(target);
+  return normalized.endsWith("@g.us") ? `group:${normalized}` : `dm:${normalized}`;
+}
+
+function normalizeWhatsAppHandleLookupValue(value: string): string {
+  const trimmed = value.trim();
+  const normalizedPhone = normalizePhone(trimmed);
+  if (normalizedPhone) {
+    return normalizedPhone;
+  }
+  return normalizeWhatsAppJid(trimmed);
 }
 
 export type LocalDrizzleDatabase = BetterSQLite3Database<typeof schema>;
@@ -176,6 +303,82 @@ export class CuedDatabase {
 
   orm(): LocalDrizzleDatabase {
     return this.db;
+  }
+
+  listAppSettings(): AppSettingRow[] {
+    return this.db
+      .select({
+        key: appSettings.key,
+        value: appSettings.value,
+        updated_at: appSettings.updatedAt,
+      })
+      .from(appSettings)
+      .orderBy(asc(appSettings.key))
+      .all() as AppSettingRow[];
+  }
+
+  getAppSetting(key: string): AppSettingRow | null {
+    const row = this.db
+      .select({
+        key: appSettings.key,
+        value: appSettings.value,
+        updated_at: appSettings.updatedAt,
+      })
+      .from(appSettings)
+      .where(eq(appSettings.key, key))
+      .get();
+
+    return row ? row as AppSettingRow : null;
+  }
+
+  setAppSetting(key: string, value: string | null): void {
+    this.db
+      .insert(appSettings)
+      .values({
+        key,
+        value,
+        updatedAt: now(),
+      })
+      .onConflictDoUpdate({
+        target: appSettings.key,
+        set: {
+          value,
+          updatedAt: now(),
+        },
+      })
+      .run();
+  }
+
+  recordAppMetadata(input: {
+    version: string;
+    releaseChannel: string;
+    cliSymlinkInstalled?: boolean | null;
+  }): void {
+    this.setAppSetting(APP_SETTING_KEYS.installedAppVersion, input.version);
+    this.setAppSetting(APP_SETTING_KEYS.releaseChannel, input.releaseChannel);
+    if (typeof input.cliSymlinkInstalled === "boolean") {
+      this.setAppSetting(APP_SETTING_KEYS.cliSymlinkInstalled, input.cliSymlinkInstalled ? "1" : "0");
+    }
+  }
+
+  markOnboardingCompleted(version: string): void {
+    this.setAppSetting(APP_SETTING_KEYS.onboardingCompletedVersion, version);
+  }
+
+  markReleaseCheck(at = now()): void {
+    this.setAppSetting(APP_SETTING_KEYS.lastReleaseCheckAt, String(at));
+  }
+
+  getAppMetadata(): AppMetadataSnapshot {
+    const byKey = new Map(this.listAppSettings().map((row) => [row.key, row.value]));
+    const lastReleaseCheckAt = Number(byKey.get(APP_SETTING_KEYS.lastReleaseCheckAt) ?? "");
+    return {
+      onboardingCompletedVersion: byKey.get(APP_SETTING_KEYS.onboardingCompletedVersion) ?? null,
+      releaseChannel: byKey.get(APP_SETTING_KEYS.releaseChannel) ?? null,
+      installedAppVersion: byKey.get(APP_SETTING_KEYS.installedAppVersion) ?? null,
+      lastReleaseCheckAt: Number.isFinite(lastReleaseCheckAt) ? lastReleaseCheckAt : null,
+      cliSymlinkInstalled: (byKey.get(APP_SETTING_KEYS.cliSymlinkInstalled) ?? "0") === "1",
+    };
   }
 
   getDaemonState(): DaemonStatusRow | null {
@@ -697,6 +900,504 @@ export class CuedDatabase {
       errorSummary: input.errorSummary === undefined ? current.error_summary : input.errorSummary,
       updatedAt: now(),
     }).where(eq(authSessions.id, input.id)).run();
+  }
+
+  queueOutboundMessage(input: {
+    platform: Platform;
+    accountKey: string;
+    target: string;
+    threadId?: string | null;
+    text: string;
+    metadata?: unknown;
+  }): string {
+    const id = randomUUID();
+    const timestamp = now();
+    this.db.insert(outboundMessages).values({
+      id,
+      platform: input.platform,
+      accountKey: input.accountKey,
+      target: input.target,
+      threadId: input.threadId ?? null,
+      text: input.text,
+      status: "pending",
+      attemptCount: 0,
+      scheduledFor: timestamp,
+      startedAt: null,
+      finishedAt: null,
+      lastError: null,
+      metadataJson: input.metadata ? JSON.stringify(input.metadata) : null,
+      createdAt: timestamp,
+      updatedAt: timestamp,
+    }).run();
+    return id;
+  }
+
+  resolveSignalSendTarget(targetInput: string): SignalSendResolution | null {
+    const trimmed = targetInput.trim();
+    if (trimmed.length === 0) {
+      return null;
+    }
+
+    if (trimmed.startsWith("group:")) {
+      return {
+        target: trimmed,
+        threadId: trimmed,
+        resolution: "group",
+        matchedContactIds: [],
+        matchedName: null,
+      };
+    }
+
+    const directLookupValue = normalizeSignalHandleLookupValue(trimmed);
+    const explicitContact = this.sqlite
+      .prepare(`
+        SELECT id, name
+        FROM contacts
+        WHERE id = ?
+        LIMIT 1
+      `)
+      .get(trimmed) as { id: string; name: string | null } | undefined;
+
+    const matchingHandleContacts = this.sqlite
+      .prepare(`
+        SELECT DISTINCT c.id, c.name
+        FROM contacts c
+        JOIN contact_handles h ON h.contact_id = c.id
+        WHERE lower(h.value) = lower(?)
+           OR lower(h.normalized_value) = lower(?)
+        ORDER BY c.updated_at DESC, c.id ASC
+      `)
+      .all(trimmed, directLookupValue) as Array<{ id: string; name: string | null }>;
+
+    const exactNameContacts = this.sqlite
+      .prepare(`
+        SELECT id, name
+        FROM contacts
+        WHERE lower(name) = lower(?)
+        ORDER BY updated_at DESC, id ASC
+      `)
+      .all(trimmed) as Array<{ id: string; name: string | null }>;
+
+    const seedContacts = explicitContact
+      ? [explicitContact]
+      : matchingHandleContacts.length > 0
+        ? matchingHandleContacts
+        : exactNameContacts;
+
+    const matchedName = seedContacts.find((contact) => typeof contact.name === "string" && contact.name.trim().length > 0)?.name ?? null;
+
+    const contactIds = new Set(seedContacts.map((contact) => contact.id));
+    if (matchedName) {
+      const sameNameContacts = this.sqlite
+        .prepare(`
+          SELECT id
+          FROM contacts
+          WHERE lower(name) = lower(?)
+          ORDER BY updated_at DESC, id ASC
+        `)
+        .all(matchedName) as Array<{ id: string }>;
+      for (const contact of sameNameContacts) {
+        contactIds.add(contact.id);
+      }
+    }
+
+    const candidateContactIds = [...contactIds];
+    if (candidateContactIds.length > 0) {
+      const placeholders = candidateContactIds.map(() => "?").join(", ");
+      const handles = this.sqlite
+        .prepare(`
+          SELECT contact_id, type, value, normalized_value, platform
+          FROM contact_handles
+          WHERE contact_id IN (${placeholders})
+          ORDER BY contact_id ASC, platform ASC, type ASC
+        `)
+        .all(...candidateContactIds) as Array<{
+          contact_id: string;
+          type: string;
+          value: string;
+          normalized_value: string;
+          platform: string | null;
+        }>;
+
+      const rankedHandle = handles
+        .map((handle) => {
+          if (handle.platform === "signal" && handle.type === "signal_id") {
+            const recipient = handle.normalized_value.trim().toLowerCase();
+            return {
+              rank: 0,
+              target: recipient,
+              resolution: "signal_id" as const,
+            } satisfies SignalSendCandidate;
+          }
+          if (handle.platform === "signal" && handle.type === "phone") {
+            const recipient = normalizePhone(handle.value) || normalizePhone(handle.normalized_value);
+            if (!recipient) {
+              return null;
+            }
+            return {
+              rank: 1,
+              target: recipient,
+              resolution: "signal_phone" as const,
+            } satisfies SignalSendCandidate;
+          }
+          if (handle.type === "phone") {
+            const recipient = normalizePhone(handle.value) || normalizePhone(handle.normalized_value);
+            if (!recipient) {
+              return null;
+            }
+            return {
+              rank: 2,
+              target: recipient,
+              resolution: "phone" as const,
+            } satisfies SignalSendCandidate;
+          }
+          if (handle.type === "imessage_handle") {
+            const recipient = normalizePhone(handle.value) || normalizePhone(handle.normalized_value);
+            if (!recipient) {
+              return null;
+            }
+            return {
+              rank: 3,
+              target: recipient,
+              resolution: "imessage_phone" as const,
+            } satisfies SignalSendCandidate;
+          }
+          return null;
+        })
+        .filter((value): value is SignalSendCandidate => value !== null)
+        .sort((left, right) =>
+          left.rank - right.rank || left.target.localeCompare(right.target));
+
+      if (rankedHandle[0]) {
+        return {
+          target: rankedHandle[0].target,
+          threadId: buildSignalDmThreadId(rankedHandle[0].target, rankedHandle[0].resolution),
+          resolution: rankedHandle[0].resolution,
+          matchedContactIds: candidateContactIds,
+          matchedName,
+        };
+      }
+    }
+
+    if (isSignalUuid(trimmed)) {
+      return {
+        target: trimmed.toLowerCase(),
+        threadId: buildSignalDmThreadId(trimmed, "signal_id"),
+        resolution: "signal_id",
+        matchedContactIds: [],
+        matchedName: null,
+      };
+    }
+
+    const directPhone = normalizePhone(trimmed);
+    if (directPhone) {
+      return {
+        target: directPhone,
+        threadId: buildSignalDmThreadId(directPhone, "passthrough"),
+        resolution: "passthrough",
+        matchedContactIds: candidateContactIds,
+        matchedName,
+      };
+    }
+
+    return null;
+  }
+
+  resolveWhatsAppSendTarget(targetInput: string): WhatsAppSendResolution | null {
+    const trimmed = targetInput.trim();
+    if (trimmed.length === 0) {
+      return null;
+    }
+
+    const normalizedInput = normalizeWhatsAppHandleLookupValue(trimmed);
+    const directJid = normalizeWhatsAppJid(trimmed);
+    if (directJid.endsWith("@g.us")) {
+      return {
+        target: directJid,
+        threadId: `group:${directJid}`,
+        resolution: "group",
+        matchedContactIds: [],
+        matchedName: null,
+      };
+    }
+
+    const explicitContact = this.sqlite
+      .prepare(`
+        SELECT id, name
+        FROM contacts
+        WHERE id = ?
+        LIMIT 1
+      `)
+      .get(trimmed) as { id: string; name: string | null } | undefined;
+
+    const matchingHandleContacts = this.sqlite
+      .prepare(`
+        SELECT DISTINCT c.id, c.name
+        FROM contacts c
+        JOIN contact_handles h ON h.contact_id = c.id
+        WHERE lower(h.value) = lower(?)
+           OR lower(h.normalized_value) = lower(?)
+        ORDER BY c.updated_at DESC, c.id ASC
+      `)
+      .all(trimmed, normalizedInput) as Array<{ id: string; name: string | null }>;
+
+    const exactNameContacts = this.sqlite
+      .prepare(`
+        SELECT id, name
+        FROM contacts
+        WHERE lower(name) = lower(?)
+        ORDER BY updated_at DESC, id ASC
+      `)
+      .all(trimmed) as Array<{ id: string; name: string | null }>;
+
+    const seedContacts = explicitContact
+      ? [explicitContact]
+      : matchingHandleContacts.length > 0
+        ? matchingHandleContacts
+        : exactNameContacts;
+    const matchedName = seedContacts.find((contact) => typeof contact.name === "string" && contact.name.trim().length > 0)?.name ?? null;
+
+    const contactIds = new Set(seedContacts.map((contact) => contact.id));
+    if (matchedName) {
+      const sameNameContacts = this.sqlite
+        .prepare(`
+          SELECT id
+          FROM contacts
+          WHERE lower(name) = lower(?)
+          ORDER BY updated_at DESC, id ASC
+        `)
+        .all(matchedName) as Array<{ id: string }>;
+      for (const contact of sameNameContacts) {
+        contactIds.add(contact.id);
+      }
+    }
+
+    const candidateContactIds = [...contactIds];
+    if (candidateContactIds.length > 0) {
+      const placeholders = candidateContactIds.map(() => "?").join(", ");
+      const handles = this.sqlite
+        .prepare(`
+          SELECT contact_id, type, value, normalized_value, platform
+          FROM contact_handles
+          WHERE contact_id IN (${placeholders})
+          ORDER BY contact_id ASC, platform ASC, type ASC
+        `)
+        .all(...candidateContactIds) as Array<{
+          contact_id: string;
+          type: string;
+          value: string;
+          normalized_value: string;
+          platform: string | null;
+        }>;
+
+      const rankedHandle = handles
+        .map((handle) => {
+          if (handle.platform === "whatsapp" && handle.type === "whatsapp_jid") {
+            return {
+              rank: 0,
+              target: normalizeWhatsAppJid(handle.normalized_value || handle.value),
+              resolution: "whatsapp_jid" as const,
+            } satisfies WhatsAppSendCandidate;
+          }
+          if (handle.type === "phone") {
+            const recipient = normalizePhone(handle.value) || normalizePhone(handle.normalized_value);
+            if (!recipient) {
+              return null;
+            }
+            return {
+              rank: 1,
+              target: `${recipient.slice(1)}@s.whatsapp.net`,
+              resolution: "phone" as const,
+            } satisfies WhatsAppSendCandidate;
+          }
+          return null;
+        })
+        .filter((value): value is WhatsAppSendCandidate => value !== null)
+        .sort((left, right) =>
+          left.rank - right.rank || left.target.localeCompare(right.target));
+
+      if (rankedHandle[0]) {
+        return {
+          target: rankedHandle[0].target,
+          threadId: buildWhatsAppThreadId(rankedHandle[0].target),
+          resolution: rankedHandle[0].resolution,
+          matchedContactIds: candidateContactIds,
+          matchedName,
+        };
+      }
+    }
+
+    if (directJid.includes("@")) {
+      return {
+        target: directJid,
+        threadId: buildWhatsAppThreadId(directJid),
+        resolution: directJid.endsWith("@g.us") ? "group" : "passthrough",
+        matchedContactIds: candidateContactIds,
+        matchedName,
+      };
+    }
+
+    const directPhone = normalizePhone(trimmed);
+    if (directPhone) {
+      const jid = `${directPhone.slice(1)}@s.whatsapp.net`;
+      return {
+        target: jid,
+        threadId: buildWhatsAppThreadId(jid),
+        resolution: "passthrough",
+        matchedContactIds: candidateContactIds,
+        matchedName,
+      };
+    }
+
+    return null;
+  }
+
+  findMessageByPlatformKey(platform: Platform, accountKey: string, platformMessageId: string): {
+    id: string;
+    sender_source_key: string | null;
+    sent_at: number | null;
+    content: string | null;
+    status: string | null;
+    delivered_at: number | null;
+    read_at: number | null;
+  } | null {
+    return this.sqlite
+      .prepare(`
+        SELECT
+          id,
+          sender_source_key,
+          sent_at,
+          content,
+          status,
+          delivered_at,
+          read_at
+        FROM messages
+        WHERE platform = ?
+          AND account_key = ?
+          AND platform_message_id = ?
+        LIMIT 1
+      `)
+      .get(platform, accountKey, platformMessageId) as {
+        id: string;
+        sender_source_key: string | null;
+        sent_at: number | null;
+        content: string | null;
+        status: string | null;
+        delivered_at: number | null;
+        read_at: number | null;
+      } | undefined ?? null;
+  }
+
+  claimNextOutboundMessage(platform?: Platform): OutboundMessageRow | null {
+    return this.db.transaction((tx) => {
+      const whereCondition = platform
+        ? and(
+            eq(outboundMessages.status, "pending"),
+            eq(outboundMessages.platform, platform),
+            sql`${outboundMessages.scheduledFor} <= ${now()}`,
+          )
+        : and(
+            eq(outboundMessages.status, "pending"),
+            sql`${outboundMessages.scheduledFor} <= ${now()}`,
+          );
+
+      const row = tx
+        .select({
+          id: outboundMessages.id,
+          platform: outboundMessages.platform,
+          account_key: outboundMessages.accountKey,
+          target: outboundMessages.target,
+          thread_id: outboundMessages.threadId,
+          text: outboundMessages.text,
+          status: outboundMessages.status,
+          attempt_count: outboundMessages.attemptCount,
+          scheduled_for: outboundMessages.scheduledFor,
+          started_at: outboundMessages.startedAt,
+          finished_at: outboundMessages.finishedAt,
+          last_error: outboundMessages.lastError,
+          metadata_json: outboundMessages.metadataJson,
+          created_at: outboundMessages.createdAt,
+          updated_at: outboundMessages.updatedAt,
+        })
+        .from(outboundMessages)
+        .where(whereCondition)
+        .orderBy(asc(outboundMessages.scheduledFor), asc(outboundMessages.createdAt))
+        .limit(1)
+        .get() as OutboundMessageRow | undefined;
+
+      if (!row) {
+        return null;
+      }
+
+      tx.update(outboundMessages)
+        .set({
+          status: "sending",
+          attemptCount: row.attempt_count + 1,
+          startedAt: now(),
+          updatedAt: now(),
+        })
+        .where(eq(outboundMessages.id, row.id))
+        .run();
+
+      return {
+        ...row,
+        status: "sending",
+        attempt_count: row.attempt_count + 1,
+        started_at: now(),
+        updated_at: now(),
+      };
+    });
+  }
+
+  completeOutboundMessage(id: string): void {
+    this.db.update(outboundMessages).set({
+      status: "sent",
+      finishedAt: now(),
+      updatedAt: now(),
+      lastError: null,
+    }).where(eq(outboundMessages.id, id)).run();
+  }
+
+  failOutboundMessage(input: {
+    id: string;
+    retryable: boolean;
+    error: string;
+    retryDelayMs?: number;
+    maxAttempts?: number;
+  }): void {
+    const current = this.db
+      .select({
+        attempt_count: outboundMessages.attemptCount,
+      })
+      .from(outboundMessages)
+      .where(eq(outboundMessages.id, input.id))
+      .get() as { attempt_count: number } | undefined;
+
+    if (!current) {
+      throw new Error(`Outbound message not found: ${input.id}`);
+    }
+
+    const shouldRetry = input.retryable && current.attempt_count < (input.maxAttempts ?? 3);
+    this.db.update(outboundMessages).set({
+      status: shouldRetry ? "pending" : "failed",
+      scheduledFor: shouldRetry ? now() + (input.retryDelayMs ?? 5_000) : now(),
+      finishedAt: shouldRetry ? null : now(),
+      updatedAt: now(),
+      lastError: input.error,
+    }).where(eq(outboundMessages.id, input.id)).run();
+  }
+
+  hasQueuedOutboundMessages(platform?: Platform): boolean {
+    const whereCondition = platform
+      ? and(eq(outboundMessages.status, "pending"), eq(outboundMessages.platform, platform))
+      : eq(outboundMessages.status, "pending");
+    const row = this.db
+      .select({ id: outboundMessages.id })
+      .from(outboundMessages)
+      .where(whereCondition)
+      .limit(1)
+      .get();
+    return Boolean(row);
   }
 
   failInProgressRuns(errorMessage: string): number {
@@ -1559,5 +2260,9 @@ export class CuedDatabase {
 export function openCuedDatabase(dbPath?: string): CuedDatabase {
   const db = new CuedDatabase(dbPath);
   db.migrate();
+  db.recordAppMetadata({
+    version: getCurrentAppVersion(),
+    releaseChannel: getCurrentReleaseChannel(),
+  });
   return db;
 }

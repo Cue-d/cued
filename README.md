@@ -31,9 +31,10 @@ apps/cued (daemon, auth/session model, sync orchestration, projection)
 | Requirement | Version | Check |
 |-------------|---------|-------|
 | Node.js | 22+ | `node --version` |
-| pnpm | 9+ | `pnpm --version` |
-| macOS | 15+ | `sw_vers` |
+| pnpm | 10+ | `pnpm --version` |
+| macOS | 13+ (Apple Silicon) | `sw_vers` |
 | Swift | 6+ | `swift --version` |
+| Go | 1.25.1+ (source builds only) | `go version` |
 
 ## Quick Start
 
@@ -41,6 +42,7 @@ apps/cued (daemon, auth/session model, sync orchestration, projection)
 pnpm install
 pnpm --dir apps/cued build
 swift build --package-path native/macos/CuedNative -c release
+GOWORK=off go build -C native/helpers/whatsapp-go
 
 cued install
 cued setup
@@ -90,12 +92,14 @@ native/
 | `pnpm dev` | Run the local CLI in dev mode |
 | `pnpm typecheck` | Type check `apps/cued` |
 | `pnpm test` | Run `apps/cued` tests |
-| `pnpm build:app:macos` | Build `CuedDaemon.app` |
-| `pnpm build:dmg:macos` | Build the DMG |
-| `pnpm sign:notarize:macos` | Sign and notarize the app |
+| `pnpm build:app:macos` | Build the local `Cued.app` dev bundle |
+| `pnpm build:dmg:macos` | Build signed/notarized release artifacts and output the DMG path |
+| `pnpm build:tarball:macos` | Build signed/notarized release artifacts and output the Apple Silicon tarball path |
+| `pnpm sign:notarize:macos` | Build signed/notarized release artifacts |
 | `pnpm permissions:macos` | Open/request macOS permissions |
 
 ## Notes
 
 - `apps/cued` is the only product runtime moving forward.
 - The repo no longer ships the Electron app or the old shared/cloud packages.
+- Internal release artifacts currently target Apple Silicon Macs only.

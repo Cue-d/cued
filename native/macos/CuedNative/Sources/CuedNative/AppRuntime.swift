@@ -32,7 +32,7 @@ struct AppStatusSnapshot {
   let cliSymlinkInstalled: Bool
 }
 
-final class AppStatusStore {
+final class AppStatusStore: @unchecked Sendable {
   private let dbPath: String
 
   init(dbPath: String) {
@@ -542,7 +542,7 @@ final class DaemonSupervisor {
     _ = launchShellCommand(permissionsCommand, environment: environment)
   }
 
-  func runCLI(arguments: [String]) -> (status: Int32, stdout: String, stderr: String)? {
+  nonisolated func runCLI(arguments: [String]) -> (status: Int32, stdout: String, stderr: String)? {
     if let daemonLaunchPath, !daemonLaunchPath.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
       let process = Process()
       process.executableURL = URL(fileURLWithPath: daemonLaunchPath)
@@ -567,7 +567,7 @@ final class DaemonSupervisor {
     return runShellCommandAndCapture(command, environment: daemonEnvironment())
   }
 
-  private func daemonEnvironment() -> [String: String] {
+  private nonisolated func daemonEnvironment() -> [String: String] {
     var environment = ProcessInfo.processInfo.environment
 
     if let executablePath = Bundle.main.executablePath,
@@ -614,7 +614,7 @@ final class DaemonSupervisor {
     return launchShellCommand(daemonCommand, environment: daemonEnvironment())
   }
 
-  private func launchShellCommand(_ command: String, environment: [String: String]? = nil) -> Process? {
+  private nonisolated func launchShellCommand(_ command: String, environment: [String: String]? = nil) -> Process? {
     let process = Process()
     process.executableURL = URL(fileURLWithPath: "/bin/zsh")
     process.arguments = ["-lc", command]
@@ -638,7 +638,7 @@ final class DaemonSupervisor {
     }
   }
 
-  private func runShellCommandAndCapture(
+  private nonisolated func runShellCommandAndCapture(
     _ command: String,
     environment: [String: String]? = nil
   ) -> (status: Int32, stdout: String, stderr: String)? {
@@ -663,7 +663,7 @@ final class DaemonSupervisor {
     }
   }
 
-  private func shellCommand(_ command: String, environment: [String: String]) -> String {
+  private nonisolated func shellCommand(_ command: String, environment: [String: String]) -> String {
     let exports = environment
       .sorted { $0.key < $1.key }
       .map { "export \($0.key)=\(shellEscape($0.value))" }
@@ -671,7 +671,7 @@ final class DaemonSupervisor {
     return exports.isEmpty ? command : "\(exports); \(command)"
   }
 
-  private func shellEscape(_ value: String) -> String {
+  private nonisolated func shellEscape(_ value: String) -> String {
     "'\(value.replacingOccurrences(of: "'", with: "'\"'\"'"))'"
   }
 
@@ -817,7 +817,7 @@ private final class LegacyOnboardingWindowController: NSWindowController {
     let daemonSupervisor = self.daemonSupervisor
     let statusStore = self.statusStore
 
-    DispatchQueue.global(qos: .userInitiated).async {
+    Task.detached(priority: .userInitiated) { [daemonSupervisor, statusStore] in
       _ = daemonSupervisor.runCLI(arguments: ["integrations", "refresh"])
       let snapshot = statusStore.readSnapshot()
       let integrations = Self.decodeJSON(
@@ -836,7 +836,7 @@ private final class LegacyOnboardingWindowController: NSWindowController {
         arguments: ["cli", "status"]
       )
 
-      DispatchQueue.main.async {
+      await MainActor.run {
         self.isRefreshing = false
         self.rebuild(
           snapshot: snapshot,
@@ -848,7 +848,7 @@ private final class LegacyOnboardingWindowController: NSWindowController {
     }
   }
 
-  private static func decodeJSON<T: Decodable>(
+  private nonisolated static func decodeJSON<T: Decodable>(
     daemonSupervisor: DaemonSupervisor,
     _ type: T.Type,
     arguments: [String]
@@ -1235,12 +1235,12 @@ private final class LegacyOnboardingWindowController: NSWindowController {
     let iconWrap = NSView()
     iconWrap.translatesAutoresizingMaskIntoConstraints = false
     iconWrap.wantsLayer = true
-    iconWrap.layer?.cornerRadius = 72
+    iconWrap.layer?.cornerRadius = 58
 
     let glow = NSView()
     glow.translatesAutoresizingMaskIntoConstraints = false
     glow.wantsLayer = true
-    glow.layer?.cornerRadius = 62
+    glow.layer?.cornerRadius = 52
     glow.layer?.backgroundColor = NSColor.controlAccentColor.withAlphaComponent(0.18).cgColor
     iconWrap.addSubview(glow)
 
@@ -1248,21 +1248,21 @@ private final class LegacyOnboardingWindowController: NSWindowController {
     icon.translatesAutoresizingMaskIntoConstraints = false
     icon.imageScaling = .scaleProportionallyUpOrDown
     icon.wantsLayer = true
-    icon.layer?.cornerRadius = 22
+    icon.layer?.cornerRadius = 18
     icon.layer?.masksToBounds = true
     iconWrap.addSubview(icon)
 
     NSLayoutConstraint.activate([
-      iconWrap.widthAnchor.constraint(equalToConstant: 136),
-      iconWrap.heightAnchor.constraint(equalToConstant: 136),
+      iconWrap.widthAnchor.constraint(equalToConstant: 112),
+      iconWrap.heightAnchor.constraint(equalToConstant: 112),
       glow.centerXAnchor.constraint(equalTo: iconWrap.centerXAnchor),
       glow.centerYAnchor.constraint(equalTo: iconWrap.centerYAnchor),
-      glow.widthAnchor.constraint(equalToConstant: 124),
-      glow.heightAnchor.constraint(equalToConstant: 124),
+      glow.widthAnchor.constraint(equalToConstant: 104),
+      glow.heightAnchor.constraint(equalToConstant: 104),
       icon.centerXAnchor.constraint(equalTo: iconWrap.centerXAnchor),
       icon.centerYAnchor.constraint(equalTo: iconWrap.centerYAnchor),
-      icon.widthAnchor.constraint(equalToConstant: 92),
-      icon.heightAnchor.constraint(equalToConstant: 92),
+      icon.widthAnchor.constraint(equalToConstant: 76),
+      icon.heightAnchor.constraint(equalToConstant: 76),
     ])
     container.addArrangedSubview(iconWrap)
 
@@ -1539,9 +1539,9 @@ private final class LegacyOnboardingWindowController: NSWindowController {
   private func runAction(arguments: [String]) {
     rebuildLoading()
     let daemonSupervisor = self.daemonSupervisor
-    DispatchQueue.global(qos: .userInitiated).async {
+    Task.detached(priority: .userInitiated) { [daemonSupervisor] in
       _ = daemonSupervisor.runCLI(arguments: arguments)
-      DispatchQueue.main.async {
+      await MainActor.run {
         self.onRefresh()
         self.refresh()
       }

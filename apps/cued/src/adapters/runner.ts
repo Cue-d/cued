@@ -1,4 +1,5 @@
 import { spawn } from "node:child_process";
+import { existsSync } from "node:fs";
 import type { AdapterWorkerOutput, SyncBundle } from "./types.js";
 import { getAdapterDefinition } from "./registry.js";
 import type { AdapterPlatform } from "../types/provider.js";
@@ -13,8 +14,10 @@ export async function runAdapter(
     throw new Error(`No adapter registered for platform '${platform}'`);
   }
 
+  const workerEntrypoint = resolveWorkerEntrypoint(definition.workerEntrypoint);
+
   return new Promise((resolve, reject) => {
-    const child = spawn(process.execPath, [definition.workerEntrypoint], {
+    const child = spawn(process.execPath, [...process.execArgv, workerEntrypoint], {
       stdio: ["ignore", "pipe", "pipe"],
       env: {
         ...process.env,
@@ -100,4 +103,19 @@ function parseWorkerError(stdout: string): string | null {
   } catch {
     return null;
   }
+}
+
+function resolveWorkerEntrypoint(entrypoint: string): string {
+  if (existsSync(entrypoint)) {
+    return entrypoint;
+  }
+
+  if (entrypoint.endsWith(".js")) {
+    const tsEntrypoint = `${entrypoint.slice(0, -3)}.ts`;
+    if (existsSync(tsEntrypoint)) {
+      return tsEntrypoint;
+    }
+  }
+
+  return entrypoint;
 }

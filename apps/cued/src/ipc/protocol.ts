@@ -8,6 +8,15 @@ export type DaemonRequest =
   | { id: string; command: "integrations-disconnect"; platform: string; accountKey?: string }
   | { id: string; command: "integrations-enable"; platform: string; accountKey?: string }
   | { id: string; command: "integrations-disable"; platform: string; accountKey?: string }
+  | {
+      id: string;
+      command: "message-send";
+      platform: string;
+      target: string;
+      text: string;
+      accountKey?: string;
+      threadId?: string;
+    }
   | { id: string; command: "sync-run"; source?: string }
   | { id: string; command: "sync-resume" }
   | { id: string; command: "rebuild" }

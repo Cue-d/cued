@@ -4,7 +4,9 @@ import process from "node:process";
 import { existsSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
-import { CUED_DB_PATH, CUED_LOG_DIR, CUED_SOCKET_PATH, ensureCuedDirs } from "./config.js";
+import { execFileSync } from "node:child_process";
+import { getCurrentAppVersion, getCurrentReleaseChannel } from "./app-metadata.js";
+import { CUED_DB_PATH, CUED_SOCKET_PATH, ensureCuedDirs } from "./config.js";
 import { openCuedDatabase } from "./db/database.js";
 import { buildDoctorReport } from "./diagnostics/doctor.js";
 import { runDaemon } from "./daemon/server.js";
@@ -25,13 +27,17 @@ import { runAuthSessionSync } from "./integrations/auth-runtime.js";
 import { doctorHooksConfig, emitHookEvent, HOOK_EVENT_NAMES, initHooksConfig, testHookEvent } from "./hooks/service.js";
 import {
   getAppBundleInfo,
+  getCLISymlinkStatus,
   getLaunchAgentStatus,
+  installCLISymlink,
   installLaunchAgent,
   installMacOSApp,
+  resolveInstalledAppPath,
   uninstallLaunchAgent,
 } from "./macos/install.js";
+import { followLogs, getDaemonLogPath, parseLogsCommandArgs, readRecentLogLines } from "./logs.js";
+import { resolveHostOS } from "./platform-capabilities.js";
 import { runSetupTUI } from "./setup.js";
-import { execFileSync } from "node:child_process";
 
 const DIST_ROOT = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = join(DIST_ROOT, "../../..");
@@ -61,6 +67,8 @@ Usage:
   cued doctor
   cued logs
   cued setup
+  cued cli install|status
+  cued onboarding complete|status
   cued launchd install|uninstall|status
   cued permissions doctor|request [--all|--contacts|--messages|--full-disk-access|--accessibility]
   cued integrations list
@@ -73,6 +81,7 @@ Usage:
   cued hooks init
   cued hooks doctor
   cued hooks test <event>
+  cued send <platform> <target> <text> [account]
   cued sync run [source]
   cued sync resume
   cued rebuild
@@ -88,6 +97,15 @@ Paths:
 
 function printJson(value: unknown): void {
   console.log(JSON.stringify(value, null, 2));
+}
+
+function getAppStatusMetadata(db: ReturnType<typeof openCuedDatabase>) {
+  return {
+    hostOs: resolveHostOS(),
+    version: getCurrentAppVersion(),
+    releaseChannel: getCurrentReleaseChannel(),
+    install: db.getAppMetadata(),
+  };
 }
 
 async function safeEmitHookEvent(event: typeof HOOK_EVENT_NAMES[number], payload: unknown): Promise<void> {
@@ -127,6 +145,19 @@ async function handleLocalIntegrationCommand(
             errorSummary: result.errorSummary ?? null,
           });
           if (completed.integration.authState === "authenticated") {
+            if (!db.hasQueuedOrRunningRun(completed.integration.platform, completed.integration.accountKey)) {
+              db.queueSyncRun({
+                platform: completed.integration.platform,
+                accountKey: completed.integration.accountKey,
+                runType: "sync",
+                trigger: "integration_authenticated",
+                details: {
+                  source: completed.integration.platform,
+                  accountKey: completed.integration.accountKey,
+                  trigger: "integration_authenticated",
+                },
+              });
+            }
             await safeEmitHookEvent("integration.authenticated", completed);
           }
           return completed;
@@ -189,10 +220,21 @@ async function main(): Promise<void> {
   }
 
   if (command === "logs") {
-    printJson({
-      logDir: CUED_LOG_DIR,
-      message: "Structured log persistence is not implemented yet",
-    });
+    const options = parseLogsCommandArgs([subcommand, ...rest].filter((value): value is string => Boolean(value)));
+    if (options.pathOnly) {
+      console.log(getDaemonLogPath());
+      return;
+    }
+    if (options.follow) {
+      await followLogs({ tail: options.tail });
+      return;
+    }
+    const lines = readRecentLogLines(options.tail);
+    if (lines.length === 0) {
+      console.log(`No daemon logs found at ${getDaemonLogPath()}`);
+      return;
+    }
+    console.log(lines.join("\n"));
     return;
   }
 
@@ -201,11 +243,13 @@ async function main(): Promise<void> {
     printJson(
       command === "doctor"
         ? {
-            ...buildDoctorReport(db),
+            app: getAppStatusMetadata(db),
+            ...await buildDoctorReport(db),
             projection: db.getProjectionBacklog(),
             hooks: doctorHooksConfig(),
           }
         : {
+            app: getAppStatusMetadata(db),
             daemon: db.getDaemonState(),
             overview: db.getOverview(),
             projection: db.getProjectionBacklog(),
@@ -249,6 +293,51 @@ async function main(): Promise<void> {
   let response;
 
   switch (command) {
+    case "cli":
+      switch (subcommand) {
+        case "install": {
+          const appPath = resolveInstalledAppPath();
+          if (!appPath) {
+            throw new Error("Cued.app is not installed.");
+          }
+          const db = openCuedDatabase();
+          try {
+            const cliSymlinkPath = installCLISymlink(appPath);
+            db.setAppSetting("cli_symlink_installed", "1");
+            printJson({
+              appPath,
+              cliSymlinkPath,
+              status: getCLISymlinkStatus(),
+            });
+          } finally {
+            db.close();
+          }
+          return;
+        }
+        case "status":
+          printJson(getCLISymlinkStatus());
+          return;
+        default:
+          throw new Error("Usage: cued cli install | status");
+      }
+    case "onboarding": {
+      const db = openCuedDatabase();
+      try {
+        switch (subcommand) {
+          case "complete":
+            db.markOnboardingCompleted(getCurrentAppVersion());
+            printJson(db.getAppMetadata());
+            return;
+          case "status":
+            printJson(db.getAppMetadata());
+            return;
+          default:
+            throw new Error("Usage: cued onboarding complete | status");
+        }
+      } finally {
+        db.close();
+      }
+    }
     case "launchd":
       switch (subcommand) {
         case "install":
@@ -271,7 +360,7 @@ async function main(): Promise<void> {
             try {
               printJson({
                 app: getAppBundleInfo(),
-                doctor: buildDoctorReport(db),
+                doctor: await buildDoctorReport(db),
               });
             } finally {
               db.close();
@@ -372,6 +461,19 @@ async function main(): Promise<void> {
         break;
       }
       throw new Error("Usage: cued sync run [source] | cued sync resume");
+    case "send":
+      if (!subcommand || !rest[0]) {
+        throw new Error("Usage: cued send <platform> <target> <text> [account]");
+      }
+      response = await sendDaemonRequest({
+        command: "message-send",
+        platform: subcommand,
+        target: rest[0],
+        text: rest[1] ?? "",
+        accountKey: rest[2],
+        threadId: rest[0],
+      });
+      break;
     case "rebuild":
       response = await sendDaemonRequest({ command: "rebuild" });
       break;

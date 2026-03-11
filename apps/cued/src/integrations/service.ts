@@ -1,6 +1,11 @@
 import { execFileSync } from "node:child_process";
 import { existsSync, rmSync } from "node:fs";
 import { join } from "node:path";
+import {
+  resolveHostOS,
+  summarizePlatformCapability,
+  type PlatformCapabilitySummary,
+} from "../platform-capabilities.js";
 import { CUED_BROWSER_DIR } from "../config.js";
 import { DEFAULT_CHAT_DB_PATH, IMessageReader } from "../adapters/imessage/reader.js";
 import { listAdapterPlatforms } from "../adapters/registry.js";
@@ -9,10 +14,12 @@ import {
   type AuthSessionState,
   type ConnectionKind,
   getDefaultAccountKeyForPlatform,
+  isOnboardingVisiblePlatform,
   type IntegrationAuthState,
   type IntegrationLaunchStrategy,
   type IntegrationRuntimeKind,
   isRequestableIntegrationPlatform,
+  PLATFORM_VALUES,
   type Platform,
   parseIntegrationAuthState,
   parseIntegrationRuntimeKind,
@@ -50,6 +57,7 @@ export interface IntegrationStateSummary {
   lastSeenAt: number;
   updatedAt: number;
   latestAuthSessionId: string | null;
+  capability: PlatformCapabilitySummary;
 }
 
 export interface AuthSessionSummary {
@@ -412,6 +420,70 @@ function addSupportedByDaemonMetadata(integration: ManagedIntegrationState): Man
   };
 }
 
+function normalizePersistedRequestableIntegrationRow(
+  row: IntegrationStateRow,
+): {
+  syncCapable: boolean;
+  metadata: Record<string, unknown> | null;
+} | null {
+  if (!isRequestableIntegrationPlatform(row.platform)) {
+    return null;
+  }
+
+  const supportedByDaemon = new Set<string>(listAdapterPlatforms()).has(row.platform);
+  const metadata = row.metadata_json
+    ? (JSON.parse(row.metadata_json) as Record<string, unknown>)
+    : null;
+  return {
+    syncCapable: row.auth_state === "authenticated" && supportedByDaemon,
+    metadata: {
+      ...(metadata ?? {}),
+      supportedByDaemon,
+    },
+  };
+}
+
+function refreshPersistedRequestableIntegrationStates(db: CuedDatabase): number {
+  let refreshed = 0;
+
+  for (const row of db.listIntegrationStates()) {
+    const normalized = normalizePersistedRequestableIntegrationRow(row);
+    if (!normalized) {
+      continue;
+    }
+
+    const nextSyncCapable = normalized.syncCapable ? 1 : 0;
+    const currentMetadata = row.metadata_json
+      ? (JSON.parse(row.metadata_json) as Record<string, unknown>)
+      : null;
+    const currentSupportedByDaemon = currentMetadata?.supportedByDaemon;
+    if (
+      row.sync_capable === nextSyncCapable
+      && currentSupportedByDaemon === normalized.metadata?.supportedByDaemon
+    ) {
+      continue;
+    }
+
+    db.upsertIntegrationState({
+      platform: row.platform,
+      accountKey: row.account_key,
+      displayName: row.display_name,
+      authState: row.auth_state,
+      enabled: row.enabled === 1,
+      connectionKind: row.connection_kind,
+      syncCapable: normalized.syncCapable,
+      launchStrategy: row.launch_strategy,
+      launchTarget: row.launch_target,
+      importedFrom: row.imported_from,
+      artifactPaths: row.artifact_paths_json ? (JSON.parse(row.artifact_paths_json) as string[]) : [],
+      metadata: normalized.metadata,
+    });
+    refreshed += 1;
+  }
+
+  return refreshed;
+}
+
 function getKeychainMetadata(metadata: Record<string, unknown> | null): {
   keychainService: string | null;
   keychainAccount: string | null;
@@ -464,6 +536,7 @@ export function summarizeIntegrationStates(
   db: CuedDatabase,
   rows: IntegrationStateRow[],
 ): IntegrationStateSummary[] {
+  const hostOs = resolveHostOS();
   return rows.map((row) => ({
     platform: row.platform,
     accountKey: row.account_key,
@@ -481,7 +554,93 @@ export function summarizeIntegrationStates(
     lastSeenAt: row.last_seen_at,
     updatedAt: row.updated_at,
     latestAuthSessionId: db.getLatestAuthSession(row.platform, row.account_key)?.id ?? null,
+    capability: summarizePlatformCapability(
+      row.platform,
+      {
+        platform: row.platform,
+        authState: row.auth_state,
+      },
+      hostOs,
+    ),
   }));
+}
+
+function summarizeManagedIntegrationState(
+  db: CuedDatabase,
+  integration: ManagedIntegrationState,
+): IntegrationStateSummary {
+  const hostOs = resolveHostOS();
+  return {
+    platform: integration.platform,
+    accountKey: integration.accountKey,
+    displayName: integration.displayName,
+    authState: integration.authState,
+    enabled: integration.enabled,
+    connectionKind: integration.connectionKind,
+    runtimeKind: integration.runtimeKind,
+    syncCapable: integration.syncCapable,
+    launchStrategy: integration.launchStrategy ?? null,
+    launchTarget: integration.launchTarget ?? null,
+    importedFrom: integration.importedFrom,
+    artifactPaths: integration.artifactPaths ?? [],
+    metadata: integration.metadata ?? null,
+    lastSeenAt: now(),
+    updatedAt: now(),
+    latestAuthSessionId: db.getLatestAuthSession(integration.platform, integration.accountKey)?.id ?? null,
+    capability: summarizePlatformCapability(
+      integration.platform,
+      {
+        platform: integration.platform,
+        authState: integration.authState,
+      },
+      hostOs,
+    ),
+  };
+}
+
+function buildSetupIntegrations(db: CuedDatabase): IntegrationStateSummary[] {
+  const byPlatform = new Map<Platform, IntegrationStateSummary>();
+
+  for (const integration of listIntegrationStates(db)) {
+    if (!isOnboardingVisiblePlatform(integration.platform)) {
+      continue;
+    }
+    if (!byPlatform.has(integration.platform)) {
+      byPlatform.set(integration.platform, integration);
+    }
+  }
+
+  for (const managed of buildLocalIntegrationStates()) {
+    if (!byPlatform.has(managed.platform)) {
+      byPlatform.set(managed.platform, summarizeManagedIntegrationState(db, addSupportedByDaemonMetadata(managed)));
+    }
+  }
+
+  for (const platform of REQUESTABLE_INTEGRATION_PLATFORM_VALUES) {
+    if (byPlatform.has(platform)) {
+      continue;
+    }
+    const requested = getRequestableIntegration(platform);
+    byPlatform.set(platform, summarizeManagedIntegrationState(db, addSupportedByDaemonMetadata({
+      platform,
+      accountKey: getDefaultAccountKeyForPlatform(platform),
+      displayName: requested.displayName,
+      authState: "missing",
+      enabled: true,
+      connectionKind: requested.connectionKind,
+      runtimeKind: requested.runtimeKind,
+      syncCapable: false,
+      launchStrategy: requested.launchStrategy,
+      launchTarget: requested.launchTarget,
+      importedFrom: "bootstrap",
+      metadata: requested.metadata,
+    })));
+  }
+
+  return PLATFORM_VALUES
+    .filter(isOnboardingVisiblePlatform)
+    .map((platform) => byPlatform.get(platform))
+    .filter((value): value is IntegrationStateSummary => Boolean(value));
 }
 
 export function listIntegrationStates(db: CuedDatabase): IntegrationStateSummary[] {
@@ -515,6 +674,7 @@ export async function refreshManagedIntegrationStates(db: CuedDatabase): Promise
   refreshed: number;
   integrations: IntegrationStateSummary[];
 }> {
+  const refreshedPersistedRequestables = refreshPersistedRequestableIntegrationStates(db);
   const managed = buildLocalIntegrationStates().map(addSupportedByDaemonMetadata);
 
   for (const integration of managed) {
@@ -574,7 +734,8 @@ export async function refreshManagedIntegrationStates(db: CuedDatabase): Promise
   }
 
   return {
-    refreshed: managed.length
+    refreshed: refreshedPersistedRequestables
+      + managed.length
       + importedDesktop.filter((entry) => entry.imported).length
       + (signalManaged ? 1 : 0)
       + (whatsAppManaged ? 1 : 0),
@@ -847,10 +1008,14 @@ export function disconnectIntegration(
 }
 
 export function buildIntegrationStatus(db: CuedDatabase): {
+  hostOs: ReturnType<typeof resolveHostOS>;
   integrations: IntegrationStateSummary[];
+  setupIntegrations: IntegrationStateSummary[];
 } {
   return {
+    hostOs: resolveHostOS(),
     integrations: listIntegrationStates(db),
+    setupIntegrations: buildSetupIntegrations(db),
   };
 }
 

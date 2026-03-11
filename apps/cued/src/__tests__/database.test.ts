@@ -22,6 +22,67 @@ describe("CuedDatabase", () => {
     return db;
   }
 
+  function insertContact(
+    db: CuedDatabase,
+    input: {
+      id: string;
+      name: string;
+      updatedAt?: number;
+    },
+  ): void {
+    const sqlite = (db as unknown as {
+      sqlite: {
+        prepare: (sql: string) => {
+          run: (...params: unknown[]) => void;
+        };
+      };
+    }).sqlite;
+    const timestamp = input.updatedAt ?? Date.now();
+    sqlite.prepare(`
+      INSERT INTO contacts (id, kind, name, photo_url, company, archived, created_at, updated_at)
+      VALUES (?, 'person', ?, NULL, NULL, 0, ?, ?)
+    `).run(input.id, input.name, timestamp, timestamp);
+  }
+
+  function insertHandle(
+    db: CuedDatabase,
+    input: {
+      id: string;
+      contactId: string;
+      type: string;
+      value: string;
+      normalizedValue: string;
+      platform: string;
+      accountKey: string;
+      isDeterministic?: number;
+    },
+  ): void {
+    const sqlite = (db as unknown as {
+      sqlite: {
+        prepare: (sql: string) => {
+          run: (...params: unknown[]) => void;
+        };
+      };
+    }).sqlite;
+    const timestamp = Date.now();
+    sqlite.prepare(`
+      INSERT INTO contact_handles (
+        id, contact_id, type, value, normalized_value, platform, account_key, is_deterministic, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      input.id,
+      input.contactId,
+      input.type,
+      input.value,
+      input.normalizedValue,
+      input.platform,
+      input.accountKey,
+      input.isDeterministic ?? 1,
+      timestamp,
+      timestamp,
+    );
+  }
+
   it("creates the schema and exposes overview counts", () => {
     const db = createDb();
     expect(db.getOverview()).toEqual({
@@ -67,6 +128,29 @@ describe("CuedDatabase", () => {
     });
 
     expect(id).toBeTruthy();
+    db.close();
+  });
+
+  it("persists app settings and install metadata", () => {
+    const db = createDb();
+
+    db.recordAppMetadata({
+      version: "0.1.0-internal.1",
+      releaseChannel: "internal",
+      cliSymlinkInstalled: true,
+    });
+    db.markOnboardingCompleted("0.1.0-internal.1");
+    db.markReleaseCheck(123456789);
+
+    expect(db.getAppMetadata()).toEqual({
+      onboardingCompletedVersion: "0.1.0-internal.1",
+      releaseChannel: "internal",
+      installedAppVersion: "0.1.0-internal.1",
+      lastReleaseCheckAt: 123456789,
+      cliSymlinkInstalled: true,
+    });
+    expect(db.getAppSetting("installed_app_version")?.value).toBe("0.1.0-internal.1");
+
     db.close();
   });
 
@@ -152,6 +236,142 @@ describe("CuedDatabase", () => {
       }),
     );
     expect(db.getLatestAuthSession("slack", "workspace-a")?.id).toBe(sessionId);
+
+    db.close();
+  });
+
+  it("queues and retries outbound messages", () => {
+    const db = createDb();
+
+    const messageId = db.queueOutboundMessage({
+      platform: "signal",
+      accountKey: "default",
+      target: "+14155550123",
+      text: "Hello",
+    });
+
+    const claimed = db.claimNextOutboundMessage("signal");
+    expect(claimed).toEqual(expect.objectContaining({
+      id: messageId,
+      platform: "signal",
+      account_key: "default",
+      status: "sending",
+      attempt_count: 1,
+    }));
+
+    db.failOutboundMessage({
+      id: messageId,
+      retryable: true,
+      error: "network timeout",
+      retryDelayMs: 0,
+    });
+    expect(db.hasQueuedOutboundMessages("signal")).toBe(true);
+
+    const retried = db.claimNextOutboundMessage("signal");
+    expect(retried?.attempt_count).toBe(2);
+    db.completeOutboundMessage(messageId);
+    expect(db.hasQueuedOutboundMessages("signal")).toBe(false);
+    db.close();
+  });
+
+  it("resolves Signal targets by preferring signal_id over phone without merging contacts", () => {
+    const db = createDb();
+
+    insertContact(db, { id: "contact-phone", name: "Soham Bafana", updatedAt: 10 });
+    insertContact(db, { id: "contact-signal", name: "Soham Bafana", updatedAt: 20 });
+
+    insertHandle(db, {
+      id: "handle-phone",
+      contactId: "contact-phone",
+      type: "phone",
+      value: "+12016824050",
+      normalizedValue: "+12016824050",
+      platform: "contacts",
+      accountKey: "local",
+    });
+    insertHandle(db, {
+      id: "handle-signal",
+      contactId: "contact-signal",
+      type: "signal_id",
+      value: "d6ed1597-758c-4022-96aa-253b334f1f5d",
+      normalizedValue: "d6ed1597-758c-4022-96aa-253b334f1f5d",
+      platform: "signal",
+      accountKey: "default",
+    });
+
+    expect(db.resolveSignalSendTarget("Soham Bafana")).toEqual({
+      target: "d6ed1597-758c-4022-96aa-253b334f1f5d",
+      threadId: "dm:d6ed1597-758c-4022-96aa-253b334f1f5d",
+      resolution: "signal_id",
+      matchedContactIds: ["contact-signal", "contact-phone"],
+      matchedName: "Soham Bafana",
+    });
+
+    expect(db.resolveSignalSendTarget("+12016824050")).toEqual({
+      target: "d6ed1597-758c-4022-96aa-253b334f1f5d",
+      threadId: "dm:d6ed1597-758c-4022-96aa-253b334f1f5d",
+      resolution: "signal_id",
+      matchedContactIds: ["contact-phone", "contact-signal"],
+      matchedName: "Soham Bafana",
+    });
+
+    db.close();
+  });
+
+  it("keeps direct Signal phone sends as passthrough when there is no better contact match", () => {
+    const db = createDb();
+
+    expect(db.resolveSignalSendTarget("+14155550123")).toEqual({
+      target: "+14155550123",
+      threadId: "dm:+14155550123",
+      resolution: "passthrough",
+      matchedContactIds: [],
+      matchedName: null,
+    });
+
+    db.close();
+  });
+
+  it("resolves WhatsApp targets by preferring whatsapp_jid over phone without merging contacts", () => {
+    const db = createDb();
+
+    insertContact(db, { id: "contact-phone", name: "Soham Bafana", updatedAt: 10 });
+    insertContact(db, { id: "contact-whatsapp", name: "Soham Bafana", updatedAt: 20 });
+
+    insertHandle(db, {
+      id: "wa-handle-phone",
+      contactId: "contact-phone",
+      type: "phone",
+      value: "+12016824050",
+      normalizedValue: "+12016824050",
+      platform: "contacts",
+      accountKey: "local",
+    });
+    insertHandle(db, {
+      id: "wa-handle-jid",
+      contactId: "contact-whatsapp",
+      type: "whatsapp_jid",
+      value: "12016824050@s.whatsapp.net",
+      normalizedValue: "12016824050@s.whatsapp.net",
+      platform: "whatsapp",
+      accountKey: "default",
+    });
+
+    expect(db.resolveWhatsAppSendTarget("Soham Bafana")).toEqual({
+      target: "12016824050@s.whatsapp.net",
+      threadId: "dm:12016824050@s.whatsapp.net",
+      resolution: "whatsapp_jid",
+      matchedContactIds: ["contact-whatsapp", "contact-phone"],
+      matchedName: "Soham Bafana",
+    });
+
+    expect(db.resolveWhatsAppSendTarget("+12016824050")).toEqual({
+      target: "12016824050@s.whatsapp.net",
+      threadId: "dm:12016824050@s.whatsapp.net",
+      resolution: "whatsapp_jid",
+      matchedContactIds: ["contact-phone", "contact-whatsapp"],
+      matchedName: "Soham Bafana",
+    });
 
     db.close();
   });
