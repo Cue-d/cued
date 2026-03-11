@@ -1,11 +1,13 @@
-import { cpSync, existsSync, mkdirSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { dirname, join, resolve } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
 import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
-const APP_NAME = "CuedDaemon.app";
+const APP_NAME = "Cued.app";
+const APP_EXECUTABLE_NAME = "CuedDaemon";
 const LAUNCH_AGENT_LABEL = "dev.cued.daemon";
+const APP_BUNDLE_IDENTIFIER = "dev.cued.app";
 
 function currentUid(): number {
   return typeof process.getuid === "function" ? process.getuid() : 0;
@@ -17,10 +19,40 @@ function repoRoot(): string {
 
 function currentAppPath(): string | null {
   const appPath = process.env.CUED_APP_PATH;
-  if (!appPath || !existsSync(appPath)) {
+  if (!appPath || !isValidCuedAppBundle(appPath)) {
     return null;
   }
   return appPath;
+}
+
+function readInfoPlistValue(contents: string, key: string): string | null {
+  const match = contents.match(new RegExp(`<key>${key}</key>\\s*<string>([^<]+)</string>`));
+  return match?.[1] ?? null;
+}
+
+export function isValidCuedAppBundle(appPath: string): boolean {
+  if (basename(appPath) !== APP_NAME || !existsSync(appPath)) {
+    return false;
+  }
+
+  const infoPath = join(appPath, "Contents", "Info.plist");
+  const executablePath = appExecutablePath(appPath);
+  if (!existsSync(infoPath) || !existsSync(executablePath)) {
+    return false;
+  }
+
+  try {
+    const info = readFileSync(infoPath, "utf8");
+    return readInfoPlistValue(info, "CFBundleIdentifier") === APP_BUNDLE_IDENTIFIER
+      && readInfoPlistValue(info, "CFBundleExecutable") === APP_EXECUTABLE_NAME
+      && readInfoPlistValue(info, "CFBundleName") === "Cued";
+  } catch {
+    return false;
+  }
+}
+
+export function resolveInstalledAppPathFromCandidates(candidates: string[]): string | null {
+  return candidates.find((candidate) => isValidCuedAppBundle(candidate)) ?? null;
 }
 
 export function getBuiltAppPath(): string {
@@ -43,7 +75,7 @@ export function resolveInstalledAppPath(): string | null {
     getBuiltAppPath(),
   ].filter((value): value is string => Boolean(value));
 
-  return candidates.find((candidate) => existsSync(candidate)) ?? null;
+  return resolveInstalledAppPathFromCandidates(candidates);
 }
 
 export function buildMacOSAppBundle(): { appPath: string } {
@@ -68,6 +100,57 @@ export function installMacOSApp(destinationPath?: string): {
   cliSymlinkPath: string;
 } {
   const { appPath: sourcePath } = buildMacOSAppBundle();
+  return installMacOSAppFromSource(sourcePath, destinationPath);
+}
+
+export function installCLISymlink(installedAppPath: string): string {
+  const cliSource = join(installedAppPath, "Contents", "Resources", "cued-cli");
+  const cliDir = join(homedir(), ".local", "bin");
+  mkdirSync(cliDir, { recursive: true });
+  const cliSymlinkPath = join(cliDir, "cued");
+  rmSync(cliSymlinkPath, { force: true });
+  symlinkSync(cliSource, cliSymlinkPath);
+  return cliSymlinkPath;
+}
+
+export function getCLISymlinkPath(): string {
+  return join(homedir(), ".local", "bin", "cued");
+}
+
+export function getCLISymlinkStatus(): {
+  path: string;
+  installed: boolean;
+  target: string | null;
+} {
+  const path = getCLISymlinkPath();
+  if (!existsSync(path)) {
+    return {
+      path,
+      installed: false,
+      target: null,
+    };
+  }
+
+  try {
+    return {
+      path,
+      installed: true,
+      target: realpathSync(path),
+    };
+  } catch {
+    return {
+      path,
+      installed: true,
+      target: null,
+    };
+  }
+}
+
+export function installMacOSAppFromSource(sourcePath: string, destinationPath?: string): {
+  sourcePath: string;
+  installedAppPath: string;
+  cliSymlinkPath: string;
+} {
   const installedAppPath = destinationPath ?? getDefaultInstallAppPath();
   const sameBundle = existsSync(sourcePath)
     && existsSync(installedAppPath)
@@ -75,26 +158,18 @@ export function installMacOSApp(destinationPath?: string): {
   if (!sameBundle) {
     mkdirSync(dirname(installedAppPath), { recursive: true });
     if (!existsSync(installedAppPath)) {
-      cpSync(sourcePath, installedAppPath, { recursive: true });
-    } else {
-      // Keep the installed app bundle path stable so macOS privacy grants survive updates.
-      execFileSync("rsync", ["-a", "--delete", `${sourcePath}/`, `${installedAppPath}/`], {
-        stdio: "ignore",
-      });
+      mkdirSync(installedAppPath, { recursive: true });
     }
+    // Keep the installed app bundle path stable so macOS privacy grants survive updates.
+    execFileSync("rsync", ["-a", "--delete", `${sourcePath}/`, `${installedAppPath}/`], {
+      stdio: "ignore",
+    });
   }
-
-  const cliSource = join(installedAppPath, "Contents", "Resources", "cued-cli");
-  const cliDir = join(homedir(), ".local", "bin");
-  mkdirSync(cliDir, { recursive: true });
-  const cliSymlinkPath = join(cliDir, "cued");
-  rmSync(cliSymlinkPath, { force: true });
-  symlinkSync(cliSource, cliSymlinkPath);
 
   return {
     sourcePath,
     installedAppPath,
-    cliSymlinkPath,
+    cliSymlinkPath: installCLISymlink(installedAppPath),
   };
 }
 
@@ -103,13 +178,13 @@ function launchAgentPath(): string {
 }
 
 function appExecutablePath(appPath: string): string {
-  return join(appPath, "Contents", "MacOS", "CuedDaemon");
+  return join(appPath, "Contents", "MacOS", APP_EXECUTABLE_NAME);
 }
 
 export function installLaunchAgent(appPath?: string): { plistPath: string; appPath: string } {
   const resolvedAppPath = appPath ?? resolveInstalledAppPath();
   if (!resolvedAppPath) {
-    throw new Error("CuedDaemon.app is not installed. Run `cued install` first.");
+    throw new Error("Cued.app is not installed. Run `cued install` first.");
   }
 
   const plistPath = launchAgentPath();
@@ -191,6 +266,7 @@ export function getAppBundleInfo(appPath?: string): Record<string, unknown> {
     appPath: resolvedAppPath,
     executablePath: appExecutablePath(resolvedAppPath),
     infoPath,
+    bundleIdentifier: isValidCuedAppBundle(resolvedAppPath) ? APP_BUNDLE_IDENTIFIER : null,
     infoPlistPreview: existsSync(infoPath) ? readFileSync(infoPath, "utf8").slice(0, 800) : null,
   };
 }

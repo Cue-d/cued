@@ -1071,4 +1071,55 @@ export const MIGRATIONS: Array<{ id: string; sql: string }> = [
       DROP TRIGGER IF EXISTS trg_conversation_participants_deleted;
     `,
   },
+  {
+    id: "0008_outbound_messages",
+    sql: `
+      CREATE TABLE IF NOT EXISTS outbound_messages (
+        id TEXT PRIMARY KEY,
+        platform TEXT NOT NULL,
+        account_key TEXT NOT NULL,
+        target TEXT NOT NULL,
+        thread_id TEXT,
+        text TEXT NOT NULL,
+        status TEXT NOT NULL,
+        attempt_count INTEGER NOT NULL DEFAULT 0,
+        scheduled_for INTEGER NOT NULL,
+        started_at INTEGER,
+        finished_at INTEGER,
+        last_error TEXT,
+        metadata_json TEXT,
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_outbound_messages_status_scheduled
+      ON outbound_messages(status, scheduled_for, created_at);
+
+      CREATE INDEX IF NOT EXISTS idx_outbound_messages_platform_account_status
+      ON outbound_messages(platform, account_key, status, scheduled_for);
+    `,
+  },
+  {
+    id: "0009_app_settings",
+    sql: `
+      CREATE TABLE IF NOT EXISTS app_settings (
+        key TEXT PRIMARY KEY,
+        value TEXT,
+        updated_at INTEGER NOT NULL
+      );
+    `,
+  },
+  {
+    id: "0010_requestable_sync_capable_backfill",
+    sql: `
+      UPDATE integration_states
+      SET sync_capable = CASE
+        WHEN auth_state = 'authenticated' AND platform IN ('slack', 'linkedin', 'signal', 'whatsapp') THEN 1
+        WHEN platform IN ('slack', 'linkedin', 'signal', 'whatsapp') THEN 0
+        ELSE sync_capable
+      END,
+      updated_at = strftime('%s','now') * 1000
+      WHERE platform IN ('slack', 'linkedin', 'signal', 'whatsapp');
+    `,
+  },
 ];

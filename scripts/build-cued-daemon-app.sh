@@ -3,11 +3,13 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-APP_NAME="CuedDaemon"
+APP_DISPLAY_NAME="Cued"
+APP_BUNDLE_NAME="${APP_DISPLAY_NAME}.app"
+APP_EXECUTABLE_NAME="CuedDaemon"
 SWIFT_PACKAGE_DIR="$ROOT_DIR/native/macos/CuedNative"
 SWIFT_BINARY="$SWIFT_PACKAGE_DIR/.build/release/CuedNative"
 APP_DIST_DIR="$ROOT_DIR/native/macos/dist"
-APP_BUNDLE="$APP_DIST_DIR/${APP_NAME}.app"
+APP_BUNDLE="$APP_DIST_DIR/${APP_BUNDLE_NAME}"
 CONTENTS_DIR="$APP_BUNDLE/Contents"
 MACOS_DIR="$CONTENTS_DIR/MacOS"
 RESOURCES_DIR="$CONTENTS_DIR/Resources"
@@ -17,8 +19,11 @@ HELPERS_DIR="$RESOURCES_DIR/helpers"
 WHATSAPP_HELPER_SOURCE="$ROOT_DIR/native/helpers/whatsapp-go/.build/cued-whatsapp-helper"
 PERMISSIONS_SCRIPT_SOURCE="$ROOT_DIR/scripts/request-macos-access.sh"
 TRAY_ICON_SOURCE="$ROOT_DIR/native/macos/CuedNative/Resources/trayIconTemplate.png"
+CUED_MARK_SOURCE="$ROOT_DIR/native/macos/CuedNative/Resources/cued-mark.png"
 NODE_PATH="${CUED_NODE_PATH:-$(command -v node)}"
 DB_PATH="${CUED_DB_PATH_OVERRIDE:-$HOME/.cued/local.db}"
+APP_VERSION="$("$NODE_PATH" -p "require(process.argv[1]).version" "$ROOT_DIR/apps/cued/package.json")"
+RELEASE_CHANNEL="${CUED_RELEASE_CHANNEL:-internal}"
 DAEMON_COMMAND="${CUED_DAEMON_COMMAND:-\"\$CUED_APP_PATH/Contents/Resources/cued-cli\" daemon}"
 SETUP_COMMAND="${CUED_SETUP_COMMAND:-\"\$CUED_APP_PATH/Contents/Resources/cued-cli\" setup}"
 PERMISSIONS_COMMAND="${CUED_PERMISSIONS_COMMAND:-\"\$CUED_APP_PATH/Contents/Resources/cued-cli\" permissions request --all}"
@@ -48,8 +53,8 @@ pnpm --filter ./apps/cued deploy --legacy --prod "$DEPLOY_STAGING_DIR" >/dev/nul
 rm -rf "$APP_BUNDLE"
 mkdir -p "$MACOS_DIR" "$RESOURCES_DIR" "$RUNTIME_DIR" "$RUNTIME_NODE_DIR" "$HELPERS_DIR"
 
-cp "$SWIFT_BINARY" "$MACOS_DIR/$APP_NAME"
-chmod +x "$MACOS_DIR/$APP_NAME"
+cp "$SWIFT_BINARY" "$MACOS_DIR/$APP_EXECUTABLE_NAME"
+chmod +x "$MACOS_DIR/$APP_EXECUTABLE_NAME"
 cp "$NODE_PATH" "$RUNTIME_NODE_DIR/node"
 chmod +x "$RUNTIME_NODE_DIR/node"
 cp -R "$DEPLOY_STAGING_DIR/." "$RUNTIME_DIR/"
@@ -85,7 +90,7 @@ function visit(dir) {
 
 visit(runtimeRoot);
 ' "$RUNTIME_DIR"
-rm -f "$RUNTIME_DIR/node_modules/cued"
+rm -rf "$RUNTIME_DIR/node_modules/cued" "$RUNTIME_DIR/node_modules/@cued/app"
 
 mkdir -p "$RESOURCES_DIR/scripts"
 cp "$PERMISSIONS_SCRIPT_SOURCE" "$RESOURCES_DIR/scripts/request-macos-access.sh"
@@ -99,21 +104,21 @@ cat > "$CONTENTS_DIR/Info.plist" <<EOF
   <key>CFBundleDevelopmentRegion</key>
   <string>en</string>
   <key>CFBundleDisplayName</key>
-  <string>$APP_NAME</string>
+  <string>$APP_DISPLAY_NAME</string>
   <key>CFBundleExecutable</key>
-  <string>$APP_NAME</string>
+  <string>$APP_EXECUTABLE_NAME</string>
   <key>CFBundleIdentifier</key>
-  <string>dev.cued.$APP_NAME</string>
+  <string>dev.cued.app</string>
   <key>CFBundleInfoDictionaryVersion</key>
   <string>6.0</string>
   <key>CFBundleName</key>
-  <string>$APP_NAME</string>
+  <string>$APP_DISPLAY_NAME</string>
   <key>CFBundlePackageType</key>
   <string>APPL</string>
   <key>CFBundleShortVersionString</key>
-  <string>0.1.0</string>
+  <string>$APP_VERSION</string>
   <key>CFBundleVersion</key>
-  <string>1</string>
+  <string>$APP_VERSION</string>
   <key>LSMinimumSystemVersion</key>
   <string>13.0</string>
   <key>LSUIElement</key>
@@ -138,7 +143,7 @@ cat > "$RESOURCES_DIR/cued-cli" <<EOF
 #!/usr/bin/env bash
 set -euo pipefail
 SCRIPT_DIR="\$(cd "\$(dirname "\${BASH_SOURCE[0]}")" && pwd)"
-APP_EXEC="\$SCRIPT_DIR/../MacOS/$APP_NAME"
+APP_EXEC="\$SCRIPT_DIR/../MacOS/$APP_EXECUTABLE_NAME"
 APP_BUNDLE_PATH="\$(cd "\$SCRIPT_DIR/../.." && pwd)"
 RUNTIME_ROOT="\$SCRIPT_DIR/cued-runtime"
 SCRIPT_ROOT="\$SCRIPT_DIR/scripts"
@@ -150,15 +155,16 @@ export CUED_BUNDLED_SCRIPT_ROOT="\${CUED_BUNDLED_SCRIPT_ROOT:-\$SCRIPT_ROOT}"
 export CUED_IMESSAGE_NATIVE_BINARY="\${CUED_IMESSAGE_NATIVE_BINARY:-\$APP_EXEC}"
 export CUED_CONTACTS_NATIVE_BINARY="\${CUED_CONTACTS_NATIVE_BINARY:-\$APP_EXEC}"
 export CUED_WHATSAPP_HELPER_BINARY="\${CUED_WHATSAPP_HELPER_BINARY:-\$SCRIPT_DIR/helpers/cued-whatsapp-helper}"
+export CUED_APP_VERSION="\${CUED_APP_VERSION:-$APP_VERSION}"
+export CUED_RELEASE_CHANNEL="\${CUED_RELEASE_CHANNEL:-$RELEASE_CHANNEL}"
 exec "\$NODE_BIN" "\$RUNTIME_ROOT/dist/cli.js" "\$@"
 EOF
 chmod +x "$RESOURCES_DIR/cued-cli"
 
 cp "$TRAY_ICON_SOURCE" "$RESOURCES_DIR/trayIconTemplate.png"
+cp "$CUED_MARK_SOURCE" "$RESOURCES_DIR/cued-mark.png"
 
 # Sign the assembled app bundle so LaunchServices accepts it as an app.
 codesign --force --deep --sign - "$APP_BUNDLE" >/dev/null
 
 echo "$APP_BUNDLE"
-CUED_MARK_SOURCE="$ROOT_DIR/native/macos/CuedNative/Resources/cued-mark.png"
-cp "$CUED_MARK_SOURCE" "$RESOURCES_DIR/cued-mark.png"

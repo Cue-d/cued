@@ -36,7 +36,7 @@ export async function runSetupTUI(): Promise<void> {
   try {
     let done = false;
     while (!done) {
-      const doctor = buildDoctorReport(db) as SetupDoctorReport;
+      const doctor = await buildDoctorReport(db) as SetupDoctorReport;
       const appPath = resolveInstalledAppPath();
 
       output.write("\x1b[2J\x1b[H");

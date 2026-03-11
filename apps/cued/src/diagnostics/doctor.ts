@@ -4,6 +4,14 @@ import type { CuedDatabase } from "../db/database.js";
 import { listAdapterPlatforms } from "../adapters/registry.js";
 import { DEFAULT_CHAT_DB_PATH, IMessageReader } from "../adapters/imessage/reader.js";
 import { listIntegrationStates } from "../integrations/service.js";
+import {
+  getSignalConfigDir,
+  parseSignalCliVersion,
+  readSignalLinkedAccount,
+  resolveSignalCliPath,
+  isSignalCliVersionSupported,
+} from "../integrations/signal-cli.js";
+import { getWhatsAppStoreDir, inspectWhatsAppHelper, readWhatsAppHelperStatus } from "../integrations/whatsapp-helper.js";
 import { resolveMacOSNativeBinary } from "../workers/native-binary.js";
 
 export interface DoctorCheck {
@@ -12,6 +20,11 @@ export interface DoctorCheck {
   summary: string;
   details?: unknown;
   remediation?: string;
+}
+
+export interface DoctorRuntimeStatus {
+  signalRealtimeSessions?: unknown;
+  whatsappRealtimeSessions?: unknown;
 }
 
 function tryReadMessagesDatabase(): DoctorCheck {
@@ -64,7 +77,7 @@ function getMessagesNativeHelperCheck(): DoctorCheck {
       status: "unknown",
       summary: "Native Messages helper is not built, so daemon access is using the current process identity",
       remediation:
-        "Use the packaged CuedDaemon.app or run `cued permissions request --full-disk-access` after rebuilding the native helper in development.",
+        "Use the packaged Cued.app or run `cued permissions request --full-disk-access` after rebuilding the native helper in development.",
     };
   }
 
@@ -192,7 +205,128 @@ function getMessagesAutomationCheck(): DoctorCheck {
   }
 }
 
-export function buildDoctorReport(db: CuedDatabase): Record<string, unknown> {
+function getSignalCliCheck(): DoctorCheck {
+  const cliPath = resolveSignalCliPath();
+  if (!cliPath) {
+    return {
+      name: "signal_cli",
+      status: "warning",
+      summary: "signal-cli is not installed",
+      remediation: "Install signal-cli and rerun `cued integrations connect signal`.",
+    };
+  }
+
+  try {
+    const stdout = execFileSync(cliPath, ["--version"], {
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    const version = parseSignalCliVersion(stdout);
+    const supported = isSignalCliVersionSupported(version);
+    return {
+      name: "signal_cli",
+      status: supported ? "ok" : "warning",
+      summary: supported
+        ? `signal-cli ${version?.raw ?? "unknown"} detected`
+        : `signal-cli ${version?.raw ?? "unknown"} is below the supported version floor`,
+      details: {
+        cliPath,
+        version: version?.raw ?? null,
+      },
+      remediation: supported ? undefined : "Upgrade signal-cli to a supported release and reconnect Signal.",
+    };
+  } catch (error) {
+    return {
+      name: "signal_cli",
+      status: "error",
+      summary: "signal-cli exists but could not be executed",
+      details: {
+        cliPath,
+        error: error instanceof Error ? error.message : String(error),
+      },
+      remediation: "Check that signal-cli is executable and that its Java runtime is installed.",
+    };
+  }
+}
+
+function getSignalLinkCheck(): DoctorCheck {
+  const configDir = getSignalConfigDir("default");
+  const linkedAccount = readSignalLinkedAccount(configDir);
+  return {
+    name: "signal_link",
+    status: linkedAccount ? "ok" : "unknown",
+    summary: linkedAccount
+      ? `Signal is linked as ${linkedAccount}`
+      : "No linked Signal account was found in Cued's managed config",
+    details: {
+      configDir,
+      linkedAccount,
+    },
+    remediation: linkedAccount ? undefined : "Run `cued integrations connect signal` to link a Signal device.",
+  };
+}
+
+async function getWhatsAppHelperCheck(): Promise<DoctorCheck> {
+  const inspected = inspectWhatsAppHelper();
+  if (!inspected.helperPath) {
+    return {
+      name: "whatsapp_helper",
+      status: "warning",
+      summary: "WhatsApp helper is not built",
+      remediation: "Build native/helpers/whatsapp-go or use the packaged app bundle.",
+    };
+  }
+
+  return {
+    name: "whatsapp_helper",
+    status: inspected.version ? "ok" : "warning",
+    summary: inspected.version
+      ? `WhatsApp helper ${inspected.version} detected`
+      : "WhatsApp helper exists but its version could not be read",
+    details: {
+      helperPath: inspected.helperPath,
+      version: inspected.version,
+    },
+    remediation: inspected.version ? undefined : "Rebuild the WhatsApp helper and rerun doctor.",
+  };
+}
+
+async function getWhatsAppLinkCheck(): Promise<DoctorCheck> {
+  const storeDir = getWhatsAppStoreDir("default");
+  try {
+    const status = await readWhatsAppHelperStatus(storeDir);
+    return {
+      name: "whatsapp_link",
+      status: status.authenticated ? "ok" : "unknown",
+      summary: status.authenticated
+        ? `WhatsApp is linked as ${status.accountJid ?? "unknown"}`
+        : "No linked WhatsApp account was found in Cued's managed store",
+      details: {
+        storeDir,
+        accountJid: status.accountJid,
+        pushName: status.pushName,
+        helperVersion: status.helperVersion,
+      },
+      remediation: status.authenticated ? undefined : "Run `cued integrations connect whatsapp` to link a WhatsApp device.",
+    };
+  } catch (error) {
+    return {
+      name: "whatsapp_link",
+      status: "warning",
+      summary: "WhatsApp helper status check failed",
+      details: {
+        storeDir,
+        error: error instanceof Error ? error.message : String(error),
+      },
+      remediation: "Rebuild the WhatsApp helper or reconnect WhatsApp.",
+    };
+  }
+}
+
+export async function buildDoctorReport(
+  db: CuedDatabase,
+  runtime: DoctorRuntimeStatus = {},
+): Promise<Record<string, unknown>> {
   const checks: DoctorCheck[] = [];
 
   if (process.platform === "darwin") {
@@ -201,6 +335,10 @@ export function buildDoctorReport(db: CuedDatabase): Record<string, unknown> {
     checks.push(getMessagesNativeHelperCheck());
     checks.push(getMessagesAutomationCheck());
   }
+  checks.push(getSignalCliCheck());
+  checks.push(getSignalLinkCheck());
+  checks.push(await getWhatsAppHelperCheck());
+  checks.push(await getWhatsAppLinkCheck());
 
   return {
     daemon: db.getDaemonState(),
@@ -208,6 +346,8 @@ export function buildDoctorReport(db: CuedDatabase): Record<string, unknown> {
     projection: db.getProjectionBacklog(),
     checkpoints: db.listCheckpointSummary(),
     recentRuns: db.listRecentRuns(),
+    signalRealtimeSessions: runtime.signalRealtimeSessions ?? [],
+    whatsappRealtimeSessions: runtime.whatsappRealtimeSessions ?? [],
     registeredAdapters: listAdapterPlatforms(),
     integrations: listIntegrationStates(db),
     checks,

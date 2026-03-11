@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { CuedDatabase } from "../db/database.js";
 import {
+  buildIntegrationStatus,
   completeAuthSession,
   getAuthSessionSummary,
   listIntegrationStates,
@@ -124,6 +125,58 @@ describe("integration state management", () => {
     );
     expect(() => requestIntegrationAccess(db, "discord")).toThrow(
       "Unsupported integration platform: discord",
+    );
+    expect(buildIntegrationStatus(db).setupIntegrations).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          platform: "contacts",
+          capability: expect.objectContaining({
+            availability: "available",
+          }),
+        }),
+        expect.objectContaining({
+          platform: "linkedin",
+          capability: expect.objectContaining({
+            availability: "available",
+          }),
+        }),
+      ]),
+    );
+    db.close();
+  });
+
+  it("repairs stale linkedin sync capability on refresh", async () => {
+    const db = createDb();
+    db.upsertIntegrationState({
+      platform: "linkedin",
+      accountKey: "default",
+      displayName: "LinkedIn",
+      authState: "authenticated",
+      enabled: true,
+      connectionKind: "browser-session",
+      syncCapable: false,
+      launchStrategy: "chromium-auth",
+      launchTarget: "https://www.linkedin.com/login",
+      importedFrom: "local-cli",
+      metadata: {
+        supportedByDaemon: false,
+      },
+    });
+
+    await refreshManagedIntegrationStates(db);
+
+    expect(listIntegrationStates(db)).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          platform: "linkedin",
+          accountKey: "default",
+          authState: "authenticated",
+          syncCapable: true,
+          metadata: expect.objectContaining({
+            supportedByDaemon: true,
+          }),
+        }),
+      ]),
     );
     db.close();
   });

@@ -44,6 +44,18 @@ const ADAPTER_DEFINITIONS: Record<AdapterPlatform, AdapterDefinition> = {
     autoSync: true,
     workerTimeoutMs: 180_000,
   },
+  signal: {
+    platform: "signal",
+    workerEntrypoint: join(import.meta.dirname, "../workers/signal-worker.js"),
+    autoSync: true,
+    workerTimeoutMs: 60_000,
+  },
+  whatsapp: {
+    platform: "whatsapp",
+    workerEntrypoint: join(import.meta.dirname, "../workers/whatsapp-worker.js"),
+    autoSync: true,
+    workerTimeoutMs: 60_000,
+  },
 };
 
 export function listAdapterPlatforms(): AdapterPlatform[] {

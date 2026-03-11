@@ -9,11 +9,30 @@ export const PLATFORM_VALUES = [
 ] as const;
 export type Platform = typeof PLATFORM_VALUES[number];
 
+export const HOST_OS_VALUES = ["macos", "windows", "linux"] as const;
+export type HostOS = typeof HOST_OS_VALUES[number];
+
+export const PLATFORM_PERMISSION_REQUIREMENT_VALUES = [
+  "contacts",
+  "full_disk_access",
+] as const;
+export type PlatformPermissionRequirement = typeof PLATFORM_PERMISSION_REQUIREMENT_VALUES[number];
+
+export const PLATFORM_HELPER_REQUIREMENT_VALUES = [
+  "signal_cli",
+  "whatsapp_helper",
+] as const;
+export type PlatformHelperRequirement = typeof PLATFORM_HELPER_REQUIREMENT_VALUES[number];
+
 type PlatformDefinition = {
   adapter: boolean;
   defaultAccountKey: "default" | "local";
   requestableIntegration: boolean;
   requestableOrder?: number;
+  supportedHostOs: readonly HostOS[];
+  onboardingVisible: boolean;
+  permissionRequirements: readonly PlatformPermissionRequirement[];
+  helperRequirements: readonly PlatformHelperRequirement[];
 };
 
 export const PLATFORM_DEFINITIONS = {
@@ -21,40 +40,68 @@ export const PLATFORM_DEFINITIONS = {
     adapter: true,
     defaultAccountKey: "local",
     requestableIntegration: false,
+    supportedHostOs: ["macos"],
+    onboardingVisible: true,
+    permissionRequirements: ["contacts"],
+    helperRequirements: [],
   },
   fixture: {
     adapter: true,
     defaultAccountKey: "default",
     requestableIntegration: false,
+    supportedHostOs: ["macos", "windows", "linux"],
+    onboardingVisible: false,
+    permissionRequirements: [],
+    helperRequirements: [],
   },
   imessage: {
     adapter: true,
     defaultAccountKey: "local",
     requestableIntegration: false,
+    supportedHostOs: ["macos"],
+    onboardingVisible: true,
+    permissionRequirements: ["full_disk_access"],
+    helperRequirements: [],
   },
   linkedin: {
     adapter: true,
     defaultAccountKey: "default",
     requestableIntegration: true,
     requestableOrder: 2,
+    supportedHostOs: ["macos", "windows", "linux"],
+    onboardingVisible: true,
+    permissionRequirements: [],
+    helperRequirements: [],
   },
   signal: {
     adapter: true,
     defaultAccountKey: "default",
     requestableIntegration: true,
     requestableOrder: 5,
+    supportedHostOs: ["macos", "windows", "linux"],
+    onboardingVisible: true,
+    permissionRequirements: [],
+    helperRequirements: ["signal_cli"],
   },
   slack: {
     adapter: true,
     defaultAccountKey: "default",
     requestableIntegration: true,
     requestableOrder: 1,
+    supportedHostOs: ["macos", "windows", "linux"],
+    onboardingVisible: true,
+    permissionRequirements: [],
+    helperRequirements: [],
   },
   whatsapp: {
     adapter: true,
     defaultAccountKey: "default",
     requestableIntegration: true,
     requestableOrder: 4,
+    supportedHostOs: ["macos", "windows", "linux"],
+    onboardingVisible: true,
+    permissionRequirements: [],
+    helperRequirements: ["whatsapp_helper"],
   },
 } as const satisfies Record<Platform, PlatformDefinition>;
 
@@ -280,6 +327,7 @@ const requestableIntegrationPlatformSet = new Set<string>(REQUESTABLE_INTEGRATIO
 const integrationAuthStateSet = new Set<string>(INTEGRATION_AUTH_STATE_VALUES);
 const contactFieldNameSet = new Set<string>(CONTACT_FIELD_NAME_VALUES);
 const integrationRuntimeKindSet = new Set<string>(INTEGRATION_RUNTIME_KIND_VALUES);
+const hostOsSet = new Set<string>(HOST_OS_VALUES);
 
 export function isPlatform(value: string): value is Platform {
   return platformSet.has(value);
@@ -299,8 +347,40 @@ export function parsePlatform(value: string): Platform | null {
   return isPlatform(value) ? value : null;
 }
 
+export function isHostOS(value: string): value is HostOS {
+  return hostOsSet.has(value);
+}
+
+export function parseHostOS(value: string | null | undefined): HostOS | null {
+  return value && isHostOS(value) ? value : null;
+}
+
 export function getDefaultAccountKeyForPlatform(platform: Platform): string {
   return PLATFORM_DEFINITIONS[platform].defaultAccountKey;
+}
+
+export function getSupportedHostOsForPlatform(platform: Platform): readonly HostOS[] {
+  return PLATFORM_DEFINITIONS[platform].supportedHostOs;
+}
+
+export function isPlatformSupportedOnHost(platform: Platform, hostOs: HostOS): boolean {
+  return (PLATFORM_DEFINITIONS[platform].supportedHostOs as readonly HostOS[]).includes(hostOs);
+}
+
+export function isOnboardingVisiblePlatform(platform: Platform): boolean {
+  return PLATFORM_DEFINITIONS[platform].onboardingVisible;
+}
+
+export function getPlatformPermissionRequirements(
+  platform: Platform,
+): readonly PlatformPermissionRequirement[] {
+  return PLATFORM_DEFINITIONS[platform].permissionRequirements;
+}
+
+export function getPlatformHelperRequirements(
+  platform: Platform,
+): readonly PlatformHelperRequirement[] {
+  return PLATFORM_DEFINITIONS[platform].helperRequirements;
 }
 
 export function parseConversationType(value: string): ConversationType {
