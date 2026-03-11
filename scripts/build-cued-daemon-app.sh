@@ -160,3 +160,5 @@ cp "$TRAY_ICON_SOURCE" "$RESOURCES_DIR/trayIconTemplate.png"
 codesign --force --deep --sign - "$APP_BUNDLE" >/dev/null
 
 echo "$APP_BUNDLE"
+CUED_MARK_SOURCE="$ROOT_DIR/native/macos/CuedNative/Resources/cued-mark.png"
+cp "$CUED_MARK_SOURCE" "$RESOURCES_DIR/cued-mark.png"
