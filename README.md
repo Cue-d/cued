@@ -80,18 +80,16 @@ apps/
 native/
   macos/
     CuedNative/  macOS host app, permissions, menu bar runtime
-
-packages/
-  shared/        Shared types and utilities
 ```
 
 ## Scripts
 
 | Script | Description |
 |--------|-------------|
-| `pnpm build` | Build the workspace |
-| `pnpm typecheck` | Type check the workspace |
-| `pnpm test` | Run tests |
+| `pnpm build` | Build `apps/cued` |
+| `pnpm dev` | Run the local CLI in dev mode |
+| `pnpm typecheck` | Type check `apps/cued` |
+| `pnpm test` | Run `apps/cued` tests |
 | `pnpm build:app:macos` | Build `CuedDaemon.app` |
 | `pnpm build:dmg:macos` | Build the DMG |
 | `pnpm sign:notarize:macos` | Sign and notarize the app |
@@ -100,4 +98,4 @@ packages/
 ## Notes
 
 - `apps/cued` is the only product runtime moving forward.
-- Legacy Electron/cloud directories may still exist on disk during cleanup, but they are no longer part of the active workspace or shipping runtime.
+- The repo no longer ships the Electron app or the old shared/cloud packages.

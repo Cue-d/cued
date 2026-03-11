@@ -12,7 +12,7 @@ concurrency:
 
 jobs:
   ci:
-    name: Lint, Typecheck, Test
+    name: Build, Typecheck, Test
     runs-on: blacksmith-4vcpu-ubuntu-2404
 
     steps:
@@ -31,11 +31,11 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Lint
-        run: pnpm exec turbo lint
+      - name: Build
+        run: pnpm build
 
       - name: Typecheck
-        run: pnpm exec turbo typecheck --filter='!@cued/convex'
+        run: pnpm typecheck
 
       - name: Test
-        run: pnpm exec turbo test --filter='!@cued/convex'
+        run: pnpm test

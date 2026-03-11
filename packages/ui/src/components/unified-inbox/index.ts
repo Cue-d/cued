@@ -1,8 +1,0 @@
-export * from "./types"
-export * from "./message-types"
-export { InboxConversationList } from "./conversation-list"
-export { InboxConversationItem } from "./conversation-item"
-export { InboxConversationAvatar } from "./conversation-avatar"
-export { InboxPlatformBadge } from "./platform-badge"
-export { InboxMessageBubble } from "./message-bubble"
-export { InboxMessageThread } from "./message-thread"
