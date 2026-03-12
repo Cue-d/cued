@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 
 set -euo pipefail
+shopt -s nullglob
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 APP_DISPLAY_NAME="Cued"
@@ -47,6 +48,7 @@ mkdir -p "$APP_DIST_DIR"
 
 pnpm --dir "$ROOT_DIR/apps/cued" build >/dev/null
 swift build --package-path "$SWIFT_PACKAGE_DIR" -c release >/dev/null
+SWIFT_RESOURCE_BUNDLES=("$SWIFT_PACKAGE_DIR"/.build/*/release/*.bundle)
 mkdir -p "$(dirname "$WHATSAPP_HELPER_SOURCE")"
 (cd "$ROOT_DIR/native/helpers/whatsapp-go" && GOWORK=off go build -o "$WHATSAPP_HELPER_SOURCE" .) >/dev/null
 pnpm --filter ./apps/cued deploy --legacy --prod "$DEPLOY_STAGING_DIR" >/dev/null
@@ -56,6 +58,9 @@ mkdir -p "$MACOS_DIR" "$RESOURCES_DIR" "$RUNTIME_DIR" "$RUNTIME_NODE_DIR" "$HELP
 
 cp "$SWIFT_BINARY" "$MACOS_DIR/$APP_EXECUTABLE_NAME"
 chmod +x "$MACOS_DIR/$APP_EXECUTABLE_NAME"
+for resource_bundle in "${SWIFT_RESOURCE_BUNDLES[@]}"; do
+  cp -R "$resource_bundle" "$RESOURCES_DIR/$(basename "$resource_bundle")"
+done
 cp "$NODE_PATH" "$RUNTIME_NODE_DIR/node"
 chmod +x "$RUNTIME_NODE_DIR/node"
 cp -R "$DEPLOY_STAGING_DIR/." "$RUNTIME_DIR/"

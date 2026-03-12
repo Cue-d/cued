@@ -1,0 +1,28 @@
+name: CuedNativeUIFramework
+options:
+  minimumXcodeGenVersion: 2.38.0
+  deploymentTarget:
+    macOS: "13.0"
+settings:
+  base:
+    SWIFT_VERSION: 6.0
+    PRODUCT_NAME: $(TARGET_NAME)
+targets:
+  CuedNativeUIFramework:
+    type: framework
+    platform: macOS
+    sources:
+      - path: ../CuedNative/Sources/CuedNativeUI/OnboardingUI.swift
+      - path: ../CuedNative/Sources/CuedNativeUI/Resources
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: dev.cued.CuedNativeUIFramework
+        CODE_SIGNING_ALLOWED: NO
+        CODE_SIGNING_REQUIRED: NO
+        GENERATE_INFOPLIST_FILE: YES
+        DEFINES_MODULE: YES
+schemes:
+  CuedNativeUIFramework:
+    build:
+      targets:
+        CuedNativeUIFramework: all
