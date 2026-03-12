@@ -10,7 +10,7 @@ import { sendDaemonRequest } from "./client.js";
 import { CUED_DB_PATH, CUED_SOCKET_PATH, ensureCuedDirs } from "./config.js";
 import { runDaemon } from "./daemon/server.js";
 import { openCuedDatabase } from "./db/database.js";
-import { buildDoctorReport } from "./diagnostics/doctor.js";
+import { buildDoctorReport, buildPermissionStatus } from "./diagnostics/doctor.js";
 import {
   doctorHooksConfig,
   emitHookEvent,
@@ -80,7 +80,7 @@ Usage:
   cued cli install|status
   cued onboarding complete|status
   cued launchd install|uninstall|status
-  cued permissions doctor|request [--all|--contacts|--messages|--full-disk-access|--accessibility]
+  cued permissions doctor|status|request [--all|--contacts|--messages|--full-disk-access]
   cued integrations list
   cued integrations status
   cued integrations refresh
@@ -394,6 +394,9 @@ async function main(): Promise<void> {
             }
           }
           return;
+        case "status":
+          printJson(await buildPermissionStatus());
+          return;
         case "request": {
           const flags = rest.length > 0 ? rest : ["--all"];
           const scriptPath = resolvePermissionsScriptPath();
@@ -407,7 +410,7 @@ async function main(): Promise<void> {
         }
         default:
           throw new Error(
-            "Usage: cued permissions doctor | request [--all|--contacts|--messages|--full-disk-access|--accessibility]",
+            "Usage: cued permissions doctor | status | request [--all|--contacts|--messages|--full-disk-access]",
           );
       }
     case "status":
