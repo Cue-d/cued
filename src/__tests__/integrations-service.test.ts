@@ -188,4 +188,132 @@ describe("integration state management", () => {
     );
     db.close();
   });
+
+  it("refreshes signal and whatsapp managed states for every persisted account", async () => {
+    process.env.CUED_SIGNAL_CLI_PATH = join(createTempDir("cued-missing-signal-cli-"), "signal-cli");
+    process.env.CUED_WHATSAPP_HELPER_BINARY = join(
+      createTempDir("cued-missing-whatsapp-helper-"),
+      "cued-whatsapp-helper",
+    );
+    process.env.CUED_SLACK_APP_BINARY = join(createTempDir("cued-no-slack-app-"), "Slack");
+
+    const db = createDb();
+    db.upsertIntegrationState({
+      platform: "signal",
+      accountKey: "signal-a",
+      displayName: "Signal A",
+      authState: "authenticated",
+      enabled: true,
+      connectionKind: "local-cli",
+      syncCapable: true,
+      launchStrategy: "qr-native",
+      launchTarget: null,
+      importedFrom: "local-cli",
+      metadata: {
+        configDir: "/tmp/old-signal-a",
+      },
+    });
+    db.upsertIntegrationState({
+      platform: "signal",
+      accountKey: "signal-b",
+      displayName: "Signal B",
+      authState: "authenticated",
+      enabled: false,
+      connectionKind: "local-cli",
+      syncCapable: true,
+      launchStrategy: "qr-native",
+      launchTarget: null,
+      importedFrom: "local-cli",
+      metadata: {
+        configDir: "/tmp/old-signal-b",
+      },
+    });
+    db.upsertIntegrationState({
+      platform: "whatsapp",
+      accountKey: "whatsapp-a",
+      displayName: "WhatsApp A",
+      authState: "authenticated",
+      enabled: true,
+      connectionKind: "qr-link",
+      syncCapable: true,
+      launchStrategy: "qr-native",
+      launchTarget: null,
+      importedFrom: "bundled-helper",
+      metadata: {
+        storeDir: "/tmp/old-whatsapp-a",
+      },
+    });
+    db.upsertIntegrationState({
+      platform: "whatsapp",
+      accountKey: "whatsapp-b",
+      displayName: "WhatsApp B",
+      authState: "authenticated",
+      enabled: false,
+      connectionKind: "qr-link",
+      syncCapable: true,
+      launchStrategy: "qr-native",
+      launchTarget: null,
+      importedFrom: "bundled-helper",
+      metadata: {
+        storeDir: "/tmp/old-whatsapp-b",
+      },
+    });
+
+    const refreshed = await refreshManagedIntegrationStates(db);
+
+    expect(refreshed.refreshed).toBe(10);
+    expect(listIntegrationStates(db)).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          platform: "signal",
+          accountKey: "signal-a",
+          authState: "outdated",
+          enabled: true,
+          metadata: expect.objectContaining({
+            configDir: expect.stringContaining("/signal-a"),
+          }),
+        }),
+        expect.objectContaining({
+          platform: "signal",
+          accountKey: "signal-b",
+          authState: "outdated",
+          enabled: false,
+          metadata: expect.objectContaining({
+            configDir: expect.stringContaining("/signal-b"),
+          }),
+        }),
+        expect.objectContaining({
+          platform: "whatsapp",
+          accountKey: "whatsapp-a",
+          authState: "blocked",
+          enabled: true,
+          metadata: expect.objectContaining({
+            storeDir: expect.stringContaining("/whatsapp-a"),
+          }),
+        }),
+        expect.objectContaining({
+          platform: "whatsapp",
+          accountKey: "whatsapp-b",
+          authState: "blocked",
+          enabled: false,
+          metadata: expect.objectContaining({
+            storeDir: expect.stringContaining("/whatsapp-b"),
+          }),
+        }),
+      ]),
+    );
+    expect(listIntegrationStates(db)).not.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          platform: "signal",
+          accountKey: "default",
+        }),
+        expect.objectContaining({
+          platform: "whatsapp",
+          accountKey: "default",
+        }),
+      ]),
+    );
+    db.close();
+  });
 });
