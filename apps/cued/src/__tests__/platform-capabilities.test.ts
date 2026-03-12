@@ -13,10 +13,14 @@ describe("platform capability resolver", () => {
 
   it("marks permissions-required connectors correctly on macOS", () => {
     expect(
-      summarizePlatformCapability("contacts", {
-        platform: "contacts",
-        authState: "not_determined",
-      }, "macos"),
+      summarizePlatformCapability(
+        "contacts",
+        {
+          platform: "contacts",
+          authState: "not_determined",
+        },
+        "macos",
+      ),
     ).toEqual(
       expect.objectContaining({
         availability: "requires_permission",
@@ -26,10 +30,14 @@ describe("platform capability resolver", () => {
 
   it("marks helper-driven connectors as requiring helpers when missing", () => {
     expect(
-      summarizePlatformCapability("signal", {
-        platform: "signal",
-        authState: "missing",
-      }, "macos"),
+      summarizePlatformCapability(
+        "signal",
+        {
+          platform: "signal",
+          authState: "missing",
+        },
+        "macos",
+      ),
     ).toEqual(
       expect.objectContaining({
         availability: "requires_helper",

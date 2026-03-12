@@ -1,7 +1,7 @@
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { execFileSync, spawn } from "node:child_process";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
-import { stringify, parse } from "smol-toml";
+import { parse, stringify } from "smol-toml";
 import { CUED_HOOKS_PATH, ensureCuedDirs } from "../config.js";
 
 export const HOOK_EVENT_NAMES = [
@@ -11,7 +11,7 @@ export const HOOK_EVENT_NAMES = [
   "message.received",
 ] as const;
 
-export type HookEventName = typeof HOOK_EVENT_NAMES[number];
+export type HookEventName = (typeof HOOK_EVENT_NAMES)[number];
 
 export interface HookDefinition {
   event: HookEventName;
@@ -81,9 +81,7 @@ function detectOpenClaw(): { detected: boolean; path: string | null } {
 }
 
 function normalizeHook(raw: Record<string, unknown>): HookDefinition {
-  const event = typeof raw.event === "string" && isHookEventName(raw.event)
-    ? raw.event
-    : null;
+  const event = typeof raw.event === "string" && isHookEventName(raw.event) ? raw.event : null;
   if (!event) {
     throw new Error(`Unsupported hook event: ${String(raw.event)}`);
   }
@@ -95,15 +93,18 @@ function normalizeHook(raw: Record<string, unknown>): HookDefinition {
     event,
     enabled: raw.enabled === true,
     command: raw.command,
-    args: Array.isArray(raw.args) ? raw.args.filter((value): value is string => typeof value === "string") : [],
+    args: Array.isArray(raw.args)
+      ? raw.args.filter((value): value is string => typeof value === "string")
+      : [],
     cwd: typeof raw.cwd === "string" ? raw.cwd : null,
-    env: typeof raw.env === "object" && raw.env
-      ? Object.fromEntries(
-        Object.entries(raw.env as Record<string, unknown>).flatMap(([key, value]) =>
-          typeof value === "string" ? [[key, value]] : [],
-        ),
-      )
-      : {},
+    env:
+      typeof raw.env === "object" && raw.env
+        ? Object.fromEntries(
+            Object.entries(raw.env as Record<string, unknown>).flatMap(([key, value]) =>
+              typeof value === "string" ? [[key, value]] : [],
+            ),
+          )
+        : {},
   };
 }
 
@@ -229,50 +230,52 @@ export async function emitHookEvent(
   const matchingHooks = config.hooks.filter((hook) => hook.enabled && hook.event === event);
   const body = JSON.stringify({ event, payload }, null, 2);
 
-  const executions = matchingHooks.map((hook) =>
-    new Promise<HookExecutionResult>((resolve) => {
-      const child = spawn(hook.command, hook.args ?? [], {
-        cwd: hook.cwd ?? dirname(CUED_HOOKS_PATH),
-        env: {
-          ...process.env,
-          ...(hook.env ?? {}),
-          CUED_HOOK_EVENT: event,
-        },
-        stdio: ["pipe", "pipe", "pipe"],
-      });
+  const executions = matchingHooks.map(
+    (hook) =>
+      new Promise<HookExecutionResult>((resolve) => {
+        const child = spawn(hook.command, hook.args ?? [], {
+          cwd: hook.cwd ?? dirname(CUED_HOOKS_PATH),
+          env: {
+            ...process.env,
+            ...(hook.env ?? {}),
+            CUED_HOOK_EVENT: event,
+          },
+          stdio: ["pipe", "pipe", "pipe"],
+        });
 
-      let stdout = "";
-      let stderr = "";
-      child.stdout.on("data", (chunk) => {
-        stdout += chunk.toString("utf8");
-      });
-      child.stderr.on("data", (chunk) => {
-        stderr += chunk.toString("utf8");
-      });
-      child.on("error", (error) => {
-        resolve({
-          event,
-          command: hook.command,
-          args: hook.args ?? [],
-          exitCode: 1,
-          stdout,
-          stderr: error.message,
-          ok: false,
+        let stdout = "";
+        let stderr = "";
+        child.stdout.on("data", (chunk) => {
+          stdout += chunk.toString("utf8");
         });
-      });
-      child.on("close", (code) => {
-        resolve({
-          event,
-          command: hook.command,
-          args: hook.args ?? [],
-          exitCode: code,
-          stdout,
-          stderr,
-          ok: code === 0,
+        child.stderr.on("data", (chunk) => {
+          stderr += chunk.toString("utf8");
         });
-      });
-      child.stdin.end(body);
-    }));
+        child.on("error", (error) => {
+          resolve({
+            event,
+            command: hook.command,
+            args: hook.args ?? [],
+            exitCode: 1,
+            stdout,
+            stderr: error.message,
+            ok: false,
+          });
+        });
+        child.on("close", (code) => {
+          resolve({
+            event,
+            command: hook.command,
+            args: hook.args ?? [],
+            exitCode: code,
+            stdout,
+            stderr,
+            ok: code === 0,
+          });
+        });
+        child.stdin.end(body);
+      }),
+  );
 
   return Promise.all(executions);
 }

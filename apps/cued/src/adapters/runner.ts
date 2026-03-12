@@ -1,8 +1,8 @@
 import { spawn } from "node:child_process";
 import { existsSync } from "node:fs";
-import type { AdapterWorkerOutput, SyncBundle } from "./types.js";
-import { getAdapterDefinition } from "./registry.js";
 import type { AdapterPlatform } from "../types/provider.js";
+import { getAdapterDefinition } from "./registry.js";
+import type { AdapterWorkerOutput, SyncBundle } from "./types.js";
 
 export async function runAdapter(
   platform: AdapterPlatform,
@@ -76,7 +76,11 @@ export async function runAdapter(
       try {
         parsed = JSON.parse(stdout) as AdapterWorkerOutput;
       } catch (error) {
-        reject(new Error(`Invalid adapter worker output: ${error instanceof Error ? error.message : String(error)}`));
+        reject(
+          new Error(
+            `Invalid adapter worker output: ${error instanceof Error ? error.message : String(error)}`,
+          ),
+        );
         return;
       }
 
@@ -97,9 +101,7 @@ function parseWorkerError(stdout: string): string | null {
 
   try {
     const parsed = JSON.parse(stdout) as AdapterWorkerOutput;
-    return typeof parsed.error === "string" && parsed.error.length > 0
-      ? parsed.error
-      : null;
+    return typeof parsed.error === "string" && parsed.error.length > 0 ? parsed.error : null;
   } catch {
     return null;
   }

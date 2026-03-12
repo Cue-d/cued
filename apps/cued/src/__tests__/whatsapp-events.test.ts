@@ -18,42 +18,56 @@ describe("whatsapp events", () => {
     const rawEvents = buildWhatsAppRawEventsFromSnapshot({
       accountKey: "default",
       snapshot: {
-        contacts: [{
-          jid: "12016824050@s.whatsapp.net",
-          name: "Soham",
-        }],
-        chats: [{
-          jid: "12016824050@s.whatsapp.net",
-          isGroup: false,
-          participants: ["12016824050@s.whatsapp.net"],
-        }],
-        messages: [{
-          messageID: "wamid-1",
-          chatJID: "12016824050@s.whatsapp.net",
-          senderJID: "12016824050@s.whatsapp.net",
-          fromMe: false,
-          timestamp: 1_710_000_000_000,
-          text: "hello",
-          status: "delivered",
-        }],
+        contacts: [
+          {
+            jid: "12016824050@s.whatsapp.net",
+            name: "Soham",
+          },
+        ],
+        chats: [
+          {
+            jid: "12016824050@s.whatsapp.net",
+            isGroup: false,
+            participants: ["12016824050@s.whatsapp.net"],
+          },
+        ],
+        messages: [
+          {
+            messageID: "wamid-1",
+            chatJID: "12016824050@s.whatsapp.net",
+            senderJID: "12016824050@s.whatsapp.net",
+            fromMe: false,
+            timestamp: 1_710_000_000_000,
+            text: "hello",
+            status: "delivered",
+          },
+        ],
       },
       observedBase: 1_710_000_000_500,
     });
 
-    expect(rawEvents.map((event) => event.entityKind)).toEqual(["contact", "conversation", "message"]);
-    expect(rawEvents[2]?.payload).toEqual(expect.objectContaining({
-      sourceMessageKey: "12016824050@s.whatsapp.net:wamid-1",
-      senderSourceKey: "whatsapp:12016824050@s.whatsapp.net",
-      content: "hello",
-      service: "whatsapp",
-    }));
-    expect(whatsappMessageSourceKey({
-      messageID: "wamid-1",
-      chatJID: "12016824050@s.whatsapp.net",
-      fromMe: false,
-      timestamp: 1,
-      text: "x",
-    })).toBe("12016824050@s.whatsapp.net:wamid-1");
+    expect(rawEvents.map((event) => event.entityKind)).toEqual([
+      "contact",
+      "conversation",
+      "message",
+    ]);
+    expect(rawEvents[2]?.payload).toEqual(
+      expect.objectContaining({
+        sourceMessageKey: "12016824050@s.whatsapp.net:wamid-1",
+        senderSourceKey: "whatsapp:12016824050@s.whatsapp.net",
+        content: "hello",
+        service: "whatsapp",
+      }),
+    );
+    expect(
+      whatsappMessageSourceKey({
+        messageID: "wamid-1",
+        chatJID: "12016824050@s.whatsapp.net",
+        fromMe: false,
+        timestamp: 1,
+        text: "x",
+      }),
+    ).toBe("12016824050@s.whatsapp.net:wamid-1");
   });
 
   it("creates optimistic outbound raw events with the same message key", () => {
@@ -71,11 +85,17 @@ describe("whatsapp events", () => {
       },
     });
 
-    expect(rawEvents.map((event) => event.entityKind)).toEqual(["contact", "conversation", "message"]);
-    expect(rawEvents[2]?.payload).toEqual(expect.objectContaining({
-      sourceMessageKey: "12016824050@s.whatsapp.net:wamid-2",
-      isFromMe: true,
-      status: "sent",
-    }));
+    expect(rawEvents.map((event) => event.entityKind)).toEqual([
+      "contact",
+      "conversation",
+      "message",
+    ]);
+    expect(rawEvents[2]?.payload).toEqual(
+      expect.objectContaining({
+        sourceMessageKey: "12016824050@s.whatsapp.net:wamid-2",
+        isFromMe: true,
+        status: "sent",
+      }),
+    );
   });
 });

@@ -55,11 +55,13 @@ describe("slack worker lib", () => {
                 text: "Hi from Slack",
                 ts: "1710000000.000100",
                 reply_count: 1,
-                reactions: [
-                  { name: "thumbsup", count: 1, users: ["U_SELF"] },
-                ],
+                reactions: [{ name: "thumbsup", count: 1, users: ["U_SELF"] }],
                 files: [
-                  { id: "F1", name: "resume.pdf", url_private_download: "https://files/resume.pdf" },
+                  {
+                    id: "F1",
+                    name: "resume.pdf",
+                    url_private_download: "https://files/resume.pdf",
+                  },
                 ],
               },
             ],
@@ -89,25 +91,32 @@ describe("slack worker lib", () => {
       { platform: "slack", accountKey: "default", displayName: "Acme" },
     ]);
     expect(bundle.syncMode).toBe("full");
-    expect(bundle.sourceCursor).toEqual(expect.objectContaining({ teamId: "T123", selfUserId: "U_SELF" }));
+    expect(bundle.sourceCursor).toEqual(
+      expect.objectContaining({ teamId: "T123", selfUserId: "U_SELF" }),
+    );
     expect(bundle.rawEvents.some((event) => event.entityKind === "contact")).toBe(true);
     expect(bundle.rawEvents.some((event) => event.entityKind === "conversation")).toBe(true);
     expect(bundle.rawEvents.some((event) => event.entityKind === "message")).toBe(true);
     expect(bundle.rawEvents.some((event) => event.entityKind === "reaction")).toBe(true);
 
     const messageEvent = bundle.rawEvents.find((event) => event.entityKind === "message");
-    expect(messageEvent?.payload).toEqual(expect.objectContaining({
-      sourceConversationKey: "slack:T123:D123",
-      senderSourceKey: "slack:T123:U_BEN",
-      content: "Hi from Slack",
-      isFromMe: false,
-      service: "slack",
-      attachments: expect.any(Array),
-    }));
+    expect(messageEvent?.payload).toEqual(
+      expect.objectContaining({
+        sourceConversationKey: "slack:T123:D123",
+        senderSourceKey: "slack:T123:U_BEN",
+        content: "Hi from Slack",
+        isFromMe: false,
+        service: "slack",
+        attachments: expect.any(Array),
+      }),
+    );
     expect(
-      bundle.rawEvents.some((event) =>
-        event.entityKind === "message"
-        && (event.payload as Record<string, unknown>).replyToSourceMessageKey === "slack:T123:D123:1710000000.000100"),
+      bundle.rawEvents.some(
+        (event) =>
+          event.entityKind === "message" &&
+          (event.payload as Record<string, unknown>).replyToSourceMessageKey ===
+            "slack:T123:D123:1710000000.000100",
+      ),
     ).toBe(true);
   });
 
@@ -120,13 +129,15 @@ describe("slack worker lib", () => {
         },
         async listUsers() {
           return {
-            users: [{
-              id: "U_SELF",
-              team_id: "T123",
-              name: "ava",
-              real_name: "Ava Chen",
-              profile: {},
-            }],
+            users: [
+              {
+                id: "U_SELF",
+                team_id: "T123",
+                name: "ava",
+                real_name: "Ava Chen",
+                profile: {},
+              },
+            ],
             nextCursor: undefined,
           };
         },
@@ -149,10 +160,12 @@ describe("slack worker lib", () => {
     });
 
     expect(bundle.hasMore).toBe(false);
-    expect(bundle.sourceCursor).toEqual(expect.objectContaining({
-      teamId: "T123",
-      selfUserId: "U_SELF",
-    }));
+    expect(bundle.sourceCursor).toEqual(
+      expect.objectContaining({
+        teamId: "T123",
+        selfUserId: "U_SELF",
+      }),
+    );
     expect((bundle.sourceCursor as Record<string, unknown>).scan).toBeUndefined();
   });
 });

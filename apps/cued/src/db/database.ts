@@ -1,15 +1,14 @@
 import { randomUUID } from "node:crypto";
+import Database from "better-sqlite3";
 import { and, asc, desc, eq, inArray, sql } from "drizzle-orm";
 import { type BetterSQLite3Database, drizzle } from "drizzle-orm/better-sqlite3";
 import type { SQLiteTable } from "drizzle-orm/sqlite-core";
-import Database from "better-sqlite3";
 import { getCurrentAppVersion, getCurrentReleaseChannel } from "../app-metadata.js";
-import { ensureCuedDirs, CUED_DB_PATH } from "../config.js";
+import { CUED_DB_PATH, ensureCuedDirs } from "../config.js";
 import { normalizePhone } from "../lib/phone.js";
 import type {
   AuthSessionState,
   ConnectionKind,
-  ConversationType,
   IntegrationAuthState,
   IntegrationLaunchStrategy,
   MergeDecisionType,
@@ -40,7 +39,6 @@ const {
   outboundMessages,
   projectionState,
   rawEvents,
-  schemaMigrations,
   sourceAccounts,
   syncCheckpoints,
   syncRunErrors,
@@ -187,13 +185,17 @@ type WhatsAppSendCandidate = {
   resolution: Extract<WhatsAppSendResolution["resolution"], "whatsapp_jid" | "phone">;
 };
 
-const SIGNAL_UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const SIGNAL_UUID_PATTERN =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 function isSignalUuid(value: string): boolean {
   return SIGNAL_UUID_PATTERN.test(value.trim());
 }
 
-function normalizeSignalThreadRecipient(value: string, resolution: SignalSendResolution["resolution"]): string {
+function normalizeSignalThreadRecipient(
+  value: string,
+  resolution: SignalSendResolution["resolution"],
+): string {
   const trimmed = value.trim();
   if (resolution === "signal_id") {
     return trimmed.toLowerCase();
@@ -328,7 +330,7 @@ export class CuedDatabase {
       .where(eq(appSettings.key, key))
       .get();
 
-    return row ? row as AppSettingRow : null;
+    return row ? (row as AppSettingRow) : null;
   }
 
   setAppSetting(key: string, value: string | null): void {
@@ -357,7 +359,10 @@ export class CuedDatabase {
     this.setAppSetting(APP_SETTING_KEYS.installedAppVersion, input.version);
     this.setAppSetting(APP_SETTING_KEYS.releaseChannel, input.releaseChannel);
     if (typeof input.cliSymlinkInstalled === "boolean") {
-      this.setAppSetting(APP_SETTING_KEYS.cliSymlinkInstalled, input.cliSymlinkInstalled ? "1" : "0");
+      this.setAppSetting(
+        APP_SETTING_KEYS.cliSymlinkInstalled,
+        input.cliSymlinkInstalled ? "1" : "0",
+      );
     }
   }
 
@@ -458,34 +463,49 @@ export class CuedDatabase {
     }>;
   }
 
-  getCheckpoint(platform: Platform, accountKey: string): {
+  getCheckpoint(
+    platform: Platform,
+    accountKey: string,
+  ): {
     source_cursor_json: string | null;
     sync_mode: SyncMode;
     raw_ingest_watermark: number;
     projection_watermark: number;
   } | null {
-    return this.db
-      .select({
-        source_cursor_json: syncCheckpoints.sourceCursorJson,
-        sync_mode: syncCheckpoints.syncMode,
-        raw_ingest_watermark: syncCheckpoints.rawIngestWatermark,
-        projection_watermark: syncCheckpoints.projectionWatermark,
-      })
-      .from(syncCheckpoints)
-      .where(and(eq(syncCheckpoints.platform, platform), eq(syncCheckpoints.accountKey, accountKey)))
-      .get() as {
-      source_cursor_json: string | null;
-      sync_mode: SyncMode;
-      raw_ingest_watermark: number;
-      projection_watermark: number;
-    } | undefined ?? null;
+    return (
+      (this.db
+        .select({
+          source_cursor_json: syncCheckpoints.sourceCursorJson,
+          sync_mode: syncCheckpoints.syncMode,
+          raw_ingest_watermark: syncCheckpoints.rawIngestWatermark,
+          projection_watermark: syncCheckpoints.projectionWatermark,
+        })
+        .from(syncCheckpoints)
+        .where(
+          and(eq(syncCheckpoints.platform, platform), eq(syncCheckpoints.accountKey, accountKey)),
+        )
+        .get() as
+        | {
+            source_cursor_json: string | null;
+            sync_mode: SyncMode;
+            raw_ingest_watermark: number;
+            projection_watermark: number;
+          }
+        | undefined) ?? null
+    );
   }
 
   resetSource(platform: Platform): number {
     return this.db.transaction((tx) => {
       const removedRuns = tx.delete(syncRuns).where(eq(syncRuns.platform, platform)).run().changes;
-      const removedErrors = tx.delete(syncRunErrors).where(eq(syncRunErrors.platform, platform)).run().changes;
-      const removedCheckpoints = tx.delete(syncCheckpoints).where(eq(syncCheckpoints.platform, platform)).run().changes;
+      const removedErrors = tx
+        .delete(syncRunErrors)
+        .where(eq(syncRunErrors.platform, platform))
+        .run().changes;
+      const removedCheckpoints = tx
+        .delete(syncCheckpoints)
+        .where(eq(syncCheckpoints.platform, platform))
+        .run().changes;
       return Number(removedRuns) + Number(removedErrors) + Number(removedCheckpoints);
     });
   }
@@ -499,16 +519,19 @@ export class CuedDatabase {
     createdBy: string;
   }): string {
     const id = randomUUID();
-    this.db.insert(contactMergeDecisions).values({
-      id,
-      decisionType: input.decisionType,
-      leftContactId: input.leftContactId ?? null,
-      rightContactId: input.rightContactId ?? null,
-      canonicalContactId: input.canonicalContactId ?? null,
-      reason: input.reason ?? null,
-      createdBy: input.createdBy,
-      createdAt: now(),
-    }).run();
+    this.db
+      .insert(contactMergeDecisions)
+      .values({
+        id,
+        decisionType: input.decisionType,
+        leftContactId: input.leftContactId ?? null,
+        rightContactId: input.rightContactId ?? null,
+        canonicalContactId: input.canonicalContactId ?? null,
+        reason: input.reason ?? null,
+        createdBy: input.createdBy,
+        createdAt: now(),
+      })
+      .run();
     return id;
   }
 
@@ -599,16 +622,18 @@ export class CuedDatabase {
   } {
     const state = this.getProjectionState();
     const row = this.sqlite
-      .prepare(`
+      .prepare(
+        `
         SELECT
           COALESCE(MAX(rowid), 0) AS max_raw_event_rowid,
           COALESCE(SUM(CASE WHEN rowid > ? THEN 1 ELSE 0 END), 0) AS pending_raw_events
         FROM raw_events
-      `)
+      `,
+      )
       .get(state.projection_watermark) as {
-        max_raw_event_rowid: number | null;
-        pending_raw_events: number | null;
-      };
+      max_raw_event_rowid: number | null;
+      pending_raw_events: number | null;
+    };
 
     return {
       projection_watermark: state.projection_watermark,
@@ -665,28 +690,35 @@ export class CuedDatabase {
   }
 
   getIntegrationState(platform: Platform, accountKey: string): IntegrationStateRow | null {
-    return this.db
-      .select({
-        id: integrationStates.id,
-        platform: integrationStates.platform,
-        account_key: integrationStates.accountKey,
-        display_name: integrationStates.displayName,
-        auth_state: integrationStates.authState,
-        enabled: integrationStates.enabled,
-        connection_kind: integrationStates.connectionKind,
-        sync_capable: integrationStates.syncCapable,
-        launch_strategy: integrationStates.launchStrategy,
-        launch_target: integrationStates.launchTarget,
-        imported_from: integrationStates.importedFrom,
-        artifact_paths_json: integrationStates.artifactPathsJson,
-        metadata_json: integrationStates.metadataJson,
-        last_seen_at: integrationStates.lastSeenAt,
-        created_at: integrationStates.createdAt,
-        updated_at: integrationStates.updatedAt,
-      })
-      .from(integrationStates)
-      .where(and(eq(integrationStates.platform, platform), eq(integrationStates.accountKey, accountKey)))
-      .get() as IntegrationStateRow | undefined ?? null;
+    return (
+      (this.db
+        .select({
+          id: integrationStates.id,
+          platform: integrationStates.platform,
+          account_key: integrationStates.accountKey,
+          display_name: integrationStates.displayName,
+          auth_state: integrationStates.authState,
+          enabled: integrationStates.enabled,
+          connection_kind: integrationStates.connectionKind,
+          sync_capable: integrationStates.syncCapable,
+          launch_strategy: integrationStates.launchStrategy,
+          launch_target: integrationStates.launchTarget,
+          imported_from: integrationStates.importedFrom,
+          artifact_paths_json: integrationStates.artifactPathsJson,
+          metadata_json: integrationStates.metadataJson,
+          last_seen_at: integrationStates.lastSeenAt,
+          created_at: integrationStates.createdAt,
+          updated_at: integrationStates.updatedAt,
+        })
+        .from(integrationStates)
+        .where(
+          and(
+            eq(integrationStates.platform, platform),
+            eq(integrationStates.accountKey, accountKey),
+          ),
+        )
+        .get() as IntegrationStateRow | undefined) ?? null
+    );
   }
 
   upsertIntegrationState(input: {
@@ -754,7 +786,9 @@ export class CuedDatabase {
         enabled: enabled ? 1 : 0,
         updatedAt: now(),
       })
-      .where(and(eq(integrationStates.platform, platform), eq(integrationStates.accountKey, accountKey)))
+      .where(
+        and(eq(integrationStates.platform, platform), eq(integrationStates.accountKey, accountKey)),
+      )
       .run();
 
     if (Number(result.changes) === 0) {
@@ -788,53 +822,57 @@ export class CuedDatabase {
   }
 
   getAuthSession(sessionId: string): AuthSessionRow | null {
-    return this.db
-      .select({
-        id: authSessions.id,
-        platform: authSessions.platform,
-        account_key: authSessions.accountKey,
-        integration_state_id: authSessions.integrationStateId,
-        state: authSessions.state,
-        native_pid: authSessions.nativePid,
-        requested_at: authSessions.requestedAt,
-        started_at: authSessions.startedAt,
-        finished_at: authSessions.finishedAt,
-        keychain_service: authSessions.keychainService,
-        keychain_account: authSessions.keychainAccount,
-        result_summary_json: authSessions.resultSummaryJson,
-        error_summary: authSessions.errorSummary,
-        created_at: authSessions.createdAt,
-        updated_at: authSessions.updatedAt,
-      })
-      .from(authSessions)
-      .where(eq(authSessions.id, sessionId))
-      .get() as AuthSessionRow | undefined ?? null;
+    return (
+      (this.db
+        .select({
+          id: authSessions.id,
+          platform: authSessions.platform,
+          account_key: authSessions.accountKey,
+          integration_state_id: authSessions.integrationStateId,
+          state: authSessions.state,
+          native_pid: authSessions.nativePid,
+          requested_at: authSessions.requestedAt,
+          started_at: authSessions.startedAt,
+          finished_at: authSessions.finishedAt,
+          keychain_service: authSessions.keychainService,
+          keychain_account: authSessions.keychainAccount,
+          result_summary_json: authSessions.resultSummaryJson,
+          error_summary: authSessions.errorSummary,
+          created_at: authSessions.createdAt,
+          updated_at: authSessions.updatedAt,
+        })
+        .from(authSessions)
+        .where(eq(authSessions.id, sessionId))
+        .get() as AuthSessionRow | undefined) ?? null
+    );
   }
 
   getLatestAuthSession(platform: Platform, accountKey: string): AuthSessionRow | null {
-    return this.db
-      .select({
-        id: authSessions.id,
-        platform: authSessions.platform,
-        account_key: authSessions.accountKey,
-        integration_state_id: authSessions.integrationStateId,
-        state: authSessions.state,
-        native_pid: authSessions.nativePid,
-        requested_at: authSessions.requestedAt,
-        started_at: authSessions.startedAt,
-        finished_at: authSessions.finishedAt,
-        keychain_service: authSessions.keychainService,
-        keychain_account: authSessions.keychainAccount,
-        result_summary_json: authSessions.resultSummaryJson,
-        error_summary: authSessions.errorSummary,
-        created_at: authSessions.createdAt,
-        updated_at: authSessions.updatedAt,
-      })
-      .from(authSessions)
-      .where(and(eq(authSessions.platform, platform), eq(authSessions.accountKey, accountKey)))
-      .orderBy(desc(authSessions.requestedAt), desc(authSessions.createdAt))
-      .limit(1)
-      .get() as AuthSessionRow | undefined ?? null;
+    return (
+      (this.db
+        .select({
+          id: authSessions.id,
+          platform: authSessions.platform,
+          account_key: authSessions.accountKey,
+          integration_state_id: authSessions.integrationStateId,
+          state: authSessions.state,
+          native_pid: authSessions.nativePid,
+          requested_at: authSessions.requestedAt,
+          started_at: authSessions.startedAt,
+          finished_at: authSessions.finishedAt,
+          keychain_service: authSessions.keychainService,
+          keychain_account: authSessions.keychainAccount,
+          result_summary_json: authSessions.resultSummaryJson,
+          error_summary: authSessions.errorSummary,
+          created_at: authSessions.createdAt,
+          updated_at: authSessions.updatedAt,
+        })
+        .from(authSessions)
+        .where(and(eq(authSessions.platform, platform), eq(authSessions.accountKey, accountKey)))
+        .orderBy(desc(authSessions.requestedAt), desc(authSessions.createdAt))
+        .limit(1)
+        .get() as AuthSessionRow | undefined) ?? null
+    );
   }
 
   createAuthSession(input: {
@@ -849,23 +887,26 @@ export class CuedDatabase {
   }): string {
     const id = input.id ?? randomUUID();
     const timestamp = input.requestedAt ?? now();
-    this.db.insert(authSessions).values({
-      id,
-      platform: input.platform,
-      accountKey: input.accountKey,
-      integrationStateId: input.integrationStateId,
-      state: input.state ?? "requested",
-      nativePid: null,
-      requestedAt: timestamp,
-      startedAt: null,
-      finishedAt: null,
-      keychainService: null,
-      keychainAccount: null,
-      resultSummaryJson: input.resultSummary ? JSON.stringify(input.resultSummary) : null,
-      errorSummary: input.errorSummary ?? null,
-      createdAt: timestamp,
-      updatedAt: timestamp,
-    }).run();
+    this.db
+      .insert(authSessions)
+      .values({
+        id,
+        platform: input.platform,
+        accountKey: input.accountKey,
+        integrationStateId: input.integrationStateId,
+        state: input.state ?? "requested",
+        nativePid: null,
+        requestedAt: timestamp,
+        startedAt: null,
+        finishedAt: null,
+        keychainService: null,
+        keychainAccount: null,
+        resultSummaryJson: input.resultSummary ? JSON.stringify(input.resultSummary) : null,
+        errorSummary: input.errorSummary ?? null,
+        createdAt: timestamp,
+        updatedAt: timestamp,
+      })
+      .run();
     return id;
   }
 
@@ -885,21 +926,28 @@ export class CuedDatabase {
       throw new Error(`Auth session not found: ${input.id}`);
     }
 
-    this.db.update(authSessions).set({
-      state: input.state,
-      nativePid: input.nativePid === undefined ? current.native_pid : input.nativePid,
-      startedAt: input.startedAt === undefined ? current.started_at : input.startedAt,
-      finishedAt: input.finishedAt === undefined ? current.finished_at : input.finishedAt,
-      keychainService: input.keychainService === undefined ? current.keychain_service : input.keychainService,
-      keychainAccount: input.keychainAccount === undefined ? current.keychain_account : input.keychainAccount,
-      resultSummaryJson: input.resultSummary === undefined
-        ? current.result_summary_json
-        : input.resultSummary === null
-          ? null
-          : JSON.stringify(input.resultSummary),
-      errorSummary: input.errorSummary === undefined ? current.error_summary : input.errorSummary,
-      updatedAt: now(),
-    }).where(eq(authSessions.id, input.id)).run();
+    this.db
+      .update(authSessions)
+      .set({
+        state: input.state,
+        nativePid: input.nativePid === undefined ? current.native_pid : input.nativePid,
+        startedAt: input.startedAt === undefined ? current.started_at : input.startedAt,
+        finishedAt: input.finishedAt === undefined ? current.finished_at : input.finishedAt,
+        keychainService:
+          input.keychainService === undefined ? current.keychain_service : input.keychainService,
+        keychainAccount:
+          input.keychainAccount === undefined ? current.keychain_account : input.keychainAccount,
+        resultSummaryJson:
+          input.resultSummary === undefined
+            ? current.result_summary_json
+            : input.resultSummary === null
+              ? null
+              : JSON.stringify(input.resultSummary),
+        errorSummary: input.errorSummary === undefined ? current.error_summary : input.errorSummary,
+        updatedAt: now(),
+      })
+      .where(eq(authSessions.id, input.id))
+      .run();
   }
 
   queueOutboundMessage(input: {
@@ -912,23 +960,26 @@ export class CuedDatabase {
   }): string {
     const id = randomUUID();
     const timestamp = now();
-    this.db.insert(outboundMessages).values({
-      id,
-      platform: input.platform,
-      accountKey: input.accountKey,
-      target: input.target,
-      threadId: input.threadId ?? null,
-      text: input.text,
-      status: "pending",
-      attemptCount: 0,
-      scheduledFor: timestamp,
-      startedAt: null,
-      finishedAt: null,
-      lastError: null,
-      metadataJson: input.metadata ? JSON.stringify(input.metadata) : null,
-      createdAt: timestamp,
-      updatedAt: timestamp,
-    }).run();
+    this.db
+      .insert(outboundMessages)
+      .values({
+        id,
+        platform: input.platform,
+        accountKey: input.accountKey,
+        target: input.target,
+        threadId: input.threadId ?? null,
+        text: input.text,
+        status: "pending",
+        attemptCount: 0,
+        scheduledFor: timestamp,
+        startedAt: null,
+        finishedAt: null,
+        lastError: null,
+        metadataJson: input.metadata ? JSON.stringify(input.metadata) : null,
+        createdAt: timestamp,
+        updatedAt: timestamp,
+      })
+      .run();
     return id;
   }
 
@@ -950,32 +1001,38 @@ export class CuedDatabase {
 
     const directLookupValue = normalizeSignalHandleLookupValue(trimmed);
     const explicitContact = this.sqlite
-      .prepare(`
+      .prepare(
+        `
         SELECT id, name
         FROM contacts
         WHERE id = ?
         LIMIT 1
-      `)
+      `,
+      )
       .get(trimmed) as { id: string; name: string | null } | undefined;
 
     const matchingHandleContacts = this.sqlite
-      .prepare(`
+      .prepare(
+        `
         SELECT DISTINCT c.id, c.name
         FROM contacts c
         JOIN contact_handles h ON h.contact_id = c.id
         WHERE lower(h.value) = lower(?)
            OR lower(h.normalized_value) = lower(?)
         ORDER BY c.updated_at DESC, c.id ASC
-      `)
+      `,
+      )
       .all(trimmed, directLookupValue) as Array<{ id: string; name: string | null }>;
 
     const exactNameContacts = this.sqlite
-      .prepare(`
+      .prepare(
+        `
         SELECT id, name
         FROM contacts
         WHERE lower(name) = lower(?)
         ORDER BY updated_at DESC, id ASC
-      `)
+      `,
+      )
       .all(trimmed) as Array<{ id: string; name: string | null }>;
 
     const seedContacts = explicitContact
@@ -984,17 +1041,22 @@ export class CuedDatabase {
         ? matchingHandleContacts
         : exactNameContacts;
 
-    const matchedName = seedContacts.find((contact) => typeof contact.name === "string" && contact.name.trim().length > 0)?.name ?? null;
+    const matchedName =
+      seedContacts.find(
+        (contact) => typeof contact.name === "string" && contact.name.trim().length > 0,
+      )?.name ?? null;
 
     const contactIds = new Set(seedContacts.map((contact) => contact.id));
     if (matchedName) {
       const sameNameContacts = this.sqlite
-        .prepare(`
+        .prepare(
+          `
           SELECT id
           FROM contacts
           WHERE lower(name) = lower(?)
           ORDER BY updated_at DESC, id ASC
-        `)
+        `,
+        )
         .all(matchedName) as Array<{ id: string }>;
       for (const contact of sameNameContacts) {
         contactIds.add(contact.id);
@@ -1005,19 +1067,21 @@ export class CuedDatabase {
     if (candidateContactIds.length > 0) {
       const placeholders = candidateContactIds.map(() => "?").join(", ");
       const handles = this.sqlite
-        .prepare(`
+        .prepare(
+          `
           SELECT contact_id, type, value, normalized_value, platform
           FROM contact_handles
           WHERE contact_id IN (${placeholders})
           ORDER BY contact_id ASC, platform ASC, type ASC
-        `)
+        `,
+        )
         .all(...candidateContactIds) as Array<{
-          contact_id: string;
-          type: string;
-          value: string;
-          normalized_value: string;
-          platform: string | null;
-        }>;
+        contact_id: string;
+        type: string;
+        value: string;
+        normalized_value: string;
+        platform: string | null;
+      }>;
 
       const rankedHandle = handles
         .map((handle) => {
@@ -1030,7 +1094,8 @@ export class CuedDatabase {
             } satisfies SignalSendCandidate;
           }
           if (handle.platform === "signal" && handle.type === "phone") {
-            const recipient = normalizePhone(handle.value) || normalizePhone(handle.normalized_value);
+            const recipient =
+              normalizePhone(handle.value) || normalizePhone(handle.normalized_value);
             if (!recipient) {
               return null;
             }
@@ -1041,7 +1106,8 @@ export class CuedDatabase {
             } satisfies SignalSendCandidate;
           }
           if (handle.type === "phone") {
-            const recipient = normalizePhone(handle.value) || normalizePhone(handle.normalized_value);
+            const recipient =
+              normalizePhone(handle.value) || normalizePhone(handle.normalized_value);
             if (!recipient) {
               return null;
             }
@@ -1052,7 +1118,8 @@ export class CuedDatabase {
             } satisfies SignalSendCandidate;
           }
           if (handle.type === "imessage_handle") {
-            const recipient = normalizePhone(handle.value) || normalizePhone(handle.normalized_value);
+            const recipient =
+              normalizePhone(handle.value) || normalizePhone(handle.normalized_value);
             if (!recipient) {
               return null;
             }
@@ -1065,8 +1132,7 @@ export class CuedDatabase {
           return null;
         })
         .filter((value): value is SignalSendCandidate => value !== null)
-        .sort((left, right) =>
-          left.rank - right.rank || left.target.localeCompare(right.target));
+        .sort((left, right) => left.rank - right.rank || left.target.localeCompare(right.target));
 
       if (rankedHandle[0]) {
         return {
@@ -1122,32 +1188,38 @@ export class CuedDatabase {
     }
 
     const explicitContact = this.sqlite
-      .prepare(`
+      .prepare(
+        `
         SELECT id, name
         FROM contacts
         WHERE id = ?
         LIMIT 1
-      `)
+      `,
+      )
       .get(trimmed) as { id: string; name: string | null } | undefined;
 
     const matchingHandleContacts = this.sqlite
-      .prepare(`
+      .prepare(
+        `
         SELECT DISTINCT c.id, c.name
         FROM contacts c
         JOIN contact_handles h ON h.contact_id = c.id
         WHERE lower(h.value) = lower(?)
            OR lower(h.normalized_value) = lower(?)
         ORDER BY c.updated_at DESC, c.id ASC
-      `)
+      `,
+      )
       .all(trimmed, normalizedInput) as Array<{ id: string; name: string | null }>;
 
     const exactNameContacts = this.sqlite
-      .prepare(`
+      .prepare(
+        `
         SELECT id, name
         FROM contacts
         WHERE lower(name) = lower(?)
         ORDER BY updated_at DESC, id ASC
-      `)
+      `,
+      )
       .all(trimmed) as Array<{ id: string; name: string | null }>;
 
     const seedContacts = explicitContact
@@ -1155,17 +1227,22 @@ export class CuedDatabase {
       : matchingHandleContacts.length > 0
         ? matchingHandleContacts
         : exactNameContacts;
-    const matchedName = seedContacts.find((contact) => typeof contact.name === "string" && contact.name.trim().length > 0)?.name ?? null;
+    const matchedName =
+      seedContacts.find(
+        (contact) => typeof contact.name === "string" && contact.name.trim().length > 0,
+      )?.name ?? null;
 
     const contactIds = new Set(seedContacts.map((contact) => contact.id));
     if (matchedName) {
       const sameNameContacts = this.sqlite
-        .prepare(`
+        .prepare(
+          `
           SELECT id
           FROM contacts
           WHERE lower(name) = lower(?)
           ORDER BY updated_at DESC, id ASC
-        `)
+        `,
+        )
         .all(matchedName) as Array<{ id: string }>;
       for (const contact of sameNameContacts) {
         contactIds.add(contact.id);
@@ -1176,19 +1253,21 @@ export class CuedDatabase {
     if (candidateContactIds.length > 0) {
       const placeholders = candidateContactIds.map(() => "?").join(", ");
       const handles = this.sqlite
-        .prepare(`
+        .prepare(
+          `
           SELECT contact_id, type, value, normalized_value, platform
           FROM contact_handles
           WHERE contact_id IN (${placeholders})
           ORDER BY contact_id ASC, platform ASC, type ASC
-        `)
+        `,
+        )
         .all(...candidateContactIds) as Array<{
-          contact_id: string;
-          type: string;
-          value: string;
-          normalized_value: string;
-          platform: string | null;
-        }>;
+        contact_id: string;
+        type: string;
+        value: string;
+        normalized_value: string;
+        platform: string | null;
+      }>;
 
       const rankedHandle = handles
         .map((handle) => {
@@ -1200,7 +1279,8 @@ export class CuedDatabase {
             } satisfies WhatsAppSendCandidate;
           }
           if (handle.type === "phone") {
-            const recipient = normalizePhone(handle.value) || normalizePhone(handle.normalized_value);
+            const recipient =
+              normalizePhone(handle.value) || normalizePhone(handle.normalized_value);
             if (!recipient) {
               return null;
             }
@@ -1213,8 +1293,7 @@ export class CuedDatabase {
           return null;
         })
         .filter((value): value is WhatsAppSendCandidate => value !== null)
-        .sort((left, right) =>
-          left.rank - right.rank || left.target.localeCompare(right.target));
+        .sort((left, right) => left.rank - right.rank || left.target.localeCompare(right.target));
 
       if (rankedHandle[0]) {
         return {
@@ -1252,7 +1331,11 @@ export class CuedDatabase {
     return null;
   }
 
-  findMessageByPlatformKey(platform: Platform, accountKey: string, platformMessageId: string): {
+  findMessageByPlatformKey(
+    platform: Platform,
+    accountKey: string,
+    platformMessageId: string,
+  ): {
     id: string;
     sender_source_key: string | null;
     sent_at: number | null;
@@ -1261,8 +1344,10 @@ export class CuedDatabase {
     delivered_at: number | null;
     read_at: number | null;
   } | null {
-    return this.sqlite
-      .prepare(`
+    return (
+      (this.sqlite
+        .prepare(
+          `
         SELECT
           id,
           sender_source_key,
@@ -1276,16 +1361,20 @@ export class CuedDatabase {
           AND account_key = ?
           AND platform_message_id = ?
         LIMIT 1
-      `)
-      .get(platform, accountKey, platformMessageId) as {
-        id: string;
-        sender_source_key: string | null;
-        sent_at: number | null;
-        content: string | null;
-        status: string | null;
-        delivered_at: number | null;
-        read_at: number | null;
-      } | undefined ?? null;
+      `,
+        )
+        .get(platform, accountKey, platformMessageId) as
+        | {
+            id: string;
+            sender_source_key: string | null;
+            sent_at: number | null;
+            content: string | null;
+            status: string | null;
+            delivered_at: number | null;
+            read_at: number | null;
+          }
+        | undefined) ?? null
+    );
   }
 
   claimNextOutboundMessage(platform?: Platform): OutboundMessageRow | null {
@@ -1350,12 +1439,16 @@ export class CuedDatabase {
   }
 
   completeOutboundMessage(id: string): void {
-    this.db.update(outboundMessages).set({
-      status: "sent",
-      finishedAt: now(),
-      updatedAt: now(),
-      lastError: null,
-    }).where(eq(outboundMessages.id, id)).run();
+    this.db
+      .update(outboundMessages)
+      .set({
+        status: "sent",
+        finishedAt: now(),
+        updatedAt: now(),
+        lastError: null,
+      })
+      .where(eq(outboundMessages.id, id))
+      .run();
   }
 
   failOutboundMessage(input: {
@@ -1378,13 +1471,17 @@ export class CuedDatabase {
     }
 
     const shouldRetry = input.retryable && current.attempt_count < (input.maxAttempts ?? 3);
-    this.db.update(outboundMessages).set({
-      status: shouldRetry ? "pending" : "failed",
-      scheduledFor: shouldRetry ? now() + (input.retryDelayMs ?? 5_000) : now(),
-      finishedAt: shouldRetry ? null : now(),
-      updatedAt: now(),
-      lastError: input.error,
-    }).where(eq(outboundMessages.id, input.id)).run();
+    this.db
+      .update(outboundMessages)
+      .set({
+        status: shouldRetry ? "pending" : "failed",
+        scheduledFor: shouldRetry ? now() + (input.retryDelayMs ?? 5_000) : now(),
+        finishedAt: shouldRetry ? null : now(),
+        updatedAt: now(),
+        lastError: input.error,
+      })
+      .where(eq(outboundMessages.id, input.id))
+      .run();
   }
 
   hasQueuedOutboundMessages(platform?: Platform): boolean {
@@ -1424,13 +1521,15 @@ export class CuedDatabase {
           .where(eq(syncRuns.id, run.id))
           .run();
 
-        tx.insert(syncRunErrors).values({
-          id: randomUUID(),
-          syncRunId: run.id,
-          errorMessage,
-          detailsJson: null,
-          createdAt: finishedAt,
-        }).run();
+        tx.insert(syncRunErrors)
+          .values({
+            id: randomUUID(),
+            syncRunId: run.id,
+            errorMessage,
+            detailsJson: null,
+            createdAt: finishedAt,
+          })
+          .run();
       }
 
       return stuckRuns.length;
@@ -1445,27 +1544,32 @@ export class CuedDatabase {
     details?: unknown;
   }): string {
     const id = randomUUID();
-    this.db.insert(syncRuns).values({
-      id,
-      platform: input.platform ?? null,
-      accountKey: input.accountKey ?? null,
-      runType: input.runType,
-      status: "queued",
-      trigger: input.trigger,
-      startedAt: now(),
-      finishedAt: null,
-      detailsJson: input.details ? JSON.stringify(input.details) : null,
-    }).run();
+    this.db
+      .insert(syncRuns)
+      .values({
+        id,
+        platform: input.platform ?? null,
+        accountKey: input.accountKey ?? null,
+        runType: input.runType,
+        status: "queued",
+        trigger: input.trigger,
+        startedAt: now(),
+        finishedAt: null,
+        detailsJson: input.details ? JSON.stringify(input.details) : null,
+      })
+      .run();
     return id;
   }
 
-  queueSyncRuns(inputs: Array<{
-    platform?: Platform | null;
-    accountKey?: string | null;
-    runType: SyncRunType;
-    trigger: string;
-    details?: unknown;
-  }>): string[] {
+  queueSyncRuns(
+    inputs: Array<{
+      platform?: Platform | null;
+      accountKey?: string | null;
+      runType: SyncRunType;
+      trigger: string;
+      details?: unknown;
+    }>,
+  ): string[] {
     if (inputs.length === 0) {
       return [];
     }
@@ -1498,18 +1602,18 @@ export class CuedDatabase {
   }
 
   hasQueuedOrRunningRun(platform: Platform, accountKey?: string | null): boolean {
-    const accountPredicate = accountKey == null
-      ? sql`1 = 1`
-      : eq(syncRuns.accountKey, accountKey);
+    const accountPredicate = accountKey == null ? sql`1 = 1` : eq(syncRuns.accountKey, accountKey);
     return Boolean(
       this.db
         .select({ id: syncRuns.id })
         .from(syncRuns)
-        .where(and(
-          eq(syncRuns.platform, platform),
-          accountPredicate,
-          sql`${syncRuns.status} IN ('queued', 'running', 'ingesting')`,
-        ))
+        .where(
+          and(
+            eq(syncRuns.platform, platform),
+            accountPredicate,
+            sql`${syncRuns.status} IN ('queued', 'running', 'ingesting')`,
+          ),
+        )
         .limit(1)
         .get(),
     );
@@ -1520,10 +1624,12 @@ export class CuedDatabase {
       this.db
         .select({ id: syncRuns.id })
         .from(syncRuns)
-        .where(and(
-          inArray(syncRuns.runType, ["project", "rebuild"]),
-          sql`${syncRuns.status} IN ('queued', 'running', 'projecting')`,
-        ))
+        .where(
+          and(
+            inArray(syncRuns.runType, ["project", "rebuild"]),
+            sql`${syncRuns.status} IN ('queued', 'running', 'projecting')`,
+          ),
+        )
         .limit(1)
         .get(),
     );
@@ -1590,9 +1696,10 @@ export class CuedDatabase {
     nextStatus: SyncRunStatus = "ingesting",
   ): QueuedSyncRun | null {
     return this.db.transaction((tx) => {
-      const statusPredicate = runTypes && runTypes.length > 0
-        ? and(eq(syncRuns.status, "queued"), inArray(syncRuns.runType, runTypes))
-        : eq(syncRuns.status, "queued");
+      const statusPredicate =
+        runTypes && runTypes.length > 0
+          ? and(eq(syncRuns.status, "queued"), inArray(syncRuns.runType, runTypes))
+          : eq(syncRuns.status, "queued");
 
       const row = tx
         .select({
@@ -1609,25 +1716,24 @@ export class CuedDatabase {
         .where(statusPredicate)
         .orderBy(asc(syncRuns.startedAt))
         .limit(1)
-        .get() as {
-        id: string;
-        platform: Platform | null;
-        account_key: string | null;
-        run_type: SyncRunType;
-        status: SyncRunStatus;
-        trigger: string;
-        started_at: number;
-        details_json: string | null;
-      } | undefined;
+        .get() as
+        | {
+            id: string;
+            platform: Platform | null;
+            account_key: string | null;
+            run_type: SyncRunType;
+            status: SyncRunStatus;
+            trigger: string;
+            started_at: number;
+            details_json: string | null;
+          }
+        | undefined;
 
       if (!row) {
         return null;
       }
 
-      tx.update(syncRuns)
-        .set({ status: nextStatus })
-        .where(eq(syncRuns.id, row.id))
-        .run();
+      tx.update(syncRuns).set({ status: nextStatus }).where(eq(syncRuns.id, row.id)).run();
 
       return { ...row, status: nextStatus };
     });
@@ -1637,15 +1743,9 @@ export class CuedDatabase {
     const values: {
       status: SyncRunStatus;
       detailsJson?: string;
-    } = details === undefined
-      ? { status }
-      : { status, detailsJson: JSON.stringify(details) };
+    } = details === undefined ? { status } : { status, detailsJson: JSON.stringify(details) };
 
-    this.db
-      .update(syncRuns)
-      .set(values)
-      .where(eq(syncRuns.id, runId))
-      .run();
+    this.db.update(syncRuns).set(values).where(eq(syncRuns.id, runId)).run();
   }
 
   finishRun(runId: string, details?: unknown): void {
@@ -1653,22 +1753,19 @@ export class CuedDatabase {
       status: SyncRunStatus;
       finishedAt: number;
       detailsJson?: string;
-    } = details === undefined
-      ? {
-          status: "completed",
-          finishedAt: now(),
-        }
-      : {
-          status: "completed",
-          finishedAt: now(),
-          detailsJson: JSON.stringify(details),
-        };
+    } =
+      details === undefined
+        ? {
+            status: "completed",
+            finishedAt: now(),
+          }
+        : {
+            status: "completed",
+            finishedAt: now(),
+            detailsJson: JSON.stringify(details),
+          };
 
-    this.db
-      .update(syncRuns)
-      .set(values)
-      .where(eq(syncRuns.id, runId))
-      .run();
+    this.db.update(syncRuns).set(values).where(eq(syncRuns.id, runId)).run();
   }
 
   failRun(runId: string, errorMessage: string, details?: unknown): void {
@@ -1677,29 +1774,29 @@ export class CuedDatabase {
         status: SyncRunStatus;
         finishedAt: number;
         detailsJson?: string;
-      } = details === undefined
-        ? {
-            status: "failed",
-            finishedAt: now(),
-          }
-        : {
-            status: "failed",
-            finishedAt: now(),
-            detailsJson: JSON.stringify(details),
-          };
+      } =
+        details === undefined
+          ? {
+              status: "failed",
+              finishedAt: now(),
+            }
+          : {
+              status: "failed",
+              finishedAt: now(),
+              detailsJson: JSON.stringify(details),
+            };
 
-      tx.update(syncRuns)
-        .set(values)
-        .where(eq(syncRuns.id, runId))
+      tx.update(syncRuns).set(values).where(eq(syncRuns.id, runId)).run();
+
+      tx.insert(syncRunErrors)
+        .values({
+          id: randomUUID(),
+          syncRunId: runId,
+          errorMessage,
+          detailsJson: details ? JSON.stringify(details) : null,
+          createdAt: now(),
+        })
         .run();
-
-      tx.insert(syncRunErrors).values({
-        id: randomUUID(),
-        syncRunId: runId,
-        errorMessage,
-        detailsJson: details ? JSON.stringify(details) : null,
-        createdAt: now(),
-      }).run();
     });
   }
 
@@ -1737,13 +1834,15 @@ export class CuedDatabase {
       .run();
   }
 
-  upsertSourceAccounts(inputs: Array<{
-    platform: Platform;
-    accountKey: string;
-    displayName?: string | null;
-    status?: string;
-    metadata?: unknown;
-  }>): void {
+  upsertSourceAccounts(
+    inputs: Array<{
+      platform: Platform;
+      accountKey: string;
+      displayName?: string | null;
+      status?: string;
+      metadata?: unknown;
+    }>,
+  ): void {
     if (inputs.length === 0) {
       return;
     }
@@ -1752,16 +1851,18 @@ export class CuedDatabase {
     this.db.transaction((tx) => {
       for (const chunk of chunkArray(inputs, WRITE_BATCH_SIZE)) {
         tx.insert(sourceAccounts)
-          .values(chunk.map((input) => ({
-            id: `${input.platform}:${input.accountKey}`,
-            platform: input.platform,
-            accountKey: input.accountKey,
-            displayName: input.displayName ?? null,
-            status: input.status ?? "active",
-            metadataJson: input.metadata ? JSON.stringify(input.metadata) : null,
-            createdAt: timestamp,
-            updatedAt: timestamp,
-          })))
+          .values(
+            chunk.map((input) => ({
+              id: `${input.platform}:${input.accountKey}`,
+              platform: input.platform,
+              accountKey: input.accountKey,
+              displayName: input.displayName ?? null,
+              status: input.status ?? "active",
+              metadataJson: input.metadata ? JSON.stringify(input.metadata) : null,
+              createdAt: timestamp,
+              updatedAt: timestamp,
+            })),
+          )
           .onConflictDoUpdate({
             target: [sourceAccounts.platform, sourceAccounts.accountKey],
             set: {
@@ -1813,9 +1914,10 @@ export class CuedDatabase {
           rawIngestWatermark: values.rawIngestWatermark,
           projectionWatermark: values.projectionWatermark,
           syncMode: values.syncMode,
-          lastFullSyncAt: input.syncMode === "full"
-            ? values.lastSuccessAt
-            : sql`${syncCheckpoints.lastFullSyncAt}`,
+          lastFullSyncAt:
+            input.syncMode === "full"
+              ? values.lastSuccessAt
+              : sql`${syncCheckpoints.lastFullSyncAt}`,
           lastSuccessAt: values.lastSuccessAt,
           lastErrorSummary: values.lastErrorSummary,
           updatedAt: values.updatedAt,
@@ -1870,7 +1972,12 @@ export class CuedDatabase {
         const rows = tx
           .select({ id: rawEvents.id })
           .from(rawEvents)
-          .where(inArray(rawEvents.id, chunk.map((event) => event.id)))
+          .where(
+            inArray(
+              rawEvents.id,
+              chunk.map((event) => event.id),
+            ),
+          )
           .all();
         for (const row of rows) {
           existingIds.add(row.id);
@@ -1879,22 +1986,24 @@ export class CuedDatabase {
 
       for (const chunk of chunkArray(uniqueEvents, WRITE_BATCH_SIZE)) {
         tx.insert(rawEvents)
-          .values(chunk.map((event) => ({
-            id: event.id,
-            platform: event.platform,
-            accountKey: event.accountKey,
-            entityKind: event.entityKind,
-            eventKind: event.eventKind,
-            externalEventId: event.externalEventId ?? null,
-            externalEntityId: event.externalEntityId ?? null,
-            conversationExternalId: event.conversationExternalId ?? null,
-            occurredAt: event.occurredAt ?? null,
-            observedAt: event.observedAt,
-            cursorJson: event.cursor ? JSON.stringify(event.cursor) : null,
-            dedupeKey: event.dedupeKey,
-            payloadJson: JSON.stringify(event.payload),
-            sourceVersion: event.sourceVersion ?? null,
-          })))
+          .values(
+            chunk.map((event) => ({
+              id: event.id,
+              platform: event.platform,
+              accountKey: event.accountKey,
+              entityKind: event.entityKind,
+              eventKind: event.eventKind,
+              externalEventId: event.externalEventId ?? null,
+              externalEntityId: event.externalEntityId ?? null,
+              conversationExternalId: event.conversationExternalId ?? null,
+              occurredAt: event.occurredAt ?? null,
+              observedAt: event.observedAt,
+              cursorJson: event.cursor ? JSON.stringify(event.cursor) : null,
+              dedupeKey: event.dedupeKey,
+              payloadJson: JSON.stringify(event.payload),
+              sourceVersion: event.sourceVersion ?? null,
+            })),
+          )
           .onConflictDoNothing()
           .run();
       }
@@ -1907,12 +2016,14 @@ export class CuedDatabase {
     if (candidateEvents.length > 0) {
       for (const chunk of chunkArray(candidateEvents, WRITE_BATCH_SIZE)) {
         const rows = this.sqlite
-          .prepare(`
+          .prepare(
+            `
             SELECT id, rowid
             FROM raw_events
             WHERE id IN (${chunk.map(() => "?").join(", ")})
             ORDER BY rowid ASC
-          `)
+          `,
+          )
           .all(...chunk.map((event) => event.id)) as Array<{ id: string; rowid: number }>;
         if (rows.length === 0) {
           continue;
@@ -1972,7 +2083,10 @@ export class CuedDatabase {
     }>;
   }
 
-  listRawEventsAfter(rowId: number, limit?: number): Array<{
+  listRawEventsAfter(
+    rowId: number,
+    limit?: number,
+  ): Array<{
     rowid: number;
     id: string;
     platform: Platform;
@@ -1983,7 +2097,8 @@ export class CuedDatabase {
     payload_json: string;
   }> {
     return this.sqlite
-      .prepare(`
+      .prepare(
+        `
         SELECT
           rowid,
           id,
@@ -1997,7 +2112,8 @@ export class CuedDatabase {
         WHERE rowid > ?
         ORDER BY rowid ASC
         LIMIT ?
-      `)
+      `,
+      )
       .all(rowId, limit ?? Number.MAX_SAFE_INTEGER) as Array<{
       rowid: number;
       id: string;
@@ -2022,11 +2138,13 @@ export class CuedDatabase {
     }
 
     const row = this.sqlite
-      .prepare(`
+      .prepare(
+        `
         SELECT MIN(rowid) AS min_rowid, MAX(rowid) AS max_rowid
         FROM raw_events
         WHERE ${clauses.join(" AND ")}
-      `)
+      `,
+      )
       .get(...params) as { min_rowid: number | null; max_rowid: number | null } | undefined;
 
     if (!row?.min_rowid || !row?.max_rowid) {
@@ -2039,7 +2157,11 @@ export class CuedDatabase {
     };
   }
 
-  listRawEventsInRange(startRowId: number, endRowId: number, limit?: number): Array<{
+  listRawEventsInRange(
+    startRowId: number,
+    endRowId: number,
+    limit?: number,
+  ): Array<{
     rowid: number;
     id: string;
     platform: Platform;
@@ -2054,7 +2176,8 @@ export class CuedDatabase {
     }
 
     return this.sqlite
-      .prepare(`
+      .prepare(
+        `
         SELECT
           rowid,
           id,
@@ -2069,7 +2192,8 @@ export class CuedDatabase {
           AND rowid <= ?
         ORDER BY rowid ASC
         LIMIT ?
-      `)
+      `,
+      )
       .all(startRowId, endRowId, limit ?? Number.MAX_SAFE_INTEGER) as Array<{
       rowid: number;
       id: string;
@@ -2083,25 +2207,24 @@ export class CuedDatabase {
   }
 
   getQueuedProjectionRun(): QueuedSyncRun | null {
-    return this.db
-      .select({
-        id: syncRuns.id,
-        platform: syncRuns.platform,
-        account_key: syncRuns.accountKey,
-        run_type: syncRuns.runType,
-        status: syncRuns.status,
-        trigger: syncRuns.trigger,
-        started_at: syncRuns.startedAt,
-        details_json: syncRuns.detailsJson,
-      })
-      .from(syncRuns)
-      .where(and(
-        eq(syncRuns.status, "queued"),
-        eq(syncRuns.runType, "project"),
-      ))
-      .orderBy(asc(syncRuns.startedAt))
-      .limit(1)
-      .get() as QueuedSyncRun | undefined ?? null;
+    return (
+      (this.db
+        .select({
+          id: syncRuns.id,
+          platform: syncRuns.platform,
+          account_key: syncRuns.accountKey,
+          run_type: syncRuns.runType,
+          status: syncRuns.status,
+          trigger: syncRuns.trigger,
+          started_at: syncRuns.startedAt,
+          details_json: syncRuns.detailsJson,
+        })
+        .from(syncRuns)
+        .where(and(eq(syncRuns.status, "queued"), eq(syncRuns.runType, "project")))
+        .orderBy(asc(syncRuns.startedAt))
+        .limit(1)
+        .get() as QueuedSyncRun | undefined) ?? null
+    );
   }
 
   updateRunDetails(runId: string, details: unknown): void {
@@ -2248,10 +2371,7 @@ export class CuedDatabase {
   }
 
   private countRows(table: SQLiteTable): number {
-    const row = this.db
-      .select({ count: sql<number>`count(*)` })
-      .from(table)
-      .get();
+    const row = this.db.select({ count: sql<number>`count(*)` }).from(table).get();
 
     return Number(row?.count ?? 0);
   }

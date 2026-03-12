@@ -56,8 +56,10 @@ export class LinkedInClient {
   }
 
   isAuthenticated(): boolean {
-    return this._cookies.some((cookie) => cookie.name === COOKIE_NAMES.authToken && cookie.value)
-      && this._cookies.some((cookie) => cookie.name === COOKIE_NAMES.sessionId && cookie.value);
+    return (
+      this._cookies.some((cookie) => cookie.name === COOKIE_NAMES.authToken && cookie.value) &&
+      this._cookies.some((cookie) => cookie.name === COOKIE_NAMES.sessionId && cookie.value)
+    );
   }
 
   async fetchSelf(): Promise<string> {

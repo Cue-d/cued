@@ -1,7 +1,6 @@
 import { execFileSync } from "node:child_process";
 import { mkdirSync } from "node:fs";
-import { dirname } from "node:path";
-import { chromium, type BrowserContext, type Cookie, type Page } from "playwright";
+import { type BrowserContext, type Cookie, chromium, type Page } from "playwright";
 
 declare const localStorage: {
   getItem(key: string): string | null;
@@ -101,25 +100,28 @@ function firstOpenPage(context: BrowserContext): Page | null {
 }
 
 function isSlackWorkspaceUrl(url: string): boolean {
-  return url.startsWith("https://app.slack.com")
-    || /^https:\/\/[a-z0-9-]+\.slack\.com\/(client|messages|archives)/i.test(url);
+  return (
+    url.startsWith("https://app.slack.com") ||
+    /^https:\/\/[a-z0-9-]+\.slack\.com\/(client|messages|archives)/i.test(url)
+  );
 }
 
 function isLinkedInAuthPage(url: string): boolean {
   return url.includes("/login") || url.includes("/authwall") || url.includes("/checkpoint");
 }
 
-async function extractSlackAuth(context: BrowserContext, page: Page, accountKey: string): Promise<ExtractedAuth | null> {
+async function extractSlackAuth(
+  context: BrowserContext,
+  page: Page,
+  accountKey: string,
+): Promise<ExtractedAuth | null> {
   if (!isSlackWorkspaceUrl(page.url())) {
     return null;
   }
 
-  let localConfigRaw: string | null = null;
-  try {
-    localConfigRaw = await page.evaluate(() => localStorage.getItem("localConfig_v2"));
-  } catch {
-    return null;
-  }
+  const localConfigRaw = await page
+    .evaluate(() => localStorage.getItem("localConfig_v2"))
+    .catch(() => null);
   if (!localConfigRaw) {
     return null;
   }
@@ -131,17 +133,22 @@ async function extractSlackAuth(context: BrowserContext, page: Page, accountKey:
     return null;
   }
 
-  const teams = typeof parsed.teams === "object" && parsed.teams
-    ? parsed.teams as Record<string, Record<string, unknown>>
-    : {};
-  const teamEntry = Object.entries(teams).find(([, team]) => typeof team?.token === "string" && team.token.startsWith("xoxc-"));
+  const teams =
+    typeof parsed.teams === "object" && parsed.teams
+      ? (parsed.teams as Record<string, Record<string, unknown>>)
+      : {};
+  const teamEntry = Object.entries(teams).find(
+    ([, team]) => typeof team?.token === "string" && team.token.startsWith("xoxc-"),
+  );
   if (!teamEntry) {
     return null;
   }
 
   const [teamId, team] = teamEntry;
   const cookies = await context.cookies(["https://slack.com", "https://app.slack.com"]);
-  const dCookie = cookies.find((cookie) => cookie.name === "d" && domainMatches(cookie, "slack.com"));
+  const dCookie = cookies.find(
+    (cookie) => cookie.name === "d" && domainMatches(cookie, "slack.com"),
+  );
   if (!dCookie?.value) {
     return null;
   }
@@ -150,15 +157,15 @@ async function extractSlackAuth(context: BrowserContext, page: Page, accountKey:
   const userId = typeof team.user_id === "string" ? team.user_id : "";
   return {
     keychainService: "dev.cued.auth.slack",
-      keychainAccount: accountKey,
-      secret: {
-        token: team.token,
-        cookie: dCookie.value,
-        teamId,
-        teamName,
-        userId,
-        savedAt: Date.now(),
-      },
+    keychainAccount: accountKey,
+    secret: {
+      token: team.token,
+      cookie: dCookie.value,
+      teamId,
+      teamName,
+      userId,
+      savedAt: Date.now(),
+    },
     resultSummary: {
       provider: "slack",
       teamId,
@@ -169,14 +176,22 @@ async function extractSlackAuth(context: BrowserContext, page: Page, accountKey:
   };
 }
 
-async function extractLinkedInAuth(context: BrowserContext, page: Page, accountKey: string): Promise<ExtractedAuth | null> {
+async function extractLinkedInAuth(
+  context: BrowserContext,
+  page: Page,
+  accountKey: string,
+): Promise<ExtractedAuth | null> {
   if (isLinkedInAuthPage(page.url())) {
     return null;
   }
 
   const cookies = await context.cookies(["https://www.linkedin.com", "https://linkedin.com"]);
-  const liAt = cookies.find((cookie) => cookie.name === "li_at" && domainMatches(cookie, "linkedin.com"));
-  const jsession = cookies.find((cookie) => cookie.name === "JSESSIONID" && domainMatches(cookie, "linkedin.com"));
+  const liAt = cookies.find(
+    (cookie) => cookie.name === "li_at" && domainMatches(cookie, "linkedin.com"),
+  );
+  const jsession = cookies.find(
+    (cookie) => cookie.name === "JSESSIONID" && domainMatches(cookie, "linkedin.com"),
+  );
   if (!liAt?.value || !jsession?.value) {
     return null;
   }
@@ -230,12 +245,19 @@ function getFakeResult(args: WorkerArgs): WorkerResult | null {
     sessionId: args.sessionId,
     platform: args.platform,
     accountKey: args.accountKey,
-    state: parsed.state === "authenticated" ? "authenticated" : parsed.state === "cancelled" ? "cancelled" : "failed",
+    state:
+      parsed.state === "authenticated"
+        ? "authenticated"
+        : parsed.state === "cancelled"
+          ? "cancelled"
+          : "failed",
     keychainService: typeof parsed.keychainService === "string" ? parsed.keychainService : null,
-    keychainAccount: typeof parsed.keychainAccount === "string" ? parsed.keychainAccount : args.accountKey,
-    resultSummary: typeof parsed.resultSummary === "object" && parsed.resultSummary
-      ? parsed.resultSummary as Record<string, unknown>
-      : { provider: args.platform, fake: true },
+    keychainAccount:
+      typeof parsed.keychainAccount === "string" ? parsed.keychainAccount : args.accountKey,
+    resultSummary:
+      typeof parsed.resultSummary === "object" && parsed.resultSummary
+        ? (parsed.resultSummary as Record<string, unknown>)
+        : { provider: args.platform, fake: true },
     errorSummary: typeof parsed.errorSummary === "string" ? parsed.errorSummary : null,
   };
 }
@@ -258,7 +280,7 @@ async function run(): Promise<void> {
       viewport: { width: 1280, height: 900 },
     });
 
-    let page = firstOpenPage(context) ?? await context.newPage();
+    let page = firstOpenPage(context) ?? (await context.newPage());
     if (!page.url() || page.url() === "about:blank") {
       await page.goto(args.launchTarget, { waitUntil: "domcontentloaded" });
     }

@@ -1,30 +1,37 @@
 #!/usr/bin/env node
 
-import process from "node:process";
-import { existsSync } from "node:fs";
-import { join, dirname } from "node:path";
-import { fileURLToPath } from "node:url";
 import { execFileSync } from "node:child_process";
+import { existsSync } from "node:fs";
+import { dirname, join } from "node:path";
+import process from "node:process";
+import { fileURLToPath } from "node:url";
 import { getCurrentAppVersion, getCurrentReleaseChannel } from "./app-metadata.js";
+import { sendDaemonRequest } from "./client.js";
 import { CUED_DB_PATH, CUED_SOCKET_PATH, ensureCuedDirs } from "./config.js";
+import { runDaemon } from "./daemon/server.js";
 import { openCuedDatabase } from "./db/database.js";
 import { buildDoctorReport } from "./diagnostics/doctor.js";
-import { runDaemon } from "./daemon/server.js";
-import { sendDaemonRequest } from "./client.js";
+import {
+  doctorHooksConfig,
+  emitHookEvent,
+  HOOK_EVENT_NAMES,
+  initHooksConfig,
+  testHookEvent,
+} from "./hooks/service.js";
+import { runAuthSessionSync } from "./integrations/auth-runtime.js";
 import {
   buildIntegrationStatus,
+  completeAuthSession,
   connectIntegration,
   disconnectIntegration,
+  getIntegrationSummary,
   listIntegrationStates,
   listRequestableIntegrationPlatforms,
-  completeAuthSession,
-  getIntegrationSummary,
   markAuthSessionInProgress,
   refreshManagedIntegrationStates,
   setIntegrationEnabled,
 } from "./integrations/service.js";
-import { runAuthSessionSync } from "./integrations/auth-runtime.js";
-import { doctorHooksConfig, emitHookEvent, HOOK_EVENT_NAMES, initHooksConfig, testHookEvent } from "./hooks/service.js";
+import { followLogs, getDaemonLogPath, parseLogsCommandArgs, readRecentLogLines } from "./logs.js";
 import {
   getAppBundleInfo,
   getCLISymlinkStatus,
@@ -35,7 +42,6 @@ import {
   resolveInstalledAppPath,
   uninstallLaunchAgent,
 } from "./macos/install.js";
-import { followLogs, getDaemonLogPath, parseLogsCommandArgs, readRecentLogLines } from "./logs.js";
 import { resolveHostOS } from "./platform-capabilities.js";
 import { runSetupTUI } from "./setup.js";
 
@@ -44,7 +50,9 @@ const REPO_ROOT = join(DIST_ROOT, "../../..");
 
 function resolveBundledScriptPath(scriptName: string): string | null {
   const candidates = [
-    process.env.CUED_BUNDLED_SCRIPT_ROOT ? join(process.env.CUED_BUNDLED_SCRIPT_ROOT, scriptName) : null,
+    process.env.CUED_BUNDLED_SCRIPT_ROOT
+      ? join(process.env.CUED_BUNDLED_SCRIPT_ROOT, scriptName)
+      : null,
     join(DIST_ROOT, "../../scripts", scriptName),
   ].filter((value): value is string => Boolean(value));
 
@@ -52,8 +60,10 @@ function resolveBundledScriptPath(scriptName: string): string | null {
 }
 
 function resolvePermissionsScriptPath(): string {
-  return resolveBundledScriptPath("request-macos-access.sh")
-    ?? join(REPO_ROOT, "scripts", "request-macos-access.sh");
+  return (
+    resolveBundledScriptPath("request-macos-access.sh") ??
+    join(REPO_ROOT, "scripts", "request-macos-access.sh")
+  );
 }
 
 function printHelp(): void {
@@ -108,11 +118,16 @@ function getAppStatusMetadata(db: ReturnType<typeof openCuedDatabase>) {
   };
 }
 
-async function safeEmitHookEvent(event: typeof HOOK_EVENT_NAMES[number], payload: unknown): Promise<void> {
+async function safeEmitHookEvent(
+  event: (typeof HOOK_EVENT_NAMES)[number],
+  payload: unknown,
+): Promise<void> {
   try {
     await emitHookEvent(event, payload as Record<string, unknown>);
   } catch (error) {
-    console.warn(`[cued hooks] ${event} failed: ${error instanceof Error ? error.message : String(error)}`);
+    console.warn(
+      `[cued hooks] ${event} failed: ${error instanceof Error ? error.message : String(error)}`,
+    );
   }
 }
 
@@ -135,7 +150,11 @@ async function handleLocalIntegrationCommand(
         const requested = connectIntegration(db, rest[0], rest[1]);
         const running = markAuthSessionInProgress(db, requested.authSession.id, process.pid);
         try {
-          const integration = getIntegrationSummary(db, requested.integration.platform, requested.integration.accountKey);
+          const integration = getIntegrationSummary(
+            db,
+            requested.integration.platform,
+            requested.integration.accountKey,
+          );
           const result = await runAuthSessionSync(db, running, integration);
           const completed = completeAuthSession(db, running.id, {
             state: result.state,
@@ -145,7 +164,12 @@ async function handleLocalIntegrationCommand(
             errorSummary: result.errorSummary ?? null,
           });
           if (completed.integration.authState === "authenticated") {
-            if (!db.hasQueuedOrRunningRun(completed.integration.platform, completed.integration.accountKey)) {
+            if (
+              !db.hasQueuedOrRunningRun(
+                completed.integration.platform,
+                completed.integration.accountKey,
+              )
+            ) {
               db.queueSyncRun({
                 platform: completed.integration.platform,
                 accountKey: completed.integration.accountKey,
@@ -220,7 +244,9 @@ async function main(): Promise<void> {
   }
 
   if (command === "logs") {
-    const options = parseLogsCommandArgs([subcommand, ...rest].filter((value): value is string => Boolean(value)));
+    const options = parseLogsCommandArgs(
+      [subcommand, ...rest].filter((value): value is string => Boolean(value)),
+    );
     if (options.pathOnly) {
       console.log(getDaemonLogPath());
       return;
@@ -244,7 +270,7 @@ async function main(): Promise<void> {
       command === "doctor"
         ? {
             app: getAppStatusMetadata(db),
-            ...await buildDoctorReport(db),
+            ...(await buildDoctorReport(db)),
             projection: db.getProjectionBacklog(),
             hooks: doctorHooksConfig(),
           }
@@ -279,18 +305,19 @@ async function main(): Promise<void> {
         printJson(doctorHooksConfig());
         return;
       case "test":
-        if (!rest[0] || !HOOK_EVENT_NAMES.includes(rest[0] as typeof HOOK_EVENT_NAMES[number])) {
+        if (!rest[0] || !HOOK_EVENT_NAMES.includes(rest[0] as (typeof HOOK_EVENT_NAMES)[number])) {
           throw new Error(`Usage: cued hooks test <event>\nEvents: ${HOOK_EVENT_NAMES.join(", ")}`);
         }
-        printJson(await testHookEvent(rest[0] as typeof HOOK_EVENT_NAMES[number]));
+        printJson(await testHookEvent(rest[0] as (typeof HOOK_EVENT_NAMES)[number]));
         return;
       default:
-        throw new Error(`Usage: cued hooks init | doctor | test <event>\nEvents: ${HOOK_EVENT_NAMES.join(", ")}`);
+        throw new Error(
+          `Usage: cued hooks init | doctor | test <event>\nEvents: ${HOOK_EVENT_NAMES.join(", ")}`,
+        );
     }
-    return;
   }
 
-  let response;
+  let response: Awaited<ReturnType<typeof sendDaemonRequest>>;
 
   switch (command) {
     case "cli":
@@ -375,11 +402,7 @@ async function main(): Promise<void> {
             requested: flags,
             command: ["bash", scriptPath, ...flags],
           });
-          execFileSync(
-            "bash",
-            [scriptPath, ...flags],
-            { stdio: "inherit" },
-          );
+          execFileSync("bash", [scriptPath, ...flags], { stdio: "inherit" });
           return;
         }
         default:

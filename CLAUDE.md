@@ -41,24 +41,25 @@ The repository no longer includes the Electron runtime or the old shared/cloud p
 
 ## Key Files
 
-| Feature | Files |
-|---------|-------|
-| CLI entrypoint | `apps/cued/src/cli.ts` |
-| Setup flow | `apps/cued/src/setup.ts` |
-| Daemon | `apps/cued/src/daemon/` |
-| Integrations | `apps/cued/src/integrations/` |
-| Database | `apps/cued/src/db/` |
-| Diagnostics | `apps/cued/src/diagnostics/doctor.ts` |
-| macOS install helpers | `apps/cued/src/macos/install.ts` |
-| App bundle build | `scripts/build-cued-daemon-app.sh` |
+| Feature               | Files                                                                                                 |
+| --------------------- | ----------------------------------------------------------------------------------------------------- |
+| CLI entrypoint        | `apps/cued/src/cli.ts`                                                                                |
+| Setup flow            | `apps/cued/src/setup.ts`                                                                              |
+| Daemon                | `apps/cued/src/daemon/`                                                                               |
+| Integrations          | `apps/cued/src/integrations/`                                                                         |
+| Database              | `apps/cued/src/db/`                                                                                   |
+| Diagnostics           | `apps/cued/src/diagnostics/doctor.ts`                                                                 |
+| macOS install helpers | `apps/cued/src/macos/install.ts`                                                                      |
+| App bundle build      | `scripts/build-cued-daemon-app.sh`                                                                    |
 | Packaging and signing | `scripts/build-cued-dmg.sh`, `scripts/build-cued-tarball.sh`, `scripts/sign-and-notarize-cued-app.sh` |
-| Native host | `native/macos/CuedNative/Sources/CuedNative/` |
+| Native host           | `native/macos/CuedNative/Sources/CuedNative/`                                                         |
 
 ## Commands
 
 ```bash
 pnpm install
 pnpm build
+pnpm check:biome
 pnpm typecheck
 pnpm test
 pnpm build:app:macos
@@ -69,13 +70,13 @@ swift build --package-path native/macos/CuedNative -c release
 
 ```bash
 cd apps/cued && pnpm test
-cd native/macos/CuedNative && swift test
+swift build --package-path native/macos/CuedNative -c release
 ```
 
 ## Common Issues
 
-| Problem | Solution |
-|---------|----------|
-| Messages DB access fails | Grant Full Disk Access |
-| Contacts access denied | Grant Contacts access in System Settings |
+| Problem                          | Solution                                                                  |
+| -------------------------------- | ------------------------------------------------------------------------- |
+| Messages DB access fails         | Grant Full Disk Access                                                    |
+| Contacts access denied           | Grant Contacts access in System Settings                                  |
 | Permission prompts do not appear | Run `pnpm permissions:macos -- --all` or `cued permissions request --all` |

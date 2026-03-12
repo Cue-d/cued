@@ -43,7 +43,10 @@ describe("adapter runner", () => {
       workerTimeoutMs: 50,
     });
     while (tempDirs.length > 0) {
-      rmSync(tempDirs.pop()!, { recursive: true, force: true });
+      const dir = tempDirs.pop();
+      if (dir) {
+        rmSync(dir, { recursive: true, force: true });
+      }
     }
   });
 
@@ -52,10 +55,15 @@ describe("adapter runner", () => {
     spawnMock.mockReturnValue(child);
 
     const promise = runAdapter("slack", "workspace-a");
-    child.stdout.emit("data", Buffer.from(JSON.stringify({
-      ok: false,
-      error: "Slack API error: rate_limited",
-    })));
+    child.stdout.emit(
+      "data",
+      Buffer.from(
+        JSON.stringify({
+          ok: false,
+          error: "Slack API error: rate_limited",
+        }),
+      ),
+    );
     child.emit("close", 1);
 
     await expect(promise).rejects.toThrow("Slack API error: rate_limited");
@@ -95,13 +103,18 @@ describe("adapter runner", () => {
     spawnMock.mockReturnValue(child);
 
     const promise = runAdapter("signal", "default");
-    child.stdout.emit("data", Buffer.from(JSON.stringify({
-      ok: true,
-      bundle: {
-        sourceAccounts: [],
-        rawEvents: [],
-      },
-    })));
+    child.stdout.emit(
+      "data",
+      Buffer.from(
+        JSON.stringify({
+          ok: true,
+          bundle: {
+            sourceAccounts: [],
+            rawEvents: [],
+          },
+        }),
+      ),
+    );
     child.emit("close", 0);
 
     await expect(promise).resolves.toEqual({

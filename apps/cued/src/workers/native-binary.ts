@@ -26,5 +26,7 @@ export function resolveMacOSNativeBinary(
     return envVarValue;
   }
 
-  return getMacOSNativeBinaryCandidates(repoRoot).find((candidate) => existsSync(candidate)) ?? null;
+  return (
+    getMacOSNativeBinaryCandidates(repoRoot).find((candidate) => existsSync(candidate)) ?? null
+  );
 }

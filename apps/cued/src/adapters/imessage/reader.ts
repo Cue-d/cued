@@ -77,11 +77,10 @@ function getTapbackBaseType(type: number): number {
   return isTapbackRemovalType(type) ? type - 1000 : type;
 }
 
-function getMessageText(
-  text: string | null,
-  attributedBody: Uint8Array | null,
-): string | null {
-  const extracted = extractTextFromAttributedBody(attributedBody ? Buffer.from(attributedBody) : null);
+function getMessageText(text: string | null, attributedBody: Uint8Array | null): string | null {
+  const extracted = extractTextFromAttributedBody(
+    attributedBody ? Buffer.from(attributedBody) : null,
+  );
   if (extracted && extracted.trim() !== "") {
     return extracted;
   }
@@ -100,14 +99,18 @@ export class IMessageReader {
   }
 
   getMaxMessageRowid(): number {
-    const row = this.db.prepare("SELECT MAX(ROWID) as max_rowid FROM message").get() as {
-      max_rowid: number | null;
-    } | undefined;
+    const row = this.db.prepare("SELECT MAX(ROWID) as max_rowid FROM message").get() as
+      | {
+          max_rowid: number | null;
+        }
+      | undefined;
     return row?.max_rowid ?? 0;
   }
 
   buildSyncBatch(lastRowid: number, limit = 500): ImsSyncBatch {
-    const rows = this.db.prepare(`
+    const rows = this.db
+      .prepare(
+        `
       SELECT
         m.ROWID as rowid,
         m.guid,
@@ -136,7 +139,9 @@ export class IMessageReader {
       WHERE m.ROWID > ? AND m.item_type IN (0, 1, 2)
       ORDER BY m.ROWID
       LIMIT ?
-    `).all(lastRowid, limit) as MessageRow[];
+    `,
+      )
+      .all(lastRowid, limit) as MessageRow[];
 
     if (rows.length === 0) {
       return { cursor: lastRowid, fetchedCount: 0, chats: [], messages: [], handles: [] };
@@ -176,39 +181,39 @@ export class IMessageReader {
     return rows
       .filter((row) => !isTapbackType(row.associated_message_type))
       .map((row) => {
-      const isFromMe = row.is_from_me === 1;
-      const isRead = row.is_read === 1;
-      const sender =
-        row.sender_id !== null
-          ? {
-              id: row.sender_id,
-              identifier: normalizeChatDbHandleIdentifier(row.sender_identifier ?? ""),
-              service: row.sender_service ?? "iMessage",
-            }
-          : null;
+        const isFromMe = row.is_from_me === 1;
+        const isRead = row.is_read === 1;
+        const sender =
+          row.sender_id !== null
+            ? {
+                id: row.sender_id,
+                identifier: normalizeChatDbHandleIdentifier(row.sender_identifier ?? ""),
+                service: row.sender_service ?? "iMessage",
+              }
+            : null;
 
-      return {
-        id: row.rowid,
-        guid: row.guid,
-        chatId: row.chat_id,
-        itemType: row.item_type,
-        text: getMessageText(row.text, row.attributedBody),
-        timestamp: row.unix_date ?? 0,
-        isFromMe,
-        isRead,
-        readAt: row.unix_date_read,
-        status: getMessageStatus(
+        return {
+          id: row.rowid,
+          guid: row.guid,
+          chatId: row.chat_id,
+          itemType: row.item_type,
+          text: getMessageText(row.text, row.attributedBody),
+          timestamp: row.unix_date ?? 0,
           isFromMe,
-          row.is_sent === 1,
-          row.is_delivered === 1,
           isRead,
-          row.error,
-        ),
-        errorCode: row.error,
-        hasAttachments: row.cache_has_attachments === 1,
-        sender,
-        reactions: [],
-      };
+          readAt: row.unix_date_read,
+          status: getMessageStatus(
+            isFromMe,
+            row.is_sent === 1,
+            row.is_delivered === 1,
+            isRead,
+            row.error,
+          ),
+          errorCode: row.error,
+          hasAttachments: row.cache_has_attachments === 1,
+          sender,
+          reactions: [],
+        };
       });
   }
 
@@ -218,7 +223,9 @@ export class IMessageReader {
     }
 
     const jsonChatIds = JSON.stringify(chatIds);
-    const chatRows = this.db.prepare(`
+    const chatRows = this.db
+      .prepare(
+        `
       WITH requested_chats AS (
         SELECT CAST(value AS INTEGER) AS chat_id
         FROM json_each(?)
@@ -237,14 +244,18 @@ export class IMessageReader {
       FROM chat c
       LEFT JOIN participant_counts pc ON pc.chat_id = c.ROWID
       WHERE c.ROWID IN (SELECT chat_id FROM requested_chats)
-    `).all(jsonChatIds) as Array<{
+    `,
+      )
+      .all(jsonChatIds) as Array<{
       id: number;
       identifier: string;
       name: string | null;
       is_group: number;
     }>;
 
-    const participantRows = this.db.prepare(`
+    const participantRows = this.db
+      .prepare(
+        `
       SELECT
         chj.chat_id as chat_id,
         h.ROWID as id,
@@ -256,7 +267,9 @@ export class IMessageReader {
         SELECT CAST(value AS INTEGER)
         FROM json_each(?)
       )
-    `).all(jsonChatIds) as Array<{
+    `,
+      )
+      .all(jsonChatIds) as Array<{
       chat_id: number;
       id: number;
       identifier: string;
@@ -293,7 +306,9 @@ export class IMessageReader {
   private getReactionsForGuids(guids: string[]): Map<string, ImsReaction[]> {
     if (guids.length === 0) return new Map();
     const jsonGuids = JSON.stringify(guids);
-    const rows = this.db.prepare(`
+    const rows = this.db
+      .prepare(
+        `
       SELECT
         CASE
           WHEN m.associated_message_guid LIKE 'p:%/%' THEN substr(m.associated_message_guid, instr(m.associated_message_guid, '/') + 1)
@@ -315,7 +330,9 @@ export class IMessageReader {
             ELSE m.associated_message_guid
           END
         ) IN (SELECT value FROM json_each(?))
-    `).all(jsonGuids) as ReactionRow[];
+    `,
+      )
+      .all(jsonGuids) as ReactionRow[];
 
     const result = new Map<string, Map<string, ImsReaction>>();
     for (const row of rows) {

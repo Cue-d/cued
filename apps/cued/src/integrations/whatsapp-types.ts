@@ -70,7 +70,9 @@ export type WhatsAppHelperEventData = {
   };
 };
 
-export interface WhatsAppHelperEventEnvelope<TEvent extends WhatsAppHelperEventName = WhatsAppHelperEventName> {
+export interface WhatsAppHelperEventEnvelope<
+  TEvent extends WhatsAppHelperEventName = WhatsAppHelperEventName,
+> {
   event: TEvent;
   data: WhatsAppHelperEventData[TEvent];
 }

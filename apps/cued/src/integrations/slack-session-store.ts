@@ -29,7 +29,11 @@ function getChromiumProfileDir(accountKey: string): string {
   return join(CUED_BROWSER_DIR, "slack", accountKey);
 }
 
-function storeSecretInKeychain(service: string, account: string, secret: Record<string, unknown>): void {
+function storeSecretInKeychain(
+  service: string,
+  account: string,
+  secret: Record<string, unknown>,
+): void {
   execFileSync(
     "security",
     ["add-generic-password", "-U", "-s", service, "-a", account, "-w", JSON.stringify(secret)],
@@ -39,11 +43,9 @@ function storeSecretInKeychain(service: string, account: string, secret: Record<
 
 function keychainSecretExists(service: string, account: string): boolean {
   try {
-    execFileSync(
-      "security",
-      ["find-generic-password", "-s", service, "-a", account, "-w"],
-      { stdio: ["ignore", "ignore", "pipe"] },
-    );
+    execFileSync("security", ["find-generic-password", "-s", service, "-a", account, "-w"], {
+      stdio: ["ignore", "ignore", "pipe"],
+    });
     return true;
   } catch {
     return false;
@@ -60,13 +62,13 @@ export function storeSlackSession(
     ? (JSON.parse(existing.metadata_json) as Record<string, unknown>)
     : {};
 
-  const importedSavedAt = typeof existingMetadata.importedSavedAt === "number"
-    ? existingMetadata.importedSavedAt
-    : null;
-  const alreadyImported = existing?.auth_state === "authenticated"
-    && importedSavedAt !== null
-    && importedSavedAt >= payload.savedAt
-    && keychainSecretExists(SLACK_KEYCHAIN_SERVICE, accountKey);
+  const importedSavedAt =
+    typeof existingMetadata.importedSavedAt === "number" ? existingMetadata.importedSavedAt : null;
+  const alreadyImported =
+    existing?.auth_state === "authenticated" &&
+    importedSavedAt !== null &&
+    importedSavedAt >= payload.savedAt &&
+    keychainSecretExists(SLACK_KEYCHAIN_SERVICE, accountKey);
   if (alreadyImported) {
     return {
       platform: "slack",
@@ -99,7 +101,9 @@ export function storeSlackSession(
     artifactPaths: [
       ...new Set([
         payload.sourcePath,
-        ...(existing?.artifact_paths_json ? (JSON.parse(existing.artifact_paths_json) as string[]) : []),
+        ...(existing?.artifact_paths_json
+          ? (JSON.parse(existing.artifact_paths_json) as string[])
+          : []),
       ]),
     ],
     metadata: {

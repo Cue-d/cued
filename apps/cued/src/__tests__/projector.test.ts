@@ -1,8 +1,8 @@
 import { randomUUID } from "node:crypto";
 import { mkdtempSync, rmSync } from "node:fs";
-import { sql } from "drizzle-orm";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { sql } from "drizzle-orm";
 import { afterEach, describe, expect, it } from "vitest";
 import { CuedDatabase } from "../db/database.js";
 import {
@@ -17,7 +17,10 @@ describe("projector", () => {
 
   afterEach(() => {
     while (tempDirs.length > 0) {
-      rmSync(tempDirs.pop()!, { recursive: true, force: true });
+      const dir = tempDirs.pop();
+      if (dir) {
+        rmSync(dir, { recursive: true, force: true });
+      }
     }
   });
 
@@ -118,7 +121,9 @@ describe("projector", () => {
       projectionWatermark: 4,
     });
 
-    const ftsRows = db.orm().all<{ count: number }>(sql`SELECT COUNT(*) as count FROM messages_fts`);
+    const ftsRows = db
+      .orm()
+      .all<{ count: number }>(sql`SELECT COUNT(*) as count FROM messages_fts`);
     expect(ftsRows[0]?.count).toBe(1);
 
     const contactRows = db.orm().all<{
@@ -236,9 +241,7 @@ describe("projector", () => {
         fields: {
           display_name: "Theo Tarr",
         },
-        handles: [
-          { type: "slack_user_id", value: "T0A9C9RHZ9T:U123", deterministic: true },
-        ],
+        handles: [{ type: "slack_user_id", value: "T0A9C9RHZ9T:U123", deterministic: true }],
       },
       sourceVersion: "slack-v1",
     });
@@ -498,7 +501,9 @@ describe("projector", () => {
       sender_name: null,
     });
 
-    const hotFtsRows = db.orm().all<{ count: number }>(sql`SELECT COUNT(*) as count FROM messages_fts`);
+    const hotFtsRows = db
+      .orm()
+      .all<{ count: number }>(sql`SELECT COUNT(*) as count FROM messages_fts`);
     expect(hotFtsRows).toEqual([{ count: 0 }]);
 
     projectDeferredRange(db, {
@@ -532,7 +537,9 @@ describe("projector", () => {
       conversation_name: "Ava Chen",
     });
 
-    const coldFtsRows = db.orm().all<{ count: number }>(sql`SELECT COUNT(*) as count FROM messages_fts`);
+    const coldFtsRows = db
+      .orm()
+      .all<{ count: number }>(sql`SELECT COUNT(*) as count FROM messages_fts`);
     expect(coldFtsRows).toEqual([{ count: 1 }]);
 
     db.close();
@@ -593,10 +600,12 @@ describe("projector", () => {
       sourceVersion: "imessage-v1",
     });
 
-    expect(projectDeferredRange(db, {
-      startRowId: 2,
-      endRowId: 3,
-    })).toEqual({
+    expect(
+      projectDeferredRange(db, {
+        startRowId: 2,
+        endRowId: 3,
+      }),
+    ).toEqual({
       contacts: 1,
       conversations: 1,
       messages: 1,
@@ -633,10 +642,12 @@ describe("projector", () => {
       conversation_name: "+15551234567",
     });
 
-    expect(projectDeferredRange(db, {
-      startRowId: 1,
-      endRowId: 1,
-    })).toEqual({
+    expect(
+      projectDeferredRange(db, {
+        startRowId: 1,
+        endRowId: 1,
+      }),
+    ).toEqual({
       contacts: 1,
       conversations: 1,
       messages: 1,
@@ -847,7 +858,11 @@ describe("projector", () => {
       conversation_name: "Investor thread",
     });
 
-    const ftsRow = db.orm().get<{ sender_name: string; conversation_name: string; attachment_text: string }>(sql`
+    const ftsRow = db.orm().get<{
+      sender_name: string;
+      conversation_name: string;
+      attachment_text: string;
+    }>(sql`
       SELECT sender_name, conversation_name, attachment_text
       FROM messages_fts
       WHERE message_id = (
@@ -944,7 +959,10 @@ describe("projector", () => {
 
     projectPendingRawEvents(db);
 
-    const attachmentRows = db.orm().all<{ source_attachment_key: string; filename: string | null }>(sql`
+    const attachmentRows = db.orm().all<{
+      source_attachment_key: string;
+      filename: string | null;
+    }>(sql`
       SELECT source_attachment_key, filename
       FROM message_attachments
       ORDER BY source_attachment_key ASC

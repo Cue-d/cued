@@ -1,17 +1,21 @@
 import { execFileSync } from "node:child_process";
 import { existsSync } from "node:fs";
-import type { CuedDatabase } from "../db/database.js";
-import { listAdapterPlatforms } from "../adapters/registry.js";
 import { DEFAULT_CHAT_DB_PATH, IMessageReader } from "../adapters/imessage/reader.js";
+import { listAdapterPlatforms } from "../adapters/registry.js";
+import type { CuedDatabase } from "../db/database.js";
 import { listIntegrationStates } from "../integrations/service.js";
 import {
   getSignalConfigDir,
+  isSignalCliVersionSupported,
   parseSignalCliVersion,
   readSignalLinkedAccount,
   resolveSignalCliPath,
-  isSignalCliVersionSupported,
 } from "../integrations/signal-cli.js";
-import { getWhatsAppStoreDir, inspectWhatsAppHelper, readWhatsAppHelperStatus } from "../integrations/whatsapp-helper.js";
+import {
+  getWhatsAppStoreDir,
+  inspectWhatsAppHelper,
+  readWhatsAppHelperStatus,
+} from "../integrations/whatsapp-helper.js";
 import { resolveMacOSNativeBinary } from "../workers/native-binary.js";
 
 export interface DoctorCheck {
@@ -75,7 +79,8 @@ function getMessagesNativeHelperCheck(): DoctorCheck {
     return {
       name: "messages_native_helper",
       status: "unknown",
-      summary: "Native Messages helper is not built, so daemon access is using the current process identity",
+      summary:
+        "Native Messages helper is not built, so daemon access is using the current process identity",
       remediation:
         "Use the packaged Cued.app or run `cued permissions request --full-disk-access` after rebuilding the native helper in development.",
     };
@@ -84,16 +89,7 @@ function getMessagesNativeHelperCheck(): DoctorCheck {
   try {
     execFileSync(
       nativeBinary,
-      [
-        "imessage",
-        "dump",
-        "--db-path",
-        DEFAULT_CHAT_DB_PATH,
-        "--after-rowid",
-        "0",
-        "--limit",
-        "1",
-      ],
+      ["imessage", "dump", "--db-path", DEFAULT_CHAT_DB_PATH, "--after-rowid", "0", "--limit", "1"],
       {
         encoding: "utf8",
         stdio: ["ignore", "pipe", "pipe"],
@@ -128,7 +124,8 @@ function getContactsPermissionCheck(): DoctorCheck {
       name: "contacts_permission",
       status: "unknown",
       summary: "Native macOS helper is not built, so Contacts permission could not be checked",
-      remediation: "Run `cued permissions request --contacts` or rebuild the native helper in development.",
+      remediation:
+        "Run `cued permissions request --contacts` or rebuild the native helper in development.",
     };
   }
 
@@ -175,7 +172,7 @@ function getMessagesAutomationCheck(): DoctorCheck {
       "osascript",
       [
         "-e",
-        'with timeout of 1 second',
+        "with timeout of 1 second",
         "-e",
         'tell application "Messages" to count of services',
         "-e",
@@ -233,7 +230,9 @@ function getSignalCliCheck(): DoctorCheck {
         cliPath,
         version: version?.raw ?? null,
       },
-      remediation: supported ? undefined : "Upgrade signal-cli to a supported release and reconnect Signal.",
+      remediation: supported
+        ? undefined
+        : "Upgrade signal-cli to a supported release and reconnect Signal.",
     };
   } catch (error) {
     return {
@@ -262,7 +261,9 @@ function getSignalLinkCheck(): DoctorCheck {
       configDir,
       linkedAccount,
     },
-    remediation: linkedAccount ? undefined : "Run `cued integrations connect signal` to link a Signal device.",
+    remediation: linkedAccount
+      ? undefined
+      : "Run `cued integrations connect signal` to link a Signal device.",
   };
 }
 
@@ -307,7 +308,9 @@ async function getWhatsAppLinkCheck(): Promise<DoctorCheck> {
         pushName: status.pushName,
         helperVersion: status.helperVersion,
       },
-      remediation: status.authenticated ? undefined : "Run `cued integrations connect whatsapp` to link a WhatsApp device.",
+      remediation: status.authenticated
+        ? undefined
+        : "Run `cued integrations connect whatsapp` to link a WhatsApp device.",
     };
   } catch (error) {
     return {

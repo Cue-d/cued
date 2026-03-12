@@ -1,7 +1,7 @@
-import { spawn, type ChildProcess } from "node:child_process";
+import { type ChildProcess, spawn } from "node:child_process";
 import { createInterface, type Interface as ReadLineInterface } from "node:readline";
 import { createLogger } from "../logging.js";
-import { toSignalMessage, type SignalReceivedMessage } from "./signal-cli.js";
+import { type SignalReceivedMessage, toSignalMessage } from "./signal-cli.js";
 
 const DEFAULT_REQUEST_TIMEOUT_MS = 30_000;
 const DEFAULT_RECONNECT_BASE_MS = 1_000;
@@ -64,7 +64,10 @@ export interface SignalRealtimeSessionLike {
   stop(): void;
   getStatus(): SignalRealtimeStatus;
   isConnected(): boolean;
-  sendMessage(text: string, target: { recipient?: string; groupId?: string }): Promise<{ timestamp: number }>;
+  sendMessage(
+    text: string,
+    target: { recipient?: string; groupId?: string },
+  ): Promise<{ timestamp: number }>;
 }
 
 export interface SignalRealtimeSupervisorSessionInput {
@@ -234,12 +237,13 @@ export class SignalRealtimeSession implements SignalRealtimeSessionLike {
     }
 
     const id = this.nextRequestId++;
-    const payload = JSON.stringify({
-      jsonrpc: "2.0",
-      id,
-      method,
-      params,
-    }) + "\n";
+    const payload =
+      JSON.stringify({
+        jsonrpc: "2.0",
+        id,
+        method,
+        params,
+      }) + "\n";
 
     return await new Promise<T>((resolve, reject) => {
       const timeout = setTimeout(() => {
@@ -270,7 +274,17 @@ export class SignalRealtimeSession implements SignalRealtimeSessionLike {
     this.disposeChild();
     const child = this.spawnImpl(
       this.cliPath,
-      ["--config", this.configDir, "-u", this.account, "-o", "json", "jsonRpc", "--receive-mode", "on-start"],
+      [
+        "--config",
+        this.configDir,
+        "-u",
+        this.account,
+        "-o",
+        "json",
+        "jsonRpc",
+        "--receive-mode",
+        "on-start",
+      ],
       {
         stdio: ["pipe", "pipe", "pipe"],
         env: process.env,
@@ -307,11 +321,12 @@ export class SignalRealtimeSession implements SignalRealtimeSessionLike {
     });
 
     child.once("exit", (code, signal) => {
-      const reason = code && code !== 0
-        ? `signal-cli jsonRpc exited with code ${code}`
-        : signal
-          ? `signal-cli jsonRpc exited with signal ${signal}`
-          : "signal-cli jsonRpc exited";
+      const reason =
+        code && code !== 0
+          ? `signal-cli jsonRpc exited with code ${code}`
+          : signal
+            ? `signal-cli jsonRpc exited with signal ${signal}`
+            : "signal-cli jsonRpc exited";
       this.handleExit(new Error(reason));
     });
   }
@@ -430,7 +445,9 @@ type ManagedSignalSession = {
 };
 
 export class SignalRealtimeSupervisor {
-  private readonly createSession: (input: SignalRealtimeSupervisorSessionInput) => SignalRealtimeSessionLike;
+  private readonly createSession: (
+    input: SignalRealtimeSupervisorSessionInput,
+  ) => SignalRealtimeSessionLike;
   private readonly onMessage?: SignalRealtimeSupervisorOptions["onMessage"];
   private readonly onConnected?: SignalRealtimeSupervisorOptions["onConnected"];
   private readonly onDisconnected?: SignalRealtimeSupervisorOptions["onDisconnected"];
@@ -447,21 +464,27 @@ export class SignalRealtimeSupervisor {
     this.onConnected = options.onConnected;
     this.onDisconnected = options.onDisconnected;
     this.onStatusChange = options.onStatusChange;
-    this.createSession = options.createSession ?? ((input) => new SignalRealtimeSession({
-      ...input,
-      onMessage: (message) => this.onMessage?.(input.accountKey, message),
-      onConnected: (status, reconnected) => {
-        this.resolveWaiters(input.accountKey, this.sessions.get(input.accountKey)?.session ?? null);
-        this.onConnected?.(input.accountKey, status, reconnected);
-      },
-      onDisconnected: (status) => {
-        this.onDisconnected?.(input.accountKey, status);
-      },
-      onStatusChange: (status) => {
-        this.degradedStatuses.delete(input.accountKey);
-        this.onStatusChange?.(input.accountKey, status);
-      },
-    }));
+    this.createSession =
+      options.createSession ??
+      ((input) =>
+        new SignalRealtimeSession({
+          ...input,
+          onMessage: (message) => this.onMessage?.(input.accountKey, message),
+          onConnected: (status, reconnected) => {
+            this.resolveWaiters(
+              input.accountKey,
+              this.sessions.get(input.accountKey)?.session ?? null,
+            );
+            this.onConnected?.(input.accountKey, status, reconnected);
+          },
+          onDisconnected: (status) => {
+            this.onDisconnected?.(input.accountKey, status);
+          },
+          onStatusChange: (status) => {
+            this.degradedStatuses.delete(input.accountKey);
+            this.onStatusChange?.(input.accountKey, status);
+          },
+        }));
   }
 
   reconcile(
@@ -527,7 +550,10 @@ export class SignalRealtimeSupervisor {
     return this.sessions.get(accountKey)?.session ?? null;
   }
 
-  async waitForConnected(accountKey: string, timeoutMs: number): Promise<SignalRealtimeSessionLike | null> {
+  async waitForConnected(
+    accountKey: string,
+    timeoutMs: number,
+  ): Promise<SignalRealtimeSessionLike | null> {
     const existing = this.getSession(accountKey);
     if (existing?.isConnected()) {
       return existing;
@@ -570,9 +596,11 @@ export class SignalRealtimeSupervisor {
     left: SignalRealtimeSupervisorSessionInput,
     right: SignalRealtimeSupervisorSessionInput,
   ): boolean {
-    return left.account === right.account
-      && left.accountKey === right.accountKey
-      && left.cliPath === right.cliPath
-      && left.configDir === right.configDir;
+    return (
+      left.account === right.account &&
+      left.accountKey === right.accountKey &&
+      left.cliPath === right.cliPath &&
+      left.configDir === right.configDir
+    );
   }
 }
