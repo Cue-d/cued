@@ -3,7 +3,7 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 function resolveRepoRoot(): string {
-  return resolve(dirname(fileURLToPath(import.meta.url)), "../../../../");
+  return resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 }
 
 export function getMacOSNativeBinaryCandidates(repoRoot = resolveRepoRoot()): string[] {

@@ -11,7 +11,7 @@
       "**",
       "!native/macos/CuedNative/.build",
       "!native/macos/dist",
-      "!apps/cued/tsconfig.build.tsbuildinfo"
+      "!tsconfig.build.tsbuildinfo"
     ]
   },
   "formatter": {

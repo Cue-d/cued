@@ -2,7 +2,7 @@
 
 import { execFileSync } from "node:child_process";
 import { existsSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
 import { getCurrentAppVersion, getCurrentReleaseChannel } from "./app-metadata.js";
@@ -46,23 +46,29 @@ import { resolveHostOS } from "./platform-capabilities.js";
 import { runSetupTUI } from "./setup.js";
 
 const DIST_ROOT = dirname(fileURLToPath(import.meta.url));
-const REPO_ROOT = join(DIST_ROOT, "../../..");
+const REPO_ROOT = resolve(DIST_ROOT, "..");
 
-function resolveBundledScriptPath(scriptName: string): string | null {
+export function resolveBundledScriptPath(scriptName: string): string | null {
   const candidates = [
     process.env.CUED_BUNDLED_SCRIPT_ROOT
       ? join(process.env.CUED_BUNDLED_SCRIPT_ROOT, scriptName)
       : null,
-    join(DIST_ROOT, "../../scripts", scriptName),
+    join(DIST_ROOT, "../scripts", scriptName),
   ].filter((value): value is string => Boolean(value));
 
   return candidates.find((candidate) => existsSync(candidate)) ?? null;
 }
 
-function resolvePermissionsScriptPath(): string {
+export function resolvePermissionsScriptPath(): string {
   return (
     resolveBundledScriptPath("request-macos-access.sh") ??
     join(REPO_ROOT, "scripts", "request-macos-access.sh")
+  );
+}
+
+function isInvokedDirectly(): boolean {
+  return (
+    process.argv[1] !== undefined && fileURLToPath(import.meta.url) === resolve(process.argv[1])
   );
 }
 
@@ -539,7 +545,9 @@ async function main(): Promise<void> {
   printJson(response.result ?? null);
 }
 
-main().catch((error) => {
-  console.error(error instanceof Error ? error.message : String(error));
-  process.exit(1);
-});
+if (isInvokedDirectly()) {
+  main().catch((error) => {
+    console.error(error instanceof Error ? error.message : String(error));
+    process.exit(1);
+  });
+}
