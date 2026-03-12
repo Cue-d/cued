@@ -26,7 +26,10 @@ describe("integration state management", () => {
     delete process.env.CUED_WHATSAPP_HELPER_BINARY;
 
     while (tempDirs.length > 0) {
-      rmSync(tempDirs.pop()!, { recursive: true, force: true });
+      const dir = tempDirs.pop();
+      if (dir) {
+        rmSync(dir, { recursive: true, force: true });
+      }
     }
   });
 
@@ -48,7 +51,7 @@ describe("integration state management", () => {
     const nativeBinaryPath = join(nativeBinaryDir, "CuedNative");
     writeFileSync(
       nativeBinaryPath,
-      "#!/bin/sh\nif [ \"$1\" = \"contacts\" ] && [ \"$2\" = \"status\" ]; then\n  echo '{\"status\":\"authorized\"}'\n  exit 0\nfi\nexit 1\n",
+      '#!/bin/sh\nif [ "$1" = "contacts" ] && [ "$2" = "status" ]; then\n  echo \'{"status":"authorized"}\'\n  exit 0\nfi\nexit 1\n',
     );
     chmodSync(nativeBinaryPath, 0o755);
 
@@ -56,7 +59,10 @@ describe("integration state management", () => {
     process.env.CUED_IMESSAGE_DB_PATH = join(createTempDir("cued-imessage-"), "missing.db");
     process.env.CUED_SLACK_APP_BINARY = join(createTempDir("cued-no-slack-app-"), "Slack");
     process.env.CUED_SIGNAL_CLI_PATH = join(createTempDir("cued-no-signal-cli-"), "signal-cli");
-    process.env.CUED_WHATSAPP_HELPER_BINARY = join(createTempDir("cued-no-whatsapp-helper-"), "cued-whatsapp-helper");
+    process.env.CUED_WHATSAPP_HELPER_BINARY = join(
+      createTempDir("cued-no-whatsapp-helper-"),
+      "cued-whatsapp-helper",
+    );
 
     const db = createDb();
     const refreshed = await refreshManagedIntegrationStates(db);

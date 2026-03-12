@@ -11,6 +11,7 @@ pnpm permissions:macos -- --full-disk-access --open-only
 ```
 
 This bootstrap script will:
+
 - trigger the Contacts permission prompt through the native macOS helper
 - trigger Apple Events automation access for Messages through AppleScript
 - open the Full Disk Access and Accessibility panes for manual approval when requested

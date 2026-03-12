@@ -37,11 +37,16 @@ export class SlackClient {
   constructor(private readonly credentials: SlackCredentials) {}
 
   async testAuth(): Promise<SlackAuthTestResponse> {
-    return newPostRequest(SLACK_API_URLS.authTest, this.credentials)
-      .doJSON<SlackAuthTestResponse>();
+    return newPostRequest(
+      SLACK_API_URLS.authTest,
+      this.credentials,
+    ).doJSON<SlackAuthTestResponse>();
   }
 
-  async listUsers(cursor?: string, limit: number = PAGINATION.defaultLimit): Promise<SlackUsersResult> {
+  async listUsers(
+    cursor?: string,
+    limit: number = PAGINATION.defaultLimit,
+  ): Promise<SlackUsersResult> {
     const response = await newPostRequest(SLACK_API_URLS.usersList, this.credentials)
       .withParams({
         cursor,
@@ -55,7 +60,10 @@ export class SlackClient {
     };
   }
 
-  async listConversations(cursor?: string, limit: number = PAGINATION.defaultLimit): Promise<SlackConversationsResult> {
+  async listConversations(
+    cursor?: string,
+    limit: number = PAGINATION.defaultLimit,
+  ): Promise<SlackConversationsResult> {
     const response = await newPostRequest(SLACK_API_URLS.conversationsList, this.credentials)
       .withParams({
         types: "im,mpim,private_channel,public_channel",

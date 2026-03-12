@@ -1,9 +1,9 @@
+import { type ChildProcess, spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { spawn, type ChildProcess } from "node:child_process";
 import type { CuedDatabase } from "../db/database.js";
 import type { AuthSessionState, Platform } from "../types/provider.js";
-import type { AuthSessionSummary, IntegrationStateSummary } from "./service.js";
 import { resolveMacOSNativeBinary } from "../workers/native-binary.js";
+import type { AuthSessionSummary, IntegrationStateSummary } from "./service.js";
 import {
   getSignalConfigDir,
   inspectSignalCli,
@@ -58,9 +58,15 @@ function parseFakeResult(
     sessionId: session.id,
     platform: session.platform,
     accountKey: session.accountKey,
-    state: parsed.state === "authenticated" ? "authenticated" : parsed.state === "cancelled" ? "cancelled" : "failed",
+    state:
+      parsed.state === "authenticated"
+        ? "authenticated"
+        : parsed.state === "cancelled"
+          ? "cancelled"
+          : "failed",
     keychainService: typeof parsed.keychainService === "string" ? parsed.keychainService : null,
-    keychainAccount: typeof parsed.keychainAccount === "string" ? parsed.keychainAccount : session.accountKey,
+    keychainAccount:
+      typeof parsed.keychainAccount === "string" ? parsed.keychainAccount : session.accountKey,
     resultSummary: {
       runtime: "qr_native",
       integration: `${integration.platform}/${integration.accountKey}`,
@@ -87,9 +93,10 @@ export function startQrNativeAuthSession(
   }
 
   if (integration.platform === "signal") {
-    const configDir = typeof integration.metadata?.configDir === "string"
-      ? integration.metadata.configDir
-      : getSignalConfigDir(session.accountKey);
+    const configDir =
+      typeof integration.metadata?.configDir === "string"
+        ? integration.metadata.configDir
+        : getSignalConfigDir(session.accountKey);
     const child = spawn("sh", ["-lc", "exit 0"], { stdio: "ignore" });
     const completion = (async (): Promise<QrNativeAuthResult> => {
       const inspected = await inspectSignalCli();
@@ -131,33 +138,36 @@ export function startQrNativeAuthSession(
       });
       const provisioningUri = await link.provisioningUri;
       const nativeBinary = resolveNativeQrBinary();
-      const qrWindow = spawn(nativeBinary, [
-        "auth",
-        "qr",
-        "--title",
-        "Connect Signal",
-        "--subtitle",
-        "Scan this code in Signal > Settings > Linked Devices",
-        "--uri",
-        provisioningUri,
-      ], {
-        stdio: ["ignore", "pipe", "pipe"],
-      });
+      const qrWindow = spawn(
+        nativeBinary,
+        [
+          "auth",
+          "qr",
+          "--title",
+          "Connect Signal",
+          "--subtitle",
+          "Scan this code in Signal > Settings > Linked Devices",
+          "--uri",
+          provisioningUri,
+        ],
+        {
+          stdio: ["ignore", "pipe", "pipe"],
+        },
+      );
 
       const qrClosed = new Promise<"cancelled">((resolve) => {
         qrWindow.once("close", () => resolve("cancelled"));
       });
 
       try {
-        await Promise.race([
-          link.completion.then(() => "authenticated" as const),
-          qrClosed,
-        ]).then((state) => {
-          if (state === "cancelled") {
-            link.cancel();
-            throw new Error("Signal linking cancelled");
-          }
-        });
+        await Promise.race([link.completion.then(() => "authenticated" as const), qrClosed]).then(
+          (state) => {
+            if (state === "cancelled") {
+              link.cancel();
+              throw new Error("Signal linking cancelled");
+            }
+          },
+        );
       } catch (error) {
         if (!qrWindow.killed) {
           qrWindow.kill("SIGTERM");
@@ -166,9 +176,10 @@ export function startQrNativeAuthSession(
           sessionId: session.id,
           platform: session.platform,
           accountKey: session.accountKey,
-          state: error instanceof Error && error.message === "Signal linking cancelled"
-            ? "cancelled"
-            : "failed",
+          state:
+            error instanceof Error && error.message === "Signal linking cancelled"
+              ? "cancelled"
+              : "failed",
           resultSummary: {
             runtime: "qr_native",
             helper: "signal-cli",
@@ -210,9 +221,10 @@ export function startQrNativeAuthSession(
   }
 
   if (integration.platform === "whatsapp") {
-    const storeDir = typeof integration.metadata?.storeDir === "string"
-      ? integration.metadata.storeDir
-      : getWhatsAppStoreDir(session.accountKey);
+    const storeDir =
+      typeof integration.metadata?.storeDir === "string"
+        ? integration.metadata.storeDir
+        : getWhatsAppStoreDir(session.accountKey);
     const child = spawn("sh", ["-lc", "exit 0"], { stdio: "ignore" });
     const completion = (async (): Promise<QrNativeAuthResult> => {
       const inspected = inspectWhatsAppHelper();
@@ -227,7 +239,8 @@ export function startQrNativeAuthSession(
             helper: "cued-whatsapp-helper",
             storeDir,
           },
-          errorSummary: "WhatsApp helper was not found. Build native/helpers/whatsapp-go first or set CUED_WHATSAPP_HELPER_BINARY.",
+          errorSummary:
+            "WhatsApp helper was not found. Build native/helpers/whatsapp-go first or set CUED_WHATSAPP_HELPER_BINARY.",
         };
       }
 
@@ -286,18 +299,22 @@ export function startQrNativeAuthSession(
 
       const qrCode = initial.value;
       const nativeBinary = resolveNativeQrBinary();
-      const qrWindow = spawn(nativeBinary, [
-        "auth",
-        "qr",
-        "--title",
-        "Connect WhatsApp",
-        "--subtitle",
-        "Scan this code in WhatsApp > Linked Devices",
-        "--uri",
-        qrCode,
-      ], {
-        stdio: ["ignore", "pipe", "pipe"],
-      });
+      const qrWindow = spawn(
+        nativeBinary,
+        [
+          "auth",
+          "qr",
+          "--title",
+          "Connect WhatsApp",
+          "--subtitle",
+          "Scan this code in WhatsApp > Linked Devices",
+          "--uri",
+          qrCode,
+        ],
+        {
+          stdio: ["ignore", "pipe", "pipe"],
+        },
+      );
 
       const qrClosed = new Promise<"cancelled">((resolve) => {
         qrWindow.once("close", () => resolve("cancelled"));
@@ -343,9 +360,10 @@ export function startQrNativeAuthSession(
           sessionId: session.id,
           platform: session.platform,
           accountKey: session.accountKey,
-          state: error instanceof Error && error.message === "WhatsApp linking cancelled"
-            ? "cancelled"
-            : "failed",
+          state:
+            error instanceof Error && error.message === "WhatsApp linking cancelled"
+              ? "cancelled"
+              : "failed",
           resultSummary: {
             runtime: "qr_native",
             helper: "cued-whatsapp-helper",

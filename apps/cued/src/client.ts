@@ -9,9 +9,7 @@ export type DaemonRequestInput = {
   [K in DaemonRequest["command"]]: Omit<Extract<DaemonRequest, { command: K }>, "id">;
 }[DaemonRequest["command"]];
 
-export async function sendDaemonRequest(
-  request: DaemonRequestInput,
-): Promise<DaemonResponse> {
+export async function sendDaemonRequest(request: DaemonRequestInput): Promise<DaemonResponse> {
   const withId = { ...request, id: randomUUID() } as DaemonRequest;
   let lastError: Error | null = null;
 

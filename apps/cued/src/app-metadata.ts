@@ -18,9 +18,9 @@ function packageVersionFallback(): string {
 }
 
 export function getCurrentAppVersion(): string {
-  return process.env.CUED_APP_VERSION
-    ?? process.env.npm_package_version
-    ?? packageVersionFallback();
+  return (
+    process.env.CUED_APP_VERSION ?? process.env.npm_package_version ?? packageVersionFallback()
+  );
 }
 
 export function getCurrentReleaseChannel(): ReleaseChannel {

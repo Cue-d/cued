@@ -1,7 +1,7 @@
+import type { ConnectionsResult, LinkedInClient } from "./client.js";
 import { API_URLS, CONTENT_TYPES, PAGINATION_DEFAULTS } from "./constants.js";
-import type { LinkedInClient, ConnectionsResult } from "./client.js";
-import type { Connection, VectorImage } from "./types.js";
 import { newGetRequest } from "./request.js";
+import type { Connection, VectorImage } from "./types.js";
 
 interface ConnectionsApiResponse {
   data?: {
@@ -89,7 +89,10 @@ function parseConnectionsResponse(response: ConnectionsApiResponse): Connection[
 
   const profileMap = new Map<string, ProfileElement>();
   for (const element of response.included) {
-    if (element.$type === "com.linkedin.voyager.dash.identity.profile.Profile" && element.entityUrn) {
+    if (
+      element.$type === "com.linkedin.voyager.dash.identity.profile.Profile" &&
+      element.entityUrn
+    ) {
       profileMap.set(element.entityUrn, element as unknown as ProfileElement);
     }
   }
@@ -100,11 +103,11 @@ function parseConnectionsResponse(response: ConnectionsApiResponse): Connection[
       continue;
     }
     const memberRef =
-      element.connectedMemberResolutionResult
-      ?? (element["*connectedMemberResolutionResult"]
+      element.connectedMemberResolutionResult ??
+      (element["*connectedMemberResolutionResult"]
         ? profileMap.get(element["*connectedMemberResolutionResult"])
-        : undefined)
-      ?? (element.connectedMember ? profileMap.get(element.connectedMember) : undefined);
+        : undefined) ??
+      (element.connectedMember ? profileMap.get(element.connectedMember) : undefined);
 
     if (!memberRef) {
       continue;
@@ -140,7 +143,10 @@ export async function getConnections(
     sortType: "RECENTLY_ADDED",
   });
 
-  const response = await newGetRequest(`${API_URLS.connections}?${queryParams.toString()}`, client.cookies)
+  const response = await newGetRequest(
+    `${API_URLS.connections}?${queryParams.toString()}`,
+    client.cookies,
+  )
     .withHeader("Accept", CONTENT_TYPES.linkedInNormalized)
     .withXLIHeaders()
     .doJSON<ConnectionsApiResponse>();
@@ -149,7 +155,8 @@ export async function getConnections(
   const paging = response.paging ?? response.data?.paging ?? response.data?.metadata?.paging;
   const nextStart = start + connections.length;
   const total = paging?.total;
-  const hasMore = total !== undefined && total > 0 ? nextStart < total : connections.length >= count;
+  const hasMore =
+    total !== undefined && total > 0 ? nextStart < total : connections.length >= count;
 
   return {
     connections,

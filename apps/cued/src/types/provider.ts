@@ -7,22 +7,16 @@ export const PLATFORM_VALUES = [
   "slack",
   "whatsapp",
 ] as const;
-export type Platform = typeof PLATFORM_VALUES[number];
+export type Platform = (typeof PLATFORM_VALUES)[number];
 
 export const HOST_OS_VALUES = ["macos", "windows", "linux"] as const;
-export type HostOS = typeof HOST_OS_VALUES[number];
+export type HostOS = (typeof HOST_OS_VALUES)[number];
 
-export const PLATFORM_PERMISSION_REQUIREMENT_VALUES = [
-  "contacts",
-  "full_disk_access",
-] as const;
-export type PlatformPermissionRequirement = typeof PLATFORM_PERMISSION_REQUIREMENT_VALUES[number];
+export const PLATFORM_PERMISSION_REQUIREMENT_VALUES = ["contacts", "full_disk_access"] as const;
+export type PlatformPermissionRequirement = (typeof PLATFORM_PERMISSION_REQUIREMENT_VALUES)[number];
 
-export const PLATFORM_HELPER_REQUIREMENT_VALUES = [
-  "signal_cli",
-  "whatsapp_helper",
-] as const;
-export type PlatformHelperRequirement = typeof PLATFORM_HELPER_REQUIREMENT_VALUES[number];
+export const PLATFORM_HELPER_REQUIREMENT_VALUES = ["signal_cli", "whatsapp_helper"] as const;
+export type PlatformHelperRequirement = (typeof PLATFORM_HELPER_REQUIREMENT_VALUES)[number];
 
 type PlatformDefinition = {
   adapter: boolean;
@@ -122,15 +116,15 @@ export const REQUESTABLE_INTEGRATION_PLATFORM_VALUES = PLATFORM_VALUES.filter(
     PLATFORM_DEFINITIONS[platform].requestableIntegration,
 ).sort(
   (left, right) =>
-    (PLATFORM_DEFINITIONS[left].requestableOrder ?? Number.MAX_SAFE_INTEGER)
-    - (PLATFORM_DEFINITIONS[right].requestableOrder ?? Number.MAX_SAFE_INTEGER),
+    (PLATFORM_DEFINITIONS[left].requestableOrder ?? Number.MAX_SAFE_INTEGER) -
+    (PLATFORM_DEFINITIONS[right].requestableOrder ?? Number.MAX_SAFE_INTEGER),
 );
 
 export const SYNC_MODE_VALUES = ["full", "incremental"] as const;
-export type SyncMode = typeof SYNC_MODE_VALUES[number];
+export type SyncMode = (typeof SYNC_MODE_VALUES)[number];
 
 export const SYNC_RUN_TYPE_VALUES = ["sync", "sync_resume", "project", "rebuild"] as const;
-export type SyncRunType = typeof SYNC_RUN_TYPE_VALUES[number];
+export type SyncRunType = (typeof SYNC_RUN_TYPE_VALUES)[number];
 
 export const SYNC_RUN_STATUS_VALUES = [
   "queued",
@@ -139,7 +133,7 @@ export const SYNC_RUN_STATUS_VALUES = [
   "completed",
   "failed",
 ] as const;
-export type SyncRunStatus = typeof SYNC_RUN_STATUS_VALUES[number];
+export type SyncRunStatus = (typeof SYNC_RUN_STATUS_VALUES)[number];
 
 export const RAW_EVENT_ENTITY_KIND_VALUES = [
   "contact",
@@ -149,16 +143,16 @@ export const RAW_EVENT_ENTITY_KIND_VALUES = [
   "participant",
   "timeline_event",
 ] as const;
-export type RawEventEntityKind = typeof RAW_EVENT_ENTITY_KIND_VALUES[number];
+export type RawEventEntityKind = (typeof RAW_EVENT_ENTITY_KIND_VALUES)[number];
 
 export const CONTACT_KIND_VALUES = ["person"] as const;
-export type ContactKind = typeof CONTACT_KIND_VALUES[number];
+export type ContactKind = (typeof CONTACT_KIND_VALUES)[number];
 
 export const CONVERSATION_TYPE_VALUES = ["dm", "group"] as const;
-export type ConversationType = typeof CONVERSATION_TYPE_VALUES[number];
+export type ConversationType = (typeof CONVERSATION_TYPE_VALUES)[number];
 
 export const MERGE_DECISION_TYPE_VALUES = ["merge", "block", "split"] as const;
-export type MergeDecisionType = typeof MERGE_DECISION_TYPE_VALUES[number];
+export type MergeDecisionType = (typeof MERGE_DECISION_TYPE_VALUES)[number];
 
 export const INTEGRATION_AUTH_STATE_VALUES = [
   "authenticated",
@@ -176,7 +170,7 @@ export const INTEGRATION_AUTH_STATE_VALUES = [
   "requested",
   "unknown",
 ] as const;
-export type IntegrationAuthState = typeof INTEGRATION_AUTH_STATE_VALUES[number];
+export type IntegrationAuthState = (typeof INTEGRATION_AUTH_STATE_VALUES)[number];
 
 export const CONNECTION_KIND_VALUES = [
   "browser-session",
@@ -184,7 +178,7 @@ export const CONNECTION_KIND_VALUES = [
   "native",
   "qr-link",
 ] as const;
-export type ConnectionKind = typeof CONNECTION_KIND_VALUES[number];
+export type ConnectionKind = (typeof CONNECTION_KIND_VALUES)[number];
 
 export const INTEGRATION_LAUNCH_STRATEGY_VALUES = [
   "chromium-auth",
@@ -192,7 +186,7 @@ export const INTEGRATION_LAUNCH_STRATEGY_VALUES = [
   "qr-native",
   "system-settings",
 ] as const;
-export type IntegrationLaunchStrategy = typeof INTEGRATION_LAUNCH_STRATEGY_VALUES[number];
+export type IntegrationLaunchStrategy = (typeof INTEGRATION_LAUNCH_STRATEGY_VALUES)[number];
 
 export const INTEGRATION_RUNTIME_KIND_VALUES = [
   "chromium",
@@ -200,7 +194,7 @@ export const INTEGRATION_RUNTIME_KIND_VALUES = [
   "oauth",
   "qr_native",
 ] as const;
-export type IntegrationRuntimeKind = typeof INTEGRATION_RUNTIME_KIND_VALUES[number];
+export type IntegrationRuntimeKind = (typeof INTEGRATION_RUNTIME_KIND_VALUES)[number];
 
 export const AUTH_SESSION_STATE_VALUES = [
   "requested",
@@ -209,14 +203,10 @@ export const AUTH_SESSION_STATE_VALUES = [
   "failed",
   "cancelled",
 ] as const;
-export type AuthSessionState = typeof AUTH_SESSION_STATE_VALUES[number];
+export type AuthSessionState = (typeof AUTH_SESSION_STATE_VALUES)[number];
 
-export const CONTACT_FIELD_NAME_VALUES = [
-  "company",
-  "display_name",
-  "photo_url",
-] as const;
-export type ContactFieldName = typeof CONTACT_FIELD_NAME_VALUES[number];
+export const CONTACT_FIELD_NAME_VALUES = ["company", "display_name", "photo_url"] as const;
+export type ContactFieldName = (typeof CONTACT_FIELD_NAME_VALUES)[number];
 
 export type ContactFields = Partial<Record<ContactFieldName, string | null | undefined>>;
 

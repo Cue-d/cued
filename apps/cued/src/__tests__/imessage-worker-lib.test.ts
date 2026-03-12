@@ -1,7 +1,7 @@
 import { mkdtempSync, rmSync } from "node:fs";
+import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { createRequire } from "node:module";
 import { afterEach, describe, expect, it } from "vitest";
 import { buildIMessageSyncBundle, resolveIMessageLoader } from "../workers/imessage-worker-lib.js";
 
@@ -13,7 +13,10 @@ describe("imessage worker loader resolution", () => {
 
   afterEach(() => {
     while (tempDirs.length > 0) {
-      rmSync(tempDirs.pop()!, { recursive: true, force: true });
+      const dir = tempDirs.pop();
+      if (dir) {
+        rmSync(dir, { recursive: true, force: true });
+      }
     }
   });
 
@@ -70,7 +73,10 @@ describe("imessage worker loader resolution", () => {
     `);
 
     db.prepare("INSERT INTO handle (id, service) VALUES (?, ?)").run("+14155550123", "iMessage");
-    db.prepare("INSERT INTO chat (chat_identifier, display_name) VALUES (?, ?)").run("chat-1", null);
+    db.prepare("INSERT INTO chat (chat_identifier, display_name) VALUES (?, ?)").run(
+      "chat-1",
+      null,
+    );
     db.prepare("INSERT INTO chat_handle_join (chat_id, handle_id) VALUES (?, ?)").run(1, 1);
 
     const insertMessage = db.prepare(`
@@ -93,7 +99,9 @@ describe("imessage worker loader resolution", () => {
         associated_message_guid
       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
-    const insertChatJoin = db.prepare("INSERT INTO chat_message_join (chat_id, message_id) VALUES (?, ?)");
+    const insertChatJoin = db.prepare(
+      "INSERT INTO chat_message_join (chat_id, message_id) VALUES (?, ?)",
+    );
 
     for (let index = 1; index <= messageCount; index += 1) {
       insertMessage.run(

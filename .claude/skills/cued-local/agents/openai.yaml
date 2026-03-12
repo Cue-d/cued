@@ -1,3 +1,0 @@
-display_name: Cued Local
-short_description: Query Cued's local SQLite message and contact store directly with SQL.
-default_prompt: Inspect the local Cued SQLite database at ~/.cued/local.db using sqlite3 -json. Prefer the read-only views first, then raw tables if needed.

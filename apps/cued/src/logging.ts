@@ -41,9 +41,10 @@ function normalizeLogDetails(details: unknown): string {
 }
 
 function rotateLogFileIfNeeded(logPath = CUED_DAEMON_LOG_PATH): void {
-  const maxLogBytes = Number.isFinite(DEFAULT_MAX_LOG_BYTES) && DEFAULT_MAX_LOG_BYTES > 0
-    ? DEFAULT_MAX_LOG_BYTES
-    : 1_048_576;
+  const maxLogBytes =
+    Number.isFinite(DEFAULT_MAX_LOG_BYTES) && DEFAULT_MAX_LOG_BYTES > 0
+      ? DEFAULT_MAX_LOG_BYTES
+      : 1_048_576;
 
   if (!existsSync(logPath)) {
     return;

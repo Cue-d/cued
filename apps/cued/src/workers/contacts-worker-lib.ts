@@ -1,5 +1,5 @@
-import { createHash, randomUUID } from "node:crypto";
 import { execFileSync } from "node:child_process";
+import { createHash, randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
 import type { SyncBundle } from "../adapters/types.js";
 import type { ContactObservationPayload } from "../types/provider.js";

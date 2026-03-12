@@ -28,13 +28,13 @@ apps/cued (daemon, auth/session model, sync orchestration, projection)
 
 ## Prerequisites
 
-| Requirement | Version | Check |
-|-------------|---------|-------|
-| Node.js | 22+ | `node --version` |
-| pnpm | 10+ | `pnpm --version` |
-| macOS | 13+ (Apple Silicon) | `sw_vers` |
-| Swift | 6+ | `swift --version` |
-| Go | 1.25.1+ (source builds only) | `go version` |
+| Requirement | Version                      | Check             |
+| ----------- | ---------------------------- | ----------------- |
+| Node.js     | 22+                          | `node --version`  |
+| pnpm        | 10+                          | `pnpm --version`  |
+| macOS       | 13+ (Apple Silicon)          | `sw_vers`         |
+| Swift       | 6+                           | `swift --version` |
+| Go          | 1.25.1+ (source builds only) | `go version`      |
 
 ## Quick Start
 
@@ -86,20 +86,22 @@ native/
 
 ## Scripts
 
-| Script | Description |
-|--------|-------------|
-| `pnpm build` | Build `apps/cued` |
-| `pnpm dev` | Run the local CLI in dev mode |
-| `pnpm typecheck` | Type check `apps/cued` |
-| `pnpm test` | Run `apps/cued` tests |
-| `pnpm build:app:macos` | Build the local `Cued.app` dev bundle |
-| `pnpm build:dmg:macos` | Build signed/notarized release artifacts and output the DMG path |
+| Script                     | Description                                                                        |
+| -------------------------- | ---------------------------------------------------------------------------------- |
+| `pnpm build`               | Build `apps/cued`                                                                  |
+| `pnpm dev`                 | Run the local CLI in dev mode                                                      |
+| `pnpm check:biome`         | Run formatting, lint, and import checks                                            |
+| `pnpm typecheck`           | Type check `apps/cued`                                                             |
+| `pnpm test`                | Run `apps/cued` tests                                                              |
+| `pnpm build:app:macos`     | Build the local `Cued.app` dev bundle                                              |
+| `pnpm build:dmg:macos`     | Build signed/notarized release artifacts and output the DMG path                   |
 | `pnpm build:tarball:macos` | Build signed/notarized release artifacts and output the Apple Silicon tarball path |
-| `pnpm sign:notarize:macos` | Build signed/notarized release artifacts |
-| `pnpm permissions:macos` | Open/request macOS permissions |
+| `pnpm sign:notarize:macos` | Build signed/notarized release artifacts                                           |
+| `pnpm permissions:macos`   | Open/request macOS permissions                                                     |
 
 ## Notes
 
 - `apps/cued` is the only product runtime moving forward.
 - The repo no longer ships the Electron app or the old shared/cloud packages.
 - Internal release artifacts currently target Apple Silicon Macs only.
+- The native macOS package currently has a build check but no dedicated Swift test target.

@@ -15,10 +15,10 @@ vi.mock("node:child_process", async (importOriginal) => {
 });
 
 import {
-  SignalRealtimeSession,
-  SignalRealtimeSupervisor,
   parseSignalJsonRpcLine,
+  SignalRealtimeSession,
   type SignalRealtimeSessionLike,
+  SignalRealtimeSupervisor,
 } from "../integrations/signal-realtime.js";
 
 class MockChild extends EventEmitter {
@@ -61,27 +61,31 @@ describe("signal realtime", () => {
     session.start();
     child.emit("spawn");
 
-    child.stdout.write(`${JSON.stringify({
-      jsonrpc: "2.0",
-      method: "receive",
-      params: {
-        envelope: {
-          source: "+14155550123",
-          sourceName: "Ben",
-          timestamp: 1_710_000_000_000,
-          serverGuid: "msg-1",
-          dataMessage: {
-            message: "Hello from Signal",
+    child.stdout.write(
+      `${JSON.stringify({
+        jsonrpc: "2.0",
+        method: "receive",
+        params: {
+          envelope: {
+            source: "+14155550123",
+            sourceName: "Ben",
+            timestamp: 1_710_000_000_000,
+            serverGuid: "msg-1",
+            dataMessage: {
+              message: "Hello from Signal",
+            },
           },
         },
-      },
-    })}\n`);
+      })}\n`,
+    );
 
-    expect(onMessage).toHaveBeenCalledWith(expect.objectContaining({
-      messageId: "msg-1",
-      threadId: "dm:+14155550123",
-      text: "Hello from Signal",
-    }));
+    expect(onMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        messageId: "msg-1",
+        threadId: "dm:+14155550123",
+        text: "Hello from Signal",
+      }),
+    );
 
     const sendPromise = session.sendMessage("Ping", { recipient: "+14155550123" });
     expect(child.stdinWrites).toHaveLength(1);
@@ -95,11 +99,13 @@ describe("signal realtime", () => {
       },
     });
 
-    child.stdout.write(`${JSON.stringify({
-      jsonrpc: "2.0",
-      id: 1,
-      result: { timestamp: 123 },
-    })}\n`);
+    child.stdout.write(
+      `${JSON.stringify({
+        jsonrpc: "2.0",
+        id: 1,
+        result: { timestamp: 123 },
+      })}\n`,
+    );
 
     await expect(sendPromise).resolves.toEqual({ timestamp: 123 });
     expect(parseSignalJsonRpcLine('{"jsonrpc":"2.0","method":"receive"}')).toEqual({
@@ -138,9 +144,13 @@ describe("signal realtime", () => {
 
     expect(spawnMock).toHaveBeenCalledTimes(2);
     expect(session.getStatus().state).toBe("connected");
-    expect(onConnected).toHaveBeenNthCalledWith(2, expect.objectContaining({
-      state: "connected",
-    }), true);
+    expect(onConnected).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        state: "connected",
+      }),
+      true,
+    );
 
     session.stop();
   });
@@ -181,12 +191,14 @@ describe("signal realtime", () => {
       }),
     });
 
-    supervisor.reconcile([{
-      accountKey: "default",
-      account: "+14155550000",
-      cliPath: "/opt/homebrew/bin/signal-cli",
-      configDir: "/tmp/cued-signal/default",
-    }]);
+    supervisor.reconcile([
+      {
+        accountKey: "default",
+        account: "+14155550000",
+        cliPath: "/opt/homebrew/bin/signal-cli",
+        configDir: "/tmp/cued-signal/default",
+      },
+    ]);
     expect(started).toEqual(["default"]);
     expect(supervisor.getStatuses()).toEqual([
       expect.objectContaining({

@@ -4,6 +4,7 @@ import {
   type AdapterPlatform,
   isAdapterPlatform,
 } from "../types/provider.js";
+
 export { isAdapterPlatform } from "../types/provider.js";
 
 export interface AdapterDefinition {

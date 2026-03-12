@@ -1,5 +1,4 @@
 import { createHash, randomUUID } from "node:crypto";
-import type { SyncBundle } from "./types.js";
 import type {
   ContactObservationPayload,
   ConversationObservationPayload,
@@ -7,6 +6,7 @@ import type {
   ProviderRawEventInput,
   SourceAccountInput,
 } from "../types/provider.js";
+import type { SyncBundle } from "./types.js";
 
 function eventId(seed: string): string {
   return createHash("sha256").update(seed).digest("hex");
@@ -24,7 +24,13 @@ export function buildFixtureSyncBundle(): SyncBundle {
   const events: Array<
     Pick<
       ProviderRawEventInput,
-      "accountKey" | "conversationExternalId" | "entityKind" | "eventKind" | "externalEntityId" | "observedAt" | "platform"
+      | "accountKey"
+      | "conversationExternalId"
+      | "entityKind"
+      | "eventKind"
+      | "externalEntityId"
+      | "observedAt"
+      | "platform"
     > & {
       payload: ContactObservationPayload | ConversationObservationPayload | MessagePayload;
     }

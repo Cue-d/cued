@@ -1,8 +1,8 @@
-import { spawn, type ChildProcess, execFileSync, execFile } from "node:child_process";
+import { type ChildProcess, execFile, execFileSync, spawn } from "node:child_process";
 import { existsSync, mkdirSync } from "node:fs";
-import { join, resolve, dirname } from "node:path";
-import { promisify } from "node:util";
+import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { promisify } from "node:util";
 import { CUED_WHATSAPP_DIR, ensureCuedDirs } from "../config.js";
 import type { WhatsAppHelperEventEnvelope } from "./whatsapp-types.js";
 
@@ -36,7 +36,9 @@ export function resolveWhatsAppHelperBinary(
     return envVarValue;
   }
 
-  return getWhatsAppHelperBinaryCandidates(repoRoot).find((candidate) => existsSync(candidate)) ?? null;
+  return (
+    getWhatsAppHelperBinaryCandidates(repoRoot).find((candidate) => existsSync(candidate)) ?? null
+  );
 }
 
 export interface WhatsAppHelperInspection {
@@ -125,16 +127,14 @@ export function startWhatsAppPairSession(options: {
   storeDir: string;
   deviceName: string;
 }): WhatsAppPairHandle {
-  const child = spawn(options.helperPath, [
-    "pair",
-    "--store-dir",
-    options.storeDir,
-    "--device-name",
-    options.deviceName,
-  ], {
-    stdio: ["ignore", "pipe", "pipe"],
-    env: process.env,
-  });
+  const child = spawn(
+    options.helperPath,
+    ["pair", "--store-dir", options.storeDir, "--device-name", options.deviceName],
+    {
+      stdio: ["ignore", "pipe", "pipe"],
+      env: process.env,
+    },
+  );
 
   let stdoutBuffer = "";
   let stderrBuffer = "";
@@ -214,7 +214,9 @@ export function startWhatsAppPairSession(options: {
       return;
     }
     if (!completionSettled) {
-      rejectPending(new Error(stderrBuffer.trim() || "WhatsApp helper exited before pairing completed"));
+      rejectPending(
+        new Error(stderrBuffer.trim() || "WhatsApp helper exited before pairing completed"),
+      );
     }
   });
 
@@ -233,7 +235,12 @@ export function startWhatsAppPairSession(options: {
   };
 }
 
-function parseWhatsAppPairLine(line: string): WhatsAppHelperEventEnvelope<"connected" | "error"> | ({ event: "qr"; data: { code: string } }) | null {
+function parseWhatsAppPairLine(
+  line: string,
+):
+  | WhatsAppHelperEventEnvelope<"connected" | "error">
+  | { event: "qr"; data: { code: string } }
+  | null {
   const trimmed = line.trim();
   if (!trimmed.startsWith("{")) {
     return null;
@@ -249,9 +256,9 @@ function parseWhatsAppPairLine(line: string): WhatsAppHelperEventEnvelope<"conne
       };
     }
     if (
-      (parsed.event === "connected" || parsed.event === "error")
-      && typeof parsed.data === "object"
-      && parsed.data !== null
+      (parsed.event === "connected" || parsed.event === "error") &&
+      typeof parsed.data === "object" &&
+      parsed.data !== null
     ) {
       return parsed as unknown as WhatsAppHelperEventEnvelope<"connected" | "error">;
     }

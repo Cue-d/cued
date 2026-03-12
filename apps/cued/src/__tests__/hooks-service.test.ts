@@ -1,6 +1,6 @@
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
 import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 describe("hooks service", () => {
@@ -12,7 +12,10 @@ describe("hooks service", () => {
     process.env.HOME = originalHome;
     process.env.USERPROFILE = originalUserProfile;
     while (tempDirs.length > 0) {
-      rmSync(tempDirs.pop()!, { recursive: true, force: true });
+      const dir = tempDirs.pop();
+      if (dir) {
+        rmSync(dir, { recursive: true, force: true });
+      }
     }
   });
 
@@ -71,7 +74,7 @@ args = ["-lc", "cat > ${join(home, "hook-payload.json")}"]
     expect(results).toHaveLength(1);
     expect(results[0]?.ok).toBe(true);
     const payload = readFileSync(join(home, "hook-payload.json"), "utf8");
-    expect(payload).toContain("\"event\": \"sync.completed\"");
-    expect(payload).toContain("\"runId\": \"123\"");
+    expect(payload).toContain('"event": "sync.completed"');
+    expect(payload).toContain('"runId": "123"');
   });
 });

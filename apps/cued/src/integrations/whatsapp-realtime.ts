@@ -1,4 +1,4 @@
-import { spawn, type ChildProcess } from "node:child_process";
+import { type ChildProcess, spawn } from "node:child_process";
 import { createInterface, type Interface as ReadLineInterface } from "node:readline";
 import { createLogger } from "../logging.js";
 import type {
@@ -6,7 +6,6 @@ import type {
   WhatsAppHelperEventEnvelope,
   WhatsAppHelperResponseEnvelope,
   WhatsAppHelperSendResult,
-  WhatsAppHelperStatusResult,
   WhatsAppSnapshot,
 } from "./whatsapp-types.js";
 
@@ -115,17 +114,21 @@ function makeStatus(input: {
 }
 
 function isResponseEnvelope(value: unknown): value is WhatsAppHelperResponseEnvelope {
-  return typeof value === "object"
-    && value !== null
-    && typeof (value as { id?: unknown }).id === "number"
-    && typeof (value as { ok?: unknown }).ok === "boolean";
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    typeof (value as { id?: unknown }).id === "number" &&
+    typeof (value as { ok?: unknown }).ok === "boolean"
+  );
 }
 
 function isEventEnvelope(value: unknown): value is WhatsAppHelperEventEnvelope {
-  return typeof value === "object"
-    && value !== null
-    && typeof (value as { event?: unknown }).event === "string"
-    && "data" in (value as object);
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    typeof (value as { event?: unknown }).event === "string" &&
+    "data" in (value as object)
+  );
 }
 
 export function parseWhatsAppHelperLine(
@@ -274,14 +277,10 @@ export class WhatsAppRealtimeSession implements WhatsAppRealtimeSessionLike {
 
   private spawnChild(): void {
     this.disposeChild();
-    const child = this.spawnImpl(
-      this.helperPath,
-      ["session", "--store-dir", this.storeDir],
-      {
-        stdio: ["pipe", "pipe", "pipe"],
-        env: process.env,
-      },
-    );
+    const child = this.spawnImpl(this.helperPath, ["session", "--store-dir", this.storeDir], {
+      stdio: ["pipe", "pipe", "pipe"],
+      env: process.env,
+    });
 
     this.child = child;
     this.readLine = createInterface({ input: child.stdout! });
@@ -313,11 +312,12 @@ export class WhatsAppRealtimeSession implements WhatsAppRealtimeSessionLike {
     });
 
     child.once("exit", (code, signal) => {
-      const reason = code && code !== 0
-        ? `WhatsApp helper exited with code ${code}`
-        : signal
-          ? `WhatsApp helper exited with signal ${signal}`
-          : "WhatsApp helper exited";
+      const reason =
+        code && code !== 0
+          ? `WhatsApp helper exited with code ${code}`
+          : signal
+            ? `WhatsApp helper exited with signal ${signal}`
+            : "WhatsApp helper exited";
       this.handleExit(new Error(reason));
     });
   }
@@ -336,7 +336,9 @@ export class WhatsAppRealtimeSession implements WhatsAppRealtimeSessionLike {
       this.pendingRequests.delete(parsed.id);
       clearTimeout(pending.timeout);
       if (!parsed.ok) {
-        pending.reject(new Error(parsed.error ?? `WhatsApp helper request failed: ${pending.command}`));
+        pending.reject(
+          new Error(parsed.error ?? `WhatsApp helper request failed: ${pending.command}`),
+        );
         return;
       }
       pending.resolve(parsed.result);
@@ -346,9 +348,10 @@ export class WhatsAppRealtimeSession implements WhatsAppRealtimeSessionLike {
     const eventData = parsed.data as Record<string, unknown>;
     this.setStatus({
       lastEventAt: now(),
-      lastSessionError: parsed.event === "error" && typeof eventData.message === "string"
-        ? eventData.message
-        : null,
+      lastSessionError:
+        parsed.event === "error" && typeof eventData.message === "string"
+          ? eventData.message
+          : null,
     });
     if (parsed.event === "connected") {
       this.setStatus({
@@ -358,7 +361,8 @@ export class WhatsAppRealtimeSession implements WhatsAppRealtimeSessionLike {
     }
     if (parsed.event === "history_sync") {
       this.setStatus({
-        lastHistorySyncAt: typeof eventData.completedAt === "number" ? eventData.completedAt : now(),
+        lastHistorySyncAt:
+          typeof eventData.completedAt === "number" ? eventData.completedAt : now(),
       });
     }
     if (parsed.event === "disconnected") {
@@ -452,7 +456,9 @@ type ManagedSession = {
 };
 
 export class WhatsAppRealtimeSupervisor {
-  private readonly createSession: (input: WhatsAppRealtimeSupervisorSessionInput) => WhatsAppRealtimeSessionLike;
+  private readonly createSession: (
+    input: WhatsAppRealtimeSupervisorSessionInput,
+  ) => WhatsAppRealtimeSessionLike;
   private readonly onEvent?: WhatsAppRealtimeSupervisorOptions["onEvent"];
   private readonly onConnected?: WhatsAppRealtimeSupervisorOptions["onConnected"];
   private readonly onDisconnected?: WhatsAppRealtimeSupervisorOptions["onDisconnected"];
@@ -469,21 +475,27 @@ export class WhatsAppRealtimeSupervisor {
     this.onConnected = options.onConnected;
     this.onDisconnected = options.onDisconnected;
     this.onStatusChange = options.onStatusChange;
-    this.createSession = options.createSession ?? ((input) => new WhatsAppRealtimeSession({
-      accountKey: input.accountKey,
-      helperPath: input.helperPath,
-      storeDir: input.storeDir,
-      onEvent: (accountKey, event) => this.onEvent?.(accountKey, event),
-      onConnected: (status, reconnected) => {
-        this.resolveWaiters(input.accountKey, this.sessions.get(input.accountKey)?.session ?? null);
-        this.onConnected?.(input.accountKey, status, reconnected);
-      },
-      onDisconnected: (status) => this.onDisconnected?.(input.accountKey, status),
-      onStatusChange: (status) => {
-        this.degradedStatuses.delete(input.accountKey);
-        this.onStatusChange?.(input.accountKey, status);
-      },
-    }));
+    this.createSession =
+      options.createSession ??
+      ((input) =>
+        new WhatsAppRealtimeSession({
+          accountKey: input.accountKey,
+          helperPath: input.helperPath,
+          storeDir: input.storeDir,
+          onEvent: (accountKey, event) => this.onEvent?.(accountKey, event),
+          onConnected: (status, reconnected) => {
+            this.resolveWaiters(
+              input.accountKey,
+              this.sessions.get(input.accountKey)?.session ?? null,
+            );
+            this.onConnected?.(input.accountKey, status, reconnected);
+          },
+          onDisconnected: (status) => this.onDisconnected?.(input.accountKey, status),
+          onStatusChange: (status) => {
+            this.degradedStatuses.delete(input.accountKey);
+            this.onStatusChange?.(input.accountKey, status);
+          },
+        }));
   }
 
   reconcile(
@@ -542,11 +554,13 @@ export class WhatsAppRealtimeSupervisor {
     return [
       ...[...this.sessions.values()].map((managed) => managed.session.getStatus()),
       ...this.degradedStatuses.values(),
-    ]
-      .sort((left, right) => left.accountKey.localeCompare(right.accountKey));
+    ].sort((left, right) => left.accountKey.localeCompare(right.accountKey));
   }
 
-  async waitForConnected(accountKey: string, timeoutMs: number): Promise<WhatsAppRealtimeSessionLike | null> {
+  async waitForConnected(
+    accountKey: string,
+    timeoutMs: number,
+  ): Promise<WhatsAppRealtimeSessionLike | null> {
     const existing = this.getSession(accountKey);
     if (existing?.isConnected()) {
       return existing;
@@ -590,7 +604,9 @@ function inputsEqual(
   left: WhatsAppRealtimeSupervisorSessionInput,
   right: WhatsAppRealtimeSupervisorSessionInput,
 ): boolean {
-  return left.accountKey === right.accountKey
-    && left.helperPath === right.helperPath
-    && left.storeDir === right.storeDir;
+  return (
+    left.accountKey === right.accountKey &&
+    left.helperPath === right.helperPath &&
+    left.storeDir === right.storeDir
+  );
 }

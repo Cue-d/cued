@@ -1,7 +1,15 @@
-import { existsSync, mkdirSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import {
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { homedir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
-import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
 const APP_NAME = "Cued.app";
@@ -43,9 +51,11 @@ export function isValidCuedAppBundle(appPath: string): boolean {
 
   try {
     const info = readFileSync(infoPath, "utf8");
-    return readInfoPlistValue(info, "CFBundleIdentifier") === APP_BUNDLE_IDENTIFIER
-      && readInfoPlistValue(info, "CFBundleExecutable") === APP_EXECUTABLE_NAME
-      && readInfoPlistValue(info, "CFBundleName") === "Cued";
+    return (
+      readInfoPlistValue(info, "CFBundleIdentifier") === APP_BUNDLE_IDENTIFIER &&
+      readInfoPlistValue(info, "CFBundleExecutable") === APP_EXECUTABLE_NAME &&
+      readInfoPlistValue(info, "CFBundleName") === "Cued"
+    );
   } catch {
     return false;
   }
@@ -146,15 +156,19 @@ export function getCLISymlinkStatus(): {
   }
 }
 
-export function installMacOSAppFromSource(sourcePath: string, destinationPath?: string): {
+export function installMacOSAppFromSource(
+  sourcePath: string,
+  destinationPath?: string,
+): {
   sourcePath: string;
   installedAppPath: string;
   cliSymlinkPath: string;
 } {
   const installedAppPath = destinationPath ?? getDefaultInstallAppPath();
-  const sameBundle = existsSync(sourcePath)
-    && existsSync(installedAppPath)
-    && realpathSync(sourcePath) === realpathSync(installedAppPath);
+  const sameBundle =
+    existsSync(sourcePath) &&
+    existsSync(installedAppPath) &&
+    realpathSync(sourcePath) === realpathSync(installedAppPath);
   if (!sameBundle) {
     mkdirSync(dirname(installedAppPath), { recursive: true });
     if (!existsSync(installedAppPath)) {
@@ -231,13 +245,22 @@ export function uninstallLaunchAgent(): { plistPath: string; removed: boolean } 
   return { plistPath, removed: true };
 }
 
-export function getLaunchAgentStatus(): { label: string; plistPath: string; loaded: boolean; details?: string } {
+export function getLaunchAgentStatus(): {
+  label: string;
+  plistPath: string;
+  loaded: boolean;
+  details?: string;
+} {
   const plistPath = launchAgentPath();
   try {
-    const details = execFileSync("launchctl", ["print", `gui/${currentUid()}/${LAUNCH_AGENT_LABEL}`], {
-      encoding: "utf8",
-      stdio: ["ignore", "pipe", "pipe"],
-    });
+    const details = execFileSync(
+      "launchctl",
+      ["print", `gui/${currentUid()}/${LAUNCH_AGENT_LABEL}`],
+      {
+        encoding: "utf8",
+        stdio: ["ignore", "pipe", "pipe"],
+      },
+    );
     return { label: LAUNCH_AGENT_LABEL, plistPath, loaded: true, details };
   } catch (error) {
     return {

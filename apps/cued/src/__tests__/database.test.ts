@@ -10,7 +10,10 @@ describe("CuedDatabase", () => {
 
   afterEach(() => {
     while (tempDirs.length > 0) {
-      rmSync(tempDirs.pop()!, { recursive: true, force: true });
+      const dir = tempDirs.pop();
+      if (dir) {
+        rmSync(dir, { recursive: true, force: true });
+      }
     }
   });
 
@@ -30,18 +33,24 @@ describe("CuedDatabase", () => {
       updatedAt?: number;
     },
   ): void {
-    const sqlite = (db as unknown as {
-      sqlite: {
-        prepare: (sql: string) => {
-          run: (...params: unknown[]) => void;
+    const sqlite = (
+      db as unknown as {
+        sqlite: {
+          prepare: (sql: string) => {
+            run: (...params: unknown[]) => void;
+          };
         };
-      };
-    }).sqlite;
+      }
+    ).sqlite;
     const timestamp = input.updatedAt ?? Date.now();
-    sqlite.prepare(`
+    sqlite
+      .prepare(
+        `
       INSERT INTO contacts (id, kind, name, photo_url, company, archived, created_at, updated_at)
       VALUES (?, 'person', ?, NULL, NULL, 0, ?, ?)
-    `).run(input.id, input.name, timestamp, timestamp);
+    `,
+      )
+      .run(input.id, input.name, timestamp, timestamp);
   }
 
   function insertHandle(
@@ -57,30 +66,36 @@ describe("CuedDatabase", () => {
       isDeterministic?: number;
     },
   ): void {
-    const sqlite = (db as unknown as {
-      sqlite: {
-        prepare: (sql: string) => {
-          run: (...params: unknown[]) => void;
+    const sqlite = (
+      db as unknown as {
+        sqlite: {
+          prepare: (sql: string) => {
+            run: (...params: unknown[]) => void;
+          };
         };
-      };
-    }).sqlite;
+      }
+    ).sqlite;
     const timestamp = Date.now();
-    sqlite.prepare(`
+    sqlite
+      .prepare(
+        `
       INSERT INTO contact_handles (
         id, contact_id, type, value, normalized_value, platform, account_key, is_deterministic, created_at, updated_at
       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(
-      input.id,
-      input.contactId,
-      input.type,
-      input.value,
-      input.normalizedValue,
-      input.platform,
-      input.accountKey,
-      input.isDeterministic ?? 1,
-      timestamp,
-      timestamp,
-    );
+    `,
+      )
+      .run(
+        input.id,
+        input.contactId,
+        input.type,
+        input.value,
+        input.normalizedValue,
+        input.platform,
+        input.accountKey,
+        input.isDeterministic ?? 1,
+        timestamp,
+        timestamp,
+      );
   }
 
   it("creates the schema and exposes overview counts", () => {
@@ -251,13 +266,15 @@ describe("CuedDatabase", () => {
     });
 
     const claimed = db.claimNextOutboundMessage("signal");
-    expect(claimed).toEqual(expect.objectContaining({
-      id: messageId,
-      platform: "signal",
-      account_key: "default",
-      status: "sending",
-      attempt_count: 1,
-    }));
+    expect(claimed).toEqual(
+      expect.objectContaining({
+        id: messageId,
+        platform: "signal",
+        account_key: "default",
+        status: "sending",
+        attempt_count: 1,
+      }),
+    );
 
     db.failOutboundMessage({
       id: messageId,
@@ -424,7 +441,9 @@ describe("CuedDatabase", () => {
       trigger: "manual",
     });
     db.failRun(failedId, "boom", { code: "x" });
-    expect(db.listRecentRuns(2).some((run) => run.id === failedId && run.status === "failed")).toBe(true);
+    expect(db.listRecentRuns(2).some((run) => run.id === failedId && run.status === "failed")).toBe(
+      true,
+    );
 
     db.close();
   });

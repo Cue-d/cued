@@ -53,12 +53,14 @@ describe("signal worker lib", () => {
     expect(bundle.rawEvents.some((event) => event.entityKind === "message")).toBe(true);
 
     const messageEvent = bundle.rawEvents.find((event) => event.entityKind === "message");
-    expect(messageEvent?.payload).toEqual(expect.objectContaining({
-      sourceConversationKey: "signal:dm:+14155550123",
-      senderSourceKey: "signal:+14155550123",
-      content: "Hello from Signal",
-      service: "signal",
-      isFromMe: false,
-    }));
+    expect(messageEvent?.payload).toEqual(
+      expect.objectContaining({
+        sourceConversationKey: "signal:dm:+14155550123",
+        senderSourceKey: "signal:+14155550123",
+        content: "Hello from Signal",
+        service: "signal",
+        isFromMe: false,
+      }),
+    );
   });
 });
