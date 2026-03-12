@@ -606,6 +606,7 @@ public struct CuedOnboardingView: View {
 
   private func platformConfigurationCard(_ configuration: InstallerPlatformConfiguration) -> some View {
     let isFullyConnected = platformIsFullyConnected(configuration)
+    let shouldShowAccountControls = configuration.supportsMultipleAccounts || !isFullyConnected
 
     return VStack(alignment: .leading, spacing: 14) {
       HStack(alignment: .top, spacing: 12) {
@@ -631,7 +632,7 @@ public struct CuedOnboardingView: View {
         }
       }
 
-      if !isFullyConnected {
+      if shouldShowAccountControls {
         if configuration.supportsMultipleAccounts {
           multiAccountPlatformRows(configuration)
         } else if let integration = configuration.accounts.first ?? configuration.placeholder {
