@@ -14,6 +14,7 @@ import {
   requestIntegrationAccess,
   setIntegrationEnabled,
 } from "../integrations/service.js";
+import { resolveHostOS } from "../platform-capabilities.js";
 
 describe("integration state management", () => {
   const tempDirs: string[] = [];
@@ -132,12 +133,13 @@ describe("integration state management", () => {
     expect(() => requestIntegrationAccess(db, "discord")).toThrow(
       "Unsupported integration platform: discord",
     );
+    const expectedContactsAvailability = resolveHostOS() === "macos" ? "available" : "unsupported";
     expect(buildIntegrationStatus(db).setupIntegrations).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
           platform: "contacts",
           capability: expect.objectContaining({
-            availability: "available",
+            availability: expectedContactsAvailability,
           }),
         }),
         expect.objectContaining({
