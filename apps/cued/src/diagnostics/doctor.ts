@@ -31,6 +31,111 @@ export interface DoctorRuntimeStatus {
   whatsappRealtimeSessions?: unknown;
 }
 
+export type PermissionStatusKey = "contacts" | "full_disk_access" | "messages_automation";
+export type PermissionStatusState = "granted" | "needs_action" | "unknown";
+
+export interface PermissionStatusSummary {
+  key: PermissionStatusKey;
+  status: PermissionStatusState;
+  summary: string;
+  requestFlags: string[];
+}
+
+export interface PermissionCheckSummaryInput {
+  contacts: DoctorCheck;
+  messagesAutomation: DoctorCheck;
+  messagesDatabase: DoctorCheck;
+  messagesNativeHelper: DoctorCheck;
+}
+
+export function summarizePermissionStatuses(
+  checks: PermissionCheckSummaryInput,
+): PermissionStatusSummary[] {
+  const fullDiskStatus: PermissionStatusState =
+    checks.messagesDatabase.status === "error" || checks.messagesNativeHelper.status === "error"
+      ? "needs_action"
+      : checks.messagesDatabase.status === "ok" &&
+          (checks.messagesNativeHelper.status === "ok" ||
+            checks.messagesNativeHelper.status === "unknown")
+        ? "granted"
+        : "unknown";
+
+  const fullDiskSummary =
+    checks.messagesDatabase.status === "error"
+      ? checks.messagesDatabase.summary
+      : checks.messagesNativeHelper.status === "error"
+        ? checks.messagesNativeHelper.summary
+        : checks.messagesDatabase.status === "ok"
+          ? "Full Disk Access is available for Messages data"
+          : "Full Disk Access has not been verified yet";
+
+  return [
+    {
+      key: "contacts",
+      status:
+        checks.contacts.status === "ok"
+          ? "granted"
+          : checks.contacts.status === "unknown"
+            ? "unknown"
+            : "needs_action",
+      summary: checks.contacts.summary,
+      requestFlags: ["--contacts"],
+    },
+    {
+      key: "full_disk_access",
+      status: fullDiskStatus,
+      summary: fullDiskSummary,
+      requestFlags: ["--full-disk-access"],
+    },
+    {
+      key: "messages_automation",
+      status: checks.messagesAutomation.status === "ok" ? "granted" : "needs_action",
+      summary: checks.messagesAutomation.summary,
+      requestFlags: ["--messages"],
+    },
+  ];
+}
+
+export async function buildPermissionStatus(): Promise<{ permissions: PermissionStatusSummary[] }> {
+  const contacts = process.platform === "darwin"
+    ? getContactsPermissionCheck()
+    : {
+        name: "contacts_permission",
+        status: "unknown",
+        summary: "Contacts permission can only be checked on macOS",
+      } satisfies DoctorCheck;
+  const messagesDatabase = process.platform === "darwin"
+    ? tryReadMessagesDatabase()
+    : {
+        name: "messages_database",
+        status: "unknown",
+        summary: "Messages database access can only be checked on macOS",
+      } satisfies DoctorCheck;
+  const messagesNativeHelper = process.platform === "darwin"
+    ? getMessagesNativeHelperCheck()
+    : {
+        name: "messages_native_helper",
+        status: "unknown",
+        summary: "Native Messages access can only be checked on macOS",
+      } satisfies DoctorCheck;
+  const messagesAutomation = process.platform === "darwin"
+    ? getMessagesAutomationCheck()
+    : {
+        name: "messages_automation",
+        status: "unknown",
+        summary: "Messages automation can only be checked on macOS",
+      } satisfies DoctorCheck;
+
+  return {
+    permissions: summarizePermissionStatuses({
+      contacts,
+      messagesAutomation,
+      messagesDatabase,
+      messagesNativeHelper,
+    }),
+  };
+}
+
 function tryReadMessagesDatabase(): DoctorCheck {
   if (!existsSync(DEFAULT_CHAT_DB_PATH)) {
     return {

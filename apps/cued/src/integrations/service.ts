@@ -221,6 +221,30 @@ function getIMessageAuthState(): IntegrationAuthState {
     return "missing";
   }
 
+  const nativeBinary = resolveMacOSNativeBinary(process.env.CUED_IMESSAGE_NATIVE_BINARY);
+  if (nativeBinary) {
+    try {
+      execFileSync(
+        nativeBinary,
+        ["imessage", "dump", "--db-path", chatDbPath, "--after-rowid", "0", "--limit", "1"],
+        {
+          encoding: "utf8",
+          stdio: ["ignore", "pipe", "pipe"],
+        },
+      );
+      return "authorized";
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      if (
+        message.includes("authorization denied") ||
+        message.includes("unable to open database file")
+      ) {
+        return "needs_full_disk_access";
+      }
+      return "blocked";
+    }
+  }
+
   try {
     const reader = new IMessageReader(chatDbPath);
     try {
@@ -608,6 +632,14 @@ function summarizeManagedIntegrationState(
 }
 
 function buildSetupIntegrations(db: CuedDatabase): IntegrationStateSummary[] {
+  const onboardingOrder: Platform[] = [
+    "contacts",
+    "imessage",
+    "slack",
+    "linkedin",
+    "whatsapp",
+    "signal",
+  ];
   const byPlatform = new Map<Platform, IntegrationStateSummary>();
 
   for (const integration of listIntegrationStates(db)) {
@@ -655,7 +687,7 @@ function buildSetupIntegrations(db: CuedDatabase): IntegrationStateSummary[] {
     );
   }
 
-  return PLATFORM_VALUES.filter(isOnboardingVisiblePlatform)
+  return onboardingOrder.filter(isOnboardingVisiblePlatform)
     .map((platform) => byPlatform.get(platform))
     .filter((value): value is IntegrationStateSummary => Boolean(value));
 }

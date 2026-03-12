@@ -150,6 +150,14 @@ describe("integration state management", () => {
         }),
       ]),
     );
+    expect(buildIntegrationStatus(db).setupIntegrations.map((integration) => integration.platform)).toEqual([
+      "contacts",
+      "imessage",
+      "slack",
+      "linkedin",
+      "whatsapp",
+      "signal",
+    ]);
     db.close();
   });
 
