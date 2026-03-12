@@ -20,6 +20,7 @@ import {
   getAuthSessionSummary,
   getIntegrationSummary,
   markAuthSessionInProgress,
+  removeIntegration,
   refreshManagedIntegrationStates,
   setIntegrationEnabled,
 } from "../integrations/service.js";
@@ -2422,6 +2423,15 @@ async function dispatchRequest(
       }
       case "integrations-disconnect": {
         const result = disconnectIntegration(db, request.platform, request.accountKey);
+        requestRealtimeReconcile();
+        return {
+          id: request.id,
+          ok: true,
+          result,
+        };
+      }
+      case "integrations-remove": {
+        const result = removeIntegration(db, request.platform, request.accountKey);
         requestRealtimeReconcile();
         return {
           id: request.id,

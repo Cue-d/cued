@@ -28,6 +28,7 @@ import {
   listIntegrationStates,
   listRequestableIntegrationPlatforms,
   markAuthSessionInProgress,
+  removeIntegration,
   refreshManagedIntegrationStates,
   setIntegrationEnabled,
 } from "./integrations/service.js";
@@ -86,6 +87,7 @@ Usage:
   cued integrations refresh
   cued integrations connect <platform> [account]
   cued integrations disconnect <platform> [account]
+  cued integrations remove <platform> [account]
   cued integrations enable <platform> [account]
   cued integrations disable <platform> [account]
   cued hooks init
@@ -197,6 +199,11 @@ async function handleLocalIntegrationCommand(
           throw new Error("Usage: cued integrations disconnect <platform> [account]");
         }
         return disconnectIntegration(db, rest[0], rest[1]);
+      case "remove":
+        if (!rest[0]) {
+          throw new Error("Usage: cued integrations remove <platform> [account]");
+        }
+        return removeIntegration(db, rest[0], rest[1]);
       case "enable":
         if (!rest[0]) {
           throw new Error("Usage: cued integrations enable <platform> [account]");
@@ -209,7 +216,7 @@ async function handleLocalIntegrationCommand(
         return setIntegrationEnabled(db, rest[0], rest[1], false);
       default:
         throw new Error(
-          `Usage: cued integrations list | status | refresh | connect <platform> [account] | disconnect <platform> [account] | enable <platform> [account] | disable <platform> [account]\nRequestable platforms: ${listRequestableIntegrationPlatforms().join(", ")}`,
+          `Usage: cued integrations list | status | refresh | connect <platform> [account] | disconnect <platform> [account] | remove <platform> [account] | enable <platform> [account] | disable <platform> [account]\nRequestable platforms: ${listRequestableIntegrationPlatforms().join(", ")}`,
         );
     }
   } finally {
@@ -448,6 +455,16 @@ async function main(): Promise<void> {
             accountKey: rest[1],
           });
           break;
+        case "remove":
+          if (!rest[0]) {
+            throw new Error("Usage: cued integrations remove <platform> [account]");
+          }
+          response = await sendDaemonRequest({
+            command: "integrations-remove",
+            platform: rest[0],
+            accountKey: rest[1],
+          });
+          break;
         case "enable":
           if (!rest[0]) {
             throw new Error("Usage: cued integrations enable <platform> [account]");
@@ -470,7 +487,7 @@ async function main(): Promise<void> {
           break;
         default:
           throw new Error(
-            `Usage: cued integrations list | status | refresh | connect <platform> [account] | disconnect <platform> [account] | enable <platform> [account] | disable <platform> [account]\nRequestable platforms: ${listRequestableIntegrationPlatforms().join(", ")}`,
+            `Usage: cued integrations list | status | refresh | connect <platform> [account] | disconnect <platform> [account] | remove <platform> [account] | enable <platform> [account] | disable <platform> [account]\nRequestable platforms: ${listRequestableIntegrationPlatforms().join(", ")}`,
           );
       }
       break;
