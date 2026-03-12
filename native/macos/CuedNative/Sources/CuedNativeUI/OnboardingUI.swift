@@ -224,6 +224,13 @@ public final class OnboardingViewModel: ObservableObject {
   }
 
   public func suggestedAccountKey(for platform: String) -> String {
+    if installerSupportsAutomaticAccountDiscovery(platform) {
+      return installerGeneratedPendingAccountKey(
+        for: platform,
+        existing: Set(configuration(for: platform)?.accounts.map(\.accountKey) ?? [])
+      )
+    }
+
     let existing = Set(configuration(for: platform)?.accounts.map(\.accountKey) ?? [])
     if !existing.contains("default") {
       return "default"
@@ -654,7 +661,6 @@ public struct CuedOnboardingView: View {
       Spacer(minLength: 0)
       if let action {
         actionButton(title: action.title, action: action.handler)
-          .disabled(viewModel.isRefreshing)
       }
     }
   }
@@ -674,7 +680,6 @@ public struct CuedOnboardingView: View {
         HStack {
           Spacer(minLength: 0)
           actionButton(title: action.title, prominent: false, action: action.handler)
-            .disabled(viewModel.isRefreshing)
         }
       }
     }
@@ -706,7 +711,6 @@ public struct CuedOnboardingView: View {
         authenticatedCheckmark(label: "\(accountTitle(for: integration)) authenticated")
       } else if let action {
         actionButton(title: action.title, action: action.handler)
-          .disabled(viewModel.isRefreshing)
       }
     }
   }
@@ -816,15 +820,24 @@ public struct CuedOnboardingView: View {
 
     if configuration.supportsMultipleAccounts {
       let noun = installerAccountNoun(for: configuration.platform)
-      let title = "Add \(noun)"
+      let title = configuration.accounts.isEmpty && installerSupportsAutomaticAccountDiscovery(configuration.platform)
+        ? "Authenticate"
+        : "Add \(noun)"
       return (
         title.capitalized,
         {
-          addAccountPrompt = InstallerAddAccountPrompt(
-            platform: configuration.platform,
-            platformTitle: configuration.title,
-            suggestedAccountKey: viewModel.suggestedAccountKey(for: configuration.platform)
-          )
+          if installerSupportsAutomaticAccountDiscovery(configuration.platform) {
+            onConnectIntegration(
+              configuration.platform,
+              viewModel.suggestedAccountKey(for: configuration.platform)
+            )
+          } else {
+            addAccountPrompt = InstallerAddAccountPrompt(
+              platform: configuration.platform,
+              platformTitle: configuration.title,
+              suggestedAccountKey: viewModel.suggestedAccountKey(for: configuration.platform)
+            )
+          }
         }
       )
     }
@@ -859,7 +872,8 @@ public struct CuedOnboardingView: View {
     if !integration.enabled && installerIsConnectedIntegrationState(integration.authState) {
       parts.append("turned off")
     }
-    if integration.displayName?.trimmingCharacters(in: .whitespacesAndNewlines) != integration.accountKey {
+    if integration.displayName?.trimmingCharacters(in: .whitespacesAndNewlines) != integration.accountKey,
+       !installerShouldHideAccountKey(platform: integration.platform, accountKey: integration.accountKey) {
       parts.append(integration.accountKey)
     }
     return parts.joined(separator: " • ")
@@ -1388,6 +1402,26 @@ private func installerPlatformTitle(_ platform: String, fallback: String?) -> St
 
 private func installerAccountNoun(for platform: String) -> String {
   platform == "slack" ? "workspace" : "account"
+}
+
+private func installerSupportsAutomaticAccountDiscovery(_ platform: String) -> Bool {
+  platform == "slack"
+}
+
+private func installerShouldHideAccountKey(platform: String, accountKey: String) -> Bool {
+  installerSupportsAutomaticAccountDiscovery(platform) && accountKey.hasPrefix("pending-slack-")
+}
+
+private func installerGeneratedPendingAccountKey(
+  for platform: String,
+  existing: Set<String>
+) -> String {
+  let prefix = platform == "slack" ? "pending-slack-" : "pending-"
+  var candidate = "\(prefix)\(UUID().uuidString.prefix(8).lowercased())"
+  while existing.contains(candidate) {
+    candidate = "\(prefix)\(UUID().uuidString.prefix(8).lowercased())"
+  }
+  return candidate
 }
 
 private func installerSupportsMultipleAccounts(_ platform: String) -> Bool {
