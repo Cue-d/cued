@@ -78,7 +78,7 @@ export interface AuthSessionSummary {
 }
 
 export interface CompletedAuthSessionSummary {
-  authSession: AuthSessionSummary;
+  authSession: AuthSessionSummary | null;
   integration: IntegrationStateSummary | null;
 }
 
@@ -975,7 +975,10 @@ export function completeAuthSession(
 ): CompletedAuthSessionSummary {
   const session = db.getAuthSession(sessionId);
   if (!session) {
-    throw new Error(`Auth session not found: ${sessionId}`);
+    return {
+      authSession: null,
+      integration: null,
+    };
   }
 
   const existingIntegration = db.getIntegrationState(session.platform, session.account_key);
@@ -1235,6 +1238,14 @@ export function removeIntegration(
         ? integration.metadata.storeDir
         : getWhatsAppStoreDir(integration.accountKey);
     rmSync(storeDir, { recursive: true, force: true });
+  }
+
+  if (integration.platform === "signal") {
+    const configDir =
+      typeof integration.metadata?.configDir === "string"
+        ? integration.metadata.configDir
+        : getSignalConfigDir(integration.accountKey);
+    rmSync(configDir, { recursive: true, force: true });
   }
 
   db.deleteIntegrationState(integration.platform, integration.accountKey);

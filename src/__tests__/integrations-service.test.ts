@@ -1,4 +1,4 @@
-import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -134,11 +134,12 @@ describe("integration state management", () => {
       resultSummary: { teamId: "T123", teamName: "Acme" },
     });
     expect(completed.integration).not.toBeNull();
+    expect(completed.authSession).not.toBeNull();
     expect(completed.integration?.authState).toBe("authenticated");
     expect(completed.integration?.accountKey).toBe("T123");
     expect(completed.integration?.displayName).toBe("Acme");
-    expect(completed.authSession.keychainService).toBe("dev.cued.auth.slack");
-    expect(completed.authSession.accountKey).toBe("T123");
+    expect(completed.authSession?.keychainService).toBe("dev.cued.auth.slack");
+    expect(completed.authSession?.accountKey).toBe("T123");
     expect(db.getIntegrationState("slack", requested.integration.accountKey)).toBeNull();
 
     const disabled = setIntegrationEnabled(db, "slack", completed.integration!.accountKey, false);
@@ -268,6 +269,39 @@ describe("integration state management", () => {
     db.close();
   });
 
+  it("removes a signal integration and its local config directory", () => {
+    const db = createDb();
+    const configDir = createTempDir("cued-signal-config-");
+    mkdirSync(configDir, { recursive: true });
+
+    db.upsertIntegrationState({
+      platform: "signal",
+      accountKey: "default",
+      displayName: "Signal",
+      authState: "authenticated",
+      enabled: true,
+      connectionKind: "local-cli",
+      syncCapable: true,
+      launchStrategy: "qr-native",
+      launchTarget: null,
+      importedFrom: "local-cli",
+      metadata: {
+        configDir,
+      },
+    });
+
+    const removed = removeIntegration(db, "signal", "default");
+    expect(removed).toEqual({
+      platform: "signal",
+      accountKey: "default",
+      removed: true,
+    });
+    expect(existsSync(configDir)).toBe(false);
+    expect(db.getIntegrationState("signal", "default")).toBeNull();
+
+    db.close();
+  });
+
   it("reuses the same stable slack workspace key after remove and reconnect", () => {
     const db = createDb();
 
@@ -325,7 +359,7 @@ describe("integration state management", () => {
       resultSummary: { teamId: "T123", teamName: "Acme" },
     });
     expect(completed.integration).toBeNull();
-    expect(completed.authSession.state).toBe("cancelled");
+    expect(completed.authSession).toBeNull();
     expect(db.getIntegrationState("slack", requested.integration.accountKey)).toBeNull();
 
     db.close();
