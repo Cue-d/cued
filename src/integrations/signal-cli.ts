@@ -1,16 +1,14 @@
-import { type ChildProcess, execFile, execFileSync, spawn } from "node:child_process";
+import { type ChildProcess, execFile, spawn } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync } from "node:fs";
-import { join } from "node:path";
+import { dirname, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import { CUED_SIGNAL_DIR } from "../config.js";
 
 const execFileAsync = promisify(execFile);
-const SIGNAL_CLI_COMMON_PATHS = [
-  "/opt/homebrew/bin/signal-cli",
-  "/usr/local/bin/signal-cli",
-] as const;
 const MIN_SIGNAL_CLI_VERSION = { major: 0, minor: 13, patch: 0 } as const;
 const DEFAULT_RECEIVE_TIMEOUT_SECONDS = 1;
+const SIGNAL_HELPER_BINARY_NAME = "cued-signal-cli";
 
 export interface SignalCliVersion {
   major: number;
@@ -112,6 +110,10 @@ function normalizeHandle(value: string): string {
   return value.trim().toLowerCase();
 }
 
+function resolveRepoRoot(): string {
+  return resolve(dirname(fileURLToPath(import.meta.url)), "../..");
+}
+
 function makeSignalConfigDir(accountKey: string): string {
   return join(CUED_SIGNAL_DIR, accountKey);
 }
@@ -124,35 +126,57 @@ export function getSignalConfigDir(accountKey: string): string {
   return path;
 }
 
-export function resolveSignalCliPath(env: NodeJS.ProcessEnv = process.env): string | null {
-  const explicit = env.CUED_SIGNAL_CLI_PATH?.trim();
-  if (explicit) {
-    return explicit;
-  }
+function runtimeBundledSignalCliRoot(): string {
+  return resolve(dirname(fileURLToPath(import.meta.url)), "../../../helpers/signal-cli");
+}
 
-  try {
-    const { stdout } = execFileSyncCompat("which", ["signal-cli"]);
-    const resolved = stdout.trim();
-    if (resolved.length > 0) {
-      return resolved;
-    }
-  } catch {
-    // fall through
-  }
+export function getSignalCliHelperRootCandidates(
+  env: NodeJS.ProcessEnv = process.env,
+  repoRoot = resolveRepoRoot(),
+): string[] {
+  const candidates = [
+    env.CUED_APP_PATH?.trim()
+      ? join(env.CUED_APP_PATH.trim(), "Contents", "Resources", "helpers", "signal-cli")
+      : null,
+    runtimeBundledSignalCliRoot(),
+    join(repoRoot, "native", "helpers", "signal-cli", ".build", "cued-signal-cli"),
+  ].filter((value): value is string => Boolean(value));
 
-  for (const candidate of SIGNAL_CLI_COMMON_PATHS) {
+  return [...new Set(candidates)];
+}
+
+export function getSignalCliBinaryCandidates(
+  env: NodeJS.ProcessEnv = process.env,
+  repoRoot = resolveRepoRoot(),
+): string[] {
+  return getSignalCliHelperRootCandidates(env, repoRoot).map((candidate) =>
+    join(candidate, SIGNAL_HELPER_BINARY_NAME),
+  );
+}
+
+function signalCliHelperRootFromPath(cliPath: string): string {
+  return dirname(cliPath);
+}
+
+function signalCliJavaHomeFromRoot(helperRoot: string): string {
+  return join(helperRoot, "jre", "Contents", "Home");
+}
+
+function signalCliDistributionPathFromRoot(helperRoot: string): string {
+  return join(helperRoot, "signal-cli");
+}
+
+export function resolveSignalCliPath(
+  env: NodeJS.ProcessEnv = process.env,
+  repoRoot = resolveRepoRoot(),
+): string | null {
+  for (const candidate of getSignalCliBinaryCandidates(env, repoRoot)) {
     if (existsSync(candidate)) {
       return candidate;
     }
   }
 
   return null;
-}
-
-function execFileSyncCompat(file: string, args: string[]): { stdout: string } {
-  return {
-    stdout: execFileSync(file, args, { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }),
-  };
 }
 
 export function parseSignalCliVersion(stdout: string): SignalCliVersion | null {
@@ -183,12 +207,23 @@ export function isSignalCliVersionSupported(version: SignalCliVersion | null): b
 
 export async function inspectSignalCli(env: NodeJS.ProcessEnv = process.env): Promise<{
   cliPath: string | null;
+  helperRoot: string | null;
+  distributionPath: string | null;
+  javaHome: string | null;
   version: SignalCliVersion | null;
 }> {
   const cliPath = resolveSignalCliPath(env);
   if (!cliPath) {
-    return { cliPath: null, version: null };
+    return {
+      cliPath: null,
+      helperRoot: null,
+      distributionPath: null,
+      javaHome: null,
+      version: null,
+    };
   }
+
+  const helperRoot = signalCliHelperRootFromPath(cliPath);
 
   try {
     const { stdout, stderr } = await execFileAsync(cliPath, ["--version"], {
@@ -197,10 +232,19 @@ export async function inspectSignalCli(env: NodeJS.ProcessEnv = process.env): Pr
     });
     return {
       cliPath,
+      helperRoot,
+      distributionPath: signalCliDistributionPathFromRoot(helperRoot),
+      javaHome: signalCliJavaHomeFromRoot(helperRoot),
       version: parseSignalCliVersion(`${stdout}\n${stderr}`),
     };
   } catch {
-    return { cliPath, version: null };
+    return {
+      cliPath,
+      helperRoot,
+      distributionPath: signalCliDistributionPathFromRoot(helperRoot),
+      javaHome: signalCliJavaHomeFromRoot(helperRoot),
+      version: null,
+    };
   }
 }
 
@@ -382,7 +426,11 @@ export class SignalCliClient {
 
   constructor(options: SignalClientOptions) {
     this.account = options.account;
-    this.cliPath = options.cliPath ?? resolveSignalCliPath() ?? "signal-cli";
+    const cliPath = options.cliPath ?? resolveSignalCliPath();
+    if (!cliPath) {
+      throw new Error("Bundled Signal helper was not found");
+    }
+    this.cliPath = cliPath;
     this.configDir = options.configDir ?? getSignalConfigDir("default");
   }
 
@@ -540,7 +588,7 @@ export function startSignalLinkSession(options: {
           new Error(
             stderrBuffer.trim() ||
               stdoutBuffer.trim() ||
-              `signal-cli link exited with code ${code ?? "unknown"}`,
+              `Bundled Signal helper link exited with code ${code ?? "unknown"}`,
           ),
         );
       }
@@ -558,7 +606,7 @@ export function startSignalLinkSession(options: {
         new Error(
           stderrBuffer.trim() ||
             stdoutBuffer.trim() ||
-            `signal-cli link exited with code ${code ?? "unknown"}`,
+            `Bundled Signal helper link exited with code ${code ?? "unknown"}`,
         ),
       );
     });
