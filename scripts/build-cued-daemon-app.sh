@@ -43,6 +43,21 @@ xml_escape() {
           -e 's/>/\&gt;/g'
 }
 
+sign_app_bundle() {
+  if [[ -n "${CUED_CODESIGN_IDENTITY:-}" ]]; then
+    codesign \
+      --force \
+      --deep \
+      --timestamp \
+      --options runtime \
+      --sign "$CUED_CODESIGN_IDENTITY" \
+      "$APP_BUNDLE" >/dev/null
+    return
+  fi
+
+  codesign --force --deep --sign - "$APP_BUNDLE" >/dev/null
+}
+
 mkdir -p "$APP_DIST_DIR"
 
 pnpm --dir "$ROOT_DIR" build >/dev/null
@@ -141,6 +156,6 @@ cp "$TRAY_ICON_SOURCE" "$RESOURCES_DIR/trayIconTemplate.png"
 cp "$CUED_MARK_SOURCE" "$RESOURCES_DIR/cued-mark.png"
 
 # Sign the assembled app bundle so LaunchServices accepts it as an app.
-codesign --force --deep --sign - "$APP_BUNDLE" >/dev/null
+sign_app_bundle
 
 echo "$APP_BUNDLE"
