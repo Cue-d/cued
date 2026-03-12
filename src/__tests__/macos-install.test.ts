@@ -2,7 +2,11 @@ import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:f
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { isValidCuedAppBundle, resolveInstalledAppPathFromCandidates } from "../macos/install.js";
+import {
+  getBuiltAppPath,
+  isValidCuedAppBundle,
+  resolveInstalledAppPathFromCandidates,
+} from "../macos/install.js";
 
 describe("macOS app bundle resolution", () => {
   const tempDirs: string[] = [];
@@ -57,5 +61,9 @@ describe("macOS app bundle resolution", () => {
     const valid = createAppBundle(createTempDir("cued-valid-app-"), "dev.cued.app");
 
     expect(resolveInstalledAppPathFromCandidates([legacy, valid])).toBe(valid);
+  });
+
+  it("resolves the built app path under the repo root after flattening", () => {
+    expect(getBuiltAppPath()).toBe(join(process.cwd(), "native", "macos", "dist", "Cued.app"));
   });
 });
