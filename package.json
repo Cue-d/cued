@@ -8,7 +8,7 @@
   },
   "packageManager": "pnpm@10.29.3",
   "scripts": {
-    "prepare": "sh scripts/install-git-hooks.sh",
+    "prepare": "husky",
     "dev": "tsx src/cli.ts",
     "build": "tsc -p tsconfig.build.json",
     "build:native:macos": "swift build --package-path native/macos/CuedNative -c release",
@@ -45,6 +45,7 @@
     "@biomejs/biome": "^2.4.6",
     "@types/better-sqlite3": "^7.6.13",
     "@types/node": "^20.14.9",
+    "husky": "^9.1.7",
     "tsx": "^4.20.6",
     "typescript": "^5.9.2",
     "vitest": "^2.1.8"
