@@ -1,4 +1,4 @@
-import { existsSync, mkdtempSync, mkdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -21,7 +21,14 @@ describe("bundled runtime symlink pruning", () => {
 
   it("keeps symlinks whose targets resolve inside the runtime root", () => {
     const runtimeRoot = createTempDir("cued-runtime-");
-    const targetDir = join(runtimeRoot, "node_modules", ".pnpm", "better-sqlite3@1.0.0", "node_modules", "better-sqlite3");
+    const targetDir = join(
+      runtimeRoot,
+      "node_modules",
+      ".pnpm",
+      "better-sqlite3@1.0.0",
+      "node_modules",
+      "better-sqlite3",
+    );
     mkdirSync(targetDir, { recursive: true });
     writeFileSync(join(targetDir, "package.json"), "{}\n");
 
