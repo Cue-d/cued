@@ -22,7 +22,6 @@ final class OnboardingWindowController: NSWindowController {
   private var cachedSetupIntegrations: [InstallerIntegrationStatus] = []
   private var isRefreshing = false
   private var prerequisitesEnsured = false
-  private var refreshBurstTask: Task<Void, Never>?
 
   init(daemonSupervisor: DaemonSupervisor, statusStore: AppStatusStore, onRefresh: @escaping () -> Void) {
     self.daemonSupervisor = daemonSupervisor
@@ -51,7 +50,7 @@ final class OnboardingWindowController: NSWindowController {
     let hosting = NSHostingController(
       rootView: CuedOnboardingView(
         viewModel: viewModel,
-        onRefresh: { [weak self] in self?.refreshForPermissionChanges() },
+        onRefresh: { [weak self] in self?.refresh() },
         onRequestPermission: { [weak self] flags in self?.requestPermission(flags: flags) },
         onEnableIntegration: { [weak self] platform, accountKey in
           self?.enableIntegration(platform: platform, accountKey: accountKey)
@@ -74,7 +73,7 @@ final class OnboardingWindowController: NSWindowController {
     showWindow(nil)
     window?.makeKeyAndOrderFront(nil)
     NSApp.activate(ignoringOtherApps: true)
-    refreshForPermissionChanges()
+    refresh()
   }
 
   func refresh() {
@@ -201,7 +200,6 @@ final class OnboardingWindowController: NSWindowController {
 
   private func requestPermission(flags: [String]) {
     runActions(argumentsList: [["permissions", "request"] + flags])
-    scheduleRefreshBurst()
   }
 
   private func enableIntegration(platform: String, accountKey: String) {
@@ -228,28 +226,5 @@ final class OnboardingWindowController: NSWindowController {
     _ = daemonSupervisor.runCLI(arguments: ["onboarding", "complete"])
     close()
     onRefresh()
-  }
-
-  private func refreshForPermissionChanges() {
-    refresh()
-    scheduleRefreshBurst(iterations: 12, delayNanoseconds: 250_000_000)
-  }
-
-  private func scheduleRefreshBurst(iterations: Int = 8, delayNanoseconds: UInt64 = 250_000_000) {
-    refreshBurstTask?.cancel()
-    refreshBurstTask = Task { @MainActor [weak self] in
-      guard let self else {
-        return
-      }
-      for index in 0..<iterations {
-        if index > 0 {
-          try? await Task.sleep(nanoseconds: delayNanoseconds)
-        }
-        if Task.isCancelled {
-          return
-        }
-        self.refresh()
-      }
-    }
   }
 }
