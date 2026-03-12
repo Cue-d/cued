@@ -30,6 +30,7 @@ jobs:
       pull-requests: write
       issues: write
       id-token: write
+      actions: read
 
     steps:
       - name: Checkout repository
@@ -42,13 +43,39 @@ jobs:
         run: |
           echo "::notice title=Claude review skipped::Set CLAUDE_CODE_OAUTH_TOKEN or ANTHROPIC_API_KEY in GitHub Actions secrets to enable automatic PR reviews."
 
-      - name: Run Claude Code Review
+      - name: Check workflow bootstrap compatibility
         if: ${{ env.CLAUDE_CODE_OAUTH_TOKEN != '' || env.ANTHROPIC_API_KEY != '' }}
+        id: workflow-bootstrap
+        env:
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          WORKFLOW_PATH: .github/workflows/claude-code-review.yml
+        run: |
+          git fetch --no-tags --depth=1 origin "${DEFAULT_BRANCH}"
+          if ! git cat-file -e "origin/${DEFAULT_BRANCH}:${WORKFLOW_PATH}" 2>/dev/null; then
+            echo "can_run=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          if git diff --quiet "origin/${DEFAULT_BRANCH}" -- "${WORKFLOW_PATH}"; then
+            echo "can_run=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "can_run=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Skip bootstrap review runs until workflow is on default branch
+        if: ${{ (env.CLAUDE_CODE_OAUTH_TOKEN != '' || env.ANTHROPIC_API_KEY != '') && steps.workflow-bootstrap.outputs.can_run != 'true' }}
+        run: |
+          echo "::notice title=Claude review skipped::This workflow must already exist on ${GITHUB_REPOSITORY}'s default branch with identical contents before Claude Code Review can authenticate on pull requests."
+
+      - name: Run Claude Code Review
+        if: ${{ (env.CLAUDE_CODE_OAUTH_TOKEN != '' || env.ANTHROPIC_API_KEY != '') && steps.workflow-bootstrap.outputs.can_run == 'true' }}
         id: claude-review
         uses: anthropics/claude-code-action@v1
         with:
           anthropic_api_key: ${{ env.ANTHROPIC_API_KEY }}
           claude_code_oauth_token: ${{ env.CLAUDE_CODE_OAUTH_TOKEN }}
+          additional_permissions: |
+            actions: read
           plugin_marketplaces: "https://github.com/anthropics/claude-code.git"
           plugins: "code-review@claude-code-plugins"
           prompt: "/code-review:code-review ${{ github.repository }}/pull/${{ github.event.pull_request.number }}"
