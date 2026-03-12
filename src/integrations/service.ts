@@ -983,12 +983,8 @@ export function completeAuthSession(
 
   const existingIntegration = db.getIntegrationState(session.platform, session.account_key);
   if (!existingIntegration && session.state === "cancelled") {
-    const authSession = getAuthSessionSummary(db, sessionId);
-    if (!authSession) {
-      throw new Error(`Auth session not found after cancellation: ${sessionId}`);
-    }
     return {
-      authSession,
+      authSession: null,
       integration: null,
     };
   }
