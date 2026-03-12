@@ -75,7 +75,7 @@ jobs:
           fi
           gh release upload "$TAG" \
             native/macos/dist/Cued.dmg \
-            native/macos/dist/cued-macos-universal.tar.gz \
+            native/macos/dist/cued-macos-arm64.tar.gz \
             native/macos/dist/release.json \
             native/macos/dist/SHA256SUMS \
             --clobber
