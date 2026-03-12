@@ -28,8 +28,8 @@ import {
   listIntegrationStates,
   listRequestableIntegrationPlatforms,
   markAuthSessionInProgress,
-  removeIntegration,
   refreshManagedIntegrationStates,
+  removeIntegration,
   setIntegrationEnabled,
 } from "./integrations/service.js";
 import { followLogs, getDaemonLogPath, parseLogsCommandArgs, readRecentLogLines } from "./logs.js";

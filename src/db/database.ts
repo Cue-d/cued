@@ -974,7 +974,9 @@ export class CuedDatabase {
   deleteIntegrationState(platform: Platform, accountKey: string): void {
     this.db
       .delete(integrationStates)
-      .where(and(eq(integrationStates.platform, platform), eq(integrationStates.accountKey, accountKey)))
+      .where(
+        and(eq(integrationStates.platform, platform), eq(integrationStates.accountKey, accountKey)),
+      )
       .run();
   }
 

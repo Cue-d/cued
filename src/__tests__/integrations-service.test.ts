@@ -10,8 +10,8 @@ import {
   listIntegrationStates,
   listRequestableIntegrationPlatforms,
   markAuthSessionInProgress,
-  removeIntegration,
   refreshManagedIntegrationStates,
+  removeIntegration,
   requestIntegrationAccess,
   setIntegrationEnabled,
 } from "../integrations/service.js";
@@ -177,14 +177,9 @@ describe("integration state management", () => {
         }),
       ]),
     );
-    expect(buildIntegrationStatus(db).setupIntegrations.map((integration) => integration.platform)).toEqual([
-      "contacts",
-      "imessage",
-      "slack",
-      "linkedin",
-      "whatsapp",
-      "signal",
-    ]);
+    expect(
+      buildIntegrationStatus(db).setupIntegrations.map((integration) => integration.platform),
+    ).toEqual(["contacts", "imessage", "slack", "linkedin", "whatsapp", "signal"]);
     db.close();
   });
 

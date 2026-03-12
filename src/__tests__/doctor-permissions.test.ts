@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
-  summarizePermissionStatuses,
   type PermissionCheckSummaryInput,
+  summarizePermissionStatuses,
 } from "../diagnostics/doctor.js";
 
 function makeInput(

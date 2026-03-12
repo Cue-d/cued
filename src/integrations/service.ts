@@ -19,7 +19,6 @@ import {
   type IntegrationRuntimeKind,
   isOnboardingVisiblePlatform,
   isRequestableIntegrationPlatform,
-  PLATFORM_VALUES,
   type Platform,
   parseIntegrationAuthState,
   parseIntegrationRuntimeKind,
@@ -723,7 +722,8 @@ function buildSetupIntegrations(db: CuedDatabase): IntegrationStateSummary[] {
     );
   }
 
-  return onboardingOrder.filter(isOnboardingVisiblePlatform)
+  return onboardingOrder
+    .filter(isOnboardingVisiblePlatform)
     .map((platform) => byPlatform.get(platform))
     .filter((value): value is IntegrationStateSummary => Boolean(value));
 }
@@ -993,7 +993,10 @@ export function completeAuthSession(
     ? (JSON.parse(integration.metadata_json) as Record<string, unknown>)
     : {};
   const targetAccountKey = resolveCompletedAccountKey(session, input);
-  const targetDisplayName = resolveCompletedDisplayName(integration.display_name, input.resultSummary);
+  const targetDisplayName = resolveCompletedDisplayName(
+    integration.display_name,
+    input.resultSummary,
+  );
   const targetMetadata = resolveCompletedMetadata(
     integration.platform,
     integration.account_key,
@@ -1046,7 +1049,7 @@ export function completeAuthSession(
     },
   });
 
-  if (targetAccountKey != integration.account_key) {
+  if (targetAccountKey !== integration.account_key) {
     db.updateAuthSessionIdentity({
       id: sessionId,
       accountKey: targetAccountKey,
@@ -1079,7 +1082,8 @@ function resolveCompletedAccountKey(
     return teamId;
   }
 
-  const keychainAccount = typeof input.keychainAccount === "string" ? input.keychainAccount.trim() : "";
+  const keychainAccount =
+    typeof input.keychainAccount === "string" ? input.keychainAccount.trim() : "";
   return keychainAccount.length > 0 ? keychainAccount : session.account_key;
 }
 
