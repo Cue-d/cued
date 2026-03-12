@@ -67,7 +67,9 @@ export function resolvePermissionsScriptPath(): string {
 }
 
 function isInvokedDirectly(): boolean {
-  return process.argv[1] !== undefined && fileURLToPath(import.meta.url) === process.argv[1];
+  return (
+    process.argv[1] !== undefined && fileURLToPath(import.meta.url) === resolve(process.argv[1])
+  );
 }
 
 function printHelp(): void {
