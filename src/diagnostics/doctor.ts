@@ -90,7 +90,12 @@ export function summarizePermissionStatuses(
     },
     {
       key: "messages_automation",
-      status: checks.messagesAutomation.status === "ok" ? "granted" : "needs_action",
+      status:
+        checks.messagesAutomation.status === "ok"
+          ? "granted"
+          : checks.messagesAutomation.status === "unknown"
+            ? "unknown"
+            : "needs_action",
       summary: checks.messagesAutomation.summary,
       requestFlags: ["--messages"],
     },

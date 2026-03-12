@@ -133,14 +133,15 @@ describe("integration state management", () => {
       keychainAccount: "T123",
       resultSummary: { teamId: "T123", teamName: "Acme" },
     });
-    expect(completed.integration.authState).toBe("authenticated");
-    expect(completed.integration.accountKey).toBe("T123");
-    expect(completed.integration.displayName).toBe("Acme");
+    expect(completed.integration).not.toBeNull();
+    expect(completed.integration?.authState).toBe("authenticated");
+    expect(completed.integration?.accountKey).toBe("T123");
+    expect(completed.integration?.displayName).toBe("Acme");
     expect(completed.authSession.keychainService).toBe("dev.cued.auth.slack");
     expect(completed.authSession.accountKey).toBe("T123");
     expect(db.getIntegrationState("slack", requested.integration.accountKey)).toBeNull();
 
-    const disabled = setIntegrationEnabled(db, "slack", completed.integration.accountKey, false);
+    const disabled = setIntegrationEnabled(db, "slack", completed.integration!.accountKey, false);
     expect(disabled.enabled).toBe(false);
     expect(listRequestableIntegrationPlatforms()).toEqual([
       "slack",
@@ -277,7 +278,7 @@ describe("integration state management", () => {
       keychainAccount: "T123",
       resultSummary: { teamId: "T123", teamName: "Acme" },
     });
-    expect(firstCompleted.integration.accountKey).toBe("T123");
+    expect(firstCompleted.integration?.accountKey).toBe("T123");
 
     const removed = removeIntegration(db, "slack", "T123");
     expect(removed.accountKey).toBe("T123");
@@ -291,7 +292,7 @@ describe("integration state management", () => {
       keychainAccount: "T123",
       resultSummary: { teamId: "T123", teamName: "Acme" },
     });
-    expect(secondCompleted.integration.accountKey).toBe("T123");
+    expect(secondCompleted.integration?.accountKey).toBe("T123");
     expect(listIntegrationStates(db)).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
@@ -301,6 +302,32 @@ describe("integration state management", () => {
         }),
       ]),
     );
+    db.close();
+  });
+
+  it("cancels an in-flight auth session before removing the integration", () => {
+    const db = createDb();
+    const requested = requestIntegrationAccess(db, "slack");
+
+    markAuthSessionInProgress(db, requested.authSession.id, 12345);
+
+    const removed = removeIntegration(db, "slack", requested.integration.accountKey);
+    expect(removed).toEqual({
+      platform: "slack",
+      accountKey: requested.integration.accountKey,
+      removed: true,
+    });
+
+    const completed = completeAuthSession(db, requested.authSession.id, {
+      state: "authenticated",
+      keychainService: "dev.cued.auth.slack",
+      keychainAccount: "T123",
+      resultSummary: { teamId: "T123", teamName: "Acme" },
+    });
+    expect(completed.integration).toBeNull();
+    expect(completed.authSession.state).toBe("cancelled");
+    expect(db.getIntegrationState("slack", requested.integration.accountKey)).toBeNull();
+
     db.close();
   });
 
