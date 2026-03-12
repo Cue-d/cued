@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: "Version to release (for example 0.1.0-internal.1). Leave empty to use apps/cued/package.json."
+        description: "Version to release (for example 0.1.0-internal.1). Leave empty to use package.json."
         required: false
         type: string
 
@@ -30,7 +30,7 @@ jobs:
         run: |
           node -e '
             const fs = require("node:fs");
-            const files = ["apps/cued/package.json"];
+            const files = ["package.json"];
             for (const file of files) {
               const parsed = JSON.parse(fs.readFileSync(file, "utf8"));
               parsed.version = process.env.VERSION;
@@ -65,7 +65,7 @@ jobs:
         run: |
           VERSION="${{ inputs.version }}"
           if [[ -z "$VERSION" ]]; then
-            VERSION="$(node -p "require('./apps/cued/package.json').version")"
+            VERSION="$(node -p "require('./package.json').version")"
           fi
           TAG="v${VERSION}"
           if gh release view "$TAG" >/dev/null 2>&1; then
@@ -75,7 +75,7 @@ jobs:
           fi
           gh release upload "$TAG" \
             native/macos/dist/Cued.dmg \
-            native/macos/dist/cued-macos-universal.tar.gz \
+            native/macos/dist/cued-macos-arm64.tar.gz \
             native/macos/dist/release.json \
             native/macos/dist/SHA256SUMS \
             --clobber

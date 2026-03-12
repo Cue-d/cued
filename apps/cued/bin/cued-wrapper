@@ -1,2 +1,0 @@
-#!/bin/sh
-exec /Users/theotarr/.nvm/versions/node/v24.4.0/bin/node /Users/theotarr/Documents/Development/cued/apps/cued/dist/cli.js "$@"

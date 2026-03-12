@@ -1,0 +1,2643 @@
+import { type ChildProcess, spawn } from "node:child_process";
+import { existsSync, type FSWatcher, rmSync, watch } from "node:fs";
+import { createConnection, createServer, type Socket } from "node:net";
+import { basename, dirname } from "node:path";
+import process from "node:process";
+import { DEFAULT_CHAT_DB_PATH } from "../adapters/imessage/reader.js";
+import { isAdapterPlatform, listAutoSyncPlatforms } from "../adapters/registry.js";
+import { runAdapter } from "../adapters/runner.js";
+import { getCurrentAppVersion, getCurrentReleaseChannel } from "../app-metadata.js";
+import { CUED_SOCKET_PATH } from "../config.js";
+import { type OutboundMessageRow, openCuedDatabase } from "../db/database.js";
+import { buildDoctorReport } from "../diagnostics/doctor.js";
+import { doctorHooksConfig, emitHookEvent } from "../hooks/service.js";
+import { startAuthSession } from "../integrations/auth-runtime.js";
+import {
+  buildIntegrationStatus,
+  completeAuthSession,
+  connectIntegration,
+  disconnectIntegration,
+  getAuthSessionSummary,
+  getIntegrationSummary,
+  markAuthSessionInProgress,
+  removeIntegration,
+  refreshManagedIntegrationStates,
+  setIntegrationEnabled,
+} from "../integrations/service.js";
+import {
+  getSignalConfigDir,
+  inspectSignalCli,
+  isSignalCliVersionSupported,
+  readSignalLinkedAccount,
+  SignalCliClient,
+} from "../integrations/signal-cli.js";
+import {
+  buildOptimisticSignalRawEvents,
+  buildSignalRawEventsFromMessages,
+} from "../integrations/signal-events.js";
+import {
+  type SignalRealtimeStatus,
+  SignalRealtimeSupervisor,
+} from "../integrations/signal-realtime.js";
+import {
+  buildOptimisticWhatsAppRawEvents,
+  buildWhatsAppRawEventsFromSnapshot,
+} from "../integrations/whatsapp-events.js";
+import {
+  getWhatsAppStoreDir,
+  inspectWhatsAppHelper,
+  readWhatsAppHelperStatus,
+} from "../integrations/whatsapp-helper.js";
+import {
+  type WhatsAppRealtimeStatus,
+  WhatsAppRealtimeSupervisor,
+} from "../integrations/whatsapp-realtime.js";
+import type {
+  WhatsAppHelperEventEnvelope,
+  WhatsAppReceiptSnapshot,
+  WhatsAppSnapshot,
+} from "../integrations/whatsapp-types.js";
+import type { DaemonRequest, DaemonResponse } from "../ipc/protocol.js";
+import { createLogger } from "../logging.js";
+import {
+  projectDeferredRange,
+  projectPendingRawEvents,
+  projectRealtimeRange,
+  rebuildProjectedState,
+} from "../projector/projector.js";
+import {
+  type AdapterPlatform,
+  getDefaultAccountKeyForPlatform,
+  type HostOS,
+  isPlatform,
+  type Platform,
+  type ProviderRawEventInput,
+} from "../types/provider.js";
+import { resolveMacOSNativeBinary } from "../workers/native-binary.js";
+
+const DAEMON_VERSION = getCurrentAppVersion();
+const DEFAULT_AUTOSYNC_INTERVAL_MS = 60_000;
+const DEFAULT_SIGNAL_CATCHUP_INTERVAL_MS = 300_000;
+const DEFAULT_WHATSAPP_CATCHUP_INTERVAL_MS = 300_000;
+const DEFAULT_INGEST_CONCURRENCY = 4;
+const DEFAULT_PROJECTION_BATCH_SIZE = 1_000;
+const DEFAULT_REALTIME_PROJECTION_ENABLED = true;
+const DEFAULT_DEFERRED_PROJECTION_COALESCE_MS = 250;
+const NATIVE_WATCH_DEBOUNCE_MS = 1_500;
+const AUTOSYNC_SCHEDULER_TICK_MS = 1_000;
+const SIGNAL_SEND_SESSION_WAIT_MS = 3_000;
+const SIGNAL_SEND_ECHO_TIMEOUT_MS = 5_000;
+const WHATSAPP_SEND_SESSION_WAIT_MS = 3_000;
+const daemonLogger = createLogger("daemon");
+const hooksLogger = createLogger("hooks");
+const nativeWatchLogger = createLogger("native-watch");
+const signalLogger = createLogger("signal");
+const whatsAppLogger = createLogger("whatsapp");
+
+function getAppStatusMetadata(db: { getAppMetadata: () => unknown }): {
+  hostOs: HostOS;
+  version: string;
+  releaseChannel: string;
+  install: unknown;
+} {
+  return {
+    hostOs:
+      process.platform === "darwin" ? "macos" : process.platform === "win32" ? "windows" : "linux",
+    version: DAEMON_VERSION,
+    releaseChannel: getCurrentReleaseChannel(),
+    install: db.getAppMetadata(),
+  };
+}
+
+function now(): number {
+  return Date.now();
+}
+
+type QueueSchedulers = {
+  wakeIngest: () => void;
+  wakeOutbound: () => void;
+  wakeProjection: () => void;
+};
+
+type IngestTiming = {
+  adapterFetchMs: number;
+  rawEventInsertMs: number;
+  realtimeProjectionMs: number;
+  checkpointUpdateMs: number;
+  webhookReadyMs: number;
+  totalMs: number;
+  insertedRawEvents: number;
+};
+
+type ProjectionRunDetails = {
+  trigger: string;
+  startRowId: number;
+  endRowId: number;
+  projectionWatermark?: number;
+  maxRawEventRowid?: number;
+};
+
+type SignalDesiredSession = {
+  accountKey: string;
+  account: string;
+  cliPath: string;
+  configDir: string;
+};
+
+type WhatsAppDesiredSession = {
+  accountKey: string;
+  helperPath: string;
+  storeDir: string;
+};
+
+type PendingSignalEcho = {
+  accountKey: string;
+  threadId: string | null;
+  text: string;
+  timestamp: number;
+  timeout: NodeJS.Timeout;
+  outboundMessageId: string;
+};
+
+function collectInboundMessages(
+  rawEvents: ProviderRawEventInput[],
+): Array<Record<string, unknown>> {
+  const inboundMessages: Array<Record<string, unknown>> = [];
+  for (const rawEvent of rawEvents) {
+    if (
+      !isInboundMessageEvent({ ...rawEvent, payload: rawEvent.payload as Record<string, unknown> })
+    ) {
+      continue;
+    }
+
+    inboundMessages.push({
+      platform: rawEvent.platform,
+      accountKey: rawEvent.accountKey,
+      observedAt: rawEvent.observedAt,
+      payload: rawEvent.payload,
+    });
+  }
+  return inboundMessages;
+}
+
+function getAutoSyncTargets(
+  db: ReturnType<typeof openCuedDatabase>,
+): Array<{ platform: AdapterPlatform; accountKey: string }> {
+  const configured = process.env.CUED_AUTOSYNC_PLATFORMS?.split(",")
+    .map((value) => value.trim())
+    .filter(isAdapterPlatform);
+
+  if (configured && configured.length > 0) {
+    return configured.map((platform) => ({
+      platform,
+      accountKey: getDefaultAccountKeyForPlatform(platform),
+    }));
+  }
+
+  const enabled = db
+    .listEnabledSyncTargets()
+    .filter((target): target is { platform: AdapterPlatform; account_key: string } =>
+      isAdapterPlatform(target.platform),
+    )
+    .map((target) => ({
+      platform: target.platform,
+      accountKey: target.account_key,
+    }));
+  if (enabled.length > 0) {
+    return enabled;
+  }
+
+  return listAutoSyncPlatforms().map((platform) => ({
+    platform,
+    accountKey: getDefaultAccountKeyForPlatform(platform),
+  }));
+}
+
+function getAutoSyncIntervalMs(platform?: AdapterPlatform): number {
+  if (platform) {
+    const platformEnvName = `CUED_AUTOSYNC_INTERVAL_${platform.toUpperCase()}_MS`;
+    const platformConfigured = Number(process.env[platformEnvName]);
+    if (Number.isFinite(platformConfigured) && platformConfigured > 0) {
+      return platformConfigured;
+    }
+  }
+
+  const globalConfiguredRaw = process.env.CUED_AUTOSYNC_INTERVAL_MS;
+  const globalConfigured = Number(globalConfiguredRaw);
+  if (globalConfiguredRaw != null && Number.isFinite(globalConfigured) && globalConfigured > 0) {
+    return globalConfigured;
+  }
+
+  if (platform === "signal") {
+    return DEFAULT_SIGNAL_CATCHUP_INTERVAL_MS;
+  }
+
+  if (platform === "whatsapp") {
+    return DEFAULT_WHATSAPP_CATCHUP_INTERVAL_MS;
+  }
+
+  return DEFAULT_AUTOSYNC_INTERVAL_MS;
+}
+
+function isSqliteBusyError(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error);
+  return /sqlite_(busy|locked)|database is locked|database is busy/i.test(message);
+}
+
+function getIngestConcurrency(): number {
+  const configured = Number(process.env.CUED_INGEST_CONCURRENCY ?? DEFAULT_INGEST_CONCURRENCY);
+  return Number.isFinite(configured) && configured > 0 ? configured : DEFAULT_INGEST_CONCURRENCY;
+}
+
+function getProjectionBatchSize(): number {
+  const configured = Number(
+    process.env.CUED_PROJECTION_BATCH_SIZE ?? DEFAULT_PROJECTION_BATCH_SIZE,
+  );
+  return Number.isFinite(configured) && configured > 0 ? configured : DEFAULT_PROJECTION_BATCH_SIZE;
+}
+
+function getRealtimeProjectionEnabled(): boolean {
+  const configured = process.env.CUED_REALTIME_PROJECTION_ENABLED;
+  if (configured == null) {
+    return DEFAULT_REALTIME_PROJECTION_ENABLED;
+  }
+
+  return !["0", "false", "off", "no"].includes(configured.trim().toLowerCase());
+}
+
+function getRealtimeProjectionBatchSize(): number {
+  const configured = Number(
+    process.env.CUED_REALTIME_PROJECTION_BATCH_SIZE ?? getProjectionBatchSize(),
+  );
+  return Number.isFinite(configured) && configured > 0 ? configured : getProjectionBatchSize();
+}
+
+function getDeferredProjectionCoalesceMs(): number {
+  const configured = Number(
+    process.env.CUED_DEFERRED_PROJECTION_COALESCE_MS ?? DEFAULT_DEFERRED_PROJECTION_COALESCE_MS,
+  );
+  return Number.isFinite(configured) && configured >= 0
+    ? configured
+    : DEFAULT_DEFERRED_PROJECTION_COALESCE_MS;
+}
+
+function parseProjectionRunDetails(detailsJson: string | null): ProjectionRunDetails | null {
+  if (!detailsJson) {
+    return null;
+  }
+
+  try {
+    const parsed = JSON.parse(detailsJson) as Partial<ProjectionRunDetails>;
+    if (typeof parsed.startRowId !== "number" || typeof parsed.endRowId !== "number") {
+      return null;
+    }
+    return {
+      trigger: typeof parsed.trigger === "string" ? parsed.trigger : "unknown",
+      startRowId: parsed.startRowId,
+      endRowId: parsed.endRowId,
+      projectionWatermark:
+        typeof parsed.projectionWatermark === "number" ? parsed.projectionWatermark : undefined,
+      maxRawEventRowid:
+        typeof parsed.maxRawEventRowid === "number" ? parsed.maxRawEventRowid : undefined,
+    };
+  } catch {
+    return null;
+  }
+}
+
+function resolveCheckpointSyncMode(
+  runType: "sync" | "sync_resume",
+  priorSyncMode: string | null | undefined,
+  bundleSyncMode: string | null | undefined,
+  hasMore: boolean,
+): "full" | "incremental" {
+  if (hasMore) {
+    return "full";
+  }
+
+  if (runType === "sync_resume" || priorSyncMode === "full") {
+    return "incremental";
+  }
+
+  return bundleSyncMode === "incremental" ? "incremental" : "full";
+}
+
+async function safeEmitHookEvent(
+  event: "integration.authenticated" | "sync.completed" | "sync.failed" | "message.received",
+  payload: Record<string, unknown>,
+): Promise<void> {
+  try {
+    await emitHookEvent(event, payload);
+  } catch (error) {
+    hooksLogger.warn(`${event} failed`, error);
+  }
+}
+
+async function emitAuthenticatedHook(
+  db: ReturnType<typeof openCuedDatabase>,
+  platform: string,
+  accountKey: string,
+): Promise<void> {
+  await safeEmitHookEvent("integration.authenticated", {
+    integration: getIntegrationSummary(db, platform, accountKey),
+  });
+}
+
+function queueNativeTriggeredSync(
+  db: ReturnType<typeof openCuedDatabase>,
+  platform: AdapterPlatform,
+  accountKey: string,
+  trigger: string,
+  wakeIngest: () => void,
+): void {
+  const integration = db.getIntegrationState(platform, accountKey);
+  if (!integration || integration.enabled !== 1 || integration.sync_capable !== 1) {
+    return;
+  }
+  if (db.hasQueuedOrRunningRun(platform, accountKey)) {
+    return;
+  }
+
+  db.queueSyncRun({
+    platform,
+    accountKey,
+    runType: "sync",
+    trigger,
+    details: { source: platform, accountKey, trigger },
+  });
+  wakeIngest();
+}
+
+function createDebouncedSyncEnqueuer(
+  db: ReturnType<typeof openCuedDatabase>,
+  wakeIngest: () => void,
+): (platform: AdapterPlatform, accountKey: string, trigger: string) => void {
+  const timers = new Map<string, NodeJS.Timeout>();
+
+  return (platform, accountKey, trigger) => {
+    const key = `${platform}:${accountKey}`;
+    const existing = timers.get(key);
+    if (existing) {
+      clearTimeout(existing);
+    }
+
+    const timer = setTimeout(() => {
+      timers.delete(key);
+      queueNativeTriggeredSync(db, platform, accountKey, trigger, wakeIngest);
+    }, NATIVE_WATCH_DEBOUNCE_MS);
+    timers.set(key, timer);
+  };
+}
+
+function startIMessageWatcher(
+  _db: ReturnType<typeof openCuedDatabase>,
+  queueSync: (platform: AdapterPlatform, accountKey: string, trigger: string) => void,
+): FSWatcher | ChildProcess | null {
+  const nativeBinary = resolveMacOSNativeBinary(process.env.CUED_IMESSAGE_NATIVE_BINARY);
+  if (nativeBinary) {
+    const child = spawn(nativeBinary, ["imessage", "watch", "--db-path", DEFAULT_CHAT_DB_PATH], {
+      stdio: ["ignore", "pipe", "pipe"],
+      env: process.env,
+    });
+
+    let stdoutBuffer = "";
+    child.stdout.on("data", (chunk) => {
+      stdoutBuffer += chunk.toString("utf8");
+      let newlineIndex = stdoutBuffer.indexOf("\n");
+      while (newlineIndex >= 0) {
+        const line = stdoutBuffer.slice(0, newlineIndex).trim();
+        stdoutBuffer = stdoutBuffer.slice(newlineIndex + 1);
+        if (line.length > 0) {
+          queueSync("imessage", "local", "native_watch:imessage");
+        }
+        newlineIndex = stdoutBuffer.indexOf("\n");
+      }
+    });
+
+    child.stderr.on("data", (chunk) => {
+      const message = chunk.toString("utf8").trim();
+      if (message.length > 0) {
+        nativeWatchLogger.warn(`imessage watcher stderr`, { message });
+      }
+    });
+
+    child.on("exit", (code) => {
+      if (code && code !== 0) {
+        nativeWatchLogger.warn(`imessage watcher exited`, { code });
+      }
+    });
+
+    return child;
+  }
+
+  try {
+    const targetDir = dirname(DEFAULT_CHAT_DB_PATH);
+    const watchedNames = new Set([
+      basename(DEFAULT_CHAT_DB_PATH),
+      `${basename(DEFAULT_CHAT_DB_PATH)}-wal`,
+      `${basename(DEFAULT_CHAT_DB_PATH)}-shm`,
+    ]);
+
+    return watch(targetDir, (_eventType, filename) => {
+      if (!filename) {
+        return;
+      }
+      if (!watchedNames.has(filename.toString())) {
+        return;
+      }
+      queueSync("imessage", "local", "native_watch:imessage");
+    });
+  } catch (error) {
+    nativeWatchLogger.warn("imessage watcher unavailable", error);
+    return null;
+  }
+}
+
+function startContactsWatcher(
+  _db: ReturnType<typeof openCuedDatabase>,
+  queueSync: (platform: AdapterPlatform, accountKey: string, trigger: string) => void,
+): ChildProcess | null {
+  const nativeBinary = resolveMacOSNativeBinary(process.env.CUED_CONTACTS_NATIVE_BINARY);
+  if (!nativeBinary) {
+    return null;
+  }
+
+  const child = spawn(nativeBinary, ["contacts", "watch"], {
+    stdio: ["ignore", "pipe", "pipe"],
+    env: process.env,
+  });
+
+  let stdoutBuffer = "";
+  child.stdout.on("data", (chunk) => {
+    stdoutBuffer += chunk.toString("utf8");
+    let newlineIndex = stdoutBuffer.indexOf("\n");
+    while (newlineIndex >= 0) {
+      const line = stdoutBuffer.slice(0, newlineIndex).trim();
+      stdoutBuffer = stdoutBuffer.slice(newlineIndex + 1);
+      if (line.length > 0) {
+        queueSync("contacts", "local", "native_watch:contacts");
+      }
+      newlineIndex = stdoutBuffer.indexOf("\n");
+    }
+  });
+
+  child.stderr.on("data", (chunk) => {
+    const message = chunk.toString("utf8").trim();
+    if (message.length > 0) {
+      nativeWatchLogger.warn("contacts watcher stderr", { message });
+    }
+  });
+
+  child.on("exit", (code) => {
+    if (code && code !== 0) {
+      nativeWatchLogger.warn("contacts watcher exited", { code });
+    }
+  });
+
+  return child;
+}
+
+function isInboundMessageEvent(rawEvent: Record<string, unknown>): boolean {
+  return (
+    rawEvent.entityKind === "message" &&
+    rawEvent.eventKind === "message_created" &&
+    typeof rawEvent.payload === "object" &&
+    rawEvent.payload !== null &&
+    typeof (rawEvent.payload as Record<string, unknown>).senderSourceKey === "string" &&
+    ((rawEvent.payload as Record<string, unknown>).senderSourceKey as string).length > 0
+  );
+}
+
+function resolveSignalTarget(message: OutboundMessageRow): {
+  recipient?: string;
+  groupId?: string;
+} {
+  const threadId = message.thread_id ?? "";
+  const target = message.target;
+  if (threadId.startsWith("group:")) {
+    return { groupId: threadId.slice("group:".length) };
+  }
+  if (target.startsWith("group:")) {
+    return { groupId: target.slice("group:".length) };
+  }
+  return { recipient: target };
+}
+
+function isRetryableSignalSendError(message: string): boolean {
+  const normalized = message.toLowerCase();
+  if (
+    normalized.includes("invalid") ||
+    normalized.includes("unregistered") ||
+    normalized.includes("not found") ||
+    normalized.includes("malformed")
+  ) {
+    return false;
+  }
+  return true;
+}
+
+async function sendSignalOutboundMessage(
+  message: OutboundMessageRow,
+  signalRealtime: SignalRealtimeSupervisor,
+): Promise<{ transport: "session" | "fallback"; timestamp: number }> {
+  const target = resolveSignalTarget(message);
+  const session = signalRealtime.getSession(message.account_key);
+  if (session?.isConnected()) {
+    const result = await session.sendMessage(message.text, target);
+    return {
+      transport: "session",
+      timestamp: result.timestamp,
+    };
+  }
+
+  const waitedSession = await signalRealtime.waitForConnected(
+    message.account_key,
+    SIGNAL_SEND_SESSION_WAIT_MS,
+  );
+  if (waitedSession?.isConnected()) {
+    const result = await waitedSession.sendMessage(message.text, target);
+    return {
+      transport: "session",
+      timestamp: result.timestamp,
+    };
+  }
+
+  const inspected = await inspectSignalCli();
+  if (!inspected.cliPath) {
+    throw new Error("Bundled Signal helper was not found");
+  }
+  if (!isSignalCliVersionSupported(inspected.version)) {
+    throw new Error(
+      `Bundled Signal helper is too old or invalid (${inspected.version?.raw ?? "unknown"})`,
+    );
+  }
+
+  const configDir = getSignalConfigDir(message.account_key);
+  const account = readSignalLinkedAccount(configDir);
+  if (!account) {
+    throw new Error(`Signal account is not linked for '${message.account_key}'`);
+  }
+
+  const client = new SignalCliClient({
+    account,
+    cliPath: inspected.cliPath,
+    configDir,
+  });
+  const result = await client.sendMessage(message.text, target);
+  return {
+    transport: "fallback",
+    timestamp: result.timestamp,
+  };
+}
+
+async function collectDesiredSignalSessions(db: ReturnType<typeof openCuedDatabase>): Promise<{
+  desired: SignalDesiredSession[];
+  degraded: Array<Omit<SignalRealtimeStatus, "platform">>;
+}> {
+  const integrations = db
+    .listIntegrationStates()
+    .filter(
+      (row) => row.platform === "signal" && row.enabled === 1 && row.auth_state === "authenticated",
+    );
+  if (integrations.length === 0) {
+    return {
+      desired: [],
+      degraded: [],
+    };
+  }
+
+  const inspected = await inspectSignalCli();
+  const baseStatus = (integration: {
+    account_key: string;
+  }): Omit<SignalRealtimeStatus, "platform"> => ({
+    accountKey: integration.account_key,
+    account: "",
+    cliPath: inspected.cliPath ?? "",
+    configDir: getSignalConfigDir(integration.account_key),
+    state: "degraded",
+    connectedAt: null,
+    lastNotificationAt: null,
+    lastReconnectAt: null,
+    reconnectAttempts: 0,
+    lastSessionError: null,
+  });
+
+  if (!inspected.cliPath) {
+    return {
+      desired: [],
+      degraded: integrations.map((integration) => ({
+        ...baseStatus(integration),
+        lastSessionError: "Bundled Signal helper was not found",
+      })),
+    };
+  }
+
+  if (!isSignalCliVersionSupported(inspected.version)) {
+    return {
+      desired: [],
+      degraded: integrations.map((integration) => ({
+        ...baseStatus(integration),
+        lastSessionError: `Bundled Signal helper is too old or invalid (${inspected.version?.raw ?? "unknown"})`,
+      })),
+    };
+  }
+
+  const desired: SignalDesiredSession[] = [];
+  const degraded: Array<Omit<SignalRealtimeStatus, "platform">> = [];
+  for (const integration of integrations) {
+    const configDir = getSignalConfigDir(integration.account_key);
+    const account = readSignalLinkedAccount(configDir);
+    if (!account) {
+      degraded.push({
+        ...baseStatus(integration),
+        cliPath: inspected.cliPath,
+        configDir,
+        lastSessionError: "Signal account is not linked in Cued's managed config",
+      });
+      continue;
+    }
+
+    desired.push({
+      accountKey: integration.account_key,
+      account,
+      cliPath: inspected.cliPath,
+      configDir,
+    });
+  }
+
+  return { desired, degraded };
+}
+
+async function collectDesiredWhatsAppSessions(db: ReturnType<typeof openCuedDatabase>): Promise<{
+  desired: WhatsAppDesiredSession[];
+  degraded: Array<Omit<WhatsAppRealtimeStatus, "platform">>;
+}> {
+  const integrations = db
+    .listIntegrationStates()
+    .filter(
+      (row) =>
+        row.platform === "whatsapp" && row.enabled === 1 && row.auth_state === "authenticated",
+    );
+  if (integrations.length === 0) {
+    return {
+      desired: [],
+      degraded: [],
+    };
+  }
+
+  const inspected = inspectWhatsAppHelper();
+  const baseStatus = (integration: {
+    account_key: string;
+  }): Omit<WhatsAppRealtimeStatus, "platform"> => ({
+    accountKey: integration.account_key,
+    helperPath: inspected.helperPath ?? "",
+    storeDir: getWhatsAppStoreDir(integration.account_key),
+    state: "degraded",
+    accountJid: null,
+    connectedAt: null,
+    lastEventAt: null,
+    lastHistorySyncAt: null,
+    lastReconnectAt: null,
+    reconnectAttempts: 0,
+    lastSessionError: null,
+  });
+
+  if (!inspected.helperPath) {
+    return {
+      desired: [],
+      degraded: integrations.map((integration) => ({
+        ...baseStatus(integration),
+        lastSessionError: "WhatsApp helper was not found",
+      })),
+    };
+  }
+
+  const desired: WhatsAppDesiredSession[] = [];
+  const degraded: Array<Omit<WhatsAppRealtimeStatus, "platform">> = [];
+  for (const integration of integrations) {
+    const storeDir = getWhatsAppStoreDir(integration.account_key);
+    try {
+      const status = await readWhatsAppHelperStatus(storeDir);
+      if (!status.authenticated || !status.accountJid) {
+        degraded.push({
+          ...baseStatus(integration),
+          helperPath: inspected.helperPath,
+          storeDir,
+          lastSessionError: "WhatsApp account is not linked in Cued's managed store",
+        });
+        continue;
+      }
+    } catch (error) {
+      degraded.push({
+        ...baseStatus(integration),
+        helperPath: inspected.helperPath,
+        storeDir,
+        lastSessionError: error instanceof Error ? error.message : String(error),
+      });
+      continue;
+    }
+
+    desired.push({
+      accountKey: integration.account_key,
+      helperPath: inspected.helperPath,
+      storeDir,
+    });
+  }
+
+  return { desired, degraded };
+}
+
+async function startManagedAuth(
+  db: ReturnType<typeof openCuedDatabase>,
+  platform: string,
+  accountKey: string | undefined,
+  activeAuthSessions: Map<string, { child: ChildProcess; platform: Platform; accountKey: string }>,
+  wakeIngest: () => void,
+  onRuntimeStateChanged: () => void,
+): Promise<{
+  integration: ReturnType<typeof getIntegrationSummary>;
+  authSession: ReturnType<typeof getAuthSessionSummary>;
+}> {
+  const requested = connectIntegration(db, platform, accountKey);
+  const integration = getIntegrationSummary(
+    db,
+    requested.integration.platform,
+    requested.integration.accountKey,
+  );
+  const runtime = startAuthSession(db, requested.authSession, integration);
+  const running = markAuthSessionInProgress(
+    db,
+    requested.authSession.id,
+    runtime.child.pid ?? process.pid,
+  );
+  activeAuthSessions.set(running.id, {
+    child: runtime.child,
+    platform: running.platform,
+    accountKey: running.accountKey,
+  });
+
+  runtime.completion
+    .then(async (result) => {
+      const completed = completeAuthSession(db, running.id, {
+        state: result.state,
+        keychainService: result.keychainService ?? null,
+        keychainAccount: result.keychainAccount ?? null,
+        resultSummary: result.resultSummary ?? null,
+        errorSummary: result.errorSummary ?? null,
+      });
+      if (completed.integration.authState === "authenticated") {
+        if (
+          !db.hasQueuedOrRunningRun(
+            completed.integration.platform,
+            completed.integration.accountKey,
+          )
+        ) {
+          db.queueSyncRun({
+            platform: completed.integration.platform,
+            accountKey: completed.integration.accountKey,
+            runType: "sync",
+            trigger: "integration_authenticated",
+            details: {
+              source: completed.integration.platform,
+              accountKey: completed.integration.accountKey,
+              trigger: "integration_authenticated",
+            },
+          });
+          wakeIngest();
+        }
+        await emitAuthenticatedHook(
+          db,
+          completed.integration.platform,
+          completed.integration.accountKey,
+        );
+      }
+      onRuntimeStateChanged();
+    })
+    .catch((error) => {
+      const latest = db.getAuthSession(running.id);
+      if (latest?.state === "cancelled") {
+        return;
+      }
+      completeAuthSession(db, running.id, {
+        state: "failed",
+        errorSummary: error instanceof Error ? error.message : String(error),
+      });
+      onRuntimeStateChanged();
+    })
+    .finally(() => {
+      activeAuthSessions.delete(running.id);
+    });
+
+  return {
+    integration: getIntegrationSummary(
+      db,
+      requested.integration.platform,
+      requested.integration.accountKey,
+    ),
+    authSession: getAuthSessionSummary(db, running.id),
+  };
+}
+
+export async function runDaemon(): Promise<void> {
+  await cleanupSocketPath();
+  const db = openCuedDatabase();
+  ensureNoActiveDaemonProcess(db);
+  const startedAt = now();
+  const ingestConcurrency = getIngestConcurrency();
+  const projectionBatchSize = getProjectionBatchSize();
+  const realtimeProjectionEnabled = getRealtimeProjectionEnabled();
+  const realtimeProjectionBatchSize = getRealtimeProjectionBatchSize();
+  const deferredProjectionCoalesceMs = getDeferredProjectionCoalesceMs();
+  const activeAuthSessions = new Map<
+    string,
+    { child: ChildProcess; platform: Platform; accountKey: string }
+  >();
+  const activeIngestRuns = new Map<string, Promise<void>>();
+  let activeOutboundSend: Promise<void> | null = null;
+  let isProcessingProjection = false;
+  let ingestDrainScheduled = false;
+  let outboundDrainScheduled = false;
+  let projectionDrainScheduled = false;
+  let projectionDrainTimer: NodeJS.Timeout | null = null;
+  const lastAutoSyncQueuedAt = new Map<string, number>();
+  const pendingSignalSendEchoes = new Map<string, PendingSignalEcho[]>();
+  const suppressNextSignalReconnectSync = new Set<string>();
+  let signalRealtimeReconcilePromise: Promise<void> | null = null;
+  let signalRealtimeReconcileQueued = false;
+  let whatsAppRealtimeReconcilePromise: Promise<void> | null = null;
+  let whatsAppRealtimeReconcileQueued = false;
+
+  const clearSignalSendEcho = (
+    accountKey: string,
+    matcher: (echo: PendingSignalEcho) => boolean,
+  ) => {
+    const echoes = pendingSignalSendEchoes.get(accountKey);
+    if (!echoes || echoes.length === 0) {
+      return;
+    }
+
+    const remaining: PendingSignalEcho[] = [];
+    for (const echo of echoes) {
+      if (matcher(echo)) {
+        clearTimeout(echo.timeout);
+        continue;
+      }
+      remaining.push(echo);
+    }
+
+    if (remaining.length === 0) {
+      pendingSignalSendEchoes.delete(accountKey);
+      return;
+    }
+    pendingSignalSendEchoes.set(accountKey, remaining);
+  };
+
+  const scheduleSignalSendEchoCatchup = (message: OutboundMessageRow, timestamp: number) => {
+    const threadId = message.thread_id ?? null;
+    const pending: PendingSignalEcho = {
+      accountKey: message.account_key,
+      threadId,
+      text: message.text,
+      timestamp,
+      outboundMessageId: message.id,
+      timeout: setTimeout(() => {
+        clearSignalSendEcho(
+          message.account_key,
+          (candidate) => candidate.outboundMessageId === message.id,
+        );
+        if (!db.hasQueuedOrRunningRun(message.platform, message.account_key)) {
+          db.queueSyncRun({
+            platform: message.platform,
+            accountKey: message.account_key,
+            runType: "sync",
+            trigger: "signal_send_echo_timeout",
+            details: {
+              source: message.platform,
+              accountKey: message.account_key,
+              trigger: "signal_send_echo_timeout",
+              outboundMessageId: message.id,
+            },
+          });
+          schedulers.wakeIngest();
+        }
+      }, SIGNAL_SEND_ECHO_TIMEOUT_MS),
+    };
+
+    const existing = pendingSignalSendEchoes.get(message.account_key) ?? [];
+    existing.push(pending);
+    pendingSignalSendEchoes.set(message.account_key, existing);
+  };
+
+  const updateSignalCheckpointFromRealtime = (accountKey: string) => {
+    const checkpoint = db.getCheckpoint("signal", accountKey);
+    const projection = db.getProjectionBacklog();
+    const sourceCursor = checkpoint?.source_cursor_json
+      ? (JSON.parse(checkpoint.source_cursor_json) as Record<string, unknown>)
+      : null;
+    db.upsertCheckpoint({
+      platform: "signal",
+      accountKey,
+      syncMode: checkpoint?.sync_mode ?? "incremental",
+      sourceCursor,
+      rawIngestWatermark: projection.max_raw_event_rowid,
+      projectionWatermark: projection.projection_watermark,
+      lastSuccessAt: now(),
+      lastErrorSummary: null,
+    });
+  };
+
+  const insertSignalOptimisticSentMessage = (
+    message: OutboundMessageRow,
+    timestamp: number,
+  ): void => {
+    let threadName: string | null = null;
+    try {
+      if (message.metadata_json) {
+        const metadata = JSON.parse(message.metadata_json) as { matchedName?: unknown };
+        if (typeof metadata.matchedName === "string" && metadata.matchedName.trim().length > 0) {
+          threadName = metadata.matchedName.trim();
+        }
+      }
+    } catch {
+      threadName = null;
+    }
+
+    const threadId =
+      message.thread_id ??
+      (message.target.startsWith("group:") ? message.target : `dm:${message.target}`);
+    const rawEvents = buildOptimisticSignalRawEvents({
+      accountKey: message.account_key,
+      recipientHandle: message.target,
+      threadId,
+      threadName,
+      text: message.text,
+      sentAt: timestamp,
+      observedAt: now(),
+    });
+    if (rawEvents.length === 0) {
+      return;
+    }
+
+    db.upsertSourceAccounts([
+      {
+        platform: "signal",
+        accountKey: message.account_key,
+        displayName: "Signal",
+      },
+    ]);
+    const insertResult = db.insertRawEvents(rawEvents);
+    if (
+      realtimeProjectionEnabled &&
+      insertResult.firstInsertedRowId != null &&
+      insertResult.lastInsertedRowId != null
+    ) {
+      projectRealtimeRange(db, {
+        startRowId: insertResult.firstInsertedRowId,
+        endRowId: insertResult.lastInsertedRowId,
+        batchSize: realtimeProjectionBatchSize,
+      });
+    }
+    if (insertResult.firstInsertedRowId != null && insertResult.lastInsertedRowId != null) {
+      queueProjectionRun(
+        `signal_outbound:${message.account_key}`,
+        {
+          startRowId: insertResult.firstInsertedRowId,
+          endRowId: insertResult.lastInsertedRowId,
+        },
+        { delayMs: deferredProjectionCoalesceMs },
+      );
+      updateSignalCheckpointFromRealtime(message.account_key);
+    }
+  };
+
+  const runSignalSyncExclusively = async <T>(
+    accountKey: string,
+    task: () => Promise<T>,
+  ): Promise<T> => {
+    const activeSession = signalRealtime.getSession(accountKey);
+    if (!activeSession) {
+      return await task();
+    }
+
+    suppressNextSignalReconnectSync.add(accountKey);
+    activeSession.stop();
+    await new Promise((resolve) => setTimeout(resolve, 250));
+
+    try {
+      return await task();
+    } finally {
+      activeSession.start();
+      requestSignalRealtimeReconcile();
+    }
+  };
+
+  const ingestSignalRealtimeMessages = async (
+    accountKey: string,
+    messages: Parameters<typeof buildSignalRawEventsFromMessages>[0]["messages"],
+  ): Promise<void> => {
+    try {
+      const rawEvents = buildSignalRawEventsFromMessages({
+        accountKey,
+        messages,
+      });
+      if (rawEvents.length === 0) {
+        return;
+      }
+
+      db.upsertSourceAccounts([
+        {
+          platform: "signal",
+          accountKey,
+          displayName: "Signal",
+        },
+      ]);
+      const insertResult = db.insertRawEvents(rawEvents);
+      if (
+        realtimeProjectionEnabled &&
+        insertResult.firstInsertedRowId != null &&
+        insertResult.lastInsertedRowId != null
+      ) {
+        projectRealtimeRange(db, {
+          startRowId: insertResult.firstInsertedRowId,
+          endRowId: insertResult.lastInsertedRowId,
+          batchSize: realtimeProjectionBatchSize,
+        });
+      }
+      if (insertResult.firstInsertedRowId != null && insertResult.lastInsertedRowId != null) {
+        queueProjectionRun(
+          `signal_realtime:${accountKey}`,
+          {
+            startRowId: insertResult.firstInsertedRowId,
+            endRowId: insertResult.lastInsertedRowId,
+          },
+          { delayMs: deferredProjectionCoalesceMs },
+        );
+      }
+      if (insertResult.insertedCount > 0) {
+        updateSignalCheckpointFromRealtime(accountKey);
+      }
+
+      for (const message of messages) {
+        if (message.isFromMe) {
+          const normalizedThreadId = message.threadId;
+          const normalizedText = message.text.trim();
+          clearSignalSendEcho(accountKey, (echo) => {
+            const sameThread = !echo.threadId || echo.threadId === normalizedThreadId;
+            const sameText = echo.text.trim() === normalizedText;
+            const nearTimestamp = Math.abs(echo.timestamp - message.sentAt) < 30_000;
+            return sameThread && sameText && nearTimestamp;
+          });
+        }
+      }
+
+      const inboundMessages = collectInboundMessages(insertResult.insertedEvents);
+      for (const inboundMessage of inboundMessages) {
+        await safeEmitHookEvent("message.received", {
+          runId: `signal_realtime:${accountKey}`,
+          message: inboundMessage,
+        });
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      signalLogger.warn("realtime ingest failed", { accountKey, error: message });
+      if (isSqliteBusyError(error)) {
+        queueNativeTriggeredSync(
+          db,
+          "signal",
+          accountKey,
+          "signal_realtime_busy_fallback",
+          schedulers.wakeIngest,
+        );
+      }
+    }
+  };
+
+  const updateWhatsAppCheckpointFromRealtime = (accountKey: string) => {
+    const checkpoint = db.getCheckpoint("whatsapp", accountKey);
+    const projection = db.getProjectionBacklog();
+    const sourceCursor = checkpoint?.source_cursor_json
+      ? (JSON.parse(checkpoint.source_cursor_json) as Record<string, unknown>)
+      : null;
+    db.upsertCheckpoint({
+      platform: "whatsapp",
+      accountKey,
+      syncMode: checkpoint?.sync_mode ?? "incremental",
+      sourceCursor,
+      rawIngestWatermark: projection.max_raw_event_rowid,
+      projectionWatermark: projection.projection_watermark,
+      lastSuccessAt: now(),
+      lastErrorSummary: null,
+    });
+  };
+
+  const insertWhatsAppOptimisticSentMessage = (
+    message: OutboundMessageRow,
+    sendResult: { messageID: string; chatJID: string; timestamp: number },
+  ): void => {
+    let threadName: string | null = null;
+    try {
+      if (message.metadata_json) {
+        const metadata = JSON.parse(message.metadata_json) as { matchedName?: unknown };
+        if (typeof metadata.matchedName === "string" && metadata.matchedName.trim().length > 0) {
+          threadName = metadata.matchedName.trim();
+        }
+      }
+    } catch {
+      threadName = null;
+    }
+
+    const rawEvents = buildOptimisticWhatsAppRawEvents({
+      accountKey: message.account_key,
+      message: {
+        messageID: sendResult.messageID,
+        chatJID: sendResult.chatJID,
+        senderJID: sendResult.chatJID,
+        fromMe: true,
+        timestamp: sendResult.timestamp,
+        text: message.text,
+        status: "sent",
+      },
+      threadName,
+      observedAt: now(),
+    });
+    if (rawEvents.length === 0) {
+      return;
+    }
+
+    db.upsertSourceAccounts([
+      {
+        platform: "whatsapp",
+        accountKey: message.account_key,
+        displayName: "WhatsApp",
+      },
+    ]);
+    const insertResult = db.insertRawEvents(rawEvents);
+    if (
+      realtimeProjectionEnabled &&
+      insertResult.firstInsertedRowId != null &&
+      insertResult.lastInsertedRowId != null
+    ) {
+      projectRealtimeRange(db, {
+        startRowId: insertResult.firstInsertedRowId,
+        endRowId: insertResult.lastInsertedRowId,
+        batchSize: realtimeProjectionBatchSize,
+      });
+    }
+    if (insertResult.firstInsertedRowId != null && insertResult.lastInsertedRowId != null) {
+      queueProjectionRun(
+        `whatsapp_outbound:${message.account_key}`,
+        {
+          startRowId: insertResult.firstInsertedRowId,
+          endRowId: insertResult.lastInsertedRowId,
+        },
+        { delayMs: deferredProjectionCoalesceMs },
+      );
+      updateWhatsAppCheckpointFromRealtime(message.account_key);
+    }
+  };
+
+  const ingestWhatsAppRealtimeSnapshot = async (
+    accountKey: string,
+    snapshot: WhatsAppSnapshot,
+    trigger: string,
+  ): Promise<void> => {
+    try {
+      const rawEvents = buildWhatsAppRawEventsFromSnapshot({
+        accountKey,
+        snapshot,
+      });
+      if (rawEvents.length === 0) {
+        return;
+      }
+
+      db.upsertSourceAccounts([
+        {
+          platform: "whatsapp",
+          accountKey,
+          displayName: "WhatsApp",
+        },
+      ]);
+      const insertResult = db.insertRawEvents(rawEvents);
+      if (
+        realtimeProjectionEnabled &&
+        insertResult.firstInsertedRowId != null &&
+        insertResult.lastInsertedRowId != null
+      ) {
+        projectRealtimeRange(db, {
+          startRowId: insertResult.firstInsertedRowId,
+          endRowId: insertResult.lastInsertedRowId,
+          batchSize: realtimeProjectionBatchSize,
+        });
+      }
+      if (insertResult.firstInsertedRowId != null && insertResult.lastInsertedRowId != null) {
+        queueProjectionRun(
+          trigger,
+          {
+            startRowId: insertResult.firstInsertedRowId,
+            endRowId: insertResult.lastInsertedRowId,
+          },
+          { delayMs: deferredProjectionCoalesceMs },
+        );
+      }
+      if (insertResult.insertedCount > 0) {
+        updateWhatsAppCheckpointFromRealtime(accountKey);
+      }
+
+      const inboundMessages = collectInboundMessages(insertResult.insertedEvents);
+      for (const inboundMessage of inboundMessages) {
+        await safeEmitHookEvent("message.received", {
+          runId: trigger,
+          message: inboundMessage,
+        });
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      whatsAppLogger.warn("realtime ingest failed", { accountKey, error: message });
+      if (isSqliteBusyError(error)) {
+        queueNativeTriggeredSync(
+          db,
+          "whatsapp",
+          accountKey,
+          "whatsapp_realtime_busy_fallback",
+          schedulers.wakeIngest,
+        );
+      }
+    }
+  };
+
+  const applyReceiptToRealtimeSnapshot = async (
+    accountKey: string,
+    receipt: WhatsAppReceiptSnapshot,
+  ): Promise<void> => {
+    const message = db.findMessageByPlatformKey(
+      "whatsapp",
+      accountKey,
+      `${receipt.chatJID.toLowerCase()}:${receipt.messageID}`,
+    );
+    if (!message) {
+      return;
+    }
+
+    await ingestWhatsAppRealtimeSnapshot(
+      accountKey,
+      {
+        messages: [
+          {
+            messageID: receipt.messageID,
+            chatJID: receipt.chatJID,
+            senderJID: message.sender_source_key?.replace(/^whatsapp:/, "") ?? receipt.chatJID,
+            fromMe: receipt.fromMe,
+            timestamp: message.sent_at ?? now(),
+            text: message.content ?? "",
+            status: receipt.status ?? message.status ?? null,
+            deliveredAt: receipt.deliveredAt ?? message.delivered_at ?? null,
+            readAt: receipt.readAt ?? message.read_at ?? null,
+          },
+        ],
+      },
+      `whatsapp_receipt:${accountKey}`,
+    );
+  };
+
+  const handleWhatsAppRealtimeEvent = async (
+    accountKey: string,
+    event: WhatsAppHelperEventEnvelope,
+  ): Promise<void> => {
+    switch (event.event) {
+      case "contact_upsert": {
+        const contact = event.data as WhatsAppHelperEventEnvelope<"contact_upsert">["data"];
+        await ingestWhatsAppRealtimeSnapshot(
+          accountKey,
+          {
+            contacts: [contact],
+          },
+          `whatsapp_realtime:${accountKey}`,
+        );
+        return;
+      }
+      case "chat_upsert": {
+        const chat = event.data as WhatsAppHelperEventEnvelope<"chat_upsert">["data"];
+        await ingestWhatsAppRealtimeSnapshot(
+          accountKey,
+          {
+            chats: [chat],
+          },
+          `whatsapp_realtime:${accountKey}`,
+        );
+        return;
+      }
+      case "message_upsert": {
+        const message = event.data as WhatsAppHelperEventEnvelope<"message_upsert">["data"];
+        await ingestWhatsAppRealtimeSnapshot(
+          accountKey,
+          {
+            messages: [message],
+          },
+          `whatsapp_realtime:${accountKey}`,
+        );
+        return;
+      }
+      case "receipt_update":
+        await applyReceiptToRealtimeSnapshot(
+          accountKey,
+          event.data as WhatsAppHelperEventEnvelope<"receipt_update">["data"],
+        );
+        return;
+      case "history_sync":
+        await ingestWhatsAppRealtimeSnapshot(
+          accountKey,
+          event.data as WhatsAppHelperEventEnvelope<"history_sync">["data"],
+          `whatsapp_history_sync:${accountKey}`,
+        );
+        return;
+      default:
+        return;
+    }
+  };
+
+  const sendWhatsAppOutboundMessage = async (
+    message: OutboundMessageRow,
+    realtime: WhatsAppRealtimeSupervisor,
+  ): Promise<{
+    transport: "session";
+    result: { messageID: string; chatJID: string; timestamp: number };
+  }> => {
+    const session =
+      realtime.getSession(message.account_key) ??
+      (await realtime.waitForConnected(message.account_key, WHATSAPP_SEND_SESSION_WAIT_MS));
+    if (!session?.isConnected()) {
+      throw new Error(`WhatsApp session is not connected for '${message.account_key}'`);
+    }
+
+    return {
+      transport: "session",
+      result: await session.sendText(message.target, message.text),
+    };
+  };
+
+  const drainIngestQueue = () => {
+    ingestDrainScheduled = false;
+    while (activeIngestRuns.size < ingestConcurrency) {
+      const currentRun = db.claimNextQueuedRun(["sync", "sync_resume"], "ingesting");
+      if (!currentRun) {
+        break;
+      }
+
+      const promise = processIngestRun(currentRun).finally(() => {
+        activeIngestRuns.delete(currentRun.id);
+        scheduleIngestDrain();
+      });
+      activeIngestRuns.set(currentRun.id, promise);
+    }
+  };
+
+  const scheduleIngestDrain = () => {
+    if (ingestDrainScheduled) {
+      return;
+    }
+    ingestDrainScheduled = true;
+    setImmediate(drainIngestQueue);
+  };
+
+  const drainOutboundQueue = () => {
+    outboundDrainScheduled = false;
+    if (activeOutboundSend) {
+      return;
+    }
+
+    const message = db.claimNextOutboundMessage();
+    if (!message) {
+      return;
+    }
+
+    activeOutboundSend = (async () => {
+      try {
+        if (message.platform === "signal") {
+          const sendResult = await sendSignalOutboundMessage(message, signalRealtime);
+          try {
+            insertSignalOptimisticSentMessage(message, sendResult.timestamp);
+          } catch (error) {
+            const detail = error instanceof Error ? error.message : String(error);
+            signalLogger.warn("failed to insert optimistic sent message", {
+              accountKey: message.account_key,
+              outboundMessageId: message.id,
+              detail,
+            });
+          }
+          db.completeOutboundMessage(message.id);
+          if (sendResult.transport === "session") {
+            scheduleSignalSendEchoCatchup(message, sendResult.timestamp);
+            return;
+          }
+          if (!db.hasQueuedOrRunningRun(message.platform, message.account_key)) {
+            db.queueSyncRun({
+              platform: message.platform,
+              accountKey: message.account_key,
+              runType: "sync",
+              trigger: "outbound_send_completed",
+              details: {
+                source: message.platform,
+                accountKey: message.account_key,
+                trigger: "outbound_send_completed",
+                outboundMessageId: message.id,
+              },
+            });
+            scheduleIngestDrain();
+          }
+          return;
+        }
+
+        if (message.platform === "whatsapp") {
+          const sendResult = await sendWhatsAppOutboundMessage(message, whatsAppRealtime);
+          try {
+            insertWhatsAppOptimisticSentMessage(message, sendResult.result);
+          } catch (error) {
+            const detail = error instanceof Error ? error.message : String(error);
+            whatsAppLogger.warn("failed to insert optimistic sent message", {
+              accountKey: message.account_key,
+              outboundMessageId: message.id,
+              detail,
+            });
+          }
+          db.completeOutboundMessage(message.id);
+          return;
+        }
+        db.failOutboundMessage({
+          id: message.id,
+          retryable: false,
+          error: `Unsupported outbound platform: ${message.platform}`,
+        });
+        return;
+      } catch (error) {
+        const messageText = error instanceof Error ? error.message : String(error);
+        const logger = message.platform === "signal" ? signalLogger : whatsAppLogger;
+        logger.warn("outbound send failed", {
+          accountKey: message.account_key,
+          outboundMessageId: message.id,
+          error: messageText,
+        });
+        db.failOutboundMessage({
+          id: message.id,
+          retryable: message.platform === "signal" ? isRetryableSignalSendError(messageText) : true,
+          error: messageText,
+        });
+      } finally {
+        activeOutboundSend = null;
+        scheduleOutboundDrain();
+      }
+    })();
+  };
+
+  const scheduleOutboundDrain = () => {
+    if (outboundDrainScheduled) {
+      return;
+    }
+    outboundDrainScheduled = true;
+    setImmediate(drainOutboundQueue);
+  };
+
+  const drainProjectionQueue = () => {
+    projectionDrainScheduled = false;
+    if (isProcessingProjection) {
+      return;
+    }
+
+    const currentRun = db.claimNextQueuedRun(["project", "rebuild"], "projecting");
+    if (!currentRun) {
+      return;
+    }
+
+    isProcessingProjection = true;
+    void processProjectionRun(currentRun);
+  };
+
+  const scheduleProjectionDrain = (delayMs = 0) => {
+    if (projectionDrainScheduled) {
+      return;
+    }
+    projectionDrainScheduled = true;
+    if (delayMs <= 0) {
+      setImmediate(drainProjectionQueue);
+      return;
+    }
+
+    projectionDrainTimer = setTimeout(() => {
+      projectionDrainTimer = null;
+      drainProjectionQueue();
+    }, delayMs);
+  };
+
+  const schedulers = {
+    wakeIngest: scheduleIngestDrain,
+    wakeOutbound: scheduleOutboundDrain,
+    wakeProjection: () => scheduleProjectionDrain(),
+  };
+  const queueDebouncedNativeSync = createDebouncedSyncEnqueuer(db, schedulers.wakeIngest);
+  const signalRealtime = new SignalRealtimeSupervisor({
+    onMessage: (accountKey, message) => {
+      void ingestSignalRealtimeMessages(accountKey, [message]);
+    },
+    onConnected: (accountKey, _status, reconnected) => {
+      if (!reconnected) {
+        return;
+      }
+      if (suppressNextSignalReconnectSync.has(accountKey)) {
+        suppressNextSignalReconnectSync.delete(accountKey);
+        return;
+      }
+      queueNativeTriggeredSync(
+        db,
+        "signal",
+        accountKey,
+        "signal_realtime_reconnected",
+        schedulers.wakeIngest,
+      );
+    },
+  });
+  const whatsAppRealtime = new WhatsAppRealtimeSupervisor({
+    onEvent: (accountKey, event) => {
+      void handleWhatsAppRealtimeEvent(accountKey, event);
+    },
+    onConnected: (accountKey, _status, reconnected) => {
+      if (!reconnected) {
+        return;
+      }
+      queueNativeTriggeredSync(
+        db,
+        "whatsapp",
+        accountKey,
+        "whatsapp_realtime_reconnected",
+        schedulers.wakeIngest,
+      );
+    },
+  });
+
+  const reconcileSignalRealtimeSessions = async () => {
+    const { desired, degraded } = await collectDesiredSignalSessions(db);
+    signalRealtime.reconcile(desired, degraded);
+  };
+
+  const requestSignalRealtimeReconcile = () => {
+    if (signalRealtimeReconcilePromise) {
+      signalRealtimeReconcileQueued = true;
+      return;
+    }
+
+    signalRealtimeReconcilePromise = reconcileSignalRealtimeSessions()
+      .catch((error) => {
+        signalLogger.warn("realtime reconcile failed", error);
+      })
+      .finally(() => {
+        signalRealtimeReconcilePromise = null;
+        if (signalRealtimeReconcileQueued) {
+          signalRealtimeReconcileQueued = false;
+          requestSignalRealtimeReconcile();
+        }
+      });
+  };
+
+  const reconcileWhatsAppRealtimeSessions = async () => {
+    const { desired, degraded } = await collectDesiredWhatsAppSessions(db);
+    whatsAppRealtime.reconcile(desired, degraded);
+  };
+
+  const requestWhatsAppRealtimeReconcile = () => {
+    if (whatsAppRealtimeReconcilePromise) {
+      whatsAppRealtimeReconcileQueued = true;
+      return;
+    }
+
+    whatsAppRealtimeReconcilePromise = reconcileWhatsAppRealtimeSessions()
+      .catch((error) => {
+        whatsAppLogger.warn("realtime reconcile failed", error);
+      })
+      .finally(() => {
+        whatsAppRealtimeReconcilePromise = null;
+        if (whatsAppRealtimeReconcileQueued) {
+          whatsAppRealtimeReconcileQueued = false;
+          requestWhatsAppRealtimeReconcile();
+        }
+      });
+  };
+
+  db.failInProgressRuns("Recovered stale in-progress sync after daemon restart");
+  daemonLogger.info("daemon starting", {
+    pid: process.pid,
+    version: DAEMON_VERSION,
+  });
+  await refreshManagedIntegrationStates(db);
+  await reconcileSignalRealtimeSessions();
+  await reconcileWhatsAppRealtimeSessions();
+
+  db.upsertDaemonState({
+    pid: process.pid,
+    startedAt,
+    updatedAt: startedAt,
+    status: "running",
+    version: DAEMON_VERSION,
+  });
+
+  const heartbeat = setInterval(() => {
+    try {
+      db.upsertDaemonState({
+        pid: process.pid,
+        startedAt,
+        updatedAt: now(),
+        status: "running",
+        version: DAEMON_VERSION,
+      });
+    } catch (error) {
+      if (!isSqliteBusyError(error)) {
+        throw error;
+      }
+      daemonLogger.warn("heartbeat skipped because SQLite is busy");
+    }
+  }, 5_000);
+
+  const queueAutoSyncRuns = (trigger: string) => {
+    try {
+      const autoSyncTargets = getAutoSyncTargets(db);
+      let queuedAny = false;
+      const queuedAt = now();
+      for (const target of autoSyncTargets) {
+        if (trigger === "scheduler") {
+          const targetKey = `${target.platform}:${target.accountKey}`;
+          const lastQueuedAt = lastAutoSyncQueuedAt.get(targetKey) ?? 0;
+          if (queuedAt - lastQueuedAt < getAutoSyncIntervalMs(target.platform)) {
+            continue;
+          }
+        }
+
+        if (db.hasQueuedOrRunningRun(target.platform, target.accountKey)) {
+          continue;
+        }
+
+        db.queueSyncRun({
+          platform: target.platform,
+          accountKey: target.accountKey,
+          runType: "sync",
+          trigger,
+          details: { source: target.platform, accountKey: target.accountKey, trigger },
+        });
+        lastAutoSyncQueuedAt.set(`${target.platform}:${target.accountKey}`, queuedAt);
+        queuedAny = true;
+      }
+
+      if (queuedAny) {
+        schedulers.wakeIngest();
+      }
+    } catch (error) {
+      if (!isSqliteBusyError(error)) {
+        throw error;
+      }
+      daemonLogger.warn("autosync queue skipped because SQLite is busy", { trigger });
+    }
+  };
+
+  const queueProjectionRun = (
+    trigger: string,
+    range?: { startRowId: number; endRowId: number },
+    options?: { delayMs?: number },
+  ) => {
+    const backlog = db.getProjectionBacklog();
+    const startRowId = range?.startRowId ?? backlog.projection_watermark + 1;
+    const endRowId = range?.endRowId ?? backlog.max_raw_event_rowid;
+    if (endRowId < startRowId) {
+      return null;
+    }
+
+    const queuedProjectionRun = db.getQueuedProjectionRun();
+    if (queuedProjectionRun) {
+      const existingDetails = parseProjectionRunDetails(queuedProjectionRun.details_json);
+      if (!existingDetails) {
+        db.updateRunDetails(queuedProjectionRun.id, {
+          trigger,
+          startRowId,
+          endRowId,
+          projectionWatermark: backlog.projection_watermark,
+          maxRawEventRowid: backlog.max_raw_event_rowid,
+        } satisfies ProjectionRunDetails);
+      } else {
+        db.updateRunDetails(queuedProjectionRun.id, {
+          ...existingDetails,
+          trigger,
+          startRowId: Math.min(existingDetails.startRowId, startRowId),
+          endRowId: Math.max(existingDetails.endRowId, endRowId),
+          projectionWatermark: Math.min(
+            existingDetails.projectionWatermark ?? backlog.projection_watermark,
+            backlog.projection_watermark,
+          ),
+          maxRawEventRowid: Math.max(
+            existingDetails.maxRawEventRowid ?? backlog.max_raw_event_rowid,
+            backlog.max_raw_event_rowid,
+          ),
+        } satisfies ProjectionRunDetails);
+      }
+      scheduleProjectionDrain(options?.delayMs ?? deferredProjectionCoalesceMs);
+      return queuedProjectionRun.id;
+    }
+
+    const runId = db.queueSyncRun({
+      runType: "project",
+      trigger,
+      details: {
+        trigger,
+        startRowId,
+        endRowId,
+        projectionWatermark: backlog.projection_watermark,
+        maxRawEventRowid: backlog.max_raw_event_rowid,
+      } satisfies ProjectionRunDetails,
+    });
+    scheduleProjectionDrain(options?.delayMs ?? deferredProjectionCoalesceMs);
+    return runId;
+  };
+
+  queueAutoSyncRuns("daemon_start");
+  queueProjectionRun("daemon_start", undefined, { delayMs: 0 });
+  scheduleOutboundDrain();
+
+  const nativeWatchers: Array<FSWatcher | ChildProcess> = [];
+  if (process.platform === "darwin") {
+    const imessageWatcher = startIMessageWatcher(db, queueDebouncedNativeSync);
+    if (imessageWatcher) {
+      nativeWatchers.push(imessageWatcher);
+    }
+
+    const contactsWatcher = startContactsWatcher(db, queueDebouncedNativeSync);
+    if (contactsWatcher) {
+      nativeWatchers.push(contactsWatcher);
+    }
+  }
+
+  const processIngestRun = async (
+    currentRun: NonNullable<ReturnType<typeof db.claimNextQueuedRun>>,
+  ) => {
+    const ingestStartedAt = now();
+    daemonLogger.info("ingest run started", {
+      runId: currentRun.id,
+      platform: currentRun.platform,
+      accountKey: currentRun.account_key,
+      trigger: currentRun.trigger,
+      runType: currentRun.run_type,
+    });
+    try {
+      if (
+        (currentRun.run_type !== "sync" && currentRun.run_type !== "sync_resume") ||
+        !currentRun.platform
+      ) {
+        db.failRun(
+          currentRun.id,
+          `Unsupported ingest run target: ${currentRun.run_type}:${currentRun.platform ?? "none"}`,
+        );
+        return;
+      }
+      if (!isAdapterPlatform(currentRun.platform)) {
+        db.failRun(currentRun.id, `No adapter registered for platform: ${currentRun.platform}`);
+        return;
+      }
+
+      const platform = currentRun.platform;
+      const accountKey = currentRun.account_key ?? getDefaultAccountKeyForPlatform(platform);
+      const checkpoint = db.getCheckpoint(currentRun.platform, accountKey);
+      const sourceCursor = checkpoint?.source_cursor_json
+        ? (JSON.parse(checkpoint.source_cursor_json) as Record<string, unknown>)
+        : null;
+      const envOverrides: Record<string, string> = {};
+      if (platform === "imessage" && typeof sourceCursor?.rowId === "number") {
+        envOverrides.CUED_IMESSAGE_LAST_ROWID = String(sourceCursor.rowId);
+      }
+      if (platform === "slack" && typeof sourceCursor?.lastSyncAt === "number") {
+        envOverrides.CUED_SLACK_LAST_SYNC_AT = String(sourceCursor.lastSyncAt);
+      }
+      if (platform === "slack" && checkpoint?.source_cursor_json) {
+        envOverrides.CUED_SLACK_SOURCE_CURSOR = checkpoint.source_cursor_json;
+      }
+      if (platform === "linkedin") {
+        if (typeof sourceCursor?.lastSyncAt === "number") {
+          envOverrides.CUED_LINKEDIN_LAST_SYNC_AT = String(sourceCursor.lastSyncAt);
+        }
+        if (typeof sourceCursor?.syncToken === "string" && sourceCursor.syncToken.length > 0) {
+          envOverrides.CUED_LINKEDIN_SYNC_TOKEN = sourceCursor.syncToken;
+        }
+      }
+      if (platform === "signal" && typeof sourceCursor?.lastSyncAt === "number") {
+        envOverrides.CUED_SIGNAL_LAST_SYNC_AT = String(sourceCursor.lastSyncAt);
+      }
+
+      const adapterStartedAt = now();
+      const bundle =
+        platform === "whatsapp"
+          ? await (async () => {
+              const session =
+                whatsAppRealtime.getSession(accountKey) ??
+                (await whatsAppRealtime.waitForConnected(accountKey, 10_000));
+              if (!session?.isConnected()) {
+                throw new Error(`WhatsApp session is not connected for '${accountKey}'`);
+              }
+
+              const snapshot = await session.resync();
+              return {
+                sourceAccounts: [
+                  {
+                    platform: "whatsapp" as const,
+                    accountKey,
+                    displayName: "WhatsApp",
+                  },
+                ],
+                rawEvents: buildWhatsAppRawEventsFromSnapshot({
+                  accountKey,
+                  snapshot,
+                }),
+                sourceCursor: {
+                  lastSyncAt: now(),
+                },
+                syncMode: checkpoint?.source_cursor_json
+                  ? ("incremental" as const)
+                  : ("full" as const),
+                hasMore: false,
+              };
+            })()
+          : platform === "signal"
+            ? await runSignalSyncExclusively(
+                accountKey,
+                async () => await runAdapter(platform, accountKey, envOverrides),
+              )
+            : await runAdapter(platform, accountKey, envOverrides);
+      const afterAdapter = now();
+      db.upsertSourceAccounts(bundle.sourceAccounts);
+      const rawEventInsertStartedAt = now();
+      const insertResult = db.insertRawEvents(bundle.rawEvents);
+      const afterRawInsert = now();
+      const realtimeProjectionStartedAt = now();
+      if (
+        realtimeProjectionEnabled &&
+        insertResult.firstInsertedRowId != null &&
+        insertResult.lastInsertedRowId != null
+      ) {
+        projectRealtimeRange(db, {
+          startRowId: insertResult.firstInsertedRowId,
+          endRowId: insertResult.lastInsertedRowId,
+          batchSize: realtimeProjectionBatchSize,
+        });
+      }
+      const afterRealtimeProjection = now();
+      const inboundMessages = collectInboundMessages(insertResult.insertedEvents);
+      if (platform === "signal") {
+        for (const rawEvent of insertResult.insertedEvents) {
+          if (rawEvent.entityKind !== "message" || rawEvent.eventKind !== "message_created") {
+            continue;
+          }
+          const payload = rawEvent.payload as Record<string, unknown>;
+          if (payload.isFromMe !== true || typeof payload.content !== "string") {
+            continue;
+          }
+          const sourceConversationKey =
+            typeof payload.sourceConversationKey === "string"
+              ? payload.sourceConversationKey.replace(/^signal:/, "")
+              : null;
+          const sentAt = typeof payload.sentAt === "number" ? payload.sentAt : 0;
+          clearSignalSendEcho(accountKey, (echo) => {
+            const sameThread = !echo.threadId || echo.threadId === sourceConversationKey;
+            const sameText = echo.text.trim() === payload.content;
+            const nearTimestamp = sentAt > 0 ? Math.abs(echo.timestamp - sentAt) < 30_000 : true;
+            return sameThread && sameText && nearTimestamp;
+          });
+        }
+      }
+
+      const projection = db.getProjectionBacklog();
+      const checkpointSyncMode = resolveCheckpointSyncMode(
+        currentRun.run_type,
+        checkpoint?.sync_mode,
+        bundle.syncMode,
+        bundle.hasMore ?? false,
+      );
+      const checkpointStartedAt = now();
+      db.upsertCheckpoint({
+        platform: currentRun.platform,
+        accountKey,
+        syncMode: checkpointSyncMode,
+        sourceCursor: bundle.sourceCursor,
+        rawIngestWatermark: projection.max_raw_event_rowid,
+        projectionWatermark: projection.projection_watermark,
+        lastSuccessAt: now(),
+      });
+      const afterCheckpoint = now();
+      const timings: IngestTiming = {
+        adapterFetchMs: afterAdapter - adapterStartedAt,
+        rawEventInsertMs: afterRawInsert - rawEventInsertStartedAt,
+        realtimeProjectionMs: afterRealtimeProjection - realtimeProjectionStartedAt,
+        checkpointUpdateMs: afterCheckpoint - checkpointStartedAt,
+        webhookReadyMs: afterCheckpoint - ingestStartedAt,
+        totalMs: afterCheckpoint - ingestStartedAt,
+        insertedRawEvents: insertResult.insertedCount,
+      };
+
+      let projectionQueued = false;
+      if (insertResult.firstInsertedRowId != null && insertResult.lastInsertedRowId != null) {
+        queueProjectionRun(
+          `ingest:${currentRun.platform}:${accountKey}`,
+          {
+            startRowId: insertResult.firstInsertedRowId,
+            endRowId: insertResult.lastInsertedRowId,
+          },
+          { delayMs: deferredProjectionCoalesceMs },
+        );
+        projectionQueued = true;
+      }
+      if (platform === "contacts") {
+        const contactsRange = db.getRawEventRowIdRange("contacts", accountKey);
+        if (contactsRange) {
+          queueProjectionRun(
+            `contacts_replay:${accountKey}`,
+            {
+              startRowId: contactsRange.minRowId,
+              endRowId: contactsRange.maxRowId,
+            },
+            { delayMs: 0 },
+          );
+          projectionQueued = true;
+        }
+      }
+      db.finishRun(currentRun.id, {
+        ingested: bundle.rawEvents.length,
+        insertedRawEvents: insertResult.insertedCount,
+        projectionQueued,
+        hasMore: bundle.hasMore ?? false,
+        syncMode: checkpointSyncMode,
+        timings,
+      });
+      if (bundle.hasMore && !db.hasQueuedOrRunningRun(currentRun.platform, accountKey)) {
+        db.queueSyncRun({
+          platform: currentRun.platform,
+          accountKey,
+          runType: "sync_resume",
+          trigger: "ingest_continue",
+          details: {
+            source: currentRun.platform,
+            accountKey,
+            trigger: "ingest_continue",
+          },
+        });
+        schedulers.wakeIngest();
+      }
+      await safeEmitHookEvent("sync.completed", {
+        runId: currentRun.id,
+        platform,
+        accountKey,
+        runType: currentRun.run_type,
+        stage: "ingest",
+        ingested: bundle.rawEvents.length,
+        insertedRawEvents: insertResult.insertedCount,
+        timings,
+      });
+      for (const message of inboundMessages) {
+        await safeEmitHookEvent("message.received", {
+          runId: currentRun.id,
+          message,
+        });
+      }
+      daemonLogger.info("ingest run completed", {
+        runId: currentRun.id,
+        platform,
+        accountKey,
+        insertedRawEvents: insertResult.insertedCount,
+        totalMs: timings.totalMs,
+      });
+    } catch (error) {
+      daemonLogger.error("ingest run failed", {
+        runId: currentRun.id,
+        platform: currentRun.platform,
+        accountKey: currentRun.account_key,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      db.failRun(currentRun.id, error instanceof Error ? error.message : String(error));
+      await safeEmitHookEvent("sync.failed", {
+        runId: currentRun.id,
+        platform: currentRun.platform,
+        runType: currentRun.run_type,
+        stage: "ingest",
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  };
+
+  const processProjectionRun = async (
+    currentRun: NonNullable<ReturnType<typeof db.claimNextQueuedRun>>,
+  ) => {
+    const projectionStartedAt = now();
+    daemonLogger.info("projection run started", {
+      runId: currentRun.id,
+      trigger: currentRun.trigger,
+      runType: currentRun.run_type,
+    });
+    try {
+      const projectionDetails = parseProjectionRunDetails(currentRun.details_json);
+      const projected =
+        currentRun.run_type === "rebuild"
+          ? rebuildProjectedState(db)
+          : projectionDetails
+            ? projectDeferredRange(db, {
+                startRowId: projectionDetails.startRowId,
+                endRowId: projectionDetails.endRowId,
+                limit: projectionBatchSize,
+              })
+            : (() => {
+                const backlog = db.getProjectionBacklog();
+                return backlog.pending_raw_events === 0
+                  ? projectPendingRawEvents(db, { limit: projectionBatchSize })
+                  : projectDeferredRange(db, {
+                      startRowId: backlog.projection_watermark + 1,
+                      endRowId: backlog.max_raw_event_rowid,
+                      limit: projectionBatchSize,
+                    });
+              })();
+      const projectionFinishedAt = now();
+      const timings = {
+        projectionMs: projectionFinishedAt - projectionStartedAt,
+        totalMs: projectionFinishedAt - projectionStartedAt,
+      };
+      const deferredProjected =
+        currentRun.run_type === "project"
+          ? (projected as ReturnType<typeof projectDeferredRange>)
+          : null;
+      db.finishRun(currentRun.id, {
+        projected,
+        timings,
+        range: projectionDetails,
+      });
+      if (deferredProjected?.nextStartRowId != null) {
+        queueProjectionRun(
+          `projection_continue:${currentRun.id}`,
+          {
+            startRowId: deferredProjected.nextStartRowId,
+            endRowId:
+              deferredProjected.rangeEndRowId ??
+              projectionDetails?.endRowId ??
+              deferredProjected.projectionWatermark,
+          },
+          { delayMs: 0 },
+        );
+      }
+      queueProjectionRun(`projection:${currentRun.run_type}`, undefined, { delayMs: 0 });
+      await safeEmitHookEvent("sync.completed", {
+        runId: currentRun.id,
+        platform: currentRun.platform,
+        runType: currentRun.run_type,
+        stage: "projection",
+        projected,
+        timings,
+      });
+      daemonLogger.info("projection run completed", {
+        runId: currentRun.id,
+        runType: currentRun.run_type,
+        totalMs: timings.totalMs,
+      });
+    } catch (error) {
+      daemonLogger.error("projection run failed", {
+        runId: currentRun.id,
+        runType: currentRun.run_type,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      db.failRun(currentRun.id, error instanceof Error ? error.message : String(error));
+      await safeEmitHookEvent("sync.failed", {
+        runId: currentRun.id,
+        platform: currentRun.platform,
+        runType: currentRun.run_type,
+        stage: "projection",
+        error: error instanceof Error ? error.message : String(error),
+      });
+    } finally {
+      isProcessingProjection = false;
+      schedulers.wakeProjection();
+    }
+  };
+
+  const ingestLoop = setInterval(() => {
+    schedulers.wakeIngest();
+  }, 250);
+
+  const projectionLoop = setInterval(() => {
+    schedulers.wakeProjection();
+  }, 250);
+
+  const schedulerLoop = setInterval(() => {
+    queueAutoSyncRuns("scheduler");
+  }, AUTOSYNC_SCHEDULER_TICK_MS);
+
+  const server = createServer((socket) => {
+    handleSocket(
+      socket,
+      db,
+      activeAuthSessions,
+      schedulers,
+      signalRealtime,
+      whatsAppRealtime,
+      () => {
+        requestSignalRealtimeReconcile();
+        requestWhatsAppRealtimeReconcile();
+      },
+    );
+  });
+
+  server.listen(CUED_SOCKET_PATH);
+
+  const shutdown = () => {
+    daemonLogger.info("daemon shutting down", { pid: process.pid });
+    clearInterval(heartbeat);
+    clearInterval(ingestLoop);
+    clearInterval(projectionLoop);
+    clearInterval(schedulerLoop);
+    if (projectionDrainTimer) {
+      clearTimeout(projectionDrainTimer);
+      projectionDrainTimer = null;
+    }
+    for (const watcher of nativeWatchers) {
+      if ("close" in watcher && typeof watcher.close === "function") {
+        watcher.close();
+        continue;
+      }
+      if ("kill" in watcher && typeof watcher.kill === "function") {
+        watcher.kill("SIGTERM");
+      }
+    }
+    signalRealtime.stopAll();
+    whatsAppRealtime.stopAll();
+    for (const echoes of pendingSignalSendEchoes.values()) {
+      for (const echo of echoes) {
+        clearTimeout(echo.timeout);
+      }
+    }
+    db.upsertDaemonState({
+      pid: null,
+      startedAt,
+      updatedAt: now(),
+      status: "stopped",
+      version: DAEMON_VERSION,
+    });
+    server.close();
+    db.close();
+    if (existsSync(CUED_SOCKET_PATH)) {
+      rmSync(CUED_SOCKET_PATH, { force: true });
+    }
+    process.exit(0);
+  };
+
+  process.on("SIGINT", shutdown);
+  process.on("SIGTERM", shutdown);
+}
+
+async function cleanupSocketPath(): Promise<void> {
+  if (!existsSync(CUED_SOCKET_PATH)) {
+    return;
+  }
+
+  const socketState = await probeExistingSocket();
+  if (socketState === "active") {
+    throw new Error(`Cued daemon already running on ${CUED_SOCKET_PATH}`);
+  }
+
+  rmSync(CUED_SOCKET_PATH, { force: true });
+}
+
+async function probeExistingSocket(): Promise<"active" | "stale"> {
+  return new Promise((resolve) => {
+    const socket = createConnection(CUED_SOCKET_PATH);
+    let settled = false;
+    let buffer = "";
+    const timeout = setTimeout(() => {
+      finish("stale");
+    }, 500);
+
+    const finish = (state: "active" | "stale") => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      clearTimeout(timeout);
+      socket.destroy();
+      resolve(state);
+    };
+
+    socket.on("connect", () => {
+      socket.write(`${JSON.stringify({ id: "startup-probe", command: "ping" })}\n`);
+    });
+
+    socket.on("data", (chunk) => {
+      buffer += chunk.toString("utf8");
+      const newlineIndex = buffer.indexOf("\n");
+      if (newlineIndex < 0) {
+        return;
+      }
+
+      try {
+        const response = JSON.parse(buffer.slice(0, newlineIndex)) as {
+          ok?: boolean;
+          result?: { pong?: boolean };
+        };
+        if (response.ok && response.result?.pong === true) {
+          finish("active");
+          return;
+        }
+      } catch {
+        // Treat malformed responses as stale so we can recover the socket path.
+      }
+
+      finish("stale");
+    });
+
+    socket.on("error", () => {
+      finish("stale");
+    });
+  });
+}
+
+function writeResponse(socket: Socket, response: DaemonResponse): void {
+  socket.write(`${JSON.stringify(response)}\n`);
+}
+
+function handleSocket(
+  socket: Socket,
+  db: ReturnType<typeof openCuedDatabase>,
+  activeAuthSessions: Map<string, { child: ChildProcess; platform: Platform; accountKey: string }>,
+  schedulers: QueueSchedulers,
+  signalRealtime: SignalRealtimeSupervisor,
+  whatsAppRealtime: WhatsAppRealtimeSupervisor,
+  requestRealtimeReconcile: () => void,
+): void {
+  let buffer = "";
+
+  socket.on("data", (chunk) => {
+    buffer += chunk.toString("utf8");
+
+    let newlineIndex = buffer.indexOf("\n");
+    while (newlineIndex >= 0) {
+      const line = buffer.slice(0, newlineIndex).trim();
+      buffer = buffer.slice(newlineIndex + 1);
+
+      if (line.length > 0) {
+        let request: DaemonRequest | null = null;
+        try {
+          request = JSON.parse(line) as DaemonRequest;
+        } catch {
+          writeResponse(socket, {
+            id: "unknown",
+            ok: false,
+            error: "Invalid JSON request",
+          });
+          newlineIndex = buffer.indexOf("\n");
+          continue;
+        }
+
+        void dispatchRequest(
+          db,
+          request,
+          activeAuthSessions,
+          schedulers,
+          signalRealtime,
+          whatsAppRealtime,
+          requestRealtimeReconcile,
+        )
+          .then((response) => writeResponse(socket, response))
+          .catch((error) => {
+            writeResponse(socket, {
+              id: request?.id ?? "unknown",
+              ok: false,
+              error: error instanceof Error ? error.message : String(error),
+            });
+          });
+      }
+
+      newlineIndex = buffer.indexOf("\n");
+    }
+  });
+}
+
+function ensureNoActiveDaemonProcess(db: ReturnType<typeof openCuedDatabase>): void {
+  const daemon = db.getDaemonState();
+  if (
+    daemon?.status === "running" &&
+    typeof daemon.pid === "number" &&
+    daemon.pid > 0 &&
+    daemon.pid !== process.pid &&
+    isProcessRunning(daemon.pid)
+  ) {
+    throw new Error(`Cued daemon already running with pid ${daemon.pid}`);
+  }
+}
+
+function isProcessRunning(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function dispatchRequest(
+  db: ReturnType<typeof openCuedDatabase>,
+  request: DaemonRequest,
+  activeAuthSessions: Map<string, { child: ChildProcess; platform: Platform; accountKey: string }>,
+  schedulers: QueueSchedulers,
+  signalRealtime: SignalRealtimeSupervisor,
+  whatsAppRealtime: WhatsAppRealtimeSupervisor,
+  requestRealtimeReconcile: () => void,
+): Promise<DaemonResponse> {
+  try {
+    switch (request.command) {
+      case "ping":
+        return { id: request.id, ok: true, result: { pong: true } };
+      case "status":
+        return {
+          id: request.id,
+          ok: true,
+          result: {
+            app: getAppStatusMetadata(db),
+            daemon: db.getDaemonState(),
+            overview: db.getOverview(),
+            projection: db.getProjectionBacklog(),
+            checkpoints: db.listCheckpointSummary(),
+            recentRuns: db.listRecentRuns(),
+            signalRealtimeSessions: signalRealtime.getStatuses(),
+            whatsappRealtimeSessions: whatsAppRealtime.getStatuses(),
+            ...buildIntegrationStatus(db),
+            socketPath: CUED_SOCKET_PATH,
+            dbPath: db.dbPath,
+          },
+        };
+      case "doctor":
+        return {
+          id: request.id,
+          ok: true,
+          result: {
+            app: getAppStatusMetadata(db),
+            ...(await buildDoctorReport(db, {
+              signalRealtimeSessions: signalRealtime.getStatuses(),
+              whatsappRealtimeSessions: whatsAppRealtime.getStatuses(),
+            })),
+            autoSyncTargets: getAutoSyncTargets(db),
+            autoSyncIntervalMs: getAutoSyncIntervalMs(),
+            autoSyncIntervalsMs: Object.fromEntries(
+              getAutoSyncTargets(db).map((target) => [
+                `${target.platform}:${target.accountKey}`,
+                getAutoSyncIntervalMs(target.platform),
+              ]),
+            ),
+            signalCatchupIntervalMs: getAutoSyncIntervalMs("signal"),
+            whatsappCatchupIntervalMs: getAutoSyncIntervalMs("whatsapp"),
+            ingestConcurrency: getIngestConcurrency(),
+            projectionBatchSize: getProjectionBatchSize(),
+            realtimeProjectionEnabled: getRealtimeProjectionEnabled(),
+            realtimeProjectionBatchSize: getRealtimeProjectionBatchSize(),
+            deferredProjectionCoalesceMs: getDeferredProjectionCoalesceMs(),
+            hooks: doctorHooksConfig(),
+          },
+        };
+      case "integrations-list":
+        return {
+          id: request.id,
+          ok: true,
+          result: buildIntegrationStatus(db),
+        };
+      case "integrations-refresh":
+        await refreshManagedIntegrationStates(db);
+        requestRealtimeReconcile();
+        return {
+          id: request.id,
+          ok: true,
+          result: buildIntegrationStatus(db),
+        };
+      case "integrations-connect": {
+        const started = await startManagedAuth(
+          db,
+          request.platform,
+          request.accountKey,
+          activeAuthSessions,
+          schedulers.wakeIngest,
+          requestRealtimeReconcile,
+        );
+        return {
+          id: request.id,
+          ok: true,
+          result: started,
+        };
+      }
+      case "integrations-disconnect": {
+        const result = disconnectIntegration(db, request.platform, request.accountKey);
+        requestRealtimeReconcile();
+        return {
+          id: request.id,
+          ok: true,
+          result,
+        };
+      }
+      case "integrations-remove": {
+        const result = removeIntegration(db, request.platform, request.accountKey);
+        requestRealtimeReconcile();
+        return {
+          id: request.id,
+          ok: true,
+          result,
+        };
+      }
+      case "integrations-enable": {
+        const result = setIntegrationEnabled(db, request.platform, request.accountKey, true);
+        requestRealtimeReconcile();
+        return {
+          id: request.id,
+          ok: true,
+          result,
+        };
+      }
+      case "integrations-disable": {
+        const result = setIntegrationEnabled(db, request.platform, request.accountKey, false);
+        requestRealtimeReconcile();
+        return {
+          id: request.id,
+          ok: true,
+          result,
+        };
+      }
+      case "message-send":
+        if (request.platform !== "signal" && request.platform !== "whatsapp") {
+          throw new Error(`Unsupported outbound platform: ${request.platform}`);
+        }
+        if (request.target.trim().length === 0 || request.text.trim().length === 0) {
+          throw new Error(`${request.platform} send requires a target and non-empty text`);
+        }
+        {
+          const resolved =
+            request.platform === "signal"
+              ? db.resolveSignalSendTarget(request.target.trim())
+              : db.resolveWhatsAppSendTarget(request.target.trim());
+          if (!resolved) {
+            throw new Error(
+              `Unable to resolve ${request.platform} target: ${request.target.trim()}`,
+            );
+          }
+          return {
+            id: request.id,
+            ok: true,
+            result: {
+              queued: true,
+              messageId: (() => {
+                const queuedId = db.queueOutboundMessage({
+                  platform: request.platform,
+                  accountKey:
+                    request.accountKey ?? getDefaultAccountKeyForPlatform(request.platform),
+                  target: resolved.target,
+                  threadId: resolved.threadId,
+                  text: request.text,
+                  metadata: {
+                    originalTarget: request.target.trim(),
+                    resolvedTarget: resolved.target,
+                    resolvedThreadId: resolved.threadId,
+                    resolution: resolved.resolution,
+                    matchedContactIds: resolved.matchedContactIds,
+                    matchedName: resolved.matchedName,
+                  },
+                });
+                schedulers.wakeOutbound();
+                return queuedId;
+              })(),
+            },
+          };
+        }
+      case "sync-run":
+        if (request.source && !isAdapterPlatform(request.source)) {
+          throw new Error(`Unsupported sync source: ${request.source}`);
+        }
+        return {
+          id: request.id,
+          ok: true,
+          result: {
+            queued: true,
+            runId: (() => {
+              const runId = db.queueSyncRun({
+                platform:
+                  request.source && isAdapterPlatform(request.source) ? request.source : null,
+                runType: "sync",
+                trigger: "cli",
+                details: { source: request.source ?? null },
+              });
+              schedulers.wakeIngest();
+              return runId;
+            })(),
+          },
+        };
+      case "sync-resume": {
+        const platforms = new Set([
+          ...getAutoSyncTargets(db).map((target) => `${target.platform}:${target.accountKey}`),
+          ...db
+            .listCheckpointTargets()
+            .filter((target) => isAdapterPlatform(target.platform))
+            .map((target) => `${target.platform}:${target.account_key}`),
+        ]);
+        const queuedRunIds: string[] = [];
+        for (const targetKey of platforms) {
+          const [platform, accountKey] = targetKey.split(":");
+          if (!platform || !accountKey || !isAdapterPlatform(platform)) {
+            continue;
+          }
+          if (db.hasQueuedOrRunningRun(platform, accountKey)) {
+            continue;
+          }
+
+          queuedRunIds.push(
+            db.queueSyncRun({
+              platform,
+              accountKey,
+              runType: "sync_resume",
+              trigger: "cli",
+              details: { source: platform, accountKey },
+            }),
+          );
+        }
+
+        if (queuedRunIds.length > 0) {
+          schedulers.wakeIngest();
+        }
+
+        return {
+          id: request.id,
+          ok: true,
+          result: {
+            queued: queuedRunIds.length > 0,
+            runIds: queuedRunIds,
+            targets: [...platforms],
+          },
+        };
+      }
+      case "rebuild":
+        return {
+          id: request.id,
+          ok: true,
+          result: {
+            queued: true,
+            runId: (() => {
+              const runId = db.queueSyncRun({
+                runType: "rebuild",
+                trigger: "cli",
+                details: { trigger: "cli" },
+              });
+              schedulers.wakeProjection();
+              return runId;
+            })(),
+          },
+        };
+      case "reset":
+        if (!isPlatform(request.source)) {
+          throw new Error(`Unsupported reset source: ${request.source}`);
+        }
+        return {
+          id: request.id,
+          ok: true,
+          result: {
+            source: request.source,
+            rowsRemoved: db.resetSource(request.source),
+          },
+        };
+      case "merge-contact":
+        return {
+          id: request.id,
+          ok: true,
+          result: {
+            decisionId: db.insertMergeDecision({
+              decisionType: "merge",
+              leftContactId: request.leftContactId,
+              rightContactId: request.rightContactId,
+              canonicalContactId: request.leftContactId,
+              reason: request.reason ?? "manual_cli_merge",
+              createdBy: "cli",
+            }),
+          },
+        };
+      case "split-contact":
+        return {
+          id: request.id,
+          ok: true,
+          result: {
+            decisionId: db.insertMergeDecision({
+              decisionType: "split",
+              canonicalContactId: request.contactId,
+              reason: request.reason ?? "manual_cli_split",
+              createdBy: "cli",
+            }),
+          },
+        };
+      default:
+        return {
+          id: request satisfies never,
+          ok: false,
+          error: "Unsupported command",
+        };
+    }
+  } catch (error) {
+    return {
+      id: request.id,
+      ok: false,
+      error: error instanceof Error ? error.message : String(error),
+    };
+  }
+}
