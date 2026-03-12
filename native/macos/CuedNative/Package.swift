@@ -8,11 +8,23 @@ let package = Package(
     .macOS(.v13),
   ],
   products: [
+    .library(name: "CuedNativeUI", type: .dynamic, targets: ["CuedNativeUI"]),
     .executable(name: "CuedNative", targets: ["CuedNative"]),
   ],
   targets: [
+    .target(
+      name: "CuedNativeUI",
+      path: "Sources/CuedNativeUI",
+      resources: [
+        .process("Resources"),
+      ],
+      swiftSettings: [
+        .unsafeFlags(["-parse-as-library"]),
+      ]
+    ),
     .executableTarget(
       name: "CuedNative",
+      dependencies: ["CuedNativeUI"],
       path: "Sources/CuedNative",
       swiftSettings: [
         .unsafeFlags(["-parse-as-library"]),
