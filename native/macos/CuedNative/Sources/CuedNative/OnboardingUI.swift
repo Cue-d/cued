@@ -4,6 +4,7 @@ import SwiftUI
 struct InstallerCapabilityStatus: Decodable {
   let availability: String
   let onboardingVisible: Bool
+  let supportsMultipleAccounts: Bool
   let reason: String?
 }
 
@@ -219,7 +220,7 @@ final class OnboardingViewModel: ObservableObject {
         capability: base.capability,
         accounts: accounts,
         placeholder: placeholder,
-        supportsMultipleAccounts: installerSupportsMultipleAccounts(setupIntegration.platform)
+        supportsMultipleAccounts: base.capability.supportsMultipleAccounts
       )
     }
   }
@@ -1502,10 +1503,6 @@ private func installerPlatformTitle(_ platform: String, fallback: String?) -> St
     }
     return platform.capitalized
   }
-}
-
-private func installerSupportsMultipleAccounts(_ platform: String) -> Bool {
-  platform == "slack"
 }
 
 private func installerIsRequestablePlatform(_ platform: String) -> Bool {
