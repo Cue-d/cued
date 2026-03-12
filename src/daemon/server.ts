@@ -20,8 +20,8 @@ import {
   getAuthSessionSummary,
   getIntegrationSummary,
   markAuthSessionInProgress,
-  removeIntegration,
   refreshManagedIntegrationStates,
+  removeIntegration,
   setIntegrationEnabled,
 } from "../integrations/service.js";
 import {

@@ -98,34 +98,38 @@ export function summarizePermissionStatuses(
 }
 
 export async function buildPermissionStatus(): Promise<{ permissions: PermissionStatusSummary[] }> {
-  const contacts = process.platform === "darwin"
-    ? getContactsPermissionCheck()
-    : {
-        name: "contacts_permission",
-        status: "unknown",
-        summary: "Contacts permission can only be checked on macOS",
-      } satisfies DoctorCheck;
-  const messagesDatabase = process.platform === "darwin"
-    ? tryReadMessagesDatabase()
-    : {
-        name: "messages_database",
-        status: "unknown",
-        summary: "Messages database access can only be checked on macOS",
-      } satisfies DoctorCheck;
-  const messagesNativeHelper = process.platform === "darwin"
-    ? getMessagesNativeHelperCheck()
-    : {
-        name: "messages_native_helper",
-        status: "unknown",
-        summary: "Native Messages access can only be checked on macOS",
-      } satisfies DoctorCheck;
-  const messagesAutomation = process.platform === "darwin"
-    ? getMessagesAutomationCheck()
-    : {
-        name: "messages_automation",
-        status: "unknown",
-        summary: "Messages automation can only be checked on macOS",
-      } satisfies DoctorCheck;
+  const contacts =
+    process.platform === "darwin"
+      ? getContactsPermissionCheck()
+      : ({
+          name: "contacts_permission",
+          status: "unknown",
+          summary: "Contacts permission can only be checked on macOS",
+        } satisfies DoctorCheck);
+  const messagesDatabase =
+    process.platform === "darwin"
+      ? tryReadMessagesDatabase()
+      : ({
+          name: "messages_database",
+          status: "unknown",
+          summary: "Messages database access can only be checked on macOS",
+        } satisfies DoctorCheck);
+  const messagesNativeHelper =
+    process.platform === "darwin"
+      ? getMessagesNativeHelperCheck()
+      : ({
+          name: "messages_native_helper",
+          status: "unknown",
+          summary: "Native Messages access can only be checked on macOS",
+        } satisfies DoctorCheck);
+  const messagesAutomation =
+    process.platform === "darwin"
+      ? getMessagesAutomationCheck()
+      : ({
+          name: "messages_automation",
+          status: "unknown",
+          summary: "Messages automation can only be checked on macOS",
+        } satisfies DoctorCheck);
 
   return {
     permissions: summarizePermissionStatuses({
