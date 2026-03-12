@@ -22,7 +22,7 @@ function currentUid(): number {
 }
 
 function repoRoot(): string {
-  return resolve(dirname(fileURLToPath(import.meta.url)), "../../../../");
+  return resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 }
 
 function currentAppPath(): string | null {
