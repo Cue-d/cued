@@ -323,10 +323,10 @@ export class SignalRealtimeSession implements SignalRealtimeSessionLike {
     child.once("exit", (code, signal) => {
       const reason =
         code && code !== 0
-          ? `signal-cli jsonRpc exited with code ${code}`
+          ? `Bundled Signal helper jsonRpc exited with code ${code}`
           : signal
-            ? `signal-cli jsonRpc exited with signal ${signal}`
-            : "signal-cli jsonRpc exited";
+            ? `Bundled Signal helper jsonRpc exited with signal ${signal}`
+            : "Bundled Signal helper jsonRpc exited";
       this.handleExit(new Error(reason));
     });
   }

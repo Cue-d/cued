@@ -1,4 +1,4 @@
-import { chmodSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -23,7 +23,7 @@ describe("integration state management", () => {
     delete process.env.CUED_CONTACTS_NATIVE_BINARY;
     delete process.env.CUED_IMESSAGE_DB_PATH;
     delete process.env.CUED_SLACK_APP_BINARY;
-    delete process.env.CUED_SIGNAL_CLI_PATH;
+    delete process.env.CUED_APP_PATH;
     delete process.env.CUED_WHATSAPP_HELPER_BINARY;
 
     while (tempDirs.length > 0) {
@@ -47,6 +47,22 @@ describe("integration state management", () => {
     return db;
   }
 
+  function createPackagedSignalHelper(version = "0.12.9"): string {
+    const appPath = join(createTempDir("cued-app-"), "Cued.app");
+    const helperPath = join(
+      appPath,
+      "Contents",
+      "Resources",
+      "helpers",
+      "signal-cli",
+      "cued-signal-cli",
+    );
+    mkdirSync(join(helperPath, ".."), { recursive: true });
+    writeFileSync(helperPath, `#!/bin/sh\necho "signal-cli ${version}"\n`);
+    chmodSync(helperPath, 0o755);
+    return appPath;
+  }
+
   it("refreshes managed integrations and creates managed auth sessions for browser platforms", async () => {
     const nativeBinaryDir = createTempDir("cued-native-binary-");
     const nativeBinaryPath = join(nativeBinaryDir, "CuedNative");
@@ -59,7 +75,7 @@ describe("integration state management", () => {
     process.env.CUED_CONTACTS_NATIVE_BINARY = nativeBinaryPath;
     process.env.CUED_IMESSAGE_DB_PATH = join(createTempDir("cued-imessage-"), "missing.db");
     process.env.CUED_SLACK_APP_BINARY = join(createTempDir("cued-no-slack-app-"), "Slack");
-    process.env.CUED_SIGNAL_CLI_PATH = join(createTempDir("cued-no-signal-cli-"), "signal-cli");
+    process.env.CUED_APP_PATH = createPackagedSignalHelper();
     process.env.CUED_WHATSAPP_HELPER_BINARY = join(
       createTempDir("cued-no-whatsapp-helper-"),
       "cued-whatsapp-helper",
@@ -146,6 +162,12 @@ describe("integration state management", () => {
           platform: "linkedin",
           capability: expect.objectContaining({
             availability: "available",
+          }),
+        }),
+        expect.objectContaining({
+          platform: "signal",
+          metadata: expect.objectContaining({
+            authManagedBy: "signal-helper-runtime",
           }),
         }),
       ]),
@@ -270,7 +292,6 @@ describe("integration state management", () => {
         expect.objectContaining({
           platform: "signal",
           accountKey: "signal-a",
-          authState: "outdated",
           enabled: true,
           metadata: expect.objectContaining({
             configDir: expect.stringContaining("/signal-a"),
@@ -279,7 +300,6 @@ describe("integration state management", () => {
         expect.objectContaining({
           platform: "signal",
           accountKey: "signal-b",
-          authState: "outdated",
           enabled: false,
           metadata: expect.objectContaining({
             configDir: expect.stringContaining("/signal-b"),
@@ -288,7 +308,6 @@ describe("integration state management", () => {
         expect.objectContaining({
           platform: "whatsapp",
           accountKey: "whatsapp-a",
-          authState: "blocked",
           enabled: true,
           metadata: expect.objectContaining({
             storeDir: expect.stringContaining("/whatsapp-a"),
@@ -297,7 +316,6 @@ describe("integration state management", () => {
         expect.objectContaining({
           platform: "whatsapp",
           accountKey: "whatsapp-b",
-          authState: "blocked",
           enabled: false,
           metadata: expect.objectContaining({
             storeDir: expect.stringContaining("/whatsapp-b"),

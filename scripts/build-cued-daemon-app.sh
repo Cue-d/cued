@@ -16,6 +16,8 @@ RESOURCES_DIR="$CONTENTS_DIR/Resources"
 RUNTIME_DIR="$RESOURCES_DIR/cued-runtime"
 RUNTIME_NODE_DIR="$RESOURCES_DIR/runtime/node/bin"
 HELPERS_DIR="$RESOURCES_DIR/helpers"
+SIGNAL_FETCH_SCRIPT="$ROOT_DIR/scripts/fetch-signal-cli-macos.sh"
+SIGNAL_HELPER_SOURCE_DIR="$ROOT_DIR/native/helpers/signal-cli/.build/cued-signal-cli"
 WHATSAPP_HELPER_SOURCE="$ROOT_DIR/native/helpers/whatsapp-go/.build/cued-whatsapp-helper"
 PERMISSIONS_SCRIPT_SOURCE="$ROOT_DIR/scripts/request-macos-access.sh"
 TRAY_ICON_SOURCE="$ROOT_DIR/native/macos/CuedNative/Resources/trayIconTemplate.png"
@@ -62,6 +64,7 @@ mkdir -p "$APP_DIST_DIR"
 
 pnpm --dir "$ROOT_DIR" build >/dev/null
 swift build --package-path "$SWIFT_PACKAGE_DIR" -c release >/dev/null
+bash "$SIGNAL_FETCH_SCRIPT" >/dev/null
 mkdir -p "$(dirname "$WHATSAPP_HELPER_SOURCE")"
 (cd "$ROOT_DIR/native/helpers/whatsapp-go" && GOWORK=off go build -o "$WHATSAPP_HELPER_SOURCE" .) >/dev/null
 pnpm --dir "$ROOT_DIR" --filter . deploy --legacy --prod "$DEPLOY_STAGING_DIR" >/dev/null
@@ -74,6 +77,7 @@ chmod +x "$MACOS_DIR/$APP_EXECUTABLE_NAME"
 cp "$NODE_PATH" "$RUNTIME_NODE_DIR/node"
 chmod +x "$RUNTIME_NODE_DIR/node"
 cp -R "$DEPLOY_STAGING_DIR/." "$RUNTIME_DIR/"
+cp -R "$SIGNAL_HELPER_SOURCE_DIR" "$HELPERS_DIR/signal-cli"
 cp "$WHATSAPP_HELPER_SOURCE" "$HELPERS_DIR/cued-whatsapp-helper"
 chmod +x "$HELPERS_DIR/cued-whatsapp-helper"
 

@@ -5,6 +5,7 @@ Local build and macOS permission helpers for the headless Cued runtime.
 ## macOS Permissions
 
 ```bash
+pnpm bootstrap:signal:macos
 pnpm permissions:macos
 pnpm permissions:macos -- --contacts --messages
 pnpm permissions:macos -- --full-disk-access --open-only

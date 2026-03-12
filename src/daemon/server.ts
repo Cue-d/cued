@@ -563,10 +563,12 @@ async function sendSignalOutboundMessage(
 
   const inspected = await inspectSignalCli();
   if (!inspected.cliPath) {
-    throw new Error("signal-cli was not found");
+    throw new Error("Bundled Signal helper was not found");
   }
   if (!isSignalCliVersionSupported(inspected.version)) {
-    throw new Error(`signal-cli is too old (${inspected.version?.raw ?? "unknown"})`);
+    throw new Error(
+      `Bundled Signal helper is too old or invalid (${inspected.version?.raw ?? "unknown"})`,
+    );
   }
 
   const configDir = getSignalConfigDir(message.account_key);
@@ -624,7 +626,7 @@ async function collectDesiredSignalSessions(db: ReturnType<typeof openCuedDataba
       desired: [],
       degraded: integrations.map((integration) => ({
         ...baseStatus(integration),
-        lastSessionError: "signal-cli was not found",
+        lastSessionError: "Bundled Signal helper was not found",
       })),
     };
   }
@@ -634,7 +636,7 @@ async function collectDesiredSignalSessions(db: ReturnType<typeof openCuedDataba
       desired: [],
       degraded: integrations.map((integration) => ({
         ...baseStatus(integration),
-        lastSessionError: `signal-cli is too old (${inspected.version?.raw ?? "unknown"})`,
+        lastSessionError: `Bundled Signal helper is too old or invalid (${inspected.version?.raw ?? "unknown"})`,
       })),
     };
   }
