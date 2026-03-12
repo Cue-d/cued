@@ -7,10 +7,10 @@ import {
   type HostOS,
   isOnboardingVisiblePlatform,
   isPlatformSupportedOnHost,
-  platformSupportsMultipleAccounts,
   type Platform,
   type PlatformHelperRequirement,
   type PlatformPermissionRequirement,
+  platformSupportsMultipleAccounts,
 } from "./types/provider.js";
 
 export type PlatformAvailabilityState =
