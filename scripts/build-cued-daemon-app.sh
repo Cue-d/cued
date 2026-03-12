@@ -21,6 +21,7 @@ PERMISSIONS_SCRIPT_SOURCE="$ROOT_DIR/scripts/request-macos-access.sh"
 TRAY_ICON_SOURCE="$ROOT_DIR/native/macos/CuedNative/Resources/trayIconTemplate.png"
 CUED_MARK_SOURCE="$ROOT_DIR/native/macos/CuedNative/Resources/cued-mark.png"
 NODE_PATH="${CUED_NODE_PATH:-$(command -v node)}"
+RUNTIME_SYMLINK_PRUNER="$ROOT_DIR/apps/cued/dist/macos/runtime-symlinks.js"
 DB_PATH="${CUED_DB_PATH_OVERRIDE:-$HOME/.cued/local.db}"
 APP_VERSION="$("$NODE_PATH" -p "require(process.argv[1]).version" "$ROOT_DIR/apps/cued/package.json")"
 RELEASE_CHANNEL="${CUED_RELEASE_CHANNEL:-internal}"
@@ -61,35 +62,8 @@ cp -R "$DEPLOY_STAGING_DIR/." "$RUNTIME_DIR/"
 cp "$WHATSAPP_HELPER_SOURCE" "$HELPERS_DIR/cued-whatsapp-helper"
 chmod +x "$HELPERS_DIR/cued-whatsapp-helper"
 
-# Remove workspace symlinks that escape the bundled runtime; they break app signing.
-"$NODE_PATH" -e '
-const fs = require("node:fs");
-const path = require("node:path");
-
-const runtimeRoot = fs.realpathSync(process.argv[1]);
-
-function visit(dir) {
-  for (const entryName of fs.readdirSync(dir)) {
-    const entryPath = path.join(dir, entryName);
-    const stat = fs.lstatSync(entryPath);
-    if (stat.isDirectory()) {
-      visit(entryPath);
-      continue;
-    }
-    if (!stat.isSymbolicLink()) continue;
-
-    const linkTarget = fs.readlinkSync(entryPath);
-    const resolvedTarget = path.resolve(path.dirname(entryPath), linkTarget);
-    const normalizedTarget = path.normalize(resolvedTarget);
-    if (normalizedTarget === runtimeRoot || normalizedTarget.startsWith(`${runtimeRoot}${path.sep}`)) {
-      continue;
-    }
-    fs.rmSync(entryPath, { force: true });
-  }
-}
-
-visit(runtimeRoot);
-' "$RUNTIME_DIR"
+# Remove symlinks that escape the bundled runtime or no longer resolve after deploy.
+"$NODE_PATH" "$RUNTIME_SYMLINK_PRUNER" "$RUNTIME_DIR" >/dev/null
 rm -rf "$RUNTIME_DIR/node_modules/cued" "$RUNTIME_DIR/node_modules/@cued/app"
 
 mkdir -p "$RESOURCES_DIR/scripts"
