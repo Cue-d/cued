@@ -1,5 +1,6 @@
+import type { ConversationsResult, LinkedInClient } from "./client.js";
 import { PAGINATION_DEFAULTS } from "./constants.js";
-import type { LinkedInClient, ConversationsResult } from "./client.js";
+import { newMessagingGraphQLRequest } from "./request.js";
 import type {
   AttributedText,
   CollectionResponse,
@@ -9,7 +10,6 @@ import type {
   PagingMetadata,
   VectorImage,
 } from "./types.js";
-import { newMessagingGraphQLRequest } from "./request.js";
 
 interface GraphQLConversationsResponse {
   data?: {
@@ -138,7 +138,8 @@ function parseMessage(raw: RawMessage): Message | null {
     deliveredAt: raw.deliveredAt ?? 0,
     entityURN: raw.entityUrn,
     sender,
-    messageBodyRenderFormat: (raw.messageBodyRenderFormat ?? "DEFAULT") as Message["messageBodyRenderFormat"],
+    messageBodyRenderFormat: (raw.messageBodyRenderFormat ??
+      "DEFAULT") as Message["messageBodyRenderFormat"],
     renderContent: raw.renderContent,
     reactionSummaries: raw.reactionSummaries,
     conversationURN: raw["*conversationUrn"] ?? "",
@@ -211,11 +212,12 @@ export async function getConversations(
 ): Promise<ConversationsResult> {
   const mailboxUrn = await client.getMailboxUrn();
   const queryId = syncToken ? "messengerConversationsBySyncToken" : "messengerConversations";
-  const variables: Record<string, string> = syncToken
-    ? { mailboxUrn, syncToken }
-    : { mailboxUrn };
-  const response = await newMessagingGraphQLRequest(client.cookies, queryId, variables)
-    .doJSON<GraphQLConversationsResponse>();
+  const variables: Record<string, string> = syncToken ? { mailboxUrn, syncToken } : { mailboxUrn };
+  const response = await newMessagingGraphQLRequest(
+    client.cookies,
+    queryId,
+    variables,
+  ).doJSON<GraphQLConversationsResponse>();
   return parseConversationsResponse(response);
 }
 

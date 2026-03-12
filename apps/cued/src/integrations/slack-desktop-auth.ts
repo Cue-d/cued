@@ -1,4 +1,4 @@
-import { execFileSync, spawn, type ChildProcess } from "node:child_process";
+import { type ChildProcess, execFileSync, spawn } from "node:child_process";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { chromium } from "playwright";
@@ -10,7 +10,12 @@ declare const localStorage: {
 };
 
 const DEFAULT_SLACK_APP_BINARY = "/Applications/Slack.app/Contents/MacOS/Slack";
-const DEFAULT_SLACK_USER_DATA_DIR = join(process.env.HOME ?? "", "Library", "Application Support", "Slack");
+const DEFAULT_SLACK_USER_DATA_DIR = join(
+  process.env.HOME ?? "",
+  "Library",
+  "Application Support",
+  "Slack",
+);
 const DEFAULT_DEBUGGING_PORT = 9222;
 
 interface SlackDesktopTeamConfig {
@@ -38,7 +43,9 @@ function getDebuggingPort(): number {
 }
 
 function hasAuthenticatedSlackIntegration(db: CuedDatabase): boolean {
-  return db.listIntegrationStates().some((row) => row.platform === "slack" && row.auth_state === "authenticated");
+  return db
+    .listIntegrationStates()
+    .some((row) => row.platform === "slack" && row.auth_state === "authenticated");
 }
 
 function isSlackInstalled(): boolean {
@@ -79,12 +86,14 @@ function parseLocalConfig(raw: string): SlackDesktopLocalConfig {
   return JSON.parse(raw) as SlackDesktopLocalConfig;
 }
 
-export async function importSlackDesktopAuth(db: CuedDatabase): Promise<Array<{
-  platform: "slack";
-  accountKey: string;
-  sourcePath: string;
-  imported: boolean;
-}>> {
+export async function importSlackDesktopAuth(db: CuedDatabase): Promise<
+  Array<{
+    platform: "slack";
+    accountKey: string;
+    sourcePath: string;
+    imported: boolean;
+  }>
+> {
   if (!isSlackInstalled() || hasAuthenticatedSlackIntegration(db)) {
     return [];
   }
@@ -113,35 +122,40 @@ export async function importSlackDesktopAuth(db: CuedDatabase): Promise<Array<{
       }
 
       const parsed = parseLocalConfig(rawLocalConfig);
-      const teams = Object.values(parsed.teams ?? {}).filter((team) =>
-        typeof team?.id === "string"
-        && typeof team?.name === "string"
-        && typeof team?.token === "string"
-        && team.token.startsWith("xoxc-")
-        && typeof team?.user_id === "string"
+      const teams = Object.values(parsed.teams ?? {}).filter(
+        (team) =>
+          typeof team?.id === "string" &&
+          typeof team?.name === "string" &&
+          typeof team?.token === "string" &&
+          team.token.startsWith("xoxc-") &&
+          typeof team?.user_id === "string",
       );
       if (teams.length === 0) {
         throw new Error("No authenticated Slack teams were present in localConfig_v2");
       }
 
       const cookies = await context.cookies(["https://slack.com", "https://app.slack.com"]);
-      const dCookie = cookies.find((cookie) => cookie.name === "d" && cookie.domain.includes("slack.com"));
+      const dCookie = cookies.find(
+        (cookie) => cookie.name === "d" && cookie.domain.includes("slack.com"),
+      );
       if (!dCookie?.value) {
         throw new Error("Slack desktop app did not expose the required d cookie");
       }
 
       const sourcePath = getSlackUserDataDir();
-      return teams.map((team) => storeSlackSession(db, {
-        accountKey: team.id,
-        teamId: team.id,
-        teamName: team.name,
-        userId: team.user_id,
-        token: team.token,
-        cookie: dCookie.value,
-        savedAt: Date.now(),
-        sourcePath,
-        importMethod: "slack-desktop-cdp",
-      }));
+      return teams.map((team) =>
+        storeSlackSession(db, {
+          accountKey: team.id,
+          teamId: team.id,
+          teamName: team.name,
+          userId: team.user_id,
+          token: team.token,
+          cookie: dCookie.value,
+          savedAt: Date.now(),
+          sourcePath,
+          importMethod: "slack-desktop-cdp",
+        }),
+      );
     } finally {
       await browser.close();
     }

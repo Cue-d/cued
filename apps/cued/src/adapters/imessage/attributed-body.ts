@@ -27,9 +27,9 @@ export function extractTextFromAttributedBody(blob: Buffer | null): string | nul
     const firstByte = afterMarker[i];
     if ((firstByte === 0x94 || firstByte === 0x95) && afterMarker.length > i + 4) {
       if (
-        afterMarker[i + 1] === 0x84
-        && afterMarker[i + 2] === 0x01
-        && afterMarker[i + 3] === 0x2b
+        afterMarker[i + 1] === 0x84 &&
+        afterMarker[i + 2] === 0x01 &&
+        afterMarker[i + 3] === 0x2b
       ) {
         const result = decodeLength(afterMarker, i + 4);
         if (!result) continue;

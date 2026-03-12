@@ -1,7 +1,7 @@
-import { PAGINATION_DEFAULTS } from "./constants.js";
 import type { LinkedInClient, MessagesResult } from "./client.js";
-import type { AttributedText, Message, PagingMetadata } from "./types.js";
+import { PAGINATION_DEFAULTS } from "./constants.js";
 import { linkedInEncode, newMessagingGraphQLRequest } from "./request.js";
+import type { AttributedText, Message, PagingMetadata } from "./types.js";
 
 interface MessagesGraphQLResponse {
   data?: {
@@ -106,9 +106,11 @@ function parseRawMessage(raw: RawMessage, conversationURN: string): Message {
   };
 }
 
-function parsePagingMetadata(
-  paging?: { start?: number; count?: number; total?: number },
-): PagingMetadata | undefined {
+function parsePagingMetadata(paging?: {
+  start?: number;
+  count?: number;
+  total?: number;
+}): PagingMetadata | undefined {
   return paging
     ? {
         start: paging.start,

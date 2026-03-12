@@ -119,11 +119,12 @@ export function buildSignalMessageConversationEvent(
   accountKey: string,
   observedAt: number,
 ): SyncBundle["rawEvents"][number] {
-  const participants = message.threadType === "group"
-    ? []
-    : message.peerHandle
-      ? [{ sourceEntityKey: signalSourceEntityKey(message.peerHandle) }]
-      : [];
+  const participants =
+    message.threadType === "group"
+      ? []
+      : message.peerHandle
+        ? [{ sourceEntityKey: signalSourceEntityKey(message.peerHandle) }]
+        : [];
 
   return {
     id: stableId(`signal:conversation:${accountKey}:${message.threadId}:${observedAt}`),
@@ -166,11 +167,13 @@ export function buildSyntheticSignalContactEvent(
       fields: {
         display_name: displayName,
       },
-      handles: [{
-        type: contactHandleType(handle),
-        value: handle,
-        deterministic: true,
-      }],
+      handles: [
+        {
+          type: contactHandleType(handle),
+          value: handle,
+          deterministic: true,
+        },
+      ],
     } satisfies ContactObservationPayload,
     sourceVersion: "signal-v1",
   };
@@ -262,12 +265,14 @@ function appendMessageEvents(
     const peerHandle = message.peerHandle || message.senderHandle;
     if (peerHandle && !seenContacts.has(peerHandle)) {
       seenContacts.add(peerHandle);
-      rawEvents.push(buildSyntheticSignalContactEvent(
-        peerHandle,
-        message.senderName ?? peerHandle,
-        accountKey,
-        observedAt,
-      ));
+      rawEvents.push(
+        buildSyntheticSignalContactEvent(
+          peerHandle,
+          message.senderName ?? peerHandle,
+          accountKey,
+          observedAt,
+        ),
+      );
     }
 
     const conversationKey = signalSourceConversationKey(message.threadId);

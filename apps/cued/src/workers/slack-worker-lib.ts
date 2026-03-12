@@ -1,6 +1,4 @@
 import { createHash } from "node:crypto";
-import type { SyncBundle } from "../adapters/types.js";
-import { loadIntegrationSecret } from "../integrations/keychain.js";
 import {
   SlackClient,
   type SlackConversation,
@@ -8,6 +6,8 @@ import {
   type SlackMessage,
   type SlackUser,
 } from "../adapters/slack/api/index.js";
+import type { SyncBundle } from "../adapters/types.js";
+import { loadIntegrationSecret } from "../integrations/keychain.js";
 import type {
   ContactObservationPayload,
   ConversationObservationPayload,
@@ -18,12 +18,21 @@ import type {
 
 const DEFAULT_SYNC_HISTORY_DAYS = Number(process.env.CUED_SYNC_HISTORY_DAYS ?? "730");
 const INCREMENTAL_BUFFER_MS = 5 * 60 * 1000;
-const DEFAULT_SLACK_CONVERSATIONS_PER_RUN = Number(process.env.CUED_SLACK_CONVERSATIONS_PER_RUN ?? "100");
-const DEFAULT_SLACK_MESSAGES_PAGE_LIMIT = Number(process.env.CUED_SLACK_MESSAGES_PAGE_LIMIT ?? "100");
+const DEFAULT_SLACK_CONVERSATIONS_PER_RUN = Number(
+  process.env.CUED_SLACK_CONVERSATIONS_PER_RUN ?? "100",
+);
+const DEFAULT_SLACK_MESSAGES_PAGE_LIMIT = Number(
+  process.env.CUED_SLACK_MESSAGES_PAGE_LIMIT ?? "100",
+);
 
 type SlackClientLike = Pick<
   SlackClient,
-  "testAuth" | "listUsers" | "listConversations" | "getConversationMembers" | "getHistory" | "getReplies"
+  | "testAuth"
+  | "listUsers"
+  | "listConversations"
+  | "getConversationMembers"
+  | "getHistory"
+  | "getReplies"
 >;
 
 type SlackScanMode = "full" | "incremental";
@@ -116,10 +125,9 @@ function buildConversationDisplayName(
     return conversation.user;
   }
 
-  return conversation.name
-    || conversation.topic?.value
-    || conversation.purpose?.value
-    || conversation.id;
+  return (
+    conversation.name || conversation.topic?.value || conversation.purpose?.value || conversation.id
+  );
 }
 
 function shouldIncludeMessage(message: SlackMessage): boolean {
@@ -127,9 +135,9 @@ function shouldIncludeMessage(message: SlackMessage): boolean {
     return false;
   }
   return Boolean(
-    message.text
-    || (message.files && message.files.length > 0)
-    || (message.attachments && message.attachments.length > 0),
+    message.text ||
+      (message.files && message.files.length > 0) ||
+      (message.attachments && message.attachments.length > 0),
   );
 }
 
@@ -173,27 +181,29 @@ function parseSlackSourceCursor(raw: unknown): SlackSourceCursor | undefined {
   const teamId = typeof value.teamId === "string" ? value.teamId : "";
   const selfUserId = typeof value.selfUserId === "string" ? value.selfUserId : "";
   const rawScan = value.scan;
-  const scan = rawScan && typeof rawScan === "object"
-    ? (() => {
-        const parsed = rawScan as Record<string, unknown>;
-        const mode = parsed.mode === "incremental" ? "incremental" : parsed.mode === "full" ? "full" : null;
-        const startedAt = typeof parsed.startedAt === "number" ? parsed.startedAt : null;
-        const oldestMs = typeof parsed.oldestMs === "number" ? parsed.oldestMs : null;
-        if (!mode || startedAt == null || oldestMs == null) {
-          return undefined;
-        }
-        return {
-          mode,
-          startedAt,
-          oldestMs,
-          usersComplete: parsed.usersComplete === true,
-          conversationCursor:
-            typeof parsed.conversationCursor === "string" || parsed.conversationCursor === null
-              ? parsed.conversationCursor
-              : undefined,
-        } satisfies SlackScanCursor;
-      })()
-    : undefined;
+  const scan =
+    rawScan && typeof rawScan === "object"
+      ? (() => {
+          const parsed = rawScan as Record<string, unknown>;
+          const mode =
+            parsed.mode === "incremental" ? "incremental" : parsed.mode === "full" ? "full" : null;
+          const startedAt = typeof parsed.startedAt === "number" ? parsed.startedAt : null;
+          const oldestMs = typeof parsed.oldestMs === "number" ? parsed.oldestMs : null;
+          if (!mode || startedAt == null || oldestMs == null) {
+            return undefined;
+          }
+          return {
+            mode,
+            startedAt,
+            oldestMs,
+            usersComplete: parsed.usersComplete === true,
+            conversationCursor:
+              typeof parsed.conversationCursor === "string" || parsed.conversationCursor === null
+                ? parsed.conversationCursor
+                : undefined,
+          } satisfies SlackScanCursor;
+        })()
+      : undefined;
 
   if (!teamId || !selfUserId) {
     if (lastSyncAt == null && !scan) {
@@ -321,7 +331,8 @@ function buildContactEvents(
       payload: {
         sourceEntityKey: slackSourceKey(teamId, user.id),
         fields: {
-          display_name: user.real_name || user.profile.real_name || user.profile.display_name || user.name,
+          display_name:
+            user.real_name || user.profile.real_name || user.profile.display_name || user.name,
           photo_url: bestSlackAvatar(user.profile) ?? null,
         },
         handles: [
@@ -330,11 +341,15 @@ function buildContactEvents(
             value: `${teamId}:${user.id}`,
             deterministic: true,
           },
-          ...(user.profile.email ? [{
-            type: "email",
-            value: user.profile.email,
-            deterministic: true,
-          }] : []),
+          ...(user.profile.email
+            ? [
+                {
+                  type: "email",
+                  value: user.profile.email,
+                  deterministic: true,
+                },
+              ]
+            : []),
         ],
       } satisfies ContactObservationPayload,
       sourceVersion: "slack-v1",
@@ -375,14 +390,14 @@ function buildMessageEvents(
         sourceMessageKey: slackMessageKey(teamId, conversationId, message.ts),
         sourceConversationKey: `slack:${teamId}:${conversationId}`,
         senderSourceKey:
-          senderUserId && senderUserId !== selfUserId
-            ? slackSourceKey(teamId, senderUserId)
-            : null,
+          senderUserId && senderUserId !== selfUserId ? slackSourceKey(teamId, senderUserId) : null,
         sentAt: messageTsMs,
         content:
-          message.text
-          || attachments
-            .map((attachment) => String(attachment.title ?? attachment.name ?? attachment.text ?? ""))
+          message.text ||
+          attachments
+            .map((attachment) =>
+              String(attachment.title ?? attachment.name ?? attachment.text ?? ""),
+            )
             .filter(Boolean)
             .join("\n"),
         service: "slack",
@@ -402,7 +417,9 @@ function buildMessageEvents(
 
     for (const reaction of message.reactions ?? []) {
       for (const reactorUserId of reaction.users) {
-        const reactionId = dedupeKey(`slack:reaction:${teamId}:${conversationId}:${message.ts}:${reaction.name}:${reactorUserId}`);
+        const reactionId = dedupeKey(
+          `slack:reaction:${teamId}:${conversationId}:${message.ts}:${reaction.name}:${reactorUserId}`,
+        );
         rawEvents.push({
           id: reactionId,
           platform: "slack",
@@ -417,7 +434,8 @@ function buildMessageEvents(
           payload: {
             sourceMessageKey: slackMessageKey(teamId, conversationId, message.ts),
             sourceConversationKey: `slack:${teamId}:${conversationId}`,
-            reactorSourceKey: reactorUserId === selfUserId ? null : slackSourceKey(teamId, reactorUserId),
+            reactorSourceKey:
+              reactorUserId === selfUserId ? null : slackSourceKey(teamId, reactorUserId),
             emoji: `:${reaction.name}:`,
             timestamp: messageTsMs,
             isActive: true,
@@ -444,9 +462,7 @@ export async function buildSlackSyncBundle(options?: {
   const client = options?.client ?? new SlackClient(loadedAuth!);
   const savedCursor = parseSlackSourceCursor(options?.sourceCursor);
   const previousLastSyncAt =
-    typeof options?.lastSyncAt === "number"
-      ? options.lastSyncAt
-      : savedCursor?.lastSyncAt;
+    typeof options?.lastSyncAt === "number" ? options.lastSyncAt : savedCursor?.lastSyncAt;
 
   const auth = await client.testAuth();
   if (!auth.ok || !auth.team_id || !auth.user_id) {
@@ -499,7 +515,10 @@ export async function buildSlackSyncBundle(options?: {
   );
 
   for (const conversation of conversationPage.conversations) {
-    if (scan.mode === "incremental" && !shouldFetchConversationIncrementally(conversation, scan.oldestMs)) {
+    if (
+      scan.mode === "incremental" &&
+      !shouldFetchConversationIncrementally(conversation, scan.oldestMs)
+    ) {
       continue;
     }
 
@@ -523,7 +542,8 @@ export async function buildSlackSyncBundle(options?: {
       dedupeKey: conversationId,
       payload: {
         sourceConversationKey: `slack:${teamId}:${conversation.id}`,
-        conversationType: conversation.is_mpim || conversation.is_channel || conversation.is_group ? "group" : "dm",
+        conversationType:
+          conversation.is_mpim || conversation.is_channel || conversation.is_group ? "group" : "dm",
         displayName: buildConversationDisplayName(conversation, usersById),
         nativeConversationKey: conversation.id,
         service: "slack",
@@ -536,7 +556,14 @@ export async function buildSlackSyncBundle(options?: {
     });
 
     rawEvents.push(
-      ...buildMessageEvents(teamId, accountKey, conversation.id, selfUserId, observedBase, messages),
+      ...buildMessageEvents(
+        teamId,
+        accountKey,
+        conversation.id,
+        selfUserId,
+        observedBase,
+        messages,
+      ),
     );
   }
 

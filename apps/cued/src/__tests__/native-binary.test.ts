@@ -1,15 +1,21 @@
-import { chmodSync, mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { getMacOSNativeBinaryCandidates, resolveMacOSNativeBinary } from "../workers/native-binary.js";
+import {
+  getMacOSNativeBinaryCandidates,
+  resolveMacOSNativeBinary,
+} from "../workers/native-binary.js";
 
 describe("macOS native binary resolution", () => {
   const tempDirs: string[] = [];
 
   afterEach(() => {
     while (tempDirs.length > 0) {
-      rmSync(tempDirs.pop()!, { recursive: true, force: true });
+      const dir = tempDirs.pop();
+      if (dir) {
+        rmSync(dir, { recursive: true, force: true });
+      }
     }
   });
 

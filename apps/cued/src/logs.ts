@@ -1,7 +1,6 @@
-import { createReadStream, existsSync, mkdirSync, readFileSync, statSync } from "node:fs";
+import { createReadStream, existsSync, mkdirSync, readFileSync, statSync, watch } from "node:fs";
 import { dirname } from "node:path";
 import process from "node:process";
-import { watch } from "node:fs";
 import { CUED_DAEMON_LOG_PATH } from "./config.js";
 
 export interface LogsCommandOptions {

@@ -15,10 +15,10 @@ vi.mock("node:child_process", async (importOriginal) => {
 });
 
 import {
-  WhatsAppRealtimeSession,
-  WhatsAppRealtimeSupervisor,
   parseWhatsAppHelperLine,
+  WhatsAppRealtimeSession,
   type WhatsAppRealtimeSessionLike,
+  WhatsAppRealtimeSupervisor,
 } from "../integrations/whatsapp-realtime.js";
 
 class MockChild extends EventEmitter {
@@ -60,28 +60,35 @@ describe("whatsapp realtime", () => {
     session.start();
     child.emit("spawn");
 
-    child.stdout.write(`${JSON.stringify({
-      event: "connected",
-      data: {
-        accountJid: "15551234567@s.whatsapp.net",
-      },
-    })}\n`);
+    child.stdout.write(
+      `${JSON.stringify({
+        event: "connected",
+        data: {
+          accountJid: "15551234567@s.whatsapp.net",
+        },
+      })}\n`,
+    );
 
-    child.stdout.write(`${JSON.stringify({
-      event: "message_upsert",
-      data: {
-        messageID: "wamid-1",
-        chatJID: "12016824050@s.whatsapp.net",
-        senderJID: "12016824050@s.whatsapp.net",
-        fromMe: false,
-        timestamp: 1_710_000_000_000,
-        text: "hello",
-      },
-    })}\n`);
+    child.stdout.write(
+      `${JSON.stringify({
+        event: "message_upsert",
+        data: {
+          messageID: "wamid-1",
+          chatJID: "12016824050@s.whatsapp.net",
+          senderJID: "12016824050@s.whatsapp.net",
+          fromMe: false,
+          timestamp: 1_710_000_000_000,
+          text: "hello",
+        },
+      })}\n`,
+    );
 
-    expect(onEvent).toHaveBeenCalledWith("default", expect.objectContaining({
-      event: "message_upsert",
-    }));
+    expect(onEvent).toHaveBeenCalledWith(
+      "default",
+      expect.objectContaining({
+        event: "message_upsert",
+      }),
+    );
 
     const sendPromise = session.sendText("12016824050@s.whatsapp.net", "ping");
     expect(JSON.parse(child.stdinWrites[0]!.trim())).toEqual({
@@ -91,15 +98,17 @@ describe("whatsapp realtime", () => {
       text: "ping",
     });
 
-    child.stdout.write(`${JSON.stringify({
-      id: 1,
-      ok: true,
-      result: {
-        messageID: "wamid-2",
-        chatJID: "12016824050@s.whatsapp.net",
-        timestamp: 123,
-      },
-    })}\n`);
+    child.stdout.write(
+      `${JSON.stringify({
+        id: 1,
+        ok: true,
+        result: {
+          messageID: "wamid-2",
+          chatJID: "12016824050@s.whatsapp.net",
+          timestamp: 123,
+        },
+      })}\n`,
+    );
 
     await expect(sendPromise).resolves.toEqual({
       messageID: "wamid-2",
@@ -188,11 +197,13 @@ describe("whatsapp realtime", () => {
       }),
     });
 
-    supervisor.reconcile([{
-      accountKey: "default",
-      helperPath: "/tmp/cued-whatsapp-helper",
-      storeDir: "/tmp/cued-whatsapp/default",
-    }]);
+    supervisor.reconcile([
+      {
+        accountKey: "default",
+        helperPath: "/tmp/cued-whatsapp-helper",
+        storeDir: "/tmp/cued-whatsapp/default",
+      },
+    ]);
 
     expect(started).toEqual(["default"]);
     expect(supervisor.getStatuses()).toEqual([

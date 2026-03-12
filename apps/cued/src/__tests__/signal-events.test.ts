@@ -1,11 +1,11 @@
 import { describe, expect, it } from "vitest";
+import { toSignalMessage } from "../integrations/signal-cli.js";
 import {
   buildOptimisticSignalRawEvents,
   buildSignalMessageEvent,
   buildSignalRawEventsFromMessages,
   buildSignalRawEventsFromSnapshot,
 } from "../integrations/signal-events.js";
-import { toSignalMessage } from "../integrations/signal-cli.js";
 
 describe("signal events", () => {
   it("reuses message identifiers between realtime and catch-up normalization", () => {
@@ -54,23 +54,30 @@ describe("signal events", () => {
     });
     const optimisticMessage = optimisticEvents.find((event) => event.entityKind === "message");
 
-    const echoed = toSignalMessage({
-      envelope: {
-        timestamp: 1_710_000_000_000,
-        syncMessage: {
-          sentMessage: {
-            timestamp: 1_710_000_000_000,
-            message: "test from Cued via signal_id",
-            destinationUuid: "d6ed1597-758c-4022-96aa-253b334f1f5d",
+    const echoed = toSignalMessage(
+      {
+        envelope: {
+          timestamp: 1_710_000_000_000,
+          syncMessage: {
+            sentMessage: {
+              timestamp: 1_710_000_000_000,
+              message: "test from Cued via signal_id",
+              destinationUuid: "d6ed1597-758c-4022-96aa-253b334f1f5d",
+            },
           },
         },
       },
-    }, "+13474468966", 0);
+      "+13474468966",
+      0,
+    );
 
     expect(echoed).not.toBeNull();
+    if (!echoed) {
+      throw new Error("expected echoed signal message");
+    }
     const echoedEvents = buildSignalRawEventsFromMessages({
       accountKey: "default",
-      messages: [echoed!],
+      messages: [echoed],
       observedBase: 201,
     });
     const echoedMessage = echoedEvents.find((event) => event.entityKind === "message");

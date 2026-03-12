@@ -1,16 +1,16 @@
+import type { IntegrationStateSummary } from "./integrations/service.js";
 import {
   getPlatformHelperRequirements,
   getPlatformPermissionRequirements,
   getSupportedHostOsForPlatform,
   HOST_OS_VALUES,
+  type HostOS,
   isOnboardingVisiblePlatform,
   isPlatformSupportedOnHost,
-  type HostOS,
   type Platform,
   type PlatformHelperRequirement,
   type PlatformPermissionRequirement,
 } from "./types/provider.js";
-import type { IntegrationStateSummary } from "./integrations/service.js";
 
 export type PlatformAvailabilityState =
   | "available"
@@ -62,7 +62,10 @@ function resolveHelperAvailability(
     return null;
   }
 
-  if (requirements.includes("signal_cli") && (integration.authState === "missing" || integration.authState === "outdated")) {
+  if (
+    requirements.includes("signal_cli") &&
+    (integration.authState === "missing" || integration.authState === "outdated")
+  ) {
     return "requires_helper";
   }
 

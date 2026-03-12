@@ -1,6 +1,5 @@
-import { createHash, randomUUID } from "node:crypto";
-import { buildIMessageSyncBundle } from "../workers/imessage-worker-lib.js";
 import type { AdapterWorkerOutput } from "../adapters/types.js";
+import { buildIMessageSyncBundle } from "../workers/imessage-worker-lib.js";
 
 async function main(): Promise<void> {
   try {

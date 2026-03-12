@@ -1,4 +1,4 @@
-import { chmodSync, mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -9,7 +9,10 @@ describe("macOS app bundle resolution", () => {
 
   afterEach(() => {
     while (tempDirs.length > 0) {
-      rmSync(tempDirs.pop()!, { recursive: true, force: true });
+      const dir = tempDirs.pop();
+      if (dir) {
+        rmSync(dir, { recursive: true, force: true });
+      }
     }
   });
 
@@ -23,7 +26,9 @@ describe("macOS app bundle resolution", () => {
     const appPath = join(baseDir, "Cued.app");
     const macOSDir = join(appPath, "Contents", "MacOS");
     mkdirSync(macOSDir, { recursive: true });
-    writeFileSync(join(appPath, "Contents", "Info.plist"), `<?xml version="1.0" encoding="UTF-8"?>
+    writeFileSync(
+      join(appPath, "Contents", "Info.plist"),
+      `<?xml version="1.0" encoding="UTF-8"?>
 <plist version="1.0">
 <dict>
   <key>CFBundleIdentifier</key>
@@ -34,7 +39,8 @@ describe("macOS app bundle resolution", () => {
   <string>Cued</string>
 </dict>
 </plist>
-`);
+`,
+    );
     const executablePath = join(macOSDir, "CuedDaemon");
     writeFileSync(executablePath, "#!/bin/sh\nexit 0\n");
     chmodSync(executablePath, 0o755);

@@ -1,9 +1,9 @@
 import { createHash } from "node:crypto";
 import {
-  LinkedInClient,
   type Connection,
   type Conversation,
   type Cookie,
+  LinkedInClient,
   type Message,
   type MessagingParticipant,
 } from "../adapters/linkedin/api/index.js";
@@ -23,7 +23,9 @@ const INCREMENTAL_BUFFER_MS = 5 * 60 * 1000;
 const MAX_CONNECTION_PAGES = Number(process.env.CUED_LINKEDIN_CONNECTION_PAGES ?? "25");
 const MAX_CONVERSATION_PAGES = Number(process.env.CUED_LINKEDIN_CONVERSATION_PAGES ?? "50");
 const MAX_MESSAGE_PAGES = Number(process.env.CUED_LINKEDIN_MESSAGE_PAGES ?? "10");
-const DEFAULT_LINKEDIN_FETCH_CONCURRENCY = Number(process.env.CUED_LINKEDIN_FETCH_CONCURRENCY ?? "3");
+const DEFAULT_LINKEDIN_FETCH_CONCURRENCY = Number(
+  process.env.CUED_LINKEDIN_FETCH_CONCURRENCY ?? "3",
+);
 
 type LinkedInClientLike = Pick<
   LinkedInClient,
@@ -40,7 +42,8 @@ function now(): number {
 }
 
 function getLinkedInFetchConcurrency(): number {
-  return Number.isFinite(DEFAULT_LINKEDIN_FETCH_CONCURRENCY) && DEFAULT_LINKEDIN_FETCH_CONCURRENCY > 0
+  return Number.isFinite(DEFAULT_LINKEDIN_FETCH_CONCURRENCY) &&
+    DEFAULT_LINKEDIN_FETCH_CONCURRENCY > 0
     ? Math.trunc(DEFAULT_LINKEDIN_FETCH_CONCURRENCY)
     : 3;
 }
@@ -91,7 +94,10 @@ function linkedinProfileUrlFromUrn(urn: string | undefined): string | null {
 
 function bestParticipantName(participant: MessagingParticipant): string {
   if (participant.participantType.member) {
-    return [participant.participantType.member.firstName, participant.participantType.member.lastName]
+    return [
+      participant.participantType.member.firstName,
+      participant.participantType.member.lastName,
+    ]
       .filter(Boolean)
       .join(" ")
       .trim();
@@ -100,9 +106,11 @@ function bestParticipantName(participant: MessagingParticipant): string {
 }
 
 function bestParticipantPhoto(participant: MessagingParticipant): string | null {
-  return participant.participantType.member?.picture?.url
-    ?? participant.participantType.organization?.logoUrl
-    ?? null;
+  return (
+    participant.participantType.member?.picture?.url ??
+    participant.participantType.organization?.logoUrl ??
+    null
+  );
 }
 
 function participantHandles(participant: MessagingParticipant): ContactHandleInput[] {
@@ -114,7 +122,8 @@ function participantHandles(participant: MessagingParticipant): ContactHandleInp
     },
   ];
   const profileUrl =
-    participant.participantType.member?.profileUrl || linkedinProfileUrlFromUrn(participant.entityURN);
+    participant.participantType.member?.profileUrl ||
+    linkedinProfileUrlFromUrn(participant.entityURN);
   if (profileUrl) {
     handles.push({
       type: "linkedin_profile_url",
@@ -193,12 +202,14 @@ async function listConversations(
     seen.set(conversation.entityURN, conversation);
   }
 
-  let oldestLastActivity = Math.min(...firstPage.conversations.map((conversation) => conversation.lastActivityAt));
+  let oldestLastActivity = Math.min(
+    ...firstPage.conversations.map((conversation) => conversation.lastActivityAt),
+  );
   let pageCount = 1;
   while (
-    Number.isFinite(oldestLastActivity)
-    && oldestLastActivity > getHistoryCutoffMs()
-    && pageCount < MAX_CONVERSATION_PAGES
+    Number.isFinite(oldestLastActivity) &&
+    oldestLastActivity > getHistoryCutoffMs() &&
+    pageCount < MAX_CONVERSATION_PAGES
   ) {
     const page = await client.getConversationsBefore(oldestLastActivity - 1);
     if (page.conversations.length === 0) {
@@ -207,7 +218,9 @@ async function listConversations(
     for (const conversation of page.conversations) {
       seen.set(conversation.entityURN, conversation);
     }
-    oldestLastActivity = Math.min(...page.conversations.map((conversation) => conversation.lastActivityAt));
+    oldestLastActivity = Math.min(
+      ...page.conversations.map((conversation) => conversation.lastActivityAt),
+    );
     pageCount += 1;
   }
 
@@ -229,18 +242,21 @@ async function listMessagesForConversation(
     seen.set(message.entityURN, message);
   }
 
-  const latest = embedded.length > 0 ? { messages: embedded } : await client.getMessages(conversation.entityURN);
+  const latest =
+    embedded.length > 0 ? { messages: embedded } : await client.getMessages(conversation.entityURN);
   for (const message of latest.messages) {
     seen.set(message.entityURN, message);
   }
 
-  let oldestDeliveredAt = Math.min(...latest.messages.map((message) => message.deliveredAt).filter(Boolean));
+  let oldestDeliveredAt = Math.min(
+    ...latest.messages.map((message) => message.deliveredAt).filter(Boolean),
+  );
   let pageCount = 1;
   while (
-    !incremental
-    && Number.isFinite(oldestDeliveredAt)
-    && oldestDeliveredAt > oldestMs
-    && pageCount < MAX_MESSAGE_PAGES
+    !incremental &&
+    Number.isFinite(oldestDeliveredAt) &&
+    oldestDeliveredAt > oldestMs &&
+    pageCount < MAX_MESSAGE_PAGES
   ) {
     const page = await client.getMessagesBefore(conversation.entityURN, oldestDeliveredAt - 1);
     if (page.messages.length === 0) {
@@ -249,7 +265,9 @@ async function listMessagesForConversation(
     for (const message of page.messages) {
       seen.set(message.entityURN, message);
     }
-    oldestDeliveredAt = Math.min(...page.messages.map((message) => message.deliveredAt).filter(Boolean));
+    oldestDeliveredAt = Math.min(
+      ...page.messages.map((message) => message.deliveredAt).filter(Boolean),
+    );
     pageCount += 1;
   }
 
@@ -321,7 +339,9 @@ export async function buildLinkedInSyncBundle(options?: {
       payload: {
         sourceEntityKey,
         fields: {
-          display_name: [connection.firstName, connection.lastName].filter(Boolean).join(" ").trim() || connection.profileId,
+          display_name:
+            [connection.firstName, connection.lastName].filter(Boolean).join(" ").trim() ||
+            connection.profileId,
           company: connection.headline ?? null,
           photo_url: connection.picture?.url ?? null,
         },
@@ -333,11 +353,13 @@ export async function buildLinkedInSyncBundle(options?: {
             deterministic: true,
           },
           ...(connection.profileUrl
-            ? [{
-                type: "linkedin_profile_url",
-                value: connection.profileUrl,
-                deterministic: true,
-              }]
+            ? [
+                {
+                  type: "linkedin_profile_url",
+                  value: connection.profileUrl,
+                  deterministic: true,
+                },
+              ]
             : []),
         ],
       } satisfies ContactObservationPayload,
@@ -347,8 +369,9 @@ export async function buildLinkedInSyncBundle(options?: {
 
   for (const { conversation, messages } of conversationMessages) {
     const normalizedConversation = normalizeConversationUrn(conversation.entityURN);
-    const participantKeys = conversation.conversationParticipants
-      .map((participant) => participantSourceKey(participant));
+    const participantKeys = conversation.conversationParticipants.map((participant) =>
+      participantSourceKey(participant),
+    );
 
     const conversationId = stableId(
       `linkedin:conversation:${accountKey}:${normalizedConversation}:${conversation.title}:${participantKeys.join(",")}`,
@@ -409,7 +432,9 @@ export async function buildLinkedInSyncBundle(options?: {
             company: participant.participantType.member?.headline ?? null,
             photo_url: bestParticipantPhoto(participant),
           },
-          sourceProfileUrl: participant.participantType.member?.profileUrl ?? linkedinProfileUrlFromUrn(participant.entityURN),
+          sourceProfileUrl:
+            participant.participantType.member?.profileUrl ??
+            linkedinProfileUrlFromUrn(participant.entityURN),
           handles: participantHandles(participant),
         } satisfies ContactObservationPayload,
         sourceVersion: "linkedin-v1",

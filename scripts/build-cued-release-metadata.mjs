@@ -8,9 +8,9 @@ import { join, resolve } from "node:path";
 const rootDir = resolve(import.meta.dirname, "..");
 const distDir = join(rootDir, "native", "macos", "dist");
 
-const version = process.env.CUED_RELEASE_VERSION ?? JSON.parse(
-  readFileSync(join(rootDir, "apps", "cued", "package.json"), "utf8"),
-).version;
+const version =
+  process.env.CUED_RELEASE_VERSION ??
+  JSON.parse(readFileSync(join(rootDir, "apps", "cued", "package.json"), "utf8")).version;
 const tag = process.env.CUED_RELEASE_TAG ?? `v${version}`;
 const repo = process.env.CUED_RELEASE_REPO ?? "Cue-d/cued";
 const channel = process.env.CUED_RELEASE_CHANNEL ?? "internal";
@@ -24,7 +24,10 @@ const artifactNames = {
 if (!existsSync(join(distDir, "Cued.app"))) {
   throw new Error("Signed Cued.app is required before generating release metadata");
 }
-if (!existsSync(join(distDir, artifactNames.dmg)) || !existsSync(join(distDir, artifactNames.tarball))) {
+if (
+  !existsSync(join(distDir, artifactNames.dmg)) ||
+  !existsSync(join(distDir, artifactNames.tarball))
+) {
   throw new Error("Signed release artifacts are required before generating release metadata");
 }
 
@@ -40,7 +43,9 @@ if (codesignInfo.includes("Signature=adhoc")) {
 }
 
 function sha256(fileName) {
-  return createHash("sha256").update(readFileSync(join(distDir, fileName))).digest("hex");
+  return createHash("sha256")
+    .update(readFileSync(join(distDir, fileName)))
+    .digest("hex");
 }
 
 const metadata = {

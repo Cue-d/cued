@@ -1,8 +1,8 @@
-import { execFileSync, spawn, type ChildProcess } from "node:child_process";
+import { type ChildProcess, execFileSync, spawn } from "node:child_process";
 import type { CuedDatabase } from "../db/database.js";
 import type { AuthSessionState, Platform } from "../types/provider.js";
-import type { AuthSessionSummary } from "./service.js";
 import { resolveMacOSNativeBinary } from "../workers/native-binary.js";
+import type { AuthSessionSummary } from "./service.js";
 
 export interface NativeAuthResult {
   sessionId: string;
@@ -80,9 +80,7 @@ export function startNativeAuthSession(
       }
 
       reject(
-        new Error(
-          stderr || stdout || `Native auth helper exited with code ${code ?? "unknown"}`,
-        ),
+        new Error(stderr || stdout || `Native auth helper exited with code ${code ?? "unknown"}`),
       );
     });
   });

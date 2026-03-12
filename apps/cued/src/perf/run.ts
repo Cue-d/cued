@@ -1,16 +1,25 @@
-import { mkdtempSync, rmSync, writeFileSync, existsSync, readFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { createRequire } from "node:module";
 import { performance } from "node:perf_hooks";
-import { buildIMessageSyncBundle } from "../workers/imessage-worker-lib.js";
-import { buildSlackSyncBundle } from "../workers/slack-worker-lib.js";
-import { buildLinkedInSyncBundle } from "../workers/linkedin-worker-lib.js";
-import { CuedDatabase } from "../db/database.js";
-import { projectDeferredRange, projectPendingRawEvents, projectRealtimeRange } from "../projector/projector.js";
-import type { ProviderRawEventInput } from "../types/provider.js";
+import type {
+  Connection,
+  Conversation,
+  Message,
+  MessagingParticipant,
+} from "../adapters/linkedin/api/index.js";
 import type { SlackConversation, SlackMessage, SlackUser } from "../adapters/slack/api/index.js";
-import type { Connection, Conversation, Message, MessagingParticipant } from "../adapters/linkedin/api/index.js";
+import { CuedDatabase } from "../db/database.js";
+import {
+  projectDeferredRange,
+  projectPendingRawEvents,
+  projectRealtimeRange,
+} from "../projector/projector.js";
+import type { ProviderRawEventInput } from "../types/provider.js";
+import { buildIMessageSyncBundle } from "../workers/imessage-worker-lib.js";
+import { buildLinkedInSyncBundle } from "../workers/linkedin-worker-lib.js";
+import { buildSlackSyncBundle } from "../workers/slack-worker-lib.js";
 
 const require = createRequire(import.meta.url);
 const { DatabaseSync } = require("node:sqlite") as typeof import("node:sqlite");
@@ -29,9 +38,7 @@ type BaselineFile = Record<string, { medianMs: number }>;
 function median(values: number[]): number {
   const sorted = [...values].sort((left, right) => left - right);
   const middle = Math.floor(sorted.length / 2);
-  return sorted.length % 2 === 0
-    ? (sorted[middle - 1]! + sorted[middle]!) / 2
-    : sorted[middle]!;
+  return sorted.length % 2 === 0 ? (sorted[middle - 1]! + sorted[middle]!) / 2 : sorted[middle]!;
 }
 
 function formatMs(value: number): string {
@@ -135,7 +142,9 @@ function createSyntheticIMessageChatDb(): { dir: string; dbPath: string } {
 
   const insertHandle = db.prepare("INSERT INTO handle (id, service) VALUES (?, ?)");
   const insertChat = db.prepare("INSERT INTO chat (chat_identifier, display_name) VALUES (?, ?)");
-  const insertChatHandle = db.prepare("INSERT INTO chat_handle_join (chat_id, handle_id) VALUES (?, ?)");
+  const insertChatHandle = db.prepare(
+    "INSERT INTO chat_handle_join (chat_id, handle_id) VALUES (?, ?)",
+  );
   const insertMessage = db.prepare(`
     INSERT INTO message (
       guid,
@@ -156,7 +165,9 @@ function createSyntheticIMessageChatDb(): { dir: string; dbPath: string } {
       associated_message_guid
     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
-  const insertChatJoin = db.prepare("INSERT INTO chat_message_join (chat_id, message_id) VALUES (?, ?)");
+  const insertChatJoin = db.prepare(
+    "INSERT INTO chat_message_join (chat_id, message_id) VALUES (?, ?)",
+  );
 
   let rowId = 0;
   for (let chatIndex = 1; chatIndex <= 200; chatIndex += 1) {
@@ -224,14 +235,17 @@ function createSlackClientFixture(conversationCount: number, messagesPerConversa
       image_192: `https://img.example.com/${index}.png`,
     },
   }));
-  const conversations: SlackConversation[] = Array.from({ length: conversationCount }, (_, index) => ({
-    id: `C_${index + 1}`,
-    is_im: index % 2 === 0,
-    is_group: index % 2 === 1,
-    user: index % 2 === 0 ? `U_${index + 1}` : undefined,
-    name: index % 2 === 1 ? `group-${index + 1}` : undefined,
-    latest: undefined,
-  }));
+  const conversations: SlackConversation[] = Array.from(
+    { length: conversationCount },
+    (_, index) => ({
+      id: `C_${index + 1}`,
+      is_im: index % 2 === 0,
+      is_group: index % 2 === 1,
+      user: index % 2 === 0 ? `U_${index + 1}` : undefined,
+      name: index % 2 === 1 ? `group-${index + 1}` : undefined,
+      latest: undefined,
+    }),
+  );
 
   const membersByConversation = new Map<string, string[]>();
   const messagesByConversation = new Map<string, SlackMessage[]>();
@@ -240,7 +254,10 @@ function createSlackClientFixture(conversationCount: number, messagesPerConversa
       conversation.id,
       conversation.is_im
         ? [conversation.user!]
-        : [`U_${((Number(conversation.id.split("_")[1]) + 1) % conversationCount) + 1}`, `U_${Number(conversation.id.split("_")[1])}`],
+        : [
+            `U_${((Number(conversation.id.split("_")[1]) + 1) % conversationCount) + 1}`,
+            `U_${Number(conversation.id.split("_")[1])}`,
+          ],
     );
     messagesByConversation.set(
       conversation.id,
@@ -249,19 +266,25 @@ function createSlackClientFixture(conversationCount: number, messagesPerConversa
         user: membersByConversation.get(conversation.id)?.[0] ?? "U_1",
         text: `message ${conversation.id}-${messageIndex + 1}`,
         ts: `${1_710_000_000 + messageIndex}.${String(messageIndex).padStart(6, "0")}`,
-        reactions: messageIndex % 10 === 0
-          ? [{ name: "thumbsup", count: 1, users: ["U_SELF"] }]
-          : [],
-        files: messageIndex % 20 === 0
-          ? [{ id: `F_${conversation.id}_${messageIndex}`, name: `file-${messageIndex}.txt` }]
-          : [],
+        reactions:
+          messageIndex % 10 === 0 ? [{ name: "thumbsup", count: 1, users: ["U_SELF"] }] : [],
+        files:
+          messageIndex % 20 === 0
+            ? [{ id: `F_${conversation.id}_${messageIndex}`, name: `file-${messageIndex}.txt` }]
+            : [],
       })),
     );
   }
 
   return {
     async testAuth() {
-      return { ok: true, team_id: "T_PERF", user_id: "U_SELF", team: "Perf Slack", user: "Perf Self" };
+      return {
+        ok: true,
+        team_id: "T_PERF",
+        user_id: "U_SELF",
+        team: "Perf Slack",
+        user: "Perf Self",
+      };
     },
     async listUsers(cursor?: string) {
       const offset = cursor ? Number(cursor) : 0;
@@ -274,7 +297,8 @@ function createSlackClientFixture(conversationCount: number, messagesPerConversa
       const offset = cursor ? Number(cursor) : 0;
       return {
         conversations: conversations.slice(offset, offset + pageSize),
-        nextCursor: offset + pageSize < conversations.length ? String(offset + pageSize) : undefined,
+        nextCursor:
+          offset + pageSize < conversations.length ? String(offset + pageSize) : undefined,
       };
     },
     async getConversationMembers(conversationId: string, cursor?: string) {
@@ -421,7 +445,9 @@ function buildProjectionReplayEvents(): ProviderRawEventInput[] {
         fields: {
           display_name: `Perf Contact ${conversationIndex}`,
         },
-        handles: [{ type: "email", value: `perf-${conversationIndex}@example.com`, deterministic: true }],
+        handles: [
+          { type: "email", value: `perf-${conversationIndex}@example.com`, deterministic: true },
+        ],
       },
       sourceVersion: "perf-v1",
     });
@@ -449,13 +475,13 @@ function buildProjectionReplayEvents(): ProviderRawEventInput[] {
         accountKey: "default",
         entityKind: "message",
         eventKind: "message_created",
-        observedAt: baseObservedAt + 20_000 + (conversationIndex * 100) + messageIndex,
+        observedAt: baseObservedAt + 20_000 + conversationIndex * 100 + messageIndex,
         dedupeKey: `message:${conversationIndex}:${messageIndex}`,
         payload: {
           sourceMessageKey: `perf-message-${conversationIndex}-${messageIndex}`,
           sourceConversationKey: `perf-conversation-${conversationIndex}`,
           senderSourceKey: `contacts:${conversationIndex}`,
-          sentAt: baseObservedAt + (conversationIndex * 100) + messageIndex,
+          sentAt: baseObservedAt + conversationIndex * 100 + messageIndex,
           content: `Projection perf message ${conversationIndex}-${messageIndex}`,
           service: "linkedin",
           isFromMe: false,
@@ -488,7 +514,13 @@ function buildIncrementalProjectionEvents(
         fields: {
           display_name: `Incremental Contact ${conversationIndex}`,
         },
-        handles: [{ type: "email", value: `incremental-${conversationIndex}@example.com`, deterministic: true }],
+        handles: [
+          {
+            type: "email",
+            value: `incremental-${conversationIndex}@example.com`,
+            deterministic: true,
+          },
+        ],
       },
       sourceVersion: "perf-v1",
     });
@@ -515,13 +547,13 @@ function buildIncrementalProjectionEvents(
         accountKey: "default",
         entityKind: "message",
         eventKind: "message_created",
-        observedAt: baseObservedAt + 20_000 + (conversationIndex * 100) + messageIndex,
+        observedAt: baseObservedAt + 20_000 + conversationIndex * 100 + messageIndex,
         dedupeKey: `incremental-message:${conversationIndex}:${messageIndex}`,
         payload: {
           sourceMessageKey: `incremental-message-${conversationIndex}-${messageIndex}`,
           sourceConversationKey: `incremental-conversation-${conversationIndex}`,
           senderSourceKey: `contacts:${conversationIndex}`,
-          sentAt: baseObservedAt + (conversationIndex * 100) + messageIndex,
+          sentAt: baseObservedAt + conversationIndex * 100 + messageIndex,
           content: `Incremental message ${conversationIndex}-${messageIndex}`,
           service: "linkedin",
           isFromMe: false,

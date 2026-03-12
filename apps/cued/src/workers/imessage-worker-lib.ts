@@ -1,5 +1,5 @@
-import { createHash, randomUUID } from "node:crypto";
 import { execFileSync } from "node:child_process";
+import { createHash, randomUUID } from "node:crypto";
 import { DEFAULT_CHAT_DB_PATH, IMessageReader } from "../adapters/imessage/reader.js";
 import type { ImsSyncBatch } from "../adapters/imessage/types.js";
 import type { SyncBundle } from "../adapters/types.js";
@@ -24,9 +24,7 @@ function guessHandleType(identifier: string): string {
   return "imessage_handle";
 }
 
-type IMessageLoader =
-  | { kind: "native"; path: string }
-  | { kind: "ts"; path: string };
+type IMessageLoader = { kind: "native"; path: string } | { kind: "ts"; path: string };
 
 export function resolveIMessageLoader(
   env: NodeJS.ProcessEnv = process.env,
@@ -203,7 +201,9 @@ export function buildIMessageSyncBundle(options?: {
         conversationExternalId: String(message.chatId),
         occurredAt: reaction.timestamp * 1000,
         observedAt: observedBase + message.id + reaction.timestamp,
-        dedupeKey: dedupeKey(`imessage:reaction:${message.guid}:${reaction.reactorIdentifier}:${reaction.emoji}:${reaction.timestamp}`),
+        dedupeKey: dedupeKey(
+          `imessage:reaction:${message.guid}:${reaction.reactorIdentifier}:${reaction.emoji}:${reaction.timestamp}`,
+        ),
         payload: {
           sourceMessageKey: message.guid,
           sourceConversationKey: String(message.chatId),
@@ -221,10 +221,7 @@ export function buildIMessageSyncBundle(options?: {
     sourceAccounts,
     rawEvents,
     sourceCursor: { rowId: batch.cursor },
-    syncMode:
-      options?.lastRowId && options.lastRowId > 0 && !hasMore
-        ? "incremental"
-        : "full",
+    syncMode: options?.lastRowId && options.lastRowId > 0 && !hasMore ? "incremental" : "full",
     hasMore,
   };
 }
