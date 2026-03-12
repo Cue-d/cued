@@ -607,6 +607,27 @@ function summarizeManagedIntegrationState(
   };
 }
 
+function upsertManagedIntegrationState(
+  db: CuedDatabase,
+  integration: ManagedIntegrationState,
+): void {
+  const existing = db.getIntegrationState(integration.platform, integration.accountKey);
+  db.upsertIntegrationState({
+    platform: integration.platform,
+    accountKey: integration.accountKey,
+    displayName: integration.displayName,
+    authState: integration.authState,
+    enabled: existing ? existing.enabled === 1 : integration.enabled,
+    connectionKind: integration.connectionKind,
+    syncCapable: integration.syncCapable,
+    launchStrategy: integration.launchStrategy ?? null,
+    launchTarget: integration.launchTarget ?? null,
+    importedFrom: integration.importedFrom,
+    artifactPaths: integration.artifactPaths,
+    metadata: integration.metadata,
+  });
+}
+
 function buildSetupIntegrations(db: CuedDatabase): IntegrationStateSummary[] {
   const byPlatform = new Map<Platform, IntegrationStateSummary>();
 
@@ -698,61 +719,27 @@ export async function refreshManagedIntegrationStates(db: CuedDatabase): Promise
   const managed = buildLocalIntegrationStates().map(addSupportedByDaemonMetadata);
 
   for (const integration of managed) {
-    const existing = db.getIntegrationState(integration.platform, integration.accountKey);
-    db.upsertIntegrationState({
-      platform: integration.platform,
-      accountKey: integration.accountKey,
-      displayName: integration.displayName,
-      authState: integration.authState,
-      enabled: existing ? existing.enabled === 1 : integration.enabled,
-      connectionKind: integration.connectionKind,
-      syncCapable: integration.syncCapable,
-      launchStrategy: integration.launchStrategy ?? null,
-      launchTarget: integration.launchTarget ?? null,
-      importedFrom: integration.importedFrom,
-      artifactPaths: integration.artifactPaths,
-      metadata: integration.metadata,
-    });
+    upsertManagedIntegrationState(db, integration);
   }
 
   const importedDesktop = await importSlackDesktopAuth(db);
-  const existingSignal =
-    db.listIntegrationStates().find((row) => row.platform === "signal") ?? null;
-  const signalManaged = await buildSignalManagedState(existingSignal);
-  if (signalManaged) {
-    db.upsertIntegrationState({
-      platform: signalManaged.platform,
-      accountKey: signalManaged.accountKey,
-      displayName: signalManaged.displayName,
-      authState: signalManaged.authState,
-      enabled: signalManaged.enabled,
-      connectionKind: signalManaged.connectionKind,
-      syncCapable: signalManaged.syncCapable,
-      launchStrategy: signalManaged.launchStrategy ?? null,
-      launchTarget: signalManaged.launchTarget ?? null,
-      importedFrom: signalManaged.importedFrom,
-      artifactPaths: signalManaged.artifactPaths,
-      metadata: signalManaged.metadata,
-    });
+  const existingStates = db.listIntegrationStates();
+  const signalRows = existingStates.filter((row) => row.platform === "signal");
+  const signalInputs = signalRows.length > 0 ? signalRows : [null];
+  const signalManagedStates = (
+    await Promise.all(signalInputs.map((row) => buildSignalManagedState(row)))
+  ).filter((state): state is ManagedIntegrationState => Boolean(state));
+  for (const integration of signalManagedStates) {
+    upsertManagedIntegrationState(db, integration);
   }
-  const existingWhatsApp =
-    db.listIntegrationStates().find((row) => row.platform === "whatsapp") ?? null;
-  const whatsAppManaged = await buildWhatsAppManagedState(existingWhatsApp);
-  if (whatsAppManaged) {
-    db.upsertIntegrationState({
-      platform: whatsAppManaged.platform,
-      accountKey: whatsAppManaged.accountKey,
-      displayName: whatsAppManaged.displayName,
-      authState: whatsAppManaged.authState,
-      enabled: whatsAppManaged.enabled,
-      connectionKind: whatsAppManaged.connectionKind,
-      syncCapable: whatsAppManaged.syncCapable,
-      launchStrategy: whatsAppManaged.launchStrategy ?? null,
-      launchTarget: whatsAppManaged.launchTarget ?? null,
-      importedFrom: whatsAppManaged.importedFrom,
-      artifactPaths: whatsAppManaged.artifactPaths,
-      metadata: whatsAppManaged.metadata,
-    });
+
+  const whatsAppRows = existingStates.filter((row) => row.platform === "whatsapp");
+  const whatsAppInputs = whatsAppRows.length > 0 ? whatsAppRows : [null];
+  const whatsAppManagedStates = (
+    await Promise.all(whatsAppInputs.map((row) => buildWhatsAppManagedState(row)))
+  ).filter((state): state is ManagedIntegrationState => Boolean(state));
+  for (const integration of whatsAppManagedStates) {
+    upsertManagedIntegrationState(db, integration);
   }
 
   return {
@@ -760,8 +747,8 @@ export async function refreshManagedIntegrationStates(db: CuedDatabase): Promise
       refreshedPersistedRequestables +
       managed.length +
       importedDesktop.filter((entry) => entry.imported).length +
-      (signalManaged ? 1 : 0) +
-      (whatsAppManaged ? 1 : 0),
+      signalManagedStates.length +
+      whatsAppManagedStates.length,
     integrations: listIntegrationStates(db),
   };
 }

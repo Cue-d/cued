@@ -7,6 +7,7 @@ import {
   type HostOS,
   isOnboardingVisiblePlatform,
   isPlatformSupportedOnHost,
+  platformSupportsMultipleAccounts,
   type Platform,
   type PlatformHelperRequirement,
   type PlatformPermissionRequirement,
@@ -23,6 +24,7 @@ export interface PlatformCapabilitySummary {
   hostOs: HostOS;
   supportedHostOs: readonly HostOS[];
   onboardingVisible: boolean;
+  supportsMultipleAccounts: boolean;
   permissionRequirements: readonly PlatformPermissionRequirement[];
   helperRequirements: readonly PlatformHelperRequirement[];
   availability: PlatformAvailabilityState;
@@ -91,6 +93,7 @@ export function summarizePlatformCapability(
       hostOs,
       supportedHostOs,
       onboardingVisible: isOnboardingVisiblePlatform(platform),
+      supportsMultipleAccounts: platformSupportsMultipleAccounts(platform),
       permissionRequirements,
       helperRequirements,
       availability: "unsupported",
@@ -105,6 +108,7 @@ export function summarizePlatformCapability(
       hostOs,
       supportedHostOs,
       onboardingVisible: isOnboardingVisiblePlatform(platform),
+      supportsMultipleAccounts: platformSupportsMultipleAccounts(platform),
       permissionRequirements,
       helperRequirements,
       availability: permissionAvailability,
@@ -119,6 +123,7 @@ export function summarizePlatformCapability(
       hostOs,
       supportedHostOs,
       onboardingVisible: isOnboardingVisiblePlatform(platform),
+      supportsMultipleAccounts: platformSupportsMultipleAccounts(platform),
       permissionRequirements,
       helperRequirements,
       availability: helperAvailability,
@@ -131,6 +136,7 @@ export function summarizePlatformCapability(
     hostOs,
     supportedHostOs,
     onboardingVisible: isOnboardingVisiblePlatform(platform),
+    supportsMultipleAccounts: platformSupportsMultipleAccounts(platform),
     permissionRequirements,
     helperRequirements,
     availability: "available",
