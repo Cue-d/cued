@@ -50,7 +50,7 @@ class AuthedRequest {
 
   constructor(
     private readonly url: string,
-    private readonly cookies: Cookie[],
+    cookies: Cookie[],
   ) {
     Object.assign(this.headers, DEFAULT_HEADERS);
     this.headers.Cookie = formatCookieHeader(cookies);

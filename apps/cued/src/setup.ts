@@ -1,8 +1,8 @@
-import readline from "node:readline/promises";
-import { stdin as input, stdout as output } from "node:process";
 import { existsSync } from "node:fs";
-import { buildDoctorReport } from "./diagnostics/doctor.js";
+import { stdin as input, stdout as output } from "node:process";
+import readline from "node:readline/promises";
 import { openCuedDatabase } from "./db/database.js";
+import { buildDoctorReport } from "./diagnostics/doctor.js";
 import { resolveInstalledAppPath } from "./macos/install.js";
 
 type SetupDoctorReport = {
@@ -36,7 +36,7 @@ export async function runSetupTUI(): Promise<void> {
   try {
     let done = false;
     while (!done) {
-      const doctor = await buildDoctorReport(db) as SetupDoctorReport;
+      const doctor = (await buildDoctorReport(db)) as SetupDoctorReport;
       const appPath = resolveInstalledAppPath();
 
       output.write("\x1b[2J\x1b[H");
@@ -72,7 +72,9 @@ export async function runSetupTUI(): Promise<void> {
         case "4":
           output.write(`\nMessages: ${doctor.overview?.messages ?? 0}\n`);
           output.write(`Contacts: ${doctor.overview?.contacts ?? 0}\n`);
-          output.write(`Recent sync runs: ${(doctor.recentRuns as unknown[] | undefined)?.length ?? 0}\n`);
+          output.write(
+            `Recent sync runs: ${(doctor.recentRuns as unknown[] | undefined)?.length ?? 0}\n`,
+          );
           break;
         case "5":
           output.write("\nRun: cued integrations connect slack default\n");

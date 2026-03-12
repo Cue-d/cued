@@ -1,5 +1,5 @@
-import { buildContactsSyncBundle } from "./contacts-worker-lib.js";
 import type { AdapterWorkerOutput } from "../adapters/types.js";
+import { buildContactsSyncBundle } from "./contacts-worker-lib.js";
 
 function main(): void {
   try {

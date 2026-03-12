@@ -1,15 +1,17 @@
+import { type ChildProcess, spawn } from "node:child_process";
+import { existsSync, type FSWatcher, rmSync, watch } from "node:fs";
 import { createConnection, createServer, type Socket } from "node:net";
-import { spawn, type ChildProcess } from "node:child_process";
-import { existsSync, rmSync, watch, type FSWatcher } from "node:fs";
-import { dirname, basename } from "node:path";
+import { basename, dirname } from "node:path";
 import process from "node:process";
+import { DEFAULT_CHAT_DB_PATH } from "../adapters/imessage/reader.js";
+import { isAdapterPlatform, listAutoSyncPlatforms } from "../adapters/registry.js";
+import { runAdapter } from "../adapters/runner.js";
 import { getCurrentAppVersion, getCurrentReleaseChannel } from "../app-metadata.js";
 import { CUED_SOCKET_PATH } from "../config.js";
 import { type OutboundMessageRow, openCuedDatabase } from "../db/database.js";
 import { buildDoctorReport } from "../diagnostics/doctor.js";
-import type { DaemonRequest, DaemonResponse } from "../ipc/protocol.js";
-import { runAdapter } from "../adapters/runner.js";
-import { isAdapterPlatform, listAutoSyncPlatforms } from "../adapters/registry.js";
+import { doctorHooksConfig, emitHookEvent } from "../hooks/service.js";
+import { startAuthSession } from "../integrations/auth-runtime.js";
 import {
   buildIntegrationStatus,
   completeAuthSession,
@@ -17,12 +19,10 @@ import {
   disconnectIntegration,
   getAuthSessionSummary,
   getIntegrationSummary,
-  listIntegrationStates,
   markAuthSessionInProgress,
   refreshManagedIntegrationStates,
   setIntegrationEnabled,
 } from "../integrations/service.js";
-import { startAuthSession } from "../integrations/auth-runtime.js";
 import {
   getSignalConfigDir,
   inspectSignalCli,
@@ -31,13 +31,13 @@ import {
   SignalCliClient,
 } from "../integrations/signal-cli.js";
 import {
-  SignalRealtimeSupervisor,
-  type SignalRealtimeStatus,
-} from "../integrations/signal-realtime.js";
-import {
   buildOptimisticSignalRawEvents,
   buildSignalRawEventsFromMessages,
 } from "../integrations/signal-events.js";
+import {
+  type SignalRealtimeStatus,
+  SignalRealtimeSupervisor,
+} from "../integrations/signal-realtime.js";
 import {
   buildOptimisticWhatsAppRawEvents,
   buildWhatsAppRawEventsFromSnapshot,
@@ -48,33 +48,31 @@ import {
   readWhatsAppHelperStatus,
 } from "../integrations/whatsapp-helper.js";
 import {
-  WhatsAppRealtimeSupervisor,
   type WhatsAppRealtimeStatus,
+  WhatsAppRealtimeSupervisor,
 } from "../integrations/whatsapp-realtime.js";
 import type {
   WhatsAppHelperEventEnvelope,
   WhatsAppReceiptSnapshot,
-  WhatsAppMessageSnapshot,
   WhatsAppSnapshot,
 } from "../integrations/whatsapp-types.js";
-import { doctorHooksConfig, emitHookEvent } from "../hooks/service.js";
+import type { DaemonRequest, DaemonResponse } from "../ipc/protocol.js";
+import { createLogger } from "../logging.js";
 import {
   projectDeferredRange,
   projectPendingRawEvents,
   projectRealtimeRange,
   rebuildProjectedState,
 } from "../projector/projector.js";
-import { createLogger } from "../logging.js";
-import { DEFAULT_CHAT_DB_PATH } from "../adapters/imessage/reader.js";
-import { resolveMacOSNativeBinary } from "../workers/native-binary.js";
 import {
-  getDefaultAccountKeyForPlatform,
-  isPlatform,
-  type HostOS,
-  type ProviderRawEventInput,
   type AdapterPlatform,
+  getDefaultAccountKeyForPlatform,
+  type HostOS,
+  isPlatform,
   type Platform,
+  type ProviderRawEventInput,
 } from "../types/provider.js";
+import { resolveMacOSNativeBinary } from "../workers/native-binary.js";
 
 const DAEMON_VERSION = getCurrentAppVersion();
 const DEFAULT_AUTOSYNC_INTERVAL_MS = 60_000;
@@ -102,7 +100,8 @@ function getAppStatusMetadata(db: { getAppMetadata: () => unknown }): {
   install: unknown;
 } {
   return {
-    hostOs: process.platform === "darwin" ? "macos" : process.platform === "win32" ? "windows" : "linux",
+    hostOs:
+      process.platform === "darwin" ? "macos" : process.platform === "win32" ? "windows" : "linux",
     version: DAEMON_VERSION,
     releaseChannel: getCurrentReleaseChannel(),
     install: db.getAppMetadata(),
@@ -159,10 +158,14 @@ type PendingSignalEcho = {
   outboundMessageId: string;
 };
 
-function collectInboundMessages(rawEvents: ProviderRawEventInput[]): Array<Record<string, unknown>> {
+function collectInboundMessages(
+  rawEvents: ProviderRawEventInput[],
+): Array<Record<string, unknown>> {
   const inboundMessages: Array<Record<string, unknown>> = [];
   for (const rawEvent of rawEvents) {
-    if (!isInboundMessageEvent({ ...rawEvent, payload: rawEvent.payload as Record<string, unknown> })) {
+    if (
+      !isInboundMessageEvent({ ...rawEvent, payload: rawEvent.payload as Record<string, unknown> })
+    ) {
       continue;
     }
 
@@ -179,8 +182,7 @@ function collectInboundMessages(rawEvents: ProviderRawEventInput[]): Array<Recor
 function getAutoSyncTargets(
   db: ReturnType<typeof openCuedDatabase>,
 ): Array<{ platform: AdapterPlatform; accountKey: string }> {
-  const configured = process.env.CUED_AUTOSYNC_PLATFORMS
-    ?.split(",")
+  const configured = process.env.CUED_AUTOSYNC_PLATFORMS?.split(",")
     .map((value) => value.trim())
     .filter(isAdapterPlatform);
 
@@ -191,7 +193,8 @@ function getAutoSyncTargets(
     }));
   }
 
-  const enabled = db.listEnabledSyncTargets()
+  const enabled = db
+    .listEnabledSyncTargets()
     .filter((target): target is { platform: AdapterPlatform; account_key: string } =>
       isAdapterPlatform(target.platform),
     )
@@ -246,7 +249,9 @@ function getIngestConcurrency(): number {
 }
 
 function getProjectionBatchSize(): number {
-  const configured = Number(process.env.CUED_PROJECTION_BATCH_SIZE ?? DEFAULT_PROJECTION_BATCH_SIZE);
+  const configured = Number(
+    process.env.CUED_PROJECTION_BATCH_SIZE ?? DEFAULT_PROJECTION_BATCH_SIZE,
+  );
   return Number.isFinite(configured) && configured > 0 ? configured : DEFAULT_PROJECTION_BATCH_SIZE;
 }
 
@@ -260,7 +265,9 @@ function getRealtimeProjectionEnabled(): boolean {
 }
 
 function getRealtimeProjectionBatchSize(): number {
-  const configured = Number(process.env.CUED_REALTIME_PROJECTION_BATCH_SIZE ?? getProjectionBatchSize());
+  const configured = Number(
+    process.env.CUED_REALTIME_PROJECTION_BATCH_SIZE ?? getProjectionBatchSize(),
+  );
   return Number.isFinite(configured) && configured > 0 ? configured : getProjectionBatchSize();
 }
 
@@ -287,12 +294,10 @@ function parseProjectionRunDetails(detailsJson: string | null): ProjectionRunDet
       trigger: typeof parsed.trigger === "string" ? parsed.trigger : "unknown",
       startRowId: parsed.startRowId,
       endRowId: parsed.endRowId,
-      projectionWatermark: typeof parsed.projectionWatermark === "number"
-        ? parsed.projectionWatermark
-        : undefined,
-      maxRawEventRowid: typeof parsed.maxRawEventRowid === "number"
-        ? parsed.maxRawEventRowid
-        : undefined,
+      projectionWatermark:
+        typeof parsed.projectionWatermark === "number" ? parsed.projectionWatermark : undefined,
+      maxRawEventRowid:
+        typeof parsed.maxRawEventRowid === "number" ? parsed.maxRawEventRowid : undefined,
     };
   } catch {
     return null;
@@ -384,7 +389,7 @@ function createDebouncedSyncEnqueuer(
 }
 
 function startIMessageWatcher(
-  db: ReturnType<typeof openCuedDatabase>,
+  _db: ReturnType<typeof openCuedDatabase>,
   queueSync: (platform: AdapterPlatform, accountKey: string, trigger: string) => void,
 ): FSWatcher | ChildProcess | null {
   const nativeBinary = resolveMacOSNativeBinary(process.env.CUED_IMESSAGE_NATIVE_BINARY);
@@ -448,7 +453,7 @@ function startIMessageWatcher(
 }
 
 function startContactsWatcher(
-  db: ReturnType<typeof openCuedDatabase>,
+  _db: ReturnType<typeof openCuedDatabase>,
   queueSync: (platform: AdapterPlatform, accountKey: string, trigger: string) => void,
 ): ChildProcess | null {
   const nativeBinary = resolveMacOSNativeBinary(process.env.CUED_CONTACTS_NATIVE_BINARY);
@@ -492,12 +497,14 @@ function startContactsWatcher(
 }
 
 function isInboundMessageEvent(rawEvent: Record<string, unknown>): boolean {
-  return rawEvent.entityKind === "message"
-    && rawEvent.eventKind === "message_created"
-    && typeof rawEvent.payload === "object"
-    && rawEvent.payload !== null
-    && typeof (rawEvent.payload as Record<string, unknown>).senderSourceKey === "string"
-    && ((rawEvent.payload as Record<string, unknown>).senderSourceKey as string).length > 0;
+  return (
+    rawEvent.entityKind === "message" &&
+    rawEvent.eventKind === "message_created" &&
+    typeof rawEvent.payload === "object" &&
+    rawEvent.payload !== null &&
+    typeof (rawEvent.payload as Record<string, unknown>).senderSourceKey === "string" &&
+    ((rawEvent.payload as Record<string, unknown>).senderSourceKey as string).length > 0
+  );
 }
 
 function resolveSignalTarget(message: OutboundMessageRow): {
@@ -518,10 +525,10 @@ function resolveSignalTarget(message: OutboundMessageRow): {
 function isRetryableSignalSendError(message: string): boolean {
   const normalized = message.toLowerCase();
   if (
-    normalized.includes("invalid")
-    || normalized.includes("unregistered")
-    || normalized.includes("not found")
-    || normalized.includes("malformed")
+    normalized.includes("invalid") ||
+    normalized.includes("unregistered") ||
+    normalized.includes("not found") ||
+    normalized.includes("malformed")
   ) {
     return false;
   }
@@ -542,7 +549,10 @@ async function sendSignalOutboundMessage(
     };
   }
 
-  const waitedSession = await signalRealtime.waitForConnected(message.account_key, SIGNAL_SEND_SESSION_WAIT_MS);
+  const waitedSession = await signalRealtime.waitForConnected(
+    message.account_key,
+    SIGNAL_SEND_SESSION_WAIT_MS,
+  );
   if (waitedSession?.isConnected()) {
     const result = await waitedSession.sendMessage(message.text, target);
     return {
@@ -577,14 +587,15 @@ async function sendSignalOutboundMessage(
   };
 }
 
-async function collectDesiredSignalSessions(
-  db: ReturnType<typeof openCuedDatabase>,
-): Promise<{
+async function collectDesiredSignalSessions(db: ReturnType<typeof openCuedDatabase>): Promise<{
   desired: SignalDesiredSession[];
   degraded: Array<Omit<SignalRealtimeStatus, "platform">>;
 }> {
-  const integrations = db.listIntegrationStates()
-    .filter((row) => row.platform === "signal" && row.enabled === 1 && row.auth_state === "authenticated");
+  const integrations = db
+    .listIntegrationStates()
+    .filter(
+      (row) => row.platform === "signal" && row.enabled === 1 && row.auth_state === "authenticated",
+    );
   if (integrations.length === 0) {
     return {
       desired: [],
@@ -593,7 +604,9 @@ async function collectDesiredSignalSessions(
   }
 
   const inspected = await inspectSignalCli();
-  const baseStatus = (integration: { account_key: string }): Omit<SignalRealtimeStatus, "platform"> => ({
+  const baseStatus = (integration: {
+    account_key: string;
+  }): Omit<SignalRealtimeStatus, "platform"> => ({
     accountKey: integration.account_key,
     account: "",
     cliPath: inspected.cliPath ?? "",
@@ -652,14 +665,16 @@ async function collectDesiredSignalSessions(
   return { desired, degraded };
 }
 
-async function collectDesiredWhatsAppSessions(
-  db: ReturnType<typeof openCuedDatabase>,
-): Promise<{
+async function collectDesiredWhatsAppSessions(db: ReturnType<typeof openCuedDatabase>): Promise<{
   desired: WhatsAppDesiredSession[];
   degraded: Array<Omit<WhatsAppRealtimeStatus, "platform">>;
 }> {
-  const integrations = db.listIntegrationStates()
-    .filter((row) => row.platform === "whatsapp" && row.enabled === 1 && row.auth_state === "authenticated");
+  const integrations = db
+    .listIntegrationStates()
+    .filter(
+      (row) =>
+        row.platform === "whatsapp" && row.enabled === 1 && row.auth_state === "authenticated",
+    );
   if (integrations.length === 0) {
     return {
       desired: [],
@@ -668,7 +683,9 @@ async function collectDesiredWhatsAppSessions(
   }
 
   const inspected = inspectWhatsAppHelper();
-  const baseStatus = (integration: { account_key: string }): Omit<WhatsAppRealtimeStatus, "platform"> => ({
+  const baseStatus = (integration: {
+    account_key: string;
+  }): Omit<WhatsAppRealtimeStatus, "platform"> => ({
     accountKey: integration.account_key,
     helperPath: inspected.helperPath ?? "",
     storeDir: getWhatsAppStoreDir(integration.account_key),
@@ -766,7 +783,12 @@ async function startManagedAuth(
         errorSummary: result.errorSummary ?? null,
       });
       if (completed.integration.authState === "authenticated") {
-        if (!db.hasQueuedOrRunningRun(completed.integration.platform, completed.integration.accountKey)) {
+        if (
+          !db.hasQueuedOrRunningRun(
+            completed.integration.platform,
+            completed.integration.accountKey,
+          )
+        ) {
           db.queueSyncRun({
             platform: completed.integration.platform,
             accountKey: completed.integration.accountKey,
@@ -780,7 +802,11 @@ async function startManagedAuth(
           });
           wakeIngest();
         }
-        await emitAuthenticatedHook(db, completed.integration.platform, completed.integration.accountKey);
+        await emitAuthenticatedHook(
+          db,
+          completed.integration.platform,
+          completed.integration.accountKey,
+        );
       }
       onRuntimeStateChanged();
     })
@@ -800,7 +826,11 @@ async function startManagedAuth(
     });
 
   return {
-    integration: getIntegrationSummary(db, requested.integration.platform, requested.integration.accountKey),
+    integration: getIntegrationSummary(
+      db,
+      requested.integration.platform,
+      requested.integration.accountKey,
+    ),
     authSession: getAuthSessionSummary(db, running.id),
   };
 }
@@ -829,20 +859,15 @@ export async function runDaemon(): Promise<void> {
   const lastAutoSyncQueuedAt = new Map<string, number>();
   const pendingSignalSendEchoes = new Map<string, PendingSignalEcho[]>();
   const suppressNextSignalReconnectSync = new Set<string>();
-  let schedulers!: QueueSchedulers;
-  let queueProjectionRun!: (
-    trigger: string,
-    range?: { startRowId: number; endRowId: number },
-    options?: { delayMs?: number },
-  ) => string | null;
-  let signalRealtime!: SignalRealtimeSupervisor;
   let signalRealtimeReconcilePromise: Promise<void> | null = null;
   let signalRealtimeReconcileQueued = false;
-  let whatsAppRealtime!: WhatsAppRealtimeSupervisor;
   let whatsAppRealtimeReconcilePromise: Promise<void> | null = null;
   let whatsAppRealtimeReconcileQueued = false;
 
-  const clearSignalSendEcho = (accountKey: string, matcher: (echo: PendingSignalEcho) => boolean) => {
+  const clearSignalSendEcho = (
+    accountKey: string,
+    matcher: (echo: PendingSignalEcho) => boolean,
+  ) => {
     const echoes = pendingSignalSendEchoes.get(accountKey);
     if (!echoes || echoes.length === 0) {
       return;
@@ -873,7 +898,10 @@ export async function runDaemon(): Promise<void> {
       timestamp,
       outboundMessageId: message.id,
       timeout: setTimeout(() => {
-        clearSignalSendEcho(message.account_key, (candidate) => candidate.outboundMessageId === message.id);
+        clearSignalSendEcho(
+          message.account_key,
+          (candidate) => candidate.outboundMessageId === message.id,
+        );
         if (!db.hasQueuedOrRunningRun(message.platform, message.account_key)) {
           db.queueSyncRun({
             platform: message.platform,
@@ -901,7 +929,7 @@ export async function runDaemon(): Promise<void> {
     const checkpoint = db.getCheckpoint("signal", accountKey);
     const projection = db.getProjectionBacklog();
     const sourceCursor = checkpoint?.source_cursor_json
-      ? JSON.parse(checkpoint.source_cursor_json) as Record<string, unknown>
+      ? (JSON.parse(checkpoint.source_cursor_json) as Record<string, unknown>)
       : null;
     db.upsertCheckpoint({
       platform: "signal",
@@ -931,8 +959,9 @@ export async function runDaemon(): Promise<void> {
       threadName = null;
     }
 
-    const threadId = message.thread_id
-      ?? (message.target.startsWith("group:") ? message.target : `dm:${message.target}`);
+    const threadId =
+      message.thread_id ??
+      (message.target.startsWith("group:") ? message.target : `dm:${message.target}`);
     const rawEvents = buildOptimisticSignalRawEvents({
       accountKey: message.account_key,
       recipientHandle: message.target,
@@ -946,16 +975,18 @@ export async function runDaemon(): Promise<void> {
       return;
     }
 
-    db.upsertSourceAccounts([{
-      platform: "signal",
-      accountKey: message.account_key,
-      displayName: "Signal",
-    }]);
+    db.upsertSourceAccounts([
+      {
+        platform: "signal",
+        accountKey: message.account_key,
+        displayName: "Signal",
+      },
+    ]);
     const insertResult = db.insertRawEvents(rawEvents);
     if (
-      realtimeProjectionEnabled
-      && insertResult.firstInsertedRowId != null
-      && insertResult.lastInsertedRowId != null
+      realtimeProjectionEnabled &&
+      insertResult.firstInsertedRowId != null &&
+      insertResult.lastInsertedRowId != null
     ) {
       projectRealtimeRange(db, {
         startRowId: insertResult.firstInsertedRowId,
@@ -963,10 +994,7 @@ export async function runDaemon(): Promise<void> {
         batchSize: realtimeProjectionBatchSize,
       });
     }
-    if (
-      insertResult.firstInsertedRowId != null
-      && insertResult.lastInsertedRowId != null
-    ) {
+    if (insertResult.firstInsertedRowId != null && insertResult.lastInsertedRowId != null) {
       queueProjectionRun(
         `signal_outbound:${message.account_key}`,
         {
@@ -1013,16 +1041,18 @@ export async function runDaemon(): Promise<void> {
         return;
       }
 
-      db.upsertSourceAccounts([{
-        platform: "signal",
-        accountKey,
-        displayName: "Signal",
-      }]);
+      db.upsertSourceAccounts([
+        {
+          platform: "signal",
+          accountKey,
+          displayName: "Signal",
+        },
+      ]);
       const insertResult = db.insertRawEvents(rawEvents);
       if (
-        realtimeProjectionEnabled
-        && insertResult.firstInsertedRowId != null
-        && insertResult.lastInsertedRowId != null
+        realtimeProjectionEnabled &&
+        insertResult.firstInsertedRowId != null &&
+        insertResult.lastInsertedRowId != null
       ) {
         projectRealtimeRange(db, {
           startRowId: insertResult.firstInsertedRowId,
@@ -1030,10 +1060,7 @@ export async function runDaemon(): Promise<void> {
           batchSize: realtimeProjectionBatchSize,
         });
       }
-      if (
-        insertResult.firstInsertedRowId != null
-        && insertResult.lastInsertedRowId != null
-      ) {
+      if (insertResult.firstInsertedRowId != null && insertResult.lastInsertedRowId != null) {
         queueProjectionRun(
           `signal_realtime:${accountKey}`,
           {
@@ -1086,7 +1113,7 @@ export async function runDaemon(): Promise<void> {
     const checkpoint = db.getCheckpoint("whatsapp", accountKey);
     const projection = db.getProjectionBacklog();
     const sourceCursor = checkpoint?.source_cursor_json
-      ? JSON.parse(checkpoint.source_cursor_json) as Record<string, unknown>
+      ? (JSON.parse(checkpoint.source_cursor_json) as Record<string, unknown>)
       : null;
     db.upsertCheckpoint({
       platform: "whatsapp",
@@ -1134,16 +1161,18 @@ export async function runDaemon(): Promise<void> {
       return;
     }
 
-    db.upsertSourceAccounts([{
-      platform: "whatsapp",
-      accountKey: message.account_key,
-      displayName: "WhatsApp",
-    }]);
+    db.upsertSourceAccounts([
+      {
+        platform: "whatsapp",
+        accountKey: message.account_key,
+        displayName: "WhatsApp",
+      },
+    ]);
     const insertResult = db.insertRawEvents(rawEvents);
     if (
-      realtimeProjectionEnabled
-      && insertResult.firstInsertedRowId != null
-      && insertResult.lastInsertedRowId != null
+      realtimeProjectionEnabled &&
+      insertResult.firstInsertedRowId != null &&
+      insertResult.lastInsertedRowId != null
     ) {
       projectRealtimeRange(db, {
         startRowId: insertResult.firstInsertedRowId,
@@ -1178,16 +1207,18 @@ export async function runDaemon(): Promise<void> {
         return;
       }
 
-      db.upsertSourceAccounts([{
-        platform: "whatsapp",
-        accountKey,
-        displayName: "WhatsApp",
-      }]);
+      db.upsertSourceAccounts([
+        {
+          platform: "whatsapp",
+          accountKey,
+          displayName: "WhatsApp",
+        },
+      ]);
       const insertResult = db.insertRawEvents(rawEvents);
       if (
-        realtimeProjectionEnabled
-        && insertResult.firstInsertedRowId != null
-        && insertResult.lastInsertedRowId != null
+        realtimeProjectionEnabled &&
+        insertResult.firstInsertedRowId != null &&
+        insertResult.lastInsertedRowId != null
       ) {
         projectRealtimeRange(db, {
           startRowId: insertResult.firstInsertedRowId,
@@ -1244,19 +1275,25 @@ export async function runDaemon(): Promise<void> {
       return;
     }
 
-    await ingestWhatsAppRealtimeSnapshot(accountKey, {
-      messages: [{
-        messageID: receipt.messageID,
-        chatJID: receipt.chatJID,
-        senderJID: message.sender_source_key?.replace(/^whatsapp:/, "") ?? receipt.chatJID,
-        fromMe: receipt.fromMe,
-        timestamp: message.sent_at ?? now(),
-        text: message.content ?? "",
-        status: receipt.status ?? message.status ?? null,
-        deliveredAt: receipt.deliveredAt ?? message.delivered_at ?? null,
-        readAt: receipt.readAt ?? message.read_at ?? null,
-      }],
-    }, `whatsapp_receipt:${accountKey}`);
+    await ingestWhatsAppRealtimeSnapshot(
+      accountKey,
+      {
+        messages: [
+          {
+            messageID: receipt.messageID,
+            chatJID: receipt.chatJID,
+            senderJID: message.sender_source_key?.replace(/^whatsapp:/, "") ?? receipt.chatJID,
+            fromMe: receipt.fromMe,
+            timestamp: message.sent_at ?? now(),
+            text: message.content ?? "",
+            status: receipt.status ?? message.status ?? null,
+            deliveredAt: receipt.deliveredAt ?? message.delivered_at ?? null,
+            readAt: receipt.readAt ?? message.read_at ?? null,
+          },
+        ],
+      },
+      `whatsapp_receipt:${accountKey}`,
+    );
   };
 
   const handleWhatsAppRealtimeEvent = async (
@@ -1266,23 +1303,35 @@ export async function runDaemon(): Promise<void> {
     switch (event.event) {
       case "contact_upsert": {
         const contact = event.data as WhatsAppHelperEventEnvelope<"contact_upsert">["data"];
-        await ingestWhatsAppRealtimeSnapshot(accountKey, {
-          contacts: [contact],
-        }, `whatsapp_realtime:${accountKey}`);
+        await ingestWhatsAppRealtimeSnapshot(
+          accountKey,
+          {
+            contacts: [contact],
+          },
+          `whatsapp_realtime:${accountKey}`,
+        );
         return;
       }
       case "chat_upsert": {
         const chat = event.data as WhatsAppHelperEventEnvelope<"chat_upsert">["data"];
-        await ingestWhatsAppRealtimeSnapshot(accountKey, {
-          chats: [chat],
-        }, `whatsapp_realtime:${accountKey}`);
+        await ingestWhatsAppRealtimeSnapshot(
+          accountKey,
+          {
+            chats: [chat],
+          },
+          `whatsapp_realtime:${accountKey}`,
+        );
         return;
       }
       case "message_upsert": {
         const message = event.data as WhatsAppHelperEventEnvelope<"message_upsert">["data"];
-        await ingestWhatsAppRealtimeSnapshot(accountKey, {
-          messages: [message],
-        }, `whatsapp_realtime:${accountKey}`);
+        await ingestWhatsAppRealtimeSnapshot(
+          accountKey,
+          {
+            messages: [message],
+          },
+          `whatsapp_realtime:${accountKey}`,
+        );
         return;
       }
       case "receipt_update":
@@ -1306,9 +1355,13 @@ export async function runDaemon(): Promise<void> {
   const sendWhatsAppOutboundMessage = async (
     message: OutboundMessageRow,
     realtime: WhatsAppRealtimeSupervisor,
-  ): Promise<{ transport: "session"; result: { messageID: string; chatJID: string; timestamp: number } }> => {
-    const session = realtime.getSession(message.account_key)
-      ?? await realtime.waitForConnected(message.account_key, WHATSAPP_SEND_SESSION_WAIT_MS);
+  ): Promise<{
+    transport: "session";
+    result: { messageID: string; chatJID: string; timestamp: number };
+  }> => {
+    const session =
+      realtime.getSession(message.account_key) ??
+      (await realtime.waitForConnected(message.account_key, WHATSAPP_SEND_SESSION_WAIT_MS));
     if (!session?.isConnected()) {
       throw new Error(`WhatsApp session is not connected for '${message.account_key}'`);
     }
@@ -1327,11 +1380,10 @@ export async function runDaemon(): Promise<void> {
         break;
       }
 
-      const promise = processIngestRun(currentRun)
-        .finally(() => {
-          activeIngestRuns.delete(currentRun.id);
-          scheduleIngestDrain();
-        });
+      const promise = processIngestRun(currentRun).finally(() => {
+        activeIngestRuns.delete(currentRun.id);
+        scheduleIngestDrain();
+      });
       activeIngestRuns.set(currentRun.id, promise);
     }
   };
@@ -1407,15 +1459,12 @@ export async function runDaemon(): Promise<void> {
           db.completeOutboundMessage(message.id);
           return;
         }
-
-        {
-          db.failOutboundMessage({
-            id: message.id,
-            retryable: false,
-            error: `Unsupported outbound platform: ${message.platform}`,
-          });
-          return;
-        }
+        db.failOutboundMessage({
+          id: message.id,
+          retryable: false,
+          error: `Unsupported outbound platform: ${message.platform}`,
+        });
+        return;
       } catch (error) {
         const messageText = error instanceof Error ? error.message : String(error);
         const logger = message.platform === "signal" ? signalLogger : whatsAppLogger;
@@ -1475,13 +1524,13 @@ export async function runDaemon(): Promise<void> {
     }, delayMs);
   };
 
-  schedulers = {
+  const schedulers = {
     wakeIngest: scheduleIngestDrain,
     wakeOutbound: scheduleOutboundDrain,
     wakeProjection: () => scheduleProjectionDrain(),
   };
   const queueDebouncedNativeSync = createDebouncedSyncEnqueuer(db, schedulers.wakeIngest);
-  signalRealtime = new SignalRealtimeSupervisor({
+  const signalRealtime = new SignalRealtimeSupervisor({
     onMessage: (accountKey, message) => {
       void ingestSignalRealtimeMessages(accountKey, [message]);
     },
@@ -1502,7 +1551,7 @@ export async function runDaemon(): Promise<void> {
       );
     },
   });
-  whatsAppRealtime = new WhatsAppRealtimeSupervisor({
+  const whatsAppRealtime = new WhatsAppRealtimeSupervisor({
     onEvent: (accountKey, event) => {
       void handleWhatsAppRealtimeEvent(accountKey, event);
     },
@@ -1642,7 +1691,7 @@ export async function runDaemon(): Promise<void> {
     }
   };
 
-  queueProjectionRun = (
+  const queueProjectionRun = (
     trigger: string,
     range?: { startRowId: number; endRowId: number },
     options?: { delayMs?: number },
@@ -1730,8 +1779,8 @@ export async function runDaemon(): Promise<void> {
     });
     try {
       if (
-        (currentRun.run_type !== "sync" && currentRun.run_type !== "sync_resume")
-        || !currentRun.platform
+        (currentRun.run_type !== "sync" && currentRun.run_type !== "sync_resume") ||
+        !currentRun.platform
       ) {
         db.failRun(
           currentRun.id,
@@ -1773,36 +1822,44 @@ export async function runDaemon(): Promise<void> {
       }
 
       const adapterStartedAt = now();
-      const bundle = platform === "whatsapp"
-        ? await (async () => {
-            const session = whatsAppRealtime.getSession(accountKey)
-              ?? await whatsAppRealtime.waitForConnected(accountKey, 10_000);
-            if (!session?.isConnected()) {
-              throw new Error(`WhatsApp session is not connected for '${accountKey}'`);
-            }
+      const bundle =
+        platform === "whatsapp"
+          ? await (async () => {
+              const session =
+                whatsAppRealtime.getSession(accountKey) ??
+                (await whatsAppRealtime.waitForConnected(accountKey, 10_000));
+              if (!session?.isConnected()) {
+                throw new Error(`WhatsApp session is not connected for '${accountKey}'`);
+              }
 
-            const snapshot = await session.resync();
-            return {
-              sourceAccounts: [{
-                platform: "whatsapp" as const,
+              const snapshot = await session.resync();
+              return {
+                sourceAccounts: [
+                  {
+                    platform: "whatsapp" as const,
+                    accountKey,
+                    displayName: "WhatsApp",
+                  },
+                ],
+                rawEvents: buildWhatsAppRawEventsFromSnapshot({
+                  accountKey,
+                  snapshot,
+                }),
+                sourceCursor: {
+                  lastSyncAt: now(),
+                },
+                syncMode: checkpoint?.source_cursor_json
+                  ? ("incremental" as const)
+                  : ("full" as const),
+                hasMore: false,
+              };
+            })()
+          : platform === "signal"
+            ? await runSignalSyncExclusively(
                 accountKey,
-                displayName: "WhatsApp",
-              }],
-              rawEvents: buildWhatsAppRawEventsFromSnapshot({
-                accountKey,
-                snapshot,
-              }),
-              sourceCursor: {
-                lastSyncAt: now(),
-              },
-              syncMode: checkpoint?.source_cursor_json ? "incremental" as const : "full" as const,
-              hasMore: false,
-            };
-          })()
-        : platform === "signal"
-          ? await runSignalSyncExclusively(accountKey, async () =>
-            await runAdapter(platform, accountKey, envOverrides))
-          : await runAdapter(platform, accountKey, envOverrides);
+                async () => await runAdapter(platform, accountKey, envOverrides),
+              )
+            : await runAdapter(platform, accountKey, envOverrides);
       const afterAdapter = now();
       db.upsertSourceAccounts(bundle.sourceAccounts);
       const rawEventInsertStartedAt = now();
@@ -1810,9 +1867,9 @@ export async function runDaemon(): Promise<void> {
       const afterRawInsert = now();
       const realtimeProjectionStartedAt = now();
       if (
-        realtimeProjectionEnabled
-        && insertResult.firstInsertedRowId != null
-        && insertResult.lastInsertedRowId != null
+        realtimeProjectionEnabled &&
+        insertResult.firstInsertedRowId != null &&
+        insertResult.lastInsertedRowId != null
       ) {
         projectRealtimeRange(db, {
           startRowId: insertResult.firstInsertedRowId,
@@ -1831,9 +1888,10 @@ export async function runDaemon(): Promise<void> {
           if (payload.isFromMe !== true || typeof payload.content !== "string") {
             continue;
           }
-          const sourceConversationKey = typeof payload.sourceConversationKey === "string"
-            ? payload.sourceConversationKey.replace(/^signal:/, "")
-            : null;
+          const sourceConversationKey =
+            typeof payload.sourceConversationKey === "string"
+              ? payload.sourceConversationKey.replace(/^signal:/, "")
+              : null;
           const sentAt = typeof payload.sentAt === "number" ? payload.sentAt : 0;
           clearSignalSendEcho(accountKey, (echo) => {
             const sameThread = !echo.threadId || echo.threadId === sourceConversationKey;
@@ -1873,10 +1931,7 @@ export async function runDaemon(): Promise<void> {
       };
 
       let projectionQueued = false;
-      if (
-        insertResult.firstInsertedRowId != null
-        && insertResult.lastInsertedRowId != null
-      ) {
+      if (insertResult.firstInsertedRowId != null && insertResult.lastInsertedRowId != null) {
         queueProjectionRun(
           `ingest:${currentRun.platform}:${accountKey}`,
           {
@@ -1975,32 +2030,34 @@ export async function runDaemon(): Promise<void> {
     });
     try {
       const projectionDetails = parseProjectionRunDetails(currentRun.details_json);
-      const projected = currentRun.run_type === "rebuild"
-        ? rebuildProjectedState(db)
-        : projectionDetails
-          ? projectDeferredRange(db, {
-              startRowId: projectionDetails.startRowId,
-              endRowId: projectionDetails.endRowId,
-              limit: projectionBatchSize,
-            })
-          : (() => {
-              const backlog = db.getProjectionBacklog();
-              return backlog.pending_raw_events === 0
-                ? projectPendingRawEvents(db, { limit: projectionBatchSize })
-                : projectDeferredRange(db, {
-                    startRowId: backlog.projection_watermark + 1,
-                    endRowId: backlog.max_raw_event_rowid,
-                    limit: projectionBatchSize,
-                  });
-            })();
+      const projected =
+        currentRun.run_type === "rebuild"
+          ? rebuildProjectedState(db)
+          : projectionDetails
+            ? projectDeferredRange(db, {
+                startRowId: projectionDetails.startRowId,
+                endRowId: projectionDetails.endRowId,
+                limit: projectionBatchSize,
+              })
+            : (() => {
+                const backlog = db.getProjectionBacklog();
+                return backlog.pending_raw_events === 0
+                  ? projectPendingRawEvents(db, { limit: projectionBatchSize })
+                  : projectDeferredRange(db, {
+                      startRowId: backlog.projection_watermark + 1,
+                      endRowId: backlog.max_raw_event_rowid,
+                      limit: projectionBatchSize,
+                    });
+              })();
       const projectionFinishedAt = now();
       const timings = {
         projectionMs: projectionFinishedAt - projectionStartedAt,
         totalMs: projectionFinishedAt - projectionStartedAt,
       };
-      const deferredProjected = currentRun.run_type === "project"
-        ? projected as ReturnType<typeof projectDeferredRange>
-        : null;
+      const deferredProjected =
+        currentRun.run_type === "project"
+          ? (projected as ReturnType<typeof projectDeferredRange>)
+          : null;
       db.finishRun(currentRun.id, {
         projected,
         timings,
@@ -2011,9 +2068,10 @@ export async function runDaemon(): Promise<void> {
           `projection_continue:${currentRun.id}`,
           {
             startRowId: deferredProjected.nextStartRowId,
-            endRowId: deferredProjected.rangeEndRowId
-              ?? projectionDetails?.endRowId
-              ?? deferredProjected.projectionWatermark,
+            endRowId:
+              deferredProjected.rangeEndRowId ??
+              projectionDetails?.endRowId ??
+              deferredProjected.projectionWatermark,
           },
           { delayMs: 0 },
         );
@@ -2198,10 +2256,7 @@ function writeResponse(socket: Socket, response: DaemonResponse): void {
 function handleSocket(
   socket: Socket,
   db: ReturnType<typeof openCuedDatabase>,
-  activeAuthSessions: Map<
-    string,
-    { child: ChildProcess; platform: Platform; accountKey: string }
-  >,
+  activeAuthSessions: Map<string, { child: ChildProcess; platform: Platform; accountKey: string }>,
   schedulers: QueueSchedulers,
   signalRealtime: SignalRealtimeSupervisor,
   whatsAppRealtime: WhatsAppRealtimeSupervisor,
@@ -2255,16 +2310,14 @@ function handleSocket(
   });
 }
 
-function ensureNoActiveDaemonProcess(
-  db: ReturnType<typeof openCuedDatabase>,
-): void {
+function ensureNoActiveDaemonProcess(db: ReturnType<typeof openCuedDatabase>): void {
   const daemon = db.getDaemonState();
   if (
-    daemon?.status === "running"
-    && typeof daemon.pid === "number"
-    && daemon.pid > 0
-    && daemon.pid !== process.pid
-    && isProcessRunning(daemon.pid)
+    daemon?.status === "running" &&
+    typeof daemon.pid === "number" &&
+    daemon.pid > 0 &&
+    daemon.pid !== process.pid &&
+    isProcessRunning(daemon.pid)
   ) {
     throw new Error(`Cued daemon already running with pid ${daemon.pid}`);
   }
@@ -2282,10 +2335,7 @@ function isProcessRunning(pid: number): boolean {
 async function dispatchRequest(
   db: ReturnType<typeof openCuedDatabase>,
   request: DaemonRequest,
-  activeAuthSessions: Map<
-    string,
-    { child: ChildProcess; platform: Platform; accountKey: string }
-  >,
+  activeAuthSessions: Map<string, { child: ChildProcess; platform: Platform; accountKey: string }>,
   schedulers: QueueSchedulers,
   signalRealtime: SignalRealtimeSupervisor,
   whatsAppRealtime: WhatsAppRealtimeSupervisor,
@@ -2319,10 +2369,10 @@ async function dispatchRequest(
           ok: true,
           result: {
             app: getAppStatusMetadata(db),
-            ...await buildDoctorReport(db, {
+            ...(await buildDoctorReport(db, {
               signalRealtimeSessions: signalRealtime.getStatuses(),
               whatsappRealtimeSessions: whatsAppRealtime.getStatuses(),
-            }),
+            })),
             autoSyncTargets: getAutoSyncTargets(db),
             autoSyncIntervalMs: getAutoSyncIntervalMs(),
             autoSyncIntervalsMs: Object.fromEntries(
@@ -2355,52 +2405,48 @@ async function dispatchRequest(
           ok: true,
           result: buildIntegrationStatus(db),
         };
-      case "integrations-connect":
-        {
-          const started = await startManagedAuth(
-            db,
-            request.platform,
-            request.accountKey,
-            activeAuthSessions,
-            schedulers.wakeIngest,
-            requestRealtimeReconcile,
-          );
-          return {
-            id: request.id,
-            ok: true,
-            result: started,
-          };
-        }
-      case "integrations-disconnect":
-        {
-          const result = disconnectIntegration(db, request.platform, request.accountKey);
-          requestRealtimeReconcile();
-          return {
-            id: request.id,
-            ok: true,
-            result,
-          };
-        }
-      case "integrations-enable":
-        {
-          const result = setIntegrationEnabled(db, request.platform, request.accountKey, true);
-          requestRealtimeReconcile();
-          return {
-            id: request.id,
-            ok: true,
-            result,
-          };
-        }
-      case "integrations-disable":
-        {
-          const result = setIntegrationEnabled(db, request.platform, request.accountKey, false);
-          requestRealtimeReconcile();
-          return {
-            id: request.id,
-            ok: true,
-            result,
-          };
-        }
+      case "integrations-connect": {
+        const started = await startManagedAuth(
+          db,
+          request.platform,
+          request.accountKey,
+          activeAuthSessions,
+          schedulers.wakeIngest,
+          requestRealtimeReconcile,
+        );
+        return {
+          id: request.id,
+          ok: true,
+          result: started,
+        };
+      }
+      case "integrations-disconnect": {
+        const result = disconnectIntegration(db, request.platform, request.accountKey);
+        requestRealtimeReconcile();
+        return {
+          id: request.id,
+          ok: true,
+          result,
+        };
+      }
+      case "integrations-enable": {
+        const result = setIntegrationEnabled(db, request.platform, request.accountKey, true);
+        requestRealtimeReconcile();
+        return {
+          id: request.id,
+          ok: true,
+          result,
+        };
+      }
+      case "integrations-disable": {
+        const result = setIntegrationEnabled(db, request.platform, request.accountKey, false);
+        requestRealtimeReconcile();
+        return {
+          id: request.id,
+          ok: true,
+          result,
+        };
+      }
       case "message-send":
         if (request.platform !== "signal" && request.platform !== "whatsapp") {
           throw new Error(`Unsupported outbound platform: ${request.platform}`);
@@ -2409,38 +2455,42 @@ async function dispatchRequest(
           throw new Error(`${request.platform} send requires a target and non-empty text`);
         }
         {
-          const resolved = request.platform === "signal"
-            ? db.resolveSignalSendTarget(request.target.trim())
-            : db.resolveWhatsAppSendTarget(request.target.trim());
+          const resolved =
+            request.platform === "signal"
+              ? db.resolveSignalSendTarget(request.target.trim())
+              : db.resolveWhatsAppSendTarget(request.target.trim());
           if (!resolved) {
-            throw new Error(`Unable to resolve ${request.platform} target: ${request.target.trim()}`);
+            throw new Error(
+              `Unable to resolve ${request.platform} target: ${request.target.trim()}`,
+            );
           }
-        return {
-          id: request.id,
-          ok: true,
-          result: {
-            queued: true,
-            messageId: (() => {
-              const queuedId = db.queueOutboundMessage({
-                platform: request.platform,
-                accountKey: request.accountKey ?? getDefaultAccountKeyForPlatform(request.platform),
-                target: resolved.target,
-                threadId: resolved.threadId,
-                text: request.text,
-                metadata: {
-                  originalTarget: request.target.trim(),
-                  resolvedTarget: resolved.target,
-                  resolvedThreadId: resolved.threadId,
-                  resolution: resolved.resolution,
-                  matchedContactIds: resolved.matchedContactIds,
-                  matchedName: resolved.matchedName,
-                },
-              });
-              schedulers.wakeOutbound();
-              return queuedId;
-            })(),
-          },
-        };
+          return {
+            id: request.id,
+            ok: true,
+            result: {
+              queued: true,
+              messageId: (() => {
+                const queuedId = db.queueOutboundMessage({
+                  platform: request.platform,
+                  accountKey:
+                    request.accountKey ?? getDefaultAccountKeyForPlatform(request.platform),
+                  target: resolved.target,
+                  threadId: resolved.threadId,
+                  text: request.text,
+                  metadata: {
+                    originalTarget: request.target.trim(),
+                    resolvedTarget: resolved.target,
+                    resolvedThreadId: resolved.threadId,
+                    resolution: resolved.resolution,
+                    matchedContactIds: resolved.matchedContactIds,
+                    matchedName: resolved.matchedName,
+                  },
+                });
+                schedulers.wakeOutbound();
+                return queuedId;
+              })(),
+            },
+          };
         }
       case "sync-run":
         if (request.source && !isAdapterPlatform(request.source)) {
@@ -2453,59 +2503,60 @@ async function dispatchRequest(
             queued: true,
             runId: (() => {
               const runId = db.queueSyncRun({
-              platform: request.source && isAdapterPlatform(request.source) ? request.source : null,
-              runType: "sync",
-              trigger: "cli",
-              details: { source: request.source ?? null },
+                platform:
+                  request.source && isAdapterPlatform(request.source) ? request.source : null,
+                runType: "sync",
+                trigger: "cli",
+                details: { source: request.source ?? null },
               });
               schedulers.wakeIngest();
               return runId;
             })(),
           },
         };
-      case "sync-resume":
-        {
-          const platforms = new Set([
-            ...getAutoSyncTargets(db).map((target) => `${target.platform}:${target.accountKey}`),
-            ...db.listCheckpointTargets()
-              .filter((target) => isAdapterPlatform(target.platform))
-              .map((target) => `${target.platform}:${target.account_key}`),
-          ]);
-          const queuedRunIds: string[] = [];
-          for (const targetKey of platforms) {
-            const [platform, accountKey] = targetKey.split(":");
-            if (!platform || !accountKey || !isAdapterPlatform(platform)) {
-              continue;
-            }
-            if (db.hasQueuedOrRunningRun(platform, accountKey)) {
-              continue;
-            }
-
-            queuedRunIds.push(
-              db.queueSyncRun({
-                platform,
-                accountKey,
-                runType: "sync_resume",
-                trigger: "cli",
-                details: { source: platform, accountKey },
-              }),
-            );
+      case "sync-resume": {
+        const platforms = new Set([
+          ...getAutoSyncTargets(db).map((target) => `${target.platform}:${target.accountKey}`),
+          ...db
+            .listCheckpointTargets()
+            .filter((target) => isAdapterPlatform(target.platform))
+            .map((target) => `${target.platform}:${target.account_key}`),
+        ]);
+        const queuedRunIds: string[] = [];
+        for (const targetKey of platforms) {
+          const [platform, accountKey] = targetKey.split(":");
+          if (!platform || !accountKey || !isAdapterPlatform(platform)) {
+            continue;
+          }
+          if (db.hasQueuedOrRunningRun(platform, accountKey)) {
+            continue;
           }
 
-          if (queuedRunIds.length > 0) {
-            schedulers.wakeIngest();
-          }
-
-          return {
-            id: request.id,
-            ok: true,
-            result: {
-              queued: queuedRunIds.length > 0,
-              runIds: queuedRunIds,
-              targets: [...platforms],
-            },
-          };
+          queuedRunIds.push(
+            db.queueSyncRun({
+              platform,
+              accountKey,
+              runType: "sync_resume",
+              trigger: "cli",
+              details: { source: platform, accountKey },
+            }),
+          );
         }
+
+        if (queuedRunIds.length > 0) {
+          schedulers.wakeIngest();
+        }
+
+        return {
+          id: request.id,
+          ok: true,
+          result: {
+            queued: queuedRunIds.length > 0,
+            runIds: queuedRunIds,
+            targets: [...platforms],
+          },
+        };
+      }
       case "rebuild":
         return {
           id: request.id,
@@ -2514,9 +2565,9 @@ async function dispatchRequest(
             queued: true,
             runId: (() => {
               const runId = db.queueSyncRun({
-              runType: "rebuild",
-              trigger: "cli",
-              details: { trigger: "cli" },
+                runType: "rebuild",
+                trigger: "cli",
+                details: { trigger: "cli" },
               });
               schedulers.wakeProjection();
               return runId;

@@ -11,8 +11,8 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  ci:
-    name: Build, Typecheck, Test
+  app-quality:
+    name: App Quality
     runs-on: blacksmith-4vcpu-ubuntu-2404
 
     steps:
@@ -25,11 +25,14 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: "20"
+          node-version: "24"
           cache: "pnpm"
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
+
+      - name: Biome
+        run: pnpm check:biome
 
       - name: Build
         run: pnpm build
@@ -39,3 +42,14 @@ jobs:
 
       - name: Test
         run: pnpm test
+
+  native-macos:
+    name: Native macOS Build
+    runs-on: macos-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Swift build
+        run: swift build --package-path native/macos/CuedNative -c release

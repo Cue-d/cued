@@ -1,4 +1,4 @@
-import { execFileSync, spawn, type ChildProcess } from "node:child_process";
+import { type ChildProcess, execFileSync, spawn } from "node:child_process";
 import { join } from "node:path";
 import type { CuedDatabase } from "../db/database.js";
 import type { AuthSessionState, Platform } from "../types/provider.js";
@@ -30,9 +30,8 @@ function buildWorkerArgs(
   integration: IntegrationStateSummary,
 ): string[] {
   const metadata = integration.metadata ?? {};
-  const profileDir = typeof metadata.browserProfileDir === "string"
-    ? metadata.browserProfileDir
-    : null;
+  const profileDir =
+    typeof metadata.browserProfileDir === "string" ? metadata.browserProfileDir : null;
   if (!profileDir) {
     throw new Error(
       `Chromium auth requires browserProfileDir metadata for ${integration.platform}/${integration.accountKey}`,
@@ -90,9 +89,7 @@ export function startChromiumAuthSession(
       }
 
       reject(
-        new Error(
-          stderr || stdout || `Chromium auth helper exited with code ${code ?? "unknown"}`,
-        ),
+        new Error(stderr || stdout || `Chromium auth helper exited with code ${code ?? "unknown"}`),
       );
     });
   });

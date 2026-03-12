@@ -729,7 +729,7 @@ Recommended target structure:
   - future native macOS integrations
 - `docs/`
   - architecture and schema docs
-- `.claude/skills/cued-local/`
+- `skills/cued/`
   - SQL-first agent skill
 
 ## Migration Strategy From Current Local Mode

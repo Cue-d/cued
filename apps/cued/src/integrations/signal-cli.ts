@@ -1,4 +1,4 @@
-import { execFile, execFileSync, spawn, type ChildProcess } from "node:child_process";
+import { type ChildProcess, execFile, execFileSync, spawn } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { promisify } from "node:util";
@@ -266,18 +266,22 @@ export function contactHandleType(handle: string): "phone" | "signal_id" {
 }
 
 export function bestSignalContactName(contact: SignalContact): string {
-  return contact.name?.trim()
-    || [contact.profile?.givenName, contact.profile?.familyName].filter(Boolean).join(" ").trim()
-    || [contact.givenName, contact.familyName].filter(Boolean).join(" ").trim()
-    || bestContactHandle(contact)
-    || "Signal Contact";
+  return (
+    contact.name?.trim() ||
+    [contact.profile?.givenName, contact.profile?.familyName].filter(Boolean).join(" ").trim() ||
+    [contact.givenName, contact.familyName].filter(Boolean).join(" ").trim() ||
+    bestContactHandle(contact) ||
+    "Signal Contact"
+  );
 }
 
 function bestSourceHandle(envelope: SignalEnvelope): string | undefined {
-  return envelope.sourceNumber?.trim()
-    || envelope.source?.trim()
-    || envelope.sourceUuid?.trim()?.toLowerCase()
-    || undefined;
+  return (
+    envelope.sourceNumber?.trim() ||
+    envelope.source?.trim() ||
+    envelope.sourceUuid?.trim()?.toLowerCase() ||
+    undefined
+  );
 }
 
 export function makeSignalMessageFallbackId(options: {
@@ -303,10 +307,11 @@ function makeMessageId(
     return serverGuid;
   }
 
-  const timestamp = envelope.dataMessage?.timestamp
-    ?? envelope.syncMessage?.sentMessage?.timestamp
-    ?? envelope.timestamp
-    ?? Date.now();
+  const timestamp =
+    envelope.dataMessage?.timestamp ??
+    envelope.syncMessage?.sentMessage?.timestamp ??
+    envelope.timestamp ??
+    Date.now();
   return makeSignalMessageFallbackId({
     timestamp,
     threadId,
@@ -334,14 +339,14 @@ export function toSignalMessage(
   const groupId = groupInfo?.groupId?.trim();
   const groupName = groupInfo?.name?.trim();
   const source = bestSourceHandle(envelope);
-  const isFromMe = Boolean(sentMessage)
-    || (source ? normalizeHandle(source) === normalizeHandle(account) : false);
+  const isFromMe =
+    Boolean(sentMessage) || (source ? normalizeHandle(source) === normalizeHandle(account) : false);
   const peerHandle = groupId
     ? undefined
     : isFromMe
-      ? sentMessage?.destinationNumber?.trim()
-        || sentMessage?.destination?.trim()
-        || sentMessage?.destinationUuid?.trim()?.toLowerCase()
+      ? sentMessage?.destinationNumber?.trim() ||
+        sentMessage?.destination?.trim() ||
+        sentMessage?.destinationUuid?.trim()?.toLowerCase()
       : source;
   const threadId = groupId
     ? `group:${groupId}`
@@ -349,13 +354,11 @@ export function toSignalMessage(
       ? `dm:${normalizeHandle(peerHandle)}`
       : "dm:unknown";
   const timestamp = Number(
-    dataMessage?.timestamp
-      ?? sentMessage?.timestamp
-      ?? envelope.timestamp
-      ?? Date.now(),
+    dataMessage?.timestamp ?? sentMessage?.timestamp ?? envelope.timestamp ?? Date.now(),
   );
-  const attachments = (dataMessage?.attachments ?? sentMessage?.attachments ?? [])
-    .filter((value): value is Record<string, unknown> => typeof value === "object" && value !== null);
+  const attachments = (dataMessage?.attachments ?? sentMessage?.attachments ?? []).filter(
+    (value): value is Record<string, unknown> => typeof value === "object" && value !== null,
+  );
 
   return {
     messageId: makeMessageId(envelope, threadId, isFromMe, text, index),
@@ -404,35 +407,47 @@ export class SignalCliClient {
   }
 
   async listContacts(): Promise<SignalContact[]> {
-    const { stdout } = await execFileAsync(this.cliPath, this.accountArgs(["-o", "json", "listContacts"]), {
-      timeout: 30_000,
-      maxBuffer: 10 * 1024 * 1024,
-    });
+    const { stdout } = await execFileAsync(
+      this.cliPath,
+      this.accountArgs(["-o", "json", "listContacts"]),
+      {
+        timeout: 30_000,
+        maxBuffer: 10 * 1024 * 1024,
+      },
+    );
 
     return parseJsonObjects(stdout)
-      .flatMap((value) => Array.isArray(value) ? value : [value])
+      .flatMap((value) => (Array.isArray(value) ? value : [value]))
       .filter((value): value is SignalContact => typeof value === "object" && value !== null)
       .filter((contact) => {
         const handle = bestContactHandle(contact);
-        return Boolean(handle)
-          && !contact.isBlocked
-          && !contact.unregistered
-          && normalizeHandle(handle!) !== normalizeHandle(this.account);
+        return (
+          Boolean(handle) &&
+          !contact.isBlocked &&
+          !contact.unregistered &&
+          normalizeHandle(handle!) !== normalizeHandle(this.account)
+        );
       });
   }
 
   async listGroups(): Promise<SignalGroup[]> {
-    const { stdout } = await execFileAsync(this.cliPath, this.accountArgs(["-o", "json", "listGroups"]), {
-      timeout: 30_000,
-      maxBuffer: 10 * 1024 * 1024,
-    });
+    const { stdout } = await execFileAsync(
+      this.cliPath,
+      this.accountArgs(["-o", "json", "listGroups"]),
+      {
+        timeout: 30_000,
+        maxBuffer: 10 * 1024 * 1024,
+      },
+    );
 
     return parseJsonObjects(stdout)
-      .flatMap((value) => Array.isArray(value) ? value : [value])
+      .flatMap((value) => (Array.isArray(value) ? value : [value]))
       .filter((value): value is SignalGroup => typeof value === "object" && value !== null);
   }
 
-  async receiveMessages(timeoutSeconds = DEFAULT_RECEIVE_TIMEOUT_SECONDS): Promise<SignalReceivedMessage[]> {
+  async receiveMessages(
+    timeoutSeconds = DEFAULT_RECEIVE_TIMEOUT_SECONDS,
+  ): Promise<SignalReceivedMessage[]> {
     const { stdout } = await execFileAsync(
       this.cliPath,
       this.accountArgs(["-o", "json", "receive", "--timeout", String(timeoutSeconds)]),
@@ -521,7 +536,13 @@ export function startSignalLinkSession(options: {
     child.once("error", reject);
     child.once("close", (code) => {
       if (!settledUri) {
-        reject(new Error(stderrBuffer.trim() || stdoutBuffer.trim() || `signal-cli link exited with code ${code ?? "unknown"}`));
+        reject(
+          new Error(
+            stderrBuffer.trim() ||
+              stdoutBuffer.trim() ||
+              `signal-cli link exited with code ${code ?? "unknown"}`,
+          ),
+        );
       }
     });
   });
@@ -533,7 +554,13 @@ export function startSignalLinkSession(options: {
         resolve();
         return;
       }
-      reject(new Error(stderrBuffer.trim() || stdoutBuffer.trim() || `signal-cli link exited with code ${code ?? "unknown"}`));
+      reject(
+        new Error(
+          stderrBuffer.trim() ||
+            stdoutBuffer.trim() ||
+            `signal-cli link exited with code ${code ?? "unknown"}`,
+        ),
+      );
     });
   });
 

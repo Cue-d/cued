@@ -45,10 +45,12 @@ export function whatsappMessageSourceKey(message: WhatsAppMessageSnapshot): stri
 }
 
 function bestContactName(contact: WhatsAppContactSnapshot): string {
-  return contact.name?.trim()
-    || contact.pushName?.trim()
-    || contact.phone?.trim()
-    || normalizeWhatsAppJid(contact.jid);
+  return (
+    contact.name?.trim() ||
+    contact.pushName?.trim() ||
+    contact.phone?.trim() ||
+    normalizeWhatsAppJid(contact.jid)
+  );
 }
 
 export function buildWhatsAppContactEvent(
@@ -57,11 +59,13 @@ export function buildWhatsAppContactEvent(
   observedAt: number,
 ): SyncBundle["rawEvents"][number] {
   const jid = normalizeWhatsAppJid(contact.jid);
-  const handles = [{
-    type: "whatsapp_jid",
-    value: jid,
-    deterministic: true,
-  }];
+  const handles = [
+    {
+      type: "whatsapp_jid",
+      value: jid,
+      deterministic: true,
+    },
+  ];
   const phone = contact.phone?.trim() || extractWhatsAppPhone(jid);
   if (phone) {
     handles.push({
@@ -133,11 +137,15 @@ function buildSyntheticContactFromMessage(
     return null;
   }
 
-  return buildWhatsAppContactEvent({
-    jid: candidate,
-    phone: extractWhatsAppPhone(candidate),
-    name: message.pushName ?? null,
-  }, accountKey, observedAt);
+  return buildWhatsAppContactEvent(
+    {
+      jid: candidate,
+      phone: extractWhatsAppPhone(candidate),
+      name: message.pushName ?? null,
+    },
+    accountKey,
+    observedAt,
+  );
 }
 
 function buildConversationFromMessage(
@@ -155,17 +163,21 @@ function buildConversationFromMessage(
   }
   if (!isGroup) {
     const peer = message.fromMe
-      ? (message.senderJID || message.participantJID || message.chatJID)
+      ? message.senderJID || message.participantJID || message.chatJID
       : message.chatJID;
     participants.add(normalizeWhatsAppJid(peer));
   }
 
-  return buildWhatsAppChatEvent({
-    jid: message.chatJID,
-    name: message.pushName ?? null,
-    isGroup,
-    participants: [...participants],
-  }, accountKey, observedAt);
+  return buildWhatsAppChatEvent(
+    {
+      jid: message.chatJID,
+      name: message.pushName ?? null,
+      isGroup,
+      participants: [...participants],
+    },
+    accountKey,
+    observedAt,
+  );
 }
 
 export function buildWhatsAppMessageEvent(
@@ -218,7 +230,7 @@ function appendMessages(
     const candidateContact = normalizeWhatsAppJid(
       message.fromMe
         ? message.chatJID
-        : (message.participantJID || message.senderJID || message.chatJID),
+        : message.participantJID || message.senderJID || message.chatJID,
     );
     if (!seenContacts.has(candidateContact)) {
       const contactEvent = buildSyntheticContactFromMessage(message, accountKey, observedAt);
@@ -286,17 +298,21 @@ export function buildOptimisticWhatsAppRawEvents(options: {
 }): SyncBundle["rawEvents"] {
   const observedAt = options.observedAt ?? options.message.timestamp;
   const snapshot: WhatsAppSnapshot = {
-    contacts: [{
-      jid: options.message.chatJID,
-      phone: extractWhatsAppPhone(options.message.chatJID),
-      name: options.threadName ?? null,
-    }],
-    chats: [{
-      jid: options.message.chatJID,
-      name: options.threadName ?? null,
-      isGroup: normalizeWhatsAppJid(options.message.chatJID).endsWith("@g.us"),
-      participants: [options.message.chatJID],
-    }],
+    contacts: [
+      {
+        jid: options.message.chatJID,
+        phone: extractWhatsAppPhone(options.message.chatJID),
+        name: options.threadName ?? null,
+      },
+    ],
+    chats: [
+      {
+        jid: options.message.chatJID,
+        name: options.threadName ?? null,
+        isGroup: normalizeWhatsAppJid(options.message.chatJID).endsWith("@g.us"),
+        participants: [options.message.chatJID],
+      },
+    ],
     messages: [options.message],
   };
 

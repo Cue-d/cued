@@ -1,23 +1,23 @@
 import { execFileSync } from "node:child_process";
 import { existsSync, rmSync } from "node:fs";
 import { join } from "node:path";
-import {
-  resolveHostOS,
-  summarizePlatformCapability,
-  type PlatformCapabilitySummary,
-} from "../platform-capabilities.js";
-import { CUED_BROWSER_DIR } from "../config.js";
 import { DEFAULT_CHAT_DB_PATH, IMessageReader } from "../adapters/imessage/reader.js";
 import { listAdapterPlatforms } from "../adapters/registry.js";
+import { CUED_BROWSER_DIR } from "../config.js";
 import type { AuthSessionRow, CuedDatabase, IntegrationStateRow } from "../db/database.js";
+import {
+  type PlatformCapabilitySummary,
+  resolveHostOS,
+  summarizePlatformCapability,
+} from "../platform-capabilities.js";
 import {
   type AuthSessionState,
   type ConnectionKind,
   getDefaultAccountKeyForPlatform,
-  isOnboardingVisiblePlatform,
   type IntegrationAuthState,
   type IntegrationLaunchStrategy,
   type IntegrationRuntimeKind,
+  isOnboardingVisiblePlatform,
   isRequestableIntegrationPlatform,
   PLATFORM_VALUES,
   type Platform,
@@ -33,12 +33,12 @@ import {
   isSignalCliVersionSupported,
   readSignalLinkedAccount,
 } from "./signal-cli.js";
+import { importSlackDesktopAuth } from "./slack-desktop-auth.js";
 import {
   getWhatsAppStoreDir,
   inspectWhatsAppHelper,
   readWhatsAppHelperStatus,
 } from "./whatsapp-helper.js";
-import { importSlackDesktopAuth } from "./slack-desktop-auth.js";
 
 export interface IntegrationStateSummary {
   platform: Platform;
@@ -166,7 +166,9 @@ export function listRequestableIntegrationPlatforms(): Platform[] {
   return [...REQUESTABLE_INTEGRATION_PLATFORM_VALUES];
 }
 
-function deriveRuntimeKind(row: Pick<IntegrationStateRow, "metadata_json" | "launch_strategy">): IntegrationRuntimeKind {
+function deriveRuntimeKind(
+  row: Pick<IntegrationStateRow, "metadata_json" | "launch_strategy">,
+): IntegrationRuntimeKind {
   const metadata = row.metadata_json
     ? (JSON.parse(row.metadata_json) as Record<string, unknown>)
     : {};
@@ -229,7 +231,10 @@ function getIMessageAuthState(): IntegrationAuthState {
     }
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    if (message.includes("authorization denied") || message.includes("unable to open database file")) {
+    if (
+      message.includes("authorization denied") ||
+      message.includes("unable to open database file")
+    ) {
       return "needs_full_disk_access";
     }
     return "blocked";
@@ -387,11 +392,7 @@ async function buildWhatsAppManagedState(
   };
 }
 
-function resolveAccountKey(
-  db: CuedDatabase,
-  platform: Platform,
-  accountKey?: string,
-): string {
+function resolveAccountKey(db: CuedDatabase, platform: Platform, accountKey?: string): string {
   if (accountKey) {
     return accountKey;
   }
@@ -408,7 +409,9 @@ function resolveAccountKey(
   );
 }
 
-function addSupportedByDaemonMetadata(integration: ManagedIntegrationState): ManagedIntegrationState {
+function addSupportedByDaemonMetadata(
+  integration: ManagedIntegrationState,
+): ManagedIntegrationState {
   const supportedPlatforms = new Set<string>(listAdapterPlatforms());
   return {
     ...integration,
@@ -420,9 +423,7 @@ function addSupportedByDaemonMetadata(integration: ManagedIntegrationState): Man
   };
 }
 
-function normalizePersistedRequestableIntegrationRow(
-  row: IntegrationStateRow,
-): {
+function normalizePersistedRequestableIntegrationRow(row: IntegrationStateRow): {
   syncCapable: boolean;
   metadata: Record<string, unknown> | null;
 } | null {
@@ -458,8 +459,8 @@ function refreshPersistedRequestableIntegrationStates(db: CuedDatabase): number 
       : null;
     const currentSupportedByDaemon = currentMetadata?.supportedByDaemon;
     if (
-      row.sync_capable === nextSyncCapable
-      && currentSupportedByDaemon === normalized.metadata?.supportedByDaemon
+      row.sync_capable === nextSyncCapable &&
+      currentSupportedByDaemon === normalized.metadata?.supportedByDaemon
     ) {
       continue;
     }
@@ -475,7 +476,9 @@ function refreshPersistedRequestableIntegrationStates(db: CuedDatabase): number 
       launchStrategy: row.launch_strategy,
       launchTarget: row.launch_target,
       importedFrom: row.imported_from,
-      artifactPaths: row.artifact_paths_json ? (JSON.parse(row.artifact_paths_json) as string[]) : [],
+      artifactPaths: row.artifact_paths_json
+        ? (JSON.parse(row.artifact_paths_json) as string[])
+        : [],
       metadata: normalized.metadata,
     });
     refreshed += 1;
@@ -489,12 +492,17 @@ function getKeychainMetadata(metadata: Record<string, unknown> | null): {
   keychainAccount: string | null;
 } {
   return {
-    keychainService: typeof metadata?.keychainService === "string" ? metadata.keychainService : null,
-    keychainAccount: typeof metadata?.keychainAccount === "string" ? metadata.keychainAccount : null,
+    keychainService:
+      typeof metadata?.keychainService === "string" ? metadata.keychainService : null,
+    keychainAccount:
+      typeof metadata?.keychainAccount === "string" ? metadata.keychainAccount : null,
   };
 }
 
-function deleteKeychainSecret(keychainService: string | null, keychainAccount: string | null): void {
+function deleteKeychainSecret(
+  keychainService: string | null,
+  keychainAccount: string | null,
+): void {
   if (!keychainService || !keychainAccount) {
     return;
   }
@@ -586,7 +594,8 @@ function summarizeManagedIntegrationState(
     metadata: integration.metadata ?? null,
     lastSeenAt: now(),
     updatedAt: now(),
-    latestAuthSessionId: db.getLatestAuthSession(integration.platform, integration.accountKey)?.id ?? null,
+    latestAuthSessionId:
+      db.getLatestAuthSession(integration.platform, integration.accountKey)?.id ?? null,
     capability: summarizePlatformCapability(
       integration.platform,
       {
@@ -612,7 +621,10 @@ function buildSetupIntegrations(db: CuedDatabase): IntegrationStateSummary[] {
 
   for (const managed of buildLocalIntegrationStates()) {
     if (!byPlatform.has(managed.platform)) {
-      byPlatform.set(managed.platform, summarizeManagedIntegrationState(db, addSupportedByDaemonMetadata(managed)));
+      byPlatform.set(
+        managed.platform,
+        summarizeManagedIntegrationState(db, addSupportedByDaemonMetadata(managed)),
+      );
     }
   }
 
@@ -621,24 +633,29 @@ function buildSetupIntegrations(db: CuedDatabase): IntegrationStateSummary[] {
       continue;
     }
     const requested = getRequestableIntegration(platform);
-    byPlatform.set(platform, summarizeManagedIntegrationState(db, addSupportedByDaemonMetadata({
+    byPlatform.set(
       platform,
-      accountKey: getDefaultAccountKeyForPlatform(platform),
-      displayName: requested.displayName,
-      authState: "missing",
-      enabled: true,
-      connectionKind: requested.connectionKind,
-      runtimeKind: requested.runtimeKind,
-      syncCapable: false,
-      launchStrategy: requested.launchStrategy,
-      launchTarget: requested.launchTarget,
-      importedFrom: "bootstrap",
-      metadata: requested.metadata,
-    })));
+      summarizeManagedIntegrationState(
+        db,
+        addSupportedByDaemonMetadata({
+          platform,
+          accountKey: getDefaultAccountKeyForPlatform(platform),
+          displayName: requested.displayName,
+          authState: "missing",
+          enabled: true,
+          connectionKind: requested.connectionKind,
+          runtimeKind: requested.runtimeKind,
+          syncCapable: false,
+          launchStrategy: requested.launchStrategy,
+          launchTarget: requested.launchTarget,
+          importedFrom: "bootstrap",
+          metadata: requested.metadata,
+        }),
+      ),
+    );
   }
 
-  return PLATFORM_VALUES
-    .filter(isOnboardingVisiblePlatform)
+  return PLATFORM_VALUES.filter(isOnboardingVisiblePlatform)
     .map((platform) => byPlatform.get(platform))
     .filter((value): value is IntegrationStateSummary => Boolean(value));
 }
@@ -651,7 +668,10 @@ export function listAuthSessions(db: CuedDatabase, limit = 20): AuthSessionSumma
   return summarizeAuthSessions(db.listAuthSessions(limit));
 }
 
-export function getAuthSessionSummary(db: CuedDatabase, sessionId: string): AuthSessionSummary | null {
+export function getAuthSessionSummary(
+  db: CuedDatabase,
+  sessionId: string,
+): AuthSessionSummary | null {
   const row = db.getAuthSession(sessionId);
   return row ? summarizeAuthSessions([row])[0]! : null;
 }
@@ -696,7 +716,8 @@ export async function refreshManagedIntegrationStates(db: CuedDatabase): Promise
   }
 
   const importedDesktop = await importSlackDesktopAuth(db);
-  const existingSignal = db.listIntegrationStates().find((row) => row.platform === "signal") ?? null;
+  const existingSignal =
+    db.listIntegrationStates().find((row) => row.platform === "signal") ?? null;
   const signalManaged = await buildSignalManagedState(existingSignal);
   if (signalManaged) {
     db.upsertIntegrationState({
@@ -714,7 +735,8 @@ export async function refreshManagedIntegrationStates(db: CuedDatabase): Promise
       metadata: signalManaged.metadata,
     });
   }
-  const existingWhatsApp = db.listIntegrationStates().find((row) => row.platform === "whatsapp") ?? null;
+  const existingWhatsApp =
+    db.listIntegrationStates().find((row) => row.platform === "whatsapp") ?? null;
   const whatsAppManaged = await buildWhatsAppManagedState(existingWhatsApp);
   if (whatsAppManaged) {
     db.upsertIntegrationState({
@@ -734,11 +756,12 @@ export async function refreshManagedIntegrationStates(db: CuedDatabase): Promise
   }
 
   return {
-    refreshed: refreshedPersistedRequestables
-      + managed.length
-      + importedDesktop.filter((entry) => entry.imported).length
-      + (signalManaged ? 1 : 0)
-      + (whatsAppManaged ? 1 : 0),
+    refreshed:
+      refreshedPersistedRequestables +
+      managed.length +
+      importedDesktop.filter((entry) => entry.imported).length +
+      (signalManaged ? 1 : 0) +
+      (whatsAppManaged ? 1 : 0),
     integrations: listIntegrationStates(db),
   };
 }
@@ -767,23 +790,22 @@ function ensureRequestableIntegrationState(
   const existingMetadata = existing?.metadata_json
     ? (JSON.parse(existing.metadata_json) as Record<string, unknown>)
     : {};
-  const browserProfileDir = requested.runtimeKind === "chromium"
-    ? getChromiumProfileDir(normalized, resolvedAccountKey)
-    : null;
-  const signalConfigDir = normalized === "signal"
-    ? getSignalConfigDir(resolvedAccountKey)
-    : null;
-  const whatsappStoreDir = normalized === "whatsapp"
-    ? getWhatsAppStoreDir(resolvedAccountKey)
-    : null;
+  const browserProfileDir =
+    requested.runtimeKind === "chromium"
+      ? getChromiumProfileDir(normalized, resolvedAccountKey)
+      : null;
+  const signalConfigDir = normalized === "signal" ? getSignalConfigDir(resolvedAccountKey) : null;
+  const whatsappStoreDir =
+    normalized === "whatsapp" ? getWhatsAppStoreDir(resolvedAccountKey) : null;
 
   const supportedByDaemon = new Set<string>(listAdapterPlatforms()).has(normalized);
   db.upsertIntegrationState({
     platform: normalized,
     accountKey: resolvedAccountKey,
-    displayName: accountKey && accountKey !== getDefaultAccountKeyForPlatform(normalized)
-      ? `${requested.displayName} ${accountKey}`
-      : requested.displayName,
+    displayName:
+      accountKey && accountKey !== getDefaultAccountKeyForPlatform(normalized)
+        ? `${requested.displayName} ${accountKey}`
+        : requested.displayName,
     authState: existing?.auth_state ?? "requested",
     enabled: existing ? existing.enabled === 1 : true,
     connectionKind: requested.connectionKind,
@@ -795,11 +817,12 @@ function ensureRequestableIntegrationState(
       ...existingMetadata,
       ...(requested.metadata ?? {}),
       supportedByDaemon,
-      authManagedBy: normalized === "signal"
-        ? "signal-cli-runtime"
-        : requested.runtimeKind === "chromium"
-          ? "chromium-runtime"
-          : "native-qr-runtime",
+      authManagedBy:
+        normalized === "signal"
+          ? "signal-cli-runtime"
+          : requested.runtimeKind === "chromium"
+            ? "chromium-runtime"
+            : "native-qr-runtime",
       requestedAt: existingMetadata.requestedAt ?? now(),
       runtimeKind: requested.runtimeKind,
       browserProfileDir,
@@ -886,7 +909,9 @@ export function markAuthSessionInProgress(
       launchStrategy: integration.launch_strategy,
       launchTarget: integration.launch_target,
       importedFrom: integration.imported_from,
-      artifactPaths: integration.artifact_paths_json ? JSON.parse(integration.artifact_paths_json) as string[] : [],
+      artifactPaths: integration.artifact_paths_json
+        ? (JSON.parse(integration.artifact_paths_json) as string[])
+        : [],
       metadata: {
         ...metadata,
         latestAuthSessionId: sessionId,
@@ -933,9 +958,8 @@ export function completeAuthSession(
     ? (JSON.parse(integration.metadata_json) as Record<string, unknown>)
     : {};
   const supportedByDaemon = new Set<string>(listAdapterPlatforms()).has(integration.platform);
-  const syncCapable = input.state === "authenticated"
-    ? supportedByDaemon
-    : integration.sync_capable === 1;
+  const syncCapable =
+    input.state === "authenticated" ? supportedByDaemon : integration.sync_capable === 1;
   db.upsertIntegrationState({
     platform: integration.platform,
     accountKey: integration.account_key,
@@ -947,7 +971,9 @@ export function completeAuthSession(
     launchStrategy: integration.launch_strategy,
     launchTarget: integration.launch_target,
     importedFrom: integration.imported_from,
-    artifactPaths: integration.artifact_paths_json ? JSON.parse(integration.artifact_paths_json) as string[] : [],
+    artifactPaths: integration.artifact_paths_json
+      ? (JSON.parse(integration.artifact_paths_json) as string[])
+      : [],
     metadata: {
       ...metadata,
       latestAuthSessionId: sessionId,
@@ -998,9 +1024,10 @@ export function disconnectIntegration(
   });
 
   if (integration.platform === "whatsapp") {
-    const storeDir = typeof integration.metadata?.storeDir === "string"
-      ? integration.metadata.storeDir
-      : getWhatsAppStoreDir(integration.accountKey);
+    const storeDir =
+      typeof integration.metadata?.storeDir === "string"
+        ? integration.metadata.storeDir
+        : getWhatsAppStoreDir(integration.accountKey);
     rmSync(storeDir, { recursive: true, force: true });
   }
 
@@ -1023,11 +1050,12 @@ export function getPlatformRuntimeDefaults(platform: Platform): {
   runtimeKind: IntegrationRuntimeKind;
   accountKey: string;
 } {
-  const runtimeKind = platform === "contacts" || platform === "imessage"
-    ? "native"
-    : platform === "signal" || platform === "whatsapp"
-      ? "qr_native"
-      : "chromium";
+  const runtimeKind =
+    platform === "contacts" || platform === "imessage"
+      ? "native"
+      : platform === "signal" || platform === "whatsapp"
+        ? "qr_native"
+        : "chromium";
   return {
     runtimeKind,
     accountKey: getDefaultAccountKeyForPlatform(platform),

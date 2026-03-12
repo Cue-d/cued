@@ -2,7 +2,10 @@ import { DEFAULT_HEADERS, RETRY_CONFIG, SLACK_API_BASE } from "./constants.js";
 import type { SlackCredentials } from "./types.js";
 
 export class SlackAuthError extends Error {
-  constructor(message: string, public readonly slackError: string) {
+  constructor(
+    message: string,
+    public readonly slackError: string,
+  ) {
     super(message);
     this.name = "SlackAuthError";
   }
@@ -75,7 +78,7 @@ class SlackRequest {
         if ((RETRY_CONFIG.retryableStatusCodes as readonly number[]).includes(response.status)) {
           const retryAfterMs = parseRetryAfterMs(response.headers.get("retry-after"));
           if (attempt < RETRY_CONFIG.maxRetries) {
-            await sleep(retryAfterMs ?? RETRY_CONFIG.baseDelayMs * Math.pow(2, attempt));
+            await sleep(retryAfterMs ?? RETRY_CONFIG.baseDelayMs * 2 ** attempt);
             continue;
           }
           throw new SlackRequestError(
@@ -94,7 +97,7 @@ class SlackRequest {
           if (error === "ratelimited") {
             const retryAfterMs = parseRetryAfterMs(response.headers.get("retry-after"));
             if (attempt < RETRY_CONFIG.maxRetries) {
-              await sleep(retryAfterMs ?? RETRY_CONFIG.baseDelayMs * Math.pow(2, attempt));
+              await sleep(retryAfterMs ?? RETRY_CONFIG.baseDelayMs * 2 ** attempt);
               continue;
             }
             throw new SlackRequestError(
@@ -117,8 +120,7 @@ class SlackRequest {
         }
         lastError = error instanceof Error ? error : new Error(String(error));
         if (attempt < RETRY_CONFIG.maxRetries) {
-          await sleep(RETRY_CONFIG.baseDelayMs * Math.pow(2, attempt));
-          continue;
+          await sleep(RETRY_CONFIG.baseDelayMs * 2 ** attempt);
         }
       }
     }

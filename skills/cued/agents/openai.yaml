@@ -1,0 +1,7 @@
+interface:
+  display_name: "Cued"
+  short_description: "Inspect Cued's local SQLite store with SQL."
+  default_prompt: "Use $cued to inspect ~/.cued/local.db with sqlite3 -json and prefer read-only views before raw table joins."
+
+policy:
+  allow_implicit_invocation: true

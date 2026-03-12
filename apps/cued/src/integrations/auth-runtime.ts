@@ -1,9 +1,9 @@
 import type { ChildProcess } from "node:child_process";
 import type { CuedDatabase } from "../db/database.js";
 import type { AuthSessionState, Platform } from "../types/provider.js";
-import { startChromiumAuthSession, runChromiumAuthSessionSync } from "./chromium-auth.js";
-import { startNativeAuthSession, runNativeAuthSessionSync } from "./native-auth.js";
-import { startQrNativeAuthSession, runQrNativeAuthSessionSync } from "./qr-native-auth.js";
+import { runChromiumAuthSessionSync, startChromiumAuthSession } from "./chromium-auth.js";
+import { runNativeAuthSessionSync, startNativeAuthSession } from "./native-auth.js";
+import { runQrNativeAuthSessionSync, startQrNativeAuthSession } from "./qr-native-auth.js";
 import type { AuthSessionSummary, IntegrationStateSummary } from "./service.js";
 
 export interface AuthRuntimeResult {

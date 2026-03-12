@@ -56,7 +56,10 @@ type ProjectionChangeSet = {
   dirtyReplyMessageIds: Set<string>;
 };
 
-type ProjectableRawEvent = Pick<RawEventRow, "platform" | "account_key" | "observed_at" | "payload_json">;
+type ProjectableRawEvent = Pick<
+  RawEventRow,
+  "platform" | "account_key" | "observed_at" | "payload_json"
+>;
 
 type ProjectionOverview = {
   contacts: number;
@@ -191,7 +194,10 @@ function chunkArray<T>(items: readonly T[], size: number): T[][] {
 }
 
 function sqlValueList(values: readonly (string | number)[]) {
-  return sql.join(values.map((value) => sql`${value}`), sql`, `);
+  return sql.join(
+    values.map((value) => sql`${value}`),
+    sql`, `,
+  );
 }
 
 function createProjectionCache(): ProjectionCache {
@@ -220,10 +226,7 @@ function hydrateProjectionCache(db: CuedDatabase, cache: ProjectionCache): void 
   }
 
   for (const row of db.listDeterministicContactHandles()) {
-    cache.deterministicHandleMap.set(
-      `${row.handle_type}:${row.normalized_value}`,
-      row.contact_id,
-    );
+    cache.deterministicHandleMap.set(`${row.handle_type}:${row.normalized_value}`, row.contact_id);
   }
 
   for (const row of db.listConversationMap()) {
@@ -344,16 +347,20 @@ function ensureContactStub(
     cache.contactNameMap.set(contactId, null);
   }
 
-  conn.insert(contacts).values({
-    id: contactId,
-    kind: "person",
-    name: null,
-    photoUrl: null,
-    company: null,
-    archived: 0,
-    createdAt: observedAt,
-    updatedAt: observedAt,
-  }).onConflictDoNothing().run();
+  conn
+    .insert(contacts)
+    .values({
+      id: contactId,
+      kind: "person",
+      name: null,
+      photoUrl: null,
+      company: null,
+      archived: 0,
+      createdAt: observedAt,
+      updatedAt: observedAt,
+    })
+    .onConflictDoNothing()
+    .run();
 
   return contactId;
 }
@@ -372,18 +379,18 @@ function resolveOrEnsureContact(
 
   const directKey = `${platform}:${accountKey}:${sourceEntityKey}`;
   const contactsLocalKey = `contacts:local:${sourceEntityKey}`;
-  const existingContactId = cache.sourceContactMap.get(directKey)
-    ?? cache.sourceContactMap.get(contactsLocalKey)
-    ?? null;
+  const existingContactId =
+    cache.sourceContactMap.get(directKey) ?? cache.sourceContactMap.get(contactsLocalKey) ?? null;
   if (existingContactId) {
     return existingContactId;
   }
 
   const inferredHandle = inferHandleFromSourceEntityKey(sourceEntityKey);
   if (inferredHandle) {
-    const handleContactId = cache.deterministicHandleMap.get(
-      `${inferredHandle.type}:${inferredHandle.normalizedValue}`,
-    ) ?? null;
+    const handleContactId =
+      cache.deterministicHandleMap.get(
+        `${inferredHandle.type}:${inferredHandle.normalizedValue}`,
+      ) ?? null;
     if (handleContactId) {
       cache.sourceContactMap.set(directKey, handleContactId);
       return handleContactId;
@@ -409,25 +416,29 @@ function ensureConversationStub(
     cache.conversationNameMap.set(conversationId, null);
   }
 
-  conn.insert(conversations).values({
-    id: conversationId,
-    platform,
-    accountKey,
-    sourceConversationKey,
-    nativeConversationKey: null,
-    type: "dm",
-    subtype: null,
-    service: null,
-    name: null,
-    topic: null,
-    participantNames: null,
-    lastMessageId: null,
-    lastMessageAt: null,
-    lastMessagePreview: null,
-    unreadCount: 0,
-    createdAt: observedAt,
-    updatedAt: observedAt,
-  }).onConflictDoNothing().run();
+  conn
+    .insert(conversations)
+    .values({
+      id: conversationId,
+      platform,
+      accountKey,
+      sourceConversationKey,
+      nativeConversationKey: null,
+      type: "dm",
+      subtype: null,
+      service: null,
+      name: null,
+      topic: null,
+      participantNames: null,
+      lastMessageId: null,
+      lastMessageAt: null,
+      lastMessagePreview: null,
+      unreadCount: 0,
+      createdAt: observedAt,
+      updatedAt: observedAt,
+    })
+    .onConflictDoNothing()
+    .run();
 
   return conversationId;
 }
@@ -451,33 +462,37 @@ function ensureMessageStub(
     observedAt,
   );
 
-  conn.insert(messages).values({
-    id: messageId,
-    platform,
-    accountKey,
-    platformMessageId,
-    conversationId,
-    senderContactId: null,
-    senderSourceKey: null,
-    senderName: null,
-    conversationName: null,
-    sentAt: observedAt,
-    service: null,
-    status: null,
-    isFromMe: 0,
-    content: null,
-    deliveredAt: null,
-    readAt: null,
-    editedAt: null,
-    deletedAt: null,
-    replyToMessageId: null,
-    isDeleted: 0,
-    isEdited: 0,
-    attachmentCount: 0,
-    reactionCount: 0,
-    createdAt: observedAt,
-    updatedAt: observedAt,
-  }).onConflictDoNothing().run();
+  conn
+    .insert(messages)
+    .values({
+      id: messageId,
+      platform,
+      accountKey,
+      platformMessageId,
+      conversationId,
+      senderContactId: null,
+      senderSourceKey: null,
+      senderName: null,
+      conversationName: null,
+      sentAt: observedAt,
+      service: null,
+      status: null,
+      isFromMe: 0,
+      content: null,
+      deliveredAt: null,
+      readAt: null,
+      editedAt: null,
+      deletedAt: null,
+      replyToMessageId: null,
+      isDeleted: 0,
+      isEdited: 0,
+      attachmentCount: 0,
+      reactionCount: 0,
+      createdAt: observedAt,
+      updatedAt: observedAt,
+    })
+    .onConflictDoNothing()
+    .run();
 
   return { messageId, conversationId };
 }
@@ -503,21 +518,25 @@ function upsertProjectionState(
     lastRebuildAt?: number | null;
   },
 ): void {
-  conn.insert(projectionState).values({
-    singletonKey: "global",
-    projectionWatermark: input.projectionWatermark,
-    lastProjectedAt: input.lastProjectedAt,
-    lastRebuildAt: input.lastRebuildAt ?? null,
-    updatedAt: Date.now(),
-  }).onConflictDoUpdate({
-    target: projectionState.singletonKey,
-    set: {
-      projectionWatermark: sql`MAX(${projectionState.projectionWatermark}, ${input.projectionWatermark})`,
+  conn
+    .insert(projectionState)
+    .values({
+      singletonKey: "global",
+      projectionWatermark: input.projectionWatermark,
       lastProjectedAt: input.lastProjectedAt,
-      lastRebuildAt: input.lastRebuildAt ?? sql`${projectionState.lastRebuildAt}`,
+      lastRebuildAt: input.lastRebuildAt ?? null,
       updatedAt: Date.now(),
-    },
-  }).run();
+    })
+    .onConflictDoUpdate({
+      target: projectionState.singletonKey,
+      set: {
+        projectionWatermark: sql`MAX(${projectionState.projectionWatermark}, ${input.projectionWatermark})`,
+        lastProjectedAt: input.lastProjectedAt,
+        lastRebuildAt: input.lastRebuildAt ?? sql`${projectionState.lastRebuildAt}`,
+        updatedAt: Date.now(),
+      },
+    })
+    .run();
 }
 
 function projectRealtimeConversationObservation(
@@ -568,10 +587,7 @@ function projectRealtimeConversationObservation(
     conversationSet.unreadCount = payload.unreadCount;
   }
 
-  conn.update(conversations)
-    .set(conversationSet)
-    .where(eq(conversations.id, conversationId))
-    .run();
+  conn.update(conversations).set(conversationSet).where(eq(conversations.id, conversationId)).run();
 
   if (payload.displayName !== undefined) {
     cache.conversationNameMap.set(conversationId, normalizeText(payload.displayName));
@@ -596,7 +612,8 @@ function projectRealtimeMessageEvent(
     event.observed_at,
   );
 
-  conn.update(messages)
+  conn
+    .update(messages)
     .set({
       platform: event.platform,
       accountKey: event.account_key,
@@ -641,39 +658,51 @@ function projectContactObservation(
       normalizedValue: normalizeHandle(handle.type, handle.value),
     }))
     .sort((left, right) =>
-      `${left.type}:${left.normalizedValue}`.localeCompare(`${right.type}:${right.normalizedValue}`));
+      `${left.type}:${left.normalizedValue}`.localeCompare(
+        `${right.type}:${right.normalizedValue}`,
+      ),
+    );
 
   const existingSourceContactId = cache.sourceContactMap.get(sourceKey) ?? null;
   const existingContactId = deterministicHandles
-    .map((handle) => cache.deterministicHandleMap.get(`${handle.type}:${handle.normalizedValue}`) ?? null)
+    .map(
+      (handle) =>
+        cache.deterministicHandleMap.get(`${handle.type}:${handle.normalizedValue}`) ?? null,
+    )
     .find((contactId): contactId is string => Boolean(contactId));
-  const existingAliasedContactId = existingContactId == null
-    ? findProjectedContactIdByKnownHandleAliases(conn, deterministicHandles)
-    : null;
+  const existingAliasedContactId =
+    existingContactId == null
+      ? findProjectedContactIdByKnownHandleAliases(conn, deterministicHandles)
+      : null;
 
   const preferredIdentity = deterministicHandles[0]
     ? `${deterministicHandles[0].type}:${deterministicHandles[0].normalizedValue}`
     : sourceKey;
 
-  const contactId = existingSourceContactId
-    ?? existingContactId
-    ?? existingAliasedContactId
-    ?? hashId("contact", preferredIdentity);
+  const contactId =
+    existingSourceContactId ??
+    existingContactId ??
+    existingAliasedContactId ??
+    hashId("contact", preferredIdentity);
   cache.sourceContactMap.set(sourceKey, contactId);
   for (const handle of deterministicHandles) {
     cache.deterministicHandleMap.set(`${handle.type}:${handle.normalizedValue}`, contactId);
   }
 
-  conn.insert(contacts).values({
-    id: contactId,
-    kind: "person",
-    name: normalizeText(payload.fields.display_name) ?? null,
-    photoUrl: normalizeText(payload.fields.photo_url) ?? null,
-    company: normalizeText(payload.fields.company) ?? null,
-    archived: 0,
-    createdAt: event.observed_at,
-    updatedAt: event.observed_at,
-  }).onConflictDoNothing().run();
+  conn
+    .insert(contacts)
+    .values({
+      id: contactId,
+      kind: "person",
+      name: normalizeText(payload.fields.display_name) ?? null,
+      photoUrl: normalizeText(payload.fields.photo_url) ?? null,
+      company: normalizeText(payload.fields.company) ?? null,
+      archived: 0,
+      createdAt: event.observed_at,
+      updatedAt: event.observed_at,
+    })
+    .onConflictDoNothing()
+    .run();
 
   const contactSet: {
     updatedAt: number;
@@ -693,59 +722,65 @@ function projectContactObservation(
     contactSet.company = normalizeText(payload.fields.company);
   }
 
-  const resolvedName = payload.fields.display_name !== undefined
-    ? normalizeText(payload.fields.display_name)
-    : cache.contactNameMap.get(contactId) ?? null;
+  const resolvedName =
+    payload.fields.display_name !== undefined
+      ? normalizeText(payload.fields.display_name)
+      : (cache.contactNameMap.get(contactId) ?? null);
   cache.contactNameMap.set(contactId, resolvedName);
 
-  conn.update(contacts)
-    .set(contactSet)
-    .where(eq(contacts.id, contactId))
-    .run();
+  conn.update(contacts).set(contactSet).where(eq(contacts.id, contactId)).run();
 
-  conn.insert(contactSources).values({
-    id: hashId("contact_source", sourceKey),
-    contactId,
-    platform: event.platform,
-    accountKey: event.account_key,
-    sourceEntityKey: payload.sourceEntityKey,
-    profileUrl: normalizeText(payload.sourceProfileUrl ?? null),
-    metadataJson: null,
-    firstSeenAt: event.observed_at,
-    lastSeenAt: event.observed_at,
-  }).onConflictDoUpdate({
-    target: contactSources.id,
-    set: {
+  conn
+    .insert(contactSources)
+    .values({
+      id: hashId("contact_source", sourceKey),
       contactId,
+      platform: event.platform,
+      accountKey: event.account_key,
+      sourceEntityKey: payload.sourceEntityKey,
       profileUrl: normalizeText(payload.sourceProfileUrl ?? null),
       metadataJson: null,
+      firstSeenAt: event.observed_at,
       lastSeenAt: event.observed_at,
-    },
-  }).run();
+    })
+    .onConflictDoUpdate({
+      target: contactSources.id,
+      set: {
+        contactId,
+        profileUrl: normalizeText(payload.sourceProfileUrl ?? null),
+        metadataJson: null,
+        lastSeenAt: event.observed_at,
+      },
+    })
+    .run();
 
   for (const handle of payload.handles) {
     const normalizedValue = normalizeHandle(handle.type, handle.value);
-    conn.insert(contactHandles).values({
-      id: hashId("handle", `${contactId}:${handle.type}:${normalizedValue}`),
-      contactId,
-      type: handle.type,
-      value: handle.value,
-      normalizedValue,
-      platform: event.platform,
-      accountKey: event.account_key,
-      isDeterministic: handle.deterministic ? 1 : 0,
-      createdAt: event.observed_at,
-      updatedAt: event.observed_at,
-    }).onConflictDoUpdate({
-      target: contactHandles.id,
-      set: {
+    conn
+      .insert(contactHandles)
+      .values({
+        id: hashId("handle", `${contactId}:${handle.type}:${normalizedValue}`),
+        contactId,
+        type: handle.type,
         value: handle.value,
+        normalizedValue,
         platform: event.platform,
         accountKey: event.account_key,
         isDeterministic: handle.deterministic ? 1 : 0,
+        createdAt: event.observed_at,
         updatedAt: event.observed_at,
-      },
-    }).run();
+      })
+      .onConflictDoUpdate({
+        target: contactHandles.id,
+        set: {
+          value: handle.value,
+          platform: event.platform,
+          accountKey: event.account_key,
+          isDeterministic: handle.deterministic ? 1 : 0,
+          updatedAt: event.observed_at,
+        },
+      })
+      .run();
   }
 
   changes.dirtyContactIds.add(contactId);
@@ -799,14 +834,12 @@ function projectConversationObservation(
     conversationSet.unreadCount = payload.unreadCount;
   }
 
-  conn.update(conversations)
-    .set(conversationSet)
-    .where(eq(conversations.id, conversationId))
-    .run();
+  conn.update(conversations).set(conversationSet).where(eq(conversations.id, conversationId)).run();
 
-  const resolvedName = payload.displayName !== undefined
-    ? normalizeText(payload.displayName)
-    : cache.conversationNameMap.get(conversationId) ?? null;
+  const resolvedName =
+    payload.displayName !== undefined
+      ? normalizeText(payload.displayName)
+      : (cache.conversationNameMap.get(conversationId) ?? null);
   cache.conversationNameMap.set(conversationId, resolvedName);
 
   for (const participant of payload.participants) {
@@ -822,31 +855,35 @@ function projectConversationObservation(
       continue;
     }
 
-    conn.insert(conversationParticipants).values({
-      conversationId,
-      contactId,
-      sourceParticipantKey: participant.sourceEntityKey,
-      participantName: cache.contactNameMap.get(contactId) ?? null,
-      role: null,
-      isSelf: boolToInt(participant.isSelf),
-      isActive: 1,
-      joinedAt: event.observed_at,
-      leftAt: null,
-      updatedAt: event.observed_at,
-    }).onConflictDoUpdate({
-      target: [
-        conversationParticipants.conversationId,
-        conversationParticipants.contactId,
-        conversationParticipants.sourceParticipantKey,
-      ],
-      set: {
+    conn
+      .insert(conversationParticipants)
+      .values({
+        conversationId,
+        contactId,
+        sourceParticipantKey: participant.sourceEntityKey,
         participantName: cache.contactNameMap.get(contactId) ?? null,
+        role: null,
         isSelf: boolToInt(participant.isSelf),
         isActive: 1,
+        joinedAt: event.observed_at,
         leftAt: null,
         updatedAt: event.observed_at,
-      },
-    }).run();
+      })
+      .onConflictDoUpdate({
+        target: [
+          conversationParticipants.conversationId,
+          conversationParticipants.contactId,
+          conversationParticipants.sourceParticipantKey,
+        ],
+        set: {
+          participantName: cache.contactNameMap.get(contactId) ?? null,
+          isSelf: boolToInt(participant.isSelf),
+          isActive: 1,
+          leftAt: null,
+          updatedAt: event.observed_at,
+        },
+      })
+      .run();
   }
 
   changes.dirtyConversationIds.add(conversationId);
@@ -878,7 +915,8 @@ function projectMessageEvent(
     event.observed_at,
   );
 
-  conn.update(messages)
+  conn
+    .update(messages)
     .set({
       platform: event.platform,
       accountKey: event.account_key,
@@ -886,7 +924,7 @@ function projectMessageEvent(
       conversationId,
       senderContactId: senderContactId ?? null,
       senderSourceKey: payload.senderSourceKey,
-      senderName: senderContactId ? cache.contactNameMap.get(senderContactId) ?? null : null,
+      senderName: senderContactId ? (cache.contactNameMap.get(senderContactId) ?? null) : null,
       conversationName: cache.conversationNameMap.get(conversationId) ?? null,
       sentAt: payload.sentAt,
       service: normalizeText(payload.service ?? null),
@@ -912,57 +950,75 @@ function projectMessageEvent(
 
   const desiredAttachmentIds = new Set<string>();
   for (const [index, attachment] of (payload.attachments ?? []).entries()) {
-    const sourceAttachmentKey = normalizeText((attachment as { sourceAttachmentKey?: unknown }).sourceAttachmentKey)
-      ?? normalizeText((attachment as { id?: unknown }).id)
-      ?? normalizeText((attachment as { url?: unknown }).url)
-      ?? `${payload.sourceMessageKey}:${index}`;
+    const sourceAttachmentKey =
+      normalizeText((attachment as { sourceAttachmentKey?: unknown }).sourceAttachmentKey) ??
+      normalizeText((attachment as { id?: unknown }).id) ??
+      normalizeText((attachment as { url?: unknown }).url) ??
+      `${payload.sourceMessageKey}:${index}`;
     const attachmentId = hashId("attachment", `${messageId}:${sourceAttachmentKey}`);
     desiredAttachmentIds.add(attachmentId);
 
-    conn.insert(messageAttachments).values({
-      id: attachmentId,
-      messageId,
-      platform: event.platform,
-      accountKey: event.account_key,
-      sourceAttachmentKey,
-      kind: normalizeText((attachment as { kind?: unknown }).kind),
-      mimeType: normalizeText((attachment as { mime_type?: unknown; mimetype?: unknown }).mime_type)
-        ?? normalizeText((attachment as { mimetype?: unknown }).mimetype),
-      filename: normalizeText((attachment as { filename?: unknown; name?: unknown }).filename)
-        ?? normalizeText((attachment as { name?: unknown }).name),
-      title: normalizeText((attachment as { title?: unknown }).title),
-      localPath: normalizeText((attachment as { local_path?: unknown; path?: unknown }).local_path)
-        ?? normalizeText((attachment as { path?: unknown }).path),
-      remoteUrl: normalizeText((attachment as { remote_url?: unknown; url?: unknown }).remote_url)
-        ?? normalizeText((attachment as { url?: unknown }).url),
-      sizeBytes: normalizeInteger((attachment as { size_bytes?: unknown; size?: unknown }).size_bytes)
-        ?? normalizeInteger((attachment as { size?: unknown }).size),
-      textContent: normalizeText((attachment as { text_content?: unknown; text?: unknown }).text_content)
-        ?? normalizeText((attachment as { text?: unknown }).text),
-      metadataJson: JSON.stringify(attachment),
-      createdAt: event.observed_at,
-      updatedAt: event.observed_at,
-    }).onConflictDoUpdate({
-      target: messageAttachments.id,
-      set: {
+    conn
+      .insert(messageAttachments)
+      .values({
+        id: attachmentId,
+        messageId,
+        platform: event.platform,
+        accountKey: event.account_key,
+        sourceAttachmentKey,
         kind: normalizeText((attachment as { kind?: unknown }).kind),
-        mimeType: normalizeText((attachment as { mime_type?: unknown; mimetype?: unknown }).mime_type)
-          ?? normalizeText((attachment as { mimetype?: unknown }).mimetype),
-        filename: normalizeText((attachment as { filename?: unknown; name?: unknown }).filename)
-          ?? normalizeText((attachment as { name?: unknown }).name),
+        mimeType:
+          normalizeText((attachment as { mime_type?: unknown; mimetype?: unknown }).mime_type) ??
+          normalizeText((attachment as { mimetype?: unknown }).mimetype),
+        filename:
+          normalizeText((attachment as { filename?: unknown; name?: unknown }).filename) ??
+          normalizeText((attachment as { name?: unknown }).name),
         title: normalizeText((attachment as { title?: unknown }).title),
-        localPath: normalizeText((attachment as { local_path?: unknown; path?: unknown }).local_path)
-          ?? normalizeText((attachment as { path?: unknown }).path),
-        remoteUrl: normalizeText((attachment as { remote_url?: unknown; url?: unknown }).remote_url)
-          ?? normalizeText((attachment as { url?: unknown }).url),
-        sizeBytes: normalizeInteger((attachment as { size_bytes?: unknown; size?: unknown }).size_bytes)
-          ?? normalizeInteger((attachment as { size?: unknown }).size),
-        textContent: normalizeText((attachment as { text_content?: unknown; text?: unknown }).text_content)
-          ?? normalizeText((attachment as { text?: unknown }).text),
+        localPath:
+          normalizeText((attachment as { local_path?: unknown; path?: unknown }).local_path) ??
+          normalizeText((attachment as { path?: unknown }).path),
+        remoteUrl:
+          normalizeText((attachment as { remote_url?: unknown; url?: unknown }).remote_url) ??
+          normalizeText((attachment as { url?: unknown }).url),
+        sizeBytes:
+          normalizeInteger((attachment as { size_bytes?: unknown; size?: unknown }).size_bytes) ??
+          normalizeInteger((attachment as { size?: unknown }).size),
+        textContent:
+          normalizeText((attachment as { text_content?: unknown; text?: unknown }).text_content) ??
+          normalizeText((attachment as { text?: unknown }).text),
         metadataJson: JSON.stringify(attachment),
+        createdAt: event.observed_at,
         updatedAt: event.observed_at,
-      },
-    }).run();
+      })
+      .onConflictDoUpdate({
+        target: messageAttachments.id,
+        set: {
+          kind: normalizeText((attachment as { kind?: unknown }).kind),
+          mimeType:
+            normalizeText((attachment as { mime_type?: unknown; mimetype?: unknown }).mime_type) ??
+            normalizeText((attachment as { mimetype?: unknown }).mimetype),
+          filename:
+            normalizeText((attachment as { filename?: unknown; name?: unknown }).filename) ??
+            normalizeText((attachment as { name?: unknown }).name),
+          title: normalizeText((attachment as { title?: unknown }).title),
+          localPath:
+            normalizeText((attachment as { local_path?: unknown; path?: unknown }).local_path) ??
+            normalizeText((attachment as { path?: unknown }).path),
+          remoteUrl:
+            normalizeText((attachment as { remote_url?: unknown; url?: unknown }).remote_url) ??
+            normalizeText((attachment as { url?: unknown }).url),
+          sizeBytes:
+            normalizeInteger((attachment as { size_bytes?: unknown; size?: unknown }).size_bytes) ??
+            normalizeInteger((attachment as { size?: unknown }).size),
+          textContent:
+            normalizeText(
+              (attachment as { text_content?: unknown; text?: unknown }).text_content,
+            ) ?? normalizeText((attachment as { text?: unknown }).text),
+          metadataJson: JSON.stringify(attachment),
+          updatedAt: event.observed_at,
+        },
+      })
+      .run();
   }
 
   const existingAttachments = conn.all<{ id: string }>(sql`
@@ -974,9 +1030,7 @@ function projectMessageEvent(
     if (desiredAttachmentIds.has(existingAttachment.id)) {
       continue;
     }
-    conn.delete(messageAttachments)
-      .where(eq(messageAttachments.id, existingAttachment.id))
-      .run();
+    conn.delete(messageAttachments).where(eq(messageAttachments.id, existingAttachment.id)).run();
   }
 }
 
@@ -1005,31 +1059,38 @@ function projectReactionEvent(
     event.observed_at,
   );
 
-  conn.insert(messageReactions).values({
-    id: hashId("reaction", `${messageId}:${payload.reactorSourceKey ?? "__me__"}:${payload.emoji}`),
-    messageId,
-    platform: event.platform,
-    accountKey: event.account_key,
-    sourceReactionKey: `${payload.sourceMessageKey}:${payload.reactorSourceKey ?? "__me__"}:${payload.emoji}`,
-    reactorContactId,
-    reactorSourceKey: payload.reactorSourceKey,
-    reactorName: reactorContactId ? cache.contactNameMap.get(reactorContactId) ?? null : null,
-    emoji: payload.emoji,
-    reactionType: normalizeText(payload.reactionType ?? null),
-    isActive: boolToInt(payload.isActive),
-    createdAt: payload.timestamp,
-    updatedAt: event.observed_at,
-  }).onConflictDoUpdate({
-    target: messageReactions.id,
-    set: {
+  conn
+    .insert(messageReactions)
+    .values({
+      id: hashId(
+        "reaction",
+        `${messageId}:${payload.reactorSourceKey ?? "__me__"}:${payload.emoji}`,
+      ),
+      messageId,
+      platform: event.platform,
+      accountKey: event.account_key,
+      sourceReactionKey: `${payload.sourceMessageKey}:${payload.reactorSourceKey ?? "__me__"}:${payload.emoji}`,
       reactorContactId,
       reactorSourceKey: payload.reactorSourceKey,
-      reactorName: reactorContactId ? cache.contactNameMap.get(reactorContactId) ?? null : null,
+      reactorName: reactorContactId ? (cache.contactNameMap.get(reactorContactId) ?? null) : null,
+      emoji: payload.emoji,
       reactionType: normalizeText(payload.reactionType ?? null),
       isActive: boolToInt(payload.isActive),
+      createdAt: payload.timestamp,
       updatedAt: event.observed_at,
-    },
-  }).run();
+    })
+    .onConflictDoUpdate({
+      target: messageReactions.id,
+      set: {
+        reactorContactId,
+        reactorSourceKey: payload.reactorSourceKey,
+        reactorName: reactorContactId ? (cache.contactNameMap.get(reactorContactId) ?? null) : null,
+        reactionType: normalizeText(payload.reactionType ?? null),
+        isActive: boolToInt(payload.isActive),
+        updatedAt: event.observed_at,
+      },
+    })
+    .run();
 
   changes.dirtyConversationIds.add(conversationId);
   changes.dirtyMessageIds.add(messageId);
@@ -1066,35 +1127,42 @@ function projectTimelineEvent(
     event.observed_at,
   );
 
-  conn.insert(timelineEvents).values({
-    id: hashId("timeline_event", `${event.platform}:${event.account_key}:${payload.sourceEventKey}`),
-    platform: event.platform,
-    accountKey: event.account_key,
-    conversationId,
-    sourceEventKey: payload.sourceEventKey,
-    eventKind: payload.eventKind,
-    actorContactId,
-    actorSourceKey: payload.actorSourceKey ?? null,
-    actorName: actorContactId ? cache.contactNameMap.get(actorContactId) ?? null : null,
-    subjectContactId,
-    eventAt: payload.eventAt,
-    text: normalizeText(payload.text ?? null),
-    metadataJson: payload.metadata ? JSON.stringify(payload.metadata) : null,
-    createdAt: event.observed_at,
-    updatedAt: event.observed_at,
-  }).onConflictDoUpdate({
-    target: timelineEvents.id,
-    set: {
+  conn
+    .insert(timelineEvents)
+    .values({
+      id: hashId(
+        "timeline_event",
+        `${event.platform}:${event.account_key}:${payload.sourceEventKey}`,
+      ),
+      platform: event.platform,
+      accountKey: event.account_key,
+      conversationId,
+      sourceEventKey: payload.sourceEventKey,
+      eventKind: payload.eventKind,
       actorContactId,
       actorSourceKey: payload.actorSourceKey ?? null,
-      actorName: actorContactId ? cache.contactNameMap.get(actorContactId) ?? null : null,
+      actorName: actorContactId ? (cache.contactNameMap.get(actorContactId) ?? null) : null,
       subjectContactId,
       eventAt: payload.eventAt,
       text: normalizeText(payload.text ?? null),
       metadataJson: payload.metadata ? JSON.stringify(payload.metadata) : null,
+      createdAt: event.observed_at,
       updatedAt: event.observed_at,
-    },
-  }).run();
+    })
+    .onConflictDoUpdate({
+      target: timelineEvents.id,
+      set: {
+        actorContactId,
+        actorSourceKey: payload.actorSourceKey ?? null,
+        actorName: actorContactId ? (cache.contactNameMap.get(actorContactId) ?? null) : null,
+        subjectContactId,
+        eventAt: payload.eventAt,
+        text: normalizeText(payload.text ?? null),
+        metadataJson: payload.metadata ? JSON.stringify(payload.metadata) : null,
+        updatedAt: event.observed_at,
+      },
+    })
+    .run();
 }
 
 function refreshConversationSummariesForIds(
@@ -1139,10 +1207,7 @@ function refreshConversationSummariesForIds(
   }
 }
 
-function refreshContactFanoutForIds(
-  conn: LocalDbExecutor,
-  contactIds: Set<string>,
-): void {
+function refreshContactFanoutForIds(conn: LocalDbExecutor, contactIds: Set<string>): void {
   for (const chunk of chunkArray([...contactIds], SQL_CHUNK_SIZE)) {
     conn.run(sql`
       UPDATE messages
@@ -1175,10 +1240,7 @@ function refreshContactFanoutForIds(
   }
 }
 
-function expandDirtyConversationIds(
-  conn: LocalDbExecutor,
-  changes: ProjectionChangeSet,
-): void {
+function expandDirtyConversationIds(conn: LocalDbExecutor, changes: ProjectionChangeSet): void {
   if (changes.dirtyContactIds.size === 0) {
     return;
   }
@@ -1195,10 +1257,7 @@ function expandDirtyConversationIds(
   }
 }
 
-function refreshParticipantNamesForIds(
-  conn: LocalDbExecutor,
-  conversationIds: Set<string>,
-): void {
+function refreshParticipantNamesForIds(conn: LocalDbExecutor, conversationIds: Set<string>): void {
   for (const chunk of chunkArray([...conversationIds], SQL_CHUNK_SIZE)) {
     conn.run(sql`
       UPDATE conversations
@@ -1215,10 +1274,7 @@ function refreshParticipantNamesForIds(
   }
 }
 
-function refreshConversationNamesForIds(
-  conn: LocalDbExecutor,
-  conversationIds: Set<string>,
-): void {
+function refreshConversationNamesForIds(conn: LocalDbExecutor, conversationIds: Set<string>): void {
   for (const chunk of chunkArray([...conversationIds], SQL_CHUNK_SIZE)) {
     conn.run(sql`
       UPDATE conversations
@@ -1254,10 +1310,7 @@ function refreshMessageConversationNamesForIds(
   }
 }
 
-function expandDirtyMessageIds(
-  conn: LocalDbExecutor,
-  changes: ProjectionChangeSet,
-): void {
+function expandDirtyMessageIds(conn: LocalDbExecutor, changes: ProjectionChangeSet): void {
   if (changes.dirtyConversationIds.size > 0) {
     for (const chunk of chunkArray([...changes.dirtyConversationIds], SQL_CHUNK_SIZE)) {
       const rows = conn.all<{ id: string }>(sql`
@@ -1285,10 +1338,7 @@ function expandDirtyMessageIds(
   }
 }
 
-function refreshAttachmentCountsForIds(
-  conn: LocalDbExecutor,
-  messageIds: Set<string>,
-): void {
+function refreshAttachmentCountsForIds(conn: LocalDbExecutor, messageIds: Set<string>): void {
   for (const chunk of chunkArray([...messageIds], SQL_CHUNK_SIZE)) {
     conn.run(sql`
       UPDATE messages
@@ -1302,10 +1352,7 @@ function refreshAttachmentCountsForIds(
   }
 }
 
-function refreshReactionCountsForIds(
-  conn: LocalDbExecutor,
-  messageIds: Set<string>,
-): void {
+function refreshReactionCountsForIds(conn: LocalDbExecutor, messageIds: Set<string>): void {
   for (const chunk of chunkArray([...messageIds], SQL_CHUNK_SIZE)) {
     conn.run(sql`
       UPDATE messages
@@ -1320,10 +1367,7 @@ function refreshReactionCountsForIds(
   }
 }
 
-function refreshReplyLinksForIds(
-  conn: LocalDbExecutor,
-  messageIds: Set<string>,
-): void {
+function refreshReplyLinksForIds(conn: LocalDbExecutor, messageIds: Set<string>): void {
   for (const chunk of chunkArray([...messageIds], SQL_CHUNK_SIZE)) {
     conn.run(sql`
       UPDATE messages
@@ -1346,10 +1390,7 @@ function refreshReplyLinksForIds(
   }
 }
 
-function refreshMessageSearchIndexForIds(
-  conn: LocalDbExecutor,
-  messageIds: Set<string>,
-): void {
+function refreshMessageSearchIndexForIds(conn: LocalDbExecutor, messageIds: Set<string>): void {
   for (const chunk of chunkArray([...messageIds], SQL_CHUNK_SIZE)) {
     conn.run(sql`
       DELETE FROM messages_fts
@@ -1364,10 +1405,7 @@ function refreshMessageSearchIndexForIds(
   }
 }
 
-function finalizeRealtimeProjection(
-  conn: LocalDbExecutor,
-  conversationIds: Set<string>,
-): void {
+function finalizeRealtimeProjection(conn: LocalDbExecutor, conversationIds: Set<string>): void {
   refreshConversationSummariesForIds(conn, conversationIds);
 }
 
@@ -1506,15 +1544,7 @@ function projectRangeInternal(
 ): ProjectionRangeResult {
   if (input.endRowId < input.startRowId) {
     const projection = db.getProjectionState();
-    return summarizeResult(
-      db,
-      0,
-      projection.projection_watermark,
-      null,
-      null,
-      true,
-      null,
-    );
+    return summarizeResult(db, 0, projection.projection_watermark, null, null, true, null);
   }
 
   const currentProjectionState = db.getProjectionState();
@@ -1545,9 +1575,10 @@ function projectRangeInternal(
     lastRebuildAt: input.mode === "rebuild" ? Date.now() : undefined,
   });
 
-  const projectionWatermark = input.mode === "realtime"
-    ? db.getProjectionState().projection_watermark
-    : deferredProjectionWatermark;
+  const projectionWatermark =
+    input.mode === "realtime"
+      ? db.getProjectionState().projection_watermark
+      : deferredProjectionWatermark;
 
   return summarizeResult(
     db,
@@ -1569,7 +1600,15 @@ export function projectRealtimeRange(
   },
 ): ProjectionRangeResult {
   let currentStartRowId = options.startRowId;
-  let lastResult = summarizeResult(db, 0, db.getProjectionState().projection_watermark, null, null, true, null);
+  let lastResult = summarizeResult(
+    db,
+    0,
+    db.getProjectionState().projection_watermark,
+    null,
+    null,
+    true,
+    null,
+  );
   while (currentStartRowId <= options.endRowId) {
     const result = projectRangeInternal(db, {
       mode: "realtime",
@@ -1621,15 +1660,7 @@ export function projectPendingRawEvents(
 ): ProjectionOverview {
   const backlog = db.getProjectionBacklog();
   if (backlog.pending_raw_events === 0) {
-    const result = summarizeResult(
-      db,
-      0,
-      backlog.projection_watermark,
-      null,
-      null,
-      true,
-      null,
-    );
+    const result = summarizeResult(db, 0, backlog.projection_watermark, null, null, true, null);
     return {
       contacts: result.contacts,
       conversations: result.conversations,
