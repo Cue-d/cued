@@ -1,12 +1,2 @@
 #!/bin/sh
-set -e
-
-echo "Running Biome on staged files..."
-pnpm biome check --write --staged --no-errors-on-unmatched
-git update-index --again
-
-echo "Running typecheck..."
-pnpm typecheck
-
-echo "Running app tests..."
-pnpm test
+pnpm check:ci-local

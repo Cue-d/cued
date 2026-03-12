@@ -7,6 +7,7 @@ describe("platform capability resolver", () => {
       expect.objectContaining({
         availability: "unsupported",
         onboardingVisible: true,
+        supportsMultipleAccounts: false,
       }),
     );
   });
@@ -24,6 +25,7 @@ describe("platform capability resolver", () => {
     ).toEqual(
       expect.objectContaining({
         availability: "requires_permission",
+        supportsMultipleAccounts: false,
       }),
     );
   });
@@ -41,6 +43,7 @@ describe("platform capability resolver", () => {
     ).toEqual(
       expect.objectContaining({
         availability: "requires_helper",
+        supportsMultipleAccounts: false,
       }),
     );
   });
@@ -49,6 +52,7 @@ describe("platform capability resolver", () => {
     expect(summarizePlatformCapability("slack", null, "linux")).toEqual(
       expect.objectContaining({
         availability: "available",
+        supportsMultipleAccounts: true,
       }),
     );
   });
