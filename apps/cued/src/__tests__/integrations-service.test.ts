@@ -113,13 +113,17 @@ describe("integration state management", () => {
     const completed = completeAuthSession(db, requested.authSession.id, {
       state: "authenticated",
       keychainService: "dev.cued.auth.slack",
-      keychainAccount: requested.integration.accountKey,
+      keychainAccount: "T123",
       resultSummary: { teamId: "T123", teamName: "Acme" },
     });
     expect(completed.integration.authState).toBe("authenticated");
+    expect(completed.integration.accountKey).toBe("T123");
+    expect(completed.integration.displayName).toBe("Acme");
     expect(completed.authSession.keychainService).toBe("dev.cued.auth.slack");
+    expect(completed.authSession.accountKey).toBe("T123");
+    expect(db.getIntegrationState("slack", requested.integration.accountKey)).toBeNull();
 
-    const disabled = setIntegrationEnabled(db, "slack", requested.integration.accountKey, false);
+    const disabled = setIntegrationEnabled(db, "slack", completed.integration.accountKey, false);
     expect(disabled.enabled).toBe(false);
     expect(listRequestableIntegrationPlatforms()).toEqual([
       "slack",

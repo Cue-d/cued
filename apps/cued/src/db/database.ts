@@ -950,6 +950,34 @@ export class CuedDatabase {
       .run();
   }
 
+  updateAuthSessionIdentity(input: {
+    id: string;
+    accountKey: string;
+    integrationStateId: string;
+  }): void {
+    const current = this.getAuthSession(input.id);
+    if (!current) {
+      throw new Error(`Auth session not found: ${input.id}`);
+    }
+
+    this.db
+      .update(authSessions)
+      .set({
+        accountKey: input.accountKey,
+        integrationStateId: input.integrationStateId,
+        updatedAt: now(),
+      })
+      .where(eq(authSessions.id, input.id))
+      .run();
+  }
+
+  deleteIntegrationState(platform: Platform, accountKey: string): void {
+    this.db
+      .delete(integrationStates)
+      .where(and(eq(integrationStates.platform, platform), eq(integrationStates.accountKey, accountKey)))
+      .run();
+  }
+
   queueOutboundMessage(input: {
     platform: Platform;
     accountKey: string;
