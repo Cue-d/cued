@@ -1190,6 +1190,39 @@ export function disconnectIntegration(
   return getIntegrationSummary(db, integration.platform, integration.accountKey);
 }
 
+export function removeIntegration(
+  db: CuedDatabase,
+  platform: string,
+  accountKey?: string,
+): { platform: Platform; accountKey: string; removed: true } {
+  const integration = getIntegrationSummary(db, platform, accountKey);
+  const keychain = getKeychainMetadata(integration.metadata);
+  deleteKeychainSecret(keychain.keychainService, keychain.keychainAccount);
+
+  const browserProfileDir =
+    typeof integration.metadata?.browserProfileDir === "string"
+      ? integration.metadata.browserProfileDir
+      : null;
+  if (browserProfileDir) {
+    rmSync(browserProfileDir, { recursive: true, force: true });
+  }
+
+  if (integration.platform === "whatsapp") {
+    const storeDir =
+      typeof integration.metadata?.storeDir === "string"
+        ? integration.metadata.storeDir
+        : getWhatsAppStoreDir(integration.accountKey);
+    rmSync(storeDir, { recursive: true, force: true });
+  }
+
+  db.deleteIntegrationState(integration.platform, integration.accountKey);
+  return {
+    platform: integration.platform,
+    accountKey: integration.accountKey,
+    removed: true,
+  };
+}
+
 export function buildIntegrationStatus(db: CuedDatabase): {
   hostOs: ReturnType<typeof resolveHostOS>;
   integrations: IntegrationStateSummary[];
