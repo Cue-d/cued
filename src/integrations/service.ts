@@ -77,6 +77,11 @@ export interface AuthSessionSummary {
   updatedAt: number;
 }
 
+export interface CompletedAuthSessionSummary {
+  authSession: AuthSessionSummary;
+  integration: IntegrationStateSummary | null;
+}
+
 interface ManagedIntegrationState {
   platform: Platform;
   accountKey: string;
@@ -967,10 +972,22 @@ export function completeAuthSession(
     resultSummary?: Record<string, unknown> | null;
     errorSummary?: string | null;
   },
-): { authSession: AuthSessionSummary; integration: IntegrationStateSummary } {
+): CompletedAuthSessionSummary {
   const session = db.getAuthSession(sessionId);
   if (!session) {
     throw new Error(`Auth session not found: ${sessionId}`);
+  }
+
+  const existingIntegration = db.getIntegrationState(session.platform, session.account_key);
+  if (!existingIntegration && session.state === "cancelled") {
+    const authSession = getAuthSessionSummary(db, sessionId);
+    if (!authSession) {
+      throw new Error(`Auth session not found after cancellation: ${sessionId}`);
+    }
+    return {
+      authSession,
+      integration: null,
+    };
   }
 
   db.updateAuthSessionState({
@@ -1190,6 +1207,17 @@ export function removeIntegration(
   accountKey?: string,
 ): { platform: Platform; accountKey: string; removed: true } {
   const integration = getIntegrationSummary(db, platform, accountKey);
+  const latestAuthSession = db.getLatestAuthSession(integration.platform, integration.accountKey);
+  if (latestAuthSession?.state === "requested" || latestAuthSession?.state === "in_progress") {
+    db.updateAuthSessionState({
+      id: latestAuthSession.id,
+      state: "cancelled",
+      nativePid: null,
+      finishedAt: now(),
+      errorSummary: null,
+    });
+  }
+
   const keychain = getKeychainMetadata(integration.metadata);
   deleteKeychainSecret(keychain.keychainService, keychain.keychainAccount);
 

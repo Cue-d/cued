@@ -171,7 +171,7 @@ async function handleLocalIntegrationCommand(
             resultSummary: result.resultSummary ?? null,
             errorSummary: result.errorSummary ?? null,
           });
-          if (completed.integration.authState === "authenticated") {
+          if (completed.integration?.authState === "authenticated") {
             if (
               !db.hasQueuedOrRunningRun(
                 completed.integration.platform,
