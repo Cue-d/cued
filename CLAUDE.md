@@ -10,7 +10,7 @@ Current runtime:
 native/macos/CuedNative (menu bar host, permissions, native windows)
         |
         v
-apps/cued (daemon, CLI, sync orchestration, projection)
+repo root app (daemon, CLI, sync orchestration, projection)
         |
         v
 ~/.cued/local.db
@@ -19,9 +19,7 @@ apps/cued (daemon, CLI, sync orchestration, projection)
 ## Active Repository Layout
 
 ```text
-apps/
-  cued/             Local daemon and CLI
-
+src/                Local daemon and CLI
 native/
   macos/
     CuedNative/     macOS host app
@@ -33,9 +31,9 @@ The repository no longer includes the Electron runtime or the old shared/cloud p
 
 ## Development Rules
 
-- Use `apps/cued` as the source of truth for active runtime behavior.
+- Use the repo root app as the source of truth for active runtime behavior.
 - Keep data flow local. Avoid introducing cloud sync, Convex, or web/mobile assumptions.
-- Prefer local modules in `apps/cued/src/` over rebuilding a package abstraction.
+- Prefer local modules in `src/` over rebuilding a package abstraction.
 - Do not modify generated app bundles in `native/macos/dist/`.
 - Run the relevant tests before shipping changes.
 
@@ -43,13 +41,13 @@ The repository no longer includes the Electron runtime or the old shared/cloud p
 
 | Feature               | Files                                                                                                 |
 | --------------------- | ----------------------------------------------------------------------------------------------------- |
-| CLI entrypoint        | `apps/cued/src/cli.ts`                                                                                |
-| Setup flow            | `apps/cued/src/setup.ts`                                                                              |
-| Daemon                | `apps/cued/src/daemon/`                                                                               |
-| Integrations          | `apps/cued/src/integrations/`                                                                         |
-| Database              | `apps/cued/src/db/`                                                                                   |
-| Diagnostics           | `apps/cued/src/diagnostics/doctor.ts`                                                                 |
-| macOS install helpers | `apps/cued/src/macos/install.ts`                                                                      |
+| CLI entrypoint        | `src/cli.ts`                                                                                          |
+| Setup flow            | `src/setup.ts`                                                                                        |
+| Daemon                | `src/daemon/`                                                                                         |
+| Integrations          | `src/integrations/`                                                                                   |
+| Database              | `src/db/`                                                                                             |
+| Diagnostics           | `src/diagnostics/doctor.ts`                                                                           |
+| macOS install helpers | `src/macos/install.ts`                                                                                |
 | App bundle build      | `scripts/build-cued-daemon-app.sh`                                                                    |
 | Packaging and signing | `scripts/build-cued-dmg.sh`, `scripts/build-cued-tarball.sh`, `scripts/sign-and-notarize-cued-app.sh` |
 | Native host           | `native/macos/CuedNative/Sources/CuedNative/`                                                         |
@@ -69,7 +67,7 @@ swift build --package-path native/macos/CuedNative -c release
 ## Testing
 
 ```bash
-cd apps/cued && pnpm test
+pnpm test
 swift build --package-path native/macos/CuedNative -c release
 ```
 

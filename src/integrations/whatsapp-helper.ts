@@ -9,7 +9,7 @@ import type { WhatsAppHelperEventEnvelope } from "./whatsapp-types.js";
 const execFileAsync = promisify(execFile);
 
 function resolveRepoRoot(): string {
-  return resolve(dirname(fileURLToPath(import.meta.url)), "../../../../");
+  return resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 }
 
 export function getWhatsAppStoreDir(accountKey: string): string {

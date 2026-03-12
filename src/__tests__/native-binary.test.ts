@@ -46,4 +46,10 @@ describe("macOS native binary resolution", () => {
     const repoRoot = createRepoRoot();
     expect(resolveMacOSNativeBinary(undefined, repoRoot)).toBeNull();
   });
+
+  it("uses the flattened repo root for implicit development candidates", () => {
+    expect(getMacOSNativeBinaryCandidates()[0]).toBe(
+      join(process.cwd(), "native", "macos", "CuedNative", ".build", "release", "CuedNative"),
+    );
+  });
 });

@@ -7,12 +7,6 @@ settings:
 importers:
 
   .:
-    devDependencies:
-      '@biomejs/biome':
-        specifier: ^2.4.6
-        version: 2.4.6
-
-  apps/cued:
     dependencies:
       better-sqlite3:
         specifier: ^12.6.0
@@ -27,6 +21,9 @@ importers:
         specifier: ^1.6.0
         version: 1.6.0
     devDependencies:
+      '@biomejs/biome':
+        specifier: ^2.4.6
+        version: 2.4.6
       '@types/better-sqlite3':
         specifier: ^7.6.13
         version: 7.6.13
@@ -602,9 +599,6 @@ packages:
   '@types/node@20.19.29':
     resolution: {integrity: sha512-YrT9ArrGaHForBaCNwFjoqJWmn8G1Pr7+BH/vwyLHciA9qT/wSiuOhxGCT50JA5xLvFBd6PIiGkE3afxcPE1nw==}
 
-  '@types/node@22.19.6':
-    resolution: {integrity: sha512-qm+G8HuG6hOHQigsi7VGuLjUVu6TtBo/F05zvX04Mw2uCg9Dv0Qxy3Qw7j41SidlTcl5D/5yg0SEZqOB+EqZnQ==}
-
   '@vitest/expect@2.1.9':
     resolution: {integrity: sha512-UJCIkTBenHeKT1TTlKMJWy1laZewsRIzYighyYiJKZreqtdxSos/S1t+ktRMQWu2CKqaarrkeszJx1cgC5tGZw==}
 
@@ -1040,6 +1034,7 @@ packages:
   prebuild-install@7.1.3:
     resolution: {integrity: sha512-8Mf2cbV7x1cXPUILADGI3wuhfqWvtiLA1iclTDbFRZkgRQS0NqsPZphna9V+HyTEadheuPmjaJMsbzKQFOzLug==}
     engines: {node: '>=10'}
+    deprecated: No longer maintained. Please contact the author of the relevant native addon; alternatives are available.
     hasBin: true
 
   pump@3.0.3:
@@ -1625,15 +1620,11 @@ snapshots:
 
   '@types/better-sqlite3@7.6.13':
     dependencies:
-      '@types/node': 22.19.6
+      '@types/node': 20.19.29
 
   '@types/estree@1.0.8': {}
 
   '@types/node@20.19.29':
-    dependencies:
-      undici-types: 6.21.0
-
-  '@types/node@22.19.6':
     dependencies:
       undici-types: 6.21.0
 
