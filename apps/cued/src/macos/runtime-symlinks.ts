@@ -30,11 +30,10 @@ export function pruneBundledRuntimeSymlinks(runtimeRoot: string): string[] {
         normalizedTarget = null;
       }
 
-      const pointsInsideRuntime = normalizedTarget !== null
-        && (
-          normalizedTarget === normalizedRuntimeRoot
-          || normalizedTarget.startsWith(`${normalizedRuntimeRoot}${sep}`)
-        );
+      const pointsInsideRuntime =
+        normalizedTarget !== null &&
+        (normalizedTarget === normalizedRuntimeRoot ||
+          normalizedTarget.startsWith(`${normalizedRuntimeRoot}${sep}`));
 
       if (pointsInsideRuntime) {
         continue;
@@ -50,7 +49,9 @@ export function pruneBundledRuntimeSymlinks(runtimeRoot: string): string[] {
 }
 
 function isInvokedDirectly(): boolean {
-  return process.argv[1] !== undefined && fileURLToPath(import.meta.url) === resolve(process.argv[1]);
+  return (
+    process.argv[1] !== undefined && fileURLToPath(import.meta.url) === resolve(process.argv[1])
+  );
 }
 
 if (isInvokedDirectly()) {
