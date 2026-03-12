@@ -16,6 +16,7 @@
     "build:dmg:macos": "bash scripts/build-cued-dmg.sh",
     "build:tarball:macos": "bash scripts/build-cued-tarball.sh",
     "check:ci-local": "sh scripts/check-ci-local.sh",
+    "bootstrap:signal:macos": "bash scripts/fetch-signal-cli-macos.sh",
     "check:native:macos": "swift build --package-path native/macos/CuedNative -c release",
     "check:biome": "biome check .",
     "format": "biome format --write .",

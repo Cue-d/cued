@@ -1,12 +1,14 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   contactHandleType,
+  getSignalCliBinaryCandidates,
   isSignalCliVersionSupported,
   parseSignalCliVersion,
   readSignalLinkedAccount,
+  resolveSignalCliPath,
   toSignalMessage,
 } from "../integrations/signal-cli.js";
 
@@ -27,6 +29,11 @@ describe("signal cli helpers", () => {
     const dir = mkdtempSync(join(tmpdir(), prefix));
     tempDirs.push(dir);
     return dir;
+  }
+
+  function createSignalHelperBinary(path: string, version = "0.14.1"): void {
+    writeFileSync(path, `#!/bin/sh\necho "signal-cli ${version}"\n`);
+    chmodSync(path, 0o755);
   }
 
   it("parses and validates signal-cli versions", () => {
@@ -52,6 +59,67 @@ describe("signal cli helpers", () => {
     );
 
     expect(readSignalLinkedAccount(dir)).toBe("+14155550123");
+  });
+
+  it("prefers the packaged app helper over the repo-local helper", () => {
+    const repoRoot = createTempDir("cued-signal-repo-");
+    const appPath = join(createTempDir("cued-signal-app-"), "Cued.app");
+    const packagedHelper = join(
+      appPath,
+      "Contents",
+      "Resources",
+      "helpers",
+      "signal-cli",
+      "cued-signal-cli",
+    );
+    const repoHelper = join(
+      repoRoot,
+      "native",
+      "helpers",
+      "signal-cli",
+      ".build",
+      "cued-signal-cli",
+      "cued-signal-cli",
+    );
+
+    mkdirSync(join(packagedHelper, ".."), { recursive: true });
+    mkdirSync(join(repoHelper, ".."), { recursive: true });
+    createSignalHelperBinary(packagedHelper, "0.14.1");
+    createSignalHelperBinary(repoHelper, "0.13.1");
+
+    const env = { CUED_APP_PATH: appPath } as NodeJS.ProcessEnv;
+    expect(getSignalCliBinaryCandidates(env, repoRoot)).toEqual(
+      expect.arrayContaining([packagedHelper, repoHelper]),
+    );
+    expect(resolveSignalCliPath(env, repoRoot)).toBe(packagedHelper);
+  });
+
+  it("falls back to the repo-local staged helper when no packaged app helper exists", () => {
+    const repoRoot = createTempDir("cued-signal-repo-");
+    const repoHelper = join(
+      repoRoot,
+      "native",
+      "helpers",
+      "signal-cli",
+      ".build",
+      "cued-signal-cli",
+      "cued-signal-cli",
+    );
+
+    mkdirSync(join(repoHelper, ".."), { recursive: true });
+    createSignalHelperBinary(repoHelper);
+
+    expect(resolveSignalCliPath({}, repoRoot)).toBe(repoHelper);
+  });
+
+  it("returns null when no bundled helper exists and ignores legacy env overrides", () => {
+    const repoRoot = createTempDir("cued-signal-repo-");
+    const legacyOverride = join(createTempDir("cued-signal-legacy-"), "signal-cli");
+    createSignalHelperBinary(legacyOverride);
+
+    expect(
+      resolveSignalCliPath({ CUED_SIGNAL_CLI_PATH: legacyOverride } as NodeJS.ProcessEnv, repoRoot),
+    ).toBeNull();
   });
 
   it("normalizes received signal envelopes into message payloads", () => {

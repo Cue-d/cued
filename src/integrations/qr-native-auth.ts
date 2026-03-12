@@ -108,10 +108,10 @@ export function startQrNativeAuthSession(
           state: "failed",
           resultSummary: {
             runtime: "qr_native",
-            helper: "signal-cli",
+            helper: "cued-signal-cli",
             configDir,
           },
-          errorSummary: "signal-cli was not found. Set CUED_SIGNAL_CLI_PATH or install signal-cli.",
+          errorSummary: "Bundled Signal helper was not found. Rebuild or update Cued.",
         };
       }
       if (!isSignalCliVersionSupported(inspected.version)) {
@@ -122,12 +122,14 @@ export function startQrNativeAuthSession(
           state: "failed",
           resultSummary: {
             runtime: "qr_native",
-            helper: "signal-cli",
+            helper: "cued-signal-cli",
             cliPath: inspected.cliPath,
+            helperRoot: inspected.helperRoot,
+            javaHome: inspected.javaHome,
             signalCliVersion: inspected.version?.raw ?? null,
             configDir,
           },
-          errorSummary: `signal-cli is too old (${inspected.version?.raw ?? "unknown"}). Upgrade to a supported version.`,
+          errorSummary: `Bundled Signal helper is too old or invalid (${inspected.version?.raw ?? "unknown"}). Rebuild or update Cued.`,
         };
       }
 
@@ -182,8 +184,10 @@ export function startQrNativeAuthSession(
               : "failed",
           resultSummary: {
             runtime: "qr_native",
-            helper: "signal-cli",
+            helper: "cued-signal-cli",
             cliPath: inspected.cliPath,
+            helperRoot: inspected.helperRoot,
+            javaHome: inspected.javaHome,
             signalCliVersion: inspected.version?.raw ?? null,
             configDir,
           },
@@ -204,8 +208,10 @@ export function startQrNativeAuthSession(
         keychainAccount: null,
         resultSummary: {
           runtime: "qr_native",
-          helper: "signal-cli",
+          helper: "cued-signal-cli",
           cliPath: inspected.cliPath,
+          helperRoot: inspected.helperRoot,
+          javaHome: inspected.javaHome,
           signalCliVersion: inspected.version?.raw ?? null,
           configDir,
           linkedAccount,

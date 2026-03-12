@@ -144,7 +144,7 @@ const REQUESTABLE_INTEGRATIONS: Record<string, RequestableIntegrationConfig> = {
     metadata: {
       authCapture: "signal_cli_link",
       pairingKind: "native_qr",
-      helper: "signal-cli",
+      helper: "cued-signal-cli",
     },
   },
 };
@@ -310,16 +310,18 @@ async function buildSignalManagedState(
     syncCapable: authState === "authenticated" && supportedByDaemon,
     launchStrategy: "qr-native",
     launchTarget: null,
-    importedFrom: existing?.imported_from ?? "local-cli",
+    importedFrom: existing?.imported_from ?? "bundled-helper",
     artifactPaths: [configDir],
     metadata: {
       authCapture: "signal_cli_link",
       pairingKind: "native_qr",
-      helper: "signal-cli",
-      authManagedBy: "signal-cli-runtime",
+      helper: "cued-signal-cli",
+      authManagedBy: "signal-helper-runtime",
       runtimeKind: "qr_native",
       configDir,
       signalCliPath: inspected.cliPath,
+      signalHelperRoot: inspected.helperRoot,
+      signalJavaHome: inspected.javaHome,
       signalCliVersion: inspected.version?.raw ?? null,
       signalLinkedAccount: linkedAccount,
       signalVersionSupported: isSignalCliVersionSupported(inspected.version),
@@ -799,14 +801,15 @@ function ensureRequestableIntegrationState(
     syncCapable: false,
     launchStrategy: requested.launchStrategy,
     launchTarget: requested.launchTarget,
-    importedFrom: existing?.imported_from ?? "local-cli",
+    importedFrom:
+      existing?.imported_from ?? (normalized === "signal" ? "bundled-helper" : "local-cli"),
     metadata: {
       ...existingMetadata,
       ...(requested.metadata ?? {}),
       supportedByDaemon,
       authManagedBy:
         normalized === "signal"
-          ? "signal-cli-runtime"
+          ? "signal-helper-runtime"
           : requested.runtimeKind === "chromium"
             ? "chromium-runtime"
             : "native-qr-runtime",
