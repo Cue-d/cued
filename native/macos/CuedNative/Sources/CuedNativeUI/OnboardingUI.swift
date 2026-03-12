@@ -161,6 +161,22 @@ public struct InstallerAddAccountPrompt: Identifiable {
   }
 }
 
+public struct InstallerRemovalPrompt: Identifiable {
+  public let platform: String
+  public let platformTitle: String
+  public let accountKey: String
+  public let accountTitle: String
+
+  public var id: String { "\(platform):\(accountKey)" }
+
+  public init(platform: String, platformTitle: String, accountKey: String, accountTitle: String) {
+    self.platform = platform
+    self.platformTitle = platformTitle
+    self.accountKey = accountKey
+    self.accountTitle = accountTitle
+  }
+}
+
 @MainActor
 public final class OnboardingViewModel: ObservableObject {
   public static let windowWidth: CGFloat = 630
@@ -305,17 +321,22 @@ public struct CuedOnboardingView: View {
   let onRefresh: () -> Void
   let onRequestPermission: ([String]) -> Void
   let onEnableIntegration: (String, String) -> Void
+  let onRemoveIntegration: (String, String) -> Void
   let onConnectIntegration: (String, String) -> Void
   let onFinish: () -> Void
 
   @State private var addAccountPrompt: InstallerAddAccountPrompt?
+  @State private var removalPrompt: InstallerRemovalPrompt?
   @State private var pendingPermissionKeys = Set<String>()
+  @State private var pendingIntegrationActionIDs = Set<String>()
+  @State private var pendingPlatformConnectPlatforms = Set<String>()
 
   public init(
     viewModel: OnboardingViewModel,
     onRefresh: @escaping () -> Void,
     onRequestPermission: @escaping ([String]) -> Void,
     onEnableIntegration: @escaping (String, String) -> Void,
+    onRemoveIntegration: @escaping (String, String) -> Void,
     onConnectIntegration: @escaping (String, String) -> Void,
     onFinish: @escaping () -> Void
   ) {
@@ -323,6 +344,7 @@ public struct CuedOnboardingView: View {
     self.onRefresh = onRefresh
     self.onRequestPermission = onRequestPermission
     self.onEnableIntegration = onEnableIntegration
+    self.onRemoveIntegration = onRemoveIntegration
     self.onConnectIntegration = onConnectIntegration
     self.onFinish = onFinish
   }
@@ -366,6 +388,10 @@ public struct CuedOnboardingView: View {
     .onChange(of: viewModel.permissionStatuses.map(\.status)) { _ in
       pendingPermissionKeys.removeAll()
     }
+    .onChange(of: platformRefreshSignature) { _ in
+      pendingIntegrationActionIDs.removeAll()
+      pendingPlatformConnectPlatforms.removeAll()
+    }
     .sheet(item: $addAccountPrompt) { prompt in
       InstallerAddAccountSheet(
         platformTitle: prompt.platformTitle,
@@ -373,9 +399,29 @@ public struct CuedOnboardingView: View {
         onCancel: { addAccountPrompt = nil },
         onConnect: { accountKey in
           addAccountPrompt = nil
+          pendingPlatformConnectPlatforms.insert(prompt.platform)
           onConnectIntegration(prompt.platform, accountKey)
         }
       )
+    }
+    .alert(item: $removalPrompt) { prompt in
+      Alert(
+        title: Text("Remove \(prompt.accountTitle)?"),
+        message: Text("This deletes the saved \(prompt.platformTitle) connection from this Mac."),
+        primaryButton: .destructive(Text("Remove")) {
+          pendingIntegrationActionIDs.insert(prompt.id)
+          onRemoveIntegration(prompt.platform, prompt.accountKey)
+        },
+        secondaryButton: .cancel()
+      )
+    }
+  }
+
+  private var platformRefreshSignature: [String] {
+    viewModel.platformConfigurations.flatMap { configuration in
+      configuration.knownAccounts.map { integration in
+        "\(integration.id):\(integration.authState):\(integration.enabled)"
+      }
     }
   }
 
@@ -613,7 +659,9 @@ public struct CuedOnboardingView: View {
 
   private func platformConfigurationCard(_ configuration: InstallerPlatformConfiguration) -> some View {
     let isFullyConnected = platformIsFullyConnected(configuration)
-    let shouldShowAccountControls = configuration.supportsMultipleAccounts || !isFullyConnected
+    let shouldShowAccountControls =
+      configuration.supportsMultipleAccounts || configuration.isRequestable || !isFullyConnected
+    let shouldDimCard = isFullyConnected && !shouldShowAccountControls
 
     return VStack(alignment: .leading, spacing: 14) {
       HStack(alignment: .top, spacing: 12) {
@@ -648,7 +696,7 @@ public struct CuedOnboardingView: View {
       }
     }
     .padding(.vertical, 2)
-    .opacity(isFullyConnected ? 0.7 : 1.0)
+    .opacity(shouldDimCard ? 0.7 : 1.0)
   }
 
   private func singleAccountPlatformRow(
@@ -656,9 +704,24 @@ public struct CuedOnboardingView: View {
     integration: InstallerIntegrationStatus
   ) -> some View {
     let action = accountAction(for: configuration, integration: integration)
+    let removeAction = removeAction(for: configuration, integration: integration)
+    let showsCheckmark = installerShowsCompletionCheckmark(
+      for: configuration,
+      integration: integration
+    )
+    let isPending = pendingIntegrationActionIDs.contains(integration.id)
 
-    return HStack {
+    return HStack(spacing: 10) {
       Spacer(minLength: 0)
+      if isPending {
+        ProgressView()
+          .controlSize(.small)
+      } else if showsCheckmark {
+        authenticatedCheckmark(label: "\(configuration.title) authenticated")
+      }
+      if let removeAction {
+        removalButton(label: removeAction.label, action: removeAction.handler)
+      }
       if let action {
         actionButton(title: action.title, action: action.handler)
       }
@@ -679,7 +742,12 @@ public struct CuedOnboardingView: View {
       if let action = platformLevelAction(for: configuration) {
         HStack {
           Spacer(minLength: 0)
-          actionButton(title: action.title, prominent: false, action: action.handler)
+          if pendingPlatformConnectPlatforms.contains(configuration.platform) {
+            ProgressView()
+              .controlSize(.small)
+          } else {
+            actionButton(title: action.title, prominent: false, action: action.handler)
+          }
         }
       }
     }
@@ -690,10 +758,12 @@ public struct CuedOnboardingView: View {
     integration: InstallerIntegrationStatus
   ) -> some View {
     let action = accountAction(for: configuration, integration: integration)
+    let removeAction = removeAction(for: configuration, integration: integration)
     let showsCheckmark = installerShowsCompletionCheckmark(
       for: configuration,
       integration: integration
     )
+    let isPending = pendingIntegrationActionIDs.contains(integration.id)
 
     return HStack(alignment: .top, spacing: 12) {
       VStack(alignment: .leading, spacing: 4) {
@@ -707,9 +777,17 @@ public struct CuedOnboardingView: View {
 
       Spacer(minLength: 12)
 
-      if showsCheckmark {
+      if isPending {
+        ProgressView()
+          .controlSize(.small)
+          .padding(.top, 2)
+      } else if showsCheckmark {
         authenticatedCheckmark(label: "\(accountTitle(for: integration)) authenticated")
-      } else if let action {
+      }
+      if let removeAction {
+        removalButton(label: removeAction.label, action: removeAction.handler)
+      }
+      if let action {
         actionButton(title: action.title, action: action.handler)
       }
     }
@@ -731,6 +809,21 @@ public struct CuedOnboardingView: View {
           .controlSize(.regular)
       }
     }
+  }
+
+  private func removalButton(
+    label: String,
+    action: @escaping () -> Void
+  ) -> some View {
+    Button(action: action) {
+      Image(systemName: "xmark")
+        .font(.headline.weight(.semibold))
+        .foregroundStyle(.secondary)
+        .frame(width: 18, height: 18, alignment: .center)
+    }
+    .frame(width: 24, height: 24, alignment: .center)
+    .buttonStyle(.plain)
+    .accessibilityLabel(label)
   }
 
   private func singleAccountDetail(
@@ -787,14 +880,50 @@ public struct CuedOnboardingView: View {
     if !integration.enabled && isConnected {
       return (
         "Turn on",
-        { onEnableIntegration(configuration.platform, integration.accountKey) }
+        {
+          pendingIntegrationActionIDs.insert(integration.id)
+          onEnableIntegration(configuration.platform, integration.accountKey)
+        }
       )
     }
+    if isConnected {
+      return nil
+    }
 
-    let title = isConnected ? "Reconnect" : "Connect"
+    let title =
+      integration.authState == "failed" || integration.authState == "blocked"
+        || integration.authState == "check_failed"
+        ? "Connect again"
+        : "Connect"
     return (
       title,
-      { onConnectIntegration(configuration.platform, integration.accountKey) }
+      {
+        pendingIntegrationActionIDs.insert(integration.id)
+        onConnectIntegration(configuration.platform, integration.accountKey)
+      }
+    )
+  }
+
+  private func removeAction(
+    for configuration: InstallerPlatformConfiguration,
+    integration: InstallerIntegrationStatus
+  ) -> (label: String, handler: () -> Void)? {
+    guard configuration.isRequestable,
+          integration.authState != "requested",
+          integration.authState != "in_progress" else {
+      return nil
+    }
+
+    return (
+      "Remove \(accountTitle(for: integration))",
+      {
+        removalPrompt = InstallerRemovalPrompt(
+          platform: configuration.platform,
+          platformTitle: configuration.title,
+          accountKey: integration.accountKey,
+          accountTitle: accountTitle(for: integration)
+        )
+      }
     )
   }
 
@@ -821,12 +950,13 @@ public struct CuedOnboardingView: View {
     if configuration.supportsMultipleAccounts {
       let noun = installerAccountNoun(for: configuration.platform)
       let title = configuration.accounts.isEmpty && installerSupportsAutomaticAccountDiscovery(configuration.platform)
-        ? "Authenticate"
+        ? "Connect"
         : "Add \(noun)"
       return (
-        title.capitalized,
+        title,
         {
           if installerSupportsAutomaticAccountDiscovery(configuration.platform) {
+            pendingPlatformConnectPlatforms.insert(configuration.platform)
             onConnectIntegration(
               configuration.platform,
               viewModel.suggestedAccountKey(for: configuration.platform)
@@ -847,12 +977,18 @@ public struct CuedOnboardingView: View {
       if !integration.enabled && isConnected {
         return (
           "Turn on",
-          { onEnableIntegration(configuration.platform, integration.accountKey) }
+          {
+            pendingIntegrationActionIDs.insert(integration.id)
+            onEnableIntegration(configuration.platform, integration.accountKey)
+          }
         )
       }
       return (
-        isConnected ? "Reconnect" : "Connect",
-        { onConnectIntegration(configuration.platform, integration.accountKey) }
+        isConnected ? "Connect again" : "Connect",
+        {
+          pendingIntegrationActionIDs.insert(integration.id)
+          onConnectIntegration(configuration.platform, integration.accountKey)
+        }
       )
     }
 
@@ -891,6 +1027,7 @@ public struct CuedOnboardingView: View {
     Image(systemName: "checkmark.circle.fill")
       .font(.title3.weight(.semibold))
       .foregroundStyle(.secondary)
+      .frame(width: 24, height: 24, alignment: .center)
       .accessibilityLabel(label)
   }
 
@@ -1527,6 +1664,7 @@ private struct InstallerPreviewContainer: View {
       onRefresh: {},
       onRequestPermission: { _ in },
       onEnableIntegration: { _, _ in },
+      onRemoveIntegration: { _, _ in },
       onConnectIntegration: { _, _ in },
       onFinish: {}
     )
