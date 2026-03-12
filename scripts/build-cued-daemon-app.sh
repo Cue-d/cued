@@ -17,14 +17,16 @@ RESOURCES_DIR="$CONTENTS_DIR/Resources"
 RUNTIME_DIR="$RESOURCES_DIR/cued-runtime"
 RUNTIME_NODE_DIR="$RESOURCES_DIR/runtime/node/bin"
 HELPERS_DIR="$RESOURCES_DIR/helpers"
+SIGNAL_FETCH_SCRIPT="$ROOT_DIR/scripts/fetch-signal-cli-macos.sh"
+SIGNAL_HELPER_SOURCE_DIR="$ROOT_DIR/native/helpers/signal-cli/.build/cued-signal-cli"
 WHATSAPP_HELPER_SOURCE="$ROOT_DIR/native/helpers/whatsapp-go/.build/cued-whatsapp-helper"
 PERMISSIONS_SCRIPT_SOURCE="$ROOT_DIR/scripts/request-macos-access.sh"
 TRAY_ICON_SOURCE="$ROOT_DIR/native/macos/CuedNative/Resources/trayIconTemplate.png"
 CUED_MARK_SOURCE="$ROOT_DIR/native/macos/CuedNative/Resources/cued-mark.png"
 NODE_PATH="${CUED_NODE_PATH:-$(command -v node)}"
-RUNTIME_SYMLINK_PRUNER="$ROOT_DIR/apps/cued/dist/macos/runtime-symlinks.js"
+RUNTIME_SYMLINK_PRUNER="$ROOT_DIR/dist/macos/runtime-symlinks.js"
 DB_PATH="${CUED_DB_PATH_OVERRIDE:-$HOME/.cued/local.db}"
-APP_VERSION="$("$NODE_PATH" -p "require(process.argv[1]).version" "$ROOT_DIR/apps/cued/package.json")"
+APP_VERSION="$("$NODE_PATH" -p "require(process.argv[1]).version" "$ROOT_DIR/package.json")"
 RELEASE_CHANNEL="${CUED_RELEASE_CHANNEL:-internal}"
 DAEMON_COMMAND="${CUED_DAEMON_COMMAND:-\"\$CUED_APP_PATH/Contents/Resources/cued-cli\" daemon}"
 SETUP_COMMAND="${CUED_SETUP_COMMAND:-\"\$CUED_APP_PATH/Contents/Resources/cued-cli\" setup}"
@@ -44,14 +46,30 @@ xml_escape() {
           -e 's/>/\&gt;/g'
 }
 
+sign_app_bundle() {
+  if [[ -n "${CUED_CODESIGN_IDENTITY:-}" ]]; then
+    codesign \
+      --force \
+      --deep \
+      --timestamp \
+      --options runtime \
+      --sign "$CUED_CODESIGN_IDENTITY" \
+      "$APP_BUNDLE" >/dev/null
+    return
+  fi
+
+  codesign --force --deep --sign - "$APP_BUNDLE" >/dev/null
+}
+
 mkdir -p "$APP_DIST_DIR"
 
-pnpm --dir "$ROOT_DIR/apps/cued" build >/dev/null
+pnpm --dir "$ROOT_DIR" build >/dev/null
 swift build --package-path "$SWIFT_PACKAGE_DIR" -c release >/dev/null
 SWIFT_RESOURCE_BUNDLES=("$SWIFT_PACKAGE_DIR"/.build/*/release/*.bundle)
+bash "$SIGNAL_FETCH_SCRIPT" >/dev/null
 mkdir -p "$(dirname "$WHATSAPP_HELPER_SOURCE")"
 (cd "$ROOT_DIR/native/helpers/whatsapp-go" && GOWORK=off go build -o "$WHATSAPP_HELPER_SOURCE" .) >/dev/null
-pnpm --filter ./apps/cued deploy --legacy --prod "$DEPLOY_STAGING_DIR" >/dev/null
+npm_config_ignore_scripts=true pnpm --dir "$ROOT_DIR" --filter . deploy --legacy --prod "$DEPLOY_STAGING_DIR" >/dev/null
 
 rm -rf "$APP_BUNDLE"
 mkdir -p "$MACOS_DIR" "$RESOURCES_DIR" "$RUNTIME_DIR" "$RUNTIME_NODE_DIR" "$HELPERS_DIR"
@@ -64,11 +82,14 @@ done
 cp "$NODE_PATH" "$RUNTIME_NODE_DIR/node"
 chmod +x "$RUNTIME_NODE_DIR/node"
 cp -R "$DEPLOY_STAGING_DIR/." "$RUNTIME_DIR/"
+cp -R "$SIGNAL_HELPER_SOURCE_DIR" "$HELPERS_DIR/signal-cli"
 cp "$WHATSAPP_HELPER_SOURCE" "$HELPERS_DIR/cued-whatsapp-helper"
 chmod +x "$HELPERS_DIR/cued-whatsapp-helper"
 
 # Remove symlinks that escape the bundled runtime or no longer resolve after deploy.
 "$NODE_PATH" "$RUNTIME_SYMLINK_PRUNER" "$RUNTIME_DIR" >/dev/null
+# `pnpm deploy --legacy --prod` can still leave a handful of dangling package links behind.
+find -L "$RUNTIME_DIR" -type l -exec rm -f {} +
 rm -rf "$RUNTIME_DIR/node_modules/cued" "$RUNTIME_DIR/node_modules/@cued/app"
 
 mkdir -p "$RESOURCES_DIR/scripts"
@@ -144,6 +165,6 @@ cp "$TRAY_ICON_SOURCE" "$RESOURCES_DIR/trayIconTemplate.png"
 cp "$CUED_MARK_SOURCE" "$RESOURCES_DIR/cued-mark.png"
 
 # Sign the assembled app bundle so LaunchServices accepts it as an app.
-codesign --force --deep --sign - "$APP_BUNDLE" >/dev/null
+sign_app_bundle
 
 echo "$APP_BUNDLE"

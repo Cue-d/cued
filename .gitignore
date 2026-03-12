@@ -9,14 +9,16 @@ lerna-debug.log*
 .pnpm-debug.log*
 
 # Build outputs
-apps/cued/dist/
-apps/cued/.turbo/
+dist/
 native/macos/CuedNative/.build/
 native/macos/dist/
+native/helpers/signal-cli/.build/
 native/helpers/whatsapp-go/.build/
 .turbo/
 tsconfig.tsbuildinfo
+tsconfig.build.tsbuildinfo
 **/tsconfig.tsbuildinfo
+**/tsconfig.build.tsbuildinfo
 
 # Application data and caches
 *.db
