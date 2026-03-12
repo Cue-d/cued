@@ -28,7 +28,6 @@ export async function buildSignalSyncBundle(options?: {
     options?.client ??
     new DefaultSignalCliClient({
       account,
-      cliPath: process.env.CUED_SIGNAL_CLI_PATH,
       configDir,
     });
 
