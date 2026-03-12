@@ -302,6 +302,7 @@ public struct CuedOnboardingView: View {
   let onFinish: () -> Void
 
   @State private var addAccountPrompt: InstallerAddAccountPrompt?
+  @State private var pendingPermissionKeys = Set<String>()
 
   public init(
     viewModel: OnboardingViewModel,
@@ -346,8 +347,17 @@ public struct CuedOnboardingView: View {
       }
       onRefresh()
     }
-    .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
+    .onReceive(
+      NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)
+        .debounce(for: .milliseconds(250), scheduler: RunLoop.main)
+    ) { _ in
       onRefresh()
+    }
+    .onChange(of: viewModel.permissionStatuses.map(\.id)) { _ in
+      pendingPermissionKeys.removeAll()
+    }
+    .onChange(of: viewModel.permissionStatuses.map(\.status)) { _ in
+      pendingPermissionKeys.removeAll()
     }
     .sheet(item: $addAccountPrompt) { prompt in
       InstallerAddAccountSheet(
@@ -550,6 +560,7 @@ public struct CuedOnboardingView: View {
   private func permissionRow(_ permission: InstallerPermissionStatus) -> some View {
     let descriptor = installerPermissionDescriptor(for: permission.key)
     let isGranted = permission.status == "granted"
+    let isPending = pendingPermissionKeys.contains(permission.key)
 
     return HStack(alignment: .top, spacing: 12) {
       Image(systemName: descriptor.systemImage)
@@ -575,13 +586,18 @@ public struct CuedOnboardingView: View {
           .foregroundStyle(.green)
           .padding(.top, 2)
           .accessibilityLabel("\(descriptor.title) access granted")
+      } else if isPending {
+        ProgressView()
+          .controlSize(.small)
+          .padding(.top, 6)
       } else {
         Button("Request access") {
+          pendingPermissionKeys.insert(permission.key)
           onRequestPermission(permission.requestFlags)
         }
         .buttonStyle(.bordered)
         .controlSize(.regular)
-        .disabled(viewModel.isRefreshing)
+        .disabled(isPending)
       }
     }
     .padding(.vertical, 2)
