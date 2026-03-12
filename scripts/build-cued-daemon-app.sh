@@ -21,9 +21,9 @@ PERMISSIONS_SCRIPT_SOURCE="$ROOT_DIR/scripts/request-macos-access.sh"
 TRAY_ICON_SOURCE="$ROOT_DIR/native/macos/CuedNative/Resources/trayIconTemplate.png"
 CUED_MARK_SOURCE="$ROOT_DIR/native/macos/CuedNative/Resources/cued-mark.png"
 NODE_PATH="${CUED_NODE_PATH:-$(command -v node)}"
-RUNTIME_SYMLINK_PRUNER="$ROOT_DIR/apps/cued/dist/macos/runtime-symlinks.js"
+RUNTIME_SYMLINK_PRUNER="$ROOT_DIR/dist/macos/runtime-symlinks.js"
 DB_PATH="${CUED_DB_PATH_OVERRIDE:-$HOME/.cued/local.db}"
-APP_VERSION="$("$NODE_PATH" -p "require(process.argv[1]).version" "$ROOT_DIR/apps/cued/package.json")"
+APP_VERSION="$("$NODE_PATH" -p "require(process.argv[1]).version" "$ROOT_DIR/package.json")"
 RELEASE_CHANNEL="${CUED_RELEASE_CHANNEL:-internal}"
 DAEMON_COMMAND="${CUED_DAEMON_COMMAND:-\"\$CUED_APP_PATH/Contents/Resources/cued-cli\" daemon}"
 SETUP_COMMAND="${CUED_SETUP_COMMAND:-\"\$CUED_APP_PATH/Contents/Resources/cued-cli\" setup}"
@@ -45,11 +45,11 @@ xml_escape() {
 
 mkdir -p "$APP_DIST_DIR"
 
-pnpm --dir "$ROOT_DIR/apps/cued" build >/dev/null
+pnpm --dir "$ROOT_DIR" build >/dev/null
 swift build --package-path "$SWIFT_PACKAGE_DIR" -c release >/dev/null
 mkdir -p "$(dirname "$WHATSAPP_HELPER_SOURCE")"
 (cd "$ROOT_DIR/native/helpers/whatsapp-go" && GOWORK=off go build -o "$WHATSAPP_HELPER_SOURCE" .) >/dev/null
-pnpm --filter ./apps/cued deploy --legacy --prod "$DEPLOY_STAGING_DIR" >/dev/null
+pnpm --dir "$ROOT_DIR" --filter . deploy --legacy --prod "$DEPLOY_STAGING_DIR" >/dev/null
 
 rm -rf "$APP_BUNDLE"
 mkdir -p "$MACOS_DIR" "$RESOURCES_DIR" "$RUNTIME_DIR" "$RUNTIME_NODE_DIR" "$HELPERS_DIR"
@@ -64,6 +64,8 @@ chmod +x "$HELPERS_DIR/cued-whatsapp-helper"
 
 # Remove symlinks that escape the bundled runtime or no longer resolve after deploy.
 "$NODE_PATH" "$RUNTIME_SYMLINK_PRUNER" "$RUNTIME_DIR" >/dev/null
+# `pnpm deploy --legacy --prod` can still leave a handful of dangling package links behind.
+find -L "$RUNTIME_DIR" -type l -exec rm -f {} +
 rm -rf "$RUNTIME_DIR/node_modules/cued" "$RUNTIME_DIR/node_modules/@cued/app"
 
 mkdir -p "$RESOURCES_DIR/scripts"

@@ -57,7 +57,7 @@ function isInvokedDirectly(): boolean {
 if (isInvokedDirectly()) {
   const runtimeRoot = process.argv[2];
   if (!runtimeRoot) {
-    console.error("Usage: node apps/cued/dist/macos/runtime-symlinks.js <runtime-root>");
+    console.error("Usage: node dist/macos/runtime-symlinks.js <runtime-root>");
     process.exit(1);
   }
 

@@ -10,7 +10,7 @@ const distDir = join(rootDir, "native", "macos", "dist");
 
 const version =
   process.env.CUED_RELEASE_VERSION ??
-  JSON.parse(readFileSync(join(rootDir, "apps", "cued", "package.json"), "utf8")).version;
+  JSON.parse(readFileSync(join(rootDir, "package.json"), "utf8")).version;
 const tag = process.env.CUED_RELEASE_TAG ?? `v${version}`;
 const repo = process.env.CUED_RELEASE_REPO ?? "Cue-d/cued";
 const channel = process.env.CUED_RELEASE_CHANNEL ?? "internal";
