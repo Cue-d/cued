@@ -11,6 +11,11 @@ struct InstallerCLISymlinkStatusResponse: Decodable {
   let path: String
 }
 
+enum InstallerRefreshMode: Equatable {
+  case full
+  case statusOnly
+}
+
 @MainActor
 final class OnboardingWindowController: NSWindowController {
   private let daemonSupervisor: DaemonSupervisor
@@ -22,6 +27,7 @@ final class OnboardingWindowController: NSWindowController {
   private var cachedSetupIntegrations: [InstallerIntegrationStatus] = []
   private var isRefreshing = false
   private var prerequisitesEnsured = false
+  private var pendingStatusRefreshTask: Task<Void, Never>?
 
   init(daemonSupervisor: DaemonSupervisor, statusStore: AppStatusStore, onRefresh: @escaping () -> Void) {
     self.daemonSupervisor = daemonSupervisor
@@ -39,7 +45,7 @@ final class OnboardingWindowController: NSWindowController {
       backing: .buffered,
       defer: false
     )
-    window.title = "Cued Setup"
+    window.title = "Cued Settings"
     window.center()
     window.titlebarAppearsTransparent = true
     window.titleVisibility = .hidden
@@ -54,6 +60,9 @@ final class OnboardingWindowController: NSWindowController {
         onRequestPermission: { [weak self] flags in self?.requestPermission(flags: flags) },
         onEnableIntegration: { [weak self] platform, accountKey in
           self?.enableIntegration(platform: platform, accountKey: accountKey)
+        },
+        onRemoveIntegration: { [weak self] platform, accountKey in
+          self?.removeIntegration(platform: platform, accountKey: accountKey)
         },
         onConnectIntegration: { [weak self] platform, accountKey in
           self?.handleIntegrationAction(platform: platform, accountKey: accountKey)
@@ -76,7 +85,7 @@ final class OnboardingWindowController: NSWindowController {
     refresh()
   }
 
-  func refresh() {
+  func refresh(mode: InstallerRefreshMode = .full) {
     guard !isRefreshing else {
       return
     }
@@ -92,23 +101,36 @@ final class OnboardingWindowController: NSWindowController {
         Self.ensurePrerequisites(daemonSupervisor: daemonSupervisor)
       }
 
-      let permissions = Self.decodeJSON(
-        daemonSupervisor: daemonSupervisor,
-        InstallerPermissionStatusResponse.self,
-        arguments: ["permissions", "status"]
-      ) ?? InstallerPermissionStatusResponse(permissions: [])
+      if mode == .full {
+        let permissions = Self.decodeJSON(
+          daemonSupervisor: daemonSupervisor,
+          InstallerPermissionStatusResponse.self,
+          arguments: ["permissions", "status"]
+        ) ?? InstallerPermissionStatusResponse(permissions: [])
 
-      await MainActor.run {
-        self.cachedPermissions = permissions.permissions
-        self.viewModel.apply(
-          permissions: permissions.permissions,
-          allIntegrations: self.cachedAllIntegrations,
-          integrations: self.cachedSetupIntegrations
-        )
-        self.viewModel.isRefreshing = true
+        let initialIntegrations = Self.decodeJSON(
+          daemonSupervisor: daemonSupervisor,
+          InstallerIntegrationStatusResponse.self,
+          arguments: ["integrations", "status"]
+        ) ?? InstallerIntegrationStatusResponse(hostOs: "macos", integrations: [], setupIntegrations: [])
+
+        await MainActor.run {
+          self.cachedPermissions = permissions.permissions
+          self.cachedAllIntegrations = initialIntegrations.integrations ?? []
+          self.cachedSetupIntegrations = initialIntegrations.setupIntegrations.filter {
+            $0.capability.onboardingVisible
+          }
+          self.viewModel.apply(
+            permissions: permissions.permissions,
+            allIntegrations: self.cachedAllIntegrations,
+            integrations: self.cachedSetupIntegrations
+          )
+          self.viewModel.isRefreshing = true
+        }
+
+        _ = daemonSupervisor.runCLI(arguments: ["integrations", "refresh"])
       }
 
-      _ = daemonSupervisor.runCLI(arguments: ["integrations", "refresh"])
       let integrations = Self.decodeJSON(
         daemonSupervisor: daemonSupervisor,
         InstallerIntegrationStatusResponse.self,
@@ -117,7 +139,6 @@ final class OnboardingWindowController: NSWindowController {
       _ = statusStore.readSnapshot()
 
       await MainActor.run {
-        self.cachedPermissions = permissions.permissions
         self.cachedAllIntegrations = integrations.integrations ?? []
         self.cachedSetupIntegrations = integrations.setupIntegrations.filter {
           $0.capability.onboardingVisible
@@ -128,6 +149,7 @@ final class OnboardingWindowController: NSWindowController {
           allIntegrations: self.cachedAllIntegrations,
           integrations: self.cachedSetupIntegrations
         )
+        self.schedulePendingStatusRefreshIfNeeded()
       }
     }
   }
@@ -180,11 +202,10 @@ final class OnboardingWindowController: NSWindowController {
     return try? JSONDecoder().decode(type, from: data)
   }
 
-  private func runAction(arguments: [String]) {
-    runActions(argumentsList: [arguments])
-  }
-
-  private func runActions(argumentsList: [[String]]) {
+  private func runActions(
+    argumentsList: [[String]],
+    refreshMode: InstallerRefreshMode = .full
+  ) {
     viewModel.beginRefresh()
     let daemonSupervisor = self.daemonSupervisor
     Task.detached(priority: .userInitiated) { [daemonSupervisor] in
@@ -193,17 +214,27 @@ final class OnboardingWindowController: NSWindowController {
       }
       await MainActor.run {
         self.onRefresh()
-        self.refresh()
+        self.refresh(mode: refreshMode)
       }
     }
   }
 
   private func requestPermission(flags: [String]) {
-    runActions(argumentsList: [["permissions", "request"] + flags])
+    runActions(argumentsList: [["permissions", "request"] + flags], refreshMode: .full)
   }
 
   private func enableIntegration(platform: String, accountKey: String) {
-    runAction(arguments: ["integrations", "enable", platform, accountKey])
+    runActions(
+      argumentsList: [["integrations", "enable", platform, accountKey]],
+      refreshMode: .statusOnly
+    )
+  }
+
+  private func removeIntegration(platform: String, accountKey: String) {
+    runActions(
+      argumentsList: [["integrations", "remove", platform, accountKey]],
+      refreshMode: .statusOnly
+    )
   }
 
   private func handleIntegrationAction(platform: String, accountKey: String) {
@@ -219,12 +250,40 @@ final class OnboardingWindowController: NSWindowController {
       actions.append(["integrations", "enable", platform, accountKey])
     }
     actions.append(["integrations", "connect", platform, accountKey])
-    runActions(argumentsList: actions)
+    runActions(argumentsList: actions, refreshMode: .statusOnly)
   }
 
   private func finishOnboarding() {
     _ = daemonSupervisor.runCLI(arguments: ["onboarding", "complete"])
     close()
     onRefresh()
+  }
+
+  override func close() {
+    pendingStatusRefreshTask?.cancel()
+    pendingStatusRefreshTask = nil
+    super.close()
+  }
+
+  private func schedulePendingStatusRefreshIfNeeded() {
+    pendingStatusRefreshTask?.cancel()
+    pendingStatusRefreshTask = nil
+
+    let hasPendingAuth = cachedSetupIntegrations.contains {
+      $0.authState == "requested" || $0.authState == "in_progress"
+    }
+    guard hasPendingAuth else {
+      return
+    }
+
+    pendingStatusRefreshTask = Task { [weak self] in
+      try? await Task.sleep(for: .milliseconds(700))
+      guard !Task.isCancelled else {
+        return
+      }
+      await MainActor.run {
+        self?.refresh(mode: .statusOnly)
+      }
+    }
   }
 }
