@@ -190,7 +190,10 @@ describe("integration state management", () => {
   });
 
   it("refreshes signal and whatsapp managed states for every persisted account", async () => {
-    process.env.CUED_SIGNAL_CLI_PATH = join(createTempDir("cued-missing-signal-cli-"), "signal-cli");
+    process.env.CUED_SIGNAL_CLI_PATH = join(
+      createTempDir("cued-missing-signal-cli-"),
+      "signal-cli",
+    );
     process.env.CUED_WHATSAPP_HELPER_BINARY = join(
       createTempDir("cued-missing-whatsapp-helper-"),
       "cued-whatsapp-helper",
