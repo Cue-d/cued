@@ -230,6 +230,10 @@ async function handleLocalIntegrationCommand(
   }
 }
 
+function isUnsupportedDaemonCommand(response: { ok: boolean; error?: string }): boolean {
+  return !response.ok && response.error === "Unsupported command";
+}
+
 async function main(): Promise<void> {
   ensureCuedDirs();
 
@@ -274,6 +278,11 @@ async function main(): Promise<void> {
       return;
     }
     console.log(lines.join("\n"));
+    return;
+  }
+
+  if (command === "integrations" && !existsSync(CUED_SOCKET_PATH)) {
+    printJson(await handleLocalIntegrationCommand(subcommand, rest));
     return;
   }
 
@@ -437,9 +446,17 @@ async function main(): Promise<void> {
         case "list":
         case "status":
           response = await sendDaemonRequest({ command: "integrations-list" });
+          if (isUnsupportedDaemonCommand(response)) {
+            printJson(await handleLocalIntegrationCommand(subcommand, rest));
+            return;
+          }
           break;
         case "refresh":
           response = await sendDaemonRequest({ command: "integrations-refresh" });
+          if (isUnsupportedDaemonCommand(response)) {
+            printJson(await handleLocalIntegrationCommand(subcommand, rest));
+            return;
+          }
           break;
         case "connect":
           if (!rest[0]) {
@@ -450,6 +467,10 @@ async function main(): Promise<void> {
             platform: rest[0],
             accountKey: rest[1],
           });
+          if (isUnsupportedDaemonCommand(response)) {
+            printJson(await handleLocalIntegrationCommand(subcommand, rest));
+            return;
+          }
           break;
         case "disconnect":
           if (!rest[0]) {
@@ -460,6 +481,10 @@ async function main(): Promise<void> {
             platform: rest[0],
             accountKey: rest[1],
           });
+          if (isUnsupportedDaemonCommand(response)) {
+            printJson(await handleLocalIntegrationCommand(subcommand, rest));
+            return;
+          }
           break;
         case "remove":
           if (!rest[0]) {
@@ -470,6 +495,10 @@ async function main(): Promise<void> {
             platform: rest[0],
             accountKey: rest[1],
           });
+          if (isUnsupportedDaemonCommand(response)) {
+            printJson(await handleLocalIntegrationCommand(subcommand, rest));
+            return;
+          }
           break;
         case "enable":
           if (!rest[0]) {
@@ -480,6 +509,10 @@ async function main(): Promise<void> {
             platform: rest[0],
             accountKey: rest[1],
           });
+          if (isUnsupportedDaemonCommand(response)) {
+            printJson(await handleLocalIntegrationCommand(subcommand, rest));
+            return;
+          }
           break;
         case "disable":
           if (!rest[0]) {
@@ -490,6 +523,10 @@ async function main(): Promise<void> {
             platform: rest[0],
             accountKey: rest[1],
           });
+          if (isUnsupportedDaemonCommand(response)) {
+            printJson(await handleLocalIntegrationCommand(subcommand, rest));
+            return;
+          }
           break;
         default:
           throw new Error(
