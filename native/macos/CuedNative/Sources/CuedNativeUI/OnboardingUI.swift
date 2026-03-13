@@ -712,8 +712,7 @@ public struct CuedOnboardingView: View {
     return HStack(spacing: 10) {
       Spacer(minLength: 0)
       if isPending {
-        ProgressView()
-          .controlSize(.small)
+        pendingIntegrationIndicator()
       } else if showsCheckmark {
         authenticatedCheckmark(label: "\(configuration.title) authenticated")
       }
@@ -776,8 +775,7 @@ public struct CuedOnboardingView: View {
       Spacer(minLength: 12)
 
       if isPending {
-        ProgressView()
-          .controlSize(.small)
+        pendingIntegrationIndicator()
           .padding(.top, 2)
       } else if showsCheckmark {
         authenticatedCheckmark(label: "\(accountTitle(for: integration)) authenticated")
@@ -822,6 +820,12 @@ public struct CuedOnboardingView: View {
     .frame(width: 24, height: 24, alignment: .center)
     .buttonStyle(.plain)
     .accessibilityLabel(label)
+  }
+
+  private func pendingIntegrationIndicator() -> some View {
+    ProgressView()
+      .controlSize(.small)
+      .frame(width: 24, height: 24, alignment: .center)
   }
 
   private func singleAccountDetail(

@@ -34,6 +34,7 @@ RELEASE_CHANNEL="${CUED_RELEASE_CHANNEL:-internal}"
 DAEMON_COMMAND="${CUED_DAEMON_COMMAND:-\"\$CUED_APP_PATH/Contents/Resources/cued-cli\" daemon}"
 SETUP_COMMAND="${CUED_SETUP_COMMAND:-\"\$CUED_APP_PATH/Contents/Resources/cued-cli\" setup}"
 PERMISSIONS_COMMAND="${CUED_PERMISSIONS_COMMAND:-\"\$CUED_APP_PATH/Contents/Resources/cued-cli\" permissions request --all}"
+BETTER_SQLITE3_BINDING_SOURCE="$(find "$ROOT_DIR/node_modules/.pnpm" -path "*/better-sqlite3/build/Release/better_sqlite3.node" | head -n 1)"
 DEPLOY_STAGING_DIR="$(mktemp -d "${TMPDIR:-/tmp}/cued-runtime.XXXXXX")"
 
 cleanup() {
@@ -112,6 +113,18 @@ cp -R "$DEPLOY_STAGING_DIR/." "$RUNTIME_DIR/"
 cp -R "$SIGNAL_HELPER_SOURCE_DIR" "$HELPERS_DIR/signal-cli"
 cp "$WHATSAPP_HELPER_SOURCE" "$HELPERS_DIR/cued-whatsapp-helper"
 chmod +x "$HELPERS_DIR/cued-whatsapp-helper"
+
+if [[ -z "$BETTER_SQLITE3_BINDING_SOURCE" ]]; then
+  echo "better-sqlite3 native binding not found in node_modules" >&2
+  exit 1
+fi
+BETTER_SQLITE3_RUNTIME_DIR="$(find "$RUNTIME_DIR/node_modules/.pnpm" -maxdepth 3 -type d -path "*/better-sqlite3" | head -n 1)"
+if [[ -z "$BETTER_SQLITE3_RUNTIME_DIR" ]]; then
+  echo "better-sqlite3 package missing from deployed runtime" >&2
+  exit 1
+fi
+mkdir -p "$BETTER_SQLITE3_RUNTIME_DIR/build/Release"
+cp "$BETTER_SQLITE3_BINDING_SOURCE" "$BETTER_SQLITE3_RUNTIME_DIR/build/Release/better_sqlite3.node"
 
 # Remove symlinks that escape the bundled runtime or no longer resolve after deploy.
 "$NODE_PATH" "$RUNTIME_SYMLINK_PRUNER" "$RUNTIME_DIR" >/dev/null
