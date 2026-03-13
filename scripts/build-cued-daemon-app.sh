@@ -69,7 +69,9 @@ SWIFT_RESOURCE_BUNDLES=("$SWIFT_PACKAGE_DIR"/.build/*/release/*.bundle)
 bash "$SIGNAL_FETCH_SCRIPT" >/dev/null
 mkdir -p "$(dirname "$WHATSAPP_HELPER_SOURCE")"
 (cd "$ROOT_DIR/native/helpers/whatsapp-go" && GOWORK=off go build -o "$WHATSAPP_HELPER_SOURCE" .) >/dev/null
-npm_config_ignore_scripts=true pnpm --dir "$ROOT_DIR" --filter . deploy --legacy --prod "$DEPLOY_STAGING_DIR" >/dev/null
+# Native modules like better-sqlite3 must keep their deploy-time install scripts so the
+# packaged runtime includes the compiled .node bindings that adapter workers rely on.
+pnpm --dir "$ROOT_DIR" --filter . deploy --legacy --prod "$DEPLOY_STAGING_DIR" >/dev/null
 
 rm -rf "$APP_BUNDLE"
 mkdir -p "$MACOS_DIR" "$RESOURCES_DIR" "$RUNTIME_DIR" "$RUNTIME_NODE_DIR" "$HELPERS_DIR"
