@@ -9,7 +9,7 @@ import { getCurrentAppVersion, getCurrentReleaseChannel } from "./app-metadata.j
 import { sendDaemonRequest } from "./client.js";
 import { CUED_DB_PATH, CUED_SOCKET_PATH, ensureCuedDirs } from "./config.js";
 import { runDaemon } from "./daemon/server.js";
-import { openCuedDatabase } from "./db/database.js";
+import { openCuedDatabase, openCuedDatabaseReadOnly } from "./db/database.js";
 import { buildDoctorReport, buildPermissionStatus } from "./diagnostics/doctor.js";
 import {
   doctorHooksConfig,
@@ -43,6 +43,7 @@ import {
   resolveInstalledAppPath,
   uninstallLaunchAgent,
 } from "./macos/install.js";
+import { buildOnboardingSnapshot } from "./onboarding/service.js";
 import { resolveHostOS } from "./platform-capabilities.js";
 import { runSetupTUI } from "./setup.js";
 
@@ -85,7 +86,7 @@ Usage:
   cued logs
   cued setup
   cued cli install|status
-  cued onboarding complete|status
+  cued onboarding complete|snapshot|status [--refresh-managed]
   cued launchd install|uninstall|status
   cued permissions doctor|status|request [--all|--contacts|--messages|--full-disk-access]
   cued integrations list
@@ -230,6 +231,10 @@ async function handleLocalIntegrationCommand(
   }
 }
 
+function isUnsupportedDaemonCommand(response: { ok: boolean; error?: string }): boolean {
+  return !response.ok && response.error === "Unsupported command";
+}
+
 async function main(): Promise<void> {
   ensureCuedDirs();
 
@@ -277,6 +282,11 @@ async function main(): Promise<void> {
     return;
   }
 
+  if (command === "integrations" && !existsSync(CUED_SOCKET_PATH)) {
+    printJson(await handleLocalIntegrationCommand(subcommand, rest));
+    return;
+  }
+
   if ((command === "status" || command === "doctor") && !existsSync(CUED_SOCKET_PATH)) {
     const db = openCuedDatabase();
     printJson(
@@ -301,11 +311,6 @@ async function main(): Promise<void> {
           },
     );
     db.close();
-    return;
-  }
-
-  if (command === "integrations" && !existsSync(CUED_SOCKET_PATH)) {
-    printJson(await handleLocalIntegrationCommand(subcommand, rest));
     return;
   }
 
@@ -361,18 +366,31 @@ async function main(): Promise<void> {
           throw new Error("Usage: cued cli install | status");
       }
     case "onboarding": {
-      const db = openCuedDatabase();
+      const refreshManaged = rest.includes("--refresh-managed");
+      const db =
+        subcommand === "snapshot" && !refreshManaged
+          ? openCuedDatabaseReadOnly()
+          : openCuedDatabase();
       try {
         switch (subcommand) {
           case "complete":
             db.markOnboardingCompleted(getCurrentAppVersion());
             printJson(db.getAppMetadata());
             return;
+          case "snapshot":
+            printJson(
+              await buildOnboardingSnapshot(db, {
+                refreshManagedIntegrations: refreshManaged,
+              }),
+            );
+            return;
           case "status":
             printJson(db.getAppMetadata());
             return;
           default:
-            throw new Error("Usage: cued onboarding complete | status");
+            throw new Error(
+              "Usage: cued onboarding complete | snapshot [--refresh-managed] | status",
+            );
         }
       } finally {
         db.close();
@@ -437,9 +455,17 @@ async function main(): Promise<void> {
         case "list":
         case "status":
           response = await sendDaemonRequest({ command: "integrations-list" });
+          if (isUnsupportedDaemonCommand(response)) {
+            printJson(await handleLocalIntegrationCommand(subcommand, rest));
+            return;
+          }
           break;
         case "refresh":
           response = await sendDaemonRequest({ command: "integrations-refresh" });
+          if (isUnsupportedDaemonCommand(response)) {
+            printJson(await handleLocalIntegrationCommand(subcommand, rest));
+            return;
+          }
           break;
         case "connect":
           if (!rest[0]) {
@@ -450,6 +476,10 @@ async function main(): Promise<void> {
             platform: rest[0],
             accountKey: rest[1],
           });
+          if (isUnsupportedDaemonCommand(response)) {
+            printJson(await handleLocalIntegrationCommand(subcommand, rest));
+            return;
+          }
           break;
         case "disconnect":
           if (!rest[0]) {
@@ -460,6 +490,10 @@ async function main(): Promise<void> {
             platform: rest[0],
             accountKey: rest[1],
           });
+          if (isUnsupportedDaemonCommand(response)) {
+            printJson(await handleLocalIntegrationCommand(subcommand, rest));
+            return;
+          }
           break;
         case "remove":
           if (!rest[0]) {
@@ -470,6 +504,10 @@ async function main(): Promise<void> {
             platform: rest[0],
             accountKey: rest[1],
           });
+          if (isUnsupportedDaemonCommand(response)) {
+            printJson(await handleLocalIntegrationCommand(subcommand, rest));
+            return;
+          }
           break;
         case "enable":
           if (!rest[0]) {
@@ -480,6 +518,10 @@ async function main(): Promise<void> {
             platform: rest[0],
             accountKey: rest[1],
           });
+          if (isUnsupportedDaemonCommand(response)) {
+            printJson(await handleLocalIntegrationCommand(subcommand, rest));
+            return;
+          }
           break;
         case "disable":
           if (!rest[0]) {
@@ -490,6 +532,10 @@ async function main(): Promise<void> {
             platform: rest[0],
             accountKey: rest[1],
           });
+          if (isUnsupportedDaemonCommand(response)) {
+            printJson(await handleLocalIntegrationCommand(subcommand, rest));
+            return;
+          }
           break;
         default:
           throw new Error(

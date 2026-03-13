@@ -2,9 +2,7 @@ import AppKit
 import Combine
 import SwiftUI
 
-#if !SWIFT_PACKAGE
 private final class BundleAnchor {}
-#endif
 
 public struct InstallerCapabilityStatus: Decodable, Sendable {
   public let availability: String
@@ -714,8 +712,7 @@ public struct CuedOnboardingView: View {
     return HStack(spacing: 10) {
       Spacer(minLength: 0)
       if isPending {
-        ProgressView()
-          .controlSize(.small)
+        pendingIntegrationIndicator()
       } else if showsCheckmark {
         authenticatedCheckmark(label: "\(configuration.title) authenticated")
       }
@@ -778,8 +775,7 @@ public struct CuedOnboardingView: View {
       Spacer(minLength: 12)
 
       if isPending {
-        ProgressView()
-          .controlSize(.small)
+        pendingIntegrationIndicator()
           .padding(.top, 2)
       } else if showsCheckmark {
         authenticatedCheckmark(label: "\(accountTitle(for: integration)) authenticated")
@@ -824,6 +820,12 @@ public struct CuedOnboardingView: View {
     .frame(width: 24, height: 24, alignment: .center)
     .buttonStyle(.plain)
     .accessibilityLabel(label)
+  }
+
+  private func pendingIntegrationIndicator() -> some View {
+    ProgressView()
+      .controlSize(.small)
+      .frame(width: 24, height: 24, alignment: .center)
   }
 
   private func singleAccountDetail(
@@ -1281,10 +1283,8 @@ private func installerPlatformIconAssetName(for platform: String) -> String? {
 }
 
 private func installerPlatformIconURL(named assetName: String) -> URL? {
-  #if SWIFT_PACKAGE
-  return Bundle.module.url(forResource: assetName, withExtension: "svg")
-  #else
   let bundles: [Bundle] = [
+    Bundle(url: Bundle.main.bundleURL.appendingPathComponent("CuedNative_CuedNativeUI.bundle")),
     Bundle.main.resourceURL.flatMap { Bundle(url: $0.appendingPathComponent("CuedNative_CuedNativeUI.bundle")) },
     Bundle(for: BundleAnchor.self),
     Bundle.main,
@@ -1295,7 +1295,6 @@ private func installerPlatformIconURL(named assetName: String) -> URL? {
     }
   }
   return nil
-  #endif
 }
 
 private func installerFallbackIntegration(for platform: String) -> InstallerIntegrationStatus {
