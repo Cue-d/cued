@@ -80,7 +80,7 @@ describe("onboarding snapshot", () => {
     ]);
     expect(snapshot.permissions.find((permission) => permission.key === "contacts")).toEqual(
       expect.objectContaining({
-        status: "granted",
+        status: process.platform === "darwin" ? "granted" : "unknown",
       }),
     );
     expect(snapshot.integrations).toEqual(
