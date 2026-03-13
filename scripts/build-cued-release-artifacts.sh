@@ -46,7 +46,9 @@ sign_archive_macos_binaries() {
   local -a entries=()
 
   archive_abs="$(cd "$(dirname "$archive")" && pwd)/$(basename "$archive")"
-  mapfile -t entries < <(zipinfo -1 "$archive_abs" | grep -E '\.(dylib|jnilib|node|so)$' || true)
+  while IFS= read -r entry; do
+    entries+=("$entry")
+  done < <(zipinfo -1 "$archive_abs" | grep -E '\.(dylib|jnilib|node|so)$' || true)
   if [[ "${#entries[@]}" -eq 0 ]]; then
     return
   fi
