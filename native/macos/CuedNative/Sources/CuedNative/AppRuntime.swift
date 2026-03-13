@@ -531,6 +531,13 @@ private func platformMessageDebugTitle(_ item: AppPlatformMessageCount) -> Strin
   "\(platformDisplayTitle(item.platform)) \(item.messages) message\(item.messages == 1 ? "" : "s")"
 }
 
+private func debugSummaryTitle(
+  label: String,
+  value: String
+) -> String {
+  "\(label): \(value)"
+}
+
 @MainActor
 final class DaemonSupervisor {
   private var daemonProcess: Process?
@@ -1824,20 +1831,9 @@ final class MenuBarAppController: NSObject, NSApplicationDelegate {
     }
 
     menu.addItem(.separator())
-    let debugHeader = NSMenuItem(title: "Debug", action: nil, keyEquivalent: "")
-    debugHeader.isEnabled = false
-    menu.addItem(debugHeader)
-    if snapshot.messageBreakdown.isEmpty {
-      let item = NSMenuItem(title: "No message sync data yet", action: nil, keyEquivalent: "")
-      item.isEnabled = false
-      menu.addItem(item)
-    } else {
-      for item in snapshot.messageBreakdown {
-        let menuItem = NSMenuItem(title: platformMessageDebugTitle(item), action: nil, keyEquivalent: "")
-        menuItem.isEnabled = false
-        menu.addItem(menuItem)
-      }
-    }
+    let debugItem = NSMenuItem(title: "Debug", action: nil, keyEquivalent: "")
+    debugItem.submenu = buildDebugMenu(snapshot: snapshot, daemonStarting: daemonStarting)
+    menu.addItem(debugItem)
 
     menu.addItem(.separator())
     let daemonToggleItem = menu.addItem(
@@ -1854,6 +1850,50 @@ final class MenuBarAppController: NSObject, NSApplicationDelegate {
     menu.addItem(withTitle: "Quit", action: #selector(quitApp), keyEquivalent: "q").target = self
 
     statusItem.menu = menu
+  }
+
+  private func buildDebugMenu(snapshot: AppStatusSnapshot, daemonStarting: Bool) -> NSMenu {
+    let debugMenu = NSMenu(title: "Debug")
+
+    let daemonItem = NSMenuItem(
+      title: debugSummaryTitle(
+        label: "Daemon",
+        value: snapshot.daemonRunning ? "running" : daemonStarting ? "starting" : "stopped"
+      ),
+      action: nil,
+      keyEquivalent: ""
+    )
+    daemonItem.isEnabled = false
+    debugMenu.addItem(daemonItem)
+
+    let totals = [
+      debugSummaryTitle(label: "Messages", value: "\(snapshot.messages)"),
+      debugSummaryTitle(label: "Contacts", value: "\(snapshot.contacts)"),
+      debugSummaryTitle(label: "Conversations", value: "\(snapshot.conversations)"),
+    ]
+
+    for title in totals {
+      let item = NSMenuItem(title: title, action: nil, keyEquivalent: "")
+      item.isEnabled = false
+      debugMenu.addItem(item)
+    }
+
+    debugMenu.addItem(.separator())
+
+    if snapshot.messageBreakdown.isEmpty {
+      let item = NSMenuItem(title: "No message sync data yet", action: nil, keyEquivalent: "")
+      item.isEnabled = false
+      debugMenu.addItem(item)
+      return debugMenu
+    }
+
+    for item in snapshot.messageBreakdown {
+      let menuItem = NSMenuItem(title: platformMessageDebugTitle(item), action: nil, keyEquivalent: "")
+      menuItem.isEnabled = false
+      debugMenu.addItem(menuItem)
+    }
+
+    return debugMenu
   }
 
   private static func loadStatusItemImage() -> NSImage? {
