@@ -7,7 +7,7 @@ describe("slack client", () => {
   });
 
   it("does not ask Slack to exclude archived conversations", async () => {
-    const fetchMock = vi.fn(async (_input: unknown, init?: RequestInit) => {
+    const fetchMock = vi.fn(async (_input: unknown, _init?: RequestInit) => {
       return new Response(
         JSON.stringify({
           ok: true,

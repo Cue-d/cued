@@ -16,7 +16,6 @@ import type {
   SourceAccountInput,
 } from "../types/provider.js";
 
-const DEFAULT_SYNC_HISTORY_DAYS = Number(process.env.CUED_SYNC_HISTORY_DAYS ?? "730");
 const INCREMENTAL_BUFFER_MS = 5 * 60 * 1000;
 const DEFAULT_SLACK_CONVERSATIONS_PER_RUN = Number(
   process.env.CUED_SLACK_CONVERSATIONS_PER_RUN ?? "100",
@@ -78,11 +77,11 @@ function timestampMs(slackTs: string | undefined): number | null {
   return Number.isFinite(parsed) ? Math.round(parsed * 1000) : null;
 }
 
-function getOldestMessageMs(lastSyncAt?: number): number {
-  if (lastSyncAt && lastSyncAt > 0) {
+function getOldestMessageMs(mode: SlackScanMode, lastSyncAt?: number): number {
+  if (mode === "incremental" && lastSyncAt && lastSyncAt > 0) {
     return Math.max(0, lastSyncAt - INCREMENTAL_BUFFER_MS);
   }
-  return now() - DEFAULT_SYNC_HISTORY_DAYS * 24 * 60 * 60 * 1000;
+  return 0;
 }
 
 function bestSlackAvatar(profile: SlackUser["profile"]): string | undefined {
@@ -482,10 +481,11 @@ export async function buildSlackSyncBundle(options?: {
     100,
   );
 
+  const mode: SlackScanMode = previousLastSyncAt && previousLastSyncAt > 0 ? "incremental" : "full";
   const scan: SlackScanCursor = savedCursor?.scan ?? {
-    mode: previousLastSyncAt && previousLastSyncAt > 0 ? "incremental" : "full",
+    mode,
     startedAt: observedBase,
-    oldestMs: getOldestMessageMs(previousLastSyncAt),
+    oldestMs: getOldestMessageMs(mode, previousLastSyncAt),
     usersComplete: Boolean(previousLastSyncAt && previousLastSyncAt > 0),
     conversationCursor: null,
   };
