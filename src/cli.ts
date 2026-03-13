@@ -313,11 +313,6 @@ async function main(): Promise<void> {
     return;
   }
 
-  if (command === "integrations" && !existsSync(CUED_SOCKET_PATH)) {
-    printJson(await handleLocalIntegrationCommand(subcommand, rest));
-    return;
-  }
-
   if (command === "hooks") {
     switch (subcommand) {
       case "init":
