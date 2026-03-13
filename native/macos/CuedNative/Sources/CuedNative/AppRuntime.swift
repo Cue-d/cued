@@ -1755,7 +1755,7 @@ final class MenuBarAppController: NSObject, NSApplicationDelegate {
     stopItem.target = self
     stopItem.isEnabled = snapshot.daemonRunning || daemonStarting
 
-    menu.addItem(withTitle: "Open Setup", action: #selector(openSetup), keyEquivalent: "").target = self
+    menu.addItem(withTitle: "Open Settings", action: #selector(openSetup), keyEquivalent: "").target = self
     menu.addItem(withTitle: "Request Permissions", action: #selector(requestPermissions), keyEquivalent: "").target = self
     menu.addItem(withTitle: "Check for Updates", action: #selector(checkForUpdates), keyEquivalent: "").target = self
 

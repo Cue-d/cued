@@ -1,4 +1,4 @@
-import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -11,6 +11,7 @@ import {
   listRequestableIntegrationPlatforms,
   markAuthSessionInProgress,
   refreshManagedIntegrationStates,
+  removeIntegration,
   requestIntegrationAccess,
   setIntegrationEnabled,
 } from "../integrations/service.js";
@@ -129,13 +130,19 @@ describe("integration state management", () => {
     const completed = completeAuthSession(db, requested.authSession.id, {
       state: "authenticated",
       keychainService: "dev.cued.auth.slack",
-      keychainAccount: requested.integration.accountKey,
+      keychainAccount: "T123",
       resultSummary: { teamId: "T123", teamName: "Acme" },
     });
-    expect(completed.integration.authState).toBe("authenticated");
-    expect(completed.authSession.keychainService).toBe("dev.cued.auth.slack");
+    expect(completed.integration).not.toBeNull();
+    expect(completed.authSession).not.toBeNull();
+    expect(completed.integration?.authState).toBe("authenticated");
+    expect(completed.integration?.accountKey).toBe("T123");
+    expect(completed.integration?.displayName).toBe("Acme");
+    expect(completed.authSession?.keychainService).toBe("dev.cued.auth.slack");
+    expect(completed.authSession?.accountKey).toBe("T123");
+    expect(db.getIntegrationState("slack", requested.integration.accountKey)).toBeNull();
 
-    const disabled = setIntegrationEnabled(db, "slack", requested.integration.accountKey, false);
+    const disabled = setIntegrationEnabled(db, "slack", completed.integration!.accountKey, false);
     expect(disabled.enabled).toBe(false);
     expect(listRequestableIntegrationPlatforms()).toEqual([
       "slack",
@@ -172,6 +179,9 @@ describe("integration state management", () => {
         }),
       ]),
     );
+    expect(
+      buildIntegrationStatus(db).setupIntegrations.map((integration) => integration.platform),
+    ).toEqual(["contacts", "imessage", "slack", "linkedin", "whatsapp", "signal"]);
     db.close();
   });
 
@@ -208,6 +218,150 @@ describe("integration state management", () => {
         }),
       ]),
     );
+    db.close();
+  });
+
+  it("removes a requestable integration and its local browser profile", () => {
+    const db = createDb();
+    const profileDir = createTempDir("cued-slack-profile-");
+
+    db.upsertIntegrationState({
+      platform: "slack",
+      accountKey: "T123",
+      displayName: "Acme",
+      authState: "authenticated",
+      enabled: true,
+      connectionKind: "browser-session",
+      syncCapable: true,
+      launchStrategy: "chromium-auth",
+      launchTarget: "https://slack.com/signin",
+      importedFrom: "local-cli",
+      metadata: {
+        browserProfileDir: profileDir,
+      },
+    });
+
+    expect(listIntegrationStates(db)).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          platform: "slack",
+          accountKey: "T123",
+        }),
+      ]),
+    );
+
+    const removed = removeIntegration(db, "slack", "T123");
+    expect(removed).toEqual({
+      platform: "slack",
+      accountKey: "T123",
+      removed: true,
+    });
+    expect(db.getIntegrationState("slack", "T123")).toBeNull();
+    expect(listIntegrationStates(db)).not.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          platform: "slack",
+          accountKey: "T123",
+        }),
+      ]),
+    );
+
+    db.close();
+  });
+
+  it("removes a signal integration and its local config directory", () => {
+    const db = createDb();
+    const configDir = createTempDir("cued-signal-config-");
+    mkdirSync(configDir, { recursive: true });
+
+    db.upsertIntegrationState({
+      platform: "signal",
+      accountKey: "default",
+      displayName: "Signal",
+      authState: "authenticated",
+      enabled: true,
+      connectionKind: "local-cli",
+      syncCapable: true,
+      launchStrategy: "qr-native",
+      launchTarget: null,
+      importedFrom: "local-cli",
+      metadata: {
+        configDir,
+      },
+    });
+
+    const removed = removeIntegration(db, "signal", "default");
+    expect(removed).toEqual({
+      platform: "signal",
+      accountKey: "default",
+      removed: true,
+    });
+    expect(existsSync(configDir)).toBe(false);
+    expect(db.getIntegrationState("signal", "default")).toBeNull();
+
+    db.close();
+  });
+
+  it("reuses the same stable slack workspace key after remove and reconnect", () => {
+    const db = createDb();
+
+    const firstRequest = requestIntegrationAccess(db, "slack");
+    const firstCompleted = completeAuthSession(db, firstRequest.authSession.id, {
+      state: "authenticated",
+      keychainService: "dev.cued.auth.slack",
+      keychainAccount: "T123",
+      resultSummary: { teamId: "T123", teamName: "Acme" },
+    });
+    expect(firstCompleted.integration?.accountKey).toBe("T123");
+
+    const removed = removeIntegration(db, "slack", "T123");
+    expect(removed.accountKey).toBe("T123");
+
+    const secondRequest = requestIntegrationAccess(db, "slack");
+    expect(secondRequest.integration.accountKey).toBe("default");
+
+    const secondCompleted = completeAuthSession(db, secondRequest.authSession.id, {
+      state: "authenticated",
+      keychainService: "dev.cued.auth.slack",
+      keychainAccount: "T123",
+      resultSummary: { teamId: "T123", teamName: "Acme" },
+    });
+    expect(secondCompleted.integration?.accountKey).toBe("T123");
+    expect(listIntegrationStates(db)).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          platform: "slack",
+          accountKey: "T123",
+          authState: "authenticated",
+        }),
+      ]),
+    );
+    db.close();
+  });
+
+  it("cancels an in-flight auth session before removing the integration", () => {
+    const db = createDb();
+    const requested = requestIntegrationAccess(db, "slack");
+
+    markAuthSessionInProgress(db, requested.authSession.id, 12345);
+
+    const removed = removeIntegration(db, "slack", requested.integration.accountKey);
+    expect(removed).toEqual({
+      platform: "slack",
+      accountKey: requested.integration.accountKey,
+      removed: true,
+    });
+
+    const completed = completeAuthSession(db, requested.authSession.id, {
+      state: "authenticated",
+      keychainService: "dev.cued.auth.slack",
+      keychainAccount: "T123",
+      resultSummary: { teamId: "T123", teamName: "Acme" },
+    });
+    expect(completed.integration).toBeNull();
+    expect(completed.authSession).toBeNull();
+    expect(db.getIntegrationState("slack", requested.integration.accountKey)).toBeNull();
+
     db.close();
   });
 
