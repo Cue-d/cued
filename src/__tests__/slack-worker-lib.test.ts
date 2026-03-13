@@ -168,4 +168,52 @@ describe("slack worker lib", () => {
     );
     expect((bundle.sourceCursor as Record<string, unknown>).scan).toBeUndefined();
   });
+
+  it("treats empty conversation pages with a dangling cursor as end-of-pagination", async () => {
+    const bundle = await buildSlackSyncBundle({
+      accountKey: "default",
+      sourceCursor: {
+        teamId: "T123",
+        selfUserId: "U_SELF",
+        lastSyncAt: 1710000000000,
+        scan: {
+          mode: "full",
+          startedAt: 1710000000000,
+          oldestMs: 0,
+          usersComplete: true,
+          conversationCursor: "dead-cursor",
+        },
+      },
+      client: {
+        async testAuth() {
+          return { ok: true, team_id: "T123", user_id: "U_SELF", team: "Acme", user: "Ava" };
+        },
+        async listUsers() {
+          return { users: [], nextCursor: undefined };
+        },
+        async listConversations() {
+          return {
+            conversations: [],
+            nextCursor: "still-more",
+          };
+        },
+        async getConversationMembers() {
+          return { members: [], nextCursor: undefined };
+        },
+        async getHistory() {
+          return { messages: [], hasMore: false, nextCursor: undefined };
+        },
+        async getReplies() {
+          return { messages: [], hasMore: false, nextCursor: undefined };
+        },
+      },
+    });
+
+    expect(bundle.hasMore).toBe(false);
+    expect(bundle.sourceCursor).toEqual({
+      teamId: "T123",
+      selfUserId: "U_SELF",
+      lastSyncAt: 1710000000000,
+    });
+  });
 });

@@ -567,7 +567,10 @@ export async function buildSlackSyncBundle(options?: {
     );
   }
 
-  const nextCursor = conversationPage.nextCursor || null;
+  // Slack can return an empty channel page with a non-empty cursor once it has
+  // exhausted the conversations the current token can actually access.
+  const nextCursor =
+    conversationPage.conversations.length > 0 ? conversationPage.nextCursor || null : null;
   const sourceCursor: SlackSourceCursor = nextCursor
     ? {
         teamId,
