@@ -67,7 +67,6 @@ export class SlackClient {
     const response = await newPostRequest(SLACK_API_URLS.conversationsList, this.credentials)
       .withParams({
         types: "im,mpim,private_channel,public_channel",
-        exclude_archived: true,
         limit,
         cursor,
       })
