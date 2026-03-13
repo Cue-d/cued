@@ -38,8 +38,58 @@ sign_nested_binaries() {
   done < <(find "$APP_BUNDLE/Contents" -type f -print0 | sort -rz)
 }
 
+sign_archive_macos_binaries() {
+  local archive="$1"
+  local archive_abs
+  local temp_dir
+  local updated=0
+  local -a entries=()
+
+  archive_abs="$(cd "$(dirname "$archive")" && pwd)/$(basename "$archive")"
+  while IFS= read -r entry; do
+    entries+=("$entry")
+  done < <(zipinfo -1 "$archive_abs" | grep -E '\.(dylib|jnilib|node|so)$' || true)
+  if [[ "${#entries[@]}" -eq 0 ]]; then
+    return
+  fi
+
+  temp_dir="$(mktemp -d "${TMPDIR:-/tmp}/cued-archive-sign.XXXXXX")"
+  for entry in "${entries[@]}"; do
+    unzip -qq "$archive_abs" "$entry" -d "$temp_dir"
+    if file -b "$temp_dir/$entry" | grep -q "Mach-O"; then
+      sign_macos_binary "$temp_dir/$entry"
+      updated=1
+    fi
+  done
+
+  if [[ "$updated" -eq 1 ]]; then
+    (cd "$temp_dir" && zip -q -X "$archive_abs" "${entries[@]}")
+  fi
+
+  rm -rf "$temp_dir"
+}
+
+sign_embedded_archives() {
+  while IFS= read -r -d '' archive; do
+    sign_archive_macos_binaries "$archive"
+  done < <(find "$APP_BUNDLE/Contents" -type f \( -name '*.jar' -o -name '*.zip' \) -print0 | sort -z)
+}
+
+sign_nested_code_containers() {
+  while IFS= read -r -d '' info_plist; do
+    local bundle_root
+
+    bundle_root="$(dirname "$(dirname "$info_plist")")"
+    if [[ "$bundle_root" != "$APP_BUNDLE" ]]; then
+      sign_macos_binary "$bundle_root"
+    fi
+  done < <(find "$APP_BUNDLE/Contents" -type f -path '*/Contents/Info.plist' -print0 | sort -rz)
+}
+
 bash "$APP_BUILDER" >/dev/null
 sign_nested_binaries
+sign_embedded_archives
+sign_nested_code_containers
 sign_macos_binary "$APP_BUNDLE"
 
 rm -rf "$STAGING_DIR" "$DMG_PATH"
