@@ -17,6 +17,11 @@ struct AppIntegrationStatus {
   let enabled: Bool
 }
 
+struct AppPlatformMessageCount {
+  let platform: String
+  let messages: Int
+}
+
 struct AppStatusSnapshot {
   let daemonRunning: Bool
   let daemonPID: Int?
@@ -25,6 +30,7 @@ struct AppStatusSnapshot {
   let conversations: Int
   let messages: Int
   let rawEvents: Int
+  let messageBreakdown: [AppPlatformMessageCount]
   let integrations: [AppIntegrationStatus]
   let onboardingCompletedVersion: String?
   let installedAppVersion: String?
@@ -49,6 +55,7 @@ final class AppStatusStore: @unchecked Sendable {
         conversations: 0,
         messages: 0,
         rawEvents: 0,
+        messageBreakdown: [],
         integrations: [],
         onboardingCompletedVersion: nil,
         installedAppVersion: nil,
@@ -70,6 +77,7 @@ final class AppStatusStore: @unchecked Sendable {
         conversations: 0,
         messages: 0,
         rawEvents: 0,
+        messageBreakdown: [],
         integrations: [],
         onboardingCompletedVersion: nil,
         installedAppVersion: nil,
@@ -86,6 +94,11 @@ final class AppStatusStore: @unchecked Sendable {
       countRows(db: db, table: "messages"),
       countRows(db: db, table: "raw_events"),
     ]
+    let integrations = mergeLiveLocalIntegrations(queryIntegrations(db: db))
+    let messageBreakdown = mergeMessageBreakdown(
+      queryMessageCountsByPlatform(db: db),
+      integrations: integrations
+    )
 
     return AppStatusSnapshot(
       daemonRunning: daemonRow.running,
@@ -95,7 +108,8 @@ final class AppStatusStore: @unchecked Sendable {
       conversations: counts[1],
       messages: counts[2],
       rawEvents: counts[3],
-      integrations: mergeLiveLocalIntegrations(queryIntegrations(db: db)),
+      messageBreakdown: messageBreakdown,
+      integrations: integrations,
       onboardingCompletedVersion: queryAppSetting(db: db, key: "onboarding_completed_version"),
       installedAppVersion: queryAppSetting(db: db, key: "installed_app_version"),
       releaseChannel: queryAppSetting(db: db, key: "release_channel"),
@@ -138,6 +152,32 @@ final class AppStatusStore: @unchecked Sendable {
       return 0
     }
     return Int(sqlite3_column_int64(statement, 0))
+  }
+
+  private func queryMessageCountsByPlatform(db: OpaquePointer) -> [AppPlatformMessageCount] {
+    let sql = """
+      SELECT platform, COUNT(*)
+      FROM messages
+      GROUP BY platform
+      ORDER BY platform
+    """
+
+    var statement: OpaquePointer?
+    guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK, let statement else {
+      return []
+    }
+    defer { sqlite3_finalize(statement) }
+
+    var results: [AppPlatformMessageCount] = []
+    while sqlite3_step(statement) == SQLITE_ROW {
+      results.append(
+        AppPlatformMessageCount(
+          platform: String(cString: sqlite3_column_text(statement, 0)),
+          messages: Int(sqlite3_column_int64(statement, 1))
+        )
+      )
+    }
+    return results
   }
 
   private func queryIntegrations(db: OpaquePointer) -> [AppIntegrationStatus] {
@@ -196,6 +236,26 @@ final class AppStatusStore: @unchecked Sendable {
       }
       return $0.platform < $1.platform
     }
+  }
+
+  private func mergeMessageBreakdown(
+    _ existing: [AppPlatformMessageCount],
+    integrations: [AppIntegrationStatus]
+  ) -> [AppPlatformMessageCount] {
+    var counts = Dictionary(uniqueKeysWithValues: existing.map { ($0.platform, $0.messages) })
+
+    for integration in integrations where shouldIncludeMessageDebugPlatform(integration.platform) {
+      counts[integration.platform] = counts[integration.platform] ?? 0
+    }
+
+    return counts
+      .map { AppPlatformMessageCount(platform: $0.key, messages: $0.value) }
+      .sorted {
+        if ($0.messages == 0) != ($1.messages == 0) {
+          return $0.messages > $1.messages
+        }
+        return platformDisplayTitle($0.platform) < platformDisplayTitle($1.platform)
+      }
   }
 
   private func upsertLocalIntegration(
@@ -446,6 +506,31 @@ private func integrationMenuTitle(_ integration: AppIntegrationStatus) -> String
   return "\(base) • \(integrationStateLabel(integration.authState))\(integration.enabled ? "" : " (disabled)")"
 }
 
+private func shouldIncludeMessageDebugPlatform(_ platform: String) -> Bool {
+  platform != "contacts"
+}
+
+private func platformDisplayTitle(_ platform: String) -> String {
+  switch platform {
+  case "imessage":
+    return "Messages"
+  case "linkedin":
+    return "LinkedIn"
+  case "slack":
+    return "Slack"
+  case "signal":
+    return "Signal"
+  case "whatsapp":
+    return "WhatsApp"
+  default:
+    return platform.capitalized
+  }
+}
+
+private func platformMessageDebugTitle(_ item: AppPlatformMessageCount) -> String {
+  "\(platformDisplayTitle(item.platform)) \(item.messages) message\(item.messages == 1 ? "" : "s")"
+}
+
 @MainActor
 final class DaemonSupervisor {
   private var daemonProcess: Process?
@@ -483,11 +568,6 @@ final class DaemonSupervisor {
     daemonProcess = launchDaemonProcess()
   }
 
-  func restart() {
-    stop()
-    startIfNeeded()
-  }
-
   func isLaunching(snapshot: AppStatusSnapshot) -> Bool {
     guard let daemonProcess, daemonProcess.isRunning else {
       return false
@@ -495,16 +575,23 @@ final class DaemonSupervisor {
     return !snapshot.daemonRunning
   }
 
-  func launchPID() -> Int? {
-    guard let daemonProcess, daemonProcess.isRunning else {
-      return nil
+  func stop(activePID: Int? = nil) {
+    let trackedPID = daemonProcess.flatMap { process in
+      process.isRunning ? Int(process.processIdentifier) : nil
     }
-    return Int(daemonProcess.processIdentifier)
-  }
-
-  func stop() {
     daemonProcess?.terminate()
     daemonProcess = nil
+
+    guard let activePID, activePID > 0 else {
+      return
+    }
+
+    let currentPID = Int(ProcessInfo.processInfo.processIdentifier)
+    guard activePID != currentPID, activePID != trackedPID else {
+      return
+    }
+
+    _ = Darwin.kill(pid_t(activePID), SIGTERM)
   }
 
   func openSetupInTerminal() {
@@ -1583,6 +1670,7 @@ final class MenuBarAppController: NSObject, NSApplicationDelegate {
     self?.refreshStatus()
   }
   private var timer: Timer?
+  private var shouldAutoStartDaemon = true
   private let statusItemImage = MenuBarAppController.loadStatusItemImage()
 
   init(dbPath: String, daemonLaunchPath: String?, daemonCommand: String, setupCommand: String, permissionsCommand: String) {
@@ -1617,26 +1705,27 @@ final class MenuBarAppController: NSObject, NSApplicationDelegate {
     statusMonitor.stop()
   }
 
-  @objc private func restartDaemon() {
-    daemonSupervisor.restart()
-    rebuildMenu()
-  }
-
-  @objc private func stopDaemon() {
-    daemonSupervisor.stop()
-    rebuildMenu()
-  }
-
   @objc private func openSetup() {
     onboardingWindowController.showAndRefresh()
   }
 
-  @objc private func requestPermissions() {
-    daemonSupervisor.requestPermissions()
+  @objc private func toggleDaemon() {
+    let snapshot = statusStore.readSnapshot()
+    let daemonStarting = daemonSupervisor.isLaunching(snapshot: snapshot)
+    if snapshot.daemonRunning || daemonStarting {
+      shouldAutoStartDaemon = false
+      daemonSupervisor.stop(activePID: snapshot.daemonPID)
+    } else {
+      shouldAutoStartDaemon = true
+      daemonSupervisor.startIfNeeded()
+    }
+    rebuildMenu()
   }
 
   @objc private func refreshStatus() {
-    daemonSupervisor.startIfNeeded()
+    if shouldAutoStartDaemon {
+      daemonSupervisor.startIfNeeded()
+    }
     rebuildMenu()
   }
 
@@ -1682,9 +1771,9 @@ final class MenuBarAppController: NSObject, NSApplicationDelegate {
     let menu = NSMenu()
     menu.addItem(
       withTitle: snapshot.daemonRunning
-        ? "Daemon running\(snapshot.daemonPID.map { " (pid \($0))" } ?? "")"
+        ? "Daemon running"
         : daemonStarting
-          ? "Daemon starting\(daemonSupervisor.launchPID().map { " (pid \($0))" } ?? "")"
+          ? "Daemon starting"
           : "Daemon stopped",
       action: nil,
       keyEquivalent: ""
@@ -1695,14 +1784,6 @@ final class MenuBarAppController: NSObject, NSApplicationDelegate {
       action: nil,
       keyEquivalent: ""
     ).isEnabled = false
-
-    let projectionItem = NSMenuItem(
-      title: "Raw events \(snapshot.rawEvents)",
-      action: nil,
-      keyEquivalent: ""
-    )
-    projectionItem.isEnabled = false
-    menu.addItem(projectionItem)
     menu.addItem(.separator())
 
     if snapshot.integrations.isEmpty {
@@ -1743,20 +1824,30 @@ final class MenuBarAppController: NSObject, NSApplicationDelegate {
     }
 
     menu.addItem(.separator())
-    let startItem = menu.addItem(
-      withTitle: snapshot.daemonRunning ? "Restart Daemon" : daemonStarting ? "Starting Daemon..." : "Start Daemon",
-      action: #selector(restartDaemon),
+    let debugHeader = NSMenuItem(title: "Debug", action: nil, keyEquivalent: "")
+    debugHeader.isEnabled = false
+    menu.addItem(debugHeader)
+    if snapshot.messageBreakdown.isEmpty {
+      let item = NSMenuItem(title: "No message sync data yet", action: nil, keyEquivalent: "")
+      item.isEnabled = false
+      menu.addItem(item)
+    } else {
+      for item in snapshot.messageBreakdown {
+        let menuItem = NSMenuItem(title: platformMessageDebugTitle(item), action: nil, keyEquivalent: "")
+        menuItem.isEnabled = false
+        menu.addItem(menuItem)
+      }
+    }
+
+    menu.addItem(.separator())
+    let daemonToggleItem = menu.addItem(
+      withTitle: snapshot.daemonRunning || daemonStarting ? "Stop" : "Start",
+      action: #selector(toggleDaemon),
       keyEquivalent: ""
     )
-    startItem.target = self
-    startItem.isEnabled = !daemonStarting
+    daemonToggleItem.target = self
 
-    let stopItem = menu.addItem(withTitle: "Stop Daemon", action: #selector(stopDaemon), keyEquivalent: "")
-    stopItem.target = self
-    stopItem.isEnabled = snapshot.daemonRunning || daemonStarting
-
-    menu.addItem(withTitle: "Open Settings", action: #selector(openSetup), keyEquivalent: "").target = self
-    menu.addItem(withTitle: "Request Permissions", action: #selector(requestPermissions), keyEquivalent: "").target = self
+    menu.addItem(withTitle: "Settings", action: #selector(openSetup), keyEquivalent: "").target = self
     menu.addItem(withTitle: "Check for Updates", action: #selector(checkForUpdates), keyEquivalent: "").target = self
 
     menu.addItem(.separator())
