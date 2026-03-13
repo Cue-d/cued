@@ -269,7 +269,7 @@ final class OnboardingWindowController: NSWindowController {
     pendingStatusRefreshTask?.cancel()
     pendingStatusRefreshTask = nil
 
-    let hasPendingAuth = cachedSetupIntegrations.contains {
+    let hasPendingAuth = cachedAllIntegrations.contains {
       $0.authState == "requested" || $0.authState == "in_progress"
     }
     guard hasPendingAuth else {
