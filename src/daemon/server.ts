@@ -21,6 +21,7 @@ import {
   getIntegrationSummary,
   markAuthSessionInProgress,
   refreshManagedIntegrationStates,
+  removeIntegration,
   setIntegrationEnabled,
 } from "../integrations/service.js";
 import {
@@ -784,7 +785,7 @@ async function startManagedAuth(
         resultSummary: result.resultSummary ?? null,
         errorSummary: result.errorSummary ?? null,
       });
-      if (completed.integration.authState === "authenticated") {
+      if (completed.integration?.authState === "authenticated") {
         if (
           !db.hasQueuedOrRunningRun(
             completed.integration.platform,
@@ -2424,6 +2425,15 @@ async function dispatchRequest(
       }
       case "integrations-disconnect": {
         const result = disconnectIntegration(db, request.platform, request.accountKey);
+        requestRealtimeReconcile();
+        return {
+          id: request.id,
+          ok: true,
+          result,
+        };
+      }
+      case "integrations-remove": {
+        const result = removeIntegration(db, request.platform, request.accountKey);
         requestRealtimeReconcile();
         return {
           id: request.id,

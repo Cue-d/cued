@@ -10,7 +10,7 @@ import { sendDaemonRequest } from "./client.js";
 import { CUED_DB_PATH, CUED_SOCKET_PATH, ensureCuedDirs } from "./config.js";
 import { runDaemon } from "./daemon/server.js";
 import { openCuedDatabase } from "./db/database.js";
-import { buildDoctorReport } from "./diagnostics/doctor.js";
+import { buildDoctorReport, buildPermissionStatus } from "./diagnostics/doctor.js";
 import {
   doctorHooksConfig,
   emitHookEvent,
@@ -29,6 +29,7 @@ import {
   listRequestableIntegrationPlatforms,
   markAuthSessionInProgress,
   refreshManagedIntegrationStates,
+  removeIntegration,
   setIntegrationEnabled,
 } from "./integrations/service.js";
 import { followLogs, getDaemonLogPath, parseLogsCommandArgs, readRecentLogLines } from "./logs.js";
@@ -86,12 +87,13 @@ Usage:
   cued cli install|status
   cued onboarding complete|status
   cued launchd install|uninstall|status
-  cued permissions doctor|request [--all|--contacts|--messages|--full-disk-access|--accessibility]
+  cued permissions doctor|status|request [--all|--contacts|--messages|--full-disk-access]
   cued integrations list
   cued integrations status
   cued integrations refresh
   cued integrations connect <platform> [account]
   cued integrations disconnect <platform> [account]
+  cued integrations remove <platform> [account]
   cued integrations enable <platform> [account]
   cued integrations disable <platform> [account]
   cued hooks init
@@ -169,7 +171,7 @@ async function handleLocalIntegrationCommand(
             resultSummary: result.resultSummary ?? null,
             errorSummary: result.errorSummary ?? null,
           });
-          if (completed.integration.authState === "authenticated") {
+          if (completed.integration?.authState === "authenticated") {
             if (
               !db.hasQueuedOrRunningRun(
                 completed.integration.platform,
@@ -203,6 +205,11 @@ async function handleLocalIntegrationCommand(
           throw new Error("Usage: cued integrations disconnect <platform> [account]");
         }
         return disconnectIntegration(db, rest[0], rest[1]);
+      case "remove":
+        if (!rest[0]) {
+          throw new Error("Usage: cued integrations remove <platform> [account]");
+        }
+        return removeIntegration(db, rest[0], rest[1]);
       case "enable":
         if (!rest[0]) {
           throw new Error("Usage: cued integrations enable <platform> [account]");
@@ -215,7 +222,7 @@ async function handleLocalIntegrationCommand(
         return setIntegrationEnabled(db, rest[0], rest[1], false);
       default:
         throw new Error(
-          `Usage: cued integrations list | status | refresh | connect <platform> [account] | disconnect <platform> [account] | enable <platform> [account] | disable <platform> [account]\nRequestable platforms: ${listRequestableIntegrationPlatforms().join(", ")}`,
+          `Usage: cued integrations list | status | refresh | connect <platform> [account] | disconnect <platform> [account] | remove <platform> [account] | enable <platform> [account] | disable <platform> [account]\nRequestable platforms: ${listRequestableIntegrationPlatforms().join(", ")}`,
         );
     }
   } finally {
@@ -400,6 +407,9 @@ async function main(): Promise<void> {
             }
           }
           return;
+        case "status":
+          printJson(await buildPermissionStatus());
+          return;
         case "request": {
           const flags = rest.length > 0 ? rest : ["--all"];
           const scriptPath = resolvePermissionsScriptPath();
@@ -413,7 +423,7 @@ async function main(): Promise<void> {
         }
         default:
           throw new Error(
-            "Usage: cued permissions doctor | request [--all|--contacts|--messages|--full-disk-access|--accessibility]",
+            "Usage: cued permissions doctor | status | request [--all|--contacts|--messages|--full-disk-access]",
           );
       }
     case "status":
@@ -451,6 +461,16 @@ async function main(): Promise<void> {
             accountKey: rest[1],
           });
           break;
+        case "remove":
+          if (!rest[0]) {
+            throw new Error("Usage: cued integrations remove <platform> [account]");
+          }
+          response = await sendDaemonRequest({
+            command: "integrations-remove",
+            platform: rest[0],
+            accountKey: rest[1],
+          });
+          break;
         case "enable":
           if (!rest[0]) {
             throw new Error("Usage: cued integrations enable <platform> [account]");
@@ -473,7 +493,7 @@ async function main(): Promise<void> {
           break;
         default:
           throw new Error(
-            `Usage: cued integrations list | status | refresh | connect <platform> [account] | disconnect <platform> [account] | enable <platform> [account] | disable <platform> [account]\nRequestable platforms: ${listRequestableIntegrationPlatforms().join(", ")}`,
+            `Usage: cued integrations list | status | refresh | connect <platform> [account] | disconnect <platform> [account] | remove <platform> [account] | enable <platform> [account] | disable <platform> [account]\nRequestable platforms: ${listRequestableIntegrationPlatforms().join(", ")}`,
           );
       }
       break;

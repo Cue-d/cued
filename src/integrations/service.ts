@@ -1,6 +1,6 @@
 import { execFileSync } from "node:child_process";
-import { existsSync, rmSync } from "node:fs";
-import { join } from "node:path";
+import { existsSync, mkdirSync, renameSync, rmSync } from "node:fs";
+import { dirname, join } from "node:path";
 import { DEFAULT_CHAT_DB_PATH, IMessageReader } from "../adapters/imessage/reader.js";
 import { listAdapterPlatforms } from "../adapters/registry.js";
 import { CUED_BROWSER_DIR } from "../config.js";
@@ -19,7 +19,6 @@ import {
   type IntegrationRuntimeKind,
   isOnboardingVisiblePlatform,
   isRequestableIntegrationPlatform,
-  PLATFORM_VALUES,
   type Platform,
   parseIntegrationAuthState,
   parseIntegrationRuntimeKind,
@@ -76,6 +75,11 @@ export interface AuthSessionSummary {
   errorSummary: string | null;
   createdAt: number;
   updatedAt: number;
+}
+
+export interface CompletedAuthSessionSummary {
+  authSession: AuthSessionSummary | null;
+  integration: IntegrationStateSummary | null;
 }
 
 interface ManagedIntegrationState {
@@ -149,6 +153,8 @@ const REQUESTABLE_INTEGRATIONS: Record<string, RequestableIntegrationConfig> = {
   },
 };
 
+const SLACK_PENDING_ACCOUNT_KEY_PREFIX = "pending-slack-";
+
 function now(): number {
   return Date.now();
 }
@@ -189,6 +195,17 @@ export function getChromiumProfileDir(platform: Platform, accountKey: string): s
   return join(CUED_BROWSER_DIR, platform, accountKey);
 }
 
+function isGeneratedPendingSlackAccountKey(accountKey: string): boolean {
+  return accountKey.startsWith(SLACK_PENDING_ACCOUNT_KEY_PREFIX);
+}
+
+function shouldAppendAccountKeyToDisplayName(platform: Platform, accountKey: string): boolean {
+  if (platform === "slack" && isGeneratedPendingSlackAccountKey(accountKey)) {
+    return false;
+  }
+  return accountKey !== getDefaultAccountKeyForPlatform(platform);
+}
+
 function getRequestableIntegration(platform: string): RequestableIntegrationConfig {
   const normalized = normalizeIntegrationPlatform(platform);
   if (!isRequestableIntegrationPlatform(normalized)) {
@@ -219,6 +236,30 @@ function getIMessageAuthState(): IntegrationAuthState {
   const chatDbPath = process.env.CUED_IMESSAGE_DB_PATH ?? DEFAULT_CHAT_DB_PATH;
   if (!existsSync(chatDbPath)) {
     return "missing";
+  }
+
+  const nativeBinary = resolveMacOSNativeBinary(process.env.CUED_IMESSAGE_NATIVE_BINARY);
+  if (nativeBinary) {
+    try {
+      execFileSync(
+        nativeBinary,
+        ["imessage", "dump", "--db-path", chatDbPath, "--after-rowid", "0", "--limit", "1"],
+        {
+          encoding: "utf8",
+          stdio: ["ignore", "pipe", "pipe"],
+        },
+      );
+      return "authorized";
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      if (
+        message.includes("authorization denied") ||
+        message.includes("unable to open database file")
+      ) {
+        return "needs_full_disk_access";
+      }
+      return "blocked";
+    }
   }
 
   try {
@@ -631,6 +672,14 @@ function upsertManagedIntegrationState(
 }
 
 function buildSetupIntegrations(db: CuedDatabase): IntegrationStateSummary[] {
+  const onboardingOrder: Platform[] = [
+    "contacts",
+    "imessage",
+    "slack",
+    "linkedin",
+    "whatsapp",
+    "signal",
+  ];
   const byPlatform = new Map<Platform, IntegrationStateSummary>();
 
   for (const integration of listIntegrationStates(db)) {
@@ -678,7 +727,8 @@ function buildSetupIntegrations(db: CuedDatabase): IntegrationStateSummary[] {
     );
   }
 
-  return PLATFORM_VALUES.filter(isOnboardingVisiblePlatform)
+  return onboardingOrder
+    .filter(isOnboardingVisiblePlatform)
     .map((platform) => byPlatform.get(platform))
     .filter((value): value is IntegrationStateSummary => Boolean(value));
 }
@@ -792,7 +842,7 @@ function ensureRequestableIntegrationState(
     platform: normalized,
     accountKey: resolvedAccountKey,
     displayName:
-      accountKey && accountKey !== getDefaultAccountKeyForPlatform(normalized)
+      accountKey && shouldAppendAccountKeyToDisplayName(normalized, accountKey)
         ? `${requested.displayName} ${accountKey}`
         : requested.displayName,
     authState: existing?.auth_state ?? "requested",
@@ -922,10 +972,21 @@ export function completeAuthSession(
     resultSummary?: Record<string, unknown> | null;
     errorSummary?: string | null;
   },
-): { authSession: AuthSessionSummary; integration: IntegrationStateSummary } {
+): CompletedAuthSessionSummary {
   const session = db.getAuthSession(sessionId);
   if (!session) {
-    throw new Error(`Auth session not found: ${sessionId}`);
+    return {
+      authSession: null,
+      integration: null,
+    };
+  }
+
+  const existingIntegration = db.getIntegrationState(session.platform, session.account_key);
+  if (!existingIntegration && session.state === "cancelled") {
+    return {
+      authSession: null,
+      integration: null,
+    };
   }
 
   db.updateAuthSessionState({
@@ -947,37 +1008,152 @@ export function completeAuthSession(
   const metadata = integration.metadata_json
     ? (JSON.parse(integration.metadata_json) as Record<string, unknown>)
     : {};
+  const targetAccountKey = resolveCompletedAccountKey(session, input);
+  const targetDisplayName = resolveCompletedDisplayName(
+    integration.display_name,
+    input.resultSummary,
+  );
+  const targetMetadata = resolveCompletedMetadata(
+    integration.platform,
+    integration.account_key,
+    targetAccountKey,
+    metadata,
+  );
+  const existingTarget =
+    targetAccountKey === integration.account_key
+      ? integration
+      : db.getIntegrationState(integration.platform, targetAccountKey);
   const supportedByDaemon = new Set<string>(listAdapterPlatforms()).has(integration.platform);
   const syncCapable =
-    input.state === "authenticated" ? supportedByDaemon : integration.sync_capable === 1;
+    input.state === "authenticated"
+      ? supportedByDaemon
+      : (existingTarget?.sync_capable ?? integration.sync_capable) === 1;
+  const artifactPaths = Array.from(
+    new Set([
+      ...(existingTarget?.artifact_paths_json
+        ? (JSON.parse(existingTarget.artifact_paths_json) as string[])
+        : []),
+      ...(integration.artifact_paths_json
+        ? (JSON.parse(integration.artifact_paths_json) as string[])
+        : []),
+    ]),
+  );
   db.upsertIntegrationState({
     platform: integration.platform,
-    accountKey: integration.account_key,
-    displayName: integration.display_name,
+    accountKey: targetAccountKey,
+    displayName: targetDisplayName,
     authState: input.state,
-    enabled: integration.enabled === 1,
+    enabled: (existingTarget?.enabled ?? integration.enabled) === 1,
     connectionKind: integration.connection_kind,
     syncCapable,
     launchStrategy: integration.launch_strategy,
     launchTarget: integration.launch_target,
     importedFrom: integration.imported_from,
-    artifactPaths: integration.artifact_paths_json
-      ? (JSON.parse(integration.artifact_paths_json) as string[])
-      : [],
+    artifactPaths,
     metadata: {
+      ...(existingTarget?.metadata_json
+        ? (JSON.parse(existingTarget.metadata_json) as Record<string, unknown>)
+        : {}),
       ...metadata,
+      ...targetMetadata,
       latestAuthSessionId: sessionId,
       keychainService: input.keychainService ?? null,
-      keychainAccount: input.keychainAccount ?? null,
+      keychainAccount: resolveCompletedKeychainAccount(targetAccountKey, input.keychainAccount),
       authenticatedAt: input.state === "authenticated" ? now() : null,
       authResult: input.resultSummary ?? null,
       lastAuthError: input.errorSummary ?? null,
     },
   });
 
+  if (targetAccountKey !== integration.account_key) {
+    db.updateAuthSessionIdentity({
+      id: sessionId,
+      accountKey: targetAccountKey,
+      integrationStateId: `${integration.platform}:${targetAccountKey}`,
+    });
+    db.deleteIntegrationState(integration.platform, integration.account_key);
+  }
+
   return {
     authSession: getAuthSessionSummary(db, sessionId)!,
-    integration: getIntegrationSummary(db, session.platform, session.account_key),
+    integration: getIntegrationSummary(db, session.platform, targetAccountKey),
+  };
+}
+
+function resolveCompletedAccountKey(
+  session: AuthSessionRow,
+  input: {
+    state: Extract<AuthSessionState, "authenticated" | "failed" | "cancelled">;
+    keychainAccount?: string | null;
+    resultSummary?: Record<string, unknown> | null;
+  },
+): string {
+  if (session.platform !== "slack" || input.state !== "authenticated") {
+    return session.account_key;
+  }
+
+  const teamId =
+    typeof input.resultSummary?.teamId === "string" ? input.resultSummary.teamId.trim() : "";
+  if (teamId.length > 0) {
+    return teamId;
+  }
+
+  const keychainAccount =
+    typeof input.keychainAccount === "string" ? input.keychainAccount.trim() : "";
+  return keychainAccount.length > 0 ? keychainAccount : session.account_key;
+}
+
+function resolveCompletedKeychainAccount(
+  accountKey: string,
+  keychainAccount?: string | null,
+): string | null {
+  if (typeof keychainAccount === "string" && keychainAccount.trim().length > 0) {
+    return keychainAccount;
+  }
+  return accountKey;
+}
+
+function resolveCompletedDisplayName(
+  currentDisplayName: string | null,
+  resultSummary?: Record<string, unknown> | null,
+): string | null {
+  if (typeof resultSummary?.teamName === "string" && resultSummary.teamName.trim().length > 0) {
+    return resultSummary.teamName.trim();
+  }
+  return currentDisplayName;
+}
+
+function resolveCompletedMetadata(
+  platform: Platform,
+  fromAccountKey: string,
+  toAccountKey: string,
+  metadata: Record<string, unknown>,
+): Record<string, unknown> {
+  if (platform !== "slack" || fromAccountKey === toAccountKey) {
+    return metadata;
+  }
+
+  const currentProfileDir =
+    typeof metadata.browserProfileDir === "string" ? metadata.browserProfileDir : null;
+  const targetProfileDir = getChromiumProfileDir(platform, toAccountKey);
+  if (currentProfileDir && currentProfileDir !== targetProfileDir) {
+    try {
+      if (existsSync(currentProfileDir)) {
+        mkdirSync(dirname(targetProfileDir), { recursive: true });
+        if (!existsSync(targetProfileDir)) {
+          renameSync(currentProfileDir, targetProfileDir);
+        } else {
+          rmSync(currentProfileDir, { recursive: true, force: true });
+        }
+      }
+    } catch {
+      // Best-effort move. If the rename fails, still point future auth to the target path.
+    }
+  }
+
+  return {
+    ...metadata,
+    browserProfileDir: targetProfileDir,
   };
 }
 
@@ -1022,6 +1198,58 @@ export function disconnectIntegration(
   }
 
   return getIntegrationSummary(db, integration.platform, integration.accountKey);
+}
+
+export function removeIntegration(
+  db: CuedDatabase,
+  platform: string,
+  accountKey?: string,
+): { platform: Platform; accountKey: string; removed: true } {
+  const integration = getIntegrationSummary(db, platform, accountKey);
+  const latestAuthSession = db.getLatestAuthSession(integration.platform, integration.accountKey);
+  if (latestAuthSession?.state === "requested" || latestAuthSession?.state === "in_progress") {
+    db.updateAuthSessionState({
+      id: latestAuthSession.id,
+      state: "cancelled",
+      nativePid: null,
+      finishedAt: now(),
+      errorSummary: null,
+    });
+  }
+
+  const keychain = getKeychainMetadata(integration.metadata);
+  deleteKeychainSecret(keychain.keychainService, keychain.keychainAccount);
+
+  const browserProfileDir =
+    typeof integration.metadata?.browserProfileDir === "string"
+      ? integration.metadata.browserProfileDir
+      : null;
+  if (browserProfileDir) {
+    rmSync(browserProfileDir, { recursive: true, force: true });
+  }
+
+  if (integration.platform === "whatsapp") {
+    const storeDir =
+      typeof integration.metadata?.storeDir === "string"
+        ? integration.metadata.storeDir
+        : getWhatsAppStoreDir(integration.accountKey);
+    rmSync(storeDir, { recursive: true, force: true });
+  }
+
+  if (integration.platform === "signal") {
+    const configDir =
+      typeof integration.metadata?.configDir === "string"
+        ? integration.metadata.configDir
+        : getSignalConfigDir(integration.accountKey);
+    rmSync(configDir, { recursive: true, force: true });
+  }
+
+  db.deleteIntegrationState(integration.platform, integration.accountKey);
+  return {
+    platform: integration.platform,
+    accountKey: integration.accountKey,
+    removed: true,
+  };
 }
 
 export function buildIntegrationStatus(db: CuedDatabase): {

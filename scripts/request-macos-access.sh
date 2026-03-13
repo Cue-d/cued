@@ -25,7 +25,6 @@ PERMISSION_TARGET="${CUED_PERMISSION_TARGET:-${CUED_APP_PATH:-$NATIVE_BINARY}}"
 REQUEST_CONTACTS=0
 REQUEST_MESSAGES=0
 REQUEST_FULL_DISK=0
-REQUEST_ACCESSIBILITY=0
 BUILD_NATIVE=1
 OPEN_ONLY=0
 
@@ -48,18 +47,17 @@ Usage:
   bash scripts/request-macos-access.sh [options]
 
 Options:
-  --all                 Request Contacts + Messages automation and open the manual privacy panes
+  --all                 Request Contacts + Messages automation and open the Full Disk Access pane
   --contacts            Trigger the macOS Contacts permission prompt using the native exporter
   --messages            Trigger Apple Events automation permission for Messages via AppleScript
   --full-disk-access    Open the Full Disk Access pane and print manual instructions
-  --accessibility       Open the Accessibility pane and print manual instructions
   --open-only           Skip prompt attempts and only open the relevant System Settings panes
   --skip-build          Do not build the native macOS helper before requesting Contacts access
   --help                Show this help
 
 Notes:
   - Contacts and Apple Events automation can prompt automatically.
-  - Full Disk Access and Accessibility cannot be granted programmatically on macOS.
+  - Full Disk Access cannot be granted programmatically on macOS.
   - The process that runs this script is the one macOS authorizes for AppleScript automation.
 EOF
 }
@@ -149,20 +147,6 @@ Manual step required:
 EOF
 }
 
-open_accessibility_help() {
-  log "opening Accessibility privacy pane"
-  open_privacy_pane "Privacy_Accessibility"
-  cat <<'EOF'
-
-Manual step required:
-  1. Add the app that runs cued commands.
-  2. Enable Accessibility for that app.
-
-This is only needed for workflows that rely on UI scripting or desktop automation.
-
-EOF
-}
-
 if [[ $# -eq 0 ]]; then
   REQUEST_CONTACTS=1
   REQUEST_MESSAGES=1
@@ -177,7 +161,6 @@ while [[ $# -gt 0 ]]; do
       REQUEST_CONTACTS=1
       REQUEST_MESSAGES=1
       REQUEST_FULL_DISK=1
-      REQUEST_ACCESSIBILITY=1
       ;;
     --contacts)
       REQUEST_CONTACTS=1
@@ -187,9 +170,6 @@ while [[ $# -gt 0 ]]; do
       ;;
     --full-disk-access)
       REQUEST_FULL_DISK=1
-      ;;
-    --accessibility)
-      REQUEST_ACCESSIBILITY=1
       ;;
     --open-only)
       OPEN_ONLY=1
@@ -210,7 +190,7 @@ done
 
 ensure_macos
 
-if [[ $REQUEST_CONTACTS -eq 0 && $REQUEST_MESSAGES -eq 0 && $REQUEST_FULL_DISK -eq 0 && $REQUEST_ACCESSIBILITY -eq 0 ]]; then
+if [[ $REQUEST_CONTACTS -eq 0 && $REQUEST_MESSAGES -eq 0 && $REQUEST_FULL_DISK -eq 0 ]]; then
   die "nothing requested; use --help for options"
 fi
 
@@ -224,10 +204,6 @@ fi
 
 if [[ $REQUEST_FULL_DISK -eq 1 ]]; then
   open_full_disk_access_help
-fi
-
-if [[ $REQUEST_ACCESSIBILITY -eq 1 ]]; then
-  open_accessibility_help
 fi
 
 log "done"
