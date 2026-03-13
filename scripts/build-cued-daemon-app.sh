@@ -131,6 +131,10 @@ cp "$BETTER_SQLITE3_BINDING_SOURCE" "$BETTER_SQLITE3_RUNTIME_DIR/build/Release/b
 # `pnpm deploy --legacy --prod` can still leave a handful of dangling package links behind.
 find -L "$RUNTIME_DIR" -type l -exec rm -f {} +
 rm -rf "$RUNTIME_DIR/node_modules/cued" "$RUNTIME_DIR/node_modules/@cued/app"
+# The bundled CLI only needs compiled JS plus runtime dependencies. Shipping the
+# repo's native helper sources/build output duplicates unsigned binaries inside
+# the portable runtime and breaks notarization.
+rm -rf "$RUNTIME_DIR/native"
 
 mkdir -p "$RESOURCES_DIR/scripts"
 cp "$PERMISSIONS_SCRIPT_SOURCE" "$RESOURCES_DIR/scripts/request-macos-access.sh"
