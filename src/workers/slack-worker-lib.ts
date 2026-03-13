@@ -77,6 +77,13 @@ function timestampMs(slackTs: string | undefined): number | null {
   return Number.isFinite(parsed) ? Math.round(parsed * 1000) : null;
 }
 
+function formatOldestTs(oldestMs: number): string | undefined {
+  if (!Number.isFinite(oldestMs) || oldestMs <= 0) {
+    return undefined;
+  }
+  return (oldestMs / 1000).toFixed(6);
+}
+
 function getOldestMessageMs(mode: SlackScanMode, lastSyncAt?: number): number {
   if (mode === "incremental" && lastSyncAt && lastSyncAt > 0) {
     return Math.max(0, lastSyncAt - INCREMENTAL_BUFFER_MS);
@@ -265,12 +272,13 @@ async function listConversationMessages(
 ): Promise<SlackMessage[]> {
   const messageByTs = new Map<string, SlackMessage>();
   const threadParents = new Set<string>();
+  const oldest = formatOldestTs(oldestMs);
   let cursor: string | undefined;
 
   do {
     const result = await client.getHistory(conversationId, {
       cursor,
-      oldest: (oldestMs / 1000).toFixed(6),
+      oldest,
       limit: messagesPageLimit,
     });
 
@@ -292,7 +300,7 @@ async function listConversationMessages(
     do {
       const result = await client.getReplies(conversationId, threadTs, {
         cursor: repliesCursor,
-        oldest: (oldestMs / 1000).toFixed(6),
+        oldest,
         limit: messagesPageLimit,
       });
 

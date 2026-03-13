@@ -122,8 +122,8 @@ describe("slack worker lib", () => {
             "slack:T123:D123:1710000000.000100",
       ),
     ).toBe(true);
-    expect(historyOldestValues).toEqual(["0.000000"]);
-    expect(repliesOldestValues).toEqual(["0.000000"]);
+    expect(historyOldestValues).toEqual([""]);
+    expect(repliesOldestValues).toEqual([""]);
   });
 
   it("treats empty conversation cursors as end-of-pagination", async () => {
