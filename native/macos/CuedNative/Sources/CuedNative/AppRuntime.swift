@@ -1574,7 +1574,6 @@ final class MenuBarAppController: NSObject, NSApplicationDelegate {
   private let daemonSupervisor: DaemonSupervisor
   private lazy var onboardingWindowController = OnboardingWindowController(
     daemonSupervisor: daemonSupervisor,
-    statusStore: statusStore,
     onRefresh: { [weak self] in
       self?.refreshStatus()
     }

@@ -9,7 +9,7 @@ import { getCurrentAppVersion, getCurrentReleaseChannel } from "./app-metadata.j
 import { sendDaemonRequest } from "./client.js";
 import { CUED_DB_PATH, CUED_SOCKET_PATH, ensureCuedDirs } from "./config.js";
 import { runDaemon } from "./daemon/server.js";
-import { openCuedDatabase } from "./db/database.js";
+import { openCuedDatabase, openCuedDatabaseReadOnly } from "./db/database.js";
 import { buildDoctorReport, buildPermissionStatus } from "./diagnostics/doctor.js";
 import {
   doctorHooksConfig,
@@ -43,6 +43,7 @@ import {
   resolveInstalledAppPath,
   uninstallLaunchAgent,
 } from "./macos/install.js";
+import { buildOnboardingSnapshot } from "./onboarding/service.js";
 import { resolveHostOS } from "./platform-capabilities.js";
 import { runSetupTUI } from "./setup.js";
 
@@ -85,7 +86,7 @@ Usage:
   cued logs
   cued setup
   cued cli install|status
-  cued onboarding complete|status
+  cued onboarding complete|snapshot|status [--refresh-managed]
   cued launchd install|uninstall|status
   cued permissions doctor|status|request [--all|--contacts|--messages|--full-disk-access]
   cued integrations list
@@ -361,18 +362,31 @@ async function main(): Promise<void> {
           throw new Error("Usage: cued cli install | status");
       }
     case "onboarding": {
-      const db = openCuedDatabase();
+      const refreshManaged = rest.includes("--refresh-managed");
+      const db =
+        subcommand === "snapshot" && !refreshManaged
+          ? openCuedDatabaseReadOnly()
+          : openCuedDatabase();
       try {
         switch (subcommand) {
           case "complete":
             db.markOnboardingCompleted(getCurrentAppVersion());
             printJson(db.getAppMetadata());
             return;
+          case "snapshot":
+            printJson(
+              await buildOnboardingSnapshot(db, {
+                refreshManagedIntegrations: refreshManaged,
+              }),
+            );
+            return;
           case "status":
             printJson(db.getAppMetadata());
             return;
           default:
-            throw new Error("Usage: cued onboarding complete | status");
+            throw new Error(
+              "Usage: cued onboarding complete | snapshot [--refresh-managed] | status",
+            );
         }
       } finally {
         db.close();

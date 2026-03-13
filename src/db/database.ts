@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { existsSync } from "node:fs";
 import Database from "better-sqlite3";
 import { and, asc, desc, eq, inArray, sql } from "drizzle-orm";
 import { type BetterSQLite3Database, drizzle } from "drizzle-orm/better-sqlite3";
@@ -260,13 +261,23 @@ export class CuedDatabase {
   private readonly sqlite: Database.Database;
   private readonly db: LocalDrizzleDatabase;
 
-  constructor(public readonly dbPath: string = CUED_DB_PATH) {
+  constructor(
+    public readonly dbPath: string = CUED_DB_PATH,
+    options: {
+      readonly?: boolean;
+    } = {},
+  ) {
     ensureCuedDirs();
-    this.sqlite = new Database(dbPath);
+    this.sqlite = new Database(
+      dbPath,
+      options.readonly ? { readonly: true, fileMustExist: true } : undefined,
+    );
     this.sqlite.exec("PRAGMA busy_timeout = 5000");
-    this.sqlite.exec("PRAGMA journal_mode = WAL");
     this.sqlite.exec("PRAGMA foreign_keys = ON");
-    this.sqlite.exec("PRAGMA synchronous = NORMAL");
+    if (!options.readonly) {
+      this.sqlite.exec("PRAGMA journal_mode = WAL");
+      this.sqlite.exec("PRAGMA synchronous = NORMAL");
+    }
     this.db = drizzle(this.sqlite, { schema });
   }
 
@@ -2415,4 +2426,12 @@ export function openCuedDatabase(dbPath?: string): CuedDatabase {
     releaseChannel: getCurrentReleaseChannel(),
   });
   return db;
+}
+
+export function openCuedDatabaseReadOnly(dbPath?: string): CuedDatabase {
+  if (!existsSync(dbPath ?? CUED_DB_PATH)) {
+    return openCuedDatabase(dbPath);
+  }
+
+  return new CuedDatabase(dbPath, { readonly: true });
 }
