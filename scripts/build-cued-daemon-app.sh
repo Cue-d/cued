@@ -15,9 +15,11 @@ CONTENTS_DIR="$APP_BUNDLE/Contents"
 MACOS_DIR="$CONTENTS_DIR/MacOS"
 RESOURCES_DIR="$CONTENTS_DIR/Resources"
 RUNTIME_DIR="$RESOURCES_DIR/cued-runtime"
-RUNTIME_NODE_DIR="$RESOURCES_DIR/runtime/node/bin"
+RUNTIME_NODE_ROOT="$RESOURCES_DIR/runtime/node"
+RUNTIME_NODE_BIN_DIR="$RUNTIME_NODE_ROOT/bin"
 HELPERS_DIR="$RESOURCES_DIR/helpers"
 SIGNAL_FETCH_SCRIPT="$ROOT_DIR/scripts/fetch-signal-cli-macos.sh"
+NODE_RUNTIME_FETCH_SCRIPT="$ROOT_DIR/scripts/fetch-node-runtime-macos.sh"
 SIGNAL_HELPER_SOURCE_DIR="$ROOT_DIR/native/helpers/signal-cli/.build/cued-signal-cli"
 WHATSAPP_HELPER_SOURCE="$ROOT_DIR/native/helpers/whatsapp-go/.build/cued-whatsapp-helper"
 PERMISSIONS_SCRIPT_SOURCE="$ROOT_DIR/scripts/request-macos-access.sh"
@@ -25,8 +27,9 @@ TRAY_ICON_SOURCE="$ROOT_DIR/native/macos/CuedNative/Resources/trayIconTemplate.p
 CUED_MARK_SOURCE="$ROOT_DIR/native/macos/CuedNative/Resources/cued-mark.png"
 NODE_PATH="${CUED_NODE_PATH:-$(command -v node)}"
 RUNTIME_SYMLINK_PRUNER="$ROOT_DIR/dist/macos/runtime-symlinks.js"
-DB_PATH="${CUED_DB_PATH_OVERRIDE:-$HOME/.cued/local.db}"
 APP_VERSION="$("$NODE_PATH" -p "require(process.argv[1]).version" "$ROOT_DIR/package.json")"
+NODE_VERSION="$("$NODE_PATH" -p 'process.versions.node')"
+NODE_ARCH="$("$NODE_PATH" -p 'process.arch === "arm64" ? "arm64" : "x64"')"
 RELEASE_CHANNEL="${CUED_RELEASE_CHANNEL:-internal}"
 DAEMON_COMMAND="${CUED_DAEMON_COMMAND:-\"\$CUED_APP_PATH/Contents/Resources/cued-cli\" daemon}"
 SETUP_COMMAND="${CUED_SETUP_COMMAND:-\"\$CUED_APP_PATH/Contents/Resources/cued-cli\" setup}"
@@ -61,26 +64,50 @@ sign_app_bundle() {
   codesign --force --deep --sign - "$APP_BUNDLE" >/dev/null
 }
 
+copy_better_sqlite3_binary() {
+  local built_binary
+  local staged_module_dir
+
+  built_binary="$(find "$ROOT_DIR/node_modules/.pnpm" -path '*/better-sqlite3/build/Release/better_sqlite3.node' -print -quit)"
+  staged_module_dir="$(find "$DEPLOY_STAGING_DIR/node_modules/.pnpm" -path '*/node_modules/better-sqlite3' -type d -print -quit)"
+
+  if [[ -z "$built_binary" ]]; then
+    echo "Could not locate the built better_sqlite3.node in node_modules" >&2
+    exit 1
+  fi
+
+  if [[ -z "$staged_module_dir" ]]; then
+    echo "Could not locate better-sqlite3 in the deploy staging directory" >&2
+    exit 1
+  fi
+
+  mkdir -p "$staged_module_dir/build/Release"
+  cp "$built_binary" "$staged_module_dir/build/Release/better_sqlite3.node"
+}
+
 mkdir -p "$APP_DIST_DIR"
 
 pnpm --dir "$ROOT_DIR" build >/dev/null
 swift build --package-path "$SWIFT_PACKAGE_DIR" -c release >/dev/null
 SWIFT_RESOURCE_BUNDLES=("$SWIFT_PACKAGE_DIR"/.build/*/release/*.bundle)
+NODE_RUNTIME_SOURCE_DIR="$(bash "$NODE_RUNTIME_FETCH_SCRIPT" "$NODE_VERSION" "$NODE_ARCH")"
 bash "$SIGNAL_FETCH_SCRIPT" >/dev/null
 mkdir -p "$(dirname "$WHATSAPP_HELPER_SOURCE")"
 (cd "$ROOT_DIR/native/helpers/whatsapp-go" && GOWORK=off go build -o "$WHATSAPP_HELPER_SOURCE" .) >/dev/null
 npm_config_ignore_scripts=true pnpm --dir "$ROOT_DIR" --filter . deploy --legacy --prod "$DEPLOY_STAGING_DIR" >/dev/null
+copy_better_sqlite3_binary
 
 rm -rf "$APP_BUNDLE"
-mkdir -p "$MACOS_DIR" "$RESOURCES_DIR" "$RUNTIME_DIR" "$RUNTIME_NODE_DIR" "$HELPERS_DIR"
+mkdir -p "$MACOS_DIR" "$RESOURCES_DIR" "$RUNTIME_DIR" "$RUNTIME_NODE_BIN_DIR" "$HELPERS_DIR"
 
 cp "$SWIFT_BINARY" "$MACOS_DIR/$APP_EXECUTABLE_NAME"
 chmod +x "$MACOS_DIR/$APP_EXECUTABLE_NAME"
 for resource_bundle in "${SWIFT_RESOURCE_BUNDLES[@]}"; do
   cp -R "$resource_bundle" "$RESOURCES_DIR/$(basename "$resource_bundle")"
 done
-cp "$NODE_PATH" "$RUNTIME_NODE_DIR/node"
-chmod +x "$RUNTIME_NODE_DIR/node"
+cp "$NODE_RUNTIME_SOURCE_DIR/bin/node" "$RUNTIME_NODE_BIN_DIR/node"
+cp -R "$NODE_RUNTIME_SOURCE_DIR/lib" "$RUNTIME_NODE_ROOT/lib"
+chmod +x "$RUNTIME_NODE_BIN_DIR/node"
 cp -R "$DEPLOY_STAGING_DIR/." "$RUNTIME_DIR/"
 cp -R "$SIGNAL_HELPER_SOURCE_DIR" "$HELPERS_DIR/signal-cli"
 cp "$WHATSAPP_HELPER_SOURCE" "$HELPERS_DIR/cued-whatsapp-helper"
@@ -95,6 +122,15 @@ rm -rf "$RUNTIME_DIR/node_modules/cued" "$RUNTIME_DIR/node_modules/@cued/app"
 mkdir -p "$RESOURCES_DIR/scripts"
 cp "$PERMISSIONS_SCRIPT_SOURCE" "$RESOURCES_DIR/scripts/request-macos-access.sh"
 chmod +x "$RESOURCES_DIR/scripts/request-macos-access.sh"
+
+INFO_PLIST_DB_PATH_BLOCK=""
+if [[ -n "${CUED_DB_PATH_OVERRIDE:-}" ]]; then
+  INFO_PLIST_DB_PATH_BLOCK=$(cat <<EOF
+  <key>CuedDBPath</key>
+  <string>$(xml_escape "$CUED_DB_PATH_OVERRIDE")</string>
+EOF
+)
+fi
 
 cat > "$CONTENTS_DIR/Info.plist" <<EOF
 <?xml version="1.0" encoding="UTF-8"?>
@@ -133,8 +169,7 @@ cat > "$CONTENTS_DIR/Info.plist" <<EOF
   <string>$(xml_escape "$SETUP_COMMAND")</string>
   <key>CuedPermissionsCommand</key>
   <string>$(xml_escape "$PERMISSIONS_COMMAND")</string>
-  <key>CuedDBPath</key>
-  <string>$(xml_escape "$DB_PATH")</string>
+$INFO_PLIST_DB_PATH_BLOCK
 </dict>
 </plist>
 EOF
