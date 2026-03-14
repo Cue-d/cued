@@ -3,6 +3,8 @@ import { buildSlackSyncBundle } from "../workers/slack-worker-lib.js";
 
 describe("slack worker lib", () => {
   it("builds a raw event bundle from Slack users, conversations, messages, and reactions", async () => {
+    const historyOldestValues: string[] = [];
+    const repliesOldestValues: string[] = [];
     const bundle = await buildSlackSyncBundle({
       accountKey: "default",
       client: {
@@ -46,7 +48,8 @@ describe("slack worker lib", () => {
         async getConversationMembers() {
           return { members: [], nextCursor: undefined };
         },
-        async getHistory() {
+        async getHistory(_conversationId, options) {
+          historyOldestValues.push(String(options?.oldest ?? ""));
           return {
             messages: [
               {
@@ -69,7 +72,8 @@ describe("slack worker lib", () => {
             nextCursor: undefined,
           };
         },
-        async getReplies() {
+        async getReplies(_conversationId, _threadTs, options) {
+          repliesOldestValues.push(String(options?.oldest ?? ""));
           return {
             messages: [
               {
@@ -118,6 +122,8 @@ describe("slack worker lib", () => {
             "slack:T123:D123:1710000000.000100",
       ),
     ).toBe(true);
+    expect(historyOldestValues).toEqual([""]);
+    expect(repliesOldestValues).toEqual([""]);
   });
 
   it("treats empty conversation cursors as end-of-pagination", async () => {
@@ -167,5 +173,95 @@ describe("slack worker lib", () => {
       }),
     );
     expect((bundle.sourceCursor as Record<string, unknown>).scan).toBeUndefined();
+  });
+
+  it("treats empty conversation pages with a dangling cursor as end-of-pagination", async () => {
+    const bundle = await buildSlackSyncBundle({
+      accountKey: "default",
+      sourceCursor: {
+        teamId: "T123",
+        selfUserId: "U_SELF",
+        lastSyncAt: 1710000000000,
+        scan: {
+          mode: "full",
+          startedAt: 1710000000000,
+          oldestMs: 0,
+          usersComplete: true,
+          conversationCursor: "dead-cursor",
+        },
+      },
+      client: {
+        async testAuth() {
+          return { ok: true, team_id: "T123", user_id: "U_SELF", team: "Acme", user: "Ava" };
+        },
+        async listUsers() {
+          return { users: [], nextCursor: undefined };
+        },
+        async listConversations() {
+          return {
+            conversations: [],
+            nextCursor: "still-more",
+          };
+        },
+        async getConversationMembers() {
+          return { members: [], nextCursor: undefined };
+        },
+        async getHistory() {
+          return { messages: [], hasMore: false, nextCursor: undefined };
+        },
+        async getReplies() {
+          return { messages: [], hasMore: false, nextCursor: undefined };
+        },
+      },
+    });
+
+    expect(bundle.hasMore).toBe(false);
+    expect(bundle.sourceCursor).toEqual({
+      teamId: "T123",
+      selfUserId: "U_SELF",
+      lastSyncAt: 1710000000000,
+    });
+  });
+
+  it("keeps incremental Slack syncs bounded to the last sync window", async () => {
+    const historyOldestValues: string[] = [];
+    const lastSyncAt = 1710000000000;
+    const expectedOldest = ((lastSyncAt - 5 * 60 * 1000) / 1000).toFixed(6);
+
+    await buildSlackSyncBundle({
+      accountKey: "default",
+      lastSyncAt,
+      client: {
+        async testAuth() {
+          return { ok: true, team_id: "T123", user_id: "U_SELF", team: "Acme", user: "Ava" };
+        },
+        async listUsers() {
+          return { users: [], nextCursor: undefined };
+        },
+        async listConversations() {
+          return {
+            conversations: [
+              {
+                id: "C123",
+                is_channel: true,
+              },
+            ],
+            nextCursor: undefined,
+          };
+        },
+        async getConversationMembers() {
+          return { members: [], nextCursor: undefined };
+        },
+        async getHistory(_conversationId, options) {
+          historyOldestValues.push(String(options?.oldest ?? ""));
+          return { messages: [], hasMore: false, nextCursor: undefined };
+        },
+        async getReplies() {
+          return { messages: [], hasMore: false, nextCursor: undefined };
+        },
+      },
+    });
+
+    expect(historyOldestValues).toEqual([expectedOldest]);
   });
 });

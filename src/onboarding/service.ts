@@ -1,0 +1,37 @@
+import type { CuedDatabase } from "../db/database.js";
+import { buildPermissionStatus } from "../diagnostics/doctor.js";
+import {
+  buildIntegrationStatus,
+  refreshManagedIntegrationStates,
+} from "../integrations/service.js";
+
+export interface OnboardingSnapshot {
+  permissions: Awaited<ReturnType<typeof buildPermissionStatus>>["permissions"];
+  hostOs: ReturnType<typeof buildIntegrationStatus>["hostOs"];
+  integrations: ReturnType<typeof buildIntegrationStatus>["integrations"];
+  setupIntegrations: ReturnType<typeof buildIntegrationStatus>["setupIntegrations"];
+}
+
+export async function buildOnboardingSnapshot(
+  db: CuedDatabase,
+  options: {
+    refreshManagedIntegrations?: boolean;
+  } = {},
+): Promise<OnboardingSnapshot> {
+  if (options.refreshManagedIntegrations) {
+    try {
+      await refreshManagedIntegrationStates(db);
+    } catch {
+      // The daemon may be writing at the same time. The onboarding UI can still
+      // render a usable snapshot from the current DB state and live permission checks.
+    }
+  }
+
+  const permissions = await buildPermissionStatus();
+  const integrations = buildIntegrationStatus(db);
+
+  return {
+    permissions: permissions.permissions,
+    ...integrations,
+  };
+}

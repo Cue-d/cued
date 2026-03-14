@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 import { execFileSync } from "node:child_process";
-import { existsSync } from "node:fs";
+import { existsSync, realpathSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
@@ -9,8 +9,8 @@ import { getCurrentAppVersion, getCurrentReleaseChannel } from "./app-metadata.j
 import { sendDaemonRequest } from "./client.js";
 import { CUED_DB_PATH, CUED_SOCKET_PATH, ensureCuedDirs } from "./config.js";
 import { runDaemon } from "./daemon/server.js";
-import { openCuedDatabase } from "./db/database.js";
-import { buildDoctorReport } from "./diagnostics/doctor.js";
+import { openCuedDatabase, openCuedDatabaseReadOnly } from "./db/database.js";
+import { buildDoctorReport, buildPermissionStatus } from "./diagnostics/doctor.js";
 import {
   doctorHooksConfig,
   emitHookEvent,
@@ -18,19 +18,7 @@ import {
   initHooksConfig,
   testHookEvent,
 } from "./hooks/service.js";
-import { runAuthSessionSync } from "./integrations/auth-runtime.js";
-import {
-  buildIntegrationStatus,
-  completeAuthSession,
-  connectIntegration,
-  disconnectIntegration,
-  getIntegrationSummary,
-  listIntegrationStates,
-  listRequestableIntegrationPlatforms,
-  markAuthSessionInProgress,
-  refreshManagedIntegrationStates,
-  setIntegrationEnabled,
-} from "./integrations/service.js";
+import { getIntegrationSummary, listIntegrationStates } from "./integrations/service.js";
 import { followLogs, getDaemonLogPath, parseLogsCommandArgs, readRecentLogLines } from "./logs.js";
 import {
   getAppBundleInfo,
@@ -42,8 +30,16 @@ import {
   resolveInstalledAppPath,
   uninstallLaunchAgent,
 } from "./macos/install.js";
+import { buildOnboardingSnapshot } from "./onboarding/service.js";
 import { resolveHostOS } from "./platform-capabilities.js";
+import { IntegrationAuthService } from "./services/integration-auth.js";
 import { runSetupTUI } from "./setup.js";
+import {
+  checkForUpdates,
+  getUpdateStatus,
+  installAvailableUpdate,
+  runUpdatePreflight,
+} from "./updater/service.js";
 
 const DIST_ROOT = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = resolve(DIST_ROOT, "..");
@@ -66,10 +62,27 @@ export function resolvePermissionsScriptPath(): string {
   );
 }
 
+export function normalizeInvocationPath(path: string): string {
+  try {
+    return existsSync(path) ? realpathSync(path) : resolve(path);
+  } catch {
+    return resolve(path);
+  }
+}
+
+export function isDirectInvocation(
+  moduleUrl = import.meta.url,
+  argvPath: string | undefined = process.argv[1],
+): boolean {
+  if (argvPath === undefined) {
+    return false;
+  }
+
+  return normalizeInvocationPath(fileURLToPath(moduleUrl)) === normalizeInvocationPath(argvPath);
+}
+
 function isInvokedDirectly(): boolean {
-  return (
-    process.argv[1] !== undefined && fileURLToPath(import.meta.url) === resolve(process.argv[1])
-  );
+  return isDirectInvocation();
 }
 
 function printHelp(): void {
@@ -83,15 +96,19 @@ Usage:
   cued doctor
   cued logs
   cued setup
+  cued update status
+  cued update check [--force]
+  cued update install
   cued cli install|status
-  cued onboarding complete|status
+  cued onboarding complete|snapshot|status [--refresh-managed]
   cued launchd install|uninstall|status
-  cued permissions doctor|request [--all|--contacts|--messages|--full-disk-access|--accessibility]
+  cued permissions doctor|status|request [--all|--contacts|--messages|--full-disk-access]
   cued integrations list
   cued integrations status
   cued integrations refresh
   cued integrations connect <platform> [account]
   cued integrations disconnect <platform> [account]
+  cued integrations remove <platform> [account]
   cued integrations enable <platform> [account]
   cued integrations disable <platform> [account]
   cued hooks init
@@ -142,85 +159,56 @@ async function handleLocalIntegrationCommand(
   rest: string[],
 ): Promise<unknown> {
   const db = openCuedDatabase();
+  const service = new IntegrationAuthService(db);
   try {
     switch (subcommand) {
       case "list":
       case "status":
-        return buildIntegrationStatus(db);
+        return service.listStatus();
       case "refresh":
-        return await refreshManagedIntegrationStates(db);
+        return await service.refresh();
       case "connect": {
         if (!rest[0]) {
           throw new Error("Usage: cued integrations connect <platform> [account]");
         }
-        const requested = connectIntegration(db, rest[0], rest[1]);
-        const running = markAuthSessionInProgress(db, requested.authSession.id, process.pid);
-        try {
-          const integration = getIntegrationSummary(
-            db,
-            requested.integration.platform,
-            requested.integration.accountKey,
-          );
-          const result = await runAuthSessionSync(db, running, integration);
-          const completed = completeAuthSession(db, running.id, {
-            state: result.state,
-            keychainService: result.keychainService ?? null,
-            keychainAccount: result.keychainAccount ?? null,
-            resultSummary: result.resultSummary ?? null,
-            errorSummary: result.errorSummary ?? null,
-          });
-          if (completed.integration.authState === "authenticated") {
-            if (
-              !db.hasQueuedOrRunningRun(
-                completed.integration.platform,
-                completed.integration.accountKey,
-              )
-            ) {
-              db.queueSyncRun({
-                platform: completed.integration.platform,
-                accountKey: completed.integration.accountKey,
-                runType: "sync",
-                trigger: "integration_authenticated",
-                details: {
-                  source: completed.integration.platform,
-                  accountKey: completed.integration.accountKey,
-                  trigger: "integration_authenticated",
-                },
-              });
-            }
-            await safeEmitHookEvent("integration.authenticated", completed);
-          }
-          return completed;
-        } catch (error) {
-          return completeAuthSession(db, running.id, {
-            state: "failed",
-            errorSummary: error instanceof Error ? error.message : String(error),
-          });
-        }
+        return service.connectLocally(rest[0], rest[1], {
+          emitAuthenticatedHook: async (platform, accountKey) => {
+            await safeEmitHookEvent("integration.authenticated", {
+              integration: getIntegrationSummary(db, platform, accountKey),
+            });
+          },
+        });
       }
       case "disconnect":
         if (!rest[0]) {
           throw new Error("Usage: cued integrations disconnect <platform> [account]");
         }
-        return disconnectIntegration(db, rest[0], rest[1]);
+        return service.disconnect(rest[0], rest[1]);
+      case "remove":
+        if (!rest[0]) {
+          throw new Error("Usage: cued integrations remove <platform> [account]");
+        }
+        return service.remove(rest[0], rest[1]);
       case "enable":
         if (!rest[0]) {
           throw new Error("Usage: cued integrations enable <platform> [account]");
         }
-        return setIntegrationEnabled(db, rest[0], rest[1], true);
+        return service.enable(rest[0], rest[1]);
       case "disable":
         if (!rest[0]) {
           throw new Error("Usage: cued integrations disable <platform> [account]");
         }
-        return setIntegrationEnabled(db, rest[0], rest[1], false);
+        return service.disable(rest[0], rest[1]);
       default:
-        throw new Error(
-          `Usage: cued integrations list | status | refresh | connect <platform> [account] | disconnect <platform> [account] | enable <platform> [account] | disable <platform> [account]\nRequestable platforms: ${listRequestableIntegrationPlatforms().join(", ")}`,
-        );
+        throw new Error(service.usage());
     }
   } finally {
     db.close();
   }
+}
+
+function isUnsupportedDaemonCommand(response: { ok: boolean; error?: string }): boolean {
+  return !response.ok && response.error === "Unsupported command";
 }
 
 async function main(): Promise<void> {
@@ -249,6 +237,49 @@ async function main(): Promise<void> {
     return;
   }
 
+  if (command === "update") {
+    switch (subcommand) {
+      case "status": {
+        const db = openCuedDatabase();
+        try {
+          printJson(getUpdateStatus(db));
+        } finally {
+          db.close();
+        }
+        return;
+      }
+      case "check": {
+        const db = openCuedDatabase();
+        try {
+          printJson(await checkForUpdates(db, { force: rest.includes("--force") }));
+        } finally {
+          db.close();
+        }
+        return;
+      }
+      case "install": {
+        const db = openCuedDatabase();
+        try {
+          printJson(await installAvailableUpdate(db));
+        } finally {
+          db.close();
+        }
+        return;
+      }
+      case "preflight": {
+        const dbPathFlagIndex = rest.findIndex((value) => value === "--db-path");
+        const dbPath = dbPathFlagIndex >= 0 ? rest[dbPathFlagIndex + 1] : undefined;
+        if (!dbPath) {
+          throw new Error("Usage: cued update preflight --db-path <path>");
+        }
+        printJson(runUpdatePreflight(dbPath));
+        return;
+      }
+      default:
+        throw new Error("Usage: cued update status | check [--force] | install");
+    }
+  }
+
   if (command === "logs") {
     const options = parseLogsCommandArgs(
       [subcommand, ...rest].filter((value): value is string => Boolean(value)),
@@ -270,6 +301,11 @@ async function main(): Promise<void> {
     return;
   }
 
+  if (command === "integrations" && !existsSync(CUED_SOCKET_PATH)) {
+    printJson(await handleLocalIntegrationCommand(subcommand, rest));
+    return;
+  }
+
   if ((command === "status" || command === "doctor") && !existsSync(CUED_SOCKET_PATH)) {
     const db = openCuedDatabase();
     printJson(
@@ -279,6 +315,7 @@ async function main(): Promise<void> {
             ...(await buildDoctorReport(db)),
             projection: db.getProjectionBacklog(),
             hooks: doctorHooksConfig(),
+            update: getUpdateStatus(db),
           }
         : {
             app: getAppStatusMetadata(db),
@@ -289,16 +326,12 @@ async function main(): Promise<void> {
             recentRuns: db.listRecentRuns(),
             integrations: listIntegrationStates(db),
             hooks: doctorHooksConfig(),
+            update: getUpdateStatus(db),
             socketRunning: false,
             dbPath: db.dbPath,
           },
     );
     db.close();
-    return;
-  }
-
-  if (command === "integrations" && !existsSync(CUED_SOCKET_PATH)) {
-    printJson(await handleLocalIntegrationCommand(subcommand, rest));
     return;
   }
 
@@ -354,18 +387,31 @@ async function main(): Promise<void> {
           throw new Error("Usage: cued cli install | status");
       }
     case "onboarding": {
-      const db = openCuedDatabase();
+      const refreshManaged = rest.includes("--refresh-managed");
+      const db =
+        subcommand === "snapshot" && !refreshManaged
+          ? openCuedDatabaseReadOnly()
+          : openCuedDatabase();
       try {
         switch (subcommand) {
           case "complete":
             db.markOnboardingCompleted(getCurrentAppVersion());
             printJson(db.getAppMetadata());
             return;
+          case "snapshot":
+            printJson(
+              await buildOnboardingSnapshot(db, {
+                refreshManagedIntegrations: refreshManaged,
+              }),
+            );
+            return;
           case "status":
             printJson(db.getAppMetadata());
             return;
           default:
-            throw new Error("Usage: cued onboarding complete | status");
+            throw new Error(
+              "Usage: cued onboarding complete | snapshot [--refresh-managed] | status",
+            );
         }
       } finally {
         db.close();
@@ -400,6 +446,9 @@ async function main(): Promise<void> {
             }
           }
           return;
+        case "status":
+          printJson(await buildPermissionStatus());
+          return;
         case "request": {
           const flags = rest.length > 0 ? rest : ["--all"];
           const scriptPath = resolvePermissionsScriptPath();
@@ -413,7 +462,7 @@ async function main(): Promise<void> {
         }
         default:
           throw new Error(
-            "Usage: cued permissions doctor | request [--all|--contacts|--messages|--full-disk-access|--accessibility]",
+            "Usage: cued permissions doctor | status | request [--all|--contacts|--messages|--full-disk-access]",
           );
       }
     case "status":
@@ -427,9 +476,17 @@ async function main(): Promise<void> {
         case "list":
         case "status":
           response = await sendDaemonRequest({ command: "integrations-list" });
+          if (isUnsupportedDaemonCommand(response)) {
+            printJson(await handleLocalIntegrationCommand(subcommand, rest));
+            return;
+          }
           break;
         case "refresh":
           response = await sendDaemonRequest({ command: "integrations-refresh" });
+          if (isUnsupportedDaemonCommand(response)) {
+            printJson(await handleLocalIntegrationCommand(subcommand, rest));
+            return;
+          }
           break;
         case "connect":
           if (!rest[0]) {
@@ -440,6 +497,10 @@ async function main(): Promise<void> {
             platform: rest[0],
             accountKey: rest[1],
           });
+          if (isUnsupportedDaemonCommand(response)) {
+            printJson(await handleLocalIntegrationCommand(subcommand, rest));
+            return;
+          }
           break;
         case "disconnect":
           if (!rest[0]) {
@@ -450,6 +511,24 @@ async function main(): Promise<void> {
             platform: rest[0],
             accountKey: rest[1],
           });
+          if (isUnsupportedDaemonCommand(response)) {
+            printJson(await handleLocalIntegrationCommand(subcommand, rest));
+            return;
+          }
+          break;
+        case "remove":
+          if (!rest[0]) {
+            throw new Error("Usage: cued integrations remove <platform> [account]");
+          }
+          response = await sendDaemonRequest({
+            command: "integrations-remove",
+            platform: rest[0],
+            accountKey: rest[1],
+          });
+          if (isUnsupportedDaemonCommand(response)) {
+            printJson(await handleLocalIntegrationCommand(subcommand, rest));
+            return;
+          }
           break;
         case "enable":
           if (!rest[0]) {
@@ -460,6 +539,10 @@ async function main(): Promise<void> {
             platform: rest[0],
             accountKey: rest[1],
           });
+          if (isUnsupportedDaemonCommand(response)) {
+            printJson(await handleLocalIntegrationCommand(subcommand, rest));
+            return;
+          }
           break;
         case "disable":
           if (!rest[0]) {
@@ -470,11 +553,13 @@ async function main(): Promise<void> {
             platform: rest[0],
             accountKey: rest[1],
           });
+          if (isUnsupportedDaemonCommand(response)) {
+            printJson(await handleLocalIntegrationCommand(subcommand, rest));
+            return;
+          }
           break;
         default:
-          throw new Error(
-            `Usage: cued integrations list | status | refresh | connect <platform> [account] | disconnect <platform> [account] | enable <platform> [account] | disable <platform> [account]\nRequestable platforms: ${listRequestableIntegrationPlatforms().join(", ")}`,
-          );
+          throw new Error(IntegrationAuthService.usageText());
       }
       break;
     case "sync":

@@ -43,7 +43,8 @@ export const MIGRATIONS: Array<{ id: string; sql: string }> = [
         run_type TEXT NOT NULL,
         status TEXT NOT NULL,
         trigger TEXT NOT NULL,
-        started_at INTEGER NOT NULL,
+        queued_at INTEGER NOT NULL,
+        started_at INTEGER,
         finished_at INTEGER,
         details_json TEXT
       );
@@ -1045,11 +1046,11 @@ export const MIGRATIONS: Array<{ id: string; sql: string }> = [
   {
     id: "0006_sync_run_indexes",
     sql: `
-      CREATE INDEX IF NOT EXISTS idx_sync_runs_status_type_started
-      ON sync_runs(status, run_type, started_at);
+      CREATE INDEX IF NOT EXISTS idx_sync_runs_status_type_queue
+      ON sync_runs(status, run_type, queued_at);
 
-      CREATE INDEX IF NOT EXISTS idx_sync_runs_platform_account_status_started
-      ON sync_runs(platform, account_key, status, started_at);
+      CREATE INDEX IF NOT EXISTS idx_sync_runs_platform_account_status_queue
+      ON sync_runs(platform, account_key, status, queued_at);
     `,
   },
   {
@@ -1120,6 +1121,102 @@ export const MIGRATIONS: Array<{ id: string; sql: string }> = [
       END,
       updated_at = strftime('%s','now') * 1000
       WHERE platform IN ('slack', 'linkedin', 'signal', 'whatsapp');
+    `,
+  },
+  {
+    id: "0011_sync_run_timing_v2",
+    sql: `
+      -- Foreign keys remain enforced here because migrations run inside a transaction.
+      -- This migration stays valid by copying sync_runs before sync_run_errors.
+      DROP INDEX IF EXISTS idx_sync_runs_status_type_started;
+      DROP INDEX IF EXISTS idx_sync_runs_platform_account_status_started;
+      DROP INDEX IF EXISTS idx_sync_runs_status_type_queue;
+      DROP INDEX IF EXISTS idx_sync_runs_platform_account_status_queue;
+
+      ALTER TABLE sync_runs RENAME TO sync_runs_legacy_timing;
+      ALTER TABLE sync_run_errors RENAME TO sync_run_errors_legacy_timing;
+
+      CREATE TABLE sync_runs (
+        id TEXT PRIMARY KEY,
+        platform TEXT,
+        account_key TEXT,
+        run_type TEXT NOT NULL,
+        status TEXT NOT NULL,
+        trigger TEXT NOT NULL,
+        queued_at INTEGER NOT NULL,
+        started_at INTEGER,
+        finished_at INTEGER,
+        details_json TEXT
+      );
+
+      CREATE TABLE sync_run_errors (
+        id TEXT PRIMARY KEY,
+        sync_run_id TEXT NOT NULL REFERENCES sync_runs(id) ON DELETE CASCADE,
+        platform TEXT,
+        account_key TEXT,
+        error_code TEXT,
+        error_message TEXT NOT NULL,
+        details_json TEXT,
+        created_at INTEGER NOT NULL
+      );
+
+      INSERT INTO sync_runs (
+        id,
+        platform,
+        account_key,
+        run_type,
+        status,
+        trigger,
+        queued_at,
+        started_at,
+        finished_at,
+        details_json
+      )
+      SELECT
+        id,
+        platform,
+        account_key,
+        run_type,
+        status,
+        trigger,
+        COALESCE(started_at, strftime('%s','now') * 1000),
+        CASE
+          WHEN status IN ('ingesting', 'projecting', 'completed', 'failed') THEN started_at
+          ELSE NULL
+        END,
+        finished_at,
+        details_json
+      FROM sync_runs_legacy_timing;
+
+      INSERT INTO sync_run_errors (
+        id,
+        sync_run_id,
+        platform,
+        account_key,
+        error_code,
+        error_message,
+        details_json,
+        created_at
+      )
+      SELECT
+        id,
+        sync_run_id,
+        platform,
+        account_key,
+        error_code,
+        error_message,
+        details_json,
+        created_at
+      FROM sync_run_errors_legacy_timing;
+
+      DROP TABLE sync_runs_legacy_timing;
+      DROP TABLE sync_run_errors_legacy_timing;
+
+      CREATE INDEX idx_sync_runs_status_type_queue
+      ON sync_runs(status, run_type, queued_at);
+
+      CREATE INDEX idx_sync_runs_platform_account_status_queue
+      ON sync_runs(platform, account_key, status, queued_at);
     `,
   },
 ];

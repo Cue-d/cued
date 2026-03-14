@@ -1,5 +1,6 @@
 import { execFileSync } from "node:child_process";
 import { existsSync } from "node:fs";
+import { dirname, join } from "node:path";
 import { DEFAULT_CHAT_DB_PATH, IMessageReader } from "../adapters/imessage/reader.js";
 import { listAdapterPlatforms } from "../adapters/registry.js";
 import type { CuedDatabase } from "../db/database.js";
@@ -31,6 +32,120 @@ export interface DoctorCheck {
 export interface DoctorRuntimeStatus {
   signalRealtimeSessions?: unknown;
   whatsappRealtimeSessions?: unknown;
+}
+
+export type PermissionStatusKey = "contacts" | "full_disk_access" | "messages_automation";
+export type PermissionStatusState = "granted" | "needs_action" | "unknown";
+
+export interface PermissionStatusSummary {
+  key: PermissionStatusKey;
+  status: PermissionStatusState;
+  summary: string;
+  requestFlags: string[];
+}
+
+export interface PermissionCheckSummaryInput {
+  contacts: DoctorCheck;
+  messagesAutomation: DoctorCheck;
+  messagesDatabase: DoctorCheck;
+  messagesNativeHelper: DoctorCheck;
+}
+
+export function summarizePermissionStatuses(
+  checks: PermissionCheckSummaryInput,
+): PermissionStatusSummary[] {
+  const fullDiskStatus: PermissionStatusState =
+    checks.messagesDatabase.status === "error" || checks.messagesNativeHelper.status === "error"
+      ? "needs_action"
+      : checks.messagesDatabase.status === "ok" &&
+          (checks.messagesNativeHelper.status === "ok" ||
+            checks.messagesNativeHelper.status === "unknown")
+        ? "granted"
+        : "unknown";
+
+  const fullDiskSummary =
+    checks.messagesDatabase.status === "error"
+      ? checks.messagesDatabase.summary
+      : checks.messagesNativeHelper.status === "error"
+        ? checks.messagesNativeHelper.summary
+        : checks.messagesDatabase.status === "ok"
+          ? "Full Disk Access is available for Messages data"
+          : "Full Disk Access has not been verified yet";
+
+  return [
+    {
+      key: "contacts",
+      status:
+        checks.contacts.status === "ok"
+          ? "granted"
+          : checks.contacts.status === "unknown"
+            ? "unknown"
+            : "needs_action",
+      summary: checks.contacts.summary,
+      requestFlags: ["--contacts"],
+    },
+    {
+      key: "full_disk_access",
+      status: fullDiskStatus,
+      summary: fullDiskSummary,
+      requestFlags: ["--full-disk-access"],
+    },
+    {
+      key: "messages_automation",
+      status:
+        checks.messagesAutomation.status === "ok"
+          ? "granted"
+          : checks.messagesAutomation.status === "unknown"
+            ? "unknown"
+            : "needs_action",
+      summary: checks.messagesAutomation.summary,
+      requestFlags: ["--messages"],
+    },
+  ];
+}
+
+export async function buildPermissionStatus(): Promise<{ permissions: PermissionStatusSummary[] }> {
+  const contacts =
+    process.platform === "darwin"
+      ? getContactsPermissionCheck()
+      : ({
+          name: "contacts_permission",
+          status: "unknown",
+          summary: "Contacts permission can only be checked on macOS",
+        } satisfies DoctorCheck);
+  const messagesDatabase =
+    process.platform === "darwin"
+      ? tryReadMessagesDatabase()
+      : ({
+          name: "messages_database",
+          status: "unknown",
+          summary: "Messages database access can only be checked on macOS",
+        } satisfies DoctorCheck);
+  const messagesNativeHelper =
+    process.platform === "darwin"
+      ? getMessagesNativeHelperCheck()
+      : ({
+          name: "messages_native_helper",
+          status: "unknown",
+          summary: "Native Messages access can only be checked on macOS",
+        } satisfies DoctorCheck);
+  const messagesAutomation =
+    process.platform === "darwin"
+      ? getMessagesAutomationCheck()
+      : ({
+          name: "messages_automation",
+          status: "unknown",
+          summary: "Messages automation can only be checked on macOS",
+        } satisfies DoctorCheck);
+
+  return {
+    permissions: summarizePermissionStatuses({
+      contacts,
+      messagesAutomation,
+      messagesDatabase,
+      messagesNativeHelper,
+    }),
+  };
 }
 
 function tryReadMessagesDatabase(): DoctorCheck {
@@ -210,12 +325,15 @@ function getSignalCliCheck(): DoctorCheck {
     return {
       name: "signal_cli",
       status: "warning",
-      summary: "signal-cli is not installed",
-      remediation: "Install signal-cli and rerun `cued integrations connect signal`.",
+      summary: "Bundled Signal helper is not available",
+      remediation:
+        "Rebuild or update Cued so the bundled Signal helper is present, then rerun `cued integrations connect signal`.",
     };
   }
 
   try {
+    const helperRoot = dirname(cliPath);
+    const javaHome = join(helperRoot, "jre", "Contents", "Home");
     const stdout = execFileSync(cliPath, ["--version"], {
       encoding: "utf8",
       stdio: ["ignore", "pipe", "pipe"],
@@ -226,26 +344,31 @@ function getSignalCliCheck(): DoctorCheck {
       name: "signal_cli",
       status: supported ? "ok" : "warning",
       summary: supported
-        ? `signal-cli ${version?.raw ?? "unknown"} detected`
-        : `signal-cli ${version?.raw ?? "unknown"} is below the supported version floor`,
+        ? `Bundled Signal helper ${version?.raw ?? "unknown"} detected`
+        : `Bundled Signal helper ${version?.raw ?? "unknown"} is below the supported version floor`,
       details: {
         cliPath,
+        helperRoot,
+        javaHome,
         version: version?.raw ?? null,
       },
       remediation: supported
         ? undefined
-        : "Upgrade signal-cli to a supported release and reconnect Signal.",
+        : "Update or rebuild Cued to refresh the bundled Signal helper, then reconnect Signal.",
     };
   } catch (error) {
     return {
       name: "signal_cli",
       status: "error",
-      summary: "signal-cli exists but could not be executed",
+      summary: "Bundled Signal helper exists but could not be executed",
       details: {
         cliPath,
+        helperRoot: dirname(cliPath),
+        javaHome: join(dirname(cliPath), "jre", "Contents", "Home"),
         error: error instanceof Error ? error.message : String(error),
       },
-      remediation: "Check that signal-cli is executable and that its Java runtime is installed.",
+      remediation:
+        "Rebuild or update Cued; the bundled Signal helper or runtime is missing required files.",
     };
   }
 }

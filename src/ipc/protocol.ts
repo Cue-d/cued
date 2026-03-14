@@ -6,6 +6,7 @@ export type DaemonRequest =
   | { id: string; command: "integrations-refresh" }
   | { id: string; command: "integrations-connect"; platform: string; accountKey?: string }
   | { id: string; command: "integrations-disconnect"; platform: string; accountKey?: string }
+  | { id: string; command: "integrations-remove"; platform: string; accountKey?: string }
   | { id: string; command: "integrations-enable"; platform: string; accountKey?: string }
   | { id: string; command: "integrations-disable"; platform: string; accountKey?: string }
   | {
@@ -19,6 +20,7 @@ export type DaemonRequest =
     }
   | { id: string; command: "sync-run"; source?: string }
   | { id: string; command: "sync-resume" }
+  | { id: string; command: "shutdown-for-update" }
   | { id: string; command: "rebuild" }
   | { id: string; command: "reset"; source: string }
   | {

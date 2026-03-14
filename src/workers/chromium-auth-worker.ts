@@ -113,7 +113,7 @@ function isLinkedInAuthPage(url: string): boolean {
 async function extractSlackAuth(
   context: BrowserContext,
   page: Page,
-  accountKey: string,
+  _accountKey: string,
 ): Promise<ExtractedAuth | null> {
   if (!isSlackWorkspaceUrl(page.url())) {
     return null;
@@ -157,7 +157,7 @@ async function extractSlackAuth(
   const userId = typeof team.user_id === "string" ? team.user_id : "";
   return {
     keychainService: "dev.cued.auth.slack",
-    keychainAccount: accountKey,
+    keychainAccount: teamId,
     secret: {
       token: team.token,
       cookie: dCookie.value,
@@ -309,7 +309,7 @@ async function run(): Promise<void> {
         const result: WorkerResult = {
           sessionId: args.sessionId,
           platform: args.platform,
-          accountKey: args.accountKey,
+          accountKey: extracted.keychainAccount,
           state: "authenticated",
           keychainService: extracted.keychainService,
           keychainAccount: extracted.keychainAccount,
