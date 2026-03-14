@@ -1484,6 +1484,9 @@ public func installerShouldAutoConfigurePrerequisites() -> Bool {
   if ProcessInfo.processInfo.environment["XCODE_RUNNING_FOR_PREVIEWS"] == "1" {
     return false
   }
+  if ProcessInfo.processInfo.environment["CUED_SKIP_AUTO_PREREQUISITES"] == "1" {
+    return false
+  }
   let bundlePath = Bundle.main.bundlePath.trimmingCharacters(in: .whitespacesAndNewlines)
   return bundlePath.hasSuffix(".app")
 }

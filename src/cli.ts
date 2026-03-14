@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 import { execFileSync } from "node:child_process";
-import { existsSync } from "node:fs";
+import { existsSync, realpathSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
@@ -75,9 +75,26 @@ export function resolvePermissionsScriptPath(): string {
 }
 
 function isInvokedDirectly(): boolean {
-  return (
-    process.argv[1] !== undefined && fileURLToPath(import.meta.url) === resolve(process.argv[1])
-  );
+  return isDirectInvocation();
+}
+
+export function normalizeInvocationPath(path: string): string {
+  try {
+    return existsSync(path) ? realpathSync(path) : resolve(path);
+  } catch {
+    return resolve(path);
+  }
+}
+
+export function isDirectInvocation(
+  moduleUrl = import.meta.url,
+  argvPath: string | undefined = process.argv[1],
+): boolean {
+  if (argvPath === undefined) {
+    return false;
+  }
+
+  return normalizeInvocationPath(fileURLToPath(moduleUrl)) === normalizeInvocationPath(argvPath);
 }
 
 function printHelp(): void {
