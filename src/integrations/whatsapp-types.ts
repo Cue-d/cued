@@ -41,6 +41,12 @@ export interface WhatsAppSnapshot {
   messages?: WhatsAppMessageSnapshot[];
 }
 
+export interface WhatsAppResyncPage extends WhatsAppSnapshot {
+  nextCursor?: string | null;
+  hasMore: boolean;
+  completedAt: number;
+}
+
 export type WhatsAppHelperEventName =
   | "connected"
   | "contact_upsert"
@@ -87,6 +93,9 @@ export type WhatsAppHelperCommand =
   | {
       id: number;
       command: "resync";
+      cursor?: string;
+      sinceMs?: number | null;
+      limit?: number;
     }
   | {
       id: number;

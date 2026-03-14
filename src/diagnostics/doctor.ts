@@ -16,6 +16,8 @@ import {
   inspectWhatsAppHelper,
   readWhatsAppHelperStatus,
 } from "../integrations/whatsapp-helper.js";
+import type { WhatsAppRealtimeStatus } from "../integrations/whatsapp-realtime.js";
+import { buildWhatsAppDiagnostics } from "../integrations/whatsapp-diagnostics.js";
 import { resolveMacOSNativeBinary } from "../workers/native-binary.js";
 
 export interface DoctorCheck {
@@ -351,6 +353,10 @@ export async function buildDoctorReport(
     recentRuns: db.listRecentRuns(),
     signalRealtimeSessions: runtime.signalRealtimeSessions ?? [],
     whatsappRealtimeSessions: runtime.whatsappRealtimeSessions ?? [],
+    whatsappDiagnostics: buildWhatsAppDiagnostics(
+      db,
+      (runtime.whatsappRealtimeSessions as WhatsAppRealtimeStatus[] | undefined) ?? [],
+    ),
     registeredAdapters: listAdapterPlatforms(),
     integrations: listIntegrationStates(db),
     checks,

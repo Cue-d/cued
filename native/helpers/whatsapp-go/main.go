@@ -12,6 +12,8 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"syscall"
@@ -19,9 +21,10 @@ import (
 
 	_ "modernc.org/sqlite"
 
-	waProto "go.mau.fi/whatsmeow/binary/proto"
 	"go.mau.fi/whatsmeow"
+	waProto "go.mau.fi/whatsmeow/binary/proto"
 	"go.mau.fi/whatsmeow/proto/waCompanionReg"
+	"go.mau.fi/whatsmeow/proto/waHistorySync"
 	"go.mau.fi/whatsmeow/proto/waWa6"
 	"go.mau.fi/whatsmeow/store"
 	"go.mau.fi/whatsmeow/store/sqlstore"
@@ -31,6 +34,8 @@ import (
 )
 
 const helperVersion = "0.1.0"
+const pairConnectGracePeriod = 20 * time.Second
+const defaultResyncLimit = 1000
 
 type helperMetadata struct {
 	AccountJID string `json:"accountJid,omitempty"`
@@ -97,26 +102,45 @@ type commandEnvelope struct {
 	Command string `json:"command"`
 	Target  string `json:"target,omitempty"`
 	Text    string `json:"text,omitempty"`
+	Cursor  string `json:"cursor,omitempty"`
+	SinceMS *int64 `json:"sinceMs,omitempty"`
+	Limit   int    `json:"limit,omitempty"`
 }
 
 type helperState struct {
 	storeDir     string
 	metadataPath string
-	snapshotPath string
 
 	mu       sync.Mutex
 	metadata helperMetadata
-	snapshot stateSnapshot
+	cache    *syncCache
+}
+
+type resyncPage struct {
+	Contacts    []contactSnapshot `json:"contacts,omitempty"`
+	Chats       []chatSnapshot    `json:"chats,omitempty"`
+	Messages    []messageSnapshot `json:"messages,omitempty"`
+	NextCursor  *string           `json:"nextCursor,omitempty"`
+	HasMore     bool              `json:"hasMore"`
+	CompletedAt int64             `json:"completedAt"`
+}
+
+type syncCache struct {
+	db *sql.DB
 }
 
 func newHelperState(storeDir string) (*helperState, error) {
 	if err := os.MkdirAll(storeDir, 0o700); err != nil {
 		return nil, err
 	}
+	cache, err := openSyncCache(storeDir)
+	if err != nil {
+		return nil, err
+	}
 	state := &helperState{
 		storeDir:     storeDir,
 		metadataPath: filepath.Join(storeDir, "metadata.json"),
-		snapshotPath: filepath.Join(storeDir, "snapshot.json"),
+		cache:        cache,
 	}
 	state.load()
 	return state, nil
@@ -126,7 +150,6 @@ func (s *helperState) load() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	readJSONFile(s.metadataPath, &s.metadata)
-	readJSONFile(s.snapshotPath, &s.snapshot)
 }
 
 func (s *helperState) setMetadata(metadata helperMetadata) {
@@ -143,85 +166,482 @@ func (s *helperState) getMetadata() helperMetadata {
 }
 
 func (s *helperState) setContact(contact contactSnapshot) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	replaced := false
-	for idx, existing := range s.snapshot.Contacts {
-		if normalizeJID(existing.JID) == normalizeJID(contact.JID) {
-			s.snapshot.Contacts[idx] = contact
-			replaced = true
-			break
-		}
-	}
-	if !replaced {
-		s.snapshot.Contacts = append(s.snapshot.Contacts, contact)
-	}
-	_ = writeJSONFileAtomic(s.snapshotPath, s.snapshot)
+	_ = s.cache.upsertContact(contact)
 }
 
 func (s *helperState) setChat(chat chatSnapshot) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	replaced := false
-	for idx, existing := range s.snapshot.Chats {
-		if normalizeJID(existing.JID) == normalizeJID(chat.JID) {
-			s.snapshot.Chats[idx] = chat
-			replaced = true
-			break
-		}
-	}
-	if !replaced {
-		s.snapshot.Chats = append(s.snapshot.Chats, chat)
-	}
-	_ = writeJSONFileAtomic(s.snapshotPath, s.snapshot)
+	_ = s.cache.upsertChat(chat)
 }
 
 func (s *helperState) setMessage(message messageSnapshot) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	replaced := false
-	for idx, existing := range s.snapshot.Messages {
-		if normalizeJID(existing.ChatJID) == normalizeJID(message.ChatJID) && existing.MessageID == message.MessageID {
-			s.snapshot.Messages[idx] = message
-			replaced = true
-			break
-		}
-	}
-	if !replaced {
-		s.snapshot.Messages = append(s.snapshot.Messages, message)
-	}
-	if len(s.snapshot.Messages) > 5000 {
-		s.snapshot.Messages = s.snapshot.Messages[len(s.snapshot.Messages)-5000:]
-	}
-	_ = writeJSONFileAtomic(s.snapshotPath, s.snapshot)
+	_ = s.cache.upsertMessage(message)
 }
 
 func (s *helperState) applyReceipt(receipt receiptSnapshot) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	for idx, message := range s.snapshot.Messages {
-		if normalizeJID(message.ChatJID) != normalizeJID(receipt.ChatJID) || message.MessageID != receipt.MessageID {
-			continue
-		}
-		if receipt.Status != nil {
-			message.Status = receipt.Status
-		}
-		if receipt.DeliveredAt != nil {
-			message.DeliveredAt = receipt.DeliveredAt
-		}
-		if receipt.ReadAt != nil {
-			message.ReadAt = receipt.ReadAt
-		}
-		s.snapshot.Messages[idx] = message
-		break
-	}
-	_ = writeJSONFileAtomic(s.snapshotPath, s.snapshot)
+	_ = s.cache.applyReceipt(receipt)
 }
 
 func (s *helperState) getSnapshot() stateSnapshot {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.snapshot
+	snapshot, err := s.cache.getSnapshot()
+	if err != nil {
+		return stateSnapshot{}
+	}
+	return snapshot
+}
+
+func (s *helperState) getResyncPage(sinceMS *int64, cursor string, limit int) (resyncPage, error) {
+	return s.cache.getResyncPage(sinceMS, cursor, limit)
+}
+
+func (s *helperState) applySnapshot(snapshot stateSnapshot) error {
+	return s.cache.applySnapshot(snapshot)
+}
+
+func (s *helperState) close() error {
+	if s.cache == nil {
+		return nil
+	}
+	return s.cache.close()
+}
+
+func openSyncCache(storeDir string) (*syncCache, error) {
+	dbPath := filepath.Join(storeDir, "history.db")
+	db, err := sql.Open("sqlite", fmt.Sprintf("file:%s", dbPath))
+	if err != nil {
+		return nil, err
+	}
+	schema := []string{
+		`CREATE TABLE IF NOT EXISTS contacts (
+			jid TEXT PRIMARY KEY,
+			phone TEXT,
+			name TEXT,
+			push_name TEXT,
+			updated_at INTEGER NOT NULL
+		)`,
+		`CREATE TABLE IF NOT EXISTS chats (
+			jid TEXT PRIMARY KEY,
+			name TEXT,
+			is_group INTEGER NOT NULL,
+			participants_json TEXT,
+			updated_at INTEGER NOT NULL
+		)`,
+		`CREATE TABLE IF NOT EXISTS messages (
+			chat_jid TEXT NOT NULL,
+			message_id TEXT NOT NULL,
+			sender_jid TEXT,
+			participant_jid TEXT,
+			from_me INTEGER NOT NULL,
+			timestamp INTEGER NOT NULL,
+			text TEXT NOT NULL,
+			push_name TEXT,
+			status TEXT,
+			delivered_at INTEGER,
+			read_at INTEGER,
+			updated_at INTEGER NOT NULL,
+			PRIMARY KEY (chat_jid, message_id)
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_messages_timestamp
+			ON messages(timestamp, chat_jid, message_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_messages_updated_at
+			ON messages(updated_at, timestamp, chat_jid, message_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_contacts_updated_at
+			ON contacts(updated_at, jid)`,
+		`CREATE INDEX IF NOT EXISTS idx_chats_updated_at
+			ON chats(updated_at, jid)`,
+	}
+	for _, statement := range schema {
+		if _, err := db.Exec(statement); err != nil {
+			_ = db.Close()
+			return nil, err
+		}
+	}
+	return &syncCache{db: db}, nil
+}
+
+func (c *syncCache) close() error {
+	if c == nil || c.db == nil {
+		return nil
+	}
+	return c.db.Close()
+}
+
+func (c *syncCache) applySnapshot(snapshot stateSnapshot) error {
+	tx, err := c.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	for _, contact := range snapshot.Contacts {
+		if err := upsertContactTx(tx, contact, nowMillis()); err != nil {
+			return err
+		}
+	}
+	for _, chat := range snapshot.Chats {
+		if err := upsertChatTx(tx, chat, nowMillis()); err != nil {
+			return err
+		}
+	}
+	for _, message := range snapshot.Messages {
+		if err := upsertMessageTx(tx, message, nowMillis()); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
+}
+
+func (c *syncCache) upsertContact(contact contactSnapshot) error {
+	tx, err := c.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if err := upsertContactTx(tx, contact, nowMillis()); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+func (c *syncCache) upsertChat(chat chatSnapshot) error {
+	tx, err := c.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if err := upsertChatTx(tx, chat, nowMillis()); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+func (c *syncCache) upsertMessage(message messageSnapshot) error {
+	tx, err := c.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if err := upsertMessageTx(tx, message, nowMillis()); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+func (c *syncCache) applyReceipt(receipt receiptSnapshot) error {
+	_, err := c.db.Exec(
+		`UPDATE messages
+		 SET status = COALESCE(?, status),
+		     delivered_at = COALESCE(?, delivered_at),
+		     read_at = COALESCE(?, read_at),
+		     updated_at = ?
+		 WHERE chat_jid = ? AND message_id = ?`,
+		nullableString(receipt.Status),
+		nullableInt64(receipt.DeliveredAt),
+		nullableInt64(receipt.ReadAt),
+		nowMillis(),
+		normalizeJID(receipt.ChatJID),
+		receipt.MessageID,
+	)
+	return err
+}
+
+func (c *syncCache) getSnapshot() (stateSnapshot, error) {
+	contacts, err := c.queryContacts(nil)
+	if err != nil {
+		return stateSnapshot{}, err
+	}
+	chats, err := c.queryChats(nil)
+	if err != nil {
+		return stateSnapshot{}, err
+	}
+	messages, _, _, err := c.queryMessages(nil, 0, -1)
+	if err != nil {
+		return stateSnapshot{}, err
+	}
+	return stateSnapshot{
+		Contacts: contacts,
+		Chats:    chats,
+		Messages: messages,
+	}, nil
+}
+
+func (c *syncCache) getResyncPage(sinceMS *int64, cursor string, limit int) (resyncPage, error) {
+	offset, err := parseResyncCursor(cursor)
+	if err != nil {
+		return resyncPage{}, err
+	}
+	if limit <= 0 {
+		limit = defaultResyncLimit
+	}
+
+	page := resyncPage{
+		HasMore:     false,
+		CompletedAt: nowMillis(),
+	}
+	if offset == 0 {
+		page.Contacts, err = c.queryContacts(sinceMS)
+		if err != nil {
+			return resyncPage{}, err
+		}
+		page.Chats, err = c.queryChats(sinceMS)
+		if err != nil {
+			return resyncPage{}, err
+		}
+	}
+
+	messages, total, returned, err := c.queryMessages(sinceMS, offset, limit)
+	if err != nil {
+		return resyncPage{}, err
+	}
+	page.Messages = messages
+	if offset+returned < total {
+		nextCursor := strconv.Itoa(offset + returned)
+		page.NextCursor = &nextCursor
+		page.HasMore = true
+	}
+	return page, nil
+}
+
+func (c *syncCache) queryContacts(sinceMS *int64) ([]contactSnapshot, error) {
+	query := `SELECT jid, phone, name, push_name FROM contacts`
+	args := []any{}
+	if sinceMS != nil {
+		query += ` WHERE updated_at > ?`
+		args = append(args, *sinceMS)
+	}
+	query += ` ORDER BY jid`
+	rows, err := c.db.Query(query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var contacts []contactSnapshot
+	for rows.Next() {
+		var jid string
+		var phone, name, pushName sql.NullString
+		if err := rows.Scan(&jid, &phone, &name, &pushName); err != nil {
+			return nil, err
+		}
+		contact := contactSnapshot{JID: jid}
+		if phone.Valid {
+			contact.Phone = stringPtr(phone.String)
+		}
+		if name.Valid {
+			contact.Name = stringPtr(name.String)
+		}
+		if pushName.Valid {
+			contact.PushName = stringPtr(pushName.String)
+		}
+		contacts = append(contacts, contact)
+	}
+	return contacts, rows.Err()
+}
+
+func (c *syncCache) queryChats(sinceMS *int64) ([]chatSnapshot, error) {
+	query := `SELECT jid, name, is_group, participants_json FROM chats`
+	args := []any{}
+	if sinceMS != nil {
+		query += ` WHERE updated_at > ?`
+		args = append(args, *sinceMS)
+	}
+	query += ` ORDER BY jid`
+	rows, err := c.db.Query(query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var chats []chatSnapshot
+	for rows.Next() {
+		var jid string
+		var name, participantsJSON sql.NullString
+		var isGroup int64
+		if err := rows.Scan(&jid, &name, &isGroup, &participantsJSON); err != nil {
+			return nil, err
+		}
+		chat := chatSnapshot{
+			JID:     jid,
+			IsGroup: isGroup == 1,
+		}
+		if name.Valid {
+			chat.Name = stringPtr(name.String)
+		}
+		if participantsJSON.Valid && participantsJSON.String != "" {
+			_ = json.Unmarshal([]byte(participantsJSON.String), &chat.Participants)
+		}
+		chats = append(chats, chat)
+	}
+	return chats, rows.Err()
+}
+
+func (c *syncCache) queryMessages(
+	sinceMS *int64,
+	offset int,
+	limit int,
+) ([]messageSnapshot, int, int, error) {
+	countQuery := `SELECT COUNT(*) FROM messages`
+	selectQuery := `SELECT chat_jid, message_id, sender_jid, participant_jid, from_me, timestamp, text, push_name, status, delivered_at, read_at FROM messages`
+	args := []any{}
+	if sinceMS != nil {
+		countQuery += ` WHERE updated_at > ?`
+		selectQuery += ` WHERE updated_at > ?`
+		args = append(args, *sinceMS)
+	}
+	var total int
+	if err := c.db.QueryRow(countQuery, args...).Scan(&total); err != nil {
+		return nil, 0, 0, err
+	}
+	if limit < 0 {
+		limit = total
+		offset = 0
+	}
+	selectQuery += ` ORDER BY timestamp, chat_jid, message_id LIMIT ? OFFSET ?`
+	selectArgs := append(append([]any{}, args...), limit, offset)
+	rows, err := c.db.Query(selectQuery, selectArgs...)
+	if err != nil {
+		return nil, 0, 0, err
+	}
+	defer rows.Close()
+
+	var messages []messageSnapshot
+	for rows.Next() {
+		var chatJID string
+		var messageID string
+		var senderJID, participantJID, pushName, status sql.NullString
+		var fromMe int64
+		var timestamp int64
+		var text string
+		var deliveredAt, readAt sql.NullInt64
+		if err := rows.Scan(
+			&chatJID,
+			&messageID,
+			&senderJID,
+			&participantJID,
+			&fromMe,
+			&timestamp,
+			&text,
+			&pushName,
+			&status,
+			&deliveredAt,
+			&readAt,
+		); err != nil {
+			return nil, 0, 0, err
+		}
+		message := messageSnapshot{
+			MessageID: messageID,
+			ChatJID:   chatJID,
+			FromMe:    fromMe == 1,
+			Timestamp: timestamp,
+			Text:      text,
+		}
+		if senderJID.Valid {
+			message.SenderJID = stringPtr(senderJID.String)
+		}
+		if participantJID.Valid {
+			message.ParticipantJID = stringPtr(participantJID.String)
+		}
+		if pushName.Valid {
+			message.PushName = stringPtr(pushName.String)
+		}
+		if status.Valid {
+			message.Status = stringPtr(status.String)
+		}
+		if deliveredAt.Valid {
+			message.DeliveredAt = int64Ptr(deliveredAt.Int64)
+		}
+		if readAt.Valid {
+			message.ReadAt = int64Ptr(readAt.Int64)
+		}
+		messages = append(messages, message)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, 0, 0, err
+	}
+	return messages, total, len(messages), nil
+}
+
+func upsertContactTx(tx *sql.Tx, contact contactSnapshot, updatedAt int64) error {
+	_, err := tx.Exec(
+		`INSERT INTO contacts (jid, phone, name, push_name, updated_at)
+		 VALUES (?, ?, ?, ?, ?)
+		 ON CONFLICT(jid) DO UPDATE SET
+		   phone = excluded.phone,
+		   name = excluded.name,
+		   push_name = excluded.push_name,
+		   updated_at = excluded.updated_at`,
+		normalizeJID(contact.JID),
+		nullableString(contact.Phone),
+		nullableString(contact.Name),
+		nullableString(contact.PushName),
+		updatedAt,
+	)
+	return err
+}
+
+func upsertChatTx(tx *sql.Tx, chat chatSnapshot, updatedAt int64) error {
+	participantsJSON, err := json.Marshal(chat.Participants)
+	if err != nil {
+		return err
+	}
+	_, err = tx.Exec(
+		`INSERT INTO chats (jid, name, is_group, participants_json, updated_at)
+		 VALUES (?, ?, ?, ?, ?)
+		 ON CONFLICT(jid) DO UPDATE SET
+		   name = excluded.name,
+		   is_group = excluded.is_group,
+		   participants_json = excluded.participants_json,
+		   updated_at = excluded.updated_at`,
+		normalizeJID(chat.JID),
+		nullableString(chat.Name),
+		boolToInt(chat.IsGroup),
+		string(participantsJSON),
+		updatedAt,
+	)
+	return err
+}
+
+func upsertMessageTx(tx *sql.Tx, message messageSnapshot, updatedAt int64) error {
+	_, err := tx.Exec(
+		`INSERT INTO messages (
+		   chat_jid, message_id, sender_jid, participant_jid, from_me, timestamp, text, push_name,
+		   status, delivered_at, read_at, updated_at
+		 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		 ON CONFLICT(chat_jid, message_id) DO UPDATE SET
+		   sender_jid = excluded.sender_jid,
+		   participant_jid = excluded.participant_jid,
+		   from_me = excluded.from_me,
+		   timestamp = excluded.timestamp,
+		   text = excluded.text,
+		   push_name = excluded.push_name,
+		   status = excluded.status,
+		   delivered_at = COALESCE(excluded.delivered_at, messages.delivered_at),
+		   read_at = COALESCE(excluded.read_at, messages.read_at),
+		   updated_at = excluded.updated_at`,
+		normalizeJID(message.ChatJID),
+		message.MessageID,
+		nullableString(message.SenderJID),
+		nullableString(message.ParticipantJID),
+		boolToInt(message.FromMe),
+		message.Timestamp,
+		message.Text,
+		nullableString(message.PushName),
+		nullableString(message.Status),
+		nullableInt64(message.DeliveredAt),
+		nullableInt64(message.ReadAt),
+		updatedAt,
+	)
+	return err
+}
+
+func parseResyncCursor(cursor string) (int, error) {
+	trimmed := strings.TrimSpace(cursor)
+	if trimmed == "" {
+		return 0, nil
+	}
+	offset, err := strconv.Atoi(trimmed)
+	if err != nil || offset < 0 {
+		return 0, fmt.Errorf("invalid resync cursor: %q", cursor)
+	}
+	return offset, nil
 }
 
 type helperRuntime struct {
@@ -331,6 +751,7 @@ func runStatus(args []string) error {
 	if err != nil {
 		return err
 	}
+	defer state.close()
 
 	deviceStore, _, err := openStore(*storeDir)
 	if err != nil {
@@ -410,29 +831,7 @@ func runPair(args []string) error {
 		if err := client.Connect(); err != nil {
 			return err
 		}
-		for {
-			select {
-			case <-ctx.Done():
-				return ctx.Err()
-			case evt, ok := <-qrChan:
-				if !ok {
-					return nil
-				}
-				switch evt.Event {
-				case "code":
-					runtime.emitEvent("qr", map[string]string{
-						"code": evt.Code,
-					})
-				case "error":
-					return fmt.Errorf("qr pairing error: %v", evt.Error)
-				case "timeout":
-					return errors.New("pairing timed out")
-				case "success":
-				}
-			case <-done:
-				return nil
-			}
-		}
+		return waitForPairingCompletion(ctx, qrChan, done, runtime)
 	}
 
 	if err := client.Connect(); err != nil {
@@ -444,6 +843,56 @@ func runPair(args []string) error {
 		return ctx.Err()
 	case <-done:
 		return nil
+	}
+}
+
+func waitForPairingCompletion(
+	ctx context.Context,
+	qrChan <-chan whatsmeow.QRChannelItem,
+	done <-chan struct{},
+	runtime *helperRuntime,
+) error {
+	pairingSucceeded := false
+	for {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case evt, ok := <-qrChan:
+			if !ok {
+				if pairingSucceeded {
+					return waitForConnectedAfterPair(ctx, done)
+				}
+				return errors.New("QR channel closed before pairing completed")
+			}
+			switch evt.Event {
+			case "code":
+				runtime.emitEvent("qr", map[string]string{
+					"code": evt.Code,
+				})
+			case "error":
+				return fmt.Errorf("qr pairing error: %v", evt.Error)
+			case "timeout":
+				return errors.New("pairing timed out")
+			case "success":
+				pairingSucceeded = true
+				return waitForConnectedAfterPair(ctx, done)
+			default:
+				return fmt.Errorf("qr pairing ended with event %q", evt.Event)
+			}
+		case <-done:
+			return nil
+		}
+	}
+}
+
+func waitForConnectedAfterPair(ctx context.Context, done <-chan struct{}) error {
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-done:
+		return nil
+	case <-time.After(pairConnectGracePeriod):
+		return errors.New("pairing succeeded but WhatsApp never established a connected session")
 	}
 }
 
@@ -515,7 +964,8 @@ func (r *helperRuntime) readCommands(ctx context.Context, errs chan<- error) {
 				"helperVersion": helperVersion,
 			}, nil)
 		case "resync":
-			r.writeResponse(command.ID, true, r.state.getSnapshot(), nil)
+			page, err := r.state.getResyncPage(command.SinceMS, command.Cursor, command.Limit)
+			r.writeResponse(command.ID, err == nil, page, err)
 		case "sendText":
 			result, err := r.sendText(ctx, command.Target, command.Text)
 			r.writeResponse(command.ID, err == nil, result, err)
@@ -635,7 +1085,13 @@ func (r *helperRuntime) handleReceiptEvent(event *events.Receipt) {
 }
 
 func (r *helperRuntime) handleHistorySyncEvent(event *events.HistorySync) {
-	snapshot := r.state.getSnapshot()
+	snapshot := historySyncBatchFromEvent(r.client, event)
+	if err := r.state.applySnapshot(snapshot); err != nil {
+		r.emitEvent("error", map[string]string{
+			"message": fmt.Sprintf("failed to persist history sync: %v", err),
+		})
+		return
+	}
 	completedAt := time.Now().UnixMilli()
 	r.emitEvent("history_sync", map[string]interface{}{
 		"contacts":    snapshot.Contacts,
@@ -643,6 +1099,100 @@ func (r *helperRuntime) handleHistorySyncEvent(event *events.HistorySync) {
 		"messages":    snapshot.Messages,
 		"completedAt": completedAt,
 	})
+}
+
+func historySyncBatchFromEvent(client *whatsmeow.Client, event *events.HistorySync) stateSnapshot {
+	if event == nil || event.Data == nil {
+		return stateSnapshot{}
+	}
+
+	contactsByJID := make(map[string]contactSnapshot)
+	chatsByJID := make(map[string]chatSnapshot)
+	messagesByKey := make(map[string]messageSnapshot)
+
+	for _, pushname := range event.Data.GetPushnames() {
+		contact := contactSnapshot{
+			JID:      normalizeJID(pushname.GetID()),
+			Phone:    phoneFromJID(pushname.GetID()),
+			PushName: emptyToNil(pushname.GetPushname()),
+		}
+		mergeContactSnapshot(contactsByJID, contact)
+	}
+
+	for _, conversation := range event.Data.GetConversations() {
+		chat := chatFromHistoryConversation(conversation)
+		if chat.JID != "" {
+			mergeChatSnapshot(chatsByJID, chat)
+		}
+
+		if !chat.IsGroup && chat.JID != "" {
+			mergeContactSnapshot(contactsByJID, contactSnapshot{
+				JID:   chat.JID,
+				Phone: phoneFromJID(chat.JID),
+				Name:  chat.Name,
+			})
+		}
+
+		for _, participant := range conversation.GetParticipant() {
+			jid := normalizeJID(participant.GetUserJID())
+			if jid == "" {
+				continue
+			}
+			mergeContactSnapshot(contactsByJID, contactSnapshot{
+				JID:   jid,
+				Phone: phoneFromJID(jid),
+			})
+		}
+
+		chatJID, err := types.ParseJID(conversation.GetID())
+		if err != nil {
+			continue
+		}
+		for _, historyMsg := range conversation.GetMessages() {
+			snapshot, ok := historyMessageSnapshot(client, chatJID, historyMsg)
+			if !ok {
+				continue
+			}
+			messagesByKey[snapshot.ChatJID+"::"+snapshot.MessageID] = snapshot
+			mergeContactSnapshot(contactsByJID, contactFromMessage(snapshot))
+			mergeChatSnapshot(chatsByJID, chatFromMessage(snapshot))
+		}
+	}
+
+	contacts := make([]contactSnapshot, 0, len(contactsByJID))
+	for _, contact := range contactsByJID {
+		contacts = append(contacts, contact)
+	}
+	chats := make([]chatSnapshot, 0, len(chatsByJID))
+	for _, chat := range chatsByJID {
+		chats = append(chats, chat)
+	}
+	messages := make([]messageSnapshot, 0, len(messagesByKey))
+	for _, message := range messagesByKey {
+		messages = append(messages, message)
+	}
+
+	sort.Slice(contacts, func(i, j int) bool {
+		return contacts[i].JID < contacts[j].JID
+	})
+	sort.Slice(chats, func(i, j int) bool {
+		return chats[i].JID < chats[j].JID
+	})
+	sort.Slice(messages, func(i, j int) bool {
+		if messages[i].Timestamp != messages[j].Timestamp {
+			return messages[i].Timestamp < messages[j].Timestamp
+		}
+		if messages[i].ChatJID != messages[j].ChatJID {
+			return messages[i].ChatJID < messages[j].ChatJID
+		}
+		return messages[i].MessageID < messages[j].MessageID
+	})
+
+	return stateSnapshot{
+		Contacts: contacts,
+		Chats:    chats,
+		Messages: messages,
+	}
 }
 
 func messageFromEvent(event *events.Message) messageSnapshot {
@@ -735,6 +1285,147 @@ func extractText(message *waProto.Message) string {
 	return ""
 }
 
+func historyMessageSnapshot(
+	client *whatsmeow.Client,
+	chatJID types.JID,
+	historyMsg *waHistorySync.HistorySyncMsg,
+) (messageSnapshot, bool) {
+	if historyMsg == nil || historyMsg.GetMessage() == nil {
+		return messageSnapshot{}, false
+	}
+	if client != nil {
+		event, err := client.ParseWebMessage(chatJID, historyMsg.GetMessage())
+		if err == nil {
+			return messageFromEvent(event), true
+		}
+	}
+
+	webMsg := historyMsg.GetMessage()
+	normalizedChatJID := normalizeJID(chatJID.String())
+	fromMe := webMsg.GetKey().GetFromMe()
+	sender := normalizeJID(webMsg.GetParticipant())
+	if sender == "" {
+		sender = normalizeJID(webMsg.GetKey().GetParticipant())
+	}
+	if sender == "" {
+		sender = normalizedChatJID
+	}
+
+	var participantJID *string
+	if strings.HasSuffix(normalizedChatJID, "@g.us") && sender != "" {
+		participantJID = stringPtr(sender)
+	}
+	status := "delivered"
+	if fromMe {
+		status = "sent"
+	}
+
+	return messageSnapshot{
+		MessageID:      webMsg.GetKey().GetID(),
+		ChatJID:        normalizedChatJID,
+		SenderJID:      stringPtr(sender),
+		ParticipantJID: participantJID,
+		FromMe:         fromMe,
+		Timestamp:      int64(webMsg.GetMessageTimestamp()) * 1000,
+		Text:           extractText(webMsg.GetMessage()),
+		PushName:       emptyToNil(webMsg.GetPushName()),
+		Status:         stringPtr(status),
+	}, true
+}
+
+func chatFromHistoryConversation(conversation *waHistorySync.Conversation) chatSnapshot {
+	if conversation == nil {
+		return chatSnapshot{}
+	}
+	participants := make([]string, 0, len(conversation.GetParticipant()))
+	seen := make(map[string]struct{})
+	for _, participant := range conversation.GetParticipant() {
+		jid := normalizeJID(participant.GetUserJID())
+		if jid == "" {
+			continue
+		}
+		if _, ok := seen[jid]; ok {
+			continue
+		}
+		seen[jid] = struct{}{}
+		participants = append(participants, jid)
+	}
+
+	name := firstNonEmpty(
+		conversation.GetName(),
+		conversation.GetDisplayName(),
+		conversation.GetUsername(),
+	)
+
+	return chatSnapshot{
+		JID:          normalizeJID(conversation.GetID()),
+		Name:         emptyToNil(name),
+		IsGroup:      strings.HasSuffix(normalizeJID(conversation.GetID()), "@g.us"),
+		Participants: participants,
+	}
+}
+
+func mergeContactSnapshot(target map[string]contactSnapshot, contact contactSnapshot) {
+	contact.JID = normalizeJID(contact.JID)
+	if contact.JID == "" {
+		return
+	}
+	current, ok := target[contact.JID]
+	if !ok {
+		target[contact.JID] = contact
+		return
+	}
+	if current.Phone == nil {
+		current.Phone = contact.Phone
+	}
+	if current.Name == nil {
+		current.Name = contact.Name
+	}
+	if current.PushName == nil {
+		current.PushName = contact.PushName
+	}
+	target[contact.JID] = current
+}
+
+func mergeChatSnapshot(target map[string]chatSnapshot, chat chatSnapshot) {
+	chat.JID = normalizeJID(chat.JID)
+	if chat.JID == "" {
+		return
+	}
+	current, ok := target[chat.JID]
+	if !ok {
+		chat.Participants = uniqueStrings(chat.Participants)
+		target[chat.JID] = chat
+		return
+	}
+	if current.Name == nil {
+		current.Name = chat.Name
+	}
+	current.IsGroup = current.IsGroup || chat.IsGroup
+	current.Participants = uniqueStrings(append(current.Participants, chat.Participants...))
+	target[chat.JID] = current
+}
+
+func uniqueStrings(values []string) []string {
+	if len(values) == 0 {
+		return nil
+	}
+	seen := make(map[string]struct{}, len(values))
+	result := make([]string, 0, len(values))
+	for _, value := range values {
+		normalized := normalizeJID(value)
+		if normalized == "" {
+			continue
+		}
+		if _, ok := seen[normalized]; ok {
+			continue
+		}
+		seen[normalized] = struct{}{}
+		result = append(result, normalized)
+	}
+	return result
+}
+
 func initClient(storeDir string) (*helperState, *whatsmeow.Client, func(), error) {
 	state, err := newHelperState(storeDir)
 	if err != nil {
@@ -746,6 +1437,7 @@ func initClient(storeDir string) (*helperState, *whatsmeow.Client, func(), error
 	}
 	client := whatsmeow.NewClient(deviceStore, nil)
 	cleanup := func() {
+		_ = state.close()
 		if container != nil {
 			_ = container.Close()
 		}
@@ -825,6 +1517,31 @@ func normalizeJID(value string) string {
 	return strings.ToLower(strings.TrimSpace(value))
 }
 
+func nowMillis() int64 {
+	return time.Now().UnixMilli()
+}
+
+func nullableString(value *string) interface{} {
+	if value == nil || strings.TrimSpace(*value) == "" {
+		return nil
+	}
+	return *value
+}
+
+func nullableInt64(value *int64) interface{} {
+	if value == nil {
+		return nil
+	}
+	return *value
+}
+
+func boolToInt(value bool) int {
+	if value {
+		return 1
+	}
+	return 0
+}
+
 func phoneFromJID(value string) *string {
 	normalized := normalizeJID(value)
 	parts := strings.Split(normalized, "@")
@@ -852,6 +1569,11 @@ func stringPtr(value string) *string {
 	if strings.TrimSpace(value) == "" {
 		return nil
 	}
+	copy := value
+	return &copy
+}
+
+func int64Ptr(value int64) *int64 {
 	copy := value
 	return &copy
 }
