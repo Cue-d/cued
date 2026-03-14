@@ -343,7 +343,8 @@ async function buildSignalManagedState(
   return {
     platform: "signal",
     accountKey,
-    displayName: "Signal",
+    displayName:
+      firstNonEmptyDisplayName(linkedAccount, existing?.display_name, "Signal") ?? "Signal",
     authState,
     enabled: existing ? existing.enabled === 1 : true,
     connectionKind: "local-cli",
@@ -409,7 +410,9 @@ async function buildWhatsAppManagedState(
   return {
     platform: "whatsapp",
     accountKey,
-    displayName: "WhatsApp",
+    displayName:
+      firstNonEmptyDisplayName(pushName, accountJid, existing?.display_name, "WhatsApp") ??
+      "WhatsApp",
     authState,
     enabled: existing ? existing.enabled === 1 : true,
     connectionKind: "qr-link",
@@ -1117,10 +1120,29 @@ function resolveCompletedDisplayName(
   currentDisplayName: string | null,
   resultSummary?: Record<string, unknown> | null,
 ): string | null {
-  if (typeof resultSummary?.teamName === "string" && resultSummary.teamName.trim().length > 0) {
-    return resultSummary.teamName.trim();
+  return (
+    firstNonEmptyDisplayName(
+      typeof resultSummary?.teamName === "string" ? resultSummary.teamName : null,
+      typeof resultSummary?.pushName === "string" ? resultSummary.pushName : null,
+      typeof resultSummary?.linkedAccount === "string" ? resultSummary.linkedAccount : null,
+      typeof resultSummary?.accountJid === "string" ? resultSummary.accountJid : null,
+      typeof resultSummary?.profileName === "string" ? resultSummary.profileName : null,
+      typeof resultSummary?.displayName === "string" ? resultSummary.displayName : null,
+    ) ?? currentDisplayName
+  );
+}
+
+function firstNonEmptyDisplayName(...values: Array<string | null | undefined>): string | null {
+  for (const value of values) {
+    if (typeof value !== "string") {
+      continue;
+    }
+    const trimmed = value.trim();
+    if (trimmed.length > 0) {
+      return trimmed;
+    }
   }
-  return currentDisplayName;
+  return null;
 }
 
 function resolveCompletedMetadata(
