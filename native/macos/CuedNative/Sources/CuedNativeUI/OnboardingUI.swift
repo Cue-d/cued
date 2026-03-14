@@ -910,6 +910,12 @@ public struct CuedOnboardingView: View {
     for configuration: InstallerPlatformConfiguration,
     integration: InstallerIntegrationStatus
   ) -> (label: String, handler: () -> Void)? {
+    guard configuration.accounts.contains(where: {
+      $0.platform == integration.platform && $0.accountKey == integration.accountKey
+    }) else {
+      return nil
+    }
+
     guard configuration.isRequestable,
           integration.authState != "requested",
           integration.authState != "in_progress" else {
