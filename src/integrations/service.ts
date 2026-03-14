@@ -4,6 +4,7 @@ import { dirname, join } from "node:path";
 import { DEFAULT_CHAT_DB_PATH, IMessageReader } from "../adapters/imessage/reader.js";
 import { listAdapterPlatforms } from "../adapters/registry.js";
 import { CUED_BROWSER_DIR } from "../config.js";
+import { safeParseJsonRecord, safeParseJsonStringArray } from "../db/codecs.js";
 import type { AuthSessionRow, CuedDatabase, IntegrationStateRow } from "../db/database.js";
 import {
   type PlatformCapabilitySummary,
@@ -175,9 +176,7 @@ export function listRequestableIntegrationPlatforms(): Platform[] {
 function deriveRuntimeKind(
   row: Pick<IntegrationStateRow, "metadata_json" | "launch_strategy">,
 ): IntegrationRuntimeKind {
-  const metadata = row.metadata_json
-    ? (JSON.parse(row.metadata_json) as Record<string, unknown>)
-    : {};
+  const metadata = safeParseJsonRecord(row.metadata_json, "integration_states.metadata_json") ?? {};
   const fromMetadata = parseIntegrationRuntimeKind(
     typeof metadata.runtimeKind === "string" ? metadata.runtimeKind : null,
     "native",
@@ -475,9 +474,7 @@ function normalizePersistedRequestableIntegrationRow(row: IntegrationStateRow): 
   }
 
   const supportedByDaemon = new Set<string>(listAdapterPlatforms()).has(row.platform);
-  const metadata = row.metadata_json
-    ? (JSON.parse(row.metadata_json) as Record<string, unknown>)
-    : null;
+  const metadata = safeParseJsonRecord(row.metadata_json, "integration_states.metadata_json");
   return {
     syncCapable: row.auth_state === "authenticated" && supportedByDaemon,
     metadata: {
@@ -497,9 +494,10 @@ function refreshPersistedRequestableIntegrationStates(db: CuedDatabase): number 
     }
 
     const nextSyncCapable = normalized.syncCapable ? 1 : 0;
-    const currentMetadata = row.metadata_json
-      ? (JSON.parse(row.metadata_json) as Record<string, unknown>)
-      : null;
+    const currentMetadata = safeParseJsonRecord(
+      row.metadata_json,
+      "integration_states.metadata_json",
+    );
     const currentSupportedByDaemon = currentMetadata?.supportedByDaemon;
     if (
       row.sync_capable === nextSyncCapable &&
@@ -519,9 +517,10 @@ function refreshPersistedRequestableIntegrationStates(db: CuedDatabase): number 
       launchStrategy: row.launch_strategy,
       launchTarget: row.launch_target,
       importedFrom: row.imported_from,
-      artifactPaths: row.artifact_paths_json
-        ? (JSON.parse(row.artifact_paths_json) as string[])
-        : [],
+      artifactPaths: safeParseJsonStringArray(
+        row.artifact_paths_json,
+        "integration_states.artifact_paths_json",
+      ),
       metadata: normalized.metadata,
     });
     refreshed += 1;
@@ -574,9 +573,10 @@ export function summarizeAuthSessions(rows: AuthSessionRow[]): AuthSessionSummar
     finishedAt: row.finished_at,
     keychainService: row.keychain_service,
     keychainAccount: row.keychain_account,
-    resultSummary: row.result_summary_json
-      ? (JSON.parse(row.result_summary_json) as Record<string, unknown>)
-      : null,
+    resultSummary: safeParseJsonRecord(
+      row.result_summary_json,
+      "auth_sessions.result_summary_json",
+    ),
     errorSummary: row.error_summary,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
@@ -600,8 +600,11 @@ export function summarizeIntegrationStates(
     launchStrategy: row.launch_strategy,
     launchTarget: row.launch_target,
     importedFrom: row.imported_from,
-    artifactPaths: row.artifact_paths_json ? (JSON.parse(row.artifact_paths_json) as string[]) : [],
-    metadata: row.metadata_json ? (JSON.parse(row.metadata_json) as Record<string, unknown>) : null,
+    artifactPaths: safeParseJsonStringArray(
+      row.artifact_paths_json,
+      "integration_states.artifact_paths_json",
+    ),
+    metadata: safeParseJsonRecord(row.metadata_json, "integration_states.metadata_json"),
     lastSeenAt: row.last_seen_at,
     updatedAt: row.updated_at,
     latestAuthSessionId: db.getLatestAuthSession(row.platform, row.account_key)?.id ?? null,
@@ -827,8 +830,9 @@ function ensureRequestableIntegrationState(
   const resolvedAccountKey = accountKey ?? getDefaultAccountKeyForPlatform(normalized);
   const existing = db.getIntegrationState(normalized, resolvedAccountKey);
   const existingMetadata = existing?.metadata_json
-    ? (JSON.parse(existing.metadata_json) as Record<string, unknown>)
+    ? safeParseJsonRecord(existing.metadata_json, "integration_states.metadata_json")
     : {};
+  const normalizedExistingMetadata = existingMetadata ?? {};
   const browserProfileDir =
     requested.runtimeKind === "chromium"
       ? getChromiumProfileDir(normalized, resolvedAccountKey)
@@ -854,7 +858,7 @@ function ensureRequestableIntegrationState(
     importedFrom:
       existing?.imported_from ?? (normalized === "signal" ? "bundled-helper" : "local-cli"),
     metadata: {
-      ...existingMetadata,
+      ...normalizedExistingMetadata,
       ...(requested.metadata ?? {}),
       supportedByDaemon,
       authManagedBy:
@@ -863,7 +867,7 @@ function ensureRequestableIntegrationState(
           : requested.runtimeKind === "chromium"
             ? "chromium-runtime"
             : "native-qr-runtime",
-      requestedAt: existingMetadata.requestedAt ?? now(),
+      requestedAt: normalizedExistingMetadata.requestedAt ?? now(),
       runtimeKind: requested.runtimeKind,
       browserProfileDir,
       configDir: signalConfigDir,
@@ -935,9 +939,8 @@ export function markAuthSessionInProgress(
 
   const integration = db.getIntegrationState(session.platform, session.account_key);
   if (integration) {
-    const metadata = integration.metadata_json
-      ? (JSON.parse(integration.metadata_json) as Record<string, unknown>)
-      : {};
+    const metadata =
+      safeParseJsonRecord(integration.metadata_json, "integration_states.metadata_json") ?? {};
     db.upsertIntegrationState({
       platform: integration.platform,
       accountKey: integration.account_key,
@@ -949,9 +952,10 @@ export function markAuthSessionInProgress(
       launchStrategy: integration.launch_strategy,
       launchTarget: integration.launch_target,
       importedFrom: integration.imported_from,
-      artifactPaths: integration.artifact_paths_json
-        ? (JSON.parse(integration.artifact_paths_json) as string[])
-        : [],
+      artifactPaths: safeParseJsonStringArray(
+        integration.artifact_paths_json,
+        "integration_states.artifact_paths_json",
+      ),
       metadata: {
         ...metadata,
         latestAuthSessionId: sessionId,
@@ -1005,9 +1009,8 @@ export function completeAuthSession(
     throw new Error(`Integration not found: ${session.platform}/${session.account_key}`);
   }
 
-  const metadata = integration.metadata_json
-    ? (JSON.parse(integration.metadata_json) as Record<string, unknown>)
-    : {};
+  const metadata =
+    safeParseJsonRecord(integration.metadata_json, "integration_states.metadata_json") ?? {};
   const targetAccountKey = resolveCompletedAccountKey(session, input);
   const targetDisplayName = resolveCompletedDisplayName(
     integration.display_name,
@@ -1030,12 +1033,14 @@ export function completeAuthSession(
       : (existingTarget?.sync_capable ?? integration.sync_capable) === 1;
   const artifactPaths = Array.from(
     new Set([
-      ...(existingTarget?.artifact_paths_json
-        ? (JSON.parse(existingTarget.artifact_paths_json) as string[])
-        : []),
-      ...(integration.artifact_paths_json
-        ? (JSON.parse(integration.artifact_paths_json) as string[])
-        : []),
+      ...safeParseJsonStringArray(
+        existingTarget?.artifact_paths_json ?? null,
+        "integration_states.artifact_paths_json",
+      ),
+      ...safeParseJsonStringArray(
+        integration.artifact_paths_json,
+        "integration_states.artifact_paths_json",
+      ),
     ]),
   );
   db.upsertIntegrationState({
@@ -1051,9 +1056,10 @@ export function completeAuthSession(
     importedFrom: integration.imported_from,
     artifactPaths,
     metadata: {
-      ...(existingTarget?.metadata_json
-        ? (JSON.parse(existingTarget.metadata_json) as Record<string, unknown>)
-        : {}),
+      ...(safeParseJsonRecord(
+        existingTarget?.metadata_json ?? null,
+        "integration_states.metadata_json",
+      ) ?? {}),
       ...metadata,
       ...targetMetadata,
       latestAuthSessionId: sessionId,

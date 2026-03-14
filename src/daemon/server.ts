@@ -8,22 +8,10 @@ import { isAdapterPlatform, listAutoSyncPlatforms } from "../adapters/registry.j
 import { runAdapter } from "../adapters/runner.js";
 import { getCurrentAppVersion, getCurrentReleaseChannel } from "../app-metadata.js";
 import { CUED_SOCKET_PATH } from "../config.js";
+import { safeParseJsonRecord } from "../db/codecs.js";
 import { type OutboundMessageRow, openCuedDatabase } from "../db/database.js";
-import { buildDoctorReport } from "../diagnostics/doctor.js";
-import { doctorHooksConfig, emitHookEvent } from "../hooks/service.js";
-import { startAuthSession } from "../integrations/auth-runtime.js";
-import {
-  buildIntegrationStatus,
-  completeAuthSession,
-  connectIntegration,
-  disconnectIntegration,
-  getAuthSessionSummary,
-  getIntegrationSummary,
-  markAuthSessionInProgress,
-  refreshManagedIntegrationStates,
-  removeIntegration,
-  setIntegrationEnabled,
-} from "../integrations/service.js";
+import { emitHookEvent } from "../hooks/service.js";
+import { getIntegrationSummary, refreshManagedIntegrationStates } from "../integrations/service.js";
 import {
   getSignalConfigDir,
   inspectSignalCli,
@@ -65,15 +53,22 @@ import {
   projectRealtimeRange,
   rebuildProjectedState,
 } from "../projector/projector.js";
+import { IntegrationAuthService } from "../services/integration-auth.js";
+import {
+  ProjectionMessageHookBarrier,
+  type ProjectionRunDetails,
+  parseProjectionRunDetails,
+} from "../services/projection.js";
+import { RunQueueService } from "../services/run-queue.js";
+import { buildDaemonStatusSnapshot, buildDoctorSnapshot } from "../services/status.js";
 import {
   type AdapterPlatform,
   getDefaultAccountKeyForPlatform,
   type HostOS,
-  isPlatform,
   type Platform,
   type ProviderRawEventInput,
 } from "../types/provider.js";
-import { checkForUpdates, getUpdateStatus } from "../updater/service.js";
+import { checkForUpdates } from "../updater/service.js";
 import { resolveMacOSNativeBinary } from "../workers/native-binary.js";
 
 const DAEMON_VERSION = getCurrentAppVersion();
@@ -130,14 +125,6 @@ type IngestTiming = {
   webhookReadyMs: number;
   totalMs: number;
   insertedRawEvents: number;
-};
-
-type ProjectionRunDetails = {
-  trigger: string;
-  startRowId: number;
-  endRowId: number;
-  projectionWatermark?: number;
-  maxRawEventRowid?: number;
 };
 
 type SignalDesiredSession = {
@@ -282,30 +269,6 @@ function getDeferredProjectionCoalesceMs(): number {
   return Number.isFinite(configured) && configured >= 0
     ? configured
     : DEFAULT_DEFERRED_PROJECTION_COALESCE_MS;
-}
-
-function parseProjectionRunDetails(detailsJson: string | null): ProjectionRunDetails | null {
-  if (!detailsJson) {
-    return null;
-  }
-
-  try {
-    const parsed = JSON.parse(detailsJson) as Partial<ProjectionRunDetails>;
-    if (typeof parsed.startRowId !== "number" || typeof parsed.endRowId !== "number") {
-      return null;
-    }
-    return {
-      trigger: typeof parsed.trigger === "string" ? parsed.trigger : "unknown",
-      startRowId: parsed.startRowId,
-      endRowId: parsed.endRowId,
-      projectionWatermark:
-        typeof parsed.projectionWatermark === "number" ? parsed.projectionWatermark : undefined,
-      maxRawEventRowid:
-        typeof parsed.maxRawEventRowid === "number" ? parsed.maxRawEventRowid : undefined,
-    };
-  } catch {
-    return null;
-  }
 }
 
 function resolveCheckpointSyncMode(
@@ -750,97 +713,6 @@ async function collectDesiredWhatsAppSessions(db: ReturnType<typeof openCuedData
   return { desired, degraded };
 }
 
-async function startManagedAuth(
-  db: ReturnType<typeof openCuedDatabase>,
-  platform: string,
-  accountKey: string | undefined,
-  activeAuthSessions: Map<string, { child: ChildProcess; platform: Platform; accountKey: string }>,
-  wakeIngest: () => void,
-  onRuntimeStateChanged: () => void,
-): Promise<{
-  integration: ReturnType<typeof getIntegrationSummary>;
-  authSession: ReturnType<typeof getAuthSessionSummary>;
-}> {
-  const requested = connectIntegration(db, platform, accountKey);
-  const integration = getIntegrationSummary(
-    db,
-    requested.integration.platform,
-    requested.integration.accountKey,
-  );
-  const runtime = startAuthSession(db, requested.authSession, integration);
-  const running = markAuthSessionInProgress(
-    db,
-    requested.authSession.id,
-    runtime.child.pid ?? process.pid,
-  );
-  activeAuthSessions.set(running.id, {
-    child: runtime.child,
-    platform: running.platform,
-    accountKey: running.accountKey,
-  });
-
-  runtime.completion
-    .then(async (result) => {
-      const completed = completeAuthSession(db, running.id, {
-        state: result.state,
-        keychainService: result.keychainService ?? null,
-        keychainAccount: result.keychainAccount ?? null,
-        resultSummary: result.resultSummary ?? null,
-        errorSummary: result.errorSummary ?? null,
-      });
-      if (completed.integration?.authState === "authenticated") {
-        if (
-          !db.hasQueuedOrRunningRun(
-            completed.integration.platform,
-            completed.integration.accountKey,
-          )
-        ) {
-          db.queueSyncRun({
-            platform: completed.integration.platform,
-            accountKey: completed.integration.accountKey,
-            runType: "sync",
-            trigger: "integration_authenticated",
-            details: {
-              source: completed.integration.platform,
-              accountKey: completed.integration.accountKey,
-              trigger: "integration_authenticated",
-            },
-          });
-          wakeIngest();
-        }
-        await emitAuthenticatedHook(
-          db,
-          completed.integration.platform,
-          completed.integration.accountKey,
-        );
-      }
-      onRuntimeStateChanged();
-    })
-    .catch((error) => {
-      const latest = db.getAuthSession(running.id);
-      if (latest?.state === "cancelled") {
-        return;
-      }
-      completeAuthSession(db, running.id, {
-        state: "failed",
-        errorSummary: error instanceof Error ? error.message : String(error),
-      });
-      onRuntimeStateChanged();
-    })
-    .finally(() => {
-      activeAuthSessions.delete(running.id);
-    });
-
-  return {
-    integration: getIntegrationSummary(
-      db,
-      requested.integration.platform,
-      requested.integration.accountKey,
-    ),
-    authSession: getAuthSessionSummary(db, running.id),
-  };
-}
-
 export async function runDaemon(): Promise<void> {
   await cleanupSocketPath();
   const db = openCuedDatabase();
@@ -864,6 +736,7 @@ export async function runDaemon(): Promise<void> {
   let projectionDrainTimer: NodeJS.Timeout | null = null;
   const lastAutoSyncQueuedAt = new Map<string, number>();
   const pendingSignalSendEchoes = new Map<string, PendingSignalEcho[]>();
+  const projectionMessageHooks = new ProjectionMessageHookBarrier();
   const suppressNextSignalReconnectSync = new Set<string>();
   const nativeWatchers: Array<FSWatcher | ChildProcess> = [];
   let signalRealtimeReconcilePromise: Promise<void> | null = null;
@@ -898,6 +771,24 @@ export async function runDaemon(): Promise<void> {
       return;
     }
     pendingSignalSendEchoes.set(accountKey, remaining);
+  };
+
+  const queueMessageReceivedHooks = (
+    range: { startRowId: number; endRowId: number } | null,
+    runId: string,
+    inboundMessages: Array<Record<string, unknown>>,
+  ) => {
+    if (!range || inboundMessages.length === 0) {
+      return;
+    }
+
+    projectionMessageHooks.enqueue(
+      range,
+      inboundMessages.map((message) => ({
+        runId,
+        message,
+      })),
+    );
   };
 
   const scheduleSignalSendEchoCatchup = (message: OutboundMessageRow, timestamp: number) => {
@@ -939,9 +830,10 @@ export async function runDaemon(): Promise<void> {
   const updateSignalCheckpointFromRealtime = (accountKey: string) => {
     const checkpoint = db.getCheckpoint("signal", accountKey);
     const projection = db.getProjectionBacklog();
-    const sourceCursor = checkpoint?.source_cursor_json
-      ? (JSON.parse(checkpoint.source_cursor_json) as Record<string, unknown>)
-      : null;
+    const sourceCursor = safeParseJsonRecord(
+      checkpoint?.source_cursor_json ?? null,
+      "sync_checkpoints.source_cursor_json",
+    );
     db.upsertCheckpoint({
       platform: "signal",
       accountKey,
@@ -959,15 +851,14 @@ export async function runDaemon(): Promise<void> {
     timestamp: number,
   ): void => {
     let threadName: string | null = null;
-    try {
-      if (message.metadata_json) {
-        const metadata = JSON.parse(message.metadata_json) as { matchedName?: unknown };
-        if (typeof metadata.matchedName === "string" && metadata.matchedName.trim().length > 0) {
-          threadName = metadata.matchedName.trim();
-        }
+    if (message.metadata_json) {
+      const metadata = safeParseJsonRecord(
+        message.metadata_json,
+        "outbound_messages.metadata_json",
+      );
+      if (typeof metadata?.matchedName === "string" && metadata.matchedName.trim().length > 0) {
+        threadName = metadata.matchedName.trim();
       }
-    } catch {
-      threadName = null;
     }
 
     const threadId =
@@ -1099,12 +990,16 @@ export async function runDaemon(): Promise<void> {
       }
 
       const inboundMessages = collectInboundMessages(insertResult.insertedEvents);
-      for (const inboundMessage of inboundMessages) {
-        await safeEmitHookEvent("message.received", {
-          runId: `signal_realtime:${accountKey}`,
-          message: inboundMessage,
-        });
-      }
+      queueMessageReceivedHooks(
+        insertResult.firstInsertedRowId != null && insertResult.lastInsertedRowId != null
+          ? {
+              startRowId: insertResult.firstInsertedRowId,
+              endRowId: insertResult.lastInsertedRowId,
+            }
+          : null,
+        `signal_realtime:${accountKey}`,
+        inboundMessages,
+      );
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       signalLogger.warn("realtime ingest failed", { accountKey, error: message });
@@ -1123,9 +1018,10 @@ export async function runDaemon(): Promise<void> {
   const updateWhatsAppCheckpointFromRealtime = (accountKey: string) => {
     const checkpoint = db.getCheckpoint("whatsapp", accountKey);
     const projection = db.getProjectionBacklog();
-    const sourceCursor = checkpoint?.source_cursor_json
-      ? (JSON.parse(checkpoint.source_cursor_json) as Record<string, unknown>)
-      : null;
+    const sourceCursor = safeParseJsonRecord(
+      checkpoint?.source_cursor_json ?? null,
+      "sync_checkpoints.source_cursor_json",
+    );
     db.upsertCheckpoint({
       platform: "whatsapp",
       accountKey,
@@ -1143,15 +1039,14 @@ export async function runDaemon(): Promise<void> {
     sendResult: { messageID: string; chatJID: string; timestamp: number },
   ): void => {
     let threadName: string | null = null;
-    try {
-      if (message.metadata_json) {
-        const metadata = JSON.parse(message.metadata_json) as { matchedName?: unknown };
-        if (typeof metadata.matchedName === "string" && metadata.matchedName.trim().length > 0) {
-          threadName = metadata.matchedName.trim();
-        }
+    if (message.metadata_json) {
+      const metadata = safeParseJsonRecord(
+        message.metadata_json,
+        "outbound_messages.metadata_json",
+      );
+      if (typeof metadata?.matchedName === "string" && metadata.matchedName.trim().length > 0) {
+        threadName = metadata.matchedName.trim();
       }
-    } catch {
-      threadName = null;
     }
 
     const rawEvents = buildOptimisticWhatsAppRawEvents({
@@ -1252,12 +1147,16 @@ export async function runDaemon(): Promise<void> {
       }
 
       const inboundMessages = collectInboundMessages(insertResult.insertedEvents);
-      for (const inboundMessage of inboundMessages) {
-        await safeEmitHookEvent("message.received", {
-          runId: trigger,
-          message: inboundMessage,
-        });
-      }
+      queueMessageReceivedHooks(
+        insertResult.firstInsertedRowId != null && insertResult.lastInsertedRowId != null
+          ? {
+              startRowId: insertResult.firstInsertedRowId,
+              endRowId: insertResult.lastInsertedRowId,
+            }
+          : null,
+        trigger,
+        inboundMessages,
+      );
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       whatsAppLogger.warn("realtime ingest failed", { accountKey, error: message });
@@ -1899,9 +1798,10 @@ export async function runDaemon(): Promise<void> {
       const platform = currentRun.platform;
       const accountKey = currentRun.account_key ?? getDefaultAccountKeyForPlatform(platform);
       const checkpoint = db.getCheckpoint(currentRun.platform, accountKey);
-      const sourceCursor = checkpoint?.source_cursor_json
-        ? (JSON.parse(checkpoint.source_cursor_json) as Record<string, unknown>)
-        : null;
+      const sourceCursor = safeParseJsonRecord(
+        checkpoint?.source_cursor_json ?? null,
+        "sync_checkpoints.source_cursor_json",
+      );
       const envOverrides: Record<string, string> = {};
       if (platform === "imessage" && typeof sourceCursor?.rowId === "number") {
         envOverrides.CUED_IMESSAGE_LAST_ROWID = String(sourceCursor.rowId);
@@ -1982,6 +1882,16 @@ export async function runDaemon(): Promise<void> {
       }
       const afterRealtimeProjection = now();
       const inboundMessages = collectInboundMessages(insertResult.insertedEvents);
+      queueMessageReceivedHooks(
+        insertResult.firstInsertedRowId != null && insertResult.lastInsertedRowId != null
+          ? {
+              startRowId: insertResult.firstInsertedRowId,
+              endRowId: insertResult.lastInsertedRowId,
+            }
+          : null,
+        currentRun.id,
+        inboundMessages,
+      );
       if (platform === "signal") {
         for (const rawEvent of insertResult.insertedEvents) {
           if (rawEvent.entityKind !== "message" || rawEvent.eventKind !== "message_created") {
@@ -2091,12 +2001,6 @@ export async function runDaemon(): Promise<void> {
         insertedRawEvents: insertResult.insertedCount,
         timings,
       });
-      for (const message of inboundMessages) {
-        await safeEmitHookEvent("message.received", {
-          runId: currentRun.id,
-          message,
-        });
-      }
       daemonLogger.info("ingest run completed", {
         runId: currentRun.id,
         platform,
@@ -2166,6 +2070,29 @@ export async function runDaemon(): Promise<void> {
         timings,
         range: projectionDetails,
       });
+      const projectedRangeStart =
+        deferredProjected?.rangeStartRowId ?? projectionDetails?.startRowId ?? null;
+      const projectedRangeEnd =
+        deferredProjected == null
+          ? null
+          : deferredProjected.nextStartRowId != null
+            ? deferredProjected.nextStartRowId - 1
+            : (deferredProjected.rangeEndRowId ?? projectionDetails?.endRowId ?? null);
+      if (
+        projectedRangeStart != null &&
+        projectedRangeEnd != null &&
+        projectedRangeEnd >= projectedRangeStart
+      ) {
+        await projectionMessageHooks.releaseCompletedRange(
+          {
+            startRowId: projectedRangeStart,
+            endRowId: projectedRangeEnd,
+          },
+          async (payload) => {
+            await safeEmitHookEvent("message.received", payload);
+          },
+        );
+      }
       if (deferredProjected?.nextStartRowId != null) {
         queueProjectionRun(
           `projection_continue:${currentRun.id}`,
@@ -2273,6 +2200,7 @@ export async function runDaemon(): Promise<void> {
         clearTimeout(echo.timeout);
       }
     }
+    projectionMessageHooks.clear();
     db.upsertDaemonState({
       pid: null,
       startedAt,
@@ -2453,6 +2381,8 @@ async function dispatchRequest(
   requestUpdateShutdown: () => { shuttingDown: boolean; requestedAt: number | null },
 ): Promise<DaemonResponse> {
   try {
+    const integrationAuthService = new IntegrationAuthService(db);
+    const runQueueService = new RunQueueService(db, schedulers);
     switch (request.command) {
       case "ping":
         return { id: request.id, ok: true, result: { pong: true } };
@@ -2460,31 +2390,21 @@ async function dispatchRequest(
         return {
           id: request.id,
           ok: true,
-          result: {
+          result: buildDaemonStatusSnapshot(db, {
             app: getAppStatusMetadata(db),
-            daemon: db.getDaemonState(),
-            overview: db.getOverview(),
-            projection: db.getProjectionBacklog(),
-            checkpoints: db.listCheckpointSummary(),
-            recentRuns: db.listRecentRuns(),
-            signalRealtimeSessions: signalRealtime.getStatuses(),
-            whatsappRealtimeSessions: whatsAppRealtime.getStatuses(),
-            ...buildIntegrationStatus(db),
-            update: getUpdateStatus(db),
+            signalRealtime,
+            whatsAppRealtime,
             socketPath: CUED_SOCKET_PATH,
-            dbPath: db.dbPath,
-          },
+          }),
         };
       case "doctor":
         return {
           id: request.id,
           ok: true,
-          result: {
+          result: await buildDoctorSnapshot(db, {
             app: getAppStatusMetadata(db),
-            ...(await buildDoctorReport(db, {
-              signalRealtimeSessions: signalRealtime.getStatuses(),
-              whatsappRealtimeSessions: whatsAppRealtime.getStatuses(),
-            })),
+            signalRealtime,
+            whatsAppRealtime,
             autoSyncTargets: getAutoSyncTargets(db),
             autoSyncIntervalMs: getAutoSyncIntervalMs(),
             autoSyncIntervalsMs: Object.fromEntries(
@@ -2500,32 +2420,34 @@ async function dispatchRequest(
             realtimeProjectionEnabled: getRealtimeProjectionEnabled(),
             realtimeProjectionBatchSize: getRealtimeProjectionBatchSize(),
             deferredProjectionCoalesceMs: getDeferredProjectionCoalesceMs(),
-            hooks: doctorHooksConfig(),
-            update: getUpdateStatus(db),
-          },
+          }),
         };
       case "integrations-list":
         return {
           id: request.id,
           ok: true,
-          result: buildIntegrationStatus(db),
+          result: integrationAuthService.listStatus(),
         };
       case "integrations-refresh":
-        await refreshManagedIntegrationStates(db);
+        await integrationAuthService.refresh();
         requestRealtimeReconcile();
         return {
           id: request.id,
           ok: true,
-          result: buildIntegrationStatus(db),
+          result: integrationAuthService.listStatus(),
         };
       case "integrations-connect": {
-        const started = await startManagedAuth(
-          db,
+        const started = await integrationAuthService.connectManaged(
           request.platform,
           request.accountKey,
           activeAuthSessions,
-          schedulers.wakeIngest,
-          requestRealtimeReconcile,
+          {
+            wakeIngest: schedulers.wakeIngest,
+            onRuntimeStateChanged: requestRealtimeReconcile,
+            emitAuthenticatedHook: async (platform, accountKey) => {
+              await emitAuthenticatedHook(db, platform, accountKey);
+            },
+          },
         );
         return {
           id: request.id,
@@ -2534,7 +2456,7 @@ async function dispatchRequest(
         };
       }
       case "integrations-disconnect": {
-        const result = disconnectIntegration(db, request.platform, request.accountKey);
+        const result = integrationAuthService.disconnect(request.platform, request.accountKey);
         requestRealtimeReconcile();
         return {
           id: request.id,
@@ -2543,7 +2465,7 @@ async function dispatchRequest(
         };
       }
       case "integrations-remove": {
-        const result = removeIntegration(db, request.platform, request.accountKey);
+        const result = integrationAuthService.remove(request.platform, request.accountKey);
         requestRealtimeReconcile();
         return {
           id: request.id,
@@ -2552,7 +2474,7 @@ async function dispatchRequest(
         };
       }
       case "integrations-enable": {
-        const result = setIntegrationEnabled(db, request.platform, request.accountKey, true);
+        const result = integrationAuthService.enable(request.platform, request.accountKey);
         requestRealtimeReconcile();
         return {
           id: request.id,
@@ -2561,7 +2483,7 @@ async function dispatchRequest(
         };
       }
       case "integrations-disable": {
-        const result = setIntegrationEnabled(db, request.platform, request.accountKey, false);
+        const result = integrationAuthService.disable(request.platform, request.accountKey);
         requestRealtimeReconcile();
         return {
           id: request.id,
@@ -2570,113 +2492,41 @@ async function dispatchRequest(
         };
       }
       case "message-send":
-        if (request.platform !== "signal" && request.platform !== "whatsapp") {
-          throw new Error(`Unsupported outbound platform: ${request.platform}`);
-        }
-        if (request.target.trim().length === 0 || request.text.trim().length === 0) {
-          throw new Error(`${request.platform} send requires a target and non-empty text`);
-        }
-        {
-          const resolved =
-            request.platform === "signal"
-              ? db.resolveSignalSendTarget(request.target.trim())
-              : db.resolveWhatsAppSendTarget(request.target.trim());
-          if (!resolved) {
-            throw new Error(
-              `Unable to resolve ${request.platform} target: ${request.target.trim()}`,
-            );
-          }
-          return {
-            id: request.id,
-            ok: true,
-            result: {
-              queued: true,
-              messageId: (() => {
-                const queuedId = db.queueOutboundMessage({
-                  platform: request.platform,
-                  accountKey:
-                    request.accountKey ?? getDefaultAccountKeyForPlatform(request.platform),
-                  target: resolved.target,
-                  threadId: resolved.threadId,
-                  text: request.text,
-                  metadata: {
-                    originalTarget: request.target.trim(),
-                    resolvedTarget: resolved.target,
-                    resolvedThreadId: resolved.threadId,
-                    resolution: resolved.resolution,
-                    matchedContactIds: resolved.matchedContactIds,
-                    matchedName: resolved.matchedName,
-                  },
-                });
-                schedulers.wakeOutbound();
-                return queuedId;
-              })(),
-            },
-          };
-        }
-      case "sync-run":
-        if (request.source && !isAdapterPlatform(request.source)) {
-          throw new Error(`Unsupported sync source: ${request.source}`);
-        }
         return {
           id: request.id,
           ok: true,
-          result: {
-            queued: true,
-            runId: (() => {
-              const runId = db.queueSyncRun({
-                platform:
-                  request.source && isAdapterPlatform(request.source) ? request.source : null,
-                runType: "sync",
-                trigger: "cli",
-                details: { source: request.source ?? null },
-              });
-              schedulers.wakeIngest();
-              return runId;
-            })(),
-          },
+          result: runQueueService.queueMessageSend({
+            platform: request.platform,
+            target: request.target,
+            text: request.text,
+            accountKey: request.accountKey,
+          }),
+        };
+      case "sync-run":
+        return {
+          id: request.id,
+          ok: true,
+          result: runQueueService.queueSyncRun(request.source),
         };
       case "sync-resume": {
-        const platforms = new Set([
+        const targets = [
           ...getAutoSyncTargets(db).map((target) => `${target.platform}:${target.accountKey}`),
           ...db
             .listCheckpointTargets()
             .filter((target) => isAdapterPlatform(target.platform))
             .map((target) => `${target.platform}:${target.account_key}`),
-        ]);
-        const queuedRunIds: string[] = [];
-        for (const targetKey of platforms) {
-          const [platform, accountKey] = targetKey.split(":");
-          if (!platform || !accountKey || !isAdapterPlatform(platform)) {
-            continue;
-          }
-          if (db.hasQueuedOrRunningRun(platform, accountKey)) {
-            continue;
-          }
-
-          queuedRunIds.push(
-            db.queueSyncRun({
-              platform,
-              accountKey,
-              runType: "sync_resume",
-              trigger: "cli",
-              details: { source: platform, accountKey },
-            }),
-          );
-        }
-
-        if (queuedRunIds.length > 0) {
-          schedulers.wakeIngest();
-        }
-
+        ];
         return {
           id: request.id,
           ok: true,
-          result: {
-            queued: queuedRunIds.length > 0,
-            runIds: queuedRunIds,
-            targets: [...platforms],
-          },
+          result: runQueueService.queueSyncResume(
+            targets.flatMap((targetKey) => {
+              const [platform, accountKey] = targetKey.split(":");
+              return platform && accountKey && isAdapterPlatform(platform)
+                ? [{ platform, accountKey }]
+                : [];
+            }),
+          ),
         };
       }
       case "shutdown-for-update":
@@ -2689,30 +2539,13 @@ async function dispatchRequest(
         return {
           id: request.id,
           ok: true,
-          result: {
-            queued: true,
-            runId: (() => {
-              const runId = db.queueSyncRun({
-                runType: "rebuild",
-                trigger: "cli",
-                details: { trigger: "cli" },
-              });
-              schedulers.wakeProjection();
-              return runId;
-            })(),
-          },
+          result: runQueueService.queueRebuild(),
         };
       case "reset":
-        if (!isPlatform(request.source)) {
-          throw new Error(`Unsupported reset source: ${request.source}`);
-        }
         return {
           id: request.id,
           ok: true,
-          result: {
-            source: request.source,
-            rowsRemoved: db.resetSource(request.source),
-          },
+          result: runQueueService.resetSource(request.source),
         };
       case "merge-contact":
         return {
