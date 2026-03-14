@@ -700,28 +700,7 @@ public struct CuedOnboardingView: View {
     _ configuration: InstallerPlatformConfiguration,
     integration: InstallerIntegrationStatus
   ) -> some View {
-    let action = accountAction(for: configuration, integration: integration)
-    let removeAction = removeAction(for: configuration, integration: integration)
-    let showsCheckmark = installerShowsCompletionCheckmark(
-      for: configuration,
-      integration: integration
-    )
-    let isPending = pendingIntegrationActionIDs.contains(integration.id)
-
-    return HStack(spacing: 10) {
-      Spacer(minLength: 0)
-      if isPending {
-        pendingIntegrationIndicator()
-      } else if showsCheckmark {
-        authenticatedCheckmark(label: "\(configuration.title) authenticated")
-      }
-      if let removeAction {
-        removalButton(label: removeAction.label, action: removeAction.handler)
-      }
-      if let action {
-        actionButton(title: action.title, action: action.handler)
-      }
-    }
+    accountSummaryRow(configuration, integration: integration)
   }
 
   private func multiAccountPlatformRows(_ configuration: InstallerPlatformConfiguration) -> some View {
@@ -753,19 +732,22 @@ public struct CuedOnboardingView: View {
     _ configuration: InstallerPlatformConfiguration,
     integration: InstallerIntegrationStatus
   ) -> some View {
+    accountSummaryRow(configuration, integration: integration)
+  }
+
+  private func accountSummaryRow(
+    _ configuration: InstallerPlatformConfiguration,
+    integration: InstallerIntegrationStatus
+  ) -> some View {
     let action = accountAction(for: configuration, integration: integration)
     let removeAction = removeAction(for: configuration, integration: integration)
-    let showsCheckmark = installerShowsCompletionCheckmark(
-      for: configuration,
-      integration: integration
-    )
     let isPending = pendingIntegrationActionIDs.contains(integration.id)
 
     return HStack(alignment: .top, spacing: 12) {
       VStack(alignment: .leading, spacing: 4) {
-        Text(accountTitle(for: integration))
+        Text(accountTitle(for: configuration, integration: integration))
           .font(.subheadline.weight(.semibold))
-        Text(accountDetail(for: integration))
+        Text(accountDetail(for: configuration, integration: integration))
           .font(.subheadline)
           .foregroundStyle(.secondary)
           .fixedSize(horizontal: false, vertical: true)
@@ -775,9 +757,7 @@ public struct CuedOnboardingView: View {
 
       if isPending {
         pendingIntegrationIndicator()
-          .padding(.top, 2)
-      } else if showsCheckmark {
-        authenticatedCheckmark(label: "\(accountTitle(for: integration)) authenticated")
+          .padding(.top, 3)
       }
       if let removeAction {
         removalButton(label: removeAction.label, action: removeAction.handler)
@@ -786,6 +766,7 @@ public struct CuedOnboardingView: View {
         actionButton(title: action.title, action: action.handler)
       }
     }
+    .padding(.leading, 40)
   }
 
   private func actionButton(
@@ -922,13 +903,13 @@ public struct CuedOnboardingView: View {
     }
 
     return (
-      "Remove \(accountTitle(for: integration))",
+      "Remove \(accountTitle(for: configuration, integration: integration))",
       {
         removalPrompt = InstallerRemovalPrompt(
           platform: configuration.platform,
           platformTitle: configuration.title,
           accountKey: integration.accountKey,
-          accountTitle: accountTitle(for: integration)
+          accountTitle: accountTitle(for: configuration, integration: integration)
         )
       }
     )
@@ -1002,20 +983,34 @@ public struct CuedOnboardingView: View {
     return nil
   }
 
-  private func accountTitle(for integration: InstallerIntegrationStatus) -> String {
+  private func accountTitle(
+    for configuration: InstallerPlatformConfiguration,
+    integration: InstallerIntegrationStatus
+  ) -> String {
     let title = integration.displayName?.trimmingCharacters(in: .whitespacesAndNewlines)
     if let title, !title.isEmpty {
+      if installerNormalizedTitle(title) == installerNormalizedTitle(configuration.title),
+         installerShouldHideAccountKey(platform: integration.platform, accountKey: integration.accountKey) {
+        return fallbackAccountTitle(for: configuration.platform, authState: integration.authState)
+      }
       return title
     }
-    return integration.accountKey
+    if !installerShouldHideAccountKey(platform: integration.platform, accountKey: integration.accountKey) {
+      return integration.accountKey
+    }
+    return fallbackAccountTitle(for: configuration.platform, authState: integration.authState)
   }
 
-  private func accountDetail(for integration: InstallerIntegrationStatus) -> String {
+  private func accountDetail(
+    for configuration: InstallerPlatformConfiguration,
+    integration: InstallerIntegrationStatus
+  ) -> String {
     var parts = [installerReadableIntegrationState(integration.authState)]
     if !integration.enabled && installerIsConnectedIntegrationState(integration.authState) {
       parts.append("turned off")
     }
-    if integration.displayName?.trimmingCharacters(in: .whitespacesAndNewlines) != integration.accountKey,
+    if installerNormalizedTitle(accountTitle(for: configuration, integration: integration))
+      != installerNormalizedTitle(integration.accountKey),
        !installerShouldHideAccountKey(platform: integration.platform, accountKey: integration.accountKey) {
       parts.append(integration.accountKey)
     }
@@ -1028,14 +1023,6 @@ public struct CuedOnboardingView: View {
       return false
     }
     return accounts.allSatisfy { installerShowsCompletionCheckmark(for: configuration, integration: $0) }
-  }
-
-  private func authenticatedCheckmark(label: String) -> some View {
-    Image(systemName: "checkmark.circle.fill")
-      .font(.title3.weight(.semibold))
-      .foregroundStyle(.secondary)
-      .frame(width: 24, height: 24, alignment: .center)
-      .accessibilityLabel(label)
   }
 
   private func connectorDetail(_ integration: InstallerIntegrationStatus) -> String {
@@ -1553,7 +1540,43 @@ private func installerSupportsAutomaticAccountDiscovery(_ platform: String) -> B
 }
 
 private func installerShouldHideAccountKey(platform: String, accountKey: String) -> Bool {
-  installerSupportsAutomaticAccountDiscovery(platform) && accountKey.hasPrefix("pending-slack-")
+  if installerSupportsAutomaticAccountDiscovery(platform) && accountKey.hasPrefix("pending-slack-") {
+    return true
+  }
+  if !installerSupportsMultipleAccounts(platform) && accountKey == "default" {
+    return true
+  }
+  return false
+}
+
+private func installerNormalizedTitle(_ value: String?) -> String {
+  value?.trimmingCharacters(in: .whitespacesAndNewlines).localizedLowercase ?? ""
+}
+
+private func fallbackAccountTitle(for platform: String, authState: String) -> String {
+  if installerIsConnectedIntegrationState(authState) {
+    switch platform {
+    case "linkedin":
+      return "Saved browser session"
+    case "signal":
+      return "Linked Signal device"
+    case "whatsapp":
+      return "Linked WhatsApp device"
+    default:
+      return "Connected account"
+    }
+  }
+
+  switch platform {
+  case "linkedin":
+    return "Browser sign-in"
+  case "signal":
+    return "Signal device"
+  case "whatsapp":
+    return "WhatsApp device"
+  default:
+    return "Account"
+  }
 }
 
 private func installerGeneratedPendingAccountKey(
