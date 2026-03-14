@@ -74,6 +74,7 @@ import {
   type Platform,
   type ProviderRawEventInput,
 } from "../types/provider.js";
+import { checkForUpdates, getUpdateStatus } from "../updater/service.js";
 import { resolveMacOSNativeBinary } from "../workers/native-binary.js";
 
 const DAEMON_VERSION = getCurrentAppVersion();
@@ -86,6 +87,8 @@ const DEFAULT_REALTIME_PROJECTION_ENABLED = true;
 const DEFAULT_DEFERRED_PROJECTION_COALESCE_MS = 250;
 const NATIVE_WATCH_DEBOUNCE_MS = 1_500;
 const AUTOSYNC_SCHEDULER_TICK_MS = 1_000;
+const UPDATE_CHECK_INTERVAL_MS = 6 * 60 * 60 * 1000;
+const UPDATE_SHUTDOWN_GRACE_MS = 30_000;
 const SIGNAL_SEND_SESSION_WAIT_MS = 3_000;
 const SIGNAL_SEND_ECHO_TIMEOUT_MS = 5_000;
 const WHATSAPP_SEND_SESSION_WAIT_MS = 3_000;
@@ -877,10 +880,15 @@ export async function runDaemon(): Promise<void> {
   const lastAutoSyncQueuedAt = new Map<string, number>();
   const pendingSignalSendEchoes = new Map<string, PendingSignalEcho[]>();
   const suppressNextSignalReconnectSync = new Set<string>();
+  const nativeWatchers: Array<FSWatcher | ChildProcess> = [];
   let signalRealtimeReconcilePromise: Promise<void> | null = null;
   let signalRealtimeReconcileQueued = false;
   let whatsAppRealtimeReconcilePromise: Promise<void> | null = null;
   let whatsAppRealtimeReconcileQueued = false;
+  let updateCheckPromise: Promise<void> | null = null;
+  let isUpdateShutdownRequested = false;
+  let updateShutdownRequestedAt: number | null = null;
+  let shutdownInitiated = false;
 
   const clearSignalSendEcho = (
     accountKey: string,
@@ -1392,6 +1400,9 @@ export async function runDaemon(): Promise<void> {
 
   const drainIngestQueue = () => {
     ingestDrainScheduled = false;
+    if (isUpdateShutdownRequested) {
+      return;
+    }
     while (activeIngestRuns.size < ingestConcurrency) {
       const currentRun = db.claimNextQueuedRun(["sync", "sync_resume"], "ingesting");
       if (!currentRun) {
@@ -1401,6 +1412,7 @@ export async function runDaemon(): Promise<void> {
       const promise = processIngestRun(currentRun).finally(() => {
         activeIngestRuns.delete(currentRun.id);
         scheduleIngestDrain();
+        maybeFinishUpdateShutdown();
       });
       activeIngestRuns.set(currentRun.id, promise);
     }
@@ -1416,6 +1428,9 @@ export async function runDaemon(): Promise<void> {
 
   const drainOutboundQueue = () => {
     outboundDrainScheduled = false;
+    if (isUpdateShutdownRequested) {
+      return;
+    }
     if (activeOutboundSend) {
       return;
     }
@@ -1499,6 +1514,7 @@ export async function runDaemon(): Promise<void> {
       } finally {
         activeOutboundSend = null;
         scheduleOutboundDrain();
+        maybeFinishUpdateShutdown();
       }
     })();
   };
@@ -1513,6 +1529,9 @@ export async function runDaemon(): Promise<void> {
 
   const drainProjectionQueue = () => {
     projectionDrainScheduled = false;
+    if (isUpdateShutdownRequested) {
+      return;
+    }
     if (isProcessingProjection) {
       return;
     }
@@ -1651,6 +1670,10 @@ export async function runDaemon(): Promise<void> {
     status: "running",
     version: DAEMON_VERSION,
   });
+  if (db.getPendingRollbackState()?.targetVersion === DAEMON_VERSION) {
+    db.setUpdatePendingRollback(null);
+    db.setUpdateLastError(null);
+  }
 
   const heartbeat = setInterval(() => {
     try {
@@ -1670,6 +1693,9 @@ export async function runDaemon(): Promise<void> {
   }, 5_000);
 
   const queueAutoSyncRuns = (trigger: string) => {
+    if (isUpdateShutdownRequested) {
+      return;
+    }
     try {
       const autoSyncTargets = getAutoSyncTargets(db);
       let queuedAny = false;
@@ -1714,6 +1740,9 @@ export async function runDaemon(): Promise<void> {
     range?: { startRowId: number; endRowId: number },
     options?: { delayMs?: number },
   ) => {
+    if (isUpdateShutdownRequested) {
+      return null;
+    }
     const backlog = db.getProjectionBacklog();
     const startRowId = range?.startRowId ?? backlog.projection_watermark + 1;
     const endRowId = range?.endRowId ?? backlog.max_raw_event_rowid;
@@ -1771,7 +1800,6 @@ export async function runDaemon(): Promise<void> {
   queueProjectionRun("daemon_start", undefined, { delayMs: 0 });
   scheduleOutboundDrain();
 
-  const nativeWatchers: Array<FSWatcher | ChildProcess> = [];
   if (process.platform === "darwin") {
     const imessageWatcher = startIMessageWatcher(db, queueDebouncedNativeSync);
     if (imessageWatcher) {
@@ -1783,6 +1811,78 @@ export async function runDaemon(): Promise<void> {
       nativeWatchers.push(contactsWatcher);
     }
   }
+
+  const stopRealtimeAndWatchers = () => {
+    for (const watcher of nativeWatchers) {
+      if ("close" in watcher && typeof watcher.close === "function") {
+        watcher.close();
+        continue;
+      }
+      if ("kill" in watcher && typeof watcher.kill === "function") {
+        watcher.kill("SIGTERM");
+      }
+    }
+    nativeWatchers.length = 0;
+    signalRealtime.stopAll();
+    whatsAppRealtime.stopAll();
+  };
+
+  const maybeFinishUpdateShutdown = () => {
+    if (!isUpdateShutdownRequested || shutdownInitiated) {
+      return;
+    }
+    const deadlineReached =
+      updateShutdownRequestedAt != null &&
+      now() - updateShutdownRequestedAt >= UPDATE_SHUTDOWN_GRACE_MS;
+    if (
+      deadlineReached ||
+      (activeIngestRuns.size === 0 && !activeOutboundSend && !isProcessingProjection)
+    ) {
+      shutdown();
+    }
+  };
+
+  const requestUpdateShutdown = () => {
+    if (isUpdateShutdownRequested) {
+      return {
+        shuttingDown: true,
+        requestedAt: updateShutdownRequestedAt,
+      };
+    }
+
+    isUpdateShutdownRequested = true;
+    updateShutdownRequestedAt = now();
+    daemonLogger.info("daemon entering update shutdown", {
+      activeIngestRuns: activeIngestRuns.size,
+      activeOutboundSend: Boolean(activeOutboundSend),
+      isProcessingProjection,
+    });
+    stopRealtimeAndWatchers();
+    setImmediate(maybeFinishUpdateShutdown);
+
+    return {
+      shuttingDown: true,
+      requestedAt: updateShutdownRequestedAt,
+    };
+  };
+
+  const scheduleUpdateCheck = (force = false) => {
+    if (updateCheckPromise || isUpdateShutdownRequested) {
+      return;
+    }
+
+    updateCheckPromise = (async () => {
+      try {
+        await checkForUpdates(db, { force });
+      } catch (error) {
+        daemonLogger.warn("background update check failed", error);
+      } finally {
+        updateCheckPromise = null;
+      }
+    })();
+  };
+
+  scheduleUpdateCheck(false);
 
   const processIngestRun = async (
     currentRun: NonNullable<ReturnType<typeof db.claimNextQueuedRun>>,
@@ -2125,6 +2225,7 @@ export async function runDaemon(): Promise<void> {
     } finally {
       isProcessingProjection = false;
       schedulers.wakeProjection();
+      maybeFinishUpdateShutdown();
     }
   };
 
@@ -2140,6 +2241,10 @@ export async function runDaemon(): Promise<void> {
     queueAutoSyncRuns("scheduler");
   }, AUTOSYNC_SCHEDULER_TICK_MS);
 
+  const updateLoop = setInterval(() => {
+    scheduleUpdateCheck(false);
+  }, UPDATE_CHECK_INTERVAL_MS);
+
   const server = createServer((socket) => {
     handleSocket(
       socket,
@@ -2152,32 +2257,32 @@ export async function runDaemon(): Promise<void> {
         requestSignalRealtimeReconcile();
         requestWhatsAppRealtimeReconcile();
       },
+      requestUpdateShutdown,
     );
   });
 
   server.listen(CUED_SOCKET_PATH);
 
   const shutdown = () => {
+    if (shutdownInitiated) {
+      return;
+    }
+    shutdownInitiated = true;
     daemonLogger.info("daemon shutting down", { pid: process.pid });
     clearInterval(heartbeat);
     clearInterval(ingestLoop);
     clearInterval(projectionLoop);
     clearInterval(schedulerLoop);
+    clearInterval(updateLoop);
     if (projectionDrainTimer) {
       clearTimeout(projectionDrainTimer);
       projectionDrainTimer = null;
     }
-    for (const watcher of nativeWatchers) {
-      if ("close" in watcher && typeof watcher.close === "function") {
-        watcher.close();
-        continue;
-      }
-      if ("kill" in watcher && typeof watcher.kill === "function") {
-        watcher.kill("SIGTERM");
-      }
+    stopRealtimeAndWatchers();
+    for (const session of activeAuthSessions.values()) {
+      session.child.kill("SIGTERM");
     }
-    signalRealtime.stopAll();
-    whatsAppRealtime.stopAll();
+    activeAuthSessions.clear();
     for (const echoes of pendingSignalSendEchoes.values()) {
       for (const echo of echoes) {
         clearTimeout(echo.timeout);
@@ -2279,6 +2384,7 @@ function handleSocket(
   signalRealtime: SignalRealtimeSupervisor,
   whatsAppRealtime: WhatsAppRealtimeSupervisor,
   requestRealtimeReconcile: () => void,
+  requestUpdateShutdown: () => { shuttingDown: boolean; requestedAt: number | null },
 ): void {
   let buffer = "";
 
@@ -2312,6 +2418,7 @@ function handleSocket(
           signalRealtime,
           whatsAppRealtime,
           requestRealtimeReconcile,
+          requestUpdateShutdown,
         )
           .then((response) => writeResponse(socket, response))
           .catch((error) => {
@@ -2358,6 +2465,7 @@ async function dispatchRequest(
   signalRealtime: SignalRealtimeSupervisor,
   whatsAppRealtime: WhatsAppRealtimeSupervisor,
   requestRealtimeReconcile: () => void,
+  requestUpdateShutdown: () => { shuttingDown: boolean; requestedAt: number | null },
 ): Promise<DaemonResponse> {
   try {
     switch (request.command) {
@@ -2377,6 +2485,7 @@ async function dispatchRequest(
             signalRealtimeSessions: signalRealtime.getStatuses(),
             whatsappRealtimeSessions: whatsAppRealtime.getStatuses(),
             ...buildIntegrationStatus(db),
+            update: getUpdateStatus(db),
             socketPath: CUED_SOCKET_PATH,
             dbPath: db.dbPath,
           },
@@ -2407,6 +2516,7 @@ async function dispatchRequest(
             realtimeProjectionBatchSize: getRealtimeProjectionBatchSize(),
             deferredProjectionCoalesceMs: getDeferredProjectionCoalesceMs(),
             hooks: doctorHooksConfig(),
+            update: getUpdateStatus(db),
           },
         };
       case "integrations-list":
@@ -2652,6 +2762,12 @@ async function dispatchRequest(
           },
         };
       }
+      case "shutdown-for-update":
+        return {
+          id: request.id,
+          ok: true,
+          result: requestUpdateShutdown(),
+        };
       case "rebuild":
         return {
           id: request.id,

@@ -33,9 +33,26 @@ function currentAppPath(): string | null {
   return appPath;
 }
 
+export function getCurrentAppPath(): string | null {
+  return currentAppPath();
+}
+
 function readInfoPlistValue(contents: string, key: string): string | null {
   const match = contents.match(new RegExp(`<key>${key}</key>\\s*<string>([^<]+)</string>`));
   return match?.[1] ?? null;
+}
+
+export function getAppBundleVersion(appPath: string): string | null {
+  const infoPath = join(appPath, "Contents", "Info.plist");
+  if (!existsSync(infoPath)) {
+    return null;
+  }
+
+  try {
+    return readInfoPlistValue(readFileSync(infoPath, "utf8"), "CFBundleShortVersionString");
+  } catch {
+    return null;
+  }
 }
 
 export function isValidCuedAppBundle(appPath: string): boolean {
@@ -191,8 +208,44 @@ function launchAgentPath(): string {
   return join(homedir(), "Library", "LaunchAgents", `${LAUNCH_AGENT_LABEL}.plist`);
 }
 
+export function getLaunchAgentPlistPath(): string {
+  return launchAgentPath();
+}
+
 function appExecutablePath(appPath: string): string {
   return join(appPath, "Contents", "MacOS", APP_EXECUTABLE_NAME);
+}
+
+export function getAppExecutablePath(appPath: string): string {
+  return appExecutablePath(appPath);
+}
+
+export function bootoutLaunchAgent(): { plistPath: string; bootedOut: boolean } {
+  const plistPath = launchAgentPath();
+  if (!existsSync(plistPath)) {
+    return { plistPath, bootedOut: false };
+  }
+
+  try {
+    execFileSync("launchctl", ["bootout", `gui/${currentUid()}`, plistPath], { stdio: "ignore" });
+    return { plistPath, bootedOut: true };
+  } catch {
+    return { plistPath, bootedOut: false };
+  }
+}
+
+export function bootstrapLaunchAgent(): { plistPath: string; bootstrapped: boolean } {
+  const plistPath = launchAgentPath();
+  if (!existsSync(plistPath)) {
+    return { plistPath, bootstrapped: false };
+  }
+
+  try {
+    execFileSync("launchctl", ["bootstrap", `gui/${currentUid()}`, plistPath], { stdio: "ignore" });
+    return { plistPath, bootstrapped: true };
+  } catch {
+    return { plistPath, bootstrapped: false };
+  }
 }
 
 export function installLaunchAgent(appPath?: string): { plistPath: string; appPath: string } {
@@ -289,6 +342,7 @@ export function getAppBundleInfo(appPath?: string): Record<string, unknown> {
     appPath: resolvedAppPath,
     executablePath: appExecutablePath(resolvedAppPath),
     infoPath,
+    version: getAppBundleVersion(resolvedAppPath),
     bundleIdentifier: isValidCuedAppBundle(resolvedAppPath) ? APP_BUNDLE_IDENTIFIER : null,
     infoPlistPreview: existsSync(infoPath) ? readFileSync(infoPath, "utf8").slice(0, 800) : null,
   };

@@ -1028,11 +1028,14 @@ function projectMessageEvent(
   const desiredAttachmentIds = new Set<string>();
   for (const [index, attachment] of (payload.attachments ?? []).entries()) {
     const normalizedAttachment = normalizeAttachmentObject(attachment) ?? {};
-    const sourceAttachmentKey =
-      normalizeText(normalizedAttachment.sourceAttachmentKey) ??
+    const explicitSourceAttachmentKey = normalizeText(normalizedAttachment.sourceAttachmentKey);
+    const attachmentIdentity =
+      explicitSourceAttachmentKey ??
       normalizeText(normalizedAttachment.id) ??
       normalizeText(normalizedAttachment.url) ??
-      `${payload.sourceMessageKey}:${index}`;
+      String(index);
+    const sourceAttachmentKey =
+      explicitSourceAttachmentKey ?? `${payload.sourceMessageKey}:${attachmentIdentity}`;
     const attachmentId = hashId("attachment", `${messageId}:${sourceAttachmentKey}`);
     desiredAttachmentIds.add(attachmentId);
     const inferred = inferAttachmentProjection(normalizedAttachment);
