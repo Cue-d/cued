@@ -698,6 +698,26 @@ final class DaemonSupervisor {
     return runShellCommandAndCapture(command, environment: daemonEnvironment())
   }
 
+  nonisolated func launchCLI(arguments: [String]) -> Bool {
+    if let daemonLaunchPath, !daemonLaunchPath.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+      let process = Process()
+      process.executableURL = URL(fileURLWithPath: daemonLaunchPath)
+      process.arguments = arguments
+      process.environment = daemonEnvironment()
+      process.standardOutput = nil
+      process.standardError = nil
+      do {
+        try process.run()
+        return true
+      } catch {
+        return false
+      }
+    }
+
+    let command = arguments.map(shellEscape).joined(separator: " ")
+    return launchShellCommand(command, environment: daemonEnvironment()) != nil
+  }
+
   private nonisolated func daemonEnvironment() -> [String: String] {
     var environment = ProcessInfo.processInfo.environment
 
