@@ -53,10 +53,13 @@ function normalizeSignalAttachments(
       (typeof attachment.mimetype === "string" && attachment.mimetype) ||
       null;
     const size =
-      (typeof attachment.size === "number" && attachment.size) ||
-      (typeof attachment.sizeBytes === "number" && attachment.sizeBytes) ||
-      (typeof attachment.length === "number" && attachment.length) ||
-      null;
+      typeof attachment.size === "number"
+        ? attachment.size
+        : typeof attachment.sizeBytes === "number"
+          ? attachment.sizeBytes
+          : typeof attachment.length === "number"
+            ? attachment.length
+            : null;
 
     return {
       id,
