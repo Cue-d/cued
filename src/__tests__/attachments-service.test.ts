@@ -207,4 +207,69 @@ describe("attachment service", () => {
 
     db.close();
   });
+
+  it("marks the cache entry as failed when payload acquisition throws", async () => {
+    const db = createDb();
+    const timestamp = Date.now();
+    const sql = sqlite(db);
+    sql
+      .prepare(
+        `
+        INSERT INTO conversations (
+          id, platform, account_key, source_conversation_key, native_conversation_key, type, subtype,
+          service, name, topic, participant_names, last_message_id, last_message_at, last_message_preview,
+          unread_count, created_at, updated_at
+        ) VALUES (?, 'imessage', 'local', ?, NULL, 'dm', NULL, 'iMessage', ?, NULL, '', NULL, NULL, NULL, 0, ?, ?)
+      `,
+      )
+      .run("conversation-3", "source-conversation-3", "Thread", timestamp, timestamp);
+    sql
+      .prepare(
+        `
+        INSERT INTO messages (
+          id, platform, account_key, platform_message_id, conversation_id, sender_contact_id,
+          sender_source_key, sender_name, conversation_name, sent_at, service, status, is_from_me,
+          content, delivered_at, read_at, edited_at, deleted_at, reply_to_message_id, is_deleted,
+          is_edited, attachment_count, reaction_count, created_at, updated_at
+        ) VALUES (?, 'imessage', 'local', ?, ?, NULL, NULL, 'Ben', 'Thread', ?, 'iMessage', 'delivered', 0, 'hello', NULL, NULL, NULL, NULL, NULL, 0, 0, 1, 0, ?, ?)
+      `,
+      )
+      .run("message-3", "platform-message-3", "conversation-3", timestamp, timestamp, timestamp);
+    sql
+      .prepare(
+        `
+        INSERT INTO message_attachments (
+          id, message_id, platform, account_key, source_attachment_key, kind, mime_type, filename,
+          title, local_path, remote_url, size_bytes, text_content, access_kind, access_ref_json,
+          preview_ref_json, availability_status, provider_metadata_json, metadata_json, created_at, updated_at
+        ) VALUES (?, ?, 'imessage', 'local', ?, 'file', 'text/plain', 'missing.txt', 'Missing', ?, NULL, ?, NULL, 'local_path', ?, NULL, 'available', '{}', '{}', ?, ?)
+      `,
+      )
+      .run(
+        "attachment-3",
+        "message-3",
+        "source-attachment-3",
+        "/definitely/missing/path.txt",
+        0,
+        JSON.stringify({ path: "/definitely/missing/path.txt" }),
+        timestamp,
+        timestamp,
+      );
+
+    await expect(
+      fetchAttachment(db, {
+        attachmentId: "attachment-3",
+      }),
+    ).rejects.toThrow("Attachment source path does not exist");
+
+    const cacheEntry = db.getAttachmentCacheEntry("attachment-3", "original");
+    expect(cacheEntry).toEqual(
+      expect.objectContaining({
+        status: "failed",
+      }),
+    );
+    expect(cacheEntry?.last_error).toContain("Attachment source path does not exist");
+
+    db.close();
+  });
 });
