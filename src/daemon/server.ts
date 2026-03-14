@@ -55,7 +55,9 @@ import {
 } from "../projector/projector.js";
 import { IntegrationAuthService } from "../services/integration-auth.js";
 import {
+  buildProjectionMessageHookBatches,
   ProjectionMessageHookBarrier,
+  type ProjectionMessageHookPayload,
   type ProjectionRunDetails,
   parseProjectionRunDetails,
 } from "../services/projection.js";
@@ -150,10 +152,11 @@ type PendingSignalEcho = {
 };
 
 function collectInboundMessages(
-  rawEvents: ProviderRawEventInput[],
-): Array<Record<string, unknown>> {
-  const inboundMessages: Array<Record<string, unknown>> = [];
-  for (const rawEvent of rawEvents) {
+  insertedRows: Array<{ rowId: number; event: ProviderRawEventInput }>,
+): Array<{ rowId: number; message: Record<string, unknown> }> {
+  const inboundMessages: Array<{ rowId: number; message: Record<string, unknown> }> = [];
+  for (const insertedRow of insertedRows) {
+    const rawEvent = insertedRow.event;
     if (
       !isInboundMessageEvent({ ...rawEvent, payload: rawEvent.payload as Record<string, unknown> })
     ) {
@@ -161,10 +164,13 @@ function collectInboundMessages(
     }
 
     inboundMessages.push({
-      platform: rawEvent.platform,
-      accountKey: rawEvent.accountKey,
-      observedAt: rawEvent.observedAt,
-      payload: rawEvent.payload,
+      rowId: insertedRow.rowId,
+      message: {
+        platform: rawEvent.platform,
+        accountKey: rawEvent.accountKey,
+        observedAt: rawEvent.observedAt,
+        payload: rawEvent.payload,
+      },
     });
   }
   return inboundMessages;
@@ -776,19 +782,29 @@ export async function runDaemon(): Promise<void> {
   const queueMessageReceivedHooks = (
     range: { startRowId: number; endRowId: number } | null,
     runId: string,
-    inboundMessages: Array<Record<string, unknown>>,
+    inboundMessages: Array<{ rowId: number; message: Record<string, unknown> }>,
   ) => {
     if (!range || inboundMessages.length === 0) {
       return;
     }
 
-    projectionMessageHooks.enqueue(
+    const batches = buildProjectionMessageHookBatches(
       range,
-      inboundMessages.map((message) => ({
-        runId,
-        message,
-      })),
+      inboundMessages.map(
+        (entry) =>
+          ({
+            rowId: entry.rowId,
+            payload: {
+              runId,
+              message: entry.message,
+            },
+          }) satisfies ProjectionMessageHookPayload,
+      ),
+      projectionBatchSize,
     );
+    for (const batch of batches) {
+      projectionMessageHooks.enqueue(batch, batch.payloads);
+    }
   };
 
   const scheduleSignalSendEchoCatchup = (message: OutboundMessageRow, timestamp: number) => {
@@ -989,7 +1005,7 @@ export async function runDaemon(): Promise<void> {
         }
       }
 
-      const inboundMessages = collectInboundMessages(insertResult.insertedEvents);
+      const inboundMessages = collectInboundMessages(insertResult.insertedRows);
       queueMessageReceivedHooks(
         insertResult.firstInsertedRowId != null && insertResult.lastInsertedRowId != null
           ? {
@@ -1146,7 +1162,7 @@ export async function runDaemon(): Promise<void> {
         updateWhatsAppCheckpointFromRealtime(accountKey);
       }
 
-      const inboundMessages = collectInboundMessages(insertResult.insertedEvents);
+      const inboundMessages = collectInboundMessages(insertResult.insertedRows);
       queueMessageReceivedHooks(
         insertResult.firstInsertedRowId != null && insertResult.lastInsertedRowId != null
           ? {
@@ -1881,7 +1897,7 @@ export async function runDaemon(): Promise<void> {
         });
       }
       const afterRealtimeProjection = now();
-      const inboundMessages = collectInboundMessages(insertResult.insertedEvents);
+      const inboundMessages = collectInboundMessages(insertResult.insertedRows);
       queueMessageReceivedHooks(
         insertResult.firstInsertedRowId != null && insertResult.lastInsertedRowId != null
           ? {
