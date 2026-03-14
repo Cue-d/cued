@@ -55,6 +55,9 @@ export interface WhatsAppHelperStatus {
   lastHistorySyncType: string | null;
   lastHistoryChunkOrder: number | null;
   lastHistoryProgress: number | null;
+  queuedHistorySyncCount: number | null;
+  lastHistorySyncError: string | null;
+  lastHistoryNotificationAt: number | null;
 }
 
 export function inspectWhatsAppHelper(): WhatsAppHelperInspection {
@@ -96,6 +99,9 @@ export async function readWhatsAppHelperStatus(storeDir: string): Promise<WhatsA
       lastHistorySyncType: null,
       lastHistoryChunkOrder: null,
       lastHistoryProgress: null,
+      queuedHistorySyncCount: null,
+      lastHistorySyncError: null,
+      lastHistoryNotificationAt: null,
     };
   }
 
@@ -112,19 +118,31 @@ export async function readWhatsAppHelperStatus(storeDir: string): Promise<WhatsA
     lastHistorySyncType?: unknown;
     lastHistoryChunkOrder?: unknown;
     lastHistoryProgress?: unknown;
+    queuedHistorySyncCount?: unknown;
+    lastHistorySyncError?: unknown;
+    lastHistoryNotificationAt?: unknown;
   };
   return {
     authenticated: parsed.authenticated === true,
     accountJid: typeof parsed.accountJid === "string" ? parsed.accountJid : null,
     pushName: typeof parsed.pushName === "string" ? parsed.pushName : null,
     helperVersion: typeof parsed.helperVersion === "string" ? parsed.helperVersion : null,
-    lastHistorySyncAt: typeof parsed.lastHistorySyncAt === "number" ? parsed.lastHistorySyncAt : null,
+    lastHistorySyncAt:
+      typeof parsed.lastHistorySyncAt === "number" ? parsed.lastHistorySyncAt : null,
     lastHistorySyncType:
       typeof parsed.lastHistorySyncType === "string" ? parsed.lastHistorySyncType : null,
     lastHistoryChunkOrder:
       typeof parsed.lastHistoryChunkOrder === "number" ? parsed.lastHistoryChunkOrder : null,
     lastHistoryProgress:
       typeof parsed.lastHistoryProgress === "number" ? parsed.lastHistoryProgress : null,
+    queuedHistorySyncCount:
+      typeof parsed.queuedHistorySyncCount === "number" ? parsed.queuedHistorySyncCount : null,
+    lastHistorySyncError:
+      typeof parsed.lastHistorySyncError === "string" ? parsed.lastHistorySyncError : null,
+    lastHistoryNotificationAt:
+      typeof parsed.lastHistoryNotificationAt === "number"
+        ? parsed.lastHistoryNotificationAt
+        : null,
   };
 }
 
@@ -160,6 +178,7 @@ export function startWhatsAppPairSession(options: {
   let qrResolved = false;
   let qrRejected = false;
   let completionSettled = false;
+  let connectedResult: WhatsAppPairResult | null = null;
   let resolveQr!: (value: string) => void;
   let rejectQr!: (reason: Error) => void;
   let resolveCompletion!: (value: WhatsAppPairResult) => void;
@@ -204,14 +223,11 @@ export function startWhatsAppPairSession(options: {
       }
       if (parsed.event === "connected") {
         const data = parsed.data as WhatsAppHelperEventEnvelope<"connected">["data"];
-        if (!completionSettled) {
-          completionSettled = true;
-          resolveCompletion({
-            accountJid: data.accountJid,
-            pushName: data.pushName ?? null,
-            helperVersion: data.helperVersion ?? null,
-          });
-        }
+        connectedResult = {
+          accountJid: data.accountJid,
+          pushName: data.pushName ?? null,
+          helperVersion: data.helperVersion ?? null,
+        };
         continue;
       }
       if (parsed.event === "error") {
@@ -230,6 +246,11 @@ export function startWhatsAppPairSession(options: {
   child.once("exit", (code) => {
     if (code && code !== 0) {
       rejectPending(new Error(stderrBuffer.trim() || `WhatsApp helper exited with code ${code}`));
+      return;
+    }
+    if (!completionSettled && connectedResult) {
+      completionSettled = true;
+      resolveCompletion(connectedResult);
       return;
     }
     if (!completionSettled) {
