@@ -227,6 +227,7 @@ async function fetchSlackRemote(url: string, accountKey: string): Promise<Respon
   if (!cookie) {
     return authResponse;
   }
+  await authResponse.body?.cancel();
 
   return await fetch(url, {
     headers: {
