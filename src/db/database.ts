@@ -26,6 +26,7 @@ import type {
   UpdateReleaseState,
   UpdateStatusSnapshot,
 } from "../updater/types.js";
+import { safeParseJson, safeStringifyJson } from "./codecs.js";
 import { MIGRATIONS } from "./migrations.js";
 import * as schema from "./schema.js";
 
@@ -81,7 +82,8 @@ export interface QueuedSyncRun {
   run_type: SyncRunType;
   status: SyncRunStatus;
   trigger: string;
-  started_at: number;
+  queued_at: number;
+  started_at: number | null;
   details_json: string | null;
 }
 
@@ -261,18 +263,6 @@ function now(): number {
   return Date.now();
 }
 
-function parseJsonSetting<T>(value: string | null): T | null {
-  if (!value) {
-    return null;
-  }
-
-  try {
-    return JSON.parse(value) as T;
-  } catch {
-    return null;
-  }
-}
-
 function chunkArray<T>(items: readonly T[], size: number): T[][] {
   const chunks: T[][] = [];
   for (let index = 0; index < items.length; index += size) {
@@ -410,38 +400,43 @@ export class CuedDatabase {
   }
 
   setUpdateReleaseState(value: UpdateReleaseState | null): void {
-    this.setAppSetting(APP_SETTING_KEYS.updateReleaseState, value ? JSON.stringify(value) : null);
+    this.setAppSetting(APP_SETTING_KEYS.updateReleaseState, safeStringifyJson(value));
     if (value) {
       this.markReleaseCheck(value.checkedAt);
     }
   }
 
   setUpdatePendingRollback(value: PendingRollbackState | null): void {
-    this.setAppSetting(
-      APP_SETTING_KEYS.updatePendingRollback,
-      value ? JSON.stringify(value) : null,
-    );
+    this.setAppSetting(APP_SETTING_KEYS.updatePendingRollback, safeStringifyJson(value));
   }
 
   setUpdateLastError(value: UpdateErrorState | null): void {
-    this.setAppSetting(APP_SETTING_KEYS.updateLastError, value ? JSON.stringify(value) : null);
+    this.setAppSetting(APP_SETTING_KEYS.updateLastError, safeStringifyJson(value));
   }
 
   getUpdateReleaseState(): UpdateReleaseState | null {
-    return parseJsonSetting<UpdateReleaseState>(
+    return safeParseJson<UpdateReleaseState | null>(
       this.getAppSetting(APP_SETTING_KEYS.updateReleaseState)?.value ?? null,
+      "app_settings.update_release_state_json",
+      null,
     );
   }
 
   getPendingRollbackState(): PendingRollbackState | null {
-    return parseJsonSetting<PendingRollbackState>(
+    return safeParseJson<PendingRollbackState | null>(
       this.getAppSetting(APP_SETTING_KEYS.updatePendingRollback)?.value ?? null,
+      "app_settings.update_pending_rollback_json",
+      null,
     );
   }
 
   getUpdateLastError(): UpdateErrorState | null {
     const raw = this.getAppSetting(APP_SETTING_KEYS.updateLastError)?.value ?? null;
-    const parsed = parseJsonSetting<UpdateErrorState>(raw);
+    const parsed = safeParseJson<UpdateErrorState | null>(
+      raw,
+      "app_settings.update_last_error_json",
+      null,
+    );
     if (parsed) {
       return parsed;
     }
@@ -481,14 +476,22 @@ export class CuedDatabase {
       installedAppVersion: byKey.get(APP_SETTING_KEYS.installedAppVersion) ?? null,
       lastReleaseCheckAt: Number.isFinite(lastReleaseCheckAt) ? lastReleaseCheckAt : null,
       cliSymlinkInstalled: (byKey.get(APP_SETTING_KEYS.cliSymlinkInstalled) ?? "0") === "1",
-      updateReleaseState: parseJsonSetting<UpdateReleaseState>(
+      updateReleaseState: safeParseJson<UpdateReleaseState | null>(
         byKey.get(APP_SETTING_KEYS.updateReleaseState) ?? null,
+        "app_settings.update_release_state_json",
+        null,
       ),
-      updatePendingRollback: parseJsonSetting<PendingRollbackState>(
+      updatePendingRollback: safeParseJson<PendingRollbackState | null>(
         byKey.get(APP_SETTING_KEYS.updatePendingRollback) ?? null,
+        "app_settings.update_pending_rollback_json",
+        null,
       ),
       updateLastError:
-        parseJsonSetting<UpdateErrorState>(byKey.get(APP_SETTING_KEYS.updateLastError) ?? null) ??
+        safeParseJson<UpdateErrorState | null>(
+          byKey.get(APP_SETTING_KEYS.updateLastError) ?? null,
+          "app_settings.update_last_error_json",
+          null,
+        ) ??
         (byKey.get(APP_SETTING_KEYS.updateLastError)
           ? {
               at: now(),
@@ -535,7 +538,7 @@ export class CuedDatabase {
         updatedAt: input.updatedAt,
         status: input.status,
         version: input.version ?? null,
-        detailsJson: input.details ? JSON.stringify(input.details) : null,
+        detailsJson: safeStringifyJson(input.details),
       })
       .onConflictDoUpdate({
         target: daemonState.singletonKey,
@@ -545,7 +548,7 @@ export class CuedDatabase {
           updatedAt: input.updatedAt,
           status: input.status,
           version: input.version ?? null,
-          detailsJson: input.details ? JSON.stringify(input.details) : null,
+          detailsJson: safeStringifyJson(input.details),
         },
       })
       .run();
@@ -863,8 +866,8 @@ export class CuedDatabase {
       launchStrategy: input.launchStrategy ?? null,
       launchTarget: input.launchTarget ?? null,
       importedFrom: input.importedFrom ?? null,
-      artifactPathsJson: input.artifactPaths ? JSON.stringify(input.artifactPaths) : null,
-      metadataJson: input.metadata ? JSON.stringify(input.metadata) : null,
+      artifactPathsJson: safeStringifyJson(input.artifactPaths),
+      metadataJson: safeStringifyJson(input.metadata),
       lastSeenAt: timestamp,
       createdAt: timestamp,
       updatedAt: timestamp,
@@ -1015,7 +1018,7 @@ export class CuedDatabase {
         finishedAt: null,
         keychainService: null,
         keychainAccount: null,
-        resultSummaryJson: input.resultSummary ? JSON.stringify(input.resultSummary) : null,
+        resultSummaryJson: safeStringifyJson(input.resultSummary),
         errorSummary: input.errorSummary ?? null,
         createdAt: timestamp,
         updatedAt: timestamp,
@@ -1054,9 +1057,7 @@ export class CuedDatabase {
         resultSummaryJson:
           input.resultSummary === undefined
             ? current.result_summary_json
-            : input.resultSummary === null
-              ? null
-              : JSON.stringify(input.resultSummary),
+            : safeStringifyJson(input.resultSummary),
         errorSummary: input.errorSummary === undefined ? current.error_summary : input.errorSummary,
         updatedAt: now(),
       })
@@ -1119,7 +1120,7 @@ export class CuedDatabase {
         startedAt: null,
         finishedAt: null,
         lastError: null,
-        metadataJson: input.metadata ? JSON.stringify(input.metadata) : null,
+        metadataJson: safeStringifyJson(input.metadata),
         createdAt: timestamp,
         updatedAt: timestamp,
       })
@@ -1648,7 +1649,7 @@ export class CuedDatabase {
           id: syncRuns.id,
         })
         .from(syncRuns)
-        .where(sql`${syncRuns.status} IN ('running', 'ingesting', 'projecting')`)
+        .where(sql`${syncRuns.status} IN ('ingesting', 'projecting')`)
         .all();
 
       if (stuckRuns.length === 0) {
@@ -1688,6 +1689,7 @@ export class CuedDatabase {
     details?: unknown;
   }): string {
     const id = randomUUID();
+    const queuedAt = now();
     this.db
       .insert(syncRuns)
       .values({
@@ -1697,9 +1699,10 @@ export class CuedDatabase {
         runType: input.runType,
         status: "queued",
         trigger: input.trigger,
-        startedAt: now(),
+        queuedAt,
+        startedAt: null,
         finishedAt: null,
-        detailsJson: input.details ? JSON.stringify(input.details) : null,
+        detailsJson: safeStringifyJson(input.details),
       })
       .run();
     return id;
@@ -1732,9 +1735,10 @@ export class CuedDatabase {
             runType: input.runType,
             status: "queued" as const,
             trigger: input.trigger,
-            startedAt: queuedAt,
+            queuedAt,
+            startedAt: null,
             finishedAt: null,
-            detailsJson: input.details ? JSON.stringify(input.details) : null,
+            detailsJson: safeStringifyJson(input.details),
           };
         });
 
@@ -1755,7 +1759,7 @@ export class CuedDatabase {
           and(
             eq(syncRuns.platform, platform),
             accountPredicate,
-            sql`${syncRuns.status} IN ('queued', 'running', 'ingesting')`,
+            sql`${syncRuns.status} IN ('queued', 'ingesting')`,
           ),
         )
         .limit(1)
@@ -1771,7 +1775,7 @@ export class CuedDatabase {
         .where(
           and(
             inArray(syncRuns.runType, ["project", "rebuild"]),
-            sql`${syncRuns.status} IN ('queued', 'running', 'projecting')`,
+            sql`${syncRuns.status} IN ('queued', 'projecting')`,
           ),
         )
         .limit(1)
@@ -1806,7 +1810,8 @@ export class CuedDatabase {
     run_type: SyncRunType;
     status: SyncRunStatus;
     trigger: string;
-    started_at: number;
+    queued_at: number;
+    started_at: number | null;
     finished_at: number | null;
   }> {
     return this.db
@@ -1817,11 +1822,12 @@ export class CuedDatabase {
         run_type: syncRuns.runType,
         status: syncRuns.status,
         trigger: syncRuns.trigger,
+        queued_at: syncRuns.queuedAt,
         started_at: syncRuns.startedAt,
         finished_at: syncRuns.finishedAt,
       })
       .from(syncRuns)
-      .orderBy(desc(syncRuns.startedAt))
+      .orderBy(desc(syncRuns.queuedAt))
       .limit(limit)
       .all() as Array<{
       id: string;
@@ -1830,7 +1836,8 @@ export class CuedDatabase {
       run_type: SyncRunType;
       status: SyncRunStatus;
       trigger: string;
-      started_at: number;
+      queued_at: number;
+      started_at: number | null;
       finished_at: number | null;
     }>;
   }
@@ -1853,12 +1860,13 @@ export class CuedDatabase {
           run_type: syncRuns.runType,
           status: syncRuns.status,
           trigger: syncRuns.trigger,
+          queued_at: syncRuns.queuedAt,
           started_at: syncRuns.startedAt,
           details_json: syncRuns.detailsJson,
         })
         .from(syncRuns)
         .where(statusPredicate)
-        .orderBy(asc(syncRuns.startedAt))
+        .orderBy(asc(syncRuns.queuedAt))
         .limit(1)
         .get() as
         | {
@@ -1868,7 +1876,8 @@ export class CuedDatabase {
             run_type: SyncRunType;
             status: SyncRunStatus;
             trigger: string;
-            started_at: number;
+            queued_at: number;
+            started_at: number | null;
             details_json: string | null;
           }
         | undefined;
@@ -1877,17 +1886,27 @@ export class CuedDatabase {
         return null;
       }
 
-      tx.update(syncRuns).set({ status: nextStatus }).where(eq(syncRuns.id, row.id)).run();
+      const startedAt = now();
+      tx.update(syncRuns)
+        .set({ status: nextStatus, startedAt })
+        .where(eq(syncRuns.id, row.id))
+        .run();
 
-      return { ...row, status: nextStatus };
+      return { ...row, status: nextStatus, started_at: startedAt };
     });
   }
 
   updateRunStatus(runId: string, status: SyncRunStatus, details?: unknown): void {
     const values: {
       status: SyncRunStatus;
-      detailsJson?: string;
-    } = details === undefined ? { status } : { status, detailsJson: JSON.stringify(details) };
+      detailsJson?: string | null;
+    } =
+      details === undefined
+        ? { status }
+        : {
+            status,
+            detailsJson: safeStringifyJson(details),
+          };
 
     this.db.update(syncRuns).set(values).where(eq(syncRuns.id, runId)).run();
   }
@@ -1896,7 +1915,7 @@ export class CuedDatabase {
     const values: {
       status: SyncRunStatus;
       finishedAt: number;
-      detailsJson?: string;
+      detailsJson?: string | null;
     } =
       details === undefined
         ? {
@@ -1906,7 +1925,7 @@ export class CuedDatabase {
         : {
             status: "completed",
             finishedAt: now(),
-            detailsJson: JSON.stringify(details),
+            detailsJson: safeStringifyJson(details),
           };
 
     this.db.update(syncRuns).set(values).where(eq(syncRuns.id, runId)).run();
@@ -1917,7 +1936,7 @@ export class CuedDatabase {
       const values: {
         status: SyncRunStatus;
         finishedAt: number;
-        detailsJson?: string;
+        detailsJson?: string | null;
       } =
         details === undefined
           ? {
@@ -1927,7 +1946,7 @@ export class CuedDatabase {
           : {
               status: "failed",
               finishedAt: now(),
-              detailsJson: JSON.stringify(details),
+              detailsJson: safeStringifyJson(details),
             };
 
       tx.update(syncRuns).set(values).where(eq(syncRuns.id, runId)).run();
@@ -1937,7 +1956,7 @@ export class CuedDatabase {
           id: randomUUID(),
           syncRunId: runId,
           errorMessage,
-          detailsJson: details ? JSON.stringify(details) : null,
+          detailsJson: safeStringifyJson(details),
           createdAt: now(),
         })
         .run();
@@ -1958,7 +1977,7 @@ export class CuedDatabase {
       accountKey: input.accountKey,
       displayName: input.displayName ?? null,
       status: input.status ?? "active",
-      metadataJson: input.metadata ? JSON.stringify(input.metadata) : null,
+      metadataJson: safeStringifyJson(input.metadata),
       createdAt: timestamp,
       updatedAt: timestamp,
     };
@@ -2002,7 +2021,7 @@ export class CuedDatabase {
               accountKey: input.accountKey,
               displayName: input.displayName ?? null,
               status: input.status ?? "active",
-              metadataJson: input.metadata ? JSON.stringify(input.metadata) : null,
+              metadataJson: safeStringifyJson(input.metadata),
               createdAt: timestamp,
               updatedAt: timestamp,
             })),
@@ -2036,7 +2055,7 @@ export class CuedDatabase {
       id: `${input.platform}:${input.accountKey}`,
       platform: input.platform,
       accountKey: input.accountKey,
-      sourceCursorJson: input.sourceCursor ? JSON.stringify(input.sourceCursor) : null,
+      sourceCursorJson: safeStringifyJson(input.sourceCursor),
       rawIngestWatermark: input.rawIngestWatermark ?? 0,
       projectionWatermark: input.projectionWatermark ?? 0,
       syncMode: input.syncMode,
@@ -2084,9 +2103,9 @@ export class CuedDatabase {
         conversationExternalId: event.conversationExternalId ?? null,
         occurredAt: event.occurredAt ?? null,
         observedAt: event.observedAt,
-        cursorJson: event.cursor ? JSON.stringify(event.cursor) : null,
+        cursorJson: safeStringifyJson(event.cursor),
         dedupeKey: event.dedupeKey,
-        payloadJson: JSON.stringify(event.payload),
+        payloadJson: safeStringifyJson(event.payload) ?? "null",
         sourceVersion: event.sourceVersion ?? null,
       })
       .onConflictDoNothing()
@@ -2142,9 +2161,9 @@ export class CuedDatabase {
               conversationExternalId: event.conversationExternalId ?? null,
               occurredAt: event.occurredAt ?? null,
               observedAt: event.observedAt,
-              cursorJson: event.cursor ? JSON.stringify(event.cursor) : null,
+              cursorJson: safeStringifyJson(event.cursor),
               dedupeKey: event.dedupeKey,
-              payloadJson: JSON.stringify(event.payload),
+              payloadJson: safeStringifyJson(event.payload) ?? "null",
               sourceVersion: event.sourceVersion ?? null,
             })),
           )
@@ -2360,12 +2379,13 @@ export class CuedDatabase {
           run_type: syncRuns.runType,
           status: syncRuns.status,
           trigger: syncRuns.trigger,
+          queued_at: syncRuns.queuedAt,
           started_at: syncRuns.startedAt,
           details_json: syncRuns.detailsJson,
         })
         .from(syncRuns)
         .where(and(eq(syncRuns.status, "queued"), eq(syncRuns.runType, "project")))
-        .orderBy(asc(syncRuns.startedAt))
+        .orderBy(asc(syncRuns.queuedAt))
         .limit(1)
         .get() as QueuedSyncRun | undefined) ?? null
     );
@@ -2375,7 +2395,7 @@ export class CuedDatabase {
     this.db
       .update(syncRuns)
       .set({
-        detailsJson: JSON.stringify(details),
+        detailsJson: safeStringifyJson(details),
       })
       .where(eq(syncRuns.id, runId))
       .run();

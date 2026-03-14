@@ -46,7 +46,15 @@ function sendSingleDaemonRequest(request: DaemonRequest): Promise<DaemonResponse
       if (newlineIndex >= 0) {
         const line = buffer.slice(0, newlineIndex);
         socket.end();
-        resolve(JSON.parse(line) as DaemonResponse);
+        try {
+          resolve(JSON.parse(line) as DaemonResponse);
+        } catch (error) {
+          reject(
+            new Error(
+              `Invalid daemon response: ${error instanceof Error ? error.message : String(error)}`,
+            ),
+          );
+        }
       }
     });
 

@@ -1,0 +1,82 @@
+import { safeParseJson } from "../db/codecs.js";
+
+export type ProjectionRunDetails = {
+  trigger: string;
+  startRowId: number;
+  endRowId: number;
+  projectionWatermark?: number;
+  maxRawEventRowid?: number;
+};
+
+type PendingMessageHookBatch = {
+  startRowId: number;
+  endRowId: number;
+  payloads: Array<Record<string, unknown>>;
+};
+
+export function parseProjectionRunDetails(detailsJson: string | null): ProjectionRunDetails | null {
+  const parsed = safeParseJson<Partial<ProjectionRunDetails> | null>(
+    detailsJson,
+    "sync_runs.details_json",
+    null,
+  );
+  if (!parsed || typeof parsed.startRowId !== "number" || typeof parsed.endRowId !== "number") {
+    return null;
+  }
+
+  return {
+    trigger: typeof parsed.trigger === "string" ? parsed.trigger : "unknown",
+    startRowId: parsed.startRowId,
+    endRowId: parsed.endRowId,
+    projectionWatermark:
+      typeof parsed.projectionWatermark === "number" ? parsed.projectionWatermark : undefined,
+    maxRawEventRowid:
+      typeof parsed.maxRawEventRowid === "number" ? parsed.maxRawEventRowid : undefined,
+  };
+}
+
+export class ProjectionMessageHookBarrier {
+  private readonly pending: PendingMessageHookBatch[] = [];
+
+  enqueue(
+    range: { startRowId: number; endRowId: number },
+    payloads: Array<Record<string, unknown>>,
+  ): void {
+    if (payloads.length === 0 || range.endRowId < range.startRowId) {
+      return;
+    }
+
+    this.pending.push({
+      startRowId: range.startRowId,
+      endRowId: range.endRowId,
+      payloads,
+    });
+    this.pending.sort((left, right) => left.startRowId - right.startRowId);
+  }
+
+  async releaseCompletedRange(
+    range: { startRowId: number; endRowId: number },
+    emit: (payload: Record<string, unknown>) => Promise<void>,
+  ): Promise<void> {
+    if (range.endRowId < range.startRowId || this.pending.length === 0) {
+      return;
+    }
+
+    const remaining: PendingMessageHookBatch[] = [];
+    for (const batch of this.pending) {
+      if (batch.startRowId >= range.startRowId && batch.endRowId <= range.endRowId) {
+        for (const payload of batch.payloads) {
+          await emit(payload);
+        }
+        continue;
+      }
+      remaining.push(batch);
+    }
+    this.pending.length = 0;
+    this.pending.push(...remaining);
+  }
+
+  clear(): void {
+    this.pending.length = 0;
+  }
+}
