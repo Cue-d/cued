@@ -17,9 +17,13 @@ RESOURCES_DIR="$CONTENTS_DIR/Resources"
 RUNTIME_DIR="$RESOURCES_DIR/cued-runtime"
 RUNTIME_NODE_ROOT="$RESOURCES_DIR/runtime/node"
 RUNTIME_NODE_BIN_DIR="$RUNTIME_NODE_ROOT/bin"
+PLAYWRIGHT_CHROMIUM_ROOT="$RESOURCES_DIR/runtime/chromium"
+PLAYWRIGHT_CHROMIUM_PAYLOAD_DIR="$PLAYWRIGHT_CHROMIUM_ROOT/chrome"
+PLAYWRIGHT_CHROMIUM_EXECUTABLE="$PLAYWRIGHT_CHROMIUM_PAYLOAD_DIR/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing"
 HELPERS_DIR="$RESOURCES_DIR/helpers"
 SIGNAL_FETCH_SCRIPT="$ROOT_DIR/scripts/fetch-signal-cli-macos.sh"
 NODE_RUNTIME_FETCH_SCRIPT="$ROOT_DIR/scripts/fetch-node-runtime-macos.sh"
+PLAYWRIGHT_CHROMIUM_FETCH_SCRIPT="$ROOT_DIR/scripts/fetch-playwright-chromium-macos.sh"
 JIT_RUNTIME_ENTITLEMENTS="$ROOT_DIR/scripts/packaging/jit-runtime.entitlements.plist"
 APP_PERMISSIONS_ENTITLEMENTS="$ROOT_DIR/scripts/packaging/app-permissions.entitlements.plist"
 SIGNAL_HELPER_SOURCE_DIR="$ROOT_DIR/native/helpers/signal-cli/.build/cued-signal-cli"
@@ -53,24 +57,50 @@ xml_escape() {
 }
 
 sign_app_bundle() {
+  sign_nested_binaries
+  sign_embedded_archives
+  sign_nested_code_containers
+  sign_macos_binary "$APP_BUNDLE" "$APP_PERMISSIONS_ENTITLEMENTS"
+}
+
+sign_macos_binary() {
+  local target="$1"
+  local entitlements="${2:-}"
+
   if [[ -n "${CUED_CODESIGN_IDENTITY:-}" ]]; then
-    sign_nested_binaries
+    if [[ -n "$entitlements" ]]; then
+      codesign \
+        --force \
+        --timestamp \
+        --options runtime \
+        --entitlements "$entitlements" \
+        --sign "$CUED_CODESIGN_IDENTITY" \
+        "$target" >/dev/null
+      return
+    fi
+
     codesign \
       --force \
       --timestamp \
       --options runtime \
-      --entitlements "$APP_PERMISSIONS_ENTITLEMENTS" \
       --sign "$CUED_CODESIGN_IDENTITY" \
-      "$APP_BUNDLE" >/dev/null
+      "$target" >/dev/null
+    return
+  fi
+
+  if [[ -n "$entitlements" ]]; then
+    codesign \
+      --force \
+      --entitlements "$entitlements" \
+      --sign - \
+      "$target" >/dev/null
     return
   fi
 
   codesign \
     --force \
-    --deep \
-    --entitlements "$APP_PERMISSIONS_ENTITLEMENTS" \
     --sign - \
-    "$APP_BUNDLE" >/dev/null
+    "$target" >/dev/null
 }
 
 runtime_entitlements_for_binary() {
@@ -80,7 +110,7 @@ runtime_entitlements_for_binary() {
     "$MACOS_DIR/$APP_EXECUTABLE_NAME")
       printf '%s\n' "$APP_PERMISSIONS_ENTITLEMENTS"
       ;;
-    "$RUNTIME_NODE_BIN_DIR/node"|"$HELPERS_DIR"/signal-cli/jre/Contents/Home/bin/java)
+    "$RUNTIME_NODE_BIN_DIR/node"|"$HELPERS_DIR"/signal-cli/jre/Contents/Home/bin/java|"$PLAYWRIGHT_CHROMIUM_ROOT"/*)
       printf '%s\n' "$JIT_RUNTIME_ENTITLEMENTS"
       ;;
   esac
@@ -96,24 +126,56 @@ sign_nested_binaries() {
     fi
 
     entitlements="$(runtime_entitlements_for_binary "$path")"
-    if [[ -n "$entitlements" ]]; then
-      codesign \
-        --force \
-        --timestamp \
-        --options runtime \
-        --entitlements "$entitlements" \
-        --sign "$CUED_CODESIGN_IDENTITY" \
-        "$path" >/dev/null
-      continue
-    fi
-
-    codesign \
-      --force \
-      --timestamp \
-      --options runtime \
-      --sign "$CUED_CODESIGN_IDENTITY" \
-      "$path" >/dev/null
+    sign_macos_binary "$path" "$entitlements"
   done < <(find "$APP_BUNDLE/Contents" -type f -print0 | sort -rz)
+}
+
+sign_archive_macos_binaries() {
+  local archive="$1"
+  local archive_abs
+  local temp_dir
+  local updated=0
+  local -a entries=()
+
+  archive_abs="$(cd "$(dirname "$archive")" && pwd)/$(basename "$archive")"
+  while IFS= read -r entry; do
+    entries+=("$entry")
+  done < <(zipinfo -1 "$archive_abs" | grep -E '\.(dylib|jnilib|node|so)$' || true)
+  if [[ "${#entries[@]}" -eq 0 ]]; then
+    return
+  fi
+
+  temp_dir="$(mktemp -d "${TMPDIR:-/tmp}/cued-archive-sign.XXXXXX")"
+  for entry in "${entries[@]}"; do
+    unzip -qq "$archive_abs" "$entry" -d "$temp_dir"
+    if file -b "$temp_dir/$entry" | grep -q "Mach-O"; then
+      sign_macos_binary "$temp_dir/$entry"
+      updated=1
+    fi
+  done
+
+  if [[ "$updated" -eq 1 ]]; then
+    (cd "$temp_dir" && zip -q -X "$archive_abs" "${entries[@]}")
+  fi
+
+  rm -rf "$temp_dir"
+}
+
+sign_embedded_archives() {
+  while IFS= read -r -d '' archive; do
+    sign_archive_macos_binaries "$archive"
+  done < <(find "$APP_BUNDLE/Contents" -type f \( -name '*.jar' -o -name '*.zip' \) -print0 | sort -z)
+}
+
+sign_nested_code_containers() {
+  while IFS= read -r -d '' info_plist; do
+    local bundle_root
+
+    bundle_root="$(dirname "$(dirname "$info_plist")")"
+    if [[ "$bundle_root" != "$APP_BUNDLE" ]]; then
+      sign_macos_binary "$bundle_root"
+    fi
+  done < <(find "$APP_BUNDLE/Contents" -type f -path '*/Contents/Info.plist' -print0 | sort -rz)
 }
 
 copy_better_sqlite3_binary() {
@@ -143,6 +205,7 @@ pnpm --dir "$ROOT_DIR" build >/dev/null
 swift build --package-path "$SWIFT_PACKAGE_DIR" -c release >/dev/null
 SWIFT_RESOURCE_BUNDLES=("$SWIFT_PACKAGE_DIR"/.build/*/release/*.bundle)
 NODE_RUNTIME_SOURCE_DIR="$(bash "$NODE_RUNTIME_FETCH_SCRIPT" "$NODE_VERSION" "$NODE_ARCH")"
+PLAYWRIGHT_CHROMIUM_SOURCE_DIR="$(bash "$PLAYWRIGHT_CHROMIUM_FETCH_SCRIPT")"
 bash "$SIGNAL_FETCH_SCRIPT" >/dev/null
 mkdir -p "$(dirname "$WHATSAPP_HELPER_SOURCE")"
 (cd "$ROOT_DIR/native/helpers/whatsapp-go" && GOWORK=off go build -o "$WHATSAPP_HELPER_SOURCE" .) >/dev/null
@@ -150,7 +213,13 @@ npm_config_ignore_scripts=true pnpm --dir "$ROOT_DIR" --filter . deploy --legacy
 copy_better_sqlite3_binary
 
 rm -rf "$APP_BUNDLE"
-mkdir -p "$MACOS_DIR" "$RESOURCES_DIR" "$RUNTIME_DIR" "$RUNTIME_NODE_BIN_DIR" "$HELPERS_DIR"
+mkdir -p \
+  "$MACOS_DIR" \
+  "$RESOURCES_DIR" \
+  "$RUNTIME_DIR" \
+  "$RUNTIME_NODE_BIN_DIR" \
+  "$PLAYWRIGHT_CHROMIUM_ROOT" \
+  "$HELPERS_DIR"
 
 cp "$SWIFT_BINARY" "$MACOS_DIR/$APP_EXECUTABLE_NAME"
 chmod +x "$MACOS_DIR/$APP_EXECUTABLE_NAME"
@@ -160,6 +229,7 @@ done
 cp "$NODE_RUNTIME_SOURCE_DIR/bin/node" "$RUNTIME_NODE_BIN_DIR/node"
 cp -R "$NODE_RUNTIME_SOURCE_DIR/lib" "$RUNTIME_NODE_ROOT/lib"
 chmod +x "$RUNTIME_NODE_BIN_DIR/node"
+cp -R "$PLAYWRIGHT_CHROMIUM_SOURCE_DIR" "$PLAYWRIGHT_CHROMIUM_PAYLOAD_DIR"
 cp -R "$DEPLOY_STAGING_DIR/." "$RUNTIME_DIR/"
 cp -R "$SIGNAL_HELPER_SOURCE_DIR" "$HELPERS_DIR/signal-cli"
 cp "$WHATSAPP_HELPER_SOURCE" "$HELPERS_DIR/cued-whatsapp-helper"
@@ -257,6 +327,7 @@ export CUED_BUNDLED_RUNTIME_ROOT="\${CUED_BUNDLED_RUNTIME_ROOT:-\$RUNTIME_ROOT}"
 export CUED_BUNDLED_SCRIPT_ROOT="\${CUED_BUNDLED_SCRIPT_ROOT:-\$SCRIPT_ROOT}"
 export CUED_IMESSAGE_NATIVE_BINARY="\${CUED_IMESSAGE_NATIVE_BINARY:-\$APP_EXEC}"
 export CUED_CONTACTS_NATIVE_BINARY="\${CUED_CONTACTS_NATIVE_BINARY:-\$APP_EXEC}"
+export CUED_CHROMIUM_EXECUTABLE_PATH="\${CUED_CHROMIUM_EXECUTABLE_PATH:-$PLAYWRIGHT_CHROMIUM_EXECUTABLE}"
 export CUED_WHATSAPP_HELPER_BINARY="\${CUED_WHATSAPP_HELPER_BINARY:-\$SCRIPT_DIR/helpers/cued-whatsapp-helper}"
 export CUED_APP_VERSION="\${CUED_APP_VERSION:-$APP_VERSION}"
 export CUED_RELEASE_CHANNEL="\${CUED_RELEASE_CHANNEL:-$RELEASE_CHANNEL}"
