@@ -9,6 +9,25 @@ private let appMessagesDBPath =
   FileManager.default.homeDirectoryForCurrentUser
   .appendingPathComponent("Library/Messages/chat.db").path
 
+private func environmentPath(_ name: String) -> String? {
+  let value = ProcessInfo.processInfo.environment[name]?.trimmingCharacters(in: .whitespacesAndNewlines)
+  return value?.isEmpty == false ? value : nil
+}
+
+private func configuredCuedHomePath() -> String {
+  if let cuedHome = environmentPath("CUED_HOME") {
+    return cuedHome
+  }
+  if let dbPath = environmentPath("CUED_DB_PATH") {
+    return URL(fileURLWithPath: dbPath).deletingLastPathComponent().path
+  }
+  return "\(NSHomeDirectory())/.cued"
+}
+
+private func configuredCuedDBPath() -> String {
+  environmentPath("CUED_DB_PATH") ?? "\(configuredCuedHomePath())/local.db"
+}
+
 struct AppIntegrationStatus {
   let platform: String
   let accountKey: String
@@ -2107,8 +2126,9 @@ func runMenuBarApp() {
   let permissionsCommand = (Bundle.main.object(forInfoDictionaryKey: "CuedPermissionsCommand") as? String)
     ?? ProcessInfo.processInfo.environment["CUED_PERMISSIONS_COMMAND"]
     ?? "cued permissions request --all"
-  let dbPath = (Bundle.main.object(forInfoDictionaryKey: "CuedDBPath") as? String)
-    ?? "\(NSHomeDirectory())/.cued/local.db"
+  let dbPath = environmentPath("CUED_DB_PATH")
+    ?? (Bundle.main.object(forInfoDictionaryKey: "CuedDBPath") as? String)
+    ?? configuredCuedDBPath()
 
   let app = NSApplication.shared
   let delegate = MenuBarAppController(
