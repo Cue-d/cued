@@ -184,6 +184,7 @@ public final class OnboardingViewModel: ObservableObject {
   @Published public var isRefreshing = false
   @Published public var platformConfigurations: [InstallerPlatformConfiguration] = []
   @Published public var permissionStatuses: [InstallerPermissionStatus] = installerDefaultPermissionStatuses()
+  @Published public private(set) var refreshSequence = 0
 
   public let pageWidth: CGFloat = OnboardingViewModel.windowWidth
 
@@ -231,6 +232,7 @@ public final class OnboardingViewModel: ObservableObject {
       setupIntegrations: integrations
     )
     isRefreshing = false
+    refreshSequence += 1
   }
 
   public func configuration(for platform: String) -> InstallerPlatformConfiguration? {
@@ -380,10 +382,7 @@ public struct CuedOnboardingView: View {
     ) { _ in
       onRefresh()
     }
-    .onChange(of: viewModel.permissionStatuses.map(\.id)) { _ in
-      pendingPermissionKeys.removeAll()
-    }
-    .onChange(of: viewModel.permissionStatuses.map(\.status)) { _ in
+    .onChange(of: viewModel.refreshSequence) { _ in
       pendingPermissionKeys.removeAll()
     }
     .onChange(of: platformRefreshSignature) { _ in
@@ -910,6 +909,12 @@ public struct CuedOnboardingView: View {
     for configuration: InstallerPlatformConfiguration,
     integration: InstallerIntegrationStatus
   ) -> (label: String, handler: () -> Void)? {
+    guard configuration.accounts.contains(where: {
+      $0.platform == integration.platform && $0.accountKey == integration.accountKey
+    }) else {
+      return nil
+    }
+
     guard configuration.isRequestable,
           integration.authState != "requested",
           integration.authState != "in_progress" else {
