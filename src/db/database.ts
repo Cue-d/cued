@@ -2116,6 +2116,7 @@ export class CuedDatabase {
   insertRawEvents(events: RawEventInput[]): {
     insertedCount: number;
     insertedEvents: RawEventInput[];
+    insertedRows: Array<{ rowId: number; event: RawEventInput }>;
     firstInsertedRowId: number | null;
     lastInsertedRowId: number | null;
   } {
@@ -2123,6 +2124,7 @@ export class CuedDatabase {
       return {
         insertedCount: 0,
         insertedEvents: [],
+        insertedRows: [],
         firstInsertedRowId: null,
         lastInsertedRowId: null,
       };
@@ -2206,9 +2208,16 @@ export class CuedDatabase {
       }
     }
     const insertedEvents = candidateEvents.filter((event) => insertedRowIds.has(event.id));
+    const insertedRows = insertedEvents
+      .map((event) => {
+        const rowId = insertedRowIds.get(event.id);
+        return rowId == null ? null : { rowId, event };
+      })
+      .filter((value): value is { rowId: number; event: RawEventInput } => value !== null);
     return {
       insertedCount: insertedEvents.length,
       insertedEvents,
+      insertedRows,
       firstInsertedRowId,
       lastInsertedRowId,
     };

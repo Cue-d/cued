@@ -14,6 +14,11 @@ type PendingMessageHookBatch = {
   payloads: Array<Record<string, unknown>>;
 };
 
+export type ProjectionMessageHookPayload = {
+  rowId: number;
+  payload: Record<string, unknown>;
+};
+
 export function parseProjectionRunDetails(detailsJson: string | null): ProjectionRunDetails | null {
   const parsed = safeParseJson<Partial<ProjectionRunDetails> | null>(
     detailsJson,
@@ -93,4 +98,41 @@ export class ProjectionMessageHookBarrier {
   clear(): void {
     this.pending.length = 0;
   }
+}
+
+export function buildProjectionMessageHookBatches(
+  range: { startRowId: number; endRowId: number },
+  payloads: ProjectionMessageHookPayload[],
+  batchSize: number,
+): Array<{
+  startRowId: number;
+  endRowId: number;
+  payloads: Array<Record<string, unknown>>;
+}> {
+  if (payloads.length === 0 || range.endRowId < range.startRowId || batchSize <= 0) {
+    return [];
+  }
+
+  const batches = new Map<number, PendingMessageHookBatch>();
+  for (const entry of payloads) {
+    if (entry.rowId < range.startRowId || entry.rowId > range.endRowId) {
+      continue;
+    }
+
+    const offset = entry.rowId - range.startRowId;
+    const batchStart = range.startRowId + Math.floor(offset / batchSize) * batchSize;
+    const batchEnd = Math.min(batchStart + batchSize - 1, range.endRowId);
+    const existing = batches.get(batchStart);
+    if (existing) {
+      existing.payloads.push(entry.payload);
+      continue;
+    }
+    batches.set(batchStart, {
+      startRowId: batchStart,
+      endRowId: batchEnd,
+      payloads: [entry.payload],
+    });
+  }
+
+  return [...batches.values()].sort((left, right) => left.startRowId - right.startRowId);
 }

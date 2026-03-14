@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { ProjectionMessageHookBarrier } from "../services/projection.js";
+import {
+  buildProjectionMessageHookBatches,
+  ProjectionMessageHookBarrier,
+} from "../services/projection.js";
 
 describe("ProjectionMessageHookBarrier", () => {
   it("releases only batches fully covered by completed projection ranges", async () => {
@@ -41,5 +44,30 @@ describe("ProjectionMessageHookBarrier", () => {
       emitted.push(String(payload.id));
     });
     expect(emitted).toEqual(["earlier-a", "earlier-b", "later"]);
+  });
+
+  it("splits queued hook payloads by projection page so paginated runs can release them", () => {
+    expect(
+      buildProjectionMessageHookBatches(
+        { startRowId: 100, endRowId: 2000 },
+        [
+          { rowId: 150, payload: { id: "page-1" } },
+          { rowId: 1100, payload: { id: "page-2" } },
+          { rowId: 1999, payload: { id: "page-2b" } },
+        ],
+        1000,
+      ),
+    ).toEqual([
+      {
+        startRowId: 100,
+        endRowId: 1099,
+        payloads: [{ id: "page-1" }],
+      },
+      {
+        startRowId: 1100,
+        endRowId: 2000,
+        payloads: [{ id: "page-2" }, { id: "page-2b" }],
+      },
+    ]);
   });
 });
