@@ -97,7 +97,11 @@ func TestResyncPageFiltersIncrementalUpdates(t *testing.T) {
 		t.Fatalf("applySnapshot failed: %v", err)
 	}
 
-	since := time.Now().UnixMilli() - 1
+	var since int64
+	if err := state.cache.db.QueryRow(`SELECT MAX(updated_at) FROM messages`).Scan(&since); err != nil {
+		t.Fatalf("failed to read message watermark: %v", err)
+	}
+	time.Sleep(time.Millisecond)
 	state.setMessage(messageSnapshot{
 		MessageID: "wamid-latest",
 		ChatJID:   "15551234567@s.whatsapp.net",

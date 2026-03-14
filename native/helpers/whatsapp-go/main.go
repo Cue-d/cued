@@ -478,6 +478,14 @@ func (c *syncCache) queryMessages(
 	offset int,
 	limit int,
 ) ([]messageSnapshot, int, int, error) {
+	tx, err := c.db.BeginTx(context.Background(), &sql.TxOptions{ReadOnly: true})
+	if err != nil {
+		return nil, 0, 0, err
+	}
+	defer func() {
+		_ = tx.Rollback()
+	}()
+
 	countQuery := `SELECT COUNT(*) FROM messages`
 	selectQuery := `SELECT chat_jid, message_id, sender_jid, participant_jid, from_me, timestamp, text, push_name, status, delivered_at, read_at FROM messages`
 	args := []any{}
@@ -487,7 +495,7 @@ func (c *syncCache) queryMessages(
 		args = append(args, *sinceMS)
 	}
 	var total int
-	if err := c.db.QueryRow(countQuery, args...).Scan(&total); err != nil {
+	if err := tx.QueryRow(countQuery, args...).Scan(&total); err != nil {
 		return nil, 0, 0, err
 	}
 	if limit < 0 {
@@ -496,7 +504,7 @@ func (c *syncCache) queryMessages(
 	}
 	selectQuery += ` ORDER BY timestamp, chat_jid, message_id LIMIT ? OFFSET ?`
 	selectArgs := append(append([]any{}, args...), limit, offset)
-	rows, err := c.db.Query(selectQuery, selectArgs...)
+	rows, err := tx.Query(selectQuery, selectArgs...)
 	if err != nil {
 		return nil, 0, 0, err
 	}
@@ -554,6 +562,9 @@ func (c *syncCache) queryMessages(
 		messages = append(messages, message)
 	}
 	if err := rows.Err(); err != nil {
+		return nil, 0, 0, err
+	}
+	if err := tx.Commit(); err != nil {
 		return nil, 0, 0, err
 	}
 	return messages, total, len(messages), nil
@@ -1433,6 +1444,7 @@ func initClient(storeDir string) (*helperState, *whatsmeow.Client, func(), error
 	}
 	deviceStore, container, err := openStore(storeDir)
 	if err != nil {
+		_ = state.close()
 		return nil, nil, nil, err
 	}
 	client := whatsmeow.NewClient(deviceStore, nil)
