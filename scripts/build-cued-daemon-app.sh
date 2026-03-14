@@ -116,6 +116,16 @@ runtime_entitlements_for_binary() {
   esac
 }
 
+runtime_entitlements_for_bundle() {
+  local target="$1"
+
+  case "$target" in
+    "$PLAYWRIGHT_CHROMIUM_ROOT"/*)
+      printf '%s\n' "$JIT_RUNTIME_ENTITLEMENTS"
+      ;;
+  esac
+}
+
 sign_nested_binaries() {
   local path
   local entitlements
@@ -170,10 +180,12 @@ sign_embedded_archives() {
 sign_nested_code_containers() {
   while IFS= read -r -d '' info_plist; do
     local bundle_root
+    local entitlements
 
     bundle_root="$(dirname "$(dirname "$info_plist")")"
     if [[ "$bundle_root" != "$APP_BUNDLE" ]]; then
-      sign_macos_binary "$bundle_root"
+      entitlements="$(runtime_entitlements_for_bundle "$bundle_root")"
+      sign_macos_binary "$bundle_root" "$entitlements"
     fi
   done < <(find "$APP_BUNDLE/Contents" -type f -path '*/Contents/Info.plist' -print0 | sort -rz)
 }
