@@ -444,6 +444,12 @@ describe("CuedDatabase", () => {
     expect(db.listRecentRuns(2).some((run) => run.id === failedId && run.status === "failed")).toBe(
       true,
     );
+    expect(db.getLatestSyncRunError("linkedin", "default")).toEqual({
+      sync_run_id: failedId,
+      error_message: "boom",
+      created_at: expect.any(Number),
+      details_json: JSON.stringify({ code: "x" }),
+    });
 
     db.close();
   });
@@ -494,6 +500,8 @@ describe("CuedDatabase", () => {
       sync_mode: "incremental",
       raw_ingest_watermark: 6,
       projection_watermark: 4,
+      last_success_at: 1_700_000_000_500,
+      last_error_summary: "none",
     });
     expect(db.listCheckpointSummary()).toEqual([
       {
@@ -504,6 +512,15 @@ describe("CuedDatabase", () => {
         last_error_summary: "none",
       },
     ]);
+    db.recordCheckpointError("contacts", "local", "sync failed");
+    expect(db.getCheckpoint("contacts", "local")).toEqual({
+      source_cursor_json: JSON.stringify({ snapshotAt: 456 }),
+      sync_mode: "incremental",
+      raw_ingest_watermark: 6,
+      projection_watermark: 4,
+      last_success_at: 1_700_000_000_500,
+      last_error_summary: "sync failed",
+    });
     expect(db.listCheckpointPlatforms()).toEqual(["contacts"]);
     expect(db.listRawEvents()).toEqual([
       {

@@ -834,6 +834,23 @@ function ensureRequestableIntegrationState(
   return getIntegrationSummary(db, normalized, resolvedAccountKey);
 }
 
+function cancelStaleAuthSessions(db: CuedDatabase, platform: Platform, accountKey: string): void {
+  for (const session of db.listAuthSessions(100)) {
+    if (session.platform !== platform || session.account_key !== accountKey) {
+      continue;
+    }
+    if (session.state !== "requested" && session.state !== "in_progress") {
+      continue;
+    }
+    db.updateAuthSessionState({
+      id: session.id,
+      state: "cancelled",
+      finishedAt: now(),
+      errorSummary: "Superseded by a newer auth session request",
+    });
+  }
+}
+
 export function requestIntegrationAccess(
   db: CuedDatabase,
   platform: string,
@@ -843,6 +860,7 @@ export function requestIntegrationAccess(
   authSession: AuthSessionSummary;
 } {
   const integration = ensureRequestableIntegrationState(db, platform, accountKey);
+  cancelStaleAuthSessions(db, integration.platform, integration.accountKey);
   const sessionId = db.createAuthSession({
     platform: integration.platform,
     accountKey: integration.accountKey,

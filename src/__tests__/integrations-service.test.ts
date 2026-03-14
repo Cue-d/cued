@@ -188,4 +188,18 @@ describe("integration state management", () => {
     );
     db.close();
   });
+
+  it("cancels older pending auth sessions before creating a new request", () => {
+    const db = createDb();
+
+    const first = requestIntegrationAccess(db, "whatsapp");
+    const second = requestIntegrationAccess(db, "whatsapp");
+
+    expect(db.getAuthSession(first.authSession.id)?.state).toBe("cancelled");
+    expect(db.getAuthSession(first.authSession.id)?.error_summary).toBe(
+      "Superseded by a newer auth session request",
+    );
+    expect(second.authSession.state).toBe("requested");
+    db.close();
+  });
 });
