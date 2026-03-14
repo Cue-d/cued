@@ -24,4 +24,22 @@ describe("ProjectionMessageHookBarrier", () => {
     });
     expect(emitted).toEqual(["first-a", "first-b", "second"]);
   });
+
+  it("flushes all pending batches in row order", async () => {
+    const barrier = new ProjectionMessageHookBarrier();
+    const emitted: string[] = [];
+
+    barrier.enqueue({ startRowId: 20, endRowId: 21 }, [{ id: "later" }]);
+    barrier.enqueue({ startRowId: 10, endRowId: 12 }, [{ id: "earlier-a" }, { id: "earlier-b" }]);
+
+    await barrier.releaseAll(async (payload) => {
+      emitted.push(String(payload.id));
+    });
+    expect(emitted).toEqual(["earlier-a", "earlier-b", "later"]);
+
+    await barrier.releaseAll(async (payload) => {
+      emitted.push(String(payload.id));
+    });
+    expect(emitted).toEqual(["earlier-a", "earlier-b", "later"]);
+  });
 });
