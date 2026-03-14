@@ -456,13 +456,16 @@ export async function fetchAttachment(
     expiresAt: existing?.expires_at ?? null,
     lastError: null,
   });
-
-  const { tempPath, mimeType, filename } = await acquireAttachmentPayload(
-    attachment,
-    input.providerFetchers ?? {},
-  );
+  let tempPath: string | null = null;
+  let mimeType: string | null = existing?.mime_type ?? attachment.mime_type;
+  let filename: string | null = attachment.filename;
 
   try {
+    const payload = await acquireAttachmentPayload(attachment, input.providerFetchers ?? {});
+    tempPath = payload.tempPath;
+    mimeType = payload.mimeType ?? mimeType;
+    filename = payload.filename ?? filename;
+
     const { sizeBytes, sha256 } = hashFile(tempPath);
     const maxBytes = input.maxBytes ?? DEFAULT_ATTACHMENT_FETCH_MAX_BYTES;
     if (!input.allowLarge && sizeBytes > maxBytes) {
@@ -528,7 +531,7 @@ export async function fetchAttachment(
     });
     throw error;
   } finally {
-    if (existsSync(tempPath)) {
+    if (tempPath && existsSync(tempPath)) {
       rmSync(tempPath, { force: true });
     }
   }
