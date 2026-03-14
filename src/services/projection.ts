@@ -76,6 +76,20 @@ export class ProjectionMessageHookBarrier {
     this.pending.push(...remaining);
   }
 
+  async releaseAll(emit: (payload: Record<string, unknown>) => Promise<void>): Promise<void> {
+    if (this.pending.length === 0) {
+      return;
+    }
+
+    const batches = [...this.pending].sort((left, right) => left.startRowId - right.startRowId);
+    this.pending.length = 0;
+    for (const batch of batches) {
+      for (const payload of batch.payloads) {
+        await emit(payload);
+      }
+    }
+  }
+
   clear(): void {
     this.pending.length = 0;
   }

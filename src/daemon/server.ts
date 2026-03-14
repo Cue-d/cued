@@ -2070,6 +2070,11 @@ export async function runDaemon(): Promise<void> {
         timings,
         range: projectionDetails,
       });
+      if (currentRun.run_type === "rebuild") {
+        await projectionMessageHooks.releaseAll(async (payload) => {
+          await safeEmitHookEvent("message.received", payload);
+        });
+      }
       const projectedRangeStart =
         deferredProjected?.rangeStartRowId ?? projectionDetails?.startRowId ?? null;
       const projectedRangeEnd =
@@ -2079,6 +2084,7 @@ export async function runDaemon(): Promise<void> {
             ? deferredProjected.nextStartRowId - 1
             : (deferredProjected.rangeEndRowId ?? projectionDetails?.endRowId ?? null);
       if (
+        currentRun.run_type !== "rebuild" &&
         projectedRangeStart != null &&
         projectedRangeEnd != null &&
         projectedRangeEnd >= projectedRangeStart
