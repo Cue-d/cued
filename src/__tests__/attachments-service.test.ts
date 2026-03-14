@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -8,8 +8,10 @@ import { CuedDatabase } from "../db/database.js";
 describe("attachment service", () => {
   const tempDirs: string[] = [];
   const cleanupPaths: string[] = [];
+  const originalHome = process.env.HOME;
 
   afterEach(() => {
+    process.env.HOME = originalHome;
     while (cleanupPaths.length > 0) {
       const path = cleanupPaths.pop();
       if (path) {
@@ -128,6 +130,80 @@ describe("attachment service", () => {
         messageId: "message-1",
       }),
     ]);
+
+    db.close();
+  });
+
+  it("expands home-relative access_ref paths when fetching local attachments", async () => {
+    const db = createDb();
+    const homeDir = mkdtempSync(join(tmpdir(), "cued-attachments-home-"));
+    tempDirs.push(homeDir);
+    process.env.HOME = homeDir;
+
+    const attachmentDir = join(homeDir, "Library", "Messages", "Attachments");
+    mkdirSync(attachmentDir, { recursive: true });
+    const sourcePath = join(attachmentDir, "note.txt");
+    writeFileSync(sourcePath, "attachment from tilde path\n");
+
+    const timestamp = Date.now();
+    const sql = sqlite(db);
+    sql
+      .prepare(
+        `
+        INSERT INTO conversations (
+          id, platform, account_key, source_conversation_key, native_conversation_key, type, subtype,
+          service, name, topic, participant_names, last_message_id, last_message_at, last_message_preview,
+          unread_count, created_at, updated_at
+        ) VALUES (?, 'imessage', 'local', ?, NULL, 'dm', NULL, 'iMessage', ?, NULL, '', NULL, NULL, NULL, 0, ?, ?)
+      `,
+      )
+      .run("conversation-2", "source-conversation-2", "Thread", timestamp, timestamp);
+    sql
+      .prepare(
+        `
+        INSERT INTO messages (
+          id, platform, account_key, platform_message_id, conversation_id, sender_contact_id,
+          sender_source_key, sender_name, conversation_name, sent_at, service, status, is_from_me,
+          content, delivered_at, read_at, edited_at, deleted_at, reply_to_message_id, is_deleted,
+          is_edited, attachment_count, reaction_count, created_at, updated_at
+        ) VALUES (?, 'imessage', 'local', ?, ?, NULL, NULL, 'Ben', 'Thread', ?, 'iMessage', 'delivered', 0, 'hello', NULL, NULL, NULL, NULL, NULL, 0, 0, 1, 0, ?, ?)
+      `,
+      )
+      .run("message-2", "platform-message-2", "conversation-2", timestamp, timestamp, timestamp);
+    sql
+      .prepare(
+        `
+        INSERT INTO message_attachments (
+          id, message_id, platform, account_key, source_attachment_key, kind, mime_type, filename,
+          title, local_path, remote_url, size_bytes, text_content, access_kind, access_ref_json,
+          preview_ref_json, availability_status, provider_metadata_json, metadata_json, created_at, updated_at
+        ) VALUES (?, ?, 'imessage', 'local', ?, 'file', 'text/plain', 'note.txt', 'Note', ?, NULL, ?, NULL, 'local_path', ?, NULL, 'available', '{}', '{}', ?, ?)
+      `,
+      )
+      .run(
+        "attachment-2",
+        "message-2",
+        "source-attachment-2",
+        "~/Library/Messages/Attachments/note.txt",
+        27,
+        JSON.stringify({ path: "~/Library/Messages/Attachments/note.txt" }),
+        timestamp,
+        timestamp,
+      );
+
+    const fetched = await fetchAttachment(db, {
+      attachmentId: "attachment-2",
+    });
+    if (fetched.localPath) {
+      cleanupPaths.push(fetched.localPath);
+    }
+    expect(fetched.localPath).toBeTruthy();
+    expect(fetched.content).toEqual(
+      expect.objectContaining({
+        status: "ready",
+        hasText: true,
+      }),
+    );
 
     db.close();
   });

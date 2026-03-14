@@ -287,7 +287,9 @@ async function acquireAttachmentPayload(
 ): Promise<{ tempPath: string; mimeType: string | null; filename: string | null }> {
   const accessRef = parseJsonRecord(attachment.access_ref_json);
   const localPath =
-    typeof accessRef?.path === "string" ? accessRef.path : expandHomePath(attachment.local_path);
+    typeof accessRef?.path === "string"
+      ? expandHomePath(accessRef.path)
+      : expandHomePath(attachment.local_path);
   if ((attachment.access_kind === "local_path" || localPath) && localPath) {
     if (!existsSync(localPath)) {
       throw new Error(`Attachment source path does not exist: ${localPath}`);
