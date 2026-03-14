@@ -21,6 +21,7 @@ HELPERS_DIR="$RESOURCES_DIR/helpers"
 SIGNAL_FETCH_SCRIPT="$ROOT_DIR/scripts/fetch-signal-cli-macos.sh"
 NODE_RUNTIME_FETCH_SCRIPT="$ROOT_DIR/scripts/fetch-node-runtime-macos.sh"
 JIT_RUNTIME_ENTITLEMENTS="$ROOT_DIR/scripts/packaging/jit-runtime.entitlements.plist"
+APP_PERMISSIONS_ENTITLEMENTS="$ROOT_DIR/scripts/packaging/app-permissions.entitlements.plist"
 SIGNAL_HELPER_SOURCE_DIR="$ROOT_DIR/native/helpers/signal-cli/.build/cued-signal-cli"
 WHATSAPP_HELPER_SOURCE="$ROOT_DIR/native/helpers/whatsapp-go/.build/cued-whatsapp-helper"
 PERMISSIONS_SCRIPT_SOURCE="$ROOT_DIR/scripts/request-macos-access.sh"
@@ -58,18 +59,27 @@ sign_app_bundle() {
       --force \
       --timestamp \
       --options runtime \
+      --entitlements "$APP_PERMISSIONS_ENTITLEMENTS" \
       --sign "$CUED_CODESIGN_IDENTITY" \
       "$APP_BUNDLE" >/dev/null
     return
   fi
 
-  codesign --force --deep --sign - "$APP_BUNDLE" >/dev/null
+  codesign \
+    --force \
+    --deep \
+    --entitlements "$APP_PERMISSIONS_ENTITLEMENTS" \
+    --sign - \
+    "$APP_BUNDLE" >/dev/null
 }
 
 runtime_entitlements_for_binary() {
   local target="$1"
 
   case "$target" in
+    "$MACOS_DIR/$APP_EXECUTABLE_NAME")
+      printf '%s\n' "$APP_PERMISSIONS_ENTITLEMENTS"
+      ;;
     "$RUNTIME_NODE_BIN_DIR/node"|"$HELPERS_DIR"/signal-cli/jre/Contents/Home/bin/java)
       printf '%s\n' "$JIT_RUNTIME_ENTITLEMENTS"
       ;;
