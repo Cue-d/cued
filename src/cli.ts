@@ -18,20 +18,7 @@ import {
   initHooksConfig,
   testHookEvent,
 } from "./hooks/service.js";
-import { runAuthSessionSync } from "./integrations/auth-runtime.js";
-import {
-  buildIntegrationStatus,
-  completeAuthSession,
-  connectIntegration,
-  disconnectIntegration,
-  getIntegrationSummary,
-  listIntegrationStates,
-  listRequestableIntegrationPlatforms,
-  markAuthSessionInProgress,
-  refreshManagedIntegrationStates,
-  removeIntegration,
-  setIntegrationEnabled,
-} from "./integrations/service.js";
+import { getIntegrationSummary, listIntegrationStates } from "./integrations/service.js";
 import { followLogs, getDaemonLogPath, parseLogsCommandArgs, readRecentLogLines } from "./logs.js";
 import {
   getAppBundleInfo,
@@ -45,6 +32,7 @@ import {
 } from "./macos/install.js";
 import { buildOnboardingSnapshot } from "./onboarding/service.js";
 import { resolveHostOS } from "./platform-capabilities.js";
+import { IntegrationAuthService } from "./services/integration-auth.js";
 import { runSetupTUI } from "./setup.js";
 import {
   checkForUpdates,
@@ -74,10 +62,6 @@ export function resolvePermissionsScriptPath(): string {
   );
 }
 
-function isInvokedDirectly(): boolean {
-  return isDirectInvocation();
-}
-
 export function normalizeInvocationPath(path: string): string {
   try {
     return existsSync(path) ? realpathSync(path) : resolve(path);
@@ -95,6 +79,10 @@ export function isDirectInvocation(
   }
 
   return normalizeInvocationPath(fileURLToPath(moduleUrl)) === normalizeInvocationPath(argvPath);
+}
+
+function isInvokedDirectly(): boolean {
+  return isDirectInvocation();
 }
 
 function printHelp(): void {
@@ -171,86 +159,48 @@ async function handleLocalIntegrationCommand(
   rest: string[],
 ): Promise<unknown> {
   const db = openCuedDatabase();
+  const service = new IntegrationAuthService(db);
   try {
     switch (subcommand) {
       case "list":
       case "status":
-        return buildIntegrationStatus(db);
+        return service.listStatus();
       case "refresh":
-        return await refreshManagedIntegrationStates(db);
+        return await service.refresh();
       case "connect": {
         if (!rest[0]) {
           throw new Error("Usage: cued integrations connect <platform> [account]");
         }
-        const requested = connectIntegration(db, rest[0], rest[1]);
-        const running = markAuthSessionInProgress(db, requested.authSession.id, process.pid);
-        try {
-          const integration = getIntegrationSummary(
-            db,
-            requested.integration.platform,
-            requested.integration.accountKey,
-          );
-          const result = await runAuthSessionSync(db, running, integration);
-          const completed = completeAuthSession(db, running.id, {
-            state: result.state,
-            keychainService: result.keychainService ?? null,
-            keychainAccount: result.keychainAccount ?? null,
-            resultSummary: result.resultSummary ?? null,
-            errorSummary: result.errorSummary ?? null,
-          });
-          if (completed.integration?.authState === "authenticated") {
-            if (
-              !db.hasQueuedOrRunningRun(
-                completed.integration.platform,
-                completed.integration.accountKey,
-              )
-            ) {
-              db.queueSyncRun({
-                platform: completed.integration.platform,
-                accountKey: completed.integration.accountKey,
-                runType: "sync",
-                trigger: "integration_authenticated",
-                details: {
-                  source: completed.integration.platform,
-                  accountKey: completed.integration.accountKey,
-                  trigger: "integration_authenticated",
-                },
-              });
-            }
-            await safeEmitHookEvent("integration.authenticated", completed);
-          }
-          return completed;
-        } catch (error) {
-          return completeAuthSession(db, running.id, {
-            state: "failed",
-            errorSummary: error instanceof Error ? error.message : String(error),
-          });
-        }
+        return service.connectLocally(rest[0], rest[1], {
+          emitAuthenticatedHook: async (platform, accountKey) => {
+            await safeEmitHookEvent("integration.authenticated", {
+              integration: getIntegrationSummary(db, platform, accountKey),
+            });
+          },
+        });
       }
       case "disconnect":
         if (!rest[0]) {
           throw new Error("Usage: cued integrations disconnect <platform> [account]");
         }
-        return disconnectIntegration(db, rest[0], rest[1]);
+        return service.disconnect(rest[0], rest[1]);
       case "remove":
         if (!rest[0]) {
           throw new Error("Usage: cued integrations remove <platform> [account]");
         }
-        return removeIntegration(db, rest[0], rest[1]);
+        return service.remove(rest[0], rest[1]);
       case "enable":
         if (!rest[0]) {
           throw new Error("Usage: cued integrations enable <platform> [account]");
         }
-        return setIntegrationEnabled(db, rest[0], rest[1], true);
+        return service.enable(rest[0], rest[1]);
       case "disable":
         if (!rest[0]) {
           throw new Error("Usage: cued integrations disable <platform> [account]");
         }
-        return setIntegrationEnabled(db, rest[0], rest[1], false);
+        return service.disable(rest[0], rest[1]);
       default:
-        throw new Error(
-          `Usage: cued integrations list | status | refresh | connect <platform> [account] | disconnect <platform> [account] | remove <platform> [account] | enable <platform> [account] | disable <platform> [account]\nRequestable platforms: ${listRequestableIntegrationPlatforms().join(", ")}`,
-        );
+        throw new Error(service.usage());
     }
   } finally {
     db.close();
@@ -609,9 +559,7 @@ async function main(): Promise<void> {
           }
           break;
         default:
-          throw new Error(
-            `Usage: cued integrations list | status | refresh | connect <platform> [account] | disconnect <platform> [account] | remove <platform> [account] | enable <platform> [account] | disable <platform> [account]\nRequestable platforms: ${listRequestableIntegrationPlatforms().join(", ")}`,
-          );
+          throw new Error(IntegrationAuthService.usageText());
       }
       break;
     case "sync":
