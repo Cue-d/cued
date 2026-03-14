@@ -46,6 +46,12 @@ import {
 import { buildOnboardingSnapshot } from "./onboarding/service.js";
 import { resolveHostOS } from "./platform-capabilities.js";
 import { runSetupTUI } from "./setup.js";
+import {
+  checkForUpdates,
+  getUpdateStatus,
+  installAvailableUpdate,
+  runUpdatePreflight,
+} from "./updater/service.js";
 
 const DIST_ROOT = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = resolve(DIST_ROOT, "..");
@@ -85,6 +91,9 @@ Usage:
   cued doctor
   cued logs
   cued setup
+  cued update status
+  cued update check [--force]
+  cued update install
   cued cli install|status
   cued onboarding complete|snapshot|status [--refresh-managed]
   cued launchd install|uninstall|status
@@ -261,6 +270,49 @@ async function main(): Promise<void> {
     return;
   }
 
+  if (command === "update") {
+    switch (subcommand) {
+      case "status": {
+        const db = openCuedDatabase();
+        try {
+          printJson(getUpdateStatus(db));
+        } finally {
+          db.close();
+        }
+        return;
+      }
+      case "check": {
+        const db = openCuedDatabase();
+        try {
+          printJson(await checkForUpdates(db, { force: rest.includes("--force") }));
+        } finally {
+          db.close();
+        }
+        return;
+      }
+      case "install": {
+        const db = openCuedDatabase();
+        try {
+          printJson(await installAvailableUpdate(db));
+        } finally {
+          db.close();
+        }
+        return;
+      }
+      case "preflight": {
+        const dbPathFlagIndex = rest.findIndex((value) => value === "--db-path");
+        const dbPath = dbPathFlagIndex >= 0 ? rest[dbPathFlagIndex + 1] : undefined;
+        if (!dbPath) {
+          throw new Error("Usage: cued update preflight --db-path <path>");
+        }
+        printJson(runUpdatePreflight(dbPath));
+        return;
+      }
+      default:
+        throw new Error("Usage: cued update status | check [--force] | install");
+    }
+  }
+
   if (command === "logs") {
     const options = parseLogsCommandArgs(
       [subcommand, ...rest].filter((value): value is string => Boolean(value)),
@@ -296,6 +348,7 @@ async function main(): Promise<void> {
             ...(await buildDoctorReport(db)),
             projection: db.getProjectionBacklog(),
             hooks: doctorHooksConfig(),
+            update: getUpdateStatus(db),
           }
         : {
             app: getAppStatusMetadata(db),
@@ -306,6 +359,7 @@ async function main(): Promise<void> {
             recentRuns: db.listRecentRuns(),
             integrations: listIntegrationStates(db),
             hooks: doctorHooksConfig(),
+            update: getUpdateStatus(db),
             socketRunning: false,
             dbPath: db.dbPath,
           },
