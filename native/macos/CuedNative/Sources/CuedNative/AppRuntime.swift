@@ -1789,12 +1789,9 @@ final class MenuBarAppController: NSObject, NSApplicationDelegate {
   }
 
   @objc private func checkForUpdates() {
-    Task.detached(priority: .userInitiated) { [weak self] in
-      guard let self else {
-        return
-      }
-
-      let result = self.daemonSupervisor.runCLI(arguments: ["update", "check", "--force"])
+    let daemonSupervisor = self.daemonSupervisor
+    Task.detached(priority: .userInitiated) { [daemonSupervisor] in
+      let result = daemonSupervisor.runCLI(arguments: ["update", "check", "--force"])
       let updateStatus: UpdateStatusResponse? = result.flatMap { output in
         guard output.status == 0, let data = output.stdout.data(using: .utf8) else {
           return nil
@@ -1802,7 +1799,10 @@ final class MenuBarAppController: NSObject, NSApplicationDelegate {
         return try? JSONDecoder().decode(UpdateStatusResponse.self, from: data)
       }
 
-      await MainActor.run {
+      await MainActor.run { [weak self] in
+        guard let self else {
+          return
+        }
         self.refreshStatus()
         if let updateStatus {
           self.presentUpdateStatus(updateStatus)
@@ -1966,12 +1966,9 @@ final class MenuBarAppController: NSObject, NSApplicationDelegate {
   }
 
   private func installUpdate() {
-    Task.detached(priority: .userInitiated) { [weak self] in
-      guard let self else {
-        return
-      }
-
-      let result = self.daemonSupervisor.runCLI(arguments: ["update", "install"])
+    let daemonSupervisor = self.daemonSupervisor
+    Task.detached(priority: .userInitiated) { [daemonSupervisor] in
+      let result = daemonSupervisor.runCLI(arguments: ["update", "install"])
       let installResponse: UpdateInstallResponse? = result.flatMap { output in
         guard output.status == 0, let data = output.stdout.data(using: .utf8) else {
           return nil
@@ -1979,7 +1976,10 @@ final class MenuBarAppController: NSObject, NSApplicationDelegate {
         return try? JSONDecoder().decode(UpdateInstallResponse.self, from: data)
       }
 
-      await MainActor.run {
+      await MainActor.run { [weak self] in
+        guard let self else {
+          return
+        }
         if let installResponse, installResponse.started {
           NSApp.terminate(nil)
           return
