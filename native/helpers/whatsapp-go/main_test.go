@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+	"encoding/json"
+	"io"
 	"strconv"
 	"testing"
 	"time"
@@ -9,8 +11,10 @@ import (
 	"go.mau.fi/whatsmeow"
 	waProto "go.mau.fi/whatsmeow/binary/proto"
 	"go.mau.fi/whatsmeow/proto/waCommon"
+	"go.mau.fi/whatsmeow/proto/waCompanionReg"
 	"go.mau.fi/whatsmeow/proto/waHistorySync"
 	waWeb "go.mau.fi/whatsmeow/proto/waWeb"
+	"go.mau.fi/whatsmeow/store"
 	"go.mau.fi/whatsmeow/types/events"
 	"google.golang.org/protobuf/proto"
 )
@@ -161,5 +165,78 @@ func TestHistorySyncBatchFromEventUsesHistoryPayload(t *testing.T) {
 	}
 	if len(snapshot.Chats) != 1 || snapshot.Chats[0].JID != "15551234567@s.whatsapp.net" {
 		t.Fatalf("expected chat in snapshot, got %+v", snapshot.Chats)
+	}
+}
+
+func TestHandleHistorySyncEventPersistsMetadata(t *testing.T) {
+	storeDir := t.TempDir()
+	state, err := newHelperState(storeDir)
+	if err != nil {
+		t.Fatalf("newHelperState failed: %v", err)
+	}
+	defer state.close()
+
+	runtime := newHelperRuntime(nil, state, json.NewEncoder(io.Discard))
+	runtime.handleHistorySyncEvent(&events.HistorySync{
+		Data: &waHistorySync.HistorySync{
+			SyncType:   waHistorySync.HistorySync_FULL.Enum(),
+			ChunkOrder: proto.Uint32(7),
+			Progress:   proto.Uint32(42),
+			Conversations: []*waHistorySync.Conversation{{
+				ID: proto.String("15551234567@s.whatsapp.net"),
+				Messages: []*waHistorySync.HistorySyncMsg{{
+					Message: &waWeb.WebMessageInfo{
+						Key:              &waCommon.MessageKey{ID: proto.String("wamid-1")},
+						MessageTimestamp: proto.Uint64(1),
+						Message:          &waProto.Message{Conversation: proto.String("hello")},
+					},
+				}},
+			}},
+		},
+	})
+
+	metadata := state.getMetadata()
+	if metadata.LastHistorySyncAt == 0 {
+		t.Fatalf("expected history sync timestamp to be recorded")
+	}
+	if metadata.LastHistorySyncType != waHistorySync.HistorySync_FULL.String() {
+		t.Fatalf("unexpected history sync type: %q", metadata.LastHistorySyncType)
+	}
+	if metadata.LastHistoryChunkOrder != 7 {
+		t.Fatalf("unexpected history sync chunk order: %d", metadata.LastHistoryChunkOrder)
+	}
+	if metadata.LastHistoryProgress != 42 {
+		t.Fatalf("unexpected history sync progress: %d", metadata.LastHistoryProgress)
+	}
+}
+
+func TestConfigureClientPayloadRequestsFullHistory(t *testing.T) {
+	configureClientPayload()
+
+	if store.DeviceProps.GetRequireFullSync() != true {
+		t.Fatalf("expected helper to require full history sync")
+	}
+
+	config := store.DeviceProps.GetHistorySyncConfig()
+	if config == nil {
+		t.Fatalf("expected history sync config to be configured")
+	}
+	if got := config.GetFullSyncDaysLimit(); got != fullHistorySyncDaysLimit {
+		t.Fatalf("unexpected full sync days limit: %d", got)
+	}
+	if got := config.GetRecentSyncDaysLimit(); got != fullHistorySyncDaysLimit {
+		t.Fatalf("unexpected recent sync days limit: %d", got)
+	}
+	if got := config.GetSupportGroupHistory(); got != true {
+		t.Fatalf("expected group history support to be enabled")
+	}
+	if got := config.GetOnDemandReady(); got != true {
+		t.Fatalf("expected on-demand history sync to be enabled")
+	}
+	if got := config.GetCompleteOnDemandReady(); got != true {
+		t.Fatalf("expected complete on-demand history sync to be enabled")
+	}
+	if got := store.DeviceProps.GetPlatformType(); got != waCompanionReg.DeviceProps_DESKTOP {
+		t.Fatalf("unexpected platform type: %v", got)
 	}
 }

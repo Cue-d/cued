@@ -340,16 +340,17 @@ async function buildWhatsAppManagedState(
   let accountJid: string | null = null;
   let pushName: string | null = null;
   let helperVersion = inspected.version;
+  let helperStatus: Awaited<ReturnType<typeof readWhatsAppHelperStatus>> | null = null;
 
   if (!inspected.helperPath) {
     authState = existing?.auth_state === "cancelled" ? "cancelled" : "missing";
   } else {
     try {
-      const status = await readWhatsAppHelperStatus(storeDir);
-      accountJid = status.accountJid;
-      pushName = status.pushName;
-      helperVersion = status.helperVersion ?? helperVersion;
-      if (status.authenticated) {
+      helperStatus = await readWhatsAppHelperStatus(storeDir);
+      accountJid = helperStatus.accountJid;
+      pushName = helperStatus.pushName;
+      helperVersion = helperStatus.helperVersion ?? helperVersion;
+      if (helperStatus.authenticated) {
         authState = "authenticated";
       } else if (existing?.auth_state === "requested" || existing?.auth_state === "in_progress") {
         authState = existing.auth_state;
@@ -387,6 +388,10 @@ async function buildWhatsAppManagedState(
       whatsappHelperVersion: helperVersion,
       whatsappAccountJid: accountJid,
       whatsappPushName: pushName,
+      whatsappLastHistorySyncAt: helperStatus?.lastHistorySyncAt ?? null,
+      whatsappLastHistorySyncType: helperStatus?.lastHistorySyncType ?? null,
+      whatsappLastHistoryChunkOrder: helperStatus?.lastHistoryChunkOrder ?? null,
+      whatsappLastHistoryProgress: helperStatus?.lastHistoryProgress ?? null,
       lastVerifiedAt: now(),
     },
   };

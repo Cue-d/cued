@@ -36,10 +36,16 @@ import (
 const helperVersion = "0.1.0"
 const pairConnectGracePeriod = 20 * time.Second
 const defaultResyncLimit = 1000
+const fullHistorySyncDaysLimit = 3650
+const fullHistorySyncSizeMBLimit = 102400
 
 type helperMetadata struct {
-	AccountJID string `json:"accountJid,omitempty"`
-	PushName   string `json:"pushName,omitempty"`
+	AccountJID            string `json:"accountJid,omitempty"`
+	PushName              string `json:"pushName,omitempty"`
+	LastHistorySyncAt     int64  `json:"lastHistorySyncAt,omitempty"`
+	LastHistorySyncType   string `json:"lastHistorySyncType,omitempty"`
+	LastHistoryChunkOrder uint32 `json:"lastHistoryChunkOrder,omitempty"`
+	LastHistoryProgress   uint32 `json:"lastHistoryProgress,omitempty"`
 }
 
 type contactSnapshot struct {
@@ -745,6 +751,26 @@ func configureClientPayload() {
 	store.BaseClientPayload.WebInfo.WebSubPlatform = waWa6.ClientPayload_WebInfo_DARWIN.Enum()
 	store.DeviceProps.Os = proto.String("macOS")
 	store.DeviceProps.PlatformType = waCompanionReg.DeviceProps_DESKTOP.Enum()
+	store.DeviceProps.RequireFullSync = proto.Bool(true)
+	store.DeviceProps.HistorySyncConfig = &waCompanionReg.DeviceProps_HistorySyncConfig{
+		FullSyncDaysLimit:                        proto.Uint32(fullHistorySyncDaysLimit),
+		FullSyncSizeMbLimit:                      proto.Uint32(fullHistorySyncSizeMBLimit),
+		StorageQuotaMb:                           proto.Uint32(10240),
+		InlineInitialPayloadInE2EeMsg:            proto.Bool(true),
+		RecentSyncDaysLimit:                      proto.Uint32(fullHistorySyncDaysLimit),
+		SupportCallLogHistory:                    proto.Bool(false),
+		SupportBotUserAgentChatHistory:           proto.Bool(true),
+		SupportCagReactionsAndPolls:              proto.Bool(true),
+		SupportBizHostedMsg:                      proto.Bool(true),
+		SupportRecentSyncChunkMessageCountTuning: proto.Bool(true),
+		SupportHostedGroupMsg:                    proto.Bool(true),
+		SupportFbidBotChatHistory:                proto.Bool(true),
+		SupportMessageAssociation:                proto.Bool(true),
+		SupportGroupHistory:                      proto.Bool(true),
+		OnDemandReady:                            proto.Bool(true),
+		CompleteOnDemandReady:                    proto.Bool(true),
+		ThumbnailSyncDaysLimit:                   proto.Uint32(fullHistorySyncDaysLimit),
+	}
 }
 
 func runStatus(args []string) error {
@@ -770,10 +796,14 @@ func runStatus(args []string) error {
 	}
 	metadata := state.getMetadata()
 	writeJSON(os.Stdout, map[string]interface{}{
-		"authenticated": deviceStore.ID != nil,
-		"accountJid":    firstNonEmpty(metadata.AccountJID, jidString(deviceStore.ID)),
-		"pushName":      emptyToNil(metadata.PushName),
-		"helperVersion": helperVersion,
+		"authenticated":         deviceStore.ID != nil,
+		"accountJid":            firstNonEmpty(metadata.AccountJID, jidString(deviceStore.ID)),
+		"pushName":              emptyToNil(metadata.PushName),
+		"helperVersion":         helperVersion,
+		"lastHistorySyncAt":     int64PtrOrNil(metadata.LastHistorySyncAt),
+		"lastHistorySyncType":   emptyToNil(metadata.LastHistorySyncType),
+		"lastHistoryChunkOrder": uint32PtrOrNil(metadata.LastHistoryChunkOrder),
+		"lastHistoryProgress":   uint32PtrOrNil(metadata.LastHistoryProgress),
 	})
 	return nil
 }
@@ -1104,11 +1134,22 @@ func (r *helperRuntime) handleHistorySyncEvent(event *events.HistorySync) {
 		return
 	}
 	completedAt := time.Now().UnixMilli()
+	metadata := r.state.getMetadata()
+	metadata.LastHistorySyncAt = completedAt
+	if event != nil && event.Data != nil {
+		metadata.LastHistorySyncType = event.Data.GetSyncType().String()
+		metadata.LastHistoryChunkOrder = event.Data.GetChunkOrder()
+		metadata.LastHistoryProgress = event.Data.GetProgress()
+	}
+	r.state.setMetadata(metadata)
 	r.emitEvent("history_sync", map[string]interface{}{
 		"contacts":    snapshot.Contacts,
 		"chats":       snapshot.Chats,
 		"messages":    snapshot.Messages,
 		"completedAt": completedAt,
+		"syncType":    emptyToNil(metadata.LastHistorySyncType),
+		"chunkOrder":  uint32PtrOrNil(metadata.LastHistoryChunkOrder),
+		"progress":    uint32PtrOrNil(metadata.LastHistoryProgress),
 	})
 }
 
@@ -1586,6 +1627,21 @@ func stringPtr(value string) *string {
 }
 
 func int64Ptr(value int64) *int64 {
+	copy := value
+	return &copy
+}
+
+func int64PtrOrNil(value int64) *int64 {
+	if value == 0 {
+		return nil
+	}
+	return int64Ptr(value)
+}
+
+func uint32PtrOrNil(value uint32) *uint32 {
+	if value == 0 {
+		return nil
+	}
 	copy := value
 	return &copy
 }
