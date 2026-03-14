@@ -15,6 +15,7 @@ import (
 	"go.mau.fi/whatsmeow/proto/waHistorySync"
 	waWeb "go.mau.fi/whatsmeow/proto/waWeb"
 	"go.mau.fi/whatsmeow/store"
+	"go.mau.fi/whatsmeow/types"
 	"go.mau.fi/whatsmeow/types/events"
 	"google.golang.org/protobuf/proto"
 )
@@ -238,5 +239,177 @@ func TestConfigureClientPayloadRequestsFullHistory(t *testing.T) {
 	}
 	if got := store.DeviceProps.GetPlatformType(); got != waCompanionReg.DeviceProps_DESKTOP {
 		t.Fatalf("unexpected platform type: %v", got)
+	}
+}
+
+func TestHistorySyncNotificationQueueRoundTrip(t *testing.T) {
+	storeDir := t.TempDir()
+	state, err := newHelperState(storeDir)
+	if err != nil {
+		t.Fatalf("newHelperState failed: %v", err)
+	}
+	defer state.close()
+
+	notification := &waProto.HistorySyncNotification{
+		ChunkOrder: proto.Uint32(3),
+		Progress:   proto.Uint32(77),
+	}
+	if err := state.cache.enqueueHistorySyncNotification(notification); err != nil {
+		t.Fatalf("enqueue failed: %v", err)
+	}
+
+	rowID, next, err := state.cache.getNextHistorySyncNotification()
+	if err != nil {
+		t.Fatalf("getNext failed: %v", err)
+	}
+	if rowID == 0 || next == nil {
+		t.Fatalf("expected queued notification, got rowID=%d notif=%v", rowID, next)
+	}
+	if next.GetChunkOrder() != 3 || next.GetProgress() != 77 {
+		t.Fatalf("unexpected notification round trip: %+v", next)
+	}
+	if err := state.cache.deleteHistorySyncNotification(rowID); err != nil {
+		t.Fatalf("delete failed: %v", err)
+	}
+	rowID, next, err = state.cache.getNextHistorySyncNotification()
+	if err != nil {
+		t.Fatalf("second getNext failed: %v", err)
+	}
+	if rowID != 0 || next != nil {
+		t.Fatalf("expected empty queue, got rowID=%d notif=%v", rowID, next)
+	}
+}
+
+func TestHandleMessageEventQueuesHistorySyncNotification(t *testing.T) {
+	storeDir := t.TempDir()
+	state, err := newHelperState(storeDir)
+	if err != nil {
+		t.Fatalf("newHelperState failed: %v", err)
+	}
+	defer state.close()
+
+	runtime := newHelperRuntime(nil, state, json.NewEncoder(io.Discard))
+	runtime.handleMessageEvent(&events.Message{
+		Info: types.MessageInfo{
+			MessageSource: types.MessageSource{
+				IsFromMe: true,
+			},
+		},
+		Message: &waProto.Message{
+			ProtocolMessage: &waProto.ProtocolMessage{
+				HistorySyncNotification: &waProto.HistorySyncNotification{
+					ChunkOrder: proto.Uint32(2),
+					Progress:   proto.Uint32(55),
+				},
+			},
+		},
+	})
+
+	rowID, notification, err := state.cache.getNextHistorySyncNotification()
+	if err != nil {
+		t.Fatalf("getNext failed: %v", err)
+	}
+	if rowID == 0 || notification == nil {
+		t.Fatalf("expected queued notification, got rowID=%d notif=%v", rowID, notification)
+	}
+	if notification.GetChunkOrder() != 2 || notification.GetProgress() != 55 {
+		t.Fatalf("unexpected queued notification telemetry: %+v", notification)
+	}
+
+	metadata := state.getMetadata()
+	if metadata.LastHistoryNotificationAt == 0 {
+		t.Fatalf("expected history notification timestamp to be recorded")
+	}
+
+	var messageCount int
+	if err := state.cache.db.QueryRow(`SELECT COUNT(*) FROM messages`).Scan(&messageCount); err != nil {
+		t.Fatalf("failed to count messages: %v", err)
+	}
+	if messageCount != 0 {
+		t.Fatalf("expected protocol history sync message to be skipped, got %d messages", messageCount)
+	}
+
+	queueCount, err := state.cache.countHistorySyncNotifications()
+	if err != nil {
+		t.Fatalf("failed to count queued history sync notifications: %v", err)
+	}
+	if queueCount != 1 {
+		t.Fatalf("expected one queued history sync notification, got %d", queueCount)
+	}
+}
+
+func TestApplyHistorySyncDataClearsHistorySyncError(t *testing.T) {
+	storeDir := t.TempDir()
+	state, err := newHelperState(storeDir)
+	if err != nil {
+		t.Fatalf("newHelperState failed: %v", err)
+	}
+	defer state.close()
+
+	state.setMetadata(helperMetadata{
+		LastHistorySyncError: "failed to download history sync notification: timeout",
+	})
+
+	runtime := newHelperRuntime(nil, state, json.NewEncoder(io.Discard))
+	err = runtime.applyHistorySyncData(&waHistorySync.HistorySync{
+		SyncType:   waHistorySync.HistorySync_FULL.Enum(),
+		ChunkOrder: proto.Uint32(1),
+		Progress:   proto.Uint32(100),
+		Conversations: []*waHistorySync.Conversation{{
+			ID: proto.String("15551234567@s.whatsapp.net"),
+			Messages: []*waHistorySync.HistorySyncMsg{{
+				Message: &waWeb.WebMessageInfo{
+					Key:              &waCommon.MessageKey{ID: proto.String("wamid-apply")},
+					MessageTimestamp: proto.Uint64(1),
+					Message:          &waProto.Message{Conversation: proto.String("hello")},
+				},
+			}},
+		}},
+	})
+	if err != nil {
+		t.Fatalf("applyHistorySyncData failed: %v", err)
+	}
+
+	metadata := state.getMetadata()
+	if metadata.LastHistorySyncError != "" {
+		t.Fatalf("expected history sync error to clear after success, got %q", metadata.LastHistorySyncError)
+	}
+}
+
+func TestConnectedEventPreservesHistorySyncMetadata(t *testing.T) {
+	storeDir := t.TempDir()
+	state, err := newHelperState(storeDir)
+	if err != nil {
+		t.Fatalf("newHelperState failed: %v", err)
+	}
+	defer state.close()
+
+	state.setMetadata(helperMetadata{
+		LastHistorySyncAt:         123,
+		LastHistorySyncType:       "FULL",
+		LastHistoryChunkOrder:     2,
+		LastHistoryProgress:       100,
+		LastHistoryNotificationAt: 122,
+	})
+
+	client := whatsmeow.NewClient(&store.Device{
+		PushName: "Theo Tarr",
+		ID: &types.JID{
+			User:   "13474468966",
+			Server: types.DefaultUserServer,
+		},
+	}, nil)
+	runtime := newHelperRuntime(client, state, json.NewEncoder(io.Discard))
+	runtime.handleEvent(&events.Connected{})
+
+	metadata := state.getMetadata()
+	if metadata.AccountJID != "13474468966@s.whatsapp.net" {
+		t.Fatalf("unexpected account jid: %q", metadata.AccountJID)
+	}
+	if metadata.LastHistorySyncAt != 123 || metadata.LastHistorySyncType != "FULL" {
+		t.Fatalf("expected history sync metadata to survive connect, got %+v", metadata)
+	}
+	if metadata.LastHistoryChunkOrder != 2 || metadata.LastHistoryProgress != 100 {
+		t.Fatalf("expected history sync chunk/progress to survive connect, got %+v", metadata)
 	}
 }

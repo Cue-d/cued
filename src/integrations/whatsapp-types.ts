@@ -67,7 +67,15 @@ export type WhatsAppHelperEventData = {
   chat_upsert: WhatsAppChatSnapshot;
   message_upsert: WhatsAppMessageSnapshot;
   receipt_update: WhatsAppReceiptSnapshot;
-  history_sync: WhatsAppSnapshot & { completedAt?: number | null };
+  history_sync: WhatsAppSnapshot & {
+    completedAt?: number | null;
+    syncType?: string | null;
+    chunkOrder?: number | null;
+    progress?: number | null;
+    queuedHistorySyncCount?: number | null;
+    lastHistorySyncError?: string | null;
+    lastHistoryNotificationAt?: number | null;
+  };
   disconnected: {
     reason?: string | null;
   };
@@ -111,6 +119,9 @@ export interface WhatsAppHelperStatusResult {
   lastHistorySyncType?: string | null;
   lastHistoryChunkOrder?: number | null;
   lastHistoryProgress?: number | null;
+  queuedHistorySyncCount?: number | null;
+  lastHistorySyncError?: string | null;
+  lastHistoryNotificationAt?: number | null;
 }
 
 export interface WhatsAppHelperSendResult {

@@ -392,6 +392,9 @@ async function buildWhatsAppManagedState(
       whatsappLastHistorySyncType: helperStatus?.lastHistorySyncType ?? null,
       whatsappLastHistoryChunkOrder: helperStatus?.lastHistoryChunkOrder ?? null,
       whatsappLastHistoryProgress: helperStatus?.lastHistoryProgress ?? null,
+      whatsappQueuedHistorySyncCount: helperStatus?.queuedHistorySyncCount ?? null,
+      whatsappLastHistorySyncError: helperStatus?.lastHistorySyncError ?? null,
+      whatsappLastHistoryNotificationAt: helperStatus?.lastHistoryNotificationAt ?? null,
       lastVerifiedAt: now(),
     },
   };

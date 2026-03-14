@@ -38,14 +38,18 @@ const pairConnectGracePeriod = 20 * time.Second
 const defaultResyncLimit = 1000
 const fullHistorySyncDaysLimit = 3650
 const fullHistorySyncSizeMBLimit = 102400
+const pairHistorySyncCaptureGracePeriod = 5 * time.Second
+const historySyncRetryDelay = 1 * time.Second
 
 type helperMetadata struct {
-	AccountJID            string `json:"accountJid,omitempty"`
-	PushName              string `json:"pushName,omitempty"`
-	LastHistorySyncAt     int64  `json:"lastHistorySyncAt,omitempty"`
-	LastHistorySyncType   string `json:"lastHistorySyncType,omitempty"`
-	LastHistoryChunkOrder uint32 `json:"lastHistoryChunkOrder,omitempty"`
-	LastHistoryProgress   uint32 `json:"lastHistoryProgress,omitempty"`
+	AccountJID                string `json:"accountJid,omitempty"`
+	PushName                  string `json:"pushName,omitempty"`
+	LastHistorySyncAt         int64  `json:"lastHistorySyncAt,omitempty"`
+	LastHistorySyncType       string `json:"lastHistorySyncType,omitempty"`
+	LastHistoryChunkOrder     uint32 `json:"lastHistoryChunkOrder,omitempty"`
+	LastHistoryProgress       uint32 `json:"lastHistoryProgress,omitempty"`
+	LastHistorySyncError      string `json:"lastHistorySyncError,omitempty"`
+	LastHistoryNotificationAt int64  `json:"lastHistoryNotificationAt,omitempty"`
 }
 
 type contactSnapshot struct {
@@ -171,6 +175,14 @@ func (s *helperState) getMetadata() helperMetadata {
 	return s.metadata
 }
 
+func (s *helperState) updateMetadata(update func(*helperMetadata)) helperMetadata {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	update(&s.metadata)
+	_ = writeJSONFileAtomic(s.metadataPath, s.metadata)
+	return s.metadata
+}
+
 func (s *helperState) setContact(contact contactSnapshot) {
 	_ = s.cache.upsertContact(contact)
 }
@@ -254,6 +266,11 @@ func openSyncCache(storeDir string) (*syncCache, error) {
 			ON contacts(updated_at, jid)`,
 		`CREATE INDEX IF NOT EXISTS idx_chats_updated_at
 			ON chats(updated_at, jid)`,
+		`CREATE TABLE IF NOT EXISTS history_sync_notifications (
+			rowid INTEGER PRIMARY KEY AUTOINCREMENT,
+			notification_blob BLOB NOT NULL,
+			created_at INTEGER NOT NULL
+		)`,
 	}
 	for _, statement := range schema {
 		if _, err := db.Exec(statement); err != nil {
@@ -367,6 +384,55 @@ func (c *syncCache) getSnapshot() (stateSnapshot, error) {
 		Chats:    chats,
 		Messages: messages,
 	}, nil
+}
+
+func (c *syncCache) enqueueHistorySyncNotification(notification *waProto.HistorySyncNotification) error {
+	if notification == nil {
+		return nil
+	}
+	blob, err := proto.Marshal(notification)
+	if err != nil {
+		return err
+	}
+	_, err = c.db.Exec(
+		`INSERT INTO history_sync_notifications (notification_blob, created_at) VALUES (?, ?)`,
+		blob,
+		nowMillis(),
+	)
+	return err
+}
+
+func (c *syncCache) getNextHistorySyncNotification() (int64, *waProto.HistorySyncNotification, error) {
+	row := c.db.QueryRow(
+		`SELECT rowid, notification_blob FROM history_sync_notifications ORDER BY rowid LIMIT 1`,
+	)
+	var rowID int64
+	var blob []byte
+	if err := row.Scan(&rowID, &blob); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return 0, nil, nil
+		}
+		return 0, nil, err
+	}
+	var notification waProto.HistorySyncNotification
+	if err := proto.Unmarshal(blob, &notification); err != nil {
+		return 0, nil, err
+	}
+	return rowID, &notification, nil
+}
+
+func (c *syncCache) deleteHistorySyncNotification(rowID int64) error {
+	_, err := c.db.Exec(`DELETE FROM history_sync_notifications WHERE rowid = ?`, rowID)
+	return err
+}
+
+func (c *syncCache) countHistorySyncNotifications() (int, error) {
+	row := c.db.QueryRow(`SELECT COUNT(*) FROM history_sync_notifications`)
+	var count int
+	if err := row.Scan(&count); err != nil {
+		return 0, err
+	}
+	return count, nil
 }
 
 func (c *syncCache) getResyncPage(sinceMS *int64, cursor string, limit int) (resyncPage, error) {
@@ -662,19 +728,21 @@ func parseResyncCursor(cursor string) (int, error) {
 }
 
 type helperRuntime struct {
-	client     *whatsmeow.Client
-	state      *helperState
-	connected  bool
-	connectedM sync.RWMutex
-	writer     *json.Encoder
-	writerM    sync.Mutex
+	client          *whatsmeow.Client
+	state           *helperState
+	connected       bool
+	connectedM      sync.RWMutex
+	writer          *json.Encoder
+	writerM         sync.Mutex
+	historySyncWake chan struct{}
 }
 
 func newHelperRuntime(client *whatsmeow.Client, state *helperState, writer *json.Encoder) *helperRuntime {
 	return &helperRuntime{
-		client: client,
-		state:  state,
-		writer: writer,
+		client:          client,
+		state:           state,
+		writer:          writer,
+		historySyncWake: make(chan struct{}, 1),
 	}
 }
 
@@ -712,6 +780,108 @@ func (r *helperRuntime) isConnected() bool {
 	r.connectedM.RLock()
 	defer r.connectedM.RUnlock()
 	return r.connected
+}
+
+func (r *helperRuntime) enqueueHistorySyncNotification(notification *waProto.HistorySyncNotification) {
+	if err := r.state.cache.enqueueHistorySyncNotification(notification); err != nil {
+		r.setHistorySyncError(fmt.Sprintf("failed to queue history sync notification: %v", err))
+		r.emitEvent("error", map[string]string{
+			"message": fmt.Sprintf("failed to queue history sync notification: %v", err),
+		})
+		return
+	}
+	r.state.updateMetadata(func(metadata *helperMetadata) {
+		metadata.LastHistoryNotificationAt = nowMillis()
+	})
+	select {
+	case r.historySyncWake <- struct{}{}:
+	default:
+	}
+}
+
+func (r *helperRuntime) processHistorySyncNotifications(ctx context.Context) {
+	for {
+		processed, err := r.processQueuedHistorySyncNotifications(ctx)
+		if err != nil {
+			r.emitEvent("error", map[string]string{
+				"message": fmt.Sprintf("failed to process history sync notification: %v", err),
+			})
+			select {
+			case <-ctx.Done():
+				return
+			case <-time.After(historySyncRetryDelay):
+			}
+		}
+		if processed {
+			continue
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-r.historySyncWake:
+		}
+	}
+}
+
+func (r *helperRuntime) processQueuedHistorySyncNotifications(ctx context.Context) (bool, error) {
+	processedAny := false
+	for {
+		rowID, notification, err := r.state.cache.getNextHistorySyncNotification()
+		if err != nil {
+			r.setHistorySyncError(fmt.Sprintf("failed to load queued history sync notification: %v", err))
+			return processedAny, err
+		}
+		if notification == nil {
+			return processedAny, nil
+		}
+		processedAny = true
+		r.updateHistorySyncNotificationMetadata(notification)
+		data, err := r.client.DownloadHistorySync(ctx, notification, true)
+		if err != nil {
+			r.setHistorySyncError(fmt.Sprintf("failed to download history sync notification: %v", err))
+			return processedAny, err
+		}
+		if err := r.applyHistorySyncData(data); err != nil {
+			r.setHistorySyncError(fmt.Sprintf("failed to persist history sync notification: %v", err))
+			return processedAny, err
+		}
+		if err := r.state.cache.deleteHistorySyncNotification(rowID); err != nil {
+			r.setHistorySyncError(fmt.Sprintf("failed to delete processed history sync notification: %v", err))
+			return processedAny, err
+		}
+		r.clearHistorySyncError()
+	}
+}
+
+func (r *helperRuntime) updateHistorySyncNotificationMetadata(
+	notification *waProto.HistorySyncNotification,
+) helperMetadata {
+	return r.state.updateMetadata(func(metadata *helperMetadata) {
+		metadata.LastHistoryNotificationAt = nowMillis()
+		metadata.LastHistorySyncType = notification.GetSyncType().String()
+		metadata.LastHistoryChunkOrder = notification.GetChunkOrder()
+		metadata.LastHistoryProgress = notification.GetProgress()
+	})
+}
+
+func (r *helperRuntime) setHistorySyncError(message string) helperMetadata {
+	return r.state.updateMetadata(func(metadata *helperMetadata) {
+		metadata.LastHistorySyncError = strings.TrimSpace(message)
+	})
+}
+
+func (r *helperRuntime) clearHistorySyncError() helperMetadata {
+	return r.state.updateMetadata(func(metadata *helperMetadata) {
+		metadata.LastHistorySyncError = ""
+	})
+}
+
+func (r *helperRuntime) historySyncQueueCount() int {
+	count, err := r.state.cache.countHistorySyncNotifications()
+	if err != nil {
+		return 0
+	}
+	return count
 }
 
 func main() {
@@ -790,20 +960,32 @@ func runStatus(args []string) error {
 	}
 	defer state.close()
 
-	deviceStore, _, err := openStore(*storeDir)
+	deviceStore, container, err := openStore(*storeDir)
 	if err != nil {
 		return err
 	}
+	defer func() {
+		if container != nil {
+			_ = container.Close()
+		}
+	}()
 	metadata := state.getMetadata()
+	queuedCount, err := state.cache.countHistorySyncNotifications()
+	if err != nil {
+		return err
+	}
 	writeJSON(os.Stdout, map[string]interface{}{
-		"authenticated":         deviceStore.ID != nil,
-		"accountJid":            firstNonEmpty(metadata.AccountJID, jidString(deviceStore.ID)),
-		"pushName":              emptyToNil(metadata.PushName),
-		"helperVersion":         helperVersion,
-		"lastHistorySyncAt":     int64PtrOrNil(metadata.LastHistorySyncAt),
-		"lastHistorySyncType":   emptyToNil(metadata.LastHistorySyncType),
-		"lastHistoryChunkOrder": uint32PtrOrNil(metadata.LastHistoryChunkOrder),
-		"lastHistoryProgress":   uint32PtrOrNil(metadata.LastHistoryProgress),
+		"authenticated":             deviceStore.ID != nil,
+		"accountJid":                firstNonEmpty(metadata.AccountJID, jidString(deviceStore.ID)),
+		"pushName":                  emptyToNil(metadata.PushName),
+		"helperVersion":             helperVersion,
+		"lastHistorySyncAt":         int64PtrOrNil(metadata.LastHistorySyncAt),
+		"lastHistorySyncType":       emptyToNil(metadata.LastHistorySyncType),
+		"lastHistoryChunkOrder":     uint32PtrOrNil(metadata.LastHistoryChunkOrder),
+		"lastHistoryProgress":       uint32PtrOrNil(metadata.LastHistoryProgress),
+		"queuedHistorySyncCount":    queuedCount,
+		"lastHistorySyncError":      emptyToNil(metadata.LastHistorySyncError),
+		"lastHistoryNotificationAt": int64PtrOrNil(metadata.LastHistoryNotificationAt),
 	})
 	return nil
 }
@@ -833,31 +1015,14 @@ func runPair(args []string) error {
 	done := make(chan struct{})
 
 	client.AddEventHandler(func(evt interface{}) {
+		runtime.handleEvent(evt)
 		switch evt.(type) {
 		case *events.Connected:
-			metadata := helperMetadata{
-				AccountJID: jidString(client.Store.ID),
-				PushName:   emptyString(client.Store.PushName),
-			}
-			state.setMetadata(metadata)
-			runtime.emitEvent("connected", map[string]interface{}{
-				"accountJid":    metadata.AccountJID,
-				"pushName":      emptyToNil(metadata.PushName),
-				"helperVersion": helperVersion,
-			})
 			select {
 			case <-done:
 			default:
 				close(done)
 			}
-		case *events.Disconnected:
-			runtime.emitEvent("disconnected", map[string]interface{}{
-				"reason": "disconnected",
-			})
-		case *events.LoggedOut:
-			runtime.emitEvent("error", map[string]string{
-				"message": "logged out from WhatsApp",
-			})
 		}
 	})
 
@@ -883,7 +1048,7 @@ func runPair(args []string) error {
 	case <-ctx.Done():
 		return ctx.Err()
 	case <-done:
-		return nil
+		return waitForPairHistorySyncCapture(ctx, runtime)
 	}
 }
 
@@ -901,7 +1066,10 @@ func waitForPairingCompletion(
 		case evt, ok := <-qrChan:
 			if !ok {
 				if pairingSucceeded {
-					return waitForConnectedAfterPair(ctx, done)
+					if err := waitForConnectedAfterPair(ctx, done); err != nil {
+						return err
+					}
+					return waitForPairHistorySyncCapture(ctx, runtime)
 				}
 				return errors.New("QR channel closed before pairing completed")
 			}
@@ -916,12 +1084,15 @@ func waitForPairingCompletion(
 				return errors.New("pairing timed out")
 			case "success":
 				pairingSucceeded = true
-				return waitForConnectedAfterPair(ctx, done)
+				if err := waitForConnectedAfterPair(ctx, done); err != nil {
+					return err
+				}
+				return waitForPairHistorySyncCapture(ctx, runtime)
 			default:
 				return fmt.Errorf("qr pairing ended with event %q", evt.Event)
 			}
 		case <-done:
-			return nil
+			return waitForPairHistorySyncCapture(ctx, runtime)
 		}
 	}
 }
@@ -934,6 +1105,39 @@ func waitForConnectedAfterPair(ctx context.Context, done <-chan struct{}) error 
 		return nil
 	case <-time.After(pairConnectGracePeriod):
 		return errors.New("pairing succeeded but WhatsApp never established a connected session")
+	}
+}
+
+func waitForPairHistorySyncCapture(ctx context.Context, runtime *helperRuntime) error {
+	if runtime == nil {
+		return nil
+	}
+	deadline := time.NewTimer(pairHistorySyncCaptureGracePeriod)
+	defer deadline.Stop()
+	for {
+		processed, err := runtime.processQueuedHistorySyncNotifications(ctx)
+		if err != nil {
+			runtime.emitEvent("error", map[string]string{
+				"message": fmt.Sprintf("failed to process history sync notification during pair: %v", err),
+			})
+			return nil
+		}
+		if processed {
+			if !deadline.Stop() {
+				select {
+				case <-deadline.C:
+				default:
+				}
+			}
+			deadline.Reset(pairHistorySyncCaptureGracePeriod)
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-deadline.C:
+			return nil
+		case <-runtime.historySyncWake:
+		}
 	}
 }
 
@@ -969,6 +1173,7 @@ func runSession(args []string) error {
 	defer cancel()
 
 	commandErr := make(chan error, 1)
+	go runtime.processHistorySyncNotifications(ctx)
 	go runtime.readCommands(ctx, commandErr)
 
 	select {
@@ -998,11 +1203,19 @@ func (r *helperRuntime) readCommands(ctx context.Context, errs chan<- error) {
 		switch command.Command {
 		case "status":
 			metadata := r.state.getMetadata()
+			queuedCount := r.historySyncQueueCount()
 			r.writeResponse(command.ID, true, map[string]interface{}{
-				"accountJid":    firstNonEmpty(metadata.AccountJID, jidString(r.client.Store.ID)),
-				"pushName":      emptyToNil(firstNonEmpty(metadata.PushName, r.client.Store.PushName)),
-				"connected":     r.isConnected(),
-				"helperVersion": helperVersion,
+				"accountJid":                firstNonEmpty(metadata.AccountJID, jidString(r.client.Store.ID)),
+				"pushName":                  emptyToNil(firstNonEmpty(metadata.PushName, r.client.Store.PushName)),
+				"connected":                 r.isConnected(),
+				"helperVersion":             helperVersion,
+				"lastHistorySyncAt":         int64PtrOrNil(metadata.LastHistorySyncAt),
+				"lastHistorySyncType":       emptyToNil(metadata.LastHistorySyncType),
+				"lastHistoryChunkOrder":     uint32PtrOrNil(metadata.LastHistoryChunkOrder),
+				"lastHistoryProgress":       uint32PtrOrNil(metadata.LastHistoryProgress),
+				"queuedHistorySyncCount":    queuedCount,
+				"lastHistorySyncError":      emptyToNil(metadata.LastHistorySyncError),
+				"lastHistoryNotificationAt": int64PtrOrNil(metadata.LastHistoryNotificationAt),
 			}, nil)
 		case "resync":
 			page, err := r.state.getResyncPage(command.SinceMS, command.Cursor, command.Limit)
@@ -1057,11 +1270,10 @@ func (r *helperRuntime) handleEvent(evt interface{}) {
 	switch event := evt.(type) {
 	case *events.Connected:
 		r.setConnected(true)
-		metadata := helperMetadata{
-			AccountJID: jidString(r.client.Store.ID),
-			PushName:   emptyString(r.client.Store.PushName),
-		}
-		r.state.setMetadata(metadata)
+		metadata := r.state.updateMetadata(func(metadata *helperMetadata) {
+			metadata.AccountJID = jidString(r.client.Store.ID)
+			metadata.PushName = emptyString(r.client.Store.PushName)
+		})
 		r.emitEvent("connected", map[string]interface{}{
 			"accountJid":    metadata.AccountJID,
 			"pushName":      emptyToNil(metadata.PushName),
@@ -1093,6 +1305,17 @@ func (r *helperRuntime) handleEvent(evt interface{}) {
 }
 
 func (r *helperRuntime) handleMessageEvent(event *events.Message) {
+	if event == nil {
+		return
+	}
+	if event.Info.IsFromMe && event.Message != nil {
+		if notification := event.Message.GetProtocolMessage().GetHistorySyncNotification(); notification != nil {
+			r.enqueueHistorySyncNotification(notification)
+			if strings.TrimSpace(extractText(event.Message)) == "" {
+				return
+			}
+		}
+	}
 	snapshot := messageFromEvent(event)
 	r.state.setMessage(snapshot)
 	contact := contactFromMessage(snapshot)
@@ -1126,31 +1349,45 @@ func (r *helperRuntime) handleReceiptEvent(event *events.Receipt) {
 }
 
 func (r *helperRuntime) handleHistorySyncEvent(event *events.HistorySync) {
-	snapshot := historySyncBatchFromEvent(r.client, event)
-	if err := r.state.applySnapshot(snapshot); err != nil {
+	if event == nil {
+		return
+	}
+	if err := r.applyHistorySyncData(event.Data); err != nil {
 		r.emitEvent("error", map[string]string{
 			"message": fmt.Sprintf("failed to persist history sync: %v", err),
 		})
-		return
+	}
+}
+
+func (r *helperRuntime) applyHistorySyncData(data *waHistorySync.HistorySync) error {
+	if data == nil {
+		return nil
+	}
+	snapshot := historySyncBatchFromEvent(r.client, &events.HistorySync{Data: data})
+	if err := r.state.applySnapshot(snapshot); err != nil {
+		return err
 	}
 	completedAt := time.Now().UnixMilli()
-	metadata := r.state.getMetadata()
-	metadata.LastHistorySyncAt = completedAt
-	if event != nil && event.Data != nil {
-		metadata.LastHistorySyncType = event.Data.GetSyncType().String()
-		metadata.LastHistoryChunkOrder = event.Data.GetChunkOrder()
-		metadata.LastHistoryProgress = event.Data.GetProgress()
-	}
-	r.state.setMetadata(metadata)
-	r.emitEvent("history_sync", map[string]interface{}{
-		"contacts":    snapshot.Contacts,
-		"chats":       snapshot.Chats,
-		"messages":    snapshot.Messages,
-		"completedAt": completedAt,
-		"syncType":    emptyToNil(metadata.LastHistorySyncType),
-		"chunkOrder":  uint32PtrOrNil(metadata.LastHistoryChunkOrder),
-		"progress":    uint32PtrOrNil(metadata.LastHistoryProgress),
+	metadata := r.state.updateMetadata(func(metadata *helperMetadata) {
+		metadata.LastHistorySyncAt = completedAt
+		metadata.LastHistorySyncType = data.GetSyncType().String()
+		metadata.LastHistoryChunkOrder = data.GetChunkOrder()
+		metadata.LastHistoryProgress = data.GetProgress()
+		metadata.LastHistorySyncError = ""
 	})
+	r.emitEvent("history_sync", map[string]interface{}{
+		"contacts":                  snapshot.Contacts,
+		"chats":                     snapshot.Chats,
+		"messages":                  snapshot.Messages,
+		"completedAt":               completedAt,
+		"syncType":                  emptyToNil(metadata.LastHistorySyncType),
+		"chunkOrder":                uint32PtrOrNil(metadata.LastHistoryChunkOrder),
+		"progress":                  uint32PtrOrNil(metadata.LastHistoryProgress),
+		"queuedHistorySyncCount":    r.historySyncQueueCount(),
+		"lastHistoryNotificationAt": int64PtrOrNil(metadata.LastHistoryNotificationAt),
+		"lastHistorySyncError":      emptyToNil(metadata.LastHistorySyncError),
+	})
+	return nil
 }
 
 func historySyncBatchFromEvent(client *whatsmeow.Client, event *events.HistorySync) stateSnapshot {
@@ -1489,6 +1726,9 @@ func initClient(storeDir string) (*helperState, *whatsmeow.Client, func(), error
 		return nil, nil, nil, err
 	}
 	client := whatsmeow.NewClient(deviceStore, nil)
+	client.ManualHistorySyncDownload = true
+	client.SynchronousAck = true
+	client.AutomaticMessageRerequestFromPhone = true
 	cleanup := func() {
 		_ = state.close()
 		if container != nil {
