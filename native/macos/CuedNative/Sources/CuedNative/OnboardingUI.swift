@@ -28,6 +28,7 @@ final class OnboardingWindowController: NSWindowController {
   private var cachedSetupIntegrations: [InstallerIntegrationStatus] = []
   private var isRefreshing = false
   private var prerequisitesEnsured = false
+  private var pendingAuthKickoffRefreshTask: Task<Void, Never>?
   private var pendingStatusRefreshTask: Task<Void, Never>?
 
   init(daemonSupervisor: DaemonSupervisor, onRefresh: @escaping () -> Void) {
@@ -217,7 +218,7 @@ final class OnboardingWindowController: NSWindowController {
       actions.append(["integrations", "enable", platform, accountKey])
     }
     actions.append(["integrations", "connect", platform, accountKey])
-    runActions(argumentsList: actions)
+    runConnectActions(argumentsList: actions)
   }
 
   private func finishOnboarding() {
@@ -227,9 +228,35 @@ final class OnboardingWindowController: NSWindowController {
   }
 
   override func close() {
+    pendingAuthKickoffRefreshTask?.cancel()
+    pendingAuthKickoffRefreshTask = nil
     pendingStatusRefreshTask?.cancel()
     pendingStatusRefreshTask = nil
     super.close()
+  }
+
+  private func runConnectActions(argumentsList: [[String]]) {
+    guard let connectArguments = argumentsList.last else {
+      return
+    }
+
+    viewModel.beginRefresh()
+    let daemonSupervisor = self.daemonSupervisor
+    let setupArguments = Array(argumentsList.dropLast())
+    Task.detached(priority: .userInitiated) { [daemonSupervisor] in
+      for arguments in setupArguments {
+        _ = daemonSupervisor.runCLI(arguments: arguments)
+      }
+      let launched = daemonSupervisor.launchCLI(arguments: connectArguments)
+      await MainActor.run {
+        self.onRefresh()
+        if launched {
+          self.scheduleAuthKickoffRefresh()
+        } else {
+          self.refresh()
+        }
+      }
+    }
   }
 
   private func schedulePendingStatusRefreshIfNeeded() {
@@ -250,6 +277,24 @@ final class OnboardingWindowController: NSWindowController {
       }
       await MainActor.run {
         self?.refresh()
+      }
+    }
+  }
+
+  private func scheduleAuthKickoffRefresh() {
+    pendingAuthKickoffRefreshTask?.cancel()
+    pendingAuthKickoffRefreshTask = Task { [weak self] in
+      for delay in [200, 700] {
+        try? await Task.sleep(for: .milliseconds(delay))
+        guard !Task.isCancelled else {
+          return
+        }
+        await MainActor.run {
+          self?.refresh()
+        }
+      }
+      await MainActor.run {
+        self?.pendingAuthKickoffRefreshTask = nil
       }
     }
   }
