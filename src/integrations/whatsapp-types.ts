@@ -107,6 +107,10 @@ export interface WhatsAppHelperStatusResult {
   pushName?: string | null;
   connected?: boolean;
   helperVersion?: string | null;
+  lastHistorySyncAt?: number | null;
+  lastHistorySyncType?: string | null;
+  lastHistoryChunkOrder?: number | null;
+  lastHistoryProgress?: number | null;
 }
 
 export interface WhatsAppHelperSendResult {

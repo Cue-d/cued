@@ -51,6 +51,10 @@ export interface WhatsAppHelperStatus {
   accountJid: string | null;
   pushName: string | null;
   helperVersion: string | null;
+  lastHistorySyncAt: number | null;
+  lastHistorySyncType: string | null;
+  lastHistoryChunkOrder: number | null;
+  lastHistoryProgress: number | null;
 }
 
 export function inspectWhatsAppHelper(): WhatsAppHelperInspection {
@@ -88,6 +92,10 @@ export async function readWhatsAppHelperStatus(storeDir: string): Promise<WhatsA
       accountJid: null,
       pushName: null,
       helperVersion: null,
+      lastHistorySyncAt: null,
+      lastHistorySyncType: null,
+      lastHistoryChunkOrder: null,
+      lastHistoryProgress: null,
     };
   }
 
@@ -100,12 +108,23 @@ export async function readWhatsAppHelperStatus(storeDir: string): Promise<WhatsA
     accountJid?: unknown;
     pushName?: unknown;
     helperVersion?: unknown;
+    lastHistorySyncAt?: unknown;
+    lastHistorySyncType?: unknown;
+    lastHistoryChunkOrder?: unknown;
+    lastHistoryProgress?: unknown;
   };
   return {
     authenticated: parsed.authenticated === true,
     accountJid: typeof parsed.accountJid === "string" ? parsed.accountJid : null,
     pushName: typeof parsed.pushName === "string" ? parsed.pushName : null,
     helperVersion: typeof parsed.helperVersion === "string" ? parsed.helperVersion : null,
+    lastHistorySyncAt: typeof parsed.lastHistorySyncAt === "number" ? parsed.lastHistorySyncAt : null,
+    lastHistorySyncType:
+      typeof parsed.lastHistorySyncType === "string" ? parsed.lastHistorySyncType : null,
+    lastHistoryChunkOrder:
+      typeof parsed.lastHistoryChunkOrder === "number" ? parsed.lastHistoryChunkOrder : null,
+    lastHistoryProgress:
+      typeof parsed.lastHistoryProgress === "number" ? parsed.lastHistoryProgress : null,
   };
 }
 
