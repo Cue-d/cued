@@ -811,6 +811,7 @@ func (r *helperRuntime) processHistorySyncNotifications(ctx context.Context) {
 				return
 			case <-time.After(historySyncRetryDelay):
 			}
+			continue
 		}
 		if processed {
 			continue
@@ -1290,11 +1291,11 @@ func (r *helperRuntime) handleEvent(evt interface{}) {
 			"message": "logged out from WhatsApp",
 		})
 	case *events.PushNameSetting:
-		metadata := r.state.getMetadata()
 		if event.Action != nil {
-			metadata.PushName = event.Action.GetName()
+			r.state.updateMetadata(func(metadata *helperMetadata) {
+				metadata.PushName = event.Action.GetName()
+			})
 		}
-		r.state.setMetadata(metadata)
 	case *events.Message:
 		r.handleMessageEvent(event)
 	case *events.Receipt:

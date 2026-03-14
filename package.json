@@ -1,6 +1,6 @@
 {
   "name": "@cued/app",
-  "version": "0.1.1",
+  "version": "0.1.6",
   "private": true,
   "type": "module",
   "bin": {
@@ -8,12 +8,15 @@
   },
   "packageManager": "pnpm@10.29.3",
   "scripts": {
+    "prepare": "husky",
     "dev": "tsx src/cli.ts",
     "build": "tsc -p tsconfig.build.json",
     "build:native:macos": "swift build --package-path native/macos/CuedNative -c release",
     "build:app:macos": "bash scripts/build-cued-daemon-app.sh",
     "build:dmg:macos": "bash scripts/build-cued-dmg.sh",
     "build:tarball:macos": "bash scripts/build-cued-tarball.sh",
+    "check:ci-local": "sh scripts/check-ci-local.sh",
+    "bootstrap:signal:macos": "bash scripts/fetch-signal-cli-macos.sh",
     "check:native:macos": "swift build --package-path native/macos/CuedNative -c release",
     "check:biome": "biome check .",
     "format": "biome format --write .",
@@ -43,6 +46,7 @@
     "@biomejs/biome": "^2.4.6",
     "@types/better-sqlite3": "^7.6.13",
     "@types/node": "^20.14.9",
+    "husky": "^9.1.7",
     "tsx": "^4.20.6",
     "typescript": "^5.9.2",
     "vitest": "^2.1.8"

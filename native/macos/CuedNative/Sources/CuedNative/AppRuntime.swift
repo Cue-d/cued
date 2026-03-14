@@ -9,12 +9,34 @@ private let appMessagesDBPath =
   FileManager.default.homeDirectoryForCurrentUser
   .appendingPathComponent("Library/Messages/chat.db").path
 
+private func environmentPath(_ name: String) -> String? {
+  trimmedEnvironmentPath(ProcessInfo.processInfo.environment, name: name)
+}
+
+private func configuredCuedHomePath() -> String {
+  configuredCuedHomePath(environment: ProcessInfo.processInfo.environment)
+}
+
+private func configuredCuedDBPath() -> String {
+  configuredCuedDBPath(environment: ProcessInfo.processInfo.environment)
+}
+
 struct AppIntegrationStatus {
   let platform: String
   let accountKey: String
   let displayName: String?
   let authState: String
   let enabled: Bool
+}
+
+struct AppPlatformMessageCount {
+  let platform: String
+  let messages: Int
+}
+
+struct AppUpdateSummary {
+  let availableVersion: String?
+  let releaseURL: String?
 }
 
 struct AppStatusSnapshot {
@@ -25,11 +47,13 @@ struct AppStatusSnapshot {
   let conversations: Int
   let messages: Int
   let rawEvents: Int
+  let messageBreakdown: [AppPlatformMessageCount]
   let integrations: [AppIntegrationStatus]
   let onboardingCompletedVersion: String?
   let installedAppVersion: String?
   let releaseChannel: String?
   let cliSymlinkInstalled: Bool
+  let updateSummary: AppUpdateSummary?
 }
 
 final class AppStatusStore: @unchecked Sendable {
@@ -49,11 +73,13 @@ final class AppStatusStore: @unchecked Sendable {
         conversations: 0,
         messages: 0,
         rawEvents: 0,
+        messageBreakdown: [],
         integrations: [],
         onboardingCompletedVersion: nil,
         installedAppVersion: nil,
         releaseChannel: nil,
-        cliSymlinkInstalled: false
+        cliSymlinkInstalled: false,
+        updateSummary: nil
       )
     }
 
@@ -70,11 +96,13 @@ final class AppStatusStore: @unchecked Sendable {
         conversations: 0,
         messages: 0,
         rawEvents: 0,
+        messageBreakdown: [],
         integrations: [],
         onboardingCompletedVersion: nil,
         installedAppVersion: nil,
         releaseChannel: nil,
-        cliSymlinkInstalled: false
+        cliSymlinkInstalled: false,
+        updateSummary: nil
       )
     }
     defer { sqlite3_close(db) }
@@ -86,6 +114,12 @@ final class AppStatusStore: @unchecked Sendable {
       countRows(db: db, table: "messages"),
       countRows(db: db, table: "raw_events"),
     ]
+    let integrations = mergeLiveLocalIntegrations(queryIntegrations(db: db))
+    let messageBreakdown = mergeMessageBreakdown(
+      queryMessageCountsByPlatform(db: db),
+      integrations: integrations
+    )
+    let updateSummary = queryUpdateSummary(db: db)
 
     return AppStatusSnapshot(
       daemonRunning: daemonRow.running,
@@ -95,11 +129,13 @@ final class AppStatusStore: @unchecked Sendable {
       conversations: counts[1],
       messages: counts[2],
       rawEvents: counts[3],
-      integrations: mergeLiveLocalIntegrations(queryIntegrations(db: db)),
+      messageBreakdown: messageBreakdown,
+      integrations: integrations,
       onboardingCompletedVersion: queryAppSetting(db: db, key: "onboarding_completed_version"),
       installedAppVersion: queryAppSetting(db: db, key: "installed_app_version"),
       releaseChannel: queryAppSetting(db: db, key: "release_channel"),
-      cliSymlinkInstalled: queryAppSetting(db: db, key: "cli_symlink_installed") == "1"
+      cliSymlinkInstalled: queryAppSetting(db: db, key: "cli_symlink_installed") == "1",
+      updateSummary: updateSummary
     )
   }
 
@@ -138,6 +174,32 @@ final class AppStatusStore: @unchecked Sendable {
       return 0
     }
     return Int(sqlite3_column_int64(statement, 0))
+  }
+
+  private func queryMessageCountsByPlatform(db: OpaquePointer) -> [AppPlatformMessageCount] {
+    let sql = """
+      SELECT platform, COUNT(*)
+      FROM messages
+      GROUP BY platform
+      ORDER BY platform
+    """
+
+    var statement: OpaquePointer?
+    guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK, let statement else {
+      return []
+    }
+    defer { sqlite3_finalize(statement) }
+
+    var results: [AppPlatformMessageCount] = []
+    while sqlite3_step(statement) == SQLITE_ROW {
+      results.append(
+        AppPlatformMessageCount(
+          platform: String(cString: sqlite3_column_text(statement, 0)),
+          messages: Int(sqlite3_column_int64(statement, 1))
+        )
+      )
+    }
+    return results
   }
 
   private func queryIntegrations(db: OpaquePointer) -> [AppIntegrationStatus] {
@@ -196,6 +258,26 @@ final class AppStatusStore: @unchecked Sendable {
       }
       return $0.platform < $1.platform
     }
+  }
+
+  private func mergeMessageBreakdown(
+    _ existing: [AppPlatformMessageCount],
+    integrations: [AppIntegrationStatus]
+  ) -> [AppPlatformMessageCount] {
+    var counts = Dictionary(uniqueKeysWithValues: existing.map { ($0.platform, $0.messages) })
+
+    for integration in integrations where shouldIncludeMessageDebugPlatform(integration.platform) {
+      counts[integration.platform] = counts[integration.platform] ?? 0
+    }
+
+    return counts
+      .map { AppPlatformMessageCount(platform: $0.key, messages: $0.value) }
+      .sorted {
+        if ($0.messages == 0) != ($1.messages == 0) {
+          return $0.messages > $1.messages
+        }
+        return platformDisplayTitle($0.platform) < platformDisplayTitle($1.platform)
+      }
   }
 
   private func upsertLocalIntegration(
@@ -286,6 +368,21 @@ final class AppStatusStore: @unchecked Sendable {
       return nil
     }
     return String(cString: value)
+  }
+
+  private func queryUpdateSummary(db: OpaquePointer) -> AppUpdateSummary? {
+    guard let raw = queryAppSetting(db: db, key: "update_release_state_json"),
+          let data = raw.data(using: .utf8),
+          let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+      return nil
+    }
+
+    let availableVersion = object["availableVersion"] as? String
+    let releaseURL = object["releaseUrl"] as? String
+    if availableVersion == nil && releaseURL == nil {
+      return nil
+    }
+    return AppUpdateSummary(availableVersion: availableVersion, releaseURL: releaseURL)
   }
 }
 
@@ -446,6 +543,38 @@ private func integrationMenuTitle(_ integration: AppIntegrationStatus) -> String
   return "\(base) • \(integrationStateLabel(integration.authState))\(integration.enabled ? "" : " (disabled)")"
 }
 
+private func shouldIncludeMessageDebugPlatform(_ platform: String) -> Bool {
+  platform != "contacts"
+}
+
+private func platformDisplayTitle(_ platform: String) -> String {
+  switch platform {
+  case "imessage":
+    return "Messages"
+  case "linkedin":
+    return "LinkedIn"
+  case "slack":
+    return "Slack"
+  case "signal":
+    return "Signal"
+  case "whatsapp":
+    return "WhatsApp"
+  default:
+    return platform.capitalized
+  }
+}
+
+private func platformMessageDebugTitle(_ item: AppPlatformMessageCount) -> String {
+  "\(platformDisplayTitle(item.platform)) \(item.messages) message\(item.messages == 1 ? "" : "s")"
+}
+
+private func debugSummaryTitle(
+  label: String,
+  value: String
+) -> String {
+  "\(label): \(value)"
+}
+
 @MainActor
 final class DaemonSupervisor {
   private var daemonProcess: Process?
@@ -483,11 +612,6 @@ final class DaemonSupervisor {
     daemonProcess = launchDaemonProcess()
   }
 
-  func restart() {
-    stop()
-    startIfNeeded()
-  }
-
   func isLaunching(snapshot: AppStatusSnapshot) -> Bool {
     guard let daemonProcess, daemonProcess.isRunning else {
       return false
@@ -495,16 +619,23 @@ final class DaemonSupervisor {
     return !snapshot.daemonRunning
   }
 
-  func launchPID() -> Int? {
-    guard let daemonProcess, daemonProcess.isRunning else {
-      return nil
+  func stop(activePID: Int? = nil) {
+    let trackedPID = daemonProcess.flatMap { process in
+      process.isRunning ? Int(process.processIdentifier) : nil
     }
-    return Int(daemonProcess.processIdentifier)
-  }
-
-  func stop() {
     daemonProcess?.terminate()
     daemonProcess = nil
+
+    guard let activePID, activePID > 0 else {
+      return
+    }
+
+    let currentPID = Int(ProcessInfo.processInfo.processIdentifier)
+    guard activePID != currentPID, activePID != trackedPID else {
+      return
+    }
+
+    _ = Darwin.kill(pid_t(activePID), SIGTERM)
   }
 
   func openSetupInTerminal() {
@@ -522,7 +653,7 @@ final class DaemonSupervisor {
       {
         environment["CUED_NATIVE_BINARY"] = executablePath
       }
-      command = shellCommand(setupCommand, environment: environment)
+      command = buildShellCommand(setupCommand, environment: environment)
     }
 
     runInTerminal(command)
@@ -565,6 +696,26 @@ final class DaemonSupervisor {
 
     let command = arguments.map(shellEscape).joined(separator: " ")
     return runShellCommandAndCapture(command, environment: daemonEnvironment())
+  }
+
+  nonisolated func launchCLI(arguments: [String]) -> Bool {
+    if let daemonLaunchPath, !daemonLaunchPath.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+      let process = Process()
+      process.executableURL = URL(fileURLWithPath: daemonLaunchPath)
+      process.arguments = arguments
+      process.environment = daemonEnvironment()
+      process.standardOutput = nil
+      process.standardError = nil
+      do {
+        try process.run()
+        return true
+      } catch {
+        return false
+      }
+    }
+
+    let command = arguments.map(shellEscape).joined(separator: " ")
+    return launchShellCommand(command, environment: daemonEnvironment()) != nil
   }
 
   private nonisolated func daemonEnvironment() -> [String: String] {
@@ -663,18 +814,6 @@ final class DaemonSupervisor {
     }
   }
 
-  private nonisolated func shellCommand(_ command: String, environment: [String: String]) -> String {
-    let exports = environment
-      .sorted { $0.key < $1.key }
-      .map { "export \($0.key)=\(shellEscape($0.value))" }
-      .joined(separator: "; ")
-    return exports.isEmpty ? command : "\(exports); \(command)"
-  }
-
-  private nonisolated func shellEscape(_ value: String) -> String {
-    "'\(value.replacingOccurrences(of: "'", with: "'\"'\"'"))'"
-  }
-
   private func runInTerminal(_ command: String) {
     let escaped = command
       .replacingOccurrences(of: "\\", with: "\\\\")
@@ -720,850 +859,28 @@ private struct CLISymlinkStatusResponse: Decodable {
   let path: String
 }
 
-private final class LegacyOnboardingDocumentView: NSView {
-  override var isFlipped: Bool { true }
+private struct UpdateErrorResponse: Decodable {
+  let stage: String
+  let message: String
 }
 
-@MainActor
-private final class LegacyOnboardingWindowController: NSWindowController {
-  private let daemonSupervisor: DaemonSupervisor
-  private let statusStore: AppStatusStore
-  private let onRefresh: () -> Void
-  private let stackView = NSStackView()
-  private let scrollView = NSScrollView()
-  private var isRefreshing = false
-  private var buttonActions: [ObjectIdentifier: () -> Void] = [:]
-
-  init(daemonSupervisor: DaemonSupervisor, statusStore: AppStatusStore, onRefresh: @escaping () -> Void) {
-    self.daemonSupervisor = daemonSupervisor
-    self.statusStore = statusStore
-    self.onRefresh = onRefresh
-
-    let window = NSWindow(
-      contentRect: NSRect(x: 0, y: 0, width: 760, height: 820),
-      styleMask: [.titled, .closable, .miniaturizable, .fullSizeContentView],
-      backing: .buffered,
-      defer: false
-    )
-    window.title = "Cued Setup"
-    window.center()
-    window.titlebarAppearsTransparent = true
-    window.titleVisibility = .hidden
-    window.isMovableByWindowBackground = true
-    window.backgroundColor = .windowBackgroundColor
-    super.init(window: window)
-
-    stackView.orientation = .vertical
-    stackView.alignment = .leading
-    stackView.spacing = 18
-    stackView.translatesAutoresizingMaskIntoConstraints = false
-
-    let backgroundView = NSVisualEffectView()
-    backgroundView.material = .windowBackground
-    backgroundView.blendingMode = .behindWindow
-    backgroundView.state = .active
-    backgroundView.wantsLayer = true
-    backgroundView.layer?.backgroundColor = NSColor.windowBackgroundColor.cgColor
-
-    let contentView = LegacyOnboardingDocumentView()
-    contentView.translatesAutoresizingMaskIntoConstraints = false
-    contentView.addSubview(stackView)
-    NSLayoutConstraint.activate([
-      stackView.leadingAnchor.constraint(greaterThanOrEqualTo: contentView.leadingAnchor, constant: 28),
-      stackView.trailingAnchor.constraint(lessThanOrEqualTo: contentView.trailingAnchor, constant: -28),
-      stackView.centerXAnchor.constraint(equalTo: contentView.centerXAnchor),
-      stackView.topAnchor.constraint(equalTo: contentView.topAnchor, constant: 28),
-      stackView.bottomAnchor.constraint(equalTo: contentView.bottomAnchor, constant: -28),
-      stackView.widthAnchor.constraint(equalToConstant: 640),
-    ])
-
-    scrollView.documentView = contentView
-    scrollView.hasVerticalScroller = true
-    scrollView.drawsBackground = false
-    scrollView.translatesAutoresizingMaskIntoConstraints = false
-
-    backgroundView.addSubview(scrollView)
-    NSLayoutConstraint.activate([
-      scrollView.leadingAnchor.constraint(equalTo: backgroundView.leadingAnchor),
-      scrollView.trailingAnchor.constraint(equalTo: backgroundView.trailingAnchor),
-      scrollView.topAnchor.constraint(equalTo: backgroundView.topAnchor),
-      scrollView.bottomAnchor.constraint(equalTo: backgroundView.bottomAnchor),
-      contentView.widthAnchor.constraint(equalTo: scrollView.contentView.widthAnchor),
-    ])
-
-    window.contentView = backgroundView
-  }
-
-  @available(*, unavailable)
-  required init?(coder: NSCoder) {
-    fatalError("init(coder:) has not been implemented")
-  }
-
-  func showAndRefresh() {
-    showWindow(nil)
-    window?.makeKeyAndOrderFront(nil)
-    NSApp.activate(ignoringOtherApps: true)
-    scrollView.contentView.scroll(to: .zero)
-    scrollView.reflectScrolledClipView(scrollView.contentView)
-    refresh()
-  }
-
-  func refresh() {
-    guard !isRefreshing else {
-      return
-    }
-    isRefreshing = true
-    rebuildLoading()
-    let daemonSupervisor = self.daemonSupervisor
-    let statusStore = self.statusStore
-
-    Task.detached(priority: .userInitiated) { [daemonSupervisor, statusStore] in
-      _ = daemonSupervisor.runCLI(arguments: ["integrations", "refresh"])
-      let snapshot = statusStore.readSnapshot()
-      let integrations = Self.decodeJSON(
-        daemonSupervisor: daemonSupervisor,
-        IntegrationStatusResponse.self,
-        arguments: ["integrations", "status"]
-      ) ?? IntegrationStatusResponse(hostOs: "macos", setupIntegrations: [])
-      let launchd = Self.decodeJSON(
-        daemonSupervisor: daemonSupervisor,
-        LaunchAgentStatusResponse.self,
-        arguments: ["launchd", "status"]
-      )
-      let cliStatus = Self.decodeJSON(
-        daemonSupervisor: daemonSupervisor,
-        CLISymlinkStatusResponse.self,
-        arguments: ["cli", "status"]
-      )
-
-      await MainActor.run {
-        self.isRefreshing = false
-        self.rebuild(
-          snapshot: snapshot,
-          integrations: integrations.setupIntegrations.filter { $0.capability.onboardingVisible },
-          launchAgentLoaded: launchd?.loaded ?? false,
-          cliStatus: cliStatus
-        )
-      }
-    }
-  }
-
-  private nonisolated static func decodeJSON<T: Decodable>(
-    daemonSupervisor: DaemonSupervisor,
-    _ type: T.Type,
-    arguments: [String]
-  ) -> T? {
-    guard let result = daemonSupervisor.runCLI(arguments: arguments),
-          result.status == 0,
-          let data = result.stdout.data(using: .utf8) else {
-      return nil
-    }
-    return try? JSONDecoder().decode(type, from: data)
-  }
-
-  private func rebuildLoading() {
-    clearStack()
-    let card = cardView(
-      eyebrow: "Preparing",
-      title: "Loading setup status",
-      subtitle: "Refreshing daemon, permissions, and connector availability."
-    )
-    let indicator = NSProgressIndicator()
-    indicator.style = .spinning
-    indicator.controlSize = .regular
-    indicator.startAnimation(nil)
-    card.stack.addArrangedSubview(indicator)
-    stackView.addArrangedSubview(card.container)
-    scrollView.contentView.scroll(to: .zero)
-    scrollView.reflectScrolledClipView(scrollView.contentView)
-  }
-
-  private func rebuild(
-    snapshot: AppStatusSnapshot,
-    integrations: [SetupIntegrationStatus],
-    launchAgentLoaded: Bool,
-    cliStatus: CLISymlinkStatusResponse?
-  ) {
-    clearStack()
-    let displayVersion = snapshot.installedAppVersion
-      ?? (Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "unknown")
-    let releaseChannel = snapshot.releaseChannel ?? "internal"
-
-    stackView.addArrangedSubview(heroHeader(
-      version: displayVersion,
-      releaseChannel: releaseChannel,
-      daemonRunning: snapshot.daemonRunning
-    ))
-
-    let connectedCount = snapshot.integrations.filter { $0.enabled && isConnectedIntegrationState($0.authState) }.count
-    let summaryRow = NSStackView()
-    summaryRow.orientation = .horizontal
-    summaryRow.alignment = .top
-    summaryRow.spacing = 14
-    summaryRow.distribution = .fillEqually
-    summaryRow.addArrangedSubview(statCard(
-      label: "Status",
-      value: snapshot.daemonRunning ? "Ready" : "Starting",
-      tone: snapshot.daemonRunning ? .good : .warning,
-      detail: "Daemon \(snapshot.daemonRunning ? "online" : "warming up")"
-    ))
-    summaryRow.addArrangedSubview(statCard(
-      label: "Connected",
-      value: "\(connectedCount)",
-      tone: connectedCount > 0 ? .good : .neutral,
-      detail: connectedCount == 1 ? "connector active" : "connectors active"
-    ))
-    summaryRow.addArrangedSubview(statCard(
-      label: "Messages",
-      value: "\(snapshot.messages)",
-      tone: .neutral,
-      detail: "local records"
-    ))
-    stackView.addArrangedSubview(summaryRow)
-
-    let systemCard = cardView(
-      eyebrow: "System Setup",
-      title: "Get this Mac ready",
-      subtitle: "Turn on startup behavior, install the CLI, and grant the macOS permissions local connectors need."
-    )
-    systemCard.stack.addArrangedSubview(actionRow(
-      title: launchAgentLoaded ? "Run at login is enabled" : "Run at login is disabled",
-      detail: "Cued launches the menu bar app and daemon automatically after login.",
-      statusText: launchAgentLoaded ? "On" : "Off",
-      statusStyle: launchAgentLoaded ? .good : .neutral,
-      buttonTitle: launchAgentLoaded ? "Disable" : "Enable",
-      buttonStyle: launchAgentLoaded ? .secondary : .primary,
-      action: { [weak self] in
-        self?.runAction(arguments: ["launchd", launchAgentLoaded ? "uninstall" : "install"])
-      }
-    ))
-    systemCard.stack.addArrangedSubview(divider())
-    systemCard.stack.addArrangedSubview(actionRow(
-      title: cliStatus?.installed == true ? "Command line access is ready" : "Install the cued CLI",
-      detail: cliStatus?.path ?? "\(NSHomeDirectory())/.local/bin/cued",
-      statusText: cliStatus?.installed == true ? "Installed" : "Not installed",
-      statusStyle: cliStatus?.installed == true ? .good : .neutral,
-      buttonTitle: cliStatus?.installed == true ? "Reinstall" : "Install CLI",
-      buttonStyle: cliStatus?.installed == true ? .secondary : .primary,
-      action: { [weak self] in
-        self?.runAction(arguments: ["cli", "install"])
-      }
-    ))
-    systemCard.stack.addArrangedSubview(divider())
-    systemCard.stack.addArrangedSubview(actionRow(
-      title: "Grant macOS permissions",
-      detail: "Contacts and Full Disk Access unlock local connectors like Contacts.app and Messages.",
-      statusText: permissionStatusLabel(for: integrations),
-      statusStyle: permissionStatusStyle(for: integrations),
-      buttonTitle: "Open Permissions",
-      buttonStyle: .primary,
-      action: { [weak self] in
-        self?.daemonSupervisor.requestPermissions()
-        self?.refresh()
-      }
-    ))
-
-    let healthCard = cardView(
-      eyebrow: "Install Snapshot",
-      title: "Current local state",
-      subtitle: "A quick read on the machine and datastore before you connect anything."
-    )
-    let healthStats = NSStackView()
-    healthStats.orientation = .vertical
-    healthStats.alignment = .leading
-    healthStats.spacing = 10
-    healthStats.addArrangedSubview(statusMetricRow(label: "Version", value: displayVersion))
-    healthStats.addArrangedSubview(divider())
-    healthStats.addArrangedSubview(statusMetricRow(label: "Channel", value: releaseChannel))
-    healthStats.addArrangedSubview(divider())
-    healthStats.addArrangedSubview(statusMetricRow(label: "Contacts", value: "\(snapshot.contacts)"))
-    healthStats.addArrangedSubview(divider())
-    healthStats.addArrangedSubview(statusMetricRow(label: "Conversations", value: "\(snapshot.conversations)"))
-    healthStats.addArrangedSubview(divider())
-    healthStats.addArrangedSubview(statusMetricRow(label: "Raw events", value: "\(snapshot.rawEvents)"))
-    healthCard.stack.addArrangedSubview(healthStats)
-    healthCard.stack.addArrangedSubview(calloutView(
-      tone: snapshot.daemonRunning ? .neutral : .warning,
-      text: snapshot.daemonRunning
-        ? "Cued is installed and running locally. You can finish machine setup now or skip straight to connector setup."
-        : "The daemon is still starting. You can continue setup while it finishes warming up."
-    ))
-
-    stackView.addArrangedSubview(twoColumnRow(systemCard.container, healthCard.container))
-
-    let connectorsCard = cardView(
-      eyebrow: "Connectors",
-      title: "Choose what to connect",
-      subtitle: "You can skip any connector now and add it later from the menu bar app."
-    )
-    if integrations.isEmpty {
-      connectorsCard.stack.addArrangedSubview(emptyStateView(
-        title: "No connectors are available yet",
-        detail: "Connectors will appear here as soon as the daemon reports supported integrations for this host."
-      ))
-    } else {
-      for (index, integration) in integrations.enumerated() {
-        connectorsCard.stack.addArrangedSubview(connectorRow(integration))
-        if index < integrations.count - 1 {
-          connectorsCard.stack.addArrangedSubview(divider())
-        }
-      }
-    }
-    stackView.addArrangedSubview(connectorsCard.container)
-
-    let footer = NSStackView()
-    footer.orientation = .horizontal
-    footer.spacing = 12
-    footer.alignment = .centerY
-    footer.distribution = .gravityAreas
-
-    let footerNote = secondaryLabel("You can reopen setup any time from the menu bar.")
-    footer.addArrangedSubview(footerNote)
-
-    let spacer = NSView()
-    spacer.translatesAutoresizingMaskIntoConstraints = false
-    footer.addArrangedSubview(spacer)
-    footer.setVisibilityPriority(.detachOnlyIfNecessary, for: spacer)
-
-    let updatesButton = makeButton(title: "View Releases", style: .secondary)
-    updatesButton.target = self
-    updatesButton.action = #selector(openReleasesPage)
-    footer.addArrangedSubview(updatesButton)
-
-    let finishButton = makeButton(title: "Finish Setup", style: .primary)
-    finishButton.target = self
-    finishButton.action = #selector(finishOnboarding)
-    footer.addArrangedSubview(finishButton)
-    stackView.addArrangedSubview(footer)
-    scrollView.contentView.scroll(to: .zero)
-    scrollView.reflectScrolledClipView(scrollView.contentView)
-  }
-
-  private func connectorRow(_ integration: SetupIntegrationStatus) -> NSView {
-    let title = connectorTitle(integration)
-    let detail = connectorDetail(integration)
-
-    let buttonTitle: String?
-    let buttonStyle: ActionButtonStyle
-    if integration.capability.availability == "unsupported" {
-      buttonTitle = nil
-      buttonStyle = .secondary
-    } else if integration.capability.availability == "requires_permission" {
-      buttonTitle = "Grant Access"
-      buttonStyle = .secondary
-    } else if isConnectedIntegrationState(integration.authState) {
-      buttonTitle = "Reconnect"
-      buttonStyle = .secondary
-    } else {
-      buttonTitle = "Connect"
-      buttonStyle = .primary
-    }
-
-    return actionRow(
-      title: title,
-      detail: detail,
-      statusText: connectorStatusText(integration),
-      statusStyle: connectorStatusStyle(integration),
-      buttonTitle: buttonTitle,
-      buttonStyle: buttonStyle,
-      action: { [weak self] in
-        guard let self else {
-          return
-        }
-        if integration.capability.availability == "requires_permission" {
-          self.daemonSupervisor.requestPermissions()
-          self.refresh()
-          return
-        }
-        self.runAction(arguments: ["integrations", "connect", integration.platform, integration.accountKey])
-      }
-    )
-  }
-
-  private func clearStack() {
-    buttonActions.removeAll()
-    let subviews = stackView.arrangedSubviews
-    for view in subviews {
-      stackView.removeArrangedSubview(view)
-      view.removeFromSuperview()
-    }
-  }
-
-  private func sectionTitle(_ value: String) -> NSTextField {
-    let label = NSTextField(labelWithString: value)
-    label.font = NSFont.systemFont(ofSize: 16, weight: .semibold)
-    label.textColor = .labelColor
-    return label
-  }
-
-  private func bodyLabel(_ value: String) -> NSTextField {
-    let label = NSTextField(wrappingLabelWithString: value)
-    label.font = NSFont.systemFont(ofSize: 13)
-    label.textColor = .secondaryLabelColor
-    label.maximumNumberOfLines = 0
-    return label
-  }
-
-  private func secondaryLabel(_ value: String) -> NSTextField {
-    let label = NSTextField(wrappingLabelWithString: value)
-    label.font = NSFont.systemFont(ofSize: 12.5, weight: .medium)
-    label.textColor = .secondaryLabelColor
-    label.maximumNumberOfLines = 0
-    return label
-  }
-
-  private func heroTitleLabel(_ value: String) -> NSTextField {
-    let label = NSTextField(wrappingLabelWithString: value)
-    label.font = NSFont.systemFont(ofSize: 30, weight: .bold)
-    label.textColor = .labelColor
-    label.maximumNumberOfLines = 0
-    return label
-  }
-
-  private func eyebrowLabel(_ value: String) -> NSTextField {
-    let label = NSTextField(labelWithString: value.uppercased())
-    label.font = NSFont.monospacedSystemFont(ofSize: 11, weight: .semibold)
-    label.textColor = .secondaryLabelColor
-    return label
-  }
-
-  private enum BadgeStyle {
-    case good
-    case warning
-    case neutral
-    case danger
-  }
-
-  private enum ActionButtonStyle {
-    case primary
-    case secondary
-  }
-
-  private func toneTextColor(_ style: BadgeStyle) -> NSColor {
-    switch style {
-    case .good:
-      return NSColor.systemGreen
-    case .warning:
-      return NSColor.systemOrange
-    case .neutral:
-      return NSColor.labelColor
-    case .danger:
-      return NSColor.systemRed
-    }
-  }
-
-  private func badge(text: String, style: BadgeStyle) -> NSView {
-    let label = NSTextField(labelWithString: text.uppercased())
-    label.font = NSFont.monospacedSystemFont(ofSize: 11, weight: .semibold)
-    label.textColor = badgeTextColor(style)
-
-    let container = NSView()
-    container.wantsLayer = true
-    container.layer?.cornerRadius = 999
-    container.layer?.backgroundColor = badgeBackgroundColor(style).cgColor
-    container.translatesAutoresizingMaskIntoConstraints = false
-
-    label.translatesAutoresizingMaskIntoConstraints = false
-    container.addSubview(label)
-    NSLayoutConstraint.activate([
-      label.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 10),
-      label.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -10),
-      label.topAnchor.constraint(equalTo: container.topAnchor, constant: 5),
-      label.bottomAnchor.constraint(equalTo: container.bottomAnchor, constant: -5),
-    ])
-
-    return container
-  }
-
-  private func badgeBackgroundColor(_ style: BadgeStyle) -> NSColor {
-    switch style {
-    case .good:
-      return NSColor.systemGreen.withAlphaComponent(0.14)
-    case .warning:
-      return NSColor.systemOrange.withAlphaComponent(0.14)
-    case .neutral:
-      return NSColor.controlBackgroundColor
-    case .danger:
-      return NSColor.systemRed.withAlphaComponent(0.14)
-    }
-  }
-
-  private func badgeTextColor(_ style: BadgeStyle) -> NSColor {
-    switch style {
-    case .good:
-      return NSColor.systemGreen
-    case .warning:
-      return NSColor.systemOrange
-    case .neutral:
-      return NSColor.secondaryLabelColor
-    case .danger:
-      return NSColor.systemRed
-    }
-  }
-
-  private func makeButton(title: String, style: ActionButtonStyle) -> NSButton {
-    let button = NSButton(title: title, target: nil, action: nil)
-    button.isBordered = true
-    button.bezelStyle = .rounded
-    button.controlSize = .large
-    if #available(macOS 11.0, *) {
-      button.bezelColor = style == .primary ? .controlAccentColor : .controlBackgroundColor
-    }
-    button.contentTintColor = style == .primary ? .white : .labelColor
-    button.font = NSFont.systemFont(ofSize: 13, weight: .semibold)
-    button.translatesAutoresizingMaskIntoConstraints = false
-    button.heightAnchor.constraint(equalToConstant: 36).isActive = true
-    button.widthAnchor.constraint(greaterThanOrEqualToConstant: max(120, CGFloat(title.count * 8))).isActive = true
-    return button
-  }
-
-  private func divider() -> NSView {
-    let line = NSView()
-    line.wantsLayer = true
-    line.layer?.backgroundColor = NSColor(calibratedWhite: 1, alpha: 0.08).cgColor
-    line.translatesAutoresizingMaskIntoConstraints = false
-    line.heightAnchor.constraint(equalToConstant: 1).isActive = true
-    return line
-  }
-
-  private func heroHeader(version: String, releaseChannel: String, daemonRunning: Bool) -> NSView {
-    let container = NSStackView()
-    container.orientation = .vertical
-    container.alignment = .centerX
-    container.spacing = 12
-
-    let iconWrap = NSView()
-    iconWrap.translatesAutoresizingMaskIntoConstraints = false
-    iconWrap.wantsLayer = true
-    iconWrap.layer?.cornerRadius = 58
-
-    let glow = NSView()
-    glow.translatesAutoresizingMaskIntoConstraints = false
-    glow.wantsLayer = true
-    glow.layer?.cornerRadius = 52
-    glow.layer?.backgroundColor = NSColor.controlAccentColor.withAlphaComponent(0.18).cgColor
-    iconWrap.addSubview(glow)
-
-    let icon = NSImageView(image: NSApp.applicationIconImage)
-    icon.translatesAutoresizingMaskIntoConstraints = false
-    icon.imageScaling = .scaleProportionallyUpOrDown
-    icon.wantsLayer = true
-    icon.layer?.cornerRadius = 18
-    icon.layer?.masksToBounds = true
-    iconWrap.addSubview(icon)
-
-    NSLayoutConstraint.activate([
-      iconWrap.widthAnchor.constraint(equalToConstant: 112),
-      iconWrap.heightAnchor.constraint(equalToConstant: 112),
-      glow.centerXAnchor.constraint(equalTo: iconWrap.centerXAnchor),
-      glow.centerYAnchor.constraint(equalTo: iconWrap.centerYAnchor),
-      glow.widthAnchor.constraint(equalToConstant: 104),
-      glow.heightAnchor.constraint(equalToConstant: 104),
-      icon.centerXAnchor.constraint(equalTo: iconWrap.centerXAnchor),
-      icon.centerYAnchor.constraint(equalTo: iconWrap.centerYAnchor),
-      icon.widthAnchor.constraint(equalToConstant: 76),
-      icon.heightAnchor.constraint(equalToConstant: 76),
-    ])
-    container.addArrangedSubview(iconWrap)
-
-    let title = NSTextField(wrappingLabelWithString: "Set up Cued on this Mac")
-    title.font = NSFont.systemFont(ofSize: 30, weight: .semibold)
-    title.textColor = .labelColor
-    title.alignment = .center
-    title.maximumNumberOfLines = 0
-    container.addArrangedSubview(title)
-
-    let subtitle = NSTextField(wrappingLabelWithString: "Local-first messaging and contacts for agents. Finish machine setup now, then connect the sources you want.")
-    subtitle.font = NSFont.systemFont(ofSize: 14)
-    subtitle.textColor = .secondaryLabelColor
-    subtitle.alignment = .center
-    subtitle.maximumNumberOfLines = 0
-    subtitle.preferredMaxLayoutWidth = 560
-    container.addArrangedSubview(subtitle)
-
-    let badges = NSStackView()
-    badges.orientation = .horizontal
-    badges.spacing = 10
-    badges.alignment = .centerY
-    badges.addArrangedSubview(badge(text: "v\(version)", style: .neutral))
-    badges.addArrangedSubview(badge(text: releaseChannel, style: .neutral))
-    badges.addArrangedSubview(badge(text: daemonRunning ? "Daemon ready" : "Daemon starting", style: daemonRunning ? .good : .warning))
-    container.addArrangedSubview(badges)
-
-    return container
-  }
-
-  private func cardView(
-    eyebrow: String,
-    title: String,
-    subtitle: String
-  ) -> (container: NSView, stack: NSStackView) {
-    let wrapper = NSVisualEffectView()
-    wrapper.material = .popover
-    wrapper.state = .active
-    wrapper.blendingMode = .withinWindow
-    wrapper.wantsLayer = true
-    wrapper.layer?.cornerRadius = 20
-    wrapper.layer?.backgroundColor = NSColor.controlBackgroundColor.cgColor
-    wrapper.layer?.borderWidth = 1
-    wrapper.layer?.borderColor = NSColor.separatorColor.withAlphaComponent(0.35).cgColor
-    wrapper.translatesAutoresizingMaskIntoConstraints = false
-
-    let content = NSStackView()
-    content.orientation = .vertical
-    content.alignment = .leading
-    content.spacing = 14
-    content.translatesAutoresizingMaskIntoConstraints = false
-    wrapper.addSubview(content)
-    NSLayoutConstraint.activate([
-      content.leadingAnchor.constraint(equalTo: wrapper.leadingAnchor, constant: 22),
-      content.trailingAnchor.constraint(equalTo: wrapper.trailingAnchor, constant: -22),
-      content.topAnchor.constraint(equalTo: wrapper.topAnchor, constant: 20),
-      content.bottomAnchor.constraint(equalTo: wrapper.bottomAnchor, constant: -20),
-    ])
-
-    content.addArrangedSubview(eyebrowLabel(eyebrow))
-    content.addArrangedSubview(sectionTitle(title))
-    content.addArrangedSubview(bodyLabel(subtitle))
-    return (wrapper, content)
-  }
-
-  private func twoColumnRow(_ left: NSView, _ right: NSView) -> NSView {
-    let row = NSStackView()
-    row.orientation = .horizontal
-    row.alignment = .top
-    row.spacing = 14
-    row.distribution = .fillEqually
-    row.addArrangedSubview(left)
-    row.addArrangedSubview(right)
-    return row
-  }
-
-  private func statCard(label: String, value: String, tone: BadgeStyle, detail: String) -> NSView {
-    let wrapper = NSVisualEffectView()
-    wrapper.material = .popover
-    wrapper.state = .active
-    wrapper.blendingMode = .withinWindow
-    wrapper.wantsLayer = true
-    wrapper.layer?.cornerRadius = 16
-    wrapper.layer?.backgroundColor = NSColor.controlBackgroundColor.cgColor
-    wrapper.layer?.borderWidth = 1
-    wrapper.layer?.borderColor = NSColor.separatorColor.withAlphaComponent(0.3).cgColor
-
-    let stack = NSStackView()
-    stack.orientation = .vertical
-    stack.alignment = .leading
-    stack.spacing = 6
-    stack.translatesAutoresizingMaskIntoConstraints = false
-    wrapper.addSubview(stack)
-    NSLayoutConstraint.activate([
-      stack.leadingAnchor.constraint(equalTo: wrapper.leadingAnchor, constant: 16),
-      stack.trailingAnchor.constraint(equalTo: wrapper.trailingAnchor, constant: -16),
-      stack.topAnchor.constraint(equalTo: wrapper.topAnchor, constant: 16),
-      stack.bottomAnchor.constraint(equalTo: wrapper.bottomAnchor, constant: -16),
-    ])
-
-    let labelView = NSTextField(labelWithString: label.uppercased())
-    labelView.font = NSFont.systemFont(ofSize: 11, weight: .semibold)
-    labelView.textColor = .secondaryLabelColor
-    stack.addArrangedSubview(labelView)
-
-    let valueView = NSTextField(labelWithString: value)
-    valueView.font = NSFont.systemFont(ofSize: 24, weight: .bold)
-    valueView.textColor = toneTextColor(tone)
-    stack.addArrangedSubview(valueView)
-    stack.addArrangedSubview(secondaryLabel(detail))
-
-    return wrapper
-  }
-
-  private func statusMetricRow(label: String, value: String) -> NSView {
-    let row = NSStackView()
-    row.orientation = .horizontal
-    row.alignment = .centerY
-    row.distribution = .fill
-    row.spacing = 10
-
-    let left = secondaryLabel(label)
-    let right = NSTextField(labelWithString: value)
-    right.font = NSFont.monospacedSystemFont(ofSize: 12.5, weight: .semibold)
-    right.textColor = .labelColor
-    right.alignment = .right
-    row.addArrangedSubview(left)
-    row.addArrangedSubview(NSView())
-    row.addArrangedSubview(right)
-    return row
-  }
-
-  private func calloutView(tone: BadgeStyle, text: String) -> NSView {
-    let wrapper = NSView()
-    wrapper.wantsLayer = true
-    wrapper.layer?.cornerRadius = 14
-    wrapper.layer?.backgroundColor = badgeBackgroundColor(tone).cgColor
-    wrapper.translatesAutoresizingMaskIntoConstraints = false
-
-    let label = NSTextField(wrappingLabelWithString: text)
-    label.font = NSFont.systemFont(ofSize: 12.5, weight: .medium)
-    label.textColor = badgeTextColor(tone)
-    label.translatesAutoresizingMaskIntoConstraints = false
-    wrapper.addSubview(label)
-    NSLayoutConstraint.activate([
-      label.leadingAnchor.constraint(equalTo: wrapper.leadingAnchor, constant: 14),
-      label.trailingAnchor.constraint(equalTo: wrapper.trailingAnchor, constant: -14),
-      label.topAnchor.constraint(equalTo: wrapper.topAnchor, constant: 12),
-      label.bottomAnchor.constraint(equalTo: wrapper.bottomAnchor, constant: -12),
-    ])
-    return wrapper
-  }
-
-  private func actionRow(
-    title: String,
-    detail: String,
-    statusText: String,
-    statusStyle: BadgeStyle,
-    buttonTitle: String?,
-    buttonStyle: ActionButtonStyle,
-    action: @escaping () -> Void
-  ) -> NSView {
-    let container = NSStackView()
-    container.orientation = .horizontal
-    container.alignment = .centerY
-    container.spacing = 16
-    container.distribution = .fill
-
-    let labels = NSStackView()
-    labels.orientation = .vertical
-    labels.spacing = 6
-    labels.alignment = .leading
-    let titleLabel = NSTextField(labelWithString: title)
-    titleLabel.font = NSFont.systemFont(ofSize: 15, weight: .semibold)
-    titleLabel.textColor = .labelColor
-    labels.addArrangedSubview(titleLabel)
-    labels.addArrangedSubview(bodyLabel(detail))
-    container.addArrangedSubview(labels)
-
-    let trailing = NSStackView()
-    trailing.orientation = .horizontal
-    trailing.spacing = 10
-    trailing.alignment = .centerY
-    trailing.setHuggingPriority(.required, for: .horizontal)
-    trailing.addArrangedSubview(badge(text: statusText, style: statusStyle))
-
-    if let buttonTitle {
-      let button = makeButton(title: buttonTitle, style: buttonStyle)
-      button.target = self
-      button.action = #selector(handleButtonAction(_:))
-      buttonActions[ObjectIdentifier(button)] = action
-      trailing.addArrangedSubview(button)
-    }
-
-    container.addArrangedSubview(trailing)
-
-    return container
-  }
-
-  private func emptyStateView(title: String, detail: String) -> NSView {
-    let container = NSStackView()
-    container.orientation = .vertical
-    container.alignment = .leading
-    container.spacing = 8
-    let icon = NSTextField(labelWithString: "◎")
-    icon.font = NSFont.systemFont(ofSize: 26, weight: .regular)
-    icon.textColor = NSColor(calibratedRed: 0.57, green: 0.74, blue: 1.0, alpha: 0.9)
-    container.addArrangedSubview(icon)
-    container.addArrangedSubview(sectionTitle(title))
-    container.addArrangedSubview(bodyLabel(detail))
-    return container
-  }
-
-  private func permissionStatusLabel(for integrations: [SetupIntegrationStatus]) -> String {
-    if integrations.contains(where: { $0.capability.availability == "requires_permission" }) {
-      return "Needed"
-    }
-    return "Ready"
-  }
-
-  private func permissionStatusStyle(for integrations: [SetupIntegrationStatus]) -> BadgeStyle {
-    integrations.contains(where: { $0.capability.availability == "requires_permission" }) ? .warning : .good
-  }
-
-  private func connectorTitle(_ integration: SetupIntegrationStatus) -> String {
-    let title = integration.displayName?.trimmingCharacters(in: .whitespacesAndNewlines)
-    if let title, !title.isEmpty {
-      return title
-    }
-    return integration.platform.capitalized
-  }
-
-  private func connectorDetail(_ integration: SetupIntegrationStatus) -> String {
-    var parts = [integrationStateLabel(integration.authState).capitalized]
-    if let reason = integration.capability.reason?.trimmingCharacters(in: .whitespacesAndNewlines),
-       !reason.isEmpty {
-      parts.append(reason)
-    }
-    return parts.joined(separator: " • ")
-  }
-
-  private func connectorStatusText(_ integration: SetupIntegrationStatus) -> String {
-    if integration.capability.availability == "unsupported" {
-      return "Unsupported"
-    }
-    if integration.capability.availability == "requires_permission" {
-      return "Needs access"
-    }
-    if isConnectedIntegrationState(integration.authState) {
-      return "Connected"
-    }
-    if integration.authState == "in_progress" {
-      return "Connecting"
-    }
-    return "Ready"
-  }
-
-  private func connectorStatusStyle(_ integration: SetupIntegrationStatus) -> BadgeStyle {
-    if integration.capability.availability == "unsupported" {
-      return .neutral
-    }
-    if integration.capability.availability == "requires_permission" {
-      return .warning
-    }
-    if isConnectedIntegrationState(integration.authState) {
-      return .good
-    }
-    if integration.authState == "blocked" || integration.authState == "check_failed" {
-      return .danger
-    }
-    return .neutral
-  }
-
-  private func runAction(arguments: [String]) {
-    rebuildLoading()
-    let daemonSupervisor = self.daemonSupervisor
-    Task.detached(priority: .userInitiated) { [daemonSupervisor] in
-      _ = daemonSupervisor.runCLI(arguments: arguments)
-      await MainActor.run {
-        self.onRefresh()
-        self.refresh()
-      }
-    }
-  }
-
-  @objc private func finishOnboarding() {
-    _ = daemonSupervisor.runCLI(arguments: ["onboarding", "complete"])
-    close()
-    onRefresh()
-  }
-
-  @objc func openReleasesPage() {
-    guard let url = URL(string: "https://github.com/Cue-d/cued/releases") else {
-      return
-    }
-    NSWorkspace.shared.open(url)
-  }
-
-  @objc private func handleButtonAction(_ sender: NSButton) {
-    buttonActions[ObjectIdentifier(sender)]?()
-  }
+private struct UpdateStatusResponse: Decodable {
+  let currentVersion: String
+  let releaseChannel: String
+  let lastCheckedAt: Int?
+  let latestVersion: String?
+  let availableVersion: String?
+  let available: Bool
+  let releaseUrl: String?
+  let tarballUrl: String?
+  let lastError: UpdateErrorResponse?
+}
+
+private struct UpdateInstallResponse: Decodable {
+  let started: Bool
+  let targetVersion: String
+  let releaseUrl: String?
+  let installedAppPath: String
 }
 
 @MainActor
@@ -1574,7 +891,6 @@ final class MenuBarAppController: NSObject, NSApplicationDelegate {
   private let daemonSupervisor: DaemonSupervisor
   private lazy var onboardingWindowController = OnboardingWindowController(
     daemonSupervisor: daemonSupervisor,
-    statusStore: statusStore,
     onRefresh: { [weak self] in
       self?.refreshStatus()
     }
@@ -1583,6 +899,7 @@ final class MenuBarAppController: NSObject, NSApplicationDelegate {
     self?.refreshStatus()
   }
   private var timer: Timer?
+  private var shouldAutoStartDaemon = true
   private let statusItemImage = MenuBarAppController.loadStatusItemImage()
 
   init(dbPath: String, daemonLaunchPath: String?, daemonCommand: String, setupCommand: String, permissionsCommand: String) {
@@ -1617,26 +934,27 @@ final class MenuBarAppController: NSObject, NSApplicationDelegate {
     statusMonitor.stop()
   }
 
-  @objc private func restartDaemon() {
-    daemonSupervisor.restart()
-    rebuildMenu()
-  }
-
-  @objc private func stopDaemon() {
-    daemonSupervisor.stop()
-    rebuildMenu()
-  }
-
   @objc private func openSetup() {
     onboardingWindowController.showAndRefresh()
   }
 
-  @objc private func requestPermissions() {
-    daemonSupervisor.requestPermissions()
+  @objc private func toggleDaemon() {
+    let snapshot = statusStore.readSnapshot()
+    let daemonStarting = daemonSupervisor.isLaunching(snapshot: snapshot)
+    if snapshot.daemonRunning || daemonStarting {
+      shouldAutoStartDaemon = false
+      daemonSupervisor.stop(activePID: snapshot.daemonPID)
+    } else {
+      shouldAutoStartDaemon = true
+      daemonSupervisor.startIfNeeded()
+    }
+    rebuildMenu()
   }
 
   @objc private func refreshStatus() {
-    daemonSupervisor.startIfNeeded()
+    if shouldAutoStartDaemon {
+      daemonSupervisor.startIfNeeded()
+    }
     rebuildMenu()
   }
 
@@ -1645,7 +963,30 @@ final class MenuBarAppController: NSObject, NSApplicationDelegate {
   }
 
   @objc private func checkForUpdates() {
-    onboardingWindowController.openReleasesPage()
+    let daemonSupervisor = self.daemonSupervisor
+    Task.detached(priority: .userInitiated) { [daemonSupervisor] in
+      let result = daemonSupervisor.runCLI(arguments: ["update", "check", "--force"])
+      let updateStatus = result.flatMap { output in
+        decodeCLIJSON(UpdateStatusResponse.self, status: output.status, stdout: output.stdout)
+      }
+
+      await MainActor.run { [weak self] in
+        guard let self else {
+          return
+        }
+        self.refreshStatus()
+        if let updateStatus {
+          self.presentUpdateStatus(updateStatus)
+          return
+        }
+
+        let message = result?.stderr.trimmingCharacters(in: .whitespacesAndNewlines)
+        self.presentAlert(
+          title: "Update Check Failed",
+          message: message?.isEmpty == false ? message! : "Cued could not check GitHub Releases right now."
+        )
+      }
+    }
   }
 
   private func openSetupIfNeeded() {
@@ -1682,9 +1023,9 @@ final class MenuBarAppController: NSObject, NSApplicationDelegate {
     let menu = NSMenu()
     menu.addItem(
       withTitle: snapshot.daemonRunning
-        ? "Daemon running\(snapshot.daemonPID.map { " (pid \($0))" } ?? "")"
+        ? "Daemon running"
         : daemonStarting
-          ? "Daemon starting\(daemonSupervisor.launchPID().map { " (pid \($0))" } ?? "")"
+          ? "Daemon starting"
           : "Daemon stopped",
       action: nil,
       keyEquivalent: ""
@@ -1695,14 +1036,6 @@ final class MenuBarAppController: NSObject, NSApplicationDelegate {
       action: nil,
       keyEquivalent: ""
     ).isEnabled = false
-
-    let projectionItem = NSMenuItem(
-      title: "Raw events \(snapshot.rawEvents)",
-      action: nil,
-      keyEquivalent: ""
-    )
-    projectionItem.isEnabled = false
-    menu.addItem(projectionItem)
     menu.addItem(.separator())
 
     if snapshot.integrations.isEmpty {
@@ -1743,26 +1076,152 @@ final class MenuBarAppController: NSObject, NSApplicationDelegate {
     }
 
     menu.addItem(.separator())
-    let startItem = menu.addItem(
-      withTitle: snapshot.daemonRunning ? "Restart Daemon" : daemonStarting ? "Starting Daemon..." : "Start Daemon",
-      action: #selector(restartDaemon),
+    let debugItem = NSMenuItem(title: "Debug", action: nil, keyEquivalent: "")
+    debugItem.submenu = buildDebugMenu(snapshot: snapshot, daemonStarting: daemonStarting)
+    menu.addItem(debugItem)
+
+    menu.addItem(.separator())
+    let daemonToggleItem = menu.addItem(
+      withTitle: snapshot.daemonRunning || daemonStarting ? "Stop" : "Start",
+      action: #selector(toggleDaemon),
       keyEquivalent: ""
     )
-    startItem.target = self
-    startItem.isEnabled = !daemonStarting
+    daemonToggleItem.target = self
 
-    let stopItem = menu.addItem(withTitle: "Stop Daemon", action: #selector(stopDaemon), keyEquivalent: "")
-    stopItem.target = self
-    stopItem.isEnabled = snapshot.daemonRunning || daemonStarting
-
-    menu.addItem(withTitle: "Open Setup", action: #selector(openSetup), keyEquivalent: "").target = self
-    menu.addItem(withTitle: "Request Permissions", action: #selector(requestPermissions), keyEquivalent: "").target = self
-    menu.addItem(withTitle: "Check for Updates", action: #selector(checkForUpdates), keyEquivalent: "").target = self
+    menu.addItem(withTitle: "Settings", action: #selector(openSetup), keyEquivalent: "").target = self
+    menu.addItem(
+      withTitle: snapshot.updateSummary?.availableVersion.map { "Update Available: v\($0)" } ?? "Check for Updates",
+      action: #selector(checkForUpdates),
+      keyEquivalent: ""
+    ).target = self
 
     menu.addItem(.separator())
     menu.addItem(withTitle: "Quit", action: #selector(quitApp), keyEquivalent: "q").target = self
 
     statusItem.menu = menu
+  }
+
+  private func presentUpdateStatus(_ status: UpdateStatusResponse) {
+    if status.available, let targetVersion = status.availableVersion {
+      let alert = NSAlert()
+      alert.alertStyle = .informational
+      alert.messageText = "Update Available: v\(targetVersion)"
+      alert.informativeText =
+        "Current version: v\(status.currentVersion)\nInstalling the update will restart Cued and migrate the local database if needed."
+      alert.addButton(withTitle: "Install and Restart")
+      alert.addButton(withTitle: "Later")
+      if status.releaseUrl != nil {
+        alert.addButton(withTitle: "View Releases")
+      }
+      NSApp.activate(ignoringOtherApps: true)
+      let response = alert.runModal()
+      if response == .alertFirstButtonReturn {
+        installUpdate()
+        return
+      }
+      if status.releaseUrl != nil, response == NSApplication.ModalResponse.alertThirdButtonReturn {
+        openReleaseURL(status.releaseUrl)
+      }
+      return
+    }
+
+    if let error = status.lastError {
+      presentAlert(title: "Updater Error", message: error.message)
+      return
+    }
+
+    presentAlert(
+      title: "Cued Is Up To Date",
+      message: "You are already running v\(status.currentVersion)."
+    )
+  }
+
+  private func installUpdate() {
+    let daemonSupervisor = self.daemonSupervisor
+    Task.detached(priority: .userInitiated) { [daemonSupervisor] in
+      let result = daemonSupervisor.runCLI(arguments: ["update", "install"])
+      let installResponse = result.flatMap { output in
+        decodeCLIJSON(UpdateInstallResponse.self, status: output.status, stdout: output.stdout)
+      }
+
+      await MainActor.run { [weak self] in
+        guard let self else {
+          return
+        }
+        if let installResponse, installResponse.started {
+          NSApp.terminate(nil)
+          return
+        }
+
+        let message = result?.stderr.trimmingCharacters(in: .whitespacesAndNewlines)
+        self.presentAlert(
+          title: "Install Failed",
+          message: message?.isEmpty == false ? message! : "Cued could not start the update installer."
+        )
+      }
+    }
+  }
+
+  private func presentAlert(title: String, message: String) {
+    let alert = NSAlert()
+    alert.alertStyle = .informational
+    alert.messageText = title
+    alert.informativeText = message
+    alert.addButton(withTitle: "OK")
+    NSApp.activate(ignoringOtherApps: true)
+    alert.runModal()
+  }
+
+  private func openReleaseURL(_ value: String?) {
+    guard let value, let url = URL(string: value) else {
+      onboardingWindowController.openReleasesPage()
+      return
+    }
+    NSWorkspace.shared.open(url)
+  }
+
+  private func buildDebugMenu(snapshot: AppStatusSnapshot, daemonStarting: Bool) -> NSMenu {
+    let debugMenu = NSMenu(title: "Debug")
+
+    let daemonItem = NSMenuItem(
+      title: debugSummaryTitle(
+        label: "Daemon",
+        value: snapshot.daemonRunning ? "running" : daemonStarting ? "starting" : "stopped"
+      ),
+      action: nil,
+      keyEquivalent: ""
+    )
+    daemonItem.isEnabled = false
+    debugMenu.addItem(daemonItem)
+
+    let totals = [
+      debugSummaryTitle(label: "Messages", value: "\(snapshot.messages)"),
+      debugSummaryTitle(label: "Contacts", value: "\(snapshot.contacts)"),
+      debugSummaryTitle(label: "Conversations", value: "\(snapshot.conversations)"),
+    ]
+
+    for title in totals {
+      let item = NSMenuItem(title: title, action: nil, keyEquivalent: "")
+      item.isEnabled = false
+      debugMenu.addItem(item)
+    }
+
+    debugMenu.addItem(.separator())
+
+    if snapshot.messageBreakdown.isEmpty {
+      let item = NSMenuItem(title: "No message sync data yet", action: nil, keyEquivalent: "")
+      item.isEnabled = false
+      debugMenu.addItem(item)
+      return debugMenu
+    }
+
+    for item in snapshot.messageBreakdown {
+      let menuItem = NSMenuItem(title: platformMessageDebugTitle(item), action: nil, keyEquivalent: "")
+      menuItem.isEnabled = false
+      debugMenu.addItem(menuItem)
+    }
+
+    return debugMenu
   }
 
   private static func loadStatusItemImage() -> NSImage? {
@@ -1816,8 +1275,9 @@ func runMenuBarApp() {
   let permissionsCommand = (Bundle.main.object(forInfoDictionaryKey: "CuedPermissionsCommand") as? String)
     ?? ProcessInfo.processInfo.environment["CUED_PERMISSIONS_COMMAND"]
     ?? "cued permissions request --all"
-  let dbPath = (Bundle.main.object(forInfoDictionaryKey: "CuedDBPath") as? String)
-    ?? "\(NSHomeDirectory())/.cued/local.db"
+  let dbPath = environmentPath("CUED_DB_PATH")
+    ?? (Bundle.main.object(forInfoDictionaryKey: "CuedDBPath") as? String)
+    ?? configuredCuedDBPath()
 
   let app = NSApplication.shared
   let delegate = MenuBarAppController(

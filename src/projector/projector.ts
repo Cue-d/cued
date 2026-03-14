@@ -950,11 +950,16 @@ function projectMessageEvent(
 
   const desiredAttachmentIds = new Set<string>();
   for (const [index, attachment] of (payload.attachments ?? []).entries()) {
-    const sourceAttachmentKey =
-      normalizeText((attachment as { sourceAttachmentKey?: unknown }).sourceAttachmentKey) ??
+    const explicitSourceAttachmentKey = normalizeText(
+      (attachment as { sourceAttachmentKey?: unknown }).sourceAttachmentKey,
+    );
+    const attachmentIdentity =
+      explicitSourceAttachmentKey ??
       normalizeText((attachment as { id?: unknown }).id) ??
       normalizeText((attachment as { url?: unknown }).url) ??
-      `${payload.sourceMessageKey}:${index}`;
+      String(index);
+    const sourceAttachmentKey =
+      explicitSourceAttachmentKey ?? `${payload.sourceMessageKey}:${attachmentIdentity}`;
     const attachmentId = hashId("attachment", `${messageId}:${sourceAttachmentKey}`);
     desiredAttachmentIds.add(attachmentId);
 

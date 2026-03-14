@@ -21,6 +21,7 @@ export type PlatformHelperRequirement = (typeof PLATFORM_HELPER_REQUIREMENT_VALU
 type PlatformDefinition = {
   adapter: boolean;
   defaultAccountKey: "default" | "local";
+  supportsMultipleAccounts: boolean;
   requestableIntegration: boolean;
   requestableOrder?: number;
   supportedHostOs: readonly HostOS[];
@@ -33,6 +34,7 @@ export const PLATFORM_DEFINITIONS = {
   contacts: {
     adapter: true,
     defaultAccountKey: "local",
+    supportsMultipleAccounts: false,
     requestableIntegration: false,
     supportedHostOs: ["macos"],
     onboardingVisible: true,
@@ -42,6 +44,7 @@ export const PLATFORM_DEFINITIONS = {
   fixture: {
     adapter: true,
     defaultAccountKey: "default",
+    supportsMultipleAccounts: false,
     requestableIntegration: false,
     supportedHostOs: ["macos", "windows", "linux"],
     onboardingVisible: false,
@@ -51,6 +54,7 @@ export const PLATFORM_DEFINITIONS = {
   imessage: {
     adapter: true,
     defaultAccountKey: "local",
+    supportsMultipleAccounts: false,
     requestableIntegration: false,
     supportedHostOs: ["macos"],
     onboardingVisible: true,
@@ -60,6 +64,7 @@ export const PLATFORM_DEFINITIONS = {
   linkedin: {
     adapter: true,
     defaultAccountKey: "default",
+    supportsMultipleAccounts: false,
     requestableIntegration: true,
     requestableOrder: 2,
     supportedHostOs: ["macos", "windows", "linux"],
@@ -70,6 +75,7 @@ export const PLATFORM_DEFINITIONS = {
   signal: {
     adapter: true,
     defaultAccountKey: "default",
+    supportsMultipleAccounts: false,
     requestableIntegration: true,
     requestableOrder: 5,
     supportedHostOs: ["macos", "windows", "linux"],
@@ -80,6 +86,7 @@ export const PLATFORM_DEFINITIONS = {
   slack: {
     adapter: true,
     defaultAccountKey: "default",
+    supportsMultipleAccounts: true,
     requestableIntegration: true,
     requestableOrder: 1,
     supportedHostOs: ["macos", "windows", "linux"],
@@ -90,6 +97,7 @@ export const PLATFORM_DEFINITIONS = {
   whatsapp: {
     adapter: true,
     defaultAccountKey: "default",
+    supportsMultipleAccounts: false,
     requestableIntegration: true,
     requestableOrder: 4,
     supportedHostOs: ["macos", "windows", "linux"],
@@ -347,6 +355,10 @@ export function parseHostOS(value: string | null | undefined): HostOS | null {
 
 export function getDefaultAccountKeyForPlatform(platform: Platform): string {
   return PLATFORM_DEFINITIONS[platform].defaultAccountKey;
+}
+
+export function platformSupportsMultipleAccounts(platform: Platform): boolean {
+  return PLATFORM_DEFINITIONS[platform].supportsMultipleAccounts;
 }
 
 export function getSupportedHostOsForPlatform(platform: Platform): readonly HostOS[] {
