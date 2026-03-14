@@ -1126,8 +1126,8 @@ export const MIGRATIONS: Array<{ id: string; sql: string }> = [
   {
     id: "0011_sync_run_timing_v2",
     sql: `
-      PRAGMA foreign_keys = OFF;
-
+      -- Foreign keys remain enforced here because migrations run inside a transaction.
+      -- This migration stays valid by copying sync_runs before sync_run_errors.
       DROP INDEX IF EXISTS idx_sync_runs_status_type_started;
       DROP INDEX IF EXISTS idx_sync_runs_platform_account_status_started;
       DROP INDEX IF EXISTS idx_sync_runs_status_type_queue;
@@ -1217,8 +1217,6 @@ export const MIGRATIONS: Array<{ id: string; sql: string }> = [
 
       CREATE INDEX idx_sync_runs_platform_account_status_queue
       ON sync_runs(platform, account_key, status, queued_at);
-
-      PRAGMA foreign_keys = ON;
     `,
   },
 ];
