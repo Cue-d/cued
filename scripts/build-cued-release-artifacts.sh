@@ -30,7 +30,8 @@ runtime_entitlements_for_binary() {
       printf '%s\n' "$APP_PERMISSIONS_ENTITLEMENTS"
       ;;
     "$APP_BUNDLE/Contents/Resources/runtime/node/bin/node"|\
-    "$APP_BUNDLE/Contents/Resources/helpers/signal-cli/jre/Contents/Home/bin/java")
+    "$APP_BUNDLE/Contents/Resources/helpers/signal-cli/jre/Contents/Home/bin/java"|\
+    "$APP_BUNDLE/Contents/Resources/runtime/chromium"/*)
       printf '%s\n' "$JIT_RUNTIME_ENTITLEMENTS"
       ;;
   esac
