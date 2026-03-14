@@ -12,6 +12,10 @@ export const CUED_INTEGRATIONS_DIR = join(CUED_HOME, "integrations");
 export const CUED_SIGNAL_DIR = join(CUED_INTEGRATIONS_DIR, "signal");
 export const CUED_WHATSAPP_DIR = join(CUED_INTEGRATIONS_DIR, "whatsapp");
 export const CUED_HOOKS_PATH = join(CUED_HOME, "hooks.toml");
+export const CUED_UPDATES_DIR = join(CUED_HOME, "updates");
+export const CUED_UPDATE_DOWNLOADS_DIR = join(CUED_UPDATES_DIR, "downloads");
+export const CUED_UPDATE_ROLLBACK_DIR = join(CUED_UPDATES_DIR, "rollback");
+export const CUED_BACKUPS_DIR = join(CUED_HOME, "backups");
 
 export function ensureCuedDirs(): void {
   if (!existsSync(CUED_HOME)) {
@@ -38,10 +42,30 @@ export function ensureCuedDirs(): void {
     mkdirSync(CUED_WHATSAPP_DIR, { recursive: true, mode: 0o700 });
   }
 
+  if (!existsSync(CUED_UPDATES_DIR)) {
+    mkdirSync(CUED_UPDATES_DIR, { recursive: true, mode: 0o700 });
+  }
+
+  if (!existsSync(CUED_UPDATE_DOWNLOADS_DIR)) {
+    mkdirSync(CUED_UPDATE_DOWNLOADS_DIR, { recursive: true, mode: 0o700 });
+  }
+
+  if (!existsSync(CUED_UPDATE_ROLLBACK_DIR)) {
+    mkdirSync(CUED_UPDATE_ROLLBACK_DIR, { recursive: true, mode: 0o700 });
+  }
+
+  if (!existsSync(CUED_BACKUPS_DIR)) {
+    mkdirSync(CUED_BACKUPS_DIR, { recursive: true, mode: 0o700 });
+  }
+
   // Best-effort hardening for the local data dir.
   chmodSync(CUED_HOME, 0o700);
   chmodSync(CUED_BROWSER_DIR, 0o700);
   chmodSync(CUED_INTEGRATIONS_DIR, 0o700);
   chmodSync(CUED_SIGNAL_DIR, 0o700);
   chmodSync(CUED_WHATSAPP_DIR, 0o700);
+  chmodSync(CUED_UPDATES_DIR, 0o700);
+  chmodSync(CUED_UPDATE_DOWNLOADS_DIR, 0o700);
+  chmodSync(CUED_UPDATE_ROLLBACK_DIR, 0o700);
+  chmodSync(CUED_BACKUPS_DIR, 0o700);
 }

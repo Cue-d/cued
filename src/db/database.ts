@@ -20,6 +20,12 @@ import type {
   SyncRunStatus,
   SyncRunType,
 } from "../types/provider.js";
+import type {
+  PendingRollbackState,
+  UpdateErrorState,
+  UpdateReleaseState,
+  UpdateStatusSnapshot,
+} from "../updater/types.js";
 import { MIGRATIONS } from "./migrations.js";
 import * as schema from "./schema.js";
 
@@ -53,6 +59,9 @@ const APP_SETTING_KEYS = {
   lastReleaseCheckAt: "last_release_check_at",
   onboardingCompletedVersion: "onboarding_completed_version",
   releaseChannel: "release_channel",
+  updateLastError: "update_last_error_json",
+  updatePendingRollback: "update_pending_rollback_json",
+  updateReleaseState: "update_release_state_json",
 } as const;
 
 export interface DaemonStatusRow {
@@ -96,6 +105,9 @@ export interface AppMetadataSnapshot {
   installedAppVersion: string | null;
   lastReleaseCheckAt: number | null;
   cliSymlinkInstalled: boolean;
+  updateReleaseState: UpdateReleaseState | null;
+  updatePendingRollback: PendingRollbackState | null;
+  updateLastError: UpdateErrorState | null;
 }
 
 export type RawEventInput = ProviderRawEventInput;
@@ -249,6 +261,18 @@ function now(): number {
   return Date.now();
 }
 
+function parseJsonSetting<T>(value: string | null): T | null {
+  if (!value) {
+    return null;
+  }
+
+  try {
+    return JSON.parse(value) as T;
+  } catch {
+    return null;
+  }
+}
+
 function chunkArray<T>(items: readonly T[], size: number): T[][] {
   const chunks: T[][] = [];
   for (let index = 0; index < items.length; index += size) {
@@ -385,6 +409,69 @@ export class CuedDatabase {
     this.setAppSetting(APP_SETTING_KEYS.lastReleaseCheckAt, String(at));
   }
 
+  setUpdateReleaseState(value: UpdateReleaseState | null): void {
+    this.setAppSetting(APP_SETTING_KEYS.updateReleaseState, value ? JSON.stringify(value) : null);
+    if (value) {
+      this.markReleaseCheck(value.checkedAt);
+    }
+  }
+
+  setUpdatePendingRollback(value: PendingRollbackState | null): void {
+    this.setAppSetting(
+      APP_SETTING_KEYS.updatePendingRollback,
+      value ? JSON.stringify(value) : null,
+    );
+  }
+
+  setUpdateLastError(value: UpdateErrorState | null): void {
+    this.setAppSetting(APP_SETTING_KEYS.updateLastError, value ? JSON.stringify(value) : null);
+  }
+
+  getUpdateReleaseState(): UpdateReleaseState | null {
+    return parseJsonSetting<UpdateReleaseState>(
+      this.getAppSetting(APP_SETTING_KEYS.updateReleaseState)?.value ?? null,
+    );
+  }
+
+  getPendingRollbackState(): PendingRollbackState | null {
+    return parseJsonSetting<PendingRollbackState>(
+      this.getAppSetting(APP_SETTING_KEYS.updatePendingRollback)?.value ?? null,
+    );
+  }
+
+  getUpdateLastError(): UpdateErrorState | null {
+    const raw = this.getAppSetting(APP_SETTING_KEYS.updateLastError)?.value ?? null;
+    const parsed = parseJsonSetting<UpdateErrorState>(raw);
+    if (parsed) {
+      return parsed;
+    }
+    if (!raw) {
+      return null;
+    }
+    return {
+      at: now(),
+      stage: "unknown",
+      message: raw,
+      targetVersion: null,
+    };
+  }
+
+  getUpdateStatus(): UpdateStatusSnapshot {
+    const releaseState = this.getUpdateReleaseState();
+    return {
+      currentVersion: getCurrentAppVersion(),
+      releaseChannel: getCurrentReleaseChannel(),
+      lastCheckedAt: releaseState?.checkedAt ?? this.getAppMetadata().lastReleaseCheckAt,
+      latestVersion: releaseState?.latestVersion ?? null,
+      availableVersion: releaseState?.availableVersion ?? null,
+      available: Boolean(releaseState?.availableVersion),
+      releaseUrl: releaseState?.releaseUrl ?? null,
+      tarballUrl: releaseState?.tarballUrl ?? null,
+      pendingRollback: this.getPendingRollbackState(),
+      lastError: this.getUpdateLastError(),
+    };
+  }
+
   getAppMetadata(): AppMetadataSnapshot {
     const byKey = new Map(this.listAppSettings().map((row) => [row.key, row.value]));
     const lastReleaseCheckAt = Number(byKey.get(APP_SETTING_KEYS.lastReleaseCheckAt) ?? "");
@@ -394,6 +481,22 @@ export class CuedDatabase {
       installedAppVersion: byKey.get(APP_SETTING_KEYS.installedAppVersion) ?? null,
       lastReleaseCheckAt: Number.isFinite(lastReleaseCheckAt) ? lastReleaseCheckAt : null,
       cliSymlinkInstalled: (byKey.get(APP_SETTING_KEYS.cliSymlinkInstalled) ?? "0") === "1",
+      updateReleaseState: parseJsonSetting<UpdateReleaseState>(
+        byKey.get(APP_SETTING_KEYS.updateReleaseState) ?? null,
+      ),
+      updatePendingRollback: parseJsonSetting<PendingRollbackState>(
+        byKey.get(APP_SETTING_KEYS.updatePendingRollback) ?? null,
+      ),
+      updateLastError:
+        parseJsonSetting<UpdateErrorState>(byKey.get(APP_SETTING_KEYS.updateLastError) ?? null) ??
+        (byKey.get(APP_SETTING_KEYS.updateLastError)
+          ? {
+              at: now(),
+              stage: "unknown",
+              message: byKey.get(APP_SETTING_KEYS.updateLastError) ?? "",
+              targetVersion: null,
+            }
+          : null),
     };
   }
 
