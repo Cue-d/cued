@@ -22,6 +22,11 @@ struct AppPlatformMessageCount {
   let messages: Int
 }
 
+struct AppUpdateSummary {
+  let availableVersion: String?
+  let releaseURL: String?
+}
+
 struct AppStatusSnapshot {
   let daemonRunning: Bool
   let daemonPID: Int?
@@ -36,6 +41,7 @@ struct AppStatusSnapshot {
   let installedAppVersion: String?
   let releaseChannel: String?
   let cliSymlinkInstalled: Bool
+  let updateSummary: AppUpdateSummary?
 }
 
 final class AppStatusStore: @unchecked Sendable {
@@ -60,7 +66,8 @@ final class AppStatusStore: @unchecked Sendable {
         onboardingCompletedVersion: nil,
         installedAppVersion: nil,
         releaseChannel: nil,
-        cliSymlinkInstalled: false
+        cliSymlinkInstalled: false,
+        updateSummary: nil
       )
     }
 
@@ -82,7 +89,8 @@ final class AppStatusStore: @unchecked Sendable {
         onboardingCompletedVersion: nil,
         installedAppVersion: nil,
         releaseChannel: nil,
-        cliSymlinkInstalled: false
+        cliSymlinkInstalled: false,
+        updateSummary: nil
       )
     }
     defer { sqlite3_close(db) }
@@ -99,6 +107,7 @@ final class AppStatusStore: @unchecked Sendable {
       queryMessageCountsByPlatform(db: db),
       integrations: integrations
     )
+    let updateSummary = queryUpdateSummary(db: db)
 
     return AppStatusSnapshot(
       daemonRunning: daemonRow.running,
@@ -113,7 +122,8 @@ final class AppStatusStore: @unchecked Sendable {
       onboardingCompletedVersion: queryAppSetting(db: db, key: "onboarding_completed_version"),
       installedAppVersion: queryAppSetting(db: db, key: "installed_app_version"),
       releaseChannel: queryAppSetting(db: db, key: "release_channel"),
-      cliSymlinkInstalled: queryAppSetting(db: db, key: "cli_symlink_installed") == "1"
+      cliSymlinkInstalled: queryAppSetting(db: db, key: "cli_symlink_installed") == "1",
+      updateSummary: updateSummary
     )
   }
 
@@ -346,6 +356,21 @@ final class AppStatusStore: @unchecked Sendable {
       return nil
     }
     return String(cString: value)
+  }
+
+  private func queryUpdateSummary(db: OpaquePointer) -> AppUpdateSummary? {
+    guard let raw = queryAppSetting(db: db, key: "update_release_state_json"),
+          let data = raw.data(using: .utf8),
+          let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+      return nil
+    }
+
+    let availableVersion = object["availableVersion"] as? String
+    let releaseURL = object["releaseUrl"] as? String
+    if availableVersion == nil && releaseURL == nil {
+      return nil
+    }
+    return AppUpdateSummary(availableVersion: availableVersion, releaseURL: releaseURL)
   }
 }
 
@@ -812,6 +837,30 @@ private struct LaunchAgentStatusResponse: Decodable {
 private struct CLISymlinkStatusResponse: Decodable {
   let installed: Bool
   let path: String
+}
+
+private struct UpdateErrorResponse: Decodable {
+  let stage: String
+  let message: String
+}
+
+private struct UpdateStatusResponse: Decodable {
+  let currentVersion: String
+  let releaseChannel: String
+  let lastCheckedAt: Int?
+  let latestVersion: String?
+  let availableVersion: String?
+  let available: Bool
+  let releaseUrl: String?
+  let tarballUrl: String?
+  let lastError: UpdateErrorResponse?
+}
+
+private struct UpdateInstallResponse: Decodable {
+  let started: Bool
+  let targetVersion: String
+  let releaseUrl: String?
+  let installedAppPath: String
 }
 
 private final class LegacyOnboardingDocumentView: NSView {
@@ -1740,7 +1789,33 @@ final class MenuBarAppController: NSObject, NSApplicationDelegate {
   }
 
   @objc private func checkForUpdates() {
-    onboardingWindowController.openReleasesPage()
+    let daemonSupervisor = self.daemonSupervisor
+    Task.detached(priority: .userInitiated) { [daemonSupervisor] in
+      let result = daemonSupervisor.runCLI(arguments: ["update", "check", "--force"])
+      let updateStatus: UpdateStatusResponse? = result.flatMap { output in
+        guard output.status == 0, let data = output.stdout.data(using: .utf8) else {
+          return nil
+        }
+        return try? JSONDecoder().decode(UpdateStatusResponse.self, from: data)
+      }
+
+      await MainActor.run { [weak self] in
+        guard let self else {
+          return
+        }
+        self.refreshStatus()
+        if let updateStatus {
+          self.presentUpdateStatus(updateStatus)
+          return
+        }
+
+        let message = result?.stderr.trimmingCharacters(in: .whitespacesAndNewlines)
+        self.presentAlert(
+          title: "Update Check Failed",
+          message: message?.isEmpty == false ? message! : "Cued could not check GitHub Releases right now."
+        )
+      }
+    }
   }
 
   private func openSetupIfNeeded() {
@@ -1843,12 +1918,98 @@ final class MenuBarAppController: NSObject, NSApplicationDelegate {
     daemonToggleItem.target = self
 
     menu.addItem(withTitle: "Settings", action: #selector(openSetup), keyEquivalent: "").target = self
-    menu.addItem(withTitle: "Check for Updates", action: #selector(checkForUpdates), keyEquivalent: "").target = self
+    menu.addItem(
+      withTitle: snapshot.updateSummary?.availableVersion.map { "Update Available: v\($0)" } ?? "Check for Updates",
+      action: #selector(checkForUpdates),
+      keyEquivalent: ""
+    ).target = self
 
     menu.addItem(.separator())
     menu.addItem(withTitle: "Quit", action: #selector(quitApp), keyEquivalent: "q").target = self
 
     statusItem.menu = menu
+  }
+
+  private func presentUpdateStatus(_ status: UpdateStatusResponse) {
+    if status.available, let targetVersion = status.availableVersion {
+      let alert = NSAlert()
+      alert.alertStyle = .informational
+      alert.messageText = "Update Available: v\(targetVersion)"
+      alert.informativeText =
+        "Current version: v\(status.currentVersion)\nInstalling the update will restart Cued and migrate the local database if needed."
+      alert.addButton(withTitle: "Install and Restart")
+      alert.addButton(withTitle: "Later")
+      if status.releaseUrl != nil {
+        alert.addButton(withTitle: "View Releases")
+      }
+      NSApp.activate(ignoringOtherApps: true)
+      let response = alert.runModal()
+      if response == .alertFirstButtonReturn {
+        installUpdate()
+        return
+      }
+      if status.releaseUrl != nil, response == NSApplication.ModalResponse.alertThirdButtonReturn {
+        openReleaseURL(status.releaseUrl)
+      }
+      return
+    }
+
+    if let error = status.lastError {
+      presentAlert(title: "Updater Error", message: error.message)
+      return
+    }
+
+    presentAlert(
+      title: "Cued Is Up To Date",
+      message: "You are already running v\(status.currentVersion)."
+    )
+  }
+
+  private func installUpdate() {
+    let daemonSupervisor = self.daemonSupervisor
+    Task.detached(priority: .userInitiated) { [daemonSupervisor] in
+      let result = daemonSupervisor.runCLI(arguments: ["update", "install"])
+      let installResponse: UpdateInstallResponse? = result.flatMap { output in
+        guard output.status == 0, let data = output.stdout.data(using: .utf8) else {
+          return nil
+        }
+        return try? JSONDecoder().decode(UpdateInstallResponse.self, from: data)
+      }
+
+      await MainActor.run { [weak self] in
+        guard let self else {
+          return
+        }
+        if let installResponse, installResponse.started {
+          NSApp.terminate(nil)
+          return
+        }
+
+        let message = result?.stderr.trimmingCharacters(in: .whitespacesAndNewlines)
+        self.presentAlert(
+          title: "Install Failed",
+          message: message?.isEmpty == false ? message! : "Cued could not start the update installer."
+        )
+      }
+    }
+  }
+
+  private func presentAlert(title: String, message: String) {
+    let alert = NSAlert()
+    alert.alertStyle = .informational
+    alert.messageText = title
+    alert.informativeText = message
+    alert.addButton(withTitle: "OK")
+    NSApp.activate(ignoringOtherApps: true)
+    alert.runModal()
+  }
+
+  private func openReleaseURL(_ value: String?) {
+    guard let value, let url = URL(string: value) else {
+      onboardingWindowController.openReleasesPage()
+      return
+    }
+    NSWorkspace.shared.open(url)
   }
 
   private func buildDebugMenu(snapshot: AppStatusSnapshot, daemonStarting: Bool) -> NSMenu {

@@ -163,6 +163,9 @@ describe("CuedDatabase", () => {
       installedAppVersion: "0.1.0-internal.1",
       lastReleaseCheckAt: 123456789,
       cliSymlinkInstalled: true,
+      updateReleaseState: null,
+      updatePendingRollback: null,
+      updateLastError: null,
     });
     expect(db.getAppSetting("installed_app_version")?.value).toBe("0.1.0-internal.1");
 
