@@ -5,6 +5,7 @@ import {
   mkdirSync,
   mkdtempSync,
   realpathSync,
+  renameSync,
   rmSync,
   writeFileSync,
 } from "node:fs";
@@ -402,8 +403,16 @@ async function downloadReleaseAsset(url: string, destinationPath: string): Promi
     throw new Error(`Download failed with ${response.status}`);
   }
   mkdirSync(dirname(destinationPath), { recursive: true, mode: 0o700 });
-  const stream = createWriteStream(destinationPath, { mode: 0o600 });
-  await pipeline(Readable.fromWeb(response.body), stream);
+  const temporaryPath = `${destinationPath}.download`;
+  rmSync(temporaryPath, { force: true });
+  const stream = createWriteStream(temporaryPath, { mode: 0o600 });
+  try {
+    await pipeline(Readable.fromWeb(response.body), stream);
+    renameSync(temporaryPath, destinationPath);
+  } catch (error) {
+    rmSync(temporaryPath, { force: true });
+    throw error;
+  }
 }
 
 function validateBundleSignature(appPath: string): void {
