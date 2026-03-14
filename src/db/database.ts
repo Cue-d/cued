@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { existsSync } from "node:fs";
+import { existsSync, rmSync } from "node:fs";
 import Database from "better-sqlite3";
 import { and, asc, desc, eq, inArray, sql } from "drizzle-orm";
 import { type BetterSQLite3Database, drizzle } from "drizzle-orm/better-sqlite3";
@@ -2921,6 +2921,13 @@ export class CuedDatabase {
   }
 
   clearProjectedState(): void {
+    const cacheEntries = this.listReadyAttachmentCacheEntries();
+    for (const entry of cacheEntries) {
+      if (entry.cache_path) {
+        rmSync(entry.cache_path, { force: true });
+      }
+    }
+
     this.db.transaction((tx) => {
       tx.run(sql.raw("DELETE FROM messages_fts"));
       tx.run(sql.raw("DELETE FROM attachment_content_fts"));
