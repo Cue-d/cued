@@ -1112,6 +1112,10 @@ function projectMessageEvent(
     if (desiredAttachmentIds.has(existingAttachment.id)) {
       continue;
     }
+    conn.run(sql`
+      DELETE FROM attachment_content_fts
+      WHERE attachment_id = ${existingAttachment.id}
+    `);
     conn.delete(messageAttachments).where(eq(messageAttachments.id, existingAttachment.id)).run();
   }
 }
