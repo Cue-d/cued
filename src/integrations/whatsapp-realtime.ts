@@ -3,6 +3,7 @@ import { createInterface, type Interface as ReadLineInterface } from "node:readl
 import { createLogger } from "../logging.js";
 import type {
   WhatsAppHelperCommand,
+  WhatsAppHelperDownloadResult,
   WhatsAppHelperEventEnvelope,
   WhatsAppHelperResponseEnvelope,
   WhatsAppHelperSendResult,
@@ -63,6 +64,11 @@ export interface WhatsAppRealtimeSessionLike {
   getStatus(): WhatsAppRealtimeStatus;
   isConnected(): boolean;
   sendText(target: string, text: string): Promise<WhatsAppHelperSendResult>;
+  downloadMedia(
+    chatJID: string,
+    messageID: string,
+    attachmentIndex?: number,
+  ): Promise<WhatsAppHelperDownloadResult>;
   resync(): Promise<WhatsAppSnapshot>;
 }
 
@@ -242,6 +248,20 @@ export class WhatsAppRealtimeSession implements WhatsAppRealtimeSessionLike {
     return await this.request<WhatsAppSnapshot>({
       id: this.nextRequestId++,
       command: "resync",
+    });
+  }
+
+  async downloadMedia(
+    chatJID: string,
+    messageID: string,
+    attachmentIndex = 0,
+  ): Promise<WhatsAppHelperDownloadResult> {
+    return await this.request<WhatsAppHelperDownloadResult>({
+      id: this.nextRequestId++,
+      command: "downloadMedia",
+      chatJID,
+      messageID,
+      attachmentIndex,
     });
   }
 

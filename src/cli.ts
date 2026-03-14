@@ -97,6 +97,9 @@ Usage:
   cued integrations remove <platform> [account]
   cued integrations enable <platform> [account]
   cued integrations disable <platform> [account]
+  cued attachments list [--message ID] [--conversation ID] [--platform PLATFORM] [--account ACCOUNT] [--limit N]
+  cued attachments fetch <attachment-id> [--variant original] [--max-bytes N] [--allow-large] [--no-extract]
+  cued attachments search <query> [--conversation ID] [--platform PLATFORM] [--account ACCOUNT] [--limit N]
   cued hooks init
   cued hooks doctor
   cued hooks test <event>
@@ -116,6 +119,11 @@ Paths:
 
 function printJson(value: unknown): void {
   console.log(JSON.stringify(value, null, 2));
+}
+
+function parseFlagValue(args: string[], flag: string): string | undefined {
+  const index = args.findIndex((value) => value === flag);
+  return index >= 0 ? args[index + 1] : undefined;
 }
 
 function getAppStatusMetadata(db: ReturnType<typeof openCuedDatabase>) {
@@ -540,6 +548,55 @@ async function main(): Promise<void> {
         default:
           throw new Error(
             `Usage: cued integrations list | status | refresh | connect <platform> [account] | disconnect <platform> [account] | remove <platform> [account] | enable <platform> [account] | disable <platform> [account]\nRequestable platforms: ${listRequestableIntegrationPlatforms().join(", ")}`,
+          );
+      }
+      break;
+    case "attachments":
+      switch (subcommand) {
+        case "list":
+          response = await sendDaemonRequest({
+            command: "attachments-list",
+            messageId: parseFlagValue(rest, "--message"),
+            conversationId: parseFlagValue(rest, "--conversation"),
+            platform: parseFlagValue(rest, "--platform"),
+            accountKey: parseFlagValue(rest, "--account"),
+            limit: Number.parseInt(parseFlagValue(rest, "--limit") ?? "", 10) || undefined,
+          });
+          break;
+        case "fetch":
+          if (!rest[0]) {
+            throw new Error(
+              "Usage: cued attachments fetch <attachment-id> [--variant original] [--max-bytes N] [--allow-large] [--no-extract]",
+            );
+          }
+          response = await sendDaemonRequest({
+            command: "attachment-fetch",
+            attachmentId: rest[0],
+            variant: parseFlagValue(rest.slice(1), "--variant"),
+            maxBytes:
+              Number.parseInt(parseFlagValue(rest.slice(1), "--max-bytes") ?? "", 10) || undefined,
+            allowLarge: rest.includes("--allow-large"),
+            extractText: !rest.includes("--no-extract"),
+          });
+          break;
+        case "search":
+          if (!rest[0]) {
+            throw new Error(
+              "Usage: cued attachments search <query> [--conversation ID] [--platform PLATFORM] [--account ACCOUNT] [--limit N]",
+            );
+          }
+          response = await sendDaemonRequest({
+            command: "attachments-search",
+            query: rest[0],
+            conversationId: parseFlagValue(rest.slice(1), "--conversation"),
+            platform: parseFlagValue(rest.slice(1), "--platform"),
+            accountKey: parseFlagValue(rest.slice(1), "--account"),
+            limit: Number.parseInt(parseFlagValue(rest.slice(1), "--limit") ?? "", 10) || undefined,
+          });
+          break;
+        default:
+          throw new Error(
+            "Usage: cued attachments list [--message ID] [--conversation ID] [--platform PLATFORM] [--account ACCOUNT] [--limit N] | cued attachments fetch <attachment-id> [--variant original] [--max-bytes N] [--allow-large] [--no-extract] | cued attachments search <query> [--conversation ID] [--platform PLATFORM] [--account ACCOUNT] [--limit N]",
           );
       }
       break;

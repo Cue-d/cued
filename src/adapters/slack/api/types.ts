@@ -49,6 +49,7 @@ export interface SlackFile {
   name: string;
   mimetype?: string;
   pretty_type?: string;
+  size?: number;
   url_private?: string;
   url_private_download?: string;
   thumb_360?: string;

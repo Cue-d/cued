@@ -11,6 +11,33 @@ export type DaemonRequest =
   | { id: string; command: "integrations-disable"; platform: string; accountKey?: string }
   | {
       id: string;
+      command: "attachments-list";
+      messageId?: string;
+      conversationId?: string;
+      platform?: string;
+      accountKey?: string;
+      limit?: number;
+    }
+  | {
+      id: string;
+      command: "attachment-fetch";
+      attachmentId: string;
+      variant?: string;
+      maxBytes?: number;
+      allowLarge?: boolean;
+      extractText?: boolean;
+    }
+  | {
+      id: string;
+      command: "attachments-search";
+      query: string;
+      platform?: string;
+      accountKey?: string;
+      conversationId?: string;
+      limit?: number;
+    }
+  | {
+      id: string;
       command: "message-send";
       platform: string;
       target: string;

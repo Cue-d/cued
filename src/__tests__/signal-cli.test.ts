@@ -178,4 +178,29 @@ describe("signal cli helpers", () => {
     expect(contactHandleType("+14155550123")).toBe("phone");
     expect(contactHandleType("uuid-123")).toBe("signal_id");
   });
+
+  it("keeps attachment-only signal envelopes instead of dropping them", () => {
+    const message = toSignalMessage(
+      {
+        envelope: {
+          source: "+14155550123",
+          timestamp: 1_710_000_000_000,
+          serverGuid: "msg-att-1",
+          dataMessage: {
+            attachments: [{ id: "att-1", storedFilename: "/tmp/file.pdf" }],
+          },
+        },
+      },
+      "+14155550000",
+      0,
+    );
+
+    expect(message).toEqual(
+      expect.objectContaining({
+        messageId: "msg-att-1",
+        text: "",
+        attachments: [{ id: "att-1", storedFilename: "/tmp/file.pdf" }],
+      }),
+    );
+  });
 });

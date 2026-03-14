@@ -3,7 +3,14 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { extractTextFromAttributedBody } from "./attributed-body.js";
 import { normalizeChatDbHandleIdentifier } from "./handle-normalization.js";
-import type { ImsChat, ImsHandle, ImsMessage, ImsReaction, ImsSyncBatch } from "./types.js";
+import type {
+  ImsAttachment,
+  ImsChat,
+  ImsHandle,
+  ImsMessage,
+  ImsReaction,
+  ImsSyncBatch,
+} from "./types.js";
 
 const require = createRequire(import.meta.url);
 const { DatabaseSync } = require("node:sqlite") as typeof import("node:sqlite");
@@ -54,6 +61,19 @@ type ReactionRow = {
   reactor_identifier: string | null;
   is_from_me: number;
   unix_date: number | null;
+};
+
+type AttachmentRow = {
+  message_id: number;
+  guid: string;
+  filename: string | null;
+  transfer_name: string | null;
+  mime_type: string | null;
+  uti: string | null;
+  total_bytes: number | null;
+  is_sticker: number;
+  hide_attachment: number;
+  ck_record_id: string | null;
 };
 
 const TAPBACK_TYPE_TO_EMOJI: Record<number, string> = {
@@ -148,6 +168,10 @@ export class IMessageReader {
     }
 
     const messages = this.transformMessages(rows);
+    const attachments = this.getAttachmentsForMessageIds(messages.map((message) => message.id));
+    for (const message of messages) {
+      message.attachments = attachments.get(message.id) ?? [];
+    }
     const cursor = rows[rows.length - 1]?.rowid ?? lastRowid;
     const reactions = this.getReactionsForGuids(messages.map((message) => message.guid));
     for (const message of messages) {
@@ -211,10 +235,61 @@ export class IMessageReader {
           ),
           errorCode: row.error,
           hasAttachments: row.cache_has_attachments === 1,
+          attachments: [],
           sender,
           reactions: [],
         };
       });
+  }
+
+  private getAttachmentsForMessageIds(messageIds: number[]): Map<number, ImsAttachment[]> {
+    if (messageIds.length === 0) {
+      return new Map();
+    }
+
+    const rows = this.db
+      .prepare(
+        `
+      WITH requested_messages AS (
+        SELECT CAST(value AS INTEGER) AS message_id
+        FROM json_each(?)
+      )
+      SELECT
+        maj.message_id as message_id,
+        a.guid,
+        a.filename,
+        a.transfer_name,
+        a.mime_type,
+        a.uti,
+        a.total_bytes,
+        a.is_sticker,
+        a.hide_attachment,
+        a.ck_record_id
+      FROM message_attachment_join maj
+      JOIN attachment a ON a.ROWID = maj.attachment_id
+      WHERE maj.message_id IN (SELECT message_id FROM requested_messages)
+      ORDER BY maj.message_id ASC, a.ROWID ASC
+    `,
+      )
+      .all(JSON.stringify(messageIds)) as AttachmentRow[];
+
+    const attachments = new Map<number, ImsAttachment[]>();
+    for (const row of rows) {
+      const messageAttachments = attachments.get(row.message_id) ?? [];
+      messageAttachments.push({
+        guid: row.guid,
+        filename: row.filename,
+        transferName: row.transfer_name,
+        mimeType: row.mime_type,
+        uti: row.uti,
+        totalBytes: row.total_bytes,
+        isSticker: row.is_sticker === 1,
+        hideAttachment: row.hide_attachment === 1,
+        ckRecordId: row.ck_record_id,
+      });
+      attachments.set(row.message_id, messageAttachments);
+    }
+    return attachments;
   }
 
   private getChats(chatIds: number[]): ImsChat[] {

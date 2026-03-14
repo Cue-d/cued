@@ -98,8 +98,22 @@ function toAttachmentMetadata(message: SlackMessage): Array<Record<string, unkno
       name: file.name,
       mimetype: file.mimetype ?? null,
       prettyType: file.pretty_type ?? null,
+      size: file.size ?? null,
       url: file.url_private_download ?? file.url_private ?? null,
       previewUrl: file.thumb_480 ?? file.thumb_360 ?? null,
+      access_kind: file.url_private_download || file.url_private ? "remote_url" : "none",
+      access_ref:
+        file.url_private_download || file.url_private
+          ? { url: file.url_private_download ?? file.url_private }
+          : null,
+      preview_ref:
+        file.thumb_480 || file.thumb_360 ? { url: file.thumb_480 ?? file.thumb_360 } : null,
+      availability_status:
+        file.url_private_download || file.url_private ? "available" : "metadata_only",
+      provider_metadata: {
+        id: file.id,
+        prettyType: file.pretty_type ?? null,
+      },
     });
   }
   for (const attachment of message.attachments ?? []) {
@@ -108,6 +122,26 @@ function toAttachmentMetadata(message: SlackMessage): Array<Record<string, unkno
       title: attachment.title ?? null,
       text: attachment.text ?? attachment.fallback ?? null,
       url: attachment.title_link ?? attachment.image_url ?? attachment.thumb_url ?? null,
+      access_kind:
+        attachment.title_link || attachment.image_url || attachment.thumb_url
+          ? "remote_url"
+          : "none",
+      access_ref:
+        attachment.title_link || attachment.image_url || attachment.thumb_url
+          ? { url: attachment.title_link ?? attachment.image_url ?? attachment.thumb_url }
+          : null,
+      preview_ref:
+        attachment.image_url || attachment.thumb_url
+          ? { url: attachment.image_url ?? attachment.thumb_url }
+          : null,
+      availability_status:
+        attachment.title_link || attachment.image_url || attachment.thumb_url
+          ? "available"
+          : "metadata_only",
+      provider_metadata: {
+        footer: attachment.footer ?? null,
+        ts: attachment.ts ?? null,
+      },
     });
   }
   return attachments;

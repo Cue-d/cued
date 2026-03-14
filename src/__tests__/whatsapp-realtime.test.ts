@@ -191,6 +191,14 @@ describe("whatsapp realtime", () => {
             timestamp: 1,
           };
         },
+        async downloadMedia() {
+          return {
+            dataBase64: Buffer.from("hello").toString("base64"),
+            mimeType: "text/plain",
+            filename: "hello.txt",
+            sizeBytes: 5,
+          };
+        },
         async resync() {
           return { contacts: [], chats: [], messages: [] };
         },
