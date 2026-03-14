@@ -969,8 +969,113 @@ describe("projector", () => {
     `);
 
     expect(attachmentRows).toEqual([
-      { source_attachment_key: "att-2", filename: "two-updated.txt" },
-      { source_attachment_key: "att-3", filename: "three.txt" },
+      {
+        source_attachment_key: "message-attachments:att-2",
+        filename: "two-updated.txt",
+      },
+      { source_attachment_key: "message-attachments:att-3", filename: "three.txt" },
+    ]);
+
+    db.close();
+  });
+
+  it("scopes fallback attachment ids to the message so reused Slack file ids do not collide", () => {
+    const db = createDb();
+
+    db.insertRawEvent({
+      id: "slack-conversation-a",
+      platform: "slack",
+      accountKey: "workspace-a",
+      entityKind: "conversation",
+      eventKind: "observed",
+      observedAt: 1,
+      dedupeKey: "slack-conversation-a",
+      payload: {
+        sourceConversationKey: "slack:T1:C_A",
+        conversationType: "group",
+        displayName: "alpha",
+        participants: [],
+      },
+      sourceVersion: "test-v1",
+    });
+    db.insertRawEvent({
+      id: "slack-conversation-b",
+      platform: "slack",
+      accountKey: "workspace-a",
+      entityKind: "conversation",
+      eventKind: "observed",
+      observedAt: 2,
+      dedupeKey: "slack-conversation-b",
+      payload: {
+        sourceConversationKey: "slack:T1:C_B",
+        conversationType: "group",
+        displayName: "beta",
+        participants: [],
+      },
+      sourceVersion: "test-v1",
+    });
+    db.insertRawEvent({
+      id: "slack-message-a",
+      platform: "slack",
+      accountKey: "workspace-a",
+      entityKind: "message",
+      eventKind: "message_created",
+      observedAt: 3,
+      dedupeKey: "slack-message-a",
+      payload: {
+        sourceMessageKey: "slack:T1:C_A:1000.000001",
+        sourceConversationKey: "slack:T1:C_A",
+        sentAt: 3,
+        content: "alpha attachment",
+        attachments: [{ id: "F_SHARED", name: "shared.pdf" }],
+      },
+      sourceVersion: "test-v1",
+    });
+    db.insertRawEvent({
+      id: "slack-message-b",
+      platform: "slack",
+      accountKey: "workspace-a",
+      entityKind: "message",
+      eventKind: "message_created",
+      observedAt: 4,
+      dedupeKey: "slack-message-b",
+      payload: {
+        sourceMessageKey: "slack:T1:C_B:1000.000002",
+        sourceConversationKey: "slack:T1:C_B",
+        sentAt: 4,
+        content: "beta attachment",
+        attachments: [{ id: "F_SHARED", name: "shared.pdf" }],
+      },
+      sourceVersion: "test-v1",
+    });
+
+    projectPendingRawEvents(db);
+
+    const attachmentRows = db.orm().all<{
+      source_attachment_key: string;
+      filename: string | null;
+    }>(sql`
+      SELECT source_attachment_key, filename
+      FROM message_attachments
+      WHERE platform = 'slack' AND account_key = 'workspace-a'
+      ORDER BY source_attachment_key ASC
+    `);
+    const messageCount = db.orm().get<{ count: number }>(sql`
+      SELECT COUNT(*) AS count
+      FROM messages
+      WHERE platform = 'slack' AND account_key = 'workspace-a'
+    `);
+
+    expect(messageCount?.count).toBe(2);
+    expect(attachmentRows).toEqual([
+      {
+        source_attachment_key: "slack:T1:C_A:1000.000001:F_SHARED",
+        filename: "shared.pdf",
+      },
+      {
+        source_attachment_key: "slack:T1:C_B:1000.000002:F_SHARED",
+        filename: "shared.pdf",
+      },
     ]);
 
     db.close();

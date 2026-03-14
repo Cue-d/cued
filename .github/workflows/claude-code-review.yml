@@ -70,6 +70,7 @@ jobs:
       - name: Run Claude Code Review
         if: ${{ (env.CLAUDE_CODE_OAUTH_TOKEN != '' || env.ANTHROPIC_API_KEY != '') && steps.workflow-bootstrap.outputs.can_run == 'true' }}
         id: claude-review
+        continue-on-error: true
         uses: anthropics/claude-code-action@v1
         with:
           anthropic_api_key: ${{ env.ANTHROPIC_API_KEY }}
@@ -81,3 +82,8 @@ jobs:
           prompt: "/code-review:code-review ${{ github.repository }}/pull/${{ github.event.pull_request.number }}"
           # See https://github.com/anthropics/claude-code-action/blob/main/docs/usage.md
           # or https://code.claude.com/docs/en/cli-reference for available options
+
+      - name: Report Claude review failure
+        if: ${{ steps.claude-review.outcome == 'failure' }}
+        run: |
+          echo "::warning title=Claude review failed::anthropics/claude-code-action@v1 exited non-zero. Treating this as non-blocking because the failure is in the external review action rather than repository validation."
