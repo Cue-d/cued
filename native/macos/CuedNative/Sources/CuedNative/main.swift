@@ -42,6 +42,18 @@ struct IMessageReaction: Codable {
   let timestamp: Int
 }
 
+struct IMessageAttachment: Codable {
+  let guid: String
+  let filename: String?
+  let transferName: String?
+  let mimeType: String?
+  let uti: String?
+  let totalBytes: Int?
+  let isSticker: Bool
+  let hideAttachment: Bool
+  let ckRecordId: String?
+}
+
 struct IMessageMessage: Codable {
   let id: Int
   let guid: String
@@ -55,6 +67,7 @@ struct IMessageMessage: Codable {
   let status: String
   let errorCode: Int
   let hasAttachments: Bool
+  var attachments: [IMessageAttachment]
   let sender: IMessageHandle?
   var reactions: [IMessageReaction]
 }
@@ -114,6 +127,19 @@ private struct MessageRow {
   let errorCode: Int
   let hasAttachments: Bool
   let associatedMessageType: Int
+}
+
+private struct AttachmentRow {
+  let messageID: Int
+  let guid: String
+  let filename: String?
+  let transferName: String?
+  let mimeType: String?
+  let uti: String?
+  let totalBytes: Int?
+  let isSticker: Bool
+  let hideAttachment: Bool
+  let ckRecordID: String?
 }
 
 private struct ReactionRow {
@@ -696,6 +722,13 @@ struct CuedNativeCLI {
     }
 
     var messages = transformMessages(rows: messageRows)
+    let attachments = try fetchAttachments(
+      connection: connection,
+      messageIDs: messages.map(\.id)
+    )
+    for index in messages.indices {
+      messages[index].attachments = attachments[messages[index].id] ?? []
+    }
     let cursor = messageRows.last?.rowID ?? options.afterRowID
     let reactions = try fetchReactions(
       connection: connection,
@@ -879,10 +912,80 @@ struct CuedNativeCLI {
           ),
           errorCode: row.errorCode,
           hasAttachments: row.hasAttachments,
+          attachments: [],
           sender: sender,
           reactions: []
         )
       }
+  }
+
+  private static func fetchAttachments(
+    connection: SQLiteConnection,
+    messageIDs: [Int]
+  ) throws -> [Int: [IMessageAttachment]] {
+    guard !messageIDs.isEmpty else {
+      return [:]
+    }
+
+    let placeholders = Array(repeating: "?", count: messageIDs.count).joined(separator: ", ")
+    let sql = """
+      SELECT
+        maj.message_id,
+        a.guid,
+        a.filename,
+        a.transfer_name,
+        a.mime_type,
+        a.uti,
+        a.total_bytes,
+        a.is_sticker,
+        a.hide_attachment,
+        a.ck_record_id
+      FROM message_attachment_join maj
+      JOIN attachment a ON a.ROWID = maj.attachment_id
+      WHERE maj.message_id IN (\(placeholders))
+      ORDER BY maj.message_id ASC, a.ROWID ASC
+    """
+
+    let rows = try connection.query(
+      sql: sql,
+      bind: { statement in
+        for (offset, messageID) in messageIDs.enumerated() {
+          sqlite3_bind_int64(statement, Int32(offset + 1), sqlite3_int64(messageID))
+        }
+      },
+      mapRow: { statement in
+        AttachmentRow(
+          messageID: intColumn(statement, 0) ?? 0,
+          guid: stringColumn(statement, 1) ?? "",
+          filename: stringColumn(statement, 2),
+          transferName: stringColumn(statement, 3),
+          mimeType: stringColumn(statement, 4),
+          uti: stringColumn(statement, 5),
+          totalBytes: intColumn(statement, 6),
+          isSticker: boolColumn(statement, 7),
+          hideAttachment: boolColumn(statement, 8),
+          ckRecordID: stringColumn(statement, 9)
+        )
+      }
+    )
+
+    var attachmentsByMessageID: [Int: [IMessageAttachment]] = [:]
+    for row in rows {
+      attachmentsByMessageID[row.messageID, default: []].append(
+        IMessageAttachment(
+          guid: row.guid,
+          filename: row.filename,
+          transferName: row.transferName,
+          mimeType: row.mimeType,
+          uti: row.uti,
+          totalBytes: row.totalBytes,
+          isSticker: row.isSticker,
+          hideAttachment: row.hideAttachment,
+          ckRecordId: row.ckRecordID
+        )
+      )
+    }
+    return attachmentsByMessageID
   }
 
   private static func resolvedMessageText(

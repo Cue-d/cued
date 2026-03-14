@@ -31,6 +31,51 @@ export function signalSourceConversationKey(threadId: string): string {
   return `signal:${threadId}`;
 }
 
+function normalizeSignalAttachments(
+  attachments: Array<Record<string, unknown>>,
+): Array<Record<string, unknown>> {
+  return attachments.map((attachment, index) => {
+    const id =
+      (typeof attachment.id === "string" && attachment.id.trim().length > 0 && attachment.id) ||
+      (typeof attachment.digest === "string" &&
+        attachment.digest.trim().length > 0 &&
+        attachment.digest) ||
+      `signal-attachment:${index}`;
+    const localPath =
+      (typeof attachment.path === "string" && attachment.path) ||
+      (typeof attachment.localPath === "string" && attachment.localPath) ||
+      (typeof attachment.storedFilename === "string" && attachment.storedFilename) ||
+      (typeof attachment.file === "string" && attachment.file) ||
+      null;
+    const contentType =
+      (typeof attachment.contentType === "string" && attachment.contentType) ||
+      (typeof attachment.mimeType === "string" && attachment.mimeType) ||
+      (typeof attachment.mimetype === "string" && attachment.mimetype) ||
+      null;
+    const size =
+      (typeof attachment.size === "number" && attachment.size) ||
+      (typeof attachment.sizeBytes === "number" && attachment.sizeBytes) ||
+      (typeof attachment.length === "number" && attachment.length) ||
+      null;
+
+    return {
+      id,
+      kind: "file",
+      filename:
+        (typeof attachment.filename === "string" && attachment.filename) ||
+        (typeof attachment.fileName === "string" && attachment.fileName) ||
+        null,
+      mime_type: contentType,
+      size_bytes: size,
+      local_path: localPath,
+      access_kind: localPath ? "local_path" : "none",
+      availability_status: localPath ? "available" : "unsupported_pending_signal_fetch",
+      access_ref: localPath ? { path: localPath } : null,
+      provider_metadata: { ...attachment },
+    };
+  });
+}
+
 function contactHandles(contact: SignalContact): ContactHandleInput[] {
   const handles: ContactHandleInput[] = [];
   if (typeof contact.number === "string" && contact.number.trim().length > 0) {
@@ -208,7 +253,7 @@ export function buildSignalMessageEvent(
       status: message.isFromMe ? "sent" : "delivered",
       isFromMe: message.isFromMe,
       deliveredAt: message.sentAt,
-      attachments: message.attachments,
+      attachments: normalizeSignalAttachments(message.attachments),
     } satisfies MessagePayload,
     sourceVersion: "signal-v1",
   };

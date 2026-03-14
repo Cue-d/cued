@@ -1,0 +1,134 @@
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterEach, describe, expect, it } from "vitest";
+import { fetchAttachment, listAttachments, searchAttachments } from "../attachments/service.js";
+import { CuedDatabase } from "../db/database.js";
+
+describe("attachment service", () => {
+  const tempDirs: string[] = [];
+  const cleanupPaths: string[] = [];
+
+  afterEach(() => {
+    while (cleanupPaths.length > 0) {
+      const path = cleanupPaths.pop();
+      if (path) {
+        rmSync(path, { force: true });
+      }
+    }
+    while (tempDirs.length > 0) {
+      const dir = tempDirs.pop();
+      if (dir) {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    }
+  });
+
+  function createDb(): CuedDatabase {
+    const dir = mkdtempSync(join(tmpdir(), "cued-attachments-db-"));
+    tempDirs.push(dir);
+    const db = new CuedDatabase(join(dir, "local.db"));
+    db.migrate();
+    return db;
+  }
+
+  function sqlite(db: CuedDatabase) {
+    return (
+      db as unknown as {
+        sqlite: {
+          prepare: (sql: string) => {
+            run: (...params: unknown[]) => void;
+          };
+        };
+      }
+    ).sqlite;
+  }
+
+  it("fetches a local attachment into cache, extracts text, and makes it searchable", async () => {
+    const db = createDb();
+    const fileDir = mkdtempSync(join(tmpdir(), "cued-attachments-src-"));
+    tempDirs.push(fileDir);
+    const sourcePath = join(fileDir, "note.txt");
+    writeFileSync(sourcePath, "attachment alpha beta gamma\n");
+
+    const timestamp = Date.now();
+    const sql = sqlite(db);
+    sql
+      .prepare(
+        `
+        INSERT INTO conversations (
+          id, platform, account_key, source_conversation_key, native_conversation_key, type, subtype,
+          service, name, topic, participant_names, last_message_id, last_message_at, last_message_preview,
+          unread_count, created_at, updated_at
+        ) VALUES (?, 'imessage', 'local', ?, NULL, 'dm', NULL, 'iMessage', ?, NULL, '', NULL, NULL, NULL, 0, ?, ?)
+      `,
+      )
+      .run("conversation-1", "source-conversation-1", "Thread", timestamp, timestamp);
+    sql
+      .prepare(
+        `
+        INSERT INTO messages (
+          id, platform, account_key, platform_message_id, conversation_id, sender_contact_id,
+          sender_source_key, sender_name, conversation_name, sent_at, service, status, is_from_me,
+          content, delivered_at, read_at, edited_at, deleted_at, reply_to_message_id, is_deleted,
+          is_edited, attachment_count, reaction_count, created_at, updated_at
+        ) VALUES (?, 'imessage', 'local', ?, ?, NULL, NULL, 'Ben', 'Thread', ?, 'iMessage', 'delivered', 0, 'hello', NULL, NULL, NULL, NULL, NULL, 0, 0, 1, 0, ?, ?)
+      `,
+      )
+      .run("message-1", "platform-message-1", "conversation-1", timestamp, timestamp, timestamp);
+    sql
+      .prepare(
+        `
+        INSERT INTO message_attachments (
+          id, message_id, platform, account_key, source_attachment_key, kind, mime_type, filename,
+          title, local_path, remote_url, size_bytes, text_content, access_kind, access_ref_json,
+          preview_ref_json, availability_status, provider_metadata_json, metadata_json, created_at, updated_at
+        ) VALUES (?, ?, 'imessage', 'local', ?, 'file', 'text/plain', 'note.txt', 'Note', ?, NULL, ?, NULL, 'local_path', ?, NULL, 'available', '{}', '{}', ?, ?)
+      `,
+      )
+      .run(
+        "attachment-1",
+        "message-1",
+        "source-attachment-1",
+        sourcePath,
+        28,
+        JSON.stringify({ path: sourcePath }),
+        timestamp,
+        timestamp,
+      );
+
+    const listed = listAttachments(db, { messageId: "message-1" });
+    expect(listed).toHaveLength(1);
+    expect(listed[0]?.attachment.access_kind).toBe("local_path");
+
+    const fetched = await fetchAttachment(db, {
+      attachmentId: "attachment-1",
+    });
+    if (fetched.localPath) {
+      cleanupPaths.push(fetched.localPath);
+    }
+    expect(fetched.cacheHit).toBe(false);
+    expect(fetched.localPath).toBeTruthy();
+    expect(fetched.content).toEqual(
+      expect.objectContaining({
+        status: "ready",
+        hasText: true,
+      }),
+    );
+
+    const second = await fetchAttachment(db, {
+      attachmentId: "attachment-1",
+    });
+    expect(second.cacheHit).toBe(true);
+
+    const searchResults = searchAttachments(db, { query: "alpha" });
+    expect(searchResults).toEqual([
+      expect.objectContaining({
+        attachmentId: "attachment-1",
+        messageId: "message-1",
+      }),
+    ]);
+
+    db.close();
+  });
+});

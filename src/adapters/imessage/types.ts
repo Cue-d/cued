@@ -19,6 +19,18 @@ export interface ImsReaction {
   timestamp: number;
 }
 
+export interface ImsAttachment {
+  guid: string;
+  filename: string | null;
+  transferName: string | null;
+  mimeType: string | null;
+  uti: string | null;
+  totalBytes: number | null;
+  isSticker: boolean;
+  hideAttachment: boolean;
+  ckRecordId: string | null;
+}
+
 export interface ImsMessage {
   id: number;
   guid: string;
@@ -32,6 +44,7 @@ export interface ImsMessage {
   status: "sending" | "sent" | "delivered" | "read" | "failed";
   errorCode: number;
   hasAttachments: boolean;
+  attachments: ImsAttachment[];
   sender: ImsHandle | null;
   reactions: ImsReaction[];
 }

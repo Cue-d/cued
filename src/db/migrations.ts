@@ -1122,4 +1122,74 @@ export const MIGRATIONS: Array<{ id: string; sql: string }> = [
       WHERE platform IN ('slack', 'linkedin', 'signal', 'whatsapp');
     `,
   },
+  {
+    id: "0011_attachment_access_and_content",
+    sql: `
+      ALTER TABLE message_attachments ADD COLUMN access_kind TEXT;
+      ALTER TABLE message_attachments ADD COLUMN access_ref_json TEXT;
+      ALTER TABLE message_attachments ADD COLUMN preview_ref_json TEXT;
+      ALTER TABLE message_attachments ADD COLUMN availability_status TEXT;
+      ALTER TABLE message_attachments ADD COLUMN provider_metadata_json TEXT;
+
+      UPDATE message_attachments
+      SET
+        access_kind = CASE
+          WHEN local_path IS NOT NULL AND trim(local_path) <> '' THEN 'local_path'
+          WHEN remote_url IS NOT NULL AND trim(remote_url) <> '' THEN 'remote_url'
+          ELSE 'none'
+        END,
+        access_ref_json = CASE
+          WHEN local_path IS NOT NULL AND trim(local_path) <> '' THEN json_object('path', local_path)
+          WHEN remote_url IS NOT NULL AND trim(remote_url) <> '' THEN json_object('url', remote_url)
+          ELSE NULL
+        END,
+        availability_status = CASE
+          WHEN local_path IS NOT NULL AND trim(local_path) <> '' THEN 'available'
+          WHEN remote_url IS NOT NULL AND trim(remote_url) <> '' THEN 'available'
+          ELSE 'metadata_only'
+        END,
+        provider_metadata_json = metadata_json
+      WHERE access_kind IS NULL;
+
+      CREATE TABLE IF NOT EXISTS attachment_cache (
+        id TEXT PRIMARY KEY,
+        attachment_id TEXT NOT NULL REFERENCES message_attachments(id) ON DELETE CASCADE,
+        variant TEXT NOT NULL,
+        status TEXT NOT NULL,
+        cache_path TEXT,
+        mime_type TEXT,
+        size_bytes INTEGER,
+        sha256 TEXT,
+        fetched_at INTEGER,
+        last_accessed_at INTEGER,
+        expires_at INTEGER,
+        last_error TEXT,
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL,
+        UNIQUE(attachment_id, variant)
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_attachment_cache_status_accessed
+      ON attachment_cache(status, last_accessed_at, updated_at);
+
+      CREATE TABLE IF NOT EXISTS attachment_content (
+        attachment_id TEXT PRIMARY KEY REFERENCES message_attachments(id) ON DELETE CASCADE,
+        extractor TEXT,
+        status TEXT NOT NULL,
+        text_content TEXT,
+        mime_type TEXT,
+        extracted_at INTEGER,
+        last_error TEXT,
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL
+      );
+
+      CREATE VIRTUAL TABLE IF NOT EXISTS attachment_content_fts USING fts5(
+        attachment_id UNINDEXED,
+        filename,
+        title,
+        content
+      );
+    `,
+  },
 ];
