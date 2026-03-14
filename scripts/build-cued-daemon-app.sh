@@ -20,6 +20,7 @@ RUNTIME_NODE_BIN_DIR="$RUNTIME_NODE_ROOT/bin"
 HELPERS_DIR="$RESOURCES_DIR/helpers"
 SIGNAL_FETCH_SCRIPT="$ROOT_DIR/scripts/fetch-signal-cli-macos.sh"
 NODE_RUNTIME_FETCH_SCRIPT="$ROOT_DIR/scripts/fetch-node-runtime-macos.sh"
+JIT_RUNTIME_ENTITLEMENTS="$ROOT_DIR/scripts/packaging/jit-runtime.entitlements.plist"
 SIGNAL_HELPER_SOURCE_DIR="$ROOT_DIR/native/helpers/signal-cli/.build/cued-signal-cli"
 WHATSAPP_HELPER_SOURCE="$ROOT_DIR/native/helpers/whatsapp-go/.build/cued-whatsapp-helper"
 PERMISSIONS_SCRIPT_SOURCE="$ROOT_DIR/scripts/request-macos-access.sh"
@@ -52,9 +53,9 @@ xml_escape() {
 
 sign_app_bundle() {
   if [[ -n "${CUED_CODESIGN_IDENTITY:-}" ]]; then
+    sign_nested_binaries
     codesign \
       --force \
-      --deep \
       --timestamp \
       --options runtime \
       --sign "$CUED_CODESIGN_IDENTITY" \
@@ -63,6 +64,46 @@ sign_app_bundle() {
   fi
 
   codesign --force --deep --sign - "$APP_BUNDLE" >/dev/null
+}
+
+runtime_entitlements_for_binary() {
+  local target="$1"
+
+  case "$target" in
+    "$RUNTIME_NODE_BIN_DIR/node"|"$HELPERS_DIR"/signal-cli/jre/Contents/Home/bin/java)
+      printf '%s\n' "$JIT_RUNTIME_ENTITLEMENTS"
+      ;;
+  esac
+}
+
+sign_nested_binaries() {
+  local path
+  local entitlements
+
+  while IFS= read -r -d '' path; do
+    if ! file -b "$path" | grep -q "Mach-O"; then
+      continue
+    fi
+
+    entitlements="$(runtime_entitlements_for_binary "$path")"
+    if [[ -n "$entitlements" ]]; then
+      codesign \
+        --force \
+        --timestamp \
+        --options runtime \
+        --entitlements "$entitlements" \
+        --sign "$CUED_CODESIGN_IDENTITY" \
+        "$path" >/dev/null
+      continue
+    fi
+
+    codesign \
+      --force \
+      --timestamp \
+      --options runtime \
+      --sign "$CUED_CODESIGN_IDENTITY" \
+      "$path" >/dev/null
+  done < <(find "$APP_BUNDLE/Contents" -type f -print0 | sort -rz)
 }
 
 copy_better_sqlite3_binary() {

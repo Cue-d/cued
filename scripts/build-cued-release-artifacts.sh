@@ -9,6 +9,7 @@ APP_BUNDLE="$DIST_DIR/Cued.app"
 DMG_PATH="$DIST_DIR/Cued.dmg"
 TARBALL_PATH="$DIST_DIR/cued-macos-arm64.tar.gz"
 STAGING_DIR="$DIST_DIR/dmg-staging"
+JIT_RUNTIME_ENTITLEMENTS="$ROOT_DIR/scripts/packaging/jit-runtime.entitlements.plist"
 
 if [[ -z "${CUED_CODESIGN_IDENTITY:-}" ]]; then
   echo "CUED_CODESIGN_IDENTITY is required for shareable release artifacts" >&2
@@ -20,8 +21,32 @@ if [[ -z "${CUED_NOTARY_PROFILE:-}" ]]; then
   exit 1
 fi
 
+runtime_entitlements_for_binary() {
+  local target="$1"
+
+  case "$target" in
+    "$APP_BUNDLE/Contents/Resources/runtime/node/bin/node"|\
+    "$APP_BUNDLE/Contents/Resources/helpers/signal-cli/jre/Contents/Home/bin/java")
+      printf '%s\n' "$JIT_RUNTIME_ENTITLEMENTS"
+      ;;
+  esac
+}
+
 sign_macos_binary() {
   local target="$1"
+  local entitlements="${2:-}"
+
+  if [[ -n "$entitlements" ]]; then
+    codesign \
+      --force \
+      --timestamp \
+      --options runtime \
+      --entitlements "$entitlements" \
+      --sign "$CUED_CODESIGN_IDENTITY" \
+      "$target"
+    return
+  fi
+
   codesign \
     --force \
     --timestamp \
@@ -31,9 +56,12 @@ sign_macos_binary() {
 }
 
 sign_nested_binaries() {
+  local entitlements
+
   while IFS= read -r -d '' path; do
     if file -b "$path" | grep -q "Mach-O"; then
-      sign_macos_binary "$path"
+      entitlements="$(runtime_entitlements_for_binary "$path")"
+      sign_macos_binary "$path" "$entitlements"
     fi
   done < <(find "$APP_BUNDLE/Contents" -type f -print0 | sort -rz)
 }
