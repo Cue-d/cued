@@ -1,10 +1,12 @@
 import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   contactHandleType,
   getSignalCliBinaryCandidates,
+  getSignalCliHelperRootCandidates,
   isSignalCliVersionSupported,
   parseSignalCliVersion,
   readSignalLinkedAccount,
@@ -120,6 +122,14 @@ describe("signal cli helpers", () => {
     expect(
       resolveSignalCliPath({ CUED_SIGNAL_CLI_PATH: legacyOverride } as NodeJS.ProcessEnv, repoRoot),
     ).toBeNull();
+  });
+
+  it("uses the relocated runtime bundled helper fallback path", () => {
+    const candidates = getSignalCliHelperRootCandidates({});
+
+    expect(candidates[0]).toBe(
+      resolve(dirname(fileURLToPath(import.meta.url)), "../../../../../helpers/signal-cli"),
+    );
   });
 
   it("normalizes received signal envelopes into message payloads", () => {
