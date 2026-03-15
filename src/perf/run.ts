@@ -425,6 +425,15 @@ function createLinkedInClientFixture(conversationCount: number, messagesPerConve
         messages: [],
       };
     },
+    async getMessagesWithPrevCursor() {
+      return {
+        messages: [],
+        prevCursor: null,
+      };
+    },
+    async getReactors() {
+      return [];
+    },
   };
 }
 

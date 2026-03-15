@@ -1522,6 +1522,29 @@ export class CuedDatabase {
     );
   }
 
+  listActiveReactionsForMessage(
+    platform: Platform,
+    accountKey: string,
+    platformMessageId: string,
+  ): Array<{ reactor_source_key: string | null; emoji: string }> {
+    return this.sqlite
+      .prepare(
+        `
+          SELECT mr.reactor_source_key, mr.emoji
+          FROM message_reactions mr
+          JOIN messages m ON m.id = mr.message_id
+          WHERE m.platform = ?
+            AND m.account_key = ?
+            AND m.platform_message_id = ?
+            AND mr.is_active = 1
+        `,
+      )
+      .all(platform, accountKey, platformMessageId) as Array<{
+      reactor_source_key: string | null;
+      emoji: string;
+    }>;
+  }
+
   claimNextOutboundMessage(platform?: Platform): OutboundMessageRow | null {
     return this.db.transaction((tx) => {
       const whereCondition = platform

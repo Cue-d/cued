@@ -58,7 +58,7 @@ type ProjectionChangeSet = {
 
 type ProjectableRawEvent = Pick<
   RawEventRow,
-  "platform" | "account_key" | "observed_at" | "payload_json"
+  "platform" | "account_key" | "event_kind" | "observed_at" | "payload_json"
 >;
 
 type ProjectionOverview = {
@@ -589,6 +589,64 @@ function projectRealtimeConversationObservation(
 
   conn.update(conversations).set(conversationSet).where(eq(conversations.id, conversationId)).run();
 
+  if (event.event_kind === "removed") {
+    conn
+      .update(conversationParticipants)
+      .set({
+        isActive: 0,
+        leftAt: event.observed_at,
+        updatedAt: event.observed_at,
+      })
+      .where(eq(conversationParticipants.conversationId, conversationId))
+      .run();
+  }
+
+  if (event.event_kind === "removed") {
+    for (const participant of payload.participants) {
+      const contactId = resolveOrEnsureContact(
+        conn,
+        cache,
+        event.platform,
+        event.account_key,
+        participant.sourceEntityKey,
+        event.observed_at,
+      );
+      if (!contactId) {
+        continue;
+      }
+
+      conn
+        .insert(conversationParticipants)
+        .values({
+          conversationId,
+          contactId,
+          sourceParticipantKey: participant.sourceEntityKey,
+          participantName: cache.contactNameMap.get(contactId) ?? null,
+          role: null,
+          isSelf: boolToInt(participant.isSelf),
+          isActive: 0,
+          joinedAt: event.observed_at,
+          leftAt: event.observed_at,
+          updatedAt: event.observed_at,
+        })
+        .onConflictDoUpdate({
+          target: [
+            conversationParticipants.conversationId,
+            conversationParticipants.contactId,
+            conversationParticipants.sourceParticipantKey,
+          ],
+          set: {
+            participantName: cache.contactNameMap.get(contactId) ?? null,
+            isSelf: boolToInt(participant.isSelf),
+            isActive: 0,
+            leftAt: event.observed_at,
+            updatedAt: event.observed_at,
+          },
+        })
+        .run();
+    }
+  }
+
   if (payload.displayName !== undefined) {
     cache.conversationNameMap.set(conversationId, normalizeText(payload.displayName));
   }
@@ -640,6 +698,7 @@ function projectRealtimeMessageEvent(
     .run();
 
   changes.dirtyConversationIds.add(conversationId);
+  changes.dirtyMessageIds.add(messageId);
 }
 
 function projectContactObservation(
@@ -842,6 +901,18 @@ function projectConversationObservation(
       : (cache.conversationNameMap.get(conversationId) ?? null);
   cache.conversationNameMap.set(conversationId, resolvedName);
 
+  if (event.event_kind === "removed") {
+    conn
+      .update(conversationParticipants)
+      .set({
+        isActive: 0,
+        leftAt: event.observed_at,
+        updatedAt: event.observed_at,
+      })
+      .where(eq(conversationParticipants.conversationId, conversationId))
+      .run();
+  }
+
   for (const participant of payload.participants) {
     const contactId = resolveOrEnsureContact(
       conn,
@@ -864,9 +935,9 @@ function projectConversationObservation(
         participantName: cache.contactNameMap.get(contactId) ?? null,
         role: null,
         isSelf: boolToInt(participant.isSelf),
-        isActive: 1,
+        isActive: event.event_kind === "removed" ? 0 : 1,
         joinedAt: event.observed_at,
-        leftAt: null,
+        leftAt: event.event_kind === "removed" ? event.observed_at : null,
         updatedAt: event.observed_at,
       })
       .onConflictDoUpdate({
@@ -878,8 +949,8 @@ function projectConversationObservation(
         set: {
           participantName: cache.contactNameMap.get(contactId) ?? null,
           isSelf: boolToInt(participant.isSelf),
-          isActive: 1,
-          leftAt: null,
+          isActive: event.event_kind === "removed" ? 0 : 1,
+          leftAt: event.event_kind === "removed" ? event.observed_at : null,
           updatedAt: event.observed_at,
         },
       })
@@ -1200,12 +1271,17 @@ function refreshConversationSummariesForIds(
           LIMIT 1
         ),
         unread_count = (
-          SELECT COUNT(*)
-          FROM messages m
-          WHERE m.conversation_id = conversations.id
-            AND m.is_from_me = 0
-            AND m.is_deleted = 0
-            AND m.read_at IS NULL
+          CASE
+            WHEN conversations.subtype = 'deleted' THEN 0
+            ELSE (
+              SELECT COUNT(*)
+              FROM messages m
+              WHERE m.conversation_id = conversations.id
+                AND m.is_from_me = 0
+                AND m.is_deleted = 0
+                AND m.read_at IS NULL
+            )
+          END
         )
       WHERE id IN (${sqlValueList(chunk)})
     `);
@@ -1410,8 +1486,13 @@ function refreshMessageSearchIndexForIds(conn: LocalDbExecutor, messageIds: Set<
   }
 }
 
-function finalizeRealtimeProjection(conn: LocalDbExecutor, conversationIds: Set<string>): void {
-  refreshConversationSummariesForIds(conn, conversationIds);
+function finalizeRealtimeProjection(conn: LocalDbExecutor, changes: ProjectionChangeSet): void {
+  if (changes.dirtyConversationIds.size > 0) {
+    refreshConversationSummariesForIds(conn, changes.dirtyConversationIds);
+  }
+  if (changes.dirtyMessageIds.size > 0) {
+    refreshReactionCountsForIds(conn, changes.dirtyMessageIds);
+  }
 }
 
 function finalizeDeferredProjection(
@@ -1488,6 +1569,7 @@ function projectEventBatch(
       const shapedEvent = {
         platform: event.platform,
         account_key: event.account_key,
+        event_kind: event.event_kind,
         observed_at: event.observed_at,
         payload_json: event.payload_json,
       };
@@ -1497,6 +1579,10 @@ function projectEventBatch(
           projectRealtimeConversationObservation(tx, cache, changes, shapedEvent);
         } else if (event.entity_kind === "message") {
           projectRealtimeMessageEvent(tx, cache, changes, shapedEvent);
+        } else if (event.entity_kind === "reaction") {
+          projectReactionEvent(tx, cache, changes, shapedEvent);
+        } else if (event.entity_kind === "timeline_event") {
+          projectTimelineEvent(tx, cache, shapedEvent);
         }
         continue;
       }
@@ -1523,7 +1609,7 @@ function projectEventBatch(
     }
 
     if (input.mode === "realtime") {
-      finalizeRealtimeProjection(tx, changes.dirtyConversationIds);
+      finalizeRealtimeProjection(tx, changes);
       return;
     }
 
