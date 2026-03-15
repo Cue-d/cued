@@ -12,7 +12,7 @@ import {
   SYNC_MODE_VALUES,
   SYNC_RUN_STATUS_VALUES,
   SYNC_RUN_TYPE_VALUES,
-} from "../types/provider.js";
+} from "../core/types/provider.js";
 
 function textEnum<const TValues extends readonly [string, ...string[]]>(
   name: string,

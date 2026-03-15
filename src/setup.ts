@@ -2,8 +2,8 @@ import { existsSync } from "node:fs";
 import { stdin as input, stdout as output } from "node:process";
 import readline from "node:readline/promises";
 import { openCuedDatabase } from "./db/database.js";
-import { buildDoctorReport } from "./diagnostics/doctor.js";
 import { resolveInstalledAppPath } from "./macos/install.js";
+import { buildDoctorReport } from "./runtime/doctor.js";
 
 type SetupDoctorReport = {
   daemon?: unknown;

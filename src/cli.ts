@@ -5,25 +5,11 @@ import { existsSync, realpathSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
-import { getCurrentAppVersion, getCurrentReleaseChannel } from "./app-metadata.js";
 import { sendDaemonRequest } from "./client.js";
-import { CUED_DB_PATH, CUED_SOCKET_PATH, ensureCuedDirs } from "./config.js";
-import { runDaemon } from "./daemon/server.js";
+import { getCurrentAppVersion, getCurrentReleaseChannel } from "./core/app-metadata.js";
+import { CUED_DB_PATH, CUED_SOCKET_PATH, ensureCuedDirs } from "./core/config.js";
+import { resolveHostOS } from "./core/platform-capabilities.js";
 import { openCuedDatabase, openCuedDatabaseReadOnly } from "./db/database.js";
-import {
-  buildDoctorReport,
-  buildPermissionStatus,
-  refreshMessagesAutomationVerification,
-} from "./diagnostics/doctor.js";
-import {
-  doctorHooksConfig,
-  emitHookEvent,
-  HOOK_EVENT_NAMES,
-  initHooksConfig,
-  testHookEvent,
-} from "./hooks/service.js";
-import { getIntegrationSummary, listIntegrationStates } from "./integrations/service.js";
-import { followLogs, getDaemonLogPath, parseLogsCommandArgs, readRecentLogLines } from "./logs.js";
 import {
   getAppBundleInfo,
   getCLISymlinkStatus,
@@ -34,16 +20,35 @@ import {
   resolveInstalledAppPath,
   uninstallLaunchAgent,
 } from "./macos/install.js";
-import { buildOnboardingSnapshot } from "./onboarding/service.js";
-import { resolveHostOS } from "./platform-capabilities.js";
-import { IntegrationAuthService } from "./services/integration-auth.js";
-import { runSetupTUI } from "./setup.js";
+import { IntegrationAuthService } from "./platforms/core/auth/service.js";
+import { getIntegrationSummary, listIntegrationStates } from "./platforms/core/state/status.js";
+import { runDaemon } from "./runtime/daemon/server.js";
+import {
+  buildDoctorReport,
+  buildPermissionStatus,
+  refreshMessagesAutomationVerification,
+} from "./runtime/doctor.js";
+import {
+  doctorHooksConfig,
+  emitHookEvent,
+  HOOK_EVENT_NAMES,
+  initHooksConfig,
+  testHookEvent,
+} from "./runtime/hooks.js";
+import {
+  followLogs,
+  getDaemonLogPath,
+  parseLogsCommandArgs,
+  readRecentLogLines,
+} from "./runtime/logs.js";
+import { buildOnboardingSnapshot } from "./runtime/onboarding.js";
 import {
   checkForUpdates,
   getUpdateStatus,
   installAvailableUpdate,
   runUpdatePreflight,
-} from "./updater/service.js";
+} from "./runtime/updater/service.js";
+import { runSetupTUI } from "./setup.js";
 
 const DIST_ROOT = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = resolve(DIST_ROOT, "..");
