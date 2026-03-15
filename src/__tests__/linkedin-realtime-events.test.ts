@@ -172,6 +172,20 @@ describe("buildLinkedInRawEventsFromRealtimeEnvelope", () => {
         (event) => event.entityKind === "conversation" && event.eventKind === "removed",
       ),
     ).toBe(true);
+    expect(
+      rawEvents.find(
+        (event) => event.entityKind === "conversation" && event.eventKind === "removed",
+      )?.payload,
+    ).toEqual(
+      expect.objectContaining({
+        participants: expect.arrayContaining([
+          expect.objectContaining({
+            sourceEntityKey: "linkedin:urn:li:member:SELF123",
+            isSelf: true,
+          }),
+        ]),
+      }),
+    );
     expect(rawEvents.some((event) => event.entityKind === "message")).toBe(false);
     expect(
       rawEvents.some(

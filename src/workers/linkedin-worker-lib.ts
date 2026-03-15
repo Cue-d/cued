@@ -443,6 +443,7 @@ export async function buildLinkedInSyncBundle(options?: {
           observedAt: observedBase,
           reason: "deleted",
           conversation: conversationsByUrn.get(removedUrn) ?? null,
+          userEntityUrn,
         }),
       );
     }
@@ -459,6 +460,7 @@ export async function buildLinkedInSyncBundle(options?: {
             observedAt: observedBase,
             reason: isSpamConversation(conversation) ? "spam" : !isMember ? "removed" : "archived",
             conversation,
+            userEntityUrn,
           }),
         );
         continue;

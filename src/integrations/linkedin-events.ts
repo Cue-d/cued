@@ -339,6 +339,7 @@ export function buildLinkedInConversationRemovalEvents(input: {
   observedAt: number;
   reason: string;
   conversation?: Conversation | null;
+  userEntityUrn?: string | null;
 }): ProviderRawEventInput[] {
   const normalizedConversation = normalizeConversationUrn(input.conversationUrn);
   const sourceConversationKey = conversationSourceKey(normalizedConversation);
@@ -368,6 +369,9 @@ export function buildLinkedInConversationRemovalEvents(input: {
         participants:
           input.conversation?.conversationParticipants.map((participant) => ({
             sourceEntityKey: participantSourceKey(participant),
+            isSelf: input.userEntityUrn
+              ? normalizeMemberUrn(participant.entityURN) === input.userEntityUrn
+              : undefined,
           })) ?? [],
       } satisfies ConversationObservationPayload,
       sourceVersion: "linkedin-v1",
