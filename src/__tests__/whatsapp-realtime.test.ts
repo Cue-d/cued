@@ -224,6 +224,50 @@ describe("whatsapp realtime", () => {
     session.stop();
   });
 
+  it("preserves the disconnect reason on the first disconnected status update", () => {
+    const child = new MockChild();
+    spawnMock.mockReturnValue(child);
+    const onStatusChange = vi.fn();
+
+    const session = new WhatsAppRealtimeSession({
+      accountKey: "default",
+      helperPath: "/tmp/cued-whatsapp-helper",
+      storeDir: "/tmp/cued-whatsapp/default",
+      onStatusChange,
+    });
+
+    session.start();
+    child.emit("spawn");
+    child.stdout.write(
+      `${JSON.stringify({
+        event: "connected",
+        data: {
+          accountJid: "15551234567@s.whatsapp.net",
+        },
+      })}\n`,
+    );
+
+    onStatusChange.mockClear();
+    child.stdout.write(
+      `${JSON.stringify({
+        event: "disconnected",
+        data: {
+          reason: "network lost",
+        },
+      })}\n`,
+    );
+
+    expect(onStatusChange).toHaveBeenCalled();
+    expect(onStatusChange.mock.calls[0]?.[0]).toEqual(
+      expect.objectContaining({
+        state: "reconnecting",
+        lastSessionError: "network lost",
+      }),
+    );
+
+    session.stop();
+  });
+
   it("starts and stops managed sessions through the supervisor", async () => {
     const started: string[] = [];
     const stopped: string[] = [];

@@ -123,6 +123,59 @@ func TestResyncPageFiltersIncrementalUpdates(t *testing.T) {
 	}
 }
 
+func TestResyncPageUsesStableSnapshotAcrossPages(t *testing.T) {
+	storeDir := t.TempDir()
+	state, err := newHelperState(storeDir)
+	if err != nil {
+		t.Fatalf("newHelperState failed: %v", err)
+	}
+	defer state.close()
+
+	for index := 0; index < 3; index++ {
+		state.setMessage(messageSnapshot{
+			MessageID: "wamid-base-" + strconv.Itoa(index),
+			ChatJID:   "15551234567@s.whatsapp.net",
+			Timestamp: int64(index + 1),
+			Text:      "base",
+		})
+	}
+
+	firstPage, err := state.getResyncPage(nil, "", 2)
+	if err != nil {
+		t.Fatalf("first resync page failed: %v", err)
+	}
+	if len(firstPage.Messages) != 2 || firstPage.NextCursor == nil || !firstPage.HasMore {
+		t.Fatalf("unexpected first page: %+v", firstPage)
+	}
+
+	time.Sleep(2 * time.Millisecond)
+	state.setMessage(messageSnapshot{
+		MessageID: "wamid-late",
+		ChatJID:   "15551234567@s.whatsapp.net",
+		Timestamp: 1,
+		Text:      "late",
+	})
+
+	secondPage, err := state.getResyncPage(nil, *firstPage.NextCursor, 2)
+	if err != nil {
+		t.Fatalf("second resync page failed: %v", err)
+	}
+	if secondPage.CompletedAt != firstPage.CompletedAt {
+		t.Fatalf("expected stable completedAt across pages, got %d then %d", firstPage.CompletedAt, secondPage.CompletedAt)
+	}
+	if len(secondPage.Messages) != 1 || secondPage.Messages[0].MessageID != "wamid-base-2" {
+		t.Fatalf("expected only remaining base message, got %+v", secondPage.Messages)
+	}
+
+	incrementalPage, err := state.getResyncPage(&firstPage.CompletedAt, "", 10)
+	if err != nil {
+		t.Fatalf("incremental resync failed: %v", err)
+	}
+	if len(incrementalPage.Messages) != 1 || incrementalPage.Messages[0].MessageID != "wamid-late" {
+		t.Fatalf("expected late message on next incremental sync, got %+v", incrementalPage.Messages)
+	}
+}
+
 func TestHistorySyncBatchFromEventUsesHistoryPayload(t *testing.T) {
 	event := &events.HistorySync{
 		Data: &waHistorySync.HistorySync{

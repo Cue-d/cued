@@ -358,50 +358,49 @@ export class WhatsAppRealtimeSession implements WhatsAppRealtimeSessionLike {
     }
 
     const eventData = parsed.data as Record<string, unknown>;
-    this.setStatus({
-      lastEventAt: now(),
-      lastSessionError:
-        parsed.event === "error" && typeof eventData.message === "string"
-          ? eventData.message
-          : null,
-    });
+    const eventAt = now();
     if (parsed.event === "connected") {
       const reconnected = this.hasEverConnected;
       this.hasEverConnected = true;
       this.clearConnectTimer();
       this.setStatus({
+        lastEventAt: eventAt,
         state: "connected",
         accountJid: typeof eventData.accountJid === "string" ? eventData.accountJid : null,
-        connectedAt: now(),
+        connectedAt: eventAt,
         reconnectAttempts: 0,
         lastSessionError: null,
       });
       this.onConnected?.(this.getStatus(), reconnected);
-    }
-    if (parsed.event === "history_sync") {
+    } else if (parsed.event === "history_sync") {
       this.setStatus({
+        lastEventAt: eventAt,
         lastHistorySyncAt:
-          typeof eventData.completedAt === "number" ? eventData.completedAt : now(),
+          typeof eventData.completedAt === "number" ? eventData.completedAt : eventAt,
       });
-    }
-    if (parsed.event === "disconnected") {
+    } else if (parsed.event === "disconnected") {
       this.clearConnectTimer();
       this.setStatus({
+        lastEventAt: eventAt,
         state: this.shouldReconnect ? "reconnecting" : "degraded",
         connectedAt: null,
         lastSessionError: typeof eventData.reason === "string" ? eventData.reason : null,
       });
-    }
-    if (
+    } else if (
       parsed.event === "error" &&
       typeof eventData.message === "string" &&
       this.status.state !== "connected"
     ) {
       this.clearConnectTimer();
       this.setStatus({
+        lastEventAt: eventAt,
         state: this.shouldReconnect ? "reconnecting" : "degraded",
         connectedAt: null,
         lastSessionError: eventData.message,
+      });
+    } else {
+      this.setStatus({
+        lastEventAt: eventAt,
       });
     }
 
