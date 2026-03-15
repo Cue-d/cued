@@ -460,6 +460,7 @@ export class LinkedInRealtimeSupervisor {
     input: LinkedInRealtimeSupervisorSessionInput,
   ) => LinkedInRealtimeSessionLike;
   private readonly sessions = new Map<string, LinkedInRealtimeSessionLike>();
+  private readonly sessionFingerprints = new Map<string, string>();
   private readonly degradedStatuses = new Map<string, LinkedInRealtimeStatus>();
 
   constructor(options: LinkedInRealtimeSupervisorOptions = {}) {
@@ -489,6 +490,7 @@ export class LinkedInRealtimeSupervisor {
       }
       session.stop();
       this.sessions.delete(accountKey);
+      this.sessionFingerprints.delete(accountKey);
     }
 
     this.degradedStatuses.clear();
@@ -500,11 +502,16 @@ export class LinkedInRealtimeSupervisor {
     }
 
     for (const sessionInput of desired) {
-      if (this.sessions.has(sessionInput.accountKey)) {
+      const nextFingerprint = fingerprintSessionInput(sessionInput);
+      const existingSession = this.sessions.get(sessionInput.accountKey);
+      const existingFingerprint = this.sessionFingerprints.get(sessionInput.accountKey);
+      if (existingSession && existingFingerprint === nextFingerprint) {
         continue;
       }
+      existingSession?.stop();
       const session = this.createSession(sessionInput);
       this.sessions.set(sessionInput.accountKey, session);
+      this.sessionFingerprints.set(sessionInput.accountKey, nextFingerprint);
       session.start();
     }
   }
@@ -533,5 +540,27 @@ export class LinkedInRealtimeSupervisor {
       session.stop();
     }
     this.sessions.clear();
+    this.sessionFingerprints.clear();
   }
+}
+
+function fingerprintSessionInput(input: LinkedInRealtimeSupervisorSessionInput): string {
+  return JSON.stringify({
+    accountKey: input.accountKey,
+    cookies: input.cookies.map((cookie) => ({
+      name: cookie.name,
+      value: cookie.value,
+      domain: cookie.domain ?? null,
+      path: cookie.path ?? null,
+      expires: cookie.expires ?? null,
+      httpOnly: cookie.httpOnly ?? null,
+      secure: cookie.secure ?? null,
+      sameSite: cookie.sameSite ?? null,
+    })),
+    pageInstance: input.pageInstance,
+    xLiTrack: input.xLiTrack,
+    serviceVersion: input.serviceVersion ?? null,
+    realtimeQueryMap: input.realtimeQueryMap,
+    realtimeRecipeMap: input.realtimeRecipeMap,
+  });
 }
