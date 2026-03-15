@@ -39,18 +39,19 @@ The repository no longer includes the Electron runtime or the old shared/cloud p
 
 ## Key Files
 
-| Feature               | Files                                                                                                 |
-| --------------------- | ----------------------------------------------------------------------------------------------------- |
-| CLI entrypoint        | `src/cli.ts`                                                                                          |
-| Setup flow            | `src/setup.ts`                                                                                        |
-| Daemon                | `src/daemon/`                                                                                         |
-| Integrations          | `src/integrations/`                                                                                   |
-| Database              | `src/db/`                                                                                             |
-| Diagnostics           | `src/diagnostics/doctor.ts`                                                                           |
-| macOS install helpers | `src/macos/install.ts`                                                                                |
-| App bundle build      | `scripts/build-cued-daemon-app.sh`                                                                    |
-| Packaging and signing | `scripts/build-cued-dmg.sh`, `scripts/build-cued-tarball.sh`, `scripts/sign-and-notarize-cued-app.sh` |
-| Native host           | `native/macos/CuedNative/Sources/CuedNative/`                                                         |
+| Feature               | Files                                                                                                      |
+| --------------------- | ---------------------------------------------------------------------------------------------------------- |
+| CLI entrypoint        | `src/cli.ts`                                                                                               |
+| Setup flow            | `src/setup.ts`                                                                                             |
+| Daemon                | `src/runtime/daemon/`                                                                                      |
+| Platform auth/state   | `src/platforms/core/auth/`, `src/platforms/core/state/`                                                    |
+| Platform implementations | `src/platforms/`                                                                                         |
+| Database              | `src/db/`                                                                                                  |
+| Diagnostics           | `src/runtime/doctor.ts`                                                                                    |
+| macOS install helpers | `src/macos/install.ts`                                                                                     |
+| App bundle build      | `scripts/build-cued-daemon-app.sh`                                                                         |
+| Packaging and signing | `scripts/build-cued-dmg.sh`, `scripts/build-cued-tarball.sh`, `scripts/sign-and-notarize-cued-app.sh`     |
+| Native host           | `native/macos/CuedNative/Sources/CuedNative/`                                                              |
 
 ## Commands
 
