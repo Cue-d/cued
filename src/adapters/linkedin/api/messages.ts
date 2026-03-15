@@ -135,6 +135,7 @@ export async function getMessages(
     {
       pageInstance: client.pageInstance,
       xLiTrack: client.xLiTrack,
+      allowRedirects: false,
     },
   ).doJSON<MessagesGraphQLResponse>();
 
@@ -166,6 +167,7 @@ export async function getMessagesWithPrevCursor(
     {
       pageInstance: client.pageInstance,
       xLiTrack: client.xLiTrack,
+      allowRedirects: false,
     },
   ).doJSON<MessagesGraphQLResponse>();
 
@@ -198,6 +200,7 @@ export async function getMessagesBefore(
     {
       pageInstance: client.pageInstance,
       xLiTrack: client.xLiTrack,
+      allowRedirects: false,
     },
   ).doJSON<MessagesGraphQLResponse>();
 

@@ -87,6 +87,7 @@ export class LinkedInClient {
     const response = await newGetRequest("https://www.linkedin.com/voyager/api/me", this._cookies, {
       pageInstance: this._pageInstance,
       xLiTrack: this._xLiTrack,
+      allowRedirects: false,
     })
       .withXLIHeaders()
       .doJSON<{

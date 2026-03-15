@@ -1,6 +1,6 @@
 import { GRAPHQL_QUERY_IDS } from "./constants.js";
 import type { LinkedInClient } from "./client.js";
-import { newMessagingGraphQLRequest } from "./request.js";
+import { linkedInEncode, newMessagingGraphQLRequest } from "./request.js";
 import type { MessagingParticipant } from "./types.js";
 
 interface ReactorsGraphQLResponse {
@@ -92,12 +92,13 @@ export async function getReactors(
     client.cookies,
     "messengerMessagingParticipantsByMessageAndEmoji",
     {
-      messageUrn: encodeURIComponent(messageUrn),
+      messageUrn: linkedInEncode(messageUrn),
       emoji: encodeURIComponent(emoji),
     },
     {
       pageInstance: client.pageInstance,
       xLiTrack: client.xLiTrack,
+      allowRedirects: false,
     },
   ).doJSON<ReactorsGraphQLResponse>();
 

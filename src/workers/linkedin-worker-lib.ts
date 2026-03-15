@@ -279,22 +279,20 @@ function reactionCompositeKey(reactorSourceKey: string | null, emoji: string): s
 }
 
 function loadProjectedReactions(
+  db: ReturnType<typeof openCuedDatabase>,
   accountKey: string,
   sourceMessageKey: string,
 ): Map<string, ProjectedReactionRow> {
-  const db = openCuedDatabase();
-  try {
-    return new Map(
-      db
-        .listActiveReactionsForMessage("linkedin", accountKey, sourceMessageKey)
-        .map((row) => [reactionCompositeKey(row.reactor_source_key, row.emoji), row]),
-    );
-  } finally {
-    db.close();
-  }
+  return new Map(
+    db.listActiveReactionsForMessage("linkedin", accountKey, sourceMessageKey).map((row) => [
+      reactionCompositeKey(row.reactor_source_key, row.emoji),
+      row,
+    ]),
+  );
 }
 
 async function buildReactionEventsForMessage(input: {
+  db: ReturnType<typeof openCuedDatabase>;
   client: LinkedInClientLike;
   accountKey: string;
   message: Message;
@@ -304,7 +302,7 @@ async function buildReactionEventsForMessage(input: {
 }): Promise<SyncBundle["rawEvents"]> {
   const rawEvents: SyncBundle["rawEvents"] = [];
   const sourceMessageKey = messageSourceKey(input.message.entityURN);
-  const projectedReactions = loadProjectedReactions(input.accountKey, sourceMessageKey);
+  const projectedReactions = loadProjectedReactions(input.db, input.accountKey, sourceMessageKey);
   const desiredKeys = new Set<string>();
 
   for (const summary of input.message.reactionSummaries ?? []) {
@@ -376,97 +374,34 @@ export async function buildLinkedInSyncBundle(options?: {
       xLiTrack: session?.xLiTrack ?? undefined,
     });
 
-  const observedBase = now();
-  const cutoffMs = incrementalOldestMs(options?.lastSyncAt);
-  const incremental = Boolean(options?.lastSyncAt || options?.syncToken);
-  const fetchConcurrency = getLinkedInFetchConcurrency();
-  const [selfEntityUrn, conversationResult, connections] = await Promise.all([
-    client.fetchSelf(),
-    listConversations(client, options?.syncToken ?? null),
-    listConnections(client, incremental),
-  ]);
-  const userEntityUrn = normalizeMemberUrn(selfEntityUrn);
+  const db = openCuedDatabase();
+  try {
+    const observedBase = now();
+    const cutoffMs = incrementalOldestMs(options?.lastSyncAt);
+    const incremental = Boolean(options?.lastSyncAt || options?.syncToken);
+    const fetchConcurrency = getLinkedInFetchConcurrency();
+    const [selfEntityUrn, conversationResult, connections] = await Promise.all([
+      client.fetchSelf(),
+      listConversations(client, options?.syncToken ?? null),
+      listConnections(client, incremental),
+    ]);
+    const userEntityUrn = normalizeMemberUrn(selfEntityUrn);
 
-  const sourceAccounts: SourceAccountInput[] = [
-    {
-      platform: "linkedin",
-      accountKey,
-      displayName: "LinkedIn",
-    },
-  ];
-
-  const rawEvents: SyncBundle["rawEvents"] = [];
-  const seenContactIds = new Set<string>();
-  const seenConversationKeys = new Set<string>();
-  const seenMessageIds = new Set<string>();
-
-  for (const connection of connections) {
-    const event = buildLinkedInConnectionContactEvent(accountKey, connection, observedBase);
-    if (seenContactIds.has(event.id)) {
-      continue;
-    }
-    seenContactIds.add(event.id);
-    rawEvents.push(event);
-  }
-
-  const validConversations: Conversation[] = [];
-  const conversationsByUrn = new Map(
-    conversationResult.conversations.map((conversation) => [conversation.entityURN, conversation]),
-  );
-
-  for (const removedUrn of conversationResult.removedConversationURNs) {
-    rawEvents.push(
-      ...buildLinkedInConversationRemovalEvents({
+    const sourceAccounts: SourceAccountInput[] = [
+      {
+        platform: "linkedin",
         accountKey,
-        conversationUrn: removedUrn,
-        observedAt: observedBase,
-        reason: "deleted",
-        conversation: conversationsByUrn.get(removedUrn) ?? null,
-      }),
-    );
-  }
+        displayName: "LinkedIn",
+      },
+    ];
 
-  for (const conversation of conversationResult.conversations) {
-    const isMember = userIsConversationMember(conversation, userEntityUrn);
-    const shouldRemove =
-      isSpamConversation(conversation) || !hasInboxCategory(conversation) || !isMember;
-    if (shouldRemove) {
-      rawEvents.push(
-        ...buildLinkedInConversationRemovalEvents({
-          accountKey,
-          conversationUrn: conversation.entityURN,
-          observedAt: observedBase,
-          reason: isSpamConversation(conversation) ? "spam" : !isMember ? "removed" : "archived",
-          conversation,
-        }),
-      );
-      continue;
-    }
-    validConversations.push(conversation);
-  }
+    const rawEvents: SyncBundle["rawEvents"] = [];
+    const seenContactIds = new Set<string>();
+    const seenConversationKeys = new Set<string>();
+    const seenMessageIds = new Set<string>();
 
-  const conversationMessages = await mapWithConcurrency(
-    validConversations,
-    fetchConcurrency,
-    async (conversation) => ({
-      conversation,
-      messages: await listMessagesForConversation(client, conversation, cutoffMs, incremental),
-    }),
-  );
-
-  for (const { conversation, messages } of conversationMessages) {
-    const conversationKey = conversationSourceKey(conversation.entityURN);
-    if (!seenConversationKeys.has(conversationKey)) {
-      seenConversationKeys.add(conversationKey);
-      rawEvents.push(buildLinkedInConversationEvent(accountKey, conversation, userEntityUrn, observedBase));
-    }
-
-    for (const participant of conversation.conversationParticipants) {
-      const normalizedParticipantUrn = normalizeMemberUrn(participant.entityURN);
-      if (normalizedParticipantUrn === userEntityUrn) {
-        continue;
-      }
-      const event = buildParticipantContactEvent(accountKey, participant, observedBase);
+    for (const connection of connections) {
+      const event = buildLinkedInConnectionContactEvent(accountKey, connection, observedBase);
       if (seenContactIds.has(event.id)) {
         continue;
       }
@@ -474,48 +409,119 @@ export async function buildLinkedInSyncBundle(options?: {
       rawEvents.push(event);
     }
 
-    for (const message of messages) {
-      if (!message.entityURN) {
+    const validConversations: Conversation[] = [];
+    const conversationsByUrn = new Map(
+      conversationResult.conversations.map((conversation) => [conversation.entityURN, conversation]),
+    );
+
+    for (const removedUrn of conversationResult.removedConversationURNs) {
+      rawEvents.push(
+        ...buildLinkedInConversationRemovalEvents({
+          accountKey,
+          conversationUrn: removedUrn,
+          observedAt: observedBase,
+          reason: "deleted",
+          conversation: conversationsByUrn.get(removedUrn) ?? null,
+        }),
+      );
+    }
+
+    for (const conversation of conversationResult.conversations) {
+      const isMember = userIsConversationMember(conversation, userEntityUrn);
+      const shouldRemove =
+        isSpamConversation(conversation) || !hasInboxCategory(conversation) || !isMember;
+      if (shouldRemove) {
+        rawEvents.push(
+          ...buildLinkedInConversationRemovalEvents({
+            accountKey,
+            conversationUrn: conversation.entityURN,
+            observedAt: observedBase,
+            reason: isSpamConversation(conversation) ? "spam" : !isMember ? "removed" : "archived",
+            conversation,
+          }),
+        );
         continue;
       }
-      if (message.messageBodyRenderFormat === "SYSTEM") {
-        rawEvents.push(buildLinkedInSystemTimelineEvent(accountKey, message, observedBase));
-        continue;
+      validConversations.push(conversation);
+    }
+
+    const conversationMessages = await mapWithConcurrency(
+      validConversations,
+      fetchConcurrency,
+      async (conversation) => ({
+        conversation,
+        messages: await listMessagesForConversation(client, conversation, cutoffMs, incremental),
+      }),
+    );
+
+    for (const { conversation, messages } of conversationMessages) {
+      const conversationKey = conversationSourceKey(conversation.entityURN);
+      if (!seenConversationKeys.has(conversationKey)) {
+        seenConversationKeys.add(conversationKey);
+        rawEvents.push(
+          buildLinkedInConversationEvent(accountKey, conversation, userEntityUrn, observedBase),
+        );
       }
 
-      const event = buildLinkedInMessageEvent({
-        accountKey,
-        message,
-        fallbackConversationUrn: conversation.entityURN,
-        userEntityUrn,
-        observedAt: observedBase,
-      });
-      if (!seenMessageIds.has(event.id)) {
-        seenMessageIds.add(event.id);
+      for (const participant of conversation.conversationParticipants) {
+        const normalizedParticipantUrn = normalizeMemberUrn(participant.entityURN);
+        if (normalizedParticipantUrn === userEntityUrn) {
+          continue;
+        }
+        const event = buildParticipantContactEvent(accountKey, participant, observedBase);
+        if (seenContactIds.has(event.id)) {
+          continue;
+        }
+        seenContactIds.add(event.id);
         rawEvents.push(event);
       }
 
-      rawEvents.push(
-        ...(await buildReactionEventsForMessage({
-          client,
+      for (const message of messages) {
+        if (!message.entityURN) {
+          continue;
+        }
+        if (message.messageBodyRenderFormat === "SYSTEM") {
+          rawEvents.push(buildLinkedInSystemTimelineEvent(accountKey, message, observedBase));
+          continue;
+        }
+
+        const event = buildLinkedInMessageEvent({
           accountKey,
           message,
-          conversationUrn: message.conversationURN || conversation.entityURN,
+          fallbackConversationUrn: conversation.entityURN,
+          userEntityUrn,
           observedAt: observedBase,
-          seenContactIds,
-        })),
-      );
-    }
-  }
+        });
+        if (!seenMessageIds.has(event.id)) {
+          seenMessageIds.add(event.id);
+          rawEvents.push(event);
+        }
 
-  return {
-    sourceAccounts,
-    rawEvents,
-    sourceCursor: {
-      lastSyncAt: observedBase,
-      syncToken: conversationResult.syncToken,
-      userEntityUrn,
-    },
-    syncMode: incremental ? "incremental" : "full",
-  };
+        rawEvents.push(
+          ...(await buildReactionEventsForMessage({
+            db,
+            client,
+            accountKey,
+            message,
+            conversationUrn: message.conversationURN || conversation.entityURN,
+            observedAt: observedBase,
+            seenContactIds,
+          })),
+        );
+      }
+    }
+
+    return {
+      sourceAccounts,
+      rawEvents,
+      sourceCursor: {
+        lastSyncAt: observedBase,
+        syncToken: conversationResult.syncToken,
+        userEntityUrn,
+      },
+      syncMode: incremental ? "incremental" : "full",
+    };
+  } finally {
+    db.close();
+  }
 }
