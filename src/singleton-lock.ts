@@ -3,7 +3,6 @@ import {
   existsSync,
   fstatSync,
   fsyncSync,
-  ftruncateSync,
   openSync,
   readFileSync,
   rmSync,
@@ -14,6 +13,8 @@ import process from "node:process";
 
 export const SINGLETON_LOCK_HEARTBEAT_MS = 5_000;
 export const SINGLETON_LOCK_STALE_MS = 15_000;
+const SINGLETON_LOCK_SLOT_BYTES = 1_024;
+const SINGLETON_LOCK_SLOT_COUNT = 2;
 
 export type SingletonLockMetadata = {
   kind: string;
@@ -63,25 +64,7 @@ export function readSingletonLock(path: string): SingletonLockMetadata | null {
   }
 
   try {
-    const raw = JSON.parse(readFileSync(path, "utf8")) as Partial<SingletonLockMetadata>;
-    if (
-      typeof raw.kind !== "string" ||
-      typeof raw.pid !== "number" ||
-      typeof raw.startedAt !== "number" ||
-      typeof raw.updatedAt !== "number"
-    ) {
-      return null;
-    }
-    return {
-      kind: raw.kind,
-      pid: raw.pid,
-      startedAt: raw.startedAt,
-      updatedAt: raw.updatedAt,
-      version:
-        raw.version === undefined || raw.version === null || typeof raw.version === "string"
-          ? (raw.version ?? null)
-          : null,
-    };
+    return parseSingletonLockContents(readFileSync(path));
   } catch {
     return null;
   }
@@ -108,8 +91,14 @@ export async function acquireSingletonLock(
   const tryAcquire = (): SingletonLockLease => {
     const metadata = buildMetadata();
     const fd = openSync(options.path, "wx", 0o600);
-    writeLockFile(fd, metadata);
-    return createLease(options.path, fd, metadata, now);
+    try {
+      initializeLockFile(fd, metadata);
+      return createLease(options.path, fd, metadata, now);
+    } catch (error) {
+      closeQuietly(fd);
+      rmSync(options.path, { force: true });
+      throw error;
+    }
   };
 
   try {
@@ -153,6 +142,7 @@ function createLease(
 ): SingletonLockLease {
   let released = false;
   let ownedFd: number | null = fd;
+  let activeSlot = SINGLETON_LOCK_SLOT_COUNT - 1;
   let current = metadata;
 
   const stillOwnsPath = (): boolean => {
@@ -187,7 +177,9 @@ function createLease(
         ...current,
         updatedAt: now(),
       };
-      writeLockFile(ownedFd, current);
+      const nextSlot = (activeSlot + 1) % SINGLETON_LOCK_SLOT_COUNT;
+      writeLockFile(ownedFd, current, nextSlot);
+      activeSlot = nextSlot;
     },
     release() {
       if (released) {
@@ -206,10 +198,86 @@ function createLease(
   };
 }
 
-function writeLockFile(fd: number, metadata: SingletonLockMetadata): void {
-  ftruncateSync(fd, 0);
-  writeSync(fd, `${JSON.stringify(metadata)}\n`, 0, "utf8");
+function initializeLockFile(fd: number, metadata: SingletonLockMetadata): void {
+  for (let slot = 0; slot < SINGLETON_LOCK_SLOT_COUNT; slot += 1) {
+    writeLockSlot(fd, metadata, slot);
+  }
   fsyncSync(fd);
+}
+
+function writeLockFile(fd: number, metadata: SingletonLockMetadata, slot: number): void {
+  writeLockSlot(fd, metadata, slot);
+  fsyncSync(fd);
+}
+
+function writeLockSlot(fd: number, metadata: SingletonLockMetadata, slot: number): void {
+  const payload = Buffer.from(`${JSON.stringify(metadata)}\n`, "utf8");
+  if (payload.length > SINGLETON_LOCK_SLOT_BYTES) {
+    throw new Error(`Singleton lock metadata exceeds ${SINGLETON_LOCK_SLOT_BYTES} bytes`);
+  }
+
+  const buffer = Buffer.alloc(SINGLETON_LOCK_SLOT_BYTES);
+  payload.copy(buffer);
+  writeAllSync(fd, buffer, slot * SINGLETON_LOCK_SLOT_BYTES);
+}
+
+function writeAllSync(fd: number, buffer: Buffer, position: number): void {
+  let offset = 0;
+  while (offset < buffer.length) {
+    offset += writeSync(fd, buffer, offset, buffer.length - offset, position + offset);
+  }
+}
+
+function parseSingletonLockContents(contents: Buffer): SingletonLockMetadata | null {
+  const slotCount = Math.max(1, Math.ceil(contents.length / SINGLETON_LOCK_SLOT_BYTES));
+  let latest: SingletonLockMetadata | null = null;
+  for (let slot = 0; slot < slotCount; slot += 1) {
+    const start = slot * SINGLETON_LOCK_SLOT_BYTES;
+    const candidate = parseSingletonLockChunk(
+      contents.subarray(start, start + SINGLETON_LOCK_SLOT_BYTES),
+    );
+    if (candidate !== null && (latest === null || candidate.updatedAt > latest.updatedAt)) {
+      latest = candidate;
+    }
+  }
+  return latest;
+}
+
+function parseSingletonLockChunk(chunk: Buffer): SingletonLockMetadata | null {
+  const nullByte = chunk.indexOf(0);
+  const end = nullByte >= 0 ? nullByte : chunk.length;
+  return parseSingletonLockMetadata(chunk.subarray(0, end).toString("utf8"));
+}
+
+function parseSingletonLockMetadata(rawText: string): SingletonLockMetadata | null {
+  try {
+    const firstLine = rawText.split("\n", 1)[0]?.trim();
+    if (!firstLine) {
+      return null;
+    }
+
+    const raw = JSON.parse(firstLine) as Partial<SingletonLockMetadata>;
+    if (
+      typeof raw.kind !== "string" ||
+      typeof raw.pid !== "number" ||
+      typeof raw.startedAt !== "number" ||
+      typeof raw.updatedAt !== "number"
+    ) {
+      return null;
+    }
+    return {
+      kind: raw.kind,
+      pid: raw.pid,
+      startedAt: raw.startedAt,
+      updatedAt: raw.updatedAt,
+      version:
+        raw.version === undefined || raw.version === null || typeof raw.version === "string"
+          ? (raw.version ?? null)
+          : null,
+    };
+  } catch {
+    return null;
+  }
 }
 
 function isAlreadyExistsError(error: unknown): error is NodeJS.ErrnoException {
