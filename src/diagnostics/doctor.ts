@@ -12,13 +12,13 @@ import {
   readSignalLinkedAccount,
   resolveSignalCliPath,
 } from "../integrations/signal-cli.js";
+import { buildWhatsAppDiagnostics } from "../integrations/whatsapp-diagnostics.js";
 import {
   getWhatsAppStoreDir,
   inspectWhatsAppHelper,
   readWhatsAppHelperStatus,
 } from "../integrations/whatsapp-helper.js";
 import type { WhatsAppRealtimeStatus } from "../integrations/whatsapp-realtime.js";
-import { buildWhatsAppDiagnostics } from "../integrations/whatsapp-diagnostics.js";
 import { resolveMacOSNativeBinary } from "../workers/native-binary.js";
 
 export interface DoctorCheck {
