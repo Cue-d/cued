@@ -23,7 +23,7 @@ function topicName(topic: string | undefined): string | null {
     return null;
   }
   const parts = topic.split(":");
-  return parts.length >= 3 ? parts[2] ?? null : topic;
+  return parts.length >= 3 ? (parts[2] ?? null) : topic;
 }
 
 function pushUniqueContactEvent(
@@ -58,7 +58,9 @@ function pushConversationContext(
     }
     pushUniqueContactEvent(rawEvents, seenContactIds, accountKey, observedAt, participant);
   }
-  rawEvents.push(buildLinkedInConversationEvent(accountKey, conversation, userEntityUrn, observedAt));
+  rawEvents.push(
+    buildLinkedInConversationEvent(accountKey, conversation, userEntityUrn, observedAt),
+  );
 }
 
 export function buildLinkedInRawEventsFromRealtimeEnvelope(input: {
@@ -122,7 +124,13 @@ export function buildLinkedInRawEventsFromRealtimeEnvelope(input: {
         observedAt,
         message.conversation,
       );
-      pushUniqueContactEvent(rawEvents, seenContactIds, input.accountKey, observedAt, message.sender);
+      pushUniqueContactEvent(
+        rawEvents,
+        seenContactIds,
+        input.accountKey,
+        observedAt,
+        message.sender,
+      );
       rawEvents.push(
         message.messageBodyRenderFormat === "SYSTEM"
           ? buildLinkedInSystemTimelineEvent(input.accountKey, message, observedAt)
@@ -150,7 +158,13 @@ export function buildLinkedInRawEventsFromRealtimeEnvelope(input: {
         observedAt,
         reaction.message.conversation,
       );
-      pushUniqueContactEvent(rawEvents, seenContactIds, input.accountKey, observedAt, reaction.actor);
+      pushUniqueContactEvent(
+        rawEvents,
+        seenContactIds,
+        input.accountKey,
+        observedAt,
+        reaction.actor,
+      );
       rawEvents.push(
         buildLinkedInReactionEvent({
           accountKey: input.accountKey,

@@ -67,8 +67,8 @@ function invalidatesAuth(response: Response): boolean {
     return true;
   }
 
-  return extractResponseCookies(response).some((cookie) =>
-    /\bli_at=(?:delete me)?\b/i.test(cookie) || /\bli_at=;\b/i.test(cookie),
+  return extractResponseCookies(response).some(
+    (cookie) => /\bli_at=(?:delete me)?\b/i.test(cookie) || /\bli_at=;\b/i.test(cookie),
   );
 }
 
