@@ -20,8 +20,8 @@ import (
 
 	_ "modernc.org/sqlite"
 
-	waProto "go.mau.fi/whatsmeow/binary/proto"
 	"go.mau.fi/whatsmeow"
+	waProto "go.mau.fi/whatsmeow/binary/proto"
 	"go.mau.fi/whatsmeow/proto/waCompanionReg"
 	"go.mau.fi/whatsmeow/proto/waWa6"
 	"go.mau.fi/whatsmeow/store"
@@ -53,32 +53,39 @@ type chatSnapshot struct {
 }
 
 type attachmentSnapshot struct {
-	ID              string                 `json:"id"`
-	Kind            string                 `json:"kind"`
-	Filename        *string                `json:"filename,omitempty"`
-	MimeType        *string                `json:"mime_type,omitempty"`
-	SizeBytes       *int64                 `json:"size_bytes,omitempty"`
-	Text            *string                `json:"text,omitempty"`
-	AccessKind      string                 `json:"access_kind"`
-	AccessRef       map[string]interface{} `json:"access_ref,omitempty"`
-	Availability    string                 `json:"availability_status,omitempty"`
-	ProviderMeta    map[string]interface{} `json:"provider_metadata,omitempty"`
+	ID           string                 `json:"id"`
+	Kind         string                 `json:"kind"`
+	Filename     *string                `json:"filename,omitempty"`
+	MimeType     *string                `json:"mime_type,omitempty"`
+	SizeBytes    *int64                 `json:"size_bytes,omitempty"`
+	Text         *string                `json:"text,omitempty"`
+	AccessKind   string                 `json:"access_kind"`
+	AccessRef    map[string]interface{} `json:"access_ref,omitempty"`
+	Availability string                 `json:"availability_status,omitempty"`
+	ProviderMeta map[string]interface{} `json:"provider_metadata,omitempty"`
 }
 
 type messageSnapshot struct {
-	MessageID      string  `json:"messageID"`
-	ChatJID        string  `json:"chatJID"`
-	SenderJID      *string `json:"senderJID,omitempty"`
-	ParticipantJID *string `json:"participantJID,omitempty"`
-	FromMe         bool    `json:"fromMe"`
-	Timestamp      int64   `json:"timestamp"`
-	Text           string  `json:"text"`
-	PushName       *string `json:"pushName,omitempty"`
-	Status         *string `json:"status,omitempty"`
-	DeliveredAt    *int64  `json:"deliveredAt,omitempty"`
-	ReadAt         *int64  `json:"readAt,omitempty"`
-	MessageProto   *string `json:"messageProtoBase64,omitempty"`
+	MessageID      string               `json:"messageID"`
+	ChatJID        string               `json:"chatJID"`
+	SenderJID      *string              `json:"senderJID,omitempty"`
+	ParticipantJID *string              `json:"participantJID,omitempty"`
+	FromMe         bool                 `json:"fromMe"`
+	Timestamp      int64                `json:"timestamp"`
+	Text           string               `json:"text"`
+	PushName       *string              `json:"pushName,omitempty"`
+	Status         *string              `json:"status,omitempty"`
+	DeliveredAt    *int64               `json:"deliveredAt,omitempty"`
+	ReadAt         *int64               `json:"readAt,omitempty"`
+	MessageProto   *string              `json:"messageProtoBase64,omitempty"`
 	Attachments    []attachmentSnapshot `json:"attachments,omitempty"`
+}
+
+type downloadableMessageSnapshot struct {
+	MessageID    string               `json:"messageID"`
+	ChatJID      string               `json:"chatJID"`
+	MessageProto *string              `json:"messageProtoBase64,omitempty"`
+	Attachments  []attachmentSnapshot `json:"attachments,omitempty"`
 }
 
 type receiptSnapshot struct {
@@ -122,10 +129,12 @@ type helperState struct {
 	storeDir     string
 	metadataPath string
 	snapshotPath string
+	mediaPath    string
 
 	mu       sync.Mutex
 	metadata helperMetadata
 	snapshot stateSnapshot
+	media    []downloadableMessageSnapshot
 }
 
 func newHelperState(storeDir string) (*helperState, error) {
@@ -136,6 +145,7 @@ func newHelperState(storeDir string) (*helperState, error) {
 		storeDir:     storeDir,
 		metadataPath: filepath.Join(storeDir, "metadata.json"),
 		snapshotPath: filepath.Join(storeDir, "snapshot.json"),
+		mediaPath:    filepath.Join(storeDir, "media.json"),
 	}
 	state.load()
 	return state, nil
@@ -146,6 +156,7 @@ func (s *helperState) load() {
 	defer s.mu.Unlock()
 	readJSONFile(s.metadataPath, &s.metadata)
 	readJSONFile(s.snapshotPath, &s.snapshot)
+	readJSONFile(s.mediaPath, &s.media)
 }
 
 func (s *helperState) setMetadata(metadata helperMetadata) {
@@ -212,7 +223,32 @@ func (s *helperState) setMessage(message messageSnapshot) {
 	if len(s.snapshot.Messages) > 5000 {
 		s.snapshot.Messages = s.snapshot.Messages[len(s.snapshot.Messages)-5000:]
 	}
+	s.upsertDownloadableMessageLocked(message)
 	_ = writeJSONFileAtomic(s.snapshotPath, s.snapshot)
+}
+
+func (s *helperState) upsertDownloadableMessageLocked(message messageSnapshot) {
+	if message.MessageProto == nil || strings.TrimSpace(*message.MessageProto) == "" || len(message.Attachments) == 0 {
+		return
+	}
+	entry := downloadableMessageSnapshot{
+		MessageID:    message.MessageID,
+		ChatJID:      message.ChatJID,
+		MessageProto: message.MessageProto,
+		Attachments:  message.Attachments,
+	}
+	replaced := false
+	for idx, existing := range s.media {
+		if normalizeJID(existing.ChatJID) == normalizeJID(message.ChatJID) && existing.MessageID == message.MessageID {
+			s.media[idx] = entry
+			replaced = true
+			break
+		}
+	}
+	if !replaced {
+		s.media = append(s.media, entry)
+	}
+	_ = writeJSONFileAtomic(s.mediaPath, s.media)
 }
 
 func (s *helperState) applyReceipt(receipt receiptSnapshot) {
@@ -251,6 +287,16 @@ func (s *helperState) findMessage(chatJID string, messageID string) *messageSnap
 		if normalizeJID(message.ChatJID) == normalizedChat && message.MessageID == messageID {
 			copy := message
 			return &copy
+		}
+	}
+	for _, message := range s.media {
+		if normalizeJID(message.ChatJID) == normalizedChat && message.MessageID == messageID {
+			return &messageSnapshot{
+				MessageID:    message.MessageID,
+				ChatJID:      message.ChatJID,
+				MessageProto: message.MessageProto,
+				Attachments:  message.Attachments,
+			}
 		}
 	}
 	return nil
@@ -580,13 +626,13 @@ func (r *helperRuntime) sendText(ctx context.Context, target string, text string
 	messageID := resp.ID
 	timestamp := time.Now().UnixMilli()
 	snapshot := messageSnapshot{
-		MessageID: messageID,
-		ChatJID:   chatJID,
-		SenderJID: stringPtr(jidString(r.client.Store.ID)),
-		FromMe:    true,
-		Timestamp: timestamp,
-		Text:      text,
-		Status:    stringPtr("sent"),
+		MessageID:   messageID,
+		ChatJID:     chatJID,
+		SenderJID:   stringPtr(jidString(r.client.Store.ID)),
+		FromMe:      true,
+		Timestamp:   timestamp,
+		Text:        text,
+		Status:      stringPtr("sent"),
 		Attachments: []attachmentSnapshot{},
 	}
 	r.state.setMessage(snapshot)
