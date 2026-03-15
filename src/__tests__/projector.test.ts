@@ -1080,4 +1080,183 @@ describe("projector", () => {
 
     db.close();
   });
+
+  it("preserves deleted conversations locally while marking participants inactive", () => {
+    const db = createDb();
+
+    db.insertRawEvent({
+      id: "contact-ava-delete",
+      platform: "linkedin",
+      accountKey: "default",
+      entityKind: "contact",
+      eventKind: "observed",
+      observedAt: 1,
+      dedupeKey: "contact-ava-delete",
+      payload: {
+        sourceEntityKey: "linkedin:urn:li:member:ACoAAA1",
+        fields: { display_name: "Ava Chen" },
+        handles: [],
+      },
+      sourceVersion: "test-v1",
+    });
+    db.insertRawEvent({
+      id: "conversation-delete-observed",
+      platform: "linkedin",
+      accountKey: "default",
+      entityKind: "conversation",
+      eventKind: "observed",
+      observedAt: 2,
+      dedupeKey: "conversation-delete-observed",
+      payload: {
+        sourceConversationKey: "linkedin:urn:li:fs_conversation:CONV_DELETE",
+        conversationType: "dm",
+        participants: [{ sourceEntityKey: "linkedin:urn:li:member:ACoAAA1" }],
+      },
+      sourceVersion: "test-v1",
+    });
+    db.insertRawEvent({
+      id: "message-delete-observed",
+      platform: "linkedin",
+      accountKey: "default",
+      entityKind: "message",
+      eventKind: "message_created",
+      observedAt: 3,
+      dedupeKey: "message-delete-observed",
+      payload: {
+        sourceMessageKey: "linkedin:urn:li:fsd_message:MSG_DELETE",
+        sourceConversationKey: "linkedin:urn:li:fs_conversation:CONV_DELETE",
+        senderSourceKey: "linkedin:urn:li:member:ACoAAA1",
+        sentAt: 3,
+        content: "preserve me",
+        isFromMe: false,
+      },
+      sourceVersion: "test-v1",
+    });
+    db.insertRawEvent({
+      id: "conversation-delete-removed",
+      platform: "linkedin",
+      accountKey: "default",
+      entityKind: "conversation",
+      eventKind: "removed",
+      observedAt: 4,
+      dedupeKey: "conversation-delete-removed",
+      payload: {
+        sourceConversationKey: "linkedin:urn:li:fs_conversation:CONV_DELETE",
+        conversationType: "dm",
+        subtype: "deleted",
+        unreadCount: 0,
+        participants: [{ sourceEntityKey: "linkedin:urn:li:member:ACoAAA1" }],
+      },
+      sourceVersion: "test-v1",
+    });
+
+    projectPendingRawEvents(db);
+
+    const conversationRow = db.orm().get<{
+      subtype: string | null;
+      unread_count: number;
+    }>(sql`
+      SELECT subtype, unread_count
+      FROM conversations
+      WHERE source_conversation_key = 'linkedin:urn:li:fs_conversation:CONV_DELETE'
+    `);
+    const participantRow = db.orm().get<{
+      is_active: number;
+      left_at: number | null;
+    }>(sql`
+      SELECT is_active, left_at
+      FROM conversation_participants
+      LIMIT 1
+    `);
+    const messageCount = db.orm().get<{ count: number }>(sql`
+      SELECT COUNT(*) AS count
+      FROM messages
+      WHERE platform_message_id = 'linkedin:urn:li:fsd_message:MSG_DELETE'
+    `);
+
+    expect(conversationRow).toEqual({
+      subtype: "deleted",
+      unread_count: 0,
+    });
+    expect(participantRow).toEqual({
+      is_active: 0,
+      left_at: 4,
+    });
+    expect(messageCount?.count).toBe(1);
+
+    db.close();
+  });
+
+  it("updates reaction counts on realtime projection", () => {
+    const db = createDb();
+
+    const insertResult = db.insertRawEvents([
+      {
+        id: "conversation-realtime-reaction",
+        platform: "linkedin",
+        accountKey: "default",
+        entityKind: "conversation",
+        eventKind: "observed",
+        observedAt: 1,
+        dedupeKey: "conversation-realtime-reaction",
+        payload: {
+          sourceConversationKey: "linkedin:urn:li:fs_conversation:CONV_REACTION",
+          conversationType: "dm",
+          participants: [],
+        },
+        sourceVersion: "test-v1",
+      },
+      {
+        id: "message-realtime-reaction",
+        platform: "linkedin",
+        accountKey: "default",
+        entityKind: "message",
+        eventKind: "message_created",
+        observedAt: 2,
+        dedupeKey: "message-realtime-reaction",
+        payload: {
+          sourceMessageKey: "linkedin:urn:li:fsd_message:MSG_REACTION",
+          sourceConversationKey: "linkedin:urn:li:fs_conversation:CONV_REACTION",
+          senderSourceKey: "linkedin:urn:li:member:ACoAAA1",
+          sentAt: 2,
+          content: "react to this",
+          isFromMe: false,
+        },
+        sourceVersion: "test-v1",
+      },
+      {
+        id: "reaction-realtime-reaction",
+        platform: "linkedin",
+        accountKey: "default",
+        entityKind: "reaction",
+        eventKind: "reaction_added",
+        observedAt: 3,
+        dedupeKey: "reaction-realtime-reaction",
+        payload: {
+          sourceMessageKey: "linkedin:urn:li:fsd_message:MSG_REACTION",
+          sourceConversationKey: "linkedin:urn:li:fs_conversation:CONV_REACTION",
+          reactorSourceKey: "linkedin:urn:li:member:ACoAAA1",
+          emoji: "👍",
+          timestamp: 3,
+          isActive: true,
+        },
+        sourceVersion: "test-v1",
+      },
+    ]);
+
+    projectRealtimeRange(db, {
+      startRowId: insertResult.firstInsertedRowId!,
+      endRowId: insertResult.lastInsertedRowId!,
+      batchSize: 10,
+    });
+
+    const messageRow = db.orm().get<{ reaction_count: number }>(sql`
+      SELECT reaction_count
+      FROM messages
+      WHERE platform_message_id = 'linkedin:urn:li:fsd_message:MSG_REACTION'
+    `);
+    expect(messageRow?.reaction_count).toBe(1);
+
+    db.close();
+  });
 });

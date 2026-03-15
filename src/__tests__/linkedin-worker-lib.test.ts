@@ -101,6 +101,12 @@ describe("buildLinkedInSyncBundle", () => {
         async getMessagesBefore() {
           return { messages: [], metadata: { count: 0, total: 0 } };
         },
+        async getMessagesWithPrevCursor() {
+          return { messages: [], metadata: { count: 0, total: 0 }, prevCursor: null };
+        },
+        async getReactors() {
+          return [];
+        },
       },
     });
 
@@ -128,5 +134,204 @@ describe("buildLinkedInSyncBundle", () => {
         isFromMe: false,
       }),
     );
+  });
+
+  it("emits removal, system, reply, attachment, and reaction events", async () => {
+    const bundle = await buildLinkedInSyncBundle({
+      accountKey: "default",
+      client: {
+        async fetchSelf() {
+          return "urn:li:fsd_profile:SELF123";
+        },
+        async getConnections() {
+          return { connections: [] };
+        },
+        async getConversations() {
+          return {
+            conversations: [
+              {
+                title: "Ava Chen",
+                entityURN: "urn:li:fsd_conversation:CONV_ACTIVE",
+                lastActivityAt: 1_700_000_100_000,
+                lastReadAt: 1_700_000_100_000,
+                groupChat: false,
+                read: true,
+                categories: ["PRIMARY_INBOX"],
+                unreadCount: 0,
+                conversationParticipants: [
+                  {
+                    entityURN: "urn:li:fsd_profile:SELF123",
+                    participantType: { member: { firstName: "Theo", lastName: "Tarr", profileUrl: "" } },
+                  },
+                  {
+                    entityURN: "urn:li:fsd_profile:ACoAAA1",
+                    participantType: {
+                      member: {
+                        firstName: "Ava",
+                        lastName: "Chen",
+                        profileUrl: "https://www.linkedin.com/in/ava-chen",
+                      },
+                    },
+                  },
+                ],
+              },
+              {
+                title: "Spam Chat",
+                entityURN: "urn:li:fsd_conversation:CONV_SPAM",
+                lastActivityAt: 1_700_000_200_000,
+                lastReadAt: 1_700_000_200_000,
+                groupChat: false,
+                read: true,
+                categories: ["SPAM"],
+                unreadCount: 0,
+                conversationParticipants: [],
+              },
+            ],
+            deletedConversationURNs: ["urn:li:fsd_conversation:CONV_DELETED"],
+            syncToken: "sync-token-2",
+          };
+        },
+        async getConversationsBefore() {
+          return { conversations: [] };
+        },
+        async getMessages() {
+          return {
+            messages: [
+              {
+                entityURN: "urn:li:fsd_message:MSG_REPLY",
+                body: { text: "Here is the spec" },
+                deliveredAt: 1_700_000_100_000,
+                sender: {
+                  entityURN: "urn:li:fsd_profile:ACoAAA1",
+                  participantType: {
+                    member: {
+                      firstName: "Ava",
+                      lastName: "Chen",
+                      profileUrl: "https://www.linkedin.com/in/ava-chen",
+                    },
+                  },
+                },
+                messageBodyRenderFormat: "EDITED" as const,
+                renderContent: [
+                  {
+                    repliedMessageContent: {
+                      originalMessage: {
+                        entityUrn: "urn:li:fsd_message:MSG_PARENT",
+                      },
+                    },
+                  },
+                  {
+                    file: {
+                      assetUrn: "asset-1",
+                      name: "spec.pdf",
+                      mediaType: "application/pdf",
+                      byteSize: 1234,
+                      url: "https://cdn.example.com/spec.pdf",
+                    },
+                  },
+                ],
+                reactionSummaries: [
+                  {
+                    emoji: "👍",
+                    count: 1,
+                    viewerReacted: false,
+                    firstReactedAt: 1_700_000_100_100,
+                  },
+                ],
+                conversationURN: "urn:li:fsd_conversation:CONV_ACTIVE",
+              },
+              {
+                entityURN: "urn:li:fsd_message:MSG_SYSTEM",
+                body: { text: "Ava renamed the conversation" },
+                deliveredAt: 1_700_000_100_200,
+                sender: {
+                  entityURN: "urn:li:fsd_profile:ACoAAA1",
+                  participantType: {
+                    member: {
+                      firstName: "Ava",
+                      lastName: "Chen",
+                      profileUrl: "https://www.linkedin.com/in/ava-chen",
+                    },
+                  },
+                },
+                messageBodyRenderFormat: "SYSTEM" as const,
+                renderContent: [],
+                reactionSummaries: [],
+                conversationURN: "urn:li:fsd_conversation:CONV_ACTIVE",
+              },
+            ],
+            prevCursor: null,
+          };
+        },
+        async getMessagesBefore() {
+          return { messages: [], prevCursor: null };
+        },
+        async getMessagesWithPrevCursor() {
+          return { messages: [], prevCursor: null };
+        },
+        async getReactors() {
+          return [
+            {
+              entityURN: "urn:li:fsd_profile:ACoAAA1",
+              participantType: {
+                member: {
+                  firstName: "Ava",
+                  lastName: "Chen",
+                  profileUrl: "https://www.linkedin.com/in/ava-chen",
+                },
+              },
+            },
+          ];
+        },
+      },
+    });
+
+    expect(
+      bundle.rawEvents.some(
+        (event) => event.entityKind === "conversation" && event.eventKind === "removed",
+      ),
+    ).toBe(true);
+    expect(
+      bundle.rawEvents.some(
+        (event) =>
+          event.entityKind === "timeline_event" &&
+          event.eventKind === "linkedin_conversation_removed",
+      ),
+    ).toBe(true);
+
+    const messageEvent = bundle.rawEvents.find(
+      (event) => event.entityKind === "message" && event.externalEntityId === "urn:li:fsd_message:MSG_REPLY",
+    );
+    expect(messageEvent?.payload).toEqual(
+      expect.objectContaining({
+        replyToSourceMessageKey: "linkedin:urn:li:fsd_message:MSG_PARENT",
+        isEdited: true,
+        attachments: [
+          expect.objectContaining({
+            kind: "file",
+            filename: "spec.pdf",
+            mime_type: "application/pdf",
+            remote_url: "https://cdn.example.com/spec.pdf",
+          }),
+        ],
+      }),
+    );
+
+    expect(
+      bundle.rawEvents.find(
+        (event) =>
+          event.entityKind === "timeline_event" &&
+          event.eventKind === "linkedin_system_message",
+      ),
+    ).toBeTruthy();
+
+    expect(
+      bundle.rawEvents.find(
+        (event) =>
+          event.entityKind === "reaction" &&
+          event.payload &&
+          (event.payload as { emoji?: string }).emoji === "👍",
+      ),
+    ).toBeTruthy();
   });
 });
