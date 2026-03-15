@@ -11,6 +11,7 @@ import {
 import { homedir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { terminateCompetingDaemons } from "./competing-daemons.js";
 
 const APP_NAME = "Cued.app";
 const APP_EXECUTABLE_NAME = "CuedDaemon";
@@ -182,6 +183,9 @@ export function installMacOSAppFromSource(
   cliSymlinkPath: string;
 } {
   const installedAppPath = destinationPath ?? getDefaultInstallAppPath();
+  terminateCompetingDaemons({
+    expectedExecutablePath: appExecutablePath(installedAppPath),
+  });
   const sameBundle =
     existsSync(sourcePath) &&
     existsSync(installedAppPath) &&
@@ -240,6 +244,13 @@ export function bootstrapLaunchAgent(): { plistPath: string; bootstrapped: boole
     return { plistPath, bootstrapped: false };
   }
 
+  const installedAppPath = resolveInstalledAppPath();
+  if (installedAppPath) {
+    terminateCompetingDaemons({
+      expectedExecutablePath: appExecutablePath(installedAppPath),
+    });
+  }
+
   try {
     execFileSync("launchctl", ["bootstrap", `gui/${currentUid()}`, plistPath], { stdio: "ignore" });
     return { plistPath, bootstrapped: true };
@@ -253,6 +264,9 @@ export function installLaunchAgent(appPath?: string): { plistPath: string; appPa
   if (!resolvedAppPath) {
     throw new Error("Cued.app is not installed. Run `cued install` first.");
   }
+  terminateCompetingDaemons({
+    expectedExecutablePath: appExecutablePath(resolvedAppPath),
+  });
 
   const plistPath = launchAgentPath();
   mkdirSync(dirname(plistPath), { recursive: true });
