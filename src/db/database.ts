@@ -588,6 +588,8 @@ export class CuedDatabase {
     sync_mode: SyncMode;
     raw_ingest_watermark: number;
     projection_watermark: number;
+    last_success_at: number | null;
+    last_error_summary: string | null;
   } | null {
     return (
       (this.db
@@ -596,6 +598,8 @@ export class CuedDatabase {
           sync_mode: syncCheckpoints.syncMode,
           raw_ingest_watermark: syncCheckpoints.rawIngestWatermark,
           projection_watermark: syncCheckpoints.projectionWatermark,
+          last_success_at: syncCheckpoints.lastSuccessAt,
+          last_error_summary: syncCheckpoints.lastErrorSummary,
         })
         .from(syncCheckpoints)
         .where(
@@ -607,6 +611,8 @@ export class CuedDatabase {
             sync_mode: SyncMode;
             raw_ingest_watermark: number;
             projection_watermark: number;
+            last_success_at: number | null;
+            last_error_summary: string | null;
           }
         | undefined) ?? null
     );
@@ -1933,6 +1939,14 @@ export class CuedDatabase {
 
   failRun(runId: string, errorMessage: string, details?: unknown): void {
     this.db.transaction((tx) => {
+      const run = tx
+        .select({
+          platform: syncRuns.platform,
+          accountKey: syncRuns.accountKey,
+        })
+        .from(syncRuns)
+        .where(eq(syncRuns.id, runId))
+        .get();
       const values: {
         status: SyncRunStatus;
         finishedAt: number;
@@ -1955,12 +1969,46 @@ export class CuedDatabase {
         .values({
           id: randomUUID(),
           syncRunId: runId,
+          platform: run?.platform ?? null,
+          accountKey: run?.accountKey ?? null,
           errorMessage,
           detailsJson: safeStringifyJson(details),
           createdAt: now(),
         })
         .run();
     });
+  }
+
+  getLatestSyncRunError(
+    platform: Platform,
+    accountKey: string,
+  ): {
+    sync_run_id: string;
+    error_message: string;
+    created_at: number;
+    details_json: string | null;
+  } | null {
+    return (
+      (this.db
+        .select({
+          sync_run_id: syncRunErrors.syncRunId,
+          error_message: syncRunErrors.errorMessage,
+          created_at: syncRunErrors.createdAt,
+          details_json: syncRunErrors.detailsJson,
+        })
+        .from(syncRunErrors)
+        .where(and(eq(syncRunErrors.platform, platform), eq(syncRunErrors.accountKey, accountKey)))
+        .orderBy(desc(syncRunErrors.createdAt))
+        .limit(1)
+        .get() as
+        | {
+            sync_run_id: string;
+            error_message: string;
+            created_at: number;
+            details_json: string | null;
+          }
+        | undefined) ?? null
+    );
   }
 
   upsertSourceAccount(input: {
@@ -2086,6 +2134,20 @@ export class CuedDatabase {
           updatedAt: values.updatedAt,
         },
       })
+      .run();
+  }
+
+  recordCheckpointError(platform: Platform, accountKey: string, errorSummary: string): void {
+    this.db
+      .update(syncCheckpoints)
+      .set({
+        lastErrorAt: now(),
+        lastErrorSummary: errorSummary,
+        updatedAt: now(),
+      })
+      .where(
+        and(eq(syncCheckpoints.platform, platform), eq(syncCheckpoints.accountKey, accountKey)),
+      )
       .run();
   }
 
