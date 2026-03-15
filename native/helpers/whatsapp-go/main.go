@@ -234,9 +234,21 @@ func (s *helperState) setMessage(message messageSnapshot) {
 	s.upsertDownloadableMessageLocked(message)
 }
 
-func (s *helperState) upsertDownloadableMessageLocked(message messageSnapshot) {
+func downloadableMessageSnapshotsEqual(a downloadableMessageSnapshot, b downloadableMessageSnapshot) bool {
+	aJSON, err := json.Marshal(a)
+	if err != nil {
+		return false
+	}
+	bJSON, err := json.Marshal(b)
+	if err != nil {
+		return false
+	}
+	return string(aJSON) == string(bJSON)
+}
+
+func (s *helperState) upsertDownloadableMessageInMemoryLocked(message messageSnapshot) bool {
 	if message.MessageProto == nil || strings.TrimSpace(*message.MessageProto) == "" || len(message.Attachments) == 0 {
-		return
+		return false
 	}
 	entry := downloadableMessageSnapshot{
 		MessageID:    message.MessageID,
@@ -247,6 +259,9 @@ func (s *helperState) upsertDownloadableMessageLocked(message messageSnapshot) {
 	replaced := false
 	for idx, existing := range s.media {
 		if normalizeJID(existing.ChatJID) == normalizeJID(message.ChatJID) && existing.MessageID == message.MessageID {
+			if downloadableMessageSnapshotsEqual(existing, entry) {
+				return false
+			}
 			s.media[idx] = entry
 			replaced = true
 			break
@@ -254,6 +269,13 @@ func (s *helperState) upsertDownloadableMessageLocked(message messageSnapshot) {
 	}
 	if !replaced {
 		s.media = append(s.media, entry)
+	}
+	return true
+}
+
+func (s *helperState) upsertDownloadableMessageLocked(message messageSnapshot) {
+	if !s.upsertDownloadableMessageInMemoryLocked(message) {
+		return
 	}
 	_ = writeJSONFileAtomic(s.mediaPath, s.media)
 }
@@ -280,8 +302,12 @@ func (s *helperState) applySnapshot(snapshot stateSnapshot) error {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	mediaChanged := false
 	for _, message := range snapshot.Messages {
-		s.upsertDownloadableMessageLocked(message)
+		mediaChanged = s.upsertDownloadableMessageInMemoryLocked(message) || mediaChanged
+	}
+	if mediaChanged {
+		_ = writeJSONFileAtomic(s.mediaPath, s.media)
 	}
 	return nil
 }
@@ -1893,6 +1919,7 @@ func historyMessageSnapshot(
 	if fromMe {
 		status = "sent"
 	}
+	attachments, messageProto := attachmentsFromMessage(webMsg.GetKey().GetID(), normalizedChatJID, webMsg.GetMessage())
 
 	return messageSnapshot{
 		MessageID:      webMsg.GetKey().GetID(),
@@ -1904,6 +1931,8 @@ func historyMessageSnapshot(
 		Text:           extractText(webMsg.GetMessage()),
 		PushName:       emptyToNil(webMsg.GetPushName()),
 		Status:         stringPtr(status),
+		MessageProto:   messageProto,
+		Attachments:    attachments,
 	}, true
 }
 

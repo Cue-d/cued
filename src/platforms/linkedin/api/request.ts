@@ -214,7 +214,7 @@ class AuthedRequest {
 }
 
 export function linkedInEncode(value: string): string {
-  return encodeURIComponent(value).replaceAll("%3A", ":");
+  return encodeURIComponent(value);
 }
 
 function queriesToString(variables: Record<string, string>): string {
