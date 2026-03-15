@@ -1,5 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
-import { LinkedInRealtimeSession } from "../integrations/linkedin-realtime.js";
+import {
+  LinkedInRealtimeSession,
+  LinkedInRealtimeSupervisor,
+} from "../integrations/linkedin-realtime.js";
 
 type TestableRealtimeSession = {
   userEntityUrn: string | null;
@@ -59,5 +62,55 @@ describe("LinkedInRealtimeSession", () => {
       "LinkedIn realtime stream closed",
     );
     expect(heartbeatAborted).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("LinkedInRealtimeSupervisor", () => {
+  it("replaces an existing session when auth material changes", () => {
+    const start = vi.fn();
+    const stop = vi.fn();
+    const createSession = vi.fn(() => ({
+      start,
+      stop,
+      getStatus: () => ({
+        platform: "linkedin" as const,
+        accountKey: "default",
+        state: "connected" as const,
+        connectedAt: null,
+        lastEventAt: null,
+        lastReconnectAt: null,
+        reconnectAttempts: 0,
+        lastSessionError: null,
+      }),
+      isConnected: () => true,
+    }));
+
+    const supervisor = new LinkedInRealtimeSupervisor({ createSession });
+    const baseInput = {
+      accountKey: "default",
+      cookies: [
+        { name: "li_at", value: "token-a", domain: ".linkedin.com", path: "/" },
+        { name: "JSESSIONID", value: '"ajax:123"', domain: ".linkedin.com", path: "/" },
+      ],
+      pageInstance: "urn:li:page:d_flagship3_messaging_conversation_detail;test",
+      xLiTrack: '{"clientVersion":"1.0.0"}',
+      realtimeQueryMap: '{"q":"a"}',
+      realtimeRecipeMap: '{"r":"a"}',
+    };
+
+    supervisor.reconcile([baseInput], []);
+    supervisor.reconcile(
+      [
+        {
+          ...baseInput,
+          cookies: [{ ...baseInput.cookies[0], value: "token-b" }, baseInput.cookies[1]!],
+        },
+      ],
+      [],
+    );
+
+    expect(createSession).toHaveBeenCalledTimes(2);
+    expect(start).toHaveBeenCalledTimes(2);
+    expect(stop).toHaveBeenCalledTimes(1);
   });
 });
