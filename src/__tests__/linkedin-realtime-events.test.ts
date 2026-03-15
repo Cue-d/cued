@@ -126,4 +126,59 @@ describe("buildLinkedInRawEventsFromRealtimeEnvelope", () => {
     expect(rawEvents.some((event) => event.eventKind === "linkedin_group_read_receipt")).toBe(true);
     expect(rawEvents.some((event) => event.entityKind === "message")).toBe(false);
   });
+
+  it("keeps archived realtime threads removed instead of reactivating them", () => {
+    const rawEvents = buildLinkedInRawEventsFromRealtimeEnvelope({
+      accountKey: "default",
+      userEntityUrn: "urn:li:member:SELF123",
+      envelope: {
+        "com.linkedin.realtimefrontend.DecoratedEvent": {
+          topic: "urn:li-realtime:messagesTopic:123",
+          leftServerAt: 1_700_000_200_000,
+          id: "evt-3",
+          payload: {
+            data: {
+              doDecorateMessageMessengerRealtimeDecoration: {
+                result: {
+                  entityURN: "urn:li:fsd_message:MSG3",
+                  body: { text: "archive me" },
+                  deliveredAt: 1_700_000_200_100,
+                  sender: peerParticipant,
+                  messageBodyRenderFormat: "DEFAULT",
+                  renderContent: [],
+                  reactionSummaries: [],
+                  conversationURN: "urn:li:fsd_conversation:CONV3",
+                  conversation: {
+                    title: "Archived chat",
+                    entityURN: "urn:li:fsd_conversation:CONV3",
+                    lastActivityAt: 1_700_000_200_100,
+                    lastReadAt: 1_700_000_200_100,
+                    groupChat: false,
+                    read: true,
+                    categories: ["ARCHIVED"],
+                    unreadCount: 0,
+                    conversationParticipants: [selfParticipant, peerParticipant],
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+    });
+
+    expect(
+      rawEvents.some(
+        (event) => event.entityKind === "conversation" && event.eventKind === "removed",
+      ),
+    ).toBe(true);
+    expect(rawEvents.some((event) => event.entityKind === "message")).toBe(false);
+    expect(
+      rawEvents.some(
+        (event) =>
+          event.entityKind === "timeline_event" &&
+          event.eventKind === "linkedin_conversation_removed",
+      ),
+    ).toBe(true);
+  });
 });

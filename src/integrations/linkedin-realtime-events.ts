@@ -63,6 +63,35 @@ function pushConversationContext(
   );
 }
 
+function hasInboxCategory(conversation: Conversation): boolean {
+  return (
+    conversation.categories.includes("INBOX") || conversation.categories.includes("PRIMARY_INBOX")
+  );
+}
+
+function isSpamConversation(conversation: Conversation): boolean {
+  return conversation.categories.includes("SPAM");
+}
+
+function userIsConversationMember(conversation: Conversation, userEntityUrn: string): boolean {
+  return conversation.conversationParticipants.some(
+    (participant) => normalizeMemberUrn(participant.entityURN) === userEntityUrn,
+  );
+}
+
+function removalReason(conversation: Conversation, userEntityUrn: string): string | null {
+  if (isSpamConversation(conversation)) {
+    return "spam";
+  }
+  if (!userIsConversationMember(conversation, userEntityUrn)) {
+    return "removed";
+  }
+  if (!hasInboxCategory(conversation)) {
+    return "archived";
+  }
+  return null;
+}
+
 export function buildLinkedInRawEventsFromRealtimeEnvelope(input: {
   accountKey: string;
   userEntityUrn: string;
@@ -87,6 +116,16 @@ export function buildLinkedInRawEventsFromRealtimeEnvelope(input: {
       const conversation = data?.doDecorateConversationMessengerRealtimeDecoration?.result;
       if (!conversation) {
         return [];
+      }
+      const reason = removalReason(conversation, input.userEntityUrn);
+      if (reason) {
+        return buildLinkedInConversationRemovalEvents({
+          accountKey: input.accountKey,
+          conversationUrn: conversation.entityURN,
+          observedAt,
+          reason,
+          conversation,
+        });
       }
       pushConversationContext(
         rawEvents,
@@ -115,6 +154,18 @@ export function buildLinkedInRawEventsFromRealtimeEnvelope(input: {
       const message = data?.doDecorateMessageMessengerRealtimeDecoration?.result;
       if (!message?.entityURN) {
         return [];
+      }
+      const reason = message.conversation
+        ? removalReason(message.conversation, input.userEntityUrn)
+        : null;
+      if (reason) {
+        return buildLinkedInConversationRemovalEvents({
+          accountKey: input.accountKey,
+          conversationUrn: message.conversation?.entityURN || message.conversationURN || "",
+          observedAt,
+          reason,
+          conversation: message.conversation,
+        });
       }
       pushConversationContext(
         rawEvents,
@@ -150,6 +201,19 @@ export function buildLinkedInRawEventsFromRealtimeEnvelope(input: {
       if (!reaction?.message?.entityURN) {
         return [];
       }
+      const reason = reaction.message.conversation
+        ? removalReason(reaction.message.conversation, input.userEntityUrn)
+        : null;
+      if (reason) {
+        return buildLinkedInConversationRemovalEvents({
+          accountKey: input.accountKey,
+          conversationUrn:
+            reaction.message.conversation?.entityURN || reaction.message.conversationURN || "",
+          observedAt,
+          reason,
+          conversation: reaction.message.conversation,
+        });
+      }
       pushConversationContext(
         rawEvents,
         seenContactIds,
@@ -184,6 +248,19 @@ export function buildLinkedInRawEventsFromRealtimeEnvelope(input: {
       const receipt = data?.doDecorateSeenReceiptMessengerRealtimeDecoration?.result;
       if (!receipt?.message?.entityURN) {
         return [];
+      }
+      const reason = receipt.message.conversation
+        ? removalReason(receipt.message.conversation, input.userEntityUrn)
+        : null;
+      if (reason) {
+        return buildLinkedInConversationRemovalEvents({
+          accountKey: input.accountKey,
+          conversationUrn:
+            receipt.message.conversation?.entityURN || receipt.message.conversationURN || "",
+          observedAt,
+          reason,
+          conversation: receipt.message.conversation,
+        });
       }
       pushConversationContext(
         rawEvents,
