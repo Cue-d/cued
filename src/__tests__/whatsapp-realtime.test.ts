@@ -59,6 +59,7 @@ describe("whatsapp realtime", () => {
 
     session.start();
     child.emit("spawn");
+    expect(session.getStatus().state).toBe("connecting");
 
     child.stdout.write(
       `${JSON.stringify({
@@ -126,6 +127,38 @@ describe("whatsapp realtime", () => {
     session.stop();
   });
 
+  it("waits for helper connected before marking the session connected", async () => {
+    vi.useFakeTimers();
+    const child = new MockChild();
+    spawnMock.mockReturnValue(child);
+
+    const session = new WhatsAppRealtimeSession({
+      accountKey: "default",
+      helperPath: "/tmp/cued-whatsapp-helper",
+      storeDir: "/tmp/cued-whatsapp/default",
+      connectTimeoutMs: 1_000,
+    });
+
+    session.start();
+    child.emit("spawn");
+    expect(session.getStatus().state).toBe("connecting");
+    await expect(session.sendText("12016824050@s.whatsapp.net", "ping")).rejects.toThrowError(
+      "WhatsApp realtime session is not connected",
+    );
+
+    child.stdout.write(
+      `${JSON.stringify({
+        event: "connected",
+        data: {
+          accountJid: "15551234567@s.whatsapp.net",
+        },
+      })}\n`,
+    );
+
+    expect(session.getStatus().state).toBe("connected");
+    session.stop();
+  });
+
   it("reconnects after the helper exits", () => {
     vi.useFakeTimers();
     const firstChild = new MockChild();
@@ -140,6 +173,15 @@ describe("whatsapp realtime", () => {
 
     session.start();
     firstChild.emit("spawn");
+    expect(session.getStatus().state).toBe("connecting");
+    firstChild.stdout.write(
+      `${JSON.stringify({
+        event: "connected",
+        data: {
+          accountJid: "15551234567@s.whatsapp.net",
+        },
+      })}\n`,
+    );
     expect(session.getStatus().state).toBe("connected");
 
     firstChild.emit("exit", 1, null);
@@ -147,8 +189,81 @@ describe("whatsapp realtime", () => {
 
     vi.advanceTimersByTime(1_000);
     secondChild.emit("spawn");
+    expect(session.getStatus().state).toBe("reconnecting");
+    secondChild.stdout.write(
+      `${JSON.stringify({
+        event: "connected",
+        data: {
+          accountJid: "15551234567@s.whatsapp.net",
+        },
+      })}\n`,
+    );
     expect(spawnMock).toHaveBeenCalledTimes(2);
     expect(session.getStatus().state).toBe("connected");
+
+    session.stop();
+  });
+
+  it("times out when the helper never emits connected", () => {
+    vi.useFakeTimers();
+    const child = new MockChild();
+    spawnMock.mockReturnValue(child);
+
+    const session = new WhatsAppRealtimeSession({
+      accountKey: "default",
+      helperPath: "/tmp/cued-whatsapp-helper",
+      storeDir: "/tmp/cued-whatsapp/default",
+      connectTimeoutMs: 25,
+    });
+
+    session.start();
+    child.emit("spawn");
+    vi.advanceTimersByTime(25);
+    expect(session.getStatus().state).toBe("reconnecting");
+    expect(session.getStatus().lastSessionError).toContain("did not emit connected");
+    session.stop();
+  });
+
+  it("preserves the disconnect reason on the first disconnected status update", () => {
+    const child = new MockChild();
+    spawnMock.mockReturnValue(child);
+    const onStatusChange = vi.fn();
+
+    const session = new WhatsAppRealtimeSession({
+      accountKey: "default",
+      helperPath: "/tmp/cued-whatsapp-helper",
+      storeDir: "/tmp/cued-whatsapp/default",
+      onStatusChange,
+    });
+
+    session.start();
+    child.emit("spawn");
+    child.stdout.write(
+      `${JSON.stringify({
+        event: "connected",
+        data: {
+          accountJid: "15551234567@s.whatsapp.net",
+        },
+      })}\n`,
+    );
+
+    onStatusChange.mockClear();
+    child.stdout.write(
+      `${JSON.stringify({
+        event: "disconnected",
+        data: {
+          reason: "network lost",
+        },
+      })}\n`,
+    );
+
+    expect(onStatusChange).toHaveBeenCalled();
+    expect(onStatusChange.mock.calls[0]?.[0]).toEqual(
+      expect.objectContaining({
+        state: "reconnecting",
+        lastSessionError: "network lost",
+      }),
+    );
 
     session.stop();
   });
@@ -191,8 +306,16 @@ describe("whatsapp realtime", () => {
             timestamp: 1,
           };
         },
+        async downloadMedia() {
+          return {
+            dataBase64: Buffer.from("hello").toString("base64"),
+            mimeType: "text/plain",
+            filename: "hello.txt",
+            sizeBytes: 5,
+          };
+        },
         async resync() {
-          return { contacts: [], chats: [], messages: [] };
+          return { contacts: [], chats: [], messages: [], hasMore: false, completedAt: 1 };
         },
       }),
     });

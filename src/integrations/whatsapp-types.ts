@@ -24,6 +24,7 @@ export interface WhatsAppMessageSnapshot {
   status?: string | null;
   deliveredAt?: number | null;
   readAt?: number | null;
+  attachments?: Array<Record<string, unknown>>;
 }
 
 export interface WhatsAppReceiptSnapshot {
@@ -39,6 +40,12 @@ export interface WhatsAppSnapshot {
   contacts?: WhatsAppContactSnapshot[];
   chats?: WhatsAppChatSnapshot[];
   messages?: WhatsAppMessageSnapshot[];
+}
+
+export interface WhatsAppResyncPage extends WhatsAppSnapshot {
+  nextCursor?: string | null;
+  hasMore: boolean;
+  completedAt: number;
 }
 
 export type WhatsAppHelperEventName =
@@ -61,7 +68,15 @@ export type WhatsAppHelperEventData = {
   chat_upsert: WhatsAppChatSnapshot;
   message_upsert: WhatsAppMessageSnapshot;
   receipt_update: WhatsAppReceiptSnapshot;
-  history_sync: WhatsAppSnapshot & { completedAt?: number | null };
+  history_sync: WhatsAppSnapshot & {
+    completedAt?: number | null;
+    syncType?: string | null;
+    chunkOrder?: number | null;
+    progress?: number | null;
+    queuedHistorySyncCount?: number | null;
+    lastHistorySyncError?: string | null;
+    lastHistoryNotificationAt?: number | null;
+  };
   disconnected: {
     reason?: string | null;
   };
@@ -87,6 +102,16 @@ export type WhatsAppHelperCommand =
   | {
       id: number;
       command: "resync";
+      cursor?: string;
+      sinceMs?: number | null;
+      limit?: number;
+    }
+  | {
+      id: number;
+      command: "downloadMedia";
+      chatJID: string;
+      messageID: string;
+      attachmentIndex?: number;
     }
   | {
       id: number;
@@ -98,12 +123,26 @@ export interface WhatsAppHelperStatusResult {
   pushName?: string | null;
   connected?: boolean;
   helperVersion?: string | null;
+  lastHistorySyncAt?: number | null;
+  lastHistorySyncType?: string | null;
+  lastHistoryChunkOrder?: number | null;
+  lastHistoryProgress?: number | null;
+  queuedHistorySyncCount?: number | null;
+  lastHistorySyncError?: string | null;
+  lastHistoryNotificationAt?: number | null;
 }
 
 export interface WhatsAppHelperSendResult {
   messageID: string;
   chatJID: string;
   timestamp: number;
+}
+
+export interface WhatsAppHelperDownloadResult {
+  dataBase64: string;
+  mimeType?: string | null;
+  filename?: string | null;
+  sizeBytes: number;
 }
 
 export interface WhatsAppHelperResponseEnvelope<TResult = unknown> {

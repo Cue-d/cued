@@ -7,6 +7,7 @@ import { DEFAULT_CHAT_DB_PATH } from "../adapters/imessage/reader.js";
 import { isAdapterPlatform, listAutoSyncPlatforms } from "../adapters/registry.js";
 import { runAdapter } from "../adapters/runner.js";
 import { getCurrentAppVersion, getCurrentReleaseChannel } from "../app-metadata.js";
+import { fetchAttachment, listAttachments, searchAttachments } from "../attachments/service.js";
 import { CUED_DAEMON_LOCK_PATH, CUED_SOCKET_PATH } from "../config.js";
 import { safeParseJsonRecord } from "../db/codecs.js";
 import { type OutboundMessageRow, openCuedDatabase } from "../db/database.js";
@@ -80,6 +81,7 @@ import {
   type AdapterPlatform,
   getDefaultAccountKeyForPlatform,
   type HostOS,
+  isPlatform,
   type Platform,
   type ProviderRawEventInput,
 } from "../types/provider.js";
@@ -125,6 +127,20 @@ function getAppStatusMetadata(db: { getAppMetadata: () => unknown }): {
 
 function now(): number {
   return Date.now();
+}
+
+function parseJsonRecord(value: string | null | undefined): Record<string, unknown> | null {
+  if (!value) {
+    return null;
+  }
+  try {
+    const parsed = JSON.parse(value) as unknown;
+    return typeof parsed === "object" && parsed !== null
+      ? (parsed as Record<string, unknown>)
+      : null;
+  } catch {
+    return null;
+  }
 }
 
 type QueueSchedulers = {
@@ -2109,49 +2125,116 @@ export async function runDaemon(): Promise<void> {
       }
 
       const adapterStartedAt = now();
-      const bundle =
-        platform === "whatsapp"
-          ? await (async () => {
-              const session =
-                whatsAppRealtime.getSession(accountKey) ??
-                (await whatsAppRealtime.waitForConnected(accountKey, 10_000));
-              if (!session?.isConnected()) {
-                throw new Error(`WhatsApp session is not connected for '${accountKey}'`);
-              }
+      let adapterFetchMs = 0;
+      let rawEventInsertMs = 0;
+      let ingestedCount = 0;
+      let bundleHasMore = false;
+      let bundleSyncMode: "full" | "incremental" = checkpoint?.source_cursor_json
+        ? "incremental"
+        : "full";
+      let bundleSourceCursor: Record<string, unknown> | null = null;
+      let checkpointLastSuccessAt = now();
+      let sourceAccounts: Array<{
+        platform: Platform;
+        accountKey: string;
+        displayName?: string | null;
+      }> = [];
+      let insertResult: ReturnType<typeof db.insertRawEvents> = {
+        insertedCount: 0,
+        insertedEvents: [],
+        insertedRows: [],
+        firstInsertedRowId: null,
+        lastInsertedRowId: null,
+      };
 
-              const snapshot = await session.resync();
-              return {
-                sourceAccounts: [
-                  {
-                    platform: "whatsapp" as const,
-                    accountKey,
-                    displayName: "WhatsApp",
-                  },
-                ],
-                rawEvents: buildWhatsAppRawEventsFromSnapshot({
-                  accountKey,
-                  snapshot,
-                }),
-                sourceCursor: {
-                  lastSyncAt: now(),
-                },
-                syncMode: checkpoint?.source_cursor_json
-                  ? ("incremental" as const)
-                  : ("full" as const),
-                hasMore: false,
-              };
-            })()
-          : platform === "signal"
+      if (platform === "whatsapp") {
+        const session =
+          whatsAppRealtime.getSession(accountKey) ??
+          (await whatsAppRealtime.waitForConnected(accountKey, 10_000));
+        if (!session?.isConnected()) {
+          throw new Error(`WhatsApp session is not connected for '${accountKey}'`);
+        }
+
+        sourceAccounts = [
+          {
+            platform: "whatsapp",
+            accountKey,
+            displayName: "WhatsApp",
+          },
+        ];
+        bundleSyncMode = checkpoint?.source_cursor_json ? "incremental" : "full";
+
+        let cursor: string | null = null;
+        let hasMore = false;
+        let lastCompletedAt = now();
+        do {
+          const pageFetchStartedAt = now();
+          const page = await session.resync({
+            cursor,
+            sinceMs:
+              bundleSyncMode === "incremental" ? (checkpoint?.last_success_at ?? null) : null,
+            limit: 1000,
+          });
+          adapterFetchMs += now() - pageFetchStartedAt;
+
+          const rawEvents = buildWhatsAppRawEventsFromSnapshot({
+            accountKey,
+            snapshot: page,
+          });
+          ingestedCount += rawEvents.length;
+          lastCompletedAt = page.completedAt ?? now();
+          hasMore = page.hasMore;
+          cursor = page.nextCursor ?? null;
+
+          const pageInsertStartedAt = now();
+          const pageInsertResult = db.insertRawEvents(rawEvents);
+          rawEventInsertMs += now() - pageInsertStartedAt;
+          insertResult = {
+            insertedCount: insertResult.insertedCount + pageInsertResult.insertedCount,
+            insertedEvents: [...insertResult.insertedEvents, ...pageInsertResult.insertedEvents],
+            insertedRows: [...insertResult.insertedRows, ...pageInsertResult.insertedRows],
+            firstInsertedRowId:
+              insertResult.firstInsertedRowId == null
+                ? pageInsertResult.firstInsertedRowId
+                : pageInsertResult.firstInsertedRowId == null
+                  ? insertResult.firstInsertedRowId
+                  : Math.min(insertResult.firstInsertedRowId, pageInsertResult.firstInsertedRowId),
+            lastInsertedRowId:
+              insertResult.lastInsertedRowId == null
+                ? pageInsertResult.lastInsertedRowId
+                : pageInsertResult.lastInsertedRowId == null
+                  ? insertResult.lastInsertedRowId
+                  : Math.max(insertResult.lastInsertedRowId, pageInsertResult.lastInsertedRowId),
+          };
+        } while (hasMore);
+
+        bundleHasMore = false;
+        bundleSourceCursor = {
+          lastSyncAt: lastCompletedAt,
+        };
+        checkpointLastSuccessAt = lastCompletedAt;
+      } else {
+        const bundle =
+          platform === "signal"
             ? await runSignalSyncExclusively(
                 accountKey,
                 async () => await runAdapter(platform, accountKey, envOverrides),
               )
             : await runAdapter(platform, accountKey, envOverrides);
-      const afterAdapter = now();
-      db.upsertSourceAccounts(bundle.sourceAccounts);
-      const rawEventInsertStartedAt = now();
-      const insertResult = db.insertRawEvents(bundle.rawEvents);
-      const afterRawInsert = now();
+        adapterFetchMs = now() - adapterStartedAt;
+        sourceAccounts = bundle.sourceAccounts as typeof sourceAccounts;
+        bundleSourceCursor =
+          (bundle.sourceCursor as Record<string, unknown> | undefined | null) ?? null;
+        bundleSyncMode = bundle.syncMode ?? bundleSyncMode;
+        bundleHasMore = bundle.hasMore ?? false;
+        ingestedCount = bundle.rawEvents.length;
+        const rawEventInsertStartedAt = now();
+        insertResult = db.insertRawEvents(bundle.rawEvents);
+        rawEventInsertMs = now() - rawEventInsertStartedAt;
+        checkpointLastSuccessAt = now();
+      }
+
+      db.upsertSourceAccounts(sourceAccounts);
       const realtimeProjectionStartedAt = now();
       if (
         realtimeProjectionEnabled &&
@@ -2203,23 +2286,23 @@ export async function runDaemon(): Promise<void> {
       const checkpointSyncMode = resolveCheckpointSyncMode(
         currentRun.run_type,
         checkpoint?.sync_mode,
-        bundle.syncMode,
-        bundle.hasMore ?? false,
+        bundleSyncMode,
+        bundleHasMore,
       );
       const checkpointStartedAt = now();
       db.upsertCheckpoint({
         platform: currentRun.platform,
         accountKey,
         syncMode: checkpointSyncMode,
-        sourceCursor: bundle.sourceCursor,
+        sourceCursor: bundleSourceCursor,
         rawIngestWatermark: projection.max_raw_event_rowid,
         projectionWatermark: projection.projection_watermark,
-        lastSuccessAt: now(),
+        lastSuccessAt: checkpointLastSuccessAt,
       });
       const afterCheckpoint = now();
       const timings: IngestTiming = {
-        adapterFetchMs: afterAdapter - adapterStartedAt,
-        rawEventInsertMs: afterRawInsert - rawEventInsertStartedAt,
+        adapterFetchMs,
+        rawEventInsertMs,
         realtimeProjectionMs: afterRealtimeProjection - realtimeProjectionStartedAt,
         checkpointUpdateMs: afterCheckpoint - checkpointStartedAt,
         webhookReadyMs: afterCheckpoint - ingestStartedAt,
@@ -2254,14 +2337,14 @@ export async function runDaemon(): Promise<void> {
         }
       }
       db.finishRun(currentRun.id, {
-        ingested: bundle.rawEvents.length,
+        ingested: ingestedCount,
         insertedRawEvents: insertResult.insertedCount,
         projectionQueued,
-        hasMore: bundle.hasMore ?? false,
+        hasMore: bundleHasMore,
         syncMode: checkpointSyncMode,
         timings,
       });
-      if (bundle.hasMore && !db.hasQueuedOrRunningRun(currentRun.platform, accountKey)) {
+      if (bundleHasMore && !db.hasQueuedOrRunningRun(currentRun.platform, accountKey)) {
         db.queueSyncRun({
           platform: currentRun.platform,
           accountKey,
@@ -2281,7 +2364,7 @@ export async function runDaemon(): Promise<void> {
         accountKey,
         runType: currentRun.run_type,
         stage: "ingest",
-        ingested: bundle.rawEvents.length,
+        ingested: ingestedCount,
         insertedRawEvents: insertResult.insertedCount,
         timings,
       });
@@ -2293,19 +2376,27 @@ export async function runDaemon(): Promise<void> {
         totalMs: timings.totalMs,
       });
     } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
       daemonLogger.error("ingest run failed", {
         runId: currentRun.id,
         platform: currentRun.platform,
         accountKey: currentRun.account_key,
-        error: error instanceof Error ? error.message : String(error),
+        error: errorMessage,
       });
-      db.failRun(currentRun.id, error instanceof Error ? error.message : String(error));
+      if (currentRun.platform && isPlatform(currentRun.platform)) {
+        db.recordCheckpointError(
+          currentRun.platform,
+          currentRun.account_key ?? getDefaultAccountKeyForPlatform(currentRun.platform),
+          errorMessage,
+        );
+      }
+      db.failRun(currentRun.id, errorMessage);
       await safeEmitHookEvent("sync.failed", {
         runId: currentRun.id,
         platform: currentRun.platform,
         runType: currentRun.run_type,
         stage: "ingest",
-        error: error instanceof Error ? error.message : String(error),
+        error: errorMessage,
       });
     }
   };
@@ -2795,6 +2886,74 @@ async function dispatchRequest(
           result,
         };
       }
+      case "attachments-list":
+        return {
+          id: request.id,
+          ok: true,
+          result: listAttachments(db, {
+            messageId: request.messageId,
+            conversationId: request.conversationId,
+            platform: request.platform,
+            accountKey: request.accountKey,
+            limit: request.limit,
+          }),
+        };
+      case "attachment-fetch":
+        return {
+          id: request.id,
+          ok: true,
+          result: await fetchAttachment(db, {
+            attachmentId: request.attachmentId,
+            variant: request.variant,
+            maxBytes: request.maxBytes,
+            allowLarge: request.allowLarge,
+            extractText: request.extractText,
+            providerFetchers: {
+              whatsapp: async (attachment) => {
+                const accessRef = parseJsonRecord(attachment.access_ref_json);
+                const chatJID = typeof accessRef?.chatJID === "string" ? accessRef.chatJID : null;
+                const messageID =
+                  typeof accessRef?.messageID === "string" ? accessRef.messageID : null;
+                const attachmentIndex =
+                  typeof accessRef?.attachmentIndex === "number" ? accessRef.attachmentIndex : 0;
+                if (!chatJID || !messageID) {
+                  throw new Error("WhatsApp attachment is missing provider fetch coordinates");
+                }
+
+                const session =
+                  whatsAppRealtime.getSession(attachment.account_key) ??
+                  (await whatsAppRealtime.waitForConnected(
+                    attachment.account_key,
+                    WHATSAPP_SEND_SESSION_WAIT_MS,
+                  ));
+                if (!session?.isConnected()) {
+                  throw new Error(
+                    `WhatsApp realtime session is not connected for '${attachment.account_key}'`,
+                  );
+                }
+
+                const result = await session.downloadMedia(chatJID, messageID, attachmentIndex);
+                return {
+                  buffer: Buffer.from(result.dataBase64, "base64"),
+                  mimeType: result.mimeType ?? attachment.mime_type,
+                  filename: result.filename ?? attachment.filename,
+                };
+              },
+            },
+          }),
+        };
+      case "attachments-search":
+        return {
+          id: request.id,
+          ok: true,
+          result: searchAttachments(db, {
+            query: request.query,
+            platform: request.platform,
+            accountKey: request.accountKey,
+            conversationId: request.conversationId,
+            limit: request.limit,
+          }),
+        };
       case "message-send":
         return {
           id: request.id,

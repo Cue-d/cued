@@ -3,13 +3,15 @@ import { createInterface, type Interface as ReadLineInterface } from "node:readl
 import { createLogger } from "../logging.js";
 import type {
   WhatsAppHelperCommand,
+  WhatsAppHelperDownloadResult,
   WhatsAppHelperEventEnvelope,
   WhatsAppHelperResponseEnvelope,
   WhatsAppHelperSendResult,
-  WhatsAppSnapshot,
+  WhatsAppResyncPage,
 } from "./whatsapp-types.js";
 
 const DEFAULT_REQUEST_TIMEOUT_MS = 30_000;
+const DEFAULT_CONNECT_TIMEOUT_MS = 20_000;
 const DEFAULT_RECONNECT_BASE_MS = 1_000;
 const DEFAULT_RECONNECT_MAX_MS = 60_000;
 const whatsAppLogger = createLogger("whatsapp");
@@ -48,6 +50,7 @@ interface WhatsAppRealtimeSessionOptions {
   helperPath: string;
   storeDir: string;
   requestTimeoutMs?: number;
+  connectTimeoutMs?: number;
   reconnectBaseMs?: number;
   reconnectMaxMs?: number;
   spawnImpl?: typeof spawn;
@@ -63,7 +66,16 @@ export interface WhatsAppRealtimeSessionLike {
   getStatus(): WhatsAppRealtimeStatus;
   isConnected(): boolean;
   sendText(target: string, text: string): Promise<WhatsAppHelperSendResult>;
-  resync(): Promise<WhatsAppSnapshot>;
+  downloadMedia(
+    chatJID: string,
+    messageID: string,
+    attachmentIndex?: number,
+  ): Promise<WhatsAppHelperDownloadResult>;
+  resync(input?: {
+    cursor?: string | null;
+    sinceMs?: number | null;
+    limit?: number;
+  }): Promise<WhatsAppResyncPage>;
 }
 
 export interface WhatsAppRealtimeSupervisorSessionInput {
@@ -154,6 +166,7 @@ export class WhatsAppRealtimeSession implements WhatsAppRealtimeSessionLike {
   private readonly helperPath: string;
   private readonly storeDir: string;
   private readonly requestTimeoutMs: number;
+  private readonly connectTimeoutMs: number;
   private readonly reconnectBaseMs: number;
   private readonly reconnectMaxMs: number;
   private readonly spawnImpl: typeof spawn;
@@ -167,6 +180,7 @@ export class WhatsAppRealtimeSession implements WhatsAppRealtimeSessionLike {
   private nextRequestId = 1;
   private pendingRequests = new Map<number, PendingRequest>();
   private reconnectTimer: NodeJS.Timeout | null = null;
+  private connectTimer: NodeJS.Timeout | null = null;
   private shouldReconnect = false;
   private hasEverConnected = false;
   private status: WhatsAppRealtimeStatus;
@@ -176,6 +190,7 @@ export class WhatsAppRealtimeSession implements WhatsAppRealtimeSessionLike {
     this.helperPath = options.helperPath;
     this.storeDir = options.storeDir;
     this.requestTimeoutMs = options.requestTimeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS;
+    this.connectTimeoutMs = options.connectTimeoutMs ?? DEFAULT_CONNECT_TIMEOUT_MS;
     this.reconnectBaseMs = options.reconnectBaseMs ?? DEFAULT_RECONNECT_BASE_MS;
     this.reconnectMaxMs = options.reconnectMaxMs ?? DEFAULT_RECONNECT_MAX_MS;
     this.spawnImpl = options.spawnImpl ?? spawn;
@@ -205,6 +220,7 @@ export class WhatsAppRealtimeSession implements WhatsAppRealtimeSessionLike {
   stop(): void {
     this.shouldReconnect = false;
     this.clearReconnectTimer();
+    this.clearConnectTimer();
     this.rejectPendingRequests("WhatsApp realtime session stopped");
     this.disposeChild();
     this.setStatus({
@@ -238,10 +254,29 @@ export class WhatsAppRealtimeSession implements WhatsAppRealtimeSessionLike {
     return result;
   }
 
-  async resync(): Promise<WhatsAppSnapshot> {
-    return await this.request<WhatsAppSnapshot>({
+  async resync(
+    input: { cursor?: string | null; sinceMs?: number | null; limit?: number } = {},
+  ): Promise<WhatsAppResyncPage> {
+    return await this.request<WhatsAppResyncPage>({
       id: this.nextRequestId++,
       command: "resync",
+      cursor: input.cursor ?? undefined,
+      sinceMs: input.sinceMs ?? undefined,
+      limit: input.limit,
+    });
+  }
+
+  async downloadMedia(
+    chatJID: string,
+    messageID: string,
+    attachmentIndex = 0,
+  ): Promise<WhatsAppHelperDownloadResult> {
+    return await this.request<WhatsAppHelperDownloadResult>({
+      id: this.nextRequestId++,
+      command: "downloadMedia",
+      chatJID,
+      messageID,
+      attachmentIndex,
     });
   }
 
@@ -296,15 +331,12 @@ export class WhatsAppRealtimeSession implements WhatsAppRealtimeSessionLike {
     });
 
     child.once("spawn", () => {
-      const reconnected = this.hasEverConnected;
-      this.hasEverConnected = true;
       this.setStatus({
-        state: "connected",
-        connectedAt: now(),
-        reconnectAttempts: 0,
+        state: this.hasEverConnected ? "reconnecting" : "connecting",
+        connectedAt: null,
         lastSessionError: null,
       });
-      this.onConnected?.(this.getStatus(), reconnected);
+      this.startConnectTimer();
     });
 
     child.once("error", (error) => {
@@ -346,30 +378,49 @@ export class WhatsAppRealtimeSession implements WhatsAppRealtimeSessionLike {
     }
 
     const eventData = parsed.data as Record<string, unknown>;
-    this.setStatus({
-      lastEventAt: now(),
-      lastSessionError:
-        parsed.event === "error" && typeof eventData.message === "string"
-          ? eventData.message
-          : null,
-    });
+    const eventAt = now();
     if (parsed.event === "connected") {
+      const reconnected = this.hasEverConnected;
+      this.hasEverConnected = true;
+      this.clearConnectTimer();
       this.setStatus({
+        lastEventAt: eventAt,
+        state: "connected",
         accountJid: typeof eventData.accountJid === "string" ? eventData.accountJid : null,
-        connectedAt: now(),
+        connectedAt: eventAt,
+        reconnectAttempts: 0,
+        lastSessionError: null,
       });
-    }
-    if (parsed.event === "history_sync") {
+      this.onConnected?.(this.getStatus(), reconnected);
+    } else if (parsed.event === "history_sync") {
       this.setStatus({
+        lastEventAt: eventAt,
         lastHistorySyncAt:
-          typeof eventData.completedAt === "number" ? eventData.completedAt : now(),
+          typeof eventData.completedAt === "number" ? eventData.completedAt : eventAt,
       });
-    }
-    if (parsed.event === "disconnected") {
+    } else if (parsed.event === "disconnected") {
+      this.clearConnectTimer();
       this.setStatus({
+        lastEventAt: eventAt,
         state: this.shouldReconnect ? "reconnecting" : "degraded",
         connectedAt: null,
         lastSessionError: typeof eventData.reason === "string" ? eventData.reason : null,
+      });
+    } else if (
+      parsed.event === "error" &&
+      typeof eventData.message === "string" &&
+      this.status.state !== "connected"
+    ) {
+      this.clearConnectTimer();
+      this.setStatus({
+        lastEventAt: eventAt,
+        state: this.shouldReconnect ? "reconnecting" : "degraded",
+        connectedAt: null,
+        lastSessionError: eventData.message,
+      });
+    } else {
+      this.setStatus({
+        lastEventAt: eventAt,
       });
     }
 
@@ -379,6 +430,7 @@ export class WhatsAppRealtimeSession implements WhatsAppRealtimeSessionLike {
   private handleExit(error: Error): void {
     const wasActive = this.status.state !== "stopped";
     this.rejectPendingRequests(error.message);
+    this.clearConnectTimer();
     this.disposeChild();
     if (!wasActive) {
       return;
@@ -438,6 +490,23 @@ export class WhatsAppRealtimeSession implements WhatsAppRealtimeSessionLike {
     if (this.reconnectTimer) {
       clearTimeout(this.reconnectTimer);
       this.reconnectTimer = null;
+    }
+  }
+
+  private startConnectTimer(): void {
+    this.clearConnectTimer();
+    this.connectTimer = setTimeout(() => {
+      this.connectTimer = null;
+      this.handleExit(
+        new Error(`WhatsApp helper did not emit connected within ${this.connectTimeoutMs}ms`),
+      );
+    }, this.connectTimeoutMs);
+  }
+
+  private clearConnectTimer(): void {
+    if (this.connectTimer) {
+      clearTimeout(this.connectTimer);
+      this.connectTimer = null;
     }
   }
 

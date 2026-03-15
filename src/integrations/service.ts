@@ -383,16 +383,17 @@ async function buildWhatsAppManagedState(
   let accountJid: string | null = null;
   let pushName: string | null = null;
   let helperVersion = inspected.version;
+  let helperStatus: Awaited<ReturnType<typeof readWhatsAppHelperStatus>> | null = null;
 
   if (!inspected.helperPath) {
     authState = existing?.auth_state === "cancelled" ? "cancelled" : "missing";
   } else {
     try {
-      const status = await readWhatsAppHelperStatus(storeDir);
-      accountJid = status.accountJid;
-      pushName = status.pushName;
-      helperVersion = status.helperVersion ?? helperVersion;
-      if (status.authenticated) {
+      helperStatus = await readWhatsAppHelperStatus(storeDir);
+      accountJid = helperStatus.accountJid;
+      pushName = helperStatus.pushName;
+      helperVersion = helperStatus.helperVersion ?? helperVersion;
+      if (helperStatus.authenticated) {
         authState = "authenticated";
       } else if (existing?.auth_state === "requested" || existing?.auth_state === "in_progress") {
         authState = existing.auth_state;
@@ -432,6 +433,13 @@ async function buildWhatsAppManagedState(
       whatsappHelperVersion: helperVersion,
       whatsappAccountJid: accountJid,
       whatsappPushName: pushName,
+      whatsappLastHistorySyncAt: helperStatus?.lastHistorySyncAt ?? null,
+      whatsappLastHistorySyncType: helperStatus?.lastHistorySyncType ?? null,
+      whatsappLastHistoryChunkOrder: helperStatus?.lastHistoryChunkOrder ?? null,
+      whatsappLastHistoryProgress: helperStatus?.lastHistoryProgress ?? null,
+      whatsappQueuedHistorySyncCount: helperStatus?.queuedHistorySyncCount ?? null,
+      whatsappLastHistorySyncError: helperStatus?.lastHistorySyncError ?? null,
+      whatsappLastHistoryNotificationAt: helperStatus?.lastHistoryNotificationAt ?? null,
       lastVerifiedAt: now(),
     },
   };
@@ -881,6 +889,23 @@ function ensureRequestableIntegrationState(
   return getIntegrationSummary(db, normalized, resolvedAccountKey);
 }
 
+function cancelStaleAuthSessions(db: CuedDatabase, platform: Platform, accountKey: string): void {
+  for (const session of db.listAuthSessions(100)) {
+    if (session.platform !== platform || session.account_key !== accountKey) {
+      continue;
+    }
+    if (session.state !== "requested" && session.state !== "in_progress") {
+      continue;
+    }
+    db.updateAuthSessionState({
+      id: session.id,
+      state: "cancelled",
+      finishedAt: now(),
+      errorSummary: "Superseded by a newer auth session request",
+    });
+  }
+}
+
 export function requestIntegrationAccess(
   db: CuedDatabase,
   platform: string,
@@ -890,6 +915,7 @@ export function requestIntegrationAccess(
   authSession: AuthSessionSummary;
 } {
   const integration = ensureRequestableIntegrationState(db, platform, accountKey);
+  cancelStaleAuthSessions(db, integration.platform, integration.accountKey);
   const sessionId = db.createAuthSession({
     platform: integration.platform,
     accountKey: integration.accountKey,

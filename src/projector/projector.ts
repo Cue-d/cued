@@ -185,6 +185,83 @@ function hasStringValue(value: string | null | undefined): value is string {
   return typeof value === "string" && value.length > 0;
 }
 
+function normalizeAttachmentObject(value: unknown): Record<string, unknown> | null {
+  return typeof value === "object" && value !== null ? (value as Record<string, unknown>) : null;
+}
+
+function inferAttachmentProjection(attachment: Record<string, unknown>): {
+  localPath: string | null;
+  remoteUrl: string | null;
+  accessKind: string | null;
+  accessRefJson: string | null;
+  previewRefJson: string | null;
+  availabilityStatus: string | null;
+  providerMetadataJson: string | null;
+} {
+  const localPath =
+    normalizeText(attachment.local_path) ??
+    normalizeText(attachment.path) ??
+    normalizeText(attachment.filename_path);
+  const remoteUrl =
+    normalizeText(attachment.remote_url) ??
+    normalizeText(attachment.url) ??
+    normalizeText(attachment.download_url);
+  const explicitAccessKind = normalizeText(attachment.access_kind);
+  const explicitAccessRef = normalizeAttachmentObject(attachment.access_ref);
+  const explicitPreviewRef = normalizeAttachmentObject(attachment.preview_ref);
+  const providerFetchRef =
+    normalizeAttachmentObject(attachment.provider_fetch) ??
+    normalizeAttachmentObject(attachment.download_ref);
+
+  const accessKind =
+    explicitAccessKind ??
+    (localPath
+      ? "local_path"
+      : providerFetchRef
+        ? "provider_fetch"
+        : remoteUrl
+          ? "remote_url"
+          : null);
+  const accessRefJson =
+    explicitAccessRef != null
+      ? JSON.stringify(explicitAccessRef)
+      : accessKind === "local_path" && localPath
+        ? JSON.stringify({ path: localPath })
+        : accessKind === "provider_fetch" && providerFetchRef
+          ? JSON.stringify(providerFetchRef)
+          : accessKind === "remote_url" && remoteUrl
+            ? JSON.stringify({ url: remoteUrl })
+            : null;
+  const previewRefJson =
+    explicitPreviewRef != null
+      ? JSON.stringify(explicitPreviewRef)
+      : (normalizeText(attachment.previewUrl) ??
+          normalizeText(attachment.preview_url) ??
+          normalizeText(attachment.thumb_url) ??
+          normalizeText(attachment.image_url))
+        ? JSON.stringify({
+            url:
+              normalizeText(attachment.previewUrl) ??
+              normalizeText(attachment.preview_url) ??
+              normalizeText(attachment.thumb_url) ??
+              normalizeText(attachment.image_url),
+          })
+        : null;
+  const availabilityStatus =
+    normalizeText(attachment.availability_status) ?? (accessKind ? "available" : "metadata_only");
+  const providerMetadata = normalizeAttachmentObject(attachment.provider_metadata);
+
+  return {
+    localPath,
+    remoteUrl,
+    accessKind,
+    accessRefJson,
+    previewRefJson,
+    availabilityStatus,
+    providerMetadataJson: JSON.stringify(providerMetadata ?? attachment),
+  };
+}
+
 function chunkArray<T>(items: readonly T[], size: number): T[][] {
   const chunks: T[][] = [];
   for (let index = 0; index < items.length; index += size) {
@@ -1021,18 +1098,18 @@ function projectMessageEvent(
 
   const desiredAttachmentIds = new Set<string>();
   for (const [index, attachment] of (payload.attachments ?? []).entries()) {
-    const explicitSourceAttachmentKey = normalizeText(
-      (attachment as { sourceAttachmentKey?: unknown }).sourceAttachmentKey,
-    );
+    const normalizedAttachment = normalizeAttachmentObject(attachment) ?? {};
+    const explicitSourceAttachmentKey = normalizeText(normalizedAttachment.sourceAttachmentKey);
     const attachmentIdentity =
       explicitSourceAttachmentKey ??
-      normalizeText((attachment as { id?: unknown }).id) ??
-      normalizeText((attachment as { url?: unknown }).url) ??
+      normalizeText(normalizedAttachment.id) ??
+      normalizeText(normalizedAttachment.url) ??
       String(index);
     const sourceAttachmentKey =
       explicitSourceAttachmentKey ?? `${payload.sourceMessageKey}:${attachmentIdentity}`;
     const attachmentId = hashId("attachment", `${messageId}:${sourceAttachmentKey}`);
     desiredAttachmentIds.add(attachmentId);
+    const inferred = inferAttachmentProjection(normalizedAttachment);
 
     conn
       .insert(messageAttachments)
@@ -1042,55 +1119,55 @@ function projectMessageEvent(
         platform: event.platform,
         accountKey: event.account_key,
         sourceAttachmentKey,
-        kind: normalizeText((attachment as { kind?: unknown }).kind),
+        kind: normalizeText(normalizedAttachment.kind),
         mimeType:
-          normalizeText((attachment as { mime_type?: unknown; mimetype?: unknown }).mime_type) ??
-          normalizeText((attachment as { mimetype?: unknown }).mimetype),
+          normalizeText(normalizedAttachment.mime_type) ??
+          normalizeText(normalizedAttachment.mimetype),
         filename:
-          normalizeText((attachment as { filename?: unknown; name?: unknown }).filename) ??
-          normalizeText((attachment as { name?: unknown }).name),
-        title: normalizeText((attachment as { title?: unknown }).title),
-        localPath:
-          normalizeText((attachment as { local_path?: unknown; path?: unknown }).local_path) ??
-          normalizeText((attachment as { path?: unknown }).path),
-        remoteUrl:
-          normalizeText((attachment as { remote_url?: unknown; url?: unknown }).remote_url) ??
-          normalizeText((attachment as { url?: unknown }).url),
+          normalizeText(normalizedAttachment.filename) ?? normalizeText(normalizedAttachment.name),
+        title: normalizeText(normalizedAttachment.title),
+        localPath: inferred.localPath,
+        remoteUrl: inferred.remoteUrl,
         sizeBytes:
-          normalizeInteger((attachment as { size_bytes?: unknown; size?: unknown }).size_bytes) ??
-          normalizeInteger((attachment as { size?: unknown }).size),
+          normalizeInteger(normalizedAttachment.size_bytes) ??
+          normalizeInteger(normalizedAttachment.size),
         textContent:
-          normalizeText((attachment as { text_content?: unknown; text?: unknown }).text_content) ??
-          normalizeText((attachment as { text?: unknown }).text),
-        metadataJson: JSON.stringify(attachment),
+          normalizeText(normalizedAttachment.text_content) ??
+          normalizeText(normalizedAttachment.text),
+        accessKind: inferred.accessKind,
+        accessRefJson: inferred.accessRefJson,
+        previewRefJson: inferred.previewRefJson,
+        availabilityStatus: inferred.availabilityStatus,
+        providerMetadataJson: inferred.providerMetadataJson,
+        metadataJson: JSON.stringify(normalizedAttachment),
         createdAt: event.observed_at,
         updatedAt: event.observed_at,
       })
       .onConflictDoUpdate({
         target: messageAttachments.id,
         set: {
-          kind: normalizeText((attachment as { kind?: unknown }).kind),
+          kind: normalizeText(normalizedAttachment.kind),
           mimeType:
-            normalizeText((attachment as { mime_type?: unknown; mimetype?: unknown }).mime_type) ??
-            normalizeText((attachment as { mimetype?: unknown }).mimetype),
+            normalizeText(normalizedAttachment.mime_type) ??
+            normalizeText(normalizedAttachment.mimetype),
           filename:
-            normalizeText((attachment as { filename?: unknown; name?: unknown }).filename) ??
-            normalizeText((attachment as { name?: unknown }).name),
-          title: normalizeText((attachment as { title?: unknown }).title),
-          localPath:
-            normalizeText((attachment as { local_path?: unknown; path?: unknown }).local_path) ??
-            normalizeText((attachment as { path?: unknown }).path),
-          remoteUrl:
-            normalizeText((attachment as { remote_url?: unknown; url?: unknown }).remote_url) ??
-            normalizeText((attachment as { url?: unknown }).url),
+            normalizeText(normalizedAttachment.filename) ??
+            normalizeText(normalizedAttachment.name),
+          title: normalizeText(normalizedAttachment.title),
+          localPath: inferred.localPath,
+          remoteUrl: inferred.remoteUrl,
           sizeBytes:
-            normalizeInteger((attachment as { size_bytes?: unknown; size?: unknown }).size_bytes) ??
-            normalizeInteger((attachment as { size?: unknown }).size),
+            normalizeInteger(normalizedAttachment.size_bytes) ??
+            normalizeInteger(normalizedAttachment.size),
           textContent:
-            normalizeText(
-              (attachment as { text_content?: unknown; text?: unknown }).text_content,
-            ) ?? normalizeText((attachment as { text?: unknown }).text),
-          metadataJson: JSON.stringify(attachment),
+            normalizeText(normalizedAttachment.text_content) ??
+            normalizeText(normalizedAttachment.text),
+          accessKind: inferred.accessKind,
+          accessRefJson: inferred.accessRefJson,
+          previewRefJson: inferred.previewRefJson,
+          availabilityStatus: inferred.availabilityStatus,
+          providerMetadataJson: inferred.providerMetadataJson,
+          metadataJson: JSON.stringify(normalizedAttachment),
           updatedAt: event.observed_at,
         },
       })
@@ -1106,6 +1183,10 @@ function projectMessageEvent(
     if (desiredAttachmentIds.has(existingAttachment.id)) {
       continue;
     }
+    conn.run(sql`
+      DELETE FROM attachment_content_fts
+      WHERE attachment_id = ${existingAttachment.id}
+    `);
     conn.delete(messageAttachments).where(eq(messageAttachments.id, existingAttachment.id)).run();
   }
 }
