@@ -42,6 +42,12 @@ export interface WhatsAppSnapshot {
   messages?: WhatsAppMessageSnapshot[];
 }
 
+export interface WhatsAppResyncPage extends WhatsAppSnapshot {
+  nextCursor?: string | null;
+  hasMore: boolean;
+  completedAt: number;
+}
+
 export type WhatsAppHelperEventName =
   | "connected"
   | "contact_upsert"
@@ -62,7 +68,15 @@ export type WhatsAppHelperEventData = {
   chat_upsert: WhatsAppChatSnapshot;
   message_upsert: WhatsAppMessageSnapshot;
   receipt_update: WhatsAppReceiptSnapshot;
-  history_sync: WhatsAppSnapshot & { completedAt?: number | null };
+  history_sync: WhatsAppSnapshot & {
+    completedAt?: number | null;
+    syncType?: string | null;
+    chunkOrder?: number | null;
+    progress?: number | null;
+    queuedHistorySyncCount?: number | null;
+    lastHistorySyncError?: string | null;
+    lastHistoryNotificationAt?: number | null;
+  };
   disconnected: {
     reason?: string | null;
   };
@@ -88,6 +102,9 @@ export type WhatsAppHelperCommand =
   | {
       id: number;
       command: "resync";
+      cursor?: string;
+      sinceMs?: number | null;
+      limit?: number;
     }
   | {
       id: number;
@@ -106,6 +123,13 @@ export interface WhatsAppHelperStatusResult {
   pushName?: string | null;
   connected?: boolean;
   helperVersion?: string | null;
+  lastHistorySyncAt?: number | null;
+  lastHistorySyncType?: string | null;
+  lastHistoryChunkOrder?: number | null;
+  lastHistoryProgress?: number | null;
+  queuedHistorySyncCount?: number | null;
+  lastHistorySyncError?: string | null;
+  lastHistoryNotificationAt?: number | null;
 }
 
 export interface WhatsAppHelperSendResult {
