@@ -52,6 +52,11 @@ type ProjectedReactionRow = {
   emoji: string;
 };
 
+type ProjectedReactionLookup = (
+  accountKey: string,
+  sourceMessageKey: string,
+) => Map<string, ProjectedReactionRow>;
+
 function now(): number {
   return Date.now();
 }
@@ -292,7 +297,7 @@ function loadProjectedReactions(
 }
 
 async function buildReactionEventsForMessage(input: {
-  db: ReturnType<typeof openCuedDatabase>;
+  loadProjectedReactions: ProjectedReactionLookup;
   client: LinkedInClientLike;
   accountKey: string;
   message: Message;
@@ -302,7 +307,7 @@ async function buildReactionEventsForMessage(input: {
 }): Promise<SyncBundle["rawEvents"]> {
   const rawEvents: SyncBundle["rawEvents"] = [];
   const sourceMessageKey = messageSourceKey(input.message.entityURN);
-  const projectedReactions = loadProjectedReactions(input.db, input.accountKey, sourceMessageKey);
+  const projectedReactions = input.loadProjectedReactions(input.accountKey, sourceMessageKey);
   const desiredKeys = new Set<string>();
 
   for (const summary of input.message.reactionSummaries ?? []) {
@@ -363,6 +368,7 @@ export async function buildLinkedInSyncBundle(options?: {
   lastSyncAt?: number;
   syncToken?: string | null;
   client?: LinkedInClientLike;
+  loadProjectedReactions?: ProjectedReactionLookup;
 }): Promise<SyncBundle> {
   const accountKey = options?.accountKey ?? process.env.CUED_ACCOUNT_KEY ?? "default";
   const session = options?.client ? null : loadLinkedInSessionSecret(accountKey);
@@ -374,7 +380,11 @@ export async function buildLinkedInSyncBundle(options?: {
       xLiTrack: session?.xLiTrack ?? undefined,
     });
 
-  const db = openCuedDatabase();
+  const db = options?.loadProjectedReactions ? null : openCuedDatabase();
+  const loadProjectedReactionsForSync =
+    options?.loadProjectedReactions ??
+    ((lookupAccountKey: string, sourceMessageKey: string) =>
+      loadProjectedReactions(db!, lookupAccountKey, sourceMessageKey));
   try {
     const observedBase = now();
     const cutoffMs = incrementalOldestMs(options?.lastSyncAt);
@@ -499,7 +509,7 @@ export async function buildLinkedInSyncBundle(options?: {
 
         rawEvents.push(
           ...(await buildReactionEventsForMessage({
-            db,
+            loadProjectedReactions: loadProjectedReactionsForSync,
             client,
             accountKey,
             message,
@@ -522,6 +532,6 @@ export async function buildLinkedInSyncBundle(options?: {
       syncMode: incremental ? "incremental" : "full",
     };
   } finally {
-    db.close();
+    db?.close();
   }
 }

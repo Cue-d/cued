@@ -1042,13 +1042,17 @@ export async function runDaemon(): Promise<void> {
         updateLinkedInCheckpointFromRealtime(accountKey);
       }
 
-      const inboundMessages = collectInboundMessages(insertResult.insertedEvents);
-      for (const inboundMessage of inboundMessages) {
-        await safeEmitHookEvent("message.received", {
-          runId: `linkedin_realtime:${accountKey}`,
-          message: inboundMessage,
-        });
-      }
+      const inboundMessages = collectInboundMessages(insertResult.insertedRows);
+      queueMessageReceivedHooks(
+        insertResult.firstInsertedRowId != null && insertResult.lastInsertedRowId != null
+          ? {
+              startRowId: insertResult.firstInsertedRowId,
+              endRowId: insertResult.lastInsertedRowId,
+            }
+          : null,
+        `linkedin_realtime:${accountKey}`,
+        inboundMessages,
+      );
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       linkedInLogger.warn("realtime ingest failed", { accountKey, error: message });

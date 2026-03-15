@@ -5,6 +5,7 @@ describe("buildLinkedInSyncBundle", () => {
   it("builds raw events from conversations, messages, and connections", async () => {
     const bundle = await buildLinkedInSyncBundle({
       accountKey: "default",
+      loadProjectedReactions: () => new Map(),
       client: {
         async fetchSelf() {
           return "urn:li:fsd_profile:SELF123";
@@ -139,6 +140,7 @@ describe("buildLinkedInSyncBundle", () => {
   it("emits removal, system, reply, attachment, and reaction events", async () => {
     const bundle = await buildLinkedInSyncBundle({
       accountKey: "default",
+      loadProjectedReactions: () => new Map(),
       client: {
         async fetchSelf() {
           return "urn:li:fsd_profile:SELF123";
