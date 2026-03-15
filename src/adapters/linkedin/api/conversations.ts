@@ -15,12 +15,18 @@ interface GraphQLConversationsResponse {
   data?: {
     messengerConversationsBySyncToken?: ConversationsData;
     messengerConversations?: ConversationsData;
+    messengerConversationsByCategoryQuery?: ConversationsData;
   };
 }
 
 interface ConversationsData {
   elements: RawConversation[];
-  metadata?: { newSyncToken?: string };
+  metadata?: {
+    newSyncToken?: string;
+    deletedUrns?: Array<{
+      conversation?: { entityUrn?: string };
+    }>;
+  };
   paging?: { start?: number; count?: number; total?: number };
 }
 
@@ -185,9 +191,12 @@ function parseConversationsResponse(response: GraphQLConversationsResponse): {
   conversations: Conversation[];
   metadata?: PagingMetadata;
   syncToken?: string;
+  deletedConversationURNs?: string[];
 } {
   const data =
-    response.data?.messengerConversationsBySyncToken ?? response.data?.messengerConversations;
+    response.data?.messengerConversationsBySyncToken ??
+    response.data?.messengerConversations ??
+    response.data?.messengerConversationsByCategoryQuery;
 
   if (!data) {
     return { conversations: [] };
@@ -203,6 +212,10 @@ function parseConversationsResponse(response: GraphQLConversationsResponse): {
         }
       : undefined,
     syncToken: data.metadata?.newSyncToken,
+    deletedConversationURNs:
+      data.metadata?.deletedUrns
+        ?.map((item) => item.conversation?.entityUrn)
+        .filter((urn): urn is string => typeof urn === "string" && urn.length > 0) ?? [],
   };
 }
 
@@ -213,11 +226,11 @@ export async function getConversations(
   const mailboxUrn = await client.getMailboxUrn();
   const queryId = syncToken ? "messengerConversationsBySyncToken" : "messengerConversations";
   const variables: Record<string, string> = syncToken ? { mailboxUrn, syncToken } : { mailboxUrn };
-  const response = await newMessagingGraphQLRequest(
-    client.cookies,
-    queryId,
-    variables,
-  ).doJSON<GraphQLConversationsResponse>();
+  const response = await newMessagingGraphQLRequest(client.cookies, queryId, variables, {
+    pageInstance: client.pageInstance,
+    xLiTrack: client.xLiTrack,
+    allowRedirects: false,
+  }).doJSON<GraphQLConversationsResponse>();
   return parseConversationsResponse(response);
 }
 
@@ -236,6 +249,11 @@ export async function getConversationsBefore(
     client.cookies,
     "messengerConversationsByCursor",
     variables,
+    {
+      pageInstance: client.pageInstance,
+      xLiTrack: client.xLiTrack,
+      allowRedirects: false,
+    },
   ).doJSON<GraphQLConversationsResponse>();
   return parseConversationsResponse(response);
 }

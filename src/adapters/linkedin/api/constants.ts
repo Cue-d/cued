@@ -11,6 +11,8 @@ export const API_URLS = {
   connections: "https://www.linkedin.com/voyager/api/relationships/dash/connections",
   search: "https://www.linkedin.com/voyager/api/voyagerSearchDash",
   messagingBase: "https://www.linkedin.com/messaging",
+  realtimeConnect: "https://www.linkedin.com/realtime/connect",
+  realtimeHeartbeat: "https://www.linkedin.com/realtime/realtimeFrontendClientConnectivityTracking",
 } as const;
 
 export const COOKIE_NAMES = {
@@ -39,6 +41,8 @@ export const GRAPHQL_QUERY_IDS = {
   messengerConversationsByCursor: "messengerConversations.8656fb361a8ad0c178e8d3ff1a84ce26",
   messengerMessagesByConversation: "messengerMessages.34c9888be71c8010fecfb575cb38308f",
   messengerMessagesByAnchorTimestamp: "messengerMessages.4088d03bc70c91c3fa68965cb42336de",
+  messengerMessagingParticipantsByMessageAndEmoji:
+    "messengerMessagingParticipants.6bedbcf9406fa19045dc627ffc51f286",
 } as const;
 
 export const DEFAULT_X_LI_TRACK = JSON.stringify({
@@ -59,6 +63,14 @@ export const RETRY_CONFIG = {
   baseDelayMs: 1000,
   retryableStatusCodes: [429, 502, 503, 504],
   authErrorStatusCodes: [401, 403],
+} as const;
+
+export const REALTIME_TOPICS = {
+  conversations: "conversationsTopic",
+  conversationDeletes: "conversationDeletesTopic",
+  messageSeenReceipts: "messageSeenReceiptsTopic",
+  messages: "messagesTopic",
+  messageReactionSummaries: "messageReactionSummariesTopic",
 } as const;
 
 export const PAGINATION_DEFAULTS = {

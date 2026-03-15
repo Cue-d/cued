@@ -1,6 +1,6 @@
 import { execFileSync } from "node:child_process";
 import { mkdirSync } from "node:fs";
-import { type BrowserContext, type Cookie, chromium, type Page } from "playwright";
+import { type BrowserContext, type Cookie, chromium, type Page, type Request } from "playwright";
 
 declare const localStorage: {
   getItem(key: string): string | null;
@@ -110,6 +110,77 @@ function isLinkedInAuthPage(url: string): boolean {
   return url.includes("/login") || url.includes("/authwall") || url.includes("/checkpoint");
 }
 
+function isLinkedInMessagingUrl(url: string): boolean {
+  return /linkedin\.com\/messaging/i.test(url);
+}
+
+type LinkedInCapture = {
+  pageInstance: string | null;
+  xLiTrack: string | null;
+  serviceVersion: string | null;
+  realtimeQueryMap: string | null;
+  realtimeRecipeMap: string | null;
+};
+
+function captureLinkedInHeaders(capture: LinkedInCapture, request: Request): void {
+  if (!request.url().includes("linkedin.com")) {
+    return;
+  }
+
+  const headers = request.headers();
+  if (!capture.pageInstance && typeof headers["x-li-page-instance"] === "string") {
+    capture.pageInstance = headers["x-li-page-instance"];
+  }
+  if (!capture.xLiTrack && typeof headers["x-li-track"] === "string") {
+    capture.xLiTrack = headers["x-li-track"];
+    try {
+      const parsed = JSON.parse(headers["x-li-track"]) as Record<string, unknown>;
+      if (typeof parsed.mpVersion === "string") {
+        capture.serviceVersion = parsed.mpVersion;
+      } else if (typeof parsed.clientVersion === "string") {
+        capture.serviceVersion = parsed.clientVersion;
+      }
+    } catch {
+      capture.serviceVersion = null;
+    }
+  }
+  if (request.url().includes("/realtime/connect")) {
+    if (!capture.realtimeQueryMap && typeof headers["x-li-query-map"] === "string") {
+      capture.realtimeQueryMap = headers["x-li-query-map"];
+    }
+    if (!capture.realtimeRecipeMap && typeof headers["x-li-recipe-map"] === "string") {
+      capture.realtimeRecipeMap = headers["x-li-recipe-map"];
+    }
+  }
+}
+
+async function captureLinkedInSessionData(
+  context: BrowserContext,
+  page: Page,
+): Promise<LinkedInCapture> {
+  const capture: LinkedInCapture = {
+    pageInstance: null,
+    xLiTrack: null,
+    serviceVersion: null,
+    realtimeQueryMap: null,
+    realtimeRecipeMap: null,
+  };
+  const onRequest = (request: Request) => {
+    captureLinkedInHeaders(capture, request);
+  };
+  context.on("request", onRequest);
+  try {
+    if (!isLinkedInMessagingUrl(page.url())) {
+      await page.goto("https://www.linkedin.com/messaging/", { waitUntil: "domcontentloaded" });
+    }
+    await page.waitForLoadState("networkidle", { timeout: 10_000 }).catch(() => {});
+    await page.waitForTimeout(3_000);
+    return capture;
+  } finally {
+    context.off("request", onRequest);
+  }
+}
+
 async function extractSlackAuth(
   context: BrowserContext,
   page: Page,
@@ -196,6 +267,14 @@ async function extractLinkedInAuth(
     return null;
   }
 
+  const captured = await captureLinkedInSessionData(context, page);
+  const realtimeReady = Boolean(
+    captured.pageInstance &&
+      captured.xLiTrack &&
+      captured.realtimeQueryMap &&
+      captured.realtimeRecipeMap,
+  );
+
   return {
     keychainService: "dev.cued.auth.linkedin",
     keychainAccount: accountKey,
@@ -212,12 +291,23 @@ async function extractLinkedInAuth(
           secure: cookie.secure,
           sameSite: cookie.sameSite,
         })),
+      pageInstance: captured.pageInstance,
+      xLiTrack: captured.xLiTrack,
+      serviceVersion: captured.serviceVersion,
+      realtimeQueryMap: captured.realtimeQueryMap,
+      realtimeRecipeMap: captured.realtimeRecipeMap,
       savedAt: Date.now(),
     },
     resultSummary: {
       provider: "linkedin",
       cookieCount: cookies.length,
       currentUrl: page.url(),
+      realtimeReady,
+      pageInstanceCaptured: Boolean(captured.pageInstance),
+      xLiTrackCaptured: Boolean(captured.xLiTrack),
+      realtimeQueryMapCaptured: Boolean(captured.realtimeQueryMap),
+      realtimeRecipeMapCaptured: Boolean(captured.realtimeRecipeMap),
+      serviceVersion: captured.serviceVersion,
     },
   };
 }
