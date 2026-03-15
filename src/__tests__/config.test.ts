@@ -15,6 +15,8 @@ describe("config path resolution", () => {
     expect(config.CUED_HOME).toBe("/tmp/cued-home");
     expect(config.CUED_DB_PATH).toBe("/tmp/cued-home/local.db");
     expect(config.CUED_SOCKET_PATH).toBe("/tmp/cued-home/cued.sock");
+    expect(config.CUED_DAEMON_LOCK_PATH).toBe("/tmp/cued-home/daemon.lock");
+    expect(config.CUED_MENU_BAR_LOCK_PATH).toBe("/tmp/cued-home/menu-bar.lock");
     expect(config.CUED_DAEMON_LOG_PATH).toBe("/tmp/cued-home/logs/daemon.log");
   });
 
@@ -27,5 +29,6 @@ describe("config path resolution", () => {
     expect(config.CUED_HOME).toBe("/tmp/cued-db");
     expect(config.CUED_DB_PATH).toBe("/tmp/cued-db/local.db");
     expect(config.CUED_BROWSER_DIR).toBe("/tmp/cued-db/browser");
+    expect(config.CUED_DAEMON_LOCK_PATH).toBe("/tmp/cued-db/daemon.lock");
   });
 });
