@@ -130,6 +130,17 @@ function now(): number {
   return Date.now();
 }
 
+function getDaemonIdentity(): {
+  executablePath: string;
+  appPath?: string;
+} {
+  const appPath = process.env.CUED_APP_PATH?.trim() || undefined;
+  return {
+    executablePath: process.execPath,
+    appPath,
+  };
+}
+
 function parseJsonRecord(value: string | null | undefined): Record<string, unknown> | null {
   if (!value) {
     return null;
@@ -1837,9 +1848,12 @@ export async function runDaemon(): Promise<void> {
   };
 
   db.failInProgressRuns("Recovered stale in-progress sync after daemon restart");
+  const daemonIdentity = getDaemonIdentity();
   daemonLogger.info("daemon starting", {
     pid: process.pid,
     version: DAEMON_VERSION,
+    executablePath: daemonIdentity.executablePath,
+    appPath: daemonIdentity.appPath,
   });
   await refreshManagedIntegrationStates(db);
   await reconcileLinkedInRealtimeSessions();
@@ -1852,6 +1866,7 @@ export async function runDaemon(): Promise<void> {
     updatedAt: startedAt,
     status: "running",
     version: DAEMON_VERSION,
+    details: daemonIdentity,
   });
   if (db.getPendingRollbackState()?.targetVersion === DAEMON_VERSION) {
     db.setUpdatePendingRollback(null);
@@ -1867,6 +1882,7 @@ export async function runDaemon(): Promise<void> {
         updatedAt: now(),
         status: "running",
         version: DAEMON_VERSION,
+        details: daemonIdentity,
       });
     } catch (error) {
       if (!isSqliteBusyError(error)) {
@@ -2591,6 +2607,7 @@ export async function runDaemon(): Promise<void> {
       updatedAt: now(),
       status: "stopped",
       version: DAEMON_VERSION,
+      details: daemonIdentity,
     });
     server.close();
     db.close();
@@ -2606,12 +2623,15 @@ export async function runDaemon(): Promise<void> {
 }
 
 async function acquireDaemonLease() {
+  const identity = getDaemonIdentity();
   try {
     return await acquireSingletonLock({
       path: CUED_DAEMON_LOCK_PATH,
       kind: "daemon",
       staleMs: SINGLETON_LOCK_STALE_MS,
       version: DAEMON_VERSION,
+      executablePath: identity.executablePath,
+      appPath: identity.appPath,
       probe: probeDaemonLockOwner,
     });
   } catch (error) {
@@ -2779,7 +2799,16 @@ async function dispatchRequest(
     const runQueueService = new RunQueueService(db, schedulers);
     switch (request.command) {
       case "ping":
-        return { id: request.id, ok: true, result: { pong: true } };
+        return {
+          id: request.id,
+          ok: true,
+          result: {
+            pong: true,
+            pid: process.pid,
+            version: DAEMON_VERSION,
+            ...getDaemonIdentity(),
+          },
+        };
       case "status":
         return {
           id: request.id,
