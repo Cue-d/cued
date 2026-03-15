@@ -1,0 +1,153 @@
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterEach, describe, expect, it } from "vitest";
+import {
+  acquireSingletonLock,
+  readSingletonLock,
+  SingletonLockHeldError,
+} from "../singleton-lock.js";
+
+describe("singleton lock", () => {
+  const tempDirs: string[] = [];
+
+  afterEach(() => {
+    while (tempDirs.length > 0) {
+      const dir = tempDirs.pop();
+      if (dir) {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    }
+  });
+
+  function createLockPath(): string {
+    const dir = mkdtempSync(join(tmpdir(), "cued-singleton-lock-"));
+    tempDirs.push(dir);
+    return join(dir, "daemon.lock");
+  }
+
+  it("acquires, heartbeats, and releases a lock", async () => {
+    let timestamp = 1_700_000_000_000;
+    const path = createLockPath();
+    const lease = await acquireSingletonLock({
+      path,
+      kind: "daemon",
+      pid: 41,
+      now: () => timestamp,
+    });
+
+    expect(readSingletonLock(path)).toEqual({
+      kind: "daemon",
+      pid: 41,
+      startedAt: timestamp,
+      updatedAt: timestamp,
+      version: null,
+    });
+
+    timestamp += 5_000;
+    lease.heartbeat();
+    expect(readSingletonLock(path)?.updatedAt).toBe(timestamp);
+
+    lease.release();
+    expect(readSingletonLock(path)).toBeNull();
+  });
+
+  it("rejects an active owner", async () => {
+    const path = createLockPath();
+    writeFileSync(
+      path,
+      `${JSON.stringify({
+        kind: "daemon",
+        pid: 99,
+        startedAt: 10,
+        updatedAt: 20,
+        version: "0.1.0",
+      })}\n`,
+    );
+
+    await expect(
+      acquireSingletonLock({
+        path,
+        kind: "daemon",
+        pid: 42,
+        now: () => 25,
+        staleMs: 15_000,
+        isProcessRunning: (pid) => pid === 99,
+      }),
+    ).rejects.toMatchObject({
+      metadata: expect.objectContaining({ pid: 99 }),
+    } satisfies Partial<SingletonLockHeldError>);
+  });
+
+  it("recovers a stale owner whose pid is gone", async () => {
+    const path = createLockPath();
+    writeFileSync(
+      path,
+      `${JSON.stringify({
+        kind: "daemon",
+        pid: 99,
+        startedAt: 10,
+        updatedAt: 20,
+        version: "0.1.0",
+      })}\n`,
+    );
+
+    const lease = await acquireSingletonLock({
+      path,
+      kind: "daemon",
+      pid: 42,
+      now: () => 30,
+      staleMs: 15_000,
+      isProcessRunning: () => false,
+    });
+
+    expect(readSingletonLock(path)).toEqual({
+      kind: "daemon",
+      pid: 42,
+      startedAt: 30,
+      updatedAt: 30,
+      version: null,
+    });
+    lease.release();
+  });
+
+  it("recovers a stale lock only when the probe is stale", async () => {
+    const path = createLockPath();
+    writeFileSync(
+      path,
+      `${JSON.stringify({
+        kind: "daemon",
+        pid: 99,
+        startedAt: 10,
+        updatedAt: 20,
+        version: "0.1.0",
+      })}\n`,
+    );
+
+    await expect(
+      acquireSingletonLock({
+        path,
+        kind: "daemon",
+        pid: 42,
+        now: () => 30_100,
+        staleMs: 15_000,
+        isProcessRunning: () => true,
+        probe: async () => "active" as const,
+      }),
+    ).rejects.toBeInstanceOf(SingletonLockHeldError);
+
+    const lease = await acquireSingletonLock({
+      path,
+      kind: "daemon",
+      pid: 42,
+      now: () => 30_100,
+      staleMs: 15_000,
+      isProcessRunning: () => true,
+      probe: async () => "stale" as const,
+    });
+
+    const metadata = JSON.parse(readFileSync(path, "utf8")) as { pid: number };
+    expect(metadata.pid).toBe(42);
+    lease.release();
+  });
+});

@@ -251,7 +251,7 @@ struct CuedNativeCLI {
     let arguments = Array(CommandLine.arguments.dropFirst())
 
     if arguments.isEmpty || arguments == ["--menu-bar"] {
-      runMenuBarApp()
+      try runMenuBarApp()
       return
     }
 
