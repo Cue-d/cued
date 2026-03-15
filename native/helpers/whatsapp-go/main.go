@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"database/sql"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"flag"
@@ -13,7 +14,6 @@ import (
 	"os/signal"
 	"path/filepath"
 	"sort"
-	"strconv"
 	"strings"
 	"sync"
 	"syscall"
@@ -133,6 +133,13 @@ type resyncPage struct {
 	NextCursor  *string           `json:"nextCursor,omitempty"`
 	HasMore     bool              `json:"hasMore"`
 	CompletedAt int64             `json:"completedAt"`
+}
+
+type resyncCursor struct {
+	SnapshotUpdatedAt int64  `json:"snapshotUpdatedAt"`
+	Timestamp         int64  `json:"timestamp,omitempty"`
+	ChatJID           string `json:"chatJID,omitempty"`
+	MessageID         string `json:"messageID,omitempty"`
 }
 
 type syncCache struct {
@@ -367,15 +374,16 @@ func (c *syncCache) applyReceipt(receipt receiptSnapshot) error {
 }
 
 func (c *syncCache) getSnapshot() (stateSnapshot, error) {
-	contacts, err := c.queryContacts(nil)
+	snapshotUpdatedAt := nowMillis()
+	contacts, err := c.queryContacts(nil, snapshotUpdatedAt)
 	if err != nil {
 		return stateSnapshot{}, err
 	}
-	chats, err := c.queryChats(nil)
+	chats, err := c.queryChats(nil, snapshotUpdatedAt)
 	if err != nil {
 		return stateSnapshot{}, err
 	}
-	messages, _, _, err := c.queryMessages(nil, 0, -1)
+	messages, _, _, err := c.queryMessages(nil, &resyncCursor{SnapshotUpdatedAt: snapshotUpdatedAt}, int(^uint(0)>>1))
 	if err != nil {
 		return stateSnapshot{}, err
 	}
@@ -436,49 +444,70 @@ func (c *syncCache) countHistorySyncNotifications() (int, error) {
 }
 
 func (c *syncCache) getResyncPage(sinceMS *int64, cursor string, limit int) (resyncPage, error) {
-	offset, err := parseResyncCursor(cursor)
+	parsedCursor, err := parseResyncCursor(cursor)
 	if err != nil {
 		return resyncPage{}, err
 	}
 	if limit <= 0 {
 		limit = defaultResyncLimit
 	}
+	initialPage := parsedCursor == nil
+	if parsedCursor == nil {
+		parsedCursor = &resyncCursor{
+			SnapshotUpdatedAt: nowMillis(),
+		}
+	}
 
 	page := resyncPage{
 		HasMore:     false,
-		CompletedAt: nowMillis(),
+		CompletedAt: parsedCursor.SnapshotUpdatedAt,
 	}
-	if offset == 0 {
-		page.Contacts, err = c.queryContacts(sinceMS)
+	if initialPage {
+		page.Contacts, err = c.queryContacts(sinceMS, parsedCursor.SnapshotUpdatedAt)
 		if err != nil {
 			return resyncPage{}, err
 		}
-		page.Chats, err = c.queryChats(sinceMS)
+		page.Chats, err = c.queryChats(sinceMS, parsedCursor.SnapshotUpdatedAt)
 		if err != nil {
 			return resyncPage{}, err
 		}
 	}
 
-	messages, total, returned, err := c.queryMessages(sinceMS, offset, limit)
+	messages, nextCursor, hasMore, err := c.queryMessages(sinceMS, parsedCursor, limit)
 	if err != nil {
 		return resyncPage{}, err
 	}
 	page.Messages = messages
-	if offset+returned < total {
-		nextCursor := strconv.Itoa(offset + returned)
-		page.NextCursor = &nextCursor
-		page.HasMore = true
-	}
+	page.NextCursor = nextCursor
+	page.HasMore = hasMore
 	return page, nil
 }
 
-func (c *syncCache) queryContacts(sinceMS *int64) ([]contactSnapshot, error) {
+func (cursor *resyncCursor) hasPosition() bool {
+	return strings.TrimSpace(cursor.ChatJID) != "" && strings.TrimSpace(cursor.MessageID) != ""
+}
+
+func encodeResyncCursor(cursor *resyncCursor) (string, error) {
+	if cursor == nil || cursor.SnapshotUpdatedAt <= 0 {
+		return "", errors.New("invalid resync cursor")
+	}
+	encoded, err := json.Marshal(cursor)
+	if err != nil {
+		return "", err
+	}
+	return base64.RawURLEncoding.EncodeToString(encoded), nil
+}
+
+func (c *syncCache) queryContacts(sinceMS *int64, snapshotUpdatedAt int64) ([]contactSnapshot, error) {
 	query := `SELECT jid, phone, name, push_name FROM contacts`
 	args := []any{}
+	clauses := []string{`updated_at <= ?`}
+	args = append(args, snapshotUpdatedAt)
 	if sinceMS != nil {
-		query += ` WHERE updated_at > ?`
+		clauses = append(clauses, `updated_at > ?`)
 		args = append(args, *sinceMS)
 	}
+	query += ` WHERE ` + strings.Join(clauses, ` AND `)
 	query += ` ORDER BY jid`
 	rows, err := c.db.Query(query, args...)
 	if err != nil {
@@ -508,13 +537,16 @@ func (c *syncCache) queryContacts(sinceMS *int64) ([]contactSnapshot, error) {
 	return contacts, rows.Err()
 }
 
-func (c *syncCache) queryChats(sinceMS *int64) ([]chatSnapshot, error) {
+func (c *syncCache) queryChats(sinceMS *int64, snapshotUpdatedAt int64) ([]chatSnapshot, error) {
 	query := `SELECT jid, name, is_group, participants_json FROM chats`
 	args := []any{}
+	clauses := []string{`updated_at <= ?`}
+	args = append(args, snapshotUpdatedAt)
 	if sinceMS != nil {
-		query += ` WHERE updated_at > ?`
+		clauses = append(clauses, `updated_at > ?`)
 		args = append(args, *sinceMS)
 	}
+	query += ` WHERE ` + strings.Join(clauses, ` AND `)
 	query += ` ORDER BY jid`
 	rows, err := c.db.Query(query, args...)
 	if err != nil {
@@ -547,38 +579,44 @@ func (c *syncCache) queryChats(sinceMS *int64) ([]chatSnapshot, error) {
 
 func (c *syncCache) queryMessages(
 	sinceMS *int64,
-	offset int,
+	cursor *resyncCursor,
 	limit int,
-) ([]messageSnapshot, int, int, error) {
+) ([]messageSnapshot, *string, bool, error) {
 	tx, err := c.db.BeginTx(context.Background(), &sql.TxOptions{ReadOnly: true})
 	if err != nil {
-		return nil, 0, 0, err
+		return nil, nil, false, err
 	}
 	defer func() {
 		_ = tx.Rollback()
 	}()
 
-	countQuery := `SELECT COUNT(*) FROM messages`
 	selectQuery := `SELECT chat_jid, message_id, sender_jid, participant_jid, from_me, timestamp, text, push_name, status, delivered_at, read_at FROM messages`
 	args := []any{}
+	if cursor == nil || cursor.SnapshotUpdatedAt <= 0 {
+		return nil, nil, false, errors.New("invalid resync cursor")
+	}
+	clauses := []string{`updated_at <= ?`}
+	args = append(args, cursor.SnapshotUpdatedAt)
 	if sinceMS != nil {
-		countQuery += ` WHERE updated_at > ?`
-		selectQuery += ` WHERE updated_at > ?`
+		clauses = append(clauses, `updated_at > ?`)
 		args = append(args, *sinceMS)
 	}
-	var total int
-	if err := tx.QueryRow(countQuery, args...).Scan(&total); err != nil {
-		return nil, 0, 0, err
+	if cursor.hasPosition() {
+		clauses = append(
+			clauses,
+			`(timestamp > ? OR (timestamp = ? AND chat_jid > ?) OR (timestamp = ? AND chat_jid = ? AND message_id > ?))`,
+		)
+		args = append(args, cursor.Timestamp, cursor.Timestamp, cursor.ChatJID, cursor.Timestamp, cursor.ChatJID, cursor.MessageID)
 	}
-	if limit < 0 {
-		limit = total
-		offset = 0
+	if limit <= 0 {
+		limit = defaultResyncLimit
 	}
-	selectQuery += ` ORDER BY timestamp, chat_jid, message_id LIMIT ? OFFSET ?`
-	selectArgs := append(append([]any{}, args...), limit, offset)
+	selectQuery += ` WHERE ` + strings.Join(clauses, ` AND `)
+	selectQuery += ` ORDER BY timestamp, chat_jid, message_id LIMIT ?`
+	selectArgs := append(append([]any{}, args...), limit+1)
 	rows, err := tx.Query(selectQuery, selectArgs...)
 	if err != nil {
-		return nil, 0, 0, err
+		return nil, nil, false, err
 	}
 	defer rows.Close()
 
@@ -604,7 +642,7 @@ func (c *syncCache) queryMessages(
 			&deliveredAt,
 			&readAt,
 		); err != nil {
-			return nil, 0, 0, err
+			return nil, nil, false, err
 		}
 		message := messageSnapshot{
 			MessageID: messageID,
@@ -634,12 +672,26 @@ func (c *syncCache) queryMessages(
 		messages = append(messages, message)
 	}
 	if err := rows.Err(); err != nil {
-		return nil, 0, 0, err
+		return nil, nil, false, err
 	}
 	if err := tx.Commit(); err != nil {
-		return nil, 0, 0, err
+		return nil, nil, false, err
 	}
-	return messages, total, len(messages), nil
+	hasMore := len(messages) > limit
+	if !hasMore {
+		return messages, nil, false, nil
+	}
+	nextCursor, err := encodeResyncCursor(&resyncCursor{
+		SnapshotUpdatedAt: cursor.SnapshotUpdatedAt,
+		Timestamp:         messages[limit-1].Timestamp,
+		ChatJID:           messages[limit-1].ChatJID,
+		MessageID:         messages[limit-1].MessageID,
+	})
+	if err != nil {
+		return nil, nil, false, err
+	}
+	messages = messages[:limit]
+	return messages, &nextCursor, true, nil
 }
 
 func upsertContactTx(tx *sql.Tx, contact contactSnapshot, updatedAt int64) error {
@@ -715,16 +767,26 @@ func upsertMessageTx(tx *sql.Tx, message messageSnapshot, updatedAt int64) error
 	return err
 }
 
-func parseResyncCursor(cursor string) (int, error) {
+func parseResyncCursor(cursor string) (*resyncCursor, error) {
 	trimmed := strings.TrimSpace(cursor)
 	if trimmed == "" {
-		return 0, nil
+		return nil, nil
 	}
-	offset, err := strconv.Atoi(trimmed)
-	if err != nil || offset < 0 {
-		return 0, fmt.Errorf("invalid resync cursor: %q", cursor)
+	decoded, err := base64.RawURLEncoding.DecodeString(trimmed)
+	if err != nil {
+		return nil, fmt.Errorf("invalid resync cursor: %q", cursor)
 	}
-	return offset, nil
+	var parsed resyncCursor
+	if err := json.Unmarshal(decoded, &parsed); err != nil {
+		return nil, fmt.Errorf("invalid resync cursor: %q", cursor)
+	}
+	if parsed.SnapshotUpdatedAt <= 0 {
+		return nil, fmt.Errorf("invalid resync cursor: %q", cursor)
+	}
+	if (parsed.ChatJID == "") != (parsed.MessageID == "") {
+		return nil, fmt.Errorf("invalid resync cursor: %q", cursor)
+	}
+	return &parsed, nil
 }
 
 type helperRuntime struct {
