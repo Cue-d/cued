@@ -178,6 +178,13 @@ function ensureWithinLimit(
   limitBytes = DEFAULT_ATTACHMENT_CACHE_LIMIT_BYTES,
 ): void {
   const entries = db.listReadyAttachmentCacheEntries();
+  const remainingRefsByPath = new Map<string, number>();
+  for (const entry of entries) {
+    if (!entry.cache_path) {
+      continue;
+    }
+    remainingRefsByPath.set(entry.cache_path, (remainingRefsByPath.get(entry.cache_path) ?? 0) + 1);
+  }
   let totalBytes = entries.reduce((sum, entry) => sum + (entry.size_bytes ?? 0), 0);
   if (totalBytes <= limitBytes) {
     return;
@@ -188,7 +195,13 @@ function ensureWithinLimit(
       break;
     }
     if (entry.cache_path && existsSync(entry.cache_path)) {
-      rmSync(entry.cache_path, { force: true });
+      const remainingRefs = (remainingRefsByPath.get(entry.cache_path) ?? 0) - 1;
+      if (remainingRefs <= 0) {
+        rmSync(entry.cache_path, { force: true });
+        remainingRefsByPath.delete(entry.cache_path);
+      } else {
+        remainingRefsByPath.set(entry.cache_path, remainingRefs);
+      }
     }
     totalBytes -= entry.size_bytes ?? 0;
     db.upsertAttachmentCacheEntry({
@@ -410,6 +423,7 @@ export async function fetchAttachment(
     maxBytes?: number;
     allowLarge?: boolean;
     extractText?: boolean;
+    cacheLimitBytes?: number;
     providerFetchers?: ProviderFetchHandlers;
   },
 ): Promise<AttachmentFetchResult> {
@@ -509,7 +523,7 @@ export async function fetchAttachment(
       });
     }
 
-    ensureWithinLimit(db);
+    ensureWithinLimit(db, input.cacheLimitBytes);
     const cache = db.getAttachmentCacheEntry(attachment.id, variant);
     return {
       ...buildListedAttachment(db, attachment),

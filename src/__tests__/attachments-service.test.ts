@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -269,6 +269,97 @@ describe("attachment service", () => {
       }),
     );
     expect(cacheEntry?.last_error).toContain("Attachment source path does not exist");
+
+    db.close();
+  });
+
+  it("keeps a shared cached object on disk while another ready entry still references it", async () => {
+    const db = createDb();
+    const fileDir = mkdtempSync(join(tmpdir(), "cued-attachments-shared-"));
+    tempDirs.push(fileDir);
+    const sourcePath = join(fileDir, "shared.txt");
+    writeFileSync(sourcePath, "shared cache payload\n");
+
+    const timestamp = Date.now();
+    const sql = sqlite(db);
+    sql
+      .prepare(
+        `
+        INSERT INTO conversations (
+          id, platform, account_key, source_conversation_key, native_conversation_key, type, subtype,
+          service, name, topic, participant_names, last_message_id, last_message_at, last_message_preview,
+          unread_count, created_at, updated_at
+        ) VALUES (?, 'imessage', 'local', ?, NULL, 'dm', NULL, 'iMessage', ?, NULL, '', NULL, NULL, NULL, 0, ?, ?)
+      `,
+      )
+      .run("conversation-shared", "source-conversation-shared", "Thread", timestamp, timestamp);
+
+    for (const suffix of ["a", "b"]) {
+      sql
+        .prepare(
+          `
+          INSERT INTO messages (
+            id, platform, account_key, platform_message_id, conversation_id, sender_contact_id,
+            sender_source_key, sender_name, conversation_name, sent_at, service, status, is_from_me,
+            content, delivered_at, read_at, edited_at, deleted_at, reply_to_message_id, is_deleted,
+            is_edited, attachment_count, reaction_count, created_at, updated_at
+          ) VALUES (?, 'imessage', 'local', ?, ?, NULL, NULL, 'Ben', 'Thread', ?, 'iMessage', 'delivered', 0, 'hello', NULL, NULL, NULL, NULL, NULL, 0, 0, 1, 0, ?, ?)
+        `,
+        )
+        .run(
+          `message-shared-${suffix}`,
+          `platform-message-shared-${suffix}`,
+          "conversation-shared",
+          timestamp,
+          timestamp,
+          timestamp,
+        );
+      sql
+        .prepare(
+          `
+          INSERT INTO message_attachments (
+            id, message_id, platform, account_key, source_attachment_key, kind, mime_type, filename,
+            title, local_path, remote_url, size_bytes, text_content, access_kind, access_ref_json,
+            preview_ref_json, availability_status, provider_metadata_json, metadata_json, created_at, updated_at
+          ) VALUES (?, ?, 'imessage', 'local', ?, 'file', 'text/plain', 'shared.txt', 'Shared', ?, NULL, ?, NULL, 'local_path', ?, NULL, 'available', '{}', '{}', ?, ?)
+        `,
+        )
+        .run(
+          `attachment-shared-${suffix}`,
+          `message-shared-${suffix}`,
+          `source-attachment-shared-${suffix}`,
+          sourcePath,
+          21,
+          JSON.stringify({ path: sourcePath }),
+          timestamp,
+          timestamp,
+        );
+    }
+
+    const first = await fetchAttachment(db, {
+      attachmentId: "attachment-shared-a",
+      cacheLimitBytes: 30,
+    });
+    const second = await fetchAttachment(db, {
+      attachmentId: "attachment-shared-b",
+      cacheLimitBytes: 30,
+    });
+
+    expect(first.localPath).toBeTruthy();
+    expect(second.localPath).toBeTruthy();
+    expect(first.localPath).toBe(second.localPath);
+
+    const firstCache = db.getAttachmentCacheEntry("attachment-shared-a", "original");
+    const secondCache = db.getAttachmentCacheEntry("attachment-shared-b", "original");
+
+    expect(firstCache?.status).toBe("evicted");
+    expect(secondCache?.status).toBe("ready");
+    expect(secondCache?.cache_path).toBeTruthy();
+    expect(secondCache?.cache_path).toBe(first.localPath);
+    if (secondCache?.cache_path) {
+      cleanupPaths.push(secondCache.cache_path);
+      expect(existsSync(secondCache.cache_path)).toBe(true);
+    }
 
     db.close();
   });
