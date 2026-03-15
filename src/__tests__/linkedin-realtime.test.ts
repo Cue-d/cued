@@ -63,6 +63,34 @@ describe("LinkedInRealtimeSession", () => {
     );
     expect(heartbeatAborted).toHaveBeenCalledTimes(1);
   });
+
+  it("suppresses stream abort rejections after heartbeat failure wins the race", async () => {
+    const { internals } = createSession();
+    const controller = new AbortController();
+    const unhandledRejection = vi.fn();
+
+    internals.runHeartbeatLoop = vi.fn(async () => {
+      throw new Error("heartbeat failed");
+    });
+
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => {
+        const stream = new ReadableStream<Uint8Array>({
+          start() {},
+        });
+        return new Response(stream, { status: 200 });
+      }),
+    );
+
+    process.once("unhandledRejection", unhandledRejection);
+    await expect(internals.connectOnce(controller.signal)).rejects.toThrow("heartbeat failed");
+    controller.abort();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    process.removeListener("unhandledRejection", unhandledRejection);
+
+    expect(unhandledRejection).not.toHaveBeenCalled();
+  });
 });
 
 describe("LinkedInRealtimeSupervisor", () => {

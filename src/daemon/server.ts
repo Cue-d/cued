@@ -977,9 +977,10 @@ export async function runDaemon(): Promise<void> {
   const updateLinkedInCheckpointFromRealtime = (accountKey: string) => {
     const checkpoint = db.getCheckpoint("linkedin", accountKey);
     const projection = db.getProjectionBacklog();
-    const sourceCursor = checkpoint?.source_cursor_json
-      ? (JSON.parse(checkpoint.source_cursor_json) as Record<string, unknown>)
-      : null;
+    const sourceCursor = safeParseJsonRecord(
+      checkpoint?.source_cursor_json ?? null,
+      "sync_checkpoints.source_cursor_json",
+    );
     db.upsertCheckpoint({
       platform: "linkedin",
       accountKey,
