@@ -1,4 +1,15 @@
-import { existsSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import {
+  closeSync,
+  existsSync,
+  fstatSync,
+  fsyncSync,
+  ftruncateSync,
+  openSync,
+  readFileSync,
+  rmSync,
+  statSync,
+  writeSync,
+} from "node:fs";
 import process from "node:process";
 
 export const SINGLETON_LOCK_HEARTBEAT_MS = 5_000;
@@ -96,12 +107,9 @@ export async function acquireSingletonLock(
 
   const tryAcquire = (): SingletonLockLease => {
     const metadata = buildMetadata();
-    writeFileSync(options.path, `${JSON.stringify(metadata)}\n`, {
-      encoding: "utf8",
-      flag: "wx",
-      mode: 0o600,
-    });
-    return createLease(options.path, metadata, now);
+    const fd = openSync(options.path, "wx", 0o600);
+    writeLockFile(fd, metadata);
+    return createLease(options.path, fd, metadata, now);
   };
 
   try {
@@ -127,16 +135,38 @@ export async function acquireSingletonLock(
   }
 
   rmSync(options.path, { force: true });
-  return tryAcquire();
+  try {
+    return tryAcquire();
+  } catch (error) {
+    if (isAlreadyExistsError(error)) {
+      throw new SingletonLockHeldError(options.path, readSingletonLock(options.path));
+    }
+    throw error;
+  }
 }
 
 function createLease(
   path: string,
+  fd: number,
   metadata: SingletonLockMetadata,
   now: () => number,
 ): SingletonLockLease {
   let released = false;
+  let ownedFd: number | null = fd;
   let current = metadata;
+
+  const stillOwnsPath = (): boolean => {
+    if (ownedFd === null) {
+      return false;
+    }
+    try {
+      const fdStats = fstatSync(ownedFd);
+      const pathStats = statSync(path);
+      return fdStats.dev === pathStats.dev && fdStats.ino === pathStats.ino;
+    } catch {
+      return false;
+    }
+  };
 
   return {
     path,
@@ -144,36 +174,54 @@ function createLease(
       return current;
     },
     heartbeat() {
-      if (released) {
+      if (released || ownedFd === null) {
+        return;
+      }
+      if (!stillOwnsPath()) {
+        closeQuietly(ownedFd);
+        ownedFd = null;
+        released = true;
         return;
       }
       current = {
         ...current,
         updatedAt: now(),
       };
-      persistLock(path, current);
+      writeLockFile(ownedFd, current);
     },
     release() {
       if (released) {
         return;
       }
       released = true;
-      rmSync(path, { force: true });
+      const ownsPath = stillOwnsPath();
+      if (ownedFd !== null) {
+        closeQuietly(ownedFd);
+        ownedFd = null;
+      }
+      if (ownsPath) {
+        rmSync(path, { force: true });
+      }
     },
   };
 }
 
-function persistLock(path: string, metadata: SingletonLockMetadata): void {
-  const tempPath = `${path}.${metadata.pid}.tmp`;
-  writeFileSync(tempPath, `${JSON.stringify(metadata)}\n`, {
-    encoding: "utf8",
-    mode: 0o600,
-  });
-  renameSync(tempPath, path);
+function writeLockFile(fd: number, metadata: SingletonLockMetadata): void {
+  ftruncateSync(fd, 0);
+  writeSync(fd, `${JSON.stringify(metadata)}\n`, 0, "utf8");
+  fsyncSync(fd);
 }
 
 function isAlreadyExistsError(error: unknown): error is NodeJS.ErrnoException {
   return Boolean(error && typeof error === "object" && "code" in error && error.code === "EEXIST");
+}
+
+function closeQuietly(fd: number): void {
+  try {
+    closeSync(fd);
+  } catch {
+    // Best effort.
+  }
 }
 
 function defaultIsProcessRunning(pid: number): boolean {

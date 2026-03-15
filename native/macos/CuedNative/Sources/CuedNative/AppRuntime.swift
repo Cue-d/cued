@@ -49,11 +49,13 @@ private enum SingletonLockError: Error {
 
 private final class SingletonLockLease {
   private let path: String
+  private var fileHandle: FileHandle?
   private(set) var metadata: SingletonLockMetadata
   private var released = false
 
-  private init(path: String, metadata: SingletonLockMetadata) {
+  private init(path: String, fileHandle: FileHandle, metadata: SingletonLockMetadata) {
     self.path = path
+    self.fileHandle = fileHandle
     self.metadata = metadata
   }
 
@@ -71,12 +73,9 @@ private final class SingletonLockLease {
       updatedAt: currentTimeMs(),
       version: version
     )
-    let lease = SingletonLockLease(path: path, metadata: metadata)
-
     do {
-      try lease.create()
-      return lease
-    } catch CocoaError.fileWriteFileExists {
+      return try SingletonLockLease.create(path: path, metadata: metadata)
+    } catch let error as NSError where error.domain == NSCocoaErrorDomain && error.code == CocoaError.fileWriteFileExists.rawValue {
       let existing = read(path: path)
       let fresh = existing.map { currentTimeMs() - $0.updatedAt < staleMs } ?? false
       let pidRunning = existing.map { isProcessRunning($0.pid) } ?? false
@@ -87,17 +86,26 @@ private final class SingletonLockLease {
         throw SingletonLockError.held(existing)
       }
       try? FileManager.default.removeItem(atPath: path)
-      try lease.create()
-      return lease
+      do {
+        return try SingletonLockLease.create(path: path, metadata: metadata)
+      } catch let retryError as NSError where retryError.domain == NSCocoaErrorDomain && retryError.code == CocoaError.fileWriteFileExists.rawValue {
+        throw SingletonLockError.held(read(path: path))
+      }
     }
   }
 
   func heartbeat() {
-    guard !released else {
+    guard !released, let fileHandle else {
+      return
+    }
+    guard stillOwnsPath(fileHandle) else {
+      closeQuietly(fileHandle)
+      self.fileHandle = nil
+      released = true
       return
     }
     metadata.updatedAt = currentTimeMs()
-    persist()
+    writeLockFile(fileHandle, metadata: metadata)
   }
 
   func release() {
@@ -105,7 +113,14 @@ private final class SingletonLockLease {
       return
     }
     released = true
-    try? FileManager.default.removeItem(atPath: path)
+    let ownsPath = fileHandle.map(stillOwnsPath) ?? false
+    if let fileHandle {
+      closeQuietly(fileHandle)
+      self.fileHandle = nil
+    }
+    if ownsPath {
+      try? FileManager.default.removeItem(atPath: path)
+    }
   }
 
   static func read(path: String) -> SingletonLockMetadata? {
@@ -115,17 +130,53 @@ private final class SingletonLockLease {
     return try? JSONDecoder().decode(SingletonLockMetadata.self, from: data)
   }
 
-  private func create() throws {
+  private static func create(path: String, metadata: SingletonLockMetadata) throws -> SingletonLockLease {
     let data = try JSONEncoder().encode(metadata)
     try data.write(to: URL(fileURLWithPath: path), options: [.withoutOverwriting])
+    guard let fileHandle = FileHandle(forUpdatingAtPath: path) else {
+      throw CocoaError(.fileNoSuchFile)
+    }
+    return SingletonLockLease(path: path, fileHandle: fileHandle, metadata: metadata)
   }
 
-  private func persist() {
-    let data = try? JSONEncoder().encode(metadata)
-    guard let data else {
-      return
+  private func stillOwnsPath(_ fileHandle: FileHandle) -> Bool {
+    var fileStat = stat()
+    guard fstat(fileHandle.fileDescriptor, &fileStat) == 0 else {
+      return false
     }
-    try? data.write(to: URL(fileURLWithPath: path), options: [.atomic])
+
+    var pathStat = stat()
+    let statResult = path.withCString { pointer in
+      Darwin.lstat(pointer, &pathStat)
+    }
+    guard statResult == 0 else {
+      return false
+    }
+
+    return fileStat.st_dev == pathStat.st_dev && fileStat.st_ino == pathStat.st_ino
+  }
+}
+
+private func writeLockFile(_ fileHandle: FileHandle, metadata: SingletonLockMetadata) {
+  guard let data = try? JSONEncoder().encode(metadata) else {
+    return
+  }
+
+  do {
+    try fileHandle.truncate(atOffset: 0)
+    try fileHandle.seek(toOffset: 0)
+    try fileHandle.write(contentsOf: data + Data("\n".utf8))
+    try fileHandle.synchronize()
+  } catch {
+    // Best effort.
+  }
+}
+
+private func closeQuietly(_ fileHandle: FileHandle) {
+  do {
+    try fileHandle.close()
+  } catch {
+    // Best effort.
   }
 }
 
