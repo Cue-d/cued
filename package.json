@@ -26,7 +26,7 @@
     "permissions:macos": "bash scripts/request-macos-access.sh",
     "sign:notarize:macos": "bash scripts/sign-and-notarize-cued-app.sh",
     "test": "vitest run",
-    "test:perf": "tsx src/perf/run.ts",
+    "test:perf": "tsx src/runtime/perf/run.ts",
     "typecheck": "tsc --noEmit"
   },
   "engines": {

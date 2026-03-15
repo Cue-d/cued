@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { createConnection } from "node:net";
-import { CUED_SOCKET_PATH } from "./config.js";
-import type { DaemonRequest, DaemonResponse } from "./ipc/protocol.js";
+import { CUED_SOCKET_PATH } from "./core/config.js";
+import type { DaemonRequest, DaemonResponse } from "./runtime/ipc.js";
 
 const DAEMON_CONNECT_RETRY_DELAYS_MS = [100, 250, 500] as const;
 

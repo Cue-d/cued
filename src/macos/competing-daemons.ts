@@ -2,8 +2,8 @@ import { execFileSync } from "node:child_process";
 import { existsSync, realpathSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import process from "node:process";
-import { CUED_DAEMON_LOCK_PATH, CUED_SOCKET_PATH } from "../config.js";
-import { readSingletonLock, type SingletonLockMetadata } from "../singleton-lock.js";
+import { CUED_DAEMON_LOCK_PATH, CUED_SOCKET_PATH } from "../core/config.js";
+import { readSingletonLock, type SingletonLockMetadata } from "../core/singleton-lock.js";
 
 const DEFAULT_WAIT_MS = 5_000;
 const DEFAULT_POLL_MS = 100;

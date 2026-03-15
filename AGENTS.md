@@ -47,17 +47,18 @@ The Electron app and legacy shared packages are gone. Do not add new code agains
 
 ## Key Files
 
-| Feature               | Files                                                                |
-| --------------------- | -------------------------------------------------------------------- |
-| CLI entrypoint        | `src/cli.ts`                                                         |
-| Daemon server         | `src/daemon/`                                                        |
-| Integrations and auth | `src/integrations/`                                                  |
-| Database layer        | `src/db/`                                                            |
-| Diagnostics           | `src/diagnostics/doctor.ts`                                          |
-| macOS install helpers | `src/macos/install.ts`                                               |
-| App bundle build      | `scripts/build-cued-daemon-app.sh`                                   |
-| DMG/signing           | `scripts/build-cued-dmg.sh`, `scripts/sign-and-notarize-cued-app.sh` |
-| Native host           | `native/macos/CuedNative/Sources/CuedNative/`                        |
+| Feature               | Files                                                                                                      |
+| --------------------- | ---------------------------------------------------------------------------------------------------------- |
+| CLI entrypoint        | `src/cli.ts`                                                                                               |
+| Daemon server         | `src/runtime/daemon/`                                                                                      |
+| Platform auth/state   | `src/platforms/core/auth/`, `src/platforms/core/state/`                                                    |
+| Platform implementations | `src/platforms/`                                                                                         |
+| Database layer        | `src/db/`                                                                                                  |
+| Diagnostics           | `src/runtime/doctor.ts`                                                                                    |
+| macOS install helpers | `src/macos/install.ts`                                                                                     |
+| App bundle build      | `scripts/build-cued-daemon-app.sh`                                                                         |
+| DMG/signing           | `scripts/build-cued-dmg.sh`, `scripts/sign-and-notarize-cued-app.sh`                                       |
+| Native host           | `native/macos/CuedNative/Sources/CuedNative/`                                                              |
 
 ## Commands
 
