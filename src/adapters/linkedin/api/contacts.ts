@@ -149,6 +149,7 @@ export async function getConnections(
     {
       pageInstance: client.pageInstance,
       xLiTrack: client.xLiTrack,
+      allowRedirects: false,
     },
   )
     .withHeader("Accept", CONTENT_TYPES.linkedInNormalized)

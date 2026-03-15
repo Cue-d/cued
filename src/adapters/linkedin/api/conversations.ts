@@ -233,6 +233,7 @@ export async function getConversations(
     {
       pageInstance: client.pageInstance,
       xLiTrack: client.xLiTrack,
+      allowRedirects: false,
     },
   ).doJSON<GraphQLConversationsResponse>();
   return parseConversationsResponse(response);
@@ -256,6 +257,7 @@ export async function getConversationsBefore(
     {
       pageInstance: client.pageInstance,
       xLiTrack: client.xLiTrack,
+      allowRedirects: false,
     },
   ).doJSON<GraphQLConversationsResponse>();
   return parseConversationsResponse(response);

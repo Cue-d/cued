@@ -169,7 +169,7 @@ class AuthedRequest {
         method: this.method,
         headers: this.headers,
         body: this.body ?? undefined,
-        redirect: this.options.allowRedirects ? "follow" : "manual",
+        redirect: this.options.allowRedirects === false ? "manual" : "follow",
       });
 
       if (
