@@ -11,11 +11,6 @@ import { CUED_DB_PATH, CUED_SOCKET_PATH, ensureCuedDirs } from "./core/config.js
 import { resolveHostOS } from "./core/platform-capabilities.js";
 import { openCuedDatabase, openCuedDatabaseReadOnly } from "./db/database.js";
 import {
-  buildDoctorReport,
-  buildPermissionStatus,
-  refreshMessagesAutomationVerification,
-} from "./runtime/doctor.js";
-import {
   getAppBundleInfo,
   getCLISymlinkStatus,
   getLaunchAgentStatus,
@@ -28,6 +23,11 @@ import {
 import { IntegrationAuthService } from "./platforms/core/auth/service.js";
 import { getIntegrationSummary, listIntegrationStates } from "./platforms/core/state/status.js";
 import { runDaemon } from "./runtime/daemon/server.js";
+import {
+  buildDoctorReport,
+  buildPermissionStatus,
+  refreshMessagesAutomationVerification,
+} from "./runtime/doctor.js";
 import {
   doctorHooksConfig,
   emitHookEvent,

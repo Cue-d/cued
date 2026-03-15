@@ -16,10 +16,7 @@ vi.mock("node:child_process", async (importOriginal) => {
 });
 
 import { CuedDatabase } from "../db/database.js";
-import {
-  buildPermissionStatus,
-  refreshMessagesAutomationVerification,
-} from "./doctor.js";
+import { buildPermissionStatus, refreshMessagesAutomationVerification } from "./doctor.js";
 
 const itDarwin = process.platform === "darwin" ? it : it.skip;
 
