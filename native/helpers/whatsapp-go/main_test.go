@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"os"
 	"strconv"
 	"testing"
 	"time"
@@ -220,6 +221,41 @@ func TestHistorySyncBatchFromEventUsesHistoryPayload(t *testing.T) {
 	}
 	if len(snapshot.Chats) != 1 || snapshot.Chats[0].JID != "15551234567@s.whatsapp.net" {
 		t.Fatalf("expected chat in snapshot, got %+v", snapshot.Chats)
+	}
+}
+
+func TestHistoryMessageSnapshotFallbackRetainsMediaMetadata(t *testing.T) {
+	historyMsg := &waHistorySync.HistorySyncMsg{
+		Message: &waWeb.WebMessageInfo{
+			Key: &waCommon.MessageKey{
+				ID:        proto.String("wamid-history-media"),
+				RemoteJID: proto.String("15551234567@s.whatsapp.net"),
+				FromMe:    proto.Bool(false),
+			},
+			MessageTimestamp: proto.Uint64(1_710_000_000),
+			PushName:         proto.String("Theo"),
+			Message: &waProto.Message{
+				ImageMessage: &waProto.ImageMessage{
+					Mimetype:   proto.String("image/jpeg"),
+					FileLength: proto.Uint64(42),
+					Caption:    proto.String("photo"),
+				},
+			},
+		},
+	}
+
+	snapshot, ok := historyMessageSnapshot(nil, types.NewJID("15551234567", types.DefaultUserServer), historyMsg)
+	if !ok {
+		t.Fatal("expected fallback history snapshot")
+	}
+	if snapshot.MessageProto == nil || *snapshot.MessageProto == "" {
+		t.Fatalf("expected encoded message proto, got %#v", snapshot.MessageProto)
+	}
+	if len(snapshot.Attachments) != 1 {
+		t.Fatalf("expected one attachment, got %+v", snapshot.Attachments)
+	}
+	if snapshot.Attachments[0].Kind != "image" {
+		t.Fatalf("expected image attachment, got %+v", snapshot.Attachments[0])
 	}
 }
 
@@ -509,5 +545,62 @@ func TestHelperStateRetainsDownloadableMediaAcrossReload(t *testing.T) {
 		t.Fatal("reloaded helper state lost downloadable media metadata")
 	} else if len(message.Attachments) != 1 {
 		t.Fatalf("reloaded helper state kept %d attachments, want 1", len(message.Attachments))
+	}
+}
+
+func TestApplySnapshotDoesNotRewriteUnchangedMediaFile(t *testing.T) {
+	state, err := newHelperState(t.TempDir())
+	if err != nil {
+		t.Fatalf("newHelperState: %v", err)
+	}
+	defer state.close()
+
+	protoValue := "encoded-message"
+	snapshot := stateSnapshot{
+		Messages: []messageSnapshot{
+			{
+				MessageID:    "message-1",
+				ChatJID:      "12015550123@s.whatsapp.net",
+				MessageProto: &protoValue,
+				Attachments: []attachmentSnapshot{{
+					ID:         "attachment-1",
+					Kind:       "image",
+					AccessKind: "provider_fetch",
+				}},
+			},
+			{
+				MessageID:    "message-2",
+				ChatJID:      "12015550123@s.whatsapp.net",
+				MessageProto: &protoValue,
+				Attachments: []attachmentSnapshot{{
+					ID:         "attachment-2",
+					Kind:       "document",
+					AccessKind: "provider_fetch",
+				}},
+			},
+		},
+	}
+
+	if err := state.applySnapshot(snapshot); err != nil {
+		t.Fatalf("applySnapshot first pass: %v", err)
+	}
+
+	infoBefore, err := os.Stat(state.mediaPath)
+	if err != nil {
+		t.Fatalf("stat media file after first apply: %v", err)
+	}
+
+	time.Sleep(20 * time.Millisecond)
+
+	if err := state.applySnapshot(snapshot); err != nil {
+		t.Fatalf("applySnapshot second pass: %v", err)
+	}
+
+	infoAfter, err := os.Stat(state.mediaPath)
+	if err != nil {
+		t.Fatalf("stat media file after second apply: %v", err)
+	}
+	if !infoAfter.ModTime().Equal(infoBefore.ModTime()) {
+		t.Fatalf("expected unchanged media snapshot to avoid rewrite, mod time changed from %v to %v", infoBefore.ModTime(), infoAfter.ModTime())
 	}
 }
