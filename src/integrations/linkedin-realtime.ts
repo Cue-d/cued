@@ -288,6 +288,7 @@ export class LinkedInRealtimeSession implements LinkedInRealtimeSessionLike {
           Math.min(this.reconnectMaxMs, this.reconnectBaseMs * 2 ** Math.max(0, attempt - 1)),
         ).catch(() => undefined);
       } finally {
+        this.controller?.abort();
         this.controller = null;
       }
     }
@@ -431,10 +432,14 @@ export class LinkedInRealtimeSession implements LinkedInRealtimeSessionLike {
           if (!payload) {
             continue;
           }
-          const event = JSON.parse(payload) as RealtimeEventEnvelope;
-          this.setStatus({ lastEventAt: now() });
-          if (event["com.linkedin.realtimefrontend.DecoratedEvent"] && this.userEntityUrn) {
-            this.onEvent?.(this.accountKey, event, this.userEntityUrn);
+          try {
+            const event = JSON.parse(payload) as RealtimeEventEnvelope;
+            this.setStatus({ lastEventAt: now() });
+            if (event["com.linkedin.realtimefrontend.DecoratedEvent"] && this.userEntityUrn) {
+              this.onEvent?.(this.accountKey, event, this.userEntityUrn);
+            }
+          } catch {
+            continue;
           }
         }
       }
