@@ -125,6 +125,7 @@ export function buildLinkedInRawEventsFromRealtimeEnvelope(input: {
           observedAt,
           reason,
           conversation,
+          userEntityUrn: input.userEntityUrn,
         });
       }
       pushConversationContext(
@@ -148,6 +149,7 @@ export function buildLinkedInRawEventsFromRealtimeEnvelope(input: {
         observedAt,
         reason: "deleted",
         conversation,
+        userEntityUrn: input.userEntityUrn,
       });
     }
     case "messagesTopic": {
@@ -165,6 +167,7 @@ export function buildLinkedInRawEventsFromRealtimeEnvelope(input: {
           observedAt,
           reason,
           conversation: message.conversation,
+          userEntityUrn: input.userEntityUrn,
         });
       }
       pushConversationContext(
@@ -213,6 +216,7 @@ export function buildLinkedInRawEventsFromRealtimeEnvelope(input: {
           observedAt,
           reason,
           conversation: reaction.message.conversation,
+          userEntityUrn: input.userEntityUrn,
         });
       }
       pushConversationContext(
@@ -261,6 +265,7 @@ export function buildLinkedInRawEventsFromRealtimeEnvelope(input: {
           observedAt,
           reason,
           conversation: receipt.message.conversation,
+          userEntityUrn: input.userEntityUrn,
         });
       }
       pushConversationContext(
