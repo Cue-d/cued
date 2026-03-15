@@ -23,6 +23,7 @@ describe("integration state management", () => {
   afterEach(() => {
     delete process.env.CUED_CONTACTS_NATIVE_BINARY;
     delete process.env.CUED_IMESSAGE_DB_PATH;
+    delete process.env.CUED_SIGNAL_CLI_PATH;
     delete process.env.CUED_SLACK_APP_BINARY;
     delete process.env.CUED_APP_PATH;
     delete process.env.CUED_WHATSAPP_HELPER_BINARY;
@@ -218,6 +219,37 @@ describe("integration state management", () => {
         }),
       ]),
     );
+    db.close();
+  });
+
+  it("uses the linked Signal account as the display label after auth", () => {
+    const db = createDb();
+    const requested = requestIntegrationAccess(db, "signal");
+
+    const completed = completeAuthSession(db, requested.authSession.id, {
+      state: "authenticated",
+      resultSummary: { linkedAccount: "+15551234567" },
+    });
+
+    expect(completed.integration?.platform).toBe("signal");
+    expect(completed.integration?.displayName).toBe("+15551234567");
+    db.close();
+  });
+
+  it("prefers the WhatsApp push name as the display label after auth", () => {
+    const db = createDb();
+    const requested = requestIntegrationAccess(db, "whatsapp");
+
+    const completed = completeAuthSession(db, requested.authSession.id, {
+      state: "authenticated",
+      resultSummary: {
+        accountJid: "15551234567@s.whatsapp.net",
+        pushName: "Theo",
+      },
+    });
+
+    expect(completed.integration?.platform).toBe("whatsapp");
+    expect(completed.integration?.displayName).toBe("Theo");
     db.close();
   });
 
@@ -489,6 +521,81 @@ describe("integration state management", () => {
         }),
       ]),
     );
+    db.close();
+  });
+
+  it("falls back safely when persisted integration and auth JSON is malformed", () => {
+    const db = createDb();
+
+    db.upsertIntegrationState({
+      platform: "slack",
+      accountKey: "T123",
+      displayName: "Acme",
+      authState: "authenticated",
+      enabled: true,
+      connectionKind: "browser-session",
+      syncCapable: true,
+      launchStrategy: "chromium-auth",
+      launchTarget: "https://slack.com/signin",
+      importedFrom: "local-cli",
+      artifactPaths: ["/tmp/profile"],
+      metadata: { browserProfileDir: "/tmp/profile", supportedByDaemon: true },
+    });
+
+    const sessionId = db.createAuthSession({
+      platform: "slack",
+      accountKey: "T123",
+      integrationStateId: "slack:T123",
+      state: "requested",
+    });
+    db.updateAuthSessionState({
+      id: sessionId,
+      state: "authenticated",
+      resultSummary: { teamId: "T123" },
+    });
+
+    const sqlite = (
+      db as unknown as {
+        sqlite: {
+          prepare: (sql: string) => {
+            run: (...params: unknown[]) => void;
+          };
+        };
+      }
+    ).sqlite;
+    sqlite
+      .prepare(
+        `
+          UPDATE integration_states
+          SET metadata_json = ?, artifact_paths_json = ?
+          WHERE platform = ? AND account_key = ?
+        `,
+      )
+      .run("{", '{"not":"an-array"}', "slack", "T123");
+    sqlite
+      .prepare("UPDATE auth_sessions SET result_summary_json = ? WHERE id = ?")
+      .run("{", sessionId);
+
+    const integration = buildIntegrationStatus(db).integrations.find(
+      (entry) => entry.platform === "slack" && entry.accountKey === "T123",
+    );
+    const authSession = getAuthSessionSummary(db, sessionId);
+
+    expect(integration).toEqual(
+      expect.objectContaining({
+        platform: "slack",
+        accountKey: "T123",
+        metadata: null,
+        artifactPaths: [],
+      }),
+    );
+    expect(authSession).toEqual(
+      expect.objectContaining({
+        id: sessionId,
+        resultSummary: null,
+      }),
+    );
+
     db.close();
   });
 });

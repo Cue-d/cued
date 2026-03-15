@@ -33,5 +33,10 @@ let package = Package(
         .linkedLibrary("sqlite3"),
       ]
     ),
+    .testTarget(
+      name: "CuedNativeTests",
+      dependencies: ["CuedNative"],
+      path: "Tests/CuedNativeTests"
+    ),
   ]
 )

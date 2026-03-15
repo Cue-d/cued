@@ -60,7 +60,8 @@ export const syncRuns = sqliteTable("sync_runs", {
   runType: textEnum("run_type", SYNC_RUN_TYPE_VALUES).notNull(),
   status: textEnum("status", SYNC_RUN_STATUS_VALUES).notNull(),
   trigger: text("trigger").notNull(),
-  startedAt: integer("started_at").notNull(),
+  queuedAt: integer("queued_at").notNull(),
+  startedAt: integer("started_at"),
   finishedAt: integer("finished_at"),
   detailsJson: text("details_json"),
 });
