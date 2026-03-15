@@ -146,8 +146,63 @@ function participantSourceKey(participant: MessagingParticipant): string {
   return `linkedin:${normalizeMemberUrn(participant.entityURN)}`;
 }
 
+function firstHttpsValue(value: unknown): string | null {
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    return trimmed.startsWith("https://") ? trimmed : null;
+  }
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      const resolved = firstHttpsValue(item);
+      if (resolved) {
+        return resolved;
+      }
+    }
+    return null;
+  }
+  if (typeof value === "object" && value !== null) {
+    for (const nested of Object.values(value)) {
+      const resolved = firstHttpsValue(nested);
+      if (resolved) {
+        return resolved;
+      }
+    }
+  }
+  return null;
+}
+
 function renderContentAttachments(message: Message): Array<Record<string, unknown>> {
-  return (message.renderContent ?? []).map((item) => ({ ...item }));
+  return (message.renderContent ?? [])
+    .map((item, index) => {
+      const url = firstHttpsValue(item);
+      return {
+        id: `linkedin-render:${index}`,
+        kind:
+          typeof item.entityType === "string"
+            ? item.entityType
+            : typeof item.type === "string"
+              ? item.type
+              : "attachment",
+        title:
+          typeof item.title === "string"
+            ? item.title
+            : typeof item.name === "string"
+              ? item.name
+              : null,
+        text:
+          typeof item.text === "string"
+            ? item.text
+            : typeof item.altText === "string"
+              ? item.altText
+              : null,
+        url,
+        access_kind: url ? "remote_url" : "none",
+        access_ref: url ? { url } : null,
+        availability_status: url ? "available" : "metadata_only",
+        provider_metadata: { ...item },
+      };
+    })
+    .filter((item) => item.url || item.title || item.text);
 }
 
 function isLinkedInMessageDeleted(message: Message): boolean {

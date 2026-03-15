@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import Database from "better-sqlite3";
@@ -98,6 +98,19 @@ describe("CuedDatabase", () => {
         timestamp,
         timestamp,
       );
+  }
+
+  function sqlite(db: CuedDatabase) {
+    return (
+      db as unknown as {
+        sqlite: {
+          prepare: (sql: string) => {
+            run: (...params: unknown[]) => void;
+            get: (...params: unknown[]) => unknown;
+          };
+        };
+      }
+    ).sqlite;
   }
 
   it("creates the schema and exposes overview counts", () => {
@@ -507,7 +520,11 @@ describe("CuedDatabase", () => {
     `);
 
     const appliedAt = 1_700_000_000_000;
-    for (const migration of MIGRATIONS.slice(0, -1)) {
+    const syncRunMigrationId = "0011_sync_run_timing_v2";
+    for (const migration of MIGRATIONS) {
+      if (migration.id === syncRunMigrationId) {
+        continue;
+      }
       sqlite
         .prepare("INSERT INTO schema_migrations (id, applied_at) VALUES (?, ?)")
         .run(migration.id, appliedAt);
@@ -810,6 +827,85 @@ describe("CuedDatabase", () => {
     expect(result.insertedCount).toBe(1);
     expect(result.insertedEvents).toHaveLength(1);
     expect(db.getOverview().rawEvents).toBe(1);
+
+    db.close();
+  });
+
+  it("removes cached attachment files when clearing projected state", () => {
+    const db = createDb();
+    const timestamp = Date.now();
+    const cacheDir = mkdtempSync(join(tmpdir(), "cued-attachment-cache-"));
+    tempDirs.push(cacheDir);
+    const cachePath = join(cacheDir, "cached.txt");
+    writeFileSync(cachePath, "cached attachment payload");
+
+    const sql = sqlite(db);
+    sql
+      .prepare(
+        `
+        INSERT INTO conversations (
+          id, platform, account_key, source_conversation_key, native_conversation_key, type, subtype,
+          service, name, topic, participant_names, last_message_id, last_message_at, last_message_preview,
+          unread_count, created_at, updated_at
+        ) VALUES (?, 'imessage', 'local', ?, NULL, 'dm', NULL, 'iMessage', ?, NULL, '', NULL, NULL, NULL, 0, ?, ?)
+      `,
+      )
+      .run("conversation-cache-1", "source-conversation-cache-1", "Thread", timestamp, timestamp);
+    sql
+      .prepare(
+        `
+        INSERT INTO messages (
+          id, platform, account_key, platform_message_id, conversation_id, sender_contact_id,
+          sender_source_key, sender_name, conversation_name, sent_at, service, status, is_from_me,
+          content, delivered_at, read_at, edited_at, deleted_at, reply_to_message_id, is_deleted,
+          is_edited, attachment_count, reaction_count, created_at, updated_at
+        ) VALUES (?, 'imessage', 'local', ?, ?, NULL, NULL, 'Ben', 'Thread', ?, 'iMessage', 'delivered', 0, 'hello', NULL, NULL, NULL, NULL, NULL, 0, 0, 1, 0, ?, ?)
+      `,
+      )
+      .run(
+        "message-cache-1",
+        "platform-message-cache-1",
+        "conversation-cache-1",
+        timestamp,
+        timestamp,
+        timestamp,
+      );
+    sql
+      .prepare(
+        `
+        INSERT INTO message_attachments (
+          id, message_id, platform, account_key, source_attachment_key, kind, mime_type, filename,
+          title, local_path, remote_url, size_bytes, text_content, access_kind, access_ref_json,
+          preview_ref_json, availability_status, provider_metadata_json, metadata_json, created_at, updated_at
+        ) VALUES (?, ?, 'imessage', 'local', ?, 'file', 'text/plain', 'cached.txt', 'Cached', ?, NULL, ?, NULL, 'local_path', ?, NULL, 'available', '{}', '{}', ?, ?)
+      `,
+      )
+      .run(
+        "attachment-cache-1",
+        "message-cache-1",
+        "source-attachment-cache-1",
+        cachePath,
+        25,
+        JSON.stringify({ path: cachePath }),
+        timestamp,
+        timestamp,
+      );
+    db.upsertAttachmentCacheEntry({
+      attachmentId: "attachment-cache-1",
+      variant: "original",
+      status: "ready",
+      cachePath,
+      mimeType: "text/plain",
+      sizeBytes: 25,
+      sha256: "abc123",
+      fetchedAt: timestamp,
+      lastAccessedAt: timestamp,
+    });
+
+    db.clearProjectedState();
+
+    expect(existsSync(cachePath)).toBe(false);
+    expect(db.getAttachmentCacheEntry("attachment-cache-1", "original")).toBeNull();
 
     db.close();
   });

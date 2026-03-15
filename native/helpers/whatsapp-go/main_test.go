@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"strconv"
 	"testing"
@@ -464,5 +465,49 @@ func TestConnectedEventPreservesHistorySyncMetadata(t *testing.T) {
 	}
 	if metadata.LastHistoryChunkOrder != 2 || metadata.LastHistoryProgress != 100 {
 		t.Fatalf("expected history sync chunk/progress to survive connect, got %+v", metadata)
+	}
+}
+
+func TestHelperStateRetainsDownloadableMediaAcrossReload(t *testing.T) {
+	state, err := newHelperState(t.TempDir())
+	if err != nil {
+		t.Fatalf("newHelperState: %v", err)
+	}
+	defer state.close()
+
+	protoValue := "encoded-message"
+	for index := range 5001 {
+		message := messageSnapshot{
+			MessageID: fmt.Sprintf("message-%d", index),
+			ChatJID:   "12015550123@s.whatsapp.net",
+			Text:      "hello",
+		}
+		if index == 0 {
+			message.MessageProto = &protoValue
+			message.Attachments = []attachmentSnapshot{{
+				ID:         "attachment-0",
+				Kind:       "image",
+				AccessKind: "provider_fetch",
+			}}
+		}
+		state.setMessage(message)
+	}
+
+	if message := state.findMessage("12015550123@s.whatsapp.net", "message-0"); message == nil {
+		t.Fatal("downloadable media metadata was not retained")
+	} else if message.MessageProto == nil || *message.MessageProto != protoValue {
+		t.Fatalf("unexpected proto for retained media message: %#v", message.MessageProto)
+	}
+
+	reloaded, err := newHelperState(state.storeDir)
+	if err != nil {
+		t.Fatalf("reload helper state: %v", err)
+	}
+	defer reloaded.close()
+
+	if message := reloaded.findMessage("12015550123@s.whatsapp.net", "message-0"); message == nil {
+		t.Fatal("reloaded helper state lost downloadable media metadata")
+	} else if len(message.Attachments) != 1 {
+		t.Fatalf("reloaded helper state kept %d attachments, want 1", len(message.Attachments))
 	}
 }

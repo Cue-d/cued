@@ -7,6 +7,7 @@ import { DEFAULT_CHAT_DB_PATH } from "../adapters/imessage/reader.js";
 import { isAdapterPlatform, listAutoSyncPlatforms } from "../adapters/registry.js";
 import { runAdapter } from "../adapters/runner.js";
 import { getCurrentAppVersion, getCurrentReleaseChannel } from "../app-metadata.js";
+import { fetchAttachment, listAttachments, searchAttachments } from "../attachments/service.js";
 import { CUED_DAEMON_LOCK_PATH, CUED_SOCKET_PATH } from "../config.js";
 import { safeParseJsonRecord } from "../db/codecs.js";
 import { type OutboundMessageRow, openCuedDatabase } from "../db/database.js";
@@ -119,6 +120,20 @@ function getAppStatusMetadata(db: { getAppMetadata: () => unknown }): {
 
 function now(): number {
   return Date.now();
+}
+
+function parseJsonRecord(value: string | null | undefined): Record<string, unknown> | null {
+  if (!value) {
+    return null;
+  }
+  try {
+    const parsed = JSON.parse(value) as unknown;
+    return typeof parsed === "object" && parsed !== null
+      ? (parsed as Record<string, unknown>)
+      : null;
+  } catch {
+    return null;
+  }
 }
 
 type QueueSchedulers = {
@@ -2616,6 +2631,74 @@ async function dispatchRequest(
           result,
         };
       }
+      case "attachments-list":
+        return {
+          id: request.id,
+          ok: true,
+          result: listAttachments(db, {
+            messageId: request.messageId,
+            conversationId: request.conversationId,
+            platform: request.platform,
+            accountKey: request.accountKey,
+            limit: request.limit,
+          }),
+        };
+      case "attachment-fetch":
+        return {
+          id: request.id,
+          ok: true,
+          result: await fetchAttachment(db, {
+            attachmentId: request.attachmentId,
+            variant: request.variant,
+            maxBytes: request.maxBytes,
+            allowLarge: request.allowLarge,
+            extractText: request.extractText,
+            providerFetchers: {
+              whatsapp: async (attachment) => {
+                const accessRef = parseJsonRecord(attachment.access_ref_json);
+                const chatJID = typeof accessRef?.chatJID === "string" ? accessRef.chatJID : null;
+                const messageID =
+                  typeof accessRef?.messageID === "string" ? accessRef.messageID : null;
+                const attachmentIndex =
+                  typeof accessRef?.attachmentIndex === "number" ? accessRef.attachmentIndex : 0;
+                if (!chatJID || !messageID) {
+                  throw new Error("WhatsApp attachment is missing provider fetch coordinates");
+                }
+
+                const session =
+                  whatsAppRealtime.getSession(attachment.account_key) ??
+                  (await whatsAppRealtime.waitForConnected(
+                    attachment.account_key,
+                    WHATSAPP_SEND_SESSION_WAIT_MS,
+                  ));
+                if (!session?.isConnected()) {
+                  throw new Error(
+                    `WhatsApp realtime session is not connected for '${attachment.account_key}'`,
+                  );
+                }
+
+                const result = await session.downloadMedia(chatJID, messageID, attachmentIndex);
+                return {
+                  buffer: Buffer.from(result.dataBase64, "base64"),
+                  mimeType: result.mimeType ?? attachment.mime_type,
+                  filename: result.filename ?? attachment.filename,
+                };
+              },
+            },
+          }),
+        };
+      case "attachments-search":
+        return {
+          id: request.id,
+          ok: true,
+          result: searchAttachments(db, {
+            query: request.query,
+            platform: request.platform,
+            accountKey: request.accountKey,
+            conversationId: request.conversationId,
+            limit: request.limit,
+          }),
+        };
       case "message-send":
         return {
           id: request.id,
