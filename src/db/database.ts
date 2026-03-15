@@ -4,9 +4,9 @@ import Database from "better-sqlite3";
 import { and, asc, desc, eq, inArray, sql } from "drizzle-orm";
 import { type BetterSQLite3Database, drizzle } from "drizzle-orm/better-sqlite3";
 import type { SQLiteTable } from "drizzle-orm/sqlite-core";
-import { getCurrentAppVersion, getCurrentReleaseChannel } from "../app-metadata.js";
-import { CUED_DB_PATH, ensureCuedDirs } from "../config.js";
-import { normalizePhone } from "../lib/phone.js";
+import { getCurrentAppVersion, getCurrentReleaseChannel } from "../core/app-metadata.js";
+import { CUED_DB_PATH, ensureCuedDirs } from "../core/config.js";
+import { normalizePhone } from "../core/utils/phone.js";
 import type {
   AuthSessionState,
   ConnectionKind,
@@ -19,13 +19,13 @@ import type {
   SyncMode,
   SyncRunStatus,
   SyncRunType,
-} from "../types/provider.js";
+} from "../core/types/provider.js";
 import type {
   PendingRollbackState,
   UpdateErrorState,
   UpdateReleaseState,
   UpdateStatusSnapshot,
-} from "../updater/types.js";
+} from "../runtime/updater/types.js";
 import { safeParseJson, safeStringifyJson } from "./codecs.js";
 import { MIGRATIONS } from "./migrations.js";
 import * as schema from "./schema.js";

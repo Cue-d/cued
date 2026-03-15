@@ -1,4 +1,4 @@
-import { createLogger } from "../logging.js";
+import { createLogger } from "../core/logging.js";
 
 const codecLogger = createLogger("db-codec");
 
