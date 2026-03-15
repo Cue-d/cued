@@ -566,6 +566,15 @@ func TestApplySnapshotDoesNotRewriteUnchangedMediaFile(t *testing.T) {
 					ID:         "attachment-1",
 					Kind:       "image",
 					AccessKind: "provider_fetch",
+					AccessRef: map[string]interface{}{
+						"chatJID":         "12015550123@s.whatsapp.net",
+						"messageID":       "message-1",
+						"attachmentIndex": 0,
+					},
+					ProviderMeta: map[string]interface{}{
+						"kind":  "image",
+						"width": 640,
+					},
 				}},
 			},
 			{
@@ -576,6 +585,15 @@ func TestApplySnapshotDoesNotRewriteUnchangedMediaFile(t *testing.T) {
 					ID:         "attachment-2",
 					Kind:       "document",
 					AccessKind: "provider_fetch",
+					AccessRef: map[string]interface{}{
+						"chatJID":         "12015550123@s.whatsapp.net",
+						"messageID":       "message-2",
+						"attachmentIndex": 0,
+					},
+					ProviderMeta: map[string]interface{}{
+						"kind":      "document",
+						"pageCount": 3,
+					},
 				}},
 			},
 		},
@@ -602,5 +620,71 @@ func TestApplySnapshotDoesNotRewriteUnchangedMediaFile(t *testing.T) {
 	}
 	if !infoAfter.ModTime().Equal(infoBefore.ModTime()) {
 		t.Fatalf("expected unchanged media snapshot to avoid rewrite, mod time changed from %v to %v", infoBefore.ModTime(), infoAfter.ModTime())
+	}
+}
+
+func TestApplySnapshotDoesNotRewriteUnchangedMediaFileAfterReload(t *testing.T) {
+	state, err := newHelperState(t.TempDir())
+	if err != nil {
+		t.Fatalf("newHelperState: %v", err)
+	}
+
+	protoValue := "encoded-message"
+	snapshot := stateSnapshot{
+		Messages: []messageSnapshot{
+			{
+				MessageID:    "message-1",
+				ChatJID:      "12015550123@s.whatsapp.net",
+				MessageProto: &protoValue,
+				Attachments: []attachmentSnapshot{{
+					ID:         "attachment-1",
+					Kind:       "image",
+					AccessKind: "provider_fetch",
+					AccessRef: map[string]interface{}{
+						"chatJID":         "12015550123@s.whatsapp.net",
+						"messageID":       "message-1",
+						"attachmentIndex": 0,
+					},
+					ProviderMeta: map[string]interface{}{
+						"kind":  "image",
+						"width": 640,
+					},
+				}},
+			},
+		},
+	}
+
+	if err := state.applySnapshot(snapshot); err != nil {
+		t.Fatalf("applySnapshot first pass: %v", err)
+	}
+
+	infoBefore, err := os.Stat(state.mediaPath)
+	if err != nil {
+		t.Fatalf("stat media file after first apply: %v", err)
+	}
+
+	storeDir := state.storeDir
+	if err := state.close(); err != nil {
+		t.Fatalf("close helper state: %v", err)
+	}
+
+	time.Sleep(20 * time.Millisecond)
+
+	reloaded, err := newHelperState(storeDir)
+	if err != nil {
+		t.Fatalf("reload helper state: %v", err)
+	}
+	defer reloaded.close()
+
+	if err := reloaded.applySnapshot(snapshot); err != nil {
+		t.Fatalf("applySnapshot after reload: %v", err)
+	}
+
+	infoAfter, err := os.Stat(reloaded.mediaPath)
+	if err != nil {
+		t.Fatalf("stat media file after reload apply: %v", err)
+	}
+	if !infoAfter.ModTime().Equal(infoBefore.ModTime()) {
+		t.Fatalf("expected unchanged media snapshot after reload to avoid rewrite, mod time changed from %v to %v", infoBefore.ModTime(), infoAfter.ModTime())
 	}
 }

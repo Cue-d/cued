@@ -13,7 +13,6 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
-	"reflect"
 	"sort"
 	"strings"
 	"sync"
@@ -235,6 +234,18 @@ func (s *helperState) setMessage(message messageSnapshot) {
 	s.upsertDownloadableMessageLocked(message)
 }
 
+func downloadableMessageSnapshotsEqual(a downloadableMessageSnapshot, b downloadableMessageSnapshot) bool {
+	aJSON, err := json.Marshal(a)
+	if err != nil {
+		return false
+	}
+	bJSON, err := json.Marshal(b)
+	if err != nil {
+		return false
+	}
+	return string(aJSON) == string(bJSON)
+}
+
 func (s *helperState) upsertDownloadableMessageInMemoryLocked(message messageSnapshot) bool {
 	if message.MessageProto == nil || strings.TrimSpace(*message.MessageProto) == "" || len(message.Attachments) == 0 {
 		return false
@@ -248,7 +259,7 @@ func (s *helperState) upsertDownloadableMessageInMemoryLocked(message messageSna
 	replaced := false
 	for idx, existing := range s.media {
 		if normalizeJID(existing.ChatJID) == normalizeJID(message.ChatJID) && existing.MessageID == message.MessageID {
-			if reflect.DeepEqual(existing, entry) {
+			if downloadableMessageSnapshotsEqual(existing, entry) {
 				return false
 			}
 			s.media[idx] = entry
