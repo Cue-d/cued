@@ -15,7 +15,10 @@ describe("app metadata", () => {
 
     const expectedVersion = (
       JSON.parse(
-        readFileSync(join(dirname(fileURLToPath(import.meta.url)), "..", "..", "package.json"), "utf8"),
+        readFileSync(
+          join(dirname(fileURLToPath(import.meta.url)), "..", "..", "package.json"),
+          "utf8",
+        ),
       ) as { version: string }
     ).version;
 

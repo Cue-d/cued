@@ -9,7 +9,12 @@ const FALLBACK_RELEASE_CHANNEL: ReleaseChannel = "dev";
 
 function packageVersionFallback(): string {
   try {
-    const packageJsonPath = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "package.json");
+    const packageJsonPath = join(
+      dirname(fileURLToPath(import.meta.url)),
+      "..",
+      "..",
+      "package.json",
+    );
     const parsed = JSON.parse(readFileSync(packageJsonPath, "utf8")) as { version?: unknown };
     return typeof parsed.version === "string" ? parsed.version : FALLBACK_APP_VERSION;
   } catch {
