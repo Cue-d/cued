@@ -182,17 +182,19 @@ export function buildLinkedInRawEventsFromRealtimeEnvelope(input: {
         observedAt,
         message.sender,
       );
+      if (message.messageBodyRenderFormat === "SYSTEM") {
+        rawEvents.push(buildLinkedInSystemTimelineEvent(input.accountKey, message, observedAt));
+      }
       rawEvents.push(
-        message.messageBodyRenderFormat === "SYSTEM"
-          ? buildLinkedInSystemTimelineEvent(input.accountKey, message, observedAt)
-          : buildLinkedInMessageEvent({
-              accountKey: input.accountKey,
-              message,
-              fallbackConversationUrn:
-                message.conversationURN || message.conversation?.entityURN || "",
-              userEntityUrn: input.userEntityUrn,
-              observedAt,
-            }),
+        buildLinkedInMessageEvent({
+          accountKey: input.accountKey,
+          message,
+          fallbackConversationUrn:
+            message.conversationURN || message.conversation?.entityURN || "",
+          userEntityUrn: input.userEntityUrn,
+          observedAt,
+          eventKind: message.messageBodyRenderFormat === "SYSTEM" ? "message_observed" : undefined,
+        }),
       );
       return rawEvents;
     }
