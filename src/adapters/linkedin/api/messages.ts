@@ -132,12 +132,51 @@ export async function getMessages(
       conversationUrn: linkedInEncode(conversationURN),
       count: String(PAGINATION_DEFAULTS.messagesCount),
     },
+    {
+      pageInstance: client.pageInstance,
+      xLiTrack: client.xLiTrack,
+    },
   ).doJSON<MessagesGraphQLResponse>();
 
   const data = response.data?.messengerMessagesByConversation;
   return {
     messages: (data?.elements ?? []).map((message) => parseRawMessage(message, conversationURN)),
     metadata: parsePagingMetadata(data?.paging),
+    prevCursor:
+      data?.paging && "prevCursor" in data.paging && typeof data.paging.prevCursor === "string"
+        ? data.paging.prevCursor
+        : null,
+  };
+}
+
+export async function getMessagesWithPrevCursor(
+  client: LinkedInClient,
+  conversationId: string,
+  prevCursor: string,
+): Promise<MessagesResult> {
+  const conversationURN = ensureMsgConversationURN(conversationId);
+  const response = await newMessagingGraphQLRequest(
+    client.cookies,
+    "messengerMessagesByConversation",
+    {
+      conversationUrn: linkedInEncode(conversationURN),
+      count: String(PAGINATION_DEFAULTS.messagesCount),
+      prevCursor: linkedInEncode(prevCursor),
+    },
+    {
+      pageInstance: client.pageInstance,
+      xLiTrack: client.xLiTrack,
+    },
+  ).doJSON<MessagesGraphQLResponse>();
+
+  const data = response.data?.messengerMessagesByConversation;
+  return {
+    messages: (data?.elements ?? []).map((message) => parseRawMessage(message, conversationURN)),
+    metadata: parsePagingMetadata(data?.paging),
+    prevCursor:
+      data?.paging && "prevCursor" in data.paging && typeof data.paging.prevCursor === "string"
+        ? data.paging.prevCursor
+        : null,
   };
 }
 
@@ -156,11 +195,19 @@ export async function getMessagesBefore(
       countBefore: String(PAGINATION_DEFAULTS.messagesCount),
       countAfter: "0",
     },
+    {
+      pageInstance: client.pageInstance,
+      xLiTrack: client.xLiTrack,
+    },
   ).doJSON<MessagesGraphQLResponse>();
 
   const data = response.data?.messengerMessagesByAnchorTimestamp;
   return {
     messages: (data?.elements ?? []).map((message) => parseRawMessage(message, conversationURN)),
     metadata: parsePagingMetadata(data?.paging),
+    prevCursor:
+      data?.paging && "prevCursor" in data.paging && typeof data.paging.prevCursor === "string"
+        ? data.paging.prevCursor
+        : null,
   };
 }

@@ -146,6 +146,10 @@ export async function getConnections(
   const response = await newGetRequest(
     `${API_URLS.connections}?${queryParams.toString()}`,
     client.cookies,
+    {
+      pageInstance: client.pageInstance,
+      xLiTrack: client.xLiTrack,
+    },
   )
     .withHeader("Accept", CONTENT_TYPES.linkedInNormalized)
     .withXLIHeaders()
