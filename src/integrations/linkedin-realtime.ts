@@ -362,8 +362,10 @@ export class LinkedInRealtimeSession implements LinkedInRealtimeSessionLike {
     const abortHeartbeat = () => heartbeatController.abort();
     signal.addEventListener("abort", abortHeartbeat, { once: true });
     const heartbeatPromise = this.runHeartbeatLoop(heartbeatController.signal);
+    const readPromise = this.readStream(response.body, signal);
+    readPromise.catch(() => undefined);
     try {
-      await Promise.race([this.readStream(response.body, signal), heartbeatPromise]);
+      await Promise.race([readPromise, heartbeatPromise]);
       if (!signal.aborted) {
         this.onDisconnected?.(this.getStatus());
         throw new Error("LinkedIn realtime stream closed");
