@@ -2,17 +2,27 @@ import { COOKIE_NAMES, DEFAULT_X_LI_TRACK, USER_AGENT } from "./constants.js";
 import { getConnections } from "./contacts.js";
 import { getConversations, getConversationsBefore } from "./conversations.js";
 import { linkedInEncode, newGetRequest } from "./request.js";
-import type { Connection, Conversation, Cookie, Message, PagingMetadata } from "./types.js";
+import { getReactors } from "./reactions.js";
+import type {
+  Connection,
+  Conversation,
+  Cookie,
+  Message,
+  MessagingParticipant,
+  PagingMetadata,
+} from "./types.js";
 
 export interface ConversationsResult {
   conversations: Conversation[];
   metadata?: PagingMetadata;
   syncToken?: string;
+  deletedConversationURNs?: string[];
 }
 
 export interface MessagesResult {
   messages: Message[];
   metadata?: PagingMetadata;
+  prevCursor?: string | null;
 }
 
 export interface ConnectionsResult {
@@ -25,18 +35,21 @@ export interface LinkedInClientOptions {
   cookies?: Cookie[];
   userAgent?: string;
   xLiTrack?: string;
+  pageInstance?: string;
 }
 
 export class LinkedInClient {
   private readonly _cookies: Cookie[];
   private readonly _userAgent: string;
   private readonly _xLiTrack: string;
+  private readonly _pageInstance: string;
   private _userEntityURN: string | null = null;
 
   constructor(options: LinkedInClientOptions = {}) {
     this._cookies = options.cookies ?? [];
     this._userAgent = options.userAgent ?? USER_AGENT;
     this._xLiTrack = options.xLiTrack ?? DEFAULT_X_LI_TRACK;
+    this._pageInstance = options.pageInstance ?? "urn:li:page:messaging_thread;";
   }
 
   get cookies(): Cookie[] {
@@ -55,6 +68,10 @@ export class LinkedInClient {
     return this._xLiTrack;
   }
 
+  get pageInstance(): string {
+    return this._pageInstance;
+  }
+
   isAuthenticated(): boolean {
     return (
       this._cookies.some((cookie) => cookie.name === COOKIE_NAMES.authToken && cookie.value) &&
@@ -67,7 +84,10 @@ export class LinkedInClient {
       return this._userEntityURN;
     }
 
-    const response = await newGetRequest("https://www.linkedin.com/voyager/api/me", this._cookies)
+    const response = await newGetRequest("https://www.linkedin.com/voyager/api/me", this._cookies, {
+      pageInstance: this._pageInstance,
+      xLiTrack: this._xLiTrack,
+    })
       .withXLIHeaders()
       .doJSON<{
         data?: { plainId?: number };
@@ -111,6 +131,14 @@ export class LinkedInClient {
     return getMessages(this, conversationId);
   }
 
+  async getMessagesWithPrevCursor(
+    conversationId: string,
+    prevCursor: string,
+  ): Promise<MessagesResult> {
+    const { getMessagesWithPrevCursor } = await import("./messages.js");
+    return getMessagesWithPrevCursor(this, conversationId, prevCursor);
+  }
+
   async getMessagesBefore(conversationId: string, timestamp: number): Promise<MessagesResult> {
     const { getMessagesBefore } = await import("./messages.js");
     return getMessagesBefore(this, conversationId, timestamp);
@@ -118,5 +146,9 @@ export class LinkedInClient {
 
   async getConnections(cursor?: string): Promise<ConnectionsResult> {
     return getConnections(this, cursor);
+  }
+
+  async getReactors(messageUrn: string, emoji: string): Promise<MessagingParticipant[]> {
+    return getReactors(this, messageUrn, emoji);
   }
 }
