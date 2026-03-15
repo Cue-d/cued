@@ -27,6 +27,7 @@ import {
 } from "../../core/config.js";
 import { createLogger } from "../../core/logging.js";
 import { type CuedDatabase, openCuedDatabase } from "../../db/database.js";
+import { terminateCompetingDaemons } from "../../macos/competing-daemons.js";
 import {
   bootoutLaunchAgent,
   getAppBundleVersion,
@@ -37,7 +38,6 @@ import {
   isValidCuedAppBundle,
   resolveInstalledAppPath,
 } from "../../macos/install.js";
-import { terminateCompetingDaemons } from "../../macos/competing-daemons.js";
 import type {
   PendingRollbackState,
   UpdateErrorState,
