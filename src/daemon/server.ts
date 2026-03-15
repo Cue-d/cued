@@ -7,7 +7,7 @@ import { DEFAULT_CHAT_DB_PATH } from "../adapters/imessage/reader.js";
 import { isAdapterPlatform, listAutoSyncPlatforms } from "../adapters/registry.js";
 import { runAdapter } from "../adapters/runner.js";
 import { getCurrentAppVersion, getCurrentReleaseChannel } from "../app-metadata.js";
-import { CUED_SOCKET_PATH } from "../config.js";
+import { CUED_DAEMON_LOCK_PATH, CUED_SOCKET_PATH } from "../config.js";
 import { safeParseJsonRecord } from "../db/codecs.js";
 import { type OutboundMessageRow, openCuedDatabase } from "../db/database.js";
 import { emitHookEvent } from "../hooks/service.js";
@@ -63,6 +63,13 @@ import {
 } from "../services/projection.js";
 import { RunQueueService } from "../services/run-queue.js";
 import { buildDaemonStatusSnapshot, buildDoctorSnapshot } from "../services/status.js";
+import {
+  acquireSingletonLock,
+  SINGLETON_LOCK_HEARTBEAT_MS,
+  SINGLETON_LOCK_STALE_MS,
+  SingletonLockHeldError,
+  type SingletonLockMetadata,
+} from "../singleton-lock.js";
 import {
   type AdapterPlatform,
   getDefaultAccountKeyForPlatform,
@@ -720,9 +727,21 @@ async function collectDesiredWhatsAppSessions(db: ReturnType<typeof openCuedData
 }
 
 export async function runDaemon(): Promise<void> {
-  await cleanupSocketPath();
-  const db = openCuedDatabase();
-  ensureNoActiveDaemonProcess(db);
+  const daemonLease = await acquireDaemonLease();
+  let openedDb: ReturnType<typeof openCuedDatabase> | null = null;
+  try {
+    await cleanupSocketPath();
+    openedDb = openCuedDatabase();
+  } catch (error) {
+    daemonLease.release();
+    openedDb?.close();
+    throw error;
+  }
+  if (!openedDb) {
+    daemonLease.release();
+    throw new Error("Failed to open Cued database");
+  }
+  const db = openedDb;
   const startedAt = now();
   const ingestConcurrency = getIngestConcurrency();
   const projectionBatchSize = getProjectionBatchSize();
@@ -1577,6 +1596,7 @@ export async function runDaemon(): Promise<void> {
 
   const heartbeat = setInterval(() => {
     try {
+      daemonLease.heartbeat();
       db.upsertDaemonState({
         pid: process.pid,
         startedAt,
@@ -1590,7 +1610,7 @@ export async function runDaemon(): Promise<void> {
       }
       daemonLogger.warn("heartbeat skipped because SQLite is busy");
     }
-  }, 5_000);
+  }, SINGLETON_LOCK_HEARTBEAT_MS);
 
   const queueAutoSyncRuns = (trigger: string) => {
     if (isUpdateShutdownRequested) {
@@ -2232,6 +2252,7 @@ export async function runDaemon(): Promise<void> {
     });
     server.close();
     db.close();
+    daemonLease.release();
     if (existsSync(CUED_SOCKET_PATH)) {
       rmSync(CUED_SOCKET_PATH, { force: true });
     }
@@ -2240,6 +2261,34 @@ export async function runDaemon(): Promise<void> {
 
   process.on("SIGINT", shutdown);
   process.on("SIGTERM", shutdown);
+}
+
+async function acquireDaemonLease() {
+  try {
+    return await acquireSingletonLock({
+      path: CUED_DAEMON_LOCK_PATH,
+      kind: "daemon",
+      staleMs: SINGLETON_LOCK_STALE_MS,
+      version: DAEMON_VERSION,
+      probe: probeDaemonLockOwner,
+    });
+  } catch (error) {
+    if (error instanceof SingletonLockHeldError) {
+      const ownerPid = error.metadata?.pid;
+      throw new Error(
+        typeof ownerPid === "number" && ownerPid > 0
+          ? `Cued daemon already running with pid ${ownerPid}`
+          : "Cued daemon already running",
+      );
+    }
+    throw error;
+  }
+}
+
+async function probeDaemonLockOwner(
+  _metadata: SingletonLockMetadata | null,
+): Promise<"active" | "stale"> {
+  return probeExistingSocket();
 }
 
 async function cleanupSocketPath(): Promise<void> {
@@ -2368,28 +2417,6 @@ function handleSocket(
       newlineIndex = buffer.indexOf("\n");
     }
   });
-}
-
-function ensureNoActiveDaemonProcess(db: ReturnType<typeof openCuedDatabase>): void {
-  const daemon = db.getDaemonState();
-  if (
-    daemon?.status === "running" &&
-    typeof daemon.pid === "number" &&
-    daemon.pid > 0 &&
-    daemon.pid !== process.pid &&
-    isProcessRunning(daemon.pid)
-  ) {
-    throw new Error(`Cued daemon already running with pid ${daemon.pid}`);
-  }
-}
-
-function isProcessRunning(pid: number): boolean {
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch {
-    return false;
-  }
 }
 
 async function dispatchRequest(
