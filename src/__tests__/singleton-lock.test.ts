@@ -1,4 +1,12 @@
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+  closeSync,
+  mkdtempSync,
+  openSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+  writeSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -146,8 +154,78 @@ describe("singleton lock", () => {
       probe: async () => "stale" as const,
     });
 
-    const metadata = JSON.parse(readFileSync(path, "utf8")) as { pid: number };
-    expect(metadata.pid).toBe(42);
+    expect(readSingletonLock(path)?.pid).toBe(42);
+    lease.release();
+  });
+
+  it("does not overwrite or delete a replacement owner after losing the path", async () => {
+    let timestamp = 1_700_000_000_000;
+    const path = createLockPath();
+    const firstLease = await acquireSingletonLock({
+      path,
+      kind: "daemon",
+      pid: 41,
+      now: () => timestamp,
+    });
+
+    timestamp += 20_000;
+    const replacementLease = await acquireSingletonLock({
+      path,
+      kind: "daemon",
+      pid: 42,
+      now: () => timestamp,
+      staleMs: 15_000,
+      isProcessRunning: () => false,
+    });
+
+    firstLease.heartbeat();
+    expect(readSingletonLock(path)).toEqual({
+      kind: "daemon",
+      pid: 42,
+      startedAt: timestamp,
+      updatedAt: timestamp,
+      version: null,
+    });
+
+    firstLease.release();
+    expect(readSingletonLock(path)?.pid).toBe(42);
+
+    replacementLease.release();
+    expect(readSingletonLock(path)).toBeNull();
+  });
+
+  it("reads the last valid slot when a newer slot is only partially written", async () => {
+    let timestamp = 1_700_000_000_000;
+    const path = createLockPath();
+    const lease = await acquireSingletonLock({
+      path,
+      kind: "daemon",
+      pid: 41,
+      now: () => timestamp,
+    });
+
+    timestamp += 5_000;
+    lease.heartbeat();
+    expect(readSingletonLock(path)?.updatedAt).toBe(timestamp);
+
+    const raw = readFileSync(path);
+    const slotBytes = raw.length / 2;
+    const fd = openSync(path, "r+");
+    try {
+      const invalid = Buffer.from("not-json", "utf8");
+      writeSync(fd, invalid, 0, invalid.length, slotBytes);
+    } finally {
+      closeSync(fd);
+    }
+
+    expect(readSingletonLock(path)).toEqual({
+      kind: "daemon",
+      pid: 41,
+      startedAt: 1_700_000_000_000,
+      updatedAt: timestamp,
+      version: null,
+    });
+
     lease.release();
   });
 });

@@ -36,6 +36,9 @@ export const CUED_BROWSER_DIR = join(CUED_HOME, "browser");
 export const CUED_INTEGRATIONS_DIR = join(CUED_HOME, "integrations");
 export const CUED_SIGNAL_DIR = join(CUED_INTEGRATIONS_DIR, "signal");
 export const CUED_WHATSAPP_DIR = join(CUED_INTEGRATIONS_DIR, "whatsapp");
+export const CUED_ATTACHMENTS_DIR = join(CUED_HOME, "attachments");
+export const CUED_ATTACHMENTS_OBJECTS_DIR = join(CUED_ATTACHMENTS_DIR, "objects");
+export const CUED_ATTACHMENTS_TMP_DIR = join(CUED_ATTACHMENTS_DIR, "tmp");
 export const CUED_HOOKS_PATH = join(CUED_HOME, "hooks.toml");
 export const CUED_UPDATES_DIR = join(CUED_HOME, "updates");
 export const CUED_UPDATE_DOWNLOADS_DIR = join(CUED_UPDATES_DIR, "downloads");
@@ -67,6 +70,18 @@ export function ensureCuedDirs(): void {
     mkdirSync(CUED_WHATSAPP_DIR, { recursive: true, mode: 0o700 });
   }
 
+  if (!existsSync(CUED_ATTACHMENTS_DIR)) {
+    mkdirSync(CUED_ATTACHMENTS_DIR, { recursive: true, mode: 0o700 });
+  }
+
+  if (!existsSync(CUED_ATTACHMENTS_OBJECTS_DIR)) {
+    mkdirSync(CUED_ATTACHMENTS_OBJECTS_DIR, { recursive: true, mode: 0o700 });
+  }
+
+  if (!existsSync(CUED_ATTACHMENTS_TMP_DIR)) {
+    mkdirSync(CUED_ATTACHMENTS_TMP_DIR, { recursive: true, mode: 0o700 });
+  }
+
   if (!existsSync(CUED_UPDATES_DIR)) {
     mkdirSync(CUED_UPDATES_DIR, { recursive: true, mode: 0o700 });
   }
@@ -89,6 +104,9 @@ export function ensureCuedDirs(): void {
   chmodSync(CUED_INTEGRATIONS_DIR, 0o700);
   chmodSync(CUED_SIGNAL_DIR, 0o700);
   chmodSync(CUED_WHATSAPP_DIR, 0o700);
+  chmodSync(CUED_ATTACHMENTS_DIR, 0o700);
+  chmodSync(CUED_ATTACHMENTS_OBJECTS_DIR, 0o700);
+  chmodSync(CUED_ATTACHMENTS_TMP_DIR, 0o700);
   chmodSync(CUED_UPDATES_DIR, 0o700);
   chmodSync(CUED_UPDATE_DOWNLOADS_DIR, 0o700);
   chmodSync(CUED_UPDATE_ROLLBACK_DIR, 0o700);

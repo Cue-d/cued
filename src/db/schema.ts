@@ -256,7 +256,41 @@ export const messageAttachments = sqliteTable("message_attachments", {
   remoteUrl: text("remote_url"),
   sizeBytes: integer("size_bytes"),
   textContent: text("text_content"),
+  accessKind: text("access_kind"),
+  accessRefJson: text("access_ref_json"),
+  previewRefJson: text("preview_ref_json"),
+  availabilityStatus: text("availability_status"),
+  providerMetadataJson: text("provider_metadata_json"),
   metadataJson: text("metadata_json"),
+  createdAt: integer("created_at").notNull(),
+  updatedAt: integer("updated_at").notNull(),
+});
+
+export const attachmentCache = sqliteTable("attachment_cache", {
+  id: text("id").primaryKey(),
+  attachmentId: text("attachment_id").notNull(),
+  variant: text("variant").notNull(),
+  status: text("status").notNull(),
+  cachePath: text("cache_path"),
+  mimeType: text("mime_type"),
+  sizeBytes: integer("size_bytes"),
+  sha256: text("sha256"),
+  fetchedAt: integer("fetched_at"),
+  lastAccessedAt: integer("last_accessed_at"),
+  expiresAt: integer("expires_at"),
+  lastError: text("last_error"),
+  createdAt: integer("created_at").notNull(),
+  updatedAt: integer("updated_at").notNull(),
+});
+
+export const attachmentContent = sqliteTable("attachment_content", {
+  attachmentId: text("attachment_id").primaryKey(),
+  extractor: text("extractor"),
+  status: text("status").notNull(),
+  textContent: text("text_content"),
+  mimeType: text("mime_type"),
+  extractedAt: integer("extracted_at"),
+  lastError: text("last_error"),
   createdAt: integer("created_at").notNull(),
   updatedAt: integer("updated_at").notNull(),
 });

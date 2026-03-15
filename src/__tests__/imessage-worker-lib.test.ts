@@ -28,12 +28,13 @@ describe("imessage worker loader resolution", () => {
 
   function createSyntheticChatDb(
     messageCount: number,
-    options?: { filteredRowIds?: number[] },
+    options?: { filteredRowIds?: number[]; attachmentRowIds?: number[] },
   ): string {
     const dir = createTempDir("cued-imessage-db-");
     const dbPath = join(dir, "chat.db");
     const db = new DatabaseSync(dbPath);
     const filteredRowIds = new Set(options?.filteredRowIds ?? []);
+    const attachmentRowIds = new Set(options?.attachmentRowIds ?? []);
 
     db.exec(`
       CREATE TABLE handle (
@@ -70,6 +71,21 @@ describe("imessage worker loader resolution", () => {
         chat_id INTEGER NOT NULL,
         message_id INTEGER NOT NULL
       );
+      CREATE TABLE attachment (
+        guid TEXT NOT NULL,
+        filename TEXT,
+        uti TEXT,
+        mime_type TEXT,
+        transfer_name TEXT,
+        total_bytes INTEGER NOT NULL DEFAULT 0,
+        is_sticker INTEGER NOT NULL DEFAULT 0,
+        hide_attachment INTEGER NOT NULL DEFAULT 0,
+        ck_record_id TEXT
+      );
+      CREATE TABLE message_attachment_join (
+        message_id INTEGER NOT NULL,
+        attachment_id INTEGER NOT NULL
+      );
     `);
 
     db.prepare("INSERT INTO handle (id, service) VALUES (?, ?)").run("+14155550123", "iMessage");
@@ -102,6 +118,22 @@ describe("imessage worker loader resolution", () => {
     const insertChatJoin = db.prepare(
       "INSERT INTO chat_message_join (chat_id, message_id) VALUES (?, ?)",
     );
+    const insertAttachment = db.prepare(`
+      INSERT INTO attachment (
+        guid,
+        filename,
+        uti,
+        mime_type,
+        transfer_name,
+        total_bytes,
+        is_sticker,
+        hide_attachment,
+        ck_record_id
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `);
+    const insertAttachmentJoin = db.prepare(
+      "INSERT INTO message_attachment_join (message_id, attachment_id) VALUES (?, ?)",
+    );
 
     for (let index = 1; index <= messageCount; index += 1) {
       insertMessage.run(
@@ -123,6 +155,20 @@ describe("imessage worker loader resolution", () => {
         null,
       );
       insertChatJoin.run(1, index);
+      if (attachmentRowIds.has(index)) {
+        insertAttachment.run(
+          `attachment-${index}`,
+          `~/Library/Messages/Attachments/${index}/file-${index}.pdf`,
+          "com.adobe.pdf",
+          "application/pdf",
+          `file-${index}.pdf`,
+          2_048,
+          0,
+          0,
+          `record-${index}`,
+        );
+        insertAttachmentJoin.run(index, index);
+      }
     }
 
     db.close();
@@ -210,5 +256,32 @@ describe("imessage worker loader resolution", () => {
     expect(second.hasMore).toBe(false);
     expect(second.syncMode).toBe("incremental");
     expect(second.sourceCursor).toEqual({ rowId: 650 });
+  });
+
+  it("projects iMessage attachment metadata when the chat db has local attachment rows", () => {
+    const chatDbPath = createSyntheticChatDb(1, { attachmentRowIds: [1] });
+    const repoRoot = createTempDir("cued-imessage-repo-");
+    const env = { CUED_IMESSAGE_DB_PATH: chatDbPath };
+
+    const bundle = buildIMessageSyncBundle({
+      path: chatDbPath,
+      env,
+      repoRoot,
+    });
+
+    const messageEvent = bundle.rawEvents.find((event) => event.entityKind === "message");
+    expect(messageEvent?.payload).toEqual(
+      expect.objectContaining({
+        attachments: [
+          expect.objectContaining({
+            kind: "file",
+            filename: "file-1.pdf",
+            local_path: "~/Library/Messages/Attachments/1/file-1.pdf",
+            mime_type: "application/pdf",
+            access_kind: "local_path",
+          }),
+        ],
+      }),
+    );
   });
 });

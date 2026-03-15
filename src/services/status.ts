@@ -4,6 +4,7 @@ import { doctorHooksConfig } from "../hooks/service.js";
 import type { LinkedInRealtimeSupervisor } from "../integrations/linkedin-realtime.js";
 import { buildIntegrationStatus } from "../integrations/service.js";
 import type { SignalRealtimeSupervisor } from "../integrations/signal-realtime.js";
+import { buildWhatsAppDiagnostics } from "../integrations/whatsapp-diagnostics.js";
 import type { WhatsAppRealtimeSupervisor } from "../integrations/whatsapp-realtime.js";
 import { getUpdateStatus } from "../updater/service.js";
 
@@ -68,6 +69,7 @@ export function buildDaemonStatusSnapshot(
     linkedinRealtimeSessions: options.linkedInRealtime.getStatuses(),
     signalRealtimeSessions: options.signalRealtime.getStatuses(),
     whatsappRealtimeSessions: options.whatsAppRealtime.getStatuses(),
+    whatsappDiagnostics: buildWhatsAppDiagnostics(db, options.whatsAppRealtime.getStatuses()),
     ...buildIntegrationStatus(db),
     update: getUpdateStatus(db),
     socketPath: options.socketPath,

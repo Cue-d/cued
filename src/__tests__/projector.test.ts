@@ -935,6 +935,25 @@ describe("projector", () => {
 
     projectPendingRawEvents(db);
 
+    const removedAttachment = db.orm().get<{ id: string }>(sql`
+      SELECT id
+      FROM message_attachments
+      WHERE source_attachment_key = 'message-attachments:att-1'
+    `);
+    expect(removedAttachment?.id).toBeTruthy();
+    if (!removedAttachment?.id) {
+      throw new Error("expected projected attachment id");
+    }
+    db.upsertAttachmentContent({
+      attachmentId: removedAttachment.id,
+      status: "ready",
+      textContent: "orphan me",
+      mimeType: "text/plain",
+      extractedAt: 3,
+      filename: "one.txt",
+      title: "One",
+    });
+
     db.insertRawEvent({
       id: "message-attachments-v2",
       platform: "linkedin",
@@ -975,6 +994,12 @@ describe("projector", () => {
       },
       { source_attachment_key: "message-attachments:att-3", filename: "three.txt" },
     ]);
+    const orphanedFts = db.orm().get<{ count: number }>(sql`
+      SELECT COUNT(*) AS count
+      FROM attachment_content_fts
+      WHERE attachment_id = ${removedAttachment.id}
+    `);
+    expect(orphanedFts?.count).toBe(0);
 
     db.close();
   });

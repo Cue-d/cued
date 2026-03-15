@@ -6,6 +6,8 @@ import SQLite3
 
 private let appDaemonHeartbeatGraceMs = 120_000
 private let appSingletonLockStaleMs = 15_000
+private let singletonLockSlotBytes = 1_024
+private let singletonLockSlotCount = 2
 private let menuBarReopenNotificationName = Notification.Name("dev.cued.menuBar.reopen")
 private let appMessagesDBPath =
   FileManager.default.homeDirectoryForCurrentUser
@@ -47,14 +49,22 @@ private enum SingletonLockError: Error {
   case held(SingletonLockMetadata?)
 }
 
+private enum SingletonLockPersistenceError: Error {
+  case metadataTooLarge
+}
+
 private final class SingletonLockLease {
   private let path: String
+  private var fileHandle: FileHandle?
   private(set) var metadata: SingletonLockMetadata
+  private var activeSlot: Int
   private var released = false
 
-  private init(path: String, metadata: SingletonLockMetadata) {
+  private init(path: String, fileHandle: FileHandle, metadata: SingletonLockMetadata) {
     self.path = path
+    self.fileHandle = fileHandle
     self.metadata = metadata
+    self.activeSlot = singletonLockSlotCount - 1
   }
 
   static func acquire(
@@ -71,12 +81,9 @@ private final class SingletonLockLease {
       updatedAt: currentTimeMs(),
       version: version
     )
-    let lease = SingletonLockLease(path: path, metadata: metadata)
-
     do {
-      try lease.create()
-      return lease
-    } catch CocoaError.fileWriteFileExists {
+      return try SingletonLockLease.create(path: path, metadata: metadata)
+    } catch let error as NSError where error.domain == NSCocoaErrorDomain && error.code == CocoaError.fileWriteFileExists.rawValue {
       let existing = read(path: path)
       let fresh = existing.map { currentTimeMs() - $0.updatedAt < staleMs } ?? false
       let pidRunning = existing.map { isProcessRunning($0.pid) } ?? false
@@ -87,17 +94,32 @@ private final class SingletonLockLease {
         throw SingletonLockError.held(existing)
       }
       try? FileManager.default.removeItem(atPath: path)
-      try lease.create()
-      return lease
+      do {
+        return try SingletonLockLease.create(path: path, metadata: metadata)
+      } catch let retryError as NSError where retryError.domain == NSCocoaErrorDomain && retryError.code == CocoaError.fileWriteFileExists.rawValue {
+        throw SingletonLockError.held(read(path: path))
+      }
     }
   }
 
   func heartbeat() {
-    guard !released else {
+    guard !released, let fileHandle else {
+      return
+    }
+    guard stillOwnsPath(fileHandle) else {
+      closeQuietly(fileHandle)
+      self.fileHandle = nil
+      released = true
       return
     }
     metadata.updatedAt = currentTimeMs()
-    persist()
+    let nextSlot = (activeSlot + 1) % singletonLockSlotCount
+    do {
+      try writeLockFile(fileHandle, metadata: metadata, slot: nextSlot)
+      activeSlot = nextSlot
+    } catch {
+      // Best effort.
+    }
   }
 
   func release() {
@@ -105,27 +127,133 @@ private final class SingletonLockLease {
       return
     }
     released = true
-    try? FileManager.default.removeItem(atPath: path)
+    let ownsPath = fileHandle.map(stillOwnsPath) ?? false
+    if let fileHandle {
+      closeQuietly(fileHandle)
+      self.fileHandle = nil
+    }
+    if ownsPath {
+      try? FileManager.default.removeItem(atPath: path)
+    }
   }
 
   static func read(path: String) -> SingletonLockMetadata? {
     guard let data = FileManager.default.contents(atPath: path) else {
       return nil
     }
-    return try? JSONDecoder().decode(SingletonLockMetadata.self, from: data)
+    return parseSingletonLockContents(data)
   }
 
-  private func create() throws {
-    let data = try JSONEncoder().encode(metadata)
-    try data.write(to: URL(fileURLWithPath: path), options: [.withoutOverwriting])
-  }
-
-  private func persist() {
-    let data = try? JSONEncoder().encode(metadata)
-    guard let data else {
-      return
+  private static func create(path: String, metadata: SingletonLockMetadata) throws -> SingletonLockLease {
+    let fd = path.withCString { pointer in
+      Darwin.open(pointer, O_RDWR | O_CREAT | O_EXCL, 0o600)
     }
-    try? data.write(to: URL(fileURLWithPath: path), options: [.atomic])
+    guard fd >= 0 else {
+      let openError = errno
+      if openError == EEXIST {
+        throw CocoaError(.fileWriteFileExists)
+      }
+      throw POSIXError(POSIXErrorCode(rawValue: openError) ?? .EIO)
+    }
+    let fileHandle = FileHandle(fileDescriptor: fd, closeOnDealloc: true)
+    do {
+      try initializeLockFile(fileHandle, metadata: metadata)
+    } catch {
+      closeQuietly(fileHandle)
+      try? FileManager.default.removeItem(atPath: path)
+      throw error
+    }
+    return SingletonLockLease(path: path, fileHandle: fileHandle, metadata: metadata)
+  }
+
+  private func stillOwnsPath(_ fileHandle: FileHandle) -> Bool {
+    var fileStat = stat()
+    guard fstat(fileHandle.fileDescriptor, &fileStat) == 0 else {
+      return false
+    }
+
+    var pathStat = stat()
+    let statResult = path.withCString { pointer in
+      Darwin.lstat(pointer, &pathStat)
+    }
+    guard statResult == 0 else {
+      return false
+    }
+
+    return fileStat.st_dev == pathStat.st_dev && fileStat.st_ino == pathStat.st_ino
+  }
+}
+
+private func initializeLockFile(_ fileHandle: FileHandle, metadata: SingletonLockMetadata) throws {
+  for slot in 0..<singletonLockSlotCount {
+    try writeLockSlot(fileHandle, metadata: metadata, slot: slot)
+  }
+  try fileHandle.synchronize()
+}
+
+private func writeLockFile(
+  _ fileHandle: FileHandle,
+  metadata: SingletonLockMetadata,
+  slot: Int
+) throws {
+  try writeLockSlot(fileHandle, metadata: metadata, slot: slot)
+  try fileHandle.synchronize()
+}
+
+private func writeLockSlot(
+  _ fileHandle: FileHandle,
+  metadata: SingletonLockMetadata,
+  slot: Int
+) throws {
+  let payload = try singletonLockPayload(metadata)
+  guard payload.count <= singletonLockSlotBytes else {
+    throw SingletonLockPersistenceError.metadataTooLarge
+  }
+
+  var slotData = Data(count: singletonLockSlotBytes)
+  slotData.replaceSubrange(0..<payload.count, with: payload)
+  try fileHandle.seek(toOffset: UInt64(slot * singletonLockSlotBytes))
+  try fileHandle.write(contentsOf: slotData)
+}
+
+private func singletonLockPayload(_ metadata: SingletonLockMetadata) throws -> Data {
+  let data = try JSONEncoder().encode(metadata)
+  return data + Data("\n".utf8)
+}
+
+private func parseSingletonLockContents(_ data: Data) -> SingletonLockMetadata? {
+  let slotCount = max(1, (data.count + singletonLockSlotBytes - 1) / singletonLockSlotBytes)
+  var latest: SingletonLockMetadata?
+  for slot in 0..<slotCount {
+    let start = slot * singletonLockSlotBytes
+    let end = min(start + singletonLockSlotBytes, data.count)
+    guard start < end else {
+      continue
+    }
+    let candidate = parseSingletonLockChunk(data.subdata(in: start..<end))
+    if let candidate, latest.map({ candidate.updatedAt > $0.updatedAt }) ?? true {
+      latest = candidate
+    }
+  }
+  return latest
+}
+
+private func parseSingletonLockChunk(_ chunk: Data) -> SingletonLockMetadata? {
+  let nullIndex = chunk.firstIndex(of: 0) ?? chunk.endIndex
+  let prefix = chunk[..<nullIndex]
+  let lineEnd = prefix.firstIndex(of: 0x0A) ?? prefix.endIndex
+  let record = prefix[..<lineEnd]
+  guard !record.isEmpty else {
+    return nil
+  }
+  return try? JSONDecoder().decode(SingletonLockMetadata.self, from: Data(record))
+}
+
+private func closeQuietly(_ fileHandle: FileHandle) {
+  do {
+    try fileHandle.close()
+  } catch {
+    // Best effort.
   }
 }
 
