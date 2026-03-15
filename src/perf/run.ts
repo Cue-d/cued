@@ -725,6 +725,7 @@ async function main(): Promise<void> {
           accountKey: "default",
           lastSyncAt: 1_709_999_000_000,
           client: linkedInClient,
+          loadProjectedReactions: () => new Map(),
         });
       }),
       await benchmarkScenario("incremental_insert_only", () => {
