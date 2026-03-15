@@ -27,7 +27,10 @@ export async function buildOnboardingSnapshot(
     }
   }
 
-  const permissions = await buildPermissionStatus();
+  const permissions = await buildPermissionStatus({
+    mode: "passive",
+    db,
+  });
   const integrations = buildIntegrationStatus(db);
 
   return {

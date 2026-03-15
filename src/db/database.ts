@@ -60,6 +60,7 @@ const APP_SETTING_KEYS = {
   cliSymlinkInstalled: "cli_symlink_installed",
   installedAppVersion: "installed_app_version",
   lastReleaseCheckAt: "last_release_check_at",
+  messagesAutomationVerification: "messages_automation_verification_json",
   onboardingCompletedVersion: "onboarding_completed_version",
   releaseChannel: "release_channel",
   updateLastError: "update_last_error_json",
@@ -112,6 +113,13 @@ export interface AppMetadataSnapshot {
   updateReleaseState: UpdateReleaseState | null;
   updatePendingRollback: PendingRollbackState | null;
   updateLastError: UpdateErrorState | null;
+}
+
+export interface MessagesAutomationVerificationState {
+  status: "granted" | "unknown";
+  verifiedAt: number | null;
+  checkedAt: number;
+  summary: string | null;
 }
 
 export type RawEventInput = ProviderRawEventInput;
@@ -475,6 +483,10 @@ export class CuedDatabase {
     this.setAppSetting(APP_SETTING_KEYS.updateLastError, safeStringifyJson(value));
   }
 
+  setMessagesAutomationVerification(value: MessagesAutomationVerificationState | null): void {
+    this.setAppSetting(APP_SETTING_KEYS.messagesAutomationVerification, safeStringifyJson(value));
+  }
+
   getUpdateReleaseState(): UpdateReleaseState | null {
     return safeParseJson<UpdateReleaseState | null>(
       this.getAppSetting(APP_SETTING_KEYS.updateReleaseState)?.value ?? null,
@@ -509,6 +521,30 @@ export class CuedDatabase {
       stage: "unknown",
       message: raw,
       targetVersion: null,
+    };
+  }
+
+  getMessagesAutomationVerification(): MessagesAutomationVerificationState | null {
+    const parsed = safeParseJson<Partial<MessagesAutomationVerificationState> | null>(
+      this.getAppSetting(APP_SETTING_KEYS.messagesAutomationVerification)?.value ?? null,
+      "app_settings.messages_automation_verification_json",
+      null,
+    );
+    if (!parsed) {
+      return null;
+    }
+
+    const status = parsed.status === "granted" ? "granted" : "unknown";
+    const checkedAt = typeof parsed.checkedAt === "number" ? parsed.checkedAt : null;
+    if (checkedAt === null) {
+      return null;
+    }
+
+    return {
+      status,
+      verifiedAt: typeof parsed.verifiedAt === "number" ? parsed.verifiedAt : null,
+      checkedAt,
+      summary: typeof parsed.summary === "string" ? parsed.summary : null,
     };
   }
 

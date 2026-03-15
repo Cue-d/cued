@@ -22,6 +22,8 @@ export type SingletonLockMetadata = {
   startedAt: number;
   updatedAt: number;
   version?: string | null;
+  executablePath?: string;
+  appPath?: string;
 };
 
 export class SingletonLockHeldError extends Error {
@@ -45,6 +47,8 @@ type AcquireSingletonLockOptions = {
   kind: string;
   staleMs?: number;
   version?: string | null;
+  executablePath?: string;
+  appPath?: string;
   now?: () => number;
   pid?: number;
   isProcessRunning?: (pid: number) => boolean;
@@ -85,6 +89,8 @@ export async function acquireSingletonLock(
       startedAt: timestamp,
       updatedAt: timestamp,
       version: options.version ?? null,
+      ...(options.executablePath ? { executablePath: options.executablePath } : {}),
+      ...(options.appPath ? { appPath: options.appPath } : {}),
     };
   };
 
@@ -274,6 +280,12 @@ function parseSingletonLockMetadata(rawText: string): SingletonLockMetadata | nu
         raw.version === undefined || raw.version === null || typeof raw.version === "string"
           ? (raw.version ?? null)
           : null,
+      ...(typeof raw.executablePath === "string" && raw.executablePath.length > 0
+        ? { executablePath: raw.executablePath }
+        : {}),
+      ...(typeof raw.appPath === "string" && raw.appPath.length > 0
+        ? { appPath: raw.appPath }
+        : {}),
     };
   } catch {
     return null;
