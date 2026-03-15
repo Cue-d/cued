@@ -1,5 +1,5 @@
-import { GRAPHQL_QUERY_IDS } from "./constants.js";
 import type { LinkedInClient } from "./client.js";
+import { GRAPHQL_QUERY_IDS } from "./constants.js";
 import { linkedInEncode, newMessagingGraphQLRequest } from "./request.js";
 import type { MessagingParticipant } from "./types.js";
 

@@ -83,7 +83,8 @@ export function participantHandles(participant: MessagingParticipant): ContactHa
     },
   ];
   const profileUrl =
-    participant.participantType.member?.profileUrl || linkedinProfileUrlFromUrn(participant.entityURN);
+    participant.participantType.member?.profileUrl ||
+    linkedinProfileUrlFromUrn(participant.entityURN);
   if (profileUrl) {
     handles.push({
       type: "linkedin_profile_url",
@@ -405,7 +406,9 @@ export function buildLinkedInSystemTimelineEvent(
   const sourceConversationKey = conversationSourceKey(message.conversationURN);
   const sender = message.sender?.entityURN ? participantSourceKey(message.sender) : null;
   return {
-    id: stableId(`linkedin:timeline:system:${accountKey}:${message.entityURN}:${message.deliveredAt}`),
+    id: stableId(
+      `linkedin:timeline:system:${accountKey}:${message.entityURN}:${message.deliveredAt}`,
+    ),
     platform: "linkedin",
     accountKey,
     entityKind: "timeline_event",
@@ -562,6 +565,9 @@ export function buildLinkedInGroupReceiptTimelineEvent(input: {
   };
 }
 
-export function extractReactionTimestamp(summary: ReactionSummary | undefined, fallback: number): number {
+export function extractReactionTimestamp(
+  summary: ReactionSummary | undefined,
+  fallback: number,
+): number {
   return typeof summary?.firstReactedAt === "number" ? summary.firstReactedAt : fallback;
 }

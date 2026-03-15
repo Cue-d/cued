@@ -11,16 +11,13 @@ import { CUED_DAEMON_LOCK_PATH, CUED_SOCKET_PATH } from "../config.js";
 import { safeParseJsonRecord } from "../db/codecs.js";
 import { type OutboundMessageRow, openCuedDatabase } from "../db/database.js";
 import { emitHookEvent } from "../hooks/service.js";
-import { buildLinkedInRawEventsFromRealtimeEnvelope } from "../integrations/linkedin-realtime-events.js";
 import {
   type LinkedInRealtimeStatus,
   LinkedInRealtimeSupervisor,
 } from "../integrations/linkedin-realtime.js";
+import { buildLinkedInRawEventsFromRealtimeEnvelope } from "../integrations/linkedin-realtime-events.js";
 import { loadLinkedInSessionSecret } from "../integrations/linkedin-session-store.js";
-import {
-  getIntegrationSummary,
-  refreshManagedIntegrationStates,
-} from "../integrations/service.js";
+import { getIntegrationSummary, refreshManagedIntegrationStates } from "../integrations/service.js";
 import {
   getSignalConfigDir,
   inspectSignalCli,
@@ -767,7 +764,8 @@ async function collectDesiredLinkedInSessions(db: ReturnType<typeof openCuedData
   const integrations = db
     .listIntegrationStates()
     .filter(
-      (row) => row.platform === "linkedin" && row.enabled === 1 && row.auth_state === "authenticated",
+      (row) =>
+        row.platform === "linkedin" && row.enabled === 1 && row.auth_state === "authenticated",
     );
   if (integrations.length === 0) {
     return {

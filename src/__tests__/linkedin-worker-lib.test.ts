@@ -163,7 +163,9 @@ describe("buildLinkedInSyncBundle", () => {
                 conversationParticipants: [
                   {
                     entityURN: "urn:li:fsd_profile:SELF123",
-                    participantType: { member: { firstName: "Theo", lastName: "Tarr", profileUrl: "" } },
+                    participantType: {
+                      member: { firstName: "Theo", lastName: "Tarr", profileUrl: "" },
+                    },
                   },
                   {
                     entityURN: "urn:li:fsd_profile:ACoAAA1",
@@ -302,7 +304,8 @@ describe("buildLinkedInSyncBundle", () => {
     ).toBe(true);
 
     const messageEvent = bundle.rawEvents.find(
-      (event) => event.entityKind === "message" && event.externalEntityId === "urn:li:fsd_message:MSG_REPLY",
+      (event) =>
+        event.entityKind === "message" && event.externalEntityId === "urn:li:fsd_message:MSG_REPLY",
     );
     expect(messageEvent?.payload).toEqual(
       expect.objectContaining({
@@ -322,8 +325,7 @@ describe("buildLinkedInSyncBundle", () => {
     expect(
       bundle.rawEvents.find(
         (event) =>
-          event.entityKind === "timeline_event" &&
-          event.eventKind === "linkedin_system_message",
+          event.entityKind === "timeline_event" && event.eventKind === "linkedin_system_message",
       ),
     ).toBeTruthy();
 

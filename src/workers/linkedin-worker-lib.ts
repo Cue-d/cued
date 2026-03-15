@@ -1,5 +1,4 @@
 import { createHash } from "node:crypto";
-import { openCuedDatabase } from "../db/database.js";
 import {
   type Connection,
   type Conversation,
@@ -9,7 +8,7 @@ import {
   type MessagingParticipant,
 } from "../adapters/linkedin/api/index.js";
 import type { SyncBundle } from "../adapters/types.js";
-import { loadLinkedInSessionSecret } from "../integrations/linkedin-session-store.js";
+import { openCuedDatabase } from "../db/database.js";
 import {
   buildLinkedInConversationEvent,
   buildLinkedInConversationRemovalEvents,
@@ -23,6 +22,7 @@ import {
   normalizeMemberUrn,
   participantSourceKey,
 } from "../integrations/linkedin-events.js";
+import { loadLinkedInSessionSecret } from "../integrations/linkedin-session-store.js";
 import { mapWithConcurrency } from "../lib/async.js";
 import type { SourceAccountInput } from "../types/provider.js";
 
@@ -84,7 +84,9 @@ function incrementalOldestMs(lastSyncAt?: number): number {
 }
 
 function hasInboxCategory(conversation: Conversation): boolean {
-  return conversation.categories.includes("INBOX") || conversation.categories.includes("PRIMARY_INBOX");
+  return (
+    conversation.categories.includes("INBOX") || conversation.categories.includes("PRIMARY_INBOX")
+  );
 }
 
 function isSpamConversation(conversation: Conversation): boolean {
@@ -211,7 +213,9 @@ async function listConversations(
     for (const conversation of page.conversations) {
       seen.set(conversation.entityURN, conversation);
     }
-    oldestLastActivity = Math.min(...page.conversations.map((conversation) => conversation.lastActivityAt));
+    oldestLastActivity = Math.min(
+      ...page.conversations.map((conversation) => conversation.lastActivityAt),
+    );
     pageCount += 1;
   }
 
@@ -289,10 +293,9 @@ function loadProjectedReactions(
   sourceMessageKey: string,
 ): Map<string, ProjectedReactionRow> {
   return new Map(
-    db.listActiveReactionsForMessage("linkedin", accountKey, sourceMessageKey).map((row) => [
-      reactionCompositeKey(row.reactor_source_key, row.emoji),
-      row,
-    ]),
+    db
+      .listActiveReactionsForMessage("linkedin", accountKey, sourceMessageKey)
+      .map((row) => [reactionCompositeKey(row.reactor_source_key, row.emoji), row]),
   );
 }
 
@@ -313,7 +316,11 @@ async function buildReactionEventsForMessage(input: {
   for (const summary of input.message.reactionSummaries ?? []) {
     const reactors = await input.client.getReactors(input.message.entityURN, summary.emoji);
     for (const reactor of reactors) {
-      const contactEvent = buildParticipantContactEvent(input.accountKey, reactor, input.observedAt);
+      const contactEvent = buildParticipantContactEvent(
+        input.accountKey,
+        reactor,
+        input.observedAt,
+      );
       if (!input.seenContactIds.has(contactEvent.id)) {
         input.seenContactIds.add(contactEvent.id);
         rawEvents.push(contactEvent);
@@ -421,7 +428,10 @@ export async function buildLinkedInSyncBundle(options?: {
 
     const validConversations: Conversation[] = [];
     const conversationsByUrn = new Map(
-      conversationResult.conversations.map((conversation) => [conversation.entityURN, conversation]),
+      conversationResult.conversations.map((conversation) => [
+        conversation.entityURN,
+        conversation,
+      ]),
     );
 
     for (const removedUrn of conversationResult.removedConversationURNs) {

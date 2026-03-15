@@ -1,8 +1,8 @@
 import { COOKIE_NAMES, DEFAULT_X_LI_TRACK, USER_AGENT } from "./constants.js";
 import { getConnections } from "./contacts.js";
 import { getConversations, getConversationsBefore } from "./conversations.js";
-import { linkedInEncode, newGetRequest } from "./request.js";
 import { getReactors } from "./reactions.js";
+import { linkedInEncode, newGetRequest } from "./request.js";
 import type {
   Connection,
   Conversation,

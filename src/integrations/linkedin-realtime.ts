@@ -1,13 +1,16 @@
 import { randomUUID } from "node:crypto";
-import { API_URLS, CONTENT_TYPES, DEFAULT_HEADERS, USER_AGENT } from "../adapters/linkedin/api/constants.js";
 import { LinkedInClient } from "../adapters/linkedin/api/client.js";
+import {
+  API_URLS,
+  CONTENT_TYPES,
+  DEFAULT_HEADERS,
+  USER_AGENT,
+} from "../adapters/linkedin/api/constants.js";
 import type { Cookie, RealtimeEventEnvelope } from "../adapters/linkedin/api/types.js";
-import { createLogger } from "../logging.js";
 
 const DEFAULT_RECONNECT_BASE_MS = 1_000;
 const DEFAULT_RECONNECT_MAX_MS = 60_000;
 const HEARTBEAT_INTERVAL_MS = 60_000;
-const linkedInLogger = createLogger("linkedin");
 
 export type LinkedInRealtimeState =
   | "connecting"
@@ -104,8 +107,8 @@ function isAuthInvalidation(response: Response): boolean {
   if (response.status >= 300 && response.status < 400 && isAuthUrl(location)) {
     return true;
   }
-  return responseCookies(response).some((cookie) =>
-    /\bli_at=(?:delete me)?\b/i.test(cookie) || /\bli_at=;\b/i.test(cookie),
+  return responseCookies(response).some(
+    (cookie) => /\bli_at=(?:delete me)?\b/i.test(cookie) || /\bli_at=;\b/i.test(cookie),
   );
 }
 
@@ -188,7 +191,11 @@ export class LinkedInRealtimeSession implements LinkedInRealtimeSessionLike {
   private readonly realtimeRecipeMap: string;
   private readonly reconnectBaseMs: number;
   private readonly reconnectMaxMs: number;
-  private readonly onEvent?: (accountKey: string, event: RealtimeEventEnvelope, userEntityUrn: string) => void;
+  private readonly onEvent?: (
+    accountKey: string,
+    event: RealtimeEventEnvelope,
+    userEntityUrn: string,
+  ) => void;
   private readonly onConnected?: (status: LinkedInRealtimeStatus, reconnected: boolean) => void;
   private readonly onDisconnected?: (status: LinkedInRealtimeStatus) => void;
   private readonly onStatusChange?: (status: LinkedInRealtimeStatus) => void;
@@ -196,7 +203,6 @@ export class LinkedInRealtimeSession implements LinkedInRealtimeSessionLike {
   private status: LinkedInRealtimeStatus;
   private shouldReconnect = false;
   private hasEverConnected = false;
-  private loopPromise: Promise<void> | null = null;
   private controller: AbortController | null = null;
   private realtimeSessionId = randomUUID();
   private userEntityUrn: string | null = null;
@@ -227,7 +233,7 @@ export class LinkedInRealtimeSession implements LinkedInRealtimeSessionLike {
       state: this.hasEverConnected ? "reconnecting" : "connecting",
       lastSessionError: null,
     });
-    this.loopPromise = this.runLoop();
+    void this.runLoop();
   }
 
   stop(): void {
@@ -354,10 +360,7 @@ export class LinkedInRealtimeSession implements LinkedInRealtimeSessionLike {
 
     const heartbeatPromise = this.runHeartbeatLoop(signal);
     try {
-      await Promise.race([
-        this.readStream(response.body, signal),
-        heartbeatPromise,
-      ]);
+      await Promise.race([this.readStream(response.body, signal), heartbeatPromise]);
       if (!signal.aborted) {
         this.onDisconnected?.(this.getStatus());
         throw new Error("LinkedIn realtime stream closed");
@@ -438,9 +441,7 @@ export class LinkedInRealtimeSession implements LinkedInRealtimeSessionLike {
             if (event["com.linkedin.realtimefrontend.DecoratedEvent"] && this.userEntityUrn) {
               this.onEvent?.(this.accountKey, event, this.userEntityUrn);
             }
-          } catch {
-            continue;
-          }
+          } catch {}
         }
       }
     } finally {
