@@ -358,7 +358,10 @@ export class LinkedInRealtimeSession implements LinkedInRealtimeSessionLike {
     });
     this.onConnected?.(this.getStatus(), reconnected);
 
-    const heartbeatPromise = this.runHeartbeatLoop(signal);
+    const heartbeatController = new AbortController();
+    const abortHeartbeat = () => heartbeatController.abort();
+    signal.addEventListener("abort", abortHeartbeat, { once: true });
+    const heartbeatPromise = this.runHeartbeatLoop(heartbeatController.signal);
     try {
       await Promise.race([this.readStream(response.body, signal), heartbeatPromise]);
       if (!signal.aborted) {
@@ -366,6 +369,8 @@ export class LinkedInRealtimeSession implements LinkedInRealtimeSessionLike {
         throw new Error("LinkedIn realtime stream closed");
       }
     } finally {
+      heartbeatController.abort();
+      signal.removeEventListener("abort", abortHeartbeat);
       await heartbeatPromise.catch(() => undefined);
     }
   }
