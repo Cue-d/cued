@@ -2145,7 +2145,9 @@ export class CuedDatabase {
         lastErrorSummary: errorSummary,
         updatedAt: now(),
       })
-      .where(and(eq(syncCheckpoints.platform, platform), eq(syncCheckpoints.accountKey, accountKey)))
+      .where(
+        and(eq(syncCheckpoints.platform, platform), eq(syncCheckpoints.accountKey, accountKey)),
+      )
       .run();
   }
 

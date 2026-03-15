@@ -1846,9 +1846,11 @@ export async function runDaemon(): Promise<void> {
       let rawEventInsertMs = 0;
       let ingestedCount = 0;
       let bundleHasMore = false;
-      let bundleSyncMode: "full" | "incremental" =
-        checkpoint?.source_cursor_json ? "incremental" : "full";
+      let bundleSyncMode: "full" | "incremental" = checkpoint?.source_cursor_json
+        ? "incremental"
+        : "full";
       let bundleSourceCursor: Record<string, unknown> | null = null;
+      let checkpointLastSuccessAt = now();
       let sourceAccounts: Array<{
         platform: Platform;
         accountKey: string;
@@ -1886,7 +1888,8 @@ export async function runDaemon(): Promise<void> {
           const pageFetchStartedAt = now();
           const page = await session.resync({
             cursor,
-            sinceMs: bundleSyncMode === "incremental" ? checkpoint?.last_success_at ?? null : null,
+            sinceMs:
+              bundleSyncMode === "incremental" ? (checkpoint?.last_success_at ?? null) : null,
             limit: 1000,
           });
           adapterFetchMs += now() - pageFetchStartedAt;
@@ -1926,6 +1929,7 @@ export async function runDaemon(): Promise<void> {
         bundleSourceCursor = {
           lastSyncAt: lastCompletedAt,
         };
+        checkpointLastSuccessAt = lastCompletedAt;
       } else {
         const bundle =
           platform === "signal"
@@ -1944,6 +1948,7 @@ export async function runDaemon(): Promise<void> {
         const rawEventInsertStartedAt = now();
         insertResult = db.insertRawEvents(bundle.rawEvents);
         rawEventInsertMs = now() - rawEventInsertStartedAt;
+        checkpointLastSuccessAt = now();
       }
 
       db.upsertSourceAccounts(sourceAccounts);
@@ -2009,7 +2014,7 @@ export async function runDaemon(): Promise<void> {
         sourceCursor: bundleSourceCursor,
         rawIngestWatermark: projection.max_raw_event_rowid,
         projectionWatermark: projection.projection_watermark,
-        lastSuccessAt: now(),
+        lastSuccessAt: checkpointLastSuccessAt,
       });
       const afterCheckpoint = now();
       const timings: IngestTiming = {

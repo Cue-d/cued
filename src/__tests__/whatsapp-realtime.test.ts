@@ -142,9 +142,9 @@ describe("whatsapp realtime", () => {
     session.start();
     child.emit("spawn");
     expect(session.getStatus().state).toBe("connecting");
-    await expect(
-      session.sendText("12016824050@s.whatsapp.net", "ping"),
-    ).rejects.toThrowError("WhatsApp realtime session is not connected");
+    await expect(session.sendText("12016824050@s.whatsapp.net", "ping")).rejects.toThrowError(
+      "WhatsApp realtime session is not connected",
+    );
 
     child.stdout.write(
       `${JSON.stringify({

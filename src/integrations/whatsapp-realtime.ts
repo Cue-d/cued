@@ -4,9 +4,9 @@ import { createLogger } from "../logging.js";
 import type {
   WhatsAppHelperCommand,
   WhatsAppHelperEventEnvelope,
-  WhatsAppResyncPage,
   WhatsAppHelperResponseEnvelope,
   WhatsAppHelperSendResult,
+  WhatsAppResyncPage,
 } from "./whatsapp-types.js";
 
 const DEFAULT_REQUEST_TIMEOUT_MS = 30_000;
@@ -248,11 +248,9 @@ export class WhatsAppRealtimeSession implements WhatsAppRealtimeSessionLike {
     return result;
   }
 
-  async resync(input: {
-    cursor?: string | null;
-    sinceMs?: number | null;
-    limit?: number;
-  } = {}): Promise<WhatsAppResyncPage> {
+  async resync(
+    input: { cursor?: string | null; sinceMs?: number | null; limit?: number } = {},
+  ): Promise<WhatsAppResyncPage> {
     return await this.request<WhatsAppResyncPage>({
       id: this.nextRequestId++,
       command: "resync",
