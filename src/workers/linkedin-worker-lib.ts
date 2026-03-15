@@ -511,8 +511,7 @@ export async function buildLinkedInSyncBundle(options?: {
           fallbackConversationUrn: conversation.entityURN,
           userEntityUrn,
           observedAt: observedBase,
-          eventKind:
-            message.messageBodyRenderFormat === "SYSTEM" ? "message_observed" : undefined,
+          eventKind: message.messageBodyRenderFormat === "SYSTEM" ? "message_observed" : undefined,
         });
         if (!seenMessageIds.has(event.id)) {
           seenMessageIds.add(event.id);
