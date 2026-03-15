@@ -5,6 +5,8 @@ import Foundation
 import SQLite3
 
 private let appDaemonHeartbeatGraceMs = 120_000
+private let appSingletonLockStaleMs = 15_000
+private let menuBarReopenNotificationName = Notification.Name("dev.cued.menuBar.reopen")
 private let appMessagesDBPath =
   FileManager.default.homeDirectoryForCurrentUser
   .appendingPathComponent("Library/Messages/chat.db").path
@@ -19,6 +21,156 @@ private func configuredCuedHomePath() -> String {
 
 private func configuredCuedDBPath() -> String {
   configuredCuedDBPath(environment: ProcessInfo.processInfo.environment)
+}
+
+private func configuredDaemonLockPath() -> String {
+  "\(configuredCuedHomePath())/daemon.lock"
+}
+
+private func configuredMenuBarLockPath() -> String {
+  "\(configuredCuedHomePath())/menu-bar.lock"
+}
+
+private func currentTimeMs() -> Int {
+  Int(Date().timeIntervalSince1970 * 1000)
+}
+
+private struct SingletonLockMetadata: Codable {
+  let kind: String
+  let pid: Int
+  let startedAt: Int
+  var updatedAt: Int
+  let version: String?
+}
+
+private enum SingletonLockError: Error {
+  case held(SingletonLockMetadata?)
+}
+
+private final class SingletonLockLease {
+  private let path: String
+  private(set) var metadata: SingletonLockMetadata
+  private var released = false
+
+  private init(path: String, metadata: SingletonLockMetadata) {
+    self.path = path
+    self.metadata = metadata
+  }
+
+  static func acquire(
+    path: String,
+    kind: String,
+    staleMs: Int = appSingletonLockStaleMs,
+    version: String? = nil,
+    probe: (SingletonLockMetadata?) -> Bool = { _ in false }
+  ) throws -> SingletonLockLease {
+    let metadata = SingletonLockMetadata(
+      kind: kind,
+      pid: Int(ProcessInfo.processInfo.processIdentifier),
+      startedAt: currentTimeMs(),
+      updatedAt: currentTimeMs(),
+      version: version
+    )
+    let lease = SingletonLockLease(path: path, metadata: metadata)
+
+    do {
+      try lease.create()
+      return lease
+    } catch CocoaError.fileWriteFileExists {
+      let existing = read(path: path)
+      let fresh = existing.map { currentTimeMs() - $0.updatedAt < staleMs } ?? false
+      let pidRunning = existing.map { isProcessRunning($0.pid) } ?? false
+      if fresh && pidRunning {
+        throw SingletonLockError.held(existing)
+      }
+      if probe(existing) {
+        throw SingletonLockError.held(existing)
+      }
+      try? FileManager.default.removeItem(atPath: path)
+      try lease.create()
+      return lease
+    }
+  }
+
+  func heartbeat() {
+    guard !released else {
+      return
+    }
+    metadata.updatedAt = currentTimeMs()
+    persist()
+  }
+
+  func release() {
+    guard !released else {
+      return
+    }
+    released = true
+    try? FileManager.default.removeItem(atPath: path)
+  }
+
+  static func read(path: String) -> SingletonLockMetadata? {
+    guard let data = FileManager.default.contents(atPath: path) else {
+      return nil
+    }
+    return try? JSONDecoder().decode(SingletonLockMetadata.self, from: data)
+  }
+
+  private func create() throws {
+    let data = try JSONEncoder().encode(metadata)
+    try data.write(to: URL(fileURLWithPath: path), options: [.withoutOverwriting])
+  }
+
+  private func persist() {
+    let data = try? JSONEncoder().encode(metadata)
+    guard let data else {
+      return
+    }
+    try? data.write(to: URL(fileURLWithPath: path), options: [.atomic])
+  }
+}
+
+private func isProcessRunning(_ pid: Int) -> Bool {
+  guard pid > 0 else {
+    return false
+  }
+
+  if Darwin.kill(pid_t(pid), 0) == 0 {
+    return true
+  }
+
+  return errno == EPERM
+}
+
+private func readSingletonLockState(path: String, staleMs: Int = appSingletonLockStaleMs) -> (running: Bool, pid: Int?, updatedAt: Int?) {
+  guard let metadata = SingletonLockLease.read(path: path) else {
+    return (false, nil, nil)
+  }
+
+  let fresh = currentTimeMs() - metadata.updatedAt < staleMs
+  let running = fresh && isProcessRunning(metadata.pid)
+  return (running, running ? metadata.pid : nil, metadata.updatedAt)
+}
+
+private func activateExistingCuedApp() {
+  guard let bundleIdentifier = Bundle.main.bundleIdentifier else {
+    return
+  }
+
+  let currentPID = ProcessInfo.processInfo.processIdentifier
+  for app in NSRunningApplication.runningApplications(withBundleIdentifier: bundleIdentifier)
+  where app.processIdentifier != currentPID {
+    _ = app.activate(options: [.activateIgnoringOtherApps])
+  }
+}
+
+private func signalExistingMenuBarInstance() {
+  DistributedNotificationCenter.default().postNotificationName(
+    menuBarReopenNotificationName,
+    object: nil,
+    userInfo: nil,
+    options: [.deliverImmediately]
+  )
+  activateExistingCuedApp()
 }
 
 struct AppIntegrationStatus {
@@ -64,11 +216,12 @@ final class AppStatusStore: @unchecked Sendable {
   }
 
   func readSnapshot() -> AppStatusSnapshot {
+    let daemonLockState = readSingletonLockState(path: configuredDaemonLockPath())
     guard FileManager.default.fileExists(atPath: dbPath) else {
       return AppStatusSnapshot(
-        daemonRunning: false,
-        daemonPID: nil,
-        daemonUpdatedAt: nil,
+        daemonRunning: daemonLockState.running,
+        daemonPID: daemonLockState.pid,
+        daemonUpdatedAt: daemonLockState.updatedAt,
         contacts: 0,
         conversations: 0,
         messages: 0,
@@ -89,9 +242,9 @@ final class AppStatusStore: @unchecked Sendable {
         sqlite3_close(db)
       }
       return AppStatusSnapshot(
-        daemonRunning: false,
-        daemonPID: nil,
-        daemonUpdatedAt: nil,
+        daemonRunning: daemonLockState.running,
+        daemonPID: daemonLockState.pid,
+        daemonUpdatedAt: daemonLockState.updatedAt,
         contacts: 0,
         conversations: 0,
         messages: 0,
@@ -108,6 +261,7 @@ final class AppStatusStore: @unchecked Sendable {
     defer { sqlite3_close(db) }
 
     let daemonRow = queryDaemonRow(db: db)
+    let daemonState = daemonRow.running ? daemonRow : daemonLockState
     let counts = [
       countRows(db: db, table: "contacts"),
       countRows(db: db, table: "conversations"),
@@ -122,9 +276,9 @@ final class AppStatusStore: @unchecked Sendable {
     let updateSummary = queryUpdateSummary(db: db)
 
     return AppStatusSnapshot(
-      daemonRunning: daemonRow.running,
-      daemonPID: daemonRow.pid,
-      daemonUpdatedAt: daemonRow.updatedAt,
+      daemonRunning: daemonState.running,
+      daemonPID: daemonState.pid,
+      daemonUpdatedAt: daemonState.updatedAt,
       contacts: counts[0],
       conversations: counts[1],
       messages: counts[2],
@@ -887,6 +1041,7 @@ private struct UpdateInstallResponse: Decodable {
 final class MenuBarAppController: NSObject, NSApplicationDelegate {
   private let statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
   private let dbPath: String
+  private let menuBarLease: SingletonLockLease
   private let statusStore: AppStatusStore
   private let daemonSupervisor: DaemonSupervisor
   private lazy var onboardingWindowController = OnboardingWindowController(
@@ -902,8 +1057,16 @@ final class MenuBarAppController: NSObject, NSApplicationDelegate {
   private var shouldAutoStartDaemon = true
   private let statusItemImage = MenuBarAppController.loadStatusItemImage()
 
-  init(dbPath: String, daemonLaunchPath: String?, daemonCommand: String, setupCommand: String, permissionsCommand: String) {
+  fileprivate init(
+    dbPath: String,
+    daemonLaunchPath: String?,
+    daemonCommand: String,
+    setupCommand: String,
+    permissionsCommand: String,
+    menuBarLease: SingletonLockLease
+  ) {
     self.dbPath = dbPath
+    self.menuBarLease = menuBarLease
     self.statusStore = AppStatusStore(dbPath: dbPath)
     self.daemonSupervisor = DaemonSupervisor(
       daemonLaunchPath: daemonLaunchPath,
@@ -913,10 +1076,17 @@ final class MenuBarAppController: NSObject, NSApplicationDelegate {
       statusStore: self.statusStore
     )
     super.init()
+    DistributedNotificationCenter.default().addObserver(
+      self,
+      selector: #selector(handleMenuBarReopenNotification(_:)),
+      name: menuBarReopenNotificationName,
+      object: nil
+    )
   }
 
   func applicationDidFinishLaunching(_ notification: Notification) {
     NSApp.setActivationPolicy(.accessory)
+    menuBarLease.heartbeat()
     daemonSupervisor.startIfNeeded()
     rebuildMenu()
     statusMonitor.start()
@@ -932,6 +1102,8 @@ final class MenuBarAppController: NSObject, NSApplicationDelegate {
   func applicationWillTerminate(_ notification: Notification) {
     timer?.invalidate()
     statusMonitor.stop()
+    DistributedNotificationCenter.default().removeObserver(self)
+    menuBarLease.release()
   }
 
   @objc private func openSetup() {
@@ -952,10 +1124,16 @@ final class MenuBarAppController: NSObject, NSApplicationDelegate {
   }
 
   @objc private func refreshStatus() {
+    menuBarLease.heartbeat()
     if shouldAutoStartDaemon {
       daemonSupervisor.startIfNeeded()
     }
     rebuildMenu()
+  }
+
+  @objc private func handleMenuBarReopenNotification(_ notification: Notification) {
+    onboardingWindowController.showAndRefresh()
+    NSApp.activate(ignoringOtherApps: true)
   }
 
   @objc private func quitApp() {
@@ -1264,7 +1442,7 @@ final class MenuBarAppController: NSObject, NSApplicationDelegate {
 }
 
 @MainActor
-func runMenuBarApp() {
+func runMenuBarApp() throws {
   let daemonLaunchPath = Bundle.main.path(forResource: "cued-cli", ofType: nil)
   let daemonCommand = (Bundle.main.object(forInfoDictionaryKey: "CuedDaemonCommand") as? String)
     ?? ProcessInfo.processInfo.environment["CUED_DAEMON_COMMAND"]
@@ -1278,6 +1456,26 @@ func runMenuBarApp() {
   let dbPath = environmentPath("CUED_DB_PATH")
     ?? (Bundle.main.object(forInfoDictionaryKey: "CuedDBPath") as? String)
     ?? configuredCuedDBPath()
+  let menuBarLease: SingletonLockLease
+  do {
+    menuBarLease = try SingletonLockLease.acquire(
+      path: configuredMenuBarLockPath(),
+      kind: "menu-bar",
+      version: Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String,
+      probe: { _ in
+        guard let bundleIdentifier = Bundle.main.bundleIdentifier else {
+          return false
+        }
+        let currentPID = ProcessInfo.processInfo.processIdentifier
+        return NSRunningApplication
+          .runningApplications(withBundleIdentifier: bundleIdentifier)
+          .contains { $0.processIdentifier != currentPID }
+      }
+    )
+  } catch SingletonLockError.held {
+    signalExistingMenuBarInstance()
+    Darwin.exit(0)
+  }
 
   let app = NSApplication.shared
   let delegate = MenuBarAppController(
@@ -1285,7 +1483,8 @@ func runMenuBarApp() {
     daemonLaunchPath: daemonLaunchPath,
     daemonCommand: daemonCommand,
     setupCommand: setupCommand,
-    permissionsCommand: permissionsCommand
+    permissionsCommand: permissionsCommand,
+    menuBarLease: menuBarLease
   )
   app.delegate = delegate
   app.run()
