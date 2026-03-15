@@ -107,8 +107,8 @@ function isAuthInvalidation(response: Response): boolean {
   if (response.status >= 300 && response.status < 400 && isAuthUrl(location)) {
     return true;
   }
-  return responseCookies(response).some(
-    (cookie) => /\bli_at=(?:delete me)?\b/i.test(cookie) || /\bli_at=;\b/i.test(cookie),
+  return responseCookies(response).some((cookie) =>
+    /\bli_at\s*=\s*(?:delete me)?\s*(?:;|$)/i.test(cookie),
   );
 }
 
