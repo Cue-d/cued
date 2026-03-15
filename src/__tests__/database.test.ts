@@ -2,8 +2,10 @@ import { randomUUID } from "node:crypto";
 import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import Database from "better-sqlite3";
 import { afterEach, describe, expect, it } from "vitest";
 import { CuedDatabase } from "../db/database.js";
+import { MIGRATIONS } from "../db/migrations.js";
 
 describe("CuedDatabase", () => {
   const tempDirs: string[] = [];
@@ -421,32 +423,43 @@ describe("CuedDatabase", () => {
     });
 
     expect(db.hasQueuedOrRunningRun("contacts")).toBe(true);
-    expect(db.listRecentRuns(1)).toEqual([
+    const queuedRun = db.listRecentRuns(1)[0]!;
+    expect(queuedRun).toEqual(
       expect.objectContaining({
         id: runId,
         platform: "contacts",
         account_key: "local",
         run_type: "sync",
         status: "queued",
+        started_at: null,
+        finished_at: null,
       }),
-    ]);
+    );
+    expect(queuedRun.queued_at).toEqual(expect.any(Number));
 
-    expect(db.claimNextQueuedRun()).toEqual(
+    const claimedRun = db.claimNextQueuedRun();
+    expect(claimedRun).toEqual(
       expect.objectContaining({
         id: runId,
         platform: "contacts",
         account_key: "local",
         run_type: "sync",
         status: "ingesting",
+        queued_at: queuedRun.queued_at,
         details_json: JSON.stringify({ requestId: "abc" }),
       }),
     );
+    expect(claimedRun?.started_at).toEqual(expect.any(Number));
+    expect(claimedRun?.started_at).toBeGreaterThanOrEqual(claimedRun?.queued_at ?? 0);
 
     db.finishRun(runId, { projected: 3 });
     expect(db.listRecentRuns(1)[0]).toEqual(
       expect.objectContaining({
         id: runId,
         status: "completed",
+        queued_at: queuedRun.queued_at,
+        started_at: claimedRun?.started_at,
+        finished_at: expect.any(Number),
       }),
     );
 
@@ -460,6 +473,154 @@ describe("CuedDatabase", () => {
     expect(db.listRecentRuns(2).some((run) => run.id === failedId && run.status === "failed")).toBe(
       true,
     );
+
+    db.close();
+  });
+
+  it("migrates legacy sync run timing into queued and started timestamps", () => {
+    const dir = mkdtempSync(join(tmpdir(), "cued-v2-db-legacy-sync-runs-"));
+    tempDirs.push(dir);
+    const dbPath = join(dir, "local.db");
+    const sqlite = new Database(dbPath);
+
+    sqlite.exec(`
+      CREATE TABLE schema_migrations (
+        id TEXT PRIMARY KEY,
+        applied_at INTEGER NOT NULL
+      );
+
+      CREATE TABLE sync_runs (
+        id TEXT PRIMARY KEY,
+        platform TEXT,
+        account_key TEXT,
+        run_type TEXT NOT NULL,
+        status TEXT NOT NULL,
+        trigger TEXT NOT NULL,
+        started_at INTEGER NOT NULL,
+        finished_at INTEGER,
+        details_json TEXT
+      );
+
+      CREATE TABLE sync_run_errors (
+        id TEXT PRIMARY KEY,
+        sync_run_id TEXT NOT NULL REFERENCES sync_runs(id) ON DELETE CASCADE,
+        platform TEXT,
+        account_key TEXT,
+        error_code TEXT,
+        error_message TEXT NOT NULL,
+        details_json TEXT,
+        created_at INTEGER NOT NULL
+      );
+    `);
+
+    const appliedAt = 1_700_000_000_000;
+    const syncRunMigrationId = "0011_sync_run_timing_v2";
+    for (const migration of MIGRATIONS) {
+      if (migration.id === syncRunMigrationId) {
+        continue;
+      }
+      sqlite
+        .prepare("INSERT INTO schema_migrations (id, applied_at) VALUES (?, ?)")
+        .run(migration.id, appliedAt);
+    }
+
+    sqlite
+      .prepare(
+        `
+          INSERT INTO sync_runs (
+            id, platform, account_key, run_type, status, trigger, started_at, finished_at, details_json
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `,
+      )
+      .run(
+        "queued-run",
+        "signal",
+        "default",
+        "sync",
+        "queued",
+        "manual",
+        100,
+        null,
+        '{"source":"signal"}',
+      );
+    sqlite
+      .prepare(
+        `
+          INSERT INTO sync_runs (
+            id, platform, account_key, run_type, status, trigger, started_at, finished_at, details_json
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `,
+      )
+      .run(
+        "completed-run",
+        "whatsapp",
+        "default",
+        "sync",
+        "completed",
+        "manual",
+        200,
+        250,
+        '{"source":"whatsapp"}',
+      );
+    sqlite
+      .prepare(
+        `
+          INSERT INTO sync_run_errors (
+            id, sync_run_id, platform, account_key, error_code, error_message, details_json, created_at
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        `,
+      )
+      .run("error-1", "completed-run", "whatsapp", "default", "E_SYNC", "boom", "{}", 260);
+    sqlite.close();
+
+    const db = new CuedDatabase(dbPath);
+    db.migrate();
+
+    const migratedSqlite = (
+      db as unknown as {
+        sqlite: {
+          prepare: (sql: string) => {
+            all: () => Array<Record<string, unknown>>;
+          };
+        };
+      }
+    ).sqlite;
+    const migratedRuns = migratedSqlite
+      .prepare(
+        `
+          SELECT id, status, queued_at, started_at, finished_at
+          FROM sync_runs
+          ORDER BY id ASC
+        `,
+      )
+      .all() as Array<{
+      id: string;
+      status: string;
+      queued_at: number;
+      started_at: number | null;
+      finished_at: number | null;
+    }>;
+    const migratedErrors = migratedSqlite
+      .prepare("SELECT id, sync_run_id FROM sync_run_errors ORDER BY id ASC")
+      .all() as Array<{ id: string; sync_run_id: string }>;
+
+    expect(migratedRuns).toEqual([
+      {
+        id: "completed-run",
+        status: "completed",
+        queued_at: 200,
+        started_at: 200,
+        finished_at: 250,
+      },
+      {
+        id: "queued-run",
+        status: "queued",
+        queued_at: 100,
+        started_at: null,
+        finished_at: null,
+      },
+    ]);
+    expect(migratedErrors).toEqual([{ id: "error-1", sync_run_id: "completed-run" }]);
 
     db.close();
   });

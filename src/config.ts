@@ -1,10 +1,35 @@
 import { chmodSync, existsSync, mkdirSync } from "node:fs";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 
-export const CUED_HOME = join(homedir(), ".cued");
-export const CUED_DB_PATH = join(CUED_HOME, "local.db");
+function getConfiguredPath(name: "CUED_HOME" | "CUED_DB_PATH", env = process.env): string | null {
+  const raw = env[name]?.trim();
+  return raw ? raw : null;
+}
+
+export function resolveCuedHome(env = process.env): string {
+  const configuredHome = getConfiguredPath("CUED_HOME", env);
+  if (configuredHome) {
+    return configuredHome;
+  }
+
+  const configuredDbPath = getConfiguredPath("CUED_DB_PATH", env);
+  if (configuredDbPath) {
+    return dirname(configuredDbPath);
+  }
+
+  return join(homedir(), ".cued");
+}
+
+export function resolveCuedDbPath(env = process.env): string {
+  return getConfiguredPath("CUED_DB_PATH", env) ?? join(resolveCuedHome(env), "local.db");
+}
+
+export const CUED_HOME = resolveCuedHome();
+export const CUED_DB_PATH = resolveCuedDbPath();
 export const CUED_SOCKET_PATH = join(CUED_HOME, "cued.sock");
+export const CUED_DAEMON_LOCK_PATH = join(CUED_HOME, "daemon.lock");
+export const CUED_MENU_BAR_LOCK_PATH = join(CUED_HOME, "menu-bar.lock");
 export const CUED_LOG_DIR = join(CUED_HOME, "logs");
 export const CUED_DAEMON_LOG_PATH = join(CUED_LOG_DIR, "daemon.log");
 export const CUED_BROWSER_DIR = join(CUED_HOME, "browser");

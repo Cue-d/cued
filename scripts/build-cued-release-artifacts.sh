@@ -10,6 +10,7 @@ DMG_PATH="$DIST_DIR/Cued.dmg"
 TARBALL_PATH="$DIST_DIR/cued-macos-arm64.tar.gz"
 STAGING_DIR="$DIST_DIR/dmg-staging"
 JIT_RUNTIME_ENTITLEMENTS="$ROOT_DIR/scripts/packaging/jit-runtime.entitlements.plist"
+APP_PERMISSIONS_ENTITLEMENTS="$ROOT_DIR/scripts/packaging/app-permissions.entitlements.plist"
 
 if [[ -z "${CUED_CODESIGN_IDENTITY:-}" ]]; then
   echo "CUED_CODESIGN_IDENTITY is required for shareable release artifacts" >&2
@@ -25,8 +26,22 @@ runtime_entitlements_for_binary() {
   local target="$1"
 
   case "$target" in
+    "$APP_BUNDLE/Contents/MacOS/CuedDaemon")
+      printf '%s\n' "$APP_PERMISSIONS_ENTITLEMENTS"
+      ;;
     "$APP_BUNDLE/Contents/Resources/runtime/node/bin/node"|\
-    "$APP_BUNDLE/Contents/Resources/helpers/signal-cli/jre/Contents/Home/bin/java")
+    "$APP_BUNDLE/Contents/Resources/helpers/signal-cli/jre/Contents/Home/bin/java"|\
+    "$APP_BUNDLE/Contents/Resources/runtime/chromium"/*)
+      printf '%s\n' "$JIT_RUNTIME_ENTITLEMENTS"
+      ;;
+  esac
+}
+
+runtime_entitlements_for_bundle() {
+  local target="$1"
+
+  case "$target" in
+    "$APP_BUNDLE/Contents/Resources/runtime/chromium"/*)
       printf '%s\n' "$JIT_RUNTIME_ENTITLEMENTS"
       ;;
   esac
@@ -106,10 +121,12 @@ sign_embedded_archives() {
 sign_nested_code_containers() {
   while IFS= read -r -d '' info_plist; do
     local bundle_root
+    local entitlements
 
     bundle_root="$(dirname "$(dirname "$info_plist")")"
     if [[ "$bundle_root" != "$APP_BUNDLE" ]]; then
-      sign_macos_binary "$bundle_root"
+      entitlements="$(runtime_entitlements_for_bundle "$bundle_root")"
+      sign_macos_binary "$bundle_root" "$entitlements"
     fi
   done < <(find "$APP_BUNDLE/Contents" -type f -path '*/Contents/Info.plist' -print0 | sort -rz)
 }
@@ -118,7 +135,7 @@ bash "$APP_BUILDER" >/dev/null
 sign_nested_binaries
 sign_embedded_archives
 sign_nested_code_containers
-sign_macos_binary "$APP_BUNDLE"
+sign_macos_binary "$APP_BUNDLE" "$APP_PERMISSIONS_ENTITLEMENTS"
 
 rm -rf "$STAGING_DIR" "$DMG_PATH"
 mkdir -p "$STAGING_DIR"
