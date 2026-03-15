@@ -212,6 +212,7 @@ export function buildWhatsAppMessageEvent(
       isFromMe: message.fromMe,
       deliveredAt: message.deliveredAt ?? null,
       readAt: message.readAt ?? null,
+      attachments: message.attachments ?? [],
     } satisfies MessagePayload,
     sourceVersion: "whatsapp-v1",
   };

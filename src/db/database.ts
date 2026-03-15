@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { existsSync } from "node:fs";
+import { existsSync, rmSync } from "node:fs";
 import Database from "better-sqlite3";
 import { and, asc, desc, eq, inArray, sql } from "drizzle-orm";
 import { type BetterSQLite3Database, drizzle } from "drizzle-orm/better-sqlite3";
@@ -31,6 +31,8 @@ import { MIGRATIONS } from "./migrations.js";
 import * as schema from "./schema.js";
 
 const {
+  attachmentCache,
+  attachmentContent,
   appSettings,
   authSessions,
   contactMergeDecisions,
@@ -165,6 +167,65 @@ export interface OutboundMessageRow {
   finished_at: number | null;
   last_error: string | null;
   metadata_json: string | null;
+  created_at: number;
+  updated_at: number;
+}
+
+export interface MessageAttachmentRow {
+  id: string;
+  message_id: string;
+  platform: Platform;
+  account_key: string;
+  source_attachment_key: string;
+  kind: string | null;
+  mime_type: string | null;
+  filename: string | null;
+  title: string | null;
+  local_path: string | null;
+  remote_url: string | null;
+  size_bytes: number | null;
+  text_content: string | null;
+  access_kind: string | null;
+  access_ref_json: string | null;
+  preview_ref_json: string | null;
+  availability_status: string | null;
+  provider_metadata_json: string | null;
+  metadata_json: string | null;
+  created_at: number;
+  updated_at: number;
+  conversation_id?: string;
+  platform_message_id?: string;
+  sent_at?: number;
+  content?: string | null;
+  sender_name?: string | null;
+  conversation_name?: string | null;
+}
+
+export interface AttachmentCacheRow {
+  id: string;
+  attachment_id: string;
+  variant: string;
+  status: string;
+  cache_path: string | null;
+  mime_type: string | null;
+  size_bytes: number | null;
+  sha256: string | null;
+  fetched_at: number | null;
+  last_accessed_at: number | null;
+  expires_at: number | null;
+  last_error: string | null;
+  created_at: number;
+  updated_at: number;
+}
+
+export interface AttachmentContentRow {
+  attachment_id: string;
+  extractor: string | null;
+  status: string;
+  text_content: string | null;
+  mime_type: string | null;
+  extracted_at: number | null;
+  last_error: string | null;
   created_at: number;
   updated_at: number;
 }
@@ -1528,6 +1589,366 @@ export class CuedDatabase {
     );
   }
 
+  listMessageAttachments(
+    input: {
+      attachmentId?: string;
+      messageId?: string;
+      conversationId?: string;
+      platform?: Platform;
+      accountKey?: string;
+      limit?: number;
+    } = {},
+  ): MessageAttachmentRow[] {
+    const clauses: string[] = [];
+    const params: Array<string | number> = [];
+
+    if (input.attachmentId) {
+      clauses.push("ma.id = ?");
+      params.push(input.attachmentId);
+    }
+    if (input.messageId) {
+      clauses.push("ma.message_id = ?");
+      params.push(input.messageId);
+    }
+    if (input.conversationId) {
+      clauses.push("m.conversation_id = ?");
+      params.push(input.conversationId);
+    }
+    if (input.platform) {
+      clauses.push("ma.platform = ?");
+      params.push(input.platform);
+    }
+    if (input.accountKey) {
+      clauses.push("ma.account_key = ?");
+      params.push(input.accountKey);
+    }
+
+    const whereClause = clauses.length > 0 ? `WHERE ${clauses.join(" AND ")}` : "";
+    const limitClause = input.limit ? "LIMIT ?" : "";
+    if (input.limit) {
+      params.push(input.limit);
+    }
+
+    return this.sqlite
+      .prepare(
+        `
+        SELECT
+          ma.id,
+          ma.message_id,
+          ma.platform,
+          ma.account_key,
+          ma.source_attachment_key,
+          ma.kind,
+          ma.mime_type,
+          ma.filename,
+          ma.title,
+          ma.local_path,
+          ma.remote_url,
+          ma.size_bytes,
+          ma.text_content,
+          ma.access_kind,
+          ma.access_ref_json,
+          ma.preview_ref_json,
+          ma.availability_status,
+          ma.provider_metadata_json,
+          ma.metadata_json,
+          ma.created_at,
+          ma.updated_at,
+          m.conversation_id,
+          m.platform_message_id,
+          m.sent_at,
+          m.content,
+          m.sender_name,
+          m.conversation_name
+        FROM message_attachments ma
+        JOIN messages m ON m.id = ma.message_id
+        ${whereClause}
+        ORDER BY m.sent_at DESC, ma.created_at DESC, ma.id ASC
+        ${limitClause}
+      `,
+      )
+      .all(...params) as MessageAttachmentRow[];
+  }
+
+  getMessageAttachment(attachmentId: string): MessageAttachmentRow | null {
+    return this.listMessageAttachments({ attachmentId, limit: 1 })[0] ?? null;
+  }
+
+  getAttachmentCacheEntry(attachmentId: string, variant: string): AttachmentCacheRow | null {
+    return (
+      (this.sqlite
+        .prepare(
+          `
+          SELECT
+            id,
+            attachment_id,
+            variant,
+            status,
+            cache_path,
+            mime_type,
+            size_bytes,
+            sha256,
+            fetched_at,
+            last_accessed_at,
+            expires_at,
+            last_error,
+            created_at,
+            updated_at
+          FROM attachment_cache
+          WHERE attachment_id = ?
+            AND variant = ?
+          LIMIT 1
+        `,
+        )
+        .get(attachmentId, variant) as AttachmentCacheRow | undefined) ?? null
+    );
+  }
+
+  upsertAttachmentCacheEntry(input: {
+    attachmentId: string;
+    variant: string;
+    status: string;
+    cachePath?: string | null;
+    mimeType?: string | null;
+    sizeBytes?: number | null;
+    sha256?: string | null;
+    fetchedAt?: number | null;
+    lastAccessedAt?: number | null;
+    expiresAt?: number | null;
+    lastError?: string | null;
+  }): string {
+    const timestamp = now();
+    const existing = this.getAttachmentCacheEntry(input.attachmentId, input.variant);
+    const id = existing?.id ?? randomUUID();
+    this.db
+      .insert(attachmentCache)
+      .values({
+        id,
+        attachmentId: input.attachmentId,
+        variant: input.variant,
+        status: input.status,
+        cachePath: input.cachePath ?? null,
+        mimeType: input.mimeType ?? null,
+        sizeBytes: input.sizeBytes ?? null,
+        sha256: input.sha256 ?? null,
+        fetchedAt: input.fetchedAt ?? null,
+        lastAccessedAt: input.lastAccessedAt ?? input.fetchedAt ?? timestamp,
+        expiresAt: input.expiresAt ?? null,
+        lastError: input.lastError ?? null,
+        createdAt: existing?.created_at ?? timestamp,
+        updatedAt: timestamp,
+      })
+      .onConflictDoUpdate({
+        target: [attachmentCache.attachmentId, attachmentCache.variant],
+        set: {
+          status: input.status,
+          cachePath: input.cachePath ?? null,
+          mimeType: input.mimeType ?? null,
+          sizeBytes: input.sizeBytes ?? null,
+          sha256: input.sha256 ?? null,
+          fetchedAt: input.fetchedAt ?? null,
+          lastAccessedAt: input.lastAccessedAt ?? input.fetchedAt ?? timestamp,
+          expiresAt: input.expiresAt ?? null,
+          lastError: input.lastError ?? null,
+          updatedAt: timestamp,
+        },
+      })
+      .run();
+    return id;
+  }
+
+  touchAttachmentCacheEntry(attachmentId: string, variant: string, accessedAt = now()): void {
+    this.db
+      .update(attachmentCache)
+      .set({
+        lastAccessedAt: accessedAt,
+        updatedAt: accessedAt,
+      })
+      .where(
+        and(eq(attachmentCache.attachmentId, attachmentId), eq(attachmentCache.variant, variant)),
+      )
+      .run();
+  }
+
+  listReadyAttachmentCacheEntries(): AttachmentCacheRow[] {
+    return this.sqlite
+      .prepare(
+        `
+        SELECT
+          id,
+          attachment_id,
+          variant,
+          status,
+          cache_path,
+          mime_type,
+          size_bytes,
+          sha256,
+          fetched_at,
+          last_accessed_at,
+          expires_at,
+          last_error,
+          created_at,
+          updated_at
+        FROM attachment_cache
+        WHERE status = 'ready'
+          AND cache_path IS NOT NULL
+        ORDER BY COALESCE(last_accessed_at, fetched_at, updated_at, created_at) ASC, id ASC
+      `,
+      )
+      .all() as AttachmentCacheRow[];
+  }
+
+  getAttachmentContent(attachmentId: string): AttachmentContentRow | null {
+    return (
+      (this.sqlite
+        .prepare(
+          `
+          SELECT
+            attachment_id,
+            extractor,
+            status,
+            text_content,
+            mime_type,
+            extracted_at,
+            last_error,
+            created_at,
+            updated_at
+          FROM attachment_content
+          WHERE attachment_id = ?
+          LIMIT 1
+        `,
+        )
+        .get(attachmentId) as AttachmentContentRow | undefined) ?? null
+    );
+  }
+
+  upsertAttachmentContent(input: {
+    attachmentId: string;
+    extractor?: string | null;
+    status: string;
+    textContent?: string | null;
+    mimeType?: string | null;
+    extractedAt?: number | null;
+    lastError?: string | null;
+    filename?: string | null;
+    title?: string | null;
+  }): void {
+    const timestamp = now();
+    const existing = this.getAttachmentContent(input.attachmentId);
+    this.db.transaction((tx) => {
+      tx.insert(attachmentContent)
+        .values({
+          attachmentId: input.attachmentId,
+          extractor: input.extractor ?? null,
+          status: input.status,
+          textContent: input.textContent ?? null,
+          mimeType: input.mimeType ?? null,
+          extractedAt: input.extractedAt ?? null,
+          lastError: input.lastError ?? null,
+          createdAt: existing?.created_at ?? timestamp,
+          updatedAt: timestamp,
+        })
+        .onConflictDoUpdate({
+          target: attachmentContent.attachmentId,
+          set: {
+            extractor: input.extractor ?? null,
+            status: input.status,
+            textContent: input.textContent ?? null,
+            mimeType: input.mimeType ?? null,
+            extractedAt: input.extractedAt ?? null,
+            lastError: input.lastError ?? null,
+            updatedAt: timestamp,
+          },
+        })
+        .run();
+
+      tx.run(sql`DELETE FROM attachment_content_fts WHERE attachment_id = ${input.attachmentId}`);
+      if (input.textContent && input.textContent.trim().length > 0) {
+        tx.run(sql`
+          INSERT INTO attachment_content_fts (attachment_id, filename, title, content)
+          VALUES (${input.attachmentId}, ${input.filename ?? ""}, ${input.title ?? ""}, ${input.textContent})
+        `);
+      }
+    });
+  }
+
+  searchAttachmentContent(input: {
+    query: string;
+    limit?: number;
+    platform?: Platform;
+    accountKey?: string;
+    conversationId?: string;
+  }): Array<{
+    attachment_id: string;
+    message_id: string;
+    filename: string | null;
+    title: string | null;
+    platform: Platform;
+    account_key: string;
+    conversation_id: string;
+    conversation_name: string | null;
+    sender_name: string | null;
+    sent_at: number;
+    rank: number;
+    snippet: string;
+  }> {
+    const clauses = ["attachment_content_fts MATCH ?"];
+    const params: Array<string | number> = [input.query];
+    if (input.platform) {
+      clauses.push("ma.platform = ?");
+      params.push(input.platform);
+    }
+    if (input.accountKey) {
+      clauses.push("ma.account_key = ?");
+      params.push(input.accountKey);
+    }
+    if (input.conversationId) {
+      clauses.push("m.conversation_id = ?");
+      params.push(input.conversationId);
+    }
+    const limit = input.limit ?? 20;
+    params.push(limit);
+
+    return this.sqlite
+      .prepare(
+        `
+        SELECT
+          ma.id AS attachment_id,
+          ma.message_id,
+          ma.filename,
+          ma.title,
+          ma.platform,
+          ma.account_key,
+          m.conversation_id,
+          m.conversation_name,
+          m.sender_name,
+          m.sent_at,
+          bm25(attachment_content_fts) AS rank,
+          snippet(attachment_content_fts, 3, '[', ']', '…', 20) AS snippet
+        FROM attachment_content_fts
+        JOIN message_attachments ma ON ma.id = attachment_content_fts.attachment_id
+        JOIN messages m ON m.id = ma.message_id
+        WHERE ${clauses.join(" AND ")}
+        ORDER BY rank ASC, m.sent_at DESC
+        LIMIT ?
+      `,
+      )
+      .all(...params) as Array<{
+      attachment_id: string;
+      message_id: string;
+      filename: string | null;
+      title: string | null;
+      platform: Platform;
+      account_key: string;
+      conversation_id: string;
+      conversation_name: string | null;
+      sender_name: string | null;
+      sent_at: number;
+      rank: number;
+      snippet: string;
+    }>;
+  }
+
   claimNextOutboundMessage(platform?: Platform): OutboundMessageRow | null {
     return this.db.transaction((tx) => {
       const whereCondition = platform
@@ -2591,8 +3012,18 @@ export class CuedDatabase {
   }
 
   clearProjectedState(): void {
+    const cacheEntries = this.listReadyAttachmentCacheEntries();
+    for (const entry of cacheEntries) {
+      if (entry.cache_path) {
+        rmSync(entry.cache_path, { force: true });
+      }
+    }
+
     this.db.transaction((tx) => {
       tx.run(sql.raw("DELETE FROM messages_fts"));
+      tx.run(sql.raw("DELETE FROM attachment_content_fts"));
+      tx.delete(attachmentContent).run();
+      tx.delete(attachmentCache).run();
       tx.delete(timelineEvents).run();
       tx.delete(messageAttachments).run();
       tx.delete(messageReactions).run();

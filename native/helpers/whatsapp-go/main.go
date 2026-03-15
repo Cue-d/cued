@@ -66,18 +66,40 @@ type chatSnapshot struct {
 	Participants []string `json:"participants,omitempty"`
 }
 
+type attachmentSnapshot struct {
+	ID           string                 `json:"id"`
+	Kind         string                 `json:"kind"`
+	Filename     *string                `json:"filename,omitempty"`
+	MimeType     *string                `json:"mime_type,omitempty"`
+	SizeBytes    *int64                 `json:"size_bytes,omitempty"`
+	Text         *string                `json:"text,omitempty"`
+	AccessKind   string                 `json:"access_kind"`
+	AccessRef    map[string]interface{} `json:"access_ref,omitempty"`
+	Availability string                 `json:"availability_status,omitempty"`
+	ProviderMeta map[string]interface{} `json:"provider_metadata,omitempty"`
+}
+
 type messageSnapshot struct {
-	MessageID      string  `json:"messageID"`
-	ChatJID        string  `json:"chatJID"`
-	SenderJID      *string `json:"senderJID,omitempty"`
-	ParticipantJID *string `json:"participantJID,omitempty"`
-	FromMe         bool    `json:"fromMe"`
-	Timestamp      int64   `json:"timestamp"`
-	Text           string  `json:"text"`
-	PushName       *string `json:"pushName,omitempty"`
-	Status         *string `json:"status,omitempty"`
-	DeliveredAt    *int64  `json:"deliveredAt,omitempty"`
-	ReadAt         *int64  `json:"readAt,omitempty"`
+	MessageID      string               `json:"messageID"`
+	ChatJID        string               `json:"chatJID"`
+	SenderJID      *string              `json:"senderJID,omitempty"`
+	ParticipantJID *string              `json:"participantJID,omitempty"`
+	FromMe         bool                 `json:"fromMe"`
+	Timestamp      int64                `json:"timestamp"`
+	Text           string               `json:"text"`
+	PushName       *string              `json:"pushName,omitempty"`
+	Status         *string              `json:"status,omitempty"`
+	DeliveredAt    *int64               `json:"deliveredAt,omitempty"`
+	ReadAt         *int64               `json:"readAt,omitempty"`
+	MessageProto   *string              `json:"messageProtoBase64,omitempty"`
+	Attachments    []attachmentSnapshot `json:"attachments,omitempty"`
+}
+
+type downloadableMessageSnapshot struct {
+	MessageID    string               `json:"messageID"`
+	ChatJID      string               `json:"chatJID"`
+	MessageProto *string              `json:"messageProtoBase64,omitempty"`
+	Attachments  []attachmentSnapshot `json:"attachments,omitempty"`
 }
 
 type receiptSnapshot struct {
@@ -108,21 +130,26 @@ type eventEnvelope struct {
 }
 
 type commandEnvelope struct {
-	ID      int    `json:"id"`
-	Command string `json:"command"`
-	Target  string `json:"target,omitempty"`
-	Text    string `json:"text,omitempty"`
-	Cursor  string `json:"cursor,omitempty"`
-	SinceMS *int64 `json:"sinceMs,omitempty"`
-	Limit   int    `json:"limit,omitempty"`
+	ID              int    `json:"id"`
+	Command         string `json:"command"`
+	Target          string `json:"target,omitempty"`
+	Text            string `json:"text,omitempty"`
+	Cursor          string `json:"cursor,omitempty"`
+	SinceMS         *int64 `json:"sinceMs,omitempty"`
+	Limit           int    `json:"limit,omitempty"`
+	ChatJID         string `json:"chatJID,omitempty"`
+	MessageID       string `json:"messageID,omitempty"`
+	AttachmentIndex int    `json:"attachmentIndex,omitempty"`
 }
 
 type helperState struct {
 	storeDir     string
 	metadataPath string
+	mediaPath    string
 
 	mu       sync.Mutex
 	metadata helperMetadata
+	media    []downloadableMessageSnapshot
 	cache    *syncCache
 }
 
@@ -157,6 +184,7 @@ func newHelperState(storeDir string) (*helperState, error) {
 	state := &helperState{
 		storeDir:     storeDir,
 		metadataPath: filepath.Join(storeDir, "metadata.json"),
+		mediaPath:    filepath.Join(storeDir, "media.json"),
 		cache:        cache,
 	}
 	state.load()
@@ -167,6 +195,7 @@ func (s *helperState) load() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	readJSONFile(s.metadataPath, &s.metadata)
+	readJSONFile(s.mediaPath, &s.media)
 }
 
 func (s *helperState) setMetadata(metadata helperMetadata) {
@@ -200,6 +229,33 @@ func (s *helperState) setChat(chat chatSnapshot) {
 
 func (s *helperState) setMessage(message messageSnapshot) {
 	_ = s.cache.upsertMessage(message)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.upsertDownloadableMessageLocked(message)
+}
+
+func (s *helperState) upsertDownloadableMessageLocked(message messageSnapshot) {
+	if message.MessageProto == nil || strings.TrimSpace(*message.MessageProto) == "" || len(message.Attachments) == 0 {
+		return
+	}
+	entry := downloadableMessageSnapshot{
+		MessageID:    message.MessageID,
+		ChatJID:      message.ChatJID,
+		MessageProto: message.MessageProto,
+		Attachments:  message.Attachments,
+	}
+	replaced := false
+	for idx, existing := range s.media {
+		if normalizeJID(existing.ChatJID) == normalizeJID(message.ChatJID) && existing.MessageID == message.MessageID {
+			s.media[idx] = entry
+			replaced = true
+			break
+		}
+	}
+	if !replaced {
+		s.media = append(s.media, entry)
+	}
+	_ = writeJSONFileAtomic(s.mediaPath, s.media)
 }
 
 func (s *helperState) applyReceipt(receipt receiptSnapshot) {
@@ -219,7 +275,15 @@ func (s *helperState) getResyncPage(sinceMS *int64, cursor string, limit int) (r
 }
 
 func (s *helperState) applySnapshot(snapshot stateSnapshot) error {
-	return s.cache.applySnapshot(snapshot)
+	if err := s.cache.applySnapshot(snapshot); err != nil {
+		return err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, message := range snapshot.Messages {
+		s.upsertDownloadableMessageLocked(message)
+	}
+	return nil
 }
 
 func (s *helperState) close() error {
@@ -789,6 +853,23 @@ func parseResyncCursor(cursor string) (*resyncCursor, error) {
 	return &parsed, nil
 }
 
+func (s *helperState) findMessage(chatJID string, messageID string) *messageSnapshot {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	normalizedChat := normalizeJID(chatJID)
+	for _, message := range s.media {
+		if normalizeJID(message.ChatJID) == normalizedChat && message.MessageID == messageID {
+			return &messageSnapshot{
+				MessageID:    message.MessageID,
+				ChatJID:      message.ChatJID,
+				MessageProto: message.MessageProto,
+				Attachments:  message.Attachments,
+			}
+		}
+	}
+	return nil
+}
+
 type helperRuntime struct {
 	client          *whatsmeow.Client
 	state           *helperState
@@ -1283,6 +1364,9 @@ func (r *helperRuntime) readCommands(ctx context.Context, errs chan<- error) {
 		case "resync":
 			page, err := r.state.getResyncPage(command.SinceMS, command.Cursor, command.Limit)
 			r.writeResponse(command.ID, err == nil, page, err)
+		case "downloadMedia":
+			result, err := r.downloadMedia(ctx, command.ChatJID, command.MessageID, command.AttachmentIndex)
+			r.writeResponse(command.ID, err == nil, result, err)
 		case "sendText":
 			result, err := r.sendText(ctx, command.Target, command.Text)
 			r.writeResponse(command.ID, err == nil, result, err)
@@ -1312,13 +1396,14 @@ func (r *helperRuntime) sendText(ctx context.Context, target string, text string
 	messageID := resp.ID
 	timestamp := time.Now().UnixMilli()
 	snapshot := messageSnapshot{
-		MessageID: messageID,
-		ChatJID:   chatJID,
-		SenderJID: stringPtr(jidString(r.client.Store.ID)),
-		FromMe:    true,
-		Timestamp: timestamp,
-		Text:      text,
-		Status:    stringPtr("sent"),
+		MessageID:   messageID,
+		ChatJID:     chatJID,
+		SenderJID:   stringPtr(jidString(r.client.Store.ID)),
+		FromMe:      true,
+		Timestamp:   timestamp,
+		Text:        text,
+		Status:      stringPtr("sent"),
+		Attachments: []attachmentSnapshot{},
 	}
 	r.state.setMessage(snapshot)
 
@@ -1326,6 +1411,47 @@ func (r *helperRuntime) sendText(ctx context.Context, target string, text string
 		"messageID": messageID,
 		"chatJID":   chatJID,
 		"timestamp": timestamp,
+	}, nil
+}
+
+func (r *helperRuntime) downloadMedia(ctx context.Context, chatJID string, messageID string, attachmentIndex int) (map[string]interface{}, error) {
+	if attachmentIndex != 0 {
+		return nil, fmt.Errorf("unsupported attachment index: %d", attachmentIndex)
+	}
+
+	snapshot := r.state.findMessage(chatJID, messageID)
+	if snapshot == nil {
+		return nil, fmt.Errorf("message not found: %s/%s", chatJID, messageID)
+	}
+	if snapshot.MessageProto == nil || strings.TrimSpace(*snapshot.MessageProto) == "" {
+		return nil, errors.New("message does not have downloadable media metadata")
+	}
+
+	protoBytes, err := base64.StdEncoding.DecodeString(*snapshot.MessageProto)
+	if err != nil {
+		return nil, fmt.Errorf("decode message proto: %w", err)
+	}
+
+	var message waProto.Message
+	if err := proto.Unmarshal(protoBytes, &message); err != nil {
+		return nil, fmt.Errorf("unmarshal message proto: %w", err)
+	}
+
+	data, err := r.client.DownloadAny(ctx, &message)
+	if err != nil {
+		return nil, err
+	}
+
+	var attachment *attachmentSnapshot
+	if len(snapshot.Attachments) > 0 {
+		attachment = &snapshot.Attachments[0]
+	}
+
+	return map[string]interface{}{
+		"dataBase64": base64.StdEncoding.EncodeToString(data),
+		"mimeType":   valueOrNil(attachment, func(value attachmentSnapshot) *string { return value.MimeType }),
+		"filename":   valueOrNil(attachment, func(value attachmentSnapshot) *string { return value.Filename }),
+		"sizeBytes":  len(data),
 	}, nil
 }
 
@@ -1559,6 +1685,7 @@ func messageFromEvent(event *events.Message) messageSnapshot {
 	if event.Info.IsFromMe {
 		status = "sent"
 	}
+	attachments, messageProto := attachmentsFromMessage(event.Info.ID, chatJID, event.Message)
 	return messageSnapshot{
 		MessageID:      event.Info.ID,
 		ChatJID:        chatJID,
@@ -1569,7 +1696,102 @@ func messageFromEvent(event *events.Message) messageSnapshot {
 		Text:           extractText(event.Message),
 		PushName:       pushName,
 		Status:         &status,
+		MessageProto:   messageProto,
+		Attachments:    attachments,
 	}
+}
+
+func attachmentsFromMessage(messageID string, chatJID string, message *waProto.Message) ([]attachmentSnapshot, *string) {
+	if message == nil {
+		return nil, nil
+	}
+
+	encodedMessage := func() *string {
+		data, err := proto.Marshal(message)
+		if err != nil {
+			return nil
+		}
+		return stringPtr(base64.StdEncoding.EncodeToString(data))
+	}
+
+	makeAttachment := func(kind string, filename *string, mimeType *string, sizeBytes *int64, text *string) attachmentSnapshot {
+		return attachmentSnapshot{
+			ID:         fmt.Sprintf("%s:0", kind),
+			Kind:       kind,
+			Filename:   filename,
+			MimeType:   mimeType,
+			SizeBytes:  sizeBytes,
+			Text:       text,
+			AccessKind: "provider_fetch",
+			AccessRef: map[string]interface{}{
+				"chatJID":         chatJID,
+				"messageID":       messageID,
+				"attachmentIndex": 0,
+			},
+			Availability: "available",
+			ProviderMeta: map[string]interface{}{
+				"kind": kind,
+			},
+		}
+	}
+
+	if image := message.GetImageMessage(); image != nil {
+		return []attachmentSnapshot{
+			makeAttachment(
+				"image",
+				nil,
+				emptyToNil(image.GetMimetype()),
+				int64PtrIfPositive(int64(image.GetFileLength())),
+				emptyToNil(strings.TrimSpace(image.GetCaption())),
+			),
+		}, encodedMessage()
+	}
+	if video := message.GetVideoMessage(); video != nil {
+		return []attachmentSnapshot{
+			makeAttachment(
+				"video",
+				nil,
+				emptyToNil(video.GetMimetype()),
+				int64PtrIfPositive(int64(video.GetFileLength())),
+				emptyToNil(strings.TrimSpace(video.GetCaption())),
+			),
+		}, encodedMessage()
+	}
+	if document := message.GetDocumentMessage(); document != nil {
+		return []attachmentSnapshot{
+			makeAttachment(
+				"document",
+				emptyToNil(document.GetFileName()),
+				emptyToNil(document.GetMimetype()),
+				int64PtrIfPositive(int64(document.GetFileLength())),
+				emptyToNil(strings.TrimSpace(document.GetCaption())),
+			),
+		}, encodedMessage()
+	}
+	if audio := message.GetAudioMessage(); audio != nil {
+		return []attachmentSnapshot{
+			makeAttachment(
+				"audio",
+				nil,
+				emptyToNil(audio.GetMimetype()),
+				int64PtrIfPositive(int64(audio.GetFileLength())),
+				nil,
+			),
+		}, encodedMessage()
+	}
+	if sticker := message.GetStickerMessage(); sticker != nil {
+		return []attachmentSnapshot{
+			makeAttachment(
+				"sticker",
+				nil,
+				emptyToNil(sticker.GetMimetype()),
+				int64PtrIfPositive(int64(sticker.GetFileLength())),
+				nil,
+			),
+		}, encodedMessage()
+	}
+
+	return nil, nil
 }
 
 func contactFromMessage(message messageSnapshot) contactSnapshot {
@@ -1958,6 +2180,21 @@ func emptyToNil(value string) *string {
 
 func emptyString(value string) string {
 	return strings.TrimSpace(value)
+}
+
+func int64PtrIfPositive(value int64) *int64 {
+	if value <= 0 {
+		return nil
+	}
+	copy := value
+	return &copy
+}
+
+func valueOrNil[T any](value *T, getter func(T) *string) *string {
+	if value == nil {
+		return nil
+	}
+	return getter(*value)
 }
 
 func firstNonEmpty(values ...string) string {

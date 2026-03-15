@@ -375,10 +375,6 @@ export function toSignalMessage(
   const dataMessage = envelope.dataMessage;
   const sentMessage = envelope.syncMessage?.sentMessage;
   const text = dataMessage?.message ?? sentMessage?.message;
-  if (!text || text.trim().length === 0) {
-    return null;
-  }
-
   const groupInfo = dataMessage?.groupInfo ?? sentMessage?.groupInfo;
   const groupId = groupInfo?.groupId?.trim();
   const groupName = groupInfo?.name?.trim();
@@ -403,13 +399,16 @@ export function toSignalMessage(
   const attachments = (dataMessage?.attachments ?? sentMessage?.attachments ?? []).filter(
     (value): value is Record<string, unknown> => typeof value === "object" && value !== null,
   );
+  if ((!text || text.trim().length === 0) && attachments.length === 0) {
+    return null;
+  }
 
   return {
-    messageId: makeMessageId(envelope, threadId, isFromMe, text, index),
+    messageId: makeMessageId(envelope, threadId, isFromMe, text ?? "[attachment]", index),
     threadId,
     threadType: groupId ? "group" : "dm",
     threadName: groupName || undefined,
-    text,
+    text: text ?? "",
     sentAt: timestamp,
     isFromMe,
     senderHandle: isFromMe ? undefined : source,

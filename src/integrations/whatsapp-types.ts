@@ -24,6 +24,7 @@ export interface WhatsAppMessageSnapshot {
   status?: string | null;
   deliveredAt?: number | null;
   readAt?: number | null;
+  attachments?: Array<Record<string, unknown>>;
 }
 
 export interface WhatsAppReceiptSnapshot {
@@ -107,6 +108,13 @@ export type WhatsAppHelperCommand =
     }
   | {
       id: number;
+      command: "downloadMedia";
+      chatJID: string;
+      messageID: string;
+      attachmentIndex?: number;
+    }
+  | {
+      id: number;
       command: "status";
     };
 
@@ -128,6 +136,13 @@ export interface WhatsAppHelperSendResult {
   messageID: string;
   chatJID: string;
   timestamp: number;
+}
+
+export interface WhatsAppHelperDownloadResult {
+  dataBase64: string;
+  mimeType?: string | null;
+  filename?: string | null;
+  sizeBytes: number;
 }
 
 export interface WhatsAppHelperResponseEnvelope<TResult = unknown> {
