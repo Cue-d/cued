@@ -378,8 +378,9 @@ async function extractTextContent(
 function buildListedAttachment(
   db: CuedDatabase,
   attachment: MessageAttachmentRow,
+  variant = "original",
 ): ListedAttachment {
-  const cache = db.getAttachmentCacheEntry(attachment.id, "original");
+  const cache = db.getAttachmentCacheEntry(attachment.id, variant);
   const content = db.getAttachmentContent(attachment.id);
   return {
     attachment,
@@ -452,7 +453,7 @@ export async function fetchAttachment(
       });
     }
     return {
-      ...buildListedAttachment(db, attachment),
+      ...buildListedAttachment(db, attachment, variant),
       localPath: existing.cache_path,
       cacheHit: true,
     };
@@ -526,7 +527,7 @@ export async function fetchAttachment(
     ensureWithinLimit(db, input.cacheLimitBytes);
     const cache = db.getAttachmentCacheEntry(attachment.id, variant);
     return {
-      ...buildListedAttachment(db, attachment),
+      ...buildListedAttachment(db, attachment, variant),
       localPath: cache?.cache_path ?? null,
       cacheHit: false,
     };
