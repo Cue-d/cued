@@ -181,4 +181,60 @@ describe("buildLinkedInRawEventsFromRealtimeEnvelope", () => {
       ),
     ).toBe(true);
   });
+
+  it("keeps system realtime messages in the message stream for summaries", () => {
+    const rawEvents = buildLinkedInRawEventsFromRealtimeEnvelope({
+      accountKey: "default",
+      userEntityUrn: "urn:li:member:SELF123",
+      envelope: {
+        "com.linkedin.realtimefrontend.DecoratedEvent": {
+          topic: "urn:li-realtime:messagesTopic:123",
+          leftServerAt: 1_700_000_300_000,
+          id: "evt-4",
+          payload: {
+            data: {
+              doDecorateMessageMessengerRealtimeDecoration: {
+                result: {
+                  entityURN: "urn:li:fsd_message:MSG4",
+                  body: { text: "Ava renamed the conversation" },
+                  deliveredAt: 1_700_000_300_100,
+                  sender: peerParticipant,
+                  messageBodyRenderFormat: "SYSTEM",
+                  renderContent: [],
+                  reactionSummaries: [],
+                  conversationURN: "urn:li:fsd_conversation:CONV4",
+                  conversation: {
+                    title: "Renamed chat",
+                    entityURN: "urn:li:fsd_conversation:CONV4",
+                    lastActivityAt: 1_700_000_300_100,
+                    lastReadAt: 1_700_000_300_100,
+                    groupChat: false,
+                    read: true,
+                    categories: ["PRIMARY_INBOX"],
+                    unreadCount: 0,
+                    conversationParticipants: [selfParticipant, peerParticipant],
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+    });
+
+    expect(
+      rawEvents.some(
+        (event) =>
+          event.entityKind === "timeline_event" && event.eventKind === "linkedin_system_message",
+      ),
+    ).toBe(true);
+    expect(
+      rawEvents.find(
+        (event) =>
+          event.entityKind === "message" &&
+          event.externalEntityId === "urn:li:fsd_message:MSG4" &&
+          event.eventKind === "message_observed",
+      ),
+    ).toBeTruthy();
+  });
 });

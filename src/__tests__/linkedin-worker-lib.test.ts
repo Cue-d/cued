@@ -328,6 +328,14 @@ describe("buildLinkedInSyncBundle", () => {
           event.entityKind === "timeline_event" && event.eventKind === "linkedin_system_message",
       ),
     ).toBeTruthy();
+    expect(
+      bundle.rawEvents.find(
+        (event) =>
+          event.entityKind === "message" &&
+          event.externalEntityId === "urn:li:fsd_message:MSG_SYSTEM" &&
+          event.eventKind === "message_observed",
+      ),
+    ).toBeTruthy();
 
     expect(
       bundle.rawEvents.find(
