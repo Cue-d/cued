@@ -150,4 +150,40 @@ describe("singleton lock", () => {
     expect(metadata.pid).toBe(42);
     lease.release();
   });
+
+  it("does not overwrite or delete a replacement owner after losing the path", async () => {
+    let timestamp = 1_700_000_000_000;
+    const path = createLockPath();
+    const firstLease = await acquireSingletonLock({
+      path,
+      kind: "daemon",
+      pid: 41,
+      now: () => timestamp,
+    });
+
+    timestamp += 20_000;
+    const replacementLease = await acquireSingletonLock({
+      path,
+      kind: "daemon",
+      pid: 42,
+      now: () => timestamp,
+      staleMs: 15_000,
+      isProcessRunning: () => false,
+    });
+
+    firstLease.heartbeat();
+    expect(readSingletonLock(path)).toEqual({
+      kind: "daemon",
+      pid: 42,
+      startedAt: timestamp,
+      updatedAt: timestamp,
+      version: null,
+    });
+
+    firstLease.release();
+    expect(readSingletonLock(path)?.pid).toBe(42);
+
+    replacementLease.release();
+    expect(readSingletonLock(path)).toBeNull();
+  });
 });
