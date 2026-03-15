@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { buildLinkedInSyncBundle } from "../workers/linkedin-worker-lib.js";
 
 describe("buildLinkedInSyncBundle", () => {
@@ -337,5 +337,78 @@ describe("buildLinkedInSyncBundle", () => {
           (event.payload as { emoji?: string }).emoji === "👍",
       ),
     ).toBeTruthy();
+  });
+
+  it("does not anchor-paginate empty conversations", async () => {
+    const getMessagesBefore = vi.fn(async () => {
+      throw new Error("should not paginate empty conversations");
+    });
+
+    await buildLinkedInSyncBundle({
+      accountKey: "default",
+      loadProjectedReactions: () => new Map(),
+      client: {
+        async fetchSelf() {
+          return "urn:li:fsd_profile:SELF123";
+        },
+        async getConnections() {
+          return { connections: [] };
+        },
+        async getConversations() {
+          return {
+            conversations: [
+              {
+                title: "Fresh thread",
+                entityURN: "urn:li:fsd_conversation:CONV_EMPTY",
+                lastActivityAt: 1_700_000_300_000,
+                lastReadAt: 1_700_000_300_000,
+                groupChat: false,
+                read: true,
+                categories: ["PRIMARY_INBOX"],
+                unreadCount: 0,
+                conversationParticipants: [
+                  {
+                    entityURN: "urn:li:fsd_profile:SELF123",
+                    participantType: {
+                      member: {
+                        firstName: "Theo",
+                        lastName: "Tarr",
+                        profileUrl: "https://www.linkedin.com/in/theotarr",
+                      },
+                    },
+                  },
+                  {
+                    entityURN: "urn:li:fsd_profile:ACoAAA2",
+                    participantType: {
+                      member: {
+                        firstName: "Mina",
+                        lastName: "Park",
+                        profileUrl: "https://www.linkedin.com/in/mina-park",
+                      },
+                    },
+                  },
+                ],
+              },
+            ],
+            syncToken: "sync-token-empty",
+          };
+        },
+        async getConversationsBefore() {
+          return { conversations: [] };
+        },
+        async getMessages() {
+          return { messages: [], prevCursor: null };
+        },
+        getMessagesBefore,
+        async getMessagesWithPrevCursor() {
+          return { messages: [], prevCursor: null };
+        },
+        async getReactors() {
+          return [];
+        },
+      },
+    });
+
+    expect(getMessagesBefore).not.toHaveBeenCalled();
   });
 });

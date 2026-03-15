@@ -256,7 +256,8 @@ async function listMessagesForConversation(
   while (
     !incremental &&
     pageCount < MAX_MESSAGE_PAGES &&
-    ((prevCursor && prevCursor.length > 0) || oldestDeliveredAt > oldestMs)
+    ((prevCursor && prevCursor.length > 0) ||
+      (Number.isFinite(oldestDeliveredAt) && oldestDeliveredAt > oldestMs))
   ) {
     const page = prevCursor
       ? await client.getMessagesWithPrevCursor(conversation.entityURN, prevCursor)
