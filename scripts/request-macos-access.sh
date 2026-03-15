@@ -17,7 +17,7 @@ if [[ -n "${CUED_APP_PATH:-}" && -d "${CUED_APP_PATH}/Contents/Resources" ]]; th
   IS_BUNDLED_APP=1
 fi
 if [[ $IS_BUNDLED_APP -eq 1 ]]; then
-  DEFAULT_NATIVE_BINARY="${CUED_APP_PATH}/Contents/MacOS/CuedDaemon"
+  DEFAULT_NATIVE_BINARY="${CUED_APP_PATH}/Contents/Resources/helpers/cued-native-helper"
 fi
 NATIVE_BINARY="${CUED_NATIVE_BINARY:-$DEFAULT_NATIVE_BINARY}"
 PERMISSION_TARGET="${CUED_PERMISSION_TARGET:-${CUED_APP_PATH:-$NATIVE_BINARY}}"

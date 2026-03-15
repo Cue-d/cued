@@ -39,6 +39,8 @@ jobs:
 
   native-macos:
     name: Native macOS Build
+    # GitHub-hosted macOS runners are currently billing-gated for this repo.
+    if: ${{ vars.ENABLE_GITHUB_HOSTED_MACOS_CI == 'true' }}
     runs-on: macos-latest
 
     steps:

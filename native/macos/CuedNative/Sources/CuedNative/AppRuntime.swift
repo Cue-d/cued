@@ -33,6 +33,18 @@ private func configuredMenuBarLockPath() -> String {
   "\(configuredCuedHomePath())/menu-bar.lock"
 }
 
+private func bundledNativeHelperPath() -> String? {
+  guard let resourcePath = Bundle.main.resourcePath?.trimmingCharacters(in: .whitespacesAndNewlines),
+        !resourcePath.isEmpty else {
+    return nil
+  }
+
+  let candidate = URL(fileURLWithPath: resourcePath)
+    .appendingPathComponent("helpers/cued-native-helper")
+    .path
+  return FileManager.default.fileExists(atPath: candidate) ? candidate : nil
+}
+
 private func currentTimeMs() -> Int {
   Int(Date().timeIntervalSince1970 * 1000)
 }
@@ -43,6 +55,8 @@ private struct SingletonLockMetadata: Codable {
   let startedAt: Int
   var updatedAt: Int
   let version: String?
+  let executablePath: String?
+  let appPath: String?
 }
 
 private enum SingletonLockError: Error {
@@ -79,7 +93,9 @@ private final class SingletonLockLease {
       pid: Int(ProcessInfo.processInfo.processIdentifier),
       startedAt: currentTimeMs(),
       updatedAt: currentTimeMs(),
-      version: version
+      version: version,
+      executablePath: Bundle.main.executablePath,
+      appPath: Bundle.main.bundlePath
     )
     do {
       return try SingletonLockLease.create(path: path, metadata: metadata)
@@ -277,6 +293,105 @@ private func readSingletonLockState(path: String, staleMs: Int = appSingletonLoc
   let fresh = currentTimeMs() - metadata.updatedAt < staleMs
   let running = fresh && isProcessRunning(metadata.pid)
   return (running, running ? metadata.pid : nil, metadata.updatedAt)
+}
+
+private func normalizeFileSystemPath(_ path: String) -> String {
+  URL(fileURLWithPath: path).resolvingSymlinksInPath().standardizedFileURL.path
+}
+
+private func extractAppBundlePath(from command: String) -> String? {
+  guard let range = command.range(of: "/Cued.app/") else {
+    return nil
+  }
+  let prefix = command[..<range.upperBound]
+  guard let start = prefix.lastIndex(of: " ") else {
+    return String(prefix.dropLast())
+  }
+  return String(prefix[prefix.index(after: start)..<prefix.index(before: prefix.endIndex)])
+}
+
+private func looksLikeCuedDaemonCommand(_ command: String) -> Bool {
+  command.contains("/Cued.app/")
+    && (
+      command.contains("/Contents/MacOS/CuedDaemon")
+        || command.contains("/Contents/Resources/cued-cli daemon")
+        || command.contains("dist/cli.js daemon")
+    )
+}
+
+private func terminateCompetingDaemonProcesses(currentAppPath: String) {
+  let normalizedCurrentAppPath = normalizeFileSystemPath(currentAppPath)
+  let currentPID = Int(ProcessInfo.processInfo.processIdentifier)
+
+  let process = Process()
+  process.executableURL = URL(fileURLWithPath: "/bin/ps")
+  process.arguments = ["-axo", "pid=,command="]
+  let stdout = Pipe()
+  process.standardOutput = stdout
+  process.standardError = nil
+  do {
+    try process.run()
+  } catch {
+    return
+  }
+
+  let data = stdout.fileHandleForReading.readDataToEndOfFile()
+  process.waitUntilExit()
+
+  guard process.terminationStatus == 0 else {
+    return
+  }
+
+  guard let output = String(data: data, encoding: .utf8) else {
+    return
+  }
+
+  var terminatedPIDs: [Int] = []
+  for rawLine in output.split(separator: "\n") {
+    let line = rawLine.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !line.isEmpty, let splitIndex = line.firstIndex(where: \.isWhitespace) else {
+      continue
+    }
+    let pidText = line[..<splitIndex].trimmingCharacters(in: .whitespacesAndNewlines)
+    let command = line[splitIndex...].trimmingCharacters(in: .whitespacesAndNewlines)
+    guard let pid = Int(pidText), pid > 0, pid != currentPID, looksLikeCuedDaemonCommand(command) else {
+      continue
+    }
+
+    guard let appPath = extractAppBundlePath(from: command) else {
+      continue
+    }
+    let normalizedAppPath = normalizeFileSystemPath(appPath)
+    let shouldTerminate =
+      normalizedAppPath != normalizedCurrentAppPath
+        || normalizedAppPath.contains("/.Trash/")
+        || normalizedAppPath.contains("/Trash/")
+        || !FileManager.default.fileExists(atPath: appPath)
+    guard shouldTerminate else {
+      continue
+    }
+
+    if Darwin.kill(pid_t(pid), SIGTERM) == 0 || errno == ESRCH {
+      terminatedPIDs.append(pid)
+    }
+  }
+
+  guard !terminatedPIDs.isEmpty else {
+    return
+  }
+
+  let deadline = currentTimeMs() + 5_000
+  let socketPath = "\(configuredCuedHomePath())/cued.sock"
+  while currentTimeMs() < deadline {
+    let anyRunning = terminatedPIDs.contains { isProcessRunning($0) }
+    let lockOwnerPID = SingletonLockLease.read(path: configuredDaemonLockPath())?.pid
+    let lockHeldByCompetingPID = lockOwnerPID.map { terminatedPIDs.contains($0) } ?? false
+    let socketExists = FileManager.default.fileExists(atPath: socketPath)
+    if !anyRunning && !lockHeldByCompetingPID && !socketExists {
+      break
+    }
+    usleep(100_000)
+  }
 }
 
 private func activateExistingCuedApp() {
@@ -933,7 +1048,7 @@ final class DaemonSupervisor {
       if let executablePath = Bundle.main.executablePath,
          !executablePath.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
       {
-        environment["CUED_NATIVE_BINARY"] = executablePath
+        environment["CUED_AUTH_NATIVE_BINARY"] = executablePath
       }
       command = buildShellCommand(setupCommand, environment: environment)
     }
@@ -943,10 +1058,8 @@ final class DaemonSupervisor {
 
   func requestPermissions() {
     var environment = daemonEnvironment()
-    if let executablePath = Bundle.main.executablePath,
-       !executablePath.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-    {
-      environment["CUED_NATIVE_BINARY"] = executablePath
+    if let helperPath = bundledNativeHelperPath() {
+      environment["CUED_NATIVE_BINARY"] = helperPath
     }
     let bundlePath = Bundle.main.bundlePath.trimmingCharacters(in: .whitespacesAndNewlines)
     if !bundlePath.isEmpty {
@@ -1002,16 +1115,29 @@ final class DaemonSupervisor {
 
   private nonisolated func daemonEnvironment() -> [String: String] {
     var environment = ProcessInfo.processInfo.environment
+    let executablePath = Bundle.main.executablePath?.trimmingCharacters(in: .whitespacesAndNewlines)
 
-    if let executablePath = Bundle.main.executablePath,
-       !executablePath.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-    {
+    if let helperPath = bundledNativeHelperPath() {
+      if environment["CUED_NATIVE_BINARY"] == nil {
+        environment["CUED_NATIVE_BINARY"] = helperPath
+      }
+      if environment["CUED_IMESSAGE_NATIVE_BINARY"] == nil {
+        environment["CUED_IMESSAGE_NATIVE_BINARY"] = helperPath
+      }
+      if environment["CUED_CONTACTS_NATIVE_BINARY"] == nil {
+        environment["CUED_CONTACTS_NATIVE_BINARY"] = helperPath
+      }
+    } else if let executablePath, !executablePath.isEmpty {
       if environment["CUED_IMESSAGE_NATIVE_BINARY"] == nil {
         environment["CUED_IMESSAGE_NATIVE_BINARY"] = executablePath
       }
       if environment["CUED_CONTACTS_NATIVE_BINARY"] == nil {
         environment["CUED_CONTACTS_NATIVE_BINARY"] = executablePath
       }
+    }
+    if let executablePath, !executablePath.isEmpty, environment["CUED_AUTH_NATIVE_BINARY"] == nil
+    {
+      environment["CUED_AUTH_NATIVE_BINARY"] = executablePath
     }
     let bundlePath = Bundle.main.bundlePath.trimmingCharacters(in: .whitespacesAndNewlines)
     if !bundlePath.isEmpty, environment["CUED_APP_PATH"] == nil {
@@ -1584,6 +1710,10 @@ func runMenuBarApp() throws {
   let dbPath = environmentPath("CUED_DB_PATH")
     ?? (Bundle.main.object(forInfoDictionaryKey: "CuedDBPath") as? String)
     ?? configuredCuedDBPath()
+  let bundlePath = Bundle.main.bundlePath.trimmingCharacters(in: .whitespacesAndNewlines)
+  if !bundlePath.isEmpty {
+    terminateCompetingDaemonProcesses(currentAppPath: bundlePath)
+  }
   let menuBarLease: SingletonLockLease
   do {
     menuBarLease = try SingletonLockLease.acquire(

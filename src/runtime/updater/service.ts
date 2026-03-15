@@ -37,6 +37,7 @@ import {
   isValidCuedAppBundle,
   resolveInstalledAppPath,
 } from "../../macos/install.js";
+import { terminateCompetingDaemons } from "../../macos/competing-daemons.js";
 import type {
   PendingRollbackState,
   UpdateErrorState,
@@ -673,6 +674,9 @@ export async function installAvailableUpdate(db: CuedDatabase): Promise<InstallR
     db.setUpdateLastError(null);
     await requestShutdownForUpdate(db);
     bootoutLaunchAgent();
+    terminateCompetingDaemons({
+      expectedExecutablePath: getAppExecutablePath(installedAppPath),
+    });
 
     const currentVersion = getCurrentAppVersion();
     const backupStamp = `${now()}-preupdate-${currentVersion}-to-${prepared.version}`;

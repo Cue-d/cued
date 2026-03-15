@@ -11,6 +11,11 @@ import { CUED_DB_PATH, CUED_SOCKET_PATH, ensureCuedDirs } from "./core/config.js
 import { resolveHostOS } from "./core/platform-capabilities.js";
 import { openCuedDatabase, openCuedDatabaseReadOnly } from "./db/database.js";
 import {
+  buildDoctorReport,
+  buildPermissionStatus,
+  refreshMessagesAutomationVerification,
+} from "./runtime/doctor.js";
+import {
   getAppBundleInfo,
   getCLISymlinkStatus,
   getLaunchAgentStatus,
@@ -23,7 +28,6 @@ import {
 import { IntegrationAuthService } from "./platforms/core/auth/service.js";
 import { getIntegrationSummary, listIntegrationStates } from "./platforms/core/state/status.js";
 import { runDaemon } from "./runtime/daemon/server.js";
-import { buildDoctorReport, buildPermissionStatus } from "./runtime/doctor.js";
 import {
   doctorHooksConfig,
   emitHookEvent,
@@ -460,7 +464,19 @@ async function main(): Promise<void> {
           }
           return;
         case "status":
-          printJson(await buildPermissionStatus());
+          {
+            const db = openCuedDatabaseReadOnly();
+            try {
+              printJson(
+                await buildPermissionStatus({
+                  mode: "passive",
+                  db,
+                }),
+              );
+            } finally {
+              db.close();
+            }
+          }
           return;
         case "request": {
           const flags = rest.length > 0 ? rest : ["--all"];
@@ -471,6 +487,14 @@ async function main(): Promise<void> {
             command: ["bash", scriptPath, ...flags],
           });
           execFileSync("bash", [scriptPath, ...flags], { stdio: "inherit" });
+          if (flags.includes("--all") || flags.includes("--messages")) {
+            const db = openCuedDatabase();
+            try {
+              refreshMessagesAutomationVerification(db);
+            } finally {
+              db.close();
+            }
+          }
           return;
         }
         default:
