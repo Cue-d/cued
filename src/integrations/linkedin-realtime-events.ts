@@ -189,8 +189,7 @@ export function buildLinkedInRawEventsFromRealtimeEnvelope(input: {
         buildLinkedInMessageEvent({
           accountKey: input.accountKey,
           message,
-          fallbackConversationUrn:
-            message.conversationURN || message.conversation?.entityURN || "",
+          fallbackConversationUrn: message.conversationURN || message.conversation?.entityURN || "",
           userEntityUrn: input.userEntityUrn,
           observedAt,
           eventKind: message.messageBodyRenderFormat === "SYSTEM" ? "message_observed" : undefined,
