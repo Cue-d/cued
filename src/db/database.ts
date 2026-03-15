@@ -6,7 +6,6 @@ import { type BetterSQLite3Database, drizzle } from "drizzle-orm/better-sqlite3"
 import type { SQLiteTable } from "drizzle-orm/sqlite-core";
 import { getCurrentAppVersion, getCurrentReleaseChannel } from "../core/app-metadata.js";
 import { CUED_DB_PATH, ensureCuedDirs } from "../core/config.js";
-import { normalizePhone } from "../core/utils/phone.js";
 import type {
   AuthSessionState,
   ConnectionKind,
@@ -20,6 +19,7 @@ import type {
   SyncRunStatus,
   SyncRunType,
 } from "../core/types/provider.js";
+import { normalizePhone } from "../core/utils/phone.js";
 import type {
   PendingRollbackState,
   UpdateErrorState,

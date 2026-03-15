@@ -1,8 +1,5 @@
 import { describe, expect, it } from "vitest";
-import {
-  buildProjectionMessageHookBatches,
-  ProjectionMessageHookBarrier,
-} from "./service.js";
+import { buildProjectionMessageHookBatches, ProjectionMessageHookBarrier } from "./service.js";
 
 describe("ProjectionMessageHookBarrier", () => {
   it("releases only batches fully covered by completed projection ranges", async () => {

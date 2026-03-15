@@ -1,10 +1,10 @@
 import { createHash } from "node:crypto";
-import type { SyncBundle } from "../../core/sync.js";
 import type {
   ContactObservationPayload,
   ConversationObservationPayload,
   MessagePayload,
 } from "../../../core/types/provider.js";
+import type { SyncBundle } from "../../core/sync.js";
 import type {
   WhatsAppChatSnapshot,
   WhatsAppContactSnapshot,

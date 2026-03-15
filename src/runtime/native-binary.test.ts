@@ -2,10 +2,7 @@ import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:f
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import {
-  getMacOSNativeBinaryCandidates,
-  resolveMacOSNativeBinary,
-} from "./native-binary.js";
+import { getMacOSNativeBinaryCandidates, resolveMacOSNativeBinary } from "./native-binary.js";
 
 describe("macOS native binary resolution", () => {
   const tempDirs: string[] = [];

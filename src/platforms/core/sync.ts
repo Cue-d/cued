@@ -1,4 +1,8 @@
-import type { ProviderRawEventInput, SourceAccountInput, SyncMode } from "../../core/types/provider.js";
+import type {
+  ProviderRawEventInput,
+  SourceAccountInput,
+  SyncMode,
+} from "../../core/types/provider.js";
 
 export type { ProviderRawEventInput as RawEventInput, SourceAccountInput };
 

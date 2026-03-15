@@ -3,23 +3,27 @@ import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { performance } from "node:perf_hooks";
+import type { ProviderRawEventInput } from "../../core/types/provider.js";
+import { CuedDatabase } from "../../db/database.js";
+import { buildIMessageSyncBundle } from "../../platforms/imessage/sync.js";
 import type {
   Connection,
   Conversation,
   Message,
   MessagingParticipant,
 } from "../../platforms/linkedin/api/index.js";
-import type { SlackConversation, SlackMessage, SlackUser } from "../../platforms/slack/api/index.js";
-import { CuedDatabase } from "../../db/database.js";
+import { buildLinkedInSyncBundle } from "../../platforms/linkedin/sync/bundle.js";
+import type {
+  SlackConversation,
+  SlackMessage,
+  SlackUser,
+} from "../../platforms/slack/api/index.js";
+import { buildSlackSyncBundle } from "../../platforms/slack/sync/bundle.js";
 import {
   projectDeferredRange,
   projectPendingRawEvents,
   projectRealtimeRange,
 } from "../projection/projector.js";
-import type { ProviderRawEventInput } from "../../core/types/provider.js";
-import { buildIMessageSyncBundle } from "../../platforms/imessage/sync.js";
-import { buildLinkedInSyncBundle } from "../../platforms/linkedin/sync/bundle.js";
-import { buildSlackSyncBundle } from "../../platforms/slack/sync/bundle.js";
 
 const require = createRequire(import.meta.url);
 const { DatabaseSync } = require("node:sqlite") as typeof import("node:sqlite");

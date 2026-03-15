@@ -3,74 +3,9 @@ import { existsSync, type FSWatcher, rmSync, watch } from "node:fs";
 import { createConnection, createServer, type Socket } from "node:net";
 import { basename, dirname } from "node:path";
 import process from "node:process";
-import { DEFAULT_CHAT_DB_PATH } from "../../platforms/imessage/reader.js";
-import { isAdapterPlatform, listAutoSyncPlatforms } from "../../platforms/core/registry.js";
-import { runAdapter } from "../../platforms/core/runner.js";
 import { getCurrentAppVersion, getCurrentReleaseChannel } from "../../core/app-metadata.js";
-import { fetchAttachment, listAttachments, searchAttachments } from "../attachments.js";
 import { CUED_DAEMON_LOCK_PATH, CUED_SOCKET_PATH } from "../../core/config.js";
-import { safeParseJsonRecord } from "../../db/codecs.js";
-import { type OutboundMessageRow, openCuedDatabase } from "../../db/database.js";
-import { emitHookEvent } from "../hooks.js";
-import {
-  type LinkedInRealtimeStatus,
-  LinkedInRealtimeSupervisor,
-} from "../../platforms/linkedin/realtime/session.js";
-import { buildLinkedInRawEventsFromRealtimeEnvelope } from "../../platforms/linkedin/realtime/events.js";
-import { loadLinkedInSessionSecret } from "../../platforms/linkedin/auth/session-store.js";
-import { getIntegrationSummary } from "../../platforms/core/state/status.js";
-import { refreshManagedIntegrationStates } from "../../platforms/core/state/refresh.js";
-import {
-  getSignalConfigDir,
-  inspectSignalCli,
-  isSignalCliVersionSupported,
-  readSignalLinkedAccount,
-} from "../../platforms/signal/cli/binary.js";
-import { SignalCliClient } from "../../platforms/signal/cli/client.js";
-import {
-  buildOptimisticSignalRawEvents,
-  buildSignalRawEventsFromMessages,
-} from "../../platforms/signal/sync/events.js";
-import {
-  type SignalRealtimeStatus,
-  SignalRealtimeSupervisor,
-} from "../../platforms/signal/realtime/session.js";
-import {
-  buildOptimisticWhatsAppRawEvents,
-  buildWhatsAppRawEventsFromSnapshot,
-} from "../../platforms/whatsapp/sync/events.js";
-import {
-  getWhatsAppStoreDir,
-  inspectWhatsAppHelper,
-} from "../../platforms/whatsapp/helper/binary.js";
-import { readWhatsAppHelperStatus } from "../../platforms/whatsapp/helper/status.js";
-import {
-  type WhatsAppRealtimeStatus,
-  WhatsAppRealtimeSupervisor,
-} from "../../platforms/whatsapp/realtime/session.js";
-import type {
-  WhatsAppHelperEventEnvelope,
-  WhatsAppReceiptSnapshot,
-  WhatsAppSnapshot,
-} from "../../platforms/whatsapp/types.js";
-import type { DaemonRequest, DaemonResponse } from "../ipc.js";
 import { createLogger } from "../../core/logging.js";
-import {
-  projectDeferredRange,
-  projectPendingRawEvents,
-  projectRealtimeRange,
-  rebuildProjectedState,
-} from "../projection/projector.js";
-import { IntegrationAuthService } from "../../platforms/core/auth/service.js";
-import {
-  buildProjectionMessageHookBatches,
-  ProjectionMessageHookBarrier,
-  type ProjectionMessageHookPayload,
-  type ProjectionRunDetails,
-  parseProjectionRunDetails,
-} from "../projection/service.js";
-import { RunQueueService } from "../run-queue.js";
-import { buildDaemonStatusSnapshot, buildDoctorSnapshot } from "../status.js";
 import {
   acquireSingletonLock,
   SINGLETON_LOCK_HEARTBEAT_MS,
@@ -86,8 +21,73 @@ import {
   type Platform,
   type ProviderRawEventInput,
 } from "../../core/types/provider.js";
-import { checkForUpdates } from "../updater/service.js";
+import { safeParseJsonRecord } from "../../db/codecs.js";
+import { type OutboundMessageRow, openCuedDatabase } from "../../db/database.js";
+import { IntegrationAuthService } from "../../platforms/core/auth/service.js";
+import { isAdapterPlatform, listAutoSyncPlatforms } from "../../platforms/core/registry.js";
+import { runAdapter } from "../../platforms/core/runner.js";
+import { refreshManagedIntegrationStates } from "../../platforms/core/state/refresh.js";
+import { getIntegrationSummary } from "../../platforms/core/state/status.js";
+import { DEFAULT_CHAT_DB_PATH } from "../../platforms/imessage/reader.js";
+import { loadLinkedInSessionSecret } from "../../platforms/linkedin/auth/session-store.js";
+import { buildLinkedInRawEventsFromRealtimeEnvelope } from "../../platforms/linkedin/realtime/events.js";
+import {
+  type LinkedInRealtimeStatus,
+  LinkedInRealtimeSupervisor,
+} from "../../platforms/linkedin/realtime/session.js";
+import {
+  getSignalConfigDir,
+  inspectSignalCli,
+  isSignalCliVersionSupported,
+  readSignalLinkedAccount,
+} from "../../platforms/signal/cli/binary.js";
+import { SignalCliClient } from "../../platforms/signal/cli/client.js";
+import {
+  type SignalRealtimeStatus,
+  SignalRealtimeSupervisor,
+} from "../../platforms/signal/realtime/session.js";
+import {
+  buildOptimisticSignalRawEvents,
+  buildSignalRawEventsFromMessages,
+} from "../../platforms/signal/sync/events.js";
+import {
+  getWhatsAppStoreDir,
+  inspectWhatsAppHelper,
+} from "../../platforms/whatsapp/helper/binary.js";
+import { readWhatsAppHelperStatus } from "../../platforms/whatsapp/helper/status.js";
+import {
+  type WhatsAppRealtimeStatus,
+  WhatsAppRealtimeSupervisor,
+} from "../../platforms/whatsapp/realtime/session.js";
+import {
+  buildOptimisticWhatsAppRawEvents,
+  buildWhatsAppRawEventsFromSnapshot,
+} from "../../platforms/whatsapp/sync/events.js";
+import type {
+  WhatsAppHelperEventEnvelope,
+  WhatsAppReceiptSnapshot,
+  WhatsAppSnapshot,
+} from "../../platforms/whatsapp/types.js";
+import { fetchAttachment, listAttachments, searchAttachments } from "../attachments.js";
+import { emitHookEvent } from "../hooks.js";
+import type { DaemonRequest, DaemonResponse } from "../ipc.js";
 import { resolveMacOSNativeBinary } from "../native-binary.js";
+import {
+  projectDeferredRange,
+  projectPendingRawEvents,
+  projectRealtimeRange,
+  rebuildProjectedState,
+} from "../projection/projector.js";
+import {
+  buildProjectionMessageHookBatches,
+  ProjectionMessageHookBarrier,
+  type ProjectionMessageHookPayload,
+  type ProjectionRunDetails,
+  parseProjectionRunDetails,
+} from "../projection/service.js";
+import { RunQueueService } from "../run-queue.js";
+import { buildDaemonStatusSnapshot, buildDoctorSnapshot } from "../status.js";
+import { checkForUpdates } from "../updater/service.js";
 
 const DAEMON_VERSION = getCurrentAppVersion();
 const DEFAULT_AUTOSYNC_INTERVAL_MS = 60_000;

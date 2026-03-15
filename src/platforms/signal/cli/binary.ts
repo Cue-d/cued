@@ -1,12 +1,11 @@
+export type { SignalCliVersion } from "./client.js";
 export {
-  getSignalConfigDir,
   getSignalCliBinaryCandidates,
   getSignalCliHelperRootCandidates,
+  getSignalConfigDir,
   inspectSignalCli,
   isSignalCliVersionSupported,
   parseSignalCliVersion,
   readSignalLinkedAccount,
   resolveSignalCliPath,
 } from "./client.js";
-
-export type { SignalCliVersion } from "./client.js";

@@ -1,4 +1,8 @@
 import { createHash } from "node:crypto";
+import type { SourceAccountInput } from "../../../core/types/provider.js";
+import { mapWithConcurrency } from "../../../core/utils/async.js";
+import { openCuedDatabase } from "../../../db/database.js";
+import type { SyncBundle } from "../../core/sync.js";
 import {
   type Connection,
   type Conversation,
@@ -7,8 +11,7 @@ import {
   type Message,
   type MessagingParticipant,
 } from "../api/index.js";
-import type { SyncBundle } from "../../core/sync.js";
-import { openCuedDatabase } from "../../../db/database.js";
+import { loadLinkedInSessionSecret } from "../auth/session-store.js";
 import {
   buildLinkedInConversationEvent,
   buildLinkedInConversationRemovalEvents,
@@ -22,9 +25,6 @@ import {
   normalizeMemberUrn,
   participantSourceKey,
 } from "./events.js";
-import { loadLinkedInSessionSecret } from "../auth/session-store.js";
-import { mapWithConcurrency } from "../../../core/utils/async.js";
-import type { SourceAccountInput } from "../../../core/types/provider.js";
 
 const DEFAULT_SYNC_HISTORY_DAYS = Number(process.env.CUED_SYNC_HISTORY_DAYS ?? "730");
 const INCREMENTAL_BUFFER_MS = 5 * 60 * 1000;

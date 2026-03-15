@@ -1,5 +1,5 @@
-import type { Cookie } from "../api/types.js";
 import { loadIntegrationSecret } from "../../core/secrets/keychain.js";
+import type { Cookie } from "../api/types.js";
 
 export interface LinkedInSessionSecret {
   cookies: Cookie[];

@@ -1,5 +1,13 @@
 import { createHash } from "node:crypto";
 import { eq, sql } from "drizzle-orm";
+import type {
+  ContactObservationPayload,
+  ConversationObservationPayload,
+  MessagePayload,
+  Platform,
+  ReactionPayload,
+  TimelineEventPayload,
+} from "../../core/types/provider.js";
 import type { CuedDatabase, LocalDrizzleDatabase } from "../../db/database.js";
 import {
   contactHandles,
@@ -13,14 +21,6 @@ import {
   projectionState,
   timelineEvents,
 } from "../../db/schema.js";
-import type {
-  ContactObservationPayload,
-  ConversationObservationPayload,
-  MessagePayload,
-  Platform,
-  ReactionPayload,
-  TimelineEventPayload,
-} from "../../core/types/provider.js";
 
 type LocalDbExecutor = Pick<
   LocalDrizzleDatabase,

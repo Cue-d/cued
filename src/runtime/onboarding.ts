@@ -1,7 +1,7 @@
 import type { CuedDatabase } from "../db/database.js";
-import { buildPermissionStatus } from "./doctor.js";
-import { buildIntegrationStatus } from "../platforms/core/state/status.js";
 import { refreshManagedIntegrationStates } from "../platforms/core/state/refresh.js";
+import { buildIntegrationStatus } from "../platforms/core/state/status.js";
+import { buildPermissionStatus } from "./doctor.js";
 
 export interface OnboardingSnapshot {
   permissions: Awaited<ReturnType<typeof buildPermissionStatus>>["permissions"];

@@ -1,7 +1,7 @@
 import { type ChildProcess, execFileSync, spawn } from "node:child_process";
 import { join } from "node:path";
-import type { CuedDatabase } from "../../../db/database.js";
 import type { AuthSessionState, Platform } from "../../../core/types/provider.js";
+import type { CuedDatabase } from "../../../db/database.js";
 import type { AuthSessionSummary, IntegrationStateSummary } from "../state/types.js";
 
 export interface ChromiumAuthResult {

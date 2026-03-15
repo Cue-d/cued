@@ -1,19 +1,16 @@
-import { execFileSync } from "node:child_process";
-import { existsSync } from "node:fs";
-import { DEFAULT_CHAT_DB_PATH, IMessageReader } from "../../imessage/reader.js";
-import { importSlackDesktopAuth } from "../../slack/auth/desktop-import.js";
+import type { CuedDatabase, IntegrationStateRow } from "../../../db/database.js";
 import {
   getSignalConfigDir,
   inspectSignalCli,
   isSignalCliVersionSupported,
   readSignalLinkedAccount,
 } from "../../signal/cli/binary.js";
+import { importSlackDesktopAuth } from "../../slack/auth/desktop-import.js";
 import { getWhatsAppStoreDir, inspectWhatsAppHelper } from "../../whatsapp/helper/binary.js";
 import { readWhatsAppHelperStatus } from "../../whatsapp/helper/status.js";
-import { resolveMacOSNativeBinary } from "../../../runtime/native-binary.js";
-import type { CuedDatabase, IntegrationStateRow } from "../../../db/database.js";
+import { listAdapterPlatforms } from "../registry.js";
 import type { IntegrationAuthState } from "../types.js";
-import type { IntegrationStateSummary, ManagedIntegrationState } from "./types.js";
+import { buildLocalIntegrationStates } from "./local.js";
 import {
   addSupportedByDaemonMetadata,
   firstNonEmptyDisplayName,
@@ -22,105 +19,7 @@ import {
   refreshPersistedRequestableIntegrationStates,
   upsertManagedIntegrationState,
 } from "./status.js";
-import { listAdapterPlatforms } from "../registry.js";
-
-function getContactsAuthState(): IntegrationAuthState {
-  const nativeBinary = resolveMacOSNativeBinary(process.env.CUED_CONTACTS_NATIVE_BINARY);
-  if (!nativeBinary) {
-    return "native_helper_missing";
-  }
-  try {
-    const stdout = execFileSync(nativeBinary, ["contacts", "status"], {
-      encoding: "utf8",
-      stdio: ["ignore", "pipe", "pipe"],
-    });
-    const parsed = JSON.parse(stdout) as { status?: string };
-    switch (parsed.status) {
-      case "authorized":
-      case "not_determined":
-      case "unknown":
-        return parsed.status;
-      case "denied":
-        return "blocked";
-      default:
-        return "unknown";
-    }
-  } catch {
-    return "check_failed";
-  }
-}
-
-function getIMessageAuthState(): IntegrationAuthState {
-  const chatDbPath = process.env.CUED_IMESSAGE_DB_PATH ?? DEFAULT_CHAT_DB_PATH;
-  if (!existsSync(chatDbPath)) {
-    return "missing";
-  }
-  const nativeBinary = resolveMacOSNativeBinary(process.env.CUED_IMESSAGE_NATIVE_BINARY);
-  if (nativeBinary) {
-    try {
-      execFileSync(
-        nativeBinary,
-        ["imessage", "dump", "--db-path", chatDbPath, "--after-rowid", "0", "--limit", "1"],
-        { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] },
-      );
-      return "authorized";
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      if (message.includes("authorization denied") || message.includes("unable to open database file")) {
-        return "needs_full_disk_access";
-      }
-      return "blocked";
-    }
-  }
-  try {
-    const reader = new IMessageReader(chatDbPath);
-    try {
-      reader.getMaxMessageRowid();
-      return "authorized";
-    } finally {
-      reader.close();
-    }
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    if (message.includes("authorization denied") || message.includes("unable to open database file")) {
-      return "needs_full_disk_access";
-    }
-    return "blocked";
-  }
-}
-
-function buildLocalIntegrationStates(): ManagedIntegrationState[] {
-  const chatDbPath = process.env.CUED_IMESSAGE_DB_PATH ?? DEFAULT_CHAT_DB_PATH;
-  return [
-    {
-      platform: "contacts",
-      accountKey: "local",
-      displayName: "Contacts.app",
-      authState: getContactsAuthState(),
-      enabled: true,
-      connectionKind: "native",
-      runtimeKind: "native",
-      syncCapable: true,
-      launchStrategy: "system-settings",
-      launchTarget: "x-apple.systempreferences:com.apple.preference.security?Privacy_Contacts",
-      importedFrom: "local-system",
-    },
-    {
-      platform: "imessage",
-      accountKey: "local",
-      displayName: "Messages",
-      authState: getIMessageAuthState(),
-      enabled: true,
-      connectionKind: "native",
-      runtimeKind: "native",
-      syncCapable: true,
-      launchStrategy: "system-settings",
-      launchTarget: "x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles",
-      importedFrom: "local-system",
-      artifactPaths: existsSync(chatDbPath) ? [chatDbPath] : [],
-    },
-  ];
-}
+import type { IntegrationStateSummary, ManagedIntegrationState } from "./types.js";
 
 async function buildSignalManagedState(
   existing: IntegrationStateRow | null,
@@ -149,7 +48,8 @@ async function buildSignalManagedState(
   return {
     platform: "signal",
     accountKey,
-    displayName: firstNonEmptyDisplayName(linkedAccount, existing?.display_name, "Signal") ?? "Signal",
+    displayName:
+      firstNonEmptyDisplayName(linkedAccount, existing?.display_name, "Signal") ?? "Signal",
     authState,
     enabled: existing ? existing.enabled === 1 : true,
     connectionKind: "local-cli",

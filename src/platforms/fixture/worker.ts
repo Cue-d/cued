@@ -1,5 +1,5 @@
-import { buildFixtureSyncBundle } from "./data.js";
 import type { AdapterWorkerOutput } from "../core/sync.js";
+import { buildFixtureSyncBundle } from "./data.js";
 
 function main(): void {
   try {
