@@ -1,11 +1,11 @@
 import type { CuedDatabase } from "../db/database.js";
-import { buildDoctorReport } from "./doctor.js";
-import { doctorHooksConfig } from "./hooks.js";
-import type { LinkedInRealtimeSupervisor } from "../platforms/linkedin/realtime/session.js";
 import { buildIntegrationStatus } from "../platforms/core/state/status.js";
+import type { LinkedInRealtimeSupervisor } from "../platforms/linkedin/realtime/session.js";
 import type { SignalRealtimeSupervisor } from "../platforms/signal/realtime/session.js";
 import { buildWhatsAppDiagnostics } from "../platforms/whatsapp/diagnostics.js";
 import type { WhatsAppRealtimeSupervisor } from "../platforms/whatsapp/realtime/session.js";
+import { buildDoctorReport } from "./doctor.js";
+import { doctorHooksConfig } from "./hooks.js";
 import { getUpdateStatus } from "./updater/service.js";
 
 export async function buildDoctorSnapshot(

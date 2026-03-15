@@ -1,13 +1,4 @@
 import { createHash } from "node:crypto";
-import {
-  SlackClient,
-  type SlackConversation,
-  type SlackCredentials,
-  type SlackMessage,
-  type SlackUser,
-} from "../api/index.js";
-import type { SyncBundle } from "../../core/sync.js";
-import { loadIntegrationSecret } from "../../core/secrets/keychain.js";
 import type {
   ContactObservationPayload,
   ConversationObservationPayload,
@@ -15,6 +6,15 @@ import type {
   ReactionPayload,
   SourceAccountInput,
 } from "../../../core/types/provider.js";
+import { loadIntegrationSecret } from "../../core/secrets/keychain.js";
+import type { SyncBundle } from "../../core/sync.js";
+import {
+  SlackClient,
+  type SlackConversation,
+  type SlackCredentials,
+  type SlackMessage,
+  type SlackUser,
+} from "../api/index.js";
 
 const INCREMENTAL_BUFFER_MS = 5 * 60 * 1000;
 const DEFAULT_SLACK_CONVERSATIONS_PER_RUN = Number(

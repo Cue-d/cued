@@ -1,8 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import {
-  LinkedInRealtimeSession,
-  LinkedInRealtimeSupervisor,
-} from "./session.js";
+import { LinkedInRealtimeSession, LinkedInRealtimeSupervisor } from "./session.js";
 
 type TestableRealtimeSession = {
   userEntityUrn: string | null;

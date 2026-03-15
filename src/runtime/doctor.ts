@@ -1,10 +1,10 @@
 import { execFileSync } from "node:child_process";
 import { existsSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { DEFAULT_CHAT_DB_PATH, IMessageReader } from "../platforms/imessage/reader.js";
-import { listAdapterPlatforms } from "../platforms/core/registry.js";
 import type { CuedDatabase } from "../db/database.js";
+import { listAdapterPlatforms } from "../platforms/core/registry.js";
 import { listIntegrationStates } from "../platforms/core/state/status.js";
+import { DEFAULT_CHAT_DB_PATH, IMessageReader } from "../platforms/imessage/reader.js";
 import {
   getSignalConfigDir,
   isSignalCliVersionSupported,
@@ -13,10 +13,7 @@ import {
   resolveSignalCliPath,
 } from "../platforms/signal/cli/binary.js";
 import { buildWhatsAppDiagnostics } from "../platforms/whatsapp/diagnostics.js";
-import {
-  getWhatsAppStoreDir,
-  inspectWhatsAppHelper,
-} from "../platforms/whatsapp/helper/binary.js";
+import { getWhatsAppStoreDir, inspectWhatsAppHelper } from "../platforms/whatsapp/helper/binary.js";
 import { readWhatsAppHelperStatus } from "../platforms/whatsapp/helper/status.js";
 import type { WhatsAppRealtimeStatus } from "../platforms/whatsapp/realtime/session.js";
 import { resolveMacOSNativeBinary } from "./native-binary.js";

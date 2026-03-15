@@ -1,10 +1,10 @@
-import type { CuedDatabase } from "../db/database.js";
 import {
   type AdapterPlatform,
   getDefaultAccountKeyForPlatform,
   isAdapterPlatform,
   isPlatform,
 } from "../core/types/provider.js";
+import type { CuedDatabase } from "../db/database.js";
 
 type RunQueueSchedulers = {
   wakeIngest?: () => void;

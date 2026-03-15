@@ -1,9 +1,8 @@
 import { type ChildProcess, spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import type { CuedDatabase } from "../../../db/database.js";
 import type { AuthSessionState, Platform } from "../../../core/types/provider.js";
+import type { CuedDatabase } from "../../../db/database.js";
 import { resolveMacOSNativeBinary } from "../../../runtime/native-binary.js";
-import type { AuthSessionSummary, IntegrationStateSummary } from "../state/types.js";
 import {
   getSignalConfigDir,
   inspectSignalCli,
@@ -17,6 +16,7 @@ import {
   readWhatsAppHelperStatus,
   startWhatsAppPairSession,
 } from "../../whatsapp/helper/pair.js";
+import type { AuthSessionSummary, IntegrationStateSummary } from "../state/types.js";
 
 export interface QrNativeAuthResult {
   sessionId: string;

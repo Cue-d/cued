@@ -1,3 +1,4 @@
+import type { ProviderRawEventInput } from "../../../core/types/provider.js";
 import type {
   Conversation,
   Message,
@@ -5,7 +6,6 @@ import type {
   RealtimeReaction,
   SeenReceipt,
 } from "../api/types.js";
-import type { ProviderRawEventInput } from "../../../core/types/provider.js";
 import {
   buildLinkedInConversationEvent,
   buildLinkedInConversationRemovalEvents,

@@ -2,28 +2,21 @@ import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, renameSync, rmSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { CUED_BROWSER_DIR } from "../../../core/config.js";
-import {
-  type PlatformCapabilitySummary,
-  resolveHostOS,
-  summarizePlatformCapability,
-} from "../../../core/platform-capabilities.js";
+import { resolveHostOS, summarizePlatformCapability } from "../../../core/platform-capabilities.js";
 import { safeParseJsonRecord, safeParseJsonStringArray } from "../../../db/codecs.js";
 import type { AuthSessionRow, CuedDatabase, IntegrationStateRow } from "../../../db/database.js";
-import { DEFAULT_CHAT_DB_PATH, IMessageReader } from "../../imessage/reader.js";
 import { listAdapterPlatforms } from "../registry.js";
 import {
-  type ConnectionKind,
   getDefaultAccountKeyForPlatform,
-  type IntegrationAuthState,
   type IntegrationRuntimeKind,
   isOnboardingVisiblePlatform,
   isRequestableIntegrationPlatform,
   type Platform,
-  parseIntegrationAuthState,
   parseIntegrationRuntimeKind,
   parsePlatform,
   REQUESTABLE_INTEGRATION_PLATFORM_VALUES,
 } from "../types.js";
+import { buildLocalIntegrationStates } from "./local.js";
 import type {
   AuthSessionSummary,
   IntegrationRowLike,
@@ -31,6 +24,8 @@ import type {
   ManagedIntegrationState,
   RequestableIntegrationConfig,
 } from "./types.js";
+
+export { getContactsAuthState, getIMessageAuthState } from "./local.js";
 
 export const REQUESTABLE_INTEGRATIONS: Record<string, RequestableIntegrationConfig> = {
   slack: {
@@ -137,7 +132,11 @@ export function getRequestableIntegration(platform: string): RequestableIntegrat
   return REQUESTABLE_INTEGRATIONS[normalized];
 }
 
-export function resolveAccountKey(db: CuedDatabase, platform: Platform, accountKey?: string): string {
+export function resolveAccountKey(
+  db: CuedDatabase,
+  platform: Platform,
+  accountKey?: string,
+): string {
   if (accountKey) {
     return accountKey;
   }
@@ -268,7 +267,10 @@ export function summarizeAuthSessions(rows: AuthSessionRow[]): AuthSessionSummar
     finishedAt: row.finished_at,
     keychainService: row.keychain_service,
     keychainAccount: row.keychain_account,
-    resultSummary: safeParseJsonRecord(row.result_summary_json, "auth_sessions.result_summary_json"),
+    resultSummary: safeParseJsonRecord(
+      row.result_summary_json,
+      "auth_sessions.result_summary_json",
+    ),
     errorSummary: row.error_summary,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
@@ -379,6 +381,15 @@ function buildSetupIntegrations(db: CuedDatabase): IntegrationStateSummary[] {
     }
   }
 
+  for (const managed of buildLocalIntegrationStates()) {
+    if (!byPlatform.has(managed.platform)) {
+      byPlatform.set(
+        managed.platform,
+        summarizeManagedIntegrationState(db, addSupportedByDaemonMetadata(managed)),
+      );
+    }
+  }
+
   for (const platform of REQUESTABLE_INTEGRATION_PLATFORM_VALUES) {
     if (byPlatform.has(platform)) {
       continue;
@@ -442,7 +453,9 @@ export function getIntegrationSummary(
   return summarizeIntegrationStates(db, [row])[0]!;
 }
 
-export function firstNonEmptyDisplayName(...values: Array<string | null | undefined>): string | null {
+export function firstNonEmptyDisplayName(
+  ...values: Array<string | null | undefined>
+): string | null {
   for (const value of values) {
     if (typeof value !== "string") {
       continue;
@@ -529,63 +542,4 @@ export function buildIntegrationStatus(db: CuedDatabase): {
     integrations: listIntegrationStates(db),
     setupIntegrations: buildSetupIntegrations(db),
   };
-}
-
-export function getContactsAuthState(): IntegrationAuthState {
-  const nativeBinary = process.env.CUED_CONTACTS_NATIVE_BINARY;
-  if (!nativeBinary) {
-    return "native_helper_missing";
-  }
-  try {
-    const stdout = execFileSync(nativeBinary, ["contacts", "status"], {
-      encoding: "utf8",
-      stdio: ["ignore", "pipe", "pipe"],
-    });
-    const parsed = JSON.parse(stdout) as { status?: string };
-    return parseIntegrationAuthState(parsed.status);
-  } catch {
-    return "check_failed";
-  }
-}
-
-export function getIMessageAuthState(resolveNativeBinary: (envVarValue: string | undefined) => string | null): IntegrationAuthState {
-  const chatDbPath = process.env.CUED_IMESSAGE_DB_PATH ?? DEFAULT_CHAT_DB_PATH;
-  if (!existsSync(chatDbPath)) {
-    return "missing";
-  }
-  const nativeBinary = resolveNativeBinary(process.env.CUED_IMESSAGE_NATIVE_BINARY);
-  if (nativeBinary) {
-    try {
-      execFileSync(
-        nativeBinary,
-        ["imessage", "dump", "--db-path", chatDbPath, "--after-rowid", "0", "--limit", "1"],
-        {
-          encoding: "utf8",
-          stdio: ["ignore", "pipe", "pipe"],
-        },
-      );
-      return "authorized";
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      if (message.includes("authorization denied") || message.includes("unable to open database file")) {
-        return "needs_full_disk_access";
-      }
-      return "blocked";
-    }
-  }
-  try {
-    const reader = new IMessageReader(chatDbPath);
-    try {
-      reader.getMaxMessageRowid();
-      return "authorized";
-    } finally {
-      reader.close();
-    }
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    if (message.includes("authorization denied") || message.includes("unable to open database file")) {
-      return "needs_full_disk_access";
-    }
-    return "blocked";
-  }
 }

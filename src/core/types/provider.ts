@@ -1,4 +1,4 @@
-import type { ConversationType, Platform, RawEventEntityKind, SyncMode } from "../../platforms/core/types.js";
+import type { ConversationType, Platform, RawEventEntityKind } from "../../platforms/core/types.js";
 
 export * from "../../platforms/core/types.js";
 

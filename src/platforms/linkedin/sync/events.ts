@@ -1,12 +1,5 @@
 import { createHash } from "node:crypto";
 import type {
-  Conversation,
-  Message,
-  MessagingParticipant,
-  ReactionSummary,
-  SeenReceipt,
-} from "../api/types.js";
-import type {
   ContactHandleInput,
   ContactObservationPayload,
   ConversationObservationPayload,
@@ -15,6 +8,13 @@ import type {
   ReactionPayload,
   TimelineEventPayload,
 } from "../../../core/types/provider.js";
+import type {
+  Conversation,
+  Message,
+  MessagingParticipant,
+  ReactionSummary,
+  SeenReceipt,
+} from "../api/types.js";
 
 function stableId(seed: string): string {
   return createHash("sha256").update(seed).digest("hex");

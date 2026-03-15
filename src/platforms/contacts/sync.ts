@@ -1,9 +1,12 @@
 import { execFileSync } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
-import type { SyncBundle } from "../core/sync.js";
 import type { ContactObservationPayload } from "../../core/types/provider.js";
-import { getMacOSNativeBinaryCandidates, resolveMacOSNativeBinary } from "../../runtime/native-binary.js";
+import {
+  getMacOSNativeBinaryCandidates,
+  resolveMacOSNativeBinary,
+} from "../../runtime/native-binary.js";
+import type { SyncBundle } from "../core/sync.js";
 
 export interface ContactRecordInput {
   sourceId: string;

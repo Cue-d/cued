@@ -1,8 +1,5 @@
 import { describe, expect, it } from "vitest";
-import {
-  type PermissionCheckSummaryInput,
-  summarizePermissionStatuses,
-} from "./doctor.js";
+import { type PermissionCheckSummaryInput, summarizePermissionStatuses } from "./doctor.js";
 
 function makeInput(
   overrides: Partial<PermissionCheckSummaryInput> = {},

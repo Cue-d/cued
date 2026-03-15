@@ -1,3 +1,4 @@
+import type { SourceAccountInput } from "../../../core/types/provider.js";
 import type { SyncBundle } from "../../core/sync.js";
 import {
   SignalCliClient as DefaultSignalCliClient,
@@ -6,7 +7,6 @@ import {
   type SignalCliClient,
 } from "../cli/client.js";
 import { buildSignalRawEventsFromSnapshot } from "./events.js";
-import type { SourceAccountInput } from "../../../core/types/provider.js";
 
 type SignalClientLike = Pick<SignalCliClient, "listContacts" | "listGroups" | "receiveMessages">;
 

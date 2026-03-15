@@ -1,11 +1,11 @@
 import { createHash } from "node:crypto";
-import type { SyncBundle } from "../../core/sync.js";
 import type {
   ContactHandleInput,
   ContactObservationPayload,
   ConversationObservationPayload,
   MessagePayload,
 } from "../../../core/types/provider.js";
+import type { SyncBundle } from "../../core/sync.js";
 import {
   bestSignalContactName,
   contactHandleType,

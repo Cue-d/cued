@@ -2,13 +2,8 @@ import { chmodSync, existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } 
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
+import { resolveHostOS } from "../../../core/platform-capabilities.js";
 import { CuedDatabase } from "../../../db/database.js";
-import {
-  buildIntegrationStatus,
-  getAuthSessionSummary,
-  listIntegrationStates,
-  listRequestableIntegrationPlatforms,
-} from "./status.js";
 import {
   completeAuthSession,
   markAuthSessionInProgress,
@@ -17,7 +12,12 @@ import {
   setIntegrationEnabled,
 } from "./mutations.js";
 import { refreshManagedIntegrationStates } from "./refresh.js";
-import { resolveHostOS } from "../../../core/platform-capabilities.js";
+import {
+  buildIntegrationStatus,
+  getAuthSessionSummary,
+  listIntegrationStates,
+  listRequestableIntegrationPlatforms,
+} from "./status.js";
 
 describe("integration state management", () => {
   const tempDirs: string[] = [];
@@ -185,6 +185,18 @@ describe("integration state management", () => {
     expect(
       buildIntegrationStatus(db).setupIntegrations.map((integration) => integration.platform),
     ).toEqual(["contacts", "imessage", "slack", "linkedin", "whatsapp", "signal"]);
+    db.close();
+  });
+
+  it("includes local native integrations in setup status before the first refresh", () => {
+    process.env.CUED_IMESSAGE_DB_PATH = join(createTempDir("cued-imessage-"), "missing.db");
+
+    const db = createDb();
+
+    expect(
+      buildIntegrationStatus(db).setupIntegrations.map((integration) => integration.platform),
+    ).toEqual(["contacts", "imessage", "slack", "linkedin", "whatsapp", "signal"]);
+
     db.close();
   });
 

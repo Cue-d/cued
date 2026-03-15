@@ -1,38 +1,30 @@
 import { rmSync } from "node:fs";
-import {
-  safeParseJsonRecord,
-  safeParseJsonStringArray,
-} from "../../../db/codecs.js";
+import { safeParseJsonRecord, safeParseJsonStringArray } from "../../../db/codecs.js";
 import type { AuthSessionRow, CuedDatabase } from "../../../db/database.js";
 import { getSignalConfigDir } from "../../signal/cli/binary.js";
 import { getWhatsAppStoreDir } from "../../whatsapp/helper/binary.js";
+import { listAdapterPlatforms } from "../registry.js";
+import { getDefaultAccountKeyForPlatform, type Platform } from "../types.js";
 import {
-  type AuthSessionState,
-  getDefaultAccountKeyForPlatform,
-  type Platform,
-} from "../types.js";
+  deleteKeychainSecret,
+  getAuthSessionSummary,
+  getChromiumProfileDir,
+  getIntegrationSummary,
+  getKeychainMetadata,
+  getRequestableIntegration,
+  normalizeIntegrationPlatform,
+  now,
+  resolveAccountKey,
+  resolveCompletedDisplayName,
+  resolveCompletedMetadata,
+  shouldAppendAccountKeyToDisplayName,
+} from "./status.js";
 import type {
   AuthSessionSummary,
   CompletedAuthSessionInput,
   CompletedAuthSessionSummary,
   IntegrationStateSummary,
 } from "./types.js";
-import {
-  deleteKeychainSecret,
-  firstNonEmptyDisplayName,
-  getAuthSessionSummary,
-  getChromiumProfileDir,
-  getIntegrationSummary,
-  getKeychainMetadata,
-  getRequestableIntegration,
-  now,
-  normalizeIntegrationPlatform,
-  resolveAccountKey,
-  resolveCompletedDisplayName,
-  resolveCompletedMetadata,
-  shouldAppendAccountKeyToDisplayName,
-} from "./status.js";
-import { listAdapterPlatforms } from "../registry.js";
 
 export function setIntegrationEnabled(
   db: CuedDatabase,
@@ -270,7 +262,10 @@ export function completeAuthSession(
   const metadata =
     safeParseJsonRecord(integration.metadata_json, "integration_states.metadata_json") ?? {};
   const targetAccountKey = resolveCompletedAccountKey(session, input);
-  const targetDisplayName = resolveCompletedDisplayName(integration.display_name, input.resultSummary);
+  const targetDisplayName = resolveCompletedDisplayName(
+    integration.display_name,
+    input.resultSummary,
+  );
   const targetMetadata = resolveCompletedMetadata(
     integration.platform,
     integration.account_key,

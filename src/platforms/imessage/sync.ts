@@ -1,8 +1,5 @@
 import { execFileSync } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
-import { DEFAULT_CHAT_DB_PATH, IMessageReader } from "./reader.js";
-import type { SyncBundle } from "../core/sync.js";
-import type { ImsSyncBatch } from "./types.js";
 import type {
   ContactObservationPayload,
   ConversationObservationPayload,
@@ -11,6 +8,9 @@ import type {
   SourceAccountInput,
 } from "../../core/types/provider.js";
 import { resolveMacOSNativeBinary } from "../../runtime/native-binary.js";
+import type { SyncBundle } from "../core/sync.js";
+import { DEFAULT_CHAT_DB_PATH, IMessageReader } from "./reader.js";
+import type { ImsSyncBatch } from "./types.js";
 
 const DEFAULT_IMESSAGE_BATCH_LIMIT = 2_000;
 

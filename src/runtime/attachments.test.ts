@@ -2,8 +2,8 @@ import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { fetchAttachment, listAttachments, searchAttachments } from "./attachments.js";
 import { CuedDatabase } from "../db/database.js";
+import { fetchAttachment, listAttachments, searchAttachments } from "./attachments.js";
 
 describe("attachment service", () => {
   const tempDirs: string[] = [];

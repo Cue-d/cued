@@ -1,6 +1,6 @@
 import { execFileSync } from "node:child_process";
-import { openCuedDatabase } from "../../../db/database.js";
 import type { Platform } from "../../../core/types/provider.js";
+import { openCuedDatabase } from "../../../db/database.js";
 
 export interface IntegrationSecretPayload {
   keychainService: string;

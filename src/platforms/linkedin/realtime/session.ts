@@ -1,11 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { LinkedInClient } from "../api/client.js";
-import {
-  API_URLS,
-  CONTENT_TYPES,
-  DEFAULT_HEADERS,
-  USER_AGENT,
-} from "../api/constants.js";
+import { API_URLS, CONTENT_TYPES, DEFAULT_HEADERS, USER_AGENT } from "../api/constants.js";
 import type { Cookie, RealtimeEventEnvelope } from "../api/types.js";
 
 const DEFAULT_RECONNECT_BASE_MS = 1_000;

@@ -15,8 +15,8 @@ import process from "node:process";
 import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import Database from "better-sqlite3";
-import { getCurrentAppVersion, getCurrentReleaseChannel } from "../../core/app-metadata.js";
 import { sendDaemonRequest } from "../../client.js";
+import { getCurrentAppVersion, getCurrentReleaseChannel } from "../../core/app-metadata.js";
 import {
   CUED_BACKUPS_DIR,
   CUED_DB_PATH,
@@ -25,8 +25,8 @@ import {
   CUED_UPDATE_ROLLBACK_DIR,
   ensureCuedDirs,
 } from "../../core/config.js";
-import { type CuedDatabase, openCuedDatabase } from "../../db/database.js";
 import { createLogger } from "../../core/logging.js";
+import { type CuedDatabase, openCuedDatabase } from "../../db/database.js";
 import {
   bootoutLaunchAgent,
   getAppBundleVersion,

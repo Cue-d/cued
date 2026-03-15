@@ -1,6 +1,6 @@
 import { type ChildProcess, execFileSync, spawn } from "node:child_process";
-import type { CuedDatabase } from "../../../db/database.js";
 import type { AuthSessionState, Platform } from "../../../core/types/provider.js";
+import type { CuedDatabase } from "../../../db/database.js";
 import { resolveMacOSNativeBinary } from "../../../runtime/native-binary.js";
 import type { AuthSessionSummary } from "../state/types.js";
 
