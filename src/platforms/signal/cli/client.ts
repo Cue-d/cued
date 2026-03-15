@@ -127,7 +127,7 @@ export function getSignalConfigDir(accountKey: string): string {
 }
 
 function runtimeBundledSignalCliRoot(): string {
-  return resolve(dirname(fileURLToPath(import.meta.url)), "../../../../helpers/signal-cli");
+  return resolve(dirname(fileURLToPath(import.meta.url)), "../../../../../helpers/signal-cli");
 }
 
 export function getSignalCliHelperRootCandidates(
