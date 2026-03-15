@@ -131,17 +131,19 @@ private final class SingletonLockLease {
   }
 
   private static func create(path: String, metadata: SingletonLockMetadata) throws -> SingletonLockLease {
-    let data = try JSONEncoder().encode(metadata)
     let fd = path.withCString { pointer in
       Darwin.open(pointer, O_RDWR | O_CREAT | O_EXCL, 0o600)
     }
     guard fd >= 0 else {
-      throw CocoaError(.fileWriteFileExists)
+      let openError = errno
+      if openError == EEXIST {
+        throw CocoaError(.fileWriteFileExists)
+      }
+      throw POSIXError(POSIXErrorCode(rawValue: openError) ?? .EIO)
     }
     let fileHandle = FileHandle(fileDescriptor: fd, closeOnDealloc: true)
     writeLockFile(fileHandle, metadata: metadata)
     return SingletonLockLease(path: path, fileHandle: fileHandle, metadata: metadata)
-  }
   }
 
   private func stillOwnsPath(_ fileHandle: FileHandle) -> Bool {
