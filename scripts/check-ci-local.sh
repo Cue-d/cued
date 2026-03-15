@@ -1,8 +1,10 @@
 #!/bin/sh
 set -eu
 
-pnpm check:biome
-pnpm build
-pnpm typecheck
-pnpm test
-swift build --package-path native/macos/CuedNative -c release
+pnpm check:app-quality
+
+if [ "$(uname -s)" = "Darwin" ]; then
+  pnpm check:native:macos
+else
+  printf '%s\n' "Skipping native macOS build on $(uname -s)."
+fi

@@ -1,6 +1,7 @@
 import type { CuedDatabase } from "../db/database.js";
 import { buildDoctorReport } from "../diagnostics/doctor.js";
 import { doctorHooksConfig } from "../hooks/service.js";
+import type { LinkedInRealtimeSupervisor } from "../integrations/linkedin-realtime.js";
 import { buildIntegrationStatus } from "../integrations/service.js";
 import type { SignalRealtimeSupervisor } from "../integrations/signal-realtime.js";
 import { buildWhatsAppDiagnostics } from "../integrations/whatsapp-diagnostics.js";
@@ -10,6 +11,7 @@ import { getUpdateStatus } from "../updater/service.js";
 export async function buildDoctorSnapshot(
   db: CuedDatabase,
   options: {
+    linkedInRealtime: LinkedInRealtimeSupervisor;
     signalRealtime: SignalRealtimeSupervisor;
     whatsAppRealtime: WhatsAppRealtimeSupervisor;
     autoSyncTargets: Array<{ platform: string; accountKey: string }>;
@@ -28,6 +30,7 @@ export async function buildDoctorSnapshot(
   return {
     app: options.app,
     ...(await buildDoctorReport(db, {
+      linkedinRealtimeSessions: options.linkedInRealtime.getStatuses(),
       signalRealtimeSessions: options.signalRealtime.getStatuses(),
       whatsappRealtimeSessions: options.whatsAppRealtime.getStatuses(),
     })),
@@ -50,6 +53,7 @@ export function buildDaemonStatusSnapshot(
   db: CuedDatabase,
   options: {
     app: unknown;
+    linkedInRealtime: LinkedInRealtimeSupervisor;
     signalRealtime: SignalRealtimeSupervisor;
     whatsAppRealtime: WhatsAppRealtimeSupervisor;
     socketPath: string;
@@ -62,6 +66,7 @@ export function buildDaemonStatusSnapshot(
     projection: db.getProjectionBacklog(),
     checkpoints: db.listCheckpointSummary(),
     recentRuns: db.listRecentRuns(),
+    linkedinRealtimeSessions: options.linkedInRealtime.getStatuses(),
     signalRealtimeSessions: options.signalRealtime.getStatuses(),
     whatsappRealtimeSessions: options.whatsAppRealtime.getStatuses(),
     whatsappDiagnostics: buildWhatsAppDiagnostics(db, options.whatsAppRealtime.getStatuses()),

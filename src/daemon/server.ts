@@ -12,6 +12,12 @@ import { CUED_DAEMON_LOCK_PATH, CUED_SOCKET_PATH } from "../config.js";
 import { safeParseJsonRecord } from "../db/codecs.js";
 import { type OutboundMessageRow, openCuedDatabase } from "../db/database.js";
 import { emitHookEvent } from "../hooks/service.js";
+import {
+  type LinkedInRealtimeStatus,
+  LinkedInRealtimeSupervisor,
+} from "../integrations/linkedin-realtime.js";
+import { buildLinkedInRawEventsFromRealtimeEnvelope } from "../integrations/linkedin-realtime-events.js";
+import { loadLinkedInSessionSecret } from "../integrations/linkedin-session-store.js";
 import { getIntegrationSummary, refreshManagedIntegrationStates } from "../integrations/service.js";
 import {
   getSignalConfigDir,
@@ -100,6 +106,7 @@ const WHATSAPP_SEND_SESSION_WAIT_MS = 3_000;
 const daemonLogger = createLogger("daemon");
 const hooksLogger = createLogger("hooks");
 const nativeWatchLogger = createLogger("native-watch");
+const linkedInLogger = createLogger("linkedin");
 const signalLogger = createLogger("signal");
 const whatsAppLogger = createLogger("whatsapp");
 
@@ -163,6 +170,16 @@ type WhatsAppDesiredSession = {
   accountKey: string;
   helperPath: string;
   storeDir: string;
+};
+
+type LinkedInDesiredSession = {
+  accountKey: string;
+  cookies: ReturnType<typeof loadLinkedInSessionSecret>["cookies"];
+  pageInstance: string;
+  xLiTrack: string;
+  serviceVersion: string | null;
+  realtimeQueryMap: string;
+  realtimeRecipeMap: string;
 };
 
 type PendingSignalEcho = {
@@ -742,6 +759,99 @@ async function collectDesiredWhatsAppSessions(db: ReturnType<typeof openCuedData
   return { desired, degraded };
 }
 
+function readIntegrationAuthResult(metadataJson: string | null): Record<string, unknown> | null {
+  if (!metadataJson) {
+    return null;
+  }
+  try {
+    const parsed = JSON.parse(metadataJson) as { authResult?: unknown };
+    return typeof parsed.authResult === "object" && parsed.authResult !== null
+      ? (parsed.authResult as Record<string, unknown>)
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+async function collectDesiredLinkedInSessions(db: ReturnType<typeof openCuedDatabase>): Promise<{
+  desired: LinkedInDesiredSession[];
+  degraded: Array<Omit<LinkedInRealtimeStatus, "platform">>;
+}> {
+  const integrations = db
+    .listIntegrationStates()
+    .filter(
+      (row) =>
+        row.platform === "linkedin" && row.enabled === 1 && row.auth_state === "authenticated",
+    );
+  if (integrations.length === 0) {
+    return {
+      desired: [],
+      degraded: [],
+    };
+  }
+
+  const desired: LinkedInDesiredSession[] = [];
+  const degraded: Array<Omit<LinkedInRealtimeStatus, "platform">> = [];
+  for (const integration of integrations) {
+    const authResult = readIntegrationAuthResult(integration.metadata_json);
+    if (authResult?.realtimeReady !== true) {
+      degraded.push({
+        accountKey: integration.account_key,
+        state: "degraded",
+        connectedAt: null,
+        lastEventAt: null,
+        lastReconnectAt: null,
+        reconnectAttempts: 0,
+        lastSessionError: "LinkedIn realtime headers were not captured during auth",
+      });
+      continue;
+    }
+
+    try {
+      const session = loadLinkedInSessionSecret(integration.account_key);
+      if (
+        !session.cookies.length ||
+        !session.pageInstance ||
+        !session.xLiTrack ||
+        !session.realtimeQueryMap ||
+        !session.realtimeRecipeMap
+      ) {
+        degraded.push({
+          accountKey: integration.account_key,
+          state: "degraded",
+          connectedAt: null,
+          lastEventAt: null,
+          lastReconnectAt: null,
+          reconnectAttempts: 0,
+          lastSessionError: "LinkedIn realtime session data is incomplete",
+        });
+        continue;
+      }
+
+      desired.push({
+        accountKey: integration.account_key,
+        cookies: session.cookies,
+        pageInstance: session.pageInstance,
+        xLiTrack: session.xLiTrack,
+        serviceVersion: session.serviceVersion,
+        realtimeQueryMap: session.realtimeQueryMap,
+        realtimeRecipeMap: session.realtimeRecipeMap,
+      });
+    } catch (error) {
+      degraded.push({
+        accountKey: integration.account_key,
+        state: "degraded",
+        connectedAt: null,
+        lastEventAt: null,
+        lastReconnectAt: null,
+        reconnectAttempts: 0,
+        lastSessionError: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+
+  return { desired, degraded };
+}
 export async function runDaemon(): Promise<void> {
   const daemonLease = await acquireDaemonLease();
   let openedDb: ReturnType<typeof openCuedDatabase> | null = null;
@@ -780,6 +890,8 @@ export async function runDaemon(): Promise<void> {
   const projectionMessageHooks = new ProjectionMessageHookBarrier();
   const suppressNextSignalReconnectSync = new Set<string>();
   const nativeWatchers: Array<FSWatcher | ChildProcess> = [];
+  let linkedInRealtimeReconcilePromise: Promise<void> | null = null;
+  let linkedInRealtimeReconcileQueued = false;
   let signalRealtimeReconcilePromise: Promise<void> | null = null;
   let signalRealtimeReconcileQueued = false;
   let whatsAppRealtimeReconcilePromise: Promise<void> | null = null;
@@ -876,6 +988,99 @@ export async function runDaemon(): Promise<void> {
     const existing = pendingSignalSendEchoes.get(message.account_key) ?? [];
     existing.push(pending);
     pendingSignalSendEchoes.set(message.account_key, existing);
+  };
+
+  const updateLinkedInCheckpointFromRealtime = (accountKey: string) => {
+    const checkpoint = db.getCheckpoint("linkedin", accountKey);
+    const projection = db.getProjectionBacklog();
+    const sourceCursor = safeParseJsonRecord(
+      checkpoint?.source_cursor_json ?? null,
+      "sync_checkpoints.source_cursor_json",
+    );
+    db.upsertCheckpoint({
+      platform: "linkedin",
+      accountKey,
+      syncMode: checkpoint?.sync_mode ?? "incremental",
+      sourceCursor,
+      rawIngestWatermark: projection.max_raw_event_rowid,
+      projectionWatermark: projection.projection_watermark,
+      lastSuccessAt: now(),
+      lastErrorSummary: null,
+    });
+  };
+
+  const ingestLinkedInRealtimeEnvelope = async (
+    accountKey: string,
+    envelope: Parameters<typeof buildLinkedInRawEventsFromRealtimeEnvelope>[0]["envelope"],
+    userEntityUrn: string,
+  ): Promise<void> => {
+    try {
+      const rawEvents = buildLinkedInRawEventsFromRealtimeEnvelope({
+        accountKey,
+        userEntityUrn,
+        envelope,
+      });
+      if (rawEvents.length === 0) {
+        return;
+      }
+
+      db.upsertSourceAccounts([
+        {
+          platform: "linkedin",
+          accountKey,
+          displayName: "LinkedIn",
+        },
+      ]);
+      const insertResult = db.insertRawEvents(rawEvents);
+      if (
+        realtimeProjectionEnabled &&
+        insertResult.firstInsertedRowId != null &&
+        insertResult.lastInsertedRowId != null
+      ) {
+        projectRealtimeRange(db, {
+          startRowId: insertResult.firstInsertedRowId,
+          endRowId: insertResult.lastInsertedRowId,
+          batchSize: realtimeProjectionBatchSize,
+        });
+      }
+      if (insertResult.firstInsertedRowId != null && insertResult.lastInsertedRowId != null) {
+        queueProjectionRun(
+          `linkedin_realtime:${accountKey}`,
+          {
+            startRowId: insertResult.firstInsertedRowId,
+            endRowId: insertResult.lastInsertedRowId,
+          },
+          { delayMs: deferredProjectionCoalesceMs },
+        );
+      }
+      if (insertResult.insertedCount > 0) {
+        updateLinkedInCheckpointFromRealtime(accountKey);
+      }
+
+      const inboundMessages = collectInboundMessages(insertResult.insertedRows);
+      queueMessageReceivedHooks(
+        insertResult.firstInsertedRowId != null && insertResult.lastInsertedRowId != null
+          ? {
+              startRowId: insertResult.firstInsertedRowId,
+              endRowId: insertResult.lastInsertedRowId,
+            }
+          : null,
+        `linkedin_realtime:${accountKey}`,
+        inboundMessages,
+      );
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      linkedInLogger.warn("realtime ingest failed", { accountKey, error: message });
+      if (isSqliteBusyError(error)) {
+        queueNativeTriggeredSync(
+          db,
+          "linkedin",
+          accountKey,
+          "linkedin_realtime_busy_fallback",
+          schedulers.wakeIngest,
+        );
+      }
+    }
   };
 
   const updateSignalCheckpointFromRealtime = (accountKey: string) => {
@@ -1502,6 +1707,23 @@ export async function runDaemon(): Promise<void> {
     wakeProjection: () => scheduleProjectionDrain(),
   };
   const queueDebouncedNativeSync = createDebouncedSyncEnqueuer(db, schedulers.wakeIngest);
+  const linkedInRealtime = new LinkedInRealtimeSupervisor({
+    onEvent: (accountKey, event, userEntityUrn) => {
+      void ingestLinkedInRealtimeEnvelope(accountKey, event, userEntityUrn);
+    },
+    onConnected: (accountKey, _status, reconnected) => {
+      if (!reconnected) {
+        return;
+      }
+      queueNativeTriggeredSync(
+        db,
+        "linkedin",
+        accountKey,
+        "linkedin_realtime_reconnected",
+        schedulers.wakeIngest,
+      );
+    },
+  });
   const signalRealtime = new SignalRealtimeSupervisor({
     onMessage: (accountKey, message) => {
       void ingestSignalRealtimeMessages(accountKey, [message]);
@@ -1540,6 +1762,30 @@ export async function runDaemon(): Promise<void> {
       );
     },
   });
+
+  const reconcileLinkedInRealtimeSessions = async () => {
+    const { desired, degraded } = await collectDesiredLinkedInSessions(db);
+    linkedInRealtime.reconcile(desired, degraded);
+  };
+
+  const requestLinkedInRealtimeReconcile = () => {
+    if (linkedInRealtimeReconcilePromise) {
+      linkedInRealtimeReconcileQueued = true;
+      return;
+    }
+
+    linkedInRealtimeReconcilePromise = reconcileLinkedInRealtimeSessions()
+      .catch((error) => {
+        linkedInLogger.warn("realtime reconcile failed", error);
+      })
+      .finally(() => {
+        linkedInRealtimeReconcilePromise = null;
+        if (linkedInRealtimeReconcileQueued) {
+          linkedInRealtimeReconcileQueued = false;
+          requestLinkedInRealtimeReconcile();
+        }
+      });
+  };
 
   const reconcileSignalRealtimeSessions = async () => {
     const { desired, degraded } = await collectDesiredSignalSessions(db);
@@ -1595,6 +1841,7 @@ export async function runDaemon(): Promise<void> {
     version: DAEMON_VERSION,
   });
   await refreshManagedIntegrationStates(db);
+  await reconcileLinkedInRealtimeSessions();
   await reconcileSignalRealtimeSessions();
   await reconcileWhatsAppRealtimeSessions();
 
@@ -1759,6 +2006,7 @@ export async function runDaemon(): Promise<void> {
       }
     }
     nativeWatchers.length = 0;
+    linkedInRealtime.stopAll();
     signalRealtime.stopAll();
     whatsAppRealtime.stopAll();
   };
@@ -2296,9 +2544,11 @@ export async function runDaemon(): Promise<void> {
       db,
       activeAuthSessions,
       schedulers,
+      linkedInRealtime,
       signalRealtime,
       whatsAppRealtime,
       () => {
+        requestLinkedInRealtimeReconcile();
         requestSignalRealtimeReconcile();
         requestWhatsAppRealtimeReconcile();
       },
@@ -2456,6 +2706,7 @@ function handleSocket(
   db: ReturnType<typeof openCuedDatabase>,
   activeAuthSessions: Map<string, { child: ChildProcess; platform: Platform; accountKey: string }>,
   schedulers: QueueSchedulers,
+  linkedInRealtime: LinkedInRealtimeSupervisor,
   signalRealtime: SignalRealtimeSupervisor,
   whatsAppRealtime: WhatsAppRealtimeSupervisor,
   requestRealtimeReconcile: () => void,
@@ -2490,6 +2741,7 @@ function handleSocket(
           request,
           activeAuthSessions,
           schedulers,
+          linkedInRealtime,
           signalRealtime,
           whatsAppRealtime,
           requestRealtimeReconcile,
@@ -2515,6 +2767,7 @@ async function dispatchRequest(
   request: DaemonRequest,
   activeAuthSessions: Map<string, { child: ChildProcess; platform: Platform; accountKey: string }>,
   schedulers: QueueSchedulers,
+  linkedInRealtime: LinkedInRealtimeSupervisor,
   signalRealtime: SignalRealtimeSupervisor,
   whatsAppRealtime: WhatsAppRealtimeSupervisor,
   requestRealtimeReconcile: () => void,
@@ -2532,6 +2785,7 @@ async function dispatchRequest(
           ok: true,
           result: buildDaemonStatusSnapshot(db, {
             app: getAppStatusMetadata(db),
+            linkedInRealtime,
             signalRealtime,
             whatsAppRealtime,
             socketPath: CUED_SOCKET_PATH,
@@ -2543,6 +2797,7 @@ async function dispatchRequest(
           ok: true,
           result: await buildDoctorSnapshot(db, {
             app: getAppStatusMetadata(db),
+            linkedInRealtime,
             signalRealtime,
             whatsAppRealtime,
             autoSyncTargets: getAutoSyncTargets(db),

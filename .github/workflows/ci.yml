@@ -34,17 +34,8 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Biome
-        run: pnpm check:biome
-
-      - name: Build
-        run: pnpm build
-
-      - name: Typecheck
-        run: pnpm typecheck
-
-      - name: Test
-        run: pnpm test
+      - name: App quality
+        run: pnpm check:app-quality
 
   native-macos:
     name: Native macOS Build
