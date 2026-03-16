@@ -161,6 +161,13 @@ private final class SingletonLockLease {
   }
 
   private static func create(path: String, metadata: SingletonLockMetadata) throws -> SingletonLockLease {
+    let directoryURL = URL(fileURLWithPath: path).deletingLastPathComponent()
+    try FileManager.default.createDirectory(
+      at: directoryURL,
+      withIntermediateDirectories: true,
+      attributes: [.posixPermissions: 0o700]
+    )
+
     let fd = path.withCString { pointer in
       Darwin.open(pointer, O_RDWR | O_CREAT | O_EXCL, 0o600)
     }
