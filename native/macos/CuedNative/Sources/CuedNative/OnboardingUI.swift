@@ -2,8 +2,9 @@ import AppKit
 import CuedNativeUI
 import SwiftUI
 
-struct InstallerLaunchAgentStatusResponse: Decodable {
-  let loaded: Bool
+struct InstallerLoginItemStatusResponse: Decodable {
+  let enabled: Bool
+  let status: String
 }
 
 struct InstallerCLISymlinkStatusResponse: Decodable {
@@ -147,11 +148,11 @@ final class OnboardingWindowController: NSWindowController {
   private nonisolated static func ensurePrerequisites(daemonSupervisor: DaemonSupervisor) {
     let launchAgentStatus = decodeJSON(
       daemonSupervisor: daemonSupervisor,
-      InstallerLaunchAgentStatusResponse.self,
-      arguments: ["launchd", "status"]
+      InstallerLoginItemStatusResponse.self,
+      arguments: ["login-item", "status"]
     )
-    if launchAgentStatus?.loaded != true {
-      _ = daemonSupervisor.runCLI(arguments: ["launchd", "install"])
+    if launchAgentStatus?.enabled != true && launchAgentStatus?.status != "requires_approval" {
+      _ = daemonSupervisor.runCLI(arguments: ["login-item", "enable"])
     }
 
     let cliStatus = decodeJSON(

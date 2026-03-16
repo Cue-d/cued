@@ -6,17 +6,41 @@ import {
   realpathSync,
   rmSync,
   symlinkSync,
-  writeFileSync,
 } from "node:fs";
 import { homedir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { resolveMacOSNativeBinary } from "../runtime/native-binary.js";
 import { terminateCompetingDaemons } from "./competing-daemons.js";
 
 const APP_NAME = "Cued.app";
 const APP_EXECUTABLE_NAME = "CuedDaemon";
 const LAUNCH_AGENT_LABEL = "dev.cued.daemon";
 const APP_BUNDLE_IDENTIFIER = "dev.cued.app";
+
+type NativeLoginItemStatus = {
+  enabled: boolean;
+  status: string;
+  requiresApproval: boolean;
+  found: boolean;
+};
+
+export type LegacyLaunchAgentStatus = {
+  label: string;
+  plistPath: string;
+  installed: boolean;
+  loaded: boolean;
+  details?: string;
+};
+
+export type LoginItemStatus = NativeLoginItemStatus & {
+  appPath: string | null;
+  legacyLaunchAgent: LegacyLaunchAgentStatus;
+};
+
+export type LoginItemCommandResult = LoginItemStatus & {
+  migratedLegacyLaunchAgent: boolean;
+};
 
 function currentUid(): number {
   return typeof process.getuid === "function" ? process.getuid() : 0;
@@ -224,6 +248,47 @@ export function getAppExecutablePath(appPath: string): string {
   return appExecutablePath(appPath);
 }
 
+function resolveLoginItemBinary(appPath?: string): string {
+  const preferredAppPath = appPath ?? currentAppPath() ?? resolveInstalledAppPath();
+  if (preferredAppPath && isValidCuedAppBundle(preferredAppPath)) {
+    return appExecutablePath(preferredAppPath);
+  }
+
+  const nativeBinary = resolveMacOSNativeBinary(
+    process.env.CUED_AUTH_NATIVE_BINARY ?? process.env.CUED_CONTACTS_NATIVE_BINARY,
+    repoRoot(),
+  );
+  if (!nativeBinary) {
+    throw new Error("CuedNative binary not found; build native/macos/CuedNative first");
+  }
+  return nativeBinary;
+}
+
+function runNativeLoginItemCommand(
+  subcommand: "status" | "enable" | "disable",
+  appPath?: string,
+): NativeLoginItemStatus {
+  const stdout = execFileSync(resolveLoginItemBinary(appPath), ["login-item", subcommand], {
+    encoding: "utf8",
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  const parsed = JSON.parse(stdout) as Partial<NativeLoginItemStatus>;
+  if (
+    typeof parsed.enabled !== "boolean" ||
+    typeof parsed.status !== "string" ||
+    typeof parsed.requiresApproval !== "boolean" ||
+    typeof parsed.found !== "boolean"
+  ) {
+    throw new Error("Invalid login item status response from native runtime");
+  }
+  return {
+    enabled: parsed.enabled,
+    status: parsed.status,
+    requiresApproval: parsed.requiresApproval,
+    found: parsed.found,
+  };
+}
+
 export function bootoutLaunchAgent(): { plistPath: string; bootedOut: boolean } {
   const plistPath = launchAgentPath();
   if (!existsSync(plistPath)) {
@@ -238,86 +303,7 @@ export function bootoutLaunchAgent(): { plistPath: string; bootedOut: boolean } 
   }
 }
 
-export function bootstrapLaunchAgent(): { plistPath: string; bootstrapped: boolean } {
-  const plistPath = launchAgentPath();
-  if (!existsSync(plistPath)) {
-    return { plistPath, bootstrapped: false };
-  }
-
-  const installedAppPath = resolveInstalledAppPath();
-  if (installedAppPath) {
-    terminateCompetingDaemons({
-      expectedExecutablePath: appExecutablePath(installedAppPath),
-    });
-  }
-
-  try {
-    execFileSync("launchctl", ["bootstrap", `gui/${currentUid()}`, plistPath], { stdio: "ignore" });
-    return { plistPath, bootstrapped: true };
-  } catch {
-    return { plistPath, bootstrapped: false };
-  }
-}
-
-export function installLaunchAgent(appPath?: string): { plistPath: string; appPath: string } {
-  const resolvedAppPath = appPath ?? resolveInstalledAppPath();
-  if (!resolvedAppPath) {
-    throw new Error("Cued.app is not installed. Run `cued install` first.");
-  }
-  terminateCompetingDaemons({
-    expectedExecutablePath: appExecutablePath(resolvedAppPath),
-  });
-
-  const plistPath = launchAgentPath();
-  mkdirSync(dirname(plistPath), { recursive: true });
-  const plist = `<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-<dict>
-  <key>Label</key>
-  <string>${LAUNCH_AGENT_LABEL}</string>
-  <key>ProgramArguments</key>
-  <array>
-    <string>${appExecutablePath(resolvedAppPath)}</string>
-    <string>--menu-bar</string>
-  </array>
-  <key>RunAtLoad</key>
-  <true/>
-  <key>KeepAlive</key>
-  <true/>
-</dict>
-</plist>
-`;
-  writeFileSync(plistPath, plist);
-  try {
-    execFileSync("launchctl", ["bootout", `gui/${currentUid()}`, plistPath], { stdio: "ignore" });
-  } catch {
-    // Ignore if the agent was not already loaded.
-  }
-  execFileSync("launchctl", ["bootstrap", `gui/${currentUid()}`, plistPath], { stdio: "ignore" });
-  return { plistPath, appPath: resolvedAppPath };
-}
-
-export function uninstallLaunchAgent(): { plistPath: string; removed: boolean } {
-  const plistPath = launchAgentPath();
-  if (!existsSync(plistPath)) {
-    return { plistPath, removed: false };
-  }
-  try {
-    execFileSync("launchctl", ["bootout", `gui/${currentUid()}`, plistPath], { stdio: "ignore" });
-  } catch {
-    // Ignore stale unload failures.
-  }
-  rmSync(plistPath, { force: true });
-  return { plistPath, removed: true };
-}
-
-export function getLaunchAgentStatus(): {
-  label: string;
-  plistPath: string;
-  loaded: boolean;
-  details?: string;
-} {
+export function getLegacyLaunchAgentStatus(): LegacyLaunchAgentStatus {
   const plistPath = launchAgentPath();
   try {
     const details = execFileSync(
@@ -328,15 +314,100 @@ export function getLaunchAgentStatus(): {
         stdio: ["ignore", "pipe", "pipe"],
       },
     );
-    return { label: LAUNCH_AGENT_LABEL, plistPath, loaded: true, details };
+    return {
+      label: LAUNCH_AGENT_LABEL,
+      plistPath,
+      installed: existsSync(plistPath),
+      loaded: true,
+      details,
+    };
   } catch (error) {
     return {
       label: LAUNCH_AGENT_LABEL,
       plistPath,
+      installed: existsSync(plistPath),
       loaded: false,
       details: error instanceof Error ? error.message : String(error),
     };
   }
+}
+
+export function removeLegacyLaunchAgent(): {
+  plistPath: string;
+  bootedOut: boolean;
+  removed: boolean;
+} {
+  const { plistPath, bootedOut } = bootoutLaunchAgent();
+  const removed = existsSync(plistPath);
+  if (removed) {
+    rmSync(plistPath, { force: true });
+  }
+  return {
+    plistPath,
+    bootedOut,
+    removed,
+  };
+}
+
+export function getLoginItemStatus(appPath?: string): LoginItemStatus {
+  const resolvedAppPath = appPath ?? resolveInstalledAppPath();
+  return {
+    ...runNativeLoginItemCommand("status", resolvedAppPath ?? undefined),
+    appPath: resolvedAppPath,
+    legacyLaunchAgent: getLegacyLaunchAgentStatus(),
+  };
+}
+
+export function enableLoginItem(appPath?: string): LoginItemCommandResult {
+  const resolvedAppPath = appPath ?? resolveInstalledAppPath();
+  if (!resolvedAppPath) {
+    throw new Error("Cued.app is not installed. Run `cued install` first.");
+  }
+  terminateCompetingDaemons({
+    expectedExecutablePath: appExecutablePath(resolvedAppPath),
+  });
+
+  const legacyBefore = getLegacyLaunchAgentStatus();
+  const native = runNativeLoginItemCommand("enable", resolvedAppPath);
+  if (legacyBefore.installed) {
+    removeLegacyLaunchAgent();
+  }
+
+  return {
+    ...native,
+    appPath: resolvedAppPath,
+    legacyLaunchAgent: getLegacyLaunchAgentStatus(),
+    migratedLegacyLaunchAgent: legacyBefore.installed,
+  };
+}
+
+export function disableLoginItem(appPath?: string): LoginItemCommandResult {
+  const resolvedAppPath = appPath ?? resolveInstalledAppPath();
+  const nativeStatus = runNativeLoginItemCommand("status", resolvedAppPath ?? undefined);
+  const native =
+    nativeStatus.status === "enabled" || nativeStatus.status === "requires_approval"
+      ? runNativeLoginItemCommand("disable", resolvedAppPath ?? undefined)
+      : nativeStatus;
+  const legacy = removeLegacyLaunchAgent();
+
+  return {
+    ...native,
+    appPath: resolvedAppPath,
+    legacyLaunchAgent: getLegacyLaunchAgentStatus(),
+    migratedLegacyLaunchAgent: legacy.removed || legacy.bootedOut,
+  };
+}
+
+export function installLaunchAgent(appPath?: string): LoginItemCommandResult {
+  return enableLoginItem(appPath);
+}
+
+export function uninstallLaunchAgent(appPath?: string): LoginItemCommandResult {
+  return disableLoginItem(appPath);
+}
+
+export function getLaunchAgentStatus(appPath?: string): LoginItemStatus {
+  return getLoginItemStatus(appPath);
 }
 
 export function getAppBundleInfo(appPath?: string): Record<string, unknown> {
