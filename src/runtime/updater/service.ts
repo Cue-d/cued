@@ -35,6 +35,7 @@ import {
   getCLISymlinkPath,
   getCurrentAppPath,
   getLaunchAgentPlistPath,
+  getLegacyLaunchAgentStatus,
   isValidCuedAppBundle,
   resolveInstalledAppPath,
 } from "../../macos/install.js";
@@ -547,6 +548,7 @@ function writeHelperScript(
     stagedAppPath: string;
     targetVersion: string;
     dbPath: string;
+    migrateLegacyLaunchAgent: boolean;
     stagingRoot: string;
   },
 ): string {
@@ -563,6 +565,7 @@ DB_PATH=${shellEscape(input.dbPath)}
 DB_BACKUP_PATH=${shellEscape(input.dbBackupPath)}
 CLI_SYMLINK_PATH=${shellEscape(getCLISymlinkPath())}
 LAUNCH_AGENT_PLIST=${shellEscape(getLaunchAgentPlistPath())}
+MIGRATE_LEGACY_LAUNCH_AGENT=${input.migrateLegacyLaunchAgent ? "1" : "0"}
 TARGET_VERSION=${shellEscape(input.targetVersion)}
 STAGING_ROOT=${shellEscape(input.stagingRoot)}
 WAIT_FOR_EXIT_MS=${UPDATE_HELPER_WAIT_FOR_EXIT_MS}
@@ -574,6 +577,13 @@ sqlite_exec() {
 
 clear_pending() {
   sqlite_exec "INSERT INTO app_settings (key, value, updated_at) VALUES ('update_pending_rollback_json', NULL, strftime('%s','now') * 1000) ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at;"
+}
+
+cleanup_legacy_launch_agent() {
+  if [[ -f "$LAUNCH_AGENT_PLIST" ]]; then
+    /bin/launchctl bootout "gui/$(id -u)" "$LAUNCH_AGENT_PLIST" >/dev/null 2>&1 || true
+    rm -f "$LAUNCH_AGENT_PLIST"
+  fi
 }
 
 wait_for_old_app_exit() {
@@ -624,12 +634,16 @@ mkdir -p "$INSTALLED_APP_PATH"
 /usr/bin/rsync -a --delete "$STAGED_APP_PATH/" "$INSTALLED_APP_PATH/"
 mkdir -p "$(dirname "$CLI_SYMLINK_PATH")"
 ln -sf "$INSTALLED_APP_PATH/Contents/Resources/cued-cli" "$CLI_SYMLINK_PATH"
-if [[ -f "$LAUNCH_AGENT_PLIST" ]]; then
-  /bin/launchctl bootstrap "gui/$(id -u)" "$LAUNCH_AGENT_PLIST" >/dev/null 2>&1 || true
+LOGIN_ITEM_MIGRATED=0
+if [[ "$MIGRATE_LEGACY_LAUNCH_AGENT" == "1" ]] && "$INSTALLED_APP_EXEC" login-item enable >/dev/null 2>&1; then
+  LOGIN_ITEM_MIGRATED=1
 fi
 /usr/bin/open "$INSTALLED_APP_PATH" >/dev/null 2>&1 || true
 
 if wait_for_health; then
+  if [[ "$LOGIN_ITEM_MIGRATED" == "1" ]]; then
+    cleanup_legacy_launch_agent
+  fi
   clear_pending
   sqlite_exec "INSERT INTO app_settings (key, value, updated_at) VALUES ('update_last_error_json', NULL, strftime('%s','now') * 1000) ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at;"
   rm -rf "$STAGING_ROOT"
@@ -656,6 +670,7 @@ function spawnUpdateHelper(
     stagedAppPath,
     targetVersion: pendingRollback.targetVersion,
     dbPath,
+    migrateLegacyLaunchAgent: getLegacyLaunchAgentStatus().installed,
     stagingRoot: dirname(dirname(stagedAppPath)),
   });
   const child = spawn("/bin/bash", [scriptPath], {

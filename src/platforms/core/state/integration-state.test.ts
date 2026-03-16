@@ -201,6 +201,8 @@ describe("integration state management", () => {
   });
 
   it("repairs stale linkedin sync capability on refresh", async () => {
+    process.env.CUED_SLACK_APP_BINARY = join(createTempDir("cued-no-slack-app-"), "Slack");
+
     const db = createDb();
     db.upsertIntegrationState({
       platform: "linkedin",

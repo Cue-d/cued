@@ -163,7 +163,7 @@ enum CLIError: Error, LocalizedError {
   var errorDescription: String? {
     switch self {
     case .invalidCommand:
-      return "usage: CuedNative contacts dump|status|watch | CuedNative imessage dump [--db-path PATH] [--after-rowid N] [--limit N] | CuedNative imessage watch [--db-path PATH] | CuedNative browser open --url URL | CuedNative browser close --url-prefix PREFIX | CuedNative auth open --platform PLATFORM --account-key KEY --session-id ID --db-path PATH | CuedNative auth qr --title TITLE --subtitle TEXT --uri URI | CuedNative --menu-bar"
+      return "usage: CuedNative contacts dump|status|watch | CuedNative imessage dump [--db-path PATH] [--after-rowid N] [--limit N] | CuedNative imessage watch [--db-path PATH] | CuedNative browser open --url URL | CuedNative browser close --url-prefix PREFIX | CuedNative auth open --platform PLATFORM --account-key KEY --session-id ID --db-path PATH | CuedNative auth qr --title TITLE --subtitle TEXT --uri URI | CuedNative login-item status|enable|disable | CuedNative --menu-bar"
     case .invalidOption(let message):
       return message
     case .contactsAccessDenied:
@@ -310,6 +310,12 @@ struct CuedNativeCLI {
     case ("browser", "close"):
       let prefix = try parseBrowserClosePrefix(Array(arguments.dropFirst(2)))
       try writeJSON(closeBrowserTabs(urlPrefix: prefix))
+    case ("login-item", "status"):
+      try writeJSON(currentLoginItemStatus())
+    case ("login-item", "enable"):
+      try writeJSON(try enableLoginItem())
+    case ("login-item", "disable"):
+      try writeJSON(try disableLoginItem())
     default:
       throw CLIError.invalidCommand
     }
