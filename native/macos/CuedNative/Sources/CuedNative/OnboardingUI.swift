@@ -203,7 +203,7 @@ final class OnboardingWindowController: NSWindowController {
     markPendingLivePermissions(flags: flags)
     runActions(
       argumentsList: [["permissions", "request"] + flags],
-      refreshPermissionsAfter: true
+      refreshPermissionsAfter: onboardingShouldRefreshPermissionsLive(for: flags)
     )
   }
 
@@ -348,7 +348,7 @@ final class OnboardingWindowController: NSWindowController {
   }
 
   private func markPendingLivePermissions(flags: [String]) {
-    pendingLivePermissionKeys.formUnion(Self.permissionKeys(for: flags))
+    pendingLivePermissionKeys.formUnion(onboardingPermissionKeys(for: flags))
     if !pendingLivePermissionKeys.isEmpty {
       pendingLivePermissionDeadline = Date().addingTimeInterval(30)
     }
@@ -392,21 +392,26 @@ final class OnboardingWindowController: NSWindowController {
     }
   }
 
-  private static func permissionKeys(for flags: [String]) -> Set<String> {
-    if flags.contains("--all") {
-      return ["contacts", "full_disk_access", "messages_automation"]
-    }
+}
 
-    var keys = Set<String>()
-    if flags.contains("--contacts") {
-      keys.insert("contacts")
-    }
-    if flags.contains("--full-disk-access") {
-      keys.insert("full_disk_access")
-    }
-    if flags.contains("--messages") {
-      keys.insert("messages_automation")
-    }
-    return keys
+func onboardingPermissionKeys(for flags: [String]) -> Set<String> {
+  if flags.contains("--all") {
+    return ["contacts", "full_disk_access", "messages_automation"]
   }
+
+  var keys = Set<String>()
+  if flags.contains("--contacts") {
+    keys.insert("contacts")
+  }
+  if flags.contains("--full-disk-access") {
+    keys.insert("full_disk_access")
+  }
+  if flags.contains("--messages") {
+    keys.insert("messages_automation")
+  }
+  return keys
+}
+
+func onboardingShouldRefreshPermissionsLive(for flags: [String]) -> Bool {
+  onboardingPermissionKeys(for: flags).contains("messages_automation")
 }
