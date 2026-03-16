@@ -11,9 +11,12 @@ import { CUED_DB_PATH, CUED_SOCKET_PATH, ensureCuedDirs } from "./core/config.js
 import { resolveHostOS } from "./core/platform-capabilities.js";
 import { openCuedDatabase, openCuedDatabaseReadOnly } from "./db/database.js";
 import {
+  disableLoginItem,
+  enableLoginItem,
   getAppBundleInfo,
   getCLISymlinkStatus,
   getLaunchAgentStatus,
+  getLoginItemStatus,
   installCLISymlink,
   installLaunchAgent,
   installMacOSApp,
@@ -109,6 +112,7 @@ Usage:
   cued update check [--force]
   cued update install
   cued cli install|status
+  cued login-item enable|disable|status
   cued onboarding complete|snapshot|status [--refresh-managed] [--refresh-permissions]
   cued launchd install|uninstall|status
   cued permissions doctor|status|request [--all|--contacts|--messages|--full-disk-access]
@@ -449,6 +453,20 @@ async function main(): Promise<void> {
           return;
         default:
           throw new Error("Usage: cued launchd install | uninstall | status");
+      }
+    case "login-item":
+      switch (subcommand) {
+        case "enable":
+          printJson(enableLoginItem());
+          return;
+        case "disable":
+          printJson(disableLoginItem());
+          return;
+        case "status":
+          printJson(getLoginItemStatus());
+          return;
+        default:
+          throw new Error("Usage: cued login-item enable | disable | status");
       }
     case "permissions":
       switch (subcommand) {
