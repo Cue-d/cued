@@ -115,6 +115,10 @@ format_number() {
   awk -v value="$1" 'BEGIN { printf "%.1f", value }'
 }
 
+current_time_ms() {
+  node -e 'process.stdout.write(String(Date.now()))'
+}
+
 cleanup_active_tree() {
   local pids pid root_pid
   if [ -z "${ACTIVE_ROOT_PID:-}" ]; then
@@ -233,6 +237,7 @@ for run_number in $(seq 1 "$RUN_COUNT"); do
   ACTIVE_ROOT_PID="$!"
 
   READY_MS=0
+  STARTUP_STARTED_MS="$(current_time_ms)"
   for startup_attempt in $(seq 1 "$STARTUP_ATTEMPTS"); do
     if \
       CUED_HOME="$HOME_DIR" \
@@ -240,7 +245,7 @@ for run_number in $(seq 1 "$RUN_COUNT"); do
       CUED_SLACK_APP_BINARY="$DISABLED_SLACK_APP_PATH" \
       CUED_SLACK_USER_DATA_DIR="$DISABLED_SLACK_USER_DATA_DIR" \
       node "$DIST_CLI_PATH" status >/dev/null 2>&1; then
-      READY_MS=$((startup_attempt * 100))
+      READY_MS=$(( $(current_time_ms) - STARTUP_STARTED_MS ))
       break
     fi
     sleep "$STARTUP_SLEEP_SECONDS"
