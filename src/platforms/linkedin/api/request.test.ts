@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { LinkedInAuthError, newGetRequest } from "./request.js";
+import { LinkedInAuthError, linkedInEncode, newGetRequest } from "./request.js";
 
 const cookies = [
   {
@@ -58,5 +58,11 @@ describe("linkedin request auth invalidation", () => {
     await expect(
       newGetRequest("https://www.linkedin.com/voyager/api/test", cookies).doRaw(),
     ).rejects.toBeInstanceOf(LinkedInAuthError);
+  });
+
+  it("encodes tuple-style linkedin urn parentheses", () => {
+    expect(linkedInEncode("urn:li:msg_conversation:(urn:li:fsd_profile:SELF123,CONV123)")).toBe(
+      "urn%3Ali%3Amsg_conversation%3A%28urn%3Ali%3Afsd_profile%3ASELF123%2CCONV123%29",
+    );
   });
 });

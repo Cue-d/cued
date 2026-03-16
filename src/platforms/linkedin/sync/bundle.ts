@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import type { SourceAccountInput } from "../../../core/types/provider.js";
 import { mapWithConcurrency } from "../../../core/utils/async.js";
-import { openCuedDatabase } from "../../../db/database.js";
+import { type openCuedDatabase, openCuedDatabaseReadOnly } from "../../../db/database.js";
 import type { SyncBundle } from "../../core/sync.js";
 import {
   type Connection,
@@ -9,8 +9,10 @@ import {
   type Cookie,
   LinkedInClient,
   type Message,
+  type MessagesResult,
   type MessagingParticipant,
 } from "../api/index.js";
+import { LinkedInRequestError } from "../api/request.js";
 import { loadLinkedInSessionSecret } from "../auth/session-store.js";
 import {
   buildLinkedInConversationEvent,
@@ -239,7 +241,18 @@ async function listMessagesForConversation(
     }
   }
 
-  const latest = await client.getMessages(conversation.entityURN);
+  let latest: MessagesResult;
+  try {
+    latest = await client.getMessages(conversation.entityURN);
+  } catch (error) {
+    if (isLinkedInLegacyPaginationError(error)) {
+      return [...seen.values()]
+        .filter((message) => message.entityURN)
+        .filter((message) => !incremental || message.deliveredAt >= oldestMs)
+        .sort((left, right) => left.deliveredAt - right.deliveredAt);
+    }
+    throw error;
+  }
   for (const message of latest.messages) {
     if (message.entityURN) {
       seen.set(message.entityURN, message);
@@ -259,9 +272,17 @@ async function listMessagesForConversation(
     ((prevCursor && prevCursor.length > 0) ||
       (Number.isFinite(oldestDeliveredAt) && oldestDeliveredAt > oldestMs))
   ) {
-    const page = prevCursor
-      ? await client.getMessagesWithPrevCursor(conversation.entityURN, prevCursor)
-      : await client.getMessagesBefore(conversation.entityURN, oldestDeliveredAt - 1);
+    let page: MessagesResult;
+    try {
+      page = prevCursor
+        ? await client.getMessagesWithPrevCursor(conversation.entityURN, prevCursor)
+        : await client.getMessagesBefore(conversation.entityURN, oldestDeliveredAt - 1);
+    } catch (error) {
+      if (isLinkedInLegacyPaginationError(error)) {
+        break;
+      }
+      throw error;
+    }
     if (page.messages.length === 0) {
       break;
     }
@@ -298,6 +319,10 @@ function loadProjectedReactions(
       .listActiveReactionsForMessage("linkedin", accountKey, sourceMessageKey)
       .map((row) => [reactionCompositeKey(row.reactor_source_key, row.emoji), row]),
   );
+}
+
+function isLinkedInLegacyPaginationError(error: unknown): error is LinkedInRequestError {
+  return error instanceof LinkedInRequestError && error.statusCode === 400;
 }
 
 async function buildReactionEventsForMessage(input: {
@@ -388,7 +413,7 @@ export async function buildLinkedInSyncBundle(options?: {
       xLiTrack: session?.xLiTrack ?? undefined,
     });
 
-  const db = options?.loadProjectedReactions ? null : openCuedDatabase();
+  const db = options?.loadProjectedReactions ? null : openCuedDatabaseReadOnly();
   const loadProjectedReactionsForSync =
     options?.loadProjectedReactions ??
     ((lookupAccountKey: string, sourceMessageKey: string) =>

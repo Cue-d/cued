@@ -9,6 +9,11 @@ interface MessagesGraphQLResponse {
       elements: RawMessage[];
       paging?: { start?: number; count?: number; total?: number };
     };
+    messengerMessagesBySyncToken?: {
+      elements: RawMessage[];
+      metadata?: { newSyncToken?: string };
+      paging?: { start?: number; count?: number; total?: number };
+    };
     messengerMessagesByAnchorTimestamp?: {
       elements: RawMessage[];
       paging?: { start?: number; count?: number; total?: number };
@@ -120,6 +125,14 @@ function parsePagingMetadata(paging?: {
     : undefined;
 }
 
+function getMessagesPayload(response: MessagesGraphQLResponse) {
+  return (
+    response.data?.messengerMessagesByConversation ??
+    response.data?.messengerMessagesBySyncToken ??
+    response.data?.messengerMessagesByAnchorTimestamp
+  );
+}
+
 export async function getMessages(
   client: LinkedInClient,
   conversationId: string,
@@ -130,7 +143,6 @@ export async function getMessages(
     "messengerMessagesByConversation",
     {
       conversationUrn: linkedInEncode(conversationURN),
-      count: String(PAGINATION_DEFAULTS.messagesCount),
     },
     {
       pageInstance: client.pageInstance,
@@ -139,7 +151,7 @@ export async function getMessages(
     },
   ).doJSON<MessagesGraphQLResponse>();
 
-  const data = response.data?.messengerMessagesByConversation;
+  const data = getMessagesPayload(response);
   return {
     messages: (data?.elements ?? []).map((message) => parseRawMessage(message, conversationURN)),
     metadata: parsePagingMetadata(data?.paging),
@@ -171,7 +183,7 @@ export async function getMessagesWithPrevCursor(
     },
   ).doJSON<MessagesGraphQLResponse>();
 
-  const data = response.data?.messengerMessagesByConversation;
+  const data = getMessagesPayload(response);
   return {
     messages: (data?.elements ?? []).map((message) => parseRawMessage(message, conversationURN)),
     metadata: parsePagingMetadata(data?.paging),
@@ -204,7 +216,7 @@ export async function getMessagesBefore(
     },
   ).doJSON<MessagesGraphQLResponse>();
 
-  const data = response.data?.messengerMessagesByAnchorTimestamp;
+  const data = getMessagesPayload(response);
   return {
     messages: (data?.elements ?? []).map((message) => parseRawMessage(message, conversationURN)),
     metadata: parsePagingMetadata(data?.paging),
