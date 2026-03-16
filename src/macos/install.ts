@@ -1,12 +1,5 @@
 import { execFileSync } from "node:child_process";
-import {
-  existsSync,
-  mkdirSync,
-  readFileSync,
-  realpathSync,
-  rmSync,
-  symlinkSync,
-} from "node:fs";
+import { existsSync, mkdirSync, readFileSync, realpathSync, rmSync, symlinkSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -315,14 +308,10 @@ export function bootoutLaunchAgent(): { plistPath: string; bootedOut: boolean } 
 export function getLegacyLaunchAgentStatus(): LegacyLaunchAgentStatus {
   const fallbackPath = launchAgentPath();
   try {
-    const details = execFileSync(
-      "launchctl",
-      ["print", legacyLaunchAgentServiceTarget()],
-      {
-        encoding: "utf8",
-        stdio: ["ignore", "pipe", "pipe"],
-      },
-    );
+    const details = execFileSync("launchctl", ["print", legacyLaunchAgentServiceTarget()], {
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "pipe"],
+    });
     const plistPath = parseLaunchAgentPath(details) ?? fallbackPath;
     return {
       label: LAUNCH_AGENT_LABEL,
