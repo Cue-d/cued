@@ -51,7 +51,7 @@ export async function runSetupTUI(): Promise<void> {
 
       printSection("Actions");
       output.write("1. Install/refresh app bundle and CLI\n");
-      output.write("2. Install launch agent\n");
+      output.write("2. Enable run at login\n");
       output.write("3. Request macOS permissions\n");
       output.write("4. Show local source status\n");
       output.write("5. Connect Slack\n");
@@ -64,7 +64,7 @@ export async function runSetupTUI(): Promise<void> {
           output.write("\nRun: cued install\n");
           break;
         case "2":
-          output.write("\nRun: cued launchd install\n");
+          output.write("\nRun: cued login-item enable\n");
           break;
         case "3":
           output.write("\nRun: cued permissions request --all\n");
