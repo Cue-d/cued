@@ -214,7 +214,9 @@ class AuthedRequest {
 }
 
 export function linkedInEncode(value: string): string {
-  return encodeURIComponent(value);
+  return encodeURIComponent(value).replace(/[()]/g, (character) =>
+    character === "(" ? "%28" : "%29",
+  );
 }
 
 function queriesToString(variables: Record<string, string>): string {

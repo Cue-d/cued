@@ -23,11 +23,12 @@ function stableId(seed: string): string {
 export function normalizeConversationUrn(urn: string): string {
   return urn
     .replace(/^urn:li:fsd_conversation:/, "urn:li:fs_conversation:")
+    .replace(/^urn:li:msg_conversation:/, "urn:li:fs_conversation:")
     .replace(/^urn:li:messagingThread:/, "urn:li:fs_conversation:");
 }
 
 export function normalizeMemberUrn(urn: string): string {
-  const nested = urn.match(/^urn:li:msg_messagingparticipant:(.+)$/)?.[1];
+  const nested = urn.match(/^urn:li:msg_messagingparticipant:(.+)$/i)?.[1];
   const base = nested ?? urn;
   const id = base.match(/^urn:li:[^:]+:(.+)$/)?.[1];
   return id ? `urn:li:member:${id}` : base;
