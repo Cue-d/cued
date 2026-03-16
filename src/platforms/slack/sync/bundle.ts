@@ -18,10 +18,13 @@ import {
 
 const INCREMENTAL_BUFFER_MS = 5 * 60 * 1000;
 const DEFAULT_SLACK_CONVERSATIONS_PER_RUN = Number(
-  process.env.CUED_SLACK_CONVERSATIONS_PER_RUN ?? "100",
+  process.env.CUED_SLACK_CONVERSATIONS_PER_RUN ?? "25",
 );
 const DEFAULT_SLACK_MESSAGES_PAGE_LIMIT = Number(
   process.env.CUED_SLACK_MESSAGES_PAGE_LIMIT ?? "100",
+);
+const DEFAULT_SLACK_CHANNEL_HISTORY_DAYS = Number(
+  process.env.CUED_SLACK_CHANNEL_HISTORY_DAYS ?? "30",
 );
 
 type SlackClientLike = Pick<
@@ -89,6 +92,42 @@ function getOldestMessageMs(mode: SlackScanMode, lastSyncAt?: number): number {
     return Math.max(0, lastSyncAt - INCREMENTAL_BUFFER_MS);
   }
   return 0;
+}
+
+function isDirectConversation(conversation: SlackConversation): boolean {
+  return Boolean(conversation.is_im || conversation.is_mpim);
+}
+
+function compareConversationPriority(left: SlackConversation, right: SlackConversation): number {
+  const leftDirect = isDirectConversation(left) ? 0 : 1;
+  const rightDirect = isDirectConversation(right) ? 0 : 1;
+  if (leftDirect !== rightDirect) {
+    return leftDirect - rightDirect;
+  }
+
+  const leftMembers =
+    typeof left.num_members === "number" ? left.num_members : Number.MAX_SAFE_INTEGER;
+  const rightMembers =
+    typeof right.num_members === "number" ? right.num_members : Number.MAX_SAFE_INTEGER;
+  if (leftMembers !== rightMembers) {
+    return leftMembers - rightMembers;
+  }
+
+  return left.id.localeCompare(right.id);
+}
+
+function getConversationHistoryOldestMs(
+  mode: SlackScanMode,
+  oldestMs: number,
+  conversation: SlackConversation,
+  observedAt: number,
+): number {
+  if (mode === "incremental" || isDirectConversation(conversation)) {
+    return oldestMs;
+  }
+
+  const boundedWindowMs = positiveInt(DEFAULT_SLACK_CHANNEL_HISTORY_DAYS, 30) * 24 * 60 * 60 * 1000;
+  return Math.max(oldestMs, observedAt - boundedWindowMs);
 }
 
 function bestSlackAvatar(profile: SlackUser["profile"]): string | undefined {
@@ -556,7 +595,10 @@ export async function buildSlackSyncBundle(options?: {
     conversationPageLimit,
   );
 
-  for (const conversation of conversationPage.conversations) {
+  const orderedConversations = [...conversationPage.conversations].sort(
+    compareConversationPriority,
+  );
+  for (const conversation of orderedConversations) {
     if (
       scan.mode === "incremental" &&
       !shouldFetchConversationIncrementally(conversation, scan.oldestMs)
@@ -564,11 +606,17 @@ export async function buildSlackSyncBundle(options?: {
       continue;
     }
 
+    const conversationOldestMs = getConversationHistoryOldestMs(
+      scan.mode,
+      scan.oldestMs,
+      conversation,
+      observedBase,
+    );
     const memberIds = await listConversationMembers(client, conversation);
     const messages = await listConversationMessages(
       client,
       conversation.id,
-      scan.oldestMs,
+      conversationOldestMs,
       messagesPageLimit,
     );
 
@@ -613,7 +661,8 @@ export async function buildSlackSyncBundle(options?: {
   // exhausted the conversations the current token can actually access.
   const nextCursor =
     conversationPage.conversations.length > 0 ? conversationPage.nextCursor || null : null;
-  const sourceCursor: SlackSourceCursor = nextCursor
+  const shouldContinueScan = scan.mode === "full" && nextCursor != null;
+  const sourceCursor: SlackSourceCursor = shouldContinueScan
     ? {
         teamId,
         selfUserId,
@@ -635,6 +684,6 @@ export async function buildSlackSyncBundle(options?: {
     rawEvents,
     sourceCursor,
     syncMode: scan.mode,
-    hasMore: nextCursor != null,
+    hasMore: shouldContinueScan,
   };
 }

@@ -85,6 +85,7 @@ export interface SlackMessage {
 export interface SlackConversation {
   id: string;
   name?: string;
+  num_members?: number;
   is_channel?: boolean;
   is_group?: boolean;
   is_im?: boolean;
