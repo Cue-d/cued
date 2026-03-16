@@ -127,6 +127,35 @@ describe("macOS app bundle resolution", () => {
     );
   });
 
+  it("uses the launchctl-reported plist path when the shell HOME differs", () => {
+    setTempHome();
+    const appPath = createAppBundle(createTempDir("cued-valid-app-"), "dev.cued.app");
+    process.env.CUED_APP_PATH = appPath;
+
+    const actualHome = createTempDir("cued-actual-home-");
+    const actualPlistPath = join(actualHome, "Library", "LaunchAgents", "dev.cued.daemon.plist");
+    mkdirSync(join(actualPlistPath, ".."), { recursive: true });
+    writeFileSync(actualPlistPath, "legacy");
+
+    execFileSyncMock.mockImplementation((command: string, args?: string[]) => {
+      if (command === join(appPath, "Contents", "MacOS", "CuedDaemon")) {
+        return '{"enabled":false,"status":"not_registered","requiresApproval":false,"found":true}';
+      }
+      if (command === "launchctl" && args?.[0] === "print") {
+        return `gui/501/dev.cued.daemon = {\n\tpath = ${actualPlistPath}\n}`;
+      }
+      throw new Error(`unexpected command: ${command}`);
+    });
+
+    expect(getLoginItemStatus(appPath).legacyLaunchAgent).toEqual(
+      expect.objectContaining({
+        plistPath: actualPlistPath,
+        installed: true,
+        loaded: true,
+      }),
+    );
+  });
+
   it("migrates an existing legacy launch agent when enabling the login item", () => {
     const homeDir = setTempHome();
     const appPath = createAppBundle(createTempDir("cued-valid-app-"), "dev.cued.app");

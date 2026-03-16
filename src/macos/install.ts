@@ -240,6 +240,15 @@ export function getLaunchAgentPlistPath(): string {
   return launchAgentPath();
 }
 
+function legacyLaunchAgentServiceTarget(): string {
+  return `gui/${currentUid()}/${LAUNCH_AGENT_LABEL}`;
+}
+
+function parseLaunchAgentPath(details: string): string | null {
+  const match = details.match(/^\s*path = (.+)$/m);
+  return match?.[1]?.trim() ?? null;
+}
+
 function appExecutablePath(appPath: string): string {
   return join(appPath, "Contents", "MacOS", APP_EXECUTABLE_NAME);
 }
@@ -290,30 +299,31 @@ function runNativeLoginItemCommand(
 }
 
 export function bootoutLaunchAgent(): { plistPath: string; bootedOut: boolean } {
-  const plistPath = launchAgentPath();
-  if (!existsSync(plistPath)) {
-    return { plistPath, bootedOut: false };
+  const status = getLegacyLaunchAgentStatus();
+  if (!status.installed && !status.loaded) {
+    return { plistPath: status.plistPath, bootedOut: false };
   }
 
   try {
-    execFileSync("launchctl", ["bootout", `gui/${currentUid()}`, plistPath], { stdio: "ignore" });
-    return { plistPath, bootedOut: true };
+    execFileSync("launchctl", ["bootout", legacyLaunchAgentServiceTarget()], { stdio: "ignore" });
+    return { plistPath: status.plistPath, bootedOut: true };
   } catch {
-    return { plistPath, bootedOut: false };
+    return { plistPath: status.plistPath, bootedOut: false };
   }
 }
 
 export function getLegacyLaunchAgentStatus(): LegacyLaunchAgentStatus {
-  const plistPath = launchAgentPath();
+  const fallbackPath = launchAgentPath();
   try {
     const details = execFileSync(
       "launchctl",
-      ["print", `gui/${currentUid()}/${LAUNCH_AGENT_LABEL}`],
+      ["print", legacyLaunchAgentServiceTarget()],
       {
         encoding: "utf8",
         stdio: ["ignore", "pipe", "pipe"],
       },
     );
+    const plistPath = parseLaunchAgentPath(details) ?? fallbackPath;
     return {
       label: LAUNCH_AGENT_LABEL,
       plistPath,
@@ -324,8 +334,8 @@ export function getLegacyLaunchAgentStatus(): LegacyLaunchAgentStatus {
   } catch (error) {
     return {
       label: LAUNCH_AGENT_LABEL,
-      plistPath,
-      installed: existsSync(plistPath),
+      plistPath: fallbackPath,
+      installed: existsSync(fallbackPath),
       loaded: false,
       details: error instanceof Error ? error.message : String(error),
     };
