@@ -1,5 +1,57 @@
 import { describe, expect, it } from "vitest";
-import { buildProjectionMessageHookBatches, ProjectionMessageHookBarrier } from "./service.js";
+import {
+  buildProjectionMessageHookBatches,
+  mergeProjectionRunDetails,
+  ProjectionMessageHookBarrier,
+} from "./service.js";
+
+describe("mergeProjectionRunDetails", () => {
+  it("drops replay ranges that sit entirely below the committed watermark", () => {
+    expect(
+      mergeProjectionRunDetails({
+        existing: null,
+        incoming: {
+          trigger: "contacts_replay:local",
+          startRowId: 1,
+          endRowId: 132,
+          projectionWatermark: 43_224,
+          maxRawEventRowid: 63_911,
+        },
+        projectionWatermark: 43_224,
+        maxRawEventRowid: 63_911,
+      }),
+    ).toBeNull();
+  });
+
+  it("clamps stale queued starts to the next unapplied row before merging", () => {
+    expect(
+      mergeProjectionRunDetails({
+        existing: {
+          trigger: "projection_continue:prev",
+          startRowId: 10_001,
+          endRowId: 63_911,
+          projectionWatermark: 43_224,
+          maxRawEventRowid: 63_911,
+        },
+        incoming: {
+          trigger: "contacts_replay:local",
+          startRowId: 1,
+          endRowId: 132,
+          projectionWatermark: 43_224,
+          maxRawEventRowid: 63_911,
+        },
+        projectionWatermark: 43_224,
+        maxRawEventRowid: 63_911,
+      }),
+    ).toEqual({
+      trigger: "projection_continue:prev",
+      startRowId: 43_225,
+      endRowId: 63_911,
+      projectionWatermark: 43_224,
+      maxRawEventRowid: 63_911,
+    });
+  });
+});
 
 describe("ProjectionMessageHookBarrier", () => {
   it("releases only batches fully covered by completed projection ranges", async () => {
