@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { buildSlackSyncBundle } from "./bundle.js";
 
 describe("slack worker lib", () => {
@@ -263,5 +263,96 @@ describe("slack worker lib", () => {
     });
 
     expect(historyOldestValues).toEqual([expectedOldest]);
+  });
+
+  it("does not keep paginating incremental scans when slack returns a next cursor", async () => {
+    const bundle = await buildSlackSyncBundle({
+      accountKey: "default",
+      lastSyncAt: 1710000000000,
+      client: {
+        async testAuth() {
+          return { ok: true, team_id: "T123", user_id: "U_SELF", team: "Acme", user: "Ava" };
+        },
+        async listUsers() {
+          return { users: [], nextCursor: undefined };
+        },
+        async listConversations() {
+          return {
+            conversations: [
+              {
+                id: "C123",
+                is_channel: true,
+                latest: {
+                  type: "message",
+                  text: "Recent channel update",
+                  ts: "1710000300.000000",
+                },
+              },
+            ],
+            nextCursor: "page-2",
+          };
+        },
+        async getConversationMembers() {
+          return { members: [], nextCursor: undefined };
+        },
+        async getHistory() {
+          return { messages: [], hasMore: false, nextCursor: undefined };
+        },
+        async getReplies() {
+          return { messages: [], hasMore: false, nextCursor: undefined };
+        },
+      },
+    });
+
+    expect(bundle.syncMode).toBe("incremental");
+    expect(bundle.hasMore).toBe(false);
+    expect((bundle.sourceCursor as Record<string, unknown>).scan).toBeUndefined();
+  });
+
+  it("bounds full public channel history to a recent window", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-03-16T17:00:00.000Z"));
+    const historyOldestValues: string[] = [];
+    const expectedOldest = String(Date.parse("2026-02-14T17:00:00.000Z") / 1000);
+
+    try {
+      await buildSlackSyncBundle({
+        accountKey: "default",
+        client: {
+          async testAuth() {
+            return { ok: true, team_id: "T123", user_id: "U_SELF", team: "Acme", user: "Ava" };
+          },
+          async listUsers() {
+            return { users: [], nextCursor: undefined };
+          },
+          async listConversations() {
+            return {
+              conversations: [
+                {
+                  id: "C123",
+                  is_channel: true,
+                  num_members: 4200,
+                },
+              ],
+              nextCursor: undefined,
+            };
+          },
+          async getConversationMembers() {
+            return { members: [], nextCursor: undefined };
+          },
+          async getHistory(_conversationId, options) {
+            historyOldestValues.push(String(options?.oldest ?? ""));
+            return { messages: [], hasMore: false, nextCursor: undefined };
+          },
+          async getReplies() {
+            return { messages: [], hasMore: false, nextCursor: undefined };
+          },
+        },
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+
+    expect(historyOldestValues).toEqual([`${expectedOldest}.000000`]);
   });
 });
