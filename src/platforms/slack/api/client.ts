@@ -61,12 +61,13 @@ export class SlackClient {
   }
 
   async listConversations(
+    types: string,
     cursor?: string,
     limit: number = PAGINATION.defaultLimit,
   ): Promise<SlackConversationsResult> {
     const response = await newPostRequest(SLACK_API_URLS.conversationsList, this.credentials)
       .withParams({
-        types: "im,mpim,private_channel,public_channel",
+        types,
         limit,
         cursor,
       })

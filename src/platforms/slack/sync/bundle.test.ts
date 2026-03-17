@@ -5,6 +5,7 @@ describe("slack worker lib", () => {
   it("builds a raw event bundle from Slack users, conversations, messages, and reactions", async () => {
     const historyOldestValues: string[] = [];
     const repliesOldestValues: string[] = [];
+    const listedTypes: string[] = [];
     const bundle = await buildSlackSyncBundle({
       accountKey: "default",
       client: {
@@ -32,7 +33,8 @@ describe("slack worker lib", () => {
             nextCursor: undefined,
           };
         },
-        async listConversations() {
+        async listConversations(types) {
+          listedTypes.push(types);
           return {
             conversations: [
               {
@@ -122,6 +124,7 @@ describe("slack worker lib", () => {
             "slack:T123:D123:1710000000.000100",
       ),
     ).toBe(true);
+    expect(listedTypes).toEqual(["im,mpim"]);
     expect(historyOldestValues).toEqual([""]);
     expect(repliesOldestValues).toEqual([""]);
   });
@@ -165,14 +168,20 @@ describe("slack worker lib", () => {
       },
     });
 
-    expect(bundle.hasMore).toBe(false);
-    expect(bundle.sourceCursor).toEqual(
-      expect.objectContaining({
-        teamId: "T123",
-        selfUserId: "U_SELF",
-      }),
-    );
-    expect((bundle.sourceCursor as Record<string, unknown>).scan).toBeUndefined();
+    expect(bundle.hasMore).toBe(true);
+    expect(bundle.sourceCursor).toEqual({
+      teamId: "T123",
+      selfUserId: "U_SELF",
+      lastSyncAt: undefined,
+      scan: {
+        mode: "full",
+        startedAt: expect.any(Number),
+        oldestMs: 0,
+        usersComplete: true,
+        conversationFamily: "channels",
+        conversationCursor: null,
+      },
+    });
   });
 
   it("treats empty conversation pages with a dangling cursor as end-of-pagination", async () => {
@@ -225,6 +234,7 @@ describe("slack worker lib", () => {
 
   it("keeps incremental Slack syncs bounded to the last sync window", async () => {
     const historyOldestValues: string[] = [];
+    const listedTypes: string[] = [];
     const lastSyncAt = 1710000000000;
     const expectedOldest = ((lastSyncAt - 5 * 60 * 1000) / 1000).toFixed(6);
 
@@ -238,7 +248,20 @@ describe("slack worker lib", () => {
         async listUsers() {
           return { users: [], nextCursor: undefined };
         },
-        async listConversations() {
+        async listConversations(types) {
+          listedTypes.push(types);
+          if (types === "im,mpim") {
+            return {
+              conversations: [
+                {
+                  id: "D123",
+                  is_im: true,
+                },
+              ],
+              nextCursor: "ignored-im-next-cursor",
+            };
+          }
+
           return {
             conversations: [
               {
@@ -246,7 +269,7 @@ describe("slack worker lib", () => {
                 is_channel: true,
               },
             ],
-            nextCursor: undefined,
+            nextCursor: "ignored-channel-next-cursor",
           };
         },
         async getConversationMembers() {
@@ -262,7 +285,8 @@ describe("slack worker lib", () => {
       },
     });
 
-    expect(historyOldestValues).toEqual([expectedOldest]);
+    expect(listedTypes).toEqual(["im,mpim", "public_channel,private_channel"]);
+    expect(historyOldestValues).toEqual([expectedOldest, expectedOldest]);
   });
 
   it("does not keep paginating incremental scans when slack returns a next cursor", async () => {
@@ -276,7 +300,24 @@ describe("slack worker lib", () => {
         async listUsers() {
           return { users: [], nextCursor: undefined };
         },
-        async listConversations() {
+        async listConversations(types) {
+          if (types === "im,mpim") {
+            return {
+              conversations: [
+                {
+                  id: "D123",
+                  is_im: true,
+                  latest: {
+                    type: "message",
+                    text: "Recent DM update",
+                    ts: "1710000301.000000",
+                  },
+                },
+              ],
+              nextCursor: "page-2-im",
+            };
+          }
+
           return {
             conversations: [
               {
@@ -289,7 +330,7 @@ describe("slack worker lib", () => {
                 },
               },
             ],
-            nextCursor: "page-2",
+            nextCursor: "page-2-channel",
           };
         },
         async getConversationMembers() {
@@ -309,11 +350,151 @@ describe("slack worker lib", () => {
     expect((bundle.sourceCursor as Record<string, unknown>).scan).toBeUndefined();
   });
 
-  it("bounds full public channel history to a recent window", async () => {
+  it("continues full scans from direct conversations into channels", async () => {
+    const listedTypes: string[] = [];
+    const bundle = await buildSlackSyncBundle({
+      accountKey: "default",
+      client: {
+        async testAuth() {
+          return { ok: true, team_id: "T123", user_id: "U_SELF", team: "Acme", user: "Ava" };
+        },
+        async listUsers() {
+          return { users: [], nextCursor: undefined };
+        },
+        async listConversations(types) {
+          listedTypes.push(types);
+          if (types === "im,mpim") {
+            return {
+              conversations: [],
+              nextCursor: "",
+            };
+          }
+
+          return {
+            conversations: [],
+            nextCursor: undefined,
+          };
+        },
+        async getConversationMembers() {
+          return { members: [], nextCursor: undefined };
+        },
+        async getHistory() {
+          return { messages: [], hasMore: false, nextCursor: undefined };
+        },
+        async getReplies() {
+          return { messages: [], hasMore: false, nextCursor: undefined };
+        },
+      },
+    });
+
+    expect(listedTypes).toEqual(["im,mpim"]);
+    expect(bundle.hasMore).toBe(true);
+    expect(bundle.sourceCursor).toEqual({
+      teamId: "T123",
+      selfUserId: "U_SELF",
+      lastSyncAt: undefined,
+      scan: {
+        mode: "full",
+        startedAt: expect.any(Number),
+        oldestMs: 0,
+        usersComplete: true,
+        conversationFamily: "channels",
+        conversationCursor: null,
+      },
+    });
+  });
+
+  it("resumes old mixed scan cursors in the channel family", async () => {
+    const listedTypes: string[] = [];
+    await buildSlackSyncBundle({
+      accountKey: "default",
+      sourceCursor: {
+        teamId: "T123",
+        selfUserId: "U_SELF",
+        scan: {
+          mode: "full",
+          startedAt: 1710000000000,
+          oldestMs: 0,
+          usersComplete: true,
+          conversationCursor: "team:legacy-cursor",
+        },
+      },
+      client: {
+        async testAuth() {
+          return { ok: true, team_id: "T123", user_id: "U_SELF", team: "Acme", user: "Ava" };
+        },
+        async listUsers() {
+          return { users: [], nextCursor: undefined };
+        },
+        async listConversations(types) {
+          listedTypes.push(types);
+          return {
+            conversations: [],
+            nextCursor: undefined,
+          };
+        },
+        async getConversationMembers() {
+          return { members: [], nextCursor: undefined };
+        },
+        async getHistory() {
+          return { messages: [], hasMore: false, nextCursor: undefined };
+        },
+        async getReplies() {
+          return { messages: [], hasMore: false, nextCursor: undefined };
+        },
+      },
+    });
+
+    expect(listedTypes).toEqual(["public_channel,private_channel"]);
+  });
+
+  it("fetches all channel history during full sync by default", async () => {
+    const historyOldestValues: string[] = [];
+
+    await buildSlackSyncBundle({
+      accountKey: "default",
+      client: {
+        async testAuth() {
+          return { ok: true, team_id: "T123", user_id: "U_SELF", team: "Acme", user: "Ava" };
+        },
+        async listUsers() {
+          return { users: [], nextCursor: undefined };
+        },
+        async listConversations() {
+          return {
+            conversations: [
+              {
+                id: "C123",
+                is_channel: true,
+                num_members: 4200,
+              },
+            ],
+            nextCursor: undefined,
+          };
+        },
+        async getConversationMembers() {
+          return { members: [], nextCursor: undefined };
+        },
+        async getHistory(_conversationId, options) {
+          historyOldestValues.push(String(options?.oldest ?? ""));
+          return { messages: [], hasMore: false, nextCursor: undefined };
+        },
+        async getReplies() {
+          return { messages: [], hasMore: false, nextCursor: undefined };
+        },
+      },
+    });
+
+    expect(historyOldestValues).toEqual([""]);
+  });
+
+  it("can still bound full public channel history with an explicit env override", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-03-16T17:00:00.000Z"));
     const historyOldestValues: string[] = [];
     const expectedOldest = String(Date.parse("2026-02-14T17:00:00.000Z") / 1000);
+    const previous = process.env.CUED_SLACK_CHANNEL_HISTORY_DAYS;
+    process.env.CUED_SLACK_CHANNEL_HISTORY_DAYS = "30";
 
     try {
       await buildSlackSyncBundle({
@@ -350,6 +531,11 @@ describe("slack worker lib", () => {
         },
       });
     } finally {
+      if (previous == null) {
+        delete process.env.CUED_SLACK_CHANNEL_HISTORY_DAYS;
+      } else {
+        process.env.CUED_SLACK_CHANNEL_HISTORY_DAYS = previous;
+      }
       vi.useRealTimers();
     }
 
