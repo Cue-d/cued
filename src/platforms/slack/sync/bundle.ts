@@ -18,13 +18,10 @@ import {
 
 const INCREMENTAL_BUFFER_MS = 5 * 60 * 1000;
 const DEFAULT_SLACK_CONVERSATIONS_PER_RUN = Number(
-  process.env.CUED_SLACK_CONVERSATIONS_PER_RUN ?? "25",
+  process.env.CUED_SLACK_CONVERSATIONS_PER_RUN ?? "5",
 );
 const DEFAULT_SLACK_MESSAGES_PAGE_LIMIT = Number(
   process.env.CUED_SLACK_MESSAGES_PAGE_LIMIT ?? "100",
-);
-const DEFAULT_SLACK_CHANNEL_HISTORY_DAYS = Number(
-  process.env.CUED_SLACK_CHANNEL_HISTORY_DAYS ?? "30",
 );
 
 type SlackClientLike = Pick<
@@ -38,12 +35,20 @@ type SlackClientLike = Pick<
 >;
 
 type SlackScanMode = "full" | "incremental";
+type SlackConversationFamily = "direct" | "channels";
+
+const SLACK_FULL_SCAN_FAMILIES: SlackConversationFamily[] = ["direct", "channels"];
+const SLACK_CONVERSATION_TYPES: Record<SlackConversationFamily, string> = {
+  direct: "im,mpim",
+  channels: "public_channel,private_channel",
+};
 
 export interface SlackScanCursor {
   mode: SlackScanMode;
   startedAt: number;
   oldestMs: number;
   usersComplete: boolean;
+  conversationFamily?: SlackConversationFamily;
   conversationCursor?: string | null;
 }
 
@@ -122,12 +127,41 @@ function getConversationHistoryOldestMs(
   conversation: SlackConversation,
   observedAt: number,
 ): number {
-  if (mode === "incremental" || isDirectConversation(conversation)) {
+  if (mode === "incremental") {
     return oldestMs;
   }
 
-  const boundedWindowMs = positiveInt(DEFAULT_SLACK_CHANNEL_HISTORY_DAYS, 30) * 24 * 60 * 60 * 1000;
+  if (isDirectConversation(conversation)) {
+    return oldestMs;
+  }
+
+  const historyDays = positiveInt(Number(process.env.CUED_SLACK_CHANNEL_HISTORY_DAYS ?? "0"), 0);
+  if (historyDays <= 0) {
+    return oldestMs;
+  }
+
+  const boundedWindowMs = historyDays * 24 * 60 * 60 * 1000;
   return Math.max(oldestMs, observedAt - boundedWindowMs);
+}
+
+function isSlackConversationFamily(value: unknown): value is SlackConversationFamily {
+  return value === "direct" || value === "channels";
+}
+
+function inferConversationFamily(
+  conversationCursor: string | null | undefined,
+): SlackConversationFamily {
+  if (typeof conversationCursor === "string" && conversationCursor.startsWith("im_")) {
+    return "direct";
+  }
+  return "channels";
+}
+
+function nextConversationFamily(
+  family: SlackConversationFamily,
+): SlackConversationFamily | undefined {
+  const index = SLACK_FULL_SCAN_FAMILIES.indexOf(family);
+  return index >= 0 ? SLACK_FULL_SCAN_FAMILIES[index + 1] : undefined;
 }
 
 function bestSlackAvatar(profile: SlackUser["profile"]): string | undefined {
@@ -276,6 +310,14 @@ function parseSlackSourceCursor(raw: unknown): SlackSourceCursor | undefined {
             startedAt,
             oldestMs,
             usersComplete: parsed.usersComplete === true,
+            conversationFamily: isSlackConversationFamily(parsed.conversationFamily)
+              ? parsed.conversationFamily
+              : inferConversationFamily(
+                  typeof parsed.conversationCursor === "string" ||
+                    parsed.conversationCursor === null
+                    ? parsed.conversationCursor
+                    : undefined,
+                ),
             conversationCursor:
               typeof parsed.conversationCursor === "string" || parsed.conversationCursor === null
                 ? parsed.conversationCursor
@@ -568,6 +610,7 @@ export async function buildSlackSyncBundle(options?: {
     startedAt: observedBase,
     oldestMs: getOldestMessageMs(mode, previousLastSyncAt),
     usersComplete: Boolean(previousLastSyncAt && previousLastSyncAt > 0),
+    conversationFamily: "direct",
     conversationCursor: null,
   };
 
@@ -590,100 +633,138 @@ export async function buildSlackSyncBundle(options?: {
     scan.usersComplete = true;
   }
 
-  const conversationPage = await client.listConversations(
-    scan.conversationCursor ?? undefined,
-    conversationPageLimit,
-  );
+  const conversationPages =
+    scan.mode === "incremental"
+      ? await Promise.all(
+          SLACK_FULL_SCAN_FAMILIES.map(async (family) => ({
+            family,
+            page: await client.listConversations(
+              SLACK_CONVERSATION_TYPES[family],
+              undefined,
+              conversationPageLimit,
+            ),
+          })),
+        )
+      : [
+          {
+            family: scan.conversationFamily ?? "direct",
+            page: await client.listConversations(
+              SLACK_CONVERSATION_TYPES[scan.conversationFamily ?? "direct"],
+              scan.conversationCursor ?? undefined,
+              conversationPageLimit,
+            ),
+          },
+        ];
 
-  const orderedConversations = [...conversationPage.conversations].sort(
-    compareConversationPriority,
-  );
-  for (const conversation of orderedConversations) {
-    if (
-      scan.mode === "incremental" &&
-      !shouldFetchConversationIncrementally(conversation, scan.oldestMs)
-    ) {
-      continue;
-    }
+  for (const { page } of conversationPages) {
+    const orderedConversations = [...page.conversations].sort(compareConversationPriority);
+    for (const conversation of orderedConversations) {
+      if (
+        scan.mode === "incremental" &&
+        !shouldFetchConversationIncrementally(conversation, scan.oldestMs)
+      ) {
+        continue;
+      }
 
-    const conversationOldestMs = getConversationHistoryOldestMs(
-      scan.mode,
-      scan.oldestMs,
-      conversation,
-      observedBase,
-    );
-    const memberIds = await listConversationMembers(client, conversation);
-    const messages = await listConversationMessages(
-      client,
-      conversation.id,
-      conversationOldestMs,
-      messagesPageLimit,
-    );
-
-    const conversationId = dedupeKey(`slack:conversation:${teamId}:${conversation.id}`);
-    rawEvents.push({
-      id: conversationId,
-      platform: "slack",
-      accountKey,
-      entityKind: "conversation",
-      eventKind: "observed",
-      conversationExternalId: conversation.id,
-      observedAt: observedBase,
-      dedupeKey: conversationId,
-      payload: {
-        sourceConversationKey: `slack:${teamId}:${conversation.id}`,
-        conversationType:
-          conversation.is_mpim || conversation.is_channel || conversation.is_group ? "group" : "dm",
-        displayName: buildConversationDisplayName(conversation, usersById),
-        nativeConversationKey: conversation.id,
-        service: "slack",
-        participants: memberIds.map((memberId) => ({
-          sourceEntityKey: slackSourceKey(teamId, memberId),
-          isSelf: memberId === selfUserId,
-        })),
-      } satisfies ConversationObservationPayload,
-      sourceVersion: "slack-v1",
-    });
-
-    rawEvents.push(
-      ...buildMessageEvents(
-        teamId,
-        accountKey,
-        conversation.id,
-        selfUserId,
+      const conversationOldestMs = getConversationHistoryOldestMs(
+        scan.mode,
+        scan.oldestMs,
+        conversation,
         observedBase,
-        messages,
-      ),
-    );
+      );
+      const memberIds = await listConversationMembers(client, conversation);
+      const messages = await listConversationMessages(
+        client,
+        conversation.id,
+        conversationOldestMs,
+        messagesPageLimit,
+      );
+
+      const conversationId = dedupeKey(`slack:conversation:${teamId}:${conversation.id}`);
+      rawEvents.push({
+        id: conversationId,
+        platform: "slack",
+        accountKey,
+        entityKind: "conversation",
+        eventKind: "observed",
+        conversationExternalId: conversation.id,
+        observedAt: observedBase,
+        dedupeKey: conversationId,
+        payload: {
+          sourceConversationKey: `slack:${teamId}:${conversation.id}`,
+          conversationType:
+            conversation.is_mpim || conversation.is_channel || conversation.is_group
+              ? "group"
+              : "dm",
+          displayName: buildConversationDisplayName(conversation, usersById),
+          nativeConversationKey: conversation.id,
+          service: "slack",
+          participants: memberIds.map((memberId) => ({
+            sourceEntityKey: slackSourceKey(teamId, memberId),
+            isSelf: memberId === selfUserId,
+          })),
+        } satisfies ConversationObservationPayload,
+        sourceVersion: "slack-v1",
+      });
+
+      rawEvents.push(
+        ...buildMessageEvents(
+          teamId,
+          accountKey,
+          conversation.id,
+          selfUserId,
+          observedBase,
+          messages,
+        ),
+      );
+    }
   }
 
-  // Slack can return an empty channel page with a non-empty cursor once it has
-  // exhausted the conversations the current token can actually access.
-  const nextCursor =
-    conversationPage.conversations.length > 0 ? conversationPage.nextCursor || null : null;
-  const shouldContinueScan = scan.mode === "full" && nextCursor != null;
-  const sourceCursor: SlackSourceCursor = shouldContinueScan
-    ? {
+  let sourceCursor: SlackSourceCursor;
+  let hasMore = false;
+
+  if (scan.mode === "full") {
+    const currentFamily = scan.conversationFamily ?? "direct";
+    const currentPage = conversationPages[0].page;
+    // Slack can return an empty page with a dangling cursor once it has exhausted
+    // the current conversation family that the token can actually access.
+    const nextCursor = currentPage.conversations.length > 0 ? currentPage.nextCursor || null : null;
+    const nextFamily = nextConversationFamily(currentFamily);
+    const nextScanFamily = nextCursor != null ? currentFamily : nextFamily;
+
+    if (nextScanFamily) {
+      hasMore = true;
+      sourceCursor = {
         teamId,
         selfUserId,
         lastSyncAt: previousLastSyncAt,
         scan: {
           ...scan,
           usersComplete: scan.usersComplete,
-          conversationCursor: nextCursor,
+          conversationFamily: nextScanFamily,
+          conversationCursor: nextCursor != null ? nextCursor : null,
         },
-      }
-    : {
+      };
+    } else {
+      sourceCursor = {
         teamId,
         selfUserId,
         lastSyncAt: scan.startedAt,
       };
+    }
+  } else {
+    sourceCursor = {
+      teamId,
+      selfUserId,
+      lastSyncAt: scan.startedAt,
+    };
+  }
 
   return {
     sourceAccounts,
     rawEvents,
     sourceCursor,
     syncMode: scan.mode,
-    hasMore: shouldContinueScan,
+    hasMore,
   };
 }
