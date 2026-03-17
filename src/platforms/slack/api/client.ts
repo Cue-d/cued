@@ -1,39 +1,26 @@
+import type {
+  SlackConversationsResult,
+  SlackMessagesResult,
+  SlackTransport,
+  SlackUsersResult,
+} from "../transport.js";
 import { PAGINATION, SLACK_API_URLS } from "./constants.js";
 import { newPostRequest } from "./request.js";
 import type {
   SlackAuthTestResponse,
-  SlackConversation,
   SlackConversationsHistoryResponse,
   SlackConversationsListResponse,
   SlackConversationsMembersResponse,
   SlackConversationsRepliesResponse,
   SlackCredentials,
-  SlackMessage,
-  SlackUser,
   SlackUsersListResponse,
 } from "./types.js";
-
-export interface SlackConversationsResult {
-  conversations: SlackConversation[];
-  nextCursor?: string;
-}
-
-export interface SlackMessagesResult {
-  messages: SlackMessage[];
-  hasMore: boolean;
-  nextCursor?: string;
-}
-
-export interface SlackUsersResult {
-  users: SlackUser[];
-  nextCursor?: string;
-}
 
 function normalizeCursor(cursor: string | undefined): string | undefined {
   return cursor && cursor.length > 0 ? cursor : undefined;
 }
 
-export class SlackClient {
+export class SlackClient implements SlackTransport {
   constructor(private readonly credentials: SlackCredentials) {}
 
   async testAuth(): Promise<SlackAuthTestResponse> {
