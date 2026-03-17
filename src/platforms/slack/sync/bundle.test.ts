@@ -173,6 +173,7 @@ describe("slack worker lib", () => {
       teamId: "T123",
       selfUserId: "U_SELF",
       lastSyncAt: undefined,
+      knownConversationIds: [],
       scan: {
         mode: "full",
         startedAt: expect.any(Number),
@@ -229,6 +230,7 @@ describe("slack worker lib", () => {
       teamId: "T123",
       selfUserId: "U_SELF",
       lastSyncAt: 1710000000000,
+      knownConversationIds: [],
     });
   });
 
@@ -393,6 +395,7 @@ describe("slack worker lib", () => {
       teamId: "T123",
       selfUserId: "U_SELF",
       lastSyncAt: undefined,
+      knownConversationIds: [],
       scan: {
         mode: "full",
         startedAt: expect.any(Number),
@@ -523,6 +526,7 @@ describe("slack worker lib", () => {
       teamId: "T123",
       selfUserId: "U_SELF",
       lastSyncAt: undefined,
+      knownConversationIds: ["C123"],
       scan: {
         mode: "full",
         startedAt: 1710000000000,
@@ -573,6 +577,7 @@ describe("slack worker lib", () => {
       teamId: "T123",
       selfUserId: "U_SELF",
       lastSyncAt: 1710000000000,
+      knownConversationIds: ["C123"],
     });
   });
 
@@ -669,6 +674,7 @@ describe("slack worker lib", () => {
       teamId: "T123",
       selfUserId: "U_SELF",
       lastSyncAt: undefined,
+      knownConversationIds: ["C123"],
       scan: {
         mode: "full",
         startedAt: 1710000000000,
@@ -767,5 +773,101 @@ describe("slack worker lib", () => {
     });
 
     expect(historyOldestValues).toEqual([""]);
+  });
+
+  it("fetches newly discovered conversations during incremental sync even when their latest activity is old", async () => {
+    const fetchedHistories: string[] = [];
+
+    const bundle = await buildSlackSyncBundle({
+      accountKey: "default",
+      lastSyncAt: 1_710_000_400_000,
+      sourceCursor: {
+        teamId: "T123",
+        selfUserId: "U_SELF",
+        lastSyncAt: 1_710_000_400_000,
+        knownConversationIds: ["D_KNOWN"],
+      },
+      client: {
+        async testAuth() {
+          return { ok: true, team_id: "T123", user_id: "U_SELF", team: "Acme", user: "Ava" };
+        },
+        async listUsers() {
+          return { users: [], nextCursor: undefined };
+        },
+        async listConversations(types) {
+          if (types === "im,mpim") {
+            return {
+              conversations: [
+                {
+                  id: "D_KNOWN",
+                  is_im: true,
+                  user: "U_BEN",
+                  latest: {
+                    type: "message",
+                    user: "U_BEN",
+                    text: "old known",
+                    ts: "1710000000.000100",
+                  },
+                },
+                {
+                  id: "D_NEW",
+                  is_im: true,
+                  user: "U_CARA",
+                  latest: {
+                    type: "message",
+                    user: "U_CARA",
+                    text: "old new",
+                    ts: "1710000000.000200",
+                  },
+                },
+              ],
+              nextCursor: undefined,
+            };
+          }
+          return {
+            conversations: [],
+            nextCursor: undefined,
+          };
+        },
+        async getConversationMembers() {
+          return { members: [], nextCursor: undefined };
+        },
+        async getHistory(conversationId) {
+          fetchedHistories.push(conversationId);
+          return {
+            messages:
+              conversationId === "D_NEW"
+                ? [
+                    {
+                      type: "message",
+                      user: "U_CARA",
+                      text: "historic DM from a newly discovered thread",
+                      ts: "1710000000.000200",
+                    },
+                  ]
+                : [],
+            hasMore: false,
+            nextCursor: undefined,
+          };
+        },
+        async getReplies() {
+          return { messages: [], hasMore: false, nextCursor: undefined };
+        },
+      },
+    });
+
+    expect(fetchedHistories).toEqual(["D_NEW"]);
+    expect(
+      bundle.rawEvents.some(
+        (event) =>
+          event.entityKind === "message" &&
+          (event.payload as Record<string, unknown>).sourceConversationKey === "slack:T123:D_NEW",
+      ),
+    ).toBe(true);
+    expect(bundle.sourceCursor).toEqual(
+      expect.objectContaining({
+        knownConversationIds: ["D_KNOWN", "D_NEW"],
+      }),
+    );
   });
 });
