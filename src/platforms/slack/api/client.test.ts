@@ -23,7 +23,7 @@ describe("slack client", () => {
     vi.stubGlobal("fetch", fetchMock);
 
     const client = new SlackClient({ token: "xoxc-test", cookie: "cookie-test" });
-    await client.listConversations(undefined, 200);
+    await client.listConversations("im,mpim,private_channel,public_channel", undefined, 200);
 
     expect(fetchMock).toHaveBeenCalledTimes(1);
     const [, init] = fetchMock.mock.calls[0] ?? [];
