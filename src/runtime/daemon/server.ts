@@ -23,10 +23,9 @@ import {
 } from "../../core/types/provider.js";
 import { safeParseJsonRecord } from "../../db/codecs.js";
 import { type OutboundMessageRow, openCuedDatabase } from "../../db/database.js";
-import { IntegrationAuthService } from "../../platforms/core/auth/service.js";
 import { isAdapterPlatform, listAutoSyncPlatforms } from "../../platforms/core/registry.js";
 import { runAdapter } from "../../platforms/core/runner.js";
-import { refreshManagedIntegrationStates } from "../../platforms/core/state/refresh.js";
+import { refreshLocalIntegrationStates } from "../../platforms/core/state/local-refresh.js";
 import { getIntegrationSummary } from "../../platforms/core/state/status.js";
 import { DEFAULT_CHAT_DB_PATH } from "../../platforms/imessage/reader.js";
 import { loadLinkedInSessionSecret } from "../../platforms/linkedin/auth/session-store.js";
@@ -87,7 +86,11 @@ import {
   parseProjectionRunDetails,
 } from "../projection/service.js";
 import { RunQueueService } from "../run-queue.js";
-import { buildDaemonStatusSnapshot, buildDoctorSnapshot } from "../status.js";
+import {
+  buildDaemonStatusSnapshot,
+  buildDoctorSnapshot,
+  type DaemonBootstrapSnapshot,
+} from "../status.js";
 import { checkForUpdates } from "../updater/service.js";
 
 const DAEMON_VERSION = getCurrentAppVersion();
@@ -902,7 +905,7 @@ export async function runDaemon(): Promise<void> {
   const pendingSignalSendEchoes = new Map<string, PendingSignalEcho[]>();
   const projectionMessageHooks = new ProjectionMessageHookBarrier();
   const suppressNextSignalReconnectSync = new Set<string>();
-  const nativeWatchers: Array<FSWatcher | ChildProcess> = [];
+  const nativeWatchers = new Map<"contacts" | "imessage", FSWatcher | ChildProcess>();
   let linkedInRealtimeReconcilePromise: Promise<void> | null = null;
   let linkedInRealtimeReconcileQueued = false;
   let signalRealtimeReconcilePromise: Promise<void> | null = null;
@@ -913,6 +916,12 @@ export async function runDaemon(): Promise<void> {
   let isUpdateShutdownRequested = false;
   let updateShutdownRequestedAt: number | null = null;
   let shutdownInitiated = false;
+  const bootstrap: DaemonBootstrapSnapshot = {
+    state: "starting",
+    startedAt,
+    finishedAt: null,
+    error: null,
+  };
 
   const clearSignalSendEcho = (
     accountKey: string,
@@ -1720,6 +1729,52 @@ export async function runDaemon(): Promise<void> {
     wakeProjection: () => scheduleProjectionDrain(),
   };
   const queueDebouncedNativeSync = createDebouncedSyncEnqueuer(db, schedulers.wakeIngest);
+  const stopNativeWatcher = (watcher: FSWatcher | ChildProcess) => {
+    if ("close" in watcher && typeof watcher.close === "function") {
+      watcher.close();
+      return;
+    }
+    if ("kill" in watcher && typeof watcher.kill === "function") {
+      watcher.kill("SIGTERM");
+    }
+  };
+  const shouldRunLocalWatcher = (platform: "contacts" | "imessage") => {
+    const integration = db.getIntegrationState(platform, "local");
+    if (!integration || integration.enabled !== 1) {
+      return false;
+    }
+    return integration.auth_state === "authorized" || integration.auth_state === "authenticated";
+  };
+  const reconcileLocalWatchers = () => {
+    if (process.platform !== "darwin") {
+      return;
+    }
+
+    const desiredPlatforms = (["imessage", "contacts"] as const).filter((platform) =>
+      shouldRunLocalWatcher(platform),
+    );
+
+    for (const [platform, watcher] of nativeWatchers.entries()) {
+      if (desiredPlatforms.includes(platform)) {
+        continue;
+      }
+      stopNativeWatcher(watcher);
+      nativeWatchers.delete(platform);
+    }
+
+    for (const platform of desiredPlatforms) {
+      if (nativeWatchers.has(platform)) {
+        continue;
+      }
+      const watcher =
+        platform === "imessage"
+          ? startIMessageWatcher(db, queueDebouncedNativeSync)
+          : startContactsWatcher(db, queueDebouncedNativeSync);
+      if (watcher) {
+        nativeWatchers.set(platform, watcher);
+      }
+    }
+  };
   const linkedInRealtime = new LinkedInRealtimeSupervisor({
     onEvent: (accountKey, event, userEntityUrn) => {
       void ingestLinkedInRealtimeEnvelope(accountKey, event, userEntityUrn);
@@ -1856,10 +1911,6 @@ export async function runDaemon(): Promise<void> {
     executablePath: daemonIdentity.executablePath,
     appPath: daemonIdentity.appPath,
   });
-  await refreshManagedIntegrationStates(db);
-  await reconcileLinkedInRealtimeSessions();
-  await reconcileSignalRealtimeSessions();
-  await reconcileWhatsAppRealtimeSessions();
 
   db.upsertDaemonState({
     pid: process.pid,
@@ -1903,8 +1954,11 @@ export async function runDaemon(): Promise<void> {
       const queuedAt = now();
       for (const target of autoSyncTargets) {
         if (trigger === "scheduler") {
+          if (bootstrap.state !== "ready") {
+            continue;
+          }
           const targetKey = `${target.platform}:${target.accountKey}`;
-          const lastQueuedAt = lastAutoSyncQueuedAt.get(targetKey) ?? 0;
+          const lastQueuedAt = lastAutoSyncQueuedAt.get(targetKey) ?? startedAt;
           if (queuedAt - lastQueuedAt < getAutoSyncIntervalMs(target.platform)) {
             continue;
           }
@@ -1996,34 +2050,13 @@ export async function runDaemon(): Promise<void> {
     scheduleProjectionDrain(options?.delayMs ?? deferredProjectionCoalesceMs);
     return runId;
   };
-
-  queueAutoSyncRuns("daemon_start");
-  queueProjectionRun("daemon_start", undefined, { delayMs: 0 });
   scheduleOutboundDrain();
 
-  if (process.platform === "darwin") {
-    const imessageWatcher = startIMessageWatcher(db, queueDebouncedNativeSync);
-    if (imessageWatcher) {
-      nativeWatchers.push(imessageWatcher);
-    }
-
-    const contactsWatcher = startContactsWatcher(db, queueDebouncedNativeSync);
-    if (contactsWatcher) {
-      nativeWatchers.push(contactsWatcher);
-    }
-  }
-
   const stopRealtimeAndWatchers = () => {
-    for (const watcher of nativeWatchers) {
-      if ("close" in watcher && typeof watcher.close === "function") {
-        watcher.close();
-        continue;
-      }
-      if ("kill" in watcher && typeof watcher.kill === "function") {
-        watcher.kill("SIGTERM");
-      }
+    for (const watcher of nativeWatchers.values()) {
+      stopNativeWatcher(watcher);
     }
-    nativeWatchers.length = 0;
+    nativeWatchers.clear();
     linkedInRealtime.stopAll();
     signalRealtime.stopAll();
     whatsAppRealtime.stopAll();
@@ -2083,8 +2116,28 @@ export async function runDaemon(): Promise<void> {
       }
     })();
   };
-
-  scheduleUpdateCheck(false);
+  const completeBootstrap = (state: DaemonBootstrapSnapshot["state"], error?: unknown) => {
+    bootstrap.state = state;
+    bootstrap.finishedAt = now();
+    bootstrap.error = error ? (error instanceof Error ? error.message : String(error)) : null;
+  };
+  const runBootstrap = async () => {
+    try {
+      refreshLocalIntegrationStates(db);
+      reconcileLocalWatchers();
+      requestLinkedInRealtimeReconcile();
+      requestSignalRealtimeReconcile();
+      requestWhatsAppRealtimeReconcile();
+      if (db.getProjectionBacklog().pending_raw_events > 0) {
+        queueProjectionRun("daemon_bootstrap_backlog", undefined, { delayMs: 0 });
+      }
+      scheduleUpdateCheck(false);
+      completeBootstrap("ready");
+    } catch (error) {
+      daemonLogger.warn("daemon bootstrap failed", error);
+      completeBootstrap("failed", error);
+    }
+  };
 
   const processIngestRun = async (
     currentRun: NonNullable<ReturnType<typeof db.claimNextQueuedRun>>,
@@ -2551,16 +2604,27 @@ export async function runDaemon(): Promise<void> {
       linkedInRealtime,
       signalRealtime,
       whatsAppRealtime,
+      bootstrap,
       () => {
         requestLinkedInRealtimeReconcile();
         requestSignalRealtimeReconcile();
         requestWhatsAppRealtimeReconcile();
       },
+      reconcileLocalWatchers,
       requestUpdateShutdown,
     );
   });
 
-  server.listen(CUED_SOCKET_PATH);
+  await new Promise<void>((resolve, reject) => {
+    server.once("error", reject);
+    server.listen(CUED_SOCKET_PATH, () => {
+      server.off("error", reject);
+      resolve();
+    });
+  });
+  setImmediate(() => {
+    void runBootstrap();
+  });
 
   const shutdown = () => {
     if (shutdownInitiated) {
@@ -2717,7 +2781,9 @@ function handleSocket(
   linkedInRealtime: LinkedInRealtimeSupervisor,
   signalRealtime: SignalRealtimeSupervisor,
   whatsAppRealtime: WhatsAppRealtimeSupervisor,
+  bootstrap: DaemonBootstrapSnapshot,
   requestRealtimeReconcile: () => void,
+  reconcileLocalWatchers: () => void,
   requestUpdateShutdown: () => { shuttingDown: boolean; requestedAt: number | null },
 ): void {
   let buffer = "";
@@ -2752,7 +2818,9 @@ function handleSocket(
           linkedInRealtime,
           signalRealtime,
           whatsAppRealtime,
+          bootstrap,
           requestRealtimeReconcile,
+          reconcileLocalWatchers,
           requestUpdateShutdown,
         )
           .then((response) => writeResponse(socket, response))
@@ -2778,12 +2846,17 @@ async function dispatchRequest(
   linkedInRealtime: LinkedInRealtimeSupervisor,
   signalRealtime: SignalRealtimeSupervisor,
   whatsAppRealtime: WhatsAppRealtimeSupervisor,
+  bootstrap: DaemonBootstrapSnapshot,
   requestRealtimeReconcile: () => void,
+  reconcileLocalWatchers: () => void,
   requestUpdateShutdown: () => { shuttingDown: boolean; requestedAt: number | null },
 ): Promise<DaemonResponse> {
   try {
-    const integrationAuthService = new IntegrationAuthService(db);
     const runQueueService = new RunQueueService(db, schedulers);
+    const getIntegrationAuthService = async () => {
+      const { IntegrationAuthService } = await import("../../platforms/core/auth/service.js");
+      return new IntegrationAuthService(db);
+    };
     switch (request.command) {
       case "ping":
         return {
@@ -2806,6 +2879,7 @@ async function dispatchRequest(
             signalRealtime,
             whatsAppRealtime,
             socketPath: CUED_SOCKET_PATH,
+            bootstrap,
           }),
         };
       case "doctor":
@@ -2832,23 +2906,30 @@ async function dispatchRequest(
             realtimeProjectionEnabled: getRealtimeProjectionEnabled(),
             realtimeProjectionBatchSize: getRealtimeProjectionBatchSize(),
             deferredProjectionCoalesceMs: getDeferredProjectionCoalesceMs(),
+            bootstrap,
           }),
         };
-      case "integrations-list":
+      case "integrations-list": {
+        const integrationAuthService = await getIntegrationAuthService();
         return {
           id: request.id,
           ok: true,
           result: integrationAuthService.listStatus(),
         };
-      case "integrations-refresh":
+      }
+      case "integrations-refresh": {
+        const integrationAuthService = await getIntegrationAuthService();
         await integrationAuthService.refresh();
         requestRealtimeReconcile();
+        reconcileLocalWatchers();
         return {
           id: request.id,
           ok: true,
           result: integrationAuthService.listStatus(),
         };
+      }
       case "integrations-connect": {
+        const integrationAuthService = await getIntegrationAuthService();
         const started = await integrationAuthService.connectManaged(
           request.platform,
           request.accountKey,
@@ -2868,8 +2949,10 @@ async function dispatchRequest(
         };
       }
       case "integrations-disconnect": {
+        const integrationAuthService = await getIntegrationAuthService();
         const result = integrationAuthService.disconnect(request.platform, request.accountKey);
         requestRealtimeReconcile();
+        reconcileLocalWatchers();
         return {
           id: request.id,
           ok: true,
@@ -2877,8 +2960,10 @@ async function dispatchRequest(
         };
       }
       case "integrations-remove": {
+        const integrationAuthService = await getIntegrationAuthService();
         const result = integrationAuthService.remove(request.platform, request.accountKey);
         requestRealtimeReconcile();
+        reconcileLocalWatchers();
         return {
           id: request.id,
           ok: true,
@@ -2886,8 +2971,10 @@ async function dispatchRequest(
         };
       }
       case "integrations-enable": {
+        const integrationAuthService = await getIntegrationAuthService();
         const result = integrationAuthService.enable(request.platform, request.accountKey);
         requestRealtimeReconcile();
+        reconcileLocalWatchers();
         return {
           id: request.id,
           ok: true,
@@ -2895,8 +2982,10 @@ async function dispatchRequest(
         };
       }
       case "integrations-disable": {
+        const integrationAuthService = await getIntegrationAuthService();
         const result = integrationAuthService.disable(request.platform, request.accountKey);
         requestRealtimeReconcile();
+        reconcileLocalWatchers();
         return {
           id: request.id,
           ok: true,
