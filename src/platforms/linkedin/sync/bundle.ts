@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import type { SourceAccountInput } from "../../../core/types/provider.js";
 import { mapWithConcurrency } from "../../../core/utils/async.js";
-import { type openCuedDatabase, openCuedDatabaseReadOnly } from "../../../db/database.js";
+import { openCuedDatabaseReadOnly } from "../../../db/database.js";
 import type { SyncBundle } from "../../core/sync.js";
 import {
   type Connection,
@@ -310,7 +310,7 @@ function reactionCompositeKey(reactorSourceKey: string | null, emoji: string): s
 }
 
 function loadProjectedReactions(
-  db: ReturnType<typeof openCuedDatabase>,
+  db: ReturnType<typeof openCuedDatabaseReadOnly>,
   accountKey: string,
   sourceMessageKey: string,
 ): Map<string, ProjectedReactionRow> {
