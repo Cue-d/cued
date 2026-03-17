@@ -1,0 +1,9 @@
+{
+  "clean_idle": {
+    "startupReadyMs": 100,
+    "mainRssMedianMb": 291.7,
+    "treeRssMedianMb": 303.7,
+    "physicalFootprintMb": 271.1,
+    "treeRssMaxMb": 388.2
+  }
+}

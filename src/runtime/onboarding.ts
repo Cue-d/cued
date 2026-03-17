@@ -14,6 +14,7 @@ export async function buildOnboardingSnapshot(
   db: CuedDatabase,
   options: {
     refreshManagedIntegrations?: boolean;
+    refreshPermissions?: boolean;
   } = {},
 ): Promise<OnboardingSnapshot> {
   if (options.refreshManagedIntegrations) {
@@ -26,7 +27,7 @@ export async function buildOnboardingSnapshot(
   }
 
   const permissions = await buildPermissionStatus({
-    mode: "passive",
+    mode: options.refreshPermissions ? "active" : "passive",
     db,
   });
   const integrations = buildIntegrationStatus(db);

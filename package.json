@@ -27,6 +27,7 @@
     "sign:notarize:macos": "bash scripts/sign-and-notarize-cued-app.sh",
     "test": "vitest run",
     "test:perf": "tsx src/runtime/perf/run.ts",
+    "test:perf:daemon-memory": "bash scripts/bench-daemon-memory-macos.sh",
     "typecheck": "tsc --noEmit"
   },
   "engines": {

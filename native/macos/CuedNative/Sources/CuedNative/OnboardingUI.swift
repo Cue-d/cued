@@ -31,6 +31,9 @@ final class OnboardingWindowController: NSWindowController {
   private var prerequisitesEnsured = false
   private var pendingAuthKickoffRefreshTask: Task<Void, Never>?
   private var pendingStatusRefreshTask: Task<Void, Never>?
+  private var pendingPermissionRefreshTask: Task<Void, Never>?
+  private var pendingLivePermissionKeys = Set<String>()
+  private var pendingLivePermissionDeadline: Date?
 
   init(daemonSupervisor: DaemonSupervisor, onRefresh: @escaping () -> Void) {
     self.daemonSupervisor = daemonSupervisor
@@ -87,7 +90,7 @@ final class OnboardingWindowController: NSWindowController {
     refresh()
   }
 
-  func refresh() {
+  func refresh(forceLivePermissions: Bool = false) {
     guard !isRefreshing else {
       return
     }
@@ -96,6 +99,7 @@ final class OnboardingWindowController: NSWindowController {
 
     let daemonSupervisor = self.daemonSupervisor
     let shouldEnsurePrerequisites = consumePrerequisiteSetupFlag()
+    let shouldRefreshPermissions = forceLivePermissions || consumeLivePermissionRefreshFlag()
 
     Task.detached(priority: .userInitiated) { [daemonSupervisor] in
       if shouldEnsurePrerequisites {
@@ -105,7 +109,7 @@ final class OnboardingWindowController: NSWindowController {
       let snapshot = Self.decodeJSON(
         daemonSupervisor: daemonSupervisor,
         InstallerOnboardingSnapshotResponse.self,
-        arguments: ["onboarding", "snapshot"]
+        arguments: ["onboarding", "snapshot"] + (shouldRefreshPermissions ? ["--refresh-permissions"] : [])
       ) ?? InstallerOnboardingSnapshotResponse(
         permissions: [],
         hostOs: "macos",
@@ -119,6 +123,7 @@ final class OnboardingWindowController: NSWindowController {
         self.cachedSetupIntegrations = snapshot.setupIntegrations.filter {
           $0.capability.onboardingVisible
         }
+        self.resolvePendingLivePermissions(using: snapshot.permissions)
         self.isRefreshing = false
         self.viewModel.apply(
           permissions: snapshot.permissions,
@@ -195,7 +200,11 @@ final class OnboardingWindowController: NSWindowController {
   }
 
   private func requestPermission(flags: [String]) {
-    runActions(argumentsList: [["permissions", "request"] + flags])
+    markPendingLivePermissions(flags: flags)
+    runActions(
+      argumentsList: [["permissions", "request"] + flags],
+      refreshPermissionsAfter: onboardingShouldRefreshPermissionsLive(for: flags)
+    )
   }
 
   private func enableIntegration(platform: String, accountKey: String) {
@@ -233,6 +242,8 @@ final class OnboardingWindowController: NSWindowController {
     pendingAuthKickoffRefreshTask = nil
     pendingStatusRefreshTask?.cancel()
     pendingStatusRefreshTask = nil
+    pendingPermissionRefreshTask?.cancel()
+    pendingPermissionRefreshTask = nil
     super.close()
   }
 
@@ -299,4 +310,108 @@ final class OnboardingWindowController: NSWindowController {
       }
     }
   }
+
+  private func runActions(
+    argumentsList: [[String]],
+    refreshPermissionsAfter: Bool
+  ) {
+    viewModel.beginRefresh()
+    let daemonSupervisor = self.daemonSupervisor
+    Task.detached(priority: .userInitiated) { [daemonSupervisor] in
+      for arguments in argumentsList {
+        _ = daemonSupervisor.runCLI(arguments: arguments)
+      }
+      await MainActor.run {
+        self.onRefresh()
+        self.refresh(forceLivePermissions: refreshPermissionsAfter)
+        if refreshPermissionsAfter {
+          self.schedulePermissionRefreshRetry()
+        }
+      }
+    }
+  }
+
+  private func consumeLivePermissionRefreshFlag() -> Bool {
+    guard !pendingLivePermissionKeys.isEmpty else {
+      pendingLivePermissionDeadline = nil
+      return false
+    }
+    guard let deadline = pendingLivePermissionDeadline else {
+      return false
+    }
+    if deadline <= Date() {
+      pendingLivePermissionKeys.removeAll()
+      pendingLivePermissionDeadline = nil
+      return false
+    }
+    return true
+  }
+
+  private func markPendingLivePermissions(flags: [String]) {
+    pendingLivePermissionKeys.formUnion(onboardingPermissionKeys(for: flags))
+    if !pendingLivePermissionKeys.isEmpty {
+      pendingLivePermissionDeadline = Date().addingTimeInterval(30)
+    }
+  }
+
+  private func resolvePendingLivePermissions(using permissions: [InstallerPermissionStatus]) {
+    guard !pendingLivePermissionKeys.isEmpty else {
+      pendingLivePermissionDeadline = nil
+      return
+    }
+
+    let grantedKeys = Set(permissions.filter { $0.status == "granted" }.map(\.key))
+    pendingLivePermissionKeys.subtract(grantedKeys)
+    if pendingLivePermissionKeys.isEmpty {
+      pendingLivePermissionDeadline = nil
+      pendingPermissionRefreshTask?.cancel()
+      pendingPermissionRefreshTask = nil
+    }
+  }
+
+  private func schedulePermissionRefreshRetry() {
+    guard !pendingLivePermissionKeys.isEmpty else {
+      pendingPermissionRefreshTask?.cancel()
+      pendingPermissionRefreshTask = nil
+      return
+    }
+
+    pendingPermissionRefreshTask?.cancel()
+    pendingPermissionRefreshTask = Task { [weak self] in
+      try? await Task.sleep(for: .milliseconds(900))
+      guard !Task.isCancelled else {
+        return
+      }
+      await MainActor.run {
+        guard let self else {
+          return
+        }
+        self.pendingPermissionRefreshTask = nil
+        self.refresh()
+      }
+    }
+  }
+
+}
+
+func onboardingPermissionKeys(for flags: [String]) -> Set<String> {
+  if flags.contains("--all") {
+    return ["contacts", "full_disk_access", "messages_automation"]
+  }
+
+  var keys = Set<String>()
+  if flags.contains("--contacts") {
+    keys.insert("contacts")
+  }
+  if flags.contains("--full-disk-access") {
+    keys.insert("full_disk_access")
+  }
+  if flags.contains("--messages") {
+    keys.insert("messages_automation")
+  }
+  return keys
+}
+
+func onboardingShouldRefreshPermissionsLive(for flags: [String]) -> Bool {
+  onboardingPermissionKeys(for: flags).contains("messages_automation")
 }
