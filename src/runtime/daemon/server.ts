@@ -2579,14 +2579,6 @@ export async function runDaemon(): Promise<void> {
     }
   };
 
-  const ingestLoop = setInterval(() => {
-    schedulers.wakeIngest();
-  }, 250);
-
-  const projectionLoop = setInterval(() => {
-    schedulers.wakeProjection();
-  }, 250);
-
   const schedulerLoop = setInterval(() => {
     queueAutoSyncRuns("scheduler");
   }, AUTOSYNC_SCHEDULER_TICK_MS);
@@ -2622,6 +2614,8 @@ export async function runDaemon(): Promise<void> {
       resolve();
     });
   });
+  scheduleIngestDrain();
+  scheduleProjectionDrain();
   setImmediate(() => {
     void runBootstrap();
   });
@@ -2633,8 +2627,6 @@ export async function runDaemon(): Promise<void> {
     shutdownInitiated = true;
     daemonLogger.info("daemon shutting down", { pid: process.pid });
     clearInterval(heartbeat);
-    clearInterval(ingestLoop);
-    clearInterval(projectionLoop);
     clearInterval(schedulerLoop);
     clearInterval(updateLoop);
     if (projectionDrainTimer) {
