@@ -1,9 +1,12 @@
 {
   "clean_idle": {
-    "startupReadyMs": 100,
-    "mainRssMedianMb": 291.7,
-    "treeRssMedianMb": 303.7,
-    "physicalFootprintMb": 271.1,
-    "treeRssMaxMb": 388.2
+    "startupReadyMs": 390,
+    "mainRssMedianMb": 149.3,
+    "treeRssMedianMb": 149.3,
+    "physicalFootprintMb": 121.8,
+    "cpuMedianPct": 0.35,
+    "cpuP95Pct": 0.8,
+    "treeRssMaxMb": 150.2,
+    "processCount": 1
   }
 }
