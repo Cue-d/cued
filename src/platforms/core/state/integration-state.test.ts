@@ -27,6 +27,7 @@ describe("integration state management", () => {
     delete process.env.CUED_IMESSAGE_DB_PATH;
     delete process.env.CUED_SIGNAL_CLI_PATH;
     delete process.env.CUED_SLACK_APP_BINARY;
+    delete process.env.CUED_SLACK_HELPER_BINARY;
     delete process.env.CUED_APP_PATH;
     delete process.env.CUED_WHATSAPP_HELPER_BINARY;
 
@@ -65,6 +66,26 @@ describe("integration state management", () => {
     writeFileSync(helperPath, `#!/bin/sh\necho "signal-cli ${version}"\n`);
     chmodSync(helperPath, 0o755);
     return appPath;
+  }
+
+  function createSlackHelper(version = "0.1.0"): string {
+    const helperPath = join(createTempDir("cued-slack-helper-bin-"), "cued-slack-helper");
+    writeFileSync(
+      helperPath,
+      `#!/bin/sh
+if [ "$1" = "version" ]; then
+  echo '{"version":"${version}","protocolVersion":1}'
+  exit 0
+fi
+if [ "$1" = "status" ]; then
+  echo '{"helperVersion":"${version}","protocolVersion":1}'
+  exit 0
+fi
+exit 1
+`,
+    );
+    chmodSync(helperPath, 0o755);
+    return helperPath;
   }
 
   it("refreshes managed integrations and creates managed auth sessions for browser platforms", async () => {
@@ -231,6 +252,46 @@ describe("integration state management", () => {
           syncCapable: true,
           metadata: expect.objectContaining({
             supportedByDaemon: true,
+          }),
+        }),
+      ]),
+    );
+    db.close();
+  });
+
+  it("repairs stale slack sync capability only when the helper is available", async () => {
+    process.env.CUED_SLACK_HELPER_BINARY = createSlackHelper();
+
+    const db = createDb();
+    db.upsertIntegrationState({
+      platform: "slack",
+      accountKey: "T123",
+      displayName: "Acme",
+      authState: "authenticated",
+      enabled: true,
+      connectionKind: "browser-session",
+      syncCapable: false,
+      launchStrategy: "chromium-auth",
+      launchTarget: "https://slack.com/signin",
+      importedFrom: "slack-desktop-cdp",
+      metadata: {
+        authManagedBy: "chromium-runtime",
+      },
+    });
+
+    await refreshManagedIntegrationStates(db);
+
+    expect(listIntegrationStates(db)).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          platform: "slack",
+          accountKey: "T123",
+          authState: "authenticated",
+          syncCapable: true,
+          metadata: expect.objectContaining({
+            syncTransport: "slack-helper",
+            slackHelperVersion: "0.1.0",
+            slackHelperVersionSupported: true,
           }),
         }),
       ]),

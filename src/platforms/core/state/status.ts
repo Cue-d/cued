@@ -5,6 +5,7 @@ import { CUED_BROWSER_DIR } from "../../../core/config.js";
 import { resolveHostOS, summarizePlatformCapability } from "../../../core/platform-capabilities.js";
 import { safeParseJsonRecord, safeParseJsonStringArray } from "../../../db/codecs.js";
 import type { AuthSessionRow, CuedDatabase, IntegrationStateRow } from "../../../db/database.js";
+import { inspectSlackHelper } from "../../slack/helper/binary.js";
 import { listAdapterPlatforms } from "../registry.js";
 import {
   getDefaultAccountKeyForPlatform,
@@ -174,11 +175,29 @@ export function normalizePersistedRequestableIntegrationRow(row: IntegrationStat
   }
   const supportedByDaemon = new Set<string>(listAdapterPlatforms()).has(row.platform);
   const metadata = safeParseJsonRecord(row.metadata_json, "integration_states.metadata_json");
+  const slackHelperInspection = row.platform === "slack" ? inspectSlackHelper() : null;
+  const slackHelperReady =
+    row.platform !== "slack" ||
+    (Boolean(slackHelperInspection?.helperPath) &&
+      slackHelperInspection?.versionSupported === true);
   return {
-    syncCapable: row.auth_state === "authenticated" && supportedByDaemon,
+    syncCapable: row.auth_state === "authenticated" && supportedByDaemon && slackHelperReady,
     metadata: {
       ...(metadata ?? {}),
       supportedByDaemon,
+      ...(row.platform === "slack"
+        ? {
+            authManagedBy:
+              typeof metadata?.authManagedBy === "string"
+                ? metadata.authManagedBy
+                : "chromium-runtime",
+            syncTransport: "slack-helper",
+            slackHelperPath: slackHelperInspection?.helperPath ?? null,
+            slackHelperVersion: slackHelperInspection?.version ?? null,
+            slackHelperProtocolVersion: slackHelperInspection?.protocolVersion ?? null,
+            slackHelperVersionSupported: slackHelperInspection?.versionSupported ?? false,
+          }
+        : {}),
     },
   };
 }
@@ -195,10 +214,9 @@ export function refreshPersistedRequestableIntegrationStates(db: CuedDatabase): 
       row.metadata_json,
       "integration_states.metadata_json",
     );
-    const currentSupportedByDaemon = currentMetadata?.supportedByDaemon;
     if (
       row.sync_capable === nextSyncCapable &&
-      currentSupportedByDaemon === normalized.metadata?.supportedByDaemon
+      JSON.stringify(currentMetadata ?? {}) === JSON.stringify(normalized.metadata ?? {})
     ) {
       continue;
     }

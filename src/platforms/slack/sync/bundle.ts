@@ -8,14 +8,14 @@ import type {
 } from "../../../core/types/provider.js";
 import { loadIntegrationSecret } from "../../core/secrets/keychain.js";
 import type { SyncBundle } from "../../core/sync.js";
-import {
-  SlackClient,
-  type SlackConversation,
-  type SlackCredentials,
-  type SlackMessage,
-  type SlackTransport,
-  type SlackUser,
+import type {
+  SlackConversation,
+  SlackCredentials,
+  SlackMessage,
+  SlackTransport,
+  SlackUser,
 } from "../api/index.js";
+import { SlackHelperClient } from "../helper/client.js";
 
 const INCREMENTAL_BUFFER_MS = 5 * 60 * 1000;
 const DEFAULT_SLACK_CONVERSATIONS_PER_RUN = 5;
@@ -706,7 +706,7 @@ export async function buildSlackSyncBundle(options?: {
 }): Promise<SyncBundle> {
   const accountKey = options?.accountKey ?? process.env.CUED_ACCOUNT_KEY ?? "default";
   const loadedAuth = options?.client ? null : loadSlackAuthFromKeychain(accountKey);
-  const client = options?.client ?? new SlackClient(loadedAuth!);
+  const client = options?.client ?? new SlackHelperClient(loadedAuth!);
   const savedCursor = parseSlackSourceCursor(options?.sourceCursor);
   const previousLastSyncAt =
     typeof options?.lastSyncAt === "number" ? options.lastSyncAt : savedCursor?.lastSyncAt;
