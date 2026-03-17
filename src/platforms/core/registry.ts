@@ -43,7 +43,7 @@ const ADAPTER_DEFINITIONS: Record<AdapterPlatform, AdapterDefinition> = {
     platform: "slack",
     workerEntrypoint: join(import.meta.dirname, "../slack/sync/worker.js"),
     autoSync: true,
-    workerTimeoutMs: 180_000,
+    workerTimeoutMs: 600_000,
   },
   signal: {
     platform: "signal",
