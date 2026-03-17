@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 import { buildSlackSyncBundle } from "./bundle.js";
 
 describe("slack worker lib", () => {
@@ -486,59 +486,5 @@ describe("slack worker lib", () => {
     });
 
     expect(historyOldestValues).toEqual([""]);
-  });
-
-  it("can still bound full public channel history with an explicit env override", async () => {
-    vi.useFakeTimers();
-    vi.setSystemTime(new Date("2026-03-16T17:00:00.000Z"));
-    const historyOldestValues: string[] = [];
-    const expectedOldest = String(Date.parse("2026-02-14T17:00:00.000Z") / 1000);
-    const previous = process.env.CUED_SLACK_CHANNEL_HISTORY_DAYS;
-    process.env.CUED_SLACK_CHANNEL_HISTORY_DAYS = "30";
-
-    try {
-      await buildSlackSyncBundle({
-        accountKey: "default",
-        client: {
-          async testAuth() {
-            return { ok: true, team_id: "T123", user_id: "U_SELF", team: "Acme", user: "Ava" };
-          },
-          async listUsers() {
-            return { users: [], nextCursor: undefined };
-          },
-          async listConversations() {
-            return {
-              conversations: [
-                {
-                  id: "C123",
-                  is_channel: true,
-                  num_members: 4200,
-                },
-              ],
-              nextCursor: undefined,
-            };
-          },
-          async getConversationMembers() {
-            return { members: [], nextCursor: undefined };
-          },
-          async getHistory(_conversationId, options) {
-            historyOldestValues.push(String(options?.oldest ?? ""));
-            return { messages: [], hasMore: false, nextCursor: undefined };
-          },
-          async getReplies() {
-            return { messages: [], hasMore: false, nextCursor: undefined };
-          },
-        },
-      });
-    } finally {
-      if (previous == null) {
-        delete process.env.CUED_SLACK_CHANNEL_HISTORY_DAYS;
-      } else {
-        process.env.CUED_SLACK_CHANNEL_HISTORY_DAYS = previous;
-      }
-      vi.useRealTimers();
-    }
-
-    expect(historyOldestValues).toEqual([`${expectedOldest}.000000`]);
   });
 });

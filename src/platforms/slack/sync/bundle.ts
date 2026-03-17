@@ -17,12 +17,9 @@ import {
 } from "../api/index.js";
 
 const INCREMENTAL_BUFFER_MS = 5 * 60 * 1000;
-const DEFAULT_SLACK_CONVERSATIONS_PER_RUN = Number(
-  process.env.CUED_SLACK_CONVERSATIONS_PER_RUN ?? "5",
-);
-const DEFAULT_SLACK_MESSAGES_PAGE_LIMIT = Number(
-  process.env.CUED_SLACK_MESSAGES_PAGE_LIMIT ?? "100",
-);
+const DEFAULT_SLACK_CONVERSATIONS_PER_RUN = 5;
+const DEFAULT_SLACK_MESSAGES_PAGE_LIMIT = 100;
+const DEFAULT_SLACK_CHANNEL_HISTORY_DAYS = 0;
 
 type SlackClientLike = Pick<
   SlackClient,
@@ -135,7 +132,7 @@ function getConversationHistoryOldestMs(
     return oldestMs;
   }
 
-  const historyDays = positiveInt(Number(process.env.CUED_SLACK_CHANNEL_HISTORY_DAYS ?? "0"), 0);
+  const historyDays = DEFAULT_SLACK_CHANNEL_HISTORY_DAYS;
   if (historyDays <= 0) {
     return oldestMs;
   }
