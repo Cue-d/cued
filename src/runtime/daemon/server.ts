@@ -92,6 +92,10 @@ import {
   type DaemonBootstrapSnapshot,
 } from "../status.js";
 import { checkForUpdates } from "../updater/service.js";
+import {
+  shouldBootstrapLocalIntegrations,
+  shouldRunLocalWatcher as shouldRunLocalWatcherForState,
+} from "./local-watchers.js";
 
 const DAEMON_VERSION = getCurrentAppVersion();
 const DEFAULT_AUTOSYNC_INTERVAL_MS = 60_000;
@@ -1738,12 +1742,11 @@ export async function runDaemon(): Promise<void> {
       watcher.kill("SIGTERM");
     }
   };
-  const shouldRunLocalWatcher = (platform: "contacts" | "imessage") => {
-    const integration = db.getIntegrationState(platform, "local");
-    if (!integration || integration.enabled !== 1) {
-      return false;
-    }
-    return integration.auth_state === "authorized" || integration.auth_state === "authenticated";
+  const shouldStartLocalWatcher = (platform: "contacts" | "imessage") => {
+    return shouldRunLocalWatcherForState(
+      db.getAppMetadata(),
+      db.getIntegrationState(platform, "local"),
+    );
   };
   const reconcileLocalWatchers = () => {
     if (process.platform !== "darwin") {
@@ -1751,7 +1754,7 @@ export async function runDaemon(): Promise<void> {
     }
 
     const desiredPlatforms = (["imessage", "contacts"] as const).filter((platform) =>
-      shouldRunLocalWatcher(platform),
+      shouldStartLocalWatcher(platform),
     );
 
     for (const [platform, watcher] of nativeWatchers.entries()) {
@@ -2123,8 +2126,10 @@ export async function runDaemon(): Promise<void> {
   };
   const runBootstrap = async () => {
     try {
-      refreshLocalIntegrationStates(db);
-      reconcileLocalWatchers();
+      if (shouldBootstrapLocalIntegrations(db.getAppMetadata())) {
+        refreshLocalIntegrationStates(db);
+        reconcileLocalWatchers();
+      }
       requestLinkedInRealtimeReconcile();
       requestSignalRealtimeReconcile();
       requestWhatsAppRealtimeReconcile();
