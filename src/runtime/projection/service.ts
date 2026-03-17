@@ -40,6 +40,63 @@ export function parseProjectionRunDetails(detailsJson: string | null): Projectio
   };
 }
 
+function clampProjectionRunDetails(
+  details: ProjectionRunDetails,
+  projectionWatermark: number,
+): ProjectionRunDetails | null {
+  const minimumStartRowId = projectionWatermark + 1;
+  const startRowId = Math.max(details.startRowId, minimumStartRowId);
+  if (details.endRowId < startRowId) {
+    return null;
+  }
+
+  return {
+    ...details,
+    startRowId,
+    projectionWatermark,
+  };
+}
+
+export function mergeProjectionRunDetails(input: {
+  existing: ProjectionRunDetails | null;
+  incoming: ProjectionRunDetails;
+  projectionWatermark: number;
+  maxRawEventRowid: number;
+}): ProjectionRunDetails | null {
+  const normalizedIncoming = clampProjectionRunDetails(input.incoming, input.projectionWatermark);
+  const normalizedExisting =
+    input.existing == null
+      ? null
+      : clampProjectionRunDetails(input.existing, input.projectionWatermark);
+
+  if (!normalizedIncoming) {
+    return normalizedExisting;
+  }
+
+  if (!normalizedExisting) {
+    return {
+      ...normalizedIncoming,
+      maxRawEventRowid: Math.max(
+        normalizedIncoming.maxRawEventRowid ?? normalizedIncoming.endRowId,
+        input.maxRawEventRowid,
+      ),
+    };
+  }
+
+  return {
+    ...normalizedExisting,
+    trigger: normalizedIncoming.trigger,
+    startRowId: Math.min(normalizedExisting.startRowId, normalizedIncoming.startRowId),
+    endRowId: Math.max(normalizedExisting.endRowId, normalizedIncoming.endRowId),
+    projectionWatermark: input.projectionWatermark,
+    maxRawEventRowid: Math.max(
+      normalizedExisting.maxRawEventRowid ?? normalizedExisting.endRowId,
+      normalizedIncoming.maxRawEventRowid ?? normalizedIncoming.endRowId,
+      input.maxRawEventRowid,
+    ),
+  };
+}
+
 export class ProjectionMessageHookBarrier {
   private readonly pending: PendingMessageHookBatch[] = [];
 
