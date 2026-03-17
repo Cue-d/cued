@@ -297,12 +297,27 @@ function createSlackClientFixture(conversationCount: number, messagesPerConversa
         nextCursor: offset + pageSize < users.length ? String(offset + pageSize) : undefined,
       };
     },
-    async listConversations(cursor?: string) {
+    async listConversations(types: string, cursor?: string) {
+      const requestedTypes = new Set(types.split(","));
+      const filtered = conversations.filter((conversation) => {
+        if (conversation.is_im) {
+          return requestedTypes.has("im");
+        }
+        if (conversation.is_mpim) {
+          return requestedTypes.has("mpim");
+        }
+        if (conversation.is_group) {
+          return requestedTypes.has("private_channel");
+        }
+        if (conversation.is_channel) {
+          return requestedTypes.has("public_channel");
+        }
+        return false;
+      });
       const offset = cursor ? Number(cursor) : 0;
       return {
-        conversations: conversations.slice(offset, offset + pageSize),
-        nextCursor:
-          offset + pageSize < conversations.length ? String(offset + pageSize) : undefined,
+        conversations: filtered.slice(offset, offset + pageSize),
+        nextCursor: offset + pageSize < filtered.length ? String(offset + pageSize) : undefined,
       };
     },
     async getConversationMembers(conversationId: string, cursor?: string) {
