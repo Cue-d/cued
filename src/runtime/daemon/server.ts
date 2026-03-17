@@ -80,6 +80,7 @@ import {
 } from "../projection/projector.js";
 import {
   buildProjectionMessageHookBatches,
+  mergeProjectionRunDetails,
   ProjectionMessageHookBarrier,
   type ProjectionMessageHookPayload,
   type ProjectionRunDetails,
@@ -1944,53 +1945,46 @@ export async function runDaemon(): Promise<void> {
       return null;
     }
     const backlog = db.getProjectionBacklog();
-    const startRowId = range?.startRowId ?? backlog.projection_watermark + 1;
-    const endRowId = range?.endRowId ?? backlog.max_raw_event_rowid;
-    if (endRowId < startRowId) {
-      return null;
-    }
+    const incomingDetails = mergeProjectionRunDetails({
+      existing: null,
+      incoming: {
+        trigger,
+        startRowId: range?.startRowId ?? backlog.projection_watermark + 1,
+        endRowId: range?.endRowId ?? backlog.max_raw_event_rowid,
+        projectionWatermark: backlog.projection_watermark,
+        maxRawEventRowid: backlog.max_raw_event_rowid,
+      },
+      projectionWatermark: backlog.projection_watermark,
+      maxRawEventRowid: backlog.max_raw_event_rowid,
+    });
 
     const queuedProjectionRun = db.getQueuedProjectionRun();
     if (queuedProjectionRun) {
       const existingDetails = parseProjectionRunDetails(queuedProjectionRun.details_json);
-      if (!existingDetails) {
-        db.updateRunDetails(queuedProjectionRun.id, {
-          trigger,
-          startRowId,
-          endRowId,
-          projectionWatermark: backlog.projection_watermark,
-          maxRawEventRowid: backlog.max_raw_event_rowid,
-        } satisfies ProjectionRunDetails);
-      } else {
-        db.updateRunDetails(queuedProjectionRun.id, {
-          ...existingDetails,
-          trigger,
-          startRowId: Math.min(existingDetails.startRowId, startRowId),
-          endRowId: Math.max(existingDetails.endRowId, endRowId),
-          projectionWatermark: Math.min(
-            existingDetails.projectionWatermark ?? backlog.projection_watermark,
-            backlog.projection_watermark,
-          ),
-          maxRawEventRowid: Math.max(
-            existingDetails.maxRawEventRowid ?? backlog.max_raw_event_rowid,
-            backlog.max_raw_event_rowid,
-          ),
-        } satisfies ProjectionRunDetails);
+      const mergedDetails =
+        incomingDetails == null
+          ? existingDetails
+          : mergeProjectionRunDetails({
+              existing: existingDetails,
+              incoming: incomingDetails,
+              projectionWatermark: backlog.projection_watermark,
+              maxRawEventRowid: backlog.max_raw_event_rowid,
+            });
+      if (mergedDetails) {
+        db.updateRunDetails(queuedProjectionRun.id, mergedDetails satisfies ProjectionRunDetails);
       }
       scheduleProjectionDrain(options?.delayMs ?? deferredProjectionCoalesceMs);
       return queuedProjectionRun.id;
     }
 
+    if (!incomingDetails) {
+      return null;
+    }
+
     const runId = db.queueSyncRun({
       runType: "project",
       trigger,
-      details: {
-        trigger,
-        startRowId,
-        endRowId,
-        projectionWatermark: backlog.projection_watermark,
-        maxRawEventRowid: backlog.max_raw_event_rowid,
-      } satisfies ProjectionRunDetails,
+      details: incomingDetails satisfies ProjectionRunDetails,
     });
     scheduleProjectionDrain(options?.delayMs ?? deferredProjectionCoalesceMs);
     return runId;
@@ -2338,20 +2332,6 @@ export async function runDaemon(): Promise<void> {
           { delayMs: deferredProjectionCoalesceMs },
         );
         projectionQueued = true;
-      }
-      if (platform === "contacts") {
-        const contactsRange = db.getRawEventRowIdRange("contacts", accountKey);
-        if (contactsRange) {
-          queueProjectionRun(
-            `contacts_replay:${accountKey}`,
-            {
-              startRowId: contactsRange.minRowId,
-              endRowId: contactsRange.maxRowId,
-            },
-            { delayMs: 0 },
-          );
-          projectionQueued = true;
-        }
       }
       db.finishRun(currentRun.id, {
         ingested: ingestedCount,
