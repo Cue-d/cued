@@ -13,6 +13,7 @@ import {
   type SlackConversation,
   type SlackCredentials,
   type SlackMessage,
+  type SlackTransport,
   type SlackUser,
 } from "../api/index.js";
 
@@ -21,16 +22,6 @@ const DEFAULT_SLACK_CONVERSATIONS_PER_RUN = 5;
 const DEFAULT_SLACK_MESSAGES_PAGE_LIMIT = 100;
 const DEFAULT_SLACK_CHANNEL_HISTORY_DAYS = 0;
 const DEFAULT_SLACK_API_PAGES_PER_RUN = 25;
-
-type SlackClientLike = Pick<
-  SlackClient,
-  | "testAuth"
-  | "listUsers"
-  | "listConversations"
-  | "getConversationMembers"
-  | "getHistory"
-  | "getReplies"
->;
 
 type SlackScanMode = "full" | "incremental";
 type SlackConversationFamily = "direct" | "channels";
@@ -379,7 +370,7 @@ function parseSlackSourceCursor(raw: unknown): SlackSourceCursor | undefined {
   };
 }
 
-async function listAllUsers(client: SlackClientLike): Promise<SlackUser[]> {
+async function listAllUsers(client: SlackTransport): Promise<SlackUser[]> {
   const users: SlackUser[] = [];
   let cursor: string | undefined;
   do {
@@ -391,7 +382,7 @@ async function listAllUsers(client: SlackClientLike): Promise<SlackUser[]> {
 }
 
 async function listConversationMembers(
-  client: SlackClientLike,
+  client: SlackTransport,
   conversation: SlackConversation,
 ): Promise<string[]> {
   if (conversation.is_im && conversation.user) {
@@ -413,7 +404,7 @@ async function listConversationMembers(
 }
 
 async function listConversationMessages(
-  client: SlackClientLike,
+  client: SlackTransport,
   conversationId: string,
   oldestMs: number,
   messagesPageLimit: number,
@@ -481,7 +472,7 @@ interface SlackConversationBatchResult {
 }
 
 async function listConversationMessagesBatch(
-  client: SlackClientLike,
+  client: SlackTransport,
   conversationId: string,
   oldestMs: number,
   messagesPageLimit: number,
@@ -708,7 +699,7 @@ export async function buildSlackSyncBundle(options?: {
   accountKey?: string;
   lastSyncAt?: number;
   sourceCursor?: unknown;
-  client?: SlackClientLike;
+  client?: SlackTransport;
   conversationPageLimit?: number;
   messagesPageLimit?: number;
   apiPageBudget?: number;
