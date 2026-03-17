@@ -1,6 +1,6 @@
 import { execFileSync } from "node:child_process";
 import type { Platform } from "../../../core/types/provider.js";
-import { openCuedDatabase } from "../../../db/database.js";
+import { openCuedDatabaseReadOnly } from "../../../db/database.js";
 
 export interface IntegrationSecretPayload {
   keychainService: string;
@@ -13,7 +13,7 @@ export function loadIntegrationSecret(
   platform: Platform,
   accountKey: string,
 ): IntegrationSecretPayload {
-  const db = openCuedDatabase();
+  const db = openCuedDatabaseReadOnly();
   try {
     const integration = db.getIntegrationState(platform, accountKey);
     if (!integration?.metadata_json) {

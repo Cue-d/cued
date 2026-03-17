@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import { LinkedInRequestError } from "../api/request.js";
 import { buildLinkedInSyncBundle } from "./bundle.js";
 
 describe("buildLinkedInSyncBundle", () => {
@@ -418,5 +419,205 @@ describe("buildLinkedInSyncBundle", () => {
     });
 
     expect(getMessagesBefore).not.toHaveBeenCalled();
+  });
+
+  it("keeps syncing when older linkedin message pagination returns 400", async () => {
+    const bundle = await buildLinkedInSyncBundle({
+      accountKey: "default",
+      loadProjectedReactions: () => new Map(),
+      client: {
+        async fetchSelf() {
+          return "urn:li:fsd_profile:SELF123";
+        },
+        async getConnections() {
+          return { connections: [] };
+        },
+        async getConversations() {
+          return {
+            conversations: [
+              {
+                title: "Ava Chen",
+                entityURN: "urn:li:msg_conversation:(urn:li:fsd_profile:SELF123,CONV123)",
+                lastActivityAt: 1_700_000_100_000,
+                lastReadAt: 1_700_000_100_000,
+                groupChat: false,
+                read: true,
+                categories: ["INBOX", "PRIMARY_INBOX"],
+                unreadCount: 0,
+                conversationParticipants: [
+                  {
+                    entityURN: "urn:li:msg_messagingParticipant:urn:li:fsd_profile:SELF123",
+                    participantType: {
+                      member: { firstName: "Theo", lastName: "Tarr", profileUrl: "" },
+                    },
+                  },
+                  {
+                    entityURN: "urn:li:msg_messagingParticipant:urn:li:fsd_profile:OTHER456",
+                    participantType: {
+                      member: {
+                        firstName: "Ava",
+                        lastName: "Chen",
+                        profileUrl: "https://www.linkedin.com/in/ava-chen",
+                      },
+                    },
+                  },
+                ],
+                messages: {
+                  elements: [
+                    {
+                      entityURN: "urn:li:fsd_message:MSG_EMBEDDED",
+                      body: { text: "Embedded latest" },
+                      deliveredAt: 1_700_000_090_000,
+                      sender: {
+                        entityURN: "urn:li:msg_messagingParticipant:urn:li:fsd_profile:OTHER456",
+                        participantType: {},
+                      },
+                      messageBodyRenderFormat: "DEFAULT" as const,
+                      renderContent: [],
+                      reactionSummaries: [],
+                      conversationURN: "",
+                    },
+                  ],
+                },
+              },
+            ],
+            deletedConversationURNs: [],
+            syncToken: "sync-token-live",
+          };
+        },
+        async getConversationsBefore() {
+          return { conversations: [] };
+        },
+        async getMessages() {
+          return {
+            messages: [
+              {
+                entityURN: "urn:li:fsd_message:MSG_LIVE",
+                body: { text: "Live latest" },
+                deliveredAt: 1_700_000_100_000,
+                sender: {
+                  entityURN: "urn:li:msg_messagingParticipant:urn:li:fsd_profile:OTHER456",
+                  participantType: {},
+                },
+                messageBodyRenderFormat: "DEFAULT" as const,
+                renderContent: [],
+                reactionSummaries: [],
+                conversationURN: "urn:li:msg_conversation:(urn:li:fsd_profile:SELF123,CONV123)",
+              },
+            ],
+            prevCursor: null,
+          };
+        },
+        async getMessagesBefore() {
+          throw new LinkedInRequestError("Request failed: 400 Bad Request", 400, '{"status":400}');
+        },
+        async getMessagesWithPrevCursor() {
+          throw new LinkedInRequestError("Request failed: 400 Bad Request", 400, '{"status":400}');
+        },
+        async getReactors() {
+          return [];
+        },
+      },
+    });
+
+    expect(bundle.rawEvents.some((event) => event.entityKind === "conversation")).toBe(true);
+    expect(
+      bundle.rawEvents.some(
+        (event) =>
+          event.entityKind === "message" &&
+          event.externalEntityId === "urn:li:fsd_message:MSG_LIVE",
+      ),
+    ).toBe(true);
+  });
+
+  it("accepts msg-style urns from the live linkedin messaging API", async () => {
+    const bundle = await buildLinkedInSyncBundle({
+      accountKey: "default",
+      loadProjectedReactions: () => new Map(),
+      client: {
+        async fetchSelf() {
+          return "urn:li:fsd_profile:SELF123";
+        },
+        async getConnections() {
+          return { connections: [] };
+        },
+        async getConversations() {
+          return {
+            conversations: [
+              {
+                title: "",
+                entityURN: "urn:li:msg_conversation:(urn:li:fsd_profile:SELF123,CONV123)",
+                lastActivityAt: 1_700_000_000_000,
+                lastReadAt: 1_700_000_000_000,
+                groupChat: false,
+                read: true,
+                categories: ["INBOX", "PRIMARY_INBOX"],
+                unreadCount: 0,
+                conversationParticipants: [
+                  {
+                    entityURN: "urn:li:msg_messagingParticipant:urn:li:fsd_profile:SELF123",
+                    participantType: {
+                      member: { firstName: "Theo", lastName: "Tarr", profileUrl: "" },
+                    },
+                  },
+                  {
+                    entityURN: "urn:li:msg_messagingParticipant:urn:li:fsd_profile:OTHER456",
+                    participantType: {
+                      member: {
+                        firstName: "Ava",
+                        lastName: "Chen",
+                        profileUrl: "https://www.linkedin.com/in/ava-chen",
+                      },
+                    },
+                  },
+                ],
+                messages: {
+                  elements: [
+                    {
+                      entityURN: "urn:li:msg_message:(SELF123,MSG123)",
+                      body: { text: "Live API message" },
+                      deliveredAt: 1_700_000_000_000,
+                      sender: {
+                        entityURN: "urn:li:msg_messagingParticipant:urn:li:fsd_profile:OTHER456",
+                        participantType: {},
+                      },
+                      messageBodyRenderFormat: "DEFAULT" as const,
+                      renderContent: [],
+                      reactionSummaries: [],
+                      conversationURN: "",
+                    },
+                  ],
+                },
+              },
+            ],
+            deletedConversationURNs: [],
+            syncToken: "sync-token-live",
+          };
+        },
+        async getConversationsBefore() {
+          return { conversations: [] };
+        },
+        async getMessages() {
+          return { messages: [], prevCursor: null };
+        },
+        async getMessagesBefore() {
+          return { messages: [], prevCursor: null };
+        },
+        async getMessagesWithPrevCursor() {
+          return { messages: [], prevCursor: null };
+        },
+        async getReactors() {
+          return [];
+        },
+      },
+    });
+
+    expect(bundle.rawEvents.some((event) => event.entityKind === "conversation")).toBe(true);
+    expect(bundle.rawEvents.some((event) => event.entityKind === "message")).toBe(true);
+    expect(
+      bundle.rawEvents.some(
+        (event) => event.entityKind === "conversation" && event.eventKind === "removed",
+      ),
+    ).toBe(false);
   });
 });
