@@ -8,7 +8,9 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"os/signal"
 	"strings"
+	"syscall"
 	"time"
 
 	slackapi "github.com/slack-go/slack"
@@ -536,6 +538,8 @@ func (r helperRunner) run(ctx context.Context, command string, stdin io.Reader) 
 			HasMore:    hasMore,
 			NextCursor: nextCursor,
 		}, nil
+	case "session":
+		return nil, errors.New("session must be run through runSession")
 	default:
 		return nil, fmt.Errorf("unknown command: %s", command)
 	}
@@ -548,17 +552,29 @@ func writeJSON(writer io.Writer, value any) error {
 
 func main() {
 	if len(os.Args) < 2 {
-		fmt.Fprintln(os.Stderr, "usage: cued-slack-helper <version|status|authTest|listUsers|listConversations|getConversationMembers|getHistory|getReplies>")
+		fmt.Fprintln(os.Stderr, "usage: cued-slack-helper <version|status|authTest|listUsers|listConversations|getConversationMembers|getHistory|getReplies|session>")
 		os.Exit(1)
 	}
 
 	command := os.Args[1]
-	ctx, cancel := context.WithTimeout(context.Background(), requestTimeout)
+	baseCtx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	ctx, cancel := context.WithTimeout(baseCtx, requestTimeout)
 	defer cancel()
 
 	runner := newHelperRunner(runnerOptions{
 		apiURL: os.Getenv("CUED_SLACK_HELPER_API_URL"),
 	})
+
+	if command == "session" {
+		sessionCtx := baseCtx
+		if err := runner.runSession(sessionCtx, os.Stdin, os.Stdout); err != nil {
+			_ = writeSessionEvent(os.Stdout, "disconnected", disconnectedEventData{Reason: err.Error()})
+			fmt.Fprintln(os.Stderr, err.Error())
+			os.Exit(1)
+		}
+		return
+	}
 
 	result, err := runner.run(ctx, command, os.Stdin)
 	if err != nil {

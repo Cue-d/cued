@@ -233,7 +233,7 @@ echo '{"token":"xoxc-test","cookie":"cookie-test","teamId":"T123","teamName":"Ac
                       type: "message",
                       user: "U_DREW",
                       text: "New DM hello",
-                      ts: slackTs(120, 100),
+                      ts: slackTs(-420, 100),
                     },
                   },
                   {
@@ -246,7 +246,7 @@ echo '{"token":"xoxc-test","cookie":"cookie-test","teamId":"T123","teamName":"Ac
                       type: "message",
                       user: "U_CARA",
                       text: "New group hello",
-                      ts: slackTs(121, 100),
+                      ts: slackTs(-419, 100),
                     },
                   },
                 );
@@ -281,7 +281,7 @@ echo '{"token":"xoxc-test","cookie":"cookie-test","teamId":"T123","teamName":"Ac
                   type: "message",
                   user: "U_SELF",
                   text: "New channel kickoff",
-                  ts: slackTs(122, 100),
+                  ts: slackTs(-418, 100),
                 },
                 num_members: 2,
               });
@@ -352,7 +352,7 @@ echo '{"token":"xoxc-test","cookie":"cookie-test","teamId":"T123","teamName":"Ac
                         type: "message",
                         user: "U_DREW",
                         text: "New DM hello",
-                        ts: slackTs(120, 100),
+                        ts: slackTs(-420, 100),
                       },
                     ],
                     has_more: false,
@@ -370,7 +370,7 @@ echo '{"token":"xoxc-test","cookie":"cookie-test","teamId":"T123","teamName":"Ac
                         type: "message",
                         user: "U_CARA",
                         text: "New group hello",
-                        ts: slackTs(121, 100),
+                        ts: slackTs(-419, 100),
                       },
                     ],
                     has_more: false,
@@ -388,7 +388,7 @@ echo '{"token":"xoxc-test","cookie":"cookie-test","teamId":"T123","teamName":"Ac
                         type: "message",
                         user: "U_SELF",
                         text: "New channel kickoff",
-                        ts: slackTs(122, 100),
+                        ts: slackTs(-418, 100),
                       },
                     ],
                     has_more: false,
@@ -567,6 +567,18 @@ echo '{"token":"xoxc-test","cookie":"cookie-test","teamId":"T123","teamName":"Ac
       expect(finalCheckpoint?.sync_mode).toBe("incremental");
       expect(finalCheckpoint?.projection_watermark).toBe(
         db.getProjectionBacklog().projection_watermark,
+      );
+      expect(JSON.parse(finalCheckpoint?.source_cursor_json ?? "{}")).toEqual(
+        expect.objectContaining({
+          knownConversationIds: expect.arrayContaining([
+            "C_ENG",
+            "C_NEW",
+            "D_BEN",
+            "D_DREW",
+            "G_NEW",
+            "G_TEAM",
+          ]),
+        }),
       );
     } finally {
       process.execArgv = originalExecArgv;

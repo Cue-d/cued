@@ -28,6 +28,7 @@ export interface DoctorCheck {
 }
 
 export interface DoctorRuntimeStatus {
+  slackRealtimeSessions?: unknown;
   linkedinRealtimeSessions?: unknown;
   signalRealtimeSessions?: unknown;
   whatsappRealtimeSessions?: unknown;
@@ -585,6 +586,7 @@ export async function buildDoctorReport(
     projection: db.getProjectionBacklog(),
     checkpoints: db.listCheckpointSummary(),
     recentRuns: db.listRecentRuns(),
+    slackRealtimeSessions: runtime.slackRealtimeSessions ?? [],
     linkedinRealtimeSessions: runtime.linkedinRealtimeSessions ?? [],
     signalRealtimeSessions: runtime.signalRealtimeSessions ?? [],
     whatsappRealtimeSessions: runtime.whatsappRealtimeSessions ?? [],
