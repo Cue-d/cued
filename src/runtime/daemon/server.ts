@@ -1964,6 +1964,13 @@ export async function runDaemon(): Promise<void> {
       const mergedDetails =
         incomingDetails == null
           ? existingDetails
+            ? mergeProjectionRunDetails({
+                existing: null,
+                incoming: existingDetails,
+                projectionWatermark: backlog.projection_watermark,
+                maxRawEventRowid: backlog.max_raw_event_rowid,
+              })
+            : null
           : mergeProjectionRunDetails({
               existing: existingDetails,
               incoming: incomingDetails,
