@@ -8,6 +8,13 @@ import { buildDoctorReport } from "./doctor.js";
 import { doctorHooksConfig } from "./hooks.js";
 import { getUpdateStatus } from "./updater/service.js";
 
+export interface DaemonBootstrapSnapshot {
+  state: "starting" | "ready" | "failed";
+  startedAt: number;
+  finishedAt: number | null;
+  error: string | null;
+}
+
 export async function buildDoctorSnapshot(
   db: CuedDatabase,
   options: {
@@ -25,10 +32,12 @@ export async function buildDoctorSnapshot(
     realtimeProjectionBatchSize: number;
     deferredProjectionCoalesceMs: number;
     app: unknown;
+    bootstrap: DaemonBootstrapSnapshot;
   },
 ) {
   return {
     app: options.app,
+    bootstrap: options.bootstrap,
     ...(await buildDoctorReport(db, {
       linkedinRealtimeSessions: options.linkedInRealtime.getStatuses(),
       signalRealtimeSessions: options.signalRealtime.getStatuses(),
@@ -57,10 +66,12 @@ export function buildDaemonStatusSnapshot(
     signalRealtime: SignalRealtimeSupervisor;
     whatsAppRealtime: WhatsAppRealtimeSupervisor;
     socketPath: string;
+    bootstrap: DaemonBootstrapSnapshot;
   },
 ) {
   return {
     app: options.app,
+    bootstrap: options.bootstrap,
     daemon: db.getDaemonState(),
     overview: db.getOverview(),
     projection: db.getProjectionBacklog(),
@@ -70,7 +81,9 @@ export function buildDaemonStatusSnapshot(
     signalRealtimeSessions: options.signalRealtime.getStatuses(),
     whatsappRealtimeSessions: options.whatsAppRealtime.getStatuses(),
     whatsappDiagnostics: buildWhatsAppDiagnostics(db, options.whatsAppRealtime.getStatuses()),
-    ...buildIntegrationStatus(db),
+    ...buildIntegrationStatus(db, {
+      includeLiveLocalIntegrations: false,
+    }),
     update: getUpdateStatus(db),
     socketPath: options.socketPath,
     dbPath: db.dbPath,
