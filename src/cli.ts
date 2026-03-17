@@ -113,7 +113,7 @@ Usage:
   cued update install
   cued cli install|status
   cued login-item enable|disable|status
-  cued onboarding complete|snapshot|status [--refresh-managed]
+  cued onboarding complete|snapshot|status [--refresh-managed] [--refresh-permissions]
   cued launchd install|uninstall|status
   cued permissions doctor|status|request [--all|--contacts|--messages|--full-disk-access]
   cued integrations list
@@ -409,8 +409,9 @@ async function main(): Promise<void> {
       }
     case "onboarding": {
       const refreshManaged = rest.includes("--refresh-managed");
+      const refreshPermissions = rest.includes("--refresh-permissions");
       const db =
-        subcommand === "snapshot" && !refreshManaged
+        subcommand === "snapshot" && !refreshManaged && !refreshPermissions
           ? openCuedDatabaseReadOnly()
           : openCuedDatabase();
       try {
@@ -423,6 +424,7 @@ async function main(): Promise<void> {
             printJson(
               await buildOnboardingSnapshot(db, {
                 refreshManagedIntegrations: refreshManaged,
+                refreshPermissions,
               }),
             );
             return;
@@ -431,7 +433,7 @@ async function main(): Promise<void> {
             return;
           default:
             throw new Error(
-              "Usage: cued onboarding complete | snapshot [--refresh-managed] | status",
+              "Usage: cued onboarding complete | snapshot [--refresh-managed] [--refresh-permissions] | status",
             );
         }
       } finally {
