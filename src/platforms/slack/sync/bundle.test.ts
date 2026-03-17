@@ -448,6 +448,287 @@ describe("slack worker lib", () => {
     expect(listedTypes).toEqual(["public_channel,private_channel"]);
   });
 
+  it("resumes full syncs within a conversation history pagination chain", async () => {
+    const getHistory = async (_conversationId: string, options?: { cursor?: string }) => {
+      if (!options?.cursor) {
+        return {
+          messages: [
+            {
+              type: "message",
+              user: "U_BEN",
+              text: "page one",
+              ts: "1710000000.000100",
+            },
+          ],
+          hasMore: true,
+          nextCursor: "history-2",
+        };
+      }
+
+      return {
+        messages: [
+          {
+            type: "message",
+            user: "U_BEN",
+            text: "page two",
+            ts: "1710000000.000200",
+          },
+        ],
+        hasMore: false,
+        nextCursor: undefined,
+      };
+    };
+
+    const first = await buildSlackSyncBundle({
+      accountKey: "default",
+      apiPageBudget: 1,
+      sourceCursor: {
+        teamId: "T123",
+        selfUserId: "U_SELF",
+        scan: {
+          mode: "full",
+          startedAt: 1710000000000,
+          oldestMs: 0,
+          usersComplete: true,
+          conversationFamily: "channels",
+          conversationCursor: null,
+        },
+      },
+      client: {
+        async testAuth() {
+          return { ok: true, team_id: "T123", user_id: "U_SELF", team: "Acme", user: "Ava" };
+        },
+        async listUsers() {
+          return { users: [], nextCursor: undefined };
+        },
+        async listConversations() {
+          return {
+            conversations: [{ id: "C123", is_channel: true }],
+            nextCursor: undefined,
+          };
+        },
+        async getConversationMembers() {
+          return { members: [], nextCursor: undefined };
+        },
+        getHistory,
+        async getReplies() {
+          return { messages: [], hasMore: false, nextCursor: undefined };
+        },
+      },
+    });
+
+    expect(first.hasMore).toBe(true);
+    expect(first.rawEvents.filter((event) => event.entityKind === "message")).toHaveLength(1);
+    expect(first.sourceCursor).toEqual({
+      teamId: "T123",
+      selfUserId: "U_SELF",
+      lastSyncAt: undefined,
+      scan: {
+        mode: "full",
+        startedAt: 1710000000000,
+        oldestMs: 0,
+        usersComplete: true,
+        conversationFamily: "channels",
+        conversationCursor: null,
+        conversationIndex: 0,
+        activeConversationId: "C123",
+        historyCursor: "history-2",
+        historyComplete: false,
+        pendingThreadTs: [],
+        activeThreadTs: null,
+        repliesCursor: null,
+      },
+    });
+
+    const second = await buildSlackSyncBundle({
+      accountKey: "default",
+      apiPageBudget: 1,
+      sourceCursor: first.sourceCursor,
+      client: {
+        async testAuth() {
+          return { ok: true, team_id: "T123", user_id: "U_SELF", team: "Acme", user: "Ava" };
+        },
+        async listUsers() {
+          return { users: [], nextCursor: undefined };
+        },
+        async listConversations() {
+          return {
+            conversations: [{ id: "C123", is_channel: true }],
+            nextCursor: undefined,
+          };
+        },
+        async getConversationMembers() {
+          return { members: [], nextCursor: undefined };
+        },
+        getHistory,
+        async getReplies() {
+          return { messages: [], hasMore: false, nextCursor: undefined };
+        },
+      },
+    });
+
+    expect(second.hasMore).toBe(false);
+    expect(second.rawEvents.filter((event) => event.entityKind === "message")).toHaveLength(1);
+    expect(second.sourceCursor).toEqual({
+      teamId: "T123",
+      selfUserId: "U_SELF",
+      lastSyncAt: 1710000000000,
+    });
+  });
+
+  it("resumes full syncs within thread reply pagination", async () => {
+    const getReplies = async (
+      _conversationId: string,
+      _threadTs: string,
+      options?: { cursor?: string },
+    ) => {
+      if (!options?.cursor) {
+        return {
+          messages: [
+            {
+              type: "message",
+              user: "U_BEN",
+              text: "reply one",
+              ts: "1710000000.000200",
+              thread_ts: "1710000000.000100",
+            },
+          ],
+          hasMore: true,
+          nextCursor: "reply-2",
+        };
+      }
+
+      return {
+        messages: [
+          {
+            type: "message",
+            user: "U_BEN",
+            text: "reply two",
+            ts: "1710000000.000300",
+            thread_ts: "1710000000.000100",
+          },
+        ],
+        hasMore: false,
+        nextCursor: undefined,
+      };
+    };
+
+    const first = await buildSlackSyncBundle({
+      accountKey: "default",
+      apiPageBudget: 2,
+      sourceCursor: {
+        teamId: "T123",
+        selfUserId: "U_SELF",
+        scan: {
+          mode: "full",
+          startedAt: 1710000000000,
+          oldestMs: 0,
+          usersComplete: true,
+          conversationFamily: "channels",
+          conversationCursor: null,
+        },
+      },
+      client: {
+        async testAuth() {
+          return { ok: true, team_id: "T123", user_id: "U_SELF", team: "Acme", user: "Ava" };
+        },
+        async listUsers() {
+          return { users: [], nextCursor: undefined };
+        },
+        async listConversations() {
+          return {
+            conversations: [{ id: "C123", is_channel: true }],
+            nextCursor: undefined,
+          };
+        },
+        async getConversationMembers() {
+          return { members: [], nextCursor: undefined };
+        },
+        async getHistory() {
+          return {
+            messages: [
+              {
+                type: "message",
+                user: "U_BEN",
+                text: "thread root",
+                ts: "1710000000.000100",
+                reply_count: 2,
+              },
+            ],
+            hasMore: false,
+            nextCursor: undefined,
+          };
+        },
+        getReplies,
+      },
+    });
+
+    expect(first.hasMore).toBe(true);
+    expect(first.rawEvents.filter((event) => event.entityKind === "message")).toHaveLength(2);
+    expect(first.sourceCursor).toEqual({
+      teamId: "T123",
+      selfUserId: "U_SELF",
+      lastSyncAt: undefined,
+      scan: {
+        mode: "full",
+        startedAt: 1710000000000,
+        oldestMs: 0,
+        usersComplete: true,
+        conversationFamily: "channels",
+        conversationCursor: null,
+        conversationIndex: 0,
+        activeConversationId: "C123",
+        historyCursor: null,
+        historyComplete: true,
+        pendingThreadTs: [],
+        activeThreadTs: "1710000000.000100",
+        repliesCursor: "reply-2",
+      },
+    });
+
+    const second = await buildSlackSyncBundle({
+      accountKey: "default",
+      apiPageBudget: 2,
+      sourceCursor: first.sourceCursor,
+      client: {
+        async testAuth() {
+          return { ok: true, team_id: "T123", user_id: "U_SELF", team: "Acme", user: "Ava" };
+        },
+        async listUsers() {
+          return { users: [], nextCursor: undefined };
+        },
+        async listConversations() {
+          return {
+            conversations: [{ id: "C123", is_channel: true }],
+            nextCursor: undefined,
+          };
+        },
+        async getConversationMembers() {
+          return { members: [], nextCursor: undefined };
+        },
+        async getHistory() {
+          return {
+            messages: [
+              {
+                type: "message",
+                user: "U_BEN",
+                text: "thread root",
+                ts: "1710000000.000100",
+                reply_count: 2,
+              },
+            ],
+            hasMore: false,
+            nextCursor: undefined,
+          };
+        },
+        getReplies,
+      },
+    });
+
+    expect(second.hasMore).toBe(false);
+    expect(second.rawEvents.filter((event) => event.entityKind === "message")).toHaveLength(1);
+  });
+
   it("fetches all channel history during full sync by default", async () => {
     const historyOldestValues: string[] = [];
 

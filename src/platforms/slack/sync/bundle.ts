@@ -20,6 +20,7 @@ const INCREMENTAL_BUFFER_MS = 5 * 60 * 1000;
 const DEFAULT_SLACK_CONVERSATIONS_PER_RUN = 5;
 const DEFAULT_SLACK_MESSAGES_PAGE_LIMIT = 100;
 const DEFAULT_SLACK_CHANNEL_HISTORY_DAYS = 0;
+const DEFAULT_SLACK_API_PAGES_PER_RUN = 25;
 
 type SlackClientLike = Pick<
   SlackClient,
@@ -47,6 +48,13 @@ export interface SlackScanCursor {
   usersComplete: boolean;
   conversationFamily?: SlackConversationFamily;
   conversationCursor?: string | null;
+  conversationIndex?: number;
+  activeConversationId?: string;
+  historyCursor?: string | null;
+  historyComplete?: boolean;
+  pendingThreadTs?: string[];
+  activeThreadTs?: string | null;
+  repliesCursor?: string | null;
 }
 
 export interface SlackSourceCursor {
@@ -159,6 +167,12 @@ function nextConversationFamily(
 ): SlackConversationFamily | undefined {
   const index = SLACK_FULL_SCAN_FAMILIES.indexOf(family);
   return index >= 0 ? SLACK_FULL_SCAN_FAMILIES[index + 1] : undefined;
+}
+
+function parseStringArray(value: unknown): string[] {
+  return Array.isArray(value)
+    ? value.filter((entry): entry is string => typeof entry === "string")
+    : [];
 }
 
 function bestSlackAvatar(profile: SlackUser["profile"]): string | undefined {
@@ -319,6 +333,28 @@ function parseSlackSourceCursor(raw: unknown): SlackSourceCursor | undefined {
               typeof parsed.conversationCursor === "string" || parsed.conversationCursor === null
                 ? parsed.conversationCursor
                 : undefined,
+            conversationIndex:
+              typeof parsed.conversationIndex === "number" && parsed.conversationIndex >= 0
+                ? Math.trunc(parsed.conversationIndex)
+                : undefined,
+            activeConversationId:
+              typeof parsed.activeConversationId === "string"
+                ? parsed.activeConversationId
+                : undefined,
+            historyCursor:
+              typeof parsed.historyCursor === "string" || parsed.historyCursor === null
+                ? parsed.historyCursor
+                : undefined,
+            historyComplete: parsed.historyComplete === true,
+            pendingThreadTs: parseStringArray(parsed.pendingThreadTs),
+            activeThreadTs:
+              typeof parsed.activeThreadTs === "string" || parsed.activeThreadTs === null
+                ? parsed.activeThreadTs
+                : undefined,
+            repliesCursor:
+              typeof parsed.repliesCursor === "string" || parsed.repliesCursor === null
+                ? parsed.repliesCursor
+                : undefined,
           } satisfies SlackScanCursor;
         })()
       : undefined;
@@ -428,6 +464,106 @@ async function listConversationMessages(
   }
 
   return sortSlackMessages(Array.from(messageByTs.values()));
+}
+
+interface SlackConversationResumeState {
+  historyCursor: string | null;
+  historyComplete: boolean;
+  pendingThreadTs: string[];
+  activeThreadTs: string | null;
+  repliesCursor: string | null;
+}
+
+interface SlackConversationBatchResult {
+  messages: SlackMessage[];
+  complete: boolean;
+  resumeState: SlackConversationResumeState;
+}
+
+async function listConversationMessagesBatch(
+  client: SlackClientLike,
+  conversationId: string,
+  oldestMs: number,
+  messagesPageLimit: number,
+  resumeState?: Partial<SlackConversationResumeState>,
+  apiPageBudget: number = DEFAULT_SLACK_API_PAGES_PER_RUN,
+): Promise<SlackConversationBatchResult> {
+  const oldest = formatOldestTs(oldestMs);
+  const messages: SlackMessage[] = [];
+  const seenMessageTs = new Set<string>();
+  const pendingThreadTs = [...(resumeState?.pendingThreadTs ?? [])];
+  let historyCursor = resumeState?.historyCursor ?? null;
+  let historyComplete = resumeState?.historyComplete ?? false;
+  let activeThreadTs = resumeState?.activeThreadTs ?? null;
+  let repliesCursor = resumeState?.repliesCursor ?? null;
+  let apiPagesRemaining = apiPageBudget;
+
+  const addMessage = (message: SlackMessage) => {
+    if (!shouldIncludeMessage(message) || seenMessageTs.has(message.ts)) {
+      return;
+    }
+    seenMessageTs.add(message.ts);
+    messages.push(message);
+  };
+
+  while (apiPagesRemaining > 0) {
+    if (activeThreadTs) {
+      const result = await client.getReplies(conversationId, activeThreadTs, {
+        cursor: repliesCursor ?? undefined,
+        oldest,
+        limit: messagesPageLimit,
+      });
+      apiPagesRemaining -= 1;
+      for (const reply of result.messages) {
+        if (reply.ts === activeThreadTs) {
+          continue;
+        }
+        addMessage(reply);
+      }
+      repliesCursor = result.nextCursor ?? null;
+      if (!repliesCursor) {
+        activeThreadTs = pendingThreadTs.shift() ?? null;
+      }
+      continue;
+    }
+
+    if (!historyComplete) {
+      const result = await client.getHistory(conversationId, {
+        cursor: historyCursor ?? undefined,
+        oldest,
+        limit: messagesPageLimit,
+      });
+      apiPagesRemaining -= 1;
+      for (const message of result.messages) {
+        if (message.reply_count && message.reply_count > 0) {
+          pendingThreadTs.push(message.ts);
+        }
+        addMessage(message);
+      }
+      historyCursor = result.nextCursor ?? null;
+      if (!historyCursor) {
+        historyComplete = true;
+      }
+      if (!activeThreadTs && pendingThreadTs.length > 0) {
+        activeThreadTs = pendingThreadTs.shift() ?? null;
+      }
+      continue;
+    }
+
+    break;
+  }
+
+  return {
+    messages: sortSlackMessages(messages),
+    complete: historyComplete && !activeThreadTs && pendingThreadTs.length === 0,
+    resumeState: {
+      historyCursor,
+      historyComplete,
+      pendingThreadTs,
+      activeThreadTs,
+      repliesCursor: activeThreadTs ? repliesCursor : null,
+    },
+  };
 }
 
 function buildContactEvents(
@@ -575,6 +711,7 @@ export async function buildSlackSyncBundle(options?: {
   client?: SlackClientLike;
   conversationPageLimit?: number;
   messagesPageLimit?: number;
+  apiPageBudget?: number;
 }): Promise<SyncBundle> {
   const accountKey = options?.accountKey ?? process.env.CUED_ACCOUNT_KEY ?? "default";
   const loadedAuth = options?.client ? null : loadSlackAuthFromKeychain(accountKey);
@@ -600,6 +737,7 @@ export async function buildSlackSyncBundle(options?: {
     options?.messagesPageLimit ?? DEFAULT_SLACK_MESSAGES_PAGE_LIMIT,
     100,
   );
+  const apiPageBudget = positiveInt(options?.apiPageBudget ?? DEFAULT_SLACK_API_PAGES_PER_RUN, 25);
 
   const mode: SlackScanMode = previousLastSyncAt && previousLastSyncAt > 0 ? "incremental" : "full";
   const scan: SlackScanCursor = savedCursor?.scan ?? {
@@ -653,8 +791,175 @@ export async function buildSlackSyncBundle(options?: {
           },
         ];
 
-  for (const { page } of conversationPages) {
+  for (const { page, family } of conversationPages) {
     const orderedConversations = [...page.conversations].sort(compareConversationPriority);
+    if (scan.mode === "full") {
+      if (orderedConversations.length === 0) {
+        continue;
+      }
+
+      let conversationIndex = Math.max(0, scan.conversationIndex ?? 0);
+      if (scan.activeConversationId) {
+        const activeIndex = orderedConversations.findIndex(
+          (conversation) => conversation.id === scan.activeConversationId,
+        );
+        if (activeIndex >= 0) {
+          conversationIndex = activeIndex;
+        }
+      }
+
+      if (conversationIndex >= orderedConversations.length) {
+        conversationIndex = orderedConversations.length - 1;
+      }
+
+      const conversation = orderedConversations[conversationIndex];
+      const conversationOldestMs = getConversationHistoryOldestMs(
+        scan.mode,
+        scan.oldestMs,
+        conversation,
+        observedBase,
+      );
+      const memberIds = await listConversationMembers(client, conversation);
+      const messageBatch = await listConversationMessagesBatch(
+        client,
+        conversation.id,
+        conversationOldestMs,
+        messagesPageLimit,
+        scan.activeConversationId === conversation.id
+          ? {
+              historyCursor: scan.historyCursor ?? null,
+              historyComplete: scan.historyComplete === true,
+              pendingThreadTs: scan.pendingThreadTs ?? [],
+              activeThreadTs: scan.activeThreadTs ?? null,
+              repliesCursor: scan.repliesCursor ?? null,
+            }
+          : undefined,
+        apiPageBudget,
+      );
+
+      const conversationId = dedupeKey(`slack:conversation:${teamId}:${conversation.id}`);
+      rawEvents.push({
+        id: conversationId,
+        platform: "slack",
+        accountKey,
+        entityKind: "conversation",
+        eventKind: "observed",
+        conversationExternalId: conversation.id,
+        observedAt: observedBase,
+        dedupeKey: conversationId,
+        payload: {
+          sourceConversationKey: `slack:${teamId}:${conversation.id}`,
+          conversationType:
+            conversation.is_mpim || conversation.is_channel || conversation.is_group
+              ? "group"
+              : "dm",
+          displayName: buildConversationDisplayName(conversation, usersById),
+          nativeConversationKey: conversation.id,
+          service: "slack",
+          participants: memberIds.map((memberId) => ({
+            sourceEntityKey: slackSourceKey(teamId, memberId),
+            isSelf: memberId === selfUserId,
+          })),
+        } satisfies ConversationObservationPayload,
+        sourceVersion: "slack-v1",
+      });
+
+      rawEvents.push(
+        ...buildMessageEvents(
+          teamId,
+          accountKey,
+          conversation.id,
+          selfUserId,
+          observedBase,
+          messageBatch.messages,
+        ),
+      );
+
+      let sourceCursor: SlackSourceCursor;
+      let hasMore = false;
+      const nextCursor = page.conversations.length > 0 ? page.nextCursor || null : null;
+      const nextFamily = nextConversationFamily(family);
+
+      if (!messageBatch.complete) {
+        hasMore = true;
+        sourceCursor = {
+          teamId,
+          selfUserId,
+          lastSyncAt: previousLastSyncAt,
+          scan: {
+            ...scan,
+            usersComplete: scan.usersComplete,
+            conversationFamily: family,
+            conversationCursor: scan.conversationCursor ?? null,
+            conversationIndex,
+            activeConversationId: conversation.id,
+            historyCursor: messageBatch.resumeState.historyCursor,
+            historyComplete: messageBatch.resumeState.historyComplete,
+            pendingThreadTs: messageBatch.resumeState.pendingThreadTs,
+            activeThreadTs: messageBatch.resumeState.activeThreadTs,
+            repliesCursor: messageBatch.resumeState.repliesCursor,
+          },
+        };
+      } else if (conversationIndex + 1 < orderedConversations.length) {
+        hasMore = true;
+        sourceCursor = {
+          teamId,
+          selfUserId,
+          lastSyncAt: previousLastSyncAt,
+          scan: {
+            ...scan,
+            usersComplete: scan.usersComplete,
+            conversationFamily: family,
+            conversationCursor: scan.conversationCursor ?? null,
+            conversationIndex: conversationIndex + 1,
+            activeConversationId: undefined,
+            historyCursor: undefined,
+            historyComplete: undefined,
+            pendingThreadTs: undefined,
+            activeThreadTs: undefined,
+            repliesCursor: undefined,
+          },
+        };
+      } else {
+        const nextScanFamily = nextCursor != null ? family : nextFamily;
+        if (nextScanFamily) {
+          hasMore = true;
+          sourceCursor = {
+            teamId,
+            selfUserId,
+            lastSyncAt: previousLastSyncAt,
+            scan: {
+              ...scan,
+              usersComplete: scan.usersComplete,
+              conversationFamily: nextScanFamily,
+              conversationCursor: nextCursor != null ? nextCursor : null,
+              conversationIndex: undefined,
+              activeConversationId: undefined,
+              historyCursor: undefined,
+              historyComplete: undefined,
+              pendingThreadTs: undefined,
+              activeThreadTs: undefined,
+              repliesCursor: undefined,
+            },
+          };
+        } else {
+          sourceCursor = {
+            teamId,
+            selfUserId,
+            lastSyncAt: scan.startedAt,
+          };
+        }
+      }
+
+      return {
+        sourceAccounts,
+        rawEvents,
+        sourceCursor,
+        syncMode: scan.mode,
+        hasMore,
+      };
+    }
+
     for (const conversation of orderedConversations) {
       if (
         scan.mode === "incremental" &&
