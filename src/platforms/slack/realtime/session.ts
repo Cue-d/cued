@@ -1,8 +1,7 @@
 import { type ChildProcess, spawn } from "node:child_process";
 import { createInterface, type Interface as ReadLineInterface } from "node:readline";
 import { createLogger } from "../../../core/logging.js";
-import type { SlackConversation, SlackMessage, SlackUser } from "../api/index.js";
-import type { SlackCredentials } from "../api/types.js";
+import type { SlackConversation, SlackCredentials, SlackMessage, SlackUser } from "../types.js";
 
 const DEFAULT_CONNECT_TIMEOUT_MS = 20_000;
 const DEFAULT_RECONNECT_BASE_MS = 1_000;

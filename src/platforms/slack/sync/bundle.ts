@@ -1,14 +1,9 @@
 import type { SourceAccountInput } from "../../../core/types/provider.js";
 import { loadIntegrationSecret } from "../../core/secrets/keychain.js";
 import type { SyncBundle } from "../../core/sync.js";
-import type {
-  SlackConversation,
-  SlackCredentials,
-  SlackMessage,
-  SlackTransport,
-  SlackUser,
-} from "../api/index.js";
 import { SlackHelperClient } from "../helper/client.js";
+import type { SlackTransport } from "../transport.js";
+import type { SlackConversation, SlackCredentials, SlackMessage, SlackUser } from "../types.js";
 import {
   buildSlackContactEvents,
   buildSlackConversationEvent,

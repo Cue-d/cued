@@ -13,12 +13,8 @@ import type {
   MessagingParticipant,
 } from "../../platforms/linkedin/api/index.js";
 import { buildLinkedInSyncBundle } from "../../platforms/linkedin/sync/bundle.js";
-import type {
-  SlackConversation,
-  SlackMessage,
-  SlackUser,
-} from "../../platforms/slack/api/index.js";
 import { buildSlackSyncBundle } from "../../platforms/slack/sync/bundle.js";
+import type { SlackConversation, SlackMessage, SlackUser } from "../../platforms/slack/types.js";
 import {
   projectDeferredRange,
   projectPendingRawEvents,
