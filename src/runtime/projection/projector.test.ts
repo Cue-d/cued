@@ -270,6 +270,194 @@ describe("projector", () => {
     db.close();
   });
 
+  it("does not let later raw handle observations clobber a resolved contact name", () => {
+    const db = createDb();
+
+    db.insertRawEvent({
+      id: "contacts-ava",
+      platform: "contacts",
+      accountKey: "local",
+      entityKind: "contact",
+      eventKind: "observed",
+      observedAt: 1,
+      dedupeKey: "contacts:ava",
+      payload: {
+        sourceEntityKey: "contacts:ava",
+        fields: { display_name: "Ava Chen" },
+        handles: [{ type: "phone", value: "+1 (555) 123-4567", deterministic: true }],
+      },
+      sourceVersion: "contacts-v1",
+    });
+    db.insertRawEvent({
+      id: "imessage-contact-ava",
+      platform: "imessage",
+      accountKey: "local",
+      entityKind: "contact",
+      eventKind: "observed",
+      observedAt: 2,
+      dedupeKey: "imessage:contact:ava",
+      payload: {
+        sourceEntityKey: "imessage:+15551234567",
+        fields: { display_name: "+15551234567" },
+        handles: [
+          { type: "phone", value: "+15551234567", deterministic: true },
+          { type: "imessage_handle", value: "+15551234567", deterministic: true },
+        ],
+      },
+      sourceVersion: "imessage-v1",
+    });
+    db.insertRawEvent({
+      id: "imessage-conversation-ava",
+      platform: "imessage",
+      accountKey: "local",
+      entityKind: "conversation",
+      eventKind: "observed",
+      observedAt: 3,
+      dedupeKey: "imessage:conversation:ava",
+      payload: {
+        sourceConversationKey: "chat-ava",
+        conversationType: "dm",
+        service: "iMessage",
+        displayName: "+15551234567",
+        participants: [{ sourceEntityKey: "imessage:+15551234567" }],
+      },
+      sourceVersion: "imessage-v1",
+    });
+    db.insertRawEvent({
+      id: "imessage-message-ava",
+      platform: "imessage",
+      accountKey: "local",
+      entityKind: "message",
+      eventKind: "message_created",
+      observedAt: 4,
+      dedupeKey: "imessage:message:ava",
+      payload: {
+        sourceMessageKey: "message-ava",
+        sourceConversationKey: "chat-ava",
+        senderSourceKey: "imessage:+15551234567",
+        sentAt: 4,
+        content: "hello from imessage",
+        service: "iMessage",
+        isFromMe: false,
+      },
+      sourceVersion: "imessage-v1",
+    });
+
+    projectPendingRawEvents(db);
+
+    const row = db.orm().get<{
+      contact_name: string | null;
+      participant_name: string | null;
+      sender_name: string | null;
+      conversation_name: string | null;
+    }>(sql`
+      SELECT
+        c.name AS contact_name,
+        cp.participant_name,
+        m.sender_name,
+        m.conversation_name
+      FROM contacts c
+      JOIN conversation_participants cp ON cp.contact_id = c.id
+      JOIN messages m ON m.sender_contact_id = c.id
+      WHERE cp.source_participant_key = 'imessage:+15551234567'
+    `);
+    expect(row).toEqual({
+      contact_name: "Ava Chen",
+      participant_name: "Ava Chen",
+      sender_name: "Ava Chen",
+      conversation_name: "Ava Chen",
+    });
+
+    db.close();
+  });
+
+  it("uses a DM conversation name to resolve sender identities when contact records stay raw", () => {
+    const db = createDb();
+
+    db.insertRawEvent({
+      id: "signal-contact",
+      platform: "signal",
+      accountKey: "default",
+      entityKind: "contact",
+      eventKind: "observed",
+      observedAt: 1,
+      dedupeKey: "signal:contact:+14155550123",
+      payload: {
+        sourceEntityKey: "signal:+14155550123",
+        fields: { display_name: "+14155550123" },
+        handles: [{ type: "phone", value: "+14155550123", deterministic: true }],
+      },
+      sourceVersion: "signal-v1",
+    });
+    db.insertRawEvent({
+      id: "signal-conversation",
+      platform: "signal",
+      accountKey: "default",
+      entityKind: "conversation",
+      eventKind: "observed",
+      observedAt: 2,
+      dedupeKey: "signal:conversation:dm-ava",
+      payload: {
+        sourceConversationKey: "signal:dm-ava",
+        conversationType: "dm",
+        displayName: "Ava Chen",
+        service: "signal",
+        participants: [{ sourceEntityKey: "signal:+14155550123" }],
+      },
+      sourceVersion: "signal-v1",
+    });
+    db.insertRawEvent({
+      id: "signal-message",
+      platform: "signal",
+      accountKey: "default",
+      entityKind: "message",
+      eventKind: "message_created",
+      observedAt: 3,
+      dedupeKey: "signal:message:1",
+      payload: {
+        sourceMessageKey: "signal:message:1",
+        sourceConversationKey: "signal:dm-ava",
+        senderSourceKey: "signal:+14155550123",
+        sentAt: 3,
+        content: "hello from signal",
+        service: "signal",
+        isFromMe: false,
+      },
+      sourceVersion: "signal-v1",
+    });
+
+    projectPendingRawEvents(db);
+
+    const row = db.orm().get<{
+      contact_name: string | null;
+      participant_name: string | null;
+      participant_names: string | null;
+      sender_name: string | null;
+      conversation_name: string | null;
+    }>(sql`
+      SELECT
+        c.name AS contact_name,
+        cp.participant_name,
+        conv.participant_names,
+        m.sender_name,
+        m.conversation_name
+      FROM contacts c
+      JOIN conversation_participants cp ON cp.contact_id = c.id
+      JOIN conversations conv ON conv.id = cp.conversation_id
+      JOIN messages m ON m.sender_contact_id = c.id
+      WHERE cp.source_participant_key = 'signal:+14155550123'
+    `);
+    expect(row).toEqual({
+      contact_name: "+14155550123",
+      participant_name: "Ava Chen",
+      participant_names: "Ava Chen",
+      sender_name: "Ava Chen",
+      conversation_name: "Ava Chen",
+    });
+
+    db.close();
+  });
+
   it("projects new raw events incrementally without clearing canonical tables", () => {
     const db = createDb();
 
