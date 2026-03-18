@@ -231,6 +231,10 @@ function isRawIdentifierDisplayNameSql(value: SQL): SQL {
       OR LOWER(TRIM(${value})) LIKE 'linkedin:%'
       OR LOWER(TRIM(${value})) LIKE 'slack:%'
       OR LOWER(TRIM(${value})) LIKE 'urn:li:%'
+      OR (
+        LENGTH(TRIM(${value})) = 36
+        AND TRIM(${value}) GLOB '[0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F]-[0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F]-[0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F]-[0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F]-[0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F]'
+      )
     )
   )`;
 }
