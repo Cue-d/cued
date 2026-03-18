@@ -6,7 +6,7 @@ import type {
   ReactionPayload,
 } from "../../../core/types/provider.js";
 import type { SyncBundle } from "../../core/sync.js";
-import type { SlackConversation, SlackMessage, SlackUser } from "../api/index.js";
+import type { SlackConversation, SlackMessage, SlackUser } from "../types.js";
 
 export function slackDedupeKey(seed: string): string {
   return createHash("sha256").update(seed).digest("hex");

@@ -1,9 +1,4 @@
-import type {
-  SlackAuthTestResponse,
-  SlackConversation,
-  SlackMessage,
-  SlackUser,
-} from "./api/types.js";
+import type { SlackAuthTestResponse, SlackConversation, SlackMessage, SlackUser } from "./types.js";
 
 export interface SlackConversationsResult {
   conversations: SlackConversation[];

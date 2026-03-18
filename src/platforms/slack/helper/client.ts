@@ -1,11 +1,11 @@
 import { spawn } from "node:child_process";
-import type { SlackCredentials } from "../api/types.js";
 import type {
   SlackConversationsResult,
   SlackMessagesResult,
   SlackTransport,
   SlackUsersResult,
 } from "../transport.js";
+import type { SlackCredentials } from "../types.js";
 import { resolveSlackHelperBinary } from "./binary.js";
 
 interface SlackHelperCommandEnvelope<TResult = unknown> {
