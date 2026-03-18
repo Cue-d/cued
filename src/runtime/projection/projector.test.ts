@@ -458,6 +458,99 @@ describe("projector", () => {
     db.close();
   });
 
+  it("treats Signal UUID contact names as raw identifiers in SQL-backed sender resolution", () => {
+    const db = createDb();
+
+    db.insertRawEvent({
+      id: "signal-contact-uuid",
+      platform: "signal",
+      accountKey: "default",
+      entityKind: "contact",
+      eventKind: "observed",
+      observedAt: 1,
+      dedupeKey: "signal:contact:uuid",
+      payload: {
+        sourceEntityKey: "signal:a1b2c3d4-e5f6-1234-9abc-def012345678",
+        fields: { display_name: "a1b2c3d4-e5f6-1234-9abc-def012345678" },
+        handles: [
+          {
+            type: "signal_id",
+            value: "a1b2c3d4-e5f6-1234-9abc-def012345678",
+            deterministic: true,
+          },
+        ],
+      },
+      sourceVersion: "signal-v1",
+    });
+    db.insertRawEvent({
+      id: "signal-conversation-uuid",
+      platform: "signal",
+      accountKey: "default",
+      entityKind: "conversation",
+      eventKind: "observed",
+      observedAt: 2,
+      dedupeKey: "signal:conversation:uuid",
+      payload: {
+        sourceConversationKey: "signal:dm-uuid",
+        conversationType: "dm",
+        displayName: "Ava Chen",
+        service: "signal",
+        participants: [{ sourceEntityKey: "signal:a1b2c3d4-e5f6-1234-9abc-def012345678" }],
+      },
+      sourceVersion: "signal-v1",
+    });
+    db.insertRawEvent({
+      id: "signal-message-uuid",
+      platform: "signal",
+      accountKey: "default",
+      entityKind: "message",
+      eventKind: "message_created",
+      observedAt: 3,
+      dedupeKey: "signal:message:uuid",
+      payload: {
+        sourceMessageKey: "signal:message:uuid",
+        sourceConversationKey: "signal:dm-uuid",
+        senderSourceKey: "signal:a1b2c3d4-e5f6-1234-9abc-def012345678",
+        sentAt: 3,
+        content: "hello from signal uuid",
+        service: "signal",
+        isFromMe: false,
+      },
+      sourceVersion: "signal-v1",
+    });
+
+    projectPendingRawEvents(db);
+
+    const row = db.orm().get<{
+      contact_name: string | null;
+      participant_name: string | null;
+      participant_names: string | null;
+      sender_name: string | null;
+      conversation_name: string | null;
+    }>(sql`
+      SELECT
+        c.name AS contact_name,
+        cp.participant_name,
+        conv.participant_names,
+        m.sender_name,
+        m.conversation_name
+      FROM contacts c
+      JOIN conversation_participants cp ON cp.contact_id = c.id
+      JOIN conversations conv ON conv.id = cp.conversation_id
+      JOIN messages m ON m.sender_contact_id = c.id
+      WHERE cp.source_participant_key = 'signal:a1b2c3d4-e5f6-1234-9abc-def012345678'
+    `);
+    expect(row).toEqual({
+      contact_name: "a1b2c3d4-e5f6-1234-9abc-def012345678",
+      participant_name: "Ava Chen",
+      participant_names: "Ava Chen",
+      sender_name: "Ava Chen",
+      conversation_name: "Ava Chen",
+    });
+
+    db.close();
+  });
+
   it("projects new raw events incrementally without clearing canonical tables", () => {
     const db = createDb();
 
