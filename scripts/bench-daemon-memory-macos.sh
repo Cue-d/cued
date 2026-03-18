@@ -24,6 +24,7 @@ BASELINE_PATH=""
 WRITE_BASELINE_PATH=""
 ARTIFACT_ROOT=""
 ACTIVE_ROOT_PID=""
+CLONED_PROFILE_SEED_DB_PATH=""
 
 usage() {
   cat <<EOF
@@ -323,6 +324,11 @@ prepare_home_for_run() {
       return
       ;;
     cloned_profile_idle)
+      if [ -n "$CLONED_PROFILE_SEED_DB_PATH" ]; then
+        sqlite3 "$CLONED_PROFILE_SEED_DB_PATH" ".backup '$home_dir/local.db'"
+        return
+      fi
+
       if [ ! -f "$HOME/.cued/local.db" ]; then
         printf '%s\n' "Missing source database at $HOME/.cued/local.db" >&2
         exit 1
@@ -330,6 +336,33 @@ prepare_home_for_run() {
       sqlite3 "$HOME/.cued/local.db" ".backup '$home_dir/local.db'"
       ;;
   esac
+}
+
+prepare_cloned_profile_seed() {
+  local seed_home_dir
+  if [ "$SCENARIO" != "cloned_profile_idle" ]; then
+    return
+  fi
+
+  seed_home_dir="$ARTIFACT_ROOT/seed-home"
+  prepare_home_for_run "$seed_home_dir"
+  CLONED_PROFILE_SEED_DB_PATH="$seed_home_dir/local.db"
+
+  (
+    cd "$ROOT_DIR"
+    CUED_HOME="$seed_home_dir" \
+    CUED_DB_PATH="$CLONED_PROFILE_SEED_DB_PATH" \
+    node <<'EOF'
+(async () => {
+  const { openCuedDatabase } = await import("./dist/db/database.js");
+  const db = openCuedDatabase(process.env.CUED_DB_PATH);
+  db.close();
+})().catch((error) => {
+  console.error(error);
+  process.exit(1);
+});
+EOF
+  )
 }
 
 wait_for_daemon_ready() {
@@ -530,6 +563,8 @@ RUN_COUNT="$(scenario_run_count)"
 WARMUP_SECONDS="$(scenario_warmup_seconds)"
 SAMPLE_COUNT="$(scenario_sample_count)"
 SAMPLE_INTERVAL_SECONDS="$(scenario_sample_interval_seconds)"
+
+prepare_cloned_profile_seed
 
 RUN_SUMMARY_TSV="$ARTIFACT_ROOT/run-summary.tsv"
 printf 'run\tstatus\tstartup_ready_ms\tmain_rss_median_kb\tmain_rss_avg_kb\tmain_rss_max_kb\ttree_rss_median_kb\ttree_rss_avg_kb\ttree_rss_max_kb\tcpu_median_pct\tcpu_p95_pct\tcpu_max_pct\tphysical_footprint_mb\tphysical_footprint_peak_mb\tproc_count_median\tproc_churn_count\tpower_proxy_status\tpower_proxy_raw\n' >"$RUN_SUMMARY_TSV"
