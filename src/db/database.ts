@@ -327,6 +327,9 @@ function normalizeWhatsAppHandleLookupValue(value: string): string {
 
 export type LocalDrizzleDatabase = BetterSQLite3Database<typeof schema>;
 const WRITE_BATCH_SIZE = 250;
+const MIGRATION_COMPATIBILITY_ALIASES: Record<string, readonly string[]> = {
+  "0012_attachment_access_and_content": ["0011_attachment_access_and_content"],
+};
 
 function now(): number {
   return Date.now();
@@ -366,17 +369,8 @@ export class CuedDatabase {
 
   migrate(): void {
     for (const migration of MIGRATIONS) {
-      const alreadyApplied = this.sqlite
-        .prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'schema_migrations'")
-        .get() as { 1: number } | undefined;
-
-      if (alreadyApplied) {
-        const applied = this.sqlite
-          .prepare("SELECT id FROM schema_migrations WHERE id = ?")
-          .get(migration.id) as { id: string } | undefined;
-        if (applied) {
-          continue;
-        }
+      if (this.isMigrationApplied(migration.id)) {
+        continue;
       }
 
       this.sqlite.exec("BEGIN");
@@ -391,6 +385,32 @@ export class CuedDatabase {
         throw error;
       }
     }
+  }
+
+  private isMigrationApplied(migrationId: string): boolean {
+    const hasMigrationsTable = this.sqlite
+      .prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'schema_migrations'")
+      .get() as { 1: number } | undefined;
+    if (!hasMigrationsTable) {
+      return false;
+    }
+
+    const compatibleIds = [migrationId, ...(MIGRATION_COMPATIBILITY_ALIASES[migrationId] ?? [])];
+    const placeholders = compatibleIds.map(() => "?").join(", ");
+    const applied = this.sqlite
+      .prepare(`SELECT id FROM schema_migrations WHERE id IN (${placeholders}) LIMIT 1`)
+      .get(...compatibleIds) as { id: string } | undefined;
+    if (!applied) {
+      return false;
+    }
+
+    if (applied.id !== migrationId) {
+      this.sqlite
+        .prepare("INSERT OR IGNORE INTO schema_migrations (id, applied_at) VALUES (?, ?)")
+        .run(migrationId, now());
+    }
+
+    return true;
   }
 
   close(): void {
