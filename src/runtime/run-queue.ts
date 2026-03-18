@@ -66,11 +66,63 @@ export class RunQueueService {
   }
 
   queueSyncRun(source?: string): {
-    queued: true;
-    runId: string;
+    queued: boolean;
+    runId: string | null;
+    runIds: string[];
+    targets: string[];
   } {
     if (source && !isAdapterPlatform(source)) {
       throw new Error(`Unsupported sync source: ${source}`);
+    }
+
+    if (source && isAdapterPlatform(source)) {
+      const targets = [
+        ...new Set(
+          this.db
+            .listEnabledSyncTargets()
+            .filter(
+              (target): target is { platform: AdapterPlatform; account_key: string } =>
+                isAdapterPlatform(target.platform) && target.platform === source,
+            )
+            .map((target) => `${target.platform}:${target.account_key}`),
+        ),
+      ];
+
+      if (targets.length > 0) {
+        const queuedTargets: string[] = [];
+        const runInputs = targets.flatMap((targetKey) => {
+          const [platform, accountKey] = targetKey.split(":");
+          if (!platform || !accountKey || !isAdapterPlatform(platform)) {
+            return [];
+          }
+          if (this.db.hasQueuedOrRunningRun(platform, accountKey)) {
+            return [];
+          }
+
+          queuedTargets.push(targetKey);
+          return [
+            {
+              platform,
+              accountKey,
+              runType: "sync" as const,
+              trigger: "cli",
+              details: { source: platform, accountKey },
+            },
+          ];
+        });
+
+        const runIds = this.db.queueSyncRuns(runInputs);
+        if (runIds.length > 0) {
+          this.schedulers.wakeIngest?.();
+        }
+
+        return {
+          queued: runIds.length > 0,
+          runId: runIds[0] ?? null,
+          runIds,
+          targets: queuedTargets,
+        };
+      }
     }
 
     const runId = this.db.queueSyncRun({
@@ -84,6 +136,8 @@ export class RunQueueService {
     return {
       queued: true,
       runId,
+      runIds: [runId],
+      targets: source ? [source] : [],
     };
   }
 
