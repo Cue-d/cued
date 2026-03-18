@@ -247,10 +247,12 @@ run_cli_to_file() {
 run_cli_quiet() {
   local home_dir="$1"
   shift
-  local output_path
+  local output_path rc
   output_path="$(mktemp "/tmp/cued-bench-cli.XXXXXX")"
-  run_cli_to_file "$home_dir" "$output_path" "$@"
+  rc=0
+  run_cli_to_file "$home_dir" "$output_path" "$@" || rc=$?
   rm -f "$output_path"
+  return "$rc"
 }
 
 parse_json_field_from_file() {
