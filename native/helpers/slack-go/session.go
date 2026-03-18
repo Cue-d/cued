@@ -160,12 +160,16 @@ func conversationVersionKey(conversation slackConversation, memberIDs []string, 
 	if conversation.Latest != nil {
 		latestTS = conversation.Latest.TS
 	}
+	memberVersion := ""
+	if conversation.IsIM || conversation.IsMPIM {
+		memberVersion = fmt.Sprintf("%d", len(memberIDs))
+	}
 	return strings.Join([]string{
 		latestTS,
 		displayName,
 		conversation.Name,
 		conversation.User,
-		fmt.Sprintf("%d", len(memberIDs)),
+		memberVersion,
 	}, "|")
 }
 
