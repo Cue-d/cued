@@ -371,9 +371,11 @@ export class CuedDatabase {
         .get() as { 1: number } | undefined;
 
       if (alreadyApplied) {
+        const candidateIds = [migration.id, ...(migration.legacyIds ?? [])];
+        const placeholders = candidateIds.map(() => "?").join(", ");
         const applied = this.sqlite
-          .prepare("SELECT id FROM schema_migrations WHERE id = ?")
-          .get(migration.id) as { id: string } | undefined;
+          .prepare(`SELECT id FROM schema_migrations WHERE id IN (${placeholders}) LIMIT 1`)
+          .get(...candidateIds) as { id: string } | undefined;
         if (applied) {
           continue;
         }

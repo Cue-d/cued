@@ -1,4 +1,10 @@
-export const MIGRATIONS: Array<{ id: string; sql: string }> = [
+export type Migration = {
+  id: string;
+  legacyIds?: string[];
+  sql: string;
+};
+
+export const MIGRATIONS: Migration[] = [
   {
     id: "0001_initial_local_cued_v2",
     sql: `
@@ -1221,6 +1227,7 @@ export const MIGRATIONS: Array<{ id: string; sql: string }> = [
   },
   {
     id: "0012_attachment_access_and_content",
+    legacyIds: ["0011_attachment_access_and_content"],
     sql: `
       CREATE TABLE IF NOT EXISTS message_attachments (
         id TEXT PRIMARY KEY,

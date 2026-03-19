@@ -107,6 +107,7 @@ describe("CuedDatabase", () => {
           prepare: (sql: string) => {
             run: (...params: unknown[]) => void;
             get: (...params: unknown[]) => unknown;
+            all: (...params: unknown[]) => unknown[];
           };
         };
       }
@@ -647,6 +648,59 @@ describe("CuedDatabase", () => {
       },
     ]);
     expect(migratedErrors).toEqual([{ id: "error-1", sync_run_id: "completed-run" }]);
+
+    db.close();
+  });
+
+  it("accepts legacy migration ids after a migration rename", () => {
+    const dir = mkdtempSync(join(tmpdir(), "cued-v2-db-legacy-migration-"));
+    tempDirs.push(dir);
+    const dbPath = join(dir, "local.db");
+    const legacySqlite = new Database(dbPath);
+
+    legacySqlite.exec(`
+      CREATE TABLE schema_migrations (
+        id TEXT PRIMARY KEY,
+        applied_at INTEGER NOT NULL
+      );
+
+      CREATE TABLE message_attachments (
+        id TEXT PRIMARY KEY,
+        message_id TEXT NOT NULL,
+        platform TEXT NOT NULL,
+        account_key TEXT NOT NULL,
+        source_attachment_key TEXT NOT NULL,
+        kind TEXT,
+        mime_type TEXT,
+        filename TEXT,
+        title TEXT,
+        local_path TEXT,
+        remote_url TEXT,
+        size_bytes INTEGER,
+        text_content TEXT,
+        metadata_json TEXT,
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL,
+        access_kind TEXT,
+        access_ref_json TEXT,
+        preview_ref_json TEXT,
+        availability_status TEXT,
+        provider_metadata_json TEXT,
+        UNIQUE(platform, account_key, source_attachment_key)
+      );
+    `);
+    legacySqlite
+      .prepare("INSERT INTO schema_migrations (id, applied_at) VALUES (?, ?)")
+      .run("0011_attachment_access_and_content", Date.now());
+    legacySqlite.close();
+
+    const db = new CuedDatabase(dbPath);
+    expect(() => db.migrate()).not.toThrow();
+
+    const migratedIds = sqlite(db)
+      .prepare("SELECT id FROM schema_migrations WHERE id LIKE '001%attachment_access_and_content'")
+      .all() as Array<{ id: string }>;
+    expect(migratedIds).toEqual([{ id: "0011_attachment_access_and_content" }]);
 
     db.close();
   });
