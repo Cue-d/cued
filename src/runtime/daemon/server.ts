@@ -2414,9 +2414,9 @@ export async function runDaemon(): Promise<void> {
 
   scheduleUpdateCheck(false);
 
-  const processIngestRun = async (
+  async function processIngestRun(
     currentRun: NonNullable<ReturnType<typeof db.claimNextQueuedRun>>,
-  ) => {
+  ) {
     const ingestStartedAt = now();
     daemonLogger.info("ingest run started", {
       runId: currentRun.id,
@@ -2731,7 +2731,7 @@ export async function runDaemon(): Promise<void> {
         error: errorMessage,
       });
     }
-  };
+  }
 
   const processProjectionRun = async (
     currentRun: NonNullable<ReturnType<typeof db.claimNextQueuedRun>>,
