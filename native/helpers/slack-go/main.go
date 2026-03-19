@@ -19,7 +19,7 @@ import (
 const (
 	helperVersion   = "0.1.0"
 	protocolVersion = 1
-	requestTimeout  = 30 * time.Second
+	requestTimeout  = 2 * time.Minute
 )
 
 type slackCredentials struct {
