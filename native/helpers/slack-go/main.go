@@ -17,9 +17,11 @@ import (
 )
 
 const (
-	helperVersion   = "0.1.0"
-	protocolVersion = 1
-	requestTimeout  = 2 * time.Minute
+	helperVersion         = "0.1.0"
+	protocolVersion       = 1
+	requestTimeout        = 2 * time.Minute
+	tlsHandshakeTimeout   = 30 * time.Second
+	responseHeaderTimeout = 30 * time.Second
 )
 
 type slackCredentials struct {
@@ -234,10 +236,17 @@ func newSlackClient(credentials slackCredentials, apiURL string) (*slackapi.Clie
 		return nil, errors.New("Slack credentials must include token and cookie")
 	}
 
+	baseTransport := http.DefaultTransport.(*http.Transport).Clone()
+	baseTransport.TLSHandshakeTimeout = tlsHandshakeTimeout
+	baseTransport.ResponseHeaderTimeout = responseHeaderTimeout
+	baseTransport.MaxIdleConns = 100
+	baseTransport.MaxIdleConnsPerHost = 20
+	baseTransport.MaxConnsPerHost = 20
+
 	client := &http.Client{
 		Timeout: requestTimeout,
 		Transport: cookieTransport{
-			base:   http.DefaultTransport,
+			base:   baseTransport,
 			cookie: credentials.Cookie,
 		},
 	}

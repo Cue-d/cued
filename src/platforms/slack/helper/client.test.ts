@@ -91,4 +91,46 @@ describe("slack helper client", () => {
 
     await expect(promise).rejects.toThrow("bad auth");
   });
+
+  it("retries transient helper errors and returns the later success", async () => {
+    const transientChild = new MockChild();
+    const successChild = new MockChild();
+    spawnMock.mockReturnValueOnce(transientChild).mockReturnValueOnce(successChild);
+
+    const client = new SlackHelperClient(
+      { token: "xoxc-test", cookie: "cookie-test" },
+      {
+        helperPath: "/tmp/cued-slack-helper",
+        retryAttempts: 2,
+        retryBaseMs: 0,
+      },
+    );
+
+    const promise = client.getReplies("C123", "1710000001.000100");
+
+    transientChild.stderr.write(
+      'Post "https://slack.com/api/conversations.replies": net/http: TLS handshake timeout',
+    );
+    transientChild.emit("close", 1);
+
+    await new Promise((resolve) => setTimeout(resolve, 10));
+
+    successChild.stdout.write(
+      `${JSON.stringify({
+        ok: true,
+        protocolVersion: 1,
+        result: {
+          messages: [],
+          hasMore: false,
+        },
+      })}\n`,
+    );
+    successChild.emit("close", 0);
+
+    await expect(promise).resolves.toEqual({
+      messages: [],
+      hasMore: false,
+    });
+    expect(spawnMock).toHaveBeenCalledTimes(2);
+  }, 10_000);
 });

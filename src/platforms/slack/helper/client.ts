@@ -17,15 +17,22 @@ interface SlackHelperCommandEnvelope<TResult = unknown> {
 
 type SpawnImpl = typeof spawn;
 
+const DEFAULT_RETRY_ATTEMPTS = 4;
+const DEFAULT_RETRY_BASE_MS = 500;
+
 export class SlackHelperClient implements SlackTransport {
   private readonly helperPath: string;
   private readonly spawnImpl: SpawnImpl;
+  private readonly retryAttempts: number;
+  private readonly retryBaseMs: number;
 
   constructor(
     private readonly credentials: SlackCredentials,
     options: {
       helperPath?: string | null;
       spawnImpl?: SpawnImpl;
+      retryAttempts?: number;
+      retryBaseMs?: number;
     } = {},
   ) {
     const helperPath = options.helperPath ?? resolveSlackHelperBinary();
@@ -35,6 +42,8 @@ export class SlackHelperClient implements SlackTransport {
 
     this.helperPath = helperPath;
     this.spawnImpl = options.spawnImpl ?? spawn;
+    this.retryAttempts = Math.max(1, options.retryAttempts ?? DEFAULT_RETRY_ATTEMPTS);
+    this.retryBaseMs = Math.max(0, options.retryBaseMs ?? DEFAULT_RETRY_BASE_MS);
   }
 
   async testAuth(): Promise<{
@@ -119,6 +128,35 @@ export class SlackHelperClient implements SlackTransport {
       | "getReplies",
     payload: Record<string, unknown>,
   ): Promise<TResult> {
+    let attempt = 0;
+    let lastError: unknown;
+
+    while (attempt < this.retryAttempts) {
+      try {
+        return await this.requestOnce<TResult>(command, payload);
+      } catch (error) {
+        lastError = error;
+        attempt += 1;
+        if (attempt >= this.retryAttempts || !isRetryableSlackHelperError(error)) {
+          break;
+        }
+        await delay(this.retryBaseMs * 2 ** (attempt - 1));
+      }
+    }
+
+    throw lastError instanceof Error ? lastError : new Error(String(lastError));
+  }
+
+  private async requestOnce<TResult>(
+    command:
+      | "authTest"
+      | "listUsers"
+      | "listConversations"
+      | "getConversationMembers"
+      | "getHistory"
+      | "getReplies",
+    payload: Record<string, unknown>,
+  ): Promise<TResult> {
     const child = this.spawnImpl(this.helperPath, [command], {
       stdio: ["pipe", "pipe", "pipe"],
       env: process.env,
@@ -188,4 +226,25 @@ function tryParseHelperEnvelope<TResult>(raw: string): SlackHelperCommandEnvelop
   } catch {
     return null;
   }
+}
+
+function isRetryableSlackHelperError(error: unknown): boolean {
+  const message =
+    error instanceof Error ? error.message.toLowerCase() : String(error).toLowerCase();
+  return (
+    message.includes("tls handshake timeout") ||
+    message.includes("context deadline exceeded") ||
+    message.includes("timeout") ||
+    message.includes("econnreset") ||
+    message.includes("connection reset") ||
+    message.includes("unexpected eof") ||
+    message.includes("client timeout") ||
+    message.includes("too many requests") ||
+    message.includes("rate limit") ||
+    message.includes("temporarily unavailable")
+  );
+}
+
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }

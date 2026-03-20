@@ -14,6 +14,7 @@ import {
 const INCREMENTAL_BUFFER_MS = 5 * 60 * 1000;
 const DEFAULT_SLACK_CONVERSATIONS_PER_RUN = 5;
 const DEFAULT_SLACK_MESSAGES_PAGE_LIMIT = 100;
+const DEFAULT_SLACK_REPLIES_PAGE_LIMIT = 50;
 const DEFAULT_SLACK_CHANNEL_HISTORY_DAYS = 0;
 const DEFAULT_SLACK_API_PAGES_PER_RUN = 25;
 
@@ -309,6 +310,7 @@ async function listConversationMessages(
   conversationId: string,
   oldestMs: number,
   messagesPageLimit: number,
+  repliesPageLimit: number,
 ): Promise<SlackMessage[]> {
   const messageByTs = new Map<string, SlackMessage>();
   const threadParents = new Set<string>();
@@ -341,7 +343,7 @@ async function listConversationMessages(
       const result = await client.getReplies(conversationId, threadTs, {
         cursor: repliesCursor,
         oldest,
-        limit: messagesPageLimit,
+        limit: repliesPageLimit,
       });
 
       for (const reply of result.messages) {
@@ -377,6 +379,7 @@ async function listConversationMessagesBatch(
   conversationId: string,
   oldestMs: number,
   messagesPageLimit: number,
+  repliesPageLimit: number,
   resumeState?: Partial<SlackConversationResumeState>,
   apiPageBudget: number = DEFAULT_SLACK_API_PAGES_PER_RUN,
 ): Promise<SlackConversationBatchResult> {
@@ -403,7 +406,7 @@ async function listConversationMessagesBatch(
       const result = await client.getReplies(conversationId, activeThreadTs, {
         cursor: repliesCursor ?? undefined,
         oldest,
-        limit: messagesPageLimit,
+        limit: repliesPageLimit,
       });
       apiPagesRemaining -= 1;
       for (const reply of result.messages) {
@@ -490,6 +493,10 @@ export async function buildSlackSyncBundle(options?: {
   const messagesPageLimit = positiveInt(
     options?.messagesPageLimit ?? DEFAULT_SLACK_MESSAGES_PAGE_LIMIT,
     100,
+  );
+  const repliesPageLimit = Math.min(
+    messagesPageLimit,
+    positiveInt(DEFAULT_SLACK_REPLIES_PAGE_LIMIT, DEFAULT_SLACK_MESSAGES_PAGE_LIMIT),
   );
   const apiPageBudget = positiveInt(options?.apiPageBudget ?? DEFAULT_SLACK_API_PAGES_PER_RUN, 25);
 
@@ -580,6 +587,7 @@ export async function buildSlackSyncBundle(options?: {
         conversation.id,
         conversationOldestMs,
         messagesPageLimit,
+        repliesPageLimit,
         scan.activeConversationId === conversation.id
           ? {
               historyCursor: scan.historyCursor ?? null,
@@ -728,6 +736,7 @@ export async function buildSlackSyncBundle(options?: {
         conversation.id,
         conversationOldestMs,
         messagesPageLimit,
+        repliesPageLimit,
       );
 
       rawEvents.push(
