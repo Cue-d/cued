@@ -779,7 +779,7 @@ describe("projector", () => {
     `);
     expect(hotMessage).toEqual({
       content: "hot path preview",
-      sender_name: null,
+      sender_name: "Ava Chen",
     });
 
     const hotFtsRows = db
