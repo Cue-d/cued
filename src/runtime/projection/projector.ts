@@ -824,6 +824,15 @@ function projectRealtimeMessageEvent(
     event.observed_at,
   );
 
+  const senderContactId = resolveOrEnsureContact(
+    conn,
+    cache,
+    event.platform,
+    event.account_key,
+    payload.senderSourceKey,
+    event.observed_at,
+  );
+
   conn
     .update(messages)
     .set({
@@ -831,9 +840,9 @@ function projectRealtimeMessageEvent(
       accountKey: event.account_key,
       platformMessageId: payload.sourceMessageKey,
       conversationId,
-      senderContactId: null,
+      senderContactId: senderContactId ?? null,
       senderSourceKey: payload.senderSourceKey,
-      senderName: null,
+      senderName: senderContactId ? (cache.contactNameMap.get(senderContactId) ?? null) : null,
       conversationName: cache.conversationNameMap.get(conversationId) ?? null,
       sentAt: payload.sentAt,
       service: normalizeText(payload.service ?? null),
@@ -1736,7 +1745,15 @@ function refreshMessageSearchIndexForIds(conn: LocalDbExecutor, messageIds: Set<
   }
 }
 
-function finalizeRealtimeProjection(conn: LocalDbExecutor, changes: ProjectionChangeSet): void {
+function finalizeRealtimeProjection(
+  conn: LocalDbExecutor,
+  cache: ProjectionCache,
+  changes: ProjectionChangeSet,
+): void {
+  if (changes.dirtyContactIds.size > 0) {
+    refreshContactFanoutForIds(conn, changes.dirtyContactIds);
+    syncContactNameCache(conn, cache, changes.dirtyContactIds);
+  }
   if (changes.dirtyConversationIds.size > 0) {
     refreshConversationSummariesForIds(conn, changes.dirtyConversationIds);
   }
@@ -1826,7 +1843,9 @@ function projectEventBatch(
       };
 
       if (input.mode === "realtime") {
-        if (event.entity_kind === "conversation") {
+        if (event.entity_kind === "contact") {
+          projectContactObservation(tx, cache, changes, shapedEvent);
+        } else if (event.entity_kind === "conversation") {
           projectRealtimeConversationObservation(tx, cache, changes, shapedEvent);
         } else if (event.entity_kind === "message") {
           projectRealtimeMessageEvent(tx, cache, changes, shapedEvent);
@@ -1860,7 +1879,7 @@ function projectEventBatch(
     }
 
     if (input.mode === "realtime") {
-      finalizeRealtimeProjection(tx, changes);
+      finalizeRealtimeProjection(tx, cache, changes);
       return;
     }
 

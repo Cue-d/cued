@@ -772,14 +772,16 @@ describe("projector", () => {
     const hotMessage = db.orm().get<{
       content: string | null;
       sender_name: string | null;
+      sender_contact_id: string | null;
     }>(sql`
-      SELECT content, sender_name
+      SELECT content, sender_name, sender_contact_id
       FROM messages
       WHERE platform_message_id = 'message-hot-path'
     `);
     expect(hotMessage).toEqual({
       content: "hot path preview",
-      sender_name: null,
+      sender_name: "Ava Chen",
+      sender_contact_id: expect.any(String),
     });
 
     const hotFtsRows = db
@@ -823,6 +825,162 @@ describe("projector", () => {
       .all<{ count: number }>(sql`SELECT COUNT(*) as count FROM messages_fts`);
     expect(coldFtsRows).toEqual([{ count: 1 }]);
 
+    db.close();
+  });
+
+  it("realtime projection resolves imessage sender_contact_id and sender_name", () => {
+    const db = createDb();
+    const insertResult = db.insertRawEvents([
+      {
+        id: "rt-imessage-contact",
+        platform: "imessage",
+        accountKey: "local",
+        entityKind: "contact",
+        eventKind: "observed",
+        observedAt: 1,
+        dedupeKey: "rt-imessage-contact",
+        payload: {
+          sourceEntityKey: "imessage:+15559876543",
+          fields: { display_name: "Casey IM" },
+          handles: [
+            { type: "phone", value: "+15559876543", deterministic: true },
+            { type: "imessage_handle", value: "+15559876543", deterministic: true },
+          ],
+        },
+        sourceVersion: "imessage-v1",
+      },
+      {
+        id: "rt-imessage-conv",
+        platform: "imessage",
+        accountKey: "local",
+        entityKind: "conversation",
+        eventKind: "observed",
+        observedAt: 2,
+        dedupeKey: "rt-imessage-conv",
+        payload: {
+          sourceConversationKey: "rt-imessage-chat",
+          conversationType: "dm",
+          service: "iMessage",
+          displayName: "+15559876543",
+          participants: [{ sourceEntityKey: "imessage:+15559876543" }],
+        },
+        sourceVersion: "imessage-v1",
+      },
+      {
+        id: "rt-imessage-msg",
+        platform: "imessage",
+        accountKey: "local",
+        entityKind: "message",
+        eventKind: "message_created",
+        observedAt: 3,
+        dedupeKey: "rt-imessage-msg",
+        payload: {
+          sourceMessageKey: "rt-imessage-msg-key",
+          sourceConversationKey: "rt-imessage-chat",
+          senderSourceKey: "imessage:+15559876543",
+          sentAt: 3,
+          content: "hi",
+          service: "iMessage",
+          isFromMe: false,
+        },
+        sourceVersion: "imessage-v1",
+      },
+    ]);
+    projectRealtimeRange(db, {
+      startRowId: insertResult.firstInsertedRowId!,
+      endRowId: insertResult.lastInsertedRowId!,
+      batchSize: 10,
+    });
+    const row = db.orm().get<{
+      sender_name: string | null;
+      sender_contact_id: string | null;
+    }>(sql`
+      SELECT sender_name, sender_contact_id
+      FROM messages
+      WHERE platform_message_id = 'rt-imessage-msg-key'
+    `);
+    expect(row).toEqual({
+      sender_name: "Casey IM",
+      sender_contact_id: expect.any(String),
+    });
+    db.close();
+  });
+
+  it("realtime projection backfills sender_name when the contact observation arrives after the message in one batch", () => {
+    const db = createDb();
+    const insertResult = db.insertRawEvents([
+      {
+        id: "order-imessage-conv",
+        platform: "imessage",
+        accountKey: "local",
+        entityKind: "conversation",
+        eventKind: "observed",
+        observedAt: 1,
+        dedupeKey: "order-imessage-conv",
+        payload: {
+          sourceConversationKey: "order-imessage-chat",
+          conversationType: "dm",
+          service: "iMessage",
+          displayName: "+15551110000",
+          participants: [{ sourceEntityKey: "imessage:+15551110000" }],
+        },
+        sourceVersion: "imessage-v1",
+      },
+      {
+        id: "order-imessage-msg",
+        platform: "imessage",
+        accountKey: "local",
+        entityKind: "message",
+        eventKind: "message_created",
+        observedAt: 2,
+        dedupeKey: "order-imessage-msg",
+        payload: {
+          sourceMessageKey: "order-imessage-msg-key",
+          sourceConversationKey: "order-imessage-chat",
+          senderSourceKey: "imessage:+15551110000",
+          sentAt: 2,
+          content: "out of order",
+          service: "iMessage",
+          isFromMe: false,
+        },
+        sourceVersion: "imessage-v1",
+      },
+      {
+        id: "order-imessage-contact",
+        platform: "imessage",
+        accountKey: "local",
+        entityKind: "contact",
+        eventKind: "observed",
+        observedAt: 3,
+        dedupeKey: "order-imessage-contact",
+        payload: {
+          sourceEntityKey: "imessage:+15551110000",
+          fields: { display_name: "Later Contact" },
+          handles: [
+            { type: "phone", value: "+15551110000", deterministic: true },
+            { type: "imessage_handle", value: "+15551110000", deterministic: true },
+          ],
+        },
+        sourceVersion: "imessage-v1",
+      },
+    ]);
+    projectRealtimeRange(db, {
+      startRowId: insertResult.firstInsertedRowId!,
+      endRowId: insertResult.lastInsertedRowId!,
+      batchSize: 10,
+    });
+    const row = db.orm().get<{
+      sender_name: string | null;
+      sender_contact_id: string | null;
+    }>(sql`
+      SELECT sender_name, sender_contact_id
+      FROM messages
+      WHERE platform_message_id = 'order-imessage-msg-key'
+    `);
+    expect(row).toEqual({
+      sender_name: "Later Contact",
+      sender_contact_id: expect.any(String),
+    });
     db.close();
   });
 
