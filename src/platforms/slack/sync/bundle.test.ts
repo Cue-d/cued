@@ -5,6 +5,8 @@ describe("slack worker lib", () => {
   it("builds a raw event bundle from Slack users, conversations, messages, and reactions", async () => {
     const historyOldestValues: string[] = [];
     const repliesOldestValues: string[] = [];
+    const historyLimits: number[] = [];
+    const repliesLimits: number[] = [];
     const listedTypes: string[] = [];
     const bundle = await buildSlackSyncBundle({
       accountKey: "default",
@@ -52,6 +54,7 @@ describe("slack worker lib", () => {
         },
         async getHistory(_conversationId, options) {
           historyOldestValues.push(String(options?.oldest ?? ""));
+          historyLimits.push(Number(options?.limit ?? 0));
           return {
             messages: [
               {
@@ -76,6 +79,7 @@ describe("slack worker lib", () => {
         },
         async getReplies(_conversationId, _threadTs, options) {
           repliesOldestValues.push(String(options?.oldest ?? ""));
+          repliesLimits.push(Number(options?.limit ?? 0));
           return {
             messages: [
               {
@@ -127,6 +131,8 @@ describe("slack worker lib", () => {
     expect(listedTypes).toEqual(["im,mpim"]);
     expect(historyOldestValues).toEqual([""]);
     expect(repliesOldestValues).toEqual([""]);
+    expect(historyLimits).toEqual([100]);
+    expect(repliesLimits).toEqual([50]);
   });
 
   it("treats empty conversation cursors as end-of-pagination", async () => {

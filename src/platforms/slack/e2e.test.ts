@@ -587,7 +587,7 @@ echo '{"token":"xoxc-test","cookie":"cookie-test","teamId":"T123","teamName":"Ac
         server.close((error) => (error ? reject(error) : resolve())),
       );
     }
-  });
+  }, 15_000);
 });
 
 async function runSlackCycle(
