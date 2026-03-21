@@ -544,6 +544,9 @@ describe("slack worker lib", () => {
         activeConversationId: "C123",
         historyCursor: "history-2",
         historyComplete: false,
+        conversationPhase: "history",
+        threadRootCount: 0,
+        completedThreadCount: 0,
         pendingThreadTs: [],
         activeThreadTs: null,
         repliesCursor: null,
@@ -692,6 +695,9 @@ describe("slack worker lib", () => {
         activeConversationId: "C123",
         historyCursor: null,
         historyComplete: true,
+        conversationPhase: "threads",
+        threadRootCount: 1,
+        completedThreadCount: 0,
         pendingThreadTs: [],
         activeThreadTs: "1710000000.000100",
         repliesCursor: "reply-2",
@@ -739,6 +745,89 @@ describe("slack worker lib", () => {
 
     expect(second.hasMore).toBe(false);
     expect(second.rawEvents.filter((event) => event.entityKind === "message")).toHaveLength(1);
+  });
+
+  it("finishes top-level history before entering thread backfill", async () => {
+    const calls: string[] = [];
+
+    const first = await buildSlackSyncBundle({
+      accountKey: "default",
+      apiPageBudget: 1,
+      sourceCursor: {
+        teamId: "T123",
+        selfUserId: "U_SELF",
+        scan: {
+          mode: "full",
+          startedAt: 1710000000000,
+          oldestMs: 0,
+          usersComplete: true,
+          conversationFamily: "channels",
+          conversationCursor: null,
+        },
+      },
+      client: {
+        async testAuth() {
+          return { ok: true, team_id: "T123", user_id: "U_SELF", team: "Acme", user: "Ava" };
+        },
+        async listUsers() {
+          return { users: [], nextCursor: undefined };
+        },
+        async listConversations() {
+          return {
+            conversations: [{ id: "C123", is_channel: true }],
+            nextCursor: undefined,
+          };
+        },
+        async getConversationMembers() {
+          return { members: [], nextCursor: undefined };
+        },
+        async getHistory(_conversationId, options) {
+          calls.push(`history:${options?.cursor ?? "start"}`);
+          return !options?.cursor
+            ? {
+                messages: [
+                  {
+                    type: "message",
+                    user: "U_BEN",
+                    text: "page one",
+                    ts: "1710000000.000100",
+                    reply_count: 1,
+                  },
+                ],
+                hasMore: true,
+                nextCursor: "history-2",
+              }
+            : {
+                messages: [
+                  {
+                    type: "message",
+                    user: "U_BEN",
+                    text: "page two",
+                    ts: "1710000000.000200",
+                  },
+                ],
+                hasMore: false,
+                nextCursor: undefined,
+              };
+        },
+        async getReplies() {
+          calls.push("replies");
+          return { messages: [], hasMore: false, nextCursor: undefined };
+        },
+      },
+    });
+
+    expect(calls).toEqual(["history:start"]);
+    expect(first.sourceCursor).toEqual(
+      expect.objectContaining({
+        scan: expect.objectContaining({
+          conversationPhase: "history",
+          historyCursor: "history-2",
+          pendingThreadTs: ["1710000000.000100"],
+          activeThreadTs: null,
+        }),
+      }),
+    );
   });
 
   it("fetches all channel history during full sync by default", async () => {

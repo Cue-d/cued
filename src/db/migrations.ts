@@ -1316,4 +1316,39 @@ export const MIGRATIONS: Migration[] = [
       );
     `,
   },
+  {
+    id: "0013_slack_backfill_proofs",
+    sql: `
+      CREATE TABLE IF NOT EXISTS slack_backfill_proofs (
+        id TEXT PRIMARY KEY,
+        account_key TEXT NOT NULL,
+        team_id TEXT NOT NULL,
+        conversation_id TEXT NOT NULL,
+        conversation_name TEXT,
+        conversation_family TEXT NOT NULL,
+        sync_mode TEXT NOT NULL,
+        scan_started_at INTEGER NOT NULL,
+        known_conversation_count INTEGER NOT NULL,
+        conversation_phase TEXT NOT NULL,
+        history_complete INTEGER NOT NULL DEFAULT 0,
+        history_cursor TEXT,
+        thread_root_count INTEGER NOT NULL DEFAULT 0,
+        completed_thread_count INTEGER NOT NULL DEFAULT 0,
+        pending_thread_count INTEGER NOT NULL DEFAULT 0,
+        active_thread_ts TEXT,
+        replies_cursor TEXT,
+        oldest_message_ts TEXT,
+        newest_message_ts TEXT,
+        first_discovered_at INTEGER NOT NULL,
+        history_complete_at INTEGER,
+        replies_complete_at INTEGER,
+        last_observed_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL,
+        UNIQUE(account_key, conversation_id)
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_slack_backfill_proofs_account_phase
+      ON slack_backfill_proofs(account_key, conversation_phase, updated_at);
+    `,
+  },
 ];
