@@ -944,7 +944,7 @@ function projectRealtimeMessageEvent(
       service: normalizeText(payload.service ?? null),
       status: normalizeText(payload.status ?? null),
       isFromMe: boolToInt(payload.isFromMe),
-      content: normalizeText(payload.content) ?? payload.content,
+      content: resolveProjectedMessageContent(payload),
       deliveredAt: payload.deliveredAt ?? null,
       readAt: payload.readAt ?? null,
       editedAt: payload.editedAt ?? null,
@@ -958,6 +958,7 @@ function projectRealtimeMessageEvent(
 
   changes.dirtyConversationIds.add(conversationId);
   changes.dirtyMessageIds.add(messageId);
+  projectMessageAttachments(conn, changes, event, payload, messageId);
 }
 
 function projectContactObservation(
@@ -1280,6 +1281,16 @@ function projectMessageEvent(
     changes.dirtyReplyMessageIds.add(messageId);
   }
 
+  projectMessageAttachments(conn, changes, event, payload, messageId);
+}
+
+function projectMessageAttachments(
+  conn: LocalDbExecutor,
+  changes: ProjectionChangeSet,
+  event: ProjectableRawEvent,
+  payload: MessagePayload,
+  messageId: string,
+): void {
   const desiredAttachmentIds = new Set<string>();
   let removedAttachment = false;
   for (const [index, attachment] of (payload.attachments ?? []).entries()) {
@@ -1877,6 +1888,10 @@ function finalizeRealtimeProjection(
   }
   if (changes.dirtyConversationIds.size > 0) {
     refreshConversationSummariesForIds(conn, changes.dirtyConversationIds);
+  }
+  if (changes.touchedAttachments && changes.dirtyMessageIds.size > 0) {
+    refreshAttachmentCountsForIds(conn, changes.dirtyMessageIds);
+    refreshMessageSearchIndexForIds(conn, changes.dirtyMessageIds);
   }
   if (changes.touchedReactions && changes.dirtyMessageIds.size > 0) {
     refreshReactionCountsForIds(conn, changes.dirtyMessageIds);
