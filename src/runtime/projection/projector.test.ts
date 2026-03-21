@@ -284,7 +284,7 @@ describe("projector", () => {
       payload: {
         sourceEntityKey: "contacts:ava",
         fields: { display_name: "Ava Chen" },
-        handles: [{ type: "phone", value: "+1 (555) 123-4567", deterministic: true }],
+        handles: [{ type: "phone", value: "(555) 123-4567", deterministic: true }],
       },
       sourceVersion: "contacts-v1",
     });
@@ -367,6 +367,167 @@ describe("projector", () => {
       sender_name: "Ava Chen",
       conversation_name: "Ava Chen",
     });
+
+    db.close();
+  });
+
+  it("merges iMessage phone stubs into later Contacts observations when formats differ", () => {
+    const db = createDb();
+
+    db.insertRawEvent({
+      id: "imessage-conversation-parent",
+      platform: "imessage",
+      accountKey: "local",
+      entityKind: "conversation",
+      eventKind: "observed",
+      observedAt: 1,
+      dedupeKey: "imessage:conversation:parent",
+      payload: {
+        sourceConversationKey: "chat-parent",
+        conversationType: "dm",
+        service: "iMessage",
+        displayName: "+17737441662",
+        participants: [{ sourceEntityKey: "imessage:+17737441662" }],
+      },
+      sourceVersion: "imessage-v1",
+    });
+    db.insertRawEvent({
+      id: "imessage-message-parent",
+      platform: "imessage",
+      accountKey: "local",
+      entityKind: "message",
+      eventKind: "message_created",
+      observedAt: 2,
+      dedupeKey: "imessage:message:parent",
+      payload: {
+        sourceMessageKey: "message-parent",
+        sourceConversationKey: "chat-parent",
+        senderSourceKey: "imessage:+17737441662",
+        sentAt: 2,
+        content: "hello from parent",
+        service: "iMessage",
+        isFromMe: false,
+      },
+      sourceVersion: "imessage-v1",
+    });
+    db.insertRawEvent({
+      id: "contacts-parent",
+      platform: "contacts",
+      accountKey: "local",
+      entityKind: "contact",
+      eventKind: "observed",
+      observedAt: 3,
+      dedupeKey: "contacts:parent",
+      payload: {
+        sourceEntityKey: "contacts:parent",
+        fields: { display_name: "Parent" },
+        handles: [{ type: "phone", value: "773 744 1662", deterministic: true }],
+      },
+      sourceVersion: "contacts-v1",
+    });
+
+    projectPendingRawEvents(db);
+
+    const contactRows = db.orm().all<{ name: string | null }>(sql`
+      SELECT name
+      FROM contacts
+      ORDER BY id ASC
+    `);
+    expect(contactRows).toEqual([{ name: "Parent" }]);
+
+    const row = db.orm().get<{
+      sender_name: string | null;
+      participant_name: string | null;
+      conversation_name: string | null;
+    }>(sql`
+      SELECT
+        m.sender_name,
+        cp.participant_name,
+        c.name AS conversation_name
+      FROM messages m
+      JOIN conversation_participants cp ON cp.conversation_id = m.conversation_id
+      JOIN conversations c ON c.id = m.conversation_id
+      WHERE m.platform_message_id = 'message-parent'
+    `);
+    expect(row).toEqual({
+      sender_name: "Parent",
+      participant_name: "Parent",
+      conversation_name: "Parent",
+    });
+
+    db.close();
+  });
+
+  it("matches iMessage email aliases case-insensitively when contacts land later", () => {
+    const db = createDb();
+
+    db.insertRawEvent({
+      id: "imessage-conversation-email",
+      platform: "imessage",
+      accountKey: "local",
+      entityKind: "conversation",
+      eventKind: "observed",
+      observedAt: 1,
+      dedupeKey: "imessage:conversation:email",
+      payload: {
+        sourceConversationKey: "chat-email",
+        conversationType: "dm",
+        service: "iMessage",
+        displayName: "Casey@Example.com",
+        participants: [{ sourceEntityKey: "imessage:Casey@Example.com" }],
+      },
+      sourceVersion: "imessage-v1",
+    });
+    db.insertRawEvent({
+      id: "imessage-message-email",
+      platform: "imessage",
+      accountKey: "local",
+      entityKind: "message",
+      eventKind: "message_created",
+      observedAt: 2,
+      dedupeKey: "imessage:message:email",
+      payload: {
+        sourceMessageKey: "message-email",
+        sourceConversationKey: "chat-email",
+        senderSourceKey: "imessage:Casey@Example.com",
+        sentAt: 2,
+        content: "hello from email",
+        service: "iMessage",
+        isFromMe: false,
+      },
+      sourceVersion: "imessage-v1",
+    });
+    db.insertRawEvent({
+      id: "contacts-email",
+      platform: "contacts",
+      accountKey: "local",
+      entityKind: "contact",
+      eventKind: "observed",
+      observedAt: 3,
+      dedupeKey: "contacts:email",
+      payload: {
+        sourceEntityKey: "contacts:email",
+        fields: { display_name: "Casey Contact" },
+        handles: [{ type: "email", value: "casey@example.com", deterministic: true }],
+      },
+      sourceVersion: "contacts-v1",
+    });
+
+    projectPendingRawEvents(db);
+
+    const contactRows = db.orm().all<{ name: string | null }>(sql`
+      SELECT name
+      FROM contacts
+      ORDER BY id ASC
+    `);
+    expect(contactRows).toEqual([{ name: "Casey Contact" }]);
+
+    const row = db.orm().get<{ sender_name: string | null }>(sql`
+      SELECT sender_name
+      FROM messages
+      WHERE platform_message_id = 'message-email'
+    `);
+    expect(row).toEqual({ sender_name: "Casey Contact" });
 
     db.close();
   });

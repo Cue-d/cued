@@ -19,7 +19,7 @@ import type {
   SyncRunStatus,
   SyncRunType,
 } from "../core/types/provider.js";
-import { normalizePhone } from "../core/utils/phone.js";
+import { normalizePhone, toE164 } from "../core/utils/phone.js";
 import type {
   PendingRollbackState,
   UpdateErrorState,
@@ -284,6 +284,10 @@ function normalizeSignalThreadRecipient(
   if (resolution === "signal_id") {
     return trimmed.toLowerCase();
   }
+  const e164Phone = toE164(trimmed);
+  if (e164Phone) {
+    return e164Phone;
+  }
   const normalizedPhone = normalizePhone(trimmed);
   if (normalizedPhone) {
     return normalizedPhone;
@@ -323,6 +327,14 @@ function normalizeWhatsAppHandleLookupValue(value: string): string {
     return normalizedPhone;
   }
   return normalizeWhatsAppJid(trimmed);
+}
+
+function toWhatsAppJidFromPhone(value: string): string | null {
+  const e164Phone = toE164(value);
+  if (!e164Phone) {
+    return null;
+  }
+  return `${e164Phone.slice(1)}@s.whatsapp.net`;
 }
 
 export type LocalDrizzleDatabase = BetterSQLite3Database<typeof schema>;
@@ -1342,8 +1354,7 @@ export class CuedDatabase {
             } satisfies SignalSendCandidate;
           }
           if (handle.platform === "signal" && handle.type === "phone") {
-            const recipient =
-              normalizePhone(handle.value) || normalizePhone(handle.normalized_value);
+            const recipient = toE164(handle.value) || toE164(handle.normalized_value);
             if (!recipient) {
               return null;
             }
@@ -1354,8 +1365,7 @@ export class CuedDatabase {
             } satisfies SignalSendCandidate;
           }
           if (handle.type === "phone") {
-            const recipient =
-              normalizePhone(handle.value) || normalizePhone(handle.normalized_value);
+            const recipient = toE164(handle.value) || toE164(handle.normalized_value);
             if (!recipient) {
               return null;
             }
@@ -1366,8 +1376,7 @@ export class CuedDatabase {
             } satisfies SignalSendCandidate;
           }
           if (handle.type === "imessage_handle") {
-            const recipient =
-              normalizePhone(handle.value) || normalizePhone(handle.normalized_value);
+            const recipient = toE164(handle.value) || toE164(handle.normalized_value);
             if (!recipient) {
               return null;
             }
@@ -1403,7 +1412,7 @@ export class CuedDatabase {
       };
     }
 
-    const directPhone = normalizePhone(trimmed);
+    const directPhone = toE164(trimmed);
     if (directPhone) {
       return {
         target: directPhone,
@@ -1528,13 +1537,14 @@ export class CuedDatabase {
           }
           if (handle.type === "phone") {
             const recipient =
-              normalizePhone(handle.value) || normalizePhone(handle.normalized_value);
+              toWhatsAppJidFromPhone(handle.value) ||
+              toWhatsAppJidFromPhone(handle.normalized_value);
             if (!recipient) {
               return null;
             }
             return {
               rank: 1,
-              target: `${recipient.slice(1)}@s.whatsapp.net`,
+              target: recipient,
               resolution: "phone" as const,
             } satisfies WhatsAppSendCandidate;
           }
@@ -1564,12 +1574,11 @@ export class CuedDatabase {
       };
     }
 
-    const directPhone = normalizePhone(trimmed);
+    const directPhone = toWhatsAppJidFromPhone(trimmed);
     if (directPhone) {
-      const jid = `${directPhone.slice(1)}@s.whatsapp.net`;
       return {
-        target: jid,
-        threadId: buildWhatsAppThreadId(jid),
+        target: directPhone,
+        threadId: buildWhatsAppThreadId(directPhone),
         resolution: "passthrough",
         matchedContactIds: candidateContactIds,
         matchedName,
