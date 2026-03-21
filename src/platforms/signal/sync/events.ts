@@ -9,7 +9,6 @@ import type { SyncBundle } from "../../core/sync.js";
 import {
   bestSignalContactName,
   contactHandleType,
-  makeSignalMessageFallbackId,
   type SignalContact,
   type SignalGroup,
   type SignalReceivedMessage,
@@ -260,44 +259,6 @@ export function buildSignalMessageEvent(
     } satisfies MessagePayload,
     sourceVersion: "signal-v1",
   };
-}
-
-export function buildOptimisticSignalRawEvents(options: {
-  accountKey: string;
-  recipientHandle: string;
-  threadId: string;
-  threadName?: string | null;
-  text: string;
-  sentAt: number;
-  observedAt?: number;
-}): SyncBundle["rawEvents"] {
-  const observedAt = options.observedAt ?? options.sentAt;
-  const threadType = options.threadId.startsWith("group:") ? "group" : "dm";
-  const message: SignalReceivedMessage = {
-    messageId: makeSignalMessageFallbackId({
-      timestamp: options.sentAt,
-      threadId: options.threadId,
-      isFromMe: true,
-      text: options.text,
-      fallbackIndex: 0,
-    }),
-    threadId: options.threadId,
-    threadType,
-    threadName: options.threadName ?? undefined,
-    text: options.text,
-    sentAt: options.sentAt,
-    isFromMe: true,
-    senderHandle: undefined,
-    senderName: undefined,
-    peerHandle: threadType === "dm" ? options.recipientHandle : undefined,
-    attachments: [],
-  };
-
-  return buildSignalRawEventsFromMessages({
-    accountKey: options.accountKey,
-    messages: [message],
-    observedBase: observedAt,
-  });
 }
 
 function appendMessageEvents(

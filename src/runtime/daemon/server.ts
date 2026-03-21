@@ -20,6 +20,7 @@ import {
   isPlatform,
   type Platform,
   type ProviderRawEventInput,
+  type RawEventAcquisitionMode,
 } from "../../core/types/provider.js";
 import { safeParseJsonRecord } from "../../db/codecs.js";
 import { type OutboundMessageRow, openCuedDatabase } from "../../db/database.js";
@@ -47,10 +48,7 @@ import {
   type SignalRealtimeStatus,
   SignalRealtimeSupervisor,
 } from "../../platforms/signal/realtime/session.js";
-import {
-  buildOptimisticSignalRawEvents,
-  buildSignalRawEventsFromMessages,
-} from "../../platforms/signal/sync/events.js";
+import { buildSignalRawEventsFromMessages } from "../../platforms/signal/sync/events.js";
 import { inspectSlackHelper } from "../../platforms/slack/helper/binary.js";
 import {
   type SlackRealtimeEventEnvelope,
@@ -72,10 +70,7 @@ import {
   type WhatsAppRealtimeStatus,
   WhatsAppRealtimeSupervisor,
 } from "../../platforms/whatsapp/realtime/session.js";
-import {
-  buildOptimisticWhatsAppRawEvents,
-  buildWhatsAppRawEventsFromSnapshot,
-} from "../../platforms/whatsapp/sync/events.js";
+import { buildWhatsAppRawEventsFromSnapshot } from "../../platforms/whatsapp/sync/events.js";
 import type {
   WhatsAppHelperEventEnvelope,
   WhatsAppReceiptSnapshot,
@@ -392,8 +387,26 @@ function resolveCheckpointSyncMode(
   return bundleSyncMode === "incremental" ? "incremental" : "full";
 }
 
+function withRawEventAcquisitionMode(
+  rawEvents: ProviderRawEventInput[],
+  acquisitionMode: RawEventAcquisitionMode,
+): ProviderRawEventInput[] {
+  return rawEvents.map((rawEvent) => ({
+    ...rawEvent,
+    provenance: {
+      ...(rawEvent.provenance ?? {}),
+      acquisitionMode,
+    },
+  }));
+}
+
 async function safeEmitHookEvent(
-  event: "integration.authenticated" | "sync.completed" | "sync.failed" | "message.received",
+  event:
+    | "integration.authenticated"
+    | "sync.completed"
+    | "sync.failed"
+    | "message.sent"
+    | "message.received",
   payload: Record<string, unknown>,
 ): Promise<void> {
   try {
@@ -410,6 +423,34 @@ async function emitAuthenticatedHook(
 ): Promise<void> {
   await safeEmitHookEvent("integration.authenticated", {
     integration: getIntegrationSummary(db, platform, accountKey),
+  });
+}
+
+async function emitMessageSentHook(
+  message: OutboundMessageRow,
+  details: {
+    transport: string;
+    sentAt: number;
+    providerMessageId?: string | null;
+    conversationExternalId?: string | null;
+  },
+): Promise<void> {
+  await safeEmitHookEvent("message.sent", {
+    outboundMessage: {
+      id: message.id,
+      platform: message.platform,
+      accountKey: message.account_key,
+      target: message.target,
+      threadId: message.thread_id,
+      text: message.text,
+      createdAt: message.created_at,
+    },
+    delivery: {
+      transport: details.transport,
+      sentAt: details.sentAt,
+      providerMessageId: details.providerMessageId ?? null,
+      conversationExternalId: details.conversationExternalId ?? null,
+    },
   });
 }
 
@@ -1121,6 +1162,15 @@ export async function runDaemon(): Promise<void> {
     }
   };
 
+  const releaseMessageReceivedHooksForRange = async (range: {
+    startRowId: number;
+    endRowId: number;
+  }) => {
+    await projectionMessageHooks.releaseCompletedRange(range, async (payload) => {
+      await safeEmitHookEvent("message.received", payload);
+    });
+  };
+
   const scheduleSignalSendEchoCatchup = (message: OutboundMessageRow, timestamp: number) => {
     const threadId = message.thread_id ?? null;
     const pending: PendingSignalEcho = {
@@ -1328,11 +1378,14 @@ export async function runDaemon(): Promise<void> {
     userEntityUrn: string,
   ): Promise<void> => {
     try {
-      const rawEvents = buildLinkedInRawEventsFromRealtimeEnvelope({
-        accountKey,
-        userEntityUrn,
-        envelope,
-      });
+      const rawEvents = withRawEventAcquisitionMode(
+        buildLinkedInRawEventsFromRealtimeEnvelope({
+          accountKey,
+          userEntityUrn,
+          envelope,
+        }),
+        "realtime",
+      );
       if (rawEvents.length === 0) {
         return;
       }
@@ -1356,15 +1409,11 @@ export async function runDaemon(): Promise<void> {
           batchSize: realtimeProjectionBatchSize,
         });
       }
-      if (insertResult.firstInsertedRowId != null && insertResult.lastInsertedRowId != null) {
-        queueProjectionRun(
-          `linkedin_realtime:${accountKey}`,
-          {
-            startRowId: insertResult.firstInsertedRowId,
-            endRowId: insertResult.lastInsertedRowId,
-          },
-          { delayMs: deferredProjectionCoalesceMs },
-        );
+      const projection = db.getProjectionBacklog();
+      if (projection.pending_raw_events > 0) {
+        queueProjectionRun(`linkedin_realtime:${accountKey}`, undefined, {
+          delayMs: deferredProjectionCoalesceMs,
+        });
       }
       if (insertResult.insertedCount > 0) {
         updateLinkedInCheckpointFromRealtime(accountKey);
@@ -1381,6 +1430,16 @@ export async function runDaemon(): Promise<void> {
         `linkedin_realtime:${accountKey}`,
         inboundMessages,
       );
+      if (
+        projection.pending_raw_events === 0 &&
+        insertResult.firstInsertedRowId != null &&
+        insertResult.lastInsertedRowId != null
+      ) {
+        await releaseMessageReceivedHooksForRange({
+          startRowId: insertResult.firstInsertedRowId,
+          endRowId: insertResult.lastInsertedRowId,
+        });
+      }
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       linkedInLogger.warn("realtime ingest failed", { accountKey, error: message });
@@ -1415,69 +1474,6 @@ export async function runDaemon(): Promise<void> {
     });
   };
 
-  const insertSignalOptimisticSentMessage = (
-    message: OutboundMessageRow,
-    timestamp: number,
-  ): void => {
-    let threadName: string | null = null;
-    if (message.metadata_json) {
-      const metadata = safeParseJsonRecord(
-        message.metadata_json,
-        "outbound_messages.metadata_json",
-      );
-      if (typeof metadata?.matchedName === "string" && metadata.matchedName.trim().length > 0) {
-        threadName = metadata.matchedName.trim();
-      }
-    }
-
-    const threadId =
-      message.thread_id ??
-      (message.target.startsWith("group:") ? message.target : `dm:${message.target}`);
-    const rawEvents = buildOptimisticSignalRawEvents({
-      accountKey: message.account_key,
-      recipientHandle: message.target,
-      threadId,
-      threadName,
-      text: message.text,
-      sentAt: timestamp,
-      observedAt: now(),
-    });
-    if (rawEvents.length === 0) {
-      return;
-    }
-
-    db.upsertSourceAccounts([
-      {
-        platform: "signal",
-        accountKey: message.account_key,
-        displayName: "Signal",
-      },
-    ]);
-    const insertResult = db.insertRawEvents(rawEvents);
-    if (
-      realtimeProjectionEnabled &&
-      insertResult.firstInsertedRowId != null &&
-      insertResult.lastInsertedRowId != null
-    ) {
-      projectRealtimeRange(db, {
-        startRowId: insertResult.firstInsertedRowId,
-        endRowId: insertResult.lastInsertedRowId,
-        batchSize: realtimeProjectionBatchSize,
-      });
-    }
-    if (insertResult.firstInsertedRowId != null && insertResult.lastInsertedRowId != null) {
-      queueProjectionRun(
-        `signal_outbound:${message.account_key}`,
-        {
-          startRowId: insertResult.firstInsertedRowId,
-          endRowId: insertResult.lastInsertedRowId,
-        },
-        { delayMs: deferredProjectionCoalesceMs },
-      );
-      updateSignalCheckpointFromRealtime(message.account_key);
-    }
-  };
-
   const runSignalSyncExclusively = async <T>(
     accountKey: string,
     task: () => Promise<T>,
@@ -1504,10 +1500,13 @@ export async function runDaemon(): Promise<void> {
     messages: Parameters<typeof buildSignalRawEventsFromMessages>[0]["messages"],
   ): Promise<void> => {
     try {
-      const rawEvents = buildSignalRawEventsFromMessages({
-        accountKey,
-        messages,
-      });
+      const rawEvents = withRawEventAcquisitionMode(
+        buildSignalRawEventsFromMessages({
+          accountKey,
+          messages,
+        }),
+        "realtime",
+      );
       if (rawEvents.length === 0) {
         return;
       }
@@ -1531,15 +1530,11 @@ export async function runDaemon(): Promise<void> {
           batchSize: realtimeProjectionBatchSize,
         });
       }
-      if (insertResult.firstInsertedRowId != null && insertResult.lastInsertedRowId != null) {
-        queueProjectionRun(
-          `signal_realtime:${accountKey}`,
-          {
-            startRowId: insertResult.firstInsertedRowId,
-            endRowId: insertResult.lastInsertedRowId,
-          },
-          { delayMs: deferredProjectionCoalesceMs },
-        );
+      const projection = db.getProjectionBacklog();
+      if (projection.pending_raw_events > 0) {
+        queueProjectionRun(`signal_realtime:${accountKey}`, undefined, {
+          delayMs: deferredProjectionCoalesceMs,
+        });
       }
       if (insertResult.insertedCount > 0) {
         updateSignalCheckpointFromRealtime(accountKey);
@@ -1569,6 +1564,16 @@ export async function runDaemon(): Promise<void> {
         `signal_realtime:${accountKey}`,
         inboundMessages,
       );
+      if (
+        projection.pending_raw_events === 0 &&
+        insertResult.firstInsertedRowId != null &&
+        insertResult.lastInsertedRowId != null
+      ) {
+        await releaseMessageReceivedHooksForRange({
+          startRowId: insertResult.firstInsertedRowId,
+          endRowId: insertResult.lastInsertedRowId,
+        });
+      }
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       signalLogger.warn("realtime ingest failed", { accountKey, error: message });
@@ -1603,81 +1608,19 @@ export async function runDaemon(): Promise<void> {
     });
   };
 
-  const insertWhatsAppOptimisticSentMessage = (
-    message: OutboundMessageRow,
-    sendResult: { messageID: string; chatJID: string; timestamp: number },
-  ): void => {
-    let threadName: string | null = null;
-    if (message.metadata_json) {
-      const metadata = safeParseJsonRecord(
-        message.metadata_json,
-        "outbound_messages.metadata_json",
-      );
-      if (typeof metadata?.matchedName === "string" && metadata.matchedName.trim().length > 0) {
-        threadName = metadata.matchedName.trim();
-      }
-    }
-
-    const rawEvents = buildOptimisticWhatsAppRawEvents({
-      accountKey: message.account_key,
-      message: {
-        messageID: sendResult.messageID,
-        chatJID: sendResult.chatJID,
-        senderJID: sendResult.chatJID,
-        fromMe: true,
-        timestamp: sendResult.timestamp,
-        text: message.text,
-        status: "sent",
-      },
-      threadName,
-      observedAt: now(),
-    });
-    if (rawEvents.length === 0) {
-      return;
-    }
-
-    db.upsertSourceAccounts([
-      {
-        platform: "whatsapp",
-        accountKey: message.account_key,
-        displayName: "WhatsApp",
-      },
-    ]);
-    const insertResult = db.insertRawEvents(rawEvents);
-    if (
-      realtimeProjectionEnabled &&
-      insertResult.firstInsertedRowId != null &&
-      insertResult.lastInsertedRowId != null
-    ) {
-      projectRealtimeRange(db, {
-        startRowId: insertResult.firstInsertedRowId,
-        endRowId: insertResult.lastInsertedRowId,
-        batchSize: realtimeProjectionBatchSize,
-      });
-    }
-    if (insertResult.firstInsertedRowId != null && insertResult.lastInsertedRowId != null) {
-      queueProjectionRun(
-        `whatsapp_outbound:${message.account_key}`,
-        {
-          startRowId: insertResult.firstInsertedRowId,
-          endRowId: insertResult.lastInsertedRowId,
-        },
-        { delayMs: deferredProjectionCoalesceMs },
-      );
-      updateWhatsAppCheckpointFromRealtime(message.account_key);
-    }
-  };
-
   const ingestWhatsAppRealtimeSnapshot = async (
     accountKey: string,
     snapshot: WhatsAppSnapshot,
     trigger: string,
   ): Promise<void> => {
     try {
-      const rawEvents = buildWhatsAppRawEventsFromSnapshot({
-        accountKey,
-        snapshot,
-      });
+      const rawEvents = withRawEventAcquisitionMode(
+        buildWhatsAppRawEventsFromSnapshot({
+          accountKey,
+          snapshot,
+        }),
+        "realtime",
+      );
       if (rawEvents.length === 0) {
         return;
       }
@@ -1701,15 +1644,9 @@ export async function runDaemon(): Promise<void> {
           batchSize: realtimeProjectionBatchSize,
         });
       }
-      if (insertResult.firstInsertedRowId != null && insertResult.lastInsertedRowId != null) {
-        queueProjectionRun(
-          trigger,
-          {
-            startRowId: insertResult.firstInsertedRowId,
-            endRowId: insertResult.lastInsertedRowId,
-          },
-          { delayMs: deferredProjectionCoalesceMs },
-        );
+      const projection = db.getProjectionBacklog();
+      if (projection.pending_raw_events > 0) {
+        queueProjectionRun(trigger, undefined, { delayMs: deferredProjectionCoalesceMs });
       }
       if (insertResult.insertedCount > 0) {
         updateWhatsAppCheckpointFromRealtime(accountKey);
@@ -1726,6 +1663,16 @@ export async function runDaemon(): Promise<void> {
         trigger,
         inboundMessages,
       );
+      if (
+        projection.pending_raw_events === 0 &&
+        insertResult.firstInsertedRowId != null &&
+        insertResult.lastInsertedRowId != null
+      ) {
+        await releaseMessageReceivedHooksForRange({
+          startRowId: insertResult.firstInsertedRowId,
+          endRowId: insertResult.lastInsertedRowId,
+        });
+      }
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       whatsAppLogger.warn("realtime ingest failed", { accountKey, error: message });
@@ -1897,17 +1844,11 @@ export async function runDaemon(): Promise<void> {
       try {
         if (message.platform === "signal") {
           const sendResult = await sendSignalOutboundMessage(message, signalRealtime);
-          try {
-            insertSignalOptimisticSentMessage(message, sendResult.timestamp);
-          } catch (error) {
-            const detail = error instanceof Error ? error.message : String(error);
-            signalLogger.warn("failed to insert optimistic sent message", {
-              accountKey: message.account_key,
-              outboundMessageId: message.id,
-              detail,
-            });
-          }
           db.completeOutboundMessage(message.id);
+          await emitMessageSentHook(message, {
+            transport: sendResult.transport,
+            sentAt: sendResult.timestamp,
+          });
           if (sendResult.transport === "session") {
             scheduleSignalSendEchoCatchup(message, sendResult.timestamp);
             return;
@@ -1932,17 +1873,13 @@ export async function runDaemon(): Promise<void> {
 
         if (message.platform === "whatsapp") {
           const sendResult = await sendWhatsAppOutboundMessage(message, whatsAppRealtime);
-          try {
-            insertWhatsAppOptimisticSentMessage(message, sendResult.result);
-          } catch (error) {
-            const detail = error instanceof Error ? error.message : String(error);
-            whatsAppLogger.warn("failed to insert optimistic sent message", {
-              accountKey: message.account_key,
-              outboundMessageId: message.id,
-              detail,
-            });
-          }
           db.completeOutboundMessage(message.id);
+          await emitMessageSentHook(message, {
+            transport: sendResult.transport,
+            sentAt: sendResult.result.timestamp,
+            providerMessageId: sendResult.result.messageID,
+            conversationExternalId: sendResult.result.chatJID,
+          });
           return;
         }
         db.failOutboundMessage({
@@ -2585,10 +2522,13 @@ export async function runDaemon(): Promise<void> {
           });
           adapterFetchMs += now() - pageFetchStartedAt;
 
-          const rawEvents = buildWhatsAppRawEventsFromSnapshot({
-            accountKey,
-            snapshot: page,
-          });
+          const rawEvents = withRawEventAcquisitionMode(
+            buildWhatsAppRawEventsFromSnapshot({
+              accountKey,
+              snapshot: page,
+            }),
+            "sync",
+          );
           ingestedCount += rawEvents.length;
           lastCompletedAt = page.completedAt ?? now();
           hasMore = page.hasMore;
@@ -2637,7 +2577,7 @@ export async function runDaemon(): Promise<void> {
         bundleHasMore = bundle.hasMore ?? false;
         ingestedCount = bundle.rawEvents.length;
         const rawEventInsertStartedAt = now();
-        insertResult = db.insertRawEvents(bundle.rawEvents);
+        insertResult = db.insertRawEvents(withRawEventAcquisitionMode(bundle.rawEvents, "sync"));
         rawEventInsertMs = now() - rawEventInsertStartedAt;
         const slackBackfillDiagnostics = Array.isArray(
           bundle.diagnostics?.slackBackfillConversations,
@@ -2731,16 +2671,19 @@ export async function runDaemon(): Promise<void> {
       };
 
       let projectionQueued = false;
-      if (insertResult.firstInsertedRowId != null && insertResult.lastInsertedRowId != null) {
-        queueProjectionRun(
-          `ingest:${currentRun.platform}:${accountKey}`,
-          {
-            startRowId: insertResult.firstInsertedRowId,
-            endRowId: insertResult.lastInsertedRowId,
-          },
-          { delayMs: deferredProjectionCoalesceMs },
-        );
+      if (projection.pending_raw_events > 0) {
+        queueProjectionRun(`ingest:${currentRun.platform}:${accountKey}`, undefined, {
+          delayMs: deferredProjectionCoalesceMs,
+        });
         projectionQueued = true;
+      } else if (
+        insertResult.firstInsertedRowId != null &&
+        insertResult.lastInsertedRowId != null
+      ) {
+        await releaseMessageReceivedHooksForRange({
+          startRowId: insertResult.firstInsertedRowId,
+          endRowId: insertResult.lastInsertedRowId,
+        });
       }
       db.finishRun(currentRun.id, {
         ingested: ingestedCount,

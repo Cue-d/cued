@@ -5,6 +5,8 @@ import type {
   ConversationObservationPayload,
   MessagePayload,
   Platform,
+  RawEventEntityKind,
+  RawEventPayload,
   ReactionPayload,
   TimelineEventPayload,
 } from "../../core/types/provider.js";
@@ -22,6 +24,10 @@ import {
   projectionState,
   timelineEvents,
 } from "../../db/schema.js";
+import {
+  resolveNormalizedSchemaForStoredRawEvent,
+  upcastNormalizedRawEventPayload,
+} from "./events.js";
 
 type LocalDbExecutor = Pick<
   LocalDrizzleDatabase,
@@ -35,6 +41,8 @@ type RawEventRow = {
   account_key: string;
   entity_kind: string;
   event_kind: string;
+  normalized_schema: string | null;
+  provenance_json: string | null;
   observed_at: number;
   payload_json: string;
 };
@@ -61,7 +69,25 @@ type ProjectionChangeSet = {
 
 type ProjectableRawEvent = Pick<
   RawEventRow,
-  "platform" | "account_key" | "event_kind" | "observed_at" | "payload_json"
+  | "platform"
+  | "account_key"
+  | "entity_kind"
+  | "event_kind"
+  | "normalized_schema"
+  | "observed_at"
+  | "payload_json"
+>;
+
+type RawEventNormalizationContext = Pick<
+  RawEventRow,
+  | "rowid"
+  | "id"
+  | "platform"
+  | "account_key"
+  | "entity_kind"
+  | "event_kind"
+  | "normalized_schema"
+  | "provenance_json"
 >;
 
 type ProjectionOverview = {
@@ -517,6 +543,44 @@ function resetProjectionCache(db: CuedDatabase): ProjectionCache {
   return cache;
 }
 
+function describeRawEventContext(event: RawEventNormalizationContext): string {
+  const parts = [
+    `row ${event.rowid}`,
+    `event ${event.id}`,
+    `${event.platform}/${event.account_key}`,
+    `${event.entity_kind}:${event.event_kind}`,
+  ];
+  if (event.normalized_schema) {
+    parts.push(`schema ${event.normalized_schema}`);
+  }
+
+  if (event.provenance_json) {
+    try {
+      const provenance = JSON.parse(event.provenance_json) as {
+        sourceVersion?: string | null;
+        providerApiVersion?: string | null;
+        acquisitionMode?: string | null;
+        captureKind?: string | null;
+      };
+      if (provenance.sourceVersion) {
+        parts.push(`sourceVersion ${provenance.sourceVersion}`);
+      }
+      if (provenance.providerApiVersion) {
+        parts.push(`providerApiVersion ${provenance.providerApiVersion}`);
+      }
+      if (provenance.acquisitionMode) {
+        parts.push(`acquisitionMode ${provenance.acquisitionMode}`);
+      } else if (provenance.captureKind) {
+        parts.push(`captureKind ${provenance.captureKind}`);
+      }
+    } catch {
+      parts.push("invalid provenance");
+    }
+  }
+
+  return parts.join(", ");
+}
+
 function createProjectionChangeSet(): ProjectionChangeSet {
   return {
     dirtyContactIds: new Set<string>(),
@@ -787,178 +851,6 @@ function upsertProjectionState(
       },
     })
     .run();
-}
-
-function projectRealtimeConversationObservation(
-  conn: LocalDbExecutor,
-  cache: ProjectionCache,
-  changes: ProjectionChangeSet,
-  event: ProjectableRawEvent,
-): void {
-  const payload = JSON.parse(event.payload_json) as ConversationObservationPayload;
-  const conversationId = ensureConversationStub(
-    conn,
-    cache,
-    event.platform,
-    event.account_key,
-    payload.sourceConversationKey,
-    event.observed_at,
-  );
-
-  const conversationSet: {
-    updatedAt: number;
-    nativeConversationKey?: string | null;
-    type: "dm" | "group";
-    subtype?: string | null;
-    service?: string | null;
-    name?: string | null;
-    topic?: string | null;
-    unreadCount?: number;
-  } = {
-    updatedAt: event.observed_at,
-    type: payload.conversationType,
-  };
-  if (payload.nativeConversationKey !== undefined) {
-    conversationSet.nativeConversationKey = normalizeText(payload.nativeConversationKey);
-  }
-  if (payload.subtype !== undefined) {
-    conversationSet.subtype = normalizeText(payload.subtype);
-  }
-  if (payload.service !== undefined) {
-    conversationSet.service = normalizeText(payload.service);
-  }
-  if (payload.displayName !== undefined) {
-    conversationSet.name = normalizeText(payload.displayName);
-  }
-  if (payload.topic !== undefined) {
-    conversationSet.topic = normalizeText(payload.topic);
-  }
-  if (payload.unreadCount !== undefined && payload.unreadCount !== null) {
-    conversationSet.unreadCount = payload.unreadCount;
-  }
-
-  conn.update(conversations).set(conversationSet).where(eq(conversations.id, conversationId)).run();
-
-  if (event.event_kind === "removed") {
-    conn
-      .update(conversationParticipants)
-      .set({
-        isActive: 0,
-        leftAt: event.observed_at,
-        updatedAt: event.observed_at,
-      })
-      .where(eq(conversationParticipants.conversationId, conversationId))
-      .run();
-  }
-
-  if (event.event_kind === "removed") {
-    for (const participant of payload.participants) {
-      const contactId = resolveOrEnsureContact(
-        conn,
-        cache,
-        event.platform,
-        event.account_key,
-        participant.sourceEntityKey,
-        event.observed_at,
-      );
-      if (!contactId) {
-        continue;
-      }
-
-      conn
-        .insert(conversationParticipants)
-        .values({
-          conversationId,
-          contactId,
-          sourceParticipantKey: participant.sourceEntityKey,
-          participantName: cache.contactNameMap.get(contactId) ?? null,
-          role: null,
-          isSelf: boolToInt(participant.isSelf),
-          isActive: 0,
-          joinedAt: event.observed_at,
-          leftAt: event.observed_at,
-          updatedAt: event.observed_at,
-        })
-        .onConflictDoUpdate({
-          target: [
-            conversationParticipants.conversationId,
-            conversationParticipants.contactId,
-            conversationParticipants.sourceParticipantKey,
-          ],
-          set: {
-            participantName: cache.contactNameMap.get(contactId) ?? null,
-            isSelf: boolToInt(participant.isSelf),
-            isActive: 0,
-            leftAt: event.observed_at,
-            updatedAt: event.observed_at,
-          },
-        })
-        .run();
-    }
-  }
-
-  if (payload.displayName !== undefined) {
-    cache.conversationNameMap.set(conversationId, normalizeText(payload.displayName));
-  }
-  changes.dirtyConversationIds.add(conversationId);
-}
-
-function projectRealtimeMessageEvent(
-  conn: LocalDbExecutor,
-  cache: ProjectionCache,
-  changes: ProjectionChangeSet,
-  event: ProjectableRawEvent,
-): void {
-  const payload = JSON.parse(event.payload_json) as MessagePayload;
-  const { messageId, conversationId } = ensureMessageStub(
-    conn,
-    cache,
-    event.platform,
-    event.account_key,
-    payload.sourceConversationKey,
-    payload.sourceMessageKey,
-    event.observed_at,
-  );
-
-  const senderContactId = resolveOrEnsureContact(
-    conn,
-    cache,
-    event.platform,
-    event.account_key,
-    payload.senderSourceKey,
-    event.observed_at,
-  );
-
-  conn
-    .update(messages)
-    .set({
-      platform: event.platform,
-      accountKey: event.account_key,
-      platformMessageId: payload.sourceMessageKey,
-      conversationId,
-      senderContactId: senderContactId ?? null,
-      senderSourceKey: payload.senderSourceKey,
-      senderName: senderContactId ? (cache.contactNameMap.get(senderContactId) ?? null) : null,
-      conversationName: cache.conversationNameMap.get(conversationId) ?? null,
-      sentAt: payload.sentAt,
-      service: normalizeText(payload.service ?? null),
-      status: normalizeText(payload.status ?? null),
-      isFromMe: boolToInt(payload.isFromMe),
-      content: resolveProjectedMessageContent(payload),
-      deliveredAt: payload.deliveredAt ?? null,
-      readAt: payload.readAt ?? null,
-      editedAt: payload.editedAt ?? null,
-      deletedAt: payload.deletedAt ?? null,
-      isDeleted: boolToInt(payload.isDeleted),
-      isEdited: boolToInt(payload.isEdited),
-      updatedAt: event.observed_at,
-    })
-    .where(eq(messages.id, messageId))
-    .run();
-
-  changes.dirtyConversationIds.add(conversationId);
-  changes.dirtyMessageIds.add(messageId);
-  projectMessageAttachments(conn, changes, event, payload, messageId);
 }
 
 function projectContactObservation(
@@ -1877,27 +1769,6 @@ function refreshMessageSearchIndexForIds(conn: LocalDbExecutor, messageIds: Set<
   }
 }
 
-function finalizeRealtimeProjection(
-  conn: LocalDbExecutor,
-  cache: ProjectionCache,
-  changes: ProjectionChangeSet,
-): void {
-  if (changes.dirtyContactIds.size > 0) {
-    refreshContactFanoutForIds(conn, changes.dirtyContactIds);
-    syncContactNameCache(conn, cache, changes.dirtyContactIds);
-  }
-  if (changes.dirtyConversationIds.size > 0) {
-    refreshConversationSummariesForIds(conn, changes.dirtyConversationIds);
-  }
-  if (changes.touchedAttachments && changes.dirtyMessageIds.size > 0) {
-    refreshAttachmentCountsForIds(conn, changes.dirtyMessageIds);
-    refreshMessageSearchIndexForIds(conn, changes.dirtyMessageIds);
-  }
-  if (changes.touchedReactions && changes.dirtyMessageIds.size > 0) {
-    refreshReactionCountsForIds(conn, changes.dirtyMessageIds);
-  }
-}
-
 function insertMessageSearchIndexForIds(conn: LocalDbExecutor, messageIds: Set<string>): void {
   for (const chunk of chunkArray([...messageIds], SQL_CHUNK_SIZE)) {
     conn.run(sql`
@@ -2020,28 +1891,33 @@ function projectEventBatch(
     }
 
     for (const event of input.rawEvents) {
+      let normalizedSchema: string;
+      let normalizedPayload: RawEventPayload;
+      try {
+        normalizedSchema = resolveNormalizedSchemaForStoredRawEvent({
+          entityKind: event.entity_kind as RawEventEntityKind,
+          eventKind: event.event_kind,
+          normalizedSchema: event.normalized_schema,
+        });
+        normalizedPayload = upcastNormalizedRawEventPayload(
+          normalizedSchema,
+          JSON.parse(event.payload_json) as RawEventPayload,
+        );
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        throw new Error(
+          `Failed to normalize raw event (${describeRawEventContext(event)}): ${message}`,
+        );
+      }
       const shapedEvent = {
         platform: event.platform,
         account_key: event.account_key,
+        entity_kind: event.entity_kind as RawEventEntityKind,
         event_kind: event.event_kind,
+        normalized_schema: normalizedSchema,
         observed_at: event.observed_at,
-        payload_json: event.payload_json,
+        payload_json: JSON.stringify(normalizedPayload),
       };
-
-      if (input.mode === "realtime") {
-        if (event.entity_kind === "contact") {
-          projectContactObservation(tx, cache, changes, shapedEvent);
-        } else if (event.entity_kind === "conversation") {
-          projectRealtimeConversationObservation(tx, cache, changes, shapedEvent);
-        } else if (event.entity_kind === "message") {
-          projectRealtimeMessageEvent(tx, cache, changes, shapedEvent);
-        } else if (event.entity_kind === "reaction") {
-          projectReactionEvent(tx, cache, changes, shapedEvent);
-        } else if (event.entity_kind === "timeline_event") {
-          projectTimelineEvent(tx, cache, shapedEvent);
-        }
-        continue;
-      }
 
       if (event.entity_kind === "contact") {
         projectContactObservation(tx, cache, changes, shapedEvent);
@@ -2062,11 +1938,6 @@ function projectEventBatch(
       if (event.entity_kind === "timeline_event") {
         projectTimelineEvent(tx, cache, shapedEvent);
       }
-    }
-
-    if (input.mode === "realtime") {
-      finalizeRealtimeProjection(tx, cache, changes);
-      return;
     }
 
     finalizeDeferredProjection(tx, cache, changes, {
@@ -2117,19 +1988,23 @@ function projectRangeInternal(
     currentProjectionState.projection_watermark,
     appliedEndRowId,
   );
+  const committedProjectionWatermark =
+    input.mode === "realtime"
+      ? input.startRowId === currentProjectionState.projection_watermark + 1
+        ? deferredProjectionWatermark
+        : null
+      : deferredProjectionWatermark;
   projectEventBatch(db, {
     mode: input.mode,
     rawEvents,
-    projectionWatermark: input.mode === "realtime" ? null : deferredProjectionWatermark,
+    projectionWatermark: committedProjectionWatermark,
     lastRebuildAt: input.mode === "rebuild" ? Date.now() : undefined,
     initialProjection:
       input.mode !== "realtime" && currentProjectionState.projection_watermark === 0,
   });
 
   const projectionWatermark =
-    input.mode === "realtime"
-      ? db.getProjectionState().projection_watermark
-      : deferredProjectionWatermark;
+    committedProjectionWatermark ?? db.getProjectionState().projection_watermark;
 
   return summarizeResult(
     db,
