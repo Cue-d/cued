@@ -166,7 +166,7 @@ func TestRunSessionCommandEmitsSingleDisconnectedEvent(t *testing.T) {
 			_, _ = w.Write([]byte(`{"ok":true,"team":"Acme","user":"Ava","team_id":"T123","user_id":"U123"}`))
 		case "/users.list":
 			_, _ = w.Write([]byte(`{"ok":true,"members":[],"response_metadata":{"next_cursor":""}}`))
-		case "/users.conversations":
+		case "/conversations.list":
 			_, _ = w.Write([]byte(`{"ok":false,"error":"rate_limited"}`))
 		default:
 			http.NotFound(w, r)
