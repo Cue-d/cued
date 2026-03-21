@@ -227,7 +227,7 @@ func listAllConversationsForSession(
 	cursor := ""
 	conversations := make([]slackConversation, 0)
 	for {
-		channels, nextCursor, err := client.GetConversationsForUserContext(ctx, &slackapi.GetConversationsForUserParameters{
+		channels, nextCursor, err := client.GetConversationsContext(ctx, &slackapi.GetConversationsParameters{
 			Types:  types,
 			Cursor: cursor,
 			Limit:  limit,
