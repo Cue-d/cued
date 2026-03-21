@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"strings"
 	"testing"
 )
 
@@ -155,6 +156,64 @@ func TestSlackCommands(t *testing.T) {
 			t.Fatalf("unexpected replies params: %v", lastForm)
 		}
 	})
+}
+
+func TestRunSessionCommandEmitsSingleDisconnectedEvent(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("content-type", "application/json")
+		switch r.URL.Path {
+		case "/auth.test":
+			_, _ = w.Write([]byte(`{"ok":true,"team":"Acme","user":"Ava","team_id":"T123","user_id":"U123"}`))
+		case "/users.list":
+			_, _ = w.Write([]byte(`{"ok":true,"members":[],"response_metadata":{"next_cursor":""}}`))
+		case "/users.conversations":
+			_, _ = w.Write([]byte(`{"ok":false,"error":"rate_limited"}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	runner := newHelperRunner(runnerOptions{
+		apiURL: server.URL + "/",
+	})
+	payload, err := json.Marshal(sessionRequest{
+		Credentials: slackCredentials{Token: "xoxc-test", Cookie: "cookie-test"},
+	})
+	if err != nil {
+		t.Fatalf("marshal payload: %v", err)
+	}
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	exitCode := runSessionCommand(
+		runner,
+		context.Background(),
+		bytes.NewReader(payload),
+		&stdout,
+		&stderr,
+	)
+	if exitCode != 1 {
+		t.Fatalf("exit code = %d, want 1", exitCode)
+	}
+	if !strings.Contains(stderr.String(), "rate_limited") {
+		t.Fatalf("stderr = %q, want rate_limited", stderr.String())
+	}
+
+	disconnectedCount := 0
+	decoder := json.NewDecoder(bytes.NewReader(stdout.Bytes()))
+	for decoder.More() {
+		var envelope sessionEventEnvelope
+		if err := decoder.Decode(&envelope); err != nil {
+			t.Fatalf("decode session event: %v", err)
+		}
+		if envelope.Event == "disconnected" {
+			disconnectedCount++
+		}
+	}
+	if disconnectedCount != 1 {
+		t.Fatalf("disconnected event count = %d, want 1; output=%s", disconnectedCount, stdout.String())
+	}
 }
 
 type responseEnvelope[T any] struct {
