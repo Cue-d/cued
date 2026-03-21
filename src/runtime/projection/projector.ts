@@ -1744,11 +1744,30 @@ function refreshMessageSearchIndexForIds(conn: LocalDbExecutor, messageIds: Set<
   for (const chunk of chunkArray([...messageIds], SQL_CHUNK_SIZE)) {
     conn.run(sql`
       DELETE FROM messages_fts
-      WHERE message_id IN (${sqlValueList(chunk)})
+      WHERE rowid IN (
+        SELECT rowid
+        FROM messages
+        WHERE id IN (${sqlValueList(chunk)})
+      )
     `);
     conn.run(sql`
-      INSERT INTO messages_fts (message_id, sender_name, conversation_name, participant_names, attachment_text, content)
-      SELECT message_id, sender_name, conversation_name, participant_names, attachment_text, content
+      INSERT INTO messages_fts (
+        rowid,
+        message_id,
+        sender_name,
+        conversation_name,
+        participant_names,
+        attachment_text,
+        content
+      )
+      SELECT
+        message_rowid,
+        message_id,
+        sender_name,
+        conversation_name,
+        participant_names,
+        attachment_text,
+        content
       FROM message_fts_source
       WHERE message_id IN (${sqlValueList(chunk)})
     `);
@@ -1775,8 +1794,31 @@ function finalizeRealtimeProjection(
 function insertMessageSearchIndexForIds(conn: LocalDbExecutor, messageIds: Set<string>): void {
   for (const chunk of chunkArray([...messageIds], SQL_CHUNK_SIZE)) {
     conn.run(sql`
-      INSERT INTO messages_fts (message_id, sender_name, conversation_name, participant_names, attachment_text, content)
-      SELECT message_id, sender_name, conversation_name, participant_names, attachment_text, content
+      DELETE FROM messages_fts
+      WHERE rowid IN (
+        SELECT rowid
+        FROM messages
+        WHERE id IN (${sqlValueList(chunk)})
+      )
+    `);
+    conn.run(sql`
+      INSERT INTO messages_fts (
+        rowid,
+        message_id,
+        sender_name,
+        conversation_name,
+        participant_names,
+        attachment_text,
+        content
+      )
+      SELECT
+        message_rowid,
+        message_id,
+        sender_name,
+        conversation_name,
+        participant_names,
+        attachment_text,
+        content
       FROM message_fts_source
       WHERE message_id IN (${sqlValueList(chunk)})
     `);
