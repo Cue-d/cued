@@ -10,13 +10,11 @@ import { getWhatsAppStoreDir, inspectWhatsAppHelper } from "../../whatsapp/helpe
 import { readWhatsAppHelperStatus } from "../../whatsapp/helper/status.js";
 import { listAdapterPlatforms } from "../registry.js";
 import type { IntegrationAuthState } from "../types.js";
-import { buildLocalIntegrationStates } from "./local.js";
+import { refreshLocalIntegrationStates } from "./local-refresh.js";
 import {
-  addSupportedByDaemonMetadata,
   firstNonEmptyDisplayName,
   listIntegrationStates,
   now,
-  refreshPersistedRequestableIntegrationStates,
   upsertManagedIntegrationState,
 } from "./status.js";
 import type { IntegrationStateSummary, ManagedIntegrationState } from "./types.js";
@@ -151,18 +149,24 @@ async function buildWhatsAppManagedState(
   };
 }
 
-export async function refreshManagedIntegrationStates(db: CuedDatabase): Promise<{
+export async function refreshDesktopImportedIntegrations(db: CuedDatabase): Promise<{
   refreshed: number;
   integrations: IntegrationStateSummary[];
 }> {
-  const refreshedPersistedRequestables = refreshPersistedRequestableIntegrationStates(db);
-  const managed = buildLocalIntegrationStates().map(addSupportedByDaemonMetadata);
-  for (const integration of managed) {
-    upsertManagedIntegrationState(db, integration);
-  }
-
   const importedDesktop = await importSlackDesktopAuth(db);
+  return {
+    refreshed: importedDesktop.filter((entry) => entry.imported).length,
+    integrations: listIntegrationStates(db),
+  };
+}
+
+export async function refreshManagedHelperIntegrationStates(db: CuedDatabase): Promise<{
+  refreshed: number;
+  integrations: IntegrationStateSummary[];
+}> {
   const existingStates = db.listIntegrationStates();
+  let refreshed = 0;
+
   const signalRows = existingStates.filter((row) => row.platform === "signal");
   const signalInputs = signalRows.length > 0 ? signalRows : [null];
   const signalManagedStates = (
@@ -171,6 +175,7 @@ export async function refreshManagedIntegrationStates(db: CuedDatabase): Promise
   for (const integration of signalManagedStates) {
     upsertManagedIntegrationState(db, integration);
   }
+  refreshed += signalManagedStates.length;
 
   const whatsAppRows = existingStates.filter((row) => row.platform === "whatsapp");
   const whatsAppInputs = whatsAppRows.length > 0 ? whatsAppRows : [null];
@@ -180,13 +185,23 @@ export async function refreshManagedIntegrationStates(db: CuedDatabase): Promise
   for (const integration of whatsAppManagedStates) {
     upsertManagedIntegrationState(db, integration);
   }
+  refreshed += whatsAppManagedStates.length;
+
   return {
-    refreshed:
-      refreshedPersistedRequestables +
-      managed.length +
-      importedDesktop.filter((entry) => entry.imported).length +
-      signalManagedStates.length +
-      whatsAppManagedStates.length,
+    refreshed,
+    integrations: listIntegrationStates(db),
+  };
+}
+
+export async function refreshManagedIntegrationStates(db: CuedDatabase): Promise<{
+  refreshed: number;
+  integrations: IntegrationStateSummary[];
+}> {
+  const local = refreshLocalIntegrationStates(db);
+  const desktopImported = await refreshDesktopImportedIntegrations(db);
+  const helpers = await refreshManagedHelperIntegrationStates(db);
+  return {
+    refreshed: local.refreshed + desktopImported.refreshed + helpers.refreshed,
     integrations: listIntegrationStates(db),
   };
 }

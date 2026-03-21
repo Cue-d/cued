@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { eq, sql } from "drizzle-orm";
+import { eq, type SQL, sql } from "drizzle-orm";
 import type {
   ContactObservationPayload,
   ConversationObservationPayload,
@@ -54,6 +54,8 @@ type ProjectionChangeSet = {
   dirtyConversationIds: Set<string>;
   dirtyMessageIds: Set<string>;
   dirtyReplyMessageIds: Set<string>;
+  touchedAttachments: boolean;
+  touchedReactions: boolean;
 };
 
 type ProjectableRawEvent = Pick<
@@ -79,6 +81,9 @@ export type ProjectionRangeResult = ProjectionOverview & {
 
 const projectionCaches = new WeakMap<CuedDatabase, ProjectionCache>();
 const SQL_CHUNK_SIZE = 200;
+const SIGNAL_UUID_PATTERN =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const RAW_PHONE_DISPLAY_NAME_PATTERN = /^\+?[\d\s().-]{6,}$/;
 
 function hashId(prefix: string, value: string): string {
   return `${prefix}_${createHash("sha256").update(value).digest("hex").slice(0, 24)}`;
@@ -164,6 +169,80 @@ function normalizeText(value: unknown): string | null {
   }
   const trimmed = value.trim();
   return trimmed.length > 0 ? trimmed : null;
+}
+
+function isRawIdentifierDisplayName(value: string | null | undefined): boolean {
+  const normalized = normalizeText(value);
+  if (!normalized) {
+    return false;
+  }
+
+  const lower = normalized.toLowerCase();
+  return (
+    RAW_PHONE_DISPLAY_NAME_PATTERN.test(normalized) ||
+    lower.includes("@") ||
+    lower.startsWith("contacts:") ||
+    lower.startsWith("imessage:") ||
+    lower.startsWith("signal:") ||
+    lower.startsWith("whatsapp:") ||
+    lower.startsWith("linkedin:") ||
+    lower.startsWith("slack:") ||
+    lower.startsWith("urn:li:") ||
+    SIGNAL_UUID_PATTERN.test(lower)
+  );
+}
+
+function mergeObservedDisplayName(
+  existingName: string | null | undefined,
+  incomingName: string | null | undefined,
+): string | null {
+  const normalizedExisting = normalizeText(existingName);
+  const normalizedIncoming = normalizeText(incomingName);
+  if (normalizedIncoming == null) {
+    return normalizedExisting;
+  }
+  if (normalizedExisting == null) {
+    return normalizedIncoming;
+  }
+  if (
+    !isRawIdentifierDisplayName(normalizedExisting) &&
+    isRawIdentifierDisplayName(normalizedIncoming)
+  ) {
+    return normalizedExisting;
+  }
+  return normalizedIncoming;
+}
+
+function nonEmptySql(value: SQL): SQL {
+  return sql`NULLIF(TRIM(${value}), '')`;
+}
+
+function isRawIdentifierDisplayNameSql(value: SQL): SQL {
+  return sql`(
+    ${nonEmptySql(value)} IS NOT NULL
+    AND (
+      (
+        (TRIM(${value}) GLOB '+[0-9]*' OR TRIM(${value}) GLOB '[0-9]*')
+        AND TRIM(${value}) NOT GLOB '*[A-Za-z]*'
+      )
+      OR LOWER(TRIM(${value})) LIKE '%@%'
+      OR LOWER(TRIM(${value})) LIKE 'contacts:%'
+      OR LOWER(TRIM(${value})) LIKE 'imessage:%'
+      OR LOWER(TRIM(${value})) LIKE 'signal:%'
+      OR LOWER(TRIM(${value})) LIKE 'whatsapp:%'
+      OR LOWER(TRIM(${value})) LIKE 'linkedin:%'
+      OR LOWER(TRIM(${value})) LIKE 'slack:%'
+      OR LOWER(TRIM(${value})) LIKE 'urn:li:%'
+      OR (
+        LENGTH(TRIM(${value})) = 36
+        AND TRIM(${value}) GLOB '[0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F]-[0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F]-[0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F]-[0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F]-[0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F]'
+      )
+    )
+  )`;
+}
+
+function isHumanDisplayNameSql(value: SQL): SQL {
+  return sql`(${nonEmptySql(value)} IS NOT NULL AND NOT ${isRawIdentifierDisplayNameSql(value)})`;
 }
 
 function normalizeInteger(value: unknown): number | null {
@@ -352,6 +431,8 @@ function createProjectionChangeSet(): ProjectionChangeSet {
     dirtyConversationIds: new Set<string>(),
     dirtyMessageIds: new Set<string>(),
     dirtyReplyMessageIds: new Set<string>(),
+    touchedAttachments: false,
+    touchedReactions: false,
   };
 }
 
@@ -747,6 +828,15 @@ function projectRealtimeMessageEvent(
     event.observed_at,
   );
 
+  const senderContactId = resolveOrEnsureContact(
+    conn,
+    cache,
+    event.platform,
+    event.account_key,
+    payload.senderSourceKey,
+    event.observed_at,
+  );
+
   conn
     .update(messages)
     .set({
@@ -754,9 +844,9 @@ function projectRealtimeMessageEvent(
       accountKey: event.account_key,
       platformMessageId: payload.sourceMessageKey,
       conversationId,
-      senderContactId: null,
+      senderContactId: senderContactId ?? null,
       senderSourceKey: payload.senderSourceKey,
-      senderName: null,
+      senderName: senderContactId ? (cache.contactNameMap.get(senderContactId) ?? null) : null,
       conversationName: cache.conversationNameMap.get(conversationId) ?? null,
       sentAt: payload.sentAt,
       service: normalizeText(payload.service ?? null),
@@ -848,8 +938,14 @@ function projectContactObservation(
   } = {
     updatedAt: event.observed_at,
   };
+  const existingName = cache.contactNameMap.get(contactId) ?? null;
+  const incomingName = normalizeText(payload.fields.display_name);
+  const resolvedName =
+    payload.fields.display_name !== undefined
+      ? mergeObservedDisplayName(existingName, incomingName)
+      : existingName;
   if (payload.fields.display_name !== undefined) {
-    contactSet.name = normalizeText(payload.fields.display_name);
+    contactSet.name = resolvedName;
   }
   if (payload.fields.photo_url !== undefined) {
     contactSet.photoUrl = normalizeText(payload.fields.photo_url);
@@ -858,10 +954,6 @@ function projectContactObservation(
     contactSet.company = normalizeText(payload.fields.company);
   }
 
-  const resolvedName =
-    payload.fields.display_name !== undefined
-      ? normalizeText(payload.fields.display_name)
-      : (cache.contactNameMap.get(contactId) ?? null);
   cache.contactNameMap.set(contactId, resolvedName);
 
   conn.update(contacts).set(contactSet).where(eq(contacts.id, contactId)).run();
@@ -1097,6 +1189,7 @@ function projectMessageEvent(
   }
 
   const desiredAttachmentIds = new Set<string>();
+  let removedAttachment = false;
   for (const [index, attachment] of (payload.attachments ?? []).entries()) {
     const normalizedAttachment = normalizeAttachmentObject(attachment) ?? {};
     const explicitSourceAttachmentKey = normalizeText(normalizedAttachment.sourceAttachmentKey);
@@ -1188,6 +1281,10 @@ function projectMessageEvent(
       WHERE attachment_id = ${existingAttachment.id}
     `);
     conn.delete(messageAttachments).where(eq(messageAttachments.id, existingAttachment.id)).run();
+    removedAttachment = true;
+  }
+  if (payload.attachments !== undefined || removedAttachment) {
+    changes.touchedAttachments = true;
   }
 }
 
@@ -1249,6 +1346,7 @@ function projectReactionEvent(
     })
     .run();
 
+  changes.touchedReactions = true;
   changes.dirtyConversationIds.add(conversationId);
   changes.dirtyMessageIds.add(messageId);
 }
@@ -1422,6 +1520,41 @@ function expandDirtyConversationIds(conn: LocalDbExecutor, changes: ProjectionCh
 function refreshParticipantNamesForIds(conn: LocalDbExecutor, conversationIds: Set<string>): void {
   for (const chunk of chunkArray([...conversationIds], SQL_CHUNK_SIZE)) {
     conn.run(sql`
+      UPDATE conversation_participants
+      SET participant_name = (
+        WITH resolved AS (
+          SELECT
+            ${nonEmptySql(sql`(SELECT name FROM contacts WHERE id = conversation_participants.contact_id)`)} AS contact_name,
+            CASE
+              WHEN conversation_participants.is_self = 0
+                AND (
+                  SELECT type
+                  FROM conversations
+                  WHERE id = conversation_participants.conversation_id
+                ) = 'dm'
+                AND (
+                  SELECT COUNT(*)
+                  FROM conversation_participants cp2
+                  WHERE cp2.conversation_id = conversation_participants.conversation_id
+                    AND cp2.is_active = 1
+                    AND cp2.is_self = 0
+                ) = 1
+              THEN ${nonEmptySql(sql`(SELECT name FROM conversations WHERE id = conversation_participants.conversation_id)`)}
+              ELSE NULL
+            END AS dm_name,
+            ${nonEmptySql(sql`conversation_participants.participant_name`)} AS current_name
+        )
+        SELECT CASE
+          WHEN ${isHumanDisplayNameSql(sql`contact_name`)} THEN contact_name
+          WHEN ${isHumanDisplayNameSql(sql`dm_name`)} THEN dm_name
+          WHEN ${isHumanDisplayNameSql(sql`current_name`)} THEN current_name
+          ELSE COALESCE(contact_name, current_name)
+        END
+        FROM resolved
+      )
+      WHERE conversation_id IN (${sqlValueList(chunk)})
+    `);
+    conn.run(sql`
       UPDATE conversations
       SET participant_names = (
         SELECT GROUP_CONCAT(cp.participant_name, ' | ')
@@ -1432,6 +1565,61 @@ function refreshParticipantNamesForIds(conn: LocalDbExecutor, conversationIds: S
           AND cp.participant_name <> ''
       )
       WHERE id IN (${sqlValueList(chunk)})
+    `);
+  }
+}
+
+function refreshMessageSenderNamesForIds(
+  conn: LocalDbExecutor,
+  conversationIds: Set<string>,
+): void {
+  for (const chunk of chunkArray([...conversationIds], SQL_CHUNK_SIZE)) {
+    conn.run(sql`
+      UPDATE messages
+      SET sender_name = (
+        WITH resolved AS (
+          SELECT
+            ${nonEmptySql(sql`(SELECT name FROM contacts WHERE id = messages.sender_contact_id)`)} AS contact_name,
+            ${nonEmptySql(sql`
+              (
+                SELECT cp.participant_name
+                FROM conversation_participants cp
+                WHERE cp.conversation_id = messages.conversation_id
+                  AND cp.contact_id = messages.sender_contact_id
+                  AND cp.is_active = 1
+                ORDER BY cp.updated_at DESC
+                LIMIT 1
+              )
+            `)} AS participant_name,
+            CASE
+              WHEN messages.is_from_me = 0
+                AND (
+                  SELECT type
+                  FROM conversations
+                  WHERE id = messages.conversation_id
+                ) = 'dm'
+                AND (
+                  SELECT COUNT(*)
+                  FROM conversation_participants cp2
+                  WHERE cp2.conversation_id = messages.conversation_id
+                    AND cp2.is_active = 1
+                    AND cp2.is_self = 0
+                ) = 1
+              THEN ${nonEmptySql(sql`(SELECT name FROM conversations WHERE id = messages.conversation_id)`)}
+              ELSE NULL
+            END AS dm_name,
+            ${nonEmptySql(sql`messages.sender_name`)} AS current_name
+        )
+        SELECT CASE
+          WHEN ${isHumanDisplayNameSql(sql`contact_name`)} THEN contact_name
+          WHEN ${isHumanDisplayNameSql(sql`participant_name`)} THEN participant_name
+          WHEN ${isHumanDisplayNameSql(sql`dm_name`)} THEN dm_name
+          WHEN ${isHumanDisplayNameSql(sql`current_name`)} THEN current_name
+          ELSE COALESCE(contact_name, participant_name, current_name)
+        END
+        FROM resolved
+      )
+      WHERE conversation_id IN (${sqlValueList(chunk)})
     `);
   }
 }
@@ -1567,16 +1755,7 @@ function refreshMessageSearchIndexForIds(conn: LocalDbExecutor, messageIds: Set<
   }
 }
 
-function finalizeRealtimeProjection(conn: LocalDbExecutor, changes: ProjectionChangeSet): void {
-  if (changes.dirtyConversationIds.size > 0) {
-    refreshConversationSummariesForIds(conn, changes.dirtyConversationIds);
-  }
-  if (changes.dirtyMessageIds.size > 0) {
-    refreshReactionCountsForIds(conn, changes.dirtyMessageIds);
-  }
-}
-
-function finalizeDeferredProjection(
+function finalizeRealtimeProjection(
   conn: LocalDbExecutor,
   cache: ProjectionCache,
   changes: ProjectionChangeSet,
@@ -1585,21 +1764,65 @@ function finalizeDeferredProjection(
     refreshContactFanoutForIds(conn, changes.dirtyContactIds);
     syncContactNameCache(conn, cache, changes.dirtyContactIds);
   }
+  if (changes.dirtyConversationIds.size > 0) {
+    refreshConversationSummariesForIds(conn, changes.dirtyConversationIds);
+  }
+  if (changes.touchedReactions && changes.dirtyMessageIds.size > 0) {
+    refreshReactionCountsForIds(conn, changes.dirtyMessageIds);
+  }
+}
 
-  expandDirtyConversationIds(conn, changes);
+function insertMessageSearchIndexForIds(conn: LocalDbExecutor, messageIds: Set<string>): void {
+  for (const chunk of chunkArray([...messageIds], SQL_CHUNK_SIZE)) {
+    conn.run(sql`
+      INSERT INTO messages_fts (message_id, sender_name, conversation_name, participant_names, attachment_text, content)
+      SELECT message_id, sender_name, conversation_name, participant_names, attachment_text, content
+      FROM message_fts_source
+      WHERE message_id IN (${sqlValueList(chunk)})
+    `);
+  }
+}
+
+function finalizeDeferredProjection(
+  conn: LocalDbExecutor,
+  cache: ProjectionCache,
+  changes: ProjectionChangeSet,
+  options?: {
+    initialProjection?: boolean;
+  },
+): void {
+  if (changes.dirtyContactIds.size > 0) {
+    refreshContactFanoutForIds(conn, changes.dirtyContactIds);
+    syncContactNameCache(conn, cache, changes.dirtyContactIds);
+  }
+
+  if (!options?.initialProjection) {
+    expandDirtyConversationIds(conn, changes);
+  }
   if (changes.dirtyConversationIds.size > 0) {
     refreshParticipantNamesForIds(conn, changes.dirtyConversationIds);
     refreshConversationNamesForIds(conn, changes.dirtyConversationIds);
     syncConversationNameCache(conn, cache, changes.dirtyConversationIds);
+    refreshMessageSenderNamesForIds(conn, changes.dirtyConversationIds);
     refreshMessageConversationNamesForIds(conn, changes.dirtyConversationIds);
     refreshConversationSummariesForIds(conn, changes.dirtyConversationIds);
   }
 
-  expandDirtyMessageIds(conn, changes);
+  if (!options?.initialProjection) {
+    expandDirtyMessageIds(conn, changes);
+  }
   if (changes.dirtyMessageIds.size > 0) {
-    refreshAttachmentCountsForIds(conn, changes.dirtyMessageIds);
-    refreshReactionCountsForIds(conn, changes.dirtyMessageIds);
-    refreshMessageSearchIndexForIds(conn, changes.dirtyMessageIds);
+    if (changes.touchedAttachments) {
+      refreshAttachmentCountsForIds(conn, changes.dirtyMessageIds);
+    }
+    if (changes.touchedReactions) {
+      refreshReactionCountsForIds(conn, changes.dirtyMessageIds);
+    }
+    if (options?.initialProjection) {
+      insertMessageSearchIndexForIds(conn, changes.dirtyMessageIds);
+    } else {
+      refreshMessageSearchIndexForIds(conn, changes.dirtyMessageIds);
+    }
   }
 
   if (changes.dirtyReplyMessageIds.size > 0) {
@@ -1635,6 +1858,7 @@ function projectEventBatch(
     rawEvents: RawEventRow[];
     projectionWatermark: number | null;
     lastRebuildAt?: number | null;
+    initialProjection?: boolean;
   },
 ): void {
   const cache = input.mode === "rebuild" ? resetProjectionCache(db) : getProjectionCache(db);
@@ -1656,7 +1880,9 @@ function projectEventBatch(
       };
 
       if (input.mode === "realtime") {
-        if (event.entity_kind === "conversation") {
+        if (event.entity_kind === "contact") {
+          projectContactObservation(tx, cache, changes, shapedEvent);
+        } else if (event.entity_kind === "conversation") {
           projectRealtimeConversationObservation(tx, cache, changes, shapedEvent);
         } else if (event.entity_kind === "message") {
           projectRealtimeMessageEvent(tx, cache, changes, shapedEvent);
@@ -1690,11 +1916,13 @@ function projectEventBatch(
     }
 
     if (input.mode === "realtime") {
-      finalizeRealtimeProjection(tx, changes);
+      finalizeRealtimeProjection(tx, cache, changes);
       return;
     }
 
-    finalizeDeferredProjection(tx, cache, changes);
+    finalizeDeferredProjection(tx, cache, changes, {
+      initialProjection: input.initialProjection,
+    });
     if (input.projectionWatermark != null) {
       upsertProjectionState(tx, {
         projectionWatermark: input.projectionWatermark,
@@ -1745,6 +1973,8 @@ function projectRangeInternal(
     rawEvents,
     projectionWatermark: input.mode === "realtime" ? null : deferredProjectionWatermark,
     lastRebuildAt: input.mode === "rebuild" ? Date.now() : undefined,
+    initialProjection:
+      input.mode !== "realtime" && currentProjectionState.projection_watermark === 0,
   });
 
   const projectionWatermark =

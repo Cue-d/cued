@@ -138,6 +138,21 @@ function createSyntheticIMessageChatDb(): { dir: string; dbPath: string } {
       chat_id INTEGER NOT NULL,
       message_id INTEGER NOT NULL
     );
+    CREATE TABLE attachment (
+      guid TEXT NOT NULL,
+      filename TEXT,
+      uti TEXT,
+      mime_type TEXT,
+      transfer_name TEXT,
+      total_bytes INTEGER NOT NULL DEFAULT 0,
+      is_sticker INTEGER NOT NULL DEFAULT 0,
+      hide_attachment INTEGER NOT NULL DEFAULT 0,
+      ck_record_id TEXT
+    );
+    CREATE TABLE message_attachment_join (
+      message_id INTEGER NOT NULL,
+      attachment_id INTEGER NOT NULL
+    );
   `);
 
   const insertHandle = db.prepare("INSERT INTO handle (id, service) VALUES (?, ?)");
