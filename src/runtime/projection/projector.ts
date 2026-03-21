@@ -54,6 +54,8 @@ type ProjectionChangeSet = {
   dirtyConversationIds: Set<string>;
   dirtyMessageIds: Set<string>;
   dirtyReplyMessageIds: Set<string>;
+  touchedAttachments: boolean;
+  touchedReactions: boolean;
 };
 
 type ProjectableRawEvent = Pick<
@@ -429,6 +431,8 @@ function createProjectionChangeSet(): ProjectionChangeSet {
     dirtyConversationIds: new Set<string>(),
     dirtyMessageIds: new Set<string>(),
     dirtyReplyMessageIds: new Set<string>(),
+    touchedAttachments: false,
+    touchedReactions: false,
   };
 }
 
@@ -1185,6 +1189,7 @@ function projectMessageEvent(
   }
 
   const desiredAttachmentIds = new Set<string>();
+  let removedAttachment = false;
   for (const [index, attachment] of (payload.attachments ?? []).entries()) {
     const normalizedAttachment = normalizeAttachmentObject(attachment) ?? {};
     const explicitSourceAttachmentKey = normalizeText(normalizedAttachment.sourceAttachmentKey);
@@ -1276,6 +1281,10 @@ function projectMessageEvent(
       WHERE attachment_id = ${existingAttachment.id}
     `);
     conn.delete(messageAttachments).where(eq(messageAttachments.id, existingAttachment.id)).run();
+    removedAttachment = true;
+  }
+  if (payload.attachments !== undefined || removedAttachment) {
+    changes.touchedAttachments = true;
   }
 }
 
@@ -1337,6 +1346,7 @@ function projectReactionEvent(
     })
     .run();
 
+  changes.touchedReactions = true;
   changes.dirtyConversationIds.add(conversationId);
   changes.dirtyMessageIds.add(messageId);
 }
@@ -1757,8 +1767,19 @@ function finalizeRealtimeProjection(
   if (changes.dirtyConversationIds.size > 0) {
     refreshConversationSummariesForIds(conn, changes.dirtyConversationIds);
   }
-  if (changes.dirtyMessageIds.size > 0) {
+  if (changes.touchedReactions && changes.dirtyMessageIds.size > 0) {
     refreshReactionCountsForIds(conn, changes.dirtyMessageIds);
+  }
+}
+
+function insertMessageSearchIndexForIds(conn: LocalDbExecutor, messageIds: Set<string>): void {
+  for (const chunk of chunkArray([...messageIds], SQL_CHUNK_SIZE)) {
+    conn.run(sql`
+      INSERT INTO messages_fts (message_id, sender_name, conversation_name, participant_names, attachment_text, content)
+      SELECT message_id, sender_name, conversation_name, participant_names, attachment_text, content
+      FROM message_fts_source
+      WHERE message_id IN (${sqlValueList(chunk)})
+    `);
   }
 }
 
@@ -1766,13 +1787,18 @@ function finalizeDeferredProjection(
   conn: LocalDbExecutor,
   cache: ProjectionCache,
   changes: ProjectionChangeSet,
+  options?: {
+    initialProjection?: boolean;
+  },
 ): void {
   if (changes.dirtyContactIds.size > 0) {
     refreshContactFanoutForIds(conn, changes.dirtyContactIds);
     syncContactNameCache(conn, cache, changes.dirtyContactIds);
   }
 
-  expandDirtyConversationIds(conn, changes);
+  if (!options?.initialProjection) {
+    expandDirtyConversationIds(conn, changes);
+  }
   if (changes.dirtyConversationIds.size > 0) {
     refreshParticipantNamesForIds(conn, changes.dirtyConversationIds);
     refreshConversationNamesForIds(conn, changes.dirtyConversationIds);
@@ -1782,11 +1808,21 @@ function finalizeDeferredProjection(
     refreshConversationSummariesForIds(conn, changes.dirtyConversationIds);
   }
 
-  expandDirtyMessageIds(conn, changes);
+  if (!options?.initialProjection) {
+    expandDirtyMessageIds(conn, changes);
+  }
   if (changes.dirtyMessageIds.size > 0) {
-    refreshAttachmentCountsForIds(conn, changes.dirtyMessageIds);
-    refreshReactionCountsForIds(conn, changes.dirtyMessageIds);
-    refreshMessageSearchIndexForIds(conn, changes.dirtyMessageIds);
+    if (changes.touchedAttachments) {
+      refreshAttachmentCountsForIds(conn, changes.dirtyMessageIds);
+    }
+    if (changes.touchedReactions) {
+      refreshReactionCountsForIds(conn, changes.dirtyMessageIds);
+    }
+    if (options?.initialProjection) {
+      insertMessageSearchIndexForIds(conn, changes.dirtyMessageIds);
+    } else {
+      refreshMessageSearchIndexForIds(conn, changes.dirtyMessageIds);
+    }
   }
 
   if (changes.dirtyReplyMessageIds.size > 0) {
@@ -1822,6 +1858,7 @@ function projectEventBatch(
     rawEvents: RawEventRow[];
     projectionWatermark: number | null;
     lastRebuildAt?: number | null;
+    initialProjection?: boolean;
   },
 ): void {
   const cache = input.mode === "rebuild" ? resetProjectionCache(db) : getProjectionCache(db);
@@ -1883,7 +1920,9 @@ function projectEventBatch(
       return;
     }
 
-    finalizeDeferredProjection(tx, cache, changes);
+    finalizeDeferredProjection(tx, cache, changes, {
+      initialProjection: input.initialProjection,
+    });
     if (input.projectionWatermark != null) {
       upsertProjectionState(tx, {
         projectionWatermark: input.projectionWatermark,
@@ -1934,6 +1973,8 @@ function projectRangeInternal(
     rawEvents,
     projectionWatermark: input.mode === "realtime" ? null : deferredProjectionWatermark,
     lastRebuildAt: input.mode === "rebuild" ? Date.now() : undefined,
+    initialProjection:
+      input.mode !== "realtime" && currentProjectionState.projection_watermark === 0,
   });
 
   const projectionWatermark =
