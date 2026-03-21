@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { resolveHostOS } from "../../../core/platform-capabilities.js";
 import { CuedDatabase } from "../../../db/database.js";
+import { refreshLocalIntegrationStates } from "./local-refresh.js";
 import {
   completeAuthSession,
   markAuthSessionInProgress,
@@ -196,6 +197,72 @@ describe("integration state management", () => {
     expect(
       buildIntegrationStatus(db).setupIntegrations.map((integration) => integration.platform),
     ).toEqual(["contacts", "imessage", "slack", "linkedin", "whatsapp", "signal"]);
+
+    db.close();
+  });
+
+  it("can build setup status without live local permission probes", () => {
+    const db = createDb();
+
+    expect(
+      buildIntegrationStatus(db, {
+        includeLiveLocalIntegrations: false,
+      }).setupIntegrations.map((integration) => ({
+        platform: integration.platform,
+        authState: integration.authState,
+      })),
+    ).toEqual([
+      { platform: "contacts", authState: "unknown" },
+      { platform: "imessage", authState: "unknown" },
+      { platform: "slack", authState: "missing" },
+      { platform: "linkedin", authState: "missing" },
+      { platform: "whatsapp", authState: "missing" },
+      { platform: "signal", authState: "missing" },
+    ]);
+
+    db.close();
+  });
+
+  it("refreshes only local integrations when using the local refresh path", () => {
+    const nativeBinaryDir = createTempDir("cued-native-binary-");
+    const nativeBinaryPath = join(nativeBinaryDir, "CuedNative");
+    writeFileSync(
+      nativeBinaryPath,
+      '#!/bin/sh\nif [ "$1" = "contacts" ] && [ "$2" = "status" ]; then\n  echo \'{"status":"authorized"}\'\n  exit 0\nfi\nexit 1\n',
+    );
+    chmodSync(nativeBinaryPath, 0o755);
+
+    process.env.CUED_CONTACTS_NATIVE_BINARY = nativeBinaryPath;
+    process.env.CUED_IMESSAGE_DB_PATH = join(createTempDir("cued-imessage-"), "missing.db");
+    process.env.CUED_APP_PATH = createPackagedSignalHelper();
+    process.env.CUED_WHATSAPP_HELPER_BINARY = join(
+      createTempDir("cued-no-whatsapp-helper-"),
+      "cued-whatsapp-helper",
+    );
+
+    const db = createDb();
+
+    const refreshed = refreshLocalIntegrationStates(db);
+
+    expect(refreshed.refreshed).toBe(2);
+    expect(listIntegrationStates(db)).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          platform: "contacts",
+          authState: "authorized",
+        }),
+        expect.objectContaining({
+          platform: "imessage",
+          authState: "missing",
+        }),
+      ]),
+    );
+    expect(listIntegrationStates(db).some((integration) => integration.platform === "signal")).toBe(
+      false,
+    );
+    expect(
+      listIntegrationStates(db).some((integration) => integration.platform === "whatsapp"),
+    ).toBe(false);
 
     db.close();
   });

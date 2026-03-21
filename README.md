@@ -172,18 +172,26 @@ scripts/            Packaging, runtime fetch, signing, and permission helpers
 
 ## Packaging And Release Scripts
 
-| Script | Description |
-| ------ | ----------- |
-| `pnpm build:app:macos` | Build the local `Cued.app` development bundle. |
-| `pnpm build:dmg:macos` | Build signed/notarized release artifacts and output the DMG path. |
-| `pnpm build:tarball:macos` | Build signed/notarized release artifacts and output the Apple Silicon tarball path. |
-| `pnpm sign:notarize:macos` | Sign and notarize the macOS app bundle and helpers. |
+| Script                     | Description                                                                        |
+| -------------------------- | ---------------------------------------------------------------------------------- |
+| `pnpm build`               | Build the root app                                                                 |
+| `pnpm dev`                 | Run the local CLI in dev mode                                                      |
+| `pnpm check:biome`         | Run formatting, lint, and import checks                                            |
+| `pnpm typecheck`           | Type check the root app                                                            |
+| `pnpm test`                | Run the root app tests                                                             |
+| `pnpm test:perf`           | Run synthetic sync/projection latency benchmarks                                   |
+| `pnpm test:perf:daemon-memory` | Run the macOS daemon performance benchmark                                     |
+| `pnpm build:app:macos`     | Build the local `Cued.app` dev bundle                                              |
+| `pnpm build:dmg:macos`     | Build signed/notarized release artifacts and output the DMG path                   |
+| `pnpm build:tarball:macos` | Build signed/notarized release artifacts and output the Apple Silicon tarball path |
+| `pnpm sign:notarize:macos` | Build signed/notarized release artifacts                                           |
+| `pnpm permissions:macos`   | Open/request macOS permissions                                                     |
 
 More detail: [scripts/README.md](scripts/README.md)
 
-## Memory Benchmarking
+## Daemon Benchmarking
 
-Use the macOS daemon benchmark before and after each memory optimization:
+Use the macOS daemon benchmark before and after each residency or scheduler optimization:
 
 ```bash
 pnpm build
@@ -200,12 +208,27 @@ Recommended workflow:
 5. Run `pnpm test:perf`.
 6. Attach a before/after delta table to the PR or commit notes.
 
-Benchmark defaults:
+Benchmark scenarios:
 
 - `clean_idle` is the required scenario for every memory change.
 - `cloned_profile_idle` is available via `--scenario=cloned`, but it is informational until the cloned-profile startup failure is fixed.
-- `--baseline=...` enables regression checks for startup latency, main RSS, tree RSS, physical footprint, and tree RSS spikes.
+- `idle_cpu_power` runs a 10-minute post-ready idle sample and captures CPU, process churn, and a best-effort power proxy.
+- `active_sync_fixture` runs fixture ingest + projection work and captures active CPU and memory behavior.
+- `--baseline=...` enables regression checks for startup latency, main RSS, tree RSS, physical footprint, tree RSS spikes, and idle CPU.
 - `--write-baseline=...` updates the checked-in baseline after a merged improvement, not during experiments.
+
+Summary metrics emitted per scenario:
+
+- `startupReadyMs`
+- `mainRssMedianMb`
+- `treeRssMedianMb`
+- `physicalFootprintMb`
+- `cpuMedianPct`
+- `cpuP95Pct`
+- `treeRssMaxMb`
+- `processCount`
+- `processChurnCount`
+- `powerProxy` when available
 
 ## Notes
 

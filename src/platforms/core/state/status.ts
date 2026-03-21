@@ -362,7 +362,35 @@ export function upsertManagedIntegrationState(
   });
 }
 
-function buildSetupIntegrations(db: CuedDatabase): IntegrationStateSummary[] {
+function buildBootstrappedLocalIntegration(
+  db: CuedDatabase,
+  platform: Extract<Platform, "contacts" | "imessage">,
+): IntegrationStateSummary {
+  return summarizeManagedIntegrationState(
+    db,
+    addSupportedByDaemonMetadata({
+      platform,
+      accountKey: "local",
+      displayName: platform === "contacts" ? "Contacts.app" : "Messages",
+      authState: "unknown",
+      enabled: true,
+      connectionKind: "native",
+      runtimeKind: "native",
+      syncCapable: false,
+      launchStrategy: "system-settings",
+      launchTarget:
+        platform === "contacts"
+          ? "x-apple.systempreferences:com.apple.preference.security?Privacy_Contacts"
+          : "x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles",
+      importedFrom: "bootstrap",
+    }),
+  );
+}
+
+function buildSetupIntegrations(
+  db: CuedDatabase,
+  options: { includeLiveLocalIntegrations?: boolean } = {},
+): IntegrationStateSummary[] {
   const onboardingOrder: Platform[] = [
     "contacts",
     "imessage",
@@ -381,12 +409,20 @@ function buildSetupIntegrations(db: CuedDatabase): IntegrationStateSummary[] {
     }
   }
 
-  for (const managed of buildLocalIntegrationStates()) {
-    if (!byPlatform.has(managed.platform)) {
-      byPlatform.set(
-        managed.platform,
-        summarizeManagedIntegrationState(db, addSupportedByDaemonMetadata(managed)),
-      );
+  if (options.includeLiveLocalIntegrations ?? true) {
+    for (const managed of buildLocalIntegrationStates()) {
+      if (!byPlatform.has(managed.platform)) {
+        byPlatform.set(
+          managed.platform,
+          summarizeManagedIntegrationState(db, addSupportedByDaemonMetadata(managed)),
+        );
+      }
+    }
+  } else {
+    for (const platform of ["contacts", "imessage"] as const) {
+      if (!byPlatform.has(platform)) {
+        byPlatform.set(platform, buildBootstrappedLocalIntegration(db, platform));
+      }
     }
   }
 
@@ -532,7 +568,10 @@ export function getPlatformRuntimeDefaults(platform: Platform): {
   };
 }
 
-export function buildIntegrationStatus(db: CuedDatabase): {
+export function buildIntegrationStatus(
+  db: CuedDatabase,
+  options: { includeLiveLocalIntegrations?: boolean } = {},
+): {
   hostOs: ReturnType<typeof resolveHostOS>;
   integrations: IntegrationStateSummary[];
   setupIntegrations: IntegrationStateSummary[];
@@ -540,6 +579,6 @@ export function buildIntegrationStatus(db: CuedDatabase): {
   return {
     hostOs: resolveHostOS(),
     integrations: listIntegrationStates(db),
-    setupIntegrations: buildSetupIntegrations(db),
+    setupIntegrations: buildSetupIntegrations(db, options),
   };
 }
