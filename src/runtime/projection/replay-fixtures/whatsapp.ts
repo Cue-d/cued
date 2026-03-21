@@ -33,7 +33,7 @@ export const whatsappReplayFixtures: ProjectionReplayFixture[] = [
         platform: "whatsapp",
         accountKey: "default",
         entityKind: "message",
-        eventKind: "message_created",
+        eventKind: "created",
         observedAt: 1_713_000_000_100,
         dedupeKey: "whatsapp:dm:message:1",
         payload: {
@@ -184,7 +184,7 @@ export const whatsappReplayFixtures: ProjectionReplayFixture[] = [
         platform: "whatsapp",
         accountKey: "default",
         entityKind: "message",
-        eventKind: "message_created",
+        eventKind: "created",
         observedAt: 1_713_010_000_300,
         dedupeKey: "whatsapp:group:message:1",
         payload: {
@@ -220,7 +220,7 @@ export const whatsappReplayFixtures: ProjectionReplayFixture[] = [
         platform: "whatsapp",
         accountKey: "default",
         entityKind: "message",
-        eventKind: "message_created",
+        eventKind: "created",
         observedAt: 1_713_010_000_400,
         dedupeKey: "whatsapp:group:message:2",
         payload: {
@@ -279,7 +279,7 @@ export const whatsappReplayFixtures: ProjectionReplayFixture[] = [
         platform: "whatsapp",
         accountKey: "default",
         entityKind: "message",
-        eventKind: "message_created",
+        eventKind: "created",
         observedAt: 1_713_020_000_100,
         dedupeKey: "whatsapp:dm:message:parent",
         payload: {
@@ -299,7 +299,7 @@ export const whatsappReplayFixtures: ProjectionReplayFixture[] = [
         platform: "whatsapp",
         accountKey: "default",
         entityKind: "message",
-        eventKind: "message_created",
+        eventKind: "created",
         observedAt: 1_713_020_000_150,
         dedupeKey: "whatsapp:dm:message:fromme-reply",
         payload: {
@@ -340,7 +340,7 @@ export const whatsappReplayFixtures: ProjectionReplayFixture[] = [
         platform: "whatsapp",
         accountKey: "default",
         entityKind: "message",
-        eventKind: "message_created",
+        eventKind: "created",
         observedAt: 1_713_020_000_300,
         dedupeKey: "whatsapp:dm:message:reply",
         payload: {

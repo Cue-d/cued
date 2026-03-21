@@ -66,6 +66,15 @@ export interface ReactionPayload {
   isActive: boolean;
 }
 
+export interface ParticipantPayload {
+  sourceConversationKey: string;
+  participantSourceKey: string;
+  eventAt: number;
+  isSelf?: boolean;
+  role?: string | null;
+  metadata?: Record<string, unknown>;
+}
+
 export interface TimelineEventPayload {
   sourceEventKey: string;
   sourceConversationKey: string;
@@ -82,6 +91,7 @@ export type RawEventPayload =
   | ConversationObservationPayload
   | MessagePayload
   | ReactionPayload
+  | ParticipantPayload
   | TimelineEventPayload
   | Record<string, unknown>;
 

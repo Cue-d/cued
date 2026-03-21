@@ -40,10 +40,10 @@ describe("projector", () => {
       platform: "linkedin",
       accountKey: "default",
       entityKind: "message",
-      eventKind: "message_created",
+      eventKind: "created",
       observedAt: 1_710_000_000_000,
       dedupeKey: "linkedin:unsupported-schema",
-      normalizedSchema: "message.message_created@99",
+      normalizedSchema: "message.created@99",
       provenance: {
         acquisitionMode: "realtime",
         sourceVersion: "linkedin-v99",
@@ -61,7 +61,7 @@ describe("projector", () => {
     });
 
     expect(() => projectPendingRawEvents(db)).toThrowError(
-      /Failed to normalize raw event \(row 1, event unsupported-schema, linkedin\/default, message:message_created, schema message\.message_created@99, sourceVersion linkedin-v99, providerApiVersion 2026-03, acquisitionMode realtime\): Unsupported normalized raw event schema 'message\.message_created@99'/,
+      /Failed to normalize raw event \(row 1, event unsupported-schema, linkedin\/default, message:created, schema message\.created@99, sourceVersion linkedin-v99, providerApiVersion 2026-03, acquisitionMode realtime\): Unsupported normalized raw event schema 'message\.created@99'/,
     );
 
     db.close();

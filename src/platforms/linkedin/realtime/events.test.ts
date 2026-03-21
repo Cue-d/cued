@@ -69,7 +69,7 @@ describe("buildLinkedInRawEventsFromRealtimeEnvelope", () => {
     });
 
     const messageEvent = rawEvents.find((event) => event.entityKind === "message");
-    expect(messageEvent?.eventKind).toBe("message_read_receipt");
+    expect(messageEvent?.eventKind).toBe("read_receipt");
     expect(messageEvent?.payload).toEqual(
       expect.objectContaining({
         readAt: 1_700_000_000_123,
@@ -123,7 +123,7 @@ describe("buildLinkedInRawEventsFromRealtimeEnvelope", () => {
     });
 
     expect(rawEvents.some((event) => event.entityKind === "timeline_event")).toBe(true);
-    expect(rawEvents.some((event) => event.eventKind === "linkedin_group_read_receipt")).toBe(true);
+    expect(rawEvents.some((event) => event.eventKind === "system_message")).toBe(true);
     expect(rawEvents.some((event) => event.entityKind === "message")).toBe(false);
   });
 
@@ -187,16 +187,10 @@ describe("buildLinkedInRawEventsFromRealtimeEnvelope", () => {
       }),
     );
     expect(rawEvents.some((event) => event.entityKind === "message")).toBe(false);
-    expect(
-      rawEvents.some(
-        (event) =>
-          event.entityKind === "timeline_event" &&
-          event.eventKind === "linkedin_conversation_removed",
-      ),
-    ).toBe(true);
+    expect(rawEvents.some((event) => event.entityKind === "timeline_event")).toBe(false);
   });
 
-  it("keeps system realtime messages in the message stream for summaries", () => {
+  it("maps system realtime messages onto canonical timeline events", () => {
     const rawEvents = buildLinkedInRawEventsFromRealtimeEnvelope({
       accountKey: "default",
       userEntityUrn: "urn:li:member:SELF123",
@@ -238,17 +232,9 @@ describe("buildLinkedInRawEventsFromRealtimeEnvelope", () => {
 
     expect(
       rawEvents.some(
-        (event) =>
-          event.entityKind === "timeline_event" && event.eventKind === "linkedin_system_message",
+        (event) => event.entityKind === "timeline_event" && event.eventKind === "system_message",
       ),
     ).toBe(true);
-    expect(
-      rawEvents.find(
-        (event) =>
-          event.entityKind === "message" &&
-          event.externalEntityId === "urn:li:fsd_message:MSG4" &&
-          event.eventKind === "message_observed",
-      ),
-    ).toBeTruthy();
+    expect(rawEvents.some((event) => event.entityKind === "message")).toBe(false);
   });
 });

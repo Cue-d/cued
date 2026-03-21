@@ -239,7 +239,7 @@ export function buildSignalMessageEvent(
     platform: "signal",
     accountKey,
     entityKind: "message",
-    eventKind: "message_created",
+    eventKind: "created",
     externalEntityId: message.messageId,
     conversationExternalId: message.threadId,
     occurredAt: message.sentAt,

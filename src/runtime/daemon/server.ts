@@ -611,7 +611,7 @@ function startContactsWatcher(
 function isInboundMessageEvent(rawEvent: Record<string, unknown>): boolean {
   return (
     rawEvent.entityKind === "message" &&
-    rawEvent.eventKind === "message_created" &&
+    rawEvent.eventKind === "created" &&
     typeof rawEvent.payload === "object" &&
     rawEvent.payload !== null &&
     typeof (rawEvent.payload as Record<string, unknown>).senderSourceKey === "string" &&
@@ -2621,7 +2621,7 @@ export async function runDaemon(): Promise<void> {
       );
       if (platform === "signal") {
         for (const rawEvent of insertResult.insertedEvents) {
-          if (rawEvent.entityKind !== "message" || rawEvent.eventKind !== "message_created") {
+          if (rawEvent.entityKind !== "message" || rawEvent.eventKind !== "created") {
             continue;
           }
           const payload = rawEvent.payload as Record<string, unknown>;

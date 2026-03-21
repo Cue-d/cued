@@ -530,6 +530,7 @@ export async function buildLinkedInSyncBundle(options?: {
         }
         if (message.messageBodyRenderFormat === "SYSTEM") {
           rawEvents.push(buildLinkedInSystemTimelineEvent(accountKey, message, observedBase));
+          continue;
         }
 
         const event = buildLinkedInMessageEvent({
@@ -538,15 +539,10 @@ export async function buildLinkedInSyncBundle(options?: {
           fallbackConversationUrn: conversation.entityURN,
           userEntityUrn,
           observedAt: observedBase,
-          eventKind: message.messageBodyRenderFormat === "SYSTEM" ? "message_observed" : undefined,
         });
         if (!seenMessageIds.has(event.id)) {
           seenMessageIds.add(event.id);
           rawEvents.push(event);
-        }
-
-        if (message.messageBodyRenderFormat === "SYSTEM") {
-          continue;
         }
 
         rawEvents.push(

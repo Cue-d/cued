@@ -48,6 +48,10 @@ export type CanonicalProjectionSnapshot = {
     conversationName: string | null;
     sentAt: number;
     content: string | null;
+    status: string | null;
+    readAt: number | null;
+    editedAt: number | null;
+    isEdited: number;
     isFromMe: number;
     attachmentCount: number;
     reactionCount: number;
@@ -142,12 +146,16 @@ export function readCanonicalProjectionSnapshot(db: CuedDatabase): CanonicalProj
     conversation_name: string | null;
     sent_at: number;
     content: string | null;
+    status: string | null;
+    read_at: number | null;
+    edited_at: number | null;
+    is_edited: number;
     is_from_me: number;
     attachment_count: number;
     reaction_count: number;
     reply_to_message_id: string | null;
   }>(sql`
-    SELECT id, platform, account_key, platform_message_id, conversation_id, sender_name, conversation_name, sent_at, content, is_from_me, attachment_count, reaction_count, reply_to_message_id
+    SELECT id, platform, account_key, platform_message_id, conversation_id, sender_name, conversation_name, sent_at, content, status, read_at, edited_at, is_edited, is_from_me, attachment_count, reaction_count, reply_to_message_id
     FROM messages
     ORDER BY id ASC
   `);
@@ -263,6 +271,10 @@ export function readCanonicalProjectionSnapshot(db: CuedDatabase): CanonicalProj
       conversationName: message.conversation_name,
       sentAt: message.sent_at,
       content: message.content,
+      status: message.status,
+      readAt: message.read_at,
+      editedAt: message.edited_at,
+      isEdited: message.is_edited,
       isFromMe: message.is_from_me,
       attachmentCount: message.attachment_count,
       reactionCount: message.reaction_count,
