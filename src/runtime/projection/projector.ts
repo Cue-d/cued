@@ -1764,6 +1764,13 @@ function finalizeRealtimeProjection(
     refreshContactFanoutForIds(conn, changes.dirtyContactIds);
     syncContactNameCache(conn, cache, changes.dirtyContactIds);
   }
+  if (changes.dirtyConversationIds.size > 0) {
+    refreshConversationSummariesForIds(conn, changes.dirtyConversationIds);
+  }
+  if (changes.touchedReactions && changes.dirtyMessageIds.size > 0) {
+    refreshReactionCountsForIds(conn, changes.dirtyMessageIds);
+  }
+}
 
 function insertMessageSearchIndexForIds(conn: LocalDbExecutor, messageIds: Set<string>): void {
   for (const chunk of chunkArray([...messageIds], SQL_CHUNK_SIZE)) {
@@ -1773,13 +1780,6 @@ function insertMessageSearchIndexForIds(conn: LocalDbExecutor, messageIds: Set<s
       FROM message_fts_source
       WHERE message_id IN (${sqlValueList(chunk)})
     `);
-  }
-}
-  if (changes.dirtyConversationIds.size > 0) {
-    refreshConversationSummariesForIds(conn, changes.dirtyConversationIds);
-  }
-  if (changes.touchedReactions && changes.dirtyMessageIds.size > 0) {
-    refreshReactionCountsForIds(conn, changes.dirtyMessageIds);
   }
 }
 
