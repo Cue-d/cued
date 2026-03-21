@@ -277,6 +277,89 @@ function normalizeAttachmentObject(value: unknown): Record<string, unknown> | nu
   return typeof value === "object" && value !== null ? (value as Record<string, unknown>) : null;
 }
 
+function isGenericAttachmentPlaceholder(value: string | null | undefined): boolean {
+  if (!value) {
+    return false;
+  }
+
+  const normalized = value.trim().toLowerCase();
+  return normalized === "[attachment]" || normalized === "[attachments]";
+}
+
+function normalizeMimeLabel(value: string | null | undefined): string | null {
+  const normalized = normalizeText(value)?.toLowerCase() ?? null;
+  if (!normalized) {
+    return null;
+  }
+
+  if (normalized === "application/pdf") {
+    return "pdf";
+  }
+  if (normalized.startsWith("image/")) {
+    return "image";
+  }
+  if (normalized.startsWith("audio/")) {
+    return "audio";
+  }
+  if (normalized.startsWith("video/")) {
+    return "video";
+  }
+  if (normalized.startsWith("text/")) {
+    return "text";
+  }
+
+  return null;
+}
+
+function normalizeAttachmentLabel(attachment: Record<string, unknown>): string | null {
+  const kind = normalizeText(attachment.kind)?.toLowerCase() ?? null;
+  if (kind && kind !== "attachment" && kind !== "file") {
+    return kind;
+  }
+
+  return (
+    normalizeMimeLabel(normalizeText(attachment.mime_type) ?? normalizeText(attachment.mimetype)) ??
+    (kind === "file" ? "file" : null)
+  );
+}
+
+function buildAttachmentOnlyContent(
+  attachments: MessagePayload["attachments"] | undefined,
+): string | null {
+  const normalizedAttachments = (attachments ?? [])
+    .map((attachment) => normalizeAttachmentObject(attachment))
+    .filter((attachment): attachment is Record<string, unknown> => attachment != null);
+
+  if (normalizedAttachments.length === 0) {
+    return null;
+  }
+
+  if (normalizedAttachments.length > 1) {
+    return `[${normalizedAttachments.length} attachments]`;
+  }
+
+  const attachment = normalizedAttachments[0]!;
+  const filename =
+    normalizeText(attachment.filename) ??
+    normalizeText(attachment.name) ??
+    normalizeText(attachment.title);
+  if (filename) {
+    return `[attachment: ${filename}]`;
+  }
+
+  const label = normalizeAttachmentLabel(attachment);
+  return label ? `[${label} attachment]` : "[attachment]";
+}
+
+function resolveProjectedMessageContent(payload: MessagePayload): string | null {
+  const normalizedContent = normalizeText(payload.content) ?? payload.content;
+  if (normalizedContent && !isGenericAttachmentPlaceholder(normalizedContent)) {
+    return normalizedContent;
+  }
+
+  return buildAttachmentOnlyContent(payload.attachments) ?? normalizedContent;
+}
+
 function inferAttachmentProjection(attachment: Record<string, unknown>): {
   localPath: string | null;
   remoteUrl: string | null;
@@ -1179,7 +1262,7 @@ function projectMessageEvent(
       service: normalizeText(payload.service ?? null),
       status: normalizeText(payload.status ?? null),
       isFromMe: boolToInt(payload.isFromMe),
-      content: normalizeText(payload.content) ?? payload.content,
+      content: resolveProjectedMessageContent(payload),
       deliveredAt: payload.deliveredAt ?? null,
       readAt: payload.readAt ?? null,
       editedAt: payload.editedAt ?? null,

@@ -1103,6 +1103,104 @@ describe("projector", () => {
     db.close();
   });
 
+  it("normalizes attachment-only placeholders on realtime projection", () => {
+    const db = createDb();
+
+    const insertResult = db.insertRawEvents([
+      {
+        id: "conversation-realtime-attachment",
+        platform: "imessage",
+        accountKey: "local",
+        entityKind: "conversation",
+        eventKind: "observed",
+        observedAt: 1,
+        dedupeKey: "conversation-realtime-attachment",
+        payload: {
+          sourceConversationKey: "imessage:chat:attachment",
+          conversationType: "dm",
+          participants: [],
+        },
+        sourceVersion: "test-v1",
+      },
+      {
+        id: "message-realtime-attachment",
+        platform: "imessage",
+        accountKey: "local",
+        entityKind: "message",
+        eventKind: "message_created",
+        observedAt: 2,
+        dedupeKey: "message-realtime-attachment",
+        payload: {
+          sourceMessageKey: "imessage:message:attachment",
+          sourceConversationKey: "imessage:chat:attachment",
+          senderSourceKey: "imessage:+14155550123",
+          sentAt: 2,
+          content: "[attachment]",
+          isFromMe: false,
+          attachments: [
+            {
+              id: "attachment-1",
+              kind: "file",
+              filename: "deck.pdf",
+              local_path: "~/Library/Messages/Attachments/deck.pdf",
+            },
+          ],
+        },
+        sourceVersion: "test-v1",
+      },
+      {
+        id: "reaction-realtime-attachment",
+        platform: "imessage",
+        accountKey: "local",
+        entityKind: "reaction",
+        eventKind: "reaction_added",
+        observedAt: 3,
+        dedupeKey: "reaction-realtime-attachment",
+        payload: {
+          sourceMessageKey: "imessage:message:attachment",
+          sourceConversationKey: "imessage:chat:attachment",
+          reactorSourceKey: "imessage:+14155550123",
+          emoji: "👍",
+          timestamp: 3,
+          isActive: true,
+        },
+        sourceVersion: "test-v1",
+      },
+    ]);
+
+    projectRealtimeRange(db, {
+      startRowId: insertResult.firstInsertedRowId!,
+      endRowId: insertResult.lastInsertedRowId!,
+      batchSize: 10,
+    });
+
+    const messageRow = db.orm().get<{
+      content: string | null;
+      attachment_count: number;
+      reaction_count: number;
+    }>(sql`
+      SELECT content, attachment_count, reaction_count
+      FROM messages
+      WHERE platform_message_id = 'imessage:message:attachment'
+    `);
+    const conversationRow = db.orm().get<{ last_message_preview: string | null }>(sql`
+      SELECT last_message_preview
+      FROM conversations
+      WHERE source_conversation_key = 'imessage:chat:attachment'
+    `);
+
+    expect(messageRow).toEqual({
+      content: "[attachment: deck.pdf]",
+      attachment_count: 1,
+      reaction_count: 1,
+    });
+    expect(conversationRow).toEqual({
+      last_message_preview: "[attachment: deck.pdf]",
+    });
+
+    db.close();
+  });
+
   it("realtime projection resolves imessage sender_contact_id and sender_name", () => {
     const db = createDb();
     const insertResult = db.insertRawEvents([
@@ -1587,6 +1685,128 @@ describe("projector", () => {
       sender_name: "Ava Zhang",
       conversation_name: "Investor thread",
       attachment_text: expect.stringContaining("agenda.pdf"),
+    });
+
+    db.close();
+  });
+
+  it("normalizes deferred attachment-only placeholders and preserves real text", () => {
+    const db = createDb();
+
+    db.insertRawEvent({
+      id: "conversation-placeholder-policy",
+      platform: "linkedin",
+      accountKey: "default",
+      entityKind: "conversation",
+      eventKind: "observed",
+      observedAt: 1,
+      dedupeKey: "conversation-placeholder-policy",
+      payload: {
+        sourceConversationKey: "thread-placeholder-policy",
+        conversationType: "dm",
+        participants: [],
+      },
+      sourceVersion: "test-v1",
+    });
+    db.insertRawEvent({
+      id: "message-placeholder-mime",
+      platform: "linkedin",
+      accountKey: "default",
+      entityKind: "message",
+      eventKind: "message_created",
+      observedAt: 2,
+      dedupeKey: "message-placeholder-mime",
+      payload: {
+        sourceMessageKey: "message-placeholder-mime",
+        sourceConversationKey: "thread-placeholder-policy",
+        sentAt: 2,
+        content: "[attachment]",
+        attachments: [{ id: "att-pdf", kind: "file", mime_type: "application/pdf" }],
+      },
+      sourceVersion: "test-v1",
+    });
+    db.insertRawEvent({
+      id: "message-placeholder-text",
+      platform: "linkedin",
+      accountKey: "default",
+      entityKind: "message",
+      eventKind: "message_created",
+      observedAt: 3,
+      dedupeKey: "message-placeholder-text",
+      payload: {
+        sourceMessageKey: "message-placeholder-text",
+        sourceConversationKey: "thread-placeholder-policy",
+        sentAt: 3,
+        content: "Quarterly memo",
+        attachments: [{ id: "att-caption", filename: "memo.pdf" }],
+      },
+      sourceVersion: "test-v1",
+    });
+    db.insertRawEvent({
+      id: "message-placeholder-multi",
+      platform: "linkedin",
+      accountKey: "default",
+      entityKind: "message",
+      eventKind: "message_created",
+      observedAt: 4,
+      dedupeKey: "message-placeholder-multi",
+      payload: {
+        sourceMessageKey: "message-placeholder-multi",
+        sourceConversationKey: "thread-placeholder-policy",
+        sentAt: 4,
+        content: "",
+        attachments: [
+          { id: "att-1", filename: "one.txt" },
+          { id: "att-2", filename: "two.txt" },
+        ],
+      },
+      sourceVersion: "test-v1",
+    });
+    db.insertRawEvent({
+      id: "message-placeholder-filename",
+      platform: "linkedin",
+      accountKey: "default",
+      entityKind: "message",
+      eventKind: "message_created",
+      observedAt: 5,
+      dedupeKey: "message-placeholder-filename",
+      payload: {
+        sourceMessageKey: "message-placeholder-filename",
+        sourceConversationKey: "thread-placeholder-policy",
+        sentAt: 5,
+        content: "",
+        attachments: [{ id: "att-deck", filename: "deck.pdf" }],
+      },
+      sourceVersion: "test-v1",
+    });
+
+    projectPendingRawEvents(db);
+
+    const messageRows = db.orm().all<{ platform_message_id: string; content: string | null }>(sql`
+      SELECT platform_message_id, content
+      FROM messages
+      WHERE conversation_id = (
+        SELECT id FROM conversations WHERE source_conversation_key = 'thread-placeholder-policy'
+      )
+      ORDER BY sent_at ASC
+    `);
+    const conversationRow = db.orm().get<{ last_message_preview: string | null }>(sql`
+      SELECT last_message_preview
+      FROM conversations
+      WHERE source_conversation_key = 'thread-placeholder-policy'
+    `);
+
+    expect(messageRows).toEqual([
+      { platform_message_id: "message-placeholder-mime", content: "[pdf attachment]" },
+      { platform_message_id: "message-placeholder-text", content: "Quarterly memo" },
+      { platform_message_id: "message-placeholder-multi", content: "[2 attachments]" },
+      {
+        platform_message_id: "message-placeholder-filename",
+        content: "[attachment: deck.pdf]",
+      },
+    ]);
+    expect(conversationRow).toEqual({
+      last_message_preview: "[attachment: deck.pdf]",
     });
 
     db.close();
