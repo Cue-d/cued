@@ -577,10 +577,8 @@ func main() {
 
 	if command == "session" {
 		sessionCtx := baseCtx
-		if err := runner.runSession(sessionCtx, os.Stdin, os.Stdout); err != nil {
-			_ = writeSessionEvent(os.Stdout, "disconnected", disconnectedEventData{Reason: err.Error()})
-			fmt.Fprintln(os.Stderr, err.Error())
-			os.Exit(1)
+		if exitCode := runSessionCommand(runner, sessionCtx, os.Stdin, os.Stdout, os.Stderr); exitCode != 0 {
+			os.Exit(exitCode)
 		}
 		return
 	}
@@ -613,4 +611,12 @@ func main() {
 		ProtocolVersion: protocolVersion,
 		Result:          result,
 	})
+}
+
+func runSessionCommand(runner helperRunner, ctx context.Context, stdin io.Reader, stdout, stderr io.Writer) int {
+	if err := runner.runSession(ctx, stdin, stdout); err != nil {
+		fmt.Fprintln(stderr, err.Error())
+		return 1
+	}
+	return 0
 }
