@@ -25,7 +25,9 @@ import { safeParseJsonRecord } from "../../db/codecs.js";
 import { type OutboundMessageRow, openCuedDatabase } from "../../db/database.js";
 import { isAdapterPlatform, listAutoSyncPlatforms } from "../../platforms/core/registry.js";
 import { runAdapter } from "../../platforms/core/runner.js";
+import { loadIntegrationSecret } from "../../platforms/core/secrets/keychain.js";
 import { refreshLocalIntegrationStates } from "../../platforms/core/state/local-refresh.js";
+import { refreshManagedIntegrationStates } from "../../platforms/core/state/refresh.js";
 import { getIntegrationSummary } from "../../platforms/core/state/status.js";
 import { DEFAULT_CHAT_DB_PATH } from "../../platforms/imessage/reader.js";
 import { loadLinkedInSessionSecret } from "../../platforms/linkedin/auth/session-store.js";
@@ -49,6 +51,18 @@ import {
   buildOptimisticSignalRawEvents,
   buildSignalRawEventsFromMessages,
 } from "../../platforms/signal/sync/events.js";
+import { inspectSlackHelper } from "../../platforms/slack/helper/binary.js";
+import {
+  type SlackRealtimeEventEnvelope,
+  type SlackRealtimeStatus,
+  SlackRealtimeSupervisor,
+} from "../../platforms/slack/realtime/session.js";
+import {
+  buildSlackContactEvents,
+  buildSlackConversationEvent,
+  buildSlackMessageEvents,
+} from "../../platforms/slack/sync/events.js";
+import { isSlackBackfillConversationProof } from "../../platforms/slack/sync/proof.js";
 import {
   getWhatsAppStoreDir,
   inspectWhatsAppHelper,
@@ -101,6 +115,7 @@ const DAEMON_VERSION = getCurrentAppVersion();
 const DEFAULT_AUTOSYNC_INTERVAL_MS = 60_000;
 const DEFAULT_SIGNAL_CATCHUP_INTERVAL_MS = 300_000;
 const DEFAULT_WHATSAPP_CATCHUP_INTERVAL_MS = 300_000;
+const DEFAULT_SLACK_REALTIME_ENABLED = false;
 const DEFAULT_INGEST_CONCURRENCY = 4;
 const DEFAULT_PROJECTION_BATCH_SIZE = 1_000;
 const DEFAULT_REALTIME_PROJECTION_ENABLED = true;
@@ -116,6 +131,7 @@ const daemonLogger = createLogger("daemon");
 const hooksLogger = createLogger("hooks");
 const nativeWatchLogger = createLogger("native-watch");
 const linkedInLogger = createLogger("linkedin");
+const slackLogger = createLogger("slack");
 const signalLogger = createLogger("signal");
 const whatsAppLogger = createLogger("whatsapp");
 
@@ -184,6 +200,19 @@ type SignalDesiredSession = {
   account: string;
   cliPath: string;
   configDir: string;
+};
+
+type SlackDesiredSession = {
+  accountKey: string;
+  helperPath: string;
+  credentials: {
+    token: string;
+    cookie: string;
+  };
+  pollIntervalMs?: number;
+  userRefreshMs?: number;
+  conversationLimit?: number;
+  messageLimit?: number;
 };
 
 type WhatsAppDesiredSession = {
@@ -316,6 +345,15 @@ function getRealtimeProjectionEnabled(): boolean {
   const configured = process.env.CUED_REALTIME_PROJECTION_ENABLED;
   if (configured == null) {
     return DEFAULT_REALTIME_PROJECTION_ENABLED;
+  }
+
+  return !["0", "false", "off", "no"].includes(configured.trim().toLowerCase());
+}
+
+function getSlackRealtimeEnabled(): boolean {
+  const configured = process.env.CUED_SLACK_REALTIME_ENABLED;
+  if (configured == null) {
+    return DEFAULT_SLACK_REALTIME_ENABLED;
   }
 
   return !["0", "false", "off", "no"].includes(configured.trim().toLowerCase());
@@ -700,6 +738,107 @@ async function collectDesiredSignalSessions(db: ReturnType<typeof openCuedDataba
   return { desired, degraded };
 }
 
+async function collectDesiredSlackSessions(db: ReturnType<typeof openCuedDatabase>): Promise<{
+  desired: SlackDesiredSession[];
+  degraded: Array<Omit<SlackRealtimeStatus, "platform">>;
+}> {
+  const integrations = db
+    .listIntegrationStates()
+    .filter(
+      (row) => row.platform === "slack" && row.enabled === 1 && row.auth_state === "authenticated",
+    );
+  if (integrations.length === 0 || !getSlackRealtimeEnabled()) {
+    return {
+      desired: [],
+      degraded: [],
+    };
+  }
+
+  const inspected = inspectSlackHelper();
+  const baseStatus = (integration: {
+    account_key: string;
+  }): Omit<SlackRealtimeStatus, "platform"> => ({
+    accountKey: integration.account_key,
+    helperPath: inspected.helperPath ?? "",
+    state: "degraded",
+    teamId: null,
+    userId: null,
+    transport: null,
+    connectedAt: null,
+    lastEventAt: null,
+    lastReconnectAt: null,
+    reconnectAttempts: 0,
+    lastSessionError: null,
+  });
+
+  if (!inspected.helperPath) {
+    return {
+      desired: [],
+      degraded: integrations.map((integration) => ({
+        ...baseStatus(integration),
+        lastSessionError: "Slack helper was not found",
+      })),
+    };
+  }
+
+  if (!inspected.versionSupported) {
+    return {
+      desired: [],
+      degraded: integrations.map((integration) => ({
+        ...baseStatus(integration),
+        lastSessionError: `Slack helper is too old or invalid (${inspected.version ?? "unknown"})`,
+      })),
+    };
+  }
+
+  const desired: SlackDesiredSession[] = [];
+  const degraded: Array<Omit<SlackRealtimeStatus, "platform">> = [];
+  for (const integration of integrations) {
+    try {
+      const secret = loadIntegrationSecret("slack", integration.account_key).secret;
+      if (typeof secret.token !== "string" || typeof secret.cookie !== "string") {
+        degraded.push({
+          ...baseStatus(integration),
+          helperPath: inspected.helperPath,
+          lastSessionError: "Slack credentials are missing token or cookie",
+        });
+        continue;
+      }
+
+      desired.push({
+        accountKey: integration.account_key,
+        helperPath: inspected.helperPath,
+        credentials: {
+          token: secret.token,
+          cookie: secret.cookie,
+        },
+        pollIntervalMs: Number.isFinite(Number(process.env.CUED_SLACK_REALTIME_POLL_MS))
+          ? Number(process.env.CUED_SLACK_REALTIME_POLL_MS)
+          : undefined,
+        userRefreshMs: Number.isFinite(Number(process.env.CUED_SLACK_REALTIME_USER_REFRESH_MS))
+          ? Number(process.env.CUED_SLACK_REALTIME_USER_REFRESH_MS)
+          : undefined,
+        conversationLimit: Number.isFinite(
+          Number(process.env.CUED_SLACK_REALTIME_CONVERSATION_LIMIT),
+        )
+          ? Number(process.env.CUED_SLACK_REALTIME_CONVERSATION_LIMIT)
+          : undefined,
+        messageLimit: Number.isFinite(Number(process.env.CUED_SLACK_REALTIME_MESSAGE_LIMIT))
+          ? Number(process.env.CUED_SLACK_REALTIME_MESSAGE_LIMIT)
+          : undefined,
+      });
+    } catch (error) {
+      degraded.push({
+        ...baseStatus(integration),
+        helperPath: inspected.helperPath,
+        lastSessionError: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+
+  return { desired, degraded };
+}
+
 async function collectDesiredWhatsAppSessions(db: ReturnType<typeof openCuedDatabase>): Promise<{
   desired: WhatsAppDesiredSession[];
   degraded: Array<Omit<WhatsAppRealtimeStatus, "platform">>;
@@ -912,6 +1051,8 @@ export async function runDaemon(): Promise<void> {
   const nativeWatchers = new Map<"contacts" | "imessage", FSWatcher | ChildProcess>();
   let linkedInRealtimeReconcilePromise: Promise<void> | null = null;
   let linkedInRealtimeReconcileQueued = false;
+  let slackRealtimeReconcilePromise: Promise<void> | null = null;
+  let slackRealtimeReconcileQueued = false;
   let signalRealtimeReconcilePromise: Promise<void> | null = null;
   let signalRealtimeReconcileQueued = false;
   let whatsAppRealtimeReconcilePromise: Promise<void> | null = null;
@@ -1014,6 +1155,152 @@ export async function runDaemon(): Promise<void> {
     const existing = pendingSignalSendEchoes.get(message.account_key) ?? [];
     existing.push(pending);
     pendingSignalSendEchoes.set(message.account_key, existing);
+  };
+
+  const updateSlackCheckpointFromRealtime = (accountKey: string) => {
+    const checkpoint = db.getCheckpoint("slack", accountKey);
+    const projection = db.getProjectionBacklog();
+    const sourceCursor = safeParseJsonRecord(
+      checkpoint?.source_cursor_json ?? null,
+      "sync_checkpoints.source_cursor_json",
+    );
+    db.upsertCheckpoint({
+      platform: "slack",
+      accountKey,
+      syncMode: checkpoint?.sync_mode ?? "incremental",
+      sourceCursor,
+      rawIngestWatermark: projection.max_raw_event_rowid,
+      projectionWatermark: projection.projection_watermark,
+      lastSuccessAt: now(),
+      lastErrorSummary: null,
+    });
+  };
+
+  const ingestSlackRealtimeRawEvents = async (
+    accountKey: string,
+    rawEvents: ReturnType<typeof buildSlackMessageEvents>,
+    trigger: string,
+  ): Promise<void> => {
+    try {
+      if (rawEvents.length === 0) {
+        return;
+      }
+
+      db.upsertSourceAccounts([
+        {
+          platform: "slack",
+          accountKey,
+          displayName: "Slack",
+        },
+      ]);
+      const insertResult = db.insertRawEvents(rawEvents);
+      if (
+        realtimeProjectionEnabled &&
+        insertResult.firstInsertedRowId != null &&
+        insertResult.lastInsertedRowId != null
+      ) {
+        projectRealtimeRange(db, {
+          startRowId: insertResult.firstInsertedRowId,
+          endRowId: insertResult.lastInsertedRowId,
+          batchSize: realtimeProjectionBatchSize,
+        });
+      }
+      if (insertResult.firstInsertedRowId != null && insertResult.lastInsertedRowId != null) {
+        queueProjectionRun(
+          trigger,
+          {
+            startRowId: insertResult.firstInsertedRowId,
+            endRowId: insertResult.lastInsertedRowId,
+          },
+          { delayMs: deferredProjectionCoalesceMs },
+        );
+      }
+      if (insertResult.insertedCount > 0) {
+        updateSlackCheckpointFromRealtime(accountKey);
+      }
+
+      const inboundMessages = collectInboundMessages(insertResult.insertedRows);
+      queueMessageReceivedHooks(
+        insertResult.firstInsertedRowId != null && insertResult.lastInsertedRowId != null
+          ? {
+              startRowId: insertResult.firstInsertedRowId,
+              endRowId: insertResult.lastInsertedRowId,
+            }
+          : null,
+        trigger,
+        inboundMessages,
+      );
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      slackLogger.warn("realtime ingest failed", { accountKey, error: message });
+      if (isSqliteBusyError(error)) {
+        queueNativeTriggeredSync(
+          db,
+          "slack",
+          accountKey,
+          "slack_realtime_busy_fallback",
+          schedulers.wakeIngest,
+        );
+      }
+    }
+  };
+
+  const handleSlackRealtimeEvent = async (
+    accountKey: string,
+    event: SlackRealtimeEventEnvelope,
+  ): Promise<void> => {
+    const observedAt = now();
+    switch (event.event) {
+      case "contact_upsert":
+        await ingestSlackRealtimeRawEvents(
+          accountKey,
+          buildSlackContactEvents(event.data.teamId, accountKey, observedAt, [event.data.user]),
+          `slack_realtime:${accountKey}`,
+        );
+        return;
+      case "conversation_upsert":
+        await ingestSlackRealtimeRawEvents(
+          accountKey,
+          [
+            buildSlackConversationEvent({
+              teamId: event.data.teamId,
+              accountKey,
+              conversation: event.data.conversation,
+              observedAt,
+              memberIds: event.data.memberIds,
+              selfUserId: event.data.selfUserId,
+              displayName: event.data.displayName,
+            }),
+          ],
+          `slack_realtime:${accountKey}`,
+        );
+        if (event.data.isNew) {
+          queueNativeTriggeredSync(
+            db,
+            "slack",
+            accountKey,
+            "slack_realtime_new_conversation",
+            schedulers.wakeIngest,
+          );
+        }
+        return;
+      case "message_upsert":
+        await ingestSlackRealtimeRawEvents(
+          accountKey,
+          buildSlackMessageEvents({
+            teamId: event.data.teamId,
+            accountKey,
+            conversationId: event.data.conversationId,
+            selfUserId: event.data.selfUserId,
+            observedAt,
+            messages: [event.data.message],
+          }),
+          `slack_realtime:${accountKey}`,
+        );
+        return;
+      default:
+        return;
+    }
   };
 
   const updateLinkedInCheckpointFromRealtime = (accountKey: string) => {
@@ -1733,6 +2020,23 @@ export async function runDaemon(): Promise<void> {
     wakeProjection: () => scheduleProjectionDrain(),
   };
   const queueDebouncedNativeSync = createDebouncedSyncEnqueuer(db, schedulers.wakeIngest);
+  const slackRealtime = new SlackRealtimeSupervisor({
+    onEvent: (accountKey, event) => {
+      void handleSlackRealtimeEvent(accountKey, event);
+    },
+    onConnected: (accountKey, _status, reconnected) => {
+      if (!reconnected) {
+        return;
+      }
+      queueNativeTriggeredSync(
+        db,
+        "slack",
+        accountKey,
+        "slack_realtime_reconnected",
+        schedulers.wakeIngest,
+      );
+    },
+  });
   const stopNativeWatcher = (watcher: FSWatcher | ChildProcess) => {
     if ("close" in watcher && typeof watcher.close === "function") {
       watcher.close();
@@ -1833,6 +2137,30 @@ export async function runDaemon(): Promise<void> {
       );
     },
   });
+
+  const reconcileSlackRealtimeSessions = async () => {
+    const { desired, degraded } = await collectDesiredSlackSessions(db);
+    slackRealtime.reconcile(desired, degraded);
+  };
+
+  const requestSlackRealtimeReconcile = () => {
+    if (slackRealtimeReconcilePromise) {
+      slackRealtimeReconcileQueued = true;
+      return;
+    }
+
+    slackRealtimeReconcilePromise = reconcileSlackRealtimeSessions()
+      .catch((error) => {
+        slackLogger.warn("realtime reconcile failed", error);
+      })
+      .finally(() => {
+        slackRealtimeReconcilePromise = null;
+        if (slackRealtimeReconcileQueued) {
+          slackRealtimeReconcileQueued = false;
+          requestSlackRealtimeReconcile();
+        }
+      });
+  };
 
   const reconcileLinkedInRealtimeSessions = async () => {
     const { desired, degraded } = await collectDesiredLinkedInSessions(db);
@@ -2059,6 +2387,7 @@ export async function runDaemon(): Promise<void> {
     for (const watcher of nativeWatchers.values()) {
       stopNativeWatcher(watcher);
     }
+    slackRealtime.stopAll();
     nativeWatchers.clear();
     linkedInRealtime.stopAll();
     signalRealtime.stopAll();
@@ -2126,13 +2455,16 @@ export async function runDaemon(): Promise<void> {
   };
   const runBootstrap = async () => {
     try {
+      await refreshManagedIntegrationStates(db);
       if (shouldBootstrapLocalIntegrations(db.getAppMetadata())) {
         refreshLocalIntegrationStates(db);
         reconcileLocalWatchers();
       }
+      requestSlackRealtimeReconcile();
       requestLinkedInRealtimeReconcile();
       requestSignalRealtimeReconcile();
       requestWhatsAppRealtimeReconcile();
+      queueAutoSyncRuns("daemon_start");
       if (db.getProjectionBacklog().pending_raw_events > 0) {
         queueProjectionRun("daemon_bootstrap_backlog", undefined, { delayMs: 0 });
       }
@@ -2144,9 +2476,9 @@ export async function runDaemon(): Promise<void> {
     }
   };
 
-  const processIngestRun = async (
+  async function processIngestRun(
     currentRun: NonNullable<ReturnType<typeof db.claimNextQueuedRun>>,
-  ) => {
+  ) {
     const ingestStartedAt = now();
     daemonLogger.info("ingest run started", {
       runId: currentRun.id,
@@ -2307,6 +2639,18 @@ export async function runDaemon(): Promise<void> {
         const rawEventInsertStartedAt = now();
         insertResult = db.insertRawEvents(bundle.rawEvents);
         rawEventInsertMs = now() - rawEventInsertStartedAt;
+        const slackBackfillDiagnostics = Array.isArray(
+          bundle.diagnostics?.slackBackfillConversations,
+        )
+          ? bundle.diagnostics.slackBackfillConversations
+          : [];
+        if (platform === "slack") {
+          for (const proof of slackBackfillDiagnostics) {
+            if (isSlackBackfillConversationProof(proof)) {
+              db.upsertSlackBackfillProof(proof);
+            }
+          }
+        }
         checkpointLastSuccessAt = now();
       }
 
@@ -2461,7 +2805,7 @@ export async function runDaemon(): Promise<void> {
         error: errorMessage,
       });
     }
-  };
+  }
 
   const processProjectionRun = async (
     currentRun: NonNullable<ReturnType<typeof db.claimNextQueuedRun>>,
@@ -2598,11 +2942,13 @@ export async function runDaemon(): Promise<void> {
       db,
       activeAuthSessions,
       schedulers,
+      slackRealtime,
       linkedInRealtime,
       signalRealtime,
       whatsAppRealtime,
       bootstrap,
       () => {
+        requestSlackRealtimeReconcile();
         requestLinkedInRealtimeReconcile();
         requestSignalRealtimeReconcile();
         requestWhatsAppRealtimeReconcile();
@@ -2775,6 +3121,7 @@ function handleSocket(
   db: ReturnType<typeof openCuedDatabase>,
   activeAuthSessions: Map<string, { child: ChildProcess; platform: Platform; accountKey: string }>,
   schedulers: QueueSchedulers,
+  slackRealtime: SlackRealtimeSupervisor,
   linkedInRealtime: LinkedInRealtimeSupervisor,
   signalRealtime: SignalRealtimeSupervisor,
   whatsAppRealtime: WhatsAppRealtimeSupervisor,
@@ -2812,6 +3159,7 @@ function handleSocket(
           request,
           activeAuthSessions,
           schedulers,
+          slackRealtime,
           linkedInRealtime,
           signalRealtime,
           whatsAppRealtime,
@@ -2840,6 +3188,7 @@ async function dispatchRequest(
   request: DaemonRequest,
   activeAuthSessions: Map<string, { child: ChildProcess; platform: Platform; accountKey: string }>,
   schedulers: QueueSchedulers,
+  slackRealtime: SlackRealtimeSupervisor,
   linkedInRealtime: LinkedInRealtimeSupervisor,
   signalRealtime: SignalRealtimeSupervisor,
   whatsAppRealtime: WhatsAppRealtimeSupervisor,
@@ -2872,6 +3221,7 @@ async function dispatchRequest(
           ok: true,
           result: buildDaemonStatusSnapshot(db, {
             app: getAppStatusMetadata(db),
+            slackRealtime,
             linkedInRealtime,
             signalRealtime,
             whatsAppRealtime,
@@ -2885,6 +3235,7 @@ async function dispatchRequest(
           ok: true,
           result: await buildDoctorSnapshot(db, {
             app: getAppStatusMetadata(db),
+            slackRealtime,
             linkedInRealtime,
             signalRealtime,
             whatsAppRealtime,

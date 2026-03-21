@@ -12,6 +12,7 @@ import {
   readSignalLinkedAccount,
   resolveSignalCliPath,
 } from "../platforms/signal/cli/binary.js";
+import { inspectSlackHelper } from "../platforms/slack/helper/binary.js";
 import { buildWhatsAppDiagnostics } from "../platforms/whatsapp/diagnostics.js";
 import { getWhatsAppStoreDir, inspectWhatsAppHelper } from "../platforms/whatsapp/helper/binary.js";
 import { readWhatsAppHelperStatus } from "../platforms/whatsapp/helper/status.js";
@@ -27,6 +28,7 @@ export interface DoctorCheck {
 }
 
 export interface DoctorRuntimeStatus {
+  slackRealtimeSessions?: unknown;
   linkedinRealtimeSessions?: unknown;
   signalRealtimeSessions?: unknown;
   whatsappRealtimeSessions?: unknown;
@@ -473,6 +475,34 @@ function getSignalLinkCheck(): DoctorCheck {
   };
 }
 
+function getSlackHelperCheck(): DoctorCheck {
+  const inspected = inspectSlackHelper();
+  if (!inspected.helperPath) {
+    return {
+      name: "slack_helper",
+      status: "warning",
+      summary: "Bundled Slack helper is not available",
+      remediation: "Build native/helpers/slack-go or use the packaged app bundle.",
+    };
+  }
+
+  return {
+    name: "slack_helper",
+    status: inspected.versionSupported ? "ok" : "warning",
+    summary: inspected.versionSupported
+      ? `Bundled Slack helper ${inspected.version ?? "unknown"} detected`
+      : "Bundled Slack helper exists but its version or protocol is invalid",
+    details: {
+      helperPath: inspected.helperPath,
+      version: inspected.version,
+      protocolVersion: inspected.protocolVersion,
+    },
+    remediation: inspected.versionSupported
+      ? undefined
+      : "Rebuild or update Cued so the Slack helper matches the supported protocol.",
+  };
+}
+
 async function getWhatsAppHelperCheck(): Promise<DoctorCheck> {
   const inspected = inspectWhatsAppHelper();
   if (!inspected.helperPath) {
@@ -546,6 +576,7 @@ export async function buildDoctorReport(
   }
   checks.push(getSignalCliCheck());
   checks.push(getSignalLinkCheck());
+  checks.push(getSlackHelperCheck());
   checks.push(await getWhatsAppHelperCheck());
   checks.push(await getWhatsAppLinkCheck());
 
@@ -555,6 +586,7 @@ export async function buildDoctorReport(
     projection: db.getProjectionBacklog(),
     checkpoints: db.listCheckpointSummary(),
     recentRuns: db.listRecentRuns(),
+    slackRealtimeSessions: runtime.slackRealtimeSessions ?? [],
     linkedinRealtimeSessions: runtime.linkedinRealtimeSessions ?? [],
     signalRealtimeSessions: runtime.signalRealtimeSessions ?? [],
     whatsappRealtimeSessions: runtime.whatsappRealtimeSessions ?? [],

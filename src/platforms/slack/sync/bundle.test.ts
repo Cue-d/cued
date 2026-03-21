@@ -5,6 +5,8 @@ describe("slack worker lib", () => {
   it("builds a raw event bundle from Slack users, conversations, messages, and reactions", async () => {
     const historyOldestValues: string[] = [];
     const repliesOldestValues: string[] = [];
+    const historyLimits: number[] = [];
+    const repliesLimits: number[] = [];
     const listedTypes: string[] = [];
     const bundle = await buildSlackSyncBundle({
       accountKey: "default",
@@ -52,6 +54,7 @@ describe("slack worker lib", () => {
         },
         async getHistory(_conversationId, options) {
           historyOldestValues.push(String(options?.oldest ?? ""));
+          historyLimits.push(Number(options?.limit ?? 0));
           return {
             messages: [
               {
@@ -76,6 +79,7 @@ describe("slack worker lib", () => {
         },
         async getReplies(_conversationId, _threadTs, options) {
           repliesOldestValues.push(String(options?.oldest ?? ""));
+          repliesLimits.push(Number(options?.limit ?? 0));
           return {
             messages: [
               {
@@ -127,6 +131,8 @@ describe("slack worker lib", () => {
     expect(listedTypes).toEqual(["im,mpim"]);
     expect(historyOldestValues).toEqual([""]);
     expect(repliesOldestValues).toEqual([""]);
+    expect(historyLimits).toEqual([100]);
+    expect(repliesLimits).toEqual([50]);
   });
 
   it("treats empty conversation cursors as end-of-pagination", async () => {
@@ -173,6 +179,7 @@ describe("slack worker lib", () => {
       teamId: "T123",
       selfUserId: "U_SELF",
       lastSyncAt: undefined,
+      knownConversationIds: [],
       scan: {
         mode: "full",
         startedAt: expect.any(Number),
@@ -229,6 +236,7 @@ describe("slack worker lib", () => {
       teamId: "T123",
       selfUserId: "U_SELF",
       lastSyncAt: 1710000000000,
+      knownConversationIds: [],
     });
   });
 
@@ -393,6 +401,7 @@ describe("slack worker lib", () => {
       teamId: "T123",
       selfUserId: "U_SELF",
       lastSyncAt: undefined,
+      knownConversationIds: [],
       scan: {
         mode: "full",
         startedAt: expect.any(Number),
@@ -523,6 +532,7 @@ describe("slack worker lib", () => {
       teamId: "T123",
       selfUserId: "U_SELF",
       lastSyncAt: undefined,
+      knownConversationIds: ["C123"],
       scan: {
         mode: "full",
         startedAt: 1710000000000,
@@ -534,6 +544,9 @@ describe("slack worker lib", () => {
         activeConversationId: "C123",
         historyCursor: "history-2",
         historyComplete: false,
+        conversationPhase: "history",
+        threadRootCount: 0,
+        completedThreadCount: 0,
         pendingThreadTs: [],
         activeThreadTs: null,
         repliesCursor: null,
@@ -573,6 +586,7 @@ describe("slack worker lib", () => {
       teamId: "T123",
       selfUserId: "U_SELF",
       lastSyncAt: 1710000000000,
+      knownConversationIds: ["C123"],
     });
   });
 
@@ -669,6 +683,7 @@ describe("slack worker lib", () => {
       teamId: "T123",
       selfUserId: "U_SELF",
       lastSyncAt: undefined,
+      knownConversationIds: ["C123"],
       scan: {
         mode: "full",
         startedAt: 1710000000000,
@@ -680,6 +695,9 @@ describe("slack worker lib", () => {
         activeConversationId: "C123",
         historyCursor: null,
         historyComplete: true,
+        conversationPhase: "threads",
+        threadRootCount: 1,
+        completedThreadCount: 0,
         pendingThreadTs: [],
         activeThreadTs: "1710000000.000100",
         repliesCursor: "reply-2",
@@ -727,6 +745,98 @@ describe("slack worker lib", () => {
 
     expect(second.hasMore).toBe(false);
     expect(second.rawEvents.filter((event) => event.entityKind === "message")).toHaveLength(1);
+    expect(second.diagnostics?.slackBackfillConversations).toEqual([
+      expect.objectContaining({
+        conversationId: "C123",
+        conversationPhase: "complete",
+        threadRootCount: 1,
+        completedThreadCount: 1,
+        pendingThreadCount: 0,
+      }),
+    ]);
+  });
+
+  it("finishes top-level history before entering thread backfill", async () => {
+    const calls: string[] = [];
+
+    const first = await buildSlackSyncBundle({
+      accountKey: "default",
+      apiPageBudget: 1,
+      sourceCursor: {
+        teamId: "T123",
+        selfUserId: "U_SELF",
+        scan: {
+          mode: "full",
+          startedAt: 1710000000000,
+          oldestMs: 0,
+          usersComplete: true,
+          conversationFamily: "channels",
+          conversationCursor: null,
+        },
+      },
+      client: {
+        async testAuth() {
+          return { ok: true, team_id: "T123", user_id: "U_SELF", team: "Acme", user: "Ava" };
+        },
+        async listUsers() {
+          return { users: [], nextCursor: undefined };
+        },
+        async listConversations() {
+          return {
+            conversations: [{ id: "C123", is_channel: true }],
+            nextCursor: undefined,
+          };
+        },
+        async getConversationMembers() {
+          return { members: [], nextCursor: undefined };
+        },
+        async getHistory(_conversationId, options) {
+          calls.push(`history:${options?.cursor ?? "start"}`);
+          return !options?.cursor
+            ? {
+                messages: [
+                  {
+                    type: "message",
+                    user: "U_BEN",
+                    text: "page one",
+                    ts: "1710000000.000100",
+                    reply_count: 1,
+                  },
+                ],
+                hasMore: true,
+                nextCursor: "history-2",
+              }
+            : {
+                messages: [
+                  {
+                    type: "message",
+                    user: "U_BEN",
+                    text: "page two",
+                    ts: "1710000000.000200",
+                  },
+                ],
+                hasMore: false,
+                nextCursor: undefined,
+              };
+        },
+        async getReplies() {
+          calls.push("replies");
+          return { messages: [], hasMore: false, nextCursor: undefined };
+        },
+      },
+    });
+
+    expect(calls).toEqual(["history:start"]);
+    expect(first.sourceCursor).toEqual(
+      expect.objectContaining({
+        scan: expect.objectContaining({
+          conversationPhase: "history",
+          historyCursor: "history-2",
+          pendingThreadTs: ["1710000000.000100"],
+          activeThreadTs: null,
+        }),
+      }),
+    );
   });
 
   it("fetches all channel history during full sync by default", async () => {
@@ -767,5 +877,101 @@ describe("slack worker lib", () => {
     });
 
     expect(historyOldestValues).toEqual([""]);
+  });
+
+  it("fetches newly discovered conversations during incremental sync even when their latest activity is old", async () => {
+    const fetchedHistories: string[] = [];
+
+    const bundle = await buildSlackSyncBundle({
+      accountKey: "default",
+      lastSyncAt: 1_710_000_400_000,
+      sourceCursor: {
+        teamId: "T123",
+        selfUserId: "U_SELF",
+        lastSyncAt: 1_710_000_400_000,
+        knownConversationIds: ["D_KNOWN"],
+      },
+      client: {
+        async testAuth() {
+          return { ok: true, team_id: "T123", user_id: "U_SELF", team: "Acme", user: "Ava" };
+        },
+        async listUsers() {
+          return { users: [], nextCursor: undefined };
+        },
+        async listConversations(types) {
+          if (types === "im,mpim") {
+            return {
+              conversations: [
+                {
+                  id: "D_KNOWN",
+                  is_im: true,
+                  user: "U_BEN",
+                  latest: {
+                    type: "message",
+                    user: "U_BEN",
+                    text: "old known",
+                    ts: "1710000000.000100",
+                  },
+                },
+                {
+                  id: "D_NEW",
+                  is_im: true,
+                  user: "U_CARA",
+                  latest: {
+                    type: "message",
+                    user: "U_CARA",
+                    text: "old new",
+                    ts: "1710000000.000200",
+                  },
+                },
+              ],
+              nextCursor: undefined,
+            };
+          }
+          return {
+            conversations: [],
+            nextCursor: undefined,
+          };
+        },
+        async getConversationMembers() {
+          return { members: [], nextCursor: undefined };
+        },
+        async getHistory(conversationId) {
+          fetchedHistories.push(conversationId);
+          return {
+            messages:
+              conversationId === "D_NEW"
+                ? [
+                    {
+                      type: "message",
+                      user: "U_CARA",
+                      text: "historic DM from a newly discovered thread",
+                      ts: "1710000000.000200",
+                    },
+                  ]
+                : [],
+            hasMore: false,
+            nextCursor: undefined,
+          };
+        },
+        async getReplies() {
+          return { messages: [], hasMore: false, nextCursor: undefined };
+        },
+      },
+    });
+
+    expect(fetchedHistories).toEqual(["D_NEW"]);
+    expect(
+      bundle.rawEvents.some(
+        (event) =>
+          event.entityKind === "message" &&
+          (event.payload as Record<string, unknown>).sourceConversationKey === "slack:T123:D_NEW",
+      ),
+    ).toBe(true);
+    expect(bundle.sourceCursor).toEqual(
+      expect.objectContaining({
+        knownConversationIds: ["D_KNOWN", "D_NEW"],
+      }),
+    );
   });
 });

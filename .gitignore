@@ -13,6 +13,8 @@ dist/
 native/macos/CuedNative/.build/
 native/macos/dist/
 native/helpers/signal-cli/.build/
+native/helpers/slack-go/.build/
+native/helpers/slack-go/cued-slack-helper
 native/helpers/whatsapp-go/.build/
 .turbo/
 tsconfig.tsbuildinfo

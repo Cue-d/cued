@@ -12,6 +12,7 @@ export interface SyncBundle {
   sourceCursor?: unknown;
   syncMode?: SyncMode;
   hasMore?: boolean;
+  diagnostics?: Record<string, unknown>;
 }
 
 export interface AdapterWorkerOutput {

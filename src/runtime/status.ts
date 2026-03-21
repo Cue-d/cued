@@ -2,6 +2,7 @@ import type { CuedDatabase } from "../db/database.js";
 import { buildIntegrationStatus } from "../platforms/core/state/status.js";
 import type { LinkedInRealtimeSupervisor } from "../platforms/linkedin/realtime/session.js";
 import type { SignalRealtimeSupervisor } from "../platforms/signal/realtime/session.js";
+import type { SlackRealtimeSupervisor } from "../platforms/slack/realtime/session.js";
 import { buildWhatsAppDiagnostics } from "../platforms/whatsapp/diagnostics.js";
 import type { WhatsAppRealtimeSupervisor } from "../platforms/whatsapp/realtime/session.js";
 import { buildDoctorReport } from "./doctor.js";
@@ -18,6 +19,7 @@ export interface DaemonBootstrapSnapshot {
 export async function buildDoctorSnapshot(
   db: CuedDatabase,
   options: {
+    slackRealtime: SlackRealtimeSupervisor;
     linkedInRealtime: LinkedInRealtimeSupervisor;
     signalRealtime: SignalRealtimeSupervisor;
     whatsAppRealtime: WhatsAppRealtimeSupervisor;
@@ -39,6 +41,7 @@ export async function buildDoctorSnapshot(
     app: options.app,
     bootstrap: options.bootstrap,
     ...(await buildDoctorReport(db, {
+      slackRealtimeSessions: options.slackRealtime.getStatuses(),
       linkedinRealtimeSessions: options.linkedInRealtime.getStatuses(),
       signalRealtimeSessions: options.signalRealtime.getStatuses(),
       whatsappRealtimeSessions: options.whatsAppRealtime.getStatuses(),
@@ -62,6 +65,7 @@ export function buildDaemonStatusSnapshot(
   db: CuedDatabase,
   options: {
     app: unknown;
+    slackRealtime: SlackRealtimeSupervisor;
     linkedInRealtime: LinkedInRealtimeSupervisor;
     signalRealtime: SignalRealtimeSupervisor;
     whatsAppRealtime: WhatsAppRealtimeSupervisor;
@@ -77,6 +81,7 @@ export function buildDaemonStatusSnapshot(
     projection: db.getProjectionBacklog(),
     checkpoints: db.listCheckpointSummary(),
     recentRuns: db.listRecentRuns(),
+    slackRealtimeSessions: options.slackRealtime.getStatuses(),
     linkedinRealtimeSessions: options.linkedInRealtime.getStatuses(),
     signalRealtimeSessions: options.signalRealtime.getStatuses(),
     whatsappRealtimeSessions: options.whatsAppRealtime.getStatuses(),

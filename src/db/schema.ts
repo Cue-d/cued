@@ -77,6 +77,33 @@ export const syncRunErrors = sqliteTable("sync_run_errors", {
   createdAt: integer("created_at").notNull(),
 });
 
+export const slackBackfillProofs = sqliteTable("slack_backfill_proofs", {
+  id: text("id").primaryKey(),
+  accountKey: text("account_key").notNull(),
+  teamId: text("team_id").notNull(),
+  conversationId: text("conversation_id").notNull(),
+  conversationName: text("conversation_name"),
+  conversationFamily: text("conversation_family").notNull(),
+  syncMode: text("sync_mode").notNull(),
+  scanStartedAt: integer("scan_started_at").notNull(),
+  knownConversationCount: integer("known_conversation_count").notNull(),
+  conversationPhase: text("conversation_phase").notNull(),
+  historyComplete: integer("history_complete").notNull(),
+  historyCursor: text("history_cursor"),
+  threadRootCount: integer("thread_root_count").notNull(),
+  completedThreadCount: integer("completed_thread_count").notNull(),
+  pendingThreadCount: integer("pending_thread_count").notNull(),
+  activeThreadTs: text("active_thread_ts"),
+  repliesCursor: text("replies_cursor"),
+  oldestMessageTs: text("oldest_message_ts"),
+  newestMessageTs: text("newest_message_ts"),
+  firstDiscoveredAt: integer("first_discovered_at").notNull(),
+  historyCompleteAt: integer("history_complete_at"),
+  repliesCompleteAt: integer("replies_complete_at"),
+  lastObservedAt: integer("last_observed_at").notNull(),
+  updatedAt: integer("updated_at").notNull(),
+});
+
 export const daemonState = sqliteTable("daemon_state", {
   singletonKey: text("singleton_key").primaryKey(),
   pid: integer("pid"),

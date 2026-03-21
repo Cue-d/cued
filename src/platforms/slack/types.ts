@@ -31,13 +31,6 @@ export interface SlackUser {
   profile: SlackUserProfile;
 }
 
-export interface SlackUsersListResponse {
-  ok: boolean;
-  error?: string;
-  members?: SlackUser[];
-  response_metadata?: { next_cursor?: string };
-}
-
 export interface SlackReaction {
   name: string;
   count: number;
@@ -96,34 +89,4 @@ export interface SlackConversation {
   topic?: { value: string };
   purpose?: { value: string };
   latest?: SlackMessage;
-}
-
-export interface SlackConversationsListResponse {
-  ok: boolean;
-  error?: string;
-  channels?: SlackConversation[];
-  response_metadata?: { next_cursor?: string };
-}
-
-export interface SlackConversationsHistoryResponse {
-  ok: boolean;
-  error?: string;
-  messages?: SlackMessage[];
-  has_more?: boolean;
-  response_metadata?: { next_cursor?: string };
-}
-
-export interface SlackConversationsRepliesResponse {
-  ok: boolean;
-  error?: string;
-  messages?: SlackMessage[];
-  has_more?: boolean;
-  response_metadata?: { next_cursor?: string };
-}
-
-export interface SlackConversationsMembersResponse {
-  ok: boolean;
-  error?: string;
-  members?: string[];
-  response_metadata?: { next_cursor?: string };
 }
