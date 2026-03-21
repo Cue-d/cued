@@ -8,6 +8,7 @@ import type {
   ReactionPayload,
   TimelineEventPayload,
 } from "../../core/types/provider.js";
+import { normalizePhone, toE164 } from "../../core/utils/phone.js";
 import type { CuedDatabase, LocalDrizzleDatabase } from "../../db/database.js";
 import {
   contactHandles,
@@ -95,7 +96,7 @@ function normalizeHandle(type: string, value: string): string {
     case "email":
       return trimmed.toLowerCase();
     case "phone":
-      return trimmed.replace(/[^\d+]/g, "");
+      return normalizePhone(trimmed);
     default:
       return trimmed.toLowerCase();
   }
@@ -127,7 +128,7 @@ function findProjectedContactIdBySourceKey(
   const messageRow = conn.get<{ contact_id: string }>(sql`
     SELECT sender_contact_id AS contact_id
     FROM messages
-    WHERE sender_source_key = ${sourceEntityKey}
+    WHERE LOWER(sender_source_key) = LOWER(${sourceEntityKey})
       AND sender_contact_id IS NOT NULL
     LIMIT 1
   `);
@@ -138,7 +139,7 @@ function findProjectedContactIdBySourceKey(
   const participantRow = conn.get<{ contact_id: string }>(sql`
     SELECT contact_id
     FROM conversation_participants
-    WHERE source_participant_key = ${sourceEntityKey}
+    WHERE LOWER(source_participant_key) = LOWER(${sourceEntityKey})
     LIMIT 1
   `);
   return participantRow?.contact_id ?? null;
@@ -153,10 +154,18 @@ function findProjectedContactIdByKnownHandleAliases(
       continue;
     }
 
-    const sourceEntityKey = `imessage:${handle.normalizedValue}`;
-    const contactId = findProjectedContactIdBySourceKey(conn, sourceEntityKey);
-    if (contactId) {
-      return contactId;
+    const sourceEntityKeys =
+      handle.type === "phone"
+        ? [...new Set([handle.normalizedValue, toE164(handle.normalizedValue) ?? null])]
+            .filter((value): value is string => Boolean(value))
+            .map((value) => `imessage:${value}`)
+        : [`imessage:${handle.normalizedValue}`];
+
+    for (const sourceEntityKey of sourceEntityKeys) {
+      const contactId = findProjectedContactIdBySourceKey(conn, sourceEntityKey);
+      if (contactId) {
+        return contactId;
+      }
     }
   }
 
