@@ -646,7 +646,6 @@ export async function buildSlackSyncBundle(options?: {
   ];
   const rawEvents: SyncBundle["rawEvents"] = [];
   const slackBackfillDiagnostics: SlackBackfillConversationProof[] = [];
-  let diagnostics: Record<string, unknown> | undefined;
   const usersById = new Map<string, SlackUser>();
   const knownConversationIds = new Set(savedCursor?.knownConversationIds ?? []);
 
@@ -729,8 +728,8 @@ export async function buildSlackSyncBundle(options?: {
         apiPageBudget,
       );
       knownConversationIds.add(conversation.id);
-      diagnostics = {
-        slackBackfill: buildSlackBackfillConversationProof({
+      slackBackfillDiagnostics.push(
+        buildSlackBackfillConversationProof({
           teamId,
           accountKey,
           conversation,
@@ -740,9 +739,7 @@ export async function buildSlackSyncBundle(options?: {
           observedAt: observedBase,
           messageBatch,
         }),
-        slackBackfillConversations: slackBackfillDiagnostics,
-      };
-      slackBackfillDiagnostics.push(diagnostics.slackBackfill as SlackBackfillConversationProof);
+      );
       rawEvents.push(
         buildSlackConversationEvent({
           teamId,
@@ -861,7 +858,9 @@ export async function buildSlackSyncBundle(options?: {
         sourceCursor,
         syncMode: scan.mode,
         hasMore,
-        diagnostics,
+        diagnostics: {
+          slackBackfillConversations: slackBackfillDiagnostics,
+        },
       };
     }
 
@@ -981,10 +980,7 @@ export async function buildSlackSyncBundle(options?: {
     hasMore,
     diagnostics:
       slackBackfillDiagnostics.length > 0
-        ? {
-            ...(diagnostics ?? {}),
-            slackBackfillConversations: slackBackfillDiagnostics,
-          }
-        : diagnostics,
+        ? { slackBackfillConversations: slackBackfillDiagnostics }
+        : undefined,
   };
 }
