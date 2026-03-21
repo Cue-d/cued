@@ -7,6 +7,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { CuedDatabase } from "../../db/database.js";
 import { projectPendingRawEvents } from "../../runtime/projection/projector.js";
 import { runAdapter } from "../core/runner.js";
+import { isSlackBackfillConversationProof } from "./sync/proof.js";
 
 type SlackPhase = "bootstrap" | "rerun" | "expand";
 
@@ -510,6 +511,27 @@ echo '{"token":"xoxc-test","cookie":"cookie-test","teamId":"T123","teamName":"Ac
         }),
       );
 
+      expect(db.listSlackBackfillProofs("workspace-a")).toEqual([
+        expect.objectContaining({
+          conversation_id: "C_ENG",
+          conversation_phase: "complete",
+          history_complete: 1,
+          thread_root_count: 1,
+          completed_thread_count: 1,
+          pending_thread_count: 0,
+          history_complete_at: expect.any(Number),
+          replies_complete_at: expect.any(Number),
+        }),
+        expect.objectContaining({
+          conversation_id: "D_BEN",
+          conversation_phase: "complete",
+        }),
+        expect.objectContaining({
+          conversation_id: "G_TEAM",
+          conversation_phase: "complete",
+        }),
+      ]);
+
       phase = "rerun";
       const second = await runSlackPhase(db, {
         dbPath: db.dbPath,
@@ -580,6 +602,23 @@ echo '{"token":"xoxc-test","cookie":"cookie-test","teamId":"T123","teamName":"Ac
           ]),
         }),
       );
+
+      expect(db.listSlackBackfillProofs("workspace-a")).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            conversation_id: "C_NEW",
+            conversation_phase: "complete",
+          }),
+          expect.objectContaining({
+            conversation_id: "D_DREW",
+            conversation_phase: "complete",
+          }),
+          expect.objectContaining({
+            conversation_id: "G_NEW",
+            conversation_phase: "complete",
+          }),
+        ]),
+      );
     } finally {
       process.execArgv = originalExecArgv;
       db.close();
@@ -597,6 +636,7 @@ async function runSlackCycle(
     helperBinaryPath: string;
     apiURL: string;
     securityDir: string;
+    apiPageBudget?: number;
   },
 ) {
   const checkpoint = db.getCheckpoint("slack", "workspace-a");
@@ -615,10 +655,21 @@ async function runSlackCycle(
   if (checkpoint?.source_cursor_json) {
     envOverrides.CUED_SLACK_SOURCE_CURSOR = checkpoint.source_cursor_json;
   }
+  if (typeof options.apiPageBudget === "number") {
+    envOverrides.CUED_SLACK_API_PAGE_BUDGET = String(options.apiPageBudget);
+  }
 
   const bundle = await runAdapter("slack", "workspace-a", envOverrides);
   const insertResult = db.insertRawEvents(bundle.rawEvents);
   db.upsertSourceAccounts(bundle.sourceAccounts ?? []);
+  const slackBackfillProofs = Array.isArray(bundle.diagnostics?.slackBackfillConversations)
+    ? bundle.diagnostics.slackBackfillConversations
+    : [];
+  for (const proof of slackBackfillProofs) {
+    if (isSlackBackfillConversationProof(proof)) {
+      db.upsertSlackBackfillProof(proof);
+    }
+  }
   const projection = projectPendingRawEvents(db);
   const resolvedSyncMode = resolveCheckpointSyncMode(
     checkpoint?.sync_mode ?? null,

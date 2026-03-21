@@ -162,6 +162,73 @@ describe("CuedDatabase", () => {
     db.close();
   });
 
+  it("persists slack backfill proofs and completion markers", () => {
+    const db = createDb();
+
+    db.upsertSlackBackfillProof({
+      accountKey: "workspace-a",
+      teamId: "T123",
+      conversationId: "C123",
+      conversationName: "eng",
+      conversationFamily: "channels",
+      syncMode: "full",
+      scanStartedAt: 100,
+      knownConversationCount: 1,
+      conversationPhase: "history",
+      historyComplete: false,
+      historyCursor: "history-2",
+      threadRootCount: 1,
+      completedThreadCount: 0,
+      pendingThreadCount: 1,
+      activeThreadTs: null,
+      repliesCursor: null,
+      oldestMessageTs: "1710000000.000100",
+      newestMessageTs: "1710000000.000100",
+      observedAt: 200,
+    });
+
+    db.upsertSlackBackfillProof({
+      accountKey: "workspace-a",
+      teamId: "T123",
+      conversationId: "C123",
+      conversationName: "eng",
+      conversationFamily: "channels",
+      syncMode: "full",
+      scanStartedAt: 100,
+      knownConversationCount: 3,
+      conversationPhase: "complete",
+      historyComplete: true,
+      historyCursor: null,
+      threadRootCount: 1,
+      completedThreadCount: 1,
+      pendingThreadCount: 0,
+      activeThreadTs: null,
+      repliesCursor: null,
+      oldestMessageTs: "1709999999.000000",
+      newestMessageTs: "1710000000.000300",
+      observedAt: 300,
+    });
+
+    expect(db.listSlackBackfillProofs("workspace-a")).toEqual([
+      expect.objectContaining({
+        account_key: "workspace-a",
+        conversation_id: "C123",
+        conversation_phase: "complete",
+        history_complete: 1,
+        known_conversation_count: 3,
+        thread_root_count: 1,
+        completed_thread_count: 1,
+        oldest_message_ts: "1709999999.000000",
+        newest_message_ts: "1710000000.000300",
+        first_discovered_at: 200,
+        history_complete_at: 300,
+        replies_complete_at: 300,
+      }),
+    ]);
+
+    db.close();
+  });
+
   it("persists app settings and install metadata", () => {
     const db = createDb();
 

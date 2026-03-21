@@ -62,6 +62,7 @@ import {
   buildSlackConversationEvent,
   buildSlackMessageEvents,
 } from "../../platforms/slack/sync/events.js";
+import { isSlackBackfillConversationProof } from "../../platforms/slack/sync/proof.js";
 import {
   getWhatsAppStoreDir,
   inspectWhatsAppHelper,
@@ -2577,6 +2578,18 @@ export async function runDaemon(): Promise<void> {
         const rawEventInsertStartedAt = now();
         insertResult = db.insertRawEvents(bundle.rawEvents);
         rawEventInsertMs = now() - rawEventInsertStartedAt;
+        const slackBackfillDiagnostics = Array.isArray(
+          bundle.diagnostics?.slackBackfillConversations,
+        )
+          ? bundle.diagnostics.slackBackfillConversations
+          : [];
+        if (platform === "slack") {
+          for (const proof of slackBackfillDiagnostics) {
+            if (isSlackBackfillConversationProof(proof)) {
+              db.upsertSlackBackfillProof(proof);
+            }
+          }
+        }
         checkpointLastSuccessAt = now();
       }
 

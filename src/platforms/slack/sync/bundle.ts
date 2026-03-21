@@ -10,6 +10,7 @@ import {
   buildSlackMessageEvents,
   slackTimestampMs,
 } from "./events.js";
+import type { SlackBackfillConversationPhase, SlackBackfillConversationProof } from "./proof.js";
 
 const INCREMENTAL_BUFFER_MS = 5 * 60 * 1000;
 const DEFAULT_SLACK_CONVERSATIONS_PER_RUN = 5;
@@ -38,6 +39,9 @@ export interface SlackScanCursor {
   activeConversationId?: string;
   historyCursor?: string | null;
   historyComplete?: boolean;
+  conversationPhase?: SlackBackfillConversationPhase;
+  threadRootCount?: number;
+  completedThreadCount?: number;
   pendingThreadTs?: string[];
   activeThreadTs?: string | null;
   repliesCursor?: string | null;
@@ -237,6 +241,20 @@ function parseSlackSourceCursor(raw: unknown): SlackSourceCursor | undefined {
                 ? parsed.historyCursor
                 : undefined,
             historyComplete: parsed.historyComplete === true,
+            conversationPhase:
+              parsed.conversationPhase === "history" ||
+              parsed.conversationPhase === "threads" ||
+              parsed.conversationPhase === "complete"
+                ? parsed.conversationPhase
+                : undefined,
+            threadRootCount:
+              typeof parsed.threadRootCount === "number" && parsed.threadRootCount >= 0
+                ? Math.trunc(parsed.threadRootCount)
+                : undefined,
+            completedThreadCount:
+              typeof parsed.completedThreadCount === "number" && parsed.completedThreadCount >= 0
+                ? Math.trunc(parsed.completedThreadCount)
+                : undefined,
             pendingThreadTs: parseStringArray(parsed.pendingThreadTs),
             activeThreadTs:
               typeof parsed.activeThreadTs === "string" || parsed.activeThreadTs === null
@@ -363,6 +381,9 @@ async function listConversationMessages(
 interface SlackConversationResumeState {
   historyCursor: string | null;
   historyComplete: boolean;
+  conversationPhase: SlackBackfillConversationPhase;
+  threadRootCount: number;
+  completedThreadCount: number;
   pendingThreadTs: string[];
   activeThreadTs: string | null;
   repliesCursor: string | null;
@@ -389,6 +410,11 @@ async function listConversationMessagesBatch(
   const pendingThreadTs = [...(resumeState?.pendingThreadTs ?? [])];
   let historyCursor = resumeState?.historyCursor ?? null;
   let historyComplete = resumeState?.historyComplete ?? false;
+  let threadRootCount = Math.max(
+    resumeState?.threadRootCount ?? 0,
+    pendingThreadTs.length + (resumeState?.activeThreadTs ? 1 : 0),
+  );
+  let completedThreadCount = Math.max(resumeState?.completedThreadCount ?? 0, 0);
   let activeThreadTs = resumeState?.activeThreadTs ?? null;
   let repliesCursor = resumeState?.repliesCursor ?? null;
   let apiPagesRemaining = apiPageBudget;
@@ -402,6 +428,32 @@ async function listConversationMessagesBatch(
   };
 
   while (apiPagesRemaining > 0) {
+    if (!historyComplete) {
+      const result = await client.getHistory(conversationId, {
+        cursor: historyCursor ?? undefined,
+        oldest,
+        limit: messagesPageLimit,
+      });
+      apiPagesRemaining -= 1;
+      for (const message of result.messages) {
+        if (message.reply_count && message.reply_count > 0) {
+          pendingThreadTs.push(message.ts);
+          threadRootCount += 1;
+        }
+        addMessage(message);
+      }
+      historyCursor = result.nextCursor ?? null;
+      if (!historyCursor) {
+        historyComplete = true;
+      }
+      continue;
+    }
+
+    if (!activeThreadTs && pendingThreadTs.length > 0) {
+      activeThreadTs = pendingThreadTs.shift() ?? null;
+      repliesCursor = null;
+    }
+
     if (activeThreadTs) {
       const result = await client.getReplies(conversationId, activeThreadTs, {
         cursor: repliesCursor ?? undefined,
@@ -417,30 +469,8 @@ async function listConversationMessagesBatch(
       }
       repliesCursor = result.nextCursor ?? null;
       if (!repliesCursor) {
-        activeThreadTs = pendingThreadTs.shift() ?? null;
-      }
-      continue;
-    }
-
-    if (!historyComplete) {
-      const result = await client.getHistory(conversationId, {
-        cursor: historyCursor ?? undefined,
-        oldest,
-        limit: messagesPageLimit,
-      });
-      apiPagesRemaining -= 1;
-      for (const message of result.messages) {
-        if (message.reply_count && message.reply_count > 0) {
-          pendingThreadTs.push(message.ts);
-        }
-        addMessage(message);
-      }
-      historyCursor = result.nextCursor ?? null;
-      if (!historyCursor) {
-        historyComplete = true;
-      }
-      if (!activeThreadTs && pendingThreadTs.length > 0) {
-        activeThreadTs = pendingThreadTs.shift() ?? null;
+        completedThreadCount += 1;
+        activeThreadTs = null;
       }
       continue;
     }
@@ -448,16 +478,113 @@ async function listConversationMessagesBatch(
     break;
   }
 
+  const conversationPhase: SlackBackfillConversationPhase = !historyComplete
+    ? "history"
+    : activeThreadTs || pendingThreadTs.length > 0
+      ? "threads"
+      : "complete";
+
   return {
     messages: sortSlackMessages(messages),
     complete: historyComplete && !activeThreadTs && pendingThreadTs.length === 0,
     resumeState: {
       historyCursor,
       historyComplete,
+      conversationPhase,
+      threadRootCount,
+      completedThreadCount,
       pendingThreadTs,
       activeThreadTs,
       repliesCursor: activeThreadTs ? repliesCursor : null,
     },
+  };
+}
+
+function summarizeMessageRange(messages: SlackMessage[]): {
+  oldest: string | null;
+  newest: string | null;
+} {
+  if (messages.length === 0) {
+    return { oldest: null, newest: null };
+  }
+  const sorted = sortSlackMessages(messages);
+  return {
+    oldest: sorted[0]?.ts ?? null,
+    newest: sorted.at(-1)?.ts ?? null,
+  };
+}
+
+function buildSlackBackfillConversationProof(input: {
+  teamId: string;
+  accountKey: string;
+  conversation: SlackConversation;
+  family: SlackConversationFamily;
+  scan: SlackScanCursor;
+  knownConversationCount: number;
+  observedAt: number;
+  messageBatch: SlackConversationBatchResult;
+}): SlackBackfillConversationProof {
+  const range = summarizeMessageRange(input.messageBatch.messages);
+  return {
+    teamId: input.teamId,
+    accountKey: input.accountKey,
+    syncMode: input.scan.mode,
+    scanStartedAt: input.scan.startedAt,
+    knownConversationCount: input.knownConversationCount,
+    conversationId: input.conversation.id,
+    conversationName: input.conversation.name,
+    conversationFamily: input.family,
+    conversationPhase: input.messageBatch.resumeState.conversationPhase,
+    historyComplete: input.messageBatch.resumeState.historyComplete,
+    historyCursor: input.messageBatch.resumeState.historyCursor,
+    threadRootCount: input.messageBatch.resumeState.threadRootCount,
+    completedThreadCount: input.messageBatch.resumeState.completedThreadCount,
+    pendingThreadCount:
+      input.messageBatch.resumeState.pendingThreadTs.length +
+      (input.messageBatch.resumeState.activeThreadTs ? 1 : 0),
+    activeThreadTs: input.messageBatch.resumeState.activeThreadTs,
+    repliesCursor: input.messageBatch.resumeState.repliesCursor,
+    oldestMessageTs: range.oldest,
+    newestMessageTs: range.newest,
+    observedAt: input.observedAt,
+  };
+}
+
+function buildCompleteSlackBackfillConversationProof(input: {
+  teamId: string;
+  accountKey: string;
+  conversation: SlackConversation;
+  family: SlackConversationFamily;
+  scanMode: SlackScanMode;
+  scanStartedAt: number;
+  knownConversationCount: number;
+  observedAt: number;
+  messages: SlackMessage[];
+}): SlackBackfillConversationProof {
+  const range = summarizeMessageRange(input.messages);
+  const threadRootCount = input.messages.filter(
+    (message) => Number(message.reply_count ?? 0) > 0,
+  ).length;
+  return {
+    teamId: input.teamId,
+    accountKey: input.accountKey,
+    syncMode: input.scanMode,
+    scanStartedAt: input.scanStartedAt,
+    knownConversationCount: input.knownConversationCount,
+    conversationId: input.conversation.id,
+    conversationName: input.conversation.name,
+    conversationFamily: input.family,
+    conversationPhase: "complete",
+    historyComplete: true,
+    historyCursor: null,
+    threadRootCount,
+    completedThreadCount: threadRootCount,
+    pendingThreadCount: 0,
+    activeThreadTs: null,
+    repliesCursor: null,
+    oldestMessageTs: range.oldest,
+    newestMessageTs: range.newest,
+    observedAt: input.observedAt,
   };
 }
 
@@ -518,6 +645,8 @@ export async function buildSlackSyncBundle(options?: {
     },
   ];
   const rawEvents: SyncBundle["rawEvents"] = [];
+  const slackBackfillDiagnostics: SlackBackfillConversationProof[] = [];
+  let diagnostics: Record<string, unknown> | undefined;
   const usersById = new Map<string, SlackUser>();
   const knownConversationIds = new Set(savedCursor?.knownConversationIds ?? []);
 
@@ -599,8 +728,21 @@ export async function buildSlackSyncBundle(options?: {
           : undefined,
         apiPageBudget,
       );
-
       knownConversationIds.add(conversation.id);
+      diagnostics = {
+        slackBackfill: buildSlackBackfillConversationProof({
+          teamId,
+          accountKey,
+          conversation,
+          family,
+          scan,
+          knownConversationCount: knownConversationIds.size,
+          observedAt: observedBase,
+          messageBatch,
+        }),
+        slackBackfillConversations: slackBackfillDiagnostics,
+      };
+      slackBackfillDiagnostics.push(diagnostics.slackBackfill as SlackBackfillConversationProof);
       rawEvents.push(
         buildSlackConversationEvent({
           teamId,
@@ -645,6 +787,9 @@ export async function buildSlackSyncBundle(options?: {
             activeConversationId: conversation.id,
             historyCursor: messageBatch.resumeState.historyCursor,
             historyComplete: messageBatch.resumeState.historyComplete,
+            conversationPhase: messageBatch.resumeState.conversationPhase,
+            threadRootCount: messageBatch.resumeState.threadRootCount,
+            completedThreadCount: messageBatch.resumeState.completedThreadCount,
             pendingThreadTs: messageBatch.resumeState.pendingThreadTs,
             activeThreadTs: messageBatch.resumeState.activeThreadTs,
             repliesCursor: messageBatch.resumeState.repliesCursor,
@@ -666,6 +811,9 @@ export async function buildSlackSyncBundle(options?: {
             activeConversationId: undefined,
             historyCursor: undefined,
             historyComplete: undefined,
+            conversationPhase: undefined,
+            threadRootCount: undefined,
+            completedThreadCount: undefined,
             pendingThreadTs: undefined,
             activeThreadTs: undefined,
             repliesCursor: undefined,
@@ -689,6 +837,9 @@ export async function buildSlackSyncBundle(options?: {
               activeConversationId: undefined,
               historyCursor: undefined,
               historyComplete: undefined,
+              conversationPhase: undefined,
+              threadRootCount: undefined,
+              completedThreadCount: undefined,
               pendingThreadTs: undefined,
               activeThreadTs: undefined,
               repliesCursor: undefined,
@@ -710,6 +861,7 @@ export async function buildSlackSyncBundle(options?: {
         sourceCursor,
         syncMode: scan.mode,
         hasMore,
+        diagnostics,
       };
     }
 
@@ -757,6 +909,20 @@ export async function buildSlackSyncBundle(options?: {
           accountKey,
           conversationId: conversation.id,
           selfUserId,
+          observedAt: observedBase,
+          messages,
+        }),
+      );
+
+      slackBackfillDiagnostics.push(
+        buildCompleteSlackBackfillConversationProof({
+          teamId,
+          accountKey,
+          conversation,
+          family,
+          scanMode: scan.mode,
+          scanStartedAt: scan.startedAt,
+          knownConversationCount: knownConversationIds.size,
           observedAt: observedBase,
           messages,
         }),
@@ -813,5 +979,12 @@ export async function buildSlackSyncBundle(options?: {
     sourceCursor,
     syncMode: scan.mode,
     hasMore,
+    diagnostics:
+      slackBackfillDiagnostics.length > 0
+        ? {
+            ...(diagnostics ?? {}),
+            slackBackfillConversations: slackBackfillDiagnostics,
+          }
+        : diagnostics,
   };
 }
