@@ -31,6 +31,13 @@ export type CanonicalProjectionSnapshot = {
     participantNames: string | null;
     unreadCount: number;
   }>;
+  conversationParticipants: Array<{
+    conversationId: string;
+    contactId: string;
+    participantName: string | null;
+    isSelf: number;
+    isActive: number;
+  }>;
   messages: Array<{
     id: string;
     platform: string;
@@ -145,6 +152,18 @@ export function readCanonicalProjectionSnapshot(db: CuedDatabase): CanonicalProj
     ORDER BY id ASC
   `);
 
+  const conversationParticipants = db.orm().all<{
+    conversation_id: string;
+    contact_id: string;
+    participant_name: string | null;
+    is_self: number;
+    is_active: number;
+  }>(sql`
+    SELECT conversation_id, contact_id, participant_name, is_self, is_active
+    FROM conversation_participants
+    ORDER BY conversation_id ASC, contact_id ASC
+  `);
+
   const messageAttachments = db.orm().all<{
     id: string;
     message_id: string;
@@ -226,6 +245,13 @@ export function readCanonicalProjectionSnapshot(db: CuedDatabase): CanonicalProj
       name: conversation.name,
       participantNames: conversation.participant_names,
       unreadCount: conversation.unread_count,
+    })),
+    conversationParticipants: conversationParticipants.map((participant) => ({
+      conversationId: participant.conversation_id,
+      contactId: participant.contact_id,
+      participantName: participant.participant_name,
+      isSelf: participant.is_self,
+      isActive: participant.is_active,
     })),
     messages: messages.map((message) => ({
       id: message.id,

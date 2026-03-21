@@ -72,23 +72,7 @@ describe("projection replay", () => {
 
         expect(paginatedSnapshot).toEqual(rebuildSnapshot);
         expect(insertedRangeSnapshot).toEqual(rebuildSnapshot);
-
-        if (fixture.name === "contact-thread-message-reaction") {
-          expect(rebuildSnapshot.contacts).toHaveLength(1);
-          expect(rebuildSnapshot.conversations).toHaveLength(1);
-          expect(rebuildSnapshot.messages).toHaveLength(1);
-          expect(rebuildSnapshot.messageAttachments).toHaveLength(1);
-          expect(rebuildSnapshot.messageReactions).toHaveLength(1);
-          expect(rebuildSnapshot.ftsMessageIds).toEqual([rebuildSnapshot.messages[0]!.id]);
-        }
-
-        if (fixture.name === "out-of-order-slack-dm") {
-          expect(rebuildSnapshot.contacts).toHaveLength(1);
-          expect(rebuildSnapshot.conversations).toHaveLength(1);
-          expect(rebuildSnapshot.messages).toHaveLength(1);
-          expect(rebuildSnapshot.messages[0]?.conversationName).toBe("Slack User");
-          expect(rebuildSnapshot.messages[0]?.senderName).toBe("Slack User");
-        }
+        fixture.assert?.(rebuildSnapshot);
       } finally {
         rebuildDb.close();
         paginatedDb.close();
