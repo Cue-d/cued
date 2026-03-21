@@ -142,6 +142,8 @@ export const rawEvents = sqliteTable("raw_events", {
   cursorJson: text("cursor_json"),
   dedupeKey: text("dedupe_key").notNull(),
   payloadJson: text("payload_json").notNull(),
+  normalizedSchema: text("normalized_schema"),
+  provenanceJson: text("provenance_json"),
   sourceVersion: text("source_version"),
 });
 

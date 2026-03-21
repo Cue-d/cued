@@ -8,6 +8,7 @@ export const HOOK_EVENT_NAMES = [
   "integration.authenticated",
   "sync.completed",
   "sync.failed",
+  "message.sent",
   "message.received",
 ] as const;
 
@@ -142,6 +143,12 @@ function buildSampleHooks(openClaw: { detected: boolean; path: string | null }):
         enabled: false,
         command: "/bin/sh",
         args: ["-lc", "cat >/tmp/cued-hook-sync-failed.json"],
+      },
+      {
+        event: "message.sent",
+        enabled: false,
+        command: "/bin/sh",
+        args: ["-lc", "cat >/tmp/cued-hook-message-sent.json"],
       },
       {
         event: "message.received",

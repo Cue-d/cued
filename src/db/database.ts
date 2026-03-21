@@ -19,6 +19,10 @@ import type {
   SyncRunStatus,
   SyncRunType,
 } from "../core/types/provider.js";
+import {
+  normalizeRawEventProvenance,
+  resolveRawEventNormalizedSchema,
+} from "../core/types/provider.js";
 import { normalizePhone, toE164 } from "../core/utils/phone.js";
 import type {
   PendingRollbackState,
@@ -422,6 +426,28 @@ function chunkArray<T>(items: readonly T[], size: number): T[][] {
     chunks.push(items.slice(index, index + size));
   }
   return chunks;
+}
+
+function buildRawEventValues(event: RawEventInput) {
+  const provenance = normalizeRawEventProvenance(event.provenance, event.sourceVersion);
+  return {
+    id: event.id,
+    platform: event.platform,
+    accountKey: event.accountKey,
+    entityKind: event.entityKind,
+    eventKind: event.eventKind,
+    externalEventId: event.externalEventId ?? null,
+    externalEntityId: event.externalEntityId ?? null,
+    conversationExternalId: event.conversationExternalId ?? null,
+    occurredAt: event.occurredAt ?? null,
+    observedAt: event.observedAt,
+    cursorJson: safeStringifyJson(event.cursor),
+    dedupeKey: event.dedupeKey,
+    payloadJson: safeStringifyJson(event.payload) ?? "null",
+    normalizedSchema: resolveRawEventNormalizedSchema(event),
+    provenanceJson: safeStringifyJson(provenance),
+    sourceVersion: provenance?.sourceVersion ?? event.sourceVersion ?? null,
+  };
 }
 
 export class CuedDatabase {
@@ -2869,22 +2895,7 @@ export class CuedDatabase {
   insertRawEvent(event: RawEventInput): boolean {
     const result = this.db
       .insert(rawEvents)
-      .values({
-        id: event.id,
-        platform: event.platform,
-        accountKey: event.accountKey,
-        entityKind: event.entityKind,
-        eventKind: event.eventKind,
-        externalEventId: event.externalEventId ?? null,
-        externalEntityId: event.externalEntityId ?? null,
-        conversationExternalId: event.conversationExternalId ?? null,
-        occurredAt: event.occurredAt ?? null,
-        observedAt: event.observedAt,
-        cursorJson: safeStringifyJson(event.cursor),
-        dedupeKey: event.dedupeKey,
-        payloadJson: safeStringifyJson(event.payload) ?? "null",
-        sourceVersion: event.sourceVersion ?? null,
-      })
+      .values(buildRawEventValues(event))
       .onConflictDoNothing()
       .run();
     return Number(result.changes) > 0;
@@ -2928,24 +2939,7 @@ export class CuedDatabase {
 
       for (const chunk of chunkArray(uniqueEvents, WRITE_BATCH_SIZE)) {
         tx.insert(rawEvents)
-          .values(
-            chunk.map((event) => ({
-              id: event.id,
-              platform: event.platform,
-              accountKey: event.accountKey,
-              entityKind: event.entityKind,
-              eventKind: event.eventKind,
-              externalEventId: event.externalEventId ?? null,
-              externalEntityId: event.externalEntityId ?? null,
-              conversationExternalId: event.conversationExternalId ?? null,
-              occurredAt: event.occurredAt ?? null,
-              observedAt: event.observedAt,
-              cursorJson: safeStringifyJson(event.cursor),
-              dedupeKey: event.dedupeKey,
-              payloadJson: safeStringifyJson(event.payload) ?? "null",
-              sourceVersion: event.sourceVersion ?? null,
-            })),
-          )
+          .values(chunk.map((event) => buildRawEventValues(event)))
           .onConflictDoNothing()
           .run();
       }
@@ -3006,6 +3000,8 @@ export class CuedDatabase {
     account_key: string;
     entity_kind: RawEventEntityKind;
     event_kind: string;
+    normalized_schema: string | null;
+    provenance_json: string | null;
     observed_at: number;
     payload_json: string;
   }> {
@@ -3016,6 +3012,8 @@ export class CuedDatabase {
         account_key: rawEvents.accountKey,
         entity_kind: rawEvents.entityKind,
         event_kind: rawEvents.eventKind,
+        normalized_schema: rawEvents.normalizedSchema,
+        provenance_json: rawEvents.provenanceJson,
         observed_at: rawEvents.observedAt,
         payload_json: rawEvents.payloadJson,
       })
@@ -3027,6 +3025,8 @@ export class CuedDatabase {
       account_key: string;
       entity_kind: RawEventEntityKind;
       event_kind: string;
+      normalized_schema: string | null;
+      provenance_json: string | null;
       observed_at: number;
       payload_json: string;
     }>;
@@ -3042,6 +3042,8 @@ export class CuedDatabase {
     account_key: string;
     entity_kind: RawEventEntityKind;
     event_kind: string;
+    normalized_schema: string | null;
+    provenance_json: string | null;
     observed_at: number;
     payload_json: string;
   }> {
@@ -3055,6 +3057,8 @@ export class CuedDatabase {
           account_key,
           entity_kind,
           event_kind,
+          normalized_schema,
+          provenance_json,
           observed_at,
           payload_json
         FROM raw_events
@@ -3070,6 +3074,8 @@ export class CuedDatabase {
       account_key: string;
       entity_kind: RawEventEntityKind;
       event_kind: string;
+      normalized_schema: string | null;
+      provenance_json: string | null;
       observed_at: number;
       payload_json: string;
     }>;
@@ -3117,6 +3123,8 @@ export class CuedDatabase {
     account_key: string;
     entity_kind: RawEventEntityKind;
     event_kind: string;
+    normalized_schema: string | null;
+    provenance_json: string | null;
     observed_at: number;
     payload_json: string;
   }> {
@@ -3134,6 +3142,8 @@ export class CuedDatabase {
           account_key,
           entity_kind,
           event_kind,
+          normalized_schema,
+          provenance_json,
           observed_at,
           payload_json
         FROM raw_events
@@ -3150,6 +3160,8 @@ export class CuedDatabase {
       account_key: string;
       entity_kind: RawEventEntityKind;
       event_kind: string;
+      normalized_schema: string | null;
+      provenance_json: string | null;
       observed_at: number;
       payload_json: string;
     }>;

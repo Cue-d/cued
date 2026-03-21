@@ -1031,6 +1031,13 @@ describe("CuedDatabase", () => {
         account_key: "local",
         entity_kind: "contact",
         event_kind: "observed",
+        normalized_schema: "contact.observed@1",
+        provenance_json: JSON.stringify({
+          providerApiVersion: null,
+          adapterVersion: null,
+          acquisitionMode: null,
+          sourceVersion: "contacts-v1",
+        }),
         observed_at: 1_700_000_000_000,
         payload_json: JSON.stringify({ hello: "world" }),
       },
@@ -1108,6 +1115,10 @@ describe("CuedDatabase", () => {
     expect(insertResult.firstInsertedRowId).toBe(1);
     expect(insertResult.lastInsertedRowId).toBe(2);
     expect(db.listRawEvents().map((event) => event.id)).toEqual(["event-1", "event-2"]);
+    expect(db.listRawEvents().map((event) => event.normalized_schema)).toEqual([
+      "message.message_created@1",
+      "message.message_created@1",
+    ]);
 
     db.close();
   });

@@ -91,6 +91,16 @@ export interface SourceAccountInput {
   displayName: string;
 }
 
+export const RAW_EVENT_ACQUISITION_MODE_VALUES = ["sync", "realtime"] as const;
+export type RawEventAcquisitionMode = (typeof RAW_EVENT_ACQUISITION_MODE_VALUES)[number];
+
+export interface RawEventProvenance {
+  providerApiVersion?: string | null;
+  adapterVersion?: string | null;
+  acquisitionMode?: RawEventAcquisitionMode | null;
+  sourceVersion?: string | null;
+}
+
 export interface ProviderRawEventInput<TPayload = RawEventPayload> {
   id: string;
   platform: Platform;
@@ -105,10 +115,56 @@ export interface ProviderRawEventInput<TPayload = RawEventPayload> {
   cursor?: unknown;
   dedupeKey: string;
   payload: TPayload;
+  normalizedSchema?: string | null;
+  provenance?: RawEventProvenance | null;
   sourceVersion?: string | null;
 }
 
 const contactFieldNameSet = new Set<string>(CONTACT_FIELD_NAME_VALUES);
+
+type LegacyRawEventProvenanceInput = Partial<RawEventProvenance> & {
+  captureKind?: string | null;
+};
+
+export function buildNormalizedRawEventSchema(
+  entityKind: RawEventEntityKind,
+  eventKind: string,
+  version = 1,
+): string {
+  return `${entityKind}.${eventKind}@${version}`;
+}
+
+export function normalizeRawEventProvenance(
+  input: LegacyRawEventProvenanceInput | null | undefined,
+  legacySourceVersion?: string | null,
+): RawEventProvenance | null {
+  const sourceVersion = input?.sourceVersion ?? legacySourceVersion ?? null;
+  const acquisitionMode =
+    input?.acquisitionMode ??
+    (input?.captureKind === "sync" || input?.captureKind === "realtime" ? input.captureKind : null);
+  const normalized: RawEventProvenance = {
+    providerApiVersion: input?.providerApiVersion ?? null,
+    adapterVersion: input?.adapterVersion ?? null,
+    acquisitionMode,
+    sourceVersion,
+  };
+
+  return normalized.providerApiVersion ||
+    normalized.adapterVersion ||
+    normalized.acquisitionMode ||
+    normalized.sourceVersion
+    ? normalized
+    : null;
+}
+
+export function resolveRawEventNormalizedSchema(
+  input: Pick<ProviderRawEventInput, "entityKind" | "eventKind" | "normalizedSchema">,
+): string {
+  return (
+    input.normalizedSchema?.trim() ||
+    buildNormalizedRawEventSchema(input.entityKind, input.eventKind)
+  );
+}
 
 export function parseConversationType(value: string): ConversationType {
   return value === "group" ? "group" : "dm";

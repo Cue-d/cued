@@ -1639,4 +1639,24 @@ export const MIGRATIONS: Migration[] = [
       END;
     `,
   },
+  {
+    id: "0015_raw_event_schema_and_provenance",
+    sql: `
+      ALTER TABLE raw_events ADD COLUMN normalized_schema TEXT;
+      ALTER TABLE raw_events ADD COLUMN provenance_json TEXT;
+
+      UPDATE raw_events
+      SET normalized_schema = entity_kind || '.' || event_kind || '@1'
+      WHERE normalized_schema IS NULL OR trim(normalized_schema) = '';
+
+      UPDATE raw_events
+      SET provenance_json = json_object('sourceVersion', source_version)
+      WHERE provenance_json IS NULL
+        AND source_version IS NOT NULL
+        AND trim(source_version) <> '';
+
+      CREATE INDEX IF NOT EXISTS idx_raw_events_schema_lookup
+      ON raw_events(platform, entity_kind, event_kind, normalized_schema);
+    `,
+  },
 ];

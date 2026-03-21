@@ -32,6 +32,41 @@ describe("projector", () => {
     return db;
   }
 
+  it("fails with raw-event context for unsupported normalized schemas", () => {
+    const db = createDb();
+
+    db.insertRawEvent({
+      id: "unsupported-schema",
+      platform: "linkedin",
+      accountKey: "default",
+      entityKind: "message",
+      eventKind: "message_created",
+      observedAt: 1_710_000_000_000,
+      dedupeKey: "linkedin:unsupported-schema",
+      normalizedSchema: "message.message_created@99",
+      provenance: {
+        acquisitionMode: "realtime",
+        sourceVersion: "linkedin-v99",
+        providerApiVersion: "2026-03",
+      },
+      payload: {
+        sourceMessageKey: "msg-unsupported",
+        sourceConversationKey: "thread-unsupported",
+        senderSourceKey: "contacts:test",
+        sentAt: 1_710_000_000_000,
+        content: "unsupported",
+        service: "linkedin",
+        isFromMe: false,
+      },
+    });
+
+    expect(() => projectPendingRawEvents(db)).toThrowError(
+      /Failed to normalize raw event \(row 1, event unsupported-schema, linkedin\/default, message:message_created, schema message\.message_created@99, sourceVersion linkedin-v99, providerApiVersion 2026-03, acquisitionMode realtime\): Unsupported normalized raw event schema 'message\.message_created@99'/,
+    );
+
+    db.close();
+  });
+
   it("rebuilds projected state and preserves agent-facing views", () => {
     const db = createDb();
 
@@ -969,7 +1004,7 @@ describe("projector", () => {
     db.close();
   });
 
-  it("keeps inbox state hot before deferred projection finishes", () => {
+  it("keeps inserted-range projection canonical before deferred catchup reruns", () => {
     const db = createDb();
 
     const insertResult = db.insertRawEvents([
@@ -1041,7 +1076,7 @@ describe("projector", () => {
     expect(hotConversation).toEqual({
       last_message_preview: "hot path preview",
       unread_count: 1,
-      participant_names: null,
+      participant_names: "Ava Chen",
     });
 
     const hotMessage = db.orm().get<{
