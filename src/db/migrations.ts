@@ -763,6 +763,7 @@ export const MIGRATIONS: Migration[] = [
 
       CREATE VIEW message_fts_source AS
       SELECT
+        m.rowid AS message_rowid,
         m.id AS message_id,
         COALESCE(m.sender_name, '') AS sender_name,
         COALESCE(m.conversation_name, '') AS conversation_name,
@@ -779,9 +780,9 @@ export const MIGRATIONS: Migration[] = [
       CREATE TRIGGER trg_messages_inserted_fts
       AFTER INSERT ON messages
       BEGIN
-        DELETE FROM messages_fts WHERE message_id = NEW.id;
-        INSERT INTO messages_fts (message_id, sender_name, conversation_name, participant_names, attachment_text, content)
-        SELECT message_id, sender_name, conversation_name, participant_names, attachment_text, content
+        DELETE FROM messages_fts WHERE rowid = NEW.rowid;
+        INSERT INTO messages_fts (rowid, message_id, sender_name, conversation_name, participant_names, attachment_text, content)
+        SELECT message_rowid, message_id, sender_name, conversation_name, participant_names, attachment_text, content
         FROM message_fts_source
         WHERE message_id = NEW.id;
       END;
@@ -789,9 +790,9 @@ export const MIGRATIONS: Migration[] = [
       CREATE TRIGGER trg_messages_updated_fts
       AFTER UPDATE OF sender_name, conversation_name, content ON messages
       BEGIN
-        DELETE FROM messages_fts WHERE message_id = NEW.id;
-        INSERT INTO messages_fts (message_id, sender_name, conversation_name, participant_names, attachment_text, content)
-        SELECT message_id, sender_name, conversation_name, participant_names, attachment_text, content
+        DELETE FROM messages_fts WHERE rowid = NEW.rowid;
+        INSERT INTO messages_fts (rowid, message_id, sender_name, conversation_name, participant_names, attachment_text, content)
+        SELECT message_rowid, message_id, sender_name, conversation_name, participant_names, attachment_text, content
         FROM message_fts_source
         WHERE message_id = NEW.id;
       END;
@@ -799,7 +800,7 @@ export const MIGRATIONS: Migration[] = [
       CREATE TRIGGER trg_messages_deleted_fts
       AFTER DELETE ON messages
       BEGIN
-        DELETE FROM messages_fts WHERE message_id = OLD.id;
+        DELETE FROM messages_fts WHERE rowid = OLD.rowid;
       END;
 
       CREATE TRIGGER trg_message_attachments_inserted
@@ -812,9 +813,10 @@ export const MIGRATIONS: Migration[] = [
           ),
           updated_at = MAX(updated_at, NEW.updated_at)
         WHERE id = NEW.message_id;
-        DELETE FROM messages_fts WHERE message_id = NEW.message_id;
-        INSERT INTO messages_fts (message_id, sender_name, conversation_name, participant_names, attachment_text, content)
-        SELECT message_id, sender_name, conversation_name, participant_names, attachment_text, content
+        DELETE FROM messages_fts
+        WHERE rowid IN (SELECT rowid FROM messages WHERE id = NEW.message_id);
+        INSERT INTO messages_fts (rowid, message_id, sender_name, conversation_name, participant_names, attachment_text, content)
+        SELECT message_rowid, message_id, sender_name, conversation_name, participant_names, attachment_text, content
         FROM message_fts_source
         WHERE message_id = NEW.message_id;
       END;
@@ -829,9 +831,10 @@ export const MIGRATIONS: Migration[] = [
           ),
           updated_at = MAX(updated_at, NEW.updated_at)
         WHERE id = NEW.message_id;
-        DELETE FROM messages_fts WHERE message_id = NEW.message_id;
-        INSERT INTO messages_fts (message_id, sender_name, conversation_name, participant_names, attachment_text, content)
-        SELECT message_id, sender_name, conversation_name, participant_names, attachment_text, content
+        DELETE FROM messages_fts
+        WHERE rowid IN (SELECT rowid FROM messages WHERE id = NEW.message_id);
+        INSERT INTO messages_fts (rowid, message_id, sender_name, conversation_name, participant_names, attachment_text, content)
+        SELECT message_rowid, message_id, sender_name, conversation_name, participant_names, attachment_text, content
         FROM message_fts_source
         WHERE message_id = NEW.message_id;
       END;
@@ -844,9 +847,10 @@ export const MIGRATIONS: Migration[] = [
           SELECT COUNT(*) FROM message_attachments WHERE message_id = OLD.message_id
         )
         WHERE id = OLD.message_id;
-        DELETE FROM messages_fts WHERE message_id = OLD.message_id;
-        INSERT INTO messages_fts (message_id, sender_name, conversation_name, participant_names, attachment_text, content)
-        SELECT message_id, sender_name, conversation_name, participant_names, attachment_text, content
+        DELETE FROM messages_fts
+        WHERE rowid IN (SELECT rowid FROM messages WHERE id = OLD.message_id);
+        INSERT INTO messages_fts (rowid, message_id, sender_name, conversation_name, participant_names, attachment_text, content)
+        SELECT message_rowid, message_id, sender_name, conversation_name, participant_names, attachment_text, content
         FROM message_fts_source
         WHERE message_id = OLD.message_id;
       END;
@@ -916,17 +920,17 @@ export const MIGRATIONS: Migration[] = [
         );
 
         DELETE FROM messages_fts
-        WHERE message_id IN (
-          SELECT id FROM messages WHERE sender_contact_id = NEW.id
+        WHERE rowid IN (
+          SELECT rowid FROM messages WHERE sender_contact_id = NEW.id
           UNION
-          SELECT m.id
+          SELECT m.rowid
           FROM messages m
           JOIN conversation_participants cp ON cp.conversation_id = m.conversation_id
           WHERE cp.contact_id = NEW.id
         );
 
-        INSERT INTO messages_fts (message_id, sender_name, conversation_name, participant_names, attachment_text, content)
-        SELECT message_id, sender_name, conversation_name, participant_names, attachment_text, content
+        INSERT INTO messages_fts (rowid, message_id, sender_name, conversation_name, participant_names, attachment_text, content)
+        SELECT message_rowid, message_id, sender_name, conversation_name, participant_names, attachment_text, content
         FROM message_fts_source
         WHERE message_id IN (
           SELECT id FROM messages WHERE sender_contact_id = NEW.id
@@ -946,12 +950,12 @@ export const MIGRATIONS: Migration[] = [
         WHERE conversation_id = NEW.id;
 
         DELETE FROM messages_fts
-        WHERE message_id IN (
-          SELECT id FROM messages WHERE conversation_id = NEW.id
+        WHERE rowid IN (
+          SELECT rowid FROM messages WHERE conversation_id = NEW.id
         );
 
-        INSERT INTO messages_fts (message_id, sender_name, conversation_name, participant_names, attachment_text, content)
-        SELECT message_id, sender_name, conversation_name, participant_names, attachment_text, content
+        INSERT INTO messages_fts (rowid, message_id, sender_name, conversation_name, participant_names, attachment_text, content)
+        SELECT message_rowid, message_id, sender_name, conversation_name, participant_names, attachment_text, content
         FROM message_fts_source
         WHERE message_id IN (
           SELECT id FROM messages WHERE conversation_id = NEW.id
@@ -982,12 +986,12 @@ export const MIGRATIONS: Migration[] = [
         WHERE id = NEW.conversation_id;
 
         DELETE FROM messages_fts
-        WHERE message_id IN (
-          SELECT id FROM messages WHERE conversation_id = NEW.conversation_id
+        WHERE rowid IN (
+          SELECT rowid FROM messages WHERE conversation_id = NEW.conversation_id
         );
 
-        INSERT INTO messages_fts (message_id, sender_name, conversation_name, participant_names, attachment_text, content)
-        SELECT message_id, sender_name, conversation_name, participant_names, attachment_text, content
+        INSERT INTO messages_fts (rowid, message_id, sender_name, conversation_name, participant_names, attachment_text, content)
+        SELECT message_rowid, message_id, sender_name, conversation_name, participant_names, attachment_text, content
         FROM message_fts_source
         WHERE message_id IN (
           SELECT id FROM messages WHERE conversation_id = NEW.conversation_id
@@ -1009,12 +1013,12 @@ export const MIGRATIONS: Migration[] = [
         WHERE id = NEW.conversation_id;
 
         DELETE FROM messages_fts
-        WHERE message_id IN (
-          SELECT id FROM messages WHERE conversation_id = NEW.conversation_id
+        WHERE rowid IN (
+          SELECT rowid FROM messages WHERE conversation_id = NEW.conversation_id
         );
 
-        INSERT INTO messages_fts (message_id, sender_name, conversation_name, participant_names, attachment_text, content)
-        SELECT message_id, sender_name, conversation_name, participant_names, attachment_text, content
+        INSERT INTO messages_fts (rowid, message_id, sender_name, conversation_name, participant_names, attachment_text, content)
+        SELECT message_rowid, message_id, sender_name, conversation_name, participant_names, attachment_text, content
         FROM message_fts_source
         WHERE message_id IN (
           SELECT id FROM messages WHERE conversation_id = NEW.conversation_id
@@ -1036,12 +1040,12 @@ export const MIGRATIONS: Migration[] = [
         WHERE id = OLD.conversation_id;
 
         DELETE FROM messages_fts
-        WHERE message_id IN (
-          SELECT id FROM messages WHERE conversation_id = OLD.conversation_id
+        WHERE rowid IN (
+          SELECT rowid FROM messages WHERE conversation_id = OLD.conversation_id
         );
 
-        INSERT INTO messages_fts (message_id, sender_name, conversation_name, participant_names, attachment_text, content)
-        SELECT message_id, sender_name, conversation_name, participant_names, attachment_text, content
+        INSERT INTO messages_fts (rowid, message_id, sender_name, conversation_name, participant_names, attachment_text, content)
+        SELECT message_rowid, message_id, sender_name, conversation_name, participant_names, attachment_text, content
         FROM message_fts_source
         WHERE message_id IN (
           SELECT id FROM messages WHERE conversation_id = OLD.conversation_id
@@ -1349,6 +1353,290 @@ export const MIGRATIONS: Migration[] = [
 
       CREATE INDEX IF NOT EXISTS idx_slack_backfill_proofs_account_phase
       ON slack_backfill_proofs(account_key, conversation_phase, updated_at);
+    `,
+  },
+  {
+    id: "0014_messages_fts_rowid_alignment",
+    sql: `
+      DROP TRIGGER IF EXISTS trg_messages_inserted_fts;
+      DROP TRIGGER IF EXISTS trg_messages_updated_fts;
+      DROP TRIGGER IF EXISTS trg_messages_deleted_fts;
+      DROP TRIGGER IF EXISTS trg_message_attachments_inserted;
+      DROP TRIGGER IF EXISTS trg_message_attachments_updated;
+      DROP TRIGGER IF EXISTS trg_message_attachments_deleted;
+      DROP TRIGGER IF EXISTS trg_contacts_name_updated;
+      DROP TRIGGER IF EXISTS trg_conversations_name_updated;
+      DROP TRIGGER IF EXISTS trg_conversation_participants_inserted;
+      DROP TRIGGER IF EXISTS trg_conversation_participants_updated;
+      DROP TRIGGER IF EXISTS trg_conversation_participants_deleted;
+      DROP VIEW IF EXISTS message_fts_source;
+
+      CREATE VIEW message_fts_source AS
+      SELECT
+        m.rowid AS message_rowid,
+        m.id AS message_id,
+        COALESCE(m.sender_name, '') AS sender_name,
+        COALESCE(m.conversation_name, '') AS conversation_name,
+        COALESCE(conv.participant_names, '') AS participant_names,
+        COALESCE((
+          SELECT GROUP_CONCAT(TRIM(COALESCE(ma.filename, '') || ' ' || COALESCE(ma.title, '') || ' ' || COALESCE(ma.text_content, '')), ' ')
+          FROM message_attachments ma
+          WHERE ma.message_id = m.id
+        ), '') AS attachment_text,
+        COALESCE(m.content, '') AS content
+      FROM messages m
+      JOIN conversations conv ON conv.id = m.conversation_id;
+
+      DELETE FROM messages_fts;
+
+      INSERT INTO messages_fts (rowid, message_id, sender_name, conversation_name, participant_names, attachment_text, content)
+      SELECT message_rowid, message_id, sender_name, conversation_name, participant_names, attachment_text, content
+      FROM message_fts_source;
+
+      CREATE TRIGGER trg_messages_inserted_fts
+      AFTER INSERT ON messages
+      BEGIN
+        DELETE FROM messages_fts WHERE rowid = NEW.rowid;
+        INSERT INTO messages_fts (rowid, message_id, sender_name, conversation_name, participant_names, attachment_text, content)
+        SELECT message_rowid, message_id, sender_name, conversation_name, participant_names, attachment_text, content
+        FROM message_fts_source
+        WHERE message_id = NEW.id;
+      END;
+
+      CREATE TRIGGER trg_messages_updated_fts
+      AFTER UPDATE OF sender_name, conversation_name, content ON messages
+      BEGIN
+        DELETE FROM messages_fts WHERE rowid = NEW.rowid;
+        INSERT INTO messages_fts (rowid, message_id, sender_name, conversation_name, participant_names, attachment_text, content)
+        SELECT message_rowid, message_id, sender_name, conversation_name, participant_names, attachment_text, content
+        FROM message_fts_source
+        WHERE message_id = NEW.id;
+      END;
+
+      CREATE TRIGGER trg_messages_deleted_fts
+      AFTER DELETE ON messages
+      BEGIN
+        DELETE FROM messages_fts WHERE rowid = OLD.rowid;
+      END;
+
+      CREATE TRIGGER trg_message_attachments_inserted
+      AFTER INSERT ON message_attachments
+      BEGIN
+        UPDATE messages
+        SET
+          attachment_count = (
+            SELECT COUNT(*) FROM message_attachments WHERE message_id = NEW.message_id
+          ),
+          updated_at = MAX(updated_at, NEW.updated_at)
+        WHERE id = NEW.message_id;
+        DELETE FROM messages_fts
+        WHERE rowid IN (SELECT rowid FROM messages WHERE id = NEW.message_id);
+        INSERT INTO messages_fts (rowid, message_id, sender_name, conversation_name, participant_names, attachment_text, content)
+        SELECT message_rowid, message_id, sender_name, conversation_name, participant_names, attachment_text, content
+        FROM message_fts_source
+        WHERE message_id = NEW.message_id;
+      END;
+
+      CREATE TRIGGER trg_message_attachments_updated
+      AFTER UPDATE ON message_attachments
+      BEGIN
+        UPDATE messages
+        SET
+          attachment_count = (
+            SELECT COUNT(*) FROM message_attachments WHERE message_id = NEW.message_id
+          ),
+          updated_at = MAX(updated_at, NEW.updated_at)
+        WHERE id = NEW.message_id;
+        DELETE FROM messages_fts
+        WHERE rowid IN (SELECT rowid FROM messages WHERE id = NEW.message_id);
+        INSERT INTO messages_fts (rowid, message_id, sender_name, conversation_name, participant_names, attachment_text, content)
+        SELECT message_rowid, message_id, sender_name, conversation_name, participant_names, attachment_text, content
+        FROM message_fts_source
+        WHERE message_id = NEW.message_id;
+      END;
+
+      CREATE TRIGGER trg_message_attachments_deleted
+      AFTER DELETE ON message_attachments
+      BEGIN
+        UPDATE messages
+        SET attachment_count = (
+          SELECT COUNT(*) FROM message_attachments WHERE message_id = OLD.message_id
+        )
+        WHERE id = OLD.message_id;
+        DELETE FROM messages_fts
+        WHERE rowid IN (SELECT rowid FROM messages WHERE id = OLD.message_id);
+        INSERT INTO messages_fts (rowid, message_id, sender_name, conversation_name, participant_names, attachment_text, content)
+        SELECT message_rowid, message_id, sender_name, conversation_name, participant_names, attachment_text, content
+        FROM message_fts_source
+        WHERE message_id = OLD.message_id;
+      END;
+
+      CREATE TRIGGER trg_contacts_name_updated
+      AFTER UPDATE OF name ON contacts
+      BEGIN
+        UPDATE messages
+        SET sender_name = NEW.name
+        WHERE sender_contact_id = NEW.id;
+
+        UPDATE conversation_participants
+        SET participant_name = NEW.name
+        WHERE contact_id = NEW.id;
+
+        UPDATE timeline_events
+        SET actor_name = NEW.name
+        WHERE actor_contact_id = NEW.id;
+
+        UPDATE message_reactions
+        SET reactor_name = NEW.name
+        WHERE reactor_contact_id = NEW.id;
+
+        UPDATE conversations
+        SET participant_names = (
+          SELECT GROUP_CONCAT(cp.participant_name, ' | ')
+          FROM conversation_participants cp
+          WHERE cp.conversation_id = conversations.id
+            AND cp.is_active = 1
+            AND cp.participant_name IS NOT NULL
+            AND cp.participant_name <> ''
+        )
+        WHERE id IN (
+          SELECT DISTINCT conversation_id
+          FROM conversation_participants
+          WHERE contact_id = NEW.id
+        );
+
+        DELETE FROM messages_fts
+        WHERE rowid IN (
+          SELECT rowid FROM messages WHERE sender_contact_id = NEW.id
+          UNION
+          SELECT m.rowid
+          FROM messages m
+          JOIN conversation_participants cp ON cp.conversation_id = m.conversation_id
+          WHERE cp.contact_id = NEW.id
+        );
+
+        INSERT INTO messages_fts (rowid, message_id, sender_name, conversation_name, participant_names, attachment_text, content)
+        SELECT message_rowid, message_id, sender_name, conversation_name, participant_names, attachment_text, content
+        FROM message_fts_source
+        WHERE message_id IN (
+          SELECT id FROM messages WHERE sender_contact_id = NEW.id
+          UNION
+          SELECT m.id
+          FROM messages m
+          JOIN conversation_participants cp ON cp.conversation_id = m.conversation_id
+          WHERE cp.contact_id = NEW.id
+        );
+      END;
+
+      CREATE TRIGGER trg_conversations_name_updated
+      AFTER UPDATE OF name ON conversations
+      BEGIN
+        UPDATE messages
+        SET conversation_name = NEW.name
+        WHERE conversation_id = NEW.id;
+
+        DELETE FROM messages_fts
+        WHERE rowid IN (
+          SELECT rowid FROM messages WHERE conversation_id = NEW.id
+        );
+
+        INSERT INTO messages_fts (rowid, message_id, sender_name, conversation_name, participant_names, attachment_text, content)
+        SELECT message_rowid, message_id, sender_name, conversation_name, participant_names, attachment_text, content
+        FROM message_fts_source
+        WHERE message_id IN (
+          SELECT id FROM messages WHERE conversation_id = NEW.id
+        );
+      END;
+
+      CREATE TRIGGER trg_conversation_participants_inserted
+      AFTER INSERT ON conversation_participants
+      BEGIN
+        UPDATE conversation_participants
+        SET participant_name = COALESCE(
+          (SELECT name FROM contacts WHERE id = NEW.contact_id),
+          participant_name
+        )
+        WHERE conversation_id = NEW.conversation_id
+          AND contact_id = NEW.contact_id
+          AND COALESCE(source_participant_key, '') = COALESCE(NEW.source_participant_key, '');
+
+        UPDATE conversations
+        SET participant_names = (
+          SELECT GROUP_CONCAT(cp.participant_name, ' | ')
+          FROM conversation_participants cp
+          WHERE cp.conversation_id = NEW.conversation_id
+            AND cp.is_active = 1
+            AND cp.participant_name IS NOT NULL
+            AND cp.participant_name <> ''
+        )
+        WHERE id = NEW.conversation_id;
+
+        DELETE FROM messages_fts
+        WHERE rowid IN (
+          SELECT rowid FROM messages WHERE conversation_id = NEW.conversation_id
+        );
+
+        INSERT INTO messages_fts (rowid, message_id, sender_name, conversation_name, participant_names, attachment_text, content)
+        SELECT message_rowid, message_id, sender_name, conversation_name, participant_names, attachment_text, content
+        FROM message_fts_source
+        WHERE message_id IN (
+          SELECT id FROM messages WHERE conversation_id = NEW.conversation_id
+        );
+      END;
+
+      CREATE TRIGGER trg_conversation_participants_updated
+      AFTER UPDATE ON conversation_participants
+      BEGIN
+        UPDATE conversations
+        SET participant_names = (
+          SELECT GROUP_CONCAT(cp.participant_name, ' | ')
+          FROM conversation_participants cp
+          WHERE cp.conversation_id = NEW.conversation_id
+            AND cp.is_active = 1
+            AND cp.participant_name IS NOT NULL
+            AND cp.participant_name <> ''
+        )
+        WHERE id = NEW.conversation_id;
+
+        DELETE FROM messages_fts
+        WHERE rowid IN (
+          SELECT rowid FROM messages WHERE conversation_id = NEW.conversation_id
+        );
+
+        INSERT INTO messages_fts (rowid, message_id, sender_name, conversation_name, participant_names, attachment_text, content)
+        SELECT message_rowid, message_id, sender_name, conversation_name, participant_names, attachment_text, content
+        FROM message_fts_source
+        WHERE message_id IN (
+          SELECT id FROM messages WHERE conversation_id = NEW.conversation_id
+        );
+      END;
+
+      CREATE TRIGGER trg_conversation_participants_deleted
+      AFTER DELETE ON conversation_participants
+      BEGIN
+        UPDATE conversations
+        SET participant_names = (
+          SELECT GROUP_CONCAT(cp.participant_name, ' | ')
+          FROM conversation_participants cp
+          WHERE cp.conversation_id = OLD.conversation_id
+            AND cp.is_active = 1
+            AND cp.participant_name IS NOT NULL
+            AND cp.participant_name <> ''
+        )
+        WHERE id = OLD.conversation_id;
+
+        DELETE FROM messages_fts
+        WHERE rowid IN (
+          SELECT rowid FROM messages WHERE conversation_id = OLD.conversation_id
+        );
+
+        INSERT INTO messages_fts (rowid, message_id, sender_name, conversation_name, participant_names, attachment_text, content)
+        SELECT message_rowid, message_id, sender_name, conversation_name, participant_names, attachment_text, content
+        FROM message_fts_source
+        WHERE message_id IN (
+          SELECT id FROM messages WHERE conversation_id = OLD.conversation_id
+        );
+      END;
     `,
   },
 ];

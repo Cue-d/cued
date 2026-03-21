@@ -772,6 +772,162 @@ describe("CuedDatabase", () => {
     db.close();
   });
 
+  it("realigns legacy message FTS rows onto message rowids during migration", () => {
+    const dir = mkdtempSync(join(tmpdir(), "cued-v2-db-legacy-message-fts-"));
+    tempDirs.push(dir);
+    const dbPath = join(dir, "local.db");
+    const legacySqlite = new Database(dbPath);
+
+    legacySqlite.exec(`
+      CREATE TABLE schema_migrations (
+        id TEXT PRIMARY KEY,
+        applied_at INTEGER NOT NULL
+      );
+
+      CREATE TABLE contacts (
+        id TEXT PRIMARY KEY,
+        name TEXT
+      );
+
+      CREATE TABLE conversations (
+        id TEXT PRIMARY KEY,
+        name TEXT,
+        participant_names TEXT
+      );
+
+      CREATE TABLE messages (
+        id TEXT PRIMARY KEY,
+        conversation_id TEXT NOT NULL,
+        sender_contact_id TEXT,
+        sender_name TEXT,
+        conversation_name TEXT,
+        platform_message_id TEXT,
+        content TEXT,
+        attachment_count INTEGER DEFAULT 0,
+        reaction_count INTEGER DEFAULT 0,
+        updated_at INTEGER NOT NULL
+      );
+
+      CREATE TABLE message_attachments (
+        id TEXT PRIMARY KEY,
+        message_id TEXT NOT NULL,
+        filename TEXT,
+        title TEXT,
+        text_content TEXT,
+        updated_at INTEGER NOT NULL
+      );
+
+      CREATE TABLE conversation_participants (
+        id TEXT PRIMARY KEY,
+        conversation_id TEXT NOT NULL,
+        contact_id TEXT,
+        source_participant_key TEXT,
+        participant_name TEXT,
+        is_active INTEGER NOT NULL DEFAULT 1
+      );
+
+      CREATE TABLE timeline_events (
+        id TEXT PRIMARY KEY,
+        actor_contact_id TEXT,
+        actor_name TEXT
+      );
+
+      CREATE TABLE message_reactions (
+        id TEXT PRIMARY KEY,
+        message_id TEXT NOT NULL,
+        reactor_contact_id TEXT,
+        reactor_name TEXT,
+        is_active INTEGER NOT NULL DEFAULT 1
+      );
+
+      CREATE VIRTUAL TABLE messages_fts USING fts5(
+        message_id UNINDEXED,
+        sender_name,
+        conversation_name,
+        participant_names,
+        attachment_text,
+        content
+      );
+
+      CREATE VIEW message_fts_source AS
+      SELECT
+        m.id AS message_id,
+        COALESCE(m.sender_name, '') AS sender_name,
+        COALESCE(m.conversation_name, '') AS conversation_name,
+        COALESCE(conv.participant_names, '') AS participant_names,
+        '' AS attachment_text,
+        COALESCE(m.content, '') AS content
+      FROM messages m
+      JOIN conversations conv ON conv.id = m.conversation_id;
+    `);
+
+    const appliedAt = 1_700_000_000_000;
+    const ftsMigrationId = "0014_messages_fts_rowid_alignment";
+    for (const migration of MIGRATIONS) {
+      if (migration.id === ftsMigrationId) {
+        continue;
+      }
+      legacySqlite
+        .prepare("INSERT INTO schema_migrations (id, applied_at) VALUES (?, ?)")
+        .run(migration.id, appliedAt);
+    }
+
+    legacySqlite
+      .prepare("INSERT INTO conversations (id, name, participant_names) VALUES (?, ?, ?)")
+      .run("conversation-1", "Eng", "Ava Chen");
+    legacySqlite
+      .prepare(
+        `
+          INSERT INTO messages (
+            rowid, id, conversation_id, sender_name, conversation_name, platform_message_id, content, updated_at
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        `,
+      )
+      .run(77, "message-1", "conversation-1", "Ava Chen", "Eng", "msg-1", "legacy body", 100);
+    legacySqlite
+      .prepare(
+        `
+          INSERT INTO messages_fts (
+            message_id, sender_name, conversation_name, participant_names, attachment_text, content
+          ) VALUES (?, ?, ?, ?, ?, ?)
+        `,
+      )
+      .run("message-1", "Ava Chen", "Eng", "Ava Chen", "", "legacy body");
+    legacySqlite.close();
+
+    const db = new CuedDatabase(dbPath);
+    db.migrate();
+
+    const row = sqlite(db)
+      .prepare(
+        `
+          SELECT
+            m.rowid AS message_rowid,
+            f.rowid AS fts_rowid,
+            f.message_id,
+            f.content
+          FROM messages m
+          JOIN messages_fts f ON f.message_id = m.id
+          WHERE m.id = ?
+        `,
+      )
+      .get("message-1") as {
+      message_rowid: number;
+      fts_rowid: number;
+      message_id: string;
+      content: string;
+    };
+
+    expect(row).toEqual({
+      message_rowid: 77,
+      fts_rowid: 77,
+      message_id: "message-1",
+      content: "legacy body",
+    });
+
+    db.close();
+  });
+
   it("stores checkpoints and raw events", () => {
     const db = createDb();
 

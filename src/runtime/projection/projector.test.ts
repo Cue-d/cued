@@ -270,6 +270,120 @@ describe("projector", () => {
     db.close();
   });
 
+  it("keeps FTS rowids aligned when reprojecting an existing message", () => {
+    const db = createDb();
+    const observedAt = 1_710_200_000_000;
+
+    db.insertRawEvent({
+      id: "contact",
+      platform: "linkedin",
+      accountKey: "default",
+      entityKind: "contact",
+      eventKind: "observed",
+      observedAt,
+      dedupeKey: "linkedin:contact:ava",
+      payload: {
+        sourceEntityKey: "linkedin:ava",
+        fields: { display_name: "Ava Chen" },
+        handles: [{ type: "email", value: "ava@cued.com", deterministic: true }],
+      },
+      sourceVersion: "linkedin-v1",
+    });
+    db.insertRawEvent({
+      id: "conversation",
+      platform: "linkedin",
+      accountKey: "default",
+      entityKind: "conversation",
+      eventKind: "observed",
+      observedAt: observedAt + 1,
+      dedupeKey: "linkedin:conversation:thread-1",
+      payload: {
+        sourceConversationKey: "thread-1",
+        conversationType: "dm",
+        service: "linkedin",
+        participants: [{ sourceEntityKey: "linkedin:ava" }],
+      },
+      sourceVersion: "linkedin-v1",
+    });
+    db.insertRawEvent({
+      id: "message-1",
+      platform: "linkedin",
+      accountKey: "default",
+      entityKind: "message",
+      eventKind: "message_created",
+      observedAt: observedAt + 2,
+      dedupeKey: "linkedin:message:1",
+      payload: {
+        sourceMessageKey: "msg-1",
+        sourceConversationKey: "thread-1",
+        senderSourceKey: "linkedin:ava",
+        sentAt: observedAt + 2,
+        content: "before refresh",
+        service: "linkedin",
+        isFromMe: false,
+      },
+      sourceVersion: "linkedin-v1",
+    });
+
+    projectPendingRawEvents(db);
+
+    db.insertRawEvent({
+      id: "message-1-refresh",
+      platform: "linkedin",
+      accountKey: "default",
+      entityKind: "message",
+      eventKind: "message_updated",
+      observedAt: observedAt + 3,
+      dedupeKey: "linkedin:message:1:refresh",
+      payload: {
+        sourceMessageKey: "msg-1",
+        sourceConversationKey: "thread-1",
+        senderSourceKey: "linkedin:ava",
+        sentAt: observedAt + 2,
+        content: "after refresh",
+        service: "linkedin",
+        isFromMe: false,
+        isEdited: true,
+        editedAt: observedAt + 3,
+      },
+      sourceVersion: "linkedin-v2",
+    });
+
+    projectPendingRawEvents(db);
+
+    const row = db.orm().get<{
+      message_rowid: number;
+      fts_rowid: number;
+      content: string | null;
+      fts_rows: number;
+    }>(sql`
+      SELECT
+        m.rowid AS message_rowid,
+        f.rowid AS fts_rowid,
+        m.content,
+        (
+          SELECT COUNT(*)
+          FROM messages_fts f2
+          WHERE f2.message_id = m.id
+        ) AS fts_rows
+      FROM messages m
+      JOIN messages_fts f ON f.message_id = m.id
+      WHERE m.platform = 'linkedin'
+        AND m.account_key = 'default'
+        AND m.platform_message_id = 'msg-1'
+    `);
+
+    expect(row).toEqual({
+      message_rowid: expect.any(Number),
+      fts_rowid: expect.any(Number),
+      content: "after refresh",
+      fts_rows: 1,
+    });
+    expect(row?.fts_rowid).toBe(row?.message_rowid);
+
+    db.close();
+  });
+
   it("does not let later raw handle observations clobber a resolved contact name", () => {
     const db = createDb();
 
@@ -787,7 +901,7 @@ describe("projector", () => {
     const hotFtsRows = db
       .orm()
       .all<{ count: number }>(sql`SELECT COUNT(*) as count FROM messages_fts`);
-    expect(hotFtsRows).toEqual([{ count: 0 }]);
+    expect(hotFtsRows).toEqual([{ count: 1 }]);
 
     projectDeferredRange(db, {
       startRowId: insertResult.firstInsertedRowId!,
