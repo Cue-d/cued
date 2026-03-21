@@ -106,4 +106,39 @@ describe("RunQueueService", () => {
 
     db.close();
   });
+
+  it("preserves account keys that contain colons when queueing per-account syncs", () => {
+    const db = createDb();
+    db.upsertIntegrationState({
+      platform: "slack",
+      accountKey: "workspace:team",
+      displayName: "Slack Colon",
+      authState: "authenticated",
+      enabled: true,
+      connectionKind: "browser-session",
+      syncCapable: true,
+    });
+
+    const queue = new RunQueueService(db);
+    const result = queue.queueSyncRun("slack");
+
+    expect(result).toEqual({
+      queued: true,
+      runId: result.runIds[0] ?? null,
+      runIds: expect.any(Array),
+      targets: ["slack:workspace:team"],
+    });
+    expect(result.runIds).toHaveLength(1);
+
+    const [run] = db.listRecentRuns(1);
+    expect(run).toMatchObject({
+      platform: "slack",
+      account_key: "workspace:team",
+      trigger: "cli",
+      run_type: "sync",
+      status: "queued",
+    });
+
+    db.close();
+  });
 });
