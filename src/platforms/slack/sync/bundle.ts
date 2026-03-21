@@ -720,6 +720,8 @@ export async function buildSlackSyncBundle(options?: {
           ? {
               historyCursor: scan.historyCursor ?? null,
               historyComplete: scan.historyComplete === true,
+              threadRootCount: scan.threadRootCount ?? 0,
+              completedThreadCount: scan.completedThreadCount ?? 0,
               pendingThreadTs: scan.pendingThreadTs ?? [],
               activeThreadTs: scan.activeThreadTs ?? null,
               repliesCursor: scan.repliesCursor ?? null,

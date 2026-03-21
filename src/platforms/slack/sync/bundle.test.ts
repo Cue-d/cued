@@ -745,6 +745,15 @@ describe("slack worker lib", () => {
 
     expect(second.hasMore).toBe(false);
     expect(second.rawEvents.filter((event) => event.entityKind === "message")).toHaveLength(1);
+    expect(second.diagnostics?.slackBackfillConversations).toEqual([
+      expect.objectContaining({
+        conversationId: "C123",
+        conversationPhase: "complete",
+        threadRootCount: 1,
+        completedThreadCount: 1,
+        pendingThreadCount: 0,
+      }),
+    ]);
   });
 
   it("finishes top-level history before entering thread backfill", async () => {
