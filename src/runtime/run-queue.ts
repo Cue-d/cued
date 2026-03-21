@@ -91,7 +91,11 @@ export class RunQueueService {
       if (targets.length > 0) {
         const queuedTargets: string[] = [];
         const runInputs = targets.flatMap((targetKey) => {
-          const [platform, accountKey] = targetKey.split(":");
+          const parsedTarget = parseRunTargetKey(targetKey);
+          if (!parsedTarget) {
+            return [];
+          }
+          const { platform, accountKey } = parsedTarget;
           if (!platform || !accountKey || !isAdapterPlatform(platform)) {
             return [];
           }
@@ -152,7 +156,11 @@ export class RunQueueService {
     const runIds: string[] = [];
 
     for (const targetKey of uniqueTargets) {
-      const [platform, accountKey] = targetKey.split(":");
+      const parsedTarget = parseRunTargetKey(targetKey);
+      if (!parsedTarget) {
+        continue;
+      }
+      const { platform, accountKey } = parsedTarget;
       if (!platform || !accountKey || !isAdapterPlatform(platform)) {
         continue;
       }
@@ -212,4 +220,22 @@ export class RunQueueService {
       rowsRemoved: this.db.resetSource(source),
     };
   }
+}
+
+function parseRunTargetKey(
+  targetKey: string,
+): { platform: AdapterPlatform; accountKey: string } | null {
+  const separatorIndex = targetKey.indexOf(":");
+  if (separatorIndex <= 0 || separatorIndex >= targetKey.length - 1) {
+    return null;
+  }
+  const platform = targetKey.slice(0, separatorIndex);
+  const accountKey = targetKey.slice(separatorIndex + 1);
+  if (!isAdapterPlatform(platform) || accountKey.length === 0) {
+    return null;
+  }
+  return {
+    platform,
+    accountKey,
+  };
 }

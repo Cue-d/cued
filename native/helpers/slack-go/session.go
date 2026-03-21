@@ -404,6 +404,7 @@ func (r helperRunner) runSession(ctx context.Context, stdin io.Reader, stdout io
 	}
 
 	if err := refreshUsers(true); err != nil {
+		_ = writeSessionEvent(stdout, "disconnected", disconnectedEventData{Reason: err.Error()})
 		return err
 	}
 
