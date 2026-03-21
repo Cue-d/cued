@@ -298,9 +298,7 @@ describe("buildLinkedInSyncBundle", () => {
     ).toBe(true);
     expect(
       bundle.rawEvents.some(
-        (event) =>
-          event.entityKind === "timeline_event" &&
-          event.eventKind === "linkedin_conversation_removed",
+        (event) => event.entityKind === "timeline_event" && event.eventKind === "system_message",
       ),
     ).toBe(true);
 
@@ -325,18 +323,16 @@ describe("buildLinkedInSyncBundle", () => {
 
     expect(
       bundle.rawEvents.find(
-        (event) =>
-          event.entityKind === "timeline_event" && event.eventKind === "linkedin_system_message",
+        (event) => event.entityKind === "timeline_event" && event.eventKind === "system_message",
       ),
     ).toBeTruthy();
     expect(
       bundle.rawEvents.find(
         (event) =>
           event.entityKind === "message" &&
-          event.externalEntityId === "urn:li:fsd_message:MSG_SYSTEM" &&
-          event.eventKind === "message_observed",
+          event.externalEntityId === "urn:li:fsd_message:MSG_SYSTEM",
       ),
-    ).toBeTruthy();
+    ).toBeFalsy();
 
     expect(
       bundle.rawEvents.find(

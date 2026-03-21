@@ -195,7 +195,7 @@ export function buildWhatsAppMessageEvent(
     platform: "whatsapp",
     accountKey,
     entityKind: "message",
-    eventKind: "message_created",
+    eventKind: "created",
     externalEntityId: message.messageID,
     conversationExternalId: normalizedChatJID,
     occurredAt: message.timestamp,

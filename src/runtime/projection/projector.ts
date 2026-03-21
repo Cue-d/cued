@@ -4,6 +4,7 @@ import type {
   ContactObservationPayload,
   ConversationObservationPayload,
   MessagePayload,
+  ParticipantPayload,
   Platform,
   RawEventEntityKind,
   RawEventPayload,
@@ -24,10 +25,7 @@ import {
   projectionState,
   timelineEvents,
 } from "../../db/schema.js";
-import {
-  resolveNormalizedSchemaForStoredRawEvent,
-  upcastNormalizedRawEventPayload,
-} from "./events.js";
+import { normalizeStoredRawEventForProjection } from "./events.js";
 
 type LocalDbExecutor = Pick<
   LocalDrizzleDatabase,
@@ -1346,6 +1344,71 @@ function projectReactionEvent(
   changes.dirtyMessageIds.add(messageId);
 }
 
+function projectParticipantEvent(
+  conn: LocalDbExecutor,
+  cache: ProjectionCache,
+  changes: ProjectionChangeSet,
+  event: ProjectableRawEvent,
+): void {
+  const payload = JSON.parse(event.payload_json) as ParticipantPayload;
+  const conversationId = ensureConversationStub(
+    conn,
+    cache,
+    event.platform,
+    event.account_key,
+    payload.sourceConversationKey,
+    event.observed_at,
+  );
+  const contactId = resolveOrEnsureContact(
+    conn,
+    cache,
+    event.platform,
+    event.account_key,
+    payload.participantSourceKey,
+    event.observed_at,
+  );
+  if (!contactId) {
+    return;
+  }
+
+  const joinedAt = event.event_kind === "joined" ? payload.eventAt : null;
+  const leftAt = event.event_kind === "left" ? payload.eventAt : null;
+
+  conn
+    .insert(conversationParticipants)
+    .values({
+      conversationId,
+      contactId,
+      sourceParticipantKey: payload.participantSourceKey,
+      participantName: cache.contactNameMap.get(contactId) ?? null,
+      role: normalizeText(payload.role ?? null),
+      isSelf: boolToInt(payload.isSelf),
+      isActive: event.event_kind === "left" ? 0 : 1,
+      joinedAt,
+      leftAt,
+      updatedAt: event.observed_at,
+    })
+    .onConflictDoUpdate({
+      target: [
+        conversationParticipants.conversationId,
+        conversationParticipants.contactId,
+        conversationParticipants.sourceParticipantKey,
+      ],
+      set: {
+        participantName: cache.contactNameMap.get(contactId) ?? null,
+        role: normalizeText(payload.role ?? null),
+        isSelf: boolToInt(payload.isSelf),
+        isActive: event.event_kind === "left" ? 0 : 1,
+        joinedAt: joinedAt ?? sql`${conversationParticipants.joinedAt}`,
+        leftAt,
+        updatedAt: event.observed_at,
+      },
+    })
+    .run();
+
+  changes.dirtyConversationIds.add(conversationId);
+}
+
 function projectTimelineEvent(
   conn: LocalDbExecutor,
   cache: ProjectionCache,
@@ -1891,16 +1954,14 @@ function projectEventBatch(
     }
 
     for (const event of input.rawEvents) {
-      let normalizedSchema: string;
-      let normalizedPayload: RawEventPayload;
+      let normalizedEvent: ReturnType<typeof normalizeStoredRawEventForProjection>;
       try {
-        normalizedSchema = resolveNormalizedSchemaForStoredRawEvent({
-          entityKind: event.entity_kind as RawEventEntityKind,
-          eventKind: event.event_kind,
-          normalizedSchema: event.normalized_schema,
-        });
-        normalizedPayload = upcastNormalizedRawEventPayload(
-          normalizedSchema,
+        normalizedEvent = normalizeStoredRawEventForProjection(
+          {
+            entityKind: event.entity_kind as RawEventEntityKind,
+            eventKind: event.event_kind,
+            normalizedSchema: event.normalized_schema,
+          },
           JSON.parse(event.payload_json) as RawEventPayload,
         );
       } catch (error) {
@@ -1912,30 +1973,34 @@ function projectEventBatch(
       const shapedEvent = {
         platform: event.platform,
         account_key: event.account_key,
-        entity_kind: event.entity_kind as RawEventEntityKind,
-        event_kind: event.event_kind,
-        normalized_schema: normalizedSchema,
+        entity_kind: normalizedEvent.entityKind,
+        event_kind: normalizedEvent.eventKind,
+        normalized_schema: normalizedEvent.normalizedSchema,
         observed_at: event.observed_at,
-        payload_json: JSON.stringify(normalizedPayload),
+        payload_json: JSON.stringify(normalizedEvent.payload),
       };
 
-      if (event.entity_kind === "contact") {
+      if (shapedEvent.entity_kind === "contact") {
         projectContactObservation(tx, cache, changes, shapedEvent);
         continue;
       }
-      if (event.entity_kind === "conversation") {
+      if (shapedEvent.entity_kind === "conversation") {
         projectConversationObservation(tx, cache, changes, shapedEvent);
         continue;
       }
-      if (event.entity_kind === "message") {
+      if (shapedEvent.entity_kind === "message") {
         projectMessageEvent(tx, cache, changes, shapedEvent);
         continue;
       }
-      if (event.entity_kind === "reaction") {
+      if (shapedEvent.entity_kind === "reaction") {
         projectReactionEvent(tx, cache, changes, shapedEvent);
         continue;
       }
-      if (event.entity_kind === "timeline_event") {
+      if (shapedEvent.entity_kind === "participant") {
+        projectParticipantEvent(tx, cache, changes, shapedEvent);
+        continue;
+      }
+      if (shapedEvent.entity_kind === "timeline_event") {
         projectTimelineEvent(tx, cache, shapedEvent);
       }
     }

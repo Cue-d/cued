@@ -532,7 +532,7 @@ function buildProjectionReplayEvents(): ProviderRawEventInput[] {
           platform: "linkedin",
           accountKey: "default",
           entityKind: "message",
-          eventKind: "message_created",
+          eventKind: "created",
           observedAt: baseObservedAt + 20_000 + conversationIndex * 100 + messageIndex,
           dedupeKey: `message:${conversationIndex}:${messageIndex}`,
           payload: {
@@ -610,7 +610,7 @@ function buildIncrementalProjectionEvents(
           platform: "linkedin",
           accountKey: "default",
           entityKind: "message",
-          eventKind: "message_created",
+          eventKind: "created",
           observedAt: baseObservedAt + 20_000 + conversationIndex * 100 + messageIndex,
           dedupeKey: `incremental-message:${conversationIndex}:${messageIndex}`,
           payload: {

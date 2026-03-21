@@ -40,7 +40,7 @@ export const signalReplayFixtures: ProjectionReplayFixture[] = [
         platform: "signal",
         accountKey: "default",
         entityKind: "message",
-        eventKind: "message_created",
+        eventKind: "created",
         observedAt: 1_710_200_000_100,
         dedupeKey: "signal:message:casey-1",
         payload: {
@@ -133,7 +133,7 @@ export const signalReplayFixtures: ProjectionReplayFixture[] = [
         platform: "signal",
         accountKey: "default",
         entityKind: "message",
-        eventKind: "message_created",
+        eventKind: "created",
         observedAt: 1_710_300_000_200,
         dedupeKey: "signal:message:parent",
         payload: {
@@ -152,7 +152,7 @@ export const signalReplayFixtures: ProjectionReplayFixture[] = [
         platform: "signal",
         accountKey: "default",
         entityKind: "message",
-        eventKind: "message_created",
+        eventKind: "created",
         observedAt: 1_710_300_000_300,
         dedupeKey: "signal:message:reply",
         payload: {
@@ -267,7 +267,7 @@ export const signalReplayFixtures: ProjectionReplayFixture[] = [
         platform: "signal",
         accountKey: "default",
         entityKind: "message",
-        eventKind: "message_created",
+        eventKind: "created",
         observedAt: 1_710_400_000_200,
         dedupeKey: "signal:message:uuid",
         payload: {

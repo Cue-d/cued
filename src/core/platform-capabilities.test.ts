@@ -1,4 +1,9 @@
 import { describe, expect, it } from "vitest";
+import {
+  getPlatformFeatureMatrixRow,
+  getPlatformFeatureSupport,
+  PLATFORM_FEATURE_VALUES,
+} from "../platforms/core/types.js";
 import { summarizePlatformCapability } from "./platform-capabilities.js";
 
 describe("platform capability resolver", () => {
@@ -55,5 +60,20 @@ describe("platform capability resolver", () => {
         supportsMultipleAccounts: true,
       }),
     );
+  });
+
+  it("exposes a shipped feature matrix for README-facing capabilities", () => {
+    expect(getPlatformFeatureSupport("signal", "send")).toBe("yes");
+    expect(getPlatformFeatureSupport("contacts", "send")).toBe("no");
+    expect(getPlatformFeatureSupport("linkedin", "read_receipts")).toBe("partial");
+    expect(getPlatformFeatureSupport("imessage", "realtime_ingest")).toBe("yes");
+  });
+
+  it("defines every feature for every shipped platform row", () => {
+    const contactsRow = getPlatformFeatureMatrixRow("contacts");
+    const slackRow = getPlatformFeatureMatrixRow("slack");
+
+    expect(Object.keys(contactsRow).sort()).toEqual([...PLATFORM_FEATURE_VALUES].sort());
+    expect(Object.keys(slackRow).sort()).toEqual([...PLATFORM_FEATURE_VALUES].sort());
   });
 });

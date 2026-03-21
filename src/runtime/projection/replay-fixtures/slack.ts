@@ -42,7 +42,7 @@ export const slackReplayFixtures: ProjectionReplayFixture[] = [
         platform: "slack",
         accountKey: "T0A9C9RHZ9T",
         entityKind: "message",
-        eventKind: "message_created",
+        eventKind: "created",
         observedAt: 1_710_100_000_000,
         dedupeKey: "slack:message:C123:1",
         payload: {
@@ -122,7 +122,7 @@ export const slackReplayFixtures: ProjectionReplayFixture[] = [
         platform: "slack",
         accountKey: "T0A9C9RHZ9T",
         entityKind: "message",
-        eventKind: "message_created",
+        eventKind: "created",
         observedAt: 1_710_200_000_100,
         dedupeKey: "slack:message:C777:parent",
         payload: {
@@ -141,7 +141,7 @@ export const slackReplayFixtures: ProjectionReplayFixture[] = [
         platform: "slack",
         accountKey: "T0A9C9RHZ9T",
         entityKind: "message",
-        eventKind: "message_created",
+        eventKind: "created",
         observedAt: 1_710_200_000_200,
         dedupeKey: "slack:message:C777:reply",
         payload: {

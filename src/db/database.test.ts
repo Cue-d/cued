@@ -1081,7 +1081,7 @@ describe("CuedDatabase", () => {
         platform: "slack",
         accountKey: "default",
         entityKind: "message",
-        eventKind: "message_created",
+        eventKind: "created",
         observedAt: 100,
         dedupeKey: "event-1",
         payload: { sourceMessageKey: "m1" },
@@ -1091,7 +1091,7 @@ describe("CuedDatabase", () => {
         platform: "slack",
         accountKey: "default",
         entityKind: "message",
-        eventKind: "message_created",
+        eventKind: "created",
         observedAt: 100,
         dedupeKey: "event-1",
         payload: { sourceMessageKey: "m1" },
@@ -1101,7 +1101,7 @@ describe("CuedDatabase", () => {
         platform: "slack",
         accountKey: "default",
         entityKind: "message",
-        eventKind: "message_created",
+        eventKind: "created",
         observedAt: 101,
         dedupeKey: "event-2",
         payload: { sourceMessageKey: "m2" },
@@ -1116,8 +1116,8 @@ describe("CuedDatabase", () => {
     expect(insertResult.lastInsertedRowId).toBe(2);
     expect(db.listRawEvents().map((event) => event.id)).toEqual(["event-1", "event-2"]);
     expect(db.listRawEvents().map((event) => event.normalized_schema)).toEqual([
-      "message.message_created@1",
-      "message.message_created@1",
+      "message.created@1",
+      "message.created@1",
     ]);
 
     db.close();

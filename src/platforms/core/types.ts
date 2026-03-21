@@ -18,6 +18,24 @@ export type PlatformPermissionRequirement = (typeof PLATFORM_PERMISSION_REQUIREM
 export const PLATFORM_HELPER_REQUIREMENT_VALUES = ["signal_cli", "whatsapp_helper"] as const;
 export type PlatformHelperRequirement = (typeof PLATFORM_HELPER_REQUIREMENT_VALUES)[number];
 
+export const PLATFORM_FEATURE_VALUES = [
+  "send",
+  "receive",
+  "realtime_ingest",
+  "full_history_sync",
+  "message_edits",
+  "deletes",
+  "reactions",
+  "threads_replies",
+  "read_receipts",
+  "attachments",
+  "contact_sync",
+] as const;
+export type PlatformFeature = (typeof PLATFORM_FEATURE_VALUES)[number];
+
+export const PLATFORM_FEATURE_SUPPORT_VALUES = ["yes", "partial", "no"] as const;
+export type PlatformFeatureSupport = (typeof PLATFORM_FEATURE_SUPPORT_VALUES)[number];
+
 type PlatformDefinition = {
   adapter: boolean;
   defaultAccountKey: "default" | "local";
@@ -106,6 +124,100 @@ export const PLATFORM_DEFINITIONS = {
     helperRequirements: ["whatsapp_helper"],
   },
 } as const satisfies Record<Platform, PlatformDefinition>;
+
+export const PLATFORM_FEATURE_MATRIX = {
+  contacts: {
+    send: "no",
+    receive: "no",
+    realtime_ingest: "yes",
+    full_history_sync: "yes",
+    message_edits: "no",
+    deletes: "no",
+    reactions: "no",
+    threads_replies: "no",
+    read_receipts: "no",
+    attachments: "no",
+    contact_sync: "yes",
+  },
+  fixture: {
+    send: "no",
+    receive: "no",
+    realtime_ingest: "no",
+    full_history_sync: "no",
+    message_edits: "no",
+    deletes: "no",
+    reactions: "no",
+    threads_replies: "no",
+    read_receipts: "no",
+    attachments: "no",
+    contact_sync: "no",
+  },
+  imessage: {
+    send: "no",
+    receive: "yes",
+    realtime_ingest: "yes",
+    full_history_sync: "yes",
+    message_edits: "no",
+    deletes: "no",
+    reactions: "yes",
+    threads_replies: "no",
+    read_receipts: "partial",
+    attachments: "yes",
+    contact_sync: "partial",
+  },
+  linkedin: {
+    send: "no",
+    receive: "yes",
+    realtime_ingest: "yes",
+    full_history_sync: "yes",
+    message_edits: "yes",
+    deletes: "yes",
+    reactions: "yes",
+    threads_replies: "yes",
+    read_receipts: "partial",
+    attachments: "yes",
+    contact_sync: "yes",
+  },
+  signal: {
+    send: "yes",
+    receive: "yes",
+    realtime_ingest: "yes",
+    full_history_sync: "yes",
+    message_edits: "no",
+    deletes: "no",
+    reactions: "no",
+    threads_replies: "no",
+    read_receipts: "no",
+    attachments: "yes",
+    contact_sync: "partial",
+  },
+  slack: {
+    send: "no",
+    receive: "yes",
+    realtime_ingest: "yes",
+    full_history_sync: "yes",
+    message_edits: "partial",
+    deletes: "no",
+    reactions: "partial",
+    threads_replies: "yes",
+    read_receipts: "no",
+    attachments: "yes",
+    contact_sync: "yes",
+  },
+  whatsapp: {
+    send: "yes",
+    receive: "yes",
+    realtime_ingest: "yes",
+    full_history_sync: "yes",
+    message_edits: "no",
+    deletes: "no",
+    reactions: "no",
+    threads_replies: "no",
+    read_receipts: "partial",
+    attachments: "yes",
+    contact_sync: "partial",
+  },
+} as const satisfies Record<Platform, Record<PlatformFeature, PlatformFeatureSupport>>;
 
 type PlatformCapabilityFlag = "adapter" | "requestableIntegration";
 
@@ -276,6 +388,19 @@ export function getPlatformHelperRequirements(
   platform: Platform,
 ): readonly PlatformHelperRequirement[] {
   return PLATFORM_DEFINITIONS[platform].helperRequirements;
+}
+
+export function getPlatformFeatureSupport(
+  platform: Platform,
+  feature: PlatformFeature,
+): PlatformFeatureSupport {
+  return PLATFORM_FEATURE_MATRIX[platform][feature];
+}
+
+export function getPlatformFeatureMatrixRow(
+  platform: Platform,
+): Readonly<Record<PlatformFeature, PlatformFeatureSupport>> {
+  return PLATFORM_FEATURE_MATRIX[platform];
 }
 
 export function isIntegrationAuthState(value: string): value is IntegrationAuthState {
