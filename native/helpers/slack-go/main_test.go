@@ -47,7 +47,7 @@ func TestSlackCommands(t *testing.T) {
 			_, _ = w.Write([]byte(`{"ok":true,"team":"Acme","user":"Ava","team_id":"T123","user_id":"U123"}`))
 		case "/users.list":
 			_, _ = w.Write([]byte(`{"ok":true,"members":[{"id":"U123","team_id":"T123","name":"ava","real_name":"Ava","profile":{"email":"ava@example.com","image_72":"https://img/72.png"}}],"response_metadata":{"next_cursor":"users-next"}}`))
-		case "/users.conversations":
+		case "/conversations.list":
 			_, _ = w.Write([]byte(`{"ok":true,"channels":[{"id":"C123","name":"general","num_members":2,"is_channel":true,"is_private":false,"topic":{"value":"ship"},"purpose":{"value":"build"},"latest":{"type":"message","user":"U123","text":"hello","ts":"1710000000.000100"}}],"response_metadata":{"next_cursor":"conv-next"}}`))
 		case "/conversations.members":
 			_, _ = w.Write([]byte(`{"ok":true,"members":["U123","U456"],"response_metadata":{"next_cursor":"members-next"}}`))

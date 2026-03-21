@@ -461,7 +461,7 @@ func (r helperRunner) run(ctx context.Context, command string, stdin io.Reader) 
 		if err != nil {
 			return nil, err
 		}
-		channels, nextCursor, err := client.GetConversationsForUserContext(ctx, &slackapi.GetConversationsForUserParameters{
+		channels, nextCursor, err := client.GetConversationsContext(ctx, &slackapi.GetConversationsParameters{
 			Types:  splitTypes(input.Types),
 			Cursor: input.Cursor,
 			Limit:  input.Limit,
