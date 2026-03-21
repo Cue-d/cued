@@ -15,6 +15,7 @@ const SUPPORTED_NORMALIZED_SCHEMAS = new Set<string>([
   buildNormalizedRawEventSchema("conversation", "linkedin_conversation_removed"),
   buildNormalizedRawEventSchema("message", "created"),
   buildNormalizedRawEventSchema("message", "message_created"),
+  buildNormalizedRawEventSchema("message", "message_updated"),
   buildNormalizedRawEventSchema("message", "message_read_receipt"),
   buildNormalizedRawEventSchema("reaction", "created"),
   buildNormalizedRawEventSchema("reaction", "reaction_added"),
