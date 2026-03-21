@@ -340,7 +340,7 @@ describe("CuedDatabase", () => {
       contactId: "contact-phone",
       type: "phone",
       value: "+12016824050",
-      normalizedValue: "+12016824050",
+      normalizedValue: "2016824050",
       platform: "contacts",
       accountKey: "local",
     });
@@ -387,6 +387,20 @@ describe("CuedDatabase", () => {
     db.close();
   });
 
+  it("formats local Signal phone sends as E.164 passthrough", () => {
+    const db = createDb();
+
+    expect(db.resolveSignalSendTarget("4155550123")).toEqual({
+      target: "+14155550123",
+      threadId: "dm:+14155550123",
+      resolution: "passthrough",
+      matchedContactIds: [],
+      matchedName: null,
+    });
+
+    db.close();
+  });
+
   it("resolves WhatsApp targets by preferring whatsapp_jid over phone without merging contacts", () => {
     const db = createDb();
 
@@ -398,7 +412,7 @@ describe("CuedDatabase", () => {
       contactId: "contact-phone",
       type: "phone",
       value: "+12016824050",
-      normalizedValue: "+12016824050",
+      normalizedValue: "2016824050",
       platform: "contacts",
       accountKey: "local",
     });
@@ -426,6 +440,20 @@ describe("CuedDatabase", () => {
       resolution: "whatsapp_jid",
       matchedContactIds: ["contact-phone", "contact-whatsapp"],
       matchedName: "Soham Bafana",
+    });
+
+    db.close();
+  });
+
+  it("formats local WhatsApp phone sends as JIDs", () => {
+    const db = createDb();
+
+    expect(db.resolveWhatsAppSendTarget("4155550123")).toEqual({
+      target: "14155550123@s.whatsapp.net",
+      threadId: "dm:14155550123@s.whatsapp.net",
+      resolution: "passthrough",
+      matchedContactIds: [],
+      matchedName: null,
     });
 
     db.close();
