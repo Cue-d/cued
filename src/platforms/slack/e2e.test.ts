@@ -204,7 +204,7 @@ echo '{"token":"xoxc-test","cookie":"cookie-test","teamId":"T123","teamName":"Ac
             return;
           }
 
-          if (path === "/users.conversations") {
+          if (path === "/conversations.list") {
             const types = params.get("types");
             if (types === "im,mpim") {
               const direct: Array<Record<string, unknown>> = [
