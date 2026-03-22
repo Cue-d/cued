@@ -1,6 +1,5 @@
 export const PLATFORM_VALUES = [
   "contacts",
-  "fixture",
   "imessage",
   "linkedin",
   "signal",
@@ -57,16 +56,6 @@ export const PLATFORM_DEFINITIONS = {
     supportedHostOs: ["macos"],
     onboardingVisible: true,
     permissionRequirements: ["contacts"],
-    helperRequirements: [],
-  },
-  fixture: {
-    adapter: true,
-    defaultAccountKey: "default",
-    supportsMultipleAccounts: false,
-    requestableIntegration: false,
-    supportedHostOs: ["macos", "windows", "linux"],
-    onboardingVisible: false,
-    permissionRequirements: [],
     helperRequirements: [],
   },
   imessage: {
@@ -138,19 +127,6 @@ export const PLATFORM_FEATURE_MATRIX = {
     read_receipts: "no",
     attachments: "no",
     contact_sync: "yes",
-  },
-  fixture: {
-    send: "no",
-    receive: "no",
-    realtime_ingest: "no",
-    full_history_sync: "no",
-    message_edits: "no",
-    deletes: "no",
-    reactions: "no",
-    threads_replies: "no",
-    read_receipts: "no",
-    attachments: "no",
-    contact_sync: "no",
   },
   imessage: {
     send: "no",
@@ -270,9 +246,6 @@ export type ContactKind = (typeof CONTACT_KIND_VALUES)[number];
 
 export const CONVERSATION_TYPE_VALUES = ["dm", "group"] as const;
 export type ConversationType = (typeof CONVERSATION_TYPE_VALUES)[number];
-
-export const MERGE_DECISION_TYPE_VALUES = ["merge", "block", "split"] as const;
-export type MergeDecisionType = (typeof MERGE_DECISION_TYPE_VALUES)[number];
 
 export const INTEGRATION_AUTH_STATE_VALUES = [
   "authenticated",

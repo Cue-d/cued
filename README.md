@@ -278,7 +278,7 @@ Benchmark scenarios:
 - `clean_idle` is the required scenario for every memory change.
 - `cloned_profile_idle` is available via `--scenario=cloned`, but it is informational until the cloned-profile startup failure is fixed.
 - `idle_cpu_power` runs a 10-minute post-ready idle sample and captures CPU, process churn, and a best-effort power proxy.
-- `active_sync_fixture` runs fixture ingest + projection work and captures active CPU and memory behavior.
+- `active_sync_projection` runs replay-style sync + projection work and captures active CPU and memory behavior.
 - `--baseline=...` enables regression checks for startup latency, main RSS, tree RSS, physical footprint, tree RSS spikes, and idle CPU.
 - `--write-baseline=...` updates the checked-in baseline after a merged improvement, not during experiments.
 

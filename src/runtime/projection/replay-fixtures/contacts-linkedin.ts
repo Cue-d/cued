@@ -109,7 +109,7 @@ export const contactsLinkedInReplayFixtures: ProjectionReplayFixture[] = [
         platform: "linkedin",
         accountKey: "default",
         entityKind: "reaction",
-        eventKind: "created",
+        eventKind: "added",
         observedAt: 1_710_000_000_300,
         dedupeKey: "linkedin:msg-1:thumbs-up",
         payload: {
@@ -132,6 +132,7 @@ export const contactsLinkedInReplayFixtures: ProjectionReplayFixture[] = [
       expect(snapshot.conversations).toHaveLength(1);
       expect(snapshot.conversations[0]).toMatchObject({
         name: "Northwind diligence",
+        isActive: 0,
         unreadCount: 0,
       });
       expect(snapshot.messages).toHaveLength(1);
@@ -216,7 +217,6 @@ export const contactsLinkedInReplayFixtures: ProjectionReplayFixture[] = [
           conversationType: "dm",
           displayName: "Northwind diligence",
           nativeConversationKey: "urn:li:fsd_conversation:thread-removed",
-          subtype: "deleted",
           service: "linkedin",
           unreadCount: 0,
           participants: [{ sourceEntityKey: "contacts:milo" }],

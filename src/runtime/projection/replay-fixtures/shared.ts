@@ -15,7 +15,6 @@ export function fixtureEvent(input: ProviderRawEventInput): ProviderRawEventInpu
     ...input,
     normalizedSchema: buildNormalizedRawEventSchema(input.entityKind, input.eventKind),
     provenance: {
-      sourceVersion: input.sourceVersion ?? null,
       adapterVersion: "projection-replay-fixture@1",
     },
   };

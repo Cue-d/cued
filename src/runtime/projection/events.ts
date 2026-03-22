@@ -1,10 +1,8 @@
 import {
   buildNormalizedRawEventSchema,
-  type ParticipantPayload,
   type ProviderRawEventInput,
   type RawEventEntityKind,
   type RawEventPayload,
-  type TimelineEventPayload,
 } from "../../core/types/provider.js";
 
 type StoredRawEvent = Pick<ProviderRawEventInput, "entityKind" | "eventKind"> & {
@@ -58,215 +56,6 @@ function parseNormalizedSchema(schema: string): {
   };
 }
 
-function buildSystemMessagePayload(
-  payload: RawEventPayload,
-  legacyEventKind: string,
-): TimelineEventPayload {
-  if (
-    typeof payload === "object" &&
-    payload !== null &&
-    "sourceEventKey" in payload &&
-    typeof payload.sourceEventKey === "string" &&
-    "sourceConversationKey" in payload &&
-    typeof payload.sourceConversationKey === "string" &&
-    "eventAt" in payload &&
-    typeof payload.eventAt === "number"
-  ) {
-    const timelinePayload = payload as TimelineEventPayload;
-    return {
-      ...timelinePayload,
-      eventKind: "system_message",
-      metadata: {
-        ...(timelinePayload.metadata ?? {}),
-        legacyEventKind,
-      },
-    };
-  }
-
-  if (
-    typeof payload === "object" &&
-    payload !== null &&
-    "sourceMessageKey" in payload &&
-    typeof payload.sourceMessageKey === "string" &&
-    "sourceConversationKey" in payload &&
-    typeof payload.sourceConversationKey === "string" &&
-    "sentAt" in payload &&
-    typeof payload.sentAt === "number"
-  ) {
-    const messagePayload = payload as Record<string, unknown>;
-    return {
-      sourceEventKey: String(messagePayload.sourceMessageKey),
-      sourceConversationKey: String(messagePayload.sourceConversationKey),
-      eventKind: "system_message",
-      eventAt: Number(messagePayload.sentAt),
-      text: typeof messagePayload.content === "string" ? messagePayload.content : null,
-      metadata: {
-        legacyEventKind,
-        sourceMessageKey: messagePayload.sourceMessageKey,
-      },
-    };
-  }
-
-  throw new Error(
-    `Unable to upcast payload for legacy normalized raw event schema '${legacyEventKind}'`,
-  );
-}
-
-function buildParticipantPayload(
-  payload: RawEventPayload,
-  eventKind: "joined" | "left",
-): ParticipantPayload {
-  if (
-    typeof payload !== "object" ||
-    payload === null ||
-    !("sourceConversationKey" in payload) ||
-    typeof payload.sourceConversationKey !== "string"
-  ) {
-    throw new Error(`Unable to upcast payload for legacy participant schema '${eventKind}'`);
-  }
-  const timelinePayload = payload as TimelineEventPayload;
-  const participantSourceKey =
-    typeof timelinePayload.subjectSourceKey === "string" &&
-    timelinePayload.subjectSourceKey.length > 0
-      ? timelinePayload.subjectSourceKey
-      : typeof timelinePayload.actorSourceKey === "string" &&
-          timelinePayload.actorSourceKey.length > 0
-        ? timelinePayload.actorSourceKey
-        : "";
-  if (!participantSourceKey) {
-    throw new Error(`Unable to upcast payload for legacy participant schema '${eventKind}'`);
-  }
-  return {
-    sourceConversationKey: timelinePayload.sourceConversationKey,
-    participantSourceKey,
-    eventAt: timelinePayload.eventAt,
-    metadata: {
-      ...(timelinePayload.metadata ?? {}),
-      legacyTimelineEventKind: timelinePayload.eventKind,
-    },
-  };
-}
-
-function canonicalizeLegacySchema(
-  schema: string,
-  payload: RawEventPayload,
-): NormalizedProjectedRawEvent {
-  switch (schema) {
-    case "message.message_created@1":
-      return {
-        entityKind: "message",
-        eventKind: "created",
-        normalizedSchema: buildNormalizedRawEventSchema("message", "created"),
-        payload,
-      };
-    case "message.message_updated@1":
-      return {
-        entityKind: "message",
-        eventKind: "updated",
-        normalizedSchema: buildNormalizedRawEventSchema("message", "updated"),
-        payload,
-      };
-    case "message.message_read_receipt@1":
-      return {
-        entityKind: "message",
-        eventKind: "read_receipt",
-        normalizedSchema: buildNormalizedRawEventSchema("message", "read_receipt"),
-        payload,
-      };
-    case "message.message_observed@1":
-      return {
-        entityKind: "timeline_event",
-        eventKind: "system_message",
-        normalizedSchema: buildNormalizedRawEventSchema("timeline_event", "system_message"),
-        payload: buildSystemMessagePayload(payload, "message_observed"),
-      };
-    case "reaction.created@1":
-      return {
-        entityKind: "reaction",
-        eventKind:
-          typeof payload === "object" &&
-          payload !== null &&
-          "isActive" in payload &&
-          payload.isActive === false
-            ? "removed"
-            : "added",
-        normalizedSchema: buildNormalizedRawEventSchema(
-          "reaction",
-          typeof payload === "object" &&
-            payload !== null &&
-            "isActive" in payload &&
-            payload.isActive === false
-            ? "removed"
-            : "added",
-        ),
-        payload,
-      };
-    case "reaction.reaction_added@1":
-      return {
-        entityKind: "reaction",
-        eventKind: "added",
-        normalizedSchema: buildNormalizedRawEventSchema("reaction", "added"),
-        payload,
-      };
-    case "reaction.reaction_removed@1":
-      return {
-        entityKind: "reaction",
-        eventKind: "removed",
-        normalizedSchema: buildNormalizedRawEventSchema("reaction", "removed"),
-        payload,
-      };
-    case "timeline_event.linkedin_system_message@1":
-      return {
-        entityKind: "timeline_event",
-        eventKind: "system_message",
-        normalizedSchema: buildNormalizedRawEventSchema("timeline_event", "system_message"),
-        payload: buildSystemMessagePayload(payload, "linkedin_system_message"),
-      };
-    case "timeline_event.linkedin_group_read_receipt@1":
-      return {
-        entityKind: "timeline_event",
-        eventKind: "system_message",
-        normalizedSchema: buildNormalizedRawEventSchema("timeline_event", "system_message"),
-        payload: buildSystemMessagePayload(payload, "linkedin_group_read_receipt"),
-      };
-    case "timeline_event.linkedin_conversation_removed@1":
-      return {
-        entityKind: "timeline_event",
-        eventKind: "system_message",
-        normalizedSchema: buildNormalizedRawEventSchema("timeline_event", "system_message"),
-        payload: buildSystemMessagePayload(payload, "linkedin_conversation_removed"),
-      };
-    case "timeline_event.participant_joined@1":
-      return {
-        entityKind: "participant",
-        eventKind: "joined",
-        normalizedSchema: buildNormalizedRawEventSchema("participant", "joined"),
-        payload: buildParticipantPayload(payload, "joined"),
-      };
-    case "timeline_event.participant_left@1":
-      return {
-        entityKind: "participant",
-        eventKind: "left",
-        normalizedSchema: buildNormalizedRawEventSchema("participant", "left"),
-        payload: buildParticipantPayload(payload, "left"),
-      };
-    default: {
-      const parsed = parseNormalizedSchema(schema);
-      if (!SUPPORTED_NORMALIZED_SCHEMAS.has(schema)) {
-        throw new Error(
-          `Unsupported normalized raw event schema '${schema}' for ${parsed.entityKind}:${parsed.eventKind}. Update the adapter/upcaster or run a targeted platform resync.`,
-        );
-      }
-      return {
-        entityKind: parsed.entityKind,
-        eventKind: parsed.eventKind,
-        normalizedSchema: schema,
-        payload,
-      };
-    }
-  }
-}
-
 export function normalizeStoredRawEventForProjection(
   event: StoredRawEvent,
   payload: RawEventPayload,
@@ -274,5 +63,12 @@ export function normalizeStoredRawEventForProjection(
   const normalizedSchema =
     event.normalizedSchema?.trim() ||
     buildNormalizedRawEventSchema(event.entityKind, event.eventKind);
-  return canonicalizeLegacySchema(normalizedSchema, payload);
+  const parsed = parseNormalizedSchema(normalizedSchema);
+  assertCanonicalNormalizedSchemaForWrite(normalizedSchema);
+  return {
+    entityKind: parsed.entityKind,
+    eventKind: parsed.eventKind,
+    normalizedSchema,
+    payload,
+  };
 }

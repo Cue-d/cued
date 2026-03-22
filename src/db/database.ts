@@ -11,7 +11,6 @@ import type {
   ConnectionKind,
   IntegrationAuthState,
   IntegrationLaunchStrategy,
-  MergeDecisionType,
   Platform,
   ProviderRawEventInput,
   RawEventEntityKind,
@@ -24,6 +23,7 @@ import {
   resolveRawEventNormalizedSchema,
 } from "../core/types/provider.js";
 import { normalizePhone, toE164 } from "../core/utils/phone.js";
+import { assertCanonicalNormalizedSchemaForWrite } from "../runtime/projection/events.js";
 import type {
   PendingRollbackState,
   UpdateErrorState,
@@ -39,7 +39,6 @@ const {
   attachmentContent,
   appSettings,
   authSessions,
-  contactMergeDecisions,
   contactHandles,
   contactSources,
   contacts,
@@ -429,7 +428,9 @@ function chunkArray<T>(items: readonly T[], size: number): T[][] {
 }
 
 function buildRawEventValues(event: RawEventInput) {
-  const provenance = normalizeRawEventProvenance(event.provenance, event.sourceVersion);
+  const provenance = normalizeRawEventProvenance(event.provenance);
+  const normalizedSchema = resolveRawEventNormalizedSchema(event);
+  assertCanonicalNormalizedSchemaForWrite(normalizedSchema);
   return {
     id: event.id,
     platform: event.platform,
@@ -444,9 +445,9 @@ function buildRawEventValues(event: RawEventInput) {
     cursorJson: safeStringifyJson(event.cursor),
     dedupeKey: event.dedupeKey,
     payloadJson: safeStringifyJson(event.payload) ?? "null",
-    normalizedSchema: resolveRawEventNormalizedSchema(event),
+    normalizedSchema,
     provenanceJson: safeStringifyJson(provenance),
-    sourceVersion: provenance?.sourceVersion ?? event.sourceVersion ?? null,
+    sourceVersion: event.sourceVersion ?? null,
   };
 }
 
@@ -481,11 +482,9 @@ export class CuedDatabase {
         .get() as { 1: number } | undefined;
 
       if (alreadyApplied) {
-        const candidateIds = [migration.id, ...(migration.legacyIds ?? [])];
-        const placeholders = candidateIds.map(() => "?").join(", ");
         const applied = this.sqlite
-          .prepare(`SELECT id FROM schema_migrations WHERE id IN (${placeholders}) LIMIT 1`)
-          .get(...candidateIds) as { id: string } | undefined;
+          .prepare("SELECT id FROM schema_migrations WHERE id = ? LIMIT 1")
+          .get(migration.id) as { id: string } | undefined;
         if (applied) {
           continue;
         }
@@ -796,7 +795,6 @@ export class CuedDatabase {
     source_cursor_json: string | null;
     sync_mode: SyncMode;
     raw_ingest_watermark: number;
-    projection_watermark: number;
     last_success_at: number | null;
     last_error_summary: string | null;
   } | null {
@@ -806,7 +804,6 @@ export class CuedDatabase {
           source_cursor_json: syncCheckpoints.sourceCursorJson,
           sync_mode: syncCheckpoints.syncMode,
           raw_ingest_watermark: syncCheckpoints.rawIngestWatermark,
-          projection_watermark: syncCheckpoints.projectionWatermark,
           last_success_at: syncCheckpoints.lastSuccessAt,
           last_error_summary: syncCheckpoints.lastErrorSummary,
         })
@@ -819,7 +816,6 @@ export class CuedDatabase {
             source_cursor_json: string | null;
             sync_mode: SyncMode;
             raw_ingest_watermark: number;
-            projection_watermark: number;
             last_success_at: number | null;
             last_error_summary: string | null;
           }
@@ -992,31 +988,6 @@ export class CuedDatabase {
         },
       })
       .run();
-  }
-
-  insertMergeDecision(input: {
-    decisionType: MergeDecisionType;
-    leftContactId?: string | null;
-    rightContactId?: string | null;
-    canonicalContactId?: string | null;
-    reason?: string | null;
-    createdBy: string;
-  }): string {
-    const id = randomUUID();
-    this.db
-      .insert(contactMergeDecisions)
-      .values({
-        id,
-        decisionType: input.decisionType,
-        leftContactId: input.leftContactId ?? null,
-        rightContactId: input.rightContactId ?? null,
-        canonicalContactId: input.canonicalContactId ?? null,
-        reason: input.reason ?? null,
-        createdBy: input.createdBy,
-        createdAt: now(),
-      })
-      .run();
-    return id;
   }
 
   getOverview(): {
@@ -2835,7 +2806,6 @@ export class CuedDatabase {
     syncMode: SyncMode;
     sourceCursor?: unknown;
     rawIngestWatermark?: number;
-    projectionWatermark?: number;
     lastSuccessAt?: number | null;
     lastErrorSummary?: string | null;
   }): void {
@@ -2846,7 +2816,6 @@ export class CuedDatabase {
       accountKey: input.accountKey,
       sourceCursorJson: safeStringifyJson(input.sourceCursor),
       rawIngestWatermark: input.rawIngestWatermark ?? 0,
-      projectionWatermark: input.projectionWatermark ?? 0,
       syncMode: input.syncMode,
       lastFullSyncAt: input.lastSuccessAt ?? null,
       lastSuccessAt: input.lastSuccessAt ?? null,
@@ -2864,7 +2833,6 @@ export class CuedDatabase {
         set: {
           sourceCursorJson: values.sourceCursorJson,
           rawIngestWatermark: values.rawIngestWatermark,
-          projectionWatermark: values.projectionWatermark,
           syncMode: values.syncMode,
           lastFullSyncAt:
             input.syncMode === "full"
@@ -3044,6 +3012,7 @@ export class CuedDatabase {
     event_kind: string;
     normalized_schema: string | null;
     provenance_json: string | null;
+    source_version: string | null;
     observed_at: number;
     payload_json: string;
   }> {
@@ -3059,6 +3028,7 @@ export class CuedDatabase {
           event_kind,
           normalized_schema,
           provenance_json,
+          source_version,
           observed_at,
           payload_json
         FROM raw_events
@@ -3076,6 +3046,7 @@ export class CuedDatabase {
       event_kind: string;
       normalized_schema: string | null;
       provenance_json: string | null;
+      source_version: string | null;
       observed_at: number;
       payload_json: string;
     }>;
@@ -3125,6 +3096,7 @@ export class CuedDatabase {
     event_kind: string;
     normalized_schema: string | null;
     provenance_json: string | null;
+    source_version: string | null;
     observed_at: number;
     payload_json: string;
   }> {
@@ -3144,6 +3116,7 @@ export class CuedDatabase {
           event_kind,
           normalized_schema,
           provenance_json,
+          source_version,
           observed_at,
           payload_json
         FROM raw_events
@@ -3162,6 +3135,7 @@ export class CuedDatabase {
       event_kind: string;
       normalized_schema: string | null;
       provenance_json: string | null;
+      source_version: string | null;
       observed_at: number;
       payload_json: string;
     }>;

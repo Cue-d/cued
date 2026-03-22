@@ -18,7 +18,7 @@ export interface ContactRecordInput {
 }
 
 type ContactsLoader =
-  | { kind: "fixture"; path: string }
+  | { kind: "file"; path: string }
   | { kind: "native"; path: string }
   | { kind: "jxa" };
 
@@ -26,7 +26,7 @@ function dedupeKey(seed: string): string {
   return createHash("sha256").update(seed).digest("hex");
 }
 
-function loadContactsFromFixture(path: string): ContactRecordInput[] {
+function loadContactsFromFile(path: string): ContactRecordInput[] {
   const parsed = JSON.parse(readFileSync(path, "utf8")) as
     | ContactRecordInput[]
     | {
@@ -59,7 +59,7 @@ function loadContactsFromFixture(path: string): ContactRecordInput[] {
     });
   }
 
-  throw new Error(`Unsupported contacts fixture shape: ${path}`);
+  throw new Error(`Unsupported contacts file shape: ${path}`);
 }
 
 function loadContactsFromNativeBinary(path: string): ContactRecordInput[] {
@@ -117,7 +117,7 @@ export function resolveContactsLoader(
   repoRoot?: string,
 ): ContactsLoader {
   if (env.CUED_CONTACTS_JSON_PATH) {
-    return { kind: "fixture", path: env.CUED_CONTACTS_JSON_PATH };
+    return { kind: "file", path: env.CUED_CONTACTS_JSON_PATH };
   }
 
   const nativeBinary = resolveMacOSNativeBinary(env.CUED_CONTACTS_NATIVE_BINARY, repoRoot);
@@ -131,8 +131,8 @@ export function resolveContactsLoader(
 export function buildContactsSyncBundle(): SyncBundle {
   const loader = resolveContactsLoader();
   const contacts =
-    loader.kind === "fixture"
-      ? loadContactsFromFixture(loader.path)
+    loader.kind === "file"
+      ? loadContactsFromFile(loader.path)
       : loader.kind === "native"
         ? loadContactsFromNativeBinary(loader.path)
         : loadContactsFromMacOS();

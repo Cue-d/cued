@@ -30,7 +30,6 @@ export interface ConversationObservationPayload {
   conversationType: ConversationType;
   displayName?: string | null;
   nativeConversationKey?: string | null;
-  subtype?: string | null;
   service?: string | null;
   topic?: string | null;
   unreadCount?: number | null;
@@ -108,7 +107,6 @@ export interface RawEventProvenance {
   providerApiVersion?: string | null;
   adapterVersion?: string | null;
   acquisitionMode?: RawEventAcquisitionMode | null;
-  sourceVersion?: string | null;
 }
 
 export interface ProviderRawEventInput<TPayload = RawEventPayload> {
@@ -132,10 +130,6 @@ export interface ProviderRawEventInput<TPayload = RawEventPayload> {
 
 const contactFieldNameSet = new Set<string>(CONTACT_FIELD_NAME_VALUES);
 
-type LegacyRawEventProvenanceInput = Partial<RawEventProvenance> & {
-  captureKind?: string | null;
-};
-
 export function buildNormalizedRawEventSchema(
   entityKind: RawEventEntityKind,
   eventKind: string,
@@ -145,24 +139,15 @@ export function buildNormalizedRawEventSchema(
 }
 
 export function normalizeRawEventProvenance(
-  input: LegacyRawEventProvenanceInput | null | undefined,
-  legacySourceVersion?: string | null,
+  input: Partial<RawEventProvenance> | null | undefined,
 ): RawEventProvenance | null {
-  const sourceVersion = input?.sourceVersion ?? legacySourceVersion ?? null;
-  const acquisitionMode =
-    input?.acquisitionMode ??
-    (input?.captureKind === "sync" || input?.captureKind === "realtime" ? input.captureKind : null);
   const normalized: RawEventProvenance = {
     providerApiVersion: input?.providerApiVersion ?? null,
     adapterVersion: input?.adapterVersion ?? null,
-    acquisitionMode,
-    sourceVersion,
+    acquisitionMode: input?.acquisitionMode ?? null,
   };
 
-  return normalized.providerApiVersion ||
-    normalized.adapterVersion ||
-    normalized.acquisitionMode ||
-    normalized.sourceVersion
+  return normalized.providerApiVersion || normalized.adapterVersion || normalized.acquisitionMode
     ? normalized
     : null;
 }

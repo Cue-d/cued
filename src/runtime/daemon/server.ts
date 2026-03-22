@@ -1220,7 +1220,6 @@ export async function runDaemon(): Promise<void> {
       syncMode: checkpoint?.sync_mode ?? "incremental",
       sourceCursor,
       rawIngestWatermark: projection.max_raw_event_rowid,
-      projectionWatermark: projection.projection_watermark,
       lastSuccessAt: now(),
       lastErrorSummary: null,
     });
@@ -1366,7 +1365,6 @@ export async function runDaemon(): Promise<void> {
       syncMode: checkpoint?.sync_mode ?? "incremental",
       sourceCursor,
       rawIngestWatermark: projection.max_raw_event_rowid,
-      projectionWatermark: projection.projection_watermark,
       lastSuccessAt: now(),
       lastErrorSummary: null,
     });
@@ -1468,7 +1466,6 @@ export async function runDaemon(): Promise<void> {
       syncMode: checkpoint?.sync_mode ?? "incremental",
       sourceCursor,
       rawIngestWatermark: projection.max_raw_event_rowid,
-      projectionWatermark: projection.projection_watermark,
       lastSuccessAt: now(),
       lastErrorSummary: null,
     });
@@ -1602,7 +1599,6 @@ export async function runDaemon(): Promise<void> {
       syncMode: checkpoint?.sync_mode ?? "incremental",
       sourceCursor,
       rawIngestWatermark: projection.max_raw_event_rowid,
-      projectionWatermark: projection.projection_watermark,
       lastSuccessAt: now(),
       lastErrorSummary: null,
     });
@@ -2656,7 +2652,6 @@ export async function runDaemon(): Promise<void> {
         syncMode: checkpointSyncMode,
         sourceCursor: bundleSourceCursor,
         rawIngestWatermark: projection.max_raw_event_rowid,
-        projectionWatermark: projection.projection_watermark,
         lastSuccessAt: checkpointLastSuccessAt,
       });
       const afterCheckpoint = now();
@@ -3406,34 +3401,6 @@ async function dispatchRequest(
           id: request.id,
           ok: true,
           result: runQueueService.resetSource(request.source),
-        };
-      case "merge-contact":
-        return {
-          id: request.id,
-          ok: true,
-          result: {
-            decisionId: db.insertMergeDecision({
-              decisionType: "merge",
-              leftContactId: request.leftContactId,
-              rightContactId: request.rightContactId,
-              canonicalContactId: request.leftContactId,
-              reason: request.reason ?? "manual_cli_merge",
-              createdBy: "cli",
-            }),
-          },
-        };
-      case "split-contact":
-        return {
-          id: request.id,
-          ok: true,
-          result: {
-            decisionId: db.insertMergeDecision({
-              decisionType: "split",
-              canonicalContactId: request.contactId,
-              reason: request.reason ?? "manual_cli_split",
-              createdBy: "cli",
-            }),
-          },
         };
       default:
         return {

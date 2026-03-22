@@ -6,7 +6,6 @@ import {
   CONVERSATION_TYPE_VALUES,
   INTEGRATION_AUTH_STATE_VALUES,
   INTEGRATION_LAUNCH_STRATEGY_VALUES,
-  MERGE_DECISION_TYPE_VALUES,
   PLATFORM_VALUES,
   RAW_EVENT_ENTITY_KIND_VALUES,
   SYNC_MODE_VALUES,
@@ -43,7 +42,6 @@ export const syncCheckpoints = sqliteTable("sync_checkpoints", {
   accountKey: text("account_key").notNull(),
   sourceCursorJson: text("source_cursor_json"),
   rawIngestWatermark: integer("raw_ingest_watermark").notNull(),
-  projectionWatermark: integer("projection_watermark").notNull(),
   syncMode: textEnum("sync_mode", SYNC_MODE_VALUES).notNull(),
   lastFullSyncAt: integer("last_full_sync_at"),
   lastSuccessAt: integer("last_success_at"),
@@ -199,17 +197,6 @@ export const contactSources = sqliteTable("contact_sources", {
   metadataJson: text("metadata_json"),
 });
 
-export const contactMergeDecisions = sqliteTable("contact_merge_decisions", {
-  id: text("id").primaryKey(),
-  decisionType: textEnum("decision_type", MERGE_DECISION_TYPE_VALUES).notNull(),
-  leftContactId: text("left_contact_id"),
-  rightContactId: text("right_contact_id"),
-  canonicalContactId: text("canonical_contact_id"),
-  reason: text("reason"),
-  createdBy: text("created_by").notNull(),
-  createdAt: integer("created_at").notNull(),
-});
-
 export const conversations = sqliteTable("conversations", {
   id: text("id").primaryKey(),
   platform: textEnum("platform", PLATFORM_VALUES).notNull(),
@@ -217,7 +204,7 @@ export const conversations = sqliteTable("conversations", {
   sourceConversationKey: text("source_conversation_key").notNull(),
   nativeConversationKey: text("native_conversation_key"),
   type: textEnum("type", CONVERSATION_TYPE_VALUES).notNull(),
-  subtype: text("subtype"),
+  isActive: integer("is_active").notNull(),
   service: text("service"),
   name: text("name"),
   topic: text("topic"),
@@ -335,6 +322,7 @@ export const timelineEvents = sqliteTable("timeline_events", {
   actorSourceKey: text("actor_source_key"),
   actorName: text("actor_name"),
   subjectContactId: text("subject_contact_id"),
+  subjectSourceKey: text("subject_source_key"),
   eventAt: integer("event_at").notNull(),
   text: text("text"),
   metadataJson: text("metadata_json"),

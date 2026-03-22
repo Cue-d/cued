@@ -587,8 +587,8 @@ echo '{"token":"xoxc-test","cookie":"cookie-test","teamId":"T123","teamName":"Ac
 
       const finalCheckpoint = db.getCheckpoint("slack", "workspace-a");
       expect(finalCheckpoint?.sync_mode).toBe("incremental");
-      expect(finalCheckpoint?.projection_watermark).toBe(
-        db.getProjectionBacklog().projection_watermark,
+      expect(finalCheckpoint?.raw_ingest_watermark).toBe(
+        db.getProjectionBacklog().max_raw_event_rowid,
       );
       expect(JSON.parse(finalCheckpoint?.source_cursor_json ?? "{}")).toEqual(
         expect.objectContaining({
@@ -682,7 +682,6 @@ async function runSlackCycle(
     syncMode: resolvedSyncMode,
     sourceCursor: bundle.sourceCursor,
     rawIngestWatermark: db.getProjectionBacklog().max_raw_event_rowid,
-    projectionWatermark: projection.projectionWatermark,
     lastSuccessAt: Date.now(),
   });
 

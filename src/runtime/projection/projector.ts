@@ -41,6 +41,7 @@ type RawEventRow = {
   event_kind: string;
   normalized_schema: string | null;
   provenance_json: string | null;
+  source_version: string | null;
   observed_at: number;
   payload_json: string;
 };
@@ -86,6 +87,7 @@ type RawEventNormalizationContext = Pick<
   | "event_kind"
   | "normalized_schema"
   | "provenance_json"
+  | "source_version"
 >;
 
 type ProjectionOverview = {
@@ -551,25 +553,21 @@ function describeRawEventContext(event: RawEventNormalizationContext): string {
   if (event.normalized_schema) {
     parts.push(`schema ${event.normalized_schema}`);
   }
+  if (event.source_version) {
+    parts.push(`sourceVersion ${event.source_version}`);
+  }
 
   if (event.provenance_json) {
     try {
       const provenance = JSON.parse(event.provenance_json) as {
-        sourceVersion?: string | null;
         providerApiVersion?: string | null;
         acquisitionMode?: string | null;
-        captureKind?: string | null;
       };
-      if (provenance.sourceVersion) {
-        parts.push(`sourceVersion ${provenance.sourceVersion}`);
-      }
       if (provenance.providerApiVersion) {
         parts.push(`providerApiVersion ${provenance.providerApiVersion}`);
       }
       if (provenance.acquisitionMode) {
         parts.push(`acquisitionMode ${provenance.acquisitionMode}`);
-      } else if (provenance.captureKind) {
-        parts.push(`captureKind ${provenance.captureKind}`);
       }
     } catch {
       parts.push("invalid provenance");
@@ -737,7 +735,7 @@ function ensureConversationStub(
       sourceConversationKey,
       nativeConversationKey: null,
       type: "dm",
-      subtype: null,
+      isActive: 1,
       service: null,
       name: null,
       topic: null,
@@ -1017,7 +1015,7 @@ function projectConversationObservation(
     updatedAt: number;
     nativeConversationKey?: string | null;
     type: "dm" | "group";
-    subtype?: string | null;
+    isActive: number;
     service?: string | null;
     name?: string | null;
     topic?: string | null;
@@ -1025,12 +1023,10 @@ function projectConversationObservation(
   } = {
     updatedAt: event.observed_at,
     type: payload.conversationType,
+    isActive: event.event_kind === "removed" ? 0 : 1,
   };
   if (payload.nativeConversationKey !== undefined) {
     conversationSet.nativeConversationKey = normalizeText(payload.nativeConversationKey);
-  }
-  if (payload.subtype !== undefined) {
-    conversationSet.subtype = normalizeText(payload.subtype);
   }
   if (payload.service !== undefined) {
     conversationSet.service = normalizeText(payload.service);
@@ -1456,6 +1452,7 @@ function projectTimelineEvent(
       actorSourceKey: payload.actorSourceKey ?? null,
       actorName: actorContactId ? (cache.contactNameMap.get(actorContactId) ?? null) : null,
       subjectContactId,
+      subjectSourceKey: payload.subjectSourceKey ?? null,
       eventAt: payload.eventAt,
       text: normalizeText(payload.text ?? null),
       metadataJson: payload.metadata ? JSON.stringify(payload.metadata) : null,
@@ -1509,7 +1506,7 @@ function refreshConversationSummariesForIds(
         ),
         unread_count = (
           CASE
-            WHEN conversations.subtype = 'deleted' THEN 0
+            WHEN conversations.is_active = 0 THEN 0
             ELSE (
               SELECT COUNT(*)
               FROM messages m

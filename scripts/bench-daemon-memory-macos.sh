@@ -28,7 +28,7 @@ CLONED_PROFILE_SEED_DB_PATH=""
 
 usage() {
   cat <<EOF
-Usage: $(basename "$0") [--scenario=clean|cloned|idle_cpu_power|active_sync_fixture] [--baseline=PATH] [--write-baseline=PATH]
+Usage: $(basename "$0") [--scenario=clean|cloned|idle_cpu_power|active_sync_projection] [--baseline=PATH] [--write-baseline=PATH]
 
 Options:
   --scenario=...         Benchmark scenario to run. Default: clean_idle
@@ -40,7 +40,7 @@ Scenarios:
   clean_idle             Idle daemon residency with low-noise clean profile.
   cloned_profile_idle    Idle daemon residency against a cloned ~/.cued profile (informational).
   idle_cpu_power         10-minute idle CPU/process churn sample after daemon is ready.
-  active_sync_fixture    Fixture-driven daemon sync/projection run with CPU + memory sampling.
+  active_sync_projection    Replay-driven daemon sync/projection run with CPU + memory sampling.
 
 Notes:
   - This script runs only on macOS.
@@ -60,8 +60,8 @@ normalize_scenario() {
     idle_cpu_power)
       printf '%s\n' "idle_cpu_power"
       ;;
-    active_sync_fixture)
-      printf '%s\n' "active_sync_fixture"
+    active_sync_projection)
+      printf '%s\n' "active_sync_projection"
       ;;
     *)
       printf '%s\n' "Unsupported scenario: $1" >&2
@@ -78,7 +78,7 @@ scenario_run_count() {
     idle_cpu_power)
       printf '%s\n' "$DEFAULT_IDLE_CPU_POWER_RUN_COUNT"
       ;;
-    active_sync_fixture)
+    active_sync_projection)
       printf '%s\n' "$DEFAULT_ACTIVE_SYNC_RUN_COUNT"
       ;;
   esac
@@ -92,7 +92,7 @@ scenario_warmup_seconds() {
     idle_cpu_power)
       printf '%s\n' "$DEFAULT_IDLE_CPU_POWER_WARMUP_SECONDS"
       ;;
-    active_sync_fixture)
+    active_sync_projection)
       printf '%s\n' "0"
       ;;
   esac
@@ -106,7 +106,7 @@ scenario_sample_count() {
     idle_cpu_power)
       printf '%s\n' "$DEFAULT_IDLE_CPU_POWER_SAMPLE_COUNT"
       ;;
-    active_sync_fixture)
+    active_sync_projection)
       printf '%s\n' "0"
       ;;
   esac
@@ -120,7 +120,7 @@ scenario_sample_interval_seconds() {
     idle_cpu_power)
       printf '%s\n' "$DEFAULT_IDLE_CPU_POWER_SAMPLE_INTERVAL_SECONDS"
       ;;
-    active_sync_fixture)
+    active_sync_projection)
       printf '%s\n' "$DEFAULT_ACTIVE_SYNC_SAMPLE_INTERVAL_SECONDS"
       ;;
   esac
@@ -322,7 +322,17 @@ prepare_home_for_run() {
   mkdir -p "$home_dir"
 
   case "$SCENARIO" in
-    clean_idle|idle_cpu_power|active_sync_fixture)
+    clean_idle|idle_cpu_power)
+      return
+      ;;
+    active_sync_projection)
+      cat >"$home_dir/contacts-benchmark.json" <<'EOF'
+{"contacts":[
+  {"displayName":"Perf Alpha","company":"Cued","phoneNumbers":["+14155550101"],"emails":["alpha@example.com"]},
+  {"displayName":"Perf Beta","company":"Cued","phoneNumbers":["+14155550102"],"emails":["beta@example.com"]},
+  {"displayName":"Perf Gamma","company":"Cued","phoneNumbers":["+14155550103"],"emails":["gamma@example.com"]}
+]}
+EOF
       return
       ;;
     cloned_profile_idle)
@@ -414,19 +424,19 @@ collect_fixed_interval_samples() {
   done
 }
 
-collect_active_sync_fixture_samples() {
+collect_active_sync_projection_samples() {
   local run_dir="$1"
   local home_dir="$2"
   local sample_csv="$run_dir/samples.csv"
-  local sync_output="$run_dir/fixture-sync.json"
-  local rebuild_output="$run_dir/fixture-rebuild.json"
+  local sync_output="$run_dir/replay-sync.json"
+  local rebuild_output="$run_dir/replay-rebuild.json"
   local sync_run_id rebuild_run_id sync_status rebuild_status
   local sample_number=0
   local active_started_ms
 
   printf 'sample,main_rss_kb,tree_rss_kb,tree_cpu_pct,proc_count,tree_pids\n' >"$sample_csv"
 
-  run_cli_to_file "$home_dir" "$sync_output" sync run fixture
+  run_cli_to_file "$home_dir" "$sync_output" sync run contacts
   run_cli_to_file "$home_dir" "$rebuild_output" rebuild
   sync_run_id="$(parse_json_field_from_file "$sync_output" 'data.runId ?? data.result?.runId ?? null')"
   rebuild_run_id="$(parse_json_field_from_file "$rebuild_output" 'data.runId ?? data.result?.runId ?? null')"
@@ -444,7 +454,7 @@ collect_active_sync_fixture_samples() {
       break
     fi
     if [ $(( $(current_time_ms) - active_started_ms )) -ge $(( DEFAULT_ACTIVE_SYNC_TIMEOUT_SECONDS * 1000 )) ]; then
-      printf '%s\n' "active_sync_fixture timed out after ${DEFAULT_ACTIVE_SYNC_TIMEOUT_SECONDS}s" >&2
+      printf '%s\n' "active_sync_projection timed out after ${DEFAULT_ACTIVE_SYNC_TIMEOUT_SECONDS}s" >&2
       return 1
     fi
     sleep "$DEFAULT_ACTIVE_SYNC_SAMPLE_INTERVAL_SECONDS"
@@ -546,7 +556,7 @@ for tool in node ps pgrep awk vmmap; do
   fi
 done
 
-if [ "$SCENARIO" = "cloned_profile_idle" ] || [ "$SCENARIO" = "active_sync_fixture" ]; then
+if [ "$SCENARIO" = "cloned_profile_idle" ] || [ "$SCENARIO" = "active_sync_projection" ]; then
   if ! command -v sqlite3 >/dev/null 2>&1; then
     printf '%s\n' "Missing required tool for $SCENARIO: sqlite3" >&2
     exit 1
@@ -584,7 +594,8 @@ for run_number in $(seq 1 "$RUN_COUNT"); do
 
   CUED_HOME="$HOME_DIR" \
   CUED_DB_PATH="$HOME_DIR/local.db" \
-  CUED_AUTOSYNC_PLATFORMS="fixture" \
+  CUED_AUTOSYNC_PLATFORMS="contacts" \
+  CUED_CONTACTS_JSON_PATH="$HOME_DIR/contacts-benchmark.json" \
   CUED_SLACK_APP_BINARY="$DISABLED_SLACK_APP_PATH" \
   CUED_SLACK_USER_DATA_DIR="$DISABLED_SLACK_USER_DATA_DIR" \
   node "$DIST_CLI_PATH" daemon >"$RUN_DIR/daemon.out" 2>&1 &
@@ -595,7 +606,7 @@ for run_number in $(seq 1 "$RUN_COUNT"); do
     printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
       "$run_number" "startup_failed" 0 0 0 0 0 0 0 0 0 0 0 0 0 0 "unavailable" "" >>"$RUN_SUMMARY_TSV"
 
-    if [ "$SCENARIO" = "clean_idle" ] || [ "$SCENARIO" = "idle_cpu_power" ] || [ "$SCENARIO" = "active_sync_fixture" ]; then
+    if [ "$SCENARIO" = "clean_idle" ] || [ "$SCENARIO" = "idle_cpu_power" ] || [ "$SCENARIO" = "active_sync_projection" ]; then
       printf '%s\n' "Daemon failed to start during $SCENARIO. See $RUN_DIR/daemon.out." >&2
       exit 1
     fi
@@ -610,8 +621,8 @@ for run_number in $(seq 1 "$RUN_COUNT"); do
     clean_idle|cloned_profile_idle|idle_cpu_power)
       collect_fixed_interval_samples "$RUN_DIR" "$WARMUP_SECONDS" "$SAMPLE_COUNT" "$SAMPLE_INTERVAL_SECONDS"
       ;;
-    active_sync_fixture)
-      collect_active_sync_fixture_samples "$RUN_DIR" "$HOME_DIR"
+    active_sync_projection)
+      collect_active_sync_projection_samples "$RUN_DIR" "$HOME_DIR"
       ;;
   esac
 

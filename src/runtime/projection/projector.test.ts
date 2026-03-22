@@ -35,30 +35,44 @@ describe("projector", () => {
   it("fails with raw-event context for unsupported normalized schemas", () => {
     const db = createDb();
 
-    db.insertRawEvent({
-      id: "unsupported-schema",
-      platform: "linkedin",
-      accountKey: "default",
-      entityKind: "message",
-      eventKind: "created",
-      observedAt: 1_710_000_000_000,
-      dedupeKey: "linkedin:unsupported-schema",
-      normalizedSchema: "message.created@99",
-      provenance: {
-        acquisitionMode: "realtime",
-        sourceVersion: "linkedin-v99",
-        providerApiVersion: "2026-03",
-      },
-      payload: {
-        sourceMessageKey: "msg-unsupported",
-        sourceConversationKey: "thread-unsupported",
-        senderSourceKey: "contacts:test",
-        sentAt: 1_710_000_000_000,
-        content: "unsupported",
-        service: "linkedin",
-        isFromMe: false,
-      },
-    });
+    db.orm().run(sql`
+      INSERT INTO raw_events (
+        id,
+        platform,
+        account_key,
+        entity_kind,
+        event_kind,
+        observed_at,
+        dedupe_key,
+        payload_json,
+        normalized_schema,
+        provenance_json,
+        source_version
+      ) VALUES (
+        'unsupported-schema',
+        'linkedin',
+        'default',
+        'message',
+        'created',
+        1710000000000,
+        'linkedin:unsupported-schema',
+        ${JSON.stringify({
+          sourceMessageKey: "msg-unsupported",
+          sourceConversationKey: "thread-unsupported",
+          senderSourceKey: "contacts:test",
+          sentAt: 1_710_000_000_000,
+          content: "unsupported",
+          service: "linkedin",
+          isFromMe: false,
+        })},
+        'message.created@99',
+        ${JSON.stringify({
+          acquisitionMode: "realtime",
+          providerApiVersion: "2026-03",
+        })},
+        'linkedin-v99'
+      )
+    `);
 
     expect(() => projectPendingRawEvents(db)).toThrowError(
       /Failed to normalize raw event \(row 1, event unsupported-schema, linkedin\/default, message:created, schema message\.created@99, sourceVersion linkedin-v99, providerApiVersion 2026-03, acquisitionMode realtime\): Unsupported normalized raw event schema 'message\.created@99'/,
@@ -133,7 +147,7 @@ describe("projector", () => {
       platform: "linkedin",
       accountKey: "default",
       entityKind: "reaction",
-      eventKind: "created",
+      eventKind: "added",
       observedAt: 1_710_000_000_300,
       dedupeKey: "linkedin:msg-1:thumbs-up",
       payload: {
@@ -231,7 +245,7 @@ describe("projector", () => {
       platform: "slack",
       accountKey: "T0A9C9RHZ9T",
       entityKind: "message",
-      eventKind: "message_created",
+      eventKind: "created",
       observedAt,
       dedupeKey: "slack:message:C123:1",
       payload: {
@@ -250,7 +264,7 @@ describe("projector", () => {
       platform: "slack",
       accountKey: "T0A9C9RHZ9T",
       entityKind: "reaction",
-      eventKind: "reaction_added",
+      eventKind: "added",
       observedAt,
       dedupeKey: "slack:reaction:C123:1:thumbsup",
       payload: {
@@ -345,7 +359,7 @@ describe("projector", () => {
       platform: "linkedin",
       accountKey: "default",
       entityKind: "message",
-      eventKind: "message_created",
+      eventKind: "created",
       observedAt: observedAt + 2,
       dedupeKey: "linkedin:message:1",
       payload: {
@@ -367,7 +381,7 @@ describe("projector", () => {
       platform: "linkedin",
       accountKey: "default",
       entityKind: "message",
-      eventKind: "message_updated",
+      eventKind: "updated",
       observedAt: observedAt + 3,
       dedupeKey: "linkedin:message:1:refresh",
       payload: {
@@ -477,7 +491,7 @@ describe("projector", () => {
       platform: "imessage",
       accountKey: "local",
       entityKind: "message",
-      eventKind: "message_created",
+      eventKind: "created",
       observedAt: 4,
       dedupeKey: "imessage:message:ava",
       payload: {
@@ -545,7 +559,7 @@ describe("projector", () => {
       platform: "imessage",
       accountKey: "local",
       entityKind: "message",
-      eventKind: "message_created",
+      eventKind: "created",
       observedAt: 2,
       dedupeKey: "imessage:message:parent",
       payload: {
@@ -632,7 +646,7 @@ describe("projector", () => {
       platform: "imessage",
       accountKey: "local",
       entityKind: "message",
-      eventKind: "message_created",
+      eventKind: "created",
       observedAt: 2,
       dedupeKey: "imessage:message:email",
       payload: {
@@ -721,7 +735,7 @@ describe("projector", () => {
       platform: "signal",
       accountKey: "default",
       entityKind: "message",
-      eventKind: "message_created",
+      eventKind: "created",
       observedAt: 3,
       dedupeKey: "signal:message:1",
       payload: {
@@ -814,7 +828,7 @@ describe("projector", () => {
       platform: "signal",
       accountKey: "default",
       entityKind: "message",
-      eventKind: "message_created",
+      eventKind: "created",
       observedAt: 3,
       dedupeKey: "signal:message:uuid",
       payload: {
@@ -910,7 +924,7 @@ describe("projector", () => {
       platform: "linkedin",
       accountKey: "default",
       entityKind: "message",
-      eventKind: "message_created",
+      eventKind: "created",
       observedAt: 30,
       dedupeKey: "linkedin:msg-1",
       payload: {
@@ -1043,7 +1057,7 @@ describe("projector", () => {
         platform: "linkedin",
         accountKey: "default",
         entityKind: "message",
-        eventKind: "message_created",
+        eventKind: "created",
         observedAt: 3,
         dedupeKey: "message-hot-path",
         payload: {
@@ -1279,7 +1293,7 @@ describe("projector", () => {
         platform: "imessage",
         accountKey: "local",
         entityKind: "message",
-        eventKind: "message_created",
+        eventKind: "created",
         observedAt: 3,
         dedupeKey: "rt-imessage-msg",
         payload: {
@@ -1339,7 +1353,7 @@ describe("projector", () => {
         platform: "imessage",
         accountKey: "local",
         entityKind: "message",
-        eventKind: "message_created",
+        eventKind: "created",
         observedAt: 2,
         dedupeKey: "order-imessage-msg",
         payload: {
@@ -1432,7 +1446,7 @@ describe("projector", () => {
       platform: "imessage",
       accountKey: "default",
       entityKind: "message",
-      eventKind: "message_created",
+      eventKind: "created",
       observedAt: 3,
       dedupeKey: "imessage:message:ava",
       payload: {
@@ -1582,7 +1596,7 @@ describe("projector", () => {
       platform: "linkedin",
       accountKey: "default",
       entityKind: "message",
-      eventKind: "message_created",
+      eventKind: "created",
       observedAt: 3,
       dedupeKey: "linkedin:reply",
       payload: {
@@ -1611,7 +1625,7 @@ describe("projector", () => {
       platform: "linkedin",
       accountKey: "default",
       entityKind: "message",
-      eventKind: "message_created",
+      eventKind: "created",
       observedAt: 4,
       dedupeKey: "linkedin:parent",
       payload: {
@@ -1885,7 +1899,7 @@ describe("projector", () => {
       platform: "linkedin",
       accountKey: "default",
       entityKind: "message",
-      eventKind: "message_created",
+      eventKind: "created",
       observedAt: 3,
       dedupeKey: "message-attachments-v1",
       payload: {
@@ -1928,7 +1942,7 @@ describe("projector", () => {
       platform: "linkedin",
       accountKey: "default",
       entityKind: "message",
-      eventKind: "message_created",
+      eventKind: "created",
       observedAt: 4,
       dedupeKey: "message-attachments-v2",
       payload: {
@@ -2013,7 +2027,7 @@ describe("projector", () => {
       platform: "slack",
       accountKey: "workspace-a",
       entityKind: "message",
-      eventKind: "message_created",
+      eventKind: "created",
       observedAt: 3,
       dedupeKey: "slack-message-a",
       payload: {
@@ -2030,7 +2044,7 @@ describe("projector", () => {
       platform: "slack",
       accountKey: "workspace-a",
       entityKind: "message",
-      eventKind: "message_created",
+      eventKind: "created",
       observedAt: 4,
       dedupeKey: "slack-message-b",
       payload: {
@@ -2113,7 +2127,7 @@ describe("projector", () => {
       platform: "linkedin",
       accountKey: "default",
       entityKind: "message",
-      eventKind: "message_created",
+      eventKind: "created",
       observedAt: 3,
       dedupeKey: "message-delete-observed",
       payload: {
@@ -2137,7 +2151,6 @@ describe("projector", () => {
       payload: {
         sourceConversationKey: "linkedin:urn:li:fs_conversation:CONV_DELETE",
         conversationType: "dm",
-        subtype: "deleted",
         unreadCount: 0,
         participants: [{ sourceEntityKey: "linkedin:urn:li:member:ACoAAA1" }],
       },
@@ -2147,10 +2160,10 @@ describe("projector", () => {
     projectPendingRawEvents(db);
 
     const conversationRow = db.orm().get<{
-      subtype: string | null;
+      is_active: number;
       unread_count: number;
     }>(sql`
-      SELECT subtype, unread_count
+      SELECT is_active, unread_count
       FROM conversations
       WHERE source_conversation_key = 'linkedin:urn:li:fs_conversation:CONV_DELETE'
     `);
@@ -2169,7 +2182,7 @@ describe("projector", () => {
     `);
 
     expect(conversationRow).toEqual({
-      subtype: "deleted",
+      is_active: 0,
       unread_count: 0,
     });
     expect(participantRow).toEqual({
@@ -2205,7 +2218,7 @@ describe("projector", () => {
         platform: "linkedin",
         accountKey: "default",
         entityKind: "message",
-        eventKind: "message_created",
+        eventKind: "created",
         observedAt: 2,
         dedupeKey: "message-realtime-reaction",
         payload: {
@@ -2223,7 +2236,7 @@ describe("projector", () => {
         platform: "linkedin",
         accountKey: "default",
         entityKind: "reaction",
-        eventKind: "reaction_added",
+        eventKind: "added",
         observedAt: 3,
         dedupeKey: "reaction-realtime-reaction",
         payload: {
