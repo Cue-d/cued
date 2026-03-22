@@ -81,6 +81,56 @@ describe("projector", () => {
     db.close();
   });
 
+  it("projects legacy raw events without normalized schemas", () => {
+    const db = createDb();
+
+    db.orm().run(sql`
+      INSERT INTO raw_events (
+        id,
+        platform,
+        account_key,
+        entity_kind,
+        event_kind,
+        observed_at,
+        dedupe_key,
+        payload_json,
+        normalized_schema,
+        provenance_json,
+        source_version
+      ) VALUES (
+        'legacy-message-created',
+        'linkedin',
+        'default',
+        'message',
+        'message_created',
+        1710000000000,
+        'linkedin:legacy-message-created',
+        ${JSON.stringify({
+          sourceMessageKey: "msg-legacy",
+          sourceConversationKey: "thread-legacy",
+          senderSourceKey: "contacts:test",
+          sentAt: 1_710_000_000_000,
+          content: "legacy message",
+          service: "linkedin",
+          isFromMe: false,
+        })},
+        NULL,
+        NULL,
+        'linkedin-v1'
+      )
+    `);
+
+    expect(() => projectPendingRawEvents(db)).not.toThrow();
+    const rows = db.orm().all<{ content: string | null }>(sql`
+      SELECT content
+      FROM messages
+      WHERE platform_message_id = 'msg-legacy'
+    `);
+    expect(rows).toEqual([{ content: "legacy message" }]);
+
+    db.close();
+  });
+
   it("rebuilds projected state and preserves agent-facing views", () => {
     const db = createDb();
 
