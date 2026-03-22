@@ -1176,7 +1176,7 @@ describe("projector", () => {
         platform: "imessage",
         accountKey: "local",
         entityKind: "message",
-        eventKind: "message_created",
+        eventKind: "created",
         observedAt: 2,
         dedupeKey: "message-realtime-attachment",
         payload: {
@@ -1202,7 +1202,7 @@ describe("projector", () => {
         platform: "imessage",
         accountKey: "local",
         entityKind: "reaction",
-        eventKind: "reaction_added",
+        eventKind: "added",
         observedAt: 3,
         dedupeKey: "reaction-realtime-attachment",
         payload: {
@@ -1762,7 +1762,7 @@ describe("projector", () => {
       platform: "linkedin",
       accountKey: "default",
       entityKind: "message",
-      eventKind: "message_created",
+      eventKind: "created",
       observedAt: 2,
       dedupeKey: "message-placeholder-mime",
       payload: {
@@ -1779,7 +1779,7 @@ describe("projector", () => {
       platform: "linkedin",
       accountKey: "default",
       entityKind: "message",
-      eventKind: "message_created",
+      eventKind: "created",
       observedAt: 3,
       dedupeKey: "message-placeholder-text",
       payload: {
@@ -1796,7 +1796,7 @@ describe("projector", () => {
       platform: "linkedin",
       accountKey: "default",
       entityKind: "message",
-      eventKind: "message_created",
+      eventKind: "created",
       observedAt: 4,
       dedupeKey: "message-placeholder-multi",
       payload: {
@@ -1816,7 +1816,7 @@ describe("projector", () => {
       platform: "linkedin",
       accountKey: "default",
       entityKind: "message",
-      eventKind: "message_created",
+      eventKind: "created",
       observedAt: 5,
       dedupeKey: "message-placeholder-filename",
       payload: {
