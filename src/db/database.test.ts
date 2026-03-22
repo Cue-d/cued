@@ -102,6 +102,7 @@ describe("CuedDatabase", () => {
     return (
       db as unknown as {
         sqlite: {
+          exec: (sql: string) => void;
           prepare: (sql: string) => {
             run: (...params: unknown[]) => void;
             get: (...params: unknown[]) => unknown;
@@ -730,6 +731,116 @@ describe("CuedDatabase", () => {
         acquisitionMode: "realtime",
       }),
     });
+
+    db.close();
+  });
+
+  it("upgrades existing databases with refactor columns and lifecycle state", () => {
+    const dir = mkdtempSync(join(tmpdir(), "cued-v2-upgrade-db-"));
+    tempDirs.push(dir);
+    const db = new CuedDatabase(join(dir, "local.db"));
+    const sql = sqlite(db);
+
+    sql.exec(`
+      CREATE TABLE schema_migrations (
+        id TEXT PRIMARY KEY,
+        applied_at INTEGER NOT NULL
+      )
+    `);
+    sql.exec(
+      `INSERT INTO schema_migrations (id, applied_at) VALUES ('0014_messages_fts_rowid_alignment', 1)`,
+    );
+    sql.exec(`
+      CREATE TABLE raw_events (
+        id TEXT PRIMARY KEY,
+        platform TEXT NOT NULL,
+        account_key TEXT NOT NULL,
+        entity_kind TEXT NOT NULL,
+        event_kind TEXT NOT NULL,
+        external_event_id TEXT,
+        external_entity_id TEXT,
+        conversation_external_id TEXT,
+        occurred_at INTEGER,
+        observed_at INTEGER NOT NULL,
+        cursor_json TEXT,
+        dedupe_key TEXT NOT NULL,
+        payload_json TEXT NOT NULL,
+        source_version TEXT,
+        UNIQUE(platform, account_key, dedupe_key)
+      )
+    `);
+    sql.exec(`
+      CREATE TABLE conversations (
+        id TEXT PRIMARY KEY,
+        platform TEXT NOT NULL,
+        account_key TEXT NOT NULL,
+        source_conversation_key TEXT NOT NULL,
+        native_conversation_key TEXT,
+        type TEXT NOT NULL,
+        subtype TEXT,
+        service TEXT,
+        name TEXT,
+        topic TEXT,
+        participant_names TEXT,
+        last_message_id TEXT,
+        last_message_at INTEGER,
+        last_message_preview TEXT,
+        unread_count INTEGER NOT NULL DEFAULT 0,
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL,
+        UNIQUE(platform, account_key, source_conversation_key)
+      )
+    `);
+    sql.exec(`
+      CREATE TABLE timeline_events (
+        id TEXT PRIMARY KEY,
+        platform TEXT NOT NULL,
+        account_key TEXT NOT NULL,
+        conversation_id TEXT NOT NULL,
+        source_event_key TEXT NOT NULL,
+        event_kind TEXT NOT NULL,
+        actor_contact_id TEXT,
+        actor_source_key TEXT,
+        actor_name TEXT,
+        subject_contact_id TEXT,
+        event_at INTEGER NOT NULL,
+        text TEXT,
+        metadata_json TEXT,
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL,
+        UNIQUE(platform, account_key, source_event_key)
+      )
+    `);
+    sql
+      .prepare(`
+        INSERT INTO conversations (
+          id, platform, account_key, source_conversation_key, native_conversation_key, type, subtype,
+          service, name, topic, participant_names, last_message_id, last_message_at, last_message_preview,
+          unread_count, created_at, updated_at
+        ) VALUES (?, 'linkedin', 'default', ?, NULL, 'dm', 'deleted', 'linkedin', 'Thread', NULL, '', NULL, NULL, NULL, 0, ?, ?)
+      `)
+      .run("legacy-conversation", "thread-1", 1, 1);
+
+    db.migrate();
+
+    const rawEventColumns = (
+      sql.prepare("PRAGMA table_info(raw_events)").all() as Array<{ name: string }>
+    ).map((column) => column.name);
+    const conversationColumns = (
+      sql.prepare("PRAGMA table_info(conversations)").all() as Array<{ name: string }>
+    ).map((column) => column.name);
+    const timelineColumns = (
+      sql.prepare("PRAGMA table_info(timeline_events)").all() as Array<{ name: string }>
+    ).map((column) => column.name);
+
+    expect(rawEventColumns).toEqual(
+      expect.arrayContaining(["normalized_schema", "provenance_json"]),
+    );
+    expect(conversationColumns).toContain("is_active");
+    expect(timelineColumns).toContain("subject_source_key");
+    expect(
+      sql.prepare("SELECT is_active FROM conversations WHERE id = ?").get("legacy-conversation"),
+    ).toEqual({ is_active: 0 });
 
     db.close();
   });
