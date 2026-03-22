@@ -1,11 +1,6 @@
-type MigrationDatabase = {
-  exec(sql: string): unknown;
-  prepare(sql: string): {
-    all: (...params: any[]) => unknown[];
-    get: (...params: any[]) => unknown;
-    run: (...params: any[]) => unknown;
-  };
-};
+import type Database from "better-sqlite3";
+
+type MigrationDatabase = InstanceType<typeof Database>;
 
 export type Migration = {
   id: string;
