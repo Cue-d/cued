@@ -1242,7 +1242,7 @@ export async function runDaemon(): Promise<void> {
           displayName: "Slack",
         },
       ]);
-      const insertResult = db.insertRawEvents(rawEvents);
+      const insertResult = db.insertRawEvents(withRawEventAcquisitionMode(rawEvents, "realtime"));
       if (
         realtimeProjectionEnabled &&
         insertResult.firstInsertedRowId != null &&
@@ -1254,15 +1254,9 @@ export async function runDaemon(): Promise<void> {
           batchSize: realtimeProjectionBatchSize,
         });
       }
-      if (insertResult.firstInsertedRowId != null && insertResult.lastInsertedRowId != null) {
-        queueProjectionRun(
-          trigger,
-          {
-            startRowId: insertResult.firstInsertedRowId,
-            endRowId: insertResult.lastInsertedRowId,
-          },
-          { delayMs: deferredProjectionCoalesceMs },
-        );
+      const projection = db.getProjectionBacklog();
+      if (projection.pending_raw_events > 0) {
+        queueProjectionRun(trigger, undefined, { delayMs: deferredProjectionCoalesceMs });
       }
       if (insertResult.insertedCount > 0) {
         updateSlackCheckpointFromRealtime(accountKey);
@@ -1279,6 +1273,16 @@ export async function runDaemon(): Promise<void> {
         trigger,
         inboundMessages,
       );
+      if (
+        projection.pending_raw_events === 0 &&
+        insertResult.firstInsertedRowId != null &&
+        insertResult.lastInsertedRowId != null
+      ) {
+        await releaseMessageReceivedHooksForRange({
+          startRowId: insertResult.firstInsertedRowId,
+          endRowId: insertResult.lastInsertedRowId,
+        });
+      }
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       slackLogger.warn("realtime ingest failed", { accountKey, error: message });
