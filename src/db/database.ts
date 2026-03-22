@@ -482,9 +482,11 @@ export class CuedDatabase {
         .get() as { 1: number } | undefined;
 
       if (alreadyApplied) {
+        const migrationIds = [migration.id, ...(migration.legacyIds ?? [])];
+        const placeholders = migrationIds.map(() => "?").join(", ");
         const applied = this.sqlite
-          .prepare("SELECT id FROM schema_migrations WHERE id = ? LIMIT 1")
-          .get(migration.id) as { id: string } | undefined;
+          .prepare(`SELECT id FROM schema_migrations WHERE id IN (${placeholders}) LIMIT 1`)
+          .get(...migrationIds) as { id: string } | undefined;
         if (applied) {
           continue;
         }
@@ -492,7 +494,11 @@ export class CuedDatabase {
 
       this.sqlite.exec("BEGIN");
       try {
-        this.sqlite.exec(migration.sql);
+        if (migration.apply) {
+          migration.apply(this.sqlite);
+        } else if (migration.sql) {
+          this.sqlite.exec(migration.sql);
+        }
         this.sqlite
           .prepare("INSERT OR IGNORE INTO schema_migrations (id, applied_at) VALUES (?, ?)")
           .run(migration.id, now());

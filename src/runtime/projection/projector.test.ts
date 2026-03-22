@@ -319,6 +319,75 @@ describe("projector", () => {
     db.close();
   });
 
+  it("updates timeline event subject source keys on re-projection conflicts", () => {
+    const db = createDb();
+    const observedAt = 1_710_000_000_000;
+
+    db.insertRawEvents([
+      {
+        id: "contacts-ava",
+        platform: "contacts",
+        accountKey: "local",
+        entityKind: "contact",
+        eventKind: "observed",
+        observedAt,
+        dedupeKey: "contacts:ava",
+        payload: {
+          sourceEntityKey: "contacts:ava",
+          fields: { display_name: "Ava Chen" },
+          handles: [],
+        },
+        sourceVersion: "contacts-v1",
+      },
+      {
+        id: "timeline-initial",
+        platform: "linkedin",
+        accountKey: "default",
+        entityKind: "timeline_event",
+        eventKind: "system_message",
+        observedAt: observedAt + 1,
+        dedupeKey: "linkedin:timeline:membership",
+        payload: {
+          sourceEventKey: "timeline:membership",
+          sourceConversationKey: "thread-1",
+          eventKind: "system_message",
+          eventAt: observedAt + 1,
+          text: "Ava joined",
+        },
+        sourceVersion: "linkedin-v1",
+      },
+      {
+        id: "timeline-updated",
+        platform: "linkedin",
+        accountKey: "default",
+        entityKind: "timeline_event",
+        eventKind: "system_message",
+        observedAt: observedAt + 2,
+        dedupeKey: "linkedin:timeline:membership:updated",
+        payload: {
+          sourceEventKey: "timeline:membership",
+          sourceConversationKey: "thread-1",
+          eventKind: "system_message",
+          eventAt: observedAt + 2,
+          text: "Ava joined",
+          subjectSourceKey: "contacts:ava",
+        },
+        sourceVersion: "linkedin-v1",
+      },
+    ]);
+
+    projectPendingRawEvents(db);
+
+    const rows = db.orm().all<{ subject_source_key: string | null }>(sql`
+      SELECT subject_source_key
+      FROM timeline_events
+      WHERE source_event_key = 'timeline:membership'
+    `);
+    expect(rows).toEqual([{ subject_source_key: "contacts:ava" }]);
+
+    db.close();
+  });
+
   it("keeps FTS rowids aligned when reprojecting an existing message", () => {
     const db = createDb();
     const observedAt = 1_710_200_000_000;

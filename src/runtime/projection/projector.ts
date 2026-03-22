@@ -1466,6 +1466,7 @@ function projectTimelineEvent(
         actorSourceKey: payload.actorSourceKey ?? null,
         actorName: actorContactId ? (cache.contactNameMap.get(actorContactId) ?? null) : null,
         subjectContactId,
+        subjectSourceKey: payload.subjectSourceKey ?? null,
         eventAt: payload.eventAt,
         text: normalizeText(payload.text ?? null),
         metadataJson: payload.metadata ? JSON.stringify(payload.metadata) : null,

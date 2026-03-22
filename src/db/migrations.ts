@@ -1,11 +1,61 @@
+type MigrationDatabase = {
+  exec(sql: string): unknown;
+  prepare(sql: string): {
+    all: (...params: any[]) => unknown[];
+    get: (...params: any[]) => unknown;
+    run: (...params: any[]) => unknown;
+  };
+};
+
 export type Migration = {
   id: string;
-  sql: string;
+  legacyIds?: string[];
+  sql?: string;
+  apply?: (db: MigrationDatabase) => void;
 };
+
+function tableExists(db: MigrationDatabase, tableName: string): boolean {
+  const row = db
+    .prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = ? LIMIT 1")
+    .get(tableName) as { name: string } | undefined;
+  return row?.name === tableName;
+}
+
+function columnExists(db: MigrationDatabase, tableName: string, columnName: string): boolean {
+  if (!tableExists(db, tableName)) {
+    return false;
+  }
+  const rows = db.prepare(`PRAGMA table_info(${tableName})`).all() as Array<{ name: string }>;
+  return rows.some((row) => row.name === columnName);
+}
+
+function addColumnIfMissing(db: MigrationDatabase, tableName: string, definition: string): void {
+  const [columnName] = definition.trim().split(/\s+/, 1);
+  if (!columnName || columnExists(db, tableName, columnName)) {
+    return;
+  }
+  db.exec(`ALTER TABLE ${tableName} ADD COLUMN ${definition}`);
+}
 
 export const MIGRATIONS: Migration[] = [
   {
     id: "0001_bootstrap_current_schema",
+    legacyIds: [
+      "0001_initial_local_cued_v2",
+      "0002_integration_states",
+      "0003_auth_sessions",
+      "0004_projection_state",
+      "0005_projection_vnext_cut_down",
+      "0006_sync_run_indexes",
+      "0007_projection_trigger_cleanup",
+      "0008_outbound_messages",
+      "0009_app_settings",
+      "0010_requestable_sync_capable_backfill",
+      "0011_sync_run_timing_v2",
+      "0012_attachment_access_and_content",
+      "0013_slack_backfill_proofs",
+      "0014_messages_fts_rowid_alignment",
+    ],
     sql: `
       CREATE TABLE IF NOT EXISTS schema_migrations (
         id TEXT PRIMARY KEY,
@@ -761,5 +811,23 @@ export const MIGRATIONS: Migration[] = [
         );
       END;
     `,
+  },
+  {
+    id: "0002_upgrade_existing_schema_columns",
+    apply: (db) => {
+      addColumnIfMissing(db, "raw_events", "normalized_schema TEXT");
+      addColumnIfMissing(db, "raw_events", "provenance_json TEXT");
+      addColumnIfMissing(db, "conversations", "is_active INTEGER NOT NULL DEFAULT 1");
+      if (columnExists(db, "conversations", "subtype")) {
+        db.exec(`
+          UPDATE conversations
+          SET is_active = CASE
+            WHEN subtype = 'deleted' THEN 0
+            ELSE is_active
+          END
+        `);
+      }
+      addColumnIfMissing(db, "timeline_events", "subject_source_key TEXT");
+    },
   },
 ];
