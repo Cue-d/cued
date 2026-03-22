@@ -592,13 +592,20 @@ for run_number in $(seq 1 "$RUN_COUNT"); do
   mkdir -p "$RUN_DIR"
   prepare_home_for_run "$HOME_DIR"
 
-  CUED_HOME="$HOME_DIR" \
-  CUED_DB_PATH="$HOME_DIR/local.db" \
-  CUED_AUTOSYNC_PLATFORMS="contacts" \
-  CUED_CONTACTS_JSON_PATH="$HOME_DIR/contacts-benchmark.json" \
-  CUED_SLACK_APP_BINARY="$DISABLED_SLACK_APP_PATH" \
-  CUED_SLACK_USER_DATA_DIR="$DISABLED_SLACK_USER_DATA_DIR" \
-  node "$DIST_CLI_PATH" daemon >"$RUN_DIR/daemon.out" 2>&1 &
+  DAEMON_ENV=(
+    "CUED_HOME=$HOME_DIR"
+    "CUED_DB_PATH=$HOME_DIR/local.db"
+    "CUED_SLACK_APP_BINARY=$DISABLED_SLACK_APP_PATH"
+    "CUED_SLACK_USER_DATA_DIR=$DISABLED_SLACK_USER_DATA_DIR"
+  )
+  if [ "$SCENARIO" = "active_sync_projection" ]; then
+    DAEMON_ENV+=(
+      "CUED_AUTOSYNC_PLATFORMS=contacts"
+      "CUED_CONTACTS_JSON_PATH=$HOME_DIR/contacts-benchmark.json"
+    )
+  fi
+
+  env "${DAEMON_ENV[@]}" node "$DIST_CLI_PATH" daemon >"$RUN_DIR/daemon.out" 2>&1 &
   ACTIVE_ROOT_PID="$!"
 
   READY_MS="$(wait_for_daemon_ready "$HOME_DIR")"
