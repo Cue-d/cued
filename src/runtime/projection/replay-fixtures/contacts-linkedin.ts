@@ -252,6 +252,7 @@ export const contactsLinkedInReplayFixtures: ProjectionReplayFixture[] = [
       expect(snapshot.timelineEvents).toHaveLength(1);
       expect(snapshot.timelineEvents[0]).toMatchObject({
         eventKind: "system_message",
+        subjectSourceKey: "contacts:ava",
         text: "Ava renamed the conversation",
       });
     },
@@ -403,6 +404,7 @@ export const contactsLinkedInReplayFixtures: ProjectionReplayFixture[] = [
           sourceConversationKey: "thread-updated",
           eventKind: "system_message",
           actorSourceKey: "contacts:ava",
+          subjectSourceKey: "contacts:ava",
           eventAt: 1_710_000_200_275,
           text: "Ava renamed the conversation",
           metadata: {

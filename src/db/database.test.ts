@@ -634,6 +634,7 @@ describe("CuedDatabase", () => {
       last_success_at: 1_700_000_000_500,
       last_error_summary: "none",
     });
+    expect(db.getCheckpoint("contacts", "local")).not.toHaveProperty("projection_watermark");
     expect(db.listCheckpointSummary()).toEqual([
       {
         platform: "contacts",
@@ -677,6 +678,57 @@ describe("CuedDatabase", () => {
       projection_watermark: 0,
       max_raw_event_rowid: 1,
       pending_raw_events: 1,
+    });
+
+    db.close();
+  });
+
+  it("stores source version separately from provenance metadata", () => {
+    const db = createDb();
+
+    db.insertRawEvent({
+      id: "raw-event-source-version",
+      platform: "linkedin",
+      accountKey: "default",
+      entityKind: "message",
+      eventKind: "created",
+      observedAt: 1_710_000_000_000,
+      dedupeKey: "linkedin:source-version",
+      payload: {
+        sourceMessageKey: "msg-source-version",
+        sourceConversationKey: "thread-source-version",
+        senderSourceKey: "linkedin:member:ava",
+        sentAt: 1_710_000_000_000,
+        content: "hello",
+      },
+      sourceVersion: "linkedin-v7",
+      provenance: {
+        acquisitionMode: "realtime",
+        providerApiVersion: "2026-03",
+        adapterVersion: "linkedin-adapter@7",
+      },
+    });
+
+    const row = sqlite(db)
+      .prepare(
+        `
+          SELECT source_version, provenance_json
+          FROM raw_events
+          WHERE id = ?
+        `,
+      )
+      .get("raw-event-source-version") as {
+      source_version: string | null;
+      provenance_json: string | null;
+    };
+
+    expect(row).toEqual({
+      source_version: "linkedin-v7",
+      provenance_json: JSON.stringify({
+        providerApiVersion: "2026-03",
+        adapterVersion: "linkedin-adapter@7",
+        acquisitionMode: "realtime",
+      }),
     });
 
     db.close();
