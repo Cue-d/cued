@@ -15,12 +15,6 @@ export interface AdapterDefinition {
 }
 
 const ADAPTER_DEFINITIONS: Record<AdapterPlatform, AdapterDefinition> = {
-  fixture: {
-    platform: "fixture",
-    workerEntrypoint: join(import.meta.dirname, "../fixture/worker.js"),
-    autoSync: false,
-    workerTimeoutMs: 15_000,
-  },
   imessage: {
     platform: "imessage",
     workerEntrypoint: join(import.meta.dirname, "../imessage/worker.js"),

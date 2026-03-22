@@ -27,6 +27,7 @@ export type CanonicalProjectionSnapshot = {
     accountKey: string;
     sourceConversationKey: string;
     type: string;
+    isActive: number;
     name: string | null;
     participantNames: string | null;
     unreadCount: number;
@@ -79,6 +80,7 @@ export type CanonicalProjectionSnapshot = {
     conversationId: string;
     sourceEventKey: string;
     eventKind: string;
+    subjectSourceKey: string | null;
     text: string | null;
   }>;
   ftsMessageIds: string[];
@@ -127,11 +129,12 @@ export function readCanonicalProjectionSnapshot(db: CuedDatabase): CanonicalProj
     account_key: string;
     source_conversation_key: string;
     type: string;
+    is_active: number;
     name: string | null;
     participant_names: string | null;
     unread_count: number;
   }>(sql`
-    SELECT id, platform, account_key, source_conversation_key, type, name, participant_names, unread_count
+    SELECT id, platform, account_key, source_conversation_key, type, is_active, name, participant_names, unread_count
     FROM conversations
     ORDER BY id ASC
   `);
@@ -204,9 +207,10 @@ export function readCanonicalProjectionSnapshot(db: CuedDatabase): CanonicalProj
     conversation_id: string;
     source_event_key: string;
     event_kind: string;
+    subject_source_key: string | null;
     text: string | null;
   }>(sql`
-    SELECT id, conversation_id, source_event_key, event_kind, text
+    SELECT id, conversation_id, source_event_key, event_kind, subject_source_key, text
     FROM timeline_events
     ORDER BY id ASC
   `);
@@ -250,6 +254,7 @@ export function readCanonicalProjectionSnapshot(db: CuedDatabase): CanonicalProj
       accountKey: conversation.account_key,
       sourceConversationKey: conversation.source_conversation_key,
       type: conversation.type,
+      isActive: conversation.is_active,
       name: conversation.name,
       participantNames: conversation.participant_names,
       unreadCount: conversation.unread_count,
@@ -302,6 +307,7 @@ export function readCanonicalProjectionSnapshot(db: CuedDatabase): CanonicalProj
       conversationId: event.conversation_id,
       sourceEventKey: event.source_event_key,
       eventKind: event.event_kind,
+      subjectSourceKey: event.subject_source_key,
       text: event.text,
     })),
     ftsMessageIds,

@@ -43,7 +43,6 @@ function perfRawEvent(input: ProviderRawEventInput): ProviderRawEventInput {
     ...input,
     normalizedSchema: buildNormalizedRawEventSchema(input.entityKind, input.eventKind),
     provenance: {
-      sourceVersion: input.sourceVersion ?? "perf-v1",
       adapterVersion: "perf-harness@1",
     },
   };

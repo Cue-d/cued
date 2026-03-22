@@ -322,7 +322,6 @@ export function buildLinkedInConversationEvent(
       conversationType: conversation.groupChat ? "group" : "dm",
       displayName: conversation.title || null,
       nativeConversationKey: normalizedConversation,
-      subtype: null,
       service: "linkedin",
       unreadCount: conversation.unreadCount,
       participants: conversation.conversationParticipants.map((participant) => ({
@@ -364,7 +363,6 @@ export function buildLinkedInConversationRemovalEvents(input: {
         conversationType: input.conversation?.groupChat ? "group" : "dm",
         displayName: input.conversation?.title || null,
         nativeConversationKey: normalizedConversation,
-        subtype: "deleted",
         service: "linkedin",
         unreadCount: 0,
         participants:

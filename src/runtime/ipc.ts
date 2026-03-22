@@ -49,20 +49,7 @@ export type DaemonRequest =
   | { id: string; command: "sync-resume" }
   | { id: string; command: "shutdown-for-update" }
   | { id: string; command: "rebuild" }
-  | { id: string; command: "reset"; source: string }
-  | {
-      id: string;
-      command: "merge-contact";
-      leftContactId: string;
-      rightContactId: string;
-      reason?: string;
-    }
-  | {
-      id: string;
-      command: "split-contact";
-      contactId: string;
-      reason?: string;
-    };
+  | { id: string; command: "reset"; source: string };
 
 export type DaemonResponse = {
   id: string;
