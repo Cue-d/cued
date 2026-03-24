@@ -7,7 +7,6 @@ import type {
   Conversation,
   Message,
   MessagingParticipant,
-  PagingMetadata,
   VectorImage,
 } from "./types.js";
 
@@ -187,12 +186,7 @@ function parseConversation(raw: RawConversation): Conversation {
   };
 }
 
-function parseConversationsResponse(response: GraphQLConversationsResponse): {
-  conversations: Conversation[];
-  metadata?: PagingMetadata;
-  syncToken?: string;
-  deletedConversationURNs?: string[];
-} {
+function parseConversationsResponse(response: GraphQLConversationsResponse): ConversationsResult {
   const data =
     response.data?.messengerConversationsBySyncToken ??
     response.data?.messengerConversations ??
@@ -212,6 +206,10 @@ function parseConversationsResponse(response: GraphQLConversationsResponse): {
         }
       : undefined,
     syncToken: data.metadata?.newSyncToken,
+    nextCursor:
+      data.metadata && "nextCursor" in data.metadata && typeof data.metadata.nextCursor === "string"
+        ? data.metadata.nextCursor
+        : null,
     deletedConversationURNs:
       data.metadata?.deletedUrns
         ?.map((item) => item.conversation?.entityUrn)
@@ -243,6 +241,30 @@ export async function getConversationsBefore(
     mailboxUrn,
     count: String(PAGINATION_DEFAULTS.conversationsCount),
     lastUpdatedBefore: String(timestamp),
+    query: "(predicateUnions:List((conversationCategoryPredicate:(category:PRIMARY_INBOX))))",
+  };
+  const response = await newMessagingGraphQLRequest(
+    client.cookies,
+    "messengerConversationsByCursor",
+    variables,
+    {
+      pageInstance: client.pageInstance,
+      xLiTrack: client.xLiTrack,
+      allowRedirects: false,
+    },
+  ).doJSON<GraphQLConversationsResponse>();
+  return parseConversationsResponse(response);
+}
+
+export async function getConversationsWithCursor(
+  client: LinkedInClient,
+  nextCursor: string,
+): Promise<ConversationsResult> {
+  const mailboxUrn = await client.getMailboxUrn();
+  const variables = {
+    mailboxUrn,
+    count: String(PAGINATION_DEFAULTS.conversationsCount),
+    nextCursor,
     query: "(predicateUnions:List((conversationCategoryPredicate:(category:PRIMARY_INBOX))))",
   };
   const response = await newMessagingGraphQLRequest(
