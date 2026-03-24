@@ -33,6 +33,7 @@ export interface ConversationObservationPayload {
   service?: string | null;
   topic?: string | null;
   unreadCount?: number | null;
+  removalReason?: string | null;
   participants: ConversationParticipantInput[];
 }
 

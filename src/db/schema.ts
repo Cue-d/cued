@@ -205,6 +205,7 @@ export const conversations = sqliteTable("conversations", {
   nativeConversationKey: text("native_conversation_key"),
   type: textEnum("type", CONVERSATION_TYPE_VALUES).notNull(),
   isActive: integer("is_active").notNull(),
+  removalReason: text("removal_reason"),
   service: text("service"),
   name: text("name"),
   topic: text("topic"),

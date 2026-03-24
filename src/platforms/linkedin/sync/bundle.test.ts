@@ -297,6 +297,15 @@ describe("buildLinkedInSyncBundle", () => {
       ),
     ).toBe(true);
     expect(
+      bundle.rawEvents.find(
+        (event) => event.entityKind === "conversation" && event.eventKind === "removed",
+      )?.payload,
+    ).toEqual(
+      expect.objectContaining({
+        removalReason: "deleted",
+      }),
+    );
+    expect(
       bundle.rawEvents.some(
         (event) => event.entityKind === "timeline_event" && event.eventKind === "system_message",
       ),

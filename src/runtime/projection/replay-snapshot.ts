@@ -28,7 +28,11 @@ export type CanonicalProjectionSnapshot = {
     sourceConversationKey: string;
     type: string;
     isActive: number;
+    removalReason: string | null;
     name: string | null;
+    lastMessageId: string | null;
+    lastMessageAt: number | null;
+    lastMessagePreview: string | null;
     participantNames: string | null;
     unreadCount: number;
   }>;
@@ -130,11 +134,15 @@ export function readCanonicalProjectionSnapshot(db: CuedDatabase): CanonicalProj
     source_conversation_key: string;
     type: string;
     is_active: number;
+    removal_reason: string | null;
     name: string | null;
+    last_message_id: string | null;
+    last_message_at: number | null;
+    last_message_preview: string | null;
     participant_names: string | null;
     unread_count: number;
   }>(sql`
-    SELECT id, platform, account_key, source_conversation_key, type, is_active, name, participant_names, unread_count
+    SELECT id, platform, account_key, source_conversation_key, type, is_active, removal_reason, name, last_message_id, last_message_at, last_message_preview, participant_names, unread_count
     FROM conversations
     ORDER BY id ASC
   `);
@@ -255,7 +263,11 @@ export function readCanonicalProjectionSnapshot(db: CuedDatabase): CanonicalProj
       sourceConversationKey: conversation.source_conversation_key,
       type: conversation.type,
       isActive: conversation.is_active,
+      removalReason: conversation.removal_reason,
       name: conversation.name,
+      lastMessageId: conversation.last_message_id,
+      lastMessageAt: conversation.last_message_at,
+      lastMessagePreview: conversation.last_message_preview,
       participantNames: conversation.participant_names,
       unreadCount: conversation.unread_count,
     })),

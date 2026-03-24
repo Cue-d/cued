@@ -178,6 +178,7 @@ describe("buildLinkedInRawEventsFromRealtimeEnvelope", () => {
       )?.payload,
     ).toEqual(
       expect.objectContaining({
+        removalReason: "archived",
         participants: expect.arrayContaining([
           expect.objectContaining({
             sourceEntityKey: "linkedin:urn:li:member:SELF123",
