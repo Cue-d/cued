@@ -11,7 +11,6 @@ import type {
   ConnectionKind,
   IntegrationAuthState,
   IntegrationLaunchStrategy,
-  MergeDecisionType,
   Platform,
   ProviderRawEventInput,
   RawEventEntityKind,
@@ -19,7 +18,12 @@ import type {
   SyncRunStatus,
   SyncRunType,
 } from "../core/types/provider.js";
+import {
+  normalizeRawEventProvenance,
+  resolveRawEventNormalizedSchema,
+} from "../core/types/provider.js";
 import { normalizePhone, toE164 } from "../core/utils/phone.js";
+import { assertCanonicalNormalizedSchemaForWrite } from "../runtime/projection/events.js";
 import type {
   PendingRollbackState,
   UpdateErrorState,
@@ -35,7 +39,6 @@ const {
   attachmentContent,
   appSettings,
   authSessions,
-  contactMergeDecisions,
   contactHandles,
   contactSources,
   contacts,
@@ -424,6 +427,30 @@ function chunkArray<T>(items: readonly T[], size: number): T[][] {
   return chunks;
 }
 
+function buildRawEventValues(event: RawEventInput) {
+  const provenance = normalizeRawEventProvenance(event.provenance);
+  const normalizedSchema = resolveRawEventNormalizedSchema(event);
+  assertCanonicalNormalizedSchemaForWrite(normalizedSchema);
+  return {
+    id: event.id,
+    platform: event.platform,
+    accountKey: event.accountKey,
+    entityKind: event.entityKind,
+    eventKind: event.eventKind,
+    externalEventId: event.externalEventId ?? null,
+    externalEntityId: event.externalEntityId ?? null,
+    conversationExternalId: event.conversationExternalId ?? null,
+    occurredAt: event.occurredAt ?? null,
+    observedAt: event.observedAt,
+    cursorJson: safeStringifyJson(event.cursor),
+    dedupeKey: event.dedupeKey,
+    payloadJson: safeStringifyJson(event.payload) ?? "null",
+    normalizedSchema,
+    provenanceJson: safeStringifyJson(provenance),
+    sourceVersion: event.sourceVersion ?? null,
+  };
+}
+
 export class CuedDatabase {
   private readonly sqlite: Database.Database;
   private readonly db: LocalDrizzleDatabase;
@@ -455,11 +482,11 @@ export class CuedDatabase {
         .get() as { 1: number } | undefined;
 
       if (alreadyApplied) {
-        const candidateIds = [migration.id, ...(migration.legacyIds ?? [])];
-        const placeholders = candidateIds.map(() => "?").join(", ");
+        const migrationIds = [migration.id, ...(migration.legacyIds ?? [])];
+        const placeholders = migrationIds.map(() => "?").join(", ");
         const applied = this.sqlite
           .prepare(`SELECT id FROM schema_migrations WHERE id IN (${placeholders}) LIMIT 1`)
-          .get(...candidateIds) as { id: string } | undefined;
+          .get(...migrationIds) as { id: string } | undefined;
         if (applied) {
           continue;
         }
@@ -467,7 +494,11 @@ export class CuedDatabase {
 
       this.sqlite.exec("BEGIN");
       try {
-        this.sqlite.exec(migration.sql);
+        if (migration.apply) {
+          migration.apply(this.sqlite);
+        } else if (migration.sql) {
+          this.sqlite.exec(migration.sql);
+        }
         this.sqlite
           .prepare("INSERT OR IGNORE INTO schema_migrations (id, applied_at) VALUES (?, ?)")
           .run(migration.id, now());
@@ -770,7 +801,6 @@ export class CuedDatabase {
     source_cursor_json: string | null;
     sync_mode: SyncMode;
     raw_ingest_watermark: number;
-    projection_watermark: number;
     last_success_at: number | null;
     last_error_summary: string | null;
   } | null {
@@ -780,7 +810,6 @@ export class CuedDatabase {
           source_cursor_json: syncCheckpoints.sourceCursorJson,
           sync_mode: syncCheckpoints.syncMode,
           raw_ingest_watermark: syncCheckpoints.rawIngestWatermark,
-          projection_watermark: syncCheckpoints.projectionWatermark,
           last_success_at: syncCheckpoints.lastSuccessAt,
           last_error_summary: syncCheckpoints.lastErrorSummary,
         })
@@ -793,7 +822,6 @@ export class CuedDatabase {
             source_cursor_json: string | null;
             sync_mode: SyncMode;
             raw_ingest_watermark: number;
-            projection_watermark: number;
             last_success_at: number | null;
             last_error_summary: string | null;
           }
@@ -802,7 +830,15 @@ export class CuedDatabase {
   }
 
   resetSource(platform: Platform): number {
-    return this.db.transaction((tx) => {
+    const removed = this.db.transaction((tx) => {
+      const removedSourceAccounts = tx
+        .delete(sourceAccounts)
+        .where(eq(sourceAccounts.platform, platform))
+        .run().changes;
+      const removedRawEvents = tx
+        .delete(rawEvents)
+        .where(eq(rawEvents.platform, platform))
+        .run().changes;
       const removedRuns = tx.delete(syncRuns).where(eq(syncRuns.platform, platform)).run().changes;
       const removedErrors = tx
         .delete(syncRunErrors)
@@ -815,12 +851,25 @@ export class CuedDatabase {
       const removedSlackBackfillProofs =
         platform === "slack" ? tx.delete(slackBackfillProofs).run().changes : 0;
       return (
+        Number(removedSourceAccounts) +
+        Number(removedRawEvents) +
         Number(removedRuns) +
         Number(removedErrors) +
         Number(removedCheckpoints) +
         Number(removedSlackBackfillProofs)
       );
     });
+
+    // Rebuild canonical state from the remaining raw event log so merged contacts
+    // and other cross-platform projections stay internally consistent.
+    this.clearProjectedState();
+    this.upsertProjectionState({
+      projectionWatermark: 0,
+      lastProjectedAt: null,
+      lastRebuildAt: null,
+    });
+
+    return removed;
   }
 
   listSlackBackfillProofs(accountKey: string): SlackBackfillProofRow[] {
@@ -966,31 +1015,6 @@ export class CuedDatabase {
         },
       })
       .run();
-  }
-
-  insertMergeDecision(input: {
-    decisionType: MergeDecisionType;
-    leftContactId?: string | null;
-    rightContactId?: string | null;
-    canonicalContactId?: string | null;
-    reason?: string | null;
-    createdBy: string;
-  }): string {
-    const id = randomUUID();
-    this.db
-      .insert(contactMergeDecisions)
-      .values({
-        id,
-        decisionType: input.decisionType,
-        leftContactId: input.leftContactId ?? null,
-        rightContactId: input.rightContactId ?? null,
-        canonicalContactId: input.canonicalContactId ?? null,
-        reason: input.reason ?? null,
-        createdBy: input.createdBy,
-        createdAt: now(),
-      })
-      .run();
-    return id;
   }
 
   getOverview(): {
@@ -2809,7 +2833,6 @@ export class CuedDatabase {
     syncMode: SyncMode;
     sourceCursor?: unknown;
     rawIngestWatermark?: number;
-    projectionWatermark?: number;
     lastSuccessAt?: number | null;
     lastErrorSummary?: string | null;
   }): void {
@@ -2820,7 +2843,6 @@ export class CuedDatabase {
       accountKey: input.accountKey,
       sourceCursorJson: safeStringifyJson(input.sourceCursor),
       rawIngestWatermark: input.rawIngestWatermark ?? 0,
-      projectionWatermark: input.projectionWatermark ?? 0,
       syncMode: input.syncMode,
       lastFullSyncAt: input.lastSuccessAt ?? null,
       lastSuccessAt: input.lastSuccessAt ?? null,
@@ -2838,7 +2860,6 @@ export class CuedDatabase {
         set: {
           sourceCursorJson: values.sourceCursorJson,
           rawIngestWatermark: values.rawIngestWatermark,
-          projectionWatermark: values.projectionWatermark,
           syncMode: values.syncMode,
           lastFullSyncAt:
             input.syncMode === "full"
@@ -2869,22 +2890,7 @@ export class CuedDatabase {
   insertRawEvent(event: RawEventInput): boolean {
     const result = this.db
       .insert(rawEvents)
-      .values({
-        id: event.id,
-        platform: event.platform,
-        accountKey: event.accountKey,
-        entityKind: event.entityKind,
-        eventKind: event.eventKind,
-        externalEventId: event.externalEventId ?? null,
-        externalEntityId: event.externalEntityId ?? null,
-        conversationExternalId: event.conversationExternalId ?? null,
-        occurredAt: event.occurredAt ?? null,
-        observedAt: event.observedAt,
-        cursorJson: safeStringifyJson(event.cursor),
-        dedupeKey: event.dedupeKey,
-        payloadJson: safeStringifyJson(event.payload) ?? "null",
-        sourceVersion: event.sourceVersion ?? null,
-      })
+      .values(buildRawEventValues(event))
       .onConflictDoNothing()
       .run();
     return Number(result.changes) > 0;
@@ -2928,24 +2934,7 @@ export class CuedDatabase {
 
       for (const chunk of chunkArray(uniqueEvents, WRITE_BATCH_SIZE)) {
         tx.insert(rawEvents)
-          .values(
-            chunk.map((event) => ({
-              id: event.id,
-              platform: event.platform,
-              accountKey: event.accountKey,
-              entityKind: event.entityKind,
-              eventKind: event.eventKind,
-              externalEventId: event.externalEventId ?? null,
-              externalEntityId: event.externalEntityId ?? null,
-              conversationExternalId: event.conversationExternalId ?? null,
-              occurredAt: event.occurredAt ?? null,
-              observedAt: event.observedAt,
-              cursorJson: safeStringifyJson(event.cursor),
-              dedupeKey: event.dedupeKey,
-              payloadJson: safeStringifyJson(event.payload) ?? "null",
-              sourceVersion: event.sourceVersion ?? null,
-            })),
-          )
+          .values(chunk.map((event) => buildRawEventValues(event)))
           .onConflictDoNothing()
           .run();
       }
@@ -3006,6 +2995,8 @@ export class CuedDatabase {
     account_key: string;
     entity_kind: RawEventEntityKind;
     event_kind: string;
+    normalized_schema: string | null;
+    provenance_json: string | null;
     observed_at: number;
     payload_json: string;
   }> {
@@ -3016,6 +3007,8 @@ export class CuedDatabase {
         account_key: rawEvents.accountKey,
         entity_kind: rawEvents.entityKind,
         event_kind: rawEvents.eventKind,
+        normalized_schema: rawEvents.normalizedSchema,
+        provenance_json: rawEvents.provenanceJson,
         observed_at: rawEvents.observedAt,
         payload_json: rawEvents.payloadJson,
       })
@@ -3027,6 +3020,8 @@ export class CuedDatabase {
       account_key: string;
       entity_kind: RawEventEntityKind;
       event_kind: string;
+      normalized_schema: string | null;
+      provenance_json: string | null;
       observed_at: number;
       payload_json: string;
     }>;
@@ -3042,6 +3037,9 @@ export class CuedDatabase {
     account_key: string;
     entity_kind: RawEventEntityKind;
     event_kind: string;
+    normalized_schema: string | null;
+    provenance_json: string | null;
+    source_version: string | null;
     observed_at: number;
     payload_json: string;
   }> {
@@ -3055,6 +3053,9 @@ export class CuedDatabase {
           account_key,
           entity_kind,
           event_kind,
+          normalized_schema,
+          provenance_json,
+          source_version,
           observed_at,
           payload_json
         FROM raw_events
@@ -3070,6 +3071,9 @@ export class CuedDatabase {
       account_key: string;
       entity_kind: RawEventEntityKind;
       event_kind: string;
+      normalized_schema: string | null;
+      provenance_json: string | null;
+      source_version: string | null;
       observed_at: number;
       payload_json: string;
     }>;
@@ -3117,6 +3121,9 @@ export class CuedDatabase {
     account_key: string;
     entity_kind: RawEventEntityKind;
     event_kind: string;
+    normalized_schema: string | null;
+    provenance_json: string | null;
+    source_version: string | null;
     observed_at: number;
     payload_json: string;
   }> {
@@ -3134,6 +3141,9 @@ export class CuedDatabase {
           account_key,
           entity_kind,
           event_kind,
+          normalized_schema,
+          provenance_json,
+          source_version,
           observed_at,
           payload_json
         FROM raw_events
@@ -3150,6 +3160,9 @@ export class CuedDatabase {
       account_key: string;
       entity_kind: RawEventEntityKind;
       event_kind: string;
+      normalized_schema: string | null;
+      provenance_json: string | null;
+      source_version: string | null;
       observed_at: number;
       payload_json: string;
     }>;

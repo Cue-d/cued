@@ -62,6 +62,7 @@ interface SignalRealtimeSessionOptions {
 export interface SignalRealtimeSessionLike {
   start(): void;
   stop(): void;
+  stopAndWait(): Promise<void>;
   getStatus(): SignalRealtimeStatus;
   isConnected(): boolean;
   sendMessage(
@@ -152,6 +153,7 @@ export class SignalRealtimeSession implements SignalRealtimeSessionLike {
   private reconnectTimer: NodeJS.Timeout | null = null;
   private shouldReconnect = false;
   private hasEverConnected = false;
+  private stopping = false;
   private status: SignalRealtimeStatus;
 
   constructor(options: SignalRealtimeSessionOptions) {
@@ -188,15 +190,26 @@ export class SignalRealtimeSession implements SignalRealtimeSessionLike {
   }
 
   stop(): void {
+    void this.stopAndWait();
+  }
+
+  async stopAndWait(): Promise<void> {
     this.shouldReconnect = false;
     this.clearReconnectTimer();
     this.rejectPendingRequests("Signal realtime session stopped");
-    this.disposeChild();
-    this.setStatus({
-      state: "stopped",
-      connectedAt: null,
-      lastSessionError: null,
-    });
+    const child = this.child;
+    if (!child) {
+      this.stopping = false;
+      this.setStatus({
+        state: "stopped",
+        connectedAt: null,
+        lastSessionError: null,
+      });
+      return;
+    }
+
+    this.stopping = true;
+    await this.waitForChildExit(child);
   }
 
   getStatus(): SignalRealtimeStatus {
@@ -366,9 +379,20 @@ export class SignalRealtimeSession implements SignalRealtimeSessionLike {
 
   private handleExit(error: Error): void {
     const wasActive = this.status.state !== "stopped";
+    const intentionalStop = this.stopping;
+    this.stopping = false;
     this.rejectPendingRequests(error.message);
     this.disposeChild();
     if (!wasActive) {
+      return;
+    }
+
+    if (intentionalStop) {
+      this.setStatus({
+        state: "stopped",
+        connectedAt: null,
+        lastSessionError: null,
+      });
       return;
     }
 
@@ -421,6 +445,30 @@ export class SignalRealtimeSession implements SignalRealtimeSessionLike {
       }
       this.child = null;
     }
+  }
+
+  private async waitForChildExit(child: ChildProcess): Promise<void> {
+    if (child.exitCode != null || child.signalCode != null) {
+      return;
+    }
+
+    await new Promise<void>((resolve) => {
+      const finish = () => {
+        clearTimeout(timeout);
+        resolve();
+      };
+      const timeout = setTimeout(() => {
+        if (child.exitCode == null && child.signalCode == null) {
+          child.kill("SIGKILL");
+        }
+      }, 5_000);
+
+      child.once("exit", finish);
+      child.once("error", finish);
+      if (!child.killed) {
+        child.kill("SIGTERM");
+      }
+    });
   }
 
   private clearReconnectTimer(): void {
@@ -548,6 +596,15 @@ export class SignalRealtimeSupervisor {
 
   getSession(accountKey: string): SignalRealtimeSessionLike | null {
     return this.sessions.get(accountKey)?.session ?? null;
+  }
+
+  async stopSession(accountKey: string): Promise<void> {
+    const session = this.sessions.get(accountKey)?.session;
+    if (!session) {
+      return;
+    }
+
+    await session.stopAndWait();
   }
 
   async waitForConnected(

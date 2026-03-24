@@ -2,10 +2,8 @@ import { randomUUID } from "node:crypto";
 import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import Database from "better-sqlite3";
 import { afterEach, describe, expect, it } from "vitest";
 import { CuedDatabase } from "./database.js";
-import { MIGRATIONS } from "./migrations.js";
 
 describe("CuedDatabase", () => {
   const tempDirs: string[] = [];
@@ -104,6 +102,7 @@ describe("CuedDatabase", () => {
     return (
       db as unknown as {
         sqlite: {
+          exec: (sql: string) => void;
           prepare: (sql: string) => {
             run: (...params: unknown[]) => void;
             get: (...params: unknown[]) => unknown;
@@ -128,7 +127,7 @@ describe("CuedDatabase", () => {
     db.close();
   });
 
-  it("stores daemon state and manual merge decisions", () => {
+  it("stores daemon state", () => {
     const db = createDb();
 
     db.upsertDaemonState({
@@ -150,15 +149,6 @@ describe("CuedDatabase", () => {
       details_json: JSON.stringify({ source: "test" }),
     });
 
-    const id = db.insertMergeDecision({
-      decisionType: "merge",
-      leftContactId: "contact-a",
-      rightContactId: "contact-b",
-      canonicalContactId: "contact-a",
-      createdBy: "cli",
-    });
-
-    expect(id).toBeTruthy();
     db.close();
   });
 
@@ -599,363 +589,6 @@ describe("CuedDatabase", () => {
     db.close();
   });
 
-  it("migrates legacy sync run timing into queued and started timestamps", () => {
-    const dir = mkdtempSync(join(tmpdir(), "cued-v2-db-legacy-sync-runs-"));
-    tempDirs.push(dir);
-    const dbPath = join(dir, "local.db");
-    const sqlite = new Database(dbPath);
-
-    sqlite.exec(`
-      CREATE TABLE schema_migrations (
-        id TEXT PRIMARY KEY,
-        applied_at INTEGER NOT NULL
-      );
-
-      CREATE TABLE sync_runs (
-        id TEXT PRIMARY KEY,
-        platform TEXT,
-        account_key TEXT,
-        run_type TEXT NOT NULL,
-        status TEXT NOT NULL,
-        trigger TEXT NOT NULL,
-        started_at INTEGER NOT NULL,
-        finished_at INTEGER,
-        details_json TEXT
-      );
-
-      CREATE TABLE sync_run_errors (
-        id TEXT PRIMARY KEY,
-        sync_run_id TEXT NOT NULL REFERENCES sync_runs(id) ON DELETE CASCADE,
-        platform TEXT,
-        account_key TEXT,
-        error_code TEXT,
-        error_message TEXT NOT NULL,
-        details_json TEXT,
-        created_at INTEGER NOT NULL
-      );
-    `);
-
-    const appliedAt = 1_700_000_000_000;
-    const syncRunMigrationId = "0011_sync_run_timing_v2";
-    for (const migration of MIGRATIONS) {
-      if (migration.id === syncRunMigrationId) {
-        continue;
-      }
-      sqlite
-        .prepare("INSERT INTO schema_migrations (id, applied_at) VALUES (?, ?)")
-        .run(migration.id, appliedAt);
-    }
-
-    sqlite
-      .prepare(
-        `
-          INSERT INTO sync_runs (
-            id, platform, account_key, run_type, status, trigger, started_at, finished_at, details_json
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-        `,
-      )
-      .run(
-        "queued-run",
-        "signal",
-        "default",
-        "sync",
-        "queued",
-        "manual",
-        100,
-        null,
-        '{"source":"signal"}',
-      );
-    sqlite
-      .prepare(
-        `
-          INSERT INTO sync_runs (
-            id, platform, account_key, run_type, status, trigger, started_at, finished_at, details_json
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-        `,
-      )
-      .run(
-        "completed-run",
-        "whatsapp",
-        "default",
-        "sync",
-        "completed",
-        "manual",
-        200,
-        250,
-        '{"source":"whatsapp"}',
-      );
-    sqlite
-      .prepare(
-        `
-          INSERT INTO sync_run_errors (
-            id, sync_run_id, platform, account_key, error_code, error_message, details_json, created_at
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-        `,
-      )
-      .run("error-1", "completed-run", "whatsapp", "default", "E_SYNC", "boom", "{}", 260);
-    sqlite.close();
-
-    const db = new CuedDatabase(dbPath);
-    db.migrate();
-
-    const migratedSqlite = (
-      db as unknown as {
-        sqlite: {
-          prepare: (sql: string) => {
-            all: () => Array<Record<string, unknown>>;
-          };
-        };
-      }
-    ).sqlite;
-    const migratedRuns = migratedSqlite
-      .prepare(
-        `
-          SELECT id, status, queued_at, started_at, finished_at
-          FROM sync_runs
-          ORDER BY id ASC
-        `,
-      )
-      .all() as Array<{
-      id: string;
-      status: string;
-      queued_at: number;
-      started_at: number | null;
-      finished_at: number | null;
-    }>;
-    const migratedErrors = migratedSqlite
-      .prepare("SELECT id, sync_run_id FROM sync_run_errors ORDER BY id ASC")
-      .all() as Array<{ id: string; sync_run_id: string }>;
-
-    expect(migratedRuns).toEqual([
-      {
-        id: "completed-run",
-        status: "completed",
-        queued_at: 200,
-        started_at: 200,
-        finished_at: 250,
-      },
-      {
-        id: "queued-run",
-        status: "queued",
-        queued_at: 100,
-        started_at: null,
-        finished_at: null,
-      },
-    ]);
-    expect(migratedErrors).toEqual([{ id: "error-1", sync_run_id: "completed-run" }]);
-
-    db.close();
-  });
-
-  it("accepts legacy migration ids after a migration rename", () => {
-    const dir = mkdtempSync(join(tmpdir(), "cued-v2-db-legacy-migration-"));
-    tempDirs.push(dir);
-    const dbPath = join(dir, "local.db");
-    const legacySqlite = new Database(dbPath);
-
-    legacySqlite.exec(`
-      CREATE TABLE schema_migrations (
-        id TEXT PRIMARY KEY,
-        applied_at INTEGER NOT NULL
-      );
-
-      CREATE TABLE message_attachments (
-        id TEXT PRIMARY KEY,
-        message_id TEXT NOT NULL,
-        platform TEXT NOT NULL,
-        account_key TEXT NOT NULL,
-        source_attachment_key TEXT NOT NULL,
-        kind TEXT,
-        mime_type TEXT,
-        filename TEXT,
-        title TEXT,
-        local_path TEXT,
-        remote_url TEXT,
-        size_bytes INTEGER,
-        text_content TEXT,
-        metadata_json TEXT,
-        created_at INTEGER NOT NULL,
-        updated_at INTEGER NOT NULL,
-        access_kind TEXT,
-        access_ref_json TEXT,
-        preview_ref_json TEXT,
-        availability_status TEXT,
-        provider_metadata_json TEXT,
-        UNIQUE(platform, account_key, source_attachment_key)
-      );
-    `);
-    legacySqlite
-      .prepare("INSERT INTO schema_migrations (id, applied_at) VALUES (?, ?)")
-      .run("0011_attachment_access_and_content", Date.now());
-    legacySqlite.close();
-
-    const db = new CuedDatabase(dbPath);
-    expect(() => db.migrate()).not.toThrow();
-
-    const migratedIds = sqlite(db)
-      .prepare("SELECT id FROM schema_migrations WHERE id LIKE '001%attachment_access_and_content'")
-      .all() as Array<{ id: string }>;
-    expect(migratedIds).toEqual([{ id: "0011_attachment_access_and_content" }]);
-
-    db.close();
-  });
-
-  it("realigns legacy message FTS rows onto message rowids during migration", () => {
-    const dir = mkdtempSync(join(tmpdir(), "cued-v2-db-legacy-message-fts-"));
-    tempDirs.push(dir);
-    const dbPath = join(dir, "local.db");
-    const legacySqlite = new Database(dbPath);
-
-    legacySqlite.exec(`
-      CREATE TABLE schema_migrations (
-        id TEXT PRIMARY KEY,
-        applied_at INTEGER NOT NULL
-      );
-
-      CREATE TABLE contacts (
-        id TEXT PRIMARY KEY,
-        name TEXT
-      );
-
-      CREATE TABLE conversations (
-        id TEXT PRIMARY KEY,
-        name TEXT,
-        participant_names TEXT
-      );
-
-      CREATE TABLE messages (
-        id TEXT PRIMARY KEY,
-        conversation_id TEXT NOT NULL,
-        sender_contact_id TEXT,
-        sender_name TEXT,
-        conversation_name TEXT,
-        platform_message_id TEXT,
-        content TEXT,
-        attachment_count INTEGER DEFAULT 0,
-        reaction_count INTEGER DEFAULT 0,
-        updated_at INTEGER NOT NULL
-      );
-
-      CREATE TABLE message_attachments (
-        id TEXT PRIMARY KEY,
-        message_id TEXT NOT NULL,
-        filename TEXT,
-        title TEXT,
-        text_content TEXT,
-        updated_at INTEGER NOT NULL
-      );
-
-      CREATE TABLE conversation_participants (
-        id TEXT PRIMARY KEY,
-        conversation_id TEXT NOT NULL,
-        contact_id TEXT,
-        source_participant_key TEXT,
-        participant_name TEXT,
-        is_active INTEGER NOT NULL DEFAULT 1
-      );
-
-      CREATE TABLE timeline_events (
-        id TEXT PRIMARY KEY,
-        actor_contact_id TEXT,
-        actor_name TEXT
-      );
-
-      CREATE TABLE message_reactions (
-        id TEXT PRIMARY KEY,
-        message_id TEXT NOT NULL,
-        reactor_contact_id TEXT,
-        reactor_name TEXT,
-        is_active INTEGER NOT NULL DEFAULT 1
-      );
-
-      CREATE VIRTUAL TABLE messages_fts USING fts5(
-        message_id UNINDEXED,
-        sender_name,
-        conversation_name,
-        participant_names,
-        attachment_text,
-        content
-      );
-
-      CREATE VIEW message_fts_source AS
-      SELECT
-        m.id AS message_id,
-        COALESCE(m.sender_name, '') AS sender_name,
-        COALESCE(m.conversation_name, '') AS conversation_name,
-        COALESCE(conv.participant_names, '') AS participant_names,
-        '' AS attachment_text,
-        COALESCE(m.content, '') AS content
-      FROM messages m
-      JOIN conversations conv ON conv.id = m.conversation_id;
-    `);
-
-    const appliedAt = 1_700_000_000_000;
-    const ftsMigrationId = "0014_messages_fts_rowid_alignment";
-    for (const migration of MIGRATIONS) {
-      if (migration.id === ftsMigrationId) {
-        continue;
-      }
-      legacySqlite
-        .prepare("INSERT INTO schema_migrations (id, applied_at) VALUES (?, ?)")
-        .run(migration.id, appliedAt);
-    }
-
-    legacySqlite
-      .prepare("INSERT INTO conversations (id, name, participant_names) VALUES (?, ?, ?)")
-      .run("conversation-1", "Eng", "Ava Chen");
-    legacySqlite
-      .prepare(
-        `
-          INSERT INTO messages (
-            rowid, id, conversation_id, sender_name, conversation_name, platform_message_id, content, updated_at
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-        `,
-      )
-      .run(77, "message-1", "conversation-1", "Ava Chen", "Eng", "msg-1", "legacy body", 100);
-    legacySqlite
-      .prepare(
-        `
-          INSERT INTO messages_fts (
-            message_id, sender_name, conversation_name, participant_names, attachment_text, content
-          ) VALUES (?, ?, ?, ?, ?, ?)
-        `,
-      )
-      .run("message-1", "Ava Chen", "Eng", "Ava Chen", "", "legacy body");
-    legacySqlite.close();
-
-    const db = new CuedDatabase(dbPath);
-    db.migrate();
-
-    const row = sqlite(db)
-      .prepare(
-        `
-          SELECT
-            m.rowid AS message_rowid,
-            f.rowid AS fts_rowid,
-            f.message_id,
-            f.content
-          FROM messages m
-          JOIN messages_fts f ON f.message_id = m.id
-          WHERE m.id = ?
-        `,
-      )
-      .get("message-1") as {
-      message_rowid: number;
-      fts_rowid: number;
-      message_id: string;
-      content: string;
-    };
-
-    expect(row).toEqual({
-      message_rowid: 77,
-      fts_rowid: 77,
-      message_id: "message-1",
-      content: "legacy body",
-    });
-
-    db.close();
-  });
-
   it("stores checkpoints and raw events", () => {
     const db = createDb();
 
@@ -970,7 +603,6 @@ describe("CuedDatabase", () => {
       syncMode: "full",
       sourceCursor: { snapshotAt: 123 },
       rawIngestWatermark: 5,
-      projectionWatermark: 3,
       lastSuccessAt: 1_700_000_000_000,
     });
     db.upsertCheckpoint({
@@ -979,7 +611,6 @@ describe("CuedDatabase", () => {
       syncMode: "incremental",
       sourceCursor: { snapshotAt: 456 },
       rawIngestWatermark: 6,
-      projectionWatermark: 4,
       lastSuccessAt: 1_700_000_000_500,
       lastErrorSummary: "none",
     });
@@ -1001,10 +632,10 @@ describe("CuedDatabase", () => {
       source_cursor_json: JSON.stringify({ snapshotAt: 456 }),
       sync_mode: "incremental",
       raw_ingest_watermark: 6,
-      projection_watermark: 4,
       last_success_at: 1_700_000_000_500,
       last_error_summary: "none",
     });
+    expect(db.getCheckpoint("contacts", "local")).not.toHaveProperty("projection_watermark");
     expect(db.listCheckpointSummary()).toEqual([
       {
         platform: "contacts",
@@ -1019,7 +650,6 @@ describe("CuedDatabase", () => {
       source_cursor_json: JSON.stringify({ snapshotAt: 456 }),
       sync_mode: "incremental",
       raw_ingest_watermark: 6,
-      projection_watermark: 4,
       last_success_at: 1_700_000_000_500,
       last_error_summary: "sync failed",
     });
@@ -1031,6 +661,8 @@ describe("CuedDatabase", () => {
         account_key: "local",
         entity_kind: "contact",
         event_kind: "observed",
+        normalized_schema: "contact.observed@1",
+        provenance_json: null,
         observed_at: 1_700_000_000_000,
         payload_json: JSON.stringify({ hello: "world" }),
       },
@@ -1048,6 +680,354 @@ describe("CuedDatabase", () => {
       max_raw_event_rowid: 1,
       pending_raw_events: 1,
     });
+    expect(
+      sqlite(db)
+        .prepare("SELECT COUNT(*) AS count FROM projection_state WHERE singleton_key = 'global'")
+        .get(),
+    ).toEqual({ count: 1 });
+
+    db.close();
+  });
+
+  it("stores source version separately from provenance metadata", () => {
+    const db = createDb();
+
+    db.insertRawEvent({
+      id: "raw-event-source-version",
+      platform: "linkedin",
+      accountKey: "default",
+      entityKind: "message",
+      eventKind: "created",
+      observedAt: 1_710_000_000_000,
+      dedupeKey: "linkedin:source-version",
+      payload: {
+        sourceMessageKey: "msg-source-version",
+        sourceConversationKey: "thread-source-version",
+        senderSourceKey: "linkedin:member:ava",
+        sentAt: 1_710_000_000_000,
+        content: "hello",
+      },
+      sourceVersion: "linkedin-v7",
+      provenance: {
+        acquisitionMode: "realtime",
+        providerApiVersion: "2026-03",
+        adapterVersion: "linkedin-adapter@7",
+      },
+    });
+
+    const row = sqlite(db)
+      .prepare(
+        `
+          SELECT source_version, provenance_json
+          FROM raw_events
+          WHERE id = ?
+        `,
+      )
+      .get("raw-event-source-version") as {
+      source_version: string | null;
+      provenance_json: string | null;
+    };
+
+    expect(row).toEqual({
+      source_version: "linkedin-v7",
+      provenance_json: JSON.stringify({
+        providerApiVersion: "2026-03",
+        adapterVersion: "linkedin-adapter@7",
+        acquisitionMode: "realtime",
+      }),
+    });
+
+    db.close();
+  });
+
+  it("upgrades existing databases with refactor columns and lifecycle state", () => {
+    const dir = mkdtempSync(join(tmpdir(), "cued-v2-upgrade-db-"));
+    tempDirs.push(dir);
+    const db = new CuedDatabase(join(dir, "local.db"));
+    const sql = sqlite(db);
+
+    sql.exec(`
+      CREATE TABLE schema_migrations (
+        id TEXT PRIMARY KEY,
+        applied_at INTEGER NOT NULL
+      )
+    `);
+    sql.exec(
+      `INSERT INTO schema_migrations (id, applied_at) VALUES ('0014_messages_fts_rowid_alignment', 1)`,
+    );
+    sql.exec(`
+      CREATE TABLE raw_events (
+        id TEXT PRIMARY KEY,
+        platform TEXT NOT NULL,
+        account_key TEXT NOT NULL,
+        entity_kind TEXT NOT NULL,
+        event_kind TEXT NOT NULL,
+        external_event_id TEXT,
+        external_entity_id TEXT,
+        conversation_external_id TEXT,
+        occurred_at INTEGER,
+        observed_at INTEGER NOT NULL,
+        cursor_json TEXT,
+        dedupe_key TEXT NOT NULL,
+        payload_json TEXT NOT NULL,
+        source_version TEXT,
+        UNIQUE(platform, account_key, dedupe_key)
+      )
+    `);
+    sql.exec(`
+      CREATE TABLE conversations (
+        id TEXT PRIMARY KEY,
+        platform TEXT NOT NULL,
+        account_key TEXT NOT NULL,
+        source_conversation_key TEXT NOT NULL,
+        native_conversation_key TEXT,
+        type TEXT NOT NULL,
+        subtype TEXT,
+        service TEXT,
+        name TEXT,
+        topic TEXT,
+        participant_names TEXT,
+        last_message_id TEXT,
+        last_message_at INTEGER,
+        last_message_preview TEXT,
+        unread_count INTEGER NOT NULL DEFAULT 0,
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL,
+        UNIQUE(platform, account_key, source_conversation_key)
+      )
+    `);
+    sql.exec(`
+      CREATE TABLE timeline_events (
+        id TEXT PRIMARY KEY,
+        platform TEXT NOT NULL,
+        account_key TEXT NOT NULL,
+        conversation_id TEXT NOT NULL,
+        source_event_key TEXT NOT NULL,
+        event_kind TEXT NOT NULL,
+        actor_contact_id TEXT,
+        actor_source_key TEXT,
+        actor_name TEXT,
+        subject_contact_id TEXT,
+        event_at INTEGER NOT NULL,
+        text TEXT,
+        metadata_json TEXT,
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL,
+        UNIQUE(platform, account_key, source_event_key)
+      )
+    `);
+    sql
+      .prepare(`
+        INSERT INTO conversations (
+          id, platform, account_key, source_conversation_key, native_conversation_key, type, subtype,
+          service, name, topic, participant_names, last_message_id, last_message_at, last_message_preview,
+          unread_count, created_at, updated_at
+        ) VALUES (?, 'linkedin', 'default', ?, NULL, 'dm', 'deleted', 'linkedin', 'Thread', NULL, '', NULL, NULL, NULL, 0, ?, ?)
+      `)
+      .run("legacy-conversation", "thread-1", 1, 1);
+
+    db.migrate();
+
+    const rawEventColumns = (
+      sql.prepare("PRAGMA table_info(raw_events)").all() as Array<{ name: string }>
+    ).map((column) => column.name);
+    const conversationColumns = (
+      sql.prepare("PRAGMA table_info(conversations)").all() as Array<{ name: string }>
+    ).map((column) => column.name);
+    const timelineColumns = (
+      sql.prepare("PRAGMA table_info(timeline_events)").all() as Array<{ name: string }>
+    ).map((column) => column.name);
+
+    expect(rawEventColumns).toEqual(
+      expect.arrayContaining(["normalized_schema", "provenance_json"]),
+    );
+    expect(conversationColumns).toContain("is_active");
+    expect(conversationColumns).toContain("removal_reason");
+    expect(timelineColumns).toContain("subject_source_key");
+    expect(
+      sql
+        .prepare("SELECT is_active, removal_reason FROM conversations WHERE id = ?")
+        .get("legacy-conversation"),
+    ).toEqual({ is_active: 0, removal_reason: "deleted" });
+
+    db.close();
+  });
+
+  it("repairs removal_reason for databases that already marked 0002 applied", () => {
+    const dir = mkdtempSync(join(tmpdir(), "cued-v2-removal-reason-repair-"));
+    tempDirs.push(dir);
+    const db = new CuedDatabase(join(dir, "local.db"));
+    const sql = sqlite(db);
+
+    sql.exec(`
+      CREATE TABLE schema_migrations (
+        id TEXT PRIMARY KEY,
+        applied_at INTEGER NOT NULL
+      )
+    `);
+    sql.exec(`
+      INSERT INTO schema_migrations (id, applied_at)
+      VALUES ('0001_bootstrap_current_schema', 1), ('0002_upgrade_existing_schema_columns', 2)
+    `);
+    sql.exec(`
+      CREATE TABLE conversations (
+        id TEXT PRIMARY KEY,
+        platform TEXT NOT NULL,
+        account_key TEXT NOT NULL,
+        source_conversation_key TEXT NOT NULL,
+        native_conversation_key TEXT,
+        type TEXT NOT NULL,
+        is_active INTEGER NOT NULL DEFAULT 1,
+        service TEXT,
+        name TEXT,
+        topic TEXT,
+        participant_names TEXT,
+        last_message_id TEXT,
+        last_message_at INTEGER,
+        last_message_preview TEXT,
+        unread_count INTEGER NOT NULL DEFAULT 0,
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL,
+        UNIQUE(platform, account_key, source_conversation_key)
+      )
+    `);
+
+    db.migrate();
+
+    const conversationColumns = (
+      sql.prepare("PRAGMA table_info(conversations)").all() as Array<{ name: string }>
+    ).map((column) => column.name);
+
+    expect(conversationColumns).toContain("removal_reason");
+    expect(
+      sql
+        .prepare("SELECT 1 FROM schema_migrations WHERE id = ?")
+        .get("0003_repair_conversation_removal_reason"),
+    ).toBeTruthy();
+
+    db.close();
+  });
+
+  it("repairs partially migrated legacy databases after the squash", () => {
+    const dir = mkdtempSync(join(tmpdir(), "cued-v2-partial-legacy-repair-"));
+    tempDirs.push(dir);
+    const db = new CuedDatabase(join(dir, "local.db"));
+    const sql = sqlite(db);
+
+    sql.exec(`
+      CREATE TABLE schema_migrations (
+        id TEXT PRIMARY KEY,
+        applied_at INTEGER NOT NULL
+      )
+    `);
+    sql.exec(`
+      INSERT INTO schema_migrations (id, applied_at)
+      VALUES ('0010_requestable_sync_capable_backfill', 1)
+    `);
+    sql.exec(`
+      CREATE TABLE sync_runs (
+        id TEXT PRIMARY KEY,
+        platform TEXT,
+        account_key TEXT,
+        run_type TEXT NOT NULL,
+        status TEXT NOT NULL,
+        trigger TEXT NOT NULL,
+        started_at INTEGER,
+        finished_at INTEGER,
+        details_json TEXT
+      )
+    `);
+    sql.exec(`
+      CREATE TABLE sync_run_errors (
+        id TEXT PRIMARY KEY,
+        sync_run_id TEXT NOT NULL,
+        platform TEXT,
+        account_key TEXT,
+        error_code TEXT,
+        error_message TEXT NOT NULL,
+        details_json TEXT,
+        created_at INTEGER NOT NULL
+      )
+    `);
+    sql.exec(`
+      INSERT INTO sync_runs (
+        id, platform, account_key, run_type, status, trigger, started_at, finished_at, details_json
+      ) VALUES ('legacy-run', 'slack', 'default', 'sync', 'queued', 'scheduler', 123, NULL, '{}')
+    `);
+    sql.exec(`
+      CREATE TABLE message_attachments (
+        id TEXT PRIMARY KEY,
+        message_id TEXT NOT NULL,
+        platform TEXT NOT NULL,
+        account_key TEXT NOT NULL,
+        source_attachment_key TEXT NOT NULL,
+        kind TEXT,
+        mime_type TEXT,
+        filename TEXT,
+        title TEXT,
+        local_path TEXT,
+        remote_url TEXT,
+        size_bytes INTEGER,
+        text_content TEXT,
+        metadata_json TEXT,
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL,
+        UNIQUE(platform, account_key, source_attachment_key)
+      )
+    `);
+
+    db.migrate();
+
+    const syncRunColumns = (
+      sql.prepare("PRAGMA table_info(sync_runs)").all() as Array<{ name: string }>
+    ).map((column) => column.name);
+    const messageAttachmentColumns = (
+      sql.prepare("PRAGMA table_info(message_attachments)").all() as Array<{ name: string }>
+    ).map((column) => column.name);
+    const tables = (
+      sql.prepare("SELECT name FROM sqlite_master WHERE type = 'table'").all() as Array<{
+        name: string;
+      }>
+    ).map((row) => row.name);
+    const triggerSql = sql
+      .prepare(
+        "SELECT sql FROM sqlite_master WHERE type = 'trigger' AND name = 'trg_messages_inserted_fts'",
+      )
+      .get() as { sql: string } | undefined;
+
+    expect(
+      sql
+        .prepare("SELECT 1 FROM schema_migrations WHERE id = ?")
+        .get("0001_bootstrap_current_schema"),
+    ).toBeTruthy();
+    expect(
+      sql
+        .prepare("SELECT 1 FROM schema_migrations WHERE id = ?")
+        .get("0004_repair_partial_legacy_bootstrap"),
+    ).toBeTruthy();
+    expect(syncRunColumns).toContain("queued_at");
+    expect(
+      sql.prepare("SELECT queued_at, started_at FROM sync_runs WHERE id = ?").get("legacy-run"),
+    ).toEqual({ queued_at: 123, started_at: null });
+    expect(messageAttachmentColumns).toEqual(
+      expect.arrayContaining([
+        "access_kind",
+        "access_ref_json",
+        "preview_ref_json",
+        "availability_status",
+        "provider_metadata_json",
+      ]),
+    );
+    expect(tables).toEqual(
+      expect.arrayContaining([
+        "slack_backfill_proofs",
+        "attachment_cache",
+        "attachment_content",
+        "projection_state",
+        "messages_fts",
+      ]),
+    );
+    expect(triggerSql?.sql).toContain("rowid = NEW.rowid");
 
     db.close();
   });
@@ -1074,7 +1054,7 @@ describe("CuedDatabase", () => {
         platform: "slack",
         accountKey: "default",
         entityKind: "message",
-        eventKind: "message_created",
+        eventKind: "created",
         observedAt: 100,
         dedupeKey: "event-1",
         payload: { sourceMessageKey: "m1" },
@@ -1084,7 +1064,7 @@ describe("CuedDatabase", () => {
         platform: "slack",
         accountKey: "default",
         entityKind: "message",
-        eventKind: "message_created",
+        eventKind: "created",
         observedAt: 100,
         dedupeKey: "event-1",
         payload: { sourceMessageKey: "m1" },
@@ -1094,7 +1074,7 @@ describe("CuedDatabase", () => {
         platform: "slack",
         accountKey: "default",
         entityKind: "message",
-        eventKind: "message_created",
+        eventKind: "created",
         observedAt: 101,
         dedupeKey: "event-2",
         payload: { sourceMessageKey: "m2" },
@@ -1108,6 +1088,10 @@ describe("CuedDatabase", () => {
     expect(insertResult.firstInsertedRowId).toBe(1);
     expect(insertResult.lastInsertedRowId).toBe(2);
     expect(db.listRawEvents().map((event) => event.id)).toEqual(["event-1", "event-2"]);
+    expect(db.listRawEvents().map((event) => event.normalized_schema)).toEqual([
+      "message.created@1",
+      "message.created@1",
+    ]);
 
     db.close();
   });
@@ -1156,6 +1140,76 @@ describe("CuedDatabase", () => {
     db.close();
   });
 
+  it("resets platform data and rewinds projection for rebuild", () => {
+    const db = createDb();
+    const timestamp = Date.now();
+
+    db.upsertSourceAccounts([
+      { platform: "linkedin", accountKey: "default", displayName: "LinkedIn" },
+      { platform: "slack", accountKey: "default", displayName: "Slack" },
+    ]);
+
+    db.insertRawEvents([
+      {
+        id: "linkedin-reset-raw",
+        platform: "linkedin",
+        accountKey: "default",
+        entityKind: "message",
+        eventKind: "created",
+        observedAt: timestamp,
+        dedupeKey: "linkedin-reset-raw",
+        payload: { sourceMessageKey: "linkedin:m1", sourceConversationKey: "linkedin:c1" },
+      },
+      {
+        id: "slack-reset-raw",
+        platform: "slack",
+        accountKey: "default",
+        entityKind: "message",
+        eventKind: "created",
+        observedAt: timestamp + 1,
+        dedupeKey: "slack-reset-raw",
+        payload: { sourceMessageKey: "slack:m1", sourceConversationKey: "slack:c1" },
+      },
+    ]);
+
+    insertContact(db, { id: "contact-reset-1", name: "Reset Contact", updatedAt: timestamp });
+    db.upsertProjectionState({
+      projectionWatermark: 2,
+      lastProjectedAt: timestamp,
+      lastRebuildAt: timestamp,
+    });
+
+    expect(db.getOverview().contacts).toBe(1);
+    expect(db.getProjectionBacklog()).toEqual({
+      projection_watermark: 2,
+      max_raw_event_rowid: 2,
+      pending_raw_events: 0,
+    });
+
+    const removed = db.resetSource("linkedin");
+
+    expect(removed).toBe(2);
+    expect(db.getOverview().contacts).toBe(0);
+    expect(db.getOverview().rawEvents).toBe(1);
+    expect(db.getOverview().sourceAccounts).toBe(1);
+    expect(db.getCheckpoint("linkedin", "default")).toBeNull();
+    expect(
+      sqlite(db)
+        .prepare("SELECT count(*) AS count FROM raw_events WHERE platform = 'linkedin'")
+        .get(),
+    ).toEqual({ count: 0 });
+    expect(
+      sqlite(db).prepare("SELECT count(*) AS count FROM raw_events WHERE platform = 'slack'").get(),
+    ).toEqual({ count: 1 });
+    expect(db.getProjectionBacklog()).toEqual({
+      projection_watermark: 0,
+      max_raw_event_rowid: 2,
+      pending_raw_events: 1,
+    });
+
+    db.close();
+  });
+
   it("removes cached attachment files when clearing projected state", () => {
     const db = createDb();
     const timestamp = Date.now();
@@ -1169,10 +1223,10 @@ describe("CuedDatabase", () => {
       .prepare(
         `
         INSERT INTO conversations (
-          id, platform, account_key, source_conversation_key, native_conversation_key, type, subtype,
+          id, platform, account_key, source_conversation_key, native_conversation_key, type, is_active,
           service, name, topic, participant_names, last_message_id, last_message_at, last_message_preview,
           unread_count, created_at, updated_at
-        ) VALUES (?, 'imessage', 'local', ?, NULL, 'dm', NULL, 'iMessage', ?, NULL, '', NULL, NULL, NULL, 0, ?, ?)
+        ) VALUES (?, 'imessage', 'local', ?, NULL, 'dm', 1, 'iMessage', ?, NULL, '', NULL, NULL, NULL, 0, ?, ?)
       `,
       )
       .run("conversation-cache-1", "source-conversation-cache-1", "Thread", timestamp, timestamp);

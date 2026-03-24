@@ -32,6 +32,105 @@ describe("projector", () => {
     return db;
   }
 
+  it("fails with raw-event context for unsupported normalized schemas", () => {
+    const db = createDb();
+
+    db.orm().run(sql`
+      INSERT INTO raw_events (
+        id,
+        platform,
+        account_key,
+        entity_kind,
+        event_kind,
+        observed_at,
+        dedupe_key,
+        payload_json,
+        normalized_schema,
+        provenance_json,
+        source_version
+      ) VALUES (
+        'unsupported-schema',
+        'linkedin',
+        'default',
+        'message',
+        'created',
+        1710000000000,
+        'linkedin:unsupported-schema',
+        ${JSON.stringify({
+          sourceMessageKey: "msg-unsupported",
+          sourceConversationKey: "thread-unsupported",
+          senderSourceKey: "contacts:test",
+          sentAt: 1_710_000_000_000,
+          content: "unsupported",
+          service: "linkedin",
+          isFromMe: false,
+        })},
+        'message.created@99',
+        ${JSON.stringify({
+          acquisitionMode: "realtime",
+          providerApiVersion: "2026-03",
+        })},
+        'linkedin-v99'
+      )
+    `);
+
+    expect(() => projectPendingRawEvents(db)).toThrowError(
+      /Failed to normalize raw event \(row 1, event unsupported-schema, linkedin\/default, message:created, schema message\.created@99, sourceVersion linkedin-v99, providerApiVersion 2026-03, acquisitionMode realtime\): Unsupported normalized raw event schema 'message\.created@99'/,
+    );
+
+    db.close();
+  });
+
+  it("projects legacy raw events without normalized schemas", () => {
+    const db = createDb();
+
+    db.orm().run(sql`
+      INSERT INTO raw_events (
+        id,
+        platform,
+        account_key,
+        entity_kind,
+        event_kind,
+        observed_at,
+        dedupe_key,
+        payload_json,
+        normalized_schema,
+        provenance_json,
+        source_version
+      ) VALUES (
+        'legacy-message-created',
+        'linkedin',
+        'default',
+        'message',
+        'message_created',
+        1710000000000,
+        'linkedin:legacy-message-created',
+        ${JSON.stringify({
+          sourceMessageKey: "msg-legacy",
+          sourceConversationKey: "thread-legacy",
+          senderSourceKey: "contacts:test",
+          sentAt: 1_710_000_000_000,
+          content: "legacy message",
+          service: "linkedin",
+          isFromMe: false,
+        })},
+        NULL,
+        NULL,
+        'linkedin-v1'
+      )
+    `);
+
+    expect(() => projectPendingRawEvents(db)).not.toThrow();
+    const rows = db.orm().all<{ content: string | null }>(sql`
+      SELECT content
+      FROM messages
+      WHERE platform_message_id = 'msg-legacy'
+    `);
+    expect(rows).toEqual([{ content: "legacy message" }]);
+
+    db.close();
+  });
+
   it("rebuilds projected state and preserves agent-facing views", () => {
     const db = createDb();
 
@@ -98,7 +197,7 @@ describe("projector", () => {
       platform: "linkedin",
       accountKey: "default",
       entityKind: "reaction",
-      eventKind: "created",
+      eventKind: "added",
       observedAt: 1_710_000_000_300,
       dedupeKey: "linkedin:msg-1:thumbs-up",
       payload: {
@@ -196,7 +295,7 @@ describe("projector", () => {
       platform: "slack",
       accountKey: "T0A9C9RHZ9T",
       entityKind: "message",
-      eventKind: "message_created",
+      eventKind: "created",
       observedAt,
       dedupeKey: "slack:message:C123:1",
       payload: {
@@ -215,7 +314,7 @@ describe("projector", () => {
       platform: "slack",
       accountKey: "T0A9C9RHZ9T",
       entityKind: "reaction",
-      eventKind: "reaction_added",
+      eventKind: "added",
       observedAt,
       dedupeKey: "slack:reaction:C123:1:thumbsup",
       payload: {
@@ -270,6 +369,154 @@ describe("projector", () => {
     db.close();
   });
 
+  it("updates timeline event subject source keys on re-projection conflicts", () => {
+    const db = createDb();
+    const observedAt = 1_710_000_000_000;
+
+    db.insertRawEvents([
+      {
+        id: "contacts-ava",
+        platform: "contacts",
+        accountKey: "local",
+        entityKind: "contact",
+        eventKind: "observed",
+        observedAt,
+        dedupeKey: "contacts:ava",
+        payload: {
+          sourceEntityKey: "contacts:ava",
+          fields: { display_name: "Ava Chen" },
+          handles: [],
+        },
+        sourceVersion: "contacts-v1",
+      },
+      {
+        id: "timeline-initial",
+        platform: "linkedin",
+        accountKey: "default",
+        entityKind: "timeline_event",
+        eventKind: "system_message",
+        observedAt: observedAt + 1,
+        dedupeKey: "linkedin:timeline:membership",
+        payload: {
+          sourceEventKey: "timeline:membership",
+          sourceConversationKey: "thread-1",
+          eventKind: "system_message",
+          eventAt: observedAt + 1,
+          text: "Ava joined",
+        },
+        sourceVersion: "linkedin-v1",
+      },
+      {
+        id: "timeline-updated",
+        platform: "linkedin",
+        accountKey: "default",
+        entityKind: "timeline_event",
+        eventKind: "system_message",
+        observedAt: observedAt + 2,
+        dedupeKey: "linkedin:timeline:membership:updated",
+        payload: {
+          sourceEventKey: "timeline:membership",
+          sourceConversationKey: "thread-1",
+          eventKind: "system_message",
+          eventAt: observedAt + 2,
+          text: "Ava joined",
+          subjectSourceKey: "contacts:ava",
+        },
+        sourceVersion: "linkedin-v1",
+      },
+    ]);
+
+    projectPendingRawEvents(db);
+
+    const rows = db.orm().all<{ subject_source_key: string | null }>(sql`
+      SELECT subject_source_key
+      FROM timeline_events
+      WHERE source_event_key = 'timeline:membership'
+    `);
+    expect(rows).toEqual([{ subject_source_key: "contacts:ava" }]);
+
+    db.close();
+  });
+
+  it("uses system timeline notices as the latest conversation summary activity", () => {
+    const db = createDb();
+    const observedAt = 1_710_050_000_000;
+
+    db.insertRawEvents([
+      {
+        id: "conversation-system-summary",
+        platform: "linkedin",
+        accountKey: "default",
+        entityKind: "conversation",
+        eventKind: "observed",
+        observedAt,
+        dedupeKey: "conversation:system-summary",
+        payload: {
+          sourceConversationKey: "thread-system-summary",
+          conversationType: "dm",
+          displayName: "Ava Chen",
+          participants: [{ sourceEntityKey: "linkedin:urn:li:member:ACoAAA1" }],
+        },
+        sourceVersion: "test-v1",
+      },
+      {
+        id: "message-system-summary",
+        platform: "linkedin",
+        accountKey: "default",
+        entityKind: "message",
+        eventKind: "created",
+        observedAt: observedAt + 1,
+        dedupeKey: "message:system-summary",
+        payload: {
+          sourceMessageKey: "msg-system-summary",
+          sourceConversationKey: "thread-system-summary",
+          senderSourceKey: "linkedin:urn:li:member:ACoAAA1",
+          sentAt: observedAt + 1,
+          content: "older human message",
+          isFromMe: false,
+        },
+        sourceVersion: "test-v1",
+      },
+      {
+        id: "timeline-system-summary",
+        platform: "linkedin",
+        accountKey: "default",
+        entityKind: "timeline_event",
+        eventKind: "system_message",
+        observedAt: observedAt + 2,
+        dedupeKey: "timeline:system-summary",
+        payload: {
+          sourceEventKey: "timeline:system-summary",
+          sourceConversationKey: "thread-system-summary",
+          eventKind: "system_message",
+          eventAt: observedAt + 5,
+          text: "Ava renamed the conversation",
+        },
+        sourceVersion: "test-v1",
+      },
+    ]);
+
+    projectPendingRawEvents(db);
+
+    const conversationRow = db.orm().get<{
+      last_message_id: string | null;
+      last_message_at: number | null;
+      last_message_preview: string | null;
+    }>(sql`
+      SELECT last_message_id, last_message_at, last_message_preview
+      FROM conversations
+      WHERE source_conversation_key = 'thread-system-summary'
+    `);
+
+    expect(conversationRow).toEqual({
+      last_message_id: null,
+      last_message_at: observedAt + 5,
+      last_message_preview: "Ava renamed the conversation",
+    });
+
+    db.close();
+  });
+
   it("keeps FTS rowids aligned when reprojecting an existing message", () => {
     const db = createDb();
     const observedAt = 1_710_200_000_000;
@@ -310,7 +557,7 @@ describe("projector", () => {
       platform: "linkedin",
       accountKey: "default",
       entityKind: "message",
-      eventKind: "message_created",
+      eventKind: "created",
       observedAt: observedAt + 2,
       dedupeKey: "linkedin:message:1",
       payload: {
@@ -332,7 +579,7 @@ describe("projector", () => {
       platform: "linkedin",
       accountKey: "default",
       entityKind: "message",
-      eventKind: "message_updated",
+      eventKind: "updated",
       observedAt: observedAt + 3,
       dedupeKey: "linkedin:message:1:refresh",
       payload: {
@@ -442,7 +689,7 @@ describe("projector", () => {
       platform: "imessage",
       accountKey: "local",
       entityKind: "message",
-      eventKind: "message_created",
+      eventKind: "created",
       observedAt: 4,
       dedupeKey: "imessage:message:ava",
       payload: {
@@ -510,7 +757,7 @@ describe("projector", () => {
       platform: "imessage",
       accountKey: "local",
       entityKind: "message",
-      eventKind: "message_created",
+      eventKind: "created",
       observedAt: 2,
       dedupeKey: "imessage:message:parent",
       payload: {
@@ -597,7 +844,7 @@ describe("projector", () => {
       platform: "imessage",
       accountKey: "local",
       entityKind: "message",
-      eventKind: "message_created",
+      eventKind: "created",
       observedAt: 2,
       dedupeKey: "imessage:message:email",
       payload: {
@@ -686,7 +933,7 @@ describe("projector", () => {
       platform: "signal",
       accountKey: "default",
       entityKind: "message",
-      eventKind: "message_created",
+      eventKind: "created",
       observedAt: 3,
       dedupeKey: "signal:message:1",
       payload: {
@@ -779,7 +1026,7 @@ describe("projector", () => {
       platform: "signal",
       accountKey: "default",
       entityKind: "message",
-      eventKind: "message_created",
+      eventKind: "created",
       observedAt: 3,
       dedupeKey: "signal:message:uuid",
       payload: {
@@ -875,7 +1122,7 @@ describe("projector", () => {
       platform: "linkedin",
       accountKey: "default",
       entityKind: "message",
-      eventKind: "message_created",
+      eventKind: "created",
       observedAt: 30,
       dedupeKey: "linkedin:msg-1",
       payload: {
@@ -969,7 +1216,7 @@ describe("projector", () => {
     db.close();
   });
 
-  it("keeps inbox state hot before deferred projection finishes", () => {
+  it("keeps inserted-range projection canonical before deferred catchup reruns", () => {
     const db = createDb();
 
     const insertResult = db.insertRawEvents([
@@ -1008,7 +1255,7 @@ describe("projector", () => {
         platform: "linkedin",
         accountKey: "default",
         entityKind: "message",
-        eventKind: "message_created",
+        eventKind: "created",
         observedAt: 3,
         dedupeKey: "message-hot-path",
         payload: {
@@ -1041,7 +1288,7 @@ describe("projector", () => {
     expect(hotConversation).toEqual({
       last_message_preview: "hot path preview",
       unread_count: 1,
-      participant_names: null,
+      participant_names: "Ava Chen",
     });
 
     const hotMessage = db.orm().get<{
@@ -1127,7 +1374,7 @@ describe("projector", () => {
         platform: "imessage",
         accountKey: "local",
         entityKind: "message",
-        eventKind: "message_created",
+        eventKind: "created",
         observedAt: 2,
         dedupeKey: "message-realtime-attachment",
         payload: {
@@ -1153,7 +1400,7 @@ describe("projector", () => {
         platform: "imessage",
         accountKey: "local",
         entityKind: "reaction",
-        eventKind: "reaction_added",
+        eventKind: "added",
         observedAt: 3,
         dedupeKey: "reaction-realtime-attachment",
         payload: {
@@ -1244,7 +1491,7 @@ describe("projector", () => {
         platform: "imessage",
         accountKey: "local",
         entityKind: "message",
-        eventKind: "message_created",
+        eventKind: "created",
         observedAt: 3,
         dedupeKey: "rt-imessage-msg",
         payload: {
@@ -1304,7 +1551,7 @@ describe("projector", () => {
         platform: "imessage",
         accountKey: "local",
         entityKind: "message",
-        eventKind: "message_created",
+        eventKind: "created",
         observedAt: 2,
         dedupeKey: "order-imessage-msg",
         payload: {
@@ -1397,7 +1644,7 @@ describe("projector", () => {
       platform: "imessage",
       accountKey: "default",
       entityKind: "message",
-      eventKind: "message_created",
+      eventKind: "created",
       observedAt: 3,
       dedupeKey: "imessage:message:ava",
       payload: {
@@ -1547,7 +1794,7 @@ describe("projector", () => {
       platform: "linkedin",
       accountKey: "default",
       entityKind: "message",
-      eventKind: "message_created",
+      eventKind: "created",
       observedAt: 3,
       dedupeKey: "linkedin:reply",
       payload: {
@@ -1576,7 +1823,7 @@ describe("projector", () => {
       platform: "linkedin",
       accountKey: "default",
       entityKind: "message",
-      eventKind: "message_created",
+      eventKind: "created",
       observedAt: 4,
       dedupeKey: "linkedin:parent",
       payload: {
@@ -1713,7 +1960,7 @@ describe("projector", () => {
       platform: "linkedin",
       accountKey: "default",
       entityKind: "message",
-      eventKind: "message_created",
+      eventKind: "created",
       observedAt: 2,
       dedupeKey: "message-placeholder-mime",
       payload: {
@@ -1730,7 +1977,7 @@ describe("projector", () => {
       platform: "linkedin",
       accountKey: "default",
       entityKind: "message",
-      eventKind: "message_created",
+      eventKind: "created",
       observedAt: 3,
       dedupeKey: "message-placeholder-text",
       payload: {
@@ -1747,7 +1994,7 @@ describe("projector", () => {
       platform: "linkedin",
       accountKey: "default",
       entityKind: "message",
-      eventKind: "message_created",
+      eventKind: "created",
       observedAt: 4,
       dedupeKey: "message-placeholder-multi",
       payload: {
@@ -1767,7 +2014,7 @@ describe("projector", () => {
       platform: "linkedin",
       accountKey: "default",
       entityKind: "message",
-      eventKind: "message_created",
+      eventKind: "created",
       observedAt: 5,
       dedupeKey: "message-placeholder-filename",
       payload: {
@@ -1850,7 +2097,7 @@ describe("projector", () => {
       platform: "linkedin",
       accountKey: "default",
       entityKind: "message",
-      eventKind: "message_created",
+      eventKind: "created",
       observedAt: 3,
       dedupeKey: "message-attachments-v1",
       payload: {
@@ -1893,7 +2140,7 @@ describe("projector", () => {
       platform: "linkedin",
       accountKey: "default",
       entityKind: "message",
-      eventKind: "message_created",
+      eventKind: "created",
       observedAt: 4,
       dedupeKey: "message-attachments-v2",
       payload: {
@@ -1978,7 +2225,7 @@ describe("projector", () => {
       platform: "slack",
       accountKey: "workspace-a",
       entityKind: "message",
-      eventKind: "message_created",
+      eventKind: "created",
       observedAt: 3,
       dedupeKey: "slack-message-a",
       payload: {
@@ -1995,7 +2242,7 @@ describe("projector", () => {
       platform: "slack",
       accountKey: "workspace-a",
       entityKind: "message",
-      eventKind: "message_created",
+      eventKind: "created",
       observedAt: 4,
       dedupeKey: "slack-message-b",
       payload: {
@@ -2078,7 +2325,7 @@ describe("projector", () => {
       platform: "linkedin",
       accountKey: "default",
       entityKind: "message",
-      eventKind: "message_created",
+      eventKind: "created",
       observedAt: 3,
       dedupeKey: "message-delete-observed",
       payload: {
@@ -2102,7 +2349,7 @@ describe("projector", () => {
       payload: {
         sourceConversationKey: "linkedin:urn:li:fs_conversation:CONV_DELETE",
         conversationType: "dm",
-        subtype: "deleted",
+        removalReason: "deleted",
         unreadCount: 0,
         participants: [{ sourceEntityKey: "linkedin:urn:li:member:ACoAAA1" }],
       },
@@ -2112,10 +2359,11 @@ describe("projector", () => {
     projectPendingRawEvents(db);
 
     const conversationRow = db.orm().get<{
-      subtype: string | null;
+      is_active: number;
+      removal_reason: string | null;
       unread_count: number;
     }>(sql`
-      SELECT subtype, unread_count
+      SELECT is_active, removal_reason, unread_count
       FROM conversations
       WHERE source_conversation_key = 'linkedin:urn:li:fs_conversation:CONV_DELETE'
     `);
@@ -2134,7 +2382,8 @@ describe("projector", () => {
     `);
 
     expect(conversationRow).toEqual({
-      subtype: "deleted",
+      is_active: 0,
+      removal_reason: "deleted",
       unread_count: 0,
     });
     expect(participantRow).toEqual({
@@ -2170,7 +2419,7 @@ describe("projector", () => {
         platform: "linkedin",
         accountKey: "default",
         entityKind: "message",
-        eventKind: "message_created",
+        eventKind: "created",
         observedAt: 2,
         dedupeKey: "message-realtime-reaction",
         payload: {
@@ -2188,7 +2437,7 @@ describe("projector", () => {
         platform: "linkedin",
         accountKey: "default",
         entityKind: "reaction",
-        eventKind: "reaction_added",
+        eventKind: "added",
         observedAt: 3,
         dedupeKey: "reaction-realtime-reaction",
         payload: {

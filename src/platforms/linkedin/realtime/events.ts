@@ -187,6 +187,7 @@ export function buildLinkedInRawEventsFromRealtimeEnvelope(input: {
       );
       if (message.messageBodyRenderFormat === "SYSTEM") {
         rawEvents.push(buildLinkedInSystemTimelineEvent(input.accountKey, message, observedAt));
+        return rawEvents;
       }
       rawEvents.push(
         buildLinkedInMessageEvent({
@@ -195,7 +196,6 @@ export function buildLinkedInRawEventsFromRealtimeEnvelope(input: {
           fallbackConversationUrn: message.conversationURN || message.conversation?.entityURN || "",
           userEntityUrn: input.userEntityUrn,
           observedAt,
-          eventKind: message.messageBodyRenderFormat === "SYSTEM" ? "message_observed" : undefined,
         }),
       );
       return rawEvents;
@@ -303,7 +303,7 @@ export function buildLinkedInRawEventsFromRealtimeEnvelope(input: {
             receipt.message.conversationURN || receipt.message.conversation?.entityURN || "",
           userEntityUrn: input.userEntityUrn,
           observedAt,
-          eventKind: "message_read_receipt",
+          eventKind: "read_receipt",
           readAt: receipt.seenAt,
           status: "read",
         }),

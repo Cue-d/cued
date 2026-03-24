@@ -16,6 +16,7 @@ export interface ConversationsResult {
   conversations: Conversation[];
   metadata?: PagingMetadata;
   syncToken?: string;
+  nextCursor?: string | null;
   deletedConversationURNs?: string[];
 }
 
@@ -125,6 +126,11 @@ export class LinkedInClient {
 
   async getConversationsBefore(timestamp: number): Promise<ConversationsResult> {
     return getConversationsBefore(this, timestamp);
+  }
+
+  async getConversationsWithCursor(nextCursor: string): Promise<ConversationsResult> {
+    const { getConversationsWithCursor } = await import("./conversations.js");
+    return getConversationsWithCursor(this, nextCursor);
   }
 
   async getMessages(conversationId: string): Promise<MessagesResult> {
