@@ -458,7 +458,7 @@ export class SignalRealtimeSession implements SignalRealtimeSessionLike {
         resolve();
       };
       const timeout = setTimeout(() => {
-        if (!child.killed) {
+        if (child.exitCode == null && child.signalCode == null) {
           child.kill("SIGKILL");
         }
       }, 5_000);

@@ -186,6 +186,34 @@ describe("signal realtime", () => {
     expect(session.getStatus().state).toBe("stopped");
   });
 
+  it("escalates to SIGKILL if the JSON-RPC process ignores SIGTERM", async () => {
+    vi.useFakeTimers();
+    const child = new MockChild();
+    spawnMock.mockReturnValue(child);
+
+    const session = new SignalRealtimeSession({
+      accountKey: "default",
+      account: "+14155550000",
+      cliPath: "/opt/homebrew/bin/signal-cli",
+      configDir: "/tmp/cued-signal/default",
+    });
+
+    session.start();
+    child.emit("spawn");
+
+    const stopped = session.stopAndWait();
+
+    await Promise.resolve();
+    expect(child.kill).toHaveBeenCalledWith("SIGTERM");
+
+    vi.advanceTimersByTime(5_000);
+    expect(child.kill).toHaveBeenCalledWith("SIGKILL");
+
+    child.emit("exit", null, "SIGKILL");
+    await stopped;
+    expect(session.getStatus().state).toBe("stopped");
+  });
+
   it("starts and stops managed sessions through the supervisor", async () => {
     const started: string[] = [];
     const stopped: string[] = [];
