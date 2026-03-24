@@ -64,6 +64,7 @@ describe("platform capability resolver", () => {
 
   it("exposes a shipped feature matrix for README-facing capabilities", () => {
     expect(getPlatformFeatureSupport("signal", "send")).toBe("yes");
+    expect(getPlatformFeatureSupport("signal", "full_history_sync")).toBe("no");
     expect(getPlatformFeatureSupport("contacts", "send")).toBe("no");
     expect(getPlatformFeatureSupport("linkedin", "read_receipts")).toBe("partial");
     expect(getPlatformFeatureSupport("imessage", "realtime_ingest")).toBe("yes");

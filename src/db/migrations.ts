@@ -161,6 +161,10 @@ export const MIGRATIONS: Migration[] = [
         updated_at INTEGER NOT NULL
       );
 
+      INSERT OR IGNORE INTO projection_state (
+        singleton_key, projection_watermark, last_projected_at, last_rebuild_at, updated_at
+      ) VALUES ('global', 0, NULL, NULL, strftime('%s','now') * 1000);
+
       CREATE TABLE IF NOT EXISTS raw_events (
         id TEXT PRIMARY KEY,
         platform TEXT NOT NULL,
@@ -815,6 +819,20 @@ export const MIGRATIONS: Migration[] = [
       addColumnIfMissing(db, "raw_events", "provenance_json TEXT");
       addColumnIfMissing(db, "conversations", "is_active INTEGER NOT NULL DEFAULT 1");
       addColumnIfMissing(db, "conversations", "removal_reason TEXT");
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS projection_state (
+          singleton_key TEXT PRIMARY KEY CHECK (singleton_key = 'global'),
+          projection_watermark INTEGER NOT NULL DEFAULT 0,
+          last_projected_at INTEGER,
+          last_rebuild_at INTEGER,
+          updated_at INTEGER NOT NULL
+        )
+      `);
+      db.exec(`
+        INSERT OR IGNORE INTO projection_state (
+          singleton_key, projection_watermark, last_projected_at, last_rebuild_at, updated_at
+        ) VALUES ('global', 0, NULL, NULL, strftime('%s','now') * 1000)
+      `);
       if (columnExists(db, "conversations", "subtype")) {
         db.exec(`
           UPDATE conversations

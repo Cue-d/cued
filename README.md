@@ -92,70 +92,26 @@ repo root app (daemon, CLI, sync orchestration, projection)
 
 The old cloud web/mobile product is gone. Do not add new code against legacy `@cued/*` packages.
 
-## Normalized Event Semantics
+## Normalization
 
-Adapters are platform-specific. Normalized raw events should not be.
+Adapters are platform-specific. The projector is not.
 
-The goal of normalization is to map Slack, LinkedIn, iMessage, Signal, WhatsApp, and Contacts into a small shared semantic vocabulary that the projector can understand without branching on provider-specific event names.
-
-### Target semantic event families
-
-| Normalized event | Meaning | Notes |
-| ---------------- | ------- | ----- |
-| `contact.observed` | Latest known contact/profile state was observed | Snapshot-style state, not an append-only action |
-| `conversation.observed` | Latest known conversation/thread state was observed | Snapshot-style state |
-| `conversation.removed` | Conversation was removed, archived, hidden, or left inactive | Provider-specific reason stays in payload metadata |
-| `message.created` | A user-authored message became visible | Canonical append event for inbound or outbound messages |
-| `message.updated` | A previously created message changed | Use for edits and metadata refreshes |
-| `message.deleted` | A previously created message was deleted or tombstoned | Only emit when the platform can express this semantically |
-| `message.read_receipt` | A read/seen receipt was observed | Use only when it affects product behavior |
-| `reaction.added` | A reaction became active | Canonical reaction event |
-| `reaction.removed` | A reaction became inactive | Canonical reaction removal |
-| `participant.joined` | A participant joined a conversation | Prefer this over collapsing into text when the platform exposes it structurally |
-| `participant.left` | A participant left a conversation | Prefer this over collapsing into text when the platform exposes it structurally |
-| `timeline.system_message` | A platform-generated message-like event with no stronger shared semantic meaning | Catch-all fallback, not the default modeling choice |
-
-### Modeling rules
-
-- Normalized schemas must describe shared semantics, not provider names.
-- Provider-specific details belong in payload metadata or provenance, not in the schema name.
-- Projection should depend only on normalized schemas and payload shape, never on platform-specific event kinds.
-- If two platforms support the same semantic behavior, they should emit the same normalized event.
-- If a platform emits something that does not affect canonical state or product behavior, keep it in raw events only or drop it before projection.
-
-### Rich Semantics vs System Messages
-
-Prefer richer semantics such as `participant.joined`, `participant.left`, `conversation.removed`, and `message.read_receipt` when they drive canonical state, downstream automation, or user-visible behavior.
-
-Use `timeline.system_message` only as a fallback when:
-
-- the platform exposes a message-like event with no strong cross-platform equivalent
-- the product still wants to retain/display it
-- modeling it as a richer semantic event would be fake precision
-
-Examples:
-
-- "Alice joined the group" should usually normalize to `participant.joined`, not `timeline.system_message`.
-- "Bob left the conversation" should usually normalize to `participant.left`, not `timeline.system_message`.
-- "Conversation archived" should usually normalize to `conversation.removed` plus provider-specific reason metadata.
-- A provider-only banner or system notice with no cross-platform meaning can remain `timeline.system_message`.
-
-The current direction for the codebase is to remove provider-specific normalized schema names and converge on this shared vocabulary.
+Cued normalizes platform data into one shared cross-platform event model so projection, replay, and rebuild do not branch on provider-specific schema names. Provider-specific detail stays in payload metadata or provenance.
 
 ## Platform Capability Matrix
 
-This matrix documents current shipped behavior, not roadmap promises. Capability support and normalized-event coverage are related, but they are not the same thing: a platform can omit a capability entirely, partially support it, or support it without every variant mapping to a first-class canonical event yet.
+This matrix documents current shipped behavior, not roadmap promises.
 
 | Platform | Send | Receive | Realtime ingest | Full history sync | Message edits | Deletes | Reactions | Threads / replies | Read receipts | Attachments | Contact sync |
 | -------- | ---- | ------- | --------------- | ----------------- | ------------- | ------- | --------- | ----------------- | ------------- | ----------- | ------------ |
-| Contacts | No | No | Yes | Yes | No | No | No | No | No | No | Yes |
-| iMessage | No | Yes | Yes | Yes | No | No | Yes | No | Partial | Yes | Partial |
-| LinkedIn | No | Yes | Yes | Yes | Yes | Yes | Yes | Yes | Partial | Yes | Yes |
-| Signal | Yes | Yes | Yes | Yes | No | No | No | No | No | Yes | Partial |
-| Slack | No | Yes | Yes | Yes | Partial | No | Partial | Yes | No | Yes | Yes |
-| WhatsApp | Yes | Yes | Yes | Yes | No | No | No | No | Partial | Yes | Partial |
+| Contacts | ❌ | ❌ | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ✅ |
+| iMessage | ❌ | ✅ | ✅ | ✅ | ❌ | ❌ | ✅ | ❌ | ◐ | ✅ | ◐ |
+| LinkedIn | ❌ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ◐ | ✅ | ✅ |
+| Signal | ✅ | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ✅ | ◐ |
+| Slack | ❌ | ✅ | ✅ | ✅ | ◐ | ❌ | ◐ | ✅ | ❌ | ✅ | ✅ |
+| WhatsApp | ✅ | ✅ | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ | ◐ | ✅ | ◐ |
 
-`Partial` means the platform exposes some but not all variants the product could eventually model. Current partial rows mainly reflect limited read-receipt fidelity (`iMessage`, `LinkedIn`, `WhatsApp`), partial local contact enrichment (`iMessage`, `Signal`, `WhatsApp`), and incomplete edit/reaction coverage in Slack sync behavior.
+Legend: `✅` supported, `◐` partial, `❌` unsupported.
 
 ## Install From Source
 
