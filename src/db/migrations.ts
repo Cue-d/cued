@@ -32,25 +32,595 @@ function addColumnIfMissing(db: MigrationDatabase, tableName: string, definition
   db.exec(`ALTER TABLE ${tableName} ADD COLUMN ${definition}`);
 }
 
+function repairLegacySyncRunsIfNeeded(db: MigrationDatabase): void {
+  if (!tableExists(db, "sync_runs") || columnExists(db, "sync_runs", "queued_at")) {
+    return;
+  }
+
+  db.exec(`
+    DROP INDEX IF EXISTS idx_sync_runs_status_type_started;
+    DROP INDEX IF EXISTS idx_sync_runs_platform_account_status_started;
+    DROP INDEX IF EXISTS idx_sync_runs_status_type_queue;
+    DROP INDEX IF EXISTS idx_sync_runs_platform_account_status_queue;
+
+    ALTER TABLE sync_runs RENAME TO sync_runs_legacy_timing;
+  `);
+  if (tableExists(db, "sync_run_errors")) {
+    db.exec(`ALTER TABLE sync_run_errors RENAME TO sync_run_errors_legacy_timing`);
+  }
+
+  db.exec(`
+    CREATE TABLE sync_runs (
+      id TEXT PRIMARY KEY,
+      platform TEXT,
+      account_key TEXT,
+      run_type TEXT NOT NULL,
+      status TEXT NOT NULL,
+      trigger TEXT NOT NULL,
+      queued_at INTEGER NOT NULL,
+      started_at INTEGER,
+      finished_at INTEGER,
+      details_json TEXT
+    );
+  `);
+
+  if (tableExists(db, "sync_run_errors_legacy_timing")) {
+    db.exec(`
+      CREATE TABLE sync_run_errors (
+        id TEXT PRIMARY KEY,
+        sync_run_id TEXT NOT NULL REFERENCES sync_runs(id) ON DELETE CASCADE,
+        platform TEXT,
+        account_key TEXT,
+        error_code TEXT,
+        error_message TEXT NOT NULL,
+        details_json TEXT,
+        created_at INTEGER NOT NULL
+      );
+    `);
+  }
+
+  db.exec(`
+    INSERT INTO sync_runs (
+      id,
+      platform,
+      account_key,
+      run_type,
+      status,
+      trigger,
+      queued_at,
+      started_at,
+      finished_at,
+      details_json
+    )
+    SELECT
+      id,
+      platform,
+      account_key,
+      run_type,
+      status,
+      trigger,
+      COALESCE(started_at, strftime('%s','now') * 1000),
+      CASE
+        WHEN status IN ('ingesting', 'projecting', 'completed', 'failed') THEN started_at
+        ELSE NULL
+      END,
+      finished_at,
+      details_json
+    FROM sync_runs_legacy_timing;
+  `);
+
+  if (tableExists(db, "sync_run_errors_legacy_timing")) {
+    db.exec(`
+      INSERT INTO sync_run_errors (
+        id,
+        sync_run_id,
+        platform,
+        account_key,
+        error_code,
+        error_message,
+        details_json,
+        created_at
+      )
+      SELECT
+        id,
+        sync_run_id,
+        platform,
+        account_key,
+        error_code,
+        error_message,
+        details_json,
+        created_at
+      FROM sync_run_errors_legacy_timing;
+
+      DROP TABLE sync_run_errors_legacy_timing;
+    `);
+  }
+
+  db.exec(`
+    DROP TABLE sync_runs_legacy_timing;
+
+    CREATE INDEX IF NOT EXISTS idx_sync_runs_status_type_queue
+    ON sync_runs(status, run_type, queued_at);
+
+    CREATE INDEX IF NOT EXISTS idx_sync_runs_platform_account_status_queue
+    ON sync_runs(platform, account_key, status, queued_at);
+  `);
+}
+
+function repairLegacyMessageAttachmentsIfNeeded(db: MigrationDatabase): void {
+  if (!tableExists(db, "message_attachments")) {
+    return;
+  }
+
+  addColumnIfMissing(db, "message_attachments", "access_kind TEXT");
+  addColumnIfMissing(db, "message_attachments", "access_ref_json TEXT");
+  addColumnIfMissing(db, "message_attachments", "preview_ref_json TEXT");
+  addColumnIfMissing(db, "message_attachments", "availability_status TEXT");
+  addColumnIfMissing(db, "message_attachments", "provider_metadata_json TEXT");
+
+  db.exec(`
+    UPDATE message_attachments
+    SET
+      access_kind = CASE
+        WHEN local_path IS NOT NULL AND trim(local_path) <> '' THEN 'local_path'
+        WHEN remote_url IS NOT NULL AND trim(remote_url) <> '' THEN 'remote_url'
+        ELSE 'none'
+      END,
+      access_ref_json = CASE
+        WHEN local_path IS NOT NULL AND trim(local_path) <> '' THEN json_object('path', local_path)
+        WHEN remote_url IS NOT NULL AND trim(remote_url) <> '' THEN json_object('url', remote_url)
+        ELSE NULL
+      END,
+      availability_status = CASE
+        WHEN local_path IS NOT NULL AND trim(local_path) <> '' THEN 'available'
+        WHEN remote_url IS NOT NULL AND trim(remote_url) <> '' THEN 'available'
+        ELSE 'metadata_only'
+      END,
+      provider_metadata_json = COALESCE(provider_metadata_json, metadata_json)
+    WHERE access_kind IS NULL;
+  `);
+}
+
+function ensureLegacySupportTables(db: MigrationDatabase): void {
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS slack_backfill_proofs (
+      id TEXT PRIMARY KEY,
+      account_key TEXT NOT NULL,
+      team_id TEXT NOT NULL,
+      conversation_id TEXT NOT NULL,
+      conversation_name TEXT,
+      conversation_family TEXT NOT NULL,
+      sync_mode TEXT NOT NULL,
+      scan_started_at INTEGER NOT NULL,
+      known_conversation_count INTEGER NOT NULL,
+      conversation_phase TEXT NOT NULL,
+      history_complete INTEGER NOT NULL DEFAULT 0,
+      history_cursor TEXT,
+      thread_root_count INTEGER NOT NULL DEFAULT 0,
+      completed_thread_count INTEGER NOT NULL DEFAULT 0,
+      pending_thread_count INTEGER NOT NULL DEFAULT 0,
+      active_thread_ts TEXT,
+      replies_cursor TEXT,
+      oldest_message_ts TEXT,
+      newest_message_ts TEXT,
+      first_discovered_at INTEGER NOT NULL,
+      history_complete_at INTEGER,
+      replies_complete_at INTEGER,
+      last_observed_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL,
+      UNIQUE(account_key, conversation_id)
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_slack_backfill_proofs_account_phase
+    ON slack_backfill_proofs(account_key, conversation_phase, updated_at);
+
+    CREATE TABLE IF NOT EXISTS attachment_cache (
+      id TEXT PRIMARY KEY,
+      attachment_id TEXT NOT NULL REFERENCES message_attachments(id) ON DELETE CASCADE,
+      variant TEXT NOT NULL,
+      status TEXT NOT NULL,
+      cache_path TEXT,
+      mime_type TEXT,
+      size_bytes INTEGER,
+      sha256 TEXT,
+      fetched_at INTEGER,
+      last_accessed_at INTEGER,
+      expires_at INTEGER,
+      last_error TEXT,
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL,
+      UNIQUE(attachment_id, variant)
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_attachment_cache_status_accessed
+    ON attachment_cache(status, last_accessed_at, updated_at);
+
+    CREATE TABLE IF NOT EXISTS attachment_content (
+      attachment_id TEXT PRIMARY KEY REFERENCES message_attachments(id) ON DELETE CASCADE,
+      extractor TEXT,
+      status TEXT NOT NULL,
+      text_content TEXT,
+      mime_type TEXT,
+      extracted_at INTEGER,
+      last_error TEXT,
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL
+    );
+
+    CREATE VIRTUAL TABLE IF NOT EXISTS attachment_content_fts USING fts5(
+      attachment_id UNINDEXED,
+      filename,
+      title,
+      content
+    );
+  `);
+}
+
+function rebuildMessagesFtsArtifacts(db: MigrationDatabase): void {
+  if (!tableExists(db, "messages") || !tableExists(db, "conversations")) {
+    return;
+  }
+
+  db.exec(`
+    DROP TRIGGER IF EXISTS trg_messages_inserted_fts;
+    DROP TRIGGER IF EXISTS trg_messages_updated_fts;
+    DROP TRIGGER IF EXISTS trg_messages_deleted_fts;
+    DROP TRIGGER IF EXISTS trg_message_attachments_inserted;
+    DROP TRIGGER IF EXISTS trg_message_attachments_updated;
+    DROP TRIGGER IF EXISTS trg_message_attachments_deleted;
+    DROP TRIGGER IF EXISTS trg_message_reactions_inserted;
+    DROP TRIGGER IF EXISTS trg_message_reactions_updated;
+    DROP TRIGGER IF EXISTS trg_message_reactions_deleted;
+    DROP TRIGGER IF EXISTS trg_contacts_name_updated;
+    DROP TRIGGER IF EXISTS trg_conversations_name_updated;
+    DROP TRIGGER IF EXISTS trg_conversation_participants_inserted;
+    DROP TRIGGER IF EXISTS trg_conversation_participants_updated;
+    DROP TRIGGER IF EXISTS trg_conversation_participants_deleted;
+    DROP VIEW IF EXISTS message_fts_source;
+    DROP TABLE IF EXISTS messages_fts;
+
+    CREATE VIRTUAL TABLE messages_fts USING fts5(
+      message_id UNINDEXED,
+      sender_name,
+      conversation_name,
+      participant_names,
+      attachment_text,
+      content
+    );
+
+    CREATE VIEW message_fts_source AS
+    SELECT
+      m.rowid AS message_rowid,
+      m.id AS message_id,
+      COALESCE(m.sender_name, '') AS sender_name,
+      COALESCE(m.conversation_name, '') AS conversation_name,
+      COALESCE(conv.participant_names, '') AS participant_names,
+      COALESCE((
+        SELECT GROUP_CONCAT(
+          TRIM(COALESCE(ma.filename, '') || ' ' || COALESCE(ma.title, '') || ' ' || COALESCE(ma.text_content, '')),
+          ' '
+        )
+        FROM message_attachments ma
+        WHERE ma.message_id = m.id
+      ), '') AS attachment_text,
+      COALESCE(m.content, '') AS content
+    FROM messages m
+    JOIN conversations conv ON conv.id = m.conversation_id;
+
+    CREATE TRIGGER trg_messages_inserted_fts
+    AFTER INSERT ON messages
+    BEGIN
+      DELETE FROM messages_fts WHERE rowid = NEW.rowid;
+      INSERT INTO messages_fts (rowid, message_id, sender_name, conversation_name, participant_names, attachment_text, content)
+      SELECT message_rowid, message_id, sender_name, conversation_name, participant_names, attachment_text, content
+      FROM message_fts_source
+      WHERE message_id = NEW.id;
+    END;
+
+    CREATE TRIGGER trg_messages_updated_fts
+    AFTER UPDATE OF sender_name, conversation_name, content ON messages
+    BEGIN
+      DELETE FROM messages_fts WHERE rowid = NEW.rowid;
+      INSERT INTO messages_fts (rowid, message_id, sender_name, conversation_name, participant_names, attachment_text, content)
+      SELECT message_rowid, message_id, sender_name, conversation_name, participant_names, attachment_text, content
+      FROM message_fts_source
+      WHERE message_id = NEW.id;
+    END;
+
+    CREATE TRIGGER trg_messages_deleted_fts
+    AFTER DELETE ON messages
+    BEGIN
+      DELETE FROM messages_fts WHERE rowid = OLD.rowid;
+    END;
+  `);
+
+  if (tableExists(db, "message_attachments")) {
+    db.exec(`
+      CREATE TRIGGER trg_message_attachments_inserted
+      AFTER INSERT ON message_attachments
+      BEGIN
+        UPDATE messages
+        SET
+          attachment_count = (
+            SELECT COUNT(*) FROM message_attachments WHERE message_id = NEW.message_id
+          ),
+          updated_at = MAX(updated_at, NEW.updated_at)
+        WHERE id = NEW.message_id;
+        DELETE FROM messages_fts
+        WHERE rowid IN (SELECT rowid FROM messages WHERE id = NEW.message_id);
+        INSERT INTO messages_fts (rowid, message_id, sender_name, conversation_name, participant_names, attachment_text, content)
+        SELECT message_rowid, message_id, sender_name, conversation_name, participant_names, attachment_text, content
+        FROM message_fts_source
+        WHERE message_id = NEW.message_id;
+      END;
+
+      CREATE TRIGGER trg_message_attachments_updated
+      AFTER UPDATE ON message_attachments
+      BEGIN
+        UPDATE messages
+        SET
+          attachment_count = (
+            SELECT COUNT(*) FROM message_attachments WHERE message_id = NEW.message_id
+          ),
+          updated_at = MAX(updated_at, NEW.updated_at)
+        WHERE id = NEW.message_id;
+        DELETE FROM messages_fts
+        WHERE rowid IN (SELECT rowid FROM messages WHERE id = NEW.message_id);
+        INSERT INTO messages_fts (rowid, message_id, sender_name, conversation_name, participant_names, attachment_text, content)
+        SELECT message_rowid, message_id, sender_name, conversation_name, participant_names, attachment_text, content
+        FROM message_fts_source
+        WHERE message_id = NEW.message_id;
+      END;
+
+      CREATE TRIGGER trg_message_attachments_deleted
+      AFTER DELETE ON message_attachments
+      BEGIN
+        UPDATE messages
+        SET attachment_count = (
+          SELECT COUNT(*) FROM message_attachments WHERE message_id = OLD.message_id
+        )
+        WHERE id = OLD.message_id;
+        DELETE FROM messages_fts
+        WHERE rowid IN (SELECT rowid FROM messages WHERE id = OLD.message_id);
+        INSERT INTO messages_fts (rowid, message_id, sender_name, conversation_name, participant_names, attachment_text, content)
+        SELECT message_rowid, message_id, sender_name, conversation_name, participant_names, attachment_text, content
+        FROM message_fts_source
+        WHERE message_id = OLD.message_id;
+      END;
+    `);
+  }
+
+  if (tableExists(db, "message_reactions")) {
+    db.exec(`
+      CREATE TRIGGER trg_message_reactions_inserted
+      AFTER INSERT ON message_reactions
+      BEGIN
+        UPDATE messages
+        SET reaction_count = (
+          SELECT COUNT(*) FROM message_reactions WHERE message_id = NEW.message_id AND is_active = 1
+        )
+        WHERE id = NEW.message_id;
+      END;
+
+      CREATE TRIGGER trg_message_reactions_updated
+      AFTER UPDATE ON message_reactions
+      BEGIN
+        UPDATE messages
+        SET reaction_count = (
+          SELECT COUNT(*) FROM message_reactions WHERE message_id = NEW.message_id AND is_active = 1
+        )
+        WHERE id = NEW.message_id;
+      END;
+
+      CREATE TRIGGER trg_message_reactions_deleted
+      AFTER DELETE ON message_reactions
+      BEGIN
+        UPDATE messages
+        SET reaction_count = (
+          SELECT COUNT(*) FROM message_reactions WHERE message_id = OLD.message_id AND is_active = 1
+        )
+        WHERE id = OLD.message_id;
+      END;
+    `);
+  }
+
+  if (
+    tableExists(db, "contacts") &&
+    tableExists(db, "conversation_participants") &&
+    tableExists(db, "timeline_events") &&
+    tableExists(db, "message_reactions")
+  ) {
+    db.exec(`
+      CREATE TRIGGER trg_contacts_name_updated
+      AFTER UPDATE OF name ON contacts
+      BEGIN
+        UPDATE messages
+        SET sender_name = NEW.name
+        WHERE sender_contact_id = NEW.id;
+
+        UPDATE conversation_participants
+        SET participant_name = NEW.name
+        WHERE contact_id = NEW.id;
+
+        UPDATE timeline_events
+        SET actor_name = NEW.name
+        WHERE actor_contact_id = NEW.id;
+
+        UPDATE message_reactions
+        SET reactor_name = NEW.name
+        WHERE reactor_contact_id = NEW.id;
+
+        UPDATE conversations
+        SET participant_names = (
+          SELECT GROUP_CONCAT(cp.participant_name, ' | ')
+          FROM conversation_participants cp
+          WHERE cp.conversation_id = conversations.id
+            AND cp.is_active = 1
+            AND cp.participant_name IS NOT NULL
+            AND cp.participant_name <> ''
+        )
+        WHERE id IN (
+          SELECT DISTINCT conversation_id
+          FROM conversation_participants
+          WHERE contact_id = NEW.id
+        );
+
+        DELETE FROM messages_fts
+        WHERE rowid IN (
+          SELECT rowid FROM messages WHERE sender_contact_id = NEW.id
+          UNION
+          SELECT m.rowid
+          FROM messages m
+          JOIN conversation_participants cp ON cp.conversation_id = m.conversation_id
+          WHERE cp.contact_id = NEW.id
+        );
+
+        INSERT INTO messages_fts (rowid, message_id, sender_name, conversation_name, participant_names, attachment_text, content)
+        SELECT message_rowid, message_id, sender_name, conversation_name, participant_names, attachment_text, content
+        FROM message_fts_source
+        WHERE message_id IN (
+          SELECT id FROM messages WHERE sender_contact_id = NEW.id
+          UNION
+          SELECT m.id
+          FROM messages m
+          JOIN conversation_participants cp ON cp.conversation_id = m.conversation_id
+          WHERE cp.contact_id = NEW.id
+        );
+      END;
+    `);
+  }
+
+  if (tableExists(db, "conversation_participants")) {
+    db.exec(`
+      CREATE TRIGGER trg_conversations_name_updated
+      AFTER UPDATE OF name ON conversations
+      BEGIN
+        UPDATE messages
+        SET conversation_name = NEW.name
+        WHERE conversation_id = NEW.id;
+
+        DELETE FROM messages_fts
+        WHERE rowid IN (
+          SELECT rowid FROM messages WHERE conversation_id = NEW.id
+        );
+
+        INSERT INTO messages_fts (rowid, message_id, sender_name, conversation_name, participant_names, attachment_text, content)
+        SELECT message_rowid, message_id, sender_name, conversation_name, participant_names, attachment_text, content
+        FROM message_fts_source
+        WHERE message_id IN (
+          SELECT id FROM messages WHERE conversation_id = NEW.id
+        );
+      END;
+
+      CREATE TRIGGER trg_conversation_participants_inserted
+      AFTER INSERT ON conversation_participants
+      BEGIN
+        UPDATE conversation_participants
+        SET participant_name = COALESCE(
+          (SELECT name FROM contacts WHERE id = NEW.contact_id),
+          participant_name
+        )
+        WHERE conversation_id = NEW.conversation_id
+          AND contact_id = NEW.contact_id
+          AND COALESCE(source_participant_key, '') = COALESCE(NEW.source_participant_key, '');
+
+        UPDATE conversations
+        SET participant_names = (
+          SELECT GROUP_CONCAT(cp.participant_name, ' | ')
+          FROM conversation_participants cp
+          WHERE cp.conversation_id = NEW.conversation_id
+            AND cp.is_active = 1
+            AND cp.participant_name IS NOT NULL
+            AND cp.participant_name <> ''
+        )
+        WHERE id = NEW.conversation_id;
+
+        DELETE FROM messages_fts
+        WHERE rowid IN (
+          SELECT rowid FROM messages WHERE conversation_id = NEW.conversation_id
+        );
+
+        INSERT INTO messages_fts (rowid, message_id, sender_name, conversation_name, participant_names, attachment_text, content)
+        SELECT message_rowid, message_id, sender_name, conversation_name, participant_names, attachment_text, content
+        FROM message_fts_source
+        WHERE message_id IN (
+          SELECT id FROM messages WHERE conversation_id = NEW.conversation_id
+        );
+      END;
+
+      CREATE TRIGGER trg_conversation_participants_updated
+      AFTER UPDATE ON conversation_participants
+      BEGIN
+        UPDATE conversations
+        SET participant_names = (
+          SELECT GROUP_CONCAT(cp.participant_name, ' | ')
+          FROM conversation_participants cp
+          WHERE cp.conversation_id = NEW.conversation_id
+            AND cp.is_active = 1
+            AND cp.participant_name IS NOT NULL
+            AND cp.participant_name <> ''
+        )
+        WHERE id = NEW.conversation_id;
+
+        DELETE FROM messages_fts
+        WHERE rowid IN (
+          SELECT rowid FROM messages WHERE conversation_id = NEW.conversation_id
+        );
+
+        INSERT INTO messages_fts (rowid, message_id, sender_name, conversation_name, participant_names, attachment_text, content)
+        SELECT message_rowid, message_id, sender_name, conversation_name, participant_names, attachment_text, content
+        FROM message_fts_source
+        WHERE message_id IN (
+          SELECT id FROM messages WHERE conversation_id = NEW.conversation_id
+        );
+      END;
+
+      CREATE TRIGGER trg_conversation_participants_deleted
+      AFTER DELETE ON conversation_participants
+      BEGIN
+        UPDATE conversations
+        SET participant_names = (
+          SELECT GROUP_CONCAT(cp.participant_name, ' | ')
+          FROM conversation_participants cp
+          WHERE cp.conversation_id = OLD.conversation_id
+            AND cp.is_active = 1
+            AND cp.participant_name IS NOT NULL
+            AND cp.participant_name <> ''
+        )
+        WHERE id = OLD.conversation_id;
+
+        DELETE FROM messages_fts
+        WHERE rowid IN (
+          SELECT rowid FROM messages WHERE conversation_id = OLD.conversation_id
+        );
+
+        INSERT INTO messages_fts (rowid, message_id, sender_name, conversation_name, participant_names, attachment_text, content)
+        SELECT message_rowid, message_id, sender_name, conversation_name, participant_names, attachment_text, content
+        FROM message_fts_source
+        WHERE message_id IN (
+          SELECT id FROM messages WHERE conversation_id = OLD.conversation_id
+        );
+      END;
+    `);
+  }
+}
+
 export const MIGRATIONS: Migration[] = [
   {
+    id: "0000_prepare_schema_migrations_and_legacy_sync_runs",
+    apply: (db) => {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS schema_migrations (
+          id TEXT PRIMARY KEY,
+          applied_at INTEGER NOT NULL
+        )
+      `);
+      repairLegacySyncRunsIfNeeded(db);
+    },
+  },
+  {
     id: "0001_bootstrap_current_schema",
-    legacyIds: [
-      "0001_initial_local_cued_v2",
-      "0002_integration_states",
-      "0003_auth_sessions",
-      "0004_projection_state",
-      "0005_projection_vnext_cut_down",
-      "0006_sync_run_indexes",
-      "0007_projection_trigger_cleanup",
-      "0008_outbound_messages",
-      "0009_app_settings",
-      "0010_requestable_sync_capable_backfill",
-      "0011_sync_run_timing_v2",
-      "0012_attachment_access_and_content",
-      "0013_slack_backfill_proofs",
-      "0014_messages_fts_rowid_alignment",
-    ],
+    legacyIds: ["0014_messages_fts_rowid_alignment"],
     sql: `
       CREATE TABLE IF NOT EXISTS schema_migrations (
         id TEXT PRIMARY KEY,
@@ -862,6 +1432,15 @@ export const MIGRATIONS: Migration[] = [
           END
         `);
       }
+    },
+  },
+  {
+    id: "0004_repair_partial_legacy_bootstrap",
+    apply: (db) => {
+      repairLegacySyncRunsIfNeeded(db);
+      repairLegacyMessageAttachmentsIfNeeded(db);
+      ensureLegacySupportTables(db);
+      rebuildMessagesFtsArtifacts(db);
     },
   },
 ];

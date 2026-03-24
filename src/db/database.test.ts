@@ -908,6 +908,130 @@ describe("CuedDatabase", () => {
     db.close();
   });
 
+  it("repairs partially migrated legacy databases after the squash", () => {
+    const dir = mkdtempSync(join(tmpdir(), "cued-v2-partial-legacy-repair-"));
+    tempDirs.push(dir);
+    const db = new CuedDatabase(join(dir, "local.db"));
+    const sql = sqlite(db);
+
+    sql.exec(`
+      CREATE TABLE schema_migrations (
+        id TEXT PRIMARY KEY,
+        applied_at INTEGER NOT NULL
+      )
+    `);
+    sql.exec(`
+      INSERT INTO schema_migrations (id, applied_at)
+      VALUES ('0010_requestable_sync_capable_backfill', 1)
+    `);
+    sql.exec(`
+      CREATE TABLE sync_runs (
+        id TEXT PRIMARY KEY,
+        platform TEXT,
+        account_key TEXT,
+        run_type TEXT NOT NULL,
+        status TEXT NOT NULL,
+        trigger TEXT NOT NULL,
+        started_at INTEGER,
+        finished_at INTEGER,
+        details_json TEXT
+      )
+    `);
+    sql.exec(`
+      CREATE TABLE sync_run_errors (
+        id TEXT PRIMARY KEY,
+        sync_run_id TEXT NOT NULL,
+        platform TEXT,
+        account_key TEXT,
+        error_code TEXT,
+        error_message TEXT NOT NULL,
+        details_json TEXT,
+        created_at INTEGER NOT NULL
+      )
+    `);
+    sql.exec(`
+      INSERT INTO sync_runs (
+        id, platform, account_key, run_type, status, trigger, started_at, finished_at, details_json
+      ) VALUES ('legacy-run', 'slack', 'default', 'sync', 'queued', 'scheduler', 123, NULL, '{}')
+    `);
+    sql.exec(`
+      CREATE TABLE message_attachments (
+        id TEXT PRIMARY KEY,
+        message_id TEXT NOT NULL,
+        platform TEXT NOT NULL,
+        account_key TEXT NOT NULL,
+        source_attachment_key TEXT NOT NULL,
+        kind TEXT,
+        mime_type TEXT,
+        filename TEXT,
+        title TEXT,
+        local_path TEXT,
+        remote_url TEXT,
+        size_bytes INTEGER,
+        text_content TEXT,
+        metadata_json TEXT,
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL,
+        UNIQUE(platform, account_key, source_attachment_key)
+      )
+    `);
+
+    db.migrate();
+
+    const syncRunColumns = (
+      sql.prepare("PRAGMA table_info(sync_runs)").all() as Array<{ name: string }>
+    ).map((column) => column.name);
+    const messageAttachmentColumns = (
+      sql.prepare("PRAGMA table_info(message_attachments)").all() as Array<{ name: string }>
+    ).map((column) => column.name);
+    const tables = (
+      sql.prepare("SELECT name FROM sqlite_master WHERE type = 'table'").all() as Array<{
+        name: string;
+      }>
+    ).map((row) => row.name);
+    const triggerSql = sql
+      .prepare(
+        "SELECT sql FROM sqlite_master WHERE type = 'trigger' AND name = 'trg_messages_inserted_fts'",
+      )
+      .get() as { sql: string } | undefined;
+
+    expect(
+      sql
+        .prepare("SELECT 1 FROM schema_migrations WHERE id = ?")
+        .get("0001_bootstrap_current_schema"),
+    ).toBeTruthy();
+    expect(
+      sql
+        .prepare("SELECT 1 FROM schema_migrations WHERE id = ?")
+        .get("0004_repair_partial_legacy_bootstrap"),
+    ).toBeTruthy();
+    expect(syncRunColumns).toContain("queued_at");
+    expect(
+      sql.prepare("SELECT queued_at, started_at FROM sync_runs WHERE id = ?").get("legacy-run"),
+    ).toEqual({ queued_at: 123, started_at: null });
+    expect(messageAttachmentColumns).toEqual(
+      expect.arrayContaining([
+        "access_kind",
+        "access_ref_json",
+        "preview_ref_json",
+        "availability_status",
+        "provider_metadata_json",
+      ]),
+    );
+    expect(tables).toEqual(
+      expect.arrayContaining([
+        "slack_backfill_proofs",
+        "attachment_cache",
+        "attachment_content",
+        "projection_state",
+        "messages_fts",
+      ]),
+    );
+    expect(triggerSql?.sql).toContain("rowid = NEW.rowid");
+
+    db.close();
+  });
+
   it("batches source account and raw event writes without duplicating rows", () => {
     const db = createDb();
 
