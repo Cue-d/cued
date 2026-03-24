@@ -28,7 +28,6 @@ import {
   participantSourceKey,
 } from "./events.js";
 
-const DEFAULT_SYNC_HISTORY_DAYS = Number(process.env.CUED_SYNC_HISTORY_DAYS ?? "730");
 const INCREMENTAL_BUFFER_MS = 5 * 60 * 1000;
 const MAX_CONNECTION_PAGES = Number(process.env.CUED_LINKEDIN_CONNECTION_PAGES ?? "25");
 const MAX_CONVERSATION_PAGES = Number(process.env.CUED_LINKEDIN_CONVERSATION_PAGES ?? "50");
@@ -76,15 +75,11 @@ function getLinkedInFetchConcurrency(): number {
     : 3;
 }
 
-function getHistoryCutoffMs(): number {
-  return now() - DEFAULT_SYNC_HISTORY_DAYS * 24 * 60 * 60 * 1000;
-}
-
 function incrementalOldestMs(lastSyncAt?: number): number {
   if (lastSyncAt && lastSyncAt > 0) {
     return Math.max(0, lastSyncAt - INCREMENTAL_BUFFER_MS);
   }
-  return getHistoryCutoffMs();
+  return 0;
 }
 
 function hasInboxCategory(conversation: Conversation): boolean {
@@ -209,7 +204,6 @@ async function listConversations(
   while (
     firstPage.conversations.length > 0 &&
     Number.isFinite(oldestLastActivity) &&
-    oldestLastActivity > getHistoryCutoffMs() &&
     pageCount < MAX_CONVERSATION_PAGES
   ) {
     const page =

@@ -853,6 +853,61 @@ describe("CuedDatabase", () => {
     db.close();
   });
 
+  it("repairs removal_reason for databases that already marked 0002 applied", () => {
+    const dir = mkdtempSync(join(tmpdir(), "cued-v2-removal-reason-repair-"));
+    tempDirs.push(dir);
+    const db = new CuedDatabase(join(dir, "local.db"));
+    const sql = sqlite(db);
+
+    sql.exec(`
+      CREATE TABLE schema_migrations (
+        id TEXT PRIMARY KEY,
+        applied_at INTEGER NOT NULL
+      )
+    `);
+    sql.exec(`
+      INSERT INTO schema_migrations (id, applied_at)
+      VALUES ('0001_bootstrap_current_schema', 1), ('0002_upgrade_existing_schema_columns', 2)
+    `);
+    sql.exec(`
+      CREATE TABLE conversations (
+        id TEXT PRIMARY KEY,
+        platform TEXT NOT NULL,
+        account_key TEXT NOT NULL,
+        source_conversation_key TEXT NOT NULL,
+        native_conversation_key TEXT,
+        type TEXT NOT NULL,
+        is_active INTEGER NOT NULL DEFAULT 1,
+        service TEXT,
+        name TEXT,
+        topic TEXT,
+        participant_names TEXT,
+        last_message_id TEXT,
+        last_message_at INTEGER,
+        last_message_preview TEXT,
+        unread_count INTEGER NOT NULL DEFAULT 0,
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL,
+        UNIQUE(platform, account_key, source_conversation_key)
+      )
+    `);
+
+    db.migrate();
+
+    const conversationColumns = (
+      sql.prepare("PRAGMA table_info(conversations)").all() as Array<{ name: string }>
+    ).map((column) => column.name);
+
+    expect(conversationColumns).toContain("removal_reason");
+    expect(
+      sql
+        .prepare("SELECT 1 FROM schema_migrations WHERE id = ?")
+        .get("0003_repair_conversation_removal_reason"),
+    ).toBeTruthy();
+
+    db.close();
+  });
+
   it("batches source account and raw event writes without duplicating rows", () => {
     const db = createDb();
 
