@@ -736,6 +736,7 @@ function ensureConversationStub(
       nativeConversationKey: null,
       type: "dm",
       isActive: 1,
+      removalReason: null,
       service: null,
       name: null,
       topic: null,
@@ -1016,6 +1017,7 @@ function projectConversationObservation(
     nativeConversationKey?: string | null;
     type: "dm" | "group";
     isActive: number;
+    removalReason?: string | null;
     service?: string | null;
     name?: string | null;
     topic?: string | null;
@@ -1024,6 +1026,8 @@ function projectConversationObservation(
     updatedAt: event.observed_at,
     type: payload.conversationType,
     isActive: event.event_kind === "removed" ? 0 : 1,
+    removalReason:
+      event.event_kind === "removed" ? normalizeText(payload.removalReason ?? null) : null,
   };
   if (payload.nativeConversationKey !== undefined) {
     conversationSet.nativeConversationKey = normalizeText(payload.nativeConversationKey);
@@ -1408,6 +1412,7 @@ function projectParticipantEvent(
 function projectTimelineEvent(
   conn: LocalDbExecutor,
   cache: ProjectionCache,
+  changes: ProjectionChangeSet,
   event: ProjectableRawEvent,
 ): void {
   const payload = JSON.parse(event.payload_json) as TimelineEventPayload;
@@ -1474,37 +1479,73 @@ function projectTimelineEvent(
       },
     })
     .run();
+
+  changes.dirtyConversationIds.add(conversationId);
 }
 
 function refreshConversationSummariesForIds(
   conn: LocalDbExecutor,
   conversationIds: Set<string>,
 ): void {
+  const latestMessageId = sql`(
+    SELECT m.id
+    FROM messages m
+    WHERE m.conversation_id = conversations.id
+    ORDER BY m.sent_at DESC, m.updated_at DESC, m.id DESC
+    LIMIT 1
+  )`;
+  const latestMessageAt = sql`(
+    SELECT m.sent_at
+    FROM messages m
+    WHERE m.conversation_id = conversations.id
+    ORDER BY m.sent_at DESC, m.updated_at DESC, m.id DESC
+    LIMIT 1
+  )`;
+  const latestMessagePreview = sql`(
+    SELECT m.content
+    FROM messages m
+    WHERE m.conversation_id = conversations.id
+    ORDER BY m.sent_at DESC, m.updated_at DESC, m.id DESC
+    LIMIT 1
+  )`;
+  const latestSystemMessageAt = sql`(
+    SELECT te.event_at
+    FROM timeline_events te
+    WHERE te.conversation_id = conversations.id
+      AND te.event_kind = 'system_message'
+    ORDER BY te.event_at DESC, te.updated_at DESC, te.id DESC
+    LIMIT 1
+  )`;
+  const latestSystemMessagePreview = sql`(
+    SELECT te.text
+    FROM timeline_events te
+    WHERE te.conversation_id = conversations.id
+      AND te.event_kind = 'system_message'
+    ORDER BY te.event_at DESC, te.updated_at DESC, te.id DESC
+    LIMIT 1
+  )`;
   for (const chunk of chunkArray([...conversationIds], SQL_CHUNK_SIZE)) {
     conn.run(sql`
       UPDATE conversations
       SET
-        last_message_id = (
-          SELECT m.id
-          FROM messages m
-          WHERE m.conversation_id = conversations.id
-          ORDER BY m.sent_at DESC, m.updated_at DESC, m.id DESC
-          LIMIT 1
-        ),
-        last_message_at = (
-          SELECT m.sent_at
-          FROM messages m
-          WHERE m.conversation_id = conversations.id
-          ORDER BY m.sent_at DESC, m.updated_at DESC, m.id DESC
-          LIMIT 1
-        ),
-        last_message_preview = (
-          SELECT m.content
-          FROM messages m
-          WHERE m.conversation_id = conversations.id
-          ORDER BY m.sent_at DESC, m.updated_at DESC, m.id DESC
-          LIMIT 1
-        ),
+        last_message_id = CASE
+          WHEN ${latestSystemMessageAt} IS NOT NULL
+            AND (${latestMessageAt} IS NULL OR ${latestSystemMessageAt} > ${latestMessageAt})
+          THEN NULL
+          ELSE ${latestMessageId}
+        END,
+        last_message_at = CASE
+          WHEN ${latestSystemMessageAt} IS NOT NULL
+            AND (${latestMessageAt} IS NULL OR ${latestSystemMessageAt} > ${latestMessageAt})
+          THEN ${latestSystemMessageAt}
+          ELSE ${latestMessageAt}
+        END,
+        last_message_preview = CASE
+          WHEN ${latestSystemMessageAt} IS NOT NULL
+            AND (${latestMessageAt} IS NULL OR ${latestSystemMessageAt} > ${latestMessageAt})
+          THEN ${latestSystemMessagePreview}
+          ELSE ${latestMessagePreview}
+        END,
         unread_count = (
           CASE
             WHEN conversations.is_active = 0 THEN 0
@@ -1999,7 +2040,7 @@ function projectEventBatch(
         continue;
       }
       if (shapedEvent.entity_kind === "timeline_event") {
-        projectTimelineEvent(tx, cache, shapedEvent);
+        projectTimelineEvent(tx, cache, changes, shapedEvent);
       }
     }
 

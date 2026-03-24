@@ -438,6 +438,85 @@ describe("projector", () => {
     db.close();
   });
 
+  it("uses system timeline notices as the latest conversation summary activity", () => {
+    const db = createDb();
+    const observedAt = 1_710_050_000_000;
+
+    db.insertRawEvents([
+      {
+        id: "conversation-system-summary",
+        platform: "linkedin",
+        accountKey: "default",
+        entityKind: "conversation",
+        eventKind: "observed",
+        observedAt,
+        dedupeKey: "conversation:system-summary",
+        payload: {
+          sourceConversationKey: "thread-system-summary",
+          conversationType: "dm",
+          displayName: "Ava Chen",
+          participants: [{ sourceEntityKey: "linkedin:urn:li:member:ACoAAA1" }],
+        },
+        sourceVersion: "test-v1",
+      },
+      {
+        id: "message-system-summary",
+        platform: "linkedin",
+        accountKey: "default",
+        entityKind: "message",
+        eventKind: "created",
+        observedAt: observedAt + 1,
+        dedupeKey: "message:system-summary",
+        payload: {
+          sourceMessageKey: "msg-system-summary",
+          sourceConversationKey: "thread-system-summary",
+          senderSourceKey: "linkedin:urn:li:member:ACoAAA1",
+          sentAt: observedAt + 1,
+          content: "older human message",
+          isFromMe: false,
+        },
+        sourceVersion: "test-v1",
+      },
+      {
+        id: "timeline-system-summary",
+        platform: "linkedin",
+        accountKey: "default",
+        entityKind: "timeline_event",
+        eventKind: "system_message",
+        observedAt: observedAt + 2,
+        dedupeKey: "timeline:system-summary",
+        payload: {
+          sourceEventKey: "timeline:system-summary",
+          sourceConversationKey: "thread-system-summary",
+          eventKind: "system_message",
+          eventAt: observedAt + 5,
+          text: "Ava renamed the conversation",
+        },
+        sourceVersion: "test-v1",
+      },
+    ]);
+
+    projectPendingRawEvents(db);
+
+    const conversationRow = db.orm().get<{
+      last_message_id: string | null;
+      last_message_at: number | null;
+      last_message_preview: string | null;
+    }>(sql`
+      SELECT last_message_id, last_message_at, last_message_preview
+      FROM conversations
+      WHERE source_conversation_key = 'thread-system-summary'
+    `);
+
+    expect(conversationRow).toEqual({
+      last_message_id: null,
+      last_message_at: observedAt + 5,
+      last_message_preview: "Ava renamed the conversation",
+    });
+
+    db.close();
+  });
+
   it("keeps FTS rowids aligned when reprojecting an existing message", () => {
     const db = createDb();
     const observedAt = 1_710_200_000_000;
@@ -2270,6 +2349,7 @@ describe("projector", () => {
       payload: {
         sourceConversationKey: "linkedin:urn:li:fs_conversation:CONV_DELETE",
         conversationType: "dm",
+        removalReason: "deleted",
         unreadCount: 0,
         participants: [{ sourceEntityKey: "linkedin:urn:li:member:ACoAAA1" }],
       },
@@ -2280,9 +2360,10 @@ describe("projector", () => {
 
     const conversationRow = db.orm().get<{
       is_active: number;
+      removal_reason: string | null;
       unread_count: number;
     }>(sql`
-      SELECT is_active, unread_count
+      SELECT is_active, removal_reason, unread_count
       FROM conversations
       WHERE source_conversation_key = 'linkedin:urn:li:fs_conversation:CONV_DELETE'
     `);
@@ -2302,6 +2383,7 @@ describe("projector", () => {
 
     expect(conversationRow).toEqual({
       is_active: 0,
+      removal_reason: "deleted",
       unread_count: 0,
     });
     expect(participantRow).toEqual({

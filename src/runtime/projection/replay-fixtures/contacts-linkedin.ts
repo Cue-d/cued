@@ -133,6 +133,7 @@ export const contactsLinkedInReplayFixtures: ProjectionReplayFixture[] = [
       expect(snapshot.conversations[0]).toMatchObject({
         name: "Northwind diligence",
         isActive: 0,
+        removalReason: "deleted",
         unreadCount: 0,
       });
       expect(snapshot.messages).toHaveLength(1);
@@ -219,6 +220,7 @@ export const contactsLinkedInReplayFixtures: ProjectionReplayFixture[] = [
           nativeConversationKey: "urn:li:fsd_conversation:thread-removed",
           service: "linkedin",
           unreadCount: 0,
+          removalReason: "deleted",
           participants: [{ sourceEntityKey: "contacts:milo" }],
         },
         sourceVersion: "linkedin-v1",
@@ -233,6 +235,9 @@ export const contactsLinkedInReplayFixtures: ProjectionReplayFixture[] = [
       expect(snapshot.conversations).toHaveLength(1);
       expect(snapshot.conversations[0]).toMatchObject({
         name: "Ava Chen",
+        lastMessageId: null,
+        lastMessageAt: 1_710_000_200_275,
+        lastMessagePreview: "Ava renamed the conversation",
         unreadCount: 0,
       });
       expect(snapshot.messages).toHaveLength(1);

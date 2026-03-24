@@ -837,10 +837,13 @@ describe("CuedDatabase", () => {
       expect.arrayContaining(["normalized_schema", "provenance_json"]),
     );
     expect(conversationColumns).toContain("is_active");
+    expect(conversationColumns).toContain("removal_reason");
     expect(timelineColumns).toContain("subject_source_key");
     expect(
-      sql.prepare("SELECT is_active FROM conversations WHERE id = ?").get("legacy-conversation"),
-    ).toEqual({ is_active: 0 });
+      sql
+        .prepare("SELECT is_active, removal_reason FROM conversations WHERE id = ?")
+        .get("legacy-conversation"),
+    ).toEqual({ is_active: 0, removal_reason: "deleted" });
 
     db.close();
   });

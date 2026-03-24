@@ -226,6 +226,7 @@ export const MIGRATIONS: Migration[] = [
         native_conversation_key TEXT,
         type TEXT NOT NULL,
         is_active INTEGER NOT NULL DEFAULT 1,
+        removal_reason TEXT,
         service TEXT,
         name TEXT,
         topic TEXT,
@@ -813,12 +814,17 @@ export const MIGRATIONS: Migration[] = [
       addColumnIfMissing(db, "raw_events", "normalized_schema TEXT");
       addColumnIfMissing(db, "raw_events", "provenance_json TEXT");
       addColumnIfMissing(db, "conversations", "is_active INTEGER NOT NULL DEFAULT 1");
+      addColumnIfMissing(db, "conversations", "removal_reason TEXT");
       if (columnExists(db, "conversations", "subtype")) {
         db.exec(`
           UPDATE conversations
           SET is_active = CASE
             WHEN subtype = 'deleted' THEN 0
             ELSE is_active
+          END,
+          removal_reason = CASE
+            WHEN subtype IS NOT NULL AND subtype <> '' THEN subtype
+            ELSE removal_reason
           END
         `);
       }

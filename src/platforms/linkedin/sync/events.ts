@@ -365,6 +365,7 @@ export function buildLinkedInConversationRemovalEvents(input: {
         nativeConversationKey: normalizedConversation,
         service: "linkedin",
         unreadCount: 0,
+        removalReason: input.reason,
         participants:
           input.conversation?.conversationParticipants.map((participant) => ({
             sourceEntityKey: participantSourceKey(participant),
