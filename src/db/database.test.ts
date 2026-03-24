@@ -680,6 +680,11 @@ describe("CuedDatabase", () => {
       max_raw_event_rowid: 1,
       pending_raw_events: 1,
     });
+    expect(
+      sqlite(db)
+        .prepare("SELECT COUNT(*) AS count FROM projection_state WHERE singleton_key = 'global'")
+        .get(),
+    ).toEqual({ count: 1 });
 
     db.close();
   });
