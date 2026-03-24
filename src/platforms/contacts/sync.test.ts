@@ -26,7 +26,7 @@ describe("contacts worker loader resolution", () => {
     return dir;
   }
 
-  it("prefers fixture input when configured", () => {
+  it("prefers file input when configured", () => {
     const repoRoot = createRepoRoot();
     expect(
       resolveContactsLoader(
@@ -37,7 +37,7 @@ describe("contacts worker loader resolution", () => {
         repoRoot,
       ),
     ).toEqual({
-      kind: "fixture",
+      kind: "file",
       path: "/tmp/contacts.json",
     });
   });
@@ -57,7 +57,7 @@ describe("contacts worker loader resolution", () => {
     });
   });
 
-  it("falls back to JXA when no fixture or native binary exists", () => {
+  it("falls back to JXA when no file input or native binary exists", () => {
     const repoRoot = createRepoRoot();
     expect(resolveContactsLoader({}, repoRoot)).toEqual({ kind: "jxa" });
   });

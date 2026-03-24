@@ -92,6 +92,29 @@ repo root app (daemon, CLI, sync orchestration, projection)
 
 The old cloud web/mobile product is gone. Do not add new code against legacy `@cued/*` packages.
 
+## Normalization
+
+Adapters are platform-specific. The projector is not.
+
+Cued normalizes platform data into one shared cross-platform event model so projection, replay, and rebuild do not branch on provider-specific schema names. Provider-specific detail stays in payload metadata or provenance.
+
+## Platform Capability Matrix
+
+This matrix documents current shipped behavior, not roadmap promises.
+
+| Platform | Send | Receive | Realtime ingest | Full history sync | Message edits | Deletes | Reactions | Threads / replies | Read receipts | Attachments | Contact sync |
+| -------- | ---- | ------- | --------------- | ----------------- | ------------- | ------- | --------- | ----------------- | ------------- | ----------- | ------------ |
+| Contacts | ❌ | ❌ | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ✅ |
+| iMessage | ❌ | ✅ | ✅ | ✅ | ❌ | ❌ | ✅ | ❌ | ◐ | ✅ | ◐ |
+| LinkedIn | ❌ | ✅ | ✅ | ◐ | ✅ | ✅ | ✅ | ✅ | ◐ | ✅ | ✅ |
+| Signal | ✅ | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ✅ | ◐ |
+| Slack | ❌ | ✅ | ✅ | ✅ | ◐ | ❌ | ◐ | ✅ | ❌ | ✅ | ✅ |
+| WhatsApp | ✅ | ✅ | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ | ◐ | ✅ | ◐ |
+
+Legend: `✅` supported, `◐` partial, `❌` unsupported.
+
+LinkedIn history is currently partial: Cued imports inbox-visible threads and bounded per-conversation backfill, but not every archived or non-inbox thread.
+
 ## Install From Source
 
 ### Prerequisites
@@ -213,7 +236,7 @@ Benchmark scenarios:
 - `clean_idle` is the required scenario for every memory change.
 - `cloned_profile_idle` is available via `--scenario=cloned`, but it is informational until the cloned-profile startup failure is fixed.
 - `idle_cpu_power` runs a 10-minute post-ready idle sample and captures CPU, process churn, and a best-effort power proxy.
-- `active_sync_fixture` runs fixture ingest + projection work and captures active CPU and memory behavior.
+- `active_sync_projection` runs replay-style sync + projection work and captures active CPU and memory behavior.
 - `--baseline=...` enables regression checks for startup latency, main RSS, tree RSS, physical footprint, tree RSS spikes, and idle CPU.
 - `--write-baseline=...` updates the checked-in baseline after a merged improvement, not during experiments.
 

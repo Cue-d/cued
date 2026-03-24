@@ -59,10 +59,10 @@ describe("attachment service", () => {
       .prepare(
         `
         INSERT INTO conversations (
-          id, platform, account_key, source_conversation_key, native_conversation_key, type, subtype,
+          id, platform, account_key, source_conversation_key, native_conversation_key, type, is_active,
           service, name, topic, participant_names, last_message_id, last_message_at, last_message_preview,
           unread_count, created_at, updated_at
-        ) VALUES (?, 'imessage', 'local', ?, NULL, 'dm', NULL, 'iMessage', ?, NULL, '', NULL, NULL, NULL, 0, ?, ?)
+        ) VALUES (?, 'imessage', 'local', ?, NULL, 'dm', 1, 'iMessage', ?, NULL, '', NULL, NULL, NULL, 0, ?, ?)
       `,
       )
       .run("conversation-1", "source-conversation-1", "Thread", timestamp, timestamp);
@@ -147,10 +147,10 @@ describe("attachment service", () => {
       .prepare(
         `
         INSERT INTO conversations (
-          id, platform, account_key, source_conversation_key, native_conversation_key, type, subtype,
+          id, platform, account_key, source_conversation_key, native_conversation_key, type, is_active,
           service, name, topic, participant_names, last_message_id, last_message_at, last_message_preview,
           unread_count, created_at, updated_at
-        ) VALUES (?, 'imessage', 'local', ?, NULL, 'dm', NULL, 'iMessage', ?, NULL, '', NULL, NULL, NULL, 0, ?, ?)
+        ) VALUES (?, 'imessage', 'local', ?, NULL, 'dm', 1, 'iMessage', ?, NULL, '', NULL, NULL, NULL, 0, ?, ?)
       `,
       )
       .run("conversation-variant", "source-conversation-variant", "Thread", timestamp, timestamp);
@@ -232,10 +232,10 @@ describe("attachment service", () => {
       .prepare(
         `
         INSERT INTO conversations (
-          id, platform, account_key, source_conversation_key, native_conversation_key, type, subtype,
+          id, platform, account_key, source_conversation_key, native_conversation_key, type, is_active,
           service, name, topic, participant_names, last_message_id, last_message_at, last_message_preview,
           unread_count, created_at, updated_at
-        ) VALUES (?, 'imessage', 'local', ?, NULL, 'dm', NULL, 'iMessage', ?, NULL, '', NULL, NULL, NULL, 0, ?, ?)
+        ) VALUES (?, 'imessage', 'local', ?, NULL, 'dm', 1, 'iMessage', ?, NULL, '', NULL, NULL, NULL, 0, ?, ?)
       `,
       )
       .run("conversation-2", "source-conversation-2", "Thread", timestamp, timestamp);
@@ -297,10 +297,10 @@ describe("attachment service", () => {
       .prepare(
         `
         INSERT INTO conversations (
-          id, platform, account_key, source_conversation_key, native_conversation_key, type, subtype,
+          id, platform, account_key, source_conversation_key, native_conversation_key, type, is_active,
           service, name, topic, participant_names, last_message_id, last_message_at, last_message_preview,
           unread_count, created_at, updated_at
-        ) VALUES (?, 'imessage', 'local', ?, NULL, 'dm', NULL, 'iMessage', ?, NULL, '', NULL, NULL, NULL, 0, ?, ?)
+        ) VALUES (?, 'imessage', 'local', ?, NULL, 'dm', 1, 'iMessage', ?, NULL, '', NULL, NULL, NULL, 0, ?, ?)
       `,
       )
       .run("conversation-3", "source-conversation-3", "Thread", timestamp, timestamp);
@@ -367,10 +367,10 @@ describe("attachment service", () => {
       .prepare(
         `
         INSERT INTO conversations (
-          id, platform, account_key, source_conversation_key, native_conversation_key, type, subtype,
+          id, platform, account_key, source_conversation_key, native_conversation_key, type, is_active,
           service, name, topic, participant_names, last_message_id, last_message_at, last_message_preview,
           unread_count, created_at, updated_at
-        ) VALUES (?, 'imessage', 'local', ?, NULL, 'dm', NULL, 'iMessage', ?, NULL, '', NULL, NULL, NULL, 0, ?, ?)
+        ) VALUES (?, 'imessage', 'local', ?, NULL, 'dm', 1, 'iMessage', ?, NULL, '', NULL, NULL, NULL, 0, ?, ?)
       `,
       )
       .run("conversation-shared", "source-conversation-shared", "Thread", timestamp, timestamp);

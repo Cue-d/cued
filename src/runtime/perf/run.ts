@@ -3,7 +3,10 @@ import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { performance } from "node:perf_hooks";
-import type { ProviderRawEventInput } from "../../core/types/provider.js";
+import {
+  buildNormalizedRawEventSchema,
+  type ProviderRawEventInput,
+} from "../../core/types/provider.js";
 import { CuedDatabase } from "../../db/database.js";
 import { buildIMessageSyncBundle } from "../../platforms/imessage/sync.js";
 import type {
@@ -34,6 +37,16 @@ type BenchmarkResult = {
 };
 
 type BaselineFile = Record<string, { medianMs: number }>;
+
+function perfRawEvent(input: ProviderRawEventInput): ProviderRawEventInput {
+  return {
+    ...input,
+    normalizedSchema: buildNormalizedRawEventSchema(input.entityKind, input.eventKind),
+    provenance: {
+      adapterVersion: "perf-harness@1",
+    },
+  };
+}
 
 function median(values: number[]): number {
   const sorted = [...values].sort((left, right) => left - right);
@@ -471,62 +484,68 @@ function buildProjectionReplayEvents(): ProviderRawEventInput[] {
   const rawEvents: ProviderRawEventInput[] = [];
   const baseObservedAt = 1_771_000_000_000;
   for (let conversationIndex = 1; conversationIndex <= 100; conversationIndex += 1) {
-    rawEvents.push({
-      id: `contact-${conversationIndex}`,
-      platform: "contacts",
-      accountKey: "local",
-      entityKind: "contact",
-      eventKind: "observed",
-      observedAt: baseObservedAt + conversationIndex,
-      dedupeKey: `contacts:${conversationIndex}`,
-      payload: {
-        sourceEntityKey: `contacts:${conversationIndex}`,
-        fields: {
-          display_name: `Perf Contact ${conversationIndex}`,
-        },
-        handles: [
-          { type: "email", value: `perf-${conversationIndex}@example.com`, deterministic: true },
-        ],
-      },
-      sourceVersion: "perf-v1",
-    });
-    rawEvents.push({
-      id: `conversation-${conversationIndex}`,
-      platform: "linkedin",
-      accountKey: "default",
-      entityKind: "conversation",
-      eventKind: "observed",
-      observedAt: baseObservedAt + 10_000 + conversationIndex,
-      dedupeKey: `conversation:${conversationIndex}`,
-      payload: {
-        sourceConversationKey: `perf-conversation-${conversationIndex}`,
-        conversationType: "dm",
-        service: "linkedin",
-        participants: [{ sourceEntityKey: `contacts:${conversationIndex}` }],
-      },
-      sourceVersion: "perf-v1",
-    });
-
-    for (let messageIndex = 1; messageIndex <= 98; messageIndex += 1) {
-      rawEvents.push({
-        id: `message-${conversationIndex}-${messageIndex}`,
-        platform: "linkedin",
-        accountKey: "default",
-        entityKind: "message",
-        eventKind: "message_created",
-        observedAt: baseObservedAt + 20_000 + conversationIndex * 100 + messageIndex,
-        dedupeKey: `message:${conversationIndex}:${messageIndex}`,
+    rawEvents.push(
+      perfRawEvent({
+        id: `contact-${conversationIndex}`,
+        platform: "contacts",
+        accountKey: "local",
+        entityKind: "contact",
+        eventKind: "observed",
+        observedAt: baseObservedAt + conversationIndex,
+        dedupeKey: `contacts:${conversationIndex}`,
         payload: {
-          sourceMessageKey: `perf-message-${conversationIndex}-${messageIndex}`,
-          sourceConversationKey: `perf-conversation-${conversationIndex}`,
-          senderSourceKey: `contacts:${conversationIndex}`,
-          sentAt: baseObservedAt + conversationIndex * 100 + messageIndex,
-          content: `Projection perf message ${conversationIndex}-${messageIndex}`,
-          service: "linkedin",
-          isFromMe: false,
+          sourceEntityKey: `contacts:${conversationIndex}`,
+          fields: {
+            display_name: `Perf Contact ${conversationIndex}`,
+          },
+          handles: [
+            { type: "email", value: `perf-${conversationIndex}@example.com`, deterministic: true },
+          ],
         },
         sourceVersion: "perf-v1",
-      });
+      }),
+    );
+    rawEvents.push(
+      perfRawEvent({
+        id: `conversation-${conversationIndex}`,
+        platform: "linkedin",
+        accountKey: "default",
+        entityKind: "conversation",
+        eventKind: "observed",
+        observedAt: baseObservedAt + 10_000 + conversationIndex,
+        dedupeKey: `conversation:${conversationIndex}`,
+        payload: {
+          sourceConversationKey: `perf-conversation-${conversationIndex}`,
+          conversationType: "dm",
+          service: "linkedin",
+          participants: [{ sourceEntityKey: `contacts:${conversationIndex}` }],
+        },
+        sourceVersion: "perf-v1",
+      }),
+    );
+
+    for (let messageIndex = 1; messageIndex <= 98; messageIndex += 1) {
+      rawEvents.push(
+        perfRawEvent({
+          id: `message-${conversationIndex}-${messageIndex}`,
+          platform: "linkedin",
+          accountKey: "default",
+          entityKind: "message",
+          eventKind: "created",
+          observedAt: baseObservedAt + 20_000 + conversationIndex * 100 + messageIndex,
+          dedupeKey: `message:${conversationIndex}:${messageIndex}`,
+          payload: {
+            sourceMessageKey: `perf-message-${conversationIndex}-${messageIndex}`,
+            sourceConversationKey: `perf-conversation-${conversationIndex}`,
+            senderSourceKey: `contacts:${conversationIndex}`,
+            sentAt: baseObservedAt + conversationIndex * 100 + messageIndex,
+            content: `Projection perf message ${conversationIndex}-${messageIndex}`,
+            service: "linkedin",
+            isFromMe: false,
+          },
+          sourceVersion: "perf-v1",
+        }),
+      );
     }
   }
 
@@ -540,65 +559,71 @@ function buildIncrementalProjectionEvents(
   const rawEvents: ProviderRawEventInput[] = [];
   const baseObservedAt = 1_772_000_000_000;
   for (let conversationIndex = 1; conversationIndex <= conversationCount; conversationIndex += 1) {
-    rawEvents.push({
-      id: `incremental-contact-${conversationIndex}`,
-      platform: "contacts",
-      accountKey: "local",
-      entityKind: "contact",
-      eventKind: "observed",
-      observedAt: baseObservedAt + conversationIndex,
-      dedupeKey: `incremental-contact:${conversationIndex}`,
-      payload: {
-        sourceEntityKey: `contacts:${conversationIndex}`,
-        fields: {
-          display_name: `Incremental Contact ${conversationIndex}`,
-        },
-        handles: [
-          {
-            type: "email",
-            value: `incremental-${conversationIndex}@example.com`,
-            deterministic: true,
-          },
-        ],
-      },
-      sourceVersion: "perf-v1",
-    });
-    rawEvents.push({
-      id: `incremental-conversation-${conversationIndex}`,
-      platform: "linkedin",
-      accountKey: "default",
-      entityKind: "conversation",
-      eventKind: "observed",
-      observedAt: baseObservedAt + 10_000 + conversationIndex,
-      dedupeKey: `incremental-conversation:${conversationIndex}`,
-      payload: {
-        sourceConversationKey: `incremental-conversation-${conversationIndex}`,
-        conversationType: "dm",
-        participants: [{ sourceEntityKey: `contacts:${conversationIndex}` }],
-      },
-      sourceVersion: "perf-v1",
-    });
-
-    for (let messageIndex = 1; messageIndex <= messagesPerConversation; messageIndex += 1) {
-      rawEvents.push({
-        id: `incremental-message-${conversationIndex}-${messageIndex}`,
-        platform: "linkedin",
-        accountKey: "default",
-        entityKind: "message",
-        eventKind: "message_created",
-        observedAt: baseObservedAt + 20_000 + conversationIndex * 100 + messageIndex,
-        dedupeKey: `incremental-message:${conversationIndex}:${messageIndex}`,
+    rawEvents.push(
+      perfRawEvent({
+        id: `incremental-contact-${conversationIndex}`,
+        platform: "contacts",
+        accountKey: "local",
+        entityKind: "contact",
+        eventKind: "observed",
+        observedAt: baseObservedAt + conversationIndex,
+        dedupeKey: `incremental-contact:${conversationIndex}`,
         payload: {
-          sourceMessageKey: `incremental-message-${conversationIndex}-${messageIndex}`,
-          sourceConversationKey: `incremental-conversation-${conversationIndex}`,
-          senderSourceKey: `contacts:${conversationIndex}`,
-          sentAt: baseObservedAt + conversationIndex * 100 + messageIndex,
-          content: `Incremental message ${conversationIndex}-${messageIndex}`,
-          service: "linkedin",
-          isFromMe: false,
+          sourceEntityKey: `contacts:${conversationIndex}`,
+          fields: {
+            display_name: `Incremental Contact ${conversationIndex}`,
+          },
+          handles: [
+            {
+              type: "email",
+              value: `incremental-${conversationIndex}@example.com`,
+              deterministic: true,
+            },
+          ],
         },
         sourceVersion: "perf-v1",
-      });
+      }),
+    );
+    rawEvents.push(
+      perfRawEvent({
+        id: `incremental-conversation-${conversationIndex}`,
+        platform: "linkedin",
+        accountKey: "default",
+        entityKind: "conversation",
+        eventKind: "observed",
+        observedAt: baseObservedAt + 10_000 + conversationIndex,
+        dedupeKey: `incremental-conversation:${conversationIndex}`,
+        payload: {
+          sourceConversationKey: `incremental-conversation-${conversationIndex}`,
+          conversationType: "dm",
+          participants: [{ sourceEntityKey: `contacts:${conversationIndex}` }],
+        },
+        sourceVersion: "perf-v1",
+      }),
+    );
+
+    for (let messageIndex = 1; messageIndex <= messagesPerConversation; messageIndex += 1) {
+      rawEvents.push(
+        perfRawEvent({
+          id: `incremental-message-${conversationIndex}-${messageIndex}`,
+          platform: "linkedin",
+          accountKey: "default",
+          entityKind: "message",
+          eventKind: "created",
+          observedAt: baseObservedAt + 20_000 + conversationIndex * 100 + messageIndex,
+          dedupeKey: `incremental-message:${conversationIndex}:${messageIndex}`,
+          payload: {
+            sourceMessageKey: `incremental-message-${conversationIndex}-${messageIndex}`,
+            sourceConversationKey: `incremental-conversation-${conversationIndex}`,
+            senderSourceKey: `contacts:${conversationIndex}`,
+            sentAt: baseObservedAt + conversationIndex * 100 + messageIndex,
+            content: `Incremental message ${conversationIndex}-${messageIndex}`,
+            service: "linkedin",
+            isFromMe: false,
+          },
+          sourceVersion: "perf-v1",
+        }),
+      );
     }
   }
 

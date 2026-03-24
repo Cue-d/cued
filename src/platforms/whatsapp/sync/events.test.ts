@@ -1,6 +1,5 @@
 import { describe, expect, it } from "vitest";
 import {
-  buildOptimisticWhatsAppRawEvents,
   buildWhatsAppRawEventsFromSnapshot,
   extractWhatsAppPhone,
   normalizeWhatsAppJid,
@@ -68,34 +67,5 @@ describe("whatsapp events", () => {
         text: "x",
       }),
     ).toBe("12016824050@s.whatsapp.net:wamid-1");
-  });
-
-  it("creates optimistic outbound raw events with the same message key", () => {
-    const rawEvents = buildOptimisticWhatsAppRawEvents({
-      accountKey: "default",
-      threadName: "Soham",
-      message: {
-        messageID: "wamid-2",
-        chatJID: "12016824050@s.whatsapp.net",
-        senderJID: "15551234567@s.whatsapp.net",
-        fromMe: true,
-        timestamp: 1_710_000_100_000,
-        text: "from cued",
-        status: "sent",
-      },
-    });
-
-    expect(rawEvents.map((event) => event.entityKind)).toEqual([
-      "contact",
-      "conversation",
-      "message",
-    ]);
-    expect(rawEvents[2]?.payload).toEqual(
-      expect.objectContaining({
-        sourceMessageKey: "12016824050@s.whatsapp.net:wamid-2",
-        isFromMe: true,
-        status: "sent",
-      }),
-    );
   });
 });

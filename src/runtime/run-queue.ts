@@ -215,10 +215,12 @@ export class RunQueueService {
       throw new Error(`Unsupported reset source: ${source}`);
     }
 
-    return {
+    const result = {
       source,
       rowsRemoved: this.db.resetSource(source),
     };
+    this.schedulers.wakeProjection?.();
+    return result;
   }
 }
 

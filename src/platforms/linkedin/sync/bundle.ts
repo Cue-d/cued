@@ -28,7 +28,6 @@ import {
   participantSourceKey,
 } from "./events.js";
 
-const DEFAULT_SYNC_HISTORY_DAYS = Number(process.env.CUED_SYNC_HISTORY_DAYS ?? "730");
 const INCREMENTAL_BUFFER_MS = 5 * 60 * 1000;
 const MAX_CONNECTION_PAGES = Number(process.env.CUED_LINKEDIN_CONNECTION_PAGES ?? "25");
 const MAX_CONVERSATION_PAGES = Number(process.env.CUED_LINKEDIN_CONVERSATION_PAGES ?? "50");
@@ -47,7 +46,9 @@ type LinkedInClientLike = Pick<
   | "getMessagesBefore"
   | "getMessagesWithPrevCursor"
   | "getReactors"
->;
+> & {
+  getConversationsWithCursor?: LinkedInClient["getConversationsWithCursor"];
+};
 
 type ProjectedReactionRow = {
   reactor_source_key: string | null;
@@ -74,15 +75,11 @@ function getLinkedInFetchConcurrency(): number {
     : 3;
 }
 
-function getHistoryCutoffMs(): number {
-  return now() - DEFAULT_SYNC_HISTORY_DAYS * 24 * 60 * 60 * 1000;
-}
-
 function incrementalOldestMs(lastSyncAt?: number): number {
   if (lastSyncAt && lastSyncAt > 0) {
     return Math.max(0, lastSyncAt - INCREMENTAL_BUFFER_MS);
   }
-  return getHistoryCutoffMs();
+  return 0;
 }
 
 function hasInboxCategory(conversation: Conversation): boolean {
@@ -198,26 +195,38 @@ async function listConversations(
     seen.set(conversation.entityURN, conversation);
   }
 
-  let oldestLastActivity = Math.min(
-    ...firstPage.conversations.map((conversation) => conversation.lastActivityAt),
-  );
+  let oldestLastActivity =
+    firstPage.conversations.length > 0
+      ? Math.min(...firstPage.conversations.map((conversation) => conversation.lastActivityAt))
+      : Number.NEGATIVE_INFINITY;
+  let nextCursor = firstPage.nextCursor ?? null;
   let pageCount = 1;
   while (
     firstPage.conversations.length > 0 &&
     Number.isFinite(oldestLastActivity) &&
-    oldestLastActivity > getHistoryCutoffMs() &&
     pageCount < MAX_CONVERSATION_PAGES
   ) {
-    const page = await client.getConversationsBefore(oldestLastActivity - 1);
+    const page =
+      nextCursor && client.getConversationsWithCursor
+        ? await client.getConversationsWithCursor(nextCursor)
+        : await client.getConversationsBefore(oldestLastActivity - 1);
     if (page.conversations.length === 0) {
       break;
     }
+    let added = 0;
     for (const conversation of page.conversations) {
+      if (!seen.has(conversation.entityURN)) {
+        added += 1;
+      }
       seen.set(conversation.entityURN, conversation);
     }
     oldestLastActivity = Math.min(
       ...page.conversations.map((conversation) => conversation.lastActivityAt),
     );
+    nextCursor = page.nextCursor ?? null;
+    if (added === 0 && !nextCursor) {
+      break;
+    }
     pageCount += 1;
   }
 
@@ -530,6 +539,7 @@ export async function buildLinkedInSyncBundle(options?: {
         }
         if (message.messageBodyRenderFormat === "SYSTEM") {
           rawEvents.push(buildLinkedInSystemTimelineEvent(accountKey, message, observedBase));
+          continue;
         }
 
         const event = buildLinkedInMessageEvent({
@@ -538,15 +548,10 @@ export async function buildLinkedInSyncBundle(options?: {
           fallbackConversationUrn: conversation.entityURN,
           userEntityUrn,
           observedAt: observedBase,
-          eventKind: message.messageBodyRenderFormat === "SYSTEM" ? "message_observed" : undefined,
         });
         if (!seenMessageIds.has(event.id)) {
           seenMessageIds.add(event.id);
           rawEvents.push(event);
-        }
-
-        if (message.messageBodyRenderFormat === "SYSTEM") {
-          continue;
         }
 
         rawEvents.push(

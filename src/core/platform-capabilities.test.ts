@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { getPlatformFeatureSupport } from "../platforms/core/types.js";
 import { summarizePlatformCapability } from "./platform-capabilities.js";
 
 describe("platform capability resolver", () => {
@@ -55,5 +56,14 @@ describe("platform capability resolver", () => {
         supportsMultipleAccounts: true,
       }),
     );
+  });
+
+  it("exposes a shipped feature matrix for README-facing capabilities", () => {
+    expect(getPlatformFeatureSupport("signal", "send")).toBe("yes");
+    expect(getPlatformFeatureSupport("signal", "full_history_sync")).toBe("no");
+    expect(getPlatformFeatureSupport("contacts", "send")).toBe("no");
+    expect(getPlatformFeatureSupport("linkedin", "full_history_sync")).toBe("partial");
+    expect(getPlatformFeatureSupport("linkedin", "read_receipts")).toBe("partial");
+    expect(getPlatformFeatureSupport("imessage", "realtime_ingest")).toBe("yes");
   });
 });

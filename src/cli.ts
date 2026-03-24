@@ -135,8 +135,6 @@ Usage:
   cued sync resume
   cued rebuild
   cued reset --source <source>
-  cued merge contact <left> <right>
-  cued split contact <contact>
 
 Paths:
   db: ${CUED_DB_PATH}
@@ -706,25 +704,6 @@ async function main(): Promise<void> {
       response = await sendDaemonRequest({ command: "reset", source });
       break;
     }
-    case "merge":
-      if (subcommand !== "contact" || !rest[0] || !rest[1]) {
-        throw new Error("Usage: cued merge contact <left> <right>");
-      }
-      response = await sendDaemonRequest({
-        command: "merge-contact",
-        leftContactId: rest[0],
-        rightContactId: rest[1],
-      });
-      break;
-    case "split":
-      if (subcommand !== "contact" || !rest[0]) {
-        throw new Error("Usage: cued split contact <contact>");
-      }
-      response = await sendDaemonRequest({
-        command: "split-contact",
-        contactId: rest[0],
-      });
-      break;
     default:
       throw new Error(`Unknown command: ${command}`);
   }

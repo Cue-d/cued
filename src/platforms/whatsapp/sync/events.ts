@@ -195,7 +195,7 @@ export function buildWhatsAppMessageEvent(
     platform: "whatsapp",
     accountKey,
     entityKind: "message",
-    eventKind: "message_created",
+    eventKind: "created",
     externalEntityId: message.messageID,
     conversationExternalId: normalizedChatJID,
     occurredAt: message.timestamp,
@@ -289,37 +289,4 @@ export function buildWhatsAppRawEventsFromSnapshot(options: {
   );
 
   return rawEvents;
-}
-
-export function buildOptimisticWhatsAppRawEvents(options: {
-  accountKey: string;
-  message: WhatsAppMessageSnapshot;
-  threadName?: string | null;
-  observedAt?: number;
-}): SyncBundle["rawEvents"] {
-  const observedAt = options.observedAt ?? options.message.timestamp;
-  const snapshot: WhatsAppSnapshot = {
-    contacts: [
-      {
-        jid: options.message.chatJID,
-        phone: extractWhatsAppPhone(options.message.chatJID),
-        name: options.threadName ?? null,
-      },
-    ],
-    chats: [
-      {
-        jid: options.message.chatJID,
-        name: options.threadName ?? null,
-        isGroup: normalizeWhatsAppJid(options.message.chatJID).endsWith("@g.us"),
-        participants: [options.message.chatJID],
-      },
-    ],
-    messages: [options.message],
-  };
-
-  return buildWhatsAppRawEventsFromSnapshot({
-    accountKey: options.accountKey,
-    snapshot,
-    observedBase: observedAt,
-  });
 }

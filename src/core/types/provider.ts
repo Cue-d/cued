@@ -30,10 +30,10 @@ export interface ConversationObservationPayload {
   conversationType: ConversationType;
   displayName?: string | null;
   nativeConversationKey?: string | null;
-  subtype?: string | null;
   service?: string | null;
   topic?: string | null;
   unreadCount?: number | null;
+  removalReason?: string | null;
   participants: ConversationParticipantInput[];
 }
 
@@ -66,6 +66,15 @@ export interface ReactionPayload {
   isActive: boolean;
 }
 
+export interface ParticipantPayload {
+  sourceConversationKey: string;
+  participantSourceKey: string;
+  eventAt: number;
+  isSelf?: boolean;
+  role?: string | null;
+  metadata?: Record<string, unknown>;
+}
+
 export interface TimelineEventPayload {
   sourceEventKey: string;
   sourceConversationKey: string;
@@ -82,6 +91,7 @@ export type RawEventPayload =
   | ConversationObservationPayload
   | MessagePayload
   | ReactionPayload
+  | ParticipantPayload
   | TimelineEventPayload
   | Record<string, unknown>;
 
@@ -89,6 +99,15 @@ export interface SourceAccountInput {
   platform: Platform;
   accountKey: string;
   displayName: string;
+}
+
+export const RAW_EVENT_ACQUISITION_MODE_VALUES = ["sync", "realtime"] as const;
+export type RawEventAcquisitionMode = (typeof RAW_EVENT_ACQUISITION_MODE_VALUES)[number];
+
+export interface RawEventProvenance {
+  providerApiVersion?: string | null;
+  adapterVersion?: string | null;
+  acquisitionMode?: RawEventAcquisitionMode | null;
 }
 
 export interface ProviderRawEventInput<TPayload = RawEventPayload> {
@@ -105,10 +124,43 @@ export interface ProviderRawEventInput<TPayload = RawEventPayload> {
   cursor?: unknown;
   dedupeKey: string;
   payload: TPayload;
+  normalizedSchema?: string | null;
+  provenance?: RawEventProvenance | null;
   sourceVersion?: string | null;
 }
 
 const contactFieldNameSet = new Set<string>(CONTACT_FIELD_NAME_VALUES);
+
+export function buildNormalizedRawEventSchema(
+  entityKind: RawEventEntityKind,
+  eventKind: string,
+  version = 1,
+): string {
+  return `${entityKind}.${eventKind}@${version}`;
+}
+
+export function normalizeRawEventProvenance(
+  input: Partial<RawEventProvenance> | null | undefined,
+): RawEventProvenance | null {
+  const normalized: RawEventProvenance = {
+    providerApiVersion: input?.providerApiVersion ?? null,
+    adapterVersion: input?.adapterVersion ?? null,
+    acquisitionMode: input?.acquisitionMode ?? null,
+  };
+
+  return normalized.providerApiVersion || normalized.adapterVersion || normalized.acquisitionMode
+    ? normalized
+    : null;
+}
+
+export function resolveRawEventNormalizedSchema(
+  input: Pick<ProviderRawEventInput, "entityKind" | "eventKind" | "normalizedSchema">,
+): string {
+  return (
+    input.normalizedSchema?.trim() ||
+    buildNormalizedRawEventSchema(input.entityKind, input.eventKind)
+  );
+}
 
 export function parseConversationType(value: string): ConversationType {
   return value === "group" ? "group" : "dm";
