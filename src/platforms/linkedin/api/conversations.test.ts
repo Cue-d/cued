@@ -55,6 +55,7 @@ describe("linkedin conversations bootstrap", () => {
               ],
               metadata: {
                 newSyncToken: "sync-token-1",
+                nextCursor: "cursor-2",
               },
             },
           },
@@ -80,6 +81,7 @@ describe("linkedin conversations bootstrap", () => {
 
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(result.syncToken).toBe("sync-token-1");
+    expect(result.nextCursor).toBe("cursor-2");
     expect(result.conversations).toHaveLength(1);
     expect(result.conversations[0]?.entityURN).toBe(
       "urn:li:msg_conversation:(urn:li:fsd_profile:SELF123,CONV123)",

@@ -47,7 +47,9 @@ type LinkedInClientLike = Pick<
   | "getMessagesBefore"
   | "getMessagesWithPrevCursor"
   | "getReactors"
->;
+> & {
+  getConversationsWithCursor?: LinkedInClient["getConversationsWithCursor"];
+};
 
 type ProjectedReactionRow = {
   reactor_source_key: string | null;
@@ -198,9 +200,11 @@ async function listConversations(
     seen.set(conversation.entityURN, conversation);
   }
 
-  let oldestLastActivity = Math.min(
-    ...firstPage.conversations.map((conversation) => conversation.lastActivityAt),
-  );
+  let oldestLastActivity =
+    firstPage.conversations.length > 0
+      ? Math.min(...firstPage.conversations.map((conversation) => conversation.lastActivityAt))
+      : Number.NEGATIVE_INFINITY;
+  let nextCursor = firstPage.nextCursor ?? null;
   let pageCount = 1;
   while (
     firstPage.conversations.length > 0 &&
@@ -208,16 +212,27 @@ async function listConversations(
     oldestLastActivity > getHistoryCutoffMs() &&
     pageCount < MAX_CONVERSATION_PAGES
   ) {
-    const page = await client.getConversationsBefore(oldestLastActivity - 1);
+    const page =
+      nextCursor && client.getConversationsWithCursor
+        ? await client.getConversationsWithCursor(nextCursor)
+        : await client.getConversationsBefore(oldestLastActivity - 1);
     if (page.conversations.length === 0) {
       break;
     }
+    let added = 0;
     for (const conversation of page.conversations) {
+      if (!seen.has(conversation.entityURN)) {
+        added += 1;
+      }
       seen.set(conversation.entityURN, conversation);
     }
     oldestLastActivity = Math.min(
       ...page.conversations.map((conversation) => conversation.lastActivityAt),
     );
+    nextCursor = page.nextCursor ?? null;
+    if (added === 0 && !nextCursor) {
+      break;
+    }
     pageCount += 1;
   }
 
