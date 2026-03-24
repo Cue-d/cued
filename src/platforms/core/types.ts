@@ -145,7 +145,7 @@ export const PLATFORM_FEATURE_MATRIX = {
     send: "no",
     receive: "yes",
     realtime_ingest: "yes",
-    full_history_sync: "yes",
+    full_history_sync: "partial",
     message_edits: "yes",
     deletes: "yes",
     reactions: "yes",

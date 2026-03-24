@@ -62,6 +62,7 @@ describe("platform capability resolver", () => {
     expect(getPlatformFeatureSupport("signal", "send")).toBe("yes");
     expect(getPlatformFeatureSupport("signal", "full_history_sync")).toBe("no");
     expect(getPlatformFeatureSupport("contacts", "send")).toBe("no");
+    expect(getPlatformFeatureSupport("linkedin", "full_history_sync")).toBe("partial");
     expect(getPlatformFeatureSupport("linkedin", "read_receipts")).toBe("partial");
     expect(getPlatformFeatureSupport("imessage", "realtime_ingest")).toBe("yes");
   });
