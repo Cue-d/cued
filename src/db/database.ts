@@ -830,7 +830,15 @@ export class CuedDatabase {
   }
 
   resetSource(platform: Platform): number {
-    return this.db.transaction((tx) => {
+    const removed = this.db.transaction((tx) => {
+      const removedSourceAccounts = tx
+        .delete(sourceAccounts)
+        .where(eq(sourceAccounts.platform, platform))
+        .run().changes;
+      const removedRawEvents = tx
+        .delete(rawEvents)
+        .where(eq(rawEvents.platform, platform))
+        .run().changes;
       const removedRuns = tx.delete(syncRuns).where(eq(syncRuns.platform, platform)).run().changes;
       const removedErrors = tx
         .delete(syncRunErrors)
@@ -843,12 +851,25 @@ export class CuedDatabase {
       const removedSlackBackfillProofs =
         platform === "slack" ? tx.delete(slackBackfillProofs).run().changes : 0;
       return (
+        Number(removedSourceAccounts) +
+        Number(removedRawEvents) +
         Number(removedRuns) +
         Number(removedErrors) +
         Number(removedCheckpoints) +
         Number(removedSlackBackfillProofs)
       );
     });
+
+    // Rebuild canonical state from the remaining raw event log so merged contacts
+    // and other cross-platform projections stay internally consistent.
+    this.clearProjectedState();
+    this.upsertProjectionState({
+      projectionWatermark: 0,
+      lastProjectedAt: null,
+      lastRebuildAt: null,
+    });
+
+    return removed;
   }
 
   listSlackBackfillProofs(accountKey: string): SlackBackfillProofRow[] {

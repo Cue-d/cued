@@ -1016,6 +1016,76 @@ describe("CuedDatabase", () => {
     db.close();
   });
 
+  it("resets platform data and rewinds projection for rebuild", () => {
+    const db = createDb();
+    const timestamp = Date.now();
+
+    db.upsertSourceAccounts([
+      { platform: "linkedin", accountKey: "default", displayName: "LinkedIn" },
+      { platform: "slack", accountKey: "default", displayName: "Slack" },
+    ]);
+
+    db.insertRawEvents([
+      {
+        id: "linkedin-reset-raw",
+        platform: "linkedin",
+        accountKey: "default",
+        entityKind: "message",
+        eventKind: "created",
+        observedAt: timestamp,
+        dedupeKey: "linkedin-reset-raw",
+        payload: { sourceMessageKey: "linkedin:m1", sourceConversationKey: "linkedin:c1" },
+      },
+      {
+        id: "slack-reset-raw",
+        platform: "slack",
+        accountKey: "default",
+        entityKind: "message",
+        eventKind: "created",
+        observedAt: timestamp + 1,
+        dedupeKey: "slack-reset-raw",
+        payload: { sourceMessageKey: "slack:m1", sourceConversationKey: "slack:c1" },
+      },
+    ]);
+
+    insertContact(db, { id: "contact-reset-1", name: "Reset Contact", updatedAt: timestamp });
+    db.upsertProjectionState({
+      projectionWatermark: 2,
+      lastProjectedAt: timestamp,
+      lastRebuildAt: timestamp,
+    });
+
+    expect(db.getOverview().contacts).toBe(1);
+    expect(db.getProjectionBacklog()).toEqual({
+      projection_watermark: 2,
+      max_raw_event_rowid: 2,
+      pending_raw_events: 0,
+    });
+
+    const removed = db.resetSource("linkedin");
+
+    expect(removed).toBe(2);
+    expect(db.getOverview().contacts).toBe(0);
+    expect(db.getOverview().rawEvents).toBe(1);
+    expect(db.getOverview().sourceAccounts).toBe(1);
+    expect(db.getCheckpoint("linkedin", "default")).toBeNull();
+    expect(
+      sqlite(db)
+        .prepare("SELECT count(*) AS count FROM raw_events WHERE platform = 'linkedin'")
+        .get(),
+    ).toEqual({ count: 0 });
+    expect(
+      sqlite(db).prepare("SELECT count(*) AS count FROM raw_events WHERE platform = 'slack'").get(),
+    ).toEqual({ count: 1 });
+    expect(db.getProjectionBacklog()).toEqual({
+      projection_watermark: 0,
+      max_raw_event_rowid: 2,
+      pending_raw_events: 1,
+    });
+
+    db.close();
+  });
+
   it("removes cached attachment files when clearing projected state", () => {
     const db = createDb();
     const timestamp = Date.now();
