@@ -97,6 +97,13 @@ describe("buildLinkedInSyncBundle", () => {
             metadata: { count: 0, total: 0 },
           };
         },
+        async getConversationsWithCursor() {
+          return {
+            conversations: [],
+            metadata: { count: 0, total: 0 },
+            nextCursor: null,
+          };
+        },
         async getMessages() {
           return { messages: [], metadata: { count: 0, total: 0 } };
         },
@@ -136,6 +143,120 @@ describe("buildLinkedInSyncBundle", () => {
         isFromMe: false,
       }),
     );
+  });
+
+  it("uses nextCursor pagination for older full-history conversation pages", async () => {
+    const getConversationsWithCursor = vi.fn(async () => ({
+      conversations: [
+        {
+          title: "Older Thread",
+          entityURN: "urn:li:fsd_conversation:CONV_OLDER",
+          lastActivityAt: 1_760_000_000_000,
+          lastReadAt: 1_760_000_000_000,
+          groupChat: false,
+          read: true,
+          categories: ["PRIMARY_INBOX"],
+          unreadCount: 0,
+          conversationParticipants: [
+            {
+              entityURN: "urn:li:fsd_profile:SELF123",
+              participantType: {
+                member: { firstName: "Theo", lastName: "Tarr", profileUrl: "" },
+              },
+            },
+            {
+              entityURN: "urn:li:fsd_profile:ACoAAA2",
+              participantType: {
+                member: {
+                  firstName: "Older",
+                  lastName: "Person",
+                  profileUrl: "https://www.linkedin.com/in/older-person",
+                },
+              },
+            },
+          ],
+        },
+      ],
+      nextCursor: null,
+    }));
+
+    const bundle = await buildLinkedInSyncBundle({
+      accountKey: "default",
+      loadProjectedReactions: () => new Map(),
+      client: {
+        async fetchSelf() {
+          return "urn:li:fsd_profile:SELF123";
+        },
+        async getConnections() {
+          return { connections: [] };
+        },
+        async getConversations() {
+          return {
+            conversations: [
+              {
+                title: "Newest Thread",
+                entityURN: "urn:li:fsd_conversation:CONV_NEWEST",
+                lastActivityAt: 1_770_000_000_000,
+                lastReadAt: 1_770_000_000_000,
+                groupChat: false,
+                read: true,
+                categories: ["PRIMARY_INBOX"],
+                unreadCount: 0,
+                conversationParticipants: [
+                  {
+                    entityURN: "urn:li:fsd_profile:SELF123",
+                    participantType: {
+                      member: { firstName: "Theo", lastName: "Tarr", profileUrl: "" },
+                    },
+                  },
+                  {
+                    entityURN: "urn:li:fsd_profile:ACoAAA1",
+                    participantType: {
+                      member: {
+                        firstName: "Newer",
+                        lastName: "Person",
+                        profileUrl: "https://www.linkedin.com/in/newer-person",
+                      },
+                    },
+                  },
+                ],
+              },
+            ],
+            nextCursor: "cursor-2",
+            syncToken: "sync-token-1",
+          };
+        },
+        async getConversationsBefore() {
+          return {
+            conversations: [],
+            nextCursor: null,
+          };
+        },
+        getConversationsWithCursor,
+        async getMessages() {
+          return { messages: [], metadata: { count: 0, total: 0 }, prevCursor: null };
+        },
+        async getMessagesBefore() {
+          return { messages: [], metadata: { count: 0, total: 0 }, prevCursor: null };
+        },
+        async getMessagesWithPrevCursor() {
+          return { messages: [], metadata: { count: 0, total: 0 }, prevCursor: null };
+        },
+        async getReactors() {
+          return [];
+        },
+      },
+    });
+
+    expect(getConversationsWithCursor).toHaveBeenCalledWith("cursor-2");
+    expect(
+      bundle.rawEvents.some(
+        (event) =>
+          event.entityKind === "conversation" &&
+          (event.payload as { sourceConversationKey?: string }).sourceConversationKey ===
+            "linkedin:urn:li:fs_conversation:CONV_OLDER",
+      ),
+    ).toBe(true);
   });
 
   it("emits removal, system, reply, attachment, and reaction events", async () => {
@@ -198,6 +319,9 @@ describe("buildLinkedInSyncBundle", () => {
         },
         async getConversationsBefore() {
           return { conversations: [] };
+        },
+        async getConversationsWithCursor() {
+          return { conversations: [], nextCursor: null };
         },
         async getMessages() {
           return {
@@ -410,6 +534,9 @@ describe("buildLinkedInSyncBundle", () => {
         async getConversationsBefore() {
           return { conversations: [] };
         },
+        async getConversationsWithCursor() {
+          return { conversations: [], nextCursor: null };
+        },
         async getMessages() {
           return { messages: [], prevCursor: null };
         },
@@ -492,6 +619,9 @@ describe("buildLinkedInSyncBundle", () => {
         },
         async getConversationsBefore() {
           return { conversations: [] };
+        },
+        async getConversationsWithCursor() {
+          return { conversations: [], nextCursor: null };
         },
         async getMessages() {
           return {
@@ -601,6 +731,9 @@ describe("buildLinkedInSyncBundle", () => {
         },
         async getConversationsBefore() {
           return { conversations: [] };
+        },
+        async getConversationsWithCursor() {
+          return { conversations: [], nextCursor: null };
         },
         async getMessages() {
           return { messages: [], prevCursor: null };
