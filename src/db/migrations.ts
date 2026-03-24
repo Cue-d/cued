@@ -849,4 +849,19 @@ export const MIGRATIONS: Migration[] = [
       addColumnIfMissing(db, "timeline_events", "subject_source_key TEXT");
     },
   },
+  {
+    id: "0003_repair_conversation_removal_reason",
+    apply: (db) => {
+      addColumnIfMissing(db, "conversations", "removal_reason TEXT");
+      if (columnExists(db, "conversations", "subtype")) {
+        db.exec(`
+          UPDATE conversations
+          SET removal_reason = CASE
+            WHEN subtype IS NOT NULL AND subtype <> '' THEN subtype
+            ELSE removal_reason
+          END
+        `);
+      }
+    },
+  },
 ];

@@ -259,6 +259,154 @@ describe("buildLinkedInSyncBundle", () => {
     ).toBe(true);
   });
 
+  it("continues full-history pagination after falling past the old time cutoff", async () => {
+    const getConversationsWithCursor = vi
+      .fn()
+      .mockResolvedValueOnce({
+        conversations: [
+          {
+            title: "Older Thread",
+            entityURN: "urn:li:fsd_conversation:CONV_OLDER",
+            lastActivityAt: 1_682_000_000_000,
+            lastReadAt: 1_682_000_000_000,
+            groupChat: false,
+            read: true,
+            categories: ["PRIMARY_INBOX"],
+            unreadCount: 0,
+            conversationParticipants: [
+              {
+                entityURN: "urn:li:fsd_profile:SELF123",
+                participantType: {
+                  member: { firstName: "Theo", lastName: "Tarr", profileUrl: "" },
+                },
+              },
+              {
+                entityURN: "urn:li:fsd_profile:ACoAAA3",
+                participantType: {
+                  member: {
+                    firstName: "Even",
+                    lastName: "Older",
+                    profileUrl: "https://www.linkedin.com/in/even-older",
+                  },
+                },
+              },
+            ],
+          },
+        ],
+        nextCursor: null,
+      })
+      .mockResolvedValueOnce({
+        conversations: [],
+        nextCursor: null,
+      });
+
+    const bundle = await buildLinkedInSyncBundle({
+      accountKey: "default",
+      loadProjectedReactions: () => new Map(),
+      client: {
+        async fetchSelf() {
+          return "urn:li:fsd_profile:SELF123";
+        },
+        async getConnections() {
+          return { connections: [] };
+        },
+        async getConversations() {
+          return {
+            conversations: [
+              {
+                title: "Newest Thread",
+                entityURN: "urn:li:fsd_conversation:CONV_NEWEST",
+                lastActivityAt: 1_770_000_000_000,
+                lastReadAt: 1_770_000_000_000,
+                groupChat: false,
+                read: true,
+                categories: ["PRIMARY_INBOX"],
+                unreadCount: 0,
+                conversationParticipants: [
+                  {
+                    entityURN: "urn:li:fsd_profile:SELF123",
+                    participantType: {
+                      member: { firstName: "Theo", lastName: "Tarr", profileUrl: "" },
+                    },
+                  },
+                  {
+                    entityURN: "urn:li:fsd_profile:ACoAAA1",
+                    participantType: {
+                      member: {
+                        firstName: "Newest",
+                        lastName: "Person",
+                        profileUrl: "https://www.linkedin.com/in/newest-person",
+                      },
+                    },
+                  },
+                ],
+              },
+            ],
+            syncToken: "sync-token-1",
+          };
+        },
+        async getConversationsBefore() {
+          return {
+            conversations: [
+              {
+                title: "Old Thread",
+                entityURN: "urn:li:fsd_conversation:CONV_OLD",
+                lastActivityAt: 1_690_000_000_000,
+                lastReadAt: 1_690_000_000_000,
+                groupChat: false,
+                read: true,
+                categories: ["PRIMARY_INBOX"],
+                unreadCount: 0,
+                conversationParticipants: [
+                  {
+                    entityURN: "urn:li:fsd_profile:SELF123",
+                    participantType: {
+                      member: { firstName: "Theo", lastName: "Tarr", profileUrl: "" },
+                    },
+                  },
+                  {
+                    entityURN: "urn:li:fsd_profile:ACoAAA2",
+                    participantType: {
+                      member: {
+                        firstName: "Old",
+                        lastName: "Person",
+                        profileUrl: "https://www.linkedin.com/in/old-person",
+                      },
+                    },
+                  },
+                ],
+              },
+            ],
+            nextCursor: "cursor-3",
+          };
+        },
+        getConversationsWithCursor,
+        async getMessages() {
+          return { messages: [], metadata: { count: 0, total: 0 }, prevCursor: null };
+        },
+        async getMessagesBefore() {
+          return { messages: [], metadata: { count: 0, total: 0 }, prevCursor: null };
+        },
+        async getMessagesWithPrevCursor() {
+          return { messages: [], metadata: { count: 0, total: 0 }, prevCursor: null };
+        },
+        async getReactors() {
+          return [];
+        },
+      },
+    });
+
+    expect(getConversationsWithCursor).toHaveBeenCalledWith("cursor-3");
+    expect(
+      bundle.rawEvents.some(
+        (event) =>
+          event.entityKind === "conversation" &&
+          (event.payload as { sourceConversationKey?: string }).sourceConversationKey ===
+            "linkedin:urn:li:fs_conversation:CONV_OLDER",
+      ),
+    ).toBe(true);
+  });
+
   it("emits removal, system, reply, attachment, and reaction events", async () => {
     const bundle = await buildLinkedInSyncBundle({
       accountKey: "default",
