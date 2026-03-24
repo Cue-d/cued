@@ -708,7 +708,11 @@ async function collectDesiredSignalSessions(db: ReturnType<typeof openCuedDataba
   const integrations = db
     .listIntegrationStates()
     .filter(
-      (row) => row.platform === "signal" && row.enabled === 1 && row.auth_state === "authenticated",
+      (row) =>
+        row.platform === "signal" &&
+        row.enabled === 1 &&
+        row.auth_state === "authenticated" &&
+        !db.hasQueuedOrRunningRun("signal", row.account_key),
     );
   if (integrations.length === 0) {
     return {
@@ -1485,13 +1489,11 @@ export async function runDaemon(): Promise<void> {
     }
 
     suppressNextSignalReconnectSync.add(accountKey);
-    activeSession.stop();
-    await new Promise((resolve) => setTimeout(resolve, 250));
+    await signalRealtime.stopSession(accountKey);
 
     try {
       return await task();
     } finally {
-      activeSession.start();
       requestSignalRealtimeReconcile();
     }
   };
@@ -2397,11 +2399,11 @@ export async function runDaemon(): Promise<void> {
         refreshLocalIntegrationStates(db);
         reconcileLocalWatchers();
       }
+      queueAutoSyncRuns("daemon_start");
       requestSlackRealtimeReconcile();
       requestLinkedInRealtimeReconcile();
       requestSignalRealtimeReconcile();
       requestWhatsAppRealtimeReconcile();
-      queueAutoSyncRuns("daemon_start");
       if (db.getProjectionBacklog().pending_raw_events > 0) {
         queueProjectionRun("daemon_bootstrap_backlog", undefined, { delayMs: 0 });
       }
@@ -2692,6 +2694,9 @@ export async function runDaemon(): Promise<void> {
         syncMode: checkpointSyncMode,
         timings,
       });
+      if (platform === "signal") {
+        requestSignalRealtimeReconcile();
+      }
       if (bundleHasMore && !db.hasQueuedOrRunningRun(currentRun.platform, accountKey)) {
         db.queueSyncRun({
           platform: currentRun.platform,
@@ -2739,6 +2744,9 @@ export async function runDaemon(): Promise<void> {
         );
       }
       db.failRun(currentRun.id, errorMessage);
+      if (currentRun.platform === "signal") {
+        requestSignalRealtimeReconcile();
+      }
       await safeEmitHookEvent("sync.failed", {
         runId: currentRun.id,
         platform: currentRun.platform,

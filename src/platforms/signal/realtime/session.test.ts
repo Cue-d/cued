@@ -155,6 +155,37 @@ describe("signal realtime", () => {
     session.stop();
   });
 
+  it("waits for the JSON-RPC process to exit before resolving stopAndWait", async () => {
+    const child = new MockChild();
+    spawnMock.mockReturnValue(child);
+
+    const session = new SignalRealtimeSession({
+      accountKey: "default",
+      account: "+14155550000",
+      cliPath: "/opt/homebrew/bin/signal-cli",
+      configDir: "/tmp/cued-signal/default",
+    });
+
+    session.start();
+    child.emit("spawn");
+
+    const stopped = session.stopAndWait();
+    let resolved = false;
+    void stopped.then(() => {
+      resolved = true;
+    });
+
+    await Promise.resolve();
+    expect(child.kill).toHaveBeenCalledWith("SIGTERM");
+    expect(resolved).toBe(false);
+
+    child.emit("exit", 0, null);
+    await stopped;
+
+    expect(resolved).toBe(true);
+    expect(session.getStatus().state).toBe("stopped");
+  });
+
   it("starts and stops managed sessions through the supervisor", async () => {
     const started: string[] = [];
     const stopped: string[] = [];
@@ -165,6 +196,9 @@ describe("signal realtime", () => {
           started.push(input.accountKey);
         },
         stop() {
+          stopped.push(input.accountKey);
+        },
+        async stopAndWait() {
           stopped.push(input.accountKey);
         },
         getStatus() {
