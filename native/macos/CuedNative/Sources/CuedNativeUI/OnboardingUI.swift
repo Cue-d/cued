@@ -323,13 +323,14 @@ public struct CuedOnboardingView: View {
   let onEnableIntegration: (String, String) -> Void
   let onRemoveIntegration: (String, String) -> Void
   let onConnectIntegration: (String, String) -> Void
-  let onFinish: () -> Void
+  let onFinish: (Bool) -> Void
 
   @State private var addAccountPrompt: InstallerAddAccountPrompt?
   @State private var removalPrompt: InstallerRemovalPrompt?
   @State private var pendingPermissionKeys = Set<String>()
   @State private var pendingIntegrationActionIDs = Set<String>()
   @State private var pendingPlatformConnectPlatforms = Set<String>()
+  @State private var shouldInstallGlobalSkill = true
 
   public init(
     viewModel: OnboardingViewModel,
@@ -338,7 +339,7 @@ public struct CuedOnboardingView: View {
     onEnableIntegration: @escaping (String, String) -> Void,
     onRemoveIntegration: @escaping (String, String) -> Void,
     onConnectIntegration: @escaping (String, String) -> Void,
-    onFinish: @escaping () -> Void
+    onFinish: @escaping (Bool) -> Void
   ) {
     self.viewModel = viewModel
     self.onRefresh = onRefresh
@@ -493,7 +494,7 @@ public struct CuedOnboardingView: View {
 
   private func handleNext() {
     if viewModel.currentPage == viewModel.pageCount - 1 {
-      onFinish()
+      onFinish(shouldInstallGlobalSkill)
       return
     }
     withAnimation {
@@ -553,6 +554,8 @@ public struct CuedOnboardingView: View {
           .foregroundStyle(.tertiary)
       }
       .padding(.top, 2)
+
+      globalSkillInstallCard
 
       onboardingCard {
         ForEach(Array(viewModel.permissionStatuses.enumerated()), id: \.element.id) { index, permission in
@@ -652,6 +655,23 @@ public struct CuedOnboardingView: View {
     }
     .padding(.vertical, 2)
     .opacity(isGranted ? 0.7 : 1.0)
+  }
+
+  private var globalSkillInstallCard: some View {
+    onboardingCard(spacing: 10) {
+      Toggle(isOn: $shouldInstallGlobalSkill) {
+        VStack(alignment: .leading, spacing: 4) {
+          Text("Install the Cued skill globally for all supported agents")
+            .font(.headline)
+          Text("Uses `npx skills` to link the bundled `cued` skill into every detected global agent skills directory on this Mac.")
+            .font(.subheadline)
+            .foregroundStyle(.secondary)
+            .fixedSize(horizontal: false, vertical: true)
+        }
+      }
+      .toggleStyle(.checkbox)
+      .controlSize(.regular)
+    }
   }
 
   private func platformConfigurationCard(_ configuration: InstallerPlatformConfiguration) -> some View {
@@ -1696,7 +1716,7 @@ private struct InstallerPreviewContainer: View {
       onEnableIntegration: { _, _ in },
       onRemoveIntegration: { _, _ in },
       onConnectIntegration: { _, _ in },
-      onFinish: {}
+      onFinish: { _ in }
     )
   }
 }

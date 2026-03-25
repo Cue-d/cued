@@ -52,6 +52,7 @@ import {
   runUpdatePreflight,
 } from "./runtime/updater/service.js";
 import { runSetupTUI } from "./setup.js";
+import { installGlobalCuedSkill } from "./skills/install.js";
 
 const DIST_ROOT = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = resolve(DIST_ROOT, "..");
@@ -114,6 +115,7 @@ Usage:
   cued cli install|status
   cued login-item enable|disable|status
   cued onboarding complete|snapshot|status [--refresh-managed] [--refresh-permissions]
+  cued skill install-global
   cued launchd install|uninstall|status
   cued permissions doctor|status|request [--all|--contacts|--messages|--full-disk-access]
   cued integrations list
@@ -440,6 +442,14 @@ async function main(): Promise<void> {
         db.close();
       }
     }
+    case "skill":
+      switch (subcommand) {
+        case "install-global":
+          printJson(installGlobalCuedSkill());
+          return;
+        default:
+          throw new Error("Usage: cued skill install-global");
+      }
     case "launchd":
       switch (subcommand) {
         case "install":
