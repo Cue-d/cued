@@ -117,29 +117,28 @@ final class OnboardingWindowController: NSWindowController {
         daemonSupervisor: daemonSupervisor,
         InstallerOnboardingSnapshotResponse.self,
         arguments: ["onboarding", "snapshot"] + (shouldRefreshPermissions ? ["--refresh-permissions"] : [])
-      ) ?? InstallerOnboardingSnapshotResponse(
-        permissions: [],
-        globalSkill: InstallerGlobalSkillStatus(
-          installed: false,
-          status: "unknown",
-          summary: "Checks whether the global Cued skill is available to your agents."
-        ),
-        hostOs: "macos",
-        integrations: [],
-        setupIntegrations: []
+      )
+      let globalSkill = Self.decodeJSON(
+        daemonSupervisor: daemonSupervisor,
+        InstallerGlobalSkillStatus.self,
+        arguments: ["skill", "status"]
+      ) ?? snapshot?.globalSkill ?? InstallerGlobalSkillStatus(
+        installed: false,
+        status: "unknown",
+        summary: "Checks whether the global Cued skill is available to your agents."
       )
 
       await MainActor.run {
-        self.cachedPermissions = snapshot.permissions
-        self.cachedAllIntegrations = snapshot.integrations ?? []
-        self.cachedSetupIntegrations = snapshot.setupIntegrations.filter {
+        self.cachedPermissions = snapshot?.permissions ?? []
+        self.cachedAllIntegrations = snapshot?.integrations ?? []
+        self.cachedSetupIntegrations = (snapshot?.setupIntegrations ?? []).filter {
           $0.capability.onboardingVisible
         }
-        self.resolvePendingLivePermissions(using: snapshot.permissions)
+        self.resolvePendingLivePermissions(using: snapshot?.permissions ?? [])
         self.isRefreshing = false
         self.viewModel.apply(
-          permissions: snapshot.permissions,
-          globalSkill: snapshot.globalSkill,
+          permissions: snapshot?.permissions ?? [],
+          globalSkill: globalSkill,
           allIntegrations: self.cachedAllIntegrations,
           integrations: self.cachedSetupIntegrations
         )
