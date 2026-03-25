@@ -32,7 +32,7 @@ To get current time in millis: `unixepoch('now') * 1000`.
 Canonical people/entities.
 ```
 id TEXT PRIMARY KEY
-kind TEXT            -- 'person', 'company', 'bot', 'group', 'other'
+kind TEXT            -- currently always 'person'
 name TEXT
 photo_url TEXT
 company TEXT

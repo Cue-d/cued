@@ -239,35 +239,48 @@ final class OnboardingWindowController: NSWindowController {
   }
 
   private func finishOnboarding(installGlobalSkill: Bool) {
-    let installCommandResult =
-      installGlobalSkill ? daemonSupervisor.runCLI(arguments: ["skill", "install-global"]) : nil
-    let installResult: InstallerSkillInstallResponse? =
-      installCommandResult.flatMap { result in
-        guard result.status == 0, let data = result.stdout.data(using: .utf8) else {
-          return nil
-        }
-        return try? JSONDecoder().decode(InstallerSkillInstallResponse.self, from: data)
-      }
-    _ = daemonSupervisor.runCLI(arguments: ["onboarding", "complete"])
-    close()
-    onRefresh()
+    viewModel.beginRefresh()
+    let daemonSupervisor = self.daemonSupervisor
 
-    let installFailed =
-      installGlobalSkill
-      && ((installCommandResult?.status ?? 1) != 0 || installResult?.ok == false)
-    if installFailed {
-      let alert = NSAlert()
-      alert.messageText = "Cued finished setup, but the global skill install failed."
-      let stderr = installCommandResult?.stderr.trimmingCharacters(in: .whitespacesAndNewlines)
-      let fallbackMessage =
-        (stderr?.isEmpty == false ? stderr : nil)
-        ?? "Run `cued skill install-global` from Terminal to retry."
-      alert.informativeText =
-        installResult?.error
-        ?? fallbackMessage
-      alert.alertStyle = .warning
-      alert.addButton(withTitle: "OK")
-      alert.runModal()
+    Task(priority: .userInitiated) { [daemonSupervisor] in
+      let installCommandResult =
+        installGlobalSkill
+        ? await Task.detached(priority: .userInitiated) { [daemonSupervisor] in
+          daemonSupervisor.runCLI(arguments: ["skill", "install-global"])
+        }.value
+        : nil
+      let installResult: InstallerSkillInstallResponse? =
+        installCommandResult.flatMap { result in
+          guard result.status == 0, let data = result.stdout.data(using: .utf8) else {
+            return nil
+          }
+          return try? JSONDecoder().decode(InstallerSkillInstallResponse.self, from: data)
+        }
+      _ = await Task.detached(priority: .userInitiated) { [daemonSupervisor] in
+        daemonSupervisor.runCLI(arguments: ["onboarding", "complete"])
+      }.value
+
+      let installFailed =
+        installGlobalSkill
+        && ((installCommandResult?.status ?? 1) != 0 || installResult?.ok == false)
+
+      close()
+      onRefresh()
+
+      if installFailed {
+        let alert = NSAlert()
+        alert.messageText = "Cued finished setup, but the global skill install failed."
+        let stderr = installCommandResult?.stderr.trimmingCharacters(in: .whitespacesAndNewlines)
+        let fallbackMessage =
+          (stderr?.isEmpty == false ? stderr : nil)
+          ?? "Run `cued skill install-global` from Terminal to retry."
+        alert.informativeText =
+          installResult?.error
+          ?? fallbackMessage
+        alert.alertStyle = .warning
+        alert.addButton(withTitle: "OK")
+        alert.runModal()
+      }
     }
   }
 
