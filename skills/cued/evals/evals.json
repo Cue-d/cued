@@ -223,19 +223,6 @@
     },
     {
       "id": 18,
-      "prompt": "Can you look up Arielle Rothman for me? I want to know everything we have locally and anything you can find about her online.",
-      "expected_output": "A comprehensive profile combining local database information (contact handles, message history, platforms) with web-sourced enrichment (LinkedIn, company, role).",
-      "files": [],
-      "expectations": [
-        "Searched contacts table for name match",
-        "Retrieved all contact_handles (email, phone, LinkedIn, etc.)",
-        "Checked contact_sources for profile URLs",
-        "Reviewed recent messages for contextual clues about role/company",
-        "Clearly separated local evidence from web search results"
-      ]
-    },
-    {
-      "id": 19,
       "prompt": "I reacted to someone's message with a heart but never actually texted them back. Does that count as ghosting? Show me conversations where I only reacted but didn't reply.",
       "expected_output": "A list of conversations where the user's only acknowledgment was a reaction (tapback) without a text reply, treating this as a softer form of ghosting.",
       "files": [],
@@ -245,6 +232,94 @@
         "Filtered to DM conversations",
         "Returned contact names, the reacted message, and time elapsed",
         "Distinguished between reaction-only acknowledgment and full text replies"
+      ]
+    },
+    {
+      "id": 19,
+      "prompt": "Who texted me today?",
+      "expected_output": "A list of contacts who sent messages to the user today, with message previews and platforms.",
+      "files": [],
+      "expectations": [
+        "Skill was triggered by a natural language message query without mentioning 'cued'",
+        "Filtered messages where is_from_me = 0 and sent_at is today",
+        "Joined to contacts for sender names",
+        "Returned sender names, message previews, platforms, and timestamps",
+        "Grouped by contact or conversation"
+      ]
+    },
+    {
+      "id": 20,
+      "prompt": "What's John's email address?",
+      "expected_output": "The email address(es) associated with a contact named John from the local database.",
+      "files": [],
+      "expectations": [
+        "Skill was triggered by a contact lookup query without mentioning 'cued'",
+        "Searched contacts table for name matching 'John'",
+        "Queried contact_handles where type = 'email' for matching contact_id(s)",
+        "Returned email addresses with the contact name"
+      ]
+    },
+    {
+      "id": 21,
+      "prompt": "Check my messages",
+      "expected_output": "A summary of recent messages or unread conversations across platforms.",
+      "files": [],
+      "expectations": [
+        "Skill was triggered by a generic message check without mentioning 'cued'",
+        "Queried recent messages or conversations with unread_count > 0",
+        "Returned conversation names, platforms, and message previews",
+        "Ordered by recency"
+      ]
+    },
+    {
+      "id": 22,
+      "prompt": "Have I talked to anyone from Stripe recently?",
+      "expected_output": "A list of contacts associated with Stripe (via company field or message content) with recent message activity.",
+      "files": [],
+      "expectations": [
+        "Skill was triggered by a company-based contact query without mentioning 'cued'",
+        "Searched contacts where company LIKE '%Stripe%' or used FTS for 'Stripe'",
+        "Showed recent message activity for matching contacts",
+        "Returned contact names, platforms, and last message timestamps"
+      ]
+    },
+    {
+      "id": 23,
+      "prompt": "Who's been trying to reach me that I haven't gotten back to?",
+      "expected_output": "A list of contacts with unanswered incoming messages, equivalent to ghosting detection phrased naturally.",
+      "files": [],
+      "expectations": [
+        "Skill was triggered by a natural follow-up/ghosting query without mentioning 'cued'",
+        "Identified DM conversations where last message is not from the user",
+        "Applied a reasonable time threshold",
+        "Checked message_reactions for acknowledgment",
+        "Returned contact names and message context"
+      ]
+    },
+    {
+      "id": 24,
+      "prompt": "Find me Sarah Chen's phone number and LinkedIn",
+      "expected_output": "Phone number and LinkedIn URL/handle for a contact named Sarah Chen.",
+      "files": [],
+      "expectations": [
+        "Skill was triggered by a contact info lookup without mentioning 'cued'",
+        "Searched contacts for 'Sarah Chen'",
+        "Queried contact_handles for type = 'phone' and type = 'linkedin'",
+        "Checked contact_sources for profile_url containing linkedin",
+        "Returned the handle values"
+      ]
+    },
+    {
+      "id": 25,
+      "prompt": "What did Mike and I talk about last week on Slack?",
+      "expected_output": "Messages exchanged with a contact named Mike on Slack within the last week.",
+      "files": [],
+      "expectations": [
+        "Skill was triggered by a conversation history query without mentioning 'cued'",
+        "Resolved contact named 'Mike'",
+        "Filtered to platform = 'slack'",
+        "Applied time window of last 7 days",
+        "Returned message content with timestamps and sender names"
       ]
     }
   ]
