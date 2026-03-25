@@ -12,6 +12,11 @@ struct InstallerCLISymlinkStatusResponse: Decodable {
   let path: String
 }
 
+struct InstallerSkillInstallResponse: Decodable {
+  let ok: Bool
+  let error: String?
+}
+
 struct InstallerOnboardingSnapshotResponse: Decodable {
   let permissions: [InstallerPermissionStatus]
   let hostOs: String
@@ -72,7 +77,9 @@ final class OnboardingWindowController: NSWindowController {
         onConnectIntegration: { [weak self] platform, accountKey in
           self?.handleIntegrationAction(platform: platform, accountKey: accountKey)
         },
-        onFinish: { [weak self] in self?.finishOnboarding() }
+        onFinish: { [weak self] installGlobalSkill in
+          self?.finishOnboarding(installGlobalSkill: installGlobalSkill)
+        }
       )
     )
     window.contentViewController = hosting
@@ -231,10 +238,37 @@ final class OnboardingWindowController: NSWindowController {
     runConnectActions(argumentsList: actions)
   }
 
-  private func finishOnboarding() {
+  private func finishOnboarding(installGlobalSkill: Bool) {
+    let installCommandResult =
+      installGlobalSkill ? daemonSupervisor.runCLI(arguments: ["skill", "install-global"]) : nil
+    let installResult: InstallerSkillInstallResponse? =
+      installCommandResult.flatMap { result in
+        guard result.status == 0, let data = result.stdout.data(using: .utf8) else {
+          return nil
+        }
+        return try? JSONDecoder().decode(InstallerSkillInstallResponse.self, from: data)
+      }
     _ = daemonSupervisor.runCLI(arguments: ["onboarding", "complete"])
     close()
     onRefresh()
+
+    let installFailed =
+      installGlobalSkill
+      && ((installCommandResult?.status ?? 1) != 0 || installResult?.ok == false)
+    if installFailed {
+      let alert = NSAlert()
+      alert.messageText = "Cued finished setup, but the global skill install failed."
+      let stderr = installCommandResult?.stderr.trimmingCharacters(in: .whitespacesAndNewlines)
+      let fallbackMessage =
+        (stderr?.isEmpty == false ? stderr : nil)
+        ?? "Run `cued skill install-global` from Terminal to retry."
+      alert.informativeText =
+        installResult?.error
+        ?? fallbackMessage
+      alert.alertStyle = .warning
+      alert.addButton(withTitle: "OK")
+      alert.runModal()
+    }
   }
 
   override func close() {
