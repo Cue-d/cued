@@ -19,6 +19,7 @@ struct InstallerSkillInstallResponse: Decodable {
 
 struct InstallerOnboardingSnapshotResponse: Decodable {
   let permissions: [InstallerPermissionStatus]
+  let globalSkill: InstallerGlobalSkillStatus
   let hostOs: String
   let integrations: [InstallerIntegrationStatus]?
   let setupIntegrations: [InstallerIntegrationStatus]
@@ -68,6 +69,7 @@ final class OnboardingWindowController: NSWindowController {
         viewModel: viewModel,
         onRefresh: { [weak self] in self?.refresh() },
         onRequestPermission: { [weak self] flags in self?.requestPermission(flags: flags) },
+        onInstallGlobalSkill: { [weak self] in self?.installGlobalSkill() },
         onEnableIntegration: { [weak self] platform, accountKey in
           self?.enableIntegration(platform: platform, accountKey: accountKey)
         },
@@ -77,9 +79,7 @@ final class OnboardingWindowController: NSWindowController {
         onConnectIntegration: { [weak self] platform, accountKey in
           self?.handleIntegrationAction(platform: platform, accountKey: accountKey)
         },
-        onFinish: { [weak self] installGlobalSkill in
-          self?.finishOnboarding(installGlobalSkill: installGlobalSkill)
-        }
+        onFinish: { [weak self] in self?.finishOnboarding() }
       )
     )
     window.contentViewController = hosting
@@ -119,6 +119,11 @@ final class OnboardingWindowController: NSWindowController {
         arguments: ["onboarding", "snapshot"] + (shouldRefreshPermissions ? ["--refresh-permissions"] : [])
       ) ?? InstallerOnboardingSnapshotResponse(
         permissions: [],
+        globalSkill: InstallerGlobalSkillStatus(
+          installed: false,
+          status: "unknown",
+          summary: "Checks whether the global Cued skill is available to your agents."
+        ),
         hostOs: "macos",
         integrations: [],
         setupIntegrations: []
@@ -134,6 +139,7 @@ final class OnboardingWindowController: NSWindowController {
         self.isRefreshing = false
         self.viewModel.apply(
           permissions: snapshot.permissions,
+          globalSkill: snapshot.globalSkill,
           allIntegrations: self.cachedAllIntegrations,
           integrations: self.cachedSetupIntegrations
         )
@@ -238,17 +244,14 @@ final class OnboardingWindowController: NSWindowController {
     runConnectActions(argumentsList: actions)
   }
 
-  private func finishOnboarding(installGlobalSkill: Bool) {
+  private func installGlobalSkill() {
     viewModel.beginRefresh()
     let daemonSupervisor = self.daemonSupervisor
 
     Task(priority: .userInitiated) { [daemonSupervisor] in
-      let installCommandResult =
-        installGlobalSkill
-        ? await Task.detached(priority: .userInitiated) { [daemonSupervisor] in
-          daemonSupervisor.runCLI(arguments: ["skill", "install-global"])
-        }.value
-        : nil
+      let installCommandResult = await Task.detached(priority: .userInitiated) { [daemonSupervisor] in
+        daemonSupervisor.runCLI(arguments: ["skill", "install-global"])
+      }.value
       let installResult: InstallerSkillInstallResponse? =
         installCommandResult.flatMap { result in
           guard result.status == 0, let data = result.stdout.data(using: .utf8) else {
@@ -256,20 +259,12 @@ final class OnboardingWindowController: NSWindowController {
           }
           return try? JSONDecoder().decode(InstallerSkillInstallResponse.self, from: data)
         }
-      _ = await Task.detached(priority: .userInitiated) { [daemonSupervisor] in
-        daemonSupervisor.runCLI(arguments: ["onboarding", "complete"])
-      }.value
+      let installFailed = ((installCommandResult?.status ?? 1) != 0 || installResult?.ok == false)
 
-      let installFailed =
-        installGlobalSkill
-        && ((installCommandResult?.status ?? 1) != 0 || installResult?.ok == false)
-
-      close()
-      onRefresh()
-
+      refresh()
       if installFailed {
         let alert = NSAlert()
-        alert.messageText = "Cued finished setup, but the global skill install failed."
+        alert.messageText = "Cued could not install the global skill."
         let stderr = installCommandResult?.stderr.trimmingCharacters(in: .whitespacesAndNewlines)
         let fallbackMessage =
           (stderr?.isEmpty == false ? stderr : nil)
@@ -282,6 +277,12 @@ final class OnboardingWindowController: NSWindowController {
         alert.runModal()
       }
     }
+  }
+
+  private func finishOnboarding() {
+    _ = daemonSupervisor.runCLI(arguments: ["onboarding", "complete"])
+    close()
+    onRefresh()
   }
 
   override func close() {

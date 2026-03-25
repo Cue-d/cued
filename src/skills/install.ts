@@ -20,6 +20,16 @@ export interface GlobalCuedSkillInstallResult {
   error?: string;
 }
 
+export interface GlobalCuedSkillStatusResult {
+  installed: boolean;
+  status: "installed" | "needs_action" | "unknown";
+  summary: string;
+  sourcePath: string | null;
+  npxPath: string | null;
+  installedPath: string | null;
+  error?: string;
+}
+
 function repoRoot(): string {
   return resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 }
@@ -96,6 +106,122 @@ function formatInstallError(error: unknown): { message: string; stdout: string; 
   };
 }
 
+function buildSkillsCommandEnv(npxPath: string): NodeJS.ProcessEnv {
+  return {
+    ...process.env,
+    PATH: [dirname(npxPath), process.env.PATH].filter(Boolean).join(":"),
+  };
+}
+
+function stripAnsi(value: string): string {
+  let output = "";
+  let index = 0;
+
+  while (index < value.length) {
+    if (value[index] === "\u001B" && value[index + 1] === "[") {
+      index += 2;
+      while (index < value.length && value[index] !== "m") {
+        index += 1;
+      }
+      if (index < value.length) {
+        index += 1;
+      }
+      continue;
+    }
+
+    output += value[index];
+    index += 1;
+  }
+
+  return output;
+}
+
+function findInstalledSkillPath(listOutput: string, skillName: string): string | null {
+  const cleanOutput = stripAnsi(listOutput);
+  for (const rawLine of cleanOutput.split(/\r?\n/)) {
+    if (rawLine.startsWith("  ")) {
+      continue;
+    }
+
+    const line = rawLine.trim();
+    if (!line || line === "Global Skills") {
+      continue;
+    }
+
+    const match = line.match(/^(\S+)\s+(.+)$/);
+    if (match?.[1] === skillName) {
+      return match[2]?.trim() ?? null;
+    }
+  }
+
+  return null;
+}
+
+export function getGlobalCuedSkillStatus(): GlobalCuedSkillStatusResult {
+  const sourcePath = resolveCuedSkillSourcePath();
+  const npxPath = resolveNpxPath();
+  if (!sourcePath) {
+    return {
+      installed: false,
+      status: "unknown",
+      summary: "Bundled Cued skill was not found.",
+      sourcePath: null,
+      npxPath,
+      installedPath: null,
+      error: "Bundled Cued skill not found.",
+    };
+  }
+
+  if (!npxPath) {
+    return {
+      installed: false,
+      status: "needs_action",
+      summary: "Install Node.js to enable the global Cued skill install.",
+      sourcePath,
+      npxPath: null,
+      installedPath: null,
+      error: "npx not found. Install Node.js to enable the global Cued skill install.",
+    };
+  }
+
+  try {
+    const stdout = execFileSync(npxPath, ["--yes", "skills", "list", "--global"], {
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "pipe"],
+      env: buildSkillsCommandEnv(npxPath),
+    });
+    const installedPath = findInstalledSkillPath(stdout, CUED_SKILL_NAME);
+    return installedPath
+      ? {
+          installed: true,
+          status: "installed",
+          summary: "Cued skill is installed globally.",
+          sourcePath,
+          npxPath,
+          installedPath,
+        }
+      : {
+          installed: false,
+          status: "needs_action",
+          summary: "Install the Cued skill globally so agents can query local Cued data.",
+          sourcePath,
+          npxPath,
+          installedPath: null,
+        };
+  } catch (error) {
+    const formatted = formatInstallError(error);
+    return {
+      installed: false,
+      status: "unknown",
+      summary: "Could not verify whether the global Cued skill is installed.",
+      sourcePath,
+      npxPath,
+      installedPath: null,
+      error: formatted.stderr || formatted.message,
+    };
+  }
+}
+
 export function installGlobalCuedSkill(): GlobalCuedSkillInstallResult {
   const sourcePath = resolveCuedSkillSourcePath();
   if (!sourcePath) {
@@ -134,10 +260,7 @@ export function installGlobalCuedSkill(): GlobalCuedSkillInstallResult {
       {
         encoding: "utf8",
         stdio: ["ignore", "pipe", "pipe"],
-        env: {
-          ...process.env,
-          PATH: [dirname(npxPath), process.env.PATH].filter(Boolean).join(":"),
-        },
+        env: buildSkillsCommandEnv(npxPath),
       },
     );
 
