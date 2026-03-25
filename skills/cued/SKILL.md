@@ -280,7 +280,7 @@ ORDER BY conv.last_message_at DESC;
 
 ```bash
 sqlite3 -json ~/.cued/local.db "
-SELECT platform, account_key, json_extract(state_json, '$.status') AS status
+SELECT platform, account_key, auth_state AS status, enabled
 FROM integration_states
 ORDER BY platform;
 "
