@@ -78,6 +78,12 @@ describe("onboarding snapshot", () => {
       "full_disk_access",
       "messages_automation",
     ]);
+    expect(snapshot.globalSkill).toEqual(
+      expect.objectContaining({
+        installed: expect.any(Boolean),
+        status: expect.any(String),
+      }),
+    );
     expect(snapshot.permissions.find((permission) => permission.key === "contacts")).toEqual(
       expect.objectContaining({
         status: process.platform === "darwin" ? "granted" : "unknown",

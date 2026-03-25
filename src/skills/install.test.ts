@@ -15,7 +15,11 @@ vi.mock("node:child_process", async (importOriginal) => {
   };
 });
 
-import { installGlobalCuedSkill, resolveCuedSkillSourcePath } from "./install.js";
+import {
+  getGlobalCuedSkillStatus,
+  installGlobalCuedSkill,
+  resolveCuedSkillSourcePath,
+} from "./install.js";
 
 describe("cued skill installer", () => {
   const tempDirs: string[] = [];
@@ -129,6 +133,33 @@ describe("cued skill installer", () => {
         npxPath: "/opt/homebrew/bin/npx",
         stdout: "installed",
         stderr: "",
+      }),
+    );
+  });
+
+  it("reports the bundled cued skill as installed when skills list includes it", () => {
+    setTempHome();
+    const appPath = createAppBundle(createTempDir("cued-skill-app-"));
+    process.env.CUED_APP_PATH = appPath;
+
+    execFileSyncMock.mockImplementation((command: string, args?: string[]) => {
+      if (command === "/bin/zsh") {
+        return "/opt/homebrew/bin/npx\n";
+      }
+
+      if (command === "/opt/homebrew/bin/npx") {
+        expect(args).toEqual(["--yes", "skills", "list", "--global"]);
+        return "\u001b[36mcued\u001b[0m \u001b[38;5;102m~/.agents/skills/cued\u001b[0m\n  \u001b[38;5;102mAgents:\u001b[0m Codex, Cursor\n";
+      }
+
+      throw new Error(`unexpected command: ${command}`);
+    });
+
+    expect(getGlobalCuedSkillStatus()).toEqual(
+      expect.objectContaining({
+        installed: true,
+        status: "installed",
+        installedPath: "~/.agents/skills/cued",
       }),
     );
   });
