@@ -100,6 +100,10 @@ blob-report/
 *.tar.gz
 site/
 
+# Skill eval workspace (contains message data)
+skills/*/cued-workspace/
+skills/*/evals/runs/
+
 # Misc
 *.tmp
 *.temp

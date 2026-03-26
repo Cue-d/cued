@@ -1,184 +1,159 @@
 ---
 name: cued
-description: Use this skill when a task requires inspecting Cued's local SQLite database for contacts, conversations, duplicate contacts, integration state, or message history. Prefer direct SQL via sqlite3 with JSON output against ~/.cued/local.db. Use web search only after local evidence identifies a likely person and the task explicitly asks for public enrichment.
+description: Queries a local SQLite database at ~/.cued/local.db containing the user's real contacts, conversations, and messages synced from iMessage, Slack, WhatsApp, LinkedIn, and Signal. ALWAYS use this skill when the user asks anything about their contacts, messages, texts, conversations, or communication — even short queries like "who texted me", "check my messages", "what's John's email", or "what did we talk about on Slack". Covers finding contacts, looking up phone numbers and email addresses, reading message history, follow-up detection, ghosting detection, dormant relationships, network search, unread triage, cross-platform conversation lookup, contact deduplication, and relationship analysis. The database has real data — do not tell the user you lack access to their messages or contacts.
 ---
 
 # Cued
 
-The agent-facing interface is the SQLite database at `~/.cued/local.db`.
+Local SQLite database at `~/.cued/local.db`. Read-only by default.
 
-Default command form:
-
-```bash
-sqlite3 -json ~/.cued/local.db "<query>"
-```
+**Timestamps are Unix epoch MILLISECONDS.** To convert: `datetime(sent_at/1000, 'unixepoch', 'localtime')`. Current millis: `unixepoch('now') * 1000`. N days ago: `unixepoch('now', '-N days') * 1000`.
 
 ## Rules
 
-- Read-only by default.
 - Prefer SQL over bash parsing.
-- Prefer views before raw table joins.
 - Always limit result size unless the user asks for exhaustive output.
 - Start broad, then drill down.
-- For person enrichment, use local evidence first and web search second.
+- DM conversations have `type = 'dm'`. Group conversations have `type = 'group'`.
 
 ## Tables
 
-- `contacts`: canonical people/entities
-- `contact_handles`: phone/email/platform identifiers
-- `contact_sources`: where each contact came from
-- `merge_suggestions`: ambiguous duplicate suggestions
-- `conversations`: canonical threads
-- `conversation_participants`: contact membership per conversation
-- `messages`: canonical messages across platforms
-- `messages_fts`: FTS5 index for message search
-- `sync_cursors`: per-platform local sync state
-- `integrations`: connected local integrations
-
-## Views
-
-- `contact_directory`: contacts with handles, source platforms, and last activity
-- `conversation_directory`: conversations with participant names
-- `message_timeline`: messages joined with sender and conversation names
-- `message_search_results`: `message_timeline` joined to the FTS table
-
-## Query Patterns
-
-List recent contacts:
-
-```bash
-sqlite3 -json ~/.cued/local.db "
-SELECT id, display_name, company, handles, last_message_at
-FROM contact_directory
-ORDER BY last_message_at DESC
-LIMIT 20;
-"
+### contacts
+Canonical people/entities.
+```
+id TEXT PRIMARY KEY
+kind TEXT            -- currently always 'person'
+name TEXT
+photo_url TEXT
+company TEXT
+archived INTEGER
+created_at INTEGER
+updated_at INTEGER
 ```
 
-Find a contact by name or company:
-
-```bash
-sqlite3 -json ~/.cued/local.db "
-SELECT id, display_name, company, handles
-FROM contact_directory
-WHERE lower(display_name) LIKE lower('%alex%')
-   OR lower(company) LIKE lower('%vercel%')
-LIMIT 20;
-"
+### contact_handles
+Phone/email/platform identifiers per contact.
+```
+id TEXT PRIMARY KEY
+contact_id TEXT      -- FK → contacts.id
+type TEXT            -- 'email', 'phone', 'linkedin', 'slack', etc.
+value TEXT
+normalized_value TEXT
+platform TEXT
+account_key TEXT
+is_deterministic INTEGER
 ```
 
-Find a contact by handle:
-
-```bash
-sqlite3 -json ~/.cued/local.db "
-SELECT c.id, c.display_name, h.handle_type, h.value, h.platform
-FROM contact_handles h
-JOIN contacts c ON c.id = h.contact_id
-WHERE lower(h.normalized_value) = lower('someone@example.com')
-   OR lower(h.normalized_value) = lower('the_handle')
-LIMIT 20;
-"
+### contact_sources
+Where each contact was discovered.
+```
+id TEXT PRIMARY KEY
+contact_id TEXT      -- FK → contacts.id
+platform TEXT        -- 'imessage', 'slack', 'linkedin', 'whatsapp', 'signal'
+account_key TEXT
+source_entity_key TEXT
+profile_url TEXT
+first_seen_at INTEGER
+last_seen_at INTEGER
 ```
 
-List recent conversations:
-
-```bash
-sqlite3 -json ~/.cued/local.db "
-SELECT id, platform, display_name, participant_names, last_message_text, last_message_at
-FROM conversation_directory
-ORDER BY last_message_at DESC
-LIMIT 25;
-"
+### conversations
+Canonical threads across all platforms.
+```
+id TEXT PRIMARY KEY
+platform TEXT
+account_key TEXT
+type TEXT             -- 'dm' or 'group'
+service TEXT
+name TEXT
+topic TEXT
+participant_names TEXT  -- pipe-separated, e.g. 'Alice | Bob'
+last_message_id TEXT
+last_message_at INTEGER
+last_message_preview TEXT
+unread_count INTEGER
 ```
 
-Inspect recent messages in one conversation:
-
-```bash
-sqlite3 -json ~/.cued/local.db "
-SELECT sender_name, content, sent_at, is_from_me, status
-FROM message_timeline
-WHERE conversation_id = 'conversation-id-here'
-ORDER BY sent_at DESC
-LIMIT 100;
-"
+### conversation_participants
+Contact membership per conversation.
+```
+conversation_id TEXT   -- FK → conversations.id
+contact_id TEXT        -- FK → contacts.id
+participant_name TEXT
+role TEXT
+is_self INTEGER        -- 1 if this participant is the user
+is_active INTEGER
+joined_at INTEGER
+left_at INTEGER
 ```
 
-Search messages by topic:
-
-```bash
-sqlite3 -json ~/.cued/local.db "
-SELECT sender_name, conversation_name, content, sent_at, platform
-FROM message_search_results
-WHERE message_search_results MATCH 'fundraising'
-ORDER BY sent_at DESC
-LIMIT 50;
-"
+### messages
+Canonical messages across all platforms.
+```
+id TEXT PRIMARY KEY
+platform TEXT
+account_key TEXT
+conversation_id TEXT    -- FK → conversations.id
+sender_contact_id TEXT  -- FK → contacts.id
+sender_name TEXT        -- denormalized
+conversation_name TEXT  -- denormalized
+sent_at INTEGER
+is_from_me INTEGER      -- 1 = user sent it, 0 = received
+content TEXT
+status TEXT
+delivered_at INTEGER
+read_at INTEGER
+is_deleted INTEGER
+is_edited INTEGER
+attachment_count INTEGER
+reaction_count INTEGER  -- denormalized count of active reactions
+reply_to_message_id TEXT
 ```
 
-Find duplicate-contact suggestions:
-
-```bash
-sqlite3 -json ~/.cued/local.db "
-SELECT
-  ms.reason,
-  ms.confidence,
-  c1.display_name AS primary_name,
-  c2.display_name AS secondary_name,
-  ms.updated_at
-FROM merge_suggestions ms
-JOIN contacts c1 ON c1.id = ms.primary_contact_id
-JOIN contacts c2 ON c2.id = ms.secondary_contact_id
-WHERE ms.status = 'pending'
-ORDER BY ms.confidence DESC, ms.updated_at DESC
-LIMIT 50;
-"
+### message_reactions
+Reactions (emoji tapbacks) on messages. Important for determining if someone acknowledged a message without replying.
+```
+id TEXT PRIMARY KEY
+message_id TEXT         -- FK → messages.id
+platform TEXT
+reactor_contact_id TEXT -- FK → contacts.id (who reacted)
+reactor_name TEXT       -- denormalized
+emoji TEXT              -- e.g. '❤️', '😂', '👍', '‼️'
+is_active INTEGER       -- 1 = still active, 0 = removed
+created_at INTEGER
 ```
 
-Check local integration and sync state:
-
-```bash
-sqlite3 -json ~/.cued/local.db "
-SELECT platform, workspace_id, display_name, status, updated_at
-FROM integrations
-ORDER BY platform, workspace_id;
-"
+### contact_merge_decisions
+Records of contact merge/split decisions.
+```
+id TEXT PRIMARY KEY
+decision_type TEXT      -- 'merge' or 'split'
+left_contact_id TEXT
+right_contact_id TEXT
+canonical_contact_id TEXT
+reason TEXT
+created_by TEXT
+created_at INTEGER
 ```
 
-```bash
-sqlite3 -json ~/.cued/local.db "
-SELECT platform, workspace_id, sync_mode, last_sync_at
-FROM sync_cursors
-ORDER BY platform, workspace_id;
-"
-```
+### messages_fts
+FTS5 full-text search index on messages. Searchable columns: `sender_name`, `conversation_name`, `participant_names`, `attachment_text`, `content`. Use `messages_fts MATCH '<term>'` with FTS5 syntax and join on `messages.id = messages_fts.message_id` for full metadata.
 
-## Workflows
+### integration_states
+Platform connection status. Key columns: `platform`, `account_key`, `auth_state`, `enabled`.
 
-Find a person:
+## Relationship Patterns
 
-1. Search `contact_directory` by partial name.
-2. If ambiguous, search `contact_handles` by company domain, email, phone, or platform handle.
-3. Inspect recent conversations before answering.
+- **Ghosting**: DM where the last message is not from me, I haven't replied or reacted, and it's 2+ days old. Check `message_reactions` — a reaction (tapback) counts as acknowledgment.
+- **Follow-up needed**: DM where I sent the last message, got no reply or reaction, and it's 3+ days old. If they reacted but didn't reply, it's lower priority.
+- **Dormant relationship**: Contact with significant message history (10+ messages) but no messages in 30+ days.
+- **Network search**: Use `messages_fts` to find contacts who've discussed a topic, grouped by `sender_contact_id`.
+- **Unread triage**: Conversations with `unread_count > 0` where the last message is not from me. Prioritize DMs over groups.
 
-Find recent messages on a topic:
+## Contact Management
 
-1. Use `message_search_results MATCH`.
-2. Narrow by contact or conversation only after the broad search returns candidates.
-
-Inspect the latest thread with a contact:
-
-1. Resolve the contact.
-2. Find conversations through `conversation_participants` or `conversation_directory`.
-3. Read `message_timeline` ordered by `sent_at DESC`.
-
-Check duplicates:
-
-1. Read `merge_suggestions`.
-2. Compare raw handles in `contact_handles`.
-3. Treat suggestions as ambiguous until confirmed.
-
-Enrich a person:
-
-1. Identify the most likely contact from local handles, company, and recent messages.
-2. Only then use web search for public identity or context.
-3. State clearly which conclusions came from local data versus web results.
+- **Find a person**: Search `contacts` by name (`LIKE '%name%' COLLATE NOCASE`), then check `contact_handles` for email/phone/handle matches.
+- **Cross-platform view**: Join `conversation_participants` → `conversations` for a contact to see all their threads across platforms.
+- **Duplicate detection**: Match `contact_handles.normalized_value` across different `contact_id`s, or match `contacts.name` case-insensitively. Many contacts have phone numbers as names (e.g. `+1347...`) because they were discovered via iMessage before being linked.
+- **Merge duplicates**: `cued merge contact <left-id> <right-id>` (merges right into left).
+- **Split**: `cued split contact <contact-id>`.
