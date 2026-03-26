@@ -4,6 +4,7 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 APP_BUILDER="$ROOT_DIR/scripts/build-cued-daemon-app.sh"
+RELEASE_VALIDATOR="$ROOT_DIR/scripts/validate-cued-release-artifact.sh"
 DIST_DIR="$ROOT_DIR/native/macos/dist"
 APP_BUNDLE="$DIST_DIR/Cued.app"
 DMG_PATH="$DIST_DIR/Cued.dmg"
@@ -136,6 +137,7 @@ sign_nested_binaries
 sign_embedded_archives
 sign_nested_code_containers
 sign_macos_binary "$APP_BUNDLE" "$APP_PERMISSIONS_ENTITLEMENTS"
+bash "$RELEASE_VALIDATOR" "$APP_BUNDLE" >/dev/null
 
 rm -rf "$STAGING_DIR" "$DMG_PATH"
 mkdir -p "$STAGING_DIR"
