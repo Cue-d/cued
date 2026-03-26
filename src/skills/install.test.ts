@@ -19,6 +19,7 @@ import {
   getGlobalCuedSkillStatus,
   installGlobalCuedSkill,
   resolveCuedSkillSourcePath,
+  resolveNvmNpxPath,
 } from "./install.js";
 
 describe("cued skill installer", () => {
@@ -48,6 +49,12 @@ describe("cued skill installer", () => {
     const homeDir = createTempDir("cued-skill-home-");
     process.env.HOME = homeDir;
     return homeDir;
+  }
+
+  function createFile(path: string): void {
+    mkdirSync(join(path, ".."), { recursive: true });
+    writeFileSync(path, "#!/bin/sh\nexit 0\n");
+    chmodSync(path, 0o755);
   }
 
   function createAppBundle(baseDir: string): string {
@@ -161,6 +168,19 @@ describe("cued skill installer", () => {
         status: "installed",
         installedPath: "~/.agents/skills/cued",
       }),
+    );
+  });
+
+  it("prefers the newest NVM npx version by semantic version order", () => {
+    const homeDir = setTempHome();
+    const appPath = createAppBundle(createTempDir("cued-skill-app-"));
+    process.env.CUED_APP_PATH = appPath;
+
+    createFile(join(homeDir, ".nvm", "versions", "node", "v20.9.0", "bin", "npx"));
+    createFile(join(homeDir, ".nvm", "versions", "node", "v20.11.0", "bin", "npx"));
+
+    expect(resolveNvmNpxPath()).toBe(
+      join(homeDir, ".nvm", "versions", "node", "v20.11.0", "bin", "npx"),
     );
   });
 });

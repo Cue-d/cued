@@ -62,7 +62,28 @@ function resolveShellNpxPath(): string | null {
   }
 }
 
-function resolveNvmNpxPath(): string | null {
+function compareNodeVersionNames(left: string, right: string): number {
+  const leftParts = left
+    .replace(/^v/i, "")
+    .split(".")
+    .map((part) => Number.parseInt(part, 10) || 0);
+  const rightParts = right
+    .replace(/^v/i, "")
+    .split(".")
+    .map((part) => Number.parseInt(part, 10) || 0);
+  const partCount = Math.max(leftParts.length, rightParts.length);
+
+  for (let index = 0; index < partCount; index += 1) {
+    const difference = (rightParts[index] ?? 0) - (leftParts[index] ?? 0);
+    if (difference !== 0) {
+      return difference;
+    }
+  }
+
+  return 0;
+}
+
+export function resolveNvmNpxPath(): string | null {
   const versionsRoot = join(homedir(), ".nvm", "versions", "node");
   if (!existsSync(versionsRoot)) {
     return null;
@@ -70,8 +91,7 @@ function resolveNvmNpxPath(): string | null {
 
   return (
     readdirSync(versionsRoot)
-      .sort()
-      .reverse()
+      .sort(compareNodeVersionNames)
       .map((version) => join(versionsRoot, version, "bin", "npx"))
       .find((candidate) => existsSync(candidate)) ?? null
   );
