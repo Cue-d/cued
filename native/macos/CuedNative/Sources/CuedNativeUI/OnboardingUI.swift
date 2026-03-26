@@ -83,6 +83,18 @@ public struct InstallerPermissionStatusResponse: Decodable, Sendable {
   }
 }
 
+public struct InstallerGlobalSkillStatus: Decodable, Sendable {
+  public let installed: Bool
+  public let status: String
+  public let summary: String
+
+  public init(installed: Bool, status: String, summary: String) {
+    self.installed = installed
+    self.status = status
+    self.summary = summary
+  }
+}
+
 public struct InstallerPlatformConfiguration: Identifiable {
   public let platform: String
   public let title: String
@@ -184,6 +196,7 @@ public final class OnboardingViewModel: ObservableObject {
   @Published public var isRefreshing = false
   @Published public var platformConfigurations: [InstallerPlatformConfiguration] = []
   @Published public var permissionStatuses: [InstallerPermissionStatus] = installerDefaultPermissionStatuses()
+  @Published public var globalSkillStatus = installerDefaultGlobalSkillStatus()
   @Published public private(set) var refreshSequence = 0
 
   public let pageWidth: CGFloat = OnboardingViewModel.windowWidth
@@ -221,11 +234,13 @@ public final class OnboardingViewModel: ObservableObject {
 
   public func apply(
     permissions: [InstallerPermissionStatus],
+    globalSkill: InstallerGlobalSkillStatus,
     allIntegrations: [InstallerIntegrationStatus],
     integrations: [InstallerIntegrationStatus]
   ) {
     let normalizedPermissions = buildPermissionStatuses(permissions)
     permissionStatuses = normalizedPermissions
+    globalSkillStatus = globalSkill
     platformConfigurations = buildPlatformConfigurations(
       permissions: normalizedPermissions,
       allIntegrations: allIntegrations,
@@ -320,6 +335,7 @@ public struct CuedOnboardingView: View {
 
   let onRefresh: () -> Void
   let onRequestPermission: ([String]) -> Void
+  let onInstallGlobalSkill: () -> Void
   let onEnableIntegration: (String, String) -> Void
   let onRemoveIntegration: (String, String) -> Void
   let onConnectIntegration: (String, String) -> Void
@@ -328,6 +344,7 @@ public struct CuedOnboardingView: View {
   @State private var addAccountPrompt: InstallerAddAccountPrompt?
   @State private var removalPrompt: InstallerRemovalPrompt?
   @State private var pendingPermissionKeys = Set<String>()
+  @State private var pendingGlobalSkillInstall = false
   @State private var pendingIntegrationActionIDs = Set<String>()
   @State private var pendingPlatformConnectPlatforms = Set<String>()
 
@@ -335,6 +352,7 @@ public struct CuedOnboardingView: View {
     viewModel: OnboardingViewModel,
     onRefresh: @escaping () -> Void,
     onRequestPermission: @escaping ([String]) -> Void,
+    onInstallGlobalSkill: @escaping () -> Void,
     onEnableIntegration: @escaping (String, String) -> Void,
     onRemoveIntegration: @escaping (String, String) -> Void,
     onConnectIntegration: @escaping (String, String) -> Void,
@@ -343,6 +361,7 @@ public struct CuedOnboardingView: View {
     self.viewModel = viewModel
     self.onRefresh = onRefresh
     self.onRequestPermission = onRequestPermission
+    self.onInstallGlobalSkill = onInstallGlobalSkill
     self.onEnableIntegration = onEnableIntegration
     self.onRemoveIntegration = onRemoveIntegration
     self.onConnectIntegration = onConnectIntegration
@@ -384,6 +403,7 @@ public struct CuedOnboardingView: View {
     }
     .onChange(of: viewModel.refreshSequence) { _ in
       pendingPermissionKeys.removeAll()
+      pendingGlobalSkillInstall = false
     }
     .onChange(of: platformRefreshSignature) { _ in
       pendingIntegrationActionIDs.removeAll()
@@ -561,6 +581,10 @@ public struct CuedOnboardingView: View {
             Divider()
           }
         }
+        if !viewModel.permissionStatuses.isEmpty {
+          Divider()
+        }
+        globalSkillRow
       }
     }
   }
@@ -652,6 +676,50 @@ public struct CuedOnboardingView: View {
     }
     .padding(.vertical, 2)
     .opacity(isGranted ? 0.7 : 1.0)
+  }
+
+  private var globalSkillRow: some View {
+    let isInstalled = viewModel.globalSkillStatus.installed
+
+    return HStack(alignment: .top, spacing: 12) {
+      Image(systemName: "terminal")
+        .font(.title3.weight(.semibold))
+        .foregroundStyle(isInstalled ? .green : .secondary)
+        .frame(width: 26)
+
+      VStack(alignment: .leading, spacing: 4) {
+        Text("Cued skill")
+          .font(.headline)
+          .foregroundStyle(isInstalled ? .secondary : .primary)
+        Text(viewModel.globalSkillStatus.summary)
+          .font(.subheadline)
+          .foregroundStyle(isInstalled ? .tertiary : .secondary)
+          .fixedSize(horizontal: false, vertical: true)
+      }
+
+      Spacer(minLength: 12)
+
+      if isInstalled {
+        Image(systemName: "checkmark.circle.fill")
+          .font(.title3.weight(.semibold))
+          .foregroundStyle(.green)
+          .padding(.top, 2)
+          .accessibilityLabel("Cued skill installed")
+      } else if pendingGlobalSkillInstall {
+        ProgressView()
+          .controlSize(.small)
+          .padding(.top, 6)
+      } else {
+        Button("Install") {
+          pendingGlobalSkillInstall = true
+          onInstallGlobalSkill()
+        }
+        .buttonStyle(.bordered)
+        .controlSize(.regular)
+      }
+    }
+    .padding(.vertical, 2)
+    .opacity(isInstalled ? 0.7 : 1.0)
   }
 
   private func platformConfigurationCard(_ configuration: InstallerPlatformConfiguration) -> some View {
@@ -1229,6 +1297,14 @@ private func installerDefaultPermissionStatuses() -> [InstallerPermissionStatus]
   installerPermissionOrder.compactMap { installerDefaultPermissionStatus(for: $0) }
 }
 
+private func installerDefaultGlobalSkillStatus() -> InstallerGlobalSkillStatus {
+  InstallerGlobalSkillStatus(
+    installed: false,
+    status: "unknown",
+    summary: "Checks whether the global Cued skill is available to your agents."
+  )
+}
+
 private func installerDefaultPermissionStatus(for key: String) -> InstallerPermissionStatus? {
   switch key {
   case "contacts":
@@ -1631,6 +1707,7 @@ private func installerSortIntegrations(
 private func installerPreviewViewModel(
   page: Int,
   permissions: [InstallerPermissionStatus],
+  globalSkill: InstallerGlobalSkillStatus,
   allIntegrations: [InstallerIntegrationStatus],
   setupIntegrations: [InstallerIntegrationStatus]
 ) -> OnboardingViewModel {
@@ -1638,6 +1715,7 @@ private func installerPreviewViewModel(
   viewModel.currentPage = page
   viewModel.apply(
     permissions: permissions,
+    globalSkill: globalSkill,
     allIntegrations: allIntegrations,
     integrations: setupIntegrations
   )
@@ -1675,6 +1753,7 @@ private struct InstallerPreviewContainer: View {
   init(
     page: Int,
     permissions: [InstallerPermissionStatus],
+    globalSkill: InstallerGlobalSkillStatus,
     allIntegrations: [InstallerIntegrationStatus],
     setupIntegrations: [InstallerIntegrationStatus]
   ) {
@@ -1682,6 +1761,7 @@ private struct InstallerPreviewContainer: View {
       wrappedValue: installerPreviewViewModel(
         page: page,
         permissions: permissions,
+        globalSkill: globalSkill,
         allIntegrations: allIntegrations,
         setupIntegrations: setupIntegrations
       )
@@ -1693,6 +1773,7 @@ private struct InstallerPreviewContainer: View {
       viewModel: viewModel,
       onRefresh: {},
       onRequestPermission: { _ in },
+      onInstallGlobalSkill: {},
       onEnableIntegration: { _, _ in },
       onRemoveIntegration: { _, _ in },
       onConnectIntegration: { _, _ in },
@@ -1725,6 +1806,7 @@ private struct InstallerPreviewContainer: View {
         requestFlags: ["--messages"]
       ),
     ],
+    globalSkill: installerDefaultGlobalSkillStatus(),
     allIntegrations: [],
     setupIntegrations: [
       installerPreviewIntegration(
@@ -1752,6 +1834,7 @@ private struct InstallerPreviewContainer: View {
   InstallerPreviewContainer(
     page: 1,
     permissions: installerDefaultPermissionStatuses(),
+    globalSkill: installerDefaultGlobalSkillStatus(),
     allIntegrations: [
       installerPreviewIntegration(
         platform: "contacts",
@@ -1828,6 +1911,7 @@ private struct InstallerPreviewContainer: View {
   InstallerPreviewContainer(
     page: 1,
     permissions: installerDefaultPermissionStatuses(),
+    globalSkill: installerDefaultGlobalSkillStatus(),
     allIntegrations: [
       installerPreviewIntegration(
         platform: "contacts",
@@ -1928,6 +2012,7 @@ private struct InstallerPreviewContainer: View {
   InstallerPreviewContainer(
     page: 1,
     permissions: installerDefaultPermissionStatuses(),
+    globalSkill: installerDefaultGlobalSkillStatus(),
     allIntegrations: [
       installerPreviewIntegration(
         platform: "contacts",

@@ -1,10 +1,12 @@
 import type { CuedDatabase } from "../db/database.js";
 import { refreshManagedIntegrationStates } from "../platforms/core/state/refresh.js";
 import { buildIntegrationStatus } from "../platforms/core/state/status.js";
+import { getGlobalCuedSkillStatus } from "../skills/install.js";
 import { buildPermissionStatus } from "./doctor.js";
 
 export interface OnboardingSnapshot {
   permissions: Awaited<ReturnType<typeof buildPermissionStatus>>["permissions"];
+  globalSkill: ReturnType<typeof getGlobalCuedSkillStatus>;
   hostOs: ReturnType<typeof buildIntegrationStatus>["hostOs"];
   integrations: ReturnType<typeof buildIntegrationStatus>["integrations"];
   setupIntegrations: ReturnType<typeof buildIntegrationStatus>["setupIntegrations"];
@@ -30,10 +32,12 @@ export async function buildOnboardingSnapshot(
     mode: options.refreshPermissions ? "active" : "passive",
     db,
   });
+  const globalSkill = getGlobalCuedSkillStatus();
   const integrations = buildIntegrationStatus(db);
 
   return {
     permissions: permissions.permissions,
+    globalSkill,
     ...integrations,
   };
 }
