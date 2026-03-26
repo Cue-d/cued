@@ -57,6 +57,12 @@ describe("cued skill installer", () => {
     chmodSync(path, 0o755);
   }
 
+  function createMockNpx(baseDir: string): string {
+    const npxPath = join(baseDir, "bin", "npx");
+    createFile(npxPath);
+    return npxPath;
+  }
+
   function createAppBundle(baseDir: string): string {
     const appPath = join(baseDir, "Cued.app");
     const macOSDir = join(appPath, "Contents", "MacOS");
@@ -102,16 +108,17 @@ describe("cued skill installer", () => {
   it("installs the bundled cued skill globally for all agents via npx skills", () => {
     setTempHome();
     const appPath = createAppBundle(createTempDir("cued-skill-app-"));
+    const npxPath = createMockNpx(createTempDir("cued-skill-npx-"));
     process.env.CUED_APP_PATH = appPath;
 
     execFileSyncMock.mockImplementation(
       (command: string, args?: string[], options?: { env?: Record<string, string> }) => {
         if (command === "/bin/zsh") {
           expect(args).toEqual(["-lc", "command -v npx"]);
-          return "/opt/homebrew/bin/npx\n";
+          return `${npxPath}\n`;
         }
 
-        if (command === "/opt/homebrew/bin/npx") {
+        if (command === npxPath) {
           expect(args).toEqual([
             "--yes",
             "skills",
@@ -122,7 +129,7 @@ describe("cued skill installer", () => {
             "*",
             "--yes",
           ]);
-          expect(options?.env?.PATH?.startsWith("/opt/homebrew/bin")).toBe(true);
+          expect(options?.env?.PATH?.startsWith(join(npxPath, ".."))).toBe(true);
           return "installed";
         }
 
@@ -137,7 +144,7 @@ describe("cued skill installer", () => {
         skillName: "cued",
         scope: "global",
         sourcePath: join(appPath, "Contents", "Resources", "skills", "cued"),
-        npxPath: "/opt/homebrew/bin/npx",
+        npxPath,
         stdout: "installed",
         stderr: "",
       }),
@@ -147,14 +154,15 @@ describe("cued skill installer", () => {
   it("reports the bundled cued skill as installed when skills list includes it", () => {
     setTempHome();
     const appPath = createAppBundle(createTempDir("cued-skill-app-"));
+    const npxPath = createMockNpx(createTempDir("cued-skill-npx-"));
     process.env.CUED_APP_PATH = appPath;
 
     execFileSyncMock.mockImplementation((command: string, args?: string[]) => {
       if (command === "/bin/zsh") {
-        return "/opt/homebrew/bin/npx\n";
+        return `${npxPath}\n`;
       }
 
-      if (command === "/opt/homebrew/bin/npx") {
+      if (command === npxPath) {
         expect(args).toEqual(["--yes", "skills", "list", "--global"]);
         return "\u001b[36mcued\u001b[0m \u001b[38;5;102m~/.agents/skills/cued\u001b[0m\n  \u001b[38;5;102mAgents:\u001b[0m Codex, Cursor\n";
       }
