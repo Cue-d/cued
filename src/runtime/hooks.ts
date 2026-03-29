@@ -163,6 +163,7 @@ function buildSampleHooks(openClaw: { detected: boolean; path: string | null }):
     "# Cued local hook configuration",
     "# Hooks are disabled by default. Each hook receives one JSON document on stdin.",
     '# {"event":"message.received","payload":{...}}',
+    '# message.received payloads include message.acquisitionMode = "realtime" | "sync".',
     "# Hook subprocess failures never block auth or sync.",
     openClaw.detected
       ? `# OpenClaw detected at ${openClaw.path}. Add your own disabled subprocess wrapper if you want to bridge Cued events into it.`
