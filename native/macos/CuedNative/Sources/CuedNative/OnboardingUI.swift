@@ -299,6 +299,7 @@ final class OnboardingWindowController: NSWindowController {
     pendingStatusRefreshTask = nil
     pendingPermissionRefreshTask?.cancel()
     pendingPermissionRefreshTask = nil
+    PermissionGuideAssistant.shared.dismiss()
     super.close()
   }
 

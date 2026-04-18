@@ -40,4 +40,19 @@ final class OnboardingUITests: XCTestCase {
     XCTAssertTrue(onboardingPermissionGuideUsesDragSource(for: "full_disk_access"))
     XCTAssertFalse(onboardingPermissionGuideUsesDragSource(for: "messages_automation"))
   }
+
+  func testPermissionGuideInstructionCopyMatchesPanelBehavior() {
+    XCTAssertEqual(
+      onboardingPermissionGuideInstructionSentence(for: .fullDiskAccess, hostAppName: "Cued"),
+      "Drag Cued to the list above to allow Full Disk Access."
+    )
+    XCTAssertEqual(
+      onboardingPermissionGuideInstructionSentence(for: .contacts, hostAppName: "Cued"),
+      "Enable Cued in the list above to allow Contacts."
+    )
+    XCTAssertEqual(
+      onboardingPermissionGuideInstructionSentence(for: .messagesAutomation, hostAppName: "Cued"),
+      "Enable Cued in the list above to allow Messages automation."
+    )
+  }
 }
