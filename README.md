@@ -189,9 +189,12 @@ native/
   macos/
     CuedNative/     macOS host app
   helpers/
+    slack-go/       Native Slack helper
     whatsapp-go/    Native WhatsApp helper
 scripts/            Packaging, runtime fetch, signing, and permission helpers
 ```
+
+Signal support ships as a bundled `signal-cli` payload fetched by `scripts/fetch-signal-cli-macos.sh` and staged into the app bundle.
 
 ## Packaging And Release Scripts
 
