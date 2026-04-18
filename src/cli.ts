@@ -15,13 +15,10 @@ import {
   enableLoginItem,
   getAppBundleInfo,
   getCLISymlinkStatus,
-  getLaunchAgentStatus,
   getLoginItemStatus,
   installCLISymlink,
-  installLaunchAgent,
   installMacOSApp,
   resolveInstalledAppPath,
-  uninstallLaunchAgent,
 } from "./macos/install.js";
 import { IntegrationAuthService } from "./platforms/core/auth/service.js";
 import { getIntegrationSummary, listIntegrationStates } from "./platforms/core/state/status.js";
@@ -116,7 +113,6 @@ Usage:
   cued login-item enable|disable|status
   cued onboarding complete|snapshot|status [--refresh-managed] [--refresh-permissions]
   cued skill install-global|status
-  cued launchd install|uninstall|status
   cued permissions doctor|status|request [--all|--contacts|--messages|--full-disk-access]
   cued integrations list
   cued integrations status
@@ -450,20 +446,6 @@ async function main(): Promise<void> {
           return;
         default:
           throw new Error("Usage: cued skill install-global | status");
-      }
-    case "launchd":
-      switch (subcommand) {
-        case "install":
-          printJson(installLaunchAgent());
-          return;
-        case "uninstall":
-          printJson(uninstallLaunchAgent());
-          return;
-        case "status":
-          printJson(getLaunchAgentStatus());
-          return;
-        default:
-          throw new Error("Usage: cued launchd install | uninstall | status");
       }
     case "login-item":
       switch (subcommand) {
