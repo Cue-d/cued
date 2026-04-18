@@ -100,18 +100,11 @@ Cued normalizes platform data into one shared cross-platform event model so proj
 
 ## Platform Capability Matrix
 
-This matrix documents current shipped behavior, not roadmap promises.
+The source of truth lives in `src/platforms/core/types.ts`. To inspect the current shipped matrix from the runtime instead of a duplicated README table, run:
 
-| Platform | Send | Receive | Realtime ingest | Full history sync | Message edits | Deletes | Reactions | Threads / replies | Read receipts | Attachments | Contact sync |
-| -------- | ---- | ------- | --------------- | ----------------- | ------------- | ------- | --------- | ----------------- | ------------- | ----------- | ------------ |
-| Contacts | ❌ | ❌ | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ✅ |
-| iMessage | ❌ | ✅ | ✅ | ✅ | ❌ | ❌ | ✅ | ❌ | ◐ | ✅ | ◐ |
-| LinkedIn | ❌ | ✅ | ✅ | ◐ | ✅ | ✅ | ✅ | ✅ | ◐ | ✅ | ✅ |
-| Signal | ✅ | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ✅ | ◐ |
-| Slack | ❌ | ✅ | ✅ | ✅ | ◐ | ❌ | ◐ | ✅ | ❌ | ✅ | ✅ |
-| WhatsApp | ✅ | ✅ | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ | ◐ | ✅ | ◐ |
-
-Legend: `✅` supported, `◐` partial, `❌` unsupported.
+```bash
+cued integrations capabilities
+```
 
 LinkedIn history is currently partial: Cued imports inbox-visible threads and bounded per-conversation backfill, but not every archived or non-inbox thread.
 
@@ -163,7 +156,7 @@ Once `pnpm dev -- install` has completed, you can switch to the installed `cued`
 | `pnpm dev -- help` | Run the CLI directly from source through `tsx`. |
 | `pnpm build` | Rebuild the TypeScript CLI and daemon. |
 | `pnpm typecheck` | Type check the root app. |
-| `pnpm test` | Run Vitest coverage for the root app. |
+| `pnpm test` | Run the root app test suite. |
 | `pnpm check:biome` | Run formatting, lint, and import checks. |
 | `pnpm build:app:macos` | Rebuild the local `Cued.app` development bundle. |
 | `swift build --package-path native/macos/CuedNative -c release` | Rebuild the native macOS host after Swift changes. |
