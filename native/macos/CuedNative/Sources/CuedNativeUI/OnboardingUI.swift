@@ -1276,6 +1276,7 @@ public struct InstallerPlatformIcon: View {
         Image(nsImage: image)
           .resizable()
           .interpolation(.high)
+          .antialiased(true)
           .aspectRatio(contentMode: .fit)
           .padding(brandLogoPadding)
       } else {
@@ -1289,8 +1290,6 @@ public struct InstallerPlatformIcon: View {
     guard let assetName = installerPlatformIconAssetName(for: platform),
           let url = installerPlatformIconURL(named: assetName),
           let image = NSImage(contentsOf: url) else { return nil }
-    let iconSize = 40 - (brandLogoPadding * 2)
-    image.size = NSSize(width: iconSize, height: iconSize)
     return image
   }
 
@@ -1300,11 +1299,7 @@ public struct InstallerPlatformIcon: View {
 
   private var brandLogoPadding: CGFloat {
     switch platform {
-    case "linkedin":
-      5
-    case "signal":
-      6
-    case "slack", "whatsapp":
+    case "slack", "linkedin", "signal", "whatsapp":
       7
     default:
       7
@@ -1484,11 +1479,11 @@ private func installerPlatformIconAssetName(for platform: String) -> String? {
   case "slack":
     return "slack-logo"
   case "linkedin":
-    return "linkedin-logo"
+    return "linkedin-logo-white"
   case "signal":
-    return "signal-logo"
+    return "signal-logo-white"
   case "whatsapp":
-    return "whatsapp-logo"
+    return "whatsapp-logo-white"
   default:
     return nil
   }
@@ -1497,9 +1492,9 @@ private func installerPlatformIconAssetName(for platform: String) -> String? {
 private func installerPlatformAccentColor(for platform: String) -> Color {
   switch platform {
   case "contacts":
-    return Color(red: 0.47, green: 0.49, blue: 0.54)
+    return Color(red: 0.07, green: 0.72, blue: 0.84)
   case "imessage":
-    return Color(red: 0.20, green: 0.77, blue: 0.35)
+    return Color(red: 0.24, green: 0.81, blue: 0.39)
   case "slack":
     return Color(red: 0.36, green: 0.18, blue: 0.52)
   case "linkedin":
@@ -1522,6 +1517,9 @@ private func installerPlatformIconURL(named assetName: String) -> URL? {
   ].compactMap { $0 }
   for bundle in bundles {
     if let url = bundle.url(forResource: assetName, withExtension: "svg") {
+      return url
+    }
+    if let url = bundle.url(forResource: assetName, withExtension: "png") {
       return url
     }
   }
