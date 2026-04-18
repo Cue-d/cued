@@ -100,7 +100,20 @@ Cued normalizes platform data into one shared cross-platform event model so proj
 
 ## Platform Capability Matrix
 
-The source of truth lives in `src/platforms/core/types.ts`. To inspect the current shipped matrix from the runtime instead of a duplicated README table, run:
+This matrix documents current shipped behavior, not roadmap promises.
+
+| Platform | Send | Receive | Realtime ingest | Full history sync | Message edits | Deletes | Reactions | Threads / replies | Read receipts | Attachments | Contact sync |
+| -------- | ---- | ------- | --------------- | ----------------- | ------------- | ------- | --------- | ----------------- | ------------- | ----------- | ------------ |
+| Contacts | ❌ | ❌ | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ✅ |
+| iMessage | ❌ | ✅ | ✅ | ✅ | ❌ | ❌ | ✅ | ❌ | ◐ | ✅ | ◐ |
+| LinkedIn | ❌ | ✅ | ✅ | ◐ | ✅ | ✅ | ✅ | ✅ | ◐ | ✅ | ✅ |
+| Signal | ✅ | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ✅ | ◐ |
+| Slack | ❌ | ✅ | ✅ | ✅ | ◐ | ❌ | ◐ | ✅ | ❌ | ✅ | ✅ |
+| WhatsApp | ✅ | ✅ | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ | ◐ | ✅ | ◐ |
+
+Legend: `✅` supported, `◐` partial, `❌` unsupported.
+
+The source of truth lives in `src/platforms/core/types.ts`. To inspect the current shipped matrix from the runtime, run:
 
 ```bash
 cued integrations capabilities
