@@ -50,9 +50,6 @@ jobs:
           CUED_NOTARY_PROFILE: ${{ secrets.CUED_NOTARY_PROFILE }}
           CUED_RELEASE_CHANNEL: internal
 
-      - name: Build macOS tarball
-        run: bash scripts/build-cued-tarball.sh
-
       - name: Build release metadata
         run: node scripts/build-cued-release-metadata.mjs
         env:
