@@ -397,7 +397,6 @@ export function disableLoginItem(appPath?: string): LoginItemCommandResult {
   };
 }
 
-
 export function getAppBundleInfo(appPath?: string): Record<string, unknown> {
   const resolvedAppPath = appPath ?? resolveInstalledAppPath();
   if (!resolvedAppPath) {
