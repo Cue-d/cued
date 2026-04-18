@@ -24,8 +24,12 @@ native/
   macos/
     CuedNative/     macOS host app
   helpers/
+    slack-go/       Native Slack helper
     whatsapp-go/    Native WhatsApp helper
+scripts/            Packaging plus bundled runtime/helper fetch scripts
 ```
+
+Signal support ships as a bundled `signal-cli` payload fetched by `scripts/fetch-signal-cli-macos.sh` and staged into the app bundle.
 
 The Electron app and legacy shared packages are gone. Do not add new code against `@cued/*` packages.
 
@@ -56,6 +60,7 @@ The Electron app and legacy shared packages are gone. Do not add new code agains
 | Database layer        | `src/db/`                                                                                                  |
 | Diagnostics           | `src/runtime/doctor.ts`                                                                                    |
 | macOS install helpers | `src/macos/install.ts`                                                                                     |
+| Helper binaries       | `native/helpers/slack-go/`, `native/helpers/whatsapp-go/`, `scripts/fetch-signal-cli-macos.sh`            |
 | App bundle build      | `scripts/build-cued-daemon-app.sh`                                                                         |
 | DMG/signing           | `scripts/build-cued-dmg.sh`, `scripts/sign-and-notarize-cued-app.sh`                                       |
 | Native host           | `native/macos/CuedNative/Sources/CuedNative/`                                                              |
