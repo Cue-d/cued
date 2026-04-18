@@ -758,13 +758,13 @@ public struct CuedOnboardingView: View {
     for permission: InstallerPermissionStatus,
     descriptor: InstallerPermissionDescriptor
   ) {
-    if descriptor.supportsDirectRequest {
+    switch installerPermissionActionKind(for: permission, descriptor: descriptor) {
+    case .requestPrompt:
       onRequestPermission(permission.requestFlags)
-      return
-    }
-
-    if descriptor.supportsGuidedSettings {
+    case .guideInSettings:
       startPermissionGuideTransition(for: permission.key)
+    case .none:
+      return
     }
   }
 
