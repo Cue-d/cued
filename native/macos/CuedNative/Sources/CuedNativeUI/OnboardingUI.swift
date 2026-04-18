@@ -335,6 +335,7 @@ public struct CuedOnboardingView: View {
 
   let onRefresh: () -> Void
   let onGuidePermission: (String) -> Void
+  let onDismissPermissionGuide: () -> Void
   let onRequestPermission: ([String]) -> Void
   let onInstallGlobalSkill: () -> Void
   let onEnableIntegration: (String, String) -> Void
@@ -353,6 +354,7 @@ public struct CuedOnboardingView: View {
     viewModel: OnboardingViewModel,
     onRefresh: @escaping () -> Void,
     onGuidePermission: @escaping (String) -> Void,
+    onDismissPermissionGuide: @escaping () -> Void,
     onRequestPermission: @escaping ([String]) -> Void,
     onInstallGlobalSkill: @escaping () -> Void,
     onEnableIntegration: @escaping (String, String) -> Void,
@@ -363,6 +365,7 @@ public struct CuedOnboardingView: View {
     self.viewModel = viewModel
     self.onRefresh = onRefresh
     self.onGuidePermission = onGuidePermission
+    self.onDismissPermissionGuide = onDismissPermissionGuide
     self.onRequestPermission = onRequestPermission
     self.onInstallGlobalSkill = onInstallGlobalSkill
     self.onEnableIntegration = onEnableIntegration
@@ -407,6 +410,14 @@ public struct CuedOnboardingView: View {
     .onChange(of: viewModel.refreshSequence) { _ in
       pendingGlobalSkillInstall = false
       transitioningPermissionKey = nil
+      onDismissPermissionGuide()
+    }
+    .onChange(of: viewModel.currentPage) { page in
+      guard page != 0 else {
+        return
+      }
+      transitioningPermissionKey = nil
+      onDismissPermissionGuide()
     }
     .onChange(of: platformRefreshSignature) { _ in
       pendingIntegrationActionIDs.removeAll()
@@ -1905,6 +1916,7 @@ private struct InstallerPreviewContainer: View {
       viewModel: viewModel,
       onRefresh: {},
       onGuidePermission: { _ in },
+      onDismissPermissionGuide: {},
       onRequestPermission: { _ in },
       onInstallGlobalSkill: {},
       onEnableIntegration: { _, _ in },

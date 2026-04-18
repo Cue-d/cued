@@ -69,6 +69,7 @@ final class OnboardingWindowController: NSWindowController {
         viewModel: viewModel,
         onRefresh: { [weak self] in self?.refresh() },
         onGuidePermission: { [weak self] key in self?.guidePermission(key: key) },
+        onDismissPermissionGuide: { PermissionGuideAssistant.shared.dismiss() },
         onRequestPermission: { [weak self] flags in self?.requestPermission(flags: flags) },
         onInstallGlobalSkill: { [weak self] in self?.installGlobalSkill() },
         onEnableIntegration: { [weak self] platform, accountKey in
