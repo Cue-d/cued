@@ -513,7 +513,11 @@ export function getIntegrationSummary(
   if (!row) {
     throw new Error(`Integration not found: ${normalized}/${resolvedAccountKey}`);
   }
-  return summarizeIntegrationStates(db, [row])[0]!;
+  const [summary] = summarizeIntegrationStates(db, [row]);
+  if (!summary) {
+    throw new Error(`Integration summary unavailable: ${normalized}/${resolvedAccountKey}`);
+  }
+  return summary;
 }
 
 export function firstNonEmptyDisplayName(
