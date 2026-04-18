@@ -1,6 +1,61 @@
 import AppKit
 import SwiftUI
 
+enum InstallerRoundedButtonVariant {
+  case prominent
+  case secondary
+}
+
+enum InstallerRoundedButtonSize {
+  case compact
+  case regular
+  case icon
+
+  var minWidth: CGFloat {
+    switch self {
+    case .compact:
+      74
+    case .regular:
+      92
+    case .icon:
+      32
+    }
+  }
+
+  var minHeight: CGFloat {
+    switch self {
+    case .compact:
+      30
+    case .regular:
+      32
+    case .icon:
+      32
+    }
+  }
+
+  var horizontalPadding: CGFloat {
+    switch self {
+    case .compact:
+      15
+    case .regular:
+      16
+    case .icon:
+      0
+    }
+  }
+
+  var font: Font {
+    switch self {
+    case .compact:
+      .system(size: 12, weight: .semibold)
+    case .regular:
+      .system(size: 13, weight: .semibold)
+    case .icon:
+      .system(size: 13, weight: .semibold)
+    }
+  }
+}
+
 struct InstallerPermissionDescriptor {
   let key: String
   let title: String
@@ -99,16 +154,58 @@ func installerPermissionDescriptor(for key: String) -> InstallerPermissionDescri
 }
 
 struct InstallerPermissionActionButtonStyle: ButtonStyle {
+  let variant: InstallerRoundedButtonVariant
+  let size: InstallerRoundedButtonSize
+
+  init(
+    variant: InstallerRoundedButtonVariant = .prominent,
+    size: InstallerRoundedButtonSize = .compact
+  ) {
+    self.variant = variant
+    self.size = size
+  }
+
   func makeBody(configuration: Configuration) -> some View {
     configuration.label
-      .font(.system(size: 12, weight: .semibold))
-      .foregroundStyle(.white)
-      .padding(.horizontal, 15)
-      .frame(minWidth: 74, minHeight: 30)
+      .font(size.font)
+      .foregroundStyle(foregroundColor(isPressed: configuration.isPressed))
+      .padding(.horizontal, size.horizontalPadding)
+      .frame(minWidth: size.minWidth, minHeight: size.minHeight)
       .background(
         Capsule(style: .continuous)
-          .fill(Color.accentColor.opacity(configuration.isPressed ? 0.86 : 1))
+          .fill(backgroundColor(isPressed: configuration.isPressed))
+          .overlay(
+            Capsule(style: .continuous)
+              .strokeBorder(borderColor(isPressed: configuration.isPressed), lineWidth: 1)
+          )
       )
-      .opacity(configuration.isPressed ? 0.92 : 1)
+      .opacity(configuration.isPressed ? 0.94 : 1)
+  }
+
+  private func foregroundColor(isPressed: Bool) -> Color {
+    switch variant {
+    case .prominent:
+      return .white.opacity(isPressed ? 0.96 : 1)
+    case .secondary:
+      return .primary.opacity(isPressed ? 0.84 : 1)
+    }
+  }
+
+  private func backgroundColor(isPressed: Bool) -> Color {
+    switch variant {
+    case .prominent:
+      return Color.accentColor.opacity(isPressed ? 0.86 : 1)
+    case .secondary:
+      return Color(NSColor.controlBackgroundColor).opacity(isPressed ? 0.9 : 1)
+    }
+  }
+
+  private func borderColor(isPressed: Bool) -> Color {
+    switch variant {
+    case .prominent:
+      return Color.white.opacity(isPressed ? 0.1 : 0.14)
+    case .secondary:
+      return Color(NSColor.separatorColor).opacity(isPressed ? 0.34 : 0.42)
+    }
   }
 }

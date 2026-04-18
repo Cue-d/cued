@@ -461,7 +461,12 @@ public struct CuedOnboardingView: View {
         Button(action: {}, label: {
           Label("Back", systemImage: "chevron.left").labelStyle(.iconOnly)
         })
-        .buttonStyle(.plain)
+        .buttonStyle(
+          InstallerPermissionActionButtonStyle(
+            variant: .secondary,
+            size: .icon
+          )
+        )
         .opacity(0)
         .disabled(true)
 
@@ -473,7 +478,12 @@ public struct CuedOnboardingView: View {
           } label: {
             Label("Back", systemImage: "chevron.left").labelStyle(.iconOnly)
           }
-          .buttonStyle(.plain)
+          .buttonStyle(
+            InstallerPermissionActionButtonStyle(
+              variant: .secondary,
+              size: .icon
+            )
+          )
           .foregroundStyle(.secondary)
           .opacity(0.8)
           .transition(.opacity.combined(with: .scale(scale: 0.9)))
@@ -502,10 +512,14 @@ public struct CuedOnboardingView: View {
 
       Button(action: handleNext) {
         Text(viewModel.buttonTitle)
-          .frame(minWidth: 88)
       }
       .keyboardShortcut(.return)
-      .buttonStyle(.borderedProminent)
+      .buttonStyle(
+        InstallerPermissionActionButtonStyle(
+          variant: viewModel.buttonTitle == "Skip for now" ? .secondary : .prominent,
+          size: .regular
+        )
+      )
     }
     .padding(.horizontal, 28)
     .padding(.bottom, 13)
@@ -657,7 +671,12 @@ public struct CuedOnboardingView: View {
         Button("Allow") {
           handlePermissionAction(for: permission, descriptor: descriptor)
         }
-        .buttonStyle(InstallerPermissionActionButtonStyle())
+        .buttonStyle(
+          InstallerPermissionActionButtonStyle(
+            variant: .prominent,
+            size: .compact
+          )
+        )
       }
     }
     .padding(.horizontal, 16)
@@ -701,7 +720,12 @@ public struct CuedOnboardingView: View {
           pendingGlobalSkillInstall = true
           onInstallGlobalSkill()
         }
-        .buttonStyle(InstallerPermissionActionButtonStyle())
+        .buttonStyle(
+          InstallerPermissionActionButtonStyle(
+            variant: .secondary,
+            size: .compact
+          )
+        )
       }
     }
     .padding(.horizontal, 16)
@@ -883,12 +907,20 @@ public struct CuedOnboardingView: View {
     Group {
       if prominent {
         Button(title, action: action)
-          .buttonStyle(.borderedProminent)
-          .controlSize(.regular)
+          .buttonStyle(
+            InstallerPermissionActionButtonStyle(
+              variant: .prominent,
+              size: .regular
+            )
+          )
       } else {
         Button(title, action: action)
-          .buttonStyle(.bordered)
-          .controlSize(.regular)
+          .buttonStyle(
+            InstallerPermissionActionButtonStyle(
+              variant: .secondary,
+              size: .regular
+            )
+          )
       }
     }
   }
@@ -1299,7 +1331,12 @@ private struct InstallerAddAccountSheet: View {
       HStack {
         Spacer(minLength: 0)
         Button("Cancel", action: onCancel)
-          .buttonStyle(.bordered)
+          .buttonStyle(
+            InstallerPermissionActionButtonStyle(
+              variant: .secondary,
+              size: .regular
+            )
+          )
         Button("Connect") {
           let trimmed = accountKey.trimmingCharacters(in: .whitespacesAndNewlines)
           guard !trimmed.isEmpty else {
@@ -1307,7 +1344,12 @@ private struct InstallerAddAccountSheet: View {
           }
           onConnect(trimmed)
         }
-        .buttonStyle(.borderedProminent)
+        .buttonStyle(
+          InstallerPermissionActionButtonStyle(
+            variant: .prominent,
+            size: .regular
+          )
+        )
         .disabled(accountKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
       }
     }
