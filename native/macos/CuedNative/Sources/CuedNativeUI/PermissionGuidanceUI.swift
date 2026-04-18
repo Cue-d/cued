@@ -154,6 +154,8 @@ func installerPermissionDescriptor(for key: String) -> InstallerPermissionDescri
 }
 
 struct InstallerPermissionActionButtonStyle: ButtonStyle {
+  @Environment(\.isEnabled) private var isEnabled
+
   let variant: InstallerRoundedButtonVariant
   let size: InstallerRoundedButtonSize
 
@@ -179,33 +181,33 @@ struct InstallerPermissionActionButtonStyle: ButtonStyle {
               .strokeBorder(borderColor(isPressed: configuration.isPressed), lineWidth: 1)
           )
       )
-      .opacity(configuration.isPressed ? 0.94 : 1)
+      .opacity(isEnabled ? (configuration.isPressed ? 0.94 : 1) : 0.64)
   }
 
   private func foregroundColor(isPressed: Bool) -> Color {
     switch variant {
     case .prominent:
-      return .white.opacity(isPressed ? 0.96 : 1)
+      return .white.opacity(isEnabled ? (isPressed ? 0.96 : 1) : 0.78)
     case .secondary:
-      return .primary.opacity(isPressed ? 0.84 : 1)
+      return .primary.opacity(isEnabled ? (isPressed ? 0.84 : 1) : 0.62)
     }
   }
 
   private func backgroundColor(isPressed: Bool) -> Color {
     switch variant {
     case .prominent:
-      return Color.accentColor.opacity(isPressed ? 0.86 : 1)
+      return Color.accentColor.opacity(isEnabled ? (isPressed ? 0.86 : 1) : 0.42)
     case .secondary:
-      return Color(NSColor.controlBackgroundColor).opacity(isPressed ? 0.9 : 1)
+      return Color(NSColor.controlBackgroundColor).opacity(isEnabled ? (isPressed ? 0.9 : 1) : 0.72)
     }
   }
 
   private func borderColor(isPressed: Bool) -> Color {
     switch variant {
     case .prominent:
-      return Color.white.opacity(isPressed ? 0.1 : 0.14)
+      return Color.white.opacity(isEnabled ? (isPressed ? 0.1 : 0.14) : 0.1)
     case .secondary:
-      return Color(NSColor.separatorColor).opacity(isPressed ? 0.34 : 0.42)
+      return Color(NSColor.separatorColor).opacity(isEnabled ? (isPressed ? 0.34 : 0.42) : 0.24)
     }
   }
 }

@@ -62,12 +62,15 @@ final class PermissionGuideAssistant {
   private var overlayController: PermissionGuideOverlayWindowController?
   private var trackingTimer: Timer?
   private var activationObserver: NSObjectProtocol?
+  private var pendingRefreshWorkItem: DispatchWorkItem?
+  private var lastPresentedSnapshot: SystemSettingsWindowSnapshot?
 
   func present(panel: PermissionGuidePanel) {
     dismiss()
     overlayController = PermissionGuideOverlayWindowController(
       hostApp: PermissionGuideHostApp.current(),
-      panel: panel
+      panel: panel,
+      sourceWindowFrame: PermissionGuideSourceLocator.currentWindowFrame()
     )
     NSWorkspace.shared.open(panel.settingsURL)
     startTracking()
@@ -76,6 +79,9 @@ final class PermissionGuideAssistant {
   func dismiss() {
     trackingTimer?.invalidate()
     trackingTimer = nil
+    pendingRefreshWorkItem?.cancel()
+    pendingRefreshWorkItem = nil
+    lastPresentedSnapshot = nil
 
     if let activationObserver {
       NSWorkspace.shared.notificationCenter.removeObserver(activationObserver)
@@ -100,20 +106,44 @@ final class PermissionGuideAssistant {
       queue: .main
     ) { [weak self] _ in
       Task { @MainActor in
-        self?.refreshPosition()
+        self?.refreshPosition(immediate: true)
       }
     }
 
-    refreshPosition()
+    refreshPosition(immediate: true)
   }
 
-  private func refreshPosition() {
+  private func refreshPosition(immediate: Bool = false) {
     guard let snapshot = SystemSettingsWindowLocator.frontmostWindow() else {
+      pendingRefreshWorkItem?.cancel()
+      pendingRefreshWorkItem = nil
+      lastPresentedSnapshot = nil
       overlayController?.hide()
       return
     }
 
-    overlayController?.present(settingsFrame: snapshot.frame, visibleFrame: snapshot.visibleFrame)
+    if let lastPresentedSnapshot, snapshot.isApproximatelyEqual(to: lastPresentedSnapshot) {
+      return
+    }
+
+    pendingRefreshWorkItem?.cancel()
+
+    let applyUpdate = { [weak self] in
+      guard let self else {
+        return
+      }
+      self.overlayController?.present(settingsFrame: snapshot.frame, visibleFrame: snapshot.visibleFrame)
+      self.lastPresentedSnapshot = snapshot
+    }
+
+    if immediate || lastPresentedSnapshot == nil {
+      applyUpdate()
+      return
+    }
+
+    let workItem = DispatchWorkItem(block: applyUpdate)
+    pendingRefreshWorkItem = workItem
+    DispatchQueue.main.asyncAfter(deadline: .now() + 0.12, execute: workItem)
   }
 }
 
@@ -160,11 +190,29 @@ private struct PermissionGuideHostApp {
   }
 }
 
+private enum PermissionGuideSourceLocator {
+  @MainActor
+  static func currentWindowFrame() -> CGRect? {
+    if let keyWindow = NSApp.keyWindow, keyWindow.isVisible {
+      return keyWindow.frame
+    }
+
+    if let mainWindow = NSApp.mainWindow, mainWindow.isVisible {
+      return mainWindow.frame
+    }
+
+    return NSApp.windows.first(where: \.isVisible)?.frame
+  }
+}
+
 private final class PermissionGuideOverlayWindowController: NSWindowController {
   private let preferredContentSize = NSSize(width: 460, height: 126)
+  private let sourceWindowFrame: CGRect?
   private var hasPresented = false
+  private var currentFrame: CGRect?
 
-  init(hostApp: PermissionGuideHostApp, panel: PermissionGuidePanel) {
+  init(hostApp: PermissionGuideHostApp, panel: PermissionGuidePanel, sourceWindowFrame: CGRect?) {
+    self.sourceWindowFrame = sourceWindowFrame
     let window = PassiveOverlayPanel(
       contentRect: NSRect(origin: .zero, size: preferredContentSize),
       styleMask: [.borderless, .nonactivatingPanel],
@@ -202,19 +250,42 @@ private final class PermissionGuideOverlayWindowController: NSWindowController {
 
     if !hasPresented {
       hasPresented = true
+      currentFrame = frame
+      let initialFrame = travelStartFrame(targetFrame: frame, visibleFrame: visibleFrame)
       window.alphaValue = 0
-      window.setFrame(frame, display: false)
+      window.setFrame(initialFrame, display: false)
       window.orderFrontRegardless()
+      (window.contentView as? PermissionGuideOverlayView)?.prepareForArrivalAnimation()
 
       NSAnimationContext.runAnimationGroup { context in
-        context.duration = 0.22
-        context.timingFunction = CAMediaTimingFunction(name: .easeOut)
+        context.duration = 0.5
+        context.timingFunction = CAMediaTimingFunction(controlPoints: 0.2, 0.9, 0.24, 1)
         window.animator().alphaValue = 1
-        window.animator().setFrame(frame.offsetBy(dx: 0, dy: 6), display: true)
+        window.animator().setFrame(frame, display: true)
+        (window.contentView as? PermissionGuideOverlayView)?.animateArrival()
       }
     } else {
-      window.setFrameOrigin(frame.origin)
+      guard let previousFrame = currentFrame else {
+        currentFrame = frame
+        window.setFrame(frame, display: true)
+        window.orderFrontRegardless()
+        return
+      }
+
+      let delta = CGVector(dx: frame.minX - previousFrame.minX, dy: frame.minY - previousFrame.minY)
+      guard hypot(delta.dx, delta.dy) > 1 else {
+        return
+      }
+
+      currentFrame = frame
       window.orderFrontRegardless()
+      (window.contentView as? PermissionGuideOverlayView)?.animateReposition(delta: delta)
+
+      NSAnimationContext.runAnimationGroup { context in
+        context.duration = 0.38
+        context.timingFunction = CAMediaTimingFunction(controlPoints: 0.2, 0.9, 0.24, 1)
+        window.animator().setFrame(frame, display: true)
+      }
     }
   }
 
@@ -246,6 +317,35 @@ private final class PermissionGuideOverlayWindowController: NSWindowController {
       y: min(max(preferredY, minY), maxY)
     )
   }
+
+  private func travelStartFrame(targetFrame: CGRect, visibleFrame: CGRect) -> CGRect {
+    let startScale: CGFloat = 0.82
+    let size = CGSize(
+      width: targetFrame.width * startScale,
+      height: targetFrame.height * startScale
+    )
+
+    if let sourceWindowFrame {
+      let origin = CGPoint(
+        x: sourceWindowFrame.maxX - size.width * 0.72,
+        y: sourceWindowFrame.midY - size.height * 0.38
+      )
+      return CGRect(origin: clampedOrigin(origin, size: size, visibleFrame: visibleFrame), size: size)
+    }
+
+    let origin = CGPoint(
+      x: targetFrame.minX - 220,
+      y: targetFrame.minY - 48
+    )
+    return CGRect(origin: clampedOrigin(origin, size: size, visibleFrame: visibleFrame), size: size)
+  }
+
+  private func clampedOrigin(_ origin: CGPoint, size: CGSize, visibleFrame: CGRect) -> CGPoint {
+    CGPoint(
+      x: min(max(origin.x, visibleFrame.minX + 12), visibleFrame.maxX - size.width - 12),
+      y: min(max(origin.y, visibleFrame.minY + 12), visibleFrame.maxY - size.height - 12)
+    )
+  }
 }
 
 private final class PassiveOverlayPanel: NSPanel {
@@ -254,6 +354,12 @@ private final class PassiveOverlayPanel: NSPanel {
 }
 
 private final class PermissionGuideOverlayView: NSView {
+  private weak var materialView: NSVisualEffectView?
+  private weak var tintView: NSView?
+  private weak var motionBlurOverlay: NSView?
+  private let motionWhiteLayer = CAShapeLayer()
+  private let motionAccentLayer = CAShapeLayer()
+
   init(frame frameRect: NSRect, hostApp: PermissionGuideHostApp, panel: PermissionGuidePanel) {
     super.init(frame: frameRect)
     translatesAutoresizingMaskIntoConstraints = false
@@ -277,12 +383,23 @@ private final class PermissionGuideOverlayView: NSView {
     materialView.layer?.borderWidth = 0.5
     materialView.layer?.borderColor = NSColor.separatorColor.withAlphaComponent(0.18).cgColor
     addSubview(materialView)
+    self.materialView = materialView
 
     let tint = NSView()
     tint.translatesAutoresizingMaskIntoConstraints = false
     tint.wantsLayer = true
     tint.layer?.backgroundColor = NSColor.windowBackgroundColor.withAlphaComponent(0.92).cgColor
     materialView.addSubview(tint)
+    self.tintView = tint
+
+    let motionBlurOverlay = NSView()
+    motionBlurOverlay.translatesAutoresizingMaskIntoConstraints = false
+    motionBlurOverlay.wantsLayer = true
+    motionBlurOverlay.layer?.opacity = 0
+    materialView.addSubview(motionBlurOverlay)
+    self.motionBlurOverlay = motionBlurOverlay
+
+    configureMotionBlurLayers()
 
     let arrow = NSImageView()
     arrow.translatesAutoresizingMaskIntoConstraints = false
@@ -317,6 +434,10 @@ private final class PermissionGuideOverlayView: NSView {
       tint.trailingAnchor.constraint(equalTo: materialView.trailingAnchor),
       tint.topAnchor.constraint(equalTo: materialView.topAnchor),
       tint.bottomAnchor.constraint(equalTo: materialView.bottomAnchor),
+      motionBlurOverlay.leadingAnchor.constraint(equalTo: materialView.leadingAnchor),
+      motionBlurOverlay.trailingAnchor.constraint(equalTo: materialView.trailingAnchor),
+      motionBlurOverlay.topAnchor.constraint(equalTo: materialView.topAnchor),
+      motionBlurOverlay.bottomAnchor.constraint(equalTo: materialView.bottomAnchor),
       arrow.leadingAnchor.constraint(equalTo: materialView.leadingAnchor, constant: 24),
       arrow.topAnchor.constraint(equalTo: materialView.topAnchor, constant: 14),
       arrow.widthAnchor.constraint(equalToConstant: 28),
@@ -331,6 +452,122 @@ private final class PermissionGuideOverlayView: NSView {
     ])
 
     startArrowBounce(on: arrow)
+  }
+
+  override func layout() {
+    super.layout()
+
+    guard let motionBlurOverlay else {
+      return
+    }
+
+    let bounds = motionBlurOverlay.bounds.insetBy(dx: 1, dy: 1)
+    let path = CGPath(
+      roundedRect: bounds,
+      cornerWidth: 22,
+      cornerHeight: 22,
+      transform: nil
+    )
+    motionWhiteLayer.frame = motionBlurOverlay.bounds
+    motionAccentLayer.frame = motionBlurOverlay.bounds
+    motionWhiteLayer.path = path
+    motionAccentLayer.path = path
+  }
+
+  func prepareForArrivalAnimation() {
+    wantsLayer = true
+    layer?.opacity = 0.82
+    layer?.transform = CATransform3DMakeScale(0.97, 0.97, 1)
+    materialView?.alphaValue = 0.9
+  }
+
+  func animateArrival() {
+    guard let layer else {
+      return
+    }
+
+    layer.removeAllAnimations()
+
+    let opacity = CABasicAnimation(keyPath: "opacity")
+    opacity.fromValue = 0.82
+    opacity.toValue = 1
+
+    let scale = CAKeyframeAnimation(keyPath: "transform")
+    scale.values = [
+      CATransform3DMakeScale(0.97, 0.97, 1),
+      CATransform3DMakeScale(1.014, 1.014, 1),
+      CATransform3DIdentity,
+    ]
+    scale.keyTimes = [0, 0.7, 1]
+    scale.timingFunctions = [
+      CAMediaTimingFunction(controlPoints: 0.2, 0.9, 0.24, 1),
+      CAMediaTimingFunction(name: .easeOut),
+    ]
+
+    let group = CAAnimationGroup()
+    group.animations = [opacity, scale]
+    group.duration = 0.5
+    group.timingFunction = CAMediaTimingFunction(controlPoints: 0.2, 0.9, 0.24, 1)
+    group.fillMode = .forwards
+    group.isRemovedOnCompletion = false
+    layer.add(group, forKey: "permissionGuideArrival")
+
+    NSAnimationContext.runAnimationGroup { context in
+      context.duration = 0.5
+      context.timingFunction = CAMediaTimingFunction(controlPoints: 0.2, 0.9, 0.24, 1)
+      materialView?.animator().alphaValue = 1
+    }
+  }
+
+  func animateReposition(delta: CGVector) {
+    guard let layer,
+          let motionBlurOverlay,
+          let motionLayer = motionBlurOverlay.layer,
+          hypot(delta.dx, delta.dy) > 1 else {
+      return
+    }
+
+    let offset = motionBlurOffset(for: delta)
+    motionLayer.removeAllAnimations()
+    layer.removeAnimation(forKey: "permissionGuideReposition")
+    materialView?.layer?.removeAnimation(forKey: "permissionGuideRepositionMaterial")
+
+    motionWhiteLayer.transform = CATransform3DMakeTranslation(-offset.width * 0.65, -offset.height * 0.65, 0)
+    motionAccentLayer.transform = CATransform3DMakeTranslation(-offset.width, -offset.height, 0)
+    motionBlurOverlay.alphaValue = 0.72
+
+    let settle = CAKeyframeAnimation(keyPath: "transform")
+    settle.values = [
+      CATransform3DMakeTranslation(-offset.width * 0.22, -offset.height * 0.22, 0),
+      CATransform3DMakeTranslation(offset.width * 0.04, offset.height * 0.04, 0),
+      CATransform3DIdentity,
+    ]
+    settle.keyTimes = [0, 0.72, 1]
+    settle.timingFunctions = [
+      CAMediaTimingFunction(controlPoints: 0.2, 0.9, 0.24, 1),
+      CAMediaTimingFunction(name: .easeOut),
+    ]
+
+    let settleGroup = CAAnimationGroup()
+    settleGroup.animations = [settle]
+    settleGroup.duration = 0.38
+    settleGroup.timingFunction = CAMediaTimingFunction(controlPoints: 0.2, 0.9, 0.24, 1)
+    settleGroup.fillMode = .forwards
+    settleGroup.isRemovedOnCompletion = false
+    layer.add(settleGroup, forKey: "permissionGuideReposition")
+
+    let materialOpacity = CABasicAnimation(keyPath: "opacity")
+    materialOpacity.fromValue = 0.94
+    materialOpacity.toValue = 1
+    materialOpacity.duration = 0.38
+    materialOpacity.timingFunction = CAMediaTimingFunction(controlPoints: 0.2, 0.9, 0.24, 1)
+    materialView?.layer?.add(materialOpacity, forKey: "permissionGuideRepositionMaterial")
+
+    NSAnimationContext.runAnimationGroup { context in
+      context.duration = 0.38
+      context.timingFunction = CAMediaTimingFunction(controlPoints: 0.2, 0.9, 0.24, 1)
+      motionBlurOverlay.animator().alphaValue = 0
+    }
   }
 
   private func startArrowBounce(on arrow: NSImageView) {
@@ -378,6 +615,37 @@ private final class PermissionGuideOverlayView: NSView {
 
     return attributed
   }
+
+  private func configureMotionBlurLayers() {
+    guard let motionLayer = motionBlurOverlay?.layer else {
+      return
+    }
+
+    motionWhiteLayer.fillColor = NSColor.clear.cgColor
+    motionWhiteLayer.strokeColor = NSColor.white.withAlphaComponent(0.14).cgColor
+    motionWhiteLayer.lineWidth = 1
+    motionWhiteLayer.shadowColor = NSColor.white.withAlphaComponent(0.22).cgColor
+    motionWhiteLayer.shadowOpacity = 1
+    motionWhiteLayer.shadowRadius = 8
+    motionWhiteLayer.shadowOffset = .zero
+
+    motionAccentLayer.fillColor = NSColor.clear.cgColor
+    motionAccentLayer.strokeColor = NSColor.systemBlue.withAlphaComponent(0.12).cgColor
+    motionAccentLayer.lineWidth = 1
+    motionAccentLayer.shadowColor = NSColor.systemBlue.withAlphaComponent(0.16).cgColor
+    motionAccentLayer.shadowOpacity = 1
+    motionAccentLayer.shadowRadius = 12
+    motionAccentLayer.shadowOffset = .zero
+
+    motionLayer.addSublayer(motionWhiteLayer)
+    motionLayer.addSublayer(motionAccentLayer)
+  }
+
+  private func motionBlurOffset(for delta: CGVector) -> CGSize {
+    let distance = max(1, hypot(delta.dx, delta.dy))
+    let scale = min(16, max(5, distance * 0.18))
+    return CGSize(width: (delta.dx / distance) * scale, height: (delta.dy / distance) * scale)
+  }
 }
 
 private final class AppBundleDragView: NSView, NSDraggingSource {
@@ -420,7 +688,7 @@ private final class AppBundleDragView: NSView, NSDraggingSource {
     pillView.layer?.cornerRadius = 12
     pillView.layer?.backgroundColor = NSColor.windowBackgroundColor.withAlphaComponent(0.98).cgColor
     pillView.layer?.borderWidth = 1
-    pillView.layer?.borderColor = NSColor.separatorColor.withAlphaComponent(0.28).cgColor
+    pillView.layer?.borderColor = NSColor.separatorColor.withAlphaComponent(0.16).cgColor
     addSubview(pillView)
 
     let iconView = NSImageView(image: hostApp.icon)
@@ -540,6 +808,17 @@ private final class ToggleHintView: NSView {
 private struct SystemSettingsWindowSnapshot {
   let frame: CGRect
   let visibleFrame: CGRect
+
+  func isApproximatelyEqual(to other: SystemSettingsWindowSnapshot) -> Bool {
+    abs(frame.minX - other.frame.minX) < 1 &&
+      abs(frame.minY - other.frame.minY) < 1 &&
+      abs(frame.width - other.frame.width) < 1 &&
+      abs(frame.height - other.frame.height) < 1 &&
+      abs(visibleFrame.minX - other.visibleFrame.minX) < 1 &&
+      abs(visibleFrame.minY - other.visibleFrame.minY) < 1 &&
+      abs(visibleFrame.width - other.visibleFrame.width) < 1 &&
+      abs(visibleFrame.height - other.visibleFrame.height) < 1
+  }
 }
 
 private enum SystemSettingsWindowLocator {

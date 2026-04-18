@@ -347,6 +347,7 @@ public struct CuedOnboardingView: View {
   @State private var pendingGlobalSkillInstall = false
   @State private var pendingIntegrationActionIDs = Set<String>()
   @State private var pendingPlatformConnectPlatforms = Set<String>()
+  @State private var transitioningPermissionKey: String?
 
   public init(
     viewModel: OnboardingViewModel,
@@ -405,6 +406,7 @@ public struct CuedOnboardingView: View {
     }
     .onChange(of: viewModel.refreshSequence) { _ in
       pendingGlobalSkillInstall = false
+      transitioningPermissionKey = nil
     }
     .onChange(of: platformRefreshSignature) { _ in
       pendingIntegrationActionIDs.removeAll()
@@ -573,7 +575,7 @@ public struct CuedOnboardingView: View {
       Text("Permissions")
         .font(.largeTitle.weight(.semibold))
 
-      Text("Cued needs a few macOS permissions to sync your local data. Open the requested macOS prompts directly here, or jump into System Settings when the step is manual.")
+      Text("Cued needs these permissions to sync your data in the background into a local database.")
         .font(.body)
         .foregroundStyle(.secondary)
         .multilineTextAlignment(.center)
@@ -643,6 +645,7 @@ public struct CuedOnboardingView: View {
   private func permissionRow(_ permission: InstallerPermissionStatus) -> some View {
     let descriptor = installerPermissionDescriptor(for: permission.key)
     let isGranted = permission.status == "granted"
+    let isTransitioning = transitioningPermissionKey == permission.key
 
     return HStack(spacing: 14) {
       permissionIconBadge(
@@ -677,12 +680,29 @@ public struct CuedOnboardingView: View {
             size: .compact
           )
         )
+        .disabled(isTransitioning)
       }
     }
     .padding(.horizontal, 16)
     .padding(.vertical, 15)
     .frame(maxWidth: .infinity, alignment: .leading)
     .background(permissionItemBackground())
+    .overlay {
+      if isTransitioning {
+        permissionGuideMotionBlurOverlay()
+      }
+    }
+    .scaleEffect(isTransitioning ? 0.984 : 1)
+    .offset(x: isTransitioning ? 16 : 0, y: isTransitioning ? -10 : 0)
+    .blur(radius: isTransitioning ? 11 : 0)
+    .saturation(isTransitioning ? 0.58 : 1)
+    .opacity(isTransitioning ? 0.54 : 1)
+    .allowsHitTesting(!isTransitioning)
+    .compositingGroup()
+    .animation(
+      .interactiveSpring(response: 0.34, dampingFraction: 0.76, blendDuration: 0.18),
+      value: isTransitioning
+    )
   }
 
   private var globalSkillRow: some View {
@@ -744,7 +764,29 @@ public struct CuedOnboardingView: View {
     }
 
     if descriptor.supportsGuidedSettings {
-      onGuidePermission(permission.key)
+      startPermissionGuideTransition(for: permission.key)
+    }
+  }
+
+  private func startPermissionGuideTransition(for permissionKey: String) {
+    guard transitioningPermissionKey == nil else {
+      return
+    }
+
+    withAnimation(.interactiveSpring(response: 0.32, dampingFraction: 0.76, blendDuration: 0.18)) {
+      transitioningPermissionKey = permissionKey
+    }
+
+    DispatchQueue.main.asyncAfter(deadline: .now() + 0.26) {
+      onGuidePermission(permissionKey)
+    }
+
+    DispatchQueue.main.asyncAfter(deadline: .now() + 0.82) {
+      if transitioningPermissionKey == permissionKey {
+        withAnimation(.interactiveSpring(response: 0.28, dampingFraction: 0.8, blendDuration: 0.16)) {
+          transitioningPermissionKey = nil
+        }
+      }
     }
   }
 
@@ -782,6 +824,40 @@ public struct CuedOnboardingView: View {
         RoundedRectangle(cornerRadius: 20, style: .continuous)
           .strokeBorder(Color(NSColor.separatorColor).opacity(0.32), lineWidth: 1)
       )
+  }
+
+  @ViewBuilder
+  private func permissionGuideMotionBlurOverlay() -> some View {
+    let shape = RoundedRectangle(cornerRadius: 20, style: .continuous)
+
+    ZStack {
+      shape
+        .strokeBorder(Color.white.opacity(0.12), lineWidth: 1)
+        .offset(x: 10)
+        .blur(radius: 6)
+        .opacity(0.72)
+
+      shape
+        .strokeBorder(Color.accentColor.opacity(0.12), lineWidth: 1)
+        .offset(x: 18)
+        .blur(radius: 10)
+        .opacity(0.48)
+
+      LinearGradient(
+        colors: [
+          Color.clear,
+          Color.white.opacity(0.08),
+          Color.white.opacity(0.04),
+        ],
+        startPoint: .leading,
+        endPoint: .trailing
+      )
+      .clipShape(shape)
+      .offset(x: 10)
+      .blur(radius: 12)
+      .opacity(0.84)
+    }
+    .allowsHitTesting(false)
   }
 
   private func platformConfigurationCard(_ configuration: InstallerPlatformConfiguration) -> some View {
@@ -1181,111 +1257,99 @@ public struct InstallerPlatformIcon: View {
   }
 
   public var body: some View {
-    if let image = loadPlatformImage() {
-      Image(nsImage: image)
-        .resizable()
-        .interpolation(.high)
-        .aspectRatio(contentMode: .fit)
-        .frame(width: 28, height: 28)
-        .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
-    } else {
-      fallbackIcon
-        .frame(width: 28, height: 28)
+    ZStack {
+      RoundedRectangle(cornerRadius: 12, style: .continuous)
+        .fill(
+          LinearGradient(
+            colors: [
+              accentColor.opacity(0.98),
+              accentColor.opacity(0.78),
+            ],
+            startPoint: .topLeading,
+            endPoint: .bottomTrailing
+          )
+        )
+      RoundedRectangle(cornerRadius: 12, style: .continuous)
+        .strokeBorder(Color.white.opacity(0.34), lineWidth: 0.75)
+
+      if let image = loadPlatformImage() {
+        Image(nsImage: image)
+          .resizable()
+          .interpolation(.high)
+          .aspectRatio(contentMode: .fit)
+          .padding(brandLogoPadding)
+      } else {
+        fallbackIcon
+      }
     }
+    .frame(width: 40, height: 40)
   }
 
   private func loadPlatformImage() -> NSImage? {
     guard let assetName = installerPlatformIconAssetName(for: platform),
           let url = installerPlatformIconURL(named: assetName),
           let image = NSImage(contentsOf: url) else { return nil }
-    image.size = NSSize(width: 28, height: 28)
+    let iconSize = 40 - (brandLogoPadding * 2)
+    image.size = NSSize(width: iconSize, height: iconSize)
     return image
+  }
+
+  private var accentColor: Color {
+    installerPlatformAccentColor(for: platform)
+  }
+
+  private var brandLogoPadding: CGFloat {
+    switch platform {
+    case "linkedin":
+      5
+    case "signal":
+      6
+    case "slack", "whatsapp":
+      7
+    default:
+      7
+    }
   }
 
   @ViewBuilder
   private var fallbackIcon: some View {
     switch platform {
     case "contacts":
-      ZStack {
-        Circle()
-          .fill(Color(nsColor: .quaternaryLabelColor))
-        Image(systemName: "person.crop.circle.fill")
-          .font(.system(size: 14, weight: .semibold))
-          .foregroundStyle(.white.opacity(0.92))
-      }
+      Image(systemName: "person.crop.circle.fill")
+        .font(.system(size: 17, weight: .semibold))
+        .foregroundStyle(.white.opacity(0.96))
     case "imessage":
-      ZStack {
-        RoundedRectangle(cornerRadius: 8, style: .continuous)
-          .fill(Color(red: 0.20, green: 0.77, blue: 0.35))
-        Image(systemName: "message.fill")
-          .font(.system(size: 13, weight: .semibold))
-          .foregroundStyle(.white)
-      }
+      Image(systemName: "message.fill")
+        .font(.system(size: 15, weight: .semibold))
+        .foregroundStyle(.white)
     case "slack":
-      ZStack {
-        RoundedRectangle(cornerRadius: 8, style: .continuous)
-          .fill(Color.white)
-        VStack(spacing: 2) {
-          HStack(spacing: 2) {
-            RoundedRectangle(cornerRadius: 2, style: .continuous)
-              .fill(Color(red: 0.89, green: 0.14, blue: 0.43))
-              .frame(width: 8, height: 4)
-            RoundedRectangle(cornerRadius: 2, style: .continuous)
-              .fill(Color(red: 0.21, green: 0.74, blue: 0.87))
-              .frame(width: 4, height: 8)
-          }
-          HStack(spacing: 2) {
-            RoundedRectangle(cornerRadius: 2, style: .continuous)
-              .fill(Color(red: 0.15, green: 0.73, blue: 0.36))
-              .frame(width: 4, height: 8)
-            RoundedRectangle(cornerRadius: 2, style: .continuous)
-              .fill(Color(red: 0.92, green: 0.69, blue: 0.14))
-              .frame(width: 8, height: 4)
-          }
-        }
-      }
-      .overlay(
-        RoundedRectangle(cornerRadius: 8, style: .continuous)
-          .stroke(Color.black.opacity(0.08), lineWidth: 0.5)
-      )
+      Image(systemName: "number")
+        .font(.system(size: 15, weight: .bold))
+        .foregroundStyle(.white)
     case "linkedin":
-      ZStack {
-        RoundedRectangle(cornerRadius: 6, style: .continuous)
-          .fill(Color(red: 0.03, green: 0.45, blue: 0.74))
-        Text("in")
-          .font(.system(size: 12, weight: .black, design: .rounded))
-          .foregroundStyle(.white)
-          .offset(y: 0.5)
-      }
+      Text("in")
+        .font(.system(size: 14, weight: .black, design: .rounded))
+        .foregroundStyle(.white)
+        .offset(y: 0.5)
     case "signal":
       ZStack {
-        Circle()
-          .stroke(Color(red: 0.24, green: 0.56, blue: 0.98), lineWidth: 2)
         ZStack {
           Circle()
-            .fill(Color(red: 0.24, green: 0.56, blue: 0.98))
+            .fill(.white.opacity(0.96))
             .frame(width: 12, height: 12)
           Circle()
-            .fill(.white)
+            .fill(accentColor)
             .frame(width: 3, height: 3)
         }
       }
     case "whatsapp":
-      ZStack {
-        Circle()
-          .fill(Color(red: 0.13, green: 0.74, blue: 0.38))
-        Image(systemName: "phone.fill")
-          .font(.system(size: 11, weight: .bold))
-          .foregroundStyle(.white)
-      }
+      Image(systemName: "phone.fill")
+        .font(.system(size: 13, weight: .bold))
+        .foregroundStyle(.white)
     default:
-      ZStack {
-        RoundedRectangle(cornerRadius: 6, style: .continuous)
-          .fill(Color.accentColor.opacity(0.16))
-        Image(systemName: "link.circle.fill")
-          .font(.system(size: 14, weight: .semibold))
-          .foregroundStyle(Color.accentColor)
-      }
+      Image(systemName: "link.circle.fill")
+        .font(.system(size: 15, weight: .semibold))
+        .foregroundStyle(.white)
     }
   }
 }
@@ -1427,6 +1491,25 @@ private func installerPlatformIconAssetName(for platform: String) -> String? {
     return "whatsapp-logo"
   default:
     return nil
+  }
+}
+
+private func installerPlatformAccentColor(for platform: String) -> Color {
+  switch platform {
+  case "contacts":
+    return Color(red: 0.47, green: 0.49, blue: 0.54)
+  case "imessage":
+    return Color(red: 0.20, green: 0.77, blue: 0.35)
+  case "slack":
+    return Color(red: 0.36, green: 0.18, blue: 0.52)
+  case "linkedin":
+    return Color(red: 0.03, green: 0.45, blue: 0.74)
+  case "signal":
+    return Color(red: 0.24, green: 0.56, blue: 0.98)
+  case "whatsapp":
+    return Color(red: 0.13, green: 0.74, blue: 0.38)
+  default:
+    return .accentColor
   }
 }
 
