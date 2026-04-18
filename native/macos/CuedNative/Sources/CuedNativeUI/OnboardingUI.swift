@@ -334,6 +334,7 @@ public struct CuedOnboardingView: View {
   @ObservedObject var viewModel: OnboardingViewModel
 
   let onRefresh: () -> Void
+  let onGuidePermission: (String) -> Void
   let onRequestPermission: ([String]) -> Void
   let onInstallGlobalSkill: () -> Void
   let onEnableIntegration: (String, String) -> Void
@@ -343,7 +344,6 @@ public struct CuedOnboardingView: View {
 
   @State private var addAccountPrompt: InstallerAddAccountPrompt?
   @State private var removalPrompt: InstallerRemovalPrompt?
-  @State private var pendingPermissionKeys = Set<String>()
   @State private var pendingGlobalSkillInstall = false
   @State private var pendingIntegrationActionIDs = Set<String>()
   @State private var pendingPlatformConnectPlatforms = Set<String>()
@@ -351,6 +351,7 @@ public struct CuedOnboardingView: View {
   public init(
     viewModel: OnboardingViewModel,
     onRefresh: @escaping () -> Void,
+    onGuidePermission: @escaping (String) -> Void,
     onRequestPermission: @escaping ([String]) -> Void,
     onInstallGlobalSkill: @escaping () -> Void,
     onEnableIntegration: @escaping (String, String) -> Void,
@@ -360,6 +361,7 @@ public struct CuedOnboardingView: View {
   ) {
     self.viewModel = viewModel
     self.onRefresh = onRefresh
+    self.onGuidePermission = onGuidePermission
     self.onRequestPermission = onRequestPermission
     self.onInstallGlobalSkill = onInstallGlobalSkill
     self.onEnableIntegration = onEnableIntegration
@@ -402,7 +404,6 @@ public struct CuedOnboardingView: View {
       onRefresh()
     }
     .onChange(of: viewModel.refreshSequence) { _ in
-      pendingPermissionKeys.removeAll()
       pendingGlobalSkillInstall = false
     }
     .onChange(of: platformRefreshSignature) { _ in
@@ -558,7 +559,7 @@ public struct CuedOnboardingView: View {
       Text("Permissions")
         .font(.largeTitle.weight(.semibold))
 
-      Text("Cued needs a few macOS permissions to sync your messages and contacts.")
+      Text("Cued needs a few macOS permissions to sync your local data. Open the requested macOS prompts directly here, or jump into System Settings when the step is manual.")
         .font(.body)
         .foregroundStyle(.secondary)
         .multilineTextAlignment(.center)
@@ -574,15 +575,9 @@ public struct CuedOnboardingView: View {
       }
       .padding(.top, 2)
 
-      onboardingCard {
-        ForEach(Array(viewModel.permissionStatuses.enumerated()), id: \.element.id) { index, permission in
+      VStack(spacing: 12) {
+        ForEach(viewModel.permissionStatuses) { permission in
           permissionRow(permission)
-          if index < viewModel.permissionStatuses.count - 1 {
-            Divider()
-          }
-        }
-        if !viewModel.permissionStatuses.isEmpty {
-          Divider()
         }
         globalSkillRow
       }
@@ -634,92 +629,135 @@ public struct CuedOnboardingView: View {
   private func permissionRow(_ permission: InstallerPermissionStatus) -> some View {
     let descriptor = installerPermissionDescriptor(for: permission.key)
     let isGranted = permission.status == "granted"
-    let isPending = pendingPermissionKeys.contains(permission.key)
 
-    return HStack(alignment: .top, spacing: 12) {
-      Image(systemName: descriptor.systemImage)
-        .font(.title3.weight(.semibold))
-        .foregroundStyle(isGranted ? .green : .secondary)
-        .frame(width: 26)
+    return HStack(spacing: 14) {
+      permissionIconBadge(
+        systemImage: descriptor.systemImage,
+        tint: descriptor.accentColor,
+        isGranted: isGranted
+      )
 
-      VStack(alignment: .leading, spacing: 4) {
+      VStack(alignment: .leading, spacing: 3) {
         Text(descriptor.title)
           .font(.headline)
-          .foregroundStyle(isGranted ? .secondary : .primary)
+          .foregroundStyle(.primary)
         Text(descriptor.subtitle)
           .font(.subheadline)
-          .foregroundStyle(isGranted ? .tertiary : .secondary)
+          .foregroundStyle(.secondary)
           .fixedSize(horizontal: false, vertical: true)
       }
-
-      Spacer(minLength: 12)
+      .frame(maxWidth: .infinity, alignment: .leading)
 
       if isGranted {
         Image(systemName: "checkmark.circle.fill")
           .font(.title3.weight(.semibold))
           .foregroundStyle(.green)
-          .padding(.top, 2)
           .accessibilityLabel("\(descriptor.title) access granted")
-      } else if isPending {
-        ProgressView()
-          .controlSize(.small)
-          .padding(.top, 6)
       } else {
-        Button("Request access") {
-          pendingPermissionKeys.insert(permission.key)
-          onRequestPermission(permission.requestFlags)
+        Button("Allow") {
+          handlePermissionAction(for: permission, descriptor: descriptor)
         }
-        .buttonStyle(.bordered)
-        .controlSize(.regular)
-        .disabled(isPending)
+        .buttonStyle(InstallerPermissionActionButtonStyle())
       }
     }
-    .padding(.vertical, 2)
-    .opacity(isGranted ? 0.7 : 1.0)
+    .padding(.horizontal, 16)
+    .padding(.vertical, 15)
+    .frame(maxWidth: .infinity, alignment: .leading)
+    .background(permissionItemBackground())
   }
 
   private var globalSkillRow: some View {
     let isInstalled = viewModel.globalSkillStatus.installed
 
-    return HStack(alignment: .top, spacing: 12) {
-      Image(systemName: "terminal")
-        .font(.title3.weight(.semibold))
-        .foregroundStyle(isInstalled ? .green : .secondary)
-        .frame(width: 26)
+    return HStack(spacing: 14) {
+      permissionIconBadge(
+        systemImage: "terminal",
+        tint: Color(red: 0.12, green: 0.76, blue: 0.29),
+        isGranted: isInstalled
+      )
 
-      VStack(alignment: .leading, spacing: 4) {
+      VStack(alignment: .leading, spacing: 3) {
         Text("Cued skill")
           .font(.headline)
-          .foregroundStyle(isInstalled ? .secondary : .primary)
+          .foregroundStyle(.primary)
         Text(viewModel.globalSkillStatus.summary)
           .font(.subheadline)
-          .foregroundStyle(isInstalled ? .tertiary : .secondary)
+          .foregroundStyle(.secondary)
           .fixedSize(horizontal: false, vertical: true)
       }
-
-      Spacer(minLength: 12)
+      .frame(maxWidth: .infinity, alignment: .leading)
 
       if isInstalled {
         Image(systemName: "checkmark.circle.fill")
           .font(.title3.weight(.semibold))
           .foregroundStyle(.green)
-          .padding(.top, 2)
           .accessibilityLabel("Cued skill installed")
       } else if pendingGlobalSkillInstall {
         ProgressView()
           .controlSize(.small)
-          .padding(.top, 6)
+          .frame(minWidth: 76)
       } else {
         Button("Install") {
           pendingGlobalSkillInstall = true
           onInstallGlobalSkill()
         }
-        .buttonStyle(.bordered)
-        .controlSize(.regular)
+        .buttonStyle(InstallerPermissionActionButtonStyle())
       }
     }
-    .padding(.vertical, 2)
-    .opacity(isInstalled ? 0.7 : 1.0)
+    .padding(.horizontal, 16)
+    .padding(.vertical, 15)
+    .frame(maxWidth: .infinity, alignment: .leading)
+    .background(permissionItemBackground())
+  }
+
+  private func handlePermissionAction(
+    for permission: InstallerPermissionStatus,
+    descriptor: InstallerPermissionDescriptor
+  ) {
+    if descriptor.supportsDirectRequest {
+      onRequestPermission(permission.requestFlags)
+      return
+    }
+
+    if descriptor.supportsGuidedSettings {
+      onGuidePermission(permission.key)
+    }
+  }
+
+  private func permissionIconBadge(
+    systemImage: String,
+    tint: Color,
+    isGranted _: Bool
+  ) -> some View {
+    ZStack {
+      Circle()
+        .fill(
+          LinearGradient(
+            colors: [
+              tint.opacity(0.98),
+              tint.opacity(0.78),
+            ],
+            startPoint: .topLeading,
+            endPoint: .bottomTrailing
+          )
+        )
+      Circle()
+        .strokeBorder(Color.white.opacity(0.34), lineWidth: 0.75)
+
+      Image(systemName: systemImage)
+        .font(.system(size: 16, weight: .semibold))
+        .foregroundStyle(.white)
+    }
+    .frame(width: 40, height: 40)
+  }
+
+  private func permissionItemBackground() -> some View {
+    RoundedRectangle(cornerRadius: 20, style: .continuous)
+      .fill(Color(NSColor.controlBackgroundColor))
+      .overlay(
+        RoundedRectangle(cornerRadius: 20, style: .continuous)
+          .strokeBorder(Color(NSColor.separatorColor).opacity(0.32), lineWidth: 1)
+      )
   }
 
   private func platformConfigurationCard(_ configuration: InstallerPlatformConfiguration) -> some View {
@@ -1462,35 +1500,6 @@ private func installerDefaultAccountKey(for platform: String) -> String {
   platform == "contacts" || platform == "imessage" ? "local" : "default"
 }
 
-private func installerPermissionDescriptor(for key: String) -> (
-  title: String,
-  subtitle: String,
-  systemImage: String
-) {
-  switch key {
-  case "contacts":
-    return (
-      "Contacts",
-      "Allow Cued to read Contacts.app so it can resolve people consistently across local data.",
-      "person.crop.circle.badge.checkmark"
-    )
-  case "full_disk_access":
-    return (
-      "Full Disk Access",
-      "Required to read the Messages database for passive sync on this Mac.",
-      "internaldrive.fill"
-    )
-  case "messages_automation":
-    return (
-      "Messages automation",
-      "Required only for AppleScript send and control flows in Messages. Passive sync does not use this.",
-      "paperplane.circle.fill"
-    )
-  default:
-    return ("Permission", "Review this macOS permission.", "hand.raised.fill")
-  }
-}
-
 private func platformWalkthrough(for configuration: InstallerPlatformConfiguration) -> String {
   switch configuration.platform {
   case "contacts":
@@ -1772,6 +1781,7 @@ private struct InstallerPreviewContainer: View {
     CuedOnboardingView(
       viewModel: viewModel,
       onRefresh: {},
+      onGuidePermission: { _ in },
       onRequestPermission: { _ in },
       onInstallGlobalSkill: {},
       onEnableIntegration: { _, _ in },
