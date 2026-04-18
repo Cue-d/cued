@@ -55,6 +55,17 @@ func onboardingPermissionGuideUsesDragSource(for permissionKey: String) -> Bool 
   onboardingGuidePanel(for: permissionKey)?.usesDragSource == true
 }
 
+func onboardingPermissionGuideInstructionSentence(
+  for panel: PermissionGuidePanel,
+  hostAppName: String
+) -> String {
+  if panel.usesDragSource {
+    return "Drag \(hostAppName) to the list above to allow \(panel.emphasizedPermissionTerm)."
+  }
+
+  return "Enable \(hostAppName) in the list above to allow \(panel.emphasizedPermissionTerm)."
+}
+
 @MainActor
 final class PermissionGuideAssistant {
   static let shared = PermissionGuideAssistant()
@@ -593,7 +604,10 @@ private final class PermissionGuideOverlayView: NSView {
     for panel: PermissionGuidePanel,
     hostApp: PermissionGuideHostApp
   ) -> NSAttributedString {
-    let sentence = "Drag \(hostApp.displayName) to the list above to allow \(panel.emphasizedPermissionTerm)."
+    let sentence = onboardingPermissionGuideInstructionSentence(
+      for: panel,
+      hostAppName: hostApp.displayName
+    )
     let attributed = NSMutableAttributedString(
       string: sentence,
       attributes: [
