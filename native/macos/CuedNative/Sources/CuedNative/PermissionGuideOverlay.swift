@@ -285,6 +285,7 @@ private final class PermissionGuideOverlayWindowController: NSWindowController {
 
       let delta = CGVector(dx: frame.minX - previousFrame.minX, dy: frame.minY - previousFrame.minY)
       guard hypot(delta.dx, delta.dy) > 1 else {
+        window.orderFrontRegardless()
         return
       }
 
