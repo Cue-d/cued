@@ -90,7 +90,7 @@ export function summarizePermissionStatuses(
       status:
         checks.contacts.status === "ok"
           ? "granted"
-          : checks.contacts.status === "unknown"
+          : checks.contacts.status === "unknown" || checks.contacts.status === "warning"
             ? "unknown"
             : "needs_action",
       summary: checks.contacts.summary,
