@@ -185,6 +185,18 @@ async function handleLocalIntegrationCommand(
   subcommand: string | undefined,
   rest: string[],
 ): Promise<unknown> {
+  if (subcommand === "capabilities") {
+    return PLATFORM_VALUES.map((platform) => ({
+      platform,
+      supportedHostOs: getSupportedHostOsForPlatform(platform),
+      onboardingVisible: isOnboardingVisiblePlatform(platform),
+      supportsMultipleAccounts: platformSupportsMultipleAccounts(platform),
+      permissionRequirements: getPlatformPermissionRequirements(platform),
+      helperRequirements: getPlatformHelperRequirements(platform),
+      features: getPlatformFeatureMatrixRow(platform),
+    }));
+  }
+
   const db = openCuedDatabase();
   const service = new IntegrationAuthService(db);
   try {
@@ -192,16 +204,6 @@ async function handleLocalIntegrationCommand(
       case "list":
       case "status":
         return service.listStatus();
-      case "capabilities":
-        return PLATFORM_VALUES.map((platform) => ({
-          platform,
-          supportedHostOs: getSupportedHostOsForPlatform(platform),
-          onboardingVisible: isOnboardingVisiblePlatform(platform),
-          supportsMultipleAccounts: platformSupportsMultipleAccounts(platform),
-          permissionRequirements: getPlatformPermissionRequirements(platform),
-          helperRequirements: getPlatformHelperRequirements(platform),
-          features: getPlatformFeatureMatrixRow(platform),
-        }));
       case "refresh":
         return await service.refresh();
       case "connect": {
@@ -551,6 +553,9 @@ async function main(): Promise<void> {
             return;
           }
           break;
+        case "capabilities":
+          printJson(await handleLocalIntegrationCommand(subcommand, rest));
+          return;
         case "refresh":
           response = await sendDaemonRequest({ command: "integrations-refresh" });
           if (isUnsupportedDaemonCommand(response)) {
