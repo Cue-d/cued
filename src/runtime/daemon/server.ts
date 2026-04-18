@@ -79,6 +79,7 @@ import type {
 import { fetchAttachment, listAttachments, searchAttachments } from "../attachments.js";
 import { emitHookEvent } from "../hooks.js";
 import type { DaemonRequest, DaemonResponse } from "../ipc.js";
+import { collectInboundMessageHookPayloads } from "../message-hooks.js";
 import { resolveMacOSNativeBinary } from "../native-binary.js";
 import {
   projectDeferredRange,
@@ -234,31 +235,6 @@ type PendingSignalEcho = {
   timeout: NodeJS.Timeout;
   outboundMessageId: string;
 };
-
-function collectInboundMessages(
-  insertedRows: Array<{ rowId: number; event: ProviderRawEventInput }>,
-): Array<{ rowId: number; message: Record<string, unknown> }> {
-  const inboundMessages: Array<{ rowId: number; message: Record<string, unknown> }> = [];
-  for (const insertedRow of insertedRows) {
-    const rawEvent = insertedRow.event;
-    if (
-      !isInboundMessageEvent({ ...rawEvent, payload: rawEvent.payload as Record<string, unknown> })
-    ) {
-      continue;
-    }
-
-    inboundMessages.push({
-      rowId: insertedRow.rowId,
-      message: {
-        platform: rawEvent.platform,
-        accountKey: rawEvent.accountKey,
-        observedAt: rawEvent.observedAt,
-        payload: rawEvent.payload,
-      },
-    });
-  }
-  return inboundMessages;
-}
 
 function getAutoSyncTargets(
   db: ReturnType<typeof openCuedDatabase>,
@@ -1140,27 +1116,13 @@ export async function runDaemon(): Promise<void> {
 
   const queueMessageReceivedHooks = (
     range: { startRowId: number; endRowId: number } | null,
-    runId: string,
-    inboundMessages: Array<{ rowId: number; message: Record<string, unknown> }>,
+    inboundMessages: ProjectionMessageHookPayload[],
   ) => {
     if (!range || inboundMessages.length === 0) {
       return;
     }
 
-    const batches = buildProjectionMessageHookBatches(
-      range,
-      inboundMessages.map(
-        (entry) =>
-          ({
-            rowId: entry.rowId,
-            payload: {
-              runId,
-              message: entry.message,
-            },
-          }) satisfies ProjectionMessageHookPayload,
-      ),
-      projectionBatchSize,
-    );
+    const batches = buildProjectionMessageHookBatches(range, inboundMessages, projectionBatchSize);
     for (const batch of batches) {
       projectionMessageHooks.enqueue(batch, batch.payloads);
     }
@@ -1266,7 +1228,11 @@ export async function runDaemon(): Promise<void> {
         updateSlackCheckpointFromRealtime(accountKey);
       }
 
-      const inboundMessages = collectInboundMessages(insertResult.insertedRows);
+      const inboundMessages = collectInboundMessageHookPayloads(
+        trigger,
+        insertResult.insertedRows,
+        isInboundMessageEvent,
+      );
       queueMessageReceivedHooks(
         insertResult.firstInsertedRowId != null && insertResult.lastInsertedRowId != null
           ? {
@@ -1274,7 +1240,6 @@ export async function runDaemon(): Promise<void> {
               endRowId: insertResult.lastInsertedRowId,
             }
           : null,
-        trigger,
         inboundMessages,
       );
       if (
@@ -1425,7 +1390,11 @@ export async function runDaemon(): Promise<void> {
         updateLinkedInCheckpointFromRealtime(accountKey);
       }
 
-      const inboundMessages = collectInboundMessages(insertResult.insertedRows);
+      const inboundMessages = collectInboundMessageHookPayloads(
+        `linkedin_realtime:${accountKey}`,
+        insertResult.insertedRows,
+        isInboundMessageEvent,
+      );
       queueMessageReceivedHooks(
         insertResult.firstInsertedRowId != null && insertResult.lastInsertedRowId != null
           ? {
@@ -1433,7 +1402,6 @@ export async function runDaemon(): Promise<void> {
               endRowId: insertResult.lastInsertedRowId,
             }
           : null,
-        `linkedin_realtime:${accountKey}`,
         inboundMessages,
       );
       if (
@@ -1556,7 +1524,11 @@ export async function runDaemon(): Promise<void> {
         }
       }
 
-      const inboundMessages = collectInboundMessages(insertResult.insertedRows);
+      const inboundMessages = collectInboundMessageHookPayloads(
+        `signal_realtime:${accountKey}`,
+        insertResult.insertedRows,
+        isInboundMessageEvent,
+      );
       queueMessageReceivedHooks(
         insertResult.firstInsertedRowId != null && insertResult.lastInsertedRowId != null
           ? {
@@ -1564,7 +1536,6 @@ export async function runDaemon(): Promise<void> {
               endRowId: insertResult.lastInsertedRowId,
             }
           : null,
-        `signal_realtime:${accountKey}`,
         inboundMessages,
       );
       if (
@@ -1654,7 +1625,11 @@ export async function runDaemon(): Promise<void> {
         updateWhatsAppCheckpointFromRealtime(accountKey);
       }
 
-      const inboundMessages = collectInboundMessages(insertResult.insertedRows);
+      const inboundMessages = collectInboundMessageHookPayloads(
+        trigger,
+        insertResult.insertedRows,
+        isInboundMessageEvent,
+      );
       queueMessageReceivedHooks(
         insertResult.firstInsertedRowId != null && insertResult.lastInsertedRowId != null
           ? {
@@ -1662,7 +1637,6 @@ export async function runDaemon(): Promise<void> {
               endRowId: insertResult.lastInsertedRowId,
             }
           : null,
-        trigger,
         inboundMessages,
       );
       if (
@@ -2610,7 +2584,11 @@ export async function runDaemon(): Promise<void> {
         });
       }
       const afterRealtimeProjection = now();
-      const inboundMessages = collectInboundMessages(insertResult.insertedRows);
+      const inboundMessages = collectInboundMessageHookPayloads(
+        currentRun.id,
+        insertResult.insertedRows,
+        isInboundMessageEvent,
+      );
       queueMessageReceivedHooks(
         insertResult.firstInsertedRowId != null && insertResult.lastInsertedRowId != null
           ? {
@@ -2618,7 +2596,6 @@ export async function runDaemon(): Promise<void> {
               endRowId: insertResult.lastInsertedRowId,
             }
           : null,
-        currentRun.id,
         inboundMessages,
       );
       if (platform === "signal") {
