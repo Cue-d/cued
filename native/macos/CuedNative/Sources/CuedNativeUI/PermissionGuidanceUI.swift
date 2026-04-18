@@ -72,6 +72,12 @@ struct InstallerPermissionDescriptor {
   let steps: [String]
 }
 
+enum InstallerPermissionActionKind: Equatable {
+  case requestPrompt
+  case guideInSettings
+  case none
+}
+
 func installerPermissionDescriptor(for key: String) -> InstallerPermissionDescriptor {
   switch key {
   case "contacts":
@@ -151,6 +157,25 @@ func installerPermissionDescriptor(for key: String) -> InstallerPermissionDescri
       steps: ["Open Settings.", "Complete the permission step.", "Return to Cued."],
     )
   }
+}
+
+func installerPermissionActionKind(
+  for permission: InstallerPermissionStatus,
+  descriptor: InstallerPermissionDescriptor
+) -> InstallerPermissionActionKind {
+  if descriptor.supportsDirectRequest && permission.status == "unknown" {
+    return .requestPrompt
+  }
+
+  if descriptor.supportsGuidedSettings {
+    return .guideInSettings
+  }
+
+  if descriptor.supportsDirectRequest {
+    return .requestPrompt
+  }
+
+  return .none
 }
 
 struct InstallerPermissionActionButtonStyle: ButtonStyle {
