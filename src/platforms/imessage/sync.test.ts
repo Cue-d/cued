@@ -3,6 +3,7 @@ import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
+import { loadCallHistoryBatch } from "./call-history.js";
 import { buildIMessageSyncBundle, resolveIMessageLoader } from "./sync.js";
 
 const require = createRequire(import.meta.url);
@@ -441,6 +442,55 @@ describe("imessage worker loader resolution", () => {
         status: "canceled",
         direction: "outgoing",
         durationSeconds: 3,
+      }),
+    );
+  });
+
+  it("loads call history without chat db mapping when the messages db is missing", () => {
+    const callHistoryPath = createSyntheticCallHistoryDb([
+      {
+        pk: 9,
+        uniqueId: "call-9",
+        dateValue: 14,
+        durationSeconds: 0,
+        address: "+14155550123",
+      },
+    ]);
+    const batch = loadCallHistoryBatch({
+      path: callHistoryPath,
+      chatDbPath: join(createTempDir("cued-imessage-repo-"), "missing-chat.db"),
+    });
+
+    expect(batch.calls).toContainEqual(
+      expect.objectContaining({
+        sourceCallKey: "call-9",
+        sourceConversationKey: "call:imessage:+14155550123",
+        remoteSourceKey: "imessage:+14155550123",
+      }),
+    );
+  });
+
+  it("preserves non-dialable caller labels in synthetic identities", () => {
+    const callHistoryPath = createSyntheticCallHistoryDb([
+      {
+        pk: 10,
+        uniqueId: "call-10",
+        dateValue: 16,
+        durationSeconds: 0,
+        address: "Unknown",
+      },
+    ]);
+    const batch = loadCallHistoryBatch({
+      path: callHistoryPath,
+      chatDbPath: join(createTempDir("cued-imessage-repo-"), "missing-chat.db"),
+    });
+
+    expect(batch.calls).toContainEqual(
+      expect.objectContaining({
+        sourceCallKey: "call-10",
+        sourceConversationKey: "call:imessage:Unknown",
+        remoteSourceKey: "imessage:Unknown",
+        remoteAddress: "Unknown",
       }),
     );
   });

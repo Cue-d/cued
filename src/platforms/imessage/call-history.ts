@@ -124,7 +124,8 @@ function buildRemoteSourceKey(address: string | null): string | null {
   if (trimmed.includes("@")) {
     return `imessage:${trimmed.toLowerCase()}`;
   }
-  return `imessage:${toE164(trimmed) ?? normalizePhone(trimmed) ?? trimmed}`;
+  const normalizedIdentifier = toE164(trimmed) ?? normalizePhone(trimmed);
+  return `imessage:${normalizedIdentifier || trimmed}`;
 }
 
 function buildHandleCandidates(address: string | null): string[] {
@@ -174,7 +175,8 @@ export function loadCallHistoryBatch(options?: {
     open: true,
     readOnly: true,
   });
-  const chatReader = new IMessageReader(options?.chatDbPath ?? DEFAULT_CHAT_DB_PATH);
+  const chatDbPath = options?.chatDbPath ?? DEFAULT_CHAT_DB_PATH;
+  const chatReader = existsSync(chatDbPath) ? new IMessageReader(chatDbPath) : null;
   try {
     const rows = callDb
       .prepare(
@@ -213,7 +215,8 @@ export function loadCallHistoryBatch(options?: {
       const remoteAddress = row.address?.trim() || null;
       const remoteSourceKey = buildRemoteSourceKey(remoteAddress);
       const conversationChatId = remoteAddress
-        ? chatReader.findDirectChatIdByHandleCandidates(buildHandleCandidates(remoteAddress))
+        ? (chatReader?.findDirectChatIdByHandleCandidates(buildHandleCandidates(remoteAddress)) ??
+          null)
         : null;
       const sourceConversationKey =
         conversationChatId !== null
@@ -270,7 +273,7 @@ export function loadCallHistoryBatch(options?: {
       calls,
     };
   } finally {
-    chatReader.close();
+    chatReader?.close();
     callDb.close();
   }
 }
