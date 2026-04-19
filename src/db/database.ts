@@ -20,6 +20,7 @@ import type {
 } from "../core/types/provider.js";
 import {
   normalizeRawEventProvenance,
+  parsePlatform,
   resolveRawEventNormalizedSchema,
 } from "../core/types/provider.js";
 import { normalizePhone, toE164 } from "../core/utils/phone.js";
@@ -218,6 +219,12 @@ export interface IntegrationStateRow {
   updated_at: number;
 }
 
+function hasKnownPlatform<T extends { platform: string | null }>(
+  row: T,
+): row is T & { platform: Platform } {
+  return typeof row.platform === "string" && parsePlatform(row.platform) !== null;
+}
+
 export interface AuthSessionRow {
   id: string;
   platform: Platform;
@@ -326,6 +333,14 @@ export interface WhatsAppSendResolution {
   threadId: string;
   resolution: "whatsapp_jid" | "phone" | "group" | "passthrough";
   matchedContactIds: string[];
+  matchedName: string | null;
+}
+
+export interface DiscordSendResolution {
+  target: string;
+  threadId: string | null;
+  resolution: "channel_id" | "source_conversation_key" | "conversation_name";
+  matchedConversationId: string | null;
   matchedName: string | null;
 }
 
@@ -1125,7 +1140,7 @@ export class CuedDatabase {
   }
 
   listIntegrationStates(): IntegrationStateRow[] {
-    return this.db
+    const rows = this.db
       .select({
         id: integrationStates.id,
         platform: integrationStates.platform,
@@ -1146,7 +1161,8 @@ export class CuedDatabase {
       })
       .from(integrationStates)
       .orderBy(asc(integrationStates.platform), asc(integrationStates.accountKey))
-      .all() as IntegrationStateRow[];
+      .all() as Array<IntegrationStateRow & { platform: string }>;
+    return rows.filter(hasKnownPlatform);
   }
 
   listEnabledSyncPlatforms(): Platform[] {
@@ -1156,11 +1172,12 @@ export class CuedDatabase {
       .where(and(eq(integrationStates.enabled, 1), eq(integrationStates.syncCapable, 1)))
       .orderBy(asc(integrationStates.platform))
       .all()
-      .map((row) => row.platform as Platform);
+      .filter(hasKnownPlatform)
+      .map((row) => row.platform);
   }
 
   listEnabledSyncTargets(): Array<{ platform: Platform; account_key: string }> {
-    return this.db
+    const rows = this.db
       .select({
         platform: integrationStates.platform,
         account_key: integrationStates.accountKey,
@@ -1168,7 +1185,8 @@ export class CuedDatabase {
       .from(integrationStates)
       .where(and(eq(integrationStates.enabled, 1), eq(integrationStates.syncCapable, 1)))
       .orderBy(asc(integrationStates.platform), asc(integrationStates.accountKey))
-      .all() as Array<{ platform: Platform; account_key: string }>;
+      .all() as Array<{ platform: string; account_key: string }>;
+    return rows.filter(hasKnownPlatform);
   }
 
   getIntegrationState(platform: Platform, accountKey: string): IntegrationStateRow | null {
@@ -1836,6 +1854,53 @@ export class CuedDatabase {
     }
 
     return null;
+  }
+
+  resolveDiscordSendTarget(targetInput: string): DiscordSendResolution | null {
+    const trimmed = targetInput.trim();
+    if (trimmed.length === 0) {
+      return null;
+    }
+
+    const exact = this.sqlite
+      .prepare(
+        `
+        SELECT id, source_conversation_key, native_conversation_key, name
+        FROM conversations
+        WHERE platform = 'discord'
+          AND type = 'dm'
+          AND (
+            source_conversation_key = ?
+            OR native_conversation_key = ?
+            OR lower(name) = lower(?)
+          )
+        ORDER BY updated_at DESC, id ASC
+        LIMIT 1
+      `,
+      )
+      .get(trimmed, trimmed, trimmed) as
+      | {
+          id: string;
+          source_conversation_key: string;
+          native_conversation_key: string | null;
+          name: string | null;
+        }
+      | undefined;
+
+    if (!exact) {
+      return null;
+    }
+
+    return {
+      target:
+        exact.native_conversation_key ??
+        exact.source_conversation_key.replace(/^discord:channel:/, ""),
+      threadId: exact.source_conversation_key,
+      resolution:
+        exact.source_conversation_key === trimmed ? "source_conversation_key" : "conversation_name",
+      matchedConversationId: exact.id,
+      matchedName: exact.name,
+    };
   }
 
   findMessageByPlatformKey(

@@ -1,6 +1,7 @@
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import Database from "better-sqlite3";
 import { afterEach, describe, expect, it } from "vitest";
 import { resolveHostOS } from "../../../core/platform-capabilities.js";
 import { CuedDatabase } from "../../../db/database.js";
@@ -169,17 +170,19 @@ exit 1
 
     const disabled = setIntegrationEnabled(db, "slack", completed.integration!.accountKey, false);
     expect(disabled.enabled).toBe(false);
+    const requestedDiscord = requestIntegrationAccess(db, "discord");
+    expect(requestedDiscord.integration.platform).toBe("discord");
+    expect(requestedDiscord.integration.runtimeKind).toBe("chromium");
+    expect(requestedDiscord.integration.launchTarget).toBe("https://discord.com/login");
     expect(listRequestableIntegrationPlatforms()).toEqual([
       "slack",
+      "discord",
       "linkedin",
       "whatsapp",
       "signal",
     ]);
     expect(() => requestIntegrationAccess(db, "gmail")).toThrow(
       "Unsupported integration platform: gmail",
-    );
-    expect(() => requestIntegrationAccess(db, "discord")).toThrow(
-      "Unsupported integration platform: discord",
     );
     const expectedContactsAvailability = resolveHostOS() === "macos" ? "available" : "unsupported";
     expect(buildIntegrationStatus(db).setupIntegrations).toEqual(
@@ -206,7 +209,7 @@ exit 1
     );
     expect(
       buildIntegrationStatus(db).setupIntegrations.map((integration) => integration.platform),
-    ).toEqual(["contacts", "imessage", "slack", "linkedin", "whatsapp", "signal"]);
+    ).toEqual(["contacts", "imessage", "slack", "discord", "linkedin", "whatsapp", "signal"]);
     db.close();
   });
 
@@ -217,7 +220,7 @@ exit 1
 
     expect(
       buildIntegrationStatus(db).setupIntegrations.map((integration) => integration.platform),
-    ).toEqual(["contacts", "imessage", "slack", "linkedin", "whatsapp", "signal"]);
+    ).toEqual(["contacts", "imessage", "slack", "discord", "linkedin", "whatsapp", "signal"]);
 
     db.close();
   });
@@ -236,10 +239,63 @@ exit 1
       { platform: "contacts", authState: "unknown" },
       { platform: "imessage", authState: "unknown" },
       { platform: "slack", authState: "missing" },
+      { platform: "discord", authState: "missing" },
       { platform: "linkedin", authState: "missing" },
       { platform: "whatsapp", authState: "missing" },
       { platform: "signal", authState: "missing" },
     ]);
+
+    db.close();
+  });
+
+  it("ignores legacy persisted integrations for unknown platforms", () => {
+    const db = createDb();
+    const sqlite = new Database(db.dbPath);
+    sqlite
+      .prepare(
+        `INSERT INTO integration_states (
+          id,
+          platform,
+          account_key,
+          display_name,
+          auth_state,
+          enabled,
+          connection_kind,
+          sync_capable,
+          launch_strategy,
+          launch_target,
+          imported_from,
+          artifact_paths_json,
+          metadata_json,
+          last_seen_at,
+          created_at,
+          updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(
+        "legacy-telegram",
+        "telegram",
+        "default",
+        "Telegram",
+        "failed",
+        1,
+        "browser-session",
+        0,
+        "chromium-auth",
+        "https://web.telegram.org/",
+        "legacy",
+        null,
+        null,
+        1,
+        1,
+        1,
+      );
+    sqlite.close();
+
+    expect(() => buildIntegrationStatus(db)).not.toThrow();
+    expect(
+      listIntegrationStates(db).some((integration) => String(integration.platform) === "telegram"),
+    ).toBe(false);
 
     db.close();
   });

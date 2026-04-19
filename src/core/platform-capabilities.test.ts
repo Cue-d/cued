@@ -56,11 +56,19 @@ describe("platform capability resolver", () => {
         supportsMultipleAccounts: true,
       }),
     );
+    expect(summarizePlatformCapability("discord", null, "linux")).toEqual(
+      expect.objectContaining({
+        availability: "available",
+        supportsMultipleAccounts: false,
+      }),
+    );
   });
 
   it("exposes a shipped feature matrix for README-facing capabilities", () => {
     expect(getPlatformFeatureSupport("signal", "send")).toBe("yes");
     expect(getPlatformFeatureSupport("signal", "full_history_sync")).toBe("no");
+    expect(getPlatformFeatureSupport("discord", "send")).toBe("yes");
+    expect(getPlatformFeatureSupport("discord", "full_history_sync")).toBe("no");
     expect(getPlatformFeatureSupport("contacts", "send")).toBe("no");
     expect(getPlatformFeatureSupport("linkedin", "full_history_sync")).toBe("partial");
     expect(getPlatformFeatureSupport("linkedin", "read_receipts")).toBe("partial");

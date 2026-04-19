@@ -22,7 +22,7 @@ import {
   type ProviderRawEventInput,
   type RawEventAcquisitionMode,
 } from "../../core/types/provider.js";
-import { safeParseJsonRecord } from "../../db/codecs.js";
+import { safeParseJsonRecord, safeParseJsonStringArray } from "../../db/codecs.js";
 import { type OutboundMessageRow, openCuedDatabase } from "../../db/database.js";
 import { isAdapterPlatform, listAutoSyncPlatforms } from "../../platforms/core/registry.js";
 import { runAdapter } from "../../platforms/core/runner.js";
@@ -30,6 +30,21 @@ import { loadIntegrationSecret } from "../../platforms/core/secrets/keychain.js"
 import { refreshLocalIntegrationStates } from "../../platforms/core/state/local-refresh.js";
 import { refreshManagedIntegrationStates } from "../../platforms/core/state/refresh.js";
 import { getIntegrationSummary } from "../../platforms/core/state/status.js";
+import {
+  DiscordApiClient,
+  isDiscordAuthInvalidationError,
+} from "../../platforms/discord/api/client.js";
+import {
+  type DiscordRealtimeEventEnvelope,
+  type DiscordRealtimeStatus,
+  DiscordRealtimeSupervisor,
+} from "../../platforms/discord/realtime/session.js";
+import {
+  buildDiscordContactEvent,
+  buildDiscordConversationEvent,
+  buildDiscordMessageEvent,
+} from "../../platforms/discord/sync/events.js";
+import { isDiscordDmChannel } from "../../platforms/discord/types.js";
 import { DEFAULT_CHAT_DB_PATH } from "../../platforms/imessage/reader.js";
 import { loadLinkedInSessionSecret } from "../../platforms/linkedin/auth/session-store.js";
 import { buildLinkedInRawEventsFromRealtimeEnvelope } from "../../platforms/linkedin/realtime/events.js";
@@ -110,6 +125,7 @@ const DAEMON_VERSION = getCurrentAppVersion();
 const DEFAULT_AUTOSYNC_INTERVAL_MS = 60_000;
 const DEFAULT_SIGNAL_CATCHUP_INTERVAL_MS = 300_000;
 const DEFAULT_WHATSAPP_CATCHUP_INTERVAL_MS = 300_000;
+const DEFAULT_DISCORD_REALTIME_ENABLED = true;
 const DEFAULT_SLACK_REALTIME_ENABLED = false;
 const DEFAULT_INGEST_CONCURRENCY = 4;
 const DEFAULT_PROJECTION_BATCH_SIZE = 1_000;
@@ -126,6 +142,7 @@ const daemonLogger = createLogger("daemon");
 const hooksLogger = createLogger("hooks");
 const nativeWatchLogger = createLogger("native-watch");
 const linkedInLogger = createLogger("linkedin");
+const discordLogger = createLogger("discord");
 const slackLogger = createLogger("slack");
 const signalLogger = createLogger("signal");
 const whatsAppLogger = createLogger("whatsapp");
@@ -195,6 +212,14 @@ type SignalDesiredSession = {
   account: string;
   cliPath: string;
   configDir: string;
+};
+
+type DiscordDesiredSession = {
+  accountKey: string;
+  credentials: {
+    token: string;
+  };
+  dmPollIntervalMs?: number;
 };
 
 type SlackDesiredSession = {
@@ -349,6 +374,15 @@ function getSlackRealtimeEnabled(): boolean {
   const configured = process.env.CUED_SLACK_REALTIME_ENABLED;
   if (configured == null) {
     return DEFAULT_SLACK_REALTIME_ENABLED;
+  }
+
+  return !["0", "false", "off", "no"].includes(configured.trim().toLowerCase());
+}
+
+function getDiscordRealtimeEnabled(): boolean {
+  const configured = process.env.CUED_DISCORD_REALTIME_ENABLED;
+  if (configured == null) {
+    return DEFAULT_DISCORD_REALTIME_ENABLED;
   }
 
   return !["0", "false", "off", "no"].includes(configured.trim().toLowerCase());
@@ -783,6 +817,107 @@ async function collectDesiredSignalSessions(db: ReturnType<typeof openCuedDataba
   return { desired, degraded };
 }
 
+async function collectDesiredDiscordSessions(db: ReturnType<typeof openCuedDatabase>): Promise<{
+  desired: DiscordDesiredSession[];
+  degraded: Array<Omit<DiscordRealtimeStatus, "platform">>;
+}> {
+  const integrations = db
+    .listIntegrationStates()
+    .filter(
+      (row) =>
+        row.platform === "discord" && row.enabled === 1 && row.auth_state === "authenticated",
+    );
+  if (integrations.length === 0 || !getDiscordRealtimeEnabled()) {
+    return {
+      desired: [],
+      degraded: [],
+    };
+  }
+
+  const desired: DiscordDesiredSession[] = [];
+  const degraded: Array<Omit<DiscordRealtimeStatus, "platform">> = [];
+  for (const integration of integrations) {
+    try {
+      const secret = loadIntegrationSecret("discord", integration.account_key).secret;
+      if (typeof secret.token !== "string" || secret.token.trim().length === 0) {
+        degraded.push({
+          accountKey: integration.account_key,
+          state: "degraded",
+          userId: null,
+          username: null,
+          connectedAt: null,
+          lastEventAt: null,
+          lastReconnectAt: null,
+          reconnectAttempts: 0,
+          lastSessionError: "Discord credentials are missing the stored token",
+        });
+        continue;
+      }
+
+      desired.push({
+        accountKey: integration.account_key,
+        credentials: {
+          token: secret.token,
+        },
+        dmPollIntervalMs: Number.isFinite(Number(process.env.CUED_DISCORD_DM_POLL_MS))
+          ? Number(process.env.CUED_DISCORD_DM_POLL_MS)
+          : undefined,
+      });
+    } catch (error) {
+      degraded.push({
+        accountKey: integration.account_key,
+        state: "degraded",
+        userId: null,
+        username: null,
+        connectedAt: null,
+        lastEventAt: null,
+        lastReconnectAt: null,
+        reconnectAttempts: 0,
+        lastSessionError: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+
+  return { desired, degraded };
+}
+
+function blockDiscordIntegration(
+  db: ReturnType<typeof openCuedDatabase>,
+  accountKey: string,
+  errorSummary: string,
+): void {
+  const integration = db.getIntegrationState("discord", accountKey);
+  if (!integration) {
+    return;
+  }
+
+  const metadata =
+    safeParseJsonRecord(integration.metadata_json, "integration_states.metadata_json") ?? {};
+  db.upsertIntegrationState({
+    platform: "discord",
+    accountKey,
+    displayName: integration.display_name,
+    authState: "blocked",
+    enabled: integration.enabled === 1,
+    connectionKind: integration.connection_kind,
+    syncCapable: false,
+    launchStrategy: integration.launch_strategy,
+    launchTarget: integration.launch_target,
+    importedFrom: integration.imported_from,
+    artifactPaths: safeParseJsonStringArray(
+      integration.artifact_paths_json,
+      "integration_states.artifact_paths_json",
+    ),
+    metadata: {
+      ...metadata,
+      lastAuthError: errorSummary,
+      blockedAt: now(),
+      blockedReason: "discord_auth_invalidated",
+    },
+  });
+  db.recordCheckpointError("discord", accountKey, errorSummary);
+}
+
 async function collectDesiredSlackSessions(db: ReturnType<typeof openCuedDatabase>): Promise<{
   desired: SlackDesiredSession[];
   degraded: Array<Omit<SlackRealtimeStatus, "platform">>;
@@ -1094,6 +1229,8 @@ export async function runDaemon(): Promise<void> {
   const projectionMessageHooks = new ProjectionMessageHookBarrier();
   const suppressNextSignalReconnectSync = new Set<string>();
   const nativeWatchers = new Map<"contacts" | "imessage", FSWatcher | ChildProcess>();
+  let discordRealtimeReconcilePromise: Promise<void> | null = null;
+  let discordRealtimeReconcileQueued = false;
   let linkedInRealtimeReconcilePromise: Promise<void> | null = null;
   let linkedInRealtimeReconcileQueued = false;
   let slackRealtimeReconcilePromise: Promise<void> | null = null;
@@ -1302,6 +1439,98 @@ export async function runDaemon(): Promise<void> {
     }
   };
 
+  const updateDiscordCheckpointFromRealtime = (accountKey: string) => {
+    const checkpoint = db.getCheckpoint("discord", accountKey);
+    const projection = db.getProjectionBacklog();
+    const sourceCursor = safeParseJsonRecord(
+      checkpoint?.source_cursor_json ?? null,
+      "sync_checkpoints.source_cursor_json",
+    );
+    db.upsertCheckpoint({
+      platform: "discord",
+      accountKey,
+      syncMode: checkpoint?.sync_mode ?? "incremental",
+      sourceCursor,
+      rawIngestWatermark: projection.max_raw_event_rowid,
+      lastSuccessAt: now(),
+      lastErrorSummary: null,
+    });
+  };
+
+  const ingestDiscordRealtimeRawEvents = async (
+    accountKey: string,
+    rawEvents: ProviderRawEventInput[],
+    trigger: string,
+    sourceAccountDisplayName = "Discord",
+  ): Promise<void> => {
+    try {
+      if (rawEvents.length === 0) {
+        return;
+      }
+
+      db.upsertSourceAccounts([
+        {
+          platform: "discord",
+          accountKey,
+          displayName: sourceAccountDisplayName,
+        },
+      ]);
+      const insertResult = db.insertRawEvents(withRawEventAcquisitionMode(rawEvents, "realtime"));
+      if (
+        realtimeProjectionEnabled &&
+        insertResult.firstInsertedRowId != null &&
+        insertResult.lastInsertedRowId != null
+      ) {
+        projectRealtimeRange(db, {
+          startRowId: insertResult.firstInsertedRowId,
+          endRowId: insertResult.lastInsertedRowId,
+          batchSize: realtimeProjectionBatchSize,
+        });
+      }
+      const projection = db.getProjectionBacklog();
+      if (projection.pending_raw_events > 0) {
+        queueProjectionRun(trigger, undefined, { delayMs: deferredProjectionCoalesceMs });
+      }
+      if (insertResult.insertedCount > 0) {
+        updateDiscordCheckpointFromRealtime(accountKey);
+      }
+
+      const inboundMessages = collectInboundMessages(insertResult.insertedRows);
+      queueMessageReceivedHooks(
+        insertResult.firstInsertedRowId != null && insertResult.lastInsertedRowId != null
+          ? {
+              startRowId: insertResult.firstInsertedRowId,
+              endRowId: insertResult.lastInsertedRowId,
+            }
+          : null,
+        trigger,
+        inboundMessages,
+      );
+      if (
+        projection.pending_raw_events === 0 &&
+        insertResult.firstInsertedRowId != null &&
+        insertResult.lastInsertedRowId != null
+      ) {
+        await releaseMessageReceivedHooksForRange({
+          startRowId: insertResult.firstInsertedRowId,
+          endRowId: insertResult.lastInsertedRowId,
+        });
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      discordLogger.warn("realtime ingest failed", { accountKey, error: message });
+      if (isSqliteBusyError(error)) {
+        queueNativeTriggeredSync(
+          db,
+          "discord",
+          accountKey,
+          "discord_realtime_busy_fallback",
+          schedulers.wakeIngest,
+        );
+      }
+    }
+  };
+
   const handleSlackRealtimeEvent = async (
     accountKey: string,
     event: SlackRealtimeEventEnvelope,
@@ -1353,6 +1582,71 @@ export async function runDaemon(): Promise<void> {
             messages: [event.data.message],
           }),
           `slack_realtime:${accountKey}`,
+        );
+        return;
+      default:
+        return;
+    }
+  };
+
+  const handleDiscordRealtimeEvent = async (
+    accountKey: string,
+    event: DiscordRealtimeEventEnvelope,
+  ): Promise<void> => {
+    const observedAt = now();
+    switch (event.event) {
+      case "contact_upsert":
+        await ingestDiscordRealtimeRawEvents(
+          accountKey,
+          [
+            buildDiscordContactEvent({
+              accountKey,
+              observedAt,
+              user: event.data.user,
+              displayName: event.data.displayName,
+            }),
+          ],
+          `discord_realtime:${accountKey}`,
+        );
+        return;
+      case "conversation_upsert":
+        await ingestDiscordRealtimeRawEvents(
+          accountKey,
+          [
+            buildDiscordConversationEvent({
+              accountKey,
+              observedAt,
+              channel: event.data.channel,
+              currentUser: event.data.currentUser,
+              guildNameById: event.data.guildNameById,
+            }),
+          ],
+          `discord_realtime:${accountKey}`,
+          event.data.currentUser.global_name?.trim() || event.data.currentUser.username,
+        );
+        if (event.data.isNew) {
+          queueNativeTriggeredSync(
+            db,
+            "discord",
+            accountKey,
+            "discord_realtime_new_conversation",
+            schedulers.wakeIngest,
+          );
+        }
+        return;
+      case "message_upsert":
+        await ingestDiscordRealtimeRawEvents(
+          accountKey,
+          [
+            buildDiscordMessageEvent({
+              accountKey,
+              observedAt,
+              channel: event.data.channel,
+              message: event.data.message,
+              currentUserId: event.data.currentUserId,
+            }),
+          ],
+          `discord_realtime:${accountKey}`,
         );
         return;
       default:
@@ -1800,6 +2094,42 @@ export async function runDaemon(): Promise<void> {
     };
   };
 
+  const sendDiscordOutboundMessage = async (
+    message: OutboundMessageRow,
+    realtime: DiscordRealtimeSupervisor,
+  ): Promise<{
+    transport: "session" | "fallback";
+    result: Awaited<ReturnType<DiscordApiClient["sendMessage"]>>;
+    currentUser: Awaited<ReturnType<DiscordApiClient["getCurrentUser"]>>;
+    channel: Awaited<ReturnType<DiscordApiClient["getChannel"]>>;
+  }> => {
+    const secret = loadIntegrationSecret("discord", message.account_key).secret;
+    if (typeof secret.token !== "string" || secret.token.trim().length === 0) {
+      throw new Error(`Discord integration '${message.account_key}' is missing a token`);
+    }
+
+    const client = new DiscordApiClient({ token: secret.token });
+    const session = realtime.getSession(message.account_key);
+    const transport = session?.isConnected() ? "session" : "fallback";
+    const [currentUser, channel] = await Promise.all([
+      client.getCurrentUser(),
+      client.getChannel(message.target),
+    ]);
+    if (!isDiscordDmChannel(channel)) {
+      throw new Error(`Discord DM-only mode cannot send to non-DM target '${message.target}'`);
+    }
+    const result = session?.isConnected()
+      ? await session.sendMessage(message.target, message.text)
+      : await client.sendMessage(message.target, message.text);
+
+    return {
+      transport,
+      result,
+      currentUser,
+      channel,
+    };
+  };
+
   const drainIngestQueue = () => {
     ingestDrainScheduled = false;
     if (isUpdateShutdownRequested) {
@@ -1844,6 +2174,39 @@ export async function runDaemon(): Promise<void> {
 
     activeOutboundSend = (async () => {
       try {
+        if (message.platform === "discord") {
+          const sendResult = await sendDiscordOutboundMessage(message, discordRealtime);
+          await ingestDiscordRealtimeRawEvents(
+            message.account_key,
+            [
+              buildDiscordConversationEvent({
+                accountKey: message.account_key,
+                observedAt: now(),
+                channel: sendResult.channel,
+                currentUser: sendResult.currentUser,
+                guildNameById: new Map(),
+              }),
+              buildDiscordMessageEvent({
+                accountKey: message.account_key,
+                observedAt: now(),
+                channel: sendResult.channel,
+                message: sendResult.result,
+                currentUserId: sendResult.currentUser.id,
+              }),
+            ],
+            `discord_send:${message.id}`,
+            sendResult.currentUser.global_name?.trim() || sendResult.currentUser.username,
+          );
+          db.completeOutboundMessage(message.id);
+          await emitMessageSentHook(message, {
+            transport: sendResult.transport,
+            sentAt: Date.parse(sendResult.result.timestamp),
+            providerMessageId: sendResult.result.id,
+            conversationExternalId: sendResult.result.channel_id,
+          });
+          return;
+        }
+
         if (message.platform === "signal") {
           const sendResult = await sendSignalOutboundMessage(message, signalRealtime);
           db.completeOutboundMessage(message.id);
@@ -1892,15 +2255,29 @@ export async function runDaemon(): Promise<void> {
         return;
       } catch (error) {
         const messageText = error instanceof Error ? error.message : String(error);
-        const logger = message.platform === "signal" ? signalLogger : whatsAppLogger;
-        logger.warn("outbound send failed", {
+        const resolvedLogger =
+          message.platform === "discord"
+            ? discordLogger
+            : message.platform === "signal"
+              ? signalLogger
+              : whatsAppLogger;
+        resolvedLogger.warn("outbound send failed", {
           accountKey: message.account_key,
           outboundMessageId: message.id,
           error: messageText,
         });
+        if (message.platform === "discord" && isDiscordAuthInvalidationError(error)) {
+          blockDiscordIntegration(db, message.account_key, messageText);
+          requestDiscordRealtimeReconcile();
+        }
         db.failOutboundMessage({
           id: message.id,
-          retryable: message.platform === "signal" ? isRetryableSignalSendError(messageText) : true,
+          retryable:
+            message.platform === "signal"
+              ? isRetryableSignalSendError(messageText)
+              : message.platform === "discord"
+                ? !isDiscordAuthInvalidationError(error)
+                : true,
           error: messageText,
         });
       } finally {
@@ -1959,6 +2336,27 @@ export async function runDaemon(): Promise<void> {
     wakeProjection: () => scheduleProjectionDrain(),
   };
   const queueDebouncedNativeSync = createDebouncedSyncEnqueuer(db, schedulers.wakeIngest);
+  const discordRealtime = new DiscordRealtimeSupervisor({
+    onEvent: (accountKey, event) => {
+      void handleDiscordRealtimeEvent(accountKey, event);
+    },
+    onAuthInvalidated: (accountKey, _status, reason) => {
+      blockDiscordIntegration(db, accountKey, reason);
+      requestDiscordRealtimeReconcile();
+    },
+    onConnected: (accountKey, _status, reconnected) => {
+      if (!reconnected) {
+        return;
+      }
+      queueNativeTriggeredSync(
+        db,
+        "discord",
+        accountKey,
+        "discord_realtime_reconnected",
+        schedulers.wakeIngest,
+      );
+    },
+  });
   const slackRealtime = new SlackRealtimeSupervisor({
     onEvent: (accountKey, event) => {
       void handleSlackRealtimeEvent(accountKey, event);
@@ -2080,6 +2478,30 @@ export async function runDaemon(): Promise<void> {
   const reconcileSlackRealtimeSessions = async () => {
     const { desired, degraded } = await collectDesiredSlackSessions(db);
     slackRealtime.reconcile(desired, degraded);
+  };
+
+  const reconcileDiscordRealtimeSessions = async () => {
+    const { desired, degraded } = await collectDesiredDiscordSessions(db);
+    discordRealtime.reconcile(desired, degraded);
+  };
+
+  const requestDiscordRealtimeReconcile = () => {
+    if (discordRealtimeReconcilePromise) {
+      discordRealtimeReconcileQueued = true;
+      return;
+    }
+
+    discordRealtimeReconcilePromise = reconcileDiscordRealtimeSessions()
+      .catch((error) => {
+        discordLogger.warn("realtime reconcile failed", error);
+      })
+      .finally(() => {
+        discordRealtimeReconcilePromise = null;
+        if (discordRealtimeReconcileQueued) {
+          discordRealtimeReconcileQueued = false;
+          requestDiscordRealtimeReconcile();
+        }
+      });
   };
 
   const requestSlackRealtimeReconcile = () => {
@@ -2326,6 +2748,7 @@ export async function runDaemon(): Promise<void> {
     for (const watcher of nativeWatchers.values()) {
       stopNativeWatcher(watcher);
     }
+    discordRealtime.stopAll();
     slackRealtime.stopAll();
     nativeWatchers.clear();
     linkedInRealtime.stopAll();
@@ -2400,6 +2823,7 @@ export async function runDaemon(): Promise<void> {
         reconcileLocalWatchers();
       }
       queueAutoSyncRuns("daemon_start");
+      requestDiscordRealtimeReconcile();
       requestSlackRealtimeReconcile();
       requestLinkedInRealtimeReconcile();
       requestSignalRealtimeReconcile();
@@ -2743,6 +3167,14 @@ export async function runDaemon(): Promise<void> {
           errorMessage,
         );
       }
+      if (currentRun.platform === "discord" && isDiscordAuthInvalidationError(error)) {
+        blockDiscordIntegration(
+          db,
+          currentRun.account_key ?? getDefaultAccountKeyForPlatform("discord"),
+          errorMessage,
+        );
+        requestDiscordRealtimeReconcile();
+      }
       db.failRun(currentRun.id, errorMessage);
       if (currentRun.platform === "signal") {
         requestSignalRealtimeReconcile();
@@ -2892,12 +3324,14 @@ export async function runDaemon(): Promise<void> {
       db,
       activeAuthSessions,
       schedulers,
+      discordRealtime,
       slackRealtime,
       linkedInRealtime,
       signalRealtime,
       whatsAppRealtime,
       bootstrap,
       () => {
+        requestDiscordRealtimeReconcile();
         requestSlackRealtimeReconcile();
         requestLinkedInRealtimeReconcile();
         requestSignalRealtimeReconcile();
@@ -3071,6 +3505,7 @@ function handleSocket(
   db: ReturnType<typeof openCuedDatabase>,
   activeAuthSessions: Map<string, { child: ChildProcess; platform: Platform; accountKey: string }>,
   schedulers: QueueSchedulers,
+  discordRealtime: DiscordRealtimeSupervisor,
   slackRealtime: SlackRealtimeSupervisor,
   linkedInRealtime: LinkedInRealtimeSupervisor,
   signalRealtime: SignalRealtimeSupervisor,
@@ -3109,6 +3544,7 @@ function handleSocket(
           request,
           activeAuthSessions,
           schedulers,
+          discordRealtime,
           slackRealtime,
           linkedInRealtime,
           signalRealtime,
@@ -3138,6 +3574,7 @@ async function dispatchRequest(
   request: DaemonRequest,
   activeAuthSessions: Map<string, { child: ChildProcess; platform: Platform; accountKey: string }>,
   schedulers: QueueSchedulers,
+  discordRealtime: DiscordRealtimeSupervisor,
   slackRealtime: SlackRealtimeSupervisor,
   linkedInRealtime: LinkedInRealtimeSupervisor,
   signalRealtime: SignalRealtimeSupervisor,
@@ -3171,6 +3608,7 @@ async function dispatchRequest(
           ok: true,
           result: buildDaemonStatusSnapshot(db, {
             app: getAppStatusMetadata(db),
+            discordRealtime,
             slackRealtime,
             linkedInRealtime,
             signalRealtime,
@@ -3185,6 +3623,7 @@ async function dispatchRequest(
           ok: true,
           result: await buildDoctorSnapshot(db, {
             app: getAppStatusMetadata(db),
+            discordRealtime,
             slackRealtime,
             linkedInRealtime,
             signalRealtime,

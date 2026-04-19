@@ -70,6 +70,7 @@ The setup TUI summarizes install state, daemon state, permissions, and next acti
 
 - `cued login-item enable`
 - `cued integrations connect slack default`
+- `cued integrations connect discord default`
 - `cued integrations connect linkedin default`
 
 ## Verify
@@ -140,3 +141,27 @@ After `pnpm dev -- install` completes, you can use `cued permissions request --a
 | Messages sync cannot read the database | Grant Full Disk Access to `/Applications/Cued.app` or the terminal you are using, then restart Cued. |
 | WhatsApp helper is missing | Rebuild it with `GOWORK=off go build -C native/helpers/whatsapp-go -o .build/cued-whatsapp-helper` or use the packaged app bundle. |
 | The setup screen says the app is not installed | Run `pnpm dev -- install` again. |
+
+## Discord credentials
+
+Discord uses a local browser sign-in flow and stores the captured Discord account token in the Keychain together with the account ID and display name.
+
+- No bot token is required.
+- No client secret or OAuth redirect URI is required.
+- Data stays local to `~/.cued/` and the Keychain entry on this Mac.
+
+Current Discord scope in Cued:
+
+- discovers DMs only
+- syncs new messages after connection
+- sends messages only to known DMs
+- does not backfill channel history yet
+- stops and requires reconnect if Discord invalidates auth, such as after a forced password reset
+
+Current guardrails:
+
+- no guild or server sync
+- no guild or server sends
+- no history backfill
+- realtime polling is DM-only
+- Discord auth invalidation blocks the integration instead of retrying indefinitely

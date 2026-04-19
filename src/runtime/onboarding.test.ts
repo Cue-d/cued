@@ -112,6 +112,7 @@ describe("onboarding snapshot", () => {
       "contacts",
       "imessage",
       "slack",
+      "discord",
       "linkedin",
       "whatsapp",
       "signal",

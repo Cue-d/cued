@@ -1288,6 +1288,7 @@ private let installerPlatformOrder = [
   "contacts",
   "imessage",
   "slack",
+  "discord",
   "linkedin",
   "whatsapp",
   "signal",
@@ -1499,6 +1500,8 @@ private func platformWalkthrough(for configuration: InstallerPlatformConfigurati
     return "Uses Full Disk Access for local Messages sync and Messages automation for AppleScript sending."
   case "slack":
     return "Authenticate each workspace in a browser sign-in flow. You can add more workspaces at any time."
+  case "discord":
+    return "Authenticate in a browser sign-in flow on this Mac. Discord v1 syncs newly observed messages after connection."
   case "linkedin":
     return "Authenticate in a browser window and Cued will save the session on this Mac."
   case "whatsapp":
@@ -1514,6 +1517,8 @@ private func authFlowDetail(for platform: String) -> String {
   switch platform {
   case "slack":
     return "Opens Slack sign-in in a browser tab for this workspace."
+  case "discord":
+    return "Opens Discord sign-in in a browser window."
   case "linkedin":
     return "Opens LinkedIn sign-in in a browser window."
   case "whatsapp":
@@ -1597,6 +1602,8 @@ private func installerPlatformTitle(_ platform: String, fallback: String?) -> St
     return "Signal"
   case "slack":
     return "Slack"
+  case "discord":
+    return "Discord"
   case "whatsapp":
     return "WhatsApp"
   default:
@@ -1673,7 +1680,7 @@ private func installerSupportsMultipleAccounts(_ platform: String) -> Bool {
 
 private func installerIsRequestablePlatform(_ platform: String) -> Bool {
   switch platform {
-  case "linkedin", "signal", "slack", "whatsapp":
+  case "discord", "linkedin", "signal", "slack", "whatsapp":
     return true
   default:
     return false

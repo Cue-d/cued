@@ -39,6 +39,16 @@ export const REQUESTABLE_INTEGRATIONS: Record<string, RequestableIntegrationConf
       authCapture: "localStorage.localConfig_v2 + cookie:d",
     },
   },
+  discord: {
+    connectionKind: "browser-session",
+    runtimeKind: "chromium",
+    launchStrategy: "chromium-auth",
+    launchTarget: "https://discord.com/login",
+    displayName: "Discord",
+    metadata: {
+      authCapture: "localStorage.token",
+    },
+  },
   linkedin: {
     connectionKind: "browser-session",
     runtimeKind: "chromium",
@@ -413,6 +423,7 @@ function buildSetupIntegrations(
     "contacts",
     "imessage",
     "slack",
+    "discord",
     "linkedin",
     "whatsapp",
     "signal",
