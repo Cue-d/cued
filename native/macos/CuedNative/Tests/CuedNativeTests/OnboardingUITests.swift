@@ -1,5 +1,6 @@
 import XCTest
 @testable import CuedNative
+@testable import CuedNativeUI
 
 final class OnboardingUITests: XCTestCase {
   func testPermissionKeyMappingMatchesExpectedFlags() {
@@ -53,6 +54,43 @@ final class OnboardingUITests: XCTestCase {
     XCTAssertEqual(
       onboardingPermissionGuideInstructionSentence(for: .messagesAutomation, hostAppName: "Cued"),
       "Enable Cued in the list above to allow Messages automation."
+    )
+  }
+
+  func testPermissionGuideStaysVisibleAcrossRefreshUntilPermissionIsGranted() {
+    XCTAssertFalse(
+      onboardingShouldDismissPermissionGuide(
+        activePermissionKey: "full_disk_access",
+        permissions: [
+          InstallerPermissionStatus(
+            key: "full_disk_access",
+            status: "unknown",
+            summary: "Waiting",
+            requestFlags: ["--full-disk-access"]
+          )
+        ]
+      )
+    )
+
+    XCTAssertTrue(
+      onboardingShouldDismissPermissionGuide(
+        activePermissionKey: "full_disk_access",
+        permissions: [
+          InstallerPermissionStatus(
+            key: "full_disk_access",
+            status: "granted",
+            summary: "Granted",
+            requestFlags: ["--full-disk-access"]
+          )
+        ]
+      )
+    )
+
+    XCTAssertTrue(
+      onboardingShouldDismissPermissionGuide(
+        activePermissionKey: "full_disk_access",
+        permissions: []
+      )
     )
   }
 }
