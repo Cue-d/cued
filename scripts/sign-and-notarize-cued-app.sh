@@ -3,14 +3,14 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-APP_BUNDLE="${1:-$ROOT_DIR/native/macos/dist/Cued.app}"
+APP_BUNDLE="$ROOT_DIR/native/macos/dist/Cued.app"
 RELEASE_BUILDER="$ROOT_DIR/scripts/build-cued-release-artifacts.sh"
 DMG_PATH="$ROOT_DIR/native/macos/dist/Cued.dmg"
 
-if [[ "${1:-}" == "--help" ]]; then
+if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
   cat <<'EOF'
 Usage:
-  bash scripts/sign-and-notarize-cued-app.sh [app-bundle-path]
+  bash scripts/sign-and-notarize-cued-app.sh
 
 Environment:
   CUED_CODESIGN_IDENTITY   Developer ID Application identity to use for codesign
@@ -21,6 +21,12 @@ Notes:
   - It requires both Developer ID signing and notarytool configuration.
 EOF
   exit 0
+fi
+
+if [[ "$#" -ne 0 ]]; then
+  echo "Unexpected arguments: $*" >&2
+  echo "Usage: bash scripts/sign-and-notarize-cued-app.sh" >&2
+  exit 1
 fi
 
 if [[ -z "${CUED_CODESIGN_IDENTITY:-}" ]]; then

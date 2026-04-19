@@ -12,6 +12,7 @@ import {
   type PlatformPermissionRequirement,
   platformSupportsMultipleAccounts,
 } from "../platforms/core/types.js";
+import { inspectSlackHelper } from "../platforms/slack/helper/binary.js";
 
 export type PlatformAvailabilityState =
   | "available"
@@ -30,6 +31,10 @@ export interface PlatformCapabilitySummary {
   availability: PlatformAvailabilityState;
   reason: string | null;
 }
+
+type CapabilityIntegration = Pick<IntegrationStateSummary, "platform" | "authState"> & {
+  metadata?: Record<string, unknown> | null;
+};
 
 export function resolveHostOS(platform: NodeJS.Platform = process.platform): HostOS {
   if (platform === "darwin") return "macos";
@@ -57,7 +62,7 @@ function resolvePermissionAvailability(
 }
 
 function resolveHelperAvailability(
-  integration: Pick<IntegrationStateSummary, "authState"> | null,
+  integration: Pick<CapabilityIntegration, "authState" | "metadata"> | null,
   requirements: readonly PlatformHelperRequirement[],
 ): PlatformCapabilitySummary["availability"] | null {
   if (requirements.length === 0 || !integration) {
@@ -75,12 +80,36 @@ function resolveHelperAvailability(
     return "requires_helper";
   }
 
+  if (requirements.includes("slack_helper")) {
+    if (integration.authState !== "authenticated") {
+      return null;
+    }
+
+    const slackHelperMetadata = integration.metadata;
+    const hasSlackHelperMetadata =
+      typeof slackHelperMetadata?.slackHelperPath === "string" ||
+      slackHelperMetadata?.slackHelperPath === null ||
+      typeof slackHelperMetadata?.slackHelperVersionSupported === "boolean";
+
+    if (hasSlackHelperMetadata) {
+      return slackHelperMetadata?.slackHelperPath &&
+        slackHelperMetadata?.slackHelperVersionSupported === true
+        ? null
+        : "requires_helper";
+    }
+
+    const slackHelperInspection = inspectSlackHelper();
+    if (!slackHelperInspection.helperPath || slackHelperInspection.versionSupported !== true) {
+      return "requires_helper";
+    }
+  }
+
   return null;
 }
 
 export function summarizePlatformCapability(
   platform: Platform,
-  integration: Pick<IntegrationStateSummary, "platform" | "authState"> | null,
+  integration: CapabilityIntegration | null,
   hostOs: HostOS = resolveHostOS(),
 ): PlatformCapabilitySummary {
   const supportedHostOs = getSupportedHostOsForPlatform(platform);

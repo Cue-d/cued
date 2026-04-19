@@ -397,18 +397,6 @@ export function disableLoginItem(appPath?: string): LoginItemCommandResult {
   };
 }
 
-export function installLaunchAgent(appPath?: string): LoginItemCommandResult {
-  return enableLoginItem(appPath);
-}
-
-export function uninstallLaunchAgent(appPath?: string): LoginItemCommandResult {
-  return disableLoginItem(appPath);
-}
-
-export function getLaunchAgentStatus(appPath?: string): LoginItemStatus {
-  return getLoginItemStatus(appPath);
-}
-
 export function getAppBundleInfo(appPath?: string): Record<string, unknown> {
   const resolvedAppPath = appPath ?? resolveInstalledAppPath();
   if (!resolvedAppPath) {
