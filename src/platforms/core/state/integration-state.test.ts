@@ -248,6 +248,54 @@ exit 1
     db.close();
   });
 
+  it("clears discord blocked metadata after successful reauthentication", () => {
+    const db = createDb();
+
+    const requested = requestIntegrationAccess(db, "discord");
+    db.upsertIntegrationState({
+      platform: "discord",
+      accountKey: requested.integration.accountKey,
+      displayName: requested.integration.displayName,
+      authState: "blocked",
+      enabled: true,
+      connectionKind: requested.integration.connectionKind,
+      syncCapable: false,
+      launchStrategy: requested.integration.launchStrategy,
+      launchTarget: requested.integration.launchTarget,
+      importedFrom: requested.integration.importedFrom,
+      artifactPaths: requested.integration.artifactPaths,
+      metadata: {
+        ...(requested.integration.metadata ?? {}),
+        blockedAt: 123,
+        blockedReason: "discord_auth_invalidated",
+        lastAuthError: "Discord API GET /users/@me failed (401)",
+      },
+    });
+
+    const completed = completeAuthSession(db, requested.authSession.id, {
+      state: "authenticated",
+      keychainService: "dev.cued.auth.discord",
+      keychainAccount: "default",
+      resultSummary: {
+        provider: "discord",
+        userId: "123",
+        username: "the0t",
+        displayName: "theo",
+      },
+    });
+
+    expect(completed.integration?.authState).toBe("authenticated");
+    expect(completed.integration?.metadata).toEqual(
+      expect.objectContaining({
+        blockedAt: null,
+        blockedReason: null,
+        lastAuthError: null,
+      }),
+    );
+
+    db.close();
+  });
+
   it("ignores legacy persisted integrations for unknown platforms", () => {
     const db = createDb();
     const sqlite = new Database(db.dbPath);
