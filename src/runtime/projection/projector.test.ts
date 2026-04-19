@@ -2059,6 +2059,151 @@ describe("projector", () => {
     db.close();
   });
 
+  it("applies manual contact merge decisions during rebuild", () => {
+    const db = createDb();
+
+    db.insertRawEvent({
+      id: "contacts-ava-primary",
+      platform: "contacts",
+      accountKey: "local",
+      entityKind: "contact",
+      eventKind: "observed",
+      observedAt: 1,
+      dedupeKey: "contacts:ava-primary",
+      payload: {
+        sourceEntityKey: "contacts:ava-primary",
+        fields: {
+          display_name: "Ava Chen",
+          company: "Prime Ventures",
+        },
+        handles: [{ type: "phone", value: "+1 (555) 123-4567", deterministic: true }],
+      },
+      sourceVersion: "contacts-v1",
+    });
+    db.insertRawEvent({
+      id: "linkedin-ava-duplicate",
+      platform: "linkedin",
+      accountKey: "default",
+      entityKind: "contact",
+      eventKind: "observed",
+      observedAt: 2,
+      dedupeKey: "linkedin:ava-duplicate",
+      payload: {
+        sourceEntityKey: "linkedin:ava-duplicate",
+        sourceProfileUrl: "https://www.linkedin.com/in/ava-chen/",
+        fields: {
+          display_name: "Ava Chen",
+          company: "Acme Ventures",
+          photo_url: "https://example.com/linkedin-ava.jpg",
+        },
+        handles: [{ type: "linkedin", value: "urn:li:person:ava-chen", deterministic: true }],
+      },
+      sourceVersion: "linkedin-v1",
+    });
+    db.insertRawEvent({
+      id: "linkedin-conversation-ava",
+      platform: "linkedin",
+      accountKey: "default",
+      entityKind: "conversation",
+      eventKind: "observed",
+      observedAt: 3,
+      dedupeKey: "linkedin:conversation:ava",
+      payload: {
+        sourceConversationKey: "thread-ava",
+        conversationType: "dm",
+        displayName: "Ava Chen",
+        participants: [{ sourceEntityKey: "linkedin:ava-duplicate" }],
+      },
+      sourceVersion: "linkedin-v1",
+    });
+    db.insertRawEvent({
+      id: "linkedin-message-ava",
+      platform: "linkedin",
+      accountKey: "default",
+      entityKind: "message",
+      eventKind: "created",
+      observedAt: 4,
+      dedupeKey: "linkedin:message:ava",
+      payload: {
+        sourceMessageKey: "msg-ava",
+        sourceConversationKey: "thread-ava",
+        senderSourceKey: "linkedin:ava-duplicate",
+        sentAt: 4,
+        content: "hello from linkedin",
+        isFromMe: false,
+      },
+      sourceVersion: "linkedin-v1",
+    });
+
+    rebuildProjectedState(db);
+
+    const contactsBefore = db.orm().all<{ id: string; name: string | null }>(sql`
+      SELECT id, name
+      FROM contacts
+      ORDER BY created_at ASC, id ASC
+    `);
+    expect(contactsBefore).toHaveLength(2);
+
+    const primaryContactId = contactsBefore[0]!.id;
+    const secondaryContactId = contactsBefore[1]!.id;
+
+    expect(
+      db.recordContactMergeDecision({
+        primaryContactId,
+        secondaryContactId,
+        reason: "manual merge",
+      }),
+    ).toEqual({
+      decisionId: expect.any(String),
+      primaryContactId,
+      secondaryContactId,
+      canonicalContactId: primaryContactId,
+    });
+
+    const projection = rebuildProjectedState(db);
+    expect(projection.contacts).toBe(1);
+
+    expect(
+      db.orm().get<{ count: number }>(sql`
+        SELECT COUNT(*) AS count
+        FROM contacts
+      `),
+    ).toEqual({ count: 1 });
+    expect(
+      db.orm().get<{ count: number }>(sql`
+        SELECT COUNT(*) AS count
+        FROM contact_sources
+        WHERE contact_id = ${primaryContactId}
+      `),
+    ).toEqual({ count: 2 });
+    expect(
+      db.orm().get<{ count: number }>(sql`
+        SELECT COUNT(*) AS count
+        FROM contact_handles
+        WHERE contact_id = ${primaryContactId}
+      `),
+    ).toEqual({ count: 2 });
+    expect(
+      db.orm().get<{ company: string | null; photo_url: string | null }>(sql`
+        SELECT company, photo_url
+        FROM contacts
+        WHERE id = ${primaryContactId}
+      `),
+    ).toEqual({
+      company: "Prime Ventures",
+      photo_url: "https://example.com/linkedin-ava.jpg",
+    });
+    expect(
+      db.orm().get<{ sender_contact_id: string | null }>(sql`
+        SELECT sender_contact_id
+        FROM messages
+        WHERE platform_message_id = 'msg-ava'
+      `),
+    ).toEqual({ sender_contact_id: primaryContactId });
+
+    db.close();
+  });
+
   it("updates attachments incrementally without leaving orphan rows", () => {
     const db = createDb();
 
