@@ -27,7 +27,11 @@ export class RunQueueService {
     queued: true;
     messageId: string;
   } {
-    if (input.platform !== "signal" && input.platform !== "whatsapp") {
+    if (
+      input.platform !== "signal" &&
+      input.platform !== "whatsapp" &&
+      input.platform !== "discord"
+    ) {
       throw new Error(`Unsupported outbound platform: ${input.platform}`);
     }
     if (input.target.trim().length === 0 || input.text.trim().length === 0) {
@@ -37,7 +41,9 @@ export class RunQueueService {
     const resolved =
       input.platform === "signal"
         ? this.db.resolveSignalSendTarget(input.target.trim())
-        : this.db.resolveWhatsAppSendTarget(input.target.trim());
+        : input.platform === "whatsapp"
+          ? this.db.resolveWhatsAppSendTarget(input.target.trim())
+          : this.db.resolveDiscordSendTarget(input.target.trim());
     if (!resolved) {
       throw new Error(`Unable to resolve ${input.platform} target: ${input.target.trim()}`);
     }
@@ -53,7 +59,9 @@ export class RunQueueService {
         resolvedTarget: resolved.target,
         resolvedThreadId: resolved.threadId,
         resolution: resolved.resolution,
-        matchedContactIds: resolved.matchedContactIds,
+        matchedContactIds: "matchedContactIds" in resolved ? resolved.matchedContactIds : undefined,
+        matchedConversationId:
+          "matchedConversationId" in resolved ? resolved.matchedConversationId : undefined,
         matchedName: resolved.matchedName,
       },
     });

@@ -105,6 +105,7 @@ This matrix documents current shipped behavior, not roadmap promises.
 | Platform | Send | Receive | Realtime ingest | Full history sync | Message edits | Deletes | Reactions | Threads / replies | Read receipts | Attachments | Contact sync |
 | -------- | ---- | ------- | --------------- | ----------------- | ------------- | ------- | --------- | ----------------- | ------------- | ----------- | ------------ |
 | Contacts | ❌ | ❌ | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ✅ |
+| Discord | ✅ | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ✅ | ◐ |
 | iMessage | ❌ | ✅ | ✅ | ✅ | ❌ | ❌ | ✅ | ❌ | ◐ | ✅ | ◐ |
 | LinkedIn | ❌ | ✅ | ✅ | ◐ | ✅ | ✅ | ✅ | ✅ | ◐ | ✅ | ✅ |
 | Signal | ✅ | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ✅ | ◐ |
@@ -114,6 +115,8 @@ This matrix documents current shipped behavior, not roadmap promises.
 Legend: `✅` supported, `◐` partial, `❌` unsupported.
 
 LinkedIn history is currently partial: Cued imports inbox-visible threads and bounded per-conversation backfill, but not every archived or non-inbox thread.
+
+Discord currently runs in DM-only mode: it discovers direct messages, syncs only new messages after connection, sends only to known DMs, and stores the captured Discord account token locally in the Keychain. On Discord auth invalidation such as `401` responses or forced password resets, Cued blocks the integration and stops reconnect attempts until you reconnect manually.
 
 ## Install From Source
 
@@ -168,6 +171,14 @@ Once `pnpm dev -- install` has completed, you can switch to the installed `cued`
 | `pnpm build:app:macos` | Rebuild the local `Cued.app` development bundle. |
 | `swift build --package-path native/macos/CuedNative -c release` | Rebuild the native macOS host after Swift changes. |
 | `pnpm permissions:macos -- --all` | Exercise the macOS permission helper without going through the CLI. |
+
+Useful integration commands during development:
+
+```bash
+cued integrations connect discord default
+cued integrations status
+cued sync run discord
+```
 
 ### Contributor workflow
 

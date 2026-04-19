@@ -69,9 +69,22 @@ cued status
 cued doctor
 cued logs
 cued integrations status
+cued integrations connect discord default
+cued sync run discord
 cued sync run imessage
 cued sync run contacts
 ```
+
+## Discord development notes
+
+Discord currently uses a Chromium auth capture flow plus local polling for new messages.
+
+- Auth is stored in the Keychain under `dev.cued.auth.discord`.
+- The sync worker is DM-only and does not enumerate guild or server channels.
+- Outbound Discord sends are DM-only.
+- The sync worker does not backfill message history.
+- Realtime behavior is “new messages after connection” rather than full-history catch-up.
+- On Discord auth invalidation such as `401` responses or password resets, Cued blocks the integration and stops reconnect churn until the user reconnects.
 
 ## Packaged app development
 

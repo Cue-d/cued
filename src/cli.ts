@@ -192,7 +192,7 @@ async function handleLocalIntegrationCommand(
         if (!rest[0]) {
           throw new Error("Usage: cued integrations connect <platform> [account]");
         }
-        return service.connectLocally(rest[0], rest[1], {
+        return await service.connectLocally(rest[0], rest[1], {
           emitAuthenticatedHook: async (platform, accountKey) => {
             await safeEmitHookEvent("integration.authenticated", {
               integration: getIntegrationSummary(db, platform, accountKey),
