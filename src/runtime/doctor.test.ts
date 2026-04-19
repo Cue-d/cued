@@ -89,7 +89,7 @@ describe("permission status summaries", () => {
     );
   });
 
-  it("marks non-ok contacts and Messages automation checks as needing action", () => {
+  it("keeps not-determined Contacts promptable while flagging Messages automation", () => {
     const permissions = summarizePermissionStatuses(
       makeInput({
         contacts: {
@@ -108,7 +108,7 @@ describe("permission status summaries", () => {
     expect(permissions[0]).toEqual(
       expect.objectContaining({
         key: "contacts",
-        status: "needs_action",
+        status: "unknown",
       }),
     );
     expect(permissions[2]).toEqual(

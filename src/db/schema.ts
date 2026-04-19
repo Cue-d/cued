@@ -197,6 +197,17 @@ export const contactSources = sqliteTable("contact_sources", {
   metadataJson: text("metadata_json"),
 });
 
+export const contactMergeDecisions = sqliteTable("contact_merge_decisions", {
+  id: text("id").primaryKey(),
+  decisionType: text("decision_type").notNull(),
+  primaryContactId: text("primary_contact_id").notNull(),
+  secondaryContactId: text("secondary_contact_id").notNull(),
+  canonicalContactId: text("canonical_contact_id").notNull(),
+  reason: text("reason"),
+  createdBy: text("created_by"),
+  createdAt: integer("created_at").notNull(),
+});
+
 export const conversations = sqliteTable("conversations", {
   id: text("id").primaryKey(),
   platform: textEnum("platform", PLATFORM_VALUES).notNull(),

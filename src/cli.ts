@@ -58,6 +58,7 @@ import {
   runUpdatePreflight,
 } from "./runtime/updater/service.js";
 import { runSetupTUI } from "./setup.js";
+import { getGlobalCuedSkillStatus, installGlobalCuedSkill } from "./skills/install.js";
 
 const DIST_ROOT = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = resolve(DIST_ROOT, "..");
@@ -120,6 +121,10 @@ Usage:
   cued cli install|status
   cued login-item enable|disable|status
   cued onboarding complete|snapshot|status [--refresh-managed] [--refresh-permissions]
+<<<<<<< HEAD
+=======
+  cued skill install-global|status
+>>>>>>> origin/main
   cued permissions doctor|status|request [--all|--contacts|--messages|--full-disk-access]
   cued integrations list
   cued integrations status
@@ -130,6 +135,7 @@ Usage:
   cued integrations remove <platform> [account]
   cued integrations enable <platform> [account]
   cued integrations disable <platform> [account]
+  cued contacts merge <primary-contact-id> <secondary-contact-id> [--reason TEXT]
   cued attachments list [--message ID] [--conversation ID] [--platform PLATFORM] [--account ACCOUNT] [--limit N]
   cued attachments fetch <attachment-id> [--variant original] [--max-bytes N] [--allow-large] [--no-extract]
   cued attachments search <query> [--conversation ID] [--platform PLATFORM] [--account ACCOUNT] [--limit N]
@@ -183,6 +189,18 @@ async function handleLocalIntegrationCommand(
   subcommand: string | undefined,
   rest: string[],
 ): Promise<unknown> {
+  if (subcommand === "capabilities") {
+    return PLATFORM_VALUES.map((platform) => ({
+      platform,
+      supportedHostOs: getSupportedHostOsForPlatform(platform),
+      onboardingVisible: isOnboardingVisiblePlatform(platform),
+      supportsMultipleAccounts: platformSupportsMultipleAccounts(platform),
+      permissionRequirements: getPlatformPermissionRequirements(platform),
+      helperRequirements: getPlatformHelperRequirements(platform),
+      features: getPlatformFeatureMatrixRow(platform),
+    }));
+  }
+
   const db = openCuedDatabase();
   const service = new IntegrationAuthService(db);
   try {
@@ -454,6 +472,17 @@ async function main(): Promise<void> {
         db.close();
       }
     }
+    case "skill":
+      switch (subcommand) {
+        case "install-global":
+          printJson(installGlobalCuedSkill());
+          return;
+        case "status":
+          printJson(getGlobalCuedSkillStatus());
+          return;
+        default:
+          throw new Error("Usage: cued skill install-global | status");
+      }
     case "login-item":
       switch (subcommand) {
         case "enable":
@@ -538,6 +567,9 @@ async function main(): Promise<void> {
             return;
           }
           break;
+        case "capabilities":
+          printJson(await handleLocalIntegrationCommand(subcommand, rest));
+          return;
         case "refresh":
           response = await sendDaemonRequest({ command: "integrations-refresh" });
           if (isUnsupportedDaemonCommand(response)) {
@@ -692,6 +724,19 @@ async function main(): Promise<void> {
         text: rest[1] ?? "",
         accountKey: rest[2],
         threadId: rest[0],
+      });
+      break;
+    case "contacts":
+      if (subcommand !== "merge" || !rest[0] || !rest[1]) {
+        throw new Error(
+          "Usage: cued contacts merge <primary-contact-id> <secondary-contact-id> [--reason TEXT]",
+        );
+      }
+      response = await sendDaemonRequest({
+        command: "contacts-merge",
+        primaryContactId: rest[0],
+        secondaryContactId: rest[1],
+        reason: parseFlagValue(rest.slice(2), "--reason"),
       });
       break;
     case "rebuild":

@@ -14,7 +14,11 @@ export type HostOS = (typeof HOST_OS_VALUES)[number];
 export const PLATFORM_PERMISSION_REQUIREMENT_VALUES = ["contacts", "full_disk_access"] as const;
 export type PlatformPermissionRequirement = (typeof PLATFORM_PERMISSION_REQUIREMENT_VALUES)[number];
 
-export const PLATFORM_HELPER_REQUIREMENT_VALUES = ["signal_cli", "whatsapp_helper"] as const;
+export const PLATFORM_HELPER_REQUIREMENT_VALUES = [
+  "signal_cli",
+  "slack_helper",
+  "whatsapp_helper",
+] as const;
 export type PlatformHelperRequirement = (typeof PLATFORM_HELPER_REQUIREMENT_VALUES)[number];
 
 export const PLATFORM_FEATURE_VALUES = [
@@ -99,7 +103,7 @@ export const PLATFORM_DEFINITIONS = {
     supportedHostOs: ["macos", "windows", "linux"],
     onboardingVisible: true,
     permissionRequirements: [],
-    helperRequirements: [],
+    helperRequirements: ["slack_helper"],
   },
   whatsapp: {
     adapter: true,
