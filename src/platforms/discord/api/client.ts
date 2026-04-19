@@ -7,7 +7,8 @@ import type {
 } from "../types.js";
 
 const API_BASE_URL = "https://discord.com/api/v10";
-const DEFAULT_MAX_RETRIES = 4;
+const DEFAULT_MAX_RETRIES = 2;
+const DISCORD_OVERFLOW_RETRY_BASE_MS = 2_000;
 
 type FetchLike = typeof fetch;
 
@@ -116,6 +117,7 @@ export class DiscordApiClient {
         if (attempt >= DEFAULT_MAX_RETRIES || !isRetryableDiscordError(error)) {
           break;
         }
+        await delay(getDiscordRetryDelayMs(error, attempt));
       }
     }
 
@@ -188,9 +190,26 @@ export function isDiscordAuthInvalidationError(error: unknown): boolean {
   );
 }
 
+export function isDiscordOverflowError(error: unknown): boolean {
+  if (error instanceof DiscordApiError) {
+    if (error.status === 502 || error.status === 503 || error.status === 504) {
+      return true;
+    }
+    const responseBody = error.responseBody.toLowerCase();
+    return responseBody.includes("overflow") || responseBody.includes("upstream connect error");
+  }
+
+  const message =
+    error instanceof Error ? error.message.toLowerCase() : String(error).toLowerCase();
+  return message.includes("overflow") || message.includes("upstream connect error");
+}
+
 function isRetryableDiscordError(error: unknown): boolean {
   if (isDiscordAuthInvalidationError(error)) {
     return false;
+  }
+  if (isDiscordOverflowError(error)) {
+    return true;
   }
   const message =
     error instanceof Error ? error.message.toLowerCase() : String(error).toLowerCase();
@@ -201,6 +220,13 @@ function isRetryableDiscordError(error: unknown): boolean {
     message.includes("econnreset") ||
     message.includes("unexpected end")
   );
+}
+
+function getDiscordRetryDelayMs(error: unknown, attempt: number): number {
+  if (isDiscordOverflowError(error)) {
+    return DISCORD_OVERFLOW_RETRY_BASE_MS * 2 ** Math.max(0, attempt - 1);
+  }
+  return 250 * 2 ** Math.max(0, attempt - 1);
 }
 
 async function safeJson(response: Response): Promise<unknown> {
