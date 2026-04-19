@@ -357,6 +357,57 @@ exit 1
     db.close();
   });
 
+  it("includes latest sync diagnostics in integration status", () => {
+    const db = createDb();
+    const requested = requestIntegrationAccess(db, "discord");
+
+    const runId = db.queueSyncRun({
+      platform: "discord",
+      accountKey: requested.integration.accountKey,
+      runType: "sync",
+      trigger: "test",
+    });
+    const claimed = db.claimNextQueuedRun(["sync"], "ingesting");
+    expect(claimed?.id).toBe(runId);
+    db.finishRun(runId, {
+      diagnostics: {
+        discordHydration: {
+          selectedChannelCount: 100,
+          attemptedChannelCount: 78,
+          completedChannelCount: 77,
+          messageLimitPerChannel: 50,
+          partial: true,
+          breakChannelId: "dm-break",
+          error: "Discord API rate limited",
+          rateLimited: true,
+        },
+      },
+    });
+
+    const integration = buildIntegrationStatus(db).integrations.find(
+      (entry) => entry.platform === "discord",
+    );
+
+    expect(integration?.latestSyncDiagnostics).toEqual({
+      status: "completed",
+      finishedAt: expect.any(Number),
+      diagnostics: {
+        discordHydration: {
+          selectedChannelCount: 100,
+          attemptedChannelCount: 78,
+          completedChannelCount: 77,
+          messageLimitPerChannel: 50,
+          partial: true,
+          breakChannelId: "dm-break",
+          error: "Discord API rate limited",
+          rateLimited: true,
+        },
+      },
+    });
+
+    db.close();
+  });
+
   it("ignores legacy persisted integrations for unknown platforms", () => {
     const db = createDb();
     const sqlite = new Database(db.dbPath);
