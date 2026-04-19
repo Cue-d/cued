@@ -3402,6 +3402,16 @@ async function dispatchRequest(
           ok: true,
           result: requestUpdateShutdown(),
         };
+      case "contacts-merge":
+        return {
+          id: request.id,
+          ok: true,
+          result: runQueueService.mergeContacts({
+            primaryContactId: request.primaryContactId,
+            secondaryContactId: request.secondaryContactId,
+            reason: request.reason,
+          }),
+        };
       case "rebuild":
         return {
           id: request.id,

@@ -126,6 +126,7 @@ Usage:
   cued integrations remove <platform> [account]
   cued integrations enable <platform> [account]
   cued integrations disable <platform> [account]
+  cued contacts merge <primary-contact-id> <secondary-contact-id> [--reason TEXT]
   cued attachments list [--message ID] [--conversation ID] [--platform PLATFORM] [--account ACCOUNT] [--limit N]
   cued attachments fetch <attachment-id> [--variant original] [--max-bytes N] [--allow-large] [--no-extract]
   cued attachments search <query> [--conversation ID] [--platform PLATFORM] [--account ACCOUNT] [--limit N]
@@ -703,6 +704,19 @@ async function main(): Promise<void> {
         text: rest[1] ?? "",
         accountKey: rest[2],
         threadId: rest[0],
+      });
+      break;
+    case "contacts":
+      if (subcommand !== "merge" || !rest[0] || !rest[1]) {
+        throw new Error(
+          "Usage: cued contacts merge <primary-contact-id> <secondary-contact-id> [--reason TEXT]",
+        );
+      }
+      response = await sendDaemonRequest({
+        command: "contacts-merge",
+        primaryContactId: rest[0],
+        secondaryContactId: rest[1],
+        reason: parseFlagValue(rest.slice(2), "--reason"),
       });
       break;
     case "rebuild":
