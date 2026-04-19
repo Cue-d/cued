@@ -642,6 +642,83 @@ describe("projector", () => {
     db.close();
   });
 
+  it("renders unknown call providers without duplicating 'Call call'", () => {
+    const db = createDb();
+    const observedAt = 1_710_070_000_000;
+
+    db.insertRawEvents([
+      {
+        id: "imessage-contact-call-unknown",
+        platform: "imessage",
+        accountKey: "local",
+        entityKind: "contact",
+        eventKind: "observed",
+        observedAt,
+        dedupeKey: "imessage:contact:+14155550124",
+        payload: {
+          sourceEntityKey: "imessage:+14155550124",
+          fields: { display_name: "Ava Chen" },
+          handles: [{ type: "phone", value: "+14155550124", deterministic: true }],
+        },
+        sourceVersion: "imessage-v1",
+      },
+      {
+        id: "imessage-conversation-call-unknown",
+        platform: "imessage",
+        accountKey: "local",
+        entityKind: "conversation",
+        eventKind: "observed",
+        observedAt: observedAt + 1,
+        dedupeKey: "imessage:conversation:unknown-provider",
+        payload: {
+          sourceConversationKey: "unknown-provider",
+          conversationType: "dm",
+          displayName: "Ava Chen",
+          participants: [{ sourceEntityKey: "imessage:+14155550124" }],
+        },
+        sourceVersion: "imessage-v1",
+      },
+      {
+        id: "imessage-call-unknown-provider",
+        platform: "imessage",
+        accountKey: "local",
+        entityKind: "call",
+        eventKind: "observed",
+        observedAt: observedAt + 2,
+        dedupeKey: "imessage:call:unknown-provider",
+        payload: {
+          sourceCallKey: "unknown-provider",
+          sourceConversationKey: "unknown-provider",
+          provider: "unknown",
+          direction: "incoming",
+          medium: "audio",
+          status: "missed",
+          startedAt: observedAt + 10,
+          endedAt: observedAt + 10,
+          durationSeconds: 0,
+          initiatorSourceKey: "imessage:+14155550124",
+          primaryRemoteSourceKey: "imessage:+14155550124",
+          remoteAddress: "+14155550124",
+          remoteDisplayName: "Ava Chen",
+        },
+        sourceVersion: "imessage-v1",
+      },
+    ]);
+
+    projectPendingRawEvents(db);
+
+    const timelineRow = db.orm().get<{ text: string | null }>(sql`
+      SELECT text
+      FROM timeline_events
+      WHERE source_event_key = 'unknown-provider'
+    `);
+    expect(timelineRow).toEqual({
+      text: "Missed Call",
+    });
+
+    db.close();
+  });
+
   it("keeps FTS rowids aligned when reprojecting an existing message", () => {
     const db = createDb();
     const observedAt = 1_710_200_000_000;
