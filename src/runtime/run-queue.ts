@@ -5,6 +5,7 @@ import {
   isPlatform,
 } from "../core/types/provider.js";
 import type { CuedDatabase } from "../db/database.js";
+import { rebuildProjectedState } from "./projection/projector.js";
 
 type RunQueueSchedulers = {
   wakeIngest?: () => void;
@@ -221,6 +222,32 @@ export class RunQueueService {
     };
     this.schedulers.wakeProjection?.();
     return result;
+  }
+
+  mergeContacts(input: { primaryContactId: string; secondaryContactId: string; reason?: string }): {
+    merged: true;
+    decisionId: string;
+    primaryContactId: string;
+    secondaryContactId: string;
+    canonicalContactId: string;
+    projection: ReturnType<typeof rebuildProjectedState>;
+  } {
+    const decision = this.db.recordContactMergeDecision({
+      primaryContactId: input.primaryContactId,
+      secondaryContactId: input.secondaryContactId,
+      reason: input.reason ?? null,
+      createdBy: "cli",
+    });
+    const projection = rebuildProjectedState(this.db);
+
+    return {
+      merged: true,
+      decisionId: decision.decisionId,
+      primaryContactId: decision.primaryContactId,
+      secondaryContactId: decision.secondaryContactId,
+      canonicalContactId: decision.canonicalContactId,
+      projection,
+    };
   }
 }
 

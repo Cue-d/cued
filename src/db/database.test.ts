@@ -517,6 +517,47 @@ describe("CuedDatabase", () => {
     db.close();
   });
 
+  it("records manual merge decisions and resolves canonical contact chains", () => {
+    const db = createDb();
+
+    insertContact(db, { id: "contact-a", name: "Ava Prime" });
+    insertContact(db, { id: "contact-b", name: "Ava Duplicate" });
+    insertContact(db, { id: "contact-c", name: "Ava Canonical" });
+
+    expect(
+      db.recordContactMergeDecision({
+        primaryContactId: "contact-a",
+        secondaryContactId: "contact-b",
+        reason: "same phone",
+      }),
+    ).toEqual({
+      decisionId: expect.any(String),
+      primaryContactId: "contact-a",
+      secondaryContactId: "contact-b",
+      canonicalContactId: "contact-a",
+    });
+
+    expect(
+      db.recordContactMergeDecision({
+        primaryContactId: "contact-c",
+        secondaryContactId: "contact-a",
+        reason: "prefer contacts source",
+      }),
+    ).toEqual({
+      decisionId: expect.any(String),
+      primaryContactId: "contact-c",
+      secondaryContactId: "contact-a",
+      canonicalContactId: "contact-c",
+    });
+
+    expect(db.resolveCanonicalContactId("contact-b")).toBe("contact-c");
+    expect(db.resolveCanonicalContactId("contact-a")).toBe("contact-c");
+    expect(db.resolveCanonicalContactId("contact-c")).toBe("contact-c");
+    expect(db.listContactMergeDecisions()).toHaveLength(2);
+
+    db.close();
+  });
+
   it("queues, claims, and finishes sync runs", () => {
     const db = createDb();
 
