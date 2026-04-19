@@ -2953,6 +2953,7 @@ export async function runDaemon(): Promise<void> {
         ? "incremental"
         : "full";
       let bundleSourceCursor: Record<string, unknown> | null = null;
+      let runDiagnostics: Record<string, unknown> | null = null;
       let checkpointLastSuccessAt = now();
       let sourceAccounts: Array<{
         platform: Platform;
@@ -3050,6 +3051,10 @@ export async function runDaemon(): Promise<void> {
           (bundle.sourceCursor as Record<string, unknown> | undefined | null) ?? null;
         bundleSyncMode = bundle.syncMode ?? bundleSyncMode;
         bundleHasMore = bundle.hasMore ?? false;
+        const bundleDiagnostics =
+          bundle.diagnostics && Object.keys(bundle.diagnostics).length > 0
+            ? bundle.diagnostics
+            : null;
         ingestedCount = bundle.rawEvents.length;
         const rawEventInsertStartedAt = now();
         insertResult = db.insertRawEvents(withRawEventAcquisitionMode(bundle.rawEvents, "sync"));
@@ -3066,7 +3071,24 @@ export async function runDaemon(): Promise<void> {
             }
           }
         }
+        if (platform === "discord") {
+          const discordHydration =
+            bundleDiagnostics &&
+            typeof bundleDiagnostics.discordHydration === "object" &&
+            bundleDiagnostics.discordHydration !== null
+              ? (bundleDiagnostics.discordHydration as Record<string, unknown>)
+              : null;
+          if (discordHydration?.partial === true) {
+            daemonLogger.warn("discord sync hydration partial", {
+              runId: currentRun.id,
+              platform,
+              accountKey,
+              diagnostics: discordHydration,
+            });
+          }
+        }
         checkpointLastSuccessAt = now();
+        runDiagnostics = bundleDiagnostics;
       }
 
       db.upsertSourceAccounts(sourceAccounts);
@@ -3166,6 +3188,7 @@ export async function runDaemon(): Promise<void> {
         hasMore: bundleHasMore,
         syncMode: checkpointSyncMode,
         timings,
+        ...(runDiagnostics ? { diagnostics: runDiagnostics } : {}),
       });
       if (platform === "signal") {
         requestSignalRealtimeReconcile();
@@ -3201,6 +3224,7 @@ export async function runDaemon(): Promise<void> {
         insertedRawEvents: insertResult.insertedCount,
         insertedRawEventSchemas: summarizeRawEventsBySchema(insertResult.insertedEvents),
         totalMs: timings.totalMs,
+        ...(runDiagnostics ? { diagnostics: runDiagnostics } : {}),
       });
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);

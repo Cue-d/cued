@@ -13,6 +13,17 @@ import {
 const DEFAULT_SYNC_MESSAGE_CHANNEL_LIMIT = 5;
 const DEFAULT_SYNC_MESSAGES_PER_CHANNEL_LIMIT = 50;
 
+type DiscordHydrationDiagnostics = {
+  selectedChannelCount: number;
+  attemptedChannelCount: number;
+  completedChannelCount: number;
+  messageLimitPerChannel: number;
+  partial: boolean;
+  breakChannelId: string | null;
+  error: string | null;
+  rateLimited: boolean;
+};
+
 function loadDiscordCredentials(accountKey: string): DiscordStoredCredentials {
   const parsed = loadIntegrationSecret("discord", accountKey).secret;
   if (
@@ -51,6 +62,14 @@ export async function buildDiscordSyncBundle(
   const privateChannels = await client.listPrivateChannels();
 
   const rawEvents: SyncBundle["rawEvents"] = [];
+  const hydrationChannels = selectChannelsForMessageHydration(
+    privateChannels,
+    syncMessageChannelLimit,
+  );
+  let attemptedHydrationChannelCount = 0;
+  let completedHydrationChannelCount = 0;
+  let hydrationBreakChannelId: string | null = null;
+  let hydrationErrorMessage: string | null = null;
   const seenContacts = new Set<string>();
   const pushContact = (user: DiscordUser, displayName?: string | null) => {
     const event = buildDiscordContactEvent({
@@ -83,14 +102,13 @@ export async function buildDiscordSyncBundle(
     );
   }
 
-  for (const channel of selectChannelsForMessageHydration(
-    privateChannels,
-    syncMessageChannelLimit,
-  )) {
+  for (const channel of hydrationChannels) {
+    attemptedHydrationChannelCount += 1;
     try {
       const messages = await client.listChannelMessages(channel.id, {
         limit: syncMessagesPerChannelLimit,
       });
+      completedHydrationChannelCount += 1;
       if (messages.length === 0) {
         continue;
       }
@@ -110,6 +128,8 @@ export async function buildDiscordSyncBundle(
       if (isDiscordAuthInvalidationError(error)) {
         throw error;
       }
+      hydrationBreakChannelId = channel.id;
+      hydrationErrorMessage = error instanceof Error ? error.message : String(error);
       break;
     }
   }
@@ -131,6 +151,37 @@ export async function buildDiscordSyncBundle(
     },
     syncMode: "incremental",
     hasMore: false,
+    diagnostics: {
+      discordHydration: buildDiscordHydrationDiagnostics({
+        selectedChannelCount: hydrationChannels.length,
+        attemptedChannelCount: attemptedHydrationChannelCount,
+        completedChannelCount: completedHydrationChannelCount,
+        messageLimitPerChannel: syncMessagesPerChannelLimit,
+        breakChannelId: hydrationBreakChannelId,
+        error: hydrationErrorMessage,
+      }),
+    },
+  };
+}
+
+function buildDiscordHydrationDiagnostics(input: {
+  selectedChannelCount: number;
+  attemptedChannelCount: number;
+  completedChannelCount: number;
+  messageLimitPerChannel: number;
+  breakChannelId: string | null;
+  error: string | null;
+}): DiscordHydrationDiagnostics {
+  const error = input.error?.trim() || null;
+  return {
+    selectedChannelCount: input.selectedChannelCount,
+    attemptedChannelCount: input.attemptedChannelCount,
+    completedChannelCount: input.completedChannelCount,
+    messageLimitPerChannel: input.messageLimitPerChannel,
+    partial: error !== null,
+    breakChannelId: input.breakChannelId,
+    error,
+    rateLimited: error?.toLowerCase().includes("rate limited") ?? false,
   };
 }
 
