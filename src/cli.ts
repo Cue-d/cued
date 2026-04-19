@@ -15,16 +15,22 @@ import {
   enableLoginItem,
   getAppBundleInfo,
   getCLISymlinkStatus,
-  getLaunchAgentStatus,
   getLoginItemStatus,
   installCLISymlink,
-  installLaunchAgent,
   installMacOSApp,
   resolveInstalledAppPath,
-  uninstallLaunchAgent,
 } from "./macos/install.js";
 import { IntegrationAuthService } from "./platforms/core/auth/service.js";
 import { getIntegrationSummary, listIntegrationStates } from "./platforms/core/state/status.js";
+import {
+  getPlatformFeatureMatrixRow,
+  getPlatformHelperRequirements,
+  getPlatformPermissionRequirements,
+  getSupportedHostOsForPlatform,
+  isOnboardingVisiblePlatform,
+  PLATFORM_VALUES,
+  platformSupportsMultipleAccounts,
+} from "./platforms/core/types.js";
 import { runDaemon } from "./runtime/daemon/server.js";
 import {
   buildDoctorReport,
@@ -116,10 +122,10 @@ Usage:
   cued login-item enable|disable|status
   cued onboarding complete|snapshot|status [--refresh-managed] [--refresh-permissions]
   cued skill install-global|status
-  cued launchd install|uninstall|status
   cued permissions doctor|status|request [--all|--contacts|--messages|--full-disk-access]
   cued integrations list
   cued integrations status
+  cued integrations capabilities
   cued integrations refresh
   cued integrations connect <platform> [account]
   cued integrations disconnect <platform> [account]
@@ -180,6 +186,18 @@ async function handleLocalIntegrationCommand(
   subcommand: string | undefined,
   rest: string[],
 ): Promise<unknown> {
+  if (subcommand === "capabilities") {
+    return PLATFORM_VALUES.map((platform) => ({
+      platform,
+      supportedHostOs: getSupportedHostOsForPlatform(platform),
+      onboardingVisible: isOnboardingVisiblePlatform(platform),
+      supportsMultipleAccounts: platformSupportsMultipleAccounts(platform),
+      permissionRequirements: getPlatformPermissionRequirements(platform),
+      helperRequirements: getPlatformHelperRequirements(platform),
+      features: getPlatformFeatureMatrixRow(platform),
+    }));
+  }
+
   const db = openCuedDatabase();
   const service = new IntegrationAuthService(db);
   try {
@@ -452,20 +470,6 @@ async function main(): Promise<void> {
         default:
           throw new Error("Usage: cued skill install-global | status");
       }
-    case "launchd":
-      switch (subcommand) {
-        case "install":
-          printJson(installLaunchAgent());
-          return;
-        case "uninstall":
-          printJson(uninstallLaunchAgent());
-          return;
-        case "status":
-          printJson(getLaunchAgentStatus());
-          return;
-        default:
-          throw new Error("Usage: cued launchd install | uninstall | status");
-      }
     case "login-item":
       switch (subcommand) {
         case "enable":
@@ -550,6 +554,9 @@ async function main(): Promise<void> {
             return;
           }
           break;
+        case "capabilities":
+          printJson(await handleLocalIntegrationCommand(subcommand, rest));
+          return;
         case "refresh":
           response = await sendDaemonRequest({ command: "integrations-refresh" });
           if (isUnsupportedDaemonCommand(response)) {

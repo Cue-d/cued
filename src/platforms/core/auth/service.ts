@@ -36,7 +36,7 @@ export class IntegrationAuthService {
   constructor(private readonly db: CuedDatabase) {}
 
   static usageText(): string {
-    return `Usage: cued integrations list | status | refresh | connect <platform> [account] | disconnect <platform> [account] | remove <platform> [account] | enable <platform> [account] | disable <platform> [account]\nRequestable platforms: ${listRequestableIntegrationPlatforms().join(", ")}`;
+    return `Usage: cued integrations list | status | capabilities | refresh | connect <platform> [account] | disconnect <platform> [account] | remove <platform> [account] | enable <platform> [account] | disable <platform> [account]\nRequestable platforms: ${listRequestableIntegrationPlatforms().join(", ")}`;
   }
 
   usage(): string {

@@ -306,6 +306,7 @@ export function summarizeIntegrationStates(
       return [];
     }
 
+    const metadata = safeParseJsonRecord(row.metadata_json, "integration_states.metadata_json");
     return [
       {
         platform: row.platform,
@@ -323,13 +324,13 @@ export function summarizeIntegrationStates(
           row.artifact_paths_json,
           "integration_states.artifact_paths_json",
         ),
-        metadata: safeParseJsonRecord(row.metadata_json, "integration_states.metadata_json"),
+        metadata,
         lastSeenAt: row.last_seen_at,
         updatedAt: row.updated_at,
         latestAuthSessionId: db.getLatestAuthSession(row.platform, row.account_key)?.id ?? null,
         capability: summarizePlatformCapability(
           row.platform,
-          { platform: row.platform, authState: row.auth_state },
+          { platform: row.platform, authState: row.auth_state, metadata },
           hostOs,
         ),
       },
@@ -362,7 +363,11 @@ export function summarizeManagedIntegrationState(
       db.getLatestAuthSession(integration.platform, integration.accountKey)?.id ?? null,
     capability: summarizePlatformCapability(
       integration.platform,
-      { platform: integration.platform, authState: integration.authState },
+      {
+        platform: integration.platform,
+        authState: integration.authState,
+        metadata: integration.metadata ?? null,
+      },
       hostOs,
     ),
   };
