@@ -218,12 +218,9 @@ private enum PermissionGuideSourceLocator {
 
 private final class PermissionGuideOverlayWindowController: NSWindowController {
   private let preferredContentSize = NSSize(width: 460, height: 126)
-  private let sourceWindowFrame: CGRect?
-  private var hasPresented = false
   private var currentFrame: CGRect?
 
   init(hostApp: PermissionGuideHostApp, panel: PermissionGuidePanel, sourceWindowFrame: CGRect?) {
-    self.sourceWindowFrame = sourceWindowFrame
     let window = PassiveOverlayPanel(
       contentRect: NSRect(origin: .zero, size: preferredContentSize),
       styleMask: [.borderless, .nonactivatingPanel],
@@ -259,46 +256,16 @@ private final class PermissionGuideOverlayWindowController: NSWindowController {
     let size = contentSize(for: settingsFrame, visibleFrame: visibleFrame)
     let frame = CGRect(origin: anchoredOrigin(for: settingsFrame, visibleFrame: visibleFrame, size: size), size: size)
 
-    if !hasPresented {
-      hasPresented = true
-      currentFrame = frame
-      let initialFrame = travelStartFrame(targetFrame: frame, visibleFrame: visibleFrame)
-      window.alphaValue = 0
-      window.setFrame(initialFrame, display: false)
+    if let previousFrame = currentFrame,
+       hypot(frame.minX - previousFrame.minX, frame.minY - previousFrame.minY) <= 1 {
       window.orderFrontRegardless()
-      (window.contentView as? PermissionGuideOverlayView)?.prepareForArrivalAnimation()
-
-      NSAnimationContext.runAnimationGroup { context in
-        context.duration = 0.5
-        context.timingFunction = CAMediaTimingFunction(controlPoints: 0.2, 0.9, 0.24, 1)
-        window.animator().alphaValue = 1
-        window.animator().setFrame(frame, display: true)
-        (window.contentView as? PermissionGuideOverlayView)?.animateArrival()
-      }
-    } else {
-      guard let previousFrame = currentFrame else {
-        currentFrame = frame
-        window.setFrame(frame, display: true)
-        window.orderFrontRegardless()
-        return
-      }
-
-      let delta = CGVector(dx: frame.minX - previousFrame.minX, dy: frame.minY - previousFrame.minY)
-      guard hypot(delta.dx, delta.dy) > 1 else {
-        window.orderFrontRegardless()
-        return
-      }
-
-      currentFrame = frame
-      window.orderFrontRegardless()
-      (window.contentView as? PermissionGuideOverlayView)?.animateReposition(delta: delta)
-
-      NSAnimationContext.runAnimationGroup { context in
-        context.duration = 0.38
-        context.timingFunction = CAMediaTimingFunction(controlPoints: 0.2, 0.9, 0.24, 1)
-        window.animator().setFrame(frame, display: true)
-      }
+      return
     }
+
+    currentFrame = frame
+    window.alphaValue = 1
+    window.setFrame(frame, display: true)
+    window.orderFrontRegardless()
   }
 
   func hide() {
@@ -327,35 +294,6 @@ private final class PermissionGuideOverlayWindowController: NSWindowController {
     return CGPoint(
       x: min(max(preferredX, minX), maxX),
       y: min(max(preferredY, minY), maxY)
-    )
-  }
-
-  private func travelStartFrame(targetFrame: CGRect, visibleFrame: CGRect) -> CGRect {
-    let startScale: CGFloat = 0.82
-    let size = CGSize(
-      width: targetFrame.width * startScale,
-      height: targetFrame.height * startScale
-    )
-
-    if let sourceWindowFrame {
-      let origin = CGPoint(
-        x: sourceWindowFrame.maxX - size.width * 0.72,
-        y: sourceWindowFrame.midY - size.height * 0.38
-      )
-      return CGRect(origin: clampedOrigin(origin, size: size, visibleFrame: visibleFrame), size: size)
-    }
-
-    let origin = CGPoint(
-      x: targetFrame.minX - 220,
-      y: targetFrame.minY - 48
-    )
-    return CGRect(origin: clampedOrigin(origin, size: size, visibleFrame: visibleFrame), size: size)
-  }
-
-  private func clampedOrigin(_ origin: CGPoint, size: CGSize, visibleFrame: CGRect) -> CGPoint {
-    CGPoint(
-      x: min(max(origin.x, visibleFrame.minX + 12), visibleFrame.maxX - size.width - 12),
-      y: min(max(origin.y, visibleFrame.minY + 12), visibleFrame.maxY - size.height - 12)
     )
   }
 }

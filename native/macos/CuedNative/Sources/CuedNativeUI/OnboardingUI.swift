@@ -83,6 +83,21 @@ public struct InstallerPermissionStatusResponse: Decodable, Sendable {
   }
 }
 
+func onboardingShouldDismissPermissionGuide(
+  activePermissionKey: String?,
+  permissions: [InstallerPermissionStatus]
+) -> Bool {
+  guard let activePermissionKey else {
+    return false
+  }
+
+  guard let status = permissions.first(where: { $0.key == activePermissionKey })?.status else {
+    return true
+  }
+
+  return status == "granted"
+}
+
 public struct InstallerGlobalSkillStatus: Decodable, Sendable {
   public let installed: Bool
   public let status: String
@@ -348,7 +363,7 @@ public struct CuedOnboardingView: View {
   @State private var pendingGlobalSkillInstall = false
   @State private var pendingIntegrationActionIDs = Set<String>()
   @State private var pendingPlatformConnectPlatforms = Set<String>()
-  @State private var transitioningPermissionKey: String?
+  @State private var activePermissionGuideKey: String?
 
   public init(
     viewModel: OnboardingViewModel,
@@ -409,14 +424,19 @@ public struct CuedOnboardingView: View {
     }
     .onChange(of: viewModel.refreshSequence) { _ in
       pendingGlobalSkillInstall = false
-      transitioningPermissionKey = nil
-      onDismissPermissionGuide()
+      if onboardingShouldDismissPermissionGuide(
+        activePermissionKey: activePermissionGuideKey,
+        permissions: viewModel.permissionStatuses
+      ) {
+        activePermissionGuideKey = nil
+        onDismissPermissionGuide()
+      }
     }
     .onChange(of: viewModel.currentPage) { page in
       guard page != 0 else {
         return
       }
-      transitioningPermissionKey = nil
+      activePermissionGuideKey = nil
       onDismissPermissionGuide()
     }
     .onChange(of: platformRefreshSignature) { _ in
@@ -656,7 +676,6 @@ public struct CuedOnboardingView: View {
   private func permissionRow(_ permission: InstallerPermissionStatus) -> some View {
     let descriptor = installerPermissionDescriptor(for: permission.key)
     let isGranted = permission.status == "granted"
-    let isTransitioning = transitioningPermissionKey == permission.key
 
     return HStack(spacing: 14) {
       permissionIconBadge(
@@ -691,29 +710,12 @@ public struct CuedOnboardingView: View {
             size: .compact
           )
         )
-        .disabled(isTransitioning)
       }
     }
     .padding(.horizontal, 16)
     .padding(.vertical, 15)
     .frame(maxWidth: .infinity, alignment: .leading)
     .background(permissionItemBackground())
-    .overlay {
-      if isTransitioning {
-        permissionGuideMotionBlurOverlay()
-      }
-    }
-    .scaleEffect(isTransitioning ? 0.984 : 1)
-    .offset(x: isTransitioning ? 16 : 0, y: isTransitioning ? -10 : 0)
-    .blur(radius: isTransitioning ? 11 : 0)
-    .saturation(isTransitioning ? 0.58 : 1)
-    .opacity(isTransitioning ? 0.54 : 1)
-    .allowsHitTesting(!isTransitioning)
-    .compositingGroup()
-    .animation(
-      .interactiveSpring(response: 0.34, dampingFraction: 0.76, blendDuration: 0.18),
-      value: isTransitioning
-    )
   }
 
   private var globalSkillRow: some View {
@@ -780,25 +782,8 @@ public struct CuedOnboardingView: View {
   }
 
   private func startPermissionGuideTransition(for permissionKey: String) {
-    guard transitioningPermissionKey == nil else {
-      return
-    }
-
-    withAnimation(.interactiveSpring(response: 0.32, dampingFraction: 0.76, blendDuration: 0.18)) {
-      transitioningPermissionKey = permissionKey
-    }
-
-    DispatchQueue.main.asyncAfter(deadline: .now() + 0.26) {
-      onGuidePermission(permissionKey)
-    }
-
-    DispatchQueue.main.asyncAfter(deadline: .now() + 0.82) {
-      if transitioningPermissionKey == permissionKey {
-        withAnimation(.interactiveSpring(response: 0.28, dampingFraction: 0.8, blendDuration: 0.16)) {
-          transitioningPermissionKey = nil
-        }
-      }
-    }
+    activePermissionGuideKey = permissionKey
+    onGuidePermission(permissionKey)
   }
 
   private func permissionIconBadge(
@@ -835,40 +820,6 @@ public struct CuedOnboardingView: View {
         RoundedRectangle(cornerRadius: 20, style: .continuous)
           .strokeBorder(Color(NSColor.separatorColor).opacity(0.32), lineWidth: 1)
       )
-  }
-
-  @ViewBuilder
-  private func permissionGuideMotionBlurOverlay() -> some View {
-    let shape = RoundedRectangle(cornerRadius: 20, style: .continuous)
-
-    ZStack {
-      shape
-        .strokeBorder(Color.white.opacity(0.12), lineWidth: 1)
-        .offset(x: 10)
-        .blur(radius: 6)
-        .opacity(0.72)
-
-      shape
-        .strokeBorder(Color.accentColor.opacity(0.12), lineWidth: 1)
-        .offset(x: 18)
-        .blur(radius: 10)
-        .opacity(0.48)
-
-      LinearGradient(
-        colors: [
-          Color.clear,
-          Color.white.opacity(0.08),
-          Color.white.opacity(0.04),
-        ],
-        startPoint: .leading,
-        endPoint: .trailing
-      )
-      .clipShape(shape)
-      .offset(x: 10)
-      .blur(radius: 12)
-      .opacity(0.84)
-    }
-    .allowsHitTesting(false)
   }
 
   private func platformConfigurationCard(_ configuration: InstallerPlatformConfiguration) -> some View {
