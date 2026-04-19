@@ -2,9 +2,17 @@ import { buildDiscordSyncBundle } from "./bundle.js";
 
 async function main(): Promise<void> {
   try {
-    const bundle = await buildDiscordSyncBundle({
-      accountKey: process.env.CUED_ACCOUNT_KEY,
-    });
+    const sourceCursor = process.env.CUED_DISCORD_SOURCE_CURSOR
+      ? JSON.parse(process.env.CUED_DISCORD_SOURCE_CURSOR)
+      : undefined;
+    const bundle = await buildDiscordSyncBundle(
+      {
+        accountKey: process.env.CUED_ACCOUNT_KEY,
+      },
+      {
+        sourceCursor,
+      },
+    );
     process.stdout.write(JSON.stringify({ ok: true, bundle }));
   } catch (error) {
     process.stdout.write(

@@ -131,6 +131,16 @@ describe("buildDiscordSyncBundle", () => {
         rateLimited: false,
       },
     });
+    expect(bundle.sourceCursor).toEqual({
+      userId: "u-self",
+      discoveredAt: expect.any(Number),
+      lastSyncAt: expect.any(Number),
+      channels: {
+        "dm-1": { latestMessageId: "100" },
+        "dm-2": { latestMessageId: "300" },
+        "dm-3": { latestMessageId: "200" },
+      },
+    });
   });
 
   it("reports partial hydration diagnostics when a DM history fetch fails", async () => {
@@ -208,4 +218,160 @@ describe("buildDiscordSyncBundle", () => {
       },
     });
   });
+
+  it("uses persisted Discord cursors to fetch only changed DMs and paginate older pages", async () => {
+    const fetchedRequests: Array<{
+      channelId: string;
+      before?: string | null;
+      after?: string | null;
+      limit?: number;
+    }> = [];
+
+    const bundle = await buildDiscordSyncBundle(
+      { accountKey: "default" },
+      {
+        syncMessageChannelLimit: 1,
+        client: {
+          async getCurrentUser() {
+            return {
+              id: "u-self",
+              username: "theo",
+              global_name: "Theo",
+            };
+          },
+          async listPrivateChannels() {
+            return [
+              {
+                id: "dm-1",
+                type: 1,
+                recipients: [{ id: "u-1", username: "ava" }],
+                last_message_id: "350",
+              },
+              {
+                id: "dm-2",
+                type: 1,
+                recipients: [{ id: "u-2", username: "ben" }],
+                last_message_id: "200",
+              },
+              {
+                id: "dm-3",
+                type: 1,
+                recipients: [{ id: "u-3", username: "cam" }],
+                last_message_id: "150",
+              },
+            ];
+          },
+          async listChannelMessages(
+            channelId: string,
+            options?: { before?: string | null; after?: string | null; limit?: number },
+          ) {
+            fetchedRequests.push({
+              channelId,
+              before: options?.before,
+              after: options?.after,
+              limit: options?.limit,
+            });
+
+            if (channelId === "dm-1" && !options?.before) {
+              return buildDescendingDiscordMessages(channelId, 350, 251);
+            }
+            if (channelId === "dm-1" && options?.before === "251") {
+              return buildDescendingDiscordMessages(channelId, 250, 151);
+            }
+            if (channelId === "dm-3") {
+              return [
+                {
+                  id: "150",
+                  channel_id: channelId,
+                  author: {
+                    id: "sender-dm-3",
+                    username: "user-dm-3",
+                  },
+                  content: "latest-dm-3",
+                  timestamp: "2026-04-18T12:00:00.000Z",
+                },
+              ];
+            }
+            return [];
+          },
+        } as unknown as DiscordApiClient,
+        sourceCursor: {
+          userId: "u-self",
+          discoveredAt: 1_710_000_000_000,
+          lastSyncAt: 1_710_000_000_000,
+          channels: {
+            "dm-1": { latestMessageId: "150" },
+            "dm-2": { latestMessageId: "200" },
+          },
+        },
+      },
+    );
+
+    expect(fetchedRequests).toEqual([
+      {
+        channelId: "dm-1",
+        before: null,
+        after: undefined,
+        limit: 100,
+      },
+      {
+        channelId: "dm-1",
+        before: "251",
+        after: undefined,
+        limit: 100,
+      },
+      {
+        channelId: "dm-1",
+        before: "151",
+        after: undefined,
+        limit: 100,
+      },
+      {
+        channelId: "dm-3",
+        before: undefined,
+        after: undefined,
+        limit: 50,
+      },
+    ]);
+    expect(bundle.rawEvents.filter((event) => event.entityKind === "message")).toHaveLength(201);
+    expect(bundle.diagnostics).toEqual({
+      discordHydration: {
+        selectedChannelCount: 2,
+        attemptedChannelCount: 2,
+        completedChannelCount: 2,
+        messageLimitPerChannel: 50,
+        partial: false,
+        breakChannelId: null,
+        error: null,
+        rateLimited: false,
+      },
+    });
+    expect(bundle.sourceCursor).toEqual({
+      userId: "u-self",
+      discoveredAt: expect.any(Number),
+      lastSyncAt: expect.any(Number),
+      channels: {
+        "dm-1": { latestMessageId: "350" },
+        "dm-2": { latestMessageId: "200" },
+        "dm-3": { latestMessageId: "150" },
+      },
+    });
+  });
 });
+
+function buildDescendingDiscordMessages(channelId: string, high: number, low: number) {
+  const messages = [];
+  for (let id = high; id >= low; id -= 1) {
+    messages.push({
+      id: String(id),
+      channel_id: channelId,
+      author: {
+        id: `sender-${channelId}`,
+        username: `user-${channelId}`,
+      },
+      content: `message-${id}`,
+      timestamp: "2026-04-18T12:00:00.000Z",
+    });
+  }
+  return messages;
+}

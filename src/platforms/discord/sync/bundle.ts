@@ -2,7 +2,7 @@ import type { SourceAccountInput } from "../../../core/types/provider.js";
 import { loadIntegrationSecret } from "../../core/secrets/keychain.js";
 import type { SyncBundle } from "../../core/sync.js";
 import { DiscordApiClient, isDiscordAuthInvalidationError } from "../api/client.js";
-import type { DiscordStoredCredentials, DiscordUser } from "../types.js";
+import type { DiscordMessage, DiscordStoredCredentials, DiscordUser } from "../types.js";
 import { discordDisplayName, isDiscordDmChannel } from "../types.js";
 import {
   buildDiscordContactEvent,
@@ -12,6 +12,7 @@ import {
 
 const DEFAULT_SYNC_MESSAGE_CHANNEL_LIMIT = 5;
 const DEFAULT_SYNC_MESSAGES_PER_CHANNEL_LIMIT = 50;
+const DISCORD_INCREMENTAL_PAGE_LIMIT = 100;
 
 type DiscordHydrationDiagnostics = {
   selectedChannelCount: number;
@@ -22,6 +23,18 @@ type DiscordHydrationDiagnostics = {
   breakChannelId: string | null;
   error: string | null;
   rateLimited: boolean;
+};
+
+type DiscordSyncCursor = {
+  userId: string | null;
+  discoveredAt: number | null;
+  lastSyncAt: number | null;
+  channels: Record<
+    string,
+    {
+      latestMessageId: string | null;
+    }
+  >;
 };
 
 function loadDiscordCredentials(accountKey: string): DiscordStoredCredentials {
@@ -49,10 +62,17 @@ export async function buildDiscordSyncBundle(
     client?: DiscordApiClient;
     syncMessageChannelLimit?: number;
     syncMessagesPerChannelLimit?: number;
+    sourceCursor?: unknown;
   } = {},
 ): Promise<SyncBundle> {
   const accountKey = input.accountKey ?? process.env.CUED_ACCOUNT_KEY ?? "default";
   const client = options.client ?? new DiscordApiClient(loadDiscordCredentials(accountKey));
+  const sourceCursor = parseDiscordSyncCursor(
+    options.sourceCursor ??
+      (typeof process.env.CUED_DISCORD_SOURCE_CURSOR === "string"
+        ? JSON.parse(process.env.CUED_DISCORD_SOURCE_CURSOR)
+        : null),
+  );
   const syncMessageChannelLimit =
     options.syncMessageChannelLimit ?? getDiscordSyncMessageChannelLimit();
   const syncMessagesPerChannelLimit =
@@ -64,6 +84,7 @@ export async function buildDiscordSyncBundle(
   const rawEvents: SyncBundle["rawEvents"] = [];
   const hydrationChannels = selectChannelsForMessageHydration(
     privateChannels,
+    sourceCursor,
     syncMessageChannelLimit,
   );
   let attemptedHydrationChannelCount = 0;
@@ -102,12 +123,17 @@ export async function buildDiscordSyncBundle(
     );
   }
 
+  const nextChannelCursor = buildDiscordChannelCursor(privateChannels);
   for (const channel of hydrationChannels) {
     attemptedHydrationChannelCount += 1;
     try {
-      const messages = await client.listChannelMessages(channel.id, {
-        limit: syncMessagesPerChannelLimit,
-      });
+      const previousLatestMessageId =
+        sourceCursor.channels[channel.id]?.latestMessageId?.trim() || null;
+      const messages = previousLatestMessageId
+        ? await listDiscordMessagesSince(client, channel.id, previousLatestMessageId)
+        : await client.listChannelMessages(channel.id, {
+            limit: syncMessagesPerChannelLimit,
+          });
       completedHydrationChannelCount += 1;
       if (messages.length === 0) {
         continue;
@@ -148,7 +174,9 @@ export async function buildDiscordSyncBundle(
     sourceCursor: {
       userId: currentUser.id,
       discoveredAt: observedAt,
-    },
+      lastSyncAt: observedAt,
+      channels: nextChannelCursor,
+    } satisfies DiscordSyncCursor,
     syncMode: "incremental",
     hasMore: false,
     diagnostics: {
@@ -209,14 +237,31 @@ function parsePositiveInteger(value: string | undefined, fallback: number): numb
 
 function selectChannelsForMessageHydration(
   channels: Awaited<ReturnType<DiscordApiClient["listPrivateChannels"]>>,
+  sourceCursor: DiscordSyncCursor,
   limit: number,
 ) {
-  return channels
-    .filter((channel) => isDiscordDmChannel(channel) && typeof channel.last_message_id === "string")
-    .sort((left, right) =>
-      compareDiscordSnowflakesDesc(left.last_message_id!, right.last_message_id!),
-    )
+  const dmChannels = channels.filter(
+    (channel) => isDiscordDmChannel(channel) && typeof channel.last_message_id === "string",
+  );
+  const sorted = dmChannels.sort((left, right) =>
+    compareDiscordSnowflakesDesc(left.last_message_id!, right.last_message_id!),
+  );
+  const changedChannels = sorted.filter((channel) => {
+    const latestMessageId = sourceCursor.channels[channel.id]?.latestMessageId ?? null;
+    return latestMessageId && isSnowflakeGreater(channel.last_message_id!, latestMessageId);
+  });
+  const initialChannels = sorted
+    .filter((channel) => !sourceCursor.channels[channel.id]?.latestMessageId)
     .slice(0, Math.max(0, limit));
+
+  const selected = new Map<string, (typeof sorted)[number]>();
+  for (const channel of changedChannels) {
+    selected.set(channel.id, channel);
+  }
+  for (const channel of initialChannels) {
+    selected.set(channel.id, channel);
+  }
+  return [...selected.values()];
 }
 
 function compareDiscordSnowflakesDesc(left: string, right: string): number {
@@ -226,4 +271,79 @@ function compareDiscordSnowflakesDesc(left: string, right: string): number {
     return 0;
   }
   return leftId > rightId ? -1 : 1;
+}
+
+function isSnowflakeGreater(left: string, right: string): boolean {
+  return BigInt(left) > BigInt(right);
+}
+
+function parseDiscordSyncCursor(value: unknown): DiscordSyncCursor {
+  const cursor = isRecord(value) ? value : null;
+  const channels = isRecord(cursor?.channels) ? cursor.channels : null;
+  return {
+    userId: typeof cursor?.userId === "string" ? cursor.userId : null,
+    discoveredAt: typeof cursor?.discoveredAt === "number" ? cursor.discoveredAt : null,
+    lastSyncAt: typeof cursor?.lastSyncAt === "number" ? cursor.lastSyncAt : null,
+    channels: Object.fromEntries(
+      Object.entries(channels ?? {}).map(([channelId, channelCursor]) => [
+        channelId,
+        {
+          latestMessageId:
+            isRecord(channelCursor) && typeof channelCursor.latestMessageId === "string"
+              ? channelCursor.latestMessageId
+              : null,
+        },
+      ]),
+    ),
+  };
+}
+
+function buildDiscordChannelCursor(
+  channels: Awaited<ReturnType<DiscordApiClient["listPrivateChannels"]>>,
+): DiscordSyncCursor["channels"] {
+  return Object.fromEntries(
+    channels.filter(isDiscordDmChannel).map((channel) => [
+      channel.id,
+      {
+        latestMessageId:
+          typeof channel.last_message_id === "string" ? channel.last_message_id : null,
+      },
+    ]),
+  );
+}
+
+async function listDiscordMessagesSince(
+  client: DiscordApiClient,
+  channelId: string,
+  latestMessageId: string,
+): Promise<DiscordMessage[]> {
+  const collected: DiscordMessage[] = [];
+  let before: string | null = null;
+
+  while (true) {
+    const page = await client.listChannelMessages(channelId, {
+      before,
+      limit: DISCORD_INCREMENTAL_PAGE_LIMIT,
+    });
+    if (page.length === 0) {
+      break;
+    }
+
+    const newerMessages = page.filter((message) => isSnowflakeGreater(message.id, latestMessageId));
+    collected.push(...newerMessages);
+
+    const oldestPageMessageId = page.at(-1)?.id ?? null;
+    const reachedCursor = newerMessages.length !== page.length;
+    if (reachedCursor || page.length < DISCORD_INCREMENTAL_PAGE_LIMIT || !oldestPageMessageId) {
+      break;
+    }
+
+    before = oldestPageMessageId;
+  }
+
+  return collected;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }

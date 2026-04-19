@@ -153,7 +153,8 @@ Discord uses a local browser sign-in flow and stores the captured Discord accoun
 Current Discord scope in Cued:
 
 - discovers DMs only
-- hydrates up to 50 messages in the 5 most recent DMs during sync
+- hydrates up to 50 messages in the 5 most recent unseen DMs during sync
+- uses persisted per-DM cursors to fetch only newer messages on later syncs
 - syncs new messages after connection
 - sends messages only to known DMs
 - does not backfill guild or server channel history
