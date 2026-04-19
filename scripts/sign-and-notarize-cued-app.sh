@@ -23,6 +23,12 @@ EOF
   exit 0
 fi
 
+if [[ "$#" -ne 0 ]]; then
+  echo "Unexpected arguments: $*" >&2
+  echo "Usage: bash scripts/sign-and-notarize-cued-app.sh" >&2
+  exit 1
+fi
+
 if [[ -z "${CUED_CODESIGN_IDENTITY:-}" ]]; then
   echo "CUED_CODESIGN_IDENTITY is required" >&2
   exit 1

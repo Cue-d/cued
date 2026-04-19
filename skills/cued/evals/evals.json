@@ -1,0 +1,460 @@
+{
+  "skill_name": "cued",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "Who did I ghost in the last week? I want to see anyone who messaged me that I haven't replied to.",
+      "expected_output": "A list of contacts whose last message in a DM conversation was sent by them (not me), within the last 7 days, that I have not responded to. Should include contact name, last message preview, time sent, and platform.",
+      "files": [],
+      "expectations": [
+        "Queried the messages table filtering by is_from_me = 0 for the last message in each conversation",
+        "Filtered to DM conversations only (type = 'dm')",
+        "Applied a time window filter on sent_at within the last 7 days",
+        "Returned results with contact names and timestamps",
+        "Used a window function or subquery to get the last message per conversation",
+        "Checked message_reactions to exclude messages the user already reacted to (tapback = acknowledgment)",
+        "Used millisecond timestamps correctly (divided by 1000 for display, multiplied unixepoch by 1000 for comparison)"
+      ]
+    },
+    {
+      "id": 2,
+      "prompt": "Who should I follow up with? Show me conversations where I sent the last message and never got a reply.",
+      "expected_output": "A list of DM conversations where the user sent the most recent message and the other person hasn't responded. Should include the recipient name, what the user said, when it was sent, and the platform.",
+      "files": [],
+      "expectations": [
+        "Queried messages table filtering by is_from_me = 1 for the last message",
+        "Filtered to DM conversations (type = 'dm')",
+        "Applied a reasonable time window (at least 3 days since last message)",
+        "Returned recipient names, last message content, and sent timestamps",
+        "Results are ordered by recency or days waiting",
+        "Checked message_reactions to see if the other person reacted (acknowledged but didn't reply)",
+        "Used millisecond timestamps correctly"
+      ]
+    },
+    {
+      "id": 3,
+      "prompt": "Who haven't I reached out to in a while that I used to talk to regularly?",
+      "expected_output": "A list of contacts with significant past message history but no recent communication. Should show contact name, total message count, last message date, and days since last contact.",
+      "files": [],
+      "expectations": [
+        "Joined contacts with messages through conversation_participants or directly",
+        "Compared historical message volume against recency of last message",
+        "Applied a minimum message threshold to identify 'regular' contacts",
+        "Calculated days since last message",
+        "Excluded group-only conversations or handled them separately"
+      ]
+    },
+    {
+      "id": 4,
+      "prompt": "Who in my network might be helpful for fundraising? I'm raising a seed round and want to know who I've talked to about investing, fundraising, or venture capital.",
+      "expected_output": "A list of contacts who have discussed fundraising/investing topics in messages, with context about the conversations. Should show contact name, company, number of relevant messages, and platforms.",
+      "files": [],
+      "expectations": [
+        "Used messages_fts full-text search with terms like 'fundraising OR investing OR venture OR seed'",
+        "Joined FTS results back to messages and contacts for metadata",
+        "Filtered to messages not from the user (is_from_me = 0) to find knowledgeable contacts",
+        "Grouped results by contact with mention counts",
+        "Returned contact names and companies"
+      ]
+    },
+    {
+      "id": 5,
+      "prompt": "Who should I introduce to each other? Find people in my network who talk about similar things but don't know each other.",
+      "expected_output": "Pairs of contacts who discuss overlapping topics but don't share any group conversations. Should include both names, companies, and the shared topic area.",
+      "files": [],
+      "expectations": [
+        "Used FTS search or topic analysis to identify contacts with shared interests",
+        "Checked that contact pairs don't share existing conversations",
+        "Returned pairs with names and companies",
+        "Provided reasoning or topic context for each introduction suggestion"
+      ]
+    },
+    {
+      "id": 6,
+      "prompt": "Catch me up on my conversation with Sarah. What have we been talking about recently?",
+      "expected_output": "A summary of recent messages with a contact named Sarah, including message content, timestamps, and which platform the conversation is on. Should resolve the contact first.",
+      "files": [],
+      "expectations": [
+        "Searched contacts table for name matching 'Sarah'",
+        "Found conversations via conversation_participants",
+        "Retrieved recent messages ordered by sent_at DESC",
+        "Included both sent and received messages",
+        "Showed platform and timestamp for each message"
+      ]
+    },
+    {
+      "id": 7,
+      "prompt": "Show me all my conversations with James across every platform - iMessage, Slack, WhatsApp, everything.",
+      "expected_output": "A cross-platform view of all conversations with a contact named James, showing conversation details per platform including last message time and message counts.",
+      "files": [],
+      "expectations": [
+        "Resolved the contact by searching contacts for 'James'",
+        "Joined conversation_participants to conversations",
+        "Grouped or listed results by platform",
+        "Showed last message timestamps per conversation",
+        "Covered multiple platforms if the contact exists on more than one"
+      ]
+    },
+    {
+      "id": 8,
+      "prompt": "What are my most important unread messages right now?",
+      "expected_output": "A prioritized list of conversations with unread messages, ranked by importance signals like relationship strength and message volume.",
+      "files": [],
+      "expectations": [
+        "Queried conversations where unread_count > 0",
+        "Filtered to conversations where the last message was NOT sent by the user (is_from_me = 0)",
+        "Ordered by some importance signal (message frequency, recency, or DM vs group)",
+        "Returned conversation names, platforms, unread counts, and last message previews",
+        "Distinguished between DM and group conversations, prioritizing DMs"
+      ]
+    },
+    {
+      "id": 9,
+      "prompt": "Which investors have I spoken to in the last month that I haven't followed up with? I had a bunch of intro calls and I want to make sure I'm not dropping the ball.",
+      "expected_output": "A list of contacts related to investing/fundraising where the conversation has gone cold after initial engagement. Should combine topic search with follow-up detection.",
+      "files": [],
+      "expectations": [
+        "Used FTS to search for investment/fundraising-related terms",
+        "Applied a time window of the last 30 days",
+        "Identified conversations where follow-up is needed (last message is from them, or stale)",
+        "Returned contact names with conversation context",
+        "Combined topic search with recency analysis"
+      ]
+    },
+    {
+      "id": 10,
+      "prompt": "Which prospects went quiet after I sent them pricing info? I want to see deals where I shared pricing or a proposal and then heard nothing back.",
+      "expected_output": "Conversations where the user discussed pricing/proposals and the other person stopped responding. Should use topic search combined with ghosting pattern.",
+      "files": [],
+      "expectations": [
+        "Used FTS to search for pricing/proposal-related terms",
+        "Identified conversations where the user sent the last substantive message",
+        "Applied a staleness threshold for 'went quiet'",
+        "Returned contact/conversation names with last message context"
+      ]
+    },
+    {
+      "id": 11,
+      "prompt": "Which candidates haven't responded to my last message in over 5 days? I'm recruiting for a few roles and need to know who's gone dark.",
+      "expected_output": "A list of conversations where candidates haven't replied within 5 days. Should identify recruiting-related conversations.",
+      "files": [],
+      "expectations": [
+        "Identified conversations likely related to recruiting (via FTS or context)",
+        "Found conversations where is_from_me = 1 on the last message",
+        "Filtered by sent_at older than 5 days ago",
+        "Returned candidate names, last message content, and days since sent"
+      ]
+    },
+    {
+      "id": 12,
+      "prompt": "Which portfolio founders haven't I checked in with in over a month? I want to make sure I'm staying engaged with all my investments.",
+      "expected_output": "A list of contacts related to portfolio/investment context with dormant communication patterns (>30 days since last message).",
+      "files": [],
+      "expectations": [
+        "Applied dormant relationship detection with a 30+ day threshold",
+        "Used FTS or contact metadata to identify portfolio-related contacts",
+        "Returned contact names with last message dates and days since contact",
+        "Ordered by longest gap first"
+      ]
+    },
+    {
+      "id": 13,
+      "prompt": "What have I discussed with the design team this sprint? I need to prep for standup and want to review our recent conversations.",
+      "expected_output": "A summary of recent messages in conversations involving design team members, filtered to the last 1-2 weeks.",
+      "files": [],
+      "expectations": [
+        "Searched for conversations or messages related to 'design'",
+        "Applied a recent time window (1-2 weeks)",
+        "Returned message content with sender names and timestamps",
+        "Covered both DM and group conversations"
+      ]
+    },
+    {
+      "id": 14,
+      "prompt": "Which close friends haven't I texted in over 2 weeks? Just looking at iMessage and WhatsApp, not work stuff.",
+      "expected_output": "A list of contacts from personal messaging platforms (iMessage, WhatsApp, Signal) with no recent messages in the last 2 weeks.",
+      "files": [],
+      "expectations": [
+        "Filtered to personal platforms (imessage, whatsapp, signal)",
+        "Applied dormant relationship detection (>14 days)",
+        "Required a minimum message history to qualify as 'close friends'",
+        "Excluded work platforms (slack, linkedin)",
+        "Returned contact names with last message dates"
+      ]
+    },
+    {
+      "id": 15,
+      "prompt": "Summarize my Slack conversations from today. What's been going on?",
+      "expected_output": "A summary of today's Slack messages across conversations, showing key discussions and participants.",
+      "files": [],
+      "expectations": [
+        "Filtered messages to platform = 'slack'",
+        "Applied time filter for today (sent_at > start of today)",
+        "Grouped by conversation or topic",
+        "Included sender names and message content",
+        "Covered both DM and channel conversations"
+      ]
+    },
+    {
+      "id": 16,
+      "prompt": "I think I have a bunch of duplicate contacts across platforms. Can you find contacts that exist on multiple platforms but aren't merged? Like someone who's on both iMessage and Slack as separate contacts.",
+      "expected_output": "A list of contact pairs that likely represent the same person across different platforms, identified by matching handles (phone, email) or identical names.",
+      "files": [],
+      "expectations": [
+        "Searched contact_handles for matching normalized_value across different contact_ids",
+        "Joined to contacts to show names and to contact_sources for platform info",
+        "Identified cross-platform duplicates (e.g., same person on iMessage and Slack)",
+        "Suggested using cued contacts merge <primary-id> <secondary-id> to merge duplicates",
+        "Handled phone-number-as-name contacts (name LIKE '+%') as likely duplicates"
+      ]
+    },
+    {
+      "id": 17,
+      "prompt": "I have a contact showing up as just a phone number +13475561329. Can you figure out who this is and if I have them under a real name somewhere?",
+      "expected_output": "Resolution of the phone number to a named contact by matching handles across the contacts database, with suggestion to merge if a match is found.",
+      "files": [],
+      "expectations": [
+        "Searched contact_handles for the phone number's normalized_value",
+        "Found both the phone-number contact and any named contacts sharing the same number",
+        "Showed the named contact's details (name, platform, handles)",
+        "Suggested merging the two contacts using cued contacts merge <primary-id> <secondary-id>",
+        "Checked recent messages to provide additional context about who this person is"
+      ]
+    },
+    {
+      "id": 18,
+      "prompt": "I reacted to someone's message with a heart but never actually texted them back. Does that count as ghosting? Show me conversations where I only reacted but didn't reply.",
+      "expected_output": "A list of conversations where the user's only acknowledgment was a reaction (tapback) without a text reply, treating this as a softer form of ghosting.",
+      "files": [],
+      "expectations": [
+        "Queried message_reactions to find messages the user reacted to",
+        "Cross-referenced with messages to check if the user sent a follow-up text after reacting",
+        "Filtered to DM conversations",
+        "Returned contact names, the reacted message, and time elapsed",
+        "Distinguished between reaction-only acknowledgment and full text replies"
+      ]
+    },
+    {
+      "id": 19,
+      "prompt": "Who texted me today?",
+      "expected_output": "A list of contacts who sent messages to the user today, with message previews and platforms.",
+      "files": [],
+      "expectations": [
+        "Skill was triggered by a natural language message query without mentioning 'cued'",
+        "Filtered messages where is_from_me = 0 and sent_at is today",
+        "Joined to contacts for sender names",
+        "Returned sender names, message previews, platforms, and timestamps",
+        "Grouped by contact or conversation"
+      ]
+    },
+    {
+      "id": 20,
+      "prompt": "What's John's email address?",
+      "expected_output": "The email address(es) associated with a contact named John from the local database.",
+      "files": [],
+      "expectations": [
+        "Skill was triggered by a contact lookup query without mentioning 'cued'",
+        "Searched contacts table for name matching 'John'",
+        "Queried contact_handles where type = 'email' for matching contact_id(s)",
+        "Returned email addresses with the contact name"
+      ]
+    },
+    {
+      "id": 21,
+      "prompt": "Check my messages",
+      "expected_output": "A summary of recent messages or unread conversations across platforms.",
+      "files": [],
+      "expectations": [
+        "Skill was triggered by a generic message check without mentioning 'cued'",
+        "Queried recent messages or conversations with unread_count > 0",
+        "Returned conversation names, platforms, and message previews",
+        "Ordered by recency"
+      ]
+    },
+    {
+      "id": 22,
+      "prompt": "Have I talked to anyone from Stripe recently?",
+      "expected_output": "A list of contacts associated with Stripe (via company field or message content) with recent message activity.",
+      "files": [],
+      "expectations": [
+        "Skill was triggered by a company-based contact query without mentioning 'cued'",
+        "Searched contacts where company LIKE '%Stripe%' or used FTS for 'Stripe'",
+        "Showed recent message activity for matching contacts",
+        "Returned contact names, platforms, and last message timestamps"
+      ]
+    },
+    {
+      "id": 23,
+      "prompt": "Who's been trying to reach me that I haven't gotten back to?",
+      "expected_output": "A list of contacts with unanswered incoming messages, equivalent to ghosting detection phrased naturally.",
+      "files": [],
+      "expectations": [
+        "Skill was triggered by a natural follow-up/ghosting query without mentioning 'cued'",
+        "Identified DM conversations where last message is not from the user",
+        "Applied a reasonable time threshold",
+        "Checked message_reactions for acknowledgment",
+        "Returned contact names and message context"
+      ]
+    },
+    {
+      "id": 24,
+      "prompt": "Find me Sarah Chen's phone number and LinkedIn",
+      "expected_output": "Phone number and LinkedIn URL/handle for a contact named Sarah Chen.",
+      "files": [],
+      "expectations": [
+        "Skill was triggered by a contact info lookup without mentioning 'cued'",
+        "Searched contacts for 'Sarah Chen'",
+        "Queried contact_handles for type = 'phone' and type = 'linkedin'",
+        "Checked contact_sources for profile_url containing linkedin",
+        "Returned the handle values"
+      ]
+    },
+    {
+      "id": 25,
+      "prompt": "What did Mike and I talk about last week on Slack?",
+      "expected_output": "Messages exchanged with a contact named Mike on Slack within the last week.",
+      "files": [],
+      "expectations": [
+        "Skill was triggered by a conversation history query without mentioning 'cued'",
+        "Resolved contact named 'Mike'",
+        "Filtered to platform = 'slack'",
+        "Applied time window of last 7 days",
+        "Returned message content with timestamps and sender names"
+      ]
+    },
+    {
+      "id": 26,
+      "prompt": "I want cued to automatically merge obvious duplicate contacts after each sync. Which contacts should it merge right now without asking me?",
+      "expected_output": "A list of only high-confidence duplicate contact pairs or clusters that are safe to auto-merge, with the evidence for each proposed merge and the canonical contact to keep.",
+      "files": [],
+      "expectations": [
+        "Searched contact_handles for deterministic matches on normalized_value across different contact_ids",
+        "Joined contact_sources to show cross-platform evidence for each duplicate pair or cluster",
+        "Proposed autonomous merges only for high-confidence cases, not weak same-name guesses",
+        "Identified which contact should be canonical before merging",
+        "Suggested using cued contacts merge <primary-id> <secondary-id> for each safe merge"
+      ]
+    },
+    {
+      "id": 27,
+      "prompt": "Before merging anything automatically, show me contacts that look similar by name but should NOT be merged yet because the evidence is too weak.",
+      "expected_output": "A list of ambiguous contact pairs that may be duplicates but should not be auto-merged, with a brief explanation of what evidence is missing.",
+      "files": [],
+      "expectations": [
+        "Searched contacts for case-insensitive or similar-name matches",
+        "Checked contact_handles and contact_sources for corroborating evidence",
+        "Rejected autonomous merges when only name similarity was available",
+        "Explained what additional evidence would make the merge safe",
+        "Distinguished low-confidence review candidates from high-confidence auto-merge candidates"
+      ]
+    },
+    {
+      "id": 28,
+      "prompt": "I have three separate records for Alex Kim across iMessage, Slack, and LinkedIn. Can you consolidate which of these belong to the same person and tell me which record should be the source of truth?",
+      "expected_output": "A clustered view of Alex Kim contact records across platforms, indicating which records represent the same person, which canonical contact should win, and why.",
+      "files": [],
+      "expectations": [
+        "Resolved contacts by name and grouped likely duplicates into a cluster rather than only pairwise matches",
+        "Compared contact_handles, contact_sources, and platform coverage to determine if the records refer to the same person",
+        "Selected a canonical contact record or explained the canonical choice criteria",
+        "Separated true duplicates from same-name non-duplicates if more than one Alex Kim exists",
+        "Returned merge recommendations with reasoning tied to the local data"
+      ]
+    },
+    {
+      "id": 29,
+      "prompt": "I have a contact saved as just +14155550123 and another saved as Sarah Chen. Are they the same person, and should cued merge them automatically?",
+      "expected_output": "A resolution of whether the phone-number contact and Sarah Chen are the same person, including confidence, supporting evidence, and whether the merge is safe to do automatically.",
+      "files": [],
+      "expectations": [
+        "Searched contact_handles for the normalized phone number",
+        "Looked for named contacts sharing the same phone or related handles",
+        "Checked recent messages or conversation context to support identity resolution",
+        "Recommended autonomous merge only if the handle evidence was deterministic",
+        "Explained clearly when the merge should be automatic versus held for review"
+      ]
+    },
+    {
+      "id": 30,
+      "prompt": "I want one source of truth per person. For each duplicate contact cluster, which record should be canonical and which fields should win?",
+      "expected_output": "A list of duplicate contact clusters with a canonical contact for each cluster and a field-level merge plan for name, company, phone, email, LinkedIn, and platform sources.",
+      "files": [],
+      "expectations": [
+        "Grouped duplicate contacts into clusters rather than isolated pairs",
+        "Used contact_handles and contact_sources to determine the strongest canonical record",
+        "Preferred deterministic handles and richer platform metadata when choosing field winners",
+        "Explained field-level source-of-truth decisions instead of only naming a winner",
+        "Produced an output that could drive autonomous merge or enrichment later"
+      ]
+    },
+    {
+      "id": 31,
+      "prompt": "Find up to 10 specific contacts or duplicate clusters that can be enriched immediately from local data only. Process them one contact or cluster at a time, and for each one list the exact fields that can be filled from existing contact_handles, contact_sources, or duplicate records. Do not claim any data was modified unless you actually ran a command.",
+      "expected_output": "A small queued list of concrete per-contact or per-cluster enrichment opportunities, each with the exact fields that can be enriched immediately from existing local contact_handles, contact_sources, or related duplicate records.",
+      "files": [],
+      "expectations": [
+        "Identified a bounded set of contacts or duplicate clusters with missing or sparse profile fields",
+        "Structured the output as independent per-contact or per-cluster enrichment tasks rather than one monolithic pass",
+        "Searched contact_handles for email, phone, linkedin, and other relevant handle types",
+        "Checked contact_sources.profile_url and related metadata for enrichment signals",
+        "Pulled enrichment candidates from duplicate records or cross-platform matches in local data",
+        "Returned only enrichments supported by local evidence",
+        "Did not claim that data had already been updated unless a real command was run"
+      ]
+    },
+    {
+      "id": 32,
+      "prompt": "Who are my most important contacts with incomplete profiles, and what can cued enrich automatically today?",
+      "expected_output": "A prioritized list of important contacts with incomplete profile data, along with the local enrichments that can be applied automatically and the fields that still need more evidence.",
+      "files": [],
+      "expectations": [
+        "Identified important contacts using message volume, recency, or relationship strength signals",
+        "Checked which of those contacts have missing profile fields",
+        "Derived enrichment candidates from local handles, sources, and duplicate records",
+        "Prioritized enrichments that are safe and immediately actionable",
+        "Distinguished fields that can be auto-enriched now from fields that remain unresolved"
+      ]
+    },
+    {
+      "id": 33,
+      "prompt": "Find contacts whose LinkedIn, company, or other profile details are already hiding in contact_sources or handles but haven't been surfaced clearly.",
+      "expected_output": "A list of contacts with latent enrichment opportunities from existing local metadata, including LinkedIn URLs/handles, company names, and other profile fields that can be surfaced.",
+      "files": [],
+      "expectations": [
+        "Queried contact_sources for profile_url and platform metadata that imply enrichable profile details",
+        "Queried contact_handles for linkedin, email, phone, and other relevant handle types",
+        "Matched local metadata back to the canonical contact",
+        "Returned concrete field/value enrichments rather than vague suggestions",
+        "Used only local data and did not invent unsupported profile details"
+      ]
+    },
+    {
+      "id": 34,
+      "prompt": "If cued ran a daily contact cleanup job, what high-confidence merges and local-data-backed enrichments would it queue today? Structure the answer as independent per-contact or per-cluster tasks that a scheduled job could execute separately, and keep ambiguous cases in a review queue.",
+      "expected_output": "A daily cleanup queue containing high-confidence per-contact or per-cluster auto-merges and local-data-backed enrichments that can be applied autonomously, plus a smaller review queue for ambiguous cases.",
+      "files": [],
+      "expectations": [
+        "Produced both merge and enrichment recommendations in one pass",
+        "Structured the output as independent per-contact or per-cluster tasks instead of one giant batch action",
+        "Separated safe autonomous actions from cases that require review",
+        "Used deterministic handle overlap and local metadata for autonomous decisions",
+        "Prioritized actions by confidence and likely user value",
+        "Framed the output as something a scheduled cleanup job could execute"
+      ]
+    },
+    {
+      "id": 35,
+      "prompt": "I want to enrich all my contacts over time, including GitHub, Twitter, LinkedIn, websites, and portfolio context. Start from local evidence first, then produce a prioritized queue of small per-contact or per-cluster tasks: first the contacts that can be enriched immediately from the database, then the high-value contacts that should get external research next.",
+      "expected_output": "A local-first enrichment plan that produces a prioritized queue of small per-contact or per-cluster tasks, identifies which contacts can be enriched immediately from the database, which high-value contacts deserve external research next, and what a single source of truth should aggregate for each person.",
+      "files": [],
+      "expectations": [
+        "Started with local evidence from contacts, contact_handles, contact_sources, conversations, and messages",
+        "Produced a prioritized queue of independent per-contact or per-cluster tasks rather than a single all-at-once enrichment pass",
+        "Identified a subset of high-value unresolved contacts for further enrichment rather than treating all contacts equally",
+        "Specified which external profile targets would be useful next, such as LinkedIn, GitHub, Twitter, websites, or portfolio context",
+        "Explained how local and external evidence should aggregate into one canonical contact record",
+        "Did not skip the local-first pass before proposing external enrichment"
+      ]
+    }
+  ]
+}

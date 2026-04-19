@@ -283,6 +283,9 @@ rm -rf "$RUNTIME_DIR/native"
 mkdir -p "$RESOURCES_DIR/scripts"
 cp "$PERMISSIONS_SCRIPT_SOURCE" "$RESOURCES_DIR/scripts/request-macos-access.sh"
 chmod +x "$RESOURCES_DIR/scripts/request-macos-access.sh"
+mkdir -p "$RESOURCES_DIR/skills"
+cp -R "$ROOT_DIR/skills/cued" "$RESOURCES_DIR/skills/cued"
+rm -rf "$RESOURCES_DIR/skills/cued/cued-workspace" "$RESOURCES_DIR/skills/cued/evals/runs"
 
 INFO_PLIST_DB_PATH_BLOCK=""
 if [[ -n "${CUED_DB_PATH_OVERRIDE:-}" ]]; then

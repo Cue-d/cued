@@ -1453,7 +1453,54 @@ export const MIGRATIONS: Migration[] = [
     },
   },
   {
-    id: "0005_add_timeline_call_fields",
+    id: "0005_add_contact_merge_decisions",
+    apply: (db) => {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS contact_merge_decisions (
+          id TEXT PRIMARY KEY,
+          decision_type TEXT NOT NULL,
+          primary_contact_id TEXT NOT NULL,
+          secondary_contact_id TEXT NOT NULL,
+          canonical_contact_id TEXT NOT NULL,
+          reason TEXT,
+          created_by TEXT,
+          created_at INTEGER NOT NULL
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_contact_merge_decisions_secondary
+        ON contact_merge_decisions(secondary_contact_id, created_at);
+
+        CREATE INDEX IF NOT EXISTS idx_contact_merge_decisions_canonical
+        ON contact_merge_decisions(canonical_contact_id, created_at);
+      `);
+    },
+  },
+  {
+    id: "0006_rename_contact_merge_columns",
+    apply: (db) => {
+      if (columnExists(db, "contact_merge_decisions", "left_contact_id")) {
+        db.exec(`
+          DROP INDEX IF EXISTS idx_contact_merge_decisions_right;
+          ALTER TABLE contact_merge_decisions RENAME COLUMN left_contact_id TO primary_contact_id;
+        `);
+      }
+      if (columnExists(db, "contact_merge_decisions", "right_contact_id")) {
+        db.exec(`
+          ALTER TABLE contact_merge_decisions RENAME COLUMN right_contact_id TO secondary_contact_id;
+        `);
+      }
+
+      db.exec(`
+        CREATE INDEX IF NOT EXISTS idx_contact_merge_decisions_secondary
+        ON contact_merge_decisions(secondary_contact_id, created_at);
+
+        CREATE INDEX IF NOT EXISTS idx_contact_merge_decisions_canonical
+        ON contact_merge_decisions(canonical_contact_id, created_at);
+      `);
+    },
+  },
+  {
+    id: "0007_add_timeline_call_fields",
     apply: (db) => {
       if (!tableExists(db, "timeline_events")) {
         return;

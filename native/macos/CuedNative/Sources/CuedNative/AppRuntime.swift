@@ -1674,7 +1674,10 @@ final class MenuBarAppController: NSObject, NSApplicationDelegate {
         continue
       }
       image.isTemplate = true
-      image.size = NSSize(width: 18, height: 18)
+      let targetHeight: CGFloat = 18
+      let sourceHeight = max(image.size.height, 1)
+      let scaledWidth = targetHeight * (image.size.width / sourceHeight)
+      image.size = NSSize(width: scaledWidth, height: targetHeight)
       return image
     }
 

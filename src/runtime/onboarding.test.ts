@@ -78,6 +78,12 @@ describe("onboarding snapshot", () => {
       "full_disk_access",
       "messages_automation",
     ]);
+    expect(snapshot.globalSkill).toEqual(
+      expect.objectContaining({
+        installed: expect.any(Boolean),
+        status: expect.any(String),
+      }),
+    );
     expect(snapshot.permissions.find((permission) => permission.key === "contacts")).toEqual(
       expect.objectContaining({
         status: process.platform === "darwin" ? "granted" : "unknown",
@@ -102,6 +108,38 @@ describe("onboarding snapshot", () => {
         }),
       ]),
     );
+    expect(snapshot.setupIntegrations.map((integration) => integration.platform)).toEqual([
+      "contacts",
+      "imessage",
+      "slack",
+      "linkedin",
+      "whatsapp",
+      "signal",
+    ]);
+
+    db.close();
+  });
+
+  it("ignores unsupported persisted integrations when building the snapshot", async () => {
+    const db = createDb();
+    db.upsertIntegrationState({
+      platform: "telegram" as never,
+      accountKey: "default",
+      displayName: "Telegram",
+      authState: "authenticated",
+      enabled: true,
+      connectionKind: "browser-session",
+      syncCapable: true,
+      launchStrategy: "chromium-auth",
+      launchTarget: "https://web.telegram.org",
+      importedFrom: "local-cli",
+    });
+
+    const snapshot = await buildOnboardingSnapshot(db);
+
+    expect(
+      snapshot.integrations.some((integration) => String(integration.platform) === "telegram"),
+    ).toBe(false);
     expect(snapshot.setupIntegrations.map((integration) => integration.platform)).toEqual([
       "contacts",
       "imessage",

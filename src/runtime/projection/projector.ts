@@ -51,6 +51,7 @@ type ProjectionMode = "realtime" | "deferred" | "rebuild";
 
 type ProjectionCache = {
   initialized: boolean;
+  contactMergeAliasMap: Map<string, string>;
   sourceContactMap: Map<string, string>;
   deterministicHandleMap: Map<string, string>;
   conversationMap: Map<string, string>;
@@ -329,6 +330,38 @@ function mergeObservedDisplayName(
   return normalizedIncoming;
 }
 
+function mergeAliasedDisplayName(
+  existingName: string | null | undefined,
+  incomingName: string | null | undefined,
+): string | null {
+  const normalizedExisting = normalizeText(existingName);
+  const normalizedIncoming = normalizeText(incomingName);
+  if (normalizedIncoming == null) {
+    return normalizedExisting;
+  }
+  if (normalizedExisting == null) {
+    return normalizedIncoming;
+  }
+  if (
+    isRawIdentifierDisplayName(normalizedExisting) &&
+    !isRawIdentifierDisplayName(normalizedIncoming)
+  ) {
+    return normalizedIncoming;
+  }
+  return normalizedExisting;
+}
+
+function mergeAliasedTextField(
+  existingValue: string | null | undefined,
+  incomingValue: string | null | undefined,
+): string | null {
+  const normalizedExisting = normalizeText(existingValue);
+  if (normalizedExisting != null) {
+    return normalizedExisting;
+  }
+  return normalizeText(incomingValue);
+}
+
 function nonEmptySql(value: SQL): SQL {
   return sql`NULLIF(TRIM(${value}), '')`;
 }
@@ -558,6 +591,7 @@ function sqlValueList(values: readonly (string | number)[]) {
 function createProjectionCache(): ProjectionCache {
   return {
     initialized: false,
+    contactMergeAliasMap: new Map<string, string>(),
     sourceContactMap: new Map<string, string>(),
     deterministicHandleMap: new Map<string, string>(),
     conversationMap: new Map<string, string>(),
@@ -567,21 +601,31 @@ function createProjectionCache(): ProjectionCache {
 }
 
 function hydrateProjectionCache(db: CuedDatabase, cache: ProjectionCache): void {
+  cache.contactMergeAliasMap.clear();
   cache.sourceContactMap.clear();
   cache.deterministicHandleMap.clear();
   cache.conversationMap.clear();
   cache.contactNameMap.clear();
   cache.conversationNameMap.clear();
 
+  for (const row of db.listContactMergeAliases()) {
+    cache.contactMergeAliasMap.set(row.contact_id, row.canonical_contact_id);
+  }
+
   for (const row of db.listProjectedContactSourceMap()) {
+    const canonicalContactId = resolveCanonicalContactId(cache, row.contact_id) ?? row.contact_id;
     cache.sourceContactMap.set(
       `${row.platform}:${row.account_key}:${row.source_entity_key}`,
-      row.contact_id,
+      canonicalContactId,
     );
   }
 
   for (const row of db.listDeterministicContactHandles()) {
-    cache.deterministicHandleMap.set(`${row.handle_type}:${row.normalized_value}`, row.contact_id);
+    const canonicalContactId = resolveCanonicalContactId(cache, row.contact_id) ?? row.contact_id;
+    cache.deterministicHandleMap.set(
+      `${row.handle_type}:${row.normalized_value}`,
+      canonicalContactId,
+    );
   }
 
   for (const row of db.listConversationMap()) {
@@ -619,6 +663,9 @@ function getProjectionCache(db: CuedDatabase): ProjectionCache {
 
 function resetProjectionCache(db: CuedDatabase): ProjectionCache {
   const cache = createProjectionCache();
+  for (const row of db.listContactMergeAliases()) {
+    cache.contactMergeAliasMap.set(row.contact_id, row.canonical_contact_id);
+  }
   cache.initialized = true;
   projectionCaches.set(db, cache);
   return cache;
@@ -701,6 +748,28 @@ function syncContactNameCache(
   }
 }
 
+function resolveCanonicalContactId(
+  cache: ProjectionCache,
+  contactId: string | null,
+): string | null {
+  if (!contactId) {
+    return null;
+  }
+
+  let current = contactId;
+  const seen = new Set<string>();
+  while (!seen.has(current)) {
+    seen.add(current);
+    const next = cache.contactMergeAliasMap.get(current);
+    if (!next || next === current) {
+      return current;
+    }
+    current = next;
+  }
+
+  throw new Error(`Manual contact merge alias cycle detected at ${current}`);
+}
+
 function syncConversationNameCache(
   conn: LocalDbExecutor,
   cache: ProjectionCache,
@@ -731,8 +800,13 @@ function ensureContactStub(
   }
 
   const sourceKey = `${platform}:${accountKey}:${sourceEntityKey}`;
-  const existingContactId = cache.sourceContactMap.get(sourceKey);
-  const contactId = existingContactId ?? hashId("contact", sourceKey);
+  const existingContactId = resolveCanonicalContactId(
+    cache,
+    cache.sourceContactMap.get(sourceKey) ?? null,
+  );
+  const contactId =
+    resolveCanonicalContactId(cache, existingContactId ?? hashId("contact", sourceKey)) ??
+    hashId("contact", sourceKey);
   cache.sourceContactMap.set(sourceKey, contactId);
   if (!cache.contactNameMap.has(contactId)) {
     cache.contactNameMap.set(contactId, null);
@@ -770,17 +844,23 @@ function resolveOrEnsureContact(
 
   const directKey = `${platform}:${accountKey}:${sourceEntityKey}`;
   const contactsLocalKey = `contacts:local:${sourceEntityKey}`;
-  const existingContactId =
-    cache.sourceContactMap.get(directKey) ?? cache.sourceContactMap.get(contactsLocalKey) ?? null;
+  const existingContactId = resolveCanonicalContactId(
+    cache,
+    cache.sourceContactMap.get(directKey) ?? cache.sourceContactMap.get(contactsLocalKey) ?? null,
+  );
   if (existingContactId) {
+    cache.sourceContactMap.set(directKey, existingContactId);
     return existingContactId;
   }
 
   const inferredHandle = inferHandleFromSourceEntityKey(sourceEntityKey);
   if (inferredHandle) {
     const handleContactId =
-      cache.deterministicHandleMap.get(
-        `${inferredHandle.type}:${inferredHandle.normalizedValue}`,
+      resolveCanonicalContactId(
+        cache,
+        cache.deterministicHandleMap.get(
+          `${inferredHandle.type}:${inferredHandle.normalizedValue}`,
+        ) ?? null,
       ) ?? null;
     if (handleContactId) {
       cache.sourceContactMap.set(directKey, handleContactId);
@@ -967,12 +1047,13 @@ function projectContactObservation(
   const preferredIdentity = deterministicHandles[0]
     ? `${deterministicHandles[0].type}:${deterministicHandles[0].normalizedValue}`
     : sourceKey;
-
-  const contactId =
+  const identityContactId =
     existingSourceContactId ??
     existingContactId ??
     existingAliasedContactId ??
     hashId("contact", preferredIdentity);
+  const contactId = resolveCanonicalContactId(cache, identityContactId)!;
+  const isAliasedObservation = identityContactId !== contactId;
   cache.sourceContactMap.set(sourceKey, contactId);
   for (const handle of deterministicHandles) {
     cache.deterministicHandleMap.set(`${handle.type}:${handle.normalizedValue}`, contactId);
@@ -993,6 +1074,16 @@ function projectContactObservation(
     .onConflictDoNothing()
     .run();
 
+  const existingContact = conn.get<{
+    name: string | null;
+    photo_url: string | null;
+    company: string | null;
+  }>(sql`
+    SELECT name, photo_url, company
+    FROM contacts
+    WHERE id = ${contactId}
+    LIMIT 1
+  `);
   const contactSet: {
     updatedAt: number;
     name?: string | null;
@@ -1001,20 +1092,25 @@ function projectContactObservation(
   } = {
     updatedAt: event.observed_at,
   };
-  const existingName = cache.contactNameMap.get(contactId) ?? null;
+  const existingName = existingContact?.name ?? cache.contactNameMap.get(contactId) ?? null;
   const incomingName = normalizeText(payload.fields.display_name);
-  const resolvedName =
-    payload.fields.display_name !== undefined
+  const resolvedName = isAliasedObservation
+    ? mergeAliasedDisplayName(existingName, incomingName)
+    : payload.fields.display_name !== undefined
       ? mergeObservedDisplayName(existingName, incomingName)
       : existingName;
   if (payload.fields.display_name !== undefined) {
     contactSet.name = resolvedName;
   }
   if (payload.fields.photo_url !== undefined) {
-    contactSet.photoUrl = normalizeText(payload.fields.photo_url);
+    contactSet.photoUrl = isAliasedObservation
+      ? mergeAliasedTextField(existingContact?.photo_url, payload.fields.photo_url)
+      : normalizeText(payload.fields.photo_url);
   }
   if (payload.fields.company !== undefined) {
-    contactSet.company = normalizeText(payload.fields.company);
+    contactSet.company = isAliasedObservation
+      ? mergeAliasedTextField(existingContact?.company, payload.fields.company)
+      : normalizeText(payload.fields.company);
   }
 
   cache.contactNameMap.set(contactId, resolvedName);
