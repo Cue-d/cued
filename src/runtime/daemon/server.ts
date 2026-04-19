@@ -2932,6 +2932,9 @@ export async function runDaemon(): Promise<void> {
       if (platform === "slack" && checkpoint?.source_cursor_json) {
         envOverrides.CUED_SLACK_SOURCE_CURSOR = checkpoint.source_cursor_json;
       }
+      if (platform === "discord" && checkpoint?.source_cursor_json) {
+        envOverrides.CUED_DISCORD_SOURCE_CURSOR = checkpoint.source_cursor_json;
+      }
       if (platform === "linkedin") {
         if (typeof sourceCursor?.lastSyncAt === "number") {
           envOverrides.CUED_LINKEDIN_LAST_SYNC_AT = String(sourceCursor.lastSyncAt);

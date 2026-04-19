@@ -60,11 +60,14 @@ export class DiscordApiClient {
 
   async listChannelMessages(
     channelId: string,
-    options: { after?: string | null; limit?: number } = {},
+    options: { after?: string | null; before?: string | null; limit?: number } = {},
   ): Promise<DiscordMessage[]> {
     const query = new URLSearchParams();
     if (options.after) {
       query.set("after", options.after);
+    }
+    if (options.before) {
+      query.set("before", options.before);
     }
     if (options.limit) {
       query.set("limit", String(options.limit));
