@@ -2072,7 +2072,10 @@ describe("projector", () => {
       dedupeKey: "contacts:ava-primary",
       payload: {
         sourceEntityKey: "contacts:ava-primary",
-        fields: { display_name: "Ava Chen" },
+        fields: {
+          display_name: "Ava Chen",
+          company: "Prime Ventures",
+        },
         handles: [{ type: "phone", value: "+1 (555) 123-4567", deterministic: true }],
       },
       sourceVersion: "contacts-v1",
@@ -2088,7 +2091,11 @@ describe("projector", () => {
       payload: {
         sourceEntityKey: "linkedin:ava-duplicate",
         sourceProfileUrl: "https://www.linkedin.com/in/ava-chen/",
-        fields: { display_name: "Ava Chen", company: "Acme Ventures" },
+        fields: {
+          display_name: "Ava Chen",
+          company: "Acme Ventures",
+          photo_url: "https://example.com/linkedin-ava.jpg",
+        },
         handles: [{ type: "linkedin", value: "urn:li:person:ava-chen", deterministic: true }],
       },
       sourceVersion: "linkedin-v1",
@@ -2176,6 +2183,16 @@ describe("projector", () => {
         WHERE contact_id = ${primaryContactId}
       `),
     ).toEqual({ count: 2 });
+    expect(
+      db.orm().get<{ company: string | null; photo_url: string | null }>(sql`
+        SELECT company, photo_url
+        FROM contacts
+        WHERE id = ${primaryContactId}
+      `),
+    ).toEqual({
+      company: "Prime Ventures",
+      photo_url: "https://example.com/linkedin-ava.jpg",
+    });
     expect(
       db.orm().get<{ sender_contact_id: string | null }>(sql`
         SELECT sender_contact_id

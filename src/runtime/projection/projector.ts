@@ -249,6 +249,38 @@ function mergeObservedDisplayName(
   return normalizedIncoming;
 }
 
+function mergeAliasedDisplayName(
+  existingName: string | null | undefined,
+  incomingName: string | null | undefined,
+): string | null {
+  const normalizedExisting = normalizeText(existingName);
+  const normalizedIncoming = normalizeText(incomingName);
+  if (normalizedIncoming == null) {
+    return normalizedExisting;
+  }
+  if (normalizedExisting == null) {
+    return normalizedIncoming;
+  }
+  if (
+    isRawIdentifierDisplayName(normalizedExisting) &&
+    !isRawIdentifierDisplayName(normalizedIncoming)
+  ) {
+    return normalizedIncoming;
+  }
+  return normalizedExisting;
+}
+
+function mergeAliasedTextField(
+  existingValue: string | null | undefined,
+  incomingValue: string | null | undefined,
+): string | null {
+  const normalizedExisting = normalizeText(existingValue);
+  if (normalizedExisting != null) {
+    return normalizedExisting;
+  }
+  return normalizeText(incomingValue);
+}
+
 function nonEmptySql(value: SQL): SQL {
   return sql`NULLIF(TRIM(${value}), '')`;
 }
@@ -934,14 +966,13 @@ function projectContactObservation(
   const preferredIdentity = deterministicHandles[0]
     ? `${deterministicHandles[0].type}:${deterministicHandles[0].normalizedValue}`
     : sourceKey;
-
-  const contactId = resolveCanonicalContactId(
-    cache,
+  const identityContactId =
     existingSourceContactId ??
-      existingContactId ??
-      existingAliasedContactId ??
-      hashId("contact", preferredIdentity),
-  )!;
+    existingContactId ??
+    existingAliasedContactId ??
+    hashId("contact", preferredIdentity);
+  const contactId = resolveCanonicalContactId(cache, identityContactId)!;
+  const isAliasedObservation = identityContactId !== contactId;
   cache.sourceContactMap.set(sourceKey, contactId);
   for (const handle of deterministicHandles) {
     cache.deterministicHandleMap.set(`${handle.type}:${handle.normalizedValue}`, contactId);
@@ -962,6 +993,16 @@ function projectContactObservation(
     .onConflictDoNothing()
     .run();
 
+  const existingContact = conn.get<{
+    name: string | null;
+    photo_url: string | null;
+    company: string | null;
+  }>(sql`
+    SELECT name, photo_url, company
+    FROM contacts
+    WHERE id = ${contactId}
+    LIMIT 1
+  `);
   const contactSet: {
     updatedAt: number;
     name?: string | null;
@@ -970,20 +1011,25 @@ function projectContactObservation(
   } = {
     updatedAt: event.observed_at,
   };
-  const existingName = cache.contactNameMap.get(contactId) ?? null;
+  const existingName = existingContact?.name ?? cache.contactNameMap.get(contactId) ?? null;
   const incomingName = normalizeText(payload.fields.display_name);
-  const resolvedName =
-    payload.fields.display_name !== undefined
+  const resolvedName = isAliasedObservation
+    ? mergeAliasedDisplayName(existingName, incomingName)
+    : payload.fields.display_name !== undefined
       ? mergeObservedDisplayName(existingName, incomingName)
       : existingName;
   if (payload.fields.display_name !== undefined) {
     contactSet.name = resolvedName;
   }
   if (payload.fields.photo_url !== undefined) {
-    contactSet.photoUrl = normalizeText(payload.fields.photo_url);
+    contactSet.photoUrl = isAliasedObservation
+      ? mergeAliasedTextField(existingContact?.photo_url, payload.fields.photo_url)
+      : normalizeText(payload.fields.photo_url);
   }
   if (payload.fields.company !== undefined) {
-    contactSet.company = normalizeText(payload.fields.company);
+    contactSet.company = isAliasedObservation
+      ? mergeAliasedTextField(existingContact?.company, payload.fields.company)
+      : normalizeText(payload.fields.company);
   }
 
   cache.contactNameMap.set(contactId, resolvedName);
