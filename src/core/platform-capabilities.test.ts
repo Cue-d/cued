@@ -1,8 +1,23 @@
-import { describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { getPlatformFeatureSupport } from "../platforms/core/types.js";
 import { summarizePlatformCapability } from "./platform-capabilities.js";
 
+const inspectSlackHelperMock = vi.fn();
+
+vi.mock("../platforms/slack/helper/binary.js", () => ({
+  inspectSlackHelper: () => inspectSlackHelperMock(),
+}));
+
 describe("platform capability resolver", () => {
+  beforeEach(() => {
+    inspectSlackHelperMock.mockReturnValue({
+      helperPath: "/tmp/cued-slack-helper",
+      version: "0.1.0",
+      protocolVersion: 1,
+      versionSupported: true,
+    });
+  });
+
   it("marks macOS-only connectors unsupported on non-macOS hosts", () => {
     expect(summarizePlatformCapability("imessage", null, "windows")).toEqual(
       expect.objectContaining({
@@ -54,6 +69,31 @@ describe("platform capability resolver", () => {
       expect.objectContaining({
         availability: "available",
         supportsMultipleAccounts: true,
+      }),
+    );
+  });
+
+  it("marks Slack as helper-gated when the bundled helper is unavailable", () => {
+    inspectSlackHelperMock.mockReturnValue({
+      helperPath: null,
+      version: null,
+      protocolVersion: null,
+      versionSupported: false,
+    });
+
+    expect(
+      summarizePlatformCapability(
+        "slack",
+        {
+          platform: "slack",
+          authState: "authenticated",
+        },
+        "macos",
+      ),
+    ).toEqual(
+      expect.objectContaining({
+        availability: "requires_helper",
+        helperRequirements: ["slack_helper"],
       }),
     );
   });
