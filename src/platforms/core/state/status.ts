@@ -327,6 +327,7 @@ export function summarizeIntegrationStates(
       "integration_states.artifact_paths_json",
     ),
     metadata: safeParseJsonRecord(row.metadata_json, "integration_states.metadata_json"),
+    projectionStats: db.getIntegrationProjectionStats(row.platform, row.account_key),
     lastSeenAt: row.last_seen_at,
     updatedAt: row.updated_at,
     latestAuthSessionId: db.getLatestAuthSession(row.platform, row.account_key)?.id ?? null,
@@ -357,6 +358,7 @@ export function summarizeManagedIntegrationState(
     importedFrom: integration.importedFrom,
     artifactPaths: integration.artifactPaths ?? [],
     metadata: integration.metadata ?? null,
+    projectionStats: db.getIntegrationProjectionStats(integration.platform, integration.accountKey),
     lastSeenAt: now(),
     updatedAt: now(),
     latestAuthSessionId:

@@ -1139,6 +1139,62 @@ export class CuedDatabase {
     };
   }
 
+  getIntegrationProjectionStats(
+    platform: Platform,
+    accountKey: string,
+  ): {
+    rawEvents: number;
+    rawEventsBySchema: Record<string, number>;
+    projectedContacts: number;
+    projectedConversations: number;
+    projectedMessages: number;
+  } {
+    const rawEventRows = this.sqlite
+      .prepare(
+        `
+        SELECT
+          COALESCE(normalized_schema, entity_kind || '.' || event_kind) AS schema_key,
+          COUNT(*) AS count
+        FROM raw_events
+        WHERE platform = ? AND account_key = ?
+        GROUP BY schema_key
+        ORDER BY count DESC, schema_key ASC
+      `,
+      )
+      .all(platform, accountKey) as Array<{
+      schema_key: string | null;
+      count: number | null;
+    }>;
+    const projectedCounts = this.sqlite
+      .prepare(
+        `
+        SELECT
+          (SELECT COUNT(*) FROM contact_sources WHERE platform = ? AND account_key = ?) AS projected_contacts,
+          (SELECT COUNT(*) FROM conversations WHERE platform = ? AND account_key = ?) AS projected_conversations,
+          (SELECT COUNT(*) FROM messages WHERE platform = ? AND account_key = ?) AS projected_messages
+      `,
+      )
+      .get(platform, accountKey, platform, accountKey, platform, accountKey) as {
+      projected_contacts: number | null;
+      projected_conversations: number | null;
+      projected_messages: number | null;
+    };
+
+    const rawEventsBySchema = Object.fromEntries(
+      rawEventRows
+        .filter((row) => typeof row.schema_key === "string" && row.schema_key.length > 0)
+        .map((row) => [row.schema_key!, Number(row.count ?? 0)]),
+    );
+
+    return {
+      rawEvents: rawEventRows.reduce((total, row) => total + Number(row.count ?? 0), 0),
+      rawEventsBySchema,
+      projectedContacts: Number(projectedCounts.projected_contacts ?? 0),
+      projectedConversations: Number(projectedCounts.projected_conversations ?? 0),
+      projectedMessages: Number(projectedCounts.projected_messages ?? 0),
+    };
+  }
+
   listIntegrationStates(): IntegrationStateRow[] {
     const rows = this.db
       .select({

@@ -5,6 +5,10 @@ import Database from "better-sqlite3";
 import { afterEach, describe, expect, it } from "vitest";
 import { resolveHostOS } from "../../../core/platform-capabilities.js";
 import { CuedDatabase } from "../../../db/database.js";
+import {
+  buildDiscordContactEvent,
+  buildDiscordConversationEvent,
+} from "../../discord/sync/events.js";
 import { refreshLocalIntegrationStates } from "./local-refresh.js";
 import {
   completeAuthSession,
@@ -292,6 +296,63 @@ exit 1
         lastAuthError: null,
       }),
     );
+
+    db.close();
+  });
+
+  it("includes projection stats in integration status", () => {
+    const db = createDb();
+    const requested = requestIntegrationAccess(db, "discord");
+    const currentUser = {
+      id: "u-self",
+      username: "theo",
+      global_name: "Theo",
+    };
+
+    db.insertRawEvents([
+      buildDiscordContactEvent({
+        accountKey: requested.integration.accountKey,
+        observedAt: 1_710_000_000_000,
+        user: {
+          id: "u-peer",
+          username: "ava",
+          global_name: "Ava",
+        },
+      }),
+      buildDiscordConversationEvent({
+        accountKey: requested.integration.accountKey,
+        observedAt: 1_710_000_000_000,
+        channel: {
+          id: "dm-1",
+          type: 1,
+          recipients: [
+            {
+              id: "u-peer",
+              username: "ava",
+              global_name: "Ava",
+            },
+          ],
+          last_message_id: "100",
+        },
+        currentUser,
+        guildNameById: new Map(),
+      }),
+    ]);
+
+    const integration = buildIntegrationStatus(db).integrations.find(
+      (entry) => entry.platform === "discord",
+    );
+
+    expect(integration?.projectionStats).toEqual({
+      rawEvents: 2,
+      rawEventsBySchema: {
+        "contact.observed@1": 1,
+        "conversation.observed@1": 1,
+      },
+      projectedContacts: 0,
+      projectedConversations: 0,
+      projectedMessages: 0,
+    });
 
     db.close();
   });
