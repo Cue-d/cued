@@ -23,6 +23,13 @@ export interface IntegrationStateSummary {
   importedFrom: string | null;
   artifactPaths: string[];
   metadata: Record<string, unknown> | null;
+  projectionStats: {
+    rawEvents: number;
+    rawEventsBySchema: Record<string, number>;
+    projectedContacts: number;
+    projectedConversations: number;
+    projectedMessages: number;
+  };
   lastSeenAt: number;
   updatedAt: number;
   latestAuthSessionId: string | null;

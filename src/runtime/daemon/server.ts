@@ -434,6 +434,29 @@ function withRawEventAcquisitionMode(
   }));
 }
 
+function summarizeRawEventsBySchema(
+  rawEvents: ProviderRawEventInput[],
+): Record<string, number> | undefined {
+  if (rawEvents.length === 0) {
+    return undefined;
+  }
+
+  const entries = new Map<string, number>();
+  for (const rawEvent of rawEvents) {
+    const key =
+      typeof rawEvent.normalizedSchema === "string" && rawEvent.normalizedSchema.length > 0
+        ? rawEvent.normalizedSchema
+        : `${rawEvent.entityKind}.${rawEvent.eventKind}`;
+    entries.set(key, (entries.get(key) ?? 0) + 1);
+  }
+
+  return Object.fromEntries(
+    [...entries.entries()].sort((left, right) =>
+      left[0] === right[0] ? 0 : left[0] < right[0] ? -1 : 1,
+    ),
+  );
+}
+
 async function safeEmitHookEvent(
   event:
     | "integration.authenticated"
@@ -3150,6 +3173,7 @@ export async function runDaemon(): Promise<void> {
         platform,
         accountKey,
         insertedRawEvents: insertResult.insertedCount,
+        insertedRawEventSchemas: summarizeRawEventsBySchema(insertResult.insertedEvents),
         totalMs: timings.totalMs,
       });
     } catch (error) {
