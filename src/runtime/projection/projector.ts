@@ -171,7 +171,7 @@ function humanizeCallProvider(provider: string): string {
     case "linkedin":
       return "LinkedIn";
     default:
-      return "Call";
+      return "";
   }
 }
 
@@ -205,7 +205,10 @@ function formatCallDuration(durationSeconds: number): string {
 function buildCallSummary(payload: CallPayload): string {
   const provider = humanizeCallProvider(payload.provider);
   const mediumSuffix = humanizeCallMedium(payload.medium);
-  const base = `${provider}${mediumSuffix} call`;
+  let base = `${provider}${mediumSuffix} call`.trim();
+  if (provider.length === 0 && base.length > 0) {
+    base = `${base.charAt(0).toUpperCase()}${base.slice(1)}`;
+  }
   switch (payload.status) {
     case "missed":
       return `Missed ${base}`;
