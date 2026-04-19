@@ -175,6 +175,82 @@ describe("imessage worker loader resolution", () => {
     return dbPath;
   }
 
+  function createSyntheticCallHistoryDb(
+    calls: Array<{
+      pk: number;
+      uniqueId: string;
+      dateValue: number;
+      durationSeconds: number;
+      address: string | null;
+      name?: string | null;
+      serviceProvider?: string | null;
+      callType?: number | null;
+      originated?: number | null;
+      answered?: number | null;
+      disconnectedCause?: number | null;
+    }> = [],
+  ): string {
+    const dir = createTempDir("cued-callhistory-db-");
+    const dbPath = join(dir, "CallHistory.storedata");
+    const db = new DatabaseSync(dbPath);
+    db.exec(`
+      CREATE TABLE ZCALLRECORD (
+        Z_PK INTEGER PRIMARY KEY,
+        ZUNIQUE_ID TEXT,
+        ZDATE REAL,
+        ZDURATION REAL,
+        ZADDRESS TEXT,
+        ZNAME TEXT,
+        ZSERVICE_PROVIDER TEXT,
+        ZCALLTYPE INTEGER,
+        ZORIGINATED INTEGER,
+        ZANSWERED INTEGER,
+        ZDISCONNECTED_CAUSE INTEGER,
+        ZHANDLE_TYPE INTEGER,
+        ZCALL_CATEGORY INTEGER
+      );
+    `);
+
+    const insertCall = db.prepare(`
+      INSERT INTO ZCALLRECORD (
+        Z_PK,
+        ZUNIQUE_ID,
+        ZDATE,
+        ZDURATION,
+        ZADDRESS,
+        ZNAME,
+        ZSERVICE_PROVIDER,
+        ZCALLTYPE,
+        ZORIGINATED,
+        ZANSWERED,
+        ZDISCONNECTED_CAUSE,
+        ZHANDLE_TYPE,
+        ZCALL_CATEGORY
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `);
+
+    for (const call of calls) {
+      insertCall.run(
+        call.pk,
+        call.uniqueId,
+        call.dateValue,
+        call.durationSeconds,
+        call.address,
+        call.name ?? null,
+        call.serviceProvider ?? "com.apple.Telephony",
+        call.callType ?? 1,
+        call.originated ?? 0,
+        call.answered ?? 0,
+        call.disconnectedCause ?? null,
+        2,
+        1,
+      );
+    }
+
+    db.close();
+    return dbPath;
+  }
+
   it("prefers explicit native binary overrides", () => {
     expect(
       resolveIMessageLoader(
@@ -206,21 +282,24 @@ describe("imessage worker loader resolution", () => {
 
   it("marks multi-page initial syncs as full until the final page", () => {
     const chatDbPath = createSyntheticChatDb(650);
+    const callHistoryPath = createSyntheticCallHistoryDb();
     const repoRoot = createTempDir("cued-imessage-repo-");
     const env = { CUED_IMESSAGE_DB_PATH: chatDbPath };
 
     const first = buildIMessageSyncBundle({
       path: chatDbPath,
+      callHistoryPath,
       limit: 500,
       env,
       repoRoot,
     });
     expect(first.hasMore).toBe(true);
     expect(first.syncMode).toBe("full");
-    expect(first.sourceCursor).toEqual({ rowId: 500 });
+    expect(first.sourceCursor).toEqual({ rowId: 500, callPk: 0 });
 
     const second = buildIMessageSyncBundle({
       path: chatDbPath,
+      callHistoryPath,
       lastRowId: 500,
       limit: 500,
       env,
@@ -228,26 +307,29 @@ describe("imessage worker loader resolution", () => {
     });
     expect(second.hasMore).toBe(false);
     expect(second.syncMode).toBe("incremental");
-    expect(second.sourceCursor).toEqual({ rowId: 650 });
+    expect(second.sourceCursor).toEqual({ rowId: 650, callPk: 0 });
   });
 
   it("keeps paging when the fetched batch includes filtered tapback rows", () => {
     const chatDbPath = createSyntheticChatDb(650, { filteredRowIds: [500] });
+    const callHistoryPath = createSyntheticCallHistoryDb();
     const repoRoot = createTempDir("cued-imessage-repo-");
     const env = { CUED_IMESSAGE_DB_PATH: chatDbPath };
 
     const first = buildIMessageSyncBundle({
       path: chatDbPath,
+      callHistoryPath,
       limit: 500,
       env,
       repoRoot,
     });
     expect(first.rawEvents.some((event) => event.entityKind === "message")).toBe(true);
     expect(first.hasMore).toBe(true);
-    expect(first.sourceCursor).toEqual({ rowId: 500 });
+    expect(first.sourceCursor).toEqual({ rowId: 500, callPk: 0 });
 
     const second = buildIMessageSyncBundle({
       path: chatDbPath,
+      callHistoryPath,
       lastRowId: 500,
       limit: 500,
       env,
@@ -255,16 +337,18 @@ describe("imessage worker loader resolution", () => {
     });
     expect(second.hasMore).toBe(false);
     expect(second.syncMode).toBe("incremental");
-    expect(second.sourceCursor).toEqual({ rowId: 650 });
+    expect(second.sourceCursor).toEqual({ rowId: 650, callPk: 0 });
   });
 
   it("projects iMessage attachment metadata when the chat db has local attachment rows", () => {
     const chatDbPath = createSyntheticChatDb(1, { attachmentRowIds: [1] });
+    const callHistoryPath = createSyntheticCallHistoryDb();
     const repoRoot = createTempDir("cued-imessage-repo-");
     const env = { CUED_IMESSAGE_DB_PATH: chatDbPath };
 
     const bundle = buildIMessageSyncBundle({
       path: chatDbPath,
+      callHistoryPath,
       env,
       repoRoot,
     });
@@ -281,6 +365,82 @@ describe("imessage worker loader resolution", () => {
             access_kind: "local_path",
           }),
         ],
+      }),
+    );
+  });
+
+  it("projects local call history as call raw events and maps matching direct chats", () => {
+    const chatDbPath = createSyntheticChatDb(1);
+    const callHistoryPath = createSyntheticCallHistoryDb([
+      {
+        pk: 7,
+        uniqueId: "call-7",
+        dateValue: 10,
+        durationSeconds: 75,
+        address: "+14155550123",
+        serviceProvider: "com.apple.FaceTime",
+        callType: 8,
+        originated: 0,
+        answered: 1,
+      },
+    ]);
+    const repoRoot = createTempDir("cued-imessage-repo-");
+    const env = { CUED_IMESSAGE_DB_PATH: chatDbPath };
+
+    const bundle = buildIMessageSyncBundle({
+      path: chatDbPath,
+      callHistoryPath,
+      env,
+      repoRoot,
+    });
+
+    const callEvent = bundle.rawEvents.find((event) => event.entityKind === "call");
+    expect(callEvent?.payload).toEqual(
+      expect.objectContaining({
+        sourceCallKey: "call-7",
+        sourceConversationKey: "1",
+        provider: "facetime",
+        medium: "video",
+        status: "completed",
+        primaryRemoteSourceKey: "imessage:+14155550123",
+        durationSeconds: 75,
+      }),
+    );
+    expect(bundle.sourceCursor).toEqual({ rowId: 1, callPk: 7 });
+  });
+
+  it("keeps short unanswered outgoing calls as canceled instead of completed", () => {
+    const chatDbPath = createSyntheticChatDb(1);
+    const callHistoryPath = createSyntheticCallHistoryDb([
+      {
+        pk: 8,
+        uniqueId: "call-8",
+        dateValue: 12,
+        durationSeconds: 3,
+        address: "+14155550123",
+        serviceProvider: "com.apple.FaceTime",
+        callType: 8,
+        originated: 1,
+        answered: 0,
+      },
+    ]);
+    const repoRoot = createTempDir("cued-imessage-repo-");
+    const env = { CUED_IMESSAGE_DB_PATH: chatDbPath };
+
+    const bundle = buildIMessageSyncBundle({
+      path: chatDbPath,
+      callHistoryPath,
+      env,
+      repoRoot,
+    });
+
+    const callEvent = bundle.rawEvents.find((event) => event.entityKind === "call");
+    expect(callEvent?.payload).toEqual(
+      expect.objectContaining({
+        sourceCallKey: "call-8",
+        status: "canceled",
+        direction: "outgoing",
+        durationSeconds: 3,
       }),
     );
   });

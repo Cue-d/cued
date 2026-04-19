@@ -844,6 +844,15 @@ describe("CuedDatabase", () => {
     expect(conversationColumns).toContain("is_active");
     expect(conversationColumns).toContain("removal_reason");
     expect(timelineColumns).toContain("subject_source_key");
+    expect(timelineColumns).toContain("system_kind");
+    expect(timelineColumns).toContain("call_provider");
+    expect(timelineColumns).toContain("call_direction");
+    expect(timelineColumns).toContain("call_status");
+    expect(timelineColumns).toContain("call_medium");
+    expect(timelineColumns).toContain("call_started_at");
+    expect(timelineColumns).toContain("call_duration_seconds");
+    expect(timelineColumns).toContain("call_ended_at");
+    expect(timelineColumns).toContain("call_disconnected_cause");
     expect(
       sql
         .prepare("SELECT is_active, removal_reason FROM conversations WHERE id = ?")

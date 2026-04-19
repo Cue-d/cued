@@ -21,6 +21,7 @@ export type NormalizedProjectedRawEvent = {
 const CANONICAL_SCHEMA_REGISTRY = {
   contact: new Set(["observed"]),
   conversation: new Set(["observed", "removed"]),
+  call: new Set(["observed"]),
   message: new Set(["created", "updated", "deleted", "read_receipt"]),
   reaction: new Set(["added", "removed"]),
   participant: new Set(["joined", "left"]),
@@ -46,7 +47,7 @@ function parseNormalizedSchema(schema: string): {
   eventKind: string;
 } {
   const match =
-    /^(contact|conversation|message|reaction|participant|timeline_event)\.([a-z_]+)@1$/.exec(
+    /^(contact|conversation|call|message|reaction|participant|timeline_event)\.([a-z_]+)@1$/.exec(
       schema,
     );
   if (!match) {

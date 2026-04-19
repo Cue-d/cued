@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { eq, type SQL, sql } from "drizzle-orm";
 import type {
+  CallPayload,
   ContactObservationPayload,
   ConversationObservationPayload,
   MessagePayload,
@@ -145,6 +146,86 @@ function inferHandleFromSourceEntityKey(
     type,
     normalizedValue: normalizeHandle(type, identifier),
   };
+}
+
+function inferTimelineSystemKind(payload: TimelineEventPayload): string {
+  const systemKind = payload.metadata?.systemKind;
+  return typeof systemKind === "string" && systemKind.trim().length > 0
+    ? systemKind.trim()
+    : "provider_notice";
+}
+
+function humanizeCallProvider(provider: string): string {
+  switch (provider) {
+    case "telephony":
+      return "Phone";
+    case "facetime":
+      return "FaceTime";
+    case "whatsapp":
+      return "WhatsApp";
+    case "signal":
+      return "Signal";
+    case "slack":
+      return "Slack";
+    case "linkedin":
+      return "LinkedIn";
+    default:
+      return "Call";
+  }
+}
+
+function humanizeCallMedium(medium: string): string {
+  switch (medium) {
+    case "audio":
+      return "";
+    case "video":
+      return " video";
+    case "screen_share":
+      return " screen share";
+    default:
+      return "";
+  }
+}
+
+function formatCallDuration(durationSeconds: number): string {
+  if (durationSeconds < 60) {
+    return `${durationSeconds}s`;
+  }
+  const minutes = Math.floor(durationSeconds / 60);
+  const seconds = durationSeconds % 60;
+  if (minutes < 60) {
+    return seconds > 0 ? `${minutes}m ${seconds}s` : `${minutes}m`;
+  }
+  const hours = Math.floor(minutes / 60);
+  const remainingMinutes = minutes % 60;
+  return remainingMinutes > 0 ? `${hours}h ${remainingMinutes}m` : `${hours}h`;
+}
+
+function buildCallSummary(payload: CallPayload): string {
+  const provider = humanizeCallProvider(payload.provider);
+  const mediumSuffix = humanizeCallMedium(payload.medium);
+  const base = `${provider}${mediumSuffix} call`;
+  switch (payload.status) {
+    case "missed":
+      return `Missed ${base}`;
+    case "declined":
+      return `Declined ${base}`;
+    case "canceled":
+      return `Canceled ${base}`;
+    case "blocked":
+      return `Blocked ${base}`;
+    case "failed":
+      return `Failed ${base}`;
+    case "ongoing":
+      return `Ongoing ${base}`;
+    case "completed":
+      if (typeof payload.durationSeconds === "number" && payload.durationSeconds > 0) {
+        return `${base} • ${formatCallDuration(payload.durationSeconds)}`;
+      }
+      return base;
+    default:
+      return base;
+  }
 }
 
 function findProjectedContactIdBySourceKey(
@@ -1460,6 +1541,15 @@ function projectTimelineEvent(
       subjectSourceKey: payload.subjectSourceKey ?? null,
       eventAt: payload.eventAt,
       text: normalizeText(payload.text ?? null),
+      systemKind: inferTimelineSystemKind(payload),
+      callProvider: null,
+      callDirection: null,
+      callStatus: null,
+      callMedium: null,
+      callStartedAt: null,
+      callEndedAt: null,
+      callDurationSeconds: null,
+      callDisconnectedCause: null,
       metadataJson: payload.metadata ? JSON.stringify(payload.metadata) : null,
       createdAt: event.observed_at,
       updatedAt: event.observed_at,
@@ -1474,7 +1564,118 @@ function projectTimelineEvent(
         subjectSourceKey: payload.subjectSourceKey ?? null,
         eventAt: payload.eventAt,
         text: normalizeText(payload.text ?? null),
+        systemKind: inferTimelineSystemKind(payload),
+        callProvider: null,
+        callDirection: null,
+        callStatus: null,
+        callMedium: null,
+        callStartedAt: null,
+        callEndedAt: null,
+        callDurationSeconds: null,
+        callDisconnectedCause: null,
         metadataJson: payload.metadata ? JSON.stringify(payload.metadata) : null,
+        updatedAt: event.observed_at,
+      },
+    })
+    .run();
+
+  changes.dirtyConversationIds.add(conversationId);
+}
+
+function projectCallEvent(
+  conn: LocalDbExecutor,
+  cache: ProjectionCache,
+  changes: ProjectionChangeSet,
+  event: ProjectableRawEvent,
+): void {
+  const payload = JSON.parse(event.payload_json) as CallPayload;
+  const conversationId = ensureConversationStub(
+    conn,
+    cache,
+    event.platform,
+    event.account_key,
+    payload.sourceConversationKey,
+    event.observed_at,
+  );
+  const actorContactId = resolveOrEnsureContact(
+    conn,
+    cache,
+    event.platform,
+    event.account_key,
+    payload.initiatorSourceKey,
+    event.observed_at,
+  );
+  const subjectContactId = resolveOrEnsureContact(
+    conn,
+    cache,
+    event.platform,
+    event.account_key,
+    payload.primaryRemoteSourceKey,
+    event.observed_at,
+  );
+
+  const metadata = {
+    ...(payload.metadata ?? {}),
+    providerCallType: payload.providerCallType ?? null,
+    answeredAt: payload.answeredAt ?? null,
+    endedAt: payload.endedAt ?? null,
+    disconnectedCause: payload.disconnectedCause ?? null,
+    remoteAddress: payload.remoteAddress ?? null,
+    remoteDisplayName: payload.remoteDisplayName ?? null,
+  };
+
+  conn
+    .insert(timelineEvents)
+    .values({
+      id: hashId(
+        "timeline_event",
+        `${event.platform}:${event.account_key}:${payload.sourceCallKey}`,
+      ),
+      platform: event.platform,
+      accountKey: event.account_key,
+      conversationId,
+      sourceEventKey: payload.sourceCallKey,
+      eventKind: "system_message",
+      actorContactId,
+      actorSourceKey: payload.initiatorSourceKey ?? null,
+      actorName: actorContactId ? (cache.contactNameMap.get(actorContactId) ?? null) : null,
+      subjectContactId,
+      subjectSourceKey: payload.primaryRemoteSourceKey ?? null,
+      eventAt: payload.startedAt,
+      text: buildCallSummary(payload),
+      systemKind: "call",
+      callProvider: payload.provider,
+      callDirection: payload.direction,
+      callStatus: payload.status,
+      callMedium: payload.medium,
+      callStartedAt: payload.startedAt,
+      callEndedAt: payload.endedAt ?? null,
+      callDurationSeconds: payload.durationSeconds ?? null,
+      callDisconnectedCause: payload.disconnectedCause ?? null,
+      metadataJson: JSON.stringify(metadata),
+      createdAt: event.observed_at,
+      updatedAt: event.observed_at,
+    })
+    .onConflictDoUpdate({
+      target: timelineEvents.id,
+      set: {
+        actorContactId,
+        actorSourceKey: payload.initiatorSourceKey ?? null,
+        actorName: actorContactId ? (cache.contactNameMap.get(actorContactId) ?? null) : null,
+        subjectContactId,
+        subjectSourceKey: payload.primaryRemoteSourceKey ?? null,
+        eventAt: payload.startedAt,
+        text: buildCallSummary(payload),
+        systemKind: "call",
+        callProvider: payload.provider,
+        callDirection: payload.direction,
+        callStatus: payload.status,
+        callMedium: payload.medium,
+        callStartedAt: payload.startedAt,
+        callEndedAt: payload.endedAt ?? null,
+        callDurationSeconds: payload.durationSeconds ?? null,
+        callDisconnectedCause: payload.disconnectedCause ?? null,
+        metadataJson: JSON.stringify(metadata),
         updatedAt: event.observed_at,
       },
     })
@@ -2025,6 +2226,10 @@ function projectEventBatch(
       }
       if (shapedEvent.entity_kind === "conversation") {
         projectConversationObservation(tx, cache, changes, shapedEvent);
+        continue;
+      }
+      if (shapedEvent.entity_kind === "call") {
+        projectCallEvent(tx, cache, changes, shapedEvent);
         continue;
       }
       if (shapedEvent.entity_kind === "message") {

@@ -1,6 +1,7 @@
 import { createRequire } from "node:module";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import { normalizePhone, toE164 } from "../../core/utils/phone.js";
 import { extractTextFromAttributedBody } from "./attributed-body.js";
 import { normalizeChatDbHandleIdentifier } from "./handle-normalization.js";
 import type {
@@ -107,6 +108,34 @@ function getMessageText(text: string | null, attributedBody: Uint8Array | null):
   return text;
 }
 
+function buildHandleCandidates(identifier: string): string[] {
+  const trimmed = identifier.trim();
+  if (trimmed.length === 0) {
+    return [];
+  }
+  if (trimmed.includes("@")) {
+    return [trimmed.toLowerCase()];
+  }
+
+  const candidates = new Set<string>();
+  const normalized = normalizePhone(trimmed);
+  const e164 = toE164(trimmed);
+  candidates.add(trimmed);
+  if (normalized) {
+    candidates.add(normalized);
+    if (!normalized.startsWith("+")) {
+      candidates.add(`+${normalized}`);
+    }
+    if (normalized.length === 10) {
+      candidates.add(`+1${normalized}`);
+    }
+  }
+  if (e164) {
+    candidates.add(e164);
+  }
+  return [...candidates].filter((candidate) => candidate.length > 0);
+}
+
 export class IMessageReader {
   private readonly db: import("node:sqlite").DatabaseSync;
 
@@ -125,6 +154,42 @@ export class IMessageReader {
         }
       | undefined;
     return row?.max_rowid ?? 0;
+  }
+
+  findDirectChatIdByHandleIdentifier(identifier: string): number | null {
+    return this.findDirectChatIdByHandleCandidates(buildHandleCandidates(identifier));
+  }
+
+  findDirectChatIdByHandleCandidates(candidates: string[]): number | null {
+    if (candidates.length === 0) {
+      return null;
+    }
+
+    const row = this.db
+      .prepare(
+        `
+      WITH requested_handles AS (
+        SELECT LOWER(value) AS candidate
+        FROM json_each(?)
+      )
+      SELECT c.ROWID AS chat_id
+      FROM chat c
+      JOIN chat_handle_join chj ON chj.chat_id = c.ROWID
+      JOIN handle h ON h.ROWID = chj.handle_id
+      WHERE LOWER(h.id) IN (SELECT candidate FROM requested_handles)
+        AND NOT EXISTS (
+          SELECT 1
+          FROM chat_handle_join other
+          WHERE other.chat_id = c.ROWID
+            AND other.handle_id <> h.ROWID
+        )
+      ORDER BY c.ROWID DESC
+      LIMIT 1
+    `,
+      )
+      .get(JSON.stringify(candidates)) as { chat_id: number | null } | undefined;
+
+    return row?.chat_id ?? null;
   }
 
   buildSyncBatch(lastRowid: number, limit = 500): ImsSyncBatch {

@@ -30,6 +30,7 @@ import { loadIntegrationSecret } from "../../platforms/core/secrets/keychain.js"
 import { refreshLocalIntegrationStates } from "../../platforms/core/state/local-refresh.js";
 import { refreshManagedIntegrationStates } from "../../platforms/core/state/refresh.js";
 import { getIntegrationSummary } from "../../platforms/core/state/status.js";
+import { DEFAULT_CALL_HISTORY_DB_PATH } from "../../platforms/imessage/call-history.js";
 import { DEFAULT_CHAT_DB_PATH } from "../../platforms/imessage/reader.js";
 import { loadLinkedInSessionSecret } from "../../platforms/linkedin/auth/session-store.js";
 import { buildLinkedInRawEventsFromRealtimeEnvelope } from "../../platforms/linkedin/realtime/events.js";
@@ -564,6 +565,71 @@ function startIMessageWatcher(
   }
 }
 
+function startCallHistoryWatcher(
+  _db: ReturnType<typeof openCuedDatabase>,
+  queueSync: (platform: AdapterPlatform, accountKey: string, trigger: string) => void,
+): FSWatcher | ChildProcess | null {
+  const nativeBinary = resolveMacOSNativeBinary(process.env.CUED_IMESSAGE_NATIVE_BINARY);
+  const dbPath = process.env.CUED_CALL_HISTORY_DB_PATH || DEFAULT_CALL_HISTORY_DB_PATH;
+  if (nativeBinary) {
+    const child = spawn(nativeBinary, ["callhistory", "watch", "--db-path", dbPath], {
+      stdio: ["ignore", "pipe", "pipe"],
+      env: process.env,
+    });
+
+    let stdoutBuffer = "";
+    child.stdout.on("data", (chunk) => {
+      stdoutBuffer += chunk.toString("utf8");
+      let newlineIndex = stdoutBuffer.indexOf("\n");
+      while (newlineIndex >= 0) {
+        const line = stdoutBuffer.slice(0, newlineIndex).trim();
+        stdoutBuffer = stdoutBuffer.slice(newlineIndex + 1);
+        if (line.length > 0) {
+          queueSync("imessage", "local", "native_watch:callhistory");
+        }
+        newlineIndex = stdoutBuffer.indexOf("\n");
+      }
+    });
+
+    child.stderr.on("data", (chunk) => {
+      const message = chunk.toString("utf8").trim();
+      if (message.length > 0) {
+        nativeWatchLogger.warn("callhistory watcher stderr", { message });
+      }
+    });
+
+    child.on("exit", (code) => {
+      if (code && code !== 0) {
+        nativeWatchLogger.warn("callhistory watcher exited", { code });
+      }
+    });
+
+    return child;
+  }
+
+  try {
+    const targetDir = dirname(dbPath);
+    const watchedNames = new Set([
+      basename(dbPath),
+      `${basename(dbPath)}-wal`,
+      `${basename(dbPath)}-shm`,
+    ]);
+
+    return watch(targetDir, (_eventType, filename) => {
+      if (!filename) {
+        return;
+      }
+      if (!watchedNames.has(filename.toString())) {
+        return;
+      }
+      queueSync("imessage", "local", "native_watch:callhistory");
+    });
+  } catch (error) {
+    nativeWatchLogger.warn("callhistory watcher unavailable", error);
+    return null;
+  }
+}
+
 function startContactsWatcher(
   _db: ReturnType<typeof openCuedDatabase>,
   queueSync: (platform: AdapterPlatform, accountKey: string, trigger: string) => void,
@@ -1093,7 +1159,10 @@ export async function runDaemon(): Promise<void> {
   const pendingSignalSendEchoes = new Map<string, PendingSignalEcho[]>();
   const projectionMessageHooks = new ProjectionMessageHookBarrier();
   const suppressNextSignalReconnectSync = new Set<string>();
-  const nativeWatchers = new Map<"contacts" | "imessage", FSWatcher | ChildProcess>();
+  const nativeWatchers = new Map<
+    "contacts" | "imessage" | "callhistory",
+    FSWatcher | ChildProcess
+  >();
   let linkedInRealtimeReconcilePromise: Promise<void> | null = null;
   let linkedInRealtimeReconcileQueued = false;
   let slackRealtimeReconcilePromise: Promise<void> | null = null;
@@ -1996,9 +2065,10 @@ export async function runDaemon(): Promise<void> {
       return;
     }
 
-    const desiredPlatforms = (["imessage", "contacts"] as const).filter((platform) =>
-      shouldStartLocalWatcher(platform),
-    );
+    const desiredPlatforms = [
+      ...(shouldStartLocalWatcher("imessage") ? (["imessage", "callhistory"] as const) : []),
+      ...(shouldStartLocalWatcher("contacts") ? (["contacts"] as const) : []),
+    ];
 
     for (const [platform, watcher] of nativeWatchers.entries()) {
       if (desiredPlatforms.includes(platform)) {
@@ -2015,7 +2085,9 @@ export async function runDaemon(): Promise<void> {
       const watcher =
         platform === "imessage"
           ? startIMessageWatcher(db, queueDebouncedNativeSync)
-          : startContactsWatcher(db, queueDebouncedNativeSync);
+          : platform === "callhistory"
+            ? startCallHistoryWatcher(db, queueDebouncedNativeSync)
+            : startContactsWatcher(db, queueDebouncedNativeSync);
       if (watcher) {
         nativeWatchers.set(platform, watcher);
       }
@@ -2452,6 +2524,9 @@ export async function runDaemon(): Promise<void> {
       const envOverrides: Record<string, string> = {};
       if (platform === "imessage" && typeof sourceCursor?.rowId === "number") {
         envOverrides.CUED_IMESSAGE_LAST_ROWID = String(sourceCursor.rowId);
+      }
+      if (platform === "imessage" && checkpoint?.source_cursor_json) {
+        envOverrides.CUED_IMESSAGE_SOURCE_CURSOR = checkpoint.source_cursor_json;
       }
       if (platform === "slack" && typeof sourceCursor?.lastSyncAt === "number") {
         envOverrides.CUED_SLACK_LAST_SYNC_AT = String(sourceCursor.lastSyncAt);
