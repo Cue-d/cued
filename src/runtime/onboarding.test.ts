@@ -119,4 +119,36 @@ describe("onboarding snapshot", () => {
 
     db.close();
   });
+
+  it("ignores unsupported persisted integrations when building the snapshot", async () => {
+    const db = createDb();
+    db.upsertIntegrationState({
+      platform: "telegram" as never,
+      accountKey: "default",
+      displayName: "Telegram",
+      authState: "authenticated",
+      enabled: true,
+      connectionKind: "browser-session",
+      syncCapable: true,
+      launchStrategy: "chromium-auth",
+      launchTarget: "https://web.telegram.org",
+      importedFrom: "local-cli",
+    });
+
+    const snapshot = await buildOnboardingSnapshot(db);
+
+    expect(
+      snapshot.integrations.some((integration) => String(integration.platform) === "telegram"),
+    ).toBe(false);
+    expect(snapshot.setupIntegrations.map((integration) => integration.platform)).toEqual([
+      "contacts",
+      "imessage",
+      "slack",
+      "linkedin",
+      "whatsapp",
+      "signal",
+    ]);
+
+    db.close();
+  });
 });

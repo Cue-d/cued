@@ -68,6 +68,8 @@ final class OnboardingWindowController: NSWindowController {
       rootView: CuedOnboardingView(
         viewModel: viewModel,
         onRefresh: { [weak self] in self?.refresh() },
+        onGuidePermission: { [weak self] key in self?.guidePermission(key: key) },
+        onDismissPermissionGuide: { PermissionGuideAssistant.shared.dismiss() },
         onRequestPermission: { [weak self] flags in self?.requestPermission(flags: flags) },
         onInstallGlobalSkill: { [weak self] in self?.installGlobalSkill() },
         onEnableIntegration: { [weak self] platform, accountKey in
@@ -219,6 +221,13 @@ final class OnboardingWindowController: NSWindowController {
     )
   }
 
+  private func guidePermission(key: String) {
+    guard let panel = onboardingGuidePanel(for: key) else {
+      return
+    }
+    PermissionGuideAssistant.shared.present(panel: panel)
+  }
+
   private func enableIntegration(platform: String, accountKey: String) {
     runActions(argumentsList: [["integrations", "enable", platform, accountKey]])
   }
@@ -291,6 +300,7 @@ final class OnboardingWindowController: NSWindowController {
     pendingStatusRefreshTask = nil
     pendingPermissionRefreshTask?.cancel()
     pendingPermissionRefreshTask = nil
+    PermissionGuideAssistant.shared.dismiss()
     super.close()
   }
 
