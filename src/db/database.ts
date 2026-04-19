@@ -39,6 +39,7 @@ const {
   attachmentContent,
   appSettings,
   authSessions,
+  contactMergeDecisions,
   contactHandles,
   contactSources,
   contacts,
@@ -151,6 +152,17 @@ export interface SlackBackfillProofRow {
   replies_complete_at: number | null;
   last_observed_at: number;
   updated_at: number;
+}
+
+export interface ContactMergeDecisionRow {
+  id: string;
+  decision_type: string;
+  primary_contact_id: string;
+  secondary_contact_id: string;
+  canonical_contact_id: string;
+  reason: string | null;
+  created_by: string | null;
+  created_at: number;
 }
 
 function compareSlackTs(left: string | null | undefined, right: string | null | undefined): number {
@@ -516,6 +528,137 @@ export class CuedDatabase {
 
   orm(): LocalDrizzleDatabase {
     return this.db;
+  }
+
+  listContactMergeDecisions(): ContactMergeDecisionRow[] {
+    return this.db
+      .select({
+        id: contactMergeDecisions.id,
+        decision_type: contactMergeDecisions.decisionType,
+        primary_contact_id: contactMergeDecisions.primaryContactId,
+        secondary_contact_id: contactMergeDecisions.secondaryContactId,
+        canonical_contact_id: contactMergeDecisions.canonicalContactId,
+        reason: contactMergeDecisions.reason,
+        created_by: contactMergeDecisions.createdBy,
+        created_at: contactMergeDecisions.createdAt,
+      })
+      .from(contactMergeDecisions)
+      .orderBy(asc(contactMergeDecisions.createdAt), asc(contactMergeDecisions.id))
+      .all() as ContactMergeDecisionRow[];
+  }
+
+  listContactMergeAliases(): Array<{
+    contact_id: string;
+    canonical_contact_id: string;
+  }> {
+    return this.db
+      .select({
+        contact_id: contactMergeDecisions.secondaryContactId,
+        canonical_contact_id: contactMergeDecisions.canonicalContactId,
+      })
+      .from(contactMergeDecisions)
+      .where(eq(contactMergeDecisions.decisionType, "merge"))
+      .orderBy(asc(contactMergeDecisions.createdAt), asc(contactMergeDecisions.id))
+      .all() as Array<{
+      contact_id: string;
+      canonical_contact_id: string;
+    }>;
+  }
+
+  resolveCanonicalContactId(contactId: string): string {
+    const aliasMap = new Map(
+      this.listContactMergeAliases().map((row) => [row.contact_id, row.canonical_contact_id]),
+    );
+    const seen = new Set<string>();
+    let current = contactId;
+    while (!seen.has(current)) {
+      seen.add(current);
+      const next = aliasMap.get(current);
+      if (!next || next === current) {
+        return current;
+      }
+      current = next;
+    }
+    throw new Error(`Contact merge alias cycle detected at ${current}`);
+  }
+
+  recordContactMergeDecision(input: {
+    primaryContactId: string;
+    secondaryContactId: string;
+    reason?: string | null;
+    createdBy?: string | null;
+  }): {
+    decisionId: string;
+    primaryContactId: string;
+    secondaryContactId: string;
+    canonicalContactId: string;
+  } {
+    if (input.primaryContactId === input.secondaryContactId) {
+      throw new Error("Cannot merge a contact into itself");
+    }
+
+    const primary = this.sqlite
+      .prepare(
+        `
+        SELECT id
+        FROM contacts
+        WHERE id = ?
+        LIMIT 1
+      `,
+      )
+      .get(input.primaryContactId) as { id: string } | undefined;
+    if (!primary) {
+      throw new Error(`Primary contact not found: ${input.primaryContactId}`);
+    }
+
+    const secondary = this.sqlite
+      .prepare(
+        `
+        SELECT id
+        FROM contacts
+        WHERE id = ?
+        LIMIT 1
+      `,
+      )
+      .get(input.secondaryContactId) as { id: string } | undefined;
+    if (!secondary) {
+      throw new Error(`Secondary contact not found: ${input.secondaryContactId}`);
+    }
+
+    const canonicalPrimary = this.resolveCanonicalContactId(input.primaryContactId);
+    const canonicalSecondary = this.resolveCanonicalContactId(input.secondaryContactId);
+    if (canonicalPrimary === canonicalSecondary) {
+      throw new Error(
+        `Contacts already resolve to the same canonical contact: ${canonicalPrimary}`,
+      );
+    }
+
+    const decisionId = randomUUID();
+    return this.sqlite.transaction(() => {
+      this.db
+        .insert(contactMergeDecisions)
+        .values({
+          id: decisionId,
+          decisionType: "merge",
+          primaryContactId: canonicalPrimary,
+          secondaryContactId: canonicalSecondary,
+          canonicalContactId: canonicalPrimary,
+          reason: input.reason ?? null,
+          createdBy: input.createdBy ?? "cli",
+          createdAt: now(),
+        })
+        .run();
+
+      // Validate that the new alias graph remains acyclic before committing.
+      this.resolveCanonicalContactId(canonicalSecondary);
+
+      return {
+        decisionId,
+        primaryContactId: canonicalPrimary,
+        secondaryContactId: canonicalSecondary,
+        canonicalContactId: canonicalPrimary,
+      };
+    })();
   }
 
   listAppSettings(): AppSettingRow[] {
