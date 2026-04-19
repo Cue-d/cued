@@ -123,9 +123,11 @@ import {
 
 const DAEMON_VERSION = getCurrentAppVersion();
 const DEFAULT_AUTOSYNC_INTERVAL_MS = 60_000;
+const DEFAULT_DISCORD_AUTOSYNC_INTERVAL_MS = 10 * 60_000;
 const DEFAULT_SIGNAL_CATCHUP_INTERVAL_MS = 300_000;
 const DEFAULT_WHATSAPP_CATCHUP_INTERVAL_MS = 300_000;
 const DEFAULT_DISCORD_REALTIME_ENABLED = true;
+const DEFAULT_DISCORD_DM_POLL_MS = 45_000;
 const DEFAULT_SLACK_REALTIME_ENABLED = false;
 const DEFAULT_INGEST_CONCURRENCY = 4;
 const DEFAULT_PROJECTION_BATCH_SIZE = 1_000;
@@ -341,7 +343,19 @@ function getAutoSyncIntervalMs(platform?: AdapterPlatform): number {
     return DEFAULT_WHATSAPP_CATCHUP_INTERVAL_MS;
   }
 
+  if (platform === "discord") {
+    return DEFAULT_DISCORD_AUTOSYNC_INTERVAL_MS;
+  }
+
   return DEFAULT_AUTOSYNC_INTERVAL_MS;
+}
+
+export function shouldSkipConnectedDiscordSchedulerSync(
+  targetPlatform: AdapterPlatform,
+  trigger: string,
+  status: DiscordRealtimeStatus | null,
+): boolean {
+  return targetPlatform === "discord" && trigger === "scheduler" && status?.state === "connected";
 }
 
 function isSqliteBusyError(error: unknown): boolean {
@@ -884,7 +898,7 @@ async function collectDesiredDiscordSessions(db: ReturnType<typeof openCuedDatab
         },
         dmPollIntervalMs: Number.isFinite(Number(process.env.CUED_DISCORD_DM_POLL_MS))
           ? Number(process.env.CUED_DISCORD_DM_POLL_MS)
-          : undefined,
+          : DEFAULT_DISCORD_DM_POLL_MS,
       });
     } catch (error) {
       degraded.push({
@@ -2677,6 +2691,18 @@ export async function runDaemon(): Promise<void> {
           if (queuedAt - lastQueuedAt < getAutoSyncIntervalMs(target.platform)) {
             continue;
           }
+        }
+
+        if (
+          shouldSkipConnectedDiscordSchedulerSync(
+            target.platform,
+            trigger,
+            target.platform === "discord"
+              ? (discordRealtime.getSession(target.accountKey)?.getStatus() ?? null)
+              : null,
+          )
+        ) {
+          continue;
         }
 
         if (db.hasQueuedOrRunningRun(target.platform, target.accountKey)) {

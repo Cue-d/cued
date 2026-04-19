@@ -8,7 +8,7 @@ import {
   isDiscordDmChannel,
 } from "../types.js";
 
-const DEFAULT_DM_POLL_INTERVAL_MS = 15_000;
+const DEFAULT_DM_POLL_INTERVAL_MS = 45_000;
 const DEFAULT_RECONNECT_BASE_MS = 1_000;
 const DEFAULT_RECONNECT_MAX_MS = 60_000;
 export type DiscordRealtimeState =
