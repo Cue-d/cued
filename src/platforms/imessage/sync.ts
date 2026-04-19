@@ -1,6 +1,7 @@
 import { execFileSync } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
 import type {
+  CallPayload,
   ContactObservationPayload,
   ConversationObservationPayload,
   MessagePayload,
@@ -9,10 +10,20 @@ import type {
 } from "../../core/types/provider.js";
 import { resolveMacOSNativeBinary } from "../../runtime/native-binary.js";
 import type { SyncBundle } from "../core/sync.js";
+import {
+  DEFAULT_CALL_HISTORY_DB_PATH,
+  type ImsCallSyncBatch,
+  loadCallHistoryBatch,
+} from "./call-history.js";
 import { DEFAULT_CHAT_DB_PATH, IMessageReader } from "./reader.js";
 import type { ImsSyncBatch } from "./types.js";
 
 const DEFAULT_IMESSAGE_BATCH_LIMIT = 2_000;
+
+type IMessageSourceCursor = {
+  rowId?: number;
+  callPk?: number;
+};
 
 function dedupeKey(seed: string): string {
   return createHash("sha256").update(seed).digest("hex");
@@ -22,6 +33,28 @@ function guessHandleType(identifier: string): string {
   if (identifier.includes("@")) return "email";
   if (/^[+]?\d[\d\s()-]{5,}$/.test(identifier)) return "phone";
   return "imessage_handle";
+}
+
+function resolveIMessageSourceCursor(options?: {
+  lastRowId?: number;
+  sourceCursor?: unknown;
+}): Required<IMessageSourceCursor> {
+  const sourceCursor =
+    options?.sourceCursor && typeof options.sourceCursor === "object"
+      ? (options.sourceCursor as Record<string, unknown>)
+      : null;
+  return {
+    rowId: typeof sourceCursor?.rowId === "number" ? sourceCursor.rowId : (options?.lastRowId ?? 0),
+    callPk: typeof sourceCursor?.callPk === "number" ? sourceCursor.callPk : 0,
+  };
+}
+
+function buildCallConversationLabel(call: {
+  remoteDisplayName: string | null;
+  remoteAddress: string | null;
+  provider: string;
+}): string | null {
+  return call.remoteDisplayName ?? call.remoteAddress ?? `${call.provider} call`;
 }
 
 type IMessageLoader = { kind: "native"; path: string } | { kind: "ts"; path: string };
@@ -68,6 +101,33 @@ function loadBatchFromNativeBinary(
   return JSON.parse(stdout) as ImsSyncBatch;
 }
 
+function loadCallBatchFromNativeBinary(
+  binaryPath: string,
+  options?: {
+    callHistoryPath?: string;
+    path?: string;
+    afterPk?: number;
+    limit?: number;
+  },
+): ImsCallSyncBatch {
+  const args = [
+    "callhistory",
+    "dump",
+    "--db-path",
+    options?.callHistoryPath ?? DEFAULT_CALL_HISTORY_DB_PATH,
+    "--chat-db-path",
+    options?.path ?? DEFAULT_CHAT_DB_PATH,
+    "--after-pk",
+    String(options?.afterPk ?? 0),
+    "--limit",
+    String(options?.limit ?? DEFAULT_IMESSAGE_BATCH_LIMIT),
+  ];
+  const stdout = execFileSync(binaryPath, args, {
+    encoding: "utf8",
+  });
+  return JSON.parse(stdout) as ImsCallSyncBatch;
+}
+
 function loadBatchFromTypeScript(options?: {
   path?: string;
   lastRowId?: number;
@@ -87,17 +147,49 @@ function loadBatchFromTypeScript(options?: {
 export function buildIMessageSyncBundle(options?: {
   path?: string;
   lastRowId?: number;
+  sourceCursor?: unknown;
   limit?: number;
+  callHistoryPath?: string;
   env?: NodeJS.ProcessEnv;
   repoRoot?: string;
 }): SyncBundle {
   const limit = options?.limit ?? DEFAULT_IMESSAGE_BATCH_LIMIT;
+  const cursor = resolveIMessageSourceCursor(options);
+  const env = options?.env ?? process.env;
   const loader = resolveIMessageLoader(options?.env ?? process.env, options?.repoRoot);
   const batch =
     loader.kind === "native"
-      ? loadBatchFromNativeBinary(loader.path, options)
-      : loadBatchFromTypeScript(options);
-  const hasMore = batch.fetchedCount >= limit;
+      ? loadBatchFromNativeBinary(loader.path, {
+          path: options?.path,
+          lastRowId: cursor.rowId,
+          limit,
+        })
+      : loadBatchFromTypeScript({
+          path: options?.path,
+          lastRowId: cursor.rowId,
+          limit,
+        });
+  const effectiveCallBatch =
+    loader.kind === "native"
+      ? loadCallBatchFromNativeBinary(loader.path, {
+          callHistoryPath:
+            options?.callHistoryPath ??
+            env.CUED_CALL_HISTORY_DB_PATH ??
+            DEFAULT_CALL_HISTORY_DB_PATH,
+          path: options?.path ?? env.CUED_IMESSAGE_DB_PATH ?? DEFAULT_CHAT_DB_PATH,
+          afterPk: cursor.callPk,
+          limit,
+        })
+      : loadCallHistoryBatch({
+          path:
+            options?.callHistoryPath ??
+            env.CUED_CALL_HISTORY_DB_PATH ??
+            DEFAULT_CALL_HISTORY_DB_PATH,
+          chatDbPath: options?.path ?? env.CUED_IMESSAGE_DB_PATH ?? DEFAULT_CHAT_DB_PATH,
+          afterPk: cursor.callPk,
+          limit,
+        });
+  const hasMore = batch.fetchedCount >= limit || effectiveCallBatch.fetchedCount >= limit;
   const observedBase = Date.now();
 
   const sourceAccounts: SourceAccountInput[] = [
@@ -105,8 +197,11 @@ export function buildIMessageSyncBundle(options?: {
   ];
 
   const rawEvents: SyncBundle["rawEvents"] = [];
+  const observedContactSourceKeys = new Set<string>();
+  const observedConversationSourceKeys = new Set<string>();
 
   for (const handle of batch.handles) {
+    observedContactSourceKeys.add(`imessage:${handle.identifier}`);
     rawEvents.push({
       id: randomUUID(),
       platform: "imessage",
@@ -139,6 +234,7 @@ export function buildIMessageSyncBundle(options?: {
   }
 
   for (const chat of batch.chats) {
+    observedConversationSourceKeys.add(String(chat.id));
     rawEvents.push({
       id: randomUUID(),
       platform: "imessage",
@@ -234,11 +330,103 @@ export function buildIMessageSyncBundle(options?: {
     }
   }
 
+  for (const call of effectiveCallBatch.calls) {
+    const displayName = buildCallConversationLabel(call);
+    if (call.remoteSourceKey && !observedContactSourceKeys.has(call.remoteSourceKey)) {
+      observedContactSourceKeys.add(call.remoteSourceKey);
+      rawEvents.push({
+        id: randomUUID(),
+        platform: "imessage",
+        accountKey: "local",
+        entityKind: "contact",
+        eventKind: "observed",
+        externalEntityId: call.remoteAddress ?? call.sourceCallKey,
+        observedAt: observedBase + call.pk,
+        dedupeKey: dedupeKey(`imessage:call-contact:${call.remoteSourceKey}`),
+        payload: {
+          sourceEntityKey: call.remoteSourceKey,
+          fields: {
+            display_name: displayName,
+          },
+          handles: call.remoteAddress
+            ? [
+                {
+                  type: guessHandleType(call.remoteAddress),
+                  value: call.remoteAddress,
+                  deterministic: true,
+                },
+              ]
+            : [],
+        } satisfies ContactObservationPayload,
+        sourceVersion: "imessage-v1",
+      });
+    }
+
+    if (
+      call.syntheticConversation &&
+      !observedConversationSourceKeys.has(call.sourceConversationKey)
+    ) {
+      observedConversationSourceKeys.add(call.sourceConversationKey);
+      rawEvents.push({
+        id: randomUUID(),
+        platform: "imessage",
+        accountKey: "local",
+        entityKind: "conversation",
+        eventKind: "observed",
+        conversationExternalId: call.sourceConversationKey,
+        observedAt: observedBase + call.pk,
+        dedupeKey: dedupeKey(`imessage:call-conversation:${call.sourceConversationKey}`),
+        payload: {
+          sourceConversationKey: call.sourceConversationKey,
+          conversationType: "dm",
+          displayName,
+          service: call.provider,
+          participants: call.remoteSourceKey ? [{ sourceEntityKey: call.remoteSourceKey }] : [],
+        } satisfies ConversationObservationPayload,
+        sourceVersion: "imessage-v1",
+      });
+    }
+
+    rawEvents.push({
+      id: randomUUID(),
+      platform: "imessage",
+      accountKey: "local",
+      entityKind: "call",
+      eventKind: "observed",
+      externalEntityId: call.sourceCallKey,
+      conversationExternalId: call.sourceConversationKey,
+      occurredAt: call.startedAt,
+      observedAt: observedBase + call.pk,
+      dedupeKey: dedupeKey(`imessage:call:${call.sourceCallKey}`),
+      payload: {
+        sourceCallKey: call.sourceCallKey,
+        sourceConversationKey: call.sourceConversationKey,
+        provider: call.provider,
+        providerCallType: call.providerCallType,
+        direction: call.direction,
+        medium: call.medium,
+        status: call.status,
+        startedAt: call.startedAt,
+        endedAt: call.endedAt,
+        durationSeconds: call.durationSeconds,
+        initiatorSourceKey: call.direction === "incoming" ? call.remoteSourceKey : null,
+        primaryRemoteSourceKey: call.remoteSourceKey,
+        remoteAddress: call.remoteAddress,
+        remoteDisplayName: call.remoteDisplayName,
+        disconnectedCause: call.disconnectedCause,
+        metadata: {
+          syntheticConversation: call.syntheticConversation,
+        },
+      } satisfies CallPayload,
+      sourceVersion: "imessage-v1",
+    });
+  }
+
   return {
     sourceAccounts,
     rawEvents,
-    sourceCursor: { rowId: batch.cursor },
-    syncMode: options?.lastRowId && options.lastRowId > 0 && !hasMore ? "incremental" : "full",
+    sourceCursor: { rowId: batch.cursor, callPk: effectiveCallBatch.cursor },
+    syncMode: (cursor.rowId > 0 || cursor.callPk > 0) && !hasMore ? "incremental" : "full",
     hasMore,
   };
 }

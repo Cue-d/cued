@@ -3,10 +3,15 @@ import { buildIMessageSyncBundle } from "./sync.js";
 
 async function main(): Promise<void> {
   try {
+    const sourceCursor = process.env.CUED_IMESSAGE_SOURCE_CURSOR
+      ? JSON.parse(process.env.CUED_IMESSAGE_SOURCE_CURSOR)
+      : undefined;
     const bundle = buildIMessageSyncBundle({
       path: process.env.CUED_IMESSAGE_DB_PATH || undefined,
       lastRowId: Number(process.env.CUED_IMESSAGE_LAST_ROWID || "0"),
+      sourceCursor,
       limit: Number(process.env.CUED_IMESSAGE_BATCH_LIMIT || "2000"),
+      callHistoryPath: process.env.CUED_CALL_HISTORY_DB_PATH || undefined,
     });
     const output: AdapterWorkerOutput = { ok: true, bundle };
     process.stdout.write(JSON.stringify(output));

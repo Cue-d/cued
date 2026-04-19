@@ -234,6 +234,7 @@ export type SyncRunStatus = (typeof SYNC_RUN_STATUS_VALUES)[number];
 export const RAW_EVENT_ENTITY_KIND_VALUES = [
   "contact",
   "conversation",
+  "call",
   "message",
   "reaction",
   "participant",

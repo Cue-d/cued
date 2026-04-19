@@ -943,6 +943,15 @@ export const MIGRATIONS: Migration[] = [
         subject_source_key TEXT,
         event_at INTEGER NOT NULL,
         text TEXT,
+        system_kind TEXT,
+        call_provider TEXT,
+        call_direction TEXT,
+        call_status TEXT,
+        call_medium TEXT,
+        call_started_at INTEGER,
+        call_duration_seconds INTEGER,
+        call_ended_at INTEGER,
+        call_disconnected_cause TEXT,
         metadata_json TEXT,
         created_at INTEGER NOT NULL,
         updated_at INTEGER NOT NULL,
@@ -1441,6 +1450,28 @@ export const MIGRATIONS: Migration[] = [
       repairLegacyMessageAttachmentsIfNeeded(db);
       ensureLegacySupportTables(db);
       rebuildMessagesFtsArtifacts(db);
+    },
+  },
+  {
+    id: "0005_add_timeline_call_fields",
+    apply: (db) => {
+      if (!tableExists(db, "timeline_events")) {
+        return;
+      }
+      addColumnIfMissing(db, "timeline_events", "system_kind TEXT");
+      addColumnIfMissing(db, "timeline_events", "call_provider TEXT");
+      addColumnIfMissing(db, "timeline_events", "call_direction TEXT");
+      addColumnIfMissing(db, "timeline_events", "call_status TEXT");
+      addColumnIfMissing(db, "timeline_events", "call_medium TEXT");
+      addColumnIfMissing(db, "timeline_events", "call_started_at INTEGER");
+      addColumnIfMissing(db, "timeline_events", "call_duration_seconds INTEGER");
+      addColumnIfMissing(db, "timeline_events", "call_ended_at INTEGER");
+      addColumnIfMissing(db, "timeline_events", "call_disconnected_cause TEXT");
+      db.exec(`
+        UPDATE timeline_events
+        SET system_kind = COALESCE(system_kind, 'provider_notice')
+        WHERE event_kind = 'system_message'
+      `);
     },
   },
 ];
