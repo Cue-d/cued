@@ -121,10 +121,7 @@ Usage:
   cued cli install|status
   cued login-item enable|disable|status
   cued onboarding complete|snapshot|status [--refresh-managed] [--refresh-permissions]
-<<<<<<< HEAD
-=======
   cued skill install-global|status
->>>>>>> origin/main
   cued permissions doctor|status|request [--all|--contacts|--messages|--full-disk-access]
   cued integrations list
   cued integrations status
@@ -208,16 +205,6 @@ async function handleLocalIntegrationCommand(
       case "list":
       case "status":
         return service.listStatus();
-      case "capabilities":
-        return PLATFORM_VALUES.map((platform) => ({
-          platform,
-          supportedHostOs: getSupportedHostOsForPlatform(platform),
-          onboardingVisible: isOnboardingVisiblePlatform(platform),
-          supportsMultipleAccounts: platformSupportsMultipleAccounts(platform),
-          permissionRequirements: getPlatformPermissionRequirements(platform),
-          helperRequirements: getPlatformHelperRequirements(platform),
-          features: getPlatformFeatureMatrixRow(platform),
-        }));
       case "refresh":
         return await service.refresh();
       case "connect": {
