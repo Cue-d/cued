@@ -30,6 +30,11 @@ export interface IntegrationStateSummary {
     projectedConversations: number;
     projectedMessages: number;
   };
+  latestSyncDiagnostics: {
+    status: "completed" | "failed";
+    finishedAt: number;
+    diagnostics: Record<string, unknown> | null;
+  } | null;
   lastSeenAt: number;
   updatedAt: number;
   latestAuthSessionId: string | null;

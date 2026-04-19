@@ -328,6 +328,7 @@ export function summarizeIntegrationStates(
     ),
     metadata: safeParseJsonRecord(row.metadata_json, "integration_states.metadata_json"),
     projectionStats: db.getIntegrationProjectionStats(row.platform, row.account_key),
+    latestSyncDiagnostics: getLatestSyncDiagnostics(db, row.platform, row.account_key),
     lastSeenAt: row.last_seen_at,
     updatedAt: row.updated_at,
     latestAuthSessionId: db.getLatestAuthSession(row.platform, row.account_key)?.id ?? null,
@@ -359,6 +360,11 @@ export function summarizeManagedIntegrationState(
     artifactPaths: integration.artifactPaths ?? [],
     metadata: integration.metadata ?? null,
     projectionStats: db.getIntegrationProjectionStats(integration.platform, integration.accountKey),
+    latestSyncDiagnostics: getLatestSyncDiagnostics(
+      db,
+      integration.platform,
+      integration.accountKey,
+    ),
     lastSeenAt: now(),
     updatedAt: now(),
     latestAuthSessionId:
@@ -368,6 +374,29 @@ export function summarizeManagedIntegrationState(
       { platform: integration.platform, authState: integration.authState },
       hostOs,
     ),
+  };
+}
+
+function getLatestSyncDiagnostics(
+  db: CuedDatabase,
+  platform: Platform,
+  accountKey: string,
+): IntegrationStateSummary["latestSyncDiagnostics"] {
+  const run = db.getLatestFinishedSyncRun(platform, accountKey);
+  if (!run) {
+    return null;
+  }
+
+  const details = safeParseJsonRecord(run.details_json, "sync_runs.details_json");
+  const diagnostics =
+    details && typeof details.diagnostics === "object" && details.diagnostics !== null
+      ? (details.diagnostics as Record<string, unknown>)
+      : null;
+
+  return {
+    status: run.status,
+    finishedAt: run.finished_at,
+    diagnostics,
   };
 }
 

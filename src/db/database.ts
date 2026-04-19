@@ -2797,6 +2797,43 @@ export class CuedDatabase {
     this.db.update(syncRuns).set(values).where(eq(syncRuns.id, runId)).run();
   }
 
+  getLatestFinishedSyncRun(
+    platform: Platform,
+    accountKey: string,
+  ): {
+    status: "completed" | "failed";
+    finished_at: number;
+    details_json: string | null;
+  } | null {
+    return (
+      (this.db
+        .select({
+          status: syncRuns.status,
+          finished_at: syncRuns.finishedAt,
+          details_json: syncRuns.detailsJson,
+        })
+        .from(syncRuns)
+        .where(
+          and(
+            eq(syncRuns.platform, platform),
+            eq(syncRuns.accountKey, accountKey),
+            inArray(syncRuns.runType, ["sync", "sync_resume"]),
+            inArray(syncRuns.status, ["completed", "failed"]),
+            sql`${syncRuns.finishedAt} IS NOT NULL`,
+          ),
+        )
+        .orderBy(desc(syncRuns.finishedAt))
+        .limit(1)
+        .get() as
+        | {
+            status: "completed" | "failed";
+            finished_at: number;
+            details_json: string | null;
+          }
+        | undefined) ?? null
+    );
+  }
+
   failRun(runId: string, errorMessage: string, details?: unknown): void {
     this.db.transaction((tx) => {
       const run = tx
