@@ -11,6 +11,7 @@ import {
 } from "./events.js";
 
 const DEFAULT_SYNC_MESSAGE_CHANNEL_LIMIT = 5;
+const DEFAULT_SYNC_MESSAGES_PER_CHANNEL_LIMIT = 50;
 
 function loadDiscordCredentials(accountKey: string): DiscordStoredCredentials {
   const parsed = loadIntegrationSecret("discord", accountKey).secret;
@@ -36,12 +37,15 @@ export async function buildDiscordSyncBundle(
   options: {
     client?: DiscordApiClient;
     syncMessageChannelLimit?: number;
+    syncMessagesPerChannelLimit?: number;
   } = {},
 ): Promise<SyncBundle> {
   const accountKey = input.accountKey ?? process.env.CUED_ACCOUNT_KEY ?? "default";
   const client = options.client ?? new DiscordApiClient(loadDiscordCredentials(accountKey));
   const syncMessageChannelLimit =
-    options.syncMessageChannelLimit ?? DEFAULT_SYNC_MESSAGE_CHANNEL_LIMIT;
+    options.syncMessageChannelLimit ?? getDiscordSyncMessageChannelLimit();
+  const syncMessagesPerChannelLimit =
+    options.syncMessagesPerChannelLimit ?? getDiscordSyncMessagesPerChannelLimit();
   const observedAt = Date.now();
   const currentUser = await client.getCurrentUser();
   const privateChannels = await client.listPrivateChannels();
@@ -84,21 +88,24 @@ export async function buildDiscordSyncBundle(
     syncMessageChannelLimit,
   )) {
     try {
-      const messages = await client.listChannelMessages(channel.id, { limit: 1 });
-      const message = messages.at(0);
-      if (!message) {
+      const messages = await client.listChannelMessages(channel.id, {
+        limit: syncMessagesPerChannelLimit,
+      });
+      if (messages.length === 0) {
         continue;
       }
-      pushContact(message.author, message.member?.nick ?? null);
-      rawEvents.push(
-        buildDiscordMessageEvent({
-          accountKey,
-          observedAt,
-          channel,
-          message,
-          currentUserId: currentUser.id,
-        }),
-      );
+      for (const message of [...messages].reverse()) {
+        pushContact(message.author, message.member?.nick ?? null);
+        rawEvents.push(
+          buildDiscordMessageEvent({
+            accountKey,
+            observedAt,
+            channel,
+            message,
+            currentUserId: currentUser.id,
+          }),
+        );
+      }
     } catch (error) {
       if (isDiscordAuthInvalidationError(error)) {
         throw error;
@@ -125,6 +132,28 @@ export async function buildDiscordSyncBundle(
     syncMode: "incremental",
     hasMore: false,
   };
+}
+
+export function getDiscordSyncMessageChannelLimit(): number {
+  return parsePositiveInteger(
+    process.env.CUED_DISCORD_SYNC_MESSAGE_CHANNEL_LIMIT,
+    DEFAULT_SYNC_MESSAGE_CHANNEL_LIMIT,
+  );
+}
+
+export function getDiscordSyncMessagesPerChannelLimit(): number {
+  return parsePositiveInteger(
+    process.env.CUED_DISCORD_SYNC_MESSAGES_PER_CHANNEL_LIMIT,
+    DEFAULT_SYNC_MESSAGES_PER_CHANNEL_LIMIT,
+  );
+}
+
+function parsePositiveInteger(value: string | undefined, fallback: number): number {
+  if (typeof value !== "string") {
+    return fallback;
+  }
+  const parsed = Number.parseInt(value, 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
 }
 
 function selectChannelsForMessageHydration(

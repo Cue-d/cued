@@ -153,15 +153,16 @@ Discord uses a local browser sign-in flow and stores the captured Discord accoun
 Current Discord scope in Cued:
 
 - discovers DMs only
+- hydrates up to 50 messages in the 5 most recent DMs during sync
 - syncs new messages after connection
 - sends messages only to known DMs
-- does not backfill channel history yet
+- does not backfill guild or server channel history
 - stops and requires reconnect if Discord invalidates auth, such as after a forced password reset
 
 Current guardrails:
 
 - no guild or server sync
 - no guild or server sends
-- no history backfill
+- bounded DM-only hydration
 - realtime polling is DM-only
 - Discord auth invalidation blocks the integration instead of retrying indefinitely
