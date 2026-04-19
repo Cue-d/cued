@@ -12,6 +12,7 @@ import {
   type PlatformPermissionRequirement,
   platformSupportsMultipleAccounts,
 } from "../platforms/core/types.js";
+import { inspectSlackHelper } from "../platforms/slack/helper/binary.js";
 
 export type PlatformAvailabilityState =
   | "available"
@@ -60,6 +61,9 @@ function resolveHelperAvailability(
   integration: Pick<IntegrationStateSummary, "authState"> | null,
   requirements: readonly PlatformHelperRequirement[],
 ): PlatformCapabilitySummary["availability"] | null {
+  const slackHelperInspection =
+    requirements.includes("slack_helper") ? inspectSlackHelper() : null;
+
   if (requirements.length === 0 || !integration) {
     return null;
   }
@@ -72,6 +76,13 @@ function resolveHelperAvailability(
   }
 
   if (requirements.includes("whatsapp_helper") && integration.authState === "missing") {
+    return "requires_helper";
+  }
+
+  if (
+    requirements.includes("slack_helper") &&
+    (!slackHelperInspection?.helperPath || slackHelperInspection.versionSupported !== true)
+  ) {
     return "requires_helper";
   }
 
