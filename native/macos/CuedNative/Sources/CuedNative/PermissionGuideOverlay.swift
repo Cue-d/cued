@@ -66,6 +66,17 @@ func onboardingPermissionGuideInstructionSentence(
   return "Enable \(hostAppName) in the list above to allow \(panel.emphasizedPermissionTerm)."
 }
 
+func onboardingPermissionGuideFrameIsApproximatelyEqual(
+  _ lhs: CGRect,
+  _ rhs: CGRect,
+  tolerance: CGFloat = 1
+) -> Bool {
+  abs(lhs.minX - rhs.minX) <= tolerance
+    && abs(lhs.minY - rhs.minY) <= tolerance
+    && abs(lhs.width - rhs.width) <= tolerance
+    && abs(lhs.height - rhs.height) <= tolerance
+}
+
 @MainActor
 final class PermissionGuideAssistant {
   static let shared = PermissionGuideAssistant()
@@ -257,7 +268,7 @@ private final class PermissionGuideOverlayWindowController: NSWindowController {
     let frame = CGRect(origin: anchoredOrigin(for: settingsFrame, visibleFrame: visibleFrame, size: size), size: size)
 
     if let previousFrame = currentFrame,
-       hypot(frame.minX - previousFrame.minX, frame.minY - previousFrame.minY) <= 1 {
+       onboardingPermissionGuideFrameIsApproximatelyEqual(previousFrame, frame) {
       window.orderFrontRegardless()
       return
     }

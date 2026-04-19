@@ -93,4 +93,20 @@ final class OnboardingUITests: XCTestCase {
       )
     )
   }
+
+  func testPermissionGuideFrameComparisonDetectsResizeWithoutMovement() {
+    XCTAssertTrue(
+      onboardingPermissionGuideFrameIsApproximatelyEqual(
+        CGRect(x: 120, y: 80, width: 420, height: 126),
+        CGRect(x: 120.4, y: 80.4, width: 420.3, height: 126.2)
+      )
+    )
+
+    XCTAssertFalse(
+      onboardingPermissionGuideFrameIsApproximatelyEqual(
+        CGRect(x: 120, y: 80, width: 420, height: 126),
+        CGRect(x: 120, y: 80, width: 470, height: 126)
+      )
+    )
+  }
 }
