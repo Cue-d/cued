@@ -61,8 +61,7 @@ function resolveHelperAvailability(
   integration: Pick<IntegrationStateSummary, "authState"> | null,
   requirements: readonly PlatformHelperRequirement[],
 ): PlatformCapabilitySummary["availability"] | null {
-  const slackHelperInspection =
-    requirements.includes("slack_helper") ? inspectSlackHelper() : null;
+  const slackHelperInspection = requirements.includes("slack_helper") ? inspectSlackHelper() : null;
 
   if (requirements.length === 0 || !integration) {
     return null;
