@@ -32,6 +32,10 @@ export interface PlatformCapabilitySummary {
   reason: string | null;
 }
 
+type CapabilityIntegration = Pick<IntegrationStateSummary, "platform" | "authState"> & {
+  metadata?: Record<string, unknown> | null;
+};
+
 export function resolveHostOS(platform: NodeJS.Platform = process.platform): HostOS {
   if (platform === "darwin") return "macos";
   if (platform === "win32") return "windows";
@@ -58,11 +62,9 @@ function resolvePermissionAvailability(
 }
 
 function resolveHelperAvailability(
-  integration: Pick<IntegrationStateSummary, "authState"> | null,
+  integration: Pick<CapabilityIntegration, "authState" | "metadata"> | null,
   requirements: readonly PlatformHelperRequirement[],
 ): PlatformCapabilitySummary["availability"] | null {
-  const slackHelperInspection = requirements.includes("slack_helper") ? inspectSlackHelper() : null;
-
   if (requirements.length === 0 || !integration) {
     return null;
   }
@@ -78,11 +80,28 @@ function resolveHelperAvailability(
     return "requires_helper";
   }
 
-  if (
-    requirements.includes("slack_helper") &&
-    (!slackHelperInspection?.helperPath || slackHelperInspection.versionSupported !== true)
-  ) {
-    return "requires_helper";
+  if (requirements.includes("slack_helper")) {
+    if (integration.authState !== "authenticated") {
+      return null;
+    }
+
+    const slackHelperMetadata = integration.metadata;
+    const hasSlackHelperMetadata =
+      typeof slackHelperMetadata?.slackHelperPath === "string" ||
+      slackHelperMetadata?.slackHelperPath === null ||
+      typeof slackHelperMetadata?.slackHelperVersionSupported === "boolean";
+
+    if (hasSlackHelperMetadata) {
+      return slackHelperMetadata?.slackHelperPath &&
+        slackHelperMetadata?.slackHelperVersionSupported === true
+        ? null
+        : "requires_helper";
+    }
+
+    const slackHelperInspection = inspectSlackHelper();
+    if (!slackHelperInspection.helperPath || slackHelperInspection.versionSupported !== true) {
+      return "requires_helper";
+    }
   }
 
   return null;
@@ -90,7 +109,7 @@ function resolveHelperAvailability(
 
 export function summarizePlatformCapability(
   platform: Platform,
-  integration: Pick<IntegrationStateSummary, "platform" | "authState"> | null,
+  integration: CapabilityIntegration | null,
   hostOs: HostOS = resolveHostOS(),
 ): PlatformCapabilitySummary {
   const supportedHostOs = getSupportedHostOsForPlatform(platform);
