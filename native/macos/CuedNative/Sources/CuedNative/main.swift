@@ -1715,18 +1715,31 @@ struct CuedNativeCLI {
 
     let placeholders = Array(repeating: "?", count: candidates.count).joined(separator: ", ")
     let sql = """
-      SELECT c.ROWID AS chat_id
-      FROM chat c
-      JOIN chat_handle_join chj ON chj.chat_id = c.ROWID
-      JOIN handle h ON h.ROWID = chj.handle_id
-      WHERE LOWER(h.id) IN (\(placeholders))
-        AND NOT EXISTS (
-          SELECT 1
-          FROM chat_handle_join other
-          WHERE other.chat_id = c.ROWID
-            AND other.handle_id <> h.ROWID
-        )
-      ORDER BY c.ROWID DESC
+      WITH candidate_chats AS (
+        SELECT
+          c.ROWID AS chat_id,
+          MAX(m.date) AS last_message_date,
+          MAX(m.ROWID) AS last_message_rowid
+        FROM chat c
+        JOIN chat_handle_join chj ON chj.chat_id = c.ROWID
+        JOIN handle h ON h.ROWID = chj.handle_id
+        LEFT JOIN chat_message_join cmj ON cmj.chat_id = c.ROWID
+        LEFT JOIN message m ON m.ROWID = cmj.message_id
+        WHERE LOWER(h.id) IN (\(placeholders))
+          AND NOT EXISTS (
+            SELECT 1
+            FROM chat_handle_join other
+            WHERE other.chat_id = c.ROWID
+              AND other.handle_id <> h.ROWID
+          )
+        GROUP BY c.ROWID
+      )
+      SELECT chat_id
+      FROM candidate_chats
+      ORDER BY
+        COALESCE(last_message_date, 0) DESC,
+        COALESCE(last_message_rowid, 0) DESC,
+        chat_id DESC
       LIMIT 1
     """
 

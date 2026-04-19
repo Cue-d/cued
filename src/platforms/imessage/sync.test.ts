@@ -494,4 +494,85 @@ describe("imessage worker loader resolution", () => {
       }),
     );
   });
+
+  it("prefers the most recently active direct chat when duplicates share a handle", () => {
+    const chatDbPath = createSyntheticChatDb(1);
+    const db = new DatabaseSync(chatDbPath);
+    try {
+      db.prepare("INSERT INTO chat (chat_identifier, display_name) VALUES (?, ?)").run(
+        "chat-2",
+        null,
+      );
+      db.prepare("INSERT INTO chat_handle_join (chat_id, handle_id) VALUES (?, ?)").run(2, 1);
+      db.prepare(`
+        INSERT INTO message (
+          guid,
+          handle_id,
+          text,
+          attributedBody,
+          date,
+          is_from_me,
+          is_sent,
+          is_delivered,
+          is_read,
+          date_read,
+          error,
+          cache_has_attachments,
+          item_type,
+          associated_message_type,
+          associated_message_emoji,
+          associated_message_guid
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `).run(
+        "message-2",
+        1,
+        "older duplicate thread",
+        null,
+        500_000_000,
+        0,
+        1,
+        1,
+        0,
+        null,
+        0,
+        0,
+        0,
+        0,
+        null,
+        null,
+      );
+      db.prepare("INSERT INTO chat_message_join (chat_id, message_id) VALUES (?, ?)").run(2, 2);
+    } finally {
+      db.close();
+    }
+
+    const callHistoryPath = createSyntheticCallHistoryDb([
+      {
+        pk: 11,
+        uniqueId: "call-11",
+        dateValue: 18,
+        durationSeconds: 30,
+        address: "+14155550123",
+        serviceProvider: "com.apple.Telephony",
+        callType: 16,
+        originated: 0,
+        answered: 1,
+      },
+    ]);
+
+    const bundle = buildIMessageSyncBundle({
+      path: chatDbPath,
+      callHistoryPath,
+      env: { CUED_IMESSAGE_DB_PATH: chatDbPath },
+      repoRoot: createTempDir("cued-imessage-repo-"),
+    });
+
+    const callEvent = bundle.rawEvents.find((event) => event.entityKind === "call");
+    expect(callEvent?.payload).toEqual(
+      expect.objectContaining({
+        sourceCallKey: "call-11",
+        sourceConversationKey: "1",
+      }),
+    );
+  });
 });
