@@ -3,7 +3,7 @@ import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { CuedDatabase } from "./database.js";
+import { CuedDatabase, openExistingCuedDatabase } from "./database.js";
 
 describe("CuedDatabase", () => {
   const tempDirs: string[] = [];
@@ -123,7 +123,19 @@ describe("CuedDatabase", () => {
       sourceAccounts: 0,
       integrations: 0,
       authSessions: 0,
+      messageBreakdown: [],
     });
+    db.close();
+  });
+
+  it("executes read-only SQL for ad hoc inspection", () => {
+    const db = createDb();
+
+    expect(db.executeReadOnlySql("select 1 as value")).toEqual([{ value: 1 }]);
+    expect(() => db.executeReadOnlySql("insert into app_settings (key) values ('nope')")).toThrow(
+      "Only read-only SELECT/PRAGMA/EXPLAIN queries are supported",
+    );
+
     db.close();
   });
 
@@ -243,6 +255,47 @@ describe("CuedDatabase", () => {
     expect(db.getAppSetting("installed_app_version")?.value).toBe("0.1.0-internal.1");
 
     db.close();
+  });
+
+  it("opens existing databases without startup metadata writes", () => {
+    const db = createDb();
+    const dbPath = db.dbPath;
+    db.recordAppMetadata({
+      version: "0.1.0",
+      releaseChannel: "stable",
+    });
+    db.close();
+
+    const existing = openExistingCuedDatabase(dbPath);
+    existing.setUpdateLastError(null);
+    existing.close();
+
+    const reopened = new CuedDatabase(dbPath);
+    expect(reopened.getAppMetadata().installedAppVersion).toBe("0.1.0");
+    expect(reopened.getAppMetadata().releaseChannel).toBe("stable");
+    reopened.close();
+
+    const missingDir = mkdtempSync(join(tmpdir(), "cued-v2-db-missing-"));
+    tempDirs.push(missingDir);
+    const missingPath = join(missingDir, "local.db");
+    expect(() => openExistingCuedDatabase(missingPath)).toThrow(
+      `Cued database does not exist at ${missingPath}`,
+    );
+    expect(existsSync(missingPath)).toBe(false);
+  });
+
+  it("reads projection backlog without initializing projection state", () => {
+    const db = createDb();
+    const dbPath = db.dbPath;
+    db.close();
+
+    const readonly = openExistingCuedDatabase(dbPath, { readonly: true });
+    expect(readonly.getProjectionBacklog({ initializeProjectionState: false })).toEqual({
+      projection_watermark: 0,
+      max_raw_event_rowid: 0,
+      pending_raw_events: 0,
+    });
+    readonly.close();
   });
 
   it("stores messages automation verification state", () => {
