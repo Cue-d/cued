@@ -48,6 +48,13 @@ export type DaemonRequest =
   | { id: string; command: "sync-run"; source?: string }
   | { id: string; command: "sync-resume" }
   | { id: string; command: "shutdown-for-update" }
+  | {
+      id: string;
+      command: "contacts-merge";
+      primaryContactId: string;
+      secondaryContactId: string;
+      reason?: string;
+    }
   | { id: string; command: "rebuild" }
   | { id: string; command: "reset"; source: string };
 

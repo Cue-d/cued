@@ -35,7 +35,7 @@ let package = Package(
     ),
     .testTarget(
       name: "CuedNativeTests",
-      dependencies: ["CuedNative"],
+      dependencies: ["CuedNative", "CuedNativeUI"],
       path: "Tests/CuedNativeTests"
     ),
   ]

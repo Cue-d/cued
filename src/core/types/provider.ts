@@ -1,4 +1,9 @@
-import type { ConversationType, Platform, RawEventEntityKind } from "../../platforms/core/types.js";
+import type {
+  ConversationType,
+  Platform,
+  RawEventEntityKind,
+  SyncMode,
+} from "../../platforms/core/types.js";
 
 export * from "../../platforms/core/types.js";
 
@@ -99,6 +104,62 @@ export interface SourceAccountInput {
   platform: Platform;
   accountKey: string;
   displayName: string;
+}
+
+export const SYNC_PROOF_STATUS_VALUES = [
+  "pending",
+  "running",
+  "complete",
+  "failed",
+  "stale",
+] as const;
+export type SyncProofStatus = (typeof SYNC_PROOF_STATUS_VALUES)[number];
+
+// Standard cross-platform kinds; adapters may use source-specific strings as needed.
+export const SYNC_SCOPE_KIND_VALUES = [
+  "account",
+  "folder",
+  "label",
+  "conversation",
+  "thread",
+] as const;
+export type StandardSyncScopeKind = (typeof SYNC_SCOPE_KIND_VALUES)[number];
+export type SyncScopeKind = StandardSyncScopeKind | (string & {});
+
+export const SYNC_PROOF_KIND_VALUES = [
+  "discovery",
+  "messages",
+  "replies",
+  "attachments",
+  "participants",
+] as const;
+export type StandardSyncProofKind = (typeof SYNC_PROOF_KIND_VALUES)[number];
+export type SyncProofKind = StandardSyncProofKind | (string & {});
+
+export interface SyncScopeInput {
+  kind: SyncScopeKind;
+  key: string;
+  parent?: {
+    kind: SyncScopeKind;
+    key: string;
+  } | null;
+  displayName?: string | null;
+  metadata?: Record<string, unknown> | null;
+}
+
+export interface SyncProofInput {
+  scope: SyncScopeInput;
+  proofKind: SyncProofKind;
+  status: SyncProofStatus;
+  syncMode?: SyncMode | null;
+  observedAt: number;
+  runStartedAt?: number | null;
+  completedAt?: number | null;
+  freshUntil?: number | null;
+  resumeCursor?: unknown;
+  coverage?: Record<string, unknown> | null;
+  stats?: Record<string, unknown> | null;
+  error?: unknown;
 }
 
 export const RAW_EVENT_ACQUISITION_MODE_VALUES = ["sync", "realtime"] as const;

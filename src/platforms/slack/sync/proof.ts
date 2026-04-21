@@ -1,3 +1,5 @@
+import type { SyncProofInput } from "../../../core/types/provider.js";
+
 export type SlackBackfillConversationPhase = "history" | "threads" | "complete";
 
 export interface SlackBackfillConversationProof {
@@ -47,4 +49,81 @@ export function isSlackBackfillConversationProof(
     typeof parsed.pendingThreadCount === "number" &&
     typeof parsed.observedAt === "number"
   );
+}
+
+export function buildSlackBackfillSyncProofs(
+  proof: SlackBackfillConversationProof,
+): SyncProofInput[] {
+  const scope = {
+    kind: "conversation" as const,
+    key: proof.conversationId,
+    displayName: proof.conversationName ?? null,
+    metadata: {
+      teamId: proof.teamId,
+      conversationFamily: proof.conversationFamily,
+    },
+  };
+  const proofs: SyncProofInput[] = [
+    {
+      scope,
+      proofKind: "messages",
+      status:
+        proof.historyComplete || proof.conversationPhase !== "history" ? "complete" : "running",
+      syncMode: proof.syncMode,
+      observedAt: proof.observedAt,
+      completedAt:
+        proof.historyComplete || proof.conversationPhase !== "history" ? proof.observedAt : null,
+      resumeCursor:
+        proof.historyComplete || proof.conversationPhase !== "history"
+          ? null
+          : {
+              historyCursor: proof.historyCursor,
+              conversationPhase: proof.conversationPhase,
+            },
+      coverage: {
+        oldestMessageTs: proof.oldestMessageTs,
+        newestMessageTs: proof.newestMessageTs,
+      },
+      stats: {
+        knownConversationCount: proof.knownConversationCount,
+        threadRootCount: proof.threadRootCount,
+      },
+    },
+  ];
+
+  if (
+    proof.threadRootCount > 0 ||
+    proof.conversationPhase === "threads" ||
+    proof.conversationPhase === "complete"
+  ) {
+    proofs.push({
+      scope,
+      proofKind: "replies",
+      status: proof.conversationPhase === "complete" ? "complete" : "running",
+      syncMode: proof.syncMode,
+      observedAt: proof.observedAt,
+      completedAt: proof.conversationPhase === "complete" ? proof.observedAt : null,
+      resumeCursor:
+        proof.conversationPhase === "complete"
+          ? null
+          : {
+              activeThreadTs: proof.activeThreadTs,
+              repliesCursor: proof.repliesCursor,
+              conversationPhase: proof.conversationPhase,
+            },
+      coverage: {
+        oldestMessageTs: proof.oldestMessageTs,
+        newestMessageTs: proof.newestMessageTs,
+        completedThreadCount: proof.completedThreadCount,
+        pendingThreadCount: proof.pendingThreadCount,
+      },
+      stats: {
+        threadRootCount: proof.threadRootCount,
+        completedThreadCount: proof.completedThreadCount,
+        pendingThreadCount: proof.pendingThreadCount,
+      },
+    });
+  }
+
+  return proofs;
 }

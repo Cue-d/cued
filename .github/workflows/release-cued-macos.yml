@@ -43,6 +43,12 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      - name: Resolve release version
+        run: |
+          VERSION="$(node -p "require('./package.json').version")"
+          echo "CUED_RELEASE_VERSION=$VERSION" >> "$GITHUB_ENV"
+          echo "CUED_RELEASE_TAG=v$VERSION" >> "$GITHUB_ENV"
+
       - name: Build, sign, and notarize app bundle + DMG
         run: bash scripts/sign-and-notarize-cued-app.sh
         env:
@@ -55,8 +61,6 @@ jobs:
         env:
           CUED_RELEASE_CHANNEL: internal
           CUED_RELEASE_REPO: Cue-d/cued
-          CUED_RELEASE_VERSION: ${{ inputs.version }}
-          CUED_RELEASE_TAG: ${{ inputs.version != '' && format('v{0}', inputs.version) || '' }}
 
       - name: Create or update prerelease
         run: |
