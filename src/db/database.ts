@@ -15,6 +15,7 @@ import type {
   ProviderRawEventInput,
   RawEventEntityKind,
   SyncMode,
+  SyncProofInput,
   SyncRunStatus,
   SyncRunType,
 } from "../core/types/provider.js";
@@ -56,6 +57,8 @@ const {
   rawEvents,
   sourceAccounts,
   slackBackfillProofs,
+  syncProofs,
+  syncScopes,
   syncCheckpoints,
   syncRunErrors,
   syncRuns,
@@ -155,6 +158,46 @@ export interface SlackBackfillProofRow {
   updated_at: number;
 }
 
+export interface SyncScopeRow {
+  id: string;
+  platform: Platform;
+  account_key: string;
+  scope_kind: string;
+  scope_key: string;
+  parent_scope_id: string | null;
+  display_name: string | null;
+  metadata_json: string | null;
+  first_discovered_at: number;
+  last_observed_at: number;
+  created_at: number;
+  updated_at: number;
+}
+
+export interface SyncProofRow {
+  id: string;
+  platform: Platform;
+  account_key: string;
+  scope_id: string;
+  scope_kind: string;
+  scope_key: string;
+  parent_scope_id: string | null;
+  display_name: string | null;
+  metadata_json: string | null;
+  proof_kind: string;
+  status: string;
+  sync_mode: SyncMode | null;
+  run_started_at: number | null;
+  last_observed_at: number;
+  completed_at: number | null;
+  fresh_until: number | null;
+  resume_cursor_json: string | null;
+  coverage_json: string | null;
+  stats_json: string | null;
+  error_json: string | null;
+  created_at: number;
+  updated_at: number;
+}
+
 export interface ContactMergeDecisionRow {
   id: string;
   decision_type: string;
@@ -208,6 +251,29 @@ function maxSlackTs(
     return left;
   }
   return compareSlackTs(left, right) >= 0 ? left : right;
+}
+
+function buildSyncScopeId(
+  platform: Platform,
+  accountKey: string,
+  scopeKind: string,
+  scopeKey: string,
+): string {
+  return `scope:${Buffer.from(JSON.stringify([platform, accountKey, scopeKind, scopeKey])).toString(
+    "base64url",
+  )}`;
+}
+
+function buildSyncProofId(
+  platform: Platform,
+  accountKey: string,
+  scopeKind: string,
+  scopeKey: string,
+  proofKind: string,
+): string {
+  return `proof:${Buffer.from(
+    JSON.stringify([platform, accountKey, scopeKind, scopeKey, proofKind]),
+  ).toString("base64url")}`;
 }
 
 export type RawEventInput = ProviderRawEventInput;
@@ -1004,6 +1070,14 @@ export class CuedDatabase {
         .delete(syncCheckpoints)
         .where(eq(syncCheckpoints.platform, platform))
         .run().changes;
+      const removedSyncProofs = tx
+        .delete(syncProofs)
+        .where(eq(syncProofs.platform, platform))
+        .run().changes;
+      const removedSyncScopes = tx
+        .delete(syncScopes)
+        .where(eq(syncScopes.platform, platform))
+        .run().changes;
       const removedSlackBackfillProofs =
         platform === "slack" ? tx.delete(slackBackfillProofs).run().changes : 0;
       return (
@@ -1012,6 +1086,8 @@ export class CuedDatabase {
         Number(removedRuns) +
         Number(removedErrors) +
         Number(removedCheckpoints) +
+        Number(removedSyncProofs) +
+        Number(removedSyncScopes) +
         Number(removedSlackBackfillProofs)
       );
     });
@@ -1026,6 +1102,233 @@ export class CuedDatabase {
     });
 
     return removed;
+  }
+
+  listSyncScopes(platform: Platform, accountKey: string): SyncScopeRow[] {
+    return this.db
+      .select({
+        id: syncScopes.id,
+        platform: syncScopes.platform,
+        account_key: syncScopes.accountKey,
+        scope_kind: syncScopes.scopeKind,
+        scope_key: syncScopes.scopeKey,
+        parent_scope_id: syncScopes.parentScopeId,
+        display_name: syncScopes.displayName,
+        metadata_json: syncScopes.metadataJson,
+        first_discovered_at: syncScopes.firstDiscoveredAt,
+        last_observed_at: syncScopes.lastObservedAt,
+        created_at: syncScopes.createdAt,
+        updated_at: syncScopes.updatedAt,
+      })
+      .from(syncScopes)
+      .where(and(eq(syncScopes.platform, platform), eq(syncScopes.accountKey, accountKey)))
+      .orderBy(asc(syncScopes.scopeKind), asc(syncScopes.scopeKey))
+      .all() as SyncScopeRow[];
+  }
+
+  listSyncProofs(platform: Platform, accountKey: string): SyncProofRow[] {
+    return this.db
+      .select({
+        id: syncProofs.id,
+        platform: syncProofs.platform,
+        account_key: syncProofs.accountKey,
+        scope_id: syncProofs.scopeId,
+        scope_kind: syncScopes.scopeKind,
+        scope_key: syncScopes.scopeKey,
+        parent_scope_id: syncScopes.parentScopeId,
+        display_name: syncScopes.displayName,
+        metadata_json: syncScopes.metadataJson,
+        proof_kind: syncProofs.proofKind,
+        status: syncProofs.status,
+        sync_mode: syncProofs.syncMode,
+        run_started_at: syncProofs.runStartedAt,
+        last_observed_at: syncProofs.lastObservedAt,
+        completed_at: syncProofs.completedAt,
+        fresh_until: syncProofs.freshUntil,
+        resume_cursor_json: syncProofs.resumeCursorJson,
+        coverage_json: syncProofs.coverageJson,
+        stats_json: syncProofs.statsJson,
+        error_json: syncProofs.errorJson,
+        created_at: syncProofs.createdAt,
+        updated_at: syncProofs.updatedAt,
+      })
+      .from(syncProofs)
+      .innerJoin(syncScopes, eq(syncProofs.scopeId, syncScopes.id))
+      .where(and(eq(syncProofs.platform, platform), eq(syncProofs.accountKey, accountKey)))
+      .orderBy(asc(syncScopes.scopeKind), asc(syncScopes.scopeKey), asc(syncProofs.proofKind))
+      .all() as SyncProofRow[];
+  }
+
+  upsertSyncProof(input: { platform: Platform; accountKey: string; proof: SyncProofInput }): void {
+    const timestamp = now();
+    const scopeId = buildSyncScopeId(
+      input.platform,
+      input.accountKey,
+      input.proof.scope.kind,
+      input.proof.scope.key,
+    );
+    const parentScopeId = input.proof.scope.parent
+      ? buildSyncScopeId(
+          input.platform,
+          input.accountKey,
+          input.proof.scope.parent.kind,
+          input.proof.scope.parent.key,
+        )
+      : null;
+    const existingScope = this.db
+      .select({
+        displayName: syncScopes.displayName,
+        metadataJson: syncScopes.metadataJson,
+        firstDiscoveredAt: syncScopes.firstDiscoveredAt,
+      })
+      .from(syncScopes)
+      .where(eq(syncScopes.id, scopeId))
+      .get();
+    const scopeDisplayName =
+      input.proof.scope.displayName === undefined
+        ? (existingScope?.displayName ?? null)
+        : input.proof.scope.displayName;
+    const scopeMetadataJson =
+      input.proof.scope.metadata === undefined
+        ? (existingScope?.metadataJson ?? null)
+        : safeStringifyJson(input.proof.scope.metadata);
+    const scopeFirstDiscoveredAt = existingScope?.firstDiscoveredAt ?? input.proof.observedAt;
+
+    if (input.proof.scope.parent) {
+      this.db
+        .insert(syncScopes)
+        .values({
+          id: parentScopeId!,
+          platform: input.platform,
+          accountKey: input.accountKey,
+          scopeKind: input.proof.scope.parent.kind,
+          scopeKey: input.proof.scope.parent.key,
+          parentScopeId: null,
+          displayName: null,
+          metadataJson: null,
+          firstDiscoveredAt: input.proof.observedAt,
+          lastObservedAt: input.proof.observedAt,
+          createdAt: timestamp,
+          updatedAt: timestamp,
+        })
+        .onConflictDoUpdate({
+          target: [
+            syncScopes.platform,
+            syncScopes.accountKey,
+            syncScopes.scopeKind,
+            syncScopes.scopeKey,
+          ],
+          set: {
+            lastObservedAt: input.proof.observedAt,
+            updatedAt: timestamp,
+          },
+        })
+        .run();
+    }
+
+    this.db
+      .insert(syncScopes)
+      .values({
+        id: scopeId,
+        platform: input.platform,
+        accountKey: input.accountKey,
+        scopeKind: input.proof.scope.kind,
+        scopeKey: input.proof.scope.key,
+        parentScopeId,
+        displayName: scopeDisplayName,
+        metadataJson: scopeMetadataJson,
+        firstDiscoveredAt: scopeFirstDiscoveredAt,
+        lastObservedAt: input.proof.observedAt,
+        createdAt: timestamp,
+        updatedAt: timestamp,
+      })
+      .onConflictDoUpdate({
+        target: [
+          syncScopes.platform,
+          syncScopes.accountKey,
+          syncScopes.scopeKind,
+          syncScopes.scopeKey,
+        ],
+        set: {
+          parentScopeId,
+          displayName: scopeDisplayName,
+          metadataJson: scopeMetadataJson,
+          firstDiscoveredAt: scopeFirstDiscoveredAt,
+          lastObservedAt: input.proof.observedAt,
+          updatedAt: timestamp,
+        },
+      })
+      .run();
+
+    const proofId = buildSyncProofId(
+      input.platform,
+      input.accountKey,
+      input.proof.scope.kind,
+      input.proof.scope.key,
+      input.proof.proofKind,
+    );
+    const existingProof = this.db
+      .select({
+        completedAt: syncProofs.completedAt,
+      })
+      .from(syncProofs)
+      .where(eq(syncProofs.id, proofId))
+      .get();
+    const completedAt =
+      input.proof.status === "complete"
+        ? (existingProof?.completedAt ?? input.proof.completedAt ?? input.proof.observedAt)
+        : (input.proof.completedAt ?? existingProof?.completedAt ?? null);
+    const proofSyncMode = input.proof.syncMode ?? null;
+    const proofRunStartedAt = input.proof.runStartedAt ?? null;
+    const proofFreshUntil = input.proof.freshUntil ?? null;
+    const resumeCursorJson = safeStringifyJson(input.proof.resumeCursor);
+    const coverageJson = safeStringifyJson(input.proof.coverage);
+    const statsJson = safeStringifyJson(input.proof.stats);
+    const errorJson = safeStringifyJson(input.proof.error);
+
+    this.db
+      .insert(syncProofs)
+      .values({
+        id: proofId,
+        platform: input.platform,
+        accountKey: input.accountKey,
+        scopeId,
+        proofKind: input.proof.proofKind,
+        status: input.proof.status,
+        syncMode: proofSyncMode,
+        runStartedAt: proofRunStartedAt,
+        lastObservedAt: input.proof.observedAt,
+        completedAt,
+        freshUntil: proofFreshUntil,
+        resumeCursorJson,
+        coverageJson,
+        statsJson,
+        errorJson,
+        createdAt: timestamp,
+        updatedAt: timestamp,
+      })
+      .onConflictDoUpdate({
+        target: [
+          syncProofs.platform,
+          syncProofs.accountKey,
+          syncProofs.scopeId,
+          syncProofs.proofKind,
+        ],
+        set: {
+          status: input.proof.status,
+          syncMode: proofSyncMode,
+          runStartedAt: proofRunStartedAt,
+          lastObservedAt: input.proof.observedAt,
+          completedAt,
+          freshUntil: proofFreshUntil,
+          resumeCursorJson,
+          coverageJson,
+          statsJson,
+          errorJson,
+          updatedAt: timestamp,
+        },
+      })
+      .run();
   }
 
   listSlackBackfillProofs(accountKey: string): SlackBackfillProofRow[] {

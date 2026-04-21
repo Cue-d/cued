@@ -655,6 +655,43 @@ export const MIGRATIONS: Migration[] = [
         UNIQUE(platform, account_key)
       );
 
+      CREATE TABLE IF NOT EXISTS sync_scopes (
+        id TEXT PRIMARY KEY,
+        platform TEXT NOT NULL,
+        account_key TEXT NOT NULL,
+        scope_kind TEXT NOT NULL,
+        scope_key TEXT NOT NULL,
+        parent_scope_id TEXT REFERENCES sync_scopes(id) ON DELETE CASCADE,
+        display_name TEXT,
+        metadata_json TEXT,
+        first_discovered_at INTEGER NOT NULL,
+        last_observed_at INTEGER NOT NULL,
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL,
+        UNIQUE(platform, account_key, scope_kind, scope_key)
+      );
+
+      CREATE TABLE IF NOT EXISTS sync_proofs (
+        id TEXT PRIMARY KEY,
+        platform TEXT NOT NULL,
+        account_key TEXT NOT NULL,
+        scope_id TEXT NOT NULL REFERENCES sync_scopes(id) ON DELETE CASCADE,
+        proof_kind TEXT NOT NULL,
+        status TEXT NOT NULL,
+        sync_mode TEXT,
+        run_started_at INTEGER,
+        last_observed_at INTEGER NOT NULL,
+        completed_at INTEGER,
+        fresh_until INTEGER,
+        resume_cursor_json TEXT,
+        coverage_json TEXT,
+        stats_json TEXT,
+        error_json TEXT,
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL,
+        UNIQUE(platform, account_key, scope_id, proof_kind)
+      );
+
       CREATE TABLE IF NOT EXISTS sync_runs (
         id TEXT PRIMARY KEY,
         platform TEXT,
@@ -1026,6 +1063,18 @@ export const MIGRATIONS: Migration[] = [
 
       CREATE INDEX IF NOT EXISTS idx_sync_checkpoints_lookup
       ON sync_checkpoints(platform, account_key);
+
+      CREATE INDEX IF NOT EXISTS idx_sync_scopes_lookup
+      ON sync_scopes(platform, account_key, scope_kind, scope_key);
+
+      CREATE INDEX IF NOT EXISTS idx_sync_scopes_parent
+      ON sync_scopes(parent_scope_id, updated_at);
+
+      CREATE INDEX IF NOT EXISTS idx_sync_proofs_lookup
+      ON sync_proofs(platform, account_key, scope_id, proof_kind);
+
+      CREATE INDEX IF NOT EXISTS idx_sync_proofs_status
+      ON sync_proofs(platform, account_key, status, updated_at);
 
       CREATE INDEX IF NOT EXISTS idx_sync_runs_status_type_queue
       ON sync_runs(status, run_type, queued_at);
@@ -1487,6 +1536,61 @@ export const MIGRATIONS: Migration[] = [
 
         CREATE INDEX IF NOT EXISTS idx_contact_merge_decisions_canonical
         ON contact_merge_decisions(canonical_contact_id, created_at);
+      `);
+    },
+  },
+  {
+    id: "0007_add_generic_sync_proof_tables",
+    apply: (db) => {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS sync_scopes (
+          id TEXT PRIMARY KEY,
+          platform TEXT NOT NULL,
+          account_key TEXT NOT NULL,
+          scope_kind TEXT NOT NULL,
+          scope_key TEXT NOT NULL,
+          parent_scope_id TEXT REFERENCES sync_scopes(id) ON DELETE CASCADE,
+          display_name TEXT,
+          metadata_json TEXT,
+          first_discovered_at INTEGER NOT NULL,
+          last_observed_at INTEGER NOT NULL,
+          created_at INTEGER NOT NULL,
+          updated_at INTEGER NOT NULL,
+          UNIQUE(platform, account_key, scope_kind, scope_key)
+        );
+
+        CREATE TABLE IF NOT EXISTS sync_proofs (
+          id TEXT PRIMARY KEY,
+          platform TEXT NOT NULL,
+          account_key TEXT NOT NULL,
+          scope_id TEXT NOT NULL REFERENCES sync_scopes(id) ON DELETE CASCADE,
+          proof_kind TEXT NOT NULL,
+          status TEXT NOT NULL,
+          sync_mode TEXT,
+          run_started_at INTEGER,
+          last_observed_at INTEGER NOT NULL,
+          completed_at INTEGER,
+          fresh_until INTEGER,
+          resume_cursor_json TEXT,
+          coverage_json TEXT,
+          stats_json TEXT,
+          error_json TEXT,
+          created_at INTEGER NOT NULL,
+          updated_at INTEGER NOT NULL,
+          UNIQUE(platform, account_key, scope_id, proof_kind)
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_sync_scopes_lookup
+        ON sync_scopes(platform, account_key, scope_kind, scope_key);
+
+        CREATE INDEX IF NOT EXISTS idx_sync_scopes_parent
+        ON sync_scopes(parent_scope_id, updated_at);
+
+        CREATE INDEX IF NOT EXISTS idx_sync_proofs_lookup
+        ON sync_proofs(platform, account_key, scope_id, proof_kind);
+
+        CREATE INDEX IF NOT EXISTS idx_sync_proofs_status
+        ON sync_proofs(platform, account_key, status, updated_at);
       `);
     },
   },

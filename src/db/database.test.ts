@@ -231,6 +231,163 @@ describe("CuedDatabase", () => {
     db.close();
   });
 
+  it("persists generic sync scopes and proofs", () => {
+    const db = createDb();
+
+    db.upsertSyncProof({
+      platform: "slack",
+      accountKey: "workspace-a",
+      proof: {
+        scope: {
+          kind: "conversation",
+          key: "C123",
+          displayName: "eng",
+          metadata: {
+            teamId: "T123",
+            conversationFamily: "channels",
+          },
+        },
+        proofKind: "messages",
+        status: "running",
+        syncMode: "full",
+        observedAt: 200,
+        resumeCursor: {
+          historyCursor: "history-2",
+        },
+        coverage: {
+          oldestMessageTs: "1710000000.000100",
+          newestMessageTs: "1710000000.000100",
+        },
+      },
+    });
+
+    db.upsertSyncProof({
+      platform: "slack",
+      accountKey: "workspace-a",
+      proof: {
+        scope: {
+          kind: "conversation",
+          key: "C123",
+          displayName: "eng",
+        },
+        proofKind: "messages",
+        status: "complete",
+        syncMode: "full",
+        observedAt: 300,
+        coverage: {
+          oldestMessageTs: "1709999999.000000",
+          newestMessageTs: "1710000000.000300",
+        },
+        stats: {
+          knownConversationCount: 3,
+        },
+      },
+    });
+
+    expect(db.listSyncScopes("slack", "workspace-a")).toEqual([
+      expect.objectContaining({
+        platform: "slack",
+        account_key: "workspace-a",
+        scope_kind: "conversation",
+        scope_key: "C123",
+        display_name: "eng",
+        metadata_json: JSON.stringify({
+          teamId: "T123",
+          conversationFamily: "channels",
+        }),
+        first_discovered_at: 200,
+        last_observed_at: 300,
+      }),
+    ]);
+
+    expect(db.listSyncProofs("slack", "workspace-a")).toEqual([
+      expect.objectContaining({
+        platform: "slack",
+        account_key: "workspace-a",
+        scope_kind: "conversation",
+        scope_key: "C123",
+        proof_kind: "messages",
+        status: "complete",
+        sync_mode: "full",
+        completed_at: 300,
+        resume_cursor_json: null,
+        coverage_json: JSON.stringify({
+          oldestMessageTs: "1709999999.000000",
+          newestMessageTs: "1710000000.000300",
+        }),
+        stats_json: JSON.stringify({
+          knownConversationCount: 3,
+        }),
+      }),
+    ]);
+
+    db.close();
+  });
+
+  it("uses unambiguous generic sync proof ids for colon-bearing keys", () => {
+    const db = createDb();
+
+    db.upsertSyncProof({
+      platform: "slack",
+      accountKey: "a:b",
+      proof: {
+        scope: {
+          kind: "c",
+          key: "d",
+        },
+        proofKind: "messages",
+        status: "running",
+        observedAt: 100,
+      },
+    });
+    db.upsertSyncProof({
+      platform: "slack",
+      accountKey: "a",
+      proof: {
+        scope: {
+          kind: "b",
+          key: "c:d",
+        },
+        proofKind: "messages",
+        status: "complete",
+        observedAt: 200,
+      },
+    });
+
+    expect(db.listSyncScopes("slack", "a:b")).toEqual([
+      expect.objectContaining({
+        account_key: "a:b",
+        scope_kind: "c",
+        scope_key: "d",
+      }),
+    ]);
+    expect(db.listSyncScopes("slack", "a")).toEqual([
+      expect.objectContaining({
+        account_key: "a",
+        scope_kind: "b",
+        scope_key: "c:d",
+      }),
+    ]);
+    expect(db.listSyncProofs("slack", "a:b")).toEqual([
+      expect.objectContaining({
+        account_key: "a:b",
+        scope_kind: "c",
+        scope_key: "d",
+        status: "running",
+      }),
+    ]);
+    expect(db.listSyncProofs("slack", "a")).toEqual([
+      expect.objectContaining({
+        account_key: "a",
+        scope_kind: "b",
+        scope_key: "c:d",
+        status: "complete",
+      }),
+    ]);
+
+    db.close();
+  });
+
   it("persists app settings and install metadata", () => {
     const db = createDb();
 
@@ -1099,6 +1256,11 @@ describe("CuedDatabase", () => {
         .prepare("SELECT 1 FROM schema_migrations WHERE id = ?")
         .get("0004_repair_partial_legacy_bootstrap"),
     ).toBeTruthy();
+    expect(
+      sql
+        .prepare("SELECT 1 FROM schema_migrations WHERE id = ?")
+        .get("0007_add_generic_sync_proof_tables"),
+    ).toBeTruthy();
     expect(syncRunColumns).toContain("queued_at");
     expect(
       sql.prepare("SELECT queued_at, started_at FROM sync_runs WHERE id = ?").get("legacy-run"),
@@ -1115,6 +1277,8 @@ describe("CuedDatabase", () => {
     expect(tables).toEqual(
       expect.arrayContaining([
         "slack_backfill_proofs",
+        "sync_scopes",
+        "sync_proofs",
         "attachment_cache",
         "attachment_content",
         "projection_state",

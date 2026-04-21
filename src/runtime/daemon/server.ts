@@ -2560,6 +2560,14 @@ export async function runDaemon(): Promise<void> {
         )
           ? bundle.diagnostics.slackBackfillConversations
           : [];
+        const bundleProofs = Array.isArray(bundle.proofs) ? bundle.proofs : [];
+        for (const proof of bundleProofs) {
+          db.upsertSyncProof({
+            platform,
+            accountKey,
+            proof,
+          });
+        }
         if (platform === "slack") {
           for (const proof of slackBackfillDiagnostics) {
             if (isSlackBackfillConversationProof(proof)) {

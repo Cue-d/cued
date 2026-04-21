@@ -10,7 +10,11 @@ import {
   buildSlackMessageEvents,
   slackTimestampMs,
 } from "./events.js";
-import type { SlackBackfillConversationPhase, SlackBackfillConversationProof } from "./proof.js";
+import {
+  buildSlackBackfillSyncProofs,
+  type SlackBackfillConversationPhase,
+  type SlackBackfillConversationProof,
+} from "./proof.js";
 
 const INCREMENTAL_BUFFER_MS = 5 * 60 * 1000;
 const DEFAULT_SLACK_CONVERSATIONS_PER_RUN = 5;
@@ -860,6 +864,7 @@ export async function buildSlackSyncBundle(options?: {
         sourceCursor,
         syncMode: scan.mode,
         hasMore,
+        proofs: slackBackfillDiagnostics.flatMap(buildSlackBackfillSyncProofs),
         diagnostics: {
           slackBackfillConversations: slackBackfillDiagnostics,
         },
@@ -980,6 +985,7 @@ export async function buildSlackSyncBundle(options?: {
     sourceCursor,
     syncMode: scan.mode,
     hasMore,
+    proofs: slackBackfillDiagnostics.flatMap(buildSlackBackfillSyncProofs),
     diagnostics:
       slackBackfillDiagnostics.length > 0
         ? { slackBackfillConversations: slackBackfillDiagnostics }
