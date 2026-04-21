@@ -5,6 +5,7 @@ import {
   isPlatform,
 } from "../core/types/provider.js";
 import type { CuedDatabase } from "../db/database.js";
+import { rebuildProjectedState } from "./projection/projector.js";
 
 type RunQueueSchedulers = {
   wakeIngest?: () => void;
@@ -17,6 +18,30 @@ export class RunQueueService {
     private readonly db: CuedDatabase,
     private readonly schedulers: RunQueueSchedulers = {},
   ) {}
+
+  private listManualSyncTargets(source: AdapterPlatform): string[] {
+    const syncCapableTargets = this.db
+      .listEnabledSyncTargets()
+      .filter(
+        (target): target is { platform: AdapterPlatform; account_key: string } =>
+          isAdapterPlatform(target.platform) && target.platform === source,
+      )
+      .map((target) => `${target.platform}:${target.account_key}`);
+    if (syncCapableTargets.length > 0) {
+      return [...new Set(syncCapableTargets)];
+    }
+
+    const authenticatedTargets = this.db
+      .listIntegrationStates()
+      .filter(
+        (integration) =>
+          integration.platform === source &&
+          integration.enabled === 1 &&
+          (integration.auth_state === "authenticated" || integration.auth_state === "authorized"),
+      )
+      .map((integration) => `${integration.platform}:${integration.account_key}`);
+    return [...new Set(authenticatedTargets)];
+  }
 
   queueMessageSend(input: {
     platform: string;
@@ -84,17 +109,7 @@ export class RunQueueService {
     }
 
     if (source && isAdapterPlatform(source)) {
-      const targets = [
-        ...new Set(
-          this.db
-            .listEnabledSyncTargets()
-            .filter(
-              (target): target is { platform: AdapterPlatform; account_key: string } =>
-                isAdapterPlatform(target.platform) && target.platform === source,
-            )
-            .map((target) => `${target.platform}:${target.account_key}`),
-        ),
-      ];
+      const targets = this.listManualSyncTargets(source);
 
       if (targets.length > 0) {
         const queuedTargets: string[] = [];
@@ -229,6 +244,32 @@ export class RunQueueService {
     };
     this.schedulers.wakeProjection?.();
     return result;
+  }
+
+  mergeContacts(input: { primaryContactId: string; secondaryContactId: string; reason?: string }): {
+    merged: true;
+    decisionId: string;
+    primaryContactId: string;
+    secondaryContactId: string;
+    canonicalContactId: string;
+    projection: ReturnType<typeof rebuildProjectedState>;
+  } {
+    const decision = this.db.recordContactMergeDecision({
+      primaryContactId: input.primaryContactId,
+      secondaryContactId: input.secondaryContactId,
+      reason: input.reason ?? null,
+      createdBy: "cli",
+    });
+    const projection = rebuildProjectedState(this.db);
+
+    return {
+      merged: true,
+      decisionId: decision.decisionId,
+      primaryContactId: decision.primaryContactId,
+      secondaryContactId: decision.secondaryContactId,
+      canonicalContactId: decision.canonicalContactId,
+      projection,
+    };
   }
 }
 

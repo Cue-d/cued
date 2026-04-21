@@ -128,8 +128,8 @@ Records of contact merge/split decisions.
 ```
 id TEXT PRIMARY KEY
 decision_type TEXT      -- 'merge' or 'split'
-left_contact_id TEXT
-right_contact_id TEXT
+primary_contact_id TEXT
+secondary_contact_id TEXT
 canonical_contact_id TEXT
 reason TEXT
 created_by TEXT
@@ -155,5 +155,5 @@ Platform connection status. Key columns: `platform`, `account_key`, `auth_state`
 - **Find a person**: Search `contacts` by name (`LIKE '%name%' COLLATE NOCASE`), then check `contact_handles` for email/phone/handle matches.
 - **Cross-platform view**: Join `conversation_participants` → `conversations` for a contact to see all their threads across platforms.
 - **Duplicate detection**: Match `contact_handles.normalized_value` across different `contact_id`s, or match `contacts.name` case-insensitively. Many contacts have phone numbers as names (e.g. `+1347...`) because they were discovered via iMessage before being linked.
-- **Merge duplicates**: `cued merge contact <left-id> <right-id>` (merges right into left).
-- **Split**: `cued split contact <contact-id>`.
+- **Merge duplicates**: `cued contacts merge <primary-id> <secondary-id> [--reason TEXT]` (merges secondary into primary and rebuilds projected state).
+- **Merge audit trail**: Manual merges are recorded in `contact_merge_decisions`, so they survive rebuilds and replay.

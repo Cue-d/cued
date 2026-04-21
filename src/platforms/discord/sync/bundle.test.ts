@@ -141,6 +141,49 @@ describe("buildDiscordSyncBundle", () => {
         "dm-3": { latestMessageId: "200" },
       },
     });
+    expect(findDiscordProof(bundle, "account", "u-self", "discovery")).toEqual(
+      expect.objectContaining({
+        status: "complete",
+        completedAt: expect.any(Number),
+        stats: {
+          discoveredDmCount: 3,
+        },
+      }),
+    );
+    expect(findDiscordProof(bundle, "conversation", "dm-2", "discovery")).toEqual(
+      expect.objectContaining({
+        status: "complete",
+        coverage: {
+          latestMessageId: "300",
+        },
+      }),
+    );
+    expect(findDiscordProof(bundle, "conversation", "dm-2", "latest_messages")).toEqual(
+      expect.objectContaining({
+        status: "complete",
+        coverage: {
+          latestMessageId: "300",
+          previousLatestMessageId: null,
+        },
+        stats: {
+          hydratedThisRun: true,
+          messagesFetched: 3,
+        },
+      }),
+    );
+    expect(findDiscordProof(bundle, "conversation", "dm-2", "messages")).toEqual(
+      expect.objectContaining({
+        status: "running",
+        resumeCursor: {
+          before: "dm-2-latest-1",
+        },
+        coverage: {
+          oldestMessageId: "dm-2-latest-1",
+          newestMessageId: "dm-2-latest-3",
+        },
+      }),
+    );
+    expect(findDiscordProof(bundle, "conversation", "dm-1", "latest_messages")).toBeUndefined();
   });
 
   it("reports partial hydration diagnostics when a DM history fetch fails", async () => {
@@ -217,6 +260,33 @@ describe("buildDiscordSyncBundle", () => {
         rateLimited: true,
       },
     });
+    expect(findDiscordProof(bundle, "account", "u-self", "discovery")).toEqual(
+      expect.objectContaining({
+        status: "complete",
+      }),
+    );
+    expect(findDiscordProof(bundle, "conversation", "dm-1", "latest_messages")).toEqual(
+      expect.objectContaining({
+        status: "complete",
+      }),
+    );
+    expect(findDiscordProof(bundle, "conversation", "dm-2", "latest_messages")).toEqual(
+      expect.objectContaining({
+        status: "failed",
+        completedAt: null,
+        resumeCursor: {
+          latestMessageId: "200",
+        },
+        coverage: {
+          latestMessageId: "200",
+          previousLatestMessageId: null,
+        },
+        error: {
+          message: "Discord API rate limited",
+        },
+      }),
+    );
+    expect(findDiscordProof(bundle, "conversation", "dm-3", "latest_messages")).toBeUndefined();
   });
 
   it("uses persisted Discord cursors to fetch only changed DMs and paginate older pages", async () => {
@@ -356,8 +426,59 @@ describe("buildDiscordSyncBundle", () => {
         "dm-3": { latestMessageId: "150" },
       },
     });
+    expect(findDiscordProof(bundle, "conversation", "dm-1", "latest_messages")).toEqual(
+      expect.objectContaining({
+        status: "complete",
+        coverage: {
+          latestMessageId: "350",
+          previousLatestMessageId: "150",
+        },
+        stats: {
+          hydratedThisRun: true,
+          messagesFetched: 200,
+        },
+      }),
+    );
+    expect(findDiscordProof(bundle, "conversation", "dm-1", "messages")).toBeUndefined();
+    expect(findDiscordProof(bundle, "conversation", "dm-2", "latest_messages")).toEqual(
+      expect.objectContaining({
+        status: "complete",
+        coverage: {
+          latestMessageId: "200",
+          previousLatestMessageId: "200",
+        },
+        stats: {
+          hydratedThisRun: false,
+          messagesFetched: 0,
+        },
+      }),
+    );
+    expect(findDiscordProof(bundle, "conversation", "dm-3", "messages")).toEqual(
+      expect.objectContaining({
+        status: "complete",
+        resumeCursor: null,
+        coverage: {
+          oldestMessageId: "150",
+          newestMessageId: "150",
+        },
+      }),
+    );
   });
 });
+
+function findDiscordProof(
+  bundle: Awaited<ReturnType<typeof buildDiscordSyncBundle>>,
+  scopeKind: string,
+  scopeKey: string,
+  proofKind: string,
+) {
+  return bundle.proofs?.find(
+    (proof) =>
+      proof.scope.kind === scopeKind &&
+      proof.scope.key === scopeKey &&
+      proof.proofKind === proofKind,
+  );
+}
 
 function buildDescendingDiscordMessages(channelId: string, high: number, low: number) {
   const messages = [];

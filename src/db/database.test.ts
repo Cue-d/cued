@@ -3,7 +3,7 @@ import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { CuedDatabase } from "./database.js";
+import { CuedDatabase, openExistingCuedDatabase } from "./database.js";
 
 describe("CuedDatabase", () => {
   const tempDirs: string[] = [];
@@ -123,7 +123,19 @@ describe("CuedDatabase", () => {
       sourceAccounts: 0,
       integrations: 0,
       authSessions: 0,
+      messageBreakdown: [],
     });
+    db.close();
+  });
+
+  it("executes read-only SQL for ad hoc inspection", () => {
+    const db = createDb();
+
+    expect(db.executeReadOnlySql("select 1 as value")).toEqual([{ value: 1 }]);
+    expect(() => db.executeReadOnlySql("insert into app_settings (key) values ('nope')")).toThrow(
+      "Only read-only SELECT/PRAGMA/EXPLAIN queries are supported",
+    );
+
     db.close();
   });
 
@@ -219,6 +231,163 @@ describe("CuedDatabase", () => {
     db.close();
   });
 
+  it("persists generic sync scopes and proofs", () => {
+    const db = createDb();
+
+    db.upsertSyncProof({
+      platform: "slack",
+      accountKey: "workspace-a",
+      proof: {
+        scope: {
+          kind: "conversation",
+          key: "C123",
+          displayName: "eng",
+          metadata: {
+            teamId: "T123",
+            conversationFamily: "channels",
+          },
+        },
+        proofKind: "messages",
+        status: "running",
+        syncMode: "full",
+        observedAt: 200,
+        resumeCursor: {
+          historyCursor: "history-2",
+        },
+        coverage: {
+          oldestMessageTs: "1710000000.000100",
+          newestMessageTs: "1710000000.000100",
+        },
+      },
+    });
+
+    db.upsertSyncProof({
+      platform: "slack",
+      accountKey: "workspace-a",
+      proof: {
+        scope: {
+          kind: "conversation",
+          key: "C123",
+          displayName: "eng",
+        },
+        proofKind: "messages",
+        status: "complete",
+        syncMode: "full",
+        observedAt: 300,
+        coverage: {
+          oldestMessageTs: "1709999999.000000",
+          newestMessageTs: "1710000000.000300",
+        },
+        stats: {
+          knownConversationCount: 3,
+        },
+      },
+    });
+
+    expect(db.listSyncScopes("slack", "workspace-a")).toEqual([
+      expect.objectContaining({
+        platform: "slack",
+        account_key: "workspace-a",
+        scope_kind: "conversation",
+        scope_key: "C123",
+        display_name: "eng",
+        metadata_json: JSON.stringify({
+          teamId: "T123",
+          conversationFamily: "channels",
+        }),
+        first_discovered_at: 200,
+        last_observed_at: 300,
+      }),
+    ]);
+
+    expect(db.listSyncProofs("slack", "workspace-a")).toEqual([
+      expect.objectContaining({
+        platform: "slack",
+        account_key: "workspace-a",
+        scope_kind: "conversation",
+        scope_key: "C123",
+        proof_kind: "messages",
+        status: "complete",
+        sync_mode: "full",
+        completed_at: 300,
+        resume_cursor_json: null,
+        coverage_json: JSON.stringify({
+          oldestMessageTs: "1709999999.000000",
+          newestMessageTs: "1710000000.000300",
+        }),
+        stats_json: JSON.stringify({
+          knownConversationCount: 3,
+        }),
+      }),
+    ]);
+
+    db.close();
+  });
+
+  it("uses unambiguous generic sync proof ids for colon-bearing keys", () => {
+    const db = createDb();
+
+    db.upsertSyncProof({
+      platform: "slack",
+      accountKey: "a:b",
+      proof: {
+        scope: {
+          kind: "c",
+          key: "d",
+        },
+        proofKind: "messages",
+        status: "running",
+        observedAt: 100,
+      },
+    });
+    db.upsertSyncProof({
+      platform: "slack",
+      accountKey: "a",
+      proof: {
+        scope: {
+          kind: "b",
+          key: "c:d",
+        },
+        proofKind: "messages",
+        status: "complete",
+        observedAt: 200,
+      },
+    });
+
+    expect(db.listSyncScopes("slack", "a:b")).toEqual([
+      expect.objectContaining({
+        account_key: "a:b",
+        scope_kind: "c",
+        scope_key: "d",
+      }),
+    ]);
+    expect(db.listSyncScopes("slack", "a")).toEqual([
+      expect.objectContaining({
+        account_key: "a",
+        scope_kind: "b",
+        scope_key: "c:d",
+      }),
+    ]);
+    expect(db.listSyncProofs("slack", "a:b")).toEqual([
+      expect.objectContaining({
+        account_key: "a:b",
+        scope_kind: "c",
+        scope_key: "d",
+        status: "running",
+      }),
+    ]);
+    expect(db.listSyncProofs("slack", "a")).toEqual([
+      expect.objectContaining({
+        account_key: "a",
+        scope_kind: "b",
+        scope_key: "c:d",
+        status: "complete",
+      }),
+    ]);
+
+    db.close();
+  });
+
   it("persists app settings and install metadata", () => {
     const db = createDb();
 
@@ -243,6 +412,47 @@ describe("CuedDatabase", () => {
     expect(db.getAppSetting("installed_app_version")?.value).toBe("0.1.0-internal.1");
 
     db.close();
+  });
+
+  it("opens existing databases without startup metadata writes", () => {
+    const db = createDb();
+    const dbPath = db.dbPath;
+    db.recordAppMetadata({
+      version: "0.1.0",
+      releaseChannel: "stable",
+    });
+    db.close();
+
+    const existing = openExistingCuedDatabase(dbPath);
+    existing.setUpdateLastError(null);
+    existing.close();
+
+    const reopened = new CuedDatabase(dbPath);
+    expect(reopened.getAppMetadata().installedAppVersion).toBe("0.1.0");
+    expect(reopened.getAppMetadata().releaseChannel).toBe("stable");
+    reopened.close();
+
+    const missingDir = mkdtempSync(join(tmpdir(), "cued-v2-db-missing-"));
+    tempDirs.push(missingDir);
+    const missingPath = join(missingDir, "local.db");
+    expect(() => openExistingCuedDatabase(missingPath)).toThrow(
+      `Cued database does not exist at ${missingPath}`,
+    );
+    expect(existsSync(missingPath)).toBe(false);
+  });
+
+  it("reads projection backlog without initializing projection state", () => {
+    const db = createDb();
+    const dbPath = db.dbPath;
+    db.close();
+
+    const readonly = openExistingCuedDatabase(dbPath, { readonly: true });
+    expect(readonly.getProjectionBacklog({ initializeProjectionState: false })).toEqual({
+      projection_watermark: 0,
+      max_raw_event_rowid: 0,
+      pending_raw_events: 0,
+    });
+    readonly.close();
   });
 
   it("stores messages automation verification state", () => {
@@ -562,6 +772,47 @@ describe("CuedDatabase", () => {
     });
     expect(db.resolveDiscordSendTarget("general")).toBeNull();
     expect(db.resolveDiscordSendTarget("guild-1")).toBeNull();
+
+    db.close();
+  });
+
+  it("records manual merge decisions and resolves canonical contact chains", () => {
+    const db = createDb();
+
+    insertContact(db, { id: "contact-a", name: "Ava Prime" });
+    insertContact(db, { id: "contact-b", name: "Ava Duplicate" });
+    insertContact(db, { id: "contact-c", name: "Ava Canonical" });
+
+    expect(
+      db.recordContactMergeDecision({
+        primaryContactId: "contact-a",
+        secondaryContactId: "contact-b",
+        reason: "same phone",
+      }),
+    ).toEqual({
+      decisionId: expect.any(String),
+      primaryContactId: "contact-a",
+      secondaryContactId: "contact-b",
+      canonicalContactId: "contact-a",
+    });
+
+    expect(
+      db.recordContactMergeDecision({
+        primaryContactId: "contact-c",
+        secondaryContactId: "contact-a",
+        reason: "prefer contacts source",
+      }),
+    ).toEqual({
+      decisionId: expect.any(String),
+      primaryContactId: "contact-c",
+      secondaryContactId: "contact-a",
+      canonicalContactId: "contact-c",
+    });
+
+    expect(db.resolveCanonicalContactId("contact-b")).toBe("contact-c");
+    expect(db.resolveCanonicalContactId("contact-a")).toBe("contact-c");
+    expect(db.resolveCanonicalContactId("contact-c")).toBe("contact-c");
+    expect(db.listContactMergeDecisions()).toHaveLength(2);
 
     db.close();
   });
@@ -1054,6 +1305,11 @@ describe("CuedDatabase", () => {
         .prepare("SELECT 1 FROM schema_migrations WHERE id = ?")
         .get("0004_repair_partial_legacy_bootstrap"),
     ).toBeTruthy();
+    expect(
+      sql
+        .prepare("SELECT 1 FROM schema_migrations WHERE id = ?")
+        .get("0007_add_generic_sync_proof_tables"),
+    ).toBeTruthy();
     expect(syncRunColumns).toContain("queued_at");
     expect(
       sql.prepare("SELECT queued_at, started_at FROM sync_runs WHERE id = ?").get("legacy-run"),
@@ -1070,6 +1326,8 @@ describe("CuedDatabase", () => {
     expect(tables).toEqual(
       expect.arrayContaining([
         "slack_backfill_proofs",
+        "sync_scopes",
+        "sync_proofs",
         "attachment_cache",
         "attachment_content",
         "projection_state",
