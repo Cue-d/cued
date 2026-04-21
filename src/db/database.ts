@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { existsSync, rmSync } from "node:fs";
-import Database from "better-sqlite3";
+import type Database from "better-sqlite3-multiple-ciphers";
 import { and, asc, desc, eq, inArray, sql } from "drizzle-orm";
 import { type BetterSQLite3Database, drizzle } from "drizzle-orm/better-sqlite3";
 import type { SQLiteTable } from "drizzle-orm/sqlite-core";
@@ -15,6 +15,7 @@ import type {
   ProviderRawEventInput,
   RawEventEntityKind,
   SyncMode,
+  SyncProofInput,
   SyncRunStatus,
   SyncRunType,
 } from "../core/types/provider.js";
@@ -33,12 +34,14 @@ import type {
 import { safeParseJson, safeStringifyJson } from "./codecs.js";
 import { MIGRATIONS } from "./migrations.js";
 import * as schema from "./schema.js";
+import { openSqliteDatabase } from "./sqlite.js";
 
 const {
   attachmentCache,
   attachmentContent,
   appSettings,
   authSessions,
+  contactMergeDecisions,
   contactHandles,
   contactSources,
   contacts,
@@ -54,6 +57,8 @@ const {
   rawEvents,
   sourceAccounts,
   slackBackfillProofs,
+  syncProofs,
+  syncScopes,
   syncCheckpoints,
   syncRunErrors,
   syncRuns,
@@ -153,6 +158,57 @@ export interface SlackBackfillProofRow {
   updated_at: number;
 }
 
+export interface SyncScopeRow {
+  id: string;
+  platform: Platform;
+  account_key: string;
+  scope_kind: string;
+  scope_key: string;
+  parent_scope_id: string | null;
+  display_name: string | null;
+  metadata_json: string | null;
+  first_discovered_at: number;
+  last_observed_at: number;
+  created_at: number;
+  updated_at: number;
+}
+
+export interface SyncProofRow {
+  id: string;
+  platform: Platform;
+  account_key: string;
+  scope_id: string;
+  scope_kind: string;
+  scope_key: string;
+  parent_scope_id: string | null;
+  display_name: string | null;
+  metadata_json: string | null;
+  proof_kind: string;
+  status: string;
+  sync_mode: SyncMode | null;
+  run_started_at: number | null;
+  last_observed_at: number;
+  completed_at: number | null;
+  fresh_until: number | null;
+  resume_cursor_json: string | null;
+  coverage_json: string | null;
+  stats_json: string | null;
+  error_json: string | null;
+  created_at: number;
+  updated_at: number;
+}
+
+export interface ContactMergeDecisionRow {
+  id: string;
+  decision_type: string;
+  primary_contact_id: string;
+  secondary_contact_id: string;
+  canonical_contact_id: string;
+  reason: string | null;
+  created_by: string | null;
+  created_at: number;
+}
+
 function compareSlackTs(left: string | null | undefined, right: string | null | undefined): number {
   if (!left && !right) {
     return 0;
@@ -195,6 +251,29 @@ function maxSlackTs(
     return left;
   }
   return compareSlackTs(left, right) >= 0 ? left : right;
+}
+
+function buildSyncScopeId(
+  platform: Platform,
+  accountKey: string,
+  scopeKind: string,
+  scopeKey: string,
+): string {
+  return `scope:${Buffer.from(JSON.stringify([platform, accountKey, scopeKind, scopeKey])).toString(
+    "base64url",
+  )}`;
+}
+
+function buildSyncProofId(
+  platform: Platform,
+  accountKey: string,
+  scopeKind: string,
+  scopeKey: string,
+  proofKind: string,
+): string {
+  return `proof:${Buffer.from(
+    JSON.stringify([platform, accountKey, scopeKind, scopeKey, proofKind]),
+  ).toString("base64url")}`;
 }
 
 export type RawEventInput = ProviderRawEventInput;
@@ -462,10 +541,7 @@ export class CuedDatabase {
     } = {},
   ) {
     ensureCuedDirs();
-    this.sqlite = new Database(
-      dbPath,
-      options.readonly ? { readonly: true, fileMustExist: true } : undefined,
-    );
+    this.sqlite = openSqliteDatabase(dbPath, { readonly: options.readonly });
     this.sqlite.exec("PRAGMA busy_timeout = 5000");
     this.sqlite.exec("PRAGMA foreign_keys = ON");
     if (!options.readonly) {
@@ -516,6 +592,152 @@ export class CuedDatabase {
 
   orm(): LocalDrizzleDatabase {
     return this.db;
+  }
+
+  executeReadOnlySql(query: string): unknown[] {
+    const trimmed = query.trim();
+    if (trimmed.length === 0) {
+      throw new Error("SQL query must not be empty");
+    }
+    if (!/^(select|with|pragma|explain)\b/i.test(trimmed)) {
+      throw new Error("Only read-only SELECT/PRAGMA/EXPLAIN queries are supported");
+    }
+    const statement = this.sqlite.prepare(trimmed) as Database.Statement & { reader?: boolean };
+    if (statement.reader === false) {
+      throw new Error("Only read-only queries are supported");
+    }
+    return statement.all();
+  }
+
+  listContactMergeDecisions(): ContactMergeDecisionRow[] {
+    return this.db
+      .select({
+        id: contactMergeDecisions.id,
+        decision_type: contactMergeDecisions.decisionType,
+        primary_contact_id: contactMergeDecisions.primaryContactId,
+        secondary_contact_id: contactMergeDecisions.secondaryContactId,
+        canonical_contact_id: contactMergeDecisions.canonicalContactId,
+        reason: contactMergeDecisions.reason,
+        created_by: contactMergeDecisions.createdBy,
+        created_at: contactMergeDecisions.createdAt,
+      })
+      .from(contactMergeDecisions)
+      .orderBy(asc(contactMergeDecisions.createdAt), asc(contactMergeDecisions.id))
+      .all() as ContactMergeDecisionRow[];
+  }
+
+  listContactMergeAliases(): Array<{
+    contact_id: string;
+    canonical_contact_id: string;
+  }> {
+    return this.db
+      .select({
+        contact_id: contactMergeDecisions.secondaryContactId,
+        canonical_contact_id: contactMergeDecisions.canonicalContactId,
+      })
+      .from(contactMergeDecisions)
+      .where(eq(contactMergeDecisions.decisionType, "merge"))
+      .orderBy(asc(contactMergeDecisions.createdAt), asc(contactMergeDecisions.id))
+      .all() as Array<{
+      contact_id: string;
+      canonical_contact_id: string;
+    }>;
+  }
+
+  resolveCanonicalContactId(contactId: string): string {
+    const aliasMap = new Map(
+      this.listContactMergeAliases().map((row) => [row.contact_id, row.canonical_contact_id]),
+    );
+    const seen = new Set<string>();
+    let current = contactId;
+    while (!seen.has(current)) {
+      seen.add(current);
+      const next = aliasMap.get(current);
+      if (!next || next === current) {
+        return current;
+      }
+      current = next;
+    }
+    throw new Error(`Contact merge alias cycle detected at ${current}`);
+  }
+
+  recordContactMergeDecision(input: {
+    primaryContactId: string;
+    secondaryContactId: string;
+    reason?: string | null;
+    createdBy?: string | null;
+  }): {
+    decisionId: string;
+    primaryContactId: string;
+    secondaryContactId: string;
+    canonicalContactId: string;
+  } {
+    if (input.primaryContactId === input.secondaryContactId) {
+      throw new Error("Cannot merge a contact into itself");
+    }
+
+    const primary = this.sqlite
+      .prepare(
+        `
+        SELECT id
+        FROM contacts
+        WHERE id = ?
+        LIMIT 1
+      `,
+      )
+      .get(input.primaryContactId) as { id: string } | undefined;
+    if (!primary) {
+      throw new Error(`Primary contact not found: ${input.primaryContactId}`);
+    }
+
+    const secondary = this.sqlite
+      .prepare(
+        `
+        SELECT id
+        FROM contacts
+        WHERE id = ?
+        LIMIT 1
+      `,
+      )
+      .get(input.secondaryContactId) as { id: string } | undefined;
+    if (!secondary) {
+      throw new Error(`Secondary contact not found: ${input.secondaryContactId}`);
+    }
+
+    const canonicalPrimary = this.resolveCanonicalContactId(input.primaryContactId);
+    const canonicalSecondary = this.resolveCanonicalContactId(input.secondaryContactId);
+    if (canonicalPrimary === canonicalSecondary) {
+      throw new Error(
+        `Contacts already resolve to the same canonical contact: ${canonicalPrimary}`,
+      );
+    }
+
+    const decisionId = randomUUID();
+    return this.sqlite.transaction(() => {
+      this.db
+        .insert(contactMergeDecisions)
+        .values({
+          id: decisionId,
+          decisionType: "merge",
+          primaryContactId: canonicalPrimary,
+          secondaryContactId: canonicalSecondary,
+          canonicalContactId: canonicalPrimary,
+          reason: input.reason ?? null,
+          createdBy: input.createdBy ?? "cli",
+          createdAt: now(),
+        })
+        .run();
+
+      // Validate that the new alias graph remains acyclic before committing.
+      this.resolveCanonicalContactId(canonicalSecondary);
+
+      return {
+        decisionId,
+        primaryContactId: canonicalPrimary,
+        secondaryContactId: canonicalSecondary,
+        canonicalContactId: canonicalPrimary,
+      };
+    })();
   }
 
   listAppSettings(): AppSettingRow[] {
@@ -848,6 +1070,14 @@ export class CuedDatabase {
         .delete(syncCheckpoints)
         .where(eq(syncCheckpoints.platform, platform))
         .run().changes;
+      const removedSyncProofs = tx
+        .delete(syncProofs)
+        .where(eq(syncProofs.platform, platform))
+        .run().changes;
+      const removedSyncScopes = tx
+        .delete(syncScopes)
+        .where(eq(syncScopes.platform, platform))
+        .run().changes;
       const removedSlackBackfillProofs =
         platform === "slack" ? tx.delete(slackBackfillProofs).run().changes : 0;
       return (
@@ -856,6 +1086,8 @@ export class CuedDatabase {
         Number(removedRuns) +
         Number(removedErrors) +
         Number(removedCheckpoints) +
+        Number(removedSyncProofs) +
+        Number(removedSyncScopes) +
         Number(removedSlackBackfillProofs)
       );
     });
@@ -870,6 +1102,233 @@ export class CuedDatabase {
     });
 
     return removed;
+  }
+
+  listSyncScopes(platform: Platform, accountKey: string): SyncScopeRow[] {
+    return this.db
+      .select({
+        id: syncScopes.id,
+        platform: syncScopes.platform,
+        account_key: syncScopes.accountKey,
+        scope_kind: syncScopes.scopeKind,
+        scope_key: syncScopes.scopeKey,
+        parent_scope_id: syncScopes.parentScopeId,
+        display_name: syncScopes.displayName,
+        metadata_json: syncScopes.metadataJson,
+        first_discovered_at: syncScopes.firstDiscoveredAt,
+        last_observed_at: syncScopes.lastObservedAt,
+        created_at: syncScopes.createdAt,
+        updated_at: syncScopes.updatedAt,
+      })
+      .from(syncScopes)
+      .where(and(eq(syncScopes.platform, platform), eq(syncScopes.accountKey, accountKey)))
+      .orderBy(asc(syncScopes.scopeKind), asc(syncScopes.scopeKey))
+      .all() as SyncScopeRow[];
+  }
+
+  listSyncProofs(platform: Platform, accountKey: string): SyncProofRow[] {
+    return this.db
+      .select({
+        id: syncProofs.id,
+        platform: syncProofs.platform,
+        account_key: syncProofs.accountKey,
+        scope_id: syncProofs.scopeId,
+        scope_kind: syncScopes.scopeKind,
+        scope_key: syncScopes.scopeKey,
+        parent_scope_id: syncScopes.parentScopeId,
+        display_name: syncScopes.displayName,
+        metadata_json: syncScopes.metadataJson,
+        proof_kind: syncProofs.proofKind,
+        status: syncProofs.status,
+        sync_mode: syncProofs.syncMode,
+        run_started_at: syncProofs.runStartedAt,
+        last_observed_at: syncProofs.lastObservedAt,
+        completed_at: syncProofs.completedAt,
+        fresh_until: syncProofs.freshUntil,
+        resume_cursor_json: syncProofs.resumeCursorJson,
+        coverage_json: syncProofs.coverageJson,
+        stats_json: syncProofs.statsJson,
+        error_json: syncProofs.errorJson,
+        created_at: syncProofs.createdAt,
+        updated_at: syncProofs.updatedAt,
+      })
+      .from(syncProofs)
+      .innerJoin(syncScopes, eq(syncProofs.scopeId, syncScopes.id))
+      .where(and(eq(syncProofs.platform, platform), eq(syncProofs.accountKey, accountKey)))
+      .orderBy(asc(syncScopes.scopeKind), asc(syncScopes.scopeKey), asc(syncProofs.proofKind))
+      .all() as SyncProofRow[];
+  }
+
+  upsertSyncProof(input: { platform: Platform; accountKey: string; proof: SyncProofInput }): void {
+    const timestamp = now();
+    const scopeId = buildSyncScopeId(
+      input.platform,
+      input.accountKey,
+      input.proof.scope.kind,
+      input.proof.scope.key,
+    );
+    const parentScopeId = input.proof.scope.parent
+      ? buildSyncScopeId(
+          input.platform,
+          input.accountKey,
+          input.proof.scope.parent.kind,
+          input.proof.scope.parent.key,
+        )
+      : null;
+    const existingScope = this.db
+      .select({
+        displayName: syncScopes.displayName,
+        metadataJson: syncScopes.metadataJson,
+        firstDiscoveredAt: syncScopes.firstDiscoveredAt,
+      })
+      .from(syncScopes)
+      .where(eq(syncScopes.id, scopeId))
+      .get();
+    const scopeDisplayName =
+      input.proof.scope.displayName === undefined
+        ? (existingScope?.displayName ?? null)
+        : input.proof.scope.displayName;
+    const scopeMetadataJson =
+      input.proof.scope.metadata === undefined
+        ? (existingScope?.metadataJson ?? null)
+        : safeStringifyJson(input.proof.scope.metadata);
+    const scopeFirstDiscoveredAt = existingScope?.firstDiscoveredAt ?? input.proof.observedAt;
+
+    if (input.proof.scope.parent) {
+      this.db
+        .insert(syncScopes)
+        .values({
+          id: parentScopeId!,
+          platform: input.platform,
+          accountKey: input.accountKey,
+          scopeKind: input.proof.scope.parent.kind,
+          scopeKey: input.proof.scope.parent.key,
+          parentScopeId: null,
+          displayName: null,
+          metadataJson: null,
+          firstDiscoveredAt: input.proof.observedAt,
+          lastObservedAt: input.proof.observedAt,
+          createdAt: timestamp,
+          updatedAt: timestamp,
+        })
+        .onConflictDoUpdate({
+          target: [
+            syncScopes.platform,
+            syncScopes.accountKey,
+            syncScopes.scopeKind,
+            syncScopes.scopeKey,
+          ],
+          set: {
+            lastObservedAt: input.proof.observedAt,
+            updatedAt: timestamp,
+          },
+        })
+        .run();
+    }
+
+    this.db
+      .insert(syncScopes)
+      .values({
+        id: scopeId,
+        platform: input.platform,
+        accountKey: input.accountKey,
+        scopeKind: input.proof.scope.kind,
+        scopeKey: input.proof.scope.key,
+        parentScopeId,
+        displayName: scopeDisplayName,
+        metadataJson: scopeMetadataJson,
+        firstDiscoveredAt: scopeFirstDiscoveredAt,
+        lastObservedAt: input.proof.observedAt,
+        createdAt: timestamp,
+        updatedAt: timestamp,
+      })
+      .onConflictDoUpdate({
+        target: [
+          syncScopes.platform,
+          syncScopes.accountKey,
+          syncScopes.scopeKind,
+          syncScopes.scopeKey,
+        ],
+        set: {
+          parentScopeId,
+          displayName: scopeDisplayName,
+          metadataJson: scopeMetadataJson,
+          firstDiscoveredAt: scopeFirstDiscoveredAt,
+          lastObservedAt: input.proof.observedAt,
+          updatedAt: timestamp,
+        },
+      })
+      .run();
+
+    const proofId = buildSyncProofId(
+      input.platform,
+      input.accountKey,
+      input.proof.scope.kind,
+      input.proof.scope.key,
+      input.proof.proofKind,
+    );
+    const existingProof = this.db
+      .select({
+        completedAt: syncProofs.completedAt,
+      })
+      .from(syncProofs)
+      .where(eq(syncProofs.id, proofId))
+      .get();
+    const completedAt =
+      input.proof.status === "complete"
+        ? (existingProof?.completedAt ?? input.proof.completedAt ?? input.proof.observedAt)
+        : (input.proof.completedAt ?? existingProof?.completedAt ?? null);
+    const proofSyncMode = input.proof.syncMode ?? null;
+    const proofRunStartedAt = input.proof.runStartedAt ?? null;
+    const proofFreshUntil = input.proof.freshUntil ?? null;
+    const resumeCursorJson = safeStringifyJson(input.proof.resumeCursor);
+    const coverageJson = safeStringifyJson(input.proof.coverage);
+    const statsJson = safeStringifyJson(input.proof.stats);
+    const errorJson = safeStringifyJson(input.proof.error);
+
+    this.db
+      .insert(syncProofs)
+      .values({
+        id: proofId,
+        platform: input.platform,
+        accountKey: input.accountKey,
+        scopeId,
+        proofKind: input.proof.proofKind,
+        status: input.proof.status,
+        syncMode: proofSyncMode,
+        runStartedAt: proofRunStartedAt,
+        lastObservedAt: input.proof.observedAt,
+        completedAt,
+        freshUntil: proofFreshUntil,
+        resumeCursorJson,
+        coverageJson,
+        statsJson,
+        errorJson,
+        createdAt: timestamp,
+        updatedAt: timestamp,
+      })
+      .onConflictDoUpdate({
+        target: [
+          syncProofs.platform,
+          syncProofs.accountKey,
+          syncProofs.scopeId,
+          syncProofs.proofKind,
+        ],
+        set: {
+          status: input.proof.status,
+          syncMode: proofSyncMode,
+          runStartedAt: proofRunStartedAt,
+          lastObservedAt: input.proof.observedAt,
+          completedAt,
+          freshUntil: proofFreshUntil,
+          resumeCursorJson,
+          coverageJson,
+          statsJson,
+          errorJson,
+          updatedAt: timestamp,
+        },
+      })
+      .run();
   }
 
   listSlackBackfillProofs(accountKey: string): SlackBackfillProofRow[] {
@@ -1025,6 +1484,10 @@ export class CuedDatabase {
     sourceAccounts: number;
     integrations: number;
     authSessions: number;
+    messageBreakdown: Array<{
+      platform: Platform;
+      messages: number;
+    }>;
   } {
     return {
       contacts: this.countRows(contacts),
@@ -1034,10 +1497,30 @@ export class CuedDatabase {
       sourceAccounts: this.countRows(sourceAccounts),
       integrations: this.countRows(integrationStates),
       authSessions: this.countRows(authSessions),
+      messageBreakdown: this.listMessageCountsByPlatform(),
     };
   }
 
-  getProjectionState(): ProjectionStateRow {
+  listMessageCountsByPlatform(): Array<{
+    platform: Platform;
+    messages: number;
+  }> {
+    return this.sqlite
+      .prepare(
+        `
+        SELECT platform, COUNT(*) AS messages
+        FROM messages
+        GROUP BY platform
+        ORDER BY messages DESC, platform ASC
+      `,
+      )
+      .all() as Array<{
+      platform: Platform;
+      messages: number;
+    }>;
+  }
+
+  getProjectionState(options: { initialize?: boolean } = {}): ProjectionStateRow {
     const row = this.db
       .select({
         singleton_key: projectionState.singletonKey,
@@ -1061,11 +1544,13 @@ export class CuedDatabase {
       last_rebuild_at: null,
       updated_at: now(),
     };
-    this.upsertProjectionState({
-      projectionWatermark: 0,
-      lastProjectedAt: null,
-      lastRebuildAt: null,
-    });
+    if (options.initialize !== false) {
+      this.upsertProjectionState({
+        projectionWatermark: 0,
+        lastProjectedAt: null,
+        lastRebuildAt: null,
+      });
+    }
     return fallback;
   }
 
@@ -1097,12 +1582,14 @@ export class CuedDatabase {
       .run();
   }
 
-  getProjectionBacklog(): {
+  getProjectionBacklog(options: { initializeProjectionState?: boolean } = {}): {
     projection_watermark: number;
     max_raw_event_rowid: number;
     pending_raw_events: number;
   } {
-    const state = this.getProjectionState();
+    const state = this.getProjectionState({
+      initialize: options.initializeProjectionState !== false,
+    });
     const row = this.sqlite
       .prepare(
         `
@@ -3358,6 +3845,18 @@ export function openCuedDatabase(dbPath?: string): CuedDatabase {
     releaseChannel: getCurrentReleaseChannel(),
   });
   return db;
+}
+
+export function openExistingCuedDatabase(
+  dbPath?: string,
+  options: { readonly?: boolean } = {},
+): CuedDatabase {
+  const resolvedPath = dbPath ?? CUED_DB_PATH;
+  if (!existsSync(resolvedPath)) {
+    throw new Error(`Cued database does not exist at ${resolvedPath}`);
+  }
+
+  return new CuedDatabase(resolvedPath, options);
 }
 
 export function openCuedDatabaseReadOnly(dbPath?: string): CuedDatabase {

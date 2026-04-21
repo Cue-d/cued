@@ -9,7 +9,11 @@ import { sendDaemonRequest } from "./client.js";
 import { getCurrentAppVersion, getCurrentReleaseChannel } from "./core/app-metadata.js";
 import { CUED_DB_PATH, CUED_SOCKET_PATH, ensureCuedDirs } from "./core/config.js";
 import { resolveHostOS } from "./core/platform-capabilities.js";
-import { openCuedDatabase, openCuedDatabaseReadOnly } from "./db/database.js";
+import {
+  openCuedDatabase,
+  openCuedDatabaseReadOnly,
+  openExistingCuedDatabase,
+} from "./db/database.js";
 import {
   disableLoginItem,
   enableLoginItem,
@@ -53,11 +57,15 @@ import {
 import { buildOnboardingSnapshot } from "./runtime/onboarding.js";
 import {
   checkForUpdates,
+  clearUpdateHelperPendingState,
   getUpdateStatus,
   installAvailableUpdate,
+  runUpdateHelperHealthCheck,
   runUpdatePreflight,
+  setUpdateHelperLastError,
 } from "./runtime/updater/service.js";
 import { runSetupTUI } from "./setup.js";
+import { getGlobalCuedSkillStatus, installGlobalCuedSkill } from "./skills/install.js";
 
 const DIST_ROOT = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = resolve(DIST_ROOT, "..");
@@ -120,7 +128,9 @@ Usage:
   cued cli install|status
   cued login-item enable|disable|status
   cued onboarding complete|snapshot|status [--refresh-managed] [--refresh-permissions]
+  cued skill install-global|status
   cued permissions doctor|status|request [--all|--contacts|--messages|--full-disk-access]
+  cued sql <query>
   cued integrations list
   cued integrations status
   cued integrations capabilities
@@ -130,6 +140,7 @@ Usage:
   cued integrations remove <platform> [account]
   cued integrations enable <platform> [account]
   cued integrations disable <platform> [account]
+  cued contacts merge <primary-contact-id> <secondary-contact-id> [--reason TEXT]
   cued attachments list [--message ID] [--conversation ID] [--platform PLATFORM] [--account ACCOUNT] [--limit N]
   cued attachments fetch <attachment-id> [--variant original] [--max-bytes N] [--allow-large] [--no-extract]
   cued attachments search <query> [--conversation ID] [--platform PLATFORM] [--account ACCOUNT] [--limit N]
@@ -183,6 +194,18 @@ async function handleLocalIntegrationCommand(
   subcommand: string | undefined,
   rest: string[],
 ): Promise<unknown> {
+  if (subcommand === "capabilities") {
+    return PLATFORM_VALUES.map((platform) => ({
+      platform,
+      supportedHostOs: getSupportedHostOsForPlatform(platform),
+      onboardingVisible: isOnboardingVisiblePlatform(platform),
+      supportsMultipleAccounts: platformSupportsMultipleAccounts(platform),
+      permissionRequirements: getPlatformPermissionRequirements(platform),
+      helperRequirements: getPlatformHelperRequirements(platform),
+      features: getPlatformFeatureMatrixRow(platform),
+    }));
+  }
+
   const db = openCuedDatabase();
   const service = new IntegrationAuthService(db);
   try {
@@ -310,6 +333,48 @@ async function main(): Promise<void> {
         printJson(runUpdatePreflight(dbPath));
         return;
       }
+      case "helper-health": {
+        const dbPathFlagIndex = rest.findIndex((value) => value === "--db-path");
+        const expectedVersionFlagIndex = rest.findIndex((value) => value === "--expected-version");
+        const dbPath = dbPathFlagIndex >= 0 ? rest[dbPathFlagIndex + 1] : undefined;
+        const expectedVersion =
+          expectedVersionFlagIndex >= 0 ? rest[expectedVersionFlagIndex + 1] : undefined;
+        if (!dbPath || !expectedVersion) {
+          throw new Error(
+            "Usage: cued update helper-health --db-path <path> --expected-version <version>",
+          );
+        }
+        const healthy = runUpdateHelperHealthCheck(dbPath, expectedVersion);
+        printJson({ healthy });
+        if (!healthy) {
+          process.exitCode = 1;
+        }
+        return;
+      }
+      case "helper-clear-pending": {
+        const dbPathFlagIndex = rest.findIndex((value) => value === "--db-path");
+        const dbPath = dbPathFlagIndex >= 0 ? rest[dbPathFlagIndex + 1] : undefined;
+        if (!dbPath) {
+          throw new Error("Usage: cued update helper-clear-pending --db-path <path>");
+        }
+        clearUpdateHelperPendingState(dbPath);
+        printJson({ cleared: true });
+        return;
+      }
+      case "helper-set-last-error": {
+        const dbPathFlagIndex = rest.findIndex((value) => value === "--db-path");
+        const messageFlagIndex = rest.findIndex((value) => value === "--message");
+        const dbPath = dbPathFlagIndex >= 0 ? rest[dbPathFlagIndex + 1] : undefined;
+        const message = messageFlagIndex >= 0 ? rest[messageFlagIndex + 1] : undefined;
+        if (!dbPath) {
+          throw new Error(
+            "Usage: cued update helper-set-last-error --db-path <path> [--message <text>]",
+          );
+        }
+        setUpdateHelperLastError(dbPath, message ?? null);
+        printJson({ cleared: message == null });
+        return;
+      }
       default:
         throw new Error("Usage: cued update status | check [--force] | install");
     }
@@ -342,31 +407,39 @@ async function main(): Promise<void> {
   }
 
   if ((command === "status" || command === "doctor") && !existsSync(CUED_SOCKET_PATH)) {
-    const db = openCuedDatabase();
-    printJson(
-      command === "doctor"
-        ? {
-            app: getAppStatusMetadata(db),
-            ...(await buildDoctorReport(db)),
-            projection: db.getProjectionBacklog(),
-            hooks: doctorHooksConfig(),
-            update: getUpdateStatus(db),
-          }
-        : {
-            app: getAppStatusMetadata(db),
-            daemon: db.getDaemonState(),
-            overview: db.getOverview(),
-            projection: db.getProjectionBacklog(),
-            checkpoints: db.listCheckpointSummary(),
-            recentRuns: db.listRecentRuns(),
-            integrations: listIntegrationStates(db),
-            hooks: doctorHooksConfig(),
-            update: getUpdateStatus(db),
-            socketRunning: false,
-            dbPath: db.dbPath,
-          },
-    );
-    db.close();
+    const readOnlyStatus = command === "status" && [subcommand, ...rest].includes("--read-only");
+    const db = readOnlyStatus
+      ? openExistingCuedDatabase(undefined, { readonly: true })
+      : openCuedDatabase();
+    try {
+      printJson(
+        command === "doctor"
+          ? {
+              app: getAppStatusMetadata(db),
+              ...(await buildDoctorReport(db)),
+              projection: db.getProjectionBacklog(),
+              hooks: doctorHooksConfig(),
+              update: getUpdateStatus(db),
+            }
+          : {
+              app: getAppStatusMetadata(db),
+              daemon: db.getDaemonState(),
+              overview: db.getOverview(),
+              projection: db.getProjectionBacklog({
+                initializeProjectionState: !readOnlyStatus,
+              }),
+              checkpoints: db.listCheckpointSummary(),
+              recentRuns: db.listRecentRuns(),
+              integrations: listIntegrationStates(db),
+              hooks: doctorHooksConfig(),
+              update: getUpdateStatus(db),
+              socketRunning: false,
+              dbPath: db.dbPath,
+            },
+      );
+    } finally {
+      db.close();
+    }
     return;
   }
 
@@ -454,6 +527,17 @@ async function main(): Promise<void> {
         db.close();
       }
     }
+    case "skill":
+      switch (subcommand) {
+        case "install-global":
+          printJson(installGlobalCuedSkill());
+          return;
+        case "status":
+          printJson(getGlobalCuedSkillStatus());
+          return;
+        default:
+          throw new Error("Usage: cued skill install-global | status");
+      }
     case "login-item":
       switch (subcommand) {
         case "enable":
@@ -522,6 +606,24 @@ async function main(): Promise<void> {
             "Usage: cued permissions doctor | status | request [--all|--contacts|--messages|--full-disk-access]",
           );
       }
+    case "sql": {
+      const query = [subcommand, ...rest]
+        .filter((value): value is string => Boolean(value))
+        .join(" ");
+      if (!query) {
+        throw new Error("Usage: cued sql <query>");
+      }
+      if (!existsSync(CUED_DB_PATH)) {
+        throw new Error(`Cued database does not exist at ${CUED_DB_PATH}`);
+      }
+      const db = openCuedDatabaseReadOnly();
+      try {
+        printJson(db.executeReadOnlySql(query));
+      } finally {
+        db.close();
+      }
+      return;
+    }
     case "status":
       response = await sendDaemonRequest({ command: "status" });
       break;
@@ -538,6 +640,9 @@ async function main(): Promise<void> {
             return;
           }
           break;
+        case "capabilities":
+          printJson(await handleLocalIntegrationCommand(subcommand, rest));
+          return;
         case "refresh":
           response = await sendDaemonRequest({ command: "integrations-refresh" });
           if (isUnsupportedDaemonCommand(response)) {
@@ -692,6 +797,19 @@ async function main(): Promise<void> {
         text: rest[1] ?? "",
         accountKey: rest[2],
         threadId: rest[0],
+      });
+      break;
+    case "contacts":
+      if (subcommand !== "merge" || !rest[0] || !rest[1]) {
+        throw new Error(
+          "Usage: cued contacts merge <primary-contact-id> <secondary-contact-id> [--reason TEXT]",
+        );
+      }
+      response = await sendDaemonRequest({
+        command: "contacts-merge",
+        primaryContactId: rest[0],
+        secondaryContactId: rest[1],
+        reason: parseFlagValue(rest.slice(2), "--reason"),
       });
       break;
     case "rebuild":

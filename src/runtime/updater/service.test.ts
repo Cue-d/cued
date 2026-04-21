@@ -5,9 +5,13 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { CuedDatabase } from "../../db/database.js";
 import {
   checkForUpdates,
+  clearUpdateHelperPendingState,
   compareVersions,
   isUpdateCheckDue,
   pickReleaseForChannel,
+  renderUpdateHelperScript,
+  runUpdateHelperHealthCheck,
+  setUpdateHelperLastError,
 } from "./service.js";
 
 describe("updater service", () => {
@@ -117,5 +121,71 @@ describe("updater service", () => {
     expect(isUpdateCheckDue(status.lastCheckedAt, (status.lastCheckedAt ?? 0) + 1_000)).toBe(false);
 
     db.close();
+  });
+
+  it("renders helper scripts that route DB access through cued-cli", () => {
+    const script = renderUpdateHelperScript({
+      startedAt: 1,
+      previousVersion: "0.1.0",
+      installedAppPath: "/Applications/Cued.app",
+      stagedAppPath: "/tmp/Cued.app",
+      appBackupPath: "/tmp/backup/Cued.app",
+      dbPath: "/tmp/local.db",
+      dbBackupPath: "/tmp/backup/local.db",
+      targetVersion: "0.2.0",
+      releaseUrl: null,
+      migrateLegacyLaunchAgent: false,
+      stagingRoot: "/tmp/staging",
+    });
+
+    expect(script).toContain("HELPER_CLI_PATH=");
+    expect(script).toContain(
+      'update helper-health --db-path "$DB_PATH" --expected-version "$TARGET_VERSION"',
+    );
+    expect(script).toContain(
+      'update helper-clear-pending --db-path "$DB_PATH" >/dev/null 2>&1 || true',
+    );
+    expect(script).toContain(
+      'update helper-set-last-error --db-path "$DB_PATH" --message "$1" >/dev/null 2>&1 || true',
+    );
+    expect(script).not.toContain("/usr/bin/sqlite3");
+  });
+
+  it("uses helper DB commands against encrypted databases", () => {
+    const db = createDb();
+    const dbPath = db.dbPath;
+    db.upsertDaemonState({
+      pid: 123,
+      startedAt: 1,
+      updatedAt: 2,
+      status: "running",
+      version: "0.2.0",
+      details: null,
+    });
+    db.setUpdatePendingRollback({
+      startedAt: 1,
+      previousVersion: "0.1.0",
+      targetVersion: "0.2.0",
+      installedAppPath: "/Applications/Cued.app",
+      appBackupPath: "/tmp/Cued.app",
+      dbBackupPath: "/tmp/local.db",
+      releaseUrl: null,
+    });
+    db.recordAppMetadata({
+      version: "0.1.0",
+      releaseChannel: "stable",
+    });
+    db.close();
+
+    expect(runUpdateHelperHealthCheck(dbPath, "0.2.0")).toBe(true);
+    clearUpdateHelperPendingState(dbPath);
+    setUpdateHelperLastError(dbPath, "restored");
+
+    const reopened = new CuedDatabase(dbPath);
+    expect(reopened.getPendingRollbackState()).toBeNull();
+    expect(reopened.getUpdateLastError()?.message).toBe("restored");
+    expect(reopened.getAppMetadata().installedAppVersion).toBe("0.1.0");
+    expect(reopened.getAppMetadata().releaseChannel).toBe("stable");
+    reopened.close();
   });
 });

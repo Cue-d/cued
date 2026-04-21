@@ -83,6 +83,18 @@ public struct InstallerPermissionStatusResponse: Decodable, Sendable {
   }
 }
 
+public struct InstallerGlobalSkillStatus: Decodable, Sendable {
+  public let installed: Bool
+  public let status: String
+  public let summary: String
+
+  public init(installed: Bool, status: String, summary: String) {
+    self.installed = installed
+    self.status = status
+    self.summary = summary
+  }
+}
+
 public struct InstallerPlatformConfiguration: Identifiable {
   public let platform: String
   public let title: String
@@ -184,6 +196,7 @@ public final class OnboardingViewModel: ObservableObject {
   @Published public var isRefreshing = false
   @Published public var platformConfigurations: [InstallerPlatformConfiguration] = []
   @Published public var permissionStatuses: [InstallerPermissionStatus] = installerDefaultPermissionStatuses()
+  @Published public var globalSkillStatus = installerDefaultGlobalSkillStatus()
   @Published public private(set) var refreshSequence = 0
 
   public let pageWidth: CGFloat = OnboardingViewModel.windowWidth
@@ -221,11 +234,13 @@ public final class OnboardingViewModel: ObservableObject {
 
   public func apply(
     permissions: [InstallerPermissionStatus],
+    globalSkill: InstallerGlobalSkillStatus,
     allIntegrations: [InstallerIntegrationStatus],
     integrations: [InstallerIntegrationStatus]
   ) {
     let normalizedPermissions = buildPermissionStatuses(permissions)
     permissionStatuses = normalizedPermissions
+    globalSkillStatus = globalSkill
     platformConfigurations = buildPlatformConfigurations(
       permissions: normalizedPermissions,
       allIntegrations: allIntegrations,
@@ -319,7 +334,10 @@ public struct CuedOnboardingView: View {
   @ObservedObject var viewModel: OnboardingViewModel
 
   let onRefresh: () -> Void
+  let onGuidePermission: (String) -> Void
+  let onDismissPermissionGuide: () -> Void
   let onRequestPermission: ([String]) -> Void
+  let onInstallGlobalSkill: () -> Void
   let onEnableIntegration: (String, String) -> Void
   let onRemoveIntegration: (String, String) -> Void
   let onConnectIntegration: (String, String) -> Void
@@ -327,14 +345,18 @@ public struct CuedOnboardingView: View {
 
   @State private var addAccountPrompt: InstallerAddAccountPrompt?
   @State private var removalPrompt: InstallerRemovalPrompt?
-  @State private var pendingPermissionKeys = Set<String>()
+  @State private var pendingGlobalSkillInstall = false
   @State private var pendingIntegrationActionIDs = Set<String>()
   @State private var pendingPlatformConnectPlatforms = Set<String>()
+  @State private var transitioningPermissionKey: String?
 
   public init(
     viewModel: OnboardingViewModel,
     onRefresh: @escaping () -> Void,
+    onGuidePermission: @escaping (String) -> Void,
+    onDismissPermissionGuide: @escaping () -> Void,
     onRequestPermission: @escaping ([String]) -> Void,
+    onInstallGlobalSkill: @escaping () -> Void,
     onEnableIntegration: @escaping (String, String) -> Void,
     onRemoveIntegration: @escaping (String, String) -> Void,
     onConnectIntegration: @escaping (String, String) -> Void,
@@ -342,7 +364,10 @@ public struct CuedOnboardingView: View {
   ) {
     self.viewModel = viewModel
     self.onRefresh = onRefresh
+    self.onGuidePermission = onGuidePermission
+    self.onDismissPermissionGuide = onDismissPermissionGuide
     self.onRequestPermission = onRequestPermission
+    self.onInstallGlobalSkill = onInstallGlobalSkill
     self.onEnableIntegration = onEnableIntegration
     self.onRemoveIntegration = onRemoveIntegration
     self.onConnectIntegration = onConnectIntegration
@@ -383,7 +408,16 @@ public struct CuedOnboardingView: View {
       onRefresh()
     }
     .onChange(of: viewModel.refreshSequence) { _ in
-      pendingPermissionKeys.removeAll()
+      pendingGlobalSkillInstall = false
+      transitioningPermissionKey = nil
+      onDismissPermissionGuide()
+    }
+    .onChange(of: viewModel.currentPage) { page in
+      guard page != 0 else {
+        return
+      }
+      transitioningPermissionKey = nil
+      onDismissPermissionGuide()
     }
     .onChange(of: platformRefreshSignature) { _ in
       pendingIntegrationActionIDs.removeAll()
@@ -440,7 +474,12 @@ public struct CuedOnboardingView: View {
         Button(action: {}, label: {
           Label("Back", systemImage: "chevron.left").labelStyle(.iconOnly)
         })
-        .buttonStyle(.plain)
+        .buttonStyle(
+          InstallerPermissionActionButtonStyle(
+            variant: .secondary,
+            size: .icon
+          )
+        )
         .opacity(0)
         .disabled(true)
 
@@ -452,7 +491,12 @@ public struct CuedOnboardingView: View {
           } label: {
             Label("Back", systemImage: "chevron.left").labelStyle(.iconOnly)
           }
-          .buttonStyle(.plain)
+          .buttonStyle(
+            InstallerPermissionActionButtonStyle(
+              variant: .secondary,
+              size: .icon
+            )
+          )
           .foregroundStyle(.secondary)
           .opacity(0.8)
           .transition(.opacity.combined(with: .scale(scale: 0.9)))
@@ -481,10 +525,14 @@ public struct CuedOnboardingView: View {
 
       Button(action: handleNext) {
         Text(viewModel.buttonTitle)
-          .frame(minWidth: 88)
       }
       .keyboardShortcut(.return)
-      .buttonStyle(.borderedProminent)
+      .buttonStyle(
+        InstallerPermissionActionButtonStyle(
+          variant: viewModel.buttonTitle == "Skip for now" ? .secondary : .prominent,
+          size: .regular
+        )
+      )
     }
     .padding(.horizontal, 28)
     .padding(.bottom, 13)
@@ -538,7 +586,7 @@ public struct CuedOnboardingView: View {
       Text("Permissions")
         .font(.largeTitle.weight(.semibold))
 
-      Text("Cued needs a few macOS permissions to sync your messages and contacts.")
+      Text("Cued needs these permissions to sync your data in the background into a local database.")
         .font(.body)
         .foregroundStyle(.secondary)
         .multilineTextAlignment(.center)
@@ -554,13 +602,11 @@ public struct CuedOnboardingView: View {
       }
       .padding(.top, 2)
 
-      onboardingCard {
-        ForEach(Array(viewModel.permissionStatuses.enumerated()), id: \.element.id) { index, permission in
+      VStack(spacing: 12) {
+        ForEach(viewModel.permissionStatuses) { permission in
           permissionRow(permission)
-          if index < viewModel.permissionStatuses.count - 1 {
-            Divider()
-          }
         }
+        globalSkillRow
       }
     }
   }
@@ -610,48 +656,219 @@ public struct CuedOnboardingView: View {
   private func permissionRow(_ permission: InstallerPermissionStatus) -> some View {
     let descriptor = installerPermissionDescriptor(for: permission.key)
     let isGranted = permission.status == "granted"
-    let isPending = pendingPermissionKeys.contains(permission.key)
+    let isTransitioning = transitioningPermissionKey == permission.key
 
-    return HStack(alignment: .top, spacing: 12) {
-      Image(systemName: descriptor.systemImage)
-        .font(.title3.weight(.semibold))
-        .foregroundStyle(isGranted ? .green : .secondary)
-        .frame(width: 26)
+    return HStack(spacing: 14) {
+      permissionIconBadge(
+        systemImage: descriptor.systemImage,
+        tint: descriptor.accentColor,
+        isGranted: isGranted
+      )
 
-      VStack(alignment: .leading, spacing: 4) {
+      VStack(alignment: .leading, spacing: 3) {
         Text(descriptor.title)
           .font(.headline)
-          .foregroundStyle(isGranted ? .secondary : .primary)
+          .foregroundStyle(.primary)
         Text(descriptor.subtitle)
           .font(.subheadline)
-          .foregroundStyle(isGranted ? .tertiary : .secondary)
+          .foregroundStyle(.secondary)
           .fixedSize(horizontal: false, vertical: true)
       }
-
-      Spacer(minLength: 12)
+      .frame(maxWidth: .infinity, alignment: .leading)
 
       if isGranted {
         Image(systemName: "checkmark.circle.fill")
           .font(.title3.weight(.semibold))
           .foregroundStyle(.green)
-          .padding(.top, 2)
           .accessibilityLabel("\(descriptor.title) access granted")
-      } else if isPending {
-        ProgressView()
-          .controlSize(.small)
-          .padding(.top, 6)
       } else {
-        Button("Request access") {
-          pendingPermissionKeys.insert(permission.key)
-          onRequestPermission(permission.requestFlags)
+        Button("Allow") {
+          handlePermissionAction(for: permission, descriptor: descriptor)
         }
-        .buttonStyle(.bordered)
-        .controlSize(.regular)
-        .disabled(isPending)
+        .buttonStyle(
+          InstallerPermissionActionButtonStyle(
+            variant: .prominent,
+            size: .compact
+          )
+        )
+        .disabled(isTransitioning)
       }
     }
-    .padding(.vertical, 2)
-    .opacity(isGranted ? 0.7 : 1.0)
+    .padding(.horizontal, 16)
+    .padding(.vertical, 15)
+    .frame(maxWidth: .infinity, alignment: .leading)
+    .background(permissionItemBackground())
+    .overlay {
+      if isTransitioning {
+        permissionGuideMotionBlurOverlay()
+      }
+    }
+    .scaleEffect(isTransitioning ? 0.984 : 1)
+    .offset(x: isTransitioning ? 16 : 0, y: isTransitioning ? -10 : 0)
+    .blur(radius: isTransitioning ? 11 : 0)
+    .saturation(isTransitioning ? 0.58 : 1)
+    .opacity(isTransitioning ? 0.54 : 1)
+    .allowsHitTesting(!isTransitioning)
+    .compositingGroup()
+    .animation(
+      .interactiveSpring(response: 0.34, dampingFraction: 0.76, blendDuration: 0.18),
+      value: isTransitioning
+    )
+  }
+
+  private var globalSkillRow: some View {
+    let isInstalled = viewModel.globalSkillStatus.installed
+
+    return HStack(spacing: 14) {
+      permissionIconBadge(
+        systemImage: "terminal",
+        tint: Color(red: 0.12, green: 0.76, blue: 0.29),
+        isGranted: isInstalled
+      )
+
+      VStack(alignment: .leading, spacing: 3) {
+        Text("Cued skill")
+          .font(.headline)
+          .foregroundStyle(.primary)
+        Text(viewModel.globalSkillStatus.summary)
+          .font(.subheadline)
+          .foregroundStyle(.secondary)
+          .fixedSize(horizontal: false, vertical: true)
+      }
+      .frame(maxWidth: .infinity, alignment: .leading)
+
+      if isInstalled {
+        Image(systemName: "checkmark.circle.fill")
+          .font(.title3.weight(.semibold))
+          .foregroundStyle(.green)
+          .accessibilityLabel("Cued skill installed")
+      } else if pendingGlobalSkillInstall {
+        ProgressView()
+          .controlSize(.small)
+          .frame(minWidth: 76)
+      } else {
+        Button("Install") {
+          pendingGlobalSkillInstall = true
+          onInstallGlobalSkill()
+        }
+        .buttonStyle(
+          InstallerPermissionActionButtonStyle(
+            variant: .secondary,
+            size: .compact
+          )
+        )
+      }
+    }
+    .padding(.horizontal, 16)
+    .padding(.vertical, 15)
+    .frame(maxWidth: .infinity, alignment: .leading)
+    .background(permissionItemBackground())
+  }
+
+  private func handlePermissionAction(
+    for permission: InstallerPermissionStatus,
+    descriptor: InstallerPermissionDescriptor
+  ) {
+    switch installerPermissionActionKind(for: permission, descriptor: descriptor) {
+    case .requestPrompt:
+      onRequestPermission(permission.requestFlags)
+    case .guideInSettings:
+      startPermissionGuideTransition(for: permission.key)
+    case .none:
+      return
+    }
+  }
+
+  private func startPermissionGuideTransition(for permissionKey: String) {
+    guard transitioningPermissionKey == nil else {
+      return
+    }
+
+    withAnimation(.interactiveSpring(response: 0.32, dampingFraction: 0.76, blendDuration: 0.18)) {
+      transitioningPermissionKey = permissionKey
+    }
+
+    DispatchQueue.main.asyncAfter(deadline: .now() + 0.26) {
+      onGuidePermission(permissionKey)
+    }
+
+    DispatchQueue.main.asyncAfter(deadline: .now() + 0.82) {
+      if transitioningPermissionKey == permissionKey {
+        withAnimation(.interactiveSpring(response: 0.28, dampingFraction: 0.8, blendDuration: 0.16)) {
+          transitioningPermissionKey = nil
+        }
+      }
+    }
+  }
+
+  private func permissionIconBadge(
+    systemImage: String,
+    tint: Color,
+    isGranted _: Bool
+  ) -> some View {
+    ZStack {
+      Circle()
+        .fill(
+          LinearGradient(
+            colors: [
+              tint.opacity(0.98),
+              tint.opacity(0.78),
+            ],
+            startPoint: .topLeading,
+            endPoint: .bottomTrailing
+          )
+        )
+      Circle()
+        .strokeBorder(Color.white.opacity(0.34), lineWidth: 0.75)
+
+      Image(systemName: systemImage)
+        .font(.system(size: 16, weight: .semibold))
+        .foregroundStyle(.white)
+    }
+    .frame(width: 40, height: 40)
+  }
+
+  private func permissionItemBackground() -> some View {
+    RoundedRectangle(cornerRadius: 20, style: .continuous)
+      .fill(Color(NSColor.controlBackgroundColor))
+      .overlay(
+        RoundedRectangle(cornerRadius: 20, style: .continuous)
+          .strokeBorder(Color(NSColor.separatorColor).opacity(0.32), lineWidth: 1)
+      )
+  }
+
+  @ViewBuilder
+  private func permissionGuideMotionBlurOverlay() -> some View {
+    let shape = RoundedRectangle(cornerRadius: 20, style: .continuous)
+
+    ZStack {
+      shape
+        .strokeBorder(Color.white.opacity(0.12), lineWidth: 1)
+        .offset(x: 10)
+        .blur(radius: 6)
+        .opacity(0.72)
+
+      shape
+        .strokeBorder(Color.accentColor.opacity(0.12), lineWidth: 1)
+        .offset(x: 18)
+        .blur(radius: 10)
+        .opacity(0.48)
+
+      LinearGradient(
+        colors: [
+          Color.clear,
+          Color.white.opacity(0.08),
+          Color.white.opacity(0.04),
+        ],
+        startPoint: .leading,
+        endPoint: .trailing
+      )
+      .clipShape(shape)
+      .offset(x: 10)
+      .blur(radius: 12)
+      .opacity(0.84)
+    }
+    .allowsHitTesting(false)
   }
 
   private func platformConfigurationCard(_ configuration: InstallerPlatformConfiguration) -> some View {
@@ -777,12 +994,20 @@ public struct CuedOnboardingView: View {
     Group {
       if prominent {
         Button(title, action: action)
-          .buttonStyle(.borderedProminent)
-          .controlSize(.regular)
+          .buttonStyle(
+            InstallerPermissionActionButtonStyle(
+              variant: .prominent,
+              size: .regular
+            )
+          )
       } else {
         Button(title, action: action)
-          .buttonStyle(.bordered)
-          .controlSize(.regular)
+          .buttonStyle(
+            InstallerPermissionActionButtonStyle(
+              variant: .secondary,
+              size: .regular
+            )
+          )
       }
     }
   }
@@ -1043,111 +1268,94 @@ public struct InstallerPlatformIcon: View {
   }
 
   public var body: some View {
-    if let image = loadPlatformImage() {
-      Image(nsImage: image)
-        .resizable()
-        .interpolation(.high)
-        .aspectRatio(contentMode: .fit)
-        .frame(width: 28, height: 28)
-        .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
-    } else {
-      fallbackIcon
-        .frame(width: 28, height: 28)
+    ZStack {
+      RoundedRectangle(cornerRadius: 12, style: .continuous)
+        .fill(
+          LinearGradient(
+            colors: [
+              accentColor.opacity(0.98),
+              accentColor.opacity(0.78),
+            ],
+            startPoint: .topLeading,
+            endPoint: .bottomTrailing
+          )
+        )
+      RoundedRectangle(cornerRadius: 12, style: .continuous)
+        .strokeBorder(Color.white.opacity(0.34), lineWidth: 0.75)
+
+      if let image = loadPlatformImage() {
+        Image(nsImage: image)
+          .resizable()
+          .interpolation(.high)
+          .antialiased(true)
+          .aspectRatio(contentMode: .fit)
+          .padding(brandLogoPadding)
+      } else {
+        fallbackIcon
+      }
     }
+    .frame(width: 40, height: 40)
   }
 
   private func loadPlatformImage() -> NSImage? {
     guard let assetName = installerPlatformIconAssetName(for: platform),
           let url = installerPlatformIconURL(named: assetName),
           let image = NSImage(contentsOf: url) else { return nil }
-    image.size = NSSize(width: 28, height: 28)
     return image
+  }
+
+  private var accentColor: Color {
+    installerPlatformAccentColor(for: platform)
+  }
+
+  private var brandLogoPadding: CGFloat {
+    switch platform {
+    case "slack", "linkedin", "signal", "whatsapp":
+      7
+    default:
+      7
+    }
   }
 
   @ViewBuilder
   private var fallbackIcon: some View {
     switch platform {
     case "contacts":
-      ZStack {
-        Circle()
-          .fill(Color(nsColor: .quaternaryLabelColor))
-        Image(systemName: "person.crop.circle.fill")
-          .font(.system(size: 14, weight: .semibold))
-          .foregroundStyle(.white.opacity(0.92))
-      }
+      Image(systemName: "person.crop.circle.fill")
+        .font(.system(size: 17, weight: .semibold))
+        .foregroundStyle(.white.opacity(0.96))
     case "imessage":
-      ZStack {
-        RoundedRectangle(cornerRadius: 8, style: .continuous)
-          .fill(Color(red: 0.20, green: 0.77, blue: 0.35))
-        Image(systemName: "message.fill")
-          .font(.system(size: 13, weight: .semibold))
-          .foregroundStyle(.white)
-      }
+      Image(systemName: "message.fill")
+        .font(.system(size: 15, weight: .semibold))
+        .foregroundStyle(.white)
     case "slack":
-      ZStack {
-        RoundedRectangle(cornerRadius: 8, style: .continuous)
-          .fill(Color.white)
-        VStack(spacing: 2) {
-          HStack(spacing: 2) {
-            RoundedRectangle(cornerRadius: 2, style: .continuous)
-              .fill(Color(red: 0.89, green: 0.14, blue: 0.43))
-              .frame(width: 8, height: 4)
-            RoundedRectangle(cornerRadius: 2, style: .continuous)
-              .fill(Color(red: 0.21, green: 0.74, blue: 0.87))
-              .frame(width: 4, height: 8)
-          }
-          HStack(spacing: 2) {
-            RoundedRectangle(cornerRadius: 2, style: .continuous)
-              .fill(Color(red: 0.15, green: 0.73, blue: 0.36))
-              .frame(width: 4, height: 8)
-            RoundedRectangle(cornerRadius: 2, style: .continuous)
-              .fill(Color(red: 0.92, green: 0.69, blue: 0.14))
-              .frame(width: 8, height: 4)
-          }
-        }
-      }
-      .overlay(
-        RoundedRectangle(cornerRadius: 8, style: .continuous)
-          .stroke(Color.black.opacity(0.08), lineWidth: 0.5)
-      )
+      Image(systemName: "number")
+        .font(.system(size: 15, weight: .bold))
+        .foregroundStyle(.white)
     case "linkedin":
-      ZStack {
-        RoundedRectangle(cornerRadius: 6, style: .continuous)
-          .fill(Color(red: 0.03, green: 0.45, blue: 0.74))
-        Text("in")
-          .font(.system(size: 12, weight: .black, design: .rounded))
-          .foregroundStyle(.white)
-          .offset(y: 0.5)
-      }
+      Text("in")
+        .font(.system(size: 14, weight: .black, design: .rounded))
+        .foregroundStyle(.white)
+        .offset(y: 0.5)
     case "signal":
       ZStack {
-        Circle()
-          .stroke(Color(red: 0.24, green: 0.56, blue: 0.98), lineWidth: 2)
         ZStack {
           Circle()
-            .fill(Color(red: 0.24, green: 0.56, blue: 0.98))
+            .fill(.white.opacity(0.96))
             .frame(width: 12, height: 12)
           Circle()
-            .fill(.white)
+            .fill(accentColor)
             .frame(width: 3, height: 3)
         }
       }
     case "whatsapp":
-      ZStack {
-        Circle()
-          .fill(Color(red: 0.13, green: 0.74, blue: 0.38))
-        Image(systemName: "phone.fill")
-          .font(.system(size: 11, weight: .bold))
-          .foregroundStyle(.white)
-      }
+      Image(systemName: "phone.fill")
+        .font(.system(size: 13, weight: .bold))
+        .foregroundStyle(.white)
     default:
-      ZStack {
-        RoundedRectangle(cornerRadius: 6, style: .continuous)
-          .fill(Color.accentColor.opacity(0.16))
-        Image(systemName: "link.circle.fill")
-          .font(.system(size: 14, weight: .semibold))
-          .foregroundStyle(Color.accentColor)
-      }
+      Image(systemName: "link.circle.fill")
+        .font(.system(size: 15, weight: .semibold))
+        .foregroundStyle(.white)
     }
   }
 }
@@ -1193,7 +1401,12 @@ private struct InstallerAddAccountSheet: View {
       HStack {
         Spacer(minLength: 0)
         Button("Cancel", action: onCancel)
-          .buttonStyle(.bordered)
+          .buttonStyle(
+            InstallerPermissionActionButtonStyle(
+              variant: .secondary,
+              size: .regular
+            )
+          )
         Button("Connect") {
           let trimmed = accountKey.trimmingCharacters(in: .whitespacesAndNewlines)
           guard !trimmed.isEmpty else {
@@ -1201,7 +1414,12 @@ private struct InstallerAddAccountSheet: View {
           }
           onConnect(trimmed)
         }
-        .buttonStyle(.borderedProminent)
+        .buttonStyle(
+          InstallerPermissionActionButtonStyle(
+            variant: .prominent,
+            size: .regular
+          )
+        )
         .disabled(accountKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
       }
     }
@@ -1227,6 +1445,14 @@ private let installerPlatformOrder = [
 
 private func installerDefaultPermissionStatuses() -> [InstallerPermissionStatus] {
   installerPermissionOrder.compactMap { installerDefaultPermissionStatus(for: $0) }
+}
+
+private func installerDefaultGlobalSkillStatus() -> InstallerGlobalSkillStatus {
+  InstallerGlobalSkillStatus(
+    installed: false,
+    status: "unknown",
+    summary: "Checks whether the global Cued skill is available to your agents."
+  )
 }
 
 private func installerDefaultPermissionStatus(for key: String) -> InstallerPermissionStatus? {
@@ -1264,13 +1490,32 @@ private func installerPlatformIconAssetName(for platform: String) -> String? {
   case "slack":
     return "slack-logo"
   case "linkedin":
-    return "linkedin-logo"
+    return "linkedin-logo-white"
   case "signal":
-    return "signal-logo"
+    return "signal-logo-white"
   case "whatsapp":
-    return "whatsapp-logo"
+    return "whatsapp-logo-white"
   default:
     return nil
+  }
+}
+
+private func installerPlatformAccentColor(for platform: String) -> Color {
+  switch platform {
+  case "contacts":
+    return Color(red: 0.07, green: 0.72, blue: 0.84)
+  case "imessage":
+    return Color(red: 0.24, green: 0.81, blue: 0.39)
+  case "slack":
+    return Color(red: 0.36, green: 0.18, blue: 0.52)
+  case "linkedin":
+    return Color(red: 0.03, green: 0.45, blue: 0.74)
+  case "signal":
+    return Color(red: 0.24, green: 0.56, blue: 0.98)
+  case "whatsapp":
+    return Color(red: 0.13, green: 0.74, blue: 0.38)
+  default:
+    return .accentColor
   }
 }
 
@@ -1283,6 +1528,9 @@ private func installerPlatformIconURL(named assetName: String) -> URL? {
   ].compactMap { $0 }
   for bundle in bundles {
     if let url = bundle.url(forResource: assetName, withExtension: "svg") {
+      return url
+    }
+    if let url = bundle.url(forResource: assetName, withExtension: "png") {
       return url
     }
   }
@@ -1384,35 +1632,6 @@ private func installerFallbackAuthState(for platform: String) -> String {
 
 private func installerDefaultAccountKey(for platform: String) -> String {
   platform == "contacts" || platform == "imessage" ? "local" : "default"
-}
-
-private func installerPermissionDescriptor(for key: String) -> (
-  title: String,
-  subtitle: String,
-  systemImage: String
-) {
-  switch key {
-  case "contacts":
-    return (
-      "Contacts",
-      "Allow Cued to read Contacts.app so it can resolve people consistently across local data.",
-      "person.crop.circle.badge.checkmark"
-    )
-  case "full_disk_access":
-    return (
-      "Full Disk Access",
-      "Required to read the Messages database for passive sync on this Mac.",
-      "internaldrive.fill"
-    )
-  case "messages_automation":
-    return (
-      "Messages automation",
-      "Required only for AppleScript send and control flows in Messages. Passive sync does not use this.",
-      "paperplane.circle.fill"
-    )
-  default:
-    return ("Permission", "Review this macOS permission.", "hand.raised.fill")
-  }
 }
 
 private func platformWalkthrough(for configuration: InstallerPlatformConfiguration) -> String {
@@ -1631,6 +1850,7 @@ private func installerSortIntegrations(
 private func installerPreviewViewModel(
   page: Int,
   permissions: [InstallerPermissionStatus],
+  globalSkill: InstallerGlobalSkillStatus,
   allIntegrations: [InstallerIntegrationStatus],
   setupIntegrations: [InstallerIntegrationStatus]
 ) -> OnboardingViewModel {
@@ -1638,6 +1858,7 @@ private func installerPreviewViewModel(
   viewModel.currentPage = page
   viewModel.apply(
     permissions: permissions,
+    globalSkill: globalSkill,
     allIntegrations: allIntegrations,
     integrations: setupIntegrations
   )
@@ -1675,6 +1896,7 @@ private struct InstallerPreviewContainer: View {
   init(
     page: Int,
     permissions: [InstallerPermissionStatus],
+    globalSkill: InstallerGlobalSkillStatus,
     allIntegrations: [InstallerIntegrationStatus],
     setupIntegrations: [InstallerIntegrationStatus]
   ) {
@@ -1682,6 +1904,7 @@ private struct InstallerPreviewContainer: View {
       wrappedValue: installerPreviewViewModel(
         page: page,
         permissions: permissions,
+        globalSkill: globalSkill,
         allIntegrations: allIntegrations,
         setupIntegrations: setupIntegrations
       )
@@ -1692,7 +1915,10 @@ private struct InstallerPreviewContainer: View {
     CuedOnboardingView(
       viewModel: viewModel,
       onRefresh: {},
+      onGuidePermission: { _ in },
+      onDismissPermissionGuide: {},
       onRequestPermission: { _ in },
+      onInstallGlobalSkill: {},
       onEnableIntegration: { _, _ in },
       onRemoveIntegration: { _, _ in },
       onConnectIntegration: { _, _ in },
@@ -1725,6 +1951,7 @@ private struct InstallerPreviewContainer: View {
         requestFlags: ["--messages"]
       ),
     ],
+    globalSkill: installerDefaultGlobalSkillStatus(),
     allIntegrations: [],
     setupIntegrations: [
       installerPreviewIntegration(
@@ -1752,6 +1979,7 @@ private struct InstallerPreviewContainer: View {
   InstallerPreviewContainer(
     page: 1,
     permissions: installerDefaultPermissionStatuses(),
+    globalSkill: installerDefaultGlobalSkillStatus(),
     allIntegrations: [
       installerPreviewIntegration(
         platform: "contacts",
@@ -1828,6 +2056,7 @@ private struct InstallerPreviewContainer: View {
   InstallerPreviewContainer(
     page: 1,
     permissions: installerDefaultPermissionStatuses(),
+    globalSkill: installerDefaultGlobalSkillStatus(),
     allIntegrations: [
       installerPreviewIntegration(
         platform: "contacts",
@@ -1928,6 +2157,7 @@ private struct InstallerPreviewContainer: View {
   InstallerPreviewContainer(
     page: 1,
     permissions: installerDefaultPermissionStatuses(),
+    globalSkill: installerDefaultGlobalSkillStatus(),
     allIntegrations: [
       installerPreviewIntegration(
         platform: "contacts",
