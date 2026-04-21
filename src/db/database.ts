@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { existsSync, rmSync } from "node:fs";
-import Database from "better-sqlite3";
+import type Database from "better-sqlite3-multiple-ciphers";
 import { and, asc, desc, eq, inArray, sql } from "drizzle-orm";
 import { type BetterSQLite3Database, drizzle } from "drizzle-orm/better-sqlite3";
 import type { SQLiteTable } from "drizzle-orm/sqlite-core";
@@ -33,6 +33,7 @@ import type {
 import { safeParseJson, safeStringifyJson } from "./codecs.js";
 import { MIGRATIONS } from "./migrations.js";
 import * as schema from "./schema.js";
+import { openSqliteDatabase } from "./sqlite.js";
 
 const {
   attachmentCache,
@@ -474,10 +475,7 @@ export class CuedDatabase {
     } = {},
   ) {
     ensureCuedDirs();
-    this.sqlite = new Database(
-      dbPath,
-      options.readonly ? { readonly: true, fileMustExist: true } : undefined,
-    );
+    this.sqlite = openSqliteDatabase(dbPath, { readonly: options.readonly });
     this.sqlite.exec("PRAGMA busy_timeout = 5000");
     this.sqlite.exec("PRAGMA foreign_keys = ON");
     if (!options.readonly) {
@@ -528,6 +526,21 @@ export class CuedDatabase {
 
   orm(): LocalDrizzleDatabase {
     return this.db;
+  }
+
+  executeReadOnlySql(query: string): unknown[] {
+    const trimmed = query.trim();
+    if (trimmed.length === 0) {
+      throw new Error("SQL query must not be empty");
+    }
+    if (!/^(select|with|pragma|explain)\b/i.test(trimmed)) {
+      throw new Error("Only read-only SELECT/PRAGMA/EXPLAIN queries are supported");
+    }
+    const statement = this.sqlite.prepare(trimmed) as Database.Statement & { reader?: boolean };
+    if (statement.reader === false) {
+      throw new Error("Only read-only queries are supported");
+    }
+    return statement.all();
   }
 
   listContactMergeDecisions(): ContactMergeDecisionRow[] {
@@ -1168,6 +1181,10 @@ export class CuedDatabase {
     sourceAccounts: number;
     integrations: number;
     authSessions: number;
+    messageBreakdown: Array<{
+      platform: Platform;
+      messages: number;
+    }>;
   } {
     return {
       contacts: this.countRows(contacts),
@@ -1177,10 +1194,30 @@ export class CuedDatabase {
       sourceAccounts: this.countRows(sourceAccounts),
       integrations: this.countRows(integrationStates),
       authSessions: this.countRows(authSessions),
+      messageBreakdown: this.listMessageCountsByPlatform(),
     };
   }
 
-  getProjectionState(): ProjectionStateRow {
+  listMessageCountsByPlatform(): Array<{
+    platform: Platform;
+    messages: number;
+  }> {
+    return this.sqlite
+      .prepare(
+        `
+        SELECT platform, COUNT(*) AS messages
+        FROM messages
+        GROUP BY platform
+        ORDER BY messages DESC, platform ASC
+      `,
+      )
+      .all() as Array<{
+      platform: Platform;
+      messages: number;
+    }>;
+  }
+
+  getProjectionState(options: { initialize?: boolean } = {}): ProjectionStateRow {
     const row = this.db
       .select({
         singleton_key: projectionState.singletonKey,
@@ -1204,11 +1241,13 @@ export class CuedDatabase {
       last_rebuild_at: null,
       updated_at: now(),
     };
-    this.upsertProjectionState({
-      projectionWatermark: 0,
-      lastProjectedAt: null,
-      lastRebuildAt: null,
-    });
+    if (options.initialize !== false) {
+      this.upsertProjectionState({
+        projectionWatermark: 0,
+        lastProjectedAt: null,
+        lastRebuildAt: null,
+      });
+    }
     return fallback;
   }
 
@@ -1240,12 +1279,14 @@ export class CuedDatabase {
       .run();
   }
 
-  getProjectionBacklog(): {
+  getProjectionBacklog(options: { initializeProjectionState?: boolean } = {}): {
     projection_watermark: number;
     max_raw_event_rowid: number;
     pending_raw_events: number;
   } {
-    const state = this.getProjectionState();
+    const state = this.getProjectionState({
+      initialize: options.initializeProjectionState !== false,
+    });
     const row = this.sqlite
       .prepare(
         `
@@ -3501,6 +3542,18 @@ export function openCuedDatabase(dbPath?: string): CuedDatabase {
     releaseChannel: getCurrentReleaseChannel(),
   });
   return db;
+}
+
+export function openExistingCuedDatabase(
+  dbPath?: string,
+  options: { readonly?: boolean } = {},
+): CuedDatabase {
+  const resolvedPath = dbPath ?? CUED_DB_PATH;
+  if (!existsSync(resolvedPath)) {
+    throw new Error(`Cued database does not exist at ${resolvedPath}`);
+  }
+
+  return new CuedDatabase(resolvedPath, options);
 }
 
 export function openCuedDatabaseReadOnly(dbPath?: string): CuedDatabase {

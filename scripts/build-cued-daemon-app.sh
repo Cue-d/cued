@@ -42,7 +42,7 @@ RELEASE_CHANNEL="${CUED_RELEASE_CHANNEL:-internal}"
 DAEMON_COMMAND="${CUED_DAEMON_COMMAND:-\"\$CUED_APP_PATH/Contents/Resources/cued-cli\" daemon}"
 SETUP_COMMAND="${CUED_SETUP_COMMAND:-\"\$CUED_APP_PATH/Contents/Resources/cued-cli\" setup}"
 PERMISSIONS_COMMAND="${CUED_PERMISSIONS_COMMAND:-\"\$CUED_APP_PATH/Contents/Resources/cued-cli\" permissions request --all}"
-BETTER_SQLITE3_BINDING_SOURCE="$(find "$ROOT_DIR/node_modules/.pnpm" -path "*/better-sqlite3/build/Release/better_sqlite3.node" | head -n 1)"
+BETTER_SQLITE3_BINDING_SOURCE="$(find "$ROOT_DIR/node_modules/.pnpm" -path "*/better-sqlite3-multiple-ciphers/build/Release/better_sqlite3.node" | head -n 1)"
 DEPLOY_STAGING_DIR="$(mktemp -d "${TMPDIR:-/tmp}/cued-runtime.XXXXXX")"
 
 cleanup() {
@@ -199,8 +199,8 @@ copy_better_sqlite3_binary() {
   local built_binary
   local staged_module_dir
 
-  built_binary="$(find "$ROOT_DIR/node_modules/.pnpm" -path '*/better-sqlite3/build/Release/better_sqlite3.node' -print -quit)"
-  staged_module_dir="$(find "$DEPLOY_STAGING_DIR/node_modules/.pnpm" -path '*/node_modules/better-sqlite3' -type d -print -quit)"
+  built_binary="$(find "$ROOT_DIR/node_modules/.pnpm" -path '*/better-sqlite3-multiple-ciphers/build/Release/better_sqlite3.node' -print -quit)"
+  staged_module_dir="$(find "$DEPLOY_STAGING_DIR/node_modules/.pnpm" -path '*/node_modules/better-sqlite3-multiple-ciphers' -type d -print -quit)"
 
   if [[ -z "$built_binary" ]]; then
     echo "Could not locate the built better_sqlite3.node in node_modules" >&2
@@ -208,7 +208,7 @@ copy_better_sqlite3_binary() {
   fi
 
   if [[ -z "$staged_module_dir" ]]; then
-    echo "Could not locate better-sqlite3 in the deploy staging directory" >&2
+    echo "Could not locate better-sqlite3-multiple-ciphers in the deploy staging directory" >&2
     exit 1
   fi
 
@@ -259,12 +259,12 @@ cp "$WHATSAPP_HELPER_SOURCE" "$HELPERS_DIR/cued-whatsapp-helper"
 chmod +x "$HELPERS_DIR/cued-whatsapp-helper"
 
 if [[ -z "$BETTER_SQLITE3_BINDING_SOURCE" ]]; then
-  echo "better-sqlite3 native binding not found in node_modules" >&2
+  echo "better-sqlite3-multiple-ciphers native binding not found in node_modules" >&2
   exit 1
 fi
-BETTER_SQLITE3_RUNTIME_DIR="$(find "$RUNTIME_DIR/node_modules/.pnpm" -maxdepth 3 -type d -path "*/better-sqlite3" | head -n 1)"
+BETTER_SQLITE3_RUNTIME_DIR="$(find "$RUNTIME_DIR/node_modules/.pnpm" -maxdepth 3 -type d -path "*/better-sqlite3-multiple-ciphers" | head -n 1)"
 if [[ -z "$BETTER_SQLITE3_RUNTIME_DIR" ]]; then
-  echo "better-sqlite3 package missing from deployed runtime" >&2
+  echo "better-sqlite3-multiple-ciphers package missing from deployed runtime" >&2
   exit 1
 fi
 mkdir -p "$BETTER_SQLITE3_RUNTIME_DIR/build/Release"
