@@ -485,6 +485,9 @@ final class AppStatusStore: @unchecked Sendable {
         updateSummary: nil
       )
     }
+    if let snapshot = readSnapshotViaCLI(daemonLockState: daemonLockState) {
+      return snapshot
+    }
 
     var db: OpaquePointer?
     guard sqlite3_open_v2(dbPath, &db, SQLITE_OPEN_READONLY, nil) == SQLITE_OK, let db else {
@@ -541,6 +544,157 @@ final class AppStatusStore: @unchecked Sendable {
       cliSymlinkInstalled: queryAppSetting(db: db, key: "cli_symlink_installed") == "1",
       updateSummary: updateSummary
     )
+  }
+
+  private func readSnapshotViaCLI(
+    daemonLockState: (running: Bool, pid: Int?, updatedAt: Int?)
+  ) -> AppStatusSnapshot? {
+    let daemonLaunchPath = Bundle.main.path(forResource: "cued-cli", ofType: nil)
+    guard let daemonLaunchPath else {
+      return nil
+    }
+
+    let process = Process()
+    process.executableURL = URL(fileURLWithPath: daemonLaunchPath)
+    process.arguments = ["status", "--read-only"]
+    process.environment = ProcessInfo.processInfo.environment
+
+    let stdoutPipe = Pipe()
+    process.standardOutput = stdoutPipe
+    process.standardError = FileHandle.nullDevice
+
+    do {
+      try process.run()
+    } catch {
+      return nil
+    }
+    let data = stdoutPipe.fileHandleForReading.readDataToEndOfFile()
+    process.waitUntilExit()
+
+    guard process.terminationStatus == 0 else {
+      return nil
+    }
+
+    guard
+      let payload = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+    else {
+      return nil
+    }
+
+    let overview = payload["overview"] as? [String: Any] ?? [:]
+    let integrations = parseIntegrations(payload["integrations"])
+    let app = payload["app"] as? [String: Any] ?? [:]
+    let install = app["install"] as? [String: Any] ?? [:]
+    let update = payload["update"] as? [String: Any] ?? [:]
+    let daemon = payload["daemon"] as? [String: Any] ?? [:]
+    let daemonUpdatedAt = intValue(daemon["updated_at"]) ?? daemonLockState.updatedAt
+    let daemonPID = intValue(daemon["pid"]) ?? daemonLockState.pid
+    let daemonRowFresh =
+      daemonUpdatedAt.map { currentTimeMs() - $0 < appDaemonHeartbeatGraceMs } ?? false
+    let daemonRowRunning = stringValue(daemon["status"]) == "running" && daemonRowFresh
+    let daemonRunning =
+      boolValue(payload["socketRunning"]) == true
+      || boolValue(payload["daemonRunning"]) == true
+      || daemonRowRunning
+      || daemonLockState.running
+
+    return AppStatusSnapshot(
+      daemonRunning: daemonRunning,
+      daemonPID: daemonPID,
+      daemonUpdatedAt: daemonUpdatedAt,
+      contacts: intValue(overview["contacts"]) ?? 0,
+      conversations: intValue(overview["conversations"]) ?? 0,
+      messages: intValue(overview["messages"]) ?? 0,
+      rawEvents: intValue(overview["rawEvents"]) ?? 0,
+      messageBreakdown: parseMessageBreakdown(overview["messageBreakdown"]),
+      integrations: mergeLiveLocalIntegrations(integrations),
+      onboardingCompletedVersion: stringValue(install["onboardingCompletedVersion"]),
+      installedAppVersion: stringValue(install["installedAppVersion"]),
+      releaseChannel: stringValue(install["releaseChannel"]),
+      cliSymlinkInstalled: boolValue(install["cliSymlinkInstalled"]) ?? false,
+      updateSummary: parseUpdateSummary(update)
+    )
+  }
+
+  private func parseMessageBreakdown(_ value: Any?) -> [AppPlatformMessageCount] {
+    guard let rows = value as? [[String: Any]] else {
+      return []
+    }
+
+    return rows.compactMap { row in
+      guard let platform = stringValue(row["platform"]) else {
+        return nil
+      }
+      return AppPlatformMessageCount(
+        platform: platform,
+        messages: intValue(row["messages"]) ?? 0
+      )
+    }
+  }
+
+  private func parseIntegrations(_ value: Any?) -> [AppIntegrationStatus] {
+    guard let rows = value as? [[String: Any]] else {
+      return []
+    }
+
+    return rows.compactMap { row in
+      guard
+        let platform = stringValue(row["platform"]),
+        let accountKey = stringValue(row["accountKey"]),
+        let authState = stringValue(row["authState"])
+      else {
+        return nil
+      }
+
+      return AppIntegrationStatus(
+        platform: platform,
+        accountKey: accountKey,
+        displayName: stringValue(row["displayName"]),
+        authState: authState,
+        enabled: boolValue(row["enabled"]) ?? false
+      )
+    }
+  }
+
+  private func parseUpdateSummary(_ value: Any?) -> AppUpdateSummary? {
+    guard let update = value as? [String: Any] else {
+      return nil
+    }
+
+    return AppUpdateSummary(
+      availableVersion: stringValue(update["availableVersion"]),
+      releaseURL: stringValue(update["releaseUrl"])
+    )
+  }
+
+  private func stringValue(_ value: Any?) -> String? {
+    value as? String
+  }
+
+  private func intValue(_ value: Any?) -> Int? {
+    switch value {
+    case let number as NSNumber:
+      return number.int64Value > Int64(Int.max) || number.int64Value < Int64(Int.min)
+        ? nil
+        : Int(number.int64Value)
+    case let text as String:
+      return Int(text)
+    default:
+      return nil
+    }
+  }
+
+  private func boolValue(_ value: Any?) -> Bool? {
+    switch value {
+    case let bool as Bool:
+      return bool
+    case let number as NSNumber:
+      return number.boolValue
+    case let text as String:
+      return (text as NSString).boolValue
+    default:
+      return nil
+    }
   }
 
   private func queryDaemonRow(db: OpaquePointer) -> (running: Bool, pid: Int?, updatedAt: Int?) {
@@ -1674,7 +1828,10 @@ final class MenuBarAppController: NSObject, NSApplicationDelegate {
         continue
       }
       image.isTemplate = true
-      image.size = NSSize(width: 18, height: 18)
+      let targetHeight: CGFloat = 18
+      let sourceHeight = max(image.size.height, 1)
+      let scaledWidth = targetHeight * (image.size.width / sourceHeight)
+      image.size = NSSize(width: scaledWidth, height: targetHeight)
       return image
     }
 

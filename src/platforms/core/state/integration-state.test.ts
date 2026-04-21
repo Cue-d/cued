@@ -1,10 +1,10 @@
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import Database from "better-sqlite3";
 import { afterEach, describe, expect, it } from "vitest";
 import { resolveHostOS } from "../../../core/platform-capabilities.js";
 import { CuedDatabase } from "../../../db/database.js";
+import { openSqliteDatabase } from "../../../db/sqlite.js";
 import {
   buildDiscordContactEvent,
   buildDiscordConversationEvent,
@@ -27,8 +27,10 @@ import {
 
 describe("integration state management", () => {
   const tempDirs: string[] = [];
+  const originalPath = process.env.PATH;
 
   afterEach(() => {
+    process.env.PATH = originalPath;
     delete process.env.CUED_CONTACTS_NATIVE_BINARY;
     delete process.env.CUED_IMESSAGE_DB_PATH;
     delete process.env.CUED_SIGNAL_CLI_PATH;
@@ -94,7 +96,39 @@ exit 1
     return helperPath;
   }
 
+  function createSecurityTool(
+    secretByServiceAndAccount: Record<string, Record<string, unknown>>,
+  ): string {
+    const binDir = createTempDir("cued-security-bin-");
+    const securityPath = join(binDir, "security");
+    writeFileSync(
+      securityPath,
+      `#!/usr/bin/env node
+const args = process.argv.slice(2);
+const entries = ${JSON.stringify(secretByServiceAndAccount)};
+if (args[0] === "find-generic-password" && args[1] === "-s" && args[3] === "-a" && args[5] === "-w") {
+  const service = args[2];
+  const account = args[4];
+  const entry = entries[\`\${service}:\${account}\`];
+  if (!entry) process.exit(44);
+  process.stdout.write(JSON.stringify(entry));
+  process.exit(0);
+}
+process.exit(44);
+`,
+    );
+    chmodSync(securityPath, 0o755);
+    return binDir;
+  }
+
+  function installSecurityTool(
+    secretByServiceAndAccount: Record<string, Record<string, unknown>>,
+  ): void {
+    process.env.PATH = `${createSecurityTool(secretByServiceAndAccount)}:${originalPath ?? ""}`;
+  }
+
   it("refreshes managed integrations and creates managed auth sessions for browser platforms", async () => {
+    installSecurityTool({});
     const nativeBinaryDir = createTempDir("cued-native-binary-");
     const nativeBinaryPath = join(nativeBinaryDir, "CuedNative");
     writeFileSync(
@@ -410,7 +444,7 @@ exit 1
 
   it("ignores legacy persisted integrations for unknown platforms", () => {
     const db = createDb();
-    const sqlite = new Database(db.dbPath);
+    const sqlite = openSqliteDatabase(db.dbPath);
     sqlite
       .prepare(
         `INSERT INTO integration_states (
@@ -505,6 +539,7 @@ exit 1
   });
 
   it("repairs stale linkedin sync capability on refresh", async () => {
+    installSecurityTool({});
     process.env.CUED_SLACK_APP_BINARY = join(createTempDir("cued-no-slack-app-"), "Slack");
 
     const db = createDb();
@@ -542,7 +577,47 @@ exit 1
     db.close();
   });
 
+  it("imports stored LinkedIn auth into a fresh database on refresh", async () => {
+    installSecurityTool({
+      "dev.cued.auth.linkedin:default": {
+        cookies: [
+          { name: "li_at", value: "li_at-token" },
+          { name: "JSESSIONID", value: '"ajax:123"' },
+        ],
+        savedAt: 1234,
+      },
+    });
+    process.env.CUED_SLACK_APP_BINARY = join(createTempDir("cued-no-slack-app-"), "Slack");
+
+    const db = createDb();
+    await refreshManagedIntegrationStates(db);
+
+    expect(listIntegrationStates(db)).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          platform: "linkedin",
+          accountKey: "default",
+          authState: "authenticated",
+          syncCapable: true,
+          metadata: expect.objectContaining({
+            keychainService: "dev.cued.auth.linkedin",
+            keychainAccount: "default",
+            importedSavedAt: 1234,
+          }),
+        }),
+      ]),
+    );
+    expect(db.getLatestAuthSession("linkedin", "default")).toMatchObject({
+      state: "authenticated",
+      keychain_service: "dev.cued.auth.linkedin",
+      keychain_account: "default",
+    });
+
+    db.close();
+  });
+
   it("repairs stale slack sync capability only when the helper is available", async () => {
+    installSecurityTool({});
     process.env.CUED_SLACK_HELPER_BINARY = createSlackHelper();
 
     const db = createDb();
@@ -758,6 +833,7 @@ exit 1
   });
 
   it("refreshes signal and whatsapp managed states for every persisted account", async () => {
+    installSecurityTool({});
     process.env.CUED_SIGNAL_CLI_PATH = join(
       createTempDir("cued-missing-signal-cli-"),
       "signal-cli",

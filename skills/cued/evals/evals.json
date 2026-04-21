@@ -204,7 +204,7 @@
         "Searched contact_handles for matching normalized_value across different contact_ids",
         "Joined to contacts to show names and to contact_sources for platform info",
         "Identified cross-platform duplicates (e.g., same person on iMessage and Slack)",
-        "Suggested using cued merge contact CLI command to merge duplicates",
+        "Suggested using cued contacts merge <primary-id> <secondary-id> to merge duplicates",
         "Handled phone-number-as-name contacts (name LIKE '+%') as likely duplicates"
       ]
     },
@@ -217,7 +217,7 @@
         "Searched contact_handles for the phone number's normalized_value",
         "Found both the phone-number contact and any named contacts sharing the same number",
         "Showed the named contact's details (name, platform, handles)",
-        "Suggested merging the two contacts using cued merge contact",
+        "Suggested merging the two contacts using cued contacts merge <primary-id> <secondary-id>",
         "Checked recent messages to provide additional context about who this person is"
       ]
     },
@@ -320,6 +320,140 @@
         "Filtered to platform = 'slack'",
         "Applied time window of last 7 days",
         "Returned message content with timestamps and sender names"
+      ]
+    },
+    {
+      "id": 26,
+      "prompt": "I want cued to automatically merge obvious duplicate contacts after each sync. Which contacts should it merge right now without asking me?",
+      "expected_output": "A list of only high-confidence duplicate contact pairs or clusters that are safe to auto-merge, with the evidence for each proposed merge and the canonical contact to keep.",
+      "files": [],
+      "expectations": [
+        "Searched contact_handles for deterministic matches on normalized_value across different contact_ids",
+        "Joined contact_sources to show cross-platform evidence for each duplicate pair or cluster",
+        "Proposed autonomous merges only for high-confidence cases, not weak same-name guesses",
+        "Identified which contact should be canonical before merging",
+        "Suggested using cued contacts merge <primary-id> <secondary-id> for each safe merge"
+      ]
+    },
+    {
+      "id": 27,
+      "prompt": "Before merging anything automatically, show me contacts that look similar by name but should NOT be merged yet because the evidence is too weak.",
+      "expected_output": "A list of ambiguous contact pairs that may be duplicates but should not be auto-merged, with a brief explanation of what evidence is missing.",
+      "files": [],
+      "expectations": [
+        "Searched contacts for case-insensitive or similar-name matches",
+        "Checked contact_handles and contact_sources for corroborating evidence",
+        "Rejected autonomous merges when only name similarity was available",
+        "Explained what additional evidence would make the merge safe",
+        "Distinguished low-confidence review candidates from high-confidence auto-merge candidates"
+      ]
+    },
+    {
+      "id": 28,
+      "prompt": "I have three separate records for Alex Kim across iMessage, Slack, and LinkedIn. Can you consolidate which of these belong to the same person and tell me which record should be the source of truth?",
+      "expected_output": "A clustered view of Alex Kim contact records across platforms, indicating which records represent the same person, which canonical contact should win, and why.",
+      "files": [],
+      "expectations": [
+        "Resolved contacts by name and grouped likely duplicates into a cluster rather than only pairwise matches",
+        "Compared contact_handles, contact_sources, and platform coverage to determine if the records refer to the same person",
+        "Selected a canonical contact record or explained the canonical choice criteria",
+        "Separated true duplicates from same-name non-duplicates if more than one Alex Kim exists",
+        "Returned merge recommendations with reasoning tied to the local data"
+      ]
+    },
+    {
+      "id": 29,
+      "prompt": "I have a contact saved as just +14155550123 and another saved as Sarah Chen. Are they the same person, and should cued merge them automatically?",
+      "expected_output": "A resolution of whether the phone-number contact and Sarah Chen are the same person, including confidence, supporting evidence, and whether the merge is safe to do automatically.",
+      "files": [],
+      "expectations": [
+        "Searched contact_handles for the normalized phone number",
+        "Looked for named contacts sharing the same phone or related handles",
+        "Checked recent messages or conversation context to support identity resolution",
+        "Recommended autonomous merge only if the handle evidence was deterministic",
+        "Explained clearly when the merge should be automatic versus held for review"
+      ]
+    },
+    {
+      "id": 30,
+      "prompt": "I want one source of truth per person. For each duplicate contact cluster, which record should be canonical and which fields should win?",
+      "expected_output": "A list of duplicate contact clusters with a canonical contact for each cluster and a field-level merge plan for name, company, phone, email, LinkedIn, and platform sources.",
+      "files": [],
+      "expectations": [
+        "Grouped duplicate contacts into clusters rather than isolated pairs",
+        "Used contact_handles and contact_sources to determine the strongest canonical record",
+        "Preferred deterministic handles and richer platform metadata when choosing field winners",
+        "Explained field-level source-of-truth decisions instead of only naming a winner",
+        "Produced an output that could drive autonomous merge or enrichment later"
+      ]
+    },
+    {
+      "id": 31,
+      "prompt": "Find up to 10 specific contacts or duplicate clusters that can be enriched immediately from local data only. Process them one contact or cluster at a time, and for each one list the exact fields that can be filled from existing contact_handles, contact_sources, or duplicate records. Do not claim any data was modified unless you actually ran a command.",
+      "expected_output": "A small queued list of concrete per-contact or per-cluster enrichment opportunities, each with the exact fields that can be enriched immediately from existing local contact_handles, contact_sources, or related duplicate records.",
+      "files": [],
+      "expectations": [
+        "Identified a bounded set of contacts or duplicate clusters with missing or sparse profile fields",
+        "Structured the output as independent per-contact or per-cluster enrichment tasks rather than one monolithic pass",
+        "Searched contact_handles for email, phone, linkedin, and other relevant handle types",
+        "Checked contact_sources.profile_url and related metadata for enrichment signals",
+        "Pulled enrichment candidates from duplicate records or cross-platform matches in local data",
+        "Returned only enrichments supported by local evidence",
+        "Did not claim that data had already been updated unless a real command was run"
+      ]
+    },
+    {
+      "id": 32,
+      "prompt": "Who are my most important contacts with incomplete profiles, and what can cued enrich automatically today?",
+      "expected_output": "A prioritized list of important contacts with incomplete profile data, along with the local enrichments that can be applied automatically and the fields that still need more evidence.",
+      "files": [],
+      "expectations": [
+        "Identified important contacts using message volume, recency, or relationship strength signals",
+        "Checked which of those contacts have missing profile fields",
+        "Derived enrichment candidates from local handles, sources, and duplicate records",
+        "Prioritized enrichments that are safe and immediately actionable",
+        "Distinguished fields that can be auto-enriched now from fields that remain unresolved"
+      ]
+    },
+    {
+      "id": 33,
+      "prompt": "Find contacts whose LinkedIn, company, or other profile details are already hiding in contact_sources or handles but haven't been surfaced clearly.",
+      "expected_output": "A list of contacts with latent enrichment opportunities from existing local metadata, including LinkedIn URLs/handles, company names, and other profile fields that can be surfaced.",
+      "files": [],
+      "expectations": [
+        "Queried contact_sources for profile_url and platform metadata that imply enrichable profile details",
+        "Queried contact_handles for linkedin, email, phone, and other relevant handle types",
+        "Matched local metadata back to the canonical contact",
+        "Returned concrete field/value enrichments rather than vague suggestions",
+        "Used only local data and did not invent unsupported profile details"
+      ]
+    },
+    {
+      "id": 34,
+      "prompt": "If cued ran a daily contact cleanup job, what high-confidence merges and local-data-backed enrichments would it queue today? Structure the answer as independent per-contact or per-cluster tasks that a scheduled job could execute separately, and keep ambiguous cases in a review queue.",
+      "expected_output": "A daily cleanup queue containing high-confidence per-contact or per-cluster auto-merges and local-data-backed enrichments that can be applied autonomously, plus a smaller review queue for ambiguous cases.",
+      "files": [],
+      "expectations": [
+        "Produced both merge and enrichment recommendations in one pass",
+        "Structured the output as independent per-contact or per-cluster tasks instead of one giant batch action",
+        "Separated safe autonomous actions from cases that require review",
+        "Used deterministic handle overlap and local metadata for autonomous decisions",
+        "Prioritized actions by confidence and likely user value",
+        "Framed the output as something a scheduled cleanup job could execute"
+      ]
+    },
+    {
+      "id": 35,
+      "prompt": "I want to enrich all my contacts over time, including GitHub, Twitter, LinkedIn, websites, and portfolio context. Start from local evidence first, then produce a prioritized queue of small per-contact or per-cluster tasks: first the contacts that can be enriched immediately from the database, then the high-value contacts that should get external research next.",
+      "expected_output": "A local-first enrichment plan that produces a prioritized queue of small per-contact or per-cluster tasks, identifies which contacts can be enriched immediately from the database, which high-value contacts deserve external research next, and what a single source of truth should aggregate for each person.",
+      "files": [],
+      "expectations": [
+        "Started with local evidence from contacts, contact_handles, contact_sources, conversations, and messages",
+        "Produced a prioritized queue of independent per-contact or per-cluster tasks rather than a single all-at-once enrichment pass",
+        "Identified a subset of high-value unresolved contacts for further enrichment rather than treating all contacts equally",
+        "Specified which external profile targets would be useful next, such as LinkedIn, GitHub, Twitter, websites, or portfolio context",
+        "Explained how local and external evidence should aggregate into one canonical contact record",
+        "Did not skip the local-first pass before proposing external enrichment"
       ]
     }
   ]

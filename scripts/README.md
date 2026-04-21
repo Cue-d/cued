@@ -1,6 +1,6 @@
 # Scripts
 
-Local build and macOS permission helpers for the headless Cued runtime.
+Local build, packaging, and macOS permission helpers for the packaged Cued runtime.
 
 ## Common development scripts
 
@@ -44,8 +44,8 @@ This bootstrap script will:
 
 - trigger the Contacts permission prompt through the native macOS helper
 - trigger Apple Events automation access for Messages through AppleScript
-- open the Full Disk Access and Accessibility panes for manual approval when requested
+- open the Full Disk Access and Automation panes when requested or when a prompt cannot be granted automatically
 
-macOS does not allow scripts or apps to self-grant Full Disk Access or Accessibility. The script opens the correct pane and prints the manual steps instead.
+macOS does not allow scripts or apps to self-grant Full Disk Access. The script opens the correct pane and prints the manual steps instead.
 
 Other files in this directory are invoked directly from the root workspace scripts or local packaging flow.

@@ -754,6 +754,26 @@ describe("slack worker lib", () => {
         pendingThreadCount: 0,
       }),
     ]);
+    expect(second.proofs).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          proofKind: "messages",
+          status: "complete",
+          scope: expect.objectContaining({
+            kind: "conversation",
+            key: "C123",
+          }),
+        }),
+        expect.objectContaining({
+          proofKind: "replies",
+          status: "complete",
+          scope: expect.objectContaining({
+            kind: "conversation",
+            key: "C123",
+          }),
+        }),
+      ]),
+    );
   });
 
   it("finishes top-level history before entering thread backfill", async () => {

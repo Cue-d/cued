@@ -1,4 +1,4 @@
-import type { SourceAccountInput } from "../../../core/types/provider.js";
+import type { SourceAccountInput, SyncProofInput } from "../../../core/types/provider.js";
 import { loadIntegrationSecret } from "../../core/secrets/keychain.js";
 import type { SyncBundle } from "../../core/sync.js";
 import { DiscordApiClient, isDiscordAuthInvalidationError } from "../api/client.js";
@@ -6,6 +6,7 @@ import type { DiscordMessage, DiscordStoredCredentials, DiscordUser } from "../t
 import { discordDisplayName, isDiscordDmChannel } from "../types.js";
 import {
   buildDiscordContactEvent,
+  buildDiscordConversationDisplayName,
   buildDiscordConversationEvent,
   buildDiscordMessageEvent,
 } from "./events.js";
@@ -35,6 +36,12 @@ type DiscordSyncCursor = {
       latestMessageId: string | null;
     }
   >;
+};
+
+type DiscordHydratedChannel = {
+  channelId: string;
+  messages: DiscordMessage[];
+  previousLatestMessageId: string | null;
 };
 
 function loadDiscordCredentials(accountKey: string): DiscordStoredCredentials {
@@ -91,6 +98,7 @@ export async function buildDiscordSyncBundle(
   let completedHydrationChannelCount = 0;
   let hydrationBreakChannelId: string | null = null;
   let hydrationErrorMessage: string | null = null;
+  const hydratedChannels: DiscordHydratedChannel[] = [];
   const seenContacts = new Set<string>();
   const pushContact = (user: DiscordUser, displayName?: string | null) => {
     const event = buildDiscordContactEvent({
@@ -135,6 +143,11 @@ export async function buildDiscordSyncBundle(
             limit: syncMessagesPerChannelLimit,
           });
       completedHydrationChannelCount += 1;
+      hydratedChannels.push({
+        channelId: channel.id,
+        messages,
+        previousLatestMessageId,
+      });
       if (messages.length === 0) {
         continue;
       }
@@ -179,6 +192,18 @@ export async function buildDiscordSyncBundle(
     } satisfies DiscordSyncCursor,
     syncMode: "incremental",
     hasMore: false,
+    proofs: buildDiscordSyncProofs({
+      accountKey,
+      observedAt,
+      currentUser,
+      channels: privateChannels.filter(isDiscordDmChannel),
+      sourceCursor,
+      hydratedChannels,
+      nextChannelCursor,
+      syncMessagesPerChannelLimit,
+      hydrationError: hydrationErrorMessage,
+      hydrationBreakChannelId,
+    }),
     diagnostics: {
       discordHydration: buildDiscordHydrationDiagnostics({
         selectedChannelCount: hydrationChannels.length,
@@ -190,6 +215,180 @@ export async function buildDiscordSyncBundle(
       }),
     },
   };
+}
+
+function buildDiscordSyncProofs(input: {
+  accountKey: string;
+  observedAt: number;
+  currentUser: DiscordUser;
+  channels: Awaited<ReturnType<DiscordApiClient["listPrivateChannels"]>>;
+  sourceCursor: DiscordSyncCursor;
+  hydratedChannels: DiscordHydratedChannel[];
+  nextChannelCursor: DiscordSyncCursor["channels"];
+  syncMessagesPerChannelLimit: number;
+  hydrationError: string | null;
+  hydrationBreakChannelId: string | null;
+}): SyncProofInput[] {
+  const proofs: SyncProofInput[] = [
+    {
+      scope: {
+        kind: "account",
+        key: input.currentUser.id,
+        displayName: discordDisplayName(input.currentUser),
+      },
+      proofKind: "discovery",
+      status: "complete",
+      syncMode: "incremental",
+      observedAt: input.observedAt,
+      completedAt: input.observedAt,
+      stats: {
+        discoveredDmCount: input.channels.length,
+      },
+    },
+  ];
+
+  const hydratedByChannelId = new Map(
+    input.hydratedChannels.map((hydrated) => [hydrated.channelId, hydrated]),
+  );
+
+  for (const channel of input.channels) {
+    const latestMessageId = input.nextChannelCursor[channel.id]?.latestMessageId ?? null;
+    const displayName = buildDiscordConversationDisplayName(channel, input.currentUser, new Map());
+    const scope = {
+      kind: "conversation" as const,
+      key: channel.id,
+      parent: {
+        kind: "account" as const,
+        key: input.currentUser.id,
+      },
+      displayName,
+      metadata: {
+        type: channel.type,
+        dmOnly: true,
+      },
+    };
+
+    proofs.push({
+      scope,
+      proofKind: "discovery",
+      status: "complete",
+      syncMode: "incremental",
+      observedAt: input.observedAt,
+      completedAt: input.observedAt,
+      coverage: {
+        latestMessageId,
+      },
+    });
+
+    const hydrated = hydratedByChannelId.get(channel.id);
+    const previousLatestMessageId =
+      input.sourceCursor.channels[channel.id]?.latestMessageId?.trim() || null;
+    if (input.hydrationBreakChannelId === channel.id && input.hydrationError) {
+      proofs.push({
+        scope,
+        proofKind: "latest_messages",
+        status: "failed",
+        syncMode: "incremental",
+        observedAt: input.observedAt,
+        completedAt: null,
+        resumeCursor: latestMessageId
+          ? {
+              latestMessageId,
+            }
+          : null,
+        coverage: {
+          latestMessageId,
+          previousLatestMessageId,
+        },
+        stats: {
+          hydratedThisRun: false,
+        },
+        error: {
+          message: input.hydrationError,
+        },
+      });
+      continue;
+    }
+
+    if (hydrated || (previousLatestMessageId && previousLatestMessageId === latestMessageId)) {
+      proofs.push({
+        scope,
+        proofKind: "latest_messages",
+        status: "complete",
+        syncMode: "incremental",
+        observedAt: input.observedAt,
+        completedAt: input.observedAt,
+        coverage: {
+          latestMessageId,
+          previousLatestMessageId,
+        },
+        stats: {
+          hydratedThisRun: hydrated !== undefined,
+          messagesFetched: hydrated?.messages.length ?? 0,
+        },
+      });
+    }
+
+    if (!hydrated || hydrated.previousLatestMessageId) {
+      continue;
+    }
+
+    const oldestMessageId = getOldestDiscordMessageId(hydrated.messages);
+    const newestMessageId = getNewestDiscordMessageId(hydrated.messages);
+    const historyComplete = hydrated.messages.length < input.syncMessagesPerChannelLimit;
+    proofs.push({
+      scope,
+      proofKind: "messages",
+      status: historyComplete ? "complete" : "running",
+      syncMode: "incremental",
+      observedAt: input.observedAt,
+      completedAt: historyComplete ? input.observedAt : null,
+      resumeCursor: historyComplete
+        ? null
+        : {
+            before: oldestMessageId,
+          },
+      coverage: {
+        oldestMessageId,
+        newestMessageId,
+      },
+      stats: {
+        messagesFetched: hydrated.messages.length,
+        messageLimit: input.syncMessagesPerChannelLimit,
+      },
+    });
+  }
+
+  return proofs;
+}
+
+function getOldestDiscordMessageId(messages: DiscordMessage[]): string | null {
+  return messages.reduce<string | null>(
+    (oldest, message) =>
+      !oldest || compareDiscordMessageIds(message.id, oldest) < 0 ? message.id : oldest,
+    null,
+  );
+}
+
+function getNewestDiscordMessageId(messages: DiscordMessage[]): string | null {
+  return messages.reduce<string | null>(
+    (newest, message) =>
+      !newest || compareDiscordMessageIds(message.id, newest) > 0 ? message.id : newest,
+    null,
+  );
+}
+
+function compareDiscordMessageIds(left: string, right: string): number {
+  try {
+    const leftId = BigInt(left);
+    const rightId = BigInt(right);
+    if (leftId === rightId) {
+      return 0;
+    }
+    return leftId > rightId ? 1 : -1;
+  } catch {
+    return left.localeCompare(right);
+  }
 }
 
 function buildDiscordHydrationDiagnostics(input: {

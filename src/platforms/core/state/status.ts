@@ -11,6 +11,7 @@ import {
   getDefaultAccountKeyForPlatform,
   type IntegrationRuntimeKind,
   isOnboardingVisiblePlatform,
+  isPlatform,
   isRequestableIntegrationPlatform,
   type Platform,
   parseIntegrationRuntimeKind,
@@ -310,34 +311,43 @@ export function summarizeIntegrationStates(
   rows: IntegrationStateRow[],
 ): IntegrationStateSummary[] {
   const hostOs = resolveHostOS();
-  return rows.map((row) => ({
-    platform: row.platform,
-    accountKey: row.account_key,
-    displayName: row.display_name,
-    authState: row.auth_state,
-    enabled: row.enabled === 1,
-    connectionKind: row.connection_kind,
-    runtimeKind: deriveRuntimeKind(row),
-    syncCapable: row.sync_capable === 1,
-    launchStrategy: row.launch_strategy,
-    launchTarget: row.launch_target,
-    importedFrom: row.imported_from,
-    artifactPaths: safeParseJsonStringArray(
-      row.artifact_paths_json,
-      "integration_states.artifact_paths_json",
-    ),
-    metadata: safeParseJsonRecord(row.metadata_json, "integration_states.metadata_json"),
-    projectionStats: db.getIntegrationProjectionStats(row.platform, row.account_key),
-    latestSyncDiagnostics: getLatestSyncDiagnostics(db, row.platform, row.account_key),
-    lastSeenAt: row.last_seen_at,
-    updatedAt: row.updated_at,
-    latestAuthSessionId: db.getLatestAuthSession(row.platform, row.account_key)?.id ?? null,
-    capability: summarizePlatformCapability(
-      row.platform,
-      { platform: row.platform, authState: row.auth_state },
-      hostOs,
-    ),
-  }));
+  return rows.flatMap((row) => {
+    if (!isPlatform(row.platform)) {
+      return [];
+    }
+
+    const metadata = safeParseJsonRecord(row.metadata_json, "integration_states.metadata_json");
+    return [
+      {
+        platform: row.platform,
+        accountKey: row.account_key,
+        displayName: row.display_name,
+        authState: row.auth_state,
+        enabled: row.enabled === 1,
+        connectionKind: row.connection_kind,
+        runtimeKind: deriveRuntimeKind(row),
+        syncCapable: row.sync_capable === 1,
+        launchStrategy: row.launch_strategy,
+        launchTarget: row.launch_target,
+        importedFrom: row.imported_from,
+        artifactPaths: safeParseJsonStringArray(
+          row.artifact_paths_json,
+          "integration_states.artifact_paths_json",
+        ),
+        metadata,
+        projectionStats: db.getIntegrationProjectionStats(row.platform, row.account_key),
+        latestSyncDiagnostics: getLatestSyncDiagnostics(db, row.platform, row.account_key),
+        lastSeenAt: row.last_seen_at,
+        updatedAt: row.updated_at,
+        latestAuthSessionId: db.getLatestAuthSession(row.platform, row.account_key)?.id ?? null,
+        capability: summarizePlatformCapability(
+          row.platform,
+          { platform: row.platform, authState: row.auth_state, metadata },
+          hostOs,
+        ),
+      },
+    ];
+  });
 }
 
 export function summarizeManagedIntegrationState(
@@ -371,7 +381,11 @@ export function summarizeManagedIntegrationState(
       db.getLatestAuthSession(integration.platform, integration.accountKey)?.id ?? null,
     capability: summarizePlatformCapability(
       integration.platform,
-      { platform: integration.platform, authState: integration.authState },
+      {
+        platform: integration.platform,
+        authState: integration.authState,
+        metadata: integration.metadata ?? null,
+      },
       hostOs,
     ),
   };
@@ -546,7 +560,11 @@ export function getIntegrationSummary(
   if (!row) {
     throw new Error(`Integration not found: ${normalized}/${resolvedAccountKey}`);
   }
-  return summarizeIntegrationStates(db, [row])[0]!;
+  const [summary] = summarizeIntegrationStates(db, [row]);
+  if (!summary) {
+    throw new Error(`Integration summary unavailable: ${normalized}/${resolvedAccountKey}`);
+  }
+  return summary;
 }
 
 export function firstNonEmptyDisplayName(

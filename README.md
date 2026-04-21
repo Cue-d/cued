@@ -114,6 +114,12 @@ This matrix documents current shipped behavior, not roadmap promises.
 
 Legend: `✅` supported, `◐` partial, `❌` unsupported.
 
+The source of truth lives in `src/platforms/core/types.ts`. To inspect the current shipped matrix from the runtime, run:
+
+```bash
+cued integrations capabilities
+```
+
 LinkedIn history is currently partial: Cued imports inbox-visible threads and bounded per-conversation backfill, but not every archived or non-inbox thread.
 
 Discord currently runs in DM-only mode: it discovers direct messages, hydrates up to 50 recent messages in the 5 most recent unseen DMs during sync, uses per-DM message cursors plus snowflake-based pagination to fetch only newer messages on later syncs, sends only to known DMs, and stores the captured Discord account token locally in the Keychain. On Discord auth invalidation such as `401` responses or forced password resets, Cued blocks the integration and stops reconnect attempts until you reconnect manually.
@@ -166,7 +172,7 @@ Once `pnpm dev -- install` has completed, you can switch to the installed `cued`
 | `pnpm dev -- help` | Run the CLI directly from source through `tsx`. |
 | `pnpm build` | Rebuild the TypeScript CLI and daemon. |
 | `pnpm typecheck` | Type check the root app. |
-| `pnpm test` | Run Vitest coverage for the root app. |
+| `pnpm test` | Run the root app test suite. |
 | `pnpm check:biome` | Run formatting, lint, and import checks. |
 | `pnpm build:app:macos` | Rebuild the local `Cued.app` development bundle. |
 | `swift build --package-path native/macos/CuedNative -c release` | Rebuild the native macOS host after Swift changes. |
@@ -200,9 +206,12 @@ native/
   macos/
     CuedNative/     macOS host app
   helpers/
+    slack-go/       Native Slack helper
     whatsapp-go/    Native WhatsApp helper
 scripts/            Packaging, runtime fetch, signing, and permission helpers
 ```
+
+Signal support ships as a bundled `signal-cli` payload fetched by `scripts/fetch-signal-cli-macos.sh` and staged into the app bundle.
 
 ## Packaging And Release Scripts
 
