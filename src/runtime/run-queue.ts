@@ -19,6 +19,30 @@ export class RunQueueService {
     private readonly schedulers: RunQueueSchedulers = {},
   ) {}
 
+  private listManualSyncTargets(source: AdapterPlatform): string[] {
+    const syncCapableTargets = this.db
+      .listEnabledSyncTargets()
+      .filter(
+        (target): target is { platform: AdapterPlatform; account_key: string } =>
+          isAdapterPlatform(target.platform) && target.platform === source,
+      )
+      .map((target) => `${target.platform}:${target.account_key}`);
+    if (syncCapableTargets.length > 0) {
+      return [...new Set(syncCapableTargets)];
+    }
+
+    const authenticatedTargets = this.db
+      .listIntegrationStates()
+      .filter(
+        (integration) =>
+          integration.platform === source &&
+          integration.enabled === 1 &&
+          (integration.auth_state === "authenticated" || integration.auth_state === "authorized"),
+      )
+      .map((integration) => `${integration.platform}:${integration.account_key}`);
+    return [...new Set(authenticatedTargets)];
+  }
+
   queueMessageSend(input: {
     platform: string;
     target: string;
@@ -77,17 +101,7 @@ export class RunQueueService {
     }
 
     if (source && isAdapterPlatform(source)) {
-      const targets = [
-        ...new Set(
-          this.db
-            .listEnabledSyncTargets()
-            .filter(
-              (target): target is { platform: AdapterPlatform; account_key: string } =>
-                isAdapterPlatform(target.platform) && target.platform === source,
-            )
-            .map((target) => `${target.platform}:${target.account_key}`),
-        ),
-      ];
+      const targets = this.listManualSyncTargets(source);
 
       if (targets.length > 0) {
         const queuedTargets: string[] = [];
