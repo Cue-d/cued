@@ -1822,6 +1822,7 @@ export const MIGRATIONS: Migration[] = [
   },
   {
     id: "0009_add_contact_fanout_projection_indexes",
+    legacyIds: ["0008_add_contact_fanout_projection_indexes"],
     apply: (db) => {
       if (tableExists(db, "conversation_participants")) {
         db.exec(`
