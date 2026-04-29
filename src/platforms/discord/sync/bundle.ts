@@ -302,6 +302,20 @@ export async function buildDiscordSyncBundle(
       displayName: discordDisplayName(currentUser),
     },
   ];
+  const proofs = buildDiscordSyncProofs({
+    accountKey,
+    observedAt,
+    currentUser,
+    channels: privateDmChannels,
+    sourceCursor,
+    hydratedChannels,
+    backfilledChannels,
+    nextChannelCursor,
+    syncMessagesPerChannelLimit,
+    hydrationError: hydrationErrorMessage,
+    hydrationBreakChannelId,
+    hydrationRetryAfterMs,
+  });
 
   return {
     sourceAccounts,
@@ -313,21 +327,8 @@ export async function buildDiscordSyncBundle(
       channels: nextChannelCursor,
     } satisfies DiscordSyncCursor,
     syncMode: "incremental",
-    hasMore: false,
-    proofs: buildDiscordSyncProofs({
-      accountKey,
-      observedAt,
-      currentUser,
-      channels: privateDmChannels,
-      sourceCursor,
-      hydratedChannels,
-      backfilledChannels,
-      nextChannelCursor,
-      syncMessagesPerChannelLimit,
-      hydrationError: hydrationErrorMessage,
-      hydrationBreakChannelId,
-      hydrationRetryAfterMs,
-    }),
+    hasMore: hasRunningDiscordMessageProof(proofs),
+    proofs,
     diagnostics: {
       discordHydration: buildDiscordHydrationDiagnostics({
         selectedChannelCount: hydrationChannels.length,
@@ -349,6 +350,10 @@ export async function buildDiscordSyncBundle(
       }),
     },
   };
+}
+
+function hasRunningDiscordMessageProof(proofs: SyncProofInput[]): boolean {
+  return proofs.some((proof) => proof.proofKind === "messages" && proof.status === "running");
 }
 
 function buildDiscordSyncProofs(input: {
