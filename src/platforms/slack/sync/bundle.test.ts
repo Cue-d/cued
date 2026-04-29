@@ -694,6 +694,7 @@ describe("slack worker lib", () => {
       expect.objectContaining({
         proofKind: "replies",
         status: "partial",
+        resumeCursor: null,
         coverage: expect.objectContaining({
           completedThreadCount: 1,
           pendingThreadCount: 0,
@@ -703,6 +704,12 @@ describe("slack worker lib", () => {
           completedThreadCount: 1,
           pendingThreadCount: 0,
         }),
+        error: {
+          code: "not_in_channel",
+          message: "not_in_channel",
+          retryable: false,
+          kind: "slack_api",
+        },
       }),
     ]);
   });
