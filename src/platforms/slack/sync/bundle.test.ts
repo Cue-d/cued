@@ -605,6 +605,108 @@ describe("slack worker lib", () => {
     ]);
   });
 
+  it("marks replies proof as partial when history access fails after thread replies completed", async () => {
+    const historyError = Object.assign(new Error("not_in_channel"), {
+      errorKind: "slack_api",
+      retryable: false,
+      slackCode: "not_in_channel",
+    });
+
+    let historyCalls = 0;
+    const bundle = await buildSlackSyncBundle({
+      accountKey: "default",
+      lastSyncAt: 1709990000000,
+      client: {
+        async testAuth() {
+          return { ok: true, team_id: "T123", user_id: "U_SELF", team: "Acme", user: "Ava" };
+        },
+        async listUsers() {
+          return { users: [], nextCursor: undefined };
+        },
+        async listConversations(types) {
+          if (!types.includes("public_channel")) {
+            return { conversations: [], nextCursor: undefined };
+          }
+          return {
+            conversations: [
+              {
+                id: "C_HISTORY",
+                name: "threads",
+                is_channel: true,
+                latest: {
+                  type: "message",
+                  user: "U_BEN",
+                  text: "thread root",
+                  ts: "1710000000.000100",
+                  reply_count: 1,
+                },
+              },
+            ],
+            nextCursor: undefined,
+          };
+        },
+        async getConversationMembers() {
+          return { members: [], nextCursor: undefined };
+        },
+        async getHistory() {
+          historyCalls += 1;
+          if (historyCalls === 1) {
+            return {
+              messages: [
+                {
+                  type: "message",
+                  user: "U_BEN",
+                  text: "thread root",
+                  ts: "1710000000.000100",
+                  reply_count: 1,
+                },
+              ],
+              hasMore: true,
+              nextCursor: "cursor-2",
+            };
+          }
+          throw historyError;
+        },
+        async getReplies() {
+          return {
+            messages: [
+              {
+                type: "message",
+                user: "U_BEN",
+                text: "thread reply",
+                ts: "1710000001.000100",
+                thread_ts: "1710000000.000100",
+              },
+            ],
+            hasMore: false,
+            nextCursor: undefined,
+          };
+        },
+      },
+    });
+
+    expect(bundle.hasMore).toBe(false);
+    expect(bundle.proofs).toEqual([
+      expect.objectContaining({
+        proofKind: "messages",
+        status: "partial",
+      }),
+      expect.objectContaining({
+        proofKind: "replies",
+        status: "partial",
+        coverage: expect.objectContaining({
+          completedThreadCount: 1,
+          pendingThreadCount: 0,
+        }),
+        stats: expect.objectContaining({
+          threadRootCount: 1,
+          completedThreadCount: 1,
+          pendingThreadCount: 0,
+        }),
+      }),
+    ]);
+  });
+
   it("resumes full syncs within a conversation history pagination chain", async () => {
     const getHistory = async (_conversationId: string, options?: { cursor?: string }) => {
       if (!options?.cursor) {

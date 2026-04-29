@@ -125,7 +125,7 @@ function getMessagesProofStatus(proof: SlackBackfillConversationProof): SyncProo
 }
 
 function getRepliesProofStatus(proof: SlackBackfillConversationProof): SyncProofStatus {
-  if (!proof.repliesError) {
+  if (!proof.repliesError && !proof.historyError) {
     return proof.conversationPhase === "complete" ? "complete" : "running";
   }
   return proof.completedThreadCount > 0 ? "partial" : "blocked";
