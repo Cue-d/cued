@@ -3,7 +3,6 @@ import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { chromium } from "playwright";
 import type { CuedDatabase } from "../../../db/database.js";
-import { isUserRemovedIntegrationRow } from "../../core/state/status.js";
 import { storeSlackSession } from "./session-store.js";
 
 declare const localStorage: {
@@ -47,12 +46,6 @@ function hasAuthenticatedSlackIntegration(db: CuedDatabase): boolean {
   return db
     .listIntegrationStates()
     .some((row) => row.platform === "slack" && row.auth_state === "authenticated");
-}
-
-function hasUserRemovedSlackIntegration(db: CuedDatabase): boolean {
-  return db
-    .listIntegrationStates()
-    .some((row) => row.platform === "slack" && isUserRemovedIntegrationRow(row));
 }
 
 function isSlackInstalled(): boolean {
@@ -101,11 +94,7 @@ export async function importSlackDesktopAuth(db: CuedDatabase): Promise<
     imported: boolean;
   }>
 > {
-  if (
-    !isSlackInstalled() ||
-    hasAuthenticatedSlackIntegration(db) ||
-    hasUserRemovedSlackIntegration(db)
-  ) {
+  if (!isSlackInstalled() || hasAuthenticatedSlackIntegration(db)) {
     return [];
   }
 
