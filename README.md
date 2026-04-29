@@ -122,7 +122,7 @@ cued integrations capabilities
 
 LinkedIn history is currently partial: Cued imports inbox-visible threads and bounded per-conversation backfill, but not every archived or non-inbox thread.
 
-Discord currently runs in DM-only mode: it discovers direct messages, hydrates up to 50 recent messages in the 5 most recent unseen DMs during sync, uses per-DM message cursors plus snowflake-based pagination to fetch only newer messages on later syncs, sends only to known DMs, and stores the captured Discord account token locally in the Keychain. On Discord auth invalidation such as `401` responses or forced password resets, Cued blocks the integration and stops reconnect attempts until you reconnect manually.
+Discord currently runs in DM-only mode: it discovers direct messages, hydrates up to 50 recent messages in the 5 most recent unproven DMs during sync, uses per-DM message cursors plus snowflake-based pagination to fetch newer messages on later syncs, and continues incomplete historical `messages` proofs with bounded `before` pagination. It sends only to known DMs and stores the captured Discord account token locally in the Keychain. On Discord auth invalidation such as `401` responses or forced password resets, Cued blocks the integration and stops reconnect attempts until you reconnect manually.
 
 ## Install From Source
 

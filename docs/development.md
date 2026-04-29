@@ -85,9 +85,10 @@ Discord currently uses a Chromium auth capture flow plus local polling for new m
 - Auth is stored in the Keychain under `dev.cued.auth.discord`.
 - The sync worker is DM-only and does not enumerate guild or server channels.
 - Outbound Discord sends are DM-only.
-- The sync worker hydrates up to 50 messages in the 5 most recent unseen DMs during sync.
-- Later Discord syncs persist per-DM message cursors and use snowflake-based pagination to fetch only newer messages.
-- Realtime behavior is “bounded DM hydration plus new messages after connection” rather than full-history catch-up.
+- The sync worker hydrates up to 50 messages in the 5 most recent unproven DMs during sync.
+- Later Discord syncs persist per-DM message cursors and use snowflake-based pagination to fetch newer messages.
+- Incomplete historical `messages` proofs are resumed with bounded `before` pagination and updated after every fetched page.
+- Realtime behavior is “bounded DM hydration, resumable historical catch-up, plus new messages after connection” rather than a one-shot full-history crawl.
 - On Discord auth invalidation such as `401` responses or password resets, Cued blocks the integration and stops reconnect churn until the user reconnects.
 
 ## Packaged app development

@@ -5,12 +5,16 @@ async function main(): Promise<void> {
     const sourceCursor = process.env.CUED_DISCORD_SOURCE_CURSOR
       ? JSON.parse(process.env.CUED_DISCORD_SOURCE_CURSOR)
       : undefined;
+    const syncProofs = process.env.CUED_DISCORD_SYNC_PROOFS
+      ? JSON.parse(process.env.CUED_DISCORD_SYNC_PROOFS)
+      : undefined;
     const bundle = await buildDiscordSyncBundle(
       {
         accountKey: process.env.CUED_ACCOUNT_KEY,
       },
       {
         sourceCursor,
+        syncProofs,
       },
     );
     process.stdout.write(JSON.stringify({ ok: true, bundle }));
