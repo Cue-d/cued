@@ -507,7 +507,13 @@ process.exit(44);
       accountKey: "T123",
       removed: true,
     });
-    expect(db.getIntegrationState("slack", "T123")).toBeNull();
+    expect(db.getIntegrationState("slack", "T123")).toMatchObject({
+      platform: "slack",
+      account_key: "T123",
+      auth_state: "cancelled",
+      enabled: 0,
+      sync_capable: 0,
+    });
     expect(listIntegrationStates(db)).not.toEqual(
       expect.arrayContaining([
         expect.objectContaining({
@@ -548,7 +554,123 @@ process.exit(44);
       removed: true,
     });
     expect(existsSync(configDir)).toBe(false);
-    expect(db.getIntegrationState("signal", "default")).toBeNull();
+    expect(db.getIntegrationState("signal", "default")).toMatchObject({
+      platform: "signal",
+      account_key: "default",
+      auth_state: "cancelled",
+      enabled: 0,
+      sync_capable: 0,
+    });
+    expect(listIntegrationStates(db)).not.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          platform: "signal",
+          accountKey: "default",
+        }),
+      ]),
+    );
+
+    db.close();
+  });
+
+  it("does not resurrect a removed signal integration during managed helper refresh", async () => {
+    installSecurityTool({});
+    process.env.CUED_APP_PATH = createPackagedSignalHelper("0.14.1");
+    process.env.CUED_WHATSAPP_HELPER_BINARY = join(
+      createTempDir("cued-missing-whatsapp-helper-"),
+      "cued-whatsapp-helper",
+    );
+    process.env.CUED_SLACK_APP_BINARY = join(createTempDir("cued-no-slack-app-"), "Slack");
+
+    const db = createDb();
+    const configDir = createTempDir("cued-signal-config-");
+    db.upsertIntegrationState({
+      platform: "signal",
+      accountKey: "default",
+      displayName: "Signal",
+      authState: "authenticated",
+      enabled: true,
+      connectionKind: "local-cli",
+      syncCapable: true,
+      launchStrategy: "qr-native",
+      launchTarget: null,
+      importedFrom: "local-cli",
+      metadata: { configDir },
+    });
+
+    removeIntegration(db, "signal", "default");
+    await refreshManagedIntegrationStates(db);
+
+    expect(db.getIntegrationState("signal", "default")).toMatchObject({
+      platform: "signal",
+      account_key: "default",
+      auth_state: "cancelled",
+      enabled: 0,
+      sync_capable: 0,
+    });
+    expect(listIntegrationStates(db)).not.toEqual(
+      expect.arrayContaining([expect.objectContaining({ platform: "signal" })]),
+    );
+
+    db.close();
+  });
+
+  it("clears account-scoped sync state when removing an integration", () => {
+    const db = createDb();
+    db.upsertIntegrationState({
+      platform: "signal",
+      accountKey: "default",
+      displayName: "Signal",
+      authState: "authenticated",
+      enabled: true,
+      connectionKind: "local-cli",
+      syncCapable: true,
+      launchStrategy: "qr-native",
+      launchTarget: null,
+      importedFrom: "local-cli",
+      metadata: {},
+    });
+    db.upsertSourceAccount({
+      platform: "signal",
+      accountKey: "default",
+      displayName: "Signal",
+    });
+    db.upsertCheckpoint({
+      platform: "signal",
+      accountKey: "default",
+      syncMode: "incremental",
+      sourceCursor: { cursor: "stale" },
+      lastSuccessAt: Date.now(),
+    });
+    db.upsertSyncProof({
+      platform: "signal",
+      accountKey: "default",
+      proof: {
+        scope: { kind: "account", key: "default" },
+        proofKind: "messages",
+        status: "complete",
+        syncMode: "incremental",
+        observedAt: Date.now(),
+      },
+    });
+    db.queueSyncRun({
+      platform: "signal",
+      accountKey: "default",
+      runType: "sync",
+      trigger: "test",
+    });
+
+    expect(db.getOverview().sourceAccounts).toBe(1);
+    expect(db.getCheckpoint("signal", "default")).not.toBeNull();
+    expect(db.listSyncProofs("signal", "default")).toHaveLength(1);
+    expect(db.hasQueuedOrRunningRun("signal", "default")).toBe(true);
+
+    removeIntegration(db, "signal", "default");
+
+    expect(db.getOverview().sourceAccounts).toBe(0);
+    expect(db.getCheckpoint("signal", "default")).toBeNull();
+    expect(db.listSyncProofs("signal", "default")).toHaveLength(0);
+    expect(db.hasQueuedOrRunningRun("signal", "default")).toBe(false);
 
     db.close();
   });
@@ -611,7 +733,11 @@ process.exit(44);
     });
     expect(completed.integration).toBeNull();
     expect(completed.authSession).toBeNull();
-    expect(db.getIntegrationState("slack", requested.integration.accountKey)).toBeNull();
+    expect(db.getIntegrationState("slack", requested.integration.accountKey)).toMatchObject({
+      auth_state: "cancelled",
+      enabled: 0,
+      sync_capable: 0,
+    });
 
     db.close();
   });
