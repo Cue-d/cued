@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import type { SourceAccountInput } from "../../../core/types/provider.js";
+import type { SourceAccountInput, SyncProofInput } from "../../../core/types/provider.js";
 import { mapWithConcurrency } from "../../../core/utils/async.js";
 import { openCuedDatabaseReadOnly } from "../../../db/database.js";
 import type { SyncBundle } from "../../core/sync.js";
@@ -24,6 +24,7 @@ import {
   conversationSourceKey,
   extractReactionTimestamp,
   messageSourceKey,
+  normalizeConversationUrn,
   normalizeMemberUrn,
   participantSourceKey,
 } from "./events.js";
@@ -60,6 +61,44 @@ type ProjectedReactionLookup = (
   sourceMessageKey: string,
 ) => Map<string, ProjectedReactionRow>;
 
+interface LinkedInMessageResumeCursor {
+  prevCursor?: string | null;
+  oldestDeliveredAt?: number | null;
+  oldestMessageAt?: number | null;
+  newestMessageAt?: number | null;
+  messageCount?: number;
+  reason?: string;
+}
+
+interface LinkedInFullScanCursor {
+  mode: "full";
+  startedAt: number;
+  conversationCursor?: string | null;
+  oldestLastActivity?: number | null;
+  activeConversation?: Conversation | null;
+  activeMessageCursor?: LinkedInMessageResumeCursor | null;
+  pendingConversations?: Conversation[];
+}
+
+interface LinkedInSourceCursor {
+  lastSyncAt?: number;
+  syncToken?: string | null;
+  userEntityUrn?: string;
+  scan?: LinkedInFullScanCursor;
+}
+
+interface LinkedInMessageBatchResult {
+  messages: Message[];
+  complete: boolean;
+  resumeCursor: LinkedInMessageResumeCursor | null;
+  coverage: {
+    oldestMessageAt: number | null;
+    newestMessageAt: number | null;
+  };
+  messageCount: number;
+  error?: unknown;
+}
+
 function now(): number {
   return Date.now();
 }
@@ -80,6 +119,108 @@ function incrementalOldestMs(lastSyncAt?: number): number {
     return Math.max(0, lastSyncAt - INCREMENTAL_BUFFER_MS);
   }
   return 0;
+}
+
+function mergeNullableMin(
+  left: number | null | undefined,
+  right: number | null | undefined,
+): number | null {
+  if (left == null) {
+    return right ?? null;
+  }
+  if (right == null) {
+    return left;
+  }
+  return Math.min(left, right);
+}
+
+function mergeNullableMax(
+  left: number | null | undefined,
+  right: number | null | undefined,
+): number | null {
+  if (left == null) {
+    return right ?? null;
+  }
+  if (right == null) {
+    return left;
+  }
+  return Math.max(left, right);
+}
+
+function parseConversations(value: unknown): Conversation[] {
+  return Array.isArray(value) ? (value.filter(Boolean) as Conversation[]) : [];
+}
+
+function parseLinkedInMessageResumeCursor(raw: unknown): LinkedInMessageResumeCursor | null {
+  if (!raw || typeof raw !== "object") {
+    return null;
+  }
+  const value = raw as Record<string, unknown>;
+  return {
+    prevCursor:
+      typeof value.prevCursor === "string" || value.prevCursor === null
+        ? value.prevCursor
+        : undefined,
+    oldestDeliveredAt:
+      typeof value.oldestDeliveredAt === "number" || value.oldestDeliveredAt === null
+        ? value.oldestDeliveredAt
+        : undefined,
+    oldestMessageAt:
+      typeof value.oldestMessageAt === "number" || value.oldestMessageAt === null
+        ? value.oldestMessageAt
+        : undefined,
+    newestMessageAt:
+      typeof value.newestMessageAt === "number" || value.newestMessageAt === null
+        ? value.newestMessageAt
+        : undefined,
+    messageCount: typeof value.messageCount === "number" ? value.messageCount : undefined,
+    reason: typeof value.reason === "string" ? value.reason : undefined,
+  };
+}
+
+function parseLinkedInSourceCursor(raw: unknown): LinkedInSourceCursor | undefined {
+  if (!raw || typeof raw !== "object") {
+    return undefined;
+  }
+
+  const value = raw as Record<string, unknown>;
+  const rawScan = value.scan;
+  const scan =
+    rawScan && typeof rawScan === "object"
+      ? (() => {
+          const parsed = rawScan as Record<string, unknown>;
+          if (parsed.mode !== "full" || typeof parsed.startedAt !== "number") {
+            return undefined;
+          }
+          const activeMessageCursor = parseLinkedInMessageResumeCursor(parsed.activeMessageCursor);
+          return {
+            mode: "full",
+            startedAt: parsed.startedAt,
+            conversationCursor:
+              typeof parsed.conversationCursor === "string" || parsed.conversationCursor === null
+                ? parsed.conversationCursor
+                : undefined,
+            oldestLastActivity:
+              typeof parsed.oldestLastActivity === "number" || parsed.oldestLastActivity === null
+                ? parsed.oldestLastActivity
+                : undefined,
+            activeConversation:
+              parsed.activeConversation && typeof parsed.activeConversation === "object"
+                ? (parsed.activeConversation as Conversation)
+                : null,
+            activeMessageCursor,
+            pendingConversations: parseConversations(parsed.pendingConversations),
+          } satisfies LinkedInFullScanCursor;
+        })()
+      : undefined;
+
+  return {
+    lastSyncAt: typeof value.lastSyncAt === "number" ? value.lastSyncAt : undefined,
+    syncToken:
+      typeof value.syncToken === "string" || value.syncToken === null ? value.syncToken : undefined,
+    userEntityUrn: typeof value.userEntityUrn === "string" ? value.userEntityUrn : undefined,
+    scan,
+  };
 }
 
 function hasInboxCategory(conversation: Conversation): boolean {
@@ -175,10 +316,13 @@ async function listConnections(
 async function listConversations(
   client: LinkedInClientLike,
   syncToken: string | null,
+  resumeScan?: LinkedInFullScanCursor,
 ): Promise<{
   conversations: Conversation[];
   removedConversationURNs: string[];
   syncToken: string | null;
+  complete: boolean;
+  resumeScan: LinkedInFullScanCursor | null;
 }> {
   if (syncToken) {
     const incremental = await client.getConversations(syncToken);
@@ -186,11 +330,37 @@ async function listConversations(
       conversations: incremental.conversations,
       removedConversationURNs: incremental.deletedConversationURNs ?? [],
       syncToken: incremental.syncToken ?? syncToken,
+      complete: true,
+      resumeScan: null,
+    };
+  }
+
+  const pendingConversations = [
+    ...(resumeScan?.activeConversation ? [resumeScan.activeConversation] : []),
+    ...(resumeScan?.pendingConversations ?? []),
+  ];
+  if (pendingConversations.length > 0) {
+    return {
+      conversations: pendingConversations,
+      removedConversationURNs: [],
+      syncToken: null,
+      complete: false,
+      resumeScan: {
+        mode: "full",
+        startedAt: resumeScan?.startedAt ?? now(),
+        conversationCursor: resumeScan?.conversationCursor ?? null,
+        oldestLastActivity: resumeScan?.oldestLastActivity ?? null,
+      },
     };
   }
 
   const seen = new Map<string, Conversation>();
-  const firstPage = await client.getConversations();
+  const firstPage =
+    resumeScan?.conversationCursor && client.getConversationsWithCursor
+      ? await client.getConversationsWithCursor(resumeScan.conversationCursor)
+      : typeof resumeScan?.oldestLastActivity === "number"
+        ? await client.getConversationsBefore(resumeScan.oldestLastActivity - 1)
+        : await client.getConversations();
   for (const conversation of firstPage.conversations) {
     seen.set(conversation.entityURN, conversation);
   }
@@ -230,10 +400,25 @@ async function listConversations(
     pageCount += 1;
   }
 
+  const complete = !(
+    pageCount >= MAX_CONVERSATION_PAGES &&
+    ((nextCursor && nextCursor.length > 0) ||
+      (Number.isFinite(oldestLastActivity) && oldestLastActivity !== Number.NEGATIVE_INFINITY))
+  );
+
   return {
     conversations: [...seen.values()],
     removedConversationURNs: firstPage.deletedConversationURNs ?? [],
     syncToken: firstPage.syncToken ?? null,
+    complete,
+    resumeScan: complete
+      ? null
+      : {
+          mode: "full",
+          startedAt: resumeScan?.startedAt ?? now(),
+          conversationCursor: nextCursor,
+          oldestLastActivity: Number.isFinite(oldestLastActivity) ? oldestLastActivity : null,
+        },
   };
 }
 
@@ -242,38 +427,63 @@ async function listMessagesForConversation(
   conversation: Conversation,
   oldestMs: number,
   incremental: boolean,
-): Promise<Message[]> {
+  resumeCursor?: LinkedInMessageResumeCursor | null,
+): Promise<LinkedInMessageBatchResult> {
   const seen = new Map<string, Message>();
-  for (const message of conversation.messages?.elements ?? []) {
-    if (message.entityURN) {
-      seen.set(message.entityURN, message);
+  if (!resumeCursor) {
+    for (const message of conversation.messages?.elements ?? []) {
+      if (message.entityURN) {
+        seen.set(message.entityURN, message);
+      }
     }
   }
 
-  let latest: MessagesResult;
-  try {
-    latest = await client.getMessages(conversation.entityURN);
-  } catch (error) {
-    if (isLinkedInLegacyPaginationError(error)) {
-      return [...seen.values()]
-        .filter((message) => message.entityURN)
-        .filter((message) => !incremental || message.deliveredAt >= oldestMs)
-        .sort((left, right) => left.deliveredAt - right.deliveredAt);
-    }
-    throw error;
-  }
-  for (const message of latest.messages) {
-    if (message.entityURN) {
-      seen.set(message.entityURN, message);
-    }
-  }
-
-  let prevCursor = latest.prevCursor ?? null;
+  let prevCursor = resumeCursor?.prevCursor ?? null;
   let oldestDeliveredAt =
-    latest.messages.length > 0
-      ? Math.min(...latest.messages.map((message) => message.deliveredAt).filter(Number.isFinite))
+    typeof resumeCursor?.oldestDeliveredAt === "number"
+      ? resumeCursor.oldestDeliveredAt
       : Number.POSITIVE_INFINITY;
-  let pageCount = 1;
+  let pageCount = 0;
+  let reachedEnd = false;
+
+  if (!resumeCursor) {
+    let latest: MessagesResult;
+    try {
+      latest = await client.getMessages(conversation.entityURN);
+    } catch (error) {
+      if (isLinkedInLegacyPaginationError(error)) {
+        return buildMessageBatchResult({
+          messages: [...seen.values()]
+            .filter((message) => message.entityURN)
+            .filter((message) => !incremental || message.deliveredAt >= oldestMs)
+            .sort((left, right) => left.deliveredAt - right.deliveredAt),
+          complete: false,
+          resumeCursor: null,
+          previousCursor: resumeCursor,
+          error: {
+            code: "legacy_pagination_400",
+            message: error.message,
+          },
+        });
+      }
+      throw error;
+    }
+    pageCount += 1;
+    for (const message of latest.messages) {
+      if (message.entityURN) {
+        seen.set(message.entityURN, message);
+      }
+    }
+    prevCursor = latest.prevCursor ?? null;
+    if (latest.messages.length > 0) {
+      oldestDeliveredAt = Math.min(
+        ...latest.messages.map((message) => message.deliveredAt).filter(Number.isFinite),
+      );
+    } else if (!prevCursor) {
+      oldestDeliveredAt = oldestMs;
+      reachedEnd = true;
+    }
+  }
 
   while (
     !incremental &&
@@ -288,11 +498,24 @@ async function listMessagesForConversation(
         : await client.getMessagesBefore(conversation.entityURN, oldestDeliveredAt - 1);
     } catch (error) {
       if (isLinkedInLegacyPaginationError(error)) {
-        break;
+        return buildMessageBatchResult({
+          messages: [...seen.values()]
+            .filter((message) => message.entityURN)
+            .filter((message) => !incremental || message.deliveredAt >= oldestMs)
+            .sort((left, right) => left.deliveredAt - right.deliveredAt),
+          complete: false,
+          resumeCursor: null,
+          previousCursor: resumeCursor,
+          error: {
+            code: "legacy_pagination_400",
+            message: error.message,
+          },
+        });
       }
       throw error;
     }
     if (page.messages.length === 0) {
+      reachedEnd = true;
       break;
     }
     for (const message of page.messages) {
@@ -308,10 +531,27 @@ async function listMessagesForConversation(
     pageCount += 1;
   }
 
-  return [...seen.values()]
+  const hasMore =
+    !incremental &&
+    !reachedEnd &&
+    ((prevCursor && prevCursor.length > 0) ||
+      (Number.isFinite(oldestDeliveredAt) && oldestDeliveredAt > oldestMs));
+  const messages = [...seen.values()]
     .filter((message) => message.entityURN)
     .filter((message) => !incremental || message.deliveredAt >= oldestMs)
     .sort((left, right) => left.deliveredAt - right.deliveredAt);
+  return buildMessageBatchResult({
+    messages,
+    complete: !hasMore,
+    resumeCursor: hasMore
+      ? {
+          prevCursor,
+          oldestDeliveredAt: Number.isFinite(oldestDeliveredAt) ? oldestDeliveredAt : null,
+          reason: "page_budget_exhausted",
+        }
+      : null,
+    previousCursor: resumeCursor,
+  });
 }
 
 function reactionCompositeKey(reactorSourceKey: string | null, emoji: string): string {
@@ -332,6 +572,125 @@ function loadProjectedReactions(
 
 function isLinkedInLegacyPaginationError(error: unknown): error is LinkedInRequestError {
   return error instanceof LinkedInRequestError && error.statusCode === 400;
+}
+
+function messageRange(messages: Message[]): { oldest: number | null; newest: number | null } {
+  const deliveredAt = messages.map((message) => message.deliveredAt).filter(Number.isFinite);
+  if (deliveredAt.length === 0) {
+    return { oldest: null, newest: null };
+  }
+  return {
+    oldest: Math.min(...deliveredAt),
+    newest: Math.max(...deliveredAt),
+  };
+}
+
+function buildMessageBatchResult(input: {
+  messages: Message[];
+  complete: boolean;
+  resumeCursor: Pick<
+    LinkedInMessageResumeCursor,
+    "prevCursor" | "oldestDeliveredAt" | "reason"
+  > | null;
+  previousCursor?: LinkedInMessageResumeCursor | null;
+  error?: unknown;
+}): LinkedInMessageBatchResult {
+  const range = messageRange(input.messages);
+  const coverage = {
+    oldestMessageAt: mergeNullableMin(input.previousCursor?.oldestMessageAt, range.oldest),
+    newestMessageAt: mergeNullableMax(input.previousCursor?.newestMessageAt, range.newest),
+  };
+  const messageCount = (input.previousCursor?.messageCount ?? 0) + input.messages.length;
+  return {
+    messages: input.messages,
+    complete: input.complete,
+    resumeCursor: input.resumeCursor
+      ? {
+          ...input.resumeCursor,
+          ...coverage,
+          messageCount,
+        }
+      : null,
+    coverage,
+    messageCount,
+    error: input.error,
+  };
+}
+
+function conversationScope(conversation: Conversation): SyncProofInput["scope"] {
+  const normalizedConversation = normalizeConversationUrn(conversation.entityURN);
+  return {
+    kind: "conversation",
+    key: normalizedConversation,
+    displayName: conversation.title || null,
+    metadata: {
+      sourceConversationKey: conversationSourceKey(normalizedConversation),
+      groupChat: conversation.groupChat,
+      categories: conversation.categories,
+    },
+  };
+}
+
+function buildLinkedInDiscoveryProof(input: {
+  accountKey: string;
+  observedAt: number;
+  runStartedAt: number;
+  syncMode: "full" | "incremental";
+  complete: boolean;
+  resumeScan: LinkedInFullScanCursor | null;
+  conversationCount: number;
+  syncToken: string | null;
+}): SyncProofInput {
+  return {
+    scope: {
+      kind: "account",
+      key: input.accountKey,
+      displayName: "LinkedIn",
+    },
+    proofKind: "discovery",
+    status: input.complete ? "complete" : "running",
+    syncMode: input.syncMode,
+    observedAt: input.observedAt,
+    runStartedAt: input.runStartedAt,
+    completedAt: input.complete ? input.observedAt : null,
+    resumeCursor: input.complete ? null : input.resumeScan,
+    stats: {
+      conversationCount: input.conversationCount,
+      syncToken: input.syncToken,
+    },
+  };
+}
+
+function buildLinkedInMessagesProof(input: {
+  conversation: Conversation;
+  messages: Message[];
+  coverage: {
+    oldestMessageAt: number | null;
+    newestMessageAt: number | null;
+  };
+  messageCount: number;
+  observedAt: number;
+  runStartedAt: number;
+  syncMode: "full" | "incremental";
+  complete: boolean;
+  resumeCursor: LinkedInMessageResumeCursor | null;
+  error?: unknown;
+}): SyncProofInput {
+  return {
+    scope: conversationScope(input.conversation),
+    proofKind: "messages",
+    status: input.error ? "failed" : input.complete ? "complete" : "running",
+    syncMode: input.syncMode,
+    observedAt: input.observedAt,
+    runStartedAt: input.runStartedAt,
+    completedAt: input.complete && !input.error ? input.observedAt : null,
+    resumeCursor: input.complete || input.error ? null : input.resumeCursor,
+    coverage: input.coverage,
+    stats: {
+      messageCount: input.messageCount,
+    },
+    error: input.error,
+  };
 }
 
 async function buildReactionEventsForMessage(input: {
@@ -409,10 +768,16 @@ export async function buildLinkedInSyncBundle(options?: {
   accountKey?: string;
   lastSyncAt?: number;
   syncToken?: string | null;
+  sourceCursor?: unknown;
   client?: LinkedInClientLike;
   loadProjectedReactions?: ProjectedReactionLookup;
 }): Promise<SyncBundle> {
   const accountKey = options?.accountKey ?? process.env.CUED_ACCOUNT_KEY ?? "default";
+  const savedCursor = parseLinkedInSourceCursor(options?.sourceCursor);
+  const previousLastSyncAt =
+    typeof options?.lastSyncAt === "number" ? options.lastSyncAt : savedCursor?.lastSyncAt;
+  const savedSyncToken =
+    options?.syncToken !== undefined ? options.syncToken : (savedCursor?.syncToken ?? null);
   const session = options?.client ? null : loadLinkedInSessionSecret(accountKey);
   const client =
     options?.client ??
@@ -429,12 +794,22 @@ export async function buildLinkedInSyncBundle(options?: {
       loadProjectedReactions(db!, lookupAccountKey, sourceMessageKey));
   try {
     const observedBase = now();
-    const cutoffMs = incrementalOldestMs(options?.lastSyncAt);
-    const incremental = Boolean(options?.lastSyncAt || options?.syncToken);
+    const cutoffMs = incrementalOldestMs(previousLastSyncAt);
+    const incremental = Boolean(!savedCursor?.scan && (previousLastSyncAt || savedSyncToken));
+    const syncMode = incremental ? "incremental" : "full";
+    const scan: LinkedInFullScanCursor | undefined =
+      !incremental && savedCursor?.scan
+        ? savedCursor.scan
+        : !incremental
+          ? {
+              mode: "full",
+              startedAt: observedBase,
+            }
+          : undefined;
     const fetchConcurrency = getLinkedInFetchConcurrency();
     const [selfEntityUrn, conversationResult, connections] = await Promise.all([
       client.fetchSelf(),
-      listConversations(client, options?.syncToken ?? null),
+      listConversations(client, incremental ? savedSyncToken : null, scan),
       listConnections(client, incremental),
     ]);
     const userEntityUrn = normalizeMemberUrn(selfEntityUrn);
@@ -502,16 +877,15 @@ export async function buildLinkedInSyncBundle(options?: {
       validConversations.push(conversation);
     }
 
-    const conversationMessages = await mapWithConcurrency(
-      validConversations,
-      fetchConcurrency,
-      async (conversation) => ({
-        conversation,
-        messages: await listMessagesForConversation(client, conversation, cutoffMs, incremental),
-      }),
-    );
+    const proofs: SyncProofInput[] = [];
+    let stoppedAtConversationIndex: number | null = null;
+    let stoppedMessageCursor: LinkedInMessageResumeCursor | null = null;
 
-    for (const { conversation, messages } of conversationMessages) {
+    const ingestConversation = async (
+      conversation: Conversation,
+      messages: Message[],
+      messageResult: LinkedInMessageBatchResult,
+    ) => {
       const conversationKey = conversationSourceKey(conversation.entityURN);
       if (!seenConversationKeys.has(conversationKey)) {
         seenConversationKeys.add(conversationKey);
@@ -566,17 +940,108 @@ export async function buildLinkedInSyncBundle(options?: {
           })),
         );
       }
+
+      proofs.push(
+        buildLinkedInMessagesProof({
+          conversation,
+          messages,
+          coverage: messageResult.coverage,
+          messageCount: messageResult.messageCount,
+          observedAt: observedBase,
+          runStartedAt: scan?.startedAt ?? observedBase,
+          syncMode,
+          complete: messageResult.complete,
+          resumeCursor: messageResult.resumeCursor,
+          error: messageResult.error,
+        }),
+      );
+    };
+
+    if (incremental) {
+      const conversationMessages = await mapWithConcurrency(
+        validConversations,
+        fetchConcurrency,
+        async (conversation) => ({
+          conversation,
+          result: await listMessagesForConversation(client, conversation, cutoffMs, true),
+        }),
+      );
+
+      for (const { conversation, result } of conversationMessages) {
+        await ingestConversation(conversation, result.messages, result);
+      }
+    } else {
+      for (const [index, conversation] of validConversations.entries()) {
+        const resumeCursor =
+          scan?.activeConversation?.entityURN === conversation.entityURN
+            ? scan.activeMessageCursor
+            : null;
+        const result = await listMessagesForConversation(
+          client,
+          conversation,
+          cutoffMs,
+          false,
+          resumeCursor,
+        );
+        await ingestConversation(conversation, result.messages, result);
+        if (!result.complete && !result.error) {
+          stoppedAtConversationIndex = index;
+          stoppedMessageCursor = result.resumeCursor;
+          break;
+        }
+      }
     }
+
+    const stoppedConversation =
+      stoppedAtConversationIndex == null ? null : validConversations[stoppedAtConversationIndex];
+    const pendingConversations =
+      stoppedAtConversationIndex == null
+        ? []
+        : validConversations.slice(stoppedAtConversationIndex + 1);
+    const hasMoreConversationPages = Boolean(
+      conversationResult.resumeScan?.conversationCursor ||
+        typeof conversationResult.resumeScan?.oldestLastActivity === "number",
+    );
+    proofs.unshift(
+      buildLinkedInDiscoveryProof({
+        accountKey,
+        observedAt: observedBase,
+        runStartedAt: scan?.startedAt ?? observedBase,
+        syncMode,
+        complete: !hasMoreConversationPages,
+        resumeScan: hasMoreConversationPages ? conversationResult.resumeScan : null,
+        conversationCount: conversationResult.conversations.length,
+        syncToken: conversationResult.syncToken ?? savedSyncToken,
+      }),
+    );
+    const hasMore =
+      !incremental &&
+      (Boolean(stoppedConversation) || hasMoreConversationPages || pendingConversations.length > 0);
+    const nextScan =
+      hasMore && scan
+        ? {
+            mode: "full" as const,
+            startedAt: scan.startedAt,
+            conversationCursor: conversationResult.resumeScan?.conversationCursor ?? null,
+            oldestLastActivity: conversationResult.resumeScan?.oldestLastActivity ?? null,
+            activeConversation: stoppedConversation,
+            activeMessageCursor: stoppedMessageCursor,
+            pendingConversations,
+          }
+        : undefined;
 
     return {
       sourceAccounts,
       rawEvents,
       sourceCursor: {
-        lastSyncAt: observedBase,
-        syncToken: conversationResult.syncToken,
+        lastSyncAt: hasMore ? previousLastSyncAt : observedBase,
+        syncToken: conversationResult.syncToken ?? savedSyncToken,
         userEntityUrn,
+        scan: nextScan,
       },
-      syncMode: incremental ? "incremental" : "full",
+      syncMode,
+      hasMore,
+      proofs,
     };
   } finally {
     db?.close();
