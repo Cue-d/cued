@@ -255,6 +255,17 @@ export function getKeychainMetadata(metadata: Record<string, unknown> | null): {
   };
 }
 
+export function isUserRemovedIntegrationMetadata(
+  metadata: Record<string, unknown> | null | undefined,
+): boolean {
+  return metadata?.userRemoved === true;
+}
+
+export function isUserRemovedIntegrationRow(row: IntegrationStateRow): boolean {
+  const metadata = safeParseJsonRecord(row.metadata_json, "integration_states.metadata_json");
+  return isUserRemovedIntegrationMetadata(metadata);
+}
+
 export function deleteKeychainSecret(
   keychainService: string | null,
   keychainAccount: string | null,
@@ -492,7 +503,10 @@ function buildSetupIntegrations(
 }
 
 export function listIntegrationStates(db: CuedDatabase): IntegrationStateSummary[] {
-  return summarizeIntegrationStates(db, db.listIntegrationStates());
+  return summarizeIntegrationStates(
+    db,
+    db.listIntegrationStates().filter((row) => !isUserRemovedIntegrationRow(row)),
+  );
 }
 
 export function listAuthSessions(db: CuedDatabase, limit = 20): AuthSessionSummary[] {

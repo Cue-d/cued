@@ -14,6 +14,7 @@ import type { IntegrationAuthState } from "../types.js";
 import { refreshLocalIntegrationStates } from "./local-refresh.js";
 import {
   firstNonEmptyDisplayName,
+  isUserRemovedIntegrationRow,
   listIntegrationStates,
   now,
   upsertManagedIntegrationState,
@@ -172,7 +173,9 @@ export async function refreshManagedHelperIntegrationStates(db: CuedDatabase): P
   let refreshed = 0;
 
   const signalRows = existingStates.filter((row) => row.platform === "signal");
-  const signalInputs = signalRows.length > 0 ? signalRows : [null];
+  const activeSignalRows = signalRows.filter((row) => !isUserRemovedIntegrationRow(row));
+  const signalInputs =
+    activeSignalRows.length > 0 ? activeSignalRows : signalRows.length > 0 ? [] : [null];
   const signalManagedStates = (
     await Promise.all(signalInputs.map((row) => buildSignalManagedState(row)))
   ).filter((state): state is ManagedIntegrationState => Boolean(state));
@@ -182,7 +185,9 @@ export async function refreshManagedHelperIntegrationStates(db: CuedDatabase): P
   refreshed += signalManagedStates.length;
 
   const whatsAppRows = existingStates.filter((row) => row.platform === "whatsapp");
-  const whatsAppInputs = whatsAppRows.length > 0 ? whatsAppRows : [null];
+  const activeWhatsAppRows = whatsAppRows.filter((row) => !isUserRemovedIntegrationRow(row));
+  const whatsAppInputs =
+    activeWhatsAppRows.length > 0 ? activeWhatsAppRows : whatsAppRows.length > 0 ? [] : [null];
   const whatsAppManagedStates = (
     await Promise.all(whatsAppInputs.map((row) => buildWhatsAppManagedState(row)))
   ).filter((state): state is ManagedIntegrationState => Boolean(state));
