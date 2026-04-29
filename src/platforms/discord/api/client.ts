@@ -174,12 +174,13 @@ export function isDiscordAuthInvalidationError(error: unknown): boolean {
   const message =
     error instanceof Error ? error.message.toLowerCase() : String(error).toLowerCase();
   return (
-    message.includes("401") ||
-    message.includes("unauthorized") ||
-    message.includes("password") ||
+    hasFallbackHttp401(message) ||
+    message.includes("invalid token") ||
     message.includes("limited access") ||
     message.includes("suspicious") ||
-    message.includes("disabled")
+    message.includes("password reset") ||
+    message.includes("reset your password") ||
+    (message.includes("account") && message.includes("disabled"))
   );
 }
 
@@ -195,6 +196,14 @@ function isAccountLevelDiscord403(error: DiscordApiError): boolean {
     (responseBody.includes("account") && responseBody.includes("disabled")) ||
     responseBody.includes("password reset") ||
     responseBody.includes("reset your password")
+  );
+}
+
+function hasFallbackHttp401(message: string): boolean {
+  return (
+    /\b(?:http|status|code)\s*401\b/.test(message) ||
+    /\b401\s*[:(-]\s*unauthorized\b/.test(message) ||
+    /\bfailed\s*\(401\)/.test(message)
   );
 }
 
