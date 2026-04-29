@@ -60,7 +60,6 @@ import {
   buildSlackConversationEvent,
   buildSlackMessageEvents,
 } from "../../platforms/slack/sync/events.js";
-import { isSlackBackfillConversationProof } from "../../platforms/slack/sync/proof.js";
 import {
   getWhatsAppStoreDir,
   inspectWhatsAppHelper,
@@ -71,6 +70,14 @@ import {
   WhatsAppRealtimeSupervisor,
 } from "../../platforms/whatsapp/realtime/session.js";
 import { buildWhatsAppRawEventsFromSnapshot } from "../../platforms/whatsapp/sync/events.js";
+import {
+  addWhatsAppResyncStats,
+  buildWhatsAppMessagesProof,
+  emptyWhatsAppResyncStats,
+  mergeWhatsAppResyncCoverage,
+  parseWhatsAppSourceCursor,
+  summarizeWhatsAppMessageCoverage,
+} from "../../platforms/whatsapp/sync/proof.js";
 import type {
   WhatsAppHelperEventEnvelope,
   WhatsAppReceiptSnapshot,
@@ -374,6 +381,11 @@ function withRawEventAcquisitionMode(
       acquisitionMode,
     },
   }));
+}
+
+function getWhatsAppResyncPageBudget(): number {
+  const configured = Number(process.env.CUED_WHATSAPP_RESYNC_PAGE_BUDGET ?? 10);
+  return Number.isFinite(configured) && configured > 0 ? Math.trunc(configured) : 10;
 }
 
 async function safeEmitHookEvent(
@@ -2483,20 +2495,41 @@ export async function runDaemon(): Promise<void> {
             displayName: "WhatsApp",
           },
         ];
-        bundleSyncMode = checkpoint?.source_cursor_json ? "incremental" : "full";
-
-        let cursor: string | null = null;
+        const whatsappCursor = parseWhatsAppSourceCursor(sourceCursor);
+        let cursor: string | null = whatsappCursor.resyncCursor ?? null;
+        bundleSyncMode = cursor
+          ? (whatsappCursor.resyncSyncMode ??
+            (checkpoint?.sync_mode as "full" | "incremental") ??
+            "full")
+          : checkpoint?.source_cursor_json
+            ? "incremental"
+            : "full";
+        const sinceMs =
+          cursor != null
+            ? (whatsappCursor.resyncSinceMs ?? null)
+            : bundleSyncMode === "incremental"
+              ? (checkpoint?.last_success_at ?? whatsappCursor.lastSyncAt ?? null)
+              : null;
+        const resyncStartedAt = whatsappCursor.resyncStartedAt ?? ingestStartedAt;
+        const pageBudget = getWhatsAppResyncPageBudget();
+        let pageCount = 0;
+        let resyncStats = whatsappCursor.resyncStats ?? emptyWhatsAppResyncStats();
+        let resyncCoverage = whatsappCursor.resyncCoverage ?? {
+          oldestMessageAt: null,
+          newestMessageAt: null,
+        };
         let hasMore = false;
         let lastCompletedAt = now();
         do {
           const pageFetchStartedAt = now();
           const page = await session.resync({
             cursor,
-            sinceMs:
-              bundleSyncMode === "incremental" ? (checkpoint?.last_success_at ?? null) : null,
+            sinceMs,
             limit: 1000,
           });
           adapterFetchMs += now() - pageFetchStartedAt;
+          pageCount += 1;
+          const pageCoverage = summarizeWhatsAppMessageCoverage(page.messages ?? []);
 
           const rawEvents = withRawEventAcquisitionMode(
             buildWhatsAppRawEventsFromSnapshot({
@@ -2506,6 +2539,14 @@ export async function runDaemon(): Promise<void> {
             "sync",
           );
           ingestedCount += rawEvents.length;
+          resyncStats = addWhatsAppResyncStats(resyncStats, {
+            pageCount: 1,
+            contactCount: page.contacts?.length ?? 0,
+            chatCount: page.chats?.length ?? 0,
+            messageCount: page.messages?.length ?? 0,
+            rawEventCount: rawEvents.length,
+          });
+          resyncCoverage = mergeWhatsAppResyncCoverage(resyncCoverage, pageCoverage);
           lastCompletedAt = page.completedAt ?? now();
           hasMore = page.hasMore;
           cursor = page.nextCursor ?? null;
@@ -2530,13 +2571,43 @@ export async function runDaemon(): Promise<void> {
                   ? insertResult.lastInsertedRowId
                   : Math.max(insertResult.lastInsertedRowId, pageInsertResult.lastInsertedRowId),
           };
-        } while (hasMore);
+        } while (hasMore && pageCount < pageBudget);
 
-        bundleHasMore = false;
+        bundleHasMore = hasMore;
         bundleSourceCursor = {
-          lastSyncAt: lastCompletedAt,
+          lastSyncAt: hasMore
+            ? (whatsappCursor.lastSyncAt ?? checkpoint?.last_success_at)
+            : lastCompletedAt,
+          ...(hasMore
+            ? {
+                resyncCursor: cursor,
+                resyncSinceMs: sinceMs,
+                resyncStartedAt,
+                resyncSyncMode: bundleSyncMode,
+                resyncStats,
+                resyncCoverage,
+              }
+            : {}),
         };
-        checkpointLastSuccessAt = lastCompletedAt;
+        checkpointLastSuccessAt = hasMore
+          ? (checkpoint?.last_success_at ?? lastCompletedAt)
+          : lastCompletedAt;
+        db.upsertSyncProof({
+          platform,
+          accountKey,
+          proof: buildWhatsAppMessagesProof({
+            accountKey,
+            syncMode: bundleSyncMode,
+            observedAt: now(),
+            runStartedAt: resyncStartedAt,
+            hasMore,
+            nextCursor: cursor,
+            sinceMs,
+            completedAt: lastCompletedAt,
+            stats: resyncStats,
+            coverage: resyncCoverage,
+          }),
+        });
       } else {
         const bundle =
           platform === "signal"
@@ -2555,11 +2626,6 @@ export async function runDaemon(): Promise<void> {
         const rawEventInsertStartedAt = now();
         insertResult = db.insertRawEvents(withRawEventAcquisitionMode(bundle.rawEvents, "sync"));
         rawEventInsertMs = now() - rawEventInsertStartedAt;
-        const slackBackfillDiagnostics = Array.isArray(
-          bundle.diagnostics?.slackBackfillConversations,
-        )
-          ? bundle.diagnostics.slackBackfillConversations
-          : [];
         const bundleProofs = Array.isArray(bundle.proofs) ? bundle.proofs : [];
         for (const proof of bundleProofs) {
           db.upsertSyncProof({
@@ -2567,13 +2633,6 @@ export async function runDaemon(): Promise<void> {
             accountKey,
             proof,
           });
-        }
-        if (platform === "slack") {
-          for (const proof of slackBackfillDiagnostics) {
-            if (isSlackBackfillConversationProof(proof)) {
-              db.upsertSlackBackfillProof(proof);
-            }
-          }
         }
         checkpointLastSuccessAt = now();
       }

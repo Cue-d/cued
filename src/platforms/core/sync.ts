@@ -14,7 +14,6 @@ export interface SyncBundle {
   syncMode?: SyncMode;
   hasMore?: boolean;
   proofs?: SyncProofInput[];
-  diagnostics?: Record<string, unknown>;
 }
 
 export interface AdapterWorkerOutput {
