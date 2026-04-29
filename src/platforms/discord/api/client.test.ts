@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { DiscordApiClient, isDiscordOverflowError } from "./client.js";
+import { DiscordApiClient, type DiscordRateLimitError, isDiscordOverflowError } from "./client.js";
 
 describe("DiscordApiClient", () => {
   afterEach(() => {
@@ -48,5 +48,30 @@ describe("DiscordApiClient", () => {
         ),
       ),
     ).toBe(true);
+  });
+
+  it("preserves retry-after metadata when rate limits keep failing", async () => {
+    vi.useFakeTimers();
+
+    const rateLimitResponse = () =>
+      new Response(JSON.stringify({ retry_after: 1.25 }), {
+        status: 429,
+        headers: { "Content-Type": "application/json" },
+      });
+    const fetchImpl = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(rateLimitResponse())
+      .mockResolvedValueOnce(rateLimitResponse());
+
+    const client = new DiscordApiClient({ token: "discord-token" }, { fetchImpl });
+    const promise = client.getCurrentUser();
+    const handled = promise.catch((error: unknown) => error);
+
+    await vi.advanceTimersByTimeAsync(1_250);
+    await expect(handled).resolves.toMatchObject({
+      name: "DiscordRateLimitError",
+      retryAfterMs: 1_250,
+    } satisfies Partial<DiscordRateLimitError>);
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
   });
 });

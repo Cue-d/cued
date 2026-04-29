@@ -23,7 +23,7 @@ import {
   type RawEventAcquisitionMode,
 } from "../../core/types/provider.js";
 import { safeParseJsonRecord, safeParseJsonStringArray } from "../../db/codecs.js";
-import { type OutboundMessageRow, openCuedDatabase } from "../../db/database.js";
+import { type CuedDatabase, type OutboundMessageRow, openCuedDatabase } from "../../db/database.js";
 import { isAdapterPlatform, listAutoSyncPlatforms } from "../../platforms/core/registry.js";
 import { runAdapter } from "../../platforms/core/runner.js";
 import { loadIntegrationSecret } from "../../platforms/core/secrets/keychain.js";
@@ -409,6 +409,22 @@ function resolveCheckpointSyncMode(
   }
 
   return bundleSyncMode === "incremental" ? "incremental" : "full";
+}
+
+function buildDiscordSyncProofEnv(db: CuedDatabase, accountKey: string): string | null {
+  const proofs = db
+    .listSyncProofs("discord", accountKey)
+    .filter((proof) => proof.proof_kind === "latest_messages" || proof.proof_kind === "messages")
+    .map((proof) => ({
+      scopeKey: proof.scope_key,
+      proofKind: proof.proof_kind,
+      status: proof.status,
+      resumeCursor: safeParseJsonRecord(proof.resume_cursor_json, "sync_proofs.resume_cursor_json"),
+      coverage: safeParseJsonRecord(proof.coverage_json, "sync_proofs.coverage_json"),
+      lastObservedAt: proof.last_observed_at,
+    }));
+
+  return proofs.length > 0 ? JSON.stringify(proofs) : null;
 }
 
 function withRawEventAcquisitionMode(
@@ -2911,6 +2927,12 @@ export async function runDaemon(): Promise<void> {
       }
       if (platform === "discord" && checkpoint?.source_cursor_json) {
         envOverrides.CUED_DISCORD_SOURCE_CURSOR = checkpoint.source_cursor_json;
+      }
+      if (platform === "discord") {
+        const syncProofs = buildDiscordSyncProofEnv(db, accountKey);
+        if (syncProofs) {
+          envOverrides.CUED_DISCORD_SYNC_PROOFS = syncProofs;
+        }
       }
       if (platform === "linkedin") {
         if (typeof sourceCursor?.lastSyncAt === "number") {

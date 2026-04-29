@@ -28,6 +28,13 @@ export class DiscordApiError extends Error {
   }
 }
 
+export class DiscordRateLimitError extends Error {
+  constructor(readonly retryAfterMs: number) {
+    super(`Discord API rate limited; retry after ${retryAfterMs}ms`);
+    this.name = "DiscordRateLimitError";
+  }
+}
+
 export class DiscordApiClient {
   private readonly fetchImpl: FetchLike;
 
@@ -149,8 +156,7 @@ export class DiscordApiClient {
     if (response.status === 429) {
       const retryBody = (await safeJson(response)) as { retry_after?: number } | null;
       const retryAfterMs = Math.ceil((retryBody?.retry_after ?? 1) * 1000);
-      await delay(Math.max(250, retryAfterMs));
-      throw new Error("Discord API rate limited");
+      throw new DiscordRateLimitError(Math.max(250, retryAfterMs));
     }
 
     if (!response.ok) {
@@ -207,11 +213,25 @@ export function isDiscordOverflowError(error: unknown): boolean {
   return message.includes("overflow") || message.includes("upstream connect error");
 }
 
+export function isDiscordRateLimitError(error: unknown): boolean {
+  return (
+    error instanceof DiscordRateLimitError ||
+    (error instanceof Error && error.message.toLowerCase().includes("rate limited"))
+  );
+}
+
+export function getDiscordRetryAfterMs(error: unknown): number | null {
+  if (error instanceof DiscordRateLimitError) {
+    return error.retryAfterMs;
+  }
+  return null;
+}
+
 function isRetryableDiscordError(error: unknown): boolean {
   if (isDiscordAuthInvalidationError(error)) {
     return false;
   }
-  if (isDiscordOverflowError(error)) {
+  if (isDiscordOverflowError(error) || isDiscordRateLimitError(error)) {
     return true;
   }
   const message =
@@ -226,6 +246,9 @@ function isRetryableDiscordError(error: unknown): boolean {
 }
 
 function getDiscordRetryDelayMs(error: unknown, attempt: number): number {
+  if (error instanceof DiscordRateLimitError) {
+    return error.retryAfterMs;
+  }
   if (isDiscordOverflowError(error)) {
     return DISCORD_OVERFLOW_RETRY_BASE_MS * 2 ** Math.max(0, attempt - 1);
   }

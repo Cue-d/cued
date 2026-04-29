@@ -129,6 +129,18 @@ describe("buildDiscordSyncBundle", () => {
         breakChannelId: null,
         error: null,
         rateLimited: false,
+        retryAfterMs: null,
+      },
+      discordBackfill: {
+        selectedChannelCount: 0,
+        attemptedChannelCount: 0,
+        completedChannelCount: 0,
+        messageLimitPerChannel: 100,
+        partial: false,
+        breakChannelId: null,
+        error: null,
+        rateLimited: false,
+        retryAfterMs: null,
       },
     });
     expect(bundle.sourceCursor).toEqual({
@@ -258,6 +270,18 @@ describe("buildDiscordSyncBundle", () => {
         breakChannelId: "dm-2",
         error: "Discord API rate limited",
         rateLimited: true,
+        retryAfterMs: null,
+      },
+      discordBackfill: {
+        selectedChannelCount: 0,
+        attemptedChannelCount: 0,
+        completedChannelCount: 0,
+        messageLimitPerChannel: 100,
+        partial: false,
+        breakChannelId: null,
+        error: null,
+        rateLimited: false,
+        retryAfterMs: null,
       },
     });
     expect(findDiscordProof(bundle, "account", "u-self", "discovery")).toEqual(
@@ -283,6 +307,7 @@ describe("buildDiscordSyncBundle", () => {
         },
         error: {
           message: "Discord API rate limited",
+          retryAfterMs: null,
         },
       }),
     );
@@ -374,6 +399,24 @@ describe("buildDiscordSyncBundle", () => {
             "dm-2": { latestMessageId: "200" },
           },
         },
+        syncProofs: [
+          {
+            scopeKey: "dm-1",
+            proofKind: "latest_messages",
+            status: "complete",
+            coverage: { latestMessageId: "150" },
+            resumeCursor: null,
+            lastObservedAt: 100,
+          },
+          {
+            scopeKey: "dm-2",
+            proofKind: "latest_messages",
+            status: "complete",
+            coverage: { latestMessageId: "200" },
+            resumeCursor: null,
+            lastObservedAt: 100,
+          },
+        ],
       },
     );
 
@@ -414,6 +457,18 @@ describe("buildDiscordSyncBundle", () => {
         breakChannelId: null,
         error: null,
         rateLimited: false,
+        retryAfterMs: null,
+      },
+      discordBackfill: {
+        selectedChannelCount: 0,
+        attemptedChannelCount: 0,
+        completedChannelCount: 0,
+        messageLimitPerChannel: 100,
+        partial: false,
+        breakChannelId: null,
+        error: null,
+        rateLimited: false,
+        retryAfterMs: null,
       },
     });
     expect(bundle.sourceCursor).toEqual({
@@ -460,6 +515,195 @@ describe("buildDiscordSyncBundle", () => {
         coverage: {
           oldestMessageId: "150",
           newestMessageId: "150",
+        },
+      }),
+    );
+  });
+
+  it("hydrates DMs that have a checkpoint cursor but no latest-message proof", async () => {
+    const fetchedRequests: Array<{ channelId: string; before?: string | null; limit?: number }> =
+      [];
+
+    const bundle = await buildDiscordSyncBundle(
+      { accountKey: "default" },
+      {
+        syncMessageChannelLimit: 1,
+        client: {
+          async getCurrentUser() {
+            return {
+              id: "u-self",
+              username: "theo",
+              global_name: "Theo",
+            };
+          },
+          async listPrivateChannels() {
+            return [
+              {
+                id: "dm-1",
+                type: 1,
+                recipients: [{ id: "u-1", username: "ava" }],
+                last_message_id: "300",
+              },
+              {
+                id: "dm-2",
+                type: 1,
+                recipients: [{ id: "u-2", username: "ben" }],
+                last_message_id: "200",
+              },
+            ];
+          },
+          async listChannelMessages(
+            channelId: string,
+            options?: { before?: string | null; limit?: number },
+          ) {
+            fetchedRequests.push({
+              channelId,
+              before: options?.before,
+              limit: options?.limit,
+            });
+            return [
+              {
+                id: channelId === "dm-1" ? "300" : "200",
+                channel_id: channelId,
+                author: {
+                  id: `sender-${channelId}`,
+                  username: `user-${channelId}`,
+                },
+                content: `latest-${channelId}`,
+                timestamp: "2026-04-18T12:00:00.000Z",
+              },
+            ];
+          },
+        } as unknown as DiscordApiClient,
+        sourceCursor: {
+          userId: "u-self",
+          discoveredAt: 1_710_000_000_000,
+          lastSyncAt: 1_710_000_000_000,
+          channels: {
+            "dm-1": { latestMessageId: "300" },
+            "dm-2": { latestMessageId: "200" },
+          },
+        },
+        syncProofs: [
+          {
+            scopeKey: "dm-1",
+            proofKind: "latest_messages",
+            status: "complete",
+            coverage: { latestMessageId: "300" },
+            resumeCursor: null,
+            lastObservedAt: 100,
+          },
+        ],
+      },
+    );
+
+    expect(fetchedRequests).toEqual([{ channelId: "dm-2", before: undefined, limit: 50 }]);
+    expect(findDiscordProof(bundle, "conversation", "dm-2", "latest_messages")).toEqual(
+      expect.objectContaining({
+        status: "complete",
+        coverage: {
+          latestMessageId: "200",
+          previousLatestMessageId: null,
+        },
+      }),
+    );
+  });
+
+  it("continues incomplete historical message proofs with before pagination", async () => {
+    const fetchedRequests: Array<{ channelId: string; before?: string | null; limit?: number }> =
+      [];
+
+    const bundle = await buildDiscordSyncBundle(
+      { accountKey: "default" },
+      {
+        syncMessageChannelLimit: 0,
+        backfillPageLimit: 1,
+        client: {
+          async getCurrentUser() {
+            return {
+              id: "u-self",
+              username: "theo",
+              global_name: "Theo",
+            };
+          },
+          async listPrivateChannels() {
+            return [
+              {
+                id: "dm-1",
+                type: 1,
+                recipients: [{ id: "u-1", username: "ava" }],
+                last_message_id: "350",
+              },
+            ];
+          },
+          async listChannelMessages(
+            channelId: string,
+            options?: { before?: string | null; limit?: number },
+          ) {
+            fetchedRequests.push({
+              channelId,
+              before: options?.before,
+              limit: options?.limit,
+            });
+            return buildDescendingDiscordMessages(channelId, 249, 150);
+          },
+        } as unknown as DiscordApiClient,
+        sourceCursor: {
+          userId: "u-self",
+          discoveredAt: 1_710_000_000_000,
+          lastSyncAt: 1_710_000_000_000,
+          channels: {
+            "dm-1": { latestMessageId: "350" },
+          },
+        },
+        syncProofs: [
+          {
+            scopeKey: "dm-1",
+            proofKind: "latest_messages",
+            status: "complete",
+            coverage: { latestMessageId: "350" },
+            resumeCursor: null,
+            lastObservedAt: 100,
+          },
+          {
+            scopeKey: "dm-1",
+            proofKind: "messages",
+            status: "running",
+            coverage: { oldestMessageId: "250", newestMessageId: "350" },
+            resumeCursor: { before: "250" },
+            lastObservedAt: 100,
+          },
+        ],
+      },
+    );
+
+    expect(fetchedRequests).toEqual([{ channelId: "dm-1", before: "250", limit: 100 }]);
+    expect(bundle.rawEvents.filter((event) => event.entityKind === "message")).toHaveLength(100);
+    expect(bundle.diagnostics?.discordBackfill).toEqual({
+      selectedChannelCount: 1,
+      attemptedChannelCount: 1,
+      completedChannelCount: 1,
+      messageLimitPerChannel: 100,
+      partial: false,
+      breakChannelId: null,
+      error: null,
+      rateLimited: false,
+      retryAfterMs: null,
+    });
+    expect(findDiscordProof(bundle, "conversation", "dm-1", "messages")).toEqual(
+      expect.objectContaining({
+        status: "running",
+        resumeCursor: {
+          before: "150",
+        },
+        coverage: {
+          oldestMessageId: "150",
+          newestMessageId: "350",
+        },
+        stats: {
+          messagesFetched: 100,
+          messageLimit: 100,
+          backfill: true,
         },
       }),
     );
