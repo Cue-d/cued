@@ -110,6 +110,16 @@ describe("DiscordApiClient", () => {
         ),
       ),
     ).toBe(true);
+    expect(
+      isDiscordAuthInvalidationError(
+        new DiscordApiError(
+          "GET",
+          "/users/@me",
+          403,
+          '{"message":"Your account has been disabled"}',
+        ),
+      ),
+    ).toBe(true);
   });
 
   it("does not treat transient 5xx responses as auth invalidation even if the body contains auth-like keywords", () => {

@@ -192,8 +192,7 @@ function isAccountLevelDiscord403(error: DiscordApiError): boolean {
   return (
     responseBody.includes("limited access") ||
     responseBody.includes("suspicious") ||
-    responseBody.includes("account disabled") ||
-    responseBody.includes("account is disabled") ||
+    (responseBody.includes("account") && responseBody.includes("disabled")) ||
     responseBody.includes("password reset") ||
     responseBody.includes("reset your password")
   );
