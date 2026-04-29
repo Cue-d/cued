@@ -1486,7 +1486,7 @@ private func installerDefaultPermissionStatus(for key: String) -> InstallerPermi
 
 private func installerPlatformIconAssetName(for platform: String) -> String? {
   switch platform {
-  case "contacts", "imessage":
+  case "contacts", "discord", "imessage":
     return nil  // Use SF Symbol fallback icons
   case "slack":
     return "slack-logo"
@@ -1507,6 +1507,8 @@ private func installerPlatformAccentColor(for platform: String) -> Color {
     return Color(red: 0.07, green: 0.72, blue: 0.84)
   case "imessage":
     return Color(red: 0.24, green: 0.81, blue: 0.39)
+  case "discord":
+    return Color(red: 0.35, green: 0.40, blue: 0.95)
   case "slack":
     return Color(red: 0.36, green: 0.18, blue: 0.52)
   case "linkedin":
