@@ -166,14 +166,7 @@ export function isDiscordAuthInvalidationError(error: unknown): boolean {
       return true;
     }
     if (error.status === 403) {
-      const responseBody = error.responseBody.toLowerCase();
-      return (
-        responseBody.includes("password") ||
-        responseBody.includes("unauthorized") ||
-        responseBody.includes("limited access") ||
-        responseBody.includes("suspicious") ||
-        responseBody.includes("disabled")
-      );
+      return isAccountLevelDiscord403(error);
     }
     return false;
   }
@@ -187,6 +180,21 @@ export function isDiscordAuthInvalidationError(error: unknown): boolean {
     message.includes("limited access") ||
     message.includes("suspicious") ||
     message.includes("disabled")
+  );
+}
+
+function isAccountLevelDiscord403(error: DiscordApiError): boolean {
+  if (error.path !== "/users/@me") {
+    return false;
+  }
+
+  const responseBody = error.responseBody.toLowerCase();
+  return (
+    responseBody.includes("limited access") ||
+    responseBody.includes("suspicious") ||
+    (responseBody.includes("account") && responseBody.includes("disabled")) ||
+    responseBody.includes("password reset") ||
+    responseBody.includes("reset your password")
   );
 }
 

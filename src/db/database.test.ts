@@ -1350,6 +1350,23 @@ describe("CuedDatabase", () => {
         .prepare("SELECT 1 FROM schema_migrations WHERE id = ?")
         .get("0007_add_generic_sync_proof_tables"),
     ).toBeTruthy();
+    expect(
+      sql
+        .prepare("SELECT 1 FROM schema_migrations WHERE id = ?")
+        .get("0008_add_contact_fanout_projection_indexes"),
+    ).toBeTruthy();
+    const indexNames = (
+      sql.prepare("SELECT name FROM sqlite_master WHERE type = 'index'").all() as Array<{
+        name: string;
+      }>
+    ).map((row) => row.name);
+    expect(indexNames).toEqual(
+      expect.arrayContaining([
+        "idx_conversation_participants_contact",
+        "idx_timeline_events_actor_contact",
+        "idx_message_reactions_reactor_contact",
+      ]),
+    );
     expect(syncRunColumns).toContain("queued_at");
     expect(
       sql.prepare("SELECT queued_at, started_at FROM sync_runs WHERE id = ?").get("legacy-run"),

@@ -334,6 +334,20 @@ export function shouldSkipConnectedDiscordSchedulerSync(
   return targetPlatform === "discord" && trigger === "scheduler" && status?.state === "connected";
 }
 
+export function shouldProjectIngestRunInline(input: {
+  platform: Platform;
+  realtimeProjectionEnabled: boolean;
+  firstInsertedRowId: number | null;
+  lastInsertedRowId: number | null;
+}): boolean {
+  return (
+    input.platform !== "discord" &&
+    input.realtimeProjectionEnabled &&
+    input.firstInsertedRowId != null &&
+    input.lastInsertedRowId != null
+  );
+}
+
 function isSqliteBusyError(error: unknown): boolean {
   const message = error instanceof Error ? error.message : String(error);
   return /sqlite_(busy|locked)|database is locked|database is busy/i.test(message);
@@ -3102,13 +3116,16 @@ export async function runDaemon(): Promise<void> {
       db.upsertSourceAccounts(sourceAccounts);
       const realtimeProjectionStartedAt = now();
       if (
-        realtimeProjectionEnabled &&
-        insertResult.firstInsertedRowId != null &&
-        insertResult.lastInsertedRowId != null
+        shouldProjectIngestRunInline({
+          platform,
+          realtimeProjectionEnabled,
+          firstInsertedRowId: insertResult.firstInsertedRowId,
+          lastInsertedRowId: insertResult.lastInsertedRowId,
+        })
       ) {
         projectRealtimeRange(db, {
-          startRowId: insertResult.firstInsertedRowId,
-          endRowId: insertResult.lastInsertedRowId,
+          startRowId: insertResult.firstInsertedRowId!,
+          endRowId: insertResult.lastInsertedRowId!,
           batchSize: realtimeProjectionBatchSize,
         });
       }

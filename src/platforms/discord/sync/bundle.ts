@@ -247,9 +247,29 @@ export async function buildDiscordSyncBundle(
         before: target.before,
         limit: DISCORD_INCREMENTAL_PAGE_LIMIT,
       });
-      completedBackfillChannelCount += 1;
       const oldestPageMessageId = getOldestDiscordMessageId(page);
       const historyComplete = page.length < DISCORD_INCREMENTAL_PAGE_LIMIT;
+      const cursorAdvanced =
+        historyComplete ||
+        (oldestPageMessageId != null &&
+          isDiscordMessageIdBefore(oldestPageMessageId, target.before));
+      if (!cursorAdvanced) {
+        backfillBreakChannelId = target.channel.id;
+        backfillErrorMessage = `Discord backfill cursor did not advance before '${target.before}'`;
+        backfilledChannels.push({
+          channelId: target.channel.id,
+          messages: [],
+          previousBefore: target.before,
+          nextBefore: target.before,
+          historyComplete: false,
+          coverage: target.coverage,
+          error: backfillErrorMessage,
+          rateLimited: false,
+          retryAfterMs: null,
+        });
+        break;
+      }
+      completedBackfillChannelCount += 1;
       backfilledChannels.push({
         channelId: target.channel.id,
         messages: page,
@@ -302,6 +322,20 @@ export async function buildDiscordSyncBundle(
       displayName: discordDisplayName(currentUser),
     },
   ];
+  const proofs = buildDiscordSyncProofs({
+    accountKey,
+    observedAt,
+    currentUser,
+    channels: privateDmChannels,
+    sourceCursor,
+    hydratedChannels,
+    backfilledChannels,
+    nextChannelCursor,
+    syncMessagesPerChannelLimit,
+    hydrationError: hydrationErrorMessage,
+    hydrationBreakChannelId,
+    hydrationRetryAfterMs,
+  });
 
   return {
     sourceAccounts,
@@ -313,21 +347,8 @@ export async function buildDiscordSyncBundle(
       channels: nextChannelCursor,
     } satisfies DiscordSyncCursor,
     syncMode: "incremental",
-    hasMore: false,
-    proofs: buildDiscordSyncProofs({
-      accountKey,
-      observedAt,
-      currentUser,
-      channels: privateDmChannels,
-      sourceCursor,
-      hydratedChannels,
-      backfilledChannels,
-      nextChannelCursor,
-      syncMessagesPerChannelLimit,
-      hydrationError: hydrationErrorMessage,
-      hydrationBreakChannelId,
-      hydrationRetryAfterMs,
-    }),
+    hasMore: hasRunningDiscordMessageProof(proofs),
+    proofs,
     diagnostics: {
       discordHydration: buildDiscordHydrationDiagnostics({
         selectedChannelCount: hydrationChannels.length,
@@ -349,6 +370,10 @@ export async function buildDiscordSyncBundle(
       }),
     },
   };
+}
+
+function hasRunningDiscordMessageProof(proofs: SyncProofInput[]): boolean {
+  return proofs.some((proof) => proof.proofKind === "messages" && proof.status === "running");
 }
 
 function buildDiscordSyncProofs(input: {
@@ -883,6 +908,9 @@ async function listDiscordMessagesSince(
     if (reachedCursor || page.length < DISCORD_INCREMENTAL_PAGE_LIMIT || !oldestPageMessageId) {
       break;
     }
+    if (before && !isDiscordMessageIdBefore(oldestPageMessageId, before)) {
+      break;
+    }
 
     before = oldestPageMessageId;
   }
@@ -892,4 +920,8 @@ async function listDiscordMessagesSince(
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function isDiscordMessageIdBefore(messageId: string, before: string): boolean {
+  return compareDiscordMessageIds(messageId, before) < 0;
 }
