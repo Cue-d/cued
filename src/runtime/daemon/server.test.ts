@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { shouldSkipConnectedDiscordSchedulerSync } from "./server.js";
+import { shouldProjectIngestRunInline, shouldSkipConnectedDiscordSchedulerSync } from "./server.js";
 
 describe("discord scheduler pacing", () => {
   const connectedStatus = {
@@ -35,5 +35,37 @@ describe("discord scheduler pacing", () => {
     expect(shouldSkipConnectedDiscordSchedulerSync("slack", "scheduler", connectedStatus)).toBe(
       false,
     );
+  });
+});
+
+describe("ingest projection strategy", () => {
+  it("defers discord sync projection so run completion is not coupled to projection", () => {
+    expect(
+      shouldProjectIngestRunInline({
+        platform: "discord",
+        realtimeProjectionEnabled: true,
+        firstInsertedRowId: 1,
+        lastInsertedRowId: 373,
+      }),
+    ).toBe(false);
+  });
+
+  it("keeps inline projection for non-discord sync batches when enabled", () => {
+    expect(
+      shouldProjectIngestRunInline({
+        platform: "slack",
+        realtimeProjectionEnabled: true,
+        firstInsertedRowId: 1,
+        lastInsertedRowId: 10,
+      }),
+    ).toBe(true);
+    expect(
+      shouldProjectIngestRunInline({
+        platform: "slack",
+        realtimeProjectionEnabled: false,
+        firstInsertedRowId: 1,
+        lastInsertedRowId: 10,
+      }),
+    ).toBe(false);
   });
 });
