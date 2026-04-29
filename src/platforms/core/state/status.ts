@@ -142,7 +142,9 @@ export function resolveAccountKey(
   if (accountKey) {
     return accountKey;
   }
-  const matches = db.listIntegrationStates().filter((row) => row.platform === platform);
+  const matches = db
+    .listIntegrationStates()
+    .filter((row) => row.platform === platform && !isUserRemovedIntegrationRow(row));
   if (matches.length === 1) {
     return matches[0]!.account_key;
   }

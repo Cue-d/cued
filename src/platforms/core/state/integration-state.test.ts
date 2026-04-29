@@ -615,6 +615,31 @@ process.exit(44);
     db.close();
   });
 
+  it("does not resolve a removed integration when no account key is provided", () => {
+    const db = createDb();
+    db.upsertIntegrationState({
+      platform: "signal",
+      accountKey: "default",
+      displayName: "Signal",
+      authState: "authenticated",
+      enabled: true,
+      connectionKind: "local-cli",
+      syncCapable: true,
+      launchStrategy: "qr-native",
+      launchTarget: null,
+      importedFrom: "local-cli",
+      metadata: {},
+    });
+
+    removeIntegration(db, "signal", "default");
+
+    expect(() => setIntegrationEnabled(db, "signal", undefined, true)).toThrow(
+      "Integration not found: signal",
+    );
+
+    db.close();
+  });
+
   it("clears account-scoped sync state when removing an integration", () => {
     const db = createDb();
     db.upsertIntegrationState({
