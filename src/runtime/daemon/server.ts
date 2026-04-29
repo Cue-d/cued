@@ -21,7 +21,6 @@ import {
   type Platform,
   type ProviderRawEventInput,
   type RawEventAcquisitionMode,
-  type SyncProofInput,
 } from "../../core/types/provider.js";
 import { safeParseJsonRecord } from "../../db/codecs.js";
 import { type OutboundMessageRow, openCuedDatabase } from "../../db/database.js";
@@ -71,9 +70,16 @@ import {
   WhatsAppRealtimeSupervisor,
 } from "../../platforms/whatsapp/realtime/session.js";
 import { buildWhatsAppRawEventsFromSnapshot } from "../../platforms/whatsapp/sync/events.js";
+import {
+  addWhatsAppResyncStats,
+  buildWhatsAppMessagesProof,
+  emptyWhatsAppResyncStats,
+  mergeWhatsAppResyncCoverage,
+  parseWhatsAppSourceCursor,
+  summarizeWhatsAppMessageCoverage,
+} from "../../platforms/whatsapp/sync/proof.js";
 import type {
   WhatsAppHelperEventEnvelope,
-  WhatsAppMessageSnapshot,
   WhatsAppReceiptSnapshot,
   WhatsAppSnapshot,
 } from "../../platforms/whatsapp/types.js";
@@ -401,102 +407,9 @@ function withRawEventAcquisitionMode(
   }));
 }
 
-type WhatsAppSourceCursor = {
-  lastSyncAt?: number;
-  resyncCursor?: string | null;
-  resyncSinceMs?: number | null;
-  resyncStartedAt?: number;
-};
-
-function parseWhatsAppSourceCursor(raw: Record<string, unknown> | null): WhatsAppSourceCursor {
-  return {
-    lastSyncAt: typeof raw?.lastSyncAt === "number" ? raw.lastSyncAt : undefined,
-    resyncCursor: typeof raw?.resyncCursor === "string" ? raw.resyncCursor : null,
-    resyncSinceMs:
-      typeof raw?.resyncSinceMs === "number"
-        ? raw.resyncSinceMs
-        : raw?.resyncSinceMs === null
-          ? null
-          : undefined,
-    resyncStartedAt: typeof raw?.resyncStartedAt === "number" ? raw.resyncStartedAt : undefined,
-  };
-}
-
 function getWhatsAppResyncPageBudget(): number {
   const configured = Number(process.env.CUED_WHATSAPP_RESYNC_PAGE_BUDGET ?? 10);
   return Number.isFinite(configured) && configured > 0 ? Math.trunc(configured) : 10;
-}
-
-function summarizeWhatsAppMessageCoverage(messages: WhatsAppMessageSnapshot[]): {
-  oldestMessageAt: number | null;
-  newestMessageAt: number | null;
-} {
-  let oldestMessageAt: number | null = null;
-  let newestMessageAt: number | null = null;
-  for (const message of messages) {
-    if (!Number.isFinite(message.timestamp)) {
-      continue;
-    }
-    oldestMessageAt =
-      oldestMessageAt == null ? message.timestamp : Math.min(oldestMessageAt, message.timestamp);
-    newestMessageAt =
-      newestMessageAt == null ? message.timestamp : Math.max(newestMessageAt, message.timestamp);
-  }
-  return { oldestMessageAt, newestMessageAt };
-}
-
-function buildWhatsAppMessagesProof(input: {
-  accountKey: string;
-  syncMode: "full" | "incremental";
-  observedAt: number;
-  runStartedAt: number;
-  hasMore: boolean;
-  nextCursor: string | null;
-  sinceMs: number | null;
-  completedAt: number;
-  pageCount: number;
-  contactCount: number;
-  chatCount: number;
-  messageCount: number;
-  rawEventCount: number;
-  oldestMessageAt: number | null;
-  newestMessageAt: number | null;
-}): SyncProofInput {
-  return {
-    scope: {
-      kind: "account",
-      key: input.accountKey,
-      displayName: "WhatsApp",
-      metadata: {
-        source: "whatsmeow_history_cache",
-      },
-    },
-    proofKind: "messages",
-    status: input.hasMore ? "running" : "complete",
-    syncMode: input.syncMode,
-    observedAt: input.observedAt,
-    runStartedAt: input.runStartedAt,
-    completedAt: input.hasMore ? null : input.completedAt,
-    resumeCursor: input.hasMore
-      ? {
-          cursor: input.nextCursor,
-          sinceMs: input.sinceMs,
-        }
-      : null,
-    coverage: {
-      sinceMs: input.sinceMs,
-      snapshotCompletedAt: input.completedAt,
-      oldestMessageAt: input.oldestMessageAt,
-      newestMessageAt: input.newestMessageAt,
-    },
-    stats: {
-      pageCount: input.pageCount,
-      contactCount: input.contactCount,
-      chatCount: input.chatCount,
-      messageCount: input.messageCount,
-      rawEventCount: input.rawEventCount,
-    },
-  };
 }
 
 async function safeEmitHookEvent(
@@ -2608,10 +2521,15 @@ export async function runDaemon(): Promise<void> {
             displayName: "WhatsApp",
           },
         ];
-        bundleSyncMode = checkpoint?.source_cursor_json ? "incremental" : "full";
-
         const whatsappCursor = parseWhatsAppSourceCursor(sourceCursor);
         let cursor: string | null = whatsappCursor.resyncCursor ?? null;
+        bundleSyncMode = cursor
+          ? (whatsappCursor.resyncSyncMode ??
+            (checkpoint?.sync_mode as "full" | "incremental") ??
+            "full")
+          : checkpoint?.source_cursor_json
+            ? "incremental"
+            : "full";
         const sinceMs =
           cursor != null
             ? (whatsappCursor.resyncSinceMs ?? null)
@@ -2621,11 +2539,11 @@ export async function runDaemon(): Promise<void> {
         const resyncStartedAt = whatsappCursor.resyncStartedAt ?? ingestStartedAt;
         const pageBudget = getWhatsAppResyncPageBudget();
         let pageCount = 0;
-        let contactCount = 0;
-        let chatCount = 0;
-        let messageCount = 0;
-        let oldestMessageAt: number | null = null;
-        let newestMessageAt: number | null = null;
+        let resyncStats = whatsappCursor.resyncStats ?? emptyWhatsAppResyncStats();
+        let resyncCoverage = whatsappCursor.resyncCoverage ?? {
+          oldestMessageAt: null,
+          newestMessageAt: null,
+        };
         let hasMore = false;
         let lastCompletedAt = now();
         do {
@@ -2637,22 +2555,7 @@ export async function runDaemon(): Promise<void> {
           });
           adapterFetchMs += now() - pageFetchStartedAt;
           pageCount += 1;
-          contactCount += page.contacts?.length ?? 0;
-          chatCount += page.chats?.length ?? 0;
-          messageCount += page.messages?.length ?? 0;
           const pageCoverage = summarizeWhatsAppMessageCoverage(page.messages ?? []);
-          oldestMessageAt =
-            oldestMessageAt == null
-              ? pageCoverage.oldestMessageAt
-              : pageCoverage.oldestMessageAt == null
-                ? oldestMessageAt
-                : Math.min(oldestMessageAt, pageCoverage.oldestMessageAt);
-          newestMessageAt =
-            newestMessageAt == null
-              ? pageCoverage.newestMessageAt
-              : pageCoverage.newestMessageAt == null
-                ? newestMessageAt
-                : Math.max(newestMessageAt, pageCoverage.newestMessageAt);
 
           const rawEvents = withRawEventAcquisitionMode(
             buildWhatsAppRawEventsFromSnapshot({
@@ -2662,6 +2565,14 @@ export async function runDaemon(): Promise<void> {
             "sync",
           );
           ingestedCount += rawEvents.length;
+          resyncStats = addWhatsAppResyncStats(resyncStats, {
+            pageCount: 1,
+            contactCount: page.contacts?.length ?? 0,
+            chatCount: page.chats?.length ?? 0,
+            messageCount: page.messages?.length ?? 0,
+            rawEventCount: rawEvents.length,
+          });
+          resyncCoverage = mergeWhatsAppResyncCoverage(resyncCoverage, pageCoverage);
           lastCompletedAt = page.completedAt ?? now();
           hasMore = page.hasMore;
           cursor = page.nextCursor ?? null;
@@ -2698,6 +2609,9 @@ export async function runDaemon(): Promise<void> {
                 resyncCursor: cursor,
                 resyncSinceMs: sinceMs,
                 resyncStartedAt,
+                resyncSyncMode: bundleSyncMode,
+                resyncStats,
+                resyncCoverage,
               }
             : {}),
         };
@@ -2716,13 +2630,8 @@ export async function runDaemon(): Promise<void> {
             nextCursor: cursor,
             sinceMs,
             completedAt: lastCompletedAt,
-            pageCount,
-            contactCount,
-            chatCount,
-            messageCount,
-            rawEventCount: ingestedCount,
-            oldestMessageAt,
-            newestMessageAt,
+            stats: resyncStats,
+            coverage: resyncCoverage,
           }),
         });
       } else {
