@@ -1761,6 +1761,13 @@ export class CuedDatabase {
         .delete(syncRuns)
         .where(and(eq(syncRuns.platform, platform), eq(syncRuns.accountKey, accountKey)))
         .run().changes;
+      const removedSlackBackfillProofs =
+        platform === "slack"
+          ? tx
+              .delete(slackBackfillProofs)
+              .where(eq(slackBackfillProofs.accountKey, accountKey))
+              .run().changes
+          : 0;
 
       return (
         Number(removedSourceAccounts) +
@@ -1768,7 +1775,8 @@ export class CuedDatabase {
         Number(removedSyncProofs) +
         Number(removedSyncScopes) +
         Number(removedRunErrors) +
-        Number(removedRuns)
+        Number(removedRuns) +
+        Number(removedSlackBackfillProofs)
       );
     });
   }

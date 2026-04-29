@@ -55,6 +55,17 @@ describe("integration state management", () => {
     return db;
   }
 
+  type RawSql = {
+    prepare(sql: string): {
+      run(...params: unknown[]): unknown;
+      get(...params: unknown[]): unknown;
+    };
+  };
+
+  function rawSql(db: CuedDatabase): RawSql {
+    return (db as unknown as { sqlite: RawSql }).sqlite;
+  }
+
   function createPackagedSignalHelper(version = "0.12.9"): string {
     const appPath = join(createTempDir("cued-app-"), "Cued.app");
     const helperPath = join(
@@ -696,6 +707,95 @@ process.exit(44);
     expect(db.getCheckpoint("signal", "default")).toBeNull();
     expect(db.listSyncProofs("signal", "default")).toHaveLength(0);
     expect(db.hasQueuedOrRunningRun("signal", "default")).toBe(false);
+
+    db.close();
+  });
+
+  it("clears legacy Slack backfill proofs when removing a Slack integration", () => {
+    const db = createDb();
+    const timestamp = Date.now();
+    db.upsertIntegrationState({
+      platform: "slack",
+      accountKey: "T123",
+      displayName: "Acme",
+      authState: "authenticated",
+      enabled: true,
+      connectionKind: "browser-session",
+      syncCapable: true,
+      launchStrategy: "chromium-auth",
+      launchTarget: "https://slack.com/signin",
+      importedFrom: "local-cli",
+      metadata: {},
+    });
+    rawSql(db)
+      .prepare(
+        `INSERT INTO slack_backfill_proofs (
+          id,
+          account_key,
+          team_id,
+          conversation_id,
+          conversation_name,
+          conversation_family,
+          sync_mode,
+          scan_started_at,
+          known_conversation_count,
+          conversation_phase,
+          history_complete,
+          history_cursor,
+          thread_root_count,
+          completed_thread_count,
+          pending_thread_count,
+          active_thread_ts,
+          replies_cursor,
+          oldest_message_ts,
+          newest_message_ts,
+          first_discovered_at,
+          history_complete_at,
+          replies_complete_at,
+          last_observed_at,
+          updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(
+        "proof-1",
+        "T123",
+        "T123",
+        "C123",
+        "general",
+        "channel",
+        "full",
+        timestamp,
+        1,
+        "complete",
+        1,
+        null,
+        0,
+        0,
+        0,
+        null,
+        null,
+        null,
+        null,
+        timestamp,
+        timestamp,
+        timestamp,
+        timestamp,
+        timestamp,
+      );
+
+    expect(
+      rawSql(db)
+        .prepare("SELECT COUNT(*) AS count FROM slack_backfill_proofs WHERE account_key = ?")
+        .get("T123"),
+    ).toEqual({ count: 1 });
+
+    removeIntegration(db, "slack", "T123");
+
+    expect(
+      rawSql(db)
+        .prepare("SELECT COUNT(*) AS count FROM slack_backfill_proofs WHERE account_key = ?")
+        .get("T123"),
+    ).toEqual({ count: 0 });
 
     db.close();
   });
