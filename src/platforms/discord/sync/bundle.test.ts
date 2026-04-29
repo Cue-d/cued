@@ -1,6 +1,17 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import type { DiscordApiClient } from "../api/client.js";
-import { buildDiscordSyncBundle } from "./bundle.js";
+import {
+  buildDiscordSyncBundle,
+  getDiscordSyncBackfillPageLimit,
+  getDiscordSyncMessageChannelLimit,
+  getDiscordSyncMessagesPerChannelLimit,
+} from "./bundle.js";
+
+const ORIGINAL_ENV = { ...process.env };
+
+afterEach(() => {
+  process.env = { ...ORIGINAL_ENV };
+});
 
 describe("buildDiscordSyncBundle", () => {
   it("hydrates only the most recent DM messages during sync", async () => {
@@ -707,6 +718,22 @@ describe("buildDiscordSyncBundle", () => {
         },
       }),
     );
+  });
+});
+
+describe("discord sync limits", () => {
+  it("allows zero to disable channel hydration and historical backfill", () => {
+    process.env.CUED_DISCORD_SYNC_MESSAGE_CHANNEL_LIMIT = "0";
+    process.env.CUED_DISCORD_SYNC_BACKFILL_PAGE_LIMIT = "0";
+
+    expect(getDiscordSyncMessageChannelLimit()).toBe(0);
+    expect(getDiscordSyncBackfillPageLimit()).toBe(0);
+  });
+
+  it("keeps per-channel message hydration positive", () => {
+    process.env.CUED_DISCORD_SYNC_MESSAGES_PER_CHANNEL_LIMIT = "0";
+
+    expect(getDiscordSyncMessagesPerChannelLimit()).toBe(50);
   });
 });
 

@@ -7,12 +7,6 @@ export interface DiscordUser {
   bot?: boolean;
 }
 
-export interface DiscordGuild {
-  id: string;
-  name: string;
-  icon?: string | null;
-}
-
 export interface DiscordChannel {
   id: string;
   type: number;
@@ -68,15 +62,6 @@ export interface DiscordStoredCredentials {
 }
 
 export const DISCORD_DM_CHANNEL_TYPES = new Set([1, 3]);
-export const DISCORD_GUILD_CHANNEL_TYPES = new Set([0, 5, 10, 11, 12]);
-export const DISCORD_TEXTUAL_CHANNEL_TYPES = new Set([
-  ...DISCORD_DM_CHANNEL_TYPES,
-  ...DISCORD_GUILD_CHANNEL_TYPES,
-]);
-
-export function isDiscordTextualChannel(channel: Pick<DiscordChannel, "type">): boolean {
-  return DISCORD_TEXTUAL_CHANNEL_TYPES.has(channel.type);
-}
 
 export function isDiscordDmChannel(channel: Pick<DiscordChannel, "type">): boolean {
   return DISCORD_DM_CHANNEL_TYPES.has(channel.type);

@@ -1,6 +1,5 @@
 import type {
   DiscordChannel,
-  DiscordGuild,
   DiscordMessage,
   DiscordStoredCredentials,
   DiscordUser,
@@ -53,14 +52,6 @@ export class DiscordApiClient {
     return await this.request<DiscordChannel[]>("/users/@me/channels");
   }
 
-  async listCurrentUserGuilds(): Promise<DiscordGuild[]> {
-    return await this.request<DiscordGuild[]>("/users/@me/guilds");
-  }
-
-  async listGuildChannels(guildId: string): Promise<DiscordChannel[]> {
-    return await this.request<DiscordChannel[]>(`/guilds/${guildId}/channels`);
-  }
-
   async getChannel(channelId: string): Promise<DiscordChannel> {
     return await this.request<DiscordChannel>(`/channels/${channelId}`);
   }
@@ -81,10 +72,6 @@ export class DiscordApiClient {
     }
     const suffix = query.size > 0 ? `?${query.toString()}` : "";
     return await this.request<DiscordMessage[]>(`/channels/${channelId}/messages${suffix}`);
-  }
-
-  async getChannelMessage(channelId: string, messageId: string): Promise<DiscordMessage> {
-    return await this.request<DiscordMessage>(`/channels/${channelId}/messages/${messageId}`);
   }
 
   async sendMessage(

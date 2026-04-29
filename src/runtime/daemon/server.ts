@@ -1639,7 +1639,6 @@ export async function runDaemon(): Promise<void> {
               observedAt,
               channel: event.data.channel,
               currentUser: event.data.currentUser,
-              guildNameById: event.data.guildNameById,
             }),
           ],
           `discord_realtime:${accountKey}`,
@@ -2214,7 +2213,6 @@ export async function runDaemon(): Promise<void> {
                 observedAt: now(),
                 channel: sendResult.channel,
                 currentUser: sendResult.currentUser,
-                guildNameById: new Map(),
               }),
               buildDiscordMessageEvent({
                 accountKey: message.account_key,

@@ -369,7 +369,6 @@ process.exit(44);
           last_message_id: "100",
         },
         currentUser,
-        guildNameById: new Map(),
       }),
     ]);
 

@@ -727,7 +727,7 @@ describe("CuedDatabase", () => {
     db.close();
   });
 
-  it("resolves Discord send targets only for DMs", () => {
+  it("resolves Discord send targets only for DMs and group DMs", () => {
     const db = createDb();
     const sql = sqlite(db);
     const timestamp = Date.now();
@@ -754,6 +754,25 @@ describe("CuedDatabase", () => {
       `,
       )
       .run(
+        "discord-group-dm",
+        "discord:channel:group-dm-1",
+        "group-dm-1",
+        "group",
+        "Jarvis, Ava",
+        timestamp,
+        timestamp,
+      );
+    sql
+      .prepare(
+        `
+      INSERT INTO conversations (
+          id, platform, account_key, source_conversation_key, native_conversation_key, type, is_active,
+          removal_reason, name, topic, participant_names, last_message_id, last_message_at,
+          last_message_preview, unread_count, created_at, updated_at
+        ) VALUES (?, 'discord', 'default', ?, ?, ?, 1, NULL, ?, NULL, '[]', NULL, NULL, NULL, 0, ?, ?)
+      `,
+      )
+      .run(
         "discord-channel",
         "discord:channel:guild-1",
         "guild-1",
@@ -769,6 +788,13 @@ describe("CuedDatabase", () => {
       resolution: "conversation_name",
       matchedConversationId: "discord-dm",
       matchedName: "Jarvis",
+    });
+    expect(db.resolveDiscordSendTarget("Jarvis, Ava")).toEqual({
+      target: "group-dm-1",
+      threadId: "discord:channel:group-dm-1",
+      resolution: "conversation_name",
+      matchedConversationId: "discord-group-dm",
+      matchedName: "Jarvis, Ava",
     });
     expect(db.resolveDiscordSendTarget("general")).toBeNull();
     expect(db.resolveDiscordSendTarget("guild-1")).toBeNull();

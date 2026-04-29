@@ -99,7 +99,7 @@ describe("discord realtime", () => {
     session.stop();
   });
 
-  it("marks the session connected before guild discovery completes", async () => {
+  it("marks the session connected after initial DM discovery", async () => {
     vi.useFakeTimers();
 
     const session = new DiscordRealtimeSession({
