@@ -457,6 +457,68 @@ describe("slack worker lib", () => {
     expect(listedTypes).toEqual(["public_channel,private_channel"]);
   });
 
+  it("records inaccessible Slack history as a blocked proof instead of failing the sync", async () => {
+    const error = Object.assign(new Error("not_in_channel"), {
+      errorKind: "slack_api",
+      retryable: false,
+      slackCode: "not_in_channel",
+    });
+
+    const bundle = await buildSlackSyncBundle({
+      accountKey: "default",
+      sourceCursor: {
+        teamId: "T123",
+        selfUserId: "U_SELF",
+        scan: {
+          mode: "full",
+          startedAt: 1710000000000,
+          oldestMs: 0,
+          usersComplete: true,
+          conversationFamily: "channels",
+          conversationCursor: null,
+        },
+      },
+      client: {
+        async testAuth() {
+          return { ok: true, team_id: "T123", user_id: "U_SELF", team: "Acme", user: "Ava" };
+        },
+        async listUsers() {
+          return { users: [], nextCursor: undefined };
+        },
+        async listConversations() {
+          return {
+            conversations: [{ id: "C_BLOCKED", name: "private", is_channel: true }],
+            nextCursor: undefined,
+          };
+        },
+        async getConversationMembers() {
+          return { members: [], nextCursor: undefined };
+        },
+        async getHistory() {
+          throw error;
+        },
+        async getReplies() {
+          return { messages: [], hasMore: false, nextCursor: undefined };
+        },
+      },
+    });
+
+    expect(bundle.hasMore).toBe(false);
+    expect(bundle.proofs).toEqual([
+      expect.objectContaining({
+        proofKind: "messages",
+        status: "blocked",
+        error: {
+          code: "not_in_channel",
+          message: "not_in_channel",
+          retryable: false,
+          kind: "slack_api",
+        },
+      }),
+    ]);
+    expect(bundle.rawEvents.some((event) => event.entityKind === "conversation")).toBe(true);
+  });
+
   it("resumes full syncs within a conversation history pagination chain", async () => {
     const getHistory = async (_conversationId: string, options?: { cursor?: string }) => {
       if (!options?.cursor) {
@@ -745,13 +807,21 @@ describe("slack worker lib", () => {
 
     expect(second.hasMore).toBe(false);
     expect(second.rawEvents.filter((event) => event.entityKind === "message")).toHaveLength(1);
-    expect(second.diagnostics?.slackBackfillConversations).toEqual([
+    expect(second.proofs).toEqual([
       expect.objectContaining({
-        conversationId: "C123",
-        conversationPhase: "complete",
-        threadRootCount: 1,
-        completedThreadCount: 1,
-        pendingThreadCount: 0,
+        proofKind: "messages",
+        status: "complete",
+        stats: expect.objectContaining({
+          threadRootCount: 1,
+        }),
+      }),
+      expect.objectContaining({
+        proofKind: "replies",
+        status: "complete",
+        coverage: expect.objectContaining({
+          completedThreadCount: 1,
+          pendingThreadCount: 0,
+        }),
       }),
     ]);
     expect(second.proofs).toEqual(

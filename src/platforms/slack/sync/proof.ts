@@ -1,6 +1,13 @@
-import type { SyncProofInput } from "../../../core/types/provider.js";
+import type { SyncProofInput, SyncProofStatus } from "../../../core/types/provider.js";
 
 export type SlackBackfillConversationPhase = "history" | "threads" | "complete";
+
+export interface SlackBackfillProofError {
+  code: string;
+  message: string;
+  retryable: boolean;
+  kind?: string;
+}
 
 export interface SlackBackfillConversationProof {
   teamId: string;
@@ -22,33 +29,9 @@ export interface SlackBackfillConversationProof {
   oldestMessageTs: string | null;
   newestMessageTs: string | null;
   observedAt: number;
-}
-
-export function isSlackBackfillConversationProof(
-  value: unknown,
-): value is SlackBackfillConversationProof {
-  if (!value || typeof value !== "object") {
-    return false;
-  }
-
-  const parsed = value as Record<string, unknown>;
-  return (
-    typeof parsed.teamId === "string" &&
-    typeof parsed.accountKey === "string" &&
-    (parsed.syncMode === "full" || parsed.syncMode === "incremental") &&
-    typeof parsed.scanStartedAt === "number" &&
-    typeof parsed.knownConversationCount === "number" &&
-    typeof parsed.conversationId === "string" &&
-    (parsed.conversationFamily === "direct" || parsed.conversationFamily === "channels") &&
-    (parsed.conversationPhase === "history" ||
-      parsed.conversationPhase === "threads" ||
-      parsed.conversationPhase === "complete") &&
-    typeof parsed.historyComplete === "boolean" &&
-    typeof parsed.threadRootCount === "number" &&
-    typeof parsed.completedThreadCount === "number" &&
-    typeof parsed.pendingThreadCount === "number" &&
-    typeof parsed.observedAt === "number"
-  );
+  historyError?: SlackBackfillProofError | null;
+  repliesError?: SlackBackfillProofError | null;
+  membersError?: SlackBackfillProofError | null;
 }
 
 export function buildSlackBackfillSyncProofs(
@@ -63,48 +46,54 @@ export function buildSlackBackfillSyncProofs(
       conversationFamily: proof.conversationFamily,
     },
   };
+  const messageStatus = getMessagesProofStatus(proof);
   const proofs: SyncProofInput[] = [
     {
       scope,
       proofKind: "messages",
-      status:
-        proof.historyComplete || proof.conversationPhase !== "history" ? "complete" : "running",
+      status: messageStatus,
       syncMode: proof.syncMode,
       observedAt: proof.observedAt,
+      runStartedAt: proof.scanStartedAt,
       completedAt:
-        proof.historyComplete || proof.conversationPhase !== "history" ? proof.observedAt : null,
+        messageStatus === "complete" || messageStatus === "partial" ? proof.observedAt : null,
       resumeCursor:
-        proof.historyComplete || proof.conversationPhase !== "history"
+        messageStatus === "complete" || proof.historyError
           ? null
           : {
               historyCursor: proof.historyCursor,
               conversationPhase: proof.conversationPhase,
             },
-      coverage: {
-        oldestMessageTs: proof.oldestMessageTs,
-        newestMessageTs: proof.newestMessageTs,
-      },
+      coverage: buildSlackMessageCoverage(proof),
       stats: {
         knownConversationCount: proof.knownConversationCount,
-        threadRootCount: proof.threadRootCount,
+        ...(proof.threadRootCount > 0 ? { threadRootCount: proof.threadRootCount } : {}),
       },
+      error: proof.historyError ?? proof.membersError ?? undefined,
     },
   ];
 
   if (
     proof.threadRootCount > 0 ||
+    proof.completedThreadCount > 0 ||
+    proof.pendingThreadCount > 0 ||
     proof.conversationPhase === "threads" ||
-    proof.conversationPhase === "complete"
+    proof.activeThreadTs != null ||
+    proof.repliesCursor != null ||
+    proof.repliesError
   ) {
+    const repliesStatus = getRepliesProofStatus(proof);
     proofs.push({
       scope,
       proofKind: "replies",
-      status: proof.conversationPhase === "complete" ? "complete" : "running",
+      status: repliesStatus,
       syncMode: proof.syncMode,
       observedAt: proof.observedAt,
-      completedAt: proof.conversationPhase === "complete" ? proof.observedAt : null,
+      runStartedAt: proof.scanStartedAt,
+      completedAt:
+        repliesStatus === "complete" || repliesStatus === "partial" ? proof.observedAt : null,
       resumeCursor:
-        proof.conversationPhase === "complete"
+        repliesStatus === "complete" || proof.repliesError
           ? null
           : {
               activeThreadTs: proof.activeThreadTs,
@@ -112,8 +101,7 @@ export function buildSlackBackfillSyncProofs(
               conversationPhase: proof.conversationPhase,
             },
       coverage: {
-        oldestMessageTs: proof.oldestMessageTs,
-        newestMessageTs: proof.newestMessageTs,
+        ...buildSlackMessageCoverage(proof),
         completedThreadCount: proof.completedThreadCount,
         pendingThreadCount: proof.pendingThreadCount,
       },
@@ -122,8 +110,33 @@ export function buildSlackBackfillSyncProofs(
         completedThreadCount: proof.completedThreadCount,
         pendingThreadCount: proof.pendingThreadCount,
       },
+      error: proof.repliesError ?? undefined,
     });
   }
 
   return proofs;
+}
+
+function getMessagesProofStatus(proof: SlackBackfillConversationProof): SyncProofStatus {
+  if (!proof.historyError) {
+    return proof.historyComplete || proof.conversationPhase !== "history" ? "complete" : "running";
+  }
+  return proof.oldestMessageTs || proof.newestMessageTs ? "partial" : "blocked";
+}
+
+function getRepliesProofStatus(proof: SlackBackfillConversationProof): SyncProofStatus {
+  if (!proof.repliesError) {
+    return proof.conversationPhase === "complete" ? "complete" : "running";
+  }
+  return proof.completedThreadCount > 0 ? "partial" : "blocked";
+}
+
+function buildSlackMessageCoverage(
+  proof: SlackBackfillConversationProof,
+): Record<string, unknown> | undefined {
+  const coverage = {
+    ...(proof.oldestMessageTs != null ? { oldestMessageTs: proof.oldestMessageTs } : {}),
+    ...(proof.newestMessageTs != null ? { newestMessageTs: proof.newestMessageTs } : {}),
+  };
+  return Object.keys(coverage).length > 0 ? coverage : undefined;
 }
