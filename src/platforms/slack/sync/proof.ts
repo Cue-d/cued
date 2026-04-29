@@ -93,7 +93,7 @@ export function buildSlackBackfillSyncProofs(
       completedAt:
         repliesStatus === "complete" || repliesStatus === "partial" ? proof.observedAt : null,
       resumeCursor:
-        repliesStatus === "complete" || proof.repliesError
+        repliesStatus === "complete" || proof.repliesError || proof.historyError
           ? null
           : {
               activeThreadTs: proof.activeThreadTs,
@@ -110,7 +110,7 @@ export function buildSlackBackfillSyncProofs(
         completedThreadCount: proof.completedThreadCount,
         pendingThreadCount: proof.pendingThreadCount,
       },
-      error: proof.repliesError ?? undefined,
+      error: proof.repliesError ?? proof.historyError ?? undefined,
     });
   }
 
