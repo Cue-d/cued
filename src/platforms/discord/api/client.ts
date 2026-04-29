@@ -165,8 +165,8 @@ export function isDiscordAuthInvalidationError(error: unknown): boolean {
     if (error.status === 401) {
       return true;
     }
-    const responseBody = error.responseBody.toLowerCase();
     if (error.status === 403) {
+      const responseBody = error.responseBody.toLowerCase();
       return (
         responseBody.includes("password") ||
         responseBody.includes("unauthorized") ||
@@ -175,13 +175,7 @@ export function isDiscordAuthInvalidationError(error: unknown): boolean {
         responseBody.includes("disabled")
       );
     }
-    return (
-      responseBody.includes("password") ||
-      responseBody.includes("unauthorized") ||
-      responseBody.includes("limited access") ||
-      responseBody.includes("suspicious") ||
-      responseBody.includes("disabled")
-    );
+    return false;
   }
 
   const message =

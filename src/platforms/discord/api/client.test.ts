@@ -101,4 +101,17 @@ describe("DiscordApiClient", () => {
       ),
     ).toBe(true);
   });
+
+  it("does not treat transient 5xx responses as auth invalidation even if the body contains auth-like keywords", () => {
+    expect(
+      isDiscordAuthInvalidationError(
+        new DiscordApiError(
+          "GET",
+          "/users/@me",
+          503,
+          '{"message":"Service temporarily disabled for maintenance"}',
+        ),
+      ),
+    ).toBe(false);
+  });
 });
