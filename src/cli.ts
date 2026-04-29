@@ -213,16 +213,6 @@ async function handleLocalIntegrationCommand(
       case "list":
       case "status":
         return service.listStatus();
-      case "capabilities":
-        return PLATFORM_VALUES.map((platform) => ({
-          platform,
-          supportedHostOs: getSupportedHostOsForPlatform(platform),
-          onboardingVisible: isOnboardingVisiblePlatform(platform),
-          supportsMultipleAccounts: platformSupportsMultipleAccounts(platform),
-          permissionRequirements: getPlatformPermissionRequirements(platform),
-          helperRequirements: getPlatformHelperRequirements(platform),
-          features: getPlatformFeatureMatrixRow(platform),
-        }));
       case "refresh":
         return await service.refresh();
       case "connect": {
