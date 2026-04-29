@@ -223,6 +223,7 @@ export class DiscordRealtimeSession implements DiscordRealtimeSessionLike {
         userId: currentUser.id,
         username: discordDisplayName(currentUser),
         connectedAt: this.status.connectedAt ?? now(),
+        reconnectAttempts: 0,
         lastSessionError: null,
       });
       this.onConnected?.(this.getStatus(), reconnected);
@@ -358,13 +359,14 @@ export class DiscordRealtimeSession implements DiscordRealtimeSessionLike {
     const message = error instanceof Error ? error.message : String(error);
     this.clearTimers();
     this.onDisconnected?.(this.getStatus());
+    const reconnectAttempts = this.status.reconnectAttempts + 1;
     if (isDiscordAuthInvalidationError(error)) {
       this.shouldReconnect = false;
       this.setStatus({
         state: "stopped",
         lastSessionError: message,
         lastReconnectAt: now(),
-        reconnectAttempts: this.status.reconnectAttempts + 1,
+        reconnectAttempts,
       });
       this.onAuthInvalidated?.(this.getStatus(), message);
       return;
@@ -373,14 +375,14 @@ export class DiscordRealtimeSession implements DiscordRealtimeSessionLike {
       state: "degraded",
       lastSessionError: message,
       lastReconnectAt: now(),
-      reconnectAttempts: this.status.reconnectAttempts + 1,
+      reconnectAttempts,
     });
     if (!this.shouldReconnect) {
       return;
     }
     const delayMs = Math.min(
       this.reconnectMaxMs,
-      this.reconnectBaseMs * 2 ** Math.max(0, this.status.reconnectAttempts),
+      this.reconnectBaseMs * 2 ** Math.max(0, reconnectAttempts - 1),
     );
     this.reconnectTimer = setTimeout(() => {
       this.reconnectTimer = null;
