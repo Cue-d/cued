@@ -1334,6 +1334,38 @@ describe("CuedDatabase", () => {
     db.close();
   });
 
+  it("honors the pre-renumbered Discord fanout index migration id", () => {
+    const dir = mkdtempSync(join(tmpdir(), "cued-discord-fanout-legacy-id-"));
+    tempDirs.push(dir);
+    const db = new CuedDatabase(join(dir, "local.db"));
+    const sql = sqlite(db);
+
+    sql.exec(`
+      CREATE TABLE schema_migrations (
+        id TEXT PRIMARY KEY,
+        applied_at INTEGER NOT NULL
+      )
+    `);
+    sql
+      .prepare("INSERT INTO schema_migrations (id, applied_at) VALUES (?, ?)")
+      .run("0008_add_contact_fanout_projection_indexes", 1);
+
+    db.migrate();
+
+    expect(
+      sql
+        .prepare("SELECT 1 FROM schema_migrations WHERE id = ?")
+        .get("0008_add_contact_fanout_projection_indexes"),
+    ).toBeTruthy();
+    expect(
+      sql
+        .prepare("SELECT 1 FROM schema_migrations WHERE id = ?")
+        .get("0009_add_contact_fanout_projection_indexes"),
+    ).toBeUndefined();
+
+    db.close();
+  });
+
   it("batches source account and raw event writes without duplicating rows", () => {
     const db = createDb();
 
