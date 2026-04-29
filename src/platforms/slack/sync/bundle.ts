@@ -374,6 +374,8 @@ async function listConversationMessages(
   messages: SlackMessage[];
   historyError: SlackBackfillProofError | null;
   repliesError: SlackBackfillProofError | null;
+  threadRootCount: number;
+  completedThreadCount: number;
 }> {
   const messageByTs = new Map<string, SlackMessage>();
   const threadParents = new Set<string>();
@@ -381,6 +383,7 @@ async function listConversationMessages(
   let cursor: string | undefined;
   let historyError: SlackBackfillProofError | null = null;
   let repliesError: SlackBackfillProofError | null = null;
+  let completedThreadCount = 0;
 
   do {
     let result: SlackMessagesResult;
@@ -443,12 +446,15 @@ async function listConversationMessages(
     if (repliesError) {
       break;
     }
+    completedThreadCount += 1;
   }
 
   return {
     messages: sortSlackMessages(Array.from(messageByTs.values())),
     historyError,
     repliesError,
+    threadRootCount: threadParents.size,
+    completedThreadCount,
   };
 }
 
@@ -666,12 +672,15 @@ function buildCompleteSlackBackfillConversationProof(input: {
   messages: SlackMessage[];
   historyError?: SlackBackfillProofError | null;
   repliesError?: SlackBackfillProofError | null;
+  threadRootCount?: number;
+  completedThreadCount?: number;
   membersError?: SlackBackfillProofError | null;
 }): SlackBackfillConversationProof {
   const range = summarizeMessageRange(input.messages);
-  const threadRootCount = input.messages.filter(
-    (message) => Number(message.reply_count ?? 0) > 0,
-  ).length;
+  const threadRootCount =
+    input.threadRootCount ??
+    input.messages.filter((message) => Number(message.reply_count ?? 0) > 0).length;
+  const completedThreadCount = input.completedThreadCount ?? threadRootCount;
   return {
     teamId: input.teamId,
     accountKey: input.accountKey,
@@ -685,8 +694,8 @@ function buildCompleteSlackBackfillConversationProof(input: {
     historyComplete: true,
     historyCursor: null,
     threadRootCount,
-    completedThreadCount: threadRootCount,
-    pendingThreadCount: 0,
+    completedThreadCount,
+    pendingThreadCount: Math.max(threadRootCount - completedThreadCount, 0),
     activeThreadTs: null,
     repliesCursor: null,
     oldestMessageTs: range.oldest,
@@ -1046,6 +1055,8 @@ export async function buildSlackSyncBundle(options?: {
           messages: messageBatch.messages,
           historyError: messageBatch.historyError,
           repliesError: messageBatch.repliesError,
+          threadRootCount: messageBatch.threadRootCount,
+          completedThreadCount: messageBatch.completedThreadCount,
           membersError,
         }),
       );

@@ -519,6 +519,92 @@ describe("slack worker lib", () => {
     expect(bundle.rawEvents.some((event) => event.entityKind === "conversation")).toBe(true);
   });
 
+  it("records reply access errors before any completed thread as a blocked replies proof", async () => {
+    const error = Object.assign(new Error("missing_scope"), {
+      errorKind: "slack_api",
+      retryable: false,
+      slackCode: "missing_scope",
+    });
+
+    const bundle = await buildSlackSyncBundle({
+      accountKey: "default",
+      sourceCursor: {
+        teamId: "T123",
+        selfUserId: "U_SELF",
+        scan: {
+          mode: "full",
+          startedAt: 1710000000000,
+          oldestMs: 0,
+          usersComplete: true,
+          conversationFamily: "channels",
+          conversationCursor: null,
+        },
+      },
+      client: {
+        async testAuth() {
+          return { ok: true, team_id: "T123", user_id: "U_SELF", team: "Acme", user: "Ava" };
+        },
+        async listUsers() {
+          return { users: [], nextCursor: undefined };
+        },
+        async listConversations() {
+          return {
+            conversations: [{ id: "C_REPLIES", name: "threads", is_channel: true }],
+            nextCursor: undefined,
+          };
+        },
+        async getConversationMembers() {
+          return { members: [], nextCursor: undefined };
+        },
+        async getHistory() {
+          return {
+            messages: [
+              {
+                type: "message",
+                user: "U_BEN",
+                text: "thread root",
+                ts: "1710000000.000100",
+                reply_count: 1,
+              },
+            ],
+            hasMore: false,
+            nextCursor: undefined,
+          };
+        },
+        async getReplies() {
+          throw error;
+        },
+      },
+    });
+
+    expect(bundle.hasMore).toBe(false);
+    expect(bundle.proofs).toEqual([
+      expect.objectContaining({
+        proofKind: "messages",
+        status: "complete",
+      }),
+      expect.objectContaining({
+        proofKind: "replies",
+        status: "blocked",
+        coverage: expect.objectContaining({
+          completedThreadCount: 0,
+          pendingThreadCount: 1,
+        }),
+        stats: expect.objectContaining({
+          threadRootCount: 1,
+          completedThreadCount: 0,
+          pendingThreadCount: 1,
+        }),
+        error: {
+          code: "missing_scope",
+          message: "missing_scope",
+          retryable: false,
+          kind: "slack_api",
+        },
+      }),
+    ]);
+  });
+
   it("resumes full syncs within a conversation history pagination chain", async () => {
     const getHistory = async (_conversationId: string, options?: { cursor?: string }) => {
       if (!options?.cursor) {
