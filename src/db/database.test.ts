@@ -164,73 +164,6 @@ describe("CuedDatabase", () => {
     db.close();
   });
 
-  it("persists slack backfill proofs and completion markers", () => {
-    const db = createDb();
-
-    db.upsertSlackBackfillProof({
-      accountKey: "workspace-a",
-      teamId: "T123",
-      conversationId: "C123",
-      conversationName: "eng",
-      conversationFamily: "channels",
-      syncMode: "full",
-      scanStartedAt: 100,
-      knownConversationCount: 1,
-      conversationPhase: "history",
-      historyComplete: false,
-      historyCursor: "history-2",
-      threadRootCount: 1,
-      completedThreadCount: 0,
-      pendingThreadCount: 1,
-      activeThreadTs: null,
-      repliesCursor: null,
-      oldestMessageTs: "1710000000.000100",
-      newestMessageTs: "1710000000.000100",
-      observedAt: 200,
-    });
-
-    db.upsertSlackBackfillProof({
-      accountKey: "workspace-a",
-      teamId: "T123",
-      conversationId: "C123",
-      conversationName: "eng",
-      conversationFamily: "channels",
-      syncMode: "full",
-      scanStartedAt: 100,
-      knownConversationCount: 3,
-      conversationPhase: "complete",
-      historyComplete: true,
-      historyCursor: null,
-      threadRootCount: 1,
-      completedThreadCount: 1,
-      pendingThreadCount: 0,
-      activeThreadTs: null,
-      repliesCursor: null,
-      oldestMessageTs: "1709999999.000000",
-      newestMessageTs: "1710000000.000300",
-      observedAt: 300,
-    });
-
-    expect(db.listSlackBackfillProofs("workspace-a")).toEqual([
-      expect.objectContaining({
-        account_key: "workspace-a",
-        conversation_id: "C123",
-        conversation_phase: "complete",
-        history_complete: 1,
-        known_conversation_count: 3,
-        thread_root_count: 1,
-        completed_thread_count: 1,
-        oldest_message_ts: "1709999999.000000",
-        newest_message_ts: "1710000000.000300",
-        first_discovered_at: 200,
-        history_complete_at: 300,
-        replies_complete_at: 300,
-      }),
-    ]);
-
-    db.close();
-  });
-
   it("persists generic sync scopes and proofs", () => {
     const db = createDb();
 
@@ -1353,7 +1286,12 @@ describe("CuedDatabase", () => {
     expect(
       sql
         .prepare("SELECT 1 FROM schema_migrations WHERE id = ?")
-        .get("0008_add_contact_fanout_projection_indexes"),
+        .get("0008_migrate_slack_backfill_proofs_to_generic"),
+    ).toBeTruthy();
+    expect(
+      sql
+        .prepare("SELECT 1 FROM schema_migrations WHERE id = ?")
+        .get("0009_add_contact_fanout_projection_indexes"),
     ).toBeTruthy();
     const indexNames = (
       sql.prepare("SELECT name FROM sqlite_master WHERE type = 'index'").all() as Array<{
@@ -1392,6 +1330,38 @@ describe("CuedDatabase", () => {
       ]),
     );
     expect(triggerSql?.sql).toContain("rowid = NEW.rowid");
+
+    db.close();
+  });
+
+  it("honors the pre-renumbered Discord fanout index migration id", () => {
+    const dir = mkdtempSync(join(tmpdir(), "cued-discord-fanout-legacy-id-"));
+    tempDirs.push(dir);
+    const db = new CuedDatabase(join(dir, "local.db"));
+    const sql = sqlite(db);
+
+    sql.exec(`
+      CREATE TABLE schema_migrations (
+        id TEXT PRIMARY KEY,
+        applied_at INTEGER NOT NULL
+      )
+    `);
+    sql
+      .prepare("INSERT INTO schema_migrations (id, applied_at) VALUES (?, ?)")
+      .run("0008_add_contact_fanout_projection_indexes", 1);
+
+    db.migrate();
+
+    expect(
+      sql
+        .prepare("SELECT 1 FROM schema_migrations WHERE id = ?")
+        .get("0008_add_contact_fanout_projection_indexes"),
+    ).toBeTruthy();
+    expect(
+      sql
+        .prepare("SELECT 1 FROM schema_migrations WHERE id = ?")
+        .get("0009_add_contact_fanout_projection_indexes"),
+    ).toBeUndefined();
 
     db.close();
   });

@@ -12,6 +12,7 @@ import {
   getIntegrationSummary,
   getKeychainMetadata,
   getRequestableIntegration,
+  isUserRemovedIntegrationMetadata,
   normalizeIntegrationPlatform,
   now,
   resolveAccountKey,
@@ -51,6 +52,7 @@ function ensureRequestableIntegrationState(
     ? safeParseJsonRecord(existing.metadata_json, "integration_states.metadata_json")
     : {};
   const normalizedExistingMetadata = existingMetadata ?? {};
+  const wasUserRemoved = isUserRemovedIntegrationMetadata(normalizedExistingMetadata);
   const browserProfileDir =
     requested.runtimeKind === "chromium"
       ? getChromiumProfileDir(normalized, resolvedAccountKey)
@@ -67,8 +69,8 @@ function ensureRequestableIntegrationState(
       accountKey && shouldAppendAccountKeyToDisplayName(normalized, accountKey)
         ? `${requested.displayName} ${accountKey}`
         : requested.displayName,
-    authState: existing?.auth_state ?? "requested",
-    enabled: existing ? existing.enabled === 1 : true,
+    authState: wasUserRemoved ? "requested" : (existing?.auth_state ?? "requested"),
+    enabled: wasUserRemoved ? true : existing ? existing.enabled === 1 : true,
     connectionKind: requested.connectionKind,
     syncCapable: false,
     launchStrategy: requested.launchStrategy,
@@ -90,6 +92,8 @@ function ensureRequestableIntegrationState(
       browserProfileDir,
       configDir: signalConfigDir,
       storeDir: whatsappStoreDir,
+      userRemoved: false,
+      removedAt: null,
     },
   });
 
@@ -242,6 +246,14 @@ export function completeAuthSession(
   if (!existingIntegration && session.state === "cancelled") {
     return { authSession: null, integration: null };
   }
+  const existingMetadata =
+    safeParseJsonRecord(
+      existingIntegration?.metadata_json ?? null,
+      "integration_states.metadata_json",
+    ) ?? {};
+  if (session.state === "cancelled" && isUserRemovedIntegrationMetadata(existingMetadata)) {
+    return { authSession: null, integration: null };
+  }
 
   db.updateAuthSessionState({
     id: sessionId,
@@ -276,6 +288,12 @@ export function completeAuthSession(
     targetAccountKey === integration.account_key
       ? integration
       : db.getIntegrationState(integration.platform, targetAccountKey);
+  const existingTargetMetadata =
+    safeParseJsonRecord(
+      existingTarget?.metadata_json ?? null,
+      "integration_states.metadata_json",
+    ) ?? {};
+  const existingTargetRemoved = isUserRemovedIntegrationMetadata(existingTargetMetadata);
   const supportedByDaemon = new Set<string>(listAdapterPlatforms()).has(integration.platform);
   const syncCapable =
     input.state === "authenticated"
@@ -298,7 +316,9 @@ export function completeAuthSession(
     accountKey: targetAccountKey,
     displayName: targetDisplayName,
     authState: input.state,
-    enabled: (existingTarget?.enabled ?? integration.enabled) === 1,
+    enabled: existingTargetRemoved
+      ? integration.enabled === 1
+      : (existingTarget?.enabled ?? integration.enabled) === 1,
     connectionKind: integration.connection_kind,
     syncCapable,
     launchStrategy: integration.launch_strategy,
@@ -306,10 +326,7 @@ export function completeAuthSession(
     importedFrom: integration.imported_from,
     artifactPaths,
     metadata: {
-      ...(safeParseJsonRecord(
-        existingTarget?.metadata_json ?? null,
-        "integration_states.metadata_json",
-      ) ?? {}),
+      ...existingTargetMetadata,
       ...metadata,
       ...targetMetadata,
       latestAuthSessionId: sessionId,
@@ -425,7 +442,32 @@ export function removeIntegration(
     rmSync(configDir, { recursive: true, force: true });
   }
 
-  db.deleteIntegrationState(integration.platform, integration.accountKey);
+  const removedAt = now();
+  db.clearIntegrationRuntimeState(integration.platform, integration.accountKey);
+  db.upsertIntegrationState({
+    platform: integration.platform,
+    accountKey: integration.accountKey,
+    displayName: integration.displayName,
+    authState: "cancelled",
+    enabled: false,
+    connectionKind: integration.connectionKind,
+    syncCapable: false,
+    launchStrategy: integration.launchStrategy,
+    launchTarget: integration.launchTarget,
+    importedFrom: integration.importedFrom,
+    artifactPaths: integration.artifactPaths,
+    metadata: {
+      ...(integration.metadata ?? {}),
+      keychainService: null,
+      keychainAccount: null,
+      authResult: null,
+      authenticatedAt: null,
+      lastAuthError: null,
+      disconnectedAt: removedAt,
+      removedAt,
+      userRemoved: true,
+    },
+  });
   return {
     platform: integration.platform,
     accountKey: integration.accountKey,
