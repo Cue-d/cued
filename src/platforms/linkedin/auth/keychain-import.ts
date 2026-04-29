@@ -4,6 +4,7 @@ import { CUED_BROWSER_DIR } from "../../../core/config.js";
 import { safeParseJsonRecord, safeParseJsonStringArray } from "../../../db/codecs.js";
 import type { CuedDatabase } from "../../../db/database.js";
 import { completeAuthSession } from "../../core/state/mutations.js";
+import { isUserRemovedIntegrationMetadata } from "../../core/state/status.js";
 import { type LinkedInSessionSecret, parseLinkedInSessionSecret } from "./session-store.js";
 
 const LINKEDIN_KEYCHAIN_SERVICE = "dev.cued.auth.linkedin";
@@ -60,6 +61,9 @@ export function importLinkedInStoredAuth(db: CuedDatabase): ImportedLinkedInSess
   const existingMetadata = existing?.metadata_json
     ? (safeParseJsonRecord(existing.metadata_json, "integration_states.metadata_json") ?? {})
     : {};
+  if (isUserRemovedIntegrationMetadata(existingMetadata)) {
+    return [];
+  }
   const alreadyImported =
     existing?.auth_state === "authenticated" &&
     typeof existingMetadata.keychainService === "string" &&

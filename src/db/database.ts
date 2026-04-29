@@ -1731,6 +1731,56 @@ export class CuedDatabase {
       .run();
   }
 
+  clearIntegrationRuntimeState(platform: Platform, accountKey: string): number {
+    return this.db.transaction((tx) => {
+      const removedSourceAccounts = tx
+        .delete(sourceAccounts)
+        .where(
+          and(eq(sourceAccounts.platform, platform), eq(sourceAccounts.accountKey, accountKey)),
+        )
+        .run().changes;
+      const removedCheckpoints = tx
+        .delete(syncCheckpoints)
+        .where(
+          and(eq(syncCheckpoints.platform, platform), eq(syncCheckpoints.accountKey, accountKey)),
+        )
+        .run().changes;
+      const removedSyncProofs = tx
+        .delete(syncProofs)
+        .where(and(eq(syncProofs.platform, platform), eq(syncProofs.accountKey, accountKey)))
+        .run().changes;
+      const removedSyncScopes = tx
+        .delete(syncScopes)
+        .where(and(eq(syncScopes.platform, platform), eq(syncScopes.accountKey, accountKey)))
+        .run().changes;
+      const removedRunErrors = tx
+        .delete(syncRunErrors)
+        .where(and(eq(syncRunErrors.platform, platform), eq(syncRunErrors.accountKey, accountKey)))
+        .run().changes;
+      const removedRuns = tx
+        .delete(syncRuns)
+        .where(and(eq(syncRuns.platform, platform), eq(syncRuns.accountKey, accountKey)))
+        .run().changes;
+      const removedSlackBackfillProofs =
+        platform === "slack"
+          ? tx
+              .delete(slackBackfillProofs)
+              .where(eq(slackBackfillProofs.accountKey, accountKey))
+              .run().changes
+          : 0;
+
+      return (
+        Number(removedSourceAccounts) +
+        Number(removedCheckpoints) +
+        Number(removedSyncProofs) +
+        Number(removedSyncScopes) +
+        Number(removedRunErrors) +
+        Number(removedRuns) +
+        Number(removedSlackBackfillProofs)
+      );
+    });
+  }
+
   queueOutboundMessage(input: {
     platform: Platform;
     accountKey: string;
