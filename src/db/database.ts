@@ -2440,7 +2440,11 @@ export class CuedDatabase {
         exact.source_conversation_key.replace(/^discord:channel:/, ""),
       threadId: exact.source_conversation_key,
       resolution:
-        exact.source_conversation_key === trimmed ? "source_conversation_key" : "conversation_name",
+        exact.source_conversation_key === trimmed
+          ? "source_conversation_key"
+          : exact.native_conversation_key === trimmed
+            ? "channel_id"
+            : "conversation_name",
       matchedConversationId: exact.id,
       matchedName: exact.name,
     };

@@ -1,5 +1,11 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { DiscordApiClient, type DiscordRateLimitError, isDiscordOverflowError } from "./client.js";
+import {
+  DiscordApiClient,
+  DiscordApiError,
+  type DiscordRateLimitError,
+  isDiscordAuthInvalidationError,
+  isDiscordOverflowError,
+} from "./client.js";
 
 describe("DiscordApiClient", () => {
   afterEach(() => {
@@ -73,5 +79,26 @@ describe("DiscordApiClient", () => {
       retryAfterMs: 1_250,
     } satisfies Partial<DiscordRateLimitError>);
     expect(fetchImpl).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not treat generic 403 permission errors as auth invalidation", () => {
+    expect(
+      isDiscordAuthInvalidationError(
+        new DiscordApiError("GET", "/channels/dm-1/messages", 403, '{"message":"Missing Access"}'),
+      ),
+    ).toBe(false);
+  });
+
+  it("treats account-level 403 responses as auth invalidation", () => {
+    expect(
+      isDiscordAuthInvalidationError(
+        new DiscordApiError(
+          "GET",
+          "/users/@me",
+          403,
+          '{"message":"Your account has limited access due to suspicious activity"}',
+        ),
+      ),
+    ).toBe(true);
   });
 });
