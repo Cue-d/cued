@@ -133,6 +133,12 @@ describe("DiscordApiClient", () => {
         ),
       ),
     ).toBe(false);
+    expect(
+      isDiscordAuthInvalidationError(new Error("Service temporarily disabled for maintenance")),
+    ).toBe(false);
+    expect(isDiscordAuthInvalidationError(new Error("connect ECONNREFUSED 127.0.0.1:4010"))).toBe(
+      false,
+    );
   });
 
   it("does not treat structured rate-limit responses as auth invalidation", () => {
@@ -146,5 +152,13 @@ describe("DiscordApiClient", () => {
         ),
       ),
     ).toBe(false);
+  });
+
+  it("detects specific fallback auth invalidation messages", () => {
+    expect(
+      isDiscordAuthInvalidationError(new Error("Discord auth verification failed (401)")),
+    ).toBe(true);
+    expect(isDiscordAuthInvalidationError(new Error("Your account has been disabled"))).toBe(true);
+    expect(isDiscordAuthInvalidationError(new Error("Please reset your password"))).toBe(true);
   });
 });
