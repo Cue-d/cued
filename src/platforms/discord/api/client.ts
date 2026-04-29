@@ -162,15 +162,25 @@ export class DiscordApiClient {
 
 export function isDiscordAuthInvalidationError(error: unknown): boolean {
   if (error instanceof DiscordApiError) {
-    if (error.status === 401 || error.status === 403) {
+    if (error.status === 401) {
       return true;
     }
     const responseBody = error.responseBody.toLowerCase();
+    if (error.status === 403) {
+      return (
+        responseBody.includes("password") ||
+        responseBody.includes("unauthorized") ||
+        responseBody.includes("limited access") ||
+        responseBody.includes("suspicious") ||
+        responseBody.includes("disabled")
+      );
+    }
     return (
       responseBody.includes("password") ||
       responseBody.includes("unauthorized") ||
       responseBody.includes("limited access") ||
-      responseBody.includes("suspicious")
+      responseBody.includes("suspicious") ||
+      responseBody.includes("disabled")
     );
   }
 
@@ -178,11 +188,11 @@ export function isDiscordAuthInvalidationError(error: unknown): boolean {
     error instanceof Error ? error.message.toLowerCase() : String(error).toLowerCase();
   return (
     message.includes("401") ||
-    message.includes("403") ||
     message.includes("unauthorized") ||
     message.includes("password") ||
     message.includes("limited access") ||
-    message.includes("suspicious")
+    message.includes("suspicious") ||
+    message.includes("disabled")
   );
 }
 

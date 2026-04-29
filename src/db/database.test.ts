@@ -796,6 +796,20 @@ describe("CuedDatabase", () => {
       matchedConversationId: "discord-group-dm",
       matchedName: "Jarvis, Ava",
     });
+    expect(db.resolveDiscordSendTarget("dm-1")).toEqual({
+      target: "dm-1",
+      threadId: "discord:channel:dm-1",
+      resolution: "channel_id",
+      matchedConversationId: "discord-dm",
+      matchedName: "Jarvis",
+    });
+    expect(db.resolveDiscordSendTarget("discord:channel:dm-1")).toEqual({
+      target: "dm-1",
+      threadId: "discord:channel:dm-1",
+      resolution: "source_conversation_key",
+      matchedConversationId: "discord-dm",
+      matchedName: "Jarvis",
+    });
     expect(db.resolveDiscordSendTarget("general")).toBeNull();
     expect(db.resolveDiscordSendTarget("guild-1")).toBeNull();
 
