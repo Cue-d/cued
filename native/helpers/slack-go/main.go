@@ -74,6 +74,10 @@ type commandEnvelope struct {
 	OK              bool   `json:"ok"`
 	ProtocolVersion int    `json:"protocolVersion"`
 	Error           string `json:"error,omitempty"`
+	ErrorKind       string `json:"errorKind,omitempty"`
+	RetryAfterMs    int64  `json:"retryAfterMs,omitempty"`
+	Retryable       *bool  `json:"retryable,omitempty"`
+	SlackCode       string `json:"slackCode,omitempty"`
 	Result          any    `json:"result,omitempty"`
 }
 
@@ -559,6 +563,40 @@ func writeJSON(writer io.Writer, value any) error {
 	return encoder.Encode(value)
 }
 
+func boolPtr(value bool) *bool {
+	return &value
+}
+
+func commandErrorEnvelope(err error) commandEnvelope {
+	envelope := commandEnvelope{
+		OK:              false,
+		ProtocolVersion: protocolVersion,
+		Error:           err.Error(),
+	}
+
+	var rateLimited *slackapi.RateLimitedError
+	if errors.As(err, &rateLimited) {
+		envelope.ErrorKind = "rate_limited"
+		envelope.RetryAfterMs = int64(rateLimited.RetryAfter / time.Millisecond)
+		envelope.Retryable = boolPtr(true)
+		envelope.SlackCode = "rate_limited"
+		return envelope
+	}
+
+	var slackErr slackapi.SlackErrorResponse
+	if errors.As(err, &slackErr) && slackErr.Err != "" {
+		envelope.ErrorKind = "slack_api"
+		envelope.SlackCode = slackErr.Err
+		switch slackErr.Err {
+		case "missing_scope", "not_in_channel", "channel_not_found", "is_archived":
+			envelope.Retryable = boolPtr(false)
+		}
+		return envelope
+	}
+
+	return envelope
+}
+
 func main() {
 	if len(os.Args) < 2 {
 		fmt.Fprintln(os.Stderr, "usage: cued-slack-helper <version|status|authTest|listUsers|listConversations|getConversationMembers|getHistory|getReplies|session>")
@@ -593,11 +631,7 @@ func main() {
 			})
 			os.Exit(1)
 		}
-		_ = writeJSON(os.Stdout, commandEnvelope{
-			OK:              false,
-			ProtocolVersion: protocolVersion,
-			Error:           err.Error(),
-		})
+		_ = writeJSON(os.Stdout, commandErrorEnvelope(err))
 		os.Exit(1)
 	}
 
