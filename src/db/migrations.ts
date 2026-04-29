@@ -1094,6 +1094,15 @@ export const MIGRATIONS: Migration[] = [
       CREATE INDEX IF NOT EXISTS idx_contact_sources_contact
       ON contact_sources(contact_id, platform, account_key);
 
+      CREATE INDEX IF NOT EXISTS idx_conversation_participants_contact
+      ON conversation_participants(contact_id);
+
+      CREATE INDEX IF NOT EXISTS idx_timeline_events_actor_contact
+      ON timeline_events(actor_contact_id);
+
+      CREATE INDEX IF NOT EXISTS idx_message_reactions_reactor_contact
+      ON message_reactions(reactor_contact_id);
+
       CREATE INDEX IF NOT EXISTS idx_conversations_lookup
       ON conversations(platform, account_key, source_conversation_key);
 
@@ -1592,6 +1601,29 @@ export const MIGRATIONS: Migration[] = [
         CREATE INDEX IF NOT EXISTS idx_sync_proofs_status
         ON sync_proofs(platform, account_key, status, updated_at);
       `);
+    },
+  },
+  {
+    id: "0008_add_contact_fanout_projection_indexes",
+    apply: (db) => {
+      if (tableExists(db, "conversation_participants")) {
+        db.exec(`
+          CREATE INDEX IF NOT EXISTS idx_conversation_participants_contact
+          ON conversation_participants(contact_id);
+        `);
+      }
+      if (tableExists(db, "timeline_events")) {
+        db.exec(`
+          CREATE INDEX IF NOT EXISTS idx_timeline_events_actor_contact
+          ON timeline_events(actor_contact_id);
+        `);
+      }
+      if (tableExists(db, "message_reactions")) {
+        db.exec(`
+          CREATE INDEX IF NOT EXISTS idx_message_reactions_reactor_contact
+          ON message_reactions(reactor_contact_id);
+        `);
+      }
     },
   },
 ];
