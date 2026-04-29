@@ -186,4 +186,81 @@ describe("discord realtime", () => {
     });
     expect(onAuthInvalidated).toHaveBeenCalled();
   });
+
+  it("retries after the base delay and resets reconnect attempts after recovery", async () => {
+    vi.useFakeTimers();
+    const setTimeoutSpy = vi.spyOn(globalThis, "setTimeout");
+
+    let privateChannelPollCount = 0;
+    const session = new DiscordRealtimeSession({
+      accountKey: "default",
+      credentials: {
+        token: "discord-token",
+      },
+      dmPollIntervalMs: 10,
+      reconnectBaseMs: 1_000,
+      client: {
+        async getCurrentUser() {
+          return {
+            id: "u-self",
+            username: "theo",
+            global_name: "Theo",
+          };
+        },
+        async listPrivateChannels() {
+          privateChannelPollCount += 1;
+          if (privateChannelPollCount === 2) {
+            throw new Error("temporary failure");
+          }
+          return [
+            {
+              id: "dm-1",
+              type: 1,
+              recipients: [],
+              last_message_id: "100",
+            },
+          ];
+        },
+        async listChannelMessages() {
+          return [];
+        },
+        async sendMessage() {
+          throw new Error("not used");
+        },
+      } as unknown as DiscordApiClient,
+    });
+
+    session.start();
+    await vi.waitFor(() => {
+      expect(session.getStatus()).toEqual(
+        expect.objectContaining({
+          state: "connected",
+          reconnectAttempts: 0,
+        }),
+      );
+    });
+
+    await vi.advanceTimersByTimeAsync(10);
+    expect(session.getStatus()).toEqual(
+      expect.objectContaining({
+        state: "degraded",
+        reconnectAttempts: 1,
+        lastSessionError: "temporary failure",
+      }),
+    );
+    expect(setTimeoutSpy.mock.calls.at(-1)?.[1]).toBe(1_000);
+
+    await vi.advanceTimersByTimeAsync(1_000);
+    await vi.waitFor(() => {
+      expect(session.getStatus()).toEqual(
+        expect.objectContaining({
+          state: "connected",
+          reconnectAttempts: 0,
+          lastSessionError: null,
+        }),
+      );
+    });
+
+    session.stop();
+  });
 });
