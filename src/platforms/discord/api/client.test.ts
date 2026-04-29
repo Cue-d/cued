@@ -87,6 +87,16 @@ describe("DiscordApiClient", () => {
         new DiscordApiError("GET", "/channels/dm-1/messages", 403, '{"message":"Missing Access"}'),
       ),
     ).toBe(false);
+    expect(
+      isDiscordAuthInvalidationError(
+        new DiscordApiError(
+          "GET",
+          "/channels/dm-1/messages",
+          403,
+          '{"message":"Unauthorized to access this channel"}',
+        ),
+      ),
+    ).toBe(false);
   });
 
   it("treats account-level 403 responses as auth invalidation", () => {
@@ -110,6 +120,19 @@ describe("DiscordApiClient", () => {
           "/users/@me",
           503,
           '{"message":"Service temporarily disabled for maintenance"}',
+        ),
+      ),
+    ).toBe(false);
+  });
+
+  it("does not treat structured rate-limit responses as auth invalidation", () => {
+    expect(
+      isDiscordAuthInvalidationError(
+        new DiscordApiError(
+          "GET",
+          "/users/@me",
+          429,
+          '{"message":"You are being rate limited after unauthorized-looking traffic"}',
         ),
       ),
     ).toBe(false);

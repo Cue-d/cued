@@ -206,6 +206,7 @@ describe("buildDiscordSyncBundle", () => {
         },
       }),
     );
+    expect(bundle.hasMore).toBe(true);
     expect(findDiscordProof(bundle, "conversation", "dm-1", "latest_messages")).toBeUndefined();
   });
 
@@ -529,6 +530,7 @@ describe("buildDiscordSyncBundle", () => {
         },
       }),
     );
+    expect(bundle.hasMore).toBe(false);
   });
 
   it("hydrates DMs that have a checkpoint cursor but no latest-message proof", async () => {
@@ -718,6 +720,7 @@ describe("buildDiscordSyncBundle", () => {
         },
       }),
     );
+    expect(bundle.hasMore).toBe(true);
   });
 });
 
