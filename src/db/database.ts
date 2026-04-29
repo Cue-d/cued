@@ -2411,7 +2411,7 @@ export class CuedDatabase {
         SELECT id, source_conversation_key, native_conversation_key, name
         FROM conversations
         WHERE platform = 'discord'
-          AND type = 'dm'
+          AND type IN ('dm', 'group')
           AND (
             source_conversation_key = ?
             OR native_conversation_key = ?

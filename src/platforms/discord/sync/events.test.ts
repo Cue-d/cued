@@ -27,29 +27,33 @@ describe("discord sync events", () => {
           ],
         },
         currentUser,
-        new Map(),
       ),
     ).toBe("Ava Chen");
   });
 
-  it("builds guild conversation events with a readable title", () => {
+  it("builds group DM conversation events with a readable title", () => {
     const event = buildDiscordConversationEvent({
       accountKey: "default",
       observedAt: 1_710_000_000_000,
       channel: {
         id: "c-1",
-        guild_id: "g-1",
-        type: 0,
-        name: "general",
+        type: 3,
+        name: "planning",
         topic: "Team chat",
+        recipients: [
+          {
+            id: "u-peer",
+            username: "ava",
+            global_name: "Ava Chen",
+          },
+        ],
       },
       currentUser,
-      guildNameById: new Map([["g-1", "Acme"]]),
     });
 
     expect(event.payload).toMatchObject({
       sourceConversationKey: "discord:channel:c-1",
-      displayName: "Acme / #general",
+      displayName: "planning",
       conversationType: "group",
       topic: "Team chat",
     });

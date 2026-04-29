@@ -44,7 +44,6 @@ export type DiscordRealtimeEventEnvelope =
       data: {
         channel: DiscordChannel;
         currentUser: DiscordUser;
-        guildNameById: Map<string, string>;
         isNew: boolean;
       };
     }
@@ -217,7 +216,7 @@ export class DiscordRealtimeSession implements DiscordRealtimeSessionLike {
           user: currentUser,
         },
       });
-      await this.refreshDmChannels({ seedOnly: false });
+      await this.refreshDmChannels();
       this.hasEverConnected = true;
       this.setStatus({
         state: "connected",
@@ -236,7 +235,7 @@ export class DiscordRealtimeSession implements DiscordRealtimeSessionLike {
   private scheduleTimers(): void {
     this.clearTimers();
     this.dmPollTimer = setInterval(() => {
-      void this.refreshDmChannels({ seedOnly: false });
+      void this.refreshDmChannels();
     }, this.dmPollIntervalMs);
   }
 
@@ -251,14 +250,14 @@ export class DiscordRealtimeSession implements DiscordRealtimeSessionLike {
     }
   }
 
-  private async refreshDmChannels(input: { seedOnly: boolean }): Promise<void> {
+  private async refreshDmChannels(): Promise<void> {
     if (!this.currentUser || this.pollingDm) {
       return;
     }
     this.pollingDm = true;
     try {
       const channels = (await this.client.listPrivateChannels()).filter(isDiscordDmChannel);
-      await this.refreshChannels(channels, input.seedOnly);
+      await this.refreshChannels(channels);
     } catch (error) {
       this.handlePollFailure(error);
     } finally {
@@ -266,7 +265,7 @@ export class DiscordRealtimeSession implements DiscordRealtimeSessionLike {
     }
   }
 
-  private async refreshChannels(channels: DiscordChannel[], seedOnly: boolean): Promise<void> {
+  private async refreshChannels(channels: DiscordChannel[]): Promise<void> {
     const currentUser = this.currentUser;
     if (!currentUser) {
       return;
@@ -277,24 +276,21 @@ export class DiscordRealtimeSession implements DiscordRealtimeSessionLike {
       const isNew = !existing;
       this.channelById.set(channel.id, channel);
       if (isNew || hasMeaningfulChannelChange(existing, channel)) {
-        if (!seedOnly) {
+        this.emitEvent({
+          event: "conversation_upsert",
+          data: {
+            channel,
+            currentUser,
+            isNew,
+          },
+        });
+        for (const recipient of channel.recipients ?? []) {
           this.emitEvent({
-            event: "conversation_upsert",
+            event: "contact_upsert",
             data: {
-              channel,
-              currentUser,
-              guildNameById: new Map(),
-              isNew,
+              user: recipient,
             },
           });
-          for (const recipient of channel.recipients ?? []) {
-            this.emitEvent({
-              event: "contact_upsert",
-              data: {
-                user: recipient,
-              },
-            });
-          }
         }
       }
 
@@ -308,7 +304,7 @@ export class DiscordRealtimeSession implements DiscordRealtimeSessionLike {
         continue;
       }
       this.lastMessageIdByChannel.set(channel.id, nextLastMessageId);
-      if (seedOnly || !nextLastMessageId) {
+      if (!nextLastMessageId) {
         continue;
       }
       const messages = await this.loadNewMessagesForChannel({

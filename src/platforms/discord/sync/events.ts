@@ -12,7 +12,6 @@ import {
   discordDisplayName,
   discordMessageSourceKey,
   discordSourceKey,
-  isDiscordDmChannel,
 } from "../types.js";
 
 export function discordDedupeKey(seed: string): string {
@@ -67,31 +66,19 @@ export function buildDiscordConversationEvent(input: {
   observedAt: number;
   channel: DiscordChannel;
   currentUser: DiscordUser;
-  guildNameById: Map<string, string>;
 }): SyncBundle["rawEvents"][number] {
   const id = discordDedupeKey(`discord:conversation:${input.accountKey}:${input.channel.id}`);
-  const displayName = buildDiscordConversationDisplayName(
-    input.channel,
-    input.currentUser,
-    input.guildNameById,
-  );
-  const participants = isDiscordDmChannel(input.channel)
-    ? [
-        {
-          sourceEntityKey: discordSourceKey(input.currentUser.id),
-          isSelf: true,
-        },
-        ...(input.channel.recipients ?? []).map((recipient) => ({
-          sourceEntityKey: discordSourceKey(recipient.id),
-          isSelf: false,
-        })),
-      ]
-    : [
-        {
-          sourceEntityKey: discordSourceKey(input.currentUser.id),
-          isSelf: true,
-        },
-      ];
+  const displayName = buildDiscordConversationDisplayName(input.channel, input.currentUser);
+  const participants = [
+    {
+      sourceEntityKey: discordSourceKey(input.currentUser.id),
+      isSelf: true,
+    },
+    ...(input.channel.recipients ?? []).map((recipient) => ({
+      sourceEntityKey: discordSourceKey(recipient.id),
+      isSelf: false,
+    })),
+  ];
 
   return {
     id,
@@ -104,7 +91,7 @@ export function buildDiscordConversationEvent(input: {
     dedupeKey: id,
     payload: {
       sourceConversationKey: discordConversationSourceKey(input.channel.id),
-      conversationType: isDiscordDmChannel(input.channel) ? "dm" : "group",
+      conversationType: input.channel.type === 3 ? "group" : "dm",
       displayName,
       nativeConversationKey: input.channel.id,
       service: "discord",
@@ -191,7 +178,6 @@ export function buildDiscordMessageEvent(input: {
 export function buildDiscordConversationDisplayName(
   channel: DiscordChannel,
   currentUser: DiscordUser,
-  guildNameById: Map<string, string>,
 ): string {
   if (channel.type === 1) {
     const recipient = (channel.recipients ?? []).find((user) => user.id !== currentUser.id);
@@ -206,10 +192,5 @@ export function buildDiscordConversationDisplayName(
     return names.length > 0 ? names.join(", ") : "Discord Group DM";
   }
 
-  const guildName = channel.guild_id ? guildNameById.get(channel.guild_id) : null;
-  if (channel.name?.trim()) {
-    return guildName ? `${guildName} / #${channel.name.trim()}` : `#${channel.name.trim()}`;
-  }
-
-  return guildName ? `${guildName} / ${channel.id}` : channel.id;
+  return channel.name?.trim() || channel.id;
 }

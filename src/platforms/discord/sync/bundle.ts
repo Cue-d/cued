@@ -194,7 +194,6 @@ export async function buildDiscordSyncBundle(
         observedAt,
         channel,
         currentUser,
-        guildNameById: new Map(),
       }),
     );
   }
@@ -393,7 +392,7 @@ function buildDiscordSyncProofs(input: {
 
   for (const channel of input.channels) {
     const latestMessageId = input.nextChannelCursor[channel.id]?.latestMessageId ?? null;
-    const displayName = buildDiscordConversationDisplayName(channel, input.currentUser, new Map());
+    const displayName = buildDiscordConversationDisplayName(channel, input.currentUser);
     const scope = {
       kind: "conversation" as const,
       key: channel.id,
@@ -646,7 +645,7 @@ function buildDiscordHydrationDiagnostics(input: {
 }
 
 export function getDiscordSyncMessageChannelLimit(): number {
-  return parsePositiveInteger(
+  return parseNonNegativeInteger(
     process.env.CUED_DISCORD_SYNC_MESSAGE_CHANNEL_LIMIT,
     DEFAULT_SYNC_MESSAGE_CHANNEL_LIMIT,
   );
@@ -660,10 +659,18 @@ export function getDiscordSyncMessagesPerChannelLimit(): number {
 }
 
 export function getDiscordSyncBackfillPageLimit(): number {
-  return parsePositiveInteger(
+  return parseNonNegativeInteger(
     process.env.CUED_DISCORD_SYNC_BACKFILL_PAGE_LIMIT,
     DEFAULT_SYNC_BACKFILL_PAGE_LIMIT,
   );
+}
+
+function parseNonNegativeInteger(value: string | undefined, fallback: number): number {
+  if (typeof value !== "string") {
+    return fallback;
+  }
+  const parsed = Number.parseInt(value, 10);
+  return Number.isFinite(parsed) && parsed >= 0 ? parsed : fallback;
 }
 
 function parsePositiveInteger(value: string | undefined, fallback: number): number {
