@@ -1101,6 +1101,22 @@ private func integrationMenuTitle(_ integration: AppIntegrationStatus) -> String
   return "\(base) • \(integrationStateLabel(integration.authState))\(integration.enabled ? "" : " (disabled)")"
 }
 
+private func sourceSummaryTitle(connected: Int, needsAttention: Int) -> String {
+  if connected == 0 && needsAttention == 0 {
+    return "No sources connected"
+  }
+  if connected == 0 {
+    return "\(needsAttention) source\(needsAttention == 1 ? "" : "s") need\(needsAttention == 1 ? "s" : "") attention"
+  }
+
+  let connectedText = "\(connected) source\(connected == 1 ? "" : "s") connected"
+  guard needsAttention > 0 else {
+    return connectedText
+  }
+
+  return "\(connectedText) • \(needsAttention) need\(needsAttention == 1 ? "s" : "") attention"
+}
+
 private func shouldIncludeMessageDebugPlatform(_ platform: String) -> Bool {
   platform != "contacts"
 }
@@ -1624,79 +1640,41 @@ final class MenuBarAppController: NSObject, NSApplicationDelegate {
     }
 
     let menu = NSMenu()
+    let visibleIntegrations = snapshot.integrations.filter { $0.enabled }
+    let connectedIntegrations = visibleIntegrations.filter { isConnectedIntegrationState($0.authState) }
+    let needsAttentionIntegrations = visibleIntegrations.filter { !isConnectedIntegrationState($0.authState) }
+
     menu.addItem(
       withTitle: snapshot.daemonRunning
-        ? "Daemon running"
+        ? "Cued is running"
         : daemonStarting
-          ? "Daemon starting"
-          : "Daemon stopped",
+          ? "Cued is starting"
+          : "Cued is stopped",
       action: nil,
       keyEquivalent: ""
     ).isEnabled = false
 
     menu.addItem(
-      withTitle: "Messages \(snapshot.messages)  Contacts \(snapshot.contacts)  Conversations \(snapshot.conversations)",
+      withTitle: sourceSummaryTitle(
+        connected: connectedIntegrations.count,
+        needsAttention: needsAttentionIntegrations.count
+      ),
       action: nil,
       keyEquivalent: ""
     ).isEnabled = false
-    menu.addItem(.separator())
 
-    if snapshot.integrations.isEmpty {
-      let item = NSMenuItem(title: "No integrations configured", action: nil, keyEquivalent: "")
-      item.isEnabled = false
-      menu.addItem(item)
-    } else {
-      let visibleIntegrations = snapshot.integrations.filter { $0.enabled }
-      let connectedIntegrations = visibleIntegrations.filter { isConnectedIntegrationState($0.authState) }
-      let needsAttentionIntegrations = visibleIntegrations.filter { !isConnectedIntegrationState($0.authState) }
-
-      if connectedIntegrations.isEmpty {
-        let item = NSMenuItem(title: "No connected integrations", action: nil, keyEquivalent: "")
-        item.isEnabled = false
-        menu.addItem(item)
-      } else {
-        let sectionHeader = NSMenuItem(title: "Connected", action: nil, keyEquivalent: "")
-        sectionHeader.isEnabled = false
-        menu.addItem(sectionHeader)
-        for integration in connectedIntegrations {
-          let item = NSMenuItem(title: integrationMenuTitle(integration), action: nil, keyEquivalent: "")
-          item.isEnabled = false
-          menu.addItem(item)
-        }
-      }
-
-      if !needsAttentionIntegrations.isEmpty {
-        menu.addItem(.separator())
-        let sectionHeader = NSMenuItem(title: "Needs Attention", action: nil, keyEquivalent: "")
-        sectionHeader.isEnabled = false
-        menu.addItem(sectionHeader)
-        for integration in needsAttentionIntegrations {
-          let item = NSMenuItem(title: integrationMenuTitle(integration), action: nil, keyEquivalent: "")
-          item.isEnabled = false
-          menu.addItem(item)
-        }
-      }
-    }
+    menu.addItem(
+      withTitle: "\(snapshot.contacts) contacts • \(snapshot.messages) messages",
+      action: nil,
+      keyEquivalent: ""
+    ).isEnabled = false
 
     menu.addItem(.separator())
+    menu.addItem(withTitle: "Open Cued", action: #selector(openSetup), keyEquivalent: "").target = self
+
     let debugItem = NSMenuItem(title: "Debug", action: nil, keyEquivalent: "")
     debugItem.submenu = buildDebugMenu(snapshot: snapshot, daemonStarting: daemonStarting)
     menu.addItem(debugItem)
-
-    menu.addItem(.separator())
-    let daemonToggleItem = menu.addItem(
-      withTitle: snapshot.daemonRunning || daemonStarting ? "Stop" : "Start",
-      action: #selector(toggleDaemon),
-      keyEquivalent: ""
-    )
-    daemonToggleItem.target = self
-
-    menu.addItem(withTitle: "Settings", action: #selector(openSetup), keyEquivalent: "").target = self
-    menu.addItem(
-      withTitle: snapshot.updateSummary?.availableVersion.map { "Update Available: v\($0)" } ?? "Check for Updates",
-      action: #selector(checkForUpdates),
-      keyEquivalent: ""
-    ).target = self
 
     menu.addItem(.separator())
     menu.addItem(withTitle: "Quit", action: #selector(quitApp), keyEquivalent: "q").target = self
@@ -1811,18 +1789,71 @@ final class MenuBarAppController: NSObject, NSApplicationDelegate {
 
     debugMenu.addItem(.separator())
 
+    let visibleIntegrations = snapshot.integrations.filter { $0.enabled }
+    let connectedIntegrations = visibleIntegrations.filter { isConnectedIntegrationState($0.authState) }
+    let needsAttentionIntegrations = visibleIntegrations.filter { !isConnectedIntegrationState($0.authState) }
+
+    if visibleIntegrations.isEmpty {
+      let item = NSMenuItem(title: "No integrations configured", action: nil, keyEquivalent: "")
+      item.isEnabled = false
+      debugMenu.addItem(item)
+    } else {
+      if connectedIntegrations.isEmpty {
+        let item = NSMenuItem(title: "No connected integrations", action: nil, keyEquivalent: "")
+        item.isEnabled = false
+        debugMenu.addItem(item)
+      } else {
+        let sectionHeader = NSMenuItem(title: "Connected", action: nil, keyEquivalent: "")
+        sectionHeader.isEnabled = false
+        debugMenu.addItem(sectionHeader)
+        for integration in connectedIntegrations {
+          let item = NSMenuItem(title: integrationMenuTitle(integration), action: nil, keyEquivalent: "")
+          item.isEnabled = false
+          debugMenu.addItem(item)
+        }
+      }
+
+      if !needsAttentionIntegrations.isEmpty {
+        debugMenu.addItem(.separator())
+        let sectionHeader = NSMenuItem(title: "Needs Attention", action: nil, keyEquivalent: "")
+        sectionHeader.isEnabled = false
+        debugMenu.addItem(sectionHeader)
+        for integration in needsAttentionIntegrations {
+          let item = NSMenuItem(title: integrationMenuTitle(integration), action: nil, keyEquivalent: "")
+          item.isEnabled = false
+          debugMenu.addItem(item)
+        }
+      }
+    }
+
+    debugMenu.addItem(.separator())
+
     if snapshot.messageBreakdown.isEmpty {
       let item = NSMenuItem(title: "No message sync data yet", action: nil, keyEquivalent: "")
       item.isEnabled = false
       debugMenu.addItem(item)
-      return debugMenu
+    } else {
+      for item in snapshot.messageBreakdown {
+        let menuItem = NSMenuItem(title: platformMessageDebugTitle(item), action: nil, keyEquivalent: "")
+        menuItem.isEnabled = false
+        debugMenu.addItem(menuItem)
+      }
     }
 
-    for item in snapshot.messageBreakdown {
-      let menuItem = NSMenuItem(title: platformMessageDebugTitle(item), action: nil, keyEquivalent: "")
-      menuItem.isEnabled = false
-      debugMenu.addItem(menuItem)
-    }
+    debugMenu.addItem(.separator())
+
+    let daemonToggleItem = debugMenu.addItem(
+      withTitle: snapshot.daemonRunning || daemonStarting ? "Stop Daemon" : "Start Daemon",
+      action: #selector(toggleDaemon),
+      keyEquivalent: ""
+    )
+    daemonToggleItem.target = self
+
+    debugMenu.addItem(
+      withTitle: snapshot.updateSummary?.availableVersion.map { "Update Available: v\($0)" } ?? "Check for Updates",
+      action: #selector(checkForUpdates),
+      keyEquivalent: ""
+    ).target = self
 
     return debugMenu
   }
