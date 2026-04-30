@@ -1300,6 +1300,32 @@ export class CuedDatabase {
     };
   }
 
+  getMenuBarOverview(): {
+    contacts: number;
+    conversations: number;
+    messages: number;
+    rawEvents: number;
+    sourceAccounts: number;
+    integrations: number;
+    authSessions: number;
+    messageBreakdown: Array<{
+      platform: Platform;
+      messages: number;
+    }>;
+  } {
+    const messageBreakdown = this.listMessageCountsByPlatform();
+    return {
+      contacts: this.countRows(contacts),
+      conversations: this.countRows(conversations),
+      messages: messageBreakdown.reduce((total, row) => total + row.messages, 0),
+      rawEvents: this.countRows(rawEvents),
+      sourceAccounts: this.countRows(sourceAccounts),
+      integrations: this.countRows(integrationStates),
+      authSessions: this.countRows(authSessions),
+      messageBreakdown,
+    };
+  }
+
   listMessageCountsByPlatform(): Array<{
     platform: Platform;
     messages: number;

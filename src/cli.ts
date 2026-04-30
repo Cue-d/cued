@@ -25,7 +25,11 @@ import {
   resolveInstalledAppPath,
 } from "./macos/install.js";
 import { IntegrationAuthService } from "./platforms/core/auth/service.js";
-import { getIntegrationSummary, listIntegrationStates } from "./platforms/core/state/status.js";
+import {
+  getIntegrationSummary,
+  listIntegrationStates,
+  listMenuBarIntegrationStates,
+} from "./platforms/core/state/status.js";
 import {
   getPlatformFeatureMatrixRow,
   getPlatformHelperRequirements,
@@ -393,6 +397,24 @@ async function main(): Promise<void> {
 
   if (command === "integrations" && !existsSync(CUED_SOCKET_PATH)) {
     printJson(await handleLocalIntegrationCommand(subcommand, rest));
+    return;
+  }
+
+  if (command === "status" && [subcommand, ...rest].includes("--menu-bar")) {
+    const db = openExistingCuedDatabase(undefined, { readonly: true });
+    try {
+      printJson({
+        app: getAppStatusMetadata(db),
+        daemon: db.getDaemonState(),
+        overview: db.getMenuBarOverview(),
+        integrations: listMenuBarIntegrationStates(db),
+        update: getUpdateStatus(db),
+        socketRunning: existsSync(CUED_SOCKET_PATH),
+        dbPath: db.dbPath,
+      });
+    } finally {
+      db.close();
+    }
     return;
   }
 
