@@ -91,9 +91,59 @@ export interface TimelineEventPayload {
   metadata?: Record<string, unknown>;
 }
 
+export const CALL_PROVIDER_VALUES = [
+  "telephony",
+  "facetime",
+  "whatsapp",
+  "signal",
+  "slack",
+  "linkedin",
+  "unknown",
+] as const;
+export type CallProvider = (typeof CALL_PROVIDER_VALUES)[number];
+
+export const CALL_DIRECTION_VALUES = ["incoming", "outgoing", "unknown"] as const;
+export type CallDirection = (typeof CALL_DIRECTION_VALUES)[number];
+
+export const CALL_MEDIUM_VALUES = ["audio", "video", "screen_share", "unknown"] as const;
+export type CallMedium = (typeof CALL_MEDIUM_VALUES)[number];
+
+export const CALL_STATUS_VALUES = [
+  "completed",
+  "missed",
+  "declined",
+  "canceled",
+  "blocked",
+  "failed",
+  "ongoing",
+  "unknown",
+] as const;
+export type CallStatus = (typeof CALL_STATUS_VALUES)[number];
+
+export interface CallPayload {
+  sourceCallKey: string;
+  sourceConversationKey: string;
+  provider: CallProvider;
+  providerCallType?: string | null;
+  direction: CallDirection;
+  medium: CallMedium;
+  status: CallStatus;
+  startedAt: number;
+  answeredAt?: number | null;
+  endedAt?: number | null;
+  durationSeconds?: number | null;
+  initiatorSourceKey?: string | null;
+  primaryRemoteSourceKey?: string | null;
+  remoteAddress?: string | null;
+  remoteDisplayName?: string | null;
+  disconnectedCause?: string | null;
+  metadata?: Record<string, unknown>;
+}
+
 export type RawEventPayload =
   | ContactObservationPayload
   | ConversationObservationPayload
+  | CallPayload
   | MessagePayload
   | ReactionPayload
   | ParticipantPayload

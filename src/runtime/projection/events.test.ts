@@ -49,6 +49,30 @@ describe("normalized raw event registry", () => {
     });
   });
 
+  it("passes canonical call schemas through unchanged", () => {
+    const normalized = normalizeStoredRawEventForProjection(
+      {
+        entityKind: "call",
+        eventKind: "observed",
+      },
+      {
+        sourceCallKey: "call-1",
+        sourceConversationKey: "conversation-1",
+        provider: "facetime",
+        direction: "incoming",
+        medium: "video",
+        status: "missed",
+        startedAt: 1,
+      },
+    );
+
+    expect(normalized).toMatchObject({
+      entityKind: "call",
+      eventKind: "observed",
+      normalizedSchema: "call.observed@1",
+    });
+  });
+
   it("canonicalizes legacy event kinds when normalized schema is missing", () => {
     const normalized = normalizeStoredRawEventForProjection(
       {
@@ -99,6 +123,7 @@ describe("normalized raw event registry", () => {
 
   it("rejects non-canonical schemas for new writes", () => {
     expect(() => assertCanonicalNormalizedSchemaForWrite("message.created@1")).not.toThrow();
+    expect(() => assertCanonicalNormalizedSchemaForWrite("call.observed@1")).not.toThrow();
     expect(() =>
       assertCanonicalNormalizedSchemaForWrite("timeline_event.linkedin_system_message@1"),
     ).toThrowError(
