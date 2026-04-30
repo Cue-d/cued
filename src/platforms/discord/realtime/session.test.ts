@@ -187,6 +187,60 @@ describe("discord realtime", () => {
     expect(onAuthInvalidated).toHaveBeenCalled();
   });
 
+  it("does not mark bootstrap connected when initial DM discovery invalidates auth", async () => {
+    vi.useFakeTimers();
+    const onAuthInvalidated = vi.fn();
+    const onConnected = vi.fn();
+    let privateChannelPollCount = 0;
+
+    const session = new DiscordRealtimeSession({
+      accountKey: "default",
+      credentials: {
+        token: "discord-token",
+      },
+      dmPollIntervalMs: 10,
+      onAuthInvalidated,
+      onConnected,
+      client: {
+        async getCurrentUser() {
+          return {
+            id: "u-self",
+            username: "theo",
+            global_name: "Theo",
+          };
+        },
+        async listPrivateChannels() {
+          privateChannelPollCount += 1;
+          throw new DiscordApiError("GET", "/users/@me/channels", 401, '{"message":"401"}');
+        },
+        async listChannelMessages() {
+          return [];
+        },
+        async sendMessage() {
+          throw new Error("not used");
+        },
+      } as unknown as DiscordApiClient,
+    });
+
+    session.start();
+
+    await vi.waitFor(() => {
+      expect(session.getStatus()).toEqual(
+        expect.objectContaining({
+          state: "stopped",
+          lastSessionError: expect.stringContaining("401"),
+        }),
+      );
+    });
+    expect(onAuthInvalidated).toHaveBeenCalledTimes(1);
+    expect(onConnected).not.toHaveBeenCalled();
+
+    await vi.advanceTimersByTimeAsync(50);
+    expect(privateChannelPollCount).toBe(1);
+
+    session.stop();
+  });
+
   it("retries after the base delay and resets reconnect attempts after recovery", async () => {
     vi.useFakeTimers();
     const setTimeoutSpy = vi.spyOn(globalThis, "setTimeout");
