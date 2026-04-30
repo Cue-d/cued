@@ -322,44 +322,57 @@ export function summarizeAuthSessions(rows: AuthSessionRow[]): AuthSessionSummar
 export function summarizeIntegrationStates(
   db: CuedDatabase,
   rows: IntegrationStateRow[],
+  options: { includeDiagnostics?: boolean } = {},
 ): IntegrationStateSummary[] {
   const hostOs = resolveHostOS();
+  const includeDiagnostics = options.includeDiagnostics ?? true;
   return rows.flatMap((row) => {
     if (!isPlatform(row.platform)) {
       return [];
     }
 
     const metadata = safeParseJsonRecord(row.metadata_json, "integration_states.metadata_json");
-    return [
-      {
-        platform: row.platform,
-        accountKey: row.account_key,
-        displayName: row.display_name,
-        authState: row.auth_state,
-        enabled: row.enabled === 1,
-        connectionKind: row.connection_kind,
-        runtimeKind: deriveRuntimeKind(row),
-        syncCapable: row.sync_capable === 1,
-        launchStrategy: row.launch_strategy,
-        launchTarget: row.launch_target,
-        importedFrom: row.imported_from,
-        artifactPaths: safeParseJsonStringArray(
-          row.artifact_paths_json,
-          "integration_states.artifact_paths_json",
-        ),
-        metadata,
-        projectionStats: db.getIntegrationProjectionStats(row.platform, row.account_key),
-        latestSyncDiagnostics: getLatestSyncDiagnostics(db, row.platform, row.account_key),
-        lastSeenAt: row.last_seen_at,
-        updatedAt: row.updated_at,
-        latestAuthSessionId: db.getLatestAuthSession(row.platform, row.account_key)?.id ?? null,
-        capability: summarizePlatformCapability(
-          row.platform,
-          { platform: row.platform, authState: row.auth_state, metadata },
-          hostOs,
-        ),
-      },
-    ];
+    const summary: IntegrationStateSummary = {
+      platform: row.platform,
+      accountKey: row.account_key,
+      displayName: row.display_name,
+      authState: row.auth_state,
+      enabled: row.enabled === 1,
+      connectionKind: row.connection_kind,
+      runtimeKind: deriveRuntimeKind(row),
+      syncCapable: row.sync_capable === 1,
+      launchStrategy: row.launch_strategy,
+      launchTarget: row.launch_target,
+      importedFrom: row.imported_from,
+      artifactPaths: safeParseJsonStringArray(
+        row.artifact_paths_json,
+        "integration_states.artifact_paths_json",
+      ),
+      metadata,
+      projectionStats: includeDiagnostics
+        ? db.getIntegrationProjectionStats(row.platform, row.account_key)
+        : {
+            rawEvents: 0,
+            rawEventsBySchema: {},
+            projectedContacts: 0,
+            projectedConversations: 0,
+            projectedMessages: 0,
+          },
+      latestSyncDiagnostics: includeDiagnostics
+        ? getLatestSyncDiagnostics(db, row.platform, row.account_key)
+        : null,
+      lastSeenAt: row.last_seen_at,
+      updatedAt: row.updated_at,
+      latestAuthSessionId: includeDiagnostics
+        ? (db.getLatestAuthSession(row.platform, row.account_key)?.id ?? null)
+        : null,
+      capability: summarizePlatformCapability(
+        row.platform,
+        { platform: row.platform, authState: row.auth_state, metadata },
+        hostOs,
+      ),
+    };
+    return [summary];
   });
 }
 
@@ -550,6 +563,14 @@ export function listIntegrationStates(db: CuedDatabase): IntegrationStateSummary
   return summarizeIntegrationStates(
     db,
     db.listIntegrationStates().filter((row) => !isUserRemovedIntegrationRow(row)),
+  );
+}
+
+export function listMenuBarIntegrationStates(db: CuedDatabase): IntegrationStateSummary[] {
+  return summarizeIntegrationStates(
+    db,
+    db.listIntegrationStates().filter((row) => !isUserRemovedIntegrationRow(row)),
+    { includeDiagnostics: false },
   );
 }
 

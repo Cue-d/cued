@@ -485,10 +485,6 @@ final class AppStatusStore: @unchecked Sendable {
         updateSummary: nil
       )
     }
-    if let snapshot = readSnapshotViaCLI(daemonLockState: daemonLockState) {
-      return snapshot
-    }
-
     var db: OpaquePointer?
     guard sqlite3_open_v2(dbPath, &db, SQLITE_OPEN_READONLY, nil) == SQLITE_OK, let db else {
       if let db {
@@ -556,7 +552,7 @@ final class AppStatusStore: @unchecked Sendable {
 
     let process = Process()
     process.executableURL = URL(fileURLWithPath: daemonLaunchPath)
-    process.arguments = ["status", "--read-only"]
+    process.arguments = ["status", "--read-only", "--menu-bar"]
     process.environment = ProcessInfo.processInfo.environment
 
     let stdoutPipe = Pipe()
@@ -591,7 +587,10 @@ final class AppStatusStore: @unchecked Sendable {
     let daemonPID = intValue(daemon["pid"]) ?? daemonLockState.pid
     let daemonRowFresh =
       daemonUpdatedAt.map { currentTimeMs() - $0 < appDaemonHeartbeatGraceMs } ?? false
-    let daemonRowRunning = stringValue(daemon["status"]) == "running" && daemonRowFresh
+    let daemonRowRunning =
+      stringValue(daemon["status"]) == "running"
+      && daemonRowFresh
+      && daemonPID.map { isProcessRunning($0) } == true
     let daemonRunning =
       boolValue(payload["socketRunning"]) == true
       || boolValue(payload["daemonRunning"]) == true
@@ -717,7 +716,8 @@ final class AppStatusStore: @unchecked Sendable {
 
     let pid = sqlite3_column_type(statement, 0) == SQLITE_NULL ? nil : Int(sqlite3_column_int64(statement, 0))
     let updatedAt = sqlite3_column_type(statement, 1) == SQLITE_NULL ? nil : Int(sqlite3_column_int64(statement, 1))
-    let running = (updatedAt ?? 0) > 0 && (Int(Date().timeIntervalSince1970 * 1000) - (updatedAt ?? 0)) < appDaemonHeartbeatGraceMs
+    let fresh = (updatedAt ?? 0) > 0 && (Int(Date().timeIntervalSince1970 * 1000) - (updatedAt ?? 0)) < appDaemonHeartbeatGraceMs
+    let running = fresh && pid.map { isProcessRunning($0) } == true
     return (running, pid, updatedAt)
   }
 
